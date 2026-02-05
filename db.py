@@ -2,8 +2,10 @@
 import os
 import psycopg
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb   # <-- ADICIONA ISSO
 from decimal import Decimal
 from datetime import datetime
+
 
 def get_conn():
     database_url = os.getenv("DATABASE_URL")  # Railway injeta isso quando você adiciona Postgres
@@ -114,7 +116,7 @@ def add_launch_and_update_balance(user_id: int, tipo: str, valor: float, alvo: s
                 values (%s,%s,%s,%s,%s,%s,%s)
                 returning id
                 """,
-                (user_id, tipo, v, alvo, nota, criado_em, {"delta_conta": float(delta)}),
+                (user_id, tipo, v, alvo, nota, criado_em, Jsonb({"delta_conta": float(delta)})),
             )
             launch_id = cur.fetchone()["id"]
 
