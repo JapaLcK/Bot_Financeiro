@@ -9,9 +9,7 @@ from discord.ext import commands
 from db import init_db
 from dotenv import load_dotenv
 load_dotenv() #carrega o .env
-
-
-
+from db import init_db, ensure_user, add_launch_and_update_balance, get_balance
 
 
 
@@ -579,38 +577,32 @@ async def on_message(message: discord.Message):
    # Gasto/Receita natural (ex: "gastei 35 no ifood", "recebi 2500 salario")
     parsed = parse_receita_despesa_natural(text)
     if parsed:
-        launches = get_user_launches(message.author.id)
+        user_id = message.author.id
+        ensure_user(user_id)
 
-        if parsed["tipo"] == "despesa":
-            store["conta"] -= parsed["valor"]
-            delta_conta = -float(parsed["valor"])
-            emoji = "💸"
-        else:
-            store["conta"] += parsed["valor"]
-            delta_conta = +float(parsed["valor"])
-            emoji = "💰"
+        tipo = parsed["tipo"]                 # "despesa" ou "receita"
+        valor = float(parsed["valor"])
+        categoria = parsed["categoria"]
+        nota = parsed.get("nota")
 
-        new_id = next(LAUNCH_ID)
+        launch_id, new_balance = add_launch_and_update_balance(
+            user_id=user_id,
+            tipo=tipo,
+            valor=valor,
+            alvo=categoria,
+            nota=nota
+        )
 
-        launches.append({
-            "id": new_id,
-            "tipo": parsed["tipo"],  # <-- despesa OU receita
-            "valor": float(parsed["valor"]),
-            "alvo": parsed["categoria"],
-            "nota": parsed["nota"],
-            "criado_em": datetime.now().isoformat(timespec="seconds"),
-            "efeitos": {
-                "delta_conta": delta_conta  # <-- usa o delta correto
-            }
-        })
+        emoji = "💸" if tipo == "despesa" else "💰"
 
         await message.reply(
-            f"{emoji} **{parsed['tipo'].capitalize()} registrada**: R$ {parsed['valor']:.2f}\n"
-            f"🏷️ Categoria: {parsed['categoria']}\n"
-            f"🏦 Conta: R$ {store['conta']:.2f}\n"
-            f"ID: #{new_id}"
+            f"{emoji} **{tipo.capitalize()} registrada**: R$ {valor:.2f}\n"
+            f"🏷️ Categoria: {categoria}\n"
+            f"🏦 Conta: R$ {float(new_balance):.2f}\n"
+            f"ID: #{launch_id}"
         )
         return
+
 
     
 
@@ -1231,7 +1223,10 @@ async def on_message(message: discord.Message):
         
     # comando para ver saldo da conta
     if t in ["saldo", "saldo conta", "saldo da conta", "conta", "saldo geral"]:
-        await message.reply(f"🏦 **Conta Corrente:** R$ {store['conta']:.2f}")
+        user_id = message.author.id
+        bal = get_balance(user_id)
+        
+        await message.reply(f"🏦 **Conta Corrente:** R$ {float(bal):.2f}")
         return
 
 
