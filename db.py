@@ -1,16 +1,15 @@
+# db.py
 import os
 import psycopg
 from psycopg.rows import dict_row
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
-
 def get_conn():
-    if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL não está definido (Railway cria isso quando você adiciona Postgres).")
-    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+    database_url = os.getenv("DATABASE_URL")  # Railway injeta isso quando você adiciona Postgres
+    if not database_url:
+        raise RuntimeError("DATABASE_URL não está definido.")
+    return psycopg.connect(database_url, row_factory=dict_row)
 
 def init_db():
-    """Cria tabelas se não existirem."""
     ddl = """
     create table if not exists users (
       id bigint primary key,
@@ -36,7 +35,7 @@ def init_db():
       name text not null,
       balance numeric not null default 0,
       rate numeric not null,
-      period text not null, -- daily|monthly|yearly
+      period text not null,
       last_date date not null,
       unique(user_id, name)
     );
