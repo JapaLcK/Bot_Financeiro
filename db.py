@@ -5,6 +5,9 @@ from psycopg.rows import dict_row
 
 def get_conn():
     database_url = os.getenv("DATABASE_URL")  # Railway injeta isso quando você adiciona Postgres
+    DATABASE_URL = os.getenv("DATABASE_URL")
+    print("DATABASE_URL existe?", bool(DATABASE_URL))
+
     if not database_url:
         raise RuntimeError("DATABASE_URL não está definido.")
     return psycopg.connect(database_url, row_factory=dict_row)
