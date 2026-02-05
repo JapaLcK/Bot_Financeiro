@@ -1245,11 +1245,9 @@ if __name__ == "__main__":
     if not token:
         raise RuntimeError("DISCORD_BOT_TOKEN não definido.")
 
-    # Só inicializa DB se tiver DATABASE_URL (no Railway terá)
-    if os.getenv("DATABASE_URL"):
-        init_db()
-    else:
-        print("⚠️ DATABASE_URL não definido — rodando sem Postgres (modo local).")
+    print("🗄️ Inicializando banco de dados (init_db)...")
+    init_db()
+    print("✅ Banco inicializado com sucesso!")
 
     bot.run(token)
 
