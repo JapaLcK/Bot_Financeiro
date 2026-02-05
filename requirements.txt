@@ -1,0 +1,3 @@
+discord.py
+psycopg[binary]
+python-dotenv
