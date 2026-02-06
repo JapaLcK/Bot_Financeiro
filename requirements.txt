@@ -2,3 +2,4 @@ discord.py
 psycopg[binary]
 python-dotenv
 python-dateutil
+openai
