@@ -858,13 +858,14 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
     """
     Deleta um lançamento e reverte seus efeitos no banco (atomicamente).
     Requer que launches.efeitos tenha os deltas no formato:
-      {
-        "delta_conta": -100.0,
-        "delta_pocket": {"nome": "viagem", "delta": +100.0} | None,
-        "delta_invest": {"nome": "cdb", "delta": +100.0} | None,
-        "create_pocket": {"nome": "viagem"} | None,
-        "create_investment": {"nome": "cdb"} | None
-      }
+    efeitos = {
+        "delta_conta": 0.0,
+        "delta_pocket": None,
+        "delta_invest": None,
+        "create_pocket": None,
+        "create_investment": None,
+        "delete_pocket": {"nome": pocket_name_canon, "balance": 0.0},
+        }
     """
     ensure_user(user_id)
 
@@ -898,7 +899,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
             create_pocket = efeitos.get("create_pocket")
             create_invest = efeitos.get("create_investment")
             delete_pocket = efeitos.get("delete_pocket")
-            
+
             if delete_pocket:
                 nome = delete_pocket.get("nome")
                 bal0 = Decimal(str(delete_pocket.get("balance", 0)))
