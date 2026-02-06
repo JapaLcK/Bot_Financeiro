@@ -9,7 +9,7 @@ from db import init_db
 from dotenv import load_dotenv
 load_dotenv() #carrega o .env
 from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches, list_pockets, pocket_withdraw_to_account, create_pocket, pocket_deposit_from_account, delete_pocket, investment_withdraw_to_account, accrue_all_investments, create_investment, investment_deposit_from_account, delete_launch_and_rollback
-from db import create_investment_db, delete_investment
+from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action
 from ai_router import handle_ai_message
 
 
@@ -366,6 +366,36 @@ async def on_message(message: discord.Message):
     if not text:
         return
     t = text.lower()
+
+    # Se existir uma ação pendente, processa "sim" / "não"
+    pending = get_pending_action(message.author.id)
+    if pending:
+        ans = t.strip()
+        if ans in ["sim", "s", "yes", "y"]:
+            action = pending["action_type"]
+            payload = pending["payload"]
+            try:
+                if action == "delete_launch":
+                    delete_launch_and_rollback(message.author.id, int(payload["launch_id"]))
+                    await message.reply(f"🗑️ Apagado e revertido: lançamento **#{payload['launch_id']}**.")
+                elif action == "delete_pocket":
+                    delete_pocket(message.author.id, payload["pocket_name"])
+                    await message.reply(f"🗑️ Caixinha deletada: **{payload['pocket_name']}**.")
+                elif action == "delete_investment":
+                    delete_investment(message.author.id, payload["investment_name"])
+                    await message.reply(f"🗑️ Investimento deletado: **{payload['investment_name']}**.")
+                else:
+                    await message.reply("Ação pendente desconhecida. Cancelando.")
+                clear_pending_action(message.author.id)
+            except Exception:
+                await message.reply("Deu erro ao executar a ação pendente. Veja os logs.")
+            return
+
+        if ans in ["não", "nao", "n", "no"]:
+            clear_pending_action(message.author.id)
+            await message.reply("✅ Cancelado.")
+            return
+
 
     if t in ["listar caixinhas", "saldo caixinhas", "caixinhas"]:
         rows = list_pockets(message.author.id)
@@ -1025,15 +1055,16 @@ async def on_message(message: discord.Message):
         return
 
 
-
-    # fallback
-    await message.reply("❓ **Não entendi seu comando. Tente um destes exemplos:**\n\n" + HELP_TEXT)
-
     # Fallback: se não casou nenhum comando, tenta IA (hoje retorna None)
     ai_reply = await handle_ai_message(message.author.id, message.content)
     if ai_reply:
         await message.reply(ai_reply)
         return
+
+    # fallback
+    await message.reply("❓ **Não entendi seu comando. Tente um destes exemplos:**\n\n" + HELP_TEXT)
+
+
 
 
 # --------- run ---------
