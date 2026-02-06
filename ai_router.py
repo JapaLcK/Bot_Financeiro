@@ -30,7 +30,7 @@ client = OpenAI()
 MODEL = os.getenv("OPENAI_MODEL", "gpt-5.2")  # você pode mudar depois no Railway
 
 # Tools que a IA pode chamar
-TOOLS = [
+TOOLS_NESTED = [
     {
         "type": "function",
         "function": {
@@ -263,6 +263,22 @@ TOOLS = [
         },
     },
 ]
+
+# Responses API (na prática) está exigindo tools com "name" no nível de cima.
+# Então a gente converte do formato nested -> flat automaticamente.
+TOOLS = []
+for t in TOOLS_NESTED:
+    if t.get("type") == "function" and "function" in t:
+        fn = t["function"]
+        TOOLS.append({
+            "type": "function",
+            "name": fn["name"],
+            "description": fn.get("description", ""),
+            "parameters": fn.get("parameters", {"type": "object", "properties": {}}),
+        })
+    else:
+        TOOLS.append(t)
+
 
 INSTRUCTIONS = """
 Você é um assistente financeiro para Discord.
