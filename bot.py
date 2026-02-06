@@ -108,17 +108,7 @@ def accrue_investment(inv: dict, today: date | None = None) -> None:
     inv["balance"] = bal
     inv["last_date"] = today
 
-def registrar_lancamento(launches, launch_id, tipo, valor, alvo, nota, delta_conta):
-    launches.append({
-        "id": next(launch_id),
-        "tipo": tipo,
-        "valor": float(valor),
-        "alvo": alvo,
-        "nota": nota,
-        "criado_em": datetime.now().isoformat(timespec="seconds"),
-        "delta_conta": float(delta_conta),
-    })
-    return launches[-1]
+
 
 def fmt_brl(v: float) -> str:
     return f"R$ {v:.2f}"
