@@ -6,6 +6,7 @@ from psycopg.types.json import Jsonb, Json  # <-- ADICIONA ISSO
 from decimal import Decimal
 from datetime import datetime, date
 import math
+from datetime import timedelta
 
 
 def get_conn():
@@ -60,6 +61,15 @@ def init_db():
     );
 
     create index if not exists idx_launches_user_time on launches(user_id, criado_em desc);
+
+    create table if not exists pending_actions (
+      user_id bigint primary key references users(id) on delete cascade,
+      action_type text not null,          -- ex: delete_launch | delete_pocket | delete_investment
+      payload jsonb not null,             -- dados da ação (ex: {"launch_id": 42})
+      created_at timestamptz not null default now(),
+      expires_at timestamptz not null
+    );
+
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -1166,4 +1176,82 @@ def delete_investment(user_id: int, investment_name: str, nota: str | None = Non
         conn.commit()
 
     return launch_id, canon
+
+def set_pending_action(user_id: int, action_type: str, payload: dict, minutes: int = 10):
+    """
+    Cria/atualiza uma ação pendente de confirmação (persistente no Postgres).
+    """
+    ensure_user(user_id)
+    expires_at = datetime.utcnow() + timedelta(minutes=minutes)
+
+    with get_conn() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute("""
+                insert into pending_actions (user_id, action_type, payload, expires_at)
+                values (%s, %s, %s, %s)
+                on conflict (user_id)
+                do update set action_type = excluded.action_type,
+                              payload = excluded.payload,
+                              created_at = now(),
+                              expires_at = excluded.expires_at
+            """, (user_id, action_type, Jsonb(payload), expires_at))
+        conn.commit()
+
+def get_pending_action(user_id: int):
+    """
+    Retorna a ação pendente se existir e não estiver expirada. Senão, retorna None.
+    """
+    with get_conn() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute("""
+                select user_id, action_type, payload, created_at, expires_at
+                from pending_actions
+                where user_id = %s
+            """, (user_id,))
+            row = cur.fetchone()
+        conn.commit()
+
+    if not row:
+        return None
+
+    # expirada?
+    if row["expires_at"] <= datetime.utcnow():
+        clear_pending_action(user_id)
+        return None
+
+    return row
+
+def clear_pending_action(user_id: int):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("delete from pending_actions where user_id = %s", (user_id,))
+        conn.commit()
+
+
+def set_pending_action(user_id: int, action_type: str, payload: dict, minutes: int = 10):
+    ensure_user(user_id)
+    expires_at = datetime.utcnow() + timedelta(minutes=minutes)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                create table if not exists pending_actions (
+                    user_id bigint primary key references users(id) on delete cascade,
+                    action_type text not null,
+                    payload jsonb not null,
+                    created_at timestamptz not null default now(),
+                    expires_at timestamptz not null
+                );
+            """)
+            cur.execute("""
+                insert into pending_actions (user_id, action_type, payload, expires_at)
+                values (%s, %s, %s, %s)
+                on conflict (user_id)
+                do update set action_type = excluded.action_type,
+                              payload = excluded.payload,
+                              created_at = now(),
+                              expires_at = excluded.expires_at
+            """, (user_id, action_type, Jsonb(payload), expires_at))
+        conn.commit()
+
 
