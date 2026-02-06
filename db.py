@@ -123,3 +123,20 @@ def add_launch_and_update_balance(user_id: int, tipo: str, valor: float, alvo: s
         conn.commit()
 
     return launch_id, new_bal
+
+def list_launches(user_id: int, limit: int = 10):
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, tipo, valor, alvo, nota, criado_em
+                from launches
+                where user_id=%s
+                order by criado_em desc, id desc
+                limit %s
+                """,
+                (user_id, limit),
+            )
+            return cur.fetchall()
+

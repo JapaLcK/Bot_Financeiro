@@ -9,7 +9,7 @@ from discord.ext import commands
 from db import init_db
 from dotenv import load_dotenv
 load_dotenv() #carrega o .env
-from db import init_db, ensure_user, add_launch_and_update_balance, get_balance
+from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches
 
 
 
@@ -1053,25 +1053,24 @@ async def on_message(message: discord.Message):
         return
 
     
-    # listar lancamentos
+    # listar lancamentos (Postgres)
     if t in ["listar lancamentos", "listar lançamentos", "ultimos lancamentos", "últimos lançamentos"]:
-        launches = get_user_launches(message.author.id)
-        if not launches:
+        rows = list_launches(message.author.id, limit=10)
+
+        if not rows:
             await message.reply("Você ainda não tem lançamentos.")
             return
 
-        last = launches[-10:]
         lines = []
-        for l in last:
-            tipo = l.get("tipo", "-")
-            valor = l.get("valor", None)
-            alvo = l.get("alvo", "-")
-            criado = l.get("criado_em", "-")
-            nota = l.get("nota")
+        for r in rows:
+            tipo = r["tipo"]
+            valor = r["valor"]
+            alvo = r["alvo"] or "-"
+            criado = r["criado_em"]
+            nota = r["nota"]
 
-            # limpa nota feia do create_investment
+            # mesma limpeza que você já tinha (mantive)
             if tipo == "create_investment" and nota and "taxa=" in nota:
-                # tenta extrair só taxa/periodo de forma humana
                 try:
                     m_taxa = re.search(r"taxa=([0-9.]+)", nota)
                     m_per = re.search(r"periodo=(\w+)", nota)
@@ -1084,10 +1083,11 @@ async def on_message(message: discord.Message):
 
             valor_str = f"R$ {float(valor):.2f}" if valor is not None else "-"
             nota_part = f" • {nota}" if nota else ""
-            lines.append(f"#{l.get('id','?')} • {tipo} • {valor_str} • {alvo}{nota_part} • {criado}")
+            lines.append(f"#{r['id']} • {tipo} • {valor_str} • {alvo}{nota_part} • {criado}")
 
         await message.reply("🧾 **Últimos lançamentos:**\n" + "\n".join(lines))
         return
+
 
     
 
