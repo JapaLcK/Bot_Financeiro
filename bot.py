@@ -1,6 +1,5 @@
 import os
 import re
-import itertools
 from datetime import date, datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import calendar
@@ -325,32 +324,6 @@ def parse_expense_income_natural(text: str):
 
     return {"kind": kind, "amount": amount, "note": note, "category": category}
 
-
-
-# --------- in-memory storage (MVP) ---------
-# Se quiser multi-usuário: use dict por user_id (eu já deixei assim)
-DATA = {}  # user_id -> {"pockets": {}, "investments": {}}
-LAUNCH_ID = itertools.count(1) # contador de IDs por usuário
-# user_id -> lista de lançamentos
-LAUNCHES = {}  # ex: { user_id: [ {id, type, amount, target, date}, ... ] }
-
-def get_user_store(user_id: int):
-    if user_id not in DATA:
-        DATA[user_id] = {
-            "conta": 0.0,        # saldo da conta corrente (cash)
-            "pockets": {},      # caixinhas
-            "investments": {}   # investimentos
-        }
-    DATA[user_id].setdefault("conta", 0.0)
-    DATA[user_id].setdefault("pockets", {})
-    DATA[user_id].setdefault("investments", {})
-    return DATA[user_id]
-
-
-def get_user_launches(user_id: int):
-    if user_id not in LAUNCHES:
-        LAUNCHES[user_id] = []
-    return LAUNCHES[user_id]
 
 # --------- bot setup ---------
 intents = discord.Intents.default()
@@ -766,54 +739,6 @@ async def on_message(message: discord.Message):
         )
         return
 
-
-
-
-    
-    # adicionar/colocar/por X na caixinha Y
-    # if any(w in t for w in ["adicionar", "colocar", "por", "depositar"]) and "caixinha" in t:
-    #     amount = parse_money(text)
-    #     if amount is None:
-    #         await message.reply("Qual valor? Ex: `adicionar 200 na caixinha viagem`")
-    #         return
-
-    #     # tenta achar o nome depois de "caixinha"
-    #     parts = t.split("caixinha", 1)
-    #     name = parts[1].strip() if len(parts) > 1 else ""
-    #     if not name:
-    #         await message.reply("Pra qual caixinha? Ex: `adicionar 200 na caixinha viagem`")
-    #         return
-
-    #     # acha a caixinha por case-insensitive
-    #     key = next((k for k in pockets.keys() if k.lower() == name.lower()), None)
-    #     if not key:
-    #         await message.reply(f"Não achei essa caixinha: **{name}**. Use: `criar caixinha {name}`")
-    #         return
-
-    #     # ✅ garante saldo suficiente
-    #     if store["conta"] < amount:
-    #         await message.reply(f"Saldo insuficiente na conta. Conta: R$ {store['conta']:.2f}")
-    #         return
-
-    #     # ✅ move dinheiro
-    #     store["conta"] -= amount
-    #     pockets[key] += amount
-
-    #     launches = get_user_launches(message.author.id)
-    #     launches.append({
-    #         "id": next(LAUNCH_ID),
-    #         "type": "pocket_deposit",
-    #         "amount": amount,
-    #         "target": key,
-    #         "created_at": datetime.now().isoformat(timespec="seconds")
-    #         })
-        
-    #     await message.reply(
-    #     f"✅ Caixinha **{key}**: +R$ {amount:.2f}\n"
-    #     f"🏦 Conta: R$ {store['conta']:.2f} • 📦 Caixinha: R$ {pockets[key]:.2f}")
-
-    #     return
-
     # depósito natural em caixinha (ex: "coloquei 300 na emergencia")
     amount, pocket_name = parse_pocket_deposit_natural(text)
     if amount is not None and pocket_name:
@@ -844,37 +769,6 @@ async def on_message(message: discord.Message):
             f"ID: **#{launch_id}**"
         )
         return
-
-
-    # transferir para caixinha
-    # if "transferi" in t and "caixinha" in t:
-    #     amount = parse_money(text)
-    #     if amount is None:
-    #         await message.reply("Qual valor você transferiu?")
-    #         return
-    #     m = re.search(r'caixinha (.+)$', t)
-    #     if not m:
-    #         await message.reply("Pra qual caixinha? Ex: 'transferi 200 para caixinha viagem'")
-    #         return
-    #     name = text.lower().split("caixinha", 1)[1].strip()
-
-    #     key = next((k for k in pockets.keys() if k.lower() == name.lower()), None)
-    #     if not key:
-    #         await message.reply(f"Não achei essa caixinha: **{name}**. Use: 'criar caixinha {name}'")
-    #         return
-    #     pockets[key] += amount
-
-    #     launches = get_user_launches(message.author.id)
-    #     launches.append({
-    #         "id": next(LAUNCH_ID),
-    #         "type": "pocket_deposit",
-    #         "amount": amount,
-    #         "target": key,
-    #         "created_at": datetime.now().isoformat(timespec="seconds")
-    #     })
-
-    #     await message.reply(f"✅ Caixinha **{key}**: +R$ {amount:.2f}. Saldo: **R$ {pockets[key]:.2f}**")
-    #     return
 
    # aplicar/aporte no investimento (Postgres) — debita conta corrente
     if any(w in t for w in ["apliquei", "aplicar", "aportei", "aporte"]):
@@ -1104,67 +998,31 @@ async def on_message(message: discord.Message):
         await message.reply(f"🗑️ Lançamento #{launch_id} removido e saldos ajustados.")
         return
 
-
-    # comando para desfazer a ultima acao
+    # comando para desfazer a última ação (100% Postgres)
     if t in ["desfazer", "undo", "voltar", "excluir"]:
-        launches = get_user_launches(message.author.id)
+        user_id = message.author.id
 
-        if not launches:
+        rows = list_launches(user_id, limit=1)
+        if not rows:
             await message.reply("Você não tem lançamentos para desfazer.")
             return
 
-        last = launches[-1]
-        tipo = last.get("tipo")
-        efeitos = last.get("efeitos") or {}
+        last_id = int(rows[0]["id"])
 
-        # 1) reverter create_investment (só se saldo == 0)
-        if tipo == "create_investment":
-            inv_name = last.get("alvo")
-            if inv_name in investments and investments[inv_name]["balance"] != 0:
-                await message.reply(f"⚠️ Não consigo desfazer: o investimento **{inv_name}** não está zerado (R$ {investments[inv_name]['balance']:.2f}).")
-                return
-            if inv_name in investments:
-                del investments[inv_name]
+        try:
+            delete_launch_and_rollback(user_id, last_id)
+        except LookupError:
+            await message.reply("Não achei o último lançamento para desfazer (isso não deveria acontecer).")
+            return
+        except ValueError as e:
+            await message.reply(f"Não consegui desfazer o último lançamento: {e}")
+            return
+        except Exception:
+            await message.reply("Deu erro ao desfazer o último lançamento (Postgres). Veja os logs.")
+            return
 
-        # 2) reverter create_pocket (só se saldo == 0)
-        elif tipo == "create_pocket":
-            pocket = last.get("alvo")
-            if pocket in pockets and pockets[pocket] != 0:
-                await message.reply(f"⚠️ Não consigo desfazer: a caixinha **{pocket}** não está zerada (R$ {pockets[pocket]:.2f}).")
-                return
-            if pocket in pockets:
-                del pockets[pocket]
-
-        # 3) reverter ações com efeitos (conta/caixinha/invest)
-        else:
-            # conta
-            store["conta"] -= float(efeitos.get("delta_conta", 0.0))
-
-            # pocket
-            dp = efeitos.get("delta_pocket")
-            if dp:
-                nome = dp["nome"]
-                if nome in pockets:
-                    pockets[nome] -= float(dp["delta"])
-
-            # invest
-            di = efeitos.get("delta_invest")
-            if di:
-                nome = di["nome"]
-                if nome in investments:
-                    investments[nome]["balance"] -= float(di["delta"])
-
-        # ✅ SÓ AGORA remove o lançamento
-        removed = launches.pop()
-
-        await message.reply(
-            f"↩️ Desfeito: **#{removed.get('id')}** • {removed.get('tipo')} • "
-            f"{'R$ '+format(float(removed.get('valor', 0.0)), '.2f') if removed.get('valor') is not None else '-'} • "
-            f"{removed.get('alvo','-')}"
-        )
+        await message.reply(f"↩️ Desfeito: lançamento **#{last_id}** (saldos ajustados no banco).")
         return
-
-    
         
     # comando para ver saldo da conta
     if t in ["saldo", "saldo conta", "saldo da conta", "conta", "saldo geral"]:
