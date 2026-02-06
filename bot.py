@@ -9,7 +9,7 @@ from discord.ext import commands
 from db import init_db
 from dotenv import load_dotenv
 load_dotenv() #carrega o .env
-from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches
+from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches, list_pockets, pocket_withdraw_to_account, create_pocket, pocket_deposit_from_account, delete_pocket, investment_withdraw_to_account, accrue_all_investments, create_investment, investment_deposit_from_account, delete_launch_and_rollback
 
 
 
@@ -400,20 +400,22 @@ async def on_message(message: discord.Message):
         return
     t = text.lower()
 
-    store = get_user_store(message.author.id)
-    pockets = store["pockets"]
-    investments = store["investments"]
-
     if t in ["listar caixinhas", "saldo caixinhas", "caixinhas"]:
-        if not pockets:
+        rows = list_pockets(message.author.id)
+
+        if not rows:
             await message.reply("Você ainda não tem caixinhas.")
             return
 
-        total = sum(float(v) for v in pockets.values())
-        linhas = [f"• **{k}**: {fmt_brl(float(v))}" for k, v in sorted(pockets.items(), key=lambda x: x[0].lower())]
-        await message.reply("📦 **Caixinhas:**\n" + "\n".join(linhas) + f"\n\nTotal nas caixinhas: **{fmt_brl(total)}**")
+        total = sum(float(r["balance"]) for r in rows)
+        linhas = [f"• **{r['name']}**: {fmt_brl(float(r['balance']))}" for r in rows]
+
+        await message.reply(
+            "📦 **Caixinhas:**\n"
+            + "\n".join(linhas)
+            + f"\n\nTotal nas caixinhas: **{fmt_brl(total)}**"
+        )
         return
-    
     
     # depositar na caixinha (ex: "transferi 200 para caixinha viagem", "adicionar 200 na caixinha viagem")
     if ("caixinha" in t) and any(w in t for w in ["transferi", "transferir", "adicionar", "colocar", "coloquei", "por", "depositar", "aporte", "aportei"]):
@@ -428,42 +430,38 @@ async def on_message(message: discord.Message):
         if not name:
             await message.reply("Pra qual caixinha? Ex: `transferi 200 para caixinha viagem`")
             return
-        
-        # se vier "caixinha a emergencia", remove preposições iniciais comuns
-        name = re.sub(r'^(a|a\s+|para\s+|pra\s+|na\s+|no\s+|da\s+|do\s+)\s+', '', name).strip()
 
-        key = next((k for k in pockets.keys() if k.lower() == name.lower()), None)
-        if not key:
+        name = re.sub(r'^(a|para|pra|na|no|da|do)\s+', '', name).strip()
+
+        try:
+            launch_id, new_acc, new_pocket, canon_name = pocket_deposit_from_account(
+                message.author.id,
+                pocket_name=name,
+                amount=float(amount),
+                nota=text
+            )
+        except LookupError:
             await message.reply(f"Não achei essa caixinha: **{name}**. Use: `criar caixinha {name}`")
             return
-
-        # saldo suficiente na conta
-        store.setdefault("conta", 0.0)
-        if store["conta"] < amount:
-            await message.reply(f"Saldo insuficiente na conta. Conta: {fmt_brl(store['conta'])}")
+        except ValueError as e:
+            if str(e) == "INSUFFICIENT_ACCOUNT":
+                # pega saldo atual pra mensagem ficar boa
+                bal = get_balance(message.author.id)
+                await message.reply(f"Saldo insuficiente na conta. Conta: {fmt_brl(float(bal))}")
+            else:
+                await message.reply("Valor inválido.")
+            return
+        except Exception:
+            await message.reply("Deu erro ao depositar na caixinha (Postgres). Veja os logs.")
             return
 
-        # move dinheiro: conta -> caixinha
-        store["conta"] -= amount
-        pockets[key] = float(pockets.get(key, 0.0)) + amount
-
-        launches = get_user_launches(message.author.id)
-        l = registrar_lancamento(
-            launches=launches,
-            launch_id=LAUNCH_ID,
-            tipo="deposito_caixinha",
-            valor=amount,
-            alvo=key,
-            nota=text,
-            delta_conta=-amount,
-        )
-
         await message.reply(
-            f"✅ Depósito na caixinha **{key}**: +{fmt_brl(amount)}\n"
-            f"🏦 Conta: {fmt_brl(store['conta'])} • 📦 Caixinha: {fmt_brl(pockets[key])}\n"
-            f"ID: **#{l['id']}**"
+            f"✅ Depósito na caixinha **{canon_name}**: +{fmt_brl(float(amount))}\n"
+            f"🏦 Conta: {fmt_brl(float(new_acc))} • 📦 Caixinha: {fmt_brl(float(new_pocket))}\n"
+            f"ID: **#{launch_id}**"
         )
         return
+
     
     # sacar/retirar/resgatar X da caixinha Y (CAIXINHA -> CONTA)
     if any(w in t for w in ["retirei", "retirar", "sacar", "saquei", "resgatei", "resgatar"]) and "caixinha" in t:
@@ -472,72 +470,64 @@ async def on_message(message: discord.Message):
             await message.reply("Qual valor? Ex: `retirei 200 da caixinha viagem`")
             return
 
-        # tenta achar o nome depois de "caixinha"
         parts = t.split("caixinha", 1)
         name = parts[1].strip() if len(parts) > 1 else ""
-        # remove preposições comuns se vierem grudadas
         name = re.sub(r'^(da|do|de|na|no|para|pra)\s+', '', name).strip()
 
         if not name:
             await message.reply("De qual caixinha? Ex: `retirei 200 da caixinha viagem`")
             return
 
-        key = next((k for k in pockets.keys() if k.lower() == name.lower()), None)
-        if not key:
+        try:
+            launch_id, new_acc, new_pocket, canon_name = pocket_withdraw_to_account(
+                message.author.id,
+                pocket_name=name,
+                amount=float(amount),
+                nota=None
+            )
+        except LookupError:
             await message.reply(f"Não achei essa caixinha: **{name}**. Use: `criar caixinha {name}`")
             return
-
-        if pockets[key] < amount:
-            await message.reply(f"Saldo insuficiente na caixinha **{key}**. Caixinha: R$ {pockets[key]:.2f}")
+        except ValueError as e:
+            if str(e) == "INSUFFICIENT_POCKET":
+                await message.reply(f"Saldo insuficiente na caixinha **{name}**.")
+            else:
+                await message.reply("Valor inválido.")
+            return
+        except Exception:
+            await message.reply("Deu erro ao sacar da caixinha (Postgres). Veja os logs.")
             return
 
-        # ✅ move dinheiro
-        pockets[key] -= amount
-        store["conta"] += amount
-
-        launches = get_user_launches(message.author.id)
-        launches.append({
-            "id": next(LAUNCH_ID),
-            "tipo": "saque_caixinha",
-            "valor": float(amount),
-            "alvo": key,
-            "nota": None,
-            "criado_em": datetime.now().isoformat(timespec="seconds"),
-            "efeitos": {
-                "delta_conta": +float(amount),
-                "delta_pocket": {"nome": key, "delta": -float(amount)},
-                "delta_invest": None,
-                "create_pocket": None,
-                "create_investment": None
-            }
-        })
-
         await message.reply(
-            f"📤 Caixinha **{key}**: -R$ {amount:.2f}\n"
-            f"🏦 Conta: R$ {store['conta']:.2f} • 📦 Caixinha: R$ {pockets[key]:.2f}\n"
-            f"ID: #{launches[-1]['id']}"
+            f"📤 Caixinha **{canon_name}**: -R$ {float(amount):.2f}\n"
+            f"🏦 Conta: R$ {float(new_acc):.2f} • 📦 Caixinha: R$ {float(new_pocket):.2f}\n"
+            f"ID: #{launch_id}"
         )
         return
 
-    
-    # =========================
-    # Listar caixinhas
+
+   # =========================
+    # Listar caixinhas (Postgres)
     # =========================
     if t in ["listar caixinhas", "lista caixinhas", "caixinhas"]:
-        if not pockets:
+        rows = list_pockets(message.author.id)
+
+        if not rows:
             await message.reply("Você ainda não tem caixinhas. Use: `criar caixinha <nome>`")
             return
 
-        lines = []
-        total = 0.0
-        for nome, saldo in pockets.items():
-            lines.append(f"📦 **{nome}**: R$ {saldo:.2f}")
-            total += float(saldo)
+        total = sum(float(r["balance"]) for r in rows)
+        lines = [f"📦 **{r['name']}**: {fmt_brl(float(r['balance']))}" for r in rows]
 
-        await message.reply("📦 **Suas caixinhas:**\n" + "\n".join(lines) + f"\n\nTotal em caixinhas: R$ {total:.2f}")
+        await message.reply(
+            "📦 **Suas caixinhas:**\n"
+            + "\n".join(lines)
+            + f"\n\nTotal em caixinhas: {fmt_brl(total)}"
+        )
         return
-    
-    # excluir caixinha
+
+
+    # excluir caixinha (Postgres)
     if t.startswith("excluir caixinha") or t.startswith("apagar caixinha") or t.startswith("remover caixinha"):
         parts = text.split("caixinha", 1)
         name = parts[1].strip() if len(parts) > 1 else ""
@@ -546,31 +536,36 @@ async def on_message(message: discord.Message):
             await message.reply("Qual caixinha você quer excluir? Ex: `excluir caixinha viagem`")
             return
 
-        key = next((k for k in pockets.keys() if k.lower() == name.lower()), None)
-        if not key:
+        try:
+            launch_id, canon_name = delete_pocket(message.author.id, pocket_name=name)
+        except LookupError:
             await message.reply(f"Não achei essa caixinha: **{name}**")
             return
-
-        if pockets[key] != 0:
-            await message.reply(f"⚠️ Não posso excluir a caixinha **{key}** porque o saldo não é zero (R$ {pockets[key]:.2f}).")
+        except ValueError as e:
+            if str(e) == "POCKET_NOT_ZERO":
+                # pega saldo atual pra mostrar na msg
+                rows = list_pockets(message.author.id)
+                saldo = None
+                for r in rows:
+                    if r["name"].lower() == name.lower():
+                        saldo = float(r["balance"])
+                        break
+                if saldo is None:
+                    await message.reply("⚠️ Não consegui ler o saldo da caixinha agora.")
+                else:
+                    await message.reply(
+                        f"⚠️ Não posso excluir a caixinha **{name}** porque o saldo não é zero ({fmt_brl(saldo)})."
+                    )
+            else:
+                await message.reply("Nome/valor inválido.")
+            return
+        except Exception:
+            await message.reply("Deu erro ao excluir caixinha (Postgres). Veja os logs.")
             return
 
-        # remove
-        del pockets[key]
-
-        # registra lançamento
-        launches = get_user_launches(message.author.id)
-        launches.append({
-            "id": next(LAUNCH_ID),
-            "tipo": "delete_pocket",
-            "valor": None,
-            "alvo": key,
-            "nota": None,
-            "criado_em": datetime.now().isoformat(timespec="seconds")
-        })
-
-        await message.reply(f"🗑️ Caixinha **{key}** excluída com sucesso. (ID: #{launches[-1]['id']})")
+        await message.reply(f"🗑️ Caixinha **{canon_name}** excluída com sucesso. (ID: #{launch_id})")
         return
+
 
 
 
@@ -663,29 +658,27 @@ async def on_message(message: discord.Message):
             await message.reply("Qual o nome da caixinha? Ex: `criar caixinha viagem`")
             return
 
-        if name in pockets:
-            await message.reply(f"ℹ️ A caixinha **{name}** já existe.")
+        try:
+            launch_id, pocket_id, pocket_name = create_pocket(
+                message.author.id,
+                name=name,
+                nota=text
+            )
+        except Exception:
+            await message.reply("Deu erro ao criar caixinha (Postgres). Veja os logs.")
             return
 
-        pockets[name] = 0.0
+        if launch_id is None:
+            await message.reply(f"ℹ️ A caixinha **{pocket_name}** já existe.")
+            return
 
-        launches = get_user_launches(message.author.id)
-        l = registrar_lancamento(
-            launches=launches,
-            launch_id=LAUNCH_ID,
-            tipo="criar_caixinha",
-            valor=0.0,
-            alvo=name,
-            nota=text,
-            delta_conta=0.0,
-        )
-
-        await message.reply(f"✅ Caixinha criada: **{name}** (ID: **#{l['id']}**)")
+        await message.reply(f"✅ Caixinha criada: **{pocket_name}** (ID: **#{launch_id}**)")
         return
 
 
 
-  # criar investimento (aceita taxa ao dia / ao mês / ao ano)
+
+  # criar investimento (Postgres) — aceita taxa ao dia / ao mês / ao ano
     if t.startswith("criar investimento"):
         parts = text.split("criar investimento", 1)
         rest = parts[1].strip() if len(parts) > 1 else ""
@@ -693,7 +686,6 @@ async def on_message(message: discord.Message):
             await message.reply("Use: `criar investimento <nome> <taxa>% ao dia|ao mês|ao ano`")
             return
 
-        # extrai taxa: aceita 1% / 1,1% / 1.1% e "ao dia"/"ao mes"/"ao mês"/"ao ano"
         m = re.search(r'(\d+(?:[.,]\d+)?)\s*%\s*(?:ao|a)\s*(dia|m[eê]s|ano)\b', rest, flags=re.I)
         if not m:
             await message.reply(
@@ -714,50 +706,40 @@ async def on_message(message: discord.Message):
         period_raw = m.group(2).lower()
         if "dia" in period_raw:
             period = "daily"
+            periodo_str = "ao dia"
         elif "ano" in period_raw:
             period = "yearly"
+            periodo_str = "ao ano"
         else:
             period = "monthly"
+            periodo_str = "ao mês"
 
-        # nome = texto sem a parte da taxa (remove só o trecho encontrado)
         name = (rest[:m.start()] + rest[m.end():]).strip(" -–—")
         if not name:
             await message.reply("Me diga o nome do investimento também. Ex: `criar investimento CDB 1% ao mês`")
             return
 
-        if name in investments:
-            await message.reply(f"ℹ️ O investimento **{name}** já existe.")
+        try:
+            launch_id, inv_name = create_investment(
+                message.author.id,
+                name=name,
+                rate=rate,
+                period=period,
+                nota=f"taxa={rate} periodo={period}"
+            )
+        except Exception:
+            await message.reply("Deu erro ao criar investimento (Postgres). Veja os logs.")
             return
 
-        investments[name] = {
-            "balance": 0.0,
-            "rate": rate,          # taxa do período (dia/mês/ano)
-            "period": period,      # 'daily'|'monthly'|'yearly'
-            "last_date": date.today()
-        }
-
-        launches = get_user_launches(message.author.id)
-        launches.append({
-            "id": next(LAUNCH_ID),
-            "tipo": "create_investment",
-            "valor": None,
-            "alvo": name,
-            "nota": f"taxa={rate} periodo={period}",
-            "criado_em": datetime.now().isoformat(timespec="seconds")
-        })
-
-        taxa_pct = rate * 100
-        if period == "daily":
-            periodo_str = "ao dia"
-        elif period == "monthly":
-            periodo_str = "ao mês"
-        else:
-            periodo_str = "ao ano"
+        if launch_id is None:
+            await message.reply(f"ℹ️ O investimento **{inv_name}** já existe.")
+            return
 
         await message.reply(
-            f"✅ Investimento criado: **{name}** ({taxa_pct:.4g}% {periodo_str}) (ID: #{launches[-1]['id']})"
+            f"✅ Investimento criado: **{inv_name}** ({rate*100:.4g}% {periodo_str}) (ID: #{launch_id})"
         )
         return
+
 
 
     
@@ -808,24 +790,34 @@ async def on_message(message: discord.Message):
     # depósito natural em caixinha (ex: "coloquei 300 na emergencia")
     amount, pocket_name = parse_pocket_deposit_natural(text)
     if amount is not None and pocket_name:
-        key = next((k for k in pockets.keys() if k.lower() == pocket_name.lower()), None)
-        if not key:
+        try:
+            launch_id, new_acc, new_pocket, canon_name = pocket_deposit_from_account(
+                message.author.id,
+                pocket_name=pocket_name,
+                amount=float(amount),
+                nota=text
+            )
+        except LookupError:
             await message.reply(f"Não achei essa caixinha: **{pocket_name}**. Use: `criar caixinha {pocket_name}`")
             return
+        except ValueError as e:
+            if str(e) == "INSUFFICIENT_ACCOUNT":
+                bal = get_balance(message.author.id)
+                await message.reply(f"Saldo insuficiente na conta. Conta: {fmt_brl(float(bal))}")
+            else:
+                await message.reply("Valor inválido.")
+            return
+        except Exception:
+            await message.reply("Deu erro ao depositar na caixinha (Postgres). Veja os logs.")
+            return
 
-        pockets[key] += amount
-
-        launches = get_user_launches(message.author.id)
-        launches.append({
-            "id": next(LAUNCH_ID),
-            "type": "pocket_deposit",
-            "amount": amount,
-            "target": key,
-            "created_at": datetime.now().isoformat(timespec="seconds")
-        })
-
-        await message.reply(f"✅ Caixinha **{key}**: +R$ {amount:.2f}. Saldo: **R$ {pockets[key]:.2f}**")
+        await message.reply(
+            f"✅ Depósito na caixinha **{canon_name}**: +{fmt_brl(float(amount))}\n"
+            f"🏦 Conta: {fmt_brl(float(new_acc))} • 📦 Caixinha: {fmt_brl(float(new_pocket))}\n"
+            f"ID: **#{launch_id}**"
+        )
         return
+
 
     # transferir para caixinha
     # if "transferi" in t and "caixinha" in t:
@@ -857,7 +849,7 @@ async def on_message(message: discord.Message):
     #     await message.reply(f"✅ Caixinha **{key}**: +R$ {amount:.2f}. Saldo: **R$ {pockets[key]:.2f}**")
     #     return
 
-    # aplicar/aporte no investimento (debita conta corrente)
+   # aplicar/aporte no investimento (Postgres) — debita conta corrente
     if any(w in t for w in ["apliquei", "aplicar", "aportei", "aporte"]):
         amount = parse_money(text)
         if amount is None:
@@ -873,15 +865,12 @@ async def on_message(message: discord.Message):
 
         # tenta extrair nome depois de "investimento"
         if not name and "investimento" in raw:
-            # pega o que vem depois da palavra investimento
             parts = re.split(r'\binvestimento\b', text, flags=re.I, maxsplit=1)
             name = parts[1].strip() if len(parts) > 1 else None
 
-        # fallback: "apliquei 500 cdb nubank" (sem investimento)
+        # fallback: "apliquei 500 cdb nubank"
         if not name:
-            # remove o verbo do começo
             tmp = re.sub(r'^(apliquei|aplicar|aportei|aporte)\b', '', text, flags=re.I).strip()
-            # remove o valor (primeiro número que parecer dinheiro)
             tmp = re.sub(r'\b\d[\d\.\,]*\b', '', tmp, count=1).strip()
             name = tmp.strip(" -–—") or None
 
@@ -889,58 +878,37 @@ async def on_message(message: discord.Message):
             await message.reply("Em qual investimento? Ex: `apliquei 200 no investimento cdb_nubank`")
             return
 
-        # acha investimento (case-insensitive)
-        key = next((k for k in investments.keys() if k.lower() == name.lower()), None)
-        if not key:
+        try:
+            launch_id, new_acc, new_inv, canon_name = investment_deposit_from_account(
+                message.author.id,
+                investment_name=name,
+                amount=float(amount),
+                nota=text
+            )
+        except LookupError:
             await message.reply(f"Não achei esse investimento: **{name}**. Use: `criar investimento {name} 1% ao mês`")
             return
-
-        # saldo suficiente
-        if store["conta"] < amount:
-            await message.reply(f"Saldo insuficiente na conta. Conta: R$ {store['conta']:.2f}")
+        except ValueError as e:
+            if str(e) == "INSUFFICIENT_ACCOUNT":
+                bal = get_balance(message.author.id)
+                await message.reply(f"Saldo insuficiente na conta. Conta: {fmt_brl(float(bal))}")
+            else:
+                await message.reply("Valor inválido.")
+            return
+        except Exception:
+            await message.reply("Deu erro ao aplicar/aportar no investimento (Postgres). Veja os logs.")
             return
 
-        # atualiza juros antes de mexer
-        accrue_investment(investments[key])
-
-        # move dinheiro (CONTA -> INVESTIMENTO)
-        store["conta"] -= float(amount)
-        investments[key]["balance"] += float(amount)
-
-        # registra lançamento
-        launches = get_user_launches(message.author.id)
-        launches.append({
-            "id": next(LAUNCH_ID),
-            "tipo": "aporte_investimento",
-            "valor": float(amount),
-            "alvo": key,
-            "nota": None,
-            "criado_em": datetime.now().isoformat(timespec="seconds"),
-            "efeitos": {
-                "delta_conta": -float(amount),
-                "delta_pocket": None,
-                "delta_invest": {"nome": key, "delta": +float(amount)},
-                "create_pocket": None,
-                "create_investment": None
-            }
-        })
-
         await message.reply(
-            f"✅ Aporte em **{key}**: +R$ {float(amount):.2f}. Saldo: **R$ {investments[key]['balance']:.2f}**\n"
-            f"🏦 Conta: R$ {store['conta']:.2f}\n"
-            f"ID: #{launches[-1]['id']}"
+            f"✅ Aporte em **{canon_name}**: +{fmt_brl(float(amount))}. Saldo: **{fmt_brl(float(new_inv))}**\n"
+            f"🏦 Conta: {fmt_brl(float(new_acc))}\n"
+            f"ID: #{launch_id}"
         )
         return
+
     
-    # resgatar/retirar dinheiro do investimento (credita conta corrente)
-    # Aceita:
-    # - "resgatei 200 do investimento cdb_nubank"
-    # - "retirei 200 do investimento cdb_nubank"
-    # - "resgatar 200 investimento cdb_nubank"
-    # - "resgatei 200 cdb_nubank" (sem falar investimento)
-    if any(w in t for w in ["resgatei", "resgatar", "resgate", "retirei", "retirar", "saquei", "sacar"]) and (
-        "investimento" in t or "do investimento" in t or "da investimento" in t or True
-    ):
+    # resgatar/retirar dinheiro do investimento (Postgres) — credita conta corrente
+    if any(w in t for w in ["resgatei", "resgatar", "resgate", "retirei", "retirar", "saquei", "sacar"]):
         amount = parse_money(text)
         if amount is None:
             await message.reply("Qual valor? Ex: `resgatei 200 do investimento cdb_nubank`")
@@ -968,89 +936,80 @@ async def on_message(message: discord.Message):
             await message.reply("De qual investimento? Ex: `resgatei 200 do investimento cdb_nubank`")
             return
 
-        # acha investimento (case-insensitive)
-        key = next((k for k in investments.keys() if k.lower() == name.lower()), None)
-        if not key:
+        try:
+            launch_id, new_acc, new_inv, canon_name = investment_withdraw_to_account(
+                message.author.id,
+                investment_name=name,
+                amount=float(amount),
+                nota=text
+            )
+        except LookupError:
             await message.reply(f"Não achei esse investimento: **{name}**. Use: `criar investimento {name} 1% ao mês`")
             return
-
-        # atualiza juros antes de mexer
-        accrue_investment(investments[key])
-
-        # saldo suficiente no investimento
-        if investments[key]["balance"] < float(amount):
-            await message.reply(f"Saldo insuficiente no investimento **{key}**. Saldo: R$ {investments[key]['balance']:.2f}")
+        except ValueError as e:
+            if str(e) == "INSUFFICIENT_INVEST":
+                await message.reply(f"Saldo insuficiente no investimento **{name}**.")
+            else:
+                await message.reply("Valor inválido.")
+            return
+        except Exception:
+            await message.reply("Deu erro ao resgatar investimento (Postgres). Veja os logs.")
             return
 
-        # move dinheiro (INVESTIMENTO -> CONTA)
-        investments[key]["balance"] -= float(amount)
-        store["conta"] += float(amount)
-
-        # registra lançamento
-        launches = get_user_launches(message.author.id)
-        launches.append({
-            "id": next(LAUNCH_ID),
-            "tipo": "resgate_investimento",
-            "valor": float(amount),
-            "alvo": key,
-            "nota": None,
-            "criado_em": datetime.now().isoformat(timespec="seconds"),
-            "efeitos": {
-                "delta_conta": +float(amount),
-                "delta_pocket": None,
-                "delta_invest": {"nome": key, "delta": -float(amount)},
-                "create_pocket": None,
-                "create_investment": None
-            }
-        })
-
         await message.reply(
-            f"💸 Resgate de **{key}**: -R$ {float(amount):.2f}. Saldo: **R$ {investments[key]['balance']:.2f}**\n"
-            f"🏦 Conta: R$ {store['conta']:.2f}\n"
-            f"ID: #{launches[-1]['id']}"
+            f"💸 Resgate de **{canon_name}**: -{fmt_brl(float(amount))}. Saldo: **{fmt_brl(float(new_inv))}**\n"
+            f"🏦 Conta: {fmt_brl(float(new_acc))}\n"
+            f"ID: #{launch_id}"
         )
         return
 
 
 
 
-    # saldo caixinhas
+
+   # saldo caixinhas (Postgres)
     if t == "saldo caixinhas":
-        if not pockets:
-            await message.reply("Você não tem caixinhas ainda. Use: 'criar caixinha viagem'")
+        rows = list_pockets(message.author.id)
+        if not rows:
+            await message.reply("Você não tem caixinhas ainda. Use: `criar caixinha viagem`")
             return
-        lines = "\n".join([f"- **{k}**: R$ {v:.2f}" for k, v in pockets.items()])
+
+        lines = "\n".join([f"- **{r['name']}**: {fmt_brl(float(r['balance']))}" for r in rows])
         await message.reply("💰 **Caixinhas:**\n" + lines)
         return
 
-    # saldo investimentos
+
+   # saldo investimentos (Postgres + aplica juros antes)
     if t == "saldo investimentos":
-        if not investments:
-            await message.reply("Você não tem investimentos ainda. Use: 'criar investimento CDB 1,1% ao mês'")
+        rows = accrue_all_investments(message.author.id)
+        if not rows:
+            await message.reply("Você não tem investimentos ainda. Use: `criar investimento CDB 1,1% ao mês`")
             return
-        for inv in investments.values():
-            accrue_investment(inv)
-        lines = "\n".join([f"- **{k}**: R$ {v['balance']:.2f}" for k, v in investments.items()])
+
+        lines = "\n".join([f"- **{r['name']}**: {fmt_brl(float(r['balance']))}" for r in rows])
         await message.reply("📈 **Investimentos:**\n" + lines)
         return
+
     
 
-    # listar investimentos
+   # listar investimentos (Postgres + aplica juros antes)
     if t in ["listar investimentos", "lista investimentos", "investimentos", "meus investimentos"]:
-        if not investments:
+        rows = accrue_all_investments(message.author.id)
+        if not rows:
             await message.reply("Você ainda não tem investimentos.")
             return
 
         lines = ["📈 **Seus investimentos:**"]
-        for name, inv in investments.items():
-            rate = inv.get("rate", 0.0) * 100
-            period = inv.get("period", "monthly")
+        for r in rows:
+            rate_pct = float(r["rate"]) * 100
+            period = (r["period"] or "monthly").lower()
             period_str = "ao dia" if period == "daily" else ("ao mês" if period == "monthly" else "ao ano")
-            bal = inv.get("balance", 0.0)
-            lines.append(f"• **{name}** — {rate:.4g}% {period_str} — saldo: R$ {bal:.2f}")
+            bal = float(r["balance"])
+            lines.append(f"• **{r['name']}** — {rate_pct:.4g}% {period_str} — saldo: {fmt_brl(bal)}")
 
         await message.reply("\n".join(lines))
         return
+
 
     
     # listar lancamentos (Postgres)
@@ -1092,7 +1051,7 @@ async def on_message(message: discord.Message):
     
 
     # =========================
-    # Apagar lançamento pelo ID (robusto)s
+    # Apagar lançamento pelo ID (Postgres)
     # =========================
     if t.startswith("apagar") or t.startswith("remover"):
         m = re.search(r'(\d+)', t)
@@ -1101,64 +1060,23 @@ async def on_message(message: discord.Message):
             return
 
         launch_id = int(m.group(1))
-        launches = get_user_launches(message.author.id)
 
-        idx = next((i for i, l in enumerate(launches) if l.get("id") == launch_id), None)
-        if idx is None:
+        try:
+            delete_launch_and_rollback(message.author.id, launch_id)
+        except LookupError:
             await message.reply(f"Não achei lançamento com ID {launch_id}.")
             return
-
-        removed = launches.pop(idx)
-
-        # ---- normaliza campos (novo e antigo) ----
-        tipo = removed.get("tipo") or removed.get("type")
-        valor = removed.get("valor") if "valor" in removed else removed.get("amount")
-        alvo  = removed.get("alvo")  or removed.get("target")
-
-        if valor is None:
-            valor = 0.0
-        valor = float(valor)
-
-        # ---- reverter efeitos ----
-        if tipo in ["despesa", "expense"]:
-            store["conta"] += valor
-
-        elif tipo in ["receita", "income"]:
-            store["conta"] -= valor
-
-        elif tipo == "pocket_deposit":
-            # depósito em caixinha: desfazer = tirar da caixinha e devolver na conta
-            if alvo in pockets:
-                pockets[alvo] -= valor
-            store["conta"] += valor
-
-        elif tipo == "pocket_withdraw":
-            # saque da caixinha: desfazer = devolver na caixinha e tirar da conta
-            if alvo in pockets:
-                pockets[alvo] += valor
-            store["conta"] -= valor
-
-        elif tipo == "investment_apply":
-            if alvo in investments:
-                investments[alvo]["balance"] -= valor
-            store["conta"] += valor
-
-        elif tipo == "investment_withdraw":
-            if alvo in investments:
-                investments[alvo]["balance"] += valor
-            store["conta"] -= valor
-
-        elif tipo == "create_investment":
-            # apaga o investimento criado (se existir)
-            if alvo in investments:
-                del investments[alvo]
-
-        elif tipo == "create_pocket":
-            if alvo in pockets:
-                del pockets[alvo]
+        except ValueError as e:
+            # quando faltar "efeitos" ou tiver tipo não suportado
+            await message.reply(f"Não consegui desfazer esse lançamento: {e}")
+            return
+        except Exception:
+            await message.reply("Deu erro ao apagar/desfazer o lançamento (Postgres). Veja os logs.")
+            return
 
         await message.reply(f"🗑️ Lançamento #{launch_id} removido e saldos ajustados.")
         return
+
 
     # comando para desfazer a ultima acao
     if t in ["desfazer", "undo", "voltar", "excluir"]:
