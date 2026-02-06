@@ -38,8 +38,8 @@ TOOLS_NESTED = [
             "description": "Retorna o saldo atual da conta principal do usuário.",
             "parameters": {
                 "type": "object",
-                "properties": {"user_id": {"type": "integer"}},
-                "required": ["user_id"],
+                "properties": {},
+                "required": [],
             },
         },
     },
@@ -51,10 +51,9 @@ TOOLS_NESTED = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "user_id": {"type": "integer"},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 50},
                 },
-                "required": ["user_id"],
+                "required": [],
             },
         },
     },
@@ -65,8 +64,8 @@ TOOLS_NESTED = [
             "description": "Lista todas as caixinhas e seus saldos.",
             "parameters": {
                 "type": "object",
-                "properties": {"user_id": {"type": "integer"}},
-                "required": ["user_id"],
+                "properties": {},
+                "required": [],
             },
         },
     },
@@ -77,8 +76,8 @@ TOOLS_NESTED = [
             "description": "Lista investimentos e seus saldos.",
             "parameters": {
                 "type": "object",
-                "properties": {"user_id": {"type": "integer"}},
-                "required": ["user_id"],
+                "properties": {},
+                "required": [],
             },
         },
     },
@@ -92,13 +91,12 @@ TOOLS_NESTED = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "user_id": {"type": "integer"},
                     "tipo": {"type": "string", "description": "ex: despesa, receita"},
                     "valor": {"type": "number"},
                     "alvo": {"type": "string"},
                     "nota": {"type": "string"},
                 },
-                "required": ["user_id", "tipo", "valor"],
+                "required": ["tipo", "valor"],
             },
         },
     },
@@ -110,10 +108,9 @@ TOOLS_NESTED = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "user_id": {"type": "integer"},
                     "name": {"type": "string"},
                 },
-                "required": ["user_id", "name"],
+                "required": ["name"],
             },
         },
     },
@@ -125,12 +122,11 @@ TOOLS_NESTED = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "user_id": {"type": "integer"},
                     "pocket_name": {"type": "string"},
                     "amount": {"type": "number"},
                     "nota": {"type": "string"},
                 },
-                "required": ["user_id", "pocket_name", "amount"],
+                "required": ["pocket_name", "amount"],
             },
         },
     },
@@ -142,12 +138,11 @@ TOOLS_NESTED = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "user_id": {"type": "integer"},
                     "pocket_name": {"type": "string"},
                     "amount": {"type": "number"},
                     "nota": {"type": "string"},
                 },
-                "required": ["user_id", "pocket_name", "amount"],
+                "required": ["pocket_name", "amount"],
             },
         },
     },
@@ -160,12 +155,11 @@ TOOLS_NESTED = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "user_id": {"type": "integer"},
                     "name": {"type": "string"},
                     "rate": {"type": "number"},
                     "period": {"type": "string", "enum": ["daily", "monthly", "yearly"]},
                 },
-                "required": ["user_id", "name", "rate", "period"],
+                "required": ["name", "rate", "period"],
             },
         },
     },
@@ -177,12 +171,11 @@ TOOLS_NESTED = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "user_id": {"type": "integer"},
                     "investment_name": {"type": "string"},
                     "amount": {"type": "number"},
                     "nota": {"type": "string"},
                 },
-                "required": ["user_id", "investment_name", "amount"],
+                "required": ["investment_name", "amount"],
             },
         },
     },
@@ -194,12 +187,11 @@ TOOLS_NESTED = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "user_id": {"type": "integer"},
                     "investment_name": {"type": "string"},
                     "amount": {"type": "number"},
                     "nota": {"type": "string"},
                 },
-                "required": ["user_id", "investment_name", "amount"],
+                "required": ["investment_name", "amount"],
             },
         },
     },
@@ -210,8 +202,8 @@ TOOLS_NESTED = [
             "description": "Atualiza rendimentos de todos os investimentos do usuário.",
             "parameters": {
                 "type": "object",
-                "properties": {"user_id": {"type": "integer"}},
-                "required": ["user_id"],
+                "properties": {},
+                "required": [],
             },
         },
     },
@@ -225,10 +217,9 @@ TOOLS_NESTED = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "user_id": {"type": "integer"},
                     "launch_id": {"type": "integer"},
                 },
-                "required": ["user_id", "launch_id"],
+                "required": ["launch_id"],
             },
         },
     },
@@ -240,10 +231,9 @@ TOOLS_NESTED = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "user_id": {"type": "integer"},
                     "pocket_name": {"type": "string"},
                 },
-                "required": ["user_id", "pocket_name"],
+                "required": ["pocket_name"],
             },
         },
     },
@@ -255,10 +245,9 @@ TOOLS_NESTED = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "user_id": {"type": "integer"},
                     "investment_name": {"type": "string"},
                 },
-                "required": ["user_id", "investment_name"],
+                "required": ["investment_name"],
             },
         },
     },
@@ -334,7 +323,7 @@ async def handle_ai_message(user_id: int, text: str) -> str | None:
         bal = float(get_balance(args["user_id"]))
         return f"Seu saldo atual é **R$ {bal:,.2f}**".replace(",", "X").replace(".", ",").replace("X", ".")
     if name == "list_launches":
-        rows = list_launches(args["user_id"], limit=int(args.get("limit", 10)))
+        rows = list_launches(user_id, limit=int(args.get("limit", 10)))
         if not rows:
             return "Você ainda não tem lançamentos."
         lines = [f"#{r['id']} • {r['tipo']} • {r['valor']} • {r.get('nota') or ''}" for r in rows]
