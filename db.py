@@ -899,6 +899,38 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
             create_pocket = efeitos.get("create_pocket")
             create_invest = efeitos.get("create_investment")
             delete_pocket = efeitos.get("delete_pocket")
+            delete_investment = efeitos.get("delete_investment")
+            create_invest = efeitos.get("create_investment")
+
+            if create_invest:
+                nome = create_invest.get("nome")
+                if nome:
+                    cur.execute(
+                        """
+                        delete from investments
+                        where user_id=%s and lower(name)=lower(%s) and balance=0
+                        """,
+                        (user_id, nome),
+                    )
+
+            if delete_investment:
+                nome = delete_investment.get("nome")
+                bal0 = Decimal(str(delete_investment.get("balance", 0)))
+                rate = Decimal(str(delete_investment.get("rate", 0)))
+                period = delete_investment.get("period", "monthly")
+                last_date_str = delete_investment.get("last_date")
+
+                if nome:
+                    ld = date.fromisoformat(last_date_str) if last_date_str else date.today()
+                    cur.execute(
+                        """
+                        insert into investments(user_id, name, balance, rate, period, last_date)
+                        values (%s,%s,%s,%s,%s,%s)
+                        on conflict (user_id, name) do nothing
+                        """,
+                        (user_id, nome, bal0, rate, period, ld),
+                    )
+
 
             if delete_pocket:
                 nome = delete_pocket.get("nome")
@@ -980,4 +1012,158 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
             )
 
         conn.commit()
+
+def create_investment_db(user_id: int, name: str, rate: float, period: str, nota: str | None = None):
+    """
+    Cria investimento e registra launch create_investment.
+    Retorna: (launch_id, investment_id, canon_name)
+      - se já existir: (None, investment_id, canon_name)
+    """
+    ensure_user(user_id)
+
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("EMPTY_NAME")
+
+    if period not in ("daily", "monthly", "yearly"):
+        raise ValueError("INVALID_PERIOD")
+
+    r = Decimal(str(rate))
+    if r <= 0:
+        raise ValueError("INVALID_RATE")
+
+    criado_em = datetime.now()
+    today = date.today()
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into investments(user_id, name, balance, rate, period, last_date)
+                values (%s,%s,0,%s,%s,%s)
+                on conflict (user_id, name) do nothing
+                returning id, name
+                """,
+                (user_id, name, r, period, today),
+            )
+            row = cur.fetchone()
+
+            if row:
+                inv_id = row["id"]
+                canon = row["name"]
+                created = True
+            else:
+                created = False
+                cur.execute(
+                    """
+                    select id, name
+                    from investments
+                    where user_id=%s and lower(name)=lower(%s)
+                    """,
+                    (user_id, name),
+                )
+                r2 = cur.fetchone()
+                if not r2:
+                    raise RuntimeError("INVESTMENT_LOOKUP_FAILED")
+                inv_id = r2["id"]
+                canon = r2["name"]
+
+            if not created:
+                conn.commit()
+                return None, inv_id, canon
+
+            efeitos = {
+                "delta_conta": 0.0,
+                "delta_pocket": None,
+                "delta_invest": None,
+                "create_pocket": None,
+                "create_investment": {"nome": canon},
+                "delete_pocket": None,
+                "delete_investment": None,
+            }
+
+            cur.execute(
+                """
+                insert into launches(user_id, tipo, valor, alvo, nota, criado_em, efeitos)
+                values (%s,%s,%s,%s,%s,%s,%s)
+                returning id
+                """,
+                (user_id, "create_investment", Decimal("0"), canon, nota, criado_em, Jsonb(efeitos)),
+            )
+            launch_id = cur.fetchone()["id"]
+
+        conn.commit()
+
+    return launch_id, inv_id, canon
+
+
+def delete_investment(user_id: int, investment_name: str, nota: str | None = None):
+    """
+    Exclui investimento se saldo for zero.
+    Registra launch delete_investment.
+    Retorna: (launch_id, canon_name)
+    """
+    ensure_user(user_id)
+
+    investment_name = (investment_name or "").strip()
+    if not investment_name:
+        raise ValueError("EMPTY_NAME")
+
+    criado_em = datetime.now()
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, name, balance, rate, period, last_date
+                from investments
+                where user_id=%s and lower(name)=lower(%s)
+                for update
+                """,
+                (user_id, investment_name),
+            )
+            inv = cur.fetchone()
+            if not inv:
+                raise LookupError("INV_NOT_FOUND")
+
+            inv_id = inv["id"]
+            canon = inv["name"]
+            bal = Decimal(str(inv["balance"]))
+
+            if bal != Decimal("0"):
+                raise ValueError("INV_NOT_ZERO")
+
+            # apaga
+            cur.execute("delete from investments where id=%s", (inv_id,))
+
+            # ✅ guarda dados pra poder DESFAZER (recriar igual)
+            efeitos = {
+                "delta_conta": 0.0,
+                "delta_pocket": None,
+                "delta_invest": None,
+                "create_pocket": None,
+                "create_investment": None,
+                "delete_pocket": None,
+                "delete_investment": {
+                    "nome": canon,
+                    "balance": 0.0,
+                    "rate": float(inv["rate"]),
+                    "period": inv["period"],
+                    "last_date": inv["last_date"].isoformat() if inv["last_date"] else date.today().isoformat(),
+                },
+            }
+
+            cur.execute(
+                """
+                insert into launches(user_id, tipo, valor, alvo, nota, criado_em, efeitos)
+                values (%s,%s,%s,%s,%s,%s,%s)
+                returning id
+                """,
+                (user_id, "delete_investment", Decimal("0"), canon, nota, criado_em, Jsonb(efeitos)),
+            )
+            launch_id = cur.fetchone()["id"]
+
+        conn.commit()
+
+    return launch_id, canon
 

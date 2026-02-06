@@ -10,6 +10,8 @@ from db import init_db
 from dotenv import load_dotenv
 load_dotenv() #carrega o .env
 from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches, list_pockets, pocket_withdraw_to_account, create_pocket, pocket_deposit_from_account, delete_pocket, investment_withdraw_to_account, accrue_all_investments, create_investment, investment_deposit_from_account, delete_launch_and_rollback
+from db import create_investment_db, delete_investment
+
 
 
 
@@ -566,8 +568,31 @@ async def on_message(message: discord.Message):
         await message.reply(f"🗑️ Caixinha **{canon_name}** excluída com sucesso. (ID: #{launch_id})")
         return
 
+    # excluir investimento
+    if t.startswith("excluir investimento") or t.startswith("apagar investimento") or t.startswith("remover investimento"):
+        parts = text.split("investimento", 1)
+        name = parts[1].strip() if len(parts) > 1 else ""
+        if not name:
+            await message.reply("Qual investimento você quer excluir? Ex: `excluir investimento CDB`")
+            return
 
+        try:
+            launch_id, canon = delete_investment(message.author.id, name, nota=text)
+        except LookupError:
+            await message.reply(f"Não achei esse investimento: **{name}**")
+            return
+        except ValueError as e:
+            if str(e) == "INV_NOT_ZERO":
+                await message.reply("⚠️ Não posso excluir: o saldo do investimento não é zero.")
+            else:
+                await message.reply("Não consegui excluir esse investimento.")
+            return
+        except Exception:
+            await message.reply("Deu erro ao excluir investimento (Postgres). Veja os logs.")
+            return
 
+        await message.reply(f"🗑️ Investimento **{canon}** excluído com sucesso. (ID: #{launch_id})")
+        return
 
    # Gasto/Receita natural (ex: "gastei 35 no ifood", "recebi 2500 salario")
     parsed = parse_receita_despesa_natural(text)
@@ -720,25 +745,27 @@ async def on_message(message: discord.Message):
             return
 
         try:
-            launch_id, inv_name = create_investment(
+            launch_id, inv_id, canon = create_investment_db(
                 message.author.id,
                 name=name,
                 rate=rate,
                 period=period,
-                nota=f"taxa={rate} periodo={period}"
+                nota=text
             )
         except Exception:
             await message.reply("Deu erro ao criar investimento (Postgres). Veja os logs.")
             return
 
+        # já existia
         if launch_id is None:
-            await message.reply(f"ℹ️ O investimento **{inv_name}** já existe.")
+            await message.reply(f"ℹ️ O investimento **{canon}** já existe.")
             return
 
         await message.reply(
-            f"✅ Investimento criado: **{inv_name}** ({rate*100:.4g}% {periodo_str}) (ID: #{launch_id})"
+            f"✅ Investimento criado: **{canon}** ({rate*100:.4g}% {periodo_str}) (ID: #{launch_id})"
         )
         return
+
 
 
 
