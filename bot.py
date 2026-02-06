@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 load_dotenv() #carrega o .env
 from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches, list_pockets, pocket_withdraw_to_account, create_pocket, pocket_deposit_from_account, delete_pocket, investment_withdraw_to_account, accrue_all_investments, create_investment, investment_deposit_from_account, delete_launch_and_rollback
 from db import create_investment_db, delete_investment
+from ai_router import handle_ai_message
+
 
 
 
@@ -1026,6 +1028,13 @@ async def on_message(message: discord.Message):
 
     # fallback
     await message.reply("❓ **Não entendi seu comando. Tente um destes exemplos:**\n\n" + HELP_TEXT)
+
+    # Fallback: se não casou nenhum comando, tenta IA (hoje retorna None)
+    ai_reply = await handle_ai_message(message.author.id, message.content)
+    if ai_reply:
+        await message.reply(ai_reply)
+        return
+
 
 # --------- run ---------
 if __name__ == "__main__":
