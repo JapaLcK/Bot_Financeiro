@@ -9,7 +9,7 @@ from db import init_db
 from dotenv import load_dotenv
 load_dotenv() #carrega o .env
 from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches, list_pockets, pocket_withdraw_to_account, create_pocket, pocket_deposit_from_account, delete_pocket, investment_withdraw_to_account, accrue_all_investments, create_investment, investment_deposit_from_account, delete_launch_and_rollback
-from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action
+from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments
 from ai_router import handle_ai_message
 
 
@@ -418,6 +418,8 @@ async def on_message(message: discord.Message):
     pending = get_pending_action(message.author.id)
     if pending:
         ans = t.strip()
+
+        # confirmar
         if ans in ["sim", "s", "yes", "y"]:
             action = pending["action_type"]
             payload = pending["payload"]
@@ -446,6 +448,21 @@ async def on_message(message: discord.Message):
                     print("Erro ao limpar pending_action:", e)
             return
 
+        # cancelar
+        if ans in ["nao", "não", "n", "no"]:
+            try:
+                clear_pending_action(message.author.id)
+            except Exception as e:
+                print("Erro ao limpar pending_action:", e)
+            await message.reply("❌ Ação cancelada.")
+            return
+
+        # tem ação pendente, mas o usuário respondeu outra coisa
+        await message.reply(
+            "⚠️ Existe uma ação pendente.\n"
+            "Responda **sim** para confirmar ou **não** para cancelar."
+        )
+        return
 
 
     if t in ["listar caixinhas", "saldo caixinhas", "caixinhas"]:
@@ -575,7 +592,7 @@ async def on_message(message: discord.Message):
         return
 
 
-    # excluir caixinha (Postgres)
+    # excluir caixinha (com confirmação)
     if t.startswith("excluir caixinha") or t.startswith("apagar caixinha") or t.startswith("remover caixinha"):
         parts = text.split("caixinha", 1)
         name = parts[1].strip() if len(parts) > 1 else ""
@@ -584,37 +601,41 @@ async def on_message(message: discord.Message):
             await message.reply("Qual caixinha você quer excluir? Ex: `excluir caixinha viagem`")
             return
 
-        try:
-            launch_id, canon_name = delete_pocket(message.author.id, pocket_name=name)
-        except LookupError:
+        # valida existência + pega nome canônico + saldo
+        rows = list_pockets(message.author.id)
+        pocket = None
+        for r in rows:
+            if r["name"].lower() == name.lower():
+                pocket = r
+                break
+
+        if not pocket:
             await message.reply(f"Não achei essa caixinha: **{name}**")
             return
-        except ValueError as e:
-            if str(e) == "POCKET_NOT_ZERO":
-                # pega saldo atual pra mostrar na msg
-                rows = list_pockets(message.author.id)
-                saldo = None
-                for r in rows:
-                    if r["name"].lower() == name.lower():
-                        saldo = float(r["balance"])
-                        break
-                if saldo is None:
-                    await message.reply("⚠️ Não consegui ler o saldo da caixinha agora.")
-                else:
-                    await message.reply(
-                        f"⚠️ Não posso excluir a caixinha **{name}** porque o saldo não é zero ({fmt_brl(saldo)})."
-                    )
-            else:
-                await message.reply("Nome/valor inválido.")
-            return
-        except Exception:
-            await message.reply("Deu erro ao excluir caixinha (Postgres). Veja os logs.")
+
+        canon_name = pocket["name"]
+        saldo = float(pocket["balance"])
+
+        if saldo != 0.0:
+            await message.reply(
+                f"⚠️ Não posso excluir a caixinha **{canon_name}** porque o saldo não é zero ({fmt_brl(saldo)}).\n"
+                f"Retire o valor antes e tente novamente."
+            )
             return
 
-        await message.reply(f"🗑️ Caixinha **{canon_name}** excluída com sucesso. (ID: #{launch_id})")
+        # cria a ação pendente (expira em 10 min)
+        set_pending_action(message.author.id, "delete_pocket", {"pocket_name": canon_name}, minutes=10)
+
+        await message.reply(
+            "⚠️ Você está prestes a excluir esta caixinha:\n"
+            f"• **{canon_name}** • saldo: **{fmt_brl(0.0)}**\n\n"
+            "Responda **sim** para confirmar ou **não** para cancelar. (expira em 10 min)"
+        )
         return
 
-    # excluir investimento
+
+
+    # excluir investimento (com confirmação)
     if t.startswith("excluir investimento") or t.startswith("apagar investimento") or t.startswith("remover investimento"):
         parts = text.split("investimento", 1)
         name = parts[1].strip() if len(parts) > 1 else ""
@@ -622,23 +643,45 @@ async def on_message(message: discord.Message):
             await message.reply("Qual investimento você quer excluir? Ex: `excluir investimento CDB`")
             return
 
-        try:
-            launch_id, canon = delete_investment(message.author.id, name, nota=text)
-        except LookupError:
+        # valida existência + pega nome canônico + saldo
+        rows = list_investments(message.author.id)
+        inv = None
+        for r in rows:
+            if r["name"].lower() == name.lower():
+                inv = r
+                break
+
+        if not inv:
             await message.reply(f"Não achei esse investimento: **{name}**")
             return
-        except ValueError as e:
-            if str(e) == "INV_NOT_ZERO":
-                await message.reply("⚠️ Não posso excluir: o saldo do investimento não é zero.")
-            else:
-                await message.reply("Não consegui excluir esse investimento.")
-            return
-        except Exception:
-            await message.reply("Deu erro ao excluir investimento (Postgres). Veja os logs.")
+
+        canon = inv["name"]
+        saldo = float(inv["balance"])
+
+        if saldo != 0.0:
+            await message.reply(
+                f"⚠️ Não posso excluir o investimento **{canon}** porque o saldo não é zero ({fmt_brl(saldo)}).\n"
+                f"Retire o valor antes e tente novamente."
+            )
             return
 
-        await message.reply(f"🗑️ Investimento **{canon}** excluído com sucesso. (ID: #{launch_id})")
+        # cria a ação pendente (expira em 10 min)
+        set_pending_action(message.author.id, "delete_investment", {"investment_name": canon}, minutes=10)
+
+        # preview (opcional, se existir no dict)
+        rate = inv.get("rate")
+        period = inv.get("period")
+        taxa = f"{rate}% {period}" if rate is not None and period else ""
+
+        await message.reply(
+            "⚠️ Você está prestes a excluir este investimento:\n"
+            f"• **{canon}** • saldo: **{fmt_brl(saldo)}**"
+            + (f" • taxa: **{taxa}**" if taxa else "")
+            + "\n\nResponda **sim** para confirmar ou **não** para cancelar. (expira em 10 min)"
+        )
         return
+
+
 
    # Gasto/Receita natural (ex: "gastei 35 no ifood", "recebi 2500 salario")
     parsed = parse_receita_despesa_natural(text)
@@ -1018,18 +1061,32 @@ async def on_message(message: discord.Message):
 
         # (opcional) valida se existe antes de pedir confirmação
         rows = list_launches(message.author.id, limit=1000)
-        if not any(int(r["id"]) == launch_id for r in rows):
+        row = next((r for r in rows if int(r["id"]) == launch_id), None)
+        if not row:
             await message.reply(f"Não achei lançamento com ID {launch_id}.")
             return
 
-        # cria a ação pendente (expira em 10 min)
+        tipo = (row.get("tipo") or "").lower()
+        tipo_label = "Despesa" if tipo == "despesa" else "Receita" if tipo == "receita" else tipo
+        valor = float(row.get("valor") or 0)
+        alvo = row.get("alvo") or ""
+        nota = row.get("nota") or ""
+        criado = row.get("criado_em")
+        data = criado.strftime("%d/%m/%Y %H:%M") if hasattr(criado, "strftime") else str(criado)
+
+        desc = alvo if alvo else nota
+        if desc:
+            desc = f" — {desc}"
+
         set_pending_action(message.author.id, "delete_launch", {"launch_id": launch_id}, minutes=10)
 
         await message.reply(
-            f"⚠️ Tem certeza que deseja apagar o lançamento **#{launch_id}**?\n"
-            f"Responda **sim** para confirmar ou **não** para cancelar. (expira em 10 min)"
+            "⚠️ Você está prestes a apagar este lançamento:\n"
+            f"• **#{launch_id}** • **{tipo_label}** • **{fmt_brl(valor)}**{desc} • {data}\n\n"
+            "Responda **sim** para confirmar ou **não** para cancelar. (expira em 10 min)"
         )
         return
+
 
 
     # comando para desfazer a última ação (100% Postgres)
