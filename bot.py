@@ -405,6 +405,7 @@ async def on_message(message: discord.Message):
         if ans in ["sim", "s", "yes", "y"]:
             action = pending["action_type"]
             payload = pending["payload"]
+
             try:
                 if action == "delete_launch":
                     delete_launch_and_rollback(message.author.id, int(payload["launch_id"]))
@@ -417,16 +418,18 @@ async def on_message(message: discord.Message):
                     await message.reply(f"🗑️ Investimento deletado: **{payload['investment_name']}**.")
                 else:
                     await message.reply("Ação pendente desconhecida. Cancelando.")
-                clear_pending_action(message.author.id)
             except Exception as e:
-                print("Erro ao executar ação pendente:", e)
-            await message.reply("❌ Deu erro ao executar a ação pendente. Veja os logs.")
-
-
-        if ans in ["não", "nao", "n", "no"]:
-            clear_pending_action(message.author.id)
-            await message.reply("✅ Cancelado.")
+                import traceback
+                traceback.print_exc()
+                await message.reply("❌ Deu erro ao executar a ação pendente. Veja os logs.")
+            finally:
+                # tenta limpar a pending action mesmo se algo falhar
+                try:
+                    clear_pending_action(message.author.id)
+                except Exception as e:
+                    print("Erro ao limpar pending_action:", e)
             return
+
 
 
     if t in ["listar caixinhas", "saldo caixinhas", "caixinhas"]:
