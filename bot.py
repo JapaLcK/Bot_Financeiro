@@ -1337,7 +1337,8 @@ async def on_message(message: discord.Message):
 
             data = Reference(ws_dash, min_col=5, min_row=start_row, max_row=last_row)
             cats = Reference(ws_dash, min_col=4, min_row=r0, max_row=last_row)
-
+            
+            # grafico de barras
             # bar = BarChart()
             # bar.type = "col"
             # bar.title = "Despesas por categoria"
@@ -1350,19 +1351,20 @@ async def on_message(message: discord.Message):
             # bar.add_data(data, titles_from_data=True)
             # bar.set_categories(cats)
             # bar.height = 10
-            # bar.width = 22
+            # bar.width = 22s
 
             # ws_dash.add_chart(bar, "D8")
 
+            # grafico de pizza
             pie = PieChart()
             pie.title = "Distribuição das despesas"
             pie.add_data(data, titles_from_data=True)
             pie.set_categories(cats)
-            pie.height = 10
-            pie.width = 16
-            pie.style = 10
+            pie.height = 7
+            pie.width = 12
+            pie.style = 8
 
-            ws_dash.add_chart(pie, "D23")
+            ws_dash.add_chart(pie, "G1")
 
         # salva em memória
         bio = io.BytesIO()
