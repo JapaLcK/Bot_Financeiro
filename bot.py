@@ -11,7 +11,7 @@ from db import init_db
 from dotenv import load_dotenv
 load_dotenv() #carrega o .env
 from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches, list_pockets, pocket_withdraw_to_account, create_pocket, pocket_deposit_from_account, delete_pocket, investment_withdraw_to_account, accrue_all_investments, create_investment, investment_deposit_from_account, delete_launch_and_rollback
-from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments
+from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments, export_launches
 from ai_router import handle_ai_message
 
 
