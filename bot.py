@@ -1361,8 +1361,8 @@ async def on_message(message: discord.Message):
             pie.add_data(data, titles_from_data=True)
             pie.set_categories(cats)
             pie.height = 7
-            pie.width = 12
-            pie.style = 8
+            pie.width = 8
+            pie.style = 10
 
             ws_dash.add_chart(pie, "G1")
 
