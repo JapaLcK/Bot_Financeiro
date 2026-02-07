@@ -457,12 +457,21 @@ async def on_message(message: discord.Message):
             await message.reply("❌ Ação cancelada.")
             return
 
-        # tem ação pendente, mas o usuário respondeu outra coisa
-        await message.reply(
-            "⚠️ Existe uma ação pendente.\n"
-            "Responda **sim** para confirmar ou **não** para cancelar."
-        )
+       # tem ação pendente, mas o usuário respondeu outra coisa
+        preview = pending.get("payload", {}).get("preview_text")
+        if preview:
+            await message.reply(
+                preview
+                + "\n\nResponda **sim** para confirmar ou **não** para cancelar."
+            )
+        else:
+            await message.reply(
+                "⚠️ Existe uma ação pendente.\n"
+                "Responda **sim** para confirmar ou **não** para cancelar."
+            )
         return
+
+
 
 
     if t in ["listar caixinhas", "saldo caixinhas", "caixinhas"]:
@@ -571,7 +580,7 @@ async def on_message(message: discord.Message):
         return
 
 
-   # =========================
+    # =========================
     # Listar caixinhas (Postgres)
     # =========================
     if t in ["listar caixinhas", "lista caixinhas", "caixinhas"]:
@@ -668,19 +677,27 @@ async def on_message(message: discord.Message):
         # cria a ação pendente (expira em 10 min)
         set_pending_action(message.author.id, "delete_investment", {"investment_name": canon}, minutes=10)
 
-        # preview (opcional, se existir no dict)
         rate = inv.get("rate")
         period = inv.get("period")
         taxa = f"{rate}% {period}" if rate is not None and period else ""
 
-        await message.reply(
+        preview_text = (
             "⚠️ Você está prestes a excluir este investimento:\n"
             f"• **{canon}** • saldo: **{fmt_brl(saldo)}**"
             + (f" • taxa: **{taxa}**" if taxa else "")
-            + "\n\nResponda **sim** para confirmar ou **não** para cancelar. (expira em 10 min)"
+        )
+
+        set_pending_action(
+            message.author.id,
+            "delete_investment",
+            {"investment_name": canon, "preview_text": preview_text},
+            minutes=10
+        )
+
+        await message.reply(
+            preview_text + "\n\nResponda **sim** para confirmar ou **não** para cancelar. (expira em 10 min)"
         )
         return
-
 
 
    # Gasto/Receita natural (ex: "gastei 35 no ifood", "recebi 2500 salario")
