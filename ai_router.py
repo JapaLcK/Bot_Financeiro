@@ -330,14 +330,14 @@ async def handle_ai_message(user_id: int, text: str) -> str | None:
         return "**Lançamentos recentes:**\n" + "\n".join(lines)
 
     if name == "list_pockets":
-        rows = list_pockets(args.get(user_id))
+        rows = list_pockets(user_id)
         if not rows:
             return "Você ainda não tem caixinhas."
         lines = [f"• {r['name']}: {r['balance']}" for r in rows]
         return "**Caixinhas:**\n" + "\n".join(lines)
 
     if name == "list_investments":
-        rows = list_investments(args.get(user_id))
+        rows = list_investments(user_id)
         if not rows:
             return "Você ainda não tem investimentos."
         lines = [f"• {r['name']}: {r['balance']} (rate={r['rate']} {r['period']})" for r in rows]
@@ -346,7 +346,7 @@ async def handle_ai_message(user_id: int, text: str) -> str | None:
     if name == "add_launch":
         # você já tem add_launch_and_update_balance no db.py
         launch_id, new_balance = add_launch_and_update_balance(
-            user_id=args.get(user_id),
+            user_id=user_id,
             tipo=args.get("tipo", "despesa"),
             valor=float(args["valor"]),
             alvo=args.get("alvo"),
@@ -356,50 +356,50 @@ async def handle_ai_message(user_id: int, text: str) -> str | None:
         return f"✅ Lançamento criado **#{launch_id}**. Saldo agora: **{new_balance}**"
 
     if name == "create_pocket":
-        pocket_id, canon = create_pocket(args.get(user_id), args["name"])
+        pocket_id, canon = create_pocket(user_id, args["name"])
         return f"✅ Caixinha criada: **{canon}** (id {pocket_id})"
 
     if name == "pocket_deposit":
         launch_id, new_acc, new_pocket, canon_name = pocket_deposit_from_account(
-            args.get(user_id), args["pocket_name"], float(args["amount"]), args.get("nota", text)
+            user_id, args["pocket_name"], float(args["amount"]), args.get("nota", text)
         )
         return f"✅ Depósito na caixinha **{canon_name}**. ID **#{launch_id}**."
 
     if name == "pocket_withdraw":
         launch_id, new_acc, new_pocket, canon_name = pocket_withdraw_to_account(
-            args.get(user_id), args["pocket_name"], float(args["amount"]), args.get("nota", text)
+            user_id, args["pocket_name"], float(args["amount"]), args.get("nota", text)
         )
         return f"✅ Saque da caixinha **{canon_name}**. ID **#{launch_id}**."
 
     if name == "create_investment":
-        inv_id, canon = create_investment(args.get(user_id), args["name"], float(args["rate"]), args["period"])
+        inv_id, canon = create_investment(user_id, args["name"], float(args["rate"]), args["period"])
         return f"✅ Investimento criado: **{canon}** (id {inv_id})"
 
     if name == "investment_deposit":
         launch_id, new_acc, new_inv, canon = investment_deposit_from_account(
-            args.get(user_id), args["investment_name"], float(args["amount"]), args.get("nota", text)
+            user_id, args["investment_name"], float(args["amount"]), args.get("nota", text)
         )
         return f"✅ Aporte em **{canon}**. ID **#{launch_id}**."
 
     if name == "investment_withdraw":
         launch_id, new_acc, new_inv, canon = investment_withdraw_to_account(
-            args.get(user_id), args["investment_name"], float(args["amount"]), args.get("nota", text)
+            user_id, args["investment_name"], float(args["amount"]), args.get("nota", text)
         )
         return f"✅ Resgate de **{canon}**. ID **#{launch_id}**."
 
     if name == "accrue_all_investments":
-        updated = accrue_all_investments(args.get(user_id))
+        updated = accrue_all_investments(user_id)
         return f"📈 Rendimentos atualizados em {updated} investimento(s)."
 
     # confirmação (destrutivo)
     if name == "propose_delete_launch":
-        set_pending_action(args.get(user_id), "delete_launch", {"launch_id": int(args["launch_id"])})
+        set_pending_action(user_id, "delete_launch", {"launch_id": int(args["launch_id"])})
         return f"⚠️ Isso vai apagar o lançamento **#{args['launch_id']}** e desfazer os efeitos. Confirma? Responda **sim** ou **não**."
     if name == "propose_delete_pocket":
-        set_pending_action(args.get(user_id), "delete_pocket", {"pocket_name": args["pocket_name"]})
+        set_pending_action(user_id, "delete_pocket", {"pocket_name": args["pocket_name"]})
         return f"⚠️ Isso vai deletar a caixinha **{args['pocket_name']}**. Confirma? Responda **sim** ou **não**."
     if name == "propose_delete_investment":
-        set_pending_action(args.get(user_id), "delete_investment", {"investment_name": args["investment_name"]})
+        set_pending_action(user_id, "delete_investment", {"investment_name": args["investment_name"]})
         return f"⚠️ Isso vai deletar o investimento **{args['investment_name']}**. Confirma? Responda **sim** ou **não**."
 
     return direct or "Não consegui processar isso."
