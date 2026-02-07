@@ -356,31 +356,12 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 HELP_TEXT = (
 
-    "💰 **Receitas e Despesas (conta corrente)**\n"
+   "❓ Não entendi esse comando.\n"
+    "Digite `ajuda` para ver a lista de comandos disponíveis.\n"
+    "Exemplos:\n"
+    "• `gastei 50 mercado`\n"
     "• `recebi 1000 salario`\n"
-    "• `gastei 120 mercado`\n\n"
-
-    "🏦 **Conta Corrente**\n"
-    "• `saldo`\n\n"
-
-    "📦 **Caixinhas**\n"
-    "• `criar caixinha viagem`\n"
-    "• `coloquei 300 na caixinha viagem`\n"
-    "• `retirei 100 da caixinha viagem`\n"
-    "• `saldo caixinhas`\n"
-    "• `listar caixinhas`\n\n"
-
-    "📈 **Investimentos**\n"
-    "• `criar investimento CDB Nubank 1% ao mês`\n"
-    "• `criar investimento Tesouro 0,03% ao dia`\n"
-    "• `apliquei 200 no investimento CDB Nubank`\n"
-    "• `retirei 100 do investimento CDB Nubank`\n"
-    "• `saldo investimentos`\n\n"
-
-    "🧾 **Lançamentos**\n"
-    "• `listar lançamentos`\n"
-    "• `desfazer`\n"
-    "• `apagar lançamento 3`\n"
+    "• `saldo`\n"
 )
 
 @bot.event
