@@ -146,6 +146,18 @@ def accrue_investment(inv: dict, today: date | None = None) -> None:
 def fmt_brl(v: float) -> str:
     return f"R$ {v:.2f}"
 
+def fmt_rate(rate: float | None, period: str | None) -> str:
+    if rate is None or not period:
+        return ""
+    # se rate veio como fração (ex: 0.01 = 1%), converte pra porcentagem
+    display = rate * 100 if rate <= 1 else rate
+    # evita "1.0" e mantém pequenas taxas legíveis
+    if display.is_integer():
+        pct = f"{int(display)}"
+    else:
+        pct = f"{display:.4f}".rstrip("0").rstrip(".")
+    return f"{pct}% {period}"
+
 
 DEPOSIT_VERBS = [
     "transferi", "coloquei", "adicionei", "depositei", "pus", "botei",
@@ -679,7 +691,8 @@ async def on_message(message: discord.Message):
 
         rate = inv.get("rate")
         period = inv.get("period")
-        taxa = f"{rate}% {period}" if rate is not None and period else ""
+        taxa = fmt_rate(rate, period)
+
 
         preview_text = (
             "⚠️ Você está prestes a excluir este investimento:\n"
