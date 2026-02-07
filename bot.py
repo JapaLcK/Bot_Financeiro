@@ -9,7 +9,7 @@ from db import init_db
 from dotenv import load_dotenv
 load_dotenv() #carrega o .env
 from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches, list_pockets, pocket_withdraw_to_account, create_pocket, pocket_deposit_from_account, delete_pocket, investment_withdraw_to_account, accrue_all_investments, create_investment, investment_deposit_from_account, delete_launch_and_rollback
-from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action
+from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action
 from ai_router import handle_ai_message
 
 
@@ -1025,7 +1025,7 @@ async def on_message(message: discord.Message):
     
 
     # =========================
-    # Apagar lançamento pelo ID (Postgres)
+    # Apagar lançamento pelo ID (Postgres) - com confirmação
     # =========================
     if t.startswith("apagar") or t.startswith("remover"):
         m = re.search(r'(\d+)', t)
@@ -1035,21 +1035,21 @@ async def on_message(message: discord.Message):
 
         launch_id = int(m.group(1))
 
-        try:
-            delete_launch_and_rollback(message.author.id, launch_id)
-        except LookupError:
+        # (opcional) valida se existe antes de pedir confirmação
+        rows = list_launches(message.author.id, limit=1000)
+        if not any(int(r["id"]) == launch_id for r in rows):
             await message.reply(f"Não achei lançamento com ID {launch_id}.")
             return
-        except ValueError as e:
-            # quando faltar "efeitos" ou tiver tipo não suportado
-            await message.reply(f"Não consegui desfazer esse lançamento: {e}")
-            return
-        except Exception:
-            await message.reply("Deu erro ao apagar/desfazer o lançamento (Postgres). Veja os logs.")
-            return
 
-        await message.reply(f"🗑️ Lançamento #{launch_id} removido e saldos ajustados.")
+        # cria a ação pendente (expira em 10 min)
+        set_pending_action(message.author.id, "delete_launch", {"launch_id": launch_id}, minutes=10)
+
+        await message.reply(
+            f"⚠️ Tem certeza que deseja apagar o lançamento **#{launch_id}**?\n"
+            f"Responda **sim** para confirmar ou **não** para cancelar. (expira em 10 min)"
+        )
         return
+
 
     # comando para desfazer a última ação (100% Postgres)
     if t in ["desfazer", "undo", "voltar", "excluir"]:
