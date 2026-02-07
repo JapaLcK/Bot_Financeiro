@@ -6,7 +6,7 @@ from psycopg.types.json import Jsonb, Json  # <-- ADICIONA ISSO
 from decimal import Decimal
 from datetime import datetime, date
 import math
-from datetime import timedelta
+from datetime import timedelta, timezone
 
 
 def get_conn():
@@ -1182,7 +1182,7 @@ def set_pending_action(user_id: int, action_type: str, payload: dict, minutes: i
     Cria/atualiza uma ação pendente de confirmação (persistente no Postgres).
     """
     ensure_user(user_id)
-    expires_at = datetime.utcnow() + timedelta(minutes=minutes)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes)
 
     with get_conn() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
@@ -1215,7 +1215,7 @@ def get_pending_action(user_id: int):
         return None
 
     # expirada?
-    if row["expires_at"] <= datetime.utcnow():
+    if row["expires_at"] <= datetime.now(timezone.utc):
         clear_pending_action(user_id)
         return None
 
