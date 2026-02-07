@@ -1269,13 +1269,14 @@ async def on_message(message: discord.Message):
         title_fill = PatternFill("solid", fgColor="1F2937")  # cinza escuro
         card_fill  = PatternFill("solid", fgColor="111827")  # mais escuro
         label_font = Font(bold=True, color="FFFFFF")
-        title_font = Font(bold=True, size=14, color="FFFFFF")
+        title_font = Font(bold=True, size=18, color="FFFFFF")
 
         ws_dash["A1"].value = "Dashboard Financeiro"
         ws_dash["A1"].font = title_font
         ws_dash["A1"].fill = title_fill
         ws_dash.merge_cells("A1:B1")
         ws_dash["A1"].alignment = Alignment(horizontal="center", vertical="center")
+        ws_dash.row_dimensions[1].height = 28
 
         ws_dash.column_dimensions["A"].width = 22
         ws_dash.column_dimensions["B"].width = 22
@@ -1286,6 +1287,25 @@ async def on_message(message: discord.Message):
             ws_dash[f"A{row}"].font = label_font
             ws_dash[f"A{row}"].alignment = Alignment(horizontal="left", vertical="center")
             ws_dash[f"B{row}"].alignment = Alignment(horizontal="right", vertical="center")
+
+        rec_fill   = PatternFill("solid", fgColor="064E3B")  # verde escuro
+        des_fill   = PatternFill("solid", fgColor="7F1D1D")  # vermelho escuro
+        saldo_fill = PatternFill("solid", fgColor="1E3A8A")  # azul escuro
+
+        # A3 = Total Receitas
+        ws_dash["A3"].fill = rec_fill
+        ws_dash["B3"].fill = rec_fill
+
+        # A4 = Total Despesas
+        ws_dash["A4"].fill = des_fill
+        ws_dash["B4"].fill = des_fill
+
+        # A5/A6 = Saldos
+        ws_dash["A5"].fill = saldo_fill
+        ws_dash["B5"].fill = saldo_fill
+        ws_dash["A6"].fill = saldo_fill
+        ws_dash["B6"].fill = saldo_fill
+
 
         for cell in ["B3", "B4", "B5", "B6"]:
             ws_dash[cell].number_format = 'R$ #,##0.00'
@@ -1331,7 +1351,7 @@ async def on_message(message: discord.Message):
             bar.height = 10
             bar.width = 22
 
-            ws_dash.add_chart(bar, "A8")
+            ws_dash.add_chart(bar, "D8")
 
             pie = PieChart()
             pie.title = "Distribuição das despesas"
@@ -1341,7 +1361,7 @@ async def on_message(message: discord.Message):
             pie.width = 16
             pie.style = 10
 
-            ws_dash.add_chart(pie, "A23")
+            ws_dash.add_chart(pie, "D23")
 
         # salva em memória
         bio = io.BytesIO()
