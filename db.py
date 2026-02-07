@@ -1256,4 +1256,36 @@ def set_pending_action(user_id: int, action_type: str, payload: dict, minutes: i
             """, (user_id, action_type, Jsonb(payload), expires_at))
         conn.commit()
 
+def export_launches(user_id: int, start_date: date | None = None, end_date: date | None = None):
+    """
+    Exporta lançamentos do usuário em um período.
+    - start_date: data inicial (inclusive)
+    - end_date: data final (inclusive)
+    """
+    ensure_user(user_id)
+
+    params = [user_id]
+    where = ["user_id=%s"]
+
+    if start_date:
+        start_dt = datetime.combine(start_date, datetime.min.time())
+        where.append("criado_em >= %s")
+        params.append(start_dt)
+
+    if end_date:
+        end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+        where.append("criado_em < %s")
+        params.append(end_excl)
+
+    sql = f"""
+        select id, tipo, valor, alvo, nota, criado_em, efeitos
+        from launches
+        where {' and '.join(where)}
+        order by criado_em asc, id asc
+    """
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, tuple(params))
+            return cur.fetchall()
 

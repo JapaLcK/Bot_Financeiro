@@ -1,9 +1,11 @@
 import os
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from dateutil.relativedelta import relativedelta
 import calendar
 import discord
+import io
+import csv
 from discord.ext import commands
 from db import init_db
 from dotenv import load_dotenv
@@ -29,6 +31,15 @@ from ai_router import handle_ai_message
 
 
 # --------- helpers ---------
+
+def parse_date_str(s: str) -> date:
+    s = s.strip()
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            pass
+    raise ValueError("Data inválida. Use YYYY-MM-DD ou DD/MM/YYYY.")
 
 
 # foca a IA para responder questoes so do bot e nao geral
@@ -1164,6 +1175,80 @@ async def on_message(message: discord.Message):
         
         await message.reply(f"🏦 **Conta Corrente:** R$ {float(bal):.2f}")
         return
+    
+    # exportar dados (CSV)
+    if t.startswith("exportar") or t.startswith("export"):
+        parts = text.split()
+
+        start = None
+        end = None
+
+        try:
+            if len(parts) == 1:
+                # exportar tudo
+                pass
+            elif len(parts) == 2:
+                # exportar a partir de uma data
+                start = parse_date_str(parts[1])
+            else:
+                # exportar data_ini data_fim
+                start = parse_date_str(parts[1])
+                end = parse_date_str(parts[2])
+
+                if end < start:
+                    await message.reply("A data final não pode ser menor que a inicial.")
+                    return
+        except ValueError as e:
+            await message.reply(f"❌ {e}\nExemplos:\n• `exportar`\n• `exportar 2026-01-01 2026-01-31`\n• `exportar 01/01/2026 31/01/2026`")
+            return
+
+        rows = export_launches(message.author.id, start, end)
+
+        if not rows:
+            await message.reply("📭 Nenhum lançamento encontrado nesse período.")
+            return
+
+        # limite de segurança (evitar arquivo gigante)
+        if len(rows) > 20000:
+            await message.reply(f"⚠️ Muitos dados ({len(rows)} linhas). Tente exportar por um período menor.")
+            return
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        writer.writerow(["id", "tipo", "valor", "alvo", "nota", "criado_em", "efeitos"])
+
+        for r in rows:
+            criado = r.get("criado_em")
+            criado_str = criado.isoformat() if hasattr(criado, "isoformat") else str(criado)
+
+            writer.writerow([
+                r.get("id"),
+                r.get("tipo"),
+                str(r.get("valor")),
+                r.get("alvo") or "",
+                r.get("nota") or "",
+                criado_str,
+                str(r.get("efeitos") or ""),
+            ])
+
+        data_bytes = output.getvalue().encode("utf-8")
+        output.close()
+
+        if start and end:
+            filename = f"lancamentos_{start.isoformat()}_{end.isoformat()}.csv"
+            caption = f"📤 Export: {start.isoformat()} → {end.isoformat()} ({len(rows)} linhas)"
+        elif start and not end:
+            filename = f"lancamentos_{start.isoformat()}_ate_hoje.csv"
+            caption = f"📤 Export: desde {start.isoformat()} ({len(rows)} linhas)"
+        else:
+            filename = "lancamentos_todos.csv"
+            caption = f"📤 Export: todos os lançamentos ({len(rows)} linhas)"
+
+        file_obj = discord.File(fp=io.BytesIO(data_bytes), filename=filename)
+        await message.reply(content=caption, file=file_obj)
+        return
+
 
     # fallback com IA (apenas se fizer sentido financeiro)
     if should_use_ai(message.content):
