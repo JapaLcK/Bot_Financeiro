@@ -16,8 +16,8 @@ from ai_router import handle_ai_message
 import io
 from datetime import date, datetime
 from openpyxl import Workbook
-from openpyxl.chart import LineChart, BarChart, Reference
-from openpyxl.styles import Font
+from openpyxl.chart import BarChart, PieChart, Reference
+from openpyxl.styles import Font, PatternFill, Alignment
 
 
 
@@ -1248,17 +1248,100 @@ async def on_message(message: discord.Message):
                 ws_des.append(row)
                 total_des += valor
 
+        # agrega despesas por categoria (usa alvo como categoria)
+        despesas_por_categoria = {}
+        for r in rows:
+            if r["tipo"] != "despesa":
+                continue
+            cat = (r["alvo"] or "Sem categoria").strip()
+            despesas_por_categoria[cat] = despesas_por_categoria.get(cat, 0.0) + float(r["valor"])
+
         saldo_periodo = total_rec - total_des
         saldo_atual = get_balance(message.author.id)
-
-        ws_dash["A1"] = "Dashboard Financeiro"
-        ws_dash["A1"].font = Font(bold=True)
 
         ws_dash.append(["Período", f"{start.strftime('%d/%m/%Y')} a {end.strftime('%d/%m/%Y')}"])
         ws_dash.append(["Total Receitas", total_rec])
         ws_dash.append(["Total Despesas", total_des])
         ws_dash.append(["Saldo do Período", saldo_periodo])
         ws_dash.append(["Saldo Atual", saldo_atual])
+
+        # estilo simples tipo "card"
+        title_fill = PatternFill("solid", fgColor="1F2937")  # cinza escuro
+        card_fill  = PatternFill("solid", fgColor="111827")  # mais escuro
+        label_font = Font(bold=True, color="FFFFFF")
+        title_font = Font(bold=True, size=14, color="FFFFFF")
+
+        ws_dash["A1"].value = "Dashboard Financeiro"
+        ws_dash["A1"].font = title_font
+        ws_dash["A1"].fill = title_fill
+        ws_dash.merge_cells("A1:B1")
+        ws_dash["A1"].alignment = Alignment(horizontal="center", vertical="center")
+
+        ws_dash.column_dimensions["A"].width = 22
+        ws_dash.column_dimensions["B"].width = 22
+
+        for row in range(2, 7):
+            ws_dash[f"A{row}"].fill = card_fill
+            ws_dash[f"B{row}"].fill = card_fill
+            ws_dash[f"A{row}"].font = label_font
+            ws_dash[f"A{row}"].alignment = Alignment(horizontal="left", vertical="center")
+            ws_dash[f"B{row}"].alignment = Alignment(horizontal="right", vertical="center")
+
+        for cell in ["B3", "B4", "B5", "B6"]:
+            ws_dash[cell].number_format = 'R$ #,##0.00'
+
+        # tabela auxiliar para gráfico (Categoria x Total)
+        start_row = 2
+        cat_col = "D"
+        val_col = "E"
+
+        ws_dash[f"{cat_col}{start_row}"] = "Categoria (Despesas)"
+        ws_dash[f"{val_col}{start_row}"] = "Total"
+        ws_dash[f"{cat_col}{start_row}"].font = Font(bold=True)
+        ws_dash[f"{val_col}{start_row}"].font = Font(bold=True)
+
+        cats_sorted = sorted(despesas_por_categoria.items(), key=lambda x: x[1], reverse=True)
+
+        r0 = start_row + 1
+        for i, (cat, total) in enumerate(cats_sorted):
+            rr = r0 + i
+            ws_dash[f"{cat_col}{rr}"] = cat
+            ws_dash[f"{val_col}{rr}"] = float(total)
+            ws_dash[f"{val_col}{rr}"].number_format = 'R$ #,##0.00'
+
+        ws_dash.column_dimensions[cat_col].width = 26
+        ws_dash.column_dimensions[val_col].width = 14
+
+        last_row = r0 + len(cats_sorted) - 1
+        if len(cats_sorted) > 0:
+            bar = BarChart()
+            bar.type = "col"
+            bar.title = "Despesas por categoria"
+            bar.y_axis.title = "R$"
+            bar.x_axis.title = "Categoria"
+            bar.style = 10
+            bar.y_axis.majorGridlines = None
+            bar.x_axis.majorGridlines = None
+
+            data = Reference(ws_dash, min_col=5, min_row=start_row, max_row=last_row)
+            cats = Reference(ws_dash, min_col=4, min_row=r0, max_row=last_row)
+
+            bar.add_data(data, titles_from_data=True)
+            bar.set_categories(cats)
+            bar.height = 10
+            bar.width = 22
+
+            ws_dash.add_chart(bar, "A8")
+
+            pie = PieChart()
+            pie.title = "Distribuição das despesas"
+            pie.add_data(data, titles_from_data=True)
+            pie.set_categories(cats)
+            pie.height = 10
+            pie.width = 16
+            pie.style = 10
+
+            ws_dash.add_chart(pie, "A23")
 
         # salva em memória
         bio = io.BytesIO()
