@@ -18,6 +18,8 @@ from datetime import date, datetime
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, PieChart, Reference
 from openpyxl.styles import Font, PatternFill, Alignment
+from sheets_export import export_rows_to_month_sheet
+
 
 
 
@@ -1374,6 +1376,38 @@ async def on_message(message: discord.Message):
         filename = f"dashboard_{start.isoformat()}_{end.isoformat()}.xlsx"
         await message.reply(file=discord.File(fp=bio, filename=filename))
         return
+    
+    # Exporta para Google Sheets (template dashboard)
+    if t.startswith("exportar sheets"):
+        parts = text.split()
+
+        try:
+            if len(parts) == 2:
+                start, end = month_range_today()
+            else:
+                start = parse_date_str(parts[2])
+                end = parse_date_str(parts[3])
+                if end < start:
+                    await message.reply("A data final não pode ser menor que a inicial.")
+                    return
+        except Exception:
+            await message.reply("Use: `exportar sheets` ou `exportar sheets 2026-02-01 2026-02-28`")
+            return
+
+        rows = get_launches_by_period(message.author.id, start, end)
+        if not rows:
+            await message.reply("📭 Nenhum lançamento no período.")
+            return
+
+        try:
+            export_rows_to_month_sheet(rows, start, end)
+        except Exception as e:
+            await message.reply(f"❌ Erro ao exportar para o Sheets: {e}")
+            return
+
+        await message.reply("✅ Exportado para o Google Sheets (aba do mês atual).")
+        return
+
 
 
 
