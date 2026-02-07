@@ -146,17 +146,29 @@ def accrue_investment(inv: dict, today: date | None = None) -> None:
 def fmt_brl(v: float) -> str:
     return f"R$ {v:.2f}"
 
-def fmt_rate(rate: float | None, period: str | None) -> str:
+from decimal import Decimal
+
+def fmt_rate(rate, period: str | None) -> str:
     if rate is None or not period:
         return ""
-    # se rate veio como fração (ex: 0.01 = 1%), converte pra porcentagem
-    display = rate * 100 if rate <= 1 else rate
-    # evita "1.0" e mantém pequenas taxas legíveis
-    if display.is_integer():
-        pct = f"{int(display)}"
+
+    # rate pode vir como Decimal do Postgres
+    if isinstance(rate, Decimal):
+        rate = float(rate)
     else:
-        pct = f"{display:.4f}".rstrip("0").rstrip(".")
+        rate = float(rate)
+
+    # se rate veio como fração (0.01 = 1%), converte pra %
+    display = rate * 100 if rate <= 1 else rate
+
+    # formatação limpa (sem 1.0000)
+    if abs(display - round(display)) < 1e-12:
+        pct = str(int(round(display)))
+    else:
+        pct = f"{display:.6f}".rstrip("0").rstrip(".")
+
     return f"{pct}% {period}"
+
 
 
 DEPOSIT_VERBS = [
