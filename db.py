@@ -1230,7 +1230,9 @@ def clear_pending_action(user_id: int):
 
 def set_pending_action(user_id: int, action_type: str, payload: dict, minutes: int = 10):
     ensure_user(user_id)
-    expires_at = datetime.utcnow() + timedelta(minutes=minutes)
+
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+
 
     with get_conn() as conn:
         with conn.cursor() as cur:
