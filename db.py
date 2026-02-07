@@ -1198,6 +1198,8 @@ def set_pending_action(user_id: int, action_type: str, payload: dict, minutes: i
         conn.commit()
 
 def get_pending_action(user_id: int):
+    print("get_pending_action: usando datetime.now(timezone.utc)")
+
     """
     Retorna a ação pendente se existir e não estiver expirada. Senão, retorna None.
     """

@@ -418,9 +418,10 @@ async def on_message(message: discord.Message):
                 else:
                     await message.reply("Ação pendente desconhecida. Cancelando.")
                 clear_pending_action(message.author.id)
-            except Exception:
-                await message.reply("Deu erro ao executar a ação pendente. Veja os logs.")
-            return
+            except Exception as e:
+                print("Erro ao executar ação pendente:", e)
+            await message.reply("❌ Deu erro ao executar a ação pendente. Veja os logs.")
+
 
         if ans in ["não", "nao", "n", "no"]:
             clear_pending_action(message.author.id)
