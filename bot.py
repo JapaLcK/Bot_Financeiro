@@ -1360,8 +1360,8 @@ async def on_message(message: discord.Message):
             pie.title = "Distribuição das despesas"
             pie.add_data(data, titles_from_data=True)
             pie.set_categories(cats)
-            pie.height = 12
-            pie.width = 15
+            pie.height = 15
+            pie.width = 20
             pie.style = 10
 
             ws_dash.add_chart(pie, "G1")
