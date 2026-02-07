@@ -11,8 +11,14 @@ from db import init_db
 from dotenv import load_dotenv
 load_dotenv() #carrega o .env
 from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches, list_pockets, pocket_withdraw_to_account, create_pocket, pocket_deposit_from_account, delete_pocket, investment_withdraw_to_account, accrue_all_investments, create_investment, investment_deposit_from_account, delete_launch_and_rollback
-from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments, export_launches
+from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments, export_launches, get_launches_by_period
 from ai_router import handle_ai_message
+import io
+from datetime import date, datetime
+from openpyxl import Workbook
+from openpyxl.chart import LineChart, BarChart, Reference
+from openpyxl.styles import Font
+
 
 
 
@@ -40,6 +46,17 @@ def parse_date_str(s: str) -> date:
         except ValueError:
             pass
     raise ValueError("Data inválida. Use YYYY-MM-DD ou DD/MM/YYYY.")
+
+def month_range_today():
+    today = date.today()
+    start = today.replace(day=1)
+    if today.month == 12:
+        end = today.replace(day=31)
+    else:
+        next_month = today.replace(day=28) + timedelta(days=4)
+        end = next_month.replace(day=1) - timedelta(days=1)
+    return start, end
+
 
 
 # foca a IA para responder questoes so do bot e nao geral
@@ -1176,78 +1193,82 @@ async def on_message(message: discord.Message):
         await message.reply(f"🏦 **Conta Corrente:** R$ {float(bal):.2f}")
         return
     
-    # exportar dados (CSV)
+    # Exporta dashboard financeiro em Excel
     if t.startswith("exportar") or t.startswith("export"):
         parts = text.split()
 
-        start = None
-        end = None
-
         try:
-            if len(parts) == 1:
-                # exportar tudo
-                pass
-            elif len(parts) == 2:
-                # exportar a partir de uma data
-                start = parse_date_str(parts[1])
+            if len(parts) == 2:
+                start, end = month_range_today()
             else:
-                # exportar data_ini data_fim
-                start = parse_date_str(parts[1])
-                end = parse_date_str(parts[2])
-
+                start = parse_date_str(parts[2])
+                end = parse_date_str(parts[3])
                 if end < start:
                     await message.reply("A data final não pode ser menor que a inicial.")
                     return
-        except ValueError as e:
-            await message.reply(f"❌ {e}\nExemplos:\n• `exportar`\n• `exportar 2026-01-01 2026-01-31`\n• `exportar 01/01/2026 31/01/2026`")
+        except Exception:
+            await message.reply("Use: `exportar dashboard` ou `exportar dashboard 2026-02-01 2026-02-29`")
             return
 
-        rows = export_launches(message.author.id, start, end)
-
+        rows = get_launches_by_period(message.author.id, start, end)
         if not rows:
-            await message.reply("📭 Nenhum lançamento encontrado nesse período.")
+            await message.reply("📭 Nenhum lançamento no período.")
             return
 
-        # limite de segurança (evitar arquivo gigante)
-        if len(rows) > 20000:
-            await message.reply(f"⚠️ Muitos dados ({len(rows)} linhas). Tente exportar por um período menor.")
-            return
+        wb = Workbook()
+        ws_dash = wb.active
+        ws_dash.title = "Dashboard"
 
-        output = io.StringIO()
-        writer = csv.writer(output)
+        ws_rec = wb.create_sheet("Receitas")
+        ws_des = wb.create_sheet("Despesas")
+        ws_all = wb.create_sheet("Lançamentos")
 
-        writer.writerow(["id", "tipo", "valor", "alvo", "nota", "criado_em", "efeitos"])
+        # headers
+        headers = ["Data", "Valor", "Descrição", "Observação", "ID"]
+        for ws in (ws_rec, ws_des, ws_all):
+            ws.append(headers)
+
+        total_rec = 0
+        total_des = 0
 
         for r in rows:
-            criado = r.get("criado_em")
-            criado_str = criado.isoformat() if hasattr(criado, "isoformat") else str(criado)
+            tipo = r["tipo"]
+            valor = float(r["valor"])
+            desc = r["alvo"] or r["nota"] or ""
+            nota = r["nota"] or ""
+            data = r["criado_em"].strftime("%d/%m/%Y")
 
-            writer.writerow([
-                r.get("id"),
-                r.get("tipo"),
-                str(r.get("valor")),
-                r.get("alvo") or "",
-                r.get("nota") or "",
-                criado_str,
-                str(r.get("efeitos") or ""),
-            ])
+            row = [data, valor, desc, nota, r["id"]]
+            ws_all.append(row)
 
-        data_bytes = output.getvalue().encode("utf-8")
-        output.close()
+            if tipo == "receita":
+                ws_rec.append(row)
+                total_rec += valor
+            elif tipo == "despesa":
+                ws_des.append(row)
+                total_des += valor
 
-        if start and end:
-            filename = f"lancamentos_{start.isoformat()}_{end.isoformat()}.csv"
-            caption = f"📤 Export: {start.isoformat()} → {end.isoformat()} ({len(rows)} linhas)"
-        elif start and not end:
-            filename = f"lancamentos_{start.isoformat()}_ate_hoje.csv"
-            caption = f"📤 Export: desde {start.isoformat()} ({len(rows)} linhas)"
-        else:
-            filename = "lancamentos_todos.csv"
-            caption = f"📤 Export: todos os lançamentos ({len(rows)} linhas)"
+        saldo_periodo = total_rec - total_des
+        saldo_atual = get_balance(message.author.id)
 
-        file_obj = discord.File(fp=io.BytesIO(data_bytes), filename=filename)
-        await message.reply(content=caption, file=file_obj)
+        ws_dash["A1"] = "Dashboard Financeiro"
+        ws_dash["A1"].font = Font(bold=True)
+
+        ws_dash.append(["Período", f"{start.strftime('%d/%m/%Y')} a {end.strftime('%d/%m/%Y')}"])
+        ws_dash.append(["Total Receitas", total_rec])
+        ws_dash.append(["Total Despesas", total_des])
+        ws_dash.append(["Saldo do Período", saldo_periodo])
+        ws_dash.append(["Saldo Atual", saldo_atual])
+
+        # salva em memória
+        bio = io.BytesIO()
+        wb.save(bio)
+        bio.seek(0)
+
+        filename = f"dashboard_{start.isoformat()}_{end.isoformat()}.xlsx"
+        await message.reply(file=discord.File(fp=bio, filename=filename))
         return
+
 
 
     # fallback com IA (apenas se fizer sentido financeiro)

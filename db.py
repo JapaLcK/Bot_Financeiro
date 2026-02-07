@@ -1289,3 +1289,23 @@ def export_launches(user_id: int, start_date: date | None = None, end_date: date
             cur.execute(sql, tuple(params))
             return cur.fetchall()
 
+#pega os lancamentos por periodo
+def get_launches_by_period(user_id: int, start_date: date, end_date: date):
+    ensure_user(user_id)
+
+    start_dt = datetime.combine(start_date, datetime.min.time())
+    end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+
+    sql = """
+        select id, tipo, valor, alvo, nota, criado_em
+        from launches
+        where user_id=%s
+          and criado_em >= %s
+          and criado_em < %s
+        order by criado_em asc, id asc
+    """
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (user_id, start_dt, end_excl))
+            return cur.fetchall()
