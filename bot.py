@@ -354,15 +354,50 @@ intents.message_content = True  # precisa habilitar no Developer Portal também
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-HELP_TEXT = (
-
-   "❓ Não entendi esse comando.\n"
-    "Digite `ajuda` para ver a lista de comandos disponíveis.\n"
+HELP_TEXT_SHORT = (
+    "❓ **Não entendi esse comando.**\n"
+    "Digite `ajuda` para ver todos os comandos.\n"
     "Exemplos:\n"
     "• `gastei 50 mercado`\n"
     "• `recebi 1000 salario`\n"
     "• `saldo`\n"
 )
+
+HELP_TEXT_FULL = (
+    "💰 **Receitas e Despesas (conta corrente)**\n"
+    "• `recebi 1000 salario`\n"
+    "• `gastei 120 mercado`\n\n"
+
+    "🏦 **Conta Corrente**\n"
+    "• `saldo`\n\n"
+
+    "📦 **Caixinhas**\n"
+    "• `criar caixinha viagem`\n"
+    "• `coloquei 300 na caixinha viagem`\n"
+    "• `retirei 100 da caixinha viagem`\n"
+    "• `saldo caixinhas`\n"
+    "• `listar caixinhas`\n"
+    "• `excluir caixinha viagem`\n\n"
+
+    "📈 **Investimentos**\n"
+    "• `criar investimento CDB Nubank 1% ao mês`\n"
+    "• `criar investimento Tesouro 0,03% ao dia`\n"
+    "• `apliquei 200 no investimento CDB Nubank`\n"
+    "• `retirei 100 do investimento CDB Nubank`\n"
+    "• `saldo investimentos`\n"
+    "• `listar investimentos`\n"
+    "• `excluir investimento CDB Nubank`\n\n"
+
+    "🧾 **Lançamentos**\n"
+    "• `listar lançamentos`\n"
+    "• `desfazer`\n"
+    "• `apagar 3`\n\n"
+
+    "⚠️ **Confirmações**\n"
+    "• `sim` → confirma ações (ex: apagar lançamento)\n"
+    "• `nao` → cancela a ação pendente\n"
+)
+
 
 @bot.event
 async def on_ready():
@@ -639,46 +674,7 @@ async def on_message(message: discord.Message):
 
     # ajuda / comandos
     if t in ["ajuda", "help", "comandos", "listar comandos", "menu"]:
-        texto = (
-            "**📌 Comandos do Meu Assistente Financeiro**\n\n"
-
-            "**🏦 Conta Corrente**\n"
-            "• `saldo`\n"
-            "• `recebi <valor> <categoria/opcional>`  (ex: `recebi 1000 salario`)\n"
-            "• `gastei <valor> <categoria/opcional>`  (ex: `gastei 35 ifood`)\n\n"
-
-            "**📦 Caixinhas**\n"
-            "• `criar caixinha <nome>`  (ex: `criar caixinha viagem`)\n"
-            "• `saldo caixinhas` / `listar caixinhas` / `caixinhas`\n\n"
-
-            "**✅ Depósito (Conta ➜ Caixinha):**\n"
-            "• `transferi <valor> para caixinha <nome>`\n"
-            "• `coloquei <valor> na caixinha <nome>`\n"
-            "• `aportei <valor> na caixinha <nome>`\n"
-            "• `depositei <valor> na caixinha <nome>`\n\n"
-
-            "**📤 Saque (Caixinha ➜ Conta):**\n"
-            "• `retirei <valor> da caixinha <nome>`\n"
-            "• `saquei <valor> da caixinha <nome>`\n"
-            "• `resgatei <valor> da caixinha <nome>`\n\n"
-
-            "**📈 Investimentos**\n"
-            "• `criar investimento <nome> <taxa>% ao mês|ao dia`\n"
-            "• ex: `criar investimento cdb_nubank 1% ao mês`\n"
-            "• ex: `criar investimento tesouro 0,03% ao dia`\n"
-            "• `saldo investimentos`\n\n"
-
-            "**💰 Aporte (Conta ➜ Investimento):**\n"
-            "• `apliquei <valor> no investimento <nome>`\n"
-            "• `aportei <valor> no investimento <nome>`\n\n"
-
-            "**🧾 Lançamentos**\n"
-            "• `listar lançamentos` / `ultimos lançamentos`\n"
-            "• `apagar <id>` / `remover <id>`\n"
-            "• `desfazer`  (desfaz o último lançamento quando possível)\n\n"
-        )
-
-        await message.reply(texto)
+        await message.reply(HELP_TEXT_FULL)
         return
 
 
@@ -1078,7 +1074,7 @@ async def on_message(message: discord.Message):
             return
         
     # fallback
-    await message.reply("❓ **Não entendi seu comando. Tente um destes exemplos:**\n\n" + HELP_TEXT)
+    await message.reply("❓ **Não entendi seu comando. Tente um destes exemplos:**\n\n" + HELP_TEXT_SHORT)
 
 
 
