@@ -1334,24 +1334,25 @@ async def on_message(message: discord.Message):
 
         last_row = r0 + len(cats_sorted) - 1
         if len(cats_sorted) > 0:
-            bar = BarChart()
-            bar.type = "col"
-            bar.title = "Despesas por categoria"
-            bar.y_axis.title = "R$"
-            bar.x_axis.title = "Categoria"
-            bar.style = 10
-            bar.y_axis.majorGridlines = None
-            bar.x_axis.majorGridlines = None
 
             data = Reference(ws_dash, min_col=5, min_row=start_row, max_row=last_row)
             cats = Reference(ws_dash, min_col=4, min_row=r0, max_row=last_row)
 
-            bar.add_data(data, titles_from_data=True)
-            bar.set_categories(cats)
-            bar.height = 10
-            bar.width = 22
+            # bar = BarChart()
+            # bar.type = "col"
+            # bar.title = "Despesas por categoria"
+            # bar.y_axis.title = "R$"
+            # bar.x_axis.title = "Categoria"
+            # bar.style = 10
+            # bar.y_axis.majorGridlines = None
+            # bar.x_axis.majorGridlines = None
 
-            ws_dash.add_chart(bar, "D8")
+            # bar.add_data(data, titles_from_data=True)
+            # bar.set_categories(cats)
+            # bar.height = 10
+            # bar.width = 22
+
+            # ws_dash.add_chart(bar, "D8")
 
             pie = PieChart()
             pie.title = "Distribuição das despesas"
