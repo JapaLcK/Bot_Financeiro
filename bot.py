@@ -31,6 +31,37 @@ from ai_router import handle_ai_message
 # --------- helpers ---------
 
 
+# foca a IA para responder questoes so do bot e nao geral
+def should_use_ai(text: str) -> bool:
+    t = text.lower().strip()
+
+    # 1) Não chama IA pra coisas muito curtas / aleatórias
+    if len(t) < 4:
+        return False
+
+    # 2) Palavras-chave financeiras
+    keywords = [
+        "saldo", "lanc", "lanç", "recebi", "receita", "gastei", "despesa",
+        "caixinha", "caixinhas", "invest", "investimento", "aporte", "resgate",
+        "fatura", "cartao", "cartão", "parcel", "metas", "limite", "gastos",
+        "extrato", "conta", "rendeu", "rendendo", "cdb", "tesouro", "cdi"
+    ]
+
+    if any(k in t for k in keywords):
+        return True
+
+    # 3) Se começa com comandos conhecidos
+    commands = [
+        "saldo", "listar lancamentos", "listar lançamentos", "desfazer",
+        "criar caixinha", "listar caixinhas", "saldo caixinhas",
+        "criar investimento", "saldo investimentos"
+    ]
+
+    if any(t.startswith(c) for c in commands):
+        return True
+
+    return False
+
 
 def is_business_day(d: date) -> bool:
     return d.weekday() < 5  # 0=seg ... 4=sex
@@ -1054,13 +1085,13 @@ async def on_message(message: discord.Message):
         await message.reply(f"🏦 **Conta Corrente:** R$ {float(bal):.2f}")
         return
 
-
-    # Fallback: se não casou nenhum comando, tenta IA (hoje retorna None)
-    ai_reply = await handle_ai_message(message.author.id, message.content)
-    if ai_reply:
-        await message.reply(ai_reply)
-        return
-
+    # fallback com IA (apenas se fizer sentido financeiro)
+    if should_use_ai(message.content):
+        ai_reply = await handle_ai_message(message.author.id, message.content)
+        if ai_reply:
+            await message.reply(ai_reply)
+            return
+        
     # fallback
     await message.reply("❓ **Não entendi seu comando. Tente um destes exemplos:**\n\n" + HELP_TEXT)
 
