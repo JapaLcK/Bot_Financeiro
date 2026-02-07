@@ -2,6 +2,11 @@
 
 Este documento serve como referência rápida para lembrar os comandos do bot e algumas operações comuns de desenvolvimento e manutenção do banco de dados.
 
+## Ativar o venv no terminal
+
+source .venv/bin/activate
+Certifique-se que existe a pasta .venv
+
 ## Comandos do Bot (Usuário Final)
 
 ### Registrar despesa
