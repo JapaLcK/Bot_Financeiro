@@ -42,6 +42,28 @@ def _open_sheet():
     sheet_id = sheet_id_raw.strip().strip('"').strip("'")
     return _gs_client().open_by_key(sheet_id)
 
+def get_sheet_links(worksheet=None):
+    """
+    Retorna (url_planilha, url_aba).
+    url_aba aponta direto pra aba (gid) se worksheet for informado.
+    """
+    sheet_id_raw = os.getenv("GOOGLE_SHEET_ID")
+    if not sheet_id_raw:
+        raise RuntimeError("Faltou GOOGLE_SHEET_ID")
+
+    sheet_id = sheet_id_raw.strip().strip('"').strip("'")
+    base_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
+
+    if worksheet is None:
+        return base_url, base_url
+
+    try:
+        gid = worksheet.id  # gspread Worksheet id
+        return base_url, f"{base_url}#gid={gid}"
+    except Exception:
+        return base_url, base_url
+
+
 
 def month_sheet_name(dt) -> str:
     return f"{dt.year:04d}-{dt.month:02d}"  # 2026-02
@@ -70,7 +92,6 @@ def _is_monetary_row(r) -> bool:
     return True
 
 
-# Exporta os lançamentos monetários do período para a aba do mês no Google Sheets
 # Exporta lançamentos monetários para a aba do mês e atualiza cards + donut no template do Sheets.
 def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: datetime):
     sh = _open_sheet()
@@ -185,6 +206,11 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
     # Executa tudo de uma vez
     if updates:
         ws.batch_update(updates, value_input_option="USER_ENTERED")
+
+    # Retorna links pra mostrar no Discord
+    _base, _tab = get_sheet_links(ws)
+    return _tab
+
 
 
 # Garante que exista a aba do mês no Google Sheets, duplicando o TEMPLATE se necessário
