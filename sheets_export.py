@@ -24,6 +24,7 @@ def _gs_client():
     return gspread.authorize(creds)
 
 def _open_sheet():
+    print("GOOGLE_SHEET_ID =", os.getenv("GOOGLE_SHEET_ID"))
     sheet_id = os.getenv("GOOGLE_SHEET_ID")
     if not sheet_id:
         raise RuntimeError("Faltou GOOGLE_SHEET_ID")
