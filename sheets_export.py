@@ -46,7 +46,31 @@ def _open_sheet():
 def month_sheet_name(dt) -> str:
     return f"{dt.year:04d}-{dt.month:02d}"  # 2026-02
 
-# Exporta os lançamentos e atualiza cards e donut na aba do mês no Google Sheets
+# Ignora ações (criar/apagar), mas mantém qualquer movimentação de dinheiro
+def _is_monetary_row(r) -> bool:
+    tipo = (r.get("tipo") or "").lower()
+    valor = r.get("valor")
+
+    # 1) Se for ação administrativa, ignora
+    if any(k in tipo for k in ("criar", "criou", "apagar", "apagou", "delete", "remover", "removeu")):
+        return False
+
+    # 2) Se não tem valor, não é movimentação monetária
+    if valor is None:
+        return False
+
+    # 3) Valor = 0 (ou vazio) normalmente é ação; ignora
+    try:
+        if float(valor) == 0.0:
+            return False
+    except Exception:
+        return False
+
+    # 4) Caso contrário: é movimentação
+    return True
+
+
+# Exporta os lançamentos monetários do período para a aba do mês no Google Sheets
 def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: datetime):
     sh = _open_sheet()
 
@@ -67,6 +91,10 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
     total_des = 0.0
 
     for r in rows:
+        # mantém só movimentações monetárias (ignora criar/apagar)
+        if not _is_monetary_row(r):
+            continue
+
         dt = r["criado_em"]
         data_str = dt.strftime("%d/%m/%Y") if hasattr(dt, "strftime") else str(dt)
 
@@ -90,7 +118,6 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
         elif tipo == "despesa":
             total_des += valor
 
-
     # Envia lançamentos + cards em 1 batch_update (mais estável, evita erro 500)
     saldo_periodo = total_rec - total_des
     saldo_atual = get_balance(user_id)
@@ -107,11 +134,14 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
 
     ws.batch_update(updates, value_input_option="USER_ENTERED")
 
-    # Preenche a tabela fonte do donut (B12:C37)
+    # Preenche a tabela fonte do donut (B12:C37) só com despesas monetárias
     despesas_por_categoria = {}
     for r in rows:
-        if r.get("tipo") != "despesa":
+        if not _is_monetary_row(r):
             continue
+        if (r.get("tipo") or "").lower() != "despesa":
+            continue
+
         cat = (r.get("alvo") or "Sem categoria").strip()
         despesas_por_categoria[cat] = despesas_por_categoria.get(cat, 0.0) + float(r["valor"])
 
