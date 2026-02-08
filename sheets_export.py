@@ -24,25 +24,19 @@ def _gs_client():
     return gspread.authorize(creds)
 
 # Abre a planilha e loga qual service account e qual SHEET_ID estão sendo usados
+# Abre a planilha e loga o SHEET_ID com repr/len para achar espaços/aspas escondidos
 def _open_sheet():
-    sheet_id = os.getenv("GOOGLE_SHEET_ID")
-    if not sheet_id:
+    sheet_id_raw = os.getenv("GOOGLE_SHEET_ID")
+    print("DEBUG sheet_id_raw =", repr(sheet_id_raw), "len=", (len(sheet_id_raw) if sheet_id_raw else None))
+
+    if not sheet_id_raw:
         raise RuntimeError("Faltou GOOGLE_SHEET_ID")
 
-    raw = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-    if not raw:
-        raise RuntimeError("Faltou GOOGLE_SERVICE_ACCOUNT_JSON")
-
-    # descobre o client_email do JSON sem expor a chave
-    try:
-        info = json.loads(raw)
-        print("DEBUG client_email =", info.get("client_email"))
-    except Exception as e:
-        raise RuntimeError(f"GOOGLE_SERVICE_ACCOUNT_JSON inválido: {e}")
-
-    print("DEBUG GOOGLE_SHEET_ID =", sheet_id)
+    sheet_id = sheet_id_raw.strip().strip('"').strip("'")
+    print("DEBUG sheet_id_norm =", repr(sheet_id), "len=", len(sheet_id))
 
     return _gs_client().open_by_key(sheet_id)
+
 
 def month_sheet_name(dt) -> str:
     return f"{dt.year:04d}-{dt.month:02d}"  # 2026-02
