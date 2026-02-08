@@ -11,8 +11,8 @@ from db import init_db
 from dotenv import load_dotenv
 load_dotenv() #carrega o .env
 from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches, list_pockets, pocket_withdraw_to_account, create_pocket, pocket_deposit_from_account, delete_pocket, investment_withdraw_to_account, accrue_all_investments, create_investment, investment_deposit_from_account, delete_launch_and_rollback
-from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments, export_launches, get_launches_by_period
-from ai_router import handle_ai_message
+from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments, export_launches, get_launches_by_period, upsert_category_rule, get_memorized_category
+from ai_router import handle_ai_message, classify_category_with_gpt
 import io
 from datetime import date, datetime
 from openpyxl import Workbook
@@ -39,6 +39,25 @@ from sheets_export import export_rows_to_month_sheet
 
 
 # --------- helpers ---------
+
+# Classifica uma descrição em uma categoria usando sua API do ChatGPT.
+def classify_category_with_gpt(descricao: str) -> str:
+    descricao = (descricao or "").strip()
+    if not descricao:
+        return "outros"
+
+    # 👇 TROQUE esta parte pela sua função real (você disse que já tem a API no código)
+    # Ex: resp = call_chatgpt(prompt)
+    # cat = resp.strip().lower()
+
+    cat = "outros"  # placeholder
+
+    # Normaliza (garante que não vem coisa doida)
+    cat = (cat or "").strip().lower()
+    if not cat:
+        return "outros"
+    return cat
+
 
 def parse_date_str(s: str) -> date:
     s = s.strip()
@@ -255,7 +274,10 @@ def days_between(d1: date, d2: date):
 
 
 # --- PARSER DE RECEITA / DESPESA (COLE AQUI) ---
-def parse_receita_despesa_natural(text: str):
+# Faz o parse de uma mensagem natural de receita/despesa e classifica a categoria (com fallback no GPT)
+# Faz parse de receita/despesa e usa memória + GPT para categorizar
+# Faz parse de receita/despesa, usa memória de categorias e fallback no GPT (e aprende automaticamente)
+def parse_receita_despesa_natural(user_id: int, text: str):
     raw = re.sub(r"\s+", " ", text.lower()).strip()
     valor = parse_money(raw)
     if valor is None:
@@ -274,16 +296,42 @@ def parse_receita_despesa_natural(text: str):
     if tipo is None:
         return None
 
-    # categoria simples
-    categoria = "outros"
-    if "ifood" in raw or "uber eats" in raw:
-        categoria = "alimentação"
-    elif "uber" in raw or "99" in raw:
-        categoria = "transporte"
-    elif "luz" in raw or "energia" in raw:
-        categoria = "moradia"
+    nota = raw
 
-    nota = raw  # você pode melhorar isso depois
+    # 1) tenta memória primeiro (prioridade total)
+    mem = get_memorized_category(user_id, nota)
+    if mem:
+        categoria = mem
+    else:
+        # 2) regra local (rápida e barata)
+        categoria = "outros"
+        if "ifood" in raw or "uber eats" in raw:
+            categoria = "alimentação"
+        elif "uber" in raw or "99" in raw:
+            categoria = "transporte"
+        elif "luz" in raw or "energia" in raw:
+            categoria = "moradia"
+        elif "academia" in raw or "gym" in raw:
+            categoria = "saúde"
+        elif "gasolina" in raw or "combustível" in raw:
+            categoria = "transporte"
+        elif "mercado" in raw or "supermercado" in raw:
+            categoria = "alimentação"
+
+        # 3) fallback GPT quando continuar "outros" e memoriza keyword
+        if categoria == "outros":
+            try:
+                categoria_gpt = classify_category_with_gpt(nota)
+                if categoria_gpt:
+                    categoria = categoria_gpt
+
+                    # memoriza uma keyword simples (última palavra útil)
+                    tokens = [t.strip(".,;:!?()[]{}\"'") for t in nota.split()]
+                    keyword = (tokens[-1] if tokens else "").lower()
+                    if keyword:
+                        upsert_category_rule(user_id, keyword, categoria)
+            except Exception:
+                pass  # se a API falhar, mantém "outros"
 
     return {
         "tipo": tipo,
@@ -291,6 +339,7 @@ def parse_receita_despesa_natural(text: str):
         "categoria": categoria,
         "nota": nota
     }
+
 
 def normalize_spaces(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
@@ -756,7 +805,7 @@ async def on_message(message: discord.Message):
 
 
    # Gasto/Receita natural (ex: "gastei 35 no ifood", "recebi 2500 salario")
-    parsed = parse_receita_despesa_natural(text)
+    parsed = parse_receita_despesa_natural(message.author.id, text)
     if parsed:
         user_id = message.author.id
         ensure_user(user_id)

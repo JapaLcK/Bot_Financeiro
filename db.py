@@ -9,6 +9,7 @@ import math
 from datetime import timedelta, timezone
 
 
+
 def get_conn():
     database_url = os.getenv("DATABASE_URL")  # Railway injeta isso quando você adiciona Postgres
 
@@ -69,6 +70,16 @@ def init_db():
       created_at timestamptz not null default now(),
       expires_at timestamptz not null
     );
+
+    create table if not exists user_category_rules (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL,
+        keyword TEXT NOT NULL,
+        category TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (user_id, keyword)
+    );
+
 
     """
     with get_conn() as conn:
@@ -1309,3 +1320,50 @@ def get_launches_by_period(user_id: int, start_date: date, end_date: date):
         with conn.cursor() as cur:
             cur.execute(sql, (user_id, start_dt, end_excl))
             return cur.fetchall()
+        
+# Busca uma categoria memorizada pelo user_id com base no texto (keyword contida no texto)
+def get_memorized_category(user_id: int, text: str) -> str | None:
+    text = (text or "").lower()
+    if not text:
+        return None
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT keyword, category
+                FROM user_category_rules
+                WHERE user_id = %s
+                ORDER BY LENGTH(keyword) DESC
+                """,
+                (user_id,),
+            )
+            rows = cur.fetchall()
+
+    for kw, cat in rows:
+        if kw and kw.lower() in text:
+            return cat
+    return None
+
+
+# Salva/atualiza uma regra memorizada (keyword -> category) para um usuário
+def upsert_category_rule(user_id: int, keyword: str, category: str) -> None:
+    keyword = (keyword or "").strip().lower()
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        INSERT INTO user_category_rules (user_id, keyword, category)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (user_id, keyword)
+        DO UPDATE SET category = EXCLUDED.category
+        """,
+        (user_id, keyword, category),
+    )
+
+    conn.commit()
+    cur.close()
+
+

@@ -279,6 +279,35 @@ Regras:
 - Responda sempre em português do Brasil.
 """
 
+# Classifica categoria via GPT (sem tools) e retorna uma categoria padronizada.
+def classify_category_with_gpt(descricao: str) -> str:
+    descricao = (descricao or "").strip()
+    if not descricao:
+        return "outros"
+
+    # categorias permitidas (padronizadas)
+    allowed = ["alimentação", "transporte", "saúde", "moradia", "lazer", "educação", "assinaturas", "outros"]
+
+    prompt = (
+        "Classifique o texto em UMA categoria desta lista:\n"
+        + ", ".join(allowed) + "\n\n"
+        f"Texto: {descricao}\n"
+        "Responda APENAS com a categoria, sem explicação."
+    )
+
+    try:
+        resp = client.responses.create(
+            model=MODEL,
+            input=prompt,
+            temperature=0,
+        )
+        cat = (resp.output_text or "").strip().lower()
+        return cat if cat in allowed else "outros"
+    except Exception as e:
+        print("GPT category error:", e)
+        return "outros"
+
+
 def _extract_tool_calls(resp):
     # Extrai tool calls de forma defensiva (respostas podem variar por SDK)
     calls = []
