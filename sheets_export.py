@@ -93,18 +93,22 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
         elif tipo == "despesa":
             total_des += valor
 
-    # Escreve os lançamentos a partir de A41
-    if values:
-        ws.update("A41", values, value_input_option="USER_ENTERED")
 
-    # Preenche os cards (C4:C7)
+    # Envia lançamentos + cards em 1 batch_update (mais estável, evita erro 500)
     saldo_periodo = total_rec - total_des
-    saldo_atual = get_balance(user_id)  # se precisar do user_id, passe como parâmetro
+    saldo_atual = get_balance(user_id)
 
-    ws.update("C4", [[_to_sheet_value(total_rec)]], value_input_option="USER_ENTERED")
-    ws.update("C5", [[_to_sheet_value(total_des)]], value_input_option="USER_ENTERED")
-    ws.update("C6", [[_to_sheet_value(saldo_periodo)]], value_input_option="USER_ENTERED")
-    ws.update("C7", [[_to_sheet_value(saldo_atual)]], value_input_option="USER_ENTERED")
+    updates = []
+
+    if values:
+        updates.append({"range": "A41", "values": values})
+
+    updates.append({"range": "C4", "values": [[_to_sheet_value(total_rec)]]})
+    updates.append({"range": "C5", "values": [[_to_sheet_value(total_des)]]})
+    updates.append({"range": "C6", "values": [[_to_sheet_value(saldo_periodo)]]})
+    updates.append({"range": "C7", "values": [[_to_sheet_value(saldo_atual)]]})
+
+    ws.batch_update(updates, value_input_option="USER_ENTERED")
 
     # Preenche a tabela fonte do donut (B12:C37)
     despesas_por_categoria = {}
