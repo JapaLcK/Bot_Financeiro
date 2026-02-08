@@ -35,14 +35,11 @@ def _gs_client():
 # Abre a planilha e loga o SHEET_ID com repr/len para achar espaços/aspas escondidos
 def _open_sheet():
     sheet_id_raw = os.getenv("GOOGLE_SHEET_ID")
-    print("DEBUG sheet_id_raw =", repr(sheet_id_raw), "len=", (len(sheet_id_raw) if sheet_id_raw else None))
 
     if not sheet_id_raw:
         raise RuntimeError("Faltou GOOGLE_SHEET_ID")
 
     sheet_id = sheet_id_raw.strip().strip('"').strip("'")
-    print("DEBUG sheet_id_norm =", repr(sheet_id), "len=", len(sheet_id))
-
     return _gs_client().open_by_key(sheet_id)
 
 
