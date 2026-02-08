@@ -1298,13 +1298,15 @@ async def on_message(message: discord.Message):
             return
 
         try:
-            export_rows_to_month_sheet(message.author.id, rows, start, end)
+            sheet_link = export_rows_to_month_sheet(message.author.id, rows, start, end)
         except Exception as e:
             await message.reply(f"❌ Erro ao exportar para o Sheets: {e}")
             return
 
-        await message.reply("✅ Exportado para o Google Sheets (aba do mês atual).")
+        aba = f"{start.year:04d}-{start.month:02d}"
+        await message.reply(f"✅ Exportado para o Google Sheets (aba **{aba}**).\n🔗 {sheet_link}")
         return
+
     
     # Exporta dashboard financeiro em Excel
     if t.startswith("exportar excel") or t.startswith("export excel"):
