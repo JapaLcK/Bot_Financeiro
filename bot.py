@@ -802,10 +802,10 @@ async def on_message(message: discord.Message):
 
 
    # Gasto/Receita natural (ex: "gastei 35 no ifood", "recebi 2500 salario")
-    parsed = parse_receita_despesa_natural(message.author.id, text)
+    user_id = message.author.id
+    parsed = parse_receita_despesa_natural(user_id, text)
     if parsed:
-        user_id = message.author.id
-        ensure_user(user_id)
+        ensure_user(user_id)    
 
         tipo = parsed["tipo"]                 # "despesa" ou "receita"
         valor = float(parsed["valor"])
