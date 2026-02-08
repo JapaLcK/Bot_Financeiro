@@ -23,13 +23,24 @@ def _gs_client():
     creds = Credentials.from_service_account_info(info, scopes=SCOPES)
     return gspread.authorize(creds)
 
-# Abre a planilha do Google Sheets com validação clara do SHEET_ID
+# Abre a planilha e loga qual service account e qual SHEET_ID estão sendo usados
 def _open_sheet():
-    sheet_id = os.getenv("GOOGLE_SHEET_ID")  # sempre define aqui no topo
-    print("DEBUG GOOGLE_SHEET_ID =", sheet_id)
-
+    sheet_id = os.getenv("GOOGLE_SHEET_ID")
     if not sheet_id:
         raise RuntimeError("Faltou GOOGLE_SHEET_ID")
+
+    raw = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+    if not raw:
+        raise RuntimeError("Faltou GOOGLE_SERVICE_ACCOUNT_JSON")
+
+    # descobre o client_email do JSON sem expor a chave
+    try:
+        info = json.loads(raw)
+        print("DEBUG client_email =", info.get("client_email"))
+    except Exception as e:
+        raise RuntimeError(f"GOOGLE_SERVICE_ACCOUNT_JSON inválido: {e}")
+
+    print("DEBUG GOOGLE_SHEET_ID =", sheet_id)
 
     return _gs_client().open_by_key(sheet_id)
 
