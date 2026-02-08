@@ -71,6 +71,7 @@ def _is_monetary_row(r) -> bool:
 
 
 # Exporta os lançamentos monetários do período para a aba do mês no Google Sheets
+# Exporta lançamentos monetários para a aba do mês e atualiza cards + donut no template do Sheets.
 def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: datetime):
     sh = _open_sheet()
 
@@ -85,31 +86,63 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
     if not created:
         ws.batch_clear(["A41:F2000", "B12:C37", "C4:C7"])
 
+    # Registra somente movimentações monetárias (ignora ações administrativas tipo criar/apagar caixinha/investimento)
+    def _is_money_movement(r: dict) -> bool:
+        tipo = (r.get("tipo") or "").strip().lower()
+        # Tipos que SEMPRE são movimento de dinheiro
+        if tipo in {"receita", "despesa", "transferencia", "transferência", "saque", "deposito", "depósito",
+                    "investimento", "aplicacao", "aplicação", "resgate"}:
+            return True
+
+        # Se tiver valor numérico != 0, consideramos movimento
+        try:
+            v = float(r.get("valor") or 0)
+        except Exception:
+            v = 0.0
+        if abs(v) > 0:
+            # Mas bloqueia explicitamente ações administrativas mais comuns
+            bloqueados = {
+                "criar_caixinha", "apagar_caixinha", "deletar_caixinha",
+                "criar_investimento", "apagar_investimento", "deletar_investimento",
+                "criar_categoria", "apagar_categoria", "deletar_categoria",
+            }
+            return tipo not in bloqueados
+
+        return False
+
     # Monta linhas de lançamentos (A..F)
     values = []
     total_rec = 0.0
     total_des = 0.0
+    despesas_por_categoria: dict[str, float] = {}
 
     for r in rows:
-        # mantém só movimentações monetárias (ignora criar/apagar)
-        if not _is_monetary_row(r):
+        if not _is_money_movement(r):
             continue
 
-        dt = r["criado_em"]
-        data_str = dt.strftime("%d/%m/%Y") if hasattr(dt, "strftime") else str(dt)
+        dt = r.get("criado_em")
+        data_str = dt.strftime("%d/%m/%Y") if hasattr(dt, "strftime") else (str(dt) if dt else "")
 
-        tipo = r.get("tipo", "")
-        categoria = (r.get("alvo") or "").strip()
+        tipo = (r.get("tipo") or "").strip().lower()
+
+        # Categoria: qualquer uma (não limita). Se vazio, cai em "Outros"
+        categoria = (r.get("alvo") or "").strip() or "Outros"
+
+        # Descrição
         descricao = (r.get("nota") or "").strip()
-        valor = float(r["valor"])
-        origem = r.get("origem", "") or ""
+
+        # Valor sempre numérico pro Sheets
+        valor = float(r.get("valor") or 0)
+
+        # Origem (se tiver)
+        origem = (r.get("origem") or "").strip()
 
         values.append([
             data_str,   # A (Data)
             tipo,       # B (Tipo)
             categoria,  # C (Categoria)
             descricao,  # D (Descrição)
-            valor,      # E (Valor)
+            _to_sheet_value(valor),  # E (Valor)
             origem,     # F (Origem)
         ])
 
@@ -117,8 +150,9 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
             total_rec += valor
         elif tipo == "despesa":
             total_des += valor
+            despesas_por_categoria[categoria] = despesas_por_categoria.get(categoria, 0.0) + float(valor)
 
-    # Envia lançamentos + cards em 1 batch_update (mais estável, evita erro 500)
+    # Envia lançamentos + cards + donut em batch_update (mais estável)
     saldo_periodo = total_rec - total_des
     saldo_atual = get_balance(user_id)
 
@@ -127,25 +161,16 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
     if values:
         updates.append({"range": "A41", "values": values})
 
+    # Cards (C4:C7) — labels estão em B4:B7 no seu template
     updates.append({"range": "C4", "values": [[_to_sheet_value(total_rec)]]})
     updates.append({"range": "C5", "values": [[_to_sheet_value(total_des)]]})
     updates.append({"range": "C6", "values": [[_to_sheet_value(saldo_periodo)]]})
     updates.append({"range": "C7", "values": [[_to_sheet_value(saldo_atual)]]})
 
-    ws.batch_update(updates, value_input_option="USER_ENTERED")
-
-    # Preenche a tabela fonte do donut (B12:C37) só com despesas monetárias
-    despesas_por_categoria = {}
-    for r in rows:
-        if not _is_monetary_row(r):
-            continue
-        if (r.get("tipo") or "").lower() != "despesa":
-            continue
-
-        cat = (r.get("alvo") or "Sem categoria").strip()
-        despesas_por_categoria[cat] = despesas_por_categoria.get(cat, 0.0) + float(r["valor"])
-
+    # Donut source (B12:C37)
     items = sorted(despesas_por_categoria.items(), key=lambda x: x[1], reverse=True)
+
+    # Limita a 26 linhas no donut: top 25 + "Outros"
     if len(items) > 26:
         top = items[:25]
         outros = sum(v for _, v in items[25:])
@@ -153,10 +178,13 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
     else:
         items = items[:26]
 
-    donut_values = [[cat, float(total)] for cat, total in items]
+    donut_values = [[cat, _to_sheet_value(total)] for cat, total in items]
     if donut_values:
-        ws.update("B12", donut_values, value_input_option="USER_ENTERED")
+        updates.append({"range": "B12", "values": donut_values})
 
+    # Executa tudo de uma vez
+    if updates:
+        ws.batch_update(updates, value_input_option="USER_ENTERED")
 
 
 # Garante que exista a aba do mês no Google Sheets, duplicando o TEMPLATE se necessário
