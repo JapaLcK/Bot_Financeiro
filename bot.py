@@ -40,23 +40,52 @@ from sheets_export import export_rows_to_month_sheet
 
 # --------- helpers ---------
 
-# Classifica uma descrição em uma categoria usando sua API do ChatGPT.
-def classify_category_with_gpt(descricao: str) -> str:
-    descricao = (descricao or "").strip()
-    if not descricao:
-        return "outros"
+import unicodedata
 
-    # 👇 TROQUE esta parte pela sua função real (você disse que já tem a API no código)
-    # Ex: resp = call_chatgpt(prompt)
-    # cat = resp.strip().lower()
+def normalize_text(text: str) -> str:
+    text = (text or "").strip().lower()
+    if not text:
+        return ""
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(c for c in text if not unicodedata.combining(c))  # remove acentos
+    text = re.sub(r"[^a-z0-9\s]", " ", text)  # tira pontuação
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
-    cat = "outros"  # placeholder
+def contains_word(text: str, word: str) -> bool:
+    # bate palavra inteira quando possível (evita falsos positivos)
+    return re.search(rf"\b{re.escape(word)}\b", text) is not None
 
-    # Normaliza (garante que não vem coisa doida)
-    cat = (cat or "").strip().lower()
-    if not cat:
-        return "outros"
-    return cat
+# Regras locais (baratas) — já cobrindo mercado/psicologo/petshop
+LOCAL_RULES = [
+    (["mercado", "supermercado", "mercadinho", "hortifruti", "padaria"], "alimentação"),
+    (["psicologo", "psicologa", "terapia", "terapeuta", "psiquiatra"], "saúde"),
+    (["petshop", "pet shop", "racao", "veterinario", "vet", "banho", "tosa"], "pets"),
+    (["ifood", "restaurante", "lanchonete"], "alimentação"),
+    (["uber", "99", "taxi", "metro", "onibus", "gasolina", "combustivel"], "transporte"),
+    (["academia", "remedio", "farmacia", "dentista", "consulta"], "saúde"),
+    (["netflix", "spotify", "youtube", "prime video", "disney"], "assinaturas"),
+]
+
+STOPWORDS_PT = {
+    "gastei","paguei","comprei","debitei","recebi","ganhei","salario","reembolso",
+    "no","na","nos","nas","em","de","do","da","dos","das","pra","para","por",
+    "um","uma","uns","umas","com","ao","aos","as","os","o","a"
+}
+
+def extract_keyword_for_memory(text_norm: str) -> str:
+    # 1) se bater em alguma keyword das regras locais, salva essa keyword
+    for keywords, _cat in LOCAL_RULES:
+        for kw in keywords:
+            kw_norm = normalize_text(kw)
+            if kw_norm and (contains_word(text_norm, kw_norm) or kw_norm in text_norm):
+                return kw_norm
+
+    # 2) fallback: pega o último “token útil”
+    tokens = [t for t in text_norm.split() if t and t not in STOPWORDS_PT and len(t) >= 3]
+    if not tokens:
+        return ""
+    return tokens[-1]
 
 
 def parse_date_str(s: str) -> date:
@@ -278,16 +307,20 @@ def days_between(d1: date, d2: date):
 # Faz parse de receita/despesa e usa memória + GPT para categorizar
 # Faz parse de receita/despesa, usa memória de categorias e fallback no GPT (e aprende automaticamente)
 def parse_receita_despesa_natural(user_id: int, text: str):
-    raw = re.sub(r"\s+", " ", text.lower()).strip()
-    valor = parse_money(raw)
+    # normaliza forte (acentos + pontuação)
+    raw_norm = normalize_text(text)
+    if not raw_norm:
+        return None
+
+    valor = parse_money(raw_norm)
     if valor is None:
         return None
 
-    verbos_despesa = ["gastei", "paguei", "comprei", "cartão", "cartao", "debitei"]
-    verbos_receita = ["recebi", "ganhei", "salário", "salario", "pix recebido", "reembolso"]
+    verbos_despesa = ["gastei", "paguei", "comprei", "cartao", "cartão", "debitei"]
+    verbos_receita = ["recebi", "ganhei", "salario", "salário", "pix recebido", "reembolso"]
 
-    eh_despesa = any(v in raw for v in verbos_despesa)
-    eh_receita = any(v in raw for v in verbos_receita)
+    eh_despesa = any(normalize_text(v) in raw_norm for v in verbos_despesa)
+    eh_receita = any(normalize_text(v) in raw_norm for v in verbos_receita)
 
     if not (eh_despesa or eh_receita):
         return None
@@ -296,46 +329,44 @@ def parse_receita_despesa_natural(user_id: int, text: str):
     if tipo is None:
         return None
 
-    nota = raw
-
-    # 1) tenta memória primeiro (prioridade total)
-    mem = get_memorized_category(user_id, nota)
-    if mem:
-        categoria = mem
-    else:
-        # 2) regra local (rápida e barata)
-        # categoria simples (regra local)
+    # 1) memória primeiro (prioridade total)
+    categoria = get_memorized_category(user_id, raw_norm)
+    if not categoria:
+        # 2) regra local
         categoria = "outros"
-        if "ifood" in raw:
-            categoria = "alimentação"
-        elif "uber" in raw:
-            categoria = "transporte"
-        elif "academia" in raw:
-            categoria = "saúde"
+        for keywords, cat in LOCAL_RULES:
+            for kw in keywords:
+                kw_norm = normalize_text(kw)
+                if kw_norm and (contains_word(raw_norm, kw_norm) or kw_norm in raw_norm):
+                    categoria = cat
+                    break
+            if categoria != "outros":
+                break
 
-        # 1) tenta memória
-        mem = get_memorized_category(user_id, raw)
-        if mem:
-            categoria = mem
-
-        # 2) fallback: IA quando ainda for "outros"
+        # 3) fallback GPT
         if categoria == "outros":
             try:
-                categoria_gpt = classify_category_with_gpt(raw)
+                categoria_gpt = classify_category_with_gpt(raw_norm)
                 if categoria_gpt:
                     categoria = categoria_gpt
-
-                    # salva memória
-                    upsert_category_rule(user_id, raw, categoria)
             except Exception as e:
                 print("Erro IA categoria:", e)
+                categoria = "outros"
 
-        return {
-            "tipo": tipo,
-            "valor": valor,
-            "categoria": categoria,
-            "nota": raw
-        }
+        # 4) salva memória com keyword (NÃO salva a frase inteira)
+        try:
+            kw = extract_keyword_for_memory(raw_norm)
+            if kw:
+                upsert_category_rule(user_id, kw, categoria)
+        except Exception as e:
+            print("Erro salvando memória categoria:", e)
+
+    return {
+        "tipo": tipo,
+        "valor": valor,
+        "categoria": categoria,
+        "nota": raw_norm
+    }
 
 
 def normalize_spaces(s: str) -> str:
