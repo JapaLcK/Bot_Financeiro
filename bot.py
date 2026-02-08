@@ -1221,7 +1221,7 @@ async def on_message(message: discord.Message):
             return
 
         try:
-            export_rows_to_month_sheet(rows, start, end)
+            export_rows_to_month_sheet(message.author.id, rows, start, end)
         except Exception as e:
             await message.reply(f"❌ Erro ao exportar para o Sheets: {e}")
             return
