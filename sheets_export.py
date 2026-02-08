@@ -23,12 +23,14 @@ def _gs_client():
     creds = Credentials.from_service_account_info(info, scopes=SCOPES)
     return gspread.authorize(creds)
 
+# Abre a planilha do Google Sheets com validação clara do SHEET_ID
 def _open_sheet():
-    print("DEBUG SHEET_ID =", sheet_id)
+    sheet_id = os.getenv("GOOGLE_SHEET_ID")  # sempre define aqui no topo
+    print("DEBUG GOOGLE_SHEET_ID =", sheet_id)
 
-    sheet_id = os.getenv("GOOGLE_SHEET_ID")
     if not sheet_id:
         raise RuntimeError("Faltou GOOGLE_SHEET_ID")
+
     return _gs_client().open_by_key(sheet_id)
 
 def month_sheet_name(dt) -> str:
