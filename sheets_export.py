@@ -3,6 +3,7 @@ from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 from db import get_balance
+from decimal import Decimal
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -14,6 +15,13 @@ MESES_PT = {
     5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
     9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro",
 }
+
+
+def _to_sheet_value(x):
+    if isinstance(x, Decimal):
+        return float(x)
+    return x
+
 
 def _gs_client():
     raw = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
@@ -93,10 +101,10 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
     saldo_periodo = total_rec - total_des
     saldo_atual = get_balance(user_id)  # se precisar do user_id, passe como parâmetro
 
-    ws.update("C4", [[total_rec]], value_input_option="USER_ENTERED")
-    ws.update("C5", [[total_des]], value_input_option="USER_ENTERED")
-    ws.update("C6", [[saldo_periodo]], value_input_option="USER_ENTERED")
-    ws.update("C7", [[saldo_atual]], value_input_option="USER_ENTERED")
+    ws.update("C4", [[_to_sheet_value(total_rec)]], value_input_option="USER_ENTERED")
+    ws.update("C5", [[_to_sheet_value(total_des)]], value_input_option="USER_ENTERED")
+    ws.update("C6", [[_to_sheet_value(saldo_periodo)]], value_input_option="USER_ENTERED")
+    ws.update("C7", [[_to_sheet_value(saldo_atual)]], value_input_option="USER_ENTERED")
 
     # Preenche a tabela fonte do donut (B12:C37)
     despesas_por_categoria = {}
