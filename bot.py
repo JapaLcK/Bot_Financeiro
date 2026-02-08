@@ -1195,8 +1195,42 @@ async def on_message(message: discord.Message):
         await message.reply(f"🏦 **Conta Corrente:** R$ {float(bal):.2f}")
         return
     
+    # Exporta para Google Sheets (template dashboard)
+    if t.startswith("exportar sheets"):
+        parts = text.split()
+
+        try:
+            if len(parts) == 2:
+                start, end = month_range_today()
+            elif len(parts) == 4:
+                start = parse_date_str(parts[2])
+                end = parse_date_str(parts[3])
+                if end < start:
+                    await message.reply("A data final não pode ser menor que a inicial.")
+                    return
+            else:
+                raise ValueError("args")
+
+        except Exception:
+            await message.reply("Use: `exportar sheets` ou `exportar sheets 2026-02-01 2026-02-28`")
+            return
+
+        rows = get_launches_by_period(message.author.id, start, end)
+        if not rows:
+            await message.reply("📭 Nenhum lançamento no período.")
+            return
+
+        try:
+            export_rows_to_month_sheet(rows, start, end)
+        except Exception as e:
+            await message.reply(f"❌ Erro ao exportar para o Sheets: {e}")
+            return
+
+        await message.reply("✅ Exportado para o Google Sheets (aba do mês atual).")
+        return
+    
     # Exporta dashboard financeiro em Excel
-    if t.startswith("exportar") or t.startswith("export"):
+    if t.startswith("exportar excel") or t.startswith("export excel"):
         parts = text.split()
 
         try:
@@ -1209,7 +1243,7 @@ async def on_message(message: discord.Message):
                     await message.reply("A data final não pode ser menor que a inicial.")
                     return
         except Exception:
-            await message.reply("Use: `exportar dashboard` ou `exportar dashboard 2026-02-01 2026-02-29`")
+            await message.reply("Use: `exportar excel` ou `exportar excel 2026-02-01 2026-02-29`")
             return
 
         rows = get_launches_by_period(message.author.id, start, end)
@@ -1376,39 +1410,6 @@ async def on_message(message: discord.Message):
         filename = f"dashboard_{start.isoformat()}_{end.isoformat()}.xlsx"
         await message.reply(file=discord.File(fp=bio, filename=filename))
         return
-    
-    # Exporta para Google Sheets (template dashboard)
-    if t.startswith("exportar sheets"):
-        parts = text.split()
-
-        try:
-            if len(parts) == 2:
-                start, end = month_range_today()
-            else:
-                start = parse_date_str(parts[2])
-                end = parse_date_str(parts[3])
-                if end < start:
-                    await message.reply("A data final não pode ser menor que a inicial.")
-                    return
-        except Exception:
-            await message.reply("Use: `exportar sheets` ou `exportar sheets 2026-02-01 2026-02-28`")
-            return
-
-        rows = get_launches_by_period(message.author.id, start, end)
-        if not rows:
-            await message.reply("📭 Nenhum lançamento no período.")
-            return
-
-        try:
-            export_rows_to_month_sheet(rows, start, end)
-        except Exception as e:
-            await message.reply(f"❌ Erro ao exportar para o Sheets: {e}")
-            return
-
-        await message.reply("✅ Exportado para o Google Sheets (aba do mês atual).")
-        return
-
-
 
 
     # fallback com IA (apenas se fizer sentido financeiro)
