@@ -286,14 +286,26 @@ def classify_category_with_gpt(descricao: str) -> str:
         return "outros"
 
     # categorias permitidas (padronizadas)
-    allowed = ["alimentação", "transporte", "saúde", "moradia", "lazer", "educação", "assinaturas", "outros"]
+    allowed = ["alimentação", "transporte", "saúde", "moradia", "lazer", "educação", "assinaturas", "pets", "educação", "assinaturas", "compras online", "beleza", "outros"]
+
 
     prompt = (
-        "Classifique o texto em UMA categoria desta lista:\n"
-        + ", ".join(allowed) + "\n\n"
-        f"Texto: {descricao}\n"
-        "Responda APENAS com a categoria, sem explicação."
-    )
+    "Você é um classificador de categorias financeiras.\n"
+    "Responda com UMA palavra exatamente igual a uma das categorias abaixo.\n"
+    "Categorias: " + ", ".join(allowed) + "\n\n"
+    "Exemplos:\n"
+    "petshop, ração, veterinário -> outros\n"
+    "psicólogo, remédio, dentista -> saúde\n"
+    "aluguel, condomínio, luz, internet -> moradia\n"
+    "uber, 99, gasolina, ônibus -> transporte\n"
+    "mercado, ifood, restaurante -> alimentação\n\n"
+    "online, compra online -> compras online\n\n"
+    "livros, curso, aulas, video aulas -> educação\n\n"
+    "spotify, youtube, netflix -> assinaturas\n\n"
+    f"Texto: {descricao}\n"
+    "Resposta:"
+)   
+
 
     try:
         resp = client.responses.create(
@@ -302,6 +314,18 @@ def classify_category_with_gpt(descricao: str) -> str:
             temperature=0,
         )
         cat = (resp.output_text or "").strip().lower()
+
+        cat = cat.replace(".", "").replace(",", "").strip()
+
+        # normaliza acentos simples (pra não cair em "outros" por causa disso)
+        aliases = {
+            "alimentacao": "alimentação",
+            "saude": "saúde",
+            "educacao": "educação",
+        }
+
+        cat = aliases.get(cat, cat)
+
         return cat if cat in allowed else "outros"
     except Exception as e:
         print("GPT category error:", e)

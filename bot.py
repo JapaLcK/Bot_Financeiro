@@ -304,41 +304,38 @@ def parse_receita_despesa_natural(user_id: int, text: str):
         categoria = mem
     else:
         # 2) regra local (rápida e barata)
+        # categoria simples (regra local)
         categoria = "outros"
-        if "ifood" in raw or "uber eats" in raw:
+        if "ifood" in raw:
             categoria = "alimentação"
-        elif "uber" in raw or "99" in raw:
+        elif "uber" in raw:
             categoria = "transporte"
-        elif "luz" in raw or "energia" in raw:
-            categoria = "moradia"
-        elif "academia" in raw or "gym" in raw:
+        elif "academia" in raw:
             categoria = "saúde"
-        elif "gasolina" in raw or "combustível" in raw:
-            categoria = "transporte"
-        elif "mercado" in raw or "supermercado" in raw:
-            categoria = "alimentação"
 
-        # 3) fallback GPT quando continuar "outros" e memoriza keyword
+        # 1) tenta memória
+        mem = get_memorized_category(user_id, raw)
+        if mem:
+            categoria = mem
+
+        # 2) fallback: IA quando ainda for "outros"
         if categoria == "outros":
             try:
-                categoria_gpt = classify_category_with_gpt(nota)
+                categoria_gpt = classify_category_with_gpt(raw)
                 if categoria_gpt:
                     categoria = categoria_gpt
 
-                    # memoriza uma keyword simples (última palavra útil)
-                    tokens = [t.strip(".,;:!?()[]{}\"'") for t in nota.split()]
-                    keyword = (tokens[-1] if tokens else "").lower()
-                    if keyword:
-                        upsert_category_rule(user_id, keyword, categoria)
-            except Exception:
-                pass  # se a API falhar, mantém "outros"
+                    # salva memória
+                    upsert_category_rule(user_id, raw, categoria)
+            except Exception as e:
+                print("Erro IA categoria:", e)
 
-    return {
-        "tipo": tipo,
-        "valor": valor,
-        "categoria": categoria,
-        "nota": nota
-    }
+        return {
+            "tipo": tipo,
+            "valor": valor,
+            "categoria": categoria,
+            "nota": raw
+        }
 
 
 def normalize_spaces(s: str) -> str:
