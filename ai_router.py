@@ -2,7 +2,8 @@
 import os
 import json
 from openai import OpenAI
-
+import re
+import unicodedata
 import db
 
 # aliases para não precisar mudar o resto do arquivo
@@ -279,33 +280,79 @@ Regras:
 - Responda sempre em português do Brasil.
 """
 
-# Classifica categoria via GPT (sem tools) e retorna uma categoria padronizada.
+# categorias permitidas (canon)
+ALLOWED_CATEGORIES = [
+    "alimentação",
+    "transporte",
+    "saúde",
+    "moradia",
+    "lazer",
+    "educação",
+    "assinaturas",
+    "pets",
+    "compras online",
+    "beleza",
+    "outros",
+]
+
+def _normalize_text(text: str) -> str:
+    text = (text or "").strip().lower()
+    if not text:
+        return ""
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(c for c in text if not unicodedata.combining(c))  # remove acentos
+    text = re.sub(r"[^a-z0-9\s]", " ", text)  # remove pontuação
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+# mapeia variações comuns -> categoria canônica
+_CATEGORY_ALIASES = {
+    "alimentacao": "alimentação",
+    "saude": "saúde",
+    "educacao": "educação",
+    "compra online": "compras online",
+    "compras": "compras online",
+    "online": "compras online",
+    "pet": "pets",
+    "petshop": "pets",
+}
+
+def _normalize_category(cat: str) -> str:
+    norm = _normalize_text(cat)
+    # tenta mapear variações
+    mapped = _CATEGORY_ALIASES.get(norm, norm)
+
+    # se o GPT respondeu com mais de uma palavra (ex: "compras online"), mantém como está
+    # e faz check com allowed também normalizado
+    allowed_norm_map = {_normalize_text(c): c for c in ALLOWED_CATEGORIES}
+    return allowed_norm_map.get(_normalize_text(mapped), "outros")
+
 def classify_category_with_gpt(descricao: str) -> str:
     descricao = (descricao or "").strip()
     if not descricao:
         return "outros"
 
-    # categorias permitidas (padronizadas)
-    allowed = ["alimentação", "transporte", "saúde", "moradia", "lazer", "educação", "assinaturas", "pets", "educação", "assinaturas", "compras online", "beleza", "outros"]
-
-
     prompt = (
-    "Você é um classificador de categorias financeiras.\n"
-    "Responda com UMA palavra exatamente igual a uma das categorias abaixo.\n"
-    "Categorias: " + ", ".join(allowed) + "\n\n"
-    "Exemplos:\n"
-    "petshop, ração, veterinário -> outros\n"
-    "psicólogo, remédio, dentista -> saúde\n"
-    "aluguel, condomínio, luz, internet -> moradia\n"
-    "uber, 99, gasolina, ônibus -> transporte\n"
-    "mercado, ifood, restaurante, mercado -> alimentação\n\n"
-    "online, compra online -> compras online\n\n"
-    "livros, curso, aulas, video aulas -> educação\n\n"
-    "spotify, youtube, netflix -> assinaturas\n\n"
-    f"Texto: {descricao}\n"
-    "Resposta:"
-)   
+        "Você é um classificador de categorias financeiras.\n"
+        "Responda com UMA única categoria exatamente dentre as opções abaixo.\n"
+        "Não explique. Não use pontuação. Não escreva mais nada.\n"
+        "Categorias: " + ", ".join(ALLOWED_CATEGORIES) + "\n\n"
+        "Exemplos:\n"
+        "petshop, ração, veterinário -> pets\n"
+        "psicólogo, terapia, remédio, dentista -> saúde\n"
+        "aluguel, condomínio, luz, internet -> moradia\n"
+        "uber, 99, gasolina, ônibus, metrô -> transporte\n"
+        "mercado, ifood, restaurante, padaria -> alimentação\n"
+        "compra online, online, amazon, shopee -> compras online\n"
+        "livros, curso, aulas, video aulas -> educação\n"
+        "spotify, youtube, netflix -> assinaturas\n\n"
+        f"Texto: {descricao}\n"
+        "Resposta:"
+    )
 
+    # se não tiver chave, não tenta IA
+    if not os.getenv("OPENAI_API_KEY"):
+        return "outros"
 
     try:
         resp = client.responses.create(
@@ -313,23 +360,14 @@ def classify_category_with_gpt(descricao: str) -> str:
             input=prompt,
             temperature=0,
         )
-        cat = (resp.output_text or "").strip().lower()
 
-        cat = cat.replace(".", "").replace(",", "").strip()
+        cat_raw = (resp.output_text or "").strip()
+        return _normalize_category(cat_raw)
 
-        # normaliza acentos simples (pra não cair em "outros" por causa disso)
-        aliases = {
-            "alimentacao": "alimentação",
-            "saude": "saúde",
-            "educacao": "educação",
-        }
-
-        cat = aliases.get(cat, cat)
-
-        return cat if cat in allowed else "outros"
     except Exception as e:
         print("GPT category error:", e)
         return "outros"
+
 
 
 def _extract_tool_calls(resp):
