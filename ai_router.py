@@ -298,7 +298,7 @@ def classify_category_with_gpt(descricao: str) -> str:
     "psicólogo, remédio, dentista -> saúde\n"
     "aluguel, condomínio, luz, internet -> moradia\n"
     "uber, 99, gasolina, ônibus -> transporte\n"
-    "mercado, ifood, restaurante -> alimentação\n\n"
+    "mercado, ifood, restaurante, mercado -> alimentação\n\n"
     "online, compra online -> compras online\n\n"
     "livros, curso, aulas, video aulas -> educação\n\n"
     "spotify, youtube, netflix -> assinaturas\n\n"
