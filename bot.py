@@ -337,6 +337,7 @@ def parse_receita_despesa_natural(user_id: int, text: str):
         return None
 
     valor = parse_money(text)
+    print("DEBUG parse_money:", text, "->", valor)
     if valor is None:
         return None
 
