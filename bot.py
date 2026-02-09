@@ -11,7 +11,7 @@ from db import init_db
 from dotenv import load_dotenv
 load_dotenv() #carrega o .env
 from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches, list_pockets, pocket_withdraw_to_account, create_pocket, pocket_deposit_from_account, delete_pocket, investment_withdraw_to_account, accrue_all_investments, create_investment, investment_deposit_from_account, delete_launch_and_rollback
-from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments, export_launches, get_launches_by_period, upsert_category_rule, get_memorized_category
+from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments, export_launches, get_launches_by_period, upsert_category_rule, get_memorized_category, get_conn, get_latest_cdi
 from ai_router import handle_ai_message, classify_category_with_gpt
 import io
 from datetime import date, datetime
@@ -1318,9 +1318,10 @@ async def on_message(message: discord.Message):
     if t in ["ver cdi", "cdi"]:
         try:
             # abre conexão/cur do jeito que você já usa no bot
-            with get_conn() as conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    res = get_latest_cdi(cur)
+         with get_conn() as conn:
+            with conn.cursor() as cur:
+                res = get_latest_cdi(cur)
+
 
             if not res:
                 await message.reply("⚠️ Não consegui obter a CDI agora. Tente novamente mais tarde.")
