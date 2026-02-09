@@ -343,7 +343,6 @@ def parse_receita_despesa_natural(user_id: int, text: str):
         return None
 
     valor = parse_money(text)
-    print("DEBUG parse_money:", text, "->", valor)
     if valor is None:
         return None
 
@@ -882,7 +881,6 @@ async def on_message(message: discord.Message):
         categoria = parsed["categoria"]
         nota = parsed.get("nota")
 
-        print("DEBUG 2 - antes de gravar:", parsed)
 
         launch_id, new_balance = add_launch_and_update_balance(
             user_id=user_id,
@@ -893,7 +891,6 @@ async def on_message(message: discord.Message):
         )
 
         emoji = "💸" if tipo == "despesa" else "💰"
-        print("DEBUG 3 - antes de responder:", parsed["valor"], "new_balance:", new_balance)
 
         await message.reply(
             f"{emoji} **{tipo.capitalize()} registrada**: {fmt_brl(valor)}\n"
