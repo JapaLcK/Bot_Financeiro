@@ -180,7 +180,7 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
     updates = []
 
     if values:
-        updates.append({"range": "A41", "values": values})
+        updates.append({"range": "A44", "values": values})
 
     # Cards (C4:C7) — labels estão em B4:B7 no seu template
     updates.append({"range": "C4", "values": [[_to_sheet_value(total_rec)]]})
