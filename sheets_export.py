@@ -105,7 +105,7 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
 
     # Limpa apenas as áreas de dados se a aba já existia
     if not created:
-        ws.batch_clear(["A41:F2000", "B12:C37", "C4:C7"])
+        ws.batch_clear(["A44:Q2000", "B12:C37", "C4:C7"])
 
     # Registra somente movimentações monetárias (ignora ações administrativas tipo criar/apagar caixinha/investimento)
     def _is_money_movement(r: dict) -> bool:
