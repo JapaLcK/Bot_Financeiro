@@ -225,7 +225,8 @@ def accrue_investment(inv: dict, today: date | None = None) -> None:
 
 
 def fmt_brl(v: float) -> str:
-    return f"R$ {v:.2f}"
+    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
 
 from decimal import Decimal
 
@@ -862,10 +863,6 @@ async def on_message(message: discord.Message):
         )
         return
 
-    def format_brl(v: float) -> str:
-        return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-
    # Gasto/Receita natural (ex: "gastei 35 no ifood", "recebi 2500 salario")
     user_id = message.author.id
     parsed = parse_receita_despesa_natural(user_id, text)
@@ -888,9 +885,9 @@ async def on_message(message: discord.Message):
         emoji = "💸" if tipo == "despesa" else "💰"
 
         await message.reply(
-            f"{emoji} **{tipo.capitalize()} registrada**: {format_brl(valor)}\n"
+            f"{emoji} **{tipo.capitalize()} registrada**: {fmt_brl(valor)}\n"
             f"🏷 Categoria: {categoria}\n"
-            f"🏦 Conta: {format_brl(float(new_balance))}\n"
+            f"🏦 Conta: {fmt_brl(float(new_balance))}\n"
             f"ID: #{launch_id}"
         )
 
