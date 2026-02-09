@@ -732,14 +732,13 @@ def get_latest_cdi_daily_pct() -> float:
     return float(latest)
 
 
-
 def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = None):
     """
     Atualiza (balance, last_date) do investment aplicando juros por dias úteis.
-    Usa:
-      daily  -> rate por dia útil
-      monthly-> rate distribuído em 21 dias úteis
-      yearly -> rate distribuído em 252 dias úteis
+    daily  -> rate por dia útil
+    monthly-> rate distribuído em 21 dias úteis
+    yearly -> rate distribuído em 252 dias úteis
+    cdi    -> aplica CDI diária do período (mapa), multiplicada pelo "mult" (ex 1.10 = 110% CDI)
     """
     if today is None:
         today = date.today()
@@ -753,47 +752,58 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
         raise LookupError("INV_NOT_FOUND")
 
     last_date = inv["last_date"]
+    if last_date is None:
+        # se quiser, você pode setar last_date=today e retornar sem render
+        return Decimal(inv["balance"])
+
     n = _business_days_between(last_date, today)
     if n <= 0:
-        return inv["balance"]  # nada a fazer
+        return Decimal(inv["balance"])
 
     bal = Decimal(inv["balance"])
-    rate = float(inv["rate"])
     period = inv["period"]
+    rate = float(inv["rate"])
 
+    # =========================
+    # CDI
+    # =========================
     if period == "cdi":
-        # rate aqui vira "multiplicador do CDI":
-        # 1.00 = 100% CDI, 1.10 = 110% CDI, etc.
-        mult = float(inv["rate"])
+        mult = float(inv["rate"])  # 1.00=100% CDI, 1.10=110% CDI
 
         start = last_date + timedelta(days=1)
         end = today
 
-        cdi_map = _get_cdi_daily_map(cur, start, end)
+        cdi_map = _get_cdi_daily_map(cur, start, end)  # {date: pct_ao_dia}
 
-        # produto diário (varia por dia) — usa somente dias que existem na série
+        # DEBUG (põe isso agora pra descobrir por que não rendeu)
+        print("[CDI DEBUG]",
+              "inv_id=", inv_id,
+              "last_date=", last_date,
+              "today=", today,
+              "start=", start,
+              "end=", end,
+              "business_days_n=", n,
+              "cdi_map_len=", len(cdi_map),
+              "mult=", mult)
+
         factor = 1.0
-        for d, cdi_pct_per_day in cdi_map.items():
+        # IMPORTANTE: iterar em ordem de data
+        for d in sorted(cdi_map.keys()):
+            cdi_pct_per_day = cdi_map[d]
             factor *= (1.0 + (cdi_pct_per_day / 100.0) * mult)
 
         new_bal = Decimal(str(float(bal) * factor))
 
+    # =========================
+    # Não-CDI
+    # =========================
     else:
         if period == "daily":
             daily_rate = rate
-
         elif period == "monthly":
             daily_rate = (1.0 + rate) ** (1.0 / 21.0) - 1.0
-
         elif period == "yearly":
             daily_rate = (1.0 + rate) ** (1.0 / 252.0) - 1.0
-
-        elif period == "cdi":
-            # rate aqui é o "multiplicador do CDI": 1.0 = 100% CDI, 1.1 = 110% CDI...
-            # Pega CDI diária (% a.d.) e aplica multiplicador
-            cdi_day_pct = get_latest_cdi_daily_pct()  # você vai criar essa função abaixo
-            daily_rate = (cdi_day_pct / 100.0) * rate
-
         else:
             daily_rate = 0.0
 
@@ -803,13 +813,15 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
         else:
             new_bal = bal
 
+    # =========================
+    # salva (para TODOS os casos)
+    # =========================
+    cur.execute(
+        "update investments set balance=%s, last_date=%s where id=%s and user_id=%s",
+        (new_bal, today, inv_id, user_id),
+    )
+    return new_bal
 
-        # salva
-        cur.execute(
-            "update investments set balance=%s, last_date=%s where id=%s",
-            (new_bal, today, inv_id),
-        )
-        return new_bal
 
 def investment_withdraw_to_account(user_id: int, investment_name: str, amount: float, nota: str | None = None):
     """
