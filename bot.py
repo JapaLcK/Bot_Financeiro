@@ -335,7 +335,7 @@ def parse_receita_despesa_natural(user_id: int, text: str):
     if not raw_norm:
         return None
 
-    valor = parse_money(raw_norm)
+    valor = parse_money(text)
     if valor is None:
         return None
 
