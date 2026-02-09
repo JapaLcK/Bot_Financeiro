@@ -1327,7 +1327,7 @@ async def on_message(message: discord.Message):
         user_id = message.author.id
         bal = get_balance(user_id)
         
-        await message.reply(f"🏦 **Conta Corrente:** R$ {float(bal):.2f}")
+        await message.reply(f"🏦 **Conta Corrente:** {fmt_brl(float(bal))}")
         return
     
     # comando para ver CDI
