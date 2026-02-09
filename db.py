@@ -665,6 +665,52 @@ def get_latest_cdi(cur) -> tuple[date, float] | None:
 
     return None
 
+def get_latest_cdi_aa(cur) -> tuple[date, float] | None:
+    """
+    CDI a.a. (base 252) direto do SGS/BCB (série 4389).
+    Cacheia em market_rates com code='CDI_AA'.
+    """
+    cur.execute(
+        """
+        select ref_date, value
+        from market_rates
+        where code='CDI_AA'
+        order by ref_date desc
+        limit 1
+        """
+    )
+    row = cur.fetchone()
+    if row:
+        return row["ref_date"], float(row["value"])
+
+    today = date.today()
+    start = today - timedelta(days=10)
+
+    data = _fetch_sgs_series_json(4389, start, today)  # CDI a.a. :contentReference[oaicite:0]{index=0}
+    if not data:
+        return None
+
+    latest = None
+    for item in data:
+        d = datetime.strptime(item["data"], "%d/%m/%Y").date()
+        v = float(str(item["valor"]).replace(",", "."))
+        latest = (d, v)
+
+    if latest:
+        cur.execute(
+            """
+            insert into market_rates(code, ref_date, value)
+            values ('CDI_AA', %s, %s)
+            on conflict (code, ref_date) do update set value=excluded.value
+            """,
+            latest,
+        )
+        return latest
+
+    return None
+
+
+
 
 def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = None):
     """
