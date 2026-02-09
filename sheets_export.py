@@ -93,15 +93,17 @@ def _is_monetary_row(r) -> bool:
 
 
 # Exporta lançamentos monetários para a aba do mês e atualiza cards + donut no template do Sheets.
-def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: datetime):
+def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: datetime, worksheet_name: str | None = None):
+
     sh = _open_sheet()
 
     # Garante que o período esteja dentro de um único mês
     if start_dt.month != end_dt.month or start_dt.year != end_dt.year:
         raise ValueError("Período deve estar dentro do mesmo mês/ano (ex: 2026-02-01 a 2026-02-28).")
 
-    aba = month_sheet_name(start_dt)
+    aba = worksheet_name or month_sheet_name(start_dt)
     ws, created = ensure_month_ws(sh, aba)
+
 
     # Limpa apenas as áreas de dados se a aba já existia
     if not created:

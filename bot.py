@@ -19,6 +19,9 @@ from openpyxl import Workbook
 from openpyxl.chart import BarChart, PieChart, Reference
 from openpyxl.styles import Font, PatternFill, Alignment
 from sheets_export import export_rows_to_month_sheet
+import unicodedata
+from reports import setup_monthly_export
+
 
 
 
@@ -39,8 +42,6 @@ from sheets_export import export_rows_to_month_sheet
 
 
 # --------- helpers ---------
-
-import unicodedata
 
 def normalize_text(text: str) -> str:
     text = (text or "").strip().lower()
@@ -575,6 +576,7 @@ HELP_TEXT_FULL = (
 @bot.event
 async def on_ready():
     print(f"✅ Logado como {bot.user}")
+    setup_monthly_export(bot)
 
 @bot.event
 async def on_message(message: discord.Message):
