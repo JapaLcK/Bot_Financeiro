@@ -876,6 +876,8 @@ async def on_message(message: discord.Message):
         categoria = parsed["categoria"]
         nota = parsed.get("nota")
 
+        print("DEBUG 2 - antes de gravar:", parsed)
+
         launch_id, new_balance = add_launch_and_update_balance(
             user_id=user_id,
             tipo=tipo,
@@ -885,6 +887,7 @@ async def on_message(message: discord.Message):
         )
 
         emoji = "💸" if tipo == "despesa" else "💰"
+        print("DEBUG 3 - antes de responder:", parsed["valor"], "new_balance:", new_balance)
 
         await message.reply(
             f"{emoji} **{tipo.capitalize()} registrada**: {fmt_brl(valor)}\n"
