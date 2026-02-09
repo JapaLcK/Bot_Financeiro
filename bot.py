@@ -862,6 +862,9 @@ async def on_message(message: discord.Message):
         )
         return
 
+    def format_brl(v: float) -> str:
+        return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
 
    # Gasto/Receita natural (ex: "gastei 35 no ifood", "recebi 2500 salario")
     user_id = message.author.id
@@ -885,11 +888,12 @@ async def on_message(message: discord.Message):
         emoji = "💸" if tipo == "despesa" else "💰"
 
         await message.reply(
-            f"{emoji} **{tipo.capitalize()} registrada**: R$ {valor:.2f}\n"
-            f"🏷️ Categoria: {categoria}\n"
-            f"🏦 Conta: R$ {float(new_balance):.2f}\n"
+            f"{emoji} **{tipo.capitalize()} registrada**: {format_brl(valor)}\n"
+            f"🏷 Categoria: {categoria}\n"
+            f"🏦 Conta: {format_brl(float(new_balance))}\n"
             f"ID: #{launch_id}"
         )
+
         return
 
 
