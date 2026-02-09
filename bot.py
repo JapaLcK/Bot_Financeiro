@@ -937,8 +937,7 @@ async def on_message(message: discord.Message):
 
   # criar investimento (Postgres) — aceita taxa ao dia / ao mês / ao ano / %CDI
     if t.startswith("criar investimento"):
-        parts = text.split("criar investimento", 1)
-        rest = parts[1].strip() if len(parts) > 1 else ""
+        rest = text[len("criar investimento"):].strip()
         if not rest:
             await message.reply("Use: `criar investimento <nome> <taxa>% ao dia|ao mês|ao ano` ou `criar investimento <nome> <pct>% cdi`")
             return
