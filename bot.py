@@ -258,35 +258,37 @@ DEPOSIT_VERBS = [
     "mandei", "joguei", "colocar", "adicionar", "depositar", "por", "botar"
 ]
 
-import re
-
-import re
-
 def parse_money(text: str) -> float | None:
-    # tenta primeiro pegar números longos simples (ex: 1000, 25000)
-    m = re.search(r'(\d+(?:[.,]\d+)?)', text)
+    # captura números com possíveis milhares e decimais
+    m = re.search(r'(\d{1,3}(?:[.\s]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?)', text)
     if not m:
         return None
 
     raw = m.group(1).replace(" ", "")
 
-    # Se tiver ponto e vírgula, decide qual é decimal pelo último separador
+    # se tiver ponto e vírgula, decide o decimal pelo último
     if "," in raw and "." in raw:
         if raw.rfind(",") > raw.rfind("."):
-            # BR: 53.985,53
+            # BR: 1.000,50
             raw = raw.replace(".", "").replace(",", ".")
         else:
-            # US: 53,985.53
+            # US: 1,000.50
             raw = raw.replace(",", "")
     elif "," in raw:
         # BR: 1000,50
         raw = raw.replace(".", "").replace(",", ".")
-    # elif "." in raw:  # US: 1000.50 -> já está ok
+    elif "." in raw:
+        # Pode ser milhar (1.000) ou decimal (1000.50)
+        parts = raw.split(".")
+        if len(parts[-1]) == 3:  # 1.000 -> milhar
+            raw = raw.replace(".", "")
+        # senão: 1000.50 (decimal), deixa como está
 
     try:
         return float(raw)
     except ValueError:
         return None
+
 
 
 
