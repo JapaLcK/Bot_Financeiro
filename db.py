@@ -709,6 +709,27 @@ def get_latest_cdi_aa(cur) -> tuple[date, float] | None:
 
     return None
 
+def get_latest_cdi_daily_pct() -> float:
+    """
+    Retorna CDI diária em % ao dia (ex: 0.0550 significa 0.0550% ao dia).
+    Busca do BCB série 12 e usa o último valor disponível.
+    """
+    today = date.today()
+    start = today - timedelta(days=10)
+
+    data = _fetch_sgs_series_json(12, start, today)  # CDI diária % a.d.
+    if not data:
+        raise RuntimeError("CDI_DAILY_NOT_AVAILABLE")
+
+    latest = None
+    for item in data:
+        v = float(str(item["valor"]).replace(",", "."))
+        latest = v
+
+    if latest is None:
+        raise RuntimeError("CDI_DAILY_NOT_AVAILABLE")
+
+    return float(latest)
 
 
 
@@ -758,13 +779,21 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
         new_bal = Decimal(str(float(bal) * factor))
 
     else:
-        # modelo antigo (taxa fixa distribuída por dia útil)
         if period == "daily":
             daily_rate = rate
+
         elif period == "monthly":
             daily_rate = (1.0 + rate) ** (1.0 / 21.0) - 1.0
+
         elif period == "yearly":
             daily_rate = (1.0 + rate) ** (1.0 / 252.0) - 1.0
+
+        elif period == "cdi":
+            # rate aqui é o "multiplicador do CDI": 1.0 = 100% CDI, 1.1 = 110% CDI...
+            # Pega CDI diária (% a.d.) e aplica multiplicador
+            cdi_day_pct = get_latest_cdi_daily_pct()  # você vai criar essa função abaixo
+            daily_rate = (cdi_day_pct / 100.0) * rate
+
         else:
             daily_rate = 0.0
 
@@ -1228,8 +1257,9 @@ def create_investment_db(user_id: int, name: str, rate: float, period: str, nota
     if not name:
         raise ValueError("EMPTY_NAME")
 
-    if period not in ("daily", "monthly", "yearly"):
+    if period not in ("daily", "monthly", "yearly", "cdi"):
         raise ValueError("INVALID_PERIOD")
+
 
     r = Decimal(str(rate))
     if r <= 0:
