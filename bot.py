@@ -260,28 +260,34 @@ DEPOSIT_VERBS = [
 
 import re
 
+import re
+
 def parse_money(text: str) -> float | None:
-    m = re.search(r'(\d{1,3}(?:[.\s]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?)', text)
+    # tenta primeiro pegar números longos simples (ex: 1000, 25000)
+    m = re.search(r'(\d+(?:[.,]\d+)?)', text)
     if not m:
         return None
 
-    raw = m.group(1)
+    raw = m.group(1).replace(" ", "")
 
-    # remove espaços
-    raw = raw.replace(" ", "")
-
-    # Caso BR: 53.985,53
+    # Se tiver ponto e vírgula, decide qual é decimal pelo último separador
     if "," in raw and "." in raw:
-        raw = raw.replace(".", "").replace(",", ".")
-    # Caso só vírgula: 53985,53
+        if raw.rfind(",") > raw.rfind("."):
+            # BR: 53.985,53
+            raw = raw.replace(".", "").replace(",", ".")
+        else:
+            # US: 53,985.53
+            raw = raw.replace(",", "")
     elif "," in raw:
-        raw = raw.replace(",", ".")
-    # Caso só ponto: 53985.53 -> já está ok
+        # BR: 1000,50
+        raw = raw.replace(".", "").replace(",", ".")
+    # elif "." in raw:  # US: 1000.50 -> já está ok
 
     try:
         return float(raw)
     except ValueError:
         return None
+
 
 
 def parse_interest(text: str):
