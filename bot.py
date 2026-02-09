@@ -257,11 +257,31 @@ DEPOSIT_VERBS = [
     "mandei", "joguei", "colocar", "adicionar", "depositar", "por", "botar"
 ]
 
-def parse_money(text: str):
-    m = re.search(r'(\d+[.,]?\d*)', text)
+import re
+
+def parse_money(text: str) -> float | None:
+    m = re.search(r'(\d{1,3}(?:[.\s]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?)', text)
     if not m:
         return None
-    return float(m.group(1).replace(",", "."))
+
+    raw = m.group(1)
+
+    # remove espaços
+    raw = raw.replace(" ", "")
+
+    # Caso BR: 53.985,53
+    if "," in raw and "." in raw:
+        raw = raw.replace(".", "").replace(",", ".")
+    # Caso só vírgula: 53985,53
+    elif "," in raw:
+        raw = raw.replace(",", ".")
+    # Caso só ponto: 53985.53 -> já está ok
+
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
 
 def parse_interest(text: str):
     raw = text.lower()
