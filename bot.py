@@ -575,7 +575,8 @@ async def on_message(message: discord.Message):
     text = (message.content or "").strip()
     if not text:
         return
-    t = text.lower()
+    t = text.casefold()
+
 
     # Se existir uma ação pendente, processa "sim" / "não"
     pending = get_pending_action(message.author.id)
@@ -1574,7 +1575,6 @@ async def on_message(message: discord.Message):
         filename = f"dashboard_{start.isoformat()}_{end.isoformat()}.xlsx"
         await message.reply(file=discord.File(fp=bio, filename=filename))
         return
-
 
     # fallback com IA (apenas se fizer sentido financeiro)
     if should_use_ai(message.content):
