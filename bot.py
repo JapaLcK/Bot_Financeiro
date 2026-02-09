@@ -905,15 +905,28 @@ async def on_message(message: discord.Message):
 
 
 
-  # criar investimento (Postgres) — aceita taxa ao dia / ao mês / ao ano
+  # criar investimento (Postgres) — aceita taxa ao dia / ao mês / ao ano / %CDI
     if t.startswith("criar investimento"):
         parts = text.split("criar investimento", 1)
         rest = parts[1].strip() if len(parts) > 1 else ""
         if not rest:
-            await message.reply("Use: `criar investimento <nome> <taxa>% ao dia|ao mês|ao ano`")
+            await message.reply("Use: `criar investimento <nome> <taxa>% ao dia|ao mês|ao ano` ou `criar investimento <nome> <pct>% cdi`")
             return
-        
+
         m_cdi = re.search(r'(\d+(?:[.,]\d+)?)\s*%\s*(?:do\s*)?cdi\b', rest, flags=re.I)
+        m = re.search(r'(\d+(?:[.,]\d+)?)\s*%\s*(?:ao|a)\s*(dia|m[eê]s|ano)\b', rest, flags=re.I)
+
+        if not m_cdi and not m:
+            await message.reply(
+                "Não entendi a taxa/período. Exemplos:\n"
+                "• `criar investimento CDB 1% ao mês`\n"
+                "• `criar investimento Tesouro 0,03% ao dia`\n"
+                "• `criar investimento IPCA 12% ao ano`\n"
+                "• `criar investimento CDB 100% CDI`"
+            )
+            return
+
+        # --- CDI ---
         if m_cdi:
             num_str = m_cdi.group(1).replace(",", ".")
             try:
@@ -922,7 +935,7 @@ async def on_message(message: discord.Message):
                 await message.reply("Percentual do CDI inválido. Ex: `criar investimento CDB 110% cdi`")
                 return
 
-            rate = pct_cdi / 100.0   # 110% -> 1.10 (multiplicador)
+            rate = pct_cdi / 100.0       # 110% -> 1.10 (multiplicador)
             period = "cdi"
             periodo_str = f"{pct_cdi:.4g}% do CDI"
 
@@ -931,60 +944,32 @@ async def on_message(message: discord.Message):
                 await message.reply("Me diga o nome do investimento também. Ex: `criar investimento CDB 110% cdi`")
                 return
 
-            try:
-                launch_id, inv_id, canon = create_investment_db(
-                    message.author.id,
-                    name=name,
-                    rate=rate,
-                    period=period,
-                    nota=text
-                )
-            except Exception:
-                await message.reply("Deu erro ao criar investimento CDI (Postgres). Veja os logs.")
-                return
-
-            if launch_id is None:
-                await message.reply(f"ℹ️ O investimento **{canon}** já existe.")
-                return
-
-            await message.reply(
-                f"✅ Investimento criado: **{canon}** ({periodo_str}) (ID: #{launch_id})"
-            )
-            return
-
-        m = re.search(r'(\d+(?:[.,]\d+)?)\s*%\s*(?:ao|a)\s*(dia|m[eê]s|ano)\b', rest, flags=re.I)
-        if not m:
-            await message.reply(
-                "Não entendi a taxa/período. Exemplos:\n"
-                "• `criar investimento CDB 1% ao mês`\n"
-                "• `criar investimento Tesouro 0,03% ao dia`\n"
-                "• `criar investimento IPCA 12% ao ano`"
-            )
-            return
-
-        num_str = m.group(1).replace(",", ".")
-        try:
-            rate = float(num_str) / 100.0
-        except ValueError:
-            await message.reply("Taxa inválida. Ex: **1% ao mês**, **0,03% ao dia**, **12% ao ano**")
-            return
-
-        period_raw = m.group(2).lower()
-        if "dia" in period_raw:
-            period = "daily"
-            periodo_str = "ao dia"
-        elif "ano" in period_raw:
-            period = "yearly"
-            periodo_str = "ao ano"
+        # --- dia/mês/ano ---
         else:
-            period = "monthly"
-            periodo_str = "ao mês"
+            num_str = m.group(1).replace(",", ".")
+            try:
+                rate = float(num_str) / 100.0
+            except ValueError:
+                await message.reply("Taxa inválida. Ex: **1% ao mês**, **0,03% ao dia**, **12% ao ano**")
+                return
 
-        name = (rest[:m.start()] + rest[m.end():]).strip(" -–—")
-        if not name:
-            await message.reply("Me diga o nome do investimento também. Ex: `criar investimento CDB 1% ao mês`")
-            return
+            period_raw = m.group(2).lower()
+            if "dia" in period_raw:
+                period = "daily"
+                periodo_str = "ao dia"
+            elif "ano" in period_raw:
+                period = "yearly"
+                periodo_str = "ao ano"
+            else:
+                period = "monthly"
+                periodo_str = "ao mês"
 
+            name = (rest[:m.start()] + rest[m.end():]).strip(" -–—")
+            if not name:
+                await message.reply("Me diga o nome do investimento também. Ex: `criar investimento CDB 1% ao mês`")
+                return
+
+        # --- cria no DB (1 única vez) ---
         try:
             launch_id, inv_id, canon = create_investment_db(
                 message.author.id,
@@ -993,18 +978,20 @@ async def on_message(message: discord.Message):
                 period=period,
                 nota=text
             )
-        except Exception:
+        except Exception as e:
+            print("ERRO criar investimento:", repr(e))
             await message.reply("Deu erro ao criar investimento (Postgres). Veja os logs.")
             return
 
-        # já existia
         if launch_id is None:
             await message.reply(f"ℹ️ O investimento **{canon}** já existe.")
             return
 
-        await message.reply(
-            f"✅ Investimento criado: **{canon}** ({rate*100:.4g}% {periodo_str}) (ID: #{launch_id})"
-        )
+        # resposta
+        if period == "cdi":
+            await message.reply(f"✅ Investimento criado: **{canon}** ({periodo_str}) (ID: #{launch_id})")
+        else:
+            await message.reply(f"✅ Investimento criado: **{canon}** ({rate*100:.4g}% {periodo_str}) (ID: #{launch_id})")
         return
 
     # depósito natural em caixinha (ex: "coloquei 300 na emergencia")
