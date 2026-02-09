@@ -11,7 +11,7 @@ from db import init_db
 from dotenv import load_dotenv
 load_dotenv() #carrega o .env
 from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches, list_pockets, pocket_withdraw_to_account, create_pocket, pocket_deposit_from_account, delete_pocket, investment_withdraw_to_account, accrue_all_investments, create_investment, investment_deposit_from_account, delete_launch_and_rollback
-from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments, export_launches, get_launches_by_period, upsert_category_rule, get_memorized_category, get_conn, get_latest_cdi
+from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments, export_launches, get_launches_by_period, upsert_category_rule, get_memorized_category, get_conn, get_latest_cdi, get_latest_cdi_aa
 from ai_router import handle_ai_message, classify_category_with_gpt
 import io
 from datetime import date, datetime
@@ -1320,18 +1320,18 @@ async def on_message(message: discord.Message):
             # abre conexão/cur do jeito que você já usa no bot
          with get_conn() as conn:
             with conn.cursor() as cur:
-                res = get_latest_cdi(cur)
+                res = get_latest_cdi_aa(cur)
 
 
             if not res:
                 await message.reply("⚠️ Não consegui obter a CDI agora. Tente novamente mais tarde.")
                 return
 
-            ref_date, cdi_pct_day = res
+            ref_date, cdi_aa = res
             await message.reply(
-                f"📊 **CDI (último dia útil)**\n"
+                f"📊 **CDI (a.a.)**\n"
                 f"Data: **{ref_date.strftime('%d/%m/%Y')}**\n"
-                f"Valor: **{cdi_pct_day:.4f}% ao dia**"
+                f"Valor: **{cdi_aa:.2f}% ao ano**"
             )
             return
 
