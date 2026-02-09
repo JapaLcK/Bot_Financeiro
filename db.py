@@ -775,17 +775,6 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
 
         cdi_map = _get_cdi_daily_map(cur, start, end)  # {date: pct_ao_dia}
 
-        # DEBUG (põe isso agora pra descobrir por que não rendeu)
-        print("[CDI DEBUG]",
-              "inv_id=", inv_id,
-              "last_date=", last_date,
-              "today=", today,
-              "start=", start,
-              "end=", end,
-              "business_days_n=", n,
-              "cdi_map_len=", len(cdi_map),
-              "mult=", mult)
-
         factor = 1.0
         # IMPORTANTE: iterar em ordem de data
         for d in sorted(cdi_map.keys()):
