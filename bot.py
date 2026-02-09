@@ -1314,6 +1314,32 @@ async def on_message(message: discord.Message):
         await message.reply(f"🏦 **Conta Corrente:** R$ {float(bal):.2f}")
         return
     
+    # comando para ver CDI
+    if t in ["ver cdi", "cdi"]:
+        try:
+            # abre conexão/cur do jeito que você já usa no bot
+            with get_conn() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    res = get_latest_cdi(cur)
+
+            if not res:
+                await message.reply("⚠️ Não consegui obter a CDI agora. Tente novamente mais tarde.")
+                return
+
+            ref_date, cdi_pct_day = res
+            await message.reply(
+                f"📊 **CDI (último dia útil)**\n"
+                f"Data: **{ref_date.strftime('%d/%m/%Y')}**\n"
+                f"Valor: **{cdi_pct_day:.4f}% ao dia**"
+            )
+            return
+
+        except Exception as e:
+            print("Erro ao buscar CDI:", e)
+            await message.reply("❌ Erro ao buscar a CDI. Veja os logs.")
+            return
+
+    
     # Exporta para Google Sheets (template dashboard)
     if t.startswith("exportar sheets"):
         parts = text.split()

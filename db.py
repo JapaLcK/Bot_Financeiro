@@ -619,6 +619,53 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
 
     return cached
 
+def get_latest_cdi(cur) -> tuple[date, float] | None:
+    """
+    Retorna (data, valor_percent_ao_dia) da CDI mais recente no cache.
+    Se não houver cache recente, busca do BCB (últimos 10 dias) e salva.
+    """
+    # tenta pegar do cache
+    cur.execute(
+        """
+        select ref_date, value
+        from market_rates
+        where code='CDI'
+        order by ref_date desc
+        limit 1
+        """
+    )
+    row = cur.fetchone()
+    if row:
+        return row["ref_date"], float(row["value"])
+
+    # fallback: busca últimos 10 dias do BCB e cacheia
+    today = date.today()
+    start = today - timedelta(days=10)
+
+    data = _fetch_sgs_series_json(12, start, today)  # série 12 = CDI (% a.d.)
+    if not data:
+        return None
+
+    latest = None
+    for item in data:
+        d = datetime.strptime(item["data"], "%d/%m/%Y").date()
+        v = float(str(item["valor"]).replace(",", "."))
+        latest = (d, v)
+
+    if latest:
+        cur.execute(
+            """
+            insert into market_rates(code, ref_date, value)
+            values ('CDI', %s, %s)
+            on conflict (code, ref_date) do update set value=excluded.value
+            """,
+            latest,
+        )
+        return latest
+
+    return None
+
+
 def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = None):
     """
     Atualiza (balance, last_date) do investment aplicando juros por dias úteis.
