@@ -7,6 +7,7 @@ from decimal import Decimal
 from datetime import datetime, date
 import math
 from datetime import timedelta, timezone
+import requests
 
 
 
@@ -80,6 +81,13 @@ def init_db():
         UNIQUE (user_id, keyword)
     );
 
+    create table if not exists market_rates (
+        code text not null,        -- ex: 'CDI'
+        ref_date date not null,    -- data do índice
+        value numeric not null,    -- valor do índice no dia (em % a.d. vindo do BCB)
+        created_at timestamptz default now(),
+        primary key (code, ref_date)
+        );
 
     """
     with get_conn() as conn:
@@ -550,6 +558,67 @@ def _business_days_between(d1: date, d2: date) -> int:
         if cur.weekday() < 5:
             days += 1
     return days
+
+def _fmt_ddmmyyyy(d: date) -> str:
+    return d.strftime("%d/%m/%Y")
+
+def _fetch_sgs_series_json(series_code: int, start: date, end: date) -> list[dict]:
+    # BCB SGS JSON interface (sempre com filtro de datas)
+    url = f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{series_code}/dados"
+    params = {
+        "formato": "json",
+        "dataInicial": _fmt_ddmmyyyy(start),
+        "dataFinal": _fmt_ddmmyyyy(end),
+    }
+    r = requests.get(url, params=params, timeout=20)
+    r.raise_for_status()
+    return r.json()
+
+def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
+    """
+    Retorna dict {date: cdi_percent_per_day}
+    - usa cache em market_rates
+    - busca no BCB o que estiver faltando
+    """
+    if end <= start:
+        return {}
+
+    # 1) pega o que já tem no cache
+    cur.execute(
+        """
+        select ref_date, value
+        from market_rates
+        where code='CDI' and ref_date >= %s and ref_date <= %s
+        order by ref_date
+        """,
+        (start, end),
+    )
+    cached = {row["ref_date"]: float(row["value"]) for row in cur.fetchall()}
+
+    # 2) se faltou algo, busca do BCB e salva
+    # (buscar o range inteiro é simples e barato; o BCB devolve só dias úteis/feriados úteis)
+    data = _fetch_sgs_series_json(12, start, end)  # série 12 = CDI (% p.d.)
+    to_upsert = []
+    for item in data:
+        # item: {"data":"06/01/2026","valor":"0.0xxx"}
+        d = datetime.strptime(item["data"], "%d/%m/%Y").date()
+        v = float(str(item["valor"]).replace(",", "."))
+        if d not in cached:
+            to_upsert.append((d, v))
+        cached[d] = v
+
+    if to_upsert:
+        cur.executemany(
+            """
+            insert into market_rates(code, ref_date, value)
+            values ('CDI', %s, %s)
+            on conflict (code, ref_date) do update set value=excluded.value
+            """,
+            to_upsert,
+        )
+
+    return cached
+
 def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = None):
     """
     Atualiza (balance, last_date) do investment aplicando juros por dias úteis.
@@ -578,27 +647,47 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
     rate = float(inv["rate"])
     period = inv["period"]
 
-    if period == "daily":
-        daily_rate = rate
-    elif period == "monthly":
-        daily_rate = (1.0 + rate) ** (1.0 / 21.0) - 1.0
-    elif period == "yearly":
-        daily_rate = (1.0 + rate) ** (1.0 / 252.0) - 1.0
-    else:
-        daily_rate = 0.0
+    if period == "cdi":
+        # rate aqui vira "multiplicador do CDI":
+        # 1.00 = 100% CDI, 1.10 = 110% CDI, etc.
+        mult = float(inv["rate"])
 
-    if daily_rate > 0:
-        factor = (1.0 + daily_rate) ** n
+        start = last_date + timedelta(days=1)
+        end = today
+
+        cdi_map = _get_cdi_daily_map(cur, start, end)
+
+        # produto diário (varia por dia) — usa somente dias que existem na série
+        factor = 1.0
+        for d, cdi_pct_per_day in cdi_map.items():
+            factor *= (1.0 + (cdi_pct_per_day / 100.0) * mult)
+
         new_bal = Decimal(str(float(bal) * factor))
-    else:
-        new_bal = bal
 
-    # salva
-    cur.execute(
-        "update investments set balance=%s, last_date=%s where id=%s",
-        (new_bal, today, inv_id),
-    )
-    return new_bal
+    else:
+        # modelo antigo (taxa fixa distribuída por dia útil)
+        if period == "daily":
+            daily_rate = rate
+        elif period == "monthly":
+            daily_rate = (1.0 + rate) ** (1.0 / 21.0) - 1.0
+        elif period == "yearly":
+            daily_rate = (1.0 + rate) ** (1.0 / 252.0) - 1.0
+        else:
+            daily_rate = 0.0
+
+        if daily_rate > 0:
+            factor = (1.0 + daily_rate) ** n
+            new_bal = Decimal(str(float(bal) * factor))
+        else:
+            new_bal = bal
+
+
+        # salva
+        cur.execute(
+            "update investments set balance=%s, last_date=%s where id=%s",
+            (new_bal, today, inv_id),
+        )
+        return new_bal
 
 def investment_withdraw_to_account(user_id: int, investment_name: str, amount: float, nota: str | None = None):
     """

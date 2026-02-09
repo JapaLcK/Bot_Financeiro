@@ -62,9 +62,12 @@ LOCAL_RULES = [
     (["psicologo", "psicologa", "terapia", "terapeuta", "psiquiatra"], "saúde"),
     (["petshop", "pet shop", "racao", "veterinario", "vet", "banho", "tosa"], "pets"),
     (["ifood", "restaurante", "lanchonete"], "alimentação"),
+    (["livro", "livros", "ebook", "curso", "cursos", "aula", "aulas", "material", "apostila", "faculdade", "escola"], "educação"),
     (["uber", "99", "taxi", "metro", "onibus", "gasolina", "combustivel"], "transporte"),
     (["academia", "remedio", "farmacia", "dentista", "consulta"], "saúde"),
     (["netflix", "spotify", "youtube", "prime video", "disney"], "assinaturas"),
+    
+
 ]
 
 STOPWORDS_PT = {
@@ -908,6 +911,45 @@ async def on_message(message: discord.Message):
         rest = parts[1].strip() if len(parts) > 1 else ""
         if not rest:
             await message.reply("Use: `criar investimento <nome> <taxa>% ao dia|ao mês|ao ano`")
+            return
+        
+        m_cdi = re.search(r'(\d+(?:[.,]\d+)?)\s*%\s*(?:do\s*)?cdi\b', rest, flags=re.I)
+        if m_cdi:
+            num_str = m_cdi.group(1).replace(",", ".")
+            try:
+                pct_cdi = float(num_str)  # ex: 110
+            except ValueError:
+                await message.reply("Percentual do CDI inválido. Ex: `criar investimento CDB 110% cdi`")
+                return
+
+            rate = pct_cdi / 100.0   # 110% -> 1.10 (multiplicador)
+            period = "cdi"
+            periodo_str = f"{pct_cdi:.4g}% do CDI"
+
+            name = (rest[:m_cdi.start()] + rest[m_cdi.end():]).strip(" -–—")
+            if not name:
+                await message.reply("Me diga o nome do investimento também. Ex: `criar investimento CDB 110% cdi`")
+                return
+
+            try:
+                launch_id, inv_id, canon = create_investment_db(
+                    message.author.id,
+                    name=name,
+                    rate=rate,
+                    period=period,
+                    nota=text
+                )
+            except Exception:
+                await message.reply("Deu erro ao criar investimento CDI (Postgres). Veja os logs.")
+                return
+
+            if launch_id is None:
+                await message.reply(f"ℹ️ O investimento **{canon}** já existe.")
+                return
+
+            await message.reply(
+                f"✅ Investimento criado: **{canon}** ({periodo_str}) (ID: #{launch_id})"
+            )
             return
 
         m = re.search(r'(\d+(?:[.,]\d+)?)\s*%\s*(?:ao|a)\s*(dia|m[eê]s|ano)\b', rest, flags=re.I)
