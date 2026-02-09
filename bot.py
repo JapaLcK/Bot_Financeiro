@@ -516,11 +516,19 @@ HELP_TEXT_FULL = (
     "📈 **Investimentos**\n"
     "• `criar investimento CDB Nubank 1% ao mês`\n"
     "• `criar investimento Tesouro 0,03% ao dia`\n"
+    "• `criar investimento CDB 110% CDI`\n"
     "• `apliquei 200 no investimento CDB Nubank`\n"
     "• `retirei 100 do investimento CDB Nubank`\n"
     "• `saldo investimentos`\n"
     "• `listar investimentos`\n"
     "• `excluir investimento CDB Nubank`\n\n"
+
+    "📊 **CDI**\n"
+    "• `ver cdi`\n\n"
+
+    "📤 **Exportar para Google Sheets**\n"
+    "• `exportar sheets`\n"
+    "• `exportar sheets 2026-02-01 2026-02-28`\n\n"
 
     "🧾 **Lançamentos**\n"
     "• `listar lançamentos`\n"
