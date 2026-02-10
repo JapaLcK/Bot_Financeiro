@@ -1544,6 +1544,41 @@ def get_launches_by_period(user_id: int, start_date: date, end_date: date):
             cur.execute(sql, (user_id, start_dt, end_excl))
             return cur.fetchall()
         
+
+# pega o resumo de lancamentos por periodo
+def get_summary_by_period(user_id: int, start_date: date, end_date: date):
+    """
+    Retorna soma por tipo no período [start_date, end_date] (inclusive),
+    usando criado_em como referência (mesma lógica de get_launches_by_period).
+    """
+    ensure_user(user_id)
+
+    start_dt = datetime.combine(start_date, datetime.min.time())
+    end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+
+    sql = """
+        select tipo, coalesce(sum(valor), 0) as total
+        from launches
+        where user_id=%s
+          and criado_em >= %s
+          and criado_em < %s
+        group by tipo
+    """
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (user_id, start_dt, end_excl))
+            rows = cur.fetchall()  # ex: [("despesa", Decimal("10.50")), ("receita", ...)]
+
+    # defaults para não quebrar o output
+    out = {"receita": 0.0, "despesa": 0.0, "aporte_investimento": 0.0}
+    for tipo, total in rows:
+        if tipo in out:
+            out[tipo] = float(total or 0)
+
+    return out
+
+        
 # Busca uma categoria memorizada pelo user_id com base no texto (keyword contida no texto)
 def get_memorized_category(user_id: int, text: str) -> str | None:
     text = (text or "").lower()
