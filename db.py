@@ -497,7 +497,7 @@ def create_investment(user_id: int, name: str, rate: float, period: str, nota: s
 
     criado_em = datetime.now(_tz())
 
-    last_date = date.today()
+    last_date = datetime.now(_tz()).date()
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -645,7 +645,7 @@ def get_latest_cdi(cur) -> tuple[date, float] | None:
         return row["ref_date"], float(row["value"])
 
     # fallback: busca últimos 10 dias do BCB e cacheia
-    today = date.today()
+    today = datetime.now(_tz()).date()
     start = today - timedelta(days=10)
 
     data = _fetch_sgs_series_json(12, start, today)  # série 12 = CDI (% a.d.)
@@ -689,7 +689,7 @@ def get_latest_cdi_aa(cur) -> tuple[date, float] | None:
     if row:
         return row["ref_date"], float(row["value"])
 
-    today = date.today()
+    today = datetime.now(_tz()).date()
     start = today - timedelta(days=10)
 
     data = _fetch_sgs_series_json(4389, start, today)  # CDI a.a. :contentReference[oaicite:0]{index=0}
@@ -720,7 +720,7 @@ def get_latest_cdi_daily_pct() -> float:
     Retorna CDI diária em % ao dia (ex: 0.0550 significa 0.0550% ao dia).
     Busca do BCB série 12 e usa o último valor disponível.
     """
-    today = date.today()
+    today = datetime.now(_tz()).date()
     start = today - timedelta(days=10)
 
     data = _fetch_sgs_series_json(12, start, today)  # CDI diária % a.d.
@@ -747,7 +747,7 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
     cdi    -> aplica CDI diária do período (mapa), multiplicada pelo "mult" (ex 1.10 = 110% CDI)
     """
     if today is None:
-        today = date.today()
+        today = datetime.now(_tz()).date()
 
     cur.execute(
         "select id, balance, rate, period, last_date from investments where id=%s and user_id=%s for update",
@@ -830,7 +830,7 @@ def investment_withdraw_to_account(user_id: int, investment_name: str, amount: f
 
     criado_em = datetime.now(_tz())
 
-    today = date.today()
+    today = datetime.now(_tz()).date()
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -916,7 +916,7 @@ def accrue_all_investments(user_id: int):
     Retorna lista dos investimentos já atualizados.
     """
     ensure_user(user_id)
-    today = date.today()
+    today = datetime.now(_tz()).date()
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -982,7 +982,7 @@ def _accrue_investment_row(cur, user_id: int, inv_name: str):
     rate = Decimal(inv["rate"])
     period = inv["period"]
     last = inv["last_date"]
-    today = date.today()
+    today = datetime.now(_tz()).date()
 
     if last >= today:
         return bal  # nada a fazer
@@ -1027,7 +1027,7 @@ def investment_deposit_from_account(user_id: int, investment_name: str, amount: 
 
     criado_em = datetime.now(_tz())
 
-    today = date.today()
+    today = datetime.now(_tz()).date()
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -1162,7 +1162,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
                 last_date_str = delete_investment.get("last_date")
 
                 if nome:
-                    ld = date.fromisoformat(last_date_str) if last_date_str else date.today()
+                    ld = date.fromisoformat(last_date_str) if last_date_str else datetime.now(_tz()).date()
                     cur.execute(
                         """
                         insert into investments(user_id, name, balance, rate, period, last_date)
@@ -1393,7 +1393,7 @@ def delete_investment(user_id: int, investment_name: str, nota: str | None = Non
                     "balance": 0.0,
                     "rate": float(inv["rate"]),
                     "period": inv["period"],
-                    "last_date": inv["last_date"].isoformat() if inv["last_date"] else date.today().isoformat(),
+                    "last_date": inv["last_date"].isoformat() if inv["last_date"] else datetime.now(_tz()).date().isoformat(),
                 },
             }
 

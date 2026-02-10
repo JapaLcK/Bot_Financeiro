@@ -20,7 +20,7 @@ from openpyxl.chart import BarChart, PieChart, Reference
 from openpyxl.styles import Font, PatternFill, Alignment
 from sheets_export import export_rows_to_month_sheet
 import unicodedata
-from reports import setup_monthly_export
+from reports import setup_monthly_export, _tz  
 
 
 
@@ -102,7 +102,7 @@ def parse_date_str(s: str) -> date:
     raise ValueError("Data inválida. Use YYYY-MM-DD ou DD/MM/YYYY.")
 
 def month_range_today():
-    today = date.today()
+    today = datetime.now(_tz()).date()
     start = today.replace(day=1)
     if today.month == 12:
         end = today.replace(day=31)
@@ -201,7 +201,7 @@ def accrue_investment(inv: dict, today: date | None = None) -> None:
     SOMENTE em dias úteis, com taxa convertida corretamente por período.
     """
     if today is None:
-        today = date.today()
+        today = datetime.now(_tz()).date()
 
     last = inv.get("last_date")
     if not isinstance(last, date):
