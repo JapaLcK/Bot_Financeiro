@@ -8,7 +8,7 @@ from datetime import datetime, date
 import math
 from datetime import timedelta, timezone
 import requests
-from reports import _tz
+from timezone import _tz
 
 
 

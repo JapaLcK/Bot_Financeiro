@@ -3,6 +3,7 @@ from datetime import datetime, date, timedelta, time
 from zoneinfo import ZoneInfo
 import os
 from discord.ext import tasks
+from timezone import _tz
 
 
 
@@ -38,10 +39,6 @@ def list_user_ids():
             cur.execute("select distinct user_id from launches order by user_id asc")
             rows = cur.fetchall()
             return [r["user_id"] for r in rows]
-
-
-def _tz():
-    return ZoneInfo(os.getenv("REPORT_TIMEZONE", "America/Cuiaba"))
 
 def setup_monthly_export(bot):
     """
