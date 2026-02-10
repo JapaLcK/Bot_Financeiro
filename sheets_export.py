@@ -161,11 +161,11 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
         origem = (r.get("origem") or "").strip()
 
         values.append([
-            data_str,   # A (Data)
             tipo,       # B (Tipo)
             categoria,  # C (Categoria)
             descricao,  # D (Descrição)
             _to_sheet_value(valor),  # E (Valor)
+            data_str,   # A (Data)
             origem,     # F (Origem)
         ])
 
