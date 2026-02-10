@@ -22,6 +22,8 @@ from sheets_export import export_rows_to_month_sheet
 import unicodedata
 from reports import setup_monthly_export
 from timezone import _tz  
+from commands.resumo import handle_resumo
+
 
 
 
@@ -647,8 +649,12 @@ async def on_message(message: discord.Message):
                 "Responda **sim** para confirmar ou **não** para cancelar."
             )
         return
+    
 
-
+    # comandos de consulta (não são lançamentos)
+    if t.startswith("resumo"):
+        await handle_resumo(message, message.author.id, t)
+        return
 
 
     if t in ["listar caixinhas", "saldo caixinhas", "caixinhas"]:
