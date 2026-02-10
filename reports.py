@@ -41,7 +41,7 @@ def list_user_ids():
 
 
 def _tz():
-    return ZoneInfo(os.getenv("REPORT_TIMEZONE", "America/Sao_Paulo"))
+    return ZoneInfo(os.getenv("REPORT_TIMEZONE", "America/Cuiaba"))
 
 def setup_monthly_export(bot):
     """

@@ -8,6 +8,7 @@ from datetime import datetime, date
 import math
 from datetime import timedelta, timezone
 import requests
+from reports import _tz
 
 
 
@@ -128,7 +129,7 @@ def add_launch_and_update_balance(user_id: int, tipo: str, valor: float, alvo: s
         # se tiver outros tipos depois, você decide a regra
         raise ValueError(f"tipo inválido: {tipo}")
 
-    criado_em = datetime.now().isoformat(timespec="seconds")
+    criado_em = datetime.now(_tz()).isoformat(timespec="seconds")
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -190,7 +191,8 @@ def pocket_withdraw_to_account(user_id: int, pocket_name: str, amount: float, no
     if v <= 0:
         raise ValueError("AMOUNT_INVALID")
 
-    criado_em = datetime.now()
+    criado_em = datetime.now(_tz())
+
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -265,7 +267,8 @@ def create_pocket(user_id: int, name: str, nota: str | None = None):
     if not name:
         raise ValueError("EMPTY_NAME")
 
-    criado_em = datetime.now()
+    criado_em = datetime.now(_tz())
+
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -339,7 +342,8 @@ def pocket_deposit_from_account(user_id: int, pocket_name: str, amount: float, n
     if v <= 0:
         raise ValueError("AMOUNT_INVALID")
 
-    criado_em = datetime.now()
+    criado_em = datetime.now(_tz())
+
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -417,7 +421,8 @@ def delete_pocket(user_id: int, pocket_name: str):
     if not pocket_name:
         raise ValueError("EMPTY_NAME")
 
-    criado_em = datetime.now()
+    criado_em = datetime.now(_tz())
+
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -490,7 +495,8 @@ def create_investment(user_id: int, name: str, rate: float, period: str, nota: s
     if r <= 0:
         raise ValueError("BAD_RATE")
 
-    criado_em = datetime.now()
+    criado_em = datetime.now(_tz())
+
     last_date = date.today()
 
     with get_conn() as conn:
@@ -822,7 +828,8 @@ def investment_withdraw_to_account(user_id: int, investment_name: str, amount: f
     if v <= 0:
         raise ValueError("AMOUNT_INVALID")
 
-    criado_em = datetime.now()
+    criado_em = datetime.now(_tz())
+
     today = date.today()
 
     with get_conn() as conn:
@@ -1018,7 +1025,8 @@ def investment_deposit_from_account(user_id: int, investment_name: str, amount: 
     if v <= 0:
         raise ValueError("AMOUNT_INVALID")
 
-    criado_em = datetime.now()
+    criado_em = datetime.now(_tz())
+
     today = date.today()
 
     with get_conn() as conn:
@@ -1266,7 +1274,8 @@ def create_investment_db(user_id: int, name: str, rate: float, period: str, nota
     if r <= 0:
         raise ValueError("INVALID_RATE")
 
-    criado_em = datetime.now()
+    criado_em = datetime.now(_tz())
+
     today = date.today()
 
     with get_conn() as conn:
@@ -1343,7 +1352,8 @@ def delete_investment(user_id: int, investment_name: str, nota: str | None = Non
     if not investment_name:
         raise ValueError("EMPTY_NAME")
 
-    criado_em = datetime.now()
+    criado_em = datetime.now(_tz())
+
 
     with get_conn() as conn:
         with conn.cursor() as cur:
