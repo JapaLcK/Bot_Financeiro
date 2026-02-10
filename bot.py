@@ -653,8 +653,9 @@ async def on_message(message: discord.Message):
 
     # comandos de consulta (não são lançamentos)
     if t.startswith("resumo"):
-        await handle_resumo(message, message.author.id, t)
-        return
+        await handle_resumo(message, message.author.id, message.content)
+    return
+
 
 
     if t in ["listar caixinhas", "saldo caixinhas", "caixinhas"]:
