@@ -114,7 +114,7 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
         tipo = (r.get("tipo") or "").strip().lower()
         # Tipos que SEMPRE são movimento de dinheiro
         if tipo in {"receita", "despesa", "transferencia", "transferência", "saque", "deposito", "depósito",
-                    "investimento", "aplicacao", "aplicação", "resgate", "resgate_investimento", "aporte_investimento"}:
+                    "investimento", "aplicacao", "aplicação", "resgate"}:
             return True
 
         # Se tiver valor numérico != 0, consideramos movimento
@@ -171,21 +171,9 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
 
         if tipo == "receita":
             total_rec += valor
-
         elif tipo == "despesa":
             total_des += valor
             despesas_por_categoria[categoria] = despesas_por_categoria.get(categoria, 0.0) + float(valor)
-
-        elif tipo == "aporte_investimento":
-            # Aporte é saída de dinheiro da conta -> entra como "categoria" no dashboard
-            total_des += valor
-            despesas_por_categoria["investimentos"] = despesas_por_categoria.get("investimentos", 0.0) + float(valor)
-
-        elif tipo in {"resgate_investimento", "resgate"}:
-            # Resgate é entrada na conta. Se você quiser que apareça em "Categorias" também,
-            # dá pra somar em receitas_por_categoria (mas seu dashboard hoje só plota despesas).
-            total_rec += valor
-
 
     # Envia lançamentos + cards + donut em batch_update (mais estável)
     saldo_periodo = total_rec - total_des
