@@ -114,7 +114,7 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
         tipo = (r.get("tipo") or "").strip().lower()
         # Tipos que SEMPRE são movimento de dinheiro
         if tipo in {"receita", "despesa", "transferencia", "transferência", "saque", "deposito", "depósito",
-                    "investimento", "aplicacao", "aplicação", "resgate"}:
+                    "investimento", "aplicacao", "aplicação", "resgate", "aporte_investimento"}:
             return True
 
         # Se tiver valor numérico != 0, consideramos movimento
@@ -148,8 +148,8 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
 
         tipo = (r.get("tipo") or "").strip().lower()
 
-        # Categoria: qualquer uma (não limita). Se vazio, cai em "Outros"
-        categoria = (r.get("alvo") or "").strip() or "Outros"
+       # Categoria (dashboard) vem do banco
+        categoria = (r.get("categoria") or "").strip() or "Outros"
 
         # Descrição
         descricao = (r.get("nota") or "").strip()
@@ -157,8 +157,8 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
         # Valor sempre numérico pro Sheets
         valor = float(r.get("valor") or 0)
 
-        # Origem (se tiver)
-        origem = (r.get("origem") or "").strip()
+        # Origem: para investimentos/caixinhas, use "alvo" (ex: nome do investimento)
+        origem = (r.get("alvo") or "").strip()
 
         values.append([
             tipo,       # B (Tipo)
