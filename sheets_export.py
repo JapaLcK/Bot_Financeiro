@@ -144,7 +144,13 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
             continue
 
         dt = r.get("criado_em")
-        data_str = dt.strftime("%d/%m/%Y") if hasattr(dt, "strftime") else (str(dt) if dt else "")
+
+        # ✅ ISO (YYYY-MM-DD) pra Sheets reconhecer como data real
+        if hasattr(dt, "date"):
+            data_str = dt.date().isoformat()
+        else:
+            data_str = ""
+
 
         tipo = (r.get("tipo") or "").strip().lower()
 
