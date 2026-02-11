@@ -59,7 +59,6 @@ def init_db():
       valor numeric not null,
       alvo text,                  -- categoria/caixinha/investimento
       nota text,
-      categoria text, 
       criado_em timestamptz not null default now(),
       efeitos jsonb
     );
@@ -124,11 +123,10 @@ def add_launch_and_update_balance(user_id: int, tipo: str, valor: float, alvo: s
     v = Decimal(str(valor))
     if tipo == "despesa":
         delta = -v
-        categoria = None  # despesa: categoria vem do classificador (em outro fluxo). aqui pode ficar NULL.
     elif tipo == "receita":
         delta = +v
-        categoria = "receita"  # receita: regra fixa
     else:
+        # se tiver outros tipos depois, você decide a regra
         raise ValueError(f"tipo inválido: {tipo}")
 
     criado_em = datetime.now(_tz()).isoformat(timespec="seconds")
@@ -145,18 +143,17 @@ def add_launch_and_update_balance(user_id: int, tipo: str, valor: float, alvo: s
             # grava lançamento
             cur.execute(
                 """
-                insert into launches(user_id, tipo, valor, alvo, nota, categoria, criado_em, efeitos)
-                values (%s,%s,%s,%s,%s,%s,%s,%s)
+                insert into launches(user_id, tipo, valor, alvo, nota, criado_em, efeitos)
+                values (%s,%s,%s,%s,%s,%s,%s)
                 returning id
                 """,
-                (user_id, tipo, v, alvo, nota, categoria, criado_em, Json({"delta_conta": float(delta)})),
+                (user_id, tipo, v, alvo, nota, criado_em, Json({"delta_conta": float(delta)})),
             )
             launch_id = cur.fetchone()["id"]
 
         conn.commit()
 
     return launch_id, new_bal
-
 
 def list_launches(user_id: int, limit: int = 10):
     ensure_user(user_id)
@@ -1084,17 +1081,14 @@ def investment_deposit_from_account(user_id: int, investment_name: str, amount: 
                 "create_investment": None,
             }
 
-            categoria = "investimentos"
-
             cur.execute(
                 """
-                insert into launches(user_id, tipo, valor, alvo, nota, categoria, criado_em, efeitos)
-                values (%s,%s,%s,%s,%s,%s,%s,%s)
+                insert into launches(user_id, tipo, valor, alvo, nota, criado_em, efeitos)
+                values (%s,%s,%s,%s,%s,%s,%s)
                 returning id
                 """,
-                (user_id, "aporte_investimento", v, inv_name_canon, nota, categoria, criado_em, Jsonb(efeitos)),
+                (user_id, "aporte_investimento", v, inv_name_canon, nota, criado_em, Jsonb(efeitos)),
             )
-
             launch_id = cur.fetchone()["id"]
 
         conn.commit()
