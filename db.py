@@ -1875,38 +1875,28 @@ def _bill_period_for_purchase(purchased_at: date, closing_day: int):
     return period_start, period_end
 
 
-
 def get_or_create_open_bill(card_id: int, purchased_at: date) -> int:
+    """
+    Escolhe a fatura correta para uma compra em `purchased_at`:
+    - Se dia da compra > closing_day: cai na fatura do mês seguinte (que fecha no closing do próximo mês)
+    - Senão: cai na fatura do mês atual
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("select closing_day from credit_cards where id=%s", (card_id,))
-            closing_day = cur.fetchone()["closing_day"]
-
-            ps, pe = _bill_period_for_purchase(purchased_at, closing_day)
-
-            cur.execute(
-                """
-                select id from credit_bills
-                where card_id=%s and period_start=%s and period_end=%s
-                """,
-                (card_id, ps, pe),
-            )
             row = cur.fetchone()
-            if row:
-                return row["id"]
+            if not row:
+                raise ValueError("Cartão não encontrado.")
+            closing_day = int(row["closing_day"])
 
-            cur.execute(
-                """
-                insert into credit_bills (card_id, period_start, period_end, status, total)
-                values (%s, %s, %s, 'open', 0)
-                returning id
-                """,
-                (card_id, ps, pe),
-            )
-            bill_id = cur.fetchone()["id"]
-        conn.commit()
-    return bill_id
+    y, m = purchased_at.year, purchased_at.month
 
+    # compra após o fechamento -> próxima fatura
+    if purchased_at.day > closing_day:
+        y, m = add_months(y, m, 1)
+
+    ps, pe = bill_period_for_month(y, m, closing_day)
+    return get_or_create_bill_by_period(card_id, ps, pe)
 
 def add_credit_purchase(
     user_id: int,
@@ -2040,13 +2030,26 @@ def add_months(y: int, m: int, delta: int) -> tuple[int, int]:
     #  - até o fechamento -> fatura do mês corrente
     #  - após o fechamento -> próxima fatura
 
-def bill_period_for_month(year: int, month: int, closing_day: int):
-    period_end = _safe_date(year, month, closing_day)
-    py, pm = _prev_month(year, month)
-    prev_end = _safe_date(py, pm, closing_day)
-    period_start = prev_end + timedelta(days=1)
-    return period_start, period_end
+def _last_day_of_month(y: int, m: int) -> int:
+    return calendar.monthrange(y, m)[1]
 
+
+def bill_period_for_month(year: int, month: int, closing_day: int) -> tuple[date, date]:
+    """
+    Período da fatura que FECHA no dia `closing_day` do mês (year, month).
+
+    Ex: closing_day=10, year=2026, month=4  ->  11/03/2026 a 10/04/2026
+    """
+    # fim = closing_day do mês (clamp se mês não tem esse dia)
+    end_day = min(int(closing_day), _last_day_of_month(year, month))
+    period_end = date(year, month, end_day)
+
+    # início = closing_day+1 do mês anterior (clamp também)
+    prev_y, prev_m = add_months(year, month, -1)
+    start_day = min(int(closing_day) + 1, _last_day_of_month(prev_y, prev_m))
+    period_start = date(prev_y, prev_m, start_day)
+
+    return period_start, period_end
 
     """
     Busca uma fatura por período (card_id + period_start + period_end).
