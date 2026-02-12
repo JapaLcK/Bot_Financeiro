@@ -53,6 +53,7 @@ from utils_text import (
     parse_note_after_amount,
     parse_expense_income_natural,
 )
+from investment_parse import parse_interest
 
 
 
@@ -82,114 +83,7 @@ from utils_text import (
 
 # --------- helpers ---------
 
-def is_business_day(d: date) -> bool:
-    return d.weekday() < 5  # 0=seg ... 4=sex
 
-def business_days_in_month(year: int, month: int) -> int:
-    _, last_day = calendar.monthrange(year, month)
-    count = 0
-    for day in range(1, last_day + 1):
-        if is_business_day(date(year, month, day)):
-            count += 1
-    return count
-
-def business_days_in_year(year: int) -> int:
-    start = date(year, 1, 1)
-    end = date(year, 12, 31)
-    d = start
-    count = 0
-    while d <= end:
-        if is_business_day(d):
-            count += 1
-        d += timedelta(days=1)
-    return count
-
-def daily_business_rate(inv: dict, on_day: date) -> float:
-    """
-    Converte a taxa do investimento (ao dia/mês/ano) para taxa POR DIA ÚTIL,
-    correta para o dia 'on_day' (muda conforme mês/ano).
-    """
-    r = float(inv.get("rate", 0.0))
-    period = inv.get("period")
-
-    if r == 0.0:
-        return 0.0
-
-    if period == "daily":
-        return r  # 1% ao dia => 1% por dia útil (você pediu assim)
-
-    if period == "monthly":
-        n = business_days_in_month(on_day.year, on_day.month)
-        if n <= 0:
-            return 0.0
-        return (1.0 + r) ** (1.0 / n) - 1.0
-
-    if period == "yearly":
-        n = business_days_in_year(on_day.year)
-        if n <= 0:
-            return 0.0
-        return (1.0 + r) ** (1.0 / n) - 1.0
-
-    return 0.0
-
-def accrue_investment(inv: dict, today: date | None = None) -> None:
-    """
-    Aplica rendimento do último last_date até 'today' (default: hoje),
-    SOMENTE em dias úteis, com taxa convertida corretamente por período.
-    """
-    if today is None:
-        today = datetime.now(_tz()).date()
-
-    last = inv.get("last_date")
-    if not isinstance(last, date):
-        inv["last_date"] = today
-        return
-
-    if last >= today:
-        return
-
-    bal = float(inv.get("balance", 0.0))
-    d = last + timedelta(days=1)
-
-    while d <= today:
-        if is_business_day(d) and bal > 0:
-            dr = daily_business_rate(inv, d)
-            bal *= (1.0 + dr)
-        d += timedelta(days=1)
-
-    inv["balance"] = bal
-    inv["last_date"] = today    
-
-
-def parse_interest(text: str):
-    raw = text.lower()
-
-    # bloqueia explicitamente "1," ou "1." (com espaços depois também)
-    if re.search(r'\d+\s*[.,]\s*(?:%|\b)', raw):
-        # exemplos que caem aqui: "1,", "1.", "1, %", "1. %"
-        # mas "1,0" NÃO cai porque tem dígito após a vírgula
-        if not re.search(r'\d+\s*[.,]\s*\d+', raw):
-            return None
-
-    # pega número: 1 / 1.1 / 1,1 / 0,03 etc
-    m = re.search(r'(\d+(?:[.,]\d+)?)\s*%?', raw)
-    if not m:
-        return None
-
-    taxa_pct = float(m.group(1).replace(",", "."))
-    taxa = taxa_pct / 100.0
-
-    # período
-    if re.search(r'\b(ao|a|por)\s*dia\b|/dia', raw):
-        period = "daily"
-    elif re.search(r'\b(ao|a|por)\s*m[eê]s\b|/mes|/mês', raw):
-        period = "monthly"
-    elif re.search(r'\b(ao|a|por)\s*ano\b|/ano', raw):
-        period = "yearly"
-    else:
-        return None
-
-    return taxa, period
 
 # --------- bot setup ---------
 intents = discord.Intents.default()

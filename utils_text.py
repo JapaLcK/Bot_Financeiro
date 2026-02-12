@@ -253,3 +253,4 @@ def parse_pocket_deposit_natural(text: str):
             return amount, pocket
 
     return None, None
+
