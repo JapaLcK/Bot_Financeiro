@@ -754,12 +754,21 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
     # (buscar o range inteiro é simples e barato; o BCB devolve só dias úteis/feriados úteis)
     data = _fetch_sgs_series_json(12, start, end)  # série 12 = CDI (% p.d.)
 
+    if not isinstance(data, list):
+        print(f"[WARN] Resposta inesperada do BCB (tipo={type(data)}): {data}")
+        return cached
+
     # se o BCB falhar/voltar vazio, só usa o cache e não quebra o bot
     if not data:
         return cached
 
     to_upsert = []
     for item in data:
+        # garante que item é dict (às vezes pode vir lixo)
+        if not isinstance(item, dict):
+            print(f"[WARN] Item inválido do BCB ignorado (tipo={type(item)}): {item}")
+            continue
+
         try:
             raw_date = item.get("data")
             raw_val = item.get("valor")
@@ -776,7 +785,6 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
         except Exception as e:
             print(f"[WARN] Item inválido do BCB ignorado: {item} | erro={e}")
             continue
-
 
     if to_upsert:
         cur.executemany(
