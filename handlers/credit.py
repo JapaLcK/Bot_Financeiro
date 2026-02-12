@@ -206,7 +206,7 @@ async def handle_credit_commands(message) -> bool:
             return True
 
         try:
-            result, total = add_credit_purchase_installments(
+            ret = add_credit_purchase_installments(
                 user_id=user_id,
                 card_id=card_id,
                 valor_total=float(valor),
@@ -216,10 +216,35 @@ async def handle_credit_commands(message) -> bool:
                 installments=n,
             )
 
+            # ret pode ser:
+            # 1) dict {"group_id": "...", "tx_ids":[...]}
+            # 2) (dict, total)
+            # 3) (dict, total, alguma_coisa)
+            # 4) qualquer coisa errada -> a gente não quebra
+
+            result = None
+            total = float(valor)
+
+            if isinstance(ret, tuple):
+                if len(ret) >= 1:
+                    result = ret[0]
+                if len(ret) >= 2:
+                    try:
+                        total = float(ret[1])
+                    except:
+                        total = float(valor)
+            else:
+                result = ret
+
+            # garante que "result" seja dict
+            if not isinstance(result, dict):
+                await message.reply(f"❌ Retorno inesperado do DB no parcelamento: {type(result)} | {result}")
+                return True
+
             tx_ids = result.get("tx_ids") or []
             group_id = result.get("group_id")
 
-            ids_str = ", ".join(f"#{x}" for x in tx_ids[:10])
+            ids_str = ", ".join(f"#{x}" for x in tx_ids[:10]) if tx_ids else "(sem ids)"
             if len(tx_ids) > 10:
                 ids_str += " ..."
 
@@ -230,7 +255,6 @@ async def handle_credit_commands(message) -> bool:
                 f"IDs: {ids_str}"
             )
             return True
-
 
         except Exception as e:
             await message.reply(f"❌ Erro ao parcelar no cartão: {e}")
