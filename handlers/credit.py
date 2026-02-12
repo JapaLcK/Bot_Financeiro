@@ -206,7 +206,7 @@ async def handle_credit_commands(message) -> bool:
             return True
 
         try:
-            tx_id, total, bill_id = add_credit_purchase_installments(
+            tx_id, total = add_credit_purchase_installments(
                 user_id=user_id,
                 card_id=card_id,
                 valor_total=float(valor),
@@ -215,6 +215,7 @@ async def handle_credit_commands(message) -> bool:
                 purchased_at=purchased_at,
                 installments=n,
             )
+
 
             await message.reply(
                 f"💳 Parcelado no cartão ({resolved_name}): R$ {float(valor):.2f} em {n}x\n"
