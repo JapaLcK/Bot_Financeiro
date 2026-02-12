@@ -9,6 +9,7 @@ import math
 from datetime import timedelta, timezone
 import requests
 from utils_date import _tz
+from uuid import uuid4
 
 
 
@@ -194,6 +195,26 @@ def init_db():
         """
         alter table users add column if not exists default_card_id bigint;
         """
+
+        """
+        alter table credit_bills add column if not exists paid_amount numeric not null default 0;
+        alter table credit_bills add column if not exists closed_at timestamptz;
+        """
+
+        """
+        alter table credit_transactions add column if not exists group_id uuid;
+        alter table credit_transactions add column if not exists installment_no int;
+        alter table credit_transactions add column if not exists installments_total int;
+        alter table credit_transactions add column if not exists is_refund boolean not null default false;
+        """
+
+        """
+        alter table users add column if not exists default_card_id bigint;
+        alter table users add column if not exists reminders_enabled boolean not null default false;
+        alter table users add column if not exists reminders_days_before int not null default 3;    
+        """
+
+
 
 ]
 
@@ -1792,7 +1813,8 @@ def get_default_card_id(user_id: int) -> int | None:
             row = cur.fetchone()
             return row["default_card_id"] if row else None
 
-
+# Retorna o período (início, fim) da fatura para um mês/ano e dia de fechamento.
+# Ex: closing_day=10 -> período 01/mm até 10/mm.
 def _bill_period_for_purchase(purchased_at: date, closing_day: int):
     year = purchased_at.year
     month = purchased_at.month
@@ -1961,4 +1983,112 @@ def list_cards(user_id: int):
             )
             rows = cur.fetchall()
     return rows
+
+# Soma 'delta' meses a um par (ano, mês) e retorna o novo (ano, mês).
+# Ex: (2026, 12) + 1 -> (2027, 1)
+def add_months(y: int, m: int, delta: int) -> tuple[int, int]:
+    m2 = m + delta
+    y2 = y + (m2 - 1) // 12
+    m2 = (m2 - 1) % 12 + 1
+    return y2, m2
+
+    # Dada a data da compra e o dia de fechamento do cartão, calcula
+    # em qual período de fatura a compra deve cair.
+    # Regra:
+    #  - até o fechamento -> fatura do mês corrente
+    #  - após o fechamento -> próxima fatura
+
+def bill_period_for_month(year: int, month: int, closing_day: int):
+    ps = date(year, month, 1)
+    pe = date(year, month, closing_day)
+    return ps, pe
+
+    """
+    Busca uma fatura por período (card_id + period_start + period_end).
+    Se não existir, cria uma fatura aberta com total=0 e retorna o id.
+    """
+def get_or_create_bill_by_period(card_id: int, period_start: date, period_end: date) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id from credit_bills where card_id=%s and period_start=%s and period_end=%s",
+                (card_id, period_start, period_end),
+            )
+            row = cur.fetchone()
+            if row:
+                return row["id"]
+            cur.execute(
+                """
+                insert into credit_bills (card_id, period_start, period_end, status, total, paid_amount)
+                values (%s, %s, %s, 'open', 0, 0)
+                returning id
+                """,
+                (card_id, period_start, period_end),
+            )
+            bid = cur.fetchone()["id"]
+        conn.commit()
+    return bid
+
+    # Registra uma compra parcelada no crédito.
+    # Divide o valor total em N parcelas e cria uma transação em cada
+    # fatura futura correspondente (mês a mês).
+def add_credit_purchase_installments(
+    user_id: int,
+    card_id: int,
+    valor_total: float,
+    categoria: str | None,
+    nota: str | None,
+    purchased_at: date,
+    installments: int,
+):
+    ensure_user(user_id)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select closing_day from credit_cards where id=%s", (card_id,))
+            closing_day = cur.fetchone()["closing_day"]
+
+    group_id = uuid4()
+    vtotal = Decimal(str(valor_total))
+    n = max(1, int(installments))
+    vparc = (vtotal / Decimal(n)).quantize(Decimal("0.01"))
+
+    # ajusta centavos na última parcela pra somar certinho
+    parcelas = [vparc] * n
+    diff = vtotal - sum(parcelas)
+    parcelas[-1] = (parcelas[-1] + diff).quantize(Decimal("0.01"))
+
+    # período base (mês/ano)
+    base_y, base_m = purchased_at.year, purchased_at.month
+    tx_ids = []
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for i in range(n):
+                y2, m2 = add_months(base_y, base_m, i)
+                ps, pe = bill_period_for_month(y2, m2, closing_day)
+                bill_id = get_or_create_bill_by_period(card_id, ps, pe)
+
+                cur.execute(
+                    """
+                    insert into credit_transactions
+                      (bill_id, user_id, card_id, valor, categoria, nota, purchased_at,
+                       group_id, installment_no, installments_total, is_refund)
+                    values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,false)
+                    returning id
+                    """,
+                    (bill_id, user_id, card_id, parcelas[i], categoria, nota, purchased_at, group_id, i+1, n),
+                )
+                tx_id = cur.fetchone()["id"]
+                tx_ids.append(tx_id)
+
+                cur.execute(
+                    "update credit_bills set total = total + %s where id=%s",
+                    (parcelas[i], bill_id),
+                )
+        conn.commit()
+
+    return {"group_id": str(group_id), "tx_ids": tx_ids}
+
+
 

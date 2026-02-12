@@ -29,6 +29,8 @@ from db import (
     create_card, get_card_id_by_name, set_default_card, get_default_card_id,
     add_credit_purchase, get_open_bill_summary, pay_open_bill, list_cards
 )
+from handlers.credit import handle_credit_commands
+
 
 
 
