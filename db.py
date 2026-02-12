@@ -760,12 +760,23 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
 
     to_upsert = []
     for item in data:
-        # item: {"data":"06/01/2026","valor":"0.0xxx"}
-        d = datetime.strptime(item["data"], "%d/%m/%Y").date()
-        v = float(str(item["valor"]).replace(",", "."))
-        if d not in cached:
-            to_upsert.append((d, v))
-        cached[d] = v
+        try:
+            raw_date = item.get("data")
+            raw_val = item.get("valor")
+
+            if not raw_date or raw_val is None:
+                continue
+
+            d = datetime.strptime(raw_date, "%d/%m/%Y").date()
+            v = float(str(raw_val).replace(",", "."))
+
+            if d not in cached:
+                to_upsert.append((d, v))
+            cached[d] = v
+        except Exception as e:
+            print(f"[WARN] Item inválido do BCB ignorado: {item} | erro={e}")
+            continue
+
 
     if to_upsert:
         cur.executemany(
