@@ -20,81 +20,101 @@ def get_conn():
     return psycopg.connect(database_url, row_factory=dict_row)
 
 def init_db():
-    ddl = """
-    create table if not exists users (
-      id bigint primary key,
-      created_at timestamptz default now()
-    );
+    ddl_statements = [
+        """
+        create table if not exists users (
+          id bigint primary key,
+          created_at timestamptz default now()
+        )
+        """,
+        """
+        create table if not exists accounts (
+          user_id bigint primary key references users(id) on delete cascade,
+          balance numeric not null default 0
+        )
+        """,
+        """
+        create table if not exists pockets (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          name text not null,
+          balance numeric not null default 0,
+          created_at timestamptz default now(),
+          unique(user_id, name)
+        )
+        """,
+        """
+        create table if not exists investments (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          name text not null,
+          balance numeric not null default 0,
+          rate numeric not null,
+          period text not null, -- daily|monthly|yearly
+          last_date date not null,
+          created_at timestamptz default now(),
+          unique(user_id, name)
+        )
+        """,
+        """
+        create table if not exists launches (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          tipo text not null,
+          valor numeric not null,
+          alvo text,
+          nota text,
+          criado_em timestamptz not null default now(),
+          efeitos jsonb
+        )
+        """,
+        """
+        create index if not exists idx_launches_user_time
+          on launches(user_id, criado_em desc)
+        """,
+        """
+        create table if not exists pending_actions (
+          user_id bigint primary key references users(id) on delete cascade,
+          action_type text not null,
+          payload jsonb not null,
+          created_at timestamptz not null default now(),
+          expires_at timestamptz not null
+        )
+        """,
+        """
+        create table if not exists user_category_rules (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          keyword text not null,
+          category text not null,
+          created_at timestamptz default now(),
+          unique (user_id, keyword)
+        )
+        """,
+        """
+        create table if not exists market_rates (
+          code text not null,
+          ref_date date not null,
+          value numeric not null,
+          created_at timestamptz default now(),
+          primary key (code, ref_date)
+        )
+        """,
+    ]
 
-    create table if not exists accounts (
-      user_id bigint primary key references users(id) on delete cascade,
-      balance numeric not null default 0
-    );
-
-    create table if not exists pockets (
-      id bigserial primary key,
-      user_id bigint not null references users(id) on delete cascade,
-      name text not null,
-      balance numeric not null default 0,
-      created_at timestamptz default now(),
-      unique(user_id, name)
-    );
-
-    create table if not exists investments (
-      id bigserial primary key,
-      user_id bigint not null references users(id) on delete cascade,
-      name text not null,
-      balance numeric not null default 0,
-      rate numeric not null,
-      period text not null, -- daily|monthly|yearly
-      last_date date not null,
-      created_at timestamptz default now(),
-      unique(user_id, name)
-    );
-
-    create table if not exists launches (
-      id bigserial primary key,
-      user_id bigint not null references users(id) on delete cascade,
-      tipo text not null,         -- "despesa" | "receita" | etc
-      valor numeric not null,
-      alvo text,                  -- categoria/caixinha/investimento
-      nota text,
-      criado_em timestamptz not null default now(),
-      efeitos jsonb
-    );
-
-    create index if not exists idx_launches_user_time on launches(user_id, criado_em desc);
-
-    create table if not exists pending_actions (
-      user_id bigint primary key references users(id) on delete cascade,
-      action_type text not null,          -- ex: delete_launch | delete_pocket | delete_investment
-      payload jsonb not null,             -- dados da ação (ex: {"launch_id": 42})
-      created_at timestamptz not null default now(),
-      expires_at timestamptz not null
-    );
-
-    create table if not exists user_category_rules (
-        id BIGSERIAL PRIMARY KEY,
-        user_id BIGINT NOT NULL,
-        keyword TEXT NOT NULL,
-        category TEXT NOT NULL,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        UNIQUE (user_id, keyword)
-    );
-
-    create table if not exists market_rates (
-        code text not null,        -- ex: 'CDI'
-        ref_date date not null,    -- data do índice
-        value numeric not null,    -- valor do índice no dia (em % a.d. vindo do BCB)
-        created_at timestamptz default now(),
-        primary key (code, ref_date)
-        );
-
-    """
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(ddl)
+            for i, stmt in enumerate(ddl_statements, 1):
+                try:
+                    cur.execute(stmt)
+                except Exception as e:
+                    # loga qual statement quebrou (pra aparecer no Railway)
+                    print(f"[init_db] erro no statement #{i}: {e}")
+                    print(stmt)
+                    raise
         conn.commit()
+    print("[init_db] OK")
+
 
 def ensure_user(user_id: int):
     """Garante que user e account existam."""

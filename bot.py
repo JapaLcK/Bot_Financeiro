@@ -1,11 +1,12 @@
 import os
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone, time
 from dateutil.relativedelta import relativedelta
 import calendar
 import discord
 import io
 import csv
+import traceback
 from discord.ext import commands
 from db import init_db
 from dotenv import load_dotenv
@@ -616,7 +617,6 @@ async def on_message(message: discord.Message):
                 else:
                     await message.reply("Ação pendente desconhecida. Cancelando.")
             except Exception as e:
-                import traceback
                 traceback.print_exc()
                 await message.reply("❌ Deu erro ao executar a ação pendente. Veja os logs.")
             finally:
@@ -1607,17 +1607,43 @@ async def on_message(message: discord.Message):
 
 
 
-
 # --------- run ---------
 if __name__ == "__main__":
     token = os.getenv("DISCORD_BOT_TOKEN")
     if not token:
         raise RuntimeError("DISCORD_BOT_TOKEN não definido.")
 
-    print("🗄️ Inicializando banco de dados (init_db)...")
-    init_db()
-    print("✅ Banco inicializado com sucesso!")
+    # 1) init_db com log + falha explícita
+    try:
+        print("🗄️ Inicializando banco de dados (init_db)...")
+        init_db()
+        print("✅ Banco inicializado com sucesso!")
+    except Exception as e:
+        print("❌ Falha no init_db:", e)
+        traceback.print_exc()
+        # não adianta ficar tentando logar no Discord se o DB tá quebrado
+        raise
 
-    bot.run(token)
+    # 2) retry com backoff para evitar 429/crash loop
+    wait = 15  # começa leve
+    while True:
+        try:
+            print("🤖 Conectando no Discord...")
+            bot.run(token)
+            # se bot.run retornar (normalmente só retorna ao encerrar), zera backoff
+            wait = 15
+        except Exception as e:
+            msg = str(e)
+            print("❌ Bot caiu:", msg)
+            traceback.print_exc()
+
+            # se for rate limit / 429, espera mais
+            if "429" in msg or "Too Many Requests" in msg:
+                wait = max(wait, 60)
+
+            print(f"⏳ Aguardando {wait}s para tentar de novo...")
+            time.sleep(wait)
+            wait = min(wait * 2, 600)  # dobra até 10 min
+
 
 
