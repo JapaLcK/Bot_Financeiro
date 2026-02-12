@@ -206,7 +206,7 @@ async def handle_credit_commands(message) -> bool:
             return True
 
         try:
-            tx_id, total = add_credit_purchase_installments(
+            ret = add_credit_purchase_installments(
                 user_id=user_id,
                 card_id=card_id,
                 valor_total=float(valor),
@@ -216,17 +216,37 @@ async def handle_credit_commands(message) -> bool:
                 installments=n,
             )
 
+            # ret pode vir como:
+            # (tx_ids, total)  -> tx_ids pode ser list[int] OU dict {"tx_ids":[...]}
+            # ou (tx_id, total) -> tx_id int
+            tx_part, total = ret
+
+            tx_ids = None
+            if isinstance(tx_part, dict):
+                tx_ids = tx_part.get("tx_ids") or tx_part.get("ids")
+            elif isinstance(tx_part, list):
+                tx_ids = tx_part
+            else:
+                # int/string simples
+                tx_ids = [tx_part]
+
+            # monta uma string curta de IDs
+            ids_str = ", ".join(f"#{x}" for x in tx_ids[:10])
+            if len(tx_ids) > 10:
+                ids_str += " ..."
 
             await message.reply(
                 f"💳 Parcelado no cartão ({resolved_name}): R$ {float(valor):.2f} em {n}x\n"
                 f"📌 Fatura atual: R$ {float(total):.2f}\n"
-                f"ID: #{tx_id}"
+                f"IDs: {ids_str}"
             )
+            return True
+
         except Exception as e:
             await message.reply(f"❌ Erro ao parcelar no cartão: {e}")
-
-        return True
-
+            return True
+        
+        
     # -------------------------
     # pagar fatura
     # -------------------------
