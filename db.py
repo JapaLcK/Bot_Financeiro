@@ -713,16 +713,21 @@ def _fmt_ddmmyyyy(d: date) -> str:
     return d.strftime("%d/%m/%Y")
 
 def _fetch_sgs_series_json(series_code: int, start: date, end: date) -> list[dict]:
-    # BCB SGS JSON interface (sempre com filtro de datas)
+    # BCB SGS JSON interface (semppre com filtro de datas)
     url = f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{series_code}/dados"
     params = {
         "formato": "json",
         "dataInicial": _fmt_ddmmyyyy(start),
         "dataFinal": _fmt_ddmmyyyy(end),
     }
-    r = requests.get(url, params=params, timeout=20)
-    r.raise_for_status()
-    return r.json()
+
+    try:
+        r = requests.get(url, params=params, timeout=20)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        print(f"[WARN] Falha ao buscar série SGS {series_code} no BCB: {e}")
+        return []  # não quebra o bot
 
 def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
     """
@@ -748,6 +753,11 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
     # 2) se faltou algo, busca do BCB e salva
     # (buscar o range inteiro é simples e barato; o BCB devolve só dias úteis/feriados úteis)
     data = _fetch_sgs_series_json(12, start, end)  # série 12 = CDI (% p.d.)
+
+    # se o BCB falhar/voltar vazio, só usa o cache e não quebra o bot
+    if not data:
+        return cached
+
     to_upsert = []
     for item in data:
         # item: {"data":"06/01/2026","valor":"0.0xxx"}
