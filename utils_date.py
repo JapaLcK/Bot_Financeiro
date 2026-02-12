@@ -93,3 +93,14 @@ def months_between(d1: date, d2: date):
 def days_between(d1: date, d2: date):
     return max(0, (d2 - d1).days)
 
+def fmt_br(d) -> str:
+    if not d:
+        return ""
+    # aceita date ou datetime
+    try:
+        d = d.date()
+    except Exception:
+        pass
+    return d.strftime("%d/%m/%y")
+
+

@@ -6,7 +6,7 @@ Retorna True se tratou algum comando; False caso contrário.
 
 import re
 
-from utils_date import extract_date_from_text, now_tz
+from utils_date import extract_date_from_text, now_tz, fmt_br
 from utils_text import parse_money, normalize_text
 from db import (
     create_card,
@@ -21,6 +21,7 @@ from db import (
 )
 from db import get_memorized_category
 from ai_router import classify_category_with_gpt
+from utils_text import fmt_brl
 
 
 def _pick_card_id(user_id: int, card_name: str | None):
@@ -289,11 +290,8 @@ async def handle_credit_commands(message) -> bool:
             await message.reply(f"❌ Erro ao pagar fatura: {e}")
         return True
 
-    # -------------------------
-    # fatura (inclui "listar fatura")
-    # -------------------------
+    # --- fatura (inclui "listar fatura") ---
     if t_low.startswith("fatura") or t_low.startswith("listar fatura"):
-        # extrai nome do cartão, se houver
         card_name = None
         parts = t_low.split()
         if "fatura" in parts:
@@ -313,20 +311,24 @@ async def handle_credit_commands(message) -> bool:
                 return True
 
             bill, items = res
+
+            ps = fmt_br(bill["period_start"])
+            pe = fmt_br(bill["period_end"])
+
             lines = [
-                f"💳 **Fatura ({resolved_name})** {bill['period_start']} → {bill['period_end']}",
-                f"Total: R$ {float(bill['total']):.2f}",
+                f"💳 Fatura ({resolved_name}) {ps} → {pe}",
+                f"Total: {fmt_brl(bill['total'])}",
                 "",
             ]
 
             for it in items[:10]:
                 lines.append(
-                    f"- R$ {float(it['valor']):.2f} | {it.get('categoria') or 'outros'} | {it['purchased_at']} | {it.get('nota') or ''}"
+                    f"- {fmt_brl(it['valor'])} | {it['categoria'] or 'outros'} | {fmt_br(it['purchased_at'])} | {it['nota'] or ''}"
                 )
 
             await message.reply("\n".join(lines))
+            return True
+
         except Exception as e:
             await message.reply(f"❌ Erro ao buscar fatura: {e}")
-        return True
-
-    return False
+            return True

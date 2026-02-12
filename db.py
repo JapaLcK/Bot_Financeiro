@@ -10,6 +10,7 @@ from datetime import timedelta, timezone
 import requests
 from utils_date import _tz
 from uuid import uuid4
+import calendar
 
 
 
@@ -1844,23 +1845,35 @@ def get_default_card_id(user_id: int) -> int | None:
 
 # Retorna o período (início, fim) da fatura para um mês/ano e dia de fechamento.
 # Ex: closing_day=10 -> período 01/mm até 10/mm.
-def _bill_period_for_purchase(purchased_at: date, closing_day: int):
-    year = purchased_at.year
-    month = purchased_at.month
+def _safe_date(y: int, m: int, d: int) -> date:
+    last = calendar.monthrange(y, m)[1]
+    return date(y, m, min(d, last))
 
-    if purchased_at.day <= closing_day:
-        period_start = date(year, month, 1)
-        period_end = date(year, month, closing_day)
-    else:
-        if month == 12:
-            year += 1
-            month = 1
+
+def _prev_month(y: int, m: int) -> tuple[int, int]:
+    return (y - 1, 12) if m == 1 else (y, m - 1)
+
+
+# Período correto:
+# fechamento dia X => período vai de (X+1 do mês anterior) até X do mês atual
+def _bill_period_for_purchase(purchased_at: date, closing_day: int):
+    y, m = purchased_at.year, purchased_at.month
+
+    # se a compra foi depois do fechamento, cai na fatura do mês seguinte
+    end_this = _safe_date(y, m, closing_day)
+    if purchased_at > end_this:
+        if m == 12:
+            y, m = y + 1, 1
         else:
-            month += 1
-        period_start = date(year, month, 1)
-        period_end = date(year, month, closing_day)
+            m = m + 1
+
+    period_end = _safe_date(y, m, closing_day)
+    py, pm = _prev_month(y, m)
+    prev_end = _safe_date(py, pm, closing_day)
+    period_start = prev_end + timedelta(days=1)
 
     return period_start, period_end
+
 
 
 def get_or_create_open_bill(card_id: int, purchased_at: date) -> int:
@@ -2028,9 +2041,12 @@ def add_months(y: int, m: int, delta: int) -> tuple[int, int]:
     #  - após o fechamento -> próxima fatura
 
 def bill_period_for_month(year: int, month: int, closing_day: int):
-    ps = date(year, month, 1)
-    pe = date(year, month, closing_day)
-    return ps, pe
+    period_end = _safe_date(year, month, closing_day)
+    py, pm = _prev_month(year, month)
+    prev_end = _safe_date(py, pm, closing_day)
+    period_start = prev_end + timedelta(days=1)
+    return period_start, period_end
+
 
     """
     Busca uma fatura por período (card_id + period_start + period_end).
@@ -2088,7 +2104,10 @@ def add_credit_purchase_installments(
     parcelas[-1] = (parcelas[-1] + diff).quantize(Decimal("0.01"))
 
     # período base (mês/ano)
-    base_y, base_m = purchased_at.year, purchased_at.month
+    # a 1ª parcela deve cair na MESMA fatura da compra
+    ps0, pe0 = _bill_period_for_purchase(purchased_at, closing_day)
+    base_y, base_m = pe0.year, pe0.month
+
     tx_ids = []
 
     with get_conn() as conn:
@@ -2117,7 +2136,9 @@ def add_credit_purchase_installments(
                 )
         conn.commit()
 
-    return {"group_id": str(group_id), "tx_ids": tx_ids}
+    total_bill = float(vtotal)  # total do parcelamento (valor_total)
+    return {"group_id": str(group_id), "tx_ids": tx_ids}, total_bill
+
 
 #estorno (transação negativa na fatura)
 def add_credit_refund(
