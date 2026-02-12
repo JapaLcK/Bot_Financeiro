@@ -1,32 +1,296 @@
 # handlers/credit.py
 """
 Handlers de comandos relacionados a crédito, cartões e faturas.
-Responsável por interpretar mensagens do usuário e chamar as funções de DB.
+Retorna True se tratou algum comando; False caso contrário.
 """
 
 import re
+
 from utils_date import extract_date_from_text, now_tz
-from db import (
-    create_card, list_cards, get_card_id_by_name, set_default_card, get_default_card_id,
-    add_credit_purchase, add_credit_purchase_installments, add_credit_refund,
-    get_open_bill_summary, get_next_bill_summary, close_bill, pay_bill_amount,
-)
 from utils_text import parse_money, normalize_text
+from db import (
+    create_card,
+    list_cards,
+    get_card_id_by_name,
+    set_default_card,
+    get_default_card_id,
+    add_credit_purchase,
+    add_credit_purchase_installments,
+    get_open_bill_summary,
+    pay_open_bill,
+)
 from db import get_memorized_category
 from ai_router import classify_category_with_gpt
 
 
+def _pick_card_id(user_id: int, card_name: str | None):
+    """Resolve card_id por nome (se vier) ou pelo cartão padrão."""
+    if card_name:
+        card_id = get_card_id_by_name(user_id, card_name)
+        return card_id, card_name
+    card_id = get_default_card_id(user_id)
+    return card_id, "padrão"
+
+
+def _infer_category(user_id: int, desc: str) -> str:
+    """Categoria: memória -> GPT -> outros."""
+    raw_norm = normalize_text(desc)
+    categoria = get_memorized_category(user_id, raw_norm) or "outros"
+    if categoria == "outros":
+        try:
+            categoria_gpt = classify_category_with_gpt(raw_norm)
+            if categoria_gpt:
+                categoria = categoria_gpt
+        except Exception:
+            pass
+    return categoria
+
 
 async def handle_credit_commands(message) -> bool:
-    """
-    Tenta tratar comandos de crédito/cartões/faturas.
-    Retorna True se algum comando foi tratado; False caso contrário.
-    """
     t = message.content.strip()
     t_low = t.lower().strip()
     user_id = message.author.id
 
-    # ---- cole aqui os if t_low.startswith(...) que eu te mandei ----
-    # return True quando tratar
-    # no final:
+    # -------------------------
+    # criar cartao
+    # -------------------------
+    if t_low.startswith("criar cartao"):
+        # ex: criar cartao nubank fecha 10 vence 17
+        m = re.search(r"criar cartao\s+(.+?)\s+fecha\s+(\d{1,2})\s+vence\s+(\d{1,2})", t_low)
+        if not m:
+            await message.reply("Use: criar cartao NOME fecha 10 vence 17")
+            return True
+
+        name = m.group(1).strip()
+        fecha = int(m.group(2))
+        vence = int(m.group(3))
+
+        try:
+            create_card(user_id=user_id, name=name, closing_day=fecha, due_day=vence)
+            await message.reply(f"✅ Cartão '{name}' criado/atualizado. Quer definir como padrão? Use: padrao {name}")
+        except Exception as e:
+            await message.reply(f"❌ Erro criando cartão: {e}")
+        return True
+
+    # -------------------------
+    # definir cartao padrão
+    # -------------------------
+    if t_low.startswith("padrao "):
+        name = t[7:].strip()
+        card_id = get_card_id_by_name(user_id, name)
+        if not card_id:
+            await message.reply(f"❌ Não achei o cartão '{name}'. Crie com: criar cartao {name} fecha 10 vence 17")
+            return True
+
+        set_default_card(user_id, card_id)
+        await message.reply(f"✅ Cartão padrão definido: {name}")
+        return True
+
+    # -------------------------
+    # listar cartões
+    # -------------------------
+    if t_low in ("cartoes", "cartões", "listar cartoes", "listar cartões"):
+        cards = list_cards(user_id)
+        if not cards:
+            await message.reply("📭 Você ainda não tem cartões. Crie com: criar cartao nubank fecha 10 vence 17")
+            return True
+
+        lines = ["💳 **Seus cartões:**"]
+        for c in cards:
+            badge = " (padrão)" if c.get("is_default") else ""
+            lines.append(f"- {c['name']}{badge} — fecha dia {c['closing_day']} / vence dia {c['due_day']}")
+        await message.reply("\n".join(lines))
+        return True
+
+    # -------------------------
+    # compra no crédito (fatura) via comando "credito ..."
+    # -------------------------
+    if t_low.startswith("credito"):
+        # exemplos:
+        #   credito 120 mercado
+        #   credito nubank 120 mercado
+        rest = t[len("credito"):].strip()
+        if not rest:
+            await message.reply("Use: credito 120 mercado OU credito nubank 120 mercado")
+            return True
+
+        # data opcional (ontem/hoje/2026-02-01 etc), retorna (dt, texto_sem_data)
+        dt_evento, rest2 = extract_date_from_text(rest)
+        if dt_evento is None:
+            dt_evento = now_tz()
+        purchased_at = dt_evento.date()
+
+        valor = parse_money(rest2)
+        if valor is None:
+            await message.reply("❌ Não achei o valor. Ex: credito 120 mercado")
+            return True
+
+        tokens = rest2.split()
+        card_name = None
+
+        # se o primeiro token não tem número, tratamos como nome do cartão
+        if tokens and parse_money(tokens[0]) is None:
+            card_name = tokens[0]
+            rest_desc = " ".join(tokens[1:])
+        else:
+            rest_desc = rest2
+
+        nota = normalize_text(rest_desc)
+        categoria = _infer_category(user_id, rest_desc)
+
+        card_id, resolved_name = _pick_card_id(user_id, card_name)
+        if not card_id:
+            if card_name:
+                await message.reply(f"❌ Não achei o cartão '{card_name}'. Crie com: criar cartao {card_name} fecha 10 vence 17")
+            else:
+                await message.reply("❓ Você não tem cartão padrão. Defina com: padrao NOME (ou crie: criar cartao nubank fecha 10 vence 17)")
+            return True
+
+        try:
+            tx_id, total, bill_id = add_credit_purchase(
+                user_id=user_id,
+                card_id=card_id,
+                valor=float(valor),
+                categoria=categoria,
+                nota=nota,
+                purchased_at=purchased_at,
+            )
+            await message.reply(f"💳 Compra no crédito registrada: R$ {float(valor):.2f}\n📌 Fatura atual: R$ {float(total):.2f}\nID: #{tx_id}")
+        except Exception as e:
+            await message.reply(f"❌ Erro registrando compra no crédito: {e}")
+        return True
+
+    # -------------------------
+    # PARCELAR (isso que estava faltando)
+    # -------------------------
+    if t_low.startswith("parcelar"):
+        # exemplos:
+        #   parcelar 300 no cartao nubank
+        #   parcelar 300 em 3x no cartao nubank
+        valor = parse_money(t_low)
+        if valor is None:
+            await message.reply("Use: parcelar 300 em 3x no cartao nubank")
+            return True
+
+        # parcelas (default 1 se não informar)
+        n = 1
+        mx = re.search(r"(\d+)\s*x", t_low)
+        if mx:
+            try:
+                n = int(mx.group(1))
+            except Exception:
+                n = 1
+
+        # pega nome do cartão (se tiver)
+        card_name = None
+        m = re.search(r"(?:no\s+)?cart[aã]o\s+(.+)$", t_low)
+        if m:
+            card_name = m.group(1).strip()
+
+        # data opcional
+        dt_evento, rest2 = extract_date_from_text(t)
+        if dt_evento is None:
+            dt_evento = now_tz()
+        purchased_at = dt_evento.date()
+
+        # nota/categoria
+        nota = normalize_text(t)
+        categoria = _infer_category(user_id, t)
+
+        card_id, resolved_name = _pick_card_id(user_id, card_name)
+        if not card_id:
+            if card_name:
+                await message.reply(f"❌ Não achei o cartão '{card_name}'. Crie com: criar cartao {card_name} fecha 10 vence 17")
+            else:
+                await message.reply("❓ Você não tem cartão padrão. Defina com: padrao NOME")
+            return True
+
+        try:
+            tx_id, total, bill_id = add_credit_purchase_installments(
+                user_id=user_id,
+                card_id=card_id,
+                valor=float(valor),
+                installments=n,
+                categoria=categoria,
+                nota=nota,
+                purchased_at=purchased_at,
+            )
+            await message.reply(
+                f"💳 Parcelado no cartão ({resolved_name}): R$ {float(valor):.2f} em {n}x\n"
+                f"📌 Fatura atual: R$ {float(total):.2f}\n"
+                f"ID: #{tx_id}"
+            )
+        except Exception as e:
+            await message.reply(f"❌ Erro ao parcelar no cartão: {e}")
+
+        return True
+
+    # -------------------------
+    # pagar fatura
+    # -------------------------
+    if t_low.startswith("pagar fatura"):
+        rest = t[len("pagar fatura"):].strip()
+        card_name = rest if rest else None
+
+        card_id, resolved_name = _pick_card_id(user_id, card_name)
+        if not card_id:
+            await message.reply("❓ Você não tem cartão padrão. Defina com: padrao NOME")
+            return True
+
+        try:
+            res = pay_open_bill(user_id, card_id, resolved_name)
+            if not res:
+                await message.reply("📭 Nenhuma fatura aberta para pagar.")
+                return True
+
+            total, launch_id, new_balance = res
+            await message.reply(
+                f"✅ Fatura paga: R$ {float(total):.2f}\n"
+                f"Conta agora: R$ {float(new_balance):.2f}\n"
+                f"ID lançamento: #{launch_id}"
+            )
+        except Exception as e:
+            await message.reply(f"❌ Erro ao pagar fatura: {e}")
+        return True
+
+    # -------------------------
+    # fatura (inclui "listar fatura")
+    # -------------------------
+    if t_low.startswith("fatura") or t_low.startswith("listar fatura"):
+        # extrai nome do cartão, se houver
+        card_name = None
+        parts = t_low.split()
+        if "fatura" in parts:
+            idx = parts.index("fatura")
+            if len(parts) > idx + 1:
+                card_name = t.split()[idx + 1]  # mantém capitalização
+
+        card_id, resolved_name = _pick_card_id(user_id, card_name)
+        if not card_id:
+            await message.reply("❓ Você não tem cartão padrão. Defina com: `padrao NOME`.")
+            return True
+
+        try:
+            res = get_open_bill_summary(user_id, card_id)
+            if not res:
+                await message.reply(f"📭 Nenhuma fatura aberta para {resolved_name}.")
+                return True
+
+            bill, items = res
+            lines = [
+                f"💳 **Fatura ({resolved_name})** {bill['period_start']} → {bill['period_end']}",
+                f"Total: R$ {float(bill['total']):.2f}",
+                "",
+            ]
+
+            for it in items[:10]:
+                lines.append(
+                    f"- R$ {float(it['valor']):.2f} | {it.get('categoria') or 'outros'} | {it['purchased_at']} | {it.get('nota') or ''}"
+                )
+
+            await message.reply("\n".join(lines))
+        except Exception as e:
+            await message.reply(f"❌ Erro ao buscar fatura: {e}")
+        return True
+
     return False
