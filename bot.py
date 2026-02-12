@@ -24,12 +24,38 @@ import unicodedata
 from reports import setup_monthly_export
 from utils_date import _tz, now_tz, extract_date_from_text
 from commands.resumo import handle_resumo
-from utils_date import extract_date_from_text, now_tz
+from utils_date import extract_date_from_text, now_tz, parse_date_str, month_range_today, days_between
 from db import (
     create_card, get_card_id_by_name, set_default_card, get_default_card_id,
     add_credit_purchase, get_open_bill_summary, pay_open_bill, list_cards
 )
 from handlers.credit import handle_credit_commands
+from utils_text import parse_money, normalize_text
+from parsers import parse_receita_despesa_natural
+from utils_text import (
+    normalize_text,
+    contains_word,
+    LOCAL_RULES,
+    STOPWORDS_PT,
+    extract_keyword_for_memory,
+    fmt_brl,
+    fmt_rate,
+    DEPOSIT_VERBS,
+    normalize_spaces,
+    parse_money,
+    should_use_ai,
+    parse_pocket_deposit_natural,
+)
+
+from parsers import parse_receita_despesa_natural
+from utils_text import (
+    guess_category,
+    parse_note_after_amount,
+    parse_expense_income_natural,
+)
+
+
+
 
 
 
@@ -55,108 +81,6 @@ from handlers.credit import handle_credit_commands
 
 
 # --------- helpers ---------
-
-def normalize_text(text: str) -> str:
-    text = (text or "").strip().lower()
-    if not text:
-        return ""
-    text = unicodedata.normalize("NFKD", text)
-    text = "".join(c for c in text if not unicodedata.combining(c))  # remove acentos
-    text = re.sub(r"[^a-z0-9\s]", " ", text)  # tira pontuação
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
-
-def contains_word(text: str, word: str) -> bool:
-    # bate palavra inteira quando possível (evita falsos positivos)
-    return re.search(rf"\b{re.escape(word)}\b", text) is not None
-
-# Regras locais (baratas) — já cobrindo mercado/psicologo/petshop
-LOCAL_RULES = [
-    (["mercado", "supermercado", "mercadinho", "hortifruti", "padaria"], "alimentação"),
-    (["psicologo", "psicologa", "terapia", "terapeuta", "psiquiatra"], "saúde"),
-    (["petshop", "pet shop", "racao", "veterinario", "vet", "banho", "tosa"], "pets"),
-    (["ifood", "restaurante", "lanchonete"], "alimentação"),
-    (["livro", "livros", "ebook", "curso", "cursos", "aula", "aulas", "material", "apostila", "faculdade", "escola"], "educação"),
-    (["uber", "99", "taxi", "metro", "onibus", "gasolina", "combustivel"], "transporte"),
-    (["academia", "remedio", "farmacia", "dentista", "consulta"], "saúde"),
-    (["netflix", "spotify", "youtube", "prime video", "disney"], "assinaturas"),
-    
-
-]
-
-STOPWORDS_PT = {
-    "gastei","paguei","comprei","debitei","recebi","ganhei","salario","reembolso",
-    "no","na","nos","nas","em","de","do","da","dos","das","pra","para","por",
-    "um","uma","uns","umas","com","ao","aos","as","os","o","a"
-}
-
-def extract_keyword_for_memory(text_norm: str) -> str:
-    # 1) se bater em alguma keyword das regras locais, salva essa keyword
-    for keywords, _cat in LOCAL_RULES:
-        for kw in keywords:
-            kw_norm = normalize_text(kw)
-            if kw_norm and (contains_word(text_norm, kw_norm) or kw_norm in text_norm):
-                return kw_norm
-
-    # 2) fallback: pega o último “token útil”
-    tokens = [t for t in text_norm.split() if t and t not in STOPWORDS_PT and len(t) >= 3]
-    if not tokens:
-        return ""
-    return tokens[-1]
-
-
-def parse_date_str(s: str) -> date:
-    s = s.strip()
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
-        try:
-            return datetime.strptime(s, fmt).date()
-        except ValueError:
-            pass
-    raise ValueError("Data inválida. Use YYYY-MM-DD ou DD/MM/YYYY.")
-
-def month_range_today():
-    today = datetime.now(_tz()).date()
-    start = today.replace(day=1)
-    if today.month == 12:
-        end = today.replace(day=31)
-    else:
-        next_month = today.replace(day=28) + timedelta(days=4)
-        end = next_month.replace(day=1) - timedelta(days=1)
-    return start, end
-
-
-
-# foca a IA para responder questoes so do bot e nao geral
-def should_use_ai(text: str) -> bool:
-    t = text.lower().strip()
-
-    # 1) Não chama IA pra coisas muito curtas / aleatórias
-    if len(t) < 4:
-        return False
-
-    # 2) Palavras-chave financeiras
-    keywords = [
-        "saldo", "lanc", "lanç", "recebi", "receita", "gastei", "despesa",
-        "caixinha", "caixinhas", "invest", "investimento", "aporte", "resgate",
-        "fatura", "cartao", "cartão", "parcel", "metas", "limite", "gastos",
-        "extrato", "conta", "rendeu", "rendendo", "cdb", "tesouro", "cdi"
-    ]
-
-    if any(k in t for k in keywords):
-        return True
-
-    # 3) Se começa com comandos conhecidos
-    commands = [
-        "saldo", "listar lancamentos", "listar lançamentos", "desfazer",
-        "criar caixinha", "listar caixinhas", "saldo caixinhas",
-        "criar investimento", "saldo investimentos"
-    ]
-
-    if any(t.startswith(c) for c in commands):
-        return True
-
-    return False
-
 
 def is_business_day(d: date) -> bool:
     return d.weekday() < 5  # 0=seg ... 4=sex
@@ -234,78 +158,7 @@ def accrue_investment(inv: dict, today: date | None = None) -> None:
         d += timedelta(days=1)
 
     inv["balance"] = bal
-    inv["last_date"] = today
-
-
-
-def fmt_brl(v: float) -> str:
-    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-
-from decimal import Decimal
-
-def fmt_rate(rate, period: str | None) -> str:
-    if rate is None or not period:
-        return ""
-
-    # rate pode vir como Decimal do Postgres
-    if isinstance(rate, Decimal):
-        rate = float(rate)
-    else:
-        rate = float(rate)
-
-    # se rate veio como fração (0.01 = 1%), converte pra %
-    display = rate * 100 if rate <= 1 else rate
-
-    # formatação limpa (sem 1.0000)
-    if abs(display - round(display)) < 1e-12:
-        pct = str(int(round(display)))
-    else:
-        pct = f"{display:.6f}".rstrip("0").rstrip(".")
-
-    return f"{pct}% {period}"
-
-
-
-DEPOSIT_VERBS = [
-    "transferi", "coloquei", "adicionei", "depositei", "pus", "botei",
-    "mandei", "joguei", "colocar", "adicionar", "depositar", "por", "botar"
-]
-
-
-def parse_money(text: str) -> float | None:
-    # pega o primeiro número contínuo (com possíveis separadores)
-    m = re.search(r'(\d[\d.,\s]*)', text)
-    if not m:
-        return None
-
-    raw = m.group(1).strip().replace(" ", "")
-
-    # normaliza milhares/decimais
-    # se tiver vírgula E ponto, decide o decimal pelo último
-    if "," in raw and "." in raw:
-        if raw.rfind(",") > raw.rfind("."):
-            # BR: 1.000,50
-            raw = raw.replace(".", "").replace(",", ".")
-        else:
-            # US: 1,000.50
-            raw = raw.replace(",", "")
-    elif "," in raw:
-        # BR: 1000,50 ou 1.000,50
-        raw = raw.replace(".", "").replace(",", ".")
-    elif "." in raw:
-        # pode ser milhar (1.000) ou decimal (1000.50)
-        parts = raw.split(".")
-        if len(parts[-1]) == 3:   # milhar
-            raw = raw.replace(".", "")
-        # senão, é decimal (deixa como está)
-
-    try:
-        return float(raw)
-    except ValueError:
-        return None
-
-
+    inv["last_date"] = today    
 
 
 def parse_interest(text: str):
@@ -337,202 +190,6 @@ def parse_interest(text: str):
         return None
 
     return taxa, period
-
-
-def months_between(d1: date, d2: date):
-    if d2 <= d1:
-        return 0
-    rd = relativedelta(d2, d1)
-    return rd.years * 12 + rd.months
-
-def days_between(d1: date, d2: date):
-    return max(0, (d2 - d1).days)
-
-
-
-# --- PARSER DE RECEITA / DESPESA (COLE AQUI) ---
-# Faz o parse de uma mensagem natural de receita/despesa e classifica a categoria (com fallback no GPT)
-# Faz parse de receita/despesa e usa memória + GPT para categorizar
-# Faz parse de receita/despesa, usa memória de categorias e fallback no GPT (e aprende automaticamente)
-def parse_receita_despesa_natural(user_id: int, text: str):
-    # 0) extrai data do texto (se tiver) e remove do texto
-    dt_evento, text_clean = extract_date_from_text(text)
-    if dt_evento is None:
-        dt_evento = now_tz()
-
-    # normaliza forte (acentos + pontuação)
-    raw_norm = normalize_text(text_clean)
-    if not raw_norm:
-        return None
-
-    valor = parse_money(text_clean)
-    if valor is None:
-        return None
-
-    verbos_despesa = ["gastei", "paguei", "comprei", "cartao", "cartão", "debitei"]
-    verbos_receita = ["recebi", "ganhei", "salario", "salário", "pix recebido", "reembolso"]
-
-    eh_despesa = any(normalize_text(v) in raw_norm for v in verbos_despesa)
-    eh_receita = any(normalize_text(v) in raw_norm for v in verbos_receita)
-
-    if not (eh_despesa or eh_receita):
-        return None
-
-    tipo = "despesa" if eh_despesa and not eh_receita else "receita" if eh_receita and not eh_despesa else None
-    if tipo is None:
-        return None
-
-    # 1) memória primeiro (prioridade total)
-    categoria = get_memorized_category(user_id, raw_norm)
-    if not categoria:
-        # 2) regra local
-        categoria = "outros"
-        for keywords, cat in LOCAL_RULES:
-            for kw in keywords:
-                kw_norm = normalize_text(kw)
-                if kw_norm and (contains_word(raw_norm, kw_norm) or kw_norm in raw_norm):
-                    categoria = cat
-                    break
-            if categoria != "outros":
-                break
-
-        # 3) fallback GPT
-        if categoria == "outros":
-            try:
-                categoria_gpt = classify_category_with_gpt(raw_norm)
-                if categoria_gpt:
-                    categoria = categoria_gpt
-            except Exception as e:
-                print("Erro IA categoria:", e)
-                categoria = "outros"
-
-        # 4) salva memória com keyword (NÃO salva a frase inteira)
-        try:
-            kw = extract_keyword_for_memory(raw_norm)
-            if kw:
-                upsert_category_rule(user_id, kw, categoria)
-        except Exception as e:
-            print("Erro salvando memória categoria:", e)
-
-    return {
-        "tipo": tipo,
-        "valor": valor,
-        "categoria": categoria,
-        "nota": raw_norm,
-        "criado_em": dt_evento, 
-    }
-
-
-
-def normalize_spaces(s: str) -> str:
-    return re.sub(r"\s+", " ", s).strip()
-
-def parse_pocket_deposit_natural(text: str):
-    """
-    Retorna (amount: float, pocket_name: str) ou (None, None)
-    Entende frases como:
-      - coloquei 300 na emergência
-      - adicionei 50 na caixinha viagem
-      - depositei 1200 em emergencia
-      - transferi 200 pra caixinha emergencia
-    """
-    raw = normalize_spaces(text.lower())
-
-    # precisa ter algum verbo de depósito
-    if not any(v in raw for v in DEPOSIT_VERBS):
-        return None, None
-
-    amount = parse_money(raw)
-    if amount is None:
-        return None, None
-
-    # tenta extrair o nome depois de "caixinha ..."
-    if "caixinha" in raw:
-        pocket = raw.split("caixinha", 1)[1].strip()
-        pocket = re.sub(r"^(da|do|na|no|pra|para|em)\s+", "", pocket).strip()
-        pocket = re.sub(r"\b(hoje|ontem)\b.*$", "", pocket).strip()
-        if pocket:
-            return amount, pocket
-
-    # se não tem a palavra caixinha, tenta padrões "na/em/pra <nome>"
-    m = re.search(r"\b(na|no|em|pra|para)\s+([a-z0-9_\-áàâãéèêíìîóòôõúùûç ]+)", raw)
-    if m:
-        pocket = m.group(2).strip()
-        pocket = re.sub(r"\b(hoje|ontem)\b.*$", "", pocket).strip()
-        # corta se tiver outras palavras típicas depois
-        pocket = re.split(r"\b(saldo|investimento|apliquei|aplicar)\b", pocket)[0].strip()
-        if pocket:
-            return amount, pocket
-
-    return None, None
-
-# Categorias por palavras-chave (bem simples e eficaz)
-CATEGORY_KEYWORDS = {
-    "alimentação": ["ifood", "uber eats", "rappi", "restaurante", "lanche", "pizza", "hamburguer", "café", "padaria"],
-    "mercado": ["mercado", "supermercado", "carrefour", "whole foods", "walmart", "target", "costco"],
-    "transporte": ["uber", "lyft", "99", "metro", "trem", "ônibus", "gasolina", "combustível", "posto", "estacionamento", "parking"],
-    "moradia": ["aluguel", "rent", "condomínio", "luz", "energia", "água", "internet", "wifi", "gás"],
-    "saúde": ["farmácia", "remédio", "medicina", "consulta", "dentista", "hospital"],
-    "assinaturas": ["netflix", "spotify", "prime", "amazon prime", "hbo", "disney", "icloud", "google one"],
-    "compras": ["amazon", "shopee", "aliexpress", "loja", "compra", "roupa", "tenis", "sapato"],
-    "lazer": ["cinema", "show", "bar", "balada", "viagem", "hotel", "airbnb"],
-    "educação": ["curso", "udemy", "coursera", "livro", "faculdade", "mensalidade"],
-    "outros": []
-}
-
-def guess_category(text: str) -> str:
-    t = text.lower()
-    for cat, words in CATEGORY_KEYWORDS.items():
-        for w in words:
-            if w in t:
-                return cat
-    return "outros"
-
-def parse_note_after_amount(text: str, amount: float) -> str:
-    """
-    Pega uma "descrição" simples depois do valor.
-    Ex: 'gastei 35 no ifood' -> 'ifood'
-    """
-    t = re.sub(r"\s+", " ", text.strip())
-    # remove o valor (primeira ocorrência de número)
-    t2 = re.sub(r"\d+[.,]?\d*", "", t, count=1).strip(" -–—:;")
-    # remove palavras comuns
-    t2 = re.sub(r"\b(gastei|gasto|paguei|pagar|recebi|ganhei|pix|no|na|em|pra|para|de|do|da)\b", "", t2, flags=re.I).strip()
-    return t2.strip()[:60]  # limita
-
-def parse_expense_income_natural(text: str):
-    """
-    Retorna dict com:
-      kind: 'expense'|'income'
-      amount: float
-      note: str
-      category: str
-    ou None se não reconhecer.
-    """
-    raw = re.sub(r"\s+", " ", text.lower()).strip()
-    amount = parse_money(raw)
-    if amount is None:
-        return None
-
-    expense_verbs = ["gastei", "paguei", "comprei", "debitei", "cartão", "cartao"]
-    income_verbs  = ["recebi", "ganhei", "caiu", "salário", "salario", "pix recebido", "reembolso"]
-
-    is_expense = any(v in raw for v in expense_verbs)
-    is_income  = any(v in raw for v in income_verbs)
-
-    # se não tiver verbo claro, não assume
-    if not (is_expense or is_income):
-        return None
-
-    kind = "expense" if is_expense and not is_income else "income" if is_income and not is_expense else None
-    if kind is None:
-        return None
-
-    note = parse_note_after_amount(text, amount)
-    category = guess_category(text)
-
-    return {"kind": kind, "amount": amount, "note": note, "category": category}
-
 
 # --------- bot setup ---------
 intents = discord.Intents.default()
@@ -1128,6 +785,9 @@ async def on_message(message: discord.Message):
             lines.append(f"- R$ {float(it['valor']):.2f} | {it['categoria'] or 'outros'} | {it['purchased_at']} | {it['nota'] or ''}")
 
         await message.reply("\n".join(lines))
+        return
+
+    if await handle_credit_commands(message):
         return
 
 

@@ -2090,5 +2090,205 @@ def add_credit_purchase_installments(
 
     return {"group_id": str(group_id), "tx_ids": tx_ids}
 
+#estorno (transação negativa na fatura)
+def add_credit_refund(
+    user_id: int,
+    card_id: int,
+    valor: float,
+    categoria: str | None,
+    nota: str | None,
+    purchased_at: date,
+):
+    ensure_user(user_id)
+    bill_id = get_or_create_open_bill(card_id, purchased_at)
+
+    v = Decimal(str(valor))
+    if v <= 0:
+        raise ValueError("valor do estorno deve ser > 0")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into credit_transactions
+                  (bill_id, user_id, card_id, tipo, valor, categoria, nota, purchased_at, is_refund)
+                values (%s,%s,%s,'estorno',%s,%s,%s,%s,true)
+                returning id
+                """,
+                (bill_id, user_id, card_id, -v, categoria, nota, purchased_at),
+            )
+            tx_id = cur.fetchone()["id"]
+
+            cur.execute(
+                "update credit_bills set total = total + %s where id=%s returning total",
+                (-v, bill_id),
+            )
+            total = cur.fetchone()["total"]
+        conn.commit()
+
+    return tx_id, total
+
+#pagar fatura (parcial ou total)
+def pay_bill_amount(user_id: int, card_id: int, card_name: str, amount: float | None):
+    # pega fatura aberta OU fechada mais recente ainda não paga
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, total, paid_amount, status
+                from credit_bills
+                where card_id=%s and status in ('open','closed')
+                order by period_start desc
+                limit 1
+                """,
+                (card_id,),
+            )
+            bill = cur.fetchone()
+            if not bill:
+                return None
+
+            total = Decimal(bill["total"])
+            paid = Decimal(bill["paid_amount"])
+            due = total - paid
+            if due <= 0:
+                # já quitada (por segurança)
+                cur.execute("update credit_bills set status='paid', paid_at=now() where id=%s", (bill["id"],))
+                conn.commit()
+                return None
+
+    pay = Decimal(str(amount)) if amount is not None else due
+    if pay <= 0:
+        raise ValueError("valor do pagamento deve ser > 0")
+    if pay > due:
+        pay = due
+
+    # lança despesa na conta corrente
+    launch_id, new_balance = add_launch_and_update_balance(
+        user_id=user_id,
+        tipo="despesa",
+        valor=float(pay),
+        alvo=f"fatura:{card_name}",
+        nota=f"Pagamento de fatura ({card_name})",
+    )
+
+    # atualiza bill
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update credit_bills
+                set paid_amount = paid_amount + %s
+                where id=%s
+                returning total, paid_amount
+                """,
+                (pay, bill["id"]),
+            )
+            row = cur.fetchone()
+            total2 = Decimal(row["total"])
+            paid2 = Decimal(row["paid_amount"])
+
+            if paid2 >= total2:
+                cur.execute("update credit_bills set status='paid', paid_at=now() where id=%s", (bill["id"],))
+        conn.commit()
+
+    return {"paid": float(pay), "launch_id": launch_id, "new_balance": new_balance}
+
+# fechar fatura 
+def close_bill(user_id: int, card_id: int):
+    # fecha a fatura mais recente em open
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update credit_bills
+                set status='closed', closed_at=now()
+                where id = (
+                    select id from credit_bills
+                    where card_id=%s and status='open'
+                    order by period_start desc
+                    limit 1
+                )
+                returning id
+                """,
+                (card_id,),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return row["id"] if row else None
+
+def get_next_bill_summary(card_id: int):
+    # cria/pega o próximo período com base no último bill existente
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select closing_day from credit_cards where id=%s",
+                (card_id,),
+            )
+            closing_day = cur.fetchone()["closing_day"]
+
+            cur.execute(
+                """
+                select period_start
+                from credit_bills
+                where card_id=%s
+                order by period_start desc
+                limit 1
+                """,
+                (card_id,),
+            )
+            last = cur.fetchone()
+            if last:
+                y, m = last["period_start"].year, last["period_start"].month
+                y2, m2 = add_months(y, m, 1)
+            else:
+                today = date.today()
+                y2, m2 = today.year, today.month
+
+            ps, pe = bill_period_for_month(y2, m2, closing_day)
+            bid = get_or_create_bill_by_period(card_id, ps, pe)
+
+            cur.execute("select id, period_start, period_end, total, paid_amount, status from credit_bills where id=%s", (bid,))
+            bill = cur.fetchone()
+    return bill
+
+# relatorio credito x debito mensal
+def monthly_summary_credit_debit(user_id: int, start: date, end: date):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select coalesce(sum(valor),0) as total_debito
+                from launches
+                where user_id=%s and tipo='despesa' and criado_em::date between %s and %s
+                """,
+                (user_id, start, end),
+            )
+            deb = cur.fetchone()["total_debito"]
+
+            cur.execute(
+                """
+                select coalesce(sum(valor),0) as total_credito
+                from credit_transactions
+                where user_id=%s and purchased_at between %s and %s
+                """,
+                (user_id, start, end),
+            )
+            cred = cur.fetchone()["total_credito"]
+
+            cur.execute(
+                """
+                select c.name, coalesce(sum(t.valor),0) as total
+                from credit_transactions t
+                join credit_cards c on c.id=t.card_id
+                where t.user_id=%s and t.purchased_at between %s and %s
+                group by c.name
+                order by total desc
+                """,
+                (user_id, start, end),
+            )
+            by_card = cur.fetchall()
+
+    return {"debito": deb, "credito": cred, "por_cartao": by_card}
+
 
 
