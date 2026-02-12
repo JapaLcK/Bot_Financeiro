@@ -54,6 +54,8 @@ from utils_text import (
     parse_expense_income_natural,
 )
 from investment_parse import parse_interest
+import time as pytime
+
 
 
 
@@ -1216,7 +1218,7 @@ if __name__ == "__main__":
                 wait = max(wait, 60)
 
             print(f"⏳ Aguardando {wait}s para tentar de novo...")
-            time.sleep(wait)
+            pytime.sleep(wait)
             wait = min(wait * 2, 600)  # dobra até 10 min
 
 
