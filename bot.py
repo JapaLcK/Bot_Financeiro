@@ -24,6 +24,13 @@ import unicodedata
 from reports import setup_monthly_export
 from utils_date import _tz, now_tz, extract_date_from_text
 from commands.resumo import handle_resumo
+from utils_date import extract_date_from_text, now_tz
+from db import (
+    create_card, get_card_id_by_name, set_default_card, get_default_card_id,
+    add_credit_purchase, get_open_bill_summary, pay_open_bill, list_cards
+)
+
+
 
 
 
@@ -890,7 +897,239 @@ async def on_message(message: discord.Message):
         )
         return
 
-   # Gasto/Receita natural (ex: "gastei 35 no ifood", "recebi 2500 salario")
+    # handler de criar cartao
+    t = message.content.strip()
+    t_low = t.lower().strip()
+
+    if t_low.startswith("criar cartao"):
+        # ex: criar cartao nubank fecha 10 vence 17
+        m = re.search(r"criar cartao\s+(.+?)\s+fecha\s+(\d{1,2})\s+vence\s+(\d{1,2})", t_low)
+        if not m:
+            await message.reply("Use: criar cartao NOME fecha 10 vence 17")
+            return
+
+        name = m.group(1).strip()
+        fecha = int(m.group(2))
+        vence = int(m.group(3))
+
+        try:
+            card_id = create_card(user_id=message.author.id, name=name, closing_day=fecha, due_day=vence)
+            await message.reply(f"✅ Cartão '{name}' criado/atualizado. Quer definir como padrão? Use: padrao {name}")
+        except Exception as e:
+            await message.reply(f"❌ Erro criando cartão: {e}")
+        return
+    
+    #handler de definir cartao padrao atraves de nome definido
+    if t_low.startswith("padrao "):
+        name = t[7:].strip()
+        card_id = get_card_id_by_name(message.author.id, name)
+        if not card_id:
+            await message.reply(f"❌ Não achei o cartão '{name}'. Crie com: criar cartao {name} fecha 10 vence 17")
+            return
+
+        set_default_card(message.author.id, card_id)
+        await message.reply(f"✅ Cartão padrão definido: {name}")
+        return
+
+    # handler de aceitar lancamentos no credito, colocando nome de cartao ou nao (caso n tenha nome, passa pra fatura do cartao padrao)
+    if t_low.startswith("credito"):
+        user_id = message.author.id
+
+        # remove "credito"
+        rest = t[len("credito"):].strip()
+        if not rest:
+            await message.reply("Use: credito 120 mercado OU credito nubank 120 mercado")
+            return
+
+        # data opcional
+        dt_evento, rest2 = extract_date_from_text(rest)
+        if dt_evento is None:
+            dt_evento = now_tz()
+        purchased_at = dt_evento.date()
+
+        # tenta pegar valor
+        valor = parse_money(rest2)
+        if valor is None:
+            await message.reply("❌ Não achei o valor. Ex: credito 120 mercado")
+            return
+
+        # tenta identificar se o 1º token é cartão ou não:
+        tokens = rest2.split()
+        card_name = None
+
+        # se o primeiro token não tem número, tratamos como nome do cartão
+        if tokens and parse_money(tokens[0]) is None:
+            card_name = tokens[0]
+            rest_desc = " ".join(tokens[1:])
+        else:
+            rest_desc = rest2
+
+        # categoria (reusa sua lógica)
+        raw_norm = normalize_text(rest_desc)
+        categoria = get_memorized_category(user_id, raw_norm) or "outros"
+        if categoria == "outros":
+            try:
+                categoria_gpt = classify_category_with_gpt(raw_norm)
+                if categoria_gpt:
+                    categoria = categoria_gpt
+            except:
+                pass
+
+        nota = raw_norm
+
+        # resolve card_id
+        if card_name:
+            card_id = get_card_id_by_name(user_id, card_name)
+            if not card_id:
+                await message.reply(f"❌ Não achei o cartão '{card_name}'. Crie com: criar cartao {card_name} fecha 10 vence 17")
+                return
+        else:
+            card_id = get_default_card_id(user_id)
+            if not card_id:
+                await message.reply("❓ Você não tem cartão padrão. Defina com: padrao NOME (ou crie: criar cartao nubank fecha 10 vence 17)")
+                return
+
+        tx_id, total, bill_id = add_credit_purchase(
+            user_id=user_id,
+            card_id=card_id,
+            valor=float(valor),
+            categoria=categoria,
+            nota=nota,
+            purchased_at=purchased_at,
+        )
+
+        await message.reply(f"💳 Compra no crédito registrada: R$ {float(valor):.2f}\n📌 Fatura atual: R$ {float(total):.2f}\nID: #{tx_id}")
+        return
+    
+    # define a fatura e nome da fatura
+    if t_low.startswith("fatura"):
+        user_id = message.author.id
+        parts = t.split(maxsplit=1)
+        card_name = parts[1].strip() if len(parts) > 1 else None
+
+        if card_name:
+            card_id = get_card_id_by_name(user_id, card_name)
+            if not card_id:
+                await message.reply(f"❌ Não achei o cartão '{card_name}'.")
+                return
+        else:
+            card_id = get_default_card_id(user_id)
+            if not card_id:
+                await message.reply("❓ Você não tem cartão padrão. Defina com: padrao NOME")
+                return
+            card_name = "padrão"
+
+        res = get_open_bill_summary(user_id, card_id)
+        if not res:
+            await message.reply("📭 Nenhuma fatura aberta.")
+            return
+
+        bill, items = res
+        lines = [f"💳 **Fatura ({card_name})** {bill['period_start']} → {bill['period_end']}",
+                f"Total: R$ {float(bill['total']):.2f}",
+                ""]
+        for it in items[:10]:
+            lines.append(f"- R$ {float(it['valor']):.2f} | {it['categoria'] or 'outros'} | {it['purchased_at']} | {it['nota'] or ''}")
+
+        await message.reply("\n".join(lines))
+        return
+    
+    # handler para pagar fatura
+    if t_low.startswith("pagar fatura"):
+        user_id = message.author.id
+        rest = t[len("pagar fatura"):].strip()
+        card_name = rest if rest else None
+
+        if card_name:
+            card_id = get_card_id_by_name(user_id, card_name)
+            if not card_id:
+                await message.reply(f"❌ Não achei o cartão '{card_name}'.")
+                return
+        else:
+            card_id = get_default_card_id(user_id)
+            if not card_id:
+                await message.reply("❓ Você não tem cartão padrão. Defina com: padrao NOME")
+                return
+            card_name = "Cartão padrão"
+
+        res = pay_open_bill(user_id, card_id, card_name)
+        if not res:
+            await message.reply("📭 Nenhuma fatura aberta para pagar.")
+            return
+
+        total, launch_id, new_balance = res
+        await message.reply(f"✅ Fatura paga: R$ {float(total):.2f}\nConta agora: R$ {float(new_balance):.2f}\nID lançamento: #{launch_id}")
+        return
+
+    # handler para listar cartoes armazenados
+    if t_low in ("cartoes", "cartões", "listar cartoes", "listar cartões"):
+        cards = list_cards(message.author.id)
+        if not cards:
+            await message.reply("📭 Você ainda não tem cartões. Crie com: criar cartao nubank fecha 10 vence 17")
+            return
+
+        lines = ["💳 **Seus cartões:**"]
+        for c in cards:
+            badge = " (padrão)" if c["is_default"] else ""
+            lines.append(f"- {c['name']}{badge} — fecha dia {c['closing_day']} / vence dia {c['due_day']}")
+
+        await message.reply("\n".join(lines))
+        return
+
+    # handler para listar faturas de cartao
+    t = message.content.strip()
+    t_low = t.lower().strip()
+
+    # aceitar "fatura" e "listar fatura"
+    if t_low.startswith("fatura") or t_low.startswith("listar fatura"):
+        user_id = message.author.id
+
+        # extrai nome do cartão, se houver
+        card_name = None
+        parts = t_low.split()
+        # exemplos:
+        # "fatura" -> parts = ["fatura"]
+        # "fatura santander" -> ["fatura", "santander"]
+        # "listar fatura santander" -> ["listar", "fatura", "santander"]
+        if "fatura" in parts:
+            idx = parts.index("fatura")
+            if len(parts) > idx + 1:
+                card_name = t.split()[idx + 1]  # pega do texto original pra manter maiúsculas
+
+        # resolve card_id
+        if card_name:
+            card_id = get_card_id_by_name(user_id, card_name)
+            if not card_id:
+                await message.reply(f"❌ Não achei o cartão '{card_name}'. Use `cartoes` para listar.")
+                return
+        else:
+            card_id = get_default_card_id(user_id)
+            if not card_id:
+                await message.reply("❓ Você não tem cartão padrão. Defina com: `padrao NOME`.")
+                return
+            card_name = "padrão"
+
+        res = get_open_bill_summary(user_id, card_id)
+        if not res:
+            await message.reply(f"📭 Nenhuma fatura aberta para {card_name}.")
+            return
+
+        bill, items = res
+        lines = [
+            f"💳 **Fatura {card_name}**",
+            f"Período: {bill['period_start']} → {bill['period_end']}",
+            f"Total: R$ {float(bill['total']):.2f}",
+            "",
+        ]
+
+        for it in items[:10]:
+            lines.append(f"- R$ {float(it['valor']):.2f} | {it['categoria'] or 'outros'} | {it['purchased_at']} | {it['nota'] or ''}")
+
+        await message.reply("\n".join(lines))
+        return
+
+
+# Gasto/Receita natural (ex: "gastei 35 no ifood", "recebi 2500 salario")
     user_id = message.author.id
     parsed = parse_receita_despesa_natural(user_id, text)
     if parsed:

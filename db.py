@@ -101,7 +101,101 @@ def init_db():
           primary key (code, ref_date)
         )
         """,
-    ]
+
+        """ 
+        create table if not exists credit_cards (
+        id bigserial primary key,
+        user_id bigint not null references users(id) on delete cascade,
+        name text not null,
+        closing_day int not null,  -- 1..28
+        due_day int not null,      -- 1..28
+        created_at timestamptz default now(),
+        unique(user_id, name)
+        )
+        """,
+        
+        """ 
+        create table if not exists credit_bills (
+        id bigserial primary key,
+        card_id bigint not null references credit_cards(id) on delete cascade,
+        period_start date not null,
+        period_end date not null,
+        status text not null default 'open', -- open|closed|paid
+        total numeric not null default 0,
+        paid_at timestamptz,
+        created_at timestamptz default now(),
+        unique(card_id, period_start, period_end)
+        );
+        """,
+        
+        """ 
+        create table if not exists credit_transactions (
+        id bigserial primary key,
+        bill_id bigint not null references credit_bills(id) on delete cascade,
+        user_id bigint not null references users(id) on delete cascade,
+        card_id bigint not null references credit_cards(id) on delete cascade,
+        tipo text not null default 'credito', -- ou 'estorno'
+        valor numeric not null,
+        categoria text,
+        nota text,
+        purchased_at date not null,
+        created_at timestamptz default now()
+        );
+        """
+        
+        """ create index if not exists idx_credit_tx_user_date on credit_transactions(user_id, purchased_at desc); """
+
+        """
+        create table if not exists credit_cards (
+        id bigserial primary key,
+        user_id bigint not null references users(id) on delete cascade,
+        name text not null,
+        closing_day int not null check (closing_day between 1 and 28),
+        due_day int not null check (due_day between 1 and 28),
+        created_at timestamptz default now(),
+        unique(user_id, name)
+        );
+        """
+
+        """ 
+        create table if not exists credit_bills (
+        id bigserial primary key,
+        card_id bigint not null references credit_cards(id) on delete cascade,
+        period_start date not null,
+        period_end date not null,
+        status text not null default 'open', -- open | closed | paid
+        total numeric not null default 0,
+        paid_at timestamptz,
+        created_at timestamptz default now(),
+        unique(card_id, period_start, period_end)
+        );
+        """
+
+        """
+        create table if not exists credit_transactions (
+        id bigserial primary key,
+        bill_id bigint not null references credit_bills(id) on delete cascade,
+        user_id bigint not null references users(id) on delete cascade,
+        card_id bigint not null references credit_cards(id) on delete cascade,
+        tipo text not null default 'credito', -- credito | estorno
+        valor numeric not null,
+        categoria text,
+        nota text,
+        purchased_at date not null,
+        created_at timestamptz default now()
+        );
+        """
+
+        """ 
+        create index if not exists idx_credit_tx_user_date
+        on credit_transactions(user_id, purchased_at desc);
+        """
+
+        """
+        alter table users add column if not exists default_card_id bigint;
+        """
+
+]
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -1653,4 +1747,218 @@ def upsert_category_rule(user_id: int, keyword: str, category: str) -> None:
     conn.commit()
     cur.close()
 
+def create_card(user_id: int, name: str, closing_day: int, due_day: int) -> int:
+    ensure_user(user_id)
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("nome do cartão vazio")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into credit_cards (user_id, name, closing_day, due_day)
+                values (%s, %s, %s, %s)
+                on conflict (user_id, name)
+                do update set closing_day=excluded.closing_day, due_day=excluded.due_day
+                returning id
+                """,
+                (user_id, name, int(closing_day), int(due_day)),
+            )
+            card_id = cur.fetchone()["id"]
+        conn.commit()
+    return card_id
+
+
+def get_card_id_by_name(user_id: int, name: str) -> int | None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select id from credit_cards where user_id=%s and name=%s", (user_id, name))
+            row = cur.fetchone()
+            return row["id"] if row else None
+
+
+def set_default_card(user_id: int, card_id: int):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("update users set default_card_id=%s where id=%s", (card_id, user_id))
+        conn.commit()
+
+
+def get_default_card_id(user_id: int) -> int | None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select default_card_id from users where id=%s", (user_id,))
+            row = cur.fetchone()
+            return row["default_card_id"] if row else None
+
+
+def _bill_period_for_purchase(purchased_at: date, closing_day: int):
+    year = purchased_at.year
+    month = purchased_at.month
+
+    if purchased_at.day <= closing_day:
+        period_start = date(year, month, 1)
+        period_end = date(year, month, closing_day)
+    else:
+        if month == 12:
+            year += 1
+            month = 1
+        else:
+            month += 1
+        period_start = date(year, month, 1)
+        period_end = date(year, month, closing_day)
+
+    return period_start, period_end
+
+
+def get_or_create_open_bill(card_id: int, purchased_at: date) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select closing_day from credit_cards where id=%s", (card_id,))
+            closing_day = cur.fetchone()["closing_day"]
+
+            ps, pe = _bill_period_for_purchase(purchased_at, closing_day)
+
+            cur.execute(
+                """
+                select id from credit_bills
+                where card_id=%s and period_start=%s and period_end=%s
+                """,
+                (card_id, ps, pe),
+            )
+            row = cur.fetchone()
+            if row:
+                return row["id"]
+
+            cur.execute(
+                """
+                insert into credit_bills (card_id, period_start, period_end, status, total)
+                values (%s, %s, %s, 'open', 0)
+                returning id
+                """,
+                (card_id, ps, pe),
+            )
+            bill_id = cur.fetchone()["id"]
+        conn.commit()
+    return bill_id
+
+
+def add_credit_purchase(
+    user_id: int,
+    card_id: int,
+    valor: float,
+    categoria: str | None,
+    nota: str | None,
+    purchased_at: date,
+):
+    ensure_user(user_id)
+
+    bill_id = get_or_create_open_bill(card_id, purchased_at)
+    v = Decimal(str(valor))
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into credit_transactions (bill_id, user_id, card_id, valor, categoria, nota, purchased_at)
+                values (%s, %s, %s, %s, %s, %s, %s)
+                returning id
+                """,
+                (bill_id, user_id, card_id, v, categoria, nota, purchased_at),
+            )
+            tx_id = cur.fetchone()["id"]
+
+            cur.execute(
+                "update credit_bills set total = total + %s where id=%s returning total",
+                (v, bill_id),
+            )
+            total = cur.fetchone()["total"]
+        conn.commit()
+
+    return tx_id, total, bill_id
+
+
+def get_open_bill_summary(user_id: int, card_id: int):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, period_start, period_end, total
+                from credit_bills
+                where card_id=%s and status='open'
+                order by period_start desc
+                limit 1
+                """,
+                (card_id,),
+            )
+            bill = cur.fetchone()
+            if not bill:
+                return None
+
+            cur.execute(
+                """
+                select valor, categoria, nota, purchased_at
+                from credit_transactions
+                where bill_id=%s
+                order by purchased_at desc
+                limit 50
+                """,
+                (bill["id"],),
+            )
+            items = cur.fetchall()
+
+    return bill, items
+
+
+def pay_open_bill(user_id: int, card_id: int, card_name: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, total
+                from credit_bills
+                where card_id=%s and status='open'
+                order by period_start desc
+                limit 1
+                """,
+                (card_id,),
+            )
+            bill = cur.fetchone()
+            if not bill:
+                return None
+            total = bill["total"]
+        conn.commit()
+
+    launch_id, new_balance = add_launch_and_update_balance(
+        user_id=user_id,
+        tipo="despesa",
+        valor=float(total),
+        alvo=f"fatura:{card_name}",
+        nota=f"Pagamento de fatura ({card_name})",
+    )
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("update credit_bills set status='paid', paid_at=now() where id=%s", (bill["id"],))
+        conn.commit()
+
+    return total, launch_id, new_balance
+
+def list_cards(user_id: int):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select c.id, c.name, c.closing_day, c.due_day,
+                       (u.default_card_id = c.id) as is_default
+                from credit_cards c
+                left join users u on u.id = c.user_id
+                where c.user_id = %s
+                order by c.name
+                """,
+                (user_id,),
+            )
+            rows = cur.fetchall()
+    return rows
 
