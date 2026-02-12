@@ -22,7 +22,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from sheets_export import export_rows_to_month_sheet
 import unicodedata
 from reports import setup_monthly_export
-from timezone import _tz  
+from utils_date import _tz, now_tz, extract_date_from_text
 from commands.resumo import handle_resumo
 
 
@@ -346,12 +346,17 @@ def days_between(d1: date, d2: date):
 # Faz parse de receita/despesa e usa memória + GPT para categorizar
 # Faz parse de receita/despesa, usa memória de categorias e fallback no GPT (e aprende automaticamente)
 def parse_receita_despesa_natural(user_id: int, text: str):
+    # 0) extrai data do texto (se tiver) e remove do texto
+    dt_evento, text_clean = extract_date_from_text(text)
+    if dt_evento is None:
+        dt_evento = now_tz()
+
     # normaliza forte (acentos + pontuação)
-    raw_norm = normalize_text(text)
+    raw_norm = normalize_text(text_clean)
     if not raw_norm:
         return None
 
-    valor = parse_money(text)
+    valor = parse_money(text_clean)
     if valor is None:
         return None
 
@@ -404,8 +409,10 @@ def parse_receita_despesa_natural(user_id: int, text: str):
         "tipo": tipo,
         "valor": valor,
         "categoria": categoria,
-        "nota": raw_norm
+        "nota": raw_norm,
+        "criado_em": dt_evento, 
     }
+
 
 
 def normalize_spaces(s: str) -> str:
@@ -893,6 +900,8 @@ async def on_message(message: discord.Message):
         valor = float(parsed["valor"])
         categoria = parsed["categoria"]
         nota = parsed.get("nota")
+        criado_em = parsed.get("criado_em")
+
 
 
         launch_id, new_balance = add_launch_and_update_balance(
@@ -900,7 +909,8 @@ async def on_message(message: discord.Message):
             tipo=tipo,
             valor=valor,
             alvo=categoria,
-            nota=nota
+            nota=nota,
+            criado_em=criado_em
         )
 
         emoji = "💸" if tipo == "despesa" else "💰"

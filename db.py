@@ -8,7 +8,8 @@ from datetime import datetime, date
 import math
 from datetime import timedelta, timezone
 import requests
-from timezone import _tz
+from utils_date import _tz
+
 
 
 
@@ -131,7 +132,14 @@ def get_balance(user_id: int) -> Decimal:
             row = cur.fetchone()
             return row["balance"] if row else Decimal("0")
 
-def add_launch_and_update_balance(user_id: int, tipo: str, valor: float, alvo: str | None, nota: str | None):
+def add_launch_and_update_balance(
+    user_id: int,
+    tipo: str,
+    valor: float,
+    alvo: str | None,
+    nota: str | None,
+    criado_em: datetime | None = None,   # 👈 novo
+):
     """
     Lança registro em launches e atualiza saldo em accounts na mesma transação.
     Regra:
@@ -146,10 +154,11 @@ def add_launch_and_update_balance(user_id: int, tipo: str, valor: float, alvo: s
     elif tipo == "receita":
         delta = +v
     else:
-        # se tiver outros tipos depois, você decide a regra
         raise ValueError(f"tipo inválido: {tipo}")
 
-    criado_em = datetime.now(_tz()).isoformat(timespec="seconds")
+    # 👇 se o parser não mandou data, usa agora
+    if criado_em is None:
+        criado_em = datetime.now(_tz())
 
     with get_conn() as conn:
         with conn.cursor() as cur:

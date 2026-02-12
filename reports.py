@@ -3,7 +3,7 @@ from datetime import datetime, date, timedelta, time
 from zoneinfo import ZoneInfo
 import os
 from discord.ext import tasks
-from timezone import _tz
+from utils_date import _tz
 
 
 
