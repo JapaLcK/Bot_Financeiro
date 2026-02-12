@@ -209,12 +209,13 @@ async def handle_credit_commands(message) -> bool:
             tx_id, total, bill_id = add_credit_purchase_installments(
                 user_id=user_id,
                 card_id=card_id,
-                valor=float(valor),
-                installments=n,
+                valor_total=float(valor),
                 categoria=categoria,
                 nota=nota,
                 purchased_at=purchased_at,
+                installments=n,
             )
+
             await message.reply(
                 f"💳 Parcelado no cartão ({resolved_name}): R$ {float(valor):.2f} em {n}x\n"
                 f"📌 Fatura atual: R$ {float(total):.2f}\n"
