@@ -5,8 +5,8 @@ Retorna True se tratou algum comando; False caso contrário.
 """
 
 import re
-
-from utils_date import extract_date_from_text, now_tz, fmt_br
+from ai_router import classify_category_with_gpt
+from utils_date import extract_date_from_text, now_tz, today_tz, fmt_br, fmt_brl
 from utils_text import parse_money, normalize_text
 from db import (
     create_card,
@@ -18,10 +18,8 @@ from db import (
     add_credit_purchase_installments,
     get_open_bill_summary,
     pay_open_bill,
+    get_memorized_category
 )
-from db import get_memorized_category
-from ai_router import classify_category_with_gpt
-from utils_text import fmt_brl
 
 
 def _pick_card_id(user_id: int, card_name: str | None):
@@ -162,7 +160,7 @@ async def handle_credit_commands(message) -> bool:
         return True
 
     # -------------------------
-    # PARCELAR (isso que estava faltando)
+    # PARCELAR 
     # -------------------------
     if t_low.startswith("parcelar"):
         # exemplos:
@@ -275,7 +273,7 @@ async def handle_credit_commands(message) -> bool:
             return True
 
         try:
-            res = pay_open_bill(user_id, card_id, resolved_name)
+            res = pay_open_bill(user_id, card_id, resolved_name, as_of=today_tz())
             if not res:
                 await message.reply("📭 Nenhuma fatura aberta para pagar.")
                 return True
@@ -305,7 +303,7 @@ async def handle_credit_commands(message) -> bool:
             return True
 
         try:
-            res = get_open_bill_summary(user_id, card_id)
+            res = get_open_bill_summary(user_id, card_id, as_of=today_tz())
             if not res:
                 await message.reply(f"📭 Nenhuma fatura aberta para {resolved_name}.")
                 return True

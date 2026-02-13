@@ -8,7 +8,7 @@ from datetime import datetime, date
 import math
 from datetime import timedelta, timezone
 import requests
-from utils_date import _tz
+from utils_date import _tz, today_tz, billing_period_for_close_day
 from uuid import uuid4
 import calendar
 
@@ -1864,6 +1864,7 @@ def _bill_period_for_purchase(purchased_at: date, closing_day: int):
     if purchased_at > end_this:
         if m == 12:
             y, m = y + 1, 1
+
         else:
             m = m + 1
 
@@ -1874,29 +1875,62 @@ def _bill_period_for_purchase(purchased_at: date, closing_day: int):
 
     return period_start, period_end
 
-
-def get_or_create_open_bill(card_id: int, purchased_at: date) -> int:
+def get_or_create_open_bill(user_id: int, card_id: int, ref_date: date) -> int:
     """
-    Escolhe a fatura correta para uma compra em `purchased_at`:
-    - Se dia da compra > closing_day: cai na fatura do mês seguinte (que fecha no closing do próximo mês)
-    - Senão: cai na fatura do mês atual
+    Retorna o bill_id da fatura (status open) correspondente ao ciclo onde ref_date cai,
+    calculado via closing_day do cartão.
+    Cria a fatura se não existir.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("select closing_day from credit_cards where id=%s", (card_id,))
+            # 1) pega closing_day do cartão e garante user_id
+            cur.execute(
+                """
+                select closing_day
+                from credit_cards
+                where id=%s and user_id=%s
+                limit 1
+                """,
+                (card_id, user_id),
+            )
             row = cur.fetchone()
             if not row:
-                raise ValueError("Cartão não encontrado.")
+                raise ValueError("Cartão não encontrado para este usuário.")
+
             closing_day = int(row["closing_day"])
+            period_start, period_end = billing_period_for_close_day(ref_date, closing_day)
 
-    y, m = purchased_at.year, purchased_at.month
+            # 2) tenta achar fatura open do período
+            cur.execute(
+                """
+                select id
+                from credit_bills
+                where user_id=%s
+                  and card_id=%s
+                  and status='open'
+                  and period_start=%s
+                  and period_end=%s
+                limit 1
+                """,
+                (user_id, card_id, period_start, period_end),
+            )
+            bill = cur.fetchone()
+            if bill:
+                return int(bill["id"])
 
-    # compra após o fechamento -> próxima fatura
-    if purchased_at.day > closing_day:
-        y, m = add_months(y, m, 1)
+            # 3) cria
+            cur.execute(
+                """
+                insert into credit_bills (user_id, card_id, period_start, period_end, total, status)
+                values (%s, %s, %s, %s, 0, 'open')
+                returning id
+                """,
+                (user_id, card_id, period_start, period_end),
+            )
+            bill_id = int(cur.fetchone()["id"])
+        conn.commit()
 
-    ps, pe = bill_period_for_month(y, m, closing_day)
-    return get_or_create_bill_by_period(card_id, ps, pe)
+    return bill_id
 
 def add_credit_purchase(
     user_id: int,
@@ -1908,7 +1942,9 @@ def add_credit_purchase(
 ):
     ensure_user(user_id)
 
-    bill_id = get_or_create_open_bill(card_id, purchased_at)
+    # ✅ pega/cria a fatura correta do ciclo do cartão
+    bill_id = get_or_create_open_bill(user_id, card_id, purchased_at)
+
     v = Decimal(str(valor))
 
     with get_conn() as conn:
@@ -1924,66 +1960,155 @@ def add_credit_purchase(
             tx_id = cur.fetchone()["id"]
 
             cur.execute(
-                "update credit_bills set total = total + %s where id=%s returning total",
-                (v, bill_id),
+                """
+                update credit_bills
+                set total = total + %s
+                where id=%s and user_id=%s
+                returning total
+                """,
+                (v, bill_id, user_id),
             )
             total = cur.fetchone()["total"]
+
         conn.commit()
 
     return tx_id, total, bill_id
 
 
-def get_open_bill_summary(user_id: int, card_id: int):
+
+def get_open_bill_summary(user_id: int, card_id: int, as_of: date | None = None):
+    if as_of is None:
+        as_of = today_tz()
+
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # 1) pega closing_day do cartão (e garante que é do usuário)
+            cur.execute(
+                """
+                select closing_day
+                from credit_cards
+                where id=%s and user_id=%s
+                limit 1
+                """,
+                (card_id, user_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+
+            closing_day = int(row["closing_day"])
+
+            # 2) calcula período correto
+            period_start, period_end = billing_period_for_close_day(as_of, closing_day)
+
+            # 3) busca a fatura open correspondente ao período correto
             cur.execute(
                 """
                 select id, period_start, period_end, total
                 from credit_bills
-                where card_id=%s and status='open'
-                order by period_start desc
+                where user_id=%s
+                  and card_id=%s
+                  and status='open'
+                  and period_start=%s
+                  and period_end=%s
                 limit 1
                 """,
-                (card_id,),
+                (user_id, card_id, period_start, period_end),
             )
             bill = cur.fetchone()
             if not bill:
                 return None
 
+            # 4) itens da fatura
             cur.execute(
                 """
                 select valor, categoria, nota, purchased_at
                 from credit_transactions
-                where bill_id=%s
+                where user_id=%s
+                  and bill_id=%s
                 order by purchased_at desc
                 limit 50
                 """,
-                (bill["id"],),
+                (user_id, bill["id"]),
             )
             items = cur.fetchall()
 
     return bill, items
 
 
-def pay_open_bill(user_id: int, card_id: int, card_name: str):
+
+from datetime import date
+from utils_date import today_tz, billing_period_for_close_day
+
+def pay_open_bill(user_id: int, card_id: int, card_name: str, as_of: date | None = None):
+    if as_of is None:
+        as_of = today_tz()
+
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # 1) pega closing_day do cartão (garantindo user_id)
+            cur.execute(
+                """
+                select closing_day
+                from credit_cards
+                where id=%s and user_id=%s
+                limit 1
+                """,
+                (card_id, user_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+
+            closing_day = int(row["closing_day"])
+            period_start, period_end = billing_period_for_close_day(as_of, closing_day)
+
+            # 2) pega a fatura open DO PERÍODO CERTO (e do usuário)
             cur.execute(
                 """
                 select id, total
                 from credit_bills
-                where card_id=%s and status='open'
-                order by period_start desc
+                where user_id=%s
+                  and card_id=%s
+                  and status='open'
+                  and period_start=%s
+                  and period_end=%s
                 limit 1
                 """,
-                (card_id,),
+                (user_id, card_id, period_start, period_end),
             )
             bill = cur.fetchone()
             if not bill:
                 return None
-            total = bill["total"]
+
+            total = float(bill["total"] or 0.0)
+
+            # se total já é 0, só fecha a fatura pra não continuar aparecendo
+            if total <= 0:
+                cur.execute(
+                    """
+                    update credit_bills
+                    set status='paid', paid_at=now()
+                    where id=%s and user_id=%s
+                    """,
+                    (bill["id"], user_id),
+                )
+                conn.commit()
+                return 0.0, None, None
+
+            # marca como paga *antes* de debitar (pra evitar duplicidade em corrida)
+            cur.execute(
+                """
+                update credit_bills
+                set status='paid', paid_at=now()
+                where id=%s and user_id=%s
+                """,
+                (bill["id"], user_id),
+            )
+
         conn.commit()
 
+    # 3) debita conta corrente (sua lógica atual)
     launch_id, new_balance = add_launch_and_update_balance(
         user_id=user_id,
         tipo="despesa",
@@ -1991,11 +2116,6 @@ def pay_open_bill(user_id: int, card_id: int, card_name: str):
         alvo=f"fatura:{card_name}",
         nota=f"Pagamento de fatura ({card_name})",
     )
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("update credit_bills set status='paid', paid_at=now() where id=%s", (bill["id"],))
-        conn.commit()
 
     return total, launch_id, new_balance
 
