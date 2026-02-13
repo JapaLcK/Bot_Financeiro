@@ -27,7 +27,7 @@ from commands.resumo import handle_resumo
 from utils_date import extract_date_from_text, now_tz, parse_date_str, month_range_today, days_between
 from db import (
     create_card, get_card_id_by_name, set_default_card, get_default_card_id,
-    add_credit_purchase, get_open_bill_summary, pay_open_bill, list_cards
+    add_credit_purchase, get_open_bill_summary, list_cards
 )
 from handlers.credit import handle_credit_commands
 from utils_text import parse_money, normalize_text
