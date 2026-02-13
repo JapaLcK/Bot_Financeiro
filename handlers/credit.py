@@ -6,8 +6,8 @@ Retorna True se tratou algum comando; False caso contrário.
 
 import re
 from ai_router import classify_category_with_gpt
-from utils_date import extract_date_from_text, now_tz, today_tz, fmt_br, fmt_brl
-from utils_text import parse_money, normalize_text
+from utils_date import extract_date_from_text, now_tz, today_tz, fmt_br
+from utils_text import parse_money, normalize_text, fmt_brl
 from db import (
     create_card,
     list_cards,
