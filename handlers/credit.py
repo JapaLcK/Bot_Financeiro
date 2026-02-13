@@ -17,7 +17,7 @@ from db import (
     add_credit_purchase,
     add_credit_purchase_installments,
     get_open_bill_summary,
-    pay_open_bill,
+    pay_bill_amount,
     get_memorized_category
 )
 
@@ -261,11 +261,31 @@ async def handle_credit_commands(message) -> bool:
         
 
     # -------------------------
-    # pagar fatura
+    # pagar fatura (total ou parcial)
     # -------------------------
     if t_low.startswith("pagar fatura"):
         rest = t[len("pagar fatura"):].strip()
-        card_name = rest if rest else None
+
+        # Aceita:
+        #   pagar fatura
+        #   pagar fatura 300
+        #   pagar fatura nubank
+        #   pagar fatura nubank 300
+        tokens = rest.split() if rest else []
+
+        amount = None
+        card_name = None
+
+        if tokens:
+            # se o último token é número => amount
+            last_val = parse_money(tokens[-1])
+            if last_val is not None:
+                amount = float(last_val)
+                tokens = tokens[:-1]
+
+            # o que sobrou vira nome do cartão (pode ter espaço)
+            if tokens:
+                card_name = " ".join(tokens).strip()
 
         card_id, resolved_name = _pick_card_id(user_id, card_name)
         if not card_id:
@@ -273,20 +293,33 @@ async def handle_credit_commands(message) -> bool:
             return True
 
         try:
-            res = pay_open_bill(user_id, card_id, resolved_name, as_of=today_tz())
+            res = pay_bill_amount(user_id, card_id, resolved_name, amount, as_of=today_tz())
+
             if not res:
                 await message.reply("📭 Nenhuma fatura aberta para pagar.")
                 return True
 
-            total, launch_id, new_balance = res
+            if isinstance(res, dict) and res.get("error") == "amount_too_high":
+                await message.reply(
+                    "❌ Valor maior do que o em aberto.\n"
+                    f"Em aberto: {fmt_brl(res['due'])} | Total: {fmt_brl(res['total'])} | Já pago: {fmt_brl(res['paid_amount'])}"
+                )
+                return True
+
+            if isinstance(res, dict) and res.get("error") == "invalid_amount":
+                await message.reply("❌ Valor inválido. Use: pagar fatura 300")
+                return True
+
+            # sucesso
             await message.reply(
-                f"✅ Fatura paga: R$ {float(total):.2f}\n"
-                f"Conta agora: R$ {float(new_balance):.2f}\n"
-                f"ID lançamento: #{launch_id}"
+                f"✅ Pagamento registrado: {fmt_brl(res['paid'])}\n"
+                f"Conta agora: {fmt_brl(res['new_balance'])}\n"
+                f"ID lançamento: #{res['launch_id']}"
             )
         except Exception as e:
             await message.reply(f"❌ Erro ao pagar fatura: {e}")
         return True
+
 
     # --- fatura (inclui "listar fatura") ---
     if t_low.startswith("fatura") or t_low.startswith("listar fatura"):

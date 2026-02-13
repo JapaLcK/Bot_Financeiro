@@ -1973,7 +1973,7 @@ def add_credit_purchase(
     return tx_id, total, bill_id
 
 
-
+# paga fatura em aberta e nao fecha a fatura do mes
 def get_open_bill_summary(user_id: int, card_id: int, as_of: date | None = None):
     if as_of is None:
         as_of = today_tz()
@@ -2033,89 +2033,20 @@ def get_open_bill_summary(user_id: int, card_id: int, as_of: date | None = None)
 
     return bill, items
 
-
-
-from datetime import date
-from utils_date import today_tz, billing_period_for_close_day
-
+# paga fatura em aberto
 def pay_open_bill(user_id: int, card_id: int, card_name: str, as_of: date | None = None):
-    if as_of is None:
-        as_of = today_tz()
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            # 1) pega closing_day do cartão (garantindo user_id)
-            cur.execute(
-                """
-                select closing_day
-                from credit_cards
-                where id=%s and user_id=%s
-                limit 1
-                """,
-                (card_id, user_id),
-            )
-            row = cur.fetchone()
-            if not row:
-                return None
-
-            closing_day = int(row["closing_day"])
-            period_start, period_end = billing_period_for_close_day(as_of, closing_day)
-
-            # 2) pega a fatura open DO PERÍODO CERTO (e do usuário)
-            cur.execute(
-                """
-                select id, total
-                from credit_bills
-                where user_id=%s
-                  and card_id=%s
-                  and status='open'
-                  and period_start=%s
-                  and period_end=%s
-                limit 1
-                """,
-                (user_id, card_id, period_start, period_end),
-            )
-            bill = cur.fetchone()
-            if not bill:
-                return None
-
-            total = float(bill["total"] or 0.0)
-
-            # se total já é 0, só fecha a fatura pra não continuar aparecendo
-            if total <= 0:
-                cur.execute(
-                    """
-                    update credit_bills
-                    set status='paid', paid_at=now()
-                    where id=%s and user_id=%s
-                    """,
-                    (bill["id"], user_id),
-                )
-                conn.commit()
-                return 0.0, None, None
-
-            # marca como paga *antes* de debitar (pra evitar duplicidade em corrida)
-            cur.execute(
-                """
-                update credit_bills
-                set status='paid', paid_at=now()
-                where id=%s and user_id=%s
-                """,
-                (bill["id"], user_id),
-            )
-
-        conn.commit()
-
-    # 3) debita conta corrente (sua lógica atual)
-    launch_id, new_balance = add_launch_and_update_balance(
-        user_id=user_id,
-        tipo="despesa",
-        valor=float(total),
-        alvo=f"fatura:{card_name}",
-        nota=f"Pagamento de fatura ({card_name})",
-    )
-
-    return total, launch_id, new_balance
+    """
+    Compatibilidade com o handler antigo:
+    pagar fatura (sem valor) = paga tudo em aberto da fatura do período correto.
+    Retorna (total_pago, launch_id, new_balance) igual antes.
+    """
+    res = pay_bill_amount(user_id, card_id, card_name, amount=None, as_of=as_of)
+    if not res:
+        return None
+    if isinstance(res, dict) and res.get("error"):
+        # não deveria acontecer com amount=None, mas por segurança
+        return None
+    return res["paid"], res["launch_id"], res["new_balance"]
 
 def list_cards(user_id: int):
     with get_conn() as conn:
@@ -2173,27 +2104,23 @@ def bill_period_for_month(year: int, month: int, closing_day: int) -> tuple[date
     Busca uma fatura por período (card_id + period_start + period_end).
     Se não existir, cria uma fatura aberta com total=0 e retorna o id.
     """
-def get_or_create_bill_by_period(card_id: int, period_start: date, period_end: date) -> int:
+def get_or_create_bill_by_period(user_id: int, card_id: int, period_start: date, period_end: date) -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id from credit_bills where card_id=%s and period_start=%s and period_end=%s",
-                (card_id, period_start, period_end),
-            )
-            row = cur.fetchone()
-            if row:
-                return row["id"]
-            cur.execute(
                 """
-                insert into credit_bills (card_id, period_start, period_end, status, total, paid_amount)
-                values (%s, %s, %s, 'open', 0, 0)
+                insert into credit_bills (user_id, card_id, period_start, period_end, status, total, paid_amount)
+                values (%s, %s, %s, %s, 'open', 0, 0)
+                on conflict (card_id, period_start, period_end)
+                do update set user_id = excluded.user_id
                 returning id
                 """,
-                (card_id, period_start, period_end),
+                (user_id, card_id, period_start, period_end),
             )
             bid = cur.fetchone()["id"]
         conn.commit()
-    return bid
+    return int(bid)
+
 
     # Registra uma compra parcelada no crédito.
     # Divide o valor total em N parcelas e cria uma transação em cada
@@ -2236,7 +2163,7 @@ def add_credit_purchase_installments(
             for i in range(n):
                 y2, m2 = add_months(base_y, base_m, i)
                 ps, pe = bill_period_for_month(y2, m2, closing_day)
-                bill_id = get_or_create_bill_by_period(card_id, ps, pe)
+                bill_id = get_or_create_bill_by_period(user_id, card_id, ps, pe)
 
                 cur.execute(
                     """
@@ -2299,67 +2226,151 @@ def add_credit_refund(
 
     return tx_id, total
 
-#pagar fatura (parcial ou total)
-def pay_bill_amount(user_id: int, card_id: int, card_name: str, amount: float | None):
-    # pega fatura aberta OU fechada mais recente ainda não paga
+#pagar fatura em aberto
+
+def pay_bill_amount(
+    user_id: int,
+    card_id: int,
+    card_name: str,
+    amount: float | None,
+    as_of: date | None = None,
+):
+    """
+    Paga a fatura do período correto (calculado via closing_day + as_of).
+    - Se amount=None: paga tudo que está em aberto.
+    - Se amount > em_aberto: NÃO EXECUTA e retorna error amount_too_high.
+    Retorna dict:
+      {"paid": float, "launch_id": int, "new_balance": float}
+    ou erro:
+      {"error": "amount_too_high", "due":..., "total":..., "paid_amount":...}
+      {"error": "invalid_amount"}
+    """
+    if as_of is None:
+        as_of = today_tz()
+
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # 1) pega closing_day do cartão (garantindo user_id)
             cur.execute(
                 """
-                select id, total, paid_amount, status
-                from credit_bills
-                where card_id=%s and status in ('open','closed')
-                order by period_start desc
+                select closing_day
+                from credit_cards
+                where id=%s and user_id=%s
                 limit 1
                 """,
-                (card_id,),
+                (card_id, user_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+
+            closing_day = int(row["closing_day"])
+            period_start, period_end = billing_period_for_close_day(as_of, closing_day)
+
+            # 2) pega a fatura do período (open/closed) e trava linha
+            cur.execute(
+                """
+                select id,
+                       total,
+                       coalesce(paid_amount, 0) as paid_amount,
+                       status
+                from credit_bills
+                where user_id=%s
+                  and card_id=%s
+                  and period_start=%s
+                  and period_end=%s
+                  and status in ('open','closed')
+                limit 1
+                for update
+                """,
+                (user_id, card_id, period_start, period_end),
             )
             bill = cur.fetchone()
             if not bill:
                 return None
 
-            total = Decimal(bill["total"])
-            paid = Decimal(bill["paid_amount"])
-            due = total - paid
+            total = Decimal(str(bill["total"]))
+            paid = Decimal(str(bill["paid_amount"]))
+            due = total - paid  # em aberto
+
             if due <= 0:
                 # já quitada (por segurança)
-                cur.execute("update credit_bills set status='paid', paid_at=now() where id=%s", (bill["id"],))
+                cur.execute(
+                    "update credit_bills set status='paid', paid_at=now() where id=%s and user_id=%s",
+                    (bill["id"], user_id),
+                )
                 conn.commit()
                 return None
 
-    pay = Decimal(str(amount)) if amount is not None else due
-    if pay <= 0:
-        raise ValueError("valor do pagamento deve ser > 0")
-    if pay > due:
-        pay = due
+            # valida amount ANTES de debitar conta
+            if amount is not None:
+                pay = Decimal(str(amount))
+                if pay <= 0:
+                    return {"error": "invalid_amount"}
+                if pay > due:
+                    # NÃO EXECUTA
+                    return {
+                        "error": "amount_too_high",
+                        "due": float(due),
+                        "total": float(total),
+                        "paid_amount": float(paid),
+                    }
+            else:
+                pay = due
 
-    # lança despesa na conta corrente
+            # marca como 'open' (se estava closed) porque ainda tem pagamento rolando
+            if (bill.get("status") or "").lower() == "closed":
+                cur.execute(
+                    "update credit_bills set status='open' where id=%s and user_id=%s",
+                    (bill["id"], user_id),
+                )
+
+            conn.commit()
+
+    # 3) debita conta corrente (fora do lock do bill, mas OK)
     launch_id, new_balance = add_launch_and_update_balance(
         user_id=user_id,
         tipo="despesa",
         valor=float(pay),
         alvo=f"fatura:{card_name}",
-        nota=f"Pagamento de fatura ({card_name})",
+        nota=f"Pagamento de fatura ({card_name}) {period_start} → {period_end}",
     )
 
-    # atualiza bill
+    # 4) atualiza bill (com lock novamente)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                update credit_bills
-                set paid_amount = paid_amount + %s
-                where id=%s
-                returning total, paid_amount
+                select id, total, coalesce(paid_amount,0) as paid_amount
+                from credit_bills
+                where id=%s and user_id=%s
+                limit 1
+                for update
                 """,
-                (pay, bill["id"]),
+                (bill["id"], user_id),
             )
-            row = cur.fetchone()
-            total2 = Decimal(row["total"])
-            paid2 = Decimal(row["paid_amount"])
+            b2 = cur.fetchone()
+            if not b2:
+                conn.commit()
+                return {"paid": float(pay), "launch_id": launch_id, "new_balance": new_balance}
 
-            if paid2 >= total2:
-                cur.execute("update credit_bills set status='paid', paid_at=now() where id=%s", (bill["id"],))
+            total2 = Decimal(str(b2["total"]))
+            paid2 = Decimal(str(b2["paid_amount"])) + pay
+            due2 = total2 - paid2
+
+            cur.execute(
+                """
+                update credit_bills
+                set paid_amount = coalesce(paid_amount, 0) + %s,
+                    paid_at = now(),
+                    status = case
+                        when (coalesce(paid_amount, 0) + %s) >= total then 'paid'
+                        else 'open'
+                    end
+                where id=%s and user_id=%s
+                """,
+                (pay, pay, bill["id"], user_id),
+            )
         conn.commit()
 
     return {"paid": float(pay), "launch_id": launch_id, "new_balance": new_balance}
