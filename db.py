@@ -1876,58 +1876,56 @@ def _bill_period_for_purchase(purchased_at: date, closing_day: int):
     return period_start, period_end
 
 def get_or_create_open_bill(user_id: int, card_id: int, ref_date: date) -> int:
-    """
-    Retorna o bill_id da fatura (status open) correspondente ao ciclo onde ref_date cai,
-    calculado via closing_day do cartão.
-    Cria a fatura se não existir.
-    """
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # 1) pega closing_day do cartão e garante user_id
+            # closing_day do cartão
             cur.execute(
                 """
-                select closing_day
+                select closing_day, user_id
                 from credit_cards
-                where id=%s and user_id=%s
+                where id=%s
                 limit 1
                 """,
-                (card_id, user_id),
+                (card_id,),
             )
-            row = cur.fetchone()
-            if not row:
-                raise ValueError("Cartão não encontrado para este usuário.")
+            card = cur.fetchone()
+            if not card:
+                raise ValueError("Cartão não encontrado.")
 
-            closing_day = int(row["closing_day"])
+            # segurança extra: garante que card é do user
+            if int(card["user_id"]) != int(user_id):
+                raise ValueError("Cartão não pertence a este usuário.")
+
+            closing_day = int(card["closing_day"])
             period_start, period_end = billing_period_for_close_day(ref_date, closing_day)
 
-            # 2) tenta achar fatura open do período
-            cur.execute(
-                """
-                select id
-                from credit_bills
-                where user_id=%s
-                  and card_id=%s
-                  and status='open'
-                  and period_start=%s
-                  and period_end=%s
-                limit 1
-                """,
-                (user_id, card_id, period_start, period_end),
-            )
-            bill = cur.fetchone()
-            if bill:
-                return int(bill["id"])
-
-            # 3) cria
+            # tenta criar; se já existe, pega o id (UPSERT)
             cur.execute(
                 """
                 insert into credit_bills (user_id, card_id, period_start, period_end, total, status)
                 values (%s, %s, %s, %s, 0, 'open')
-                returning id
+                on conflict (card_id, period_start, period_end)
+                do update set
+                    user_id = excluded.user_id
+                returning id, status
                 """,
                 (user_id, card_id, period_start, period_end),
             )
-            bill_id = int(cur.fetchone()["id"])
+            row = cur.fetchone()
+            bill_id = int(row["id"])
+            status = (row.get("status") or "").lower()
+
+            # se já existia e estava paga/fechada, reabre (pra não perder compras)
+            if status in ("paid", "closed"):
+                cur.execute(
+                    """
+                    update credit_bills
+                    set status='open'
+                    where id=%s
+                    """,
+                    (bill_id,),
+                )
+
         conn.commit()
 
     return bill_id
