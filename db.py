@@ -1987,6 +1987,131 @@ def add_credit_purchase(
 
     return tx_id, float(bill_due), bill_id
 
+from decimal import Decimal
+
+def undo_credit_transaction(user_id: int, credit_tx_id: int) -> dict | None:
+    """
+    Desfaz uma compra no crédito (CT#id).
+    - Se tiver group_id (parcelamento), desfaz o grupo inteiro.
+    - Ajusta credit_bills.total.
+    - Ajusta paid_amount/status se necessário.
+    Retorna um dict com resumo do que foi desfeito.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # 1) pega a transação alvo e trava
+            cur.execute(
+                """
+                select
+                    id, user_id, bill_id, card_id, valor,
+                    group_id, installment_no, installments_total,
+                    purchased_at, nota
+                from credit_transactions
+                where id=%s and user_id=%s
+                limit 1
+                for update
+                """,
+                (credit_tx_id, user_id),
+            )
+            tx = cur.fetchone()
+            if not tx:
+                return None
+
+            group_id = tx.get("group_id")
+
+            # 2) decide se desfaz 1 ou o grupo todo
+            if group_id:
+                cur.execute(
+                    """
+                    select id, bill_id, valor
+                    from credit_transactions
+                    where user_id=%s and group_id=%s
+                    order by id asc
+                    for update
+                    """,
+                    (user_id, group_id),
+                )
+                txs = cur.fetchall()
+            else:
+                txs = [{"id": tx["id"], "bill_id": tx["bill_id"], "valor": tx["valor"]}]
+
+            # 3) soma quanto vai tirar por fatura
+            per_bill = {}  # bill_id -> Decimal(sum)
+            total_removed = Decimal("0.00")
+            for row in txs:
+                b = int(row["bill_id"])
+                v = Decimal(str(row["valor"]))
+                per_bill[b] = per_bill.get(b, Decimal("0.00")) + v
+                total_removed += v
+
+            bill_ids = list(per_bill.keys())
+
+            # 4) trava as faturas afetadas
+            cur.execute(
+                """
+                select id, total, coalesce(paid_amount,0) as paid_amount, status
+                from credit_bills
+                where user_id=%s and id = any(%s)
+                for update
+                """,
+                (user_id, bill_ids),
+            )
+            bills = {int(r["id"]): r for r in cur.fetchall()}
+
+            # 5) apaga transações
+            cur.execute(
+                """
+                delete from credit_transactions
+                where user_id=%s and id = any(%s)
+                """,
+                (user_id, [int(r["id"]) for r in txs]),
+            )
+
+            # 6) ajusta totals + paid/status
+            for bill_id, removed in per_bill.items():
+                b = bills.get(int(bill_id))
+                if not b:
+                    continue
+
+                old_total = Decimal(str(b["total"]))
+                old_paid = Decimal(str(b["paid_amount"]))
+                new_total = (old_total - removed)
+                if new_total < 0:
+                    new_total = Decimal("0.00")
+
+                # se já tinha pago mais do que o novo total, “cap” no total
+                new_paid = old_paid
+                if new_paid > new_total:
+                    new_paid = new_total
+
+                # status: se pagou tudo -> paid; se não -> open
+                new_status = "paid" if new_paid >= new_total and new_total > 0 else "open"
+                # caso total virou 0, marca como paid (não fica aparecendo em aberto)
+                if new_total <= 0:
+                    new_status = "paid"
+
+                cur.execute(
+                    """
+                    update credit_bills
+                    set total=%s,
+                        paid_amount=%s,
+                        status=%s,
+                        paid_at = case when %s='paid' then coalesce(paid_at, now()) else null end
+                    where id=%s and user_id=%s
+                    """,
+                    (new_total, new_paid, new_status, new_status, bill_id, user_id),
+                )
+
+        conn.commit()
+
+    return {
+        "mode": "group" if group_id else "single",
+        "group_id": str(group_id) if group_id else None,
+        "removed_total": float(total_removed),
+        "removed_count": len(txs),
+    }
+
+
 
 # paga fatura em aberta e nao fecha a fatura do mes
 def get_open_bill_summary(user_id: int, card_id: int, as_of: date | None = None):

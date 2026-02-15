@@ -12,7 +12,7 @@ from db import init_db
 from dotenv import load_dotenv
 load_dotenv() #carrega o .env
 from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches, list_pockets, pocket_withdraw_to_account, create_pocket, pocket_deposit_from_account, delete_pocket, investment_withdraw_to_account, accrue_all_investments, create_investment, investment_deposit_from_account, delete_launch_and_rollback
-from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments, export_launches, get_launches_by_period, upsert_category_rule, get_memorized_category, get_conn, get_latest_cdi_aa
+from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments, export_launches, get_launches_by_period, upsert_category_rule, get_memorized_category, get_conn, get_latest_cdi_aa, undo_credit_transaction
 from ai_router import handle_ai_message, classify_category_with_gpt
 import io
 from datetime import date, datetime
@@ -890,6 +890,39 @@ async def on_message(message: discord.Message):
         )
         return
 
+# desfazer compras no credito
+    if t.lower().startswith("desfazer") and "ct" in t.lower():
+        user_id = message.author.id
+
+        m = re.search(r"\bct\s*#?\s*(\d+)\b", t.lower())
+
+        if not m:
+            await message.reply("Use: desfazer CT#123")
+            return True
+
+        ct_id = int(m.group(1))
+
+        try:
+            res = undo_credit_transaction(user_id, ct_id)
+            if not res:
+                await message.reply(f"❌ Não achei o crédito CT#{ct_id}.")
+                return True
+
+            if res["mode"] == "group":
+                await message.reply(
+                    f"🗑️ Parcelamento desfeito (grupo {res['group_id']}).\n"
+                    f"Removido: {fmt_brl(res['removed_total'])} em {res['removed_count']} itens."
+                )
+            else:
+                await message.reply(
+                    f"🗑️ Crédito CT#{ct_id} desfeito.\n"
+                    f"Removido: {fmt_brl(res['removed_total'])}."
+                )
+            return True
+
+        except Exception as e:
+            await message.reply(f"❌ Erro ao desfazer CT#{ct_id}: {e}")
+            return True
 
 
     # comando para desfazer a última ação (100% Postgres)
