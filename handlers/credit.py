@@ -10,6 +10,7 @@ from utils_date import extract_date_from_text, now_tz, today_tz, fmt_br
 from utils_text import parse_money, normalize_text, fmt_brl
 from db import (
     create_card,
+    get_current_open_bill_id,
     list_cards,
     get_card_id_by_name,
     set_default_card,
