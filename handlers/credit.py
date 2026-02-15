@@ -147,7 +147,7 @@ async def handle_credit_commands(message) -> bool:
             return True
 
         try:
-            tx_id, total, bill_id = add_credit_purchase(
+            tx_id, due, bill_id = add_credit_purchase(
                 user_id=user_id,
                 card_id=card_id,
                 valor=float(valor),
@@ -158,7 +158,7 @@ async def handle_credit_commands(message) -> bool:
             await message.reply(
                 f"💳 Compra no crédito registrada: {fmt_brl(valor)}\n"
                 f"📅 Data da compra: {fmt_br(purchased_at)}\n"
-                f"📌 Fatura atual: {fmt_brl(total)}\n"
+                f"📌 Fatura atual: {fmt_brl(due)}\n"
                 f"ID crédito: CT#{tx_id}"
             )
         except Exception as e:
@@ -267,29 +267,20 @@ async def handle_credit_commands(message) -> bool:
         
 
     # -------------------------
-    # pagar fatura (total ou parcial)
+    # pagar fatura (total ou parcial) - fatura ATUAL do período
     # -------------------------
     if t_low.startswith("pagar fatura"):
         rest = t[len("pagar fatura"):].strip()
 
-        # Aceita:
-        #   pagar fatura
-        #   pagar fatura 300
-        #   pagar fatura nubank
-        #   pagar fatura nubank 300
         tokens = rest.split() if rest else []
-
         amount = None
         card_name = None
 
         if tokens:
-            # se o último token é número => amount
             last_val = parse_money(tokens[-1])
             if last_val is not None:
                 amount = float(last_val)
                 tokens = tokens[:-1]
-
-            # o que sobrou vira nome do cartão (pode ter espaço)
             if tokens:
                 card_name = " ".join(tokens).strip()
 
@@ -299,11 +290,13 @@ async def handle_credit_commands(message) -> bool:
             return True
 
         try:
-            res = pay_bill_amount(user_id, card_id, resolved_name, amount, as_of=today_tz())
-
-            if not res or (isinstance(res, dict) and res.get("error") == "no_payable_bill"):
-                await message.reply("📭 Nenhuma fatura fechada para pagar ainda.")
+            as_of = today_tz()
+            bill_id = get_current_open_bill_id(user_id, card_id, as_of)
+            if not bill_id:
+                await message.reply("📭 Nenhuma fatura aberta do período atual para pagar.")
                 return True
+
+            res = pay_bill_amount(user_id, card_id, resolved_name, amount, bill_id=bill_id)
 
             if isinstance(res, dict) and res.get("error") == "amount_too_high":
                 await message.reply(
@@ -316,19 +309,20 @@ async def handle_credit_commands(message) -> bool:
                 await message.reply("❌ Valor inválido. Use: pagar fatura 300")
                 return True
 
-            if isinstance(res, dict) and res.get("error") == "already_paid":
-                await message.reply("✅ Essa fatura já está quitada.")
+            if not res:
+                await message.reply("📭 Nada para pagar.")
                 return True
 
-            # sucesso
             await message.reply(
                 f"✅ Pagamento registrado: {fmt_brl(res['paid'])}\n"
                 f"Conta agora: {fmt_brl(res['new_balance'])}\n"
                 f"ID lançamento: #{res['launch_id']}"
             )
+            return True
+
         except Exception as e:
             await message.reply(f"❌ Erro ao pagar fatura: {e}")
-        return True
+            return True
 
 # --- faturas (lista todas as faturas em aberto) ---
     if t_low in ("faturas", "listar faturas", "faturas abertas", "listar faturas abertas"):
@@ -361,14 +355,11 @@ async def handle_credit_commands(message) -> bool:
 
 
     # --- fatura (mostra a fatura atual do período) ---
-    if t_low.startswith("fatura") or t_low.startswith("listar fatura"):
-        card_name = None
-        parts = t_low.split()
-        if "fatura" in parts:
-            idx = parts.index("fatura")
-            if len(parts) > idx + 1:
-                # aceita cartão com espaço
-                card_name = " ".join(t.split()[idx + 1:]).strip()
+
+    if t_low.startswith("fatura " ) or t_low == "fatura":
+        parts = t.split()
+        # "fatura" ou "fatura nubank"
+        card_name = parts[1] if len(parts) >= 2 else None
 
         card_id, resolved_name = _pick_card_id(user_id, card_name)
         if not card_id:
@@ -378,7 +369,7 @@ async def handle_credit_commands(message) -> bool:
         try:
             res = get_open_bill_summary(user_id, card_id, as_of=today_tz())
             if not res:
-                await message.reply(f"📭 Não consegui carregar a fatura atual de {resolved_name}.")
+                await message.reply(f"📭 Nenhuma fatura aberta para {resolved_name}.")
                 return True
 
             bill, items = res
@@ -391,20 +382,15 @@ async def handle_credit_commands(message) -> bool:
             due = max(0.0, total - paid)
 
             lines = [
-                f"💳 **Fatura atual ({resolved_name})** {ps} → {pe}",
+                f"💳 Fatura atual ({resolved_name}) {ps} → {pe}",
                 f"Total: {fmt_brl(total)} | Pago: {fmt_brl(paid)} | Em aberto: {fmt_brl(due)}",
                 "",
             ]
 
-            if not items:
-                lines.append("📭 Sem compras nessa fatura (ainda).")
-            else:
-                for it in items[:10]:
-                    lines.append(
-                        f"- {fmt_brl(it['valor'])} | {it['categoria'] or 'outros'} | {fmt_br(it['purchased_at'])} | {it['nota'] or ''}"
-                    )
-                if len(items) > 10:
-                    lines.append(f"... mais {len(items) - 10} itens.")
+            for it in items[:10]:
+                lines.append(
+                    f"• {fmt_brl(it['valor'])} | {it['categoria'] or 'outros'} | {fmt_br(it['purchased_at'])} | {it['nota'] or ''}"
+                )
 
             await message.reply("\n".join(lines))
             return True
@@ -412,3 +398,43 @@ async def handle_credit_commands(message) -> bool:
         except Exception as e:
             await message.reply(f"❌ Erro ao buscar fatura: {e}")
             return True
+        
+        # -------------------------
+    # listar faturas em aberto
+    # -------------------------
+    if t_low.startswith("faturas"):
+        parts = t.split()
+        # "faturas" ou "faturas nubank"
+        card_name = parts[1] if len(parts) >= 2 else None
+
+        card_id = None
+        resolved_name = None
+
+        if card_name:
+            card_id, resolved_name = _pick_card_id(user_id, card_name)
+            if not card_id:
+                await message.reply(f"❌ Não achei o cartão '{card_name}'.")
+                return True
+
+        try:
+            rows = list_open_bills(user_id, card_id=card_id, limit=20)
+            if not rows:
+                await message.reply("📭 Nenhuma fatura em aberto.")
+                return True
+
+            lines = ["🧾 Faturas em aberto:"]
+            for r in rows:
+                total = float(r["total"] or 0)
+                paid = float(r["paid_amount"] or 0)
+                due = max(0.0, total - paid)
+                ps = fmt_br(r["period_start"])
+                pe = fmt_br(r["period_end"])
+                lines.append(f"• {r['card_name']} | {ps} → {pe} | Total {fmt_brl(total)} | Pago {fmt_brl(paid)} | Em aberto {fmt_brl(due)}")
+
+            await message.reply("\n".join(lines))
+            return True
+
+        except Exception as e:
+            await message.reply(f"❌ Erro listando faturas: {e}")
+            return True
+
