@@ -3,8 +3,8 @@
 Handlers de comandos relacionados a crédito, cartões e faturas.
 Retorna True se tratou algum comando; False caso contrário.
 """
-
-import re
+from collections import defaultdict
+import re as regex
 from ai_router import classify_category_with_gpt
 from utils_date import extract_date_from_text, now_tz, today_tz, fmt_br
 from utils_text import parse_money, normalize_text, fmt_brl
@@ -21,7 +21,9 @@ from db import (
     pay_bill_amount,
     get_memorized_category, 
     list_open_bills, 
-    undo_credit_transaction
+    undo_credit_transaction,
+    undo_installment_group, 
+    list_installment_groups
 )
 
 
@@ -52,13 +54,79 @@ async def handle_credit_commands(message) -> bool:
     t = message.content.strip()
     t_low = t.lower().strip()
     user_id = message.author.id
+    # -------------------------
+    # desfazer parcelamento por UUID do grupo
+    # uso: desfazer grupo <uuid>
+    # -------------------------
+    if t_low.startswith("desfazer grupo"):
+        raw = t[len("desfazer grupo"):].strip().lower()
+        group_id = raw
+        group_id_compact = group_id.replace("-", "")
+
+        # aceita UUID com hífen (36) OU compacto (32)
+        if not regex.fullmatch(r"(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", group_id):
+            await message.reply("Use: desfazer grupo <UUID>")
+            return True
+
+        try:
+            # passe os dois formatos pro DB (ver patch abaixo)
+            res = undo_installment_group(user_id, group_id)
+            if not res:
+                await message.reply("❌ Não achei esse grupo de parcelamento.")
+                return True
+
+            await message.reply(
+                f"🗑️ Parcelamento desfeito (grupo {res['group_id']}).\n"
+                f"Removido: {fmt_brl(res['removed_total'])} em {res['removed_count']} itens."
+            )
+            return True
+        except Exception as e:
+            await message.reply(f"❌ Erro ao desfazer grupo: {e}")
+            return True
+
+
+
+    # -------------------------
+    # desfazer compras no credito
+    # uso: desfazer CT#123
+    # -------------------------
+    if t_low.startswith("desfazer") and "ct" in t_low:
+        m = regex.search(r"\bct\s*#?\s*(\d+)\b", t_low)
+        if not m:
+            await message.reply("Use: desfazer CT#123")
+            return True
+
+        ct_id = int(m.group(1))
+
+        try:
+            res = undo_credit_transaction(user_id, ct_id)
+            if not res:
+                await message.reply(f"❌ Não achei o crédito CT#{ct_id}.")
+                return True
+
+            if res["mode"] == "group":
+                await message.reply(
+                    f"🗑️ Parcelamento desfeito (grupo {res['group_id']}).\n"
+                    f"Removido: {fmt_brl(res['removed_total'])} em {res['removed_count']} itens."
+                )
+            else:
+                await message.reply(
+                    f"🗑️ Crédito CT#{ct_id} desfeito.\n"
+                    f"Removido: {fmt_brl(res['removed_total'])}."
+                )
+            return True
+
+        except Exception as e:
+            await message.reply(f"❌ Erro ao desfazer CT#{ct_id}: {e}")
+            return True
+
 
     # -------------------------
     # criar cartao
     # -------------------------
     if t_low.startswith("criar cartao"):
         # ex: criar cartao nubank fecha 10 vence 17
-        m = re.search(r"criar cartao\s+(.+?)\s+fecha\s+(\d{1,2})\s+vence\s+(\d{1,2})", t_low)
+        m = regex.search(r"criar cartao\s+(.+?)\s+fecha\s+(\d{1,2})\s+vence\s+(\d{1,2})", t_low)
         if not m:
             await message.reply("Use: criar cartao NOME fecha 10 vence 17")
             return True
@@ -181,7 +249,7 @@ async def handle_credit_commands(message) -> bool:
 
         # parcelas (default 1 se não informar)
         n = 1
-        mx = re.search(r"(\d+)\s*x", t_low)
+        mx = regex.search(r"(\d+)\s*x", t_low)
         if mx:
             try:
                 n = int(mx.group(1))
@@ -190,7 +258,7 @@ async def handle_credit_commands(message) -> bool:
 
         # pega nome do cartão (se tiver)
         card_name = None
-        m = re.search(r"(?:no\s+)?cart[aã]o\s+(.+)$", t_low)
+        m = regex.search(r"(?:no\s+)?cart[aã]o\s+(.+)$", t_low)
         if m:
             card_name = m.group(1).strip()
 
@@ -326,29 +394,72 @@ async def handle_credit_commands(message) -> bool:
             await message.reply(f"❌ Erro ao pagar fatura: {e}")
             return True
 
-# --- faturas (lista todas as faturas em aberto) ---
-    if t_low in ("faturas", "listar faturas", "faturas abertas", "listar faturas abertas"):
+
+# --- faturas (lista todas as faturas em aberto, agrupadas por mês) ---
+    if t_low in ("faturas", "listar faturas", "faturas abertas", "listar faturas abertas", "listar fatura", "listar faturas em aberto"):
         try:
             rows = list_open_bills(user_id)
             if not rows:
                 await message.reply("📭 Nenhuma fatura em aberto.")
                 return True
 
-            lines = ["🧾 **Faturas em aberto:**"]
-            for r in rows[:20]:
+            meses = [
+                "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+            ]
+
+            # agrupa por (ano, mes) usando o period_start
+            groups = defaultdict(list)
+            for r in rows:
                 total = float(r["total"] or 0)
                 paid = float(r["paid_amount"] or 0)
                 due = max(0.0, total - paid)
 
-                lines.append(
-                    f"- {r['card_name']} | {fmt_br(r['period_start'])} → {fmt_br(r['period_end'])} | "
-                    f"Total {fmt_brl(total)} | Pago {fmt_brl(paid)} | Em aberto {fmt_brl(due)}"
-                )
+                # remove faturas futuras "vazias"
+                if total == 0.0 and paid == 0.0 and due == 0.0:
+                    continue
 
-            if len(rows) > 20:
-                lines.append(f"... e mais {len(rows) - 20} faturas.")
+                ps = r["period_start"]
+                key = (ps.year, ps.month)
+                groups[key].append((r, total, paid, due))
 
-            await message.reply("\n".join(lines))
+            if not groups:
+                await message.reply("📭 Nenhuma fatura em aberto (as futuras zeradas foram ocultadas).")
+                return True
+
+            # ordena por data
+            keys = sorted(groups.keys())
+
+            lines = ["🧾 **Faturas em aberto (por mês):**", ""]
+
+            # controle de tamanho pra não estourar 2000 chars do Discord
+            max_chars = 1800
+
+            for (y, m) in keys:
+                header = f"📅 **{meses[m-1]}/{y}:**"
+                if sum(len(x) + 1 for x in lines) + len(header) + 2 > max_chars:
+                    lines.append("")
+                    lines.append("... (mensagem cortada: muitas faturas)")
+                    break
+
+                lines.append(header)
+
+                # ordena dentro do mês por card_name
+                items = sorted(groups[(y, m)], key=lambda it: (it[0]["card_name"] or "").lower())
+
+                for (r, total, paid, due) in items:
+                    card = r["card_name"]
+                    line = f"• {card}: Total {fmt_brl(total)} | Pago {fmt_brl(paid)} | Em aberto {fmt_brl(due)}"
+
+                    if sum(len(x) + 1 for x in lines) + len(line) + 1 > max_chars:
+                        lines.append("... (mensagem cortada: muitas faturas)")
+                        break
+
+                    lines.append(line)
+
+                lines.append("")  # linha em branco entre meses
+
+            await message.reply("\n".join(lines).strip())
             return True
 
         except Exception as e:
@@ -356,8 +467,8 @@ async def handle_credit_commands(message) -> bool:
             return True
 
 
-    # --- fatura (mostra a fatura atual do período) ---
 
+    # --- fatura (mostra a fatura atual do período) ---
     if t_low.startswith("fatura " ) or t_low == "fatura":
         parts = t.split()
         # "fatura" ou "fatura nubank"
@@ -401,42 +512,28 @@ async def handle_credit_commands(message) -> bool:
             await message.reply(f"❌ Erro ao buscar fatura: {e}")
             return True
         
-        # -------------------------
-    # listar faturas em aberto
+    
     # -------------------------
-    if t_low.startswith("faturas"):
-        parts = t.split()
-        # "faturas" ou "faturas nubank"
-        card_name = parts[1] if len(parts) >= 2 else None
-
-        card_id = None
-        resolved_name = None
-
-        if card_name:
-            card_id, resolved_name = _pick_card_id(user_id, card_name)
-            if not card_id:
-                await message.reply(f"❌ Não achei o cartão '{card_name}'.")
-                return True
-
-        try:
-            rows = list_open_bills(user_id, card_id=card_id, limit=20)
-            if not rows:
-                await message.reply("📭 Nenhuma fatura em aberto.")
-                return True
-
-            lines = ["🧾 Faturas em aberto:"]
-            for r in rows:
-                total = float(r["total"] or 0)
-                paid = float(r["paid_amount"] or 0)
-                due = max(0.0, total - paid)
-                ps = fmt_br(r["period_start"])
-                pe = fmt_br(r["period_end"])
-                lines.append(f"• {r['card_name']} | {ps} → {pe} | Total {fmt_brl(total)} | Pago {fmt_brl(paid)} | Em aberto {fmt_brl(due)}")
-
-            await message.reply("\n".join(lines))
+    # listar parcelamentos (grupos)
+    # uso: parcelamentos  (ou listar parcelamentos)
+    # -------------------------
+    if t_low in ["parcelamentos", "listar parcelamentos"]:
+        rows = list_installment_groups(user_id, limit=15)
+        if not rows:
+            await message.reply("📭 Você não tem parcelamentos registrados.")
             return True
 
-        except Exception as e:
-            await message.reply(f"❌ Erro listando faturas: {e}")
-            return True
+        lines = ["📦 **Parcelamentos (grupos):**"]
+        for r in rows:
+            lines.append(
+                f"• {r['card_name']} | {fmt_brl(r['total'])} | {r['n']} itens | grupo: {r['group_id']}"
+            )
+
+        msg = "\n".join(lines)
+        if len(msg) > 1900:
+            msg = "\n".join(lines[:10]) + "\n\n(⚠️ Muitos resultados; vou mostrar só os 10 primeiros.)"
+
+        await message.reply(msg)
+        return True
+
 

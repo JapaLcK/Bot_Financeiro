@@ -12,7 +12,7 @@ from db import init_db
 from dotenv import load_dotenv
 load_dotenv() #carrega o .env
 from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches, list_pockets, pocket_withdraw_to_account, create_pocket, pocket_deposit_from_account, delete_pocket, investment_withdraw_to_account, accrue_all_investments, create_investment, investment_deposit_from_account, delete_launch_and_rollback
-from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments, export_launches, get_launches_by_period, upsert_category_rule, get_memorized_category, get_conn, get_latest_cdi_aa, undo_credit_transaction
+from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments, export_launches, get_launches_by_period, upsert_category_rule, get_memorized_category, get_conn, get_latest_cdi_aa, undo_credit_transaction, undo_installment_group
 from ai_router import handle_ai_message, classify_category_with_gpt
 import io
 from datetime import date, datetime
@@ -25,10 +25,6 @@ from reports import setup_monthly_export
 from utils_date import _tz, now_tz, extract_date_from_text
 from commands.resumo import handle_resumo
 from utils_date import extract_date_from_text, now_tz, parse_date_str, month_range_today, days_between
-from db import (
-    create_card, get_card_id_by_name, set_default_card, get_default_card_id,
-    add_credit_purchase, get_open_bill_summary, list_cards
-)
 from handlers.credit import handle_credit_commands
 from utils_text import parse_money, normalize_text
 from parsers import parse_receita_despesa_natural
@@ -351,6 +347,11 @@ async def on_message(message: discord.Message):
             + f"\n\nTotal em caixinhas: {fmt_brl(total)}"
         )
         return
+    
+    # handler de crédito (cartão, fatura, parcelamento, desfazer CT/grupo, etc.)
+    if await handle_credit_commands(message):
+        return
+
 
 
     # excluir caixinha (com confirmação)
@@ -426,9 +427,6 @@ async def on_message(message: discord.Message):
             )
             return
 
-        # cria a ação pendente (expira em 10 min)
-        set_pending_action(message.author.id, "delete_investment", {"investment_name": canon}, minutes=10)
-
         rate = inv.get("rate")
         period = inv.get("period")
         taxa = fmt_rate(rate, period)
@@ -440,6 +438,7 @@ async def on_message(message: discord.Message):
             + (f" • taxa: **{taxa}**" if taxa else "")
         )
 
+        # cria a ação pendente (expira em 10 min)
         set_pending_action(
             message.author.id,
             "delete_investment",
@@ -452,9 +451,7 @@ async def on_message(message: discord.Message):
         )
         return
 
-    # handler de credito (cartao, fatura, parcelamento, etc)
-    if await handle_credit_commands(message):
-        return
+
 
 # Gasto/Receita natural (ex: "gastei 35 no ifood", "recebi 2500 salario")
     user_id = message.author.id
@@ -765,9 +762,6 @@ async def on_message(message: discord.Message):
         return
 
 
-
-
-
    # saldo caixinhas (Postgres)
     if t == "saldo caixinhas":
         rows = list_pockets(message.author.id)
@@ -791,7 +785,6 @@ async def on_message(message: discord.Message):
         await message.reply("📈 **Investimentos:**\n" + lines)
         return
 
-    
 
    # listar investimentos (Postgres + aplica juros antes)
     if t in ["listar investimentos", "lista investimentos", "investimentos", "meus investimentos"]:
@@ -811,9 +804,7 @@ async def on_message(message: discord.Message):
         await message.reply("\n".join(lines))
         return
 
-
-    
-    # listar lancamentos (Postgres)
+# listar lancamentos (Postgres)
     if t in ["listar lancamentos", "listar lançamentos", "ultimos lancamentos", "últimos lançamentos"]:
         rows = list_launches(message.author.id, limit=10)
 
@@ -847,9 +838,6 @@ async def on_message(message: discord.Message):
 
         await message.reply("🧾 **Últimos lançamentos:**\n" + "\n".join(lines))
         return
-
-
-    
 
     # =========================
     # Apagar lançamento pelo ID (Postgres) - com confirmação
@@ -889,40 +877,6 @@ async def on_message(message: discord.Message):
             "Responda **sim** para confirmar ou **não** para cancelar. (expira em 10 min)"
         )
         return
-
-# desfazer compras no credito
-    if t.lower().startswith("desfazer") and "ct" in t.lower():
-        user_id = message.author.id
-
-        m = re.search(r"\bct\s*#?\s*(\d+)\b", t.lower())
-
-        if not m:
-            await message.reply("Use: desfazer CT#123")
-            return True
-
-        ct_id = int(m.group(1))
-
-        try:
-            res = undo_credit_transaction(user_id, ct_id)
-            if not res:
-                await message.reply(f"❌ Não achei o crédito CT#{ct_id}.")
-                return True
-
-            if res["mode"] == "group":
-                await message.reply(
-                    f"🗑️ Parcelamento desfeito (grupo {res['group_id']}).\n"
-                    f"Removido: {fmt_brl(res['removed_total'])} em {res['removed_count']} itens."
-                )
-            else:
-                await message.reply(
-                    f"🗑️ Crédito CT#{ct_id} desfeito.\n"
-                    f"Removido: {fmt_brl(res['removed_total'])}."
-                )
-            return True
-
-        except Exception as e:
-            await message.reply(f"❌ Erro ao desfazer CT#{ct_id}: {e}")
-            return True
 
 
     # comando para desfazer a última ação (100% Postgres)

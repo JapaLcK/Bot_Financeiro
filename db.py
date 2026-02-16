@@ -1987,128 +1987,87 @@ def add_credit_purchase(
 
     return tx_id, float(bill_due), bill_id
 
-from decimal import Decimal
-
-def undo_credit_transaction(user_id: int, credit_tx_id: int) -> dict | None:
+def undo_credit_transaction(user_id: int, ct_id: int):
     """
-    Desfaz uma compra no crédito (CT#id).
-    - Se tiver group_id (parcelamento), desfaz o grupo inteiro.
-    - Ajusta credit_bills.total.
-    - Ajusta paid_amount/status se necessário.
-    Retorna um dict com resumo do que foi desfeito.
+    Desfaz um crédito específico CT#.
+    Se ele pertence a um parcelamento (group_id), desfaz o GRUPO inteiro.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # 1) pega a transação alvo e trava
             cur.execute(
                 """
-                select
-                    id, user_id, bill_id, card_id, valor,
-                    group_id, installment_no, installments_total,
-                    purchased_at, nota
+                select id, bill_id, valor, group_id, installment_no, installments_total
                 from credit_transactions
-                where id=%s and user_id=%s
-                limit 1
-                for update
+                where user_id=%s and id=%s
                 """,
-                (credit_tx_id, user_id),
+                (user_id, ct_id),
             )
             tx = cur.fetchone()
             if not tx:
                 return None
 
             group_id = tx.get("group_id")
+            installments_total = int(tx.get("installments_total") or 0)
 
-            # 2) decide se desfaz 1 ou o grupo todo
-            if group_id:
-                cur.execute(
-                    """
-                    select id, bill_id, valor
-                    from credit_transactions
-                    where user_id=%s and group_id=%s
-                    order by id asc
-                    for update
-                    """,
-                    (user_id, group_id),
-                )
-                txs = cur.fetchall()
-            else:
-                txs = [{"id": tx["id"], "bill_id": tx["bill_id"], "valor": tx["valor"]}]
+    # se é parcelamento, desfaz o grupo inteiro
+    if group_id and installments_total > 1:
+        return undo_installment_group(user_id, group_id)
 
-            # 3) soma quanto vai tirar por fatura
-            per_bill = {}  # bill_id -> Decimal(sum)
-            total_removed = Decimal("0.00")
-            for row in txs:
-                b = int(row["bill_id"])
-                v = Decimal(str(row["valor"]))
-                per_bill[b] = per_bill.get(b, Decimal("0.00")) + v
-                total_removed += v
-
-            bill_ids = list(per_bill.keys())
-
-            # 4) trava as faturas afetadas
+    # senão, desfaz só o CT
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # trava linha
             cur.execute(
                 """
-                select id, total, coalesce(paid_amount,0) as paid_amount, status
-                from credit_bills
-                where user_id=%s and id = any(%s)
+                select id, bill_id, valor
+                from credit_transactions
+                where user_id=%s and id=%s
                 for update
                 """,
-                (user_id, bill_ids),
+                (user_id, ct_id),
             )
-            bills = {int(r["id"]): r for r in cur.fetchall()}
+            tx2 = cur.fetchone()
+            if not tx2:
+                return None
 
-            # 5) apaga transações
+            bill_id = tx2["bill_id"]
+            v = Decimal(str(tx2["valor"]))
+
+            cur.execute(
+                "delete from credit_transactions where user_id=%s and id=%s",
+                (user_id, ct_id),
+            )
+
             cur.execute(
                 """
-                delete from credit_transactions
-                where user_id=%s and id = any(%s)
+                update credit_bills
+                set total = greatest(0, total - %s)
+                where id=%s and user_id=%s
+                returning total, coalesce(paid_amount, 0) as paid_amount
                 """,
-                (user_id, [int(r["id"]) for r in txs]),
+                (float(v), bill_id, user_id),
             )
+            b = cur.fetchone()
+            if b:
+                total = Decimal(str(b["total"]))
+                paid = Decimal(str(b["paid_amount"]))
+                if paid >= total:
+                    cur.execute(
+                        """
+                        update credit_bills
+                        set status='paid', paid_at=now()
+                        where id=%s and user_id=%s
+                        """,
+                        (bill_id, user_id),
+                    )
 
-            # 6) ajusta totals + paid/status
-            for bill_id, removed in per_bill.items():
-                b = bills.get(int(bill_id))
-                if not b:
-                    continue
-
-                old_total = Decimal(str(b["total"]))
-                old_paid = Decimal(str(b["paid_amount"]))
-                new_total = (old_total - removed)
-                if new_total < 0:
-                    new_total = Decimal("0.00")
-
-                # se já tinha pago mais do que o novo total, “cap” no total
-                new_paid = old_paid
-                if new_paid > new_total:
-                    new_paid = new_total
-
-                # status: se pagou tudo -> paid; se não -> open
-                new_status = "paid" if new_paid >= new_total and new_total > 0 else "open"
-                # caso total virou 0, marca como paid (não fica aparecendo em aberto)
-                if new_total <= 0:
-                    new_status = "paid"
-
-                cur.execute(
-                    """
-                    update credit_bills
-                    set total=%s,
-                        paid_amount=%s,
-                        status=%s,
-                        paid_at = case when %s='paid' then coalesce(paid_at, now()) else null end
-                    where id=%s and user_id=%s
-                    """,
-                    (new_total, new_paid, new_status, new_status, bill_id, user_id),
-                )
-
-        conn.commit()
+            conn.commit()
 
     return {
-        "mode": "group" if group_id else "single",
-        "group_id": str(group_id) if group_id else None,
-        "removed_total": float(total_removed),
-        "removed_count": len(txs),
+        "mode": "single",
+        "ct_id": ct_id,
+        "removed_total": float(v),
+        "removed_count": 1,
     }
 
 
@@ -2573,6 +2532,31 @@ def list_open_bills(user_id: int):
             rows = cur.fetchall()
     return rows
 
+#lista parcelamentos
+def list_installment_groups(user_id: int, limit: int = 15):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select
+                    t.group_id,
+                    c.name as card_name,
+                    count(*) as n,
+                    sum(t.valor) as total
+                from credit_transactions t
+                join credit_cards c on c.id = t.card_id
+                where t.user_id=%s
+                  and t.group_id is not null
+                  and t.is_refund=false
+                group by t.group_id, c.name
+                order by max(t.purchased_at) desc
+                limit %s
+                """,
+                (user_id, limit),
+            )
+            return cur.fetchall()
+
+
 # relatorio credito x debito mensal
 def monthly_summary_credit_debit(user_id: int, start: date, end: date):
     with get_conn() as conn:
@@ -2612,5 +2596,71 @@ def monthly_summary_credit_debit(user_id: int, start: date, end: date):
 
     return {"debito": deb, "credito": cred, "por_cartao": by_card}
 
+# Desfaz lancamentos de parcelas nao pagas. 
+def undo_installment_group(user_id: int, group_id: str):
+    """
+    Desfaz um parcelamento (grupo) removendo todas as credit_transactions do group_id
+    e abatendo o total das faturas (credit_bills.total) correspondentes.
 
+    Retorna:
+      {"group_id": str, "removed_count": int, "removed_total": float}
+    ou None se não achar o grupo.
+    """
 
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # 1) pega tudo do grupo (travando linhas) e soma por bill_id
+            cur.execute(
+                """
+                select id, bill_id, valor
+                from credit_transactions
+                where user_id = %s
+                  and group_id = %s::uuid
+                  and is_refund = false
+                for update
+                """,
+                (user_id, group_id),
+            )
+            rows = cur.fetchall()
+            if not rows:
+                return None
+
+            # soma total e por fatura
+            total_removed = Decimal("0")
+            by_bill = {}
+            for r in rows:
+                v = Decimal(str(r["valor"]))
+                total_removed += v
+                by_bill[r["bill_id"]] = by_bill.get(r["bill_id"], Decimal("0")) + v
+
+            removed_count = len(rows)
+
+            # 2) deleta as transações do grupo
+            cur.execute(
+                """
+                delete from credit_transactions
+                where user_id = %s
+                  and group_id = %s::uuid
+                  and is_refund = false
+                """,
+                (user_id, group_id),
+            )
+
+            # 3) abate o total das faturas afetadas
+            for bill_id, bill_sum in by_bill.items():
+                cur.execute(
+                    """
+                    update credit_bills
+                    set total = greatest(0, total - %s)
+                    where id = %s and user_id = %s
+                    """,
+                    (float(bill_sum), bill_id, user_id),
+                )
+
+            conn.commit()
+
+    return {
+        "group_id": group_id,
+        "removed_count": removed_count,
+        "removed_total": float(total_removed),
+    }
