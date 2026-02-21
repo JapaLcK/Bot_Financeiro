@@ -52,6 +52,7 @@ from utils_text import (
 from investment_parse import parse_interest
 import time as pytime
 import asyncio
+from help_ui import help_embed, HelpView
 
 
 
@@ -92,12 +93,14 @@ intents.message_content = True  # precisa habilitar no Developer Portal também
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 HELP_TEXT_SHORT = (
-    "❓ **Não entendi esse comando.**\n"
-    "Digite `ajuda` para ver todos os comandos.\n"
-    "Exemplos:\n"
-    "• `gastei 50 mercado`\n"
-    "• `recebi 1000 salario`\n"
+    "❓ **Não entendi.**\n"
+    "Digite `ajuda` para ver os comandos ou `tutorial` para aprender em 2 minutos.\n\n"
+    "**Exemplos rápidos:**\n"
+    "• `gastei 50 mercado`  *(despesa)*\n"
+    "• `recebi 1000 salario` *(receita)*\n"
     "• `saldo`\n"
+    "• `importar ofx` + anexo\n"
+    "• `exportar sheets`\n"
 )
 
 HELP_TEXT_FULL = (
@@ -533,14 +536,10 @@ async def on_message(message: discord.Message):
 
         return
 
-
-    
-
     # ajuda / comandos
     if t in ["ajuda", "help", "comandos", "listar comandos", "menu"]:
-        await message.reply(HELP_TEXT_FULL)
-        return
-
+        await message.reply(embed=help_embed("start"), view=HelpView(message.author.id))
+        return    
 
     # (Opcional) se você quiser responder só em DM, descomente:
     # if not isinstance(message.channel, discord.DMChannel):
