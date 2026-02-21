@@ -143,9 +143,9 @@ def init_db():
         purchased_at date not null,
         created_at timestamptz default now()
         );
-        """
+        """,
         
-        """ create index if not exists idx_credit_tx_user_date on credit_transactions(user_id, purchased_at desc); """
+        """ create index if not exists idx_credit_tx_user_date on credit_transactions(user_id, purchased_at desc); """,
 
         """
         create table if not exists credit_cards (
@@ -157,7 +157,7 @@ def init_db():
         created_at timestamptz default now(),
         unique(user_id, name)
         );
-        """
+        """,
 
         """ 
         create table if not exists credit_bills (
@@ -171,7 +171,7 @@ def init_db():
         created_at timestamptz default now(),
         unique(card_id, period_start, period_end)
         );
-        """
+        """,
 
         """
         create table if not exists credit_transactions (
@@ -186,37 +186,68 @@ def init_db():
         purchased_at date not null,
         created_at timestamptz default now()
         );
-        """
+        """,
 
         """ 
         create index if not exists idx_credit_tx_user_date
         on credit_transactions(user_id, purchased_at desc);
+        """,
+
+                """
+        -- OFX import support (idempotente via FITID)
+        alter table launches add column if not exists source text not null default 'manual';
+        alter table launches add column if not exists external_id text;      -- FITID
+        alter table launches add column if not exists posted_at date;        -- DTPOSTED
+        alter table launches add column if not exists currency text;         -- BRL
+        alter table launches add column if not exists imported_at timestamptz;
+        """,
+
         """
+        -- garante dedupe: (user_id, source, external_id)
+        create unique index if not exists uq_launches_user_source_external
+          on launches(user_id, source, external_id);
+        """,
+
+        """
+        -- log de import (pra pular reimport do mesmo arquivo e ter auditoria)
+        create table if not exists ofx_imports (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          file_hash text not null,
+          bank_id text,
+          acct_id text,
+          acct_type text,
+          dt_start date,
+          dt_end date,
+          total_transactions int not null,
+          inserted_count int not null default 0,
+          duplicate_count int not null default 0,
+          imported_at timestamptz not null default now(),
+          unique(user_id, file_hash)
+        );
+        """,
 
         """
         alter table users add column if not exists default_card_id bigint;
-        """
+        """,
 
         """
         alter table credit_bills add column if not exists paid_amount numeric not null default 0;
         alter table credit_bills add column if not exists closed_at timestamptz;
-        """
+        """,
 
         """
         alter table credit_transactions add column if not exists group_id uuid;
         alter table credit_transactions add column if not exists installment_no int;
         alter table credit_transactions add column if not exists installments_total int;
         alter table credit_transactions add column if not exists is_refund boolean not null default false;
-        """
+        """,
 
         """
         alter table users add column if not exists default_card_id bigint;
         alter table users add column if not exists reminders_enabled boolean not null default false;
         alter table users add column if not exists reminders_days_before int not null default 3;    
-        """
-
-
-
+        """,
 ]
 
     with get_conn() as conn:
@@ -247,6 +278,18 @@ def get_balance(user_id: int) -> Decimal:
             cur.execute("select balance from accounts where user_id=%s", (user_id,))
             row = cur.fetchone()
             return row["balance"] if row else Decimal("0")
+
+def set_balance(user_id: int, new_balance: Decimal) -> Decimal:
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE accounts SET balance=%s WHERE user_id=%s RETURNING balance",
+                (new_balance, user_id),
+            )
+            bal = cur.fetchone()["balance"]
+        conn.commit()
+    return bal
 
 def add_launch_and_update_balance(
     user_id: int,
@@ -299,6 +342,141 @@ def add_launch_and_update_balance(
         conn.commit()
 
     return launch_id, new_bal
+
+# ---------------- OFX import (idempotente) ----------------
+def get_ofx_import_by_hash(user_id: int, file_hash: str):
+    """
+    Se o mesmo arquivo já foi importado, devolve o log pra evitar retrabalho.
+    """
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select file_hash, dt_start, dt_end, total_transactions, inserted_count, duplicate_count, imported_at
+                from ofx_imports
+                where user_id=%s and file_hash=%s
+                """,
+                (user_id, file_hash),
+            )
+            row = cur.fetchone()
+            return row
+
+def import_ofx_launches_bulk(
+    user_id: int,
+    launches_rows: list[dict],
+    *,
+    file_hash: str,
+    bank_id: str | None,
+    acct_id: str | None,
+    acct_type: str | None,
+    dt_start: date | None,
+    dt_end: date | None,
+):
+    """
+    Importa várias transações OFX de uma vez, de forma IDEMPOTENTE:
+      - insere launch com (source='ofx', external_id=FITID)
+      - ON CONFLICT DO NOTHING evita duplicata
+      - saldo só é ajustado SOMENTE pelas inseridas de verdade
+
+    Retorna dict com inserted, duplicates, total, new_balance.
+    """
+    ensure_user(user_id)
+
+    total = len(launches_rows)
+
+    # se já importou o mesmo arquivo, retorna rápido (saldo atual)
+    prev = get_ofx_import_by_hash(user_id, file_hash)
+    if prev:
+        bal = get_balance(user_id)
+        return {
+            "skipped_same_file": True,
+            "total": prev["total_transactions"],
+            "inserted": prev["inserted_count"],
+            "duplicates": prev["duplicate_count"],
+            "dt_start": prev["dt_start"],
+            "dt_end": prev["dt_end"],
+            "new_balance": bal,
+            "imported_at": prev["imported_at"],
+        }
+
+    inserted = 0
+    duplicates = 0
+    delta_total = Decimal("0")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for r in launches_rows:
+                # tenta inserir primeiro (idempotente via unique index)
+                cur.execute(
+                    """
+                    insert into launches(
+                        user_id, tipo, valor, alvo, nota, criado_em, efeitos,
+                        source, external_id, posted_at, currency, imported_at
+                    )
+                    values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
+                    on conflict (user_id, source, external_id) do nothing
+                    returning id
+                    """,
+                    (
+                        user_id,
+                        r["tipo"],
+                        r["valor"],
+                        r.get("categoria"),
+                        r.get("nota"),
+                        r["criado_em"],
+                        Json({"delta_conta": float(r["delta"]), "ofx": r.get("ofx_meta", {})}),
+                        "ofx",
+                        r["external_id"],
+                        r.get("posted_at"),
+                        r.get("currency", "BRL"),
+                    ),
+                )
+                row = cur.fetchone()
+                if row:
+                    inserted += 1
+                    delta_total += r["delta"]
+                else:
+                    duplicates += 1
+
+            # atualiza saldo UMA vez com o delta total inserido
+            if inserted:
+                cur.execute(
+                    "update accounts set balance = balance + %s where user_id=%s returning balance",
+                    (delta_total, user_id),
+                )
+                new_bal = cur.fetchone()["balance"]
+            else:
+                cur.execute("select balance from accounts where user_id=%s", (user_id,))
+                new_bal = cur.fetchone()["balance"]
+
+            # grava log da importação
+            cur.execute(
+                """
+                insert into ofx_imports(
+                    user_id, file_hash, bank_id, acct_id, acct_type, dt_start, dt_end,
+                    total_transactions, inserted_count, duplicate_count
+                )
+                values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                on conflict do nothing
+                """,
+                (
+                    user_id, file_hash, bank_id, acct_id, acct_type,
+                    dt_start, dt_end, total, inserted, duplicates
+                ),
+            )
+
+        conn.commit()
+
+    return {
+        "skipped_same_file": False,
+        "total": total,
+        "inserted": inserted,
+        "duplicates": duplicates,
+        "dt_start": dt_start,
+        "dt_end": dt_end,
+        "new_balance": new_bal,
+    }
 
 def list_launches(user_id: int, limit: int = 10):
     ensure_user(user_id)
@@ -1752,6 +1930,50 @@ def get_summary_by_period(user_id: int, start_date: date, end_date: date):
 
     return out
 
+# Puxa regas somente 1 vez na hora do import ofx
+def list_category_rules(user_id: int) -> list[tuple[str, str]]:
+    """
+    Carrega as regras do usuário 1x (pra usar em batch sem ficar batendo no DB).
+    """
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT keyword, category
+                FROM user_category_rules
+                WHERE user_id = %s
+                ORDER BY LENGTH(keyword) DESC
+                """,
+                (user_id,),
+            )
+            rows = cur.fetchall()
+
+    # seu cursor parece retornar dict_row, mas aqui funciona tanto com dict quanto tuple
+    out = []
+    for r in rows:
+        if isinstance(r, dict):
+            out.append((r["keyword"], r["category"]))
+        else:
+            out.append((r[0], r[1]))
+    return out
+
+def list_category_rules(user_id: int) -> list[tuple[str, str]]:
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select keyword, category
+                from user_category_rules
+                where user_id=%s
+                order by length(keyword) desc
+                """,
+                (user_id,),
+            )
+            rows = cur.fetchall()
+
+    return [(r["keyword"], r["category"]) for r in rows]
         
 # Busca uma categoria memorizada pelo user_id com base no texto (keyword contida no texto)
 def get_memorized_category(user_id: int, text: str) -> str | None:

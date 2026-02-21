@@ -19,10 +19,10 @@ from datetime import date, datetime
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, PieChart, Reference
 from openpyxl.styles import Font, PatternFill, Alignment
-from sheets_export import export_rows_to_month_sheet
+from sheets_export import export_rows_to_dados
 import unicodedata
 from reports import setup_monthly_export
-from utils_date import _tz, now_tz, extract_date_from_text
+from utils_date import _tz, now_tz, extract_date_from_text, fmt_br
 from commands.resumo import handle_resumo
 from utils_date import extract_date_from_text, now_tz, parse_date_str, month_range_today, days_between
 from handlers.credit import handle_credit_commands
@@ -42,7 +42,7 @@ from utils_text import (
     should_use_ai,
     parse_pocket_deposit_natural,
 )
-
+from ofx_import import import_ofx_bytes
 from parsers import parse_receita_despesa_natural
 from utils_text import (
     guess_category,
@@ -51,6 +51,8 @@ from utils_text import (
 )
 from investment_parse import parse_interest
 import time as pytime
+import asyncio
+
 
 
 
@@ -213,6 +215,50 @@ async def on_message(message: discord.Message):
                 "⚠️ Existe uma ação pendente.\n"
                 "Responda **sim** para confirmar ou **não** para cancelar."
             )
+        return
+    
+        # ---------------- IMPORT OFX ----------------
+    if t.startswith("importar ofx") or t.startswith("import ofx"):
+        if not message.attachments:
+            await message.reply("📎 Anexe um arquivo `.ofx` junto com o comando `importar ofx`.")
+            return
+
+        att = next((a for a in message.attachments if (a.filename or "").lower().endswith(".ofx")), None)
+        if not att:
+            await message.reply("📎 Não achei nenhum arquivo `.ofx` nos anexos.")
+            return
+
+        try:
+            ofx_bytes = await att.read()
+            report = await asyncio.to_thread(import_ofx_bytes, message.author.id, ofx_bytes, att.filename,)
+        except Exception:
+            traceback.print_exc()
+            await message.reply("❌ Erro ao ler/importar o OFX. (Veja os logs)")
+            return
+
+        dt_start = report.get("dt_start")
+        dt_end = report.get("dt_end")
+        total = report.get("total", 0)
+        ins = report.get("inserted", 0)
+        dup = report.get("duplicates", 0)
+        bal = report.get("new_balance")
+
+        period_txt = ""
+        try:
+            period_txt = f"{fmt_br(dt_start)} → {fmt_br(dt_end)}"
+        except Exception:
+            period_txt = "período não identificado"
+
+        skipped = report.get("skipped_same_file", False)
+        skipped_txt = " (arquivo já importado antes, pulei)" if skipped else ""
+
+        await message.reply(
+            f"✅ OFX importado{skipped_txt}\n"
+            f"📅 Período: **{period_txt}**\n"
+            f"🧾 Transações no arquivo: **{total}**\n"
+            f"➕ Inseridas: **{ins}** | ♻️ Duplicadas: **{dup}**\n"
+            f"🏦 Saldo atual: **R$ {bal}**"
+        )
         return
     
 
@@ -940,13 +986,17 @@ async def on_message(message: discord.Message):
             return
 
     
-    # Exporta para Google Sheets (template dashboard)
+   # Exporta para Google Sheets (dashboard)
     if t.startswith("exportar sheets"):
         parts = text.split()
 
         try:
+            # Opção B: por padrão, exporta TUDO
             if len(parts) == 2:
-                start, end = month_range_today()
+                from datetime import date
+                start = date(1970, 1, 1)
+                end = month_range_today()[1]  # hoje (fim do mês atual no seu helper)
+            # ainda permite exportar um recorte, se você quiser usar
             elif len(parts) == 4:
                 start = parse_date_str(parts[2])
                 end = parse_date_str(parts[3])
@@ -966,15 +1016,13 @@ async def on_message(message: discord.Message):
             return
 
         try:
-            sheet_link = export_rows_to_month_sheet(message.author.id, rows, start, end)
+            sheet_link = export_rows_to_dados(message.author.id, rows)
         except Exception as e:
             await message.reply(f"❌ Erro ao exportar para o Sheets: {e}")
             return
 
-        aba = f"{start.year:04d}-{start.month:02d}"
-        await message.reply(f"✅ Exportado para o Google Sheets (aba **{aba}**).\n🔗 {sheet_link}")
+        await message.reply(f"✅ Exportado para o dashboard (aba **DADOS**).\n🔗 {sheet_link}")
         return
-
     
     # Exporta dashboard financeiro em Excel
     if t.startswith("exportar excel") or t.startswith("export excel"):

@@ -89,13 +89,19 @@ Apagar todos os dados das tabelas sem apagar as tabelas em si.
 Comando SQL (executar no DBeaver):
 
 TRUNCATE TABLE
-users,
-accounts,
-launches,
-pockets,
-investments,
-pending_actions
-RESTART IDENTITY CASCADE;
+  credit_transactions,
+  credit_bills,
+  credit_cards,
+  user_category_rules,
+  pending_actions,
+  launches,
+  pockets,
+  investments,
+  ofx_imports,
+  accounts,
+  users
+RESTART IDENTITY
+CASCADE;
 
 Função:
 Remove todos os registros e reseta os IDs (auto increment) das tabelas.

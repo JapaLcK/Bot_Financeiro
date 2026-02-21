@@ -91,7 +91,10 @@ def _is_monetary_row(r) -> bool:
     # 4) Caso contrário: é movimentação
     return True
 
-
+# DEPRECATED (2026-02-20)
+# Não usar mais. Substituído por export_rows_to_dados().
+# Mantido temporariamente por segurança durante a migração.
+# Após migração, conferir e remover.
 # Exporta lançamentos monetários para a aba do mês e atualiza cards + donut no template do Sheets.
 def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: datetime, worksheet_name: str | None = None):
 
@@ -230,3 +233,61 @@ def ensure_month_ws(sh, aba, template_name="TEMPLATE"):
         ws = template.duplicate(new_sheet_name=aba)
         return ws, True
 
+# -----------------------------
+# NOVO: export único para aba DADOS (sem criar aba por mês)
+# -----------------------------
+def ensure_ws(sh, title: str, rows: int = 2000, cols: int = 12):
+    try:
+        return sh.worksheet(title)
+    except gspread.WorksheetNotFound:
+        return sh.add_worksheet(title=title, rows=rows, cols=cols)
+
+
+def export_rows_to_dados(user_id: int, rows):
+    """
+    Exporta todas as movimentações monetárias para a aba "DADOS".
+    Não cria aba do mês. Não mexe em cards/gráficos do dashboard.
+    Estrutura da aba DADOS (A:H):
+      A Data | B Tipo | C Categoria | D Descrição | E Valor | F Fonte | G Nome | H Mês (YYYY-MM)
+    """
+    sh = _open_sheet()
+    ws = ensure_ws(sh, "DADOS", rows=5000, cols=12)
+
+    header = ["Data", "Tipo", "Categoria", "Descrição", "Valor", "Fonte", "Nome", "Mês"]
+
+    # Limpa tudo (mantém header)
+    ws.batch_clear(["A1:Z99999"])
+    ws.update("A1", [header], value_input_option="USER_ENTERED")
+
+    values = []
+    for r in rows:
+        if not _is_monetary_row(r):
+            continue
+
+        dt = r.get("criado_em")
+        if not hasattr(dt, "date"):
+            continue
+
+        d = dt.date()
+        data_str = d.isoformat()          # YYYY-MM-DD
+        mes_str = f"{d.year:04d}-{d.month:02d}"  # YYYY-MM
+
+        tipo = (r.get("tipo") or "").strip().lower()
+
+        # No seu export atual você usa "alvo" como categoria.
+        # Se no futuro "alvo" for nome (ex: investimento/caixinha), você pode ajustar.
+        categoria = (r.get("alvo") or "").strip() or "Outros"
+        descricao = (r.get("nota") or "").strip()
+
+        valor = float(r.get("valor") or 0)
+        fonte = (r.get("origem") or "").strip()  # ex: conta/cartao etc (se vier)
+        nome = ""  # reservado (ex: nome da caixinha/investimento/cartão)
+
+        values.append([data_str, tipo, categoria, descricao, _to_sheet_value(valor), fonte, nome, mes_str])
+
+    if values:
+        ws.update("A2", values, value_input_option="USER_ENTERED")
+
+    # link da aba DADOS
+    _base, _tab = get_sheet_links(ws)
+    return _tab
