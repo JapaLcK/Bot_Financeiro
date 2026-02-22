@@ -1,0 +1,46 @@
+HELP_TEXT_SHORT = (
+    "❓ **Não entendi.**\n"
+    "Digite `ajuda` para ver os comandos ou `tutorial`.\n"
+    "Exemplos:\n"
+    "• `gastei 50 mercado`\n"
+    "• `recebi 1000 salario`\n"
+    "• `saldo`\n"
+    "• `importar ofx` + anexo\n"
+)
+
+HELP_TEXT_FULL = (
+    "👋 **Comece aqui**\n"
+    "• `tutorial`\n"
+    "• `saldo`\n"
+    "• `gastei 50 mercado`\n"
+    "• `recebi 1000 salario`\n\n"
+    "🧾 **OFX**\n"
+    "• `importar ofx` + anexo `.ofx`\n\n"
+    "📦 **Caixinhas**\n"
+    "• `criar caixinha viagem`\n"
+    "• `coloquei 300 na caixinha viagem`\n"
+    "• `retirei 100 da caixinha viagem`\n"
+    "• `listar caixinhas`\n\n"
+    "📈 **Investimentos**\n"
+    "• `criar investimento CDB 110% CDI`\n"
+    "• `apliquei 200 no investimento CDB`\n"
+    "• `listar investimentos`\n\n"
+    "📤 **Sheets**\n"
+    "• `exportar sheets`\n"
+    "• `exportar sheets 2026-02-01 2026-02-28`\n\n"
+    "🧾 **Lançamentos**\n"
+    "• `listar lançamentos`\n"
+    "• `apagar 3`\n"
+    "• `desfazer`\n\n"
+    "⚠️ **Confirmações**\n"
+    "• `sim` / `nao`\n"
+)
+
+TUTORIAL_TEXT = (
+    "🚀 **Tutorial (1–2 min)**\n\n"
+    "1) `recebi 1000 salario`\n"
+    "2) `gastei 50 mercado`\n"
+    "3) `saldo`\n\n"
+    "🧾 Para importar extrato: envie `importar ofx` + anexo `.ofx`\n"
+    "📤 Para exportar: `exportar sheets`\n"
+)
