@@ -3,3 +3,4 @@
 __pycache__/
 *.pyc
 smoke_db.py
+debug_rules.pyc
