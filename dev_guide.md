@@ -7,6 +7,11 @@ Este documento serve como referência rápida para lembrar os comandos do bot e 
 source .venv/bin/activate
 Certifique-se que existe a pasta .venv
 
+## Comando para ativar o bot whatsapp
+set -a; source .env; set +a
+PORT=5001 python -m adapters.whatsapp.wa_webhook
+ngrok http 5001
+
 ## Comandos do Bot (Usuário Final)
 
 ### Registrar despesa
@@ -98,6 +103,8 @@ TRUNCATE TABLE
   pockets,
   investments,
   ofx_imports,
+  link_codes,
+  user_identities,
   accounts,
   users
 RESTART IDENTITY

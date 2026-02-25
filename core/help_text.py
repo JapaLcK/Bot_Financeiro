@@ -1,46 +1,244 @@
+# core/help_text.py
+from __future__ import annotations
+import re
+from typing import Literal, Tuple
+
+Platform = Literal["discord", "whatsapp"]
+
 HELP_TEXT_SHORT = (
-    "❓ **Não entendi.**\n"
-    "Digite `ajuda` para ver os comandos ou `tutorial`.\n"
+    "❓ **Não entendi esse comando.**\n"
+    "Digite `ajuda` para ver os comandos.\n"
     "Exemplos:\n"
     "• `gastei 50 mercado`\n"
     "• `recebi 1000 salario`\n"
     "• `saldo`\n"
-    "• `importar ofx` + anexo\n"
 )
 
-HELP_TEXT_FULL = (
-    "👋 **Comece aqui**\n"
-    "• `tutorial`\n"
-    "• `saldo`\n"
-    "• `gastei 50 mercado`\n"
-    "• `recebi 1000 salario`\n\n"
-    "🧾 **OFX**\n"
-    "• `importar ofx` + anexo `.ofx`\n\n"
-    "📦 **Caixinhas**\n"
-    "• `criar caixinha viagem`\n"
-    "• `coloquei 300 na caixinha viagem`\n"
-    "• `retirei 100 da caixinha viagem`\n"
-    "• `listar caixinhas`\n\n"
-    "📈 **Investimentos**\n"
-    "• `criar investimento CDB 110% CDI`\n"
-    "• `apliquei 200 no investimento CDB`\n"
-    "• `listar investimentos`\n\n"
-    "📤 **Sheets**\n"
-    "• `exportar sheets`\n"
-    "• `exportar sheets 2026-02-01 2026-02-28`\n\n"
-    "🧾 **Lançamentos**\n"
-    "• `listar lançamentos`\n"
-    "• `apagar 3`\n"
-    "• `desfazer`\n\n"
-    "⚠️ **Confirmações**\n"
-    "• `sim` / `nao`\n"
-)
+# Fonte única de verdade: todas as seções de ajuda (conteúdo)
+HELP_SECTIONS: dict[str, str] = {
+    "start": (
+        "👋 **Comece aqui**\n"
+        "• `tutorial` → guia rápido\n"
+        "• `saldo`\n"
+        "• `gastei 50 mercado`\n"
+        "• `recebi 1000 salario`\n"
+        "• `importar ofx` + anexo\n"
+        "\n"
+        "Dica: digite `ajuda` para abrir o menu completo."
+    ),
+    "tutorial": (
+        "🚀 **Tutorial rápido (1–2 min)**\n\n"
+        "1) **Registre o básico**\n"
+        "• `recebi 1000 salario`\n"
+        "• `gastei 50 mercado`\n"
+        "• `saldo`\n\n"
+        "2) **Importe seu extrato (OFX)**\n"
+        "• Envie `importar ofx` + anexo `.ofx`\n"
+        "• Duplicadas são ignoradas\n\n"
+        "3) **Caixinhas**\n"
+        "• `criar caixinha viagem`\n"
+        "• `coloquei 300 na caixinha viagem`\n\n"
+        "4) **Investimentos**\n"
+        "• `criar investimento CDB 110% CDI`\n"
+        "• `apliquei 200 no investimento CDB`\n\n"
+        "5) **Sheets**\n"
+        "• `exportar sheets`\n"
+    ),
+    "ofx": (
+        "🧾 **Importar extrato (OFX)**\n"
+        "• Envie: `importar ofx` + anexo `.ofx`\n"
+        "• Pode importar de novo — duplicadas são ignoradas\n"
+        "• O saldo final vem do `LEDGERBAL` do OFX\n"
+    ),
+    "cc": (
+        "🏦 **Conta corrente**\n"
+        "• `saldo`\n"
+        "• `listar lançamentos`\n"
+        "• `apagar 3`\n"
+        "• `desfazer`\n"
+    ),
+    "pockets": (
+        "📦 **Caixinhas**\n"
+        "• `criar caixinha viagem`\n"
+        "• `coloquei 300 na caixinha viagem`\n"
+        "• `retirei 100 da caixinha viagem`\n"
+        "• `saldo caixinhas`\n"
+        "• `listar caixinhas`\n"
+        "• `excluir caixinha viagem`\n"
+    ),
+    "invest": (
+        "📈 **Investimentos**\n"
+        "• `criar investimento CDB Nubank 1% ao mês`\n"
+        "• `criar investimento Tesouro 0,03% ao dia`\n"
+        "• `criar investimento CDB 110% CDI`\n"
+        "• `apliquei 200 no investimento CDB Nubank`\n"
+        "• `retirei 100 do investimento CDB Nubank`\n"
+        "• `saldo investimentos`\n"
+        "• `listar investimentos`\n"
+        "• `excluir investimento CDB Nubank`\n"
+    ),
+    "cdi": (
+        "📊 **CDI**\n"
+        "• `ver cdi`\n"
+    ),
+    "sheets": (
+        "📤 **Exportar para Google Sheets**\n"
+        "• `exportar sheets`\n"
+        "• `exportar sheets 2026-02-01 2026-02-28`\n"
+        "• Datas: use `YYYY-MM-DD`\n"
+    ),
+    "launches": (
+        "🧾 **Lançamentos (histórico)**\n"
+        "• `listar lançamentos`\n"
+        "• `apagar 3`\n"
+        "• `desfazer`\n"
+    ),
+    "confirm": (
+        "⚠️ **Confirmações**\n"
+        "• `sim` → confirma ações pendentes\n"
+        "• `nao` → cancela\n"
+    ),
+}
 
-TUTORIAL_TEXT = (
-    "🚀 **Tutorial (1–2 min)**\n\n"
-    "1) `recebi 1000 salario`\n"
-    "2) `gastei 50 mercado`\n"
-    "3) `saldo`\n\n"
-    "🧾 Para importar extrato: envie `importar ofx` + anexo `.ofx`\n"
-    "📤 Para exportar: `exportar sheets`\n"
-)
+TITLE_MAP: dict[str, str] = {
+    "start": "Ajuda — Bot Financeiro",
+    "tutorial": "Tutorial",
+    "ofx": "OFX",
+    "cc": "Conta corrente",
+    "pockets": "Caixinhas",
+    "invest": "Investimentos",
+    "cdi": "CDI",
+    "sheets": "Google Sheets",
+    "launches": "Lançamentos",
+    "confirm": "Confirmações",
+}
+
+# Ordem e metadados do menu (Discord dropdown e também serve como “índice”)
+HELP_ORDER: list[tuple[str, str, str]] = [
+    ("start", "Começar (visão geral)", "👋"),
+    ("tutorial", "Tutorial", "🚀"),
+    ("ofx", "OFX (importar extrato)", "🧾"),
+    ("cc", "Conta corrente", "🏦"),
+    ("pockets", "Caixinhas", "📦"),
+    ("invest", "Investimentos", "📈"),
+    ("cdi", "CDI", "📊"),
+    ("sheets", "Exportar Sheets", "📤"),
+    ("launches", "Lançamentos", "🧾"),
+    ("confirm", "Confirmações", "⚠️"),
+]
+
+HELP_TITLES: dict[str, str] = {
+    "start": "Ajuda — Bot Financeiro",
+    "tutorial": "Tutorial",
+    "ofx": "OFX",
+    "cc": "Conta corrente",
+    "pockets": "Caixinhas",
+    "invest": "Investimentos",
+    "cdi": "CDI",
+    "sheets": "Google Sheets",
+    "launches": "Lançamentos",
+    "confirm": "Confirmações",
+}
+
+# Alias de tópicos para `ajuda <topico>` (útil no WhatsApp)
+HELP_ALIASES: dict[str, str] = {
+    "inicio": "start",
+    "start": "start",
+    "tutorial": "tutorial",
+    "ofx": "ofx",
+    "extrato": "ofx",
+    "importar": "ofx",
+    "conta": "cc",
+    "cc": "cc",
+    "caixinha": "pockets",
+    "caixinhas": "pockets",
+    "invest": "invest",
+    "investimento": "invest",
+    "investimentos": "invest",
+    "cdi": "cdi",
+    "sheet": "sheets",
+    "sheets": "sheets",
+    "lanc": "launches",
+    "lançamentos": "launches",
+    "lancamentos": "launches",
+    "confirm": "confirm",
+    "confirmacoes": "confirm",
+    "confirmações": "confirm",
+}
+
+# Mapeia vários nomes para a mesma seção
+_SECTION_ALIASES = {
+    "start": {"start", "inicio", "início", "geral", "menu"},
+    "tutorial": {"tutorial", "guia"},
+    "ofx": {"ofx", "extrato", "importar", "importarofx"},
+    "cc": {"cc", "conta", "conta corrente", "corrente", "saldo"},
+    "pockets": {"caixinhas", "caixinha", "pockets"},
+    "invest": {"invest", "investimentos", "investimento"},
+    "cdi": {"cdi"},
+    "sheets": {"sheets", "planilha", "google sheets", "exportar"},
+    "launches": {"lancamentos", "lançamentos", "historico", "histórico"},
+    "confirm": {"confirm", "confirmacoes", "confirmações", "sim", "nao", "não"},
+}
+
+def resolve_section(text: str) -> str:
+    """
+    Aceita:
+      - "ajuda"
+      - "help"
+      - "ajuda ofx"
+      - "ajuda investimentos"
+    Retorna uma key de HELP_SECTIONS.
+    """
+    t = (text or "").strip()
+    if not t:
+        return "start"
+
+    tl = t.casefold()
+
+    # caso "ajuda" puro
+    if tl in {"ajuda", "help"}:
+        return "start"
+
+    # caso "ajuda <algo>"
+    m = re.match(r"^(ajuda|help)\s+(.+)$", tl)
+    if not m:
+        return "start"
+
+    arg = m.group(2).strip()
+
+    # procura correspondência por aliases
+    for key, names in _SECTION_ALIASES.items():
+        if arg in names:
+            return key
+
+    # fallback: se o usuário digitou exatamente a key
+    if arg in HELP_SECTIONS:
+        return arg
+
+    return "start"
+
+def _to_whatsapp_md(s: str) -> str:
+    # Discord usa **bold**; WhatsApp usa *bold*
+    return s.replace("**", "*")
+
+def render_help(section_key: str, platform: Platform) -> str:
+    key = HELP_ALIASES.get(section_key.casefold().strip(), section_key.casefold().strip())
+    txt = HELP_SECTIONS.get(key, HELP_SECTIONS["start"])
+    if platform == "whatsapp":
+        txt = _to_whatsapp_md(txt)
+    return txt
+
+def render_full(platform: Platform) -> str:
+    # para WhatsApp / texto puro, gera um “guia completo”
+    parts: list[str] = []
+    for key, label, emoji in HELP_ORDER:
+        parts.append(render_help(key, platform))
+        parts.append("")  # linha em branco entre seções
+    return "\n".join(parts).strip()
+
+def render_section(section_key: str) -> str:
+    return HELP_SECTIONS.get(section_key, HELP_SECTIONS["start"])
+
+# Compatibilidade com imports antigos
+HELP_TEXT_FULL = render_full("discord")
+TUTORIAL_TEXT = render_help("tutorial", "discord")

@@ -1,91 +1,82 @@
-# parsers.py
-"""
-Parsers naturais: interpretam mensagens do usuário em ações estruturadas.
-"""
-
-from datetime import date
-from utils_date import extract_date_from_text, now_tz
-from utils_text import (
-    normalize_text,
-    contains_word,
-    LOCAL_RULES,
-    extract_keyword_for_memory,
-    parse_money,
-)
-from db import upsert_category_rule
-from ai_router import classify_category_with_gpt  # se for de lá; ajuste se seu nome for outro
-from db import get_memorized_category            # se for db; ajuste se estiver em outro arquivo
+import re
+from utils_text import normalize_text
+from core.services.category_service import infer_category, learn_from_explicit_category
 
 
-# --- PARSER DE RECEITA / DESPESA (COLE AQUI) ---
-# Faz o parse de uma mensagem natural de receita/despesa e classifica a categoria (com fallback no GPT)
-# Faz parse de receita/despesa e usa memória + GPT para categorizar
-# Faz parse de receita/despesa, usa memória de categorias e fallback no GPT (e aprende automaticamente)
-def parse_receita_despesa_natural(user_id: int, text: str):
-    # 0) extrai data do texto (se tiver) e remove do texto
-    dt_evento, text_clean = extract_date_from_text(text)
-    if dt_evento is None:
-        dt_evento = now_tz()
+def _extract_explicit_category(raw_text: str) -> tuple[str, str | None]:
+    t = (raw_text or "").strip()
+    if not t:
+        return t, None
 
-    # normaliza forte (acentos + pontuação)
-    raw_norm = normalize_text(text_clean)
-    if not raw_norm:
+    m = re.search(r"(?:^|\s)#([a-zA-ZÀ-ÿ0-9_\-]+)\b", t)
+    if m:
+        cat = m.group(1)
+        t2 = (t[: m.start()] + t[m.end() :]).strip()
+        return t2, cat
+
+    m = re.search(r"(?:^|\s)cat=([a-zA-ZÀ-ÿ0-9_\-]+)\b", t)
+    if m:
+        cat = m.group(1)
+        t2 = (t[: m.start()] + t[m.end() :]).strip()
+        return t2, cat
+
+    return t, None
+
+
+def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
+    text_clean = (raw_text or "").strip()
+    if not text_clean:
         return None
 
-    valor = parse_money(text_clean)
-    if valor is None:
+    # categoria explícita (se houver)
+    text_for_parse, explicit_cat = _extract_explicit_category(text_clean)
+    raw_norm = normalize_text(text_for_parse)
+
+    # tipo
+    tipo = None
+    if raw_norm.startswith("gastei ") or raw_norm.startswith("gasto "):
+        tipo = "despesa"
+    elif raw_norm.startswith("recebi ") or raw_norm.startswith("receita "):
+        tipo = "receita"
+    else:
         return None
 
-    verbos_despesa = ["gastei", "paguei", "comprei", "cartao", "cartão", "debitei"]
-    verbos_receita = ["recebi", "ganhei", "salario", "salário", "pix recebido", "reembolso"]
-
-    eh_despesa = any(normalize_text(v) in raw_norm for v in verbos_despesa)
-    eh_receita = any(normalize_text(v) in raw_norm for v in verbos_receita)
-
-    if not (eh_despesa or eh_receita):
+    # valor
+    m = re.search(r"(\d+[.,]?\d*)", text_for_parse)
+    if not m:
         return None
 
-    tipo = "despesa" if eh_despesa and not eh_receita else "receita" if eh_receita and not eh_despesa else None
-    if tipo is None:
+    valor_txt = m.group(1).replace(".", "").replace(",", ".")
+    try:
+        valor = float(valor_txt)
+    except Exception:
         return None
 
-    # 1) memória primeiro (prioridade total)
-    categoria = get_memorized_category(user_id, raw_norm)
-    if not categoria:
-        # 2) regra local
-        categoria = "outros"
-        for keywords, cat in LOCAL_RULES:
-            for kw in keywords:
-                kw_norm = normalize_text(kw)
-                if kw_norm and (contains_word(raw_norm, kw_norm) or kw_norm in raw_norm):
-                    categoria = cat
-                    break
-            if categoria != "outros":
-                break
+    dt_evento = None
 
-        # 3) fallback GPT
-        if categoria == "outros":
-            try:
-                categoria_gpt = classify_category_with_gpt(raw_norm)
-                if categoria_gpt:
-                    categoria = categoria_gpt
-            except Exception as e:
-                print("Erro IA categoria:", e)
-                categoria = "outros"
+    # inferência única (A > B > C)
+    res = infer_category(user_id=user_id, text_base=raw_norm, explicit_category=explicit_cat)
+    categoria = res.category
 
-        # 4) salva memória com keyword (NÃO salva a frase inteira)
-        try:
-            kw = extract_keyword_for_memory(raw_norm)
-            if kw:
-                upsert_category_rule(user_id, kw, categoria)
-        except Exception as e:
-            print("Erro salvando memória categoria:", e)
+    # aprendizado automático (somente se explícita)
+    if explicit_cat:
+        inferred_no_explicit = infer_category(user_id=user_id, text_base=raw_norm, explicit_category=None).category
+        learn_from_explicit_category(
+            user_id=user_id,
+            text_base=raw_norm,
+            chosen_category=explicit_cat,
+            inferred_category=inferred_no_explicit,
+            source="manual",
+            launch_id=None,
+        )
+
+    alvo = ""
 
     return {
         "tipo": tipo,
         "valor": valor,
         "categoria": categoria,
-        "nota": raw_norm,
-        "criado_em": dt_evento, 
+        "alvo": alvo,
+        "nota": text_clean.strip(),
+        "criado_em": dt_evento,
     }
-

@@ -12,9 +12,10 @@ from db import init_db
 from dotenv import load_dotenv
 
 load_dotenv()  # carrega o .env
-
+from core.types import IncomingMessage, Attachment
+from core.handle_incoming import handle_incoming as core_handle_incoming
 from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches, list_pockets, pocket_withdraw_to_account, create_pocket, pocket_deposit_from_account, delete_pocket, investment_withdraw_to_account, accrue_all_investments, create_investment, investment_deposit_from_account, delete_launch_and_rollback
-from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments, export_launches, get_launches_by_period, upsert_category_rule, get_memorized_category, get_conn, get_latest_cdi_aa, undo_credit_transaction, undo_installment_group
+from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments, get_or_create_canonical_user, get_launches_by_period, upsert_category_rule, get_memorized_category, get_conn, get_latest_cdi_aa, undo_credit_transaction, undo_installment_group
 from ai_router import handle_ai_message, classify_category_with_gpt
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, PieChart, Reference
@@ -126,10 +127,48 @@ async def on_message(message: discord.Message):
         return
 
     text = (message.content or "").strip()
-    if not text:
+    if (not text) and (not message.attachments):
         return
     t = text.casefold()
 
+        # ---- CORE (WhatsApp/Discord shared) intercept: help/tutorial/ofx ----
+    atts = []
+    if message.attachments:
+        for a in message.attachments:
+            try:
+                data = await a.read()
+                atts.append(Attachment(
+                    filename=a.filename or "arquivo",
+                    content_type=a.content_type or "application/octet-stream",
+                    data=data,
+                ))
+            except Exception:
+                pass
+
+    uid = get_or_create_canonical_user("discord", str(message.author.id))
+
+    incoming = IncomingMessage(
+        platform="discord",
+        user_id=uid,
+        external_id=str(message.author.id),
+        text=text,
+        message_id=str(message.id),
+        attachments=atts,
+    )
+
+    outs = core_handle_incoming(incoming)
+
+    if outs:
+        # Se for ajuda, você pode manter o dropdown (melhor UX no Discord)
+        if text.casefold().strip() in ["ajuda", "help", "comandos", "listar comandos", "menu"]:
+            await message.reply(embed=help_embed("start"), view=HelpView(message.author.id))
+            return
+
+        # Caso contrário, manda o texto padrão do core (ex: OFX importado)
+        for out in outs:
+            await message.reply(out.text)
+        return
+    
     # Se existir uma ação pendente, processa "sim" / "não"
     pending = get_pending_action(message.author.id)
     if pending:
@@ -420,43 +459,43 @@ async def on_message(message: discord.Message):
 
 
 # Gasto/Receita natural (ex: "gastei 35 no ifood", "recebi 2500 salario")
-    user_id = message.author.id
+    external_id = str(message.author.id)
+    user_id = get_or_create_canonical_user("discord", external_id)
+
     parsed = parse_receita_despesa_natural(user_id, text)
     if parsed:
-        ensure_user(user_id)    
+        ensure_user(user_id)
 
-        tipo = parsed["tipo"]                 # "despesa" ou "receita"
+        tipo = parsed["tipo"]
         valor = float(parsed["valor"])
-        categoria = parsed["categoria"]
+        categoria = parsed.get("categoria")
+        alvo = parsed.get("alvo")
         nota = parsed.get("nota")
         criado_em = parsed.get("criado_em")
-
-
 
         launch_id, new_balance = add_launch_and_update_balance(
             user_id=user_id,
             tipo=tipo,
             valor=valor,
-            alvo=categoria,
+            alvo=alvo,
             nota=nota,
-            criado_em=criado_em
+            categoria=categoria,
+            criado_em=criado_em,
         )
 
         emoji = "💸" if tipo == "despesa" else "💰"
-
         await message.reply(
             f"{emoji} **{tipo.capitalize()} registrada**: {fmt_brl(valor)}\n"
-            f"🏷 Categoria: {categoria}\n"
+            f"🏷️ Categoria: {categoria}\n"
             f"🏦 Conta: {fmt_brl(float(new_balance))}\n"
-            f"ID: #{launch_id}"
+            f"ID:#{launch_id}"
         )
-
         return
 
-    # ajuda / comandos
-    if t in ["ajuda", "help", "comandos", "listar comandos", "menu"]:
-        await message.reply(embed=help_embed("start"), view=HelpView(message.author.id))
-        return    
+        # ajuda / comandos
+        if t in ["ajuda", "help", "comandos", "listar comandos", "menu"]:
+            await message.reply(embed=help_embed("start"), view=HelpView(message.author.id))
+            return    
 
     # (Opcional) se você quiser responder só em DM, descomente:
     # if not isinstance(message.channel, discord.DMChannel):

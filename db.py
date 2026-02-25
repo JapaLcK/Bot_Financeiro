@@ -11,6 +11,8 @@ import requests
 from utils_date import _tz, today_tz, billing_period_for_close_day
 from uuid import uuid4
 import calendar
+import secrets
+import hashlib
 
 
 
@@ -24,230 +26,202 @@ def get_conn():
 
 def init_db():
     ddl_statements = [
-        """
-        create table if not exists users (
-          id bigint primary key,
-          created_at timestamptz default now()
-        )
-        """,
-        """
-        create table if not exists accounts (
-          user_id bigint primary key references users(id) on delete cascade,
-          balance numeric not null default 0
-        )
-        """,
-        """
-        create table if not exists pockets (
-          id bigserial primary key,
-          user_id bigint not null references users(id) on delete cascade,
-          name text not null,
-          balance numeric not null default 0,
-          created_at timestamptz default now(),
-          unique(user_id, name)
-        )
-        """,
-        """
-        create table if not exists investments (
-          id bigserial primary key,
-          user_id bigint not null references users(id) on delete cascade,
-          name text not null,
-          balance numeric not null default 0,
-          rate numeric not null,
-          period text not null, -- daily|monthly|yearly
-          last_date date not null,
-          created_at timestamptz default now(),
-          unique(user_id, name)
-        )
-        """,
-        """
-        create table if not exists launches (
-          id bigserial primary key,
-          user_id bigint not null references users(id) on delete cascade,
-          tipo text not null,
-          valor numeric not null,
-          alvo text,
-          nota text,
-          criado_em timestamptz not null default now(),
-          efeitos jsonb
-        )
-        """,
-        """
-        create index if not exists idx_launches_user_time
-          on launches(user_id, criado_em desc)
-        """,
-        """
-        create table if not exists pending_actions (
-          user_id bigint primary key references users(id) on delete cascade,
-          action_type text not null,
-          payload jsonb not null,
-          created_at timestamptz not null default now(),
-          expires_at timestamptz not null
-        )
-        """,
-        """
-        create table if not exists user_category_rules (
-          id bigserial primary key,
-          user_id bigint not null references users(id) on delete cascade,
-          keyword text not null,
-          category text not null,
-          created_at timestamptz default now(),
-          unique (user_id, keyword)
-        )
-        """,
-        """
-        create table if not exists market_rates (
-          code text not null,
-          ref_date date not null,
-          value numeric not null,
-          created_at timestamptz default now(),
-          primary key (code, ref_date)
-        )
-        """,
+        # -----------------------------
+    # Core
+    # -----------------------------
+    """
+    create table if not exists users (
+      id bigint primary key,
+      created_at timestamptz default now(),
+      default_card_id bigint,
+      reminders_enabled boolean not null default false,
+      reminders_days_before int not null default 3
+    )
+    """,
+    """
+    create table if not exists accounts (
+      user_id bigint primary key references users(id) on delete cascade,
+      balance numeric not null default 0
+    )
+    """,
+    """
+    create table if not exists pockets (
+      id bigserial primary key,
+      user_id bigint not null references users(id) on delete cascade,
+      name text not null,
+      balance numeric not null default 0,
+      created_at timestamptz default now(),
+      unique(user_id, name)
+    )
+    """,
+    """
+    create table if not exists investments (
+      id bigserial primary key,
+      user_id bigint not null references users(id) on delete cascade,
+      name text not null,
+      balance numeric not null default 0,
+      rate numeric not null,
+      period text not null, -- daily|monthly|yearly
+      last_date date not null,
+      created_at timestamptz default now(),
+      unique(user_id, name)
+    )
+    """,
+    """
+    create table if not exists launches (
+      id bigserial primary key,
+      user_id bigint not null references users(id) on delete cascade,
+      tipo text not null,
+      valor numeric not null,
+      alvo text,
+      nota text,
+      categoria text,
+      criado_em timestamptz not null default now(),
+      efeitos jsonb,
 
-        """ 
-        create table if not exists credit_cards (
-        id bigserial primary key,
-        user_id bigint not null references users(id) on delete cascade,
-        name text not null,
-        closing_day int not null,  -- 1..28
-        due_day int not null,      -- 1..28
-        created_at timestamptz default now(),
-        unique(user_id, name)
-        )
-        """,
+      -- OFX fields
+      source text not null default 'manual',
+      external_id text,
+      posted_at date,
+      currency text,
+      imported_at timestamptz
+    )
+    """,
+    """
+    create index if not exists idx_launches_user_time
+      on launches(user_id, criado_em desc)
+    """,
+    """
+    -- garante dedupe: (user_id, source, external_id)
+    create unique index if not exists uq_launches_user_source_external
+      on launches(user_id, source, external_id)
+    """,
+    """
+    create table if not exists pending_actions (
+      user_id bigint primary key references users(id) on delete cascade,
+      action_type text not null,
+      payload jsonb not null,
+      created_at timestamptz not null default now(),
+      expires_at timestamptz not null
+    )
+    """,
+    """
+    create table if not exists user_category_rules (
+      id bigserial primary key,
+      user_id bigint not null references users(id) on delete cascade,
+      keyword text not null,
+      category text not null,
+      created_at timestamptz default now(),
+      unique (user_id, keyword)
+    )
+    """,
+    """
+    create table if not exists market_rates (
+      code text not null,
+      ref_date date not null,
+      value numeric not null,
+      created_at timestamptz default now(),
+      primary key (code, ref_date)
+    )
+    """,
+
+    # -----------------------------
+    # Credit cards
+    # -----------------------------
+    """
+    create table if not exists credit_cards (
+      id bigserial primary key,
+      user_id bigint not null references users(id) on delete cascade,
+      name text not null,
+      closing_day int not null check (closing_day between 1 and 28),
+      due_day int not null check (due_day between 1 and 28),
+      created_at timestamptz default now(),
+      unique(user_id, name)
+    )
+    """,
+    """
+    create table if not exists credit_bills (
+      id bigserial primary key,
+      card_id bigint not null references credit_cards(id) on delete cascade,
+      period_start date not null,
+      period_end date not null,
+      status text not null default 'open', -- open | closed | paid
+      total numeric not null default 0,
+      paid_amount numeric not null default 0,
+      paid_at timestamptz,
+      closed_at timestamptz,
+      created_at timestamptz default now(),
+      unique(card_id, period_start, period_end)
+    )
+    """,
+    """
+    create table if not exists credit_transactions (
+      id bigserial primary key,
+      bill_id bigint not null references credit_bills(id) on delete cascade,
+      user_id bigint not null references users(id) on delete cascade,
+      card_id bigint not null references credit_cards(id) on delete cascade,
+      tipo text not null default 'credito', -- credito | estorno
+      valor numeric not null,
+      categoria text,
+      nota text,
+      purchased_at date not null,
+      created_at timestamptz default now(),
+      group_id uuid,
+      installment_no int,
+      installments_total int,
+      is_refund boolean not null default false
+    )
+    """,
+    """
+    create index if not exists idx_credit_tx_user_date
+      on credit_transactions(user_id, purchased_at desc)
+    """,
+
+    # -----------------------------
+    # OFX import log (auditoria)
+    # -----------------------------
+    """
+    create table if not exists ofx_imports (
+      id bigserial primary key,
+      user_id bigint not null references users(id) on delete cascade,
+      file_hash text not null,
+      bank_id text,
+      acct_id text,
+      acct_type text,
+      dt_start date,
+      dt_end date,
+      total_transactions int not null,
+      inserted_count int not null default 0,
+      duplicate_count int not null default 0,
+      imported_at timestamptz not null default now(),
+      unique(user_id, file_hash)
+    )
+    """,
+
+    # -----------------------------
+    # Identity link (Discord/WhatsApp)
+    # -----------------------------
+    """
+    create table if not exists user_identities (
+      provider text not null,
+      external_id text not null,
+      user_id bigint not null references users(id) on delete cascade,
+      created_at timestamptz not null default now(),
+      primary key (provider, external_id)
+    )
+    """,
+    """
+    create table if not exists link_codes (
+      code text primary key,
+      user_id bigint not null references users(id) on delete cascade,
+      expires_at timestamptz not null,
+      created_at timestamptz not null default now()
+    )
+    """,
+    """
+    create index if not exists idx_link_codes_expires on link_codes (expires_at)
+    """,
         
-        """ 
-        create table if not exists credit_bills (
-        id bigserial primary key,
-        card_id bigint not null references credit_cards(id) on delete cascade,
-        period_start date not null,
-        period_end date not null,
-        status text not null default 'open', -- open|closed|paid
-        total numeric not null default 0,
-        paid_at timestamptz,
-        created_at timestamptz default now(),
-        unique(card_id, period_start, period_end)
-        );
-        """,
-        
-        """ 
-        create table if not exists credit_transactions (
-        id bigserial primary key,
-        bill_id bigint not null references credit_bills(id) on delete cascade,
-        user_id bigint not null references users(id) on delete cascade,
-        card_id bigint not null references credit_cards(id) on delete cascade,
-        tipo text not null default 'credito', -- ou 'estorno'
-        valor numeric not null,
-        categoria text,
-        nota text,
-        purchased_at date not null,
-        created_at timestamptz default now()
-        );
-        """,
-        
-        """ create index if not exists idx_credit_tx_user_date on credit_transactions(user_id, purchased_at desc); """,
-
-        """
-        create table if not exists credit_cards (
-        id bigserial primary key,
-        user_id bigint not null references users(id) on delete cascade,
-        name text not null,
-        closing_day int not null check (closing_day between 1 and 28),
-        due_day int not null check (due_day between 1 and 28),
-        created_at timestamptz default now(),
-        unique(user_id, name)
-        );
-        """,
-
-        """ 
-        create table if not exists credit_bills (
-        id bigserial primary key,
-        card_id bigint not null references credit_cards(id) on delete cascade,
-        period_start date not null,
-        period_end date not null,
-        status text not null default 'open', -- open | closed | paid
-        total numeric not null default 0,
-        paid_at timestamptz,
-        created_at timestamptz default now(),
-        unique(card_id, period_start, period_end)
-        );
-        """,
-
-        """
-        create table if not exists credit_transactions (
-        id bigserial primary key,
-        bill_id bigint not null references credit_bills(id) on delete cascade,
-        user_id bigint not null references users(id) on delete cascade,
-        card_id bigint not null references credit_cards(id) on delete cascade,
-        tipo text not null default 'credito', -- credito | estorno
-        valor numeric not null,
-        categoria text,
-        nota text,
-        purchased_at date not null,
-        created_at timestamptz default now()
-        );
-        """,
-
-        """ 
-        create index if not exists idx_credit_tx_user_date
-        on credit_transactions(user_id, purchased_at desc);
-        """,
-
-                """
-        -- OFX import support (idempotente via FITID)
-        alter table launches add column if not exists source text not null default 'manual';
-        alter table launches add column if not exists external_id text;      -- FITID
-        alter table launches add column if not exists posted_at date;        -- DTPOSTED
-        alter table launches add column if not exists currency text;         -- BRL
-        alter table launches add column if not exists imported_at timestamptz;
-        """,
-
-        """
-        -- garante dedupe: (user_id, source, external_id)
-        create unique index if not exists uq_launches_user_source_external
-          on launches(user_id, source, external_id);
-        """,
-
-        """
-        -- log de import (pra pular reimport do mesmo arquivo e ter auditoria)
-        create table if not exists ofx_imports (
-          id bigserial primary key,
-          user_id bigint not null references users(id) on delete cascade,
-          file_hash text not null,
-          bank_id text,
-          acct_id text,
-          acct_type text,
-          dt_start date,
-          dt_end date,
-          total_transactions int not null,
-          inserted_count int not null default 0,
-          duplicate_count int not null default 0,
-          imported_at timestamptz not null default now(),
-          unique(user_id, file_hash)
-        );
-        """,
-
-        """
-        alter table users add column if not exists default_card_id bigint;
-        """,
-
-        """
-        alter table credit_bills add column if not exists paid_amount numeric not null default 0;
-        alter table credit_bills add column if not exists closed_at timestamptz;
-        """,
-
-        """
-        alter table credit_transactions add column if not exists group_id uuid;
-        alter table credit_transactions add column if not exists installment_no int;
-        alter table credit_transactions add column if not exists installments_total int;
-        alter table credit_transactions add column if not exists is_refund boolean not null default false;
-        """,
-
-        """
-        alter table users add column if not exists default_card_id bigint;
-        alter table users add column if not exists reminders_enabled boolean not null default false;
-        alter table users add column if not exists reminders_days_before int not null default 3;    
-        """,
 ]
 
     with get_conn() as conn:
@@ -263,14 +237,212 @@ def init_db():
         conn.commit()
     print("[init_db] OK")
 
+def ensure_user_tx(cur, user_id: int):
+    cur.execute("insert into users(id) values (%s) on conflict do nothing", (user_id,))
+    cur.execute("insert into accounts(user_id, balance) values (%s, 0) on conflict do nothing", (user_id,))
 
 def ensure_user(user_id: int):
-    """Garante que user e account existam."""
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("insert into users(id) values (%s) on conflict do nothing", (user_id,))
-            cur.execute("insert into accounts(user_id, balance) values (%s, 0) on conflict do nothing", (user_id,))
+            ensure_user_tx(cur, user_id)
         conn.commit()
+
+def merge_users(from_user_id: int, to_user_id: int) -> None:
+    """
+    Move TODOS os dados de from_user_id -> to_user_id, e atualiza identidades.
+    Nunca deve "apontar" uma identidade pro user vazio sem antes migrar.
+    """
+    if from_user_id == to_user_id:
+        return
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # garante que os dois users existem
+            ensure_user_tx(cur, to_user_id)
+            ensure_user_tx(cur, from_user_id)
+
+            # 1) launches
+            cur.execute(
+                "update launches set user_id=%s where user_id=%s",
+                (to_user_id, from_user_id),
+            )
+
+            # 2) accounts: se sua accounts é 1:1 por user, normalmente você quer somar balance
+            # Se você prefere "substituir", me diga, mas somar é o mais seguro.
+            cur.execute("select balance from accounts where user_id=%s", (to_user_id,))
+            row_to = cur.fetchone()
+            bal_to = float(row_to["balance"]) if row_to else 0.0
+
+            cur.execute("select balance from accounts where user_id=%s", (from_user_id,))
+            row_from = cur.fetchone()
+            bal_from = float(row_from["balance"]) if row_from else 0.0
+
+            # soma saldos (evita perder)
+            new_bal = bal_to + bal_from
+            cur.execute(
+                "update accounts set balance=%s where user_id=%s",
+                (new_bal, to_user_id),
+            )
+
+            # se existir a linha do from, você pode remover (evita duplicidade)
+            cur.execute("delete from accounts where user_id=%s", (from_user_id,))
+
+            # 3) identidades: tudo vira to_user_id
+            cur.execute(
+                "update user_identities set user_id=%s where user_id=%s",
+                (to_user_id, from_user_id),
+            )
+
+            # 4) link_codes: se tiver códigos pendentes pro user antigo, redireciona também
+            cur.execute(
+                "update link_codes set user_id=%s where user_id=%s",
+                (to_user_id, from_user_id),
+            )
+
+            # === SE VOCÊ TIVER OUTRAS TABELAS COM user_id, ADICIONA AQUI ===
+            # cur.execute("update pockets set user_id=%s where user_id=%s", (to_user_id, from_user_id))
+            # cur.execute("update investments set user_id=%s where user_id=%s", (to_user_id, from_user_id))
+            # cur.execute("update credit_cards set user_id=%s where user_id=%s", (to_user_id, from_user_id))
+            # cur.execute("update credit_purchases set user_id=%s where user_id=%s", (to_user_id, from_user_id))
+            # etc...
+
+            # 5) opcional: remover user "from" se ficou vazio (não é obrigatório)
+            # cur.execute("delete from users where id=%s", (from_user_id,))
+
+        conn.commit()
+
+def choose_primary_user(a_user_id: int, b_user_id: int) -> tuple[int, int]:
+    """
+    Retorna (primary, secondary) baseado em score.
+    Primary = mais dados.
+    """
+    if a_user_id == b_user_id:
+        return a_user_id, b_user_id
+
+    sa = user_score(a_user_id)
+    sb = user_score(b_user_id)
+
+    if sa >= sb:
+        return a_user_id, b_user_id
+    return b_user_id, a_user_id
+
+
+# analisa qual dados será o primario
+def user_score(user_id: int) -> int:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) as n from launches where user_id=%s", (user_id,))
+        n_launches = cur.fetchone()["n"]
+        # pode somar outras coisas depois (pockets/investments)
+        return int(n_launches)
+
+# cria usuario unico entre discord e whatsapp
+def get_or_create_canonical_user(provider: str, external_id: str) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select user_id from user_identities where provider=%s and external_id=%s",
+                (provider, external_id),
+            )
+            row = cur.fetchone()
+            if row:
+                return int(row["user_id"])
+
+            # tenta até achar um id livre
+            base = f"{provider}:{external_id}".encode("utf-8")
+            for i in range(20):
+                digest = hashlib.sha256(base + f":{i}".encode("utf-8")).digest()
+                new_id = int.from_bytes(digest[:8], "big") % 2_000_000_000 + 1
+
+                # garante user/account na MESMA transação
+                ensure_user_tx(cur, new_id)
+
+                # tenta inserir identidade; se colidir por (provider, external_id), ok
+                # se colidir por id já usado por outro, isso aqui ainda funciona porque
+                # users.id pode existir (ok), o que importa é inserir a identidade.
+                try:
+                    cur.execute(
+                        "insert into user_identities(provider, external_id, user_id) values (%s,%s,%s)",
+                        (provider, external_id, new_id),
+                    )
+                    conn.commit()
+                    return new_id
+                except Exception:
+                    conn.rollback()
+                    # tenta outro i
+                    with get_conn() as conn2:
+                        with conn2.cursor() as cur2:
+                            # recheck se alguém criou nesse meio tempo
+                            cur2.execute(
+                                "select user_id from user_identities where provider=%s and external_id=%s",
+                                (provider, external_id),
+                            )
+                            r2 = cur2.fetchone()
+                            if r2:
+                                return int(r2["user_id"])
+                    continue
+
+            raise RuntimeError("Falha ao criar user_id canônico (colisão repetida)")
+        
+# cria link para configurar ambas plataformas no mesmo usuario
+def create_link_code(user_id: int, minutes_valid: int = 10) -> str:
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes_valid)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "insert into link_codes(code, user_id, expires_at) values (%s,%s,%s) "
+                "on conflict (code) do update set user_id=excluded.user_id, expires_at=excluded.expires_at",
+                (code, user_id, expires_at),
+            )
+        conn.commit()
+    return code
+
+# funcao para confirmar link/codigo
+def consume_link_code(code: str) -> int | None:
+    now = datetime.now(timezone.utc)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select user_id, expires_at from link_codes where code=%s", (code,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            if row["expires_at"] < now:
+                cur.execute("delete from link_codes where code=%s", (code,))
+                return None
+
+            user_id = int(row["user_id"])
+            cur.execute("delete from link_codes where code=%s", (code,))
+            return user_id
+
+# junta os dois usuarios em um unico id 
+def bind_identity(provider: str, external_id: str, user_id: int) -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "insert into user_identities(provider, external_id, user_id) values (%s,%s,%s) "
+                "on conflict (provider, external_id) do update set user_id=excluded.user_id",
+                (provider, external_id, user_id),
+            )
+        conn.commit()
+
+def link_platform_identity(provider: str, external_id: str, target_user_id: int) -> int:
+    """
+    Liga (provider, external_id) ao target_user_id.
+    Se o provider já estava apontando para outro user, faz merge (sem perder dados).
+    Retorna o user_id final (primary).
+    """
+    current_user_id = get_or_create_canonical_user(provider, external_id)
+
+    if current_user_id == target_user_id:
+        # já está linkado
+        return current_user_id
+
+    primary, secondary = choose_primary_user(current_user_id, target_user_id)
+    merge_users(secondary, primary)
+
+    # garante que a identidade atual aponta pro primary
+    bind_identity(provider, external_id, primary)
+    return primary
 
 def get_balance(user_id: int) -> Decimal:
     with get_conn() as conn:
@@ -297,7 +469,8 @@ def add_launch_and_update_balance(
     valor: float,
     alvo: str | None,
     nota: str | None,
-    criado_em: datetime | None = None,   # 👈 novo
+    categoria: str | None = None,        # 👈 NOVO
+    criado_em: datetime | None = None,
 ):
     """
     Lança registro em launches e atualiza saldo em accounts na mesma transação.
@@ -315,27 +488,27 @@ def add_launch_and_update_balance(
     else:
         raise ValueError(f"tipo inválido: {tipo}")
 
-    # 👇 se o parser não mandou data, usa agora
     if criado_em is None:
         criado_em = datetime.now(_tz())
 
+    # normaliza categoria
+    cat = (categoria or "").strip() or "outros"
+
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # atualiza saldo
             cur.execute(
                 "update accounts set balance = balance + %s where user_id=%s returning balance",
                 (delta, user_id),
             )
             new_bal = cur.fetchone()["balance"]
 
-            # grava lançamento
             cur.execute(
                 """
-                insert into launches(user_id, tipo, valor, alvo, nota, criado_em, efeitos)
-                values (%s,%s,%s,%s,%s,%s,%s)
+                insert into launches(user_id, tipo, valor, alvo, nota, categoria, criado_em, efeitos)
+                values (%s,%s,%s,%s,%s,%s,%s,%s)
                 returning id
                 """,
-                (user_id, tipo, v, alvo, nota, criado_em, Json({"delta_conta": float(delta)})),
+                (user_id, tipo, v, alvo, nota, cat, criado_em, Json({"delta_conta": float(delta)})),
             )
             launch_id = cur.fetchone()["id"]
 
@@ -378,8 +551,6 @@ def import_ofx_launches_bulk(
       - insere launch com (source='ofx', external_id=FITID)
       - ON CONFLICT DO NOTHING evita duplicata
       - saldo só é ajustado SOMENTE pelas inseridas de verdade
-
-    Retorna dict com inserted, duplicates, total, new_balance.
     """
     ensure_user(user_id)
 
@@ -406,38 +577,77 @@ def import_ofx_launches_bulk(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            for r in launches_rows:
-                # tenta inserir primeiro (idempotente via unique index)
-                cur.execute(
-                    """
-                    insert into launches(
-                        user_id, tipo, valor, alvo, nota, criado_em, efeitos,
-                        source, external_id, posted_at, currency, imported_at
+            # 🔥 pipeline (psycopg3): reduz round-trips e acelera MUITO
+            try:
+                pipe_ctx = conn.pipeline()
+            except Exception:
+                pipe_ctx = None
+
+            if pipe_ctx:
+                with pipe_ctx:
+                    for r in launches_rows:
+                        cur.execute(
+                            """
+                            insert into launches(
+                                user_id, tipo, valor, categoria, alvo, nota, criado_em, efeitos,
+                                source, external_id, posted_at, currency, imported_at
+                            )
+                            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
+                            on conflict (user_id, source, external_id) do nothing
+                            returning id
+                            """,
+                            (
+                                user_id,
+                                r["tipo"],
+                                r["valor"],
+                                r.get("categoria"),   # ✅ agora vai pra coluna categoria
+                                None,                 # ✅ alvo fica vazio pro OFX (alvo é pra caixinha/investimento etc)
+                                r.get("nota"),
+                                r["criado_em"],
+                                Json({"delta_conta": float(r["delta"]), "ofx": r.get("ofx_meta", {})}),
+                                "ofx",
+                                r["external_id"],
+                                r.get("posted_at"),
+                                r.get("currency", "BRL"),
+                            ),
+                        )
+                        # rowcount=1 se inseriu, 0 se foi conflito
+                        if (cur.rowcount or 0) == 1:
+                            inserted += 1
+                            delta_total += r["delta"]
+                        else:
+                            duplicates += 1
+            else:
+                # fallback (se pipeline não existir)
+                for r in launches_rows:
+                    cur.execute(
+                        """
+                        insert into launches(
+                            user_id, tipo, valor, alvo, nota, criado_em, efeitos,
+                            source, external_id, posted_at, currency, imported_at
+                        )
+                        values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
+                        on conflict (user_id, source, external_id) do nothing
+                        """,
+                        (
+                            user_id,
+                            r["tipo"],
+                            r["valor"],
+                            r.get("categoria"),
+                            r.get("nota"),
+                            r["criado_em"],
+                            Json({"delta_conta": float(r["delta"]), "ofx": r.get("ofx_meta", {})}),
+                            "ofx",
+                            r["external_id"],
+                            r.get("posted_at"),
+                            r.get("currency", "BRL"),
+                        ),
                     )
-                    values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
-                    on conflict (user_id, source, external_id) do nothing
-                    returning id
-                    """,
-                    (
-                        user_id,
-                        r["tipo"],
-                        r["valor"],
-                        r.get("categoria"),
-                        r.get("nota"),
-                        r["criado_em"],
-                        Json({"delta_conta": float(r["delta"]), "ofx": r.get("ofx_meta", {})}),
-                        "ofx",
-                        r["external_id"],
-                        r.get("posted_at"),
-                        r.get("currency", "BRL"),
-                    ),
-                )
-                row = cur.fetchone()
-                if row:
-                    inserted += 1
-                    delta_total += r["delta"]
-                else:
-                    duplicates += 1
+                    if (cur.rowcount or 0) == 1:
+                        inserted += 1
+                        delta_total += r["delta"]
+                    else:
+                        duplicates += 1
 
             # atualiza saldo UMA vez com o delta total inserido
             if inserted:
@@ -478,13 +688,36 @@ def import_ofx_launches_bulk(
         "new_balance": new_bal,
     }
 
+def update_launch_categories_bulk(user_id: int, items: list[tuple[int, str]]) -> int:
+    """
+    items: [(launch_id, categoria_norm), ...]
+    Retorna quantos updates foram aplicados.
+    """
+    ensure_user(user_id)
+    if not items:
+        return 0
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.executemany(
+                """
+                update launches
+                   set categoria=%s
+                 where user_id=%s and id=%s
+                """,
+                [(cat, user_id, lid) for (lid, cat) in items],
+            )
+            n = cur.rowcount or 0
+        conn.commit()
+    return n
+
 def list_launches(user_id: int, limit: int = 10):
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select id, tipo, valor, alvo, nota, criado_em
+                select id, tipo, valor, alvo, nota, categoria, source, criado_em
                 from launches
                 where user_id=%s
                 order by criado_em desc, id desc
@@ -493,6 +726,29 @@ def list_launches(user_id: int, limit: int = 10):
                 (user_id, limit),
             )
             return cur.fetchall()
+        
+def update_launch_category(user_id: int, launch_id: int, categoria: str | None) -> bool:
+    """Atualiza a categoria de um lançamento (launches).
+
+    Retorna True se atualizou (rowcount==1), False caso contrário.
+    """
+    ensure_user(user_id)
+    cat = (categoria or "").strip() or None
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update launches
+                   set categoria=%s
+                 where user_id=%s and id=%s
+                """,
+                (cat, user_id, launch_id),
+            )
+            changed = (cur.rowcount or 0) == 1
+        conn.commit()
+
+    return changed
         
 def list_pockets(user_id: int):
     ensure_user(user_id)
@@ -1883,11 +2139,11 @@ def get_launches_by_period(user_id: int, start_date: date, end_date: date):
     end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
 
     sql = """
-        select id, tipo, valor, alvo, nota, criado_em
+        select id, tipo, valor, alvo, nota, categoria, source, criado_em
         from launches
         where user_id=%s
-          and criado_em >= %s
-          and criado_em < %s
+        and criado_em >= %s
+        and criado_em < %s
         order by criado_em asc, id asc
     """
 
@@ -1974,11 +2230,88 @@ def list_category_rules(user_id: int) -> list[tuple[str, str]]:
             rows = cur.fetchall()
 
     return [(r["keyword"], r["category"]) for r in rows]
+
+#adiciona uma regra de categoria
+def add_category_rule(user_id: int, keyword: str, category: str) -> None:
+    ensure_user(user_id)
+    keyword = (keyword or "").strip()
+    category = (category or "").strip()
+
+    if not keyword:
+        raise ValueError("keyword vazio")
+    if not category:
+        raise ValueError("category vazia")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # evita duplicar a mesma regra
+            cur.execute(
+                """
+                INSERT INTO user_category_rules (user_id, keyword, category)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id, keyword) DO UPDATE
+                SET category = EXCLUDED.category
+                """,
+                (user_id, keyword, category),
+            )
+        conn.commit()
+
+# deleta as categorias criadas
+def delete_category_rule(user_id: int, keyword: str) -> int:
+    ensure_user(user_id)
+    keyword = (keyword or "").strip()
+    if not keyword:
+        return 0
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM user_category_rules
+                WHERE user_id=%s AND keyword=%s
+                """,
+                (user_id, keyword),
+            )
+            n = cur.rowcount
+        conn.commit()
+    return n
+
+# lista as categorias
+def list_categories(user_id: int) -> list[str]:
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT category
+                FROM user_category_rules
+                WHERE user_id=%s
+                ORDER BY category
+                """,
+                (user_id,),
+            )
+            rows = cur.fetchall()
+
+    out = []
+    for r in rows:
+        if isinstance(r, dict):
+            out.append(r["category"])
+        else:
+            out.append(r[0])
+    return out
         
 # Busca uma categoria memorizada pelo user_id com base no texto (keyword contida no texto)
-def get_memorized_category(user_id: int, text: str) -> str | None:
-    text = (text or "").lower()
-    if not text:
+def get_memorized_category(user_id: int, memo: str) -> str | None:
+    """
+    Retorna a categoria memorizada (user_category_rules) se alguma keyword
+    bater com o texto (memo). Dá match por "contains_word" OU substring.
+    """
+    from utils_text import normalize_text, contains_word  # import local pra evitar loop
+
+    ensure_user(user_id)
+
+    memo_norm = normalize_text(memo or "")
+    if not memo_norm:
         return None
 
     with get_conn() as conn:
@@ -1994,12 +2327,22 @@ def get_memorized_category(user_id: int, text: str) -> str | None:
             )
             rows = cur.fetchall()
 
-    for kw, cat in rows:
-        if kw and kw.lower() in text:
-            return cat
+    for r in rows:
+        if isinstance(r, dict):
+            keyword = r.get("keyword")
+            category = r.get("category")
+        else:
+            keyword, category = r[0], r[1]
+
+        kw_norm = normalize_text(keyword or "")
+        if not kw_norm:
+            continue
+
+        # ✅ direção correta: keyword dentro do memo
+        if contains_word(memo_norm, kw_norm) or (kw_norm in memo_norm):
+            return (category or "").strip() or None
+
     return None
-
-
 # Salva/atualiza uma regra memorizada (keyword -> category) para um usuário
 def upsert_category_rule(user_id: int, keyword: str, category: str) -> None:
     keyword = (keyword or "").strip().lower()
@@ -2019,6 +2362,33 @@ def upsert_category_rule(user_id: int, keyword: str, category: str) -> None:
 
     conn.commit()
     cur.close()
+
+def list_user_category_rules(user_id: int) -> list[tuple[str, str]]:
+    """
+    Lista regras (keyword -> category) do usuário uma vez só.
+    Retorna ordenado por keyword maior primeiro (melhor match).
+    """
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT keyword, category
+                FROM user_category_rules
+                WHERE user_id = %s
+                ORDER BY LENGTH(keyword) DESC
+                """,
+                (user_id,),
+            )
+            rows = cur.fetchall() or []
+
+    out: list[tuple[str, str]] = []
+    for r in rows:
+        if isinstance(r, dict):
+            out.append((r.get("keyword") or "", r.get("category") or ""))
+        else:
+            out.append((r[0] or "", r[1] or ""))
+    return out
 
 def create_card(user_id: int, name: str, closing_day: int, due_day: int) -> int:
     ensure_user(user_id)

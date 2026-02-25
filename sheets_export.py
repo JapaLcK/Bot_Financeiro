@@ -2,8 +2,9 @@ import os, json
 from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
-from db import get_balance
 from decimal import Decimal
+from db import get_balance, list_user_category_rules, update_launch_category
+from utils_text import normalize_text, contains_word, LOCAL_RULES
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -96,8 +97,9 @@ def _is_monetary_row(r) -> bool:
 # Mantido temporariamente por segurança durante a migração.
 # Após migração, conferir e remover.
 # Exporta lançamentos monetários para a aba do mês e atualiza cards + donut no template do Sheets.
-def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: datetime, worksheet_name: str | None = None):
 
+def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: datetime, worksheet_name: str | None = None):
+    raise RuntimeError("DEPRECATED: use export_rows_to_dados() (não cria aba mensal).")
     sh = _open_sheet()
 
     # Garante que o período esteja dentro de um único mês
@@ -245,21 +247,78 @@ def ensure_ws(sh, title: str, rows: int = 2000, cols: int = 12):
 
 def export_rows_to_dados(user_id: int, rows):
     """
-    Exporta todas as movimentações monetárias para a aba "DADOS".
-    Não cria aba do mês. Não mexe em cards/gráficos do dashboard.
-    Estrutura da aba DADOS (A:H):
-      A Data | B Tipo | C Categoria | D Descrição | E Valor | F Fonte | G Nome | H Mês (YYYY-MM)
+    Exporta movimentações para aba DADOS (A:H).
+    Otimizações:
+      - NÃO limpa 99k linhas
+      - Escreve em chunks
+      - Apaga só o excedente da exportação anterior
+      - Reclassifica OFX "outros" usando regras
+      - Atualiza DB em lote (1 commit)
     """
+    from gspread.utils import rowcol_to_a1
+
     sh = _open_sheet()
     ws = ensure_ws(sh, "DADOS", rows=5000, cols=12)
 
+    # Guardamos o "tamanho anterior" em LISTAS!Z1 (pode trocar se quiser)
+    ws_meta = ensure_ws(sh, "LISTAS", rows=200, cols=30)
+    META_CELL = "Z1"  # guarda quantas linhas de dados (sem header) foram exportadas na última vez
+
     header = ["Data", "Tipo", "Categoria", "Descrição", "Valor", "Fonte", "Nome", "Mês"]
 
-    # Limpa tudo (mantém header)
-    ws.batch_clear(["A1:Z99999"])
+    # Lê quantas linhas tinham sido exportadas da última vez (sem header)
+    prev_n = 0
+    try:
+        v = ws_meta.acell(META_CELL).value
+        prev_n = int(v) if v and str(v).strip().isdigit() else 0
+    except Exception:
+        prev_n = 0
+
+    # Escreve header (barato)
     ws.update("A1", [header], value_input_option="USER_ENTERED")
 
-    values = []
+    # --- regras 1x ---
+    rules = list_user_category_rules(user_id) or []
+    rules_norm: list[tuple[str, str]] = []
+    for kw, cat in rules:
+        kw_n = normalize_text(kw or "")
+        cat_n = normalize_text(cat or "")
+        if kw_n and cat_n:
+            rules_norm.append((kw_n, cat_n))
+
+    RECLASSIFY_SOURCES = {"ofx"}
+
+    def _infer_category_fast(text_base: str) -> str:
+        t = normalize_text(text_base or "")
+        if not t:
+            return "outros"
+
+        for kw_n, cat_n in rules_norm:
+            try:
+                if contains_word(t, kw_n) or (kw_n in t):
+                    return cat_n
+            except Exception:
+                if kw_n in t:
+                    return cat_n
+
+        for keywords, cat2 in (LOCAL_RULES or []):
+            cat2_n = normalize_text(cat2 or "")
+            for kw in keywords:
+                kw_n = normalize_text(kw or "")
+                if not kw_n:
+                    continue
+                try:
+                    if contains_word(t, kw_n) or (kw_n in t):
+                        return cat2_n or "outros"
+                except Exception:
+                    if kw_n in t:
+                        return cat2_n or "outros"
+
+        return "outros"
+
+    values: list[list] = []
+    to_fix: list[tuple[int, str]] = []
+
     for r in rows:
         if not _is_monetary_row(r):
             continue
@@ -269,25 +328,85 @@ def export_rows_to_dados(user_id: int, rows):
             continue
 
         d = dt.date()
-        data_str = d.isoformat()          # YYYY-MM-DD
-        mes_str = f"{d.year:04d}-{d.month:02d}"  # YYYY-MM
+        data_str = d.isoformat()
+        mes_str = f"{d.year:04d}-{d.month:02d}"
 
         tipo = (r.get("tipo") or "").strip().lower()
+        fonte0 = (r.get("origem") or r.get("source") or "").strip().lower()
 
-        # No seu export atual você usa "alvo" como categoria.
-        # Se no futuro "alvo" for nome (ex: investimento/caixinha), você pode ajustar.
-        categoria = (r.get("alvo") or "").strip() or "Outros"
         descricao = (r.get("nota") or "").strip()
+        nome = (r.get("alvo") or "").strip()
 
+        cat0 = normalize_text((r.get("categoria") or "").strip()) or "outros"
+
+        if fonte0 in RECLASSIFY_SOURCES and cat0 == "outros":
+            base = descricao or nome or ""
+            new_cat = _infer_category_fast(base)
+            if new_cat and new_cat != "outros" and new_cat != cat0:
+                launch_id = r.get("id")
+                if launch_id is not None:
+                    try:
+                        to_fix.append((int(launch_id), new_cat))
+                        cat0 = new_cat
+                    except Exception:
+                        pass
+
+        categoria_sheet = "Outros" if cat0 == "outros" else cat0
         valor = float(r.get("valor") or 0)
-        fonte = (r.get("origem") or "").strip()  # ex: conta/cartao etc (se vier)
-        nome = ""  # reservado (ex: nome da caixinha/investimento/cartão)
+        fonte = (r.get("origem") or r.get("source") or "").strip()
 
-        values.append([data_str, tipo, categoria, descricao, _to_sheet_value(valor), fonte, nome, mes_str])
+        values.append([data_str, tipo, categoria_sheet, descricao, _to_sheet_value(valor), fonte, nome, mes_str])
 
-    if values:
-        ws.update("A2", values, value_input_option="USER_ENTERED")
+    # --- DB bulk update (1 commit) ---
+    if to_fix:
+        try:
+            from db import update_launch_categories_bulk
+            update_launch_categories_bulk(user_id, to_fix)
+        except Exception:
+            try:
+                from db import get_conn, ensure_user
+                ensure_user(user_id)
+                with get_conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.executemany(
+                            """
+                            update launches
+                               set categoria=%s
+                             where user_id=%s and id=%s
+                            """,
+                            [(cat, user_id, lid) for (lid, cat) in to_fix],
+                        )
+                    conn.commit()
+            except Exception:
+                pass
 
-    # link da aba DADOS
+    # --- escreve em chunks ---
+    n = len(values)
+    if n:
+        CHUNK = 800
+        start_row = 2
+        for i in range(0, n, CHUNK):
+            chunk = values[i:i + CHUNK]
+            r0 = start_row + i
+            cell = rowcol_to_a1(r0, 1)  # A{r0}
+            ws.update(cell, chunk, value_input_option="USER_ENTERED")
+
+    # --- apaga SOMENTE o excedente antigo ---
+    # Se antes exportou 3000 linhas e agora exportou 2500,
+    # apaga só A(2502):H(3001)
+    if prev_n > n:
+        try:
+            first_clear = n + 2            # +1 header, +1 base 1-indexed
+            last_clear = prev_n + 1        # header ocupa linha 1
+            ws.batch_clear([f"A{first_clear}:H{last_clear}"])
+        except Exception:
+            pass
+
+    # --- salva novo tamanho ---
+    try:
+        ws_meta.update(META_CELL, [[str(n)]], value_input_option="RAW")
+    except Exception:
+        pass
+
     _base, _tab = get_sheet_links(ws)
     return _tab

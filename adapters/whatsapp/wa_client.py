@@ -1,28 +1,94 @@
+# adapters/whatsapp/wa_client.py
 import os
+from typing import Optional, Dict, Any
+import httpx
 import requests
 
-WA_ACCESS_TOKEN = os.getenv("WA_ACCESS_TOKEN", "")
-WA_PHONE_NUMBER_ID = os.getenv("WA_PHONE_NUMBER_ID", "")
+WA_TOKEN = (os.getenv("WA_TOKEN") or "").strip()
+WA_PHONE_NUMBER_ID = (os.getenv("WA_PHONE_NUMBER_ID") or "").strip()
 
-GRAPH_BASE = "https://graph.facebook.com/v20.0"
+if not WA_TOKEN:
+    print("⚠️ WA_TOKEN vazio. Verifique o .env")
+if not WA_PHONE_NUMBER_ID:
+    print("⚠️ WA_PHONE_NUMBER_ID vazio. Verifique o .env")
 
 
-def send_text(to_phone: str, text: str) -> None:
-    if not WA_ACCESS_TOKEN or not WA_PHONE_NUMBER_ID:
-        raise RuntimeError("WA_ACCESS_TOKEN/WA_PHONE_NUMBER_ID não definidos.")
+def _env(*names: str, default: str = "") -> str:
+    for n in names:
+        v = os.getenv(n)
+        if v and v.strip():
+            return v.strip()
+    return default
 
-    url = f"{GRAPH_BASE}/{WA_PHONE_NUMBER_ID}/messages"
+
+def _wa_config(
+    access_token: Optional[str] = None,
+    phone_number_id: Optional[str] = None,
+    graph_version: Optional[str] = None,
+):
+    token = (access_token or _env("WA_ACCESS_TOKEN", "WA_TOKEN"))
+    pnid = (phone_number_id or _env("WA_PHONE_NUMBER_ID"))
+    ver = (graph_version or _env("WA_GRAPH_VERSION", default="v21.0"))
+
+    if not token:
+        raise RuntimeError("WA token vazio. Defina WA_TOKEN (ou WA_ACCESS_TOKEN) no .env")
+    if not pnid:
+        raise RuntimeError("WA phone_number_id vazio. Defina WA_PHONE_NUMBER_ID no .env")
+
+    base = f"https://graph.facebook.com/{ver}"
+    return token, pnid, base
+
+
+def send_text(to: str, body: str):
+    url = f"https://graph.facebook.com/v21.0/{WA_PHONE_NUMBER_ID}/messages"
     headers = {
-        "Authorization": f"Bearer {WA_ACCESS_TOKEN}",
+        "Authorization": f"Bearer {WA_TOKEN}",
         "Content-Type": "application/json",
     }
     payload = {
         "messaging_product": "whatsapp",
-        "to": to_phone,
+        "to": to,
         "type": "text",
-        "text": {"body": text},
+        "text": {"body": body},
     }
 
     r = requests.post(url, headers=headers, json=payload, timeout=20)
-    if r.status_code >= 300:
-        raise RuntimeError(f"WA send failed {r.status_code}: {r.text}")
+
+    if r.status_code == 401:
+        print("SEND_ERROR: token inválido/expirado")
+        print(r.text)
+        return None
+
+    if r.status_code >= 400:
+        raise RuntimeError(f"WA send_text failed {r.status_code}: {r.text}")
+
+    return r.json()
+
+def download_media(
+    media_id: str,
+    *,
+    access_token: Optional[str] = None,
+    graph_version: Optional[str] = None,
+    timeout: int = 40,
+) -> bytes:
+    """
+    Baixa mídia do WhatsApp Cloud API:
+      1) GET /{media_id} -> pega "url"
+      2) GET url com Authorization -> bytes
+    """
+    token, _pnid, base = _wa_config(access_token=access_token, graph_version=graph_version)
+    headers = {"Authorization": f"Bearer {token}"}
+    
+
+    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+        meta = client.get(f"{base}/{media_id}", headers=headers)
+        meta.raise_for_status()
+        meta_json = meta.json()
+
+        url = meta_json.get("url")
+        if not url:
+            raise RuntimeError(f"Sem 'url' no metadata do media_id={media_id}: {meta_json}")
+
+        blob = client.get(url, headers=headers)
+        blob.raise_for_status()
+        return blob.content

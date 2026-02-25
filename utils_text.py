@@ -31,6 +31,7 @@ LOCAL_RULES = [
     (["uber", "99", "taxi", "metro", "onibus", "gasolina", "combustivel"], "transporte"),
     (["academia", "remedio", "farmacia", "dentista", "consulta"], "saúde"),
     (["netflix", "spotify", "youtube", "prime video", "disney"], "assinaturas"),
+    (["compra de ações", "compra de acoes", "compra de ação", "compra de acao", "ações", "acoes", "ação", "acao", "fii", "fiis", "rdb", "cdb", "lci", "lca", "tesouro", "selic", "ipca", "aplicação", "aplicacao", "resgate"], "investimentos")
 ]
 
 STOPWORDS_PT = {

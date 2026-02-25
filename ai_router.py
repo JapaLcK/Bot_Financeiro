@@ -5,6 +5,9 @@ from openai import OpenAI
 import re
 import unicodedata
 import db
+import hashlib
+from db import list_category_rules
+from core.services.category_service import infer_category
 
 # aliases para não precisar mudar o resto do arquivo
 ensure_user = db.ensure_user
@@ -28,7 +31,7 @@ set_pending_action = db.set_pending_action
 
 client = OpenAI()
 
-MODEL = os.getenv("OPENAI_MODEL", "gpt-5.2")  # você pode mudar depois no Railway
+MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 # Tools que a IA pode chamar
 TOOLS_NESTED = [
@@ -84,8 +87,8 @@ TOOLS_NESTED = [
     },
 
     # ações NÃO destrutivas
-    {
-        "type": "function",
+   {
+    "type": "function",
         "function": {
             "name": "add_launch",
             "description": "Cria um lançamento (receita/despesa) e atualiza o saldo da conta.",
@@ -94,8 +97,9 @@ TOOLS_NESTED = [
                 "properties": {
                     "tipo": {"type": "string", "description": "ex: despesa, receita"},
                     "valor": {"type": "number"},
-                    "alvo": {"type": "string"},
-                    "nota": {"type": "string"},
+                    "alvo": {"type": "string", "description": "Destinatário/estabelecimento (ex: Uber, iFood, Spotify)."},
+                    "nota": {"type": "string", "description": "Descrição/observação do lançamento."},
+                    "categoria": {"type": "string", "description": "Categoria do lançamento (ex: lazer, alimentação, transporte, rifa)."},
                 },
                 "required": ["tipo", "valor"],
             },
@@ -271,13 +275,15 @@ for t in TOOLS_NESTED:
 
 
 INSTRUCTIONS = """
-Você é um assistente financeiro para Discord.
+Você é um assistente financeiro para WhatsApp e Discord.
 Regras:
 - Sempre use ferramentas (tools) para consultar valores reais. Nunca invente números.
 - Se a solicitação for destrutiva (apagar/deletar/excluir), NÃO execute direto.
   Em vez disso, chame a tool propose_* correspondente para criar uma confirmação.
 - Se faltar informação, faça UMA pergunta curta e objetiva.
 - Responda sempre em português do Brasil.
+- Não invente funcionalidades. Se o usuário pedir algo que não existe (ex: exportar sheets), diga claramente que ainda não está implementado.
+- Só ofereça ações que existam nas tools (get_balance, list_launches, list_pockets, list_investments, add_launch, etc.).
 """
 
 # categorias permitidas (canon)
@@ -382,12 +388,24 @@ def _extract_tool_calls(resp):
             calls.append((name, args))
     return calls
 
-async def handle_ai_message(user_id: int, text: str) -> str | None:
+def _internal_user_id(raw_user_id: int | str) -> int:
+    """
+    Converte um user_id potencialmente enorme (ex: WhatsApp) em um int seguro (32-bit-ish),
+    estável entre execuções, para não estourar colunas INTEGER no banco.
+    """
+    s = str(raw_user_id)
+    digest = hashlib.sha256(s.encode("utf-8")).digest()
+    n = int.from_bytes(digest[:8], "big")  # grande
+    # comprime pra faixa segura de int32 positivo
+    return int(n % 2_000_000_000) + 1
+
+def handle_ai_message(user_id: int | str, text: str) -> str | None:
     # se não tiver chave, não tenta IA
     if not os.getenv("OPENAI_API_KEY"):
         return None
 
-    db.ensure_user(user_id)
+    uid = _internal_user_id(user_id)
+    db.ensure_user(uid)
 
 
     resp = client.responses.create(
@@ -411,86 +429,99 @@ async def handle_ai_message(user_id: int, text: str) -> str | None:
 
     # Map tool -> função do seu sistema
     if name == "get_balance":
-        bal = float(get_balance(user_id))
+        bal = float(get_balance(uid))
         return f"Seu saldo atual é **R$ {bal:,.2f}**".replace(",", "X").replace(".", ",").replace("X", ".")
     if name == "list_launches":
-        rows = list_launches(user_id, limit=int(args.get("limit", 10)))
+        rows = list_launches(uid, limit=int(args.get("limit", 10)))
         if not rows:
             return "Você ainda não tem lançamentos."
         lines = [f"#{r['id']} • {r['tipo']} • {r['valor']} • {r.get('nota') or ''}" for r in rows]
         return "**Lançamentos recentes:**\n" + "\n".join(lines)
 
     if name == "list_pockets":
-        rows = list_pockets(user_id)
+        rows = list_pockets(uid)
         if not rows:
             return "Você ainda não tem caixinhas."
         lines = [f"• {r['name']}: {r['balance']}" for r in rows]
         return "**Caixinhas:**\n" + "\n".join(lines)
 
     if name == "list_investments":
-        rows = list_investments(user_id)
+        rows = list_investments(uid)
         if not rows:
             return "Você ainda não tem investimentos."
         lines = [f"• {r['name']}: {r['balance']} (rate={r['rate']} {r['period']})" for r in rows]
         return "**Investimentos:**\n" + "\n".join(lines)
 
     if name == "add_launch":
-        # você já tem add_launch_and_update_balance no db.py
+        alvo = args.get("alvo")
+        nota = args.get("nota", text)
+
+        # 1) Se a IA passou categoria, respeita
+        categoria = (args.get("categoria") or "").strip()
+        rules = list_category_rules(uid)
+
+        # 2) Se não veio categoria, tenta inferir por regras (alvo > nota > texto)
+        if not categoria:
+            # tenta inferir pelo memo mais informativo
+            memo = (nota or "").strip() or (alvo or "").strip() or text
+            categoria = infer_category(memo, rules)
+
         launch_id, new_balance = add_launch_and_update_balance(
-            user_id=user_id,
+            user_id=uid,
             tipo=args.get("tipo", "despesa"),
             valor=float(args["valor"]),
             alvo=args.get("alvo"),
             nota=args.get("nota", text),
-            delta_conta=None,  # seu db.py já calcula a partir do tipo/valor (se não, a gente ajusta)
+            categoria=categoria,
+            criado_em=None,
         )
-        return f"✅ Lançamento criado **#{launch_id}**. Saldo agora: **{new_balance}**"
+        return f"✅ Lançamento criado **#{launch_id}** ({categoria}). Saldo agora: **{new_balance}**"
 
     if name == "create_pocket":
-        pocket_id, canon = create_pocket(user_id, args["name"])
+        pocket_id, canon = create_pocket(uid, args["name"])
         return f"✅ Caixinha criada: **{canon}** (id {pocket_id})"
 
     if name == "pocket_deposit":
         launch_id, new_acc, new_pocket, canon_name = pocket_deposit_from_account(
-            user_id, args["pocket_name"], float(args["amount"]), args.get("nota", text)
+            uid, args["pocket_name"], float(args["amount"]), args.get("nota", text)
         )
         return f"✅ Depósito na caixinha **{canon_name}**. ID **#{launch_id}**."
 
     if name == "pocket_withdraw":
         launch_id, new_acc, new_pocket, canon_name = pocket_withdraw_to_account(
-            user_id, args["pocket_name"], float(args["amount"]), args.get("nota", text)
+            uid, args["pocket_name"], float(args["amount"]), args.get("nota", text)
         )
         return f"✅ Saque da caixinha **{canon_name}**. ID **#{launch_id}**."
 
     if name == "create_investment":
-        inv_id, canon = create_investment(user_id, args["name"], float(args["rate"]), args["period"])
+        inv_id, canon = create_investment(uid, args["name"], float(args["rate"]), args["period"])
         return f"✅ Investimento criado: **{canon}** (id {inv_id})"
 
     if name == "investment_deposit":
         launch_id, new_acc, new_inv, canon = investment_deposit_from_account(
-            user_id, args["investment_name"], float(args["amount"]), args.get("nota", text)
+            uid, args["investment_name"], float(args["amount"]), args.get("nota", text)
         )
         return f"✅ Aporte em **{canon}**. ID **#{launch_id}**."
 
     if name == "investment_withdraw":
         launch_id, new_acc, new_inv, canon = investment_withdraw_to_account(
-            user_id, args["investment_name"], float(args["amount"]), args.get("nota", text)
+            uid, args["investment_name"], float(args["amount"]), args.get("nota", text)
         )
         return f"✅ Resgate de **{canon}**. ID **#{launch_id}**."
 
     if name == "accrue_all_investments":
-        updated = accrue_all_investments(user_id)
+        updated = accrue_all_investments(uid)
         return f"📈 Rendimentos atualizados em {updated} investimento(s)."
 
     # confirmação (destrutivo)
     if name == "propose_delete_launch":
-        set_pending_action(user_id, "delete_launch", {"launch_id": int(args["launch_id"])})
+        set_pending_action(uid, "delete_launch", {"launch_id": int(args["launch_id"])})
         return f"⚠️ Isso vai apagar o lançamento **#{args['launch_id']}** e desfazer os efeitos. Confirma? Responda **sim** ou **não**."
     if name == "propose_delete_pocket":
-        set_pending_action(user_id, "delete_pocket", {"pocket_name": args["pocket_name"]})
+        set_pending_action(uid, "delete_pocket", {"pocket_name": args["pocket_name"]})
         return f"⚠️ Isso vai deletar a caixinha **{args['pocket_name']}**. Confirma? Responda **sim** ou **não**."
     if name == "propose_delete_investment":
-        set_pending_action(user_id, "delete_investment", {"investment_name": args["investment_name"]})
+        set_pending_action(uid, "delete_investment", {"investment_name": args["investment_name"]})
         return f"⚠️ Isso vai deletar o investimento **{args['investment_name']}**. Confirma? Responda **sim** ou **não**."
 
     return direct or "Não consegui processar isso."
