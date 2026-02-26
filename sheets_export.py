@@ -402,9 +402,19 @@ def export_rows_to_dados(user_id: int, rows):
         except Exception:
             pass
 
-    # --- salva novo tamanho ---
+        # --- salva novo tamanho ---
     try:
         ws_meta.update(META_CELL, [[str(n)]], value_input_option="RAW")
+    except Exception:
+        pass
+
+    # --- atualiza saldo atual no DASHBOARD ---
+    try:
+        from db import get_balance
+        saldo_atual = float(get_balance(user_id))
+
+        ws_dashboard = sh.worksheet("DASHBOARD")
+        ws_dashboard.update("C7", [[saldo_atual]], value_input_option="USER_ENTERED")
     except Exception:
         pass
 
