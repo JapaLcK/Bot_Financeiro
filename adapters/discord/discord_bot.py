@@ -131,6 +131,9 @@ async def on_message(message: discord.Message):
         return
     t = text.casefold()
 
+    external_id = str(message.author.id)
+    user_id = get_or_create_canonical_user("discord", external_id)
+
         # ---- CORE (WhatsApp/Discord shared) intercept: help/tutorial/ofx ----
     atts = []
     if message.attachments:
