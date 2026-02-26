@@ -262,6 +262,21 @@ def merge_users(from_user_id: int, to_user_id: int) -> None:
             ensure_user_tx(cur, from_user_id)
 
             # 1) launches
+            # Antes de migrar, remove colisões do UNIQUE (user_id, source, external_id)
+            # Se já existe no "to_user", a gente descarta o duplicado do "from_user".
+            cur.execute(
+                """
+                delete from launches l
+                using launches t
+                where l.user_id = %s
+                  and t.user_id = %s
+                  and l.source = t.source
+                  and l.external_id = t.external_id
+                """,
+                (from_user_id, to_user_id),
+            )
+
+            # Agora pode migrar sem violar UNIQUE
             cur.execute(
                 "update launches set user_id=%s where user_id=%s",
                 (to_user_id, from_user_id),
