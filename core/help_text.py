@@ -45,10 +45,14 @@ HELP_SECTIONS: dict[str, str] = {
         "• `exportar sheets`\n"
     ),
     "ofx": (
-        "🧾 **Importar extrato (OFX)**\n"
-        "• Envie: `importar ofx` + anexo `.ofx`\n"
-        "• Pode importar de novo — duplicadas são ignoradas\n"
-        "• O saldo final vem do `LEDGERBAL` do OFX\n"
+    "🧾 **Importar extrato (OFX)**\n"
+    "• Envie: `importar ofx` + anexo `.ofx`\n"
+    "• Pode importar de novo — duplicadas são ignoradas\n"
+    "• O saldo final vem do `LEDGERBAL` do OFX\n"
+    "\n"
+    "📌 **Categorias no OFX**\n"
+    "• Se o OFX vier como \"Outros\", o bot tenta aplicar suas **regras** (comando `linkar ...`)\n"
+    "• Se não houver correspondência, fica em \"Outros\".\n"
     ),
     "cc": (
         "🏦 **Conta corrente**\n"
@@ -56,6 +60,16 @@ HELP_SECTIONS: dict[str, str] = {
         "• `listar lançamentos`\n"
         "• `apagar 3`\n"
         "• `desfazer`\n"
+    ),
+    "categories": (
+    "🏷️ **Categorias & Regras (auto-categorização)**\n"
+    "• `categorias` → lista suas categorias\n"
+    "• `criar categoria mercado`\n"
+    "• `linkar ifood alimentacao` → sempre que aparecer \"ifood\", vira \"alimentacao\"\n"
+    "• `listar regras` → mostra palavras-chave cadastradas\n"
+    "• `apagar regra 3` → remove a regra (use o ID retornado)\n"
+    "\n"
+    "Dica: As regras ajudam MUITO no OFX quando vem tudo como \"Outros\"."
     ),
     "pockets": (
         "📦 **Caixinhas**\n"
@@ -88,10 +102,10 @@ HELP_SECTIONS: dict[str, str] = {
         "• Datas: use `YYYY-MM-DD`\n"
     ),
     "launches": (
-        "🧾 **Lançamentos (histórico)**\n"
-        "• `listar lançamentos`\n"
-        "• `apagar 3`\n"
-        "• `desfazer`\n"
+    "🧾 **Lançamentos (histórico)**\n"
+    "• `listar lançamentos` → mostra seus lançamentos com ID\n"
+    "• `apagar 228` → apaga pelo ID\n"
+    "• `desfazer` → desfaz o último lançamento criado (quando disponível)\n"
     ),
     "confirm": (
         "⚠️ **Confirmações**\n"
@@ -105,6 +119,7 @@ TITLE_MAP: dict[str, str] = {
     "tutorial": "Tutorial",
     "ofx": "OFX",
     "cc": "Conta corrente",
+    "categories": "Categorias & Regras",
     "pockets": "Caixinhas",
     "invest": "Investimentos",
     "cdi": "CDI",
@@ -119,6 +134,7 @@ HELP_ORDER: list[tuple[str, str, str]] = [
     ("tutorial", "Tutorial", "🚀"),
     ("ofx", "OFX (importar extrato)", "🧾"),
     ("cc", "Conta corrente", "🏦"),
+    ("categories", "Categorias & Regras", "🏷️"),
     ("pockets", "Caixinhas", "📦"),
     ("invest", "Investimentos", "📈"),
     ("cdi", "CDI", "📊"),
@@ -131,6 +147,7 @@ HELP_TITLES: dict[str, str] = {
     "start": "Ajuda — Bot Financeiro",
     "tutorial": "Tutorial",
     "ofx": "OFX",
+    "categories": "Categorias & Regras",
     "cc": "Conta corrente",
     "pockets": "Caixinhas",
     "invest": "Investimentos",
@@ -164,6 +181,14 @@ HELP_ALIASES: dict[str, str] = {
     "confirm": "confirm",
     "confirmacoes": "confirm",
     "confirmações": "confirm",
+    "categoria": "categories",
+    "categorias": "categories",
+    "regras": "categories",
+    "regra": "categories",
+    "linkar": "categories",
+    "palavras": "categories",
+    "palavraschave": "categories",
+    "palavra-chave": "categories",
 }
 
 # Mapeia vários nomes para a mesma seção
@@ -178,6 +203,7 @@ _SECTION_ALIASES = {
     "sheets": {"sheets", "planilha", "google sheets", "exportar"},
     "launches": {"lancamentos", "lançamentos", "historico", "histórico"},
     "confirm": {"confirm", "confirmacoes", "confirmações", "sim", "nao", "não"},
+    "categories": {"categoria", "categorias", "regras", "regra", "linkar", "palavras", "palavra-chave", "palavras-chave"},
 }
 
 def resolve_section(text: str) -> str:
