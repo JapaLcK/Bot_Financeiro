@@ -5,7 +5,7 @@ import re
 from typing import List
 from datetime import datetime, date, time
 from utils_date import _tz
-from db import get_launches_by_period
+from db import get_launches_by_period, add_launch_and_update_balance
 from sheets_export import export_rows_to_dados, get_sheet_links
 from core.types import IncomingMessage, OutgoingMessage
 from core.help_text import (
@@ -19,6 +19,7 @@ from core.services.ofx_service import handle_ofx_import
 from db import ensure_user, get_balance, list_launches, create_link_code, consume_link_code, bind_identity
 from utils_text import fmt_brl
 import re
+from parsers import parse_receita_despesa_natural
 from db import (
     get_or_create_canonical_user,
     create_link_code,
@@ -219,6 +220,27 @@ def handle_incoming(msg: IncomingMessage) -> List[OutgoingMessage]:
                 "✅ Exportação concluída!\n"
                 f"Planilha: {url_sheet}\n"
             )
+        )]
+
+    # ----------------
+    # REGISTRO RÁPIDO (sem IA)
+    # ----------------
+    parsed = parse_receita_despesa_natural(msg.user_id, t0)
+    if parsed:
+        add_launch_and_update_balance(
+            user_id=msg.user_id,
+            tipo=parsed["tipo"],
+            valor=parsed["valor"],
+            alvo=parsed.get("alvo"),
+            nota=parsed.get("nota"),
+            categoria=parsed.get("categoria"),
+            criado_em=parsed.get("criado_em"),
+        )
+
+        tipo_txt = "Despesa" if parsed["tipo"] == "despesa" else "Receita"
+        cat_txt = parsed.get("categoria") or "outros"
+        return [OutgoingMessage(
+            text=f"✅ {tipo_txt} registrada: {fmt_brl(parsed['valor'])} • {cat_txt}"
         )]
 
     # ----------------
