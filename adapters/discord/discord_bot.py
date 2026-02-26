@@ -132,7 +132,7 @@ async def on_message(message: discord.Message):
     t = text.casefold()
 
     external_id = str(message.author.id)
-    user_id = get_or_create_canonical_user("discord", external_id)
+    uid = get_or_create_canonical_user("discord", external_id)
 
         # ---- CORE (WhatsApp/Discord shared) intercept: help/tutorial/ofx ----
     atts = []
@@ -147,8 +147,6 @@ async def on_message(message: discord.Message):
                 ))
             except Exception:
                 pass
-
-    uid = get_or_create_canonical_user("discord", str(message.author.id))
 
     incoming = IncomingMessage(
         platform="discord",
@@ -167,14 +165,19 @@ async def on_message(message: discord.Message):
     if t_low in {"comandos", "listar comandos", "menu"}:
         await message.reply(embed=help_embed("start"), view=HelpView(message.author.id))
         return
-
+    # comando de ajuda
     if t_low.startswith("ajuda") or t_low.startswith("help"):
         section = resolve_section(text)  # passa a mensagem inteira
         await message.reply(embed=help_embed(section), view=HelpView(message.author.id))
         return
         
+    if outs:
+        for out in outs:
+            await message.reply(out.text)
+        return 
+    
     # Se existir uma ação pendente, processa "sim" / "não"
-    pending = get_pending_action(message.author.id)
+    pending = get_pending_action(uid)
     if pending:
         ans = t.strip()
 
@@ -185,13 +188,13 @@ async def on_message(message: discord.Message):
 
             try:
                 if action == "delete_launch":
-                    delete_launch_and_rollback(message.author.id, int(payload["launch_id"]))
+                    delete_launch_and_rollback(uid, int(payload["launch_id"]))
                     await message.reply(f"🗑️ Apagado e revertido: lançamento **#{payload['launch_id']}**.")
                 elif action == "delete_pocket":
-                    delete_pocket(message.author.id, payload["pocket_name"])
+                    delete_pocket(uid, payload["pocket_name"])
                     await message.reply(f"🗑️ Caixinha deletada: **{payload['pocket_name']}**.")
                 elif action == "delete_investment":
-                    delete_investment(message.author.id, payload["investment_name"])
+                    delete_investment(uid, payload["investment_name"])
                     await message.reply(f"🗑️ Investimento deletado: **{payload['investment_name']}**.")
                 else:
                     await message.reply("Ação pendente desconhecida. Cancelando.")
@@ -200,7 +203,7 @@ async def on_message(message: discord.Message):
                 await message.reply("❌ Deu erro ao executar a ação pendente. Veja os logs.")
             finally:
                 try:
-                    clear_pending_action(message.author.id)
+                    clear_pending_action(uid)
                 except Exception as e:
                     print("Erro ao limpar pending_action:", e)
             return
@@ -208,7 +211,7 @@ async def on_message(message: discord.Message):
         # cancelar
         if ans in ["nao", "não", "n", "no"]:
             try:
-                clear_pending_action(message.author.id)
+                clear_pending_action(uid)
             except Exception as e:
                 print("Erro ao limpar pending_action:", e)
             await message.reply("❌ Ação cancelada.")
@@ -227,12 +230,12 @@ async def on_message(message: discord.Message):
 
    # comandos de consulta (não são lançamentos)
     if t.startswith("resumo"):
-        await handle_resumo(message, message.author.id, t)
+        await handle_resumo(message, uid, t)
         return
 
 
     if t in ["listar caixinhas", "saldo caixinhas", "caixinhas"]:
-        rows = list_pockets(message.author.id)
+        rows = list_pockets(uid)
 
         if not rows:
             await message.reply("Você ainda não tem caixinhas.")
@@ -266,7 +269,7 @@ async def on_message(message: discord.Message):
 
         try:
             launch_id, new_acc, new_pocket, canon_name = pocket_deposit_from_account(
-                message.author.id,
+                uid,
                 pocket_name=name,
                 amount=float(amount),
                 nota=text
@@ -277,7 +280,7 @@ async def on_message(message: discord.Message):
         except ValueError as e:
             if str(e) == "INSUFFICIENT_ACCOUNT":
                 # pega saldo atual pra mensagem ficar boa
-                bal = get_balance(message.author.id)
+                bal = get_balance(uid)
                 await message.reply(f"Saldo insuficiente na conta. Conta: {fmt_brl(float(bal))}")
             else:
                 await message.reply("Valor inválido.")
@@ -311,7 +314,7 @@ async def on_message(message: discord.Message):
 
         try:
             launch_id, new_acc, new_pocket, canon_name = pocket_withdraw_to_account(
-                message.author.id,
+                uid,
                 pocket_name=name,
                 amount=float(amount),
                 nota=None
@@ -341,7 +344,7 @@ async def on_message(message: discord.Message):
     # Listar caixinhas (Postgres)
     # =========================
     if t in ["listar caixinhas", "lista caixinhas", "caixinhas"]:
-        rows = list_pockets(message.author.id)
+        rows = list_pockets(uid)
 
         if not rows:
             await message.reply("Você ainda não tem caixinhas. Use: `criar caixinha <nome>`")
@@ -373,7 +376,7 @@ async def on_message(message: discord.Message):
             return
 
         # valida existência + pega nome canônico + saldo
-        rows = list_pockets(message.author.id)
+        rows = list_pockets(uid)
         pocket = None
         for r in rows:
             if r["name"].lower() == name.lower():
@@ -395,7 +398,7 @@ async def on_message(message: discord.Message):
             return
 
         # cria a ação pendente (expira em 10 min)
-        set_pending_action(message.author.id, "delete_pocket", {"pocket_name": canon_name}, minutes=10)
+        set_pending_action(uid, "delete_pocket", {"pocket_name": canon_name}, minutes=10)
 
         await message.reply(
             "⚠️ Você está prestes a excluir esta caixinha:\n"
@@ -415,7 +418,7 @@ async def on_message(message: discord.Message):
             return
 
         # valida existência + pega nome canônico + saldo
-        rows = list_investments(message.author.id)
+        rows = list_investments(uid)
         inv = None
         for r in rows:
             if r["name"].lower() == name.lower():
@@ -449,7 +452,7 @@ async def on_message(message: discord.Message):
 
         # cria a ação pendente (expira em 10 min)
         set_pending_action(
-            message.author.id,
+            uid,
             "delete_investment",
             {"investment_name": canon, "preview_text": preview_text},
             minutes=10
@@ -464,7 +467,7 @@ async def on_message(message: discord.Message):
 
 # Gasto/Receita natural (ex: "gastei 35 no ifood", "recebi 2500 salario")
     
-    msg_out = handle_quick_entry(user_id, text)
+    msg_out = handle_quick_entry(uid, text)
     if msg_out:
         await message.reply(msg_out.text)
         return 
@@ -483,7 +486,7 @@ async def on_message(message: discord.Message):
 
         try:
             launch_id, pocket_id, pocket_name = create_pocket(
-                message.author.id,
+                uid,
                 name=name,
                 nota=text
             )
@@ -567,7 +570,7 @@ async def on_message(message: discord.Message):
         # --- cria no DB (1 única vez) ---
         try:
             launch_id, inv_id, canon = create_investment_db(
-                message.author.id,
+                uid,
                 name=name,
                 rate=rate,
                 period=period,
@@ -594,7 +597,7 @@ async def on_message(message: discord.Message):
     if amount is not None and pocket_name:
         try:
             launch_id, new_acc, new_pocket, canon_name = pocket_deposit_from_account(
-                message.author.id,
+                uid,
                 pocket_name=pocket_name,
                 amount=float(amount),
                 nota=text
@@ -604,7 +607,7 @@ async def on_message(message: discord.Message):
             return
         except ValueError as e:
             if str(e) == "INSUFFICIENT_ACCOUNT":
-                bal = get_balance(message.author.id)
+                bal = get_balance(uid)
                 await message.reply(f"Saldo insuficiente na conta. Conta: {fmt_brl(float(bal))}")
             else:
                 await message.reply("Valor inválido.")
@@ -651,7 +654,7 @@ async def on_message(message: discord.Message):
 
         try:
             launch_id, new_acc, new_inv, canon_name = investment_deposit_from_account(
-                message.author.id,
+                uid,
                 investment_name=name,
                 amount=float(amount),
                 nota=text
@@ -661,7 +664,7 @@ async def on_message(message: discord.Message):
             return
         except ValueError as e:
             if str(e) == "INSUFFICIENT_ACCOUNT":
-                bal = get_balance(message.author.id)
+                bal = get_balance(uid)
                 await message.reply(f"Saldo insuficiente na conta. Conta: {fmt_brl(float(bal))}")
             else:
                 await message.reply("Valor inválido.")
@@ -709,7 +712,7 @@ async def on_message(message: discord.Message):
 
         try:
             launch_id, new_acc, new_inv, canon_name = investment_withdraw_to_account(
-                message.author.id,
+                uid,
                 investment_name=name,
                 amount=float(amount),
                 nota=text
@@ -737,7 +740,7 @@ async def on_message(message: discord.Message):
 
    # saldo caixinhas (Postgres)
     if t == "saldo caixinhas":
-        rows = list_pockets(message.author.id)
+        rows = list_pockets(uid)
         if not rows:
             await message.reply("Você não tem caixinhas ainda. Use: `criar caixinha viagem`")
             return
@@ -749,7 +752,7 @@ async def on_message(message: discord.Message):
 
    # saldo investimentos (Postgres + aplica juros antes)
     if t == "saldo investimentos":
-        rows = accrue_all_investments(message.author.id)
+        rows = accrue_all_investments(uid)
         if not rows:
             await message.reply("Você não tem investimentos ainda. Use: `criar investimento CDB 1,1% ao mês`")
             return
@@ -761,7 +764,7 @@ async def on_message(message: discord.Message):
 
    # listar investimentos (Postgres + aplica juros antes)
     if t in ["listar investimentos", "lista investimentos", "investimentos", "meus investimentos"]:
-        rows = accrue_all_investments(message.author.id)
+        rows = accrue_all_investments(uid)
         if not rows:
             await message.reply("Você ainda não tem investimentos.")
             return
@@ -779,7 +782,7 @@ async def on_message(message: discord.Message):
 
 # listar lancamentos (Postgres)
     if t in ["listar lancamentos", "listar lançamentos", "ultimos lancamentos", "últimos lançamentos"]:
-        rows = list_launches(message.author.id, limit=10)
+        rows = list_launches(uid, limit=10)
 
         if not rows:
             await message.reply("Você ainda não tem lançamentos.")
@@ -824,7 +827,7 @@ async def on_message(message: discord.Message):
         launch_id = int(m.group(1))
 
         # (opcional) valida se existe antes de pedir confirmação
-        rows = list_launches(message.author.id, limit=1000)
+        rows = list_launches(uid, limit=1000)
         row = next((r for r in rows if int(r["id"]) == launch_id), None)
         if not row:
             await message.reply(f"Não achei lançamento com ID {launch_id}.")
@@ -842,7 +845,7 @@ async def on_message(message: discord.Message):
         if desc:
             desc = f" — {desc}"
 
-        set_pending_action(message.author.id, "delete_launch", {"launch_id": launch_id}, minutes=10)
+        set_pending_action(uid, "delete_launch", {"launch_id": launch_id}, minutes=10)
 
         await message.reply(
             "⚠️ Você está prestes a apagar este lançamento:\n"
@@ -854,7 +857,7 @@ async def on_message(message: discord.Message):
 
     # comando para desfazer a última ação (100% Postgres)
     if t in ["desfazer", "undo", "voltar", "excluir"]:
-        user_id = message.author.id
+        user_id = uid
 
         rows = list_launches(user_id, limit=1)
         if not rows:
@@ -880,7 +883,7 @@ async def on_message(message: discord.Message):
         
     # comando para ver saldo da conta
     if t in ["saldo", "saldo conta", "saldo da conta", "conta", "saldo geral"]:
-        user_id = message.author.id
+        user_id = uid
         bal = get_balance(user_id)
         
         await message.reply(f"🏦 **Conta Corrente:** {fmt_brl(float(bal))}")
@@ -937,13 +940,13 @@ async def on_message(message: discord.Message):
             await message.reply("Use: `exportar sheets` ou `exportar sheets 2026-02-01 2026-02-28`")
             return
 
-        rows = get_launches_by_period(message.author.id, start, end)
+        rows = get_launches_by_period(uid, start, end)
         if not rows:
             await message.reply("📭 Nenhum lançamento no período.")
             return
 
         try:
-            sheet_link = export_rows_to_dados(message.author.id, rows)
+            sheet_link = export_rows_to_dados(uid, rows)
         except Exception as e:
             await message.reply(f"❌ Erro ao exportar para o Sheets: {e}")
             return
@@ -968,7 +971,7 @@ async def on_message(message: discord.Message):
             await message.reply("Use: `exportar excel` ou `exportar excel 2026-02-01 2026-02-29`")
             return
 
-        rows = get_launches_by_period(message.author.id, start, end)
+        rows = get_launches_by_period(uid, start, end)
         if not rows:
             await message.reply("📭 Nenhum lançamento no período.")
             return
@@ -1015,7 +1018,7 @@ async def on_message(message: discord.Message):
             despesas_por_categoria[cat] = despesas_por_categoria.get(cat, 0.0) + float(r["valor"])
 
         saldo_periodo = total_rec - total_des
-        saldo_atual = get_balance(message.author.id)
+        saldo_atual = get_balance(uid)
 
         ws_dash.append(["Período", f"{start.strftime('%d/%m/%Y')} a {end.strftime('%d/%m/%Y')}"])
         ws_dash.append(["Total Receitas", total_rec])
@@ -1136,7 +1139,7 @@ async def on_message(message: discord.Message):
 
     # fallback com IA (apenas se fizer sentido financeiro)
     if should_use_ai(message.content):
-        ai_reply = await handle_ai_message(message.author.id, message.content)
+        ai_reply = await handle_ai_message(uid, message.content)
         if ai_reply:
             await message.reply(ai_reply)
             return
