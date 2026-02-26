@@ -418,5 +418,10 @@ def export_rows_to_dados(user_id: int, rows):
     except Exception:
         pass
 
+        # --- DEBUG: marca que passou aqui ---
+    try:
+        ws_meta.update("Z2", [["EXPORT_DADOS_RODOU"]], value_input_option="RAW")
+    except Exception:
+        pass
     _base, _tab = get_sheet_links(ws)
     return _tab
