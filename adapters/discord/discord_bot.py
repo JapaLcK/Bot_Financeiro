@@ -43,7 +43,7 @@ from utils_text import (
     should_use_ai,
     parse_pocket_deposit_natural,
 )
-
+from core.help_text import resolve_section
 from parsers import parse_receita_despesa_natural
 from utils_text import (
     guess_category,
@@ -161,17 +161,18 @@ async def on_message(message: discord.Message):
 
     outs = core_handle_incoming(incoming)
 
-    if outs:
-        # Se for ajuda, você pode manter o dropdown (melhor UX no Discord)
-        if text.casefold().strip() in ["ajuda", "help", "comandos", "listar comandos", "menu"]:
-            await message.reply(embed=help_embed("start"), view=HelpView(message.author.id))
-            return
+    t_low = text.casefold().strip()
 
-        # Caso contrário, manda o texto padrão do core (ex: OFX importado)
-        for out in outs:
-            await message.reply(out.text)
+    # aliases de "abrir menu"
+    if t_low in {"comandos", "listar comandos", "menu"}:
+        await message.reply(embed=help_embed("start"), view=HelpView(message.author.id))
         return
-    
+
+    if t_low.startswith("ajuda") or t_low.startswith("help"):
+        section = resolve_section(text)  # passa a mensagem inteira
+        await message.reply(embed=help_embed(section), view=HelpView(message.author.id))
+        return
+        
     # Se existir uma ação pendente, processa "sim" / "não"
     pending = get_pending_action(message.author.id)
     if pending:
@@ -466,12 +467,7 @@ async def on_message(message: discord.Message):
     msg_out = handle_quick_entry(user_id, text)
     if msg_out:
         await message.reply(msg_out.text)
-        return
-
-    # ajuda / comandos
-    if t in ["ajuda", "help", "comandos", "listar comandos", "menu"]:
-        await message.reply(embed=help_embed("start"), view=HelpView(message.author.id))
-        return    
+        return 
 
     # (Opcional) se você quiser responder só em DM, descomente:
     # if not isinstance(message.channel, discord.DMChannel):
