@@ -10,7 +10,7 @@ import traceback
 from discord.ext import commands
 from db import init_db
 from dotenv import load_dotenv
-
+from core.services.quick_entry import handle_quick_entry
 load_dotenv()  # carrega o .env
 from core.types import IncomingMessage, Attachment
 from core.handle_incoming import handle_incoming as core_handle_incoming
@@ -459,43 +459,16 @@ async def on_message(message: discord.Message):
 
 
 # Gasto/Receita natural (ex: "gastei 35 no ifood", "recebi 2500 salario")
-    external_id = str(message.author.id)
-    user_id = get_or_create_canonical_user("discord", external_id)
-
-    parsed = parse_receita_despesa_natural(user_id, text)
-    if parsed:
-        ensure_user(user_id)
-
-        tipo = parsed["tipo"]
-        valor = float(parsed["valor"])
-        categoria = parsed.get("categoria")
-        alvo = parsed.get("alvo")
-        nota = parsed.get("nota")
-        criado_em = parsed.get("criado_em")
-
-        launch_id, new_balance = add_launch_and_update_balance(
-            user_id=user_id,
-            tipo=tipo,
-            valor=valor,
-            alvo=alvo,
-            nota=nota,
-            categoria=categoria,
-            criado_em=criado_em,
-        )
-
-        emoji = "💸" if tipo == "despesa" else "💰"
-        await message.reply(
-            f"{emoji} **{tipo.capitalize()} registrada**: {fmt_brl(valor)}\n"
-            f"🏷️ Categoria: {categoria}\n"
-            f"🏦 Conta: {fmt_brl(float(new_balance))}\n"
-            f"ID:#{launch_id}"
-        )
+    
+    msg_out = handle_quick_entry(user_id, text)
+    if msg_out:
+        await message.reply(msg_out.text)
         return
 
-        # ajuda / comandos
-        if t in ["ajuda", "help", "comandos", "listar comandos", "menu"]:
-            await message.reply(embed=help_embed("start"), view=HelpView(message.author.id))
-            return    
+    # ajuda / comandos
+    if t in ["ajuda", "help", "comandos", "listar comandos", "menu"]:
+        await message.reply(embed=help_embed("start"), view=HelpView(message.author.id))
+        return    
 
     # (Opcional) se você quiser responder só em DM, descomente:
     # if not isinstance(message.channel, discord.DMChannel):

@@ -8,6 +8,7 @@ from utils_date import _tz
 from db import get_launches_by_period, add_launch_and_update_balance
 from sheets_export import export_rows_to_dados, get_sheet_links
 from core.types import IncomingMessage, OutgoingMessage
+from core.services.quick_entry import handle_quick_entry
 from core.help_text import (
     HELP_TEXT_SHORT,
     TUTORIAL_TEXT,
@@ -222,26 +223,11 @@ def handle_incoming(msg: IncomingMessage) -> List[OutgoingMessage]:
             )
         )]
 
-    # ----------------
-    # REGISTRO RÁPIDO (sem IA)
-    # ----------------
-    parsed = parse_receita_despesa_natural(msg.user_id, t0)
-    if parsed:
-        add_launch_and_update_balance(
-            user_id=msg.user_id,
-            tipo=parsed["tipo"],
-            valor=parsed["valor"],
-            alvo=parsed.get("alvo"),
-            nota=parsed.get("nota"),
-            categoria=parsed.get("categoria"),
-            criado_em=parsed.get("criado_em"),
-        )
+    
 
-        tipo_txt = "Despesa" if parsed["tipo"] == "despesa" else "Receita"
-        cat_txt = parsed.get("categoria") or "outros"
-        return [OutgoingMessage(
-            text=f"✅ {tipo_txt} registrada: {fmt_brl(parsed['valor'])} • {cat_txt}"
-        )]
+    msg_out = handle_quick_entry(msg.user_id, t0)
+    if msg_out:
+        return [msg_out]
 
     # ----------------
     # HELP / TUTORIAL (serve pros dois; Discord pode ignorar se usar dropdown no adapter)
