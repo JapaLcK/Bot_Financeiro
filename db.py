@@ -250,40 +250,53 @@ def ensure_user(user_id: int):
 def merge_users(from_user_id: int, to_user_id: int) -> None:
     """
     Move TODOS os dados de from_user_id -> to_user_id, e atualiza identidades.
-    Nunca deve "apontar" uma identidade pro user vazio sem antes migrar.
+
+    FIX CRÍTICO:
+    - Antes de mover launches, remove duplicatas que colidem na unique:
+      uq_launches_user_source_external (user_id, source, external_id)
+
+    Regra de dedupe:
+    - Se já existe no TO um launch com mesmo (source, external_id),
+      apagamos o launch do FROM (não dá pra "update" porque estoura unique).
     """
     if from_user_id == to_user_id:
         return
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # garante que os dois users existem
             ensure_user_tx(cur, to_user_id)
             ensure_user_tx(cur, from_user_id)
 
-            # 1) launches
-            # Antes de migrar, remove colisões do UNIQUE (user_id, source, external_id)
-            # Se já existe no "to_user", a gente descarta o duplicado do "from_user".
+            # =========================
+            # 1) DEDUPE de launches (evita UniqueViolation)
+            # =========================
+            # Remove do FROM qualquer lançamento que já exista no TO
+            # com o mesmo (source, external_id). Só faz sentido quando external_id não é NULL.
             cur.execute(
                 """
-                delete from launches l
-                using launches t
-                where l.user_id = %s
-                  and t.user_id = %s
-                  and l.source = t.source
-                  and l.external_id = t.external_id
+                delete from launches lf
+                using launches lt
+                where lf.user_id = %s
+                  and lt.user_id = %s
+                  and lf.external_id is not null
+                  and lt.external_id is not null
+                  and lf.source = lt.source
+                  and lf.external_id = lt.external_id
                 """,
                 (from_user_id, to_user_id),
             )
 
-            # Agora pode migrar sem violar UNIQUE
+            # =========================
+            # 2) launches: move o resto
+            # =========================
             cur.execute(
                 "update launches set user_id=%s where user_id=%s",
                 (to_user_id, from_user_id),
             )
 
-            # 2) accounts: se sua accounts é 1:1 por user, normalmente você quer somar balance
-            # Se você prefere "substituir", me diga, mas somar é o mais seguro.
+            # =========================
+            # 3) accounts: soma saldos (seguro)
+            # =========================
             cur.execute("select balance from accounts where user_id=%s", (to_user_id,))
             row_to = cur.fetchone()
             bal_to = float(row_to["balance"]) if row_to else 0.0
@@ -292,40 +305,40 @@ def merge_users(from_user_id: int, to_user_id: int) -> None:
             row_from = cur.fetchone()
             bal_from = float(row_from["balance"]) if row_from else 0.0
 
-            # soma saldos (evita perder)
             new_bal = bal_to + bal_from
             cur.execute(
                 "update accounts set balance=%s where user_id=%s",
                 (new_bal, to_user_id),
             )
-
-            # se existir a linha do from, você pode remover (evita duplicidade)
             cur.execute("delete from accounts where user_id=%s", (from_user_id,))
 
-            # 3) identidades: tudo vira to_user_id
+            # =========================
+            # 4) identidades / link_codes
+            # =========================
             cur.execute(
                 "update user_identities set user_id=%s where user_id=%s",
                 (to_user_id, from_user_id),
             )
-
-            # 4) link_codes: se tiver códigos pendentes pro user antigo, redireciona também
             cur.execute(
                 "update link_codes set user_id=%s where user_id=%s",
                 (to_user_id, from_user_id),
             )
 
-            # === SE VOCÊ TIVER OUTRAS TABELAS COM user_id, ADICIONA AQUI ===
-            # cur.execute("update pockets set user_id=%s where user_id=%s", (to_user_id, from_user_id))
-            # cur.execute("update investments set user_id=%s where user_id=%s", (to_user_id, from_user_id))
-            # cur.execute("update credit_cards set user_id=%s where user_id=%s", (to_user_id, from_user_id))
-            # cur.execute("update credit_purchases set user_id=%s where user_id=%s", (to_user_id, from_user_id))
-            # etc...
+            # =========================
+            # 5) OUTRAS tabelas que tem user_id (forte recomendação)
+            # =========================
+            # Essas aqui não costumam quebrar fácil e evitam metade dos bugs:
+            cur.execute("update user_category_rules set user_id=%s where user_id=%s", (to_user_id, from_user_id))
+            cur.execute("update pending_actions set user_id=%s where user_id=%s", (to_user_id, from_user_id))
+            cur.execute("update pockets set user_id=%s where user_id=%s", (to_user_id, from_user_id))
+            cur.execute("update investments set user_id=%s where user_id=%s", (to_user_id, from_user_id))
+            cur.execute("update credit_transactions set user_id=%s where user_id=%s", (to_user_id, from_user_id))
+            cur.execute("update ofx_imports set user_id=%s where user_id=%s", (to_user_id, from_user_id))
 
-            # 5) opcional: remover user "from" se ficou vazio (não é obrigatório)
-            # cur.execute("delete from users where id=%s", (from_user_id,))
+            # credit_cards pode colidir por unique(user_id, name) — se você quiser, eu te dou o merge seguro disso.
+            # cur.execute("update credit_cards set user_id=%s where user_id=%s", (to_user_id, from_user_id))
 
         conn.commit()
-
 def choose_primary_user(a_user_id: int, b_user_id: int) -> tuple[int, int]:
     """
     Retorna (primary, secondary) baseado em score.
@@ -443,22 +456,29 @@ def bind_identity(provider: str, external_id: str, user_id: int) -> None:
 def link_platform_identity(provider: str, external_id: str, target_user_id: int) -> int:
     """
     Liga (provider, external_id) ao target_user_id.
-    Se o provider já estava apontando para outro user, faz merge (sem perder dados).
-    Retorna o user_id final (primary).
+
+    REGRA IMPORTANTE (seu requisito):
+    - O user_id do CÓDIGO (target_user_id) é SEMPRE o PRIMARY.
+    - A conta que DIGITA o código (current_user_id) entra nela (vira secondary e é merged).
+
+    Retorna o user_id final (primary = target_user_id).
     """
     current_user_id = get_or_create_canonical_user(provider, external_id)
 
     if current_user_id == target_user_id:
         # já está linkado
-        return current_user_id
+        return target_user_id
 
-    primary, secondary = choose_primary_user(current_user_id, target_user_id)
+    # O primary é sempre o dono do código
+    primary = target_user_id
+    secondary = current_user_id
+
     merge_users(secondary, primary)
 
-    # garante que a identidade atual aponta pro primary
+    # garante que essa identidade (da plataforma que digitou o código) aponta pro primary
     bind_identity(provider, external_id, primary)
-    return primary
 
+    return primary
 def get_balance(user_id: int) -> Decimal:
     with get_conn() as conn:
         with conn.cursor() as cur:
