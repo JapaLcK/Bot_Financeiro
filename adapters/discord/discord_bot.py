@@ -361,7 +361,7 @@ async def on_message(message: discord.Message):
         return
     
     # handler de crédito (cartão, fatura, parcelamento, desfazer CT/grupo, etc.)
-    if await handle_credit_commands(message):
+    if await handle_credit_commands(message, uid):
         return
 
 
@@ -1139,7 +1139,7 @@ async def on_message(message: discord.Message):
 
     # fallback com IA (apenas se fizer sentido financeiro)
     if should_use_ai(message.content):
-        ai_reply = await handle_ai_message(uid, message.content)
+        ai_reply = handle_ai_message(uid, message.content)
         if ai_reply:
             await message.reply(ai_reply)
             return

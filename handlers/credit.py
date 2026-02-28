@@ -50,10 +50,10 @@ def _infer_category(user_id: int, desc: str) -> str:
     return categoria
 
 
-async def handle_credit_commands(message) -> bool:
+async def handle_credit_commands(message, uid: int) -> bool:
     t = message.content.strip()
     t_low = t.lower().strip()
-    user_id = message.author.id
+    user_id = uid
     # -------------------------
     # desfazer parcelamento por UUID do grupo
     # uso: desfazer grupo <uuid>
@@ -234,6 +234,14 @@ async def handle_credit_commands(message) -> bool:
         except Exception as e:
             await message.reply(f"❌ Erro registrando compra no crédito: {e}")
         return True
+    
+    # alias: "criar parcelas" / "parcelas" -> instrução
+    if t_low in ("criar parcelas", "criar parcela", "parcelas"):
+        await message.reply("Use: `parcelar 300 em 3x no cartao nubank` (ex: `parcelar 120 em 4x no cartao nubank`)")
+        return True
+    
+    if t_low in ("parcelas", "listar parcelas"):
+        t_low = "parcelamentos"
 
     # -------------------------
     # PARCELAR 
