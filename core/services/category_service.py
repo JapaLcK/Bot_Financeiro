@@ -41,7 +41,13 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
             kw_norm = normalize_text(kw)
             if not kw_norm:
                 continue
-            if contains_word(t, kw_norm) or (kw_norm in t):
+            # evita falso positivo tipo "cavalcante" bater em "lca"
+            if len(kw_norm) <= 3:
+                ok = contains_word(t, kw_norm)          # só palavra inteira
+            else:
+                ok = contains_word(t, kw_norm) or (kw_norm in t)
+
+            if ok:
                 return InferResult(category=normalize_text(cat2), reason="local_rule")
 
     return InferResult(category="outros", reason="default")

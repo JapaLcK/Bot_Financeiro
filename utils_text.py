@@ -45,8 +45,14 @@ def extract_keyword_for_memory(text_norm: str) -> str:
     for keywords, _cat in LOCAL_RULES:
         for kw in keywords:
             kw_norm = normalize_text(kw)
-            if kw_norm and (contains_word(text_norm, kw_norm) or kw_norm in text_norm):
-                return kw_norm
+            if kw_norm:
+                if len(kw_norm) <= 3:
+                    ok = contains_word(text_norm, kw_norm)
+                else:
+                    ok = contains_word(text_norm, kw_norm) or (kw_norm in text_norm)
+
+                if ok:
+                    return kw_norm
 
     # 2) fallback: pega o último “token útil”
     tokens = [t for t in text_norm.split() if t and t not in STOPWORDS_PT and len(t) >= 3]
