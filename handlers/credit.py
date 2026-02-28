@@ -246,6 +246,10 @@ async def handle_credit_commands(message, uid: int) -> bool:
     # -------------------------
     # PARCELAR 
     # -------------------------
+    # normaliza "parcelei" para "parcelar"
+    if t_low.startswith("parcelei "):
+        t_low = "parcelar " + t_low[len("parcelei "):]
+
     if t_low.startswith("parcelar"):
         # exemplos:
         #   parcelar 300 no cartao nubank
@@ -285,7 +289,11 @@ async def handle_credit_commands(message, uid: int) -> bool:
             if card_name:
                 await message.reply(f"❌ Não achei o cartão '{card_name}'. Crie com: criar cartao {card_name} fecha 10 vence 17")
             else:
-                await message.reply("❓ Você não tem cartão padrão. Defina com: padrao NOME")
+                await message.reply(
+                    "❓ Qual cartão?\n"
+                    "Ex: `parcelei 500 em 5x no cartao nubank`\n"
+                    "Dica: defina um padrão com `padrao nubank`."
+                )
             return True
 
         try:
