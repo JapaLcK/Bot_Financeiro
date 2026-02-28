@@ -288,6 +288,18 @@ def export_rows_to_dados(user_id: int, rows):
 
     RECLASSIFY_SOURCES = {"ofx"}
 
+    def _kw_match(t: str, kw: str) -> bool:
+        """
+        Evita falso-positivo tipo 'cavalcante' bater em 'lca'.
+        - keywords curtas (<=3): só palavra inteira
+        - keywords maiores: palavra inteira OU substring
+        """
+        if not kw:
+            return False
+        if len(kw) <= 3:
+            return contains_word(t, kw)
+        return contains_word(t, kw) or (kw in t)
+
     def _infer_category_fast(text_base: str) -> str:
         t = normalize_text(text_base or "")
         if not t:
@@ -295,10 +307,11 @@ def export_rows_to_dados(user_id: int, rows):
 
         for kw_n, cat_n in rules_norm:
             try:
-                if contains_word(t, kw_n) or (kw_n in t):
+                if _kw_match(t, kw_n):
                     return cat_n
             except Exception:
-                if kw_n in t:
+                # fallback seguro: para <=3 não usa substring
+                if (len(kw_n) > 3) and (kw_n in t):
                     return cat_n
 
         for keywords, cat2 in (LOCAL_RULES or []):
@@ -308,10 +321,10 @@ def export_rows_to_dados(user_id: int, rows):
                 if not kw_n:
                     continue
                 try:
-                    if contains_word(t, kw_n) or (kw_n in t):
+                    if _kw_match(t, kw_n):
                         return cat2_n or "outros"
                 except Exception:
-                    if kw_n in t:
+                    if (len(kw_n) > 3) and (kw_n in t):
                         return cat2_n or "outros"
 
         return "outros"
