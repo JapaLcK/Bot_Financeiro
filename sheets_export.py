@@ -5,6 +5,7 @@ from google.oauth2.service_account import Credentials
 from decimal import Decimal
 from db import get_balance, list_user_category_rules, update_launch_category
 from utils_text import normalize_text, contains_word, LOCAL_RULES
+from gspread.utils import rowcol_to_a1
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -393,29 +394,129 @@ def export_rows_to_dados(user_id: int, rows):
             except Exception:
                 pass
 
-    # --- escreve em chunks ---
-    n = len(values)
-    if n:
-        CHUNK = 800
-        start_row = 2
-        for i in range(0, n, CHUNK):
-            chunk = values[i:i + CHUNK]
-            r0 = start_row + i
-            cell = rowcol_to_a1(r0, 1)  # A{r0}
-            ws.update(cell, chunk, value_input_option="USER_ENTERED")
+   
 
-    # --- apaga SOMENTE o excedente antigo ---
-    # Se antes exportou 3000 linhas e agora exportou 2500,
-    # apaga só A(2502):H(3001)
-    if prev_n > n:
+    # Header (AGORA COM ID)
+    header = ["ID", "Data", "Tipo", "Categoria", "Descrição", "Valor", "Fonte", "Nome", "Mês"]
+    ws.update("A1", [header], value_input_option="USER_ENTERED")
+
+    # -------------------------
+    # 1) Lê IDs existentes no Sheets (coluna A)
+    # -------------------------
+    existing_ids_raw = ws.col_values(1)[1:]  # sem header
+    id_to_row: dict[int, int] = {}
+    for idx, v in enumerate(existing_ids_raw, start=2):  # linha real no sheets
+        v = (v or "").strip()
+        if not v:
+            continue
         try:
-            first_clear = n + 2            # +1 header, +1 base 1-indexed
-            last_clear = prev_n + 1        # header ocupa linha 1
-            ws.batch_clear([f"A{first_clear}:H{last_clear}"])
+            id_to_row[int(v)] = idx
         except Exception:
-            pass
+            continue
 
-        # --- salva novo tamanho ---
+    existing_ids = set(id_to_row.keys())
+
+    # -------------------------
+    # 2) Monta linhas do DB com ID na primeira coluna
+    # -------------------------
+    rows_by_id: dict[int, list] = {}
+    db_ids: set[int] = set()
+
+    for r in rows:
+        if not _is_monetary_row(r):
+            continue
+
+        launch_id = r.get("id")
+        if launch_id is None:
+            continue
+        try:
+            lid = int(launch_id)
+        except Exception:
+            continue
+
+        dt = r.get("criado_em")
+        if not hasattr(dt, "date"):
+            continue
+
+        d = dt.date()
+        data_str = d.isoformat()
+        mes_str = f"{d.year:04d}-{d.month:02d}"
+
+        tipo = (r.get("tipo") or "").strip().lower()
+        fonte0 = (r.get("origem") or r.get("source") or "").strip().lower()
+
+        descricao = (r.get("nota") or "").strip()
+        nome = (r.get("alvo") or "").strip()
+
+        cat0 = normalize_text((r.get("categoria") or "").strip()) or "outros"
+
+        if fonte0 in RECLASSIFY_SOURCES and cat0 == "outros":
+            base = descricao or nome or ""
+            new_cat = _infer_category_fast(base)
+            if new_cat and new_cat != "outros" and new_cat != cat0:
+                try:
+                    to_fix.append((lid, new_cat))
+                    cat0 = new_cat
+                except Exception:
+                    pass
+
+        categoria_sheet = "Outros" if cat0 == "outros" else cat0
+        valor = float(r.get("valor") or 0)
+        fonte = (r.get("origem") or r.get("source") or "").strip()
+
+        # A..I (9 colunas): ID + colunas antigas
+        row_values = [
+            lid,
+            data_str,
+            tipo,
+            categoria_sheet,
+            descricao,
+            _to_sheet_value(valor),
+            fonte,
+            nome,
+            mes_str,
+        ]
+
+        rows_by_id[lid] = row_values
+        db_ids.add(lid)
+
+    # -------------------------
+    # 3) Updates (IDs que já existem)
+    # -------------------------
+    updates = []
+    for lid in (db_ids & existing_ids):
+        rownum = id_to_row[lid]
+        # Atualiza a linha inteira A:I
+        updates.append({"range": f"A{rownum}:I{rownum}", "values": [rows_by_id[lid]]})
+
+    # manda em lotes (Sheets tem limites)
+    BATCH = 300
+    for i in range(0, len(updates), BATCH):
+        ws.batch_update(updates[i:i+BATCH], value_input_option="USER_ENTERED")
+
+    # -------------------------
+    # 4) Inserts (IDs novos) -> append
+    # -------------------------
+    new_rows = [rows_by_id[lid] for lid in (db_ids - existing_ids)]
+    if new_rows:
+        CHUNK = 500
+        for i in range(0, len(new_rows), CHUNK):
+            ws.append_rows(new_rows[i:i+CHUNK], value_input_option="USER_ENTERED")
+
+    # -------------------------
+    # 5) Deletes (IDs que existem no sheet mas sumiram do DB) -> hard delete
+    # -------------------------
+    ids_to_delete = sorted(list(existing_ids - db_ids))
+    if ids_to_delete:
+        rows_to_delete = sorted([id_to_row[lid] for lid in ids_to_delete], reverse=True)
+        for rownum in rows_to_delete:
+            try:
+                ws.delete_rows(rownum)
+            except Exception:
+                pass
+
+    # --- salva novo tamanho ---
+    n = len(rows_by_id)  # total de lançamentos exportados do DB (após filtros)
     try:
         ws_meta.update(META_CELL, [[str(n)]], value_input_option="RAW")
     except Exception:
