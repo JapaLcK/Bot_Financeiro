@@ -1,7 +1,7 @@
 from __future__ import annotations
 from utils_date import now_tz, _tz
 from db import get_balance, list_pockets, list_investments, list_launches, list_users_with_daily_report_enabled, list_identities_by_user
-from datetime import time
+from datetime import time, timedelta
 from discord.ext import tasks
 
 
@@ -39,10 +39,12 @@ def build_daily_report_text(user_id: int) -> str:
     
     now = now_tz()
     ref = now.strftime("%d/%m/%Y %H:%M")
+    ref_date = (now.date() - timedelta(days=1)).strftime("%d/%m/%Y")
     lines = []
 
     lines.append("📊 *Resumo diário do Bot Financeiro*")
-    lines.append(f"🗓️ Referência: {ref}")
+    lines.append(f"📅 Dados referentes a: {ref_date}")
+    lines.append(f"🗓️ Gerado em: {ref}")
     lines.append("")
     lines.append(f"💰 *Patrimônio total:* {_fmt_brl(patrimonio)}")
     lines.append("")
