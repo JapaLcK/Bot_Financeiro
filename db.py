@@ -131,7 +131,7 @@ def init_db():
     user_id bigint primary key references users(id) on delete cascade,
     enabled boolean not null default true,
     hour int not null default 9,
-    minute int not null default 0
+    minute int not null default 0,
     last_sent_date date
     );
     """,
@@ -3403,7 +3403,7 @@ def mark_daily_report_sent(user_id: int, sent_date) -> None:
                 (user_id, sent_date),
             )
         conn.commit()
-        
+
 # confere se a mensagem ja foi enviada no dia 
 def was_daily_report_sent_today(user_id: int, today) -> bool:
     ensure_user(user_id)
