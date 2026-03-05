@@ -1,6 +1,9 @@
 from __future__ import annotations
+from utils_date import now_tz, _tz
+from db import get_balance, list_pockets, list_investments, list_launches, list_users_with_daily_report_enabled, list_identities_by_user
+from datetime import time
+from discord.ext import tasks
 
-from db import get_balance, list_pockets, list_investments, list_launches
 
 def _fmt_brl(v: float) -> str:
     # simples e confiável sem depender de locale
@@ -33,10 +36,13 @@ def build_daily_report_text(user_id: int) -> str:
             gasto_hoje += valor
         elif tipo == "receita":
             receita_hoje += valor
-
+    
+    now = now_tz()
+    ref = now.strftime("%d/%m/%Y %H:%M")
     lines = []
 
     lines.append("📊 *Resumo diário do Bot Financeiro*")
+    lines.append(f"🗓️ Referência: {ref}")
     lines.append("")
     lines.append(f"💰 *Patrimônio total:* {_fmt_brl(patrimonio)}")
     lines.append("")
@@ -100,12 +106,6 @@ def build_daily_report_text(user_id: int) -> str:
     return msg
 
 # --- scheduler Discord (09:00) ---
-from datetime import time
-from discord.ext import tasks
-
-from utils_date import _tz
-from db import list_users_with_daily_report_enabled, list_identities_by_user
-
 
 @tasks.loop(time=time(hour=9, minute=0, tzinfo=_tz()))
 async def _daily_report_discord(bot):
