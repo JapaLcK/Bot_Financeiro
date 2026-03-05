@@ -24,7 +24,6 @@ from sheets_export import export_rows_to_dados
 import unicodedata
 from reports import setup_monthly_export
 from utils_date import _tz, now_tz, extract_date_from_text
-from commands.resumo import handle_resumo
 from utils_date import extract_date_from_text, now_tz, parse_date_str, month_range_today, days_between
 from handlers.credit import handle_credit_commands
 from utils_text import parse_money, normalize_text
@@ -230,12 +229,7 @@ async def on_message(message: discord.Message):
             )
         return
 
-   # comandos de consulta (não são lançamentos)
-    if t.startswith("resumo"):
-        await handle_resumo(message, uid, t)
-        return
-
-
+    # comandos de caixinha
     if t in ["listar caixinhas", "saldo caixinhas", "caixinhas"]:
         rows = list_pockets(uid)
 
