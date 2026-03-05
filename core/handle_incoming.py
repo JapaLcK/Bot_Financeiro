@@ -5,7 +5,7 @@ import re
 from typing import List
 from datetime import datetime, date, time
 from utils_date import _tz
-from db import get_launches_by_period, add_launch_and_update_balance
+from db import get_launches_by_period, add_launch_and_update_balance, set_daily_report_enabled
 from sheets_export import export_rows_to_dados, get_sheet_links
 from core.types import IncomingMessage, OutgoingMessage
 from core.services.quick_entry import handle_quick_entry
@@ -223,8 +223,6 @@ def handle_incoming(msg: IncomingMessage) -> List[OutgoingMessage]:
             )
         )]
 
-    
-
     msg_out = handle_quick_entry(msg.user_id, t0)
     if msg_out:
         return [msg_out]
@@ -334,6 +332,18 @@ def handle_incoming(msg: IncomingMessage) -> List[OutgoingMessage]:
             f"➕ Inseridas: {ins} | ♻️ Duplicadas: {dup}\n"
             f"🏦 Saldo atual: {saldo_txt}\n"
         ))]
+    
+    #comandos de ligar e desligar report diario 
+    t_low = (msg.text or "").strip().casefold()
+
+    if t_low in {"desligar report diario", "desativar report diario", "parar report diario"}:
+        set_daily_report_enabled(int(msg.user_id), False)
+        return [OutgoingMessage(text="✅ Report diário desligado.\nPara ligar de novo: *ligar report diario*")]
+
+    if t_low in {"ligar report diario", "ativar report diario", "voltar report diario"}:
+        set_daily_report_enabled(int(msg.user_id), True)
+        return [OutgoingMessage(text="✅ Report diário ligado.\nVocê vai receber todo dia às 09:00.")]
+
 
     # ----------------
     # FALLBACK (GPT)

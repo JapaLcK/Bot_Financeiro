@@ -125,6 +125,20 @@ def init_db():
     )
     """,
 
+# report diário (preferências do usuário)
+    """
+    create table if not exists daily_report_prefs (
+    user_id bigint primary key references users(id) on delete cascade,
+    enabled boolean not null default true,
+    hour int not null default 9,
+    minute int not null default 0
+    last_sent_date date
+    );
+    """,
+    """
+    alter table daily_report_prefs add column if not exists last_sent_date date;
+    """,
+
     # -----------------------------
     # Credit cards
     # -----------------------------
@@ -479,6 +493,7 @@ def link_platform_identity(provider: str, external_id: str, target_user_id: int)
     bind_identity(provider, external_id, primary)
 
     return primary
+
 def get_balance(user_id: int) -> Decimal:
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -3291,3 +3306,117 @@ def undo_installment_group(user_id: int, group_id: str):
         "removed_count": removed_count,
         "removed_total": float(total_removed),
     }
+
+def set_daily_report_enabled(user_id: int, enabled: bool) -> None:
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into daily_report_prefs(user_id, enabled)
+                values (%s, %s)
+                on conflict (user_id) do update set enabled=excluded.enabled
+                """,
+                (user_id, enabled),
+            )
+        conn.commit()
+
+def get_daily_report_prefs(user_id: int) -> dict:
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select enabled, hour, minute
+                from daily_report_prefs
+                where user_id=%s
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return {"enabled": True, "hour": 9, "minute": 0}
+
+            # compatível com cursor dict ou tuple
+            try:
+                return {"enabled": bool(row["enabled"]), "hour": int(row["hour"]), "minute": int(row["minute"])}
+            except Exception:
+                return {"enabled": bool(row[0]), "hour": int(row[1]), "minute": int(row[2])}
+
+def list_users_with_daily_report_enabled(hour: int = 9, minute: int = 0) -> list[int]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select u.id
+                from users u
+                left join daily_report_prefs p on p.user_id=u.id
+                where coalesce(p.enabled, true) = true
+                  and coalesce(p.hour, 9) = %s
+                  and coalesce(p.minute, 0) = %s
+                order by u.id asc
+                """,
+                (hour, minute),
+            )
+            rows = cur.fetchall() or []
+            out = []
+            for r in rows:
+                try:
+                    out.append(int(r["id"]))
+                except Exception:
+                    out.append(int(r[0]))
+            return out
+
+def list_identities_by_user(user_id: int) -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select provider, external_id
+                from user_identities
+                where user_id=%s
+                """,
+                (user_id,),
+            )
+            rows = cur.fetchall() or []
+            out = []
+            for r in rows:
+                try:
+                    out.append({"provider": r["provider"], "external_id": r["external_id"]})
+                except Exception:
+                    out.append({"provider": r[0], "external_id": r[1]})
+            return out
+        
+
+#marcar envio de mensagem diaria
+def mark_daily_report_sent(user_id: int, sent_date) -> None:
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into daily_report_prefs(user_id, last_sent_date)
+                values (%s, %s)
+                on conflict (user_id)
+                do update set last_sent_date=excluded.last_sent_date
+                """,
+                (user_id, sent_date),
+            )
+        conn.commit()
+        
+# confere se a mensagem ja foi enviada no dia 
+def was_daily_report_sent_today(user_id: int, today) -> bool:
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select last_sent_date from daily_report_prefs where user_id=%s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return False
+            try:
+                return row["last_sent_date"] == today
+            except Exception:
+                return row[0] == today

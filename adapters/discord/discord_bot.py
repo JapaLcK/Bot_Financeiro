@@ -53,6 +53,7 @@ from utils_text import (
 from investment_parse import parse_interest
 import time as pytime
 from adapters.discord.help_ui import help_embed, HelpView
+from core.reports.reports_daily import setup_daily_report
 
 
 # --------- bot setup ---------
@@ -118,6 +119,7 @@ HELP_TEXT_FULL = (
 async def on_ready():
     print(f"✅ Logado como {bot.user}")
     setup_monthly_export(bot)
+    setup_daily_report(bot)
 
 
 @bot.event
@@ -1135,7 +1137,6 @@ async def on_message(message: discord.Message):
         filename = f"dashboard_{start.isoformat()}_{end.isoformat()}.xlsx"
         await message.reply(file=discord.File(fp=bio, filename=filename))
         return
-
 
     # fallback com IA (apenas se fizer sentido financeiro)
     if should_use_ai(message.content):

@@ -5,6 +5,15 @@ import hmac
 import hashlib
 import asyncio
 from typing import Any, Dict
+import time as pytime
+from utils_date import now_tz
+from db import (
+    list_users_with_daily_report_enabled,
+    list_identities_by_user,
+    was_daily_report_sent_today,
+    mark_daily_report_sent,
+)
+from core.reports.reports_daily import build_daily_report_text
 
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse, JSONResponse
@@ -36,8 +45,11 @@ def _verify_signature(raw_body: bytes, signature_header: str) -> bool:
 
 @app.on_event("startup")
 async def _startup():
-    # cria o worker interno da fila
+    # worker interno da fila
     asyncio.create_task(_worker_loop())
+
+    # scheduler do report diário (WhatsApp)
+    asyncio.create_task(_daily_report_loop())
 
 @app.get("/wa/webhook")
 async def wa_verify(request: Request):
@@ -77,6 +89,51 @@ async def _worker_loop():
             print("[WA] worker error:", repr(e))
         finally:
             _queue.task_done()
+
+async def _daily_report_loop():
+    """
+    Loop interno que manda o report diário no WhatsApp sem precisar de cron/service extra.
+    Roda pra sempre, checa o horário e envia 1x por dia por usuário.
+    """
+    while True:
+        try:
+            now = now_tz()
+            hour = int(os.getenv("DAILY_REPORT_HOUR", "9"))
+            minute = int(os.getenv("DAILY_REPORT_MINUTE", "0"))
+
+            if now.hour == hour and now.minute == minute:
+                today = now.date()
+
+                user_ids = list_users_with_daily_report_enabled(hour, minute)
+
+                for uid in user_ids:
+                    # evita duplicar no mesmo dia
+                    if was_daily_report_sent_today(uid, today):
+                        continue
+
+                    msg = build_daily_report_text(uid)
+
+                    ids = list_identities_by_user(uid)
+                    wa_targets = [x["external_id"] for x in ids if x["provider"] == "whatsapp"]
+
+                    for to in wa_targets:
+                        try:
+                            # ✅ melhor usar o client async quando possível
+                            await wa.send_text(to, msg)
+                        except Exception as e:
+                            print("[WA] daily report send error:", repr(e))
+
+                    # marca como enviado (mesmo se não tinha target, pra não ficar tentando)
+                    try:
+                        mark_daily_report_sent(uid, today)
+                    except Exception as e:
+                        print("[WA] mark_daily_report_sent error:", repr(e))
+
+        except Exception as e:
+            print("[WA] daily report loop error:", repr(e))
+
+        # acorda 2x por minuto pra não “perder” o minuto 09:00
+        await asyncio.sleep(30)
 
 async def _process_payload(payload: dict):
     msgs = extract_messages(payload)

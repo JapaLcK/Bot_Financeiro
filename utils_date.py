@@ -170,3 +170,20 @@ def billing_period_for_close_day(ref: date, close_day: int) -> tuple[date, date]
         start = this_close + timedelta(days=1)
 
     return start, end
+
+# funcao para checar report diario
+def should_run_daily_at(now: datetime, hour: int = 9, minute: int = 0) -> bool:
+    """
+    True se 'now' (no fuso do bot) estiver no minuto exato do report.
+    Útil pra runners que rodam a cada 1 minuto.
+    """
+    return now.hour == hour and now.minute == minute
+
+# quando eh o proximo report diario
+def next_daily_run(hour: int = 9, minute: int = 0) -> datetime:
+    tz = _tz()
+    now = now_tz()
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target = target + timedelta(days=1)
+    return target
