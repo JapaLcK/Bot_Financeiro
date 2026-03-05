@@ -12,9 +12,9 @@ from db import (
     list_identities_by_user,
     was_daily_report_sent_today,
     mark_daily_report_sent,
+    get_daily_report_prefs
 )
 from core.reports.reports_daily import build_daily_report_text
-
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse, JSONResponse
 from db import get_or_create_canonical_user  # no topo do arquivo
@@ -91,48 +91,58 @@ async def _worker_loop():
             _queue.task_done()
 
 async def _daily_report_loop():
+    print("[WA] daily report loop running")
     """
-    Loop interno que manda o report diário no WhatsApp sem precisar de cron/service extra.
-    Roda pra sempre, checa o horário e envia 1x por dia por usuário.
+    Loop interno que manda o report diário no WhatsApp.
+    
+    Regras:
+    - envia se já passou do horário configurado
+    - envia apenas 1x por dia
+    - não perde envio se o bot reiniciar
     """
+
     while True:
         try:
             now = now_tz()
-            hour = int(os.getenv("DAILY_REPORT_HOUR", "9"))
-            minute = int(os.getenv("DAILY_REPORT_MINUTE", "0"))
+            today = now.date()
 
-            if now.hour == hour and now.minute == minute:
-                today = now.date()
+            # pega usuários que têm report ativado
+            user_ids = list_users_with_daily_report_enabled()
 
-                user_ids = list_users_with_daily_report_enabled(hour, minute)
+            for uid in user_ids:
 
-                for uid in user_ids:
-                    # evita duplicar no mesmo dia
-                    if was_daily_report_sent_today(uid, today):
-                        continue
+                prefs = get_daily_report_prefs(uid)
 
-                    msg = build_daily_report_text(uid)
+                if not prefs["enabled"]:
+                    continue
 
-                    ids = list_identities_by_user(uid)
-                    wa_targets = [x["external_id"] for x in ids if x["provider"] == "whatsapp"]
+                hour = prefs["hour"]
+                minute = prefs["minute"]
 
-                    for to in wa_targets:
-                        try:
-                            # ✅ melhor usar o client async quando possível
-                            await wa.send_text(to, msg)
-                        except Exception as e:
-                            print("[WA] daily report send error:", repr(e))
+                # ainda não chegou no horário
+                if (now.hour, now.minute) < (hour, minute):
+                    continue
 
-                    # marca como enviado (mesmo se não tinha target, pra não ficar tentando)
+                # já enviou hoje
+                if was_daily_report_sent_today(uid, today):
+                    continue
+
+                msg = build_daily_report_text(uid)
+
+                ids = list_identities_by_user(uid)
+                wa_targets = [x["external_id"] for x in ids if x["provider"] == "whatsapp"]
+
+                for to in wa_targets:
                     try:
-                        mark_daily_report_sent(uid, today)
+                        await wa.send_text(to, msg)
                     except Exception as e:
-                        print("[WA] mark_daily_report_sent error:", repr(e))
+                        print("[WA] daily report send error:", repr(e))
+
+                mark_daily_report_sent(uid, today)
 
         except Exception as e:
             print("[WA] daily report loop error:", repr(e))
 
-        # acorda 2x por minuto pra não “perder” o minuto 09:00
         await asyncio.sleep(30)
 
 async def _process_payload(payload: dict):
@@ -148,14 +158,33 @@ async def _process_payload(payload: dict):
 
         if m["type"] == "text":
             text = (m.get("text") or "").strip()
+            t_low = text.casefold()
+
             incoming = IncomingMessage(
                 platform="whatsapp",
-                user_id=uid,            # ✅ user canônico
-                external_id=external_id,  # ✅ necessário para link
+                user_id=uid,
+                external_id=external_id,
                 text=text,
                 message_id=message_id,
             )
+
+            # ✅ comando manual: manda o report AGORA
+            if t_low in (
+                "relatorio diario", "relatório diario",
+                "relatorio diário", "relatório diário",
+                "report diario", "resumo diario", "resumo diário",
+            ):
+                msg = build_daily_report_text(uid)
+
+                await wa.send_text(from_phone, msg)
+
+                if message_id:
+                    await wa.mark_read(message_id)
+
+                return JSONResponse({"ok": True})
+
             outs = handle_incoming(incoming)
+
             if not outs:
                 # fallback WhatsApp (porque aqui não existe "código legado" como no Discord)
                 send_text(from_phone, "❓ Não entendi. Digite `ajuda` para ver os comandos.")
