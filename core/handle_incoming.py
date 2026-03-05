@@ -32,6 +32,7 @@ from db import (
     delete_category_rule
 )
 from core.reports.reports_daily import build_daily_report_text
+from utils_text import normalize_text
 
 
 LINK_RE = re.compile(r"^\s*link(?:\s+(\d{6}))?\s*$", re.IGNORECASE)
@@ -88,6 +89,12 @@ def handle_incoming(msg: IncomingMessage) -> List[OutgoingMessage]:
     t = (msg.text or "").strip()
     platform = msg.platform
     t_low = t.casefold().strip()
+
+    t_norm = normalize_text(t0)  # remove acentos + baixa + limpa
+
+    # comandos "fixos" (NUNCA caem no AI)
+    if t_norm in ("relatorio diario", "report diario", "resumo diario"):
+        return [OutgoingMessage(text=build_daily_report_text(int(msg.user_id)))]
 
         # --- REPORT DIÁRIO (manual + liga/desliga) ---
     if t_low in ("report", "resumo", "report diario", "relatorio diario", "resumo diario"):

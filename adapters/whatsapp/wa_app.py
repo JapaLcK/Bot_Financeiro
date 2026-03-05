@@ -175,21 +175,6 @@ async def _process_payload(payload: dict):
                 message_id=message_id,
             )
 
-            # ✅ comando manual: manda o report AGORA
-            if t_low in (
-                "relatorio diario", "relatório diario",
-                "relatorio diário", "relatório diário",
-                "report diario", "resumo diario", "resumo diário",
-            ):
-                msg = build_daily_report_text(uid)
-
-                await wa.send_text(from_phone, msg)
-
-                if message_id:
-                    await wa.mark_read(message_id)
-
-                return JSONResponse({"ok": True})
-
             outs = handle_incoming(incoming)
 
             if not outs:
