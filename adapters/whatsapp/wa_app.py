@@ -22,6 +22,7 @@ from core.types import IncomingMessage
 from core.handle_incoming import handle_incoming
 from adapters.whatsapp.wa_parse import extract_messages
 from adapters.whatsapp.wa_client import send_text, wa  # WhatsAppClient singleton
+import unicodedata 
 
 app = FastAPI()
 
@@ -42,6 +43,12 @@ def _verify_signature(raw_body: bytes, signature_header: str) -> bool:
     expected_hash = hmac.new(APP_SECRET.encode(), raw_body, hashlib.sha256).hexdigest()
     expected = f"sha256={expected_hash}"
     return hmac.compare_digest(provided, expected)
+
+def normalize_text(s: str) -> str:
+    s = (s or "").casefold().strip()
+    s = unicodedata.normalize("NFD", s)
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return s
 
 @app.on_event("startup")
 async def _startup():
@@ -158,7 +165,7 @@ async def _process_payload(payload: dict):
 
         if m["type"] == "text":
             text = (m.get("text") or "").strip()
-            t_low = text.casefold()
+            t_low = normalize_text(text)
 
             incoming = IncomingMessage(
                 platform="whatsapp",
