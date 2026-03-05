@@ -90,7 +90,7 @@ def handle_incoming(msg: IncomingMessage) -> List[OutgoingMessage]:
     platform = msg.platform
     t_low = t.casefold().strip()
 
-    t_norm = normalize_text(t0)  # remove acentos + baixa + limpa
+    t_norm = normalize_text(t)  # remove acentos + baixa + limpa
 
     # comandos "fixos" (NUNCA caem no AI)
     if t_norm in ("relatorio diario", "report diario", "resumo diario"):
