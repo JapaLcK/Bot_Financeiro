@@ -89,7 +89,7 @@ def build_daily_report_text(user_id: int) -> str:
     lines.append("")
     lines.append("──────────────")
     lines.append("")
-    lines.append("⚙️ Para desligar o report diário:")
+    lines.append("⚙️ Para desligar o report diário automatico:")
     lines.append("*desligar report diario*")
 
     msg = "\n".join(lines).strip()
@@ -107,8 +107,9 @@ from utils_date import _tz
 from db import list_users_with_daily_report_enabled, list_identities_by_user
 
 
-@tasks.loop(time=time(hour=22, minute=0, tzinfo=_tz()))
+@tasks.loop(time=time(hour=23, minute=30, tzinfo=_tz()))
 async def _daily_report_discord(bot):
+    print("Daily report rodou")
     # busca usuários com report habilitado
     user_ids = list_users_with_daily_report_enabled(9, 0)
 

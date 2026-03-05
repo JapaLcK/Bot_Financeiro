@@ -9,7 +9,7 @@ from dateutil.relativedelta import relativedelta
 # ---------------- timezone helpers ----------------
 
 def _tz():
-    return ZoneInfo(os.getenv("REPORT_TIMEZONE", "America/Cuiaba"))
+    return ZoneInfo(os.getenv("REPORT_TIMEZONE", "America/New_York"))
 
 def now_tz() -> datetime:
     return datetime.now(_tz())

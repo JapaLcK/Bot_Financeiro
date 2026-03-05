@@ -31,6 +31,8 @@ from db import (
     add_category_rule,
     delete_category_rule
 )
+from core.reports.reports_daily import build_daily_report_text
+
 
 LINK_RE = re.compile(r"^\s*link(?:\s+(\d{6}))?\s*$", re.IGNORECASE)
 
@@ -87,8 +89,20 @@ def handle_incoming(msg: IncomingMessage) -> List[OutgoingMessage]:
     platform = msg.platform
     t_low = t.casefold().strip()
 
+        # --- REPORT DIÁRIO (manual + liga/desliga) ---
+    if t_low in ("report", "resumo", "report diario", "relatorio diario", "resumo diario"):
+        return [OutgoingMessage(text=build_daily_report_text(int(msg.user_id)))]
 
-    # --- OFX: prioridade máxima ---
+    if t_low in ("desligar report diario", "desativar report diario", "parar report diario"):
+        set_daily_report_enabled(int(msg.user_id), False)
+        return [OutgoingMessage(text="✅ Report diário desligado. Para ligar de novo: *ligar report diario*")]
+
+    if t_low in ("ligar report diario", "ativar report diario", "voltar report diario"):
+        set_daily_report_enabled(int(msg.user_id), True)
+        return [OutgoingMessage(text="✅ Report diário ligado. Vou te mandar todo dia no horário configurado.")]
+
+
+    # --- OFX ---
     if msg.attachments:
         ofx_atts = [a for a in msg.attachments if _is_ofx_attachment(a)]
         if ofx_atts:
