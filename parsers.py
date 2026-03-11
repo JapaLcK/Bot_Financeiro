@@ -1,5 +1,6 @@
 import re
 from utils_text import normalize_text
+from utils_date import extract_date_from_text
 from core.services.category_service import infer_category, learn_from_explicit_category
 
 
@@ -30,7 +31,13 @@ def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
 
     # categoria explícita (se houver)
     text_for_parse, explicit_cat = _extract_explicit_category(text_clean)
-    raw_norm = normalize_text(text_for_parse)
+
+    # extrai data do texto
+    dt_evento, text_without_date = extract_date_from_text(text_for_parse)
+
+    # usa o texto sem a data para tipo/categoria/valor
+    text_base = text_without_date.strip() if text_without_date else text_for_parse.strip()
+    raw_norm = normalize_text(text_base)
 
     # tipo
     tipo = None
@@ -42,7 +49,7 @@ def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
         return None
 
     # valor
-    m = re.search(r"(\d+[.,]?\d*)", text_for_parse)
+    m = re.search(r"(\d+[.,]?\d*)", text_base)
     if not m:
         return None
 
@@ -51,8 +58,6 @@ def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
         valor = float(valor_txt)
     except Exception:
         return None
-
-    dt_evento = None
 
     # inferência única (A > B > C)
     res = infer_category(user_id=user_id, text_base=raw_norm, explicit_category=explicit_cat)
