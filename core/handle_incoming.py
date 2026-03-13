@@ -231,6 +231,7 @@ def handle_incoming(msg: IncomingMessage) -> List[OutgoingMessage]:
             export_rows_to_dados(
                 msg.user_id,
                 rows,
+                allow_delete=False,
             )
         except Exception as e:
             print("EXPORT_SHEETS_ERROR:", repr(e))

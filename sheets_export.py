@@ -225,8 +225,6 @@ def export_rows_to_month_sheet(user_id: int, rows, start_dt: datetime, end_dt: d
     _base, _tab = get_sheet_links(ws)
     return _tab
 
-
-
 # Garante que exista a aba do mês no Google Sheets, duplicando o TEMPLATE se necessário
 def ensure_month_ws(sh, aba, template_name="TEMPLATE"):
     try:
@@ -244,9 +242,26 @@ def ensure_ws(sh, title: str, rows: int = 2000, cols: int = 12):
         return sh.worksheet(title)
     except gspread.WorksheetNotFound:
         return sh.add_worksheet(title=title, rows=rows, cols=cols)
+    
+# ordena a aba dados inteira por data, tipo, categoria, descrição e id (mantendo o header na linha 1)
+def _sort_dados_sheet(ws):
+    try:
+        last_row = len(ws.get_all_values())
+        if last_row < 2:
+            return
 
+        ws.sort(
+            (2, "asc"),
+            (3, "asc"),
+            (4, "asc"),
+            (5, "asc"),
+            (1, "asc"),
+            range=f"A2:I{last_row}"
+        )
+    except Exception:
+        pass
 
-def export_rows_to_dados(user_id: int, rows):
+def export_rows_to_dados(user_id: int, rows, allow_delete: bool = False):
     """
     Exporta movimentações para aba DADOS (A:H).
     Otimizações:
@@ -256,7 +271,6 @@ def export_rows_to_dados(user_id: int, rows):
       - Reclassifica OFX "outros" usando regras
       - Atualiza DB em lote (1 commit)
     """
-    from gspread.utils import rowcol_to_a1
 
     sh = _open_sheet()
     ws = ensure_ws(sh, "DADOS", rows=5000, cols=12)
@@ -422,8 +436,19 @@ def export_rows_to_dados(user_id: int, rows):
     rows_by_id: dict[int, list] = {}
     db_ids: set[int] = set()
 
+    kept = 0
+    skipped_no_money = 0
+    skipped_no_date = 0
+    feb_kept = []
+
     for r in rows:
         if not _is_monetary_row(r):
+            skipped_no_money += 1
+            continue
+
+        dt = r.get("criado_em")
+        if not hasattr(dt, "date"):
+            skipped_no_date += 1
             continue
 
         launch_id = r.get("id")
@@ -434,9 +459,10 @@ def export_rows_to_dados(user_id: int, rows):
         except Exception:
             continue
 
-        dt = r.get("criado_em")
-        if not hasattr(dt, "date"):
-            continue
+        kept += 1
+
+        if str(dt)[:7] == "2026-02":
+            feb_kept.append((r.get("id"), dt, r.get("nota")))
 
         d = dt.date()
         data_str = d.isoformat()
@@ -464,7 +490,6 @@ def export_rows_to_dados(user_id: int, rows):
         valor = float(r.get("valor") or 0)
         fonte = (r.get("origem") or r.get("source") or "").strip()
 
-        # A..I (9 colunas): ID + colunas antigas
         row_values = [
             lid,
             data_str,
@@ -479,6 +504,12 @@ def export_rows_to_dados(user_id: int, rows):
 
         rows_by_id[lid] = row_values
         db_ids.add(lid)
+
+    print("kept =", kept)
+    print("skipped_no_money =", skipped_no_money)
+    print("skipped_no_date =", skipped_no_date)
+    print("QTD fevereiro mantido =", len(feb_kept))
+    print("ALGUNS fevereiro mantido =", feb_kept[:10])
 
     # -------------------------
     # 3) Updates (IDs que já existem)
@@ -506,14 +537,15 @@ def export_rows_to_dados(user_id: int, rows):
     # -------------------------
     # 5) Deletes (IDs que existem no sheet mas sumiram do DB) -> hard delete
     # -------------------------
-    ids_to_delete = sorted(list(existing_ids - db_ids))
-    if ids_to_delete:
-        rows_to_delete = sorted([id_to_row[lid] for lid in ids_to_delete], reverse=True)
-        for rownum in rows_to_delete:
-            try:
-                ws.delete_rows(rownum)
-            except Exception:
-                pass
+    if allow_delete:
+        ids_to_delete = sorted(list(existing_ids - db_ids))
+        if ids_to_delete:
+            rows_to_delete = sorted([id_to_row[lid] for lid in ids_to_delete], reverse=True)
+            for rownum in rows_to_delete:
+                try:
+                    ws.delete_rows(rownum)
+                except Exception:
+                    pass
 
     # --- salva novo tamanho ---
     n = len(rows_by_id)  # total de lançamentos exportados do DB (após filtros)
@@ -537,5 +569,9 @@ def export_rows_to_dados(user_id: int, rows):
         ws_meta.update("Z2", [["EXPORT_DADOS_RODOU"]], value_input_option="RAW")
     except Exception:
         pass
+    
+    # ordena a aba inteira sem perder histórico
+    _sort_dados_sheet(ws)
+
     _base, _tab = get_sheet_links(ws)
     return _tab

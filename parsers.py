@@ -65,7 +65,11 @@ def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
 
     # aprendizado automático (somente se explícita)
     if explicit_cat:
-        inferred_no_explicit = infer_category(user_id=user_id, text_base=raw_norm, explicit_category=None).category
+        inferred_no_explicit = infer_category(
+            user_id=user_id,
+            text_base=raw_norm,
+            explicit_category=None
+        ).category
         learn_from_explicit_category(
             user_id=user_id,
             text_base=raw_norm,
@@ -82,6 +86,6 @@ def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
         "valor": valor,
         "categoria": categoria,
         "alvo": alvo,
-        "nota": text_clean.strip(),
+        "nota": text_base.strip(),
         "criado_em": dt_evento,
     }

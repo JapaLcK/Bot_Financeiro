@@ -4,10 +4,10 @@ import hashlib
 from datetime import datetime, date, time
 from decimal import Decimal
 import re
+from unittest import result
 from ofxparse import OfxParser
-
 from utils_date import _tz
-from db import set_balance, import_ofx_launches_bulk
+from db import set_balance, import_ofx_launches_bulk, get_last_ofx_import_end_date
 from db import list_user_category_rules
 from utils_text import normalize_text, contains_word, LOCAL_RULES
 
@@ -192,7 +192,22 @@ def import_ofx_bytes(user_id: int, ofx_bytes: bytes, filename: str | None = None
     result["filename"] = filename
     result["ledger_balance"] = ledger_balance
 
-    if ledger_balance is not None:
+    can_reconcile = False
+
+    try:
+        last_dt_end = get_last_ofx_import_end_date(user_id)
+
+        # Só reconcilia se:
+        # 1) tiver saldo no OFX
+        # 2) tiver dt_end do arquivo
+        # 3) esse OFX for o mais recente já importado
+        if ledger_balance is not None and dt_end is not None:
+            if last_dt_end is None or dt_end >= last_dt_end:
+                can_reconcile = True
+    except Exception:
+        can_reconcile = False
+
+    if can_reconcile:
         new_bal = set_balance(user_id, ledger_balance)
         result["new_balance"] = new_bal
         result["reconciled"] = True

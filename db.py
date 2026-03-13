@@ -627,11 +627,7 @@ def import_ofx_launches_bulk(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # 🔥 pipeline (psycopg3): reduz round-trips e acelera MUITO
-            try:
-                pipe_ctx = conn.pipeline()
-            except Exception:
-                pipe_ctx = None
+            pipe_ctx = None
 
             if pipe_ctx:
                 with pipe_ctx:
@@ -3420,3 +3416,23 @@ def was_daily_report_sent_today(user_id: int, today) -> bool:
                 return row["last_sent_date"] == today
             except Exception:
                 return row[0] == today
+            
+# pega a data de fim do último import OFX para o usuário, ou None se não tiver nenhum.
+def get_last_ofx_import_end_date(user_id: int):
+    ensure_user(user_id)
+    sql = """
+        select max(dt_end) as last_dt_end
+        from ofx_imports
+        where user_id = %s
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (user_id,))
+            row = cur.fetchone()
+            if not row:
+                return None
+
+            try:
+                return row["last_dt_end"]
+            except Exception:
+                return row[0]

@@ -910,8 +910,7 @@ async def on_message(message: discord.Message):
             print("Erro ao buscar CDI:", e)
             await message.reply("❌ Erro ao buscar a CDI. Veja os logs.")
             return
-
-    
+        
    # Exporta para Google Sheets (dashboard)
     if t.startswith("exportar sheets"):
         parts = text.split()
@@ -919,11 +918,13 @@ async def on_message(message: discord.Message):
         try:
             # Opção B: por padrão, exporta TUDO
             if len(parts) == 2:
+                print("CAIU NO len(parts) == 2")
                 from datetime import date
                 start = date(1970, 1, 1)
-                end = month_range_today()[1]  # hoje (fim do mês atual no seu helper)
+                end = date.today() + timedelta(days=1)  # hoje (fim do mês atual no seu helper)
             # ainda permite exportar um recorte, se você quiser usar
             elif len(parts) == 4:
+                print("CAIU NO len(parts) == 4")
                 start = parse_date_str(parts[2])
                 end = parse_date_str(parts[3])
                 if end < start:
@@ -942,7 +943,7 @@ async def on_message(message: discord.Message):
             return
 
         try:
-            sheet_link = export_rows_to_dados(uid, rows)
+            sheet_link = export_rows_to_dados(uid, rows, allow_delete=False)
         except Exception as e:
             await message.reply(f"❌ Erro ao exportar para o Sheets: {e}")
             return
