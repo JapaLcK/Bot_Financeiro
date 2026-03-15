@@ -918,13 +918,11 @@ async def on_message(message: discord.Message):
         try:
             # Opção B: por padrão, exporta TUDO
             if len(parts) == 2:
-                print("CAIU NO len(parts) == 2")
                 from datetime import date
                 start = date(1970, 1, 1)
                 end = date.today() + timedelta(days=1)  # hoje (fim do mês atual no seu helper)
             # ainda permite exportar um recorte, se você quiser usar
             elif len(parts) == 4:
-                print("CAIU NO len(parts) == 4")
                 start = parse_date_str(parts[2])
                 end = parse_date_str(parts[3])
                 if end < start:

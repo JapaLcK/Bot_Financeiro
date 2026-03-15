@@ -408,8 +408,6 @@ def export_rows_to_dados(user_id: int, rows, allow_delete: bool = False):
             except Exception:
                 pass
 
-   
-
     # Header (AGORA COM ID)
     header = ["ID", "Data", "Tipo", "Categoria", "Descrição", "Valor", "Fonte", "Nome", "Mês"]
     ws.update("A1", [header], value_input_option="USER_ENTERED")
@@ -436,19 +434,12 @@ def export_rows_to_dados(user_id: int, rows, allow_delete: bool = False):
     rows_by_id: dict[int, list] = {}
     db_ids: set[int] = set()
 
-    kept = 0
-    skipped_no_money = 0
-    skipped_no_date = 0
-    feb_kept = []
-
     for r in rows:
         if not _is_monetary_row(r):
-            skipped_no_money += 1
             continue
 
         dt = r.get("criado_em")
         if not hasattr(dt, "date"):
-            skipped_no_date += 1
             continue
 
         launch_id = r.get("id")
@@ -458,11 +449,6 @@ def export_rows_to_dados(user_id: int, rows, allow_delete: bool = False):
             lid = int(launch_id)
         except Exception:
             continue
-
-        kept += 1
-
-        if str(dt)[:7] == "2026-02":
-            feb_kept.append((r.get("id"), dt, r.get("nota")))
 
         d = dt.date()
         data_str = d.isoformat()
@@ -503,14 +489,8 @@ def export_rows_to_dados(user_id: int, rows, allow_delete: bool = False):
         ]
 
         rows_by_id[lid] = row_values
-        db_ids.add(lid)
-
-    print("kept =", kept)
-    print("skipped_no_money =", skipped_no_money)
-    print("skipped_no_date =", skipped_no_date)
-    print("QTD fevereiro mantido =", len(feb_kept))
-    print("ALGUNS fevereiro mantido =", feb_kept[:10])
-
+        db_ids.add(lid) 
+        
     # -------------------------
     # 3) Updates (IDs que já existem)
     # -------------------------
@@ -556,7 +536,6 @@ def export_rows_to_dados(user_id: int, rows, allow_delete: bool = False):
 
     # --- atualiza saldo atual no DASHBOARD ---
     try:
-        from db import get_balance
         saldo_atual = float(get_balance(user_id))
 
         ws_dashboard = sh.worksheet("DASHBOARD")
