@@ -168,3 +168,9 @@ Executa a suíte de testes automatizados para validar as principais funcionalida
 - Este arquivo é apenas para referência interna do desenvolvedor.
 - Não deve ser exposto ao público final.
 - Sempre que novos comandos forem adicionados ao bot, atualize este manual.
+
+## Comando para ativar dashboard
+cd "Bot Financeiro"
+source .venv/bin/activate
+python3 finance_bot_websocket_custom.py
+
