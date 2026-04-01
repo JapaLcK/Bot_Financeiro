@@ -1,1 +1,1 @@
-worker: python bot.py
+web: python launch.py

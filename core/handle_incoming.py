@@ -6,7 +6,7 @@ from typing import List
 from datetime import datetime, date, time
 from utils_date import _tz
 from db import get_launches_by_period, add_launch_and_update_balance, set_daily_report_enabled
-from sheets_export import export_rows_to_dados, get_sheet_links
+import os
 from core.types import IncomingMessage, OutgoingMessage
 from core.services.quick_entry import handle_quick_entry
 from core.help_text import (
@@ -214,36 +214,17 @@ def handle_incoming(msg: IncomingMessage) -> List[OutgoingMessage]:
 
             return [OutgoingMessage(text="✅ Vinculado com sucesso! Agora WhatsApp e Discord usam os mesmos dados.")]
 
-    # exportar sheets
-    if t_low in {"exportar sheets", "exportar planilha", "exportar sheet"}:
-        tz = _tz()
-        start_d, end_d = _month_range_current(tz)
-        worksheet = start_d.strftime("%Y-%m")
-
-        rows = get_launches_by_period(msg.user_id, start_d, end_d)
-        if not rows:
-            return [OutgoingMessage(text="Não encontrei lançamentos neste mês para exportar.")]
-
-        start_dt = datetime.combine(start_d, time.min)
-        end_dt = datetime.combine(end_d, time.max)
-
-        try:
-            export_rows_to_dados(
-                msg.user_id,
-                rows,
-                allow_delete=False,
-            )
-        except Exception as e:
-            print("EXPORT_SHEETS_ERROR:", repr(e))
-            return [OutgoingMessage(text="❌ Falhou ao exportar para o Google Sheets. Veja o log do servidor.")]
-
-        url_sheet, url_tab = get_sheet_links("DADOS")
-        return [OutgoingMessage(
-            text=(
-                "✅ Exportação concluída!\n"
-                f"Planilha: {url_sheet}\n"
-            )
-        )]
+    # dashboard financeiro
+    if t_low in {"dashboard", "ver dashboard", "abrir dashboard", "painel", "ver painel",
+                 "exportar sheets", "exportar planilha", "exportar sheet"}:
+        dashboard_url = os.getenv("DASHBOARD_URL", "").rstrip("/")
+        if not dashboard_url:
+            return [OutgoingMessage(text=(
+                "⚠️ Dashboard ainda não configurado.\n"
+                "Adicione DASHBOARD_URL nas variáveis de ambiente do servidor."
+            ))]
+        link = f"{dashboard_url}/?user_id={msg.user_id}"
+        return [OutgoingMessage(text=f"📊 Dashboard financeiro:\n{link}")]
 
     msg_out = handle_quick_entry(msg.user_id, t0)
     if msg_out:

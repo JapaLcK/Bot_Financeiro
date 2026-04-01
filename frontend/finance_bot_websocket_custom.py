@@ -197,27 +197,28 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None, 
             )
             categories = await cur.fetchall()
 
-            # Credit cards — pega a fatura mais recente (open > closed) por cartão,
-            # usando DISTINCT ON para evitar duplicatas quando há múltiplas faturas abertas.
+            # Credit cards — mostra a fatura cujo period_start cai DENTRO do mês visualizado.
+            # Isso identifica corretamente "a fatura de março" mesmo quando ela fecha em abril.
+            # Ex: closing_day=1, março → period_start=02/03, period_end=01/04 → aparece em março.
+            # Para meses sem fatura, cb.* será NULL (LEFT JOIN) e o card aparece sem valor.
             await cur.execute(
                 """
                 SELECT DISTINCT ON (cc.id)
                        cc.id, cc.name, cc.closing_day, cc.due_day,
                        cb.status,
                        cb.total,
-                       COALESCE(cb.paid_amount, 0) AS paid_amount,
+                       COALESCE(cb.paid_amount, 0)                          AS paid_amount,
                        GREATEST(0, cb.total - COALESCE(cb.paid_amount, 0)) AS due_amount,
                        cb.period_start, cb.period_end
                 FROM credit_cards cc
                 LEFT JOIN credit_bills cb
                     ON cc.id = cb.card_id
-                   AND cb.status IN ('open', 'closed')
+                   AND cb.period_start >= %s
+                   AND cb.period_start <  %s
                 WHERE cc.user_id = %s
-                ORDER BY cc.id,
-                         (cb.status = 'open') DESC,
-                         cb.period_start DESC
+                ORDER BY cc.id, cb.period_start DESC
                 """,
-                (user_id,),
+                (month_start, month_end, user_id),
             )
             cards = await cur.fetchall()
 
@@ -476,9 +477,13 @@ async def lifespan(app: FastAPI):
         print(f"Dashboard: http://localhost:8000/")
         print(f"WebSocket: ws://localhost:8000/ws/{uid}")
 
-    # task = asyncio.create_task(push_loop())
+    task = asyncio.create_task(push_loop())
     yield
-    # task.cancel()
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 app = FastAPI(title="Finance Dashboard", lifespan=lifespan)
 

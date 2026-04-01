@@ -41,8 +41,8 @@ HELP_SECTIONS: dict[str, str] = {
         "4) **Investimentos**\n"
         "• `criar investimento CDB 110% CDI`\n"
         "• `apliquei 200 no investimento CDB`\n\n"
-        "5) **Sheets**\n"
-        "• `exportar sheets`\n"
+        "5) **Dashboard**\n"
+        "• `dashboard`\n"
     ),
     "ofx": (
     "🧾 **Importar extrato (OFX)**\n"
@@ -95,11 +95,11 @@ HELP_SECTIONS: dict[str, str] = {
         "📊 **CDI**\n"
         "• `ver cdi`\n"
     ),
-    "sheets": (
-        "📤 **Exportar para Google Sheets**\n"
-        "• `exportar sheets`\n"
-        "• `exportar sheets 2026-02-01 2026-02-28`\n"
-        "• Datas: use `YYYY-MM-DD`\n"
+    "dashboard": (
+        "📊 **Dashboard financeiro**\n"
+        "• `dashboard` → envia o link do painel em tempo real\n"
+        "• Acesse pelo navegador para ver saldo, gastos, gráficos e mais\n"
+        "• O painel atualiza automaticamente a cada 30 segundos\n"
     ),
     "launches": (
     "🧾 **Lançamentos (histórico)**\n"
@@ -123,12 +123,12 @@ TITLE_MAP: dict[str, str] = {
     "pockets": "Caixinhas",
     "invest": "Investimentos",
     "cdi": "CDI",
-    "sheets": "Google Sheets",
+    "dashboard": "Dashboard",
     "launches": "Lançamentos",
     "confirm": "Confirmações",
 }
 
-# Ordem e metadados do menu (Discord dropdown e também serve como “índice”)
+# Ordem e metadados do menu (Discord dropdown e também serve como "índice")
 HELP_ORDER: list[tuple[str, str, str]] = [
     ("start", "Começar (visão geral)", "👋"),
     ("tutorial", "Tutorial", "🚀"),
@@ -138,7 +138,7 @@ HELP_ORDER: list[tuple[str, str, str]] = [
     ("pockets", "Caixinhas", "📦"),
     ("invest", "Investimentos", "📈"),
     ("cdi", "CDI", "📊"),
-    ("sheets", "Exportar Sheets", "📤"),
+    ("dashboard", "Dashboard financeiro", "📊"),
     ("launches", "Lançamentos", "🧾"),
     ("confirm", "Confirmações", "⚠️"),
 ]
@@ -152,7 +152,7 @@ HELP_TITLES: dict[str, str] = {
     "pockets": "Caixinhas",
     "invest": "Investimentos",
     "cdi": "CDI",
-    "sheets": "Google Sheets",
+    "dashboard": "Dashboard",
     "launches": "Lançamentos",
     "confirm": "Confirmações",
 }
@@ -173,8 +173,10 @@ HELP_ALIASES: dict[str, str] = {
     "investimento": "invest",
     "investimentos": "invest",
     "cdi": "cdi",
-    "sheet": "sheets",
-    "sheets": "sheets",
+    "sheet": "dashboard",
+    "sheets": "dashboard",
+    "dashboard": "dashboard",
+    "painel": "dashboard",
     "lanc": "launches",
     "lançamentos": "launches",
     "lancamentos": "launches",
@@ -200,7 +202,7 @@ _SECTION_ALIASES = {
     "pockets": {"caixinhas", "caixinha", "pockets"},
     "invest": {"invest", "investimentos", "investimento"},
     "cdi": {"cdi"},
-    "sheets": {"sheets", "planilha", "google sheets", "exportar"},
+    "dashboard": {"dashboard", "painel", "sheets", "planilha", "exportar"},
     "launches": {"lancamentos", "lançamentos", "historico", "histórico"},
     "confirm": {"confirm", "confirmacoes", "confirmações", "sim", "nao", "não"},
     "categories": {"categoria", "categorias", "regras", "regra", "linkar", "palavras", "palavra-chave", "palavras-chave"},
@@ -255,7 +257,7 @@ def render_help(section_key: str, platform: Platform) -> str:
     return txt
 
 def render_full(platform: Platform) -> str:
-    # para WhatsApp / texto puro, gera um “guia completo”
+    # para WhatsApp / texto puro, gera um "guia completo"
     parts: list[str] = []
     for key, label, emoji in HELP_ORDER:
         parts.append(render_help(key, platform))

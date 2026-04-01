@@ -20,9 +20,7 @@ from ai_router import handle_ai_message, classify_category_with_gpt
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, PieChart, Reference
 from openpyxl.styles import Font, PatternFill, Alignment
-from sheets_export import export_rows_to_dados
 import unicodedata
-from reports import setup_monthly_export
 from utils_date import _tz, now_tz, extract_date_from_text
 from utils_date import extract_date_from_text, now_tz, parse_date_str, month_range_today, days_between
 from handlers.credit import handle_credit_commands
@@ -99,9 +97,8 @@ HELP_TEXT_FULL = (
     "📊 **CDI**\n"
     "• `ver cdi`\n\n"
 
-    "📤 **Exportar para Google Sheets*'\n"
-    "• `exportar sheets`\n"
-    "• `exportar sheets 2026-02-01 2026-02-28`\n\n"
+    "📊 **Dashboard financeiro**\n"
+    "• `dashboard` → abre o painel em tempo real\n\n"
 
     "🧾 **Lançamentos**\n"
     "• `listar lançamentos`\n"
@@ -117,7 +114,6 @@ HELP_TEXT_FULL = (
 @bot.event
 async def on_ready():
     print(f"✅ Logado como {bot.user}")
-    setup_monthly_export(bot)
     setup_daily_report(bot)
 
 
@@ -911,42 +907,21 @@ async def on_message(message: discord.Message):
             await message.reply("❌ Erro ao buscar a CDI. Veja os logs.")
             return
         
-   # Exporta para Google Sheets (dashboard)
-    if t.startswith("exportar sheets"):
-        parts = text.split()
-
-        try:
-            # Opção B: por padrão, exporta TUDO
-            if len(parts) == 2:
-                from datetime import date
-                start = date(1970, 1, 1)
-                end = date.today() + timedelta(days=1)  # hoje (fim do mês atual no seu helper)
-            # ainda permite exportar um recorte, se você quiser usar
-            elif len(parts) == 4:
-                start = parse_date_str(parts[2])
-                end = parse_date_str(parts[3])
-                if end < start:
-                    await message.reply("A data final não pode ser menor que a inicial.")
-                    return
-            else:
-                raise ValueError("args")
-
-        except Exception:
-            await message.reply("Use: `exportar sheets` ou `exportar sheets 2026-02-01 2026-02-28`")
+    # Dashboard financeiro em tempo real
+    if t_low in ("dashboard", "ver dashboard", "abrir dashboard", "painel", "ver painel"):
+        dashboard_url = os.getenv("DASHBOARD_URL", "").rstrip("/")
+        if not dashboard_url:
+            await message.reply(
+                "⚠️ `DASHBOARD_URL` não configurada.\n"
+                "Adicione a variável de ambiente no Railway após o deploy."
+            )
             return
-
-        rows = get_launches_by_period(uid, start, end)
-        if not rows:
-            await message.reply("📭 Nenhum lançamento no período.")
-            return
-
-        try:
-            sheet_link = export_rows_to_dados(uid, rows, allow_delete=False)
-        except Exception as e:
-            await message.reply(f"❌ Erro ao exportar para o Sheets: {e}")
-            return
-
-        await message.reply(f"✅ Exportado para o dashboard (aba **DADOS**).\n🔗 {sheet_link}")
+        link = f"{dashboard_url}/?user_id={uid}"
+        await message.reply(
+            f"📊 **Dashboard financeiro**\n"
+            f"🔗 {link}\n\n"
+            f"Acesse pelo navegador para ver seus dados em tempo real."
+        )
         return
     
     # Exporta dashboard financeiro em Excel
