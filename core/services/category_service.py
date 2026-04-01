@@ -1,6 +1,7 @@
 # core/services/category_service.py
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -49,6 +50,16 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
 
             if ok:
                 return InferResult(category=normalize_text(cat2), reason="local_rule")
+
+    # D) fallback IA (só se OPENAI_API_KEY configurada)
+    if os.getenv("OPENAI_API_KEY"):
+        try:
+            from ai_router import classify_category_with_gpt
+            cat_ai = classify_category_with_gpt(t)
+            if cat_ai and cat_ai != "outros":
+                return InferResult(category=cat_ai, reason="ai")
+        except Exception:
+            pass
 
     return InferResult(category="outros", reason="default")
 

@@ -9,13 +9,22 @@ def _extract_explicit_category(raw_text: str) -> tuple[str, str | None]:
     if not t:
         return t, None
 
+    # formato: #alimentacao
     m = re.search(r"(?:^|\s)#([a-zA-ZÀ-ÿ0-9_\-]+)\b", t)
     if m:
         cat = m.group(1)
         t2 = (t[: m.start()] + t[m.end() :]).strip()
         return t2, cat
 
+    # formato: cat=alimentacao
     m = re.search(r"(?:^|\s)cat=([a-zA-ZÀ-ÿ0-9_\-]+)\b", t)
+    if m:
+        cat = m.group(1)
+        t2 = (t[: m.start()] + t[m.end() :]).strip()
+        return t2, cat
+
+    # formato: "categoria alimentacao" ou "categoria: alimentacao"
+    m = re.search(r"\bcategor(?:ia)?[:\s]+([a-zA-ZÀ-ÿ0-9_\-]+)\b", t, re.IGNORECASE)
     if m:
         cat = m.group(1)
         t2 = (t[: m.start()] + t[m.end() :]).strip()
