@@ -13,6 +13,7 @@ from uuid import uuid4
 import calendar
 import secrets
 import hashlib
+import bcrypt
 
 
 
@@ -252,7 +253,20 @@ def init_db():
     """
     create index if not exists idx_link_codes_expires on link_codes (expires_at)
     """,
-        
+    """
+    create table if not exists auth_accounts (
+      id bigserial primary key,
+      user_id bigint not null references users(id) on delete cascade,
+      email text not null unique,
+      password_hash text not null,
+      plan text not null default 'free',
+      plan_expires_at timestamptz,
+      created_at timestamptz not null default now()
+    )
+    """,
+    """
+    create index if not exists idx_auth_accounts_email on auth_accounts (email)
+    """,
 ]
 
     with get_conn() as conn:
@@ -3477,3 +3491,94 @@ def get_last_ofx_import_end_date(user_id: int):
                 return row["last_dt_end"]
             except Exception:
                 return row[0]
+
+# ─────────────────────────────────────────────
+# AUTH — cadastro e login via email/senha
+# ─────────────────────────────────────────────
+
+def _hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+def _check_password(password: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
+
+def register_auth_user(email: str, password: str) -> dict:
+    """
+    Cria uma conta via email+senha.
+    - Gera um user_id canônico usando o email como external_id
+    - Cria auth_account com hash bcrypt
+    - Retorna {user_id, link_code} pronto para uso
+    Lança ValueError se o email já estiver cadastrado.
+    """
+    email = email.strip().lower()
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # verifica email duplicado
+            cur.execute("select user_id from auth_accounts where email=%s", (email,))
+            if cur.fetchone():
+                raise ValueError("Este e-mail já está cadastrado.")
+
+    # cria user_id canônico via provider "email"
+    user_id = get_or_create_canonical_user("email", email)
+
+    password_hash = _hash_password(password)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into auth_accounts (user_id, email, password_hash)
+                values (%s, %s, %s)
+                on conflict (email) do nothing
+                """,
+                (user_id, email, password_hash),
+            )
+        conn.commit()
+
+    # gera link code com 15 min de validade
+    link_code = create_link_code(user_id, minutes_valid=15)
+
+    return {"user_id": user_id, "link_code": link_code}
+
+
+def login_auth_user(email: str, password: str) -> dict | None:
+    """
+    Valida email+senha.
+    Retorna {user_id, email, plan} ou None se inválido.
+    """
+    email = email.strip().lower()
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select user_id, password_hash, plan, plan_expires_at from auth_accounts where email=%s",
+                (email,),
+            )
+            row = cur.fetchone()
+
+    if not row:
+        return None
+    if not _check_password(password, row["password_hash"]):
+        return None
+
+    return {
+        "user_id": int(row["user_id"]),
+        "email": email,
+        "plan": row["plan"],
+        "plan_expires_at": row["plan_expires_at"],
+    }
+
+
+def get_auth_user(user_id: int) -> dict | None:
+    """Retorna dados da conta auth pelo user_id."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select email, plan, plan_expires_at, created_at from auth_accounts where user_id=%s",
+                (user_id,),
+            )
+            return cur.fetchone()

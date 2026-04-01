@@ -30,12 +30,14 @@ from typing import Dict
 
 import psycopg
 from psycopg.rows import dict_row
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
+import jwt as pyjwt
 
 load_dotenv()
 
@@ -43,6 +45,9 @@ DATABASE_URL      = os.getenv("DATABASE_URL")
 DASHBOARD_USER_ID = os.getenv("DASHBOARD_USER_ID")
 POLL_INTERVAL     = int(os.getenv("POLL_INTERVAL", "30"))
 TZ                = os.getenv("TZ", "America/Sao_Paulo")
+JWT_SECRET        = os.getenv("JWT_SECRET", "change-me-in-production")
+DASHBOARD_URL     = os.getenv("DASHBOARD_URL", "http://localhost:8000")
+WHATSAPP_NUMBER   = os.getenv("WHATSAPP_NUMBER", "")  # ex: 5511999999999
 
 HERE = pathlib.Path(__file__).parent  # directory of this file
 
@@ -493,6 +498,142 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ─── Auth helpers ────────────────────────────────────────────────────────────
+
+_bearer = HTTPBearer(auto_error=False)
+
+def _make_jwt(user_id: int, email: str) -> str:
+    from datetime import timedelta
+    payload = {
+        "sub": str(user_id),
+        "email": email,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=24),
+    }
+    return pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
+def _decode_jwt(token: str) -> dict | None:
+    try:
+        return pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    except Exception:
+        return None
+
+async def _get_current_user(creds: HTTPAuthorizationCredentials = Depends(_bearer)) -> int:
+    if not creds:
+        raise HTTPException(status_code=401, detail="Token não fornecido.")
+    payload = _decode_jwt(creds.credentials)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Token inválido ou expirado.")
+    return int(payload["sub"])
+
+# ─── Auth models ─────────────────────────────────────────────────────────────
+
+class RegisterBody(BaseModel):
+    email: str
+    password: str
+
+class LoginBody(BaseModel):
+    email: str
+    password: str
+
+# ─── Auth endpoints ──────────────────────────────────────────────────────────
+
+@app.post("/auth/register")
+async def auth_register(body: RegisterBody):
+    """Cadastra novo usuário via email+senha. Retorna JWT + link_code para vincular o bot."""
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import register_auth_user
+
+    if len(body.password) < 6:
+        raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 6 caracteres.")
+
+    try:
+        result = register_auth_user(body.email, body.password)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    user_id   = result["user_id"]
+    link_code = result["link_code"]
+    token     = _make_jwt(user_id, body.email.strip().lower())
+
+    # monta link do WhatsApp se o número estiver configurado
+    wa_link = ""
+    if WHATSAPP_NUMBER:
+        wa_link = f"https://wa.me/{WHATSAPP_NUMBER}?text=vincular%20{link_code}"
+
+    return {
+        "token": token,
+        "user_id": user_id,
+        "link_code": link_code,
+        "whatsapp_link": wa_link,
+        "dashboard_url": f"{DASHBOARD_URL}/?user_id={user_id}",
+        "expires_in": 86400,
+    }
+
+
+@app.post("/auth/login")
+async def auth_login(body: LoginBody):
+    """Login via email+senha. Retorna JWT + link_code novo para vincular o bot."""
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import login_auth_user, create_link_code
+
+    result = login_auth_user(body.email, body.password)
+    if not result:
+        raise HTTPException(status_code=401, detail="E-mail ou senha incorretos.")
+
+    user_id   = result["user_id"]
+    link_code = create_link_code(user_id, minutes_valid=15)
+    token     = _make_jwt(user_id, result["email"])
+
+    wa_link = ""
+    if WHATSAPP_NUMBER:
+        wa_link = f"https://wa.me/{WHATSAPP_NUMBER}?text=vincular%20{link_code}"
+
+    return {
+        "token": token,
+        "user_id": user_id,
+        "plan": result["plan"],
+        "link_code": link_code,
+        "whatsapp_link": wa_link,
+        "dashboard_url": f"{DASHBOARD_URL}/?user_id={user_id}",
+        "expires_in": 86400,
+    }
+
+
+@app.post("/auth/link-code")
+async def auth_new_link_code(user_id: int = Depends(_get_current_user)):
+    """Gera um novo link_code para o usuário autenticado vincular uma nova plataforma."""
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import create_link_code
+
+    link_code = create_link_code(user_id, minutes_valid=15)
+
+    wa_link = ""
+    if WHATSAPP_NUMBER:
+        wa_link = f"https://wa.me/{WHATSAPP_NUMBER}?text=vincular%20{link_code}"
+
+    return {
+        "link_code": link_code,
+        "whatsapp_link": wa_link,
+        "expires_in_minutes": 15,
+    }
+
+
+@app.get("/auth/me")
+async def auth_me(user_id: int = Depends(_get_current_user)):
+    """Retorna dados do usuário autenticado."""
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import get_auth_user
+
+    user = get_auth_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    return {"user_id": user_id, **dict(user)}
+
 
 # ─── Static file routes ──────────────────────────────────────────────────────
 

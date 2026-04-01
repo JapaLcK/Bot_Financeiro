@@ -35,39 +35,71 @@ from core.reports.reports_daily import build_daily_report_text
 from utils_text import normalize_text
 
 
+# "link 123456" — vincula Discord ↔ WhatsApp (merge de duas plataformas)
 LINK_RE = re.compile(r"^\s*link(?:\s+(\d{6}))?\s*$", re.IGNORECASE)
 
+# "vincular 123456" — vincula conta web (email/senha) ao bot nesta plataforma
+VINCULAR_RE = re.compile(r"^\s*vincular\s+(\d{6})\s*$", re.IGNORECASE)
+
 def _cmd_link(msg):
+    """Link entre plataformas: Discord ↔ WhatsApp."""
     m = LINK_RE.match(msg.text or "")
     if not m:
         return None
 
     code = m.group(1)
+    bold = lambda s: f"*{s}*" if msg.platform == "whatsapp" else f"**{s}**"
 
-    # precisa ter external_id pra link funcionar (wa_id no whatsapp, discord_user_id no discord)
     if not getattr(msg, "external_id", None):
-        return [OutgoingMessage(text="⚠️ Não consegui identificar seu id externo nesta plataforma (external_id).")]
+        return [OutgoingMessage(text="⚠️ Não consegui identificar seu ID nesta plataforma.")]
 
-    # link (sem código) -> gera código
+    # link (sem código) -> gera código para digitar na outra plataforma
     if not code:
         uid = get_or_create_canonical_user(msg.platform, msg.external_id)
         link_code = create_link_code(uid, minutes_valid=10)
         return [OutgoingMessage(
             text=(
-                f"🔗 Código de link: *{link_code}*\n"
-                "Agora digite *link 123456* na outra plataforma (o código expira em 10 min)."
+                f"🔗 Código de link: {bold(link_code)}\n"
+                "Agora digite *link 123456* na outra plataforma (expira em 10 min)."
             )
         )]
 
-    # link 123456 -> consome e mergeia
+    # link XXXXXX -> consome e mergeia as duas plataformas
     target_user_id = consume_link_code(code)
     if not target_user_id:
         return [OutgoingMessage(text="❌ Código inválido ou expirado. Envie *link* para gerar um novo.")]
 
-    final_uid = link_platform_identity(msg.platform, msg.external_id, target_user_id)
+    link_platform_identity(msg.platform, msg.external_id, target_user_id)
+
+    return [OutgoingMessage(text="✅ Contas vinculadas com sucesso! Agora Discord e WhatsApp usam os mesmos dados.")]
+
+
+def _cmd_vincular(msg):
+    """Vincula conta web (cadastro por email/senha) a esta plataforma."""
+    m = VINCULAR_RE.match(msg.text or "")
+    if not m:
+        return None
+
+    code = m.group(1)
+    bold = lambda s: f"*{s}*" if msg.platform == "whatsapp" else f"**{s}**"
+    platform_label = "WhatsApp" if msg.platform == "whatsapp" else "Discord"
+
+    if not getattr(msg, "external_id", None):
+        return [OutgoingMessage(text="⚠️ Não consegui identificar seu ID nesta plataforma.")]
+
+    target_user_id = consume_link_code(code)
+    if not target_user_id:
+        return [OutgoingMessage(
+            text="❌ Código inválido ou expirado.\nGere um novo no site e tente novamente."
+        )]
+
+    link_platform_identity(msg.platform, msg.external_id, target_user_id)
 
     return [OutgoingMessage(
-        text="✅ Contas vinculadas com sucesso! Agora Discord e WhatsApp usam os mesmos dados."
+        text=(
+            f"✅ {platform_label} vinculado à sua conta!\n"
+            f"Seus dados já estão disponíveis aqui. Digite {bold('ajuda')} para ver os comandos."
+        )
     )]
 
 def _fmt_bold(platform: str, s: str) -> str:
@@ -193,8 +225,13 @@ def handle_incoming(msg: IncomingMessage) -> List[OutgoingMessage]:
             return [OutgoingMessage(text=f"✅ Removido: **{kw}**")]
         return [OutgoingMessage(text=f"⚠️ Não encontrei regra para: **{kw}**")]
 
-    # 1) LINK
+    # 1) LINK Discord ↔ WhatsApp
     out = _cmd_link(msg)
+    if out is not None:
+        return out
+
+    # 1b) VINCULAR conta web → plataforma
+    out = _cmd_vincular(msg)
     if out is not None:
         return out
 
