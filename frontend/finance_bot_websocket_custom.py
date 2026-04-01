@@ -97,7 +97,7 @@ def _month_range(year: int, month: int):
 
 # ─── Core data fetcher ───────────────────────────────────────────────────────
 
-async def get_financial_data(user_id: int, year: int = None, month: int = None) -> dict:
+async def get_financial_data(user_id: int, year: int = None, month: int = None, page: int = 1, limit: int = 25) -> dict:
     """
     Fetch full financial snapshot for user_id.
     If year/month are given, income/expenses/categories/launches
@@ -109,6 +109,9 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None) 
     m   = month or now.month
     month_start, month_end = _month_range(y, m)
     is_current = (y == now.year and m == now.month)
+    page = max(int(page or 1), 1)
+    limit = max(min(int(limit or 25), 100), 1)
+    offset = (page - 1) * limit
 
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
@@ -134,34 +137,48 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None) 
             )
             investments = await cur.fetchall()
 
-            # Launches for the requested month
+                        # Total launches for the requested month (todos, incluindo movimentações internas)
             await cur.execute(
                 """
-                SELECT tipo, valor, alvo, nota, categoria, criado_em
+                SELECT COUNT(*) AS total
+                FROM launches
+                WHERE user_id = %s
+                  AND criado_em >= %s AND criado_em < %s
+                """,
+                (user_id, month_start, month_end),
+            )
+            launches_total_row = await cur.fetchone()
+            launches_total = int(launches_total_row["total"] or 0)
+
+            # Launches for the requested month (paginated) — inclui is_internal_movement para tag visual
+            await cur.execute(
+                """
+                SELECT tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
                 ORDER BY criado_em DESC
-                LIMIT 500
+                LIMIT %s OFFSET %s
                 """,
-                (user_id, month_start, month_end),
+                (user_id, month_start, month_end, limit, offset),
             )
             launches = await cur.fetchall()
 
-            # Monthly income / expense totals
+            # Monthly income / expense totals — EXCLUINDO movimentações internas
             await cur.execute(
                 """
                 SELECT tipo, SUM(valor) AS total
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
+                  AND is_internal_movement = false
                 GROUP BY tipo
                 """,
                 (user_id, month_start, month_end),
             )
             monthly = await cur.fetchall()
 
-            # Expense categories for the month
+            # Expense categories for the month — EXCLUINDO movimentações internas
             await cur.execute(
                 """
                 SELECT COALESCE(categoria, 'sem categoria') AS categoria,
@@ -170,6 +187,7 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None) 
                 FROM launches
                 WHERE user_id = %s
                   AND tipo     = 'despesa'
+                  AND is_internal_movement = false
                   AND criado_em >= %s AND criado_em < %s
                 GROUP BY COALESCE(categoria, 'sem categoria')
                 ORDER BY total DESC
@@ -179,24 +197,31 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None) 
             )
             categories = await cur.fetchall()
 
-            # Credit cards (always current open/closed bill)
+            # Credit cards — pega a fatura mais recente (open > closed) por cartão,
+            # usando DISTINCT ON para evitar duplicatas quando há múltiplas faturas abertas.
             await cur.execute(
                 """
-                SELECT cc.id, cc.name, cc.closing_day, cc.due_day,
-                       cb.status, cb.total, cb.paid_amount,
+                SELECT DISTINCT ON (cc.id)
+                       cc.id, cc.name, cc.closing_day, cc.due_day,
+                       cb.status,
+                       cb.total,
+                       COALESCE(cb.paid_amount, 0) AS paid_amount,
+                       GREATEST(0, cb.total - COALESCE(cb.paid_amount, 0)) AS due_amount,
                        cb.period_start, cb.period_end
                 FROM credit_cards cc
                 LEFT JOIN credit_bills cb
                     ON cc.id = cb.card_id
                    AND cb.status IN ('open', 'closed')
                 WHERE cc.user_id = %s
-                ORDER BY cc.name
+                ORDER BY cc.id,
+                         (cb.status = 'open') DESC,
+                         cb.period_start DESC
                 """,
                 (user_id,),
             )
             cards = await cur.fetchall()
 
-            # Daily expenses for the month (for bar chart)
+            # Daily expenses for the month (for bar chart) — EXCLUINDO movimentações internas
             await cur.execute(
                 f"""
                 SELECT EXTRACT(DAY FROM criado_em AT TIME ZONE '{TZ}')::int AS dia,
@@ -204,6 +229,7 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None) 
                 FROM launches
                 WHERE user_id = %s
                   AND tipo IN ('despesa', 'saida')
+                  AND is_internal_movement = false
                   AND criado_em >= %s AND criado_em < %s
                 GROUP BY dia
                 ORDER BY dia
@@ -270,6 +296,12 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None) 
         "pockets":            [dict(r) for r in pockets],
         "investments":        [dict(r) for r in investments],
         "recent_launches":    [dict(r) for r in launches],
+        "launches_pagination": {
+            "page": page,
+            "limit": limit,
+            "total": launches_total,
+            "total_pages": max((launches_total + limit - 1) // limit, 1),
+        },
         "monthly_income":     inc,
         "monthly_expense":    exp,
         "expense_categories": cat_list,
@@ -293,6 +325,7 @@ async def get_monthly_history(user_id: int, n_months: int = 6) -> list:
                 WHERE user_id = %s
                   AND criado_em >= NOW() - INTERVAL '{int(n_months)} months'
                   AND tipo IN ('receita', 'despesa')
+                  AND is_internal_movement = false
                 GROUP BY mes, tipo
                 ORDER BY mes
                 """,
@@ -443,9 +476,9 @@ async def lifespan(app: FastAPI):
         print(f"Dashboard: http://localhost:8000/")
         print(f"WebSocket: ws://localhost:8000/ws/{uid}")
 
-    task = asyncio.create_task(push_loop())
+    # task = asyncio.create_task(push_loop())
     yield
-    task.cancel()
+    # task.cancel()
 
 app = FastAPI(title="Finance Dashboard", lifespan=lifespan)
 
@@ -491,8 +524,14 @@ async def list_all_users():
     return {"users": [r["id"] for r in rows]}
 
 @app.get("/data/{user_id}")
-async def get_data(user_id: int, year: int = None, month: int = None):
-    return await get_financial_data(user_id, year, month)
+async def get_data(
+    user_id: int,
+    year: int = None,
+    month: int = None,
+    page: int = 1,
+    limit: int = 25,
+):
+    return await get_financial_data(user_id, year, month, page, limit)
 
 @app.get("/history/{user_id}")
 async def monthly_history(user_id: int, months: int = 6):
@@ -580,7 +619,9 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
 
                 if t == "refresh":
                     y, m = manager.get_month(ws, user_id)
-                    data = await get_financial_data(user_id, y, m)
+                    page  = int(payload.get("page", 1))
+                    limit = int(payload.get("limit", 25))
+                    data = await get_financial_data(user_id, y, m, page, limit)
                     await ws.send_text(jdump({"type": "update", "data": data}))
 
                 elif t == "get_month":
@@ -588,10 +629,12 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
                     now = datetime.now(timezone.utc)
                     y   = int(payload.get("year", now.year))
                     m   = int(payload.get("month", now.month))
+                    page  = int(payload.get("page", 1))
+                    limit = int(payload.get("limit", 25))
 
                     manager.set_month(ws, user_id, y, m)
 
-                    data = await get_financial_data(user_id, y, m)
+                    data = await get_financial_data(user_id, y, m, page, limit)
                     await ws.send_text(jdump({"type": "month_data", "data": data}))
 
                 elif t == "get_history":

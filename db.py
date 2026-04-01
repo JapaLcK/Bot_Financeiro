@@ -84,7 +84,10 @@ def init_db():
       external_id text,
       posted_at date,
       currency text,
-      imported_at timestamptz
+      imported_at timestamptz,
+
+      -- Movimentação interna: não entra nos cálculos de receita/despesa do dashboard
+      is_internal_movement boolean not null default false
     )
     """,
     """
@@ -95,6 +98,20 @@ def init_db():
     -- garante dedupe: (user_id, source, external_id)
     create unique index if not exists uq_launches_user_source_external
       on launches(user_id, source, external_id)
+    """,
+    """
+    -- migration: adiciona coluna is_internal_movement se ainda não existe
+    alter table launches add column if not exists
+      is_internal_movement boolean not null default false
+    """,
+    """
+    -- migration: marca retroativamente aportes, resgates e categoria investimentos como movimentações internas
+    update launches set is_internal_movement = true
+    where (
+      tipo in ('aporte_investimento', 'resgate_investimento')
+      or categoria = 'investimentos'
+    )
+    and is_internal_movement = false
     """,
     """
     create table if not exists pending_actions (
@@ -519,14 +536,18 @@ def add_launch_and_update_balance(
     valor: float,
     alvo: str | None,
     nota: str | None,
-    categoria: str | None = None,        # 👈 NOVO
+    categoria: str | None = None,
     criado_em: datetime | None = None,
+    is_internal_movement: bool = False,
 ):
     """
     Lança registro em launches e atualiza saldo em accounts na mesma transação.
     Regra:
       - despesa: saldo -= valor
       - receita: saldo += valor
+    Movimentações internas (aportes/resgates de investimento, transferências entre contas
+    próprias) devem ser registradas com is_internal_movement=True: aparecem na lista de
+    lançamentos mas não entram nos cálculos de receita/despesa do dashboard.
     """
     ensure_user(user_id)
 
@@ -554,11 +575,11 @@ def add_launch_and_update_balance(
 
             cur.execute(
                 """
-                insert into launches(user_id, tipo, valor, alvo, nota, categoria, criado_em, efeitos)
-                values (%s,%s,%s,%s,%s,%s,%s,%s)
+                insert into launches(user_id, tipo, valor, alvo, nota, categoria, criado_em, efeitos, is_internal_movement)
+                values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 returning id
                 """,
-                (user_id, tipo, v, alvo, nota, cat, criado_em, Json({"delta_conta": float(delta)})),
+                (user_id, tipo, v, alvo, nota, cat, criado_em, Json({"delta_conta": float(delta)}), is_internal_movement),
             )
             launch_id = cur.fetchone()["id"]
 
@@ -636,9 +657,9 @@ def import_ofx_launches_bulk(
                             """
                             insert into launches(
                                 user_id, tipo, valor, categoria, alvo, nota, criado_em, efeitos,
-                                source, external_id, posted_at, currency, imported_at
+                                source, external_id, posted_at, currency, imported_at, is_internal_movement
                             )
-                            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
+                            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now(),%s)
                             on conflict (user_id, source, external_id) do nothing
                             returning id
                             """,
@@ -646,8 +667,8 @@ def import_ofx_launches_bulk(
                                 user_id,
                                 r["tipo"],
                                 r["valor"],
-                                r.get("categoria"),   # ✅ agora vai pra coluna categoria
-                                None,                 # ✅ alvo fica vazio pro OFX (alvo é pra caixinha/investimento etc)
+                                r.get("categoria"),
+                                None,
                                 r.get("nota"),
                                 r["criado_em"],
                                 Json({"delta_conta": float(r["delta"]), "ofx": r.get("ofx_meta", {})}),
@@ -655,6 +676,7 @@ def import_ofx_launches_bulk(
                                 r["external_id"],
                                 r.get("posted_at"),
                                 r.get("currency", "BRL"),
+                                r.get("is_internal_movement", False),
                             ),
                         )
                         # rowcount=1 se inseriu, 0 se foi conflito
@@ -669,10 +691,10 @@ def import_ofx_launches_bulk(
                     cur.execute(
                         """
                         insert into launches(
-                            user_id, tipo, valor, alvo, nota, criado_em, efeitos,
-                            source, external_id, posted_at, currency, imported_at
+                            user_id, tipo, valor, categoria, alvo, nota, criado_em, efeitos,
+                            source, external_id, posted_at, currency, imported_at, is_internal_movement
                         )
-                        values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
+                        values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now(),%s)
                         on conflict (user_id, source, external_id) do nothing
                         """,
                         (
@@ -687,6 +709,7 @@ def import_ofx_launches_bulk(
                             r["external_id"],
                             r.get("posted_at"),
                             r.get("currency", "BRL"),
+                            r.get("is_internal_movement", False),
                         ),
                     )
                     if (cur.rowcount or 0) == 1:
@@ -1536,11 +1559,11 @@ def investment_withdraw_to_account(user_id: int, investment_name: str, amount: f
 
             cur.execute(
                 """
-                insert into launches(user_id, tipo, valor, alvo, nota, criado_em, efeitos)
-                values (%s,%s,%s,%s,%s,%s,%s)
+                insert into launches(user_id, tipo, valor, alvo, nota, criado_em, efeitos, is_internal_movement)
+                values (%s,%s,%s,%s,%s,%s,%s,%s)
                 returning id
                 """,
-                (user_id, "resgate_investimento", v, inv_name_canon, nota, criado_em, Jsonb(efeitos)),
+                (user_id, "resgate_investimento", v, inv_name_canon, nota, criado_em, Jsonb(efeitos), True),
             )
             launch_id = cur.fetchone()["id"]
 
@@ -1737,11 +1760,11 @@ def investment_deposit_from_account(user_id: int, investment_name: str, amount: 
 
             cur.execute(
                 """
-                insert into launches(user_id, tipo, valor, alvo, nota, criado_em, efeitos)
-                values (%s,%s,%s,%s,%s,%s,%s)
+                insert into launches(user_id, tipo, valor, alvo, nota, criado_em, efeitos, is_internal_movement)
+                values (%s,%s,%s,%s,%s,%s,%s,%s)
                 returning id
                 """,
-                (user_id, "aporte_investimento", v, inv_name_canon, nota, criado_em, Jsonb(efeitos)),
+                (user_id, "aporte_investimento", v, inv_name_canon, nota, criado_em, Jsonb(efeitos), True),
             )
             launch_id = cur.fetchone()["id"]
 
@@ -2761,7 +2784,8 @@ def get_open_bill_summary(user_id: int, card_id: int, as_of: date | None = None)
             # 5) itens da fatura
             cur.execute(
                 """
-                select id, valor, categoria, nota, purchased_at
+                select id, valor, categoria, nota, purchased_at,
+                       installment_no, installments_total, group_id, is_refund
                 from credit_transactions
                 where user_id=%s
                   and bill_id=%s
@@ -2903,8 +2927,14 @@ def add_credit_purchase_installments(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("select closing_day from credit_cards where id=%s", (card_id,))
-            closing_day = cur.fetchone()["closing_day"]
+            cur.execute(
+                "select closing_day from credit_cards where id=%s and user_id=%s",
+                (card_id, user_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise ValueError("Cartão não encontrado ou não pertence a este usuário.")
+            closing_day = row["closing_day"]
 
     group_id = uuid4()
     vtotal = Decimal(str(valor_total))
@@ -2963,7 +2993,7 @@ def add_credit_refund(
     purchased_at: date,
 ):
     ensure_user(user_id)
-    bill_id = get_or_create_open_bill(card_id, purchased_at)
+    bill_id = get_or_create_open_bill(user_id, card_id, purchased_at)
 
     v = Decimal(str(valor))
     if v <= 0:
@@ -3056,13 +3086,16 @@ def pay_bill_amount(
             else:
                 pay = due
 
-            # debita conta corrente
+            # debita conta corrente — pagamento de fatura é movimentação interna
+            # (os gastos reais já foram registrados individualmente no cartão)
             launch_id, new_balance = add_launch_and_update_balance(
                 user_id=user_id,
                 tipo="despesa",
                 valor=float(pay),
                 alvo=f"fatura:{card_name}",
                 nota=f"Pagamento de fatura ({card_name})",
+                categoria="pagamento_fatura",
+                is_internal_movement=True,
             )
 
             # atualiza fatura
@@ -3178,11 +3211,19 @@ def list_installment_groups(user_id: int, limit: int = 15):
                 """
                 select
                     t.group_id,
-                    c.name as card_name,
-                    count(*) as n,
-                    sum(t.valor) as total
+                    c.name              as card_name,
+                    max(t.installments_total) as n_total,
+                    count(*)            as n_registered,
+                    sum(t.valor)        as total,
+                    -- parcelas em faturas ainda abertas (não pagas)
+                    sum(case when b.status = 'open' then t.valor else 0 end) as total_pending,
+                    -- quantas parcelas ainda estão em faturas abertas
+                    count(case when b.status = 'open' then 1 end) as n_pending,
+                    max(t.purchased_at) as last_purchase,
+                    min(t.nota)         as nota
                 from credit_transactions t
                 join credit_cards c on c.id = t.card_id
+                join credit_bills b on b.id = t.bill_id
                 where t.user_id=%s
                   and t.group_id is not null
                   and t.is_refund=false

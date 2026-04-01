@@ -16,6 +16,7 @@ def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
     alvo = parsed.get("alvo")
     nota = parsed.get("nota")
     criado_em = parsed.get("criado_em")
+    is_internal = parsed.get("is_internal_movement", False)
 
     launch_id, new_balance = add_launch_and_update_balance(
         user_id=user_id,
@@ -25,6 +26,7 @@ def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
         nota=nota,
         categoria=categoria,
         criado_em=criado_em,
+        is_internal_movement=is_internal,
     )
 
     emoji = "💸" if tipo == "despesa" else "💰"

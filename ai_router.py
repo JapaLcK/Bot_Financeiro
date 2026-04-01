@@ -8,6 +8,7 @@ import db
 import hashlib
 from db import list_category_rules
 from core.services.category_service import infer_category
+from utils_text import is_internal_category
 
 # aliases para não precisar mudar o resto do arquivo
 ensure_user = db.ensure_user
@@ -474,6 +475,7 @@ def handle_ai_message(user_id: int | str, text: str) -> str | None:
             nota=args.get("nota", text),
             categoria=categoria,
             criado_em=None,
+            is_internal_movement=is_internal_category(categoria),
         )
         return f"✅ Lançamento criado **#{launch_id}** ({categoria}). Saldo agora: **{new_balance}**"
 

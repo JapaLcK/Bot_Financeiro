@@ -280,9 +280,18 @@ async def handle_credit_commands(message, uid: int) -> bool:
             dt_evento = now_tz()
         purchased_at = dt_evento.date()
 
-        # nota/categoria
-        nota = normalize_text(t)
-        categoria = _infer_category(user_id, t)
+        # Remove os tokens de comando da nota (valor, parcelas, cartão, data)
+        desc_clean = rest2  # já sem data
+        desc_clean = regex.sub(r"\bparcelei?\b", "", desc_clean, flags=regex.IGNORECASE)
+        desc_clean = regex.sub(r"\b\d+[\.,]?\d*\b", "", desc_clean)        # remove números/valores
+        desc_clean = regex.sub(r"\b\d+\s*x\b", "", desc_clean, flags=regex.IGNORECASE)  # remove "3x"
+        desc_clean = regex.sub(r"\bem\b", "", desc_clean, flags=regex.IGNORECASE)
+        desc_clean = regex.sub(r"\bno\s+cart[aã]o\s+\S+", "", desc_clean, flags=regex.IGNORECASE)
+        desc_clean = regex.sub(r"\bcart[aã]o\s+\S+", "", desc_clean, flags=regex.IGNORECASE)
+        desc_clean = " ".join(desc_clean.split())  # normaliza espaços
+
+        nota = normalize_text(desc_clean) if desc_clean.strip() else normalize_text(t)
+        categoria = _infer_category(user_id, desc_clean or t)
 
         card_id, resolved_name = _pick_card_id(user_id, card_name)
         if not card_id:
@@ -516,10 +525,17 @@ async def handle_credit_commands(message, uid: int) -> bool:
                 "",
             ]
 
-            for it in items[:10]:
+            shown = items[:10]
+            for it in shown:
+                parcela = ""
+                if it.get("installment_no") and it.get("installments_total"):
+                    parcela = f" [{it['installment_no']}/{it['installments_total']}]"
                 lines.append(
-                    f"• {fmt_brl(it['valor'])} | {it['categoria'] or 'outros'} | {fmt_br(it['purchased_at'])} | {it['nota'] or ''}"
+                    f"• {fmt_brl(it['valor'])} | {it['categoria'] or 'outros'} | {fmt_br(it['purchased_at'])} | {it['nota'] or ''}{parcela}"
                 )
+
+            if len(items) > 10:
+                lines.append(f"\n… e mais {len(items) - 10} lançamento(s). Use `exportar` para ver tudo.")
 
             await message.reply("\n".join(lines))
             return True
@@ -539,15 +555,36 @@ async def handle_credit_commands(message, uid: int) -> bool:
             await message.reply("📭 Você não tem parcelamentos registrados.")
             return True
 
-        lines = ["📦 **Parcelamentos (grupos):**"]
+        lines = ["📦 **Parcelamentos ativos:**"]
         for r in rows:
+            n_total    = int(r.get("n_total") or r.get("n_registered") or 0)
+            n_pending  = int(r.get("n_pending") or 0)
+            n_paid     = n_total - n_pending
+            total      = float(r.get("total") or 0)
+            pending    = float(r.get("total_pending") or 0)
+            nota       = (r.get("nota") or "").strip()
+            card       = r.get("card_name", "?")
+            group_id   = str(r.get("group_id") or "")
+
+            # Oculta parcelamentos totalmente quitados
+            if n_pending == 0:
+                continue
+
+            desc = f" — {nota}" if nota else ""
+            progress = f"{n_paid}/{n_total} pagas"
             lines.append(
-                f"• {r['card_name']} | {fmt_brl(r['total'])} | {r['n']} itens | grupo: {r['group_id']}"
+                f"• {card}{desc}\n"
+                f"  💰 Total: {fmt_brl(total)} | Restante: {fmt_brl(pending)} ({progress})\n"
+                f"  🔑 grupo: `{group_id}`"
             )
+
+        if len(lines) == 1:
+            await message.reply("✅ Você não tem parcelamentos em aberto.")
+            return True
 
         msg = "\n".join(lines)
         if len(msg) > 1900:
-            msg = "\n".join(lines[:10]) + "\n\n(⚠️ Muitos resultados; vou mostrar só os 10 primeiros.)"
+            msg = "\n".join(lines[:12]) + "\n\n(⚠️ Muitos resultados; veja os mais recentes acima.)"
 
         await message.reply(msg)
         return True

@@ -168,6 +168,7 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .tag.saida,.tag.despesa   { background:rgba(248,113,113,.14);color:var(--red);  border:1px solid rgba(248,113,113,.22); }
 .tag.entrada,.tag.receita { background:rgba(52,211,153,.12); color:var(--green);border:1px solid rgba(52,211,153,.2); }
 .tag.investimento         { background:rgba(96,165,250,.12); color:var(--blue); border:1px solid rgba(96,165,250,.2); }
+.tag.interno              { background:rgba(167,139,250,.1);  color:#a78bfa;      border:1px solid rgba(167,139,250,.22); }
 .tag.x                    { background:rgba(255,255,255,.06);color:var(--text-2);border:1px solid var(--div); }
 
 /* ─── Filter bar ────────────────────────────────────────────────────── */
@@ -276,6 +277,14 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
     <div class="card"><h2>Gastos por Dia</h2><div class="chart-wrap bar"><canvas id="chart-day"></canvas></div></div>
   </div>
 
+  <p class="section-title" id="history-title" style="display:none">Histórico Mensal</p>
+  <div id="history-wrap" style="display:none">
+    <div class="card">
+      <h2>Receita vs Despesa — Últimos 6 Meses</h2>
+      <div class="chart-wrap" style="height:230px"><canvas id="chart-history"></canvas></div>
+    </div>
+  </div>
+
   <p class="section-title" id="launches-title" style="display:none">Lançamentos</p>
   <div id="launches-wrap" style="display:none">
     <div class="filter-bar">
@@ -285,6 +294,7 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
         <button class="ftab"        data-type="receita"      onclick="setTab(this)">Receitas</button>
         <button class="ftab"        data-type="despesa"      onclick="setTab(this)">Despesas</button>
         <button class="ftab"        data-type="investimento" onclick="setTab(this)">Invest.</button>
+        <button class="ftab"        data-type="interno"      onclick="setTab(this)">Internos</button>
       </div>
     </div>
     <div class="card" id="launches-card"></div>
@@ -311,9 +321,21 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 /* ═══════════════════════════════════════════════════════════════════════
    CONFIG
 ═══════════════════════════════════════════════════════════════════════ */
-const USER_ID = 477493407;
-const WS_URL  = `ws://localhost:8000/ws/${USER_ID}`;
-const API     = `http://localhost:8000`;
+// pega user_id da URL (?user_id=123)
+const params  = new URLSearchParams(window.location.search);
+const USER_ID = Number(params.get("user_id"));
+
+if (!USER_ID) {
+  alert("Erro: user_id não informado na URL");
+  throw new Error("user_id missing");
+}
+
+// base dinâmica (funciona local + railway)
+const BASE_HTTP = window.location.origin;
+const BASE_WS   = BASE_HTTP.replace("http://", "ws://").replace("https://", "wss://");
+
+const WS_URL = `${BASE_WS}/ws/${USER_ID}`;
+const API    = BASE_HTTP;
 
 /* ═══════════════════════════════════════════════════════════════════════
    STATE
@@ -321,8 +343,12 @@ const API     = `http://localhost:8000`;
 let ws, lastData = null;
 let filterType   = "all";
 let bgtTarget    = null;
-let chartCat     = null, chartDay = null;
+let chartCat     = null, chartDay = null, chartHistory = null;
 const prevNums   = {};
+
+let launchesPage     = 1;
+const LAUNCHES_LIMIT = 25;
+let launchesLoading  = false;
 
 const NOW = new Date();
 let viewYear = NOW.getFullYear(), viewMonth = NOW.getMonth() + 1;
@@ -386,23 +412,32 @@ function changeMonth(d) {
   viewMonth += d;
   if (viewMonth > 12) { viewMonth = 1; viewYear++; }
   if (viewMonth < 1)  { viewMonth = 12; viewYear--; }
+
+  launchesPage = 1;
   updateMonthLabel();
+
   const btn = document.getElementById("refresh-btn");
-  btn.classList.add("spinning"); btn.disabled = true;
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({type:"get_month", year:viewYear, month:viewMonth}));
-  } else {
-    fetchMonthHttp(viewYear, viewMonth);
-  }
+  btn.classList.add("spinning");
+  btn.disabled = true;
+
+  requestMonthPage(1, { smoothScroll: false });
 }
 
-async function fetchMonthHttp(year, month) {
+async function fetchMonthHttp(year, month, page = 1, limit = LAUNCHES_LIMIT) {
   try {
-    const r    = await fetch(`${API}/data/${USER_ID}?year=${year}&month=${month}`);
+    const r = await fetch(
+      `${API}/data/${USER_ID}?year=${year}&month=${month}&page=${page}&limit=${limit}`
+    );
     const data = await r.json();
-    lastData   = data;
+    lastData = data;
     render(data);
-  } catch(err) { console.error("fetchMonthHttp error:", err); }
+    stopSpin();
+    setLaunchesLoading(false);
+  } catch(err) {
+    console.error("fetchMonthHttp error:", err);
+    stopSpin();
+    setLaunchesLoading(false);
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -410,13 +445,20 @@ async function fetchMonthHttp(year, month) {
 ═══════════════════════════════════════════════════════════════════════ */
 function sendRefresh() {
   if (ws && ws.readyState === WebSocket.OPEN) {
-    const isCurrent = viewYear === NOW.getFullYear() && viewMonth === NOW.getMonth() + 1;
-    const msg = isCurrent
-      ? {type:"refresh"}
-      : {type:"get_month", year:viewYear, month:viewMonth};
+    const msg = {
+      type: "get_month",
+      year: viewYear,
+      month: viewMonth,
+      page: launchesPage,
+      limit: LAUNCHES_LIMIT
+    };
     ws.send(JSON.stringify(msg));
+
     const btn = document.getElementById("refresh-btn");
-    btn.classList.add("spinning"); btn.disabled = true;
+    btn.classList.add("spinning");
+    btn.disabled = true;
+    setLaunchesLoading(true);
+    fetchHistory();
   }
 }
 function stopSpin() {
@@ -447,27 +489,35 @@ function connect() {
   ws = new WebSocket(WS_URL);
   ws.onopen = () => {
     setStatus("connected");
-    const isCurrent = viewYear === NOW.getFullYear() && viewMonth === NOW.getMonth() + 1;
-    if (!isCurrent) ws.send(JSON.stringify({type:"get_month", year:viewYear, month:viewMonth}));
+    ws.send(JSON.stringify({
+      type: "get_month",
+      year: viewYear,
+      month: viewMonth,
+      page: launchesPage,
+      limit: LAUNCHES_LIMIT
+    }));
+    fetchHistory();
   };
-  ws.onmessage = e => {
+    ws.onmessage = e => {
     const msg = JSON.parse(e.data);
+
     if (msg.type === "snapshot" || msg.type === "month_data") {
       lastData = msg.data;
       render(msg.data);
       stopSpin();
+      setLaunchesLoading(false);
     } else if (msg.type === "update") {
-      // push_loop always sends current-month data — only apply if user is viewing that month
       const serverYear  = msg.data.year  || NOW.getFullYear();
       const serverMonth = msg.data.month || (NOW.getMonth() + 1);
+
       if (serverYear === viewYear && serverMonth === viewMonth) {
         lastData = msg.data;
         render(msg.data);
-        stopSpin();
         showToast();
       }
-      // Always stop the spinner regardless
+
       stopSpin();
+      setLaunchesLoading(false);
     }
   };
   ws.onclose = () => { setStatus("disconnected"); setTimeout(connect, 3000); };
@@ -494,40 +544,172 @@ function renderAlerts(alerts) {
 /* ═══════════════════════════════════════════════════════════════════════
    FILTER + LAUNCHES
 ═══════════════════════════════════════════════════════════════════════ */
+function setLaunchesLoading(on) {
+  launchesLoading = on;
+  const card = document.getElementById("launches-card");
+  if (!card) return;
+
+  card.style.transition = "opacity .18s ease";
+  card.style.opacity = on ? "0.45" : "1";
+}
+
+function scrollLaunchesToTop() {
+  const wrap = document.getElementById("launches-wrap");
+  if (wrap) wrap.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function requestMonthPage(page, { smoothScroll = true } = {}) {
+  launchesPage = page;
+  setLaunchesLoading(true);
+
+  if (smoothScroll) {
+    scrollLaunchesToTop();
+  }
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: "get_month",
+      year: viewYear,
+      month: viewMonth,
+      page: launchesPage,
+      limit: LAUNCHES_LIMIT
+    }));
+  } else {
+    fetchMonthHttp(viewYear, viewMonth, launchesPage, LAUNCHES_LIMIT);
+  }
+}
+
 function setTab(el) {
   document.querySelectorAll(".ftab").forEach(t => t.classList.remove("active"));
   el.classList.add("active");
   filterType = el.dataset.type;
+  launchesPage = 1;
   renderLaunches();
 }
-function applyFilter() { renderLaunches(); }
+function applyFilter() {
+  launchesPage = 1;
+  renderLaunches();
+}
+
+function setLaunchesPage(page) {
+  requestMonthPage(page);
+}
+
+function renderLaunchesPagination(totalItems, totalPages) {
+  if (totalPages <= 1) return "";
+
+  let html = `<div style="display:flex;justify-content:center;align-items:center;gap:8px;flex-wrap:wrap;margin-top:16px;">`;
+
+  html += `
+    <button class="ftab"
+            onclick="setLaunchesPage(1)"
+            ${launchesPage === 1 ? 'disabled style="opacity:.5;cursor:default;"' : ""}>
+      «
+    </button>
+  `;
+
+  html += `
+    <button class="ftab"
+            onclick="setLaunchesPage(${Math.max(1, launchesPage - 1)})"
+            ${launchesPage === 1 ? 'disabled style="opacity:.5;cursor:default;"' : ""}>
+      ‹
+    </button>
+  `;
+
+  const start = Math.max(1, launchesPage - 2);
+  const end   = Math.min(totalPages, launchesPage + 2);
+
+  for (let p = start; p <= end; p++) {
+    html += `
+      <button class="ftab ${p === launchesPage ? "active" : ""}" onclick="setLaunchesPage(${p})">
+        ${p}
+      </button>
+    `;
+  }
+
+  html += `
+    <button class="ftab"
+            onclick="setLaunchesPage(${Math.min(totalPages, launchesPage + 1)})"
+            ${launchesPage === totalPages ? 'disabled style="opacity:.5;cursor:default;"' : ""}>
+      ›
+    </button>
+  `;
+
+  html += `
+    <button class="ftab"
+            onclick="setLaunchesPage(${totalPages})"
+            ${launchesPage === totalPages ? 'disabled style="opacity:.5;cursor:default;"' : ""}>
+      »
+    </button>
+  `;
+
+  html += `</div>`;
+
+  html += `
+    <div style="margin-top:8px;text-align:center;font-size:.72rem;color:var(--text-3);">
+      Mostrando ${totalItems === 0 ? 0 : ((launchesPage - 1) * LAUNCHES_LIMIT + 1)}
+      –
+      ${Math.min(launchesPage * LAUNCHES_LIMIT, totalItems)}
+      de ${totalItems} lançamentos
+    </div>
+  `;
+
+  return html;
+}
 
 function renderLaunches() {
   if (!lastData) return;
-  const text  = (document.getElementById("filter-text").value || "").toLowerCase().trim();
+
+  const text = (document.getElementById("filter-text").value || "").toLowerCase().trim();
+
   const items = (lastData.recent_launches || []).filter(l => {
-    const ok_type = filterType === "all" || l.tipo === filterType;
+    const ok_type = filterType === "all"
+      || (filterType === "interno" && l.is_internal_movement)
+      || (filterType !== "interno" && l.tipo === filterType && !l.is_internal_movement);
     const ok_text = !text ||
-      (l.nota      && l.nota.toLowerCase().includes(text)) ||
-      (l.alvo      && l.alvo.toLowerCase().includes(text)) ||
+      (l.nota && l.nota.toLowerCase().includes(text)) ||
+      (l.alvo && l.alvo.toLowerCase().includes(text)) ||
       (l.categoria && l.categoria.toLowerCase().includes(text));
     return ok_type && ok_text;
   });
+
   const card = document.getElementById("launches-card");
-  if (!items.length) { card.innerHTML = '<div class="empty">Nenhum lançamento encontrado.</div>'; return; }
-  card.innerHTML = items.slice(0, 20).map(l => `
-    <div class="row">
-      <span class="lbl">
-        <span class="tag ${l.tipo}">${l.tipo}</span>
-        ${l.nota || l.alvo || '—'}
-        ${l.categoria ? `<span class="tag x">${l.categoria}</span>` : ''}
-      </span>
-      <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
-        <span class="val ${l.tipo==='receita'||l.tipo==='entrada'?'g':'r'}"
-              data-num="lnc_${l.criado_em}" data-val="${l.valor}">${fmt(l.valor)}</span>
-        <span style="font-size:.65rem;color:var(--text-3)">${fmtDate(l.criado_em)}</span>
-      </span>
-    </div>`).join("");
+
+  if (!items.length) {
+    card.innerHTML = '<div class="empty">Nenhum lançamento encontrado.</div>';
+    return;
+  }
+
+  const meta = lastData.launches_pagination || {
+    page: launchesPage,
+    limit: LAUNCHES_LIMIT,
+    total: items.length,
+    total_pages: 1
+  };
+
+  launchesPage = meta.page || 1;
+
+  card.innerHTML =
+    items.map(l => {
+      const isInternal = l.is_internal_movement;
+      const valClass   = isInternal ? '' : (l.tipo==='receita'||l.tipo==='entrada' ? 'g' : 'r');
+      const valStyle   = isInternal ? 'color:var(--text-2)' : '';
+      return `
+      <div class="row" style="${isInternal?'opacity:.75':''}">
+        <span class="lbl">
+          <span class="tag ${l.tipo}">${l.tipo}</span>
+          ${isInternal ? '<span class="tag interno">mov. interna</span>' : ''}
+          ${l.nota || l.alvo || '—'}
+          ${l.categoria ? `<span class="tag x">${l.categoria}</span>` : ''}
+        </span>
+        <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+          <span class="val ${valClass}" style="${valStyle}"
+                data-num="lnc_${l.criado_em}_${l.valor}" data-val="${l.valor}">${fmt(l.valor)}</span>
+          <span style="font-size:.65rem;color:var(--text-3)">${fmtDate(l.criado_em)}</span>
+        </span>
+      </div>
+    `}).join("")
+    + renderLaunchesPagination(meta.total || items.length, meta.total_pages || 1);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -647,10 +829,108 @@ function buildDayChart(daily) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   MONTHLY HISTORY CHART
+═══════════════════════════════════════════════════════════════════════ */
+function buildHistoryChart(history) {
+  const el = document.getElementById("chart-history");
+  if (!el || !history || !history.length) return;
+
+  const labels   = history.map(h => {
+    const [y, m] = h.month.split("-");
+    return PT_MONTHS[parseInt(m) - 1].substring(0, 3) + "/" + y.substring(2);
+  });
+  const incomes  = history.map(h => h.income  || 0);
+  const expenses = history.map(h => h.expense || 0);
+
+  if (chartHistory) chartHistory.destroy();
+  chartHistory = new Chart(el, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Receita",
+          data: incomes,
+          backgroundColor: "rgba(52,211,153,.55)",
+          borderColor: "rgba(52,211,153,1)",
+          borderWidth: 1.5,
+          borderRadius: 5,
+          borderSkipped: false
+        },
+        {
+          label: "Despesa",
+          data: expenses,
+          backgroundColor: "rgba(248,113,113,.55)",
+          borderColor: "rgba(248,113,113,1)",
+          borderWidth: 1.5,
+          borderRadius: 5,
+          borderSkipped: false
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          labels: {
+            color: "rgba(255,255,255,.55)",
+            font: { size: 11 },
+            usePointStyle: true,
+            padding: 16
+          }
+        },
+        tooltip: {
+          backgroundColor: "rgba(10,12,24,.9)",
+          borderColor: "rgba(255,255,255,.1)",
+          borderWidth: 1,
+          titleColor: "rgba(255,255,255,.9)",
+          bodyColor: "rgba(255,255,255,.6)",
+          callbacks: { label: ctx => " " + fmt(ctx.parsed.y) }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: "rgba(255,255,255,.04)" },
+          ticks: { color: "rgba(255,255,255,.4)", font: { size: 10 } }
+        },
+        y: {
+          grid: { color: "rgba(255,255,255,.05)" },
+          ticks: { color: "rgba(255,255,255,.4)", font: { size: 10 }, callback: v => fmtShort(v) }
+        }
+      },
+      animation: { duration: 700, easing: "easeInOutQuart" }
+    }
+  });
+}
+
+async function fetchHistory() {
+  try {
+    const r = await fetch(`${API}/history/${USER_ID}`);
+    if (!r.ok) return;
+
+    const payload = await r.json();
+    const history = payload.data || [];
+
+    if (!history.length) return;
+
+    document.getElementById("history-title").style.display = "";
+    document.getElementById("history-wrap").style.display  = "";
+
+    setTimeout(() => buildHistoryChart(history), 50);
+  } catch(e) {
+    console.warn("[history] fetch error:", e);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    RENDER
 ═══════════════════════════════════════════════════════════════════════ */
 function render(d) {
   const grid = document.getElementById("grid");
+  if (d.launches_pagination?.page) {
+    launchesPage = d.launches_pagination.page;
+}
   const ry   = d.year  || viewYear;
   const rm   = d.month || viewMonth;
   const ni   = (d.investments||[]).reduce((s,i)=>s+i.balance,0);
@@ -729,10 +1009,24 @@ function render(d) {
     <div class="card" style="animation-delay:300ms">
       <h2>Cartões de Crédito</h2>
       ${!(d.credit_cards||[]).length?'<div class="empty">Nenhum cartão.</div>':
-        d.credit_cards.map(c=>`<div class="row">
-          <span class="lbl">${c.name} <span class="tag x">${c.status||'—'}</span></span>
-          <span class="val r" data-num="cc_${c.name}" data-val="${c.total||0}">${c.total!=null?fmt(c.total):'—'}</span>
-        </div>`).join("")}
+        d.credit_cards.map(c=>{
+          const due   = c.due_amount != null ? c.due_amount : Math.max(0, (c.total||0) - (c.paid_amount||0));
+          const total = c.total || 0;
+          const paid  = c.paid_amount || 0;
+          const statusBadge = c.status === 'paid' ? 'paga' : c.status || '—';
+          const hasData = total > 0 || paid > 0;
+          return `<div class="row">
+            <span class="lbl">
+              ${c.name}
+              <span class="tag x">${statusBadge}</span>
+              ${hasData ? `<span style="font-size:.63rem;color:var(--text-3)">fecha dia ${c.closing_day}</span>` : ''}
+            </span>
+            <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+              <span class="val r" data-num="cc_${c.name}" data-val="${due}">${hasData ? fmt(due) : '—'}</span>
+              ${hasData && paid > 0 ? `<span style="font-size:.63rem;color:var(--text-3)">total ${fmt(total)} · pago ${fmt(paid)}</span>` : ''}
+            </span>
+          </div>`;
+        }).join("")}
     </div>
   `;
 
@@ -758,7 +1052,7 @@ function render(d) {
   requestAnimationFrame(animateCounters);
 
   document.getElementById("last-update").textContent =
-    "Última atualização: " + fmtDate(d.timestamp + "Z");
+    "Última atualização: " + fmtDate(d.timestamp);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -766,6 +1060,7 @@ function render(d) {
 ═══════════════════════════════════════════════════════════════════════ */
 updateMonthLabel();
 connect();
+fetchHistory();
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {

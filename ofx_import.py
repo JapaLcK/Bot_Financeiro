@@ -9,7 +9,7 @@ from ofxparse import OfxParser
 from utils_date import _tz
 from db import set_balance, import_ofx_launches_bulk, get_last_ofx_import_end_date
 from db import list_user_category_rules
-from utils_text import normalize_text, contains_word, LOCAL_RULES
+from utils_text import normalize_text, contains_word, LOCAL_RULES, INTERNAL_MOVEMENT_CATEGORIES
 
 
 def _extract_ledger_balance(ofx_bytes: bytes) -> Decimal | None:
@@ -151,6 +151,8 @@ def import_ofx_bytes(user_id: int, ofx_bytes: bytes, filename: str | None = None
         if not categoria:
             categoria = "outros"
 
+        is_internal = normalize_text(categoria) in INTERNAL_MOVEMENT_CATEGORIES
+
         criado_em = datetime.combine(posted_at, time(12, 0), tzinfo=tz)
 
         launches_rows.append(
@@ -164,6 +166,7 @@ def import_ofx_bytes(user_id: int, ofx_bytes: bytes, filename: str | None = None
                 "posted_at": posted_at,
                 "criado_em": criado_em,
                 "currency": "BRL",
+                "is_internal_movement": is_internal,
                 "ofx_meta": {
                     "memo": memo,
                     "amount_signed": float(amount),

@@ -31,8 +31,30 @@ LOCAL_RULES = [
     (["uber", "99", "taxi", "metro", "onibus", "gasolina", "combustivel"], "transporte"),
     (["academia", "remedio", "farmacia", "dentista", "consulta"], "saúde"),
     (["netflix", "spotify", "youtube", "prime video", "disney"], "assinaturas"),
-    (["compra de ações", "compra de acoes", "compra de ação", "compra de acao", "ações", "acoes", "ação", "acao", "fii", "fiis", "rdb", "cdb", "lci", "lca", "tesouro", "selic", "ipca", "etf", "ETF", "aplicação", "aplicacao", "resgate"], "investimentos")
+    # Aportes de investimento — movimentação interna (não é despesa real)
+    (["aporte", "aplicacao", "aplicação", "compra de acoes", "compra de ações", "compra de acao", "compra de ação",
+      "acao", "ação", "acoes", "ações", "fii", "fiis", "cdb", "rdb", "lci", "lca",
+      "tesouro", "selic", "ipca", "etf"], "investimento_aporte"),
+    # Resgates de investimento — movimentação interna (não é receita real)
+    (["resgate", "retirada de investimento", "retirei do investimento"], "investimento_resgate"),
+    # Rendimentos — receita real (lucro/juros/dividendos)
+    (["rendimento", "rendimentos", "juros", "dividendo", "dividendos", "lucro investimento"], "rendimentos")
 ]
+
+# Categorias que representam movimentações internas (não entram em receita/despesa do dashboard)
+INTERNAL_MOVEMENT_CATEGORIES = {
+    "investimento_aporte",
+    "investimento_resgate",
+    "transferencia_interna",
+    "pagamento_fatura",
+    "ajuste_saldo",
+}
+
+def is_internal_category(categoria: str | None) -> bool:
+    """Retorna True se a categoria indica movimentação interna."""
+    if not categoria:
+        return False
+    return normalize_text(categoria) in INTERNAL_MOVEMENT_CATEGORIES
 
 STOPWORDS_PT = {
     "gastei","paguei","comprei","debitei","recebi","ganhei","salario","reembolso",

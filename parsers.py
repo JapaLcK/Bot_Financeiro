@@ -1,5 +1,5 @@
 import re
-from utils_text import normalize_text
+from utils_text import normalize_text, is_internal_category
 from utils_date import extract_date_from_text
 from core.services.category_service import infer_category, learn_from_explicit_category
 
@@ -88,4 +88,5 @@ def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
         "alvo": alvo,
         "nota": text_base.strip(),
         "criado_em": dt_evento,
+        "is_internal_movement": is_internal_category(categoria),
     }
