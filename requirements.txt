@@ -52,5 +52,6 @@ urllib3==2.6.3
 yarl==1.22.0
 ofxparse
 fastapi==0.115.6
-uvicorn==0.30.6
+uvicorn[standard]
 flask
+websockets
