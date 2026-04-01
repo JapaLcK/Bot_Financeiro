@@ -76,16 +76,16 @@ def extract_keyword_for_memory(text_norm: str) -> str:
                 if ok:
                     return kw_norm
 
-    # 2) fallback: pega o último “token útil” (exclui números e stopwords)
+    # 2) fallback: pega o último "token útil" (exclui números e stopwords)
     tokens = [
         t for t in text_norm.split()
         if t
         and t not in STOPWORDS_PT
         and len(t) >= 3
-        and not t.replace(“,”, “”).replace(“.”, “”).isdigit()
+        and not t.replace(",", "").replace(".", "").isdigit()
     ]
     if not tokens:
-        return “”
+        return ""
     return tokens[-1]
 
 def fmt_brl(v: float) -> str:
