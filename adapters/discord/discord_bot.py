@@ -187,6 +187,21 @@ async def on_message(message: discord.Message):
                 if action == "delete_launch":
                     delete_launch_and_rollback(uid, int(payload["launch_id"]))
                     await message.reply(f"🗑️ Apagado e revertido: lançamento **#{payload['launch_id']}**.")
+                elif action == "delete_launch_bulk":
+                    ids = payload["launch_ids"]
+                    failed = []
+                    for lid in ids:
+                        try:
+                            delete_launch_and_rollback(uid, int(lid))
+                        except Exception:
+                            failed.append(lid)
+                    ok_ids = [i for i in ids if i not in failed]
+                    msg_parts = []
+                    if ok_ids:
+                        msg_parts.append("🗑️ Apagados: " + ", ".join(f"**#{i}**" for i in ok_ids))
+                    if failed:
+                        msg_parts.append("⚠️ Falha ao apagar: " + ", ".join(f"#{i}" for i in failed))
+                    await message.reply("\n".join(msg_parts))
                 elif action == "delete_pocket":
                     delete_pocket(uid, payload["pocket_name"])
                     await message.reply(f"🗑️ Caixinha deletada: **{payload['pocket_name']}**.")
@@ -811,38 +826,55 @@ async def on_message(message: discord.Message):
     # Apagar lançamento pelo ID (Postgres) - com confirmação
     # =========================
     if t.startswith("apagar") or t.startswith("remover"):
-        m = re.search(r'(\d+)', t)
-        if not m:
-            await message.reply("Me diga o ID do lançamento. Ex: `apagar 3`")
+        # extrai todos os IDs mencionados (ex: "apagar 3 5 10" ou "apagar id 3, 5, 10")
+        ids_found = [int(x) for x in re.findall(r'\d+', t)]
+        if not ids_found:
+            await message.reply("Me diga o ID do lançamento. Ex: `apagar 3` ou `apagar 3 5 10`")
             return
 
-        launch_id = int(m.group(1))
-
-        # (opcional) valida se existe antes de pedir confirmação
         rows = list_launches(uid, limit=1000)
-        row = next((r for r in rows if int(r["id"]) == launch_id), None)
-        if not row:
-            await message.reply(f"Não achei lançamento com ID {launch_id}.")
+        rows_by_id = {int(r["id"]): r for r in rows}
+
+        found = []
+        not_found = []
+        for lid in ids_found:
+            if lid in rows_by_id:
+                found.append(rows_by_id[lid])
+            else:
+                not_found.append(lid)
+
+        if not found:
+            ids_str = ", ".join(str(i) for i in ids_found)
+            await message.reply(f"Não achei nenhum lançamento com os IDs: {ids_str}")
             return
 
-        tipo = (row.get("tipo") or "").lower()
-        tipo_label = "Despesa" if tipo == "despesa" else "Receita" if tipo == "receita" else tipo
-        valor = float(row.get("valor") or 0)
-        alvo = row.get("alvo") or ""
-        nota = row.get("nota") or ""
-        criado = row.get("criado_em")
-        data = criado.strftime("%d/%m/%Y %H:%M") if hasattr(criado, "strftime") else str(criado)
+        # monta preview de cada lançamento encontrado
+        lines = []
+        for row in found:
+            lid = int(row["id"])
+            tipo = (row.get("tipo") or "").lower()
+            tipo_label = "Despesa" if tipo == "despesa" else "Receita" if tipo == "receita" else tipo
+            valor = float(row.get("valor") or 0)
+            alvo = row.get("alvo") or ""
+            nota = row.get("nota") or ""
+            criado = row.get("criado_em")
+            data = criado.strftime("%d/%m/%Y %H:%M") if hasattr(criado, "strftime") else str(criado)
+            desc = f" — {alvo or nota}" if (alvo or nota) else ""
+            lines.append(f"• **#{lid}** • {tipo_label} • **{fmt_brl(valor)}**{desc} • {data}")
 
-        desc = alvo if alvo else nota
-        if desc:
-            desc = f" — {desc}"
+        aviso = ""
+        if not_found:
+            aviso = f"\n⚠️ IDs não encontrados: {', '.join(str(i) for i in not_found)}"
 
-        set_pending_action(uid, "delete_launch", {"launch_id": launch_id}, minutes=10)
+        launch_ids = [int(r["id"]) for r in found]
+        set_pending_action(uid, "delete_launch_bulk", {"launch_ids": launch_ids}, minutes=10)
 
+        plural = "este lançamento" if len(found) == 1 else f"estes {len(found)} lançamentos"
         await message.reply(
-            "⚠️ Você está prestes a apagar este lançamento:\n"
-            f"• **#{launch_id}** • **{tipo_label}** • **{fmt_brl(valor)}**{desc} • {data}\n\n"
-            "Responda **sim** para confirmar ou **não** para cancelar. (expira em 10 min)"
+            f"⚠️ Você está prestes a apagar {plural}:\n" +
+            "\n".join(lines) +
+            aviso +
+            "\n\nResponda **sim** para confirmar ou **não** para cancelar. (expira em 10 min)"
         )
         return
 
