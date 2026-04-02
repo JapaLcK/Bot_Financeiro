@@ -174,6 +174,7 @@ def init_db():
     """
     create table if not exists credit_bills (
       id bigserial primary key,
+      user_id bigint references users(id) on delete cascade,
       card_id bigint not null references credit_cards(id) on delete cascade,
       period_start date not null,
       period_end date not null,
@@ -269,6 +270,9 @@ def init_db():
     """,
     """
     alter table auth_accounts add column if not exists stripe_customer_id text unique
+    """,
+    """
+    alter table credit_bills add column if not exists user_id bigint references users(id) on delete cascade
     """,
     """
     create table if not exists dashboard_sessions (
@@ -394,8 +398,81 @@ def merge_users(from_user_id: int, to_user_id: int) -> None:
             cur.execute("update credit_transactions set user_id=%s where user_id=%s", (to_user_id, from_user_id))
             cur.execute("update ofx_imports set user_id=%s where user_id=%s", (to_user_id, from_user_id))
 
-            # credit_cards pode colidir por unique(user_id, name) — se você quiser, eu te dou o merge seguro disso.
-            # cur.execute("update credit_cards set user_id=%s where user_id=%s", (to_user_id, from_user_id))
+            # =========================
+            # 6) credit_cards: merge seguro por nome (evita unique(user_id, name))
+            # =========================
+            cur.execute("select id, name from credit_cards where user_id=%s", (from_user_id,))
+            from_cards = cur.fetchall()
+
+            for from_card in from_cards:
+                from_card_id = from_card["id"]
+                from_card_name = from_card["name"]
+
+                cur.execute(
+                    "select id from credit_cards where user_id=%s and name=%s",
+                    (to_user_id, from_card_name),
+                )
+                to_card_row = cur.fetchone()
+
+                if to_card_row:
+                    # Cartão com mesmo nome já existe no destino — precisa redirecionar
+                    to_card_id = to_card_row["id"]
+
+                    # Remove bills do from_card que colidem por período com bills do to_card
+                    # (cascade deleta as credit_transactions dessas bills)
+                    cur.execute(
+                        """
+                        delete from credit_bills fb
+                        using credit_bills tb
+                        where fb.card_id = %s
+                          and tb.card_id = %s
+                          and fb.period_start = tb.period_start
+                          and fb.period_end = tb.period_end
+                        """,
+                        (from_card_id, to_card_id),
+                    )
+
+                    # Move bills restantes pro cartão destino
+                    cur.execute(
+                        "update credit_bills set card_id=%s where card_id=%s",
+                        (to_card_id, from_card_id),
+                    )
+
+                    # Move transactions restantes pro cartão destino
+                    cur.execute(
+                        "update credit_transactions set card_id=%s where card_id=%s",
+                        (to_card_id, from_card_id),
+                    )
+
+                    # Deleta o cartão duplicado (sem bills/transactions restantes)
+                    cur.execute("delete from credit_cards where id=%s", (from_card_id,))
+                else:
+                    # Sem colisão de nome — só troca o dono
+                    cur.execute(
+                        "update credit_cards set user_id=%s where id=%s",
+                        (to_user_id, from_card_id),
+                    )
+
+            # =========================
+            # 7) credit_bills.user_id
+            # =========================
+            cur.execute(
+                "update credit_bills set user_id=%s where user_id=%s",
+                (to_user_id, from_user_id),
+            )
+
+            # =========================
+            # 8) auth_accounts: migra conta de email se from_user tem e to_user não tem
+            # =========================
+            cur.execute("select id from auth_accounts where user_id=%s limit 1", (to_user_id,))
+            to_has_auth = cur.fetchone() is not None
+
+            if not to_has_auth:
+                cur.execute(
+                    "update auth_accounts set user_id=%s where user_id=%s",
+                    (to_user_id, from_user_id),
+                )
+            # Se to_user já tem auth, a conta do from_user será removida por cascade
 
         conn.commit()
 def choose_primary_user(a_user_id: int, b_user_id: int) -> tuple[int, int]:
