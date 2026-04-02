@@ -538,12 +538,29 @@ class LoginBody(BaseModel):
 
 # ─── Auth endpoints ──────────────────────────────────────────────────────────
 
+@app.get("/auth/validate")
+async def auth_validate(token: str):
+    """
+    Valida um dashboard token gerado pelo bot.
+    Retorna user_id se válido, 401 caso contrário.
+    """
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from token_utils import decode_dashboard_token
+
+    user_id = decode_dashboard_token(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Token inválido ou expirado.")
+    return {"user_id": user_id}
+
+
 @app.post("/auth/register")
 async def auth_register(body: RegisterBody):
     """Cadastra novo usuário via email+senha. Retorna JWT + link_code para vincular o bot."""
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import register_auth_user
+    from token_utils import make_dashboard_token
 
     if len(body.password) < 6:
         raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 6 caracteres.")
@@ -553,9 +570,10 @@ async def auth_register(body: RegisterBody):
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
-    user_id   = result["user_id"]
-    link_code = result["link_code"]
-    token     = _make_jwt(user_id, body.email.strip().lower())
+    user_id    = result["user_id"]
+    link_code  = result["link_code"]
+    token      = _make_jwt(user_id, body.email.strip().lower())
+    dash_token = make_dashboard_token(user_id, hours=24)
 
     # monta link do WhatsApp se o número estiver configurado
     wa_link = ""
@@ -567,7 +585,7 @@ async def auth_register(body: RegisterBody):
         "user_id": user_id,
         "link_code": link_code,
         "whatsapp_link": wa_link,
-        "dashboard_url": f"{DASHBOARD_URL}/app?user_id={user_id}",
+        "dashboard_url": f"{DASHBOARD_URL}/app?token={dash_token}",
         "expires_in": 86400,
     }
 
@@ -578,14 +596,16 @@ async def auth_login(body: LoginBody):
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import login_auth_user, create_link_code
+    from token_utils import make_dashboard_token
 
     result = login_auth_user(body.email, body.password)
     if not result:
         raise HTTPException(status_code=401, detail="E-mail ou senha incorretos.")
 
-    user_id   = result["user_id"]
-    link_code = create_link_code(user_id, minutes_valid=15)
-    token     = _make_jwt(user_id, result["email"])
+    user_id    = result["user_id"]
+    link_code  = create_link_code(user_id, minutes_valid=15)
+    token      = _make_jwt(user_id, result["email"])
+    dash_token = make_dashboard_token(user_id, hours=24)
 
     wa_link = ""
     if WHATSAPP_NUMBER:
@@ -597,7 +617,7 @@ async def auth_login(body: LoginBody):
         "plan": result["plan"],
         "link_code": link_code,
         "whatsapp_link": wa_link,
-        "dashboard_url": f"{DASHBOARD_URL}/app?user_id={user_id}",
+        "dashboard_url": f"{DASHBOARD_URL}/app?token={dash_token}",
         "expires_in": 86400,
     }
 

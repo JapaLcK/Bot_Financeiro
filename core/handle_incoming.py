@@ -260,7 +260,12 @@ def handle_incoming(msg: IncomingMessage) -> List[OutgoingMessage]:
                 "⚠️ Dashboard ainda não configurado.\n"
                 "Adicione DASHBOARD_URL nas variáveis de ambiente do servidor."
             ))]
-        link = f"{dashboard_url}/app?user_id={msg.user_id}"
+        try:
+            from token_utils import make_dashboard_token
+            dash_token = make_dashboard_token(msg.user_id, hours=2)
+            link = f"{dashboard_url}/app?token={dash_token}"
+        except Exception:
+            link = f"{dashboard_url}/app?user_id={msg.user_id}"
         return [OutgoingMessage(text=f"📊 Dashboard financeiro:\n{link}")]
 
     msg_out = handle_quick_entry(msg.user_id, t0)

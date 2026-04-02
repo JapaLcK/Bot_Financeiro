@@ -364,7 +364,7 @@ async def handle_credit_commands(message, uid: int) -> bool:
     # -------------------------
     # pagar fatura (total ou parcial) - fatura ATUAL do período
     # -------------------------
-    if t_low.startswith("pagar fatura"):
+    if t_low.startswith("pagar fatura") or t_low.startswith("paguei fatura"):
         rest = t[len("pagar fatura"):].strip()
 
         tokens = rest.split() if rest else []

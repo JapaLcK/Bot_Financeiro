@@ -948,7 +948,12 @@ async def on_message(message: discord.Message):
                 "Adicione a variável de ambiente no Railway após o deploy."
             )
             return
-        link = f"{dashboard_url}/app?user_id={uid}"
+        try:
+            from token_utils import make_dashboard_token
+            dash_token = make_dashboard_token(uid, hours=2)
+            link = f"{dashboard_url}/app?token={dash_token}"
+        except Exception:
+            link = f"{dashboard_url}/app?user_id={uid}"
         await message.reply(
             f"📊 **Dashboard financeiro**\n"
             f"🔗 {link}\n\n"
