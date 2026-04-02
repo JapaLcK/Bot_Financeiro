@@ -30,7 +30,7 @@ from typing import Dict
 
 import psycopg
 from psycopg.rows import dict_row
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse, HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -38,6 +38,9 @@ import uvicorn
 from dotenv import load_dotenv
 from pydantic import BaseModel, EmailStr
 import jwt as pyjwt
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 load_dotenv()
 
@@ -45,9 +48,12 @@ DATABASE_URL      = os.getenv("DATABASE_URL")
 DASHBOARD_USER_ID = os.getenv("DASHBOARD_USER_ID")
 POLL_INTERVAL     = int(os.getenv("POLL_INTERVAL", "30"))
 TZ                = os.getenv("TZ", "America/Sao_Paulo")
-JWT_SECRET        = os.getenv("JWT_SECRET", "change-me-in-production")
-DASHBOARD_URL     = os.getenv("DASHBOARD_URL", "http://localhost:8000")
-WHATSAPP_NUMBER   = os.getenv("WHATSAPP_NUMBER", "")  # ex: 5511999999999
+JWT_SECRET              = os.getenv("JWT_SECRET", "change-me-in-production")
+DASHBOARD_URL           = os.getenv("DASHBOARD_URL", "http://localhost:8000")
+WHATSAPP_NUMBER         = os.getenv("WHATSAPP_NUMBER", "")
+STRIPE_SECRET_KEY       = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET   = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_PRICE_ID_PRO     = os.getenv("STRIPE_PRICE_ID_PRO", "")   # price_xxx do plano Pro
 
 HERE = pathlib.Path(__file__).parent  # directory of this file
 
@@ -492,6 +498,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Finance Dashboard", lifespan=lifespan)
 
+# ─── Rate limiting ────────────────────────────────────────────────────────────
+
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -555,7 +567,8 @@ async def auth_validate(token: str):
 
 
 @app.post("/auth/register")
-async def auth_register(body: RegisterBody):
+@limiter.limit("5/minute")
+async def auth_register(request: Request, body: RegisterBody):
     """Cadastra novo usuário via email+senha. Retorna JWT + link_code para vincular o bot."""
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -591,7 +604,8 @@ async def auth_register(body: RegisterBody):
 
 
 @app.post("/auth/login")
-async def auth_login(body: LoginBody):
+@limiter.limit("10/minute")
+async def auth_login(request: Request, body: LoginBody):
     """Login via email+senha. Retorna JWT + link_code novo para vincular o bot."""
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -653,6 +667,136 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
     return {"user_id": user_id, **dict(user)}
+
+
+# ─── Billing (Stripe) ────────────────────────────────────────────────────────
+
+@app.post("/billing/create-checkout")
+async def billing_create_checkout(user_id: int = Depends(_get_current_user)):
+    """
+    Cria uma sessão de checkout no Stripe para upgrade para o plano Pro.
+    Requer: STRIPE_SECRET_KEY e STRIPE_PRICE_ID_PRO configurados.
+    """
+    if not STRIPE_SECRET_KEY or not STRIPE_PRICE_ID_PRO:
+        raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
+
+    import stripe
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import get_auth_user, set_stripe_customer
+
+    stripe.api_key = STRIPE_SECRET_KEY
+
+    user = get_auth_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+
+    # Recupera ou cria o customer no Stripe
+    customer_id = user.get("stripe_customer_id")
+    if not customer_id:
+        customer = stripe.Customer.create(
+            email=user["email"],
+            metadata={"finbot_user_id": str(user_id)},
+        )
+        customer_id = customer.id
+        set_stripe_customer(user_id, customer_id)
+
+    session = stripe.checkout.Session.create(
+        customer=customer_id,
+        payment_method_types=["card"],
+        line_items=[{"price": STRIPE_PRICE_ID_PRO, "quantity": 1}],
+        mode="subscription",
+        success_url=f"{DASHBOARD_URL}/app?upgrade=success",
+        cancel_url=f"{DASHBOARD_URL}/app?upgrade=cancelled",
+        metadata={"finbot_user_id": str(user_id)},
+    )
+
+    return {"checkout_url": session.url}
+
+
+@app.post("/billing/webhook")
+async def billing_webhook(request: Request):
+    """
+    Recebe eventos do Stripe (checkout.session.completed, customer.subscription.*).
+    Atualiza o plano do usuário no banco.
+    """
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="Stripe não configurado.")
+
+    import stripe
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import update_user_plan, get_user_by_stripe_customer
+
+    stripe.api_key = STRIPE_SECRET_KEY
+    payload    = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+    except stripe.error.SignatureVerificationError:
+        raise HTTPException(status_code=400, detail="Assinatura inválida.")
+
+    def _resolve_user(obj) -> int | None:
+        uid = obj.get("metadata", {}).get("finbot_user_id")
+        if uid:
+            return int(uid)
+        cid = obj.get("customer")
+        if cid:
+            return get_user_by_stripe_customer(cid)
+        return None
+
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        user_id = _resolve_user(session)
+        if user_id:
+            # Subscription ainda pode estar incompleta; aguarda invoice.paid
+            pass
+
+    elif event["type"] in ("invoice.paid", "invoice.payment_succeeded"):
+        invoice  = event["data"]["object"]
+        user_id  = _resolve_user(invoice)
+        sub_id   = invoice.get("subscription")
+        if user_id and sub_id:
+            sub = stripe.Subscription.retrieve(sub_id)
+            expires_dt = datetime.fromtimestamp(sub["current_period_end"], tz=timezone.utc)
+            update_user_plan(user_id, "pro", expires_dt)
+            print(f"[billing] user {user_id} → pro até {expires_dt.date()}")
+
+    elif event["type"] in ("customer.subscription.deleted", "invoice.payment_failed"):
+        obj     = event["data"]["object"]
+        user_id = _resolve_user(obj)
+        if user_id:
+            update_user_plan(user_id, "free", None)
+            print(f"[billing] user {user_id} → free (cancelamento/falha)")
+
+    return {"received": True}
+
+
+@app.post("/billing/portal")
+async def billing_portal(user_id: int = Depends(_get_current_user)):
+    """
+    Cria uma sessão no Stripe Customer Portal para o usuário gerenciar
+    a assinatura (cancelar, trocar cartão, ver faturas).
+    """
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
+
+    import stripe
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import get_auth_user
+
+    stripe.api_key = STRIPE_SECRET_KEY
+    user = get_auth_user(user_id)
+    if not user or not user.get("stripe_customer_id"):
+        raise HTTPException(status_code=404, detail="Sem assinatura ativa.")
+
+    portal = stripe.billing_portal.Session.create(
+        customer=user["stripe_customer_id"],
+        return_url=f"{DASHBOARD_URL}/app",
+    )
+    return {"portal_url": portal.url}
 
 
 # ─── Static file routes ──────────────────────────────────────────────────────

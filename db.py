@@ -268,6 +268,9 @@ def init_db():
     create index if not exists idx_auth_accounts_email on auth_accounts (email)
     """,
     """
+    alter table auth_accounts add column if not exists stripe_customer_id text unique
+    """,
+    """
     create table if not exists dashboard_sessions (
       code text primary key,
       user_id bigint not null references users(id) on delete cascade,
@@ -3639,3 +3642,43 @@ def get_dashboard_session(code: str) -> int | None:
             )
             row = cur.fetchone()
     return row["user_id"] if row else None
+
+
+# ─── Billing / planos ─────────────────────────────────────────────────────────
+
+def update_user_plan(user_id: int, plan: str, expires_at=None) -> None:
+    """
+    Atualiza o plano de assinatura do usuário.
+    plan: 'free' | 'pro'
+    expires_at: datetime com timezone ou None (para free)
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts set plan = %s, plan_expires_at = %s where user_id = %s",
+                (plan, expires_at, user_id),
+            )
+        conn.commit()
+
+
+def get_user_by_stripe_customer(stripe_customer_id: str) -> int | None:
+    """Retorna user_id pelo stripe_customer_id, ou None."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select user_id from auth_accounts where stripe_customer_id = %s",
+                (stripe_customer_id,),
+            )
+            row = cur.fetchone()
+    return row["user_id"] if row else None
+
+
+def set_stripe_customer(user_id: int, stripe_customer_id: str) -> None:
+    """Vincula um Stripe Customer ID ao usuário."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts set stripe_customer_id = %s where user_id = %s",
+                (stripe_customer_id, user_id),
+            )
+        conn.commit()

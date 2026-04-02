@@ -57,3 +57,5 @@ fastapi==0.115.6
 uvicorn[standard]
 flask
 websockets
+slowapi>=0.1.9
+stripe>=8.0.0
