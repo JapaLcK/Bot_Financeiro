@@ -948,7 +948,7 @@ async def on_message(message: discord.Message):
                 "Adicione a variável de ambiente no Railway após o deploy."
             )
             return
-        link = f"{dashboard_url}/?user_id={uid}"
+        link = f"{dashboard_url}/app?user_id={uid}"
         await message.reply(
             f"📊 **Dashboard financeiro**\n"
             f"🔗 {link}\n\n"

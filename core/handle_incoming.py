@@ -260,7 +260,7 @@ def handle_incoming(msg: IncomingMessage) -> List[OutgoingMessage]:
                 "⚠️ Dashboard ainda não configurado.\n"
                 "Adicione DASHBOARD_URL nas variáveis de ambiente do servidor."
             ))]
-        link = f"{dashboard_url}/?user_id={msg.user_id}"
+        link = f"{dashboard_url}/app?user_id={msg.user_id}"
         return [OutgoingMessage(text=f"📊 Dashboard financeiro:\n{link}")]
 
     msg_out = handle_quick_entry(msg.user_id, t0)

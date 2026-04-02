@@ -567,7 +567,7 @@ async def auth_register(body: RegisterBody):
         "user_id": user_id,
         "link_code": link_code,
         "whatsapp_link": wa_link,
-        "dashboard_url": f"{DASHBOARD_URL}/?user_id={user_id}",
+        "dashboard_url": f"{DASHBOARD_URL}/app?user_id={user_id}",
         "expires_in": 86400,
     }
 
@@ -597,7 +597,7 @@ async def auth_login(body: LoginBody):
         "plan": result["plan"],
         "link_code": link_code,
         "whatsapp_link": wa_link,
-        "dashboard_url": f"{DASHBOARD_URL}/?user_id={user_id}",
+        "dashboard_url": f"{DASHBOARD_URL}/app?user_id={user_id}",
         "expires_in": 86400,
     }
 
