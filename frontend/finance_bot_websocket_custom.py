@@ -208,30 +208,55 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None, 
             )
             categories = await cur.fetchall()
 
-            # Credit cards — mostra a fatura cujo period_start cai DENTRO do mês visualizado.
-            # Isso identifica corretamente "a fatura de março" mesmo quando ela fecha em abril.
-            # Ex: closing_day=1, março → period_start=02/03, period_end=01/04 → aparece em março.
-            # Para meses sem fatura, cb.* será NULL (LEFT JOIN) e o card aparece sem valor.
+            # Credit cards — sempre listar TODOS os cartões do usuário,
+            # mesmo sem nenhuma compra/fatura no mês selecionado.
+            # Quando não houver fatura, o cartão deve aparecer com total/due/pago = 0.
             await cur.execute(
                 """
-                SELECT DISTINCT ON (cc.id)
-                       cc.id, cc.name, cc.closing_day, cc.due_day,
-                       cb.status,
-                       cb.total,
-                       COALESCE(cb.paid_amount, 0)                          AS paid_amount,
-                       GREATEST(0, cb.total - COALESCE(cb.paid_amount, 0)) AS due_amount,
-                       cb.period_start, cb.period_end
-                FROM credit_cards cc
-                LEFT JOIN credit_bills cb
-                    ON cc.id = cb.card_id
-                   AND cb.period_start >= %s
-                   AND cb.period_start <  %s
-                WHERE cc.user_id = %s
-                ORDER BY cc.id, cb.period_start DESC
+                SELECT id, name, closing_day, due_day
+                FROM credit_cards
+                WHERE user_id = %s
+                ORDER BY name
                 """,
-                (month_start, month_end, user_id),
+                (user_id,),
             )
-            cards = await cur.fetchall()
+            base_cards = await cur.fetchall()
+
+            cards = []
+            for cc in base_cards:
+                await cur.execute(
+                    """
+                    SELECT
+                        status,
+                        total,
+                        COALESCE(paid_amount, 0)                          AS paid_amount,
+                        GREATEST(0, total - COALESCE(paid_amount, 0))     AS due_amount,
+                        period_start,
+                        period_end
+                    FROM credit_bills
+                    WHERE card_id = %s
+                      AND period_start >= %s
+                      AND period_start < %s
+                    ORDER BY period_start DESC
+                    LIMIT 1
+                    """,
+                    (cc["id"], month_start, month_end),
+                )
+                bill = await cur.fetchone()
+
+                card_row = {
+                    "id": cc["id"],
+                    "name": cc["name"],
+                    "closing_day": cc["closing_day"],
+                    "due_day": cc["due_day"],
+                    "status": bill["status"] if bill else "open",
+                    "total": float(bill["total"]) if bill and bill["total"] is not None else 0.0,
+                    "paid_amount": float(bill["paid_amount"]) if bill and bill["paid_amount"] is not None else 0.0,
+                    "due_amount": float(bill["due_amount"]) if bill and bill["due_amount"] is not None else 0.0,
+                    "period_start": bill["period_start"] if bill else None,
+                    "period_end": bill["period_end"] if bill else None,
+                }
+                cards.append(card_row)
 
             # Daily expenses for the month (for bar chart) — EXCLUINDO movimentações internas
             await cur.execute(
