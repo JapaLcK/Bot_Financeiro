@@ -638,6 +638,10 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
 # ─── Static file routes ──────────────────────────────────────────────────────
 
 @app.get("/")
+async def serve_landing():
+    return FileResponse(HERE / "index.html")
+
+@app.get("/app")
 async def serve_dashboard():
     return FileResponse(HERE / "dashboard.html")
 
