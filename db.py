@@ -267,6 +267,17 @@ def init_db():
     """
     create index if not exists idx_auth_accounts_email on auth_accounts (email)
     """,
+    """
+    create table if not exists dashboard_sessions (
+      code text primary key,
+      user_id bigint not null references users(id) on delete cascade,
+      expires_at timestamptz not null,
+      created_at timestamptz not null default now()
+    )
+    """,
+    """
+    create index if not exists idx_dashboard_sessions_expires on dashboard_sessions (expires_at)
+    """,
 ]
 
     with get_conn() as conn:
@@ -3582,3 +3593,49 @@ def get_auth_user(user_id: int) -> dict | None:
                 (user_id,),
             )
             return cur.fetchone()
+
+
+# ─── Dashboard short links ────────────────────────────────────────────────────
+
+def create_dashboard_session(user_id: int, hours: int = 2) -> str:
+    """
+    Gera um código curto (ex: 'A3kP9z8Q') para acesso ao dashboard.
+    Armazena no banco com validade de `hours` horas.
+    Retorna o código gerado.
+    """
+    import secrets
+    from datetime import datetime, timezone, timedelta
+
+    code = secrets.token_urlsafe(6)  # ~8 chars URL-safe
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=hours)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # garante unicidade em caso de colisão improvável
+            for _ in range(3):
+                try:
+                    cur.execute(
+                        "insert into dashboard_sessions (code, user_id, expires_at) values (%s, %s, %s)",
+                        (code, user_id, expires_at),
+                    )
+                    break
+                except Exception:
+                    code = secrets.token_urlsafe(6)
+        conn.commit()
+
+    return code
+
+
+def get_dashboard_session(code: str) -> int | None:
+    """
+    Valida um código de acesso ao dashboard.
+    Retorna user_id se o código existe e não expirou, None caso contrário.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select user_id from dashboard_sessions where code = %s and expires_at > now()",
+                (code,),
+            )
+            row = cur.fetchone()
+    return row["user_id"] if row else None

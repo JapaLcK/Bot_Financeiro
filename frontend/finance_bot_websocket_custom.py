@@ -32,7 +32,7 @@ import psycopg
 from psycopg.rows import dict_row
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse, HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
 from dotenv import load_dotenv
@@ -656,6 +656,48 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
 
 
 # ─── Static file routes ──────────────────────────────────────────────────────
+
+@app.get("/d/{code}")
+async def dashboard_short_link(code: str):
+    """
+    Resolve um short link gerado pelo bot.
+    Valida o código, gera um JWT e redireciona para /app?token=<JWT>.
+    """
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import get_dashboard_session
+    from token_utils import make_dashboard_token
+
+    user_id = get_dashboard_session(code)
+    if not user_id:
+        return HTMLResponse(content="""<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Link expirado</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#070b14;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;
+display:flex;align-items:center;justify-content:center;min-height:100vh;color:rgba(255,255,255,.85)}
+.box{text-align:center;max-width:400px;padding:48px 32px}
+.icon{font-size:3.5rem;margin-bottom:20px}
+h2{font-size:1.4rem;font-weight:600;margin-bottom:10px}
+p{color:rgba(255,255,255,.5);line-height:1.7;margin-bottom:28px}
+a{display:inline-block;padding:11px 28px;background:rgba(124,58,237,.45);
+border:1px solid rgba(124,58,237,.55);border-radius:14px;color:white;
+text-decoration:none;font-size:.9rem;transition:background .2s}
+a:hover{background:rgba(124,58,237,.65)}
+</style></head>
+<body><div class="box">
+<div class="icon">🔒</div>
+<h2>Link expirado ou inválido</h2>
+<p>Este link de acesso ao dashboard expirou ou já foi usado.<br>
+Solicite um novo link digitando <strong style="color:rgba(255,255,255,.8)">dashboard</strong> no bot.</p>
+<a href="/">← Página inicial</a>
+</div></body></html>""", status_code=401)
+
+    token = make_dashboard_token(user_id, hours=2)
+    return RedirectResponse(url=f"/app?token={token}", status_code=302)
+
 
 @app.get("/")
 async def serve_landing():

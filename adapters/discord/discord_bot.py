@@ -949,9 +949,11 @@ async def on_message(message: discord.Message):
             )
             return
         try:
-            from token_utils import make_dashboard_token
-            dash_token = make_dashboard_token(uid, hours=2)
-            link = f"{dashboard_url}/app?token={dash_token}"
+            import sys, pathlib
+            sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
+            from db import create_dashboard_session
+            code = create_dashboard_session(uid, hours=2)
+            link = f"{dashboard_url}/d/{code}"
         except Exception:
             link = f"{dashboard_url}/app?user_id={uid}"
         await message.reply(
