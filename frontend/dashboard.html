@@ -1081,9 +1081,6 @@ function _showAccessError() {
       _showAccessError();
       return;
     }
-  } else if (uid_raw) {
-    // aceita ?user_id= temporariamente (links antigos do bot)
-    USER_ID = uid_raw;
   } else {
     _showAccessError();
     return;

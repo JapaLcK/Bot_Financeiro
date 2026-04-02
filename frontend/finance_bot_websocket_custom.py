@@ -558,9 +558,11 @@ async def auth_validate(token: str):
     """
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from token_utils import decode_dashboard_token
+    payload = _decode_jwt(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Token inválido")
 
-    user_id = decode_dashboard_token(token)
+    user_id = int(payload["sub"])
     if not user_id:
         raise HTTPException(status_code=401, detail="Token inválido ou expirado.")
     return {"user_id": user_id}
@@ -573,7 +575,7 @@ async def auth_register(request: Request, body: RegisterBody):
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import register_auth_user
-    from token_utils import make_dashboard_token
+    
 
     if len(body.password) < 6:
         raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 6 caracteres.")
@@ -586,7 +588,7 @@ async def auth_register(request: Request, body: RegisterBody):
     user_id    = result["user_id"]
     link_code  = result["link_code"]
     token      = _make_jwt(user_id, body.email.strip().lower())
-    dash_token = make_dashboard_token(user_id, hours=24)
+    dash_token = _make_jwt(user_id, body.email)
 
     # monta link do WhatsApp se o número estiver configurado
     wa_link = ""
@@ -610,7 +612,7 @@ async def auth_login(request: Request, body: LoginBody):
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import login_auth_user, create_link_code
-    from token_utils import make_dashboard_token
+    
 
     result = login_auth_user(body.email, body.password)
     if not result:
@@ -619,7 +621,7 @@ async def auth_login(request: Request, body: LoginBody):
     user_id    = result["user_id"]
     link_code  = create_link_code(user_id, minutes_valid=15)
     token      = _make_jwt(user_id, result["email"])
-    dash_token = make_dashboard_token(user_id, hours=24)
+    dash_token = _make_jwt(user_id, body.email)
 
     wa_link = ""
     if WHATSAPP_NUMBER:
