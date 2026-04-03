@@ -420,6 +420,32 @@ footer a { color: var(--text-2); text-decoration: none; }
           <div class="form-error" id="reg-error"></div>
         </div>
 
+        <!-- Verification step -->
+        <div id="form-verify" style="display:none">
+          <div style="text-align:center;margin-bottom:20px;">
+            <div style="font-size:40px;margin-bottom:12px;">📬</div>
+            <h2 style="margin-bottom:6px;">Verifique seu e-mail</h2>
+            <p class="subtitle">Enviamos um código de 6 dígitos para<br/><strong id="verify-email-display"></strong></p>
+          </div>
+          <div class="field">
+            <label>CÓDIGO DE VERIFICAÇÃO</label>
+            <input type="text" id="verify-code" placeholder="000000" maxlength="6"
+              autocomplete="one-time-code" inputmode="numeric"
+              style="text-align:center;font-size:28px;letter-spacing:10px;font-weight:700;" />
+          </div>
+          <button class="submit-btn" id="btn-verify" onclick="doVerify()">Confirmar</button>
+          <div class="form-error" id="verify-error"></div>
+          <p style="text-align:center;margin-top:14px;">
+            <a href="#" onclick="backToRegister(event)" style="font-size:13px;color:var(--text-2);text-decoration:none;border-bottom:1px solid rgba(255,255,255,0.2);padding-bottom:1px;">
+              ← Usar outro e-mail
+            </a>
+            &nbsp;·&nbsp;
+            <a href="#" onclick="resendCode(event)" style="font-size:13px;color:var(--text-2);text-decoration:none;border-bottom:1px solid rgba(255,255,255,0.2);padding-bottom:1px;">
+              Reenviar código
+            </a>
+          </p>
+        </div>
+
         <!-- Login form -->
         <div id="form-login" style="display:none">
           <h2>Bem-vindo de volta</h2>
@@ -495,6 +521,7 @@ const DASHBOARD_URL = window.location.origin;
 // ─── Tab switching ────────────────────────────────────────────────────────
 function switchTab(tab) {
   document.getElementById('form-register').style.display = tab === 'register' ? 'block' : 'none';
+  document.getElementById('form-verify').style.display   = 'none';
   document.getElementById('form-login').style.display    = tab === 'login'    ? 'block' : 'none';
   document.getElementById('success-state').classList.remove('show');
   document.getElementById('tab-register').classList.toggle('active', tab === 'register');
@@ -503,10 +530,9 @@ function switchTab(tab) {
 }
 
 function clearErrors() {
-  ['reg-error','login-error'].forEach(id => {
+  ['reg-error', 'login-error', 'verify-error'].forEach(id => {
     const el = document.getElementById(id);
-    el.classList.remove('show');
-    el.textContent = '';
+    if (el) { el.classList.remove('show'); el.textContent = ''; }
   });
 }
 
@@ -520,20 +546,22 @@ function scrollToAuth() {
   document.getElementById('auth').scrollIntoView({ behavior: 'smooth' });
 }
 
-// ─── Register ─────────────────────────────────────────────────────────────
+// ─── Register — passo 1: envia código ─────────────────────────────────────
+let _pendingEmail = '';
+
 async function doRegister() {
   clearErrors();
   const email    = document.getElementById('reg-email').value.trim();
   const password = document.getElementById('reg-password').value;
   const confirm  = document.getElementById('reg-confirm').value;
 
-  if (!email)              return showError('reg-error', 'Informe o e-mail.');
-  if (password.length < 6) return showError('reg-error', 'Senha deve ter pelo menos 6 caracteres.');
-  if (password !== confirm) return showError('reg-error', 'As senhas não coincidem.');
+  if (!email)               return showError('reg-error', 'Informe o e-mail.');
+  if (password.length < 6)  return showError('reg-error', 'Senha deve ter pelo menos 6 caracteres.');
+  if (password !== confirm)  return showError('reg-error', 'As senhas não coincidem.');
 
   const btn = document.getElementById('btn-register');
   btn.disabled = true;
-  btn.textContent = 'Criando conta…';
+  btn.textContent = 'Enviando código…';
 
   try {
     const res = await fetch(`${API_BASE}/auth/register`, {
@@ -542,14 +570,76 @@ async function doRegister() {
       body: JSON.stringify({ email, password }),
     });
     const data = await res.json();
-    if (!res.ok) return showError('reg-error', data.detail || 'Erro ao criar conta.');
-    showSuccess(data, 'Conta criada!', 'Vincule agora seu WhatsApp ou Discord para começar.');
+    if (!res.ok) return showError('reg-error', data.detail || 'Erro ao enviar código.');
+
+    // mostra passo de verificação
+    _pendingEmail = email;
+    document.getElementById('form-register').style.display = 'none';
+    document.getElementById('verify-email-display').textContent = email;
+    document.getElementById('form-verify').style.display = 'block';
+    document.getElementById('verify-code').value = '';
+    document.getElementById('verify-code').focus();
   } catch (e) {
     showError('reg-error', 'Erro de conexão. Tente novamente.');
   } finally {
     btn.disabled = false;
     btn.textContent = 'Criar conta';
   }
+}
+
+// ─── Register — passo 2: confirma código ──────────────────────────────────
+async function doVerify() {
+  clearErrors();
+  const code = document.getElementById('verify-code').value.trim();
+
+  if (code.length !== 6) return showError('verify-error', 'Digite os 6 dígitos do código.');
+
+  const btn = document.getElementById('btn-verify');
+  btn.disabled = true;
+  btn.textContent = 'Verificando…';
+
+  try {
+    const res = await fetch(`${API_BASE}/auth/verify-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: _pendingEmail, code }),
+    });
+    const data = await res.json();
+    if (!res.ok) return showError('verify-error', data.detail || 'Código inválido.');
+
+    document.getElementById('form-verify').style.display = 'none';
+    showSuccess(data, 'Conta criada!', 'Vincule agora seu WhatsApp ou Discord para começar.');
+  } catch (e) {
+    showError('verify-error', 'Erro de conexão. Tente novamente.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Confirmar';
+  }
+}
+
+function backToRegister(e) {
+  e.preventDefault();
+  document.getElementById('form-verify').style.display   = 'none';
+  document.getElementById('form-register').style.display = 'block';
+  clearErrors();
+}
+
+async function resendCode(e) {
+  e.preventDefault();
+  if (!_pendingEmail) return;
+  const password = document.getElementById('reg-password').value;
+  await fetch(`${API_BASE}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: _pendingEmail, password }),
+  });
+  const el = document.getElementById('verify-error');
+  el.textContent = 'Novo código enviado!';
+  el.style.background = 'rgba(52,211,153,0.12)';
+  el.style.border = '1px solid rgba(52,211,153,0.3)';
+  el.style.color = '#6ee7b7';
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 4000);
 }
 
 // ─── Login ────────────────────────────────────────────────────────────────

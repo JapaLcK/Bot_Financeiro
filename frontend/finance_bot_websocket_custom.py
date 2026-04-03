@@ -576,6 +576,10 @@ class LoginBody(BaseModel):
 class EmailBody(BaseModel):
     email: str
 
+class VerifyEmailBody(BaseModel):
+    email: str
+    code: str
+
 class ResetPasswordBody(BaseModel):
     token: str
     new_password: str
@@ -603,26 +607,51 @@ async def auth_validate(token: str):
 @app.post("/auth/register")
 @limiter.limit("5/minute")
 async def auth_register(request: Request, body: RegisterBody):
-    """Cadastra novo usuário via email+senha. Retorna JWT + link_code para vincular o bot."""
+    """
+    Inicia o cadastro: valida os dados, gera código de 6 dígitos e envia por e-mail.
+    A conta só é criada após confirmação via /auth/verify-email.
+    """
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import register_auth_user
-    
+    from db import create_email_verification
+    from core.services.email_service import send_verification_email
 
     if len(body.password) < 6:
         raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 6 caracteres.")
 
     try:
-        result = register_auth_user(body.email, body.password)
+        code = create_email_verification(body.email, body.password)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+    sent = send_verification_email(body.email.strip().lower(), code)
+    if not sent:
+        raise HTTPException(status_code=500, detail="Não foi possível enviar o e-mail de verificação. Tente novamente.")
+
+    return {"status": "verification_sent", "email": body.email.strip().lower()}
+
+
+@app.post("/auth/verify-email")
+@limiter.limit("10/minute")
+async def auth_verify_email(request: Request, body: VerifyEmailBody):
+    """
+    Confirma o código de verificação e cria a conta.
+    Retorna JWT + link_code igual ao registro anterior.
+    """
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import confirm_email_verification
+
+    try:
+        result = confirm_email_verification(body.email, body.code)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     user_id    = result["user_id"]
     link_code  = result["link_code"]
     token      = _make_jwt(user_id, body.email.strip().lower())
     dash_token = _make_jwt(user_id, body.email)
 
-    # monta link do WhatsApp se o número estiver configurado
     wa_link = ""
     if WHATSAPP_NUMBER:
         wa_link = f"https://wa.me/{WHATSAPP_NUMBER}?text=vincular%20{link_code}"

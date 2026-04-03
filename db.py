@@ -286,6 +286,20 @@ def init_db():
     create index if not exists idx_dashboard_sessions_expires on dashboard_sessions (expires_at)
     """,
     """
+    create table if not exists email_verification_codes (
+      id bigserial primary key,
+      email text not null,
+      code text not null,
+      password_hash text not null,
+      expires_at timestamptz not null,
+      used_at timestamptz,
+      created_at timestamptz not null default now()
+    )
+    """,
+    """
+    create index if not exists idx_email_verification_email on email_verification_codes (email, expires_at)
+    """,
+    """
     create table if not exists password_reset_tokens (
       token text primary key,
       user_id bigint not null references users(id) on delete cascade,
@@ -3782,6 +3796,116 @@ def set_stripe_customer(user_id: int, stripe_customer_id: str) -> None:
                 "update auth_accounts set stripe_customer_id = %s where user_id = %s",
                 (stripe_customer_id, user_id),
             )
+
+
+# ─── VERIFICAÇÃO DE EMAIL NO CADASTRO ────────────────────────────────────────
+
+def create_email_verification(email: str, password: str, minutes_valid: int = 15) -> str:
+    """
+    Armazena uma verificação pendente para o email+senha informados.
+    Gera um código numérico de 6 dígitos e retorna ele.
+    Lança ValueError se o email já estiver cadastrado.
+    """
+    import random
+    from datetime import timedelta
+
+    email = email.strip().lower()
+
+    # verifica se email já existe
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select user_id from auth_accounts where email = %s", (email,))
+            if cur.fetchone():
+                raise ValueError("Este e-mail já está cadastrado.")
+
+    password_hash = _hash_password(password)
+    code = f"{random.randint(0, 999999):06d}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes_valid)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # invalida códigos anteriores para o mesmo email
+            cur.execute(
+                "update email_verification_codes set used_at = now() where email = %s and used_at is null",
+                (email,),
+            )
+            cur.execute(
+                """
+                insert into email_verification_codes (email, code, password_hash, expires_at)
+                values (%s, %s, %s, %s)
+                """,
+                (email, code, password_hash, expires_at),
+            )
+        conn.commit()
+
+    return code
+
+
+def confirm_email_verification(email: str, code: str) -> dict:
+    """
+    Valida o código e cria a conta se correto.
+    Retorna {user_id, link_code} em sucesso.
+    Lança ValueError em caso de código inválido, expirado ou já usado.
+    """
+    email = email.strip().lower()
+    now = datetime.now(timezone.utc)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, password_hash, expires_at, used_at
+                from email_verification_codes
+                where email = %s and code = %s
+                order by created_at desc
+                limit 1
+                """,
+                (email, code),
+            )
+            row = cur.fetchone()
+
+    if not row:
+        raise ValueError("Código inválido. Verifique e tente novamente.")
+    if row["used_at"] is not None:
+        raise ValueError("Este código já foi utilizado. Faça o cadastro novamente.")
+    if row["expires_at"] < now:
+        raise ValueError("Código expirado. Faça o cadastro novamente.")
+
+    password_hash = row["password_hash"]
+    verification_id = row["id"]
+
+    # cria o usuário diretamente (sem re-hash da senha — reusa o hash salvo)
+    user_id = get_or_create_canonical_user("email", email)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into auth_accounts (user_id, email, password_hash)
+                values (%s, %s, %s)
+                on conflict (email) do nothing
+                """,
+                (user_id, email, password_hash),
+            )
+            # marca código como usado
+            cur.execute(
+                "update email_verification_codes set used_at = now() where id = %s",
+                (verification_id,),
+            )
+        conn.commit()
+
+    link_code = create_link_code(user_id, minutes_valid=15)
+
+    # envia email de boas-vindas
+    try:
+        from core.services.email_service import send_welcome_email
+        dashboard_url = os.getenv("DASHBOARD_URL", "")
+        send_welcome_email(email, link_code, dashboard_url)
+    except Exception as _e:
+        import logging as _log
+        _log.getLogger(__name__).warning("Falha ao enviar email de boas-vindas para <%s>: %s", email, _e)
+
+    return {"user_id": user_id, "link_code": link_code}
 
 
 # ─── RECUPERAÇÃO DE SENHA ─────────────────────────────────────────────────────

@@ -131,6 +131,44 @@ def _base_html(title: str, content: str) -> str:
 
 # ─── e-mails específicos ──────────────────────────────────────────────────────
 
+def send_verification_email(to: str, code: str) -> bool:
+    """
+    Envia o código de verificação de 6 dígitos para confirmar o e-mail no cadastro.
+    """
+    content = f"""
+      <p>Olá!</p>
+      <p>Você está quase lá! Use o código abaixo para confirmar seu e-mail
+         e finalizar o cadastro no <strong>Bot Financeiro</strong>.</p>
+
+      <div class="highlight" style="text-align:center;">
+        <code style="font-size:36px;letter-spacing:8px;font-weight:bold;color:#4361ee;">{code}</code>
+      </div>
+
+      <p style="font-size:13px;color:#888;text-align:center;">
+        ⚠️ Este código expira em <strong>15 minutos</strong>.<br/>
+        Se você não tentou criar uma conta, ignore este e-mail.
+      </p>
+    """
+
+    html = _base_html("Confirme seu e-mail — Bot Financeiro", content)
+
+    text = (
+        f"Confirme seu e-mail — Bot Financeiro\n\n"
+        f"Seu código de verificação é:\n\n"
+        f"  {code}\n\n"
+        f"Digite este código na página de cadastro para finalizar.\n"
+        f"Expira em 15 minutos.\n\n"
+        f"Se você não tentou criar uma conta, ignore este e-mail."
+    )
+
+    return send_email(
+        to=to,
+        subject=f"🔐 {code} é seu código de verificação — Bot Financeiro",
+        html_body=html,
+        text_body=text,
+    )
+
+
 def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool:
     """
     Envia e-mail de boas-vindas após o cadastro.
