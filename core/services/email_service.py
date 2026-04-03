@@ -210,3 +210,46 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
         html_body=html,
         text_body=text,
     )
+
+
+def send_password_reset_email(to: str, reset_url: str) -> bool:
+    """
+    Envia e-mail com link de recuperação de senha.
+    O link expira em 30 minutos.
+    """
+    content = f"""
+      <p>Olá!</p>
+      <p>Recebemos uma solicitação para redefinir a senha da sua conta no
+         <strong>Bot Financeiro</strong>.</p>
+      <p>Clique no botão abaixo para criar uma nova senha:</p>
+
+      <p style="text-align:center">
+        <a class="btn" href="{reset_url}">🔑 Redefinir minha senha</a>
+      </p>
+
+      <p style="font-size:13px;color:#888;">
+        ⚠️ Este link expira em <strong>30 minutos</strong> e só pode ser usado uma vez.<br/>
+        Se você não solicitou a redefinição, ignore este e-mail — sua senha não será alterada.
+      </p>
+
+      <p style="font-size:12px;color:#aaa;word-break:break-all;">
+        Se o botão não funcionar, copie e cole este link no navegador:<br/>
+        {reset_url}
+      </p>
+    """
+
+    html = _base_html("Redefinição de senha — Bot Financeiro", content)
+
+    text = (
+        f"Redefinição de senha — Bot Financeiro\n\n"
+        f"Acesse o link abaixo para criar uma nova senha (expira em 30 min):\n\n"
+        f"{reset_url}\n\n"
+        f"Se você não solicitou isso, ignore este e-mail."
+    )
+
+    return send_email(
+        to=to,
+        subject="🔑 Redefinir senha — Bot Financeiro",
+        html_body=html,
+        text_body=text,
+    )

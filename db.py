@@ -285,6 +285,18 @@ def init_db():
     """
     create index if not exists idx_dashboard_sessions_expires on dashboard_sessions (expires_at)
     """,
+    """
+    create table if not exists password_reset_tokens (
+      token text primary key,
+      user_id bigint not null references users(id) on delete cascade,
+      expires_at timestamptz not null,
+      used_at timestamptz,
+      created_at timestamptz not null default now()
+    )
+    """,
+    """
+    create index if not exists idx_password_reset_tokens_expires on password_reset_tokens (expires_at)
+    """,
 ]
 
     with get_conn() as conn:
@@ -3770,4 +3782,87 @@ def set_stripe_customer(user_id: int, stripe_customer_id: str) -> None:
                 "update auth_accounts set stripe_customer_id = %s where user_id = %s",
                 (stripe_customer_id, user_id),
             )
+
+
+# ─── RECUPERAÇÃO DE SENHA ─────────────────────────────────────────────────────
+
+def create_password_reset_token(email: str, minutes_valid: int = 30) -> str | None:
+    """
+    Gera um token de recuperação de senha para o email informado.
+    Retorna o token se o email existir, ou None se não encontrado.
+    """
+    import secrets
+    from datetime import timedelta
+
+    email = email.strip().lower()
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select user_id from auth_accounts where email = %s", (email,))
+            row = cur.fetchone()
+
+    if not row:
+        return None
+
+    user_id = row["user_id"]
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes_valid)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into password_reset_tokens (token, user_id, expires_at)
+                values (%s, %s, %s)
+                """,
+                (token, user_id, expires_at),
+            )
         conn.commit()
+
+    return token
+
+
+def consume_password_reset_token(token: str, new_password: str) -> bool:
+    """
+    Valida o token e atualiza a senha.
+    Retorna True se bem-sucedido, False se token inválido/expirado/já usado.
+    """
+    now = datetime.now(timezone.utc)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select user_id, expires_at, used_at
+                from password_reset_tokens
+                where token = %s
+                """,
+                (token,),
+            )
+            row = cur.fetchone()
+
+    if not row:
+        return False
+    if row["used_at"] is not None:
+        return False
+    if row["expires_at"] < now:
+        return False
+
+    user_id = row["user_id"]
+    new_hash = _hash_password(new_password)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # atualiza senha
+            cur.execute(
+                "update auth_accounts set password_hash = %s where user_id = %s",
+                (new_hash, user_id),
+            )
+            # marca token como usado
+            cur.execute(
+                "update password_reset_tokens set used_at = %s where token = %s",
+                (now, token),
+            )
+        conn.commit()
+
+    return True

@@ -573,6 +573,13 @@ class LoginBody(BaseModel):
     email: str
     password: str
 
+class EmailBody(BaseModel):
+    email: str
+
+class ResetPasswordBody(BaseModel):
+    token: str
+    new_password: str
+
 # ─── Auth endpoints ──────────────────────────────────────────────────────────
 
 @app.get("/auth/validate")
@@ -661,6 +668,47 @@ async def auth_login(request: Request, body: LoginBody):
         "dashboard_url": f"{DASHBOARD_URL}/app?token={dash_token}",
         "expires_in": 86400,
     }
+
+
+@app.post("/auth/forgot-password")
+@limiter.limit("3/minute")
+async def auth_forgot_password(request: Request, body: EmailBody):
+    """
+    Solicita recuperação de senha. Envia e-mail com link se o e-mail existir.
+    Sempre retorna 200 para não revelar se o e-mail está cadastrado.
+    """
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import create_password_reset_token
+    from core.services.email_service import send_password_reset_email
+
+    token = create_password_reset_token(body.email)
+    if token:
+        reset_url = f"{DASHBOARD_URL}/reset-password?token={token}"
+        send_password_reset_email(body.email.strip().lower(), reset_url)
+
+    # sempre retorna 200 — não revela se o e-mail existe ou não
+    return {"message": "Se este e-mail estiver cadastrado, você receberá as instruções em breve."}
+
+
+@app.post("/auth/reset-password")
+@limiter.limit("5/minute")
+async def auth_reset_password(request: Request, body: ResetPasswordBody):
+    """
+    Redefine a senha usando o token recebido por e-mail.
+    """
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import consume_password_reset_token
+
+    if len(body.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 6 caracteres.")
+
+    ok = consume_password_reset_token(body.token, body.new_password)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Link inválido ou expirado. Solicite um novo.")
+
+    return {"message": "Senha redefinida com sucesso! Faça login com sua nova senha."}
 
 
 @app.post("/auth/link-code")
@@ -877,6 +925,10 @@ async def serve_landing():
 @app.get("/app")
 async def serve_dashboard():
     return FileResponse(HERE / "dashboard.html")
+
+@app.get("/reset-password")
+async def serve_reset_password():
+    return FileResponse(HERE / "reset-password.html")
 
 @app.get("/manifest.json")
 async def serve_manifest():
