@@ -163,6 +163,43 @@ pytest -q
 Função:
 Executa a suíte de testes automatizados para validar as principais funcionalidades do projeto.
 
+## E-mail Transacional (Boas-vindas no Cadastro)
+
+O bot envia automaticamente um e-mail de boas-vindas quando um usuário cria conta via `register_auth_user()`.
+O e-mail inclui o código de vinculação (válido por 15 min) e instruções para conectar no WhatsApp e Discord.
+
+### Variáveis de ambiente necessárias
+
+```
+SMTP_HOST=smtp.gmail.com       # ou smtp.mailgun.org, smtp.sendgrid.net, etc.
+SMTP_PORT=587
+SMTP_USER=seuemail@gmail.com   # remetente
+SMTP_PASSWORD=sua_app_password # para Gmail: gerar em myaccount.google.com/apppasswords
+EMAIL_FROM_NAME=Bot Financeiro  # nome exibido no campo "De:"
+```
+
+### Como configurar com Gmail
+
+1. Ative a verificação em duas etapas na conta Google
+2. Acesse myaccount.google.com/apppasswords
+3. Gere uma senha de app para "Correio"
+4. Use essa senha em `SMTP_PASSWORD` (não a senha da conta Google)
+
+### Comportamento em caso de falha
+
+Se o SMTP não estiver configurado ou falhar, o cadastro **não é bloqueado**.
+O erro é logado como WARNING e o usuário é criado normalmente.
+O código de vinculação ainda é retornado na resposta da API para ser exibido na tela.
+
+### Testar o envio localmente
+
+```python
+from core.services.email_service import send_welcome_email
+send_welcome_email("teste@exemplo.com", "123456", "http://localhost:8000")
+```
+
+---
+
 ## Observações Importantes
 
 - Este arquivo é apenas para referência interna do desenvolvedor.

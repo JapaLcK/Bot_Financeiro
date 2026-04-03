@@ -3601,6 +3601,7 @@ def register_auth_user(email: str, password: str) -> dict:
     Cria uma conta via email+senha.
     - Gera um user_id canônico usando o email como external_id
     - Cria auth_account com hash bcrypt
+    - Envia e-mail de boas-vindas com o código de vinculação
     - Retorna {user_id, link_code} pronto para uso
     Lança ValueError se o email já estiver cadastrado.
     """
@@ -3632,6 +3633,17 @@ def register_auth_user(email: str, password: str) -> dict:
 
     # gera link code com 15 min de validade
     link_code = create_link_code(user_id, minutes_valid=15)
+
+    # envia e-mail de boas-vindas (falha silenciosa — não bloqueia o cadastro)
+    try:
+        from core.services.email_service import send_welcome_email
+        dashboard_url = os.getenv("DASHBOARD_URL", "")
+        send_welcome_email(email, link_code, dashboard_url)
+    except Exception as _email_exc:
+        import logging as _log
+        _log.getLogger(__name__).warning(
+            "Falha ao enviar e-mail de boas-vindas para <%s>: %s", email, _email_exc
+        )
 
     return {"user_id": user_id, "link_code": link_code}
 
