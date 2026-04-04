@@ -1007,7 +1007,7 @@ Solicite um novo link digitando <strong style="color:rgba(255,255,255,.8)">dashb
 <a href="/">← Página inicial</a>
 </div></body></html>""", status_code=401)
 
-    return RedirectResponse(url=f"/?dashboard_code={code}#auth", status_code=302)
+    return RedirectResponse(url=f"/dashboard-login?dashboard_code={code}", status_code=302)
 
 
 @app.get("/")
@@ -1021,6 +1021,11 @@ async def serve_dashboard():
 @app.get("/reset-password")
 async def serve_reset_password():
     return FileResponse(HERE / "reset-password.html")
+
+
+@app.get("/dashboard-login")
+async def serve_dashboard_login():
+    return FileResponse(HERE / "dashboard-login.html")
 
 @app.get("/favicon.png")
 async def serve_favicon():
