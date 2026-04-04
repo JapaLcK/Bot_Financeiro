@@ -640,6 +640,16 @@ footer a { color: var(--text-2); text-decoration: none; }
 const API_BASE      = window.location.origin;
 const DASHBOARD_URL = window.location.origin;
 
+// ─── Sanitiza URL retornada pela API ──────────────────────────────────────
+function sanitizeDashboardUrl(url) {
+  if (!url) return '';
+  // Corrige caso o backend retorne "DASHBOARD_URL=https://..." por misconfiguraçāo
+  if (url.startsWith('DASHBOARD_URL=')) url = url.slice('DASHBOARD_URL='.length);
+  // Garante que a URL é absoluta
+  if (url && !url.startsWith('http')) url = window.location.origin + '/' + url.replace(/^\//, '');
+  return url;
+}
+
 // ─── JWT decoder (payload only, sem validação de assinatura) ──────────────
 function decodeJWT(token) {
   try {
@@ -883,7 +893,7 @@ function showSuccess(data, title, desc) {
     waBtn.style.display = 'none';
   }
 
-  const dashUrl = data.dashboard_url || `${DASHBOARD_URL}/app?user_id=${data.user_id}`;
+  const dashUrl = sanitizeDashboardUrl(data.dashboard_url) || `${DASHBOARD_URL}/app?user_id=${data.user_id}`;
   const dashBtn = document.getElementById('dashboard-btn');
   dashBtn.href = dashUrl;
 

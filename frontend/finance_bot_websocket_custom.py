@@ -49,7 +49,11 @@ DASHBOARD_USER_ID = os.getenv("DASHBOARD_USER_ID")
 POLL_INTERVAL     = int(os.getenv("POLL_INTERVAL", "30"))
 TZ                = os.getenv("TZ", "America/Sao_Paulo")
 JWT_SECRET              = os.getenv("JWT_SECRET", "change-me-in-production")
-DASHBOARD_URL           = os.getenv("DASHBOARD_URL", "http://localhost:8000")
+DASHBOARD_URL           = os.getenv("DASHBOARD_URL", "http://localhost:8000").strip()
+# Sanitiza caso a var de ambiente tenha sido definida como "DASHBOARD_URL=https://..."
+if DASHBOARD_URL.startswith("DASHBOARD_URL="):
+    DASHBOARD_URL = DASHBOARD_URL[len("DASHBOARD_URL="):]
+DASHBOARD_URL = DASHBOARD_URL.rstrip("/")
 WHATSAPP_NUMBER         = os.getenv("WHATSAPP_NUMBER", "")
 STRIPE_SECRET_KEY       = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET   = os.getenv("STRIPE_WEBHOOK_SECRET", "")
