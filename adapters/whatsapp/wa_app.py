@@ -1,62 +1,38 @@
-# adapters/whatsapp/wa_app.py
-import os
-import json
-import hmac
-import hashlib
+from __future__ import annotations
+
 import asyncio
-from typing import Any, Dict
-import time as pytime
-from utils_date import now_tz
-from db import (
-    list_users_with_daily_report_enabled,
-    list_identities_by_user,
-    was_daily_report_sent_today,
-    mark_daily_report_sent,
-    get_daily_report_prefs
-)
-from core.reports.reports_daily import build_daily_report_text
+import json
+import logging
+import os
+
 from fastapi import FastAPI, Request
-from fastapi.responses import PlainTextResponse, JSONResponse
-from db import get_or_create_canonical_user  # no topo do arquivo
-from core.types import IncomingMessage
-from core.handle_incoming import handle_incoming
-from adapters.whatsapp.wa_parse import extract_messages
-from adapters.whatsapp.wa_client import send_text, wa  # WhatsAppClient singleton
-import unicodedata 
+from fastapi.responses import JSONResponse, PlainTextResponse
+
+from adapters.whatsapp.wa_client import send_text
+from adapters.whatsapp.wa_runtime import process_payload, verify_webhook_signature
+from core.reports.reports_daily import build_daily_report_text
+from db import (
+    get_daily_report_prefs,
+    list_identities_by_user,
+    list_users_with_daily_report_enabled,
+    mark_daily_report_sent,
+    was_daily_report_sent_today,
+)
+from utils_date import now_tz
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
+VERIFY_TOKEN = (os.getenv("WA_VERIFY_TOKEN") or "").strip()
+APP_SECRET = (os.getenv("WA_APP_SECRET") or "").strip()
+_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=500)
 
-VERIFY_TOKEN = os.getenv("WA_VERIFY_TOKEN", "dev-token")
-APP_SECRET = os.getenv("WA_APP_SECRET", "").strip()  # opcional, mas recomendado
-
-_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue(maxsize=500)
-
-def _verify_signature(raw_body: bytes, signature_header: str) -> bool:
-    """
-    Valida X-Hub-Signature-256: "sha256=<hmac>"
-    """
-    if not APP_SECRET:
-        return True  # se não configurou, não bloqueia (mas em prod configure!)
-    if not signature_header or not signature_header.startswith("sha256="):
-        return False
-    provided = signature_header
-    expected_hash = hmac.new(APP_SECRET.encode(), raw_body, hashlib.sha256).hexdigest()
-    expected = f"sha256={expected_hash}"
-    return hmac.compare_digest(provided, expected)
-
-def normalize_text(s: str) -> str:
-    s = (s or "").casefold().strip()
-    s = unicodedata.normalize("NFD", s)
-    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
-    return s
 
 @app.on_event("startup")
 async def _startup():
-    # worker interno da fila
     asyncio.create_task(_worker_loop())
-
-    # scheduler do report diário (WhatsApp)
     asyncio.create_task(_daily_report_loop())
+
 
 @app.get("/wa/webhook")
 async def wa_verify(request: Request):
@@ -64,166 +40,80 @@ async def wa_verify(request: Request):
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
 
+    if not VERIFY_TOKEN:
+        logger.error("WA_VERIFY_TOKEN is not configured")
+        return PlainTextResponse("forbidden", status_code=403)
+
     if mode == "subscribe" and token == VERIFY_TOKEN and challenge:
         return PlainTextResponse(challenge)
     return PlainTextResponse("forbidden", status_code=403)
 
+
 @app.post("/wa/webhook")
 async def wa_webhook(request: Request):
     raw = await request.body()
-
-    sig = request.headers.get("X-Hub-Signature-256", "")
-    if not _verify_signature(raw, sig):
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    if APP_SECRET and not verify_webhook_signature(raw, signature, APP_SECRET):
         return PlainTextResponse("forbidden", status_code=403)
 
     payload = json.loads(raw.decode("utf-8"))
-
-    # responde rápido, processa depois
     try:
         _queue.put_nowait(payload)
     except asyncio.QueueFull:
-        # se lotar, não trava o webhook
+        logger.warning("WA queue full, dropping payload")
         return JSONResponse({"ok": True, "dropped": True})
 
     return JSONResponse({"ok": True})
+
 
 async def _worker_loop():
     while True:
         payload = await _queue.get()
         try:
-            await _process_payload(payload)
-        except Exception as e:
-            print("[WA] worker error:", repr(e))
+            count = await asyncio.to_thread(process_payload, payload)
+            logger.info("WA payload processed messages=%s", count)
+        except Exception as exc:
+            logger.exception("WA worker error: %s", exc)
         finally:
             _queue.task_done()
 
-async def _daily_report_loop():
-    print("[WA] daily report loop running")
-    """
-    Loop interno que manda o report diário no WhatsApp.
-    
-    Regras:
-    - envia se já passou do horário configurado
-    - envia apenas 1x por dia
-    - não perde envio se o bot reiniciar
-    """
 
+async def _daily_report_loop():
     while True:
         try:
             now = now_tz()
             today = now.date()
 
-            # pega usuários que têm report ativado
-            user_ids = list_users_with_daily_report_enabled()
-
-            for uid in user_ids:
-
+            for uid in list_users_with_daily_report_enabled():
                 prefs = get_daily_report_prefs(uid)
-
                 if not prefs["enabled"]:
                     continue
 
                 hour = prefs["hour"]
                 minute = prefs["minute"]
-
-                # ainda não chegou no horário
                 if (now.hour, now.minute) < (hour, minute):
                     continue
-
-                # já enviou hoje
                 if was_daily_report_sent_today(uid, today):
                     continue
 
-                msg = build_daily_report_text(uid)
-
+                message = build_daily_report_text(uid)
                 ids = list_identities_by_user(uid)
                 wa_targets = [x["external_id"] for x in ids if x["provider"] == "whatsapp"]
 
                 for to in wa_targets:
                     try:
-                        await wa.send_text(to, msg)
-                    except Exception as e:
-                        print("[WA] daily report send error:", repr(e))
+                        await asyncio.to_thread(send_text, to, message)
+                    except Exception as exc:
+                        logger.warning("WA daily report send error to=%s error=%s", to, exc)
 
                 mark_daily_report_sent(uid, today)
-
-        except Exception as e:
-            print("[WA] daily report loop error:", repr(e))
+        except Exception as exc:
+            logger.exception("WA daily report loop error: %s", exc)
 
         await asyncio.sleep(30)
 
-async def _process_payload(payload: dict):
-    msgs = extract_messages(payload)
 
-    for m in msgs:
-        from_phone = m["from"]
-        message_id = m.get("message_id")
-
-        # id interno (seu esquema atual)
-        external_id = from_phone  # wa_id (string)
-        uid = get_or_create_canonical_user("whatsapp", external_id)
-
-        if m["type"] == "text":
-            text = (m.get("text") or "").strip()
-            t_low = normalize_text(text)
-
-            incoming = IncomingMessage(
-                platform="whatsapp",
-                user_id=uid,
-                external_id=external_id,
-                text=text,
-                message_id=message_id,
-            )
-
-            outs = handle_incoming(incoming)
-
-            if not outs:
-                # fallback WhatsApp (porque aqui não existe "código legado" como no Discord)
-                send_text(from_phone, "❓ Não entendi. Digite `ajuda` para ver os comandos.")
-            else:
-                for out in outs:
-                    send_text(from_phone, out.text)
-
-            if message_id:
-                await wa.mark_read(message_id)
-
-        elif m["type"] == "document":
-            # pronto pra plugar: baixa o arquivo e chama seu importador OFX
-            media_id = m.get("media_id")
-            filename = m.get("filename") or "arquivo"
-
-            # aqui você decide o comando: pode exigir que o usuário mande "importar ofx"
-            # ou importar automaticamente se for .ofx
-            if media_id:
-                url = await wa.get_media_url(media_id)
-                file_bytes = await wa.download_media_bytes(url)
-
-                # Exemplo: reaproveitar seu core/ofx_service.py ou função existente
-                # result_text = import_ofx_flow(user_id, file_bytes, filename)
-                # await wa.send_text(from_phone, result_text)
-
-                await wa.send_text(from_phone, f"Recebi o arquivo `{filename}`. (download OK)")
-
-            if message_id:
-                await wa.mark_read(message_id)
-
-
-# Endpoint de DEV pra testar SEM META (você já tem algo assim)
 @app.post("/wa/dev/simulate")
 async def wa_simulate(payload: dict):
-    from_phone = payload.get("from", "+15551234567")
-    text = (payload.get("text") or "").strip()
-
-    digits = "".join(ch for ch in from_phone if ch.isdigit())
-    user_id = -int(digits) if digits else -555
-
-    incoming = IncomingMessage(platform="whatsapp", user_id=user_id, text=text, message_id=None)
-    outs = handle_incoming(incoming)
-    if not outs:
-        texts = ["❓ Não entendi. Digite `ajuda` para ver os comandos."]
-    else:
-        texts = [o.text for o in outs]
-    for t in texts:
-        await wa.send_text(from_phone, t)
-
-    return {"ok": True, "responses": texts}
+    count = await asyncio.to_thread(process_payload, payload)
+    return {"ok": True, "processed_messages": count}

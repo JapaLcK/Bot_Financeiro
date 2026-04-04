@@ -7,10 +7,20 @@ Este documento serve como referência rápida para lembrar os comandos do bot e 
 source .venv/bin/activate
 Certifique-se que existe a pasta .venv
 
-## Comando para ativar o bot whatsapp
-set -a; source .env; set +a
-PORT=5001 python -m adapters.whatsapp.wa_webhook
+## Comando para ativar o bot WhatsApp
+Runtime recomendado:
+
+```
+python3 -m uvicorn adapters.whatsapp.wa_app:app --host 0.0.0.0 --port 5001
 ngrok http 5001
+```
+
+Legado / compatibilidade Flask:
+
+```
+PORT=5001 python3 -m adapters.whatsapp.wa_webhook
+ngrok http 5001
+```
 
 ## Comandos do Bot (Usuário Final)
 
@@ -210,4 +220,3 @@ send_welcome_email("teste@exemplo.com", "123456", "http://localhost:8000")
 cd "Bot Financeiro"
 source .venv/bin/activate
 python3 finance_bot_websocket_custom.py
-

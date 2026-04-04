@@ -39,10 +39,22 @@ def _wa_config(
     return token, pnid, base
 
 
-def send_text(to: str, body: str):
-    url = f"https://graph.facebook.com/v21.0/{WA_PHONE_NUMBER_ID}/messages"
+def send_text(
+    to: str,
+    body: str,
+    *,
+    access_token: Optional[str] = None,
+    phone_number_id: Optional[str] = None,
+    graph_version: Optional[str] = None,
+):
+    token, pnid, base = _wa_config(
+        access_token=access_token,
+        phone_number_id=phone_number_id,
+        graph_version=graph_version,
+    )
+    url = f"{base}/{pnid}/messages"
     headers = {
-        "Authorization": f"Bearer {WA_TOKEN}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
     payload = {
