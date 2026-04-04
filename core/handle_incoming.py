@@ -255,7 +255,7 @@ def handle_incoming(msg: IncomingMessage) -> List[OutgoingMessage]:
     # dashboard financeiro
     if t_low in {"dashboard", "ver dashboard", "abrir dashboard", "painel", "ver painel",
                  "exportar sheets", "exportar planilha", "exportar sheet"}:
-        link = build_dashboard_link(msg.user_id, hours=2)
+        link = build_dashboard_link(msg.user_id, hours=0.25)
         if not link:
             return [OutgoingMessage(text=(
                 "⚠️ Nao consegui gerar seu link do dashboard agora.\n"

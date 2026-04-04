@@ -619,6 +619,10 @@ class ResetPasswordBody(BaseModel):
     token: str
     new_password: str
 
+
+class DashboardLinkBody(BaseModel):
+    code: str
+
 # ─── Auth endpoints ──────────────────────────────────────────────────────────
 
 @app.get("/auth/validate")
@@ -813,6 +817,28 @@ async def auth_dashboard_token(user_id: int = Depends(_get_current_user)):
     }
 
 
+@app.post("/auth/dashboard-link")
+async def auth_dashboard_link(body: DashboardLinkBody, user_id: int = Depends(_get_current_user)):
+    """
+    Consome um link curto do dashboard e libera acesso apenas
+    se o usuário logado for o dono desse link.
+    """
+    from db import consume_dashboard_session
+
+    target_user_id = consume_dashboard_session(body.code.strip())
+    if not target_user_id:
+        raise HTTPException(status_code=401, detail="Link de dashboard inválido ou expirado.")
+    if int(target_user_id) != int(user_id):
+        raise HTTPException(status_code=403, detail="Este link pertence a outra conta.")
+
+    dash_token = make_dashboard_token(user_id, hours=2)
+    return {
+        "token": dash_token,
+        "dashboard_url": f"{DASHBOARD_URL}/app?token={dash_token}",
+        "expires_in": 7200,
+    }
+
+
 # ─── Billing (Stripe) ────────────────────────────────────────────────────────
 
 @app.post("/billing/create-checkout")
@@ -949,7 +975,8 @@ async def billing_portal(user_id: int = Depends(_get_current_user)):
 async def dashboard_short_link(code: str):
     """
     Resolve um short link gerado pelo bot.
-    Valida o código, gera um JWT e redireciona para /app?token=<JWT>.
+    Redireciona para a landing, onde o usuário faz login
+    e então o link é validado contra a conta autenticada.
     """
     from db import get_dashboard_session
 
@@ -980,8 +1007,7 @@ Solicite um novo link digitando <strong style="color:rgba(255,255,255,.8)">dashb
 <a href="/">← Página inicial</a>
 </div></body></html>""", status_code=401)
 
-    token = make_dashboard_token(user_id, hours=2)
-    return RedirectResponse(url=f"/app?token={token}", status_code=302)
+    return RedirectResponse(url=f"/?dashboard_code={code}#auth", status_code=302)
 
 
 @app.get("/")

@@ -639,6 +639,7 @@ footer a { color: var(--text-2); text-decoration: none; }
 // ─── Config ───────────────────────────────────────────────────────────────
 const API_BASE      = window.location.origin;
 const DASHBOARD_URL = window.location.origin;
+const PENDING_DASHBOARD_CODE = params.get('dashboard_code') || '';
 
 // ─── Sanitiza URL retornada pela API ──────────────────────────────────────
 function sanitizeDashboardUrl(url) {
@@ -675,21 +676,38 @@ async function checkAuthState() {
   const email  = payload.email || payload.sub || '';
 
   try {
-    const resp = await fetch(`${API_BASE}/auth/dashboard-token`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const resp = PENDING_DASHBOARD_CODE
+      ? await fetch(`${API_BASE}/auth/dashboard-link`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ code: PENDING_DASHBOARD_CODE })
+        })
+      : await fetch(`${API_BASE}/auth/dashboard-token`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` }
+        });
 
     if (!resp.ok) {
-      localStorage.removeItem('finbot_token');
+      if (resp.status === 401 && !PENDING_DASHBOARD_CODE) {
+        localStorage.removeItem('finbot_token');
+      }
       return;
     }
 
     const data = await resp.json();
     const dashUrl = sanitizeDashboardUrl(data.dashboard_url) || `${DASHBOARD_URL}/app`;
     applyLoggedInState(email, dashUrl);
+
+    if (PENDING_DASHBOARD_CODE) {
+      window.location.href = dashUrl;
+    }
   } catch {
-    localStorage.removeItem('finbot_token');
+    if (!PENDING_DASHBOARD_CODE) {
+      localStorage.removeItem('finbot_token');
+    }
   }
 }
 
@@ -762,6 +780,16 @@ function showError(id, msg) {
 
 function scrollToAuth() {
   document.getElementById('auth').scrollIntoView({ behavior: 'smooth' });
+}
+
+function showPendingDashboardHint() {
+  if (!PENDING_DASHBOARD_CODE) return;
+  switchTab('login');
+  const subtitle = document.querySelector('#form-login .subtitle');
+  if (subtitle) {
+    subtitle.textContent = 'Faça login para acessar o dashboard a partir do link recebido.';
+  }
+  scrollToAuth();
 }
 
 // ─── Register — passo 1: envia código ─────────────────────────────────────
@@ -880,6 +908,25 @@ async function doLogin() {
     });
     const data = await res.json();
     if (!res.ok) return showError('login-error', data.detail || 'E-mail ou senha incorretos.');
+
+    if (PENDING_DASHBOARD_CODE && data.token) {
+      localStorage.setItem('finbot_token', data.token);
+      const linkRes = await fetch(`${API_BASE}/auth/dashboard-link`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${data.token}`
+        },
+        body: JSON.stringify({ code: PENDING_DASHBOARD_CODE })
+      });
+      const linkData = await linkRes.json();
+      if (!linkRes.ok) {
+        return showError('login-error', linkData.detail || 'Nao foi possivel abrir este dashboard.');
+      }
+      window.location.href = sanitizeDashboardUrl(linkData.dashboard_url) || `${DASHBOARD_URL}/app`;
+      return;
+    }
+
     showSuccess(data, 'Bem-vindo de volta!', 'Seu código de vinculação foi renovado.');
   } catch (e) {
     showError('login-error', 'Erro de conexão. Tente novamente.');
@@ -907,7 +954,7 @@ function showSuccess(data, title, desc) {
     waBtn.style.display = 'none';
   }
 
-  const dashUrl = sanitizeDashboardUrl(data.dashboard_url) || `${DASHBOARD_URL}/app?user_id=${data.user_id}`;
+  const dashUrl = sanitizeDashboardUrl(data.dashboard_url) || `${DASHBOARD_URL}/app`;
   const dashBtn = document.getElementById('dashboard-btn');
   dashBtn.href = dashUrl;
 
@@ -923,7 +970,12 @@ function showSuccess(data, title, desc) {
 }
 
 // ─── Inicialização ────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', checkAuthState);
+document.addEventListener('DOMContentLoaded', () => {
+  if (PENDING_DASHBOARD_CODE) {
+    showPendingDashboardHint();
+  }
+  checkAuthState();
+});
 
 // ─── Enter key support ────────────────────────────────────────────────────
 document.addEventListener('keydown', e => {

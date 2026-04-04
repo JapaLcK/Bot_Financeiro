@@ -3490,7 +3490,7 @@ def get_auth_user(user_id: int) -> dict | None:
 
 # ─── Dashboard short links ────────────────────────────────────────────────────
 
-def create_dashboard_session(user_id: int, hours: int = 2) -> str:
+def create_dashboard_session(user_id: int, hours: float = 0.25) -> str:
     return _db_support.create_dashboard_session_impl(get_conn, user_id, hours)
 
 
@@ -3506,6 +3506,22 @@ def get_dashboard_session(code: str) -> int | None:
                 (code,),
             )
             row = cur.fetchone()
+    return row["user_id"] if row else None
+
+
+def consume_dashboard_session(code: str) -> int | None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                delete from dashboard_sessions
+                where code = %s and expires_at > now()
+                returning user_id
+                """,
+                (code,),
+            )
+            row = cur.fetchone()
+        conn.commit()
     return row["user_id"] if row else None
 
 

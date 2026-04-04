@@ -12,7 +12,7 @@ def get_dashboard_base_url() -> str:
 logger = logging.getLogger(__name__)
 
 
-def build_dashboard_link(user_id: int, hours: int = 2) -> str | None:
+def build_dashboard_link(user_id: int, hours: float = 0.25) -> str | None:
     base_url = get_dashboard_base_url()
 
     try:
