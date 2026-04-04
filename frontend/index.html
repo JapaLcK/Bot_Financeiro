@@ -672,9 +672,9 @@ function checkAuthState() {
     return;
   }
 
-  const email  = payload.sub || payload.email || '';
-  const userId = payload.user_id || payload.sub || '';
-  const dashUrl = `${DASHBOARD_URL}/app?user_id=${userId}`;
+  const email  = payload.email || payload.sub || '';
+  // Usa o próprio token como credencial do dashboard (mesmo segredo JWT)
+  const dashUrl = `${DASHBOARD_URL}/app?token=${encodeURIComponent(token)}`;
 
   applyLoggedInState(email, dashUrl);
 }
@@ -901,7 +901,7 @@ function showSuccess(data, title, desc) {
     localStorage.setItem('finbot_token', data.token);
     // Atualiza estado logado na UI (navbar + account center)
     const payload = decodeJWT(data.token);
-    const email = payload ? (payload.sub || payload.email || '') : '';
+    const email = payload ? (payload.email || '') : '';
     applyLoggedInState(email, dashUrl);
   }
 
