@@ -41,6 +41,18 @@ LINK_RE = re.compile(r"^\s*link(?:\s+(\d{6}))?\s*$", re.IGNORECASE)
 # "vincular 123456" — vincula conta web (email/senha) ao bot nesta plataforma
 VINCULAR_RE = re.compile(r"^\s*vincular\s+(\d{6})\s*$", re.IGNORECASE)
 
+
+def _dashboard_base_url() -> str:
+    raw = (os.getenv("DASHBOARD_URL") or "").strip()
+    raw = raw.rstrip("/")
+    if raw.startswith("DASHBOARD_URL="):
+        raw = raw[len("DASHBOARD_URL="):].rstrip("/")
+
+    if (not raw) or ("localhost" in raw) or ("127.0.0.1" in raw):
+        return "https://pigbankai.com"
+
+    return raw
+
 def _cmd_link(msg):
     """Link entre plataformas: Discord ↔ WhatsApp."""
     m = LINK_RE.match(msg.text or "")
@@ -254,12 +266,7 @@ def handle_incoming(msg: IncomingMessage) -> List[OutgoingMessage]:
     # dashboard financeiro
     if t_low in {"dashboard", "ver dashboard", "abrir dashboard", "painel", "ver painel",
                  "exportar sheets", "exportar planilha", "exportar sheet"}:
-        dashboard_url = os.getenv("DASHBOARD_URL", "").rstrip("/")
-        if not dashboard_url:
-            return [OutgoingMessage(text=(
-                "⚠️ Dashboard ainda não configurado.\n"
-                "Adicione DASHBOARD_URL nas variáveis de ambiente do servidor."
-            ))]
+        dashboard_url = _dashboard_base_url()
         try:
             from db import create_dashboard_session
             code = create_dashboard_session(msg.user_id, hours=2)

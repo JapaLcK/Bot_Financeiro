@@ -59,6 +59,18 @@ intents.message_content = True  # precisa habilitar no Developer Portal também
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+
+def _dashboard_base_url() -> str:
+    raw = (os.getenv("DASHBOARD_URL") or "").strip()
+    raw = raw.rstrip("/")
+    if raw.startswith("DASHBOARD_URL="):
+        raw = raw[len("DASHBOARD_URL="):].rstrip("/")
+
+    if (not raw) or ("localhost" in raw) or ("127.0.0.1" in raw):
+        return "https://pigbankai.com"
+
+    return raw
+
 HELP_TEXT_SHORT = (
     "❓ **Não entendi esse comando.**\n"
     "Digite `ajuda` para ver todos os comandos.\n"
@@ -941,13 +953,7 @@ async def on_message(message: discord.Message):
         
     # Dashboard financeiro em tempo real
     if t_low in ("dashboard", "ver dashboard", "abrir dashboard", "painel", "ver painel"):
-        dashboard_url = os.getenv("DASHBOARD_URL", "").rstrip("/")
-        if not dashboard_url:
-            await message.reply(
-                "⚠️ `DASHBOARD_URL` não configurada.\n"
-                "Adicione a variável de ambiente no Railway após o deploy."
-            )
-            return
+        dashboard_url = _dashboard_base_url()
         try:
             import sys, pathlib
             sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
