@@ -3495,7 +3495,18 @@ def create_dashboard_session(user_id: int, hours: int = 2) -> str:
 
 
 def get_dashboard_session(code: str) -> int | None:
-    return _db_support.get_dashboard_session_impl(get_conn, code)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select user_id
+                from dashboard_sessions
+                where code = %s and expires_at > now()
+                """,
+                (code,),
+            )
+            row = cur.fetchone()
+    return row["user_id"] if row else None
 
 
 # ─── Billing / planos ─────────────────────────────────────────────────────────
