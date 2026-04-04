@@ -30,9 +30,22 @@ delete_launch_and_rollback = db.delete_launch_and_rollback
 set_pending_action = db.set_pending_action
 
 
-client = OpenAI()
+client = None
 
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+
+def _get_openai_client():
+    global client
+    if client is not None:
+        return client
+
+    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        return None
+
+    client = OpenAI(api_key=api_key)
+    return client
 
 # Tools que a IA pode chamar
 TOOLS_NESTED = [
@@ -361,8 +374,12 @@ def classify_category_with_gpt(descricao: str) -> str:
     if not os.getenv("OPENAI_API_KEY"):
         return "outros"
 
+    current_client = _get_openai_client()
+    if current_client is None:
+        return "outros"
+
     try:
-        resp = client.responses.create(
+        resp = current_client.responses.create(
             model=MODEL,
             input=prompt,
             temperature=0,
@@ -405,11 +422,15 @@ def handle_ai_message(user_id: int | str, text: str) -> str | None:
     if not os.getenv("OPENAI_API_KEY"):
         return None
 
+    current_client = _get_openai_client()
+    if current_client is None:
+        return None
+
     uid = _internal_user_id(user_id)
     db.ensure_user(uid)
 
 
-    resp = client.responses.create(
+    resp = current_client.responses.create(
         model=MODEL,
         instructions=INSTRUCTIONS,
         input=text,
