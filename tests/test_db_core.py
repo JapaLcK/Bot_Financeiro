@@ -4,6 +4,7 @@ from db import (
     get_balance,
     add_launch_and_update_balance,
     list_launches,
+    get_summary_by_period,
     create_pocket,
     pocket_deposit_from_account,
     pocket_withdraw_to_account,
@@ -63,3 +64,15 @@ def test_delete_launch_and_rollback(user_id):
 
     delete_launch_and_rollback(user_id, int(l2))
     assert get_balance(user_id) == D("1000")
+
+
+def test_summary_by_period_soma_receitas_e_despesas(user_id):
+    from datetime import date
+
+    add_launch_and_update_balance(user_id, "receita", 500, None, "pix")
+    add_launch_and_update_balance(user_id, "despesa", 135, None, "rifa")
+
+    summary = get_summary_by_period(user_id, date.today(), date.today())
+
+    assert summary["receita"] == D("500")
+    assert summary["despesa"] == D("135")

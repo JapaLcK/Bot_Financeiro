@@ -2376,11 +2376,17 @@ def get_summary_by_period(user_id: int, start_date: date, end_date: date):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, (user_id, start_dt, end_excl))
-            rows = cur.fetchall()  # ex: [("despesa", Decimal("10.50")), ("receita", ...)]
+            rows = cur.fetchall()
 
     # defaults para não quebrar o output
     out = {"receita": 0.0, "despesa": 0.0, "aporte_investimento": 0.0}
-    for tipo, total in rows:
+    for row in rows:
+        try:
+            tipo = row["tipo"]
+            total = row["total"]
+        except Exception:
+            tipo, total = row
+
         if tipo in out:
             out[tipo] = float(total or 0)
 
