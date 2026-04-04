@@ -659,7 +659,7 @@ function decodeJWT(token) {
 }
 
 // ─── Verifica autenticação ao carregar a página ───────────────────────────
-function checkAuthState() {
+async function checkAuthState() {
   const token = localStorage.getItem('finbot_token');
   if (!token) return;
 
@@ -673,10 +673,24 @@ function checkAuthState() {
   }
 
   const email  = payload.email || payload.sub || '';
-  // Usa o próprio token como credencial do dashboard (mesmo segredo JWT)
-  const dashUrl = `${DASHBOARD_URL}/app?token=${encodeURIComponent(token)}`;
 
-  applyLoggedInState(email, dashUrl);
+  try {
+    const resp = await fetch(`${API_BASE}/auth/dashboard-token`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    if (!resp.ok) {
+      localStorage.removeItem('finbot_token');
+      return;
+    }
+
+    const data = await resp.json();
+    const dashUrl = sanitizeDashboardUrl(data.dashboard_url) || `${DASHBOARD_URL}/app`;
+    applyLoggedInState(email, dashUrl);
+  } catch {
+    localStorage.removeItem('finbot_token');
+  }
 }
 
 // ─── Aplica estado logado na UI ────────────────────────────────────────────

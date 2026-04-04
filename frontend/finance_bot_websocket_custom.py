@@ -41,6 +41,7 @@ import jwt as pyjwt
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from token_utils import decode_dashboard_token, make_dashboard_token
 
 load_dotenv()
 
@@ -48,7 +49,7 @@ DATABASE_URL      = os.getenv("DATABASE_URL")
 DASHBOARD_USER_ID = os.getenv("DASHBOARD_USER_ID")
 POLL_INTERVAL     = int(os.getenv("POLL_INTERVAL", "30"))
 TZ                = os.getenv("TZ", "America/Sao_Paulo")
-JWT_SECRET              = os.getenv("JWT_SECRET", "change-me-in-production")
+JWT_SECRET              = (os.getenv("JWT_SECRET") or "").strip()
 DASHBOARD_URL           = os.getenv("DASHBOARD_URL", "http://localhost:8000").strip()
 # Sanitiza caso a var de ambiente tenha sido definida como "DASHBOARD_URL=https://..."
 if DASHBOARD_URL.startswith("DASHBOARD_URL="):
@@ -63,6 +64,10 @@ HERE = pathlib.Path(__file__).parent  # directory of this file
 
 if not DATABASE_URL:
     print("ERROR: DATABASE_URL not set. Check your .env file.", file=sys.stderr)
+    sys.exit(1)
+
+if not JWT_SECRET:
+    print("ERROR: JWT_SECRET not set. Refusing to start with insecure default.", file=sys.stderr)
     sys.exit(1)
 
 # ─── JSON serializer ─────────────────────────────────────────────────────────
@@ -549,6 +554,7 @@ def _make_jwt(user_id: int, email: str) -> str:
     payload = {
         "sub": str(user_id),
         "email": email,
+        "type": "auth",
         "exp": datetime.now(timezone.utc) + timedelta(hours=24),
     }
     return pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
@@ -563,9 +569,34 @@ async def _get_current_user(creds: HTTPAuthorizationCredentials = Depends(_beare
     if not creds:
         raise HTTPException(status_code=401, detail="Token não fornecido.")
     payload = _decode_jwt(creds.credentials)
-    if not payload:
+    if not payload or payload.get("type") != "auth":
         raise HTTPException(status_code=401, detail="Token inválido ou expirado.")
     return int(payload["sub"])
+
+
+def _extract_bearer_token(request: Request) -> str | None:
+    auth = request.headers.get("authorization", "").strip()
+    if not auth:
+        return None
+    scheme, _, token = auth.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    return token.strip()
+
+
+def _resolve_dashboard_user_id(request: Request) -> int:
+    token = request.query_params.get("token") or _extract_bearer_token(request)
+    user_id = decode_dashboard_token(token or "")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Token de dashboard inválido ou expirado.")
+    return int(user_id)
+
+
+def _authorize_dashboard_access(request: Request, user_id: int) -> int:
+    current_user_id = _resolve_dashboard_user_id(request)
+    if current_user_id != int(user_id):
+        raise HTTPException(status_code=403, detail="Acesso negado para este usuário.")
+    return current_user_id
 
 # ─── Auth models ─────────────────────────────────────────────────────────────
 
@@ -596,15 +627,9 @@ async def auth_validate(token: str):
     Valida um dashboard token gerado pelo bot.
     Retorna user_id se válido, 401 caso contrário.
     """
-    import sys
-    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    payload = _decode_jwt(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Token inválido")
-
-    user_id = int(payload["sub"])
+    user_id = decode_dashboard_token(token)
     if not user_id:
-        raise HTTPException(status_code=401, detail="Token inválido ou expirado.")
+        raise HTTPException(status_code=401, detail="Token inválido")
     return {"user_id": user_id}
 
 
@@ -654,7 +679,7 @@ async def auth_verify_email(request: Request, body: VerifyEmailBody):
     user_id    = result["user_id"]
     link_code  = result["link_code"]
     token      = _make_jwt(user_id, body.email.strip().lower())
-    dash_token = _make_jwt(user_id, body.email)
+    dash_token = make_dashboard_token(user_id, hours=2)
 
     wa_link = ""
     if WHATSAPP_NUMBER:
@@ -686,7 +711,7 @@ async def auth_login(request: Request, body: LoginBody):
     user_id    = result["user_id"]
     link_code  = create_link_code(user_id, minutes_valid=15)
     token      = _make_jwt(user_id, result["email"])
-    dash_token = _make_jwt(user_id, body.email)
+    dash_token = make_dashboard_token(user_id, hours=2)
 
     wa_link = ""
     if WHATSAPP_NUMBER:
@@ -775,6 +800,17 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
     return {"user_id": user_id, **dict(user)}
+
+
+@app.post("/auth/dashboard-token")
+async def auth_dashboard_token(user_id: int = Depends(_get_current_user)):
+    """Troca o token de login por um token curto de acesso ao dashboard."""
+    dash_token = make_dashboard_token(user_id, hours=2)
+    return {
+        "token": dash_token,
+        "dashboard_url": f"{DASHBOARD_URL}/app?token={dash_token}",
+        "expires_in": 7200,
+    }
 
 
 # ─── Billing (Stripe) ────────────────────────────────────────────────────────
@@ -915,10 +951,7 @@ async def dashboard_short_link(code: str):
     Resolve um short link gerado pelo bot.
     Valida o código, gera um JWT e redireciona para /app?token=<JWT>.
     """
-    import sys
-    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import get_dashboard_session
-    from token_utils import make_dashboard_token
 
     user_id = get_dashboard_session(code)
     if not user_id:
@@ -991,29 +1024,33 @@ async def health():
         raise HTTPException(status_code=503, detail=f"DB error: {exc}")
 
 @app.get("/users")
-async def list_all_users():
-    rows = await list_users()
-    return {"users": [r["id"] for r in rows]}
+async def list_all_users(request: Request):
+    user_id = _resolve_dashboard_user_id(request)
+    return {"users": [user_id]}
 
 @app.get("/data/{user_id}")
 async def get_data(
+    request: Request,
     user_id: int,
     year: int = None,
     month: int = None,
     page: int = 1,
     limit: int = 25,
 ):
+    _authorize_dashboard_access(request, user_id)
     return await get_financial_data(user_id, year, month, page, limit)
 
 @app.get("/history/{user_id}")
-async def monthly_history(user_id: int, months: int = 6):
+async def monthly_history(request: Request, user_id: int, months: int = 6):
+    _authorize_dashboard_access(request, user_id)
     if not 1 <= months <= 24:
         raise HTTPException(status_code=400, detail="months must be 1-24")
     data = await get_monthly_history(user_id, months)
     return {"data": data}
 
 @app.get("/export/{user_id}")
-async def export_csv(user_id: int, year: int = None, month: int = None):
+async def export_csv(request: Request, user_id: int, year: int = None, month: int = None):
+    _authorize_dashboard_access(request, user_id)
     now = datetime.now(timezone.utc)
     y = year  or now.year
     m = month or now.month
@@ -1028,7 +1065,8 @@ async def export_csv(user_id: int, year: int = None, month: int = None):
 # ─── Budget routes ────────────────────────────────────────────────────────────
 
 @app.get("/budgets/{user_id}")
-async def get_budgets(user_id: int):
+async def get_budgets(request: Request, user_id: int):
+    _authorize_dashboard_access(request, user_id)
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -1043,7 +1081,8 @@ class BudgetPayload(BaseModel):
     budget: float
 
 @app.post("/budgets/{user_id}")
-async def set_budget(user_id: int, payload: BudgetPayload):
+async def set_budget(request: Request, user_id: int, payload: BudgetPayload):
+    _authorize_dashboard_access(request, user_id)
     if payload.budget <= 0:
         raise HTTPException(status_code=400, detail="budget must be > 0")
     async with await db_connect() as conn:
@@ -1061,7 +1100,8 @@ async def set_budget(user_id: int, payload: BudgetPayload):
     return {"ok": True, "categoria": payload.categoria, "budget": payload.budget}
 
 @app.delete("/budgets/{user_id}/{categoria}")
-async def delete_budget(user_id: int, categoria: str):
+async def delete_budget(request: Request, user_id: int, categoria: str):
+    _authorize_dashboard_access(request, user_id)
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -1075,6 +1115,12 @@ async def delete_budget(user_id: int, categoria: str):
 
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(ws: WebSocket, user_id: int):
+    token = ws.query_params.get("token", "")
+    current_user_id = decode_dashboard_token(token)
+    if not current_user_id or int(current_user_id) != int(user_id):
+        await ws.close(code=1008)
+        return
+
     now = datetime.now(timezone.utc)
     await manager.connect(ws, user_id, now.year, now.month)
     print(f"Connected: user={user_id} total={len(manager.active.get(user_id, {}))}")

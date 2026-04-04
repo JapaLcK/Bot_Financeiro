@@ -3747,15 +3747,20 @@ def create_dashboard_session(user_id: int, hours: int = 2) -> str:
 def get_dashboard_session(code: str) -> int | None:
     """
     Valida um código de acesso ao dashboard.
-    Retorna user_id se o código existe e não expirou, None caso contrário.
+    Retorna user_id se o código existe e não expirou, consumindo-o no primeiro uso.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select user_id from dashboard_sessions where code = %s and expires_at > now()",
+                """
+                delete from dashboard_sessions
+                where code = %s and expires_at > now()
+                returning user_id
+                """,
                 (code,),
             )
             row = cur.fetchone()
+        conn.commit()
     return row["user_id"] if row else None
 
 
@@ -3796,6 +3801,7 @@ def set_stripe_customer(user_id: int, stripe_customer_id: str) -> None:
                 "update auth_accounts set stripe_customer_id = %s where user_id = %s",
                 (stripe_customer_id, user_id),
             )
+        conn.commit()
 
 
 # ─── VERIFICAÇÃO DE EMAIL NO CADASTRO ────────────────────────────────────────

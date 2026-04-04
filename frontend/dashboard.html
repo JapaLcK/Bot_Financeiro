@@ -330,6 +330,7 @@ const API       = BASE_HTTP;
 // USER_ID e WS_URL são resolvidos após validação do token (ver seção INIT)
 let USER_ID = 0;
 let WS_URL  = "";
+let DASHBOARD_TOKEN = "";
 
 /* ═══════════════════════════════════════════════════════════════════════
    STATE
@@ -420,7 +421,8 @@ function changeMonth(d) {
 async function fetchMonthHttp(year, month, page = 1, limit = LAUNCHES_LIMIT) {
   try {
     const r = await fetch(
-      `${API}/data/${USER_ID}?year=${year}&month=${month}&page=${page}&limit=${limit}`
+      `${API}/data/${USER_ID}?year=${year}&month=${month}&page=${page}&limit=${limit}`,
+      { headers: { Authorization: `Bearer ${DASHBOARD_TOKEN}` } }
     );
     const data = await r.json();
     lastData = data;
@@ -727,7 +729,11 @@ async function saveBudget() {
   if (!val || val <= 0) { alert("Digite um valor maior que zero."); return; }
   try {
     const r = await fetch(`${API}/budgets/${USER_ID}`, {
-      method:"POST", headers:{"Content-Type":"application/json"},
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "Authorization": `Bearer ${DASHBOARD_TOKEN}`
+      },
       body: JSON.stringify({categoria: bgtTarget, budget: val})
     });
     if (!r.ok) throw new Error(await r.text());
@@ -747,7 +753,7 @@ document.getElementById("bgt-input").addEventListener("keydown", e => {
 ═══════════════════════════════════════════════════════════════════════ */
 function exportCSV() {
   const a = document.createElement("a");
-  a.href = `${API}/export/${USER_ID}?year=${viewYear}&month=${viewMonth}`;
+  a.href = `${API}/export/${USER_ID}?year=${viewYear}&month=${viewMonth}&token=${encodeURIComponent(DASHBOARD_TOKEN)}`;
   a.download = `financas_${viewYear}_${String(viewMonth).padStart(2,"0")}.csv`;
   a.click();
 }
@@ -900,7 +906,9 @@ function buildHistoryChart(history) {
 
 async function fetchHistory() {
   try {
-    const r = await fetch(`${API}/history/${USER_ID}`);
+    const r = await fetch(`${API}/history/${USER_ID}`, {
+      headers: { Authorization: `Bearer ${DASHBOARD_TOKEN}` }
+    });
     if (!r.ok) return;
 
     const payload = await r.json();
@@ -1073,6 +1081,7 @@ function _showAccessError() {
   const uid_raw = Number(params.get("user_id")); // fallback legado
 
   if (token) {
+    DASHBOARD_TOKEN = token;
     try {
       const resp = await fetch(`${API}/auth/validate?token=${encodeURIComponent(token)}`);
       if (!resp.ok) { _showAccessError(); return; }
@@ -1087,7 +1096,7 @@ function _showAccessError() {
     return;
   }
 
-  WS_URL = `${BASE_WS}/ws/${USER_ID}`;
+  WS_URL = `${BASE_WS}/ws/${USER_ID}?token=${encodeURIComponent(DASHBOARD_TOKEN)}`;
 
   updateMonthLabel();
   connect();
