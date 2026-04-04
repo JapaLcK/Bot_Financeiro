@@ -8,6 +8,7 @@ from datetime import datetime, date
 import math
 from datetime import timedelta, timezone
 import requests
+import db_support as _db_support
 from utils_date import _tz, today_tz, billing_period_for_close_day
 from uuid import uuid4
 import calendar
@@ -2333,64 +2334,13 @@ def export_launches(user_id: int, start_date: date | None = None, end_date: date
 
 #pega os lancamentos por periodo
 def get_launches_by_period(user_id: int, start_date: date, end_date: date):
-    ensure_user(user_id)
-
-    start_dt = datetime.combine(start_date, datetime.min.time())
-    end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
-
-    sql = """
-        select id, tipo, valor, alvo, nota, categoria, source, criado_em
-        from launches
-        where user_id=%s
-        and criado_em >= %s
-        and criado_em < %s
-        order by criado_em asc, id asc
-    """
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, (user_id, start_dt, end_excl))
-            return cur.fetchall()
+    return _db_support.get_launches_by_period_impl(get_conn, ensure_user, user_id, start_date, end_date)
         
 
 # pega o resumo de lancamentos por periodo
 def get_summary_by_period(user_id: int, start_date: date, end_date: date):
-    """
-    Retorna soma por tipo no período [start_date, end_date] (inclusive),
-    usando criado_em como referência (mesma lógica de get_launches_by_period).
-    """
-    ensure_user(user_id)
-
-    start_dt = datetime.combine(start_date, datetime.min.time())
-    end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
-
-    sql = """
-        select tipo, coalesce(sum(valor), 0) as total
-        from launches
-        where user_id=%s
-          and criado_em >= %s
-          and criado_em < %s
-        group by tipo
-    """
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, (user_id, start_dt, end_excl))
-            rows = cur.fetchall()
-
-    # defaults para não quebrar o output
-    out = {"receita": 0.0, "despesa": 0.0, "aporte_investimento": 0.0}
-    for row in rows:
-        try:
-            tipo = row["tipo"]
-            total = row["total"]
-        except Exception:
-            tipo, total = row
-
-        if tipo in out:
-            out[tipo] = float(total or 0)
-
-    return out
+    """Retorna soma por tipo no período [start_date, end_date] (inclusive)."""
+    return _db_support.get_summary_by_period_impl(get_conn, ensure_user, user_id, start_date, end_date)
 
 # Puxa regas somente 1 vez na hora do import ofx
 def list_category_rules(user_id: int) -> list[tuple[str, str]]:
@@ -3482,138 +3432,29 @@ def undo_installment_group(user_id: int, group_id: str):
     }
 
 def set_daily_report_enabled(user_id: int, enabled: bool) -> None:
-    ensure_user(user_id)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                insert into daily_report_prefs(user_id, enabled)
-                values (%s, %s)
-                on conflict (user_id) do update set enabled=excluded.enabled
-                """,
-                (user_id, enabled),
-            )
-        conn.commit()
+    return _db_support.set_daily_report_enabled_impl(get_conn, ensure_user, user_id, enabled)
 
 def get_daily_report_prefs(user_id: int) -> dict:
-    ensure_user(user_id)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select enabled, hour, minute
-                from daily_report_prefs
-                where user_id=%s
-                """,
-                (user_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                return {"enabled": True, "hour": 9, "minute": 0}
-
-            # compatível com cursor dict ou tuple
-            try:
-                return {"enabled": bool(row["enabled"]), "hour": int(row["hour"]), "minute": int(row["minute"])}
-            except Exception:
-                return {"enabled": bool(row[0]), "hour": int(row[1]), "minute": int(row[2])}
+    return _db_support.get_daily_report_prefs_impl(get_conn, ensure_user, user_id)
 
 def list_users_with_daily_report_enabled(hour: int = 9, minute: int = 0) -> list[int]:
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select u.id
-                from users u
-                left join daily_report_prefs p on p.user_id=u.id
-                where coalesce(p.enabled, true) = true
-                  and coalesce(p.hour, 9) = %s
-                  and coalesce(p.minute, 0) = %s
-                order by u.id asc
-                """,
-                (hour, minute),
-            )
-            rows = cur.fetchall() or []
-            out = []
-            for r in rows:
-                try:
-                    out.append(int(r["id"]))
-                except Exception:
-                    out.append(int(r[0]))
-            return out
+    return _db_support.list_users_with_daily_report_enabled_impl(get_conn, hour, minute)
 
 def list_identities_by_user(user_id: int) -> list[dict]:
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select provider, external_id
-                from user_identities
-                where user_id=%s
-                """,
-                (user_id,),
-            )
-            rows = cur.fetchall() or []
-            out = []
-            for r in rows:
-                try:
-                    out.append({"provider": r["provider"], "external_id": r["external_id"]})
-                except Exception:
-                    out.append({"provider": r[0], "external_id": r[1]})
-            return out
+    return _db_support.list_identities_by_user_impl(get_conn, user_id)
         
 
 #marcar envio de mensagem diaria
 def mark_daily_report_sent(user_id: int, sent_date) -> None:
-    ensure_user(user_id)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                insert into daily_report_prefs(user_id, last_sent_date)
-                values (%s, %s)
-                on conflict (user_id)
-                do update set last_sent_date=excluded.last_sent_date
-                """,
-                (user_id, sent_date),
-            )
-        conn.commit()
+    return _db_support.mark_daily_report_sent_impl(get_conn, ensure_user, user_id, sent_date)
 
 # confere se a mensagem ja foi enviada no dia 
 def was_daily_report_sent_today(user_id: int, today) -> bool:
-    ensure_user(user_id)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "select last_sent_date from daily_report_prefs where user_id=%s",
-                (user_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                return False
-            try:
-                return row["last_sent_date"] == today
-            except Exception:
-                return row[0] == today
+    return _db_support.was_daily_report_sent_today_impl(get_conn, ensure_user, user_id, today)
             
 # pega a data de fim do último import OFX para o usuário, ou None se não tiver nenhum.
 def get_last_ofx_import_end_date(user_id: int):
-    ensure_user(user_id)
-    sql = """
-        select max(dt_end) as last_dt_end
-        from ofx_imports
-        where user_id = %s
-    """
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, (user_id,))
-            row = cur.fetchone()
-            if not row:
-                return None
-
-            try:
-                return row["last_dt_end"]
-            except Exception:
-                return row[0]
+    return _db_support.get_last_ofx_import_end_date_impl(get_conn, ensure_user, user_id)
 
 # ─────────────────────────────────────────────
 # AUTH — cadastro e login via email/senha
@@ -3629,376 +3470,69 @@ def _check_password(password: str, hashed: str) -> bool:
         return False
 
 def register_auth_user(email: str, password: str) -> dict:
-    """
-    Cria uma conta via email+senha.
-    - Gera um user_id canônico usando o email como external_id
-    - Cria auth_account com hash bcrypt
-    - Envia e-mail de boas-vindas com o código de vinculação
-    - Retorna {user_id, link_code} pronto para uso
-    Lança ValueError se o email já estiver cadastrado.
-    """
-    email = email.strip().lower()
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            # verifica email duplicado
-            cur.execute("select user_id from auth_accounts where email=%s", (email,))
-            if cur.fetchone():
-                raise ValueError("Este e-mail já está cadastrado.")
-
-    # cria user_id canônico via provider "email"
-    user_id = get_or_create_canonical_user("email", email)
-
-    password_hash = _hash_password(password)
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                insert into auth_accounts (user_id, email, password_hash)
-                values (%s, %s, %s)
-                on conflict (email) do nothing
-                """,
-                (user_id, email, password_hash),
-            )
-        conn.commit()
-
-    # gera link code com 15 min de validade
-    link_code = create_link_code(user_id, minutes_valid=15)
-
-    # envia e-mail de boas-vindas (falha silenciosa — não bloqueia o cadastro)
-    try:
-        from core.services.email_service import send_welcome_email
-        dashboard_url = os.getenv("DASHBOARD_URL", "")
-        send_welcome_email(email, link_code, dashboard_url)
-    except Exception as _email_exc:
-        import logging as _log
-        _log.getLogger(__name__).warning(
-            "Falha ao enviar e-mail de boas-vindas para <%s>: %s", email, _email_exc
-        )
-
-    return {"user_id": user_id, "link_code": link_code}
+    return _db_support.register_auth_user_impl(
+        get_conn,
+        get_or_create_canonical_user,
+        create_link_code,
+        _hash_password,
+        email,
+        password,
+    )
 
 
 def login_auth_user(email: str, password: str) -> dict | None:
-    """
-    Valida email+senha.
-    Retorna {user_id, email, plan} ou None se inválido.
-    """
-    email = email.strip().lower()
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "select user_id, password_hash, plan, plan_expires_at from auth_accounts where email=%s",
-                (email,),
-            )
-            row = cur.fetchone()
-
-    if not row:
-        return None
-    if not _check_password(password, row["password_hash"]):
-        return None
-
-    return {
-        "user_id": int(row["user_id"]),
-        "email": email,
-        "plan": row["plan"],
-        "plan_expires_at": row["plan_expires_at"],
-    }
+    return _db_support.login_auth_user_impl(get_conn, _check_password, email, password)
 
 
 def get_auth_user(user_id: int) -> dict | None:
-    """Retorna dados da conta auth pelo user_id."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "select email, plan, plan_expires_at, created_at from auth_accounts where user_id=%s",
-                (user_id,),
-            )
-            return cur.fetchone()
+    return _db_support.get_auth_user_impl(get_conn, user_id)
 
 
 # ─── Dashboard short links ────────────────────────────────────────────────────
 
 def create_dashboard_session(user_id: int, hours: int = 2) -> str:
-    """
-    Gera um código curto (ex: 'A3kP9z8Q') para acesso ao dashboard.
-    Armazena no banco com validade de `hours` horas.
-    Retorna o código gerado.
-    """
-    import secrets
-    from datetime import datetime, timezone, timedelta
-
-    code = secrets.token_urlsafe(6)  # ~8 chars URL-safe
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=hours)
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            # garante unicidade em caso de colisão improvável
-            for _ in range(3):
-                try:
-                    cur.execute(
-                        "insert into dashboard_sessions (code, user_id, expires_at) values (%s, %s, %s)",
-                        (code, user_id, expires_at),
-                    )
-                    break
-                except Exception:
-                    code = secrets.token_urlsafe(6)
-        conn.commit()
-
-    return code
+    return _db_support.create_dashboard_session_impl(get_conn, user_id, hours)
 
 
 def get_dashboard_session(code: str) -> int | None:
-    """
-    Valida um código de acesso ao dashboard.
-    Retorna user_id se o código existe e não expirou, consumindo-o no primeiro uso.
-    """
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                delete from dashboard_sessions
-                where code = %s and expires_at > now()
-                returning user_id
-                """,
-                (code,),
-            )
-            row = cur.fetchone()
-        conn.commit()
-    return row["user_id"] if row else None
+    return _db_support.get_dashboard_session_impl(get_conn, code)
 
 
 # ─── Billing / planos ─────────────────────────────────────────────────────────
 
 def update_user_plan(user_id: int, plan: str, expires_at=None) -> None:
-    """
-    Atualiza o plano de assinatura do usuário.
-    plan: 'free' | 'pro'
-    expires_at: datetime com timezone ou None (para free)
-    """
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "update auth_accounts set plan = %s, plan_expires_at = %s where user_id = %s",
-                (plan, expires_at, user_id),
-            )
-        conn.commit()
+    return _db_support.update_user_plan_impl(get_conn, user_id, plan, expires_at)
 
 
 def get_user_by_stripe_customer(stripe_customer_id: str) -> int | None:
-    """Retorna user_id pelo stripe_customer_id, ou None."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "select user_id from auth_accounts where stripe_customer_id = %s",
-                (stripe_customer_id,),
-            )
-            row = cur.fetchone()
-    return row["user_id"] if row else None
+    return _db_support.get_user_by_stripe_customer_impl(get_conn, stripe_customer_id)
 
 
 def set_stripe_customer(user_id: int, stripe_customer_id: str) -> None:
-    """Vincula um Stripe Customer ID ao usuário."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "update auth_accounts set stripe_customer_id = %s where user_id = %s",
-                (stripe_customer_id, user_id),
-            )
-        conn.commit()
+    return _db_support.set_stripe_customer_impl(get_conn, user_id, stripe_customer_id)
 
 
 # ─── VERIFICAÇÃO DE EMAIL NO CADASTRO ────────────────────────────────────────
 
 def create_email_verification(email: str, password: str, minutes_valid: int = 15) -> str:
-    """
-    Armazena uma verificação pendente para o email+senha informados.
-    Gera um código numérico de 6 dígitos e retorna ele.
-    Lança ValueError se o email já estiver cadastrado.
-    """
-    import random
-    from datetime import timedelta
-
-    email = email.strip().lower()
-
-    # verifica se email já existe
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("select user_id from auth_accounts where email = %s", (email,))
-            if cur.fetchone():
-                raise ValueError("Este e-mail já está cadastrado.")
-
-    password_hash = _hash_password(password)
-    code = f"{random.randint(0, 999999):06d}"
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes_valid)
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            # invalida códigos anteriores para o mesmo email
-            cur.execute(
-                "update email_verification_codes set used_at = now() where email = %s and used_at is null",
-                (email,),
-            )
-            cur.execute(
-                """
-                insert into email_verification_codes (email, code, password_hash, expires_at)
-                values (%s, %s, %s, %s)
-                """,
-                (email, code, password_hash, expires_at),
-            )
-        conn.commit()
-
-    return code
+    return _db_support.create_email_verification_impl(get_conn, _hash_password, email, password, minutes_valid)
 
 
 def confirm_email_verification(email: str, code: str) -> dict:
-    """
-    Valida o código e cria a conta se correto.
-    Retorna {user_id, link_code} em sucesso.
-    Lança ValueError em caso de código inválido, expirado ou já usado.
-    """
-    email = email.strip().lower()
-    now = datetime.now(timezone.utc)
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select id, password_hash, expires_at, used_at
-                from email_verification_codes
-                where email = %s and code = %s
-                order by created_at desc
-                limit 1
-                """,
-                (email, code),
-            )
-            row = cur.fetchone()
-
-    if not row:
-        raise ValueError("Código inválido. Verifique e tente novamente.")
-    if row["used_at"] is not None:
-        raise ValueError("Este código já foi utilizado. Faça o cadastro novamente.")
-    if row["expires_at"] < now:
-        raise ValueError("Código expirado. Faça o cadastro novamente.")
-
-    password_hash = row["password_hash"]
-    verification_id = row["id"]
-
-    # cria o usuário diretamente (sem re-hash da senha — reusa o hash salvo)
-    user_id = get_or_create_canonical_user("email", email)
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                insert into auth_accounts (user_id, email, password_hash)
-                values (%s, %s, %s)
-                on conflict (email) do nothing
-                """,
-                (user_id, email, password_hash),
-            )
-            # marca código como usado
-            cur.execute(
-                "update email_verification_codes set used_at = now() where id = %s",
-                (verification_id,),
-            )
-        conn.commit()
-
-    link_code = create_link_code(user_id, minutes_valid=15)
-
-    # envia email de boas-vindas
-    try:
-        from core.services.email_service import send_welcome_email
-        dashboard_url = os.getenv("DASHBOARD_URL", "")
-        send_welcome_email(email, link_code, dashboard_url)
-    except Exception as _e:
-        import logging as _log
-        _log.getLogger(__name__).warning("Falha ao enviar email de boas-vindas para <%s>: %s", email, _e)
-
-    return {"user_id": user_id, "link_code": link_code}
+    return _db_support.confirm_email_verification_impl(
+        get_conn,
+        get_or_create_canonical_user,
+        create_link_code,
+        email,
+        code,
+    )
 
 
 # ─── RECUPERAÇÃO DE SENHA ─────────────────────────────────────────────────────
 
 def create_password_reset_token(email: str, minutes_valid: int = 30) -> str | None:
-    """
-    Gera um token de recuperação de senha para o email informado.
-    Retorna o token se o email existir, ou None se não encontrado.
-    """
-    import secrets
-    from datetime import timedelta
-
-    email = email.strip().lower()
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("select user_id from auth_accounts where email = %s", (email,))
-            row = cur.fetchone()
-
-    if not row:
-        return None
-
-    user_id = row["user_id"]
-    token = secrets.token_urlsafe(32)
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes_valid)
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                insert into password_reset_tokens (token, user_id, expires_at)
-                values (%s, %s, %s)
-                """,
-                (token, user_id, expires_at),
-            )
-        conn.commit()
-
-    return token
+    return _db_support.create_password_reset_token_impl(get_conn, email, minutes_valid)
 
 
 def consume_password_reset_token(token: str, new_password: str) -> bool:
-    """
-    Valida o token e atualiza a senha.
-    Retorna True se bem-sucedido, False se token inválido/expirado/já usado.
-    """
-    now = datetime.now(timezone.utc)
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select user_id, expires_at, used_at
-                from password_reset_tokens
-                where token = %s
-                """,
-                (token,),
-            )
-            row = cur.fetchone()
-
-    if not row:
-        return False
-    if row["used_at"] is not None:
-        return False
-    if row["expires_at"] < now:
-        return False
-
-    user_id = row["user_id"]
-    new_hash = _hash_password(new_password)
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            # atualiza senha
-            cur.execute(
-                "update auth_accounts set password_hash = %s where user_id = %s",
-                (new_hash, user_id),
-            )
-            # marca token como usado
-            cur.execute(
-                "update password_reset_tokens set used_at = %s where token = %s",
-                (now, token),
-            )
-        conn.commit()
-
-    return True
+    return _db_support.consume_password_reset_token_impl(get_conn, _hash_password, token, new_password)

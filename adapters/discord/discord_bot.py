@@ -50,6 +50,7 @@ from utils_text import (
 from investment_parse import parse_interest
 import time as pytime
 from adapters.discord.help_ui import help_embed, HelpView
+from core.dashboard_links import build_dashboard_link
 from core.reports.reports_daily import setup_daily_report
 
 
@@ -58,18 +59,6 @@ intents = discord.Intents.default()
 intents.message_content = True  # precisa habilitar no Developer Portal também
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-
-
-def _dashboard_base_url() -> str:
-    raw = (os.getenv("DASHBOARD_URL") or "").strip()
-    raw = raw.rstrip("/")
-    if raw.startswith("DASHBOARD_URL="):
-        raw = raw[len("DASHBOARD_URL="):].rstrip("/")
-
-    if (not raw) or ("localhost" in raw) or ("127.0.0.1" in raw):
-        return "https://pigbankai.com"
-
-    return raw
 
 HELP_TEXT_SHORT = (
     "❓ **Não entendi esse comando.**\n"
@@ -953,15 +942,7 @@ async def on_message(message: discord.Message):
         
     # Dashboard financeiro em tempo real
     if t_low in ("dashboard", "ver dashboard", "abrir dashboard", "painel", "ver painel"):
-        dashboard_url = _dashboard_base_url()
-        try:
-            import sys, pathlib
-            sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
-            from db import create_dashboard_session
-            code = create_dashboard_session(uid, hours=2)
-            link = f"{dashboard_url}/d/{code}"
-        except Exception:
-            link = f"{dashboard_url}/app?user_id={uid}"
+        link = build_dashboard_link(uid, hours=2)
         await message.reply(
             f"📊 **Dashboard financeiro**\n"
             f"🔗 {link}\n\n"

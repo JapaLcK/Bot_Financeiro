@@ -16,6 +16,7 @@ from core.help_text import (
     render_help,
     resolve_section,
 )
+from core.dashboard_links import build_dashboard_link
 from core.services.ofx_service import handle_ofx_import
 from db import ensure_user, get_balance, list_launches, create_link_code, consume_link_code, bind_identity
 from utils_text import fmt_brl
@@ -40,18 +41,6 @@ LINK_RE = re.compile(r"^\s*link(?:\s+(\d{6}))?\s*$", re.IGNORECASE)
 
 # "vincular 123456" — vincula conta web (email/senha) ao bot nesta plataforma
 VINCULAR_RE = re.compile(r"^\s*vincular\s+(\d{6})\s*$", re.IGNORECASE)
-
-
-def _dashboard_base_url() -> str:
-    raw = (os.getenv("DASHBOARD_URL") or "").strip()
-    raw = raw.rstrip("/")
-    if raw.startswith("DASHBOARD_URL="):
-        raw = raw[len("DASHBOARD_URL="):].rstrip("/")
-
-    if (not raw) or ("localhost" in raw) or ("127.0.0.1" in raw):
-        return "https://pigbankai.com"
-
-    return raw
 
 def _cmd_link(msg):
     """Link entre plataformas: Discord ↔ WhatsApp."""
@@ -266,13 +255,7 @@ def handle_incoming(msg: IncomingMessage) -> List[OutgoingMessage]:
     # dashboard financeiro
     if t_low in {"dashboard", "ver dashboard", "abrir dashboard", "painel", "ver painel",
                  "exportar sheets", "exportar planilha", "exportar sheet"}:
-        dashboard_url = _dashboard_base_url()
-        try:
-            from db import create_dashboard_session
-            code = create_dashboard_session(msg.user_id, hours=2)
-            link = f"{dashboard_url}/d/{code}"
-        except Exception:
-            link = f"{dashboard_url}/app?user_id={msg.user_id}"
+        link = build_dashboard_link(msg.user_id, hours=2)
         return [OutgoingMessage(text=f"📊 Dashboard financeiro:\n{link}")]
 
     msg_out = handle_quick_entry(msg.user_id, t0)
