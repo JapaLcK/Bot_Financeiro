@@ -943,6 +943,12 @@ async def on_message(message: discord.Message):
     # Dashboard financeiro em tempo real
     if t_low in ("dashboard", "ver dashboard", "abrir dashboard", "painel", "ver painel"):
         link = build_dashboard_link(uid, hours=2)
+        if not link:
+            await message.reply(
+                "⚠️ Nao consegui gerar seu link do dashboard agora.\n"
+                "Tente novamente em instantes."
+            )
+            return
         await message.reply(
             f"📊 **Dashboard financeiro**\n"
             f"🔗 {link}\n\n"

@@ -256,6 +256,11 @@ def handle_incoming(msg: IncomingMessage) -> List[OutgoingMessage]:
     if t_low in {"dashboard", "ver dashboard", "abrir dashboard", "painel", "ver painel",
                  "exportar sheets", "exportar planilha", "exportar sheet"}:
         link = build_dashboard_link(msg.user_id, hours=2)
+        if not link:
+            return [OutgoingMessage(text=(
+                "⚠️ Nao consegui gerar seu link do dashboard agora.\n"
+                "Tente novamente em instantes."
+            ))]
         return [OutgoingMessage(text=f"📊 Dashboard financeiro:\n{link}")]
 
     msg_out = handle_quick_entry(msg.user_id, t0)
