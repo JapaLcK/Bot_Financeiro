@@ -959,6 +959,10 @@ async def serve_dashboard():
 async def serve_reset_password():
     return FileResponse(HERE / "reset-password.html")
 
+@app.get("/favicon.png")
+async def serve_favicon():
+    return FileResponse(HERE / "favicon.png", media_type="image/png")
+
 @app.get("/manifest.json")
 async def serve_manifest():
     return FileResponse(HERE / "manifest.json", media_type="application/manifest+json")
