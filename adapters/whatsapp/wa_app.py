@@ -52,12 +52,18 @@ async def wa_webhook(request: Request):
     try:
         value = payload.get("entry", [{}])[0].get("changes", [{}])[0].get("value", {})
         statuses = value.get("statuses") or []
+        messages = value.get("messages") or []
         logger.info(
             "WA webhook received: field=%s messages=%s statuses=%s",
             payload.get("entry", [{}])[0].get("changes", [{}])[0].get("field"),
-            len(value.get("messages") or []),
+            len(messages),
             len(statuses),
         )
+        if not messages and not statuses:
+            print(
+                f"[DEBUG] webhook payload without messages/statuses: keys={list(value.keys())} value={value}",
+                flush=True,
+            )
         for status in statuses:
             logger.info(
                 "WA status received: id=%s status=%s recipient=%s conversation=%s errors=%s",
