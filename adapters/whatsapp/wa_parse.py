@@ -39,12 +39,25 @@ def extract_messages(payload: dict[str, Any]) -> list[InboundMessage]:
     """
     value = _get_value(payload)
     msgs = value.get("messages") or []
+
+    # wa_id canônico por número (do campo contacts do payload)
+    contacts = value.get("contacts") or []
+    canonical_wa_id: dict[str, str] = {}
+    for c in contacts:
+        phone = c.get("wa_id") or ""
+        if phone:
+            canonical_wa_id[phone] = phone
+    print(f"[DEBUG] contacts wa_ids={list(canonical_wa_id.keys())}", flush=True)
+
     out: list[InboundMessage] = []
 
     for m in msgs:
         wa_id = m.get("from") or ""
         if not wa_id:
             continue
+        # usa wa_id canônico do contacts se disponível
+        wa_id = canonical_wa_id.get(wa_id, wa_id)
+        print(f"[DEBUG] message from={m.get('from')} resolved_wa_id={wa_id}", flush=True)
 
         mtype = m.get("type") or "unknown"
         ts = m.get("timestamp")
