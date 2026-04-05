@@ -522,15 +522,29 @@ async def lifespan(app: FastAPI):
         print(f"Dashboard: http://localhost:8000/")
         print(f"WebSocket: ws://localhost:8000/ws/{uid}")
 
+    from adapters.whatsapp.wa_app import _worker_loop as _wa_worker, _daily_report_loop as _wa_daily  # noqa: E402
     task = asyncio.create_task(push_loop())
+    wa_worker = asyncio.create_task(_wa_worker())
+    wa_daily = asyncio.create_task(_wa_daily())
     yield
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    for t in (task, wa_worker, wa_daily):
+        t.cancel()
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
 
 app = FastAPI(title="Finance Dashboard", lifespan=lifespan)
+
+# ─── WhatsApp webhook routes ──────────────────────────────────────────────────
+from adapters.whatsapp.wa_app import (  # noqa: E402
+    wa_verify,
+    wa_webhook,
+    wa_simulate,
+)
+app.add_api_route("/wa/webhook", wa_verify, methods=["GET"])
+app.add_api_route("/wa/webhook", wa_webhook, methods=["POST"])
+app.add_api_route("/wa/dev/simulate", wa_simulate, methods=["POST"])
 
 # ─── Rate limiting ────────────────────────────────────────────────────────────
 

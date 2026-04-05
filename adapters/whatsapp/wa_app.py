@@ -5,7 +5,7 @@ import json
 import logging
 import os
 
-from fastapi import FastAPI, Request
+from fastapi import Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from adapters.whatsapp.wa_client import send_text
@@ -22,19 +22,11 @@ from utils_date import now_tz
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
 VERIFY_TOKEN = (os.getenv("WA_VERIFY_TOKEN") or "").strip()
 APP_SECRET = (os.getenv("WA_APP_SECRET") or "").strip()
 _queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=500)
 
 
-@app.on_event("startup")
-async def _startup():
-    asyncio.create_task(_worker_loop())
-    asyncio.create_task(_daily_report_loop())
-
-
-@app.get("/wa/webhook")
 async def wa_verify(request: Request):
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
@@ -49,7 +41,6 @@ async def wa_verify(request: Request):
     return PlainTextResponse("forbidden", status_code=403)
 
 
-@app.post("/wa/webhook")
 async def wa_webhook(request: Request):
     raw = await request.body()
     signature = request.headers.get("X-Hub-Signature-256", "")
@@ -64,6 +55,11 @@ async def wa_webhook(request: Request):
         return JSONResponse({"ok": True, "dropped": True})
 
     return JSONResponse({"ok": True})
+
+
+async def wa_simulate(payload: dict):
+    count = await asyncio.to_thread(process_payload, payload)
+    return {"ok": True, "processed_messages": count}
 
 
 async def _worker_loop():
@@ -111,9 +107,3 @@ async def _daily_report_loop():
             logger.exception("WA daily report loop error: %s", exc)
 
         await asyncio.sleep(30)
-
-
-@app.post("/wa/dev/simulate")
-async def wa_simulate(payload: dict):
-    count = await asyncio.to_thread(process_payload, payload)
-    return {"ok": True, "processed_messages": count}
