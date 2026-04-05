@@ -15,6 +15,20 @@ python3 -m uvicorn adapters.whatsapp.wa_app:app --host 0.0.0.0 --port 5001
 ngrok http 5001
 ```
 
+Webhook da Meta no runtime atual:
+
+```
+GET  /wa/webhook   # verificação
+POST /wa/webhook   # mensagens recebidas
+```
+
+Compatibilidade legada também aceita:
+
+```
+GET  /webhook
+POST /webhook
+```
+
 Legado / compatibilidade Flask:
 
 ```

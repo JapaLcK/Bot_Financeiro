@@ -542,8 +542,11 @@ from adapters.whatsapp.wa_app import (  # noqa: E402
     wa_webhook,
     wa_simulate,
 )
+# Mantem compatibilidade com a rota antiga `/webhook`, usada em configs legadas.
 app.add_api_route("/wa/webhook", wa_verify, methods=["GET"])
 app.add_api_route("/wa/webhook", wa_webhook, methods=["POST"])
+app.add_api_route("/webhook", wa_verify, methods=["GET"])
+app.add_api_route("/webhook", wa_webhook, methods=["POST"])
 app.add_api_route("/wa/dev/simulate", wa_simulate, methods=["POST"])
 
 # ─── Rate limiting ────────────────────────────────────────────────────────────
