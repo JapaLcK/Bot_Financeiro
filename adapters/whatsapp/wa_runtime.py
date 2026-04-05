@@ -76,8 +76,14 @@ def safe_text(obj: Any) -> str:
 def _send_reply(to_wa_id: str, body: str) -> None:
     body = (body or "").strip()
     if body:
+        print(f"[DEBUG] _send_reply to={to_wa_id} chars={len(body)}", flush=True)
         logger.info("WA sending reply to=%s chars=%s", to_wa_id, len(body))
-        send_text(to=to_wa_id, body=body)
+        try:
+            result = send_text(to=to_wa_id, body=body)
+            print(f"[DEBUG] send_text result={result}", flush=True)
+        except Exception as e:
+            print(f"[DEBUG] send_text EXCEPTION: {e}", flush=True)
+            raise
 
 
 def _download_attachments_sync(att_refs: list[InboundAttachmentRef]) -> list[Attachment]:
@@ -99,6 +105,7 @@ def _download_attachments_sync(att_refs: list[InboundAttachmentRef]) -> list[Att
 
 def process_message(message: InboundMessage) -> None:
     try:
+        print(f"[DEBUG] process_message from={message.wa_id} text={repr((message.text or '')[:80])}", flush=True)
         logger.info(
             "WA process_message from=%s text=%r attachments=%s",
             message.wa_id,
@@ -106,6 +113,7 @@ def process_message(message: InboundMessage) -> None:
             len(message.attachments or []),
         )
         uid = get_or_create_canonical_user("whatsapp", message.wa_id)
+        print(f"[DEBUG] uid={uid}", flush=True)
 
         try:
             msg_id = str(message.raw.get("id") or message.timestamp or "")
