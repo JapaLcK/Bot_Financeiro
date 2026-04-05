@@ -77,9 +77,11 @@ def safe_text(obj: Any) -> str:
 def _send_reply(to_wa_id: str, body: str) -> None:
     body = (body or "").strip()
     if body:
+        print(f"[DEBUG] _send_reply to={to_wa_id} chars={len(body)}", flush=True)
         logger.info("WA sending reply to=%s chars=%s", to_wa_id, len(body))
         try:
             result = send_text(to=to_wa_id, body=body)
+            print(f"[DEBUG] send_text result={result}", flush=True)
             try:
                 message_ids = [m.get("id") for m in (result or {}).get("messages", []) if m.get("id")]
                 contacts = [c.get("wa_id") for c in (result or {}).get("contacts", []) if c.get("wa_id")]
@@ -92,6 +94,7 @@ def _send_reply(to_wa_id: str, body: str) -> None:
             except Exception:
                 logger.info("WA send_text accepted but unable to summarize response")
         except Exception as e:
+            print(f"[DEBUG] send_text EXCEPTION: {e}", flush=True)
             logger.exception("WA send_text exception to=%s error=%s", to_wa_id, e)
             raise
 
@@ -116,6 +119,7 @@ def _download_attachments_sync(att_refs: list[InboundAttachmentRef]) -> list[Att
 def process_message(message: InboundMessage) -> None:
     try:
         reply_to = message.wa_id
+        print(f"[DEBUG] process_message from={message.wa_id} reply_to={reply_to} text={repr((message.text or '')[:80])}", flush=True)
         logger.info(
             "WA process_message from=%s reply_to=%s text=%r attachments=%s",
             message.wa_id,
@@ -124,6 +128,7 @@ def process_message(message: InboundMessage) -> None:
             len(message.attachments or []),
         )
         uid = get_or_create_canonical_user("whatsapp", message.wa_id)
+        print(f"[DEBUG] uid={uid}", flush=True)
         logger.info("WA canonical user resolved uid=%s from=%s", uid, message.wa_id)
 
         try:
@@ -175,6 +180,7 @@ def process_message(message: InboundMessage) -> None:
 
 def process_payload(payload: dict[str, Any]) -> int:
     msgs = extract_messages(payload)
+    print(f"[DEBUG] extracted_messages={len(msgs)}", flush=True)
     logger.info("WA extracted messages=%s", len(msgs))
     for message in msgs:
         process_message(message)
