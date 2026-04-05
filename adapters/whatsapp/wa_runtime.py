@@ -18,6 +18,19 @@ from db import get_or_create_canonical_user
 
 logger = logging.getLogger(__name__)
 
+
+def _normalize_br_number(wa_id: str) -> str:
+    """
+    Corrige números brasileiros que perderam o 9 extra.
+    Ex: 556599929199 (12 dígitos) → 5565999929199 (13 dígitos)
+    Números já com 13 dígitos ou não-brasileiros ficam intactos.
+    """
+    if wa_id.startswith("55") and len(wa_id) == 12:
+        # 55 + DDD (2) + número (8) → adiciona o 9 após o DDD
+        return wa_id[:4] + "9" + wa_id[4:]
+    return wa_id
+
+
 _SEEN: dict[str, float] = {}
 _SEEN_LOCK = threading.Lock()
 _SEEN_TTL = 180
@@ -105,7 +118,8 @@ def _download_attachments_sync(att_refs: list[InboundAttachmentRef]) -> list[Att
 
 def process_message(message: InboundMessage) -> None:
     try:
-        print(f"[DEBUG] process_message from={message.wa_id} text={repr((message.text or '')[:80])}", flush=True)
+        reply_to = _normalize_br_number(message.wa_id)
+        print(f"[DEBUG] process_message from={message.wa_id} reply_to={reply_to} text={repr((message.text or '')[:80])}", flush=True)
         logger.info(
             "WA process_message from=%s text=%r attachments=%s",
             message.wa_id,
@@ -129,7 +143,7 @@ def process_message(message: InboundMessage) -> None:
 
         att_refs = message.attachments or []
         if att_refs:
-            _send_reply(message.wa_id, "Recebi seu arquivo. Processando agora...")
+            _send_reply(reply_to, "Recebi seu arquivo. Processando agora...")
 
         attachments: list[Any] = []
         if att_refs:
@@ -149,14 +163,14 @@ def process_message(message: InboundMessage) -> None:
         outs = handle_incoming(incoming) or []
         if not outs:
             logger.info("WA no outgoing messages for from=%s", message.wa_id)
-            _send_reply(message.wa_id, "Nao entendi. Digite ajuda para ver os comandos.")
+            _send_reply(reply_to, "Nao entendi. Digite ajuda para ver os comandos.")
             return
 
         logger.info("WA generated outgoing messages count=%s for from=%s", len(outs), message.wa_id)
         for out in outs:
             body = safe_text(out)
             if body:
-                _send_reply(message.wa_id, body)
+                _send_reply(reply_to, body)
     except Exception as exc:
         logger.error("WA message processing failed wa_id=%s error=%s", message.wa_id, exc)
         traceback.print_exc()
