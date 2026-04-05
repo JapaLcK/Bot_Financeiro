@@ -19,18 +19,6 @@ from db import get_or_create_canonical_user
 logger = logging.getLogger(__name__)
 
 
-def _normalize_br_number(wa_id: str) -> str:
-    """
-    Corrige números brasileiros que perderam o 9 extra.
-    Ex: 556599929199 (12 dígitos) → 5565999929199 (13 dígitos)
-    Números já com 13 dígitos ou não-brasileiros ficam intactos.
-    """
-    if wa_id.startswith("55") and len(wa_id) == 12:
-        # 55 + DDD (2) + número (8) → adiciona o 9 após o DDD
-        return wa_id[:4] + "9" + wa_id[4:]
-    return wa_id
-
-
 _SEEN: dict[str, float] = {}
 _SEEN_LOCK = threading.Lock()
 _SEEN_TTL = 180
@@ -89,11 +77,9 @@ def safe_text(obj: Any) -> str:
 def _send_reply(to_wa_id: str, body: str) -> None:
     body = (body or "").strip()
     if body:
-        print(f"[DEBUG] _send_reply to={to_wa_id} chars={len(body)}", flush=True)
         logger.info("WA sending reply to=%s chars=%s", to_wa_id, len(body))
         try:
             result = send_text(to=to_wa_id, body=body)
-            print(f"[DEBUG] send_text result={result}", flush=True)
             try:
                 message_ids = [m.get("id") for m in (result or {}).get("messages", []) if m.get("id")]
                 contacts = [c.get("wa_id") for c in (result or {}).get("contacts", []) if c.get("wa_id")]
@@ -106,7 +92,7 @@ def _send_reply(to_wa_id: str, body: str) -> None:
             except Exception:
                 logger.info("WA send_text accepted but unable to summarize response")
         except Exception as e:
-            print(f"[DEBUG] send_text EXCEPTION: {e}", flush=True)
+            logger.exception("WA send_text exception to=%s error=%s", to_wa_id, e)
             raise
 
 
@@ -129,16 +115,16 @@ def _download_attachments_sync(att_refs: list[InboundAttachmentRef]) -> list[Att
 
 def process_message(message: InboundMessage) -> None:
     try:
-        reply_to = _normalize_br_number(message.wa_id)
-        print(f"[DEBUG] process_message from={message.wa_id} reply_to={reply_to} text={repr((message.text or '')[:80])}", flush=True)
+        reply_to = message.wa_id
         logger.info(
-            "WA process_message from=%s text=%r attachments=%s",
+            "WA process_message from=%s reply_to=%s text=%r attachments=%s",
             message.wa_id,
+            reply_to,
             (message.text or "")[:120],
             len(message.attachments or []),
         )
         uid = get_or_create_canonical_user("whatsapp", message.wa_id)
-        print(f"[DEBUG] uid={uid}", flush=True)
+        logger.info("WA canonical user resolved uid=%s from=%s", uid, message.wa_id)
 
         try:
             msg_id = str(message.raw.get("id") or message.timestamp or "")
