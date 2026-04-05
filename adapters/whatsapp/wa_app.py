@@ -51,12 +51,22 @@ async def wa_webhook(request: Request):
     payload = json.loads(raw.decode("utf-8"))
     try:
         value = payload.get("entry", [{}])[0].get("changes", [{}])[0].get("value", {})
+        statuses = value.get("statuses") or []
         logger.info(
             "WA webhook received: field=%s messages=%s statuses=%s",
             payload.get("entry", [{}])[0].get("changes", [{}])[0].get("field"),
             len(value.get("messages") or []),
-            len(value.get("statuses") or []),
+            len(statuses),
         )
+        for status in statuses:
+            logger.info(
+                "WA status received: id=%s status=%s recipient=%s conversation=%s errors=%s",
+                status.get("id"),
+                status.get("status"),
+                status.get("recipient_id"),
+                (status.get("conversation") or {}).get("id"),
+                status.get("errors"),
+            )
     except Exception:
         logger.info("WA webhook received: unable to summarize payload")
     try:

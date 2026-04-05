@@ -94,6 +94,17 @@ def _send_reply(to_wa_id: str, body: str) -> None:
         try:
             result = send_text(to=to_wa_id, body=body)
             print(f"[DEBUG] send_text result={result}", flush=True)
+            try:
+                message_ids = [m.get("id") for m in (result or {}).get("messages", []) if m.get("id")]
+                contacts = [c.get("wa_id") for c in (result or {}).get("contacts", []) if c.get("wa_id")]
+                logger.info(
+                    "WA send_text accepted: to=%s canonical_contacts=%s message_ids=%s",
+                    to_wa_id,
+                    contacts,
+                    message_ids,
+                )
+            except Exception:
+                logger.info("WA send_text accepted but unable to summarize response")
         except Exception as e:
             print(f"[DEBUG] send_text EXCEPTION: {e}", flush=True)
             raise
