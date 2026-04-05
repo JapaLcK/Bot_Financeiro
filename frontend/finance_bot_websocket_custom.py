@@ -1041,6 +1041,10 @@ async def serve_reset_password():
 async def serve_dashboard_login():
     return FileResponse(HERE / "dashboard-login.html")
 
+@app.get("/privacy")
+async def serve_privacy():
+    return FileResponse(HERE / "privacy.html", media_type="text/html")
+
 @app.get("/favicon.png")
 async def serve_favicon():
     return FileResponse(HERE / "favicon.png", media_type="image/png")
