@@ -76,6 +76,7 @@ def safe_text(obj: Any) -> str:
 def _send_reply(to_wa_id: str, body: str) -> None:
     body = (body or "").strip()
     if body:
+        logger.info("WA sending reply to=%s chars=%s", to_wa_id, len(body))
         send_text(to=to_wa_id, body=body)
 
 
@@ -98,6 +99,12 @@ def _download_attachments_sync(att_refs: list[InboundAttachmentRef]) -> list[Att
 
 def process_message(message: InboundMessage) -> None:
     try:
+        logger.info(
+            "WA process_message from=%s text=%r attachments=%s",
+            message.wa_id,
+            (message.text or "")[:120],
+            len(message.attachments or []),
+        )
         uid = get_or_create_canonical_user("whatsapp", message.wa_id)
 
         try:
@@ -133,9 +140,11 @@ def process_message(message: InboundMessage) -> None:
 
         outs = handle_incoming(incoming) or []
         if not outs:
+            logger.info("WA no outgoing messages for from=%s", message.wa_id)
             _send_reply(message.wa_id, "Nao entendi. Digite ajuda para ver os comandos.")
             return
 
+        logger.info("WA generated outgoing messages count=%s for from=%s", len(outs), message.wa_id)
         for out in outs:
             body = safe_text(out)
             if body:
@@ -147,6 +156,7 @@ def process_message(message: InboundMessage) -> None:
 
 def process_payload(payload: dict[str, Any]) -> int:
     msgs = extract_messages(payload)
+    logger.info("WA extracted messages=%s", len(msgs))
     for message in msgs:
         process_message(message)
     return len(msgs)

@@ -45,9 +45,20 @@ async def wa_webhook(request: Request):
     raw = await request.body()
     signature = request.headers.get("X-Hub-Signature-256", "")
     if APP_SECRET and not verify_webhook_signature(raw, signature, APP_SECRET):
+        logger.warning("WA webhook forbidden: invalid signature")
         return PlainTextResponse("forbidden", status_code=403)
 
     payload = json.loads(raw.decode("utf-8"))
+    try:
+        value = payload.get("entry", [{}])[0].get("changes", [{}])[0].get("value", {})
+        logger.info(
+            "WA webhook received: field=%s messages=%s statuses=%s",
+            payload.get("entry", [{}])[0].get("changes", [{}])[0].get("field"),
+            len(value.get("messages") or []),
+            len(value.get("statuses") or []),
+        )
+    except Exception:
+        logger.info("WA webhook received: unable to summarize payload")
     try:
         _queue.put_nowait(payload)
     except asyncio.QueueFull:
