@@ -31,7 +31,7 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
     if action_type == "delete_launch":
         launch_id = payload.get("launch_id")
         try:
-            db.delete_launch_and_rollback(launch_id, user_id)
+            db.delete_launch_and_rollback(user_id, launch_id)
             db.clear_pending_action(user_id)
             return f"✅ Lançamento **#{launch_id}** apagado e saldo revertido."
         except Exception as e:
@@ -43,7 +43,7 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
         failed = []
         for lid in ids:
             try:
-                db.delete_launch_and_rollback(lid, user_id)
+                db.delete_launch_and_rollback(user_id, lid)
             except Exception:
                 failed.append(lid)
         ok_ids = [i for i in ids if i not in failed]

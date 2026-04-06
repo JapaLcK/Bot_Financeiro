@@ -126,15 +126,15 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
     (r"^(gastei|gastamos?|tive algum gasto|teve algum gasto|houve algum gasto).*(hoje|ontem|\bdia\b|\d{1,2}[\/\-]\d{1,2})",
      "launches.list"),
     # lançamentos — sem data
-    (r"^(ver|mostrar|listar)\s+(meus\s+)?lancamentos?(\s+recentes?)?$",
+    (r"^(ver|mostrar|mostra|listar)\s+(meus\s+)?lancamentos?(\s+recentes?)?$",
      "launches.list"),
-    (r"^apagar\s+(lancamento\s+)?#?(\d+)$",
+    (r"^apagar\s+(?:id\s+)?(lancamento\s+)?#?(\d+)$",
      "launches.delete"),
-    (r"^excluir\s+(lancamento\s+)?#?(\d+)$",
+    (r"^excluir\s+(?:id\s+)?(lancamento\s+)?#?(\d+)$",
      "launches.delete"),
-    (r"^deletar\s+(lancamento\s+)?#?(\d+)$",
+    (r"^deletar\s+(?:id\s+)?(lancamento\s+)?#?(\d+)$",
      "launches.delete"),
-    (r"^apagar\s+#?(\d+)$",
+    (r"^apagar\s+(?:id\s+)?#?(\d+)$",
      "launches.delete"),
 
     # despesa / receita — detecta padrão sem chamar IA
