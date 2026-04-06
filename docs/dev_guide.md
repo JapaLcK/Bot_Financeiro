@@ -178,6 +178,41 @@ python bot.py
 Função:
 Inicia o bot localmente para testes no Discord.
 
+### Ambiente isolado de testes
+
+Recomendação:
+- Produção e testes devem usar `DATABASE_URL`, tokens do Discord e credenciais do WhatsApp diferentes.
+- O projeto agora aceita `APP_ENV` para carregar um arquivo dedicado, como `.env.staging`.
+
+Exemplo de setup local:
+
+```bash
+cp .env.example .env.staging
+```
+
+Preencha no `.env.staging`:
+- `DATABASE_URL` apontando para um Postgres separado
+- `DISCORD_BOT_TOKEN` de um segundo bot do Discord
+- `JWT_SECRET` próprio
+- credenciais próprias de WhatsApp, se quiser testar esse canal também
+
+Para subir o ambiente de testes local:
+
+```bash
+APP_ENV=staging python launch.py
+```
+
+Para subir só o bot Discord de testes:
+
+```bash
+APP_ENV=staging python bot.py
+```
+
+No Railway:
+- crie um segundo serviço/projeto para staging
+- configure as variáveis desse serviço com banco e tokens de teste
+- opcionalmente defina `APP_ENV=staging` se quiser manter o mesmo padrão local
+
 ### Rodar testes automatizados
 
 Comando:

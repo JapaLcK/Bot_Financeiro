@@ -9,9 +9,10 @@ import csv
 import traceback
 from discord.ext import commands
 from db import init_db
-from dotenv import load_dotenv
 from core.services.quick_entry import handle_quick_entry
-load_dotenv()  # carrega o .env
+from config.env import load_app_env
+
+load_app_env()
 from core.types import IncomingMessage, Attachment
 from core.handle_incoming import handle_incoming as core_handle_incoming
 from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches, list_pockets, pocket_withdraw_to_account, create_pocket, pocket_deposit_from_account, delete_pocket, investment_withdraw_to_account, accrue_all_investments, create_investment, investment_deposit_from_account, delete_launch_and_rollback

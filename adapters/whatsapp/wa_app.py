@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from adapters.whatsapp.wa_client import send_text
 from adapters.whatsapp.wa_runtime import process_payload, verify_webhook_signature
+from config.env import load_app_env
 from core.reports.reports_daily import build_daily_report_text
 from db import (
     get_daily_report_prefs,
@@ -19,6 +20,8 @@ from db import (
     was_daily_report_sent_today,
 )
 from utils_date import now_tz
+
+load_app_env()
 
 logger = logging.getLogger(__name__)
 

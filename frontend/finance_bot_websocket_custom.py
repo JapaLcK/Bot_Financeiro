@@ -35,15 +35,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse, HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
-from dotenv import load_dotenv
 from pydantic import BaseModel, EmailStr
 import jwt as pyjwt
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from config.env import load_app_env
 from token_utils import decode_dashboard_token, make_dashboard_token
 
-load_dotenv()
+load_app_env()
 
 DATABASE_URL      = os.getenv("DATABASE_URL")
 DASHBOARD_USER_ID = os.getenv("DASHBOARD_USER_ID")

@@ -4,13 +4,13 @@ import logging
 import os
 import threading
 
-from dotenv import load_dotenv
 from flask import Flask, request
 
 from adapters.whatsapp.wa_runtime import process_message, verify_webhook_signature
 from adapters.whatsapp.wa_parse import extract_messages
+from config.env import load_app_env
 
-load_dotenv()
+load_app_env()
 
 logger = logging.getLogger(__name__)
 app = Flask(__name__)

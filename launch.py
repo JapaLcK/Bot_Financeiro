@@ -14,17 +14,20 @@ import subprocess
 import sys
 import time
 
-PORT = os.environ.get("PORT", "8000")
+from config.env import load_app_env
 
 
 def main():
-    print(f"[launch] Iniciando dashboard na porta {PORT}...")
+    app_env = load_app_env()
+    port = os.environ.get("PORT", "8000")
+    print(f"[launch] Ambiente ativo: {app_env}")
+    print(f"[launch] Iniciando dashboard na porta {port}...")
     dashboard = subprocess.Popen(
         [
             sys.executable, "-m", "uvicorn",
             "frontend.finance_bot_websocket_custom:app",
             "--host", "0.0.0.0",
-            "--port", str(PORT),
+            "--port", str(port),
             "--log-level", "warning",
         ]
     )
