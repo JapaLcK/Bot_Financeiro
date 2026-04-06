@@ -1,50 +1,143 @@
 # core/handlers/launches.py
 from __future__ import annotations
 import re
+from datetime import date, timedelta
+
 import db
 from utils_text import fmt_brl, is_internal_category
+from utils_date import extract_date_from_text, today_tz
 from core.services.category_service import infer_category
 from parsers import parse_receita_despesa_natural
 
 
-def list_launches(user_id: int, limit: int = 10) -> str:
+# ---------------------------------------------------------------------------
+# Helpers de data
+# ---------------------------------------------------------------------------
+
+def _parse_date_entity(entities: dict, original_text: str) -> date | None:
+    """
+    Tenta obter uma data de:
+      1. entities["date_filter"] — pode ser ISO "2026-04-03", "hoje", "ontem" ou "dia 4"
+      2. texto original via extract_date_from_text
+    Retorna um objeto date ou None.
+    """
+    raw = entities.get("date_filter")
+    if raw:
+        raw_s = str(raw).strip().lower()
+
+        # palavras especiais
+        today = today_tz()
+        if raw_s == "hoje":
+            return today
+        if raw_s == "ontem":
+            return today - timedelta(days=1)
+
+        # ISO direto
+        try:
+            return date.fromisoformat(raw_s)
+        except ValueError:
+            pass
+
+        # tenta extrair do valor em si ("dia 4", "03/04", etc.)
+        dt, _ = extract_date_from_text(raw_s)
+        if dt:
+            return dt.date()
+
+    # fallback: extrai do texto original
+    dt, _ = extract_date_from_text(original_text)
+    if dt:
+        return dt.date()
+
+    return None
+
+
+def _fmt_date_label(d: date) -> str:
+    today = today_tz()
+    if d == today:
+        return "hoje"
+    if d == today - timedelta(days=1):
+        return "ontem"
+    return d.strftime("%d/%m/%Y")
+
+
+# ---------------------------------------------------------------------------
+# list_launches — com suporte a filtro de data
+# ---------------------------------------------------------------------------
+
+def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, original_text: str = "") -> str:
+    entities = entities or {}
+
+    target_date = _parse_date_entity(entities, original_text)
+
+    if target_date:
+        # busca por dia específico
+        rows = db.get_launches_by_period(user_id, target_date, target_date)
+        label = _fmt_date_label(target_date)
+
+        if not rows:
+            return f"Nenhum lançamento encontrado em **{label}**."
+
+        # calcula totais
+        total_despesas = sum(float(r["valor"]) for r in rows if r.get("tipo") == "despesa")
+        total_receitas = sum(float(r["valor"]) for r in rows if r.get("tipo") == "receita")
+
+        lines = []
+        for r in rows:
+            tipo   = r.get("tipo", "")
+            valor  = fmt_brl(float(r["valor"])) if r.get("valor") is not None else "-"
+            nota   = r.get("nota") or r.get("alvo") or "-"
+            cat    = r.get("categoria") or ""
+            cat_txt = f" [{cat}]" if cat else ""
+            lines.append(f"#{r['id']} • {tipo} • {valor} • {nota}{cat_txt}")
+
+        header = f"🧾 **Lançamentos de {label}**"
+        summary_parts = []
+        if total_despesas > 0:
+            summary_parts.append(f"💸 Gastos: {fmt_brl(total_despesas)}")
+        if total_receitas > 0:
+            summary_parts.append(f"💰 Receitas: {fmt_brl(total_receitas)}")
+        summary = "\n".join(summary_parts)
+
+        return f"{header}:\n" + "\n".join(lines) + (f"\n\n{summary}" if summary else "")
+
+    # sem filtro de data → últimos N lançamentos
     rows = db.list_launches(user_id, limit=limit)
     if not rows:
         return "Você ainda não tem lançamentos."
 
     lines = []
     for r in rows:
-        tipo = r.get("tipo", "")
+        tipo  = r.get("tipo", "")
         valor = r.get("valor")
-        alvo = r.get("alvo") or "-"
-        nota = r.get("nota") or ""
+        alvo  = r.get("alvo") or "-"
+        nota  = r.get("nota") or ""
         criado = r.get("criado_em")
 
         # limpa nota de investimento
         if tipo == "create_investment" and nota and "taxa=" in nota:
             try:
                 m_taxa = re.search(r"taxa=([0-9.]+)", nota)
-                m_per = re.search(r"periodo=(\w+)", nota)
-                taxa = float(m_taxa.group(1)) * 100 if m_taxa else None
-                per = m_per.group(1) if m_per else ""
-                per = "ao mês" if per.startswith("month") else "ao dia" if per.startswith("day") else per
-                nota = f"{taxa:.4g}% {per}" if taxa is not None else nota
+                m_per  = re.search(r"periodo=(\w+)", nota)
+                taxa   = float(m_taxa.group(1)) * 100 if m_taxa else None
+                per    = m_per.group(1) if m_per else ""
+                per    = "ao mês" if per.startswith("month") else "ao dia" if per.startswith("day") else per
+                nota   = f"{taxa:.4g}% {per}" if taxa is not None else nota
             except Exception:
                 pass
 
-        valor_str = fmt_brl(float(valor)) if valor is not None else "-"
-        nota_part = f" • {nota}" if nota else ""
+        valor_str  = fmt_brl(float(valor)) if valor is not None else "-"
+        nota_part  = f" • {nota}" if nota else ""
         created_str = str(criado) if criado is not None else "-"
         lines.append(f"#{r['id']} • {tipo} • {valor_str} • {alvo}{nota_part} • {created_str}")
 
     return "🧾 **Últimos lançamentos**:\n" + "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# add — registra receita/despesa
+# ---------------------------------------------------------------------------
+
 def add(user_id: int, text: str, entities: dict) -> str:
-    """
-    Tenta parsear via parser local primeiro (determinístico).
-    Se falhar, usa as entidades vindas da IA.
-    """
     parsed = parse_receita_despesa_natural(user_id, text)
 
     if parsed:
@@ -56,7 +149,6 @@ def add(user_id: int, text: str, entities: dict) -> str:
         criado_em = parsed.get("criado_em")
         is_int    = parsed.get("is_internal_movement", False)
     else:
-        # fallback: entidades da IA
         tipo  = entities.get("tipo", "despesa")
         valor = float(entities.get("valor", 0))
         if valor <= 0:
@@ -87,6 +179,10 @@ def add(user_id: int, text: str, entities: dict) -> str:
         f"ID: #{launch_id}"
     )
 
+
+# ---------------------------------------------------------------------------
+# propose_delete / undo
+# ---------------------------------------------------------------------------
 
 def propose_delete(user_id: int, launch_id: int) -> str:
     db.set_pending_action(user_id, "delete_launch", {"launch_id": launch_id})

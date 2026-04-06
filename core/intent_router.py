@@ -62,14 +62,23 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
     entities   = result.entities or {}
 
     # -----------------------------------------------------------------------
-    # 1. Confirmações (sim / não) — sempre têm prioridade
+    # 0. Esclarecimento pendente — tem prioridade máxima
+    #    Se o bot fez uma pergunta e está esperando resposta, usa esta mensagem
+    #    para completar a intent original em vez de classificar do zero.
+    # -----------------------------------------------------------------------
+    clarif = h_pending.get_pending_clarification(user_id)
+    if clarif:
+        return _resolve_clarification(clarif, text, user_id, platform, external_id)
+
+    # -----------------------------------------------------------------------
+    # 1. Confirmações (sim / não) para ações destrutivas
     # -----------------------------------------------------------------------
     if intent == "confirm.yes":
-        resp = h_pending.resolve(user_id, confirmed=True)
+        resp = h_pending.resolve_delete(user_id, confirmed=True)
         return resp if resp is not None else NOT_UNDERSTOOD_MSG
 
     if intent == "confirm.no":
-        resp = h_pending.resolve(user_id, confirmed=False)
+        resp = h_pending.resolve_delete(user_id, confirmed=False)
         return resp if resp is not None else "Nada a cancelar."
 
     # -----------------------------------------------------------------------
@@ -88,11 +97,16 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
     # 4. Precisa de esclarecimento
     # -----------------------------------------------------------------------
     if result.needs_clarification and result.clarification_question:
-        # salva estado parcial para retomar depois
+        # salva intent + entities parciais para retomar quando o usuário responder
         db.set_pending_action(
             user_id,
             "clarification",
-            {"intent": intent, "entities": entities, "question": result.clarification_question},
+            {
+                "intent":    intent,
+                "entities":  entities,
+                "question":  result.clarification_question,
+                "orig_text": text,
+            },
         )
         return result.clarification_question
 
@@ -155,7 +169,7 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
     # --- lançamentos ---
     if intent == "launches.list":
         limit = int(entities.get("limit", 10))
-        return h_launches.list_launches(user_id, limit=limit)
+        return h_launches.list_launches(user_id, limit=limit, entities=entities, original_text=text)
 
     if intent == "launches.add":
         return h_launches.add(user_id, text, entities)
@@ -238,6 +252,39 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
 
     # fallback final
     return OUT_OF_SCOPE_MSG
+
+
+def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platform: str, external_id: str) -> str:
+    """
+    O bot tinha feito uma pergunta e está esperando a resposta do usuário.
+    Combina a resposta com as entidades originais e re-executa a intent.
+    """
+    from utils_date import extract_date_from_text
+
+    payload          = clarif.get("payload", {})
+    original_intent  = payload.get("intent", "launches.list")
+    original_entities = dict(payload.get("entities") or {})
+    orig_text        = payload.get("orig_text", "")
+
+    # limpa o pending antes de executar
+    db.clear_pending_action(user_id)
+
+    # tenta extrair data da resposta do usuário
+    dt, _ = extract_date_from_text(user_response)
+    if not dt:
+        # tenta extrair do texto original (ex: "quanto gastei dia 4")
+        dt, _ = extract_date_from_text(orig_text)
+
+    if dt:
+        original_entities["date_filter"] = dt.date().isoformat()
+
+    # se o usuário negou / cancelou explicitamente
+    resp_norm = user_response.strip().lower()
+    if resp_norm in ("nao", "não", "n", "cancelar", "cancela"):
+        return "❌ Consulta cancelada."
+
+    # re-executa a intent original com as entidades completas
+    return _execute(original_intent, user_id, orig_text or user_response, original_entities, platform, external_id)
 
 
 def _intent_label(intent: str) -> str:

@@ -1,31 +1,33 @@
 # core/handlers/pending.py
 """
-Resolve ações pendentes (confirmações de delete, esclarecimentos, etc.)
+Resolve ações pendentes: confirmações de delete e esclarecimentos.
 """
 from __future__ import annotations
 import db
 from utils_text import fmt_brl
 
 
-def resolve(user_id: int, confirmed: bool) -> str | None:
+def resolve_delete(user_id: int, confirmed: bool) -> str | None:
     """
-    Verifica se existe uma pending_action para o usuário.
-    Se sim, executa ou cancela de acordo com confirmed (True=sim, False=não).
-    Retorna a mensagem de resposta, ou None se não havia pending.
+    Verifica se existe uma pending_action de DELETE para o usuário.
+    Retorna mensagem de resposta, ou None se não havia pending de delete.
     """
     pending = db.get_pending_action(user_id)
     if not pending:
         return None
 
     action_type = pending.get("action_type")
-    payload     = pending.get("payload", {})
 
-    # Cancela sempre que confirmed=False
+    # só trata deletes aqui
+    if action_type not in ("delete_launch", "delete_launch_bulk", "delete_pocket", "delete_investment"):
+        return None
+
+    payload = pending.get("payload", {})
+
     if not confirmed:
         db.clear_pending_action(user_id)
         return "❌ Ação cancelada."
 
-    # --- delete_launch ---
     if action_type == "delete_launch":
         launch_id = payload.get("launch_id")
         try:
@@ -36,7 +38,23 @@ def resolve(user_id: int, confirmed: bool) -> str | None:
             db.clear_pending_action(user_id)
             return f"Erro ao apagar lançamento #{launch_id}: {e}"
 
-    # --- delete_pocket ---
+    if action_type == "delete_launch_bulk":
+        ids = payload.get("launch_ids", [])
+        failed = []
+        for lid in ids:
+            try:
+                db.delete_launch_and_rollback(lid, user_id)
+            except Exception:
+                failed.append(lid)
+        ok_ids = [i for i in ids if i not in failed]
+        db.clear_pending_action(user_id)
+        parts = []
+        if ok_ids:
+            parts.append("✅ Apagados: " + ", ".join(f"**#{i}**" for i in ok_ids))
+        if failed:
+            parts.append("⚠️ Falha: " + ", ".join(f"#{i}" for i in failed))
+        return "\n".join(parts) or "Nada foi apagado."
+
     if action_type == "delete_pocket":
         pocket_name = payload.get("pocket_name")
         try:
@@ -47,7 +65,6 @@ def resolve(user_id: int, confirmed: bool) -> str | None:
             db.clear_pending_action(user_id)
             return f"Erro ao deletar caixinha: {e}"
 
-    # --- delete_investment ---
     if action_type == "delete_investment":
         investment_name = payload.get("investment_name")
         try:
@@ -58,6 +75,15 @@ def resolve(user_id: int, confirmed: bool) -> str | None:
             db.clear_pending_action(user_id)
             return f"Erro ao deletar investimento: {e}"
 
-    # tipo desconhecido — limpa e segue
     db.clear_pending_action(user_id)
+    return None
+
+
+def get_pending_clarification(user_id: int) -> dict | None:
+    """
+    Retorna o pending de esclarecimento se existir, ou None.
+    """
+    pending = db.get_pending_action(user_id)
+    if pending and pending.get("action_type") == "clarification":
+        return pending
     return None

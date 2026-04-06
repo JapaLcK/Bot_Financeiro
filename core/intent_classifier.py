@@ -116,7 +116,16 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      r"|quero saber (o )?saldo|quanto (tem|tenho) na (minha )?conta)$",
      "balance.check"),
 
-    # lançamentos
+    # lançamentos — com data (hoje/ontem)
+    (r"\b(lancamentos?|gastos?|despesas?|receitas?|historico)\b.*(hoje|ontem)",
+     "launches.list"),
+    (r"\b(hoje|ontem)\b.*(lancamentos?|gastos?|despesas?|receitas?)",
+     "launches.list"),
+    (r"^(quanto|algum|tive|tivemos?|houve)\s.*(gastei|gastou|gasto|gasta|despesa|despesas|lancamentos?)\b",
+     "launches.list"),
+    (r"^(gastei|gastamos?|tive algum gasto|teve algum gasto|houve algum gasto).*(hoje|ontem|\bdia\b|\d{1,2}[\/\-]\d{1,2})",
+     "launches.list"),
+    # lançamentos — sem data
     (r"^(ver|mostrar|listar)\s+(meus\s+)?lancamentos?(\s+recentes?)?$",
      "launches.list"),
     (r"^apagar\s+(lancamento\s+)?#?(\d+)$",
@@ -220,13 +229,35 @@ def _try_exact(norm: str) -> IntentResult | None:
 # Tier 2 — regex
 # ---------------------------------------------------------------------------
 
+def _extract_date_entity(norm: str) -> str | None:
+    """Extrai 'hoje', 'ontem' ou data do texto normalizado."""
+    if re.search(r"\bhoje\b", norm):
+        return "hoje"
+    if re.search(r"\bontem\b", norm):
+        return "ontem"
+    m = re.search(r"\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b", norm)
+    if m:
+        return m.group(0)
+    # "dia 4", "dia 03"
+    m = re.search(r"\bdia\s+(\d{1,2})\b", norm)
+    if m:
+        return f"dia {m.group(1)}"
+    return None
+
+
 def _try_alias(norm: str, original: str) -> IntentResult | None:
     for pattern, intent in _ALIAS_PATTERNS:
         if re.search(pattern, norm):
             entities: dict[str, Any] = {}
 
+            # extrai data para consultas de lançamentos
+            if intent == "launches.list":
+                date_ent = _extract_date_entity(norm)
+                if date_ent:
+                    entities["date_filter"] = date_ent
+
             # extrai ID para deletes
-            if intent == "launches.delete":
+            elif intent == "launches.delete":
                 launch_id = _extract_id_from_text(norm)
                 if launch_id:
                     entities["launch_id"] = launch_id
@@ -282,7 +313,7 @@ REGRAS ABSOLUTAS:
 
 CATÁLOGO DE INTENTS:
 - balance.check        → usuário quer saber o saldo da conta
-- launches.list        → quer listar lançamentos/histórico
+- launches.list        → quer listar lançamentos/histórico (entities: limit?, date_filter? ex: "hoje","ontem","2026-04-03")
 - launches.add         → quer registrar receita ou despesa
 - launches.delete      → quer apagar um lançamento (entities: launch_id)
 - launches.undo        → quer desfazer o último lançamento
@@ -325,6 +356,9 @@ EXEMPLOS:
 "deposita 200 na caixinha viagem" → {"intent":"pockets.deposit","confidence":0.97,"entities":{"pocket_name":"viagem","amount":200},"needs_clarification":false,"clarification_question":null}
 "me recomenda uma ação da bolsa" → {"intent":"out_of_scope","confidence":0.98,"entities":{},"needs_clarification":false,"clarification_question":null}
 "gastei cinquenta" → {"intent":"launches.add","confidence":0.72,"entities":{"tipo":"despesa","valor":50},"needs_clarification":true,"clarification_question":"Em que você gastou R$ 50?"}
+"quanto gastei hoje?" → {"intent":"launches.list","confidence":0.96,"entities":{"date_filter":"hoje"},"needs_clarification":false,"clarification_question":null}
+"tive algum gasto ontem?" → {"intent":"launches.list","confidence":0.95,"entities":{"date_filter":"ontem"},"needs_clarification":false,"clarification_question":null}
+"gastos do dia 4" → {"intent":"launches.list","confidence":0.90,"entities":{"date_filter":"dia 4"},"needs_clarification":true,"clarification_question":"Você gostaria de ver os gastos do dia 4 de qual mês?"}
 """
 
 
