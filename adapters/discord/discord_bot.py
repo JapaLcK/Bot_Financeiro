@@ -16,7 +16,7 @@ from core.types import IncomingMessage, Attachment
 from core.handle_incoming import handle_incoming as core_handle_incoming
 from db import init_db, ensure_user, add_launch_and_update_balance, get_balance, list_launches, list_pockets, pocket_withdraw_to_account, create_pocket, pocket_deposit_from_account, delete_pocket, investment_withdraw_to_account, accrue_all_investments, create_investment, investment_deposit_from_account, delete_launch_and_rollback
 from db import create_investment_db, delete_investment, get_pending_action, clear_pending_action, set_pending_action, list_investments, get_or_create_canonical_user, get_launches_by_period, upsert_category_rule, get_memorized_category, get_conn, get_latest_cdi_aa, undo_credit_transaction, undo_installment_group
-from ai_router import handle_ai_message, classify_category_with_gpt
+from ai_router import classify_category_with_gpt
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, PieChart, Reference
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -1137,13 +1137,6 @@ async def on_message(message: discord.Message):
         filename = f"dashboard_{start.isoformat()}_{end.isoformat()}.xlsx"
         await message.reply(file=discord.File(fp=bio, filename=filename))
         return
-
-    # fallback com IA (apenas se fizer sentido financeiro)
-    if should_use_ai(message.content):
-        ai_reply = handle_ai_message(uid, message.content)
-        if ai_reply:
-            await message.reply(ai_reply)
-            return
 
     # fallback
     await message.reply("❓ **Não entendi seu comando. Tente um destes exemplos:**\n\n" + HELP_TEXT_SHORT)
