@@ -213,6 +213,19 @@ No Railway:
 - configure as variáveis desse serviço com banco e tokens de teste
 - opcionalmente defina `APP_ENV=staging` se quiser manter o mesmo padrão local
 
+### Conexão automática do WhatsApp
+
+O dashboard agora pode gerar um link `wa.me` de onboarding automático.
+
+Fluxo:
+- o site gera um token curto de onboarding para o usuário autenticado
+- o botão do WhatsApp abre o bot com uma mensagem pré-preenchida
+- na primeira mensagem, o backend consome o token e vincula o número do WhatsApp à conta
+
+Observações:
+- o token expira e só pode ser usado uma vez
+- o usuário não precisa mais digitar `vincular 123456` para o fluxo web → WhatsApp
+
 ### Rodar testes automatizados
 
 Comando:

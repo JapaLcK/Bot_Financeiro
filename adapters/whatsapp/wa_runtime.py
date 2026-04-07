@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import os
 import re
 import threading
 import time
@@ -14,9 +15,10 @@ from adapters.whatsapp.wa_client import download_media, send_text
 from adapters.whatsapp.wa_parse import InboundAttachmentRef, InboundMessage, extract_messages
 from core.handle_incoming import handle_incoming
 from core.types import IncomingMessage
-from db import get_or_create_canonical_user
+from db import consume_platform_onboarding_token, get_or_create_canonical_user, link_platform_identity
 
 logger = logging.getLogger(__name__)
+ONBOARDING_TOKEN_RE = re.compile(r"\b(pbw_[A-Za-z0-9_-]{12,})\b")
 
 
 _SEEN: dict[str, float] = {}
@@ -116,6 +118,11 @@ def _download_attachments_sync(att_refs: list[InboundAttachmentRef]) -> list[Att
     return out
 
 
+def _extract_onboarding_token(text: str) -> str | None:
+    match = ONBOARDING_TOKEN_RE.search((text or "").strip())
+    return match.group(1) if match else None
+
+
 def process_message(message: InboundMessage) -> None:
     try:
         reply_to = message.wa_id
@@ -130,6 +137,35 @@ def process_message(message: InboundMessage) -> None:
         uid = get_or_create_canonical_user("whatsapp", message.wa_id)
         print(f"[DEBUG] uid={uid}", flush=True)
         logger.info("WA canonical user resolved uid=%s from=%s", uid, message.wa_id)
+
+        onboarding_token = _extract_onboarding_token(message.text or "")
+        if onboarding_token:
+            target_user_id = consume_platform_onboarding_token(onboarding_token, "whatsapp")
+            if target_user_id:
+                final_user_id = link_platform_identity("whatsapp", message.wa_id, target_user_id)
+                logger.info(
+                    "WA onboarding auto-link success wa_id=%s final_user_id=%s",
+                    message.wa_id,
+                    final_user_id,
+                )
+                _send_reply(
+                    reply_to,
+                    (
+                        "✅ WhatsApp conectado à sua conta com sucesso!\n"
+                        "Seu dashboard e seu bot agora estão sincronizados.\n\n"
+                        "Se quiser, já pode me mandar algo como:\n"
+                        "• gastei 50 mercado\n"
+                        "• recebi 1000 salario\n"
+                        "• saldo"
+                    ),
+                )
+                return
+
+            _send_reply(
+                reply_to,
+                "⚠️ Este link de conexão expirou ou já foi usado. Gere um novo no dashboard e tente novamente.",
+            )
+            return
 
         try:
             msg_id = str(message.raw.get("id") or message.timestamp or "")

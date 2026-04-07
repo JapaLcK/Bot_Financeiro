@@ -256,6 +256,20 @@ def init_db():
     create index if not exists idx_link_codes_expires on link_codes (expires_at)
     """,
     """
+    create table if not exists platform_onboarding_tokens (
+      token text primary key,
+      provider text not null,
+      user_id bigint not null references users(id) on delete cascade,
+      expires_at timestamptz not null,
+      consumed_at timestamptz,
+      created_at timestamptz not null default now()
+    )
+    """,
+    """
+    create index if not exists idx_platform_onboarding_tokens_lookup
+      on platform_onboarding_tokens (provider, expires_at)
+    """,
+    """
     create table if not exists auth_accounts (
       id bigserial primary key,
       user_id bigint not null references users(id) on delete cascade,
@@ -587,6 +601,47 @@ def create_link_code(user_id: int, minutes_valid: int = 10) -> str:
             )
         conn.commit()
     return code
+
+
+def create_platform_onboarding_token(user_id: int, provider: str, minutes_valid: int = 15) -> str:
+    token = f"pbw_{secrets.token_urlsafe(18)}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes_valid)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into platform_onboarding_tokens(token, provider, user_id, expires_at)
+                values (%s, %s, %s, %s)
+                on conflict (token) do update
+                set provider=excluded.provider,
+                    user_id=excluded.user_id,
+                    expires_at=excluded.expires_at,
+                    consumed_at=null
+                """,
+                (token, provider, user_id, expires_at),
+            )
+        conn.commit()
+    return token
+
+
+def consume_platform_onboarding_token(token: str, provider: str) -> int | None:
+    now = datetime.now(timezone.utc)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                delete from platform_onboarding_tokens
+                where token = %s
+                  and provider = %s
+                  and expires_at > %s
+                  and consumed_at is null
+                returning user_id
+                """,
+                (token, provider, now),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return int(row["user_id"]) if row else None
 
 # funcao para confirmar link/codigo
 def consume_link_code(code: str) -> int | None:
@@ -3486,6 +3541,22 @@ def login_auth_user(email: str, password: str) -> dict | None:
 
 def get_auth_user(user_id: int) -> dict | None:
     return _db_support.get_auth_user_impl(get_conn, user_id)
+
+
+def auto_link_auth_user(target_user_id: int, current_user_id: int) -> int:
+    """
+    Vincula automaticamente a conta autenticada atual ao usuário dono do link do bot.
+    Mantém o target_user_id como primário para preservar os dados já existentes do bot.
+    """
+    if int(target_user_id) == int(current_user_id):
+        return int(target_user_id)
+
+    target_has_auth = get_auth_user(int(target_user_id)) is not None
+    if target_has_auth:
+        return int(target_user_id)
+
+    merge_users(int(current_user_id), int(target_user_id))
+    return int(target_user_id)
 
 
 # ─── Dashboard short links ────────────────────────────────────────────────────

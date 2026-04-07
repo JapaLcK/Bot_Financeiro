@@ -24,6 +24,7 @@ import json
 import os
 import pathlib
 import sys
+import urllib.parse
 from decimal import Decimal
 from datetime import datetime, date, timezone
 from typing import Dict
@@ -582,6 +583,19 @@ def _decode_jwt(token: str) -> dict | None:
     except Exception:
         return None
 
+
+def _build_whatsapp_onboarding_link(user_id: int, minutes_valid: int = 15) -> str:
+    if not WHATSAPP_NUMBER:
+        return ""
+
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import create_platform_onboarding_token
+
+    token = create_platform_onboarding_token(user_id, "whatsapp", minutes_valid=minutes_valid)
+    text = urllib.parse.quote(f"iniciar {token}")
+    return f"https://wa.me/{WHATSAPP_NUMBER}?text={text}"
+
 async def _get_current_user(creds: HTTPAuthorizationCredentials = Depends(_bearer)) -> int:
     if not creds:
         raise HTTPException(status_code=401, detail="Token não fornecido.")
@@ -702,9 +716,7 @@ async def auth_verify_email(request: Request, body: VerifyEmailBody):
     token      = _make_jwt(user_id, body.email.strip().lower())
     dash_token = make_dashboard_token(user_id, hours=2)
 
-    wa_link = ""
-    if WHATSAPP_NUMBER:
-        wa_link = f"https://wa.me/{WHATSAPP_NUMBER}?text=vincular%20{link_code}"
+    wa_link = _build_whatsapp_onboarding_link(user_id)
 
     return {
         "token": token,
@@ -734,9 +746,7 @@ async def auth_login(request: Request, body: LoginBody):
     token      = _make_jwt(user_id, result["email"])
     dash_token = make_dashboard_token(user_id, hours=2)
 
-    wa_link = ""
-    if WHATSAPP_NUMBER:
-        wa_link = f"https://wa.me/{WHATSAPP_NUMBER}?text=vincular%20{link_code}"
+    wa_link = _build_whatsapp_onboarding_link(user_id)
 
     return {
         "token": token,
@@ -798,10 +808,7 @@ async def auth_new_link_code(user_id: int = Depends(_get_current_user)):
     from db import create_link_code
 
     link_code = create_link_code(user_id, minutes_valid=15)
-
-    wa_link = ""
-    if WHATSAPP_NUMBER:
-        wa_link = f"https://wa.me/{WHATSAPP_NUMBER}?text=vincular%20{link_code}"
+    wa_link = _build_whatsapp_onboarding_link(user_id)
 
     return {
         "link_code": link_code,
@@ -841,15 +848,26 @@ async def auth_dashboard_link(body: DashboardLinkBody, user_id: int = Depends(_g
     se o usuário logado for o dono desse link.
     """
     from db import consume_dashboard_session
+    from db import auto_link_auth_user, get_auth_user
 
     target_user_id = consume_dashboard_session(body.code.strip())
     if not target_user_id:
         raise HTTPException(status_code=401, detail="Link de dashboard inválido ou expirado.")
+    final_user_id = int(target_user_id)
     if int(target_user_id) != int(user_id):
-        raise HTTPException(status_code=403, detail="Este link pertence a outra conta.")
+        current_user = get_auth_user(user_id)
+        if not current_user:
+            raise HTTPException(status_code=403, detail="Este link pertence a outra conta.")
+        final_user_id = auto_link_auth_user(target_user_id, user_id)
 
-    dash_token = make_dashboard_token(user_id, hours=2)
+    final_auth_user = get_auth_user(final_user_id)
+    auth_token = None
+    if final_auth_user:
+        auth_token = _make_jwt(final_user_id, final_auth_user["email"])
+
+    dash_token = make_dashboard_token(final_user_id, hours=2)
     return {
+        "auth_token": auth_token,
         "token": dash_token,
         "dashboard_url": f"{DASHBOARD_URL}/app?token={dash_token}",
         "expires_in": 7200,

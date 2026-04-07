@@ -160,6 +160,10 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
       return;
     }
 
+    if (linkData.auth_token) {
+      localStorage.setItem("finbot_token", linkData.auth_token);
+    }
+
     window.location.href = linkData.dashboard_url || "/app";
   } catch (err) {
     showError(`Erro de conexão. ${err?.message || "Tente novamente."}`);
