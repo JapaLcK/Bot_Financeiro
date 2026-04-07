@@ -637,9 +637,21 @@ footer a { color: var(--text-2); text-decoration: none; }
 
 <script>
 // ─── Config ───────────────────────────────────────────────────────────────
+const params        = new URLSearchParams(window.location.search);
 const API_BASE      = window.location.origin;
 const DASHBOARD_URL = window.location.origin;
 const PENDING_DASHBOARD_CODE = params.get('dashboard_code') || '';
+
+async function readResponsePayload(res) {
+  const raw = await res.text();
+  if (!raw) return {};
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { detail: raw };
+  }
+}
 
 // ─── Sanitiza URL retornada pela API ──────────────────────────────────────
 function sanitizeDashboardUrl(url) {
@@ -815,7 +827,7 @@ async function doRegister() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     });
-    const data = await res.json();
+    const data = await readResponsePayload(res);
     if (!res.ok) return showError('reg-error', data.detail || 'Erro ao enviar código.');
 
     // mostra passo de verificação
@@ -850,7 +862,7 @@ async function doVerify() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: _pendingEmail, code }),
     });
-    const data = await res.json();
+    const data = await readResponsePayload(res);
     if (!res.ok) return showError('verify-error', data.detail || 'Código inválido.');
 
     document.getElementById('form-verify').style.display = 'none';
@@ -906,7 +918,7 @@ async function doLogin() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     });
-    const data = await res.json();
+    const data = await readResponsePayload(res);
     if (!res.ok) return showError('login-error', data.detail || 'E-mail ou senha incorretos.');
 
     if (PENDING_DASHBOARD_CODE && data.token) {
@@ -919,7 +931,7 @@ async function doLogin() {
         },
         body: JSON.stringify({ code: PENDING_DASHBOARD_CODE })
       });
-      const linkData = await linkRes.json();
+      const linkData = await readResponsePayload(linkRes);
       if (!linkRes.ok) {
         return showError('login-error', linkData.detail || 'Nao foi possivel abrir este dashboard.');
       }
