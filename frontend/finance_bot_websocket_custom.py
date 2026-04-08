@@ -588,7 +588,7 @@ def _decode_jwt(token: str) -> dict | None:
 def _build_whatsapp_onboarding_link(user_id: int, minutes_valid: int = 15) -> str:
     if not WHATSAPP_NUMBER:
         return ""
-    text = urllib.parse.quote("oi")
+    text = urllib.parse.quote("Olá")
     return f"https://wa.me/{WHATSAPP_NUMBER}?text={text}"
 
 async def _get_current_user(creds: HTTPAuthorizationCredentials = Depends(_bearer)) -> int:
