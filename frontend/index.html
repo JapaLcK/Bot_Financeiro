@@ -478,6 +478,13 @@ footer a { color: var(--text-2); text-decoration: none; }
             <input type="email" id="reg-email" placeholder="seu@email.com" autocomplete="email" />
           </div>
           <div class="field">
+            <label>WHATSAPP</label>
+            <input type="tel" id="reg-phone" placeholder="(11) 99999-9999" autocomplete="tel" inputmode="tel" />
+            <div style="margin-top:8px;font-size:.76rem;color:var(--text-3);line-height:1.5">
+              Use o mesmo número de WhatsApp com que você vai falar com o bot.
+            </div>
+          </div>
+          <div class="field">
             <label>SENHA</label>
             <input type="password" id="reg-password" placeholder="Mínimo 6 caracteres" autocomplete="new-password" />
           </div>
@@ -858,14 +865,17 @@ function showPendingDashboardHint() {
 
 // ─── Register — passo 1: envia código ─────────────────────────────────────
 let _pendingEmail = '';
+let _pendingPhone = '';
 
 async function doRegister() {
   clearErrors();
   const email    = document.getElementById('reg-email').value.trim();
+  const phone    = document.getElementById('reg-phone').value.trim();
   const password = document.getElementById('reg-password').value;
   const confirm  = document.getElementById('reg-confirm').value;
 
   if (!email)               return showError('reg-error', 'Informe o e-mail.');
+  if (!phone)               return showError('reg-error', 'Informe seu número de WhatsApp.');
   if (password.length < 6)  return showError('reg-error', 'Senha deve ter pelo menos 6 caracteres.');
   if (password !== confirm)  return showError('reg-error', 'As senhas não coincidem.');
 
@@ -877,13 +887,14 @@ async function doRegister() {
     const res = await fetch(`${API_BASE}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, phone }),
     });
     const data = await readResponsePayload(res);
     if (!res.ok) return showError('reg-error', data.detail || 'Erro ao enviar código.');
 
     // mostra passo de verificação
     _pendingEmail = email;
+    _pendingPhone = phone;
     document.getElementById('form-register').style.display = 'none';
     document.getElementById('verify-email-display').textContent = email;
     document.getElementById('form-verify').style.display = 'block';
@@ -941,7 +952,7 @@ async function resendCode(e) {
   await fetch(`${API_BASE}/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: _pendingEmail, password }),
+    body: JSON.stringify({ email: _pendingEmail, password, phone: _pendingPhone }),
   });
   const el = document.getElementById('verify-error');
   el.textContent = 'Novo código enviado!';

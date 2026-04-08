@@ -10,6 +10,7 @@ from datetime import timedelta, timezone
 import requests
 import db_support as _db_support
 from utils_date import _tz, today_tz, billing_period_for_close_day
+from utils_phone import normalize_phone_e164
 from uuid import uuid4
 import calendar
 import secrets
@@ -275,6 +276,10 @@ def init_db():
       user_id bigint not null references users(id) on delete cascade,
       email text not null unique,
       password_hash text not null,
+      phone_e164 text,
+      phone_status text not null default 'pending',
+      phone_confirmed_at timestamptz,
+      whatsapp_verified_at timestamptz,
       plan text not null default 'free',
       plan_expires_at timestamptz,
       created_at timestamptz not null default now()
@@ -284,7 +289,24 @@ def init_db():
     create index if not exists idx_auth_accounts_email on auth_accounts (email)
     """,
     """
+    create unique index if not exists idx_auth_accounts_phone_unique
+      on auth_accounts (phone_e164)
+      where phone_e164 is not null
+    """,
+    """
     alter table auth_accounts add column if not exists stripe_customer_id text unique
+    """,
+    """
+    alter table auth_accounts add column if not exists phone_e164 text
+    """,
+    """
+    alter table auth_accounts add column if not exists phone_status text not null default 'pending'
+    """,
+    """
+    alter table auth_accounts add column if not exists phone_confirmed_at timestamptz
+    """,
+    """
+    alter table auth_accounts add column if not exists whatsapp_verified_at timestamptz
     """,
     """
     alter table credit_bills add column if not exists user_id bigint references users(id) on delete cascade
@@ -306,6 +328,7 @@ def init_db():
       email text not null,
       code text not null,
       password_hash text not null,
+      phone_e164 text,
       expires_at timestamptz not null,
       used_at timestamptz,
       created_at timestamptz not null default now()
@@ -313,6 +336,9 @@ def init_db():
     """,
     """
     create index if not exists idx_email_verification_email on email_verification_codes (email, expires_at)
+    """,
+    """
+    alter table email_verification_codes add column if not exists phone_e164 text
     """,
     """
     create table if not exists password_reset_tokens (
@@ -3612,8 +3638,16 @@ def set_stripe_customer(user_id: int, stripe_customer_id: str) -> None:
 
 # ─── VERIFICAÇÃO DE EMAIL NO CADASTRO ────────────────────────────────────────
 
-def create_email_verification(email: str, password: str, minutes_valid: int = 15) -> str:
-    return _db_support.create_email_verification_impl(get_conn, _hash_password, email, password, minutes_valid)
+def create_email_verification(email: str, password: str, phone: str, minutes_valid: int = 15) -> str:
+    phone_e164 = normalize_phone_e164(phone)
+    return _db_support.create_email_verification_impl(
+        get_conn,
+        _hash_password,
+        email,
+        password,
+        phone_e164,
+        minutes_valid,
+    )
 
 
 def confirm_email_verification(email: str, code: str) -> dict:
@@ -3624,6 +3658,91 @@ def confirm_email_verification(email: str, code: str) -> dict:
         email,
         code,
     )
+
+
+def attempt_whatsapp_phone_link(wa_id: str, current_user_id: int | None = None) -> dict:
+    try:
+        wa_phone = normalize_phone_e164(wa_id)
+    except ValueError:
+        return {"status": "invalid_phone"}
+    current_user_id = int(current_user_id) if current_user_id is not None else get_or_create_canonical_user("whatsapp", wa_id)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select user_id, phone_e164
+                from auth_accounts
+                where phone_e164 = %s
+                """,
+                (wa_phone,),
+            )
+            matches = cur.fetchall() or []
+
+            cur.execute(
+                """
+                select external_id
+                from user_identities
+                where provider = 'whatsapp' and user_id = %s
+                limit 1
+                """,
+                (current_user_id,),
+            )
+            existing_current_wa = cur.fetchone()
+
+    if not matches:
+        return {"status": "no_match", "wa_phone": wa_phone}
+
+    if len(matches) > 1:
+        return {"status": "multiple_accounts", "wa_phone": wa_phone}
+
+    target_user_id = int(matches[0]["user_id"])
+
+    if current_user_id != target_user_id and get_auth_user(int(current_user_id)) is not None:
+        return {"status": "wa_linked_other_account", "wa_phone": wa_phone}
+
+    existing_target = get_auth_user(target_user_id)
+    if existing_target:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    select external_id
+                    from user_identities
+                    where provider = 'whatsapp' and user_id = %s
+                    limit 1
+                    """,
+                    (target_user_id,),
+                )
+                target_wa = cur.fetchone()
+
+                if target_wa and target_wa["external_id"] != wa_id:
+                    return {
+                        "status": "account_has_other_whatsapp",
+                        "wa_phone": wa_phone,
+                    }
+
+    final_user_id = link_platform_identity("whatsapp", wa_id, target_user_id)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update auth_accounts
+                set phone_status = 'confirmed',
+                    phone_confirmed_at = coalesce(phone_confirmed_at, now()),
+                    whatsapp_verified_at = now()
+                where user_id = %s
+                """,
+                (target_user_id,),
+            )
+        conn.commit()
+
+    return {
+        "status": "already_linked" if current_user_id == target_user_id and existing_current_wa else "linked",
+        "user_id": int(final_user_id),
+        "wa_phone": wa_phone,
+    }
 
 
 # ─── RECUPERAÇÃO DE SENHA ─────────────────────────────────────────────────────

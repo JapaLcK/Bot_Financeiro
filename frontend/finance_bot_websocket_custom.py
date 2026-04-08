@@ -43,6 +43,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from config.env import load_app_env
 from token_utils import decode_dashboard_token, make_dashboard_token
+from utils_phone import normalize_phone_e164
 
 load_app_env()
 
@@ -587,13 +588,7 @@ def _decode_jwt(token: str) -> dict | None:
 def _build_whatsapp_onboarding_link(user_id: int, minutes_valid: int = 15) -> str:
     if not WHATSAPP_NUMBER:
         return ""
-
-    import sys
-    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import create_platform_onboarding_token
-
-    token = create_platform_onboarding_token(user_id, "whatsapp", minutes_valid=minutes_valid)
-    text = urllib.parse.quote(f"iniciar {token}")
+    text = urllib.parse.quote("oi")
     return f"https://wa.me/{WHATSAPP_NUMBER}?text={text}"
 
 async def _get_current_user(creds: HTTPAuthorizationCredentials = Depends(_bearer)) -> int:
@@ -634,6 +629,7 @@ def _authorize_dashboard_access(request: Request, user_id: int) -> int:
 class RegisterBody(BaseModel):
     email: str
     password: str
+    phone: str
 
 class LoginBody(BaseModel):
     email: str
@@ -684,7 +680,12 @@ async def auth_register(request: Request, body: RegisterBody):
         raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 6 caracteres.")
 
     try:
-        code = create_email_verification(body.email, body.password)
+        normalize_phone_e164(body.phone)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        code = create_email_verification(body.email, body.password, body.phone)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 

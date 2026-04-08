@@ -15,10 +15,10 @@ from adapters.whatsapp.wa_client import download_media, send_text
 from adapters.whatsapp.wa_parse import InboundAttachmentRef, InboundMessage, extract_messages
 from core.handle_incoming import handle_incoming
 from core.types import IncomingMessage
-from db import consume_platform_onboarding_token, get_or_create_canonical_user, link_platform_identity
+from db import attempt_whatsapp_phone_link, get_or_create_canonical_user
+from utils_phone import mask_phone
 
 logger = logging.getLogger(__name__)
-ONBOARDING_TOKEN_RE = re.compile(r"\b(pbw_[A-Za-z0-9_-]{12,})\b")
 
 
 _SEEN: dict[str, float] = {}
@@ -118,9 +118,9 @@ def _download_attachments_sync(att_refs: list[InboundAttachmentRef]) -> list[Att
     return out
 
 
-def _extract_onboarding_token(text: str) -> str | None:
-    match = ONBOARDING_TOKEN_RE.search((text or "").strip())
-    return match.group(1) if match else None
+def _is_greeting(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", (text or "").strip().lower())
+    return normalized in {"oi", "ola", "olá", "hello", "hi", "hey", "bom dia", "boa tarde", "boa noite"}
 
 
 def process_message(message: InboundMessage) -> None:
@@ -138,21 +138,19 @@ def process_message(message: InboundMessage) -> None:
         print(f"[DEBUG] uid={uid}", flush=True)
         logger.info("WA canonical user resolved uid=%s from=%s", uid, message.wa_id)
 
-        onboarding_token = _extract_onboarding_token(message.text or "")
-        if onboarding_token:
-            target_user_id = consume_platform_onboarding_token(onboarding_token, "whatsapp")
-            if target_user_id:
-                final_user_id = link_platform_identity("whatsapp", message.wa_id, target_user_id)
+        auto_link_result = attempt_whatsapp_phone_link(message.wa_id, current_user_id=uid)
+        if auto_link_result["status"] in {"linked", "already_linked"}:
+            if auto_link_result["status"] == "linked":
                 logger.info(
-                    "WA onboarding auto-link success wa_id=%s final_user_id=%s",
+                    "WA phone auto-link success wa_id=%s final_user_id=%s",
                     message.wa_id,
-                    final_user_id,
+                    auto_link_result["user_id"],
                 )
                 _send_reply(
                     reply_to,
                     (
                         "✅ WhatsApp conectado à sua conta com sucesso!\n"
-                        "Seu dashboard e seu bot agora estão sincronizados.\n\n"
+                        "Seu número foi confirmado e seu dashboard agora está sincronizado.\n\n"
                         "Se quiser, já pode me mandar algo como:\n"
                         "• gastei 50 mercado\n"
                         "• recebi 1000 salario\n"
@@ -160,10 +158,34 @@ def process_message(message: InboundMessage) -> None:
                     ),
                 )
                 return
-
+        elif auto_link_result["status"] == "no_match" and _is_greeting(message.text or ""):
             _send_reply(
                 reply_to,
-                "⚠️ Este link de conexão expirou ou já foi usado. Gere um novo no dashboard e tente novamente.",
+                (
+                    "⚠️ Não encontrei nenhuma conta cadastrada com este número de WhatsApp.\n"
+                    "Crie sua conta no site usando este mesmo número ou use o fluxo de código/link para vincular."
+                ),
+            )
+            return
+        elif auto_link_result["status"] == "multiple_accounts" and _is_greeting(message.text or ""):
+            _send_reply(
+                reply_to,
+                "⚠️ Encontrei mais de uma conta com este número. Não consegui vincular automaticamente.",
+            )
+            return
+        elif auto_link_result["status"] == "wa_linked_other_account" and _is_greeting(message.text or ""):
+            _send_reply(
+                reply_to,
+                "⚠️ Este WhatsApp já está vinculado a outra conta. Revise seu cadastro ou use outro número.",
+            )
+            return
+        elif auto_link_result["status"] == "account_has_other_whatsapp" and _is_greeting(message.text or ""):
+            _send_reply(
+                reply_to,
+                (
+                    "⚠️ Sua conta já tem outro WhatsApp vinculado. "
+                    f"Este número ({mask_phone(auto_link_result['wa_phone'])}) não foi conectado automaticamente."
+                ),
             )
             return
 
