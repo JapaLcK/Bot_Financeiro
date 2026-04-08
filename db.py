@@ -289,14 +289,6 @@ def init_db():
     create index if not exists idx_auth_accounts_email on auth_accounts (email)
     """,
     """
-    create unique index if not exists idx_auth_accounts_phone_unique
-      on auth_accounts (phone_e164)
-      where phone_e164 is not null
-    """,
-    """
-    alter table auth_accounts add column if not exists stripe_customer_id text unique
-    """,
-    """
     alter table auth_accounts add column if not exists phone_e164 text
     """,
     """
@@ -307,6 +299,14 @@ def init_db():
     """,
     """
     alter table auth_accounts add column if not exists whatsapp_verified_at timestamptz
+    """,
+    """
+    alter table auth_accounts add column if not exists stripe_customer_id text unique
+    """,
+    """
+    create unique index if not exists idx_auth_accounts_phone_unique
+      on auth_accounts (phone_e164)
+      where phone_e164 is not null
     """,
     """
     alter table credit_bills add column if not exists user_id bigint references users(id) on delete cascade
