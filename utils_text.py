@@ -24,6 +24,8 @@ def contains_word(text: str, word: str) -> bool:
 # Regras locais (baratas) — já cobrindo mercado/psicologo/petshop
 LOCAL_RULES = [
     (["mercado", "supermercado", "mercadinho", "hortifruti", "padaria"], "alimentação"),
+    (["aluguel", "condominio", "condomínio", "luz", "energia", "conta de luz", "agua", "água", "conta de agua",
+      "conta de água", "gas", "gás", "internet", "wifi"], "moradia"),
     (["psicologo", "psicologa", "terapia", "terapeuta", "psiquiatra"], "saúde"),
     (["petshop", "pet shop", "racao", "veterinario", "vet", "banho", "tosa"], "pets"),
     (["ifood", "restaurante", "lanchonete"], "alimentação"),
@@ -288,4 +290,3 @@ def parse_pocket_deposit_natural(text: str):
             return amount, pocket
 
     return None, None
-
