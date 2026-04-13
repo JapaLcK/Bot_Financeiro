@@ -443,7 +443,14 @@ def confirm_email_verification_impl(
                 """
                 insert into auth_accounts (user_id, email, password_hash, phone_e164, phone_status)
                 values (%s, %s, %s, %s, 'pending')
-                on conflict (email) do nothing
+                on conflict (email) do update
+                set user_id = excluded.user_id,
+                    password_hash = excluded.password_hash,
+                    phone_e164 = coalesce(auth_accounts.phone_e164, excluded.phone_e164),
+                    phone_status = case
+                        when auth_accounts.phone_e164 is null and excluded.phone_e164 is not null then 'pending'
+                        else auth_accounts.phone_status
+                    end
                 """,
                 (user_id, email, password_hash, phone_e164),
             )
