@@ -191,6 +191,26 @@ def test_route_trocar_cartao_principal_abre_fluxo(user_id):
     assert "Qual cartão você quer definir como principal" in response
 
 
+def test_route_pergunta_quando_vence_cartao_existente(user_id):
+    create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="meu nubank vence quando?")
+
+    response = route(classify(msg.text), msg)
+
+    assert "vence no dia" in response
+    assert "8" in response
+
+
+def test_route_pergunta_quando_vence_cartao_inexistente_oferece_cadastro(user_id):
+    create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="meu visa vence quando?")
+
+    response = route(classify(msg.text), msg)
+
+    assert "Não encontrei um cartão chamado" in response
+    assert "criar cartao visa" in response
+
+
 def test_route_qual_cartao_fecha_dia_30(user_id):
     create_card(user_id=user_id, name="Mastercard", closing_day=30, due_day=31)
     msg = IncomingMessage(platform="discord", user_id=user_id, text="qual cartao fecha dia 30?")

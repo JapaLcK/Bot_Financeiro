@@ -164,6 +164,8 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "credit.handle"),
     (r"^(me\s+mostra|mostrar|ver|quero ver|quais|qual)\s+.*\b(cartao|cartoes|fatura|faturas|credito|parcelamento)\b",
      "credit.handle"),
+    (r"^(meu|minha|este|esse)\s+.*\b(vence|fecha)\s+quando\b",
+     "credit.handle"),
     (r"^(quanto|qual)\s+.*\b(fatura|credito)\b.*\b(nubank|visa|mastercard|cartao|cartoes)\b",
      "credit.handle"),
     (r"^(trocar|mudar|definir|colocar)\s+.*\b(cartao principal|principal)\b",
@@ -388,6 +390,8 @@ EXEMPLOS:
 "quero cadastrar um cartao" → {"intent":"credit.handle","confidence":0.95,"entities":{},"needs_clarification":false,"clarification_question":null}
 "me mostra minhas faturas" → {"intent":"credit.handle","confidence":0.96,"entities":{},"needs_clarification":false,"clarification_question":null}
 "quanto tenho na fatura do nubank?" → {"intent":"credit.handle","confidence":0.95,"entities":{},"needs_clarification":false,"clarification_question":null}
+"meu nubank vence quando?" → {"intent":"credit.handle","confidence":0.95,"entities":{},"needs_clarification":false,"clarification_question":null}
+"meu visa vence quando?" → {"intent":"credit.handle","confidence":0.94,"entities":{},"needs_clarification":false,"clarification_question":null}
 "qual meu cartao principal?" → {"intent":"credit.handle","confidence":0.95,"entities":{},"needs_clarification":false,"clarification_question":null}
 "quero mudar meu cartao principal" → {"intent":"credit.handle","confidence":0.94,"entities":{},"needs_clarification":false,"clarification_question":null}
 "me recomenda uma ação da bolsa" → {"intent":"out_of_scope","confidence":0.98,"entities":{},"needs_clarification":false,"clarification_question":null}

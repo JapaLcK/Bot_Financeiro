@@ -46,6 +46,23 @@ def _find_card_name_in_text(user_id: int, text: str) -> str | None:
     return None
 
 
+def _extract_unknown_card_candidate(text: str) -> str | None:
+    norm = normalize_text(text)
+    patterns = [
+        r"\bmeu\s+([a-z0-9]+)\s+(?:vence|fecha)\b",
+        r"\bfatura\s+do\s+([a-z0-9]+)\b",
+        r"\bfatura\s+de\s+([a-z0-9]+)\b",
+        r"\bcartao\s+([a-z0-9]+)\b",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, norm)
+        if m:
+            candidate = (m.group(1) or "").strip()
+            if candidate and candidate not in {"principal", "padrao", "padrão", "cartao", "fatura"}:
+                return candidate
+    return None
+
+
 def _get_primary_or_single_card(user_id: int) -> dict | None:
     cards = list_cards(user_id)
     if not cards:
@@ -351,6 +368,9 @@ def handle(user_id: int, text: str) -> str | None:
     t_low = t.lower().strip()
     t_norm = normalize_text(t)
 
+    if any(x in t_norm for x in ("mudar", "trocar", "definir", "colocar")) and any(x in t_norm for x in ("cartao principal", "cartao padrao", "cartao padrão", "principal")):
+        return _ask_set_primary_flow(user_id, _find_card_name_in_text(user_id, t))
+
     if any(x in t_norm for x in ("fecha dia", "vence dia")) and "cartao" in t_norm:
         cards = list_cards(user_id)
         if not cards:
@@ -370,7 +390,7 @@ def handle(user_id: int, text: str) -> str | None:
                     return f"💳 Cartão(ões) que vencem dia {target_day}: {names}"
                 return f"Não encontrei cartão com vencimento no dia {target_day}."
 
-    if "cartao principal" in t_norm or "cartao padrao" in t_norm:
+    if "cartao principal" in t_norm or "cartao padrao" in t_norm or "cartao padrão" in t_norm:
         if any(x in t_norm for x in ("qual", "quais", "meu", "atual")):
             cards = list_cards(user_id)
             if not cards:
@@ -382,9 +402,6 @@ def handle(user_id: int, text: str) -> str | None:
                     f"Fechamento: dia {current['closing_day']} | Vencimento: dia {current['due_day']}"
                 )
             return "Você tem cartões cadastrados, mas ainda não definiu um principal."
-
-        if any(x in t_norm for x in ("trocar", "mudar", "definir", "colocar")):
-            return _ask_set_primary_flow(user_id, _find_card_name_in_text(user_id, t))
 
     if "fatura" in t_norm or "faturas" in t_norm:
         if any(x in t_norm for x in ("mostrar", "mostra", "ver", "quais", "minhas", "tenho", "quanto", "valor", "em aberto", "atual")):
@@ -401,6 +418,23 @@ def handle(user_id: int, text: str) -> str | None:
                     t_low = f"fatura {current['name']}"
                 else:
                     return "Você tem mais de um cartão. Me diga qual deles quer consultar. Ex: **quanto tenho na fatura do Nubank?**"
+
+    if any(x in t_norm for x in ("vence quando", "fecha quando")):
+        card, error = _resolve_card_from_context(user_id, t)
+        if error:
+            return error
+        if card:
+            if "vence" in t_norm:
+                return f"💳 O cartão **{card['name']}** vence no dia **{card['due_day']}**."
+            return f"💳 O cartão **{card['name']}** fecha no dia **{card['closing_day']}**."
+
+        candidate = _extract_unknown_card_candidate(t)
+        if candidate:
+            return (
+                f"Não encontrei um cartão chamado **{candidate}**.\n"
+                f"Se quiser, posso te ajudar a cadastrar esse cartão agora. É só me mandar:\n"
+                f"**criar cartao {candidate}**"
+            )
 
     if ("cartao" in t_norm or "cartoes" in t_norm) and "fatura" not in t_norm:
         if any(x in t_norm for x in ("quais", "meus", "tenho", "registrado", "registrados", "listar", "mostrar", "mostra", "ver")):
