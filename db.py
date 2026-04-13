@@ -169,9 +169,21 @@ def init_db():
       name text not null,
       closing_day int not null check (closing_day between 1 and 28),
       due_day int not null check (due_day between 1 and 28),
+      reminders_enabled boolean not null default false,
+      reminders_days_before int not null default 3,
+      reminder_last_sent_on date,
       created_at timestamptz default now(),
       unique(user_id, name)
     )
+    """,
+    """
+    alter table credit_cards add column if not exists reminders_enabled boolean not null default false
+    """,
+    """
+    alter table credit_cards add column if not exists reminders_days_before int not null default 3
+    """,
+    """
+    alter table credit_cards add column if not exists reminder_last_sent_on date
     """,
     """
     create table if not exists credit_bills (
@@ -2973,6 +2985,7 @@ def list_cards(user_id: int):
             cur.execute(
                 """
                 select c.id, c.name, c.closing_day, c.due_day,
+                       c.reminders_enabled, c.reminders_days_before, c.reminder_last_sent_on,
                        (u.default_card_id = c.id) as is_default
                 from credit_cards c
                 left join users u on u.id = c.user_id
@@ -2983,6 +2996,63 @@ def list_cards(user_id: int):
             )
             rows = cur.fetchall()
     return rows
+
+
+def get_card_by_id(user_id: int, card_id: int):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select c.id, c.name, c.closing_day, c.due_day,
+                       c.reminders_enabled, c.reminders_days_before, c.reminder_last_sent_on,
+                       (u.default_card_id = c.id) as is_default
+                from credit_cards c
+                left join users u on u.id = c.user_id
+                where c.user_id = %s and c.id = %s
+                limit 1
+                """,
+                (user_id, card_id),
+            )
+            return cur.fetchone()
+
+
+def update_card_reminder_settings(user_id: int, card_id: int, enabled: bool, days_before: int | None = None):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if days_before is None:
+                cur.execute(
+                    """
+                    update credit_cards
+                    set reminders_enabled=%s
+                    where user_id=%s and id=%s
+                    """,
+                    (bool(enabled), user_id, card_id),
+                )
+            else:
+                cur.execute(
+                    """
+                    update credit_cards
+                    set reminders_enabled=%s,
+                        reminders_days_before=%s
+                    where user_id=%s and id=%s
+                    """,
+                    (bool(enabled), int(days_before), user_id, card_id),
+                )
+        conn.commit()
+
+
+def mark_card_reminder_sent(user_id: int, card_id: int, sent_on: date):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update credit_cards
+                set reminder_last_sent_on=%s
+                where user_id=%s and id=%s
+                """,
+                (sent_on, user_id, card_id),
+            )
+        conn.commit()
 
 # Soma 'delta' meses a um par (ano, mês) e retorna o novo (ano, mês).
 # Ex: (2026, 12) + 1 -> (2027, 1)
@@ -3370,6 +3440,36 @@ def list_open_bills(user_id: int):
             )
             rows = cur.fetchall()
     return rows
+
+
+def list_credit_card_due_reminders(user_id: int, today: date):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select
+                    c.id as card_id,
+                    c.name as card_name,
+                    c.closing_day,
+                    c.due_day,
+                    c.reminders_enabled,
+                    c.reminders_days_before,
+                    c.reminder_last_sent_on,
+                    b.id as bill_id,
+                    b.period_start,
+                    b.period_end,
+                    b.total,
+                    coalesce(b.paid_amount, 0) as paid_amount
+                from credit_cards c
+                join credit_bills b on b.card_id = c.id and b.user_id = c.user_id
+                where c.user_id = %s
+                  and c.reminders_enabled = true
+                  and b.status in ('open', 'closed')
+                order by b.period_end asc, c.name asc
+                """,
+                (user_id,),
+            )
+            return cur.fetchall()
 
 #lista parcelamentos
 def list_installment_groups(user_id: int, limit: int = 15):

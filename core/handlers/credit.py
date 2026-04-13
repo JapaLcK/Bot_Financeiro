@@ -7,10 +7,13 @@ from ai_router import classify_category_with_gpt
 from db import (
     add_credit_purchase,
     add_credit_purchase_installments,
+    clear_pending_action,
     create_card,
+    get_card_by_id,
     get_card_id_by_name,
     get_current_open_bill_id,
     get_default_card_id,
+    get_pending_action,
     get_memorized_category,
     get_open_bill_summary,
     list_cards,
@@ -18,6 +21,8 @@ from db import (
     list_open_bills,
     pay_bill_amount,
     set_default_card,
+    set_pending_action,
+    update_card_reminder_settings,
 )
 from utils_date import extract_date_from_text, fmt_br, now_tz, today_tz
 from utils_text import fmt_brl, normalize_text, parse_money
@@ -44,6 +49,188 @@ def _infer_category(user_id: int, desc: str) -> str:
     return categoria
 
 
+def _is_yes(text: str) -> bool:
+    return normalize_text(text) in {"sim", "s", "yes", "y", "quero", "claro", "ok", "pode"}
+
+
+def _is_no(text: str) -> bool:
+    return normalize_text(text) in {"nao", "não", "n", "no", "cancelar", "cancela", "agora nao", "agora não"}
+
+
+def _parse_day(text: str) -> int | None:
+    norm = normalize_text(text)
+    m = re.search(r"\b(\d{1,2})\b", norm)
+    if not m:
+        return None
+    day = int(m.group(1))
+    if 1 <= day <= 28:
+        return day
+    return None
+
+
+def _parse_card_name_from_create(text: str) -> str | None:
+    m = re.search(r"criar\s+cart[aã]o\s+(.+)$", text, re.IGNORECASE)
+    if not m:
+        return None
+    raw = m.group(1).strip()
+    raw = re.sub(r"\s+fecha\s+\d{1,2}.*$", "", raw, flags=re.IGNORECASE).strip()
+    return raw or None
+
+
+def _card_summary(card: dict) -> str:
+    reminder_txt = "desativado"
+    if card.get("reminders_enabled"):
+        reminder_txt = f"{int(card.get('reminders_days_before') or 3)} dia(s) antes"
+    principal = "Sim" if card.get("is_default") else "Não"
+    return (
+        f"• Nome: {card['name']}\n"
+        f"• Fechamento: dia {card['closing_day']}\n"
+        f"• Vencimento: dia {card['due_day']}\n"
+        f"• Cartão principal: {principal}\n"
+        f"• Lembrete: {reminder_txt}"
+    )
+
+
+def _finish_card_setup(user_id: int, card_id: int, ask_primary: bool) -> str:
+    card = get_card_by_id(user_id, card_id)
+    if not card:
+        clear_pending_action(user_id)
+        return "❌ Não consegui localizar o cartão recém-criado."
+
+    if ask_primary:
+        set_pending_action(
+            user_id,
+            "credit_card_setup",
+            {"step": "set_primary", "card_id": card_id},
+            minutes=20,
+        )
+        return (
+            f"✅ Cartão **{card['name']}** registrado com sucesso!\n"
+            f"Confira os detalhes:\n{_card_summary(card)}\n\n"
+            f"Deseja tornar o **{card['name']}** seu cartão principal? Responda **sim** ou **não**."
+        )
+
+    clear_pending_action(user_id)
+    return (
+        f"✅ Cartão **{card['name']}** registrado com sucesso!\n"
+        f"Confira os detalhes:\n{_card_summary(card)}"
+    )
+
+
+def start_card_create_flow(user_id: int, text: str = "") -> str:
+    existing_cards = list_cards(user_id)
+    inferred_name = _parse_card_name_from_create(text)
+    payload = {
+        "step": "name" if not inferred_name else "closing_day",
+        "card_name": inferred_name,
+        "existing_count": len(existing_cards),
+    }
+    set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
+    if inferred_name:
+        return f"Perfeito. Quando fecha a fatura do cartão **{inferred_name}**?"
+    return "Qual cartão deseja registrar?"
+
+
+def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str | None:
+    pending = pending or get_pending_action(user_id)
+    if not pending or pending.get("action_type") != "credit_card_setup":
+        return None
+
+    payload = dict(pending.get("payload") or {})
+    step = payload.get("step")
+    answer = (text or "").strip()
+
+    if _is_no(answer) and step not in {"reminder_opt_in", "set_primary"}:
+        clear_pending_action(user_id)
+        return "❌ Cadastro de cartão cancelado."
+
+    if step == "name":
+        name = answer
+        if normalize_text(name).startswith("criar cartao") or normalize_text(name).startswith("criar cartão"):
+            name = _parse_card_name_from_create(answer) or ""
+        name = name.strip()
+        if not name:
+            return "Qual é o nome do cartão? Ex: **Nubank**"
+        payload["card_name"] = name
+        payload["step"] = "closing_day"
+        set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
+        return f"Quando fecha a fatura do cartão **{name}**?"
+
+    if step == "closing_day":
+        closing_day = _parse_day(answer)
+        if closing_day is None:
+            return "Me diga o dia de fechamento com um número entre **1** e **28**. Ex: **dia 1**."
+        payload["closing_day"] = closing_day
+        payload["step"] = "due_day"
+        set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
+        return f"Quando vence a fatura do cartão **{payload['card_name']}**?"
+
+    if step == "due_day":
+        due_day = _parse_day(answer)
+        if due_day is None:
+            return "Me diga o dia de vencimento com um número entre **1** e **28**. Ex: **dia 8**."
+
+        payload["due_day"] = due_day
+        card_id = create_card(
+            user_id=user_id,
+            name=payload["card_name"],
+            closing_day=int(payload["closing_day"]),
+            due_day=due_day,
+        )
+        payload["card_id"] = card_id
+        first_card = int(payload.get("existing_count") or 0) == 0
+        if first_card:
+            set_default_card(user_id, card_id)
+
+        payload["step"] = "reminder_opt_in"
+        payload["ask_primary"] = not first_card
+        set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
+
+        card = get_card_by_id(user_id, card_id)
+        first_card_txt = "\nComo este é seu primeiro cartão, ele já foi definido como principal." if first_card else ""
+        return (
+            f"✅ Cartão **{card['name']}** registrado com sucesso! Confira os detalhes:\n"
+            f"{_card_summary(card)}"
+            f"{first_card_txt}\n\n"
+            "Gostaria de receber notificações antes do vencimento da fatura? Responda **sim** ou **não**."
+        )
+
+    if step == "reminder_opt_in":
+        card_id = int(payload["card_id"])
+        if _is_yes(answer):
+            payload["step"] = "reminder_days"
+            set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
+            return "Quantos dias antes do vencimento você quer ser avisado? Ex: **1**, **3** ou **5**."
+
+        update_card_reminder_settings(user_id, card_id, enabled=False)
+        return _finish_card_setup(user_id, card_id, ask_primary=bool(payload.get("ask_primary")))
+
+    if step == "reminder_days":
+        card_id = int(payload["card_id"])
+        days_before = _parse_day(answer)
+        if days_before is None:
+            return "Me diga em quantos dias antes devo avisar. Ex: **3**."
+        update_card_reminder_settings(user_id, card_id, enabled=True, days_before=days_before)
+        return _finish_card_setup(user_id, card_id, ask_primary=bool(payload.get("ask_primary")))
+
+    if step == "set_primary":
+        card_id = int(payload["card_id"])
+        card = get_card_by_id(user_id, card_id)
+        if not card:
+            clear_pending_action(user_id)
+            return "❌ Não achei esse cartão para definir como principal."
+        if _is_yes(answer):
+            set_default_card(user_id, card_id)
+            clear_pending_action(user_id)
+            card = get_card_by_id(user_id, card_id)
+            return f"✅ Perfeito. O cartão **{card['name']}** agora é o seu principal.\n{_card_summary(card)}"
+        clear_pending_action(user_id)
+        return f"Perfeito. Mantive o cartão principal atual.\n{_card_summary(card)}"
+
+    clear_pending_action(user_id)
+    return None
+
+
 def handle(user_id: int, text: str) -> str | None:
     t = (text or "").strip()
     if not t:
@@ -54,15 +241,35 @@ def handle(user_id: int, text: str) -> str | None:
     if t_low.startswith("criar cartao") or t_low.startswith("criar cartão"):
         m = re.search(r"criar\s+cart[aã]o\s+(.+?)\s+fecha\s+(\d{1,2})\s+vence\s+(\d{1,2})", t, re.IGNORECASE)
         if not m:
-            return "Use: criar cartao NOME fecha 10 vence 17"
+            return start_card_create_flow(user_id, t)
 
         name = m.group(1).strip()
         fecha = int(m.group(2))
         vence = int(m.group(3))
 
         try:
-            create_card(user_id=user_id, name=name, closing_day=fecha, due_day=vence)
-            return f"✅ Cartão '{name}' criado/atualizado. Quer definir como padrão? Use: padrao {name}"
+            existing_count = len(list_cards(user_id))
+            card_id = create_card(user_id=user_id, name=name, closing_day=fecha, due_day=vence)
+            if existing_count == 0:
+                set_default_card(user_id, card_id)
+            set_pending_action(
+                user_id,
+                "credit_card_setup",
+                {
+                    "step": "reminder_opt_in",
+                    "card_id": card_id,
+                    "ask_primary": existing_count > 0,
+                },
+                minutes=20,
+            )
+            card = get_card_by_id(user_id, card_id)
+            first_card_txt = "\nComo este é seu primeiro cartão, ele já foi definido como principal." if existing_count == 0 else ""
+            return (
+                f"✅ Cartão **{name}** registrado com sucesso! Confira os detalhes:\n"
+                f"{_card_summary(card)}"
+                f"{first_card_txt}\n\n"
+                "Gostaria de receber notificações antes do vencimento da fatura? Responda **sim** ou **não**."
+            )
         except Exception as e:
             return f"❌ Erro criando cartão: {e}"
 

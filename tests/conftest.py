@@ -21,6 +21,9 @@ def _cleanup_user(user_id: int):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("delete from pending_actions where user_id = %s", (user_id,))
+            cur.execute("delete from credit_transactions where user_id = %s", (user_id,))
+            cur.execute("delete from credit_bills where user_id = %s", (user_id,))
+            cur.execute("delete from credit_cards where user_id = %s", (user_id,))
             cur.execute("delete from launches where user_id = %s", (user_id,))
             cur.execute("delete from pockets where user_id = %s", (user_id,))
             cur.execute("delete from investments where user_id = %s", (user_id,))

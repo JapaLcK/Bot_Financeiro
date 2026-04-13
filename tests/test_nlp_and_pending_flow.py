@@ -1,9 +1,19 @@
 from core.intent_classifier import classify
 from core.intent_router import route
+from core.reports.reports_daily import build_due_bill_reminders
 from core.types import IncomingMessage
 from core.handlers.pending import resolve_delete
+from datetime import date
 from parsers import parse_receita_despesa_natural
-from db import add_launch_and_update_balance, create_card, get_balance, set_pending_action
+from db import (
+    add_credit_purchase,
+    add_launch_and_update_balance,
+    create_card,
+    get_balance,
+    get_pending_action,
+    list_cards,
+    set_pending_action,
+)
 
 
 def test_parse_paguei_conta_de_luz(user_id):
@@ -98,4 +108,86 @@ def test_route_criar_cartao_pelo_fluxo_central(user_id):
 
     response = route(result, msg)
 
-    assert "criado/atualizado" in response
+    assert "registrado com sucesso" in response
+
+
+def test_route_criar_cartao_abre_fluxo_guiado(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="criar cartao")
+
+    response = route(classify(msg.text), msg)
+    pending = get_pending_action(user_id)
+
+    assert "Qual cartão deseja registrar" in response
+    assert pending["action_type"] == "credit_card_setup"
+    assert pending["payload"]["step"] == "name"
+
+
+def test_route_criar_cartao_nubank_pergunta_fechamento(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="criar cartao nubank")
+
+    response = route(classify(msg.text), msg)
+    pending = get_pending_action(user_id)
+
+    assert "Quando fecha a fatura" in response
+    assert pending["payload"]["card_name"] == "nubank"
+    assert pending["payload"]["step"] == "closing_day"
+
+
+def test_fluxo_completo_primeiro_cartao_define_principal_e_lembrete(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="criar cartao nubank")
+    route(classify(msg.text), msg)
+
+    response = route(classify("dia 1"), IncomingMessage(platform="discord", user_id=user_id, text="dia 1"))
+    assert "Quando vence a fatura" in response
+
+    response = route(classify("dia 8"), IncomingMessage(platform="discord", user_id=user_id, text="dia 8"))
+    assert "registrado com sucesso" in response
+    assert "já foi definido como principal" in response
+    assert "Gostaria de receber notificações" in response
+
+    response = route(classify("sim"), IncomingMessage(platform="discord", user_id=user_id, text="sim"))
+    assert "Quantos dias antes" in response
+
+    response = route(classify("3"), IncomingMessage(platform="discord", user_id=user_id, text="3"))
+    assert "Cartão principal: Sim" in response
+    assert "Lembrete: 3 dia(s) antes" in response
+
+    cards = list_cards(user_id)
+    card = cards[0] if cards else None
+    assert card is not None
+
+
+def test_fluxo_segundo_cartao_pergunta_se_vira_principal(user_id):
+    create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="criar cartao Visa")
+    route(classify(msg.text), msg)
+    route(classify("dia 5"), IncomingMessage(platform="discord", user_id=user_id, text="dia 5"))
+    response = route(classify("dia 10"), IncomingMessage(platform="discord", user_id=user_id, text="dia 10"))
+
+    assert "Gostaria de receber notificações" in response
+
+    response = route(classify("nao"), IncomingMessage(platform="discord", user_id=user_id, text="nao"))
+    assert "Deseja tornar o **Visa** seu cartão principal" in response
+
+    response = route(classify("sim"), IncomingMessage(platform="discord", user_id=user_id, text="sim"))
+    assert "agora é o seu principal" in response
+
+
+def test_build_due_bill_reminders(user_id):
+    card_id = create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    from db import update_card_reminder_settings
+
+    update_card_reminder_settings(user_id, card_id, enabled=True, days_before=3)
+    add_credit_purchase(
+        user_id=user_id,
+        card_id=card_id,
+        valor=120.0,
+        categoria="outros",
+        nota="teste",
+        purchased_at=date(2026, 4, 5),
+    )
+
+    reminders = build_due_bill_reminders(user_id, date(2026, 4, 5))
+
+    assert len(reminders) == 1
+    assert "vence em 3 dia(s)" in reminders[0]["message"].lower()

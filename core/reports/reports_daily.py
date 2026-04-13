@@ -4,8 +4,9 @@ from db import (
     get_balance, list_pockets, list_investments,
     get_launches_by_period, get_summary_by_period,
     list_users_with_daily_report_enabled, list_identities_by_user,
+    list_credit_card_due_reminders, mark_card_reminder_sent,
 )
-from datetime import time, timedelta
+from datetime import time, timedelta, date
 from discord.ext import tasks
 
 
@@ -15,6 +16,54 @@ def _fmt_brl(v: float) -> str:
 
 def _s(x: str | None) -> str:
     return (x or "").strip()
+
+
+def _add_months(y: int, m: int, delta: int) -> tuple[int, int]:
+    m2 = m + delta
+    y2 = y + (m2 - 1) // 12
+    m2 = (m2 - 1) % 12 + 1
+    return y2, m2
+
+
+def _card_bill_due_date(period_end: date, closing_day: int, due_day: int) -> date:
+    if due_day >= closing_day:
+        return date(period_end.year, period_end.month, due_day)
+    y2, m2 = _add_months(period_end.year, period_end.month, 1)
+    return date(y2, m2, due_day)
+
+
+def build_due_bill_reminders(user_id: int, today: date | None = None) -> list[dict]:
+    today = today or now_tz().date()
+    reminders = []
+
+    for row in list_credit_card_due_reminders(user_id, today) or []:
+        due_date = _card_bill_due_date(row["period_end"], int(row["closing_day"]), int(row["due_day"]))
+        days_before = int(row.get("reminders_days_before") or 0)
+        total = float(row.get("total") or 0)
+        paid = float(row.get("paid_amount") or 0)
+        due_amount = max(0.0, total - paid)
+        days_left = (due_date - today).days
+
+        if due_amount <= 0:
+            continue
+        if days_left != days_before:
+            continue
+        if row.get("reminder_last_sent_on") == today:
+            continue
+
+        message = (
+            f"💳 Lembrete de fatura: {row['card_name']}\n"
+            f"📅 Vence em {days_left} dia(s): {due_date.strftime('%d/%m/%Y')}\n"
+            f"🧾 Fechamento desta fatura: {row['period_end'].strftime('%d/%m/%Y')}\n"
+            f"💰 Total: {_fmt_brl(total)} | Pago: {_fmt_brl(paid)} | Em aberto: {_fmt_brl(due_amount)}"
+        )
+        reminders.append({
+            "card_id": int(row["card_id"]),
+            "bill_id": int(row["bill_id"]),
+            "message": message,
+        })
+
+    return reminders
 
 def build_daily_report_text(user_id: int) -> str:
     saldo = float(get_balance(user_id) or 0)
@@ -110,6 +159,7 @@ async def _daily_report_discord(bot):
 
     for uid in user_ids:
         msg = build_daily_report_text(uid)
+        reminders = build_due_bill_reminders(uid)
 
         # manda para todas identidades discord ligadas no user
         ids = list_identities_by_user(uid)
@@ -119,7 +169,15 @@ async def _daily_report_discord(bot):
             try:
                 user = await bot.fetch_user(int(discord_id))
                 if user:
+                    for reminder in reminders:
+                        await user.send(reminder["message"])
                     await user.send(msg)
+            except Exception:
+                pass
+
+        for reminder in reminders:
+            try:
+                mark_card_reminder_sent(uid, reminder["card_id"], now_tz().date())
             except Exception:
                 pass
 

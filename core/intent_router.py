@@ -71,6 +71,12 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
     if clarif:
         return _resolve_clarification(clarif, text, user_id, platform, external_id)
 
+    pending = db.get_pending_action(user_id)
+    if pending and pending.get("action_type") == "credit_card_setup":
+        resp = h_credit.resolve_pending(user_id, text, pending)
+        if resp is not None:
+            return resp
+
     # -----------------------------------------------------------------------
     # 1. Confirmações (sim / não) para ações destrutivas
     # -----------------------------------------------------------------------

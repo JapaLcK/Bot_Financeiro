@@ -11,11 +11,12 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from adapters.whatsapp.wa_client import send_text
 from adapters.whatsapp.wa_runtime import process_payload, verify_webhook_signature
 from config.env import load_app_env
-from core.reports.reports_daily import build_daily_report_text
+from core.reports.reports_daily import build_daily_report_text, build_due_bill_reminders
 from db import (
     get_daily_report_prefs,
     list_identities_by_user,
     list_users_with_daily_report_enabled,
+    mark_card_reminder_sent,
     mark_daily_report_sent,
     was_daily_report_sent_today,
 )
@@ -123,14 +124,23 @@ async def _daily_report_loop():
                     continue
 
                 message = build_daily_report_text(uid)
+                reminders = build_due_bill_reminders(uid, today)
                 ids = list_identities_by_user(uid)
                 wa_targets = [x["external_id"] for x in ids if x["provider"] == "whatsapp"]
 
                 for to in wa_targets:
                     try:
+                        for reminder in reminders:
+                            await asyncio.to_thread(send_text, to, reminder["message"])
                         await asyncio.to_thread(send_text, to, message)
                     except Exception as exc:
                         logger.warning("WA daily report send error to=%s error=%s", to, exc)
+
+                for reminder in reminders:
+                    try:
+                        mark_card_reminder_sent(uid, reminder["card_id"], today)
+                    except Exception as exc:
+                        logger.warning("WA card reminder mark error uid=%s card_id=%s error=%s", uid, reminder["card_id"], exc)
 
                 mark_daily_report_sent(uid, today)
         except Exception as exc:
