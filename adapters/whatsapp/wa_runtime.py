@@ -140,6 +140,16 @@ def process_message(message: InboundMessage) -> None:
 
         auto_link_result = attempt_whatsapp_phone_link(message.wa_id, current_user_id=uid)
         if auto_link_result["status"] in {"linked", "already_linked"}:
+            resolved_uid = int(auto_link_result.get("user_id") or uid)
+            if resolved_uid != uid:
+                logger.info(
+                    "WA canonical user updated after auto-link old_uid=%s new_uid=%s from=%s",
+                    uid,
+                    resolved_uid,
+                    message.wa_id,
+                )
+                print(f"[DEBUG] uid remapped old={uid} new={resolved_uid}", flush=True)
+                uid = resolved_uid
             if auto_link_result["status"] == "linked":
                 logger.info(
                     "WA phone auto-link success wa_id=%s final_user_id=%s",
