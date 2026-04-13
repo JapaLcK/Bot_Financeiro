@@ -54,7 +54,7 @@ def _contextual_help_message(text: str) -> str:
 
     if any(k in norm for k in ("cartao", "cartoes", "fatura", "credito", "parcela", "parcelamento", "vence", "fecha")):
         return (
-            "Não entendi o que você quis fazer com cartões.\n"
+            "Não entendi o que você quis fazer sobre cartões.\n"
             "Tente uma destas opções:\n"
             "• `cartoes`\n"
             "• `fatura nubank`\n"

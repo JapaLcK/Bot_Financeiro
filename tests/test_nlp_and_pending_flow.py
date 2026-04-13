@@ -51,17 +51,13 @@ def test_resolve_delete_uses_correct_argument_order(user_id):
 
 
 def test_parse_gastei_com_data_no_meio_remove_data_da_nota(user_id):
-    parsed = parse_receita_despesa_natural(user_id, "Mandei 50 reais para barbara dia 10/04")
-
-    assert parsed is None
-
     parsed = parse_receita_despesa_natural(user_id, "gastei 50 reais para barbara dia 10/04")
 
     assert parsed is not None
     assert parsed["valor"] == 50
     assert parsed["criado_em"] is not None
     assert parsed["nota"] == "gastei 50 reais para barbara"
-    assert parsed["alvo"] == "reais para barbara"
+    assert parsed["alvo"] == "barbara"
 
 
 def test_parse_mandei_com_data_no_meio_remove_data_da_nota(user_id):
@@ -317,7 +313,7 @@ def test_build_due_bill_reminders(user_id):
         valor=120.0,
         categoria="outros",
         nota="teste",
-        purchased_at=date(2026, 4, 5),
+        purchased_at=date(2026, 3, 30),
     )
 
     reminders = build_due_bill_reminders(user_id, date(2026, 4, 5))
