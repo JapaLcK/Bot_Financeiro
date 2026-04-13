@@ -90,6 +90,15 @@ _EXACT: dict[str, str] = {
     "abrir dashboard":          "dashboard.open",
     "painel":                   "dashboard.open",
     "ver painel":               "dashboard.open",
+    # cartões / crédito
+    "cartoes":                  "credit.handle",
+    "cartoes de credito":       "credit.handle",
+    "listar cartoes":           "credit.handle",
+    "fatura":                   "credit.handle",
+    "faturas":                  "credit.handle",
+    "listar faturas":           "credit.handle",
+    "parcelamentos":            "credit.handle",
+    "listar parcelamentos":     "credit.handle",
     # ajuda
     "ajuda":                    "help",
     "help":                     "help",
@@ -123,8 +132,6 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "launches.list"),
     (r"^(quanto|algum|tive|tivemos?|houve)\s.*(gastei|gastou|gasto|gasta|despesa|despesas|lancamentos?)\b",
      "launches.list"),
-    (r"^(gastei|gastamos?|tive algum gasto|teve algum gasto|houve algum gasto).*(hoje|ontem|\bdia\b|\d{1,2}[\/\-]\d{1,2})",
-     "launches.list"),
     # lançamentos — sem data
     (r"^(ver|mostrar|mostra|listar)\s+(meus\s+)?lancamentos?(\s+recentes?)?$",
      "launches.list"),
@@ -142,6 +149,12 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "launches.add"),
     (r"^(recebi|ganhei|entrou|caiu)\b",
      "launches.add"),
+    (r"^(hoje|ontem|\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?|dia\s+\d{1,2}(?:[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?)?)\b.*\b(gastei|paguei|comprei|debitei|gasto|recebi|ganhei|entrou|caiu)\b",
+     "launches.add"),
+
+    # cartões / crédito
+    (r"^(cartoes|cartoes de credito|listar cartoes|criar cartao|padrao\b|credito\b|parcelar\b|parcelei\b|fatura\b|faturas\b|pagar fatura\b|paguei fatura\b|parcelamentos\b)",
+     "credit.handle"),
 
     # caixinhas
     (r"^(ver|mostrar|listar)\s+(minhas\s+)?caixinhas?$",

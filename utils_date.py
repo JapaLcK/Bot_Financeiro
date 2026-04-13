@@ -37,20 +37,25 @@ def extract_date_from_text(text: str) -> tuple[datetime | None, str]:
     now = now_tz()
     tz = _tz()
 
+    def _clean(pattern: str) -> str:
+        cleaned = re.sub(pattern, " ", original, flags=re.IGNORECASE)
+        return " ".join(cleaned.split()).strip(" ,.-")
+
     # hoje / ontem
     if re.search(r"\bhoje\b", t):
-        cleaned = re.sub(r"\bhoje\b", "", original, flags=re.IGNORECASE).strip()
+        cleaned = _clean(r"\bhoje\b")
         dt = datetime.combine(now.date(), time(0, 0), tzinfo=tz)
-        return dt, " ".join(cleaned.split())
+        return dt, cleaned
 
     if re.search(r"\bontem\b", t):
-        cleaned = re.sub(r"\bontem\b", "", original, flags=re.IGNORECASE).strip()
+        cleaned = _clean(r"\bontem\b")
         d = now.date() - timedelta(days=1)
         dt = datetime.combine(d, time(0, 0), tzinfo=tz)
-        return dt, " ".join(cleaned.split())
+        return dt, cleaned
 
-    # dd/mm(/yyyy)?
-    m = re.search(r"\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b", t)
+    # [dia] dd/mm(/yyyy)?
+    date_pattern = r"\b(?:dia\s+)?(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b"
+    m = re.search(date_pattern, t)
     if not m:
         return None, original
 
@@ -70,15 +75,10 @@ def extract_date_from_text(text: str) -> tuple[datetime | None, str]:
     except ValueError:
         return None, original
 
-    cleaned = re.sub(
-        r"\b\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?\b",
-        "",
-        original,
-        flags=re.IGNORECASE
-    ).strip()
+    cleaned = _clean(date_pattern)
 
     dt = datetime.combine(d, time(0, 0), tzinfo=tz)
-    return dt, " ".join(cleaned.split())
+    return dt, cleaned
 
 def parse_date_str(s: str) -> date:
     s = (s or "").strip()

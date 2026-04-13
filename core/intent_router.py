@@ -17,6 +17,7 @@ from core.types import IncomingMessage
 # handlers
 from core.handlers import (
     balance    as h_balance,
+    credit     as h_credit,
     launches   as h_launches,
     pockets    as h_pockets,
     investments as h_investments,
@@ -40,7 +41,7 @@ DESTRUCTIVE_INTENTS = {
 
 OUT_OF_SCOPE_MSG = (
     "Só consigo ajudar com finanças pessoais: "
-    "saldo, lançamentos, caixinhas e investimentos.\n"
+    "saldo, lançamentos, cartões, caixinhas e investimentos.\n"
     "Digite *ajuda* para ver o que posso fazer."
 )
 
@@ -176,6 +177,11 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
 
     if intent == "launches.undo":
         return h_launches.undo(user_id)
+
+    # --- cartões / crédito ---
+    if intent == "credit.handle":
+        resp = h_credit.handle(user_id, text)
+        return resp if resp is not None else OUT_OF_SCOPE_MSG
 
     # --- caixinhas ---
     if intent == "pockets.list":
