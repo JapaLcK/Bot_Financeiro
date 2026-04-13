@@ -829,7 +829,12 @@ async function connectWhatsApp(e) {
       alert('WhatsApp ainda nao configurado neste ambiente.');
       return false;
     }
-    window.open(data.whatsapp_link, '_blank', 'noopener');
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+    if (isMobile) {
+      window.location.href = data.whatsapp_link;
+    } else {
+      window.open(data.whatsapp_link, '_blank', 'noopener');
+    }
   } catch (err) {
     alert('Erro ao conectar o WhatsApp. Tente novamente.');
   }
