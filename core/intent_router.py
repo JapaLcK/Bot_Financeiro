@@ -54,8 +54,8 @@ def _contextual_help_message(text: str) -> str:
 
     if any(k in norm for k in ("cartao", "cartoes", "fatura", "credito", "parcela", "parcelamento", "vence", "fecha")):
         return (
-            "Não entendi essa parte sobre cartões.\n"
-            "Você pode tentar, por exemplo:\n"
+            "Não entendi o que você quis fazer com cartões.\n"
+            "Tente uma destas opções:\n"
             "• `cartoes`\n"
             "• `fatura nubank`\n"
             "• `quanto tenho na fatura do nubank?`\n"
@@ -65,8 +65,8 @@ def _contextual_help_message(text: str) -> str:
 
     if any(k in norm for k in ("caixinha", "caixinhas")):
         return (
-            "Não entendi essa parte sobre caixinhas.\n"
-            "Você pode tentar:\n"
+            "Não entendi o que você quis fazer com caixinhas.\n"
+            "Tente uma destas opções:\n"
             "• `listar caixinhas`\n"
             "• `criar caixinha viagem`\n"
             "• `coloquei 100 na caixinha viagem`"
@@ -74,8 +74,8 @@ def _contextual_help_message(text: str) -> str:
 
     if any(k in norm for k in ("investimento", "investimentos", "cdb", "tesouro", "aporte", "resgate")):
         return (
-            "Não entendi essa parte sobre investimentos.\n"
-            "Você pode tentar:\n"
+            "Não entendi o que você quis fazer com investimentos.\n"
+            "Tente uma destas opções:\n"
             "• `listar investimentos`\n"
             "• `criar investimento CDB 110% CDI`\n"
             "• `apliquei 200 no investimento CDB`"
@@ -83,8 +83,8 @@ def _contextual_help_message(text: str) -> str:
 
     if any(k in norm for k in ("saldo", "lancamento", "lancamentos", "gastei", "recebi", "despesa", "receita")):
         return (
-            "Não entendi essa parte sobre lançamentos.\n"
-            "Você pode tentar:\n"
+            "Não entendi o que você quis fazer com lançamentos.\n"
+            "Tente uma destas opções:\n"
             "• `saldo`\n"
             "• `listar lancamentos`\n"
             "• `gastei 50 mercado`\n"
