@@ -93,10 +93,15 @@ _EXACT: dict[str, str] = {
     # cartões / crédito
     "cartoes":                  "credit.handle",
     "cartoes de credito":       "credit.handle",
+    "meus cartoes":             "credit.handle",
     "listar cartoes":           "credit.handle",
+    "quais sao meus cartoes":   "credit.handle",
+    "qual meu cartao principal":"credit.handle",
+    "meu cartao principal":     "credit.handle",
     "fatura":                   "credit.handle",
     "faturas":                  "credit.handle",
     "listar faturas":           "credit.handle",
+    "minhas faturas":           "credit.handle",
     "parcelamentos":            "credit.handle",
     "listar parcelamentos":     "credit.handle",
     # ajuda
@@ -153,7 +158,17 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "launches.add"),
 
     # cartões / crédito
-    (r"^(cartoes|cartoes de credito|listar cartoes|criar cartao|padrao\b|credito\b|parcelar\b|parcelei\b|fatura\b|faturas\b|pagar fatura\b|paguei fatura\b|parcelamentos\b)",
+    (r"^(cartoes|cartoes de credito|listar cartoes|meus cartoes|quais cartoes|quais sao meus cartoes|criar cartao|padrao\b|credito\b|parcelar\b|parcelei\b|fatura\b|faturas\b|pagar fatura\b|paguei fatura\b|parcelamentos\b|minhas faturas|me mostra minhas faturas|qual meu cartao principal|meu cartao principal|trocar cartao principal|mudar cartao principal)",
+     "credit.handle"),
+    (r"^(quero|preciso|gostaria de)\s+.*\b(cartao|cartoes|fatura|faturas|credito|parcelamento)\b",
+     "credit.handle"),
+    (r"^(me\s+mostra|mostrar|ver|quero ver|quais|qual)\s+.*\b(cartao|cartoes|fatura|faturas|credito|parcelamento)\b",
+     "credit.handle"),
+    (r"^(quanto|qual)\s+.*\b(fatura|credito)\b.*\b(nubank|visa|mastercard|cartao|cartoes)\b",
+     "credit.handle"),
+    (r"^(trocar|mudar|definir|colocar)\s+.*\b(cartao principal|principal)\b",
+     "credit.handle"),
+    (r"\b(cartoes|cartao|fatura|faturas|parcelamentos|credito)\b",
      "credit.handle"),
 
     # caixinhas
@@ -330,6 +345,7 @@ CATÁLOGO DE INTENTS:
 - launches.add         → quer registrar receita ou despesa
 - launches.delete      → quer apagar um lançamento (entities: launch_id)
 - launches.undo        → quer desfazer o último lançamento
+- credit.handle        → quer criar/listar/consultar cartão, fatura, crédito ou parcelamento
 - pockets.list         → quer listar caixinhas
 - pockets.create       → quer criar caixinha (entities: name)
 - pockets.deposit      → quer depositar em caixinha (entities: pocket_name, amount)
@@ -367,6 +383,13 @@ EXEMPLOS:
 "qual meu saldo?" → {"intent":"balance.check","confidence":0.99,"entities":{},"needs_clarification":false,"clarification_question":null}
 "gastei 50 no mercado" → {"intent":"launches.add","confidence":0.97,"entities":{"tipo":"despesa","valor":50,"alvo":"mercado","categoria":"alimentação"},"needs_clarification":false,"clarification_question":null}
 "deposita 200 na caixinha viagem" → {"intent":"pockets.deposit","confidence":0.97,"entities":{"pocket_name":"viagem","amount":200},"needs_clarification":false,"clarification_question":null}
+"quais cartoes tenho registrado?" → {"intent":"credit.handle","confidence":0.96,"entities":{},"needs_clarification":false,"clarification_question":null}
+"quais sao meus cartoes?" → {"intent":"credit.handle","confidence":0.96,"entities":{},"needs_clarification":false,"clarification_question":null}
+"quero cadastrar um cartao" → {"intent":"credit.handle","confidence":0.95,"entities":{},"needs_clarification":false,"clarification_question":null}
+"me mostra minhas faturas" → {"intent":"credit.handle","confidence":0.96,"entities":{},"needs_clarification":false,"clarification_question":null}
+"quanto tenho na fatura do nubank?" → {"intent":"credit.handle","confidence":0.95,"entities":{},"needs_clarification":false,"clarification_question":null}
+"qual meu cartao principal?" → {"intent":"credit.handle","confidence":0.95,"entities":{},"needs_clarification":false,"clarification_question":null}
+"quero mudar meu cartao principal" → {"intent":"credit.handle","confidence":0.94,"entities":{},"needs_clarification":false,"clarification_question":null}
 "me recomenda uma ação da bolsa" → {"intent":"out_of_scope","confidence":0.98,"entities":{},"needs_clarification":false,"clarification_question":null}
 "gastei cinquenta" → {"intent":"launches.add","confidence":0.72,"entities":{"tipo":"despesa","valor":50},"needs_clarification":true,"clarification_question":"Em que você gastou R$ 50?"}
 "quanto gastei hoje?" → {"intent":"launches.list","confidence":0.96,"entities":{"date_filter":"hoje"},"needs_clarification":false,"clarification_question":null}

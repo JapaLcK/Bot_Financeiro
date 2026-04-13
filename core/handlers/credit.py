@@ -36,6 +36,16 @@ def _pick_card_id(user_id: int, card_name: str | None):
     return card_id, "padrão"
 
 
+def _find_card_name_in_text(user_id: int, text: str) -> str | None:
+    norm = normalize_text(text)
+    cards = list_cards(user_id)
+    for card in sorted(cards, key=lambda c: len(normalize_text(c["name"])), reverse=True):
+        name_norm = normalize_text(card["name"])
+        if name_norm and name_norm in norm:
+            return card["name"]
+    return None
+
+
 def _infer_category(user_id: int, desc: str) -> str:
     raw_norm = normalize_text(desc)
     categoria = get_memorized_category(user_id, raw_norm) or "outros"
@@ -131,9 +141,78 @@ def start_card_create_flow(user_id: int, text: str = "") -> str:
     return "Qual cartão deseja registrar?"
 
 
+def _ask_set_primary_flow(user_id: int, card_name: str | None = None) -> str:
+    cards = list_cards(user_id)
+    if not cards:
+        return "📭 Você ainda não tem cartões cadastrados."
+
+    if card_name:
+        card_id = get_card_id_by_name(user_id, card_name)
+        if not card_id:
+            return f"❌ Não achei o cartão '{card_name}'."
+        set_pending_action(
+            user_id,
+            "credit_card_set_primary",
+            {"card_id": card_id},
+            minutes=20,
+        )
+        return f"Deseja tornar o cartão **{card_name}** o seu principal? Responda **sim** ou **não**."
+
+    lines = ["Qual cartão você quer definir como principal?"]
+    for c in cards:
+        badge = " (atual)" if c.get("is_default") else ""
+        lines.append(f"• {c['name']}{badge}")
+    set_pending_action(user_id, "credit_card_set_primary", {"step": "choose"}, minutes=20)
+    return "\n".join(lines)
+
+
+def _resolve_set_primary(user_id: int, text: str, pending: dict) -> str | None:
+    payload = dict(pending.get("payload") or {})
+    answer = (text or "").strip()
+
+    if payload.get("step") == "choose":
+        if _is_no(answer):
+            clear_pending_action(user_id)
+            return "Perfeito. Mantive o cartão principal atual."
+        card_name = _find_card_name_in_text(user_id, answer) or answer.strip()
+        card_id = get_card_id_by_name(user_id, card_name)
+        if not card_id:
+            return "Não encontrei esse cartão. Me diga o nome exatamente como aparece na lista."
+        set_pending_action(user_id, "credit_card_set_primary", {"card_id": card_id}, minutes=20)
+        card = get_card_by_id(user_id, card_id)
+        return f"Deseja tornar o cartão **{card['name']}** o seu principal? Responda **sim** ou **não**."
+
+    card_id = payload.get("card_id")
+    if not card_id:
+        clear_pending_action(user_id)
+        return None
+    card = get_card_by_id(user_id, int(card_id))
+    if not card:
+        clear_pending_action(user_id)
+        return "❌ Não achei esse cartão."
+
+    if _is_yes(answer):
+        set_default_card(user_id, int(card_id))
+        clear_pending_action(user_id)
+        card = get_card_by_id(user_id, int(card_id))
+        return f"✅ O cartão **{card['name']}** agora é o seu principal.\n{_card_summary(card)}"
+
+    if _is_no(answer):
+        clear_pending_action(user_id)
+        return "Perfeito. Mantive o cartão principal atual."
+
+    return f"Responda **sim** para tornar **{card['name']}** o principal ou **não** para cancelar."
+
+
 def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str | None:
     pending = pending or get_pending_action(user_id)
-    if not pending or pending.get("action_type") != "credit_card_setup":
+    if not pending:
+        return None
+
+    if pending.get("action_type") == "credit_card_set_primary":
+        return _resolve_set_primary(user_id, text, pending)
+
+    if pending.get("action_type") != "credit_card_setup":
         return None
 
     payload = dict(pending.get("payload") or {})
@@ -237,6 +316,35 @@ def handle(user_id: int, text: str) -> str | None:
         return None
 
     t_low = t.lower().strip()
+    t_norm = normalize_text(t)
+
+    if "cartao principal" in t_norm or "cartao padrao" in t_norm:
+        if any(x in t_norm for x in ("qual", "quais", "meu", "atual")):
+            cards = list_cards(user_id)
+            if not cards:
+                return "📭 Você ainda não tem cartões cadastrados."
+            current = next((c for c in cards if c.get("is_default")), None)
+            if current:
+                return (
+                    f"💳 Seu cartão principal é **{current['name']}**.\n"
+                    f"Fechamento: dia {current['closing_day']} | Vencimento: dia {current['due_day']}"
+                )
+            return "Você tem cartões cadastrados, mas ainda não definiu um principal."
+
+        if any(x in t_norm for x in ("trocar", "mudar", "definir", "colocar")):
+            return _ask_set_primary_flow(user_id, _find_card_name_in_text(user_id, t))
+
+    if "fatura" in t_norm or "faturas" in t_norm:
+        if any(x in t_norm for x in ("mostrar", "mostra", "ver", "quais", "minhas", "tenho")):
+            card_name = _find_card_name_in_text(user_id, t)
+            if card_name:
+                t_low = f"fatura {normalize_text(card_name)}"
+            else:
+                t_low = "faturas"
+
+    if "cartao" in t_norm or "cartoes" in t_norm:
+        if any(x in t_norm for x in ("quais", "meus", "tenho", "registrado", "registrados", "listar", "mostrar", "mostra", "ver")):
+            t_low = "listar cartoes"
 
     if t_low.startswith("criar cartao") or t_low.startswith("criar cartão"):
         m = re.search(r"criar\s+cart[aã]o\s+(.+?)\s+fecha\s+(\d{1,2})\s+vence\s+(\d{1,2})", t, re.IGNORECASE)

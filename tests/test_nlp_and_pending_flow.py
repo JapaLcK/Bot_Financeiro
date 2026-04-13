@@ -98,6 +98,75 @@ def test_route_cartoes_lista_pelo_fluxo_central(user_id):
     assert "Nubank" in response
 
 
+def test_classify_frase_natural_de_cartoes():
+    result = classify("quais cartoes tenho registrado?")
+
+    assert result.intent == "credit.handle"
+
+
+def test_classify_vocabulario_natural_de_faturas():
+    result = classify("me mostra minhas faturas")
+
+    assert result.intent == "credit.handle"
+
+
+def test_classify_vocabulario_cartao_principal():
+    result = classify("qual meu cartao principal?")
+
+    assert result.intent == "credit.handle"
+
+
+def test_route_frase_natural_lista_cartoes(user_id):
+    create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="quais sao meus cartoes?")
+
+    response = route(classify(msg.text), msg)
+
+    assert "Seus cartões" in response
+    assert "Nubank" in response
+
+
+def test_route_pergunta_cartao_principal(user_id):
+    card_id = create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    from db import set_default_card
+
+    set_default_card(user_id, card_id)
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="qual meu cartao principal?")
+
+    response = route(classify(msg.text), msg)
+
+    assert "cartão principal" in response.lower()
+    assert "Nubank" in response
+
+
+def test_route_pergunta_fatura_do_cartao(user_id):
+    card_id = create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    add_credit_purchase(
+        user_id=user_id,
+        card_id=card_id,
+        valor=100.0,
+        categoria="outros",
+        nota="teste",
+        purchased_at=date(2026, 4, 5),
+    )
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="quanto tenho na fatura do nubank?")
+
+    response = route(classify(msg.text), msg)
+
+    assert "Fatura atual" in response
+    assert "Nubank" in response
+
+
+def test_route_trocar_cartao_principal_abre_fluxo(user_id):
+    create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    create_card(user_id=user_id, name="Visa", closing_day=5, due_day=10)
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="quero mudar meu cartao principal")
+
+    response = route(classify(msg.text), msg)
+
+    assert "Qual cartão você quer definir como principal" in response
+
+
 def test_route_criar_cartao_pelo_fluxo_central(user_id):
     msg = IncomingMessage(
         platform="discord",
