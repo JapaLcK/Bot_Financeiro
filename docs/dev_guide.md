@@ -36,6 +36,147 @@ PORT=5001 python3 -m adapters.whatsapp.wa_webhook
 ngrok http 5001
 ```
 
+## WhatsApp Cloud API - checklist operacional
+
+Use este procedimento sempre que configurar um novo número, trocar token, migrar ambiente ou diagnosticar falhas de recebimento.
+
+### Variáveis obrigatórias
+
+No ambiente do serviço web/dashboard, configure:
+
+```bash
+WA_TOKEN=<token ativo com acesso ao app e ao WhatsApp Business>
+WA_PHONE_NUMBER_ID=<phone_number_id do número conectado>
+WA_VERIFY_TOKEN=<token usado na verificação do webhook>
+WA_APP_SECRET=<App Secret da Meta para validar assinatura>
+```
+
+Observações:
+- `WA_PHONE_NUMBER_ID` é o ID técnico do número na Meta, não o telefone em si.
+- Sempre prefira um token novo gerado por `Usuário do sistema` no Business Manager.
+- Depois de trocar variáveis no Railway, use `Restart` no serviço `dashboard`.
+
+### Permissões do token
+
+Ao gerar o token do `Usuário do sistema`, conceda no mínimo:
+
+- `business_management`
+- `whatsapp_business_management`
+- `whatsapp_business_messaging`
+- `whatsapp_business_manage_events`
+
+Também confirme que o `Usuário do sistema` tem acesso com controle total a:
+
+- App da Meta usado pelo bot
+- Conta do WhatsApp Business (WABA)
+- Número do WhatsApp, quando aparecer como ativo atribuível
+
+### IDs que precisam bater
+
+No painel da Meta, em `WhatsApp > API Setup`, copie e confira:
+
+- `phone_number_id`
+- `whatsapp business account id` (`WABA_ID`)
+
+Esses valores devem bater com o ambiente e com os testes de API.
+
+### Verificação do webhook
+
+O callback do ambiente de produção deve responder com o challenge:
+
+```text
+https://SEU_DOMINIO/wa/webhook?hub.mode=subscribe&hub.verify_token=SEU_WA_VERIFY_TOKEN&hub.challenge=1234
+```
+
+Resultado esperado:
+
+```text
+1234
+```
+
+Se voltar `forbidden`, o `WA_VERIFY_TOKEN` do ambiente está incorreto ou o serviço certo não está atendendo a URL.
+
+### Subscription do app no WABA
+
+Para números próprios, não basta ter o webhook configurado; o app também precisa estar inscrito no WABA para receber eventos reais.
+
+Verificar:
+
+```bash
+curl -i -X GET "https://graph.facebook.com/v25.0/<WABA_ID>/subscribed_apps" \
+  -H "Authorization: Bearer <WA_TOKEN>"
+```
+
+Inscrever o app no WABA:
+
+```bash
+curl -i -X POST "https://graph.facebook.com/v25.0/<WABA_ID>/subscribed_apps" \
+  -H "Authorization: Bearer <WA_TOKEN>"
+```
+
+Depois do `POST`, o `GET` deve listar o app.
+
+### Teste de envio direto pela API
+
+Antes de culpar o webhook, valide se o token realmente consegue operar o número:
+
+```bash
+curl -i -X POST "https://graph.facebook.com/v25.0/<PHONE_NUMBER_ID>/messages" \
+  -H "Authorization: Bearer <WA_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messaging_product": "whatsapp",
+    "to": "55DDDNUMERO",
+    "type": "template",
+    "template": {
+      "name": "hello_world",
+      "language": { "code": "en_US" }
+    }
+  }'
+```
+
+Se esse request falhar com `Object with ID ... does not exist` ou `missing permissions`, o token não tem acesso real ao número.
+
+### Teste inbound / recebimento
+
+Com a subscription ativa, mande uma mensagem real para o número e confira os logs HTTP do serviço `dashboard`.
+
+Esperado:
+
+```text
+POST /wa/webhook 200
+```
+
+Nos logs de aplicação, procure por eventos como:
+
+- `WA webhook received`
+- `extracted_messages=1`
+- `process_message`
+- `send_text_result`
+
+### Interpretação rápida de sintomas
+
+- `GET /wa/webhook?...challenge=1234` retorna `1234`: webhook e verify token ok.
+- `POST /wa/webhook 200` aparece só no teste do painel, mas não na mensagem real: faltando subscription do app no WABA ou problema de contexto do número.
+- `POST /messages` funciona, mas mensagem real não chega no webhook: envio ok, recebimento ainda não inscrito/propagado.
+- número de teste americano funciona e número próprio não: normalmente faltava `subscribed_apps` no WABA do número próprio.
+- `Object with ID '<PHONE_NUMBER_ID>' does not exist`: token sem acesso operacional ao número.
+
+### Procedimento completo recomendado para novo número
+
+1. Conectar e verificar o número no WhatsApp Manager.
+2. Executar o registro do número, se o fluxo pedir.
+3. Copiar `PHONE_NUMBER_ID` e `WABA_ID` em `WhatsApp > API Setup`.
+4. Gerar token novo via `Usuário do sistema`.
+5. Atualizar `WA_TOKEN` e `WA_PHONE_NUMBER_ID` no ambiente.
+6. Confirmar callback `https://SEU_DOMINIO/wa/webhook`.
+7. Validar challenge com `hub.challenge=1234`.
+8. Executar `POST /<WABA_ID>/subscribed_apps`.
+9. Validar `GET /<WABA_ID>/subscribed_apps`.
+10. Testar envio com `POST /<PHONE_NUMBER_ID>/messages`.
+11. Mandar uma mensagem real para o número.
+12. Confirmar `POST /wa/webhook 200` e resposta do bot.
+
 ## Comandos do Bot (Usuário Final)
 
 ### Registrar despesa
