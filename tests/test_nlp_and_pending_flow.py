@@ -54,6 +54,17 @@ def test_parse_gastei_com_data_no_meio_remove_data_da_nota(user_id):
     assert parsed["alvo"] == "reais para barbara"
 
 
+def test_parse_mandei_com_data_no_meio_remove_data_da_nota(user_id):
+    parsed = parse_receita_despesa_natural(user_id, "Mandei 50 reais para barbara dia 10/04")
+
+    assert parsed is not None
+    assert parsed["tipo"] == "despesa"
+    assert parsed["valor"] == 50
+    assert parsed["criado_em"] is not None
+    assert parsed["nota"] == "Mandei 50 reais para barbara"
+    assert parsed["alvo"] == "barbara"
+
+
 def test_classify_gastei_ontem_e_lancamento_nao_consulta():
     result = classify("gastei 40,80 com rifa ontem")
 

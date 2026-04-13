@@ -145,11 +145,11 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "launches.delete"),
 
     # despesa / receita — detecta padrão sem chamar IA
-    (r"^(gastei|paguei|comprei|debitei|gasto)\b",
+    (r"^(gastei|paguei|comprei|debitei|gasto|mandei|enviei|pixei)\b",
      "launches.add"),
     (r"^(recebi|ganhei|entrou|caiu)\b",
      "launches.add"),
-    (r"^(hoje|ontem|\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?|dia\s+\d{1,2}(?:[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?)?)\b.*\b(gastei|paguei|comprei|debitei|gasto|recebi|ganhei|entrou|caiu)\b",
+    (r"^(hoje|ontem|\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?|dia\s+\d{1,2}(?:[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?)?)\b.*\b(gastei|paguei|comprei|debitei|gasto|mandei|enviei|pixei|recebi|ganhei|entrou|caiu)\b",
      "launches.add"),
 
     # cartões / crédito

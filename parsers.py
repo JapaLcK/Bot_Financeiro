@@ -38,8 +38,9 @@ def _extract_target_after_amount(text_base: str) -> str:
     if not t:
         return ""
 
-    t = re.sub(r"^\s*(gastei|gasto|paguei|pagar|comprei|debitei|recebi|receita|ganhei)\b", "", t, flags=re.IGNORECASE).strip()
+    t = re.sub(r"^\s*(gastei|gasto|paguei|pagar|comprei|debitei|mandei|enviei|pixei|recebi|receita|ganhei)\b", "", t, flags=re.IGNORECASE).strip()
     t = re.sub(r"^\s*\d+(?:[.,]\d+)?\b", "", t, count=1).strip()
+    t = re.sub(r"^\s*reais?\b", "", t, flags=re.IGNORECASE).strip()
     t = re.sub(r"^\s*(de|do|da|dos|das|no|na|nos|nas|em|pra|para)\b", "", t, flags=re.IGNORECASE).strip()
     t = re.sub(r"\s+", " ", t).strip(" -:;,.")
     return t
@@ -62,7 +63,7 @@ def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
 
     # tipo
     tipo = None
-    if raw_norm.startswith(("gastei ", "gasto ", "paguei ", "pagar ", "comprei ", "debitei ")):
+    if raw_norm.startswith(("gastei ", "gasto ", "paguei ", "pagar ", "comprei ", "debitei ", "mandei ", "enviei ", "pixei ")):
         tipo = "despesa"
     elif raw_norm.startswith(("recebi ", "receita ", "ganhei ")):
         tipo = "receita"
