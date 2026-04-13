@@ -7,6 +7,8 @@ import secrets
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
 
+from utils_phone import normalize_phone_e164, phone_lookup_candidates
+
 
 def get_launches_by_period_impl(
     get_conn: Callable[[], Any],
@@ -369,13 +371,15 @@ def create_email_verification_impl(
     minutes_valid: int = 15,
 ) -> str:
     email = email.strip().lower()
+    normalized_phone = normalize_phone_e164(phone_e164)
+    phone_candidates = phone_lookup_candidates(normalized_phone)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("select user_id from auth_accounts where email = %s", (email,))
             if cur.fetchone():
                 raise ValueError("Este e-mail já está cadastrado.")
-            cur.execute("select user_id from auth_accounts where phone_e164 = %s", (phone_e164,))
+            cur.execute("select user_id from auth_accounts where phone_e164 = any(%s)", (phone_candidates,))
             if cur.fetchone():
                 raise ValueError("Este número de WhatsApp já está em uso por outra conta.")
 
@@ -394,7 +398,7 @@ def create_email_verification_impl(
                 insert into email_verification_codes (email, code, password_hash, phone_e164, expires_at)
                 values (%s, %s, %s, %s, %s)
                 """,
-                (email, code, password_hash, phone_e164, expires_at),
+                (email, code, password_hash, normalized_phone, expires_at),
             )
         conn.commit()
 
@@ -433,7 +437,7 @@ def confirm_email_verification_impl(
         raise ValueError("Código expirado. Faça o cadastro novamente.")
 
     password_hash = row["password_hash"]
-    phone_e164 = row["phone_e164"]
+    phone_e164 = normalize_phone_e164(row["phone_e164"])
     verification_id = row["id"]
     user_id = get_or_create_canonical_user("email", email)
 

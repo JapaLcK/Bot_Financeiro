@@ -10,7 +10,7 @@ from datetime import timedelta, timezone
 import requests
 import db_support as _db_support
 from utils_date import _tz, today_tz, billing_period_for_close_day
-from utils_phone import normalize_phone_e164
+from utils_phone import normalize_phone_e164, phone_lookup_candidates
 from uuid import uuid4
 import calendar
 import secrets
@@ -3820,6 +3820,7 @@ def confirm_email_verification(email: str, code: str) -> dict:
 def attempt_whatsapp_phone_link(wa_id: str, current_user_id: int | None = None) -> dict:
     try:
         wa_phone = normalize_phone_e164(wa_id)
+        wa_candidates = phone_lookup_candidates(wa_id)
     except ValueError:
         return {"status": "invalid_phone"}
     current_user_id = int(current_user_id) if current_user_id is not None else get_or_create_canonical_user("whatsapp", wa_id)
@@ -3830,9 +3831,9 @@ def attempt_whatsapp_phone_link(wa_id: str, current_user_id: int | None = None) 
                 """
                 select user_id, phone_e164
                 from auth_accounts
-                where phone_e164 = %s
+                where phone_e164 = any(%s)
                 """,
-                (wa_phone,),
+                (wa_candidates,),
             )
             matches = cur.fetchall() or []
 

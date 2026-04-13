@@ -20,6 +20,27 @@ def normalize_phone_e164(phone: str | None, default_country_code: str = "55") ->
     return digits
 
 
+def phone_lookup_candidates(phone: str | None, default_country_code: str = "55") -> list[str]:
+    digits = normalize_phone_e164(phone, default_country_code=default_country_code)
+    candidates = {digits}
+
+    if digits.startswith("55"):
+        national = digits[2:]
+
+        # Tenta conciliar celulares BR com e sem o nono dígito.
+        if len(national) == 10:
+            ddd = national[:2]
+            local = national[2:]
+            if local and local[0] in "6789":
+                candidates.add(f"55{ddd}9{local}")
+        elif len(national) == 11 and national[2] == "9":
+            ddd = national[:2]
+            local = national[3:]
+            candidates.add(f"55{ddd}{local}")
+
+    return sorted(candidates)
+
+
 def mask_phone(phone: str | None) -> str:
     digits = re.sub(r"\D+", "", phone or "")
     if len(digits) < 8:
