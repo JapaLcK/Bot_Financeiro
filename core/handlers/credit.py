@@ -46,6 +46,39 @@ def _find_card_name_in_text(user_id: int, text: str) -> str | None:
     return None
 
 
+def _get_primary_or_single_card(user_id: int) -> dict | None:
+    cards = list_cards(user_id)
+    if not cards:
+        return None
+    current = next((c for c in cards if c.get("is_default")), None)
+    if current:
+        return current
+    if len(cards) == 1:
+        return cards[0]
+    return None
+
+
+def _resolve_card_from_context(user_id: int, text: str) -> tuple[dict | None, str | None]:
+    cards = list_cards(user_id)
+    if not cards:
+        return None, "📭 Você ainda não tem cartões cadastrados."
+
+    explicit_name = _find_card_name_in_text(user_id, text)
+    if explicit_name:
+        card_id = get_card_id_by_name(user_id, explicit_name)
+        if not card_id:
+            return None, f"❌ Não achei o cartão '{explicit_name}'."
+        return get_card_by_id(user_id, card_id), None
+
+    if any(x in normalize_text(text) for x in ("deste cartao", "desse cartao", "cartao atual", "cartao principal", "padrao", "padrão")):
+        current = _get_primary_or_single_card(user_id)
+        if current:
+            return current, None
+        return None, "Você tem mais de um cartão. Me diga qual deles você quer consultar. Ex: **fatura nubank**."
+
+    return None, None
+
+
 def _infer_category(user_id: int, desc: str) -> str:
     raw_norm = normalize_text(desc)
     categoria = get_memorized_category(user_id, raw_norm) or "outros"
@@ -318,6 +351,25 @@ def handle(user_id: int, text: str) -> str | None:
     t_low = t.lower().strip()
     t_norm = normalize_text(t)
 
+    if any(x in t_norm for x in ("fecha dia", "vence dia")) and "cartao" in t_norm:
+        cards = list_cards(user_id)
+        if not cards:
+            return "📭 Você ainda não tem cartões cadastrados."
+        target_day = _parse_day(t)
+        if target_day is not None:
+            if "fecha" in t_norm:
+                matches = [c for c in cards if int(c["closing_day"]) == target_day]
+                if matches:
+                    names = ", ".join(f"**{c['name']}**" for c in matches)
+                    return f"💳 Cartão(ões) que fecham dia {target_day}: {names}"
+                return f"Não encontrei cartão com fechamento no dia {target_day}."
+            if "vence" in t_norm:
+                matches = [c for c in cards if int(c["due_day"]) == target_day]
+                if matches:
+                    names = ", ".join(f"**{c['name']}**" for c in matches)
+                    return f"💳 Cartão(ões) que vencem dia {target_day}: {names}"
+                return f"Não encontrei cartão com vencimento no dia {target_day}."
+
     if "cartao principal" in t_norm or "cartao padrao" in t_norm:
         if any(x in t_norm for x in ("qual", "quais", "meu", "atual")):
             cards = list_cards(user_id)
@@ -335,14 +387,22 @@ def handle(user_id: int, text: str) -> str | None:
             return _ask_set_primary_flow(user_id, _find_card_name_in_text(user_id, t))
 
     if "fatura" in t_norm or "faturas" in t_norm:
-        if any(x in t_norm for x in ("mostrar", "mostra", "ver", "quais", "minhas", "tenho")):
-            card_name = _find_card_name_in_text(user_id, t)
-            if card_name:
-                t_low = f"fatura {normalize_text(card_name)}"
-            else:
+        if any(x in t_norm for x in ("mostrar", "mostra", "ver", "quais", "minhas", "tenho", "quanto", "valor", "em aberto", "atual")):
+            card, error = _resolve_card_from_context(user_id, t)
+            if error:
+                return error
+            if card:
+                t_low = f"fatura {card['name']}"
+            elif "faturas" in t_norm or "minhas" in t_norm:
                 t_low = "faturas"
+            else:
+                current = _get_primary_or_single_card(user_id)
+                if current:
+                    t_low = f"fatura {current['name']}"
+                else:
+                    return "Você tem mais de um cartão. Me diga qual deles quer consultar. Ex: **quanto tenho na fatura do Nubank?**"
 
-    if "cartao" in t_norm or "cartoes" in t_norm:
+    if ("cartao" in t_norm or "cartoes" in t_norm) and "fatura" not in t_norm:
         if any(x in t_norm for x in ("quais", "meus", "tenho", "registrado", "registrados", "listar", "mostrar", "mostra", "ver")):
             t_low = "listar cartoes"
 
@@ -599,24 +659,39 @@ def handle(user_id: int, text: str) -> str | None:
             return f"❌ Erro ao listar faturas: {e}"
 
     if t_low.startswith("fatura ") or t_low == "fatura":
-        parts = t.split()
-        card_name = parts[1] if len(parts) >= 2 else None
+        card = None
+        error = None
 
-        card_id, resolved_name = _pick_card_id(user_id, card_name)
-        if not card_id:
-            return "❓ Você não tem cartão padrão. Defina com: `padrao NOME`."
+        if t_low != "fatura":
+            requested_name = t_low.split(" ", 1)[1].strip()
+            card_id = get_card_id_by_name(user_id, requested_name)
+            if card_id:
+                card = get_card_by_id(user_id, card_id)
+            else:
+                card, error = _resolve_card_from_context(user_id, requested_name)
+        else:
+            card, error = _resolve_card_from_context(user_id, t)
+            if card is None and error is None:
+                card = _get_primary_or_single_card(user_id)
+                if card is None:
+                    error = "Você tem mais de um cartão. Me diga qual deles quer consultar. Ex: **fatura nubank**."
+
+        if error:
+            return error
+        if not card:
+            return "❓ Não consegui identificar qual cartão você quer consultar."
 
         try:
-            res = get_open_bill_summary(user_id, card_id, as_of=today_tz())
+            res = get_open_bill_summary(user_id, int(card["id"]), as_of=today_tz())
             if not res:
-                return f"📭 Nenhuma fatura aberta para {resolved_name}."
+                return f"📭 Nenhuma fatura aberta para {card['name']}."
 
             bill, items = res
             total = float(bill["total"] or 0)
             paid = float(bill.get("paid_amount", 0) or 0)
             due = max(0.0, total - paid)
             lines = [
-                f"💳 Fatura atual ({resolved_name}) {fmt_br(bill['period_start'])} → {fmt_br(bill['period_end'])}",
+                f"💳 Fatura atual ({card['name']}) {fmt_br(bill['period_start'])} → {fmt_br(bill['period_end'])}",
                 f"Total: {fmt_brl(total)} | Pago: {fmt_brl(paid)} | Em aberto: {fmt_brl(due)}",
                 "",
             ]

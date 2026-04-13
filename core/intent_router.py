@@ -13,6 +13,7 @@ from __future__ import annotations
 import db
 from core.intent_classifier import IntentResult
 from core.types import IncomingMessage
+from utils_text import normalize_text
 
 # handlers
 from core.handlers import (
@@ -46,6 +47,51 @@ OUT_OF_SCOPE_MSG = (
 )
 
 NOT_UNDERSTOOD_MSG = "Não entendi. Pode reformular?\nDigite *ajuda* para ver exemplos."
+
+
+def _contextual_help_message(text: str) -> str:
+    norm = normalize_text(text)
+
+    if any(k in norm for k in ("cartao", "cartoes", "fatura", "credito", "parcela", "parcelamento", "vence", "fecha")):
+        return (
+            "Não entendi essa parte sobre cartões.\n"
+            "Você pode tentar, por exemplo:\n"
+            "• `cartoes`\n"
+            "• `fatura nubank`\n"
+            "• `quanto tenho na fatura do nubank?`\n"
+            "• `qual cartao fecha dia 30?`\n"
+            "• `qual meu cartao principal?`"
+        )
+
+    if any(k in norm for k in ("caixinha", "caixinhas")):
+        return (
+            "Não entendi essa parte sobre caixinhas.\n"
+            "Você pode tentar:\n"
+            "• `listar caixinhas`\n"
+            "• `criar caixinha viagem`\n"
+            "• `coloquei 100 na caixinha viagem`"
+        )
+
+    if any(k in norm for k in ("investimento", "investimentos", "cdb", "tesouro", "aporte", "resgate")):
+        return (
+            "Não entendi essa parte sobre investimentos.\n"
+            "Você pode tentar:\n"
+            "• `listar investimentos`\n"
+            "• `criar investimento CDB 110% CDI`\n"
+            "• `apliquei 200 no investimento CDB`"
+        )
+
+    if any(k in norm for k in ("saldo", "lancamento", "lancamentos", "gastei", "recebi", "despesa", "receita")):
+        return (
+            "Não entendi essa parte sobre lançamentos.\n"
+            "Você pode tentar:\n"
+            "• `saldo`\n"
+            "• `listar lancamentos`\n"
+            "• `gastei 50 mercado`\n"
+            "• `recebi 1000 salario`"
+        )
+
+    return "Não entendi. Tente reformular de forma mais direta ou digite *ajuda*."
 
 
 def route(result: IntentResult, msg: IncomingMessage) -> str:
@@ -92,13 +138,13 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
     # 2. Fora do escopo
     # -----------------------------------------------------------------------
     if intent == "out_of_scope":
-        return OUT_OF_SCOPE_MSG
+        return _contextual_help_message(text)
 
     # -----------------------------------------------------------------------
     # 3. Confiança muito baixa
     # -----------------------------------------------------------------------
     if confidence < 0.55:
-        return NOT_UNDERSTOOD_MSG
+        return _contextual_help_message(text)
 
     # -----------------------------------------------------------------------
     # 4. Precisa de esclarecimento
@@ -187,7 +233,7 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
     # --- cartões / crédito ---
     if intent == "credit.handle":
         resp = h_credit.handle(user_id, text)
-        return resp if resp is not None else OUT_OF_SCOPE_MSG
+        return resp if resp is not None else _contextual_help_message(text)
 
     # --- caixinhas ---
     if intent == "pockets.list":

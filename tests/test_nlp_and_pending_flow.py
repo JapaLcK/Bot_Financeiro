@@ -141,6 +141,9 @@ def test_route_pergunta_cartao_principal(user_id):
 
 def test_route_pergunta_fatura_do_cartao(user_id):
     card_id = create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    from db import set_default_card
+
+    set_default_card(user_id, card_id)
     add_credit_purchase(
         user_id=user_id,
         card_id=card_id,
@@ -157,6 +160,27 @@ def test_route_pergunta_fatura_do_cartao(user_id):
     assert "Nubank" in response
 
 
+def test_route_pergunta_fatura_deste_cartao_usa_principal(user_id):
+    card_id = create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    from db import set_default_card
+
+    set_default_card(user_id, card_id)
+    add_credit_purchase(
+        user_id=user_id,
+        card_id=card_id,
+        valor=80.0,
+        categoria="outros",
+        nota="teste",
+        purchased_at=date(2026, 4, 5),
+    )
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="quanto tenho na fatura deste cartao?")
+
+    response = route(classify(msg.text), msg)
+
+    assert "Fatura atual" in response
+    assert "Nubank" in response
+
+
 def test_route_trocar_cartao_principal_abre_fluxo(user_id):
     create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
     create_card(user_id=user_id, name="Visa", closing_day=5, due_day=10)
@@ -165,6 +189,26 @@ def test_route_trocar_cartao_principal_abre_fluxo(user_id):
     response = route(classify(msg.text), msg)
 
     assert "Qual cartão você quer definir como principal" in response
+
+
+def test_route_qual_cartao_fecha_dia_30(user_id):
+    create_card(user_id=user_id, name="Mastercard", closing_day=30, due_day=31)
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="qual cartao fecha dia 30?")
+
+    response = route(classify(msg.text), msg)
+
+    assert "fecham dia 30" in response or "fecha dia 30" in response
+    assert "Mastercard" in response
+
+
+def test_contextual_help_para_cartao_quando_nao_entende(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="cartao banana extraterrestre")
+    result = classify(msg.text)
+
+    response = route(result, msg)
+
+    assert "sobre cartões" in response
+    assert "fatura nubank" in response
 
 
 def test_route_criar_cartao_pelo_fluxo_central(user_id):
