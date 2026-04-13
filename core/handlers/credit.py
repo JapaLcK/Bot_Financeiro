@@ -63,7 +63,7 @@ def _parse_day(text: str) -> int | None:
     if not m:
         return None
     day = int(m.group(1))
-    if 1 <= day <= 28:
+    if 1 <= day <= 31:
         return day
     return None
 
@@ -159,7 +159,7 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
     if step == "closing_day":
         closing_day = _parse_day(answer)
         if closing_day is None:
-            return "Me diga o dia de fechamento com um número entre **1** e **28**. Ex: **dia 1**."
+            return "Me diga o dia de fechamento com um número entre **1** e **31**. Ex: **dia 1**."
         payload["closing_day"] = closing_day
         payload["step"] = "due_day"
         set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
@@ -168,7 +168,7 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
     if step == "due_day":
         due_day = _parse_day(answer)
         if due_day is None:
-            return "Me diga o dia de vencimento com um número entre **1** e **28**. Ex: **dia 8**."
+            return "Me diga o dia de vencimento com um número entre **1** e **31**. Ex: **dia 8**."
 
         payload["due_day"] = due_day
         card_id = create_card(

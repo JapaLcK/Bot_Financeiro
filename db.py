@@ -167,8 +167,8 @@ def init_db():
       id bigserial primary key,
       user_id bigint not null references users(id) on delete cascade,
       name text not null,
-      closing_day int not null check (closing_day between 1 and 28),
-      due_day int not null check (due_day between 1 and 28),
+      closing_day int not null check (closing_day between 1 and 31),
+      due_day int not null check (due_day between 1 and 31),
       reminders_enabled boolean not null default false,
       reminders_days_before int not null default 3,
       reminder_last_sent_on date,
@@ -184,6 +184,63 @@ def init_db():
     """,
     """
     alter table credit_cards add column if not exists reminder_last_sent_on date
+    """,
+    """
+    do $$
+    declare r record;
+    begin
+      if to_regclass('credit_cards') is null then
+        return;
+      end if;
+
+      for r in
+        select conname
+        from pg_constraint
+        where conrelid = 'credit_cards'::regclass
+          and contype = 'c'
+          and pg_get_constraintdef(oid) ilike '%closing_day%'
+      loop
+        execute format('alter table credit_cards drop constraint %I', r.conname);
+      end loop;
+
+      for r in
+        select conname
+        from pg_constraint
+        where conrelid = 'credit_cards'::regclass
+          and contype = 'c'
+          and pg_get_constraintdef(oid) ilike '%due_day%'
+      loop
+        execute format('alter table credit_cards drop constraint %I', r.conname);
+      end loop;
+    end $$;
+    """,
+    """
+    do $$
+    begin
+      if to_regclass('credit_cards') is null then
+        return;
+      end if;
+
+      if not exists (
+        select 1 from pg_constraint
+        where conrelid = 'credit_cards'::regclass
+          and conname = 'credit_cards_closing_day_check'
+      ) then
+        alter table credit_cards
+          add constraint credit_cards_closing_day_check
+          check (closing_day between 1 and 31);
+      end if;
+
+      if not exists (
+        select 1 from pg_constraint
+        where conrelid = 'credit_cards'::regclass
+          and conname = 'credit_cards_due_day_check'
+      ) then
+        alter table credit_cards
+          add constraint credit_cards_due_day_check
+          check (due_day between 1 and 31);
+      end if;
+    end $$;
     """,
     """
     create table if not exists credit_bills (
