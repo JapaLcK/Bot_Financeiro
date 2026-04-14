@@ -80,6 +80,16 @@ _EXACT: dict[str, str] = {
     "desligar report diario":   "report.disable",
     "desativar report diario":  "report.disable",
     "parar report diario":      "report.disable",
+    # emails de engajamento
+    "reativar emails":          "emails.resubscribe",
+    "receber emails":           "emails.resubscribe",
+    "voltar emails":            "emails.resubscribe",
+    "ativar emails":            "emails.resubscribe",
+    "quero emails":             "emails.resubscribe",
+    "parar emails":             "emails.unsubscribe",
+    "cancelar emails":          "emails.unsubscribe",
+    "desativar emails":         "emails.unsubscribe",
+    "nao quero emails":         "emails.unsubscribe",
     # categorias
     "categorias":               "categories.list",
     "categoria":                "categories.list",

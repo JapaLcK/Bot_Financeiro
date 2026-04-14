@@ -1150,8 +1150,7 @@ async def unsubscribe(uid: int, token: str):
     <h1>Descadastro confirmado</h1>
     <p>Você não vai mais receber os emails de dicas e insights do Piggy.<br/>
        Seus emails de segurança (código de verificação, redefinição de senha) continuam normais.</p>
-    <p style="font-size:13px">Arrependeu? Fale com a gente em
-       <a href="mailto:oi@pigbankai.com">oi@pigbankai.com</a></p>
+    <p style="font-size:13px">Arrependeu? Mande "reativar emails" pro bot!
   </div>
 </body>
 </html>
