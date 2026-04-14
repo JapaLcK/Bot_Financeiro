@@ -212,6 +212,16 @@ def _finish_card_setup(user_id: int, card_id: int, ask_primary: bool) -> str:
 def start_card_create_flow(user_id: int, text: str = "") -> str:
     existing_cards = list_cards(user_id)
     inferred_name = _parse_card_name_from_create(text)
+
+    # Detecta duplicata imediatamente ao inferir o nome
+    if inferred_name and card_name_exists(user_id, inferred_name):
+        payload = {
+            "card_name": inferred_name,
+            "existing_count": len(existing_cards),
+            "ask_primary": len(existing_cards) > 0,
+        }
+        return _prompt_duplicate_card(user_id, inferred_name, payload)
+
     payload = {
         "step": "name" if not inferred_name else "closing_day",
         "card_name": inferred_name,
