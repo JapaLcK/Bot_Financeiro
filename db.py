@@ -3802,7 +3802,7 @@ def auto_link_auth_user(target_user_id: int, current_user_id: int) -> int:
 
 # ─── Dashboard short links ────────────────────────────────────────────────────
 
-def create_dashboard_session(user_id: int, hours: float = 0.25) -> str:
+def create_dashboard_session(user_id: int, hours: float = 5 / 60) -> str:
     return _db_support.create_dashboard_session_impl(get_conn, user_id, hours)
 
 

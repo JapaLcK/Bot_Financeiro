@@ -13,7 +13,7 @@ def _require_jwt_secret() -> str:
     return secret
 
 
-def make_dashboard_token(user_id: int, hours: int = 2) -> str:
+def make_dashboard_token(user_id: int, hours: float = 2) -> str:
     """
     Generate a short-lived signed token for dashboard access.
     """

@@ -7,6 +7,8 @@ import secrets
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
 
+import psycopg
+
 from utils_phone import normalize_phone_e164, phone_lookup_candidates
 
 
@@ -295,24 +297,28 @@ def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
             return cur.fetchone()
 
 
-def create_dashboard_session_impl(get_conn, user_id: int, hours: int = 2) -> str:
-    code = secrets.token_urlsafe(6)
+def create_dashboard_session_impl(get_conn, user_id: int, hours: float = 2) -> str:
     expires_at = datetime.now(timezone.utc) + timedelta(hours=hours)
 
     with get_conn() as conn:
-        with conn.cursor() as cur:
-            for _ in range(3):
-                try:
+        for _ in range(5):
+            code = secrets.token_urlsafe(24)
+            try:
+                with conn.cursor() as cur:
                     cur.execute(
                         "insert into dashboard_sessions (code, user_id, expires_at) values (%s, %s, %s)",
                         (code, user_id, expires_at),
                     )
-                    break
-                except Exception:
-                    code = secrets.token_urlsafe(6)
-        conn.commit()
+                conn.commit()
+                return code
+            except psycopg.errors.UniqueViolation:
+                conn.rollback()
+                continue
+            except Exception:
+                conn.rollback()
+                raise
 
-    return code
+    raise RuntimeError("Falha ao criar sessão temporária do dashboard.")
 
 
 def get_dashboard_session_impl(get_conn, code: str) -> int | None:

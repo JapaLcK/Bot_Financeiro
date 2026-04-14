@@ -61,6 +61,8 @@ WHATSAPP_NUMBER         = os.getenv("WHATSAPP_NUMBER", "")
 STRIPE_SECRET_KEY       = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET   = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PRICE_ID_PRO     = os.getenv("STRIPE_PRICE_ID_PRO", "")   # price_xxx do plano Pro
+DASHBOARD_MAGIC_LINK_MINUTES = int(os.getenv("DASHBOARD_MAGIC_LINK_MINUTES", "5"))
+DASHBOARD_SESSION_HOURS = float(os.getenv("DASHBOARD_SESSION_HOURS", "12"))
 
 HERE = pathlib.Path(__file__).parent  # directory of this file
 
@@ -718,7 +720,7 @@ async def auth_verify_email(request: Request, body: VerifyEmailBody):
     user_id    = result["user_id"]
     link_code  = result["link_code"]
     token      = _make_jwt(user_id, body.email.strip().lower())
-    dash_token = make_dashboard_token(user_id, hours=2)
+    dash_token = make_dashboard_token(user_id, hours=DASHBOARD_SESSION_HOURS)
 
     wa_link = _build_whatsapp_onboarding_link(user_id)
 
@@ -748,7 +750,7 @@ async def auth_login(request: Request, body: LoginBody):
     user_id    = result["user_id"]
     link_code  = create_link_code(user_id, minutes_valid=15)
     token      = _make_jwt(user_id, result["email"])
-    dash_token = make_dashboard_token(user_id, hours=2)
+    dash_token = make_dashboard_token(user_id, hours=DASHBOARD_SESSION_HOURS)
 
     wa_link = _build_whatsapp_onboarding_link(user_id)
 
@@ -837,44 +839,33 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
 @app.post("/auth/dashboard-token")
 async def auth_dashboard_token(user_id: int = Depends(_get_current_user)):
     """Troca o token de login por um token curto de acesso ao dashboard."""
-    dash_token = make_dashboard_token(user_id, hours=2)
+    dash_token = make_dashboard_token(user_id, hours=DASHBOARD_SESSION_HOURS)
     return {
         "token": dash_token,
         "dashboard_url": f"{DASHBOARD_URL}/app?token={dash_token}",
-        "expires_in": 7200,
+        "expires_in": int(DASHBOARD_SESSION_HOURS * 3600),
     }
 
 
 @app.post("/auth/dashboard-link")
 async def auth_dashboard_link(body: DashboardLinkBody, user_id: int = Depends(_get_current_user)):
     """
-    Consome um link curto do dashboard e libera acesso apenas
+    Consome um magic link do dashboard e libera acesso apenas
     se o usuário logado for o dono desse link.
     """
     from db import consume_dashboard_session
-    from db import auto_link_auth_user, get_auth_user
 
     target_user_id = consume_dashboard_session(body.code.strip())
     if not target_user_id:
         raise HTTPException(status_code=401, detail="Link de dashboard inválido ou expirado.")
-    final_user_id = int(target_user_id)
     if int(target_user_id) != int(user_id):
-        current_user = get_auth_user(user_id)
-        if not current_user:
-            raise HTTPException(status_code=403, detail="Este link pertence a outra conta.")
-        final_user_id = auto_link_auth_user(target_user_id, user_id)
+        raise HTTPException(status_code=403, detail="Este link pertence a outra conta.")
 
-    final_auth_user = get_auth_user(final_user_id)
-    auth_token = None
-    if final_auth_user:
-        auth_token = _make_jwt(final_user_id, final_auth_user["email"])
-
-    dash_token = make_dashboard_token(final_user_id, hours=2)
+    dash_token = make_dashboard_token(int(user_id), hours=DASHBOARD_SESSION_HOURS)
     return {
-        "auth_token": auth_token,
         "token": dash_token,
         "dashboard_url": f"{DASHBOARD_URL}/app?token={dash_token}",
-        "expires_in": 7200,
+        "expires_in": int(DASHBOARD_SESSION_HOURS * 3600),
     }
 
 
@@ -1013,15 +1004,14 @@ async def billing_portal(user_id: int = Depends(_get_current_user)):
 @app.get("/d/{code}")
 async def dashboard_short_link(code: str):
     """
-    Resolve um short link gerado pelo bot.
-    Redireciona para a landing, onde o usuário faz login
-    e então o link é validado contra a conta autenticada.
+    Resolve um magic link gerado pelo bot.
+    O link é de uso único e cria uma sessão curta no navegador.
     """
-    from db import get_dashboard_session
+    from db import consume_dashboard_session
 
-    user_id = get_dashboard_session(code)
+    user_id = consume_dashboard_session(code)
     if not user_id:
-        return HTMLResponse(content="""<!DOCTYPE html>
+        return HTMLResponse(content=f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Link expirado</title>
@@ -1042,11 +1032,13 @@ a:hover{background:rgba(124,58,237,.65)}
 <div class="icon">🔒</div>
 <h2>Link expirado ou inválido</h2>
 <p>Este link de acesso ao dashboard expirou ou já foi usado.<br>
-Solicite um novo link digitando <strong style="color:rgba(255,255,255,.8)">dashboard</strong> no bot.</p>
+Solicite um novo link digitando <strong style="color:rgba(255,255,255,.8)">dashboard</strong> no bot.<br>
+Os links expiram em {DASHBOARD_MAGIC_LINK_MINUTES} minutos e funcionam uma única vez.</p>
 <a href="/">← Página inicial</a>
 </div></body></html>""", status_code=401)
 
-    return RedirectResponse(url=f"/dashboard-login?dashboard_code={code}", status_code=302)
+    dash_token = make_dashboard_token(int(user_id), hours=DASHBOARD_SESSION_HOURS)
+    return RedirectResponse(url=f"/app?token={dash_token}", status_code=302)
 
 
 @app.get("/")
