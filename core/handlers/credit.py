@@ -7,8 +7,10 @@ from ai_router import classify_category_with_gpt
 from db import (
     add_credit_purchase,
     add_credit_purchase_installments,
+    card_name_exists,
     clear_pending_action,
     create_card,
+    delete_card,
     get_card_by_id,
     get_card_id_by_name,
     get_current_open_bill_id,
@@ -115,6 +117,36 @@ def _is_yes(text: str) -> bool:
 
 def _is_no(text: str) -> bool:
     return normalize_text(text) in {"nao", "não", "n", "no", "cancelar", "cancela", "agora nao", "agora não"}
+
+
+def _is_delete(text: str) -> bool:
+    return normalize_text(text) in {"excluir", "excluir cartao", "excluir cartão", "deletar", "apagar", "remover", "delete"}
+
+
+def _prompt_duplicate_card(user_id: int, card_name: str, payload: dict, minutes: int = 20) -> str:
+    """
+    Salva o pending com step 'duplicate_card_name' e devolve a mensagem de aviso.
+    Preserva closing_day / due_day no payload se já foram coletados.
+    """
+    existing_id = get_card_id_by_name(user_id, card_name)
+    existing_card = get_card_by_id(user_id, existing_id) if existing_id else None
+
+    payload["step"] = "duplicate_card_name"
+    payload["existing_card_id"] = existing_id
+    payload["existing_card_name"] = card_name
+    set_pending_action(user_id, "credit_card_setup", payload, minutes=minutes)
+
+    existing_info = ""
+    if existing_card:
+        existing_info = (
+            f"\n📋 Cartão atual: fecha dia {existing_card['closing_day']} / vence dia {existing_card['due_day']}"
+        )
+
+    return (
+        f"⚠️ Já existe um cartão chamado **{card_name}**.{existing_info}\n\n"
+        "Digite um **novo nome** para o cartão que você quer criar, "
+        "ou **excluir** para remover o cartão existente."
+    )
 
 
 def _parse_day(text: str) -> int | None:
@@ -269,9 +301,108 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
     step = payload.get("step")
     answer = (text or "").strip()
 
-    if _is_no(answer) and step not in {"reminder_opt_in", "set_primary"}:
+    if _is_no(answer) and step not in {"reminder_opt_in", "set_primary", "duplicate_card_name", "confirm_delete_existing_card"}:
         clear_pending_action(user_id)
         return "❌ Cadastro de cartão cancelado."
+
+    # ── Novo step: nome duplicado detectado ──────────────────────────────────
+    if step == "duplicate_card_name":
+        if _is_no(answer):
+            clear_pending_action(user_id)
+            return "❌ Cadastro de cartão cancelado."
+
+        if _is_delete(answer):
+            # Pede confirmação antes de excluir
+            existing_name = payload.get("existing_card_name", "")
+            payload["step"] = "confirm_delete_existing_card"
+            set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
+            return (
+                f"⚠️ Tem certeza que deseja **excluir** o cartão **{existing_name}**?\n"
+                "Isso irá remover todas as faturas e transações associadas.\n\n"
+                "Responda **sim** para confirmar ou **não** para cancelar."
+            )
+
+        # Usuário digitou um novo nome
+        new_name = answer.strip()
+        if not new_name:
+            return "Digite o novo nome do cartão ou **excluir** para remover o existente."
+
+        # Verifica se o novo nome também é duplicado
+        if card_name_exists(user_id, new_name):
+            payload["existing_card_name"] = new_name
+            payload["existing_card_id"] = get_card_id_by_name(user_id, new_name)
+            existing_card = get_card_by_id(user_id, payload["existing_card_id"])
+            existing_info = ""
+            if existing_card:
+                existing_info = f"\n📋 fecha dia {existing_card['closing_day']} / vence dia {existing_card['due_day']}"
+            set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
+            return (
+                f"⚠️ Já existe um cartão chamado **{new_name}**.{existing_info}\n\n"
+                "Digite outro nome ou **excluir** para remover o existente."
+            )
+
+        payload["card_name"] = new_name
+
+        # Se closing_day e due_day já foram coletados (via comando inline), cria direto
+        if payload.get("closing_day") and payload.get("due_day"):
+            card_id = create_card(
+                user_id=user_id,
+                name=new_name,
+                closing_day=int(payload["closing_day"]),
+                due_day=int(payload["due_day"]),
+            )
+            first_card = int(payload.get("existing_count") or 0) == 0
+            if first_card:
+                set_default_card(user_id, card_id)
+            payload["card_id"] = card_id
+            payload["step"] = "reminder_opt_in"
+            payload["ask_primary"] = not first_card
+            set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
+            card = get_card_by_id(user_id, card_id)
+            first_card_txt = "\nComo este é seu primeiro cartão, ele já foi definido como principal." if first_card else ""
+            return (
+                f"✅ Cartão **{card['name']}** registrado com sucesso! Confira os detalhes:\n"
+                f"{_card_summary(card)}"
+                f"{first_card_txt}\n\n"
+                "Gostaria de receber notificações antes do vencimento da fatura? Responda **sim** ou **não**."
+            )
+
+        # Sem dias coletados ainda → continua o fluxo normal
+        payload["step"] = "closing_day"
+        set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
+        return f"Quando fecha a fatura do cartão **{new_name}**?"
+
+    # ── Novo step: confirmação de exclusão do cartão existente ───────────────
+    if step == "confirm_delete_existing_card":
+        existing_id = payload.get("existing_card_id")
+        existing_name = payload.get("existing_card_name", "")
+
+        if _is_yes(answer) and existing_id:
+            deleted = delete_card(user_id, int(existing_id))
+            if not deleted:
+                clear_pending_action(user_id)
+                return f"❌ Não consegui excluir o cartão **{existing_name}**. Tente novamente."
+
+            # Após excluir, pergunta se quer criar um cartão com o mesmo nome agora
+            clear_pending_action(user_id)
+            return (
+                f"✅ Cartão **{existing_name}** excluído com sucesso.\n\n"
+                f"Se quiser criar um novo cartão com esse nome, use:\n"
+                f"**criar cartao {existing_name} fecha X vence Y**"
+            )
+
+        if _is_no(answer):
+            # Volta para o step de nome duplicado
+            payload["step"] = "duplicate_card_name"
+            set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
+            return (
+                f"Tudo bem. O cartão **{existing_name}** foi mantido.\n\n"
+                "Digite um **novo nome** para o cartão ou **cancelar** para desistir."
+            )
+
+        return f"Responda **sim** para excluir **{existing_name}** ou **não** para cancelar."
+
+    # ─────────────────────────────────────────────────────────────────────────
 
     if step == "name":
         name = answer
@@ -280,6 +411,12 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         name = name.strip()
         if not name:
             return "Qual é o nome do cartão? Ex: **Nubank**"
+
+        # Detecta duplicata antes de pedir os dias
+        if card_name_exists(user_id, name):
+            payload["card_name"] = name
+            return _prompt_duplicate_card(user_id, name, payload)
+
         payload["card_name"] = name
         payload["step"] = "closing_day"
         set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
@@ -300,9 +437,15 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
             return "Me diga o dia de vencimento com um número entre **1** e **31**. Ex: **dia 8**."
 
         payload["due_day"] = due_day
+        card_name = payload["card_name"]
+
+        # Detecta duplicata na última etapa (edge case: nome entrado antes de existir outro cartão igual)
+        if card_name_exists(user_id, card_name):
+            return _prompt_duplicate_card(user_id, card_name, payload)
+
         card_id = create_card(
             user_id=user_id,
-            name=payload["card_name"],
+            name=card_name,
             closing_day=int(payload["closing_day"]),
             due_day=due_day,
         )
@@ -448,6 +591,18 @@ def handle(user_id: int, text: str) -> str | None:
         name = m.group(1).strip()
         fecha = int(m.group(2))
         vence = int(m.group(3))
+
+        # Bloqueia duplicata antes de criar
+        if card_name_exists(user_id, name):
+            existing_count = len(list_cards(user_id))
+            payload = {
+                "card_name": name,
+                "closing_day": fecha,
+                "due_day": vence,
+                "existing_count": existing_count,
+                "ask_primary": existing_count > 0,
+            }
+            return _prompt_duplicate_card(user_id, name, payload)
 
         try:
             existing_count = len(list_cards(user_id))

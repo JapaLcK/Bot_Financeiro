@@ -2696,11 +2696,26 @@ def list_user_category_rules(user_id: int) -> list[tuple[str, str]]:
             out.append((r[0] or "", r[1] or ""))
     return out
 
+def card_name_exists(user_id: int, name: str) -> bool:
+    """Retorna True se já existe um cartão com esse nome para o usuário (case-insensitive)."""
+    name = (name or "").strip()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select 1 from credit_cards where user_id=%s and lower(name)=lower(%s) limit 1",
+                (user_id, name),
+            )
+            return cur.fetchone() is not None
+
+
 def create_card(user_id: int, name: str, closing_day: int, due_day: int) -> int:
     ensure_user(user_id)
     name = (name or "").strip()
     if not name:
         raise ValueError("nome do cartão vazio")
+
+    if card_name_exists(user_id, name):
+        raise ValueError(f"nome_duplicado:{name}")
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -2708,8 +2723,6 @@ def create_card(user_id: int, name: str, closing_day: int, due_day: int) -> int:
                 """
                 insert into credit_cards (user_id, name, closing_day, due_day)
                 values (%s, %s, %s, %s)
-                on conflict (user_id, name)
-                do update set closing_day=excluded.closing_day, due_day=excluded.due_day
                 returning id
                 """,
                 (user_id, name, int(closing_day), int(due_day)),
@@ -2717,6 +2730,30 @@ def create_card(user_id: int, name: str, closing_day: int, due_day: int) -> int:
             card_id = cur.fetchone()["id"]
         conn.commit()
     return card_id
+
+
+def delete_card(user_id: int, card_id: int) -> bool:
+    """
+    Remove o cartão e todas as suas faturas/transações (via cascade).
+    Se o cartão excluído era o principal, limpa default_card_id do usuário.
+    Retorna True se o cartão existia e foi excluído.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id from credit_cards where id=%s and user_id=%s",
+                (card_id, user_id),
+            )
+            if not cur.fetchone():
+                return False
+            # Limpa default_card_id se apontava para este cartão
+            cur.execute(
+                "update users set default_card_id=null where id=%s and default_card_id=%s",
+                (user_id, card_id),
+            )
+            cur.execute("delete from credit_cards where id=%s and user_id=%s", (card_id, user_id))
+        conn.commit()
+    return True
 
 
 def get_card_id_by_name(user_id: int, name: str) -> int | None:
