@@ -3855,10 +3855,6 @@ def attempt_whatsapp_phone_link(wa_id: str, current_user_id: int | None = None) 
         return {"status": "multiple_accounts", "wa_phone": wa_phone}
 
     target_user_id = int(matches[0]["user_id"])
-
-    if current_user_id != target_user_id and get_auth_user(int(current_user_id)) is not None:
-        return {"status": "wa_linked_other_account", "wa_phone": wa_phone}
-
     existing_target = get_auth_user(target_user_id)
     if existing_target:
         with get_conn() as conn:

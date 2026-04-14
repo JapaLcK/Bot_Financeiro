@@ -84,6 +84,85 @@ def test_summary_by_period_soma_receitas_e_despesas(user_id):
     assert summary["despesa"] == D("135")
 
 
+def test_attempt_whatsapp_phone_link_religa_quando_stale_uid_tem_auth_diferente(user_id):
+    """
+    Reproduz o bug uid=832398038:
+    - stale_wa_uid: conta WA antiga, tem auth_account com telefone DIFERENTE do WA
+    - user_id (fixture): conta correta, tem auth_account com o mesmo telefone do WA
+    - current_user_id=stale_wa_uid é passado (simula get_or_create_canonical_user antigo)
+    Esperado: status='linked', user_id retornado = user_id correto (target).
+    A identidade WA deve apontar para o user_id correto depois.
+    """
+    wa_phone = "5511987650001"
+    wa_email = f"wa-stale-{uuid.uuid4().hex[:8]}@example.com"
+    stale_email = f"stale-{uuid.uuid4().hex[:8]}@example.com"
+    stale_wa_uid = int(uuid.uuid4().int % 10_000_000_000)
+
+    ensure_user(stale_wa_uid)
+
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                # conta correta: telefone bate com o WA
+                cur.execute(
+                    """
+                    insert into auth_accounts (user_id, email, password_hash, phone_e164, phone_status)
+                    values (%s, %s, %s, %s, 'pending')
+                    """,
+                    (user_id, wa_email, "hash", wa_phone),
+                )
+                # stale: tem auth_account, mas com outro telefone
+                cur.execute(
+                    """
+                    insert into auth_accounts (user_id, email, password_hash, phone_e164, phone_status)
+                    values (%s, %s, %s, %s, 'pending')
+                    """,
+                    (stale_wa_uid, stale_email, "hash", "5511000000000"),
+                )
+                # simula identidade WA stale apontando para stale_wa_uid
+                cur.execute(
+                    """
+                    insert into user_identities (provider, external_id, user_id)
+                    values ('whatsapp', %s, %s)
+                    on conflict (provider, external_id) do update set user_id = excluded.user_id
+                    """,
+                    (wa_phone, stale_wa_uid),
+                )
+            conn.commit()
+
+        result = attempt_whatsapp_phone_link(wa_phone, current_user_id=stale_wa_uid)
+
+        assert result["status"] == "linked", f"esperado 'linked', veio {result}"
+        assert result["user_id"] == user_id, (
+            f"esperado user_id={user_id} (conta correta), veio {result['user_id']}"
+        )
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    select user_id
+                    from user_identities
+                    where provider = 'whatsapp' and external_id = %s
+                    """,
+                    (wa_phone,),
+                )
+                row = cur.fetchone()
+
+        assert row is not None
+        assert row["user_id"] == user_id, (
+            f"identidade WA deve apontar para {user_id}, aponta para {row['user_id']}"
+        )
+    finally:
+        # stale pode ter sido absorvido (merge) — tenta deletar mesmo assim
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("delete from user_identities where provider='whatsapp' and external_id=%s", (wa_phone,))
+                cur.execute("delete from auth_accounts where user_id = %s", (stale_wa_uid,))
+                cur.execute("delete from users where id = %s", (stale_wa_uid,))
+            conn.commit()
+
+
 def test_attempt_whatsapp_phone_link_aceita_variacao_com_e_sem_nono_digito(user_id):
     email = f"wa-link-{uuid.uuid4().hex[:8]}@example.com"
     other_uid = int(uuid.uuid4().int % 10_000_000_000)
