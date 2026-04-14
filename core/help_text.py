@@ -61,6 +61,26 @@ HELP_SECTIONS: dict[str, str] = {
         "• `apagar 3`\n"
         "• `desfazer`\n"
     ),
+    "credit": (
+        "💳 **Cartões, Crédito e Parcelas**\n\n"
+        "📌 *Cadastrar cartão:*\n"
+        "• `criar cartao Nubank fecha 10 vence 17`\n"
+        "• `cartoes` → lista seus cartões\n"
+        "• `padrao Nubank` → define o cartão principal\n\n"
+        "💸 *Compras no crédito:*\n"
+        "• `credito 150 mercado` → compra no cartão padrão\n"
+        "• `credito Nubank 150 mercado` → em cartão específico\n\n"
+        "📆 *Parcelamento:*\n"
+        "• `parcelar 600 em 3x no cartao Nubank`\n"
+        "• `parcelei 300 em 6x no cartao Nubank`\n\n"
+        "📊 *Faturas:*\n"
+        "• `fatura Nubank` → saldo da fatura aberta\n"
+        "• `pagar fatura Nubank 1200` → registra pagamento\n\n"
+        "🗓️ *Consultas:*\n"
+        "• `meu Nubank fecha quando`\n"
+        "• `meu Nubank vence quando`\n"
+        "• `qual meu cartao principal`\n"
+    ),
     "categories": (
     "🏷️ **Categorias & Regras (auto-categorização)**\n"
     "• `categorias` → lista suas categorias\n"
@@ -119,6 +139,7 @@ TITLE_MAP: dict[str, str] = {
     "tutorial": "Tutorial",
     "ofx": "OFX",
     "cc": "Conta corrente",
+    "credit": "Cartões & Crédito",
     "categories": "Categorias & Regras",
     "pockets": "Caixinhas",
     "invest": "Investimentos",
@@ -134,6 +155,7 @@ HELP_ORDER: list[tuple[str, str, str]] = [
     ("tutorial", "Tutorial", "🚀"),
     ("ofx", "OFX (importar extrato)", "🧾"),
     ("cc", "Conta corrente", "🏦"),
+    ("credit", "Cartões & Crédito", "💳"),
     ("categories", "Categorias & Regras", "🏷️"),
     ("pockets", "Caixinhas", "📦"),
     ("invest", "Investimentos", "📈"),
@@ -149,6 +171,7 @@ HELP_TITLES: dict[str, str] = {
     "ofx": "OFX",
     "categories": "Categorias & Regras",
     "cc": "Conta corrente",
+    "credit": "Cartões & Crédito",
     "pockets": "Caixinhas",
     "invest": "Investimentos",
     "cdi": "CDI",
@@ -183,6 +206,13 @@ HELP_ALIASES: dict[str, str] = {
     "confirm": "confirm",
     "confirmacoes": "confirm",
     "confirmações": "confirm",
+    "cartao": "credit",
+    "cartoes": "credit",
+    "credito": "credit",
+    "fatura": "credit",
+    "faturas": "credit",
+    "parcelas": "credit",
+    "parcelamento": "credit",
     "categoria": "categories",
     "categorias": "categories",
     "regras": "categories",
@@ -205,6 +235,7 @@ _SECTION_ALIASES = {
     "dashboard": {"dashboard", "painel", "sheets", "planilha", "exportar"},
     "launches": {"lancamentos", "lançamentos", "historico", "histórico"},
     "confirm": {"confirm", "confirmacoes", "confirmações", "sim", "nao", "não"},
+    "credit": {"cartao", "cartoes", "cartão", "cartões", "credito", "crédito", "fatura", "faturas", "parcel", "parcelamento", "parcelas"},
     "categories": {"categoria", "categorias", "regras", "regra", "linkar", "palavras", "palavra-chave", "palavras-chave"},
 }
 

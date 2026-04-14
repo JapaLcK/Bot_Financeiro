@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # ── IDs do menu de ajuda ─────────────────────────────────────────────────────
 
 HELP_MENU_IDS: set[str] = {
-    "help_cc", "help_pockets", "help_invest",
+    "help_cc", "help_credit", "help_pockets", "help_invest",
     "help_ofx", "help_categories", "help_dashboard",
     "help_launches", "help_tutorial", "help_menu",
 }
@@ -81,6 +81,11 @@ def send_help_menu(wa_id: str) -> None:
                         "id": "help_cc",
                         "title": "Saldo e lançamentos",
                         "description": "Registrar, listar e apagar transações",
+                    },
+                    {
+                        "id": "help_credit",
+                        "title": "Cartões e crédito",
+                        "description": "Criar cartão, faturas e parcelamento",
                     },
                     {
                         "id": "help_pockets",
@@ -138,6 +143,7 @@ def send_help_menu(wa_id: str) -> None:
 # Mapeamento de ID do menu → (key do HELP_SECTIONS, emoji, título amigável)
 _TOPIC_MAP: dict[str, tuple[str, str, str]] = {
     "help_cc":         ("cc",         "🏦", "Conta Corrente"),
+    "help_credit":     ("credit",     "💳", "Cartões e Crédito"),
     "help_pockets":    ("pockets",    "📦", "Caixinhas"),
     "help_invest":     ("invest",     "📈", "Investimentos"),
     "help_ofx":        ("ofx",        "🧾", "Extrato OFX"),

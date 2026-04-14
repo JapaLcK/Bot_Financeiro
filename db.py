@@ -1586,60 +1586,47 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
 
 def get_latest_cdi(cur) -> tuple[date, float] | None:
     """
-    Retorna (data, valor_percent_ao_dia) da CDI mais recente no cache.
-    Se não houver cache recente, busca do BCB (últimos 10 dias) e salva.
+    Retorna (data, valor_percent_ao_dia) da CDI mais recente.
+
+    Estratégia igual a get_latest_cdi_aa:
+      1. Busca da API do BCB primeiro (série 12 = CDI % a.d.) — dado fresco.
+      2. Fallback no cache se a API falhar.
+      3. Atualiza o cache com o valor mais recente obtido.
     """
-    # tenta pegar do cache
-    cur.execute(
-        """
-        select ref_date, value
-        from market_rates
-        where code='CDI'
-        order by ref_date desc
-        limit 1
-        """
-    )
-    row = cur.fetchone()
-    if row:
-        return row["ref_date"], float(row["value"])
-
-    # fallback: busca últimos 10 dias do BCB e cacheia
     today = datetime.now(_tz()).date()
-    start = today - timedelta(days=10)
+    start = today - timedelta(days=15)
 
-    data = _fetch_sgs_series_json(12, start, today)  # série 12 = CDI (% a.d.)
-    if not data:
-        return None
+    # ── 1. Busca da API do BCB primeiro ──────────────────────────────────
+    data = _fetch_sgs_series_json(12, start, today)
 
-    latest = None
-    for item in data:
-        d = datetime.strptime(item["data"], "%d/%m/%Y").date()
-        v = float(str(item["valor"]).replace(",", "."))
-        latest = (d, v)
+    latest: tuple[date, float] | None = None
+    if data:
+        for item in data:
+            try:
+                d = datetime.strptime(item["data"], "%d/%m/%Y").date()
+                v = float(str(item["valor"]).replace(",", "."))
+                if latest is None or d > latest[0]:
+                    latest = (d, v)
+            except Exception:
+                continue
 
     if latest:
         cur.execute(
             """
             insert into market_rates(code, ref_date, value)
             values ('CDI', %s, %s)
-            on conflict (code, ref_date) do update set value=excluded.value
+            on conflict (code, ref_date) do update set value = excluded.value
             """,
             latest,
         )
         return latest
 
-    return None
-
-def get_latest_cdi_aa(cur) -> tuple[date, float] | None:
-    """
-    CDI a.a. (base 252) direto do SGS/BCB (série 4389).
-    Cacheia em market_rates com code='CDI_AA'.
-    """
+    # ── 2. Fallback: usa cache do banco se a API falhou ───────────────────
     cur.execute(
         """
         select ref_date, value
         from market_rates
-        where code='CDI_AA'
+        where code = 'CDI'
         order by ref_date desc
         limit 1
         """
@@ -1648,29 +1635,63 @@ def get_latest_cdi_aa(cur) -> tuple[date, float] | None:
     if row:
         return row["ref_date"], float(row["value"])
 
+    return None
+
+def get_latest_cdi_aa(cur) -> tuple[date, float] | None:
+    """
+    CDI a.a. (base 252) direto do SGS/BCB (série 4389).
+
+    Estratégia:
+      1. Tenta buscar da API do BCB (últimos 10 dias) — sempre prioriza dado fresco.
+      2. Se a API falhar ou não retornar dados, cai no cache do banco como fallback.
+      3. Atualiza o cache com o valor mais recente obtido da API.
+
+    Isso garante que o valor exibido é sempre o mais atual disponível no BCB,
+    e não fica preso em cache desatualizado indefinidamente.
+    """
     today = datetime.now(_tz()).date()
-    start = today - timedelta(days=10)
+    # Janela de 15 dias para garantir que pegamos o último dia útil disponível
+    start = today - timedelta(days=15)
 
-    data = _fetch_sgs_series_json(4389, start, today)  # CDI a.a. :contentReference[oaicite:0]{index=0}
-    if not data:
-        return None
+    # ── 1. Tenta buscar da API do BCB primeiro ────────────────────────────
+    data = _fetch_sgs_series_json(4389, start, today)
 
-    latest = None
-    for item in data:
-        d = datetime.strptime(item["data"], "%d/%m/%Y").date()
-        v = float(str(item["valor"]).replace(",", "."))
-        latest = (d, v)
+    latest: tuple[date, float] | None = None
+    if data:
+        for item in data:
+            try:
+                d = datetime.strptime(item["data"], "%d/%m/%Y").date()
+                v = float(str(item["valor"]).replace(",", "."))
+                if latest is None or d > latest[0]:
+                    latest = (d, v)
+            except Exception:
+                continue
 
     if latest:
+        # Atualiza o cache com o valor mais recente
         cur.execute(
             """
             insert into market_rates(code, ref_date, value)
             values ('CDI_AA', %s, %s)
-            on conflict (code, ref_date) do update set value=excluded.value
+            on conflict (code, ref_date) do update set value = excluded.value
             """,
             latest,
         )
         return latest
+
+    # ── 2. Fallback: usa cache do banco se a API falhou ───────────────────
+    cur.execute(
+        """
+        select ref_date, value
+        from market_rates
+        where code = 'CDI_AA'
+        order by ref_date desc
+        limit 1
+        """
+    )
+    row = cur.fetchone()
+    if row:
+        return row["ref_date"], float(row["value"])
 
     return None
 
