@@ -76,6 +76,122 @@ def send_text(
 
     return r.json()
 
+def send_interactive_buttons(
+    to: str,
+    body: str,
+    buttons: list[dict],  # [{"id": "...", "title": "..."}] — máx 3
+    *,
+    header: Optional[str] = None,
+    footer: Optional[str] = None,
+    access_token: Optional[str] = None,
+    phone_number_id: Optional[str] = None,
+    graph_version: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Envia uma mensagem interativa com até 3 botões de resposta rápida.
+    Cada botão: {"id": "...", "title": "..."} (title máx 20 chars).
+    """
+    token, pnid, base = _wa_config(
+        access_token=access_token,
+        phone_number_id=phone_number_id,
+        graph_version=graph_version,
+    )
+    url = f"{base}/{pnid}/messages"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    interactive: Dict[str, Any] = {
+        "type": "button",
+        "body": {"text": body},
+        "action": {
+            "buttons": [
+                {"type": "reply", "reply": {"id": b["id"], "title": b["title"]}}
+                for b in buttons[:3]
+            ]
+        },
+    }
+    if header:
+        interactive["header"] = {"type": "text", "text": header}
+    if footer:
+        interactive["footer"] = {"text": footer}
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "interactive",
+        "interactive": interactive,
+    }
+
+    r = requests.post(url, headers=headers, json=payload, timeout=20)
+    if r.status_code == 401:
+        print("SEND_ERROR: token inválido/expirado")
+        print(r.text)
+        return None
+    if r.status_code >= 400:
+        raise RuntimeError(f"WA send_interactive_buttons failed {r.status_code}: {r.text}")
+    return r.json()
+
+
+def send_interactive_list(
+    to: str,
+    body: str,
+    button_label: str,
+    sections: list[dict],
+    *,
+    header: Optional[str] = None,
+    footer: Optional[str] = None,
+    access_token: Optional[str] = None,
+    phone_number_id: Optional[str] = None,
+    graph_version: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Envia uma mensagem interativa com lista de opções (máx 10 itens no total).
+    sections: [{"title": "Seção", "rows": [{"id": "...", "title": "...", "description": "..."}]}]
+    button_label: rótulo do botão que abre a lista (máx 20 chars).
+    """
+    token, pnid, base = _wa_config(
+        access_token=access_token,
+        phone_number_id=phone_number_id,
+        graph_version=graph_version,
+    )
+    url = f"{base}/{pnid}/messages"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    interactive: Dict[str, Any] = {
+        "type": "list",
+        "body": {"text": body},
+        "action": {
+            "button": button_label,
+            "sections": sections,
+        },
+    }
+    if header:
+        interactive["header"] = {"type": "text", "text": header}
+    if footer:
+        interactive["footer"] = {"text": footer}
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "interactive",
+        "interactive": interactive,
+    }
+
+    r = requests.post(url, headers=headers, json=payload, timeout=20)
+    if r.status_code == 401:
+        print("SEND_ERROR: token inválido/expirado")
+        print(r.text)
+        return None
+    if r.status_code >= 400:
+        raise RuntimeError(f"WA send_interactive_list failed {r.status_code}: {r.text}")
+    return r.json()
+
+
 def download_media(
     media_id: str,
     *,

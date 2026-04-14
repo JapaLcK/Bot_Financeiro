@@ -21,6 +21,19 @@ class InboundMessage:
     raw: dict[str, Any]
 
 
+def get_interactive_id(raw: dict[str, Any]) -> str | None:
+    """
+    Extrai o ID do botão ou item de lista clicado de um payload de mensagem
+    interativa do WhatsApp. Retorna None se não for uma mensagem interativa.
+    """
+    if raw.get("type") != "interactive":
+        return None
+    inter = raw.get("interactive") or {}
+    br = inter.get("button_reply") or {}
+    lr = inter.get("list_reply") or {}
+    return br.get("id") or lr.get("id") or None
+
+
 def _get_value(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         return payload["entry"][0]["changes"][0]["value"]

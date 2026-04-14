@@ -12,7 +12,19 @@ from dataclasses import dataclass
 from typing import Any
 
 from adapters.whatsapp.wa_client import download_media, send_text
-from adapters.whatsapp.wa_parse import InboundAttachmentRef, InboundMessage, extract_messages
+from adapters.whatsapp.wa_parse import InboundAttachmentRef, InboundMessage, extract_messages, get_interactive_id
+from adapters.whatsapp.wa_tutorial import (
+    TUTORIAL_BUTTON_IDS,
+    get_tutorial_button_id,
+    handle_tutorial_button,
+    send_welcome,
+)
+from adapters.whatsapp.wa_help_menu import (
+    HELP_MENU_IDS,
+    get_help_menu_id,
+    send_help_menu,
+    send_help_section,
+)
 from core.handle_incoming import handle_incoming
 from core.types import IncomingMessage
 from db import attempt_whatsapp_phone_link, get_or_create_canonical_user
@@ -156,17 +168,22 @@ def process_message(message: InboundMessage) -> None:
                     message.wa_id,
                     auto_link_result["user_id"],
                 )
-                _send_reply(
-                    reply_to,
-                    (
-                        "✅ WhatsApp conectado à sua conta com sucesso!\n"
-                        "Seu número foi confirmado e seu dashboard agora está sincronizado.\n\n"
-                        "Se quiser, já pode me mandar algo como:\n"
-                        "• gastei 50 mercado\n"
-                        "• recebi 1000 salario\n"
-                        "• saldo"
-                    ),
-                )
+                # Envia mensagem de boas-vindas interativa com botão de tutorial
+                try:
+                    send_welcome(reply_to)
+                except Exception as e:
+                    logger.warning("WA send_welcome failed, falling back to text: %s", e)
+                    _send_reply(
+                        reply_to,
+                        (
+                            "✅ WhatsApp conectado à sua conta!\n\n"
+                            "Já pode usar:\n"
+                            "• gastei 50 mercado\n"
+                            "• recebi 1000 salario\n"
+                            "• saldo\n"
+                            "• ajuda"
+                        ),
+                    )
                 return
         elif auto_link_result["status"] == "no_match" and _is_greeting(message.text or ""):
             _send_reply(
@@ -198,6 +215,60 @@ def process_message(message: InboundMessage) -> None:
                 ),
             )
             return
+
+        # ---------------------------------------------------------------
+        # Interceptação de mensagens interativas (botões / listas)
+        # Deve ocorrer ANTES da deduplicação para evitar ignorar cliques.
+        # ---------------------------------------------------------------
+        raw_msg = message.raw or {}
+        interactive_id = get_interactive_id(raw_msg)
+
+        if interactive_id:
+            # Botões do tutorial
+            tut_bid = get_tutorial_button_id(raw_msg)
+            if tut_bid:
+                logger.info("WA tutorial button id=%s wa_id=%s", tut_bid, reply_to)
+                try:
+                    handle_tutorial_button(reply_to, tut_bid)
+                except Exception as e:
+                    logger.exception("WA tutorial button error id=%s: %s", tut_bid, e)
+                return
+
+            # Itens do menu de ajuda
+            help_id = get_help_menu_id(raw_msg)
+            if help_id:
+                logger.info("WA help menu id=%s wa_id=%s", help_id, reply_to)
+                try:
+                    send_help_section(reply_to, help_id)
+                except Exception as e:
+                    logger.exception("WA help menu error id=%s: %s", help_id, e)
+                return
+
+        # ---------------------------------------------------------------
+        # Interceptação de comandos de texto simples para fluxo interativo
+        # ---------------------------------------------------------------
+        text_cmd = (message.text or "").strip().lower()
+
+        if text_cmd in {"ajuda", "help", "menu", "/ajuda", "/help"}:
+            logger.info("WA help menu via texto wa_id=%s", reply_to)
+            try:
+                send_help_menu(reply_to)
+            except Exception as e:
+                logger.warning("WA send_help_menu failed, usando texto: %s", e)
+                # fallback para o fluxo normal de texto
+                pass
+            else:
+                return
+
+        elif text_cmd in {"tutorial", "/tutorial"}:
+            logger.info("WA tutorial welcome via texto wa_id=%s", reply_to)
+            try:
+                send_welcome(reply_to)
+            except Exception as e:
+                logger.warning("WA send_welcome failed, usando texto: %s", e)
+                pass
+            else:
+                return
 
         try:
             msg_id = str(message.raw.get("id") or message.timestamp or "")
