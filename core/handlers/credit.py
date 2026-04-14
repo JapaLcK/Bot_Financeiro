@@ -144,8 +144,9 @@ def _prompt_duplicate_card(user_id: int, card_name: str, payload: dict, minutes:
 
     return (
         f"⚠️ Já existe um cartão chamado **{card_name}**.{existing_info}\n\n"
-        "Digite um **novo nome** para o cartão que você quer criar, "
-        "ou **excluir** para remover o cartão existente."
+        "• Digite um **novo nome** para criar com outro nome\n"
+        "• **excluir** para remover o cartão existente\n"
+        "• **cancelar** para desistir"
     )
 
 
