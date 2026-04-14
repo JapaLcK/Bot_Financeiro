@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Admin Login - PigBank</title>
+<meta name="theme-color" content="#0d1117" />
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #08111f;
+  --panel: rgba(9, 18, 34, 0.82);
+  --border: rgba(255,255,255,0.08);
+  --text: #eff6ff;
+  --muted: rgba(239,246,255,0.66);
+  --accent: #22c55e;
+  --accent-2: #14b8a6;
+  --danger: #fb7185;
+}
+body {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(20,184,166,.28), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(34,197,94,.22), transparent 28%),
+    linear-gradient(135deg, #06101d, #0c1628 52%, #08111f);
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+.card {
+  width: min(420px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 32px;
+  backdrop-filter: blur(20px);
+  box-shadow: 0 24px 80px rgba(0,0,0,.35);
+}
+.eyebrow {
+  display: inline-flex;
+  margin-bottom: 16px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(34,197,94,.25);
+  color: #bbf7d0;
+  background: rgba(34,197,94,.1);
+  font-size: 12px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+h1 { font-size: 28px; line-height: 1.1; margin-bottom: 10px; }
+p { color: var(--muted); line-height: 1.6; margin-bottom: 22px; }
+label {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+input {
+  width: 100%;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.04);
+  color: var(--text);
+  outline: none;
+}
+input:focus {
+  border-color: rgba(20,184,166,.6);
+  box-shadow: 0 0 0 4px rgba(20,184,166,.12);
+}
+button {
+  width: 100%;
+  border: 0;
+  border-radius: 14px;
+  padding: 14px 16px;
+  cursor: pointer;
+  color: #03140e;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent), #86efac);
+}
+button:disabled { opacity: .65; cursor: wait; }
+.error {
+  display: none;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  color: #fecdd3;
+  border: 1px solid rgba(251,113,133,.32);
+  background: rgba(251,113,133,.12);
+}
+.error.show { display: block; }
+.hint {
+  margin-top: 18px;
+  font-size: 13px;
+  color: rgba(239,246,255,.52);
+}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="eyebrow">Privado</div>
+    <h1>Painel administrativo</h1>
+    <p>Acesso restrito ao administrador. As credenciais são validadas exclusivamente pelas variáveis de ambiente do backend.</p>
+    <div class="error" id="error-box"></div>
+    <form id="login-form">
+      <label for="username">Usuário</label>
+      <input id="username" autocomplete="username" required />
+      <label for="password">Senha</label>
+      <input id="password" type="password" autocomplete="current-password" required />
+      <button id="submit-btn" type="submit">Entrar no admin</button>
+    </form>
+    <div class="hint">Dica: prefira usar um hash em <code>ADMIN_DASHBOARD_PASSWORD_HASH</code> no deploy.</div>
+  </div>
+
+<script>
+const tokenKey = "finbot_admin_token";
+const form = document.getElementById("login-form");
+const submitBtn = document.getElementById("submit-btn");
+const errorBox = document.getElementById("error-box");
+
+function setError(message) {
+  errorBox.textContent = message;
+  errorBox.classList.add("show");
+}
+
+function clearError() {
+  errorBox.textContent = "";
+  errorBox.classList.remove("show");
+}
+
+async function checkSession() {
+  const token = localStorage.getItem(tokenKey);
+  if (!token) return;
+  const res = await fetch("/admin/auth/me", { headers: { Authorization: `Bearer ${token}` } });
+  if (res.ok) {
+    window.location.href = "/admin";
+  } else {
+    localStorage.removeItem(tokenKey);
+  }
+}
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  clearError();
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Validando...";
+
+  try {
+    const res = await fetch("/admin/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: document.getElementById("username").value.trim(),
+        password: document.getElementById("password").value
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.detail || "Não foi possível autenticar.");
+      return;
+    }
+    localStorage.setItem(tokenKey, data.token);
+    window.location.href = "/admin";
+  } catch (err) {
+    setError("Falha de conexão com o painel admin.");
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Entrar no admin";
+  }
+});
+
+checkSession();
+</script>
+</body>
+</html>

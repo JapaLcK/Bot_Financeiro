@@ -5,6 +5,9 @@
 .venv/
 __pycache__/
 *.pyc
+*.log
+exports/
+tmp/
 smoke_db.py
 debug_rules.pyc
 ROADMAP_SAAS.md

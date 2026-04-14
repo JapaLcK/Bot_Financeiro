@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Admin Dashboard - PigBank</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #07121d;
+  --panel: rgba(10, 20, 34, 0.84);
+  --panel-2: rgba(255,255,255,.04);
+  --border: rgba(255,255,255,.08);
+  --text: #edf6ff;
+  --muted: rgba(237,246,255,.62);
+  --soft: rgba(237,246,255,.42);
+  --green: #22c55e;
+  --teal: #14b8a6;
+  --blue: #60a5fa;
+  --orange: #fb923c;
+  --red: #fb7185;
+  --yellow: #facc15;
+}
+body {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(20,184,166,.18), transparent 26%),
+    radial-gradient(circle at top right, rgba(96,165,250,.14), transparent 30%),
+    linear-gradient(180deg, #07121d, #091726 55%, #08111a);
+  min-height: 100vh;
+}
+.shell { max-width: 1480px; margin: 0 auto; padding: 28px 20px 56px; }
+.hero, .card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  backdrop-filter: blur(18px);
+  box-shadow: 0 20px 60px rgba(0,0,0,.26);
+}
+.hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: end;
+  padding: 28px;
+  margin-bottom: 18px;
+}
+.hero h1 { font-size: 32px; margin-bottom: 8px; }
+.hero p { color: var(--muted); max-width: 820px; line-height: 1.6; }
+.hero-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.hero-actions-group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+button, select {
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+button { cursor: pointer; }
+button:disabled { opacity: .7; cursor: wait; }
+.primary {
+  background: linear-gradient(135deg, var(--green), #86efac);
+  color: #08210f;
+  border: 0;
+  font-weight: 700;
+}
+.refresh-status {
+  min-height: 20px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: right;
+}
+.refresh-status.error { color: #fda4af; }
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.card { padding: 20px; }
+.metric-label {
+  color: var(--soft);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  margin-bottom: 10px;
+}
+.metric-value {
+  font-size: 30px;
+  font-weight: 750;
+  margin-bottom: 6px;
+}
+.metric-sub { color: var(--muted); font-size: 14px; line-height: 1.5; }
+.grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+}
+.section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.section-title h2 { font-size: 18px; }
+.section-title span { color: var(--muted); font-size: 13px; }
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.table th, .table td {
+  text-align: left;
+  padding: 12px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  font-size: 14px;
+  vertical-align: top;
+}
+.table th { color: var(--soft); font-weight: 600; }
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: rgba(255,255,255,.05);
+  color: var(--muted);
+}
+.pill-ok { color: #86efac; background: rgba(34,197,94,.1); border: 1px solid rgba(34,197,94,.2); }
+.pill-warn { color: #fde68a; background: rgba(250,204,21,.08); border: 1px solid rgba(250,204,21,.18); }
+.pill-muted { color: rgba(237,246,255,.72); }
+.status-ok { color: #86efac; }
+.status-warn { color: var(--yellow); }
+.status-error { color: #fda4af; }
+.list {
+  display: grid;
+  gap: 10px;
+}
+.list-item {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255,255,255,.035);
+  border: 1px solid rgba(255,255,255,.05);
+}
+.list-item strong { display: block; margin-bottom: 4px; }
+.list-item small { color: var(--muted); line-height: 1.5; }
+.empty { color: var(--muted); font-size: 14px; padding: 8px 0; }
+.chart-wrap { height: 340px; }
+@media (max-width: 1080px) {
+  .grid, .grid-3 { grid-template-columns: 1fr; }
+  .hero { align-items: start; flex-direction: column; }
+  .hero-actions, .hero-actions-group { width: 100%; }
+  .refresh-status { width: 100%; text-align: left; }
+}
+</style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div>
+        <div class="pill">Admin privado</div>
+        <h1>Observabilidade do bot</h1>
+        <p>Visão consolidada de aquisição, crescimento, atividade, transações, carteira financeira e sinais operacionais. O objetivo aqui é detectar tendência e erro cedo, sem misturar com o dashboard do usuário final.</p>
+      </div>
+      <div class="hero-actions">
+        <div class="hero-actions-group">
+          <select id="window-select">
+            <option value="30">Últimos 30 dias</option>
+            <option value="60">Últimos 60 dias</option>
+            <option value="90">Últimos 90 dias</option>
+          </select>
+          <button id="refresh-btn" class="primary" type="button">Atualizar</button>
+          <button id="logout-btn" type="button">Sair</button>
+        </div>
+        <div class="refresh-status" id="refresh-status"></div>
+      </div>
+    </section>
+
+    <section class="summary" id="summary-cards"></section>
+
+    <section class="grid">
+      <div class="card">
+        <div class="section-title">
+          <h2>Evolução temporal</h2>
+          <span id="generated-at">Carregando...</span>
+        </div>
+        <div class="chart-wrap"><canvas id="main-chart"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="section-title">
+          <h2>Saúde operacional</h2>
+          <span>Indicadores rápidos</span>
+        </div>
+        <div class="list" id="health-list"></div>
+      </div>
+    </section>
+
+    <section class="grid-3">
+      <div class="card">
+        <div class="section-title"><h2>Cadastros recentes</h2><span>Últimos 10</span></div>
+        <div id="recent-signups"></div>
+      </div>
+      <div class="card">
+        <div class="section-title"><h2>Logins recentes</h2><span>Últimos 20</span></div>
+        <div id="recent-logins"></div>
+      </div>
+      <div class="card">
+        <div class="section-title"><h2>Erros e eventos</h2><span>Últimos 20</span></div>
+        <div id="recent-errors"></div>
+      </div>
+    </section>
+
+    <section class="grid" style="margin-top:18px">
+      <div class="card">
+        <div class="section-title"><h2>Saúde do WhatsApp e backend</h2><span>Sinais invisíveis</span></div>
+        <div class="list" id="ops-health-list"></div>
+      </div>
+      <div class="card">
+        <div class="section-title"><h2>Eventos operacionais</h2><span>Últimos 25</span></div>
+        <div id="recent-ops"></div>
+      </div>
+    </section>
+
+    <section class="grid" style="margin-top:18px">
+      <div class="card">
+        <div class="section-title"><h2>Usuários com maior volume</h2><span>Últimos 30 dias</span></div>
+        <div style="overflow:auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Usuário</th>
+                <th>Última atividade</th>
+                <th>Transações</th>
+                <th>Fluxo líquido</th>
+              </tr>
+            </thead>
+            <tbody id="top-users"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="section-title"><h2>Relatório agregado mensal</h2><span>Últimos 6 meses</span></div>
+        <div style="overflow:auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Mês</th>
+                <th>Receitas</th>
+                <th>Despesas</th>
+                <th>Transações</th>
+              </tr>
+            </thead>
+            <tbody id="monthly-financials"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+<script>
+const tokenKey = "finbot_admin_token";
+const refreshBtn = document.getElementById("refresh-btn");
+const logoutBtn = document.getElementById("logout-btn");
+const windowSelect = document.getElementById("window-select");
+const refreshStatus = document.getElementById("refresh-status");
+let mainChart;
+let isRefreshing = false;
+
+function setRefreshStatus(message = "", isError = false) {
+  refreshStatus.textContent = message;
+  refreshStatus.classList.toggle("error", isError);
+}
+
+function setRefreshingState(value) {
+  isRefreshing = value;
+  refreshBtn.disabled = value;
+  windowSelect.disabled = value;
+  refreshBtn.textContent = value ? "Atualizando..." : "Atualizar";
+  if (value) {
+    setRefreshStatus("Buscando dados mais recentes...");
+  }
+}
+
+function formatInt(value) {
+  return new Intl.NumberFormat("pt-BR").format(Number(value || 0));
+}
+
+function formatMoney(value) {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  }).format(Number(value || 0));
+}
+
+function formatDate(value) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short"
+  }).format(new Date(value));
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function authHeaders() {
+  const token = localStorage.getItem(tokenKey);
+  if (!token) {
+    window.location.href = "/admin/login";
+    throw new Error("No admin token");
+  }
+  return { Authorization: `Bearer ${token}` };
+}
+
+function renderSummary(summary) {
+  const cards = [
+    ["Usuários totais", formatInt(summary.total_users), `${formatInt(summary.accounts_30d)} novos cadastros em 30 dias`],
+    ["Usuários ativos", formatInt(summary.active_users_30d), `${formatInt(summary.active_users_7d)} ativos nos últimos 7 dias`],
+    ["Logins válidos", formatInt(summary.login_success_30d), `${summary.login_success_rate_30d}% de sucesso em 30 dias`],
+    ["Transações", formatInt(summary.transactions_30d), "Somente movimentações externas ao patrimônio interno"],
+    ["Receitas", formatMoney(summary.revenue_30d), "Receita acumulada nos últimos 30 dias"],
+    ["Despesas", formatMoney(summary.expenses_30d), "Despesa acumulada nos últimos 30 dias"],
+    ["Caixinhas", formatMoney(summary.pockets_balance), "Saldo consolidado atual"],
+    ["Investimentos", formatMoney(summary.investments_balance), "Saldo consolidado atual"],
+    ["Cartões em aberto", formatMoney(summary.cards_due_open), "Saldo pendente das faturas abertas/fechadas"]
+  ];
+  document.getElementById("summary-cards").innerHTML = cards.map(([label, value, sub]) => `
+    <article class="card">
+      <div class="metric-label">${label}</div>
+      <div class="metric-value">${value}</div>
+      <div class="metric-sub">${sub}</div>
+    </article>
+  `).join("");
+}
+
+function renderHealth(summary, errors) {
+  const items = [
+    { label: "Taxa de sucesso de login 7d", value: `${summary.login_success_rate_7d}%`, cls: summary.login_success_rate_7d >= 85 ? "status-ok" : "status-warn" },
+    { label: "Cadastros 7d", value: formatInt(summary.accounts_7d), cls: "status-ok" },
+    { label: "Ativos 7d", value: formatInt(summary.active_users_7d), cls: "status-ok" },
+    { label: "Eventos críticos recentes", value: formatInt(errors.filter(item => item.level === "error").length), cls: errors.some(item => item.level === "error") ? "status-error" : "status-ok" }
+  ];
+  document.getElementById("health-list").innerHTML = items.map(item => `
+    <div class="list-item">
+      <strong class="${item.cls}">${item.value}</strong>
+      <small>${item.label}</small>
+    </div>
+  `).join("");
+}
+
+function renderOpsHealth(ops) {
+  const items = [
+    { label: "Atividade WhatsApp real 24h", value: formatInt(ops.whatsapp_real_activity_24h), cls: ops.whatsapp_real_activity_24h > 0 ? "status-ok" : "status-warn" },
+    { label: "Última atividade real WhatsApp", value: formatDate(ops.last_whatsapp_real_activity_at), cls: ops.last_whatsapp_real_activity_at ? "status-ok" : "status-warn" },
+    { label: "Webhook WhatsApp nas últimas 24h", value: formatInt(ops.whatsapp_webhooks_24h), cls: ops.whatsapp_webhooks_24h > 0 ? "status-ok" : "status-warn" },
+    { label: "Último webhook WhatsApp", value: formatDate(ops.last_whatsapp_webhook_at), cls: ops.last_whatsapp_webhook_at ? "status-ok" : "status-warn" },
+    { label: "Envios WhatsApp com sucesso 24h", value: formatInt(ops.whatsapp_send_success_24h), cls: ops.whatsapp_send_success_24h > 0 ? "status-ok" : "status-warn" },
+    { label: "Falhas de envio WhatsApp 24h", value: formatInt(ops.whatsapp_send_failures_24h), cls: ops.whatsapp_send_failures_24h > 0 ? "status-error" : "status-ok" },
+    { label: "Token inválido WhatsApp 7d", value: formatInt(ops.whatsapp_token_invalid_7d), cls: ops.whatsapp_token_invalid_7d > 0 ? "status-error" : "status-ok" },
+    { label: "Drops de fila WhatsApp 24h", value: formatInt(ops.whatsapp_queue_drop_24h), cls: ops.whatsapp_queue_drop_24h > 0 ? "status-error" : "status-ok" },
+    { label: "Erros de worker WhatsApp 7d", value: formatInt(ops.whatsapp_worker_errors_7d), cls: ops.whatsapp_worker_errors_7d > 0 ? "status-error" : "status-ok" },
+    { label: "Erros de backend 24h", value: formatInt(ops.backend_errors_24h), cls: ops.backend_errors_24h > 0 ? "status-error" : "status-ok" },
+    { label: "Billing inválido/falha 7d", value: `${formatInt(ops.billing_signature_invalid_7d)} / ${formatInt(ops.billing_payment_failed_7d)}`, cls: (ops.billing_signature_invalid_7d > 0 || ops.billing_payment_failed_7d > 0) ? "status-warn" : "status-ok" },
+    { label: "Telemetria WhatsApp consistente", value: ops.whatsapp_telemetry_inconsistent ? "Não" : "Sim", cls: ops.whatsapp_telemetry_inconsistent ? "status-warn" : "status-ok" },
+    { label: "Usuários com WhatsApp conectado", value: formatInt(ops.whatsapp_connected_users), cls: "status-ok" },
+    { label: "Usuários com WhatsApp pendente", value: formatInt(ops.whatsapp_pending_users), cls: ops.whatsapp_pending_users > 0 ? "status-warn" : "status-ok" },
+    { label: "Credenciais WA configuradas", value: ops.wa_token_configured && ops.wa_number_configured && ops.wa_phone_number_id_configured && ops.wa_verify_token_configured && ops.wa_app_secret_configured ? "OK" : "Incompleto", cls: ops.wa_token_configured && ops.wa_number_configured && ops.wa_phone_number_id_configured && ops.wa_verify_token_configured && ops.wa_app_secret_configured ? "status-ok" : "status-warn" },
+    { label: "Stripe configurado", value: ops.stripe_configured ? "OK" : "Incompleto", cls: ops.stripe_configured ? "status-ok" : "status-warn" }
+  ];
+  document.getElementById("ops-health-list").innerHTML = items.map(item => `
+    <div class="list-item">
+      <strong class="${item.cls}">${item.value}</strong>
+      <small>${item.label}</small>
+    </div>
+  `).join("");
+}
+
+function renderSimpleList(targetId, rows, formatter) {
+  const root = document.getElementById(targetId);
+  if (!rows.length) {
+    root.innerHTML = `<div class="empty">Sem dados ainda.</div>`;
+    return;
+  }
+  root.innerHTML = rows.map(formatter).join("");
+}
+
+function renderTables(data) {
+  renderSimpleList("recent-signups", data.recent_signups, row => `
+    <div class="list-item">
+      <strong>${escapeHtml(row.email)}</strong>
+      <small>
+        Criado em ${formatDate(row.created_at)}<br/>
+        Última atividade: ${formatDate(row.last_activity_at)}<br/>
+        ${renderWhatsappStatus(row)}
+      </small>
+    </div>
+  `);
+
+  renderSimpleList("recent-logins", data.recent_logins, row => `
+    <div class="list-item">
+      <strong class="${row.success ? "status-ok" : "status-error"}">${row.success ? "Login OK" : "Falha de login"}</strong>
+      <small>${escapeHtml(row.email || "sem email")} · ${formatDate(row.created_at)}<br/>${escapeHtml(row.failure_reason || row.ip_address || "sem detalhe")}</small>
+    </div>
+  `);
+
+  renderSimpleList("recent-errors", data.recent_errors, row => `
+    <div class="list-item">
+      <strong class="${row.level === "error" ? "status-error" : row.level === "warning" ? "status-warn" : "status-ok"}">${escapeHtml(row.event_type)}</strong>
+      <small>${formatDate(row.created_at)} · ${escapeHtml(row.source || "sistema")}<br/>${escapeHtml(row.message)}</small>
+    </div>
+  `);
+
+  renderSimpleList("recent-ops", data.recent_ops, row => `
+    <div class="list-item">
+      <strong class="${row.level === "error" ? "status-error" : row.level === "warning" ? "status-warn" : "status-ok"}">${escapeHtml(row.event_type)}</strong>
+      <small>${formatDate(row.created_at)} · ${escapeHtml(row.source || "sistema")}<br/>${escapeHtml(row.message)}</small>
+    </div>
+  `);
+
+  document.getElementById("top-users").innerHTML = data.top_users.map(row => `
+    <tr>
+      <td>${escapeHtml(row.email)}</td>
+      <td>${formatDate(row.last_activity_at)}</td>
+      <td>${formatInt(row.total_transactions)}</td>
+      <td>${formatMoney(row.net_flow)}</td>
+    </tr>
+  `).join("") || `<tr><td colspan="4" class="empty">Sem usuários suficientes ainda.</td></tr>`;
+
+  document.getElementById("monthly-financials").innerHTML = data.monthly_financials.map(row => `
+    <tr>
+      <td>${new Intl.DateTimeFormat("pt-BR", { month: "short", year: "numeric" }).format(new Date(row.month))}</td>
+      <td>${formatMoney(row.revenue)}</td>
+      <td>${formatMoney(row.expenses)}</td>
+      <td>${formatInt(row.transaction_count)}</td>
+    </tr>
+  `).join("") || `<tr><td colspan="4" class="empty">Sem dados agregados ainda.</td></tr>`;
+}
+
+function renderWhatsappStatus(row) {
+  const connected = Boolean(row.has_whatsapp_identity) || row.phone_status === "confirmed" || Boolean(row.whatsapp_verified_at);
+  if (connected) {
+    return `<span class="pill pill-ok">WhatsApp conectado</span>`;
+  }
+  if (row.phone_status === "pending") {
+    return `<span class="pill pill-warn">WhatsApp pendente</span>`;
+  }
+  return `<span class="pill pill-muted">WhatsApp não vinculado</span>`;
+}
+
+function renderChart(data) {
+  const labels = data.time_series.map(item => new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit" }).format(new Date(item.bucket)));
+  const ctx = document.getElementById("main-chart");
+  if (mainChart) mainChart.destroy();
+  mainChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        { label: "Cadastros", data: data.time_series.map(item => item.signups), borderColor: "#22c55e", backgroundColor: "rgba(34,197,94,.18)", tension: .3, fill: false },
+        { label: "Logins", data: data.time_series.map(item => item.logins), borderColor: "#60a5fa", backgroundColor: "rgba(96,165,250,.18)", tension: .3, fill: false },
+        { label: "Ativos", data: data.time_series.map(item => item.active_users), borderColor: "#facc15", backgroundColor: "rgba(250,204,21,.18)", tension: .3, fill: false },
+        { label: "Transações", data: data.time_series.map(item => item.transactions), borderColor: "#fb923c", backgroundColor: "rgba(251,146,60,.18)", tension: .3, fill: false }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: "#dbeafe" } }
+      },
+      scales: {
+        x: { ticks: { color: "rgba(219,234,254,.6)" }, grid: { color: "rgba(255,255,255,.05)" } },
+        y: { ticks: { color: "rgba(219,234,254,.6)" }, grid: { color: "rgba(255,255,255,.05)" } }
+      }
+    }
+  });
+}
+
+async function loadOverview(options = {}) {
+  const { force = false } = options;
+  const days = windowSelect.value;
+  const suffix = force ? `&_ts=${Date.now()}` : "";
+  const res = await fetch(`/admin/api/overview?days=${days}${suffix}`, {
+    headers: authHeaders(),
+    cache: "no-store"
+  });
+  if (res.status === 401) {
+    localStorage.removeItem(tokenKey);
+    window.location.href = "/admin/login";
+    return;
+  }
+  if (!res.ok) {
+    throw new Error(`Falha ao atualizar painel (${res.status})`);
+  }
+  const data = await res.json();
+  document.getElementById("generated-at").textContent = `Atualizado em ${formatDate(data.generated_at)}`;
+  renderSummary(data.summary);
+  renderHealth(data.summary, data.recent_errors);
+  renderOpsHealth(data.ops_summary);
+  renderTables(data);
+  renderChart(data);
+  setRefreshStatus(`Atualizado com sucesso em ${formatDate(new Date())}`);
+}
+
+async function refreshOverview(options = {}) {
+  if (isRefreshing) return;
+  setRefreshingState(true);
+  try {
+    await loadOverview(options);
+  } catch (error) {
+    setRefreshStatus("Falha ao atualizar o painel. Tente novamente.", true);
+    throw error;
+  } finally {
+    setRefreshingState(false);
+  }
+}
+
+refreshBtn.addEventListener("click", async (event) => {
+  event.preventDefault();
+  try {
+    await refreshOverview({ force: true });
+  } catch (error) {
+    console.error(error);
+  }
+});
+
+windowSelect.addEventListener("change", async () => {
+  try {
+    await refreshOverview({ force: true });
+  } catch (error) {
+    console.error(error);
+  }
+});
+
+logoutBtn.addEventListener("click", () => {
+  localStorage.removeItem(tokenKey);
+  window.location.href = "/admin/login";
+});
+
+refreshOverview().catch(() => {
+  localStorage.removeItem(tokenKey);
+  window.location.href = "/admin/login";
+});
+</script>
+</body>
+</html>

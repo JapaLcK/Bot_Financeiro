@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from adapters.whatsapp.wa_client import send_text
 from adapters.whatsapp.wa_runtime import process_payload, verify_webhook_signature
 from config.env import load_app_env
+from core.observability import log_system_event_sync
 from core.reports.reports_daily import build_daily_report_text, build_due_bill_reminders
 from db import (
     get_daily_report_prefs,
@@ -38,10 +39,29 @@ async def wa_verify(request: Request):
 
     if not VERIFY_TOKEN:
         logger.error("WA_VERIFY_TOKEN is not configured")
+        log_system_event_sync(
+            "error",
+            "whatsapp_verify_token_missing",
+            "WA_VERIFY_TOKEN nao configurado para verificacao do webhook.",
+            source="wa_app",
+        )
         return PlainTextResponse("forbidden", status_code=403)
 
     if mode == "subscribe" and token == VERIFY_TOKEN and challenge:
+        log_system_event_sync(
+            "info",
+            "whatsapp_webhook_verified",
+            "Webhook do WhatsApp validado com sucesso.",
+            source="wa_app",
+        )
         return PlainTextResponse(challenge)
+    log_system_event_sync(
+        "warning",
+        "whatsapp_webhook_verify_failed",
+        "Tentativa de verificacao do webhook do WhatsApp falhou.",
+        source="wa_app",
+        details={"mode": mode, "token_present": bool(token)},
+    )
     return PlainTextResponse("forbidden", status_code=403)
 
 
@@ -50,6 +70,12 @@ async def wa_webhook(request: Request):
     signature = request.headers.get("X-Hub-Signature-256", "")
     if APP_SECRET and not verify_webhook_signature(raw, signature, APP_SECRET):
         logger.warning("WA webhook forbidden: invalid signature")
+        log_system_event_sync(
+            "warning",
+            "whatsapp_webhook_invalid_signature",
+            "Webhook do WhatsApp rejeitado por assinatura invalida.",
+            source="wa_app",
+        )
         return PlainTextResponse("forbidden", status_code=403)
 
     payload = json.loads(raw.decode("utf-8"))
@@ -62,6 +88,17 @@ async def wa_webhook(request: Request):
             payload.get("entry", [{}])[0].get("changes", [{}])[0].get("field"),
             len(messages),
             len(statuses),
+        )
+        log_system_event_sync(
+            "info",
+            "whatsapp_webhook_received",
+            "Webhook do WhatsApp recebido.",
+            source="wa_app",
+            details={
+                "field": payload.get("entry", [{}])[0].get("changes", [{}])[0].get("field"),
+                "messages": len(messages),
+                "statuses": len(statuses),
+            },
         )
         if not messages and not statuses:
             print(
@@ -77,12 +114,31 @@ async def wa_webhook(request: Request):
                 (status.get("conversation") or {}).get("id"),
                 status.get("errors"),
             )
+            if status.get("errors"):
+                log_system_event_sync(
+                    "warning",
+                    "whatsapp_status_error",
+                    "Status de mensagem do WhatsApp retornou erro.",
+                    source="wa_app",
+                    details={
+                        "status": status.get("status"),
+                        "recipient_id": status.get("recipient_id"),
+                        "errors": status.get("errors"),
+                    },
+                )
     except Exception:
         logger.info("WA webhook received: unable to summarize payload")
     try:
         _queue.put_nowait(payload)
     except asyncio.QueueFull:
         logger.warning("WA queue full, dropping payload")
+        log_system_event_sync(
+            "error",
+            "whatsapp_queue_drop",
+            "Fila interna do WhatsApp lotou e o payload foi descartado.",
+            source="wa_app",
+            details={"queue_maxsize": _queue.maxsize},
+        )
         return JSONResponse({"ok": True, "dropped": True})
 
     return JSONResponse({"ok": True})
@@ -101,6 +157,12 @@ async def _worker_loop():
             logger.info("WA payload processed messages=%s", count)
         except Exception as exc:
             logger.exception("WA worker error: %s", exc)
+            log_system_event_sync(
+                "error",
+                "whatsapp_worker_error",
+                f"Erro no worker do WhatsApp: {exc}",
+                source="wa_app",
+            )
         finally:
             _queue.task_done()
 
@@ -135,15 +197,37 @@ async def _daily_report_loop():
                         await asyncio.to_thread(send_text, to, message)
                     except Exception as exc:
                         logger.warning("WA daily report send error to=%s error=%s", to, exc)
+                        log_system_event_sync(
+                            "warning",
+                            "whatsapp_daily_report_send_failed",
+                            f"Falha ao enviar relatorio diario via WhatsApp: {exc}",
+                            source="wa_app",
+                            user_id=uid,
+                            details={"to": to},
+                        )
 
                 for reminder in reminders:
                     try:
                         mark_card_reminder_sent(uid, reminder["card_id"], today)
                     except Exception as exc:
                         logger.warning("WA card reminder mark error uid=%s card_id=%s error=%s", uid, reminder["card_id"], exc)
+                        log_system_event_sync(
+                            "warning",
+                            "whatsapp_card_reminder_mark_failed",
+                            f"Falha ao marcar lembrete de cartao enviado: {exc}",
+                            source="wa_app",
+                            user_id=uid,
+                            details={"card_id": reminder["card_id"]},
+                        )
 
                 mark_daily_report_sent(uid, today)
         except Exception as exc:
             logger.exception("WA daily report loop error: %s", exc)
+            log_system_event_sync(
+                "error",
+                "whatsapp_daily_report_loop_error",
+                f"Erro no loop de relatorio diario do WhatsApp: {exc}",
+                source="wa_app",
+            )
 
         await asyncio.sleep(30)

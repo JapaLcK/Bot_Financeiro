@@ -19,6 +19,8 @@ import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 
+from core.observability import log_system_event_sync
+
 logger = logging.getLogger(__name__)
 
 # ─── Constantes ───────────────────────────────────────────────────────────────
@@ -46,6 +48,12 @@ async def run_engagement_loop() -> None:
             break
         except Exception as exc:
             logger.error("[engagement] Erro inesperado: %s", exc, exc_info=True)
+            log_system_event_sync(
+                "error",
+                "engagement_loop_error",
+                f"Erro inesperado no loop de engagement: {exc}",
+                source="engagement_scheduler",
+            )
 
         try:
             await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
@@ -98,6 +106,13 @@ async def _check_and_send() -> None:
                 if ok:
                     await loop.run_in_executor(None, db.mark_reengagement_sent, user_id)
                     logger.info("[engagement] reengajamento → user_id=%s (%s)", user_id, email)
+                    log_system_event_sync(
+                        "info",
+                        "engagement_reengagement_sent",
+                        "Email de reengajamento enviado.",
+                        source="engagement_scheduler",
+                        user_id=user_id,
+                    )
 
             continue  # usuário inativo não recebe dica/insight
 
@@ -110,6 +125,13 @@ async def _check_and_send() -> None:
             if ok:
                 await loop.run_in_executor(None, db.mark_tip_sent, user_id)
                 logger.info("[engagement] dica → user_id=%s (%s)", user_id, email)
+                log_system_event_sync(
+                    "info",
+                    "engagement_tip_sent",
+                    "Email de dica enviado.",
+                    source="engagement_scheduler",
+                    user_id=user_id,
+                )
                 tip_sent_now = True
 
         # ── Insight mensal ───────────────────────────────────────────────────
@@ -124,3 +146,10 @@ async def _check_and_send() -> None:
             if ok:
                 await loop.run_in_executor(None, db.mark_insight_sent, user_id)
                 logger.info("[engagement] insight → user_id=%s (%s)", user_id, email)
+                log_system_event_sync(
+                    "info",
+                    "engagement_insight_sent",
+                    "Email de insight enviado.",
+                    source="engagement_scheduler",
+                    user_id=user_id,
+                )

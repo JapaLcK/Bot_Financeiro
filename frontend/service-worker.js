@@ -10,7 +10,7 @@
  * once the network is restored.
  */
 
-const CACHE_NAME = "finance-dash-v1";
+const CACHE_NAME = "finance-dash-v2";
 
 // Resources to pre-cache on install
 const PRECACHE = [
@@ -20,7 +20,7 @@ const PRECACHE = [
 ];
 
 // Never cache these (API calls, WebSocket upgrades)
-const SKIP_CACHE = ["/ws/", "/export/", "/budgets/", "/data/", "/health"];
+const SKIP_CACHE = ["/ws/", "/export/", "/budgets/", "/data/", "/health", "/admin", "/admin/"];
 
 /* ── Install: pre-cache shell ────────────────────────────────────────── */
 self.addEventListener("install", event => {

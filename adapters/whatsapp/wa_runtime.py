@@ -26,6 +26,7 @@ from adapters.whatsapp.wa_help_menu import (
     send_help_section,
 )
 from core.handle_incoming import handle_incoming
+from core.observability import log_system_event_sync
 from core.types import IncomingMessage
 from db import attempt_whatsapp_phone_link, get_or_create_canonical_user
 from utils_phone import mask_phone
@@ -127,6 +128,13 @@ def _download_attachments_sync(att_refs: list[InboundAttachmentRef]) -> list[Att
             )
         except Exception as exc:
             logger.warning("WA attachment download failed media_id=%s error=%s", att.media_id, exc)
+            log_system_event_sync(
+                "warning",
+                "whatsapp_attachment_download_failed",
+                f"Falha ao baixar anexo do WhatsApp: {exc}",
+                source="wa_runtime",
+                details={"media_id": att.media_id},
+            )
     return out
 
 
@@ -167,6 +175,14 @@ def process_message(message: InboundMessage) -> None:
                     "WA phone auto-link success wa_id=%s final_user_id=%s",
                     message.wa_id,
                     auto_link_result["user_id"],
+                )
+                log_system_event_sync(
+                    "info",
+                    "whatsapp_auto_link_success",
+                    "Conta vinculada automaticamente ao WhatsApp.",
+                    source="wa_runtime",
+                    user_id=uid,
+                    details={"wa_id": message.wa_id},
                 )
                 # Envia mensagem de boas-vindas interativa com botão de tutorial
                 try:
@@ -232,6 +248,13 @@ def process_message(message: InboundMessage) -> None:
                     handle_tutorial_button(reply_to, tut_bid)
                 except Exception as e:
                     logger.exception("WA tutorial button error id=%s: %s", tut_bid, e)
+                    log_system_event_sync(
+                        "warning",
+                        "whatsapp_tutorial_button_error",
+                        f"Erro ao processar botao do tutorial no WhatsApp: {e}",
+                        source="wa_runtime",
+                        user_id=uid,
+                    )
                 return
 
             # Itens do menu de ajuda
@@ -242,6 +265,13 @@ def process_message(message: InboundMessage) -> None:
                     send_help_section(reply_to, help_id)
                 except Exception as e:
                     logger.exception("WA help menu error id=%s: %s", help_id, e)
+                    log_system_event_sync(
+                        "warning",
+                        "whatsapp_help_menu_error",
+                        f"Erro ao processar menu de ajuda no WhatsApp: {e}",
+                        source="wa_runtime",
+                        user_id=uid,
+                    )
                 return
 
         # ---------------------------------------------------------------
@@ -314,6 +344,13 @@ def process_message(message: InboundMessage) -> None:
                 _send_reply(reply_to, body)
     except Exception as exc:
         logger.error("WA message processing failed wa_id=%s error=%s", message.wa_id, exc)
+        log_system_event_sync(
+            "error",
+            "whatsapp_message_processing_failed",
+            f"Falha no processamento da mensagem do WhatsApp: {exc}",
+            source="wa_runtime",
+            details={"wa_id": message.wa_id},
+        )
         traceback.print_exc()
 
 
