@@ -50,7 +50,8 @@ body {
 .hero h1 { font-size: 32px; margin-bottom: 8px; }
 .hero p { color: var(--muted); max-width: 820px; line-height: 1.6; }
 .hero-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.hero-actions-group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.hero-actions-group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.hero-actions-stack { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
 button, select {
   border: 1px solid var(--border);
   background: var(--panel-2);
@@ -71,6 +72,7 @@ button:disabled { opacity: .7; cursor: wait; }
   color: var(--muted);
   font-size: 13px;
   text-align: right;
+  width: 100%;
 }
 .refresh-status.error { color: #fda4af; }
 .summary {
@@ -157,7 +159,8 @@ button:disabled { opacity: .7; cursor: wait; }
 @media (max-width: 1080px) {
   .grid, .grid-3 { grid-template-columns: 1fr; }
   .hero { align-items: start; flex-direction: column; }
-  .hero-actions, .hero-actions-group { width: 100%; }
+  .hero-actions, .hero-actions-group, .hero-actions-stack { width: 100%; }
+  .hero-actions-stack { align-items: stretch; }
   .refresh-status { width: 100%; text-align: left; }
 }
 </style>
@@ -171,16 +174,18 @@ button:disabled { opacity: .7; cursor: wait; }
         <p>Visão consolidada de aquisição, crescimento, atividade, transações, carteira financeira e sinais operacionais. O objetivo aqui é detectar tendência e erro cedo, sem misturar com o dashboard do usuário final.</p>
       </div>
       <div class="hero-actions">
-        <div class="hero-actions-group">
-          <select id="window-select">
-            <option value="30">Últimos 30 dias</option>
-            <option value="60">Últimos 60 dias</option>
-            <option value="90">Últimos 90 dias</option>
-          </select>
-          <button id="refresh-btn" class="primary" type="button">Atualizar</button>
-          <button id="logout-btn" type="button">Sair</button>
+        <div class="hero-actions-stack">
+          <div class="hero-actions-group">
+            <select id="window-select">
+              <option value="30">Últimos 30 dias</option>
+              <option value="60">Últimos 60 dias</option>
+              <option value="90">Últimos 90 dias</option>
+            </select>
+            <button id="refresh-btn" class="primary" type="button">Atualizar</button>
+            <button id="logout-btn" type="button">Sair</button>
+          </div>
+          <div class="refresh-status" id="refresh-status"></div>
         </div>
-        <div class="refresh-status" id="refresh-status"></div>
       </div>
     </section>
 
@@ -273,6 +278,8 @@ const windowSelect = document.getElementById("window-select");
 const refreshStatus = document.getElementById("refresh-status");
 let mainChart;
 let isRefreshing = false;
+let currentRefreshController = null;
+let currentRefreshTimeout = null;
 
 function setRefreshStatus(message = "", isError = false) {
   refreshStatus.textContent = message;
@@ -281,12 +288,34 @@ function setRefreshStatus(message = "", isError = false) {
 
 function setRefreshingState(value) {
   isRefreshing = value;
-  refreshBtn.disabled = value;
-  windowSelect.disabled = value;
   refreshBtn.textContent = value ? "Atualizando..." : "Atualizar";
   if (value) {
     setRefreshStatus("Buscando dados mais recentes...");
   }
+}
+
+function clearRefreshRequestState() {
+  if (currentRefreshTimeout) {
+    clearTimeout(currentRefreshTimeout);
+    currentRefreshTimeout = null;
+  }
+  currentRefreshController = null;
+}
+
+function createRefreshSignal() {
+  if (currentRefreshController) {
+    currentRefreshController.abort();
+    clearRefreshRequestState();
+  }
+
+  currentRefreshController = new AbortController();
+  currentRefreshTimeout = setTimeout(() => {
+    if (currentRefreshController) {
+      currentRefreshController.abort("timeout");
+    }
+  }, 12000);
+
+  return currentRefreshController.signal;
 }
 
 function formatInt(value) {
@@ -492,9 +521,11 @@ async function loadOverview(options = {}) {
   const { force = false } = options;
   const days = windowSelect.value;
   const suffix = force ? `&_ts=${Date.now()}` : "";
+  const signal = createRefreshSignal();
   const res = await fetch(`/admin/api/overview?days=${days}${suffix}`, {
     headers: authHeaders(),
-    cache: "no-store"
+    cache: "no-store",
+    signal
   });
   if (res.status === 401) {
     localStorage.removeItem(tokenKey);
@@ -515,14 +546,18 @@ async function loadOverview(options = {}) {
 }
 
 async function refreshOverview(options = {}) {
-  if (isRefreshing) return;
   setRefreshingState(true);
   try {
     await loadOverview(options);
   } catch (error) {
+    if (error?.name === "AbortError") {
+      setRefreshStatus("Atualização cancelada por demora. Pode tentar novamente.", true);
+      return;
+    }
     setRefreshStatus("Falha ao atualizar o painel. Tente novamente.", true);
     throw error;
   } finally {
+    clearRefreshRequestState();
     setRefreshingState(false);
   }
 }
@@ -545,8 +580,17 @@ windowSelect.addEventListener("change", async () => {
 });
 
 logoutBtn.addEventListener("click", () => {
+  if (currentRefreshController) {
+    currentRefreshController.abort();
+  }
   localStorage.removeItem(tokenKey);
   window.location.href = "/admin/login";
+});
+
+window.addEventListener("beforeunload", () => {
+  if (currentRefreshController) {
+    currentRefreshController.abort();
+  }
 });
 
 refreshOverview().catch(() => {

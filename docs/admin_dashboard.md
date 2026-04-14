@@ -83,6 +83,29 @@ Módulos principais:
 - trilha de login
 - captura mínima de erros operacionais
 
+## Como subir localmente
+
+Para abrir o painel admin local sem repetir o comando do `uvicorn`:
+
+```bash
+python dashboard_dev.py
+```
+
+Ou, se preferir, pelo script shell:
+
+```bash
+bash scripts/start_local_dashboard.sh
+```
+
+Opções úteis:
+
+```bash
+UVICORN_RELOAD=1 python dashboard_dev.py
+PORT=8010 python dashboard_dev.py
+UVICORN_RELOAD=1 bash scripts/start_local_dashboard.sh
+PORT=8010 bash scripts/start_local_dashboard.sh
+```
+
 ## O que eu evitaria agora
 
 - permissões complexas com múltiplos perfis de admin
