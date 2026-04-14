@@ -93,10 +93,11 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
             ))]
 
     # ------------------------------------------------------------------
-    # 2. Garante usuário no banco
+    # 2. Garante usuário no banco + registra atividade
     # ------------------------------------------------------------------
     uid = _normalize_user_id(msg)
     db.ensure_user(uid)
+    db.update_last_activity(uid)
 
     # Substitui o user_id normalizado para o restante do fluxo
     msg_normalized = IncomingMessage(

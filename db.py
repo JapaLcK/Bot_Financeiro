@@ -421,6 +421,28 @@ def init_db():
     """
     create index if not exists idx_password_reset_tokens_expires on password_reset_tokens (expires_at)
     """,
+
+    # ─── Engagement tracking ──────────────────────────────────────────────────
+    """
+    alter table auth_accounts add column if not exists
+      engagement_opt_out boolean not null default false
+    """,
+    """
+    alter table auth_accounts add column if not exists
+      last_activity_at timestamptz
+    """,
+    """
+    alter table auth_accounts add column if not exists
+      last_tip_sent_at timestamptz
+    """,
+    """
+    alter table auth_accounts add column if not exists
+      last_insight_sent_at timestamptz
+    """,
+    """
+    alter table auth_accounts add column if not exists
+      last_reengagement_sent_at timestamptz
+    """,
 ]
 
     with get_conn() as conn:
@@ -3730,10 +3752,13 @@ def undo_installment_group(user_id: int, group_id: str):
 def set_daily_report_enabled(user_id: int, enabled: bool) -> None:
     return _db_support.set_daily_report_enabled_impl(get_conn, ensure_user, user_id, enabled)
 
+def set_daily_report_hour(user_id: int, hour: int, minute: int = 0) -> None:
+    return _db_support.set_daily_report_hour_impl(get_conn, ensure_user, user_id, hour, minute)
+
 def get_daily_report_prefs(user_id: int) -> dict:
     return _db_support.get_daily_report_prefs_impl(get_conn, ensure_user, user_id)
 
-def list_users_with_daily_report_enabled(hour: int = 9, minute: int = 0) -> list[int]:
+def list_users_with_daily_report_enabled(hour: int | None = None, minute: int | None = None) -> list[int]:
     return _db_support.list_users_with_daily_report_enabled_impl(get_conn, hour, minute)
 
 def list_identities_by_user(user_id: int) -> list[dict]:
@@ -3965,3 +3990,103 @@ def create_password_reset_token(email: str, minutes_valid: int = 30) -> str | No
 
 def consume_password_reset_token(token: str, new_password: str) -> bool:
     return _db_support.consume_password_reset_token_impl(get_conn, _hash_password, token, new_password)
+
+
+# ─── ENGAGEMENT ───────────────────────────────────────────────────────────────
+
+import logging as _logging
+_eng_logger = _logging.getLogger(__name__)
+
+
+def update_last_activity(user_id: int) -> None:
+    """Atualiza o timestamp de última atividade do usuário no bot. Falha silenciosa."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE auth_accounts SET last_activity_at = now() WHERE user_id = %s",
+                    (user_id,),
+                )
+            conn.commit()
+    except Exception as exc:
+        _eng_logger.warning("update_last_activity falhou para user_id=%s: %s", user_id, exc)
+
+
+def get_users_for_engagement() -> list[dict]:
+    """
+    Retorna todos os usuários com conta verificada e dados de engajamento.
+    Colunas: user_id, email, last_activity_at, last_tip_sent_at,
+             last_insight_sent_at, last_reengagement_sent_at
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT user_id,
+                       email,
+                       last_activity_at,
+                       last_tip_sent_at,
+                       last_insight_sent_at,
+                       last_reengagement_sent_at
+                FROM auth_accounts
+                WHERE email IS NOT NULL
+                  AND coalesce(engagement_opt_out, false) = false
+                ORDER BY user_id
+                """
+            )
+            return cur.fetchall() or []
+
+
+def mark_reengagement_sent(user_id: int) -> None:
+    """Registra que o email de reengajamento foi enviado agora."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE auth_accounts SET last_reengagement_sent_at = now() WHERE user_id = %s",
+                (user_id,),
+            )
+        conn.commit()
+
+
+def mark_tip_sent(user_id: int) -> None:
+    """Registra que o email de dica mensal foi enviado agora."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE auth_accounts SET last_tip_sent_at = now() WHERE user_id = %s",
+                (user_id,),
+            )
+        conn.commit()
+
+
+def mark_insight_sent(user_id: int) -> None:
+    """Registra que o email de insight mensal foi enviado agora."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE auth_accounts SET last_insight_sent_at = now() WHERE user_id = %s",
+                (user_id,),
+            )
+        conn.commit()
+
+
+def set_engagement_opt_out(user_id: int, opt_out: bool) -> None:
+    """Define se o usuário optou por não receber emails de engajamento."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE auth_accounts SET engagement_opt_out = %s WHERE user_id = %s",
+                (opt_out, user_id),
+            )
+        conn.commit()
+
+
+def get_user_by_email(email: str) -> dict | None:
+    """Retorna user_id e dados básicos a partir do email."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT user_id, email, engagement_opt_out FROM auth_accounts WHERE email = %s",
+                (email,),
+            )
+            return cur.fetchone()

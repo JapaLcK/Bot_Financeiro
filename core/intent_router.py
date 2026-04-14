@@ -281,6 +281,11 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
     if intent == "report.enable":
         return h_report.enable(user_id)
 
+    if intent == "report.set_hour":
+        hour   = int(entities.get("hour",   9))
+        minute = int(entities.get("minute", 0))
+        return h_report.set_hour(user_id, hour, minute)
+
     if intent == "report.disable":
         return h_report.disable(user_id)
 

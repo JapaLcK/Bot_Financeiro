@@ -527,11 +527,16 @@ async def lifespan(app: FastAPI):
         print(f"WebSocket: ws://localhost:8000/ws/{uid}")
 
     from adapters.whatsapp.wa_app import _worker_loop as _wa_worker, _daily_report_loop as _wa_daily  # noqa: E402
-    task = asyncio.create_task(push_loop())
-    wa_worker = asyncio.create_task(_wa_worker())
-    wa_daily = asyncio.create_task(_wa_daily())
+    from core.services.engagement_scheduler import run_engagement_loop  # noqa: E402
+
+    task        = asyncio.create_task(push_loop())
+    wa_worker   = asyncio.create_task(_wa_worker())
+    wa_daily    = asyncio.create_task(_wa_daily())
+    engagement  = asyncio.create_task(run_engagement_loop())
+
     yield
-    for t in (task, wa_worker, wa_daily):
+
+    for t in (task, wa_worker, wa_daily, engagement):
         t.cancel()
         try:
             await t
@@ -1077,6 +1082,81 @@ async def serve_sw():
     resp.headers["Service-Worker-Allowed"] = "/"
     resp.headers["Cache-Control"]          = "no-cache"
     return resp
+
+# ─── Unsubscribe ─────────────────────────────────────────────────────────────
+
+import hashlib as _hashlib
+import hmac as _hmac
+import base64 as _base64
+
+from core.services.email_service import make_unsub_url  # noqa: E402
+
+
+def _verify_unsub_token(user_id: int, email: str, token: str) -> bool:
+    """Verifica token de unsubscribe usando a mesma lógica do email_service."""
+    secret   = (JWT_SECRET or "pigbank-unsub").encode()
+    payload  = f"{user_id}:{email}".encode()
+    sig      = _hmac.new(secret, payload, _hashlib.sha256).digest()
+    expected = _base64.urlsafe_b64encode(sig).decode().rstrip("=")
+    return _hmac.compare_digest(expected, token)
+
+
+@app.get("/unsubscribe")
+async def unsubscribe(uid: int, token: str):
+    # busca o email pelo user_id
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT email FROM auth_accounts WHERE user_id = %s", (uid,)
+            )
+            row = await cur.fetchone()
+
+    if not row:
+        return HTMLResponse("<h2>Link inválido.</h2>", status_code=400)
+
+    email = row["email"]
+    if not _verify_unsub_token(uid, email, token):
+        return HTMLResponse("<h2>Link inválido ou expirado.</h2>", status_code=400)
+
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE auth_accounts SET engagement_opt_out = true WHERE user_id = %s",
+                (uid,),
+            )
+        await conn.commit()
+
+    return HTMLResponse("""
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Descadastro — PigBank AI</title>
+  <style>
+    body{margin:0;padding:0;background:#0a0d18;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+         color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh}
+    .card{background:#0f1320;border:1px solid rgba(255,255,255,.1);border-radius:20px;
+          padding:48px 40px;text-align:center;max-width:440px}
+    .icon{font-size:56px;margin-bottom:16px}
+    h1{margin:0 0 12px;font-size:22px;color:#fff}
+    p{color:rgba(255,255,255,.6);line-height:1.7;margin:0 0 24px}
+    a{color:#7c3aed;text-decoration:none}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">🐷</div>
+    <h1>Descadastro confirmado</h1>
+    <p>Você não vai mais receber os emails de dicas e insights do Piggy.<br/>
+       Seus emails de segurança (código de verificação, redefinição de senha) continuam normais.</p>
+    <p style="font-size:13px">Arrependeu? Fale com a gente em
+       <a href="mailto:oi@pigbankai.com">oi@pigbankai.com</a></p>
+  </div>
+</body>
+</html>
+""")
+
 
 # ─── HTTP API routes ─────────────────────────────────────────────────────────
 

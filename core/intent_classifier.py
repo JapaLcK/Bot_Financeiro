@@ -216,6 +216,15 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
     (r"^linkar\s+",
      "categories.create"),
 
+    # relatório diário com horário
+    # cobre: "ligar report diario 20h", "ativar report diario as 8h30", "report diario 21h"
+    (r"\b(ligar|ativar|voltar|habilitar|configurar|report|relatorio)\b.*\b(report|relatorio)\b.*\b\d{1,2}h\b",
+     "report.set_hour"),
+    (r"\b(ligar|ativar|voltar|habilitar|configurar)\b.*\b(report|relatorio)\b.*\b\d{1,2}[:\s]\d{2}\b",
+     "report.set_hour"),
+    (r"\b(report|relatorio)\b.*\b(diario|daily)\b.*\b\d{1,2}h\b",
+     "report.set_hour"),
+
     # vinculação de contas
     (r"^link(\s+\d{6})?$",
      "account.link"),
@@ -321,6 +330,15 @@ def _try_alias(norm: str, original: str) -> IntentResult | None:
                 if m:
                     entities["investment_name"] = m.group(1).strip()
 
+            elif intent == "report.set_hour":
+                # tenta "20h", "20h30", "20:30", "8 30" etc.
+                mh = re.search(r"\b(\d{1,2})h(\d{2})?\b", norm)
+                if not mh:
+                    mh = re.search(r"\b(\d{1,2})[:\s](\d{2})\b", norm)
+                if mh:
+                    entities["hour"]   = int(mh.group(1))
+                    entities["minute"] = int(mh.group(2)) if mh.group(2) else 0
+
             elif intent == "account.link":
                 m = re.search(r"link\s+(\d{6})", norm)
                 if m:
@@ -371,7 +389,8 @@ CATÁLOGO DE INTENTS:
 - categories.create    → quer criar regra de categoria (entities: keyword, category_name)
 - categories.delete    → quer remover regra (entities: keyword)
 - report.daily         → quer o resumo/relatório do dia
-- report.enable        → quer ativar relatório diário
+- report.enable        → quer ativar relatório diário (sem especificar horário)
+- report.set_hour      → quer ativar relatório diário com horário específico (entities: hour, minute)
 - report.disable       → quer desativar relatório diário
 - dashboard.open       → quer acessar o dashboard
 - account.link         → quer vincular plataformas (entities: code?)

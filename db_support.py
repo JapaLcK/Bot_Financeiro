@@ -94,6 +94,25 @@ def set_daily_report_enabled_impl(get_conn, ensure_user, user_id: int, enabled: 
         conn.commit()
 
 
+def set_daily_report_hour_impl(get_conn, ensure_user, user_id: int, hour: int, minute: int = 0) -> None:
+    """Habilita o relatório diário e define o horário de envio."""
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into daily_report_prefs(user_id, enabled, hour, minute)
+                values (%s, true, %s, %s)
+                on conflict (user_id) do update
+                  set enabled = true,
+                      hour    = excluded.hour,
+                      minute  = excluded.minute
+                """,
+                (user_id, hour, minute),
+            )
+        conn.commit()
+
+
 def get_daily_report_prefs_impl(get_conn, ensure_user, user_id: int) -> dict:
     ensure_user(user_id)
     with get_conn() as conn:
@@ -116,21 +135,39 @@ def get_daily_report_prefs_impl(get_conn, ensure_user, user_id: int) -> dict:
                 return {"enabled": bool(row[0]), "hour": int(row[1]), "minute": int(row[2])}
 
 
-def list_users_with_daily_report_enabled_impl(get_conn, hour: int = 9, minute: int = 0) -> list[int]:
+def list_users_with_daily_report_enabled_impl(get_conn, hour: int | None = None, minute: int | None = None) -> list[int]:
+    """
+    Retorna IDs de todos os usuários com relatório diário habilitado.
+    Se hour/minute forem passados, filtra também pelo horário configurado
+    (usado pelo scheduler do Discord que roda em horário fixo).
+    O loop do WhatsApp chama sem argumentos e faz a comparação de horário
+    por conta própria, permitindo horários por usuário.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                select u.id
-                from users u
-                left join daily_report_prefs p on p.user_id=u.id
-                where coalesce(p.enabled, true) = true
-                  and coalesce(p.hour, 9) = %s
-                  and coalesce(p.minute, 0) = %s
-                order by u.id asc
-                """,
-                (hour, minute),
-            )
+            if hour is not None and minute is not None:
+                cur.execute(
+                    """
+                    select u.id
+                    from users u
+                    left join daily_report_prefs p on p.user_id=u.id
+                    where coalesce(p.enabled, true) = true
+                      and coalesce(p.hour, 9) = %s
+                      and coalesce(p.minute, 0) = %s
+                    order by u.id asc
+                    """,
+                    (hour, minute),
+                )
+            else:
+                cur.execute(
+                    """
+                    select u.id
+                    from users u
+                    left join daily_report_prefs p on p.user_id=u.id
+                    where coalesce(p.enabled, true) = true
+                    order by u.id asc
+                    """,
+                )
             rows = cur.fetchall() or []
             out = []
             for r in rows:
