@@ -1011,7 +1011,7 @@ async def dashboard_short_link(code: str):
 
     user_id = consume_dashboard_session(code)
     if not user_id:
-        return HTMLResponse(content=f"""<!DOCTYPE html>
+        expired_html = """<!DOCTYPE html>
 <html lang="pt-BR">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Link expirado</title>
@@ -1033,9 +1033,10 @@ a:hover{background:rgba(124,58,237,.65)}
 <h2>Link expirado ou inválido</h2>
 <p>Este link de acesso ao dashboard expirou ou já foi usado.<br>
 Solicite um novo link digitando <strong style="color:rgba(255,255,255,.8)">dashboard</strong> no bot.<br>
-Os links expiram em {DASHBOARD_MAGIC_LINK_MINUTES} minutos e funcionam uma única vez.</p>
+Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</p>
 <a href="/">← Página inicial</a>
-</div></body></html>""", status_code=401)
+</div></body></html>""".replace("__MAGIC_LINK_MINUTES__", str(DASHBOARD_MAGIC_LINK_MINUTES))
+        return HTMLResponse(content=expired_html, status_code=401)
 
     dash_token = make_dashboard_token(int(user_id), hours=DASHBOARD_SESSION_HOURS)
     return RedirectResponse(url=f"/app?token={dash_token}", status_code=302)
