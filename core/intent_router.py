@@ -299,6 +299,10 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
     if intent == "help.tutorial":
         return h_help.tutorial(platform)
 
+    # --- CDI ---
+    if intent == "cdi.check":
+        return h_investments.check_cdi()
+
     # --- vinculação ---
     if intent == "account.link":
         code = entities.get("code")

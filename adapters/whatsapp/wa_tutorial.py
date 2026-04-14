@@ -128,13 +128,14 @@ def _step_4(wa_id: str) -> None:
         header="Passo 4 de 6 — Investimentos 📈",
         body=(
             "Acompanhe suas aplicações com rendimento automático:\n\n"
+            "• *criar investimento CDB 1% ao mês*\n"
             "• *criar investimento CDB 110% CDI*\n"
             "• *criar investimento Tesouro 0,03% ao dia*\n"
             "• *apliquei 200 no investimento CDB*\n"
             "• *retirei 100 do investimento CDB*\n"
             "• *listar investimentos*\n"
-            "• *ver cdi* → taxa CDI atual\n\n"
-            "💡 O rendimento é calculado automaticamente pelo bot!"
+            "• *ver cdi* → consulta a taxa CDI atual\n\n"
+            "💡 O rendimento é calculado automaticamente!"
         ),
         footer="Próximo: importar extrato bancário",
         buttons=[

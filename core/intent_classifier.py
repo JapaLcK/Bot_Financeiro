@@ -104,6 +104,15 @@ _EXACT: dict[str, str] = {
     "minhas faturas":           "credit.handle",
     "parcelamentos":            "credit.handle",
     "listar parcelamentos":     "credit.handle",
+    # CDI
+    "ver cdi":                  "cdi.check",
+    "cdi":                      "cdi.check",
+    "taxa cdi":                 "cdi.check",
+    "qual cdi":                 "cdi.check",
+    "qual a cdi":               "cdi.check",
+    "qual e o cdi":             "cdi.check",
+    "cdi hoje":                 "cdi.check",
+    "cdi atual":                "cdi.check",
     # ajuda
     "ajuda":                    "help",
     "help":                     "help",

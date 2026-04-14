@@ -3,6 +3,9 @@ from __future__ import annotations
 import db
 from utils_text import fmt_brl, fmt_rate
 from investment_parse import parse_interest
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def list_investments(user_id: int) -> str:
@@ -80,6 +83,45 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
         if "saldo insuficiente" in err.lower() or "insufficient" in err.lower():
             return "Saldo insuficiente na conta para esse aporte."
         return f"Erro ao aportar: {err}"
+
+
+def check_cdi() -> str:
+    """
+    Retorna a taxa CDI anual (a.a.) mais recente do Banco Central.
+    Usa a função get_latest_cdi_aa do db, que consulta o SGS/BCB.
+    """
+    try:
+        with db.get_conn() as conn:
+            with conn.cursor() as cur:
+                res = db.get_latest_cdi_aa(cur)
+
+        if not res:
+            return (
+                "⚠️ Não consegui obter a taxa CDI agora.\n"
+                "O Banco Central pode estar fora do ar. Tente novamente em alguns minutos."
+            )
+
+        ref_date, cdi_aa = res
+        # Calcula estimativa mensal e diária para contexto
+        cdi_mensal = ((1 + cdi_aa / 100) ** (1 / 12) - 1) * 100
+        cdi_diaria = ((1 + cdi_aa / 100) ** (1 / 252) - 1) * 100
+
+        return (
+            f"📊 *Taxa CDI — Banco Central*\n\n"
+            f"📅 Referência: {ref_date.strftime('%d/%m/%Y')}\n"
+            f"📈 *CDI a.a.:* {cdi_aa:.2f}%\n"
+            f"📆 CDI mensal (aprox.): {cdi_mensal:.4f}%\n"
+            f"📆 CDI diário (aprox.): {cdi_diaria:.5f}%\n\n"
+            f"💡 Para criar um investimento atrelado ao CDI:\n"
+            f"_criar investimento CDB 110% CDI_"
+        )
+
+    except Exception as e:
+        logger.exception("check_cdi error: %s", e)
+        return (
+            "⚠️ Erro ao consultar a taxa CDI.\n"
+            "Verifique sua conexão ou tente novamente em instantes."
+        )
 
 
 def withdraw(user_id: int, text: str, entities: dict) -> str:
