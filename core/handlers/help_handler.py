@@ -90,6 +90,7 @@ def _infer_precise_help(norm: str) -> str | None:
         return (
             "🧾 Para consultar ou pagar uma fatura, use:\n"
             "• `fatura Nubank`\n"
+            "• `listar faturas`\n"
             "• `pagar fatura Nubank 1200`\n"
             "• `pagar fatura Nubank com saldo`"
         )
