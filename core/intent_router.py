@@ -108,6 +108,10 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
     confidence = result.confidence
     entities   = result.entities or {}
 
+    inferred_help = h_help.infer_help_from_text(text, platform)
+    if inferred_help is not None:
+        return inferred_help
+
     # -----------------------------------------------------------------------
     # 0. Esclarecimento pendente — tem prioridade máxima
     #    Se o bot fez uma pergunta e está esperando resposta, usa esta mensagem

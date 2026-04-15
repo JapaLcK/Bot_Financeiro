@@ -336,6 +336,86 @@ def test_contextual_help_para_cartao_quando_nao_entende(user_id):
     assert "fatura nubank" in response
 
 
+def test_route_pergunta_como_registrar_compra_no_credito(user_id):
+    msg = IncomingMessage(
+        platform="discord",
+        user_id=user_id,
+        text="como faço para registrar compras no cartao de credito",
+    )
+
+    response = route(classify(msg.text), msg)
+
+    assert "Para registrar uma compra no crédito" in response
+    assert "credito 150 mercado" in response
+    assert "apagar CC17" in response
+
+
+def test_route_pergunta_como_criar_caixinha(user_id):
+    msg = IncomingMessage(
+        platform="discord",
+        user_id=user_id,
+        text="como faço para criar uma caixinha",
+    )
+
+    response = route(classify(msg.text), msg)
+
+    assert "Para criar uma caixinha" in response
+    assert "criar caixinha viagem" in response
+
+
+def test_route_pergunta_como_importar_ofx(user_id):
+    msg = IncomingMessage(
+        platform="discord",
+        user_id=user_id,
+        text="como faço para importar um extrato ofx",
+    )
+
+    response = route(classify(msg.text), msg)
+
+    assert "Para importar um OFX" in response
+    assert "importar ofx" in response
+
+
+def test_route_pergunta_como_fazer_um_lancamento(user_id):
+    msg = IncomingMessage(
+        platform="discord",
+        user_id=user_id,
+        text="como faço para fazer um lançamento",
+    )
+
+    response = route(classify(msg.text), msg)
+
+    assert "Para fazer um lançamento" in response
+    assert "gastei 50 mercado" in response
+
+
+def test_route_pergunta_como_apagar_compra_no_credito(user_id):
+    msg = IncomingMessage(
+        platform="discord",
+        user_id=user_id,
+        text="como faço para apagar tal compra no crédito",
+    )
+
+    response = route(classify(msg.text), msg)
+
+    assert "Para apagar uma compra no crédito" in response
+    assert "apagar CC17" in response
+
+
+def test_route_pergunta_como_apagar_uma_parcela(user_id):
+    msg = IncomingMessage(
+        platform="discord",
+        user_id=user_id,
+        text="como faço para apagar uma parcela",
+    )
+
+    response = route(classify(msg.text), msg)
+
+    assert "Para apagar um parcelamento" in response
+    assert "apagar PCAB12CD34" in response
+    assert "parcelamentos" in response
+
+
 def test_route_criar_cartao_pelo_fluxo_central(user_id):
     msg = IncomingMessage(
         platform="discord",

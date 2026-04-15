@@ -411,6 +411,47 @@ def _format_cards_list(user_id: int, cards: list[dict]) -> str:
     return "\n".join(lines).strip()
 
 
+def _instructional_credit_help(text: str) -> str | None:
+    norm = normalize_text(text)
+    if not any(expr in norm for expr in ("como faco", "como faço", "me ensina", "me explique", "como registrar", "como usar")):
+        return None
+
+    if any(expr in norm for expr in ("compra", "compras", "cartao de credito", "cartao", "credito")):
+        return (
+            "💳 Para registrar compras no cartão de crédito, você pode usar:\n"
+            "• `credito 150 mercado`\n"
+            "• `credito Nubank 150 mercado`\n"
+            "• `gastei 150 no cartao Nubank`\n\n"
+            "Depois do registro, eu te mostro um código como **CC17** para facilitar apagar depois com `apagar CC17`."
+        )
+
+    if any(expr in norm for expr in ("parcelamento", "parcelar", "parcela")):
+        return (
+            "💳 Para parcelar uma compra, use:\n"
+            "• `parcelar 600 em 3x no cartao Nubank`\n"
+            "• `parcelei 300 em 6x no cartao Nubank`\n\n"
+            "Para ver os parcelamentos ativos, mande `parcelamentos`."
+        )
+
+    if any(expr in norm for expr in ("apagar", "remover", "excluir", "desfazer")):
+        return (
+            "🗑️ Para apagar algo no crédito:\n"
+            "• `apagar CC17` → apaga uma compra no cartão\n"
+            "• `apagar PCAB12CD34` → apaga um parcelamento\n\n"
+            "Lançamentos comuns continuam sendo apagados com `apagar 17`."
+        )
+
+    if "fatura" in norm:
+        return (
+            "🧾 Para consultar ou pagar fatura:\n"
+            "• `fatura Nubank`\n"
+            "• `pagar fatura Nubank 1200`\n"
+            "• `pagar fatura Nubank com saldo`"
+        )
+
+    return None
+
+
 def _ask_credit_limit_or_finish(user_id: int, payload: dict) -> str:
     """Pergunta sobre limite de crédito antes de finalizar o setup, se ainda não perguntou."""
     if payload.get("credit_limit_asked"):
@@ -766,6 +807,10 @@ def handle(user_id: int, text: str) -> str | None:
     t = (text or "").strip()
     if not t:
         return None
+
+    instructional_help = _instructional_credit_help(t)
+    if instructional_help is not None:
+        return instructional_help
 
     if _is_credit_delete_command(t):
         group_id = _extract_installment_group_id(user_id, t)
