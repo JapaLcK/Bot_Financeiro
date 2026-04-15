@@ -517,12 +517,8 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         if limit_val is None or float(limit_val) <= 0:
             return "Me diga o valor do limite. Ex: **5000** ou responda **não** para pular."
         set_card_limit(user_id, card_id, float(limit_val))
-        card = get_card_by_id(user_id, card_id)
-        limit_txt = fmt_brl(float(limit_val))
-        return (
-            f"✅ Limite de {limit_txt} definido para **{card['name'] if card else ''}**!\n"
-            + _finish_card_setup(user_id, card_id, ask_primary=bool(payload.get("ask_primary")))
-        )
+        # O limite já aparece no _card_summary dentro de _finish_card_setup — não precisa prefixar
+        return _finish_card_setup(user_id, card_id, ask_primary=bool(payload.get("ask_primary")))
 
     if step == "set_primary":
         card_id = int(payload["card_id"])
@@ -553,7 +549,7 @@ def handle(user_id: int, text: str) -> str | None:
     if any(x in t_norm for x in ("mudar", "trocar", "definir", "colocar")) and any(x in t_norm for x in ("cartao principal", "cartao padrao", "cartao padrão", "principal")):
         return _ask_set_primary_flow(user_id, _find_card_name_in_text(user_id, t))
 
-    if any(x in t_norm for x in ("fecha dia", "vence dia")) and "cartao" in t_norm:
+    if any(x in t_norm for x in ("fecha dia", "vence dia")) and "cartao" in t_norm and not any(x in t_norm for x in ("criar", "registrar", "novo cartao")):
         cards = list_cards(user_id)
         if not cards:
             return "📭 Você ainda não tem cartões cadastrados."
