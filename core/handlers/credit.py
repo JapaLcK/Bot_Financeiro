@@ -25,6 +25,8 @@ from db import (
     set_card_limit,
     set_default_card,
     set_pending_action,
+    undo_credit_transaction,
+    undo_installment_group,
     update_card_reminder_settings,
 )
 from utils_date import extract_date_from_text, fmt_br, now_tz, today_tz
@@ -110,6 +112,133 @@ def _infer_category(user_id: int, desc: str) -> str:
         except Exception:
             pass
     return categoria
+
+
+def _is_natural_credit_purchase(text: str) -> bool:
+    norm = normalize_text(text)
+    if norm.startswith("paguei fatura"):
+        return False
+    if not re.match(r"^(gastei|paguei|comprei|debitei|gasto)\b", norm):
+        return False
+    return any(token in norm for token in ("cartao", "credito"))
+
+
+def _extract_card_reference_for_purchase(user_id: int, text: str) -> tuple[str | None, str | None]:
+    explicit_name = _find_card_name_in_text(user_id, text)
+    if explicit_name:
+        return explicit_name, None
+
+    norm = normalize_text(text)
+    if any(x in norm for x in ("cartao principal", "cartao padrao", "cartao padrão", "no credito", "no crédito", "credito", "crédito")):
+        return None, None
+
+    m = re.search(r"\bcart[aã]o\s+(.+)$", text, re.IGNORECASE)
+    if not m:
+        return None, None
+
+    candidate = m.group(1).strip()
+    candidate = re.split(r"\b(com|para|pra|em|dia|hoje|ontem)\b", candidate, maxsplit=1, flags=re.IGNORECASE)[0].strip(" -:;,.")
+    if not candidate:
+        return None, None
+
+    if normalize_text(candidate) in {"principal", "padrao", "padrão"}:
+        return None, None
+
+    return candidate, candidate
+
+
+def _clean_credit_purchase_description(text: str, card_name: str | None) -> str:
+    desc = text.strip()
+    desc = re.sub(r"^\s*(gastei|paguei|comprei|debitei|gasto)\b", "", desc, flags=re.IGNORECASE).strip()
+    desc = re.sub(r"\d+(?:[.,]\d+)?", "", desc, count=1).strip()
+    desc = re.sub(r"^\s*reais?\b", "", desc, flags=re.IGNORECASE).strip()
+    desc = re.sub(r"\b(?:no|na|em|com)\s+cr[eé]dito\b", "", desc, flags=re.IGNORECASE).strip()
+    desc = re.sub(r"\b(?:no|na|em|com)\s+cart[aã]o\s+(?:principal|padr[aã]o)\b", "", desc, flags=re.IGNORECASE).strip()
+    if card_name:
+        desc = re.sub(
+            rf"\b(?:no|na|em|com)\s+cart[aã]o\s+{re.escape(card_name)}\b",
+            "",
+            desc,
+            flags=re.IGNORECASE,
+        ).strip()
+    desc = re.sub(r"\s+", " ", desc).strip(" -:;,.")
+    return desc
+
+
+def try_handle_natural_credit_purchase(user_id: int, text: str) -> str | None:
+    if not _is_natural_credit_purchase(text):
+        return None
+
+    dt_evento, text_without_date = extract_date_from_text(text)
+    if dt_evento is None:
+        dt_evento = now_tz()
+    purchased_at = dt_evento.date()
+    base_text = (text_without_date or text).strip()
+
+    valor = parse_money(base_text)
+    if valor is None:
+        return "❌ Não achei o valor da compra no crédito. Ex: `gastei 120 no cartao nubank`"
+
+    card_name_hint, unknown_card_candidate = _extract_card_reference_for_purchase(user_id, base_text)
+    if unknown_card_candidate and not get_card_id_by_name(user_id, unknown_card_candidate):
+        return f"❌ Não achei o cartão '{unknown_card_candidate}'. Crie com: criar cartao {unknown_card_candidate} fecha 10 vence 17"
+
+    card_id, _resolved_name = _pick_card_id(user_id, card_name_hint)
+    if not card_id:
+        return "❓ Você não tem cartão padrão. Defina com: padrao NOME (ou crie: criar cartao nubank fecha 10 vence 17)"
+
+    card = get_card_by_id(user_id, card_id)
+    card_label = card["name"] if card else (card_name_hint or "cartão")
+
+    desc = _clean_credit_purchase_description(base_text, card_name_hint or unknown_card_candidate)
+    nota = normalize_text(desc) if desc else "compra no credito"
+    categoria = _infer_category(user_id, desc or base_text)
+
+    try:
+        tx_id, due, _bill_id = add_credit_purchase(
+            user_id=user_id,
+            card_id=card_id,
+            valor=float(valor),
+            categoria=categoria,
+            nota=nota,
+            purchased_at=purchased_at,
+        )
+        return (
+            f"💳 Compra no crédito registrada ({card_label}): {fmt_brl(valor)}\n"
+            f"📅 Data da compra: {fmt_br(purchased_at)}\n"
+            f"📌 Fatura atual: {fmt_brl(due)}\n"
+            f"ID crédito: CT#{tx_id}"
+        )
+    except Exception as e:
+        return f"❌ Erro registrando compra no crédito: {e}"
+
+
+def _extract_credit_transaction_id(text: str) -> int | None:
+    norm = normalize_text(text)
+    m = re.search(r"\bct\s*#?\s*(\d+)\b", norm)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
+def _extract_installment_group_id(text: str) -> str | None:
+    norm = normalize_text(text)
+    if not any(x in norm for x in ("grupo", "group")):
+        return None
+    m = re.search(r"\b(?:grupo|group)\s+([0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b", norm)
+    if not m:
+        return None
+    return m.group(1)
+
+
+def _is_credit_delete_command(text: str) -> bool:
+    norm = normalize_text(text)
+    if not any(x in norm for x in ("desfazer", "apagar", "excluir", "remover", "delete", "deletar")):
+        return False
+    return "ct" in norm or "grupo" in norm or "group" in norm
 
 
 def _is_yes(text: str) -> bool:
@@ -542,6 +671,42 @@ def handle(user_id: int, text: str) -> str | None:
     t = (text or "").strip()
     if not t:
         return None
+
+    if _is_credit_delete_command(t):
+        group_id = _extract_installment_group_id(t)
+        if group_id:
+            try:
+                res = undo_installment_group(user_id, group_id)
+                if not res:
+                    return "❌ Não achei esse grupo de parcelamento."
+                return (
+                    f"🗑️ Parcelamento desfeito (grupo {res['group_id']}).\n"
+                    f"Removido: {fmt_brl(res['removed_total'])} em {res['removed_count']} itens."
+                )
+            except Exception as e:
+                return f"❌ Erro ao desfazer grupo: {e}"
+
+        ct_id = _extract_credit_transaction_id(t)
+        if ct_id is not None:
+            try:
+                res = undo_credit_transaction(user_id, ct_id)
+                if not res:
+                    return f"❌ Não achei o crédito CT#{ct_id}."
+                if res["mode"] == "group":
+                    return (
+                        f"🗑️ Parcelamento desfeito (grupo {res['group_id']}).\n"
+                        f"Removido: {fmt_brl(res['removed_total'])} em {res['removed_count']} itens."
+                    )
+                return (
+                    f"🗑️ Crédito CT#{ct_id} desfeito.\n"
+                    f"Removido: {fmt_brl(res['removed_total'])}."
+                )
+            except Exception as e:
+                return f"❌ Erro ao desfazer CT#{ct_id}: {e}"
+
+    natural_credit = try_handle_natural_credit_purchase(user_id, t)
+    if natural_credit is not None:
+        return natural_credit
 
     t_low = t.lower().strip()
     t_norm = normalize_text(t)

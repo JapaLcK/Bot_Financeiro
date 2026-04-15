@@ -202,6 +202,14 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
     (r"^apagar\s+(?:id\s+)?#?(\d+)$",
      "launches.delete"),
 
+    # desfazer / apagar compras no crédito
+    (r"^(desfazer|apagar|excluir|remover|deletar|delete)\b.*\b(ct|grupo|group)\b",
+     "credit.handle"),
+
+    # compra no crédito em linguagem natural
+    (r"^(gastei|paguei|comprei|debitei|gasto)\b.*\b(cartao|credito)\b",
+     "credit.handle"),
+
     # despesa / receita — detecta padrão sem chamar IA
     (r"^(gastei|paguei|comprei|debitei|gasto|mandei|enviei|pixei)\b",
      "launches.add"),

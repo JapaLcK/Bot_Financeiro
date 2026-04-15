@@ -1,6 +1,7 @@
 from core.intent_classifier import classify
 from core.intent_router import route
 from core.reports.reports_daily import build_due_bill_reminders
+from core.services.quick_entry import handle_quick_entry
 from core.types import IncomingMessage
 from core.handlers.pending import resolve_delete
 from datetime import date
@@ -10,8 +11,10 @@ from db import (
     add_launch_and_update_balance,
     create_card,
     get_balance,
+    get_open_bill_summary,
     get_pending_action,
     list_cards,
+    set_default_card,
     set_pending_action,
 )
 
@@ -81,6 +84,63 @@ def test_classify_ontem_gastei_e_lancamento():
     result = classify("ontem gastei 40,80 com rifa")
 
     assert result.intent == "launches.add"
+
+
+def test_classify_gastei_no_cartao_vai_para_credito():
+    result = classify("gastei 150 no cartao nubank")
+
+    assert result.intent == "credit.handle"
+
+
+def test_classify_apagar_ct_vai_para_credito():
+    result = classify("apagar CT#16")
+
+    assert result.intent == "credit.handle"
+
+
+def test_route_gasto_no_cartao_nao_debita_saldo(user_id):
+    card_id = create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    set_default_card(user_id, card_id)
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="gastei 150 no cartao nubank")
+
+    response = route(classify(msg.text), msg)
+
+    assert "Compra no crédito registrada" in response
+    assert get_balance(user_id) == 0
+    bill, _items = get_open_bill_summary(user_id, card_id, as_of=date.today())
+    assert float(bill["total"]) == 150.0
+
+
+def test_quick_entry_gasto_no_cartao_nao_debita_saldo(user_id):
+    card_id = create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    set_default_card(user_id, card_id)
+
+    response = handle_quick_entry(user_id, "gastei 90 no cartao nubank")
+
+    assert response is not None
+    assert "Compra no crédito registrada" in response.text
+    assert get_balance(user_id) == 0
+    bill, _items = get_open_bill_summary(user_id, card_id, as_of=date.today())
+    assert float(bill["total"]) == 90.0
+
+
+def test_route_apagar_ct_remove_compra_da_fatura(user_id):
+    card_id = create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    tx_id, _due, _bill_id = add_credit_purchase(
+        user_id=user_id,
+        card_id=card_id,
+        valor=150.0,
+        categoria="outros",
+        nota="teste",
+        purchased_at=date.today(),
+    )
+    msg = IncomingMessage(platform="discord", user_id=user_id, text=f"apagar CT#{tx_id}")
+
+    response = route(classify(msg.text), msg)
+
+    assert f"Crédito CT#{tx_id} desfeito" in response
+    bill, _items = get_open_bill_summary(user_id, card_id, as_of=date.today())
+    assert float(bill["total"]) == 0.0
 
 
 def test_route_cartoes_lista_pelo_fluxo_central(user_id):

@@ -191,6 +191,12 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
 # ---------------------------------------------------------------------------
 
 def add(user_id: int, text: str, entities: dict) -> str:
+    from core.handlers import credit as h_credit
+
+    credit_response = h_credit.try_handle_natural_credit_purchase(user_id, text)
+    if credit_response is not None:
+        return credit_response
+
     parsed = parse_receita_despesa_natural(user_id, text)
 
     if parsed:

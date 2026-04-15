@@ -4,6 +4,12 @@ from db import ensure_user, add_launch_and_update_balance
 from utils_text import fmt_brl
 
 def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
+    from core.handlers import credit as h_credit
+
+    credit_response = h_credit.try_handle_natural_credit_purchase(user_id, text)
+    if credit_response is not None:
+        return OutgoingMessage(text=credit_response)
+
     parsed = parse_receita_despesa_natural(user_id, text)
     if not parsed:
         return None
