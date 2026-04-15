@@ -8,6 +8,7 @@ from datetime import date
 from parsers import parse_receita_despesa_natural
 from db import (
     add_credit_purchase,
+    add_credit_purchase_installments,
     add_launch_and_update_balance,
     create_card,
     get_balance,
@@ -577,18 +578,18 @@ def test_route_parcelas_sem_registros_retorna_mensagem_vazia(user_id):
 
 
 def test_route_apagar_grupo_parcelamento(user_id):
-    from db import add_credit_purchase_installments, resolve_installment_group_id
     card_id = create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
-    result = add_credit_purchase_installments(
+    ret = add_credit_purchase_installments(
         user_id=user_id,
         card_id=card_id,
-        valor=300.0,
-        n=3,
+        valor_total=300.0,
+        installments=3,
         categoria="outros",
         nota="teste parcelamento",
         purchased_at=date.today(),
     )
-    group_id = result["group_id"]
+    result_dict = ret[0] if isinstance(ret, tuple) else ret
+    group_id = result_dict["group_id"]
     # Código exibido ao usuário: PC + primeiros 8 hex do UUID sem traços
     raw = str(group_id).replace("-", "").upper()
     code = f"PC{raw[:8]}"
