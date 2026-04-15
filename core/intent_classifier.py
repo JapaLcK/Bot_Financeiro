@@ -187,6 +187,13 @@ _EXACT: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 _ALIAS_PATTERNS: list[tuple[str, str]] = [
+    # saudações — captura qualquer variação antes de chegar na IA
+    (r"^(oi+e*|ol[aá]+|al[oô]+|hello+|hey+|e ?ai+|opa+|eai+)\b",
+     "greeting"),
+    (r"^bom\s+dia\b",  "greeting"),
+    (r"^boa\s+tarde\b", "greeting"),
+    (r"^boa\s+noite\b", "greeting"),
+
     # saldo
     (r"^(quanto tenho na conta|quanto tem na conta|meu saldo|qual meu saldo|ver saldo"
      r"|me fala (o )?meu saldo|me fala o saldo|me diz (o )?saldo|qual (e )?meu saldo|ver meu saldo"
