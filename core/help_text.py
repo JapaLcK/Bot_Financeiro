@@ -31,17 +31,24 @@ HELP_SECTIONS: dict[str, str] = {
         "1) **Registre o básico**\n"
         "• `recebi 1000 salario`\n"
         "• `gastei 50 mercado`\n"
-        "• `saldo`\n\n"
+        "• `saldo`\n"
+        "• `gastos` ou `meus gastos` → últimos lançamentos\n\n"
         "2) **Importe seu extrato (OFX)**\n"
         "• Envie `importar ofx` + anexo `.ofx`\n"
         "• Duplicadas são ignoradas\n\n"
-        "3) **Caixinhas**\n"
+        "3) **Cartão de crédito**\n"
+        "• `criar cartao Nubank fecha 10 vence 17`\n"
+        "• `definir limite Nubank 5000` → define o limite\n"
+        "• `credito 150 mercado` → compra no crédito\n"
+        "• `fatura Nubank` → saldo + uso do limite\n"
+        "• `pagar fatura Nubank com saldo` → paga usando seu saldo\n\n"
+        "4) **Caixinhas**\n"
         "• `criar caixinha viagem`\n"
         "• `coloquei 300 na caixinha viagem`\n\n"
-        "4) **Investimentos**\n"
+        "5) **Investimentos**\n"
         "• `criar investimento CDB 110% CDI`\n"
         "• `apliquei 200 no investimento CDB`\n\n"
-        "5) **Dashboard**\n"
+        "6) **Dashboard**\n"
         "• `dashboard`\n"
     ),
     "ofx": (
@@ -67,6 +74,10 @@ HELP_SECTIONS: dict[str, str] = {
         "• `criar cartao Nubank fecha 10 vence 17`\n"
         "• `cartoes` → lista seus cartões\n"
         "• `padrao Nubank` → define o cartão principal\n\n"
+        "💰 *Limite de crédito:*\n"
+        "• `definir limite Nubank 5000` → define o limite\n"
+        "• `limite Nubank` ou `ver limite` → uso e disponível\n"
+        "• `pagar fatura Nubank com saldo` → paga a fatura usando seu saldo da conta\n\n"
         "💸 *Compras no crédito:*\n"
         "• `credito 150 mercado` → compra no cartão padrão\n"
         "• `credito Nubank 150 mercado` → em cartão específico\n\n"
@@ -74,8 +85,9 @@ HELP_SECTIONS: dict[str, str] = {
         "• `parcelar 600 em 3x no cartao Nubank`\n"
         "• `parcelei 300 em 6x no cartao Nubank`\n\n"
         "📊 *Faturas:*\n"
-        "• `fatura Nubank` → saldo da fatura aberta\n"
-        "• `pagar fatura Nubank 1200` → registra pagamento\n\n"
+        "• `fatura Nubank` → saldo + uso do limite\n"
+        "• `pagar fatura Nubank 1200` → registra pagamento parcial\n"
+        "• `pagar fatura Nubank com saldo` → paga tudo usando o saldo\n\n"
         "🗓️ *Consultas:*\n"
         "• `meu Nubank fecha quando`\n"
         "• `meu Nubank vence quando`\n"
@@ -122,10 +134,13 @@ HELP_SECTIONS: dict[str, str] = {
         "• O painel atualiza automaticamente a cada 30 segundos\n"
     ),
     "launches": (
-    "🧾 **Lançamentos (histórico)**\n"
-    "• `listar lançamentos` → mostra seus lançamentos com ID\n"
-    "• `apagar 228` → apaga pelo ID\n"
-    "• `desfazer` → desfaz o último lançamento criado (quando disponível)\n"
+        "🧾 **Lançamentos (histórico)**\n"
+        "• `gastos` ou `meus gastos` → últimos 10 lançamentos\n"
+        "• `despesas` ou `extrato` → mesmo que acima\n"
+        "• `gastos hoje` / `gastos ontem` → por dia específico\n"
+        "• `listar lançamentos` → histórico com ID\n"
+        "• `apagar 228` → apaga pelo ID\n"
+        "• `desfazer` → desfaz o último lançamento\n"
     ),
     "confirm": (
         "⚠️ **Confirmações**\n"
@@ -203,6 +218,13 @@ HELP_ALIASES: dict[str, str] = {
     "lanc": "launches",
     "lançamentos": "launches",
     "lancamentos": "launches",
+    "gastos": "launches",
+    "despesas": "launches",
+    "extrato": "launches",
+    "historico": "launches",
+    "histórico": "launches",
+    "limite": "credit",
+    "limites": "credit",
     "confirm": "confirm",
     "confirmacoes": "confirm",
     "confirmações": "confirm",
@@ -233,9 +255,9 @@ _SECTION_ALIASES = {
     "invest": {"invest", "investimentos", "investimento"},
     "cdi": {"cdi"},
     "dashboard": {"dashboard", "painel", "sheets", "planilha", "exportar"},
-    "launches": {"lancamentos", "lançamentos", "historico", "histórico"},
+    "launches": {"lancamentos", "lançamentos", "historico", "histórico", "gastos", "despesas", "extrato"},
     "confirm": {"confirm", "confirmacoes", "confirmações", "sim", "nao", "não"},
-    "credit": {"cartao", "cartoes", "cartão", "cartões", "credito", "crédito", "fatura", "faturas", "parcel", "parcelamento", "parcelas"},
+    "credit": {"cartao", "cartoes", "cartão", "cartões", "credito", "crédito", "fatura", "faturas", "parcel", "parcelamento", "parcelas", "limite", "limites"},
     "categories": {"categoria", "categorias", "regras", "regra", "linkar", "palavras", "palavra-chave", "palavras-chave"},
 }
 
