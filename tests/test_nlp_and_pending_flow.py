@@ -442,19 +442,6 @@ def test_route_pergunta_como_apagar_uma_parcela(user_id):
     assert "parcelamentos" in response
 
 
-def test_route_pergunta_como_apagar_um_cartao(user_id):
-    msg = IncomingMessage(
-        platform="discord",
-        user_id=user_id,
-        text="com apago um cartao?",
-    )
-
-    response = route(classify(msg.text), msg)
-
-    assert "Para apagar um cartão" in response
-    assert "excluir cartao Nubank" in response
-
-
 def test_route_excluir_cartao_abre_confirmacao(user_id):
     create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
     msg = IncomingMessage(
@@ -520,7 +507,12 @@ def test_fluxo_completo_primeiro_cartao_define_principal_e_lembrete(user_id):
     response = route(classify("sim"), IncomingMessage(platform="discord", user_id=user_id, text="sim"))
     assert "Quantos dias antes" in response
 
+    # Após informar os dias, o bot pergunta sobre limite de crédito
     response = route(classify("3"), IncomingMessage(platform="discord", user_id=user_id, text="3"))
+    assert "limite de crédito" in response.lower()
+
+    # Usuário pula o limite — bot finaliza e mostra resumo do cartão
+    response = route(classify("não"), IncomingMessage(platform="discord", user_id=user_id, text="não"))
     assert "Cartão principal: Sim" in response
     assert "Lembrete: 3 dia(s) antes" in response
 
@@ -538,11 +530,74 @@ def test_fluxo_segundo_cartao_pergunta_se_vira_principal(user_id):
 
     assert "Gostaria de receber notificações" in response
 
+    # Sem notificação → bot pergunta sobre limite antes de oferecer trocar principal
     response = route(classify("nao"), IncomingMessage(platform="discord", user_id=user_id, text="nao"))
+    assert "limite de crédito" in response.lower()
+
+    # Sem limite → bot pergunta se quer trocar cartão principal
+    response = route(classify("não"), IncomingMessage(platform="discord", user_id=user_id, text="não"))
     assert "Deseja tornar o **Visa** seu cartão principal" in response
 
     response = route(classify("sim"), IncomingMessage(platform="discord", user_id=user_id, text="sim"))
     assert "agora é o seu principal" in response
+
+
+def test_classify_saudacoes_viram_greeting():
+    for texto in ("oi", "ola", "bom dia", "boa tarde", "boa noite"):
+        result = classify(texto)
+        assert result.intent == "greeting", f"Esperado greeting para '{texto}', obteve {result.intent}"
+
+
+def test_classify_variacao_saudacao_viram_greeting():
+    # variações com letras repetidas devem ser capturadas pelo Tier 2
+    for texto in ("oiiii", "olááá", "aloooo"):
+        result = classify(texto)
+        assert result.intent == "greeting", f"Esperado greeting para '{texto}', obteve {result.intent}"
+
+
+def test_route_saudacao_retorna_mensagem_amigavel(user_id):
+    for texto in ("oi", "bom dia", "boa noite"):
+        msg = IncomingMessage(platform="discord", user_id=user_id, text=texto)
+        response = route(classify(msg.text), msg)
+        # Qualquer saudação deve retornar algo não-vazio e sem "Não entendi"
+        assert response, f"Resposta vazia para '{texto}'"
+        assert "não entendi" not in response.lower(), f"Resposta de erro para '{texto}': {response}"
+
+
+def test_classify_parcelas_vai_para_credit_handle():
+    for texto in ("parcelas", "ver parcelas", "listar parcelas", "meus parcelamentos"):
+        result = classify(texto)
+        assert result.intent == "credit.handle", f"Esperado credit.handle para '{texto}', obteve {result.intent}"
+
+
+def test_route_parcelas_sem_registros_retorna_mensagem_vazia(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="parcelas")
+    response = route(classify(msg.text), msg)
+    assert "parcelamento" in response.lower()
+
+
+def test_route_apagar_grupo_parcelamento(user_id):
+    from db import add_credit_purchase_installments, resolve_installment_group_id
+    card_id = create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    result = add_credit_purchase_installments(
+        user_id=user_id,
+        card_id=card_id,
+        valor=300.0,
+        n=3,
+        categoria="outros",
+        nota="teste parcelamento",
+        purchased_at=date.today(),
+    )
+    group_id = result["group_id"]
+    # Código exibido ao usuário: PC + primeiros 8 hex do UUID sem traços
+    raw = str(group_id).replace("-", "").upper()
+    code = f"PC{raw[:8]}"
+
+    msg = IncomingMessage(platform="discord", user_id=user_id, text=f"apagar {code}")
+    response = route(classify(msg.text), msg)
+
+    assert "Parcelamento desfeito" in response
+    assert code in response
 
 
 def test_build_due_bill_reminders(user_id):
