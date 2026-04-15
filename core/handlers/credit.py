@@ -375,8 +375,8 @@ def _purchase_code(tx_id: int) -> str:
     return f"CC{int(tx_id)}"
 
 
-def _group_code(group_id: str | None) -> str:
-    raw = (group_id or "").replace("-", "").upper()
+def _group_code(group_id) -> str:
+    raw = str(group_id or "").replace("-", "").upper()
     return f"PC{raw[:8]}" if raw else "PC?"
 
 
