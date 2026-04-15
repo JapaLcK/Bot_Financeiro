@@ -389,6 +389,19 @@ def test_route_pergunta_como_fazer_um_lancamento(user_id):
     assert "gastei 50 mercado" in response
 
 
+def test_route_pergunta_como_faco_um_lancamento(user_id):
+    msg = IncomingMessage(
+        platform="discord",
+        user_id=user_id,
+        text="como faco um lancamento?",
+    )
+
+    response = route(classify(msg.text), msg)
+
+    assert "Para fazer um lançamento" in response
+    assert "listar lançamentos" in response
+
+
 def test_route_pergunta_como_apagar_compra_no_credito(user_id):
     msg = IncomingMessage(
         platform="discord",
@@ -400,6 +413,19 @@ def test_route_pergunta_como_apagar_compra_no_credito(user_id):
 
     assert "Para apagar uma compra no crédito" in response
     assert "apagar CC17" in response
+
+
+def test_route_pergunta_com_apago_um_cartao(user_id):
+    msg = IncomingMessage(
+        platform="discord",
+        user_id=user_id,
+        text="com apago um cartao?",
+    )
+
+    response = route(classify(msg.text), msg)
+
+    assert "Para apagar um cartão" in response
+    assert "excluir cartao Nubank" in response
 
 
 def test_route_pergunta_como_apagar_uma_parcela(user_id):
@@ -414,6 +440,34 @@ def test_route_pergunta_como_apagar_uma_parcela(user_id):
     assert "Para apagar um parcelamento" in response
     assert "apagar PCAB12CD34" in response
     assert "parcelamentos" in response
+
+
+def test_route_pergunta_como_apagar_um_cartao(user_id):
+    msg = IncomingMessage(
+        platform="discord",
+        user_id=user_id,
+        text="com apago um cartao?",
+    )
+
+    response = route(classify(msg.text), msg)
+
+    assert "Para apagar um cartão" in response
+    assert "excluir cartao Nubank" in response
+
+
+def test_route_excluir_cartao_abre_confirmacao(user_id):
+    create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    msg = IncomingMessage(
+        platform="discord",
+        user_id=user_id,
+        text="excluir cartao Nubank",
+    )
+
+    response = route(classify(msg.text), msg)
+    pending = get_pending_action(user_id)
+
+    assert "Tem certeza que deseja excluir o cartão" in response
+    assert pending["action_type"] == "credit_delete_card"
 
 
 def test_route_criar_cartao_pelo_fluxo_central(user_id):

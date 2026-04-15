@@ -19,6 +19,7 @@ import logging
 from adapters.whatsapp.wa_client import (
     send_interactive_buttons,
     send_interactive_list,
+    send_text,
 )
 from core.help_text import HELP_SECTIONS, _to_whatsapp_md
 
@@ -178,6 +179,20 @@ def send_help_section(wa_id: str, menu_id: str) -> None:
     raw_text = HELP_SECTIONS.get(section_key, "")
     # Converte markdown Discord → WhatsApp
     body_text = _to_whatsapp_md(raw_text)
+
+    if len(body_text) > 900:
+        send_text(to=wa_id, body=body_text)
+        send_interactive_buttons(
+            to=wa_id,
+            header=f"{emoji} {title}",
+            body="Escolha o próximo passo:",
+            footer="Ajuda do PigBank AI",
+            buttons=[
+                {"id": "help_menu", "title": "📋 Menu"},
+                {"id": "tut_start", "title": "🚀 Tutorial"},
+            ],
+        )
+        return
 
     send_interactive_buttons(
         to=wa_id,

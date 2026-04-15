@@ -326,6 +326,13 @@ def _card_summary(card: dict) -> str:
     )
 
 
+def _extract_card_name_for_delete(text: str) -> str | None:
+    m = re.search(r"(?:excluir|apagar|remover|deletar)\s+cart[aã]o\s+(.+)$", text, re.IGNORECASE)
+    if not m:
+        return None
+    return (m.group(1) or "").strip() or None
+
+
 def _purchase_code(tx_id: int) -> str:
     return f"CC{int(tx_id)}"
 
@@ -575,6 +582,30 @@ def _resolve_set_primary(user_id: int, text: str, pending: dict) -> str | None:
     return f"Responda **sim** para tornar **{card['name']}** o principal ou **não** para cancelar."
 
 
+def _resolve_delete_card(user_id: int, text: str, pending: dict) -> str | None:
+    payload = dict(pending.get("payload") or {})
+    card_id = payload.get("card_id")
+    if not card_id:
+        clear_pending_action(user_id)
+        return None
+
+    card = get_card_by_id(user_id, int(card_id))
+    card_name = payload.get("card_name") or (card["name"] if card else "esse cartão")
+
+    if _is_yes(text):
+        deleted = delete_card(user_id, int(card_id))
+        clear_pending_action(user_id)
+        if not deleted:
+            return f"❌ Não consegui excluir o cartão **{card_name}**."
+        return f"✅ Cartão **{card_name}** excluído com sucesso."
+
+    if _is_no(text):
+        clear_pending_action(user_id)
+        return f"Perfeito. Mantive o cartão **{card_name}**."
+
+    return f"Responda **sim** para excluir **{card_name}** ou **não** para cancelar."
+
+
 def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str | None:
     pending = pending or get_pending_action(user_id)
     if not pending:
@@ -582,6 +613,9 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
 
     if pending.get("action_type") == "credit_card_set_primary":
         return _resolve_set_primary(user_id, text, pending)
+
+    if pending.get("action_type") == "credit_delete_card":
+        return _resolve_delete_card(user_id, text, pending)
 
     if pending.get("action_type") != "credit_card_setup":
         return None
@@ -811,6 +845,24 @@ def handle(user_id: int, text: str) -> str | None:
     instructional_help = _instructional_credit_help(t)
     if instructional_help is not None:
         return instructional_help
+
+    delete_card_name = _extract_card_name_for_delete(t)
+    if delete_card_name:
+        card_id = get_card_id_by_name(user_id, delete_card_name)
+        if not card_id:
+            return f"❌ Não achei o cartão '{delete_card_name}'."
+        card = get_card_by_id(user_id, card_id)
+        set_pending_action(
+            user_id,
+            "credit_delete_card",
+            {"card_id": card_id, "card_name": card["name"] if card else delete_card_name},
+            minutes=20,
+        )
+        return (
+            f"⚠️ Tem certeza que deseja excluir o cartão **{card['name']}**?\n"
+            "Isso irá remover também as faturas e transações associadas.\n\n"
+            "Responda **sim** para confirmar ou **não** para cancelar."
+        )
 
     if _is_credit_delete_command(t):
         group_id = _extract_installment_group_id(user_id, t)

@@ -17,22 +17,30 @@ def tutorial(platform: str) -> str:
 
 
 def _infer_precise_help(norm: str) -> str | None:
+    if "cartao" in norm or "cartão" in norm or "cartoes" in norm or "cartões" in norm:
+        if any(expr in norm for expr in ("apagar", "apago", "excluir", "remover", "deletar")) and "compra" not in norm:
+            return (
+                "🗑️ Para apagar um cartão, use o nome dele.\n"
+                "Exemplo: `excluir cartao Nubank`.\n\n"
+                "Eu vou pedir confirmação antes de remover."
+            )
+
     if any(expr in norm for expr in ("lancamento", "lançamento", "lancamentos", "lançamentos")):
-        if any(expr in norm for expr in ("fazer", "criar", "registrar")):
+        if any(expr in norm for expr in ("fazer", "faco", "faço", "criar", "registrar")):
             return (
                 "🧾 Para fazer um lançamento, você pode usar:\n"
                 "• `gastei 50 mercado`\n"
                 "• `recebi 1000 salario`\n\n"
                 "Se quiser ver depois, use `listar lançamentos`."
             )
-        if any(expr in norm for expr in ("apagar", "excluir", "remover")):
+        if any(expr in norm for expr in ("apagar", "apago", "excluir", "remover")):
             return (
                 "🗑️ Para apagar um lançamento comum, use o número dele.\n"
                 "Exemplo: `apagar 17`."
             )
 
     if any(expr in norm for expr in ("compra", "compras")) and any(expr in norm for expr in ("cartao", "cartão", "credito", "crédito")):
-        if any(expr in norm for expr in ("fazer", "registrar", "lancar", "lançar")):
+        if any(expr in norm for expr in ("fazer", "faco", "faço", "registrar", "lancar", "lançar")):
             return (
                 "💳 Para registrar uma compra no crédito, use:\n"
                 "• `credito 150 mercado`\n"
@@ -40,20 +48,20 @@ def _infer_precise_help(norm: str) -> str | None:
                 "• `gastei 150 no cartao Nubank`\n\n"
                 "Depois eu mostro um código como `CC17` para você apagar com `apagar CC17`."
             )
-        if any(expr in norm for expr in ("apagar", "excluir", "remover", "desfazer")):
+        if any(expr in norm for expr in ("apagar", "apago", "excluir", "remover", "desfazer")):
             return (
                 "🗑️ Para apagar uma compra no crédito, use o código dela.\n"
                 "Exemplo: `apagar CC17`."
             )
 
     if any(expr in norm for expr in ("parcela", "parcelas", "parcelamento")):
-        if any(expr in norm for expr in ("apagar", "excluir", "remover", "desfazer")):
+        if any(expr in norm for expr in ("apagar", "apago", "excluir", "remover", "desfazer")):
             return (
                 "🗑️ Para apagar um parcelamento, use o código dele.\n"
                 "Exemplo: `apagar PCAB12CD34`.\n\n"
                 "Se quiser descobrir o código, mande `parcelamentos`."
             )
-        if any(expr in norm for expr in ("fazer", "criar", "registrar", "parcelar")):
+        if any(expr in norm for expr in ("fazer", "faco", "faço", "criar", "registrar", "parcelar")):
             return (
                 "💳 Para parcelar uma compra, use:\n"
                 "• `parcelar 600 em 3x no cartao Nubank`\n"
@@ -61,7 +69,7 @@ def _infer_precise_help(norm: str) -> str | None:
             )
 
     if "caixinha" in norm or "caixinhas" in norm:
-        if any(expr in norm for expr in ("fazer", "criar", "abrir")):
+        if any(expr in norm for expr in ("fazer", "faco", "faço", "criar", "abrir")):
             return (
                 "📦 Para criar uma caixinha, use:\n"
                 "• `criar caixinha viagem`"
@@ -106,6 +114,7 @@ def infer_help_from_text(text: str, platform: str) -> str | None:
         "como vejo",
         "como consultar",
         "como apago",
+        "com apago",
         "como apagar",
         "como removo",
         "como excluir",
