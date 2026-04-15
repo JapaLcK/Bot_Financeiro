@@ -2464,34 +2464,6 @@ def clear_pending_action(user_id: int):
         conn.commit()
 
 
-def set_pending_action(user_id: int, action_type: str, payload: dict, minutes: int = 10):
-    ensure_user(user_id)
-
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes)
-
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                create table if not exists pending_actions (
-                    user_id bigint primary key references users(id) on delete cascade,
-                    action_type text not null,
-                    payload jsonb not null,
-                    created_at timestamptz not null default now(),
-                    expires_at timestamptz not null
-                );
-            """)
-            cur.execute("""
-                insert into pending_actions (user_id, action_type, payload, expires_at)
-                values (%s, %s, %s, %s)
-                on conflict (user_id)
-                do update set action_type = excluded.action_type,
-                              payload = excluded.payload,
-                              created_at = now(),
-                              expires_at = excluded.expires_at
-            """, (user_id, action_type, Jsonb(payload), expires_at))
-        conn.commit()
-
 def export_launches(user_id: int, start_date: date | None = None, end_date: date | None = None):
     """
     Exporta lançamentos do usuário em um período.
@@ -2534,34 +2506,6 @@ def get_launches_by_period(user_id: int, start_date: date, end_date: date):
 def get_summary_by_period(user_id: int, start_date: date, end_date: date):
     """Retorna soma por tipo no período [start_date, end_date] (inclusive)."""
     return _db_support.get_summary_by_period_impl(get_conn, ensure_user, user_id, start_date, end_date)
-
-# Puxa regas somente 1 vez na hora do import ofx
-def list_category_rules(user_id: int) -> list[tuple[str, str]]:
-    """
-    Carrega as regras do usuário 1x (pra usar em batch sem ficar batendo no DB).
-    """
-    ensure_user(user_id)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT keyword, category
-                FROM user_category_rules
-                WHERE user_id = %s
-                ORDER BY LENGTH(keyword) DESC
-                """,
-                (user_id,),
-            )
-            rows = cur.fetchall()
-
-    # seu cursor parece retornar dict_row, mas aqui funciona tanto com dict quanto tuple
-    out = []
-    for r in rows:
-        if isinstance(r, dict):
-            out.append((r["keyword"], r["category"]))
-        else:
-            out.append((r[0], r[1]))
-    return out
 
 def list_category_rules(user_id: int) -> list[tuple[str, str]]:
     ensure_user(user_id)
