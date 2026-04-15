@@ -28,6 +28,7 @@ from core.handlers import (
     dashboard  as h_dashboard,
     account    as h_account,
     pending    as h_pending,
+    greeting   as h_greeting,
 )
 
 # Limiar de confiança para executar sem pedir confirmação
@@ -218,6 +219,11 @@ def _handle_destructive(intent: str, user_id: int, entities: dict, text: str) ->
 
 
 def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str, external_id: str) -> str:
+
+    # --- saudações ---
+    if intent == "greeting":
+        resp = h_greeting.handle_greeting(text)
+        return resp if resp is not None else "👋 Oi! Como posso te ajudar?"
 
     # --- saldo ---
     if intent == "balance.check":

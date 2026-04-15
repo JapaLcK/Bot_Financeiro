@@ -36,6 +36,18 @@ class IntentResult:
 # ---------------------------------------------------------------------------
 
 _EXACT: dict[str, str] = {
+    # saudações
+    "oi":                       "greeting",
+    "oie":                      "greeting",
+    "oii":                      "greeting",
+    "oiii":                     "greeting",
+    "ola":                      "greeting",
+    "alo":                      "greeting",
+    "hello":                    "greeting",
+    "hey":                      "greeting",
+    "bom dia":                  "greeting",
+    "boa tarde":                "greeting",
+    "boa noite":                "greeting",
     # saldo
     "saldo":                    "balance.check",
     "saldo conta":              "balance.check",
