@@ -443,6 +443,12 @@ def init_db():
     alter table auth_accounts add column if not exists
       last_reengagement_sent_at timestamptz
     """,
+
+    # ─── Limite de crédito ────────────────────────────────────────────────────
+    """
+    alter table credit_cards add column if not exists
+      credit_limit numeric
+    """,
 ]
 
     with get_conn() as conn:
@@ -3067,6 +3073,7 @@ def list_cards(user_id: int):
                 """
                 select c.id, c.name, c.closing_day, c.due_day,
                        c.reminders_enabled, c.reminders_days_before, c.reminder_last_sent_on,
+                       c.credit_limit,
                        (u.default_card_id = c.id) as is_default
                 from credit_cards c
                 left join users u on u.id = c.user_id
@@ -3086,6 +3093,7 @@ def get_card_by_id(user_id: int, card_id: int):
                 """
                 select c.id, c.name, c.closing_day, c.due_day,
                        c.reminders_enabled, c.reminders_days_before, c.reminder_last_sent_on,
+                       c.credit_limit,
                        (u.default_card_id = c.id) as is_default
                 from credit_cards c
                 left join users u on u.id = c.user_id
@@ -3095,6 +3103,23 @@ def get_card_by_id(user_id: int, card_id: int):
                 (user_id, card_id),
             )
             return cur.fetchone()
+
+
+def set_card_limit(user_id: int, card_id: int, limit_amount: float | None) -> bool:
+    """Define ou remove o limite de crédito de um cartão. Retorna True se encontrou o cartão."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update credit_cards
+                set credit_limit = %s
+                where user_id = %s and id = %s
+                """,
+                (Decimal(str(limit_amount)) if limit_amount is not None else None, user_id, card_id),
+            )
+            updated = cur.rowcount > 0
+        conn.commit()
+    return updated
 
 
 def update_card_reminder_settings(user_id: int, card_id: int, enabled: bool, days_before: int | None = None):

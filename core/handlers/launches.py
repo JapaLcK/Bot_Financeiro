@@ -105,16 +105,29 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
     if not rows:
         return "Você ainda não tem lançamentos."
 
+    today = today_tz()
+
+    _TIPO_EMOJI = {
+        "despesa":              "💸",
+        "receita":              "💰",
+        "entrada":              "💰",
+        "saida":                "💸",
+        "aporte_investimento":  "📈",
+        "resgate_investimento": "📉",
+        "create_investment":    "📈",
+        "transferencia":        "↔️",
+    }
+
     lines = []
     for r in rows:
-        tipo  = r.get("tipo", "")
-        valor = r.get("valor")
-        alvo  = r.get("alvo") or "-"
-        nota  = r.get("nota") or ""
+        tipo   = r.get("tipo", "")
+        valor  = r.get("valor")
+        alvo   = (r.get("alvo") or "").strip()
+        nota   = (r.get("nota") or "").strip()
         criado = r.get("criado_em")
 
-        # limpa nota de investimento
-        if tipo == "create_investment" and nota and "taxa=" in nota:
+        # limpa nota técnica de investimento
+        if tipo in ("create_investment", "aporte_investimento") and nota and "taxa=" in nota:
             try:
                 m_taxa = re.search(r"taxa=([0-9.]+)", nota)
                 m_per  = re.search(r"periodo=(\w+)", nota)
@@ -125,12 +138,52 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
             except Exception:
                 pass
 
-        valor_str  = fmt_brl(float(valor)) if valor is not None else "-"
-        nota_part  = f" • {nota}" if nota else ""
-        created_str = str(criado) if criado is not None else "-"
-        lines.append(f"#{r['id']} • {tipo} • {valor_str} • {alvo}{nota_part} • {created_str}")
+        # descrição: prefere nota se informativa, senão usa alvo
+        descricao = nota if nota and nota.lower() not in ("-", alvo.lower()) else alvo
+        if not descricao:
+            descricao = tipo
 
-    return "🧾 **Últimos lançamentos**:\n" + "\n".join(lines)
+        # formata data de forma amigável
+        if criado is not None:
+            try:
+                d = criado.date() if hasattr(criado, "date") else __import__("datetime").datetime.fromisoformat(str(criado)).date()
+                if d == today:
+                    data_str = "hoje"
+                elif d == today - timedelta(days=1):
+                    data_str = "ontem"
+                else:
+                    data_str = d.strftime("%d/%m")
+            except Exception:
+                data_str = str(criado)[:10]
+        else:
+            data_str = "-"
+
+        emoji     = _TIPO_EMOJI.get(tipo, "•")
+        valor_str = fmt_brl(float(valor)) if valor is not None else "-"
+        lines.append(f"{emoji} {data_str} • {valor_str} • {descricao}")
+
+    # mini resumo de despesas/receitas no período exibido
+    total_despesas = sum(
+        float(r["valor"])
+        for r in rows
+        if r.get("tipo") in ("despesa", "saida") and not r.get("is_internal_movement")
+    )
+    total_receitas = sum(
+        float(r["valor"])
+        for r in rows
+        if r.get("tipo") in ("receita", "entrada") and not r.get("is_internal_movement")
+    )
+
+    summary_parts = []
+    if total_despesas > 0:
+        summary_parts.append(f"💸 Gastos: {fmt_brl(total_despesas)}")
+    if total_receitas > 0:
+        summary_parts.append(f"💰 Receitas: {fmt_brl(total_receitas)}")
+    summary = "  |  ".join(summary_parts)
+
+    header = f"🧾 **Últimos {len(rows)} lançamentos**:"
+    body   = "\n".join(lines)
+    return f"{header}\n{body}" + (f"\n\n{summary}" if summary else "")
 
 
 # ---------------------------------------------------------------------------

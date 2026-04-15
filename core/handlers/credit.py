@@ -22,6 +22,7 @@ from db import (
     list_installment_groups,
     list_open_bills,
     pay_bill_amount,
+    set_card_limit,
     set_default_card,
     set_pending_action,
     update_card_reminder_settings,
@@ -175,13 +176,25 @@ def _card_summary(card: dict) -> str:
     if card.get("reminders_enabled"):
         reminder_txt = f"{int(card.get('reminders_days_before') or 3)} dia(s) antes"
     principal = "Sim" if card.get("is_default") else "Não"
+    limit_txt = fmt_brl(float(card["credit_limit"])) if card.get("credit_limit") else "não definido"
     return (
         f"• Nome: {card['name']}\n"
         f"• Fechamento: dia {card['closing_day']}\n"
         f"• Vencimento: dia {card['due_day']}\n"
+        f"• Limite: {limit_txt}\n"
         f"• Cartão principal: {principal}\n"
         f"• Lembrete: {reminder_txt}"
     )
+
+
+def _ask_credit_limit_or_finish(user_id: int, payload: dict) -> str:
+    """Pergunta sobre limite de crédito antes de finalizar o setup, se ainda não perguntou."""
+    if payload.get("credit_limit_asked"):
+        return _finish_card_setup(user_id, int(payload["card_id"]), ask_primary=bool(payload.get("ask_primary")))
+    payload["credit_limit_asked"] = True
+    payload["step"] = "credit_limit_ask"
+    set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
+    return "Deseja definir um limite de crédito para este cartão? Ex: **5000** ou **não**."
 
 
 def _finish_card_setup(user_id: int, card_id: int, ask_primary: bool) -> str:
@@ -486,7 +499,7 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
             return "Quantos dias antes do vencimento você quer ser avisado? Ex: **1**, **3** ou **5**."
 
         update_card_reminder_settings(user_id, card_id, enabled=False)
-        return _finish_card_setup(user_id, card_id, ask_primary=bool(payload.get("ask_primary")))
+        return _ask_credit_limit_or_finish(user_id, payload)
 
     if step == "reminder_days":
         card_id = int(payload["card_id"])
@@ -494,7 +507,22 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         if days_before is None:
             return "Me diga em quantos dias antes devo avisar. Ex: **3**."
         update_card_reminder_settings(user_id, card_id, enabled=True, days_before=days_before)
-        return _finish_card_setup(user_id, card_id, ask_primary=bool(payload.get("ask_primary")))
+        return _ask_credit_limit_or_finish(user_id, payload)
+
+    if step == "credit_limit_ask":
+        card_id = int(payload["card_id"])
+        if _is_no(answer):
+            return _finish_card_setup(user_id, card_id, ask_primary=bool(payload.get("ask_primary")))
+        limit_val = parse_money(answer)
+        if limit_val is None or float(limit_val) <= 0:
+            return "Me diga o valor do limite. Ex: **5000** ou responda **não** para pular."
+        set_card_limit(user_id, card_id, float(limit_val))
+        card = get_card_by_id(user_id, card_id)
+        limit_txt = fmt_brl(float(limit_val))
+        return (
+            f"✅ Limite de {limit_txt} definido para **{card['name'] if card else ''}**!\n"
+            + _finish_card_setup(user_id, card_id, ask_primary=bool(payload.get("ask_primary")))
+        )
 
     if step == "set_primary":
         card_id = int(payload["card_id"])
@@ -893,8 +921,15 @@ def handle(user_id: int, text: str) -> str | None:
             lines = [
                 f"💳 Fatura atual ({card['name']}) {fmt_br(bill['period_start'])} → {fmt_br(bill['period_end'])}",
                 f"Total: {fmt_brl(total)} | Pago: {fmt_brl(paid)} | Em aberto: {fmt_brl(due)}",
-                "",
             ]
+            # mostra uso do limite se definido
+            card_with_limit = get_card_by_id(user_id, int(card["id"]))
+            if card_with_limit and card_with_limit.get("credit_limit"):
+                lim = float(card_with_limit["credit_limit"])
+                avail = max(0.0, lim - total)
+                pct = round((total / lim) * 100) if lim > 0 else 0
+                lines.append(f"Limite: {fmt_brl(lim)} | Disponível: {fmt_brl(avail)} ({100 - pct}%)")
+            lines.append("")
             for it in items[:10]:
                 parcela = ""
                 if it.get("installment_no") and it.get("installments_total"):
@@ -907,6 +942,113 @@ def handle(user_id: int, text: str) -> str | None:
             return "\n".join(lines)
         except Exception as e:
             return f"❌ Erro ao buscar fatura: {e}"
+
+    # ── Limite de crédito ─────────────────────────────────────────────────────
+    # "definir limite nubank 5000" / "limite do nubank 5000" / "limite 3000"
+    _limit_set_match = re.match(
+        r"^(?:definir|setar|colocar|mudar|alterar)\s+limite"
+        r"(?:\s+(?:do|de|no|da)\s+)?"
+        r"(?P<card>[a-zA-ZÀ-ú0-9 ]+?)?\s+"
+        r"(?P<val>[\d,.]+)$",
+        t_low.strip(),
+    )
+    if not _limit_set_match:
+        # "limite [cartão] [valor]" sem prefixo de ação
+        _limit_set_match = re.match(
+            r"^limite\s+(?:(?:do|de|no|da)\s+)?(?P<card>[a-zA-ZÀ-ú0-9 ]+?)?\s*(?P<val>[\d,.]+)$",
+            t_low.strip(),
+        )
+    if _limit_set_match:
+        raw_val = _limit_set_match.group("val") or ""
+        raw_card = (_limit_set_match.group("card") or "").strip()
+        amount = parse_money(raw_val)
+        if amount is None or float(amount) <= 0:
+            return "❌ Valor inválido. Ex: *definir limite nubank 5000*"
+
+        card_name_hint = raw_card if raw_card else _find_card_name_in_text(user_id, t)
+        card_id, resolved_name = _pick_card_id(user_id, card_name_hint)
+        if not card_id:
+            return "❓ Não encontrei o cartão. Verifique o nome com: *cartões*"
+
+        ok = set_card_limit(user_id, card_id, float(amount))
+        if not ok:
+            return "❌ Não consegui atualizar o limite."
+        return f"✅ Limite do **{resolved_name}** definido em {fmt_brl(float(amount))}."
+
+    # "ver limite [cartão]" / "qual limite do nubank"
+    _limit_view_match = re.search(r"\blimite\b", t_norm)
+    if _limit_view_match and not any(x in t_norm for x in ("definir", "setar", "colocar", "mudar", "alterar")):
+        card_name_hint = _find_card_name_in_text(user_id, t)
+        card_id, resolved_name = _pick_card_id(user_id, card_name_hint)
+        if not card_id:
+            cards = list_cards(user_id)
+            if not cards:
+                return "📭 Você ainda não tem cartões cadastrados."
+            lines = ["💳 **Limites dos cartões:**"]
+            for c in cards:
+                lim = fmt_brl(float(c["credit_limit"])) if c.get("credit_limit") else "não definido"
+                badge = " ⭐" if c.get("is_default") else ""
+                lines.append(f"• {c['name']}{badge}: {lim}")
+            return "\n".join(lines)
+
+        card = get_card_by_id(user_id, card_id)
+        if not card:
+            return "❓ Cartão não encontrado."
+        lim = card.get("credit_limit")
+        if lim is None:
+            return f"💳 **{resolved_name}** não tem limite definido.\nDefina com: *definir limite {resolved_name} 5000*"
+
+        # busca uso atual (fatura aberta)
+        try:
+            res = get_open_bill_summary(user_id, card_id, as_of=today_tz())
+            used = float(res[0]["total"] or 0) if res else 0.0
+        except Exception:
+            used = 0.0
+        lim_f = float(lim)
+        avail = max(0.0, lim_f - used)
+        pct = round((used / lim_f) * 100) if lim_f > 0 else 0
+        bar_filled = round(pct / 10)
+        bar = "█" * bar_filled + "░" * (10 - bar_filled)
+        return (
+            f"💳 **{resolved_name}** — Limite de crédito\n"
+            f"Limite total:  {fmt_brl(lim_f)}\n"
+            f"Usado:         {fmt_brl(used)} ({pct}%)\n"
+            f"Disponível:    {fmt_brl(avail)}\n"
+            f"[{bar}]"
+        )
+
+    # ── Pagar fatura com saldo da conta ───────────────────────────────────────
+    if re.search(r"pagar\s+fatura\s+com\s+saldo|pagar\s+com\s+saldo|usar\s+saldo\s+para\s+pagar", t_norm):
+        card_name_hint = _find_card_name_in_text(user_id, t)
+        card_id, resolved_name = _pick_card_id(user_id, card_name_hint)
+        if not card_id:
+            return "❓ Você não tem cartão padrão. Informe o nome do cartão: *pagar fatura nubank com saldo*"
+
+        amount_match = re.search(r"([\d,.]+)", t)
+        amount = float(parse_money(amount_match.group(1))) if amount_match and parse_money(amount_match.group(1)) else None
+
+        try:
+            bill_id = get_current_open_bill_id(user_id, card_id, today_tz())
+            if not bill_id:
+                return "📭 Nenhuma fatura aberta para pagar."
+
+            res = pay_bill_amount(user_id, card_id, resolved_name, amount, bill_id=bill_id)
+            if isinstance(res, dict) and res.get("error") == "amount_too_high":
+                return (
+                    f"❌ Valor maior que o em aberto ({fmt_brl(res['due'])}).\n"
+                    f"Use: *pagar fatura {resolved_name} com saldo {fmt_brl(res['due'])}*"
+                )
+            if isinstance(res, dict) and res.get("error") == "invalid_amount":
+                return "❌ Valor inválido."
+            if not res:
+                return "📭 Nada para pagar."
+            return (
+                f"✅ Pagamento da fatura **{resolved_name}** realizado!\n"
+                f"Valor pago: {fmt_brl(res['paid'])}\n"
+                f"Saldo da conta: {fmt_brl(res['new_balance'])}"
+            )
+        except Exception as e:
+            return f"❌ Erro ao pagar fatura: {e}"
 
     if t_low in ("parcelamentos", "listar parcelamentos"):
         rows = list_installment_groups(user_id, limit=15)
