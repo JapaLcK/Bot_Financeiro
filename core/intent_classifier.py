@@ -131,6 +131,12 @@ _EXACT: dict[str, str] = {
     "minhas faturas":           "credit.handle",
     "parcelamentos":            "credit.handle",
     "listar parcelamentos":     "credit.handle",
+    "parcelas":                 "credit.handle",
+    "ver parcelas":             "credit.handle",
+    "listar parcelas":          "credit.handle",
+    "meus parcelamentos":       "credit.handle",
+    "ver parcelamentos":        "credit.handle",
+    "parcelamentos ativos":     "credit.handle",
     # limite de crédito
     "limite":                   "credit.handle",
     "meu limite":               "credit.handle",
@@ -219,7 +225,10 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "launches.add"),
 
     # cartões / crédito
-    (r"^(cartoes|cartoes de credito|listar cartoes|meus cartoes|quais cartoes|quais sao meus cartoes|criar cartao|padrao\b|credito\b|parcelar\b|parcelei\b|fatura\b|faturas\b|pagar fatura\b|paguei fatura\b|parcelamentos\b|minhas faturas|me mostra minhas faturas|qual meu cartao principal|meu cartao principal|trocar cartao principal|mudar cartao principal|definir limite|limite cartao|limite do cartao|pagar fatura com saldo)",
+    (r"^(cartoes|cartoes de credito|listar cartoes|meus cartoes|quais cartoes|quais sao meus cartoes|criar cartao|padrao\b|credito\b|parcelar\b|parcelei\b|fatura\b|faturas\b|pagar fatura\b|paguei fatura\b|parcelamentos\b|parcelas\b|minhas faturas|me mostra minhas faturas|qual meu cartao principal|meu cartao principal|trocar cartao principal|mudar cartao principal|definir limite|limite cartao|limite do cartao|pagar fatura com saldo)",
+     "credit.handle"),
+    # parcelas / parcelamentos — ver/listar variações
+    (r"^(ver|listar|mostrar|me mostra|quero ver|quais|meus)\s+(parcelas?|parcelamentos?)\b",
      "credit.handle"),
     # limite de crédito — variações naturais
     (r"\blimite\s+(de\s+credito|do\s+cartao|do\s+\w+|disponivel)\b",
