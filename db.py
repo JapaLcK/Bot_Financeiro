@@ -3105,6 +3105,23 @@ def get_card_by_id(user_id: int, card_id: int):
             return cur.fetchone()
 
 
+def get_card_credit_usage(user_id: int, card_id: int) -> Decimal:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select coalesce(sum(greatest(total - coalesce(paid_amount, 0), 0)), 0) as used
+                from credit_bills
+                where user_id = %s
+                  and card_id = %s
+                  and status in ('open', 'closed')
+                """,
+                (user_id, card_id),
+            )
+            row = cur.fetchone()
+    return Decimal(str(row["used"] or 0))
+
+
 def set_card_limit(user_id: int, card_id: int, limit_amount: float | None) -> bool:
     """Define ou remove o limite de crédito de um cartão. Retorna True se encontrou o cartão."""
     with get_conn() as conn:
@@ -3717,6 +3734,49 @@ def undo_installment_group(user_id: int, group_id: str):
         "removed_count": removed_count,
         "removed_total": float(total_removed),
     }
+
+
+def resolve_installment_group_id(user_id: int, identifier: str) -> str | None:
+    ident = (identifier or "").strip().lower()
+    if not ident:
+        return None
+
+    if ident.startswith("par-"):
+        ident = ident[4:]
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if len(ident) == 36 and "-" in ident:
+                cur.execute(
+                    """
+                    select distinct group_id::text as group_id
+                    from credit_transactions
+                    where user_id = %s
+                      and group_id = %s::uuid
+                    limit 1
+                    """,
+                    (user_id, ident),
+                )
+                row = cur.fetchone()
+                return row["group_id"] if row else None
+
+            cur.execute(
+                """
+                select distinct group_id::text as group_id
+                from credit_transactions
+                where user_id = %s
+                  and group_id is not null
+                  and replace(group_id::text, '-', '') like %s
+                order by group_id::text
+                limit 2
+                """,
+                (user_id, f"{ident}%"),
+            )
+            rows = cur.fetchall()
+
+    if len(rows) != 1:
+        return None
+    return rows[0]["group_id"]
 
 def set_daily_report_enabled(user_id: int, enabled: bool) -> None:
     return _db_support.set_daily_report_enabled_impl(get_conn, ensure_user, user_id, enabled)

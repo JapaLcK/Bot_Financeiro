@@ -93,7 +93,13 @@ def test_classify_gastei_no_cartao_vai_para_credito():
 
 
 def test_classify_apagar_ct_vai_para_credito():
-    result = classify("apagar CT#16")
+    result = classify("apagar CC16")
+
+    assert result.intent == "credit.handle"
+
+
+def test_classify_apagar_compra_vai_para_credito():
+    result = classify("apagar CC16")
 
     assert result.intent == "credit.handle"
 
@@ -106,6 +112,7 @@ def test_route_gasto_no_cartao_nao_debita_saldo(user_id):
     response = route(classify(msg.text), msg)
 
     assert "Compra no crédito registrada" in response
+    assert "Código da compra" in response
     assert get_balance(user_id) == 0
     bill, _items = get_open_bill_summary(user_id, card_id, as_of=date.today())
     assert float(bill["total"]) == 150.0
@@ -119,6 +126,7 @@ def test_quick_entry_gasto_no_cartao_nao_debita_saldo(user_id):
 
     assert response is not None
     assert "Compra no crédito registrada" in response.text
+    assert "Código da compra" in response.text
     assert get_balance(user_id) == 0
     bill, _items = get_open_bill_summary(user_id, card_id, as_of=date.today())
     assert float(bill["total"]) == 90.0
@@ -134,24 +142,65 @@ def test_route_apagar_ct_remove_compra_da_fatura(user_id):
         nota="teste",
         purchased_at=date.today(),
     )
-    msg = IncomingMessage(platform="discord", user_id=user_id, text=f"apagar CT#{tx_id}")
+    msg = IncomingMessage(platform="discord", user_id=user_id, text=f"apagar CC{tx_id}")
 
     response = route(classify(msg.text), msg)
 
-    assert f"Crédito CT#{tx_id} desfeito" in response
+    assert f"Compra no crédito CC{tx_id} apagada" in response
+    bill, _items = get_open_bill_summary(user_id, card_id, as_of=date.today())
+    assert float(bill["total"]) == 0.0
+
+
+def test_route_apagar_compra_com_codigo_simples_remove_da_fatura(user_id):
+    card_id = create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    tx_id, _due, _bill_id = add_credit_purchase(
+        user_id=user_id,
+        card_id=card_id,
+        valor=80.0,
+        categoria="outros",
+        nota="teste",
+        purchased_at=date.today(),
+    )
+    msg = IncomingMessage(platform="discord", user_id=user_id, text=f"apagar CC{tx_id}")
+
+    response = route(classify(msg.text), msg)
+
+    assert f"Compra no crédito CC{tx_id} apagada" in response
+    bill, _items = get_open_bill_summary(user_id, card_id, as_of=date.today())
+    assert float(bill["total"]) == 0.0
+
+
+def test_route_compra_acima_do_limite_e_bloqueada(user_id):
+    card_id = create_card(user_id=user_id, name="teste", closing_day=15, due_day=22)
+    from db import set_card_limit
+
+    set_card_limit(user_id, card_id, 100.0)
+    set_default_card(user_id, card_id)
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="gastei 150 no cartao teste")
+
+    response = route(classify(msg.text), msg)
+
+    assert "Compra não registrada" in response
+    assert "Limite total" in response
     bill, _items = get_open_bill_summary(user_id, card_id, as_of=date.today())
     assert float(bill["total"]) == 0.0
 
 
 def test_route_cartoes_lista_pelo_fluxo_central(user_id):
-    create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    card_id = create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    from db import set_card_limit
+
+    set_card_limit(user_id, card_id, 1000.0)
     msg = IncomingMessage(platform="discord", user_id=user_id, text="Cartões")
     result = classify("Cartões")
 
     response = route(result, msg)
 
-    assert "Seus cartões" in response
+    assert "Seus cartões cadastrados" in response
     assert "Nubank" in response
+    assert "Fechamento" in response
+    assert "Vencimento" in response
+    assert "Limite" in response
 
 
 def test_classify_frase_natural_de_cartoes():

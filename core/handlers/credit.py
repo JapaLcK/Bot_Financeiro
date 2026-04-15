@@ -12,6 +12,7 @@ from db import (
     create_card,
     delete_card,
     get_card_by_id,
+    get_card_credit_usage,
     get_card_id_by_name,
     get_current_open_bill_id,
     get_default_card_id,
@@ -22,6 +23,7 @@ from db import (
     list_installment_groups,
     list_open_bills,
     pay_bill_amount,
+    resolve_installment_group_id,
     set_card_limit,
     set_default_card,
     set_pending_action,
@@ -189,6 +191,9 @@ def try_handle_natural_credit_purchase(user_id: int, text: str) -> str | None:
 
     card = get_card_by_id(user_id, card_id)
     card_label = card["name"] if card else (card_name_hint or "cartão")
+    limit_error = _validate_credit_limit_before_purchase(user_id, card_id, float(valor))
+    if limit_error is not None:
+        return limit_error
 
     desc = _clean_credit_purchase_description(base_text, card_name_hint or unknown_card_candidate)
     nota = normalize_text(desc) if desc else "compra no credito"
@@ -203,12 +208,7 @@ def try_handle_natural_credit_purchase(user_id: int, text: str) -> str | None:
             nota=nota,
             purchased_at=purchased_at,
         )
-        return (
-            f"💳 Compra no crédito registrada ({card_label}): {fmt_brl(valor)}\n"
-            f"📅 Data da compra: {fmt_br(purchased_at)}\n"
-            f"📌 Fatura atual: {fmt_brl(due)}\n"
-            f"ID crédito: CT#{tx_id}"
-        )
+        return _format_credit_purchase_success(card_label, float(valor), purchased_at, float(due), int(tx_id))
     except Exception as e:
         return f"❌ Erro registrando compra no crédito: {e}"
 
@@ -217,6 +217,10 @@ def _extract_credit_transaction_id(text: str) -> int | None:
     norm = normalize_text(text)
     m = re.search(r"\bct\s*#?\s*(\d+)\b", norm)
     if not m:
+        m = re.search(r"\bcc\s*#?\s*(\d+)\b", norm)
+    if not m:
+        m = re.search(r"\b(?:compra|credito|crédito)\s+#?\s*(\d+)\b", norm)
+    if not m:
         return None
     try:
         return int(m.group(1))
@@ -224,21 +228,27 @@ def _extract_credit_transaction_id(text: str) -> int | None:
         return None
 
 
-def _extract_installment_group_id(text: str) -> str | None:
+def _extract_installment_group_id(user_id: int, text: str) -> str | None:
     norm = normalize_text(text)
-    if not any(x in norm for x in ("grupo", "group")):
+    if not any(x in norm for x in ("grupo", "group", "parcelamento", "parcela")):
+        m_short = re.search(r"\bpc([0-9a-f]{8})\b", norm)
+        if m_short:
+            return resolve_installment_group_id(user_id, f"pc{m_short.group(1)}")
         return None
-    m = re.search(r"\b(?:grupo|group)\s+([0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b", norm)
+    m = re.search(
+        r"\b(?:grupo|group|parcelamento|parcela)\s+(pc[0-9a-f]{8}|par-[0-9a-f]{8}|[0-9a-f]{8}|[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b",
+        norm,
+    )
     if not m:
         return None
-    return m.group(1)
+    return resolve_installment_group_id(user_id, m.group(1))
 
 
 def _is_credit_delete_command(text: str) -> bool:
     norm = normalize_text(text)
     if not any(x in norm for x in ("desfazer", "apagar", "excluir", "remover", "delete", "deletar")):
         return False
-    return "ct" in norm or "grupo" in norm or "group" in norm
+    return any(x in norm for x in ("ct", "cc", "pc", "grupo", "group", "compra", "credito", "crédito", "parcelamento", "parcela"))
 
 
 def _is_yes(text: str) -> bool:
@@ -314,6 +324,91 @@ def _card_summary(card: dict) -> str:
         f"• Cartão principal: {principal}\n"
         f"• Lembrete: {reminder_txt}"
     )
+
+
+def _purchase_code(tx_id: int) -> str:
+    return f"CC{int(tx_id)}"
+
+
+def _group_code(group_id: str | None) -> str:
+    raw = (group_id or "").replace("-", "").upper()
+    return f"PC{raw[:8]}" if raw else "PC?"
+
+
+def _format_credit_purchase_success(card_label: str, valor: float, purchased_at, due: float, tx_id: int) -> str:
+    code = _purchase_code(tx_id)
+    return (
+        f"💳 **Compra no crédito registrada**\n"
+        f"🪪 Cartão: **{card_label}**\n"
+        f"💰 Valor: {fmt_brl(valor)}\n"
+        f"📅 Data da compra: {fmt_br(purchased_at)}\n"
+        f"📌 Fatura atual: {fmt_brl(due)}\n"
+        f"🔢 Código da compra: **{code}**\n"
+        f"🗑️ Para apagar: `apagar {code}`"
+    )
+
+
+def _build_credit_limit_block_message(card_name: str, attempted_amount: float, limit_amount: float, used_amount: float) -> str:
+    available = max(0.0, limit_amount - used_amount)
+    exceeded = max(0.0, attempted_amount - available)
+    return (
+        f"❌ Compra não registrada no cartão **{card_name}**.\n"
+        f"💳 Limite total: {fmt_brl(limit_amount)}\n"
+        f"📌 Já usado: {fmt_brl(used_amount)}\n"
+        f"🟢 Disponível: {fmt_brl(available)}\n"
+        f"🧾 Tentativa de compra: {fmt_brl(attempted_amount)}\n"
+        f"⚠️ Excede o limite em {fmt_brl(exceeded)}."
+    )
+
+
+def _validate_credit_limit_before_purchase(user_id: int, card_id: int, purchase_amount: float) -> str | None:
+    card = get_card_by_id(user_id, card_id)
+    if not card:
+        return "❌ Cartão não encontrado."
+
+    limit_amount = card.get("credit_limit")
+    if limit_amount is None:
+        return None
+
+    used_amount = float(get_card_credit_usage(user_id, card_id))
+    limit_float = float(limit_amount)
+    if used_amount + float(purchase_amount) > limit_float:
+        return _build_credit_limit_block_message(card["name"], float(purchase_amount), limit_float, used_amount)
+    return None
+
+
+def _format_cards_list(user_id: int, cards: list[dict]) -> str:
+    lines = ["💳 **Seus cartões cadastrados**", ""]
+    for card in cards:
+        title_bits = [f"**{card['name']}**"]
+        if card.get("is_default"):
+            title_bits.append("⭐ principal")
+
+        limit_amount = card.get("credit_limit")
+        if limit_amount is None:
+            limit_lines = ["💰 Limite: **não definido**"]
+        else:
+            used_amount = float(get_card_credit_usage(user_id, int(card["id"])))
+            limit_float = float(limit_amount)
+            available = max(0.0, limit_float - used_amount)
+            limit_lines = [
+                f"💰 Limite: **{fmt_brl(limit_float)}**",
+                f"📌 Em uso: {fmt_brl(used_amount)}",
+                f"🟢 Disponível: {fmt_brl(available)}",
+            ]
+
+        reminder_txt = "desativado"
+        if card.get("reminders_enabled"):
+            reminder_txt = f"{int(card.get('reminders_days_before') or 3)} dia(s) antes"
+
+        lines.append(f"💳 {' • '.join(title_bits)}")
+        lines.append(f"🗓️ Fechamento: dia **{card['closing_day']}**")
+        lines.append(f"📆 Vencimento: dia **{card['due_day']}**")
+        lines.extend(limit_lines)
+        lines.append(f"🔔 Lembrete: {reminder_txt}")
+        lines.append("")
+
+    return "\n".join(lines).strip()
 
 
 def _ask_credit_limit_or_finish(user_id: int, payload: dict) -> str:
@@ -673,14 +768,14 @@ def handle(user_id: int, text: str) -> str | None:
         return None
 
     if _is_credit_delete_command(t):
-        group_id = _extract_installment_group_id(t)
+        group_id = _extract_installment_group_id(user_id, t)
         if group_id:
             try:
                 res = undo_installment_group(user_id, group_id)
                 if not res:
                     return "❌ Não achei esse grupo de parcelamento."
                 return (
-                    f"🗑️ Parcelamento desfeito (grupo {res['group_id']}).\n"
+                    f"🗑️ Parcelamento desfeito ({_group_code(res['group_id'])}).\n"
                     f"Removido: {fmt_brl(res['removed_total'])} em {res['removed_count']} itens."
                 )
             except Exception as e:
@@ -691,18 +786,18 @@ def handle(user_id: int, text: str) -> str | None:
             try:
                 res = undo_credit_transaction(user_id, ct_id)
                 if not res:
-                    return f"❌ Não achei o crédito CT#{ct_id}."
+                    return f"❌ Não achei a compra de código CC{ct_id}."
                 if res["mode"] == "group":
                     return (
-                        f"🗑️ Parcelamento desfeito (grupo {res['group_id']}).\n"
+                        f"🗑️ Parcelamento desfeito ({_group_code(res['group_id'])}).\n"
                         f"Removido: {fmt_brl(res['removed_total'])} em {res['removed_count']} itens."
                     )
                 return (
-                    f"🗑️ Crédito CT#{ct_id} desfeito.\n"
+                    f"🗑️ Compra no crédito CC{ct_id} apagada.\n"
                     f"Removido: {fmt_brl(res['removed_total'])}."
                 )
             except Exception as e:
-                return f"❌ Erro ao desfazer CT#{ct_id}: {e}"
+                return f"❌ Erro ao apagar a compra CC{ct_id}: {e}"
 
     natural_credit = try_handle_natural_credit_purchase(user_id, t)
     if natural_credit is not None:
@@ -843,12 +938,7 @@ def handle(user_id: int, text: str) -> str | None:
         cards = list_cards(user_id)
         if not cards:
             return "📭 Você ainda não tem cartões. Crie com: criar cartao nubank fecha 10 vence 17"
-
-        lines = ["💳 **Seus cartões:**"]
-        for c in cards:
-            badge = " (padrão)" if c.get("is_default") else ""
-            lines.append(f"- {c['name']}{badge} — fecha dia {c['closing_day']} / vence dia {c['due_day']}")
-        return "\n".join(lines)
+        return _format_cards_list(user_id, cards)
 
     if t_low.startswith("credito"):
         rest = t[len("credito"):].strip()
@@ -881,6 +971,10 @@ def handle(user_id: int, text: str) -> str | None:
                 return f"❌ Não achei o cartão '{card_name}'. Crie com: criar cartao {card_name} fecha 10 vence 17"
             return "❓ Você não tem cartão padrão. Defina com: padrao NOME (ou crie: criar cartao nubank fecha 10 vence 17)"
 
+        limit_error = _validate_credit_limit_before_purchase(user_id, card_id, float(valor))
+        if limit_error is not None:
+            return limit_error
+
         try:
             tx_id, due, _bill_id = add_credit_purchase(
                 user_id=user_id,
@@ -890,12 +984,7 @@ def handle(user_id: int, text: str) -> str | None:
                 nota=nota,
                 purchased_at=purchased_at,
             )
-            return (
-                f"💳 Compra no crédito registrada: {fmt_brl(valor)}\n"
-                f"📅 Data da compra: {fmt_br(purchased_at)}\n"
-                f"📌 Fatura atual: {fmt_brl(due)}\n"
-                f"ID crédito: CT#{tx_id}"
-            )
+            return _format_credit_purchase_success(resolved_name, float(valor), purchased_at, float(due), int(tx_id))
         except Exception as e:
             return f"❌ Erro registrando compra no crédito: {e}"
 
@@ -946,6 +1035,10 @@ def handle(user_id: int, text: str) -> str | None:
                 return f"❌ Não achei o cartão '{card_name}'. Crie com: criar cartao {card_name} fecha 10 vence 17"
             return "❓ Qual cartão?\nEx: `parcelei 500 em 5x no cartao nubank`\nDica: defina um padrão com `padrao nubank`."
 
+        limit_error = _validate_credit_limit_before_purchase(user_id, card_id, float(valor))
+        if limit_error is not None:
+            return limit_error
+
         try:
             ret = add_credit_purchase_installments(
                 user_id=user_id,
@@ -966,8 +1059,9 @@ def handle(user_id: int, text: str) -> str | None:
             return (
                 f"💳 Parcelado no cartão ({resolved_name}): R$ {float(valor):.2f} em {n}x\n"
                 f"📌 Total lançado nas faturas: R$ {float(total):.2f}\n"
-                f"Grupo: {group_id}\n"
-                f"IDs: {ids_str}"
+                f"🔢 Código do parcelamento: **{_group_code(group_id)}**\n"
+                f"🗑️ Para apagar: `apagar {_group_code(group_id)}`\n"
+                f"IDs internos: {ids_str}"
             )
         except Exception as e:
             return f"❌ Erro ao parcelar no cartão: {e}"
@@ -1147,7 +1241,11 @@ def handle(user_id: int, text: str) -> str | None:
                 return "📭 Você ainda não tem cartões cadastrados."
             lines = ["💳 **Limites dos cartões:**"]
             for c in cards:
-                lim = fmt_brl(float(c["credit_limit"])) if c.get("credit_limit") else "não definido"
+                if c.get("credit_limit"):
+                    used = float(get_card_credit_usage(user_id, int(c["id"])))
+                    lim = f"{fmt_brl(float(c['credit_limit']))} | disponível {fmt_brl(max(0.0, float(c['credit_limit']) - used))}"
+                else:
+                    lim = "não definido"
                 badge = " ⭐" if c.get("is_default") else ""
                 lines.append(f"• {c['name']}{badge}: {lim}")
             return "\n".join(lines)
@@ -1160,11 +1258,7 @@ def handle(user_id: int, text: str) -> str | None:
             return f"💳 **{resolved_name}** não tem limite definido.\nDefina com: *definir limite {resolved_name} 5000*"
 
         # busca uso atual (fatura aberta)
-        try:
-            res = get_open_bill_summary(user_id, card_id, as_of=today_tz())
-            used = float(res[0]["total"] or 0) if res else 0.0
-        except Exception:
-            used = 0.0
+        used = float(get_card_credit_usage(user_id, card_id))
         lim_f = float(lim)
         avail = max(0.0, lim_f - used)
         pct = round((used / lim_f) * 100) if lim_f > 0 else 0
@@ -1228,10 +1322,12 @@ def handle(user_id: int, text: str) -> str | None:
             nota = (r.get("nota") or "").strip()
             desc = f" — {nota}" if nota else ""
             progress = f"{n_paid}/{n_total} pagas"
+            group_code = _group_code(r.get("group_id"))
             lines.append(
                 f"• {r.get('card_name', '?')}{desc}\n"
                 f"  💰 Total: {fmt_brl(total)} | Restante: {fmt_brl(pending)} ({progress})\n"
-                f"  🔑 grupo: `{r.get('group_id') or ''}`"
+                f"  🔢 Código: `{group_code}`\n"
+                f"  🗑️ Apagar: `apagar {group_code}`"
             )
 
         if len(lines) == 1:

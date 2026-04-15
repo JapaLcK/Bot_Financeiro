@@ -203,7 +203,7 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "launches.delete"),
 
     # desfazer / apagar compras no crédito
-    (r"^(desfazer|apagar|excluir|remover|deletar|delete)\b.*\b(ct|grupo|group)\b",
+    (r"^(desfazer|apagar|excluir|remover|deletar|delete)\b.*(?:\bcc\s*\d+\b|\bpc[0-9a-f]{8}\b|\bct\s*#?\s*\d+\b|\bgrupo\b|\bgroup\b|\bcompra\b|\bcredito\b|\bcr[eé]dito\b|\bparcelamento\b|\bparcela\b)",
      "credit.handle"),
 
     # compra no crédito em linguagem natural
