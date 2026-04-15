@@ -461,15 +461,6 @@ def _instructional_credit_help(text: str) -> str | None:
     if not any(expr in norm for expr in ("como faco", "como faço", "me ensina", "me explique", "como registrar", "como usar")):
         return None
 
-    if any(expr in norm for expr in ("compra", "compras", "cartao de credito", "cartao", "credito")):
-        return (
-            "💳 Para registrar compras no cartão de crédito, você pode usar:\n"
-            "• `credito 150 mercado`\n"
-            "• `credito Nubank 150 mercado`\n"
-            "• `gastei 150 no cartao Nubank`\n\n"
-            "Depois do registro, eu te mostro um código como **CC17** para facilitar apagar depois com `apagar CC17`."
-        )
-
     if any(expr in norm for expr in ("parcelamento", "parcelar", "parcela")):
         # detecta intenção de VER parcelas vs CRIAR parcelas
         view_intent = any(
@@ -495,6 +486,15 @@ def _instructional_credit_help(text: str) -> str | None:
             "• `apagar CC17` → apaga uma compra no cartão\n"
             "• `apagar PCAB12CD34` → apaga um parcelamento\n\n"
             "Lançamentos comuns continuam sendo apagados com `apagar 17`."
+        )
+
+    if any(expr in norm for expr in ("compra", "compras", "cartao de credito", "cartao", "credito")):
+        return (
+            "💳 Para registrar compras no cartão de crédito, você pode usar:\n"
+            "• `credito 150 mercado`\n"
+            "• `credito Nubank 150 mercado`\n"
+            "• `gastei 150 no cartao Nubank`\n\n"
+            "Depois do registro, eu te mostro um código como **CC17** para facilitar apagar depois com `apagar CC17`."
         )
 
     if "fatura" in norm:
@@ -695,7 +695,7 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
     step = payload.get("step")
     answer = (text or "").strip()
 
-    if _is_no(answer) and step not in {"reminder_opt_in", "set_primary", "duplicate_card_name", "confirm_delete_existing_card"}:
+    if _is_no(answer) and step not in {"reminder_opt_in", "credit_limit_ask", "set_primary", "duplicate_card_name", "confirm_delete_existing_card"}:
         clear_pending_action(user_id)
         return "❌ Cadastro de cartão cancelado."
 
