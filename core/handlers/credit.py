@@ -228,6 +228,44 @@ def _extract_credit_transaction_id(text: str) -> int | None:
         return None
 
 
+def _create_installments(
+    user_id: int,
+    card_id: int,
+    resolved_name: str,
+    valor: float,
+    n: int,
+    nota: str,
+    categoria: str,
+    purchased_at,
+) -> str:
+    """Cria as parcelas no banco e retorna a mensagem de confirmação."""
+    from datetime import date as _date
+    if isinstance(purchased_at, str):
+        purchased_at = _date.fromisoformat(purchased_at)
+    try:
+        ret = add_credit_purchase_installments(
+            user_id=user_id,
+            card_id=card_id,
+            valor_total=valor,
+            categoria=categoria,
+            nota=nota,
+            purchased_at=purchased_at,
+            installments=n,
+        )
+        result = ret[0] if isinstance(ret, tuple) else ret
+        total = float(ret[1]) if isinstance(ret, tuple) and len(ret) >= 2 else valor
+        group_id = result.get("group_id")
+        return (
+            f"💳 Parcelado no **{resolved_name}**: {fmt_brl(valor)} em {n}x\n"
+            f"📝 {nota}\n"
+            f"📌 Total lançado: {fmt_brl(total)}\n"
+            f"🔢 Código: **{_group_code(group_id)}**\n"
+            f"🗑️ Para apagar: `apagar {_group_code(group_id)}`"
+        )
+    except Exception as e:
+        return f"❌ Erro ao parcelar no cartão: {e}"
+
+
 def _extract_installment_group_id(user_id: int, text: str) -> str | None:
     norm = normalize_text(text)
     if not any(x in norm for x in ("grupo", "group", "parcelamento", "parcela")):
@@ -616,6 +654,28 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
 
     if pending.get("action_type") == "credit_delete_card":
         return _resolve_delete_card(user_id, text, pending)
+
+    if pending.get("action_type") == "installment_pending":
+        answer = (text or "").strip()
+        if not answer or normalize_text(answer) in ("nao", "cancelar", "cancela"):
+            clear_pending_action(user_id)
+            return "❌ Parcelamento cancelado."
+        payload = dict(pending.get("payload") or {})
+        nota = answer
+        categoria = _infer_category(user_id, nota) or payload.get("categoria") or "outros"
+        clear_pending_action(user_id)
+        from datetime import date as _date
+        purchased_at = _date.fromisoformat(payload["purchased_at"]) if isinstance(payload.get("purchased_at"), str) else payload.get("purchased_at")
+        return _create_installments(
+            user_id,
+            int(payload["card_id"]),
+            payload["card_name"],
+            float(payload["valor"]),
+            int(payload["n"]),
+            nota,
+            categoria,
+            purchased_at,
+        )
 
     if pending.get("action_type") != "credit_card_setup":
         return None
@@ -1096,6 +1156,7 @@ def handle(user_id: int, text: str) -> str | None:
         if valor is None:
             return "Use: parcelar 300 em 3x no cartao nubank"
 
+        # ── número de parcelas ──────────────────────────────────────────────
         n = 1
         mx = re.search(r"(\d+)\s*x", t_low)
         if mx:
@@ -1104,27 +1165,63 @@ def handle(user_id: int, text: str) -> str | None:
             except Exception:
                 n = 1
 
-        card_name = None
-        m = re.search(r"(?:no\s+)?cart[aã]o\s+(.+)$", t_low)
-        if m:
-            card_name = m.group(1).strip()
-
+        # ── data ────────────────────────────────────────────────────────────
         dt_evento, rest2 = extract_date_from_text(t)
         if dt_evento is None:
             dt_evento = now_tz()
         purchased_at = dt_evento.date()
 
+        # ── categoria explícita ─────────────────────────────────────────────
+        # "categoria sapato" / "cat sapato" / "categoria: sapato"
+        categoria_override: str | None = None
+        cat_m = re.search(r"\bcat(?:egoria)?[:\s]+(\S+)", t_low)
+        if cat_m:
+            categoria_override = cat_m.group(1).strip()
+
+        # ── nome do cartão ───────────────────────────────────────────────────
+        # Para evitar capturar palavras que não são nomes de cartão,
+        # verificamos token a token e paramos em stop-words.
+        _CARD_STOP = {"categoria", "cat", "gasto", "gastei", "em", "de", "com",
+                      "para", "comprei", "compra", "parcelei", "parcelar"}
+        card_name: str | None = None
+        mc = re.search(r"(?:no\s+)?cart[aã]o\s+(.+?)(?:\s+em\s+\d+\s*x\b|$)", t_low)
+        if mc:
+            raw_tokens = mc.group(1).strip().split()
+            card_tokens: list[str] = []
+            for tok in raw_tokens:
+                if tok in _CARD_STOP:
+                    break
+                card_tokens.append(tok)
+            raw_name = " ".join(card_tokens).strip()
+            # "padrao"/"padrão"/"principal" → cartão padrão (card_name = None)
+            if raw_name and raw_name not in ("padrao", "padrão", "principal", "default"):
+                # Valida contra cartões reais do usuário — evita aceitar lixo
+                known_id = get_card_id_by_name(user_id, raw_name)
+                if known_id:
+                    card_name = raw_name
+                # Se não achou pelo nome exato, tenta via _find_card_name_in_text
+                if card_name is None:
+                    found = _find_card_name_in_text(user_id, t)
+                    if found:
+                        card_name = found
+
+        # ── descrição (o que sobrar) ─────────────────────────────────────────
         desc_clean = rest2
         desc_clean = re.sub(r"\bparcelei?\b", "", desc_clean, flags=re.IGNORECASE)
         desc_clean = re.sub(r"\b\d+[\.,]?\d*\b", "", desc_clean)
         desc_clean = re.sub(r"\b\d+\s*x\b", "", desc_clean, flags=re.IGNORECASE)
         desc_clean = re.sub(r"\bem\b", "", desc_clean, flags=re.IGNORECASE)
-        desc_clean = re.sub(r"\bno\s+cart[aã]o\s+\S+", "", desc_clean, flags=re.IGNORECASE)
-        desc_clean = re.sub(r"\bcart[aã]o\s+\S+", "", desc_clean, flags=re.IGNORECASE)
+        # remove trecho do cartão (incluindo palavras de parada como "padrao")
+        desc_clean = re.sub(r"(?:no\s+)?cart[aã]o\s+\S+(?:\s+\S+)*", "", desc_clean, flags=re.IGNORECASE)
+        # remove "categoria X" / "cat X"
+        desc_clean = re.sub(r"\bcat(?:egoria)?[:\s]+\S+", "", desc_clean, flags=re.IGNORECASE)
+        # remove stop-words soltas que sobraram
+        desc_clean = re.sub(r"\b(gasto|gastei|compra|comprei)\b", "", desc_clean, flags=re.IGNORECASE)
         desc_clean = " ".join(desc_clean.split())
 
-        nota = normalize_text(desc_clean) if desc_clean.strip() else normalize_text(t)
-        categoria = _infer_category(user_id, desc_clean or t)
+        categoria_base = _infer_category(user_id, desc_clean or t)
+        categoria = categoria_override or categoria_base
+        nota = desc_clean.strip() if desc_clean.strip() else ""
 
         card_id, resolved_name = _pick_card_id(user_id, card_name)
         if not card_id:
@@ -1136,32 +1233,27 @@ def handle(user_id: int, text: str) -> str | None:
         if limit_error is not None:
             return limit_error
 
-        try:
-            ret = add_credit_purchase_installments(
-                user_id=user_id,
-                card_id=card_id,
-                valor_total=float(valor),
-                categoria=categoria,
-                nota=nota,
-                purchased_at=purchased_at,
-                installments=n,
+        # Se não tem descrição, pergunta antes de criar
+        if not desc_clean.strip():
+            set_pending_action(
+                user_id,
+                "installment_pending",
+                {
+                    "valor": float(valor),
+                    "n": n,
+                    "card_id": card_id,
+                    "card_name": resolved_name,
+                    "purchased_at": purchased_at.isoformat(),
+                    "categoria": categoria,
+                },
+                minutes=10,
             )
-            result = ret[0] if isinstance(ret, tuple) else ret
-            total = float(ret[1]) if isinstance(ret, tuple) and len(ret) >= 2 else float(valor)
-            tx_ids = result.get("tx_ids") or []
-            group_id = result.get("group_id")
-            ids_str = ", ".join(f"#{x}" for x in tx_ids[:10]) if tx_ids else "(sem ids)"
-            if len(tx_ids) > 10:
-                ids_str += " ..."
             return (
-                f"💳 Parcelado no cartão ({resolved_name}): R$ {float(valor):.2f} em {n}x\n"
-                f"📌 Total lançado nas faturas: R$ {float(total):.2f}\n"
-                f"🔢 Código do parcelamento: **{_group_code(group_id)}**\n"
-                f"🗑️ Para apagar: `apagar {_group_code(group_id)}`\n"
-                f"IDs internos: {ids_str}"
+                f"💳 {fmt_brl(float(valor))} em {n}x no **{resolved_name}**.\n"
+                "Qual é o nome dessa compra? Ex: *TV Samsung*, *iPhone*, *Curso de inglês*"
             )
-        except Exception as e:
-            return f"❌ Erro ao parcelar no cartão: {e}"
+
+        return _create_installments(user_id, card_id, resolved_name, float(valor), n, nota, categoria, purchased_at)
 
     if t_low.startswith("pagar fatura") or t_low.startswith("paguei fatura"):
         rest = re.sub(r"^paguei?\s+fatura", "", t, flags=re.IGNORECASE).strip()
