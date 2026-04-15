@@ -471,6 +471,17 @@ def _instructional_credit_help(text: str) -> str | None:
         )
 
     if any(expr in norm for expr in ("parcelamento", "parcelar", "parcela")):
+        # detecta intenção de VER parcelas vs CRIAR parcelas
+        view_intent = any(
+            expr in norm for expr in ("ver", "visualizar", "listar", "consultar", "checar", "mostra", "mostre")
+        )
+        if view_intent:
+            return (
+                "📦 Para ver seus parcelamentos ativos, mande:\n"
+                "• `parcelamentos`\n\n"
+                "Para ver as parcelas numa fatura específica:\n"
+                "• `fatura Nubank`"
+            )
         return (
             "💳 Para parcelar uma compra, use:\n"
             "• `parcelar 600 em 3x no cartao Nubank`\n"
@@ -1145,8 +1156,16 @@ def handle(user_id: int, text: str) -> str | None:
         except Exception as e:
             return f"❌ Erro registrando compra no crédito: {e}"
 
-    if t_low in ("criar parcelas", "criar parcela", "parcelas"):
+    if t_low in ("criar parcelas", "criar parcela"):
         return "Use: `parcelar 300 em 3x no cartao nubank` (ex: `parcelar 120 em 4x no cartao nubank`)"
+
+    # "parcelas" / "ver parcelas" / "listar parcelas" → lista ativos
+    _PARCELAS_LIST_TRIGGERS = {
+        "parcelas", "ver parcelas", "listar parcelas", "meus parcelamentos",
+        "ver parcelamentos", "listar parcelamentos", "parcelamentos ativos",
+    }
+    if t_low in _PARCELAS_LIST_TRIGGERS or t_low.startswith("parcelamentos"):
+        return _list_active_installments(user_id)
 
     if t_low.startswith("parcelei "):
         t_low = "parcelar " + t_low[len("parcelei "):]
@@ -1495,32 +1514,36 @@ def handle(user_id: int, text: str) -> str | None:
             return f"❌ Erro ao pagar fatura: {e}"
 
     if t_low in ("parcelamentos", "listar parcelamentos"):
-        rows = list_installment_groups(user_id, limit=15)
-        if not rows:
-            return "📭 Você não tem parcelamentos registrados."
-
-        lines = ["📦 **Parcelamentos ativos:**"]
-        for r in rows:
-            n_total = int(r.get("n_total") or r.get("n_registered") or 0)
-            n_pending = int(r.get("n_pending") or 0)
-            if n_pending == 0:
-                continue
-            n_paid = n_total - n_pending
-            total = float(r.get("total") or 0)
-            pending = float(r.get("total_pending") or 0)
-            nota = (r.get("nota") or "").strip()
-            desc = f" — {nota}" if nota else ""
-            progress = f"{n_paid}/{n_total} pagas"
-            group_code = _group_code(r.get("group_id"))
-            lines.append(
-                f"• {r.get('card_name', '?')}{desc}\n"
-                f"  💰 Total: {fmt_brl(total)} | Restante: {fmt_brl(pending)} ({progress})\n"
-                f"  🔢 Código: `{group_code}`\n"
-                f"  🗑️ Apagar: `apagar {group_code}`"
-            )
-
-        if len(lines) == 1:
-            return "✅ Você não tem parcelamentos em aberto."
-        return "\n".join(lines)
+        return _list_active_installments(user_id)
 
     return None
+
+
+def _list_active_installments(user_id: int) -> str:
+    rows = list_installment_groups(user_id, limit=15)
+    if not rows:
+        return "📭 Você não tem parcelamentos registrados."
+
+    lines = ["📦 **Parcelamentos ativos:**"]
+    for r in rows:
+        n_total = int(r.get("n_total") or r.get("n_registered") or 0)
+        n_pending = int(r.get("n_pending") or 0)
+        if n_pending == 0:
+            continue
+        n_paid = n_total - n_pending
+        total = float(r.get("total") or 0)
+        pending = float(r.get("total_pending") or 0)
+        nota = (r.get("nota") or "").strip()
+        desc = f" — {nota}" if nota else ""
+        progress = f"{n_paid}/{n_total} pagas"
+        group_code = _group_code(r.get("group_id"))
+        lines.append(
+            f"• {r.get('card_name', '?')}{desc}\n"
+            f"  💰 Total: {fmt_brl(total)} | Restante: {fmt_brl(pending)} ({progress})\n"
+            f"  🔢 Código: `{group_code}`\n"
+            f"  🗑️ Apagar: `apagar {group_code}`"
+        )
+
+    if len(lines) == 1:
+        return "✅ Você não tem parcelamentos em aberto."
+    return "\n".join(lines)

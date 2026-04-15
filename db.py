@@ -3744,6 +3744,10 @@ def resolve_installment_group_id(user_id: int, identifier: str) -> str | None:
     if ident.startswith("par-"):
         ident = ident[4:]
 
+    # strip display prefix "pc" (e.g. "PC8C72393A" → "8c72393a")
+    if ident.startswith("pc") and len(ident) > 2:
+        ident = ident[2:]
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             if len(ident) == 36 and "-" in ident:
