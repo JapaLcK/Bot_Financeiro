@@ -134,6 +134,11 @@ _EXACT: dict[str, str] = {
     "cartoes de credito":       "credit.handle",
     "meus cartoes":             "credit.handle",
     "listar cartoes":           "credit.handle",
+    "cadastrar cartao":         "credit.handle",
+    "registrar cartao":         "credit.handle",
+    "adicionar cartao":         "credit.handle",
+    "incluir cartao":           "credit.handle",
+    "novo cartao":              "credit.handle",
     "quais sao meus cartoes":   "credit.handle",
     "qual meu cartao principal":"credit.handle",
     "meu cartao principal":     "credit.handle",
@@ -245,6 +250,10 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
 
     # cartões / crédito
     (r"^(cartoes|cartoes de credito|listar cartoes|meus cartoes|quais cartoes|quais sao meus cartoes|criar cartao|padrao\b|credito\b|parcelar\b|parcelei\b|fatura\b|faturas\b|pagar fatura\b|paguei fatura\b|parcelamentos\b|parcelas\b|minhas faturas|me mostra minhas faturas|qual meu cartao principal|meu cartao principal|trocar cartao principal|mudar cartao principal|definir limite|limite cartao|limite do cartao|pagar fatura com saldo)",
+     "credit.handle"),
+    (r"^(quero\s+)?(cadastrar|registrar|adicionar|incluir|criar)\s+(um\s+|novo\s+|meu\s+)?cartao\b",
+     "credit.handle"),
+    (r"^(quero|preciso|gostaria\s+de|me\s+ajuda\s+a|me\s+ajude\s+a)\s+.*\b(cadastrar|registrar|adicionar|incluir|criar)\b.*\bcartao\b",
      "credit.handle"),
     # parcelas / parcelamentos — ver/listar variações
     (r"^(ver|listar|mostrar|me mostra|quero ver|quais|meus)\s+(parcelas?|parcelamentos?)\b",

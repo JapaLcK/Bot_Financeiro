@@ -34,6 +34,14 @@ from db import (
 from utils_date import extract_date_from_text, fmt_br, now_tz, today_tz
 from utils_text import fmt_brl, normalize_text, parse_money
 
+_CARD_CREATE_VERBS = (
+    "criar",
+    "cadastrar",
+    "registrar",
+    "adicionar",
+    "incluir",
+)
+
 
 def _pick_card_id(user_id: int, card_name: str | None):
     if card_name:
@@ -340,12 +348,101 @@ def _parse_day(text: str) -> int | None:
 
 
 def _parse_card_name_from_create(text: str) -> str | None:
-    m = re.search(r"criar\s+cart[aã]o\s+(.+)$", text, re.IGNORECASE)
+    m = re.search(
+        r"(?:criar|cadastrar|registrar|adicionar|incluir)\s+(?:um\s+|novo\s+|meu\s+)?cart[aã]o\s+(.+)$",
+        text,
+        re.IGNORECASE,
+    )
     if not m:
         return None
     raw = m.group(1).strip()
     raw = re.sub(r"\s+fecha\s+\d{1,2}.*$", "", raw, flags=re.IGNORECASE).strip()
     return raw or None
+
+
+def _is_card_create_request(text: str) -> bool:
+    norm = normalize_text(text)
+    if "cartao" not in norm:
+        return False
+    return any(re.search(rf"\b{verb}\b", norm) for verb in _CARD_CREATE_VERBS) or "novo cartao" in norm
+
+
+def _build_credit_contextual_help(text: str) -> str:
+    norm = normalize_text(text)
+
+    if _is_card_create_request(text):
+        return (
+            "💳 Para cadastrar um cartão, eu posso te guiar de duas formas:\n"
+            "• `criar cartao Nubank fecha 10 vence 17`\n"
+            "• `criar cartao Nubank` e eu pergunto o restante\n\n"
+            "Se preferir, também funciona escrever `cadastrar cartao` ou `registrar cartao`."
+        )
+
+    if any(expr in norm for expr in ("apagar cartao", "excluir cartao", "remover cartao", "deletar cartao")):
+        return (
+            "🗑️ Para apagar um cartão, use:\n"
+            "• `excluir cartao Nubank`\n\n"
+            "Antes de remover, eu vou pedir sua confirmação."
+        )
+
+    if any(expr in norm for expr in ("cartao principal", "cartao padrao", "cartao padrão", "principal")):
+        return (
+            "⭐ Posso te ajudar com o cartão principal assim:\n"
+            "• `qual meu cartao principal?`\n"
+            "• `mudar cartao principal`\n"
+            "• `padrao Nubank`"
+        )
+
+    if any(expr in norm for expr in ("vence", "fecha")) and "cartao" in norm:
+        return (
+            "📅 Para consultar fechamento ou vencimento, tente:\n"
+            "• `quando vence o cartao Nubank?`\n"
+            "• `quando fecha o cartao Nubank?`\n"
+            "• `qual cartao fecha dia 30?`"
+        )
+
+    if "fatura" in norm:
+        return (
+            "🧾 Posso te ajudar com fatura assim:\n"
+            "• `fatura Nubank`\n"
+            "• `quanto tenho na fatura do Nubank?`\n"
+            "• `pagar fatura Nubank com saldo`"
+        )
+
+    if any(expr in norm for expr in ("parcela", "parcelamento", "parcelar")):
+        return (
+            "📦 Para parcelamentos, você pode usar:\n"
+            "• `parcelar 600 em 3x no cartao Nubank`\n"
+            "• `parcelamentos`\n"
+            "• `apagar PCAB12CD34`"
+        )
+
+    if any(expr in norm for expr in ("compra", "compras", "credito", "cartao")):
+        return (
+            "💳 Posso te ajudar com cartões de algumas formas:\n"
+            "• `criar cartao Nubank fecha 10 vence 17`\n"
+            "• `cartoes`\n"
+            "• `gastei 150 no cartao Nubank`\n"
+            "• `fatura Nubank`\n"
+            "• `qual meu cartao principal?`"
+        )
+
+    return (
+        "Não entendi exatamente o que você quer fazer sobre cartões.\n"
+        "Tente uma destas opções:\n"
+        "• `criar cartao Nubank`\n"
+        "• `cartoes`\n"
+        "• `fatura Nubank`\n"
+        "• `gastei 150 no cartao Nubank`\n"
+        "• `qual meu cartao principal?`"
+    )
+
+
+def contextual_help(text: str) -> str | None:
+    norm = normalize_text(text)
+    if not any(k in norm for k in ("cartao", "cartoes", "fatura", "credito", "parcela", "parcelamento", "vence", "fecha")):
+        return None
+    return _build_credit_contextual_help(text)
 
 
 def _card_summary(card: dict) -> str:
@@ -460,6 +557,14 @@ def _instructional_credit_help(text: str) -> str | None:
     norm = normalize_text(text)
     if not any(expr in norm for expr in ("como faco", "como faço", "me ensina", "me explique", "como registrar", "como usar")):
         return None
+
+    if _is_card_create_request(text):
+        return (
+            "💳 Para cadastrar um cartão, você pode usar:\n"
+            "• `criar cartao Nubank fecha 10 vence 17`\n"
+            "• `criar cartao Nubank`\n\n"
+            "Se mandar só `criar cartao`, eu abro o fluxo guiado e pergunto nome, fechamento e vencimento."
+        )
 
     if any(expr in norm for expr in ("parcelamento", "parcelar", "parcela")):
         # detecta intenção de VER parcelas vs CRIAR parcelas
@@ -1046,8 +1151,12 @@ def handle(user_id: int, text: str) -> str | None:
         if any(x in t_norm for x in ("quais", "meus", "tenho", "registrado", "registrados", "listar", "mostrar", "mostra", "ver")):
             t_low = "listar cartoes"
 
-    if t_low.startswith("criar cartao") or t_low.startswith("criar cartão"):
-        m = re.search(r"criar\s+cart[aã]o\s+(.+?)\s+fecha\s+(\d{1,2})\s+vence\s+(\d{1,2})", t, re.IGNORECASE)
+    if _is_card_create_request(t):
+        m = re.search(
+            r"(?:criar|cadastrar|registrar|adicionar|incluir)\s+(?:um\s+|novo\s+|meu\s+)?cart[aã]o\s+(.+?)\s+fecha\s+(\d{1,2})\s+vence\s+(\d{1,2})",
+            t,
+            re.IGNORECASE,
+        )
         if not m:
             return start_card_create_flow(user_id, t)
 
@@ -1516,7 +1625,7 @@ def handle(user_id: int, text: str) -> str | None:
     if t_low in ("parcelamentos", "listar parcelamentos"):
         return _list_active_installments(user_id)
 
-    return None
+    return _build_credit_contextual_help(t)
 
 
 def _list_active_installments(user_id: int) -> str:
