@@ -1,6 +1,11 @@
 # core/handlers/categories.py
 from __future__ import annotations
+
+import re
+
 import db
+from core.services.category_service import learn_from_signals
+from utils_text import normalize_text
 
 
 def list_categories(user_id: int) -> str:
@@ -13,12 +18,14 @@ def list_categories(user_id: int) -> str:
 
     if not cats and not rules:
         return (
-            "Você ainda não tem categorias criadas.\n"
-            "Exemplo: *criar categoria mercado linkar destinatario Carrefour*"
+            "Você ainda não tem regras de categoria.\n"
+            "Exemplos:\n"
+            "• `aprender ifood como alimentacao`\n"
+            "• `aprender carrefour como mercado`"
         )
 
     cats_all = sorted(set(list(cats) + list(by_cat.keys())))
-    lines = ["📚 **Categorias**"]
+    lines = ["🧠 **Regras de categoria**"]
     for c in cats_all:
         kws = by_cat.get(c, [])
         lines.append(f"• **{c}** ({len(kws)} regras)")
@@ -26,45 +33,63 @@ def list_categories(user_id: int) -> str:
             lines.append("  └ " + ", ".join(kws))
 
     lines.append("")
-    lines.append("Criar: `criar categoria <X> linkar destinatario <Y>`")
-    lines.append("Remover: `remover destinatario <Y>`")
+    lines.append("Aprender: `aprender <estabelecimento> como <categoria>`")
+    lines.append("Remover: `remover regra <estabelecimento>`")
+    lines.append("")
+    lines.append("Dica: o bot também aprende sozinho conforme você lança e corrige categorias.")
     return "\n".join(lines)
 
 
 def create(user_id: int, text: str) -> str:
-    """
-    Aceita: "criar categoria X linkar destinatario Y"
-    ou:     "criar categoria X linkar Y"
-    """
     t = text.strip()
-    if not t.lower().startswith("criar categoria "):
-        return "Formato: `criar categoria <X> linkar destinatario <Y>`"
+    lower = normalize_text(t)
 
-    rest = t[len("criar categoria "):].strip()
-    sep1 = " linkar destinatario "
-    sep2 = " linkar "
+    kw = ""
+    cat = ""
 
-    if sep1.lower() in rest.lower():
-        idx = rest.lower().index(sep1.lower())
-        cat = rest[:idx].strip()
-        kw  = rest[idx + len(sep1):].strip().strip('"').strip("'")
-    elif sep2.lower() in rest.lower():
-        idx = rest.lower().index(sep2.lower())
-        cat = rest[:idx].strip()
-        kw  = rest[idx + len(sep2):].strip().strip('"').strip("'")
-    else:
-        return "Formato: `criar categoria <X> linkar destinatario <Y>`"
+    m = re.match(r"^aprender\s+(.+?)\s+como\s+(.+)$", t, flags=re.IGNORECASE)
+    if m:
+        kw = m.group(1).strip().strip('"').strip("'")
+        cat = m.group(2).strip().strip('"').strip("'")
+    elif lower.startswith("linkar "):
+        rest = t[len("linkar "):].strip()
+        parts = rest.rsplit(" ", 1)
+        if len(parts) == 2:
+            kw = parts[0].strip().strip('"').strip("'")
+            cat = parts[1].strip().strip('"').strip("'")
+    elif lower.startswith("criar categoria "):
+        rest = t[len("criar categoria "):].strip()
+        rest_low = rest.lower()
+        sep1 = " linkar destinatario "
+        sep2 = " linkar "
+        if sep1 in rest_low:
+            idx = rest_low.index(sep1)
+            cat = rest[:idx].strip()
+            kw = rest[idx + len(sep1):].strip().strip('"').strip("'")
+        elif sep2 in rest_low:
+            idx = rest_low.index(sep2)
+            cat = rest[:idx].strip()
+            kw = rest[idx + len(sep2):].strip().strip('"').strip("'")
 
     if not cat or not kw:
-        return "Formato: `criar categoria <X> linkar destinatario <Y>`"
+        return (
+            "Formato: `aprender <estabelecimento> como <categoria>`\n"
+            "Exemplo: `aprender ifood como alimentacao`"
+        )
 
-    db.add_category_rule(user_id, kw, cat)
-    return f"✅ Regra criada: **{kw}** → **{cat}**"
+    learn_from_signals(user_id, cat, kw)
+    return f"✅ Aprendido: sempre que aparecer **{kw}**, vou usar **{cat}**"
 
 
-def delete(user_id: int, keyword: str) -> str:
-    if not keyword or not keyword.strip():
-        return "Qual destinatário remover? Tente: *remover destinatario iFood*"
+def delete(user_id: int, text: str) -> str:
+    keyword = re.sub(
+        r"^(remover|apagar|excluir|deletar)\s+(regra|destinatario)\s+",
+        "",
+        text.strip(),
+        flags=re.IGNORECASE,
+    ).strip()
+    if not keyword:
+        return "Qual regra você quer remover? Tente: *remover regra ifood*"
     kw = keyword.strip().strip('"').strip("'")
     n  = db.delete_category_rule(user_id, kw)
     if n:

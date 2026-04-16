@@ -2,6 +2,7 @@ from core.types import OutgoingMessage
 from parsers import parse_receita_despesa_natural
 from db import ensure_user, add_launch_and_update_balance
 from utils_text import fmt_brl
+from core.services.category_service import learn_from_inference
 
 def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
     from core.handlers import credit as h_credit
@@ -19,6 +20,7 @@ def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
     tipo = parsed["tipo"]
     valor = float(parsed["valor"])
     categoria = parsed.get("categoria")
+    category_reason = parsed.get("category_reason")
     alvo = parsed.get("alvo")
     nota = parsed.get("nota")
     criado_em = parsed.get("criado_em")
@@ -33,6 +35,14 @@ def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
         categoria=categoria,
         criado_em=criado_em,
         is_internal_movement=is_internal,
+    )
+
+    learn_from_inference(
+        user_id,
+        nota or text,
+        categoria or "outros",
+        target_hint=alvo,
+        reason=category_reason,
     )
 
     emoji = "💸" if tipo == "despesa" else "💰"

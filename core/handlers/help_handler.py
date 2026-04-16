@@ -149,24 +149,25 @@ def _investments_contextual_fallback(norm: str) -> str:
 
 
 def _categories_contextual_fallback(norm: str) -> str:
-    if _has_any(norm, "criar", "adicionar", "nova", "novo"):
+    if _has_any(norm, "criar", "adicionar", "nova", "novo", "aprender"):
         return (
-            "🏷️ Para criar uma categoria com regra, use:\n"
-            "• `criar categoria alimentacao linkar destinatario ifood`\n"
-            "• `criar categoria mercado linkar Carrefour`"
+            "🏷️ Para ensinar uma categoria ao bot, use:\n"
+            "• `aprender ifood como alimentacao`\n"
+            "• `aprender carrefour como mercado`"
         )
 
     if _has_any(norm, "remover", "apagar", "excluir", "deletar"):
         return (
             "🏷️ Para remover uma regra de categoria, use:\n"
-            "• `remover destinatario ifood`"
+            "• `remover regra ifood`"
         )
 
     return (
         "🏷️ Posso te ajudar com categorias assim:\n"
-        "• `categorias`\n"
-        "• `criar categoria mercado linkar destinatario Carrefour`\n"
-        "• `remover destinatario ifood`"
+        "• `regras de categoria` ou `listar regras`\n"
+        "• `aprender ifood como alimentacao`\n"
+        "• `remover regra ifood`\n\n"
+        "O bot também tenta aprender categorias sozinho conforme você usa."
     )
 
 

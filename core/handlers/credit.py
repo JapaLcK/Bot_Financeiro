@@ -4,6 +4,7 @@ import re
 from collections import defaultdict
 
 from ai_router import classify_category_with_gpt
+from core.services.category_service import learn_from_inference
 from db import (
     add_credit_purchase,
     add_credit_purchase_installments,
@@ -216,6 +217,13 @@ def try_handle_natural_credit_purchase(user_id: int, text: str) -> str | None:
             nota=nota,
             purchased_at=purchased_at,
         )
+        learn_from_inference(
+            user_id,
+            desc or base_text,
+            categoria,
+            target_hint=desc,
+            reason="manual",
+        )
         return _format_credit_purchase_success(card_label, float(valor), purchased_at, float(due), int(tx_id))
     except Exception as e:
         return f"❌ Erro registrando compra no crédito: {e}"
@@ -263,6 +271,13 @@ def _create_installments(
         result = ret[0] if isinstance(ret, tuple) else ret
         total = float(ret[1]) if isinstance(ret, tuple) and len(ret) >= 2 else valor
         group_id = result.get("group_id")
+        learn_from_inference(
+            user_id,
+            nota,
+            categoria,
+            target_hint=nota,
+            reason="manual",
+        )
         return (
             f"💳 Parcelado no **{resolved_name}**: {fmt_brl(valor)} em {n}x\n"
             f"📝 {nota}\n"
@@ -1260,6 +1275,13 @@ def handle(user_id: int, text: str) -> str | None:
                 categoria=categoria,
                 nota=nota,
                 purchased_at=purchased_at,
+            )
+            learn_from_inference(
+                user_id,
+                rest_desc,
+                categoria,
+                target_hint=rest_desc,
+                reason="manual",
             )
             return _format_credit_purchase_success(resolved_name, float(valor), purchased_at, float(due), int(tx_id))
         except Exception as e:

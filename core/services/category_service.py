@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-from utils_text import normalize_text, LOCAL_RULES, contains_word, extract_keyword_for_memory
+from utils_text import normalize_text, LOCAL_RULES, contains_word, extract_memory_candidates
 from db import get_memorized_category, upsert_category_rule
 
 
@@ -72,28 +72,37 @@ def learn_from_explicit_category(
     source: str | None = None,
     launch_id: int | None = None,
 ) -> None:
-    """
-    Aprendizado automático simples (sem candidates / sem db_category):
-    - extrai uma keyword do texto
-    - grava keyword -> chosen_category em user_category_rules (upsert_category_rule)
+    learn_from_signals(user_id, chosen_category, text_base)
 
-    Parâmetros extras são aceitos só pra não quebrar chamadas.
-    """
+
+def learn_from_signals(
+    user_id: int,
+    chosen_category: str,
+    *signals: str | None,
+) -> None:
     cat = normalize_text(chosen_category or "")
-    if not cat:
+    if not cat or cat == "outros":
+        return
+    if cat in {"investimento_aporte", "investimento_resgate", "transferencia_interna", "pagamento_fatura", "ajuste_saldo"}:
         return
 
-    t = normalize_text(text_base or "")
-    if not t:
-        return
+    seen: set[str] = set()
+    for signal in signals:
+        for candidate in extract_memory_candidates(signal):
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            upsert_category_rule(user_id, candidate, cat)
 
-    kw = extract_keyword_for_memory(t)
-    kw = normalize_text(kw or "")
 
-    # filtros anti-lixo
-    if not kw or len(kw) < 3:
+def learn_from_inference(
+    user_id: int,
+    text_base: str,
+    chosen_category: str,
+    *,
+    target_hint: str | None = None,
+    reason: str | None = None,
+) -> None:
+    if reason in {"default", "user_rule"}:
         return
-    if kw in {"pix", "pagamento", "debito", "credito", "compra", "transferencia", "tarifa"}:
-        return
-
-    upsert_category_rule(user_id, kw, cat)
+    learn_from_signals(user_id, chosen_category, target_hint, text_base)

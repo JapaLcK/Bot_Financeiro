@@ -265,8 +265,7 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
         return h_categories.create(user_id, text)
 
     if intent == "categories.delete":
-        keyword = entities.get("keyword") or text.replace("remover destinatario", "").strip()
-        return h_categories.delete(user_id, keyword)
+        return h_categories.delete(user_id, text)
 
     # --- relatório ---
     if intent == "report.daily":

@@ -107,6 +107,7 @@ def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
         "tipo": tipo,
         "valor": valor,
         "categoria": categoria,
+        "category_reason": res.reason,
         "alvo": alvo,
         "nota": text_base.strip(),
         "criado_em": dt_evento,

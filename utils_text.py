@@ -64,6 +64,71 @@ STOPWORDS_PT = {
     "um","uma","uns","umas","com","ao","aos","as","os","o","a"
 }
 
+MEMORY_NOISE_TOKENS = {
+    "pix", "pagamento", "pag", "pgto", "transferencia", "transfer", "ted", "doc",
+    "debito", "credito", "compra", "pagto", "recebimento", "receita", "despesa",
+    "saldo", "ajuste", "tarifa", "taxa", "estorno", "deb", "cred", "cp", "comp",
+    "ltda", "me", "epp", "sa", "eireli", "banco", "bank", "loja",
+}
+
+
+def is_useful_memory_keyword(keyword: str | None) -> bool:
+    kw = normalize_text(keyword or "")
+    if not kw or len(kw) < 3:
+        return False
+    if len(kw) > 48:
+        return False
+    if not re.search(r"[a-z]", kw):
+        return False
+
+    tokens = [tok for tok in kw.split() if tok]
+    if not tokens:
+        return False
+    if len(tokens) > 6:
+        return False
+    if all(tok in STOPWORDS_PT or tok in MEMORY_NOISE_TOKENS for tok in tokens):
+        return False
+    return True
+
+
+def extract_memory_candidates(text: str | None, limit: int = 3) -> list[str]:
+    norm = normalize_text(text or "")
+    if not norm:
+        return []
+
+    raw_tokens = [tok for tok in norm.split() if tok]
+    filtered = [
+        tok for tok in raw_tokens
+        if len(tok) >= 2
+        and not tok.isdigit()
+        and tok not in STOPWORDS_PT
+        and tok not in MEMORY_NOISE_TOKENS
+    ]
+
+    candidates: list[str] = []
+
+    if filtered:
+        phrase = " ".join(filtered[:4])
+        if is_useful_memory_keyword(phrase):
+            candidates.append(phrase)
+
+        first_two = " ".join(filtered[:2])
+        if is_useful_memory_keyword(first_two):
+            candidates.append(first_two)
+
+    keyword = extract_keyword_for_memory(norm)
+    if is_useful_memory_keyword(keyword):
+        candidates.append(normalize_text(keyword))
+
+    deduped: list[str] = []
+    for candidate in candidates:
+        c = normalize_text(candidate)
+        if c and c not in deduped:
+            deduped.append(c)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
 def extract_keyword_for_memory(text_norm: str) -> str:
     # 1) se bater em alguma keyword das regras locais, salva essa keyword
     for keywords, _cat in LOCAL_RULES:
@@ -83,6 +148,7 @@ def extract_keyword_for_memory(text_norm: str) -> str:
         t for t in text_norm.split()
         if t
         and t not in STOPWORDS_PT
+        and t not in MEMORY_NOISE_TOKENS
         and len(t) >= 3
         and not t.replace(",", "").replace(".", "").isdigit()
     ]

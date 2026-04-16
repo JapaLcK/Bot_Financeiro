@@ -12,6 +12,7 @@ from db import (
     add_launch_and_update_balance,
     create_card,
     get_balance,
+    get_memorized_category,
     get_open_bill_summary,
     get_pending_action,
     list_cards,
@@ -397,7 +398,46 @@ def test_contextual_help_para_categorias_quando_nao_entende(user_id):
 
     assert "Não entendi exatamente" in response
     assert "categor" in response.lower()
-    assert "criar categoria mercado" in response
+    assert "aprender ifood como alimentacao" in response
+
+
+def test_listar_regras_usa_fluxo_de_categorias(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="listar regras")
+
+    response = route(classify(msg.text), msg)
+
+    assert "categoria" in response.lower()
+
+
+def test_aprender_como_cria_regra(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="aprender ifood como alimentacao")
+
+    response = route(classify(msg.text), msg)
+
+    assert "aprendido" in response.lower()
+    assert get_memorized_category(user_id, "pedido no ifood") == "alimentacao"
+
+
+def test_remover_regra_remove_regra_existente(user_id):
+    route(
+        classify("aprender ifood como alimentacao"),
+        IncomingMessage(platform="discord", user_id=user_id, text="aprender ifood como alimentacao"),
+    )
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="remover regra ifood")
+
+    response = route(classify(msg.text), msg)
+
+    assert "removida" in response.lower()
+    assert get_memorized_category(user_id, "pedido no ifood") is None
+
+
+def test_lancamento_manual_ensina_categoria_automaticamente(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="gastei 35 na farmacia sao jose")
+
+    response = route(classify(msg.text), msg)
+
+    assert "registrada" in response.lower()
+    assert get_memorized_category(user_id, "compra farmacia sao jose") == "saude"
 
 
 def test_contextual_help_para_dashboard_quando_nao_entende(user_id):

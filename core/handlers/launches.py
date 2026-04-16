@@ -6,7 +6,7 @@ from datetime import date, timedelta
 import db
 from utils_text import fmt_brl, is_internal_category
 from utils_date import extract_date_from_text, today_tz
-from core.services.category_service import infer_category
+from core.services.category_service import infer_category, learn_from_inference
 from parsers import parse_receita_despesa_natural
 
 
@@ -203,6 +203,7 @@ def add(user_id: int, text: str, entities: dict) -> str:
         tipo      = parsed["tipo"]
         valor     = float(parsed["valor"])
         categoria = parsed.get("categoria") or "outros"
+        category_reason = parsed.get("category_reason")
         alvo      = parsed.get("alvo") or ""
         nota      = parsed.get("nota") or text
         criado_em = parsed.get("criado_em")
@@ -216,6 +217,7 @@ def add(user_id: int, text: str, entities: dict) -> str:
         nota  = text
         res   = infer_category(user_id, nota, entities.get("categoria"))
         categoria = res.category
+        category_reason = res.reason
         criado_em = None
         is_int    = is_internal_category(categoria)
 
@@ -228,6 +230,14 @@ def add(user_id: int, text: str, entities: dict) -> str:
         categoria=categoria,
         criado_em=criado_em,
         is_internal_movement=is_int,
+    )
+
+    learn_from_inference(
+        user_id,
+        nota,
+        categoria,
+        target_hint=alvo,
+        reason=category_reason,
     )
 
     emoji = "💸" if tipo == "despesa" else "💰"

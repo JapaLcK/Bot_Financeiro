@@ -60,7 +60,7 @@ HELP_SECTIONS: dict[str, str] = {
     "• O saldo final vem do `LEDGERBAL` do OFX\n"
     "\n"
     "📌 **Categorias no OFX**\n"
-    "• Se o OFX vier como \"Outros\", o bot tenta aplicar suas **regras** (comando `linkar ...`)\n"
+    "• Se o OFX vier como \"Outros\", o bot tenta aplicar o que ele já aprendeu com seus lançamentos e regras\n"
     "• Se não houver correspondência, fica em \"Outros\".\n"
     ),
     "cc": (
@@ -105,14 +105,14 @@ HELP_SECTIONS: dict[str, str] = {
         "• `qual meu cartao principal`\n"
     ),
     "categories": (
-    "🏷️ **Categorias & Regras (auto-categorização)**\n"
-    "• `categorias` → lista suas categorias\n"
-    "• `criar categoria mercado`\n"
-    "• `linkar ifood alimentacao` → sempre que aparecer \"ifood\", vira \"alimentacao\"\n"
-    "• `listar regras` → mostra palavras-chave cadastradas\n"
-    "• `apagar regra 3` → remove a regra (use o ID retornado)\n"
+    "🧠 **Aprendizado de categorias**\n"
+    "• `regras de categoria` ou `listar regras` → mostra o que o bot já aprendeu\n"
+    "• `aprender ifood como alimentacao`\n"
+    "• `aprender carrefour como mercado`\n"
+    "• `remover regra ifood` → remove essa regra\n"
     "\n"
-    "Dica: As regras ajudam MUITO no OFX quando vem tudo como \"Outros\"."
+    "Dica: As regras ajudam MUITO no OFX quando vem tudo como \"Outros\".\n"
+    "Aprendizado: o bot também tenta memorizar estabelecimentos automaticamente conforme você lança seus gastos."
     ),
     "pockets": (
         "📦 **Caixinhas**\n"
@@ -166,7 +166,7 @@ TITLE_MAP: dict[str, str] = {
     "ofx": "OFX",
     "cc": "Conta corrente",
     "credit": "Cartões & Crédito",
-    "categories": "Categorias & Regras",
+    "categories": "Aprendizado de categorias",
     "pockets": "Caixinhas",
     "invest": "Investimentos",
     "cdi": "CDI",
@@ -182,7 +182,7 @@ HELP_ORDER: list[tuple[str, str, str]] = [
     ("ofx", "OFX (importar extrato)", "🧾"),
     ("cc", "Conta corrente", "🏦"),
     ("credit", "Cartões & Crédito", "💳"),
-    ("categories", "Categorias & Regras", "🏷️"),
+    ("categories", "Aprendizado de categorias", "🏷️"),
     ("pockets", "Caixinhas", "📦"),
     ("invest", "Investimentos", "📈"),
     ("cdi", "CDI", "📊"),
@@ -195,7 +195,7 @@ HELP_TITLES: dict[str, str] = {
     "start": "Ajuda — Bot Financeiro",
     "tutorial": "Tutorial",
     "ofx": "OFX",
-    "categories": "Categorias & Regras",
+    "categories": "Aprendizado de categorias",
     "cc": "Conta corrente",
     "credit": "Cartões & Crédito",
     "pockets": "Caixinhas",
@@ -269,7 +269,7 @@ _SECTION_ALIASES = {
     "launches": {"lancamentos", "lançamentos", "historico", "histórico", "gastos", "despesas", "extrato"},
     "confirm": {"confirm", "confirmacoes", "confirmações", "sim", "nao", "não"},
     "credit": {"cartao", "cartoes", "cartão", "cartões", "credito", "crédito", "fatura", "faturas", "parcel", "parcelamento", "parcelas", "limite", "limites"},
-    "categories": {"categoria", "categorias", "regras", "regra", "linkar", "palavras", "palavra-chave", "palavras-chave"},
+    "categories": {"categoria", "categorias", "regras", "regra", "linkar", "aprender", "palavras", "palavra-chave", "palavras-chave"},
 }
 
 def resolve_section(text: str) -> str:
