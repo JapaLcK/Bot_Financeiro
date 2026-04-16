@@ -333,8 +333,90 @@ def test_contextual_help_para_cartao_quando_nao_entende(user_id):
 
     response = route(result, msg)
 
-    assert "sobre cartões" in response
-    assert "fatura nubank" in response
+    assert "Não entendi exatamente" in response
+    assert "Posso te ajudar com cartões" in response
+    assert "criar cartao Nubank" in response
+    assert "fatura Nubank" in response
+
+
+def test_contextual_help_para_caixinha_quando_nao_entende(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="caixinha banana cosmica")
+
+    response = route(classify(msg.text), msg)
+
+    assert "Não entendi exatamente" in response
+    assert "caixinhas" in response.lower() or "caixinha" in response.lower()
+    assert "criar caixinha viagem" in response
+
+
+def test_contextual_help_para_caixinha_com_erro_de_digitacao(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="caxinha banana cosmica")
+
+    response = route(classify(msg.text), msg)
+
+    assert "Não entendi exatamente" in response
+    assert "caixinha" in response.lower()
+    assert "criar caixinha viagem" in response
+
+
+def test_contextual_help_para_investimento_quando_nao_entende(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="investimento maluco intergalactico")
+
+    response = route(classify(msg.text), msg)
+
+    assert "Não entendi exatamente" in response
+    assert "investimento" in response.lower()
+    assert "criar investimento CDB 110% CDI" in response
+
+
+def test_contextual_help_para_lancamentos_quando_nao_entende(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="gastos banana quanticos")
+
+    response = route(classify(msg.text), msg)
+
+    assert "Não entendi exatamente" in response
+    assert "lançamentos" in response.lower() or "saldo" in response.lower()
+    assert "gastei 50 mercado" in response
+
+
+def test_gastos_com_texto_solto_nao_lista_lancamentos(user_id):
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    add_launch_and_update_balance(user_id, "despesa", 50, "mercado", "gastei 50 mercado")
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="gastos bana quanticos")
+
+    response = route(classify(msg.text), msg)
+
+    assert "Últimos" not in response
+    assert "Não entendi exatamente" in response
+
+
+def test_contextual_help_para_categorias_quando_nao_entende(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="categoria marciana aleatoria")
+
+    response = route(classify(msg.text), msg)
+
+    assert "Não entendi exatamente" in response
+    assert "categor" in response.lower()
+    assert "criar categoria mercado" in response
+
+
+def test_contextual_help_para_dashboard_quando_nao_entende(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="dashboard estranho demais")
+
+    response = route(classify(msg.text), msg)
+
+    assert "Não entendi exatamente" in response
+    assert "dashboard" in response.lower()
+    assert "abrir o dashboard" in response.lower() or "`dashboard`" in response
+
+
+def test_contextual_help_generico_quando_nao_entende_nada(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="banana radioativo do espaco")
+
+    response = route(classify(msg.text), msg)
+
+    assert "Não entendi exatamente o que você quer fazer" in response
+    assert "`ajuda`" in response
 
 
 def test_route_pergunta_como_registrar_compra_no_credito(user_id):
@@ -349,6 +431,46 @@ def test_route_pergunta_como_registrar_compra_no_credito(user_id):
     assert "Para registrar uma compra no crédito" in response
     assert "credito 150 mercado" in response
     assert "apagar CC17" in response
+
+
+def test_classify_sinonimos_de_cadastro_de_cartao():
+    for texto in ("cadastrar cartao", "registrar cartao", "adicionar cartao", "quero cadastrar um cartao"):
+        result = classify(texto)
+        assert result.intent == "credit.handle", f"Esperado credit.handle para '{texto}', obteve {result.intent}"
+
+
+def test_route_cadastrar_cartao_abre_fluxo_guiado(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="cadastrar cartao")
+
+    response = route(classify(msg.text), msg)
+    pending = get_pending_action(user_id)
+
+    assert "Qual cartão deseja registrar" in response
+    assert pending["action_type"] == "credit_card_setup"
+    assert pending["payload"]["step"] == "name"
+
+
+def test_route_registrar_cartao_nubank_pergunta_fechamento(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="registrar cartao nubank")
+
+    response = route(classify(msg.text), msg)
+    pending = get_pending_action(user_id)
+
+    assert "Quando fecha a fatura" in response
+    assert pending["payload"]["card_name"] == "nubank"
+    assert pending["payload"]["step"] == "closing_day"
+
+
+def test_route_registrar_cartao_com_dados_completos(user_id):
+    msg = IncomingMessage(
+        platform="discord",
+        user_id=user_id,
+        text="registrar cartao Nubank fecha 1 vence 8",
+    )
+
+    response = route(classify(msg.text), msg)
+
+    assert "registrado com sucesso" in response
 
 
 def test_route_pergunta_como_criar_caixinha(user_id):

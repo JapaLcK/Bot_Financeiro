@@ -10,6 +10,8 @@ Recebe um IntentResult + mensagem original e decide o que fazer:
 """
 from __future__ import annotations
 
+import re
+
 import db
 from core.intent_classifier import IntentResult
 from core.types import IncomingMessage
@@ -50,49 +52,29 @@ OUT_OF_SCOPE_MSG = (
 NOT_UNDERSTOOD_MSG = "Não entendi. Pode reformular?\nDigite *ajuda* para ver exemplos."
 
 
-def _contextual_help_message(text: str) -> str:
+def _contextual_help_message(text: str, platform: str) -> str:
+    return h_help.infer_contextual_fallback(text, platform)
+
+
+def _should_redirect_launches_list_to_help(text: str) -> bool:
     norm = normalize_text(text)
+    if not any(term in norm for term in ("gasto", "gastos", "despesa", "despesas", "lancamento", "lancamentos", "historico", "extrato")):
+        return False
 
-    if any(k in norm for k in ("cartao", "cartoes", "fatura", "credito", "parcela", "parcelamento", "vence", "fecha")):
-        return (
-            "Não entendi o que você quis fazer sobre cartões.\n"
-            "Tente uma destas opções:\n"
-            "• `cartoes`\n"
-            "• `fatura nubank`\n"
-            "• `quanto tenho na fatura do nubank?`\n"
-            "• `qual cartao fecha dia 30?`\n"
-            "• `qual meu cartao principal?`"
-        )
+    allowed_patterns = (
+        r"^(gastos?|despesas?|lancamentos?|historico|extrato)$",
+        r"^(meus|minhas)\s+(gastos?|despesas?|lancamentos?)$",
+        r"^(ver|mostrar|mostra|listar)\s+(meus\s+)?(gastos?|despesas?|lancamentos?|extrato)(\s+recentes?)?$",
+        r"^(quais|qual)\s+(sao|foram|e|foi)?\s*(meus|os|minhas|as)?\s*(gastos?|despesas?|lancamentos?|ultimos?)$",
+        r"^(o\s+que|quanto)\s+(gastei|gastos?|despesas?|lancamentos?)$",
+        r"^(gastos?|despesas?)\s+(recentes?|ultimos?|da\s+semana|do\s+mes)$",
+        r".*\b(hoje|ontem)\b.*",
+    )
+    if any(re.fullmatch(pattern, norm) for pattern in allowed_patterns):
+        return False
 
-    if any(k in norm for k in ("caixinha", "caixinhas")):
-        return (
-            "Não entendi o que você quis fazer com caixinhas.\n"
-            "Tente uma destas opções:\n"
-            "• `listar caixinhas`\n"
-            "• `criar caixinha viagem`\n"
-            "• `coloquei 100 na caixinha viagem`"
-        )
-
-    if any(k in norm for k in ("investimento", "investimentos", "cdb", "tesouro", "aporte", "resgate")):
-        return (
-            "Não entendi o que você quis fazer com investimentos.\n"
-            "Tente uma destas opções:\n"
-            "• `listar investimentos`\n"
-            "• `criar investimento CDB 110% CDI`\n"
-            "• `apliquei 200 no investimento CDB`"
-        )
-
-    if any(k in norm for k in ("saldo", "lancamento", "lancamentos", "gastei", "recebi", "despesa", "receita")):
-        return (
-            "Não entendi o que você quis fazer com lançamentos.\n"
-            "Tente uma destas opções:\n"
-            "• `saldo`\n"
-            "• `listar lancamentos`\n"
-            "• `gastei 50 mercado`\n"
-            "• `recebi 1000 salario`"
-        )
-
-    return "Não entendi. Tente reformular de forma mais direta ou digite *ajuda*."
+    first = norm.split()[0] if norm.split() else ""
+    return first in {"gasto", "gastos", "despesa", "despesas", "lancamento", "lancamentos", "historico", "extrato"}
 
 
 def route(result: IntentResult, msg: IncomingMessage) -> str:
@@ -143,13 +125,13 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
     # 2. Fora do escopo
     # -----------------------------------------------------------------------
     if intent == "out_of_scope":
-        return _contextual_help_message(text)
+        return _contextual_help_message(text, platform)
 
     # -----------------------------------------------------------------------
     # 3. Confiança muito baixa
     # -----------------------------------------------------------------------
     if confidence < 0.55:
-        return _contextual_help_message(text)
+        return _contextual_help_message(text, platform)
 
     # -----------------------------------------------------------------------
     # 4. Precisa de esclarecimento
@@ -231,6 +213,8 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
 
     # --- lançamentos ---
     if intent == "launches.list":
+        if _should_redirect_launches_list_to_help(text):
+            return _contextual_help_message(text, platform)
         limit = int(entities.get("limit", 10))
         return h_launches.list_launches(user_id, limit=limit, entities=entities, original_text=text)
 
@@ -243,7 +227,7 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
     # --- cartões / crédito ---
     if intent == "credit.handle":
         resp = h_credit.handle(user_id, text)
-        return resp if resp is not None else _contextual_help_message(text)
+        return resp if resp is not None else _contextual_help_message(text, platform)
 
     # --- caixinhas ---
     if intent == "pockets.list":

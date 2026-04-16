@@ -24,6 +24,7 @@ import json
 import os
 import pathlib
 import sys
+import time as _startup_time
 import urllib.parse
 from decimal import Decimal
 from datetime import datetime, date, timedelta, timezone
@@ -71,6 +72,9 @@ STRIPE_WEBHOOK_SECRET   = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PRICE_ID_PRO     = os.getenv("STRIPE_PRICE_ID_PRO", "")   # price_xxx do plano Pro
 DASHBOARD_MAGIC_LINK_MINUTES = int(os.getenv("DASHBOARD_MAGIC_LINK_MINUTES", "5"))
 DASHBOARD_SESSION_HOURS = float(os.getenv("DASHBOARD_SESSION_HOURS", "12"))
+DB_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "5"))
+STARTUP_STEP_TIMEOUT = int(os.getenv("STARTUP_STEP_TIMEOUT", "12"))
+RUN_BACKGROUND_TASKS = os.getenv("RUN_BACKGROUND_TASKS", "1") != "0"
 
 HERE = pathlib.Path(__file__).parent  # directory of this file
 
@@ -97,7 +101,11 @@ def jdump(data: dict) -> str:
 # ─── DB helpers ──────────────────────────────────────────────────────────────
 
 async def db_connect():
-    return await psycopg.AsyncConnection.connect(DATABASE_URL, row_factory=dict_row)
+    return await psycopg.AsyncConnection.connect(
+        DATABASE_URL,
+        row_factory=dict_row,
+        connect_timeout=DB_CONNECT_TIMEOUT,
+    )
 
 async def list_users() -> list:
     async with await db_connect() as conn:
@@ -506,73 +514,165 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _t0 = _startup_time.monotonic()
+
+    async def _startup_required(label: str, coro):
+        try:
+            return await asyncio.wait_for(coro, timeout=STARTUP_STEP_TIMEOUT)
+        except asyncio.TimeoutError as exc:
+            print(
+                f"ERROR: Startup travou em '{label}' por mais de {STARTUP_STEP_TIMEOUT}s.",
+                file=sys.stderr,
+                flush=True,
+            )
+            raise RuntimeError(f"Startup timeout: {label}") from exc
+
+    async def _startup_optional(label: str, coro, default=None):
+        try:
+            return await asyncio.wait_for(coro, timeout=STARTUP_STEP_TIMEOUT)
+        except asyncio.TimeoutError:
+            print(
+                f"WARNING: Startup ignorou '{label}' após {STARTUP_STEP_TIMEOUT}s.",
+                file=sys.stderr,
+                flush=True,
+            )
+            return default
+        except Exception as exc:
+            print(f"WARNING: Startup ignorou '{label}': {exc}", file=sys.stderr, flush=True)
+            return default
+
+    # ── 1. DB health check ────────────────────────────────────────────────────
     try:
-        async with await db_connect() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute("SELECT 1")
-        print("OK: Database connected")
+        async def _db_health_check():
+            async with await db_connect() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("SELECT 1")
+
+        await _startup_required("database health check", _db_health_check())
+        print("OK: Database connected", flush=True)
     except Exception as exc:
-        print(f"ERROR: Database connection failed: {exc}", file=sys.stderr)
+        print(f"ERROR: Database connection failed: {exc}", file=sys.stderr, flush=True)
         raise
 
-    await ensure_budget_table()
-    print("OK: Budget table ready")
-    await ensure_admin_tables()
-    print("OK: Admin observability tables ready")
-    await log_admin_startup_warnings()
+    # ── 2. Setup de tabelas em paralelo ───────────────────────────────────────
+    await _startup_required(
+        "setup de tabelas",
+        asyncio.gather(
+            ensure_budget_table(),
+            ensure_admin_tables(),
+        ),
+    )
+    print("OK: Budget table ready", flush=True)
+    print("OK: Admin observability tables ready", flush=True)
 
-    uid = int(DASHBOARD_USER_ID) if DASHBOARD_USER_ID else None
-    if uid is None:
+    # ── 3. Warnings + detecção de usuário em paralelo ─────────────────────────
+    async def _resolve_uid() -> int | None:
+        if DASHBOARD_USER_ID:
+            return int(DASHBOARD_USER_ID)
         rows = await list_users()
         if not rows:
-            print("WARNING: No users found in database.")
-        elif len(rows) == 1:
+            print("WARNING: No users found in database.", flush=True)
+            return None
+        if len(rows) == 1:
             uid = rows[0]["id"]
-            print(f"INFO: Auto-detected user ID: {uid}")
+            print(f"INFO: Auto-detected user ID: {uid}", flush=True)
         else:
             ids = [r["id"] for r in rows]
             uid = ids[0]
-            print(f"INFO: Multiple users {ids}. Using first: {uid}")
+            print(f"INFO: Multiple users {ids}. Using first: {uid}", flush=True)
+        return uid
+
+    uid, _ = await asyncio.gather(
+        _startup_optional("detecção de usuário padrão", _resolve_uid()),
+        _startup_optional("avisos administrativos de startup", log_admin_startup_warnings()),
+    )
 
     app.state.default_user_id = uid
+    _port = int(os.environ.get("PORT", "8000"))
     if uid:
-        print(f"Dashboard: http://localhost:8000/")
-        print(f"WebSocket: ws://localhost:8000/ws/{uid}")
+        print(f"Dashboard: http://localhost:{_port}/", flush=True)
+        print(f"WebSocket: ws://localhost:{_port}/ws/{uid}", flush=True)
 
-    from adapters.whatsapp.wa_app import _worker_loop as _wa_worker, _daily_report_loop as _wa_daily  # noqa: E402
-    from core.services.engagement_scheduler import run_engagement_loop  # noqa: E402
+    # ── 4. Background tasks com imports lazy ──────────────────────────────────
+    # Os imports pesados ficam dentro dos wrappers: só são carregados quando
+    # a coroutine executa (após o yield), fora da janela de startup.
+    async def _wa_worker():
+        try:
+            await asyncio.sleep(1)
+            from adapters.whatsapp.wa_app import _worker_loop  # noqa: PLC0415
+            await _worker_loop()
+        except Exception as exc:
+            print(f"[wa_worker] erro: {exc}", file=sys.stderr)
 
-    task        = asyncio.create_task(push_loop())
-    wa_worker   = asyncio.create_task(_wa_worker())
-    wa_daily    = asyncio.create_task(_wa_daily())
-    engagement  = asyncio.create_task(run_engagement_loop())
+    async def _wa_daily():
+        try:
+            await asyncio.sleep(1)
+            from adapters.whatsapp.wa_app import _daily_report_loop  # noqa: PLC0415
+            await _daily_report_loop()
+        except Exception as exc:
+            print(f"[wa_daily] erro: {exc}", file=sys.stderr)
+
+    async def _engagement():
+        try:
+            await asyncio.sleep(1)
+            from core.services.engagement_scheduler import run_engagement_loop  # noqa: PLC0415
+            await run_engagement_loop()
+        except Exception as exc:
+            print(f"[engagement] erro: {exc}", file=sys.stderr)
+
+    _elapsed = _startup_time.monotonic() - _t0
+    print(f"[app] Startup interno concluído em {_elapsed:.1f}s.", flush=True)
+
+    tasks = [asyncio.create_task(push_loop(), name="push_loop")]
+    if RUN_BACKGROUND_TASKS:
+        tasks.extend(
+            [
+                asyncio.create_task(_wa_worker(), name="wa_worker"),
+                asyncio.create_task(_wa_daily(), name="wa_daily"),
+                asyncio.create_task(_engagement(), name="engagement"),
+            ]
+        )
+    else:
+        print("[app] Background tasks desativadas neste processo.", flush=True)
 
     yield
 
-    for t in (task, wa_worker, wa_daily, engagement):
+    # Shutdown: cancela tasks e aguarda com timeout para não travar
+    for t in tasks:
         t.cancel()
-        try:
-            await t
-        except asyncio.CancelledError:
-            pass
+    await asyncio.wait(tasks, timeout=5)
+    for t in tasks:
+        if not t.done():
+            print(f"[lifespan] task '{t.get_name()}' não encerrou a tempo.", file=sys.stderr)
 
 app = FastAPI(title="Finance Dashboard", lifespan=lifespan)
 
 # Middleware de log de erros HTTP (definido em core/admin_dashboard.py)
 app.middleware("http")(admin_error_logging_middleware)
 
-# ─── WhatsApp webhook routes ──────────────────────────────────────────────────
-from adapters.whatsapp.wa_app import (  # noqa: E402
-    wa_verify,
-    wa_webhook,
-    wa_simulate,
-)
+# ─── WhatsApp webhook routes (lazy import) ───────────────────────────────────
+# Importar wa_app no nível de módulo puxava toda a cadeia de lógica do bot
+# (wa_client, wa_runtime, handle_incoming, db, bcrypt, requests…) adicionando
+# ~1s ao startup. Com wrappers lazy, o import só acontece na 1ª requisição.
+
+async def _wa_verify(request: Request):
+    from adapters.whatsapp.wa_app import wa_verify  # noqa: PLC0415
+    return await wa_verify(request)
+
+async def _wa_webhook(request: Request):
+    from adapters.whatsapp.wa_app import wa_webhook  # noqa: PLC0415
+    return await wa_webhook(request)
+
+async def _wa_simulate(request: Request):
+    from adapters.whatsapp.wa_app import wa_simulate  # noqa: PLC0415
+    return await wa_simulate(request)
+
 # Mantem compatibilidade com a rota antiga `/webhook`, usada em configs legadas.
-app.add_api_route("/wa/webhook", wa_verify, methods=["GET"])
-app.add_api_route("/wa/webhook", wa_webhook, methods=["POST"])
-app.add_api_route("/webhook", wa_verify, methods=["GET"])
-app.add_api_route("/webhook", wa_webhook, methods=["POST"])
-app.add_api_route("/wa/dev/simulate", wa_simulate, methods=["POST"])
+app.add_api_route("/wa/webhook",     _wa_verify,   methods=["GET"])
+app.add_api_route("/wa/webhook",     _wa_webhook,  methods=["POST"])
+app.add_api_route("/webhook",        _wa_verify,   methods=["GET"])
+app.add_api_route("/webhook",        _wa_webhook,  methods=["POST"])
+app.add_api_route("/wa/dev/simulate", _wa_simulate, methods=["POST"])
 
 # ─── Rate limiting ────────────────────────────────────────────────────────────
 

@@ -14,6 +14,7 @@ import json
 import os
 import re
 import unicodedata
+from difflib import get_close_matches
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -134,6 +135,11 @@ _EXACT: dict[str, str] = {
     "cartoes de credito":       "credit.handle",
     "meus cartoes":             "credit.handle",
     "listar cartoes":           "credit.handle",
+    "cadastrar cartao":         "credit.handle",
+    "registrar cartao":         "credit.handle",
+    "adicionar cartao":         "credit.handle",
+    "incluir cartao":           "credit.handle",
+    "novo cartao":              "credit.handle",
     "quais sao meus cartoes":   "credit.handle",
     "qual meu cartao principal":"credit.handle",
     "meu cartao principal":     "credit.handle",
@@ -216,7 +222,7 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "launches.list"),
     (r"^(o\s+que|quanto)\s+(gastei|gastos?|despesas?|lancamentos?)\b",
      "launches.list"),
-    (r"^(gastos?|despesas?)\s+(recentes?|ultimos?|da\s+semana|do\s+mes)?\b",
+    (r"^(gastos?|despesas?)(?:\s+(recentes?|ultimos?|da\s+semana|do\s+mes))?$",
      "launches.list"),
     (r"^apagar\s+(?:id\s+)?(lancamento\s+)?#?(\d+)$",
      "launches.delete"),
@@ -245,6 +251,10 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
 
     # cartões / crédito
     (r"^(cartoes|cartoes de credito|listar cartoes|meus cartoes|quais cartoes|quais sao meus cartoes|criar cartao|padrao\b|credito\b|parcelar\b|parcelei\b|fatura\b|faturas\b|pagar fatura\b|paguei fatura\b|parcelamentos\b|parcelas\b|minhas faturas|me mostra minhas faturas|qual meu cartao principal|meu cartao principal|trocar cartao principal|mudar cartao principal|definir limite|limite cartao|limite do cartao|pagar fatura com saldo)",
+     "credit.handle"),
+    (r"^(quero\s+)?(cadastrar|registrar|adicionar|incluir|criar)\s+(um\s+|novo\s+|meu\s+)?cartao\b",
+     "credit.handle"),
+    (r"^(quero|preciso|gostaria\s+de|me\s+ajuda\s+a|me\s+ajude\s+a)\s+.*\b(cadastrar|registrar|adicionar|incluir|criar)\b.*\bcartao\b",
      "credit.handle"),
     # parcelas / parcelamentos — ver/listar variações
     (r"^(ver|listar|mostrar|me mostra|quero ver|quais|meus)\s+(parcelas?|parcelamentos?)\b",
@@ -351,6 +361,30 @@ def _extract_id_from_text(text_norm: str) -> int | None:
     """Extrai o primeiro número inteiro do texto normalizado."""
     m = re.search(r"\b(\d+)\b", text_norm)
     return int(m.group(1)) if m else None
+
+
+_DOMAIN_HINT_KEYWORDS = (
+    "cartao", "cartoes", "fatura", "credito", "parcela", "parcelamento",
+    "caixinha", "caixinhas",
+    "investimento", "investimentos", "aporte", "resgate", "cdb", "tesouro", "cdi",
+    "categoria", "categorias", "regra", "regras", "linkar",
+    "dashboard", "painel",
+    "report", "relatorio",
+    "ofx", "extrato", "importar",
+    "saldo", "gasto", "gastos", "despesa", "despesas", "recebi", "receita", "lancamento", "lancamentos",
+)
+
+
+def _contains_domain_hint(norm: str) -> bool:
+    tokens = [tok for tok in norm.split() if tok]
+    if any(keyword in norm for keyword in _DOMAIN_HINT_KEYWORDS):
+        return True
+
+    for token in tokens:
+        if get_close_matches(token, _DOMAIN_HINT_KEYWORDS, n=1, cutoff=0.84):
+            return True
+
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -577,6 +611,9 @@ def classify(text: str) -> IntentResult:
     result = _try_alias(norm, text)
     if result:
         return result
+
+    if _contains_domain_hint(norm):
+        return IntentResult(intent="out_of_scope", confidence=0.4)
 
     # Tier 3
     return _classify_with_ai(text)
