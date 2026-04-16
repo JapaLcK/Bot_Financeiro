@@ -16,7 +16,7 @@ def list_pockets(user_id: int) -> str:
 def create(user_id: int, name: str) -> str:
     if not name or not name.strip():
         return "Qual o nome da caixinha?"
-    pocket_id, canon = db.create_pocket(user_id, name.strip())
+    _launch_id, pocket_id, canon = db.create_pocket(user_id, name.strip())
     return f"✅ Caixinha criada: **{canon}** (id {pocket_id})"
 
 

@@ -1,11 +1,30 @@
 # core/handlers/help_handler.py
 from __future__ import annotations
+from difflib import get_close_matches
 from core.help_text import render_full, render_help, resolve_section
 from utils_text import normalize_text
 
 
 def _has_any(norm: str, *terms: str) -> bool:
     return any(term in norm for term in terms)
+
+
+def _has_token_close_to(norm: str, *terms: str) -> bool:
+    tokens = [tok for tok in norm.split() if tok]
+    for token in tokens:
+        if get_close_matches(token, terms, n=1, cutoff=0.84):
+            return True
+    return False
+
+
+def _has_hint(norm: str, *terms: str) -> bool:
+    return _has_any(norm, *terms) or _has_token_close_to(norm, *terms)
+
+
+def _prepend_not_understood(topic: str, body: str) -> str:
+    if body.strip().lower().startswith("não entendi"):
+        return body
+    return f"Não entendi exatamente o que você quis fazer com {topic}.\n{body}"
 
 
 def _credit_contextual_fallback(text: str, platform: str) -> str:
@@ -359,32 +378,32 @@ def infer_help_from_text(text: str, platform: str) -> str | None:
 def infer_contextual_fallback(text: str, platform: str) -> str:
     norm = normalize_text(text)
 
-    if _has_any(norm, "cartao", "cartoes", "fatura", "credito", "parcela", "parcelamento", "vence", "fecha", "limite"):
-        return _credit_contextual_fallback(text, platform)
+    if _has_hint(norm, "cartao", "cartoes", "fatura", "credito", "parcela", "parcelamento", "vence", "fecha", "limite"):
+        return _prepend_not_understood("cartões", _credit_contextual_fallback(text, platform))
 
-    if _has_any(norm, "caixinha", "caixinhas"):
-        return _pockets_contextual_fallback(norm)
+    if _has_hint(norm, "caixinha", "caixinhas"):
+        return _prepend_not_understood("caixinhas", _pockets_contextual_fallback(norm))
 
-    if _has_any(norm, "investimento", "investimentos", "aporte", "aplicar", "apliquei", "resgate", "resgatar", "cdb", "tesouro", "cdi"):
-        return _investments_contextual_fallback(norm)
+    if _has_hint(norm, "investimento", "investimentos", "aporte", "aplicar", "apliquei", "resgate", "resgatar", "cdb", "tesouro", "cdi"):
+        return _prepend_not_understood("investimentos", _investments_contextual_fallback(norm))
 
-    if _has_any(norm, "categoria", "categorias", "regra", "regras", "linkar", "destinatario", "destinatário"):
-        return _categories_contextual_fallback(norm)
+    if _has_hint(norm, "categoria", "categorias", "regra", "regras", "linkar", "destinatario", "destinatário"):
+        return _prepend_not_understood("categorias", _categories_contextual_fallback(norm))
 
-    if _has_any(norm, "dashboard", "painel"):
-        return _dashboard_contextual_fallback()
+    if _has_hint(norm, "dashboard", "painel"):
+        return _prepend_not_understood("dashboard", _dashboard_contextual_fallback())
 
-    if _has_any(norm, "report", "relatorio", "relatório"):
-        return _report_contextual_fallback(norm)
+    if _has_hint(norm, "report", "relatorio", "relatório"):
+        return _prepend_not_understood("report diário", _report_contextual_fallback(norm))
 
-    if _has_any(norm, "link", "vincular", "codigo", "código", "whatsapp", "discord"):
-        return _account_contextual_fallback(norm)
+    if _has_hint(norm, "link", "vincular", "codigo", "código", "whatsapp", "discord"):
+        return _prepend_not_understood("vinculação de conta", _account_contextual_fallback(norm))
 
-    if _has_any(norm, "ofx", "extrato", "importar"):
-        return _ofx_contextual_fallback()
+    if _has_hint(norm, "ofx", "extrato", "importar"):
+        return _prepend_not_understood("importação de extrato", _ofx_contextual_fallback())
 
-    if _has_any(norm, "saldo", "lancamento", "lancamentos", "gastei", "gasto", "gastos", "despesa", "despesas", "recebi", "receita", "receitas", "historico", "histórico", "extrato"):
-        return _launches_contextual_fallback(norm)
+    if _has_hint(norm, "saldo", "lancamento", "lancamentos", "gastei", "gasto", "gastos", "despesa", "despesas", "recebi", "receita", "receitas", "historico", "histórico", "extrato"):
+        return _prepend_not_understood("lançamentos", _launches_contextual_fallback(norm))
 
     return (
         "Não entendi exatamente o que você quer fazer.\n"

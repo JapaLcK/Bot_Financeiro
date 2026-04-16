@@ -14,6 +14,7 @@ import json
 import os
 import re
 import unicodedata
+from difflib import get_close_matches
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -221,7 +222,7 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "launches.list"),
     (r"^(o\s+que|quanto)\s+(gastei|gastos?|despesas?|lancamentos?)\b",
      "launches.list"),
-    (r"^(gastos?|despesas?)\s+(recentes?|ultimos?|da\s+semana|do\s+mes)?\b",
+    (r"^(gastos?|despesas?)(?:\s+(recentes?|ultimos?|da\s+semana|do\s+mes))?$",
      "launches.list"),
     (r"^apagar\s+(?:id\s+)?(lancamento\s+)?#?(\d+)$",
      "launches.delete"),
@@ -360,6 +361,30 @@ def _extract_id_from_text(text_norm: str) -> int | None:
     """Extrai o primeiro número inteiro do texto normalizado."""
     m = re.search(r"\b(\d+)\b", text_norm)
     return int(m.group(1)) if m else None
+
+
+_DOMAIN_HINT_KEYWORDS = (
+    "cartao", "cartoes", "fatura", "credito", "parcela", "parcelamento",
+    "caixinha", "caixinhas",
+    "investimento", "investimentos", "aporte", "resgate", "cdb", "tesouro", "cdi",
+    "categoria", "categorias", "regra", "regras", "linkar",
+    "dashboard", "painel",
+    "report", "relatorio",
+    "ofx", "extrato", "importar",
+    "saldo", "gasto", "gastos", "despesa", "despesas", "recebi", "receita", "lancamento", "lancamentos",
+)
+
+
+def _contains_domain_hint(norm: str) -> bool:
+    tokens = [tok for tok in norm.split() if tok]
+    if any(keyword in norm for keyword in _DOMAIN_HINT_KEYWORDS):
+        return True
+
+    for token in tokens:
+        if get_close_matches(token, _DOMAIN_HINT_KEYWORDS, n=1, cutoff=0.84):
+            return True
+
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -586,6 +611,9 @@ def classify(text: str) -> IntentResult:
     result = _try_alias(norm, text)
     if result:
         return result
+
+    if _contains_domain_hint(norm):
+        return IntentResult(intent="out_of_scope", confidence=0.4)
 
     # Tier 3
     return _classify_with_ai(text)

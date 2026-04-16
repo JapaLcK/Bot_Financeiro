@@ -333,6 +333,7 @@ def test_contextual_help_para_cartao_quando_nao_entende(user_id):
 
     response = route(result, msg)
 
+    assert "Não entendi exatamente" in response
     assert "Posso te ajudar com cartões" in response
     assert "criar cartao Nubank" in response
     assert "fatura Nubank" in response
@@ -343,7 +344,18 @@ def test_contextual_help_para_caixinha_quando_nao_entende(user_id):
 
     response = route(classify(msg.text), msg)
 
+    assert "Não entendi exatamente" in response
     assert "caixinhas" in response.lower() or "caixinha" in response.lower()
+    assert "criar caixinha viagem" in response
+
+
+def test_contextual_help_para_caixinha_com_erro_de_digitacao(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="caxinha banana cosmica")
+
+    response = route(classify(msg.text), msg)
+
+    assert "Não entendi exatamente" in response
+    assert "caixinha" in response.lower()
     assert "criar caixinha viagem" in response
 
 
@@ -352,6 +364,7 @@ def test_contextual_help_para_investimento_quando_nao_entende(user_id):
 
     response = route(classify(msg.text), msg)
 
+    assert "Não entendi exatamente" in response
     assert "investimento" in response.lower()
     assert "criar investimento CDB 110% CDI" in response
 
@@ -361,8 +374,20 @@ def test_contextual_help_para_lancamentos_quando_nao_entende(user_id):
 
     response = route(classify(msg.text), msg)
 
+    assert "Não entendi exatamente" in response
     assert "lançamentos" in response.lower() or "saldo" in response.lower()
     assert "gastei 50 mercado" in response
+
+
+def test_gastos_com_texto_solto_nao_lista_lancamentos(user_id):
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    add_launch_and_update_balance(user_id, "despesa", 50, "mercado", "gastei 50 mercado")
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="gastos bana quanticos")
+
+    response = route(classify(msg.text), msg)
+
+    assert "Últimos" not in response
+    assert "Não entendi exatamente" in response
 
 
 def test_contextual_help_para_categorias_quando_nao_entende(user_id):
@@ -370,6 +395,7 @@ def test_contextual_help_para_categorias_quando_nao_entende(user_id):
 
     response = route(classify(msg.text), msg)
 
+    assert "Não entendi exatamente" in response
     assert "categor" in response.lower()
     assert "criar categoria mercado" in response
 
@@ -379,6 +405,7 @@ def test_contextual_help_para_dashboard_quando_nao_entende(user_id):
 
     response = route(classify(msg.text), msg)
 
+    assert "Não entendi exatamente" in response
     assert "dashboard" in response.lower()
     assert "abrir o dashboard" in response.lower() or "`dashboard`" in response
 
