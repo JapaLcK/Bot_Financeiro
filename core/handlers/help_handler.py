@@ -153,19 +153,21 @@ def _categories_contextual_fallback(norm: str) -> str:
         return (
             "🏷️ Para ensinar uma categoria ao bot, use:\n"
             "• `aprender ifood como alimentacao`\n"
-            "• `aprender carrefour como mercado`"
+            "• `aprender rifa como aposta`"
         )
 
     if _has_any(norm, "remover", "apagar", "excluir", "deletar"):
         return (
             "🏷️ Para remover uma regra de categoria, use:\n"
-            "• `remover regra ifood`"
+            "• `remover regra ifood`\n"
+            "• `remove regra ifood`"
         )
 
     return (
         "🏷️ Posso te ajudar com categorias assim:\n"
-        "• `regras de categoria` ou `listar regras`\n"
+        "• `regras de categoria`, `regras de categorias` ou `listar regras`\n"
         "• `aprender ifood como alimentacao`\n"
+        "• `aprender rifa como aposta`\n"
         "• `remover regra ifood`\n\n"
         "O bot também tenta aprender categorias sozinho conforme você usa."
     )

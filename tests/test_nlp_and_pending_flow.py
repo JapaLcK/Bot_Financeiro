@@ -418,6 +418,14 @@ def test_aprender_como_cria_regra(user_id):
     assert get_memorized_category(user_id, "pedido no ifood") == "alimentacao"
 
 
+def test_regras_de_categorias_plural_lista_regras(user_id):
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="regras de categorias")
+
+    response = route(classify(msg.text), msg)
+
+    assert "categoria" in response.lower()
+
+
 def test_remover_regra_remove_regra_existente(user_id):
     route(
         classify("aprender ifood como alimentacao"),
@@ -429,6 +437,19 @@ def test_remover_regra_remove_regra_existente(user_id):
 
     assert "removida" in response.lower()
     assert get_memorized_category(user_id, "pedido no ifood") is None
+
+
+def test_remove_regra_sem_r_funciona(user_id):
+    route(
+        classify("aprender money como investimentos"),
+        IncomingMessage(platform="discord", user_id=user_id, text="aprender money como investimentos"),
+    )
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="remove regra money")
+
+    response = route(classify(msg.text), msg)
+
+    assert "removida" in response.lower()
+    assert get_memorized_category(user_id, "money invest") is None
 
 
 def test_lancamento_manual_ensina_categoria_automaticamente(user_id):

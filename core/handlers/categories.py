@@ -21,7 +21,7 @@ def list_categories(user_id: int) -> str:
             "Você ainda não tem regras de categoria.\n"
             "Exemplos:\n"
             "• `aprender ifood como alimentacao`\n"
-            "• `aprender carrefour como mercado`"
+            "• `aprender rifa como aposta`"
         )
 
     cats_all = sorted(set(list(cats) + list(by_cat.keys())))
@@ -33,8 +33,8 @@ def list_categories(user_id: int) -> str:
             lines.append("  └ " + ", ".join(kws))
 
     lines.append("")
-    lines.append("Aprender: `aprender <estabelecimento> como <categoria>`")
-    lines.append("Remover: `remover regra <estabelecimento>`")
+    lines.append("Aprender: `aprender <gasto/palavra-chave> como <categoria>`")
+    lines.append("Remover: `remover regra <gasto/palavra-chave>`")
     lines.append("")
     lines.append("Dica: o bot também aprende sozinho conforme você lança e corrige categorias.")
     return "\n".join(lines)
@@ -73,8 +73,8 @@ def create(user_id: int, text: str) -> str:
 
     if not cat or not kw:
         return (
-            "Formato: `aprender <estabelecimento> como <categoria>`\n"
-            "Exemplo: `aprender ifood como alimentacao`"
+            "Formato: `aprender <gasto/palavra-chave> como <categoria>`\n"
+            "Exemplo: `aprender rifa como aposta`"
         )
 
     learn_from_signals(user_id, cat, kw)
@@ -83,7 +83,7 @@ def create(user_id: int, text: str) -> str:
 
 def delete(user_id: int, text: str) -> str:
     keyword = re.sub(
-        r"^(remover|apagar|excluir|deletar)\s+(regra|destinatario)\s+",
+        r"^(remove|remover|apagar|excluir|deletar)\s+(regra|destinatario)\s+",
         "",
         text.strip(),
         flags=re.IGNORECASE,

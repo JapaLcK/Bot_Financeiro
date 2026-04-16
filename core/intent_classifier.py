@@ -126,6 +126,7 @@ _EXACT: dict[str, str] = {
     "listar categorias":        "categories.list",
     "regras":                   "categories.list",
     "regras de categoria":      "categories.list",
+    "regras de categorias":     "categories.list",
     "listar regras":            "categories.list",
     "ver regras":               "categories.list",
     # dashboard
@@ -314,13 +315,13 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "investments.withdraw"),
 
     # categorias
-    (r"^(regras|regras de categoria|listar regras|ver regras)$",
+    (r"^(regras|regras de categoria|regras de categorias|listar regras|ver regras)$",
      "categories.list"),
     (r"^aprender\s+.+\s+como\s+.+$",
      "categories.create"),
     (r"^criar\s+categoria\s+",
      "categories.create"),
-    (r"^(remover|apagar|excluir|deletar)\s+regra\s+",
+    (r"^(remove|remover|apagar|excluir|deletar)\s+regra\s+",
      "categories.delete"),
     (r"^remover\s+destinatario\s+",
      "categories.delete"),

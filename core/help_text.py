@@ -106,13 +106,13 @@ HELP_SECTIONS: dict[str, str] = {
     ),
     "categories": (
     "🧠 **Aprendizado de categorias**\n"
-    "• `regras de categoria` ou `listar regras` → mostra o que o bot já aprendeu\n"
+    "• `regras de categoria`, `regras de categorias` ou `listar regras` → mostra o que o bot já aprendeu\n"
     "• `aprender ifood como alimentacao`\n"
-    "• `aprender carrefour como mercado`\n"
+    "• `aprender rifa como aposta`\n"
     "• `remover regra ifood` → remove essa regra\n"
     "\n"
     "Dica: As regras ajudam MUITO no OFX quando vem tudo como \"Outros\".\n"
-    "Aprendizado: o bot também tenta memorizar estabelecimentos automaticamente conforme você lança seus gastos."
+    "Aprendizado: o bot também tenta memorizar gastos, descrições e palavras-chave automaticamente conforme você lança seus gastos."
     ),
     "pockets": (
         "📦 **Caixinhas**\n"
