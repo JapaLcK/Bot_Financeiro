@@ -32,12 +32,17 @@ ADMIN_DASHBOARD_USERNAME = (os.getenv("ADMIN_DASHBOARD_USERNAME") or "admin").st
 ADMIN_DASHBOARD_PASSWORD = os.getenv("ADMIN_DASHBOARD_PASSWORD", "")
 ADMIN_DASHBOARD_PASSWORD_HASH = os.getenv("ADMIN_DASHBOARD_PASSWORD_HASH", "")
 ADMIN_DASHBOARD_SESSION_HOURS = float(os.getenv("ADMIN_DASHBOARD_SESSION_HOURS", "12"))
+DB_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "5"))
 
 _bearer = HTTPBearer(auto_error=False)
 
 
 async def db_connect():
-    return await psycopg.AsyncConnection.connect(DATABASE_URL, row_factory=dict_row)
+    return await psycopg.AsyncConnection.connect(
+        DATABASE_URL,
+        row_factory=dict_row,
+        connect_timeout=DB_CONNECT_TIMEOUT,
+    )
 
 
 def _json_safe(obj: Any) -> Any:
@@ -532,41 +537,38 @@ async def fetch_admin_overview(days: int = 30) -> dict[str, Any]:
 
 
 async def log_admin_startup_warnings() -> None:
+    # Coleta todos os avisos primeiro, depois faz UM único insert em batch.
+    # Antes eram N chamadas sequenciais a log_system_event(), cada uma abrindo
+    # sua própria conexão ao banco — em dev isso custava ~2s desnecessários.
+    warnings: list[tuple[str, str, str]] = []
+
     if not (os.getenv("WA_TOKEN") or os.getenv("WA_ACCESS_TOKEN")):
-        await log_system_event(
-            "warning",
-            "whatsapp_config_missing",
-            "WA token nao configurado no ambiente.",
-            source="startup",
-        )
+        warnings.append(("warning", "whatsapp_config_missing", "WA token nao configurado no ambiente."))
     if not os.getenv("WA_PHONE_NUMBER_ID"):
-        await log_system_event(
-            "warning",
-            "whatsapp_config_missing",
-            "WA_PHONE_NUMBER_ID nao configurado no ambiente.",
-            source="startup",
-        )
+        warnings.append(("warning", "whatsapp_config_missing", "WA_PHONE_NUMBER_ID nao configurado no ambiente."))
     if not os.getenv("WA_VERIFY_TOKEN"):
-        await log_system_event(
-            "warning",
-            "whatsapp_config_missing",
-            "WA_VERIFY_TOKEN nao configurado no ambiente.",
-            source="startup",
-        )
+        warnings.append(("warning", "whatsapp_config_missing", "WA_VERIFY_TOKEN nao configurado no ambiente."))
     if not os.getenv("WA_APP_SECRET"):
-        await log_system_event(
-            "warning",
-            "whatsapp_config_missing",
-            "WA_APP_SECRET nao configurado no ambiente.",
-            source="startup",
-        )
+        warnings.append(("warning", "whatsapp_config_missing", "WA_APP_SECRET nao configurado no ambiente."))
     if not (STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET and STRIPE_PRICE_ID_PRO):
-        await log_system_event(
-            "warning",
-            "billing_config_incomplete",
-            "Configuracao do Stripe incompleta no ambiente.",
-            source="startup",
-        )
+        warnings.append(("warning", "billing_config_incomplete", "Configuracao do Stripe incompleta no ambiente."))
+
+    if not warnings:
+        return
+
+    try:
+        async with await db_connect() as conn:
+            async with conn.cursor() as cur:
+                await cur.executemany(
+                    """
+                    INSERT INTO system_event_logs (level, event_type, message, source, details)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    [(lvl, evt, msg, "startup", Jsonb({})) for lvl, evt, msg in warnings],
+                )
+            await conn.commit()
+    except Exception as exc:
+        print(f"[admin] failed to record startup warnings: {exc}", file=sys.stderr)
 
 
 async def admin_error_logging_middleware(request: Request, call_next):
@@ -593,27 +595,41 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
 
     @app.post("/admin/auth/login")
     @limiter.limit("10/minute")
-    async def admin_auth_login(request: Request, body: AdminLoginBody):
+    async def admin_auth_login(request: Request):
+        # Lê o body manualmente para evitar incompatibilidade entre slowapi +
+        # FastAPI 0.100+ + Pydantic v2 ao resolver parâmetros de body dentro de
+        # funções de registro de rotas (register_admin_routes).
         if not admin_enabled():
             raise HTTPException(status_code=503, detail="Painel admin não configurado.")
 
-        if body.username.strip() != ADMIN_DASHBOARD_USERNAME:
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+
+        username = str(payload.get("username") or "").strip()
+        password = str(payload.get("password") or "")
+
+        if not username or not password:
+            raise HTTPException(status_code=422, detail="Usuário e senha são obrigatórios.")
+
+        if username != ADMIN_DASHBOARD_USERNAME:
             await log_system_event(
                 "warning",
                 "admin_login_failed",
                 "Tentativa de login admin com usuário inválido.",
                 source="admin_auth",
-                details={"username": body.username.strip(), "ip": get_remote_address(request)},
+                details={"username": username, "ip": get_remote_address(request)},
             )
             raise HTTPException(status_code=401, detail="Credenciais inválidas.")
 
-        if not _check_admin_password(body.password):
+        if not _check_admin_password(password):
             await log_system_event(
                 "warning",
                 "admin_login_failed",
                 "Tentativa de login admin com senha inválida.",
                 source="admin_auth",
-                details={"username": body.username.strip(), "ip": get_remote_address(request)},
+                details={"username": username, "ip": get_remote_address(request)},
             )
             raise HTTPException(status_code=401, detail="Credenciais inválidas.")
 

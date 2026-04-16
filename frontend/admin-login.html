@@ -158,9 +158,20 @@ form.addEventListener("submit", async (event) => {
         password: document.getElementById("password").value
       })
     });
-    const data = await res.json();
+    let data = {};
+    try { data = await res.json(); } catch (_) {}
     if (!res.ok) {
-      setError(data.detail || "Não foi possível autenticar.");
+      let msg = data.detail;
+      if (Array.isArray(msg)) {
+        msg = msg.map(e => e.msg || JSON.stringify(e)).join(" · ");
+      } else if (typeof msg !== "string" || !msg) {
+        msg = `Erro ${res.status} — tente novamente.`;
+      }
+      setError(msg);
+      return;
+    }
+    if (!data.token) {
+      setError("Resposta inválida do servidor.");
       return;
     }
     localStorage.setItem(tokenKey, data.token);

@@ -25,10 +25,10 @@ def load_app_env() -> str:
     env_file = ROOT_DIR / f".env.{app_env}"
 
     if base_file.exists():
-        merged.update({k: v for k, v in dotenv_values(base_file).items() if v is not None})
+        merged.update({k: v for k, v in dotenv_values(base_file, interpolate=False).items() if v is not None})
 
     if env_file.exists():
-        merged.update({k: v for k, v in dotenv_values(env_file).items() if v is not None})
+        merged.update({k: v for k, v in dotenv_values(env_file, interpolate=False).items() if v is not None})
 
     for key, value in merged.items():
         os.environ.setdefault(key, value)

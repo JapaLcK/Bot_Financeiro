@@ -154,6 +154,13 @@ button:disabled { opacity: .7; cursor: wait; }
 }
 .list-item strong { display: block; margin-bottom: 4px; }
 .list-item small { color: var(--muted); line-height: 1.5; }
+.list-item .hint {
+  display: block;
+  color: rgba(237,246,255,.52);
+  font-size: 12px;
+  line-height: 1.45;
+  margin-top: 6px;
+}
 .empty { color: var(--muted); font-size: 14px; padding: 8px 0; }
 .chart-wrap { height: 340px; }
 @media (max-width: 1080px) {
@@ -379,12 +386,18 @@ function renderHealth(summary, errors) {
     { label: "Taxa de sucesso de login 7d", value: `${summary.login_success_rate_7d}%`, cls: summary.login_success_rate_7d >= 85 ? "status-ok" : "status-warn" },
     { label: "Cadastros 7d", value: formatInt(summary.accounts_7d), cls: "status-ok" },
     { label: "Ativos 7d", value: formatInt(summary.active_users_7d), cls: "status-ok" },
-    { label: "Eventos críticos recentes", value: formatInt(errors.filter(item => item.level === "error").length), cls: errors.some(item => item.level === "error") ? "status-error" : "status-ok" }
+    {
+      label: "Eventos críticos recentes",
+      value: formatInt(errors.filter(item => item.level === "error").length),
+      cls: errors.some(item => item.level === "error") ? "status-error" : "status-ok",
+      hint: "Conta eventos level=error nos logs recentes; pode incluir WhatsApp, billing, worker ou exceção HTTP."
+    }
   ];
   document.getElementById("health-list").innerHTML = items.map(item => `
     <div class="list-item">
       <strong class="${item.cls}">${item.value}</strong>
       <small>${item.label}</small>
+      ${item.hint ? `<span class="hint">${escapeHtml(item.hint)}</span>` : ""}
     </div>
   `).join("");
 }
@@ -396,24 +409,90 @@ function renderOpsHealth(ops) {
     { label: "Webhook WhatsApp nas últimas 24h", value: formatInt(ops.whatsapp_webhooks_24h), cls: ops.whatsapp_webhooks_24h > 0 ? "status-ok" : "status-warn" },
     { label: "Último webhook WhatsApp", value: formatDate(ops.last_whatsapp_webhook_at), cls: ops.last_whatsapp_webhook_at ? "status-ok" : "status-warn" },
     { label: "Envios WhatsApp com sucesso 24h", value: formatInt(ops.whatsapp_send_success_24h), cls: ops.whatsapp_send_success_24h > 0 ? "status-ok" : "status-warn" },
-    { label: "Falhas de envio WhatsApp 24h", value: formatInt(ops.whatsapp_send_failures_24h), cls: ops.whatsapp_send_failures_24h > 0 ? "status-error" : "status-ok" },
-    { label: "Token inválido WhatsApp 7d", value: formatInt(ops.whatsapp_token_invalid_7d), cls: ops.whatsapp_token_invalid_7d > 0 ? "status-error" : "status-ok" },
-    { label: "Drops de fila WhatsApp 24h", value: formatInt(ops.whatsapp_queue_drop_24h), cls: ops.whatsapp_queue_drop_24h > 0 ? "status-error" : "status-ok" },
-    { label: "Erros de worker WhatsApp 7d", value: formatInt(ops.whatsapp_worker_errors_7d), cls: ops.whatsapp_worker_errors_7d > 0 ? "status-error" : "status-ok" },
-    { label: "Erros de backend 24h", value: formatInt(ops.backend_errors_24h), cls: ops.backend_errors_24h > 0 ? "status-error" : "status-ok" },
-    { label: "Billing inválido/falha 7d", value: `${formatInt(ops.billing_signature_invalid_7d)} / ${formatInt(ops.billing_payment_failed_7d)}`, cls: (ops.billing_signature_invalid_7d > 0 || ops.billing_payment_failed_7d > 0) ? "status-warn" : "status-ok" },
-    { label: "Telemetria WhatsApp consistente", value: ops.whatsapp_telemetry_inconsistent ? "Não" : "Sim", cls: ops.whatsapp_telemetry_inconsistent ? "status-warn" : "status-ok" },
+    {
+      label: "Falhas de envio WhatsApp 24h",
+      value: formatInt(ops.whatsapp_send_failures_24h),
+      cls: ops.whatsapp_send_failures_24h > 0 ? "status-error" : "status-ok",
+      hint: "Tentativas recusadas pela API do WhatsApp ou exceções de rede ao enviar mensagens."
+    },
+    {
+      label: "Token inválido WhatsApp 7d",
+      value: formatInt(ops.whatsapp_token_invalid_7d),
+      cls: ops.whatsapp_token_invalid_7d > 0 ? "status-error" : "status-ok",
+      hint: "A API retornou 401; geralmente token expirado, revogado ou variável WA_TOKEN/WA_ACCESS_TOKEN incorreta."
+    },
+    {
+      label: "Drops de fila WhatsApp 24h",
+      value: formatInt(ops.whatsapp_queue_drop_24h),
+      cls: ops.whatsapp_queue_drop_24h > 0 ? "status-error" : "status-ok",
+      hint: "Webhooks recebidos foram descartados porque a fila interna estava cheia."
+    },
+    {
+      label: "Erros de worker WhatsApp 7d",
+      value: formatInt(ops.whatsapp_worker_errors_7d),
+      cls: ops.whatsapp_worker_errors_7d > 0 ? "status-error" : "status-ok",
+      hint: "Falhas no worker assíncrono que processa payloads recebidos do WhatsApp."
+    },
+    {
+      label: "Erros de backend 24h",
+      value: formatInt(ops.backend_errors_24h),
+      cls: ops.backend_errors_24h > 0 ? "status-error" : "status-ok",
+      hint: "Total de eventos level=error nas últimas 24h; inclui falhas de envio WhatsApp, processamento de mensagem, worker, billing e exceções HTTP."
+    },
+    {
+      label: "Billing inválido/falha 7d",
+      value: `${formatInt(ops.billing_signature_invalid_7d)} / ${formatInt(ops.billing_payment_failed_7d)}`,
+      cls: (ops.billing_signature_invalid_7d > 0 || ops.billing_payment_failed_7d > 0) ? "status-warn" : "status-ok",
+      hint: "Assinatura Stripe inválida / pagamento recusado ou marcado como falha."
+    },
+    {
+      label: "Telemetria WhatsApp consistente",
+      value: ops.whatsapp_telemetry_inconsistent ? "Não" : "Sim",
+      cls: ops.whatsapp_telemetry_inconsistent ? "status-warn" : "status-ok",
+      hint: "Compara atividade real de usuários WhatsApp com webhooks registrados nas últimas 24h."
+    },
     { label: "Usuários com WhatsApp conectado", value: formatInt(ops.whatsapp_connected_users), cls: "status-ok" },
     { label: "Usuários com WhatsApp pendente", value: formatInt(ops.whatsapp_pending_users), cls: ops.whatsapp_pending_users > 0 ? "status-warn" : "status-ok" },
-    { label: "Credenciais WA configuradas", value: ops.wa_token_configured && ops.wa_number_configured && ops.wa_phone_number_id_configured && ops.wa_verify_token_configured && ops.wa_app_secret_configured ? "OK" : "Incompleto", cls: ops.wa_token_configured && ops.wa_number_configured && ops.wa_phone_number_id_configured && ops.wa_verify_token_configured && ops.wa_app_secret_configured ? "status-ok" : "status-warn" },
-    { label: "Stripe configurado", value: ops.stripe_configured ? "OK" : "Incompleto", cls: ops.stripe_configured ? "status-ok" : "status-warn" }
+    {
+      label: "Credenciais WA configuradas",
+      value: ops.wa_token_configured && ops.wa_number_configured && ops.wa_phone_number_id_configured && ops.wa_verify_token_configured && ops.wa_app_secret_configured ? "OK" : "Incompleto",
+      cls: ops.wa_token_configured && ops.wa_number_configured && ops.wa_phone_number_id_configured && ops.wa_verify_token_configured && ops.wa_app_secret_configured ? "status-ok" : "status-warn",
+      hint: "Valida WA_TOKEN/WA_ACCESS_TOKEN, número público, WA_PHONE_NUMBER_ID, WA_VERIFY_TOKEN e WA_APP_SECRET no ambiente."
+    },
+    {
+      label: "Stripe configurado",
+      value: ops.stripe_configured ? "OK" : "Incompleto",
+      cls: ops.stripe_configured ? "status-ok" : "status-warn",
+      hint: "Valida STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET e STRIPE_PRICE_ID_PRO."
+    }
   ];
   document.getElementById("ops-health-list").innerHTML = items.map(item => `
     <div class="list-item">
       <strong class="${item.cls}">${item.value}</strong>
       <small>${item.label}</small>
+      ${item.hint ? `<span class="hint">${escapeHtml(item.hint)}</span>` : ""}
     </div>
   `).join("");
+}
+
+function eventDescription(row) {
+  const descriptions = {
+    whatsapp_send_failed: "Falha ao enviar mensagem para a API do WhatsApp; confira status_code e resposta do provedor.",
+    whatsapp_send_exception: "Exceção local ou de rede durante o envio para o WhatsApp.",
+    whatsapp_token_invalid: "Token do WhatsApp inválido, expirado ou sem permissão.",
+    whatsapp_message_processing_failed: "Mensagem recebida pelo WhatsApp quebrou durante o processamento interno.",
+    whatsapp_worker_error: "Worker do WhatsApp falhou ao processar payload da fila.",
+    whatsapp_queue_drop: "Payload descartado porque a fila interna do WhatsApp lotou.",
+    whatsapp_config_missing: "Variável de ambiente obrigatória do WhatsApp ausente.",
+    whatsapp_webhook_invalid_signature: "Assinatura do webhook não bateu com WA_APP_SECRET.",
+    whatsapp_verify_token_missing: "WA_VERIFY_TOKEN não está configurado para validar o webhook.",
+    billing_config_incomplete: "Variáveis de ambiente do Stripe incompletas.",
+    billing_signature_invalid: "Webhook Stripe recebido com assinatura inválida.",
+    billing_payment_failed: "Stripe reportou falha de pagamento.",
+    engagement_loop_error: "Erro no agendador de mensagens de engajamento.",
+    http_unhandled_exception: "Exceção HTTP não tratada pelo backend."
+  };
+  return descriptions[row.event_type] || "";
 }
 
 function renderSimpleList(targetId, rows, formatter) {
@@ -448,6 +527,7 @@ function renderTables(data) {
     <div class="list-item">
       <strong class="${row.level === "error" ? "status-error" : row.level === "warning" ? "status-warn" : "status-ok"}">${escapeHtml(row.event_type)}</strong>
       <small>${formatDate(row.created_at)} · ${escapeHtml(row.source || "sistema")}<br/>${escapeHtml(row.message)}</small>
+      ${eventDescription(row) ? `<span class="hint">${escapeHtml(eventDescription(row))}</span>` : ""}
     </div>
   `);
 
@@ -455,6 +535,7 @@ function renderTables(data) {
     <div class="list-item">
       <strong class="${row.level === "error" ? "status-error" : row.level === "warning" ? "status-warn" : "status-ok"}">${escapeHtml(row.event_type)}</strong>
       <small>${formatDate(row.created_at)} · ${escapeHtml(row.source || "sistema")}<br/>${escapeHtml(row.message)}</small>
+      ${eventDescription(row) ? `<span class="hint">${escapeHtml(eventDescription(row))}</span>` : ""}
     </div>
   `);
 

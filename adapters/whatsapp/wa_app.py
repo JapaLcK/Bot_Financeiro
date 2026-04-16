@@ -167,60 +167,68 @@ async def _worker_loop():
             _queue.task_done()
 
 
+def _daily_report_tick() -> None:
+    now = now_tz()
+    today = now.date()
+
+    for uid in list_users_with_daily_report_enabled():
+        prefs = get_daily_report_prefs(uid)
+        if not prefs["enabled"]:
+            continue
+
+        hour = prefs["hour"]
+        minute = prefs["minute"]
+        if (now.hour, now.minute) < (hour, minute):
+            continue
+        if was_daily_report_sent_today(uid, today):
+            continue
+
+        message = build_daily_report_text(uid)
+        reminders = build_due_bill_reminders(uid, today)
+        ids = list_identities_by_user(uid)
+        wa_targets = [x["external_id"] for x in ids if x["provider"] == "whatsapp"]
+
+        for to in wa_targets:
+            try:
+                for reminder in reminders:
+                    send_text(to, reminder["message"])
+                send_text(to, message)
+            except Exception as exc:
+                logger.warning("WA daily report send error to=%s error=%s", to, exc)
+                log_system_event_sync(
+                    "warning",
+                    "whatsapp_daily_report_send_failed",
+                    f"Falha ao enviar relatorio diario via WhatsApp: {exc}",
+                    source="wa_app",
+                    user_id=uid,
+                    details={"to": to},
+                )
+
+        for reminder in reminders:
+            try:
+                mark_card_reminder_sent(uid, reminder["card_id"], today)
+            except Exception as exc:
+                logger.warning("WA card reminder mark error uid=%s card_id=%s error=%s", uid, reminder["card_id"], exc)
+                log_system_event_sync(
+                    "warning",
+                    "whatsapp_card_reminder_mark_failed",
+                    f"Falha ao marcar lembrete de cartao enviado: {exc}",
+                    source="wa_app",
+                    user_id=uid,
+                    details={"card_id": reminder["card_id"]},
+                )
+
+        mark_daily_report_sent(uid, today)
+
+
 async def _daily_report_loop():
+    await asyncio.sleep(5)
+
     while True:
         try:
-            now = now_tz()
-            today = now.date()
-
-            for uid in list_users_with_daily_report_enabled():
-                prefs = get_daily_report_prefs(uid)
-                if not prefs["enabled"]:
-                    continue
-
-                hour = prefs["hour"]
-                minute = prefs["minute"]
-                if (now.hour, now.minute) < (hour, minute):
-                    continue
-                if was_daily_report_sent_today(uid, today):
-                    continue
-
-                message = build_daily_report_text(uid)
-                reminders = build_due_bill_reminders(uid, today)
-                ids = list_identities_by_user(uid)
-                wa_targets = [x["external_id"] for x in ids if x["provider"] == "whatsapp"]
-
-                for to in wa_targets:
-                    try:
-                        for reminder in reminders:
-                            await asyncio.to_thread(send_text, to, reminder["message"])
-                        await asyncio.to_thread(send_text, to, message)
-                    except Exception as exc:
-                        logger.warning("WA daily report send error to=%s error=%s", to, exc)
-                        log_system_event_sync(
-                            "warning",
-                            "whatsapp_daily_report_send_failed",
-                            f"Falha ao enviar relatorio diario via WhatsApp: {exc}",
-                            source="wa_app",
-                            user_id=uid,
-                            details={"to": to},
-                        )
-
-                for reminder in reminders:
-                    try:
-                        mark_card_reminder_sent(uid, reminder["card_id"], today)
-                    except Exception as exc:
-                        logger.warning("WA card reminder mark error uid=%s card_id=%s error=%s", uid, reminder["card_id"], exc)
-                        log_system_event_sync(
-                            "warning",
-                            "whatsapp_card_reminder_mark_failed",
-                            f"Falha ao marcar lembrete de cartao enviado: {exc}",
-                            source="wa_app",
-                            user_id=uid,
-                            details={"card_id": reminder["card_id"]},
-                        )
-
-                mark_daily_report_sent(uid, today)
+            await asyncio.to_thread(_daily_report_tick)
+        except asyncio.CancelledError:
+            break
         except Exception as exc:
             logger.exception("WA daily report loop error: %s", exc)
             log_system_event_sync(
