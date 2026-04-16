@@ -434,6 +434,7 @@ def _build_credit_contextual_help(text: str) -> str:
 
     if any(expr in norm for expr in ("compra", "compras", "credito", "cartao")):
         return (
+            "Não entendi exatamente o que você quer fazer sobre cartões.\n"
             "💳 Posso te ajudar com cartões de algumas formas:\n"
             "• `criar cartao Nubank fecha 10 vence 17`\n"
             "• `cartoes`\n"
