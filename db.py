@@ -1523,6 +1523,7 @@ def _business_days_between(d1: date, d2: date) -> int:
             days += 1
     return days
 
+
 def _fmt_ddmmyyyy(d: date) -> str:
     return d.strftime("%d/%m/%Y")
 
@@ -1788,14 +1789,21 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
         end = today
 
         cdi_map = _get_cdi_daily_map(cur, start, end)  # {date: pct_ao_dia}
+        cdi_days = sorted(d for d in cdi_map.keys() if last_date < d <= end)
+
+        # O SGS já embute o calendário real de publicação do CDI.
+        # Se não houver novas datas publicadas desde last_date, não renderiza nem avança a data.
+        if not cdi_days:
+            return Decimal(inv["balance"])
 
         factor = 1.0
-        # IMPORTANTE: iterar em ordem de data
-        for d in sorted(cdi_map.keys()):
+        # Itera nas datas efetivamente publicadas pelo BCB.
+        for d in cdi_days:
             cdi_pct_per_day = cdi_map[d]
             factor *= (1.0 + (cdi_pct_per_day / 100.0) * mult)
 
         new_bal = Decimal(str(float(bal) * factor))
+        applied_until = cdi_days[-1]
 
     # =========================
     # Não-CDI
@@ -1815,13 +1823,14 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
             new_bal = Decimal(str(float(bal) * factor))
         else:
             new_bal = bal
+        applied_until = today
 
     # =========================
     # salva (para TODOS os casos)
     # =========================
     cur.execute(
         "update investments set balance=%s, last_date=%s where id=%s and user_id=%s",
-        (new_bal, today, inv_id, user_id),
+        (new_bal, applied_until, inv_id, user_id),
     )
     return new_bal
 

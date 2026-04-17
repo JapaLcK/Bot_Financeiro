@@ -169,8 +169,14 @@ def fmt_rate(rate, period: str | None) -> str:
     else:
         rate = float(rate)
 
-    # se rate veio como fração (0.01 = 1%), converte pra %
-    display = rate * 100 if rate <= 1 else rate
+    # CDI é armazenado como multiplicador:
+    # 1.16 => 116% CDI, 1.0 => 100% CDI
+    if period == "cdi":
+        display = rate * 100
+    else:
+        # Taxas comuns são armazenadas como fração:
+        # 0.14 => 14%
+        display = rate * 100 if rate <= 1 else rate
 
     # formatação limpa (sem 1.0000)
     if abs(display - round(display)) < 1e-12:
@@ -178,7 +184,11 @@ def fmt_rate(rate, period: str | None) -> str:
     else:
         pct = f"{display:.6f}".rstrip("0").rstrip(".")
 
-    return f"{pct}% {period}"
+    if period == "cdi":
+        return f"{pct}% CDI"
+
+    # Na listagem, mostrar só a taxa evita redundância como "14% anual".
+    return f"{pct}%"
 
 DEPOSIT_VERBS = [
     "transferi", "coloquei", "adicionei", "depositei", "pus", "botei",

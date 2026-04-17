@@ -9,14 +9,21 @@ logger = logging.getLogger(__name__)
 
 
 def list_investments(user_id: int) -> str:
-    rows = db.list_investments(user_id)
+    rows = db.accrue_all_investments(user_id)
     if not rows:
         return "Você ainda não tem investimentos.\nCrie um: *criar investimento CDB 1% ao mês*"
+
+    last_dates = [r.get("last_date") for r in rows if r.get("last_date")]
+    base_date_txt = ""
+    if last_dates:
+        base_date = max(last_dates)
+        base_date_txt = f"Atualizado até {base_date.strftime('%d/%m/%Y')}\n"
+
     lines = []
     for r in rows:
         rate_txt = fmt_rate(r.get("rate"), r.get("period"))
         lines.append(f"• **{r['name']}**: {fmt_brl(float(r['balance']))} ({rate_txt})")
-    return "📈 **Investimentos**:\n" + "\n".join(lines)
+    return "📈 **Investimentos**:\n" + base_date_txt + "\n".join(lines)
 
 
 def create(user_id: int, raw_name: str, original_text: str) -> str:
@@ -45,9 +52,12 @@ def create(user_id: int, raw_name: str, original_text: str) -> str:
         name = raw_name.strip()
 
     try:
-        inv_id, canon = db.create_investment(user_id, name, taxa, period)
-        period_label = {"daily": "ao dia", "monthly": "ao mês", "yearly": "ao ano"}.get(period, period)
-        return f"✅ Investimento criado: **{canon}** — {taxa*100:.4g}% {period_label} (id {inv_id})"
+        launch_id, _inv_id, canon = db.create_investment_db(user_id, name, taxa, period, nota=original_text)
+        if launch_id is None:
+            return f"Já existe um investimento com esse nome. Use outro nome."
+
+        rate_txt = fmt_rate(taxa, period)
+        return f"✅ Investimento criado: **{canon}** — {rate_txt} (id {launch_id})"
     except Exception as e:
         if "already exists" in str(e).lower() or "unique" in str(e).lower():
             return f"Já existe um investimento com esse nome. Use outro nome."
