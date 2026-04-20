@@ -2,6 +2,7 @@
 db/investments.py — Investimentos: criar, aportar, resgatar, juros e CDI.
 """
 import calendar
+import sys
 import requests
 from datetime import datetime, date, timedelta
 from decimal import Decimal
@@ -224,7 +225,11 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
     if period == "cdi":
         mult = float(inv["rate"])
         start = last_date + timedelta(days=1)
-        cdi_map = _get_cdi_daily_map(cur, start, today)
+        # Mantém compatibilidade com testes e callers que fazem monkeypatch
+        # em `db._get_cdi_daily_map`, como acontecia no antigo db.py monolítico.
+        db_pkg = sys.modules.get("db")
+        fetch_cdi_daily_map = getattr(db_pkg, "_get_cdi_daily_map", _get_cdi_daily_map)
+        cdi_map = fetch_cdi_daily_map(cur, start, today)
         cdi_days = sorted(d for d in cdi_map.keys() if last_date < d <= today)
 
         if not cdi_days:

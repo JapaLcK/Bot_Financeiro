@@ -52,11 +52,38 @@ INTERNAL_MOVEMENT_CATEGORIES = {
     "ajuste_saldo",
 }
 
+CATEGORY_LABELS = {
+    "alimentacao": "alimentação",
+    "transporte": "transporte",
+    "saude": "saúde",
+    "moradia": "moradia",
+    "lazer": "lazer",
+    "educacao": "educação",
+    "assinaturas": "assinaturas",
+    "pets": "pets",
+    "compras online": "compras online",
+    "beleza": "beleza",
+    "outros": "outros",
+    "investimento_aporte": "investimento_aporte",
+    "investimento_resgate": "investimento_resgate",
+    "transferencia_interna": "transferencia_interna",
+    "pagamento_fatura": "pagamento_fatura",
+    "ajuste_saldo": "ajuste_saldo",
+    "rendimentos": "rendimentos",
+}
+
 def is_internal_category(categoria: str | None) -> bool:
     """Retorna True se a categoria indica movimentação interna."""
     if not categoria:
         return False
     return normalize_text(categoria) in INTERNAL_MOVEMENT_CATEGORIES
+
+
+def canonicalize_category_label(category: str | None) -> str:
+    norm = normalize_text(category or "")
+    if not norm:
+        return ""
+    return CATEGORY_LABELS.get(norm, norm)
 
 STOPWORDS_PT = {
     "gastei","paguei","comprei","debitei","recebi","ganhei","salario","reembolso",

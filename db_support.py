@@ -520,6 +520,97 @@ def confirm_email_verification_impl(
     return {"user_id": user_id, "link_code": link_code}
 
 
+def attempt_whatsapp_phone_link_impl(
+    get_conn,
+    merge_users,
+    wa_phone: str,
+    wa_candidates: list[str],
+    current_user_id: int,
+) -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select user_id, phone_e164
+                from auth_accounts
+                where phone_e164 = any(%s)
+                """,
+                (wa_candidates,),
+            )
+            matches = cur.fetchall() or []
+
+            cur.execute(
+                """
+                select external_id
+                from user_identities
+                where provider = 'whatsapp' and user_id = %s
+                limit 1
+                """,
+                (current_user_id,),
+            )
+            existing_current_wa = cur.fetchone()
+
+    if not matches:
+        return {"status": "no_match", "wa_phone": wa_phone}
+
+    if len(matches) > 1:
+        return {"status": "multiple_accounts", "wa_phone": wa_phone}
+
+    target_user_id = int(matches[0]["user_id"])
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select external_id
+                from user_identities
+                where provider = 'whatsapp' and user_id = %s
+                limit 1
+                """,
+                (target_user_id,),
+            )
+            target_wa = cur.fetchone()
+
+            if target_wa and target_wa["external_id"] != wa_phone:
+                return {
+                    "status": "account_has_other_whatsapp",
+                    "wa_phone": wa_phone,
+                }
+
+    final_user_id = target_user_id
+    if int(current_user_id) != target_user_id:
+        merge_users(int(current_user_id), target_user_id)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into user_identities (provider, external_id, user_id)
+                values ('whatsapp', %s, %s)
+                on conflict (provider, external_id)
+                do update set user_id = excluded.user_id
+                """,
+                (wa_phone, target_user_id),
+            )
+            cur.execute(
+                """
+                update auth_accounts
+                set phone_status = 'confirmed',
+                    phone_confirmed_at = coalesce(phone_confirmed_at, now()),
+                    whatsapp_verified_at = now()
+                where user_id = %s
+                """,
+                (target_user_id,),
+            )
+        conn.commit()
+
+    return {
+        "status": "already_linked" if current_user_id == target_user_id and existing_current_wa else "linked",
+        "user_id": int(final_user_id),
+        "wa_phone": wa_phone,
+    }
+
+
 def create_password_reset_token_impl(get_conn, email: str, minutes_valid: int = 30) -> str | None:
     email = email.strip().lower()
 

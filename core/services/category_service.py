@@ -5,7 +5,13 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-from utils_text import normalize_text, LOCAL_RULES, contains_word, extract_memory_candidates
+from utils_text import (
+    normalize_text,
+    LOCAL_RULES,
+    contains_word,
+    extract_memory_candidates,
+    canonicalize_category_label,
+)
 from db import get_memorized_category, upsert_category_rule
 
 
@@ -24,7 +30,7 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
       default: 'outros'
     """
     if explicit_category:
-        cat = normalize_text(explicit_category)
+        cat = canonicalize_category_label(explicit_category)
         return InferResult(category=cat or "outros", reason="explicit")
 
     t = normalize_text(text_base or "")
@@ -34,7 +40,7 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
     # B) regras do usuário (mesma fonte do comando "criar categoria ... linkar ...")
     cat = get_memorized_category(user_id, t)
     if cat:
-        return InferResult(category=normalize_text(cat), reason="user_rule")
+        return InferResult(category=canonicalize_category_label(cat), reason="user_rule")
 
     # C) LOCAL_RULES
     for keywords, cat2 in LOCAL_RULES:
@@ -49,7 +55,7 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
                 ok = contains_word(t, kw_norm) or (kw_norm in t)
 
             if ok:
-                return InferResult(category=normalize_text(cat2), reason="local_rule")
+                return InferResult(category=canonicalize_category_label(cat2), reason="local_rule")
 
     # D) fallback IA (só se OPENAI_API_KEY configurada)
     if os.getenv("OPENAI_API_KEY"):
