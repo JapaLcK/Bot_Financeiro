@@ -12,14 +12,20 @@ Fluxo:
 """
 from __future__ import annotations
 
+import logging
+import traceback
+
 import db
 from core.types import IncomingMessage, OutgoingMessage
 from core.intent_classifier import classify
 from core.intent_router import route
 from core.response_formatter import format_for_platform
 from core.services.ofx_service import handle_ofx_import
+from core.observability import log_system_event_sync
 from utils_text import fmt_brl
 from ai_router import _internal_user_id
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -55,78 +61,115 @@ def _normalize_user_id(msg: IncomingMessage) -> int:
 def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
     platform = msg.platform
 
-    # ------------------------------------------------------------------
-    # 1. Anexo OFX — tratamento especial (não passa pelo classificador)
-    # ------------------------------------------------------------------
-    if msg.attachments:
-        ofx_atts = [a for a in msg.attachments if _is_ofx_attachment(a)]
-        if ofx_atts:
-            a = ofx_atts[0]
-            if not getattr(a, "data", None):
-                return [OutgoingMessage(
-                    text="📎 Recebi o OFX, mas não consegui baixar o arquivo. Reenvie o .ofx por favor."
-                )]
+    try:
+        # ------------------------------------------------------------------
+        # 1. Anexo OFX — tratamento especial (não passa pelo classificador)
+        # ------------------------------------------------------------------
+        if msg.attachments:
+            ofx_atts = [a for a in msg.attachments if _is_ofx_attachment(a)]
+            if ofx_atts:
+                a = ofx_atts[0]
+                if not getattr(a, "data", None):
+                    return [OutgoingMessage(
+                        text="📎 Recebi o OFX, mas não consegui baixar o arquivo. Reenvie o .ofx por favor."
+                    )]
 
-            uid = _normalize_user_id(msg)
-            db.ensure_user(uid)
+                uid = _normalize_user_id(msg)
+                db.ensure_user(uid)
 
-            report = handle_ofx_import(str(uid), a.data, getattr(a, "filename", "arquivo.ofx"))
+                report = handle_ofx_import(str(uid), a.data, getattr(a, "filename", "arquivo.ofx"))
 
-            # handle_ofx_import pode retornar str ou dict
-            if isinstance(report, str):
-                return [OutgoingMessage(text=report)]
+                # handle_ofx_import pode retornar str ou dict
+                if isinstance(report, str):
+                    return [OutgoingMessage(text=report)]
 
-            periodo   = f"{report.get('dt_start')} → {report.get('dt_end')}"
-            total     = report.get("total_in_file")
-            ins       = report.get("inserted")
-            dup       = report.get("duplicates")
-            saldo_raw = report.get("new_balance") or report.get("balance")
-            saldo_txt = fmt_brl(float(saldo_raw)) if saldo_raw is not None else "(indisponível)"
+                periodo   = f"{report.get('dt_start')} → {report.get('dt_end')}"
+                total     = report.get("total_in_file")
+                ins       = report.get("inserted")
+                dup       = report.get("duplicates")
+                saldo_raw = report.get("new_balance") or report.get("balance")
+                saldo_txt = fmt_brl(float(saldo_raw)) if saldo_raw is not None else "(indisponível)"
 
-            bold = lambda s: f"*{s}*" if platform == "whatsapp" else f"**{s}**"
-            return [OutgoingMessage(text=(
-                f"✅ {bold('OFX importado')}\n"
-                f"📅 Período: {periodo}\n"
-                f"🧾 Transações: {total}\n"
-                f"➕ Inseridas: {ins} | ♻️ Duplicadas: {dup}\n"
-                f"🏦 Saldo atual: {saldo_txt}"
-            ))]
+                bold = lambda s: f"*{s}*" if platform == "whatsapp" else f"**{s}**"
+                return [OutgoingMessage(text=(
+                    f"✅ {bold('OFX importado')}\n"
+                    f"📅 Período: {periodo}\n"
+                    f"🧾 Transações: {total}\n"
+                    f"➕ Inseridas: {ins} | ♻️ Duplicadas: {dup}\n"
+                    f"🏦 Saldo atual: {saldo_txt}"
+                ))]
 
-    # ------------------------------------------------------------------
-    # 2. Garante usuário no banco + registra atividade
-    # ------------------------------------------------------------------
-    uid = _normalize_user_id(msg)
-    db.ensure_user(uid)
-    db.update_last_activity(uid)
+        # ------------------------------------------------------------------
+        # 2. Garante usuário no banco + registra atividade
+        # ------------------------------------------------------------------
+        uid = _normalize_user_id(msg)
+        db.ensure_user(uid)
+        db.update_last_activity(uid)
 
-    # Substitui o user_id normalizado para o restante do fluxo
-    msg_normalized = IncomingMessage(
-        platform=msg.platform,
-        user_id=uid,
-        text=msg.text,
-        message_id=msg.message_id,
-        attachments=msg.attachments,
-        external_id=msg.external_id,
-        raw=msg.raw,
-    )
+        # Substitui o user_id normalizado para o restante do fluxo
+        msg_normalized = IncomingMessage(
+            platform=msg.platform,
+            user_id=uid,
+            text=msg.text,
+            message_id=msg.message_id,
+            attachments=msg.attachments,
+            external_id=msg.external_id,
+            raw=msg.raw,
+        )
 
-    # ------------------------------------------------------------------
-    # 3. Classifica intenção
-    # ------------------------------------------------------------------
-    text = (msg.text or "").strip()
-    if not text:
-        return []
+        # ------------------------------------------------------------------
+        # 3. Classifica intenção
+        # ------------------------------------------------------------------
+        text = (msg.text or "").strip()
+        if not text:
+            return []
 
-    intent_result = classify(text)
+        intent_result = classify(text)
 
-    # ------------------------------------------------------------------
-    # 4. Roteia → executa → obtém resposta bruta
-    # ------------------------------------------------------------------
-    raw_response = route(intent_result, msg_normalized)
+        # ------------------------------------------------------------------
+        # 4. Roteia → executa → obtém resposta bruta
+        # ------------------------------------------------------------------
+        raw_response = route(intent_result, msg_normalized)
 
-    # ------------------------------------------------------------------
-    # 5. Formata para o canal
-    # ------------------------------------------------------------------
-    formatted = format_for_platform(raw_response, platform)
+        # ------------------------------------------------------------------
+        # 5. Formata para o canal
+        # ------------------------------------------------------------------
+        formatted = format_for_platform(raw_response, platform)
 
-    return [OutgoingMessage(text=formatted)]
+        return [OutgoingMessage(text=formatted)]
+
+    except Exception as exc:
+        tb = traceback.format_exc()
+        logger.error(
+            "handle_incoming FAILED platform=%s user_id=%s text=%r error=%s",
+            msg.platform,
+            getattr(msg, "user_id", "?"),
+            (msg.text or "")[:120],
+            exc,
+        )
+        # Registra no banco para aparecer no dashboard de monitoramento
+        try:
+            uid_for_log = None
+            try:
+                uid_for_log = int(_normalize_user_id(msg))
+            except Exception:
+                pass
+            log_system_event_sync(
+                "error",
+                "message_processing_failed",
+                f"Falha ao processar mensagem ({msg.platform}): {exc}",
+                source=f"handle_incoming/{msg.platform}",
+                user_id=uid_for_log,
+                details={
+                    "text": (msg.text or "")[:200],
+                    "platform": msg.platform,
+                    "traceback": tb[-1500:],
+                },
+            )
+        except Exception as log_exc:
+            logger.error("Falha ao registrar erro no banco: %s", log_exc)
+
+        # Retorna mensagem amigável ao usuário em vez de silêncio
+        return [OutgoingMessage(
+            text="⚠️ Ocorreu um erro interno ao processar sua mensagem. Tente novamente em instantes."
+        )]

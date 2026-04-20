@@ -611,7 +611,8 @@ async def lifespan(app: FastAPI):
     # Shutdown: cancela tasks e aguarda com timeout para não travar
     for t in tasks:
         t.cancel()
-    await asyncio.wait(tasks, timeout=5)
+    if tasks:
+        await asyncio.wait(tasks, timeout=5)
     for t in tasks:
         if not t.done():
             print(f"[lifespan] task '{t.get_name()}' não encerrou a tempo.", file=sys.stderr)

@@ -1,8 +1,11 @@
 # adapters/whatsapp/wa_parse.py
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -60,7 +63,7 @@ def extract_messages(payload: dict[str, Any]) -> list[InboundMessage]:
         phone = c.get("wa_id") or ""
         if phone:
             canonical_wa_id[phone] = phone
-    print(f"[DEBUG] contacts wa_ids={list(canonical_wa_id.keys())}", flush=True)
+    logger.debug("WA parse contacts wa_ids=%s", list(canonical_wa_id.keys()))
 
     out: list[InboundMessage] = []
 
@@ -70,7 +73,7 @@ def extract_messages(payload: dict[str, Any]) -> list[InboundMessage]:
             continue
         # usa wa_id canônico do contacts se disponível
         wa_id = canonical_wa_id.get(wa_id, wa_id)
-        print(f"[DEBUG] message from={m.get('from')} resolved_wa_id={wa_id}", flush=True)
+        logger.debug("WA parse message from=%s resolved_wa_id=%s", m.get("from"), wa_id)
 
         mtype = m.get("type") or "unknown"
         ts = m.get("timestamp")

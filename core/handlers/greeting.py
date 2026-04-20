@@ -5,10 +5,13 @@ Fallback local por tipo de saudação caso a IA esteja indisponível.
 """
 from __future__ import annotations
 
+import logging
 import os
 import random
 from datetime import datetime
 from utils_text import normalize_text
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Fallback local por tipo — usado se a IA falhar
@@ -147,7 +150,7 @@ def _greeting_with_ai(text: str, greeting_type: str) -> str | None:
         return result if result else None
 
     except Exception as e:
-        print(f"[greeting] AI error: {e}")
+        logger.warning("greeting AI error: %s", e)
         return None
 
 

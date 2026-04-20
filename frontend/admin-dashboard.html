@@ -3,681 +3,845 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Admin Dashboard - PigBank</title>
+<title>PigBank — Monitoramento</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --bg: #07121d;
-  --panel: rgba(10, 20, 34, 0.84);
-  --panel-2: rgba(255,255,255,.04);
-  --border: rgba(255,255,255,.08);
-  --text: #edf6ff;
-  --muted: rgba(237,246,255,.62);
-  --soft: rgba(237,246,255,.42);
-  --green: #22c55e;
-  --teal: #14b8a6;
-  --blue: #60a5fa;
-  --orange: #fb923c;
-  --red: #fb7185;
-  --yellow: #facc15;
+  --bg:        #07121d;
+  --panel:     rgba(10, 20, 34, 0.88);
+  --panel-2:   rgba(255,255,255,.04);
+  --border:    rgba(255,255,255,.08);
+  --text:      #edf6ff;
+  --muted:     rgba(237,246,255,.55);
+  --soft:      rgba(237,246,255,.38);
+  --green:     #22c55e;
+  --teal:      #14b8a6;
+  --blue:      #60a5fa;
+  --orange:    #fb923c;
+  --red:       #f87171;
+  --red-deep:  #dc2626;
+  --yellow:    #facc15;
+  --purple:    #a78bfa;
 }
 body {
   font-family: "Segoe UI", system-ui, sans-serif;
   color: var(--text);
   background:
-    radial-gradient(circle at top left, rgba(20,184,166,.18), transparent 26%),
-    radial-gradient(circle at top right, rgba(96,165,250,.14), transparent 30%),
+    radial-gradient(circle at top left,  rgba(20,184,166,.16), transparent 28%),
+    radial-gradient(circle at top right, rgba(96,165,250,.12), transparent 32%),
     linear-gradient(180deg, #07121d, #091726 55%, #08111a);
   min-height: 100vh;
 }
-.shell { max-width: 1480px; margin: 0 auto; padding: 28px 20px 56px; }
-.hero, .card {
+
+/* ── Layout ─────────────────────────────────────────────────────────── */
+.shell  { max-width: 1540px; margin: 0 auto; padding: 24px 20px 60px; }
+.card   {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 24px;
+  border-radius: 20px;
   backdrop-filter: blur(18px);
-  box-shadow: 0 20px 60px rgba(0,0,0,.26);
+  box-shadow: 0 16px 48px rgba(0,0,0,.22);
+  padding: 20px;
 }
 .hero {
   display: flex;
   justify-content: space-between;
+  align-items: flex-end;
   gap: 16px;
-  align-items: end;
-  padding: 28px;
-  margin-bottom: 18px;
+  padding: 24px 28px;
+  margin-bottom: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  backdrop-filter: blur(18px);
 }
-.hero h1 { font-size: 32px; margin-bottom: 8px; }
-.hero p { color: var(--muted); max-width: 820px; line-height: 1.6; }
-.hero-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.hero-actions-group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-.hero-actions-stack { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.hero-left h1 { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
+.hero-left p  { color: var(--muted); font-size: 14px; max-width: 560px; line-height: 1.6; }
+.hero-right   { display: flex; flex-direction: column; gap: 10px; align-items: flex-end; }
+.hero-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.refresh-status { font-size: 12px; color: var(--muted); text-align: right; min-height: 18px; }
+.refresh-status.error { color: #fca5a5; }
+
+/* ── Buttons / inputs ────────────────────────────────────────────────── */
 button, select {
   border: 1px solid var(--border);
   background: var(--panel-2);
   color: var(--text);
-  border-radius: 14px;
-  padding: 12px 14px;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background .15s;
 }
-button { cursor: pointer; }
-button:disabled { opacity: .7; cursor: wait; }
-.primary {
+button:hover:not(:disabled) { background: rgba(255,255,255,.07); }
+button:disabled { opacity: .6; cursor: wait; }
+.btn-primary {
   background: linear-gradient(135deg, var(--green), #86efac);
-  color: #08210f;
+  color: #07210e;
   border: 0;
   font-weight: 700;
 }
-.refresh-status {
-  min-height: 20px;
-  color: var(--muted);
-  font-size: 13px;
-  text-align: right;
-  width: 100%;
+.btn-danger  {
+  background: rgba(220,38,38,.18);
+  border-color: rgba(248,113,113,.3);
+  color: #fca5a5;
 }
-.refresh-status.error { color: #fda4af; }
+.auto-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--muted); padding: 4px 10px;
+  background: rgba(255,255,255,.04); border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.auto-badge .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+/* ── Error alert banner ──────────────────────────────────────────────── */
+#error-banner {
+  display: none;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 20px;
+  margin-bottom: 16px;
+  background: rgba(220,38,38,.12);
+  border: 1px solid rgba(248,113,113,.35);
+  border-radius: 16px;
+  animation: slideIn .3s ease;
+}
+#error-banner.visible { display: flex; }
+@keyframes slideIn { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
+.banner-icon { font-size: 24px; }
+.banner-text { flex: 1; }
+.banner-text strong { color: #fca5a5; display: block; margin-bottom: 2px; font-size: 15px; }
+.banner-text span   { color: rgba(252,165,165,.75); font-size: 13px; }
+.banner-close { opacity: .6; cursor: pointer; font-size: 18px; padding: 4px; }
+.banner-close:hover { opacity: 1; }
+
+/* ── Summary grid ────────────────────────────────────────────────────── */
 .summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 14px;
-  margin-bottom: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
 }
-.card { padding: 20px; }
-.metric-label {
-  color: var(--soft);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-  margin-bottom: 10px;
-}
-.metric-value {
-  font-size: 30px;
-  font-weight: 750;
-  margin-bottom: 6px;
-}
-.metric-sub { color: var(--muted); font-size: 14px; line-height: 1.5; }
-.grid {
-  display: grid;
-  grid-template-columns: 1.5fr 1fr;
-  gap: 16px;
-  margin-bottom: 18px;
-}
-.grid-3 {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 16px;
-}
+.metric-label { color: var(--soft); font-size: 11px; text-transform: uppercase; letter-spacing:.08em; margin-bottom: 8px; }
+.metric-value { font-size: 28px; font-weight: 750; margin-bottom: 4px; }
+.metric-sub   { color: var(--muted); font-size: 13px; line-height: 1.5; }
+.metric-value.red    { color: var(--red); }
+.metric-value.yellow { color: var(--yellow); }
+.metric-value.green  { color: var(--green); }
+
+/* ── Grids ────────────────────────────────────────────────────────────── */
+.grid   { display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; margin-bottom: 16px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+/* ── Section header ──────────────────────────────────────────────────── */
 .section-title {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 14px;
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 14px; gap: 8px;
 }
-.section-title h2 { font-size: 18px; }
-.section-title span { color: var(--muted); font-size: 13px; }
-.table {
-  width: 100%;
-  border-collapse: collapse;
+.section-title h2 { font-size: 16px; font-weight: 600; }
+.section-title .meta { color: var(--muted); font-size: 12px; }
+
+/* ── Badges ──────────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 600;
 }
-.table th, .table td {
-  text-align: left;
-  padding: 12px 10px;
-  border-bottom: 1px solid rgba(255,255,255,.06);
-  font-size: 14px;
-  vertical-align: top;
-}
-.table th { color: var(--soft); font-weight: 600; }
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 12px;
-  background: rgba(255,255,255,.05);
-  color: var(--muted);
-}
-.pill-ok { color: #86efac; background: rgba(34,197,94,.1); border: 1px solid rgba(34,197,94,.2); }
-.pill-warn { color: #fde68a; background: rgba(250,204,21,.08); border: 1px solid rgba(250,204,21,.18); }
-.pill-muted { color: rgba(237,246,255,.72); }
-.status-ok { color: #86efac; }
-.status-warn { color: var(--yellow); }
-.status-error { color: #fda4af; }
-.list {
-  display: grid;
-  gap: 10px;
-}
-.list-item {
+.badge-error   { background: rgba(220,38,38,.18);  color: #fca5a5; border: 1px solid rgba(248,113,113,.3); }
+.badge-warning { background: rgba(250,204,21,.12); color: #fde68a; border: 1px solid rgba(250,204,21,.25); }
+.badge-ok      { background: rgba(34,197,94,.1);   color: #86efac; border: 1px solid rgba(34,197,94,.2); }
+.badge-info    { background: rgba(96,165,250,.1);  color: #93c5fd; border: 1px solid rgba(96,165,250,.2); }
+.badge-muted   { background: rgba(255,255,255,.05); color: var(--muted); }
+
+/* ── Error list ──────────────────────────────────────────────────────── */
+.error-list  { display: grid; gap: 8px; }
+.error-item  {
   padding: 12px 14px;
-  border-radius: 16px;
-  background: rgba(255,255,255,.035);
+  border-radius: 14px;
+  border: 1px solid transparent;
+  background: rgba(255,255,255,.03);
+  transition: background .15s;
+  cursor: pointer;
+}
+.error-item:hover { background: rgba(255,255,255,.055); }
+.error-item.level-error   { border-color: rgba(248,113,113,.18); background: rgba(220,38,38,.06); }
+.error-item.level-warning { border-color: rgba(250,204,21,.15); background: rgba(250,204,21,.04); }
+.error-item.level-info    { border-color: rgba(96,165,250,.12); }
+.error-item-header {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 5px; flex-wrap: wrap;
+}
+.error-item-title { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.error-item-time  { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.error-item-msg   { font-size: 12px; color: var(--muted); line-height: 1.5; margin-top: 3px; }
+.error-item-source{ font-size: 11px; color: var(--soft); margin-top: 3px; }
+.expand-hint {
+  font-size: 11px; color: var(--blue); margin-top: 7px;
+  user-select: none; opacity: .8; letter-spacing: .02em;
+}
+.expand-hint:hover { opacity: 1; }
+.error-item-tb    {
+  display: none; margin-top: 8px;
+  background: rgba(0,0,0,.45); border-radius: 10px; padding: 10px 12px;
+  font-family: monospace; font-size: 11px; color: rgba(237,246,255,.65);
+  white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow-y: auto;
+  border: 1px solid rgba(255,255,255,.07);
+}
+.error-item.expanded .error-item-tb { display: block; }
+
+/* ── Health items ────────────────────────────────────────────────────── */
+.health-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.health-item {
+  padding: 11px 13px; border-radius: 12px;
+  background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.06);
+}
+.health-item.danger  { background: rgba(220,38,38,.07);  border-color: rgba(248,113,113,.2); }
+.health-item.warning { background: rgba(250,204,21,.05); border-color: rgba(250,204,21,.18); }
+.health-item-val  { font-size: 20px; font-weight: 700; margin-bottom: 3px; }
+.health-item-val.red    { color: var(--red); }
+.health-item-val.yellow { color: var(--yellow); }
+.health-item-val.green  { color: var(--green); }
+.health-item-val.blue   { color: var(--blue); }
+.health-item-label{ font-size: 11px; color: var(--muted); line-height: 1.4; }
+.health-item-hint { font-size: 10px; color: var(--soft); margin-top: 4px; line-height: 1.4; }
+
+/* ── Tables ──────────────────────────────────────────────────────────── */
+.table { width: 100%; border-collapse: collapse; }
+.table th, .table td {
+  text-align: left; padding: 10px 8px;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  font-size: 13px; vertical-align: top;
+}
+.table th { color: var(--soft); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing:.06em; }
+
+/* ── Misc ────────────────────────────────────────────────────────────── */
+.list-item {
+  padding: 11px 13px; border-radius: 14px;
+  background: rgba(255,255,255,.03);
   border: 1px solid rgba(255,255,255,.05);
+  margin-bottom: 8px;
 }
-.list-item strong { display: block; margin-bottom: 4px; }
-.list-item small { color: var(--muted); line-height: 1.5; }
-.list-item .hint {
-  display: block;
-  color: rgba(237,246,255,.52);
-  font-size: 12px;
-  line-height: 1.45;
-  margin-top: 6px;
-}
-.empty { color: var(--muted); font-size: 14px; padding: 8px 0; }
-.chart-wrap { height: 340px; }
-@media (max-width: 1080px) {
-  .grid, .grid-3 { grid-template-columns: 1fr; }
-  .hero { align-items: start; flex-direction: column; }
-  .hero-actions, .hero-actions-group, .hero-actions-stack { width: 100%; }
-  .hero-actions-stack { align-items: stretch; }
-  .refresh-status { width: 100%; text-align: left; }
+.list-item:last-child { margin-bottom: 0; }
+.list-item strong  { display: block; margin-bottom: 3px; font-size: 13px; }
+.list-item small   { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.empty  { color: var(--muted); font-size: 13px; padding: 12px 0; }
+.chart-wrap { height: 300px; }
+.filter-bar { display: flex; gap: 6px; margin-bottom: 12px; }
+.filter-btn { padding: 5px 12px; font-size: 12px; border-radius: 999px; }
+.filter-btn.active { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.2); color: var(--text); }
+
+@media (max-width: 1100px) {
+  .grid, .grid-3, .grid-2 { grid-template-columns: 1fr; }
+  .hero { flex-direction: column; align-items: flex-start; }
+  .hero-right { align-items: flex-start; width: 100%; }
+  .hero-controls { width: 100%; }
+  .health-grid { grid-template-columns: 1fr; }
 }
 </style>
 </head>
 <body>
-  <div class="shell">
-    <section class="hero">
-      <div>
-        <div class="pill">Admin privado</div>
-        <h1>Observabilidade do bot</h1>
-        <p>Visão consolidada de aquisição, crescimento, atividade, transações, carteira financeira e sinais operacionais. O objetivo aqui é detectar tendência e erro cedo, sem misturar com o dashboard do usuário final.</p>
-      </div>
-      <div class="hero-actions">
-        <div class="hero-actions-stack">
-          <div class="hero-actions-group">
-            <select id="window-select">
-              <option value="30">Últimos 30 dias</option>
-              <option value="60">Últimos 60 dias</option>
-              <option value="90">Últimos 90 dias</option>
-            </select>
-            <button id="refresh-btn" class="primary" type="button">Atualizar</button>
-            <button id="logout-btn" type="button">Sair</button>
-          </div>
-          <div class="refresh-status" id="refresh-status"></div>
-        </div>
-      </div>
-    </section>
+<div class="shell">
 
-    <section class="summary" id="summary-cards"></section>
+  <!-- ── Hero ─────────────────────────────────────────────────────── -->
+  <section class="hero">
+    <div class="hero-left">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <span style="font-size:26px">🐷</span>
+        <h1>PigBank — Monitoramento</h1>
+        <span id="error-count-badge" style="display:none" class="badge badge-error">0 erros</span>
+      </div>
+      <p>Visão em tempo real de erros, saúde operacional e métricas do bot. Atualização automática a cada 60 segundos.</p>
+    </div>
+    <div class="hero-right">
+      <div class="hero-controls">
+        <select id="window-select">
+          <option value="7">Últimos 7 dias</option>
+          <option value="30" selected>Últimos 30 dias</option>
+          <option value="60">Últimos 60 dias</option>
+          <option value="90">Últimos 90 dias</option>
+        </select>
+        <button id="refresh-btn" class="btn-primary" type="button">↻ Atualizar</button>
+        <button id="logout-btn" type="button">Sair</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end">
+        <span class="auto-badge"><span class="dot"></span>Auto-refresh 60s</span>
+        <span class="refresh-status" id="refresh-status"></span>
+      </div>
+    </div>
+  </section>
 
-    <section class="grid">
-      <div class="card">
-        <div class="section-title">
-          <h2>Evolução temporal</h2>
-          <span id="generated-at">Carregando...</span>
-        </div>
-        <div class="chart-wrap"><canvas id="main-chart"></canvas></div>
-      </div>
-      <div class="card">
-        <div class="section-title">
-          <h2>Saúde operacional</h2>
-          <span>Indicadores rápidos</span>
-        </div>
-        <div class="list" id="health-list"></div>
-      </div>
-    </section>
-
-    <section class="grid-3">
-      <div class="card">
-        <div class="section-title"><h2>Cadastros recentes</h2><span>Últimos 10</span></div>
-        <div id="recent-signups"></div>
-      </div>
-      <div class="card">
-        <div class="section-title"><h2>Logins recentes</h2><span>Últimos 20</span></div>
-        <div id="recent-logins"></div>
-      </div>
-      <div class="card">
-        <div class="section-title"><h2>Erros e eventos</h2><span>Últimos 20</span></div>
-        <div id="recent-errors"></div>
-      </div>
-    </section>
-
-    <section class="grid" style="margin-top:18px">
-      <div class="card">
-        <div class="section-title"><h2>Saúde do WhatsApp e backend</h2><span>Sinais invisíveis</span></div>
-        <div class="list" id="ops-health-list"></div>
-      </div>
-      <div class="card">
-        <div class="section-title"><h2>Eventos operacionais</h2><span>Últimos 25</span></div>
-        <div id="recent-ops"></div>
-      </div>
-    </section>
-
-    <section class="grid" style="margin-top:18px">
-      <div class="card">
-        <div class="section-title"><h2>Usuários com maior volume</h2><span>Últimos 30 dias</span></div>
-        <div style="overflow:auto">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>Usuário</th>
-                <th>Última atividade</th>
-                <th>Transações</th>
-                <th>Fluxo líquido</th>
-              </tr>
-            </thead>
-            <tbody id="top-users"></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="card">
-        <div class="section-title"><h2>Relatório agregado mensal</h2><span>Últimos 6 meses</span></div>
-        <div style="overflow:auto">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>Mês</th>
-                <th>Receitas</th>
-                <th>Despesas</th>
-                <th>Transações</th>
-              </tr>
-            </thead>
-            <tbody id="monthly-financials"></tbody>
-          </table>
-        </div>
-      </div>
-    </section>
+  <!-- ── Error banner ──────────────────────────────────────────────── -->
+  <div id="error-banner">
+    <span class="banner-icon">🚨</span>
+    <div class="banner-text">
+      <strong id="banner-title">Erros críticos detectados</strong>
+      <span id="banner-detail">Verifique a seção de erros abaixo.</span>
+    </div>
+    <span class="banner-close" onclick="document.getElementById('error-banner').classList.remove('visible')">✕</span>
   </div>
 
+  <!-- ── Summary cards ─────────────────────────────────────────────── -->
+  <section class="summary" id="summary-cards"></section>
+
+  <!-- ── Erros críticos + Saúde operacional ────────────────────────── -->
+  <section class="grid" style="margin-bottom:16px">
+    <div class="card">
+      <div class="section-title">
+        <h2>🔴 Erros e eventos</h2>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="filter-bar" id="error-filter-bar">
+            <button class="filter-btn active" data-level="all">Todos</button>
+            <button class="filter-btn" data-level="error">Erros</button>
+            <button class="filter-btn" data-level="warning">Alertas</button>
+            <button class="filter-btn" data-level="info">Info</button>
+          </div>
+          <span class="meta" id="error-list-meta">Últimos 20</span>
+        </div>
+      </div>
+      <div class="error-list" id="error-list"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">
+        <h2>🩺 Saúde do sistema</h2>
+        <span class="meta" id="generated-at">Carregando...</span>
+      </div>
+      <div class="health-grid" id="health-grid"></div>
+    </div>
+  </section>
+
+  <!-- ── Gráfico temporal + WhatsApp ────────────────────────────────── -->
+  <section class="grid">
+    <div class="card">
+      <div class="section-title">
+        <h2>📈 Evolução temporal</h2>
+        <span class="meta">Cadastros · Logins · Transações</span>
+      </div>
+      <div class="chart-wrap"><canvas id="main-chart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="section-title">
+        <h2>💬 WhatsApp & Backend</h2>
+        <span class="meta">Sinais operacionais</span>
+      </div>
+      <div class="health-grid" id="ops-health-grid"></div>
+    </div>
+  </section>
+
+  <!-- ── Eventos operacionais ────────────────────────────────────────── -->
+  <section class="grid-2" style="margin-bottom:16px">
+    <div class="card">
+      <div class="section-title">
+        <h2>📋 Eventos operacionais</h2>
+        <span class="meta">Últimos 25 (WhatsApp · Billing · Engagement)</span>
+      </div>
+      <div class="error-list" id="ops-list"></div>
+    </div>
+    <div class="card">
+      <div class="section-title">
+        <h2>🔑 Logins recentes</h2>
+        <span class="meta">Últimos 20</span>
+      </div>
+      <div id="recent-logins"></div>
+    </div>
+  </section>
+
+  <!-- ── Cadastros + Usuários ativos ────────────────────────────────── -->
+  <section class="grid-2" style="margin-bottom:16px">
+    <div class="card">
+      <div class="section-title">
+        <h2>👤 Cadastros recentes</h2>
+        <span class="meta">Últimos 10</span>
+      </div>
+      <div id="recent-signups"></div>
+    </div>
+    <div class="card">
+      <div class="section-title">
+        <h2>🏆 Maior volume (30d)</h2>
+        <span class="meta">Top usuários ativos</span>
+      </div>
+      <div style="overflow:auto">
+        <table class="table">
+          <thead><tr><th>Usuário</th><th>Última atividade</th><th>Transações</th><th>Fluxo</th></tr></thead>
+          <tbody id="top-users"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Financeiro mensal ───────────────────────────────────────────── -->
+  <section class="card">
+    <div class="section-title">
+      <h2>📅 Relatório mensal agregado</h2>
+      <span class="meta">Últimos 6 meses</span>
+    </div>
+    <div style="overflow:auto">
+      <table class="table">
+        <thead><tr><th>Mês</th><th>Receitas</th><th>Despesas</th><th>Transações</th></tr></thead>
+        <tbody id="monthly-financials"></tbody>
+      </table>
+    </div>
+  </section>
+
+</div><!-- .shell -->
+
 <script>
+/* ── Constantes e estado ─────────────────────────────────────────── */
 const tokenKey = "finbot_admin_token";
-const refreshBtn = document.getElementById("refresh-btn");
-const logoutBtn = document.getElementById("logout-btn");
-const windowSelect = document.getElementById("window-select");
-const refreshStatus = document.getElementById("refresh-status");
 let mainChart;
 let isRefreshing = false;
-let currentRefreshController = null;
-let currentRefreshTimeout = null;
+let refreshController = null;
+let refreshTimeout   = null;
+let autoInterval     = null;
+let activeFilter     = "all";
+let lastErrorData    = [];
 
-function setRefreshStatus(message = "", isError = false) {
-  refreshStatus.textContent = message;
-  refreshStatus.classList.toggle("error", isError);
+const $id = id => document.getElementById(id);
+const refreshBtn    = $id("refresh-btn");
+const windowSelect  = $id("window-select");
+const refreshStatus = $id("refresh-status");
+const errorBanner   = $id("error-banner");
+const errorBadge    = $id("error-count-badge");
+
+/* ── Helpers de formato ──────────────────────────────────────────── */
+function fInt(v)  { return new Intl.NumberFormat("pt-BR").format(Number(v||0)); }
+function fMoney(v){ return new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(Number(v||0)); }
+function fDate(v) {
+  if (!v) return "—";
+  return new Intl.DateTimeFormat("pt-BR",{dateStyle:"short",timeStyle:"short"}).format(new Date(v));
+}
+function fRelTime(v) {
+  if (!v) return "—";
+  const diff = (Date.now() - new Date(v).getTime()) / 1000;
+  if (diff <  60)  return "agora";
+  if (diff < 3600) return `${Math.floor(diff/60)}min atrás`;
+  if (diff < 86400)return `${Math.floor(diff/3600)}h atrás`;
+  return `${Math.floor(diff/86400)}d atrás`;
+}
+function esc(v) {
+  return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function authH() {
+  const t = localStorage.getItem(tokenKey);
+  if (!t) { window.location.href = "/admin/login"; throw new Error("no token"); }
+  return { Authorization: `Bearer ${t}` };
 }
 
-function setRefreshingState(value) {
-  isRefreshing = value;
-  refreshBtn.textContent = value ? "Atualizando..." : "Atualizar";
-  if (value) {
-    setRefreshStatus("Buscando dados mais recentes...");
+/* ── Status ──────────────────────────────────────────────────────── */
+function setStatus(msg='', err=false) {
+  refreshStatus.textContent = msg;
+  refreshStatus.classList.toggle('error', err);
+}
+function setLoading(v) {
+  isRefreshing = v;
+  refreshBtn.disabled = v;
+  refreshBtn.textContent = v ? "Atualizando…" : "↻ Atualizar";
+  if (v) setStatus("Buscando dados…");
+}
+
+/* ── Error banner ────────────────────────────────────────────────── */
+function updateErrorBanner(errors) {
+  const critical = errors.filter(e => e.level === 'error');
+  const warnings = errors.filter(e => e.level === 'warning');
+  const total    = critical.length;
+
+  // Badge no header
+  if (total > 0) {
+    errorBadge.textContent = `${total} erro${total>1?'s':''}`;
+    errorBadge.style.display = 'inline-flex';
+  } else {
+    errorBadge.style.display = 'none';
+  }
+
+  // Banner de alerta
+  if (critical.length > 0) {
+    const newest = critical[0];
+    $id('banner-title').textContent =
+      `${critical.length} erro${critical.length>1?'s críticos':'crítico'} detectado${critical.length>1?'s':''}`;
+    $id('banner-detail').textContent =
+      `Mais recente: ${newest.event_type} (${fRelTime(newest.created_at)}) — ${newest.message.slice(0,100)}`;
+    errorBanner.classList.add('visible');
+  } else if (warnings.length > 3) {
+    $id('banner-title').textContent = `${warnings.length} alertas ativos`;
+    $id('banner-detail').textContent = warnings[0]?.message?.slice(0,120) || '';
+    errorBanner.classList.add('visible');
   }
 }
 
-function clearRefreshRequestState() {
-  if (currentRefreshTimeout) {
-    clearTimeout(currentRefreshTimeout);
-    currentRefreshTimeout = null;
+/* ── Error list ──────────────────────────────────────────────────── */
+const EVENT_LABELS = {
+  whatsapp_send_failed:              "Falha ao enviar para API do WhatsApp",
+  whatsapp_send_exception:           "Exceção de rede ao enviar WhatsApp",
+  whatsapp_token_invalid:            "Token do WhatsApp inválido/expirado",
+  whatsapp_message_processing_failed:"Falha no processamento da mensagem WA",
+  whatsapp_worker_error:             "Worker do WhatsApp falhou",
+  whatsapp_queue_drop:               "Payload descartado — fila cheia",
+  whatsapp_config_missing:           "Variável de ambiente WA ausente",
+  whatsapp_webhook_invalid_signature:"Assinatura do webhook inválida",
+  whatsapp_verify_token_missing:     "WA_VERIFY_TOKEN não configurado",
+  whatsapp_attachment_download_failed:"Falha ao baixar anexo do WhatsApp",
+  message_processing_failed:         "Falha no pipeline de mensagem",
+  billing_config_incomplete:         "Stripe: configuração incompleta",
+  billing_signature_invalid:         "Stripe: assinatura de webhook inválida",
+  billing_payment_failed:            "Stripe: falha de pagamento",
+  engagement_loop_error:             "Erro no agendador de engajamento",
+  http_unhandled_exception:          "Exceção HTTP não tratada",
+  admin_login_failed:                "Tentativa de login admin falhou",
+};
+
+function levelBadge(level) {
+  if (level === 'error')   return '<span class="badge badge-error">ERRO</span>';
+  if (level === 'warning') return '<span class="badge badge-warning">ALERTA</span>';
+  return '<span class="badge badge-info">INFO</span>';
+}
+
+function buildExpandContent(row) {
+  // Prioridade: traceback > details não-vazio > mensagem completa
+  if (row.details?.traceback) {
+    return esc(row.details.traceback);
   }
-  currentRefreshController = null;
-}
-
-function createRefreshSignal() {
-  if (currentRefreshController) {
-    currentRefreshController.abort();
-    clearRefreshRequestState();
+  const details = row.details || {};
+  const keys = Object.keys(details).filter(k => k !== 'traceback');
+  if (keys.length > 0) {
+    const lines = keys.map(k => {
+      const v = details[k];
+      const val = typeof v === 'string' ? v : JSON.stringify(v, null, 2);
+      return `${k}: ${val}`;
+    });
+    return esc(lines.join('\n'));
   }
-
-  currentRefreshController = new AbortController();
-  currentRefreshTimeout = setTimeout(() => {
-    if (currentRefreshController) {
-      currentRefreshController.abort("timeout");
-    }
-  }, 12000);
-
-  return currentRefreshController.signal;
-}
-
-function formatInt(value) {
-  return new Intl.NumberFormat("pt-BR").format(Number(value || 0));
-}
-
-function formatMoney(value) {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL"
-  }).format(Number(value || 0));
-}
-
-function formatDate(value) {
-  if (!value) return "—";
-  return new Intl.DateTimeFormat("pt-BR", {
-    dateStyle: "short",
-    timeStyle: "short"
-  }).format(new Date(value));
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
-
-function authHeaders() {
-  const token = localStorage.getItem(tokenKey);
-  if (!token) {
-    window.location.href = "/admin/login";
-    throw new Error("No admin token");
+  if (row.message && row.message.length > 180) {
+    return esc(row.message); // mensagem completa sem truncar
   }
-  return { Authorization: `Bearer ${token}` };
+  return 'Sem detalhes adicionais para este evento.';
 }
 
-function renderSummary(summary) {
-  const cards = [
-    ["Usuários totais", formatInt(summary.total_users), `${formatInt(summary.accounts_30d)} novos cadastros em 30 dias`],
-    ["Usuários ativos", formatInt(summary.active_users_30d), `${formatInt(summary.active_users_7d)} ativos nos últimos 7 dias`],
-    ["Logins válidos", formatInt(summary.login_success_30d), `${summary.login_success_rate_30d}% de sucesso em 30 dias`],
-    ["Transações", formatInt(summary.transactions_30d), "Somente movimentações externas ao patrimônio interno"],
-    ["Receitas", formatMoney(summary.revenue_30d), "Receita acumulada nos últimos 30 dias"],
-    ["Despesas", formatMoney(summary.expenses_30d), "Despesa acumulada nos últimos 30 dias"],
-    ["Caixinhas", formatMoney(summary.pockets_balance), "Saldo consolidado atual"],
-    ["Investimentos", formatMoney(summary.investments_balance), "Saldo consolidado atual"],
-    ["Cartões em aberto", formatMoney(summary.cards_due_open), "Saldo pendente das faturas abertas/fechadas"]
-  ];
-  document.getElementById("summary-cards").innerHTML = cards.map(([label, value, sub]) => `
-    <article class="card">
-      <div class="metric-label">${label}</div>
-      <div class="metric-value">${value}</div>
-      <div class="metric-sub">${sub}</div>
-    </article>
-  `).join("");
+function renderErrorItem(row) {
+  const hint    = EVENT_LABELS[row.event_type] || '';
+  const hasTb   = !!row.details?.traceback;
+  const content = buildExpandContent(row);
+  const cls     = `error-item level-${row.level}`;
+  const hintLabel = hasTb ? '▼ ver traceback' : '▼ ver detalhes';
+  return `
+    <div class="${cls}" onclick="toggleExpand(this)" style="cursor:pointer">
+      <div class="error-item-header">
+        ${levelBadge(row.level)}
+        <span class="error-item-title">${esc(row.event_type)}</span>
+        <span class="error-item-time" title="${fDate(row.created_at)}">${fRelTime(row.created_at)}</span>
+      </div>
+      <div class="error-item-msg">${esc(row.message.slice(0,180))}${row.message.length>180?'…':''}</div>
+      ${hint   ? `<div class="error-item-source">💡 ${esc(hint)}</div>` : ''}
+      ${row.source ? `<div class="error-item-source">📍 ${esc(row.source)}</div>` : ''}
+      <div class="expand-hint">${hintLabel}</div>
+      <div class="error-item-tb">${content}</div>
+    </div>`;
 }
 
-function renderHealth(summary, errors) {
-  const items = [
-    { label: "Taxa de sucesso de login 7d", value: `${summary.login_success_rate_7d}%`, cls: summary.login_success_rate_7d >= 85 ? "status-ok" : "status-warn" },
-    { label: "Cadastros 7d", value: formatInt(summary.accounts_7d), cls: "status-ok" },
-    { label: "Ativos 7d", value: formatInt(summary.active_users_7d), cls: "status-ok" },
-    {
-      label: "Eventos críticos recentes",
-      value: formatInt(errors.filter(item => item.level === "error").length),
-      cls: errors.some(item => item.level === "error") ? "status-error" : "status-ok",
-      hint: "Conta eventos level=error nos logs recentes; pode incluir WhatsApp, billing, worker ou exceção HTTP."
-    }
-  ];
-  document.getElementById("health-list").innerHTML = items.map(item => `
-    <div class="list-item">
-      <strong class="${item.cls}">${item.value}</strong>
-      <small>${item.label}</small>
-      ${item.hint ? `<span class="hint">${escapeHtml(item.hint)}</span>` : ""}
-    </div>
-  `).join("");
+function toggleExpand(el) {
+  el.classList.toggle('expanded');
+  const hint    = el.querySelector('.expand-hint');
+  const hasTb   = el.querySelector('.error-item-tb')?.textContent?.includes('\n') ?? false;
+  if (hint) {
+    const isOpen = el.classList.contains('expanded');
+    hint.textContent = isOpen
+      ? (hasTb ? '▲ ocultar traceback' : '▲ ocultar detalhes')
+      : (hasTb ? '▼ ver traceback'     : '▼ ver detalhes');
+  }
 }
 
-function renderOpsHealth(ops) {
-  const items = [
-    { label: "Atividade WhatsApp real 24h", value: formatInt(ops.whatsapp_real_activity_24h), cls: ops.whatsapp_real_activity_24h > 0 ? "status-ok" : "status-warn" },
-    { label: "Última atividade real WhatsApp", value: formatDate(ops.last_whatsapp_real_activity_at), cls: ops.last_whatsapp_real_activity_at ? "status-ok" : "status-warn" },
-    { label: "Webhook WhatsApp nas últimas 24h", value: formatInt(ops.whatsapp_webhooks_24h), cls: ops.whatsapp_webhooks_24h > 0 ? "status-ok" : "status-warn" },
-    { label: "Último webhook WhatsApp", value: formatDate(ops.last_whatsapp_webhook_at), cls: ops.last_whatsapp_webhook_at ? "status-ok" : "status-warn" },
-    { label: "Envios WhatsApp com sucesso 24h", value: formatInt(ops.whatsapp_send_success_24h), cls: ops.whatsapp_send_success_24h > 0 ? "status-ok" : "status-warn" },
-    {
-      label: "Falhas de envio WhatsApp 24h",
-      value: formatInt(ops.whatsapp_send_failures_24h),
-      cls: ops.whatsapp_send_failures_24h > 0 ? "status-error" : "status-ok",
-      hint: "Tentativas recusadas pela API do WhatsApp ou exceções de rede ao enviar mensagens."
-    },
-    {
-      label: "Token inválido WhatsApp 7d",
-      value: formatInt(ops.whatsapp_token_invalid_7d),
-      cls: ops.whatsapp_token_invalid_7d > 0 ? "status-error" : "status-ok",
-      hint: "A API retornou 401; geralmente token expirado, revogado ou variável WA_TOKEN/WA_ACCESS_TOKEN incorreta."
-    },
-    {
-      label: "Drops de fila WhatsApp 24h",
-      value: formatInt(ops.whatsapp_queue_drop_24h),
-      cls: ops.whatsapp_queue_drop_24h > 0 ? "status-error" : "status-ok",
-      hint: "Webhooks recebidos foram descartados porque a fila interna estava cheia."
-    },
-    {
-      label: "Erros de worker WhatsApp 7d",
-      value: formatInt(ops.whatsapp_worker_errors_7d),
-      cls: ops.whatsapp_worker_errors_7d > 0 ? "status-error" : "status-ok",
-      hint: "Falhas no worker assíncrono que processa payloads recebidos do WhatsApp."
-    },
-    {
-      label: "Erros de backend 24h",
-      value: formatInt(ops.backend_errors_24h),
-      cls: ops.backend_errors_24h > 0 ? "status-error" : "status-ok",
-      hint: "Total de eventos level=error nas últimas 24h; inclui falhas de envio WhatsApp, processamento de mensagem, worker, billing e exceções HTTP."
-    },
-    {
-      label: "Billing inválido/falha 7d",
-      value: `${formatInt(ops.billing_signature_invalid_7d)} / ${formatInt(ops.billing_payment_failed_7d)}`,
-      cls: (ops.billing_signature_invalid_7d > 0 || ops.billing_payment_failed_7d > 0) ? "status-warn" : "status-ok",
-      hint: "Assinatura Stripe inválida / pagamento recusado ou marcado como falha."
-    },
-    {
-      label: "Telemetria WhatsApp consistente",
-      value: ops.whatsapp_telemetry_inconsistent ? "Não" : "Sim",
-      cls: ops.whatsapp_telemetry_inconsistent ? "status-warn" : "status-ok",
-      hint: "Compara atividade real de usuários WhatsApp com webhooks registrados nas últimas 24h."
-    },
-    { label: "Usuários com WhatsApp conectado", value: formatInt(ops.whatsapp_connected_users), cls: "status-ok" },
-    { label: "Usuários com WhatsApp pendente", value: formatInt(ops.whatsapp_pending_users), cls: ops.whatsapp_pending_users > 0 ? "status-warn" : "status-ok" },
-    {
-      label: "Credenciais WA configuradas",
-      value: ops.wa_token_configured && ops.wa_number_configured && ops.wa_phone_number_id_configured && ops.wa_verify_token_configured && ops.wa_app_secret_configured ? "OK" : "Incompleto",
-      cls: ops.wa_token_configured && ops.wa_number_configured && ops.wa_phone_number_id_configured && ops.wa_verify_token_configured && ops.wa_app_secret_configured ? "status-ok" : "status-warn",
-      hint: "Valida WA_TOKEN/WA_ACCESS_TOKEN, número público, WA_PHONE_NUMBER_ID, WA_VERIFY_TOKEN e WA_APP_SECRET no ambiente."
-    },
-    {
-      label: "Stripe configurado",
-      value: ops.stripe_configured ? "OK" : "Incompleto",
-      cls: ops.stripe_configured ? "status-ok" : "status-warn",
-      hint: "Valida STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET e STRIPE_PRICE_ID_PRO."
-    }
-  ];
-  document.getElementById("ops-health-list").innerHTML = items.map(item => `
-    <div class="list-item">
-      <strong class="${item.cls}">${item.value}</strong>
-      <small>${item.label}</small>
-      ${item.hint ? `<span class="hint">${escapeHtml(item.hint)}</span>` : ""}
-    </div>
-  `).join("");
+function renderErrorList(errors) {
+  lastErrorData = errors;
+  applyFilter(activeFilter);
 }
 
-function eventDescription(row) {
-  const descriptions = {
-    whatsapp_send_failed: "Falha ao enviar mensagem para a API do WhatsApp; confira status_code e resposta do provedor.",
-    whatsapp_send_exception: "Exceção local ou de rede durante o envio para o WhatsApp.",
-    whatsapp_token_invalid: "Token do WhatsApp inválido, expirado ou sem permissão.",
-    whatsapp_message_processing_failed: "Mensagem recebida pelo WhatsApp quebrou durante o processamento interno.",
-    whatsapp_worker_error: "Worker do WhatsApp falhou ao processar payload da fila.",
-    whatsapp_queue_drop: "Payload descartado porque a fila interna do WhatsApp lotou.",
-    whatsapp_config_missing: "Variável de ambiente obrigatória do WhatsApp ausente.",
-    whatsapp_webhook_invalid_signature: "Assinatura do webhook não bateu com WA_APP_SECRET.",
-    whatsapp_verify_token_missing: "WA_VERIFY_TOKEN não está configurado para validar o webhook.",
-    billing_config_incomplete: "Variáveis de ambiente do Stripe incompletas.",
-    billing_signature_invalid: "Webhook Stripe recebido com assinatura inválida.",
-    billing_payment_failed: "Stripe reportou falha de pagamento.",
-    engagement_loop_error: "Erro no agendador de mensagens de engajamento.",
-    http_unhandled_exception: "Exceção HTTP não tratada pelo backend."
-  };
-  return descriptions[row.event_type] || "";
-}
-
-function renderSimpleList(targetId, rows, formatter) {
-  const root = document.getElementById(targetId);
-  if (!rows.length) {
-    root.innerHTML = `<div class="empty">Sem dados ainda.</div>`;
+function applyFilter(level) {
+  activeFilter = level;
+  document.querySelectorAll('#error-filter-bar .filter-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.level === level);
+  });
+  const filtered = level === 'all' ? lastErrorData : lastErrorData.filter(e => e.level === level);
+  const root = $id('error-list');
+  $id('error-list-meta').textContent = `${filtered.length} de ${lastErrorData.length}`;
+  if (!filtered.length) {
+    root.innerHTML = `<div class="empty">✅ Nenhum evento ${level === 'all' ? '' : 'nível ' + level} encontrado.</div>`;
     return;
   }
-  root.innerHTML = rows.map(formatter).join("");
+  root.innerHTML = filtered.map(renderErrorItem).join('');
 }
 
+/* ── Health grid ─────────────────────────────────────────────────── */
+function renderHealthGrid(summary, errors) {
+  const errCount = errors.filter(e => e.level === 'error').length;
+  const warnCount = errors.filter(e => e.level === 'warning').length;
+
+  const items = [
+    { label: "Erros críticos (recentes)", val: errCount,
+      color: errCount > 0 ? 'red' : 'green',
+      cls: errCount > 0 ? 'danger' : '',
+      hint: "Eventos level=error nos logs recentes" },
+    { label: "Alertas (recentes)", val: warnCount,
+      color: warnCount > 3 ? 'yellow' : warnCount > 0 ? 'yellow' : 'green',
+      cls: warnCount > 3 ? 'warning' : '' },
+    { label: "Taxa login 7d",
+      val: `${summary.login_success_rate_7d}%`,
+      color: summary.login_success_rate_7d >= 85 ? 'green' : 'yellow',
+      cls: summary.login_success_rate_7d < 70 ? 'danger' : '' },
+    { label: "Usuários ativos 7d",
+      val: fInt(summary.active_users_7d), color: 'blue' },
+    { label: "Novos cadastros 7d",
+      val: fInt(summary.accounts_7d), color: 'blue' },
+    { label: "Transações 30d",
+      val: fInt(summary.transactions_30d), color: 'green' },
+  ];
+
+  $id('health-grid').innerHTML = items.map(it => `
+    <div class="health-item ${it.cls||''}">
+      <div class="health-item-val ${it.color||''}">${it.val}</div>
+      <div class="health-item-label">${it.label}</div>
+      ${it.hint ? `<div class="health-item-hint">${it.hint}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+/* ── Ops health (WhatsApp + backend) ─────────────────────────────── */
+function renderOpsHealthGrid(ops) {
+  const items = [
+    { label: "Webhooks WA 24h",     val: fInt(ops.whatsapp_webhooks_24h),     color: ops.whatsapp_webhooks_24h > 0 ? 'green' : 'yellow', cls: ops.whatsapp_webhooks_24h === 0 ? 'warning' : '' },
+    { label: "Envios WA ok 24h",    val: fInt(ops.whatsapp_send_success_24h), color: ops.whatsapp_send_success_24h > 0 ? 'green' : 'yellow' },
+    { label: "Falhas envio WA 24h", val: fInt(ops.whatsapp_send_failures_24h),color: ops.whatsapp_send_failures_24h > 0 ? 'red' : 'green', cls: ops.whatsapp_send_failures_24h > 0 ? 'danger' : '',
+      hint: "Erros ao enviar para a API do WhatsApp" },
+    { label: "Token inválido WA 7d",val: fInt(ops.whatsapp_token_invalid_7d), color: ops.whatsapp_token_invalid_7d > 0 ? 'red' : 'green', cls: ops.whatsapp_token_invalid_7d > 0 ? 'danger' : '' },
+    { label: "Erros backend 24h",   val: fInt(ops.backend_errors_24h),        color: ops.backend_errors_24h > 0 ? 'red' : 'green', cls: ops.backend_errors_24h > 0 ? 'danger' : '' },
+    { label: "Drops fila WA 24h",   val: fInt(ops.whatsapp_queue_drop_24h),   color: ops.whatsapp_queue_drop_24h > 0 ? 'red' : 'green', cls: ops.whatsapp_queue_drop_24h > 0 ? 'danger' : '' },
+    { label: "WA conectados",       val: fInt(ops.whatsapp_connected_users),  color: 'blue' },
+    { label: "WA pendentes",        val: fInt(ops.whatsapp_pending_users),    color: ops.whatsapp_pending_users > 0 ? 'yellow' : 'green', cls: ops.whatsapp_pending_users > 0 ? 'warning' : '' },
+    { label: "Stripe ok",           val: ops.stripe_configured ? 'OK' : 'Incompleto', color: ops.stripe_configured ? 'green' : 'yellow', cls: ops.stripe_configured ? '' : 'warning' },
+    { label: "Credenciais WA",      val: (ops.wa_token_configured && ops.wa_number_configured && ops.wa_phone_number_id_configured) ? 'OK' : 'Incompleto',
+      color: (ops.wa_token_configured && ops.wa_number_configured) ? 'green' : 'yellow',
+      cls: (!ops.wa_token_configured || !ops.wa_number_configured) ? 'warning' : '' },
+  ];
+
+  $id('ops-health-grid').innerHTML = items.map(it => `
+    <div class="health-item ${it.cls||''}">
+      <div class="health-item-val ${it.color||''}">${it.val}</div>
+      <div class="health-item-label">${it.label}</div>
+      ${it.hint ? `<div class="health-item-hint">${it.hint}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+/* ── Summary cards ───────────────────────────────────────────────── */
+function renderSummary(s) {
+  const cards = [
+    { label:"Usuários",          val: fInt(s.total_users),       sub:`+${fInt(s.accounts_30d)} em 30d` },
+    { label:"Ativos 30d",        val: fInt(s.active_users_30d),  sub:`${fInt(s.active_users_7d)} ativos 7d` },
+    { label:"Logins ok 30d",     val: fInt(s.login_success_30d), sub:`${s.login_success_rate_30d}% taxa sucesso` },
+    { label:"Transações 30d",    val: fInt(s.transactions_30d),  sub:"Movimentações externas" },
+    { label:"Receitas 30d",      val: fMoney(s.revenue_30d),     sub:"Receita acumulada" },
+    { label:"Despesas 30d",      val: fMoney(s.expenses_30d),    sub:"Despesa acumulada" },
+    { label:"Caixinhas",         val: fMoney(s.pockets_balance), sub:"Saldo consolidado atual" },
+    { label:"Investimentos",     val: fMoney(s.investments_balance), sub:"Saldo consolidado atual" },
+    { label:"Cartões em aberto", val: fMoney(s.cards_due_open),  sub:"Faturas abertas/fechadas" },
+  ];
+  $id('summary-cards').innerHTML = cards.map(c => `
+    <article class="card">
+      <div class="metric-label">${c.label}</div>
+      <div class="metric-value">${c.val}</div>
+      <div class="metric-sub">${c.sub}</div>
+    </article>`).join('');
+}
+
+/* ── Ops list ────────────────────────────────────────────────────── */
+function renderOpsList(ops) {
+  const root = $id('ops-list');
+  if (!ops.length) { root.innerHTML = `<div class="empty">Sem eventos operacionais recentes.</div>`; return; }
+  root.innerHTML = ops.map(row => {
+    const content = buildExpandContent(row);
+    const hasTb   = !!row.details?.traceback;
+    return `
+    <div class="error-item level-${row.level}" onclick="toggleExpand(this)" style="cursor:pointer">
+      <div class="error-item-header">
+        ${levelBadge(row.level)}
+        <span class="error-item-title">${esc(row.event_type)}</span>
+        <span class="error-item-time">${fRelTime(row.created_at)}</span>
+      </div>
+      <div class="error-item-msg">${esc(row.message.slice(0,160))}</div>
+      ${row.source ? `<div class="error-item-source">📍 ${esc(row.source)}</div>` : ''}
+      <div class="expand-hint">${hasTb ? '▼ ver traceback' : '▼ ver detalhes'}</div>
+      <div class="error-item-tb">${content}</div>
+    </div>`;
+  }).join('');
+}
+
+/* ── Signups / Logins ────────────────────────────────────────────── */
+function waStatusBadge(row) {
+  if (row.has_whatsapp_identity || row.phone_status === 'confirmed') return '<span class="badge badge-ok">WA ✓</span>';
+  if (row.phone_status === 'pending') return '<span class="badge badge-warning">WA pendente</span>';
+  return '<span class="badge badge-muted">Sem WA</span>';
+}
+
+function renderSimple(id, rows, fn) {
+  const root = $id(id);
+  root.innerHTML = rows.length ? rows.map(fn).join('') : `<div class="empty">Sem dados ainda.</div>`;
+}
+
+function renderSignups(rows) {
+  renderSimple('recent-signups', rows, row => `
+    <div class="list-item">
+      <strong>${esc(row.email)} ${waStatusBadge(row)}</strong>
+      <small>Criado: ${fDate(row.created_at)}<br>Última atividade: ${fDate(row.last_activity_at)}</small>
+    </div>`);
+}
+
+function renderLogins(rows) {
+  renderSimple('recent-logins', rows, row => `
+    <div class="list-item">
+      <strong class="${row.success ? 'status-ok' : 'status-error'}" style="color:${row.success?'#86efac':'#fca5a5'}">
+        ${row.success ? '✅ Login OK' : '❌ Falha de login'}
+      </strong>
+      <small>${esc(row.email||'sem email')} · ${fRelTime(row.created_at)}<br>${esc(row.failure_reason||row.ip_address||'')}</small>
+    </div>`);
+}
+
+/* ── Tables ──────────────────────────────────────────────────────── */
 function renderTables(data) {
-  renderSimpleList("recent-signups", data.recent_signups, row => `
-    <div class="list-item">
-      <strong>${escapeHtml(row.email)}</strong>
-      <small>
-        Criado em ${formatDate(row.created_at)}<br/>
-        Última atividade: ${formatDate(row.last_activity_at)}<br/>
-        ${renderWhatsappStatus(row)}
-      </small>
-    </div>
-  `);
-
-  renderSimpleList("recent-logins", data.recent_logins, row => `
-    <div class="list-item">
-      <strong class="${row.success ? "status-ok" : "status-error"}">${row.success ? "Login OK" : "Falha de login"}</strong>
-      <small>${escapeHtml(row.email || "sem email")} · ${formatDate(row.created_at)}<br/>${escapeHtml(row.failure_reason || row.ip_address || "sem detalhe")}</small>
-    </div>
-  `);
-
-  renderSimpleList("recent-errors", data.recent_errors, row => `
-    <div class="list-item">
-      <strong class="${row.level === "error" ? "status-error" : row.level === "warning" ? "status-warn" : "status-ok"}">${escapeHtml(row.event_type)}</strong>
-      <small>${formatDate(row.created_at)} · ${escapeHtml(row.source || "sistema")}<br/>${escapeHtml(row.message)}</small>
-      ${eventDescription(row) ? `<span class="hint">${escapeHtml(eventDescription(row))}</span>` : ""}
-    </div>
-  `);
-
-  renderSimpleList("recent-ops", data.recent_ops, row => `
-    <div class="list-item">
-      <strong class="${row.level === "error" ? "status-error" : row.level === "warning" ? "status-warn" : "status-ok"}">${escapeHtml(row.event_type)}</strong>
-      <small>${formatDate(row.created_at)} · ${escapeHtml(row.source || "sistema")}<br/>${escapeHtml(row.message)}</small>
-      ${eventDescription(row) ? `<span class="hint">${escapeHtml(eventDescription(row))}</span>` : ""}
-    </div>
-  `);
-
-  document.getElementById("top-users").innerHTML = data.top_users.map(row => `
+  $id('top-users').innerHTML = data.top_users.map(r => `
     <tr>
-      <td>${escapeHtml(row.email)}</td>
-      <td>${formatDate(row.last_activity_at)}</td>
-      <td>${formatInt(row.total_transactions)}</td>
-      <td>${formatMoney(row.net_flow)}</td>
-    </tr>
-  `).join("") || `<tr><td colspan="4" class="empty">Sem usuários suficientes ainda.</td></tr>`;
+      <td>${esc(r.email)}</td>
+      <td>${fRelTime(r.last_activity_at)}</td>
+      <td>${fInt(r.total_transactions)}</td>
+      <td>${fMoney(r.net_flow)}</td>
+    </tr>`).join('') || `<tr><td colspan="4" class="empty">Sem dados ainda.</td></tr>`;
 
-  document.getElementById("monthly-financials").innerHTML = data.monthly_financials.map(row => `
+  $id('monthly-financials').innerHTML = data.monthly_financials.map(r => `
     <tr>
-      <td>${new Intl.DateTimeFormat("pt-BR", { month: "short", year: "numeric" }).format(new Date(row.month))}</td>
-      <td>${formatMoney(row.revenue)}</td>
-      <td>${formatMoney(row.expenses)}</td>
-      <td>${formatInt(row.transaction_count)}</td>
-    </tr>
-  `).join("") || `<tr><td colspan="4" class="empty">Sem dados agregados ainda.</td></tr>`;
+      <td>${new Intl.DateTimeFormat('pt-BR',{month:'short',year:'numeric'}).format(new Date(r.month))}</td>
+      <td>${fMoney(r.revenue)}</td>
+      <td>${fMoney(r.expenses)}</td>
+      <td>${fInt(r.transaction_count)}</td>
+    </tr>`).join('') || `<tr><td colspan="4" class="empty">Sem dados ainda.</td></tr>`;
 }
 
-function renderWhatsappStatus(row) {
-  const connected = Boolean(row.has_whatsapp_identity) || row.phone_status === "confirmed" || Boolean(row.whatsapp_verified_at);
-  if (connected) {
-    return `<span class="pill pill-ok">WhatsApp conectado</span>`;
-  }
-  if (row.phone_status === "pending") {
-    return `<span class="pill pill-warn">WhatsApp pendente</span>`;
-  }
-  return `<span class="pill pill-muted">WhatsApp não vinculado</span>`;
-}
-
+/* ── Chart ───────────────────────────────────────────────────────── */
 function renderChart(data) {
-  const labels = data.time_series.map(item => new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit" }).format(new Date(item.bucket)));
-  const ctx = document.getElementById("main-chart");
+  const labels = data.time_series.map(item =>
+    new Intl.DateTimeFormat('pt-BR',{day:'2-digit',month:'2-digit'}).format(new Date(item.bucket)));
+  const ctx = $id('main-chart');
   if (mainChart) mainChart.destroy();
   mainChart = new Chart(ctx, {
-    type: "line",
+    type: 'line',
     data: {
       labels,
       datasets: [
-        { label: "Cadastros", data: data.time_series.map(item => item.signups), borderColor: "#22c55e", backgroundColor: "rgba(34,197,94,.18)", tension: .3, fill: false },
-        { label: "Logins", data: data.time_series.map(item => item.logins), borderColor: "#60a5fa", backgroundColor: "rgba(96,165,250,.18)", tension: .3, fill: false },
-        { label: "Ativos", data: data.time_series.map(item => item.active_users), borderColor: "#facc15", backgroundColor: "rgba(250,204,21,.18)", tension: .3, fill: false },
-        { label: "Transações", data: data.time_series.map(item => item.transactions), borderColor: "#fb923c", backgroundColor: "rgba(251,146,60,.18)", tension: .3, fill: false }
+        { label:'Cadastros',   data: data.time_series.map(i=>i.signups),      borderColor:'#22c55e', tension:.3, fill:false },
+        { label:'Logins',      data: data.time_series.map(i=>i.logins),       borderColor:'#60a5fa', tension:.3, fill:false },
+        { label:'Ativos',      data: data.time_series.map(i=>i.active_users), borderColor:'#facc15', tension:.3, fill:false },
+        { label:'Transações',  data: data.time_series.map(i=>i.transactions), borderColor:'#fb923c', tension:.3, fill:false },
       ]
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { labels: { color: "#dbeafe" } }
-      },
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color:'#dbeafe', boxWidth:12 } } },
       scales: {
-        x: { ticks: { color: "rgba(219,234,254,.6)" }, grid: { color: "rgba(255,255,255,.05)" } },
-        y: { ticks: { color: "rgba(219,234,254,.6)" }, grid: { color: "rgba(255,255,255,.05)" } }
+        x: { ticks:{ color:'rgba(219,234,254,.6)' }, grid:{ color:'rgba(255,255,255,.05)' } },
+        y: { ticks:{ color:'rgba(219,234,254,.6)' }, grid:{ color:'rgba(255,255,255,.05)' } },
       }
     }
   });
 }
 
-async function loadOverview(options = {}) {
-  const { force = false } = options;
-  const days = windowSelect.value;
-  const suffix = force ? `&_ts=${Date.now()}` : "";
-  const signal = createRefreshSignal();
+/* ── Load ────────────────────────────────────────────────────────── */
+async function loadOverview(force=false) {
+  const days   = windowSelect.value;
+  const suffix = force ? `&_ts=${Date.now()}` : '';
+
+  if (refreshController) { refreshController.abort(); }
+  refreshController = new AbortController();
+  clearTimeout(refreshTimeout);
+  refreshTimeout = setTimeout(() => refreshController?.abort('timeout'), 15000);
+
   const res = await fetch(`/admin/api/overview?days=${days}${suffix}`, {
-    headers: authHeaders(),
-    cache: "no-store",
-    signal
+    headers: authH(), cache: 'no-store', signal: refreshController.signal
   });
+
+  clearTimeout(refreshTimeout);
+  refreshController = null;
+
   if (res.status === 401) {
     localStorage.removeItem(tokenKey);
-    window.location.href = "/admin/login";
+    window.location.href = '/admin/login';
     return;
   }
-  if (!res.ok) {
-    throw new Error(`Falha ao atualizar painel (${res.status})`);
-  }
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
   const data = await res.json();
-  document.getElementById("generated-at").textContent = `Atualizado em ${formatDate(data.generated_at)}`;
+
+  $id('generated-at').textContent = `Atualizado ${fRelTime(data.generated_at)}`;
   renderSummary(data.summary);
-  renderHealth(data.summary, data.recent_errors);
-  renderOpsHealth(data.ops_summary);
+  renderErrorList(data.recent_errors);
+  renderHealthGrid(data.summary, data.recent_errors);
+  renderOpsHealthGrid(data.ops_summary);
+  renderOpsList(data.recent_ops);
+  renderSignups(data.recent_signups);
+  renderLogins(data.recent_logins);
   renderTables(data);
   renderChart(data);
-  setRefreshStatus(`Atualizado com sucesso em ${formatDate(new Date())}`);
+  updateErrorBanner(data.recent_errors);
+
+  setStatus(`Atualizado: ${fDate(new Date())}`);
 }
 
-async function refreshOverview(options = {}) {
-  setRefreshingState(true);
+async function refresh(force=false) {
+  if (isRefreshing) return;
+  setLoading(true);
   try {
-    await loadOverview(options);
-  } catch (error) {
-    if (error?.name === "AbortError") {
-      setRefreshStatus("Atualização cancelada por demora. Pode tentar novamente.", true);
-      return;
+    await loadOverview(force);
+  } catch(e) {
+    if (e?.name === 'AbortError') {
+      setStatus('Tempo esgotado. Tente novamente.', true);
+    } else {
+      setStatus('Falha ao atualizar. Verifique a conexão.', true);
+      console.error(e);
     }
-    setRefreshStatus("Falha ao atualizar o painel. Tente novamente.", true);
-    throw error;
   } finally {
-    clearRefreshRequestState();
-    setRefreshingState(false);
+    setLoading(false);
   }
 }
 
-refreshBtn.addEventListener("click", async (event) => {
-  event.preventDefault();
-  try {
-    await refreshOverview({ force: true });
-  } catch (error) {
-    console.error(error);
-  }
-});
+/* ── Auto-refresh ────────────────────────────────────────────────── */
+function startAutoRefresh() {
+  clearInterval(autoInterval);
+  autoInterval = setInterval(() => refresh(true), 60_000);
+}
 
-windowSelect.addEventListener("change", async () => {
-  try {
-    await refreshOverview({ force: true });
-  } catch (error) {
-    console.error(error);
-  }
-});
-
-logoutBtn.addEventListener("click", () => {
-  if (currentRefreshController) {
-    currentRefreshController.abort();
-  }
+/* ── Event listeners ─────────────────────────────────────────────── */
+refreshBtn.addEventListener('click', e => { e.preventDefault(); refresh(true); });
+windowSelect.addEventListener('change', () => refresh(true));
+$id('logout-btn').addEventListener('click', () => {
+  refreshController?.abort();
+  clearInterval(autoInterval);
   localStorage.removeItem(tokenKey);
-  window.location.href = "/admin/login";
+  window.location.href = '/admin/login';
 });
 
-window.addEventListener("beforeunload", () => {
-  if (currentRefreshController) {
-    currentRefreshController.abort();
-  }
+document.querySelectorAll('#error-filter-bar .filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => applyFilter(btn.dataset.level));
 });
 
-refreshOverview().catch(() => {
+window.addEventListener('beforeunload', () => { refreshController?.abort(); clearInterval(autoInterval); });
+
+/* ── Boot ────────────────────────────────────────────────────────── */
+refresh(false).catch(() => {
   localStorage.removeItem(tokenKey);
-  window.location.href = "/admin/login";
+  window.location.href = '/admin/login';
 });
+startAutoRefresh();
 </script>
 </body>
 </html>
