@@ -58,7 +58,6 @@ load_app_env()
 
 DATABASE_URL      = os.getenv("DATABASE_URL")
 DASHBOARD_USER_ID = os.getenv("DASHBOARD_USER_ID")
-POLL_INTERVAL     = int(os.getenv("POLL_INTERVAL", "30"))
 TZ                = os.getenv("TZ", "America/Sao_Paulo")
 JWT_SECRET              = (os.getenv("JWT_SECRET") or "").strip()
 DASHBOARD_URL           = os.getenv("DASHBOARD_URL", "http://localhost:8000").strip()
@@ -478,35 +477,7 @@ class ConnectionManager:
     async def send_to(self, ws: WebSocket, payload: str):
         await ws.send_text(payload)
 
-    async def broadcast_current_view(self, user_id: int):
-        conns = self.active.get(user_id, {})
-        dead = []
-
-        for ws, info in list(conns.items()):
-            try:
-                data = await get_financial_data(user_id, info["year"], info["month"])
-                await ws.send_text(jdump({"type": "update", "data": data}))
-            except Exception:
-                dead.append(ws)
-
-        for ws in dead:
-            self.disconnect(ws, user_id)
-
 manager = ConnectionManager()
-
-# ─── Background push loop ─────────────────────────────────────────────────────
-
-async def push_loop():
-    """Every POLL_INTERVAL seconds push fresh data respecting each connection's selected month."""
-    while True:
-        await asyncio.sleep(POLL_INTERVAL)
-        for user_id, conns in list(manager.active.items()):
-            if not conns:
-                continue
-            try:
-                await manager.broadcast_current_view(user_id)
-            except Exception as exc:
-                print(f"[push_loop] error for user {user_id}: {exc}")
 
 # ─── App startup ──────────────────────────────────────────────────────────────
 
@@ -623,7 +594,7 @@ async def lifespan(app: FastAPI):
     _elapsed = _startup_time.monotonic() - _t0
     print(f"[app] Startup interno concluído em {_elapsed:.1f}s.", flush=True)
 
-    tasks = [asyncio.create_task(push_loop(), name="push_loop")]
+    tasks = []
     if RUN_BACKGROUND_TASKS:
         tasks.extend(
             [

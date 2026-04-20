@@ -95,7 +95,15 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   border-radius:14px;padding:12px 18px;font-size:.81rem; }
 #alert-banner.exceeded { background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.28);color:var(--red); }
 #alert-banner.warning  { background:rgba(251,191,36,.1); border:1px solid rgba(251,191,36,.28); color:var(--yellow); }
+#alert-banner .alert-banner-head { display:flex;align-items:flex-start;justify-content:space-between;gap:12px; }
+#alert-banner .alert-banner-body { flex:1;min-width:0; }
 .alert-row { display:flex;align-items:center;gap:8px;padding:2px 0; }
+.alert-close {
+  appearance:none;background:transparent;border:none;color:inherit;cursor:pointer;
+  font-size:1rem;line-height:1;padding:2px 4px;border-radius:6px;opacity:.72;flex-shrink:0;
+  transition:background .2s var(--ease), opacity .2s var(--ease);
+}
+.alert-close:hover { background:rgba(255,255,255,.08); opacity:1; }
 
 /* ─── Section title ─────────────────────────────────────────────────── */
 .section-title { font-size:.67rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
@@ -344,6 +352,7 @@ const prevNums   = {};
 let launchesPage     = 1;
 const LAUNCHES_LIMIT = 25;
 let launchesLoading  = false;
+let alertsDismissed  = false;
 
 const NOW = new Date();
 let viewYear = NOW.getFullYear(), viewMonth = NOW.getMonth() + 1;
@@ -525,16 +534,31 @@ function connect() {
 ═══════════════════════════════════════════════════════════════════════ */
 function renderAlerts(alerts) {
   const b = document.getElementById("alert-banner");
-  if (!alerts || !alerts.length) { b.style.display = "none"; return; }
+  if (!alerts || !alerts.length || alertsDismissed) {
+    b.style.display = "none";
+    b.innerHTML = "";
+    return;
+  }
   const exceeded = alerts.filter(a => a.type === "budget_exceeded");
   let html = "";
   alerts.forEach(a => {
     const icon = a.type === "budget_exceeded" ? "🔴" : "⚠️";
     html += `<div class="alert-row">${icon} <b>${a.categoria}</b>: ${fmt(a.spent)} de ${fmt(a.budget)} (${a.pct}%)</div>`;
   });
-  b.innerHTML = html;
+  b.innerHTML = `
+    <div class="alert-banner-head">
+      <div class="alert-banner-body">${html}</div>
+      <button class="alert-close" type="button" aria-label="Fechar aviso" onclick="dismissAlerts()">✕</button>
+    </div>
+  `;
   b.className = exceeded.length ? "exceeded" : "warning";
   b.style.display = "block";
+}
+
+function dismissAlerts() {
+  alertsDismissed = true;
+  const b = document.getElementById("alert-banner");
+  b.style.display = "none";
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
