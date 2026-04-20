@@ -23,7 +23,7 @@ def contains_word(text: str, word: str) -> bool:
 
 # Regras locais (baratas) — já cobrindo mercado/psicologo/petshop
 LOCAL_RULES = [
-    (["mercado", "supermercado", "mercadinho", "hortifruti", "padaria"], "alimentação"),
+    (["mercado", "supermercado", "mercadinho", "hortifruti", "padaria", "cafe", "café", "cafeteria"], "alimentação"),
     (["aluguel", "condominio", "condomínio", "luz", "energia", "conta de luz", "agua", "água", "conta de agua",
       "conta de água", "gas", "gás", "internet", "wifi"], "moradia"),
     (["psicologo", "psicologa", "terapia", "terapeuta", "psiquiatra"], "saúde"),
@@ -263,7 +263,7 @@ def should_use_ai(text: str) -> bool:
 
 # Categorias por palavras-chave (bem simples e eficaz)
 CATEGORY_KEYWORDS = {
-    "alimentação": ["ifood", "uber eats", "rappi", "restaurante", "lanche", "pizza", "hamburguer", "café", "padaria"],
+    "alimentação": ["ifood", "uber eats", "rappi", "restaurante", "lanche", "pizza", "hamburguer", "cafe", "café", "cafeteria", "padaria"],
     "mercado": ["mercado", "supermercado", "carrefour", "whole foods", "walmart", "target", "costco"],
     "transporte": ["uber", "lyft", "99", "metro", "trem", "ônibus", "gasolina", "combustível", "posto", "estacionamento", "parking"],
     "moradia": ["aluguel", "rent", "condomínio", "luz", "energia", "água", "internet", "wifi", "gás"],

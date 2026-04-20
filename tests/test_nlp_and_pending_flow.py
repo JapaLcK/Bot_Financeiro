@@ -31,6 +31,16 @@ def test_parse_paguei_conta_de_luz(user_id):
     assert parsed["alvo"] == "conta de luz"
 
 
+def test_parse_gastei_cafe_cai_em_alimentacao(user_id):
+    parsed = parse_receita_despesa_natural(user_id, "gastei 10 cafe")
+
+    assert parsed is not None
+    assert parsed["tipo"] == "despesa"
+    assert parsed["valor"] == 10
+    assert parsed["categoria"] == "alimentação"
+    assert parsed["alvo"] == "cafe"
+
+
 def test_classify_apagar_id_com_hash():
     result = classify("apagar id #712")
 

@@ -55,7 +55,7 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
     if os.getenv("OPENAI_API_KEY"):
         try:
             from ai_router import classify_category_with_gpt
-            cat_ai = classify_category_with_gpt(t)
+            cat_ai = classify_category_with_gpt(t, user_id=user_id, source="core.services.category_service")
             if cat_ai and cat_ai != "outros":
                 return InferResult(category=cat_ai, reason="ai")
         except Exception:

@@ -117,7 +117,7 @@ def _infer_category(user_id: int, desc: str) -> str:
     categoria = get_memorized_category(user_id, raw_norm) or "outros"
     if categoria == "outros":
         try:
-            categoria_gpt = classify_category_with_gpt(raw_norm)
+            categoria_gpt = classify_category_with_gpt(raw_norm, user_id=user_id, source="core.handlers.credit")
             if categoria_gpt:
                 categoria = categoria_gpt
         except Exception:

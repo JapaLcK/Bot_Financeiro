@@ -28,6 +28,29 @@ _client: OpenAI | None = None
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 
+def _log_category_ai_event(
+    level: str,
+    event_type: str,
+    message: str,
+    *,
+    user_id: int | None = None,
+    details: dict | None = None,
+) -> None:
+    try:
+        from core.observability import log_system_event_sync
+
+        log_system_event_sync(
+            level,
+            event_type,
+            message,
+            source="ai_router/category_fallback",
+            user_id=user_id,
+            details=details or {},
+        )
+    except Exception:
+        pass
+
+
 def _get_client() -> OpenAI | None:
     global _client
     if _client is not None:
@@ -80,7 +103,7 @@ def _normalize_category(cat: str) -> str:
 # classify_category_with_gpt
 # ---------------------------------------------------------------------------
 
-def classify_category_with_gpt(descricao: str) -> str:
+def classify_category_with_gpt(descricao: str, *, user_id: int | None = None, source: str = "unknown") -> str:
     """
     Classifica uma descrição de lançamento em uma das categorias canônicas.
     Usado por category_service.py como fallback quando regras locais não batem.
@@ -88,13 +111,34 @@ def classify_category_with_gpt(descricao: str) -> str:
     """
     descricao = (descricao or "").strip()
     if not descricao:
+        _log_category_ai_event(
+            "info",
+            "category_ai_empty_input",
+            "Fallback de IA de categoria ignorado por descricao vazia.",
+            user_id=user_id,
+            details={"source": source, "model": MODEL},
+        )
         return "outros"
 
     if not os.getenv("OPENAI_API_KEY"):
+        _log_category_ai_event(
+            "warning",
+            "category_ai_skipped_no_api_key",
+            "Fallback de IA de categoria ignorado porque OPENAI_API_KEY nao esta configurada.",
+            user_id=user_id,
+            details={"source": source, "model": MODEL, "input_text": descricao[:120]},
+        )
         return "outros"
 
     current_client = _get_client()
     if current_client is None:
+        _log_category_ai_event(
+            "warning",
+            "category_ai_client_unavailable",
+            "Fallback de IA de categoria nao conseguiu inicializar cliente OpenAI.",
+            user_id=user_id,
+            details={"source": source, "model": MODEL, "input_text": descricao[:120]},
+        )
         return "outros"
 
     prompt = (
@@ -123,10 +167,46 @@ def classify_category_with_gpt(descricao: str) -> str:
             max_tokens=10,
         )
         cat_raw = (resp.choices[0].message.content or "").strip()
-        return _normalize_category(cat_raw)
+        normalized = _normalize_category(cat_raw)
+        if normalized == "outros" and _norm(cat_raw) not in {"", "outros"}:
+            _log_category_ai_event(
+                "warning",
+                "category_ai_invalid_response",
+                "Fallback de IA retornou categoria fora da whitelist e foi normalizado para 'outros'.",
+                user_id=user_id,
+                details={
+                    "source": source,
+                    "model": MODEL,
+                    "input_text": descricao[:120],
+                    "raw_category": cat_raw[:120],
+                    "normalized_category": normalized,
+                },
+            )
+        else:
+            _log_category_ai_event(
+                "info",
+                "category_ai_classified",
+                f"Fallback de IA classificou categoria como '{normalized}'.",
+                user_id=user_id,
+                details={
+                    "source": source,
+                    "model": MODEL,
+                    "input_text": descricao[:120],
+                    "raw_category": cat_raw[:120],
+                    "normalized_category": normalized,
+                },
+            )
+        return normalized
 
     except Exception as e:
         print(f"[ai_router] classify_category error: {e}")
+        _log_category_ai_event(
+            "error",
+            "category_ai_error",
+            f"Erro no fallback de IA de categoria: {e}",
+            user_id=user_id,
+            details={"source": source, "model": MODEL, "input_text": descricao[:120]},
+        )
         return "outros"
 
 

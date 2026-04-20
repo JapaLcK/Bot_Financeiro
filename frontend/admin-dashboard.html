@@ -334,6 +334,24 @@ button:disabled { opacity: .6; cursor: wait; }
     </div>
   </section>
 
+  <!-- ── IA de categorização ────────────────────────────────────────── -->
+  <section class="grid-2" style="margin-bottom:16px">
+    <div class="card">
+      <div class="section-title">
+        <h2>🧠 IA de categorização</h2>
+        <span class="meta" id="category-ai-meta">Últimas 24h</span>
+      </div>
+      <div class="health-grid" id="category-ai-health-grid"></div>
+    </div>
+    <div class="card">
+      <div class="section-title">
+        <h2>📝 Últimos eventos da IA</h2>
+        <span class="meta" id="category-ai-list-meta">Últimos 10</span>
+      </div>
+      <div class="error-list" id="category-ai-list"></div>
+    </div>
+  </section>
+
   <!-- ── Eventos operacionais ────────────────────────────────────────── -->
   <section class="grid-2" style="margin-bottom:16px">
     <div class="card">
@@ -486,6 +504,12 @@ const EVENT_LABELS = {
   whatsapp_webhook_invalid_signature:"Assinatura do webhook inválida",
   whatsapp_verify_token_missing:     "WA_VERIFY_TOKEN não configurado",
   whatsapp_attachment_download_failed:"Falha ao baixar anexo do WhatsApp",
+  category_ai_classified:            "IA categorizou com sucesso",
+  category_ai_invalid_response:      "IA respondeu categoria fora da whitelist",
+  category_ai_error:                 "Erro na chamada de IA para categoria",
+  category_ai_skipped_no_api_key:    "Fallback de IA sem OPENAI_API_KEY",
+  category_ai_client_unavailable:    "Cliente OpenAI indisponível para fallback",
+  category_ai_empty_input:           "Fallback de IA ignorado por texto vazio",
   message_processing_failed:         "Falha no pipeline de mensagem",
   billing_config_incomplete:         "Stripe: configuração incompleta",
   billing_signature_invalid:         "Stripe: assinatura de webhook inválida",
@@ -634,6 +658,64 @@ function renderOpsHealthGrid(ops) {
       ${it.hint ? `<div class="health-item-hint">${it.hint}</div>` : ''}
     </div>
   `).join('');
+}
+
+function renderCategoryAiHealth(ops) {
+  const items = [
+    { label: "Classificações ok 24h", val: fInt(ops.category_ai_success_24h), color: ops.category_ai_success_24h > 0 ? 'green' : 'blue',
+      hint: "Fallback de IA que retornou categoria valida" },
+    { label: "Respostas inválidas 24h", val: fInt(ops.category_ai_invalid_response_24h), color: ops.category_ai_invalid_response_24h > 0 ? 'yellow' : 'green',
+      cls: ops.category_ai_invalid_response_24h > 0 ? 'warning' : '',
+      hint: "IA respondeu algo fora da whitelist e virou 'outros'" },
+    { label: "Erros 24h", val: fInt(ops.category_ai_errors_24h), color: ops.category_ai_errors_24h > 0 ? 'red' : 'green',
+      cls: ops.category_ai_errors_24h > 0 ? 'danger' : '',
+      hint: "Excecoes na chamada do fallback de categoria" },
+    { label: "Indisponível 24h", val: fInt(ops.category_ai_unavailable_24h), color: ops.category_ai_unavailable_24h > 0 ? 'yellow' : 'green',
+      cls: ops.category_ai_unavailable_24h > 0 ? 'warning' : '',
+      hint: "Sem chave ou sem cliente OpenAI no fallback" },
+    { label: "Último uso da IA", val: fRelTime(ops.last_category_ai_at), color: ops.last_category_ai_at ? 'blue' : 'yellow',
+      cls: ops.last_category_ai_at ? '' : 'warning',
+      hint: ops.last_category_ai_at ? `Último evento: ${fDate(ops.last_category_ai_at)}` : 'Nenhum evento recente de IA de categoria' },
+  ];
+
+  $id('category-ai-health-grid').innerHTML = items.map(it => `
+    <div class="health-item ${it.cls||''}">
+      <div class="health-item-val ${it.color||''}">${it.val}</div>
+      <div class="health-item-label">${it.label}</div>
+      ${it.hint ? `<div class="health-item-hint">${it.hint}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+function renderCategoryAiList(ops) {
+  const rows = (ops || []).filter(row => String(row.event_type || '').startsWith('category_ai_')).slice(0, 10);
+  $id('category-ai-list-meta').textContent = `${rows.length} recente${rows.length === 1 ? '' : 's'}`;
+
+  const root = $id('category-ai-list');
+  if (!rows.length) {
+    root.innerHTML = `<div class="empty">Sem eventos recentes da IA de categorização.</div>`;
+    return;
+  }
+
+  root.innerHTML = rows.map(row => {
+    const content = buildExpandContent(row);
+    const hasTb   = !!row.details?.traceback;
+    return `
+    <div class="error-item level-${row.level}" onclick="toggleExpand(this)" style="cursor:pointer">
+      <div class="error-item-header">
+        ${levelBadge(row.level)}
+        <span class="error-item-title">${esc(EVENT_LABELS[row.event_type] || row.event_type)}</span>
+        <span class="error-item-time">${fRelTime(row.created_at)}</span>
+      </div>
+      <div class="error-item-msg">${esc(row.message.slice(0,160))}</div>
+      ${row.details?.input_text ? `<div class="error-item-source">📝 ${esc(row.details.input_text)}</div>` : ''}
+      ${row.details?.raw_category ? `<div class="error-item-source">🤖 resposta: ${esc(row.details.raw_category)}</div>` : ''}
+      ${row.details?.normalized_category ? `<div class="error-item-source">🏷️ final: ${esc(row.details.normalized_category)}</div>` : ''}
+      ${row.source ? `<div class="error-item-source">📍 ${esc(row.source)}</div>` : ''}
+      <div class="expand-hint">${hasTb ? '▼ ver traceback' : '▼ ver detalhes'}</div>
+      <div class="error-item-tb">${content}</div>
+    </div>`;
+  }).join('');
 }
 
 /* ── Summary cards ───────────────────────────────────────────────── */
@@ -787,6 +869,8 @@ async function loadOverview(force=false) {
   renderErrorList(data.recent_errors);
   renderHealthGrid(data.summary, data.recent_errors);
   renderOpsHealthGrid(data.ops_summary);
+  renderCategoryAiHealth(data.ops_summary);
+  renderCategoryAiList(data.recent_ops);
   renderOpsList(data.recent_ops);
   renderSignups(data.recent_signups);
   renderLogins(data.recent_logins);

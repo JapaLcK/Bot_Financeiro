@@ -408,7 +408,7 @@ async def fetch_admin_overview(days: int = 30) -> dict[str, Any]:
 
             await cur.execute(
                 """
-                SELECT level, event_type, message, source, user_id, created_at
+                SELECT level, event_type, message, source, user_id, details, created_at
                 FROM system_event_logs
                 ORDER BY created_at DESC
                 LIMIT 20
@@ -423,6 +423,10 @@ async def fetch_admin_overview(days: int = 30) -> dict[str, Any]:
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND event_type = 'whatsapp_webhook_received') AS whatsapp_webhooks_24h,
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND event_type = 'whatsapp_send_success') AS whatsapp_send_success_24h,
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND event_type IN ('whatsapp_send_failed', 'whatsapp_send_exception')) AS whatsapp_send_failures_24h,
+                    COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND event_type = 'category_ai_classified') AS category_ai_success_24h,
+                    COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND event_type = 'category_ai_invalid_response') AS category_ai_invalid_response_24h,
+                    COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND event_type = 'category_ai_error') AS category_ai_errors_24h,
+                    COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND event_type IN ('category_ai_skipped_no_api_key', 'category_ai_client_unavailable')) AS category_ai_unavailable_24h,
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'whatsapp_token_invalid') AS whatsapp_token_invalid_7d,
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND event_type = 'whatsapp_queue_drop') AS whatsapp_queue_drop_24h,
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'whatsapp_worker_error') AS whatsapp_worker_errors_7d,
@@ -431,6 +435,7 @@ async def fetch_admin_overview(days: int = 30) -> dict[str, Any]:
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'engagement_loop_error') AS engagement_errors_7d,
                     MAX(created_at) FILTER (WHERE event_type = 'whatsapp_webhook_received') AS last_whatsapp_webhook_at,
                     MAX(created_at) FILTER (WHERE event_type = 'whatsapp_send_success') AS last_whatsapp_send_success_at,
+                    MAX(created_at) FILTER (WHERE event_type LIKE 'category_ai_%') AS last_category_ai_at,
                     MAX(created_at) FILTER (WHERE event_type = 'whatsapp_token_invalid') AS last_whatsapp_token_invalid_at,
                     MAX(created_at) FILTER (WHERE event_type = 'billing_webhook_received') AS last_billing_webhook_at
                 FROM system_event_logs
@@ -484,9 +489,10 @@ async def fetch_admin_overview(days: int = 30) -> dict[str, Any]:
 
             await cur.execute(
                 """
-                SELECT level, event_type, message, source, user_id, created_at
+                SELECT level, event_type, message, source, user_id, details, created_at
                 FROM system_event_logs
                 WHERE event_type LIKE 'whatsapp_%'
+                   OR event_type LIKE 'category_ai_%'
                    OR event_type LIKE 'billing_%'
                    OR event_type LIKE 'engagement_%'
                    OR event_type = 'http_unhandled_exception'
