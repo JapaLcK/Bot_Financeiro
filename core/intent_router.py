@@ -39,6 +39,7 @@ CONFIDENCE_EXECUTE = 0.85
 # Intents que exigem confirmação antes de executar (destrutivos)
 DESTRUCTIVE_INTENTS = {
     "launches.delete",
+    "launches.delete_bulk",
     "pockets.delete",
     "investments.delete",
 }
@@ -184,6 +185,17 @@ def _handle_destructive(intent: str, user_id: int, entities: dict, text: str) ->
         if not launch_id:
             return "Qual o ID do lançamento para apagar? Ex: *apagar #42*"
         return h_launches.propose_delete(user_id, int(launch_id))
+
+    if intent == "launches.delete_bulk":
+        ids = entities.get("launch_ids") or []
+        if not ids:
+            return "Informe os IDs a apagar. Ex: *apagar id 757, 756*"
+        ids_fmt = ", ".join(f"**#{i}**" for i in ids)
+        db.set_pending_action(user_id, "delete_launch_bulk", {"launch_ids": ids})
+        return (
+            f"⚠️ Isso vai apagar os lançamentos {ids_fmt} e desfazer seus efeitos no saldo.\n"
+            "Confirma? Responda **sim** ou **não**."
+        )
 
     if intent == "pockets.delete":
         pocket_name = entities.get("pocket_name")

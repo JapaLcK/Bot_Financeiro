@@ -173,7 +173,9 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
 
         emoji     = _TIPO_EMOJI.get(tipo, "•")
         valor_str = fmt_brl(float(valor)) if valor is not None else "-"
-        lines.append(f"{emoji} {data_str} • {valor_str} • {descricao}")
+        launch_id = r.get("id")
+        id_str    = f" [#{launch_id}]" if launch_id else ""
+        lines.append(f"{emoji} {data_str} • {valor_str} • {descricao}{id_str}")
 
     # mini resumo de despesas/receitas no período exibido
     total_despesas = sum(

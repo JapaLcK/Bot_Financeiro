@@ -229,6 +229,7 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "launches.list"),
     (r"^(gastos?|despesas?)(?:\s+(recentes?|ultimos?|da\s+semana|do\s+mes))?$",
      "launches.list"),
+    # delete de um único lançamento
     (r"^apagar\s+(?:id\s+)?(lancamento\s+)?#?(\d+)$",
      "launches.delete"),
     (r"^excluir\s+(?:id\s+)?(lancamento\s+)?#?(\d+)$",
@@ -237,6 +238,9 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "launches.delete"),
     (r"^apagar\s+(?:id\s+)?#?(\d+)$",
      "launches.delete"),
+    # delete de múltiplos lançamentos: "apagar id 757, 756" ou "apagar #757 e #756"
+    (r"^(?:apagar|excluir|deletar)\s+(?:id[s]?\s+)?(?:#?\d+[\s,e]+)+#?\d+$",
+     "launches.delete_bulk"),
 
     # desfazer / apagar compras no crédito
     (r"^(desfazer|apagar|excluir|remover|deletar|delete)\b.*(?:\bcc\s*\d+\b|\bpc[0-9a-f]{8}\b|\bct\s*#?\s*\d+\b|\bgrupo\b|\bgroup\b|\bcompra\b|\bcredito\b|\bcr[eé]dito\b|\bparcelamento\b|\bparcela\b)",
@@ -445,6 +449,11 @@ def _try_alias(norm: str, original: str) -> IntentResult | None:
                 launch_id = _extract_id_from_text(norm)
                 if launch_id:
                     entities["launch_id"] = launch_id
+
+            elif intent == "launches.delete_bulk":
+                ids = [int(x) for x in re.findall(r"\d+", norm)]
+                if ids:
+                    entities["launch_ids"] = ids
 
             elif intent == "pockets.create":
                 m = re.search(r"^criar\s+caixinha\s+(.+)$", norm)
