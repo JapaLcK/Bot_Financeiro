@@ -867,15 +867,34 @@ def import_credit_ofx_bulk(
                     "skipped_same_file": True,
                 }
 
-    # Criar/buscar fatura do período
-    if dt_start and dt_end:
-        bill_id = get_or_create_bill_by_period(user_id, card_id, dt_start, dt_end)
-    else:
-        from utils_date import today_tz
-        bill_id = get_or_create_open_bill(user_id, card_id, today_tz())
+    # Busca o closing_day do cartão para calcular o período correto de cada transação.
+    # NÃO usamos dt_start/dt_end do OFX diretamente — esses valores raramente
+    # coincidem com o período calculado pelo closing_day, o que criaria bills
+    # duplicadas para o mesmo mês quando o usuário já tem transações manuais.
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select closing_day from credit_cards where id=%s and user_id=%s limit 1",
+                (card_id, user_id),
+            )
+            card_row = cur.fetchone()
+    if not card_row:
+        raise ValueError("Cartão não encontrado.")
+    closing_day = int(card_row["closing_day"])
+
+    # Cache de bill_ids por (period_start, period_end) para evitar queries repetidas
+    _bill_cache: dict[tuple, int] = {}
+
+    def _get_bill_for_date(ref_date: date) -> int:
+        ps, pe = billing_period_for_close_day(ref_date, closing_day)
+        key = (ps, pe)
+        if key not in _bill_cache:
+            _bill_cache[key] = get_or_create_bill_by_period(user_id, card_id, ps, pe)
+        return _bill_cache[key]
 
     inserted = 0
     duplicates = 0
+    affected_bill_ids: set[int] = set()
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -952,6 +971,9 @@ def import_credit_ofx_bulk(
 
                 is_refund = row.get("tipo") == "estorno"
 
+                tx_bill_id = _get_bill_for_date(posted_at)
+                affected_bill_ids.add(tx_bill_id)
+
                 cur.execute(
                     """
                     insert into credit_transactions
@@ -961,7 +983,7 @@ def import_credit_ofx_bulk(
                     values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'ofx',%s)
                     """,
                     (
-                        bill_id, user_id, card_id,
+                        tx_bill_id, user_id, card_id,
                         row.get("tipo", "despesa"), valor_row,
                         row.get("categoria"), row.get("nota"),
                         posted_at,
@@ -971,19 +993,20 @@ def import_credit_ofx_bulk(
                 )
                 inserted += 1
 
-            # Recalcula total da fatura com base nas transações reais
-            cur.execute(
-                """
-                update credit_bills
-                set total = (
-                    select coalesce(sum(valor), 0)
-                    from credit_transactions
-                    where bill_id=%s and is_refund=false
+            # Recalcula total de cada fatura que recebeu transações novas
+            for bid in affected_bill_ids:
+                cur.execute(
+                    """
+                    update credit_bills
+                    set total = (
+                        select coalesce(sum(valor), 0)
+                        from credit_transactions
+                        where bill_id=%s and is_refund=false
+                    )
+                    where id=%s
+                    """,
+                    (bid, bid),
                 )
-                where id=%s
-                """,
-                (bill_id, bill_id),
-            )
 
             # Atualiza limite de crédito do cartão se veio no OFX
             if credit_limit is not None and credit_limit > 0:
@@ -1009,13 +1032,16 @@ def import_credit_ofx_bulk(
 
         conn.commit()
 
+    # bill_id principal = primeira fatura afetada (compatibilidade com chamadores)
+    main_bill_id = next(iter(affected_bill_ids), None)
+
     return {
         "inserted": inserted,
         "duplicates": duplicates,
         "total": len(tx_rows),
         "dt_start": dt_start,
         "dt_end": dt_end,
-        "bill_id": bill_id,
+        "bill_id": main_bill_id,
         "skipped_same_file": False,
     }
 
