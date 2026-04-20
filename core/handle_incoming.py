@@ -179,8 +179,13 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
 
     body = "\n\n".join(responses)
 
-    # Dica de desfazer só quando há lançamentos processados
-    undo_hint = "\n\n↩️ Para desfazer, diga: _desfazer_" if platform == "discord" else "\n\n↩️ Para desfazer, diga: desfazer"
+    # Dica de desfazer
+    if platform == "discord":
+        undo_hint = "\n\n↩️ Para desfazer, diga: _desfazer_"
+    else:
+        # No WhatsApp, o botão "↩️ Desfazer" aparece na mensagem — salva pending para o runtime exibi-lo
+        undo_hint = ""
+        db.set_pending_action(uid, "undo_audio", {})
 
     return [OutgoingMessage(text=preview + body + undo_hint)]
 

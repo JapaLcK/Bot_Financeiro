@@ -28,13 +28,14 @@ from adapters.whatsapp.wa_help_menu import (
 from core.handle_incoming import handle_incoming
 from core.observability import log_system_event_sync
 from core.types import IncomingMessage
-from db import attempt_whatsapp_phone_link, get_conn, get_or_create_canonical_user, get_pending_action
+from db import attempt_whatsapp_phone_link, clear_pending_action, get_conn, get_or_create_canonical_user, get_pending_action
 from utils_phone import mask_phone
 
 logger = logging.getLogger(__name__)
 
 WA_CONFIRM_YES_ID = "confirm_yes"
 WA_CONFIRM_NO_ID = "confirm_no"
+WA_UNDO_LAUNCH_ID = "undo_launch"
 
 
 _SEEN: dict[str, float] = {}
@@ -140,7 +141,28 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
         return
 
     pending = get_pending_action(int(user_id)) if user_id is not None else None
-    if _pending_supports_confirmation_buttons(pending):
+
+    # Botão de desfazer (one-shot após áudio processado)
+    if pending and pending.get("action_type") == "undo_audio":
+        # Limpa imediatamente — só aparece uma vez
+        if user_id is not None:
+            try:
+                clear_pending_action(int(user_id))
+            except Exception as exc:
+                logger.warning("WA clear undo_audio pending failed: %s", exc)
+        logger.info("WA sending undo button to=%s", to_wa_id)
+        try:
+            send_interactive_buttons(
+                to=to_wa_id,
+                body=body,
+                buttons=[{"id": WA_UNDO_LAUNCH_ID, "title": "↩️ Desfazer"}],
+                footer="Toque para desfazer o último lançamento",
+            )
+            return
+        except Exception as exc:
+            logger.warning("WA send_interactive_buttons (undo) failed, fallback: %s", exc)
+
+    elif _pending_supports_confirmation_buttons(pending):
         logger.info("WA sending interactive confirmation buttons to=%s", to_wa_id)
         try:
             send_interactive_buttons(
@@ -367,6 +389,12 @@ def process_message(message: InboundMessage) -> None:
                         user_id=uid,
                     )
                 return
+
+            # Botão de desfazer áudio
+            if interactive_id == WA_UNDO_LAUNCH_ID:
+                logger.info("WA undo_launch button clicked wa_id=%s", reply_to)
+                # Injeta "desfazer" para o classificador tratar normalmente
+                message.text = "desfazer"
 
         # ---------------------------------------------------------------
         # Interceptação de comandos de texto simples para fluxo interativo
