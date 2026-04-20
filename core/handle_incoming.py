@@ -116,11 +116,25 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     # Informa o usuário o que foi entendido — evita erros de interpretação silenciosos
     preview = f'🎙️ Entendi: _"{transcription}"_\n\n' if platform == "discord" else f'🎙️ Entendi: "{transcription}"\n\n'
 
-    # Processa o texto transcrito pelo pipeline normal
     uid = _normalize_user_id(msg)
     db.ensure_user(uid)
     db.update_last_activity(uid)
 
+    intent_result = classify(transcription)
+
+    # Se for um lançamento (despesa/receita), pede confirmação antes de registrar
+    # para evitar qualquer erro de interpretação do áudio
+    if intent_result.intent == "launches.add" and intent_result.confidence >= 0.6:
+        db.set_pending_action(uid, "confirm_media_launch", {"text": transcription})
+        b = lambda s: f"**{s}**" if platform == "discord" else f"*{s}*"
+        return [OutgoingMessage(text=(
+            f"{preview}"
+            f"➡️ Para confirmar e registrar, responda: `sim`\n"
+            f"✏️ Para corrigir, escreva o comando manualmente\n"
+            f"❌ Para cancelar, responda: `não`"
+        ))]
+
+    # Para outros intents (saldo, listar, etc.), processa diretamente
     msg_from_audio = IncomingMessage(
         platform=msg.platform,
         user_id=uid,
@@ -131,7 +145,6 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
         raw=msg.raw,
     )
 
-    intent_result = classify(transcription)
     raw_response = route(intent_result, msg_from_audio)
     formatted = format_for_platform(raw_response, platform)
 

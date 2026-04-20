@@ -64,6 +64,15 @@ def _fmt_date_label(d: date) -> str:
 # list_launches — com suporte a filtro de data
 # ---------------------------------------------------------------------------
 
+# Tipos que são ações internas de gerenciamento (não movimentações financeiras)
+# Esses registros existem na tabela launches para fins de rollback/auditoria,
+# mas não devem aparecer na listagem do usuário.
+_INTERNAL_TIPOS = {
+    "criar_caixinha", "delete_pocket",
+    "create_investment", "delete_investment",
+}
+
+
 def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, original_text: str = "") -> str:
     entities = entities or {}
 
@@ -73,6 +82,9 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
         # busca por dia específico
         rows = db.get_launches_by_period(user_id, target_date, target_date)
         label = _fmt_date_label(target_date)
+
+        # filtra tipos internos de gerenciamento
+        rows = [r for r in rows if r.get("tipo") not in _INTERNAL_TIPOS]
 
         if not rows:
             return f"Nenhum lançamento encontrado em **{label}**."
@@ -100,8 +112,9 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
 
         return f"{header}:\n" + "\n".join(lines) + (f"\n\n{summary}" if summary else "")
 
-    # sem filtro de data → últimos N lançamentos
-    rows = db.list_launches(user_id, limit=limit)
+    # sem filtro de data → últimos N lançamentos (busca mais para compensar os internos filtrados)
+    rows = db.list_launches(user_id, limit=limit + 20)
+    rows = [r for r in rows if r.get("tipo") not in _INTERNAL_TIPOS][:limit]
     if not rows:
         return "Você ainda não tem lançamentos."
 
