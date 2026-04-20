@@ -17,6 +17,7 @@ from db import (
     get_card_id_by_name,
     get_current_open_bill_id,
     get_default_card_id,
+    get_installment_group_summaries,
     get_pending_action,
     get_memorized_category,
     get_open_bill_summary,
@@ -1525,15 +1526,95 @@ def handle(user_id: int, text: str) -> str | None:
                 pct = round((total / lim) * 100) if lim > 0 else 0
                 lines.append(f"Limite: {fmt_brl(lim)} | Disponível: {fmt_brl(avail)} ({100 - pct}%)")
             lines.append("")
-            for it in items[:10]:
-                parcela = ""
-                if it.get("installment_no") and it.get("installments_total"):
-                    parcela = f" [{it['installment_no']}/{it['installments_total']}]"
-                lines.append(
-                    f"• {fmt_brl(it['valor'])} | {it['categoria'] or 'outros'} | {fmt_br(it['purchased_at'])} | {it['nota'] or ''}{parcela}"
-                )
-            if len(items) > 10:
-                lines.append(f"\n… e mais {len(items) - 10} lançamento(s).")
+
+            # Busca resumo dos grupos de parcelamento presentes nesta fatura
+            # em uma única query (sem N+1)
+            group_ids_nesta_fatura = [
+                str(it["group_id"])
+                for it in items
+                if it.get("group_id") and it.get("installments_total", 0) > 1
+            ]
+            group_summaries = get_installment_group_summaries(user_id, group_ids_nesta_fatura)
+
+            # Separa parcelamentos de compras simples
+            installment_items = [it for it in items if it.get("group_id") and it.get("installments_total", 0) > 1]
+            simple_items = [it for it in items if not (it.get("group_id") and it.get("installments_total", 0) > 1)]
+
+            # ── Parcelamentos ─────────────────────────────────────────────────
+            # Exibe um bloco por group_id (evita repetir se várias parcelas do
+            # mesmo grupo caírem na mesma fatura, o que é raro mas possível)
+            seen_groups: set[str] = set()
+            if installment_items:
+                lines.append("📦 **Parcelamentos nesta fatura:**")
+                for it in installment_items:
+                    gid = str(it["group_id"])
+                    if gid in seen_groups:
+                        continue
+                    seen_groups.add(gid)
+
+                    inst_no = it.get("installment_no") or "?"
+                    inst_total = it.get("installments_total") or "?"
+                    nota = (it.get("nota") or "").strip()
+                    valor_parcela = float(it["valor"])
+
+                    summ = group_summaries.get(gid, {})
+                    parcelas_restantes_db = summ.get("parcelas_restantes", 0)
+                    valor_restante_db = summ.get("valor_restante", 0.0)
+
+                    # ── Contagem de parcelas restantes ────────────────────────
+                    # O memo ("04/10") é sempre confiável para o NÚMERO, mesmo
+                    # quando o usuário só importou uma fatura e não tem histórico.
+                    # O DB só conta o que já foi importado — pode subestimar.
+                    inst_no_int = inst_no if isinstance(inst_no, int) else 0
+                    inst_total_int = inst_total if isinstance(inst_total, int) else 0
+                    proximas_pelo_memo = max(0, inst_total_int - inst_no_int)
+
+                    # ── Valor restante ────────────────────────────────────────
+                    # Usa o DB quando ele tem dados para TODAS as parcelas futuras
+                    # (histórico completo). Caso contrário, estima pelo valor desta.
+                    parcelas_futuras_db = max(0, parcelas_restantes_db - 1)
+                    if parcelas_futuras_db >= proximas_pelo_memo and parcelas_restantes_db > 0:
+                        # DB completo — usa os valores reais
+                        valor_restante_final = max(0.0, valor_restante_db - valor_parcela)
+                        estimado = False
+                    else:
+                        # Histórico parcial — estima pelo valor desta parcela
+                        valor_restante_final = proximas_pelo_memo * valor_parcela
+                        estimado = proximas_pelo_memo > 0
+
+                    proximas = proximas_pelo_memo
+                    valor_suf = " (estimado)" if estimado else ""
+
+                    restante_txt = ""
+                    if proximas > 0:
+                        restante_txt = (
+                            f"\n     ↳ Ainda faltam **{proximas}** parcela(s) = "
+                            f"{fmt_brl(valor_restante_final)}{valor_suf}"
+                        )
+                    else:
+                        restante_txt = "\n     ↳ **Última parcela** desta compra"
+
+                    lines.append(
+                        f"  📌 {nota}\n"
+                        f"     Parcela **{inst_no}/{inst_total}** — {fmt_brl(valor_parcela)}"
+                        f"{restante_txt}"
+                    )
+                lines.append("")
+
+            # ── Compras simples ───────────────────────────────────────────────
+            display_simple = simple_items[:10]
+            if display_simple:
+                lines.append("🧾 **Outras compras:**")
+                for it in display_simple:
+                    lines.append(
+                        f"  • {fmt_brl(float(it['valor']))} | {it['categoria'] or 'outros'}"
+                        f" | {fmt_br(it['purchased_at'])} | {it['nota'] or ''}"
+                    )
+
+            total_hidden = (len(installment_items) - len(seen_groups)) + max(0, len(simple_items) - 10)
+            if total_hidden > 0:
+                lines.append(f"\n… e mais {total_hidden} lançamento(s).")
+
             return "\n".join(lines)
         except Exception as e:
             return f"❌ Erro ao buscar fatura: {e}"

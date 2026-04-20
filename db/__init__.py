@@ -132,6 +132,8 @@ from .cards import (
     list_credit_card_due_reminders,
     list_installment_groups,
     monthly_summary_credit_debit,
+    import_credit_ofx_bulk,
+    get_installment_group_summaries,
 )
 
 # ── Relatórios, Auth, Dashboard, Engajamento ──────────────────────────────────
@@ -206,7 +208,7 @@ __all__ = [
     "undo_credit_transaction", "undo_installment_group", "resolve_installment_group_id",
     "get_open_bill_summary", "pay_bill_amount", "close_bill", "get_next_bill_summary",
     "list_open_bills", "list_credit_card_due_reminders", "list_installment_groups",
-    "monthly_summary_credit_debit",
+    "monthly_summary_credit_debit", "import_credit_ofx_bulk", "get_installment_group_summaries",
     # reports
     "set_daily_report_enabled", "set_daily_report_hour", "get_daily_report_prefs",
     "list_users_with_daily_report_enabled", "list_identities_by_user",

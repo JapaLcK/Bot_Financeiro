@@ -392,6 +392,19 @@ def init_db():
         """
         alter table credit_cards add column if not exists credit_limit numeric
         """,
+
+        # ─── OFX import de fatura: deduplicação em credit_transactions ────────────
+        """
+        alter table credit_transactions add column if not exists source text not null default 'manual'
+        """,
+        """
+        alter table credit_transactions add column if not exists external_id text
+        """,
+        """
+        create unique index if not exists uq_credit_tx_ofx_external
+          on credit_transactions(user_id, card_id, external_id)
+          where source = 'ofx' and external_id is not null
+        """,
     ]
 
     with get_conn() as conn:

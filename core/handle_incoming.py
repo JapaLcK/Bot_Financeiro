@@ -23,7 +23,7 @@ from core.types import IncomingMessage, OutgoingMessage
 from core.intent_classifier import classify
 from core.intent_router import route
 from core.response_formatter import format_for_platform
-from core.services.ofx_service import handle_ofx_import
+from core.services.ofx_service import handle_ofx_import, handle_credit_ofx_import
 from core.services.media_service import (
     is_audio_attachment,
     is_image_attachment,
@@ -82,7 +82,7 @@ def _split_audio_transactions(text: str) -> list[str]:
     """
     # Verbos que iniciam um lançamento financeiro
     FINANCIAL_VERBS = (
-        r"gastei|paguei|comprei|debitei|mandei|enviei|pixei|gasto|"
+        r"gastei|paguei|comprei|debitei|mandei|enviei|pix|gasto|"
         r"recebi|ganhei|receita"
     )
     # Separadores que podem introduzir um segundo lançamento
@@ -313,7 +313,18 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
                 uid = _normalize_user_id(msg)
                 db.ensure_user(uid)
 
-                report = handle_ofx_import(str(uid), a.data, getattr(a, "filename", "arquivo.ofx"))
+                # Detecta se é extrato bancário ou fatura de cartão de crédito
+                from ofx_import import detect_ofx_type
+                ofx_type = detect_ofx_type(a.data)
+                ofx_filename = getattr(a, "filename", "arquivo.ofx")
+
+                if ofx_type == "credit_card":
+                    # Roteamento para importação de fatura de cartão
+                    result_text = handle_credit_ofx_import(str(uid), a.data, ofx_filename)
+                    return [OutgoingMessage(text=result_text)]
+
+                # Extrato bancário (padrão)
+                report = handle_ofx_import(str(uid), a.data, ofx_filename)
 
                 # handle_ofx_import pode retornar str ou dict
                 if isinstance(report, str):

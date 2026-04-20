@@ -827,6 +827,248 @@ def list_installment_groups(user_id: int, limit: int = 15):
             return cur.fetchall()
 
 
+def import_credit_ofx_bulk(
+    user_id: int,
+    card_id: int,
+    tx_rows: list[dict],
+    file_hash: str,
+    dt_start: "date | None",
+    dt_end: "date | None",
+    acct_id: "str | None" = None,
+    credit_limit: "Decimal | None" = None,
+    ledger_balance: "Decimal | None" = None,
+) -> dict:
+    """
+    Importa transações de fatura OFX em credit_transactions de forma idempotente.
+
+    Cada tx_row deve ter:
+      external_id, posted_at, valor, tipo ('despesa'|'estorno'),
+      categoria, nota, installment_no (opcional), installments_total (opcional),
+      memo_base (opcional — nome sem sufixo de parcela, para linking de grupo)
+
+    Deduplicação: (user_id, card_id, external_id) WHERE source='ofx'.
+    Parcelamentos: agrupa por group_id linkando parcelas anteriores pelo memo_base.
+    Atualiza credit_limit no cartão se fornecido.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # Verifica se arquivo já foi importado
+            cur.execute(
+                "select id from ofx_imports where user_id=%s and file_hash=%s",
+                (user_id, file_hash),
+            )
+            if cur.fetchone():
+                return {
+                    "inserted": 0,
+                    "duplicates": len(tx_rows),
+                    "total": len(tx_rows),
+                    "dt_start": dt_start,
+                    "dt_end": dt_end,
+                    "skipped_same_file": True,
+                }
+
+    # Criar/buscar fatura do período
+    if dt_start and dt_end:
+        bill_id = get_or_create_bill_by_period(user_id, card_id, dt_start, dt_end)
+    else:
+        from utils_date import today_tz
+        bill_id = get_or_create_open_bill(user_id, card_id, today_tz())
+
+    inserted = 0
+    duplicates = 0
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for row in tx_rows:
+                ext_id = row.get("external_id")
+                posted_at = row["posted_at"]
+                valor_row = Decimal(str(row["valor"]))
+
+                # ── Deduplicação 1: pelo FITID (source=ofx) ──────────────────
+                # Evita reimportar o mesmo arquivo duas vezes.
+                if ext_id:
+                    cur.execute(
+                        "select id from credit_transactions "
+                        "where user_id=%s and card_id=%s and source='ofx' and external_id=%s",
+                        (user_id, card_id, ext_id),
+                    )
+                    if cur.fetchone():
+                        duplicates += 1
+                        continue
+
+                # ── Deduplicação 2: por valor + data + parcela (anti-duplicata manual) ──
+                # Cobre o caso em que o usuário cadastrou o parcelamento manualmente
+                # e depois importa a fatura OFX. Sem isso, a parcela apareceria em dobro.
+                inst_no = row.get("installment_no")
+                inst_total = row.get("installments_total")
+                if inst_no and inst_total:
+                    cur.execute(
+                        """
+                        select id from credit_transactions
+                        where user_id=%s and card_id=%s
+                          and installment_no=%s
+                          and installments_total=%s
+                          and valor=%s
+                          and purchased_at=%s
+                        limit 1
+                        """,
+                        (user_id, card_id, inst_no, inst_total, valor_row, posted_at),
+                    )
+                    if cur.fetchone():
+                        duplicates += 1
+                        continue
+
+                # ── Detectar/recuperar group_id para parcelamentos ────────────
+                group_id = None
+                memo_base = row.get("memo_base") or ""
+
+                if inst_no and inst_total and inst_total > 1:
+                    # Busca QUALQUER parcela já existente do mesmo grupo
+                    # (mesmo memo base + mesmo total de parcelas).
+                    # Funciona para OFX importado fora de ordem E para ligar
+                    # parcelas do OFX a parcelamentos manuais (se o memo bater).
+                    if memo_base:
+                        cur.execute(
+                            """
+                            select group_id from credit_transactions
+                            where user_id=%s and card_id=%s
+                              and installments_total=%s
+                              and group_id is not null
+                              and lower(nota) like %s
+                            order by purchased_at desc limit 1
+                            """,
+                            (
+                                user_id, card_id,
+                                inst_total,
+                                f"%{memo_base[:25].lower()}%",
+                            ),
+                        )
+                        existing = cur.fetchone()
+                        if existing and existing["group_id"]:
+                            group_id = existing["group_id"]
+
+                    if group_id is None:
+                        group_id = uuid4()
+
+                is_refund = row.get("tipo") == "estorno"
+
+                cur.execute(
+                    """
+                    insert into credit_transactions
+                      (bill_id, user_id, card_id, tipo, valor, categoria, nota,
+                       purchased_at, group_id, installment_no, installments_total,
+                       is_refund, source, external_id)
+                    values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'ofx',%s)
+                    """,
+                    (
+                        bill_id, user_id, card_id,
+                        row.get("tipo", "despesa"), valor_row,
+                        row.get("categoria"), row.get("nota"),
+                        posted_at,
+                        group_id, inst_no, inst_total,
+                        is_refund, ext_id,
+                    ),
+                )
+                inserted += 1
+
+            # Recalcula total da fatura com base nas transações reais
+            cur.execute(
+                """
+                update credit_bills
+                set total = (
+                    select coalesce(sum(valor), 0)
+                    from credit_transactions
+                    where bill_id=%s and is_refund=false
+                )
+                where id=%s
+                """,
+                (bill_id, bill_id),
+            )
+
+            # Atualiza limite de crédito do cartão se veio no OFX
+            if credit_limit is not None and credit_limit > 0:
+                cur.execute(
+                    "update credit_cards set credit_limit=%s where id=%s and user_id=%s",
+                    (credit_limit, card_id, user_id),
+                )
+
+            # Registra a importação no log
+            cur.execute(
+                """
+                insert into ofx_imports
+                  (user_id, file_hash, acct_id, acct_type, dt_start, dt_end,
+                   total_transactions, inserted_count, duplicate_count)
+                values (%s,%s,%s,'CREDITLINE',%s,%s,%s,%s,%s)
+                on conflict (user_id, file_hash) do nothing
+                """,
+                (
+                    user_id, file_hash, acct_id, dt_start, dt_end,
+                    len(tx_rows), inserted, duplicates,
+                ),
+            )
+
+        conn.commit()
+
+    return {
+        "inserted": inserted,
+        "duplicates": duplicates,
+        "total": len(tx_rows),
+        "dt_start": dt_start,
+        "dt_end": dt_end,
+        "bill_id": bill_id,
+        "skipped_same_file": False,
+    }
+
+
+def get_installment_group_summaries(user_id: int, group_ids: list) -> dict:
+    """
+    Dado uma lista de group_ids, retorna para cada grupo:
+      - parcelas_total: total de parcelas da compra
+      - parcelas_restantes: quantas faturas ainda estão abertas (status='open')
+      - valor_restante: soma das parcelas ainda em aberto
+
+    Retorna dict: str(group_id) → dict com as chaves acima.
+    Faz UMA única query para todos os grupos (sem N+1).
+    """
+    if not group_ids:
+        return {}
+
+    str_ids = [str(g) for g in group_ids if g]
+    if not str_ids:
+        return {}
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select
+                    t.group_id::text,
+                    max(t.installments_total) as parcelas_total,
+                    count(*) filter (where b.status = 'open')  as parcelas_restantes,
+                    coalesce(
+                        sum(t.valor) filter (where b.status = 'open'), 0
+                    ) as valor_restante
+                from credit_transactions t
+                join credit_bills b on b.id = t.bill_id
+                where t.user_id = %s
+                  and t.group_id::text = any(%s)
+                  and t.is_refund = false
+                group by t.group_id
+                """,
+                (user_id, str_ids),
+            )
+            rows = cur.fetchall()
+
+    return {
+        str(r["group_id"]): {
+            "parcelas_total": int(r["parcelas_total"] or 0),
+            "parcelas_restantes": int(r["parcelas_restantes"] or 0),
+            "valor_restante": float(r["valor_restante"] or 0),
+        }
+        for r in rows
+    }
+
+
 def monthly_summary_credit_debit(user_id: int, start: date, end: date):
     with get_conn() as conn:
         with conn.cursor() as cur:

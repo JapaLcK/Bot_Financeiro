@@ -12,6 +12,22 @@ from db import list_user_category_rules
 from utils_text import normalize_text, contains_word, LOCAL_RULES, INTERNAL_MOVEMENT_CATEGORIES
 
 
+def detect_ofx_type(ofx_bytes: bytes) -> str:
+    """
+    Detecta se o OFX é de conta bancária ('bank') ou fatura de cartão de crédito ('credit_card').
+    Inspeciona as tags SGML/XML do arquivo sem depender do parser.
+    Retorna 'unknown' se não for possível determinar.
+    """
+    text = ofx_bytes.decode("utf-8", errors="ignore").upper()
+    # Tags exclusivas de fatura de cartão de crédito no padrão OFX
+    if "CREDITCARDMSGSRS" in text or "CCSTMTRS" in text or "CCACCTFROM" in text:
+        return "credit_card"
+    # Tags exclusivas de conta bancária (corrente/poupança)
+    if "BANKMSGSRS" in text or "BANKACCTFROM" in text:
+        return "bank"
+    return "unknown"
+
+
 def _extract_ledger_balance(ofx_bytes: bytes) -> Decimal | None:
     s = ofx_bytes.decode("utf-8", errors="ignore")
     m = re.search(r"<LEDGERBAL>.*?<BALAMT>\s*([-0-9.]+)", s, re.I | re.S)
