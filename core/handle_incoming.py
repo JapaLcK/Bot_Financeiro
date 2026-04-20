@@ -4,11 +4,13 @@ Ponto de entrada para todas as mensagens recebidas.
 
 Fluxo:
   1. Anexo OFX?          → trata diretamente (não depende de intent)
-  2. Ensure user no DB   → garante que o usuário existe
-  3. Classifica intent   → core/intent_classifier.py (3 tiers: exact → regex → IA)
-  4. Roteia              → core/intent_router.py
-  5. Formata resposta    → core/response_formatter.py (Discord vs WhatsApp)
-  6. Retorna OutgoingMessage
+  2. Anexo ÁUDIO?        → transcreve via Whisper e processa como texto
+  3. Anexo IMAGEM?       → analisa via GPT-4o Vision e retorna dados para confirmação
+  4. Ensure user no DB   → garante que o usuário existe
+  5. Classifica intent   → core/intent_classifier.py (3 tiers: exact → regex → IA)
+  6. Roteia              → core/intent_router.py
+  7. Formata resposta    → core/response_formatter.py (Discord vs WhatsApp)
+  8. Retorna OutgoingMessage
 """
 from __future__ import annotations
 
@@ -21,6 +23,12 @@ from core.intent_classifier import classify
 from core.intent_router import route
 from core.response_formatter import format_for_platform
 from core.services.ofx_service import handle_ofx_import
+from core.services.media_service import (
+    is_audio_attachment,
+    is_image_attachment,
+    transcribe_audio,
+    analyze_image,
+)
 from core.observability import log_system_event_sync
 from utils_text import fmt_brl
 from ai_router import _internal_user_id
@@ -52,6 +60,176 @@ def _normalize_user_id(msg: IncomingMessage) -> int:
         return uid
     except (ValueError, TypeError):
         return _internal_user_id(raw)
+
+
+def _bold(text: str, platform: str) -> str:
+    """Formata texto em negrito de acordo com a plataforma."""
+    if platform == "whatsapp":
+        return f"*{text}*"
+    return f"**{text}**"
+
+
+# ---------------------------------------------------------------------------
+# Handlers de mídia
+# ---------------------------------------------------------------------------
+
+def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] | None:
+    """
+    Detecta anexo de áudio, transcreve via Whisper e processa como texto.
+    Retorna lista de OutgoingMessage ou None se não houver áudio.
+    """
+    if not msg.attachments:
+        return None
+
+    audio_atts = [
+        a for a in msg.attachments
+        if is_audio_attachment(
+            getattr(a, "filename", ""),
+            getattr(a, "content_type", ""),
+        )
+    ]
+    if not audio_atts:
+        return None
+
+    a = audio_atts[0]
+    data = getattr(a, "data", None)
+    filename = getattr(a, "filename", "audio.ogg")
+
+    if not data:
+        return [OutgoingMessage(
+            text="🎙️ Recebi um áudio, mas não consegui baixar o arquivo. Tente reenviar."
+        )]
+
+    transcription = transcribe_audio(data, filename)
+
+    if not transcription:
+        return [OutgoingMessage(
+            text=(
+                "🎙️ Recebi seu áudio, mas não consegui entender o que foi dito.\n"
+                "Tente reenviar em um ambiente mais silencioso ou escreva o comando."
+            )
+        )]
+
+    # Informa o usuário o que foi entendido — evita erros de interpretação silenciosos
+    preview = f'🎙️ Entendi: _"{transcription}"_\n\n' if platform == "discord" else f'🎙️ Entendi: "{transcription}"\n\n'
+
+    # Processa o texto transcrito pelo pipeline normal
+    uid = _normalize_user_id(msg)
+    db.ensure_user(uid)
+    db.update_last_activity(uid)
+
+    msg_from_audio = IncomingMessage(
+        platform=msg.platform,
+        user_id=uid,
+        text=transcription,
+        message_id=msg.message_id,
+        attachments=[],   # remove o anexo para não re-processar
+        external_id=msg.external_id,
+        raw=msg.raw,
+    )
+
+    intent_result = classify(transcription)
+    raw_response = route(intent_result, msg_from_audio)
+    formatted = format_for_platform(raw_response, platform)
+
+    return [OutgoingMessage(text=preview + formatted)]
+
+
+def _handle_image(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] | None:
+    """
+    Detecta anexo de imagem, analisa via GPT-4o Vision e retorna resumo para confirmação.
+    Retorna lista de OutgoingMessage ou None se não houver imagem.
+    """
+    if not msg.attachments:
+        return None
+
+    image_atts = [
+        a for a in msg.attachments
+        if is_image_attachment(
+            getattr(a, "filename", ""),
+            getattr(a, "content_type", ""),
+        )
+    ]
+    if not image_atts:
+        return None
+
+    a = image_atts[0]
+    data = getattr(a, "data", None)
+    filename = getattr(a, "filename", "image.jpg")
+
+    if not data:
+        return [OutgoingMessage(
+            text="📷 Recebi uma imagem, mas não consegui baixá-la. Tente reenviar."
+        )]
+
+    result = analyze_image(data, filename)
+
+    # Falha na API
+    if result is None:
+        return [OutgoingMessage(
+            text=(
+                "📷 Recebi sua imagem, mas não consegui analisá-la agora.\n"
+                "Tente digitar o lançamento manualmente, ex: `gastei 50 no mercado`."
+            )
+        )]
+
+    # Imagem sem dado financeiro
+    if not result.get("tem_dado_financeiro"):
+        return [OutgoingMessage(
+            text=(
+                "📷 Analisei a imagem, mas não encontrei informações financeiras nela.\n"
+                "Se quiser registrar um gasto, escreva: `gastei [valor] [onde]`"
+            )
+        )]
+
+    # Monta resumo dos dados extraídos
+    tipo  = result.get("tipo") or "despesa"
+    valor = result.get("valor")
+    alvo  = result.get("alvo")
+    data_str = result.get("data")
+    cat   = result.get("categoria") or "outros"
+    extra = result.get("descricao_extra") or ""
+
+    tipo_emoji = "💸" if tipo == "despesa" else "💰"
+    valor_txt  = fmt_brl(float(valor)) if valor is not None else "valor não identificado"
+    alvo_txt   = alvo if alvo else "não identificado"
+    data_txt   = data_str if data_str else "hoje"
+
+    b = lambda s: _bold(s, platform)
+
+    linhas = [
+        f"📷 {b('Imagem analisada!')} Encontrei o seguinte:\n",
+        f"{tipo_emoji} {b('Tipo:')} {tipo.capitalize()}",
+        f"💵 {b('Valor:')} {valor_txt}",
+        f"🏪 {b('Estabelecimento:')} {alvo_txt}",
+        f"📅 {b('Data:')} {data_txt}",
+        f"🏷️ {b('Categoria:')} {cat}",
+    ]
+    if extra:
+        linhas.append(f"📝 {b('Detalhe:')} {extra}")
+
+    # Instruções para confirmar ou corrigir
+    linhas += [
+        "",
+        "➡️ Para confirmar e registrar, responda: `sim`",
+        "✏️ Para corrigir, escreva o lançamento manualmente, ex: `gastei 50 no mercado`",
+        "❌ Para cancelar, responda: `não`",
+    ]
+
+    # Salva os dados no banco temporário de pendências para o confirm.yes processar
+    uid = _normalize_user_id(msg)
+    db.ensure_user(uid)
+
+    # Monta comando de texto equivalente para salvar como pendência
+    if valor is not None:
+        valor_fmt = f"{float(valor):.2f}".replace(".", ",")
+        cmd_parts = [f"gastei {valor_fmt}" if tipo == "despesa" else f"recebi {valor_fmt}"]
+        if alvo:
+            cmd_parts.append(alvo)
+        pending_text = " ".join(cmd_parts)
+        db.set_pending_action(uid, "confirm_media_launch", {"text": pending_text})
+
+    return [OutgoingMessage(text="\n".join(linhas))]
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +278,21 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
                 ))]
 
         # ------------------------------------------------------------------
-        # 2. Garante usuário no banco + registra atividade
+        # 2. Anexo ÁUDIO — transcreve via Whisper e processa como texto
+        # ------------------------------------------------------------------
+        audio_result = _handle_audio(msg, platform)
+        if audio_result is not None:
+            return audio_result
+
+        # ------------------------------------------------------------------
+        # 3. Anexo IMAGEM — analisa via Vision e pede confirmação
+        # ------------------------------------------------------------------
+        image_result = _handle_image(msg, platform)
+        if image_result is not None:
+            return image_result
+
+        # ------------------------------------------------------------------
+        # 4. Garante usuário no banco + registra atividade
         # ------------------------------------------------------------------
         uid = _normalize_user_id(msg)
         db.ensure_user(uid)
@@ -118,7 +310,7 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         )
 
         # ------------------------------------------------------------------
-        # 3. Classifica intenção
+        # 5. Classifica intenção
         # ------------------------------------------------------------------
         text = (msg.text or "").strip()
         if not text:
@@ -127,12 +319,12 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         intent_result = classify(text)
 
         # ------------------------------------------------------------------
-        # 4. Roteia → executa → obtém resposta bruta
+        # 6. Roteia → executa → obtém resposta bruta
         # ------------------------------------------------------------------
         raw_response = route(intent_result, msg_normalized)
 
         # ------------------------------------------------------------------
-        # 5. Formata para o canal
+        # 7. Formata para o canal
         # ------------------------------------------------------------------
         formatted = format_for_platform(raw_response, platform)
 

@@ -1,6 +1,6 @@
 # core/handlers/pending.py
 """
-Resolve ações pendentes: confirmações de delete e esclarecimentos.
+Resolve ações pendentes: confirmações de delete, lançamentos de mídia e esclarecimentos.
 """
 from __future__ import annotations
 import db
@@ -9,8 +9,9 @@ from utils_text import fmt_brl
 
 def resolve_delete(user_id: int, confirmed: bool) -> str | None:
     """
-    Verifica se existe uma pending_action de DELETE para o usuário.
-    Retorna mensagem de resposta, ou None se não havia pending de delete.
+    Verifica se existe uma pending_action para o usuário e a resolve.
+    Trata: deletes de lançamento/caixinha/investimento e confirmação de lançamento via mídia.
+    Retorna mensagem de resposta, ou None se não havia pending reconhecido.
     """
     pending = db.get_pending_action(user_id)
     if not pending:
@@ -18,7 +19,26 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
 
     action_type = pending.get("action_type")
 
-    # só trata deletes aqui
+    # ── Confirmação de lançamento extraído de imagem ─────────────────────────
+    if action_type == "confirm_media_launch":
+        payload = pending.get("payload", {})
+        db.clear_pending_action(user_id)
+
+        if not confirmed:
+            return "❌ Lançamento cancelado. Se quiser corrigir, escreva o comando manualmente."
+
+        text = payload.get("text", "")
+        if not text:
+            return "⚠️ Não encontrei os dados do lançamento para confirmar. Tente digitar manualmente."
+
+        # Processa o texto montado como se o usuário tivesse digitado
+        from core.services.quick_entry import handle_quick_entry
+        msg_out = handle_quick_entry(user_id, text)
+        if msg_out:
+            return f"✅ Lançamento registrado!\n{msg_out.text}"
+        return f"⚠️ Não consegui registrar automaticamente. Tente: `{text}`"
+
+    # só trata deletes abaixo
     if action_type not in ("delete_launch", "delete_launch_bulk", "delete_pocket", "delete_investment"):
         return None
 
