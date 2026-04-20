@@ -11,7 +11,7 @@ import traceback
 from dataclasses import dataclass
 from typing import Any
 
-from adapters.whatsapp.wa_client import download_media, send_text
+from adapters.whatsapp.wa_client import download_media, send_interactive_buttons, send_text
 from adapters.whatsapp.wa_parse import InboundAttachmentRef, InboundMessage, extract_messages, get_interactive_id
 from adapters.whatsapp.wa_tutorial import (
     TUTORIAL_BUTTON_IDS,
@@ -28,10 +28,13 @@ from adapters.whatsapp.wa_help_menu import (
 from core.handle_incoming import handle_incoming
 from core.observability import log_system_event_sync
 from core.types import IncomingMessage
-from db import attempt_whatsapp_phone_link, get_or_create_canonical_user
+from db import attempt_whatsapp_phone_link, get_or_create_canonical_user, get_pending_action
 from utils_phone import mask_phone
 
 logger = logging.getLogger(__name__)
+
+WA_CONFIRM_YES_ID = "confirm_yes"
+WA_CONFIRM_NO_ID = "confirm_no"
 
 
 _SEEN: dict[str, float] = {}
@@ -109,6 +112,51 @@ def _send_reply(to_wa_id: str, body: str) -> None:
         except Exception as e:
             logger.exception("WA send_text exception to=%s error=%s", to_wa_id, e)
             raise
+
+
+def _pending_supports_confirmation_buttons(pending: dict[str, Any] | None) -> bool:
+    if not pending:
+        return False
+
+    action_type = pending.get("action_type")
+    payload = pending.get("payload") or {}
+    step = payload.get("step")
+
+    if action_type in {"delete_launch", "delete_launch_bulk", "delete_pocket", "delete_investment", "credit_delete_card"}:
+        return True
+
+    if action_type == "credit_card_set_primary":
+        return step != "choose"
+
+    if action_type == "credit_card_setup":
+        return step in {"reminder_opt_in", "set_primary", "confirm_delete_existing_card"}
+
+    return False
+
+
+def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | None = None) -> None:
+    body = (body or "").strip()
+    if not body:
+        return
+
+    pending = get_pending_action(int(user_id)) if user_id is not None else None
+    if _pending_supports_confirmation_buttons(pending):
+        logger.info("WA sending interactive confirmation buttons to=%s", to_wa_id)
+        try:
+            send_interactive_buttons(
+                to=to_wa_id,
+                body=body,
+                buttons=[
+                    {"id": WA_CONFIRM_YES_ID, "title": "Sim"},
+                    {"id": WA_CONFIRM_NO_ID, "title": "Não"},
+                ],
+                footer="Toque para responder",
+            )
+            return
+        except Exception as exc:
+            logger.warning("WA send_interactive_buttons failed, fallback para texto: %s", exc)
+
+    _send_reply(to_wa_id, body)
 
 
 def _download_attachments_sync(att_refs: list[InboundAttachmentRef]) -> list[Attachment]:
@@ -335,7 +383,7 @@ def process_message(message: InboundMessage) -> None:
         for out in outs:
             body = safe_text(out)
             if body:
-                _send_reply(reply_to, body)
+                _send_reply_with_optional_buttons(reply_to, body, user_id=uid)
     except Exception as exc:
         logger.error("WA message processing failed wa_id=%s error=%s", message.wa_id, exc)
         log_system_event_sync(
