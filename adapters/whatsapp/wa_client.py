@@ -114,6 +114,75 @@ def send_text(
     )
     return response
 
+
+def send_typing_indicator(
+    message_id: str,
+    *,
+    access_token: Optional[str] = None,
+    phone_number_id: Optional[str] = None,
+    graph_version: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    token, pnid, base = _wa_config(
+        access_token=access_token,
+        phone_number_id=phone_number_id,
+        graph_version=graph_version,
+    )
+    url = f"{base}/{pnid}/messages"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "status": "read",
+        "message_id": message_id,
+        "typing_indicator": {"type": "text"},
+    }
+
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=20)
+    except Exception as exc:
+        log_system_event_sync(
+            "warning",
+            "whatsapp_typing_indicator_exception",
+            f"Excecao ao enviar typing indicator do WhatsApp: {exc}",
+            source="wa_client",
+            details={"message_id": message_id},
+        )
+        raise
+
+    if r.status_code == 401:
+        print("SEND_ERROR: token inválido/expirado")
+        print(r.text)
+        log_system_event_sync(
+            "error",
+            "whatsapp_token_invalid",
+            "Token do WhatsApp invalido ou expirado durante envio de typing indicator.",
+            source="wa_client",
+            details={"message_id": message_id, "kind": "typing_indicator", "response": r.text[:500]},
+        )
+        return None
+
+    if r.status_code >= 400:
+        log_system_event_sync(
+            "warning",
+            "whatsapp_typing_indicator_failed",
+            f"Falha ao enviar typing indicator do WhatsApp ({r.status_code}).",
+            source="wa_client",
+            details={"message_id": message_id, "status_code": r.status_code, "response": r.text[:500]},
+        )
+        raise RuntimeError(f"WA send_typing_indicator failed {r.status_code}: {r.text}")
+
+    response = r.json()
+    log_system_event_sync(
+        "info",
+        "whatsapp_typing_indicator_success",
+        "Typing indicator do WhatsApp enviado.",
+        source="wa_client",
+        details={"message_id": message_id},
+    )
+    return response
+
 def send_interactive_buttons(
     to: str,
     body: str,

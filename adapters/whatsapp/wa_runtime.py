@@ -11,7 +11,7 @@ import traceback
 from dataclasses import dataclass
 from typing import Any
 
-from adapters.whatsapp.wa_client import download_media, send_interactive_buttons, send_text
+from adapters.whatsapp.wa_client import download_media, send_interactive_buttons, send_text, send_typing_indicator
 from adapters.whatsapp.wa_parse import InboundAttachmentRef, InboundMessage, extract_messages, get_interactive_id
 from adapters.whatsapp.wa_tutorial import (
     TUTORIAL_BUTTON_IDS,
@@ -353,6 +353,11 @@ def process_message(message: InboundMessage) -> None:
         if _seen_recent(msg_id):
             logger.info("WA duplicate ignored message_id=%s", msg_id)
             return
+
+        try:
+            send_typing_indicator(msg_id)
+        except Exception as exc:
+            logger.warning("WA typing indicator failed message_id=%s error=%s", msg_id, exc)
 
         att_refs = message.attachments or []
         if att_refs:
