@@ -126,13 +126,17 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     # para evitar qualquer erro de interpretação do áudio
     if intent_result.intent == "launches.add" and intent_result.confidence >= 0.6:
         db.set_pending_action(uid, "confirm_media_launch", {"text": transcription})
-        b = lambda s: f"**{s}**" if platform == "discord" else f"*{s}*"
-        return [OutgoingMessage(text=(
-            f"{preview}"
-            f"➡️ Para confirmar e registrar, responda: `sim`\n"
-            f"✏️ Para corrigir, escreva o comando manualmente\n"
-            f"❌ Para cancelar, responda: `não`"
-        ))]
+        if platform == "whatsapp":
+            # No WhatsApp os botões "Sim" / "Não" aparecem abaixo — texto mais limpo
+            confirmation_text = f"{preview}O lançamento está correto?"
+        else:
+            confirmation_text = (
+                f"{preview}"
+                f"➡️ Para confirmar e registrar, responda: `sim`\n"
+                f"✏️ Para corrigir, escreva o comando manualmente\n"
+                f"❌ Para cancelar, responda: `não`"
+            )
+        return [OutgoingMessage(text=confirmation_text)]
 
     # Para outros intents (saldo, listar, etc.), processa diretamente
     msg_from_audio = IncomingMessage(
@@ -224,13 +228,16 @@ def _handle_image(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     if extra:
         linhas.append(f"📝 {b('Detalhe:')} {extra}")
 
-    # Instruções para confirmar ou corrigir
-    linhas += [
-        "",
-        "➡️ Para confirmar e registrar, responda: `sim`",
-        "✏️ Para corrigir, escreva o lançamento manualmente, ex: `gastei 50 no mercado`",
-        "❌ Para cancelar, responda: `não`",
-    ]
+    # Instruções para confirmar ou corrigir (Discord usa texto, WhatsApp usa botões)
+    if platform == "whatsapp":
+        linhas += ["", "O lançamento está correto?"]
+    else:
+        linhas += [
+            "",
+            "➡️ Para confirmar e registrar, responda: `sim`",
+            "✏️ Para corrigir, escreva o lançamento manualmente, ex: `gastei 50 no mercado`",
+            "❌ Para cancelar, responda: `não`",
+        ]
 
     # Salva os dados no banco temporário de pendências para o confirm.yes processar
     uid = _normalize_user_id(msg)

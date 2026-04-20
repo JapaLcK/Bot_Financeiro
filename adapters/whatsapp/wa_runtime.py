@@ -122,7 +122,7 @@ def _pending_supports_confirmation_buttons(pending: dict[str, Any] | None) -> bo
     payload = pending.get("payload") or {}
     step = payload.get("step")
 
-    if action_type in {"delete_launch", "delete_launch_bulk", "delete_pocket", "delete_investment", "credit_delete_card"}:
+    if action_type in {"delete_launch", "delete_launch_bulk", "delete_pocket", "delete_investment", "credit_delete_card", "confirm_media_launch"}:
         return True
 
     if action_type == "credit_card_set_primary":
