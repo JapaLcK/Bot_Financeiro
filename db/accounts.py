@@ -362,7 +362,7 @@ def import_ofx_launches_bulk(
                     on conflict (user_id, source, external_id) do nothing
                     """,
                     (
-                        user_id, r["tipo"], r["valor"], r.get("categoria"), r.get("nota"),
+                        user_id, r["tipo"], r["valor"], r.get("categoria"), r.get("alvo"), r.get("nota"),
                         r["criado_em"],
                         Json({"delta_conta": float(r["delta"]), "ofx": r.get("ofx_meta", {})}),
                         "ofx", r["external_id"], r.get("posted_at"), r.get("currency", "BRL"),
