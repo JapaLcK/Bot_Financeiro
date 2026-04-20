@@ -81,6 +81,8 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     if not msg.attachments:
         return None
 
+    print(f"[handle_audio] Anexos recebidos: {[(getattr(a,'filename',''), getattr(a,'content_type','')) for a in msg.attachments]}")
+
     audio_atts = [
         a for a in msg.attachments
         if is_audio_attachment(
@@ -89,6 +91,7 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
         )
     ]
     if not audio_atts:
+        print("[handle_audio] Nenhum anexo reconhecido como áudio.")
         return None
 
     a = audio_atts[0]

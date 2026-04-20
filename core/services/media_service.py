@@ -69,7 +69,9 @@ def transcribe_audio(data: bytes, filename: str) -> str | None:
     Retorna o texto transcrito ou None em caso de falha.
     """
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    print(f"[media_service] transcribe_audio chamado | filename={filename} | api_key={'OK' if api_key else 'AUSENTE'}")
     if not api_key:
+        print("[media_service] OPENAI_API_KEY não configurada — transcrição indisponível.")
         logger.warning("[media_service] OPENAI_API_KEY não configurada — transcrição indisponível.")
         return None
 
