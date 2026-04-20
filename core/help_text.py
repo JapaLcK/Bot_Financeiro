@@ -22,7 +22,7 @@ HELP_SECTIONS: dict[str, str] = {
         "• `saldo`\n"
         "• `gastei 50 mercado`\n"
         "• `recebi 1000 salario`\n"
-        "• `importar ofx` + anexo\n"
+        "• Envie um arquivo `.ofx` → importa extrato ou fatura automaticamente\n"
         "\n"
         "Dica: digite `ajuda` para abrir o menu completo."
     ),
@@ -33,35 +33,61 @@ HELP_SECTIONS: dict[str, str] = {
         "• `gastei 50 mercado`\n"
         "• `saldo`\n"
         "• `gastos` ou `meus gastos` → últimos lançamentos\n\n"
-        "2) **Importe seu extrato (OFX)**\n"
-        "• Envie `importar ofx` + anexo `.ofx`\n"
-        "• Duplicadas são ignoradas\n\n"
-        "3) **Cartão de crédito**\n"
+        "2) **Importe seu extrato bancário (OFX)**\n"
+        "• Exporte o arquivo `.ofx` pelo site do seu banco (conta corrente/poupança)\n"
+        "• Arraste o arquivo direto no chat — o bot detecta e importa automaticamente\n"
+        "• Duplicadas são ignoradas, pode importar o mesmo arquivo mais de uma vez\n\n"
+        "3) **Importe sua fatura de cartão (OFX)**\n"
+        "• Exporte o arquivo `.ofx` pelo app ou site do cartão\n"
+        "• Arraste o arquivo direto no chat — o bot detecta que é fatura e usa o cartão cadastrado\n"
+        "• Atualiza automaticamente: valor da fatura, limite disponível e parcelamentos em aberto\n"
+        "• Parcelamentos (ex: `AMAZON 02/05`) são agrupados e mostram parcelas e valor restantes\n\n"
+        "⚠️ *O bot diferencia os dois tipos de OFX sozinho — você não precisa fazer nada diferente.*\n\n"
+        "4) **Cartão de crédito**\n"
         "• `criar cartao Nubank fecha 10 vence 17`\n"
         "• `definir limite Nubank 5000` → define o limite\n"
         "• `credito 150 mercado` ou `gastei 150 no cartao Nubank` → compra no crédito\n"
-        "• `apagar CC17` → apaga uma compra no crédito pelo código\n"
-        "• `apagar PCAB12CD34` → apaga um parcelamento pelo código curto\n"
-        "• `fatura Nubank` → saldo + uso do limite\n"
+        "• `parcelar 600 em 3x no cartao Nubank` → registra parcelamento\n"
+        "• `fatura Nubank` → saldo, uso do limite e parcelamentos ativos\n"
         "• `pagar fatura Nubank com saldo` → paga usando seu saldo\n\n"
-        "4) **Caixinhas**\n"
+        "5) **Caixinhas**\n"
         "• `criar caixinha viagem`\n"
         "• `coloquei 300 na caixinha viagem`\n\n"
-        "5) **Investimentos**\n"
+        "6) **Investimentos**\n"
         "• `criar investimento CDB 110% CDI`\n"
         "• `apliquei 200 no investimento CDB`\n\n"
-        "6) **Dashboard**\n"
+        "7) **Dashboard**\n"
         "• `dashboard`\n"
     ),
     "ofx": (
-    "🧾 **Importar extrato (OFX)**\n"
-    "• Envie: `importar ofx` + anexo `.ofx`\n"
-    "• Pode importar de novo — duplicadas são ignoradas\n"
-    "• O saldo final vem do `LEDGERBAL` do OFX\n"
-    "\n"
-    "📌 **Categorias no OFX**\n"
-    "• Se o OFX vier como \"Outros\", o bot tenta aplicar o que ele já aprendeu com seus lançamentos e regras\n"
-    "• Se não houver correspondência, fica em \"Outros\".\n"
+        "🧾 **Importar OFX — Extrato ou Fatura**\n\n"
+        "O bot detecta automaticamente o tipo de arquivo e faz a importação correta.\n"
+        "Basta arrastar o `.ofx` direto no chat — sem comandos extras.\n\n"
+        "🏦 **Extrato bancário (conta corrente / poupança)**\n"
+        "• Exporte pelo site do banco (não pelo app do cartão)\n"
+        "• Importa todas as transações do período\n"
+        "• Atualiza o saldo da conta com base no `LEDGERBAL` do arquivo\n"
+        "• Duplicadas são ignoradas — pode reimportar sem problema\n\n"
+        "💳 **Fatura de cartão de crédito**\n"
+        "• Exporte pelo app ou site do cartão\n"
+        "• O bot identifica o tipo e usa o cartão padrão (ou o único cadastrado)\n"
+        "• Atualiza automaticamente:\n"
+        "  — Valor total da fatura\n"
+        "  — Limite do cartão (se disponível no arquivo)\n"
+        "  — Crédito disponível\n"
+        "• Detecta parcelamentos pelo padrão `NN/NN` no memo (ex: `AMAZON 02/05`)\n"
+        "  — Agrupa parcelas de faturas diferentes no mesmo grupo\n"
+        "  — Mostra parcela atual, quantas faltam e o valor restante\n"
+        "  — Funciona mesmo importando faturas fora de ordem\n"
+        "  — Usuário novo que importa só a fatura atual vê as parcelas restantes corretamente\n\n"
+        "📌 **Seleção de cartão na importação de fatura**\n"
+        "• 1 cartão cadastrado → usa automaticamente\n"
+        "• Vários cartões → usa o cartão padrão (`padrao Nubank` para definir)\n"
+        "• Nenhum cartão → o bot instrui como cadastrar\n\n"
+        "📌 **Categorias no OFX**\n"
+        "• O bot aplica as regras e o histórico que já aprendeu\n"
+        "• Se não houver correspondência, fica em \"outros\"\n"
+        "• Use `aprender ifood como alimentacao` para ensinar novas regras\n"
     ),
     "cc": (
         "🏦 **Conta corrente**\n"
@@ -179,7 +205,7 @@ TITLE_MAP: dict[str, str] = {
 HELP_ORDER: list[tuple[str, str, str]] = [
     ("start", "Começar (visão geral)", "👋"),
     ("tutorial", "Tutorial", "🚀"),
-    ("ofx", "OFX (importar extrato)", "🧾"),
+    ("ofx", "OFX (importar extrato ou fatura)", "🧾"),
     ("cc", "Conta corrente", "🏦"),
     ("credit", "Cartões & Crédito", "💳"),
     ("categories", "Aprendizado de categorias", "🏷️"),
@@ -214,6 +240,9 @@ HELP_ALIASES: dict[str, str] = {
     "ofx": "ofx",
     "extrato": "ofx",
     "importar": "ofx",
+    "fatura ofx": "ofx",
+    "importar fatura": "ofx",
+    "importar extrato": "ofx",
     "conta": "cc",
     "cc": "cc",
     "caixinha": "pockets",
@@ -260,7 +289,7 @@ HELP_ALIASES: dict[str, str] = {
 _SECTION_ALIASES = {
     "start": {"start", "inicio", "início", "geral", "menu"},
     "tutorial": {"tutorial", "guia"},
-    "ofx": {"ofx", "extrato", "importar", "importarofx"},
+    "ofx": {"ofx", "extrato", "importar", "importarofx", "fatura ofx", "importar fatura", "importar extrato"},
     "cc": {"cc", "conta", "conta corrente", "corrente", "saldo"},
     "pockets": {"caixinhas", "caixinha", "pockets"},
     "invest": {"invest", "investimentos", "investimento"},
