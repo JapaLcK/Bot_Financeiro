@@ -28,7 +28,7 @@ from adapters.whatsapp.wa_help_menu import (
 from core.handle_incoming import handle_incoming
 from core.observability import log_system_event_sync
 from core.types import IncomingMessage
-from db import attempt_whatsapp_phone_link, get_or_create_canonical_user, get_pending_action
+from db import attempt_whatsapp_phone_link, get_conn, get_or_create_canonical_user, get_pending_action
 from utils_phone import mask_phone
 
 logger = logging.getLogger(__name__)
@@ -188,6 +188,74 @@ def _is_greeting(text: str) -> bool:
     return normalized in {"oi", "ola", "olá", "hello", "hi", "hey", "bom dia", "boa tarde", "boa noite"}
 
 
+def _build_autolink_warning_message(status: str, auto_link_result: dict[str, Any]) -> str | None:
+    if status == "no_match":
+        return (
+            "⚠️ Não encontrei nenhuma conta cadastrada com este número de WhatsApp.\n"
+            "Crie sua conta no site usando este mesmo número ou use o fluxo de código/link para vincular."
+        )
+    if status == "multiple_accounts":
+        return "⚠️ Encontrei mais de uma conta com este número. Não consegui vincular automaticamente."
+    if status == "wa_linked_other_account":
+        return "⚠️ Este WhatsApp já está vinculado a outra conta. Revise seu cadastro ou use outro número."
+    if status == "account_has_other_whatsapp":
+        return (
+            "⚠️ Sua conta já tem outro WhatsApp vinculado. "
+            f"Este número ({mask_phone(auto_link_result['wa_phone'])}) não foi conectado automaticamente."
+        )
+    return None
+
+
+def _autolink_warning_already_sent(wa_id: str, status: str) -> bool:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM system_event_logs
+                    WHERE event_type = 'whatsapp_autolink_greeting_warning_sent'
+                      AND details->>'wa_id' = %s
+                      AND details->>'status' = %s
+                    LIMIT 1
+                    """,
+                    (wa_id, status),
+                )
+                return cur.fetchone() is not None
+    except Exception as exc:
+        logger.warning("WA autolink warning lookup failed wa_id=%s status=%s error=%s", wa_id, status, exc)
+        return False
+
+
+def _maybe_send_autolink_greeting_warning(
+    reply_to: str,
+    message_text: str,
+    status: str,
+    auto_link_result: dict[str, Any],
+    user_id: int | None = None,
+) -> bool:
+    if not _is_greeting(message_text):
+        return False
+
+    body = _build_autolink_warning_message(status, auto_link_result)
+    if not body:
+        return False
+
+    if _autolink_warning_already_sent(reply_to, status):
+        return False
+
+    _send_reply(reply_to, body)
+    log_system_event_sync(
+        "info",
+        "whatsapp_autolink_greeting_warning_sent",
+        "Aviso de vinculação automática enviado no primeiro greeting do WhatsApp.",
+        source="wa_runtime",
+        user_id=user_id,
+        details={"wa_id": reply_to, "status": status},
+    )
+    return True
+
+
 def process_message(message: InboundMessage) -> None:
     try:
         reply_to = message.wa_id
@@ -243,36 +311,20 @@ def process_message(message: InboundMessage) -> None:
                         ),
                     )
                 return
-        elif auto_link_result["status"] == "no_match" and _is_greeting(message.text or ""):
-            _send_reply(
+        elif auto_link_result["status"] in {
+            "no_match",
+            "multiple_accounts",
+            "wa_linked_other_account",
+            "account_has_other_whatsapp",
+        }:
+            if _maybe_send_autolink_greeting_warning(
                 reply_to,
-                (
-                    "⚠️ Não encontrei nenhuma conta cadastrada com este número de WhatsApp.\n"
-                    "Crie sua conta no site usando este mesmo número ou use o fluxo de código/link para vincular."
-                ),
-            )
-            return
-        elif auto_link_result["status"] == "multiple_accounts" and _is_greeting(message.text or ""):
-            _send_reply(
-                reply_to,
-                "⚠️ Encontrei mais de uma conta com este número. Não consegui vincular automaticamente.",
-            )
-            return
-        elif auto_link_result["status"] == "wa_linked_other_account" and _is_greeting(message.text or ""):
-            _send_reply(
-                reply_to,
-                "⚠️ Este WhatsApp já está vinculado a outra conta. Revise seu cadastro ou use outro número.",
-            )
-            return
-        elif auto_link_result["status"] == "account_has_other_whatsapp" and _is_greeting(message.text or ""):
-            _send_reply(
-                reply_to,
-                (
-                    "⚠️ Sua conta já tem outro WhatsApp vinculado. "
-                    f"Este número ({mask_phone(auto_link_result['wa_phone'])}) não foi conectado automaticamente."
-                ),
-            )
-            return
+                message.text or "",
+                auto_link_result["status"],
+                auto_link_result,
+                user_id=uid,
+            ):
+                return
 
         # ---------------------------------------------------------------
         # Interceptação de mensagens interativas (botões / listas)
