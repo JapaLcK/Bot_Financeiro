@@ -73,15 +73,64 @@ def _bold(text: str, platform: str) -> str:
 # Handlers de mídia
 # ---------------------------------------------------------------------------
 
+def _split_audio_transactions(text: str) -> list[str]:
+    """
+    Detecta múltiplos lançamentos em um único áudio e os separa.
+    Ex: "recebi 600 da mãe e gastei 100 no mercado" → ["recebi 600 da mãe", "gastei 100 no mercado"]
+    Retorna lista com um único item se não detectar múltiplos lançamentos.
+    """
+    # Verbos que iniciam um lançamento financeiro
+    FINANCIAL_VERBS = (
+        r"gastei|paguei|comprei|debitei|mandei|enviei|pixei|gasto|"
+        r"recebi|ganhei|receita"
+    )
+    # Separadores que podem introduzir um segundo lançamento
+    # "e gastei", "mas também recebi", "além disso gastei", etc.
+    split_pattern = re.compile(
+        r"\s+(?:e\s+também|também|mas\s+também|além\s+disso|e)\s+"
+        rf"(?={FINANCIAL_VERBS})",
+        re.IGNORECASE,
+    )
+    parts = split_pattern.split(text)
+    cleaned = [p.strip() for p in parts if p.strip()]
+    return cleaned if len(cleaned) > 1 else [text]
+
+
+def _process_audio_transaction(uid: int, transcription: str, msg: IncomingMessage, platform: str) -> str:
+    """
+    Processa um único lançamento de áudio diretamente (sem confirmação).
+    Retorna a resposta formatada.
+    """
+    intent_result = classify(transcription)
+    msg_from_audio = IncomingMessage(
+        platform=msg.platform,
+        user_id=uid,
+        text=transcription,
+        message_id=msg.message_id,
+        attachments=[],
+        external_id=msg.external_id,
+        raw=msg.raw,
+    )
+    raw_response = route(intent_result, msg_from_audio)
+    return format_for_platform(raw_response, platform)
+
+
 def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] | None:
     """
-    Detecta anexo de áudio, transcreve via Whisper e processa como texto.
-    Retorna lista de OutgoingMessage ou None se não houver áudio.
+    Detecta anexo de áudio, transcreve via Whisper e processa diretamente.
+
+    Fluxo:
+      1. Transcreve com Whisper
+      2. Mostra o que foi entendido
+      3. Detecta múltiplos lançamentos no mesmo áudio e processa cada um
+      4. Processa sem confirmação — se errar, o usuário pode dizer "desfazer"
+
+    Confirmação foi removida do áudio porque múltiplos áudios enviados ao mesmo
+    tempo sobrescrevem a pendência no banco, causando perda de lançamentos.
+    Imagens ainda usam confirmação (extração visual é menos confiável).
     """
     if not msg.attachments:
         return None
-
-    print(f"[handle_audio] Anexos recebidos: {[(getattr(a,'filename',''), getattr(a,'content_type','')) for a in msg.attachments]}")
 
     audio_atts = [
         a for a in msg.attachments
@@ -91,7 +140,6 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
         )
     ]
     if not audio_atts:
-        print("[handle_audio] Nenhum anexo reconhecido como áudio.")
         return None
 
     a = audio_atts[0]
@@ -113,46 +161,27 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
             )
         )]
 
-    # Informa o usuário o que foi entendido — evita erros de interpretação silenciosos
-    preview = f'🎙️ Entendi: _"{transcription}"_\n\n' if platform == "discord" else f'🎙️ Entendi: "{transcription}"\n\n'
-
     uid = _normalize_user_id(msg)
     db.ensure_user(uid)
     db.update_last_activity(uid)
 
-    intent_result = classify(transcription)
+    prefix = "_" if platform == "discord" else ""
+    preview = f'🎙️ {prefix}Entendi: "{transcription}"{prefix}\n\n'
 
-    # Se for um lançamento (despesa/receita), pede confirmação antes de registrar
-    # para evitar qualquer erro de interpretação do áudio
-    if intent_result.intent == "launches.add" and intent_result.confidence >= 0.6:
-        db.set_pending_action(uid, "confirm_media_launch", {"text": transcription})
-        if platform == "whatsapp":
-            # No WhatsApp os botões "Sim" / "Não" aparecem abaixo — texto mais limpo
-            confirmation_text = f"{preview}O lançamento está correto?"
-        else:
-            confirmation_text = (
-                f"{preview}"
-                f"➡️ Para confirmar e registrar, responda: `sim`\n"
-                f"✏️ Para corrigir, escreva o comando manualmente\n"
-                f"❌ Para cancelar, responda: `não`"
-            )
-        return [OutgoingMessage(text=confirmation_text)]
+    # Detecta múltiplos lançamentos no mesmo áudio
+    parts = _split_audio_transactions(transcription)
 
-    # Para outros intents (saldo, listar, etc.), processa diretamente
-    msg_from_audio = IncomingMessage(
-        platform=msg.platform,
-        user_id=uid,
-        text=transcription,
-        message_id=msg.message_id,
-        attachments=[],   # remove o anexo para não re-processar
-        external_id=msg.external_id,
-        raw=msg.raw,
-    )
+    responses = []
+    for part in parts:
+        result_text = _process_audio_transaction(uid, part, msg, platform)
+        responses.append(result_text)
 
-    raw_response = route(intent_result, msg_from_audio)
-    formatted = format_for_platform(raw_response, platform)
+    body = "\n\n".join(responses)
 
-    return [OutgoingMessage(text=preview + formatted)]
+    # Dica de desfazer só quando há lançamentos processados
+    undo_hint = "\n\n↩️ Para desfazer, diga: _desfazer_" if platform == "discord" else "\n\n↩️ Para desfazer, diga: desfazer"
+
+    return [OutgoingMessage(text=preview + body + undo_hint)]
 
 
 def _handle_image(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] | None:
