@@ -12,6 +12,7 @@ Diferenças em relação ao extrato bancário (ofx_import.py):
 import io
 import hashlib
 import re
+from collections import Counter
 from datetime import datetime, date
 from decimal import Decimal
 
@@ -96,6 +97,18 @@ def _parse_installment(memo: str) -> tuple[int, int] | None:
         if 1 <= no <= total <= 60 and total > 1:
             return no, total
     return None
+
+
+# Memos que indicam pagamento de fatura — não devem ser importados como compras
+_PAYMENT_MEMO_RE = re.compile(
+    r"\b(pagamento\s+recebido|payment\s+received|pag\.?\s*recebido|bill\s+payment)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_payment_memo(memo: str) -> bool:
+    """Retorna True se o memo indica pagamento de fatura anterior (não uma compra)."""
+    return bool(_PAYMENT_MEMO_RE.search(memo))
 
 
 def _memo_base(memo: str) -> str:
@@ -186,15 +199,30 @@ def import_credit_ofx_bytes(
         if kw and cat
     ]
 
+    # ── Pré-conta quantas vezes cada FITID aparece ───────────────────────────
+    # O Nubank agrupa a antecipação de parcelas sob um único FITID para todas
+    # as transações do lote. Se usarmos o FITID bruto como external_id, todas
+    # seriam deduplicas como "já inseridas" após a primeira.
+    # Solução: quando um FITID aparece N vezes, usar FITID_1, FITID_2, …, FITID_N.
+    fitid_count: Counter = Counter()
+    for trn in txs:
+        fid = getattr(trn, "id", None) or getattr(trn, "fitid", None)
+        if fid:
+            fitid_count[str(fid)] += 1
+
+    fitid_seen: Counter = Counter()
+
     tx_rows: list[dict] = []
     min_d: date | None = None
     max_d: date | None = None
     installments_detected = 0
+    skipped_payments = 0
 
     for trn in txs:
         fitid = getattr(trn, "id", None) or getattr(trn, "fitid", None)
         if not fitid:
             continue  # Mais tolerante na fatura do que no extrato
+        fitid_str = str(fitid)
 
         # Data da transação
         d = (
@@ -230,14 +258,30 @@ def import_credit_ofx_bytes(
 
         # No OFX de fatura:
         #   Valores negativos  = gastos (despesa)
-        #   Valores positivos  = pagamentos ou estornos
+        #   Valores positivos  = pagamentos ou estornos/créditos
         trn_type = (getattr(trn, "type", None) or "").upper().strip()
         if amount < 0 or trn_type in {"DEBIT", "DIRECTDEBIT", "FEE", "POS", "CHECK", "ATM"}:
             tipo = "despesa"
         else:
             tipo = "estorno"
 
+        # ── Filtra pagamentos de fatura ──────────────────────────────────────
+        # "Pagamento recebido" aparece no OFX quando o cliente pagou a fatura
+        # anterior. Não é uma compra — ignorar para não distorcer o total.
+        if tipo == "estorno" and _is_payment_memo(memo):
+            skipped_payments += 1
+            continue
+
         valor = abs(amount)
+
+        # ── external_id único por transação ─────────────────────────────────
+        # Se o FITID aparece mais de uma vez no arquivo (ex: Nubank antecipação),
+        # adiciona sufixo _N para garantir unicidade e evitar falsa deduplicação.
+        fitid_seen[fitid_str] += 1
+        if fitid_count[fitid_str] > 1:
+            external_id = f"{fitid_str}_{fitid_seen[fitid_str]}"
+        else:
+            external_id = fitid_str
 
         # Categorização
         memo_norm = normalize_text(memo)
@@ -253,7 +297,7 @@ def import_credit_ofx_bytes(
             installments_detected += 1
 
         tx_rows.append({
-            "external_id": str(fitid),
+            "external_id": external_id,
             "posted_at": posted_at,
             "valor": valor,
             "tipo": tipo,

@@ -1605,9 +1605,18 @@ def handle(user_id: int, text: str) -> str | None:
             ]
             group_summaries = get_installment_group_summaries(user_id, group_ids_nesta_fatura)
 
-            # Separa parcelamentos de compras simples
-            installment_items = [it for it in items if it.get("group_id") and it.get("installments_total", 0) > 1]
-            simple_items = [it for it in items if not (it.get("group_id") and it.get("installments_total", 0) > 1)]
+            # Separa parcelamentos, compras simples e estornos/descontos
+            installment_items = [
+                it for it in items
+                if it.get("group_id") and it.get("installments_total", 0) > 1
+                and not it.get("is_refund")
+            ]
+            simple_items = [
+                it for it in items
+                if not (it.get("group_id") and it.get("installments_total", 0) > 1)
+                and not it.get("is_refund")
+            ]
+            refund_items = [it for it in items if it.get("is_refund")]
 
             # ── Parcelamentos ─────────────────────────────────────────────────
             # Exibe um bloco por group_id (evita repetir se várias parcelas do
@@ -1677,6 +1686,16 @@ def handle(user_id: int, text: str) -> str | None:
                 for it in display_simple:
                     lines.append(
                         f"  • {fmt_brl(float(it['valor']))} | {it['categoria'] or 'outros'}"
+                        f" | {fmt_br(it['purchased_at'])} | {it['nota'] or ''}"
+                    )
+
+            # ── Estornos e descontos ──────────────────────────────────────────
+            if refund_items:
+                lines.append("")
+                lines.append("↩️ **Estornos / Descontos:**")
+                for it in refund_items[:5]:
+                    lines.append(
+                        f"  • -{fmt_brl(float(it['valor']))} | {it['categoria'] or 'outros'}"
                         f" | {fmt_br(it['purchased_at'])} | {it['nota'] or ''}"
                     )
 
