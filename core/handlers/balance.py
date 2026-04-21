@@ -32,12 +32,10 @@ def check(user_id: int) -> str:
     # ── Gastos do mês ────────────────────────────────────────────────────
     mes_inicio = today.replace(day=1)
     summary = db.get_summary_by_period(user_id, mes_inicio, today)
-    total_mes = 0.0
-    for row in summary:
-        if row["tipo"] == "despesa":
-            total_mes = float(row["total"])
-            break
-    mes_nome = today.strftime("%B").capitalize()
+    total_mes = summary.get("despesa", 0.0)
+    _MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+              "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
+    mes_nome = _MESES[today.month - 1]
     lines.append("")
     lines.append(f"📊 *Gastos em {mes_nome}*: {fmt_brl(total_mes)}")
 
