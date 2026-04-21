@@ -168,10 +168,16 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .cat-budget-info { font-size:.67rem;color:var(--text-3);text-align:right;margin-bottom:3px; }
 .bar-wrap { height:4px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden; }
 .bar-fill { height:100%;border-radius:3px;transition:width .6s var(--ease); }
-.bgt-btn { background:none;border:1px solid rgba(167,139,250,.4);cursor:pointer;color:#a78bfa;
-  font-size:1rem;padding:1px 7px;border-radius:20px;line-height:1.4;
-  transition:background .2s,color .2s,border-color .2s;margin-left:5px;flex-shrink:0; }
-.bgt-btn:hover { background:rgba(167,139,250,.15);border-color:rgba(167,139,250,.75);color:#c4b5fd; }
+.bgt-btn { background:none;border:none;cursor:pointer;color:var(--text-3);font-size:.95rem;
+  padding:2px 4px;border-radius:4px;transition:color .2s;margin-left:5px;flex-shrink:0;
+  position:relative; }
+.bgt-btn:hover { color:#a78bfa; }
+.bgt-btn::after { content:"Definir limite";position:absolute;bottom:calc(100% + 6px);right:0;
+  background:#1e1b2e;color:#c4b5fd;font-size:.62rem;font-weight:600;letter-spacing:.03em;
+  padding:3px 8px;border-radius:6px;border:1px solid rgba(167,139,250,.35);white-space:nowrap;
+  opacity:0;pointer-events:none;transform:translateY(4px);
+  transition:opacity .18s,transform .18s; }
+.bgt-btn:hover::after { opacity:1;transform:translateY(0); }
 
 /* ─── Tags ──────────────────────────────────────────────────────────── */
 .tag { display:inline-block;border-radius:5px;padding:2px 7px;font-size:.65rem;font-weight:600;letter-spacing:.02em;margin-right:4px;vertical-align:middle; }
