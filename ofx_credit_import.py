@@ -163,6 +163,14 @@ def import_credit_ofx_bytes(
     if not ofx_bytes:
         raise ValueError("OFX vazio.")
 
+    # Normaliza encoding: OFX pode declarar CHARSET:1252 (Windows-1252/latin-1).
+    # Se os bytes não forem UTF-8 válido, redecodifica em cp1252 e converte para UTF-8
+    # para que o parser e os memos fiquem com acentos corretos.
+    try:
+        ofx_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        ofx_bytes = ofx_bytes.decode("cp1252", errors="replace").encode("utf-8")
+
     file_hash = hashlib.sha256(ofx_bytes).hexdigest()
 
     # Extrai campos específicos de cartão antes do parse
