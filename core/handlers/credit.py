@@ -372,8 +372,41 @@ def _parse_card_name_from_create(text: str) -> str | None:
     if not m:
         return None
     raw = m.group(1).strip()
-    raw = re.sub(r"\s+fecha\s+\d{1,2}.*$", "", raw, flags=re.IGNORECASE).strip()
+    # Remove sufixos "fecha(mento) N" e "vence/vencimento N" e tudo depois
+    raw = re.sub(
+        r"\s+(?:fecha(?:mento)?|venc(?:e|imento)?)\s+\d{1,2}\b.*$",
+        "",
+        raw,
+        flags=re.IGNORECASE,
+    ).strip()
     return raw or None
+
+
+def _parse_inline_days(text: str) -> tuple[int | None, int | None]:
+    """
+    Extrai closing_day e due_day de um comando inline como:
+      'criar cartão Nubank fechamento 01 vencimento 08'
+      'criar cartão Nubank fecha 10 vence 17'
+    Retorna (closing_day, due_day) ou (None, None) se não encontrado.
+    """
+    m_close = re.search(
+        r"\b(?:fecha(?:mento)?)\s+(\d{1,2})\b",
+        text,
+        re.IGNORECASE,
+    )
+    m_due = re.search(
+        r"\b(?:venc(?:e|imento)?)\s+(\d{1,2})\b",
+        text,
+        re.IGNORECASE,
+    )
+    closing = int(m_close.group(1)) if m_close else None
+    due = int(m_due.group(1)) if m_due else None
+    # Valida range
+    if closing is not None and not (1 <= closing <= 31):
+        closing = None
+    if due is not None and not (1 <= due <= 31):
+        due = None
+    return closing, due
 
 
 def _is_card_create_request(text: str) -> bool:
@@ -669,6 +702,7 @@ def _finish_card_setup(user_id: int, card_id: int, ask_primary: bool) -> str:
 def start_card_create_flow(user_id: int, text: str = "") -> str:
     existing_cards = list_cards(user_id)
     inferred_name = _parse_card_name_from_create(text)
+    inferred_closing, inferred_due = _parse_inline_days(text) if text else (None, None)
 
     # Detecta duplicata imediatamente ao inferir o nome
     if inferred_name and card_name_exists(user_id, inferred_name):
@@ -676,15 +710,48 @@ def start_card_create_flow(user_id: int, text: str = "") -> str:
             "card_name": inferred_name,
             "existing_count": len(existing_cards),
             "ask_primary": len(existing_cards) > 0,
+            "closing_day": inferred_closing,
+            "due_day": inferred_due,
         }
         return _prompt_duplicate_card(user_id, inferred_name, payload)
+
+    # Comando completo (nome + fechamento + vencimento) → cria direto sem perguntar
+    if inferred_name and inferred_closing and inferred_due:
+        card_id = create_card(
+            user_id=user_id,
+            name=inferred_name,
+            closing_day=inferred_closing,
+            due_day=inferred_due,
+        )
+        first_card = len(existing_cards) == 0
+        if first_card:
+            set_default_card(user_id, card_id)
+        card = get_card_by_id(user_id, card_id)
+        payload = {
+            "step": "reminder_opt_in",
+            "card_name": inferred_name,
+            "card_id": card_id,
+            "closing_day": inferred_closing,
+            "due_day": inferred_due,
+            "existing_count": len(existing_cards),
+        }
+        set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
+        return (
+            f"✅ Cartão **{inferred_name}** criado!\n"
+            f"{_card_summary(card)}\n\n"
+            "Gostaria de receber notificações antes do vencimento da fatura? Responda **sim** ou **não**."
+        )
 
     payload = {
         "step": "name" if not inferred_name else "closing_day",
         "card_name": inferred_name,
+        "closing_day": inferred_closing,
+        "due_day": inferred_due,
         "existing_count": len(existing_cards),
     }
     set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
+    if inferred_name and inferred_closing:
+        return f"Perfeito. E qual é o dia de vencimento do cartão **{inferred_name}**?"
     if inferred_name:
         return f"Perfeito. Quando fecha a fatura do cartão **{inferred_name}**?"
     return "Qual cartão deseja registrar?"
