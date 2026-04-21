@@ -1465,8 +1465,10 @@ def handle(user_id: int, text: str) -> str | None:
                 due = max(0.0, total - paid)
                 if total == 0.0 and paid == 0.0 and due == 0.0:
                     continue
-                ps = r["period_start"]
-                groups[(ps.year, ps.month)].append((r, total, paid, due))
+                # Agrupa pelo mês do FECHAMENTO (period_end), que é a convenção
+                # usada pelos bancos (Nubank, Itaú etc.): "fatura de maio" = fecha em maio.
+                pe = r["period_end"]
+                groups[(pe.year, pe.month)].append((r, total, paid, due))
 
             if not groups:
                 return "📭 Nenhuma fatura em aberto (as futuras zeradas foram ocultadas)."
