@@ -178,42 +178,28 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None, 
             )
             investments = await cur.fetchall()
 
-<<<<<<< Updated upstream
-                        # Total launches for the requested month (todos, incluindo movimentações internas)
-=======
                         # Total launches for the requested month (excluindo criação/remoção de bolsos)
->>>>>>> Stashed changes
             await cur.execute(
                 """
                 SELECT COUNT(*) AS total
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
-<<<<<<< Updated upstream
-=======
                   AND tipo NOT IN ('criar_caixinha', 'delete_pocket')
->>>>>>> Stashed changes
                 """,
                 (user_id, month_start, month_end),
             )
             launches_total_row = await cur.fetchone()
             launches_total = int(launches_total_row["total"] or 0)
 
-<<<<<<< Updated upstream
-            # Launches for the requested month (paginated) — inclui is_internal_movement para tag visual
-=======
             # Launches for the requested month (paginated) — exclui apenas criação/remoção de bolsos
->>>>>>> Stashed changes
             await cur.execute(
                 """
                 SELECT tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
-<<<<<<< Updated upstream
-=======
                   AND tipo NOT IN ('criar_caixinha', 'delete_pocket')
->>>>>>> Stashed changes
                 ORDER BY criado_em DESC
                 LIMIT %s OFFSET %s
                 """,
