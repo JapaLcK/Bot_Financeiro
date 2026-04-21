@@ -168,9 +168,11 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .cat-budget-info { font-size:.67rem;color:var(--text-3);text-align:right;margin-bottom:3px; }
 .bar-wrap { height:4px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden; }
 .bar-fill { height:100%;border-radius:3px;transition:width .6s var(--ease); }
-.bgt-btn { background:none;border:none;cursor:pointer;color:var(--text-3);font-size:.78rem;
-  padding:2px 4px;border-radius:4px;transition:color .2s;margin-left:5px;flex-shrink:0; }
-.bgt-btn:hover { color:var(--purple); }
+.bgt-btn { background:none;border:1px solid rgba(167,139,250,.35);cursor:pointer;color:#a78bfa;
+  font-size:.65rem;font-weight:600;padding:2px 8px;border-radius:20px;
+  transition:background .2s,color .2s,border-color .2s;margin-left:5px;flex-shrink:0;
+  letter-spacing:.02em;white-space:nowrap; }
+.bgt-btn:hover { background:rgba(167,139,250,.15);border-color:rgba(167,139,250,.7);color:#c4b5fd; }
 
 /* ─── Tags ──────────────────────────────────────────────────────────── */
 .tag { display:inline-block;border-radius:5px;padding:2px 7px;font-size:.65rem;font-weight:600;letter-spacing:.02em;margin-right:4px;vertical-align:middle; }
@@ -1022,7 +1024,7 @@ function render(d) {
               <div class="cat-hdr">
                 <span class="cat-lbl">${c.categoria==="sem categoria"?"⚠ Sem Categoria":c.categoria}</span>
                 <span class="cat-val" data-num="cat_${c.categoria}" data-val="${c.total}">${fmt(c.total)}</span>
-                <button class="bgt-btn" onclick="openBudget('${catSafe}')" title="Definir orçamento">✏️</button>
+                <button class="bgt-btn" onclick="openBudget('${catSafe}')" title="Definir limite de orçamento">⚙ Limite</button>
               </div>
               ${hb?`<div class="cat-budget-info">${c.budget_pct}% de ${fmt(c.budget)}</div>`:""}
               <div class="bar-wrap"><div class="bar-fill" style="width:${bw}%;background:${bc}"></div></div>
