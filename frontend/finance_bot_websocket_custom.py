@@ -1211,6 +1211,10 @@ async def serve_dashboard_login():
 async def serve_privacy():
     return FileResponse(HERE / "privacy.html", media_type="text/html")
 
+@app.get("/changelog")
+async def serve_changelog():
+    return FileResponse(HERE / "changelog.html", media_type="text/html")
+
 @app.get("/favicon.png")
 async def serve_favicon():
     return FileResponse(HERE / "favicon.png", media_type="image/png")
