@@ -1029,7 +1029,7 @@ function render(d) {
               <div class="cat-hdr">
                 <span class="cat-lbl">${c.categoria==="sem categoria"?"⚠ Sem Categoria":c.categoria}</span>
                 <span class="cat-val" data-num="cat_${c.categoria}" data-val="${c.total}">${fmt(c.total)}</span>
-                <button class="bgt-btn" onclick="openBudget('${catSafe}')" title="Definir limite de orçamento">✏️</button>
+                <button class="bgt-btn" onclick="openBudget('${catSafe}')" title="Definir limite de orçamento">⚙️</button>
               </div>
               ${hb?`<div class="cat-budget-info">${c.budget_pct}% de ${fmt(c.budget)}</div>`:""}
               <div class="bar-wrap"><div class="bar-fill" style="width:${bw}%;background:${bc}"></div></div>
