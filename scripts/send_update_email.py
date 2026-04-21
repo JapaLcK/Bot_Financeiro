@@ -45,6 +45,7 @@ def build_html(user_id: int, email: str) -> str:
             <code style="background:rgba(124,58,237,.15);border-radius:6px;padding:1px 6px;color:#a78bfa;">criar cartão Nubank fechamento 01 vencimento 08</code></li>
         <li>📅 <strong>Nomes de fatura iguais ao banco</strong> — "Maio/2026" no bot = fatura de maio no app</li>
         <li>🔢 <strong>Total com descontos</strong> — estornos e descontos já subtraídos do total</li>
+        <li>📊 <strong>Saldo completo</strong> — o comando <em>saldo</em> agora mostra conta corrente, gastos do dia, total do mês e fatura de cada cartão</li>
       </ul>
 
       <div class="box" style="text-align:center;margin-top:24px;">
@@ -71,7 +72,8 @@ def build_text() -> str:
         "📦 Parcelamentos detectados — veja parcelas restantes na fatura\n"
         "💳 Cadastro rápido de cartão — criar cartão Nubank fechamento 01 vencimento 08\n"
         "📅 Nomes de fatura iguais ao banco\n"
-        "🔢 Total com descontos e estornos já subtraídos\n\n"
+        "🔢 Total com descontos e estornos já subtraídos\n"
+        "📊 Saldo completo — mostra conta, gastos do dia, total do mês e faturas\n\n"
         "Quer saber mais? https://pigbankai.com/changelog\n\n"
         "Qualquer dúvida, é só chamar!\n\nUm abraço, Piggy 🐷"
     )
