@@ -909,9 +909,9 @@ def consolidate_duplicate_bills(user_id: int, card_id: int, closing_day: int) ->
                     """
                     update credit_bills
                     set total = (
-                        select coalesce(sum(valor), 0)
+                        select coalesce(sum(case when is_refund=false then valor else -abs(valor) end), 0)
                         from credit_transactions
-                        where bill_id=%s and is_refund=false
+                        where bill_id=%s
                     )
                     where id=%s
                     """,
@@ -1095,9 +1095,9 @@ def import_credit_ofx_bulk(
                     """
                     update credit_bills
                     set total = (
-                        select coalesce(sum(valor), 0)
+                        select coalesce(sum(case when is_refund=false then valor else -abs(valor) end), 0)
                         from credit_transactions
-                        where bill_id=%s and is_refund=false
+                        where bill_id=%s
                     )
                     where id=%s
                     """,
