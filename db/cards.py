@@ -827,6 +827,102 @@ def list_installment_groups(user_id: int, limit: int = 15):
             return cur.fetchall()
 
 
+def consolidate_duplicate_bills(user_id: int, card_id: int, closing_day: int) -> int:
+    """
+    Mescla credit_bills duplicadas do mesmo cartão que caem no mesmo mês de fechamento.
+
+    Isso pode acontecer quando o OFX foi importado antes do fix de period, gerando
+    uma bill com datas brutas do arquivo e outra calculada pelo closing_day.
+
+    Estratégia:
+      - Agrupa as bills abertas por (ano, mês) do period_end
+      - Se mais de uma bill no mesmo mês: mantém a com mais transações, move
+        todas as transações das outras para ela, deleta as duplicadas
+      - Recalcula total da bill vencedora
+
+    Retorna o número de merges realizados.
+    """
+    from collections import defaultdict
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, period_start, period_end, total
+                from credit_bills
+                where user_id=%s and card_id=%s and status='open'
+                order by period_end
+                """,
+                (user_id, card_id),
+            )
+            bills = cur.fetchall()
+
+        if not bills:
+            return 0
+
+        # Agrupa por (ano, mês) do period_end
+        by_month: dict[tuple, list] = defaultdict(list)
+        for b in bills:
+            key = (b["period_end"].year, b["period_end"].month)
+            by_month[key].append(b)
+
+        merges = 0
+        with conn.cursor() as cur:
+            for (y, m), group in by_month.items():
+                if len(group) <= 1:
+                    continue
+
+                # Bill canônica: prefere a cujo period_end coincide com o closing_day
+                import calendar as _cal
+                last = _cal.monthrange(y, m)[1]
+                canonical_end = date(y, m, min(closing_day, last))
+                canonical = next((b for b in group if b["period_end"] == canonical_end), None)
+
+                # Se nenhuma bate exatamente, pega a com mais transações
+                if canonical is None:
+                    cur.execute(
+                        "select bill_id, count(*) as cnt from credit_transactions "
+                        "where bill_id = any(%s) group by bill_id order by cnt desc limit 1",
+                        ([b["id"] for b in group],),
+                    )
+                    row = cur.fetchone()
+                    winner_id = row["bill_id"] if row else group[0]["id"]
+                    canonical = next(b for b in group if b["id"] == winner_id)
+
+                others = [b for b in group if b["id"] != canonical["id"]]
+
+                for other in others:
+                    # Move transações para a bill canônica
+                    cur.execute(
+                        "update credit_transactions set bill_id=%s where bill_id=%s",
+                        (canonical["id"], other["id"]),
+                    )
+                    # Remove a bill duplicada
+                    cur.execute(
+                        "delete from credit_bills where id=%s",
+                        (other["id"],),
+                    )
+                    merges += 1
+
+                # Recalcula total da bill canônica
+                cur.execute(
+                    """
+                    update credit_bills
+                    set total = (
+                        select coalesce(sum(valor), 0)
+                        from credit_transactions
+                        where bill_id=%s and is_refund=false
+                    )
+                    where id=%s
+                    """,
+                    (canonical["id"], canonical["id"]),
+                )
+
+        conn.commit()
+
+    return merges
+
+
 def import_credit_ofx_bulk(
     user_id: int,
     card_id: int,
@@ -1034,6 +1130,24 @@ def import_credit_ofx_bulk(
 
     # bill_id principal = primeira fatura afetada (compatibilidade com chamadores)
     main_bill_id = next(iter(affected_bill_ids), None)
+
+    # Consolida bills duplicadas que possam ter sido criadas em importações anteriores
+    # (antes do fix de closing_day). Seguro de chamar sempre — sem-op se não há dups.
+    consolidate_duplicate_bills(user_id, card_id, closing_day)
+
+    # Após consolidação, o main_bill_id pode ter mudado — busca a bill canônica do mês
+    if dt_end:
+        ps, pe = billing_period_for_close_day(dt_end, closing_day)
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select id from credit_bills where user_id=%s and card_id=%s "
+                    "and period_end=%s limit 1",
+                    (user_id, card_id, pe),
+                )
+                row = cur.fetchone()
+                if row:
+                    main_bill_id = row["id"]
 
     return {
         "inserted": inserted,
