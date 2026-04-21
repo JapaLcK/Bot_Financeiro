@@ -185,7 +185,7 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None, 
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
-                  AND tipo NOT IN ('criar_caixinha', 'delete_pocket')
+                  AND tipo NOT IN ('criar_caixinha', 'delete_pocket', 'create_investment', 'delete_investment')
                 """,
                 (user_id, month_start, month_end),
             )
@@ -199,7 +199,7 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None, 
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
-                  AND tipo NOT IN ('criar_caixinha', 'delete_pocket')
+                  AND tipo NOT IN ('criar_caixinha', 'delete_pocket', 'create_investment', 'delete_investment')
                 ORDER BY criado_em DESC
                 LIMIT %s OFFSET %s
                 """,
