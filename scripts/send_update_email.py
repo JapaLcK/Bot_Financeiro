@@ -85,12 +85,12 @@ def get_all_users_with_email():
     conn = db.get_conn()
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT au.user_id, au.email
-            FROM auth_users au
-            WHERE au.email IS NOT NULL
-              AND au.email != ''
-              AND au.email_verified = true
-            ORDER BY au.user_id
+            SELECT user_id, email
+            FROM auth_accounts
+            WHERE email IS NOT NULL
+              AND email != ''
+              AND engagement_opt_out = false
+            ORDER BY user_id
         """)
         return cur.fetchall()
 
