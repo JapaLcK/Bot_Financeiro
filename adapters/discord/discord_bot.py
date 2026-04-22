@@ -229,9 +229,7 @@ def run():
     while True:
         try:
             logger.info("Conectando no Discord...")
-            loop = asyncio.new_event_loop()
-            loop.set_exception_handler(_asyncio_exception_handler)
-            bot.run(token, loop=loop)
+            bot.run(token)
             wait = 15
         except Exception as e:
             msg = str(e)
