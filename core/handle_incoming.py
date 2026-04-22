@@ -102,7 +102,7 @@ def _process_audio_transaction(uid: int, transcription: str, msg: IncomingMessag
     Processa um único lançamento de áudio diretamente (sem confirmação).
     Retorna a resposta formatada.
     """
-    intent_result = classify(transcription)
+    intent_result = classify(transcription, user_id=uid)
     msg_from_audio = IncomingMessage(
         platform=msg.platform,
         user_id=uid,
@@ -385,7 +385,7 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         if not text:
             return []
 
-        intent_result = classify(text)
+        intent_result = classify(text, user_id=uid)
 
         # ------------------------------------------------------------------
         # 6. Roteia → executa → obtém resposta bruta

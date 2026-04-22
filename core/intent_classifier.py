@@ -575,7 +575,13 @@ EXEMPLOS:
 """
 
 
-def _classify_with_ai(text: str) -> IntentResult:
+def _classify_with_ai(text: str, user_id: int | None = None) -> IntentResult:
+    from core.ai_rate_limiter import is_allowed
+
+    if user_id is not None and not is_allowed(user_id):
+        print(f"[intent_classifier] rate limit atingido para user_id={user_id}")
+        return IntentResult(intent="out_of_scope", confidence=0.0)
+
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:
         return IntentResult(intent="out_of_scope", confidence=0.0)
@@ -615,10 +621,12 @@ def _classify_with_ai(text: str) -> IntentResult:
 # Função principal
 # ---------------------------------------------------------------------------
 
-def classify(text: str) -> IntentResult:
+def classify(text: str, user_id: int | None = None) -> IntentResult:
     """
     Classifica a intenção do texto em 3 tiers.
     Retorna IntentResult com intent, confidence, entities, etc.
+
+    user_id: quando fornecido, aplica rate limiting no Tier 3 (chamada à IA).
     """
     norm = _normalize(text)
 
@@ -636,4 +644,4 @@ def classify(text: str) -> IntentResult:
         return IntentResult(intent="out_of_scope", confidence=0.4)
 
     # Tier 3
-    return _classify_with_ai(text)
+    return _classify_with_ai(text, user_id=user_id)

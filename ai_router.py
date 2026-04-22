@@ -144,6 +144,17 @@ def classify_category_with_gpt(descricao: str, *, user_id: int | None = None, so
         )
         return "outros"
 
+    from core.ai_rate_limiter import is_allowed
+    if user_id is not None and not is_allowed(user_id):
+        _log_category_ai_event(
+            "warning",
+            "category_ai_rate_limited",
+            "Fallback de IA de categoria bloqueado por rate limit.",
+            user_id=user_id,
+            details={"source": source, "model": MODEL, "input_text": descricao[:120]},
+        )
+        return "outros"
+
     prompt = (
         "Você é um classificador de categorias financeiras.\n"
         "Responda com UMA única categoria exatamente dentre as opções abaixo.\n"
