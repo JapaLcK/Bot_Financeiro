@@ -8,6 +8,9 @@ from db import (
 )
 from datetime import time, timedelta, date
 from discord.ext import tasks
+from core.observability import get_logger
+
+logger = get_logger(__name__)
 
 
 def _fmt_brl(v: float) -> str:
@@ -153,7 +156,7 @@ def build_daily_report_text(user_id: int) -> str:
 
 @tasks.loop(time=time(hour=9, minute=0, tzinfo=_tz()))
 async def _daily_report_discord(bot):
-    print("Daily report rodou")
+    logger.info("Daily report iniciado para %d usuários", len(user_ids))
     # busca usuários com report habilitado
     user_ids = list_users_with_daily_report_enabled(9, 0)
 
@@ -172,14 +175,14 @@ async def _daily_report_discord(bot):
                     for reminder in reminders:
                         await user.send(reminder["message"])
                     await user.send(msg)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("Falha ao enviar daily report para discord_id=%s: %s", discord_id, e, exc_info=True)
 
         for reminder in reminders:
             try:
                 mark_card_reminder_sent(uid, reminder["card_id"], now_tz().date())
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("Falha ao marcar reminder como enviado (card_id=%s): %s", reminder.get("card_id"), e, exc_info=True)
 
 
 def setup_daily_report(bot):

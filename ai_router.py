@@ -18,6 +18,9 @@ import re
 import unicodedata
 
 from openai import OpenAI
+from core.observability import get_logger
+
+logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +202,7 @@ def classify_category_with_gpt(descricao: str, *, user_id: int | None = None, so
         return normalized
 
     except Exception as e:
-        print(f"[ai_router] classify_category error: {e}")
+        logger.error("classify_category error: %s", e, exc_info=True)
         _log_category_ai_event(
             "error",
             "category_ai_error",
