@@ -3,8 +3,6 @@ cogs/general_cog.py — Comandos gerais: ajuda, menu, ações pendentes, dashboa
 
 Também intercepta o pipeline core (handle_incoming) antes dos demais Cogs.
 """
-import traceback
-
 import discord
 from discord.ext import commands
 
@@ -16,6 +14,9 @@ from db import (
 from core.help_text import resolve_section
 from core.dashboard_links import build_dashboard_link
 from adapters.discord.help_ui import help_embed, HelpView
+from core.observability import get_logger
+
+logger = get_logger(__name__)
 
 
 class GeneralCog(commands.Cog):
@@ -58,7 +59,7 @@ class GeneralCog(commands.Cog):
                 try:
                     clear_pending_action(uid)
                 except Exception as e:
-                    print("Erro ao limpar pending_action:", e)
+                    logger.error("Erro ao limpar pending_action: %s", e, exc_info=True)
                 await message.reply("❌ Ação cancelada.")
                 return True
 
@@ -108,7 +109,7 @@ class GeneralCog(commands.Cog):
                     f"Valor: **{cdi_aa:.2f}% ao ano**"
                 )
             except Exception as e:
-                print("Erro ao buscar CDI:", e)
+                logger.error("Erro ao buscar CDI: %s", e, exc_info=True)
                 await message.reply("❌ Erro ao buscar a CDI. Veja os logs.")
             return True
 
@@ -152,14 +153,14 @@ class GeneralCog(commands.Cog):
             else:
                 await message.reply("Ação pendente desconhecida. Cancelando.")
 
-        except Exception:
-            traceback.print_exc()
+        except Exception as e:
+            logger.error("Erro ao executar ação pendente '%s': %s", action, e, exc_info=True)
             await message.reply("❌ Deu erro ao executar a ação pendente. Veja os logs.")
         finally:
             try:
                 clear_pending_action(uid)
             except Exception as e:
-                print("Erro ao limpar pending_action:", e)
+                logger.error("Erro ao limpar pending_action: %s", e, exc_info=True)
 
 
 async def setup(bot: commands.Bot):
