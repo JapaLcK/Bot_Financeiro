@@ -62,6 +62,9 @@ body {
 .hero-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .refresh-status { font-size: 12px; color: var(--muted); text-align: right; min-height: 18px; }
 .refresh-status.error { color: #fca5a5; }
+#clear-alerts-btn { font-size: 12px; padding: 3px 10px; border-radius: 6px; border: 1px solid rgba(252,165,165,.3); background: rgba(252,165,165,.08); color: #fca5a5; cursor: pointer; transition: background .15s; white-space: nowrap; }
+#clear-alerts-btn:hover { background: rgba(252,165,165,.18); }
+.alerts-cleared-hint { font-size: 11px; color: var(--muted); font-style: italic; margin-top: 4px; }
 
 /* ── Buttons / inputs ────────────────────────────────────────────────── */
 button, select {
@@ -301,6 +304,7 @@ button:disabled { opacity: .6; cursor: wait; }
             <button class="filter-btn" data-level="warning">Alertas</button>
             <button class="filter-btn" data-level="info">Info</button>
           </div>
+          <button id="clear-alerts-btn" title="Ocultar alertas anteriores a este momento. Novos erros continuarão aparecendo.">🗑 Limpar</button>
           <span class="meta" id="error-list-meta">Últimos 20</span>
         </div>
       </div>
@@ -419,6 +423,19 @@ let refreshTimeout   = null;
 let autoInterval     = null;
 let activeFilter     = "all";
 let lastErrorData    = [];
+let alertsClearedAt  = sessionStorage.getItem('alertsClearedAt') || null;
+
+function clearAlerts() {
+  alertsClearedAt = new Date().toISOString();
+  sessionStorage.setItem('alertsClearedAt', alertsClearedAt);
+  applyFilter(activeFilter);
+  updateErrorBanner(lastErrorData);
+}
+
+function _visibleErrors(errors) {
+  if (!alertsClearedAt) return errors;
+  return errors.filter(e => new Date(e.created_at) > new Date(alertsClearedAt));
+}
 
 const $id = id => document.getElementById(id);
 const refreshBtn    = $id("refresh-btn");
@@ -465,8 +482,9 @@ function setLoading(v) {
 
 /* ── Error banner ────────────────────────────────────────────────── */
 function updateErrorBanner(errors) {
-  const critical = errors.filter(e => e.level === 'error');
-  const warnings = errors.filter(e => e.level === 'warning');
+  const visible  = _visibleErrors(errors);
+  const critical = visible.filter(e => e.level === 'error');
+  const warnings = visible.filter(e => e.level === 'warning');
   const total    = critical.length;
 
   // Badge no header
@@ -589,9 +607,11 @@ function applyFilter(level) {
   document.querySelectorAll('#error-filter-bar .filter-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.level === level);
   });
-  const filtered = level === 'all' ? lastErrorData : lastErrorData.filter(e => e.level === level);
+  const visible  = _visibleErrors(lastErrorData);
+  const filtered = level === 'all' ? visible : visible.filter(e => e.level === level);
   const root = $id('error-list');
-  $id('error-list-meta').textContent = `${filtered.length} de ${lastErrorData.length}`;
+  const hiddenCount = lastErrorData.length - visible.length;
+  $id('error-list-meta').textContent = `${filtered.length} de ${lastErrorData.length}${hiddenCount > 0 ? ` (${hiddenCount} oculto${hiddenCount>1?'s':''})` : ''}`;
   if (!filtered.length) {
     root.innerHTML = `<div class="empty">✅ Nenhum evento ${level === 'all' ? '' : 'nível ' + level} encontrado.</div>`;
     return;
@@ -906,6 +926,7 @@ function startAutoRefresh() {
 
 /* ── Event listeners ─────────────────────────────────────────────── */
 refreshBtn.addEventListener('click', e => { e.preventDefault(); refresh(true); });
+$id('clear-alerts-btn').addEventListener('click', () => clearAlerts());
 windowSelect.addEventListener('change', () => refresh(true));
 $id('logout-btn').addEventListener('click', () => {
   refreshController?.abort();
