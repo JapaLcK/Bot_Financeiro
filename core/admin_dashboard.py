@@ -583,14 +583,29 @@ async def admin_error_logging_middleware(request: Request, call_next):
     except HTTPException:
         raise
     except Exception as exc:
+        err_str = str(exc)
+
+        # detecta timeout de banco → 503 Service Unavailable
+        is_timeout = any(kw in err_str.lower() for kw in ("timeout", "connection", "could not connect"))
+        status_code = 503 if is_timeout else 500
+        user_msg = (
+            "Serviço temporariamente indisponível. Tente novamente em instantes."
+            if is_timeout
+            else "Erro interno do servidor."
+        )
+
         await log_system_event(
             "error",
             "http_unhandled_exception",
-            str(exc),
+            err_str,
             source=f"{request.method} {request.url.path}",
-            details={"query": dict(request.query_params)},
+            details={"query": dict(request.query_params), "status_code": status_code},
         )
-        raise
+
+        return JSONResponse(
+            status_code=status_code,
+            content={"error": user_msg},
+        )
 
 
 def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, limiter) -> None:

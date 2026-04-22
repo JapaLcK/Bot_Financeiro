@@ -87,13 +87,36 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
         return f"Erro ao depositar: {e}"
 
 
+_WITHDRAW_VERBS = ["retirei", "retirar", "sacar", "saquei", "resgatei", "resgatar", "tirei", "tirar"]
+
+
+def _parse_pocket_withdraw_natural(text: str):
+    """Extrai (amount, pocket_name) de frases de saque como 'retirei 50 da caixinha viagem'."""
+    import re
+    from utils_text import parse_money, normalize_spaces
+    raw = normalize_spaces(text.lower())
+    if not any(v in raw for v in _WITHDRAW_VERBS):
+        return None, None
+    amount = parse_money(raw)
+    if amount is None:
+        return None, None
+    if "caixinha" in raw:
+        pocket = raw.split("caixinha", 1)[1].strip()
+        pocket = re.sub(r"^(da|do|de|na|no|para|pra)\s+", "", pocket).strip()
+        if pocket:
+            return amount, pocket
+    return None, None
+
+
 def withdraw(user_id: int, text: str, entities: dict) -> str:
     pocket_name = entities.get("pocket_name")
     amount      = entities.get("amount")
 
     # tenta extrair do texto se as entidades não trouxerem
     if not pocket_name or not amount:
-        _a, _p = parse_pocket_deposit_natural(text)
+        _a, _p = _parse_pocket_withdraw_natural(text)
+        if not _a and not _p:
+            _a, _p = parse_pocket_deposit_natural(text)
         pocket_name = pocket_name or _p
         amount      = amount or _a
 
