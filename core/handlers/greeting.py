@@ -41,13 +41,13 @@ _FALLBACK_BOA_NOITE = [
 _FALLBACK_OI = [
     "👋 Oi! Estou aqui pra te ajudar com suas finanças!\nO que posso fazer por você?",
     "😊 Oi! Que bom te ver por aqui! Pronto pra organizar as finanças?\nMe conta o que você precisa.",
-    "🐷 Oi! Sou o PigBank, seu assistente financeiro pessoal!\nComo posso te ajudar agora?",
+    "🐷 Oi! Sou o Piggy, seu assistente financeiro pessoal!\nComo posso te ajudar agora?",
     "😄 Oi! Tô aqui e pronto! O que vamos fazer hoje com as suas finanças?",
 ]
 
 _FALLBACK_OLA = [
     "😊 Olá! Bem-vindo! Posso te ajudar com gastos, saldo, cartões e muito mais!\nPor onde começamos?",
-    "🐷 Olá! Sou o PigBank AI — aqui pra facilitar sua vida financeira!\nO que você precisa?",
+    "🐷 Olá! Sou o Piggy — aqui pra facilitar sua vida financeira!\nO que você precisa?",
     "👋 Olá! Que bom ter você aqui. Me conta, o que posso fazer por você hoje?",
     "🌟 Olá! Pronto pra colocar as finanças em ordem?\nDigite *ajuda* pra ver tudo que posso fazer.",
 ]
@@ -117,18 +117,18 @@ def _greeting_with_ai(text: str, greeting_type: str) -> str | None:
             ),
             "oi": (
                 "O usuário mandou um 'oi' (ou variação). Responda de forma descontraída e animada. "
-                "Apresente-se como PigBank AI e convide o usuário a usar o assistente financeiro."
+                "Apresente-se como Piggy e convide o usuário a usar o assistente financeiro."
             ),
             "ola": (
                 "O usuário mandou um 'olá' (ou variação). Responda de forma amigável e acolhedora. "
-                "Apresente-se como PigBank AI e diga que pode ajudar com gastos, saldo, cartões e mais."
+                "Apresente-se como Piggy e diga que pode ajudar com gastos, saldo, cartões e mais."
             ),
         }
 
         instruction = type_instructions.get(greeting_type, type_instructions["ola"])
 
         system_prompt = (
-            "Você é o PigBank AI, um assistente financeiro pessoal brasileiro — simpático, animado e acolhedor. "
+            "Você é o Piggy, um assistente financeiro pessoal brasileiro — simpático, animado e acolhedor. "
             f"{instruction} "
             f"O período do dia atual é: {period}. "
             "Use 1 emoji no início da mensagem. Seja breve: máximo 2-3 linhas. "
