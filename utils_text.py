@@ -23,7 +23,9 @@ def contains_word(text: str, word: str) -> bool:
 
 # Regras locais (baratas) — já cobrindo mercado/psicologo/petshop
 LOCAL_RULES = [
-    (["mercado", "supermercado", "mercadinho", "hortifruti", "padaria"], "alimentação"),
+    (["mercado", "supermercado", "mercadinho", "hortifruti", "padaria", "cafe", "café", "cafeteria"], "alimentação"),
+    (["aluguel", "condominio", "condomínio", "luz", "energia", "conta de luz", "agua", "água", "conta de agua",
+      "conta de água", "gas", "gás", "internet", "wifi"], "moradia"),
     (["psicologo", "psicologa", "terapia", "terapeuta", "psiquiatra"], "saúde"),
     (["petshop", "pet shop", "racao", "veterinario", "vet", "banho", "tosa"], "pets"),
     (["ifood", "restaurante", "lanchonete"], "alimentação"),
@@ -31,7 +33,57 @@ LOCAL_RULES = [
     (["uber", "99", "taxi", "metro", "onibus", "gasolina", "combustivel"], "transporte"),
     (["academia", "remedio", "farmacia", "dentista", "consulta"], "saúde"),
     (["netflix", "spotify", "youtube", "prime video", "disney"], "assinaturas"),
+    # Aportes de investimento — movimentação interna (não é despesa real)
+    (["aporte", "aplicacao", "aplicação", "compra de acoes", "compra de ações", "compra de acao", "compra de ação",
+      "acao", "ação", "acoes", "ações", "fii", "fiis", "cdb", "rdb", "lci", "lca",
+      "tesouro", "selic", "ipca", "etf"], "investimento_aporte"),
+    # Resgates de investimento — movimentação interna (não é receita real)
+    (["resgate", "retirada de investimento", "retirei do investimento"], "investimento_resgate"),
+    # Rendimentos — receita real (lucro/juros/dividendos)
+    (["rendimento", "rendimentos", "juros", "dividendo", "dividendos", "lucro investimento"], "rendimentos")
 ]
+
+# Categorias que representam movimentações internas (não entram em receita/despesa do dashboard)
+INTERNAL_MOVEMENT_CATEGORIES = {
+    "investimento_aporte",
+    "investimento_resgate",
+    "transferencia_interna",
+    "pagamento_fatura",
+    "ajuste_saldo",
+}
+
+CATEGORY_LABELS = {
+    "alimentacao": "alimentação",
+    "transporte": "transporte",
+    "saude": "saúde",
+    "moradia": "moradia",
+    "lazer": "lazer",
+    "educacao": "educação",
+    "assinaturas": "assinaturas",
+    "pets": "pets",
+    "compras online": "compras online",
+    "beleza": "beleza",
+    "outros": "outros",
+    "investimento_aporte": "investimento_aporte",
+    "investimento_resgate": "investimento_resgate",
+    "transferencia_interna": "transferencia_interna",
+    "pagamento_fatura": "pagamento_fatura",
+    "ajuste_saldo": "ajuste_saldo",
+    "rendimentos": "rendimentos",
+}
+
+def is_internal_category(categoria: str | None) -> bool:
+    """Retorna True se a categoria indica movimentação interna."""
+    if not categoria:
+        return False
+    return normalize_text(categoria) in INTERNAL_MOVEMENT_CATEGORIES
+
+
+def canonicalize_category_label(category: str | None) -> str:
+    norm = normalize_text(category or "")
+    if not norm:
+        return ""
+    return CATEGORY_LABELS.get(norm, norm)
 
 STOPWORDS_PT = {
     "gastei","paguei","comprei","debitei","recebi","ganhei","salario","reembolso",
@@ -39,16 +91,94 @@ STOPWORDS_PT = {
     "um","uma","uns","umas","com","ao","aos","as","os","o","a"
 }
 
+MEMORY_NOISE_TOKENS = {
+    "pix", "pagamento", "pag", "pgto", "transferencia", "transfer", "ted", "doc",
+    "debito", "credito", "compra", "pagto", "recebimento", "receita", "despesa",
+    "saldo", "ajuste", "tarifa", "taxa", "estorno", "deb", "cred", "cp", "comp",
+    "ltda", "me", "epp", "sa", "eireli", "banco", "bank", "loja",
+}
+
+
+def is_useful_memory_keyword(keyword: str | None) -> bool:
+    kw = normalize_text(keyword or "")
+    if not kw or len(kw) < 3:
+        return False
+    if len(kw) > 48:
+        return False
+    if not re.search(r"[a-z]", kw):
+        return False
+
+    tokens = [tok for tok in kw.split() if tok]
+    if not tokens:
+        return False
+    if len(tokens) > 6:
+        return False
+    if all(tok in STOPWORDS_PT or tok in MEMORY_NOISE_TOKENS for tok in tokens):
+        return False
+    return True
+
+
+def extract_memory_candidates(text: str | None, limit: int = 3) -> list[str]:
+    norm = normalize_text(text or "")
+    if not norm:
+        return []
+
+    raw_tokens = [tok for tok in norm.split() if tok]
+    filtered = [
+        tok for tok in raw_tokens
+        if len(tok) >= 2
+        and not tok.isdigit()
+        and tok not in STOPWORDS_PT
+        and tok not in MEMORY_NOISE_TOKENS
+    ]
+
+    candidates: list[str] = []
+
+    if filtered:
+        phrase = " ".join(filtered[:4])
+        if is_useful_memory_keyword(phrase):
+            candidates.append(phrase)
+
+        first_two = " ".join(filtered[:2])
+        if is_useful_memory_keyword(first_two):
+            candidates.append(first_two)
+
+    keyword = extract_keyword_for_memory(norm)
+    if is_useful_memory_keyword(keyword):
+        candidates.append(normalize_text(keyword))
+
+    deduped: list[str] = []
+    for candidate in candidates:
+        c = normalize_text(candidate)
+        if c and c not in deduped:
+            deduped.append(c)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
 def extract_keyword_for_memory(text_norm: str) -> str:
     # 1) se bater em alguma keyword das regras locais, salva essa keyword
     for keywords, _cat in LOCAL_RULES:
         for kw in keywords:
             kw_norm = normalize_text(kw)
-            if kw_norm and (contains_word(text_norm, kw_norm) or kw_norm in text_norm):
-                return kw_norm
+            if kw_norm:
+                if len(kw_norm) <= 3:
+                    ok = contains_word(text_norm, kw_norm)
+                else:
+                    ok = contains_word(text_norm, kw_norm) or (kw_norm in text_norm)
 
-    # 2) fallback: pega o último “token útil”
-    tokens = [t for t in text_norm.split() if t and t not in STOPWORDS_PT and len(t) >= 3]
+                if ok:
+                    return kw_norm
+
+    # 2) fallback: pega o último "token útil" (exclui números e stopwords)
+    tokens = [
+        t for t in text_norm.split()
+        if t
+        and t not in STOPWORDS_PT
+        and t not in MEMORY_NOISE_TOKENS
+        and len(t) >= 3
+        and not t.replace(",", "").replace(".", "").isdigit()
+    ]
     if not tokens:
         return ""
     return tokens[-1]
@@ -66,8 +196,14 @@ def fmt_rate(rate, period: str | None) -> str:
     else:
         rate = float(rate)
 
-    # se rate veio como fração (0.01 = 1%), converte pra %
-    display = rate * 100 if rate <= 1 else rate
+    # CDI é armazenado como multiplicador:
+    # 1.16 => 116% CDI, 1.0 => 100% CDI
+    if period == "cdi":
+        display = rate * 100
+    else:
+        # Taxas comuns são armazenadas como fração:
+        # 0.14 => 14%
+        display = rate * 100 if rate <= 1 else rate
 
     # formatação limpa (sem 1.0000)
     if abs(display - round(display)) < 1e-12:
@@ -75,7 +211,11 @@ def fmt_rate(rate, period: str | None) -> str:
     else:
         pct = f"{display:.6f}".rstrip("0").rstrip(".")
 
-    return f"{pct}% {period}"
+    if period == "cdi":
+        return f"{pct}% CDI"
+
+    # Na listagem, mostrar só a taxa evita redundância como "14% anual".
+    return f"{pct}%"
 
 DEPOSIT_VERBS = [
     "transferi", "coloquei", "adicionei", "depositei", "pus", "botei",
@@ -150,7 +290,7 @@ def should_use_ai(text: str) -> bool:
 
 # Categorias por palavras-chave (bem simples e eficaz)
 CATEGORY_KEYWORDS = {
-    "alimentação": ["ifood", "uber eats", "rappi", "restaurante", "lanche", "pizza", "hamburguer", "café", "padaria"],
+    "alimentação": ["ifood", "uber eats", "rappi", "restaurante", "lanche", "pizza", "hamburguer", "cafe", "café", "cafeteria", "padaria"],
     "mercado": ["mercado", "supermercado", "carrefour", "whole foods", "walmart", "target", "costco"],
     "transporte": ["uber", "lyft", "99", "metro", "trem", "ônibus", "gasolina", "combustível", "posto", "estacionamento", "parking"],
     "moradia": ["aluguel", "rent", "condomínio", "luz", "energia", "água", "internet", "wifi", "gás"],
@@ -253,4 +393,3 @@ def parse_pocket_deposit_natural(text: str):
             return amount, pocket
 
     return None, None
-

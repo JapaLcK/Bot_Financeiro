@@ -1,15 +1,24 @@
 import os
 import re
+import calendar
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
 from dateutil.relativedelta import relativedelta
-import calendar
+
+
+# ---------------- timezone helpers ----------------
 
 def _tz():
-    return ZoneInfo(os.getenv("REPORT_TIMEZONE", "America/Cuiaba"))
+    return ZoneInfo(os.getenv("REPORT_TIMEZONE", "America/New_York"))
 
 def now_tz() -> datetime:
     return datetime.now(_tz())
+
+def today_tz() -> date:
+    return now_tz().date()
+
+
+# ---------------- parsing / formatting ----------------
 
 def extract_date_from_text(text: str) -> tuple[datetime | None, str]:
     """
@@ -28,20 +37,25 @@ def extract_date_from_text(text: str) -> tuple[datetime | None, str]:
     now = now_tz()
     tz = _tz()
 
+    def _clean(pattern: str) -> str:
+        cleaned = re.sub(pattern, " ", original, flags=re.IGNORECASE)
+        return " ".join(cleaned.split()).strip(" ,.-")
+
     # hoje / ontem
     if re.search(r"\bhoje\b", t):
-        cleaned = re.sub(r"\bhoje\b", "", original, flags=re.IGNORECASE).strip()
+        cleaned = _clean(r"\bhoje\b")
         dt = datetime.combine(now.date(), time(0, 0), tzinfo=tz)
-        return dt, " ".join(cleaned.split())
+        return dt, cleaned
 
     if re.search(r"\bontem\b", t):
-        cleaned = re.sub(r"\bontem\b", "", original, flags=re.IGNORECASE).strip()
+        cleaned = _clean(r"\bontem\b")
         d = now.date() - timedelta(days=1)
         dt = datetime.combine(d, time(0, 0), tzinfo=tz)
-        return dt, " ".join(cleaned.split())
+        return dt, cleaned
 
-    # dd/mm(/yyyy)?
-    m = re.search(r"\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b", t)
+    # [dia] dd/mm(/yyyy)?
+    date_pattern = r"\b(?:dia\s+)?(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b"
+    m = re.search(date_pattern, t)
     if not m:
         return None, original
 
@@ -61,12 +75,13 @@ def extract_date_from_text(text: str) -> tuple[datetime | None, str]:
     except ValueError:
         return None, original
 
-    cleaned = re.sub(r"\b\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?\b", "", original, flags=re.IGNORECASE).strip()
+    cleaned = _clean(date_pattern)
+
     dt = datetime.combine(d, time(0, 0), tzinfo=tz)
-    return dt, " ".join(cleaned.split())
+    return dt, cleaned
 
 def parse_date_str(s: str) -> date:
-    s = s.strip()
+    s = (s or "").strip()
     for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
         try:
             return datetime.strptime(s, fmt).date()
@@ -74,14 +89,27 @@ def parse_date_str(s: str) -> date:
             pass
     raise ValueError("Data inválida. Use YYYY-MM-DD ou DD/MM/YYYY.")
 
+def fmt_br(d) -> str:
+    if not d:
+        return ""
+    # aceita date ou datetime
+    try:
+        d = d.date()
+    except Exception:
+        pass
+    return d.strftime("%d/%m/%y")
+
+
+# ---------------- generic ranges / diffs ----------------
+
 def month_range_today():
-    today = datetime.now(_tz()).date()
+    """
+    Retorna (start, end) do mês corrente, usando timezone do bot.
+    """
+    today = today_tz()
     start = today.replace(day=1)
-    if today.month == 12:
-        end = today.replace(day=31)
-    else:
-        next_month = today.replace(day=28) + timedelta(days=4)
-        end = next_month.replace(day=1) - timedelta(days=1)
+    last_day = calendar.monthrange(today.year, today.month)[1]
+    end = today.replace(day=last_day)
     return start, end
 
 def months_between(d1: date, d2: date):
@@ -93,3 +121,69 @@ def months_between(d1: date, d2: date):
 def days_between(d1: date, d2: date):
     return max(0, (d2 - d1).days)
 
+
+# ---------------- credit card billing helpers ----------------
+
+def clamp_day(year: int, month: int, day: int) -> int:
+    """
+    Garante que o dia existe no mês (ex: 31 em fevereiro vira 28/29).
+    """
+    last = calendar.monthrange(year, month)[1]
+    return max(1, min(day, last))
+
+def add_months(y: int, m: int, delta: int) -> tuple[int, int]:
+    """
+    Soma meses (delta pode ser +1, -1, etc) e retorna (year, month).
+    """
+    mm = m + delta
+    yy = y
+    while mm > 12:
+        mm -= 12
+        yy += 1
+    while mm < 1:
+        mm += 12
+        yy -= 1
+    return yy, mm
+
+def billing_period_for_close_day(ref: date, close_day: int) -> tuple[date, date]:
+    """
+    Retorna (period_start, period_end) inclusivo, onde period_end é o dia de fechamento.
+
+    Ex: close_day=10
+      ref=2026-02-12 => start=2026-02-11, end=2026-03-10
+      ref=2026-02-05 => start=2026-01-11, end=2026-02-10
+    """
+    y, m = ref.year, ref.month
+    close_this_month = date(y, m, clamp_day(y, m, close_day))
+
+    if ref <= close_this_month:
+        # fatura fecha neste mês
+        end = close_this_month
+        py, pm = add_months(y, m, -1)
+        prev_close = date(py, pm, clamp_day(py, pm, close_day))
+        start = prev_close + timedelta(days=1)
+    else:
+        # fatura fecha no próximo mês
+        ny, nm = add_months(y, m, +1)
+        end = date(ny, nm, clamp_day(ny, nm, close_day))
+        this_close = close_this_month
+        start = this_close + timedelta(days=1)
+
+    return start, end
+
+# funcao para checar report diario
+def should_run_daily_at(now: datetime, hour: int = 9, minute: int = 0) -> bool:
+    """
+    True se 'now' (no fuso do bot) estiver no minuto exato do report.
+    Útil pra runners que rodam a cada 1 minuto.
+    """
+    return now.hour == hour and now.minute == minute
+
+# quando eh o proximo report diario
+def next_daily_run(hour: int = 9, minute: int = 0) -> datetime:
+    tz = _tz()
+    now = now_tz()
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target = target + timedelta(days=1)
+    return target

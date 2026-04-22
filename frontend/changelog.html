@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Novidades — PigBank AI</title>
+<meta name="description" content="Veja todas as atualizações e melhorias do PigBank AI." />
+<link rel="icon" type="image/png" href="/favicon.png" />
+<meta name="theme-color" content="#070b14" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="PigBank AI" />
+<meta property="og:title" content="Novidades — PigBank AI" />
+<meta property="og:description" content="Acompanhe todas as atualizações e melhorias do PigBank AI." />
+<meta property="og:url" content="https://pigbankai.com/changelog" />
+<meta property="og:image" content="https://pigbankai.com/favicon.png" />
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --glass-bg:     rgba(255,255,255,0.07);
+  --glass-border: rgba(255,255,255,0.13);
+  --glass-shadow: 0 8px 32px rgba(0,0,0,0.35);
+  --radius:       22px;
+  --green:  #34d399; --red: #f87171; --blue: #60a5fa;
+  --purple: #a78bfa; --yellow: #fbbf24;
+  --text:   rgba(255,255,255,0.92);
+  --text-2: rgba(255,255,255,0.52);
+  --text-3: rgba(255,255,255,0.28);
+  --ease:   cubic-bezier(.4,0,.2,1);
+}
+
+html { scroll-behavior: smooth; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  background: #070b14; color: var(--text);
+  min-height: 100vh; overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── Ambient orbs ── */
+.bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.orb { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .38; animation: drift 18s ease-in-out infinite alternate; }
+.orb-1 { width:700px;height:700px;background:radial-gradient(circle,#6d28d9,transparent 70%);top:-250px;left:-200px; }
+.orb-2 { width:500px;height:500px;background:radial-gradient(circle,#0ea5e9,transparent 70%);top:30%;right:-200px;animation-delay:-6s; }
+.orb-3 { width:450px;height:450px;background:radial-gradient(circle,#ec4899,transparent 70%);bottom:-150px;left:20%;animation-delay:-12s;opacity:.22; }
+.orb-4 { width:380px;height:380px;background:radial-gradient(circle,#10b981,transparent 70%);bottom:15%;right:5%;animation-delay:-4s;opacity:.18; }
+@keyframes drift { 0%{transform:translate(0,0) scale(1)} 33%{transform:translate(40px,-30px) scale(1.05)} 66%{transform:translate(-20px,50px) scale(.97)} 100%{transform:translate(30px,20px) scale(1.03)} }
+body::before { content:""; position:fixed; inset:0; z-index:1; pointer-events:none;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E"); opacity:.6; }
+
+/* ─── Layout ── */
+.page { position: relative; z-index: 2; max-width: 780px; margin: 0 auto; padding: 0 24px 120px; }
+
+/* ─── Navbar ── */
+nav {
+  position: sticky; top: 16px; z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 16px 0 0;
+  background: rgba(255,255,255,0.06);
+  backdrop-filter: blur(32px) saturate(180%); -webkit-backdrop-filter: blur(32px) saturate(180%);
+  border: 1px solid var(--glass-border); border-radius: 18px;
+  padding: 12px 20px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.1);
+}
+.nav-logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.logo-icon {
+  width: 34px; height: 34px; border-radius: 10px;
+  background: linear-gradient(135deg, #7c3aed, #3b82f6);
+  display: flex; align-items: center; justify-content: center; font-size: 1rem;
+  box-shadow: 0 4px 12px rgba(124,58,237,.4);
+}
+.nav-logo span { font-size: 1rem; font-weight: 700; letter-spacing: -.02em; color: var(--text); }
+.nav-back {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-2); padding: 8px 18px; border-radius: 12px;
+  font-size: .85rem; font-weight: 600; cursor: pointer;
+  text-decoration: none;
+  transition: all .2s var(--ease);
+}
+.nav-back:hover { background: rgba(255,255,255,0.12); color: var(--text); }
+
+/* ─── Hero ── */
+.hero {
+  text-align: center;
+  padding: 72px 0 48px;
+}
+.hero-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(167,139,250,0.12);
+  border: 1px solid rgba(167,139,250,0.25);
+  border-radius: 999px; padding: 5px 14px;
+  font-size: .78rem; font-weight: 600; color: var(--purple);
+  letter-spacing: .04em; text-transform: uppercase;
+  margin-bottom: 20px;
+}
+.hero h1 {
+  font-size: clamp(2rem, 5vw, 3rem);
+  font-weight: 800; letter-spacing: -.03em; line-height: 1.1;
+  margin-bottom: 14px;
+}
+.hero h1 span {
+  background: linear-gradient(135deg, #a78bfa, #60a5fa);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text; color: transparent;
+}
+.hero p { color: var(--text-2); font-size: 1.05rem; line-height: 1.6; }
+
+/* ─── Timeline ── */
+.timeline { position: relative; margin-top: 16px; }
+
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: 20px;
+  top: 8px;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(to bottom, rgba(167,139,250,.4), rgba(96,165,250,.1) 80%, transparent);
+  border-radius: 2px;
+}
+
+/* ─── Release card ── */
+.release {
+  position: relative;
+  padding-left: 60px;
+  margin-bottom: 48px;
+  animation: fadeUp .5s var(--ease) both;
+}
+.release:nth-child(1) { animation-delay: .05s; }
+.release:nth-child(2) { animation-delay: .12s; }
+.release:nth-child(3) { animation-delay: .19s; }
+@keyframes fadeUp { from { opacity:0; transform: translateY(16px); } to { opacity:1; transform: translateY(0); } }
+
+.release-dot {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7c3aed, #3b82f6);
+  box-shadow: 0 0 0 4px rgba(124,58,237,.18);
+}
+
+.release-meta {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 16px; flex-wrap: wrap;
+}
+.release-date {
+  font-size: .8rem; font-weight: 700; color: var(--purple);
+  letter-spacing: .05em; text-transform: uppercase;
+}
+.release-tag {
+  font-size: .72rem; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+  letter-spacing: .03em; text-transform: uppercase;
+}
+.tag-new { background: rgba(52,211,153,.12); color: var(--green); border: 1px solid rgba(52,211,153,.25); }
+.tag-fix { background: rgba(96,165,250,.12); color: var(--blue);  border: 1px solid rgba(96,165,250,.25); }
+.tag-improve { background: rgba(251,191,36,.12); color: var(--yellow); border: 1px solid rgba(251,191,36,.25); }
+
+.release-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  padding: 28px 28px 22px;
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+}
+
+.release-title {
+  font-size: 1.15rem; font-weight: 700; margin-bottom: 12px;
+  letter-spacing: -.01em;
+}
+.release-story {
+  font-size: .875rem; color: var(--text-2); line-height: 1.7;
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+}
+
+/* ─── Feature items ── */
+.feature-list { list-style: none; display: flex; flex-direction: column; gap: 14px; }
+.feature-item {
+  display: flex; gap: 14px; align-items: flex-start;
+}
+.feature-icon {
+  width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 1rem;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+.feature-body { flex: 1; }
+.feature-name {
+  font-size: .92rem; font-weight: 700; margin-bottom: 2px; color: var(--text);
+}
+.feature-desc {
+  font-size: .83rem; color: var(--text-2); line-height: 1.5;
+}
+.feature-code {
+  display: inline-block; margin-top: 4px;
+  background: rgba(124,58,237,.15); border-radius: 6px;
+  padding: 2px 8px; color: var(--purple);
+  font-family: "SF Mono", "Fira Code", monospace; font-size: .78rem;
+}
+
+/* ─── Divider between sections ── */
+.section-divider {
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(255,255,255,.1), transparent);
+  margin: 22px 0;
+}
+
+/* ─── CTA ── */
+.cta-wrap { text-align: center; margin-top: 56px; }
+.cta-wrap p { color: var(--text-2); font-size: .9rem; margin-bottom: 14px; }
+.cta-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: linear-gradient(135deg, #7c3aed, #3b82f6);
+  color: #fff; border: none; padding: 13px 28px; border-radius: 14px;
+  font-size: .95rem; font-weight: 700; cursor: pointer; text-decoration: none;
+  box-shadow: 0 4px 24px rgba(124,58,237,.35);
+  transition: all .2s var(--ease);
+}
+.cta-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(124,58,237,.45); }
+
+/* ─── Footer ── */
+footer {
+  text-align: center; margin-top: 80px;
+  color: var(--text-3); font-size: .8rem; line-height: 1.8;
+}
+footer a { color: var(--text-2); text-decoration: none; }
+footer a:hover { color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="bg">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+  <div class="orb orb-4"></div>
+</div>
+
+<div class="page">
+
+  <!-- Navbar -->
+  <nav>
+    <a class="nav-logo" href="/">
+      <div class="logo-icon">🐷</div>
+      <span>PigBank AI</span>
+    </a>
+    <a class="nav-back" href="/">← Voltar ao site</a>
+  </nav>
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="hero-badge">📋 Changelog</div>
+    <h1>De uma ideia a um <span>assistente completo</span></h1>
+    <p>Tudo o que o PigBank AI já aprendeu a fazer —<br/>desde o primeiro gasto registrado até hoje.</p>
+  </div>
+
+  <!-- Timeline -->
+  <div class="timeline">
+
+    <!-- Release: Abril 2026 — Mais recente -->
+    <div class="release">
+      <div class="release-dot" style="background:linear-gradient(135deg,#10b981,#3b82f6);box-shadow:0 0 0 4px rgba(16,185,129,.18);"></div>
+      <div class="release-meta">
+        <span class="release-date">20 de abril de 2026</span>
+        <span class="release-tag tag-new">Novo</span>
+        <span class="release-tag tag-improve">Melhoria</span>
+        <span class="release-tag" style="background:rgba(16,185,153,.12);color:#34d399;border:1px solid rgba(52,211,153,.25);">✦ Mais recente</span>
+      </div>
+      <div class="release-card">
+        <div class="release-title">🚀 Áudio, foto, OFX e saldo completo</div>
+        <ul class="feature-list">
+          <li class="feature-item">
+            <div class="feature-icon">🎙️</div>
+            <div class="feature-body">
+              <div class="feature-name">Registro por áudio</div>
+              <div class="feature-desc">Mande um áudio no WhatsApp falando seus gastos e eu registro na hora. Mais de um gasto no mesmo áudio? Anoto todos de uma vez.</div>
+            </div>
+          </li>
+          <li class="feature-item">
+            <div class="feature-icon">📷</div>
+            <div class="feature-body">
+              <div class="feature-name">Registro por foto</div>
+              <div class="feature-desc">Tire foto de um comprovante ou nota fiscal e me mande no chat. Leio o valor, estabelecimento e data — e só registro depois da sua confirmação.</div>
+            </div>
+          </li>
+          <li class="feature-item">
+            <div class="feature-icon">📄</div>
+            <div class="feature-body">
+              <div class="feature-name">Importação de fatura OFX</div>
+              <div class="feature-desc">Envie o arquivo <strong>.OFX</strong> da sua fatura direto no chat. Identifico automaticamente se é extrato bancário ou fatura de cartão.</div>
+            </div>
+          </li>
+          <li class="feature-item">
+            <div class="feature-icon">📦</div>
+            <div class="feature-body">
+              <div class="feature-name">Parcelamentos na fatura</div>
+              <div class="feature-desc">Ao importar, detecto compras parceladas e mostro quantas parcelas ainda faltam e o valor total restante.</div>
+            </div>
+          </li>
+          <li class="feature-item">
+            <div class="feature-icon">🔢</div>
+            <div class="feature-body">
+              <div class="feature-name">Total com descontos</div>
+              <div class="feature-desc">Estornos e descontos (como o Desconto de Antecipação do Nubank) agora são subtraídos corretamente do total da fatura.</div>
+            </div>
+          </li>
+          <li class="feature-item">
+            <div class="feature-icon">💳</div>
+            <div class="feature-body">
+              <div class="feature-name">Cadastro rápido de cartão</div>
+              <div class="feature-desc">Crie um cartão em uma linha só, sem responder perguntas uma a uma.</div>
+              <span class="feature-code">criar cartão Nubank fechamento 01 vencimento 08</span>
+            </div>
+          </li>
+          <li class="feature-item">
+            <div class="feature-icon">📊</div>
+            <div class="feature-body">
+              <div class="feature-name">Saldo completo</div>
+              <div class="feature-desc">O comando <strong>saldo</strong> agora mostra muito mais: conta corrente, últimos gastos do dia, total gasto no mês e fatura + limite disponível de cada cartão.</div>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Release: Abr 2026 — Cartões e emails -->
+    <div class="release">
+      <div class="release-dot"></div>
+      <div class="release-meta">
+        <span class="release-date">Abril de 2026</span>
+        <span class="release-tag tag-new">Novo</span>
+      </div>
+      <div class="release-card">
+        <div class="release-title">💳 Cartões de crédito, parcelamentos e e-mails</div>
+        <p class="release-story">O bot ganhou controle total de cartões de crédito. Dava pra cadastrar cartão, registrar compras parceladas, acompanhar o limite disponível e ver a fatura por mês. Junto com isso, chegaram os e-mails automáticos com resumo financeiro e dicas personalizadas toda semana.</p>
+        <ul class="feature-list" style="margin-top:16px;">
+          <li class="feature-item">
+            <div class="feature-icon">💳</div>
+            <div class="feature-body">
+              <div class="feature-name">Cartões de crédito com limite</div>
+              <div class="feature-desc">Cadastro de cartão, acompanhamento de limite e histórico de gastos por fatura.</div>
+            </div>
+          </li>
+          <li class="feature-item">
+            <div class="feature-icon">📦</div>
+            <div class="feature-body">
+              <div class="feature-name">Compras parceladas</div>
+              <div class="feature-desc">Registre uma compra em N parcelas e acompanhe cada uma separadamente.</div>
+            </div>
+          </li>
+          <li class="feature-item">
+            <div class="feature-icon">📧</div>
+            <div class="feature-body">
+              <div class="feature-name">E-mails semanais com insights</div>
+              <div class="feature-desc">Resumo dos gastos, dicas de economia e alertas chegam direto no e-mail.</div>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Release: Mar/Abr 2026 — WhatsApp -->
+    <div class="release">
+      <div class="release-dot"></div>
+      <div class="release-meta">
+        <span class="release-date">Março de 2026</span>
+        <span class="release-tag tag-new">Novo</span>
+      </div>
+      <div class="release-card">
+        <div class="release-title">💬 Chegou no WhatsApp</div>
+        <p class="release-story">O passo mais importante: o bot saiu do Discord e chegou onde as pessoas já estão. Com a integração ao WhatsApp Cloud API vieram os botões interativos, o menu inicial e o dashboard web — acessível por um magic link direto no chat, sem precisar lembrar senha.</p>
+        <ul class="feature-list" style="margin-top:16px;">
+          <li class="feature-item">
+            <div class="feature-icon">💬</div>
+            <div class="feature-body">
+              <div class="feature-name">WhatsApp Cloud API</div>
+              <div class="feature-desc">Registre gastos, consulte saldo e gerencie tudo direto no WhatsApp, sem instalar nada.</div>
+            </div>
+          </li>
+          <li class="feature-item">
+            <div class="feature-icon">🖥️</div>
+            <div class="feature-body">
+              <div class="feature-name">Dashboard web</div>
+              <div class="feature-desc">Visualize gráficos, histórico e relatórios em um painel acessível por magic link seguro.</div>
+            </div>
+          </li>
+          <li class="feature-item">
+            <div class="feature-icon">🔘</div>
+            <div class="feature-body">
+              <div class="feature-name">Botões interativos</div>
+              <div class="feature-desc">Confirmações, menus e ações com um toque — sem precisar digitar comandos.</div>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Release: Fev 2026 — IA e export -->
+    <div class="release">
+      <div class="release-dot"></div>
+      <div class="release-meta">
+        <span class="release-date">Fevereiro de 2026</span>
+        <span class="release-tag tag-improve">Melhoria</span>
+      </div>
+      <div class="release-card">
+        <div class="release-title">🧠 O bot aprende a pensar</div>
+        <p class="release-story">IA integrada ao fluxo de mensagens. O bot passou a entender perguntas em linguagem natural — "quanto gastei esse mês?" virou um comando válido. Junto com isso, chegou a exportação para CSV e Excel, deixando os dados disponíveis fora do chat também.</p>
+        <ul class="feature-list" style="margin-top:16px;">
+          <li class="feature-item">
+            <div class="feature-icon">🤖</div>
+            <div class="feature-body">
+              <div class="feature-name">Linguagem natural com IA</div>
+              <div class="feature-desc">Pergunte do jeito que falar. O bot entende contexto e responde com os dados certos.</div>
+            </div>
+          </li>
+          <li class="feature-item">
+            <div class="feature-icon">📊</div>
+            <div class="feature-body">
+              <div class="feature-name">Export CSV e Excel</div>
+              <div class="feature-desc">Baixe seu histórico financeiro com filtro por período, pronto para análise.</div>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Release: Fev 2026 — Banco e investimentos -->
+    <div class="release">
+      <div class="release-dot"></div>
+      <div class="release-meta">
+        <span class="release-date">Fevereiro de 2026</span>
+        <span class="release-tag tag-new">Novo</span>
+      </div>
+      <div class="release-card">
+        <div class="release-title">🏦 Uma memória de verdade</div>
+        <p class="release-story">Os dados foram para o banco. Com PostgreSQL, o bot passou a guardar tudo de verdade — sem perder histórico, com rollback em ações importantes e suporte a investimentos e caixinhas. A partir daqui, nada se perde.</p>
+        <ul class="feature-list" style="margin-top:16px;">
+          <li class="feature-item">
+            <div class="feature-icon">🗄️</div>
+            <div class="feature-body">
+              <div class="feature-name">Banco de dados PostgreSQL</div>
+              <div class="feature-desc">Histórico completo, persistente e seguro. Desfazer ações virou realidade.</div>
+            </div>
+          </li>
+          <li class="feature-item">
+            <div class="feature-icon">📈</div>
+            <div class="feature-body">
+              <div class="feature-name">Investimentos e caixinhas</div>
+              <div class="feature-desc">Registre aplicações, acompanhe rendimentos com CDI e separe dinheiro em objetivos.</div>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Release: Fev 2026 — Primeiro commit -->
+    <div class="release">
+      <div class="release-dot" style="background:rgba(255,255,255,0.2);box-shadow:0 0 0 4px rgba(255,255,255,.06);"></div>
+      <div class="release-meta">
+        <span class="release-date">Fevereiro de 2026</span>
+        <span class="release-tag" style="background:rgba(255,255,255,.06);color:var(--text-3);border:1px solid rgba(255,255,255,.1);">Origem</span>
+      </div>
+      <div class="release-card" style="border-color:rgba(255,255,255,.08);">
+        <div class="release-title">🐣 O começo de tudo</div>
+        <p class="release-story">Tudo começou com uma ideia simples: registrar gastos sem abrir planilha. O primeiro bot vivia no Discord e fazia uma coisa só — recebia uma mensagem como <em>"gastei 50 no mercado"</em> e anotava. Sem banco de dados, sem IA, sem WhatsApp. Só uma semente.</p>
+      </div>
+    </div>
+
+  </div>
+  <!-- /timeline -->
+
+  <!-- CTA -->
+  <div class="cta-wrap">
+    <p>Tem sugestões ou encontrou algum problema?</p>
+    <a class="cta-btn" href="/">
+      Voltar ao início &rarr;
+    </a>
+  </div>
+
+  <footer>
+    <p>PigBank AI &mdash; <a href="/">pigbankai.com</a> &nbsp;·&nbsp; <a href="/privacy">Privacidade</a></p>
+  </footer>
+
+</div>
+</body>
+</html>

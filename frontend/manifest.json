@@ -1,0 +1,33 @@
+{
+  "name": "PigBank AI",
+  "short_name": "PigBank",
+  "description": "Dashboard financeiro pessoal em tempo real",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070b14",
+  "theme_color": "#070b14",
+  "orientation": "any",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["finance", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Abrir Dashboard",
+      "url": "/",
+      "description": "Ver resumo financeiro"
+    }
+  ]
+}
