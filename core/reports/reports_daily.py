@@ -1,7 +1,7 @@
 from __future__ import annotations
 from utils_date import now_tz, _tz
 from db import (
-    get_balance, list_pockets, list_investments,
+    get_balance, list_pockets, accrue_all_investments,
     get_launches_by_period, get_summary_by_period,
     list_users_with_daily_report_enabled, list_identities_by_user,
     list_credit_card_due_reminders, mark_card_reminder_sent,
@@ -72,7 +72,7 @@ def build_daily_report_text(user_id: int) -> str:
     saldo = float(get_balance(user_id) or 0)
 
     pockets = list_pockets(user_id) or []
-    invs    = list_investments(user_id) or []
+    invs    = accrue_all_investments(user_id) or []
 
     total_pockets = sum(float(p.get("balance") or 0) for p in pockets)
     total_invest  = sum(float(i.get("balance") or 0) for i in invs)

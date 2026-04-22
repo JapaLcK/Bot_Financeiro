@@ -53,6 +53,7 @@ from core.admin_dashboard import (
     admin_error_logging_middleware,
     register_admin_routes,
 )
+from db import accrue_all_investments
 
 load_app_env()
 
@@ -153,6 +154,7 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None, 
     page = max(int(page or 1), 1)
     limit = max(min(int(limit or 25), 100), 1)
     offset = (page - 1) * limit
+    current_investments = await asyncio.to_thread(accrue_all_investments, user_id)
 
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
@@ -171,12 +173,7 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None, 
             pockets = await cur.fetchall()
 
             # Investments (always current)
-            await cur.execute(
-                "SELECT name, balance, rate, period, last_date FROM investments "
-                "WHERE user_id = %s ORDER BY name",
-                (user_id,),
-            )
-            investments = await cur.fetchall()
+            investments = current_investments
 
                         # Total launches for the requested month (excluindo criação/remoção de bolsos)
             await cur.execute(
