@@ -420,6 +420,7 @@ async def fetch_admin_overview(days: int = 30) -> dict[str, Any]:
                 """
                 SELECT
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND level = 'error') AS backend_errors_24h,
+                    COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND level = 'warning') AS backend_warnings_24h,
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND event_type = 'whatsapp_webhook_received') AS whatsapp_webhooks_24h,
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND event_type = 'whatsapp_send_success') AS whatsapp_send_success_24h,
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND event_type IN ('whatsapp_send_failed', 'whatsapp_send_exception')) AS whatsapp_send_failures_24h,

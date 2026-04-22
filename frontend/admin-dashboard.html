@@ -620,16 +620,16 @@ function applyFilter(level) {
 }
 
 /* ── Health grid ─────────────────────────────────────────────────── */
-function renderHealthGrid(summary, errors) {
-  const errCount = errors.filter(e => e.level === 'error').length;
-  const warnCount = errors.filter(e => e.level === 'warning').length;
+function renderHealthGrid(summary, errors, ops) {
+  const errCount  = ops?.backend_errors_24h   ?? errors.filter(e => e.level === 'error').length;
+  const warnCount = ops?.backend_warnings_24h ?? errors.filter(e => e.level === 'warning').length;
 
   const items = [
-    { label: "Erros críticos (recentes)", val: errCount,
+    { label: "Erros críticos (24h)", val: errCount,
       color: errCount > 0 ? 'red' : 'green',
       cls: errCount > 0 ? 'danger' : '',
-      hint: "Eventos level=error nos logs recentes" },
-    { label: "Alertas (recentes)", val: warnCount,
+      hint: "Eventos level=error nas últimas 24 horas" },
+    { label: "Alertas (24h)", val: warnCount,
       color: warnCount > 3 ? 'yellow' : warnCount > 0 ? 'yellow' : 'green',
       cls: warnCount > 3 ? 'warning' : '' },
     { label: "Taxa login 7d",
@@ -887,7 +887,7 @@ async function loadOverview(force=false) {
   $id('generated-at').textContent = `Atualizado ${fRelTime(data.generated_at)}`;
   renderSummary(data.summary);
   renderErrorList(data.recent_errors);
-  renderHealthGrid(data.summary, data.recent_errors);
+  renderHealthGrid(data.summary, data.recent_errors, data.ops_summary);
   renderOpsHealthGrid(data.ops_summary);
   renderCategoryAiHealth(data.ops_summary);
   renderCategoryAiList(data.recent_ops);
