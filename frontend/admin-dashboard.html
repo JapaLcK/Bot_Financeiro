@@ -379,8 +379,16 @@ button:disabled { opacity: .6; cursor: wait; }
     </div>
   </section>
 
-  <!-- ── Cadastros + Usuários ativos ────────────────────────────────── -->
+  <!-- ── E-mails enviados ───────────────────────────────────────────── -->
   <section class="grid-2" style="margin-bottom:16px">
+    <div class="card">
+      <div class="section-title">
+        <h2>✉️ E-mails enviados</h2>
+        <span class="meta" id="email-meta">Últimos 50</span>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:12px" id="email-stats-bar"></div>
+      <div class="error-list" id="email-list"></div>
+    </div>
     <div class="card">
       <div class="section-title">
         <h2>👤 Cadastros recentes</h2>
@@ -388,6 +396,10 @@ button:disabled { opacity: .6; cursor: wait; }
       </div>
       <div id="recent-signups"></div>
     </div>
+  </section>
+
+  <!-- ── Top usuários ──────────────────────────────────────────────── -->
+  <section class="grid-2" style="margin-bottom:16px">
     <div class="card">
       <div class="section-title">
         <h2>🏆 Maior volume (30d)</h2>
@@ -837,6 +849,52 @@ function renderSimple(id, rows, fn) {
   root.innerHTML = rows.length ? rows.map(fn).join('') : `<div class="empty">Sem dados ainda.</div>`;
 }
 
+function renderEmails(stats, rows) {
+  // Stats bar
+  const bar = $id('email-stats-bar');
+  if (bar) {
+    const items = [
+      { label: '24h enviados',  val: stats.sent_24h   || 0, color: '#4ade80' },
+      { label: '24h falhas',    val: stats.failed_24h || 0, color: stats.failed_24h > 0 ? '#f87171' : '#4ade80' },
+      { label: '7d enviados',   val: stats.sent_7d    || 0, color: '#60a5fa' },
+      { label: '30d enviados',  val: stats.sent_30d   || 0, color: '#a78bfa' },
+    ];
+    bar.innerHTML = items.map(it => `
+      <div style="flex:1;background:rgba(255,255,255,.04);border-radius:10px;padding:10px 12px;text-align:center;border:1px solid rgba(255,255,255,.07)">
+        <div style="font-size:20px;font-weight:700;color:${it.color}">${it.val}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${it.label}</div>
+      </div>`).join('');
+  }
+
+  // Lista de emails
+  const root = $id('email-list');
+  if (!rows || !rows.length) {
+    root.innerHTML = `<div class="empty">Nenhum e-mail registrado ainda.</div>`;
+    return;
+  }
+  $id('email-meta').textContent = `Últimos ${rows.length}`;
+  const EMAIL_TYPE_LABEL = {
+    email_sent:   { badge: '<span class="badge" style="background:rgba(74,222,128,.12);color:#4ade80;border:1px solid rgba(74,222,128,.25)">ENVIADO</span>', icon: '✉️' },
+    email_failed: { badge: '<span class="badge" style="background:rgba(248,113,113,.12);color:#f87171;border:1px solid rgba(248,113,113,.25)">FALHOU</span>',  icon: '❌' },
+  };
+  root.innerHTML = rows.map(row => {
+    const meta  = EMAIL_TYPE_LABEL[row.event_type] || { badge: '', icon: '📧' };
+    const to      = row.details?.to      || '—';
+    const subject = row.details?.subject || row.message || '—';
+    const error   = row.details?.error   || '';
+    return `
+      <div class="error-item level-${row.event_type === 'email_failed' ? 'error' : 'info'}" style="cursor:default">
+        <div class="error-item-header">
+          ${meta.badge}
+          <span class="error-item-title">${esc(to)}</span>
+          <span class="error-item-time">${fRelTime(row.created_at)}</span>
+        </div>
+        <div class="error-item-msg">${esc(subject.slice(0, 120))}${subject.length > 120 ? '…' : ''}</div>
+        ${error ? `<div class="error-item-source" style="color:#f87171">⚠️ ${esc(error.slice(0,120))}</div>` : ''}
+      </div>`;
+  }).join('');
+}
+
 function renderSignups(rows) {
   renderSimple('recent-signups', rows, row => `
     <div class="list-item">
@@ -936,6 +994,7 @@ async function loadOverview(force=false) {
   renderCategoryAiHealth(data.ops_summary);
   renderCategoryAiList(data.recent_ops);
   renderOpsList(data.recent_ops);
+  renderEmails(data.email_stats || {}, data.recent_emails || []);
   renderSignups(data.recent_signups);
   renderLogins(data.recent_logins);
   renderTables(data);

@@ -25,6 +25,18 @@ def _get_resend():
     return resend
 
 
+def _log_email_event(level: str, event_type: str, message: str, *, to: str, subject: str, error: str = "") -> None:
+    try:
+        from core.observability import log_system_event_sync
+        log_system_event_sync(
+            level, event_type, message,
+            source="email_service",
+            details={"to": to, "subject": subject, **({"error": error} if error else {})},
+        )
+    except Exception:
+        pass
+
+
 def send_email(
     to: str,
     subject: str,
@@ -52,9 +64,11 @@ def send_email(
             params["headers"] = headers
         resend.Emails.send(params)
         logger.info("E-mail enviado para <%s>: %s", to, subject)
+        _log_email_event("info", "email_sent", f"E-mail enviado para {to}", to=to, subject=subject)
         return True
     except Exception as exc:
         logger.error("Falha ao enviar e-mail para <%s>: %s", to, exc)
+        _log_email_event("error", "email_failed", f"Falha ao enviar para {to}: {exc}", to=to, subject=subject, error=str(exc))
         return False
 
 

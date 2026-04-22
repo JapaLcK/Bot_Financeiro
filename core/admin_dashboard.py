@@ -504,6 +504,29 @@ async def fetch_admin_overview(days: int = 30) -> dict[str, Any]:
             )
             recent_ops = [dict(row) for row in await cur.fetchall()]
 
+            await cur.execute(
+                """
+                SELECT
+                    COUNT(*) FILTER (WHERE event_type = 'email_sent'   AND created_at >= NOW() - INTERVAL '24 hours') AS sent_24h,
+                    COUNT(*) FILTER (WHERE event_type = 'email_failed' AND created_at >= NOW() - INTERVAL '24 hours') AS failed_24h,
+                    COUNT(*) FILTER (WHERE event_type = 'email_sent'   AND created_at >= NOW() - INTERVAL '7 days')  AS sent_7d,
+                    COUNT(*) FILTER (WHERE event_type = 'email_sent'   AND created_at >= NOW() - INTERVAL '30 days') AS sent_30d
+                FROM system_event_logs
+                """
+            )
+            email_stats = dict(await cur.fetchone())
+
+            await cur.execute(
+                """
+                SELECT id, event_type, message, details, created_at
+                FROM system_event_logs
+                WHERE event_type IN ('email_sent', 'email_failed')
+                ORDER BY created_at DESC
+                LIMIT 50
+                """
+            )
+            recent_emails = [dict(row) for row in await cur.fetchall()]
+
     attempts_30d = int(login_stats.get("login_attempts_30d") or 0)
     attempts_7d = int(login_stats.get("login_attempts_7d") or 0)
     login_success_30d = int(login_stats.get("login_success_30d") or 0)
@@ -541,6 +564,8 @@ async def fetch_admin_overview(days: int = 30) -> dict[str, Any]:
         "recent_logins": recent_logins,
         "recent_errors": recent_errors,
         "recent_ops": recent_ops,
+        "email_stats": email_stats,
+        "recent_emails": recent_emails,
     }
 
 
