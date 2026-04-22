@@ -408,10 +408,11 @@ async def fetch_admin_overview(days: int = 30) -> dict[str, Any]:
 
             await cur.execute(
                 """
-                SELECT level, event_type, message, source, user_id, details, created_at
+                SELECT id, level, event_type, message, source, user_id, details, created_at
                 FROM system_event_logs
+                WHERE created_at >= NOW() - INTERVAL '24 hours'
                 ORDER BY created_at DESC
-                LIMIT 20
+                LIMIT 100
                 """
             )
             recent_errors = [dict(row) for row in await cur.fetchall()]
@@ -678,6 +679,20 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         data = await fetch_admin_overview(days=days)
         data["admin_user"] = username
         return JSONResponse(content=_json_safe(data))
+
+    @app.delete("/admin/api/events/{event_id}")
+    async def admin_delete_event(event_id: int, username: str = Depends(_get_current_admin)):
+        async with await db_connect() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "DELETE FROM system_event_logs WHERE id = %s RETURNING id",
+                    (event_id,),
+                )
+                deleted = await cur.fetchone()
+            await conn.commit()
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Evento não encontrado.")
+        return {"deleted": event_id}
 
     @app.get("/admin")
     async def serve_admin_dashboard():

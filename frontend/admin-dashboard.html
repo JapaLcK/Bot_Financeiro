@@ -182,6 +182,9 @@ button:disabled { opacity: .6; cursor: wait; }
 }
 .error-item-title { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .error-item-time  { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.error-item-dismiss { font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 5px; border: none; background: transparent; color: var(--muted); cursor: pointer; opacity: 0; transition: opacity .15s, background .15s; flex-shrink: 0; }
+.error-item:hover .error-item-dismiss { opacity: 1; }
+.error-item-dismiss:hover { background: rgba(255,255,255,.1); color: var(--text); }
 .error-item-msg   { font-size: 12px; color: var(--muted); line-height: 1.5; margin-top: 3px; }
 .error-item-source{ font-size: 11px; color: var(--soft); margin-top: 3px; }
 .expand-hint {
@@ -579,11 +582,12 @@ function renderErrorItem(row) {
   const cls     = `error-item level-${row.level}`;
   const hintLabel = hasTb ? '▼ ver traceback' : '▼ ver detalhes';
   return `
-    <div class="${cls}" onclick="toggleExpand(this)" style="cursor:pointer">
+    <div class="${cls}" data-event-id="${row.id}" onclick="toggleExpand(this)" style="cursor:pointer">
       <div class="error-item-header">
         ${levelBadge(row.level)}
         <span class="error-item-title">${esc(row.event_type)}</span>
         <span class="error-item-time" title="${fDate(row.created_at)}">${fRelTime(row.created_at)}</span>
+        <button class="error-item-dismiss" title="Apagar este evento" onclick="dismissEvent(event, ${row.id})">×</button>
       </div>
       <div class="error-item-msg">${esc(row.message.slice(0,180))}${row.message.length>180?'…':''}</div>
       ${hint   ? `<div class="error-item-source">💡 ${esc(hint)}</div>` : ''}
@@ -591,6 +595,34 @@ function renderErrorItem(row) {
       <div class="expand-hint">${hintLabel}</div>
       <div class="error-item-tb">${content}</div>
     </div>`;
+}
+
+async function dismissEvent(e, eventId) {
+  e.stopPropagation();
+  const card = document.querySelector(`[data-event-id="${eventId}"]`);
+  if (!card) return;
+  card.style.opacity = '0.4';
+  try {
+    const res = await fetch(`/admin/api/events/${eventId}`, {
+      method: 'DELETE', headers: authH()
+    });
+    if (res.ok) {
+      card.remove();
+      lastErrorData = lastErrorData.filter(r => r.id !== eventId);
+      updateErrorBanner(lastErrorData);
+      const total = $id('error-list-meta');
+      if (total) {
+        const visible = _visibleErrors(lastErrorData);
+        const filtered = activeFilter === 'all' ? visible : lastErrorData.filter(e => e.level === activeFilter);
+        const hiddenCount = activeFilter === 'all' ? (lastErrorData.length - visible.length) : 0;
+        total.textContent = `${filtered.length} de ${lastErrorData.length}${hiddenCount > 0 ? ` (${hiddenCount} oculto${hiddenCount>1?'s':''})` : ''}`;
+      }
+    } else {
+      card.style.opacity = '1';
+    }
+  } catch {
+    card.style.opacity = '1';
+  }
 }
 
 function toggleExpand(el) {
