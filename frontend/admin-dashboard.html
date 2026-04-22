@@ -206,6 +206,8 @@ button:disabled { opacity: .6; cursor: wait; }
 }
 .health-item.danger  { background: rgba(220,38,38,.07);  border-color: rgba(248,113,113,.2); }
 .health-item.warning { background: rgba(250,204,21,.05); border-color: rgba(250,204,21,.18); }
+.health-item.clickable { cursor: pointer; transition: filter .15s; }
+.health-item.clickable:hover { filter: brightness(1.25); }
 .health-item-val  { font-size: 20px; font-weight: 700; margin-bottom: 3px; }
 .health-item-val.red    { color: var(--red); }
 .health-item-val.yellow { color: var(--yellow); }
@@ -432,6 +434,12 @@ function clearAlerts() {
   updateErrorBanner(lastErrorData);
 }
 
+function navigateToFilter(level) {
+  applyFilter(level);
+  const section = $id('error-list');
+  if (section) section.closest('.card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function _visibleErrors(errors) {
   if (!alertsClearedAt) return errors;
   return errors.filter(e => new Date(e.created_at) > new Date(alertsClearedAt));
@@ -607,10 +615,11 @@ function applyFilter(level) {
   document.querySelectorAll('#error-filter-bar .filter-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.level === level);
   });
-  const visible  = _visibleErrors(lastErrorData);
-  const filtered = level === 'all' ? visible : visible.filter(e => e.level === level);
+  // Cleared state só se aplica em "Todos" — filtros específicos sempre mostram tudo
+  const base     = level === 'all' ? _visibleErrors(lastErrorData) : lastErrorData;
+  const filtered = level === 'all' ? base : base.filter(e => e.level === level);
   const root = $id('error-list');
-  const hiddenCount = lastErrorData.length - visible.length;
+  const hiddenCount = level === 'all' ? (lastErrorData.length - base.length) : 0;
   $id('error-list-meta').textContent = `${filtered.length} de ${lastErrorData.length}${hiddenCount > 0 ? ` (${hiddenCount} oculto${hiddenCount>1?'s':''})` : ''}`;
   if (!filtered.length) {
     root.innerHTML = `<div class="empty">✅ Nenhum evento ${level === 'all' ? '' : 'nível ' + level} encontrado.</div>`;
@@ -627,11 +636,14 @@ function renderHealthGrid(summary, errors, ops) {
   const items = [
     { label: "Erros críticos (24h)", val: errCount,
       color: errCount > 0 ? 'red' : 'green',
-      cls: errCount > 0 ? 'danger' : '',
-      hint: "Eventos level=error nas últimas 24 horas" },
+      cls: errCount > 0 ? 'danger clickable' : 'clickable',
+      hint: errCount > 0 ? "Clique para ver os erros ↓" : "Nenhum erro nas últimas 24h",
+      clickFilter: 'error' },
     { label: "Alertas (24h)", val: warnCount,
       color: warnCount > 3 ? 'yellow' : warnCount > 0 ? 'yellow' : 'green',
-      cls: warnCount > 3 ? 'warning' : '' },
+      cls: (warnCount > 3 ? 'warning' : '') + ' clickable',
+      hint: warnCount > 0 ? "Clique para ver os alertas ↓" : "Nenhum alerta nas últimas 24h",
+      clickFilter: 'warning' },
     { label: "Taxa login 7d",
       val: `${summary.login_success_rate_7d}%`,
       color: summary.login_success_rate_7d >= 85 ? 'green' : 'yellow',
@@ -645,7 +657,7 @@ function renderHealthGrid(summary, errors, ops) {
   ];
 
   $id('health-grid').innerHTML = items.map(it => `
-    <div class="health-item ${it.cls||''}">
+    <div class="health-item ${it.cls||''}" ${it.clickFilter ? `onclick="navigateToFilter('${it.clickFilter}')"` : ''}>
       <div class="health-item-val ${it.color||''}">${it.val}</div>
       <div class="health-item-label">${it.label}</div>
       ${it.hint ? `<div class="health-item-hint">${it.hint}</div>` : ''}
