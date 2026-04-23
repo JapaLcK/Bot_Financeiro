@@ -145,6 +145,7 @@ from .reports import (
     list_users_with_daily_report_enabled,
     list_identities_by_user,
     mark_daily_report_sent,
+    claim_daily_report_send,
     was_daily_report_sent_today,
     get_last_ofx_import_end_date,
     register_auth_user,
@@ -214,7 +215,8 @@ __all__ = [
     # reports
     "set_daily_report_enabled", "set_daily_report_hour", "get_daily_report_prefs",
     "list_users_with_daily_report_enabled", "list_identities_by_user",
-    "mark_daily_report_sent", "was_daily_report_sent_today", "get_last_ofx_import_end_date",
+    "mark_daily_report_sent", "claim_daily_report_send", "was_daily_report_sent_today",
+    "get_last_ofx_import_end_date",
     "register_auth_user", "login_auth_user", "get_auth_user", "auto_link_auth_user",
     "create_dashboard_session", "get_dashboard_session", "consume_dashboard_session",
     "update_user_plan", "get_user_by_stripe_customer", "set_stripe_customer",

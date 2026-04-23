@@ -47,6 +47,10 @@ def mark_daily_report_sent(user_id: int, sent_date) -> None:
     return _db_support.mark_daily_report_sent_impl(get_conn, ensure_user, user_id, sent_date)
 
 
+def claim_daily_report_send(user_id: int, sent_date) -> bool:
+    return _db_support.claim_daily_report_send_impl(get_conn, ensure_user, user_id, sent_date)
+
+
 def was_daily_report_sent_today(user_id: int, today) -> bool:
     return _db_support.was_daily_report_sent_today_impl(get_conn, ensure_user, user_id, today)
 

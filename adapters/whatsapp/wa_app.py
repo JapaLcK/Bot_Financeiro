@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import socket
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -14,12 +15,11 @@ from config.env import load_app_env
 from core.observability import log_system_event_sync
 from core.reports.reports_daily import build_daily_report_text, build_due_bill_reminders
 from db import (
+    claim_daily_report_send,
     get_daily_report_prefs,
     list_identities_by_user,
     list_users_with_daily_report_enabled,
     mark_card_reminder_sent,
-    mark_daily_report_sent,
-    was_daily_report_sent_today,
 )
 from utils_date import now_tz
 
@@ -30,6 +30,13 @@ logger = logging.getLogger(__name__)
 VERIFY_TOKEN = (os.getenv("WA_VERIFY_TOKEN") or "").strip()
 APP_SECRET = (os.getenv("WA_APP_SECRET") or "").strip()
 _queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=500)
+
+
+def _runtime_instance_details() -> dict[str, str | int]:
+    return {
+        "pid": os.getpid(),
+        "hostname": socket.gethostname(),
+    }
 
 
 async def wa_verify(request: Request):
@@ -170,6 +177,14 @@ async def _worker_loop():
 def _daily_report_tick() -> None:
     now = now_tz()
     today = now.date()
+    instance = _runtime_instance_details()
+
+    logger.info(
+        "WA daily report tick started pid=%s hostname=%s now=%s",
+        instance["pid"],
+        instance["hostname"],
+        now.isoformat(),
+    )
 
     for uid in list_users_with_daily_report_enabled():
         prefs = get_daily_report_prefs(uid)
@@ -180,8 +195,23 @@ def _daily_report_tick() -> None:
         minute = prefs["minute"]
         if (now.hour, now.minute) < (hour, minute):
             continue
-        if was_daily_report_sent_today(uid, today):
+        if not claim_daily_report_send(uid, today):
+            logger.info(
+                "WA daily report claim skipped uid=%s pid=%s hostname=%s date=%s",
+                uid,
+                instance["pid"],
+                instance["hostname"],
+                today.isoformat(),
+            )
             continue
+
+        logger.info(
+            "WA daily report claim acquired uid=%s pid=%s hostname=%s date=%s",
+            uid,
+            instance["pid"],
+            instance["hostname"],
+            today.isoformat(),
+        )
 
         message = build_daily_report_text(uid)
         reminders = build_due_bill_reminders(uid, today)
@@ -193,6 +223,14 @@ def _daily_report_tick() -> None:
                 for reminder in reminders:
                     send_text(to, reminder["message"])
                 send_text(to, message)
+                logger.info(
+                    "WA daily report sent uid=%s to=%s reminders=%s pid=%s hostname=%s",
+                    uid,
+                    to,
+                    len(reminders),
+                    instance["pid"],
+                    instance["hostname"],
+                )
             except Exception as exc:
                 logger.warning("WA daily report send error to=%s error=%s", to, exc)
                 log_system_event_sync(
@@ -217,8 +255,6 @@ def _daily_report_tick() -> None:
                     user_id=uid,
                     details={"card_id": reminder["card_id"]},
                 )
-
-        mark_daily_report_sent(uid, today)
 
 
 async def _daily_report_loop():

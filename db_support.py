@@ -215,6 +215,32 @@ def mark_daily_report_sent_impl(get_conn, ensure_user, user_id: int, sent_date) 
         conn.commit()
 
 
+def claim_daily_report_send_impl(get_conn, ensure_user, user_id: int, sent_date) -> bool:
+    """
+    Tenta reservar atomicamente o envio do report diário para `sent_date`.
+
+    Retorna True apenas para o primeiro processo que conseguir gravar a data.
+    Se outro processo já tiver reservado/enviado o mesmo dia, retorna False.
+    """
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into daily_report_prefs(user_id, last_sent_date)
+                values (%s, %s)
+                on conflict (user_id) do update
+                   set last_sent_date = excluded.last_sent_date
+                 where daily_report_prefs.last_sent_date is distinct from excluded.last_sent_date
+                returning user_id
+                """,
+                (user_id, sent_date),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return row is not None
+
+
 def was_daily_report_sent_today_impl(get_conn, ensure_user, user_id: int, today) -> bool:
     ensure_user(user_id)
     with get_conn() as conn:
