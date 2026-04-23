@@ -21,6 +21,7 @@ from db import (
     list_users_with_daily_report_enabled,
     mark_card_reminder_sent,
 )
+from utils_phone import normalize_phone_e164
 from utils_date import now_tz
 
 load_app_env()
@@ -37,6 +38,32 @@ def _runtime_instance_details() -> dict[str, str | int]:
         "pid": os.getpid(),
         "hostname": socket.gethostname(),
     }
+
+
+def _dedupe_whatsapp_targets(ids: list[dict]) -> list[str]:
+    seen: set[str] = set()
+    targets: list[str] = []
+
+    for item in ids:
+        if item.get("provider") != "whatsapp":
+            continue
+
+        raw = (item.get("external_id") or "").strip()
+        if not raw:
+            continue
+
+        try:
+            normalized = normalize_phone_e164(raw)
+        except Exception:
+            normalized = raw
+
+        if normalized in seen:
+            continue
+
+        seen.add(normalized)
+        targets.append(raw)
+
+    return targets
 
 
 async def wa_verify(request: Request):
@@ -90,12 +117,6 @@ async def wa_webhook(request: Request):
         value = payload.get("entry", [{}])[0].get("changes", [{}])[0].get("value", {})
         statuses = value.get("statuses") or []
         messages = value.get("messages") or []
-        logger.info(
-            "WA webhook received: field=%s messages=%s statuses=%s",
-            payload.get("entry", [{}])[0].get("changes", [{}])[0].get("field"),
-            len(messages),
-            len(statuses),
-        )
         log_system_event_sync(
             "info",
             "whatsapp_webhook_received",
@@ -113,14 +134,6 @@ async def wa_webhook(request: Request):
                 flush=True,
             )
         for status in statuses:
-            logger.info(
-                "WA status received: id=%s status=%s recipient=%s conversation=%s errors=%s",
-                status.get("id"),
-                status.get("status"),
-                status.get("recipient_id"),
-                (status.get("conversation") or {}).get("id"),
-                status.get("errors"),
-            )
             if status.get("errors"):
                 log_system_event_sync(
                     "warning",
@@ -160,8 +173,7 @@ async def _worker_loop():
     while True:
         payload = await _queue.get()
         try:
-            count = await asyncio.to_thread(process_payload, payload)
-            logger.info("WA payload processed messages=%s", count)
+            await asyncio.to_thread(process_payload, payload)
         except Exception as exc:
             logger.exception("WA worker error: %s", exc)
             log_system_event_sync(
@@ -179,13 +191,6 @@ def _daily_report_tick() -> None:
     today = now.date()
     instance = _runtime_instance_details()
 
-    logger.info(
-        "WA daily report tick started pid=%s hostname=%s now=%s",
-        instance["pid"],
-        instance["hostname"],
-        now.isoformat(),
-    )
-
     for uid in list_users_with_daily_report_enabled():
         prefs = get_daily_report_prefs(uid)
         if not prefs["enabled"]:
@@ -196,27 +201,12 @@ def _daily_report_tick() -> None:
         if (now.hour, now.minute) < (hour, minute):
             continue
         if not claim_daily_report_send(uid, today):
-            logger.info(
-                "WA daily report claim skipped uid=%s pid=%s hostname=%s date=%s",
-                uid,
-                instance["pid"],
-                instance["hostname"],
-                today.isoformat(),
-            )
             continue
-
-        logger.info(
-            "WA daily report claim acquired uid=%s pid=%s hostname=%s date=%s",
-            uid,
-            instance["pid"],
-            instance["hostname"],
-            today.isoformat(),
-        )
 
         message = build_daily_report_text(uid)
         reminders = build_due_bill_reminders(uid, today)
         ids = list_identities_by_user(uid)
-        wa_targets = [x["external_id"] for x in ids if x["provider"] == "whatsapp"]
+        wa_targets = _dedupe_whatsapp_targets(ids)
 
         for to in wa_targets:
             try:

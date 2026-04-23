@@ -2,6 +2,7 @@
 db/investments.py — Investimentos: criar, aportar, resgatar, juros e CDI.
 """
 import calendar
+import logging
 import sys
 import requests
 from datetime import datetime, date, timedelta
@@ -14,6 +15,9 @@ from utils_date import _tz
 
 from .connection import get_conn
 from .users import ensure_user
+
+logger = logging.getLogger(__name__)
+_warned_bcb_requests: set[tuple] = set()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -37,6 +41,13 @@ def _fmt_ddmmyyyy(d: date) -> str:
     return d.strftime("%d/%m/%Y")
 
 
+def _warn_bcb_once(key: tuple, message: str, *args) -> None:
+    if key in _warned_bcb_requests:
+        return
+    _warned_bcb_requests.add(key)
+    logger.warning(message, *args)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # CDI — BCB SGS
 # ──────────────────────────────────────────────────────────────────────────────
@@ -53,7 +64,14 @@ def _fetch_sgs_series_json(series_code: int, start: date, end: date) -> list[dic
         r.raise_for_status()
         return r.json()
     except Exception as e:
-        print(f"[WARN] Falha ao buscar série SGS {series_code} no BCB: {e}")
+        _warn_bcb_once(
+            ("fetch_sgs_series_json", series_code, start, end, type(e).__name__, str(e)),
+            "Falha ao buscar série SGS %s no BCB entre %s e %s: %s",
+            series_code,
+            start.isoformat(),
+            end.isoformat(),
+            e,
+        )
         return []
 
 
@@ -91,7 +109,12 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
                 to_upsert.append((d, v))
             cached[d] = v
         except Exception as e:
-            print(f"[WARN] Item inválido do BCB ignorado: {item} | erro={e}")
+            _warn_bcb_once(
+                ("invalid_bcb_item", str(item), type(e).__name__, str(e)),
+                "Item inválido do BCB ignorado: %s | erro=%s",
+                item,
+                e,
+            )
 
     if to_upsert:
         cur.executemany(

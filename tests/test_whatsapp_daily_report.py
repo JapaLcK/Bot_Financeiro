@@ -1,7 +1,7 @@
 from datetime import date
 from unittest.mock import patch
 
-from adapters.whatsapp.wa_app import _daily_report_tick
+from adapters.whatsapp.wa_app import _daily_report_tick, _dedupe_whatsapp_targets
 
 
 def test_daily_report_tick_nao_envia_quando_claim_falha():
@@ -34,3 +34,16 @@ def test_daily_report_tick_envia_quando_claim_tem_sucesso():
         _daily_report_tick()
 
     send_mock.assert_called_once_with("5511999999999", "resumo")
+
+
+def test_dedupe_whatsapp_targets_remove_destinos_repetidos_do_mesmo_numero():
+    ids = [
+        {"provider": "whatsapp", "external_id": "11999999999"},
+        {"provider": "whatsapp", "external_id": "5511999999999"},
+        {"provider": "discord", "external_id": "123"},
+        {"provider": "whatsapp", "external_id": "5511888888888"},
+    ]
+
+    targets = _dedupe_whatsapp_targets(ids)
+
+    assert targets == ["11999999999", "5511888888888"]
