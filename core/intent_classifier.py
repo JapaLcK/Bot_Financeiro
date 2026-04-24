@@ -17,6 +17,7 @@ import unicodedata
 from difflib import get_close_matches
 from dataclasses import dataclass, field
 from typing import Any
+from utils_text import parse_money
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +304,7 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "pockets.delete"),
     (r"^(coloquei|adicionei|depositei|transferi|pus|botei)\s+\d",
      "pockets.deposit"),
-    (r"^(retirei|saquei|tirei)\s+\d",
+    (r"^(retirei|saquei|tirei)\s+\d.*\bcaixinha\b",
      "pockets.withdraw"),
 
     # investimentos
@@ -317,6 +318,8 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "investments.deposit"),
     (r"^(resgatei|saquei do investimento|retirei do investimento)\b",
      "investments.withdraw"),
+    (r"^(retirei|saquei|tirei|resgatei)\s+\d",
+     "funds.withdraw"),
 
     # categorias
     (r"^(regras|regras de categoria|regras de categorias|listar regras|ver regras)$",
@@ -376,6 +379,32 @@ def _extract_id_from_text(text_norm: str) -> int | None:
     """Extrai o primeiro número inteiro do texto normalizado."""
     m = re.search(r"\b(\d+)\b", text_norm)
     return int(m.group(1)) if m else None
+
+
+def _extract_amount_from_text(original: str) -> float | None:
+    try:
+        return parse_money(original)
+    except Exception:
+        return None
+
+
+def _extract_source_target_name(original: str) -> str | None:
+    text = (original or "").strip()
+    if not text:
+        return None
+
+    patterns = (
+        r"\b(?:da|do|de)\s+(?:caixinha|investimento)\s+(.+)$",
+        r"\b(?:da|do|de)\s+(.+)$",
+    )
+    for pattern in patterns:
+        m = re.search(pattern, text, flags=re.IGNORECASE)
+        if not m:
+            continue
+        name = (m.group(1) or "").strip(" .,!?:;")
+        if name:
+            return name
+    return None
 
 
 _DOMAIN_HINT_KEYWORDS = (
@@ -474,6 +503,18 @@ def _try_alias(norm: str, original: str) -> IntentResult | None:
                 m = re.search(r"^(?:excluir|deletar)\s+investimento\s+(.+)$", norm)
                 if m:
                     entities["investment_name"] = m.group(1).strip()
+
+            elif intent == "funds.withdraw":
+                amount = _extract_amount_from_text(original)
+                target_name = _extract_source_target_name(original)
+                if amount:
+                    entities["amount"] = amount
+                if target_name:
+                    entities["target_name"] = target_name
+                if "caixinha" in norm:
+                    entities["target_kind"] = "pocket"
+                elif "investimento" in norm:
+                    entities["target_kind"] = "investment"
 
             elif intent == "report.set_hour":
                 # tenta "20h", "20h30", "20:30", "8 30" etc.

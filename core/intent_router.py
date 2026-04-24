@@ -163,6 +163,7 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
     WRITE_INTENTS = {
         "launches.add", "pockets.create", "pockets.deposit", "pockets.withdraw",
         "investments.create", "investments.deposit", "investments.withdraw",
+        "funds.withdraw",
         "categories.create", "categories.delete",
     }
     if intent in WRITE_INTENTS and confidence < CONFIDENCE_EXECUTE:
@@ -254,6 +255,9 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
 
     if intent == "pockets.withdraw":
         return h_pockets.withdraw(user_id, text, entities)
+
+    if intent == "funds.withdraw":
+        return _execute_generic_withdraw(user_id, text, entities)
 
     # --- investimentos ---
     if intent == "investments.list":
@@ -376,6 +380,7 @@ def _intent_label(intent: str) -> str:
         "pockets.create":       "criar caixinha",
         "pockets.deposit":      "depositar em caixinha",
         "pockets.withdraw":     "retirar de caixinha",
+        "funds.withdraw":       "retirar de caixinha ou investimento",
         "investments.create":   "criar investimento",
         "investments.deposit":  "aportar em investimento",
         "investments.withdraw": "resgatar investimento",
@@ -383,3 +388,45 @@ def _intent_label(intent: str) -> str:
         "categories.delete":    "remover regra de categoria",
     }
     return labels.get(intent, intent)
+
+
+def _execute_generic_withdraw(user_id: int, text: str, entities: dict) -> str:
+    amount = entities.get("amount")
+    target_name = (entities.get("target_name") or "").strip()
+    target_kind = entities.get("target_kind")
+
+    if target_kind == "pocket":
+        return h_pockets.withdraw(user_id, text, {"pocket_name": target_name, "amount": amount})
+    if target_kind == "investment":
+        return h_investments.withdraw(user_id, text, {"investment_name": target_name, "amount": amount})
+
+    if not amount or float(amount) <= 0:
+        return "Qual o valor? Tente: *saquei 200 da reserva de emergência*"
+
+    if not target_name:
+        return "Você quer retirar de qual caixinha ou investimento?"
+
+    norm_target = normalize_text(target_name)
+
+    pockets = db.list_pockets(user_id) or []
+    investments = db.accrue_all_investments(user_id) or []
+
+    pocket_matches = [p for p in pockets if normalize_text(p.get("name") or "") == norm_target]
+    investment_matches = [i for i in investments if normalize_text(i.get("name") or "") == norm_target]
+
+    if len(pocket_matches) == 1 and not investment_matches:
+        return h_pockets.withdraw(user_id, text, {"pocket_name": pocket_matches[0]["name"], "amount": amount})
+
+    if len(investment_matches) == 1 and not pocket_matches:
+        return h_investments.withdraw(user_id, text, {"investment_name": investment_matches[0]["name"], "amount": amount})
+
+    if pocket_matches and investment_matches:
+        return (
+            f"Encontrei esse nome tanto em caixinha quanto em investimento: **{target_name}**.\n"
+            f"Você quer retirar da *caixinha* ou do *investimento*?"
+        )
+
+    return (
+        f"Não encontrei **{target_name}** nem em caixinhas nem em investimentos.\n"
+        f"Use *listar caixinhas* ou *listar investimentos* para ver os nomes disponíveis."
+    )
