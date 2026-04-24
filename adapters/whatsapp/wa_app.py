@@ -9,7 +9,7 @@ import socket
 from fastapi import Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from adapters.whatsapp.wa_client import send_text
+from adapters.whatsapp.wa_client import send_interactive_buttons, send_template, send_text
 from adapters.whatsapp.wa_runtime import process_payload, verify_webhook_signature
 from config.env import load_app_env
 from core.observability import log_system_event_sync
@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 VERIFY_TOKEN = (os.getenv("WA_VERIFY_TOKEN") or "").strip()
 APP_SECRET = (os.getenv("WA_APP_SECRET") or "").strip()
 _queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=500)
+WA_DAILY_REPORT_DISABLE_ID = "daily_report_disable"
 
 
 def _runtime_instance_details() -> dict[str, str | int]:
@@ -64,6 +65,33 @@ def _dedupe_whatsapp_targets(ids: list[dict]) -> list[str]:
         targets.append(raw)
 
     return targets
+
+
+def _proactive_template_config() -> dict[str, str] | None:
+    template_name = (os.getenv("WA_PROACTIVE_TEMPLATE_NAME") or "").strip()
+    if not template_name:
+        return None
+
+    return {
+        "name": template_name,
+        "language_code": (os.getenv("WA_PROACTIVE_TEMPLATE_LANGUAGE") or "pt_BR").strip(),
+    }
+
+
+def _strip_daily_report_disable_hint(message: str) -> str:
+    lines = (message or "").splitlines()
+    filtered = [
+        line for line in lines
+        if line.strip() not in {
+            "⚙️ Para desligar o report diário automatico:",
+            "*desligar report diario*",
+        }
+    ]
+
+    while filtered and not filtered[-1].strip():
+        filtered.pop()
+
+    return "\n".join(filtered).strip()
 
 
 async def wa_verify(request: Request):
@@ -203,16 +231,29 @@ def _daily_report_tick() -> None:
         if not claim_daily_report_send(uid, today):
             continue
 
-        message = build_daily_report_text(uid)
+        message = _strip_daily_report_disable_hint(build_daily_report_text(uid))
         reminders = build_due_bill_reminders(uid, today)
         ids = list_identities_by_user(uid)
         wa_targets = _dedupe_whatsapp_targets(ids)
 
         for to in wa_targets:
             try:
+                proactive_template = _proactive_template_config()
+                if proactive_template:
+                    send_template(
+                        to,
+                        proactive_template["name"],
+                        language_code=proactive_template["language_code"],
+                    )
                 for reminder in reminders:
                     send_text(to, reminder["message"])
                 send_text(to, message)
+                send_interactive_buttons(
+                    to=to,
+                    body="Se quiser parar o resumo diário, toque no botão abaixo.",
+                    buttons=[{"id": WA_DAILY_REPORT_DISABLE_ID, "title": "Parar resumo"}],
+                    footer="Você pode ligar novamente quando quiser.",
+                )
                 logger.info(
                     "WA daily report sent uid=%s to=%s reminders=%s pid=%s hostname=%s",
                     uid,

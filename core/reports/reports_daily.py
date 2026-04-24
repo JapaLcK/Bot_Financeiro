@@ -156,9 +156,9 @@ def build_daily_report_text(user_id: int) -> str:
 
 @tasks.loop(time=time(hour=9, minute=0, tzinfo=_tz()))
 async def _daily_report_discord(bot):
-    logger.info("Daily report iniciado para %d usuários", len(user_ids))
     # busca usuários com report habilitado
     user_ids = list_users_with_daily_report_enabled(9, 0)
+    logger.info("Daily report iniciado para %d usuários", len(user_ids))
 
     for uid in user_ids:
         msg = build_daily_report_text(uid)

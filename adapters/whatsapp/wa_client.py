@@ -115,6 +115,115 @@ def send_text(
     return response
 
 
+def send_template(
+    to: str,
+    template_name: str,
+    *,
+    language_code: str = "pt_BR",
+    body_params: Optional[list[str]] = None,
+    access_token: Optional[str] = None,
+    phone_number_id: Optional[str] = None,
+    graph_version: Optional[str] = None,
+):
+    token, pnid, base = _wa_config(
+        access_token=access_token,
+        phone_number_id=phone_number_id,
+        graph_version=graph_version,
+    )
+    url = f"{base}/{pnid}/messages"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    template: Dict[str, Any] = {
+        "name": template_name,
+        "language": {"code": language_code},
+    }
+    if body_params:
+        template["components"] = [
+            {
+                "type": "body",
+                "parameters": [{"type": "text", "text": p} for p in body_params],
+            }
+        ]
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "template",
+        "template": template,
+    }
+
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=20)
+    except Exception as exc:
+        log_system_event_sync(
+            "error",
+            "whatsapp_send_exception",
+            f"Excecao ao enviar template WhatsApp: {exc}",
+            source="wa_client",
+            details={
+                "to": to,
+                "kind": "template",
+                "template_name": template_name,
+                "language_code": language_code,
+            },
+        )
+        raise
+
+    if r.status_code == 401:
+        print("SEND_ERROR: token inválido/expirado")
+        print(r.text)
+        log_system_event_sync(
+            "error",
+            "whatsapp_token_invalid",
+            "Token do WhatsApp invalido ou expirado durante envio de template.",
+            source="wa_client",
+            details={
+                "to": to,
+                "kind": "template",
+                "template_name": template_name,
+                "language_code": language_code,
+                "response": r.text[:500],
+            },
+        )
+        return None
+
+    if r.status_code >= 400:
+        log_system_event_sync(
+            "error",
+            "whatsapp_send_failed",
+            f"Falha ao enviar template WhatsApp ({r.status_code}).",
+            source="wa_client",
+            details={
+                "to": to,
+                "kind": "template",
+                "template_name": template_name,
+                "language_code": language_code,
+                "status_code": r.status_code,
+                "response": r.text[:500],
+            },
+        )
+        raise RuntimeError(f"WA send_template failed {r.status_code}: {r.text}")
+
+    response = r.json()
+    log_system_event_sync(
+        "info",
+        "whatsapp_send_success",
+        "Template enviado para o WhatsApp.",
+        source="wa_client",
+        details={
+            "to": to,
+            "kind": "template",
+            "template_name": template_name,
+            "language_code": language_code,
+            "message_ids": [m.get("id") for m in response.get("messages", []) if m.get("id")],
+        },
+    )
+    return response
+
+
 def send_typing_indicator(
     message_id: str,
     *,

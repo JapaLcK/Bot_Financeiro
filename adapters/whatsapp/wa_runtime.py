@@ -26,6 +26,7 @@ from adapters.whatsapp.wa_help_menu import (
     send_help_section,
 )
 from core.handle_incoming import handle_incoming
+from core.handlers import report as h_report
 from core.observability import log_system_event_sync
 from core.types import IncomingMessage
 from db import attempt_whatsapp_phone_link, clear_pending_action, get_conn, get_or_create_canonical_user, get_pending_action
@@ -36,6 +37,7 @@ logger = logging.getLogger(__name__)
 WA_CONFIRM_YES_ID = "confirm_yes"
 WA_CONFIRM_NO_ID = "confirm_no"
 WA_UNDO_LAUNCH_ID = "undo_launch"
+WA_DAILY_REPORT_DISABLE_ID = "daily_report_disable"
 
 
 _SEEN: dict[str, float] = {}
@@ -395,6 +397,20 @@ def process_message(message: InboundMessage) -> None:
                 logger.info("WA undo_launch button clicked wa_id=%s", reply_to)
                 # Injeta "desfazer" para o classificador tratar normalmente
                 message.text = "desfazer"
+            elif interactive_id == WA_DAILY_REPORT_DISABLE_ID:
+                logger.info("WA daily_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
+                try:
+                    _send_reply(reply_to, h_report.disable(uid))
+                except Exception as e:
+                    logger.exception("WA daily_report_disable button error wa_id=%s: %s", reply_to, e)
+                    log_system_event_sync(
+                        "warning",
+                        "whatsapp_daily_report_disable_button_error",
+                        f"Erro ao processar botão de desligar report diário: {e}",
+                        source="wa_runtime",
+                        user_id=uid,
+                    )
+                return
 
         # ---------------------------------------------------------------
         # Interceptação de comandos de texto simples para fluxo interativo
