@@ -97,7 +97,7 @@ def _extract_valor(text: str) -> float | None:
         return float(m.group(1)) + float(m.group(2)) / 100
 
     # 2. Número com separador decimal ("30,50" ou "30.50")
-    m = re.search(r"(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\b", text)
+    m = re.search(r"(\d+(?:[.,]\d{3})*[.,]\d{2})\b", text)
     if m:
         raw = m.group(1).replace(".", "").replace(",", ".")
         try:

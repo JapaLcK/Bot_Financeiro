@@ -41,6 +41,17 @@ def test_parse_gastei_cafe_cai_em_alimentacao(user_id):
     assert parsed["alvo"] == "cafe"
 
 
+def test_parse_valor_com_4_ou_mais_digitos_e_centavos(user_id):
+    parsed_investimentos = parse_receita_despesa_natural(user_id, "gastei 9204,40 em investimentos")
+    parsed_bitcoin = parse_receita_despesa_natural(user_id, "gastei 1598,97 em bitcoin")
+
+    assert parsed_investimentos is not None
+    assert parsed_investimentos["valor"] == 9204.40
+
+    assert parsed_bitcoin is not None
+    assert parsed_bitcoin["valor"] == 1598.97
+
+
 def test_classify_apagar_id_com_hash():
     result = classify("apagar id #712")
 
