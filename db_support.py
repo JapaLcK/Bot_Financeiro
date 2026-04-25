@@ -25,7 +25,7 @@ def get_launches_by_period_impl(
     end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
 
     sql = """
-        select id, tipo, valor, alvo, nota, categoria, source, criado_em
+        select id, tipo, valor, alvo, nota, categoria, source, criado_em, is_internal_movement
         from launches
         where user_id=%s
         and criado_em >= %s
@@ -57,6 +57,7 @@ def get_summary_by_period_impl(
         where user_id=%s
           and criado_em >= %s
           and criado_em < %s
+          and is_internal_movement = false
         group by tipo
     """
 

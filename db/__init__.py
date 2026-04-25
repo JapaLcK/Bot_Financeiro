@@ -86,10 +86,12 @@ from .categories import (
     list_category_rules,
     add_category_rule,
     delete_category_rule,
+    delete_category_rules_by_category,
     list_categories,
     get_memorized_category,
     upsert_category_rule,
     list_user_category_rules,
+    resolve_category_rule_target,
 )
 
 # ── Ações pendentes ───────────────────────────────────────────────────────────
@@ -196,8 +198,10 @@ __all__ = [
     "investment_withdraw_to_account", "get_latest_cdi", "get_latest_cdi_aa",
     "get_latest_cdi_daily_pct", "_get_cdi_daily_map", "_business_days_between",
     # categories
-    "list_category_rules", "add_category_rule", "delete_category_rule", "list_categories",
+    "list_category_rules", "add_category_rule", "delete_category_rule",
+    "delete_category_rules_by_category", "list_categories",
     "get_memorized_category", "upsert_category_rule", "list_user_category_rules",
+    "resolve_category_rule_target",
     # pending
     "set_pending_action", "get_pending_action", "clear_pending_action",
     # cards

@@ -3,6 +3,7 @@ db/categories.py — Regras de categorização automática de lançamentos.
 """
 from .connection import get_conn
 from .users import ensure_user
+from utils_text import normalize_text
 
 
 def list_category_rules(user_id: int) -> list[tuple[str, str]]:
@@ -47,6 +48,22 @@ def delete_category_rule(user_id: int, keyword: str) -> int:
             cur.execute(
                 "DELETE FROM user_category_rules WHERE user_id=%s AND keyword=%s",
                 (user_id, keyword),
+            )
+            n = cur.rowcount
+        conn.commit()
+    return n
+
+
+def delete_category_rules_by_category(user_id: int, category: str) -> int:
+    ensure_user(user_id)
+    category = (category or "").strip()
+    if not category:
+        return 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM user_category_rules WHERE user_id=%s AND lower(category)=lower(%s)",
+                (user_id, category),
             )
             n = cur.rowcount
         conn.commit()
@@ -128,3 +145,36 @@ def list_user_category_rules(user_id: int) -> list[tuple[str, str]]:
         else:
             out.append((r[0] or "", r[1] or ""))
     return out
+
+
+def resolve_category_rule_target(user_id: int, target: str) -> tuple[str, str, int]:
+    """
+    Resolve um alvo de remoção informado pelo usuário.
+
+    Retorna:
+      ("keyword", keyword_original, 1)
+      ("category", category_original, qtd_regras)
+      ("", "", 0) se não encontrar
+    """
+    target_norm = normalize_text(target or "")
+    if not target_norm:
+        return ("", "", 0)
+
+    rules = list_user_category_rules(user_id)
+    if not rules:
+        return ("", "", 0)
+
+    for keyword, _category in rules:
+        if normalize_text(keyword) == target_norm:
+            return ("keyword", keyword, 1)
+
+    category_matches: dict[str, int] = {}
+    for _keyword, category in rules:
+        if normalize_text(category) == target_norm:
+            category_matches[category] = category_matches.get(category, 0) + 1
+
+    if category_matches:
+        category, count = max(category_matches.items(), key=lambda item: item[1])
+        return ("category", category, count)
+
+    return ("", "", 0)

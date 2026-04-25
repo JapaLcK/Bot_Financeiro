@@ -37,6 +37,9 @@ LOCAL_RULES = [
     (["aporte", "aplicacao", "aplicação", "compra de acoes", "compra de ações", "compra de acao", "compra de ação",
       "acao", "ação", "acoes", "ações", "fii", "fiis", "cdb", "rdb", "lci", "lca",
       "tesouro", "selic", "ipca", "etf"], "investimento_aporte"),
+    # Cripto e referências diretas a investimentos também devem sair como movimentação interna
+    (["investimento", "investimentos"], "investimentos"),
+    (["bitcoin", "btc", "ethereum", "eth", "solana", "sol", "cripto", "criptomoeda", "criptomoedas"], "criptomoedas"),
     # Resgates de investimento — movimentação interna (não é receita real)
     (["resgate", "retirada de investimento", "retirei do investimento"], "investimento_resgate"),
     # Rendimentos — receita real (lucro/juros/dividendos)
@@ -70,13 +73,29 @@ CATEGORY_LABELS = {
     "pagamento_fatura": "pagamento_fatura",
     "ajuste_saldo": "ajuste_saldo",
     "rendimentos": "rendimentos",
+    "investimentos": "investimentos",
+    "criptomoedas": "criptomoedas",
+}
+
+INVESTMENT_CATEGORY_HINTS = {
+    "investimento", "investimentos",
+    "criptomoeda", "criptomoedas", "cripto",
+    "bitcoin", "btc", "ethereum", "eth", "solana", "sol",
+    "acao", "acoes", "fii", "fiis", "etf", "etfs",
+    "tesouro", "cdb", "rdb", "lci", "lca",
 }
 
 def is_internal_category(categoria: str | None) -> bool:
     """Retorna True se a categoria indica movimentação interna."""
     if not categoria:
         return False
-    return normalize_text(categoria) in INTERNAL_MOVEMENT_CATEGORIES
+    norm = normalize_text(categoria)
+    if norm in INTERNAL_MOVEMENT_CATEGORIES:
+        return True
+    if norm == "rendimentos":
+        return False
+
+    return any(contains_word(norm, hint) for hint in INVESTMENT_CATEGORY_HINTS)
 
 
 def canonicalize_category_label(category: str | None) -> str:

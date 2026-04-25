@@ -85,11 +85,15 @@ def init_db():
           is_internal_movement boolean not null default false
         """,
         """
-        -- migration: marca retroativamente aportes, resgates e categoria investimentos como movimentações internas
+        -- migration: marca retroativamente aportes, resgates e categorias de investimento como movimentações internas
         update launches set is_internal_movement = true
         where (
           tipo in ('aporte_investimento', 'resgate_investimento')
-          or categoria = 'investimentos'
+          or lower(coalesce(categoria, '')) in (
+            'investimentos', 'investimento',
+            'criptomoedas', 'criptomoeda', 'cripto',
+            'bitcoin', 'btc', 'ethereum', 'eth', 'solana', 'sol'
+          )
         )
         and is_internal_movement = false
         """,

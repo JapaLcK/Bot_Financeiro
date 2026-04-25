@@ -16,7 +16,10 @@ def check(user_id: int) -> str:
 
     # ── Gastos de hoje ───────────────────────────────────────────────────
     today_launches = db.get_launches_by_period(user_id, today, today)
-    despesas_hoje = [l for l in today_launches if l["tipo"] == "despesa"]
+    despesas_hoje = [
+        l for l in today_launches
+        if l["tipo"] == "despesa" and not l.get("is_internal_movement")
+    ]
     if despesas_hoje:
         lines.append("")
         lines.append("📋 *Hoje*")

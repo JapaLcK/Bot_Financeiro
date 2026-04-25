@@ -15,6 +15,7 @@ from db import (
     get_memorized_category,
     get_open_bill_summary,
     get_pending_action,
+    get_summary_by_period,
     list_cards,
     set_default_card,
     set_pending_action,
@@ -47,9 +48,13 @@ def test_parse_valor_com_4_ou_mais_digitos_e_centavos(user_id):
 
     assert parsed_investimentos is not None
     assert parsed_investimentos["valor"] == 9204.40
+    assert parsed_investimentos["categoria"] == "investimentos"
+    assert parsed_investimentos["is_internal_movement"] is True
 
     assert parsed_bitcoin is not None
     assert parsed_bitcoin["valor"] == 1598.97
+    assert parsed_bitcoin["categoria"] == "criptomoedas"
+    assert parsed_bitcoin["is_internal_movement"] is True
 
 
 def test_classify_apagar_id_com_hash():
@@ -488,6 +493,37 @@ def test_remove_regra_sem_r_funciona(user_id):
 
     assert "removida" in response.lower()
     assert get_memorized_category(user_id, "money invest") is None
+
+
+def test_remover_regra_por_nome_da_categoria_remove_regras_associadas(user_id):
+    route(
+        classify("aprender bitcoin como criptomoedas"),
+        IncomingMessage(platform="discord", user_id=user_id, text="aprender bitcoin como criptomoedas"),
+    )
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="remover regra criptomoedas")
+
+    response = route(classify(msg.text), msg)
+
+    assert "removida" in response.lower() or "removidas" in response.lower()
+    assert get_memorized_category(user_id, "comprei bitcoin") is None
+
+
+def test_regra_aprendida_de_investimentos_vira_movimentacao_interna(user_id):
+    route(
+        classify("aprender bitcoin como criptomoedas"),
+        IncomingMessage(platform="discord", user_id=user_id, text="aprender bitcoin como criptomoedas"),
+    )
+
+    response = route(
+        classify("gastei 1598,97 em bitcoin"),
+        IncomingMessage(platform="discord", user_id=user_id, text="gastei 1598,97 em bitcoin"),
+    )
+
+    summary = get_summary_by_period(user_id, date.today().replace(day=1), date.today())
+
+    assert "registrada" in response.lower()
+    assert "criptomoedas" in response.lower()
+    assert summary["despesa"] == 0.0
 
 
 def test_lancamento_manual_ensina_categoria_automaticamente(user_id):

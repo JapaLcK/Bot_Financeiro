@@ -91,7 +91,18 @@ def delete(user_id: int, text: str) -> str:
     if not keyword:
         return "Qual regra você quer remover? Tente: *remover regra ifood*"
     kw = keyword.strip().strip('"').strip("'")
-    n  = db.delete_category_rule(user_id, kw)
-    if n:
-        return f"✅ Regra removida: **{kw}**"
+    target_type, resolved, count = db.resolve_category_rule_target(user_id, kw)
+
+    if target_type == "keyword":
+        n = db.delete_category_rule(user_id, resolved)
+        if n:
+            return f"✅ Regra removida: **{resolved}**"
+
+    if target_type == "category":
+        n = db.delete_category_rules_by_category(user_id, resolved)
+        if n == 1:
+            return f"✅ Regra da categoria **{resolved}** removida."
+        if n > 1:
+            return f"✅ {n} regras da categoria **{resolved}** foram removidas."
+
     return f"⚠️ Não encontrei regra para: **{kw}**"
