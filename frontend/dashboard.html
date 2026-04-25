@@ -184,6 +184,22 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .tag.saida,.tag.despesa   { background:rgba(248,113,113,.14);color:var(--red);  border:1px solid rgba(248,113,113,.22); }
 .tag.entrada,.tag.receita { background:rgba(52,211,153,.12); color:var(--green);border:1px solid rgba(52,211,153,.2); }
 .tag.investimento         { background:rgba(96,165,250,.12); color:var(--blue); border:1px solid rgba(96,165,250,.2); }
+.tag.deposito_caixinha,
+.tag.saque_caixinha,
+.tag.aporte_investimento,
+.tag.resgate_investimento,
+.tag.transferencia,
+.tag.transferencia_interna,
+.tag.pagamento_fatura,
+.tag.ajuste_saldo {
+  background:rgba(96,165,250,.12); color:var(--blue); border:1px solid rgba(96,165,250,.2);
+}
+.tag.criar_caixinha,
+.tag.create_investment,
+.tag.delete_pocket,
+.tag.delete_investment {
+  background:rgba(251,191,36,.12); color:var(--yellow); border:1px solid rgba(251,191,36,.22);
+}
 .tag.interno              { background:rgba(167,139,250,.1);  color:#a78bfa;      border:1px solid rgba(167,139,250,.22); }
 .tag.x                    { background:rgba(255,255,255,.06);color:var(--text-2);border:1px solid var(--div); }
 
@@ -716,15 +732,30 @@ function renderLaunches() {
 
   launchesPage = meta.page || 1;
 
+  const TYPE_LABELS = {
+    deposito_caixinha: "dep. caixinha",
+    saque_caixinha: "saque caixinha",
+    aporte_investimento: "aporte invest.",
+    resgate_investimento: "resgate invest.",
+    transferencia_interna: "transf. interna",
+    pagamento_fatura: "pgto. fatura",
+    ajuste_saldo: "ajuste saldo",
+    criar_caixinha: "criar caixinha",
+    create_investment: "criar invest.",
+    delete_pocket: "remover caixinha",
+    delete_investment: "remover invest."
+  };
+
   card.innerHTML =
     items.map(l => {
       const isInternal = l.is_internal_movement;
       const valClass   = isInternal ? '' : (l.tipo==='receita'||l.tipo==='entrada' ? 'g' : 'r');
       const valStyle   = isInternal ? 'color:var(--text-2)' : '';
+      const typeLabel  = TYPE_LABELS[l.tipo] || l.tipo.replaceAll("_", " ");
       return `
       <div class="row" style="${isInternal?'opacity:.75':''}">
         <span class="lbl">
-          <span class="tag ${l.tipo}">${l.tipo}</span>
+          <span class="tag ${l.tipo}">${typeLabel}</span>
           ${isInternal ? '<span class="tag interno">mov. interna</span>' : ''}
           ${l.nota || l.alvo || '—'}
           ${l.categoria ? `<span class="tag x">${l.categoria}</span>` : ''}
