@@ -48,6 +48,46 @@ def _warn_bcb_once(key: tuple, message: str, *args) -> None:
     logger.warning(message, *args)
 
 
+def _is_sgs_no_values_payload(payload) -> bool:
+    if not isinstance(payload, dict):
+        return False
+
+    error = payload.get("erro")
+    if not isinstance(error, dict):
+        return False
+
+    detail = str(error.get("detail") or "")
+    return "Value(s) not found" in detail
+
+
+def _decode_sgs_response(r: requests.Response, series_code: int, *, context: tuple) -> list[dict]:
+    try:
+        payload = r.json()
+    except Exception as e:
+        _warn_bcb_once(
+            (*context, "invalid_json", type(e).__name__, str(e)),
+            "Resposta inválida da série SGS %s no BCB: %s",
+            series_code,
+            e,
+        )
+        return []
+
+    if isinstance(payload, list):
+        return payload
+
+    if _is_sgs_no_values_payload(payload):
+        logger.info("Sem valores publicados para série SGS %s no período consultado.", series_code)
+        return []
+
+    _warn_bcb_once(
+        (*context, "unexpected_payload", str(payload)[:200]),
+        "Resposta inesperada da série SGS %s no BCB: %s",
+        series_code,
+        payload,
+    )
+    return []
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # CDI — BCB SGS
 # ──────────────────────────────────────────────────────────────────────────────
@@ -61,8 +101,12 @@ def _fetch_sgs_series_json(series_code: int, start: date, end: date) -> list[dic
     }
     try:
         r = requests.get(url, params=params, timeout=20)
+        if r.status_code == 404:
+            data = _decode_sgs_response(r, series_code, context=("fetch_sgs_series_json", series_code, start, end))
+            if data or _is_sgs_no_values_payload(r.json()):
+                return data
         r.raise_for_status()
-        return r.json()
+        return _decode_sgs_response(r, series_code, context=("fetch_sgs_series_json", series_code, start, end))
     except Exception as e:
         _warn_bcb_once(
             ("fetch_sgs_series_json", series_code, start, end, type(e).__name__, str(e)),
@@ -70,6 +114,27 @@ def _fetch_sgs_series_json(series_code: int, start: date, end: date) -> list[dic
             series_code,
             start.isoformat(),
             end.isoformat(),
+            e,
+        )
+        return []
+
+
+def _fetch_sgs_latest_json(series_code: int, limit: int = 15) -> list[dict]:
+    url = f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{series_code}/dados/ultimos/{limit}"
+    params = {"formato": "json"}
+    try:
+        r = requests.get(url, params=params, timeout=20)
+        if r.status_code == 404:
+            data = _decode_sgs_response(r, series_code, context=("fetch_sgs_latest_json", series_code, limit))
+            if data or _is_sgs_no_values_payload(r.json()):
+                return data
+        r.raise_for_status()
+        return _decode_sgs_response(r, series_code, context=("fetch_sgs_latest_json", series_code, limit))
+    except Exception as e:
+        _warn_bcb_once(
+            ("fetch_sgs_latest_json", series_code, limit, type(e).__name__, str(e)),
+            "Falha ao buscar últimos valores da série SGS %s no BCB: %s",
+            series_code,
             e,
         )
         return []
@@ -128,10 +193,7 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
 
 def get_latest_cdi(cur) -> tuple[date, float] | None:
     """Retorna (data, valor_percent_ao_dia) da CDI mais recente."""
-    today = datetime.now(_tz()).date()
-    start = today - timedelta(days=15)
-
-    data = _fetch_sgs_series_json(12, start, today)
+    data = _fetch_sgs_latest_json(12)
     latest: tuple[date, float] | None = None
     if data:
         for item in data:
@@ -160,10 +222,7 @@ def get_latest_cdi(cur) -> tuple[date, float] | None:
 
 def get_latest_cdi_aa(cur) -> tuple[date, float] | None:
     """CDI a.a. (base 252) direto do SGS/BCB (série 4389)."""
-    today = datetime.now(_tz()).date()
-    start = today - timedelta(days=15)
-
-    data = _fetch_sgs_series_json(4389, start, today)
+    data = _fetch_sgs_latest_json(4389)
     latest: tuple[date, float] | None = None
     if data:
         for item in data:
@@ -192,10 +251,7 @@ def get_latest_cdi_aa(cur) -> tuple[date, float] | None:
 
 def get_latest_cdi_daily_pct() -> float:
     """Retorna CDI diária em % ao dia (ex: 0.0550)."""
-    today = datetime.now(_tz()).date()
-    start = today - timedelta(days=10)
-
-    data = _fetch_sgs_series_json(12, start, today)
+    data = _fetch_sgs_latest_json(12)
     if not data:
         raise RuntimeError("CDI_DAILY_NOT_AVAILABLE")
 
