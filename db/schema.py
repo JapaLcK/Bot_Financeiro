@@ -172,6 +172,62 @@ def init_db():
           primary key (code, ref_date)
         )
         """,
+        """
+        create table if not exists open_finance_connections (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          provider text not null,
+          provider_item_id text not null,
+          status text not null,
+          institution_id text not null,
+          institution_name text not null,
+          consent_url text,
+          consent_expires_at timestamptz,
+          last_sync_at timestamptz,
+          raw jsonb,
+          created_at timestamptz not null default now(),
+          updated_at timestamptz not null default now(),
+          unique(user_id, provider, provider_item_id)
+        )
+        """,
+        """
+        create table if not exists open_finance_accounts (
+          id bigserial primary key,
+          connection_id bigint not null references open_finance_connections(id) on delete cascade,
+          provider_account_id text not null,
+          name text not null,
+          type text not null,
+          subtype text,
+          currency text not null default 'BRL',
+          balance numeric not null default 0,
+          raw jsonb,
+          updated_at timestamptz not null default now(),
+          unique(connection_id, provider_account_id)
+        )
+        """,
+        """
+        create table if not exists open_finance_transactions (
+          id bigserial primary key,
+          account_id bigint not null references open_finance_accounts(id) on delete cascade,
+          provider_transaction_id text not null,
+          description text not null,
+          amount numeric not null,
+          transaction_date date not null,
+          category text,
+          raw jsonb,
+          imported_launch_id bigint references launches(id) on delete set null,
+          created_at timestamptz not null default now(),
+          unique(account_id, provider_transaction_id)
+        )
+        """,
+        """
+        create index if not exists idx_open_finance_connections_user
+          on open_finance_connections(user_id, status)
+        """,
+        """
+        create index if not exists idx_open_finance_transactions_account_date
+          on open_finance_transactions(account_id, transaction_date desc)
+        """,
         # report diário (preferências do usuário)
         """
         create table if not exists daily_report_prefs (

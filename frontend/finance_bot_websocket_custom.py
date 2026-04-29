@@ -57,7 +57,10 @@ from db import (
     accrue_all_investments,
     create_investment_db,
     delete_investment,
+    create_mock_open_finance_connection,
+    disconnect_open_finance_connection,
     get_dashboard_market_rates,
+    get_open_finance_snapshot,
     investment_deposit_from_account,
     investment_withdraw_to_account,
 )
@@ -147,6 +150,73 @@ async def ensure_investment_metadata_columns():
         "ALTER TABLE investments ADD COLUMN IF NOT EXISTS maturity_date DATE",
         "ALTER TABLE investments ADD COLUMN IF NOT EXISTS interest_payment_frequency TEXT NOT NULL DEFAULT 'maturity'",
         "ALTER TABLE investments ADD COLUMN IF NOT EXISTS tax_profile TEXT NOT NULL DEFAULT 'regressive_ir_iof'",
+    ]
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            for stmt in statements:
+                await cur.execute(stmt)
+        await conn.commit()
+
+
+async def ensure_open_finance_tables():
+    """Tabelas usadas pela tela de Open Finance."""
+    statements = [
+        """
+        create table if not exists open_finance_connections (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          provider text not null,
+          provider_item_id text not null,
+          status text not null,
+          institution_id text not null,
+          institution_name text not null,
+          consent_url text,
+          consent_expires_at timestamptz,
+          last_sync_at timestamptz,
+          raw jsonb,
+          created_at timestamptz not null default now(),
+          updated_at timestamptz not null default now(),
+          unique(user_id, provider, provider_item_id)
+        )
+        """,
+        """
+        create table if not exists open_finance_accounts (
+          id bigserial primary key,
+          connection_id bigint not null references open_finance_connections(id) on delete cascade,
+          provider_account_id text not null,
+          name text not null,
+          type text not null,
+          subtype text,
+          currency text not null default 'BRL',
+          balance numeric not null default 0,
+          raw jsonb,
+          updated_at timestamptz not null default now(),
+          unique(connection_id, provider_account_id)
+        )
+        """,
+        """
+        create table if not exists open_finance_transactions (
+          id bigserial primary key,
+          account_id bigint not null references open_finance_accounts(id) on delete cascade,
+          provider_transaction_id text not null,
+          description text not null,
+          amount numeric not null,
+          transaction_date date not null,
+          category text,
+          raw jsonb,
+          imported_launch_id bigint references launches(id) on delete set null,
+          created_at timestamptz not null default now(),
+          unique(account_id, provider_transaction_id)
+        )
+        """,
+        """
+        create index if not exists idx_open_finance_connections_user
+          on open_finance_connections(user_id, status)
+        """,
+        """
+        create index if not exists idx_open_finance_transactions_account_date
+          on open_finance_transactions(account_id, transaction_date desc)
+        """,
     ]
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
@@ -557,11 +627,13 @@ async def lifespan(app: FastAPI):
         asyncio.gather(
             ensure_budget_table(),
             ensure_investment_metadata_columns(),
+            ensure_open_finance_tables(),
             ensure_admin_tables(),
         ),
     )
     print("OK: Budget table ready", flush=True)
     print("OK: Investment metadata ready", flush=True)
+    print("OK: Open Finance tables ready", flush=True)
     print("OK: Admin observability tables ready", flush=True)
 
     # ── 3. Warnings + detecção de usuário em paralelo ─────────────────────────
@@ -1214,7 +1286,9 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
         return HTMLResponse(content=expired_html, status_code=401)
 
     dash_token = make_dashboard_token(int(user_id), hours=DASHBOARD_SESSION_HOURS)
-    target_view = view if view in {"overview", "investments"} else None
+    target_view = view if view in {"overview", "investments", "open-finance"} else None
+    if target_view == "open-finance":
+        return RedirectResponse(url=f"/settings?token={dash_token}&view=open-finance", status_code=302)
     suffix = f"&view={target_view}" if target_view else ""
     return RedirectResponse(url=f"/app?token={dash_token}{suffix}", status_code=302)
 
@@ -1226,6 +1300,11 @@ async def serve_landing():
 @app.get("/app")
 async def serve_dashboard():
     return FileResponse(HERE / "dashboard.html")
+
+
+@app.get("/settings")
+async def serve_settings():
+    return FileResponse(HERE / "settings.html")
 
 
 @app.get("/reset-password")
@@ -1458,6 +1537,10 @@ class InvestmentMovementPayload(BaseModel):
     note: str | None = None
 
 
+class OpenFinanceMockConnectPayload(BaseModel):
+    institution: str | None = None
+
+
 def _investment_action_note(action: str, name: str, issuer: str | None = None, note: str | None = None) -> str:
     clean_name = (name or "").strip() or "investimento"
     clean_issuer = (issuer or "").strip()
@@ -1589,6 +1672,32 @@ async def delete_investment_route(request: Request, user_id: int, name: str):
         raise HTTPException(status_code=400, detail=message) from exc
 
     return {"ok": True, "launch_id": launch_id, "name": canon}
+
+
+@app.get("/open-finance/{user_id}")
+async def open_finance_snapshot_route(request: Request, user_id: int):
+    _authorize_dashboard_access(request, user_id)
+    snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
+    return json.loads(jdump({"ok": True, **snapshot}))
+
+
+@app.post("/open-finance/{user_id}/mock-connect")
+async def open_finance_mock_connect_route(request: Request, user_id: int, payload: OpenFinanceMockConnectPayload):
+    _authorize_dashboard_access(request, user_id)
+    result = await asyncio.to_thread(
+        create_mock_open_finance_connection,
+        user_id,
+        payload.institution or "nubank",
+    )
+    snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
+    return json.loads(jdump({"ok": True, "sync": result, **snapshot}))
+
+
+@app.delete("/open-finance/{user_id}")
+async def open_finance_disconnect_route(request: Request, user_id: int):
+    _authorize_dashboard_access(request, user_id)
+    deleted = await asyncio.to_thread(disconnect_open_finance_connection, user_id)
+    return {"ok": True, "deleted": deleted}
 
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────

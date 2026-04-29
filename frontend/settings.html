@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Configurações — PigBank AI</title>
+<link rel="icon" type="image/png" href="/favicon.png" />
+<meta name="theme-color" content="#070b14" />
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --page:#070b14;
+  --ink:rgba(255,255,255,.94);
+  --muted:rgba(214,223,255,.66);
+  --faint:rgba(214,223,255,.4);
+  --line:rgba(167,139,250,.18);
+  --line-strong:rgba(96,165,250,.34);
+  --panel:#101729;
+  --panel-soft:#151f36;
+  --panel-warm:#171a33;
+  --green:#34d399;
+  --red:#ff7b7b;
+  --yellow:#a78bfa;
+  --blue:#60a5fa;
+  --shadow:0 24px 60px rgba(0,0,0,.34);
+  --ease:cubic-bezier(.22,.61,.36,1);
+}
+html { min-height: 100%; background: var(--page); }
+body {
+  min-height:100vh;
+  color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.035), transparent 260px),
+    radial-gradient(circle at 84% 18%, rgba(96,165,250,.18), transparent 280px),
+    radial-gradient(circle at 12% 78%, rgba(124,58,237,.16), transparent 320px),
+    var(--page);
+}
+body::before {
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  opacity:.42;
+  background-image:
+    linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+  background-size:44px 44px;
+  mask-image:linear-gradient(180deg, #000 0%, transparent 70%);
+}
+button, select { font: inherit; }
+button { color: inherit; }
+.page {
+  position:relative;
+  z-index:1;
+  max-width:1180px;
+  margin:0 auto;
+  padding:22px 24px 72px;
+}
+.topbar {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:18px;
+  padding:10px 0 34px;
+}
+.brand {
+  display:flex;
+  align-items:center;
+  gap:11px;
+  color:var(--ink);
+  text-decoration:none;
+  font-weight:760;
+  letter-spacing:-.02em;
+}
+.brand-mark {
+  width:34px;
+  height:34px;
+  border-radius:11px;
+  display:grid;
+  place-items:center;
+  background:linear-gradient(135deg,#7c3aed,#3b82f6);
+  color:#fff;
+  box-shadow:0 10px 28px rgba(124,58,237,.28), inset 0 1px 0 rgba(255,255,255,.22);
+}
+.brand-mark span { transform:translateY(-1px); }
+.top-actions { display:flex; gap:10px; align-items:center; }
+.link-btn, .ghost-btn, .primary-btn, .danger-btn {
+  min-height:40px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  border-radius:999px;
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.045);
+  color:var(--ink);
+  padding:0 15px;
+  font-size:.82rem;
+  font-weight:720;
+  text-decoration:none;
+  cursor:pointer;
+  transition:transform .18s var(--ease), background .18s var(--ease), border-color .18s var(--ease);
+}
+.link-btn:hover, .ghost-btn:hover { background:rgba(255,255,255,.075); border-color:var(--line-strong); }
+.primary-btn {
+  border-color:rgba(96,165,250,.5);
+  background:linear-gradient(135deg,#7c3aed,#2563eb);
+  color:#fff;
+  box-shadow:0 10px 28px rgba(96,165,250,.22);
+}
+.primary-btn:hover { transform:translateY(-1px); background:linear-gradient(135deg,#8b5cf6,#3b82f6); }
+.danger-btn {
+  color:#ffd4d4;
+  border-color:rgba(255,123,123,.24);
+  background:rgba(255,123,123,.075);
+}
+.danger-btn:hover { background:rgba(255,123,123,.12); }
+.title-row {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 310px;
+  gap:28px;
+  align-items:end;
+  margin-bottom:26px;
+}
+.kicker {
+  width:max-content;
+  color:#c4b5fd;
+  border:1px solid rgba(167,139,250,.28);
+  background:rgba(124,58,237,.14);
+  border-radius:999px;
+  padding:5px 10px;
+  font-size:.68rem;
+  font-weight:820;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  margin-bottom:14px;
+}
+h1 {
+  max-width:720px;
+  font-size:clamp(2rem,4.8vw,4.15rem);
+  line-height:.98;
+  letter-spacing:0;
+  font-weight:820;
+}
+.lede {
+  max-width:660px;
+  color:var(--muted);
+  line-height:1.68;
+  font-size:.98rem;
+  margin-top:18px;
+}
+.mini-ledger {
+  border:1px solid var(--line);
+  border-radius:18px;
+  background:linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.025));
+  padding:14px;
+  box-shadow:var(--shadow);
+}
+.ledger-line {
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  padding:9px 0;
+  border-bottom:1px solid rgba(255,255,255,.08);
+  color:var(--muted);
+  font-size:.76rem;
+}
+.ledger-line:last-child { border-bottom:0; }
+.ledger-line strong { color:var(--ink); font-weight:760; }
+.settings-grid {
+  display:grid;
+  grid-template-columns:260px minmax(0,1fr);
+  gap:18px;
+  align-items:start;
+}
+.side {
+  border:1px solid var(--line);
+  border-radius:20px;
+  background:rgba(17,23,28,.82);
+  box-shadow:var(--shadow);
+  overflow:hidden;
+}
+.side-label {
+  padding:16px 16px 10px;
+  color:var(--faint);
+  font-size:.68rem;
+  text-transform:uppercase;
+  letter-spacing:.12em;
+  font-weight:820;
+}
+.side-item {
+  width:100%;
+  display:flex;
+  align-items:center;
+  gap:12px;
+  border:0;
+  border-top:1px solid rgba(255,255,255,.06);
+  background:transparent;
+  padding:15px 16px;
+  text-align:left;
+  cursor:pointer;
+}
+.side-item.active {
+  background:linear-gradient(90deg, rgba(124,58,237,.24), rgba(96,165,250,.08), transparent);
+}
+.side-item[disabled] { opacity:.5; cursor:default; }
+.side-icon {
+  width:36px;
+  height:36px;
+  border-radius:12px;
+  display:grid;
+  place-items:center;
+  background:#1d262b;
+  border:1px solid rgba(255,255,255,.08);
+  flex:0 0 auto;
+}
+.side-title { display:block; font-size:.86rem; font-weight:780; }
+.side-sub { display:block; color:var(--faint); font-size:.72rem; margin-top:2px; }
+.workspace {
+  border:1px solid var(--line);
+  border-radius:24px;
+  background:rgba(17,23,28,.72);
+  box-shadow:var(--shadow);
+  overflow:hidden;
+}
+.workspace-head {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:18px;
+  align-items:start;
+  padding:22px;
+  border-bottom:1px solid var(--line);
+  background:
+    linear-gradient(90deg, rgba(124,58,237,.22), rgba(96,165,250,.1), transparent 50%),
+    rgba(255,255,255,.02);
+}
+.workspace h2 {
+  font-size:1.2rem;
+  letter-spacing:0;
+  margin-bottom:7px;
+}
+.workspace-desc {
+  color:var(--muted);
+  line-height:1.62;
+  font-size:.84rem;
+  max-width:650px;
+}
+.workspace-desc + .workspace-desc { margin-top:8px; }
+.summary-strip {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  border-bottom:1px solid var(--line);
+}
+.summary-card {
+  padding:15px 20px;
+  border-right:1px solid rgba(255,255,255,.08);
+}
+.summary-card:last-child { border-right:0; }
+.summary-card span {
+  display:block;
+  color:var(--faint);
+  font-size:.67rem;
+  text-transform:uppercase;
+  letter-spacing:.1em;
+  font-weight:820;
+  margin-bottom:6px;
+}
+.summary-card strong {
+  font-size:1.35rem;
+  letter-spacing:0;
+}
+.content {
+  display:grid;
+  grid-template-columns:minmax(280px,.82fr) minmax(0,1.18fr);
+  gap:18px;
+  padding:18px;
+}
+.card {
+  border:1px solid rgba(255,255,255,.1);
+  border-radius:18px;
+  background:rgba(11,15,20,.48);
+  padding:17px;
+}
+.connect-card {
+  background:
+    linear-gradient(180deg, rgba(124,58,237,.16), rgba(96,165,250,.06) 180px, transparent 260px),
+    rgba(11,15,20,.5);
+}
+.card h3 {
+  font-size:.94rem;
+  letter-spacing:0;
+  margin-bottom:12px;
+}
+.bank-picker {
+  display:grid;
+  grid-template-columns:1fr;
+  gap:8px;
+  margin-bottom:12px;
+}
+.bank-option {
+  width:100%;
+  min-height:58px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  border:1px solid rgba(255,255,255,.1);
+  border-radius:14px;
+  background:rgba(255,255,255,.035);
+  padding:11px 12px;
+  cursor:pointer;
+  text-align:left;
+  transition:background .18s var(--ease), border-color .18s var(--ease), transform .18s var(--ease);
+}
+.bank-option:hover { background:rgba(255,255,255,.06); border-color:var(--line-strong); }
+.bank-option.active {
+  background:rgba(124,58,237,.2);
+  border-color:rgba(96,165,250,.46);
+}
+.bank-name { display:block; font-weight:780; font-size:.86rem; }
+.bank-meta { display:block; color:var(--faint); font-size:.7rem; margin-top:3px; }
+.bank-badge {
+  width:34px;
+  height:34px;
+  border-radius:11px;
+  display:grid;
+  place-items:center;
+  background:linear-gradient(135deg,#a78bfa,#60a5fa);
+  color:#070b14;
+  font-weight:850;
+  font-size:.78rem;
+}
+.native-select { position:absolute; opacity:0; pointer-events:none; }
+.actions {
+  display:grid;
+  gap:10px;
+  margin-top:12px;
+}
+.note {
+  margin-top:12px;
+  color:var(--faint);
+  font-size:.75rem;
+  line-height:1.55;
+}
+.status-card {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:14px;
+  padding:13px 0;
+  border-bottom:1px solid rgba(255,255,255,.075);
+}
+.status-card:last-child { border-bottom:0; }
+.title { font-weight:800; color:var(--ink); }
+.sub {
+  color:var(--faint);
+  font-size:.74rem;
+  line-height:1.48;
+  margin-top:4px;
+}
+.pill {
+  flex:0 0 auto;
+  display:inline-flex;
+  align-items:center;
+  border-radius:999px;
+  padding:5px 9px;
+  font-size:.62rem;
+  font-weight:820;
+  background:rgba(96,165,250,.15);
+  color:var(--blue);
+  border:1px solid rgba(96,165,250,.3);
+  text-transform:uppercase;
+  letter-spacing:.06em;
+}
+.pill.pending {
+  color:#c4b5fd;
+  background:rgba(124,58,237,.14);
+  border-color:rgba(167,139,250,.28);
+}
+.account-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+}
+.account {
+  min-height:112px;
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+  border:1px solid rgba(255,255,255,.095);
+  border-radius:16px;
+  background:linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.018));
+  padding:13px;
+}
+.account-name {
+  font-size:.85rem;
+  font-weight:820;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.account-type {
+  color:var(--faint);
+  font-size:.62rem;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  margin-top:5px;
+}
+.account-balance {
+  font-size:1.1rem;
+  font-weight:850;
+  margin-top:12px;
+}
+.transactions-card { grid-column:1 / -1; }
+.row {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:14px;
+  padding:12px 0;
+  border-bottom:1px solid rgba(255,255,255,.075);
+}
+.row:last-child { border-bottom:0; }
+.lbl {
+  color:var(--muted);
+  font-size:.82rem;
+  line-height:1.42;
+}
+.val {
+  font-size:.84rem;
+  font-weight:820;
+  white-space:nowrap;
+}
+.green { color:var(--green); }
+.red { color:var(--red); }
+.empty {
+  min-height:86px;
+  display:grid;
+  place-items:center;
+  color:var(--faint);
+  border:1px dashed rgba(255,255,255,.14);
+  border-radius:14px;
+  font-size:.82rem;
+  text-align:center;
+  padding:14px;
+}
+#toast {
+  position:fixed;
+  left:50%;
+  bottom:26px;
+  transform:translateX(-50%) translateY(18px);
+  opacity:0;
+  background:linear-gradient(135deg,#ede9fe,#dbeafe);
+  color:#111827;
+  border:1px solid rgba(96,165,250,.22);
+  border-radius:999px;
+  padding:10px 16px;
+  font-size:.82rem;
+  font-weight:820;
+  transition:all .22s var(--ease);
+  z-index:20;
+  box-shadow:0 14px 34px rgba(0,0,0,.26);
+}
+#toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+@media(max-width:940px) {
+  .title-row, .settings-grid, .content { grid-template-columns:1fr; }
+  .mini-ledger { max-width:420px; }
+}
+@media(max-width:640px) {
+  .page { padding:16px 14px 48px; }
+  .topbar, .workspace-head { align-items:stretch; flex-direction:column; }
+  .topbar, .workspace-head { display:flex; }
+  .top-actions { width:100%; }
+  .link-btn { flex:1; }
+  .summary-strip { grid-template-columns:1fr; }
+  .summary-card { border-right:0; border-bottom:1px solid rgba(255,255,255,.08); }
+  .summary-card:last-child { border-bottom:0; }
+  .account-grid { grid-template-columns:1fr; }
+  h1 { font-size:2.25rem; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <nav class="topbar">
+    <a class="brand" id="home-link" href="/">
+      <span class="brand-mark"><span>🐷</span></span>
+      <span>PigBank AI</span>
+    </a>
+    <div class="top-actions">
+      <a class="link-btn" href="/" id="account-link">Minha conta</a>
+      <a class="link-btn" id="dashboard-link" href="/app">Dashboard</a>
+    </div>
+  </nav>
+
+  <header class="title-row">
+    <div>
+      <div class="kicker">Configurações</div>
+      <h1>Conexões bancárias sem virar bagunça.</h1>
+      <p class="lede">O Open Finance fica fora do chat e dentro da sua área segura. Você escolhe o banco, autoriza a conexão e volta para acompanhar tudo no PigBank.</p>
+    </div>
+    <div class="mini-ledger" aria-label="Resumo de segurança">
+      <div class="ledger-line"><span>Canal</span><strong>Configurações</strong></div>
+      <div class="ledger-line"><span>WhatsApp</span><strong>Somente link</strong></div>
+      <div class="ledger-line"><span>Ambiente</span><strong>Mock Pluggy</strong></div>
+    </div>
+  </header>
+
+  <main class="settings-grid">
+    <aside class="side">
+      <div class="side-label">Conta</div>
+      <button class="side-item active" type="button">
+        <span class="side-icon">🏦</span>
+        <span>
+          <span class="side-title">Open Finance</span>
+          <span class="side-sub">Bancos, saldos e histórico</span>
+        </span>
+      </button>
+      <button class="side-item" type="button" disabled>
+        <span class="side-icon">🔐</span>
+        <span>
+          <span class="side-title">Segurança</span>
+          <span class="side-sub">Em breve</span>
+        </span>
+      </button>
+      <button class="side-item" type="button" disabled>
+        <span class="side-icon">🔔</span>
+        <span>
+          <span class="side-title">Notificações</span>
+          <span class="side-sub">Em breve</span>
+        </span>
+      </button>
+    </aside>
+
+    <section class="workspace">
+      <div class="workspace-head">
+        <div>
+          <h2>Open Finance</h2>
+          <p class="workspace-desc">Open Finance é a autorização que permite ao PigBank ler dados do seu banco, como contas, saldos e transações, para organizar sua vida financeira sem você precisar lançar tudo manualmente.</p>
+          <p class="workspace-desc">Na conexão real, o consentimento acontece dentro do ambiente do banco: o PigBank não pede sua senha, não movimenta dinheiro por essa tela e você pode revogar o acesso depois. Nesta versão, os dados são simulados para validarmos a experiência antes da integração real.</p>
+        </div>
+        <button class="ghost-btn" type="button" onclick="loadOpenFinance()">Atualizar</button>
+      </div>
+
+      <div class="summary-strip">
+        <div class="summary-card"><span>Bancos</span><strong id="summary-banks">0</strong></div>
+        <div class="summary-card"><span>Contas</span><strong id="summary-accounts">0</strong></div>
+        <div class="summary-card"><span>Transações</span><strong id="summary-transactions">0</strong></div>
+      </div>
+
+      <div class="content">
+        <div class="card connect-card">
+          <h3>Escolha uma instituição</h3>
+          <select class="native-select" id="of-institution" aria-label="Instituição">
+            <option value="nubank">Nubank</option>
+            <option value="itau">Itaú</option>
+            <option value="bradesco">Bradesco</option>
+          </select>
+          <div class="bank-picker" aria-hidden="true">
+            <button class="bank-option active" type="button" data-bank="nubank" onclick="selectInstitution('nubank')">
+              <span><span class="bank-name">Nubank</span><span class="bank-meta">Conta + cartão mock</span></span>
+              <span class="bank-badge">NU</span>
+            </button>
+            <button class="bank-option" type="button" data-bank="itau" onclick="selectInstitution('itau')">
+              <span><span class="bank-name">Itaú</span><span class="bank-meta">Conta corrente mock</span></span>
+              <span class="bank-badge">IT</span>
+            </button>
+            <button class="bank-option" type="button" data-bank="bradesco" onclick="selectInstitution('bradesco')">
+              <span><span class="bank-name">Bradesco</span><span class="bank-meta">Saldo e histórico mock</span></span>
+              <span class="bank-badge">BR</span>
+            </button>
+          </div>
+          <div class="actions">
+            <button class="primary-btn" type="button" onclick="connectOpenFinanceMock()">Conectar Open Finance</button>
+            <button class="danger-btn" type="button" onclick="disconnectOpenFinance()">Desconectar bancos</button>
+          </div>
+          <p class="note">Nada sai para instituições reais neste teste. O botão só cria uma conexão Pluggy simulada para este usuário.</p>
+        </div>
+
+        <div class="card">
+          <h3>Status da conexão</h3>
+          <div id="of-connections"><div class="empty">Carregando conexões...</div></div>
+        </div>
+
+        <div class="card">
+          <h3>Contas sincronizadas</h3>
+          <div id="of-accounts"><div class="empty">Nenhuma conta sincronizada.</div></div>
+        </div>
+
+        <div class="card transactions-card">
+          <h3>Últimas transações</h3>
+          <div id="of-transactions"><div class="empty">Nenhuma transação sincronizada.</div></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<div id="toast">Atualizado</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const API = window.location.origin;
+const DASHBOARD_TOKEN = params.get("token") || "";
+
+function decodeJWT(token) {
+  try {
+    const payload = token.split(".")[1];
+    return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+  } catch {
+    return null;
+  }
+}
+
+const payload = decodeJWT(DASHBOARD_TOKEN);
+const USER_ID = payload && payload.sub ? Number(payload.sub) : null;
+
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+  }[ch]));
+}
+
+function fmt(value) {
+  return Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function fmtDate(value) {
+  if (!value) return "pendente";
+  return new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function fmtDateOnly(value) {
+  if (!value) return "—";
+  return new Date(String(value).slice(0, 10) + "T00:00:00").toLocaleDateString("pt-BR");
+}
+
+function readApiError(resp) {
+  return resp.text().then(raw => {
+    try {
+      const data = JSON.parse(raw);
+      return data.detail || raw;
+    } catch {
+      return raw || "Erro inesperado";
+    }
+  });
+}
+
+function authHeaders(extra = {}) {
+  return { ...extra, Authorization: `Bearer ${DASHBOARD_TOKEN}` };
+}
+
+function showToast(message) {
+  const toast = document.getElementById("toast");
+  toast.textContent = message;
+  toast.classList.add("show");
+  setTimeout(() => toast.classList.remove("show"), 1800);
+}
+
+function selectInstitution(bank) {
+  document.getElementById("of-institution").value = bank;
+  document.querySelectorAll(".bank-option").forEach(option => {
+    option.classList.toggle("active", option.dataset.bank === bank);
+  });
+}
+
+async function fetchOpenFinanceSnapshot() {
+  if (!USER_ID || !DASHBOARD_TOKEN) throw new Error("Sessão inválida.");
+  const resp = await fetch(`${API}/open-finance/${USER_ID}`, {
+    headers: authHeaders()
+  });
+  if (!resp.ok) throw new Error(await readApiError(resp));
+  return await resp.json();
+}
+
+function updateSummary(connections, accounts, transactions) {
+  document.getElementById("summary-banks").textContent = connections.length;
+  document.getElementById("summary-accounts").textContent = accounts.length;
+  document.getElementById("summary-transactions").textContent = transactions.length;
+}
+
+function renderOpenFinance(data) {
+  const connections = data.connections || [];
+  const accounts = data.accounts || [];
+  const transactions = data.transactions || [];
+  updateSummary(connections, accounts, transactions);
+
+  document.getElementById("of-connections").innerHTML = connections.length ? connections.map(c => `
+    <div class="status-card">
+      <div>
+        <div class="title">${esc(c.institution_name)}</div>
+        <div class="sub">Pluggy mock · item ${esc(c.provider_item_id)}</div>
+        <div class="sub">Última sincronização: ${esc(fmtDate(c.last_sync_at))}</div>
+      </div>
+      <span class="pill">${esc(c.status || "ativo")}</span>
+    </div>
+  `).join("") : `
+    <div class="status-card">
+      <div>
+        <div class="title">Nenhum banco conectado</div>
+        <div class="sub">Escolha uma instituição para simular a autorização.</div>
+      </div>
+      <span class="pill pending">mock</span>
+    </div>
+  `;
+
+  document.getElementById("of-accounts").innerHTML = accounts.length ? `
+    <div class="account-grid">
+      ${accounts.map(a => `
+        <div class="account">
+          <div>
+            <div class="account-name">${esc(a.name)}</div>
+            <div class="account-type">${esc(a.type)} · ${esc(a.institution_name || "")}</div>
+          </div>
+          <div class="account-balance ${Number(a.balance || 0) < 0 ? "red" : "green"}">${fmt(a.balance)}</div>
+        </div>
+      `).join("")}
+    </div>
+  ` : `<div class="empty">Nenhuma conta sincronizada.</div>`;
+
+  document.getElementById("of-transactions").innerHTML = transactions.length ? transactions.map(t => `
+    <div class="row">
+      <span class="lbl">${esc(t.description)} · ${esc(t.account_name || t.institution_name || "")}</span>
+      <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+        <span class="val ${Number(t.amount || 0) < 0 ? "red" : "green"}">${fmt(t.amount)}</span>
+        <span style="font-size:.65rem;color:var(--faint)">${fmtDateOnly(t.transaction_date)} · ${esc(t.category || "sem categoria")}</span>
+      </span>
+    </div>
+  `).join("") : `<div class="empty">Nenhuma transação sincronizada.</div>`;
+}
+
+async function loadOpenFinance() {
+  try {
+    renderOpenFinance(await fetchOpenFinanceSnapshot());
+  } catch (err) {
+    updateSummary([], [], []);
+    document.getElementById("of-connections").innerHTML = `<div class="empty">${esc(err.message || "Erro ao carregar Open Finance.")}</div>`;
+  }
+}
+
+async function connectOpenFinanceMock() {
+  const institution = document.getElementById("of-institution").value;
+  const resp = await fetch(`${API}/open-finance/${USER_ID}/mock-connect`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ institution })
+  });
+  if (!resp.ok) {
+    alert("Erro: " + await readApiError(resp));
+    return;
+  }
+  renderOpenFinance(await resp.json());
+  showToast("Open Finance conectado");
+}
+
+async function disconnectOpenFinance() {
+  if (!confirm("Desconectar todos os bancos Open Finance deste usuário?")) return;
+  const resp = await fetch(`${API}/open-finance/${USER_ID}`, {
+    method: "DELETE",
+    headers: authHeaders()
+  });
+  if (!resp.ok) {
+    alert("Erro: " + await readApiError(resp));
+    return;
+  }
+  await loadOpenFinance();
+  showToast("Open Finance desconectado");
+}
+
+if (DASHBOARD_TOKEN) {
+  document.getElementById("dashboard-link").href = `/app?token=${encodeURIComponent(DASHBOARD_TOKEN)}`;
+  document.getElementById("home-link").href = "/";
+  document.getElementById("account-link").href = "/";
+}
+
+selectInstitution(document.getElementById("of-institution").value);
+loadOpenFinance();
+</script>
+</body>
+</html>

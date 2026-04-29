@@ -14,6 +14,7 @@ Organização interna por domínio:
   categories  → regras de categorização
   pending     → ações pendentes
   cards       → cartões de crédito e faturas
+  open_finance → conexões Open Finance/Pluggy
   reports     → relatório diário, auth, dashboard, engajamento
 """
 
@@ -142,6 +143,13 @@ from .cards import (
     get_installment_group_summaries,
 )
 
+# ── Open Finance ──────────────────────────────────────────────────────────────
+from .open_finance import (
+    create_mock_open_finance_connection,
+    get_open_finance_snapshot,
+    disconnect_open_finance_connection,
+)
+
 # ── Relatórios, Auth, Dashboard, Engajamento ──────────────────────────────────
 from .reports import (
     set_daily_report_enabled,
@@ -220,6 +228,9 @@ __all__ = [
     "list_open_bills", "list_credit_card_due_reminders", "list_installment_groups",
     "monthly_summary_credit_debit", "import_credit_ofx_bulk", "consolidate_duplicate_bills",
     "get_installment_group_summaries",
+    # open finance
+    "create_mock_open_finance_connection", "get_open_finance_snapshot",
+    "disconnect_open_finance_connection",
     # reports
     "set_daily_report_enabled", "set_daily_report_hour", "get_daily_report_prefs",
     "list_users_with_daily_report_enabled", "list_identities_by_user",

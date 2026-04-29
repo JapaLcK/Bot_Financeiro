@@ -648,13 +648,14 @@ footer a { color: var(--text-2); text-decoration: none; }
             </div>
           </div>
 
-          <div class="account-menu-item" style="opacity:.55;cursor:default;pointer-events:none">
+          <a class="account-menu-item" id="account-settings-link" href="#" target="_blank">
             <div class="account-menu-icon">⚙️</div>
             <div class="account-menu-body">
-              <div class="account-menu-title">Configurações <span class="badge-soon">Em breve</span></div>
-              <div class="account-menu-sub">Preferências, notificações e segurança</div>
+              <div class="account-menu-title">Configurações</div>
+              <div class="account-menu-sub">Open Finance, preferências e segurança</div>
             </div>
-          </div>
+            <div class="account-menu-arrow">→</div>
+          </a>
 
         </div>
       </div>
@@ -694,6 +695,21 @@ function sanitizeDashboardUrl(url) {
   // Garante que a URL é absoluta
   if (url && !url.startsWith('http')) url = window.location.origin + '/' + url.replace(/^\//, '');
   return url;
+}
+
+function settingsUrlFromDashboardUrl(url, view) {
+  if (!url) return '';
+  try {
+    const target = new URL(url, window.location.origin);
+    const token = target.searchParams.get('token');
+    const settingsUrl = new URL('/settings', window.location.origin);
+    if (token) settingsUrl.searchParams.set('token', token);
+    if (view) settingsUrl.searchParams.set('view', view);
+    return settingsUrl.toString();
+  } catch {
+    const suffix = view ? `?view=${encodeURIComponent(view)}` : '';
+    return `${window.location.origin}/settings${suffix}`;
+  }
 }
 
 // ─── JWT decoder (payload only, sem validação de assinatura) ──────────────
@@ -779,6 +795,7 @@ function applyLoggedInState(email, dashUrl) {
   // Account center
   document.getElementById('account-email-display').textContent = email || 'Minha conta';
   document.getElementById('account-dashboard-link').href = dashUrl;
+  document.getElementById('account-settings-link').href = settingsUrlFromDashboardUrl(dashUrl, 'open-finance');
   document.getElementById('account-whatsapp-link').onclick = connectWhatsApp;
   document.getElementById('account-center').style.display = 'block';
 

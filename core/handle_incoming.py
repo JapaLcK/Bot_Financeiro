@@ -24,6 +24,7 @@ from core.intent_classifier import classify
 from core.intent_router import route
 from core.response_formatter import format_for_platform
 from core.services.ofx_service import handle_ofx_import, handle_credit_ofx_import
+from core.services.open_finance import handle_open_finance_whatsapp_command
 from core.services.media_service import (
     is_audio_attachment,
     is_image_attachment,
@@ -384,6 +385,11 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         text = (msg.text or "").strip()
         if not text:
             return []
+
+        if platform == "whatsapp":
+            open_finance_reply = handle_open_finance_whatsapp_command(uid, text)
+            if open_finance_reply is not None:
+                return [OutgoingMessage(text=open_finance_reply)]
 
         intent_result = classify(text, user_id=uid)
 

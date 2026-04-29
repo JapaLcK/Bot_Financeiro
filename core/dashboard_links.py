@@ -24,7 +24,7 @@ def build_dashboard_link(user_id: int, hours: float = 5 / 60, view: str | None =
 
         code = create_dashboard_session(user_id, hours=hours)
         suffix = ""
-        if view in {"overview", "investments"}:
+        if view in {"overview", "investments", "open-finance"}:
             suffix = f"?view={view}"
         return f"{base_url}/d/{code}{suffix}"
     except Exception:
