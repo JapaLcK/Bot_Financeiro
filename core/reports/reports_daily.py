@@ -1,8 +1,7 @@
 from __future__ import annotations
 from utils_date import now_tz, _tz
 from db import (
-    get_balance, list_pockets, accrue_all_investments,
-    get_launches_by_period, get_summary_by_period,
+    get_balance, get_launches_by_period, get_summary_by_period,
     list_users_with_daily_report_enabled, list_identities_by_user,
     list_credit_card_due_reminders, mark_card_reminder_sent,
 )
@@ -16,9 +15,6 @@ logger = get_logger(__name__)
 def _fmt_brl(v: float) -> str:
     s = f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return f"R$ {s}"
-
-def _s(x: str | None) -> str:
-    return (x or "").strip()
 
 
 def _add_months(y: int, m: int, delta: int) -> tuple[int, int]:
@@ -68,15 +64,9 @@ def build_due_bill_reminders(user_id: int, today: date | None = None) -> list[di
 
     return reminders
 
-def build_daily_report_text(user_id: int) -> str:
+
+def build_daily_report_summary(user_id: int) -> dict[str, str]:
     saldo = float(get_balance(user_id) or 0)
-
-    pockets = list_pockets(user_id) or []
-    invs    = accrue_all_investments(user_id) or []
-
-    total_pockets = sum(float(p.get("balance") or 0) for p in pockets)
-    total_invest  = sum(float(i.get("balance") or 0) for i in invs)
-    patrimonio    = saldo + total_pockets + total_invest
 
     now      = now_tz()
     ref_date = now.date() - timedelta(days=1)   # o report roda às 9h e se refere a ontem
@@ -88,69 +78,28 @@ def build_daily_report_text(user_id: int) -> str:
     gasto_dia   = summary_dia.get("despesa", 0.0)
     receita_dia = summary_dia.get("receita", 0.0)
 
-    ref_str      = now.strftime("%d/%m/%Y %H:%M")
-    ref_date_str = ref_date.strftime("%d/%m/%Y")
-    ref_day_str  = ref_date.strftime("%d/%m")
+    return {
+        "ref_date": ref_date.strftime("%d/%m/%Y"),
+        "saldo": _fmt_brl(saldo),
+        "gastos": _fmt_brl(gasto_dia),
+        "receita": _fmt_brl(receita_dia),
+        "lancamentos": str(len(launches_dia)),
+    }
+
+
+def build_daily_report_text(user_id: int) -> str:
+    summary = build_daily_report_summary(user_id)
 
     lines = []
     lines.append("📊 *Resumo diário do Bot Financeiro*")
-    lines.append(f"📅 Dados referentes a: {ref_date_str}")
-    lines.append(f"🗓️ Gerado em: {ref_str}")
+    lines.append(f"📅 Dados referentes a: {summary['ref_date']}")
     lines.append("")
-    lines.append(f"💰 *Patrimônio total:* {_fmt_brl(patrimonio)}")
-    lines.append("")
-    lines.append(f"🏦 Saldo em conta: {_fmt_brl(saldo)}")
-    lines.append(f"📦 Total em caixinhas: {_fmt_brl(total_pockets)}")
-    lines.append(f"📈 Total investido: {_fmt_brl(total_invest)}")
-    lines.append("")
-    lines.append(f"📉 Gastos em {ref_day_str}: {_fmt_brl(gasto_dia)}")
-    lines.append(f"📈 Receitas em {ref_day_str}: {_fmt_brl(receita_dia)}")
-    lines.append(f"📊 Lançamentos em {ref_day_str}: {len(launches_dia)}")
-    lines.append("")
-    lines.append("──────────────")
+    lines.append(f"🏦 Saldo atual: {summary['saldo']}")
+    lines.append(f"📉 Gastos de ontem: {summary['gastos']}")
+    lines.append(f"📈 Receitas de ontem: {summary['receita']}")
+    lines.append(f"📊 Lançamentos de ontem: {summary['lancamentos']}")
 
-    if pockets:
-        lines.append("")
-        lines.append("📦 *Caixinhas*")
-        for p in pockets[:20]:
-            lines.append(f"• {_s(p.get('name'))}: {_fmt_brl(float(p.get('balance') or 0))}")
-
-    if invs:
-        lines.append("")
-        lines.append("📈 *Investimentos*")
-        for it in invs[:20]:
-            lines.append(f"• {_s(it.get('name'))}: {_fmt_brl(float(it.get('balance') or 0))}")
-
-    lines.append("")
-    lines.append("──────────────")
-
-    if launches_dia:
-        lines.append("")
-        lines.append(f"🧾 *Lançamentos de {ref_date_str}*")
-        # mostra até os últimos 5 do dia (get_launches_by_period retorna asc)
-        for r in launches_dia[-5:]:
-            rid   = r.get("id")
-            tipo  = _s(r.get("tipo")).lower()
-            valor = float(r.get("valor") or 0)
-            nota  = _s(r.get("nota"))
-            cat   = _s(r.get("categoria") or "outros")
-            icon  = "🔻" if tipo == "despesa" else "🔺"
-            lines.append(f"{icon} #{rid} {_fmt_brl(valor)} ({cat}) — {nota}")
-    else:
-        lines.append("")
-        lines.append(f"📭 Nenhum lançamento em {ref_date_str}")
-
-    lines.append("")
-    lines.append("──────────────")
-    lines.append("")
-    lines.append("⚙️ Para desligar o report diário automatico:")
-    lines.append("*desligar report diario*")
-
-    msg = "\n".join(lines).strip()
-    if len(msg) > 3500:
-        msg = msg[:3500] + "\n…"
-
-    return msg
+    return "\n".join(lines).strip()
 
 # --- scheduler Discord (09:00) ---
 

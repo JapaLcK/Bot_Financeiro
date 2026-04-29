@@ -121,6 +121,8 @@ def send_template(
     *,
     language_code: str = "pt_BR",
     body_params: Optional[list[str]] = None,
+    named_body_params: Optional[Dict[str, str]] = None,
+    quick_reply_buttons: Optional[list[dict]] = None,
     access_token: Optional[str] = None,
     phone_number_id: Optional[str] = None,
     graph_version: Optional[str] = None,
@@ -140,13 +142,40 @@ def send_template(
         "name": template_name,
         "language": {"code": language_code},
     }
-    if body_params:
-        template["components"] = [
+    components: list[Dict[str, Any]] = []
+    if named_body_params:
+        components.append(
+            {
+                "type": "body",
+                "parameters": [
+                    {"type": "text", "parameter_name": name, "text": value}
+                    for name, value in named_body_params.items()
+                ],
+            }
+        )
+    elif body_params:
+        components.append(
             {
                 "type": "body",
                 "parameters": [{"type": "text", "text": p} for p in body_params],
             }
-        ]
+        )
+
+    for index, button in enumerate(quick_reply_buttons or []):
+        payload_value = (button.get("payload") or button.get("id") or "").strip()
+        if not payload_value:
+            continue
+        components.append(
+            {
+                "type": "button",
+                "sub_type": "quick_reply",
+                "index": str(button.get("index", index)),
+                "parameters": [{"type": "payload", "payload": payload_value}],
+            }
+        )
+
+    if components:
+        template["components"] = components
 
     payload = {
         "messaging_product": "whatsapp",

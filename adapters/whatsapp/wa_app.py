@@ -9,11 +9,15 @@ import socket
 from fastapi import Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from adapters.whatsapp.wa_client import send_interactive_buttons, send_template, send_text
+from adapters.whatsapp.wa_client import send_template
 from adapters.whatsapp.wa_runtime import process_payload, verify_webhook_signature
 from config.env import load_app_env
 from core.observability import log_system_event_sync
-from core.reports.reports_daily import build_daily_report_text, build_due_bill_reminders
+from core.reports.reports_daily import (
+    build_daily_report_summary,
+    build_daily_report_text,
+    build_due_bill_reminders,
+)
 from db import (
     claim_daily_report_send,
     get_daily_report_prefs,
@@ -76,6 +80,33 @@ def _proactive_template_config() -> dict[str, str] | None:
         "name": template_name,
         "language_code": (os.getenv("WA_PROACTIVE_TEMPLATE_LANGUAGE") or "pt_BR").strip(),
     }
+
+
+def _proactive_template_includes_report() -> bool:
+    return os.getenv("WA_PROACTIVE_TEMPLATE_INCLUDE_REPORT", "0").strip() == "1"
+
+
+def _proactive_template_stop_button_enabled() -> bool:
+    return os.getenv("WA_PROACTIVE_TEMPLATE_STOP_BUTTON", "0").strip() == "1"
+
+
+def _proactive_template_named_body_params(user_id: int) -> dict[str, str] | None:
+    if not _proactive_template_includes_report():
+        return None
+
+    summary = build_daily_report_summary(user_id)
+    return {
+        "saldo": summary["saldo"],
+        "gastos": summary["gastos"],
+        "receita": summary["receita"],
+        "lancamentos": summary["lancamentos"],
+    }
+
+
+def _proactive_template_quick_reply_buttons() -> list[dict] | None:
+    if not _proactive_template_stop_button_enabled():
+        return None
+    return [{"index": 0, "payload": WA_DAILY_REPORT_DISABLE_ID}]
 
 
 def _strip_daily_report_disable_hint(message: str) -> str:
@@ -228,31 +259,58 @@ def _daily_report_tick() -> None:
         minute = prefs["minute"]
         if (now.hour, now.minute) < (hour, minute):
             continue
+        ids = list_identities_by_user(uid)
+        wa_targets = _dedupe_whatsapp_targets(ids)
+        proactive_template = _proactive_template_config()
+
+        if wa_targets and not proactive_template:
+            logger.warning("WA daily report skipped uid=%s: WA_PROACTIVE_TEMPLATE_NAME nao configurado", uid)
+            log_system_event_sync(
+                "warning",
+                "whatsapp_proactive_template_missing",
+                "Relatorio diario via WhatsApp ignorado: WA_PROACTIVE_TEMPLATE_NAME nao configurado.",
+                source="wa_app",
+                user_id=uid,
+                details={"targets": len(wa_targets)},
+            )
+            continue
+
         if not claim_daily_report_send(uid, today):
             continue
 
         message = _strip_daily_report_disable_hint(build_daily_report_text(uid))
         reminders = build_due_bill_reminders(uid, today)
-        ids = list_identities_by_user(uid)
-        wa_targets = _dedupe_whatsapp_targets(ids)
 
         for to in wa_targets:
             try:
-                proactive_template = _proactive_template_config()
-                if proactive_template:
-                    send_template(
-                        to,
-                        proactive_template["name"],
-                        language_code=proactive_template["language_code"],
-                    )
-                for reminder in reminders:
-                    send_text(to, reminder["message"])
-                send_text(to, message)
-                send_interactive_buttons(
-                    to=to,
-                    body="Se quiser parar o resumo diário, toque no botão abaixo.",
-                    buttons=[{"id": WA_DAILY_REPORT_DISABLE_ID, "title": "Parar resumo"}],
-                    footer="Você pode ligar novamente quando quiser.",
+                template_body_params = _proactive_template_named_body_params(uid)
+                send_template(
+                    to,
+                    proactive_template["name"],
+                    language_code=proactive_template["language_code"],
+                    named_body_params=template_body_params,
+                    quick_reply_buttons=_proactive_template_quick_reply_buttons(),
+                )
+                logger.info(
+                    "WA daily report proactive template sent uid=%s to=%s reminders=%s pid=%s hostname=%s",
+                    uid,
+                    to,
+                    len(reminders),
+                    instance["pid"],
+                    instance["hostname"],
+                )
+                log_system_event_sync(
+                    "info",
+                    "whatsapp_daily_report_template_sent",
+                    "Template proativo de relatorio diario enviado para o WhatsApp.",
+                    source="wa_app",
+                    user_id=uid,
+                    details={
+                        "to": to,
+                        "template_name": proactive_template["name"],
+                        "language_code": proactive_template["language_code"],
+                        "included_report_param": bool(template_body_params),
+                    },
                 )
                 logger.info(
                     "WA daily report sent uid=%s to=%s reminders=%s pid=%s hostname=%s",
@@ -272,6 +330,13 @@ def _daily_report_tick() -> None:
                     user_id=uid,
                     details={"to": to},
                 )
+
+        if reminders:
+            logger.info(
+                "WA card reminders not marked uid=%s: proactive template uses compact daily report only",
+                uid,
+            )
+            continue
 
         for reminder in reminders:
             try:

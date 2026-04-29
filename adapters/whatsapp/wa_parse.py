@@ -29,6 +29,10 @@ def get_interactive_id(raw: dict[str, Any]) -> str | None:
     Extrai o ID do botão ou item de lista clicado de um payload de mensagem
     interativa do WhatsApp. Retorna None se não for uma mensagem interativa.
     """
+    if raw.get("type") == "button":
+        button = raw.get("button") or {}
+        return button.get("payload") or button.get("text") or None
+
     if raw.get("type") != "interactive":
         return None
     inter = raw.get("interactive") or {}
@@ -113,6 +117,14 @@ def extract_messages(payload: dict[str, Any]) -> list[InboundMessage]:
                 or br.get("id")
                 or lr.get("title")
                 or lr.get("id")
+                or ""
+            )
+
+        elif mtype == "button":
+            button = m.get("button") or {}
+            text = (
+                button.get("payload")
+                or button.get("text")
                 or ""
             )
 
