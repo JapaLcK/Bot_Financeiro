@@ -41,11 +41,39 @@ def init_db():
           name text not null,
           balance numeric not null default 0,
           rate numeric not null,
-          period text not null, -- daily|monthly|yearly
+          period text not null, -- daily|monthly|yearly|cdi|cdi_spread|ipca_spread|selic_spread
           last_date date not null,
+          asset_type text not null default 'CDB',
+          indexer text,
+          issuer text,
+          purchase_date date,
+          maturity_date date,
+          interest_payment_frequency text not null default 'maturity',
+          tax_profile text not null default 'regressive_ir_iof',
           created_at timestamptz default now(),
           unique(user_id, name)
         )
+        """,
+        """
+        alter table investments add column if not exists asset_type text not null default 'CDB'
+        """,
+        """
+        alter table investments add column if not exists indexer text
+        """,
+        """
+        alter table investments add column if not exists issuer text
+        """,
+        """
+        alter table investments add column if not exists purchase_date date
+        """,
+        """
+        alter table investments add column if not exists maturity_date date
+        """,
+        """
+        alter table investments add column if not exists interest_payment_frequency text not null default 'maturity'
+        """,
+        """
+        alter table investments add column if not exists tax_profile text not null default 'regressive_ir_iof'
         """,
         """
         create table if not exists launches (

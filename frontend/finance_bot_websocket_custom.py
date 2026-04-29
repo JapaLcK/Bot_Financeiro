@@ -53,7 +53,14 @@ from core.admin_dashboard import (
     admin_error_logging_middleware,
     register_admin_routes,
 )
-from db import accrue_all_investments
+from db import (
+    accrue_all_investments,
+    create_investment_db,
+    delete_investment,
+    get_dashboard_market_rates,
+    investment_deposit_from_account,
+    investment_withdraw_to_account,
+)
 
 load_app_env()
 
@@ -130,6 +137,24 @@ async def ensure_budget_table():
         await conn.commit()
 
 
+async def ensure_investment_metadata_columns():
+    """Migrations leves usadas pela aba de investimentos do dashboard."""
+    statements = [
+        "ALTER TABLE investments ADD COLUMN IF NOT EXISTS asset_type TEXT NOT NULL DEFAULT 'CDB'",
+        "ALTER TABLE investments ADD COLUMN IF NOT EXISTS indexer TEXT",
+        "ALTER TABLE investments ADD COLUMN IF NOT EXISTS issuer TEXT",
+        "ALTER TABLE investments ADD COLUMN IF NOT EXISTS purchase_date DATE",
+        "ALTER TABLE investments ADD COLUMN IF NOT EXISTS maturity_date DATE",
+        "ALTER TABLE investments ADD COLUMN IF NOT EXISTS interest_payment_frequency TEXT NOT NULL DEFAULT 'maturity'",
+        "ALTER TABLE investments ADD COLUMN IF NOT EXISTS tax_profile TEXT NOT NULL DEFAULT 'regressive_ir_iof'",
+    ]
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            for stmt in statements:
+                await cur.execute(stmt)
+        await conn.commit()
+
+
 
 def _month_range(year: int, month: int):
     """Returns (start_date, exclusive_end_date) for the given month."""
@@ -155,6 +180,7 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None, 
     limit = max(min(int(limit or 25), 100), 1)
     offset = (page - 1) * limit
     current_investments = await asyncio.to_thread(accrue_all_investments, user_id)
+    market_rates = await asyncio.to_thread(get_dashboard_market_rates)
 
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
@@ -361,6 +387,7 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None, 
         "balance":            float(account["balance"]) if account else 0.0,
         "pockets":            [dict(r) for r in pockets],
         "investments":        [dict(r) for r in investments],
+        "market_rates":       market_rates,
         "recent_launches":    [dict(r) for r in launches],
         "launches_pagination": {
             "page": page,
@@ -529,10 +556,12 @@ async def lifespan(app: FastAPI):
         "setup de tabelas",
         asyncio.gather(
             ensure_budget_table(),
+            ensure_investment_metadata_columns(),
             ensure_admin_tables(),
         ),
     )
     print("OK: Budget table ready", flush=True)
+    print("OK: Investment metadata ready", flush=True)
     print("OK: Admin observability tables ready", flush=True)
 
     # ── 3. Warnings + detecção de usuário em paralelo ─────────────────────────
@@ -1402,6 +1431,156 @@ async def delete_budget(request: Request, user_id: int, categoria: str):
             )
         await conn.commit()
     return {"ok": True}
+
+
+# ─── Investment routes ───────────────────────────────────────────────────────
+
+class InvestmentCreatePayload(BaseModel):
+    name: str
+    rate: float
+    period: str
+    initial_amount: float | None = None
+    asset_type: str | None = None
+    indexer: str | None = None
+    issuer: str | None = None
+    purchase_date: date | None = None
+    maturity_date: date | None = None
+    interest_payment_frequency: str | None = None
+    tax_profile: str | None = None
+    note: str | None = None
+
+
+class InvestmentMovementPayload(BaseModel):
+    name: str
+    amount: float
+    note: str | None = None
+
+
+def _investment_action_note(action: str, name: str, issuer: str | None = None, note: str | None = None) -> str:
+    clean_name = (name or "").strip() or "investimento"
+    clean_issuer = (issuer or "").strip()
+    clean_note = (note or "").strip()
+    suffix = f" ({clean_issuer})" if clean_issuer and clean_issuer.lower() not in clean_name.lower() else ""
+    description = f"{action} {clean_name}{suffix}"
+    if clean_note:
+        description += f" - {clean_note}"
+    return description
+
+
+@app.get("/investments/{user_id}/rates")
+async def investment_rates(request: Request, user_id: int):
+    _authorize_dashboard_access(request, user_id)
+    rates = await asyncio.to_thread(get_dashboard_market_rates)
+    return {"market_rates": rates}
+
+
+@app.post("/investments/{user_id}")
+async def create_investment_route(request: Request, user_id: int, payload: InvestmentCreatePayload):
+    _authorize_dashboard_access(request, user_id)
+
+    name = payload.name.strip()
+    period = payload.period.strip().lower()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nome do investimento é obrigatório.")
+    if period not in {"daily", "monthly", "yearly", "cdi", "cdi_spread", "ipca_spread", "selic_spread"}:
+        raise HTTPException(status_code=400, detail="Indexador inválido.")
+    if payload.rate <= 0 and period != "selic_spread":
+        raise HTTPException(status_code=400, detail="Taxa deve ser maior que zero.")
+
+    try:
+        create_note = _investment_action_note("Criou investimento", name, payload.issuer, payload.note)
+        initial_note = _investment_action_note("Aporte inicial em", name)
+        launch_id, inv_id, canon = await asyncio.to_thread(
+            create_investment_db,
+            user_id,
+            name,
+            payload.rate,
+            period,
+            create_note,
+            asset_type=payload.asset_type,
+            indexer=payload.indexer,
+            issuer=payload.issuer,
+            purchase_date=payload.purchase_date,
+            maturity_date=payload.maturity_date,
+            interest_payment_frequency=payload.interest_payment_frequency,
+            tax_profile=payload.tax_profile,
+            initial_amount=payload.initial_amount,
+            initial_note=initial_note,
+        )
+    except Exception as exc:
+        message = "Saldo insuficiente na conta para o aporte inicial." if str(exc) == "INSUFFICIENT_ACCOUNT" else str(exc)
+        raise HTTPException(status_code=400, detail=message) from exc
+
+    return {
+        "ok": True,
+        "created": launch_id is not None,
+        "investment": {"id": inv_id, "name": canon, "rate": payload.rate, "period": period},
+    }
+
+
+@app.post("/investments/{user_id}/deposit")
+async def deposit_investment_route(request: Request, user_id: int, payload: InvestmentMovementPayload):
+    _authorize_dashboard_access(request, user_id)
+    if payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="Valor deve ser maior que zero.")
+    try:
+        launch_id, new_acc, new_inv, canon = await asyncio.to_thread(
+            investment_deposit_from_account,
+            user_id,
+            payload.name.strip(),
+            payload.amount,
+            payload.note or _investment_action_note("Aporte em", payload.name),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Investimento não encontrado.") from exc
+    except ValueError as exc:
+        message = "Saldo insuficiente na conta." if str(exc) == "INSUFFICIENT_ACCOUNT" else str(exc)
+        raise HTTPException(status_code=400, detail=message) from exc
+
+    return {"ok": True, "launch_id": launch_id, "account_balance": new_acc, "investment_balance": new_inv, "name": canon}
+
+
+@app.post("/investments/{user_id}/withdraw")
+async def withdraw_investment_route(request: Request, user_id: int, payload: InvestmentMovementPayload):
+    _authorize_dashboard_access(request, user_id)
+    if payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="Valor deve ser maior que zero.")
+    try:
+        launch_id, new_acc, new_inv, canon = await asyncio.to_thread(
+            investment_withdraw_to_account,
+            user_id,
+            payload.name.strip(),
+            payload.amount,
+            payload.note or _investment_action_note("Resgate de", payload.name),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Investimento não encontrado.") from exc
+    except ValueError as exc:
+        message = "Saldo insuficiente no investimento." if str(exc) == "INSUFFICIENT_INVEST" else str(exc)
+        raise HTTPException(status_code=400, detail=message) from exc
+
+    return {"ok": True, "launch_id": launch_id, "account_balance": new_acc, "investment_balance": new_inv, "name": canon}
+
+
+@app.delete("/investments/{user_id}/{name:path}")
+async def delete_investment_route(request: Request, user_id: int, name: str):
+    _authorize_dashboard_access(request, user_id)
+    investment_name = urllib.parse.unquote(name).strip()
+    try:
+        launch_id, canon = await asyncio.to_thread(
+            delete_investment,
+            user_id,
+            investment_name,
+            "dashboard:delete",
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Investimento não encontrado.") from exc
+    except ValueError as exc:
+        message = "Zere o saldo antes de remover o investimento." if str(exc) == "INV_NOT_ZERO" else str(exc)
+        raise HTTPException(status_code=400, detail=message) from exc
+
+    return {"ok": True, "launch_id": launch_id, "name": canon}
+
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────
 

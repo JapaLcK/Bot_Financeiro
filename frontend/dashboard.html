@@ -215,6 +215,53 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .ftab.active { background:rgba(167,139,250,.18);border-color:rgba(167,139,250,.4);color:var(--purple); }
 .ftab:hover:not(.active) { background:rgba(255,255,255,.1);color:var(--text); }
 
+/* ─── Dashboard tabs ────────────────────────────────────────────────── */
+.dashboard-tabs { display:flex;gap:8px;flex-wrap:wrap;margin:-14px 0 18px; }
+.main-tab { background:rgba(255,255,255,.055);border:1px solid var(--glass-border);color:var(--text-2);
+  padding:8px 14px;border-radius:10px;font-size:.78rem;font-weight:650;cursor:pointer;transition:all .2s var(--ease); }
+.main-tab.active { background:rgba(96,165,250,.16);border-color:rgba(96,165,250,.38);color:var(--blue); }
+.main-tab:hover:not(.active) { background:rgba(255,255,255,.1);color:var(--text); }
+.dash-view { display:none; }
+.dash-view.active { display:block; }
+
+/* ─── Investments workspace ─────────────────────────────────────────── */
+.invest-layout { display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start; }
+.invest-stack { display:contents; }
+.invest-stack:first-child .card:nth-child(1) { grid-column:1 / -1; grid-row:1; }
+.invest-stack:first-child .card:nth-child(2) { grid-column:1 / -1; grid-row:2; }
+.invest-stack:first-child .card:nth-child(3) { grid-column:1 / -1; grid-row:4; }
+.invest-stack:first-child .card:nth-child(4) { grid-column:2; grid-row:3; }
+.invest-stack:nth-child(2) .card:nth-child(1) { grid-column:1; grid-row:3; }
+.invest-form { display:grid;gap:10px; }
+.form-row { display:grid;grid-template-columns:1fr 1fr;gap:10px; }
+.field label { display:block;font-size:.62rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.07em;margin:0 0 5px 2px; }
+.field input,.field select { width:100%;background:rgba(255,255,255,.06);border:1px solid var(--glass-border);
+  border-radius:10px;padding:9px 11px;color:var(--text);font-size:.82rem;outline:none;transition:all .2s; }
+.field input:focus,.field select:focus { background:rgba(255,255,255,.1);border-color:rgba(96,165,250,.5);box-shadow:0 0 0 2px rgba(96,165,250,.14); }
+.field select option { color:#0f172a; }
+.wide-btn { width:100%;justify-content:center;padding:9px 14px; }
+.rate-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px; }
+.rate-tile { background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:10px; }
+.rate-name { font-size:.62rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px; }
+.rate-val { font-size:1rem;font-weight:750;color:var(--text); }
+.rate-date { font-size:.62rem;color:var(--text-3);margin-top:3px; }
+.invest-card { padding:13px 0;border-bottom:1px solid var(--div); }
+.invest-card:last-child { border-bottom:none; }
+.invest-head { display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:8px; }
+.invest-name { font-weight:700;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.invest-meta { display:flex;gap:6px;flex-wrap:wrap;margin-top:5px; }
+.mini-tag { display:inline-flex;align-items:center;border-radius:6px;padding:3px 7px;font-size:.64rem;font-weight:650;
+  background:rgba(96,165,250,.12);color:var(--blue);border:1px solid rgba(96,165,250,.2); }
+.tax-note { font-size:.72rem;color:var(--text-3);line-height:1.5; }
+.sim-result { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px; }
+@media(max-width:900px) {
+  .invest-layout{display:block}
+  .invest-stack{display:flex;flex-direction:column;gap:12px}
+  .invest-stack + .invest-stack{margin-top:12px}
+  .rate-grid,.sim-result{grid-template-columns:1fr}
+  .form-row{grid-template-columns:1fr}
+}
+
 /* ─── Save rate bar ─────────────────────────────────────────────────── */
 .pbar-wrap { height:4px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden;margin-top:6px; }
 .pbar-fill { height:100%;border-radius:3px;transition:width .7s var(--ease); }
@@ -240,6 +287,7 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .modal { background:rgba(14,16,30,.94);border:1px solid var(--glass-border);
   border-radius:20px;padding:28px;width:min(360px,90vw);
   box-shadow:0 24px 60px rgba(0,0,0,.6);animation:fadeIn .25s var(--ease); }
+.modal.wide { width:min(760px,92vw);max-height:86vh;overflow:auto; }
 .modal h3 { font-size:1rem;font-weight:650;margin-bottom:5px; }
 .modal .msub { font-size:.78rem;color:var(--text-2);margin-bottom:18px; }
 .modal-inp { width:100%;background:rgba(255,255,255,.07);border:1px solid var(--glass-border);
@@ -253,6 +301,15 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .btn-save { background:linear-gradient(135deg,#7c3aed,#3b82f6);border:none;color:#fff;
   padding:8px 20px;border-radius:9px;cursor:pointer;font-size:.82rem;font-weight:600;transition:opacity .2s; }
 .btn-save:hover { opacity:.85; }
+.detail-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0; }
+.detail-cell { background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:10px; }
+.detail-k { font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px; }
+.detail-v { font-size:.86rem;color:var(--text);font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.detail-history { display:grid;gap:8px;margin-top:10px; }
+.detail-history .row { padding:8px 0; }
+.invest-card { cursor:pointer; }
+.invest-card:hover .invest-name { color:var(--blue); }
+@media(max-width:700px) { .detail-grid{grid-template-columns:1fr} }
 
 #last-update { font-size:.68rem;color:var(--text-3);margin-top:14px;text-align:right; }
 .empty { color:var(--text-3);font-size:.84rem;padding:10px 0;text-align:center; }
@@ -291,6 +348,12 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
     </div>
   </header>
 
+  <div class="dashboard-tabs">
+    <button class="main-tab active" data-view="overview" onclick="setMainView('overview')">Visão geral</button>
+    <button class="main-tab" data-view="investments" onclick="setMainView('investments')">Investimentos</button>
+  </div>
+
+  <div id="overview-view" class="dash-view active">
   <div id="alert-banner"></div>
 
   <p class="section-title">Visão Geral</p>
@@ -333,6 +396,180 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   </div>
 
   <div id="last-update"></div>
+  </div>
+
+  <div id="investments-view" class="dash-view">
+    <p class="section-title">Investimentos</p>
+    <div class="invest-layout">
+      <div class="invest-stack">
+        <div class="card">
+          <h2>Taxas BCB</h2>
+          <div class="rate-grid" id="invest-rate-grid">
+            <div class="rate-tile"><div class="rate-name">CDI a.a.</div><div class="rate-val">—</div></div>
+            <div class="rate-tile"><div class="rate-name">SELIC a.a.</div><div class="rate-val">—</div></div>
+            <div class="rate-tile"><div class="rate-name">IPCA 12m</div><div class="rate-val">—</div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Carteira unificada</h2>
+          <div id="invest-summary"></div>
+          <div id="invest-list"></div>
+        </div>
+
+        <div class="card">
+          <h2>Criar investimento</h2>
+          <form class="invest-form" onsubmit="createInvestment(event)">
+            <div class="form-row">
+              <div class="field">
+                <label for="inv-issuer">Emissor</label>
+                <input id="inv-issuer" autocomplete="off" placeholder="Tesouro Direto, Nubank" />
+              </div>
+              <div class="field">
+                <label for="inv-name">Nome do ativo</label>
+                <input id="inv-name" autocomplete="off" placeholder="Tesouro Selic 2027, CDB 110% CDI" required />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="inv-asset-type">Tipo</label>
+                <select id="inv-asset-type" onchange="updateInvestmentTaxHint()">
+                  <option value="CDB">CDB</option>
+                  <option value="LCI">LCI</option>
+                  <option value="LCA">LCA</option>
+                  <option value="Debênture">Debênture</option>
+                  <option value="CRI">CRI</option>
+                  <option value="CRA">CRA</option>
+                  <option value="ETF Renda Fixa">ETF Renda Fixa</option>
+                  <option value="Tesouro Selic">Tesouro Selic</option>
+                  <option value="Tesouro IPCA+">Tesouro IPCA+</option>
+                  <option value="Tesouro Prefixado">Tesouro Prefixado</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="inv-period">Indexador</label>
+                <select id="inv-period" onchange="updateInvestmentRateHint()">
+                  <option value="pct_cdi">% do CDI</option>
+                  <option value="cdi_spread">CDI + spread a.a.</option>
+                  <option value="ipca_spread">IPCA + spread a.a.</option>
+                  <option value="fixed">Prefixado a.a.</option>
+                  <option value="selic_spread">SELIC + spread a.a.</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="inv-rate" id="inv-rate-label">Taxa (% do CDI)</label>
+                <input id="inv-rate" type="number" min="0.01" step="0.01" value="110" required />
+                <p class="tax-note" id="inv-rate-hint">Ex: 110 = 110% do CDI</p>
+              </div>
+              <div class="field">
+                <label for="inv-frequency">Pagamento de juros</label>
+                <select id="inv-frequency">
+                  <option value="maturity">Só no vencimento</option>
+                  <option value="monthly">Mensal</option>
+                  <option value="quarterly">Trimestral</option>
+                  <option value="semiannual">Semestral</option>
+                  <option value="annual">Anual</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="inv-initial-amount">Valor investido (R$)</label>
+                <input id="inv-initial-amount" type="number" min="0" step="0.01" placeholder="10000" />
+              </div>
+              <div class="field">
+                <label for="inv-purchase-date">Data de compra</label>
+                <input id="inv-purchase-date" type="date" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="inv-maturity-date">Data de vencimento</label>
+                <input id="inv-maturity-date" type="date" />
+              </div>
+            </div>
+            <p class="tax-note" id="inv-tax-hint">IR regressivo e IOF conforme regra do tipo selecionado.</p>
+            <div class="field">
+              <label for="inv-note">Observações</label>
+              <input id="inv-note" autocomplete="off" placeholder="Reserva de emergência, objetivo, liquidez" />
+            </div>
+            <button class="hbtn wide-btn" type="submit">Criar investimento</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>Aporte e resgate</h2>
+          <form class="invest-form" onsubmit="moveInvestment(event)">
+            <div class="field">
+              <label for="move-name">Investimento</label>
+              <select id="move-name"></select>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="move-kind">Operação</label>
+                <select id="move-kind">
+                  <option value="deposit">Aporte</option>
+                  <option value="withdraw">Resgate</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="move-amount">Valor</label>
+                <input id="move-amount" type="number" min="0.01" step="0.01" placeholder="500.00" required />
+              </div>
+            </div>
+            <button class="hbtn wide-btn" type="submit">Salvar movimentação</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="invest-stack">
+        <div class="card">
+          <h2>Simulador líquido</h2>
+          <div class="invest-form">
+            <div class="form-row">
+              <div class="field">
+                <label for="sim-indexer">Indexador</label>
+                <select id="sim-indexer" onchange="runInvestmentSimulator()">
+                  <option value="cdi">CDI</option>
+                  <option value="selic">SELIC</option>
+                  <option value="ipca">IPCA+</option>
+                  <option value="fixed">Prefixado</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="sim-rate">Taxa</label>
+                <input id="sim-rate" type="number" min="0" step="0.01" value="110" oninput="runInvestmentSimulator()" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="sim-amount">Valor investido</label>
+                <input id="sim-amount" type="number" min="1" step="0.01" value="10000" oninput="runInvestmentSimulator()" />
+              </div>
+              <div class="field">
+                <label for="sim-years">Prazo em anos</label>
+                <input id="sim-years" type="number" min="0.05" step="0.05" value="2" oninput="runInvestmentSimulator()" />
+              </div>
+            </div>
+            <div class="field">
+              <label for="sim-tax">Tributação</label>
+              <select id="sim-tax" onchange="runInvestmentSimulator()">
+                <option value="taxed">IR regressivo + IOF</option>
+                <option value="exempt">Isento</option>
+              </select>
+            </div>
+          </div>
+          <div id="sim-output"></div>
+          <p class="tax-note" style="margin-top:12px">
+            IR regressivo: até 180 dias 22,5%; 181–360 dias 20%; 361–720 dias 17,5%; acima de 720 dias 15%.
+            IOF estimado apenas para resgates nos primeiros 30 dias.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div id="toast">✓ Atualizado</div>
@@ -345,6 +582,18 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
     <div class="modal-acts">
       <button class="btn-cancel" onclick="closeBudget()">Cancelar</button>
       <button class="btn-save"   onclick="saveBudget()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="investment-detail-overlay">
+  <div class="modal wide">
+    <h3 id="investment-detail-title">Investimento</h3>
+    <p class="msub" id="investment-detail-sub">—</p>
+    <div id="investment-detail-body"></div>
+    <div class="modal-acts">
+      <button class="btn-cancel" onclick="closeInvestmentDetail()">Fechar</button>
+      <button class="btn-save" id="investment-detail-move" type="button">Movimentar</button>
     </div>
   </div>
 </div>
@@ -403,6 +652,500 @@ const fmtDate = iso => {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
 };
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({
+  "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+}[c]));
+
+const displayInvestmentName = (i) => {
+  const name = String(i?.name || "").trim();
+  const legacyPrefix = [i?.asset_type, i?.issuer].filter(Boolean).join(" ").trim();
+  if (legacyPrefix && name.toLowerCase().startsWith(legacyPrefix.toLowerCase() + " ")) {
+    return name.slice(legacyPrefix.length).trim();
+  }
+  return name;
+};
+
+const fmtPct = n =>
+  n == null || Number.isNaN(Number(n)) ? "—" : Number(n).toLocaleString("pt-BR", {minimumFractionDigits:2, maximumFractionDigits:2}) + "%";
+
+const PERIOD_LABELS = {
+  cdi: "CDI",
+  cdi_spread: "CDI + spread",
+  ipca_spread: "IPCA + spread",
+  selic_spread: "SELIC + spread",
+  yearly: "a.a.",
+  monthly: "a.m.",
+  daily: "a.d."
+};
+
+function investmentRateLabel(i) {
+  const value = Number(i?.rate || 0) * 100;
+  if (i?.period === "cdi") return `${fmtPct(value)} do CDI`;
+  if (["cdi_spread", "ipca_spread", "selic_spread", "yearly"].includes(i?.period)) return `${fmtPct(value)} a.a.`;
+  if (i?.period === "monthly") return `${fmtPct(value)} a.m.`;
+  if (i?.period === "daily") return `${fmtPct(value)} a.d.`;
+  return fmtPct(value);
+}
+
+const INDEXER_TO_PERIOD = {
+  pct_cdi: "cdi",
+  cdi_spread: "cdi_spread",
+  ipca_spread: "ipca_spread",
+  fixed: "yearly",
+  selic_spread: "selic_spread"
+};
+
+const TAX_BY_ASSET = {
+  LCI: "exempt_ir_iof",
+  LCA: "exempt_ir_iof",
+  CRI: "exempt_ir_iof",
+  CRA: "exempt_ir_iof",
+  "ETF Renda Fixa": "etf_rf_15"
+};
+
+const INVESTMENT_GUIDES = {
+  CDB: {
+    indexer: "pct_cdi", rate: "110", frequency: "maturity",
+    issuerPlaceholder: "Nubank, Itaú, BTG",
+    namePlaceholder: "CDB liquidez diária 110% CDI"
+  },
+  LCI: {
+    indexer: "pct_cdi", rate: "95", frequency: "maturity",
+    issuerPlaceholder: "Banco emissor",
+    namePlaceholder: "LCI 95% CDI"
+  },
+  LCA: {
+    indexer: "pct_cdi", rate: "95", frequency: "maturity",
+    issuerPlaceholder: "Banco emissor",
+    namePlaceholder: "LCA 95% CDI"
+  },
+  "Debênture": {
+    indexer: "ipca_spread", rate: "7.5", frequency: "semiannual",
+    issuerPlaceholder: "Empresa emissora",
+    namePlaceholder: "Debênture IPCA+ 2031"
+  },
+  CRI: {
+    indexer: "ipca_spread", rate: "7.5", frequency: "maturity",
+    issuerPlaceholder: "Securitizadora",
+    namePlaceholder: "CRI IPCA+ 2030"
+  },
+  CRA: {
+    indexer: "ipca_spread", rate: "7.5", frequency: "maturity",
+    issuerPlaceholder: "Securitizadora",
+    namePlaceholder: "CRA IPCA+ 2030"
+  },
+  "ETF Renda Fixa": {
+    indexer: "fixed", rate: "15", frequency: "maturity",
+    issuerPlaceholder: "Gestora ou ticker",
+    namePlaceholder: "ETF Renda Fixa"
+  },
+  "Tesouro Selic": {
+    indexer: "selic_spread", rate: "0.07", frequency: "maturity",
+    issuerPlaceholder: "Tesouro Direto",
+    namePlaceholder: "Tesouro Selic 2029"
+  },
+  "Tesouro IPCA+": {
+    indexer: "ipca_spread", rate: "7.43", frequency: "maturity",
+    issuerPlaceholder: "Tesouro Direto",
+    namePlaceholder: "Tesouro IPCA+ 2035"
+  },
+  "Tesouro Prefixado": {
+    indexer: "fixed", rate: "13.59", frequency: "maturity",
+    issuerPlaceholder: "Tesouro Direto",
+    namePlaceholder: "Tesouro Prefixado 2032"
+  }
+};
+
+function taxProfileForAsset(assetType) {
+  return TAX_BY_ASSET[assetType] || "regressive_ir_iof";
+}
+
+function setMainView(view) {
+  document.querySelectorAll(".main-tab").forEach(b => b.classList.toggle("active", b.dataset.view === view));
+  document.getElementById("overview-view").classList.toggle("active", view === "overview");
+  document.getElementById("investments-view").classList.toggle("active", view === "investments");
+  if (view === "investments" && lastData) {
+    renderInvestmentsPanel(lastData);
+    runInvestmentSimulator();
+  }
+}
+
+function marketRate(key) {
+  return lastData && lastData.market_rates ? lastData.market_rates[key] : null;
+}
+
+function updateInvestmentRateHint() {
+  const p = document.getElementById("inv-period").value;
+  const label = document.getElementById("inv-rate-label");
+  const input = document.getElementById("inv-rate");
+  const hint = document.getElementById("inv-rate-hint");
+  if (p === "pct_cdi") {
+    label.textContent = "Taxa (% do CDI)";
+    input.placeholder = "110";
+    input.value = "110";
+    input.min = "0.01";
+    hint.textContent = "Ex: 110 = 110% do CDI";
+  } else if (p === "cdi_spread") {
+    label.textContent = "Spread sobre CDI (% a.a.)";
+    input.placeholder = "2.5";
+    input.value = "2.5";
+    input.min = "0";
+    hint.textContent = "Ex: 2.5 = CDI + 2,5% ao ano";
+  } else if (p === "ipca_spread") {
+    label.textContent = "Spread sobre IPCA (% a.a.)";
+    input.placeholder = "7.43";
+    input.value = "7.43";
+    input.min = "0.01";
+    hint.textContent = "Ex: 7.43 = IPCA + 7,43% ao ano";
+  } else if (p === "selic_spread") {
+    label.textContent = "Spread sobre SELIC (% a.a.)";
+    input.placeholder = "0";
+    input.value = "0";
+    input.min = "0";
+    hint.textContent = "Ex: 0 = SELIC pura, 0.07 = SELIC + 0,07%";
+  } else if (p === "fixed") {
+    label.textContent = "Taxa prefixada (% a.a.)";
+    input.placeholder = "13.59";
+    input.value = "13.59";
+    input.min = "0.01";
+    hint.textContent = "Ex: 13.59 = 13,59% ao ano fixo";
+  }
+}
+
+function rateToPayload(indexer, pct) {
+  return Number(pct) / 100;
+}
+
+function updateInvestmentTaxHint() {
+  const asset = document.getElementById("inv-asset-type").value;
+  const indexerSelect = document.getElementById("inv-period");
+  const guide = INVESTMENT_GUIDES[asset] || INVESTMENT_GUIDES.CDB;
+  indexerSelect.value = guide.indexer;
+  updateInvestmentRateHint();
+  const rateInput = document.getElementById("inv-rate");
+  const frequencySelect = document.getElementById("inv-frequency");
+  const issuerInput = document.getElementById("inv-issuer");
+  const nameInput = document.getElementById("inv-name");
+  rateInput.value = guide.rate;
+  frequencySelect.value = guide.frequency;
+  issuerInput.placeholder = guide.issuerPlaceholder;
+  nameInput.placeholder = guide.namePlaceholder;
+  const profile = taxProfileForAsset(asset);
+  const label = profile === "exempt_ir_iof"
+    ? "LCI, LCA, CRI e CRA: isentos de IR e IOF."
+    : profile === "etf_rf_15"
+      ? "ETF de renda fixa: IR fixo de 15% e sem IOF."
+      : "IR regressivo e IOF nos primeiros 30 dias para CDB, Debênture e Tesouro.";
+  document.getElementById("inv-tax-hint").textContent = label;
+}
+
+function monthlyRate(inv) {
+  const rate = Number(inv.rate || 0);
+  if (inv.period === "cdi") {
+    const cdi = marketRate("cdi_aa")?.value || 0;
+    return Math.pow(1 + ((cdi / 100) * rate), 1 / 12) - 1;
+  }
+  if (inv.period === "yearly") return Math.pow(1 + rate, 1 / 12) - 1;
+  if (inv.period === "monthly") return rate;
+  if (inv.period === "daily") return Math.pow(1 + rate, 21) - 1;
+  return 0;
+}
+
+function fmtDateOnly(iso) {
+  if (!iso) return "—";
+  return new Date(String(iso).slice(0, 10) + "T00:00:00").toLocaleDateString("pt-BR");
+}
+
+function taxProfileLabel(profile) {
+  if (profile === "exempt_ir_iof") return "Isento de IR/IOF";
+  if (profile === "etf_rf_15") return "IR fixo 15%";
+  return "IR regressivo + IOF";
+}
+
+function frequencyLabel(value) {
+  return {
+    maturity: "Só no vencimento",
+    monthly: "Mensal",
+    quarterly: "Trimestral",
+    semiannual: "Semestral",
+    annual: "Anual"
+  }[value] || "Só no vencimento";
+}
+
+function describeLaunch(l) {
+  const target = l.alvo || "investimento";
+  if (l.nota && l.nota.startsWith("dashboard:create")) return `Criou investimento ${target}`;
+  if (l.nota && l.nota.startsWith("dashboard:aporte")) return `Aporte em ${target}`;
+  if (l.nota && l.nota.startsWith("dashboard:resgate")) return `Resgate de ${target}`;
+  if (l.tipo === "create_investment" && !l.nota) return `Criou investimento ${target}`;
+  if (l.tipo === "aporte_investimento" && !l.nota) return `Aporte em ${target}`;
+  if (l.tipo === "resgate_investimento" && !l.nota) return `Resgate de ${target}`;
+  return l.nota || l.alvo || "—";
+}
+
+function irRate(days) {
+  if (days <= 180) return .225;
+  if (days <= 360) return .20;
+  if (days <= 720) return .175;
+  return .15;
+}
+
+function iofRate(days) {
+  const table = [0,96,93,90,86,83,80,76,73,70,66,63,60,56,53,50,46,43,40,36,33,30,26,23,20,16,13,10,6,3,0];
+  const d = Math.max(0, Math.min(30, Math.floor(days)));
+  return (table[d] || 0) / 100;
+}
+
+async function readApiError(resp) {
+  try {
+    const data = await resp.json();
+    return data.detail || JSON.stringify(data);
+  } catch (_) {
+    return await resp.text();
+  }
+}
+
+async function refreshDashboardAfterInvestment(msg) {
+  showToast(msg);
+  launchesPage = 1;
+  sendRefresh();
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    await fetchMonthHttp(viewYear, viewMonth, 1, LAUNCHES_LIMIT);
+  }
+}
+
+async function createInvestment(event) {
+  event.preventDefault();
+  const issuer = document.getElementById("inv-issuer").value.trim();
+  const name = document.getElementById("inv-name").value.trim();
+  const note = document.getElementById("inv-note").value.trim();
+  const assetType = document.getElementById("inv-asset-type").value;
+  const indexer = document.getElementById("inv-period").value;
+  const period = INDEXER_TO_PERIOD[indexer] || "yearly";
+  const ratePct = Number(document.getElementById("inv-rate").value);
+  const purchaseDate = document.getElementById("inv-purchase-date").value || null;
+  const maturityDate = document.getElementById("inv-maturity-date").value || null;
+  const initialAmount = Number(document.getElementById("inv-initial-amount").value || 0);
+  const interestPaymentFrequency = document.getElementById("inv-frequency").value;
+  const taxProfile = taxProfileForAsset(assetType);
+  if (!name || Number.isNaN(ratePct) || (ratePct <= 0 && indexer !== "selic_spread")) {
+    alert("Preencha o nome do ativo e a taxa.");
+    return;
+  }
+
+  const resp = await fetch(`${API}/investments/${USER_ID}`, {
+    method: "POST",
+    headers: {"Content-Type":"application/json", "Authorization": `Bearer ${DASHBOARD_TOKEN}`},
+    body: JSON.stringify({
+      name,
+      period,
+      rate: rateToPayload(indexer, ratePct),
+      initial_amount: initialAmount,
+      asset_type: assetType,
+      indexer,
+      issuer,
+      purchase_date: purchaseDate,
+      maturity_date: maturityDate,
+      interest_payment_frequency: interestPaymentFrequency,
+      tax_profile: taxProfile,
+      note
+    })
+  });
+  if (!resp.ok) { alert("Erro: " + await readApiError(resp)); return; }
+  document.getElementById("inv-name").value = "";
+  document.getElementById("inv-note").value = "";
+  document.getElementById("inv-initial-amount").value = "";
+  await refreshDashboardAfterInvestment("✓ Investimento criado");
+}
+
+async function moveInvestment(event) {
+  event.preventDefault();
+  const name = document.getElementById("move-name").value;
+  const kind = document.getElementById("move-kind").value;
+  const amount = Number(document.getElementById("move-amount").value);
+  if (!name || !amount || amount <= 0) { alert("Selecione um investimento e informe o valor."); return; }
+
+  const resp = await fetch(`${API}/investments/${USER_ID}/${kind}`, {
+    method: "POST",
+    headers: {"Content-Type":"application/json", "Authorization": `Bearer ${DASHBOARD_TOKEN}`},
+    body: JSON.stringify({name, amount})
+  });
+  if (!resp.ok) { alert("Erro: " + await readApiError(resp)); return; }
+  document.getElementById("move-amount").value = "";
+  await refreshDashboardAfterInvestment(kind === "deposit" ? "✓ Aporte salvo" : "✓ Resgate salvo");
+}
+
+async function deleteInvestment(name) {
+  if (!confirm(`Remover ${name}? O saldo precisa estar zerado.`)) return;
+  const resp = await fetch(`${API}/investments/${USER_ID}/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+    headers: {"Authorization": `Bearer ${DASHBOARD_TOKEN}`}
+  });
+  if (!resp.ok) { alert("Erro: " + await readApiError(resp)); return; }
+  await refreshDashboardAfterInvestment("✓ Investimento removido");
+}
+
+function openInvestmentDetail(name) {
+  const inv = (lastData?.investments || []).find(i => i.name === name);
+  if (!inv) return;
+
+  const visibleName = displayInvestmentName(inv);
+  const mRate = monthlyRate(inv);
+  const grossMonth = Number(inv.balance || 0) * mRate;
+  const netMonth = grossMonth * (inv.tax_profile === "exempt_ir_iof" ? 1 : .85);
+  const history = (lastData?.recent_launches || [])
+    .filter(l => String(l.alvo || "").toLowerCase() === String(inv.name || "").toLowerCase())
+    .slice(0, 6);
+
+  document.getElementById("investment-detail-title").textContent = visibleName;
+  document.getElementById("investment-detail-sub").textContent = [
+    inv.asset_type || "Investimento",
+    inv.issuer,
+    PERIOD_LABELS[inv.period] || inv.period
+  ].filter(Boolean).join(" · ");
+
+  const cells = [
+    ["Saldo atual", fmt(inv.balance || 0)],
+    ["Taxa", investmentRateLabel(inv)],
+    ["Rendimento bruto/mês", fmt(grossMonth)],
+    ["Líquido estimado/mês", fmt(netMonth)],
+    ["Emissor", inv.issuer || "—"],
+    ["Tributação", taxProfileLabel(inv.tax_profile)],
+    ["Compra", fmtDateOnly(inv.purchase_date)],
+    ["Vencimento", fmtDateOnly(inv.maturity_date)],
+    ["Juros", frequencyLabel(inv.interest_payment_frequency)],
+    ["Base de cálculo", fmtDateOnly(inv.last_date)],
+    ["Indexador", PERIOD_LABELS[inv.period] || inv.period || "—"],
+    ["Tipo", inv.asset_type || "—"]
+  ];
+
+  const historyHtml = history.length
+    ? history.map(l => `
+        <div class="row">
+          <span class="lbl">${esc(describeLaunch(l))}</span>
+          <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+            <span class="val" data-val="${l.valor}">${fmt(l.valor)}</span>
+            <span style="font-size:.65rem;color:var(--text-3)">${fmtDate(l.criado_em)}</span>
+          </span>
+        </div>
+      `).join("")
+    : `<div class="empty">Sem movimentações recentes.</div>`;
+
+  document.getElementById("investment-detail-body").innerHTML = `
+    <div class="detail-grid">
+      ${cells.map(([k, v]) => `
+        <div class="detail-cell">
+          <div class="detail-k">${esc(k)}</div>
+          <div class="detail-v">${esc(v)}</div>
+        </div>
+      `).join("")}
+    </div>
+    <h2 style="margin-top:10px">Movimentações recentes</h2>
+    <div class="detail-history">${historyHtml}</div>
+  `;
+
+  document.getElementById("investment-detail-move").onclick = () => {
+    document.getElementById("move-name").value = inv.name;
+    closeInvestmentDetail();
+    document.getElementById("move-amount").focus();
+  };
+  document.getElementById("investment-detail-overlay").classList.add("open");
+}
+
+function closeInvestmentDetail() {
+  document.getElementById("investment-detail-overlay").classList.remove("open");
+}
+
+function renderInvestmentsPanel(d) {
+  const rates = d.market_rates || {};
+  const rateHtml = [
+    ["CDI a.a.", rates.cdi_aa],
+    ["SELIC a.a.", rates.selic_aa],
+    ["IPCA 12m", rates.ipca_12m],
+  ].map(([label, item]) => `
+    <div class="rate-tile">
+      <div class="rate-name">${label}</div>
+      <div class="rate-val">${fmtPct(item && item.value)}</div>
+      <div class="rate-date">${item && item.date ? new Date(item.date + "T00:00:00").toLocaleDateString("pt-BR") : "sem cache"}</div>
+    </div>
+  `).join("");
+  document.getElementById("invest-rate-grid").innerHTML = rateHtml;
+
+  const invs = d.investments || [];
+  const move = document.getElementById("move-name");
+  move.innerHTML = invs.length
+    ? invs.map(i => `<option value="${esc(i.name)}">${esc(displayInvestmentName(i))}</option>`).join("")
+    : `<option value="">Nenhum investimento</option>`;
+
+  const total = invs.reduce((s, i) => s + Number(i.balance || 0), 0);
+  const grossMonth = invs.reduce((s, i) => s + Number(i.balance || 0) * monthlyRate(i), 0);
+  const netMonth = grossMonth * (1 - .15);
+  document.getElementById("invest-summary").innerHTML = `
+    <div class="chips" style="margin-top:0;margin-bottom:12px">
+      <div class="chip"><div class="chip-lbl">Patrimônio</div><div class="chip-val b">${fmt(total)}</div></div>
+      <div class="chip"><div class="chip-lbl">Rend. bruto/mês</div><div class="chip-val g">${fmt(grossMonth)}</div></div>
+      <div class="chip"><div class="chip-lbl">Líquido estimado</div><div class="chip-val">${fmt(netMonth)}</div></div>
+    </div>
+  `;
+
+	  document.getElementById("invest-list").innerHTML = invs.length ? invs.map(i => {
+	    const mRate = monthlyRate(i);
+	    const visibleName = displayInvestmentName(i);
+	    return `
+	      <div class="invest-card" data-invest-name="${esc(i.name)}" onclick="openInvestmentDetail(this.dataset.investName)">
+	        <div class="invest-head">
+	          <div style="min-width:0">
+	            <div class="invest-name">${esc(visibleName)}</div>
+	            <div class="invest-meta">
+	              <span class="mini-tag">${esc(i.asset_type || "CDB")}</span>
+	              ${i.issuer ? `<span class="mini-tag">${esc(i.issuer)}</span>` : ""}
+	              <span class="mini-tag">${PERIOD_LABELS[i.period] || esc(i.period)}</span>
+              <span class="mini-tag">${investmentRateLabel(i)}</span>
+	              <span class="mini-tag">base ${i.last_date || "—"}</span>
+            </div>
+          </div>
+          <div style="text-align:right">
+            <div class="val b">${fmt(i.balance)}</div>
+	            <button class="ftab" style="margin-top:6px" data-invest-name="${esc(i.name)}" onclick="event.stopPropagation(); deleteInvestment(this.dataset.investName)">Remover</button>
+          </div>
+        </div>
+        <div class="tax-note">Estimativa mensal: bruto ${fmt(Number(i.balance || 0) * mRate)} · líquido ${fmt(Number(i.balance || 0) * mRate * .85)}</div>
+      </div>
+    `;
+  }).join("") : `<div class="empty">Nenhum investimento cadastrado.</div>`;
+}
+
+function runInvestmentSimulator() {
+  if (!document.getElementById("sim-output")) return;
+  const indexer = document.getElementById("sim-indexer").value;
+  const rate = Number(document.getElementById("sim-rate").value || 0);
+  const amount = Number(document.getElementById("sim-amount").value || 0);
+  const years = Number(document.getElementById("sim-years").value || 0);
+  const taxed = document.getElementById("sim-tax").value === "taxed";
+  const cdi = marketRate("cdi_aa")?.value || 0;
+  const selic = marketRate("selic_aa")?.value || 0;
+  const ipca = marketRate("ipca_12m")?.value || 0;
+
+  let annual = rate;
+  if (indexer === "cdi") annual = cdi * (rate / 100);
+  if (indexer === "selic") annual = selic * (rate / 100);
+  if (indexer === "ipca") annual = ipca + rate;
+
+  const days = Math.max(1, Math.round(years * 365));
+  const grossGain = amount * (Math.pow(1 + annual / 100, years) - 1);
+  const iof = taxed ? grossGain * iofRate(days) : 0;
+  const ir = taxed ? (grossGain - iof) * irRate(days) : 0;
+  const netGain = grossGain - iof - ir;
+
+  document.getElementById("sim-output").innerHTML = `
+    <div class="sim-result">
+      <div class="rate-tile"><div class="rate-name">Taxa usada</div><div class="rate-val">${fmtPct(annual)}</div><div class="rate-date">a.a.</div></div>
+      <div class="rate-tile"><div class="rate-name">Ganho bruto</div><div class="rate-val">${fmt(grossGain)}</div><div class="rate-date">${days} dias</div></div>
+      <div class="rate-tile"><div class="rate-name">Ganho líquido</div><div class="rate-val">${fmt(netGain)}</div><div class="rate-date">IR ${fmtPct(taxed ? irRate(days) * 100 : 0)}</div></div>
+    </div>
+  `;
+}
 
 /* ═══════════════════════════════════════════════════════════════════════
    COUNTER ANIMATION
@@ -732,7 +1475,7 @@ function renderLaunches() {
 
   launchesPage = meta.page || 1;
 
-  const TYPE_LABELS = {
+	  const TYPE_LABELS = {
     deposito_caixinha: "dep. caixinha",
     saque_caixinha: "saque caixinha",
     aporte_investimento: "aporte invest.",
@@ -743,11 +1486,11 @@ function renderLaunches() {
     criar_caixinha: "criar caixinha",
     create_investment: "criar invest.",
     delete_pocket: "remover caixinha",
-    delete_investment: "remover invest."
-  };
+	    delete_investment: "remover invest."
+	  };
 
-  card.innerHTML =
-    items.map(l => {
+		  card.innerHTML =
+		    items.map(l => {
       const isInternal = l.is_internal_movement;
       const valClass   = isInternal ? '' : (l.tipo==='receita'||l.tipo==='entrada' ? 'g' : 'r');
       const valStyle   = isInternal ? 'color:var(--text-2)' : '';
@@ -755,11 +1498,11 @@ function renderLaunches() {
       return `
       <div class="row" style="${isInternal?'opacity:.75':''}">
         <span class="lbl">
-          <span class="tag ${l.tipo}">${typeLabel}</span>
-          ${isInternal ? '<span class="tag interno">mov. interna</span>' : ''}
-          ${l.nota || l.alvo || '—'}
-          ${l.categoria ? `<span class="tag x">${l.categoria}</span>` : ''}
-        </span>
+	          <span class="tag ${l.tipo}">${typeLabel}</span>
+	          ${isInternal ? '<span class="tag interno">mov. interna</span>' : ''}
+	          ${describeLaunch(l)}
+	          ${l.categoria ? `<span class="tag x">${l.categoria}</span>` : ''}
+	        </span>
         <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
           <span class="val ${valClass}" style="${valStyle}"
                 data-num="lnc_${l.criado_em}_${l.valor}" data-val="${l.valor}">${fmt(l.valor)}</span>
@@ -805,9 +1548,15 @@ async function saveBudget() {
 document.getElementById("bgt-overlay").addEventListener("click", e => {
   if (e.target === e.currentTarget) closeBudget();
 });
+document.getElementById("investment-detail-overlay").addEventListener("click", e => {
+  if (e.target === e.currentTarget) closeInvestmentDetail();
+});
 document.getElementById("bgt-input").addEventListener("keydown", e => {
   if (e.key === "Enter") saveBudget();
   if (e.key === "Escape") closeBudget();
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeInvestmentDetail();
 });
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -1033,10 +1782,10 @@ function render(d) {
     </div>
 
     <div class="card" style="animation-delay:120ms">
-      <h2>Investimentos</h2>
-      ${!(d.investments||[]).length?'<div class="empty">Nenhum investimento.</div>':
-        d.investments.map(i=>`<div class="row"><span class="lbl">${i.name}</span>
-          <span class="val b" data-num="inv_${i.name}" data-val="${i.balance}">${fmt(i.balance)}</span></div>`).join("")}
+	      <h2>Investimentos</h2>
+	      ${!(d.investments||[]).length?'<div class="empty">Nenhum investimento.</div>':
+	        d.investments.map(i=>`<div class="row"><span class="lbl">${esc(displayInvestmentName(i))}</span>
+	          <span class="val b" data-num="inv_${i.name}" data-val="${i.balance}">${fmt(i.balance)}</span></div>`).join("")}
     </div>
 
     <div class="card" style="animation-delay:180ms">
@@ -1117,6 +1866,8 @@ function render(d) {
 
   document.getElementById("last-update").textContent =
     "Última atualização: " + fmtDate(d.timestamp);
+  renderInvestmentsPanel(d);
+  runInvestmentSimulator();
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -1160,6 +1911,10 @@ function _showAccessError() {
 
   WS_URL = `${BASE_WS}/ws/${USER_ID}?token=${encodeURIComponent(DASHBOARD_TOKEN)}`;
 
+  const purchaseInput = document.getElementById("inv-purchase-date");
+  if (purchaseInput && !purchaseInput.value) purchaseInput.value = NOW.toISOString().slice(0, 10);
+  updateInvestmentRateHint();
+  updateInvestmentTaxHint();
   updateMonthLabel();
   connect();
   fetchHistory();

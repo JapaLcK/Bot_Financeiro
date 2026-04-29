@@ -229,9 +229,16 @@ def fmt_rate(rate, period: str | None) -> str:
         pct = str(int(round(display)))
     else:
         pct = f"{display:.6f}".rstrip("0").rstrip(".")
+    pct = pct.replace(".", ",")
 
     if period == "cdi":
         return f"{pct}% CDI"
+    if period == "cdi_spread":
+        return f"CDI + {pct}% a.a."
+    if period == "ipca_spread":
+        return f"IPCA + {pct}% a.a."
+    if period == "selic_spread":
+        return f"SELIC + {pct}% a.a."
 
     # Na listagem, mostrar só a taxa evita redundância como "14% anual".
     return f"{pct}%"

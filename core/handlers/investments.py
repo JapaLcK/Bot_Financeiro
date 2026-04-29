@@ -2,7 +2,7 @@
 from __future__ import annotations
 import db
 from utils_text import fmt_brl, fmt_rate
-from investment_parse import parse_interest
+from investment_parse import parse_initial_amount, parse_interest, parse_investment_spec
 import logging
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,8 @@ def list_investments(user_id: int) -> str:
     lines = []
     for r in rows:
         rate_txt = fmt_rate(r.get("rate"), r.get("period"))
-        lines.append(f"• **{r['name']}**: {fmt_brl(float(r['balance']))} ({rate_txt})")
+        asset = r.get("asset_type") or "CDB"
+        lines.append(f"• **{r['name']}** [{asset}]: {fmt_brl(float(r['balance']))} ({rate_txt})")
     return "📈 **Investimentos**:\n" + base_date_txt + "\n".join(lines)
 
 
@@ -32,27 +33,38 @@ def create(user_id: int, raw_name: str, original_text: str) -> str:
     Formato esperado: "criar investimento CDB Nubank 1% ao mês"
     raw_name: tudo que vem depois de "criar investimento"
     """
-    parsed = parse_interest(raw_name)
-    if not parsed:
-        parsed = parse_interest(original_text)
+    spec = parse_investment_spec(raw_name) or parse_investment_spec(original_text)
 
-    if not parsed:
+    if not spec:
         return (
             "Não identifiquei a taxa. Tente:\n"
-            "*criar investimento CDB 1% ao mês*\n"
-            "*criar investimento Tesouro 0,03% ao dia*"
+            "*criar investimento CDB Banco 110% CDI*\n"
+            "*criar investimento CDB Banco CDI + 2,5% a.a.*\n"
+            "*criar investimento Tesouro IPCA+ 2029 IPCA + 7,43% a.a.*\n"
+            "*criar investimento Tesouro Prefixado 13,59% a.a.*"
         )
 
-    taxa, period = parsed
-
-    # nome = tudo antes da taxa
-    import re
-    name = re.sub(r"\s*\d+[.,]?\d*\s*%.*$", "", raw_name, flags=re.IGNORECASE).strip()
-    if not name:
-        name = raw_name.strip()
+    taxa = spec["rate"]
+    period = spec["period"]
+    name = spec["name"] or raw_name.strip()
 
     try:
-        launch_id, _inv_id, canon = db.create_investment_db(user_id, name, taxa, period, nota=original_text)
+        initial_amount = parse_initial_amount(original_text)
+        kwargs = {
+            "nota": original_text,
+            "asset_type": spec.get("asset_type"),
+            "indexer": spec.get("indexer"),
+            "tax_profile": spec.get("tax_profile"),
+        }
+        if initial_amount is not None:
+            kwargs["initial_amount"] = initial_amount
+        launch_id, _inv_id, canon = db.create_investment_db(
+            user_id,
+            name,
+            taxa,
+            period,
+            **kwargs,
+        )
         if launch_id is None:
             return f"Já existe um investimento com esse nome. Use outro nome."
 

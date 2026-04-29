@@ -1,5 +1,80 @@
 import re
 
+ASSET_TYPES = {
+    "cdb": "CDB",
+    "lci": "LCI",
+    "lca": "LCA",
+    "debenture": "Debênture",
+    "debênture": "Debênture",
+    "cri": "CRI",
+    "cra": "CRA",
+    "etf renda fixa": "ETF Renda Fixa",
+    "etf rf": "ETF Renda Fixa",
+    "tesouro selic": "Tesouro Selic",
+    "tesouro ipca": "Tesouro IPCA+",
+    "tesouro ipca+": "Tesouro IPCA+",
+    "tesouro prefixado": "Tesouro Prefixado",
+}
+
+TAX_EXEMPT_ASSET_TYPES = {"LCI", "LCA", "CRI", "CRA"}
+
+
+def tax_profile_for_asset(asset_type: str | None) -> str:
+    asset = asset_type or "CDB"
+    if asset in TAX_EXEMPT_ASSET_TYPES:
+        return "exempt_ir_iof"
+    if asset == "ETF Renda Fixa":
+        return "etf_rf_15"
+    return "regressive_ir_iof"
+
+
+def detect_asset_type(text: str) -> str:
+    raw = (text or "").lower()
+    for needle, label in sorted(ASSET_TYPES.items(), key=lambda item: len(item[0]), reverse=True):
+        if re.search(rf"\b{re.escape(needle)}\b", raw):
+            return label
+    return "CDB"
+
+
+def _parse_money_number(raw: str) -> float | None:
+    value = raw.strip().replace(" ", "")
+    if "," in value and "." in value:
+        if value.rfind(",") > value.rfind("."):
+            value = value.replace(".", "").replace(",", ".")
+        else:
+            value = value.replace(",", "")
+    elif "," in value:
+        value = value.replace(".", "").replace(",", ".")
+    elif "." in value:
+        parts = value.split(".")
+        if len(parts[-1]) == 3:
+            value = value.replace(".", "")
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def parse_initial_amount(text: str) -> float | None:
+    raw = text or ""
+    pattern = (
+        r"(?:valor(?:\s+investido)?|aporte\s+inicial|com\s+aporte(?:\s+de)?|"
+        r"investido|aplicado|apliquei|investi)\s*(?:r\$)?\s*(\d[\d.,\s]*)"
+    )
+    m = re.search(pattern, raw, flags=re.I)
+    if not m:
+        return None
+    value = _parse_money_number(m.group(1))
+    return value if value and value > 0 else None
+
+
+def strip_initial_amount(text: str) -> str:
+    pattern = (
+        r"(?:valor(?:\s+investido)?|aporte\s+inicial|com\s+aporte(?:\s+de)?|"
+        r"investido|aplicado|apliquei|investi)\s*(?:r\$)?\s*\d[\d.,\s]*"
+    )
+    return re.sub(pattern, "", text or "", flags=re.I).strip(" -–—")
+
 
 def parse_interest(text: str):
     """
@@ -57,3 +132,67 @@ def parse_interest(text: str):
         return None
 
     return taxa, period
+
+
+def parse_investment_spec(text: str) -> dict | None:
+    """
+    Extrai uma especificação normalizada de investimento.
+
+    Indexadores suportados:
+      - 110% CDI            -> period="cdi", rate=1.10
+      - CDI + 2,5% a.a.     -> period="cdi_spread", rate=0.025
+      - IPCA + 7,43% a.a.   -> period="ipca_spread", rate=0.0743
+      - SELIC + 0,07% a.a.  -> period="selic_spread", rate=0.0007
+      - 13,59% a.a.         -> period="yearly", rate=0.1359
+    """
+    raw = text or ""
+    low = raw.lower()
+    asset_type = detect_asset_type(raw)
+
+    patterns = [
+        ("cdi", "pct_cdi", r"(\d+(?:[.,]\d+)?)\s*%\s*(?:do\s+)?cdi\b", lambda x: round(float(x) / 100.0, 12)),
+        ("cdi_spread", "cdi_spread", r"\bcdi\s*\+\s*(\d+(?:[.,]\d+)?)\s*%?\s*(?:a\.?a\.?|ao\s+ano)?", lambda x: round(float(x) / 100.0, 12)),
+        ("ipca_spread", "ipca_spread", r"\bipca\+?\s*\+\s*(\d+(?:[.,]\d+)?)\s*%?\s*(?:a\.?a\.?|ao\s+ano)?", lambda x: round(float(x) / 100.0, 12)),
+        ("selic_spread", "selic_spread", r"\bselic\s*\+\s*(\d+(?:[.,]\d+)?)\s*%?\s*(?:a\.?a\.?|ao\s+ano)?", lambda x: round(float(x) / 100.0, 12)),
+        ("yearly", "fixed", r"(\d+(?:[.,]\d+)?)\s*%\s*(?:a\.?a\.?|ao\s+ano|ano)\b", lambda x: round(float(x) / 100.0, 12)),
+    ]
+
+    for period, indexer, pattern, convert in patterns:
+        m = re.search(pattern, low, flags=re.I)
+        if not m:
+            continue
+
+        try:
+            rate = convert(m.group(1).replace(",", "."))
+        except ValueError:
+            return None
+        if rate <= 0 and period != "selic_spread":
+            return None
+
+        name = strip_initial_amount(raw[:m.start()] + raw[m.end():])
+        if not name:
+            name = raw.strip()
+
+        return {
+            "name": name,
+            "rate": rate,
+            "period": period,
+            "indexer": indexer,
+            "asset_type": asset_type,
+            "tax_profile": tax_profile_for_asset(asset_type),
+        }
+
+    parsed = parse_interest(raw)
+    if not parsed:
+        return None
+
+    rate, period = parsed
+    name = strip_initial_amount(re.sub(r"\s*\d+[.,]?\d*\s*%.*$", "", raw, flags=re.IGNORECASE).strip())
+    return {
+        "name": name or raw.strip(),
+        "rate": rate,
+        "period": period,
+        "indexer": "fixed" if period == "yearly" else period,
+        "asset_type": asset_type,
+        "tax_profile": tax_profile_for_asset(asset_type),
+    }

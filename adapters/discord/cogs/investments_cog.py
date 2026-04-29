@@ -15,6 +15,7 @@ import re
 import discord
 from discord.ext import commands
 
+from investment_parse import parse_initial_amount, parse_investment_spec
 from db import (
     list_investments,
     accrue_all_investments,
@@ -58,11 +59,10 @@ class InvestmentsCog(commands.Cog):
 
             lines = ["📈 **Seus investimentos:**"]
             for r in rows:
-                rate_pct = float(r["rate"]) * 100
-                period = (r["period"] or "monthly").lower()
-                period_str = "ao dia" if period == "daily" else ("ao mês" if period == "monthly" else "ao ano")
+                period_str = fmt_rate(r.get("rate"), r.get("period"))
+                asset = r.get("asset_type") or "CDB"
                 lines.append(
-                    f"• **{r['name']}** — {rate_pct:.4g}% {period_str} — saldo: {fmt_brl(float(r['balance']))}"
+                    f"• **{r['name']}** [{asset}] — {period_str} — saldo: {fmt_brl(float(r['balance']))}"
                 )
             await message.reply("\n".join(lines))
             return True
@@ -97,51 +97,40 @@ class InvestmentsCog(commands.Cog):
             )
             return True
 
-        m_cdi = re.search(r'(\d+(?:[.,]\d+)?)\s*%\s*(?:do\s*)?cdi\b', rest, flags=re.I)
-        m = re.search(r'(\d+(?:[.,]\d+)?)\s*%\s*(?:ao|a)\s*(dia|m[eê]s|ano)\b', rest, flags=re.I)
-
-        if not m_cdi and not m:
+        spec = parse_investment_spec(rest)
+        if not spec:
             await message.reply(
                 "Não entendi a taxa/período. Exemplos:\n"
-                "• `criar investimento CDB 1% ao mês`\n"
-                "• `criar investimento Tesouro 0,03% ao dia`\n"
-                "• `criar investimento IPCA 12% ao ano`\n"
-                "• `criar investimento CDB 100% CDI`"
+                "• `criar investimento CDB Banco 110% CDI`\n"
+                "• `criar investimento CDB Banco CDI + 2,5% a.a.`\n"
+                "• `criar investimento Tesouro IPCA+ 2029 IPCA + 7,43% a.a.`\n"
+                "• `criar investimento Tesouro Prefixado 13,59% a.a.`"
             )
             return True
 
-        if m_cdi:
-            try:
-                pct_cdi = float(m_cdi.group(1).replace(",", "."))
-            except ValueError:
-                await message.reply("Percentual do CDI inválido. Ex: `criar investimento CDB 110% cdi`")
-                return True
-            rate = pct_cdi / 100.0
-            period = "cdi"
-            periodo_str = f"{pct_cdi:.4g}% do CDI"
-            name = (rest[:m_cdi.start()] + rest[m_cdi.end():]).strip(" -–—")
-        else:
-            try:
-                rate = float(m.group(1).replace(",", ".")) / 100.0
-            except ValueError:
-                await message.reply("Taxa inválida. Ex: **1% ao mês**, **0,03% ao dia**, **12% ao ano**")
-                return True
-            period_raw = m.group(2).lower()
-            if "dia" in period_raw:
-                period, periodo_str = "daily", "ao dia"
-            elif "ano" in period_raw:
-                period, periodo_str = "yearly", "ao ano"
-            else:
-                period, periodo_str = "monthly", "ao mês"
-            name = (rest[:m.start()] + rest[m.end():]).strip(" -–—")
-
+        rate = spec["rate"]
+        period = spec["period"]
+        name = spec["name"]
         if not name:
             await message.reply("Me diga o nome do investimento também. Ex: `criar investimento CDB 1% ao mês`")
             return True
 
         try:
+            initial_amount = parse_initial_amount(message.content)
+            kwargs = {
+                "nota": message.content,
+                "asset_type": spec.get("asset_type"),
+                "indexer": spec.get("indexer"),
+                "tax_profile": spec.get("tax_profile"),
+            }
+            if initial_amount is not None:
+                kwargs["initial_amount"] = initial_amount
             launch_id, inv_id, canon = create_investment_db(
-                uid, name=name, rate=rate, period=period, nota=message.content
+                uid,
+                name=name,
+                rate=rate,
+                period=period,
+                **kwargs,
             )
         except Exception as e:
             print("ERRO criar investimento:", repr(e))
@@ -150,12 +139,8 @@ class InvestmentsCog(commands.Cog):
 
         if launch_id is None:
             await message.reply(f"ℹ️ O investimento **{canon}** já existe.")
-        elif period == "cdi":
-            await message.reply(f"✅ Investimento criado: **{canon}** ({periodo_str}) (ID: #{launch_id})")
         else:
-            await message.reply(
-                f"✅ Investimento criado: **{canon}** ({rate * 100:.4g}% {periodo_str}) (ID: #{launch_id})"
-            )
+            await message.reply(f"✅ Investimento criado: **{canon}** ({fmt_rate(rate, period)}) (ID: #{launch_id})")
         return True
 
     # ── Excluir ──────────────────────────────────────────────────────────────

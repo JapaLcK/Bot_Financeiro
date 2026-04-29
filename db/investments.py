@@ -191,6 +191,64 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
     return cached
 
 
+def _get_sgs_daily_map(cur, code: str, series_code: int, start: date, end: date) -> dict[date, float]:
+    """Retorna {date: percent_per_day} para séries SGS diárias, com cache em market_rates."""
+    if end <= start:
+        return {}
+
+    cur.execute(
+        "select ref_date, value from market_rates "
+        "where code=%s and ref_date >= %s and ref_date <= %s order by ref_date",
+        (code, start, end),
+    )
+    cached = {row["ref_date"]: float(row["value"]) for row in cur.fetchall()}
+
+    data = _fetch_sgs_series_json(series_code, start, end)
+    if not isinstance(data, list) or not data:
+        return cached
+
+    to_upsert = []
+    for item in data:
+        try:
+            d = datetime.strptime(item["data"], "%d/%m/%Y").date()
+            v = float(str(item["valor"]).replace(",", "."))
+            if d not in cached:
+                to_upsert.append((code, d, v))
+            cached[d] = v
+        except Exception as e:
+            _warn_bcb_once(
+                ("invalid_sgs_daily_item", code, str(item), type(e).__name__, str(e)),
+                "Item inválido do SGS %s ignorado: %s | erro=%s",
+                code,
+                item,
+                e,
+            )
+
+    if to_upsert:
+        cur.executemany(
+            "insert into market_rates(code, ref_date, value) values (%s, %s, %s) "
+            "on conflict (code, ref_date) do update set value=excluded.value",
+            to_upsert,
+        )
+
+    return cached
+
+
+def _get_sgs_monthly_map(cur, code: str, series_code: int, start: date, end: date) -> dict[date, float]:
+    """Retorna {ref_date: percent_per_month} para séries SGS mensais, com cache local."""
+    return _get_sgs_daily_map(cur, code, series_code, start, end)
+
+
+def _get_selic_daily_map(cur, start: date, end: date) -> dict[date, float]:
+    """Taxa SELIC diária (% a.d.) no SGS/BCB (série 11)."""
+    return _get_sgs_daily_map(cur, "SELIC_DAILY", 11, start, end)
+
+
+def _get_ipca_monthly_map(cur, start: date, end: date) -> dict[date, float]:
+    """IPCA mensal (% a.m.) no SGS/BCB (série 433)."""
+    return _get_sgs_monthly_map(cur, "IPCA_MONTHLY", 433, start, end)
+
+
 def get_latest_cdi(cur) -> tuple[date, float] | None:
     """Retorna (data, valor_percent_ao_dia) da CDI mais recente."""
     data = _fetch_sgs_latest_json(12)
@@ -249,6 +307,67 @@ def get_latest_cdi_aa(cur) -> tuple[date, float] | None:
     return (row["ref_date"], float(row["value"])) if row else None
 
 
+def get_latest_market_rate(cur, code: str, series_code: int) -> tuple[date, float] | None:
+    """Retorna a taxa mais recente de uma série SGS, usando cache local como fallback."""
+    data = _fetch_sgs_latest_json(series_code)
+    latest: tuple[date, float] | None = None
+    if data:
+        for item in data:
+            try:
+                d = datetime.strptime(item["data"], "%d/%m/%Y").date()
+                v = float(str(item["valor"]).replace(",", "."))
+                if latest is None or d > latest[0]:
+                    latest = (d, v)
+            except Exception:
+                continue
+
+    if latest:
+        cur.execute(
+            "insert into market_rates(code, ref_date, value) values (%s, %s, %s) "
+            "on conflict (code, ref_date) do update set value = excluded.value",
+            (code, latest[0], latest[1]),
+        )
+        return latest
+
+    cur.execute(
+        "select ref_date, value from market_rates where code = %s order by ref_date desc limit 1",
+        (code,),
+    )
+    row = cur.fetchone()
+    return (row["ref_date"], float(row["value"])) if row else None
+
+
+def get_latest_selic_aa(cur) -> tuple[date, float] | None:
+    """Meta SELIC a.a. no SGS/BCB (série 432)."""
+    return get_latest_market_rate(cur, "SELIC_AA", 432)
+
+
+def get_latest_ipca_12m(cur) -> tuple[date, float] | None:
+    """IPCA acumulado em 12 meses no SGS/BCB (série 13522)."""
+    return get_latest_market_rate(cur, "IPCA_12M", 13522)
+
+
+def get_dashboard_market_rates() -> dict:
+    """Taxas oficiais úteis para o dashboard, com datas de referência."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            rates = {
+                "cdi_aa": get_latest_cdi_aa(cur),
+                "selic_aa": get_latest_selic_aa(cur),
+                "ipca_12m": get_latest_ipca_12m(cur),
+            }
+        conn.commit()
+
+    return {
+        key: (
+            {"date": ref_date.isoformat(), "value": value}
+            if ref_date is not None else None
+        )
+        for key, maybe_rate in rates.items()
+        for ref_date, value in [maybe_rate or (None, None)]
+    }
+
+
 def get_latest_cdi_daily_pct() -> float:
     """Retorna CDI diária em % ao dia (ex: 0.0550)."""
     data = _fetch_sgs_latest_json(12)
@@ -276,6 +395,8 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
     monthly → rate distribuído em 21 dias úteis
     yearly → rate distribuído em 252 dias úteis
     cdi → aplica CDI diária do período multiplicada pelo mult (ex: 1.10 = 110% CDI)
+    cdi_spread/selic_spread → aplica taxa diária oficial + spread anual convertido para dia útil
+    ipca_spread → aplica IPCA mensal publicado + spread anual convertido para mês
     """
     if today is None:
         today = datetime.now(_tz()).date()
@@ -321,6 +442,56 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
         new_bal = Decimal(str(float(bal) * factor))
         applied_until = cdi_days[-1]
 
+    elif period == "cdi_spread":
+        start = last_date + timedelta(days=1)
+        db_pkg = sys.modules.get("db")
+        fetch_cdi_daily_map = getattr(db_pkg, "_get_cdi_daily_map", _get_cdi_daily_map)
+        cdi_map = fetch_cdi_daily_map(cur, start, today)
+        cdi_days = sorted(d for d in cdi_map.keys() if last_date < d <= today)
+
+        if not cdi_days:
+            return Decimal(inv["balance"])
+
+        spread_daily = (1.0 + rate) ** (1.0 / 252.0) - 1.0
+        factor = 1.0
+        for d in cdi_days:
+            factor *= (1.0 + (cdi_map[d] / 100.0)) * (1.0 + spread_daily)
+
+        new_bal = Decimal(str(float(bal) * factor))
+        applied_until = cdi_days[-1]
+
+    elif period == "selic_spread":
+        start = last_date + timedelta(days=1)
+        selic_map = _get_selic_daily_map(cur, start, today)
+        selic_days = sorted(d for d in selic_map.keys() if last_date < d <= today)
+
+        if not selic_days:
+            return Decimal(inv["balance"])
+
+        spread_daily = (1.0 + rate) ** (1.0 / 252.0) - 1.0
+        factor = 1.0
+        for d in selic_days:
+            factor *= (1.0 + (selic_map[d] / 100.0)) * (1.0 + spread_daily)
+
+        new_bal = Decimal(str(float(bal) * factor))
+        applied_until = selic_days[-1]
+
+    elif period == "ipca_spread":
+        start = (last_date.replace(day=1) + timedelta(days=32)).replace(day=1)
+        ipca_map = _get_ipca_monthly_map(cur, start, today)
+        ipca_months = sorted(d for d in ipca_map.keys() if last_date < d <= today)
+
+        if not ipca_months:
+            return Decimal(inv["balance"])
+
+        spread_monthly = (1.0 + rate) ** (1.0 / 12.0) - 1.0
+        factor = 1.0
+        for d in ipca_months:
+            factor *= (1.0 + (ipca_map[d] / 100.0)) * (1.0 + spread_monthly)
+
+        new_bal = Decimal(str(float(bal) * factor))
+        applied_until = ipca_months[-1]
+
     else:
         if period == "daily":
             daily_rate = rate
@@ -347,6 +518,34 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
 # ──────────────────────────────────────────────────────────────────────────────
 # CRUD de investimentos
 # ──────────────────────────────────────────────────────────────────────────────
+
+VALID_INVESTMENT_PERIODS = {
+    "daily", "monthly", "yearly", "cdi", "cdi_spread", "ipca_spread", "selic_spread"
+}
+
+VALID_INVESTMENT_INDEXERS = {
+    "daily", "monthly", "fixed", "pct_cdi", "cdi_spread", "ipca_spread", "selic_spread"
+}
+
+TAX_PROFILE_BY_ASSET_TYPE = {
+    "LCI": "exempt_ir_iof",
+    "LCA": "exempt_ir_iof",
+    "CRI": "exempt_ir_iof",
+    "CRA": "exempt_ir_iof",
+    "ETF Renda Fixa": "etf_rf_15",
+}
+
+
+def _default_indexer_for_period(period: str) -> str:
+    if period == "cdi":
+        return "pct_cdi"
+    if period == "yearly":
+        return "fixed"
+    return period
+
+
+def _tax_profile_for_asset(asset_type: str | None) -> str:
+    return TAX_PROFILE_BY_ASSET_TYPE.get(asset_type or "CDB", "regressive_ir_iof")
 
 def create_investment(user_id: int, name: str, rate: float, period: str, nota: str | None = None):
     """
@@ -412,7 +611,23 @@ def create_investment(user_id: int, name: str, rate: float, period: str, nota: s
     return launch_id, inv_name
 
 
-def create_investment_db(user_id: int, name: str, rate: float, period: str, nota: str | None = None):
+def create_investment_db(
+    user_id: int,
+    name: str,
+    rate: float,
+    period: str,
+    nota: str | None = None,
+    *,
+    asset_type: str | None = None,
+    indexer: str | None = None,
+    issuer: str | None = None,
+    purchase_date: date | str | None = None,
+    maturity_date: date | str | None = None,
+    interest_payment_frequency: str | None = None,
+    tax_profile: str | None = None,
+    initial_amount: float | Decimal | None = None,
+    initial_note: str | None = None,
+):
     """
     Cria investimento (suporta period='cdi'). Retorna (launch_id, inv_id, canon_name).
     Se já existir, retorna (None, inv_id, canon_name).
@@ -421,23 +636,48 @@ def create_investment_db(user_id: int, name: str, rate: float, period: str, nota
     name = (name or "").strip()
     if not name:
         raise ValueError("EMPTY_NAME")
-    if period not in ("daily", "monthly", "yearly", "cdi"):
+    if period not in VALID_INVESTMENT_PERIODS:
         raise ValueError("INVALID_PERIOD")
 
     r = Decimal(str(rate))
-    if r <= 0:
+    if r <= 0 and period != "selic_spread":
         raise ValueError("INVALID_RATE")
 
     criado_em = datetime.now(_tz())
     today = date.today()
+    asset_type = (asset_type or "CDB").strip() or "CDB"
+    indexer = (indexer or _default_indexer_for_period(period)).strip()
+    if indexer not in VALID_INVESTMENT_INDEXERS:
+        raise ValueError("INVALID_INDEXER")
+    issuer = (issuer or "").strip() or None
+    tax_profile = (tax_profile or _tax_profile_for_asset(asset_type)).strip()
+    interest_payment_frequency = (interest_payment_frequency or "maturity").strip()
+    if isinstance(purchase_date, str) and purchase_date:
+        purchase_date = date.fromisoformat(purchase_date)
+    if isinstance(maturity_date, str) and maturity_date:
+        maturity_date = date.fromisoformat(maturity_date)
+    initial = Decimal(str(initial_amount or 0))
+    if initial < 0:
+        raise ValueError("INITIAL_AMOUNT_INVALID")
 
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "insert into investments(user_id, name, balance, rate, period, last_date) "
-                "values (%s,%s,0,%s,%s,%s) on conflict (user_id, name) do nothing "
-                "returning id, name",
-                (user_id, name, r, period, today),
+                """
+                insert into investments(
+                    user_id, name, balance, rate, period, last_date,
+                    asset_type, indexer, issuer, purchase_date, maturity_date,
+                    interest_payment_frequency, tax_profile
+                )
+                values (%s,%s,0,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                on conflict (user_id, name) do nothing
+                returning id, name
+                """,
+                (
+                    user_id, name, r, period, today,
+                    asset_type, indexer, issuer, purchase_date, maturity_date,
+                    interest_payment_frequency, tax_profile,
+                ),
             )
             row = cur.fetchone()
 
@@ -463,6 +703,11 @@ def create_investment_db(user_id: int, name: str, rate: float, period: str, nota
                 "delta_conta": 0.0, "delta_pocket": None, "delta_invest": None,
                 "create_pocket": None, "create_investment": {"nome": canon},
                 "delete_pocket": None, "delete_investment": None,
+                "investment_meta": {
+                    "asset_type": asset_type,
+                    "indexer": indexer,
+                    "tax_profile": tax_profile,
+                },
             }
             cur.execute(
                 "insert into launches(user_id, tipo, valor, alvo, nota, criado_em, efeitos) "
@@ -470,6 +715,43 @@ def create_investment_db(user_id: int, name: str, rate: float, period: str, nota
                 (user_id, "create_investment", Decimal("0"), canon, nota, criado_em, Jsonb(efeitos)),
             )
             launch_id = cur.fetchone()["id"]
+
+            if initial > 0:
+                cur.execute("select balance from accounts where user_id=%s for update", (user_id,))
+                acc = cur.fetchone()
+                if not acc:
+                    raise RuntimeError("ACCOUNT_MISSING")
+                if acc["balance"] < initial:
+                    raise ValueError("INSUFFICIENT_ACCOUNT")
+
+                cur.execute(
+                    "update accounts set balance = balance - %s where user_id=%s",
+                    (initial, user_id),
+                )
+                cur.execute(
+                    "update investments set balance = balance + %s where id=%s",
+                    (initial, inv_id),
+                )
+
+                deposit_effects = {
+                    "delta_conta": -float(initial), "delta_pocket": None,
+                    "delta_invest": {"nome": canon, "delta": float(initial)},
+                    "create_pocket": None, "create_investment": None,
+                }
+                cur.execute(
+                    "insert into launches(user_id, tipo, valor, alvo, nota, criado_em, efeitos, is_internal_movement) "
+                    "values (%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (
+                        user_id,
+                        "aporte_investimento",
+                        initial,
+                        canon,
+                        initial_note or f"Aporte inicial em {canon}",
+                        criado_em,
+                        Jsonb(deposit_effects),
+                        True,
+                    ),
+                )
 
         conn.commit()
 
@@ -488,7 +770,12 @@ def delete_investment(user_id: int, investment_name: str, nota: str | None = Non
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, name, balance, rate, period, last_date from investments "
+                """
+                select id, name, balance, rate, period, last_date,
+                       asset_type, indexer, issuer, purchase_date, maturity_date,
+                       interest_payment_frequency, tax_profile
+                from investments
+                """
                 "where user_id=%s and lower(name)=lower(%s) for update",
                 (user_id, investment_name),
             )
@@ -508,6 +795,13 @@ def delete_investment(user_id: int, investment_name: str, nota: str | None = Non
                 "delete_investment": {
                     "nome": canon, "balance": 0.0,
                     "rate": float(inv["rate"]), "period": inv["period"],
+                    "asset_type": inv.get("asset_type"),
+                    "indexer": inv.get("indexer"),
+                    "issuer": inv.get("issuer"),
+                    "purchase_date": inv["purchase_date"].isoformat() if inv.get("purchase_date") else None,
+                    "maturity_date": inv["maturity_date"].isoformat() if inv.get("maturity_date") else None,
+                    "interest_payment_frequency": inv.get("interest_payment_frequency"),
+                    "tax_profile": inv.get("tax_profile"),
                     "last_date": inv["last_date"].isoformat() if inv["last_date"]
                                  else datetime.now(_tz()).date().isoformat(),
                 },
@@ -529,7 +823,11 @@ def list_investments(user_id: int):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, name, balance, rate, period, last_date "
+                """
+                select id, name, balance, rate, period, last_date,
+                       asset_type, indexer, issuer, purchase_date, maturity_date,
+                       interest_payment_frequency, tax_profile
+                """
                 "from investments where user_id=%s order by lower(name)",
                 (user_id,),
             )
@@ -550,7 +848,11 @@ def accrue_all_investments(user_id: int):
                 accrue_investment_db(cur, user_id, r["id"], today=today)
 
             cur.execute(
-                "select id, name, balance, rate, period, last_date "
+                """
+                select id, name, balance, rate, period, last_date,
+                       asset_type, indexer, issuer, purchase_date, maturity_date,
+                       interest_payment_frequency, tax_profile
+                """
                 "from investments where user_id=%s order by lower(name)",
                 (user_id,),
             )

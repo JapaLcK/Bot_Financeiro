@@ -227,15 +227,31 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
                 rate = Decimal(str(delete_investment.get("rate", 0)))
                 period = delete_investment.get("period", "monthly")
                 last_date_str = delete_investment.get("last_date")
+                asset_type = delete_investment.get("asset_type") or "CDB"
+                indexer = delete_investment.get("indexer")
+                issuer = delete_investment.get("issuer")
+                purchase_date = delete_investment.get("purchase_date")
+                maturity_date = delete_investment.get("maturity_date")
+                interest_payment_frequency = delete_investment.get("interest_payment_frequency") or "maturity"
+                tax_profile = delete_investment.get("tax_profile") or "regressive_ir_iof"
                 if nome:
                     from datetime import date as _date
                     ld = _date.fromisoformat(last_date_str) if last_date_str else datetime.now(_tz()).date()
                     cur.execute(
                         """
-                        insert into investments(user_id, name, balance, rate, period, last_date)
-                        values (%s,%s,%s,%s,%s,%s) on conflict (user_id, name) do nothing
+                        insert into investments(
+                            user_id, name, balance, rate, period, last_date,
+                            asset_type, indexer, issuer, purchase_date, maturity_date,
+                            interest_payment_frequency, tax_profile
+                        )
+                        values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        on conflict (user_id, name) do nothing
                         """,
-                        (user_id, nome, bal0, rate, period, ld),
+                        (
+                            user_id, nome, bal0, rate, period, ld,
+                            asset_type, indexer, issuer, purchase_date, maturity_date,
+                            interest_payment_frequency, tax_profile,
+                        ),
                     )
 
             # desfazer deleção de caixinha (recria)
