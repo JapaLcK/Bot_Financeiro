@@ -210,6 +210,9 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
             create_invest = efeitos.get("create_investment")
             delete_pocket = efeitos.get("delete_pocket")
             delete_investment = efeitos.get("delete_investment")
+            investment_lot_create = efeitos.get("investment_lot_create")
+            investment_lot_withdrawals = efeitos.get("investment_lot_withdrawals") or []
+            investment_lots_handled = False
 
             # desfazer criação de investimento (zera e deleta)
             if create_invest:
@@ -283,16 +286,104 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
                     (dp, user_id, nome),
                 )
 
+            # reverte lotes de investimento antes do saldo agregado.
+            if investment_lot_create:
+                lot_id = investment_lot_create.get("lot_id")
+                investment_id = investment_lot_create.get("investment_id")
+                if lot_id:
+                    cur.execute(
+                        """
+                        select investment_id, principal_initial, principal_remaining, status
+                        from investment_lots
+                        where id=%s and user_id=%s
+                        for update
+                        """,
+                        (lot_id, user_id),
+                    )
+                    lot = cur.fetchone()
+                    if lot and (
+                        lot["status"] != "open"
+                        or Decimal(str(lot["principal_remaining"])) != Decimal(str(lot["principal_initial"]))
+                    ):
+                        raise ValueError("Não é possível desfazer este aporte: o lote já teve resgate.")
+                    if lot and not investment_id:
+                        investment_id = lot["investment_id"]
+                    cur.execute(
+                        "delete from investment_lots where id=%s and user_id=%s",
+                        (lot_id, user_id),
+                    )
+                    investment_lots_handled = True
+                if investment_id:
+                    cur.execute(
+                        """
+                        update investments i
+                        set balance = coalesce(l.total_balance, 0),
+                            last_date = coalesce(l.max_last_date, i.last_date)
+                        from (
+                            select coalesce(sum(balance), 0) as total_balance, max(last_date) as max_last_date
+                            from investment_lots
+                            where user_id=%s and investment_id=%s and status='open'
+                        ) l
+                        where i.user_id=%s and i.id=%s
+                        """,
+                        (user_id, investment_id, user_id, investment_id),
+                    )
+
+            if investment_lot_withdrawals:
+                restored_investment_ids = set()
+                for effect in investment_lot_withdrawals:
+                    lot_id = effect.get("lot_id")
+                    before = effect.get("before") or {}
+                    if not lot_id:
+                        continue
+                    cur.execute(
+                        """
+                        update investment_lots
+                        set balance=%s, principal_remaining=%s, status=%s, closed_at=%s
+                        where id=%s and user_id=%s
+                        returning investment_id
+                        """,
+                        (
+                            Decimal(str(before.get("balance", 0))),
+                            Decimal(str(before.get("principal_remaining", 0))),
+                            before.get("status") or "open",
+                            before.get("closed_at"),
+                            lot_id,
+                            user_id,
+                        ),
+                    )
+                    restored = cur.fetchone()
+                    if restored:
+                        restored_investment_ids.add(restored["investment_id"])
+                        investment_lots_handled = True
+
+                for investment_id in restored_investment_ids:
+                    cur.execute(
+                        """
+                        update investments i
+                        set balance = coalesce(l.total_balance, 0),
+                            last_date = coalesce(l.max_last_date, i.last_date)
+                        from (
+                            select coalesce(sum(balance), 0) as total_balance, max(last_date) as max_last_date
+                            from investment_lots
+                            where user_id=%s and investment_id=%s and status='open'
+                        ) l
+                        where i.user_id=%s and i.id=%s
+                        """,
+                        (user_id, investment_id, user_id, investment_id),
+                    )
+
             # reverte investimento
             if delta_invest:
                 nome = delta_invest.get("nome")
                 di = Decimal(str(delta_invest.get("delta", 0)))
                 if not nome:
                     raise ValueError("delta_invest inválido (sem nome).")
-                cur.execute(
-                    "update investments set balance = balance - %s where user_id=%s and lower(name)=lower(%s)",
-                    (di, user_id, nome),
-                )
+                if not investment_lots_handled:
+                    cur.execute(
+                        "update investments set balance = balance - %s where user_id=%s and lower(name)=lower(%s)",
+                        (di, user_id, nome),
+                    )
 
             # desfazer criação de caixinha (deleta)
             if create_pocket:

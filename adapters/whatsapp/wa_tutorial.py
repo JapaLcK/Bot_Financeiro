@@ -170,10 +170,9 @@ def _step_4(wa_id: str) -> None:
         to=wa_id,
         header="Passo 5 de 7 — Investimentos 📈",
         body=(
-            "Acompanhe suas aplicações com rendimento automático:\n\n"
-            "• *criar investimento CDB 1% ao mês*\n"
-            "• *criar investimento CDB 110% CDI*\n"
-            "• *criar investimento Tesouro 0,03% ao dia*\n"
+            "Acompanhe suas aplicações com rendimento automático pelo bot + dashboard:\n\n"
+            "• *investimentos* → lista carteira e envia um link mágico\n"
+            "• o bot cria investimentos pela aba do dashboard, com o formulário completo\n"
             "• *apliquei 200 no investimento CDB*\n"
             "• *retirei 100 do investimento CDB*\n"
             "• *listar investimentos*\n"

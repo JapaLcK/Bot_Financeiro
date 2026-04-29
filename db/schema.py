@@ -55,6 +55,25 @@ def init_db():
         )
         """,
         """
+        create table if not exists investment_lots (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          investment_id bigint not null references investments(id) on delete cascade,
+          principal_initial numeric not null,
+          principal_remaining numeric not null,
+          balance numeric not null,
+          opened_at date not null,
+          last_date date not null,
+          status text not null default 'open',
+          closed_at date,
+          created_at timestamptz default now()
+        )
+        """,
+        """
+        create index if not exists idx_investment_lots_user_investment_opened
+          on investment_lots(user_id, investment_id, status, opened_at, id)
+        """,
+        """
         alter table investments add column if not exists asset_type text not null default 'CDB'
         """,
         """

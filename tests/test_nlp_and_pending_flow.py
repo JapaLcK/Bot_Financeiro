@@ -393,7 +393,7 @@ def test_contextual_help_para_investimento_quando_nao_entende(user_id):
 
     assert "Não entendi exatamente" in response
     assert "investimento" in response.lower()
-    assert "criar investimento CDB 110% CDI" in response
+    assert "investimentos" in response
 
 
 def test_route_saque_generico_reconhece_investimento_pelo_nome(user_id):
@@ -403,6 +403,7 @@ def test_route_saque_generico_reconhece_investimento_pelo_nome(user_id):
     import db
 
     db.create_investment_db(user_id, "Nu Reserva Planejada", 0.14, "yearly", nota="seed")
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed saldo")
     db.investment_deposit_from_account(user_id, "Nu Reserva Planejada", 1000, "seed deposit")
 
     msg = IncomingMessage(platform="discord", user_id=user_id, text="saquei 100 de Nu Reserva Planejada")

@@ -57,7 +57,7 @@ def test_investimento_aporte_resgate(user_id):
     assert bal_acc == D("800")
     assert bal_inv == D("200")
 
-    _, bal_acc, bal_inv, _ = investment_withdraw_to_account(user_id, "CDB Nubank", 50, "resgate")
+    _, bal_acc, bal_inv, _, _ = investment_withdraw_to_account(user_id, "CDB Nubank", 50, "resgate")
     assert bal_acc == D("850")
     assert bal_inv == D("150")
 

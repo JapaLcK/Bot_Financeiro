@@ -1177,7 +1177,7 @@ async def billing_portal(user_id: int = Depends(_get_current_user)):
 # ─── Static file routes ──────────────────────────────────────────────────────
 
 @app.get("/d/{code}")
-async def dashboard_short_link(code: str):
+async def dashboard_short_link(code: str, view: str | None = None):
     """
     Resolve um magic link gerado pelo bot.
     O link é de uso único e cria uma sessão curta no navegador.
@@ -1214,7 +1214,9 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
         return HTMLResponse(content=expired_html, status_code=401)
 
     dash_token = make_dashboard_token(int(user_id), hours=DASHBOARD_SESSION_HOURS)
-    return RedirectResponse(url=f"/app?token={dash_token}", status_code=302)
+    target_view = view if view in {"overview", "investments"} else None
+    suffix = f"&view={target_view}" if target_view else ""
+    return RedirectResponse(url=f"/app?token={dash_token}{suffix}", status_code=302)
 
 
 @app.get("/")
@@ -1546,7 +1548,7 @@ async def withdraw_investment_route(request: Request, user_id: int, payload: Inv
     if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="Valor deve ser maior que zero.")
     try:
-        launch_id, new_acc, new_inv, canon = await asyncio.to_thread(
+        launch_id, new_acc, new_inv, canon, tax_summary = await asyncio.to_thread(
             investment_withdraw_to_account,
             user_id,
             payload.name.strip(),
@@ -1559,7 +1561,14 @@ async def withdraw_investment_route(request: Request, user_id: int, payload: Inv
         message = "Saldo insuficiente no investimento." if str(exc) == "INSUFFICIENT_INVEST" else str(exc)
         raise HTTPException(status_code=400, detail=message) from exc
 
-    return {"ok": True, "launch_id": launch_id, "account_balance": new_acc, "investment_balance": new_inv, "name": canon}
+    return {
+        "ok": True,
+        "launch_id": launch_id,
+        "account_balance": new_acc,
+        "investment_balance": new_inv,
+        "name": canon,
+        "tax_summary": tax_summary,
+    }
 
 
 @app.delete("/investments/{user_id}/{name:path}")

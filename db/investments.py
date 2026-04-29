@@ -6,7 +6,7 @@ import logging
 import sys
 import requests
 from datetime import datetime, date, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from psycopg.types.json import Jsonb
 import psycopg
@@ -384,6 +384,250 @@ def get_latest_cdi_daily_pct() -> float:
     return float(latest)
 
 
+MONEY = Decimal("0.01")
+ZERO = Decimal("0")
+LOT_EPSILON = Decimal("0.000001")
+
+IOF_REGRESSIVE_RATES = {
+    1: Decimal("0.96"),
+    2: Decimal("0.93"),
+    3: Decimal("0.90"),
+    4: Decimal("0.86"),
+    5: Decimal("0.83"),
+    6: Decimal("0.80"),
+    7: Decimal("0.76"),
+    8: Decimal("0.73"),
+    9: Decimal("0.70"),
+    10: Decimal("0.66"),
+    11: Decimal("0.63"),
+    12: Decimal("0.60"),
+    13: Decimal("0.56"),
+    14: Decimal("0.53"),
+    15: Decimal("0.50"),
+    16: Decimal("0.46"),
+    17: Decimal("0.43"),
+    18: Decimal("0.40"),
+    19: Decimal("0.36"),
+    20: Decimal("0.33"),
+    21: Decimal("0.30"),
+    22: Decimal("0.26"),
+    23: Decimal("0.23"),
+    24: Decimal("0.20"),
+    25: Decimal("0.16"),
+    26: Decimal("0.13"),
+    27: Decimal("0.10"),
+    28: Decimal("0.06"),
+    29: Decimal("0.03"),
+}
+
+
+def _money(value: Decimal | float | int | str) -> Decimal:
+    return Decimal(str(value)).quantize(MONEY, rounding=ROUND_HALF_UP)
+
+
+def _ir_rate_for_days(days: int, tax_profile: str | None) -> Decimal:
+    if tax_profile == "etf_rf_15":
+        return Decimal("0.15")
+    if tax_profile == "exempt_ir_iof":
+        return ZERO
+    if days <= 180:
+        return Decimal("0.225")
+    if days <= 360:
+        return Decimal("0.20")
+    if days <= 720:
+        return Decimal("0.175")
+    return Decimal("0.15")
+
+
+def _iof_rate_for_days(days: int, tax_profile: str | None) -> Decimal:
+    if tax_profile != "regressive_ir_iof":
+        return ZERO
+    if days <= 0:
+        return Decimal("0.96")
+    return IOF_REGRESSIVE_RATES.get(days, ZERO)
+
+
+def _taxes_for_gain(gain: Decimal, days: int, tax_profile: str | None) -> tuple[Decimal, Decimal]:
+    gain = max(Decimal(str(gain)), ZERO)
+    if gain <= 0 or tax_profile == "exempt_ir_iof":
+        return ZERO, ZERO
+    iof = _money(gain * _iof_rate_for_days(days, tax_profile))
+    ir_base = max(gain - iof, ZERO)
+    ir = _money(ir_base * _ir_rate_for_days(days, tax_profile))
+    return iof, ir
+
+
+def _growth_for_period(
+    cur,
+    balance: Decimal,
+    period: str,
+    rate_value: Decimal,
+    last_date: date | None,
+    today: date,
+) -> tuple[Decimal, date | None]:
+    if last_date is None:
+        return balance, last_date
+
+    n = _business_days_between(last_date, today)
+    if n <= 0:
+        return balance, last_date
+
+    rate = float(rate_value)
+
+    if period == "cdi":
+        mult = rate
+        start = last_date + timedelta(days=1)
+        db_pkg = sys.modules.get("db")
+        fetch_cdi_daily_map = getattr(db_pkg, "_get_cdi_daily_map", _get_cdi_daily_map)
+        cdi_map = fetch_cdi_daily_map(cur, start, today)
+        cdi_days = sorted(d for d in cdi_map.keys() if last_date < d <= today)
+        if not cdi_days:
+            return balance, last_date
+
+        factor = 1.0
+        for d in cdi_days:
+            factor *= (1.0 + (cdi_map[d] / 100.0) * mult)
+        return Decimal(str(float(balance) * factor)), cdi_days[-1]
+
+    if period == "cdi_spread":
+        start = last_date + timedelta(days=1)
+        db_pkg = sys.modules.get("db")
+        fetch_cdi_daily_map = getattr(db_pkg, "_get_cdi_daily_map", _get_cdi_daily_map)
+        cdi_map = fetch_cdi_daily_map(cur, start, today)
+        cdi_days = sorted(d for d in cdi_map.keys() if last_date < d <= today)
+        if not cdi_days:
+            return balance, last_date
+
+        spread_daily = (1.0 + rate) ** (1.0 / 252.0) - 1.0
+        factor = 1.0
+        for d in cdi_days:
+            factor *= (1.0 + (cdi_map[d] / 100.0)) * (1.0 + spread_daily)
+        return Decimal(str(float(balance) * factor)), cdi_days[-1]
+
+    if period == "selic_spread":
+        start = last_date + timedelta(days=1)
+        selic_map = _get_selic_daily_map(cur, start, today)
+        selic_days = sorted(d for d in selic_map.keys() if last_date < d <= today)
+        if not selic_days:
+            return balance, last_date
+
+        spread_daily = (1.0 + rate) ** (1.0 / 252.0) - 1.0
+        factor = 1.0
+        for d in selic_days:
+            factor *= (1.0 + (selic_map[d] / 100.0)) * (1.0 + spread_daily)
+        return Decimal(str(float(balance) * factor)), selic_days[-1]
+
+    if period == "ipca_spread":
+        start = (last_date.replace(day=1) + timedelta(days=32)).replace(day=1)
+        ipca_map = _get_ipca_monthly_map(cur, start, today)
+        ipca_months = sorted(d for d in ipca_map.keys() if last_date < d <= today)
+        if not ipca_months:
+            return balance, last_date
+
+        spread_monthly = (1.0 + rate) ** (1.0 / 12.0) - 1.0
+        factor = 1.0
+        for d in ipca_months:
+            factor *= (1.0 + (ipca_map[d] / 100.0)) * (1.0 + spread_monthly)
+        return Decimal(str(float(balance) * factor)), ipca_months[-1]
+
+    if period == "daily":
+        daily_rate = rate
+    elif period == "monthly":
+        daily_rate = (1.0 + rate) ** (1.0 / 21.0) - 1.0
+    elif period == "yearly":
+        daily_rate = (1.0 + rate) ** (1.0 / 252.0) - 1.0
+    else:
+        daily_rate = 0.0
+
+    if daily_rate > 0:
+        return Decimal(str(float(balance) * (1.0 + daily_rate) ** n)), today
+    return balance, today
+
+
+def _insert_investment_lot(
+    cur,
+    user_id: int,
+    inv_id: int,
+    amount: Decimal,
+    opened_at: date,
+    last_date: date | None = None,
+) -> int:
+    applied_date = last_date or opened_at
+    cur.execute(
+        """
+        insert into investment_lots(
+            user_id, investment_id, principal_initial, principal_remaining,
+            balance, opened_at, last_date, status
+        )
+        values (%s,%s,%s,%s,%s,%s,%s,'open')
+        returning id
+        """,
+        (user_id, inv_id, amount, amount, amount, opened_at, applied_date),
+    )
+    return cur.fetchone()["id"]
+
+
+def _ensure_investment_lots(cur, user_id: int, inv: dict) -> None:
+    cur.execute(
+        "select count(*) as total from investment_lots where user_id=%s and investment_id=%s",
+        (user_id, inv["id"]),
+    )
+    if int(cur.fetchone()["total"] or 0) > 0:
+        return
+
+    balance = Decimal(str(inv["balance"] or 0))
+    if balance <= 0:
+        return
+
+    opened_at = inv.get("purchase_date") or inv.get("last_date") or datetime.now(_tz()).date()
+    last_date = inv.get("last_date") or opened_at
+    _insert_investment_lot(cur, user_id, inv["id"], balance, opened_at, last_date)
+
+
+def _sync_investment_from_lots(cur, user_id: int, inv_id: int) -> Decimal:
+    cur.execute(
+        """
+        select coalesce(sum(balance), 0) as balance, max(last_date) as last_date
+        from investment_lots
+        where user_id=%s and investment_id=%s and status='open'
+        """,
+        (user_id, inv_id),
+    )
+    totals = cur.fetchone()
+    new_balance = Decimal(str(totals["balance"] or 0))
+    new_last_date = totals["last_date"]
+    if new_last_date is None:
+        cur.execute("select last_date from investments where id=%s and user_id=%s", (inv_id, user_id))
+        row = cur.fetchone()
+        new_last_date = row["last_date"] if row else datetime.now(_tz()).date()
+    cur.execute(
+        "update investments set balance=%s, last_date=%s where id=%s and user_id=%s",
+        (new_balance, new_last_date, inv_id, user_id),
+    )
+    return new_balance
+
+
+def _fetch_lots_for_investments(cur, user_id: int, inv_ids: list[int]) -> dict[int, list[dict]]:
+    if not inv_ids:
+        return {}
+    cur.execute(
+        """
+        select id, investment_id, principal_initial, principal_remaining, balance,
+               opened_at, last_date, status, closed_at
+        from investment_lots
+        where user_id=%s and investment_id = any(%s)
+        order by investment_id, opened_at, id
+        """,
+        (user_id, inv_ids),
+    )
+    lots_by_inv: dict[int, list[dict]] = {int(inv_id): [] for inv_id in inv_ids}
+    for row in cur.fetchall():
+        lot = dict(row)
+        lot["age_days"] = max(0, (datetime.now(_tz()).date() - lot["opened_at"]).days)
+        lots_by_inv.setdefault(int(row["investment_id"]), []).append(lot)
+    return lots_by_inv
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Accrual (aplicação de juros)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -402,117 +646,53 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
         today = datetime.now(_tz()).date()
 
     cur.execute(
-        "select id, balance, rate, period, last_date from investments "
-        "where id=%s and user_id=%s for update",
+        """
+        select id, balance, rate, period, last_date, purchase_date
+        from investments
+        where id=%s and user_id=%s for update
+        """,
         (inv_id, user_id),
     )
     inv = cur.fetchone()
     if not inv:
         raise LookupError("INV_NOT_FOUND")
 
-    last_date = inv["last_date"]
-    if last_date is None:
-        return Decimal(inv["balance"])
-
-    n = _business_days_between(last_date, today)
-    if n <= 0:
-        return Decimal(inv["balance"])
-
-    bal = Decimal(inv["balance"])
-    period = inv["period"]
-    rate = float(inv["rate"])
-
-    if period == "cdi":
-        mult = float(inv["rate"])
-        start = last_date + timedelta(days=1)
-        # Mantém compatibilidade com testes e callers que fazem monkeypatch
-        # em `db._get_cdi_daily_map`, como acontecia no antigo db.py monolítico.
-        db_pkg = sys.modules.get("db")
-        fetch_cdi_daily_map = getattr(db_pkg, "_get_cdi_daily_map", _get_cdi_daily_map)
-        cdi_map = fetch_cdi_daily_map(cur, start, today)
-        cdi_days = sorted(d for d in cdi_map.keys() if last_date < d <= today)
-
-        if not cdi_days:
-            return Decimal(inv["balance"])
-
-        factor = 1.0
-        for d in cdi_days:
-            factor *= (1.0 + (cdi_map[d] / 100.0) * mult)
-
-        new_bal = Decimal(str(float(bal) * factor))
-        applied_until = cdi_days[-1]
-
-    elif period == "cdi_spread":
-        start = last_date + timedelta(days=1)
-        db_pkg = sys.modules.get("db")
-        fetch_cdi_daily_map = getattr(db_pkg, "_get_cdi_daily_map", _get_cdi_daily_map)
-        cdi_map = fetch_cdi_daily_map(cur, start, today)
-        cdi_days = sorted(d for d in cdi_map.keys() if last_date < d <= today)
-
-        if not cdi_days:
-            return Decimal(inv["balance"])
-
-        spread_daily = (1.0 + rate) ** (1.0 / 252.0) - 1.0
-        factor = 1.0
-        for d in cdi_days:
-            factor *= (1.0 + (cdi_map[d] / 100.0)) * (1.0 + spread_daily)
-
-        new_bal = Decimal(str(float(bal) * factor))
-        applied_until = cdi_days[-1]
-
-    elif period == "selic_spread":
-        start = last_date + timedelta(days=1)
-        selic_map = _get_selic_daily_map(cur, start, today)
-        selic_days = sorted(d for d in selic_map.keys() if last_date < d <= today)
-
-        if not selic_days:
-            return Decimal(inv["balance"])
-
-        spread_daily = (1.0 + rate) ** (1.0 / 252.0) - 1.0
-        factor = 1.0
-        for d in selic_days:
-            factor *= (1.0 + (selic_map[d] / 100.0)) * (1.0 + spread_daily)
-
-        new_bal = Decimal(str(float(bal) * factor))
-        applied_until = selic_days[-1]
-
-    elif period == "ipca_spread":
-        start = (last_date.replace(day=1) + timedelta(days=32)).replace(day=1)
-        ipca_map = _get_ipca_monthly_map(cur, start, today)
-        ipca_months = sorted(d for d in ipca_map.keys() if last_date < d <= today)
-
-        if not ipca_months:
-            return Decimal(inv["balance"])
-
-        spread_monthly = (1.0 + rate) ** (1.0 / 12.0) - 1.0
-        factor = 1.0
-        for d in ipca_months:
-            factor *= (1.0 + (ipca_map[d] / 100.0)) * (1.0 + spread_monthly)
-
-        new_bal = Decimal(str(float(bal) * factor))
-        applied_until = ipca_months[-1]
-
-    else:
-        if period == "daily":
-            daily_rate = rate
-        elif period == "monthly":
-            daily_rate = (1.0 + rate) ** (1.0 / 21.0) - 1.0
-        elif period == "yearly":
-            daily_rate = (1.0 + rate) ** (1.0 / 252.0) - 1.0
-        else:
-            daily_rate = 0.0
-
-        if daily_rate > 0:
-            new_bal = Decimal(str(float(bal) * (1.0 + daily_rate) ** n))
-        else:
-            new_bal = bal
-        applied_until = today
+    _ensure_investment_lots(cur, user_id, inv)
 
     cur.execute(
-        "update investments set balance=%s, last_date=%s where id=%s and user_id=%s",
-        (new_bal, applied_until, inv_id, user_id),
+        """
+        select id, balance, last_date
+        from investment_lots
+        where user_id=%s and investment_id=%s and status='open'
+        order by opened_at, id
+        for update
+        """,
+        (user_id, inv_id),
     )
-    return new_bal
+    lots = cur.fetchall()
+    if not lots:
+        cur.execute(
+            "update investments set balance=0 where id=%s and user_id=%s",
+            (inv_id, user_id),
+        )
+        return ZERO
+
+    for lot in lots:
+        new_balance, applied_until = _growth_for_period(
+            cur,
+            Decimal(str(lot["balance"] or 0)),
+            inv["period"],
+            Decimal(str(inv["rate"] or 0)),
+            lot["last_date"],
+            today,
+        )
+        if new_balance != lot["balance"] or applied_until != lot["last_date"]:
+            cur.execute(
+                "update investment_lots set balance=%s, last_date=%s where id=%s and user_id=%s",
+                (new_balance, applied_until or lot["last_date"], lot["id"], user_id),
+            )
+
+    return _sync_investment_from_lots(cur, user_id, inv_id)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -728,15 +908,15 @@ def create_investment_db(
                     "update accounts set balance = balance - %s where user_id=%s",
                     (initial, user_id),
                 )
-                cur.execute(
-                    "update investments set balance = balance + %s where id=%s",
-                    (initial, inv_id),
-                )
+                lot_opened_at = purchase_date or today
+                lot_id = _insert_investment_lot(cur, user_id, inv_id, initial, lot_opened_at, lot_opened_at)
+                _sync_investment_from_lots(cur, user_id, inv_id)
 
                 deposit_effects = {
                     "delta_conta": -float(initial), "delta_pocket": None,
                     "delta_invest": {"nome": canon, "delta": float(initial)},
                     "create_pocket": None, "create_investment": None,
+                    "investment_lot_create": {"lot_id": lot_id, "investment_id": inv_id},
                 }
                 cur.execute(
                     "insert into launches(user_id, tipo, valor, alvo, nota, criado_em, efeitos, is_internal_movement) "
@@ -831,7 +1011,11 @@ def list_investments(user_id: int):
                 "from investments where user_id=%s order by lower(name)",
                 (user_id,),
             )
-            return cur.fetchall()
+            rows = [dict(r) for r in cur.fetchall()]
+            lots_by_inv = _fetch_lots_for_investments(cur, user_id, [int(r["id"]) for r in rows])
+            for row in rows:
+                row["lots"] = lots_by_inv.get(int(row["id"]), [])
+            return rows
 
 
 def accrue_all_investments(user_id: int):
@@ -856,7 +1040,10 @@ def accrue_all_investments(user_id: int):
                 "from investments where user_id=%s order by lower(name)",
                 (user_id,),
             )
-            out = cur.fetchall()
+            out = [dict(r) for r in cur.fetchall()]
+            lots_by_inv = _fetch_lots_for_investments(cur, user_id, [int(r["id"]) for r in out])
+            for row in out:
+                row["lots"] = lots_by_inv.get(int(row["id"]), [])
 
         conn.commit()
 
@@ -911,16 +1098,14 @@ def investment_deposit_from_account(
             )
             new_acc = cur.fetchone()["balance"]
 
-            cur.execute(
-                "update investments set balance = balance + %s where id=%s returning balance",
-                (v, inv_id),
-            )
-            new_inv = cur.fetchone()["balance"]
+            lot_id = _insert_investment_lot(cur, user_id, inv_id, v, today, today)
+            new_inv = _sync_investment_from_lots(cur, user_id, inv_id)
 
             efeitos = {
                 "delta_conta": -float(v), "delta_pocket": None,
                 "delta_invest": {"nome": canon, "delta": +float(v)},
                 "create_pocket": None, "create_investment": None,
+                "investment_lot_create": {"lot_id": lot_id, "investment_id": inv_id},
             }
             cur.execute(
                 "insert into launches(user_id, tipo, valor, alvo, nota, criado_em, efeitos, is_internal_movement) "
@@ -937,7 +1122,7 @@ def investment_deposit_from_account(
 def investment_withdraw_to_account(
     user_id: int, investment_name: str, amount: float, nota: str | None = None
 ):
-    """Investimento → Conta (com accrual antes). Retorna (launch_id, new_acc, new_inv, canon)."""
+    """Investimento → Conta via PEPS/FIFO. Retorna (launch_id, new_acc, new_inv, canon, tax_summary)."""
     ensure_user(user_id)
     v = Decimal(str(amount))
     if v <= 0:
@@ -949,7 +1134,7 @@ def investment_withdraw_to_account(
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, name from investments "
+                "select id, name, tax_profile from investments "
                 "where user_id=%s and lower(name)=lower(%s) for update",
                 (user_id, investment_name),
             )
@@ -964,29 +1149,140 @@ def investment_withdraw_to_account(
                 raise ValueError("INSUFFICIENT_INVEST")
 
             cur.execute(
-                "update investments set balance = balance - %s where id=%s returning balance",
-                (v, inv_id),
+                """
+                select id, principal_remaining, balance, opened_at, last_date, status
+                from investment_lots
+                where user_id=%s and investment_id=%s and status='open' and balance > 0
+                order by opened_at, id
+                for update
+                """,
+                (user_id, inv_id),
             )
-            new_inv = cur.fetchone()["balance"]
+            lots = cur.fetchall()
+            remaining = v
+            total_gross = ZERO
+            total_net = ZERO
+            total_iof = ZERO
+            total_ir = ZERO
+            lot_effects = []
+            breakdown = []
+            tax_profile = inv.get("tax_profile") or "regressive_ir_iof"
+
+            for lot in lots:
+                if remaining <= 0:
+                    break
+
+                lot_balance = Decimal(str(lot["balance"] or 0))
+                if lot_balance <= 0:
+                    continue
+                lot_principal = Decimal(str(lot["principal_remaining"] or 0))
+                take = min(lot_balance, remaining)
+
+                if lot_balance <= lot_principal or lot_balance <= 0:
+                    principal_part = min(take, lot_principal)
+                    gain_part = ZERO
+                else:
+                    ratio = take / lot_balance
+                    principal_part = min(lot_principal, lot_principal * ratio)
+                    gain_part = max(take - principal_part, ZERO)
+
+                age_days = max(0, (today - lot["opened_at"]).days)
+                iof, ir = _taxes_for_gain(gain_part, age_days, tax_profile)
+                net = take - iof - ir
+
+                new_lot_balance = lot_balance - take
+                new_lot_principal = max(lot_principal - principal_part, ZERO)
+                closes = new_lot_balance <= LOT_EPSILON
+                after_status = "closed" if closes else "open"
+                after_balance = ZERO if closes else new_lot_balance
+                after_principal = ZERO if closes else new_lot_principal
+
+                lot_effects.append({
+                    "lot_id": int(lot["id"]),
+                    "before": {
+                        "balance": float(lot_balance),
+                        "principal_remaining": float(lot_principal),
+                        "status": lot["status"],
+                        "closed_at": None,
+                    },
+                    "after": {
+                        "balance": float(after_balance),
+                        "principal_remaining": float(after_principal),
+                        "status": after_status,
+                        "closed_at": today.isoformat() if closes else None,
+                    },
+                })
+                breakdown.append({
+                    "lot_id": int(lot["id"]),
+                    "opened_at": lot["opened_at"].isoformat(),
+                    "age_days": age_days,
+                    "gross": float(take),
+                    "principal": float(principal_part),
+                    "gain": float(gain_part),
+                    "iof": float(iof),
+                    "ir": float(ir),
+                    "net": float(net),
+                    "ir_rate": float(_ir_rate_for_days(age_days, tax_profile)),
+                    "iof_rate": float(_iof_rate_for_days(age_days, tax_profile)),
+                })
+
+                cur.execute(
+                    """
+                    update investment_lots
+                    set balance=%s, principal_remaining=%s, status=%s, closed_at=%s, last_date=%s
+                    where id=%s and user_id=%s
+                    """,
+                    (
+                        after_balance,
+                        after_principal,
+                        after_status,
+                        today if closes else None,
+                        today,
+                        lot["id"],
+                        user_id,
+                    ),
+                )
+
+                remaining -= take
+                total_gross += take
+                total_net += net
+                total_iof += iof
+                total_ir += ir
+
+            if remaining > LOT_EPSILON:
+                raise ValueError("INSUFFICIENT_INVEST")
+
+            new_inv = _sync_investment_from_lots(cur, user_id, inv_id)
 
             cur.execute(
                 "update accounts set balance = balance + %s where user_id=%s returning balance",
-                (v, user_id),
+                (total_net, user_id),
             )
             new_acc = cur.fetchone()["balance"]
 
+            tax_summary = {
+                "gross": float(total_gross),
+                "net": float(total_net),
+                "iof": float(total_iof),
+                "ir": float(total_ir),
+                "tax_profile": tax_profile,
+                "method": "PEPS",
+                "lots": breakdown,
+            }
             efeitos = {
-                "delta_conta": +float(v), "delta_pocket": None,
-                "delta_invest": {"nome": canon, "delta": -float(v)},
+                "delta_conta": +float(total_net), "delta_pocket": None,
+                "delta_invest": {"nome": canon, "delta": -float(total_gross)},
                 "create_pocket": None, "create_investment": None,
+                "investment_lot_withdrawals": lot_effects,
+                "tax_summary": tax_summary,
             }
             cur.execute(
                 "insert into launches(user_id, tipo, valor, alvo, nota, criado_em, efeitos, is_internal_movement) "
                 "values (%s,%s,%s,%s,%s,%s,%s,%s) returning id",
-                (user_id, "resgate_investimento", v, canon, nota, criado_em, Jsonb(efeitos), True),
+                (user_id, "resgate_investimento", total_gross, canon, nota, criado_em, Jsonb(efeitos), True),
             )
             launch_id = cur.fetchone()["id"]
 
         conn.commit()
 
-    return launch_id, new_acc, new_inv, canon
+    return launch_id, new_acc, new_inv, canon, tax_summary

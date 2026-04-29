@@ -567,7 +567,7 @@ CATÁLOGO DE INTENTS:
 - pockets.withdraw     → quer sacar de caixinha (entities: pocket_name, amount)
 - pockets.delete       → quer apagar caixinha (entities: pocket_name)
 - investments.list     → quer listar investimentos
-- investments.create   → quer criar investimento (entities: raw_name)
+- investments.create   → quer abrir o dashboard para criar investimento (entities: raw_name)
 - investments.deposit  → quer aportar em investimento (entities: investment_name, amount)
 - investments.withdraw → quer resgatar investimento (entities: investment_name, amount)
 - investments.delete   → quer apagar investimento (entities: investment_name)

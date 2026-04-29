@@ -966,15 +966,23 @@ async function moveInvestment(event) {
   const amount = Number(document.getElementById("move-amount").value);
   if (!name || !amount || amount <= 0) { alert("Selecione um investimento e informe o valor."); return; }
 
-  const resp = await fetch(`${API}/investments/${USER_ID}/${kind}`, {
-    method: "POST",
-    headers: {"Content-Type":"application/json", "Authorization": `Bearer ${DASHBOARD_TOKEN}`},
-    body: JSON.stringify({name, amount})
-  });
-  if (!resp.ok) { alert("Erro: " + await readApiError(resp)); return; }
-  document.getElementById("move-amount").value = "";
-  await refreshDashboardAfterInvestment(kind === "deposit" ? "✓ Aporte salvo" : "✓ Resgate salvo");
-}
+	  const resp = await fetch(`${API}/investments/${USER_ID}/${kind}`, {
+	    method: "POST",
+	    headers: {"Content-Type":"application/json", "Authorization": `Bearer ${DASHBOARD_TOKEN}`},
+	    body: JSON.stringify({name, amount})
+	  });
+	  if (!resp.ok) { alert("Erro: " + await readApiError(resp)); return; }
+	  const result = await resp.json();
+	  document.getElementById("move-amount").value = "";
+	  let message = kind === "deposit" ? "✓ Aporte salvo" : "✓ Resgate salvo";
+	  if (kind === "withdraw" && result.tax_summary) {
+	    const tax = Number(result.tax_summary.ir || 0) + Number(result.tax_summary.iof || 0);
+	    message = tax > 0
+	      ? `✓ Resgate salvo · líquido ${fmt(result.tax_summary.net)}`
+	      : "✓ Resgate salvo · sem IR/IOF";
+	  }
+	  await refreshDashboardAfterInvestment(message);
+	}
 
 async function deleteInvestment(name) {
   if (!confirm(`Remover ${name}? O saldo precisa estar zerado.`)) return;
@@ -1020,30 +1028,44 @@ function openInvestmentDetail(name) {
     ["Tipo", inv.asset_type || "—"]
   ];
 
-  const historyHtml = history.length
-    ? history.map(l => `
-        <div class="row">
-          <span class="lbl">${esc(describeLaunch(l))}</span>
-          <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
-            <span class="val" data-val="${l.valor}">${fmt(l.valor)}</span>
-            <span style="font-size:.65rem;color:var(--text-3)">${fmtDate(l.criado_em)}</span>
-          </span>
-        </div>
-      `).join("")
-    : `<div class="empty">Sem movimentações recentes.</div>`;
+	  const historyHtml = history.length
+	    ? history.map(l => `
+	        <div class="row">
+	          <span class="lbl">${esc(describeLaunch(l))}</span>
+	          <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+	            <span class="val" data-val="${l.valor}">${fmt(l.valor)}</span>
+	            <span style="font-size:.65rem;color:var(--text-3)">${fmtDate(l.criado_em)}</span>
+	          </span>
+	        </div>
+	      `).join("")
+	    : `<div class="empty">Sem movimentações recentes.</div>`;
+	  const lots = (inv.lots || []).filter(l => l.status === "open" && Number(l.balance || 0) > 0);
+	  const lotsHtml = lots.length
+	    ? lots.map(l => `
+	        <div class="row">
+	          <span class="lbl">Lote de ${fmtDateOnly(l.opened_at)} · ${Number(l.age_days || 0)} dias</span>
+	          <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+	            <span class="val">${fmt(l.balance)}</span>
+	            <span style="font-size:.65rem;color:var(--text-3)">principal ${fmt(l.principal_remaining)}</span>
+	          </span>
+	        </div>
+	      `).join("")
+	    : `<div class="empty">Sem lotes abertos.</div>`;
 
-  document.getElementById("investment-detail-body").innerHTML = `
-    <div class="detail-grid">
-      ${cells.map(([k, v]) => `
-        <div class="detail-cell">
-          <div class="detail-k">${esc(k)}</div>
-          <div class="detail-v">${esc(v)}</div>
-        </div>
-      `).join("")}
-    </div>
-    <h2 style="margin-top:10px">Movimentações recentes</h2>
-    <div class="detail-history">${historyHtml}</div>
-  `;
+	  document.getElementById("investment-detail-body").innerHTML = `
+	    <div class="detail-grid">
+	      ${cells.map(([k, v]) => `
+	        <div class="detail-cell">
+	          <div class="detail-k">${esc(k)}</div>
+	          <div class="detail-v">${esc(v)}</div>
+	        </div>
+	      `).join("")}
+	    </div>
+	    <h2 style="margin-top:10px">Lotes de aporte</h2>
+	    <div class="detail-history">${lotsHtml}</div>
+	    <h2 style="margin-top:10px">Movimentações recentes</h2>
+	    <div class="detail-history">${historyHtml}</div>
+	  `;
 
   document.getElementById("investment-detail-move").onclick = () => {
     document.getElementById("move-name").value = inv.name;
@@ -1913,12 +1935,13 @@ function _showAccessError() {
 
   const purchaseInput = document.getElementById("inv-purchase-date");
   if (purchaseInput && !purchaseInput.value) purchaseInput.value = NOW.toISOString().slice(0, 10);
-  updateInvestmentRateHint();
-  updateInvestmentTaxHint();
-  updateMonthLabel();
-  connect();
-  fetchHistory();
-})();
+	  updateInvestmentRateHint();
+	  updateInvestmentTaxHint();
+	  updateMonthLabel();
+	  if (params.get("view") === "investments") setMainView("investments");
+	  connect();
+	  fetchHistory();
+	})();
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {

@@ -54,8 +54,8 @@ HELP_SECTIONS: dict[str, str] = {
         "• `criar caixinha viagem`\n"
         "• `coloquei 300 na caixinha viagem`\n\n"
         "6) **Investimentos**\n"
-        "• `criar investimento CDB 110% CDI`\n"
-        "• `apliquei 200 no investimento CDB`\n\n"
+        "• `investimentos` → lista sua carteira e envia um link mágico\n"
+        "• o bot cria investimentos pela aba do dashboard, com o formulário completo\n\n"
         "7) **Dashboard**\n"
         "• `dashboard`\n"
     ),
@@ -151,9 +151,8 @@ HELP_SECTIONS: dict[str, str] = {
     ),
     "invest": (
         "📈 **Investimentos**\n"
-        "• `criar investimento CDB Nubank 1% ao mês`\n"
-        "• `criar investimento Tesouro 0,03% ao dia`\n"
-        "• `criar investimento CDB 110% CDI`\n"
+        "• `investimentos` → lista sua carteira e envia um link mágico\n"
+        "• o bot cria investimentos pela aba do dashboard, com o formulário completo\n"
         "• `apliquei 200 no investimento CDB Nubank`\n"
         "• `retirei 100 do investimento CDB Nubank`\n"
         "• `saldo investimentos`\n"

@@ -107,9 +107,8 @@ def _pockets_contextual_fallback(norm: str) -> str:
 def _investments_contextual_fallback(norm: str) -> str:
     if _has_any(norm, "criar", "novo", "nova", "cadastrar", "registrar"):
         return (
-            "📈 Para criar um investimento, use:\n"
-            "• `criar investimento CDB 110% CDI`\n"
-            "• `criar investimento Tesouro 0,03% ao dia`"
+            "📈 Eu consigo te ajudar a criar investimentos pelo dashboard.\n"
+            "Digite `investimentos`: o bot lista sua carteira e envia um link mágico direto para a aba completa de criação."
         )
 
     if _has_any(norm, "aplicar", "aporte", "aportar", "investir"):
@@ -136,12 +135,12 @@ def _investments_contextual_fallback(norm: str) -> str:
         return (
             "📊 Se você quer consultar ou usar CDI, tente:\n"
             "• `ver cdi`\n"
-            "• `criar investimento CDB 110% CDI`"
+            "• `investimentos` para receber o link mágico do dashboard e criar um ativo atrelado ao CDI"
         )
 
     return (
         "📈 Posso te ajudar com investimentos assim:\n"
-        "• `criar investimento CDB 110% CDI`\n"
+        "• `investimentos` para listar a carteira e receber o link mágico do dashboard\n"
         "• `apliquei 200 no investimento CDB`\n"
         "• `resgatei 100 do investimento CDB`\n"
         "• `listar investimentos`"
@@ -415,6 +414,6 @@ def infer_contextual_fallback(text: str, platform: str) -> str:
         "• `gastei 50 mercado`\n"
         "• `criar cartao Nubank`\n"
         "• `criar caixinha viagem`\n"
-        "• `criar investimento CDB 110% CDI`\n"
+        "• `investimentos`\n"
         "• `ajuda`"
     )

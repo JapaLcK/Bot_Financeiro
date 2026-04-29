@@ -94,6 +94,15 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
 
     inferred_help = h_help.infer_help_from_text(text, platform)
     if inferred_help is not None:
+        norm = normalize_text(text)
+        if (
+            "Não entendi exatamente" in inferred_help
+            and any(term in norm for term in ("investimento", "investimentos", "aporte", "resgate", "cdb", "tesouro", "cdi"))
+        ):
+            return h_investments.list_investments(
+                user_id,
+                "Não entendi exatamente o pedido de investimentos. Aqui está sua carteira:",
+            )
         return inferred_help
 
     # -----------------------------------------------------------------------
@@ -162,7 +171,7 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
     # -----------------------------------------------------------------------
     WRITE_INTENTS = {
         "launches.add", "pockets.create", "pockets.deposit", "pockets.withdraw",
-        "investments.create", "investments.deposit", "investments.withdraw",
+        "investments.deposit", "investments.withdraw",
         "funds.withdraw",
         "categories.create", "categories.delete",
     }
@@ -381,7 +390,7 @@ def _intent_label(intent: str) -> str:
         "pockets.deposit":      "depositar em caixinha",
         "pockets.withdraw":     "retirar de caixinha",
         "funds.withdraw":       "retirar de caixinha ou investimento",
-        "investments.create":   "criar investimento",
+        "investments.create":   "abrir investimentos",
         "investments.deposit":  "aportar em investimento",
         "investments.withdraw": "resgatar investimento",
         "categories.create":    "criar regra de categoria",
