@@ -1018,6 +1018,14 @@ def list_investments(user_id: int):
             return rows
 
 
+def list_users_with_investments() -> list[int]:
+    """Retorna usuários que possuem ao menos um investimento cadastrado."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select distinct user_id from investments order by user_id")
+            return [int(row["user_id"]) for row in cur.fetchall()]
+
+
 def accrue_all_investments(user_id: int):
     """Aplica juros em todos os investimentos do usuário e retorna a lista atualizada."""
     ensure_user(user_id)

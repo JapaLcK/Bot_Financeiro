@@ -731,6 +731,14 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[engagement] erro: {exc}", file=sys.stderr)
 
+    async def _investment_accrual():
+        try:
+            await asyncio.sleep(1)
+            from core.services.investment_scheduler import run_investment_accrual_loop  # noqa: PLC0415
+            await run_investment_accrual_loop()
+        except Exception as exc:
+            print(f"[investment_accrual] erro: {exc}", file=sys.stderr)
+
     _elapsed = _startup_time.monotonic() - _t0
     print(f"[app] Startup interno concluído em {_elapsed:.1f}s.", flush=True)
 
@@ -741,6 +749,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_wa_worker(), name="wa_worker"),
                 asyncio.create_task(_wa_daily(), name="wa_daily"),
                 asyncio.create_task(_engagement(), name="engagement"),
+                asyncio.create_task(_investment_accrual(), name="investment_accrual"),
             ]
         )
     else:
