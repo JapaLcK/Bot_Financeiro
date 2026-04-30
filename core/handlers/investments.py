@@ -47,7 +47,7 @@ def list_investments(user_id: int, intro: str | None = None) -> str:
 def create(user_id: int, raw_name: str, original_text: str) -> str:
     return list_investments(
         user_id,
-        "📈 Eu consigo te ajudar a criar investimentos, mas agora isso é feito pelo dashboard.",
+        "📈 A criação de investimentos agora é feita pelo dashboard.",
     )
 
 
