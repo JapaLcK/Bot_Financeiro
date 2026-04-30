@@ -45,6 +45,7 @@ def test_daily_report_tick_envia_apenas_template_quando_configurado():
         "WA_PROACTIVE_TEMPLATE_NAME": "daily_opener",
         "WA_PROACTIVE_TEMPLATE_LANGUAGE": "pt_BR",
         "WA_PROACTIVE_TEMPLATE_INCLUDE_REPORT": "0",
+        "WA_PROACTIVE_TEMPLATE_STOP_BUTTON": "0",
     }, clear=False), \
          patch("adapters.whatsapp.wa_app.now_tz") as now_mock, \
          patch("adapters.whatsapp.wa_app.list_users_with_daily_report_enabled", return_value=[123]), \
@@ -115,7 +116,18 @@ def test_dedupe_whatsapp_targets_remove_destinos_repetidos_do_mesmo_numero():
 
     targets = _dedupe_whatsapp_targets(ids)
 
-    assert targets == ["11999999999", "5511888888888"]
+    assert targets == ["5511999999999", "5511888888888"]
+
+
+def test_dedupe_whatsapp_targets_remove_variacao_sem_nono_digito():
+    ids = [
+        {"provider": "whatsapp", "external_id": "556599929199"},
+        {"provider": "whatsapp", "external_id": "5565999929199"},
+    ]
+
+    targets = _dedupe_whatsapp_targets(ids)
+
+    assert targets == ["5565999929199"]
 
 
 def test_strip_daily_report_disable_hint_remove_instrucao_de_texto():

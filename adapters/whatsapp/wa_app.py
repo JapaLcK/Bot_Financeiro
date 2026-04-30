@@ -25,7 +25,7 @@ from db import (
     list_users_with_daily_report_enabled,
     mark_card_reminder_sent,
 )
-from utils_phone import normalize_phone_e164
+from utils_phone import phone_lookup_candidates
 from utils_date import now_tz
 
 load_app_env()
@@ -58,15 +58,17 @@ def _dedupe_whatsapp_targets(ids: list[dict]) -> list[str]:
             continue
 
         try:
-            normalized = normalize_phone_e164(raw)
+            candidates = phone_lookup_candidates(raw)
+            normalized = max(candidates, key=len)
         except Exception:
+            candidates = [raw]
             normalized = raw
 
-        if normalized in seen:
+        if any(candidate in seen for candidate in candidates):
             continue
 
-        seen.add(normalized)
-        targets.append(raw)
+        seen.update(candidates)
+        targets.append(normalized)
 
     return targets
 
