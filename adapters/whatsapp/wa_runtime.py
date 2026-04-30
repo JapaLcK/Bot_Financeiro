@@ -318,23 +318,25 @@ def process_message(message: InboundMessage) -> None:
                     user_id=uid,
                     details={"wa_id": message.wa_id},
                 )
-                # Envia mensagem de boas-vindas interativa com botão de tutorial
-                try:
-                    send_welcome(reply_to)
-                except Exception as e:
-                    logger.warning("WA send_welcome failed, falling back to text: %s", e)
-                    _send_reply(
-                        reply_to,
-                        (
-                            "✅ WhatsApp conectado à sua conta!\n\n"
-                            "Já pode usar:\n"
-                            "• gastei 50 mercado\n"
-                            "• recebi 1000 salario\n"
-                            "• saldo\n"
-                            "• ajuda"
-                        ),
-                    )
-                return
+                if _is_greeting(message.text or ""):
+                    # Só interrompe para onboarding quando a mensagem era uma saudação.
+                    # Se o usuário mandou "saldo", "gastei..." etc., segue e executa o comando.
+                    try:
+                        send_welcome(reply_to)
+                    except Exception as e:
+                        logger.warning("WA send_welcome failed, falling back to text: %s", e)
+                        _send_reply(
+                            reply_to,
+                            (
+                                "✅ WhatsApp conectado à sua conta!\n\n"
+                                "Já pode usar:\n"
+                                "• gastei 50 mercado\n"
+                                "• recebi 1000 salario\n"
+                                "• saldo\n"
+                                "• ajuda"
+                            ),
+                        )
+                    return
         elif auto_link_result["status"] in {
             "no_match",
             "multiple_accounts",
