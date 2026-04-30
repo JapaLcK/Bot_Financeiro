@@ -61,8 +61,15 @@ from db import (
     disconnect_open_finance_connection,
     get_dashboard_market_rates,
     get_open_finance_snapshot,
+    save_pluggy_open_finance_item,
+    update_pluggy_open_finance_item_status,
     investment_deposit_from_account,
     investment_withdraw_to_account,
+)
+from core.services.pluggy import (
+    PluggyApiError,
+    PluggyConfigError,
+    create_pluggy_connect_token,
 )
 
 load_app_env()
@@ -80,6 +87,7 @@ WHATSAPP_NUMBER         = os.getenv("WHATSAPP_NUMBER", "")
 STRIPE_SECRET_KEY       = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET   = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PRICE_ID_PRO     = os.getenv("STRIPE_PRICE_ID_PRO", "")   # price_xxx do plano Pro
+PLUGGY_INCLUDE_SANDBOX  = os.getenv("PLUGGY_INCLUDE_SANDBOX", "1") != "0"
 DASHBOARD_MAGIC_LINK_MINUTES = int(os.getenv("DASHBOARD_MAGIC_LINK_MINUTES", "5"))
 DASHBOARD_SESSION_HOURS = float(os.getenv("DASHBOARD_SESSION_HOURS", "12"))
 DB_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "5"))
@@ -1541,6 +1549,10 @@ class OpenFinanceMockConnectPayload(BaseModel):
     institution: str | None = None
 
 
+class OpenFinancePluggyItemPayload(BaseModel):
+    item: dict
+
+
 def _investment_action_note(action: str, name: str, issuer: str | None = None, note: str | None = None) -> str:
     clean_name = (name or "").strip() or "investimento"
     clean_issuer = (issuer or "").strip()
@@ -1679,6 +1691,77 @@ async def open_finance_snapshot_route(request: Request, user_id: int):
     _authorize_dashboard_access(request, user_id)
     snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
     return json.loads(jdump({"ok": True, **snapshot}))
+
+
+@app.post("/open-finance/{user_id}/connect-token")
+async def open_finance_connect_token_route(request: Request, user_id: int):
+    _authorize_dashboard_access(request, user_id)
+
+    webhook_url = (os.getenv("PLUGGY_WEBHOOK_URL") or "").strip()
+    if not webhook_url and DASHBOARD_URL.startswith("https://"):
+        webhook_url = f"{DASHBOARD_URL}/open-finance/pluggy/webhook"
+
+    try:
+        token_data = await asyncio.to_thread(
+            create_pluggy_connect_token,
+            user_id,
+            webhook_url or None,
+        )
+    except PluggyConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PluggyApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return {
+        "ok": True,
+        "accessToken": token_data["accessToken"],
+        "includeSandbox": PLUGGY_INCLUDE_SANDBOX,
+        "provider": "pluggy",
+    }
+
+
+@app.post("/open-finance/{user_id}/pluggy-item")
+async def open_finance_pluggy_item_route(request: Request, user_id: int, payload: OpenFinancePluggyItemPayload):
+    _authorize_dashboard_access(request, user_id)
+    try:
+        connection = await asyncio.to_thread(save_pluggy_open_finance_item, user_id, payload.item)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
+    return json.loads(jdump({"ok": True, "connection": connection, **snapshot}))
+
+
+@app.post("/open-finance/pluggy/webhook")
+async def open_finance_pluggy_webhook(request: Request):
+    """
+    Recebe eventos da Pluggy e responde rapido.
+    Trabalho pesado de sync deve rodar fora do request.
+    """
+    try:
+        event = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Webhook inválido.") from exc
+
+    event_name = str(event.get("event") or event.get("type") or "")
+    item_id = str(event.get("itemId") or event.get("item_id") or event.get("item", {}).get("id") or "")
+    status_by_event = {
+        "item/created": "UPDATING",
+        "item/updated": "ACTIVE",
+        "item/error": "ERROR",
+        "item/deleted": "DELETED",
+    }
+    status = status_by_event.get(event_name)
+    if item_id and status:
+        await asyncio.to_thread(update_pluggy_open_finance_item_status, item_id, status, event)
+
+    await log_system_event(
+        "info" if event_name != "item/error" else "warning",
+        "pluggy_webhook_received",
+        f"Webhook Pluggy recebido: {event_name or 'evento desconhecido'}",
+        source="open_finance",
+        details={"event": event_name, "item_id": item_id},
+    )
+    return {"received": True}
 
 
 @app.post("/open-finance/{user_id}/mock-connect")

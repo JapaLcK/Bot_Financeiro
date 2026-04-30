@@ -148,6 +148,8 @@ from .open_finance import (
     create_mock_open_finance_connection,
     get_open_finance_snapshot,
     disconnect_open_finance_connection,
+    save_pluggy_open_finance_item,
+    update_pluggy_open_finance_item_status,
 )
 
 # ── Relatórios, Auth, Dashboard, Engajamento ──────────────────────────────────
@@ -230,7 +232,8 @@ __all__ = [
     "get_installment_group_summaries",
     # open finance
     "create_mock_open_finance_connection", "get_open_finance_snapshot",
-    "disconnect_open_finance_connection",
+    "disconnect_open_finance_connection", "save_pluggy_open_finance_item",
+    "update_pluggy_open_finance_item_status",
     # reports
     "set_daily_report_enabled", "set_daily_report_hour", "get_daily_report_prefs",
     "list_users_with_daily_report_enabled", "list_identities_by_user",

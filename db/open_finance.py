@@ -251,6 +251,96 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
     }
 
 
+def save_pluggy_open_finance_item(user_id: int, item: dict) -> dict:
+    ensure_user(user_id)
+
+    if not isinstance(item, dict):
+        raise ValueError("Item Pluggy inválido.")
+
+    item_id = item.get("id") or item.get("itemId")
+    if not item_id:
+        raise ValueError("Item Pluggy sem id.")
+    item_id = str(item_id)
+
+    connector = item.get("connector") or {}
+    institution_id = (
+        connector.get("id")
+        or item.get("connectorId")
+        or item.get("institutionId")
+        or "pluggy"
+    )
+    institution_name = (
+        connector.get("name")
+        or connector.get("institutionName")
+        or item.get("connectorName")
+        or item.get("institutionName")
+        or item.get("name")
+        or "Banco conectado"
+    )
+    status = item.get("status") or item.get("executionStatus") or "UPDATING"
+    now = datetime.now(_tz())
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into open_finance_connections (
+                    user_id, provider, provider_item_id, status, institution_id,
+                    institution_name, consent_url, consent_expires_at, last_sync_at, raw, updated_at
+                )
+                values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                on conflict (user_id, provider, provider_item_id)
+                do update set status = excluded.status,
+                              institution_id = excluded.institution_id,
+                              institution_name = excluded.institution_name,
+                              last_sync_at = excluded.last_sync_at,
+                              raw = excluded.raw,
+                              updated_at = excluded.updated_at
+                returning id, provider, provider_item_id, status, institution_name, last_sync_at
+                """,
+                (
+                    user_id,
+                    "pluggy",
+                    item_id,
+                    str(status).upper(),
+                    str(institution_id),
+                    str(institution_name),
+                    None,
+                    None,
+                    now,
+                    Jsonb(item),
+                    now,
+                ),
+            )
+            connection = cur.fetchone()
+        conn.commit()
+
+    return connection
+
+
+def update_pluggy_open_finance_item_status(provider_item_id: str, status: str, raw: dict | None = None) -> int:
+    item_id = (provider_item_id or "").strip()
+    if not item_id:
+        return 0
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update open_finance_connections
+                set status=%s,
+                    raw=coalesce(%s, raw),
+                    updated_at=now()
+                where provider='pluggy' and provider_item_id=%s
+                """,
+                (status, Jsonb(raw) if raw is not None else None, item_id),
+            )
+            updated = cur.rowcount
+        conn.commit()
+
+    return updated
+
+
 def disconnect_open_finance_connection(user_id: int, connection_id: int | None = None) -> int:
     ensure_user(user_id)
 
