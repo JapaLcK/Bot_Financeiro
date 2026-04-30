@@ -944,7 +944,9 @@ def import_credit_ofx_bulk(
 
     Deduplicação: (user_id, card_id, external_id) WHERE source='ofx'.
     Parcelamentos: agrupa por group_id linkando parcelas anteriores pelo memo_base.
-    Atualiza credit_limit no cartão se fornecido.
+    O limite vindo do OFX é só informativo no relatório de importação. Não
+    gravamos automaticamente no cartão porque bancos podem exportar campos de
+    limite/disponível que não refletem o limite real contratado pelo usuário.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -1102,13 +1104,6 @@ def import_credit_ofx_bulk(
                     where id=%s
                     """,
                     (bid, bid),
-                )
-
-            # Atualiza limite de crédito do cartão se veio no OFX
-            if credit_limit is not None and credit_limit > 0:
-                cur.execute(
-                    "update credit_cards set credit_limit=%s where id=%s and user_id=%s",
-                    (credit_limit, card_id, user_id),
                 )
 
             # Registra a importação no log

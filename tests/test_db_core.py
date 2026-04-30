@@ -15,8 +15,11 @@ from db import (
     attempt_whatsapp_phone_link,
     confirm_email_verification,
     create_email_verification,
+    create_card,
     get_conn,
     ensure_user,
+    import_credit_ofx_bulk,
+    list_cards,
 )
 import uuid
 
@@ -202,6 +205,85 @@ def test_attempt_whatsapp_phone_link_aceita_variacao_com_e_sem_nono_digito(user_
             with conn.cursor() as cur:
                 cur.execute("delete from users where id = %s", (other_uid,))
             conn.commit()
+
+
+def test_attempt_whatsapp_phone_link_aceita_identidade_existente_com_alias_do_mesmo_numero(user_id):
+    email = f"wa-alias-{uuid.uuid4().hex[:8]}@example.com"
+    old_wa = "556592741873"
+    new_wa = "5565992741873"
+    new_uid = int(uuid.uuid4().int % 10_000_000_000)
+    ensure_user(new_uid)
+
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    insert into auth_accounts (user_id, email, password_hash, phone_e164, phone_status)
+                    values (%s, %s, %s, %s, 'confirmed')
+                    """,
+                    (user_id, email, "hash", old_wa),
+                )
+                cur.execute(
+                    """
+                    insert into user_identities (provider, external_id, user_id)
+                    values ('whatsapp', %s, %s)
+                    """,
+                    (old_wa, user_id),
+                )
+                cur.execute(
+                    """
+                    insert into user_identities (provider, external_id, user_id)
+                    values ('whatsapp', %s, %s)
+                    """,
+                    (new_wa, new_uid),
+                )
+            conn.commit()
+
+        add_launch_and_update_balance(new_uid, "despesa", 109, None, "rifa")
+
+        result = attempt_whatsapp_phone_link(new_wa, current_user_id=new_uid)
+
+        assert result["status"] == "linked"
+        assert result["user_id"] == user_id
+        assert get_balance(user_id) == D("-109")
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    select user_id
+                    from user_identities
+                    where provider = 'whatsapp' and external_id = %s
+                    """,
+                    (new_wa,),
+                )
+                row = cur.fetchone()
+
+        assert row["user_id"] == user_id
+    finally:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("delete from users where id = %s", (new_uid,))
+            conn.commit()
+
+
+def test_import_credit_ofx_nao_grava_limite_automaticamente(user_id):
+    card_id = create_card(user_id, "Nubank", 10, 17)
+
+    import_credit_ofx_bulk(
+        user_id=user_id,
+        card_id=card_id,
+        tx_rows=[],
+        file_hash=f"test-{uuid.uuid4().hex}",
+        dt_start=None,
+        dt_end=None,
+        credit_limit=Decimal("4504.44"),
+    )
+
+    card = next(c for c in list_cards(user_id) if c["id"] == card_id)
+
+    assert card["credit_limit"] is None
 
 
 def test_confirm_email_verification_normaliza_telefone_armazenado_no_codigo():

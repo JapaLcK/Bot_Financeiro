@@ -604,7 +604,16 @@ def attempt_whatsapp_phone_link_impl(
             )
             target_wa = cur.fetchone()
 
-            if target_wa and target_wa["external_id"] != wa_phone:
+            target_wa_id = target_wa["external_id"] if target_wa else None
+            same_phone_alias = False
+            if target_wa_id:
+                try:
+                    target_candidates = set(phone_lookup_candidates(target_wa_id))
+                except ValueError:
+                    target_candidates = {target_wa_id}
+                same_phone_alias = bool(target_candidates.intersection(set(wa_candidates)))
+
+            if target_wa and target_wa_id != wa_phone and not same_phone_alias:
                 return {
                     "status": "account_has_other_whatsapp",
                     "wa_phone": wa_phone,
