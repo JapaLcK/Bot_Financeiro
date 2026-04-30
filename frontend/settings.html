@@ -1330,7 +1330,7 @@ function formatPhoneBR(value) {
 }
 
 function formatSessionExpiry() {
-  if (!payload?.exp) return "Sessão ativa";
+  if (!DASHBOARD_TOKEN || !payload?.exp) return "Sessão inválida";
   return new Date(payload.exp * 1000).toLocaleString("pt-BR", { dateStyle:"short", timeStyle:"short" });
 }
 
@@ -1390,6 +1390,7 @@ function applySecuritySettings(data) {
 
 async function loadSecuritySettings() {
   if (!USER_ID || !DASHBOARD_TOKEN) {
+    applySecuritySettings({});
     showToast("Sessão inválida — faça login novamente", "error");
     return;
   }
@@ -1399,6 +1400,7 @@ async function loadSecuritySettings() {
     const data = await resp.json();
     applySecuritySettings(data);
   } catch (err) {
+    applySecuritySettings({});
     showToast(err.message || "Erro ao carregar segurança", "error");
   }
 }
