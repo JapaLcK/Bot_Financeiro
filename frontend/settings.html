@@ -730,6 +730,12 @@ a { color: inherit; text-decoration: none; }
   border-radius: var(--radius-md);
   background: rgba(255,255,255,.04);
 }
+.security-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
 .security-label {
   color: var(--faint);
   font-size: .66rem;
@@ -749,6 +755,25 @@ a { color: inherit; text-decoration: none; }
   color: var(--faint);
   font-size: .72rem;
   line-height: 1.5;
+}
+.security-edit {
+  display: none;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  margin-top: 12px;
+}
+.security-edit.show { display: grid; }
+.security-input {
+  min-height: 34px;
+  min-width: 0;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0 12px;
+  font-size: .78rem;
+  font-weight: 700;
+  cursor: text;
 }
 .security-actions {
   display: grid;
@@ -809,6 +834,7 @@ a { color: inherit; text-decoration: none; }
   .notice-grid { grid-template-columns: 1fr; }
   .security-grid { grid-template-columns: 1fr; }
   .security-actions { grid-template-columns: 1fr; }
+  .security-edit { grid-template-columns: 1fr; }
   .accounts-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 540px) {
@@ -1059,14 +1085,30 @@ a { color: inherit; text-decoration: none; }
           <div class="card-body">
             <div class="security-grid">
               <div class="security-item">
-                <div class="security-label">E-mail</div>
+                <div class="security-item-head">
+                  <div class="security-label">E-mail</div>
+                  <button class="btn-sm" type="button" id="security-email-edit-btn" onclick="toggleSecurityEdit('email')">Alterar</button>
+                </div>
                 <div class="security-value" id="security-email-value">Carregando...</div>
                 <div class="security-note" id="security-email-note">Usado para login e recuperação de senha.</div>
+                <div class="security-edit" id="security-email-edit">
+                  <input class="security-input" id="security-email-input" type="email" placeholder="seu@email.com" autocomplete="email" />
+                  <button class="btn-sm" type="button" onclick="saveSecurityContact('email')">Salvar</button>
+                  <button class="btn-sm" type="button" onclick="toggleSecurityEdit('email', false)">Cancelar</button>
+                </div>
               </div>
               <div class="security-item">
-                <div class="security-label">Telefone / WhatsApp</div>
+                <div class="security-item-head">
+                  <div class="security-label">Telefone / WhatsApp</div>
+                  <button class="btn-sm" type="button" id="security-phone-edit-btn" onclick="toggleSecurityEdit('phone')">Alterar</button>
+                </div>
                 <div class="security-value" id="security-phone-value">Carregando...</div>
                 <div class="security-note" id="security-phone-note">Usado para vincular o bot à sua conta.</div>
+                <div class="security-edit" id="security-phone-edit">
+                  <input class="security-input" id="security-phone-input" type="tel" placeholder="(65) 99992-9199" autocomplete="tel" />
+                  <button class="btn-sm" type="button" onclick="saveSecurityContact('phone')">Salvar</button>
+                  <button class="btn-sm" type="button" onclick="toggleSecurityEdit('phone', false)">Cancelar</button>
+                </div>
               </div>
               <div class="security-item">
                 <div class="security-label">Plano</div>
@@ -1085,20 +1127,12 @@ a { color: inherit; text-decoration: none; }
         <div class="card">
           <div class="card-head">
             <div>
-              <div class="card-title">Senha</div>
-              <div class="card-sub">Envie um link seguro para criar uma nova senha</div>
+              <div class="card-title">Resetar senha por e-mail</div>
+              <div class="card-sub" id="security-reset-copy">O link expira em 30 minutos e abre uma página segura para definir a nova senha</div>
             </div>
-          </div>
-          <div class="card-body">
-            <div class="security-actions">
-              <div>
-                <div class="notification-title">Resetar senha por e-mail</div>
-                <div class="notification-sub" id="security-reset-copy">O link expira em 30 minutos e abre uma página segura para definir a nova senha.</div>
-              </div>
-              <button class="btn-connect" type="button" id="security-reset-btn" onclick="sendPasswordResetEmail()" style="width:auto; min-width:190px; padding:0 18px">
-                Enviar e-mail de reset
-              </button>
-            </div>
+            <button class="btn-connect" type="button" id="security-reset-btn" onclick="sendPasswordResetEmail()" style="width:auto; min-width:190px; padding:0 18px">
+              Enviar e-mail de reset
+            </button>
           </div>
         </div>
       </section>
@@ -1287,9 +1321,71 @@ function displayValue(value, fallback="Não vinculado") {
   return value ? String(value) : fallback;
 }
 
+function formatPhoneBR(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  const local = digits.startsWith("55") && digits.length > 11 ? digits.slice(2) : digits;
+  if (local.length === 11) return `(${local.slice(0,2)}) ${local.slice(2,7)}-${local.slice(7)}`;
+  if (local.length === 10) return `(${local.slice(0,2)}) ${local.slice(2,6)}-${local.slice(6)}`;
+  return value || "";
+}
+
 function formatSessionExpiry() {
   if (!payload?.exp) return "Sessão ativa";
   return new Date(payload.exp * 1000).toLocaleString("pt-BR", { dateStyle:"short", timeStyle:"short" });
+}
+
+function toggleSecurityEdit(kind, force) {
+  const box = document.getElementById(`security-${kind}-edit`);
+  const show = typeof force === "boolean" ? force : !box.classList.contains("show");
+  box.classList.toggle("show", show);
+  if (show) document.getElementById(`security-${kind}-input`).focus();
+}
+
+async function saveSecurityContact(kind) {
+  const input = document.getElementById(`security-${kind}-input`);
+  const value = input.value.trim();
+  if (!value) {
+    showToast(kind === "email" ? "Informe o e-mail" : "Informe o telefone", "error");
+    return;
+  }
+  try {
+    const resp = await fetch(`${API}/settings/${USER_ID}/security/contact`, {
+      method: "PATCH",
+      headers: authHeaders({ "Content-Type":"application/json" }),
+      body: JSON.stringify(kind === "email" ? { email: value } : { phone: value }),
+    });
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const data = await resp.json();
+    applySecuritySettings(data);
+    toggleSecurityEdit(kind, false);
+    showToast(kind === "email" ? "E-mail atualizado" : "Telefone atualizado", "ok");
+    notificationSettingsLoaded = false;
+  } catch (err) {
+    showToast(err.message || "Erro ao salvar dado", "error");
+  }
+}
+
+function applySecuritySettings(data) {
+  const hasEmail = Boolean(data.email);
+  const phoneStatus = data.phone_status === "confirmed" || data.whatsapp_verified_at ? "confirmado" : "pendente";
+  const phoneDisplay = data.phone ? formatPhoneBR(data.phone) : "";
+  document.getElementById("security-email-value").textContent = displayValue(data.email);
+  document.getElementById("security-email-input").value = data.email || "";
+  document.getElementById("security-email-edit-btn").textContent = hasEmail ? "Alterar" : "Adicionar";
+  document.getElementById("security-email-note").textContent = hasEmail
+    ? "Usado para login, notificações por e-mail e recuperação de senha."
+    : "Adicione um e-mail para ativar notificações e reset de senha.";
+  document.getElementById("security-phone-value").textContent = displayValue(phoneDisplay);
+  document.getElementById("security-phone-input").value = phoneDisplay;
+  document.getElementById("security-phone-edit-btn").textContent = data.phone ? "Alterar" : "Adicionar";
+  document.getElementById("security-phone-note").textContent = data.phone ? `WhatsApp ${phoneStatus}.` : "Nenhum telefone vinculado a esta conta.";
+  document.getElementById("security-plan-value").textContent = displayValue(data.plan, "Plano não identificado");
+  document.getElementById("security-plan-note").textContent = data.plan_expires_at ? `Expira em ${fmtDate(data.plan_expires_at)}.` : "Status atual da assinatura.";
+  document.getElementById("security-session-value").textContent = formatSessionExpiry();
+  document.getElementById("security-reset-btn").disabled = !hasEmail;
+  document.getElementById("security-reset-copy").textContent = hasEmail
+    ? `O link será enviado para ${data.email} e expira em 30 minutos.`
+    : "Vincule um e-mail à conta antes de solicitar reset de senha.";
 }
 
 async function loadSecuritySettings() {
@@ -1301,21 +1397,7 @@ async function loadSecuritySettings() {
     const resp = await fetch(`${API}/settings/${USER_ID}/security`, { headers: authHeaders() });
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
-    const hasEmail = Boolean(data.email);
-    const phoneStatus = data.phone_status === "confirmed" || data.whatsapp_verified_at ? "confirmado" : "não confirmado";
-    document.getElementById("security-email-value").textContent = displayValue(data.email);
-    document.getElementById("security-email-note").textContent = hasEmail
-      ? "Usado para login, notificações por e-mail e recuperação de senha."
-      : "Adicione um e-mail para ativar notificações e reset de senha.";
-    document.getElementById("security-phone-value").textContent = displayValue(data.phone);
-    document.getElementById("security-phone-note").textContent = data.phone ? `WhatsApp ${phoneStatus}.` : "Nenhum telefone vinculado a esta conta.";
-    document.getElementById("security-plan-value").textContent = displayValue(data.plan, "Plano não identificado");
-    document.getElementById("security-plan-note").textContent = data.plan_expires_at ? `Expira em ${fmtDate(data.plan_expires_at)}.` : "Status atual da assinatura.";
-    document.getElementById("security-session-value").textContent = formatSessionExpiry();
-    document.getElementById("security-reset-btn").disabled = !hasEmail;
-    document.getElementById("security-reset-copy").textContent = hasEmail
-      ? `O link será enviado para ${data.email} e expira em 30 minutos.`
-      : "Vincule um e-mail à conta antes de solicitar reset de senha.";
+    applySecuritySettings(data);
   } catch (err) {
     showToast(err.message || "Erro ao carregar segurança", "error");
   }

@@ -888,6 +888,11 @@ class ResetPasswordBody(BaseModel):
     new_password: str
 
 
+class SecurityContactPayload(BaseModel):
+    email: str | None = None
+    phone: str | None = None
+
+
 class DashboardLinkBody(BaseModel):
     code: str
 
@@ -1779,6 +1784,58 @@ async def _get_security_settings(user_id: int) -> dict:
 @app.get("/settings/{user_id}/security")
 async def security_settings_route(request: Request, user_id: int):
     _authorize_dashboard_access(request, user_id)
+    return await _get_security_settings(user_id)
+
+
+@app.patch("/settings/{user_id}/security/contact")
+async def update_security_contact_route(
+    request: Request,
+    user_id: int,
+    payload: SecurityContactPayload,
+):
+    _authorize_dashboard_access(request, user_id)
+    auth_user = await asyncio.to_thread(get_auth_user, user_id)
+    if not auth_user:
+        raise HTTPException(status_code=400, detail="Esta conta ainda não tem login por e-mail configurado.")
+
+    email = payload.email.strip().lower() if payload.email else None
+    phone = (payload.phone or "").strip() or None
+    if not email and not phone:
+        raise HTTPException(status_code=400, detail="Informe e-mail ou telefone.")
+    if email and ("@" not in email or "." not in email.rsplit("@", 1)[-1]):
+        raise HTTPException(status_code=400, detail="E-mail inválido.")
+
+    normalized_phone = None
+    if phone:
+        try:
+            normalized_phone = normalize_phone_e164(phone)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        async with await db_connect() as conn:
+            async with conn.cursor() as cur:
+                if email:
+                    await cur.execute(
+                        "UPDATE auth_accounts SET email = %s WHERE user_id = %s",
+                        (email, user_id),
+                    )
+                if normalized_phone:
+                    await cur.execute(
+                        """
+                        UPDATE auth_accounts
+                        SET phone_e164 = %s,
+                            phone_status = 'pending',
+                            phone_confirmed_at = NULL,
+                            whatsapp_verified_at = NULL
+                        WHERE user_id = %s
+                        """,
+                        (normalized_phone, user_id),
+                    )
+            await conn.commit()
+    except psycopg.errors.UniqueViolation as exc:
+        raise HTTPException(status_code=409, detail="Este e-mail ou telefone já está em uso.") from exc
+
     return await _get_security_settings(user_id)
 
 
