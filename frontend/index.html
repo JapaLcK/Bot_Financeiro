@@ -795,7 +795,7 @@ function applyLoggedInState(email, dashUrl) {
   // Account center
   document.getElementById('account-email-display').textContent = email || 'Minha conta';
   document.getElementById('account-dashboard-link').href = dashUrl;
-  document.getElementById('account-settings-link').href = settingsUrlFromDashboardUrl(dashUrl, 'open-finance');
+  document.getElementById('account-settings-link').href = settingsUrlFromDashboardUrl(dashUrl, 'security');
   document.getElementById('account-whatsapp-link').onclick = connectWhatsApp;
   document.getElementById('account-center').style.display = 'block';
 

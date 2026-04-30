@@ -197,7 +197,8 @@ def get_users_for_engagement() -> list[dict]:
             cur.execute(
                 """
                 SELECT user_id, email, last_activity_at, last_tip_sent_at,
-                       last_insight_sent_at, last_reengagement_sent_at, engagement_opt_out
+                       last_insight_sent_at, last_reengagement_sent_at, engagement_opt_out,
+                       tip_email_opt_out, insight_email_opt_out
                 FROM auth_accounts
                 WHERE engagement_opt_out = false
                 ORDER BY last_activity_at DESC NULLS LAST
@@ -240,8 +241,48 @@ def set_engagement_opt_out(user_id: int, opt_out: bool) -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE auth_accounts SET engagement_opt_out = %s WHERE user_id = %s",
+                """
+                UPDATE auth_accounts
+                SET engagement_opt_out = %s,
+                    tip_email_opt_out = %s,
+                    insight_email_opt_out = %s
+                WHERE user_id = %s
+                """,
+                (opt_out, opt_out, opt_out, user_id),
+            )
+        conn.commit()
+
+
+def set_tip_email_opt_out(user_id: int, opt_out: bool) -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE auth_accounts SET tip_email_opt_out = %s WHERE user_id = %s",
                 (opt_out, user_id),
+            )
+        conn.commit()
+
+
+def set_insight_email_opt_out(user_id: int, opt_out: bool) -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE auth_accounts SET insight_email_opt_out = %s WHERE user_id = %s",
+                (opt_out, user_id),
+            )
+        conn.commit()
+
+
+def sync_engagement_opt_out(user_id: int) -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE auth_accounts
+                SET engagement_opt_out = tip_email_opt_out AND insight_email_opt_out
+                WHERE user_id = %s
+                """,
+                (user_id,),
             )
         conn.commit()
 

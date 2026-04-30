@@ -239,6 +239,8 @@ a { color: inherit; text-decoration: none; }
 
 /* ─── Main column ────────────────────────────── */
 .main { display: flex; flex-direction: column; gap: 14px; }
+.settings-section { display: flex; flex-direction: column; gap: 14px; }
+.settings-section[hidden] { display: none !important; }
 
 /* ─── Card ───────────────────────────────────── */
 .card {
@@ -600,6 +602,161 @@ a { color: inherit; text-decoration: none; }
 .info-banner-icon { font-size: .95rem; flex-shrink: 0; margin-top: 1px; }
 .info-banner strong { color: var(--blue); font-weight: 760; }
 
+/* ─── Notifications ──────────────────────────── */
+.notice-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, .9fr) 1fr;
+  gap: 14px;
+}
+.notification-list { display: flex; flex-direction: column; gap: 10px; }
+.email-warning {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 15px;
+  border: 1px solid rgba(217,119,6,.24);
+  border-radius: var(--radius-md);
+  background: rgba(217,119,6,.08);
+}
+.email-warning[hidden] { display: none !important; }
+.email-warning-title {
+  font-size: .86rem;
+  font-weight: 800;
+  color: var(--ink);
+}
+.email-warning-sub {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: .73rem;
+  line-height: 1.5;
+}
+.notification-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255,255,255,.04);
+}
+.notification-copy { min-width: 0; }
+.notification-title { font-size: .9rem; font-weight: 800; color: var(--ink); }
+.notification-sub { margin-top: 3px; color: var(--faint); font-size: .74rem; line-height: 1.5; }
+.switch {
+  position: relative;
+  display: inline-flex;
+  width: 48px;
+  height: 28px;
+  flex-shrink: 0;
+}
+.switch input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.switch-slider {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  transition: background .16s var(--ease), border-color .16s var(--ease);
+}
+.switch-slider::before {
+  content: "";
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  left: 2px;
+  top: 2px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 7px rgba(0,0,0,.26);
+  transition: transform .16s var(--ease-spring);
+}
+.switch input:checked + .switch-slider {
+  background: linear-gradient(135deg, #7c3aed, #2563eb);
+  border-color: rgba(124,58,237,.55);
+}
+.switch input:checked + .switch-slider::before { transform: translateX(20px); }
+.switch input:disabled + .switch-slider { opacity: .55; cursor: not-allowed; }
+.quiet-select {
+  width: 100%;
+  min-height: 40px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--ink);
+  padding: 0 12px;
+  font-size: .82rem;
+  font-weight: 700;
+}
+.quiet-select:disabled { opacity: .45; cursor: not-allowed; }
+.mini-kpis {
+  display: grid;
+  gap: 10px;
+}
+.mini-kpi {
+  padding: 13px 15px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.mini-kpi-label {
+  color: var(--faint);
+  font-size: .66rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-weight: 820;
+}
+.mini-kpi-value {
+  margin-top: 5px;
+  color: var(--ink);
+  font-size: .86rem;
+  font-weight: 780;
+  word-break: break-word;
+}
+.security-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.security-item {
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255,255,255,.04);
+}
+.security-label {
+  color: var(--faint);
+  font-size: .66rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-weight: 820;
+}
+.security-value {
+  margin-top: 6px;
+  color: var(--ink);
+  font-size: .92rem;
+  font-weight: 780;
+  word-break: break-word;
+}
+.security-note {
+  margin-top: 4px;
+  color: var(--faint);
+  font-size: .72rem;
+  line-height: 1.5;
+}
+.security-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  align-items: center;
+}
+
 /* ─── Empty states ───────────────────────────── */
 .empty-state {
   display: flex;
@@ -649,6 +806,9 @@ a { color: inherit; text-decoration: none; }
   .sidebar-item { flex: 1; min-width: 110px; border-top: 0; border-left: 1px solid var(--border); }
   .sidebar-item:first-of-type { border-left: 0; }
   .connect-grid { grid-template-columns: 1fr; }
+  .notice-grid { grid-template-columns: 1fr; }
+  .security-grid { grid-template-columns: 1fr; }
+  .security-actions { grid-template-columns: 1fr; }
   .accounts-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 540px) {
@@ -696,26 +856,26 @@ a { color: inherit; text-decoration: none; }
     <aside class="sidebar">
       <div class="sidebar-section">Conta</div>
 
-      <button class="sidebar-item active" type="button">
+      <button class="sidebar-item" type="button" disabled>
         <span class="sidebar-icon">🏦</span>
         <span>
-          <span class="sidebar-title">Open Finance</span>
-          <span class="sidebar-sub">Bancos e transações</span>
+          <span class="sidebar-title">Open Finance <span class="badge-soon">em breve</span></span>
+          <span class="sidebar-sub">Integração em teste</span>
         </span>
       </button>
 
-      <button class="sidebar-item" type="button" disabled>
+      <button class="sidebar-item active" type="button" data-section="security" onclick="showSettingsSection('security')">
         <span class="sidebar-icon">🔐</span>
         <span>
-          <span class="sidebar-title">Segurança <span class="badge-soon">em breve</span></span>
+          <span class="sidebar-title">Segurança</span>
           <span class="sidebar-sub">Senha e sessões ativas</span>
         </span>
       </button>
 
-      <button class="sidebar-item" type="button" disabled>
+      <button class="sidebar-item" type="button" data-section="notifications" onclick="showSettingsSection('notifications')">
         <span class="sidebar-icon">🔔</span>
         <span>
-          <span class="sidebar-title">Notificações <span class="badge-soon">em breve</span></span>
+          <span class="sidebar-title">Notificações</span>
           <span class="sidebar-sub">Alertas e lembretes</span>
         </span>
       </button>
@@ -723,6 +883,7 @@ a { color: inherit; text-decoration: none; }
 
     <!-- Main content -->
     <main class="main">
+      <section class="settings-section" id="section-open-finance">
 
       <!-- Stats -->
       <div class="card" style="overflow:hidden">
@@ -884,6 +1045,156 @@ a { color: inherit; text-decoration: none; }
         </div>
       </div>
 
+      </section>
+
+      <section class="settings-section" id="section-security" hidden>
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <div class="card-title">Dados da conta</div>
+              <div class="card-sub">Informações usadas para login, recuperação e vínculo com o WhatsApp</div>
+            </div>
+            <button class="btn-sm" type="button" onclick="loadSecuritySettings()">↻ Atualizar</button>
+          </div>
+          <div class="card-body">
+            <div class="security-grid">
+              <div class="security-item">
+                <div class="security-label">E-mail</div>
+                <div class="security-value" id="security-email-value">Carregando...</div>
+                <div class="security-note" id="security-email-note">Usado para login e recuperação de senha.</div>
+              </div>
+              <div class="security-item">
+                <div class="security-label">Telefone / WhatsApp</div>
+                <div class="security-value" id="security-phone-value">Carregando...</div>
+                <div class="security-note" id="security-phone-note">Usado para vincular o bot à sua conta.</div>
+              </div>
+              <div class="security-item">
+                <div class="security-label">Plano</div>
+                <div class="security-value" id="security-plan-value">Carregando...</div>
+                <div class="security-note" id="security-plan-note">Status atual da assinatura.</div>
+              </div>
+              <div class="security-item">
+                <div class="security-label">Sessão do dashboard</div>
+                <div class="security-value" id="security-session-value">Carregando...</div>
+                <div class="security-note">Este acesso expira automaticamente.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <div class="card-title">Senha</div>
+              <div class="card-sub">Envie um link seguro para criar uma nova senha</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="security-actions">
+              <div>
+                <div class="notification-title">Resetar senha por e-mail</div>
+                <div class="notification-sub" id="security-reset-copy">O link expira em 30 minutos e abre uma página segura para definir a nova senha.</div>
+              </div>
+              <button class="btn-connect" type="button" id="security-reset-btn" onclick="sendPasswordResetEmail()" style="width:auto; min-width:190px; padding:0 18px">
+                Enviar e-mail de reset
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-section" id="section-notifications" hidden>
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <div class="card-title">Notificações</div>
+              <div class="card-sub">Escolha quais avisos o PigBank pode enviar para você</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="notice-grid">
+              <div class="notification-list">
+                <div class="email-warning" id="notif-email-warning" hidden>
+                  <div>
+                    <div class="email-warning-title">Adicione um e-mail para ativar estes avisos</div>
+                    <div class="email-warning-sub">Dicas de uso e insights financeiros são enviados por e-mail. Sem um e-mail vinculado, esses toggles ficam bloqueados.</div>
+                  </div>
+                  <button class="btn-sm" type="button" id="notif-email-action" onclick="showSettingsSection('security')">Adicionar e-mail</button>
+                </div>
+
+                <div class="notification-row">
+                  <div class="notification-copy">
+                    <div class="notification-title">Dicas de uso do bot</div>
+                    <div class="notification-sub">Receba sugestões para aproveitar melhor comandos, relatórios e recursos do PigBank.</div>
+                  </div>
+                  <label class="switch" aria-label="Ativar dicas de uso do bot por e-mail">
+                    <input type="checkbox" id="notif-tip-email" onchange="updateNotificationSettings({ tip_email_enabled: this.checked })">
+                    <span class="switch-slider"></span>
+                  </label>
+                </div>
+
+                <div class="notification-row">
+                  <div class="notification-copy">
+                    <div class="notification-title">Insights financeiros</div>
+                    <div class="notification-sub">Receba análises e alertas quando o PigBank encontrar padrões úteis nos seus dados.</div>
+                  </div>
+                  <label class="switch" aria-label="Ativar insights financeiros por e-mail">
+                    <input type="checkbox" id="notif-insight-email" onchange="updateNotificationSettings({ insight_email_enabled: this.checked })">
+                    <span class="switch-slider"></span>
+                  </label>
+                </div>
+
+                <div class="notification-row">
+                  <div class="notification-copy">
+                    <div class="notification-title">Resumo diário</div>
+                    <div class="notification-sub">Controle o envio do resumo automático do bot no horário escolhido.</div>
+                  </div>
+                  <label class="switch" aria-label="Ativar resumo diário">
+                    <input type="checkbox" id="notif-daily-report" onchange="updateNotificationSettings({ daily_report_enabled: this.checked })">
+                    <span class="switch-slider"></span>
+                  </label>
+                </div>
+
+                <label class="notification-row" for="notif-daily-hour">
+                  <div class="notification-copy">
+                    <div class="notification-title">Horário do resumo</div>
+                    <div class="notification-sub">O horário é salvo por usuário e usado pelo envio automático.</div>
+                  </div>
+                  <select class="quiet-select" id="notif-daily-hour" onchange="updateNotificationSettings({ daily_report_hour: Number(this.value), daily_report_minute: 0 })">
+                    <option value="6">06:00</option>
+                    <option value="7">07:00</option>
+                    <option value="8">08:00</option>
+                    <option value="9">09:00</option>
+                    <option value="10">10:00</option>
+                    <option value="11">11:00</option>
+                    <option value="12">12:00</option>
+                    <option value="18">18:00</option>
+                    <option value="19">19:00</option>
+                    <option value="20">20:00</option>
+                    <option value="21">21:00</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="mini-kpis">
+                <div class="mini-kpi">
+                  <div class="mini-kpi-label">Destino</div>
+                  <div class="mini-kpi-value" id="notif-email-value">Carregando...</div>
+                </div>
+                <div class="mini-kpi">
+                  <div class="mini-kpi-label">Status</div>
+                  <div class="mini-kpi-value" id="notif-status-value">Carregando preferências</div>
+                </div>
+                <div class="info-banner">
+                  <span class="info-banner-icon">💡</span>
+                  <span>Você pode pausar dicas e insights separadamente sem afetar os fluxos do WhatsApp.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
     </main>
   </div>
 </div>
@@ -936,6 +1247,179 @@ function showToast(msg, type="ok") {
   el.className = `show ${type}`;
   clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => el.className="", 2400);
+}
+
+/* ── Settings sections ───────────────────────── */
+let notificationSettingsLoaded = false;
+const SECTION_COPY = {
+  "open-finance": {
+    title: "Conexões bancárias",
+    sub: "Conecte seus bancos via Open Finance para sincronizar saldos e transações automaticamente — sem precisar lançar nada no chat.",
+  },
+  security: {
+    title: "Segurança",
+    sub: "Confira seus dados de acesso, telefone vinculado e envie um link seguro para resetar sua senha.",
+  },
+  notifications: {
+    title: "Notificações",
+    sub: "Controle lembretes, resumos e e-mails úteis do PigBank sem mexer nas suas conexões bancárias.",
+  },
+};
+
+function showSettingsSection(section) {
+  const target = SECTION_COPY[section] ? section : "open-finance";
+  document.querySelectorAll(".settings-section").forEach(el => {
+    el.hidden = el.id !== `section-${target}`;
+  });
+  document.querySelectorAll(".sidebar-item[data-section]").forEach(el => {
+    el.classList.toggle("active", el.dataset.section === target);
+  });
+  document.querySelector(".page-title").textContent = SECTION_COPY[target].title;
+  document.querySelector(".page-sub").textContent = SECTION_COPY[target].sub;
+  const url = new URL(window.location.href);
+  url.searchParams.set("view", target);
+  window.history.replaceState({}, "", url);
+  if (target === "security") loadSecuritySettings();
+  if (target === "notifications" && !notificationSettingsLoaded) loadNotificationSettings();
+}
+
+function displayValue(value, fallback="Não vinculado") {
+  return value ? String(value) : fallback;
+}
+
+function formatSessionExpiry() {
+  if (!payload?.exp) return "Sessão ativa";
+  return new Date(payload.exp * 1000).toLocaleString("pt-BR", { dateStyle:"short", timeStyle:"short" });
+}
+
+async function loadSecuritySettings() {
+  if (!USER_ID || !DASHBOARD_TOKEN) {
+    showToast("Sessão inválida — faça login novamente", "error");
+    return;
+  }
+  try {
+    const resp = await fetch(`${API}/settings/${USER_ID}/security`, { headers: authHeaders() });
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const data = await resp.json();
+    const hasEmail = Boolean(data.email);
+    const phoneStatus = data.phone_status === "confirmed" || data.whatsapp_verified_at ? "confirmado" : "não confirmado";
+    document.getElementById("security-email-value").textContent = displayValue(data.email);
+    document.getElementById("security-email-note").textContent = hasEmail
+      ? "Usado para login, notificações por e-mail e recuperação de senha."
+      : "Adicione um e-mail para ativar notificações e reset de senha.";
+    document.getElementById("security-phone-value").textContent = displayValue(data.phone);
+    document.getElementById("security-phone-note").textContent = data.phone ? `WhatsApp ${phoneStatus}.` : "Nenhum telefone vinculado a esta conta.";
+    document.getElementById("security-plan-value").textContent = displayValue(data.plan, "Plano não identificado");
+    document.getElementById("security-plan-note").textContent = data.plan_expires_at ? `Expira em ${fmtDate(data.plan_expires_at)}.` : "Status atual da assinatura.";
+    document.getElementById("security-session-value").textContent = formatSessionExpiry();
+    document.getElementById("security-reset-btn").disabled = !hasEmail;
+    document.getElementById("security-reset-copy").textContent = hasEmail
+      ? `O link será enviado para ${data.email} e expira em 30 minutos.`
+      : "Vincule um e-mail à conta antes de solicitar reset de senha.";
+  } catch (err) {
+    showToast(err.message || "Erro ao carregar segurança", "error");
+  }
+}
+
+async function sendPasswordResetEmail() {
+  const btn = document.getElementById("security-reset-btn");
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = "Enviando...";
+  try {
+    const resp = await fetch(`${API}/settings/${USER_ID}/password-reset`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const data = await resp.json();
+    showToast(data.message || "E-mail enviado", "ok");
+  } catch (err) {
+    showToast(err.message || "Erro ao enviar reset", "error");
+  } finally {
+    btn.textContent = original;
+    await loadSecuritySettings();
+  }
+}
+
+function setNotificationControlsDisabled(disabled) {
+  ["notif-tip-email", "notif-insight-email", "notif-daily-report", "notif-daily-hour"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = disabled;
+  });
+}
+
+function applyNotificationSettings(data) {
+  const email = data.email || "E-mail não vinculado";
+  const tipEmail = Boolean(data.tip_email_enabled ?? data.engagement_email_enabled);
+  const insightEmail = Boolean(data.insight_email_enabled ?? data.engagement_email_enabled);
+  const daily = Boolean(data.daily_report_enabled);
+  const hour = Number(data.daily_report_hour ?? 9);
+  const emailAvailable = Boolean(data.email_notifications_available);
+  const emailWarning = document.getElementById("notif-email-warning");
+  document.getElementById("notif-email-value").textContent = email;
+  if (emailWarning) emailWarning.hidden = emailAvailable;
+  document.getElementById("notif-tip-email").checked = tipEmail;
+  document.getElementById("notif-insight-email").checked = insightEmail;
+  document.getElementById("notif-tip-email").disabled = !emailAvailable;
+  document.getElementById("notif-insight-email").disabled = !emailAvailable;
+  document.getElementById("notif-daily-report").checked = daily;
+  document.getElementById("notif-daily-hour").value = String(hour);
+  document.getElementById("notif-daily-hour").disabled = !daily;
+  document.getElementById("notif-status-value").textContent = [
+    emailAvailable ? (tipEmail ? "dicas ativas" : "dicas pausadas") : "e-mail não vinculado",
+    emailAvailable ? (insightEmail ? "insights ativos" : "insights pausados") : "notificações por e-mail pausadas",
+    daily ? `resumo às ${String(hour).padStart(2, "0")}:00` : "resumo pausado",
+  ].join(" · ");
+}
+
+async function loadNotificationSettings() {
+  if (!USER_ID || !DASHBOARD_TOKEN) {
+    showToast("Sessão inválida — faça login novamente", "error");
+    return;
+  }
+  setNotificationControlsDisabled(true);
+  try {
+    const resp = await fetch(`${API}/settings/${USER_ID}/notifications`, { headers: authHeaders() });
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const data = await resp.json();
+    applyNotificationSettings(data);
+    notificationSettingsLoaded = true;
+  } catch (err) {
+    showToast(err.message || "Erro ao carregar notificações", "error");
+  } finally {
+    const daily = document.getElementById("notif-daily-report")?.checked;
+    const hasEmail = document.getElementById("notif-email-value")?.textContent !== "E-mail não vinculado";
+    setNotificationControlsDisabled(false);
+    document.getElementById("notif-tip-email").disabled = !hasEmail;
+    document.getElementById("notif-insight-email").disabled = !hasEmail;
+    document.getElementById("notif-daily-hour").disabled = !daily;
+  }
+}
+
+async function updateNotificationSettings(patch) {
+  setNotificationControlsDisabled(true);
+  try {
+    const resp = await fetch(`${API}/settings/${USER_ID}/notifications`, {
+      method: "PATCH",
+      headers: authHeaders({ "Content-Type":"application/json" }),
+      body: JSON.stringify(patch),
+    });
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const data = await resp.json();
+    applyNotificationSettings(data);
+    showToast("Preferências salvas", "ok");
+  } catch (err) {
+    showToast(err.message || "Erro ao salvar notificações", "error");
+    await loadNotificationSettings();
+  } finally {
+    const daily = document.getElementById("notif-daily-report")?.checked;
+    const hasEmail = document.getElementById("notif-email-value")?.textContent !== "E-mail não vinculado";
+    setNotificationControlsDisabled(false);
+    document.getElementById("notif-tip-email").disabled = !hasEmail;
+    document.getElementById("notif-insight-email").disabled = !hasEmail;
+    document.getElementById("notif-daily-hour").disabled = !daily;
+  }
 }
 
 /* ── Bank select ─────────────────────────────── */
@@ -1261,6 +1745,7 @@ async function disconnectAll() {
 if (DASHBOARD_TOKEN) {
   document.getElementById("dashboard-link").href = `/app?token=${encodeURIComponent(DASHBOARD_TOKEN)}`;
 }
+showSettingsSection(["security", "notifications"].includes(params.get("view")) ? params.get("view") : "security");
 loadData();
 </script>
 </body>

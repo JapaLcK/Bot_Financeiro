@@ -87,6 +87,8 @@ async def _check_and_send() -> None:
         last_tip         = user["last_tip_sent_at"]
         last_insight     = user["last_insight_sent_at"]
         last_reeng       = user["last_reengagement_sent_at"]
+        tip_opt_out      = bool(user.get("tip_email_opt_out", False))
+        insight_opt_out  = bool(user.get("insight_email_opt_out", False))
 
         # Usuário nunca usou o bot → sem dados de atividade → pula
         if last_activity is None:
@@ -118,7 +120,7 @@ async def _check_and_send() -> None:
 
         # ── Dica mensal ──────────────────────────────────────────────────────
         tip_sent_now = False
-        should_send_tip = last_tip is None or last_tip < monthly_threshold
+        should_send_tip = not tip_opt_out and (last_tip is None or last_tip < monthly_threshold)
 
         if should_send_tip:
             ok = await loop.run_in_executor(None, send_tip_email, email, user_id)
@@ -139,7 +141,7 @@ async def _check_and_send() -> None:
         if tip_sent_now:
             continue
 
-        should_send_insight = last_insight is None or last_insight < monthly_threshold
+        should_send_insight = not insight_opt_out and (last_insight is None or last_insight < monthly_threshold)
 
         if should_send_insight:
             ok = await loop.run_in_executor(None, send_insight_email, email, user_id)

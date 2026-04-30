@@ -489,7 +489,23 @@ def init_db():
         alter table auth_accounts add column if not exists last_tip_sent_at timestamptz
         """,
         """
+        alter table auth_accounts add column if not exists
+          tip_email_opt_out boolean not null default false
+        """,
+        """
         alter table auth_accounts add column if not exists last_insight_sent_at timestamptz
+        """,
+        """
+        alter table auth_accounts add column if not exists
+          insight_email_opt_out boolean not null default false
+        """,
+        """
+        update auth_accounts
+        set tip_email_opt_out = true,
+            insight_email_opt_out = true
+        where engagement_opt_out = true
+          and tip_email_opt_out = false
+          and insight_email_opt_out = false
         """,
         """
         alter table auth_accounts add column if not exists last_reengagement_sent_at timestamptz

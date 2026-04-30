@@ -355,7 +355,13 @@ def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select email, plan, plan_expires_at, created_at, phone_e164, phone_status, phone_confirmed_at, whatsapp_verified_at from auth_accounts where user_id=%s",
+                """
+                select email, plan, plan_expires_at, created_at, phone_e164, phone_status,
+                       phone_confirmed_at, whatsapp_verified_at, engagement_opt_out,
+                       tip_email_opt_out, insight_email_opt_out
+                from auth_accounts
+                where user_id=%s
+                """,
                 (user_id,),
             )
             return cur.fetchone()

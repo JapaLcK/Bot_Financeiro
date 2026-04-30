@@ -61,7 +61,16 @@ from db import (
     disconnect_open_finance_connection,
     get_dashboard_market_rates,
     get_open_finance_snapshot,
+    get_auth_user,
+    get_daily_report_prefs,
+    list_identities_by_user,
     save_pluggy_open_finance_item,
+    set_daily_report_enabled,
+    set_daily_report_hour,
+    set_engagement_opt_out,
+    set_tip_email_opt_out,
+    set_insight_email_opt_out,
+    sync_engagement_opt_out,
     update_pluggy_open_finance_item_status,
     investment_deposit_from_account,
     investment_withdraw_to_account,
@@ -224,6 +233,27 @@ async def ensure_open_finance_tables():
         """
         create index if not exists idx_open_finance_transactions_account_date
           on open_finance_transactions(account_id, transaction_date desc)
+        """,
+    ]
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            for stmt in statements:
+                await cur.execute(stmt)
+        await conn.commit()
+
+
+async def ensure_notification_preference_columns():
+    """Colunas usadas pela tela de notificações."""
+    statements = [
+        "ALTER TABLE auth_accounts ADD COLUMN IF NOT EXISTS tip_email_opt_out BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE auth_accounts ADD COLUMN IF NOT EXISTS insight_email_opt_out BOOLEAN NOT NULL DEFAULT FALSE",
+        """
+        UPDATE auth_accounts
+        SET tip_email_opt_out = TRUE,
+            insight_email_opt_out = TRUE
+        WHERE engagement_opt_out = TRUE
+          AND tip_email_opt_out = FALSE
+          AND insight_email_opt_out = FALSE
         """,
     ]
     async with await db_connect() as conn:
@@ -636,12 +666,14 @@ async def lifespan(app: FastAPI):
             ensure_budget_table(),
             ensure_investment_metadata_columns(),
             ensure_open_finance_tables(),
+            ensure_notification_preference_columns(),
             ensure_admin_tables(),
         ),
     )
     print("OK: Budget table ready", flush=True)
     print("OK: Investment metadata ready", flush=True)
     print("OK: Open Finance tables ready", flush=True)
+    print("OK: Notification preferences ready", flush=True)
     print("OK: Admin observability tables ready", flush=True)
 
     # ── 3. Warnings + detecção de usuário em paralelo ─────────────────────────
@@ -1553,6 +1585,15 @@ class OpenFinancePluggyItemPayload(BaseModel):
     item: dict
 
 
+class NotificationSettingsPayload(BaseModel):
+    engagement_email_enabled: bool | None = None
+    tip_email_enabled: bool | None = None
+    insight_email_enabled: bool | None = None
+    daily_report_enabled: bool | None = None
+    daily_report_hour: int | None = None
+    daily_report_minute: int | None = None
+
+
 def _investment_action_note(action: str, name: str, issuer: str | None = None, note: str | None = None) -> str:
     clean_name = (name or "").strip() or "investimento"
     clean_issuer = (issuer or "").strip()
@@ -1684,6 +1725,135 @@ async def delete_investment_route(request: Request, user_id: int, name: str):
         raise HTTPException(status_code=400, detail=message) from exc
 
     return {"ok": True, "launch_id": launch_id, "name": canon}
+
+
+async def _get_notification_settings(user_id: int) -> dict:
+    auth_user, daily_prefs = await asyncio.gather(
+        asyncio.to_thread(get_auth_user, user_id),
+        asyncio.to_thread(get_daily_report_prefs, user_id),
+    )
+    auth_user = auth_user or {}
+    daily_prefs = daily_prefs or {}
+    email = auth_user.get("email")
+    email_available = bool(email)
+    engagement_opt_out = bool(auth_user.get("engagement_opt_out", False))
+    tip_email_enabled = email_available and not engagement_opt_out and not bool(auth_user.get("tip_email_opt_out", False))
+    insight_email_enabled = email_available and not engagement_opt_out and not bool(auth_user.get("insight_email_opt_out", False))
+    return {
+        "ok": True,
+        "email": email,
+        "email_notifications_available": email_available,
+        "engagement_email_enabled": tip_email_enabled or insight_email_enabled,
+        "tip_email_enabled": tip_email_enabled,
+        "insight_email_enabled": insight_email_enabled,
+        "daily_report_enabled": bool(daily_prefs.get("enabled", True)),
+        "daily_report_hour": int(daily_prefs.get("hour", 9)),
+        "daily_report_minute": int(daily_prefs.get("minute", 0)),
+    }
+
+
+async def _get_security_settings(user_id: int) -> dict:
+    auth_user, identities = await asyncio.gather(
+        asyncio.to_thread(get_auth_user, user_id),
+        asyncio.to_thread(list_identities_by_user, user_id),
+    )
+    auth_user = auth_user or {}
+    identities = identities or []
+    whatsapp_identity = next((i for i in identities if i.get("provider") == "whatsapp"), None)
+    phone = auth_user.get("phone_e164") or (whatsapp_identity or {}).get("external_id")
+    return json.loads(jdump({
+        "ok": True,
+        "user_id": user_id,
+        "email": auth_user.get("email"),
+        "phone": phone,
+        "phone_status": auth_user.get("phone_status"),
+        "phone_confirmed_at": auth_user.get("phone_confirmed_at"),
+        "whatsapp_verified_at": auth_user.get("whatsapp_verified_at"),
+        "plan": auth_user.get("plan"),
+        "plan_expires_at": auth_user.get("plan_expires_at"),
+        "created_at": auth_user.get("created_at"),
+        "identities": identities,
+    }))
+
+
+@app.get("/settings/{user_id}/security")
+async def security_settings_route(request: Request, user_id: int):
+    _authorize_dashboard_access(request, user_id)
+    return await _get_security_settings(user_id)
+
+
+@app.post("/settings/{user_id}/password-reset")
+@limiter.limit("3/minute")
+async def security_password_reset_route(request: Request, user_id: int):
+    _authorize_dashboard_access(request, user_id)
+    auth_user = await asyncio.to_thread(get_auth_user, user_id)
+    email = (auth_user or {}).get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="Adicione um e-mail antes de resetar a senha.")
+
+    from db import create_password_reset_token
+    from core.services.email_service import send_password_reset_email
+
+    token = await asyncio.to_thread(create_password_reset_token, email)
+    if not token:
+        raise HTTPException(status_code=404, detail="Conta de e-mail não encontrada.")
+    reset_url = f"{DASHBOARD_URL}/reset-password?token={token}"
+    sent = await asyncio.to_thread(send_password_reset_email, email.strip().lower(), reset_url)
+    if not sent:
+        raise HTTPException(status_code=500, detail="Não foi possível enviar o e-mail de reset.")
+    return {"ok": True, "message": "Enviamos um link de redefinição de senha para o seu e-mail."}
+
+
+@app.get("/settings/{user_id}/notifications")
+async def notification_settings_route(request: Request, user_id: int):
+    _authorize_dashboard_access(request, user_id)
+    return await _get_notification_settings(user_id)
+
+
+@app.patch("/settings/{user_id}/notifications")
+async def update_notification_settings_route(
+    request: Request,
+    user_id: int,
+    payload: NotificationSettingsPayload,
+):
+    _authorize_dashboard_access(request, user_id)
+
+    touches_email_prefs = (
+        payload.engagement_email_enabled is not None
+        or payload.tip_email_enabled is not None
+        or payload.insight_email_enabled is not None
+    )
+    if touches_email_prefs:
+        auth_user = await asyncio.to_thread(get_auth_user, user_id)
+        if not auth_user or not auth_user.get("email"):
+            raise HTTPException(status_code=400, detail="Vincule um e-mail para configurar notificações por e-mail.")
+
+    if payload.engagement_email_enabled is not None:
+        await asyncio.to_thread(set_engagement_opt_out, user_id, not payload.engagement_email_enabled)
+
+    if payload.tip_email_enabled is not None:
+        await asyncio.to_thread(set_tip_email_opt_out, user_id, not payload.tip_email_enabled)
+
+    if payload.insight_email_enabled is not None:
+        await asyncio.to_thread(set_insight_email_opt_out, user_id, not payload.insight_email_enabled)
+
+    if payload.tip_email_enabled is not None or payload.insight_email_enabled is not None:
+        await asyncio.to_thread(sync_engagement_opt_out, user_id)
+
+    if payload.daily_report_hour is not None or payload.daily_report_minute is not None:
+        current = await asyncio.to_thread(get_daily_report_prefs, user_id)
+        hour = payload.daily_report_hour if payload.daily_report_hour is not None else int(current.get("hour", 9))
+        minute = payload.daily_report_minute if payload.daily_report_minute is not None else int(current.get("minute", 0))
+        if not 0 <= int(hour) <= 23:
+            raise HTTPException(status_code=400, detail="Hora inválida.")
+        if not 0 <= int(minute) <= 59:
+            raise HTTPException(status_code=400, detail="Minuto inválido.")
+        await asyncio.to_thread(set_daily_report_hour, user_id, int(hour), int(minute))
+
+    if payload.daily_report_enabled is not None:
+        await asyncio.to_thread(set_daily_report_enabled, user_id, payload.daily_report_enabled)
+
+    return await _get_notification_settings(user_id)
 
 
 @app.get("/open-finance/{user_id}")
