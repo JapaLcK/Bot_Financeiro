@@ -2019,8 +2019,25 @@ async def open_finance_pluggy_webhook(request: Request):
     Recebe eventos da Pluggy e responde rapido.
     Trabalho pesado de sync deve rodar fora do request.
     """
+    secret = (os.getenv("PLUGGY_WEBHOOK_SECRET") or "").strip()
+    if not secret:
+        raise HTTPException(status_code=503, detail="Webhook não configurado.")
+
     try:
-        event = await request.json()
+        secret_bytes = _base64.b64decode(secret, validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Webhook não configurado.") from exc
+
+    raw_body = await request.body()
+    received_sig = (request.headers.get("X-HMAC-SHA512-Signature") or "").strip()
+    expected_sig = _base64.b64encode(
+        _hmac.new(secret_bytes, raw_body, _hashlib.sha512).digest()
+    ).decode()
+    if not received_sig or not _hmac.compare_digest(received_sig, expected_sig):
+        raise HTTPException(status_code=401, detail="Assinatura inválida.")
+
+    try:
+        event = json.loads(raw_body)
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Webhook inválido.") from exc
 
