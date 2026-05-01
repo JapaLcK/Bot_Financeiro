@@ -636,6 +636,9 @@ let launchesPage     = 1;
 const LAUNCHES_LIMIT = 25;
 let launchesLoading  = false;
 let alertsDismissed  = false;
+let monthRequestSeq  = 0;
+let monthAbortController = null;
+const monthDataCache = new Map();
 
 const NOW = new Date();
 let viewYear = NOW.getFullYear(), viewMonth = NOW.getMonth() + 1;
@@ -645,6 +648,20 @@ const PT_MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
 const CAT_CLR   = ["#f87171","#fb923c","#fbbf24","#a78bfa","#60a5fa","#34d399","#e879f9","#38bdf8","#4ade80","#94a3b8"];
 const PALETTE   = ["#a78bfa","#60a5fa","#34d399","#fbbf24","#f87171","#e879f9","#38bdf8","#4ade80","#fb923c","#94a3b8"];
 const PKT_CLR   = ["var(--purple)","var(--blue)","var(--green)"];
+
+function monthCacheKey(year, month, page = 1) {
+  return `${year}-${String(month).padStart(2, "0")}-${page}`;
+}
+
+function cacheMonthData(data) {
+  if (!data || !data.year || !data.month) return;
+  const page = data.launches_pagination?.page || 1;
+  monthDataCache.set(monthCacheKey(data.year, data.month, page), data);
+}
+
+function isCurrentViewData(data) {
+  return Number(data?.year) === Number(viewYear) && Number(data?.month) === Number(viewMonth);
+}
 
 function logoutDashboard() {
   localStorage.removeItem('finbot_token');
@@ -1238,24 +1255,59 @@ function changeMonth(d) {
   btn.classList.add("spinning");
   btn.disabled = true;
 
-  requestMonthPage(1, { smoothScroll: false });
+  const cached = monthDataCache.get(monthCacheKey(viewYear, viewMonth, 1));
+  if (cached) {
+    lastData = cached;
+    render(cached);
+    stopSpin();
+    setLaunchesLoading(false);
+  }
+
+  requestMonthPage(1, { smoothScroll: false, preferHttp: true, background: Boolean(cached) });
 }
 
-async function fetchMonthHttp(year, month, page = 1, limit = LAUNCHES_LIMIT) {
+async function fetchMonthHttp(year, month, page = 1, limit = LAUNCHES_LIMIT, { background = false } = {}) {
+  const seq = ++monthRequestSeq;
+  if (monthAbortController) {
+    monthAbortController.abort();
+  }
+  monthAbortController = new AbortController();
+
   try {
     const r = await fetch(
       `${API}/data/${USER_ID}?year=${year}&month=${month}&page=${page}&limit=${limit}`,
-      { headers: { Authorization: `Bearer ${DASHBOARD_TOKEN}` } }
+      {
+        headers: { Authorization: `Bearer ${DASHBOARD_TOKEN}` },
+        signal: monthAbortController.signal,
+      }
     );
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
+    if (seq !== monthRequestSeq) return;
+    if (!isCurrentViewData(data)) {
+      if (!background) {
+        stopSpin();
+        setLaunchesLoading(false);
+      }
+      return;
+    }
+
     lastData = data;
+    cacheMonthData(data);
     render(data);
     stopSpin();
     setLaunchesLoading(false);
   } catch(err) {
+    if (err.name === "AbortError") return;
     console.error("fetchMonthHttp error:", err);
-    stopSpin();
-    setLaunchesLoading(false);
+    if (seq === monthRequestSeq && !background) {
+      stopSpin();
+      setLaunchesLoading(false);
+    }
+  } finally {
+    if (seq === monthRequestSeq) {
+      monthAbortController = null;
+    }
   }
 }
 
@@ -1321,7 +1373,9 @@ function connect() {
     const msg = JSON.parse(e.data);
 
     if (msg.type === "snapshot" || msg.type === "month_data") {
+      if (!isCurrentViewData(msg.data)) return;
       lastData = msg.data;
+      cacheMonthData(msg.data);
       render(msg.data);
       stopSpin();
       setLaunchesLoading(false);
@@ -1331,6 +1385,7 @@ function connect() {
 
       if (serverYear === viewYear && serverMonth === viewMonth) {
         lastData = msg.data;
+        cacheMonthData(msg.data);
         render(msg.data);
         showToast();
       }
@@ -1392,15 +1447,17 @@ function scrollLaunchesToTop() {
   if (wrap) wrap.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function requestMonthPage(page, { smoothScroll = true } = {}) {
+function requestMonthPage(page, { smoothScroll = true, preferHttp = false, background = false } = {}) {
   launchesPage = page;
-  setLaunchesLoading(true);
+  if (!background) {
+    setLaunchesLoading(true);
+  }
 
   if (smoothScroll) {
     scrollLaunchesToTop();
   }
 
-  if (ws && ws.readyState === WebSocket.OPEN) {
+  if (!preferHttp && ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
       type: "get_month",
       year: viewYear,
@@ -1409,7 +1466,7 @@ function requestMonthPage(page, { smoothScroll = true } = {}) {
       limit: LAUNCHES_LIMIT
     }));
   } else {
-    fetchMonthHttp(viewYear, viewMonth, launchesPage, LAUNCHES_LIMIT);
+    fetchMonthHttp(viewYear, viewMonth, launchesPage, LAUNCHES_LIMIT, { background });
   }
 }
 
@@ -1788,6 +1845,7 @@ async function fetchHistory() {
    RENDER
 ═══════════════════════════════════════════════════════════════════════ */
 function render(d) {
+  cacheMonthData(d);
   const grid = document.getElementById("grid");
   if (d.launches_pagination?.page) {
     launchesPage = d.launches_pagination.page;

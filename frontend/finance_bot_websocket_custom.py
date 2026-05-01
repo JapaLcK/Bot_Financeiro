@@ -278,6 +278,32 @@ def _month_range(year: int, month: int):
 
 # ─── Core data fetcher ───────────────────────────────────────────────────────
 
+_DASHBOARD_CURRENT_CACHE_TTL_SECONDS = 45
+_dashboard_current_cache: Dict[int, tuple[float, Any, Any]] = {}
+
+
+def _invalidate_dashboard_current_cache(user_id: int) -> None:
+    _dashboard_current_cache.pop(int(user_id), None)
+
+
+async def _get_dashboard_current_state(user_id: int):
+    now_mono = _startup_time.monotonic()
+    cached = _dashboard_current_cache.get(int(user_id))
+    if cached and now_mono - cached[0] < _DASHBOARD_CURRENT_CACHE_TTL_SECONDS:
+        return cached[1], cached[2]
+
+    current_investments, market_rates = await asyncio.gather(
+        asyncio.to_thread(accrue_all_investments, user_id),
+        asyncio.to_thread(get_dashboard_market_rates),
+    )
+    _dashboard_current_cache[int(user_id)] = (
+        _startup_time.monotonic(),
+        current_investments,
+        market_rates,
+    )
+    return current_investments, market_rates
+
+
 async def get_financial_data(user_id: int, year: int = None, month: int = None, page: int = 1, limit: int = 25) -> dict:
     """
     Fetch full financial snapshot for user_id.
@@ -293,8 +319,7 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None, 
     page = max(int(page or 1), 1)
     limit = max(min(int(limit or 25), 100), 1)
     offset = (page - 1) * limit
-    current_investments = await asyncio.to_thread(accrue_all_investments, user_id)
-    market_rates = await asyncio.to_thread(get_dashboard_market_rates)
+    current_investments, market_rates = await _get_dashboard_current_state(user_id)
 
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
@@ -1709,6 +1734,7 @@ async def create_investment_route(request: Request, user_id: int, payload: Inves
         message = "Saldo insuficiente na conta para o aporte inicial." if str(exc) == "INSUFFICIENT_ACCOUNT" else str(exc)
         raise HTTPException(status_code=400, detail=message) from exc
 
+    _invalidate_dashboard_current_cache(user_id)
     return {
         "ok": True,
         "created": launch_id is not None,
@@ -1735,6 +1761,7 @@ async def deposit_investment_route(request: Request, user_id: int, payload: Inve
         message = "Saldo insuficiente na conta." if str(exc) == "INSUFFICIENT_ACCOUNT" else str(exc)
         raise HTTPException(status_code=400, detail=message) from exc
 
+    _invalidate_dashboard_current_cache(user_id)
     return {"ok": True, "launch_id": launch_id, "account_balance": new_acc, "investment_balance": new_inv, "name": canon}
 
 
@@ -1757,6 +1784,7 @@ async def withdraw_investment_route(request: Request, user_id: int, payload: Inv
         message = "Saldo insuficiente no investimento." if str(exc) == "INSUFFICIENT_INVEST" else str(exc)
         raise HTTPException(status_code=400, detail=message) from exc
 
+    _invalidate_dashboard_current_cache(user_id)
     return {
         "ok": True,
         "launch_id": launch_id,
@@ -1784,6 +1812,7 @@ async def delete_investment_route(request: Request, user_id: int, name: str):
         message = "Zere o saldo antes de remover o investimento." if str(exc) == "INV_NOT_ZERO" else str(exc)
         raise HTTPException(status_code=400, detail=message) from exc
 
+    _invalidate_dashboard_current_cache(user_id)
     return {"ok": True, "launch_id": launch_id, "name": canon}
 
 
