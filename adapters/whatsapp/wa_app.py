@@ -5,11 +5,13 @@ import json
 import logging
 import os
 import socket
+from typing import Any
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from adapters.whatsapp.wa_client import send_template
+from adapters.whatsapp.wa_parse import InboundMessage, extract_messages
 from adapters.whatsapp.wa_runtime import process_payload, verify_webhook_signature
 from config.env import load_app_env
 from core.observability import log_system_event_sync
@@ -36,6 +38,27 @@ VERIFY_TOKEN = (os.getenv("WA_VERIFY_TOKEN") or "").strip()
 APP_SECRET = (os.getenv("WA_APP_SECRET") or "").strip()
 _queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=500)
 WA_DAILY_REPORT_DISABLE_ID = "daily_report_disable"
+
+
+def _env_flag(name: str) -> bool:
+    return (os.getenv(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _serialize_simulated_message(message: InboundMessage) -> dict[str, Any]:
+    return {
+        "wa_id": message.wa_id,
+        "text": message.text,
+        "timestamp": message.timestamp,
+        "attachments": [
+            {
+                "media_id": attachment.media_id,
+                "filename": attachment.filename,
+                "content_type": attachment.content_type,
+            }
+            for attachment in message.attachments
+        ],
+        "raw_type": (message.raw or {}).get("type"),
+    }
 
 
 def _runtime_instance_details() -> dict[str, str | int]:
@@ -226,8 +249,18 @@ async def wa_webhook(request: Request):
 
 
 async def wa_simulate(payload: dict):
+    if _env_flag("WA_SIMULATION_ONLY"):
+        messages = extract_messages(payload)
+        return {
+            "ok": True,
+            "simulation_only": True,
+            "processed_messages": 0,
+            "would_process_messages": len(messages),
+            "messages": [_serialize_simulated_message(message) for message in messages],
+        }
+
     count = await asyncio.to_thread(process_payload, payload)
-    return {"ok": True, "processed_messages": count}
+    return {"ok": True, "simulation_only": False, "processed_messages": count}
 
 
 async def _worker_loop():

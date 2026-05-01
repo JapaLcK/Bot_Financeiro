@@ -102,6 +102,12 @@ DASHBOARD_SESSION_HOURS = float(os.getenv("DASHBOARD_SESSION_HOURS", "12"))
 DB_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "5"))
 STARTUP_STEP_TIMEOUT = int(os.getenv("STARTUP_STEP_TIMEOUT", "12"))
 RUN_BACKGROUND_TASKS = os.getenv("RUN_BACKGROUND_TASKS", "1") != "0"
+ENABLE_DEV_ENDPOINTS = (os.getenv("ENABLE_DEV_ENDPOINTS") or "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 HERE = pathlib.Path(__file__).parent  # directory of this file
 
@@ -766,7 +772,13 @@ async def lifespan(app: FastAPI):
         if not t.done():
             print(f"[lifespan] task '{t.get_name()}' não encerrou a tempo.", file=sys.stderr)
 
-app = FastAPI(title="Finance Dashboard", lifespan=lifespan)
+app = FastAPI(
+    title="Finance Dashboard",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+    lifespan=lifespan,
+)
 
 # Middleware de log de erros HTTP (definido em core/admin_dashboard.py)
 app.middleware("http")(admin_error_logging_middleware)
@@ -786,14 +798,16 @@ async def _wa_webhook(request: Request):
 
 async def _wa_simulate(request: Request):
     from adapters.whatsapp.wa_app import wa_simulate  # noqa: PLC0415
-    return await wa_simulate(request)
+    payload = await request.json()
+    return await wa_simulate(payload)
 
 # Mantem compatibilidade com a rota antiga `/webhook`, usada em configs legadas.
 app.add_api_route("/wa/webhook",     _wa_verify,   methods=["GET"])
 app.add_api_route("/wa/webhook",     _wa_webhook,  methods=["POST"])
 app.add_api_route("/webhook",        _wa_verify,   methods=["GET"])
 app.add_api_route("/webhook",        _wa_webhook,  methods=["POST"])
-app.add_api_route("/wa/dev/simulate", _wa_simulate, methods=["POST"])
+if ENABLE_DEV_ENDPOINTS:
+    app.add_api_route("/wa/dev/simulate", _wa_simulate, methods=["POST"])
 
 # ─── Rate limiting ────────────────────────────────────────────────────────────
 
@@ -803,8 +817,9 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=["https://pigbankai.com"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_credentials=True,
     allow_headers=["*"],
 )
 
