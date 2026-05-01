@@ -82,10 +82,21 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
 .hbtn { background:rgba(255,255,255,.07);border:1px solid var(--glass-border);color:var(--text-2);
-  padding:6px 13px;border-radius:10px;font-size:.77rem;cursor:pointer;
+  min-height:34px;padding:6px 13px;border-radius:10px;font-size:.77rem;cursor:pointer;
   transition:all .2s var(--ease);display:flex;align-items:center;gap:5px;white-space:nowrap; }
 .hbtn:hover  { background:rgba(255,255,255,.14);color:var(--text);border-color:rgba(255,255,255,.24); }
 .hbtn:active { transform:scale(.96); }
+#logout-btn {
+  background:rgba(248,113,113,.12);
+  border-color:rgba(248,113,113,.28);
+  color:#fecaca;
+}
+#logout-btn:hover {
+  background:rgba(248,113,113,.2);
+  border-color:rgba(248,113,113,.42);
+  color:#fff1f2;
+  box-shadow:0 0 18px rgba(248,113,113,.12);
+}
 #ref-icon { display:inline-block;font-size:1rem; }
 .spinning #ref-icon { animation:spin .6s linear infinite; }
 @keyframes spin { to{transform:rotate(360deg)} }
@@ -345,6 +356,7 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
       </div>
       <button class="hbtn" id="refresh-btn" onclick="sendRefresh()"><span id="ref-icon">↻</span> Atualizar</button>
       <button class="hbtn" onclick="exportCSV()">⬇ Exportar</button>
+      <button class="hbtn" id="logout-btn" onclick="logoutDashboard()">Sair</button>
     </div>
   </header>
 
@@ -633,6 +645,11 @@ const PT_MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
 const CAT_CLR   = ["#f87171","#fb923c","#fbbf24","#a78bfa","#60a5fa","#34d399","#e879f9","#38bdf8","#4ade80","#94a3b8"];
 const PALETTE   = ["#a78bfa","#60a5fa","#34d399","#fbbf24","#f87171","#e879f9","#38bdf8","#4ade80","#fb923c","#94a3b8"];
 const PKT_CLR   = ["var(--purple)","var(--blue)","var(--green)"];
+
+function logoutDashboard() {
+  localStorage.removeItem('finbot_token');
+  window.location.href = '/';
+}
 
 /* ═══════════════════════════════════════════════════════════════════════
    FORMATTERS
