@@ -110,9 +110,11 @@ a { color: inherit; text-decoration: none; }
   box-shadow: 0 4px 12px rgba(124,58,237,.28);
 }
 
-.top-actions { display: flex; gap: 8px; align-items: center; }
+.top-actions { position: relative; z-index: 2; display: flex; gap: 8px; align-items: center; }
 .btn-topbar {
-  min-height: 34px;
+  box-sizing: border-box;
+  height: 36px;
+  min-width: 0;
   padding: 0 14px;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -122,10 +124,26 @@ a { color: inherit; text-decoration: none; }
   font-weight: 700;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
+  line-height: 1;
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
   transition: color .14s var(--ease), border-color .14s var(--ease), background .14s var(--ease);
 }
 .btn-topbar:hover { color: var(--ink); border-color: var(--border-hover); background: rgba(255,255,255,.1); }
+.btn-topbar.logout {
+  background: rgba(248,113,113,.1);
+  border-color: rgba(248,113,113,.26);
+  color: #fecaca;
+}
+.btn-topbar.logout:hover {
+  background: rgba(248,113,113,.18);
+  border-color: rgba(248,113,113,.42);
+  color: #fff1f2;
+}
 
 /* ─── Page wrapper ───────────────────────────── */
 .page {
@@ -857,6 +875,7 @@ a { color: inherit; text-decoration: none; }
     <div class="top-actions">
       <a class="btn-topbar" href="/" id="account-link">Minha conta</a>
       <a class="btn-topbar" id="dashboard-link" href="/app">Dashboard →</a>
+      <button class="btn-topbar logout" type="button" id="logout-link" onclick="logoutSettings()">Sair</button>
     </div>
   </div>
 </header>
@@ -1267,6 +1286,19 @@ function fmtDateOnly(v) {
 function authHeaders(extra={}) {
   return { ...extra, Authorization: `Bearer ${DASHBOARD_TOKEN}` };
 }
+function logoutSettings() {
+  localStorage.removeItem("finbot_token");
+  localStorage.setItem("finbot_logout_at", String(Date.now()));
+  window.location.href = "/";
+}
+window.addEventListener("storage", (event) => {
+  if (
+    (event.key === "finbot_token" && event.newValue === null) ||
+    event.key === "finbot_logout_at"
+  ) {
+    window.location.href = "/";
+  }
+});
 async function readApiError(resp) {
   const raw = await resp.text();
   try { return JSON.parse(raw).detail || raw; } catch { return raw || "Erro inesperado"; }

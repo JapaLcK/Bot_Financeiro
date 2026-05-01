@@ -652,6 +652,15 @@ function logoutDashboard() {
   window.location.href = '/';
 }
 
+window.addEventListener('storage', (event) => {
+  if (
+    (event.key === 'finbot_token' && event.newValue === null) ||
+    event.key === 'finbot_logout_at'
+  ) {
+    window.location.href = '/';
+  }
+});
+
 /* ═══════════════════════════════════════════════════════════════════════
    FORMATTERS
 ═══════════════════════════════════════════════════════════════════════ */
