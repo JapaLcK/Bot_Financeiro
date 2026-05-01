@@ -783,6 +783,37 @@ app = FastAPI(
 # Middleware de log de erros HTTP (definido em core/admin_dashboard.py)
 app.middleware("http")(admin_error_logging_middleware)
 
+_SECURITY_HEADERS = {
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' "
+        "https://cdnjs.cloudflare.com https://cdn.pluggy.ai https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' "
+        "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
+        "img-src 'self' data: blob: https:; "
+        "font-src 'self' data: "
+        "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
+        "connect-src 'self' https: wss:; "
+        "frame-src 'self' https://cdn.pluggy.ai; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'; "
+        "object-src 'none'"
+    ),
+}
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    for header, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+    return response
+
 # ─── WhatsApp webhook routes (lazy import) ───────────────────────────────────
 # Importar wa_app no nível de módulo puxava toda a cadeia de lógica do bot
 # (wa_client, wa_runtime, handle_incoming, db, bcrypt, requests…) adicionando
