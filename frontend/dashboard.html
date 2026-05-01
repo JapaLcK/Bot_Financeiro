@@ -648,6 +648,7 @@ const PKT_CLR   = ["var(--purple)","var(--blue)","var(--green)"];
 
 function logoutDashboard() {
   localStorage.removeItem('finbot_token');
+  localStorage.setItem('finbot_logout_at', String(Date.now()));
   window.location.href = '/';
 }
 

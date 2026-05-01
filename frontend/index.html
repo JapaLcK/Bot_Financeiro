@@ -804,6 +804,28 @@ function applyLoggedInState(email, dashUrl) {
   if (authSection) authSection.style.display = 'none';
 }
 
+function applyLoggedOutState() {
+  document.getElementById('nav-cta-guest').style.display = '';
+  document.getElementById('nav-cta-user').style.display = 'none';
+  document.getElementById('nav-user-label').textContent = 'Minha conta';
+
+  const heroDash = document.getElementById('hero-dashboard-btn');
+  heroDash.href = '/app';
+  heroDash.setAttribute('onclick', 'handleDashboardClick(event)');
+
+  document.getElementById('account-center').style.display = 'none';
+  document.getElementById('account-email-display').textContent = 'carregando...';
+  document.getElementById('account-dashboard-link').href = '#';
+  document.getElementById('account-settings-link').href = '#';
+  document.getElementById('account-whatsapp-link').removeAttribute('onclick');
+
+  const authSection = document.getElementById('auth');
+  if (authSection) authSection.style.display = '';
+
+  const successState = document.getElementById('success-state');
+  if (successState) successState.classList.remove('show');
+}
+
 function scrollToAccount() {
   document.getElementById('account-center').scrollIntoView({ behavior: 'smooth' });
 }
@@ -820,7 +842,8 @@ function handleDashboardClick(e) {
 
 function doLogout() {
   localStorage.removeItem('finbot_token');
-  window.location.reload();
+  localStorage.setItem('finbot_logout_at', String(Date.now()));
+  applyLoggedOutState();
 }
 
 async function connectWhatsApp(e) {
@@ -1087,6 +1110,15 @@ document.addEventListener('DOMContentLoaded', () => {
     showPendingDashboardHint();
   }
   checkAuthState();
+});
+
+window.addEventListener('storage', (event) => {
+  if (
+    (event.key === 'finbot_token' && event.newValue === null) ||
+    event.key === 'finbot_logout_at'
+  ) {
+    applyLoggedOutState();
+  }
 });
 
 // ─── Enter key support ────────────────────────────────────────────────────
