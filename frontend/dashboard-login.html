@@ -66,6 +66,19 @@ input:focus { border-color:#7c3aed; background:rgba(124,58,237,0.08); }
 .msg.error { background:rgba(248,113,113,0.12); border:1px solid rgba(248,113,113,0.3); color:#fca5a5; }
 .msg.show { display:block; }
 .back { display:block; text-align:center; margin-top:20px; font-size:13px; color:var(--text-2); text-decoration:none; }
+.legal-note {
+  margin-top: 14px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.legal-note a {
+  color: rgba(255,255,255,.72);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255,255,255,.22);
+}
+.legal-note a:hover { color: var(--text); border-bottom-color: rgba(255,255,255,.42); }
 </style>
 </head>
 <body>
@@ -93,6 +106,10 @@ input:focus { border-color:#7c3aed; background:rgba(124,58,237,0.08); }
     </div>
     <button type="submit" class="btn" id="submit-btn">Entrar</button>
   </form>
+  <p class="legal-note">
+    Ao continuar, você concorda com a
+    <a href="/privacy" target="_blank" rel="noopener">Política de Privacidade</a>.
+  </p>
   <a href="/" class="back">← Voltar para a página inicial</a>
 </div>
 <script>

@@ -279,6 +279,24 @@ a { color: inherit; text-decoration: none; }
 .card-title { font-size: .95rem; font-weight: 800; color: var(--ink); letter-spacing: -.01em; }
 .card-sub { color: var(--muted); font-size: .78rem; margin-top: 3px; line-height: 1.5; }
 .card-body { padding: 18px 20px; }
+.legal-list { display: flex; flex-direction: column; gap: 10px; }
+.legal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color .14s var(--ease), background .14s var(--ease);
+}
+.legal-row:hover { border-color: var(--border-hover); background: rgba(255,255,255,.07); }
+.legal-title { color: var(--ink); font-size: .88rem; font-weight: 780; }
+.legal-sub { color: var(--muted); font-size: .75rem; line-height: 1.45; margin-top: 2px; }
+.legal-arrow { color: var(--faint); font-size: 1rem; flex-shrink: 0; }
 
 /* ─── Stats strip ────────────────────────────── */
 .stats-strip {
@@ -924,6 +942,14 @@ a { color: inherit; text-decoration: none; }
           <span class="sidebar-sub">Alertas e lembretes</span>
         </span>
       </button>
+
+      <button class="sidebar-item" type="button" data-section="legal" onclick="showSettingsSection('legal')">
+        <span class="sidebar-icon">📜</span>
+        <span>
+          <span class="sidebar-title">Legal</span>
+          <span class="sidebar-sub">Privacidade e termos</span>
+        </span>
+      </button>
     </aside>
 
     <!-- Main content -->
@@ -1248,6 +1274,28 @@ a { color: inherit; text-decoration: none; }
         </div>
       </section>
 
+      <section class="settings-section" id="section-legal" hidden>
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <div class="card-title">Privacidade e documentos</div>
+              <div class="card-sub">Consulte as políticas aplicáveis ao uso do PigBank AI</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="legal-list">
+              <a class="legal-row" href="/privacy" target="_blank" rel="noopener">
+                <span>
+                  <span class="legal-title">Política de Privacidade</span>
+                  <span class="legal-sub">Dados coletados, bases legais, subprocessadores, retenção e direitos LGPD.</span>
+                </span>
+                <span class="legal-arrow">→</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
     </main>
   </div>
 </div>
@@ -1340,6 +1388,10 @@ const SECTION_COPY = {
   notifications: {
     title: "Notificações",
     sub: "Controle lembretes, resumos e e-mails úteis do PigBank sem mexer nas suas conexões bancárias.",
+  },
+  legal: {
+    title: "Legal",
+    sub: "Acesse a política de privacidade e os documentos legais do PigBank AI.",
   },
 };
 

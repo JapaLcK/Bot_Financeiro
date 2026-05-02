@@ -284,6 +284,24 @@ footer {
   font-size: .78rem; color: var(--text-3);
 }
 footer a { color: var(--text-2); text-decoration: none; }
+footer a:hover { color: var(--text); }
+.footer-links {
+  display: flex; justify-content: center; gap: 12px; flex-wrap: wrap;
+  margin-top: 8px;
+}
+.privacy-note {
+  margin-top: 12px;
+  color: var(--text-3);
+  font-size: .74rem;
+  line-height: 1.55;
+  text-align: center;
+}
+.privacy-note a {
+  color: var(--text-2);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255,255,255,.18);
+}
+.privacy-note a:hover { color: var(--text); border-bottom-color: rgba(255,255,255,.36); }
 
 /* ─── Account center ── */
 .account-header {
@@ -505,6 +523,10 @@ footer a { color: var(--text-2); text-decoration: none; }
             <input type="password" id="reg-confirm" placeholder="Repita a senha" autocomplete="new-password" />
           </div>
           <button class="submit-btn" id="btn-register" onclick="doRegister()">Criar conta</button>
+          <p class="privacy-note">
+            Ao criar sua conta, você concorda com a
+            <a href="/privacy" target="_blank" rel="noopener">Política de Privacidade</a>.
+          </p>
           <div class="form-error" id="reg-error"></div>
         </div>
 
@@ -547,6 +569,10 @@ footer a { color: var(--text-2); text-decoration: none; }
             <input type="password" id="login-password" placeholder="Sua senha" autocomplete="current-password" />
           </div>
           <button class="submit-btn" id="btn-login" onclick="doLogin()">Entrar</button>
+          <p class="privacy-note">
+            Ao entrar, você continua sujeito à
+            <a href="/privacy" target="_blank" rel="noopener">Política de Privacidade</a>.
+          </p>
           <div class="form-error" id="login-error"></div>
           <p style="text-align:center;margin-top:14px;">
             <a href="#" onclick="openForgot(event)" style="font-size:13px;color:var(--text-2);text-decoration:none;border-bottom:1px solid rgba(255,255,255,0.2);padding-bottom:1px;">
@@ -665,6 +691,9 @@ footer a { color: var(--text-2); text-decoration: none; }
   <!-- Footer -->
   <footer>
     <p>© 2026 PigBank AI · Feito com 🐷</p>
+    <div class="footer-links">
+      <a href="/privacy">Política de Privacidade</a>
+    </div>
   </footer>
 
 </div>
