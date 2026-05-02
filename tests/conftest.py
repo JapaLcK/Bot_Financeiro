@@ -4,6 +4,7 @@ import uuid
 import pytest
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+os.environ.setdefault("JWT_SECRET", "test-jwt-secret-for-pytest-only-32-bytes")
 
 from db import init_db, ensure_user, get_conn
 

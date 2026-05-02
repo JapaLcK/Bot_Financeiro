@@ -25,6 +25,7 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bot_financeiro_test
+      JWT_SECRET: test-jwt-secret-for-ci-only-32-bytes
 
     steps:
       - name: Checkout
