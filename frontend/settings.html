@@ -1259,14 +1259,7 @@ a { color: inherit; text-decoration: none; }
 /* ── Config ──────────────────────────────────── */
 const API = window.location.origin;
 const params = new URLSearchParams(window.location.search);
-const DASHBOARD_TOKEN = params.get("token") || "";
-
-function decodeJWT(t) {
-  try { return JSON.parse(atob(t.split(".")[1].replace(/-/g,"+").replace(/_/g,"/"))); }
-  catch { return null; }
-}
-const payload = decodeJWT(DASHBOARD_TOKEN);
-const USER_ID = payload?.sub ? Number(payload.sub) : null;
+let USER_ID = null;
 
 /* ── Helpers ─────────────────────────────────── */
 function esc(v) {
@@ -1284,20 +1277,38 @@ function fmtDateOnly(v) {
   return new Date(String(v).slice(0,10) + "T12:00:00").toLocaleDateString("pt-BR");
 }
 function authHeaders(extra={}) {
-  return { ...extra, Authorization: `Bearer ${DASHBOARD_TOKEN}` };
+  return { ...extra };
 }
 function logoutSettings() {
-  localStorage.removeItem("finbot_token");
   localStorage.setItem("finbot_logout_at", String(Date.now()));
+  fetch(`${API}/auth/logout`, { method: "POST", credentials: "same-origin" }).finally(() => {
+    window.location.href = "/";
+  });
+}
+function authOptions(options={}) {
+  return { credentials: "same-origin", ...options };
+}
+async function validateSettingsSession() {
+  const token = params.get("token") || "";
+  const validateUrl = token
+    ? `${API}/auth/validate?token=${encodeURIComponent(token)}`
+    : `${API}/auth/validate`;
+  const resp = await fetch(validateUrl, { credentials: "same-origin" });
+  if (!resp.ok) throw new Error("Sessão inválida");
+  const data = await resp.json();
+  USER_ID = Number(data.user_id);
+  if (token) {
+    const view = params.get("view");
+    const cleanUrl = view ? `/settings?view=${encodeURIComponent(view)}` : "/settings";
+    window.history.replaceState({}, "", cleanUrl);
+  }
+  return data;
+}
+function redirectHome() {
   window.location.href = "/";
 }
 window.addEventListener("storage", (event) => {
-  if (
-    (event.key === "finbot_token" && event.newValue === null) ||
-    event.key === "finbot_logout_at"
-  ) {
-    window.location.href = "/";
-  }
+  if (event.key === "finbot_logout_at") redirectHome();
 });
 async function readApiError(resp) {
   const raw = await resp.text();
@@ -1362,8 +1373,7 @@ function formatPhoneBR(value) {
 }
 
 function formatSessionExpiry() {
-  if (!DASHBOARD_TOKEN || !payload?.exp) return "Sessão inválida";
-  return new Date(payload.exp * 1000).toLocaleString("pt-BR", { dateStyle:"short", timeStyle:"short" });
+  return USER_ID ? "Sessão ativa" : "Sessão inválida";
 }
 
 function toggleSecurityEdit(kind, force) {
@@ -1383,6 +1393,7 @@ async function saveSecurityContact(kind) {
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/security/contact`, {
       method: "PATCH",
+      credentials: "same-origin",
       headers: authHeaders({ "Content-Type":"application/json" }),
       body: JSON.stringify(kind === "email" ? { email: value } : { phone: value }),
     });
@@ -1421,13 +1432,13 @@ function applySecuritySettings(data) {
 }
 
 async function loadSecuritySettings() {
-  if (!USER_ID || !DASHBOARD_TOKEN) {
+  if (!USER_ID) {
     applySecuritySettings({});
     showToast("Sessão inválida — faça login novamente", "error");
     return;
   }
   try {
-    const resp = await fetch(`${API}/settings/${USER_ID}/security`, { headers: authHeaders() });
+    const resp = await fetch(`${API}/settings/${USER_ID}/security`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
     applySecuritySettings(data);
@@ -1445,6 +1456,7 @@ async function sendPasswordResetEmail() {
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/password-reset`, {
       method: "POST",
+      credentials: "same-origin",
       headers: authHeaders(),
     });
     if (!resp.ok) throw new Error(await readApiError(resp));
@@ -1490,13 +1502,13 @@ function applyNotificationSettings(data) {
 }
 
 async function loadNotificationSettings() {
-  if (!USER_ID || !DASHBOARD_TOKEN) {
+  if (!USER_ID) {
     showToast("Sessão inválida — faça login novamente", "error");
     return;
   }
   setNotificationControlsDisabled(true);
   try {
-    const resp = await fetch(`${API}/settings/${USER_ID}/notifications`, { headers: authHeaders() });
+    const resp = await fetch(`${API}/settings/${USER_ID}/notifications`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
     applyNotificationSettings(data);
@@ -1518,6 +1530,7 @@ async function updateNotificationSettings(patch) {
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/notifications`, {
       method: "PATCH",
+      credentials: "same-origin",
       headers: authHeaders({ "Content-Type":"application/json" }),
       body: JSON.stringify(patch),
     });
@@ -1681,13 +1694,13 @@ function updateStats(connections, accounts, transactions) {
 
 /* ── Load ────────────────────────────────────── */
 async function loadData() {
-  if (!USER_ID || !DASHBOARD_TOKEN) {
+  if (!USER_ID) {
     renderConnections([]); renderAccounts([]); renderTransactions([]);
     updateStats([], [], []);
     return;
   }
   try {
-    const resp = await fetch(`${API}/open-finance/${USER_ID}`, { headers: authHeaders() });
+    const resp = await fetch(`${API}/open-finance/${USER_ID}`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
     const c = data.connections  || [];
@@ -1715,6 +1728,7 @@ async function savePluggyItem(itemData) {
   if (!item.id && !item.itemId) throw new Error("A Pluggy não retornou o item conectado.");
   const resp = await fetch(`${API}/open-finance/${USER_ID}/pluggy-item`, {
     method: "POST",
+    credentials: "same-origin",
     headers: authHeaders({ "Content-Type":"application/json" }),
     body: JSON.stringify({ item }),
   });
@@ -1733,6 +1747,7 @@ async function savePluggyItem(itemData) {
 async function openPluggyConnect() {
   const resp = await fetch(`${API}/open-finance/${USER_ID}/connect-token`, {
     method: "POST",
+    credentials: "same-origin",
     headers: authHeaders(),
   });
   if (!resp.ok) throw new Error(await readApiError(resp));
@@ -1777,7 +1792,7 @@ async function openPluggyConnect() {
 }
 
 async function connectMock() {
-  if (!USER_ID || !DASHBOARD_TOKEN) { showToast("Sessão inválida — faça login novamente", "error"); return; }
+  if (!USER_ID) { showToast("Sessão inválida — faça login novamente", "error"); return; }
   const btn = document.getElementById("connect-btn");
   const statusEl = document.getElementById("connect-status");
   const statusText = document.getElementById("connect-status-text");
@@ -1795,6 +1810,7 @@ async function connectMock() {
   try {
     const resp = await fetch(`${API}/open-finance/${USER_ID}/mock-connect`, {
       method: "POST",
+      credentials: "same-origin",
       headers: authHeaders({ "Content-Type":"application/json" }),
       body: JSON.stringify({ institution: selectedBank }),
     });
@@ -1820,7 +1836,7 @@ async function connectMock() {
 }
 
 async function connectOpenFinance() {
-  if (!USER_ID || !DASHBOARD_TOKEN) { showToast("Sessão inválida — faça login novamente", "error"); return; }
+  if (!USER_ID) { showToast("Sessão inválida — faça login novamente", "error"); return; }
   const btn = document.getElementById("connect-btn");
   const statusEl = document.getElementById("connect-status");
   const statusText = document.getElementById("connect-status-text");
@@ -1846,6 +1862,7 @@ async function disconnectAll() {
   try {
     const resp = await fetch(`${API}/open-finance/${USER_ID}`, {
       method: "DELETE",
+      credentials: "same-origin",
       headers: authHeaders(),
     });
     if (!resp.ok) throw new Error(await readApiError(resp));
@@ -1858,11 +1875,18 @@ async function disconnectAll() {
 }
 
 /* ── Init ────────────────────────────────────── */
-if (DASHBOARD_TOKEN) {
-  document.getElementById("dashboard-link").href = `/app?token=${encodeURIComponent(DASHBOARD_TOKEN)}`;
+async function initSettings() {
+  try {
+    await validateSettingsSession();
+  } catch {
+    redirectHome();
+    return;
+  }
+  document.getElementById("dashboard-link").href = "/app";
+  showSettingsSection(["security", "notifications"].includes(params.get("view")) ? params.get("view") : "security");
+  loadData();
 }
-showSettingsSection(["security", "notifications"].includes(params.get("view")) ? params.get("view") : "security");
-loadData();
+initSettings();
 </script>
 </body>
 </html>

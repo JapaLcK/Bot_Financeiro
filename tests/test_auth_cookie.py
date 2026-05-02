@@ -1,0 +1,95 @@
+from fastapi.testclient import TestClient
+
+import db
+import frontend.finance_bot_websocket_custom as dashboard
+
+
+def test_login_sets_auth_token_cookie(monkeypatch):
+    async def _noop_log(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        db,
+        "login_auth_user",
+        lambda email, password: {
+            "user_id": 123,
+            "email": email.strip().lower(),
+            "plan": "free",
+        },
+    )
+    monkeypatch.setattr(db, "create_link_code", lambda user_id, minutes_valid: "ABC123")
+    monkeypatch.setattr(dashboard, "log_auth_login_event", _noop_log)
+
+    response = TestClient(dashboard.app).post(
+        "/auth/login",
+        json={"email": "User@Example.com", "password": "secret123"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "user@example.com"
+    set_cookie = response.headers["set-cookie"]
+    assert "auth_token=" in set_cookie
+    assert "dashboard_token=" in set_cookie
+    assert "HttpOnly" in set_cookie
+    assert "Secure" in set_cookie
+    assert "SameSite=strict" in set_cookie
+    assert "Max-Age=86400" in set_cookie
+    assert "?token=" not in response.json()["dashboard_url"]
+
+
+def test_dashboard_token_accepts_auth_cookie_without_authorization_header():
+    token = dashboard._make_jwt(123, "user@example.com")
+    client = TestClient(dashboard.app)
+    client.cookies.set("auth_token", token)
+
+    response = client.post("/auth/dashboard-token")
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "user@example.com"
+    assert response.json()["dashboard_url"].startswith(dashboard.DASHBOARD_URL)
+    assert "?token=" not in response.json()["dashboard_url"]
+    assert "dashboard_token=" in response.headers["set-cookie"]
+
+
+def test_dashboard_token_still_accepts_authorization_header():
+    token = dashboard._make_jwt(123, "user@example.com")
+
+    response = TestClient(dashboard.app).post(
+        "/auth/dashboard-token",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "user@example.com"
+
+
+def test_auth_validate_consumes_url_token_and_sets_dashboard_cookie(monkeypatch):
+    monkeypatch.setattr(db, "consume_dashboard_session", lambda token: 123 if token == "one-time" else None)
+
+    response = TestClient(dashboard.app).get("/auth/validate?token=one-time")
+
+    assert response.status_code == 200
+    assert response.json() == {"user_id": 123}
+    assert "dashboard_token=" in response.headers["set-cookie"]
+
+
+def test_auth_validate_accepts_dashboard_cookie_without_url_token():
+    dashboard_token = dashboard.make_dashboard_token(123, hours=1)
+    client = TestClient(dashboard.app)
+    client.cookies.set("dashboard_token", dashboard_token)
+
+    response = client.get("/auth/validate")
+
+    assert response.status_code == 200
+    assert response.json() == {"user_id": 123}
+
+
+def test_magic_link_redirect_sets_cookie_without_token_in_url(monkeypatch):
+    monkeypatch.setattr(db, "consume_dashboard_session", lambda code: 123 if code == "one-time" else None)
+
+    response = TestClient(dashboard.app).get("/d/one-time", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/app"
+    assert "?token=" not in response.headers["location"]
+    assert "dashboard_token=" in response.headers["set-cookie"]

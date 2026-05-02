@@ -32,7 +32,7 @@ from typing import Any, Dict
 
 import psycopg
 from psycopg.rows import dict_row
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse, HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -885,6 +885,9 @@ register_admin_routes(app, HERE, JWT_SECRET, limiter)
 # ─── Auth helpers ────────────────────────────────────────────────────────────
 
 _bearer = HTTPBearer(auto_error=False)
+AUTH_COOKIE_NAME = "auth_token"
+AUTH_COOKIE_MAX_AGE = 86400
+DASHBOARD_COOKIE_NAME = "dashboard_token"
 
 def _make_jwt(user_id: int, email: str) -> str:
     from datetime import timedelta
@@ -903,6 +906,47 @@ def _decode_jwt(token: str) -> dict | None:
         return None
 
 
+def _set_auth_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        token,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+        max_age=AUTH_COOKIE_MAX_AGE,
+    )
+
+
+def _set_dashboard_cookie(response: Response, user_id: int) -> str:
+    token = make_dashboard_token(user_id, hours=DASHBOARD_SESSION_HOURS)
+    response.set_cookie(
+        DASHBOARD_COOKIE_NAME,
+        token,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+        max_age=int(DASHBOARD_SESSION_HOURS * 3600),
+    )
+    return token
+
+
+def _dashboard_url(path: str = "/app", view: str | None = None) -> str:
+    url = f"{DASHBOARD_URL}{path}"
+    if view:
+        url += f"?view={urllib.parse.quote(view)}"
+    return url
+
+
+def _get_auth_token_from_request(
+    request: Request,
+    creds: HTTPAuthorizationCredentials | None = None,
+) -> str | None:
+    if creds and creds.credentials:
+        return creds.credentials
+    cookie_token = (request.cookies.get(AUTH_COOKIE_NAME) or "").strip()
+    return cookie_token or None
+
+
 def _build_whatsapp_onboarding_link(user_id: int, minutes_valid: int = 15) -> str:
     if not WHATSAPP_NUMBER:
         return ""
@@ -912,12 +956,17 @@ def _build_whatsapp_onboarding_link(user_id: int, minutes_valid: int = 15) -> st
     text = urllib.parse.quote("Olá")
     return f"https://api.whatsapp.com/send?phone={safe_number}&text={text}"
 
-async def _get_current_user(creds: HTTPAuthorizationCredentials = Depends(_bearer)) -> int:
-    if not creds:
+async def _get_current_user(
+    request: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> int:
+    token = _get_auth_token_from_request(request, creds)
+    if not token:
         raise HTTPException(status_code=401, detail="Token não fornecido.")
-    payload = _decode_jwt(creds.credentials)
+    payload = _decode_jwt(token)
     if not payload or payload.get("type") != "auth":
         raise HTTPException(status_code=401, detail="Token inválido ou expirado.")
+    request.state.auth_payload = payload
     return int(payload["sub"])
 
 
@@ -932,7 +981,11 @@ def _extract_bearer_token(request: Request) -> str | None:
 
 
 def _resolve_dashboard_user_id(request: Request) -> int:
-    token = request.query_params.get("token") or _extract_bearer_token(request)
+    token = (
+        request.query_params.get("token")
+        or _extract_bearer_token(request)
+        or (request.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
+    )
     user_id = decode_dashboard_token(token or "")
     if not user_id:
         raise HTTPException(status_code=401, detail="Token de dashboard inválido ou expirado.")
@@ -980,12 +1033,24 @@ class DashboardLinkBody(BaseModel):
 # ─── Auth endpoints ──────────────────────────────────────────────────────────
 
 @app.get("/auth/validate")
-async def auth_validate(token: str):
+async def auth_validate(request: Request, response: Response, token: str | None = None):
     """
-    Valida um dashboard token gerado pelo bot.
+    Valida uma sessão de dashboard.
+    Se receber um token de URL, consome o token de uso único e troca por cookie HttpOnly.
     Retorna user_id se válido, 401 caso contrário.
     """
-    user_id = decode_dashboard_token(token)
+    user_id = None
+    if token:
+        from db import consume_dashboard_session
+
+        user_id = consume_dashboard_session(token.strip())
+        if not user_id:
+            user_id = decode_dashboard_token(token)
+        if user_id:
+            _set_dashboard_cookie(response, int(user_id))
+    else:
+        user_id = _resolve_dashboard_user_id(request)
+
     if not user_id:
         raise HTTPException(status_code=401, detail="Token inválido")
     return {"user_id": user_id}
@@ -1025,7 +1090,7 @@ async def auth_register(request: Request, body: RegisterBody):
 
 @app.post("/auth/verify-email")
 @limiter.limit("10/minute")
-async def auth_verify_email(request: Request, body: VerifyEmailBody):
+async def auth_verify_email(request: Request, response: Response, body: VerifyEmailBody):
     """
     Confirma o código de verificação e cria a conta.
     Retorna JWT + link_code igual ao registro anterior.
@@ -1042,23 +1107,25 @@ async def auth_verify_email(request: Request, body: VerifyEmailBody):
     user_id    = result["user_id"]
     link_code  = result["link_code"]
     token      = _make_jwt(user_id, body.email.strip().lower())
-    dash_token = make_dashboard_token(user_id, hours=DASHBOARD_SESSION_HOURS)
+    _set_auth_cookie(response, token)
+    _set_dashboard_cookie(response, int(user_id))
 
     wa_link = _build_whatsapp_onboarding_link(user_id)
 
     return {
         "token": token,
         "user_id": user_id,
+        "email": body.email.strip().lower(),
         "link_code": link_code,
         "whatsapp_link": wa_link,
-        "dashboard_url": f"{DASHBOARD_URL}/app?token={dash_token}",
+        "dashboard_url": _dashboard_url("/app"),
         "expires_in": 86400,
     }
 
 
 @app.post("/auth/login")
 @limiter.limit("10/minute")
-async def auth_login(request: Request, body: LoginBody):
+async def auth_login(request: Request, response: Response, body: LoginBody):
     """Login via email+senha. Retorna JWT + link_code novo para vincular o bot."""
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -1079,7 +1146,8 @@ async def auth_login(request: Request, body: LoginBody):
     user_id    = result["user_id"]
     link_code  = create_link_code(user_id, minutes_valid=15)
     token      = _make_jwt(user_id, result["email"])
-    dash_token = make_dashboard_token(user_id, hours=DASHBOARD_SESSION_HOURS)
+    _set_auth_cookie(response, token)
+    _set_dashboard_cookie(response, int(user_id))
 
     await log_auth_login_event(
         result["email"],
@@ -1094,12 +1162,30 @@ async def auth_login(request: Request, body: LoginBody):
     return {
         "token": token,
         "user_id": user_id,
+        "email": result["email"],
         "plan": result["plan"],
         "link_code": link_code,
         "whatsapp_link": wa_link,
-        "dashboard_url": f"{DASHBOARD_URL}/app?token={dash_token}",
+        "dashboard_url": _dashboard_url("/app"),
         "expires_in": 86400,
     }
+
+
+@app.post("/auth/logout")
+async def auth_logout(response: Response):
+    response.delete_cookie(
+        AUTH_COOKIE_NAME,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+    )
+    response.delete_cookie(
+        DASHBOARD_COOKIE_NAME,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+    )
+    return {"ok": True}
 
 
 @app.post("/auth/forgot-password")
@@ -1174,18 +1260,19 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
 
 
 @app.post("/auth/dashboard-token")
-async def auth_dashboard_token(user_id: int = Depends(_get_current_user)):
-    """Troca o token de login por um token curto de acesso ao dashboard."""
-    dash_token = make_dashboard_token(user_id, hours=DASHBOARD_SESSION_HOURS)
+async def auth_dashboard_token(response: Response, request: Request, user_id: int = Depends(_get_current_user)):
+    """Troca o token de login por um cookie HttpOnly de acesso ao dashboard."""
+    _set_dashboard_cookie(response, int(user_id))
+    auth_payload = getattr(request.state, "auth_payload", {}) or {}
     return {
-        "token": dash_token,
-        "dashboard_url": f"{DASHBOARD_URL}/app?token={dash_token}",
+        "email": auth_payload.get("email"),
+        "dashboard_url": _dashboard_url("/app"),
         "expires_in": int(DASHBOARD_SESSION_HOURS * 3600),
     }
 
 
 @app.post("/auth/dashboard-link")
-async def auth_dashboard_link(body: DashboardLinkBody, user_id: int = Depends(_get_current_user)):
+async def auth_dashboard_link(response: Response, request: Request, body: DashboardLinkBody, user_id: int = Depends(_get_current_user)):
     """
     Consome um magic link do dashboard e libera acesso apenas
     se o usuário logado for o dono desse link.
@@ -1198,10 +1285,11 @@ async def auth_dashboard_link(body: DashboardLinkBody, user_id: int = Depends(_g
     if int(target_user_id) != int(user_id):
         raise HTTPException(status_code=403, detail="Este link pertence a outra conta.")
 
-    dash_token = make_dashboard_token(int(user_id), hours=DASHBOARD_SESSION_HOURS)
+    _set_dashboard_cookie(response, int(user_id))
+    auth_payload = getattr(request.state, "auth_payload", {}) or {}
     return {
-        "token": dash_token,
-        "dashboard_url": f"{DASHBOARD_URL}/app?token={dash_token}",
+        "email": auth_payload.get("email"),
+        "dashboard_url": _dashboard_url("/app"),
         "expires_in": int(DASHBOARD_SESSION_HOURS * 3600),
     }
 
@@ -1410,12 +1498,13 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
 </div></body></html>""".replace("__MAGIC_LINK_MINUTES__", str(DASHBOARD_MAGIC_LINK_MINUTES))
         return HTMLResponse(content=expired_html, status_code=401)
 
-    dash_token = make_dashboard_token(int(user_id), hours=DASHBOARD_SESSION_HOURS)
     target_view = view if view in {"overview", "investments", "open-finance"} else None
-    if target_view == "open-finance":
-        return RedirectResponse(url=f"/settings?token={dash_token}&view=open-finance", status_code=302)
-    suffix = f"&view={target_view}" if target_view else ""
-    return RedirectResponse(url=f"/app?token={dash_token}{suffix}", status_code=302)
+    redirect_url = "/settings?view=open-finance" if target_view == "open-finance" else (
+        f"/app?view={urllib.parse.quote(target_view)}" if target_view else "/app"
+    )
+    response = RedirectResponse(url=redirect_url, status_code=302)
+    _set_dashboard_cookie(response, int(user_id))
+    return response
 
 
 @app.get("/")
@@ -2118,7 +2207,7 @@ async def open_finance_disconnect_route(request: Request, user_id: int):
 
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(ws: WebSocket, user_id: int):
-    token = ws.query_params.get("token", "")
+    token = ws.query_params.get("token", "") or (ws.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
     current_user_id = decode_dashboard_token(token)
     if not current_user_id or int(current_user_id) != int(user_id):
         await ws.close(code=1008)

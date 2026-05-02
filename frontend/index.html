@@ -675,6 +675,7 @@ const params        = new URLSearchParams(window.location.search);
 const API_BASE      = window.location.origin;
 const DASHBOARD_URL = window.location.origin;
 const PENDING_DASHBOARD_CODE = params.get('dashboard_code') || '';
+let AUTHENTICATED = false;
 
 async function readResponsePayload(res) {
   const raw = await res.text();
@@ -712,74 +713,41 @@ function settingsUrlFromDashboardUrl(url, view) {
   }
 }
 
-// ─── JWT decoder (payload only, sem validação de assinatura) ──────────────
-function decodeJWT(token) {
-  try {
-    const payload = token.split('.')[1];
-    return JSON.parse(atob(payload.replace(/-/g,'+').replace(/_/g,'/')));
-  } catch { return null; }
-}
-
 // ─── Verifica autenticação ao carregar a página ───────────────────────────
 async function checkAuthState() {
-  const token = localStorage.getItem('finbot_token');
-  if (!token) return;
-
-  const payload = decodeJWT(token);
-  if (!payload) { localStorage.removeItem('finbot_token'); return; }
-
-  // Token expirado?
-  if (payload.exp && Date.now() / 1000 > payload.exp) {
-    localStorage.removeItem('finbot_token');
-    return;
-  }
-
-  const email  = payload.email || payload.sub || '';
-
   try {
     const resp = PENDING_DASHBOARD_CODE
       ? await fetch(`${API_BASE}/auth/dashboard-link`, {
           method: 'POST',
+          credentials: 'same-origin',
           headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({ code: PENDING_DASHBOARD_CODE })
         })
       : await fetch(`${API_BASE}/auth/dashboard-token`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}` }
+          credentials: 'same-origin'
         });
 
     if (!resp.ok) {
-      if (resp.status === 401 && !PENDING_DASHBOARD_CODE) {
-        localStorage.removeItem('finbot_token');
-      }
       return;
     }
 
     const data = await resp.json();
     const dashUrl = sanitizeDashboardUrl(data.dashboard_url) || `${DASHBOARD_URL}/app`;
-    let resolvedEmail = email;
-    if (data.auth_token) {
-      localStorage.setItem('finbot_token', data.auth_token);
-      const refreshedPayload = decodeJWT(data.auth_token);
-      resolvedEmail = refreshedPayload ? (refreshedPayload.email || email) : email;
-    }
-    applyLoggedInState(resolvedEmail, dashUrl);
+    applyLoggedInState(data.email || '', dashUrl);
 
     if (PENDING_DASHBOARD_CODE) {
       window.location.href = dashUrl;
     }
-  } catch {
-    if (!PENDING_DASHBOARD_CODE) {
-      localStorage.removeItem('finbot_token');
-    }
-  }
+  } catch {}
 }
 
 // ─── Aplica estado logado na UI ────────────────────────────────────────────
 function applyLoggedInState(email, dashUrl) {
+  AUTHENTICATED = true;
+
   // Navbar
   document.getElementById('nav-cta-guest').style.display = 'none';
   const navBtn = document.getElementById('nav-cta-user');
@@ -805,6 +773,8 @@ function applyLoggedInState(email, dashUrl) {
 }
 
 function applyLoggedOutState() {
+  AUTHENTICATED = false;
+
   document.getElementById('nav-cta-guest').style.display = '';
   document.getElementById('nav-cta-user').style.display = 'none';
   document.getElementById('nav-user-label').textContent = 'Minha conta';
@@ -833,8 +803,7 @@ function scrollToAccount() {
 }
 
 function handleDashboardClick(e) {
-  const token = localStorage.getItem('finbot_token');
-  if (!token) {
+  if (!AUTHENTICATED) {
     // Não logado: rola para auth
     e.preventDefault();
     scrollToAuth();
@@ -842,8 +811,13 @@ function handleDashboardClick(e) {
   // Se logado: o href já foi atualizado pelo applyLoggedInState, navega normalmente
 }
 
-function doLogout() {
-  localStorage.removeItem('finbot_token');
+async function doLogout() {
+  try {
+    await fetch(`${API_BASE}/auth/logout`, {
+      method: 'POST',
+      credentials: 'same-origin'
+    });
+  } catch {}
   localStorage.setItem('finbot_logout_at', String(Date.now()));
   applyLoggedOutState();
 }
@@ -851,8 +825,7 @@ function doLogout() {
 async function connectWhatsApp(e) {
   if (e) e.preventDefault();
 
-  const token = localStorage.getItem('finbot_token');
-  if (!token) {
+  if (!AUTHENTICATED) {
     scrollToAuth();
     return false;
   }
@@ -860,7 +833,7 @@ async function connectWhatsApp(e) {
   try {
     const res = await fetch(`${API_BASE}/auth/link-code`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` }
+      credentials: 'same-origin'
     });
     const data = await readResponsePayload(res);
     if (!res.ok) {
@@ -945,6 +918,7 @@ async function doRegister() {
   try {
     const res = await fetch(`${API_BASE}/auth/register`, {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, phone }),
     });
@@ -981,6 +955,7 @@ async function doVerify() {
   try {
     const res = await fetch(`${API_BASE}/auth/verify-email`, {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: _pendingEmail, code }),
     });
@@ -1010,6 +985,7 @@ async function resendCode(e) {
   const password = document.getElementById('reg-password').value;
   await fetch(`${API_BASE}/auth/register`, {
     method: 'POST',
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: _pendingEmail, password, phone: _pendingPhone }),
   });
@@ -1037,28 +1013,25 @@ async function doLogin() {
   try {
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     });
     const data = await readResponsePayload(res);
     if (!res.ok) return showError('login-error', data.detail || 'E-mail ou senha incorretos.');
 
-    if (PENDING_DASHBOARD_CODE && data.token) {
-      localStorage.setItem('finbot_token', data.token);
+    if (PENDING_DASHBOARD_CODE) {
       const linkRes = await fetch(`${API_BASE}/auth/dashboard-link`, {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${data.token}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ code: PENDING_DASHBOARD_CODE })
       });
       const linkData = await readResponsePayload(linkRes);
       if (!linkRes.ok) {
         return showError('login-error', linkData.detail || 'Nao foi possivel abrir este dashboard.');
-      }
-      if (linkData.auth_token) {
-        localStorage.setItem('finbot_token', linkData.auth_token);
       }
       window.location.href = sanitizeDashboardUrl(linkData.dashboard_url) || `${DASHBOARD_URL}/app`;
       return;
@@ -1095,13 +1068,7 @@ function showSuccess(data, title, desc) {
   const dashBtn = document.getElementById('dashboard-btn');
   dashBtn.href = dashUrl;
 
-  if (data.token) {
-    localStorage.setItem('finbot_token', data.token);
-    // Atualiza estado logado na UI (navbar + account center)
-    const payload = decodeJWT(data.token);
-    const email = payload ? (payload.email || '') : '';
-    applyLoggedInState(email, dashUrl);
-  }
+  applyLoggedInState(data.email || '', dashUrl);
 
   document.getElementById('success-state').classList.add('show');
 }
@@ -1115,10 +1082,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 window.addEventListener('storage', (event) => {
-  if (
-    (event.key === 'finbot_token' && event.newValue === null) ||
-    event.key === 'finbot_logout_at'
-  ) {
+  if (event.key === 'finbot_logout_at') {
     applyLoggedOutState();
   }
 });

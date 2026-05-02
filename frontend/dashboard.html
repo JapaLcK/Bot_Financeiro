@@ -618,10 +618,9 @@ const BASE_HTTP = window.location.origin;
 const BASE_WS   = BASE_HTTP.replace("http://", "ws://").replace("https://", "wss://");
 const API       = BASE_HTTP;
 
-// USER_ID e WS_URL são resolvidos após validação do token (ver seção INIT)
+// USER_ID e WS_URL são resolvidos após validação da sessão (ver seção INIT)
 let USER_ID = 0;
 let WS_URL  = "";
-let DASHBOARD_TOKEN = "";
 
 /* ═══════════════════════════════════════════════════════════════════════
    STATE
@@ -663,17 +662,19 @@ function isCurrentViewData(data) {
   return Number(data?.year) === Number(viewYear) && Number(data?.month) === Number(viewMonth);
 }
 
-function logoutDashboard() {
-  localStorage.removeItem('finbot_token');
+async function logoutDashboard() {
+  try {
+    await fetch(`${API}/auth/logout`, {
+      method: "POST",
+      credentials: "same-origin"
+    });
+  } catch {}
   localStorage.setItem('finbot_logout_at', String(Date.now()));
   window.location.href = '/';
 }
 
 window.addEventListener('storage', (event) => {
-  if (
-    (event.key === 'finbot_token' && event.newValue === null) ||
-    event.key === 'finbot_logout_at'
-  ) {
+  if (event.key === 'finbot_logout_at') {
     window.location.href = '/';
   }
 });
@@ -979,7 +980,8 @@ async function createInvestment(event) {
 
   const resp = await fetch(`${API}/investments/${USER_ID}`, {
     method: "POST",
-    headers: {"Content-Type":"application/json", "Authorization": `Bearer ${DASHBOARD_TOKEN}`},
+    credentials: "same-origin",
+    headers: {"Content-Type":"application/json"},
     body: JSON.stringify({
       name,
       period,
@@ -1011,7 +1013,8 @@ async function moveInvestment(event) {
 
 	  const resp = await fetch(`${API}/investments/${USER_ID}/${kind}`, {
 	    method: "POST",
-	    headers: {"Content-Type":"application/json", "Authorization": `Bearer ${DASHBOARD_TOKEN}`},
+	    credentials: "same-origin",
+	    headers: {"Content-Type":"application/json"},
 	    body: JSON.stringify({name, amount})
 	  });
 	  if (!resp.ok) { alert("Erro: " + await readApiError(resp)); return; }
@@ -1031,7 +1034,7 @@ async function deleteInvestment(name) {
   if (!confirm(`Remover ${name}? O saldo precisa estar zerado.`)) return;
   const resp = await fetch(`${API}/investments/${USER_ID}/${encodeURIComponent(name)}`, {
     method: "DELETE",
-    headers: {"Authorization": `Bearer ${DASHBOARD_TOKEN}`}
+    credentials: "same-origin"
   });
   if (!resp.ok) { alert("Erro: " + await readApiError(resp)); return; }
   await refreshDashboardAfterInvestment("✓ Investimento removido");
@@ -1277,7 +1280,7 @@ async function fetchMonthHttp(year, month, page = 1, limit = LAUNCHES_LIMIT, { b
     const r = await fetch(
       `${API}/data/${USER_ID}?year=${year}&month=${month}&page=${page}&limit=${limit}`,
       {
-        headers: { Authorization: `Bearer ${DASHBOARD_TOKEN}` },
+        credentials: "same-origin",
         signal: monthAbortController.signal,
       }
     );
@@ -1640,9 +1643,9 @@ async function saveBudget() {
   try {
     const r = await fetch(`${API}/budgets/${USER_ID}`, {
       method:"POST",
+      credentials: "same-origin",
       headers:{
-        "Content-Type":"application/json",
-        "Authorization": `Bearer ${DASHBOARD_TOKEN}`
+        "Content-Type":"application/json"
       },
       body: JSON.stringify({categoria: bgtTarget, budget: val})
     });
@@ -1669,7 +1672,7 @@ document.addEventListener("keydown", e => {
 ═══════════════════════════════════════════════════════════════════════ */
 function exportCSV() {
   const a = document.createElement("a");
-  a.href = `${API}/export/${USER_ID}?year=${viewYear}&month=${viewMonth}&token=${encodeURIComponent(DASHBOARD_TOKEN)}`;
+  a.href = `${API}/export/${USER_ID}?year=${viewYear}&month=${viewMonth}`;
   a.download = `financas_${viewYear}_${String(viewMonth).padStart(2,"0")}.csv`;
   a.click();
 }
@@ -1823,7 +1826,7 @@ function buildHistoryChart(history) {
 async function fetchHistory() {
   try {
     const r = await fetch(`${API}/history/${USER_ID}`, {
-      headers: { Authorization: `Bearer ${DASHBOARD_TOKEN}` }
+      credentials: "same-origin"
     });
     if (!r.ok) return;
 
@@ -1997,32 +2000,33 @@ function _showAccessError() {
 
 (async () => {
   const token   = params.get("token");
-  const uid_raw = Number(params.get("user_id")); // fallback legado
+  const view = params.get("view");
 
-  if (token) {
-    DASHBOARD_TOKEN = token;
-    try {
-      const resp = await fetch(`${API}/auth/validate?token=${encodeURIComponent(token)}`);
-      if (!resp.ok) { _showAccessError(); return; }
-      const data = await resp.json();
-      USER_ID = data.user_id;
-    } catch(e) {
-      _showAccessError();
-      return;
+  try {
+    const validateUrl = token
+      ? `${API}/auth/validate?token=${encodeURIComponent(token)}`
+      : `${API}/auth/validate`;
+    const resp = await fetch(validateUrl, { credentials: "same-origin" });
+    if (!resp.ok) { _showAccessError(); return; }
+    const data = await resp.json();
+    USER_ID = data.user_id;
+    if (token) {
+      const cleanUrl = view ? `/app?view=${encodeURIComponent(view)}` : "/app";
+      window.history.replaceState({}, "", cleanUrl);
     }
-  } else {
+  } catch(e) {
     _showAccessError();
     return;
   }
 
-  WS_URL = `${BASE_WS}/ws/${USER_ID}?token=${encodeURIComponent(DASHBOARD_TOKEN)}`;
+  WS_URL = `${BASE_WS}/ws/${USER_ID}`;
 
   const purchaseInput = document.getElementById("inv-purchase-date");
   if (purchaseInput && !purchaseInput.value) purchaseInput.value = NOW.toISOString().slice(0, 10);
 	  updateInvestmentRateHint();
 	  updateInvestmentTaxHint();
 	  updateMonthLabel();
-	  if (params.get("view") === "investments") setMainView("investments");
+	  if (view === "investments") setMainView("investments");
 	  connect();
 	  fetchHistory();
 	})();

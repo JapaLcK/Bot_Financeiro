@@ -134,6 +134,7 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
   try {
     const loginRes = await fetch("/auth/login", {
       method: "POST",
+      credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password })
     });
@@ -143,13 +144,11 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
       return;
     }
 
-    localStorage.setItem("finbot_token", loginData.token);
-
     const linkRes = await fetch("/auth/dashboard-link", {
       method: "POST",
+      credentials: "same-origin",
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${loginData.token}`
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({ code: dashboardCode })
     });
@@ -158,10 +157,6 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
     if (!linkRes.ok) {
       showError(linkData.detail || "Nao foi possivel abrir este dashboard.");
       return;
-    }
-
-    if (linkData.auth_token) {
-      localStorage.setItem("finbot_token", linkData.auth_token);
     }
 
     window.location.href = linkData.dashboard_url || "/app";
