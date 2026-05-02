@@ -34,12 +34,12 @@ import psycopg
 from psycopg.rows import dict_row
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse, HTMLResponse
+from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
 from pydantic import BaseModel, EmailStr
 import jwt as pyjwt
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from config.env import load_app_env
@@ -159,6 +159,26 @@ async def ensure_budget_table():
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     UNIQUE (user_id, categoria)
                 )
+            """)
+        await conn.commit()
+
+
+async def ensure_auth_rate_limit_table():
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS auth_rate_limits (
+                    bucket TEXT NOT NULL,
+                    identifier TEXT NOT NULL,
+                    window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    attempts INT NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (bucket, identifier)
+                )
+            """)
+            await cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_auth_rate_limits_updated_at
+                ON auth_rate_limits (updated_at)
             """)
         await conn.commit()
 
@@ -695,6 +715,7 @@ async def lifespan(app: FastAPI):
         "setup de tabelas",
         asyncio.gather(
             ensure_budget_table(),
+            ensure_auth_rate_limit_table(),
             ensure_investment_metadata_columns(),
             ensure_open_finance_tables(),
             ensure_notification_preference_columns(),
@@ -702,6 +723,7 @@ async def lifespan(app: FastAPI):
         ),
     )
     print("OK: Budget table ready", flush=True)
+    print("OK: Auth rate-limit table ready", flush=True)
     print("OK: Investment metadata ready", flush=True)
     print("OK: Open Finance tables ready", flush=True)
     print("OK: Notification preferences ready", flush=True)
@@ -867,9 +889,95 @@ if ENABLE_DEV_ENDPOINTS:
 
 # ─── Rate limiting ────────────────────────────────────────────────────────────
 
+RATE_LIMIT_DETAIL = "Muitas tentativas. Aguarde alguns minutos e tente novamente."
+EMAIL_RATE_LIMITS = {
+    "register": (3, 60 * 60),
+    "login": (5, 60),
+    "forgot-password": (3, 60 * 60),
+}
+
+
+def _normalize_rate_limit_email(email: str) -> str:
+    return (email or "").strip().lower()
+
+
+async def _check_persistent_rate_limit(bucket: str, identifier: str, max_attempts: int, window_seconds: int) -> None:
+    if not identifier:
+        return
+
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO auth_rate_limits (bucket, identifier, window_started_at, attempts, updated_at)
+                VALUES (%s, %s, NOW(), 1, NOW())
+                ON CONFLICT (bucket, identifier) DO UPDATE SET
+                    window_started_at = CASE
+                        WHEN auth_rate_limits.window_started_at <= NOW() - (%s * INTERVAL '1 second')
+                        THEN NOW()
+                        ELSE auth_rate_limits.window_started_at
+                    END,
+                    attempts = CASE
+                        WHEN auth_rate_limits.window_started_at <= NOW() - (%s * INTERVAL '1 second')
+                        THEN 1
+                        ELSE auth_rate_limits.attempts + 1
+                    END,
+                    updated_at = NOW()
+                RETURNING
+                    attempts,
+                    EXTRACT(EPOCH FROM (NOW() - window_started_at)) AS elapsed_seconds
+                """,
+                (bucket, identifier, window_seconds, window_seconds),
+            )
+            row = await cur.fetchone()
+        await conn.commit()
+
+    attempts = int(row["attempts"] or 0)
+    if attempts > max_attempts:
+        elapsed_seconds = float(row["elapsed_seconds"] or 0)
+        retry_after = max(1, int(window_seconds - elapsed_seconds))
+        raise HTTPException(
+            status_code=429,
+            detail=RATE_LIMIT_DETAIL,
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+async def _check_auth_rate_limits(action: str, request: Request, email: str) -> None:
+    limit = EMAIL_RATE_LIMITS.get(action)
+    normalized_email = _normalize_rate_limit_email(email)
+    if not limit:
+        return
+
+    max_attempts, window_seconds = limit
+    client_ip = get_remote_address(request)
+    await _check_persistent_rate_limit(
+        action,
+        f"ip:{client_ip}",
+        max_attempts,
+        window_seconds,
+    )
+    await _check_persistent_rate_limit(
+        action,
+        f"email:{normalized_email}",
+        max_attempts,
+        window_seconds,
+    )
+
+
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"detail": RATE_LIMIT_DETAIL},
+        headers={"Retry-After": "60"},
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -1092,7 +1200,7 @@ async def auth_validate(request: Request, response: Response, token: str | None 
 
 
 @app.post("/auth/register")
-@limiter.limit("5/minute")
+@limiter.limit("3/hour")
 async def auth_register(request: Request, body: RegisterBody):
     """
     Inicia o cadastro: valida os dados, gera código de 6 dígitos e envia por e-mail.
@@ -1102,6 +1210,8 @@ async def auth_register(request: Request, body: RegisterBody):
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import create_email_verification
     from core.services.email_service import send_verification_email
+
+    await _check_auth_rate_limits("register", request, body.email)
 
     if len(body.password) < 6:
         raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 6 caracteres.")
@@ -1159,13 +1269,14 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
 
 
 @app.post("/auth/login")
-@limiter.limit("10/minute")
+@limiter.limit("5/minute")
 async def auth_login(request: Request, response: Response, body: LoginBody):
     """Login via email+senha. Retorna JWT + link_code novo para vincular o bot."""
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import login_auth_user, create_link_code
     
+    await _check_auth_rate_limits("login", request, body.email)
 
     result = login_auth_user(body.email, body.password)
     if not result:
@@ -1215,7 +1326,7 @@ async def auth_logout(response: Response):
 
 
 @app.post("/auth/forgot-password")
-@limiter.limit("3/minute")
+@limiter.limit("3/hour")
 async def auth_forgot_password(request: Request, body: EmailBody):
     """
     Solicita recuperação de senha. Envia e-mail com link se o e-mail existir.
@@ -1225,6 +1336,8 @@ async def auth_forgot_password(request: Request, body: EmailBody):
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import create_password_reset_token
     from core.services.email_service import send_password_reset_email
+
+    await _check_auth_rate_limits("forgot-password", request, body.email)
 
     token = create_password_reset_token(body.email)
     if token:

@@ -476,6 +476,20 @@ def init_db():
         """
         create index if not exists idx_password_reset_tokens_expires on password_reset_tokens (expires_at)
         """,
+        """
+        create table if not exists auth_rate_limits (
+          bucket text not null,
+          identifier text not null,
+          window_started_at timestamptz not null default now(),
+          attempts int not null default 0,
+          updated_at timestamptz not null default now(),
+          primary key (bucket, identifier)
+        )
+        """,
+        """
+        create index if not exists idx_auth_rate_limits_updated_at
+          on auth_rate_limits (updated_at)
+        """,
 
         # ─── Engagement tracking ──────────────────────────────────────────────────
         """

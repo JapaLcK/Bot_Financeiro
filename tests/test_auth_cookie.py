@@ -1,7 +1,24 @@
+import asyncio
+import pytest
+import uuid
+from types import SimpleNamespace
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 import db
 import frontend.finance_bot_websocket_custom as dashboard
+
+
+def _clear_rate_limits(*identifiers: str):
+    if not identifiers:
+        return
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "delete from auth_rate_limits where identifier = any(%s)",
+                (list(identifiers),),
+            )
+        conn.commit()
 
 
 def test_login_sets_auth_token_cookie(monkeypatch):
@@ -111,3 +128,45 @@ def test_dashboard_html_is_not_cached():
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_rate_limit_returns_friendly_error(monkeypatch):
+    monkeypatch.setattr(db, "create_password_reset_token", lambda email: None)
+    client = TestClient(dashboard.app)
+    email = f"reset-{uuid.uuid4().hex}@example.com"
+    _clear_rate_limits("ip:testclient", f"email:{email}")
+
+    try:
+        for _ in range(3):
+            response = client.post("/auth/forgot-password", json={"email": email})
+            assert response.status_code == 200
+
+        response = client.post("/auth/forgot-password", json={"email": email})
+
+        assert response.status_code == 429
+        assert response.json()["detail"] == "Muitas tentativas. Aguarde alguns minutos e tente novamente."
+    finally:
+        _clear_rate_limits("ip:testclient", f"email:{email}")
+
+
+def test_email_rate_limit_blocks_same_email_even_when_case_changes():
+    email = f"login-{uuid.uuid4().hex}@example.com"
+    email_identifier = f"email:{email}"
+    ip_identifiers = [f"ip:198.51.100.{i}" for i in range(1, 7)]
+    _clear_rate_limits(email_identifier, *ip_identifiers)
+    try:
+        for i in range(1, 6):
+            request = SimpleNamespace(client=SimpleNamespace(host=f"198.51.100.{i}"))
+            asyncio.run(dashboard._check_auth_rate_limits("login", request, email.upper()))
+
+        with pytest.raises(HTTPException) as exc_info:
+            request = SimpleNamespace(client=SimpleNamespace(host="198.51.100.6"))
+            asyncio.run(dashboard._check_auth_rate_limits("login", request, email))
+
+        assert exc_info.value.status_code == 429
+        assert exc_info.value.detail == "Muitas tentativas. Aguarde alguns minutos e tente novamente."
+
+        other_identifier = f"email:other-{uuid.uuid4().hex}@example.com"
+        asyncio.run(dashboard._check_persistent_rate_limit("login", other_identifier, 5, 60))
+    finally:
+        _clear_rate_limits(email_identifier, *ip_identifiers, locals().get("other_identifier", ""))

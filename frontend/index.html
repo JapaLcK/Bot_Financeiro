@@ -1128,10 +1128,21 @@ async function doForgot() {
   try {
     const res = await fetch(`${API_BASE}/auth/forgot-password`, {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
     });
-    const data = await res.json();
+    const data = await readResponsePayload(res);
+    if (!res.ok) {
+      msg.textContent = data.detail || 'Muitas tentativas. Aguarde alguns minutos e tente novamente.';
+      msg.style.background = '';
+      msg.style.border = '';
+      msg.style.color = '';
+      msg.className = 'form-error show';
+      btn.disabled = false;
+      btn.textContent = 'Enviar link';
+      return;
+    }
     msg.textContent = data.message || 'Se este e-mail estiver cadastrado, você receberá as instruções em breve.';
     msg.style.background = 'rgba(52,211,153,0.12)';
     msg.style.border = '1px solid rgba(52,211,153,0.3)';
