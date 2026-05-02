@@ -70,15 +70,12 @@ nav {
   box-shadow: 0 4px 12px rgba(124,58,237,.4);
 }
 .nav-logo span { font-size: 1rem; font-weight: 700; letter-spacing: -.02em; color: var(--text); }
-.nav-back {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  color: var(--text-2); padding: 8px 18px; border-radius: 12px;
-  font-size: .85rem; font-weight: 600; cursor: pointer;
-  text-decoration: none;
-  transition: all .2s var(--ease);
+.nav-links { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.nav-links a {
+  color: var(--text-2); font-size: .78rem; font-weight: 650;
+  text-decoration: none; transition: color .2s var(--ease);
 }
-.nav-back:hover { background: rgba(255,255,255,0.12); color: var(--text); }
+.nav-links a:hover, .nav-links a.active { color: var(--text); }
 
 /* ─── Hero ── */
 .hero {
@@ -229,6 +226,11 @@ footer {
 }
 footer a { color: var(--text-2); text-decoration: none; }
 footer a:hover { color: var(--text); }
+@media(max-width:760px){
+  nav { flex-wrap: wrap; }
+  .nav-links { width: 100%; justify-content: center; }
+  .page { padding-inline: 18px; }
+}
 </style>
 </head>
 <body>
@@ -248,12 +250,19 @@ footer a:hover { color: var(--text); }
       <div class="logo-icon">🐷</div>
       <span>PigBank AI</span>
     </a>
-    <a class="nav-back" href="/">← Voltar ao site</a>
+    <div class="nav-links" aria-label="Navegação principal">
+      <a href="/whatsapp">WhatsApp</a>
+      <a href="/funcionalidades">Funcionalidades</a>
+      <a href="/como-funciona">Como funciona</a>
+      <a href="/precos">Preços</a>
+      <a class="active" href="/changelog">Novidades</a>
+      <a href="/suporte">Suporte</a>
+    </div>
   </nav>
 
   <!-- Hero -->
   <div class="hero">
-    <div class="hero-badge">📋 Changelog</div>
+    <div class="hero-badge">📋 Novidades</div>
     <h1>De uma ideia a um <span>assistente completo</span></h1>
     <p>Tudo o que o PigBank AI já aprendeu a fazer —<br/>desde o primeiro gasto registrado até hoje.</p>
   </div>
