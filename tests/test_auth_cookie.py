@@ -93,3 +93,21 @@ def test_magic_link_redirect_sets_cookie_without_token_in_url(monkeypatch):
     assert response.headers["location"] == "/app"
     assert "?token=" not in response.headers["location"]
     assert "dashboard_token=" in response.headers["set-cookie"]
+
+
+def test_logout_expires_auth_and_dashboard_cookies():
+    response = TestClient(dashboard.app).post("/auth/logout")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["clear-site-data"] == '"cookies", "storage"'
+    set_cookie = response.headers.get_list("set-cookie")
+    assert any(cookie.startswith("auth_token=") and "Max-Age=0" in cookie for cookie in set_cookie)
+    assert any(cookie.startswith("dashboard_token=") and "Max-Age=0" in cookie for cookie in set_cookie)
+
+
+def test_dashboard_html_is_not_cached():
+    response = TestClient(dashboard.app).get("/app")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"

@@ -930,6 +930,40 @@ def _set_dashboard_cookie(response: Response, user_id: int) -> str:
     return token
 
 
+def _expire_cookie(response: Response, name: str, domain: str | None = None) -> None:
+    response.delete_cookie(
+        name,
+        path="/",
+        domain=domain,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+    )
+
+
+def _clear_session_cookies(response: Response) -> None:
+    domains: list[str | None] = [None]
+    host = urllib.parse.urlparse(DASHBOARD_URL).hostname
+    if host:
+        domains.extend([host, f".{host}"])
+    for domain in domains:
+        _expire_cookie(response, AUTH_COOKIE_NAME, domain)
+        _expire_cookie(response, DASHBOARD_COOKIE_NAME, domain)
+
+
+def _no_store(response: Response) -> Response:
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+def _html_file(path: pathlib.Path) -> FileResponse:
+    response = FileResponse(path, media_type="text/html")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
 def _dashboard_url(path: str = "/app", view: str | None = None) -> str:
     url = f"{DASHBOARD_URL}{path}"
     if view:
@@ -1053,6 +1087,7 @@ async def auth_validate(request: Request, response: Response, token: str | None 
 
     if not user_id:
         raise HTTPException(status_code=401, detail="Token inválido")
+    _no_store(response)
     return {"user_id": user_id}
 
 
@@ -1173,18 +1208,9 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
 
 @app.post("/auth/logout")
 async def auth_logout(response: Response):
-    response.delete_cookie(
-        AUTH_COOKIE_NAME,
-        httponly=True,
-        secure=True,
-        samesite="strict",
-    )
-    response.delete_cookie(
-        DASHBOARD_COOKIE_NAME,
-        httponly=True,
-        secure=True,
-        samesite="strict",
-    )
+    _clear_session_cookies(response)
+    response.headers["Clear-Site-Data"] = '"cookies", "storage"'
+    _no_store(response)
     return {"ok": True}
 
 
@@ -1509,34 +1535,34 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
 
 @app.get("/")
 async def serve_landing():
-    return FileResponse(HERE / "index.html")
+    return _html_file(HERE / "index.html")
 
 @app.get("/app")
 async def serve_dashboard():
-    return FileResponse(HERE / "dashboard.html")
+    return _html_file(HERE / "dashboard.html")
 
 
 @app.get("/settings")
 async def serve_settings():
-    return FileResponse(HERE / "settings.html")
+    return _html_file(HERE / "settings.html")
 
 
 @app.get("/reset-password")
 async def serve_reset_password():
-    return FileResponse(HERE / "reset-password.html")
+    return _html_file(HERE / "reset-password.html")
 
 
 @app.get("/dashboard-login")
 async def serve_dashboard_login():
-    return FileResponse(HERE / "dashboard-login.html")
+    return _html_file(HERE / "dashboard-login.html")
 
 @app.get("/privacy")
 async def serve_privacy():
-    return FileResponse(HERE / "privacy.html", media_type="text/html")
+    return _html_file(HERE / "privacy.html")
 
 @app.get("/changelog")
 async def serve_changelog():
-    return FileResponse(HERE / "changelog.html", media_type="text/html")
+    return _html_file(HERE / "changelog.html")
 
 @app.get("/favicon.png")
 async def serve_favicon():

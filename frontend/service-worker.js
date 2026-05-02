@@ -2,7 +2,8 @@
  * Finance Dashboard – Service Worker
  *
  * Strategy:
- *   - HTML / assets: Network-first with cache fallback (always fresh)
+ *   - HTML / auth: never cached
+ *   - Assets: network-first with cache fallback
  *   - API / WebSocket: Never cached (pass-through)
  *
  * This allows the dashboard shell to load even when offline,
@@ -10,7 +11,7 @@
  * once the network is restored.
  */
 
-const CACHE_NAME = "finance-dash-v2";
+const CACHE_NAME = "finance-dash-v3";
 
 // Resources to pre-cache on install
 const PRECACHE = [
@@ -20,7 +21,18 @@ const PRECACHE = [
 ];
 
 // Never cache these (API calls, WebSocket upgrades)
-const SKIP_CACHE = ["/ws/", "/export/", "/budgets/", "/data/", "/health", "/admin", "/admin/"];
+const SKIP_CACHE = [
+  "/app",
+  "/settings",
+  "/auth/",
+  "/ws/",
+  "/export/",
+  "/budgets/",
+  "/data/",
+  "/health",
+  "/admin",
+  "/admin/",
+];
 
 /* ── Install: pre-cache shell ────────────────────────────────────────── */
 self.addEventListener("install", event => {
@@ -49,8 +61,9 @@ self.addEventListener("fetch", event => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET and API/WS routes
+  // Skip non-GET, navigations, auth, API and WS routes
   if (request.method !== "GET") return;
+  if (request.mode === "navigate") return;
   if (SKIP_CACHE.some(p => url.pathname.startsWith(p))) return;
   if (url.protocol === "ws:" || url.protocol === "wss:") return;
 
