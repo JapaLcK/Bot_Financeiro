@@ -69,6 +69,7 @@ from db import (
     set_engagement_opt_out,
     set_tip_email_opt_out,
     set_insight_email_opt_out,
+    set_whatsapp_updates_opt_out,
     sync_engagement_opt_out,
     update_pluggy_open_finance_item_status,
     investment_deposit_from_account,
@@ -272,6 +273,7 @@ async def ensure_notification_preference_columns():
     statements = [
         "ALTER TABLE auth_accounts ADD COLUMN IF NOT EXISTS tip_email_opt_out BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE auth_accounts ADD COLUMN IF NOT EXISTS insight_email_opt_out BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE auth_accounts ADD COLUMN IF NOT EXISTS whatsapp_updates_opt_out BOOLEAN NOT NULL DEFAULT FALSE",
         """
         UPDATE auth_accounts
         SET tip_email_opt_out = TRUE,
@@ -1958,6 +1960,7 @@ class NotificationSettingsPayload(BaseModel):
     engagement_email_enabled: bool | None = None
     tip_email_enabled: bool | None = None
     insight_email_enabled: bool | None = None
+    whatsapp_updates_enabled: bool | None = None
     daily_report_enabled: bool | None = None
     daily_report_hour: int | None = None
     daily_report_minute: int | None = None
@@ -2108,17 +2111,23 @@ async def _get_notification_settings(user_id: int) -> dict:
     auth_user = auth_user or {}
     daily_prefs = daily_prefs or {}
     email = auth_user.get("email")
+    phone = auth_user.get("phone_e164")
     email_available = bool(email)
+    whatsapp_updates_available = bool(phone)
     engagement_opt_out = bool(auth_user.get("engagement_opt_out", False))
     tip_email_enabled = email_available and not engagement_opt_out and not bool(auth_user.get("tip_email_opt_out", False))
     insight_email_enabled = email_available and not engagement_opt_out and not bool(auth_user.get("insight_email_opt_out", False))
+    whatsapp_updates_enabled = whatsapp_updates_available and not bool(auth_user.get("whatsapp_updates_opt_out", False))
     return {
         "ok": True,
         "email": email,
+        "whatsapp_destination": phone,
         "email_notifications_available": email_available,
+        "whatsapp_updates_available": whatsapp_updates_available,
         "engagement_email_enabled": tip_email_enabled or insight_email_enabled,
         "tip_email_enabled": tip_email_enabled,
         "insight_email_enabled": insight_email_enabled,
+        "whatsapp_updates_enabled": whatsapp_updates_enabled,
         "daily_report_enabled": bool(daily_prefs.get("enabled", True)),
         "daily_report_hour": int(daily_prefs.get("hour", 9)),
         "daily_report_minute": int(daily_prefs.get("minute", 0)),
@@ -2264,6 +2273,12 @@ async def update_notification_settings_route(
 
     if payload.tip_email_enabled is not None or payload.insight_email_enabled is not None:
         await asyncio.to_thread(sync_engagement_opt_out, user_id)
+
+    if payload.whatsapp_updates_enabled is not None:
+        auth_user = await asyncio.to_thread(get_auth_user, user_id)
+        if not auth_user or not auth_user.get("phone_e164"):
+            raise HTTPException(status_code=400, detail="Vincule um WhatsApp para receber atualizações.")
+        await asyncio.to_thread(set_whatsapp_updates_opt_out, user_id, not payload.whatsapp_updates_enabled)
 
     if payload.daily_report_hour is not None or payload.daily_report_minute is not None:
         current = await asyncio.to_thread(get_daily_report_prefs, user_id)

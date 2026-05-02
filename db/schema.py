@@ -514,6 +514,10 @@ def init_db():
           insight_email_opt_out boolean not null default false
         """,
         """
+        alter table auth_accounts add column if not exists
+          whatsapp_updates_opt_out boolean not null default false
+        """,
+        """
         update auth_accounts
         set tip_email_opt_out = true,
             insight_email_opt_out = true

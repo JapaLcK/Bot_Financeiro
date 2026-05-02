@@ -38,7 +38,7 @@ def get_interactive_id(raw: dict[str, Any]) -> str | None:
     inter = raw.get("interactive") or {}
     br = inter.get("button_reply") or {}
     lr = inter.get("list_reply") or {}
-    return br.get("id") or lr.get("id") or None
+    return br.get("id") or br.get("title") or lr.get("id") or lr.get("title") or None
 
 
 def _get_value(payload: dict[str, Any]) -> dict[str, Any]:

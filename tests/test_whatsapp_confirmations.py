@@ -77,3 +77,51 @@ def test_autolink_com_comando_nao_interrompe_para_boas_vindas(monkeypatch):
     assert handled[0].user_id == 222
     assert handled[0].text == "saldo"
     assert replies == [("5565992741873", "uid=222 text=saldo", 222)]
+
+
+def test_botao_parar_atualizacoes_desliga_updates_do_whatsapp(monkeypatch):
+    replies = []
+    updates = []
+
+    monkeypatch.setattr(
+        "adapters.whatsapp.wa_runtime.get_or_create_canonical_user",
+        lambda provider, external_id: 111,
+    )
+    monkeypatch.setattr(
+        "adapters.whatsapp.wa_runtime.attempt_whatsapp_phone_link",
+        lambda wa_id, current_user_id=None: {"status": "linked", "user_id": 222, "wa_phone": wa_id},
+    )
+    monkeypatch.setattr("adapters.whatsapp.wa_runtime.log_system_event_sync", lambda *a, **k: None)
+    monkeypatch.setattr("adapters.whatsapp.wa_runtime.send_typing_indicator", lambda *a, **k: None)
+    monkeypatch.setattr("adapters.whatsapp.wa_runtime._seen_recent", lambda message_id: False)
+    monkeypatch.setattr("adapters.whatsapp.wa_runtime._send_reply", lambda to, body: replies.append((to, body)))
+    monkeypatch.setattr(
+        "adapters.whatsapp.wa_runtime.set_whatsapp_updates_opt_out",
+        lambda user_id, opt_out: updates.append((user_id, opt_out)),
+    )
+    monkeypatch.setattr(
+        "adapters.whatsapp.wa_runtime.handle_incoming",
+        lambda msg: (_ for _ in ()).throw(AssertionError("não deveria chamar o fluxo principal")),
+    )
+
+    process_message(
+        InboundMessage(
+            wa_id="5565992741873",
+            text="Parar atualizações",
+            timestamp="123",
+            attachments=[],
+            raw={
+                "id": "wamid.stop-updates",
+                "type": "button",
+                "button": {"text": "Parar atualizações"},
+            },
+        )
+    )
+
+    assert updates == [(222, True)]
+    assert replies == [
+        (
+            "5565992741873",
+            "Pronto, parei as atualizações do Piggy por aqui. Você pode religar quando quiser em Configurações > Notificações.",
+        )
+    ]

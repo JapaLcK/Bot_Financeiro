@@ -99,3 +99,17 @@ def test_extract_template_quick_reply_button_payload():
     assert len(messages) == 1
     assert messages[0].text == "daily_report_disable"
     assert get_interactive_id(messages[0].raw) == "daily_report_disable"
+
+
+def test_get_interactive_id_falls_back_to_button_title():
+    raw = {
+        "type": "interactive",
+        "interactive": {
+            "type": "button_reply",
+            "button_reply": {
+                "title": "Parar atualizações",
+            },
+        },
+    }
+
+    assert get_interactive_id(raw) == "Parar atualizações"

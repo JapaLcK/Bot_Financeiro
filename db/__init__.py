@@ -187,6 +187,7 @@ from .reports import (
     set_engagement_opt_out,
     set_tip_email_opt_out,
     set_insight_email_opt_out,
+    set_whatsapp_updates_opt_out,
     sync_engagement_opt_out,
     get_user_by_email,
 )
@@ -250,6 +251,7 @@ __all__ = [
     "create_password_reset_token", "consume_password_reset_token",
     "update_last_activity", "get_users_for_engagement", "mark_reengagement_sent",
     "mark_tip_sent", "mark_insight_sent", "set_engagement_opt_out",
-    "set_tip_email_opt_out", "set_insight_email_opt_out", "sync_engagement_opt_out",
+    "set_tip_email_opt_out", "set_insight_email_opt_out", "set_whatsapp_updates_opt_out",
+    "sync_engagement_opt_out",
     "get_user_by_email",
 ]

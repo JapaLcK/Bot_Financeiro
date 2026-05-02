@@ -29,7 +29,14 @@ from core.handle_incoming import handle_incoming
 from core.handlers import report as h_report
 from core.observability import log_system_event_sync
 from core.types import IncomingMessage
-from db import attempt_whatsapp_phone_link, clear_pending_action, get_conn, get_or_create_canonical_user, get_pending_action
+from db import (
+    attempt_whatsapp_phone_link,
+    clear_pending_action,
+    get_conn,
+    get_or_create_canonical_user,
+    get_pending_action,
+    set_whatsapp_updates_opt_out,
+)
 from utils_phone import mask_phone
 
 logger = logging.getLogger(__name__)
@@ -38,6 +45,12 @@ WA_CONFIRM_YES_ID = "confirm_yes"
 WA_CONFIRM_NO_ID = "confirm_no"
 WA_UNDO_LAUNCH_ID = "undo_launch"
 WA_DAILY_REPORT_DISABLE_ID = "daily_report_disable"
+WA_UPDATES_DISABLE_IDS = {
+    "parar atualizações",
+    "parar atualizacoes",
+    "whatsapp_updates_disable",
+    "updates_disable",
+}
 
 
 _SEEN: dict[str, float] = {}
@@ -409,6 +422,24 @@ def process_message(message: InboundMessage) -> None:
                         "warning",
                         "whatsapp_daily_report_disable_button_error",
                         f"Erro ao processar botão de desligar report diário: {e}",
+                        source="wa_runtime",
+                        user_id=uid,
+                    )
+                return
+            elif interactive_id.strip().lower() in WA_UPDATES_DISABLE_IDS:
+                logger.info("WA updates disable button clicked wa_id=%s uid=%s", reply_to, uid)
+                try:
+                    set_whatsapp_updates_opt_out(uid, True)
+                    _send_reply(
+                        reply_to,
+                        "Pronto, parei as atualizações do Piggy por aqui. Você pode religar quando quiser em Configurações > Notificações.",
+                    )
+                except Exception as e:
+                    logger.exception("WA updates disable button error wa_id=%s: %s", reply_to, e)
+                    log_system_event_sync(
+                        "warning",
+                        "whatsapp_updates_disable_button_error",
+                        f"Erro ao processar botão de parar atualizações: {e}",
                         source="wa_runtime",
                         user_id=uid,
                     )

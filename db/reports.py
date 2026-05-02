@@ -273,6 +273,16 @@ def set_insight_email_opt_out(user_id: int, opt_out: bool) -> None:
         conn.commit()
 
 
+def set_whatsapp_updates_opt_out(user_id: int, opt_out: bool) -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE auth_accounts SET whatsapp_updates_opt_out = %s WHERE user_id = %s",
+                (opt_out, user_id),
+            )
+        conn.commit()
+
+
 def sync_engagement_opt_out(user_id: int) -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:

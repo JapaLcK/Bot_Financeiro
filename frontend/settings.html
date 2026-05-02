@@ -1225,6 +1225,17 @@ a { color: inherit; text-decoration: none; }
 
                 <div class="notification-row">
                   <div class="notification-copy">
+                    <div class="notification-title">Atualizações do Piggy</div>
+                    <div class="notification-sub">Receba avisos curtos no WhatsApp quando houver novidades no PigBank AI.</div>
+                  </div>
+                  <label class="switch" aria-label="Ativar atualizações do Piggy no WhatsApp">
+                    <input type="checkbox" id="notif-whatsapp-updates" onchange="updateNotificationSettings({ whatsapp_updates_enabled: this.checked })">
+                    <span class="switch-slider"></span>
+                  </label>
+                </div>
+
+                <div class="notification-row">
+                  <div class="notification-copy">
                     <div class="notification-title">Resumo diário</div>
                     <div class="notification-sub">Controle o envio do resumo automático do bot no horário escolhido.</div>
                   </div>
@@ -1523,7 +1534,7 @@ async function sendPasswordResetEmail() {
 }
 
 function setNotificationControlsDisabled(disabled) {
-  ["notif-tip-email", "notif-insight-email", "notif-daily-report", "notif-daily-hour"].forEach(id => {
+  ["notif-tip-email", "notif-insight-email", "notif-whatsapp-updates", "notif-daily-report", "notif-daily-hour"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = disabled;
   });
@@ -1531,24 +1542,30 @@ function setNotificationControlsDisabled(disabled) {
 
 function applyNotificationSettings(data) {
   const email = data.email || "E-mail não vinculado";
+  const whatsappDestination = data.whatsapp_destination ? formatPhoneBR(data.whatsapp_destination) : "WhatsApp não vinculado";
   const tipEmail = Boolean(data.tip_email_enabled ?? data.engagement_email_enabled);
   const insightEmail = Boolean(data.insight_email_enabled ?? data.engagement_email_enabled);
+  const whatsappUpdates = Boolean(data.whatsapp_updates_enabled);
   const daily = Boolean(data.daily_report_enabled);
   const hour = Number(data.daily_report_hour ?? 9);
   const emailAvailable = Boolean(data.email_notifications_available);
+  const whatsappAvailable = Boolean(data.whatsapp_updates_available);
   const emailWarning = document.getElementById("notif-email-warning");
-  document.getElementById("notif-email-value").textContent = email;
+  document.getElementById("notif-email-value").textContent = `${email} · ${whatsappDestination}`;
   if (emailWarning) emailWarning.hidden = emailAvailable;
   document.getElementById("notif-tip-email").checked = tipEmail;
   document.getElementById("notif-insight-email").checked = insightEmail;
+  document.getElementById("notif-whatsapp-updates").checked = whatsappUpdates;
   document.getElementById("notif-tip-email").disabled = !emailAvailable;
   document.getElementById("notif-insight-email").disabled = !emailAvailable;
+  document.getElementById("notif-whatsapp-updates").disabled = !whatsappAvailable;
   document.getElementById("notif-daily-report").checked = daily;
   document.getElementById("notif-daily-hour").value = String(hour);
   document.getElementById("notif-daily-hour").disabled = !daily;
   document.getElementById("notif-status-value").textContent = [
     emailAvailable ? (tipEmail ? "dicas ativas" : "dicas pausadas") : "e-mail não vinculado",
     emailAvailable ? (insightEmail ? "insights ativos" : "insights pausados") : "notificações por e-mail pausadas",
+    whatsappAvailable ? (whatsappUpdates ? "atualizações ativas" : "atualizações pausadas") : "WhatsApp não vinculado",
     daily ? `resumo às ${String(hour).padStart(2, "0")}:00` : "resumo pausado",
   ].join(" · ");
 }
@@ -1569,10 +1586,13 @@ async function loadNotificationSettings() {
     showToast(err.message || "Erro ao carregar notificações", "error");
   } finally {
     const daily = document.getElementById("notif-daily-report")?.checked;
-    const hasEmail = document.getElementById("notif-email-value")?.textContent !== "E-mail não vinculado";
+    const destinationText = document.getElementById("notif-email-value")?.textContent || "";
+    const hasEmail = !destinationText.startsWith("E-mail não vinculado");
+    const hasWhatsapp = !destinationText.includes("WhatsApp não vinculado");
     setNotificationControlsDisabled(false);
     document.getElementById("notif-tip-email").disabled = !hasEmail;
     document.getElementById("notif-insight-email").disabled = !hasEmail;
+    document.getElementById("notif-whatsapp-updates").disabled = !hasWhatsapp;
     document.getElementById("notif-daily-hour").disabled = !daily;
   }
 }
@@ -1595,10 +1615,13 @@ async function updateNotificationSettings(patch) {
     await loadNotificationSettings();
   } finally {
     const daily = document.getElementById("notif-daily-report")?.checked;
-    const hasEmail = document.getElementById("notif-email-value")?.textContent !== "E-mail não vinculado";
+    const destinationText = document.getElementById("notif-email-value")?.textContent || "";
+    const hasEmail = !destinationText.startsWith("E-mail não vinculado");
+    const hasWhatsapp = !destinationText.includes("WhatsApp não vinculado");
     setNotificationControlsDisabled(false);
     document.getElementById("notif-tip-email").disabled = !hasEmail;
     document.getElementById("notif-insight-email").disabled = !hasEmail;
+    document.getElementById("notif-whatsapp-updates").disabled = !hasWhatsapp;
     document.getElementById("notif-daily-hour").disabled = !daily;
   }
 }
