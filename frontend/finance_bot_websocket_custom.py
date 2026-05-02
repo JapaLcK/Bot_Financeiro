@@ -7,7 +7,6 @@ Endpoints:
   GET  /manifest.json           → PWA manifest
   GET  /service-worker.js       → PWA service worker
   GET  /health
-  GET  /users
   GET  /data/{user_id}          → snapshot (query: year, month)
   GET  /history/{user_id}       → last N months summary (query: months)
   GET  /budgets/{user_id}       → list budgets
@@ -1768,18 +1767,7 @@ async def unsubscribe(uid: int, token: str):
 
 @app.get("/health")
 async def health():
-    try:
-        async with await db_connect() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute("SELECT 1")
-        return {"status": "healthy", "db": "connected"}
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"DB error: {exc}")
-
-@app.get("/users")
-async def list_all_users(request: Request):
-    user_id = _resolve_dashboard_user_id(request)
-    return {"users": [user_id]}
+    return {"status": "ok"}
 
 @app.get("/data/{user_id}")
 async def get_data(

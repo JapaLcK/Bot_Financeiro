@@ -487,8 +487,7 @@ function esc(v) {
 }
 function authH() {
   const t = localStorage.getItem(tokenKey);
-  if (!t) { window.location.href = "/admin/login"; throw new Error("no token"); }
-  return { Authorization: `Bearer ${t}` };
+  return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
 /* ── Status ──────────────────────────────────────────────────────── */
@@ -1031,11 +1030,15 @@ function startAutoRefresh() {
 refreshBtn.addEventListener('click', e => { e.preventDefault(); refresh(true); });
 $id('clear-alerts-btn').addEventListener('click', () => clearAlerts());
 windowSelect.addEventListener('change', () => refresh(true));
-$id('logout-btn').addEventListener('click', () => {
+$id('logout-btn').addEventListener('click', async () => {
   refreshController?.abort();
   clearInterval(autoInterval);
-  localStorage.removeItem(tokenKey);
-  window.location.href = '/admin/login';
+  try {
+    await fetch('/admin/auth/logout', { method: 'POST' });
+  } finally {
+    localStorage.removeItem(tokenKey);
+    window.location.href = '/admin/login';
+  }
 });
 
 document.querySelectorAll('#error-filter-bar .filter-btn').forEach(btn => {

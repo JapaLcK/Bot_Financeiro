@@ -103,6 +103,16 @@ def test_auth_validate_accepts_dashboard_cookie_without_url_token():
     assert response.json() == {"user_id": 123}
 
 
+def test_users_endpoint_is_not_exposed_with_dashboard_cookie():
+    dashboard_token = dashboard.make_dashboard_token(123, hours=1)
+    client = TestClient(dashboard.app)
+    client.cookies.set("dashboard_token", dashboard_token)
+
+    response = client.get("/users")
+
+    assert response.status_code == 404
+
+
 def test_magic_link_redirect_sets_cookie_without_token_in_url(monkeypatch):
     monkeypatch.setattr(db, "consume_dashboard_session", lambda code: 123 if code == "one-time" else None)
 
@@ -130,6 +140,13 @@ def test_dashboard_html_is_not_cached():
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_health_endpoint_does_not_expose_infrastructure():
+    response = TestClient(dashboard.app).get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
 
 
 def test_rate_limit_returns_friendly_error(monkeypatch):

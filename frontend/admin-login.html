@@ -134,8 +134,8 @@ function clearError() {
 
 async function checkSession() {
   const token = localStorage.getItem(tokenKey);
-  if (!token) return;
-  const res = await fetch("/admin/auth/me", { headers: { Authorization: `Bearer ${token}` } });
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const res = await fetch("/admin/auth/me", { headers });
   if (res.ok) {
     window.location.href = "/admin";
   } else {
@@ -170,11 +170,7 @@ form.addEventListener("submit", async (event) => {
       setError(msg);
       return;
     }
-    if (!data.token) {
-      setError("Resposta inválida do servidor.");
-      return;
-    }
-    localStorage.setItem(tokenKey, data.token);
+    if (data.token) localStorage.setItem(tokenKey, data.token);
     window.location.href = "/admin";
   } catch (err) {
     setError("Falha de conexão com o painel admin.");

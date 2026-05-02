@@ -10,8 +10,8 @@ from typing import Any
 import bcrypt
 import jwt as pyjwt
 import psycopg
-from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
@@ -33,6 +33,7 @@ ADMIN_DASHBOARD_PASSWORD = os.getenv("ADMIN_DASHBOARD_PASSWORD", "")
 ADMIN_DASHBOARD_PASSWORD_HASH = os.getenv("ADMIN_DASHBOARD_PASSWORD_HASH", "")
 ADMIN_DASHBOARD_SESSION_HOURS = float(os.getenv("ADMIN_DASHBOARD_SESSION_HOURS", "12"))
 DB_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "5"))
+ADMIN_AUTH_COOKIE_NAME = "admin_auth_token"
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -200,18 +201,48 @@ def _decode_jwt(token: str, jwt_secret: str) -> dict | None:
         return None
 
 
-async def get_current_admin(
+def _set_admin_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        ADMIN_AUTH_COOKIE_NAME,
+        token,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+        max_age=int(ADMIN_DASHBOARD_SESSION_HOURS * 3600),
+        path="/admin",
+    )
+
+
+def _clear_admin_cookie(response: Response) -> None:
+    response.delete_cookie(ADMIN_AUTH_COOKIE_NAME, path="/admin")
+
+
+def _resolve_admin_username(
     jwt_secret: str,
-    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    request: Request,
+    creds: HTTPAuthorizationCredentials | None = None,
 ) -> str:
     if not admin_enabled():
         raise HTTPException(status_code=503, detail="Painel admin não configurado.")
-    if not creds:
+    token = creds.credentials if creds else request.cookies.get(ADMIN_AUTH_COOKIE_NAME)
+    if not token:
         raise HTTPException(status_code=401, detail="Token admin não fornecido.")
-    payload = _decode_jwt(creds.credentials, jwt_secret)
-    if not payload or payload.get("type") != "admin":
+    payload = _decode_jwt(token, jwt_secret)
+    if (
+        not payload
+        or payload.get("type") != "admin"
+        or payload.get("sub") != ADMIN_DASHBOARD_USERNAME
+    ):
         raise HTTPException(status_code=401, detail="Token admin inválido ou expirado.")
     return str(payload["sub"])
+
+
+async def get_current_admin(
+    jwt_secret: str,
+    request: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> str:
+    return _resolve_admin_username(jwt_secret, request, creds)
 
 
 class AdminLoginBody(BaseModel):
@@ -637,13 +668,14 @@ async def admin_error_logging_middleware(request: Request, call_next):
 
 def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, limiter) -> None:
     async def _get_current_admin(
+        request: Request,
         creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
     ) -> str:
-        return await get_current_admin(jwt_secret, creds)
+        return await get_current_admin(jwt_secret, request, creds)
 
     @app.post("/admin/auth/login")
     @limiter.limit("10/minute")
-    async def admin_auth_login(request: Request):
+    async def admin_auth_login(request: Request, response: Response):
         # Lê o body manualmente para evitar incompatibilidade entre slowapi +
         # FastAPI 0.100+ + Pydantic v2 ao resolver parâmetros de body dentro de
         # funções de registro de rotas (register_admin_routes).
@@ -682,6 +714,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             raise HTTPException(status_code=401, detail="Credenciais inválidas.")
 
         token = _make_admin_jwt(ADMIN_DASHBOARD_USERNAME, jwt_secret)
+        _set_admin_cookie(response, token)
         await log_system_event(
             "info",
             "admin_login_success",
@@ -698,6 +731,11 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
     @app.get("/admin/auth/me")
     async def admin_auth_me(username: str = Depends(_get_current_admin)):
         return {"username": username}
+
+    @app.post("/admin/auth/logout")
+    async def admin_auth_logout(response: Response):
+        _clear_admin_cookie(response)
+        return {"ok": True}
 
     @app.get("/admin/api/overview")
     async def admin_api_overview(days: int = 30, username: str = Depends(_get_current_admin)):
@@ -720,9 +758,19 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         return {"deleted": event_id}
 
     @app.get("/admin")
-    async def serve_admin_dashboard():
-        return FileResponse(frontend_dir / "admin-dashboard.html")
+    async def serve_admin_dashboard(request: Request):
+        try:
+            _resolve_admin_username(jwt_secret, request)
+        except HTTPException:
+            return RedirectResponse("/admin/login", status_code=303)
+        return FileResponse(
+            frontend_dir / "admin-dashboard.html",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/admin/login")
     async def serve_admin_login():
-        return FileResponse(frontend_dir / "admin-login.html")
+        return FileResponse(
+            frontend_dir / "admin-login.html",
+            headers={"Cache-Control": "no-store"},
+        )
