@@ -149,6 +149,29 @@ def test_health_endpoint_does_not_expose_infrastructure():
     assert response.json() == {"status": "ok"}
 
 
+def test_sitemap_lists_public_pages_only():
+    response = TestClient(dashboard.app).get("/sitemap.xml")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/xml")
+    assert "<loc>https://pigbankai.com</loc>" in response.text
+    assert "<loc>https://pigbankai.com/privacy</loc>" in response.text
+    assert "<loc>https://pigbankai.com/changelog</loc>" in response.text
+    assert "/app" not in response.text
+    assert "/settings" not in response.text
+
+
+def test_robots_points_to_sitemap_and_blocks_private_paths():
+    response = TestClient(dashboard.app).get("/robots.txt")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "Allow: /" in response.text
+    assert "Disallow: /app" in response.text
+    assert "Disallow: /auth/" in response.text
+    assert "Sitemap: https://pigbankai.com/sitemap.xml" in response.text
+
+
 def test_rate_limit_returns_friendly_error(monkeypatch):
     monkeypatch.setattr(db, "create_password_reset_token", lambda email: None)
     client = TestClient(dashboard.app)

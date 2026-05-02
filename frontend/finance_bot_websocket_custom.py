@@ -1078,6 +1078,11 @@ def _dashboard_url(path: str = "/app", view: str | None = None) -> str:
     return url
 
 
+def _public_site_url(path: str = "") -> str:
+    base_url = DASHBOARD_URL if DASHBOARD_URL.startswith("https://") else "https://pigbankai.com"
+    return f"{base_url.rstrip('/')}{path}"
+
+
 def _get_auth_token_from_request(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = None,
@@ -1673,6 +1678,46 @@ async def serve_privacy():
 @app.get("/changelog")
 async def serve_changelog():
     return _html_file(HERE / "changelog.html")
+
+@app.get("/robots.txt")
+async def serve_robots_txt():
+    content = "\n".join([
+        "User-agent: *",
+        "Allow: /",
+        "Disallow: /app",
+        "Disallow: /settings",
+        "Disallow: /dashboard-login",
+        "Disallow: /reset-password",
+        "Disallow: /auth/",
+        "Disallow: /admin",
+        f"Sitemap: {_public_site_url('/sitemap.xml')}",
+        "",
+    ])
+    return Response(content=content, media_type="text/plain")
+
+
+@app.get("/sitemap.xml")
+async def serve_sitemap_xml():
+    urls = [
+        ("", "weekly", "1.0"),
+        ("/privacy", "monthly", "0.4"),
+        ("/changelog", "weekly", "0.5"),
+    ]
+    items = "\n".join(
+        "  <url>\n"
+        f"    <loc>{_public_site_url(path)}</loc>\n"
+        f"    <changefreq>{changefreq}</changefreq>\n"
+        f"    <priority>{priority}</priority>\n"
+        "  </url>"
+        for path, changefreq, priority in urls
+    )
+    content = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"{items}\n"
+        "</urlset>\n"
+    )
+    return Response(content=content, media_type="application/xml")
 
 @app.get("/favicon.png")
 async def serve_favicon():
