@@ -2042,6 +2042,17 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
     return json.loads(jdump({"ok": True, "connection": connection, **snapshot}))
 
 
+def _verify_pluggy_webhook_signature(raw_body: bytes, signature_header: str, secret: str) -> bool:
+    signature = (signature_header or "").strip()
+    if signature.startswith("sha256="):
+        signature = signature.split("=", 1)[1]
+    if not signature:
+        return False
+
+    expected = _hmac.new(secret.encode("utf-8"), raw_body, _hashlib.sha256).hexdigest()
+    return _hmac.compare_digest(signature, expected)
+
+
 @app.post("/open-finance/pluggy/webhook")
 async def open_finance_pluggy_webhook(request: Request):
     """
@@ -2052,17 +2063,9 @@ async def open_finance_pluggy_webhook(request: Request):
     if not secret:
         raise HTTPException(status_code=503, detail="Webhook não configurado.")
 
-    try:
-        secret_bytes = _base64.b64decode(secret, validate=True)
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Webhook não configurado.") from exc
-
     raw_body = await request.body()
-    received_sig = (request.headers.get("X-HMAC-SHA512-Signature") or "").strip()
-    expected_sig = _base64.b64encode(
-        _hmac.new(secret_bytes, raw_body, _hashlib.sha512).digest()
-    ).decode()
-    if not received_sig or not _hmac.compare_digest(received_sig, expected_sig):
+    received_sig = request.headers.get("X-Pluggy-Signature") or ""
+    if not _verify_pluggy_webhook_signature(raw_body, received_sig, secret):
         raise HTTPException(status_code=401, detail="Assinatura inválida.")
 
     try:
