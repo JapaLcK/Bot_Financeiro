@@ -1679,6 +1679,26 @@ async def serve_privacy():
 async def serve_changelog():
     return _html_file(HERE / "changelog.html")
 
+@app.get("/whatsapp")
+async def serve_whatsapp():
+    return _html_file(HERE / "whatsapp.html")
+
+@app.get("/funcionalidades")
+async def serve_funcionalidades():
+    return _html_file(HERE / "funcionalidades.html")
+
+@app.get("/como-funciona")
+async def serve_como_funciona():
+    return _html_file(HERE / "como-funciona.html")
+
+@app.get("/precos")
+async def serve_precos():
+    return _html_file(HERE / "precos.html")
+
+@app.get("/suporte")
+async def serve_suporte():
+    return _html_file(HERE / "suporte.html")
+
 @app.get("/robots.txt")
 async def serve_robots_txt():
     content = "\n".join([
@@ -1700,6 +1720,11 @@ async def serve_robots_txt():
 async def serve_sitemap_xml():
     urls = [
         ("", "weekly", "1.0"),
+        ("/whatsapp", "weekly", "0.8"),
+        ("/funcionalidades", "weekly", "0.8"),
+        ("/como-funciona", "weekly", "0.8"),
+        ("/precos", "weekly", "0.7"),
+        ("/suporte", "weekly", "0.7"),
         ("/privacy", "monthly", "0.4"),
         ("/changelog", "weekly", "0.5"),
     ]

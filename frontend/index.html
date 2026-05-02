@@ -18,6 +18,7 @@
 <meta name="twitter:title" content="PigBank AI — Controle financeiro direto no WhatsApp" />
 <meta name="twitter:description" content="Registre gastos, consulte saldo e acompanhe seus cartões em segundos. Simples, rápido e feito para usar no WhatsApp." />
 <meta name="twitter:image" content="https://pigbankai.com/favicon.png" />
+<link rel="canonical" href="https://pigbankai.com/" />
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -75,6 +76,19 @@ nav {
   box-shadow: 0 4px 12px rgba(124,58,237,.4);
 }
 .nav-logo span { font-size: 1rem; font-weight: 700; letter-spacing: -.02em; }
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.nav-links a {
+  color: var(--text-2);
+  font-size: .78rem;
+  font-weight: 650;
+  text-decoration: none;
+  transition: color .2s var(--ease);
+}
+.nav-links a:hover { color: var(--text); }
 .nav-cta {
   background: linear-gradient(135deg, #7c3aed, #3b82f6);
   color: #fff; border: none; padding: 8px 20px; border-radius: 12px;
@@ -373,6 +387,9 @@ footer a:hover { color: var(--text); }
   .auth-panel { padding: 28px 22px 24px; border-radius: 22px; }
   h1 { font-size: 2.1rem; }
   .account-email-text { font-size: .8rem; }
+  nav { gap: 12px; flex-wrap: wrap; }
+  .nav-links { order: 3; width: 100%; justify-content: center; gap: 12px; flex-wrap: wrap; }
+  .nav-links a { font-size: .74rem; }
 }
 </style>
 </head>
@@ -392,6 +409,13 @@ footer a:hover { color: var(--text); }
     <div class="nav-logo">
       <div class="logo-icon">🐷</div>
       <span>PigBank AI</span>
+    </div>
+    <div class="nav-links" aria-label="Páginas principais">
+      <a href="/whatsapp">WhatsApp</a>
+      <a href="/funcionalidades">Funcionalidades</a>
+      <a href="/como-funciona">Como funciona</a>
+      <a href="/precos">Preços</a>
+      <a href="/suporte">Suporte</a>
     </div>
     <!-- Estado deslogado -->
     <button class="nav-cta" id="nav-cta-guest" onclick="scrollToAuth()">Começar grátis</button>
@@ -692,7 +716,13 @@ footer a:hover { color: var(--text); }
   <footer>
     <p>© 2026 PigBank AI · Feito com 🐷</p>
     <div class="footer-links">
+      <a href="/whatsapp">WhatsApp</a>
+      <a href="/funcionalidades">Funcionalidades</a>
+      <a href="/como-funciona">Como funciona</a>
+      <a href="/precos">Preços</a>
+      <a href="/suporte">Suporte</a>
       <a href="/privacy">Política de Privacidade</a>
+      <a href="/changelog">Novidades</a>
       <a href="mailto:contato@pigbankai.com">Contato</a>
     </div>
   </footer>

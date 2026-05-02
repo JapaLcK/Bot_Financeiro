@@ -155,10 +155,26 @@ def test_sitemap_lists_public_pages_only():
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/xml")
     assert "<loc>https://pigbankai.com</loc>" in response.text
+    assert "<loc>https://pigbankai.com/whatsapp</loc>" in response.text
+    assert "<loc>https://pigbankai.com/funcionalidades</loc>" in response.text
+    assert "<loc>https://pigbankai.com/como-funciona</loc>" in response.text
+    assert "<loc>https://pigbankai.com/precos</loc>" in response.text
+    assert "<loc>https://pigbankai.com/suporte</loc>" in response.text
     assert "<loc>https://pigbankai.com/privacy</loc>" in response.text
     assert "<loc>https://pigbankai.com/changelog</loc>" in response.text
     assert "/app" not in response.text
     assert "/settings" not in response.text
+
+
+def test_public_seo_pages_are_served():
+    client = TestClient(dashboard.app)
+
+    for path in ["/whatsapp", "/funcionalidades", "/como-funciona", "/precos", "/suporte"]:
+        response = client.get(path)
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/html")
+        assert 'rel="canonical"' in response.text
 
 
 def test_robots_points_to_sitemap_and_blocks_private_paths():
