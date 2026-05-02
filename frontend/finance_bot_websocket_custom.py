@@ -1258,7 +1258,6 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
     wa_link = _build_whatsapp_onboarding_link(user_id)
 
     return {
-        "token": token,
         "user_id": user_id,
         "email": body.email.strip().lower(),
         "link_code": link_code,
@@ -1306,7 +1305,6 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
     wa_link = _build_whatsapp_onboarding_link(user_id)
 
     return {
-        "token": token,
         "user_id": user_id,
         "email": result["email"],
         "plan": result["plan"],

@@ -43,7 +43,9 @@ def test_login_sets_auth_token_cookie(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json()["email"] == "user@example.com"
+    data = response.json()
+    assert data["email"] == "user@example.com"
+    assert "token" not in data
     set_cookie = response.headers["set-cookie"]
     assert "auth_token=" in set_cookie
     assert "dashboard_token=" in set_cookie
