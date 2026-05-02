@@ -265,12 +265,28 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   background:rgba(96,165,250,.12);color:var(--blue);border:1px solid rgba(96,165,250,.2); }
 .tax-note { font-size:.72rem;color:var(--text-3);line-height:1.5; }
 .sim-result { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px; }
+.invest-titlebar { display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px; }
+.invest-titlebar .section-title { margin:0; }
+.invest-help-btn { display:inline-flex;align-items:center;gap:7px;background:rgba(96,165,250,.12);border:1px solid rgba(96,165,250,.28);
+  color:var(--blue);border-radius:10px;padding:8px 12px;font-size:.78rem;font-weight:700;cursor:pointer;transition:all .2s var(--ease); }
+.invest-help-btn:hover { background:rgba(96,165,250,.18);color:var(--text); }
+.help-steps { display:grid;gap:10px;margin:16px 0;counter-reset:helpStep; }
+.help-step { display:grid;grid-template-columns:auto 1fr;gap:12px;background:rgba(255,255,255,.055);
+  border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:12px; }
+.help-step::before { counter-increment:helpStep;content:counter(helpStep);width:28px;height:28px;border-radius:9px;
+  display:flex;align-items:center;justify-content:center;background:rgba(96,165,250,.16);border:1px solid rgba(96,165,250,.28);
+  color:var(--blue);font-size:.78rem;font-weight:800; }
+.help-step h4 { font-size:.86rem;margin-bottom:4px;color:var(--text); }
+.help-step p { font-size:.78rem;line-height:1.55;color:var(--text-2); }
+.help-note { background:rgba(52,211,153,.09);border:1px solid rgba(52,211,153,.2);border-radius:12px;
+  color:var(--text-2);font-size:.78rem;line-height:1.55;padding:12px;margin-top:12px; }
 @media(max-width:900px) {
   .invest-layout{display:block}
   .invest-stack{display:flex;flex-direction:column;gap:12px}
   .invest-stack + .invest-stack{margin-top:12px}
   .rate-grid,.sim-result{grid-template-columns:1fr}
   .form-row{grid-template-columns:1fr}
+  .invest-titlebar{align-items:flex-start;flex-direction:column}
 }
 
 /* ─── Save rate bar ─────────────────────────────────────────────────── */
@@ -411,7 +427,10 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   </div>
 
   <div id="investments-view" class="dash-view">
-    <p class="section-title">Investimentos</p>
+    <div class="invest-titlebar">
+      <p class="section-title">Investimentos</p>
+      <button class="invest-help-btn" type="button" onclick="openInvestmentHelp()">Como usar</button>
+    </div>
     <div class="invest-layout">
       <div class="invest-stack">
         <div class="card">
@@ -605,6 +624,55 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
     <div class="modal-acts">
       <button class="btn-cancel" onclick="closeInvestmentDetail()">Fechar</button>
       <button class="btn-save" id="investment-detail-move" type="button">Movimentar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="investment-help-overlay">
+  <div class="modal wide">
+    <h3>Como usar a aba de investimentos</h3>
+    <p class="msub">Use esta área para registrar aplicações, acompanhar rendimentos e simular o valor líquido antes de investir.</p>
+    <div class="help-steps">
+      <div class="help-step">
+        <div>
+          <h4>Veja as taxas de referência</h4>
+          <p>No topo da aba ficam CDI, Selic e IPCA. Elas ajudam o Piggy a calcular investimentos pós-fixados e indexados.</p>
+        </div>
+      </div>
+      <div class="help-step">
+        <div>
+          <h4>Cadastre o investimento</h4>
+          <p>Preencha emissor, nome do ativo, tipo, indexador, taxa, data de compra e valor investido. Exemplo: CDB 110% CDI ou Tesouro IPCA+.</p>
+        </div>
+      </div>
+      <div class="help-step">
+        <div>
+          <h4>Confira a tributação</h4>
+          <p>O Piggy aplica a regra do tipo escolhido, como IR regressivo, IOF nos primeiros 30 dias ou isenção para LCI/LCA quando aplicável.</p>
+        </div>
+      </div>
+      <div class="help-step">
+        <div>
+          <h4>Registre aportes e resgates</h4>
+          <p>Quando colocar mais dinheiro ou retirar parte do investimento, use “Aporte e resgate”. Assim a carteira continua batendo com a realidade.</p>
+        </div>
+      </div>
+      <div class="help-step">
+        <div>
+          <h4>Abra um investimento para ver detalhes</h4>
+          <p>Clique em qualquer investimento da carteira para ver saldo, rendimento estimado, datas, taxa e histórico de movimentações.</p>
+        </div>
+      </div>
+      <div class="help-step">
+        <div>
+          <h4>Use o simulador líquido</h4>
+          <p>Antes de cadastrar algo novo, simule indexador, taxa, valor e prazo para comparar cenários já considerando impostos.</p>
+        </div>
+      </div>
+    </div>
+    <div class="help-note">Dica: se não souber algum campo, preencha o essencial primeiro. Você pode usar observações para guardar detalhes como objetivo, liquidez ou banco emissor.</div>
+    <div class="modal-acts">
+      <button class="btn-save" type="button" onclick="closeInvestmentHelp()">Entendi</button>
     </div>
   </div>
 </div>
@@ -1123,6 +1191,14 @@ function openInvestmentDetail(name) {
 
 function closeInvestmentDetail() {
   document.getElementById("investment-detail-overlay").classList.remove("open");
+}
+
+function openInvestmentHelp() {
+  document.getElementById("investment-help-overlay").classList.add("open");
+}
+
+function closeInvestmentHelp() {
+  document.getElementById("investment-help-overlay").classList.remove("open");
 }
 
 function renderInvestmentsPanel(d) {
@@ -1659,12 +1735,18 @@ document.getElementById("bgt-overlay").addEventListener("click", e => {
 document.getElementById("investment-detail-overlay").addEventListener("click", e => {
   if (e.target === e.currentTarget) closeInvestmentDetail();
 });
+document.getElementById("investment-help-overlay").addEventListener("click", e => {
+  if (e.target === e.currentTarget) closeInvestmentHelp();
+});
 document.getElementById("bgt-input").addEventListener("keydown", e => {
   if (e.key === "Enter") saveBudget();
   if (e.key === "Escape") closeBudget();
 });
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") closeInvestmentDetail();
+  if (e.key === "Escape") {
+    closeInvestmentDetail();
+    closeInvestmentHelp();
+  }
 });
 
 /* ═══════════════════════════════════════════════════════════════════════
