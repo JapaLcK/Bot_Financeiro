@@ -715,6 +715,7 @@ let alertsDismissed  = false;
 let monthRequestSeq  = 0;
 let monthAbortController = null;
 const monthDataCache = new Map();
+let filterDebounceTimer = null;
 
 const NOW = new Date();
 let viewYear = NOW.getFullYear(), viewMonth = NOW.getMonth() + 1;
@@ -725,14 +726,26 @@ const CAT_CLR   = ["#f87171","#fb923c","#fbbf24","#a78bfa","#60a5fa","#34d399","
 const PALETTE   = ["#a78bfa","#60a5fa","#34d399","#fbbf24","#f87171","#e879f9","#38bdf8","#4ade80","#fb923c","#94a3b8"];
 const PKT_CLR   = ["var(--purple)","var(--blue)","var(--green)"];
 
-function monthCacheKey(year, month, page = 1) {
-  return `${year}-${String(month).padStart(2, "0")}-${page}`;
+function getFilterText() {
+  return (document.getElementById("filter-text")?.value || "").trim();
+}
+
+function monthCacheKey(year, month, page = 1, type = filterType, text = getFilterText()) {
+  return [
+    year,
+    String(month).padStart(2, "0"),
+    page,
+    type || "all",
+    encodeURIComponent(text || "")
+  ].join("-");
 }
 
 function cacheMonthData(data) {
   if (!data || !data.year || !data.month) return;
   const page = data.launches_pagination?.page || 1;
-  monthDataCache.set(monthCacheKey(data.year, data.month, page), data);
+  const type = data.launches_pagination?.filter_type || "all";
+  const text = data.launches_pagination?.query || "";
+  monthDataCache.set(monthCacheKey(data.year, data.month, page, type, text), data);
 }
 
 function isCurrentViewData(data) {
@@ -1364,8 +1377,16 @@ async function fetchMonthHttp(year, month, page = 1, limit = LAUNCHES_LIMIT, { b
   monthAbortController = new AbortController();
 
   try {
+    const params = new URLSearchParams({
+      year: String(year),
+      month: String(month),
+      page: String(page),
+      limit: String(limit),
+      filter_type: filterType || "all",
+      q: getFilterText(),
+    });
     const r = await fetch(
-      `${API}/data/${USER_ID}?year=${year}&month=${month}&page=${page}&limit=${limit}`,
+      `${API}/data/${USER_ID}?${params.toString()}`,
       {
         credentials: "same-origin",
         signal: monthAbortController.signal,
@@ -1411,7 +1432,9 @@ function sendRefresh() {
       year: viewYear,
       month: viewMonth,
       page: launchesPage,
-      limit: LAUNCHES_LIMIT
+      limit: LAUNCHES_LIMIT,
+      filter_type: filterType || "all",
+      q: getFilterText()
     };
     ws.send(JSON.stringify(msg));
 
@@ -1455,7 +1478,9 @@ function connect() {
       year: viewYear,
       month: viewMonth,
       page: launchesPage,
-      limit: LAUNCHES_LIMIT
+      limit: LAUNCHES_LIMIT,
+      filter_type: filterType || "all",
+      q: getFilterText()
     }));
     fetchHistory();
   };
@@ -1553,7 +1578,9 @@ function requestMonthPage(page, { smoothScroll = true, preferHttp = false, backg
       year: viewYear,
       month: viewMonth,
       page: launchesPage,
-      limit: LAUNCHES_LIMIT
+      limit: LAUNCHES_LIMIT,
+      filter_type: filterType || "all",
+      q: getFilterText()
     }));
   } else {
     fetchMonthHttp(viewYear, viewMonth, launchesPage, LAUNCHES_LIMIT, { background });
@@ -1564,12 +1591,13 @@ function setTab(el) {
   document.querySelectorAll(".ftab").forEach(t => t.classList.remove("active"));
   el.classList.add("active");
   filterType = el.dataset.type;
-  launchesPage = 1;
-  renderLaunches();
+  requestMonthPage(1, { smoothScroll: false, preferHttp: true });
 }
 function applyFilter() {
-  launchesPage = 1;
-  renderLaunches();
+  clearTimeout(filterDebounceTimer);
+  filterDebounceTimer = setTimeout(() => {
+    requestMonthPage(1, { smoothScroll: false, preferHttp: true });
+  }, 220);
 }
 
 function setLaunchesPage(page) {
@@ -1641,18 +1669,7 @@ function renderLaunchesPagination(totalItems, totalPages) {
 function renderLaunches() {
   if (!lastData) return;
 
-  const text = (document.getElementById("filter-text").value || "").toLowerCase().trim();
-
-  const items = (lastData.recent_launches || []).filter(l => {
-    const ok_type = filterType === "all"
-      || (filterType === "interno" && l.is_internal_movement)
-      || (filterType !== "interno" && l.tipo === filterType && !l.is_internal_movement);
-    const ok_text = !text ||
-      (l.nota && l.nota.toLowerCase().includes(text)) ||
-      (l.alvo && l.alvo.toLowerCase().includes(text)) ||
-      (l.categoria && l.categoria.toLowerCase().includes(text));
-    return ok_type && ok_text;
-  });
+  const items = lastData.recent_launches || [];
 
   const card = document.getElementById("launches-card");
 

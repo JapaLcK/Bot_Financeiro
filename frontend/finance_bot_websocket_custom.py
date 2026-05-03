@@ -331,7 +331,48 @@ async def _get_dashboard_current_state(user_id: int):
     return current_investments, market_rates
 
 
-async def get_financial_data(user_id: int, year: int = None, month: int = None, page: int = 1, limit: int = 25) -> dict:
+def _dashboard_launch_filter_sql(filter_type: str | None, query: str | None) -> tuple[list[str], list]:
+    clauses: list[str] = []
+    params: list = []
+
+    filter_type = (filter_type or "all").strip().lower()
+    query = (query or "").strip()
+
+    if filter_type == "receita":
+        clauses.append("tipo IN ('receita', 'entrada') AND is_internal_movement = false")
+    elif filter_type == "despesa":
+        clauses.append("tipo IN ('despesa', 'saida') AND is_internal_movement = false")
+    elif filter_type == "investimento":
+        clauses.append("tipo IN ('aporte_investimento', 'resgate_investimento')")
+    elif filter_type == "interno":
+        clauses.append("is_internal_movement = true")
+
+    if query:
+        clauses.append(
+            """
+            (
+              lower(coalesce(nota, '')) LIKE %s
+              OR lower(coalesce(alvo, '')) LIKE %s
+              OR lower(coalesce(categoria, '')) LIKE %s
+              OR lower(coalesce(tipo, '')) LIKE %s
+            )
+            """
+        )
+        like = f"%{query.lower()}%"
+        params.extend([like, like, like, like])
+
+    return clauses, params
+
+
+async def get_financial_data(
+    user_id: int,
+    year: int = None,
+    month: int = None,
+    page: int = 1,
+    limit: int = 25,
+    filter_type: str | None = None,
+    query: str | None = None,
+) -> dict:
     """
     Fetch full financial snapshot for user_id.
     If year/month are given, income/expenses/categories/launches
@@ -347,6 +388,8 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None, 
     limit = max(min(int(limit or 25), 100), 1)
     offset = (page - 1) * limit
     current_investments, market_rates = await _get_dashboard_current_state(user_id)
+    launch_filter_clauses, launch_filter_params = _dashboard_launch_filter_sql(filter_type, query)
+    launch_filter_sql = "".join(f"\n                  AND ({clause})" for clause in launch_filter_clauses)
 
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
@@ -367,32 +410,34 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None, 
             # Investments (always current)
             investments = current_investments
 
-                        # Total launches for the requested month (excluindo criação/remoção de bolsos)
+            # Total launches for the requested month after filters (excluindo ações administrativas)
             await cur.execute(
-                """
+                f"""
                 SELECT COUNT(*) AS total
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
                   AND tipo NOT IN ('criar_caixinha', 'delete_pocket', 'create_investment', 'delete_investment')
+                  {launch_filter_sql}
                 """,
-                (user_id, month_start, month_end),
+                (user_id, month_start, month_end, *launch_filter_params),
             )
             launches_total_row = await cur.fetchone()
             launches_total = int(launches_total_row["total"] or 0)
 
-            # Launches for the requested month (paginated) — exclui apenas criação/remoção de bolsos
+            # Launches for the requested month after filters (paginated)
             await cur.execute(
-                """
+                f"""
                 SELECT tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
                   AND tipo NOT IN ('criar_caixinha', 'delete_pocket', 'create_investment', 'delete_investment')
+                  {launch_filter_sql}
                 ORDER BY criado_em DESC
                 LIMIT %s OFFSET %s
                 """,
-                (user_id, month_start, month_end, limit, offset),
+                (user_id, month_start, month_end, *launch_filter_params, limit, offset),
             )
             launches = await cur.fetchall()
 
@@ -560,6 +605,8 @@ async def get_financial_data(user_id: int, year: int = None, month: int = None, 
             "limit": limit,
             "total": launches_total,
             "total_pages": max((launches_total + limit - 1) // limit, 1),
+            "filter_type": (filter_type or "all").strip().lower(),
+            "query": (query or "").strip(),
         },
         "monthly_income":     inc,
         "monthly_expense":    exp,
@@ -1985,9 +2032,11 @@ async def get_data(
     month: int = None,
     page: int = 1,
     limit: int = 25,
+    filter_type: str = "all",
+    q: str = "",
 ):
     _authorize_dashboard_access(request, user_id)
-    return await get_financial_data(user_id, year, month, page, limit)
+    return await get_financial_data(user_id, year, month, page, limit, filter_type, q)
 
 @app.get("/history/{user_id}")
 async def monthly_history(request: Request, user_id: int, months: int = 6):
@@ -2577,7 +2626,9 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
                     y, m = manager.get_month(ws, user_id)
                     page  = int(payload.get("page", 1))
                     limit = int(payload.get("limit", 25))
-                    data = await get_financial_data(user_id, y, m, page, limit)
+                    filter_type = str(payload.get("filter_type", "all"))
+                    query = str(payload.get("q", ""))
+                    data = await get_financial_data(user_id, y, m, page, limit, filter_type, query)
                     await ws.send_text(jdump({"type": "update", "data": data}))
 
                 elif t == "get_month":
@@ -2587,10 +2638,12 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
                     m   = int(payload.get("month", now.month))
                     page  = int(payload.get("page", 1))
                     limit = int(payload.get("limit", 25))
+                    filter_type = str(payload.get("filter_type", "all"))
+                    query = str(payload.get("q", ""))
 
                     manager.set_month(ws, user_id, y, m)
 
-                    data = await get_financial_data(user_id, y, m, page, limit)
+                    data = await get_financial_data(user_id, y, m, page, limit, filter_type, query)
                     await ws.send_text(jdump({"type": "month_data", "data": data}))
 
                 elif t == "get_history":
