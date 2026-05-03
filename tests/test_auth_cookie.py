@@ -156,6 +156,34 @@ def test_account_export_downloads_full_archive_without_password_hash(user_id):
                 """,
                 (user_id,),
             )
+            cur.execute(
+                """
+                insert into credit_cards (user_id, name, closing_day, due_day)
+                values (%s, 'Cartao teste exportacao', 10, 20)
+                returning id
+                """,
+                (user_id,),
+            )
+            card_id = cur.fetchone()["id"]
+            cur.execute(
+                """
+                insert into credit_bills (user_id, card_id, period_start, period_end)
+                values (%s, %s, current_date - interval '30 days', current_date)
+                returning id
+                """,
+                (user_id, card_id),
+            )
+            bill_id = cur.fetchone()["id"]
+            cur.execute(
+                """
+                insert into credit_transactions (
+                  bill_id, user_id, card_id, valor, categoria, nota, purchased_at,
+                  group_id, installment_no, installments_total
+                )
+                values (%s, %s, %s, 42.50, 'testes', 'Parcela com UUID', current_date, %s, 1, 2)
+                """,
+                (bill_id, user_id, card_id, uuid.uuid4()),
+            )
         conn.commit()
 
     token = dashboard.make_dashboard_token(user_id, hours=1)
@@ -171,6 +199,7 @@ def test_account_export_downloads_full_archive_without_password_hash(user_id):
         assert "csv/lancamentos.csv" in archive.namelist()
     assert payload["manifesto"]["user_id"] == user_id
     assert payload["manifesto"]["datasets"]["lancamentos"] >= 1
+    assert payload["manifesto"]["datasets"]["transacoes_cartao"] >= 1
     assert "password_hash" not in json.dumps(payload)
 
 

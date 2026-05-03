@@ -10,6 +10,7 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from .connection import get_conn
 from .users import _check_password
@@ -19,6 +20,10 @@ class PrivacyJSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Decimal):
             return float(obj)
+        if isinstance(obj, UUID):
+            return str(obj)
+        if isinstance(obj, (bytes, bytearray, memoryview)):
+            return bytes(obj).hex()
         if hasattr(obj, "isoformat"):
             return obj.isoformat()
         return super().default(obj)
