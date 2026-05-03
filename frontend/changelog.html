@@ -221,15 +221,42 @@ nav {
 
 /* ─── Footer ── */
 footer {
-  text-align: center; margin-top: 80px;
+  margin-top: 80px;
   color: var(--text-3); font-size: .8rem; line-height: 1.8;
 }
 footer a { color: var(--text-2); text-decoration: none; }
 footer a:hover { color: var(--text); }
+.footer-copy { text-align: center; margin-bottom: 18px; }
+.footer-links {
+  display: grid;
+  grid-template-columns: max-content max-content max-content;
+  justify-content: center;
+  align-items: start;
+  gap: 72px;
+  max-width: 100%;
+  margin: 0 auto;
+}
+.footer-col { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.footer-title {
+  color: var(--text);
+  font-size: .72rem;
+  font-weight: 850;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.footer-col-left { justify-self: start; }
+.footer-col-center { justify-self: start; }
+.footer-col-right { justify-self: start; }
 @media(max-width:760px){
   nav { flex-wrap: wrap; }
   .nav-links { width: 100%; justify-content: center; }
   .page { padding-inline: 18px; }
+  .footer-links { grid-template-columns: 1fr; gap: 18px; }
+  .footer-col,
+  .footer-col-left,
+  .footer-col-center,
+  .footer-col-right { justify-self: center; text-align: left; }
 }
 </style>
 </head>
@@ -541,7 +568,23 @@ footer a:hover { color: var(--text); }
   </div>
 
   <footer>
-    <p>PigBank AI &mdash; <a href="/">Início</a> &nbsp;·&nbsp; <a href="/privacy">Privacidade</a></p>
+    <p class="footer-copy">© 2026 PigBank AI</p>
+    <div class="footer-links">
+      <div class="footer-col footer-col-left"><span class="footer-title">Navegue</span>
+        <a href="/como-funciona">Como funciona</a>
+        <a href="/funcionalidades">Funcionalidades</a>
+        <a href="/whatsapp">WhatsApp</a>
+      </div>
+      <div class="footer-col footer-col-center"><span class="footer-title">Produto</span>
+        <a href="/precos">Preços</a>
+        <a href="/changelog">Novidades</a>
+      </div>
+      <div class="footer-col footer-col-right"><span class="footer-title">Institucional</span>
+        <a href="/privacy">Política de Privacidade</a>
+        <a href="/suporte">Suporte</a>
+        <a href="mailto:contato@pigbankai.com">Contato</a>
+      </div>
+    </div>
   </footer>
 
 </div>

@@ -26,8 +26,8 @@ nav{position:sticky;top:16px;z-index:10;display:flex;align-items:center;justify-
 .cta-row{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;margin-top:34px}.btn{display:inline-flex;align-items:center;justify-content:center;color:#fff;background:linear-gradient(135deg,#7c3aed,#3b82f6);border:none;border-radius:14px;padding:13px 24px;font-weight:750;text-decoration:none;box-shadow:0 6px 24px rgba(124,58,237,.38)}.btn.secondary{background:rgba(255,255,255,.07);border:1px solid var(--glass-border);box-shadow:none;color:var(--text)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:32px 0 48px}.card{background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:18px;padding:22px;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}.card h2,.card h3{font-size:1rem;margin-bottom:9px;letter-spacing:-.01em}.card p,.card li{color:var(--text-2);font-size:.9rem;line-height:1.65}.card ul{padding-left:18px}
 .section-title{font-size:1.55rem;letter-spacing:-.02em;margin:18px 0 14px}.conversation{display:grid;gap:12px;margin:18px 0 48px}.bubble{max-width:680px;padding:15px 18px;border-radius:18px;font-size:.94rem;line-height:1.55}.bubble.user{justify-self:end;background:rgba(52,211,153,.14);border:1px solid rgba(52,211,153,.26)}.bubble.bot{justify-self:start;background:rgba(255,255,255,.07);border:1px solid var(--glass-border);color:var(--text-2)}
-footer{border-top:1px solid rgba(255,255,255,.08);padding-top:28px;text-align:center;color:var(--text-3);font-size:.78rem}.footer-links{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;margin-top:10px}.footer-links a{color:var(--text-2);text-decoration:none}
-@media(max-width:720px){nav{flex-wrap:wrap}.nav-links{width:100%;justify-content:center}.hero{padding:66px 0 40px}.page{padding-inline:18px}.bubble{max-width:92%}}
+footer{border-top:1px solid rgba(255,255,255,.08);padding-top:28px;color:var(--text-3);font-size:.78rem}.footer-copy{text-align:center;margin-bottom:18px}.footer-links{display:grid;grid-template-columns:max-content max-content max-content;justify-content:center;align-items:start;gap:72px;max-width:100%;margin:0 auto}.footer-col{display:flex;flex-direction:column;gap:8px;text-align:left}.footer-title{color:var(--text);font-size:.72rem;font-weight:850;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}.footer-col-left{justify-self:start}.footer-col-center{justify-self:start}.footer-col-right{justify-self:start}.footer-links a{color:var(--text-2);text-decoration:none}.footer-links a:hover{color:var(--text)}
+@media(max-width:720px){nav{flex-wrap:wrap}.nav-links{width:100%;justify-content:center}.hero{padding:66px 0 40px}.page{padding-inline:18px}.bubble{max-width:92%}.footer-links{grid-template-columns:1fr;gap:18px}.footer-col,.footer-col-left,.footer-col-center,.footer-col-right{justify-self:center;text-align:left}}
 </style>
 </head>
 <body>
@@ -74,8 +74,12 @@ footer{border-top:1px solid rgba(255,255,255,.08);padding-top:28px;text-align:ce
     </section>
   </main>
   <footer>
-    <p>© 2026 PigBank AI</p>
-    <div class="footer-links"><a href="/">Início</a><a href="/privacy">Privacidade</a><a href="/changelog">Novidades</a><a href="mailto:contato@pigbankai.com">Contato</a></div>
+    <p class="footer-copy">© 2026 PigBank AI</p>
+    <div class="footer-links">
+      <div class="footer-col footer-col-left"><span class="footer-title">Navegue</span><a href="/como-funciona">Como funciona</a><a href="/funcionalidades">Funcionalidades</a><a href="/whatsapp">WhatsApp</a></div>
+      <div class="footer-col footer-col-center"><span class="footer-title">Produto</span><a href="/precos">Preços</a><a href="/changelog">Novidades</a></div>
+      <div class="footer-col footer-col-right"><span class="footer-title">Institucional</span><a href="/privacy">Política de Privacidade</a><a href="/suporte">Suporte</a><a href="mailto:contato@pigbankai.com">Contato</a></div>
+    </div>
   </footer>
 </div>
 </body>
