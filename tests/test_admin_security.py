@@ -15,6 +15,12 @@ def configured_admin(monkeypatch):
     monkeypatch.setattr(admin_dashboard, "log_system_event", _noop_log)
 
 
+def _csrf_headers(client: TestClient) -> dict[str, str]:
+    token = "test-admin-csrf"
+    client.cookies.set(dashboard.CSRF_COOKIE_NAME, token)
+    return {dashboard.CSRF_HEADER_NAME: token}
+
+
 def test_admin_dashboard_redirects_without_admin_session():
     response = TestClient(dashboard.app).get("/admin", follow_redirects=False)
 
@@ -27,6 +33,7 @@ def test_admin_login_sets_http_only_cookie_and_unlocks_dashboard():
 
     login = client.post(
         "/admin/auth/login",
+        headers=_csrf_headers(client),
         json={"username": "admin", "password": "secret-admin"},
     )
 
@@ -48,7 +55,8 @@ def test_admin_login_sets_http_only_cookie_and_unlocks_dashboard():
 
 
 def test_admin_logout_clears_http_only_cookie():
-    response = TestClient(dashboard.app).post("/admin/auth/logout")
+    client = TestClient(dashboard.app)
+    response = client.post("/admin/auth/logout", headers=_csrf_headers(client))
 
     assert response.status_code == 200
     set_cookie = response.headers["set-cookie"]

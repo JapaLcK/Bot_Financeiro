@@ -25,6 +25,12 @@ def _clear_rate_limits(*identifiers: str):
         conn.commit()
 
 
+def _csrf_headers(client: TestClient) -> dict[str, str]:
+    token = "test-csrf-token"
+    client.cookies.set(dashboard.CSRF_COOKIE_NAME, token)
+    return {dashboard.CSRF_HEADER_NAME: token}
+
+
 def test_login_sets_auth_token_cookie(monkeypatch):
     async def _noop_log(*args, **kwargs):
         return None
@@ -41,8 +47,10 @@ def test_login_sets_auth_token_cookie(monkeypatch):
     monkeypatch.setattr(db, "create_link_code", lambda user_id, minutes_valid: "ABC123")
     monkeypatch.setattr(dashboard, "log_auth_login_event", _noop_log)
 
-    response = TestClient(dashboard.app).post(
+    client = TestClient(dashboard.app)
+    response = client.post(
         "/auth/login",
+        headers=_csrf_headers(client),
         json={"email": "User@Example.com", "password": "secret123"},
     )
 
@@ -65,7 +73,7 @@ def test_dashboard_token_accepts_auth_cookie_without_authorization_header():
     client = TestClient(dashboard.app)
     client.cookies.set("auth_token", token)
 
-    response = client.post("/auth/dashboard-token")
+    response = client.post("/auth/dashboard-token", headers=_csrf_headers(client))
 
     assert response.status_code == 200
     assert response.json()["email"] == "user@example.com"
@@ -74,26 +82,35 @@ def test_dashboard_token_accepts_auth_cookie_without_authorization_header():
     assert "dashboard_token=" in response.headers["set-cookie"]
 
 
+def test_mutating_browser_routes_require_csrf_token():
+    token = dashboard._make_jwt(123, "user@example.com")
+    client = TestClient(dashboard.app)
+    client.cookies.set("auth_token", token)
+
+    response = client.post("/auth/dashboard-token")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Token CSRF inválido ou ausente."
+
+
 def test_dashboard_token_still_accepts_authorization_header():
     token = dashboard._make_jwt(123, "user@example.com")
+    client = TestClient(dashboard.app)
 
-    response = TestClient(dashboard.app).post(
+    response = client.post(
         "/auth/dashboard-token",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"Authorization": f"Bearer {token}", **_csrf_headers(client)},
     )
 
     assert response.status_code == 200
     assert response.json()["email"] == "user@example.com"
 
 
-def test_auth_validate_consumes_url_token_and_sets_dashboard_cookie(monkeypatch):
+def test_auth_validate_rejects_legacy_url_token(monkeypatch):
     monkeypatch.setattr(db, "consume_dashboard_session", lambda token: 123 if token == "one-time" else None)
-
     response = TestClient(dashboard.app).get("/auth/validate?token=one-time")
 
-    assert response.status_code == 200
-    assert response.json() == {"user_id": 123}
-    assert "dashboard_token=" in response.headers["set-cookie"]
+    assert response.status_code == 401
 
 
 def test_auth_validate_accepts_dashboard_cookie_without_url_token():
@@ -129,7 +146,8 @@ def test_magic_link_redirect_sets_cookie_without_token_in_url(monkeypatch):
 
 
 def test_logout_expires_auth_and_dashboard_cookies():
-    response = TestClient(dashboard.app).post("/auth/logout")
+    client = TestClient(dashboard.app)
+    response = client.post("/auth/logout", headers=_csrf_headers(client))
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
@@ -229,10 +247,10 @@ def test_delete_account_schedules_deletion_and_blocks_dashboard_token(user_id, m
     client = TestClient(dashboard.app)
     client.cookies.set("dashboard_token", token)
 
-    wrong = client.request("DELETE", "/auth/account", json={"password": "wrong"})
+    wrong = client.request("DELETE", "/auth/account", headers=_csrf_headers(client), json={"password": "wrong"})
     assert wrong.status_code == 401
 
-    response = client.request("DELETE", "/auth/account", json={"password": "secret123"})
+    response = client.request("DELETE", "/auth/account", headers=_csrf_headers(client), json={"password": "secret123"})
     assert response.status_code == 200
     assert response.json()["status"] == "scheduled"
     assert "auth_token=" in response.headers["set-cookie"]
@@ -290,10 +308,10 @@ def test_account_deletion_is_scoped_to_authenticated_user(user_id):
         client = TestClient(dashboard.app)
         client.cookies.set("dashboard_token", token)
 
-        wrong_scope = client.request("DELETE", "/auth/account", json={"password": "other123"})
+        wrong_scope = client.request("DELETE", "/auth/account", headers=_csrf_headers(client), json={"password": "other123"})
         assert wrong_scope.status_code == 401
 
-        response = client.request("DELETE", "/auth/account", json={"password": "secret123"})
+        response = client.request("DELETE", "/auth/account", headers=_csrf_headers(client), json={"password": "secret123"})
         assert response.status_code == 200
         assert response.json()["user_id"] == user_id
 
@@ -430,10 +448,10 @@ def test_rate_limit_returns_friendly_error(monkeypatch):
 
     try:
         for _ in range(3):
-            response = client.post("/auth/forgot-password", json={"email": email})
+            response = client.post("/auth/forgot-password", headers=_csrf_headers(client), json={"email": email})
             assert response.status_code == 200
 
-        response = client.post("/auth/forgot-password", json={"email": email})
+        response = client.post("/auth/forgot-password", headers=_csrf_headers(client), json={"email": email})
 
         assert response.status_code == 429
         assert response.json()["detail"] == "Muitas tentativas. Aguarde alguns minutos e tente novamente."

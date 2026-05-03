@@ -132,6 +132,15 @@ function clearError() {
   errorBox.classList.remove("show");
 }
 
+function getCookie(name) {
+  return document.cookie.split("; ").find(row => row.startsWith(`${name}=`))?.split("=")[1] || "";
+}
+
+function csrfHeaders(extra = {}) {
+  const csrf = decodeURIComponent(getCookie("csrf_token") || "");
+  return csrf ? { ...extra, "X-CSRF-Token": csrf } : { ...extra };
+}
+
 async function checkSession() {
   const token = localStorage.getItem(tokenKey);
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -152,7 +161,8 @@ form.addEventListener("submit", async (event) => {
   try {
     const res = await fetch("/admin/auth/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         username: document.getElementById("username").value.trim(),
         password: document.getElementById("password").value

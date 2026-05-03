@@ -1442,12 +1442,16 @@ function fmtDateOnly(v) {
   if (!v) return "—";
   return new Date(String(v).slice(0,10) + "T12:00:00").toLocaleDateString("pt-BR");
 }
+function getCookie(name) {
+  return document.cookie.split("; ").find(row => row.startsWith(`${name}=`))?.split("=")[1] || "";
+}
 function authHeaders(extra={}) {
-  return { ...extra };
+  const csrf = decodeURIComponent(getCookie("csrf_token") || "");
+  return csrf ? { ...extra, "X-CSRF-Token": csrf } : { ...extra };
 }
 function logoutSettings() {
   localStorage.setItem("finbot_logout_at", String(Date.now()));
-  fetch(`${API}/auth/logout`, { method: "POST", credentials: "same-origin" }).finally(() => {
+  fetch(`${API}/auth/logout`, { method: "POST", credentials: "same-origin", headers: authHeaders() }).finally(() => {
     window.location.href = "/";
   });
 }
@@ -1455,19 +1459,10 @@ function authOptions(options={}) {
   return { credentials: "same-origin", ...options };
 }
 async function validateSettingsSession() {
-  const token = params.get("token") || "";
-  const validateUrl = token
-    ? `${API}/auth/validate?token=${encodeURIComponent(token)}`
-    : `${API}/auth/validate`;
-  const resp = await fetch(validateUrl, { credentials: "same-origin" });
+  const resp = await fetch(`${API}/auth/validate`, { credentials: "same-origin" });
   if (!resp.ok) throw new Error("Sessão inválida");
   const data = await resp.json();
   USER_ID = Number(data.user_id);
-  if (token) {
-    const view = params.get("view");
-    const cleanUrl = view ? `/settings?view=${encodeURIComponent(view)}` : "/settings";
-    window.history.replaceState({}, "", cleanUrl);
-  }
   return data;
 }
 function redirectHome() {

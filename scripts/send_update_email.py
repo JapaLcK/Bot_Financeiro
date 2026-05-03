@@ -28,35 +28,54 @@ from core.services.email_service import send_email, _piggy_html, make_unsub_url,
 
 # ─── Conteúdo do e-mail ───────────────────────────────────────────────────────
 
-SUBJECT = "🐷 Novidades do PigBank AI — o bot ficou mais inteligente!"
+SUBJECT = "📈 Investimentos, configurações e site mais organizado"
 
 def build_html(user_id: int, email: str) -> str:
     unsub = make_unsub_url(user_id, email)
     content = """
       <p>Oi! Piggy por aqui. 🐷</p>
-      <p>O PigBank AI recebeu várias melhorias hoje. Veja o que é novo:</p>
+      <p>Passando para contar as novidades mais recentes do <strong>PigBank AI</strong>.</p>
 
-      <ul style="padding-left:20px;line-height:1.9;">
-        <li>🎙️ <strong>Áudio no WhatsApp</strong> — fale seus gastos e eu registro na hora</li>
-        <li>📷 <strong>Foto de comprovante</strong> — mande a foto e eu leio o valor automaticamente</li>
-        <li>📄 <strong>Importação de fatura OFX</strong> — envie o arquivo direto no chat</li>
-        <li>📦 <strong>Parcelamentos detectados</strong> — veja parcelas restantes ao importar a fatura</li>
-        <li>💳 <strong>Cadastro rápido de cartão</strong> —
-            <code style="background:rgba(124,58,237,.15);border-radius:6px;padding:1px 6px;color:#a78bfa;">criar cartão Nubank fechamento 01 vencimento 08</code></li>
-        <li>📅 <strong>Nomes de fatura iguais ao banco</strong> — "Maio/2026" no bot = fatura de maio no app</li>
-        <li>🔢 <strong>Total com descontos</strong> — estornos e descontos já subtraídos do total</li>
-        <li>📊 <strong>Saldo completo</strong> — o comando <em>saldo</em> agora mostra conta corrente, gastos do dia, total do mês e fatura de cada cartão</li>
-      </ul>
+      <div class="box" style="border-left-color:#34d399;">
+        <h2 style="margin:0 0 20px;color:#fff;font-size:22px;line-height:1.35;">
+          📈 Investimentos, configurações e site mais organizado
+        </h2>
+
+        <div style="margin:0 0 18px;">
+          <p style="margin:0 0 4px;color:#fff;font-weight:700;">📈 Investimentos no dashboard</p>
+          <p style="margin:0;color:rgba(255,255,255,.68);">Agora você pode acompanhar aplicações, aportes, saques e evolução dos investimentos em uma área dedicada.</p>
+        </div>
+
+        <div style="margin:0 0 18px;">
+          <p style="margin:0 0 4px;color:#fff;font-weight:700;">🧾 Cálculo automático de rendimentos</p>
+          <p style="margin:0;color:rgba(255,255,255,.68);">O Piggy calcula automaticamente CDI, Selic, IPCA e tributação para deixar seus investimentos mais fáceis de acompanhar.</p>
+        </div>
+
+        <div style="margin:0 0 18px;">
+          <p style="margin:0 0 4px;color:#fff;font-weight:700;">🔔 Nova área de configurações</p>
+          <p style="margin:0;color:rgba(255,255,255,.68);">Criamos uma área para o usuário ajustar notificações, dados pessoais e preferências da conta com mais facilidade.</p>
+        </div>
+
+        <div style="margin:0 0 18px;">
+          <p style="margin:0 0 4px;color:#fff;font-weight:700;">🧭 Site mais fácil de explorar</p>
+          <p style="margin:0;color:rgba(255,255,255,.68);">Organizamos melhor as páginas do site para explicar WhatsApp, funcionalidades, preços, suporte e novidades em abas separadas.</p>
+        </div>
+
+        <div style="margin:0;">
+          <p style="margin:0 0 4px;color:#fff;font-weight:700;">🔐 Privacidade mais clara</p>
+          <p style="margin:0;color:rgba(255,255,255,.68);">Atualizamos as políticas de privacidade para explicar melhor como seus dados são tratados.</p>
+        </div>
+      </div>
 
       <div class="box" style="text-align:center;margin-top:24px;">
         <a href="https://pigbankai.com/changelog"
            style="display:inline-block;background:linear-gradient(135deg,#7c3aed,#3b82f6);color:#fff;
                   text-decoration:none;padding:12px 28px;border-radius:12px;font-weight:700;font-size:15px;">
-          Quer saber mais? Clique aqui →
+          Ver novidades
         </a>
       </div>
 
-      <p style="margin-top:24px;">Qualquer dúvida, é só chamar! 🚀</p>
+      <p style="margin-top:24px;">Qualquer dúvida, é só chamar o Piggy no WhatsApp.</p>
       <p class="sig">Um abraço,<br/><strong>Piggy 🐷</strong></p>
     """
     return _piggy_html(SUBJECT, content, unsub)
@@ -64,18 +83,17 @@ def build_html(user_id: int, email: str) -> str:
 
 def build_text() -> str:
     return (
-        "Oi! Piggy por aqui. 🐷\n\n"
-        "O PigBank AI recebeu várias melhorias hoje:\n\n"
-        "🎙️ Áudio no WhatsApp — fale seus gastos e eu registro na hora\n"
-        "📷 Foto de comprovante — mande a foto e eu leio o valor\n"
-        "📄 Importação de fatura OFX — envie o arquivo direto no chat\n"
-        "📦 Parcelamentos detectados — veja parcelas restantes na fatura\n"
-        "💳 Cadastro rápido de cartão — criar cartão Nubank fechamento 01 vencimento 08\n"
-        "📅 Nomes de fatura iguais ao banco\n"
-        "🔢 Total com descontos e estornos já subtraídos\n"
-        "📊 Saldo completo — mostra conta, gastos do dia, total do mês e faturas\n\n"
-        "Quer saber mais? https://pigbankai.com/changelog\n\n"
-        "Qualquer dúvida, é só chamar!\n\nUm abraço, Piggy 🐷"
+        "Oi! Piggy por aqui.\n\n"
+        "Passando para contar as novidades mais recentes do PigBank AI.\n\n"
+        "📈 Investimentos, configurações e site mais organizado\n\n"
+        "- Investimentos no dashboard: agora você pode acompanhar aplicações, aportes, saques e evolução dos investimentos em uma área dedicada.\n"
+        "- Cálculo automático de rendimentos: o Piggy calcula automaticamente CDI, Selic, IPCA e tributação para deixar seus investimentos mais fáceis de acompanhar.\n"
+        "- Nova área de configurações: criamos uma área para o usuário ajustar notificações, dados pessoais e preferências da conta com mais facilidade.\n"
+        "- Site mais fácil de explorar: organizamos melhor as páginas do site para explicar WhatsApp, funcionalidades, preços, suporte e novidades em abas separadas.\n"
+        "- Privacidade mais clara: atualizamos as políticas de privacidade para explicar melhor como seus dados são tratados.\n\n"
+        "Ver novidades: https://pigbankai.com/changelog\n\n"
+        "Qualquer dúvida, é só chamar o Piggy no WhatsApp.\n\n"
+        "Um abraço,\nPiggy"
     )
 
 

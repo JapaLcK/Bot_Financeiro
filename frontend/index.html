@@ -749,6 +749,15 @@ async function readResponsePayload(res) {
   }
 }
 
+function getCookie(name) {
+  return document.cookie.split('; ').find(row => row.startsWith(`${name}=`))?.split('=')[1] || '';
+}
+
+function csrfHeaders(extra = {}) {
+  const csrf = decodeURIComponent(getCookie('csrf_token') || '');
+  return csrf ? { ...extra, 'X-CSRF-Token': csrf } : { ...extra };
+}
+
 // ─── Sanitiza URL retornada pela API ──────────────────────────────────────
 function sanitizeDashboardUrl(url) {
   if (!url) return '';
@@ -762,10 +771,7 @@ function sanitizeDashboardUrl(url) {
 function settingsUrlFromDashboardUrl(url, view) {
   if (!url) return '';
   try {
-    const target = new URL(url, window.location.origin);
-    const token = target.searchParams.get('token');
     const settingsUrl = new URL('/settings', window.location.origin);
-    if (token) settingsUrl.searchParams.set('token', token);
     if (view) settingsUrl.searchParams.set('view', view);
     return settingsUrl.toString();
   } catch {
@@ -781,14 +787,13 @@ async function checkAuthState() {
       ? await fetch(`${API_BASE}/auth/dashboard-link`, {
           method: 'POST',
           credentials: 'same-origin',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          headers: csrfHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ code: PENDING_DASHBOARD_CODE })
         })
       : await fetch(`${API_BASE}/auth/dashboard-token`, {
           method: 'POST',
-          credentials: 'same-origin'
+          credentials: 'same-origin',
+          headers: csrfHeaders()
         });
 
     if (!resp.ok) {
@@ -876,7 +881,8 @@ async function doLogout() {
   try {
     await fetch(`${API_BASE}/auth/logout`, {
       method: 'POST',
-      credentials: 'same-origin'
+      credentials: 'same-origin',
+      headers: csrfHeaders()
     });
   } catch {}
   localStorage.setItem('finbot_logout_at', String(Date.now()));
@@ -894,7 +900,8 @@ async function connectWhatsApp(e) {
   try {
     const res = await fetch(`${API_BASE}/auth/link-code`, {
       method: 'POST',
-      credentials: 'same-origin'
+      credentials: 'same-origin',
+      headers: csrfHeaders()
     });
     const data = await readResponsePayload(res);
     if (!res.ok) {
@@ -980,7 +987,7 @@ async function doRegister() {
     const res = await fetch(`${API_BASE}/auth/register`, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
+      headers: csrfHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ email, password, phone }),
     });
     const data = await readResponsePayload(res);
@@ -1017,7 +1024,7 @@ async function doVerify() {
     const res = await fetch(`${API_BASE}/auth/verify-email`, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
+      headers: csrfHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ email: _pendingEmail, code }),
     });
     const data = await readResponsePayload(res);
@@ -1047,7 +1054,7 @@ async function resendCode(e) {
   await fetch(`${API_BASE}/auth/register`, {
     method: 'POST',
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
+    headers: csrfHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ email: _pendingEmail, password, phone: _pendingPhone }),
   });
   const el = document.getElementById('verify-error');
@@ -1075,7 +1082,7 @@ async function doLogin() {
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
+      headers: csrfHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ email, password }),
     });
     const data = await readResponsePayload(res);
@@ -1085,9 +1092,7 @@ async function doLogin() {
       const linkRes = await fetch(`${API_BASE}/auth/dashboard-link`, {
         method: 'POST',
         credentials: 'same-origin',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: csrfHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ code: PENDING_DASHBOARD_CODE })
       });
       const linkData = await readResponsePayload(linkRes);
@@ -1190,7 +1195,7 @@ async function doForgot() {
     const res = await fetch(`${API_BASE}/auth/forgot-password`, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
+      headers: csrfHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ email }),
     });
     const data = await readResponsePayload(res);

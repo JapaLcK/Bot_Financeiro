@@ -22,6 +22,7 @@ import io
 import json
 import os
 import pathlib
+import secrets
 import sys
 import time as _startup_time
 import urllib.parse
@@ -860,6 +861,17 @@ app = FastAPI(
 # Middleware de log de erros HTTP (definido em core/admin_dashboard.py)
 app.middleware("http")(admin_error_logging_middleware)
 
+CSRF_COOKIE_NAME = "csrf_token"
+CSRF_HEADER_NAME = "x-csrf-token"
+CSRF_COOKIE_MAX_AGE = 86400
+CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
+CSRF_EXEMPT_PATHS = {
+    "/billing/webhook",
+    "/open-finance/pluggy/webhook",
+    "/wa/webhook",
+    "/webhook",
+}
+
 _SECURITY_HEADERS = {
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
     "X-Frame-Options": "DENY",
@@ -889,6 +901,44 @@ async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
     for header, value in _SECURITY_HEADERS.items():
         response.headers.setdefault(header, value)
+    return response
+
+
+def _make_csrf_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _set_csrf_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        CSRF_COOKIE_NAME,
+        token,
+        httponly=False,
+        secure=True,
+        samesite="strict",
+        max_age=CSRF_COOKIE_MAX_AGE,
+    )
+
+
+def _csrf_exempt(path: str) -> bool:
+    return path in CSRF_EXEMPT_PATHS
+
+
+@app.middleware("http")
+async def csrf_middleware(request: Request, call_next):
+    token = request.cookies.get(CSRF_COOKIE_NAME) or ""
+
+    if request.method.upper() not in CSRF_SAFE_METHODS and not _csrf_exempt(request.url.path):
+        header_token = request.headers.get(CSRF_HEADER_NAME) or ""
+        if not token or not header_token or not secrets.compare_digest(token, header_token):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Token CSRF inválido ou ausente."},
+                headers={"Cache-Control": "no-store"},
+            )
+
+    response = await call_next(request)
+    if request.method.upper() in CSRF_SAFE_METHODS and not token:
+        _set_csrf_cookie(response, _make_csrf_token())
     return response
 
 # ─── WhatsApp webhook routes (lazy import) ───────────────────────────────────
@@ -1087,6 +1137,7 @@ def _clear_session_cookies(response: Response) -> None:
     for domain in domains:
         _expire_cookie(response, AUTH_COOKIE_NAME, domain)
         _expire_cookie(response, DASHBOARD_COOKIE_NAME, domain)
+        _expire_cookie(response, CSRF_COOKIE_NAME, domain)
 
 
 def _no_store(response: Response) -> Response:
@@ -1172,8 +1223,7 @@ def _extract_bearer_token(request: Request) -> str | None:
 
 def _resolve_dashboard_user_id(request: Request) -> int:
     token = (
-        request.query_params.get("token")
-        or _extract_bearer_token(request)
+        _extract_bearer_token(request)
         or (request.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
     )
     user_id = decode_dashboard_token(token or "")
@@ -1228,24 +1278,12 @@ class DashboardLinkBody(BaseModel):
 # ─── Auth endpoints ──────────────────────────────────────────────────────────
 
 @app.get("/auth/validate")
-async def auth_validate(request: Request, response: Response, token: str | None = None):
+async def auth_validate(request: Request, response: Response):
     """
-    Valida uma sessão de dashboard.
-    Se receber um token de URL, consome o token de uso único e troca por cookie HttpOnly.
-    Retorna user_id se válido, 401 caso contrário.
+    Valida uma sessão de dashboard usando apenas cookie HttpOnly ou Bearer.
+    Magic links devem passar pela rota /d/{code}, que consome o código e redireciona sem token na URL.
     """
-    user_id = None
-    if token:
-        from db import consume_dashboard_session
-
-        user_id = consume_dashboard_session(token.strip())
-        if not user_id:
-            user_id = decode_dashboard_token(token)
-        if user_id:
-            _set_dashboard_cookie(response, int(user_id))
-    else:
-        user_id = _resolve_dashboard_user_id(request)
-
+    user_id = _resolve_dashboard_user_id(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Token inválido")
     _raise_if_account_scheduled_for_deletion(int(user_id))
@@ -2515,7 +2553,7 @@ async def open_finance_disconnect_route(request: Request, user_id: int):
 
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(ws: WebSocket, user_id: int):
-    token = ws.query_params.get("token", "") or (ws.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
+    token = (ws.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
     current_user_id = decode_dashboard_token(token)
     if not current_user_id or int(current_user_id) != int(user_id):
         await ws.close(code=1008)

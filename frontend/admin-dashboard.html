@@ -485,9 +485,16 @@ function fRelTime(v) {
 function esc(v) {
   return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+function getCookie(name) {
+  return document.cookie.split('; ').find(row => row.startsWith(`${name}=`))?.split('=')[1] || '';
+}
 function authH() {
   const t = localStorage.getItem(tokenKey);
-  return t ? { Authorization: `Bearer ${t}` } : {};
+  const csrf = decodeURIComponent(getCookie('csrf_token') || '');
+  return {
+    ...(t ? { Authorization: `Bearer ${t}` } : {}),
+    ...(csrf ? { 'X-CSRF-Token': csrf } : {})
+  };
 }
 
 /* ── Status ──────────────────────────────────────────────────────── */
@@ -1034,7 +1041,7 @@ $id('logout-btn').addEventListener('click', async () => {
   refreshController?.abort();
   clearInterval(autoInterval);
   try {
-    await fetch('/admin/auth/logout', { method: 'POST' });
+    await fetch('/admin/auth/logout', { method: 'POST', headers: authH() });
   } finally {
     localStorage.removeItem(tokenKey);
     window.location.href = '/admin/login';

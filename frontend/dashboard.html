@@ -690,6 +690,15 @@ const API       = BASE_HTTP;
 let USER_ID = 0;
 let WS_URL  = "";
 
+function getCookie(name) {
+  return document.cookie.split("; ").find(row => row.startsWith(`${name}=`))?.split("=")[1] || "";
+}
+
+function csrfHeaders(extra = {}) {
+  const csrf = decodeURIComponent(getCookie("csrf_token") || "");
+  return csrf ? { ...extra, "X-CSRF-Token": csrf } : { ...extra };
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
    STATE
 ═══════════════════════════════════════════════════════════════════════ */
@@ -734,7 +743,8 @@ async function logoutDashboard() {
   try {
     await fetch(`${API}/auth/logout`, {
       method: "POST",
-      credentials: "same-origin"
+      credentials: "same-origin",
+      headers: csrfHeaders()
     });
   } catch {}
   localStorage.setItem('finbot_logout_at', String(Date.now()));
@@ -1049,7 +1059,7 @@ async function createInvestment(event) {
   const resp = await fetch(`${API}/investments/${USER_ID}`, {
     method: "POST",
     credentials: "same-origin",
-    headers: {"Content-Type":"application/json"},
+    headers: csrfHeaders({"Content-Type":"application/json"}),
     body: JSON.stringify({
       name,
       period,
@@ -1082,7 +1092,7 @@ async function moveInvestment(event) {
 	  const resp = await fetch(`${API}/investments/${USER_ID}/${kind}`, {
 	    method: "POST",
 	    credentials: "same-origin",
-	    headers: {"Content-Type":"application/json"},
+	    headers: csrfHeaders({"Content-Type":"application/json"}),
 	    body: JSON.stringify({name, amount})
 	  });
 	  if (!resp.ok) { alert("Erro: " + await readApiError(resp)); return; }
@@ -1102,7 +1112,8 @@ async function deleteInvestment(name) {
   if (!confirm(`Remover ${name}? O saldo precisa estar zerado.`)) return;
   const resp = await fetch(`${API}/investments/${USER_ID}/${encodeURIComponent(name)}`, {
     method: "DELETE",
-    credentials: "same-origin"
+    credentials: "same-origin",
+    headers: csrfHeaders()
   });
   if (!resp.ok) { alert("Erro: " + await readApiError(resp)); return; }
   await refreshDashboardAfterInvestment("✓ Investimento removido");
@@ -1720,9 +1731,7 @@ async function saveBudget() {
     const r = await fetch(`${API}/budgets/${USER_ID}`, {
       method:"POST",
       credentials: "same-origin",
-      headers:{
-        "Content-Type":"application/json"
-      },
+      headers: csrfHeaders({ "Content-Type":"application/json" }),
       body: JSON.stringify({categoria: bgtTarget, budget: val})
     });
     if (!r.ok) throw new Error(await r.text());
@@ -2081,21 +2090,13 @@ function _showAccessError() {
 }
 
 (async () => {
-  const token   = params.get("token");
   const view = params.get("view");
 
   try {
-    const validateUrl = token
-      ? `${API}/auth/validate?token=${encodeURIComponent(token)}`
-      : `${API}/auth/validate`;
-    const resp = await fetch(validateUrl, { credentials: "same-origin" });
+    const resp = await fetch(`${API}/auth/validate`, { credentials: "same-origin" });
     if (!resp.ok) { _showAccessError(); return; }
     const data = await resp.json();
     USER_ID = data.user_id;
-    if (token) {
-      const cleanUrl = view ? `/app?view=${encodeURIComponent(view)}` : "/app";
-      window.history.replaceState({}, "", cleanUrl);
-    }
   } catch(e) {
     _showAccessError();
     return;
