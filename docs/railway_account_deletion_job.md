@@ -12,11 +12,11 @@ Configuração recomendada:
 - Nome do serviço: `account-deletion-job`
 - Config as Code file path: `/railway.account-deletion.toml`
 - Start command: `python scripts/account_deletion_job.py`
-- Cron schedule: `0 * * * *`
+- Cron schedule: `0 6 * * *`
 - Restart policy: `NEVER`
 
-O arquivo `railway.account-deletion.toml` já define o start command, o cron horário e a política de restart.
-O cron do Railway usa UTC.
+O arquivo `railway.account-deletion.toml` já define o start command, o cron diário e a política de restart.
+O cron do Railway usa UTC; `0 6 * * *` roda uma vez por dia às 06:00 UTC, aproximadamente 03:00 no horário de Brasília.
 
 ## Variáveis necessárias
 
