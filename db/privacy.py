@@ -288,6 +288,29 @@ def build_user_export_zip(user_id: int) -> bytes:
 
 def delete_user_data(user_id: int) -> dict:
     primary_email = None
+    user_owned_tables = (
+        "credit_cards",
+        "investment_lots",
+        "investments",
+        "category_budgets",
+        "pending_actions",
+        "user_category_rules",
+        "user_category_triggers",
+        "user_trigger_candidates",
+        "user_category_feedback",
+        "daily_report_prefs",
+        "ofx_imports",
+        "dashboard_sessions",
+        "link_codes",
+        "platform_onboarding_tokens",
+        "password_reset_tokens",
+        "accounts",
+        "launches",
+        "pockets",
+        "user_identities",
+        "auth_accounts",
+    )
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("select email from auth_accounts where user_id = %s", (user_id,))
@@ -352,33 +375,18 @@ def delete_user_data(user_id: int) -> dict:
                 if _column_exists(cur, "credit_bills", "user_id"):
                     cur.execute("delete from credit_bills where user_id = %s", (user_id,))
 
-            for table in (
-                "credit_cards",
-                "investment_lots",
-                "investments",
-                "category_budgets",
-                "pending_actions",
-                "user_category_rules",
-                "user_category_triggers",
-                "user_trigger_candidates",
-                "user_category_feedback",
-                "daily_report_prefs",
-                "ofx_imports",
-                "dashboard_sessions",
-                "link_codes",
-                "platform_onboarding_tokens",
-                "password_reset_tokens",
-                "accounts",
-                "launches",
-                "pockets",
-                "user_identities",
-                "auth_accounts",
-            ):
+            for table in user_owned_tables:
                 if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
                     cur.execute(f"delete from {table} where user_id = %s", (user_id,))
 
             cur.execute("delete from users where id = %s", (user_id,))
             deleted = cur.rowcount
+
+            # Bancos antigos podem não ter todas as FKs/cascades esperadas.
+            # A segunda passada remove qualquer resíduo órfão que tenha ficado.
+            for table in user_owned_tables:
+                if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
+                    cur.execute(f"delete from {table} where user_id = %s", (user_id,))
 
         conn.commit()
 

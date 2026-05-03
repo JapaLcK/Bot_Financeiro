@@ -336,7 +336,11 @@ def test_account_deletion_is_scoped_to_authenticated_user(user_id):
             with conn.cursor() as cur:
                 cur.execute("select 1 from users where id=%s", (user_id,))
                 assert cur.fetchone() is None
+                cur.execute("select 1 from accounts where user_id=%s", (user_id,))
+                assert cur.fetchone() is None
                 cur.execute("select 1 from users where id=%s", (other_user_id,))
+                assert cur.fetchone() is not None
+                cur.execute("select 1 from accounts where user_id=%s", (other_user_id,))
                 assert cur.fetchone() is not None
                 cur.execute("select nota from launches where user_id=%s", (other_user_id,))
                 assert cur.fetchone()["nota"] == "Mantem outro usuario"
@@ -382,6 +386,8 @@ def test_account_deletion_job_processes_due_accounts(user_id, monkeypatch):
 
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute("select 1 from users where id=%s", (user_id,))
+        assert cur.fetchone() is None
+        cur.execute("select 1 from accounts where user_id=%s", (user_id,))
         assert cur.fetchone() is None
         cur.execute("select 1 from launches where user_id=%s", (user_id,))
         assert cur.fetchone() is None
