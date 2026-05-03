@@ -518,6 +518,28 @@ def init_db():
           whatsapp_updates_opt_out boolean not null default false
         """,
         """
+        alter table auth_accounts add column if not exists deletion_requested_at timestamptz
+        """,
+        """
+        alter table auth_accounts add column if not exists deletion_scheduled_for timestamptz
+        """,
+        """
+        alter table auth_accounts add column if not exists deletion_status text
+        """,
+        """
+        alter table auth_accounts add column if not exists deletion_processing_started_at timestamptz
+        """,
+        """
+        create index if not exists idx_auth_accounts_deletion_due
+          on auth_accounts (deletion_scheduled_for)
+          where deletion_status = 'scheduled'
+        """,
+        """
+        create index if not exists idx_auth_accounts_deletion_processing
+          on auth_accounts (deletion_processing_started_at)
+          where deletion_status = 'processing'
+        """,
+        """
         update auth_accounts
         set tip_email_opt_out = true,
             insight_email_opt_out = true

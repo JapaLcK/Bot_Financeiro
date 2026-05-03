@@ -1,0 +1,4 @@
+[deploy]
+startCommand = "python scripts/account_deletion_job.py"
+cronSchedule = "0 * * * *"
+restartPolicyType = "NEVER"

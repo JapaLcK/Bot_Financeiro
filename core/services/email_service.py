@@ -5,6 +5,7 @@ Serviço de envio de e-mails transacionais via Resend API.
 Variáveis de ambiente necessárias:
   RESEND_API_KEY   — chave da API do Resend (re_xxxxxxxx)
   EMAIL_FROM       — remetente (default: "PigBank AI <noreply@pigbankai.com>")
+  SUPPORT_EMAIL    — e-mail público de suporte (default: "contato@pigbankai.com")
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 EMAIL_FROM          = os.getenv("EMAIL_FROM",          "Piggy do PigBank <oi@pigbankai.com>")
 EMAIL_FROM_PIGGY    = os.getenv("EMAIL_FROM_PIGGY",    "Piggy do PigBank <oi@pigbankai.com>")
+SUPPORT_EMAIL       = os.getenv("SUPPORT_EMAIL",       "contato@pigbankai.com")
 
 
 def _get_resend():
@@ -510,3 +512,57 @@ def send_password_reset_email(to: str, reset_url: str) -> bool:
     html = _base_html("Redefinição de senha — PigBank AI", content)
     text = f"Redefinição de senha — PigBank AI\n\nLink (expira em 30 min):\n{reset_url}"
     return send_email(to=to, subject="🔑 Redefinir senha — PigBank AI", html_body=html, text_body=text)
+
+
+def send_account_deletion_scheduled_email(to: str, scheduled_for: str) -> bool:
+    """Confirma que a exclusão da conta foi agendada."""
+    content = f"""
+      <p>Olá!</p>
+      <p>Recebemos uma solicitação para excluir sua conta no <strong>PigBank AI</strong>.</p>
+      <div class="highlight">
+        <p style="margin:0">A exclusão definitiva está agendada para:<br/>
+        <strong>{scheduled_for}</strong></p>
+      </div>
+      <p>Durante o período de carência, sua conta fica bloqueada para evitar novas alterações e proteger seus dados contra exclusão acidental ou indevida.</p>
+      <p>Após o prazo, removeremos os dados pessoais e financeiros vinculados à sua conta, salvo registros mínimos que precisem ser preservados por obrigação legal, segurança, prevenção de fraude ou defesa de direitos.</p>
+      <p class="warn">Se você não solicitou essa exclusão, entre em contato com o suporte imediatamente:
+        <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>.</p>
+    """
+    html = _base_html("Exclusão de conta agendada — PigBank AI", content)
+    text = (
+        "PigBank AI — exclusão de conta agendada\n\n"
+        f"A exclusão definitiva está agendada para: {scheduled_for}\n\n"
+        "Durante o período de carência, sua conta fica bloqueada. "
+        f"Se você não solicitou essa exclusão, entre em contato com o suporte imediatamente: {SUPPORT_EMAIL}."
+    )
+    return send_email(
+        to=to,
+        subject="Exclusão de conta agendada — PigBank AI",
+        html_body=html,
+        text_body=text,
+    )
+
+
+def send_account_deletion_completed_email(to: str) -> bool:
+    """Confirma que a exclusão definitiva foi concluída."""
+    content = f"""
+      <p>Olá!</p>
+      <p>A exclusão da sua conta no <strong>PigBank AI</strong> foi concluída.</p>
+      <p>Removemos os dados pessoais e financeiros vinculados à conta, salvo registros mínimos que precisem ser preservados por obrigação legal, segurança, prevenção de fraude ou defesa de direitos.</p>
+      <p>Se você acredita que isso foi um erro, fale com o suporte:
+        <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>.</p>
+      <p>Este é o último e-mail transacional relacionado a essa conta.</p>
+    """
+    html = _base_html("Conta excluída — PigBank AI", content)
+    text = (
+        "PigBank AI — conta excluída\n\n"
+        "A exclusão da sua conta foi concluída. "
+        f"Se você acredita que isso foi um erro, fale com o suporte: {SUPPORT_EMAIL}. "
+        "Este é o último e-mail transacional relacionado a essa conta."
+    )
+    return send_email(
+        to=to,
+        subject="Conta excluída — PigBank AI",
+        html_body=html,
+        text_body=text,
+    )

@@ -16,6 +16,7 @@ Organização interna por domínio:
   cards       → cartões de crédito e faturas
   open_finance → conexões Open Finance/Pluggy
   reports     → relatório diário, auth, dashboard, engajamento
+  privacy     → exportação e exclusão de conta
 """
 
 # ── Conexão ──────────────────────────────────────────────────────────────────
@@ -192,6 +193,16 @@ from .reports import (
     get_user_by_email,
 )
 
+# ── Privacidade / Retenção ───────────────────────────────────────────────────
+from .privacy import (
+    ensure_account_deletion_columns,
+    is_account_scheduled_for_deletion,
+    schedule_account_deletion,
+    build_user_export_zip,
+    delete_user_data,
+    process_due_account_deletions,
+)
+
 __all__ = [
     # connection
     "get_conn",
@@ -254,4 +265,8 @@ __all__ = [
     "set_tip_email_opt_out", "set_insight_email_opt_out", "set_whatsapp_updates_opt_out",
     "sync_engagement_opt_out",
     "get_user_by_email",
+    # privacy
+    "ensure_account_deletion_columns", "is_account_scheduled_for_deletion",
+    "schedule_account_deletion", "build_user_export_zip", "delete_user_data",
+    "process_due_account_deletions",
 ]

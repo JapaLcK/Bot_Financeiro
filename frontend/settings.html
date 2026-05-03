@@ -297,6 +297,48 @@ a { color: inherit; text-decoration: none; }
 .legal-title { color: var(--ink); font-size: .88rem; font-weight: 780; }
 .legal-sub { color: var(--muted); font-size: .75rem; line-height: 1.45; margin-top: 2px; }
 .legal-arrow { color: var(--faint); font-size: 1rem; flex-shrink: 0; }
+.data-list { display: flex; flex-direction: column; gap: 12px; }
+.data-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 15px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.data-title { color: var(--ink); font-size: .88rem; font-weight: 780; }
+.data-sub { color: var(--muted); font-size: .75rem; line-height: 1.5; margin-top: 2px; }
+.data-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.danger-panel {
+  border: 1px solid rgba(220,38,38,.22);
+  border-radius: var(--radius-md);
+  background: rgba(220,38,38,.06);
+  padding: 16px;
+}
+.danger-title { color: #fecaca; font-size: .9rem; font-weight: 820; }
+.danger-copy { color: var(--muted); font-size: .76rem; line-height: 1.6; margin-top: 6px; }
+.delete-confirm {
+  display: none;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  gap: 8px;
+  margin-top: 14px;
+}
+.delete-confirm.show { display: grid; }
+.privacy-input {
+  min-height: 38px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,.05);
+  color: var(--ink);
+  padding: 0 12px;
+  outline: none;
+}
+.privacy-input:focus {
+  border-color: rgba(124,58,237,.45);
+  box-shadow: 0 0 0 3px rgba(124,58,237,.12);
+}
 
 /* ─── Stats strip ────────────────────────────── */
 .stats-strip {
@@ -871,6 +913,11 @@ a { color: inherit; text-decoration: none; }
   .security-grid { grid-template-columns: 1fr; }
   .security-actions { grid-template-columns: 1fr; }
   .security-edit { grid-template-columns: 1fr; }
+  .data-row { align-items: flex-start; flex-direction: column; }
+  .data-actions { width: 100%; }
+  .data-actions .btn-connect,
+  .data-actions .btn-danger { width: 100%; }
+  .delete-confirm { grid-template-columns: 1fr; }
   .accounts-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 540px) {
@@ -940,6 +987,14 @@ a { color: inherit; text-decoration: none; }
         <span>
           <span class="sidebar-title">Notificações</span>
           <span class="sidebar-sub">Alertas e lembretes</span>
+        </span>
+      </button>
+
+      <button class="sidebar-item" type="button" data-section="data" onclick="showSettingsSection('data')">
+        <span class="sidebar-icon">🗄️</span>
+        <span>
+          <span class="sidebar-title">Meus dados</span>
+          <span class="sidebar-sub">Exportação e exclusão</span>
         </span>
       </button>
 
@@ -1285,6 +1340,58 @@ a { color: inherit; text-decoration: none; }
         </div>
       </section>
 
+      <section class="settings-section" id="section-data" hidden>
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <div class="card-title">Meus dados</div>
+              <div class="card-sub">Baixe uma cópia completa dos dados vinculados à sua conta</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="data-list">
+              <div class="data-row">
+                <span>
+                  <span class="data-title">Exportação completa</span>
+                  <span class="data-sub">Gera um arquivo ZIP com JSON completo e CSVs de lançamentos, cartões, investimentos, caixinhas, Open Finance e preferências.</span>
+                </span>
+                <span class="data-actions">
+                  <button class="btn-connect" type="button" id="export-data-btn" onclick="exportMyData()" style="width:auto; min-width:190px; padding:0 18px">
+                    Exportar meus dados
+                  </button>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <div class="card-title">Excluir conta</div>
+              <div class="card-sub">Agende a remoção definitiva da conta e dos dados financeiros</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="danger-panel">
+              <div class="danger-title">Exclusão permanente após 7 dias</div>
+              <div class="danger-copy">
+                Ao confirmar, sua conta ficará agendada para exclusão e o acesso será encerrado. Durante o período de carência, os dados ficam preservados para evitar exclusão acidental ou indevida; depois do prazo, os dados pessoais e financeiros são removidos permanentemente, exceto registros exigidos por obrigação legal, segurança ou prevenção de fraude.
+              </div>
+              <div style="height:12px"></div>
+              <button class="btn-danger" type="button" id="delete-start-btn" onclick="showDeleteConfirm()" style="max-width:220px">
+                Excluir conta
+              </button>
+              <div class="delete-confirm" id="delete-confirm">
+                <input class="privacy-input" id="delete-password" type="password" autocomplete="current-password" placeholder="Confirme sua senha" />
+                <button class="btn-danger" type="button" id="delete-confirm-btn" onclick="requestAccountDeletion()">Confirmar exclusão</button>
+                <button class="btn-sm" type="button" onclick="hideDeleteConfirm()">Cancelar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="settings-section" id="section-legal" hidden>
         <div class="card">
           <div class="card-head">
@@ -1374,6 +1481,11 @@ async function readApiError(resp) {
   try { return JSON.parse(raw).detail || raw; } catch { return raw || "Erro inesperado"; }
 }
 
+function filenameFromDisposition(header, fallback) {
+  const match = String(header || "").match(/filename="?([^"]+)"?/i);
+  return match ? match[1] : fallback;
+}
+
 /* ── Toast ───────────────────────────────────── */
 let _toastTimer;
 function showToast(msg, type="ok") {
@@ -1399,6 +1511,10 @@ const SECTION_COPY = {
   notifications: {
     title: "Notificações",
     sub: "Controle lembretes, resumos e e-mails úteis do PigBank sem mexer nas suas conexões bancárias.",
+  },
+  data: {
+    title: "Meus dados",
+    sub: "Exporte suas informações e controle a exclusão definitiva da conta.",
   },
   legal: {
     title: "Legal",
@@ -1623,6 +1739,80 @@ async function updateNotificationSettings(patch) {
     document.getElementById("notif-insight-email").disabled = !hasEmail;
     document.getElementById("notif-whatsapp-updates").disabled = !hasWhatsapp;
     document.getElementById("notif-daily-hour").disabled = !daily;
+  }
+}
+
+async function exportMyData() {
+  const btn = document.getElementById("export-data-btn");
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Gerando...";
+  try {
+    const resp = await fetch(`${API}/auth/account/export`, {
+      method: "GET",
+      credentials: "same-origin",
+      headers: authHeaders(),
+    });
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filenameFromDisposition(resp.headers.get("content-disposition"), `pigbank_dados_${USER_ID}.zip`);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast("Exportação gerada", "ok");
+  } catch (err) {
+    showToast(err.message || "Erro ao exportar dados", "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+function showDeleteConfirm() {
+  document.getElementById("delete-confirm").classList.add("show");
+  document.getElementById("delete-password").focus();
+}
+
+function hideDeleteConfirm() {
+  document.getElementById("delete-confirm").classList.remove("show");
+  document.getElementById("delete-password").value = "";
+}
+
+async function requestAccountDeletion() {
+  const password = document.getElementById("delete-password").value;
+  if (!password) {
+    showToast("Confirme sua senha", "error");
+    return;
+  }
+  const ok = confirm("Agendar a exclusão definitiva da sua conta para daqui a 7 dias?");
+  if (!ok) return;
+
+  const btn = document.getElementById("delete-confirm-btn");
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Agendando...";
+  try {
+    const resp = await fetch(`${API}/auth/account`, {
+      method: "DELETE",
+      credentials: "same-origin",
+      headers: authHeaders({ "Content-Type":"application/json" }),
+      body: JSON.stringify({ password }),
+    });
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const data = await resp.json();
+    const when = fmtDate(data.deletion_scheduled_for);
+    alert(`Sua conta foi agendada para exclusão em ${when}.`);
+    localStorage.setItem("finbot_logout_at", String(Date.now()));
+    window.location.href = "/";
+  } catch (err) {
+    showToast(err.message || "Erro ao agendar exclusão", "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
   }
 }
 
@@ -1958,7 +2148,7 @@ async function initSettings() {
     return;
   }
   document.getElementById("dashboard-link").href = "/app";
-  showSettingsSection(["security", "notifications"].includes(params.get("view")) ? params.get("view") : "security");
+  showSettingsSection(["security", "notifications", "data", "legal"].includes(params.get("view")) ? params.get("view") : "security");
   loadData();
 }
 initSettings();

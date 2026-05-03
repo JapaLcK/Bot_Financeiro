@@ -61,9 +61,14 @@ from db import (
     get_dashboard_market_rates,
     get_open_finance_snapshot,
     get_auth_user,
+    build_user_export_zip,
+    ensure_account_deletion_columns,
     get_daily_report_prefs,
+    is_account_scheduled_for_deletion,
     list_identities_by_user,
+    process_due_account_deletions,
     save_pluggy_open_finance_item,
+    schedule_account_deletion,
     set_daily_report_enabled,
     set_daily_report_hour,
     set_engagement_opt_out,
@@ -720,6 +725,7 @@ async def lifespan(app: FastAPI):
             ensure_investment_metadata_columns(),
             ensure_open_finance_tables(),
             ensure_notification_preference_columns(),
+            asyncio.to_thread(ensure_account_deletion_columns),
             ensure_admin_tables(),
         ),
     )
@@ -728,6 +734,7 @@ async def lifespan(app: FastAPI):
     print("OK: Investment metadata ready", flush=True)
     print("OK: Open Finance tables ready", flush=True)
     print("OK: Notification preferences ready", flush=True)
+    print("OK: Account deletion controls ready", flush=True)
     print("OK: Admin observability tables ready", flush=True)
 
     # ── 3. Warnings + detecção de usuário em paralelo ─────────────────────────
@@ -793,6 +800,27 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[investment_accrual] erro: {exc}", file=sys.stderr)
 
+    async def _account_deletion_worker():
+        while True:
+            try:
+                await asyncio.sleep(10)
+                results = await asyncio.to_thread(process_due_account_deletions)
+                if results:
+                    print(f"[account_deletion] resultados processados: {len(results)}", flush=True)
+                    from core.services.email_service import send_account_deletion_completed_email  # noqa: PLC0415
+                    for result in results:
+                        if (result or {}).get("error"):
+                            print(f"[account_deletion] erro ao remover user_id={result.get('user_id')}: {result.get('error')}", file=sys.stderr)
+                            continue
+                        email = (result or {}).get("email")
+                        if (result or {}).get("deleted") and email:
+                            await asyncio.to_thread(send_account_deletion_completed_email, email)
+                await asyncio.sleep(60 * 60)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[account_deletion] erro: {exc}", file=sys.stderr)
+
     _elapsed = _startup_time.monotonic() - _t0
     print(f"[app] Startup interno concluído em {_elapsed:.1f}s.", flush=True)
 
@@ -804,6 +832,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_wa_daily(), name="wa_daily"),
                 asyncio.create_task(_engagement(), name="engagement"),
                 asyncio.create_task(_investment_accrual(), name="investment_accrual"),
+                asyncio.create_task(_account_deletion_worker(), name="account_deletion"),
             ]
         )
     else:
@@ -1104,6 +1133,17 @@ def _build_whatsapp_onboarding_link(user_id: int, minutes_valid: int = 15) -> st
     text = urllib.parse.quote("Olá")
     return f"https://api.whatsapp.com/send?phone={safe_number}&text={text}"
 
+
+def _raise_if_account_scheduled_for_deletion(user_id: int) -> None:
+    deletion = is_account_scheduled_for_deletion(int(user_id))
+    if deletion:
+        scheduled = deletion.get("deletion_scheduled_for")
+        scheduled_txt = scheduled.isoformat() if hasattr(scheduled, "isoformat") else str(scheduled)
+        raise HTTPException(
+            status_code=403,
+            detail=f"Esta conta está agendada para exclusão em {scheduled_txt}.",
+        )
+
 async def _get_current_user(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
@@ -1115,7 +1155,9 @@ async def _get_current_user(
     if not payload or payload.get("type") != "auth":
         raise HTTPException(status_code=401, detail="Token inválido ou expirado.")
     request.state.auth_payload = payload
-    return int(payload["sub"])
+    user_id = int(payload["sub"])
+    _raise_if_account_scheduled_for_deletion(user_id)
+    return user_id
 
 
 def _extract_bearer_token(request: Request) -> str | None:
@@ -1144,6 +1186,7 @@ def _authorize_dashboard_access(request: Request, user_id: int) -> int:
     current_user_id = _resolve_dashboard_user_id(request)
     if current_user_id != int(user_id):
         raise HTTPException(status_code=403, detail="Acesso negado para este usuário.")
+    _raise_if_account_scheduled_for_deletion(current_user_id)
     return current_user_id
 
 # ─── Auth models ─────────────────────────────────────────────────────────────
@@ -1167,6 +1210,10 @@ class VerifyEmailBody(BaseModel):
 class ResetPasswordBody(BaseModel):
     token: str
     new_password: str
+
+
+class DeleteAccountBody(BaseModel):
+    password: str
 
 
 class SecurityContactPayload(BaseModel):
@@ -1201,6 +1248,7 @@ async def auth_validate(request: Request, response: Response, token: str | None 
 
     if not user_id:
         raise HTTPException(status_code=401, detail="Token inválido")
+    _raise_if_account_scheduled_for_deletion(int(user_id))
     _no_store(response)
     return {"user_id": user_id}
 
@@ -1295,6 +1343,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         raise HTTPException(status_code=401, detail="E-mail ou senha incorretos.")
 
     user_id    = result["user_id"]
+    _raise_if_account_scheduled_for_deletion(user_id)
     link_code  = create_link_code(user_id, minutes_valid=15)
     token      = _make_jwt(user_id, result["email"])
     _set_auth_cookie(response, token)
@@ -1400,6 +1449,55 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
     return {"user_id": user_id, **dict(user)}
+
+
+@app.get("/auth/account/export")
+async def auth_account_export(request: Request):
+    """Exporta todos os dados do usuário autenticado em ZIP com JSON e CSVs."""
+    user_id = _resolve_dashboard_user_id(request)
+    _raise_if_account_scheduled_for_deletion(user_id)
+    content = await asyncio.to_thread(build_user_export_zip, user_id)
+    filename = f"pigbank_dados_usuario_{user_id}_{datetime.now(timezone.utc):%Y%m%d}.zip"
+    return StreamingResponse(
+        iter([content]),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.delete("/auth/account")
+@limiter.limit("5/minute")
+async def auth_delete_account(request: Request, response: Response, body: DeleteAccountBody):
+    """Agenda a exclusão definitiva da conta após o período de carência."""
+    user_id = _resolve_dashboard_user_id(request)
+    auth_user = await asyncio.to_thread(get_auth_user, user_id)
+    email = (auth_user or {}).get("email")
+    try:
+        result = await asyncio.to_thread(schedule_account_deletion, user_id, body.password, 7)
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if email:
+        from core.services.email_service import send_account_deletion_scheduled_email
+
+        scheduled = result.get("deletion_scheduled_for")
+        scheduled_txt = scheduled.isoformat() if hasattr(scheduled, "isoformat") else str(scheduled)
+        await asyncio.to_thread(send_account_deletion_scheduled_email, email.strip().lower(), scheduled_txt)
+
+    _clear_session_cookies(response)
+    _no_store(response)
+    return json.loads(jdump({
+        "ok": True,
+        **result,
+        "message": "Conta agendada para exclusão. Seus dados serão removidos definitivamente após o período de carência.",
+    }))
 
 
 @app.post("/auth/dashboard-token")
