@@ -310,6 +310,7 @@ def delete_user_data(user_id: int) -> dict:
         "user_identities",
         "auth_accounts",
     )
+    deleted = 0
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -380,7 +381,7 @@ def delete_user_data(user_id: int) -> dict:
                     cur.execute(f"delete from {table} where user_id = %s", (user_id,))
 
             cur.execute("delete from users where id = %s", (user_id,))
-            deleted = cur.rowcount
+            deleted += cur.rowcount
 
             # Bancos antigos podem não ter todas as FKs/cascades esperadas.
             # A segunda passada remove qualquer resíduo órfão que tenha ficado.
@@ -388,7 +389,44 @@ def delete_user_data(user_id: int) -> dict:
                 if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
                     cur.execute(f"delete from {table} where user_id = %s", (user_id,))
 
+            cur.execute("delete from users where id = %s", (user_id,))
+            deleted += cur.rowcount
+
+            cur.execute("select 1 from users where id = %s", (user_id,))
+            if cur.fetchone():
+                raise RuntimeError(f"Falha ao remover usuário {user_id}: registro ainda existe após a limpeza final.")
+
         conn.commit()
+
+    # Verificação pós-commit: garante que outra conexão também enxerga a conta
+    # como removida antes de o job considerar a exclusão concluída.
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for table in user_owned_tables:
+                if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
+                    cur.execute(f"delete from {table} where user_id = %s", (user_id,))
+
+            cur.execute("delete from users where id = %s", (user_id,))
+            deleted += cur.rowcount
+
+            cur.execute("select 1 from users where id = %s", (user_id,))
+            user_still_exists = cur.fetchone() is not None
+
+            leftovers: dict[str, int] = {}
+            for table in user_owned_tables:
+                if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
+                    cur.execute(f"select count(*) as total from {table} where user_id = %s", (user_id,))
+                    total = int(cur.fetchone()["total"])
+                    if total:
+                        leftovers[table] = total
+
+        conn.commit()
+
+    if user_still_exists or leftovers:
+        raise RuntimeError(
+            f"Falha ao confirmar exclusão do usuário {user_id}: "
+            f"user_exists={user_still_exists}; leftovers={leftovers}"
+        )
 
     return {"user_id": user_id, "deleted": bool(deleted), "email": primary_email}
 
