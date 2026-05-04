@@ -380,7 +380,7 @@ def infer_help_from_text(text: str, platform: str) -> str | None:
 def infer_contextual_fallback(text: str, platform: str) -> str:
     norm = normalize_text(text)
 
-    if _has_hint(norm, "cartao", "cartoes", "fatura", "credito", "parcela", "parcelamento", "vence", "fecha", "limite"):
+    if _has_hint(norm, "cartao", "cartoes", "fatura", "credito", "parcela", "parcelamento", "vence", "fecha", "limite", "pagar", "paguei"):
         return _prepend_not_understood("cartões", _credit_contextual_fallback(text, platform))
 
     if _has_hint(norm, "caixinha", "caixinhas"):
@@ -410,10 +410,12 @@ def infer_contextual_fallback(text: str, platform: str) -> str:
     return (
         "Não entendi exatamente o que você quer fazer.\n"
         "Tente uma destas opções:\n"
-        "• `saldo`\n"
-        "• `gastei 50 mercado`\n"
-        "• `criar cartao Nubank`\n"
-        "• `criar caixinha viagem`\n"
-        "• `investimentos`\n"
-        "• `ajuda`"
+        "• `saldo` — ver saldo atual\n"
+        "• `gastei 50 mercado` — registrar despesa\n"
+        "• `pagar fatura Nubank` — pagar uma fatura\n"
+        "• `faturas` — listar faturas em aberto\n"
+        "• `cartoes` — listar seus cartões\n"
+        "• `criar caixinha viagem` — criar caixinha\n"
+        "• `investimentos` — ver carteira\n"
+        "• `ajuda` — ver todos os comandos"
     )

@@ -768,7 +768,7 @@ def list_open_bills(user_id: int):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select b.id, c.name as card_name, b.period_start, b.period_end,
+                select b.id, b.card_id, c.name as card_name, b.period_start, b.period_end,
                        b.total, coalesce(b.paid_amount, 0) as paid_amount, b.status
                 from credit_bills b
                 join credit_cards c on c.id = b.card_id

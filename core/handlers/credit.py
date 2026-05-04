@@ -44,6 +44,261 @@ _CARD_CREATE_VERBS = (
     "incluir",
 )
 
+_MONTH_NAMES_PT = [
+    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+]
+
+_MONTH_BY_TOKEN: dict[str, int] = {
+    "janeiro": 1, "jan": 1,
+    "fevereiro": 2, "fev": 2,
+    "marco": 3, "mar": 3,
+    "abril": 4, "abr": 4,
+    "maio": 5, "mai": 5,
+    "junho": 6, "jun": 6,
+    "julho": 7, "jul": 7,
+    "agosto": 8, "ago": 8,
+    "setembro": 9, "set": 9, "sete": 9,
+    "outubro": 10, "out": 10,
+    "novembro": 11, "nov": 11,
+    "dezembro": 12, "dez": 12,
+}
+
+
+def _parse_month_year_token(token: str) -> tuple[int | None, int | None]:
+    """Reconhece tokens de mês/ano: 'maio', 'mai', '05/2026', '5/26', '05-2026'."""
+    if not token:
+        return None, None
+    norm = normalize_text(token)
+    if norm in _MONTH_BY_TOKEN:
+        return _MONTH_BY_TOKEN[norm], None
+    m = re.match(r"^(\d{1,2})[\/\-](\d{2,4})$", norm)
+    if m:
+        mo = int(m.group(1))
+        yr = int(m.group(2))
+        if 1 <= mo <= 12:
+            if yr < 100:
+                yr += 2000
+            return mo, yr
+    return None, None
+
+
+def _bill_due(row: dict) -> float:
+    total = float(row.get("total") or 0)
+    paid = float(row.get("paid_amount") or 0)
+    return max(0.0, total - paid)
+
+
+def _format_bill_label(row: dict) -> str:
+    pe = row["period_end"]
+    return f"{row['card_name']} — {_MONTH_NAMES_PT[pe.month - 1]}/{pe.year}"
+
+
+def _execute_pay_bill(user_id: int, bill_row: dict, amount: float | None) -> str:
+    card_id = int(bill_row["card_id"])
+    bill_id = int(bill_row["id"])
+    card_name = bill_row["card_name"]
+    try:
+        res = pay_bill_amount(user_id, card_id, card_name, amount, bill_id=bill_id)
+        if isinstance(res, dict) and res.get("error") == "amount_too_high":
+            return (
+                "❌ Valor maior do que o em aberto.\n"
+                f"Em aberto: {fmt_brl(res['due'])} | Total: {fmt_brl(res['total'])} | Já pago: {fmt_brl(res['paid_amount'])}"
+            )
+        if isinstance(res, dict) and res.get("error") == "invalid_amount":
+            return "❌ Valor inválido. Use: pagar fatura 300"
+        if not res:
+            return "📭 Nada para pagar nessa fatura."
+        return (
+            f"✅ Pagamento registrado: {fmt_brl(res['paid'])} ({_format_bill_label(bill_row)})\n"
+            f"Conta agora: {fmt_brl(res['new_balance'])}\n"
+            f"ID lançamento: #{res['launch_id']}"
+        )
+    except Exception as e:
+        return f"❌ Erro ao pagar fatura: {e}"
+
+
+def _ask_which_bill(user_id: int, candidates: list[dict], amount: float | None) -> str:
+    set_pending_action(
+        user_id,
+        "pay_bill_choice",
+        {
+            "bill_ids": [int(r["id"]) for r in candidates],
+            "amount": amount,
+        },
+        minutes=10,
+    )
+    lines = ["🧾 Há mais de uma fatura em aberto. Qual você quer pagar?", ""]
+    for i, r in enumerate(candidates, start=1):
+        lines.append(f"{i}. {_format_bill_label(r)} — em aberto {fmt_brl(_bill_due(r))}")
+    lines.append("")
+    lines.append("Responda com o número (ex: *1*) ou *cancelar*.")
+    return "\n".join(lines)
+
+
+def _handle_pay_bill_command(user_id: int, text: str) -> str | None:
+    """
+    Trata variações do comando `pagar`:
+      - `pagar` / `paguei`                           → cartão padrão, fatura atual
+      - `pagar fatura`                               → idem
+      - `pagar fatura maio` / `pagar fatura 05/2026` → todas as faturas do mês
+      - `pagar Nubank`                               → fatura(s) abertas do Nubank
+      - `pagar Nubank maio`                          → fatura específica
+      - `pagar fatura Nubank 500`                    → paga R$500 dessa fatura
+    Retorna None se não conseguiu identificar (deixa o caller cair no fallback).
+    """
+    t = (text or "").strip()
+    if not t:
+        return None
+
+    rest = re.sub(r"^(?:pagar|paguei)\b\s*(?:a\s+)?(?:fatura\b\s*)?", "", t, flags=re.IGNORECASE).strip()
+    tokens = rest.split() if rest else []
+
+    amount: float | None = None
+    if tokens:
+        last_val = parse_money(tokens[-1])
+        if last_val is not None:
+            amount = float(last_val)
+            tokens = tokens[:-1]
+
+    month: int | None = None
+    year: int | None = None
+    leftover: list[str] = []
+    for tok in tokens:
+        mo, yr = _parse_month_year_token(tok)
+        if mo is not None:
+            month = mo
+            if yr is not None:
+                year = yr
+            continue
+        leftover.append(tok)
+
+    card_query = " ".join(leftover).strip() if leftover else ""
+
+    card_id: int | None = None
+    if card_query:
+        cid = get_card_id_by_name(user_id, card_query)
+        if cid is None:
+            resolved_name = _find_card_name_in_text(user_id, card_query)
+            if resolved_name:
+                cid = get_card_id_by_name(user_id, resolved_name)
+        if cid is None:
+            # Token não é cartão conhecido. Se nem mês nem fatura na frase, deixa o
+            # roteador decidir (ex.: "pagar boleto" não é função do bot).
+            if month is None and not re.search(r"\bfatura\b", t, re.IGNORECASE):
+                return None
+            return f"❌ Não achei o cartão '{card_query}'. Veja seus cartões com: *cartoes*"
+        card_id = int(cid)
+
+    try:
+        rows = list_open_bills(user_id)
+    except Exception as e:
+        return f"❌ Erro ao consultar faturas: {e}"
+
+    if card_id is None and month is None:
+        # Sem critério explícito → cartão padrão, fatura atual
+        default_id = get_default_card_id(user_id)
+        if not default_id:
+            return (
+                "❓ Você não tem cartão padrão. Defina com: *padrao NOME* "
+                "ou tente *pagar fatura NomeDoCartão*."
+            )
+        card_id = int(default_id)
+
+    candidates = [dict(r) for r in rows if _bill_due(r) > 0]
+    if card_id is not None:
+        candidates = [r for r in candidates if int(r["card_id"]) == card_id]
+    if month is not None:
+        candidates = [
+            r for r in candidates
+            if r["period_end"].month == month and (year is None or r["period_end"].year == year)
+        ]
+
+    if not candidates:
+        if card_id is not None and month is not None:
+            ref = f"{_MONTH_NAMES_PT[month - 1]}" + (f"/{year}" if year else "")
+            return f"📭 Nenhuma fatura em aberto desse cartão para {ref}."
+        if card_id is not None:
+            return "📭 Nenhuma fatura em aberto desse cartão."
+        if month is not None:
+            ref = f"{_MONTH_NAMES_PT[month - 1]}" + (f"/{year}" if year else "")
+            return f"📭 Nenhuma fatura em aberto para {ref}."
+        return "📭 Nenhuma fatura em aberto."
+
+    if len(candidates) == 1:
+        return _execute_pay_bill(user_id, candidates[0], amount)
+
+    return _ask_which_bill(user_id, candidates, amount)
+
+
+def _resolve_pay_bill_choice(user_id: int, text: str, pending: dict) -> str:
+    answer = (text or "").strip()
+    norm = normalize_text(answer)
+    if not answer or norm in ("nao", "cancelar", "cancela", "n"):
+        clear_pending_action(user_id)
+        return "❌ Pagamento cancelado."
+
+    payload = dict(pending.get("payload") or {})
+    bill_ids: list[int] = [int(x) for x in (payload.get("bill_ids") or [])]
+    amount = payload.get("amount")
+    if amount is not None:
+        try:
+            amount = float(amount)
+        except (TypeError, ValueError):
+            amount = None
+
+    try:
+        rows = list_open_bills(user_id)
+    except Exception as e:
+        clear_pending_action(user_id)
+        return f"❌ Erro ao consultar faturas: {e}"
+
+    candidates = [dict(r) for r in rows if int(r["id"]) in bill_ids and _bill_due(r) > 0]
+    if not candidates:
+        clear_pending_action(user_id)
+        return "📭 Nenhuma das faturas listadas continua em aberto."
+
+    chosen: dict | None = None
+
+    m_num = re.match(r"^#?(\d+)$", norm)
+    if m_num:
+        idx = int(m_num.group(1)) - 1
+        if 0 <= idx < len(candidates):
+            chosen = candidates[idx]
+
+    if chosen is None:
+        mo, _yr = _parse_month_year_token(answer)
+        if mo is not None:
+            month_matches = [r for r in candidates if r["period_end"].month == mo]
+            if len(month_matches) == 1:
+                chosen = month_matches[0]
+            elif len(month_matches) > 1:
+                return _ask_which_bill(user_id, month_matches, amount)
+
+    if chosen is None:
+        cid = get_card_id_by_name(user_id, answer)
+        if cid is None:
+            resolved_name = _find_card_name_in_text(user_id, answer)
+            if resolved_name:
+                cid = get_card_id_by_name(user_id, resolved_name)
+        if cid is not None:
+            card_matches = [r for r in candidates if int(r["card_id"]) == int(cid)]
+            if len(card_matches) == 1:
+                chosen = card_matches[0]
+            elif len(card_matches) > 1:
+                return _ask_which_bill(user_id, card_matches, amount)
+
+    if chosen is None:
+        lines = ["❓ Não entendi qual fatura. Responda com o número:", ""]
+        for i, r in enumerate(candidates, start=1):
+            lines.append(f"{i}. {_format_bill_label(r)} — em aberto {fmt_brl(_bill_due(r))}")
+        lines.append("")
+        lines.append("Ou *cancelar* para abortar.")
+        return "\n".join(lines)
+
+    clear_pending_action(user_id)
+    return _execute_pay_bill(user_id, chosen, amount)
+
 
 def _pick_card_id(user_id: int, card_name: str | None):
     if card_name:
@@ -450,12 +705,15 @@ def _build_credit_contextual_help(text: str) -> str:
             "• `qual cartao fecha dia 30?`"
         )
 
-    if "fatura" in norm:
+    if any(expr in norm for expr in ("pagar", "paguei")) or "fatura" in norm:
         return (
-            "🧾 Posso te ajudar com fatura assim:\n"
-            "• `fatura Nubank`\n"
-            "• `quanto tenho na fatura do Nubank?`\n"
-            "• `pagar fatura Nubank com saldo`"
+            "🧾 Posso te ajudar com fatura/pagamento assim:\n"
+            "• `pagar fatura` — paga a fatura atual do cartão padrão\n"
+            "• `pagar Nubank` — paga a fatura do Nubank (lista se houver mais de uma em aberto)\n"
+            "• `pagar fatura maio` — paga a fatura de maio\n"
+            "• `pagar fatura Nubank 500` — paga R$ 500 da fatura do Nubank\n"
+            "• `fatura Nubank` — consulta a fatura\n"
+            "• `faturas` — lista todas as faturas em aberto"
         )
 
     if any(expr in norm for expr in ("parcela", "parcelamento", "parcelar")):
@@ -490,7 +748,7 @@ def _build_credit_contextual_help(text: str) -> str:
 
 def contextual_help(text: str) -> str | None:
     norm = normalize_text(text)
-    if not any(k in norm for k in ("cartao", "cartoes", "fatura", "credito", "parcela", "parcelamento", "vence", "fecha")):
+    if not any(k in norm for k in ("cartao", "cartoes", "fatura", "credito", "parcela", "parcelamento", "vence", "fecha", "pagar", "paguei")):
         return None
     return _build_credit_contextual_help(text)
 
@@ -854,6 +1112,9 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
 
     if pending.get("action_type") == "credit_delete_card":
         return _resolve_delete_card(user_id, text, pending)
+
+    if pending.get("action_type") == "pay_bill_choice":
+        return _resolve_pay_bill_choice(user_id, text, pending)
 
     if pending.get("action_type") == "installment_pending":
         answer = (text or "").strip()
@@ -1474,46 +1735,10 @@ def handle(user_id: int, text: str) -> str | None:
 
         return _create_installments(user_id, card_id, resolved_name, float(valor), n, nota, categoria, purchased_at)
 
-    if t_low.startswith("pagar fatura") or t_low.startswith("paguei fatura"):
-        rest = re.sub(r"^paguei?\s+fatura", "", t, flags=re.IGNORECASE).strip()
-        tokens = rest.split() if rest else []
-        amount = None
-        card_name = None
-
-        if tokens:
-            last_val = parse_money(tokens[-1])
-            if last_val is not None:
-                amount = float(last_val)
-                tokens = tokens[:-1]
-            if tokens:
-                card_name = " ".join(tokens).strip()
-
-        card_id, resolved_name = _pick_card_id(user_id, card_name)
-        if not card_id:
-            return "❓ Você não tem cartão padrão. Defina com: padrao NOME"
-
-        try:
-            bill_id = get_current_open_bill_id(user_id, card_id, today_tz())
-            if not bill_id:
-                return "📭 Nenhuma fatura aberta do período atual para pagar."
-
-            res = pay_bill_amount(user_id, card_id, resolved_name, amount, bill_id=bill_id)
-            if isinstance(res, dict) and res.get("error") == "amount_too_high":
-                return (
-                    "❌ Valor maior do que o em aberto.\n"
-                    f"Em aberto: {fmt_brl(res['due'])} | Total: {fmt_brl(res['total'])} | Já pago: {fmt_brl(res['paid_amount'])}"
-                )
-            if isinstance(res, dict) and res.get("error") == "invalid_amount":
-                return "❌ Valor inválido. Use: pagar fatura 300"
-            if not res:
-                return "📭 Nada para pagar."
-            return (
-                f"✅ Pagamento registrado: {fmt_brl(res['paid'])}\n"
-                f"Conta agora: {fmt_brl(res['new_balance'])}\n"
-                f"ID lançamento: #{res['launch_id']}"
-            )
-        except Exception as e:
-            return f"❌ Erro ao pagar fatura: {e}"
+    if re.match(r"^(?:pagar|paguei)\b", t_low):
+        resp = _handle_pay_bill_command(user_id, t)
+        if resp is not None:
+            return resp
 
     if t_low in ("faturas", "listar faturas", "faturas abertas", "listar faturas abertas", "listar fatura", "listar faturas em aberto"):
         try:

@@ -251,6 +251,10 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
     (r"^(gastei|paguei|comprei|debitei|gasto)\b.*\b(cartao|credito)\b",
      "credit.handle"),
 
+    # pagamento de fatura (precede launches.add para não capturar "paguei" como gasto)
+    (r"^(?:pagar|paguei)\s+(?:a\s+)?fatura\b",
+     "credit.handle"),
+
     # despesa / receita — detecta padrão sem chamar IA
     (r"^(gastei|paguei|comprei|debitei|gasto|mandei|enviei|pixei)\b",
      "launches.add"),
@@ -260,7 +264,7 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "launches.add"),
 
     # cartões / crédito
-    (r"^(cartoes|cartoes de credito|listar cartoes|meus cartoes|quais cartoes|quais sao meus cartoes|criar cartao|padrao\b|credito\b|parcelar\b|parcelei\b|fatura\b|faturas\b|pagar fatura\b|paguei fatura\b|parcelamentos\b|parcelas\b|minhas faturas|me mostra minhas faturas|qual meu cartao principal|meu cartao principal|trocar cartao principal|mudar cartao principal|definir limite|limite cartao|limite do cartao|pagar fatura com saldo)",
+    (r"^(cartoes|cartoes de credito|listar cartoes|meus cartoes|quais cartoes|quais sao meus cartoes|criar cartao|padrao\b|credito\b|parcelar\b|parcelei\b|fatura\b|faturas\b|pagar\b|paguei\b|parcelamentos\b|parcelas\b|minhas faturas|me mostra minhas faturas|qual meu cartao principal|meu cartao principal|trocar cartao principal|mudar cartao principal|definir limite|limite cartao|limite do cartao)",
      "credit.handle"),
     (r"^(quero\s+)?(cadastrar|registrar|adicionar|incluir|criar)\s+(um\s+|novo\s+|meu\s+)?cartao\b",
      "credit.handle"),
