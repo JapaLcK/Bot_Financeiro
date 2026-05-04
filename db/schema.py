@@ -527,6 +527,9 @@ def init_db():
         alter table auth_accounts add column if not exists deletion_status text
         """,
         """
+        alter table auth_accounts add column if not exists display_name text
+        """,
+        """
         alter table auth_accounts add column if not exists deletion_processing_started_at timestamptz
         """,
         """

@@ -506,6 +506,12 @@ function shortAccount(email) {
   return name.length > 18 ? name.slice(0, 16) + "..." : name;
 }
 
+function displayLabel(displayName, email) {
+  const trimmed = (displayName || "").trim();
+  if (trimmed) return trimmed.length > 22 ? trimmed.slice(0, 20) + "..." : trimmed;
+  return shortAccount(email);
+}
+
 function planLabel(plan) {
   const v = (plan || "free").trim().toLowerCase();
   return v === "free" ? "PLANO FREE" : `PLANO ${v.toUpperCase()}`;
@@ -619,23 +625,34 @@ async function connectWhatsAppFromHome(event) {
 }
 
 /* ─── Profile (email + plan) ──────────────────────────────────────────── */
+let PROFILE_DISPLAY_NAME = "";
+let PROFILE_EMAIL = "";
+
 async function loadProfile() {
   try {
     const res = await fetch(`${API}/auth/dashboard-profile`, { credentials: "same-origin" });
     if (!res.ok) return;
     const data = await res.json();
-    const email = data.email || "";
+    PROFILE_EMAIL = data.email || "";
+    PROFILE_DISPLAY_NAME = data.display_name || "";
     const plan = data.plan  || "free";
-    document.getElementById("user-label").textContent = shortAccount(email);
-    document.getElementById("user-email").textContent = email || "Minha conta";
+    document.getElementById("user-label").textContent = displayLabel(PROFILE_DISPLAY_NAME, PROFILE_EMAIL);
+    document.getElementById("user-email").textContent = PROFILE_EMAIL || "Minha conta";
     document.getElementById("user-plan").textContent  = planLabel(plan);
   } catch {}
 }
 
 /* ─── Render: greeting ────────────────────────────────────────────────── */
-function renderGreeting(snapshot, email) {
-  const name = (email || "").split("@")[0] || "";
-  const firstName = name.charAt(0).toUpperCase() + name.slice(1);
+function renderGreeting(snapshot, email, displayName) {
+  const trimmed = (displayName || "").trim();
+  let firstName;
+  if (trimmed) {
+    // Usa só o primeiro nome para a saudação ficar leve
+    firstName = trimmed.split(/\s+/)[0];
+  } else {
+    const local = (email || "").split("@")[0] || "";
+    firstName = local.charAt(0).toUpperCase() + local.slice(1);
+  }
   document.getElementById("greeting-title").textContent = `${greetingByHour()}, ${firstName} 👋`;
 
   const recent = (snapshot.recent_launches || []).filter(r => r.tipo !== "criar_caixinha");
@@ -930,8 +947,9 @@ function showAccessError() {
   }
 
   // 4) Renderiza tudo
-  const email = (me && me.email) || "";
-  renderGreeting(snapshot, email);
+  const email = (me && me.email) || PROFILE_EMAIL || "";
+  const displayName = (me && me.display_name) || PROFILE_DISPLAY_NAME || "";
+  renderGreeting(snapshot, email, displayName);
   renderStats(snapshot, history);
   renderAlerts(snapshot);
   renderOnboarding(snapshot, me);

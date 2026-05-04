@@ -1186,6 +1186,19 @@ a { color: inherit; text-decoration: none; }
             <div class="security-grid">
               <div class="security-item">
                 <div class="security-item-head">
+                  <div class="security-label">Nome de exibição</div>
+                  <button class="btn-sm" type="button" id="security-name-edit-btn" onclick="toggleSecurityEdit('name')">Alterar</button>
+                </div>
+                <div class="security-value" id="security-name-value">Carregando...</div>
+                <div class="security-note" id="security-name-note">Como o PigBank te chama no app (saudações, header, etc.).</div>
+                <div class="security-edit" id="security-name-edit">
+                  <input class="security-input" id="security-name-input" type="text" placeholder="Ex: Lucas" autocomplete="name" maxlength="50" />
+                  <button class="btn-sm" type="button" onclick="saveSecurityContact('name')">Salvar</button>
+                  <button class="btn-sm" type="button" onclick="toggleSecurityEdit('name', false)">Cancelar</button>
+                </div>
+              </div>
+              <div class="security-item">
+                <div class="security-item-head">
                   <div class="security-label">E-mail</div>
                   <button class="btn-sm" type="button" id="security-email-edit-btn" onclick="toggleSecurityEdit('email')">Alterar</button>
                 </div>
@@ -1559,23 +1572,38 @@ function toggleSecurityEdit(kind, force) {
 
 async function saveSecurityContact(kind) {
   const input = document.getElementById(`security-${kind}-input`);
-  const value = input.value.trim();
-  if (!value) {
+  const rawValue = input.value;
+  const value = (rawValue || "").trim();
+
+  // Para 'name': permite valor vazio (remove o nome). Para email/phone exige valor.
+  if (kind !== "name" && !value) {
     showToast(kind === "email" ? "Informe o e-mail" : "Informe o telefone", "error");
     return;
   }
+  if (kind === "name" && value && value.length < 2) {
+    showToast("O nome deve ter pelo menos 2 caracteres", "error");
+    return;
+  }
+
+  let body;
+  if (kind === "email") body = { email: value };
+  else if (kind === "phone") body = { phone: value };
+  else if (kind === "name") body = { display_name: value };
+  else return;
+
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/security/contact`, {
       method: "PATCH",
       credentials: "same-origin",
       headers: authHeaders({ "Content-Type":"application/json" }),
-      body: JSON.stringify(kind === "email" ? { email: value } : { phone: value }),
+      body: JSON.stringify(body),
     });
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
     applySecuritySettings(data);
     toggleSecurityEdit(kind, false);
-    showToast(kind === "email" ? "E-mail atualizado" : "Telefone atualizado", "ok");
+    const labels = { email: "E-mail atualizado", phone: "Telefone atualizado", name: value ? "Nome atualizado" : "Nome removido" };
+    showToast(labels[kind] || "Dado atualizado", "ok");
     notificationSettingsLoaded = false;
   } catch (err) {
     showToast(err.message || "Erro ao salvar dado", "error");
@@ -1586,6 +1614,13 @@ function applySecuritySettings(data) {
   const hasEmail = Boolean(data.email);
   const phoneStatus = data.phone_status === "confirmed" || data.whatsapp_verified_at ? "confirmado" : "pendente";
   const phoneDisplay = data.phone ? formatPhoneBR(data.phone) : "";
+  const displayName = (data.display_name || "").trim();
+  const nameValueEl = document.getElementById("security-name-value");
+  if (nameValueEl) {
+    nameValueEl.textContent = displayName || "Não definido";
+    document.getElementById("security-name-input").value = displayName;
+    document.getElementById("security-name-edit-btn").textContent = displayName ? "Alterar" : "Adicionar";
+  }
   document.getElementById("security-email-value").textContent = displayValue(data.email);
   document.getElementById("security-email-input").value = data.email || "";
   document.getElementById("security-email-edit-btn").textContent = hasEmail ? "Alterar" : "Adicionar";

@@ -822,15 +822,21 @@ function shortAccountLabel(email) {
   return name.length > 18 ? `${name.slice(0, 16)}...` : name;
 }
 
+function userMenuLabel(displayName, email) {
+  const trimmed = (displayName || "").trim();
+  if (trimmed) return trimmed.length > 22 ? `${trimmed.slice(0, 20)}...` : trimmed;
+  return shortAccountLabel(email);
+}
+
 function formatPlanLabel(plan) {
   const value = (plan || "free").trim();
   return value.toLowerCase() === "free" ? "Plano Free" : `Plano ${value}`;
 }
 
-function applyUserMenuState(email, plan) {
+function applyUserMenuState(email, plan, displayName) {
   USER_EMAIL = email || "";
   USER_PLAN = plan || "free";
-  document.getElementById("user-label").textContent = shortAccountLabel(USER_EMAIL);
+  document.getElementById("user-label").textContent = userMenuLabel(displayName, USER_EMAIL);
   document.getElementById("user-email").textContent = USER_EMAIL || "Minha conta";
   document.getElementById("user-plan").textContent = formatPlanLabel(USER_PLAN);
 }
@@ -840,7 +846,7 @@ async function loadUserMenuState() {
     const res = await fetch(`${API}/auth/dashboard-profile`, { credentials: "same-origin" });
     if (!res.ok) return;
     const data = await readResponsePayload(res);
-    applyUserMenuState(data.email || "", data.plan || "free");
+    applyUserMenuState(data.email || "", data.plan || "free", data.display_name || "");
   } catch {}
 }
 

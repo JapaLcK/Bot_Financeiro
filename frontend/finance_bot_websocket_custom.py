@@ -1322,6 +1322,7 @@ class DeleteAccountBody(BaseModel):
 class SecurityContactPayload(BaseModel):
     email: str | None = None
     phone: str | None = None
+    display_name: str | None = None
 
 
 class DashboardLinkBody(BaseModel):
@@ -1354,6 +1355,7 @@ async def auth_dashboard_profile(request: Request, response: Response):
     return {
         "user_id": user_id,
         "email": (auth_user or {}).get("email"),
+        "display_name": (auth_user or {}).get("display_name"),
         "plan": (auth_user or {}).get("plan"),
     }
 
@@ -2358,6 +2360,7 @@ async def _get_security_settings(user_id: int) -> dict:
         "ok": True,
         "user_id": user_id,
         "email": auth_user.get("email"),
+        "display_name": auth_user.get("display_name"),
         "phone": phone,
         "phone_status": auth_user.get("phone_status"),
         "phone_confirmed_at": auth_user.get("phone_confirmed_at"),
@@ -2388,8 +2391,22 @@ async def update_security_contact_route(
 
     email = payload.email.strip().lower() if payload.email else None
     phone = (payload.phone or "").strip() or None
-    if not email and not phone:
-        raise HTTPException(status_code=400, detail="Informe e-mail ou telefone.")
+
+    display_name_raw = payload.display_name
+    display_name_provided = display_name_raw is not None
+    display_name: str | None = None
+    if display_name_provided:
+        display_name = display_name_raw.strip()
+        if display_name == "":
+            display_name = None  # remove o nome
+        else:
+            if len(display_name) > 50:
+                raise HTTPException(status_code=400, detail="O nome deve ter no máximo 50 caracteres.")
+            if len(display_name) < 2:
+                raise HTTPException(status_code=400, detail="O nome deve ter pelo menos 2 caracteres.")
+
+    if not email and not phone and not display_name_provided:
+        raise HTTPException(status_code=400, detail="Informe e-mail, telefone ou nome.")
     if email and ("@" not in email or "." not in email.rsplit("@", 1)[-1]):
         raise HTTPException(status_code=400, detail="E-mail inválido.")
 
@@ -2419,6 +2436,11 @@ async def update_security_contact_route(
                         WHERE user_id = %s
                         """,
                         (normalized_phone, user_id),
+                    )
+                if display_name_provided:
+                    await cur.execute(
+                        "UPDATE auth_accounts SET display_name = %s WHERE user_id = %s",
+                        (display_name, user_id),
                     )
             await conn.commit()
     except psycopg.errors.UniqueViolation as exc:
