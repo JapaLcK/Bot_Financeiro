@@ -410,17 +410,45 @@ async def get_financial_data(
             # Investments (always current)
             investments = current_investments
 
+            # Compras no crédito viram linhas virtuais com tipo='credito' no
+            # histórico — só quando o filtro permitir (no filtro "all" ou sem filtro).
+            include_credit = (filter_type or "all").strip().lower() in ("", "all")
+
+            credit_union_sql = ""
+            credit_union_params: list = []
+            if include_credit:
+                credit_union_sql = """
+                    UNION ALL
+                    SELECT 'credito' AS tipo,
+                           t.valor AS valor,
+                           c.name AS alvo,
+                           t.nota AS nota,
+                           t.categoria AS categoria,
+                           t.purchased_at::timestamptz AS criado_em,
+                           false AS is_internal_movement
+                    FROM credit_transactions t
+                    JOIN credit_cards c ON c.id = t.card_id
+                    WHERE t.user_id = %s
+                      AND t.purchased_at >= %s::date
+                      AND t.purchased_at < %s::date
+                      AND t.is_refund = false
+                """
+                credit_union_params = [user_id, month_start, month_end]
+
             # Total launches for the requested month after filters (excluindo ações administrativas)
             await cur.execute(
                 f"""
-                SELECT COUNT(*) AS total
-                FROM launches
-                WHERE user_id = %s
-                  AND criado_em >= %s AND criado_em < %s
-                  AND tipo NOT IN ('criar_caixinha', 'delete_pocket', 'create_investment', 'delete_investment')
-                  {launch_filter_sql}
+                SELECT COUNT(*) AS total FROM (
+                    SELECT 1
+                    FROM launches
+                    WHERE user_id = %s
+                      AND criado_em >= %s AND criado_em < %s
+                      AND tipo NOT IN ('criar_caixinha', 'delete_pocket', 'create_investment', 'delete_investment')
+                      {launch_filter_sql}
+                    {credit_union_sql}
+                ) merged
                 """,
-                (user_id, month_start, month_end, *launch_filter_params),
+                (user_id, month_start, month_end, *launch_filter_params, *credit_union_params),
             )
             launches_total_row = await cur.fetchone()
             launches_total = int(launches_total_row["total"] or 0)
@@ -429,15 +457,19 @@ async def get_financial_data(
             await cur.execute(
                 f"""
                 SELECT tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
-                FROM launches
-                WHERE user_id = %s
-                  AND criado_em >= %s AND criado_em < %s
-                  AND tipo NOT IN ('criar_caixinha', 'delete_pocket', 'create_investment', 'delete_investment')
-                  {launch_filter_sql}
+                FROM (
+                    SELECT tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
+                    FROM launches
+                    WHERE user_id = %s
+                      AND criado_em >= %s AND criado_em < %s
+                      AND tipo NOT IN ('criar_caixinha', 'delete_pocket', 'create_investment', 'delete_investment')
+                      {launch_filter_sql}
+                    {credit_union_sql}
+                ) merged
                 ORDER BY criado_em DESC
                 LIMIT %s OFFSET %s
                 """,
-                (user_id, month_start, month_end, *launch_filter_params, limit, offset),
+                (user_id, month_start, month_end, *launch_filter_params, *credit_union_params, limit, offset),
             )
             launches = await cur.fetchall()
 
@@ -2085,31 +2117,32 @@ async def monthly_history(request: Request, user_id: int, months: int = 6):
     return {"data": data}
 
 class LaunchCreatePayload(BaseModel):
-    tipo: str  # 'receita' | 'despesa'
+    tipo: str  # 'receita' | 'despesa' | 'credito'
     valor: float
     alvo: str | None = None
     nota: str | None = None
     categoria: str | None = None
+    card_id: int | None = None  # obrigatório quando tipo='credito'
 
 
 @app.post("/launches/{user_id}")
 async def create_launch_route(request: Request, user_id: int, payload: LaunchCreatePayload):
-    """Cria um lançamento manual (mesma rota usada pelo bot do WhatsApp).
+    """Cria um lançamento manual.
 
-    O lançamento aparece em todos os comandos do bot (`lancamentos`, `saldo`,
-    `gastos hoje`, etc.) e no histórico do dashboard.
+    - `receita` / `despesa` → cria em `launches` + atualiza saldo (mesmo fluxo do bot)
+    - `credito` → cria em `credit_transactions` na fatura aberta do cartão
+      escolhido (mesmo fluxo do `gastei X no cartao Y` do WhatsApp)
     """
     _authorize_dashboard_access(request, user_id)
 
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import add_launch_and_update_balance
     from core.services.category_service import infer_category, learn_from_inference
     from utils_text import is_internal_category, canonicalize_category_label
 
     tipo = (payload.tipo or "").strip().lower()
-    if tipo not in ("receita", "despesa"):
-        raise HTTPException(status_code=400, detail="tipo deve ser 'receita' ou 'despesa'.")
+    if tipo not in ("receita", "despesa", "credito"):
+        raise HTTPException(status_code=400, detail="tipo deve ser 'receita', 'despesa' ou 'credito'.")
 
     try:
         valor = float(payload.valor)
@@ -2120,13 +2153,71 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
 
     alvo = (payload.alvo or "").strip() or None
     nota_in = (payload.nota or "").strip() or None
-    nota = nota_in or alvo or ("receita registrada pelo dashboard" if tipo == "receita" else "despesa registrada pelo dashboard")
 
     # Resolve categoria — explícita do form ou inferência (mesmo fluxo do bot).
     explicit = (payload.categoria or "").strip() or None
-    inferred = await asyncio.to_thread(
-        infer_category, int(user_id), nota, explicit
-    )
+
+    # ── Crédito → add_credit_purchase ─────────────────────────────────────
+    if tipo == "credito":
+        from db import add_credit_purchase, get_card_by_id
+        from utils_date import today_tz
+
+        card_id = payload.card_id
+        if not card_id:
+            raise HTTPException(status_code=400, detail="Selecione um cartão para a compra no crédito.")
+
+        card = await asyncio.to_thread(get_card_by_id, int(user_id), int(card_id))
+        if not card:
+            raise HTTPException(status_code=400, detail="Cartão não encontrado.")
+        card_name = card.get("name") or "cartão"
+
+        nota = nota_in or alvo or f"compra no crédito ({card_name})"
+        inferred = await asyncio.to_thread(infer_category, int(user_id), nota, explicit)
+        categoria = canonicalize_category_label(inferred.category) or "outros"
+
+        purchased_at = await asyncio.to_thread(today_tz)
+        try:
+            tx_id, due, bill_id = await asyncio.to_thread(
+                add_credit_purchase,
+                int(user_id),
+                int(card_id),
+                valor,
+                categoria,
+                nota,
+                purchased_at,
+            )
+            await asyncio.to_thread(
+                learn_from_inference,
+                int(user_id),
+                nota,
+                categoria,
+                target_hint=alvo or card_name,
+                reason=inferred.reason,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Erro ao registrar compra no crédito: {exc}") from exc
+
+        return {
+            "ok": True,
+            "tipo": "credito",
+            "credit_transaction_id": int(tx_id),
+            "bill_id": int(bill_id),
+            "card_id": int(card_id),
+            "card_name": card_name,
+            "valor": float(valor),
+            "categoria": categoria,
+            "alvo": alvo or card_name,
+            "nota": nota,
+            "due_amount": float(due),
+        }
+
+    # ── Receita / Despesa → fluxo padrão de launches ──────────────────────
+    from db import add_launch_and_update_balance
+
+    nota = nota_in or alvo or ("receita registrada pelo dashboard" if tipo == "receita" else "despesa registrada pelo dashboard")
+    inferred = await asyncio.to_thread(infer_category, int(user_id), nota, explicit)
     categoria = canonicalize_category_label(inferred.category) or "outros"
     is_internal = is_internal_category(categoria)
 

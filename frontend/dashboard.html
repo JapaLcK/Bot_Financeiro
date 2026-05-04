@@ -87,9 +87,6 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   transition:all .2s var(--ease);display:flex;align-items:center;gap:5px;white-space:nowrap; }
 .hbtn:hover  { background:rgba(255,255,255,.14);color:var(--text);border-color:rgba(255,255,255,.24); }
 .hbtn:active { transform:scale(.96); }
-.hbtn-primary { background:linear-gradient(135deg,#7c3aed,#3b82f6);color:#fff;border-color:transparent;font-weight:650;
-  box-shadow:0 4px 14px rgba(124,58,237,.35); }
-.hbtn-primary:hover { background:linear-gradient(135deg,#7c3aed,#3b82f6);color:#fff;border-color:transparent;transform:translateY(-1px);box-shadow:0 6px 18px rgba(124,58,237,.5); }
 .user-menu { position:relative; }
 .user-menu-btn {
   max-width:220px;
@@ -284,6 +281,7 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .tag.saida,.tag.despesa   { background:rgba(248,113,113,.14);color:var(--red);  border:1px solid rgba(248,113,113,.22); }
 .tag.entrada,.tag.receita { background:rgba(52,211,153,.12); color:var(--green);border:1px solid rgba(52,211,153,.2); }
 .tag.investimento         { background:rgba(96,165,250,.12); color:var(--blue); border:1px solid rgba(96,165,250,.2); }
+.tag.credito              { background:rgba(167,139,250,.14); color:var(--purple);border:1px solid rgba(167,139,250,.28); }
 .tag.deposito_caixinha,
 .tag.saque_caixinha,
 .tag.aporte_investimento,
@@ -321,6 +319,13 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   padding:8px 14px;border-radius:10px;font-size:.78rem;font-weight:650;cursor:pointer;transition:all .2s var(--ease); }
 .main-tab.active { background:rgba(96,165,250,.16);border-color:rgba(96,165,250,.38);color:var(--blue); }
 .main-tab:hover:not(.active) { background:rgba(255,255,255,.1);color:var(--text); }
+.main-tab.tab-launch {
+  margin-left:auto;
+  background:linear-gradient(135deg,#7c3aed,#3b82f6);
+  border-color:transparent;color:#fff;font-weight:700;
+  box-shadow:0 4px 14px rgba(124,58,237,.35);
+}
+.main-tab.tab-launch:hover { background:linear-gradient(135deg,#7c3aed,#3b82f6);color:#fff;transform:translateY(-1px);box-shadow:0 6px 18px rgba(124,58,237,.5); }
 .dash-view { display:none; }
 .dash-view.active { display:block; }
 
@@ -421,15 +426,16 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .modal-label { font-size:.7rem;color:var(--text-3);font-weight:650;letter-spacing:.06em;
   text-transform:uppercase;margin-bottom:6px;display:block; }
 .modal-row { margin-bottom:14px; }
-.tipo-toggle { display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px; }
+.tipo-toggle { display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px; }
 .tipo-opt { background:rgba(255,255,255,.05);border:1px solid var(--glass-border);
-  border-radius:10px;padding:14px 12px;cursor:pointer;text-align:center;
-  display:flex;flex-direction:column;align-items:center;gap:5px;
-  font-size:.85rem;font-weight:650;color:var(--text-2);transition:all .2s var(--ease); }
-.tipo-opt .tipo-icon { font-size:1.3rem;line-height:1; }
+  border-radius:10px;padding:12px 8px;cursor:pointer;text-align:center;
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  font-size:.78rem;font-weight:650;color:var(--text-2);transition:all .2s var(--ease); }
+.tipo-opt .tipo-icon { font-size:1.2rem;line-height:1; }
 .tipo-opt:hover { background:rgba(255,255,255,.08);color:var(--text); }
 .tipo-opt.active.despesa { background:rgba(248,113,113,.14);border-color:rgba(248,113,113,.45);color:#fecaca; }
 .tipo-opt.active.receita { background:rgba(52,211,153,.14);border-color:rgba(52,211,153,.45);color:#a7f3d0; }
+.tipo-opt.active.credito { background:rgba(167,139,250,.16);border-color:rgba(167,139,250,.45);color:#ddd6fe; }
 .modal-inp.cat-select { appearance:none;-webkit-appearance:none;cursor:pointer;
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='rgba(255,255,255,.5)' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat:no-repeat;background-position:right 14px center;padding-right:36px; }
@@ -487,7 +493,6 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
         <div id="dot" class="connecting"></div>
         <span id="status-text">Conectando…</span>
       </div>
-      <button class="hbtn hbtn-primary" id="open-launch-btn" type="button" onclick="openLaunchModal()">+ Lançar</button>
       <button class="hbtn" id="refresh-btn" onclick="sendRefresh()"><span id="ref-icon">↻</span> Atualizar</button>
       <button class="hbtn" onclick="exportCSV()">⬇ Exportar</button>
       <div class="user-menu" id="user-menu">
@@ -517,6 +522,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
   <div class="dashboard-tabs">
     <button class="main-tab active" data-view="overview" onclick="setMainView('overview')">Visão geral</button>
     <button class="main-tab" data-view="investments" onclick="setMainView('investments')">Investimentos</button>
+    <button class="main-tab tab-launch" id="open-launch-btn" type="button" onclick="openLaunchModal()">+ Lançar</button>
   </div>
 
   <div id="overview-view" class="dash-view active">
@@ -768,11 +774,22 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
         <span class="tipo-icon">💰</span>
         <span>Receita</span>
       </button>
+      <button type="button" class="tipo-opt credito" data-tipo="credito" onclick="setLaunchTipo('credito')" role="radio" aria-checked="false">
+        <span class="tipo-icon">💳</span>
+        <span>Crédito</span>
+      </button>
     </div>
 
     <div class="modal-row">
       <label class="modal-label" for="launch-valor">Valor (R$)</label>
       <input class="modal-inp" id="launch-valor" type="number" placeholder="0,00" min="0.01" step="0.01" inputmode="decimal" />
+    </div>
+
+    <div class="modal-row" id="launch-card-row" style="display:none">
+      <label class="modal-label" for="launch-card">Cartão</label>
+      <select class="modal-inp cat-select" id="launch-card">
+        <option value="">— Selecione um cartão —</option>
+      </select>
     </div>
 
     <div class="modal-row">
@@ -1984,7 +2001,8 @@ function renderLaunches() {
     criar_caixinha: "criar caixinha",
     create_investment: "criar invest.",
     delete_pocket: "remover caixinha",
-	    delete_investment: "remover invest."
+	    delete_investment: "remover invest.",
+    credito: "crédito"
 	  };
 
 		  card.innerHTML =
@@ -2071,20 +2089,49 @@ const LAUNCH_CATEGORIES = {
     "lazer","assinaturas","compras online","pets","beleza","outros",
   ],
   receita: ["salário","freela","reembolso","rendimentos","outros"],
+  credito: [
+    "alimentação","transporte","moradia","saúde","educação",
+    "lazer","assinaturas","compras online","pets","beleza","outros",
+  ],
 };
 
 let launchTipo = "despesa";
 let launchSubmitting = false;
 
 function setLaunchTipo(tipo) {
-  if (tipo !== "receita" && tipo !== "despesa") return;
+  if (!["receita","despesa","credito"].includes(tipo)) return;
   launchTipo = tipo;
   document.querySelectorAll(".tipo-opt").forEach(el => {
     const isActive = el.dataset.tipo === tipo;
     el.classList.toggle("active", isActive);
     el.setAttribute("aria-checked", String(isActive));
   });
+  // Mostra/esconde linha do cartão e popula opções específicas do tipo
+  const cardRow = document.getElementById("launch-card-row");
+  if (tipo === "credito") {
+    cardRow.style.display = "";
+    populateLaunchCards();
+  } else {
+    cardRow.style.display = "none";
+  }
   populateLaunchCategories();
+}
+
+function populateLaunchCards() {
+  const sel = document.getElementById("launch-card");
+  const previous = sel.value;
+  const cards = (lastData && lastData.credit_cards) || [];
+  if (cards.length === 0) {
+    sel.innerHTML = '<option value="">— Nenhum cartão cadastrado —</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">— Selecione um cartão —</option>' +
+    cards.map(c => `<option value="${c.id}">${c.name}</option>`).join("");
+  if (previous && [...sel.options].some(o => o.value === previous)) {
+    sel.value = previous;
+  } else if (cards.length === 1) {
+    sel.value = String(cards[0].id);
+  }
 }
 
 function populateLaunchCategories() {
@@ -2105,6 +2152,7 @@ function openLaunchModal(opts) {
   document.getElementById("launch-alvo").value = opts.alvo || "";
   document.getElementById("launch-nota").value = opts.nota || "";
   document.getElementById("launch-categoria").value = opts.categoria || "";
+  if (opts.card_id) document.getElementById("launch-card").value = String(opts.card_id);
   hideLaunchError();
   document.getElementById("launch-overlay").classList.add("open");
   setTimeout(() => document.getElementById("launch-valor").focus(), 50);
@@ -2147,6 +2195,15 @@ async function submitLaunch() {
   const nota = document.getElementById("launch-nota").value.trim();
   const categoria = document.getElementById("launch-categoria").value;
 
+  let cardId = null;
+  if (launchTipo === "credito") {
+    cardId = document.getElementById("launch-card").value;
+    if (!cardId) {
+      showLaunchError("Selecione um cartão para registrar a compra no crédito.");
+      return;
+    }
+  }
+
   const btn = document.getElementById("launch-submit-btn");
   launchSubmitting = true;
   btn.disabled = true;
@@ -2164,14 +2221,18 @@ async function submitLaunch() {
         alvo: alvo || null,
         nota: nota || null,
         categoria: categoria || null,
+        card_id: cardId ? Number(cardId) : null,
       }),
     });
     const data = await readResponsePayload(res);
     if (!res.ok) throw new Error(data.detail || "Erro ao registrar lançamento.");
 
     closeLaunchModal();
-    const tipoLabel = launchTipo === "receita" ? "Receita" : "Despesa";
-    showLaunchSuccessToast(`✓ ${tipoLabel} registrada — #${data.launch_id}`);
+    const tipoLabel = launchTipo === "receita" ? "Receita"
+                    : launchTipo === "credito" ? "Compra no crédito"
+                    : "Despesa";
+    const idLabel = data.launch_id ? `#${data.launch_id}` : "";
+    showLaunchSuccessToast(`✓ ${tipoLabel} registrada${idLabel ? " — " + idLabel : ""}`);
     sendRefresh();
   } catch (err) {
     showLaunchError(err.message || "Erro ao registrar lançamento.");
