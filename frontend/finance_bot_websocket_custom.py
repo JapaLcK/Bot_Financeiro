@@ -436,10 +436,12 @@ async def get_financial_data(
                 credit_union_params = [user_id, month_start, month_end]
 
             # Total launches for the requested month after filters (excluindo ações administrativas)
+            # Importante: as duas pernas do UNION ALL precisam ter o mesmo shape, então
+            # selecionamos exatamente as mesmas 7 colunas em cada uma.
             await cur.execute(
                 f"""
                 SELECT COUNT(*) AS total FROM (
-                    SELECT 1
+                    SELECT tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
                     FROM launches
                     WHERE user_id = %s
                       AND criado_em >= %s AND criado_em < %s
