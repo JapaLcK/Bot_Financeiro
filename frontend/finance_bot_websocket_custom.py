@@ -2084,6 +2084,90 @@ async def monthly_history(request: Request, user_id: int, months: int = 6):
     data = await get_monthly_history(user_id, months)
     return {"data": data}
 
+class LaunchCreatePayload(BaseModel):
+    tipo: str  # 'receita' | 'despesa'
+    valor: float
+    alvo: str | None = None
+    nota: str | None = None
+    categoria: str | None = None
+
+
+@app.post("/launches/{user_id}")
+async def create_launch_route(request: Request, user_id: int, payload: LaunchCreatePayload):
+    """Cria um lançamento manual (mesma rota usada pelo bot do WhatsApp).
+
+    O lançamento aparece em todos os comandos do bot (`lancamentos`, `saldo`,
+    `gastos hoje`, etc.) e no histórico do dashboard.
+    """
+    _authorize_dashboard_access(request, user_id)
+
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import add_launch_and_update_balance
+    from core.services.category_service import infer_category, learn_from_inference
+    from utils_text import is_internal_category, canonicalize_category_label
+
+    tipo = (payload.tipo or "").strip().lower()
+    if tipo not in ("receita", "despesa"):
+        raise HTTPException(status_code=400, detail="tipo deve ser 'receita' ou 'despesa'.")
+
+    try:
+        valor = float(payload.valor)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Valor inválido.")
+    if valor <= 0:
+        raise HTTPException(status_code=400, detail="O valor deve ser maior que zero.")
+
+    alvo = (payload.alvo or "").strip() or None
+    nota_in = (payload.nota or "").strip() or None
+    nota = nota_in or alvo or ("receita registrada pelo dashboard" if tipo == "receita" else "despesa registrada pelo dashboard")
+
+    # Resolve categoria — explícita do form ou inferência (mesmo fluxo do bot).
+    explicit = (payload.categoria or "").strip() or None
+    inferred = await asyncio.to_thread(
+        infer_category, int(user_id), nota, explicit
+    )
+    categoria = canonicalize_category_label(inferred.category) or "outros"
+    is_internal = is_internal_category(categoria)
+
+    try:
+        launch_id, new_balance = await asyncio.to_thread(
+            add_launch_and_update_balance,
+            int(user_id),
+            tipo,
+            valor,
+            alvo,
+            nota,
+            categoria,
+            None,  # criado_em → now()
+            is_internal,
+        )
+        await asyncio.to_thread(
+            learn_from_inference,
+            int(user_id),
+            nota,
+            categoria,
+            target_hint=alvo,
+            reason=inferred.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Erro ao registrar lançamento: {exc}") from exc
+
+    return {
+        "ok": True,
+        "launch_id": int(launch_id),
+        "tipo": tipo,
+        "valor": float(valor),
+        "categoria": categoria,
+        "alvo": alvo,
+        "nota": nota,
+        "new_balance": float(new_balance),
+        "is_internal_movement": is_internal,
+    }
+
+
 @app.get("/export/{user_id}")
 async def export_csv(request: Request, user_id: int, year: int = None, month: int = None):
     _authorize_dashboard_access(request, user_id)

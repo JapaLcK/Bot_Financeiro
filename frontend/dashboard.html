@@ -87,6 +87,9 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   transition:all .2s var(--ease);display:flex;align-items:center;gap:5px;white-space:nowrap; }
 .hbtn:hover  { background:rgba(255,255,255,.14);color:var(--text);border-color:rgba(255,255,255,.24); }
 .hbtn:active { transform:scale(.96); }
+.hbtn-primary { background:linear-gradient(135deg,#7c3aed,#3b82f6);color:#fff;border-color:transparent;font-weight:650;
+  box-shadow:0 4px 14px rgba(124,58,237,.35); }
+.hbtn-primary:hover { background:linear-gradient(135deg,#7c3aed,#3b82f6);color:#fff;border-color:transparent;transform:translateY(-1px);box-shadow:0 6px 18px rgba(124,58,237,.5); }
 .user-menu { position:relative; }
 .user-menu-btn {
   max-width:220px;
@@ -414,6 +417,34 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .btn-save { background:linear-gradient(135deg,#7c3aed,#3b82f6);border:none;color:#fff;
   padding:8px 20px;border-radius:9px;cursor:pointer;font-size:.82rem;font-weight:600;transition:opacity .2s; }
 .btn-save:hover { opacity:.85; }
+.btn-save:disabled { opacity:.5;cursor:not-allowed; }
+.modal-label { font-size:.7rem;color:var(--text-3);font-weight:650;letter-spacing:.06em;
+  text-transform:uppercase;margin-bottom:6px;display:block; }
+.modal-row { margin-bottom:14px; }
+.tipo-toggle { display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px; }
+.tipo-opt { background:rgba(255,255,255,.05);border:1px solid var(--glass-border);
+  border-radius:10px;padding:14px 12px;cursor:pointer;text-align:center;
+  display:flex;flex-direction:column;align-items:center;gap:5px;
+  font-size:.85rem;font-weight:650;color:var(--text-2);transition:all .2s var(--ease); }
+.tipo-opt .tipo-icon { font-size:1.3rem;line-height:1; }
+.tipo-opt:hover { background:rgba(255,255,255,.08);color:var(--text); }
+.tipo-opt.active.despesa { background:rgba(248,113,113,.14);border-color:rgba(248,113,113,.45);color:#fecaca; }
+.tipo-opt.active.receita { background:rgba(52,211,153,.14);border-color:rgba(52,211,153,.45);color:#a7f3d0; }
+.modal-inp.cat-select { appearance:none;-webkit-appearance:none;cursor:pointer;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='rgba(255,255,255,.5)' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat:no-repeat;background-position:right 14px center;padding-right:36px; }
+textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
+.modal-error { background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.28);
+  color:#fecaca;border-radius:9px;padding:8px 12px;font-size:.78rem;margin-bottom:12px;display:none; }
+.modal-error.show { display:block; }
+.modal-success-toast {
+  position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);
+  background:linear-gradient(135deg,#059669,#34d399);color:#fff;padding:11px 20px;
+  border-radius:12px;font-size:.85rem;font-weight:650;letter-spacing:-.01em;
+  box-shadow:0 12px 32px rgba(0,0,0,.4);z-index:900;opacity:0;pointer-events:none;
+  transition:all .35s var(--ease);
+}
+.modal-success-toast.show { opacity:1;transform:translateX(-50%) translateY(0); }
 .detail-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0; }
 .detail-cell { background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:10px; }
 .detail-k { font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px; }
@@ -456,6 +487,7 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
         <div id="dot" class="connecting"></div>
         <span id="status-text">Conectando…</span>
       </div>
+      <button class="hbtn hbtn-primary" id="open-launch-btn" type="button" onclick="openLaunchModal()">+ Lançar</button>
       <button class="hbtn" id="refresh-btn" onclick="sendRefresh()"><span id="ref-icon">↻</span> Atualizar</button>
       <button class="hbtn" onclick="exportCSV()">⬇ Exportar</button>
       <div class="user-menu" id="user-menu">
@@ -721,6 +753,55 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
     </div>
   </div>
 </div>
+
+<div class="overlay" id="launch-overlay">
+  <div class="modal">
+    <h3>Novo lançamento</h3>
+    <p class="msub">Registre uma receita ou despesa. Vai aparecer aqui e no histórico do bot.</p>
+
+    <div class="tipo-toggle" role="radiogroup" aria-label="Tipo de lançamento">
+      <button type="button" class="tipo-opt despesa active" data-tipo="despesa" onclick="setLaunchTipo('despesa')" role="radio" aria-checked="true">
+        <span class="tipo-icon">💸</span>
+        <span>Despesa</span>
+      </button>
+      <button type="button" class="tipo-opt receita" data-tipo="receita" onclick="setLaunchTipo('receita')" role="radio" aria-checked="false">
+        <span class="tipo-icon">💰</span>
+        <span>Receita</span>
+      </button>
+    </div>
+
+    <div class="modal-row">
+      <label class="modal-label" for="launch-valor">Valor (R$)</label>
+      <input class="modal-inp" id="launch-valor" type="number" placeholder="0,00" min="0.01" step="0.01" inputmode="decimal" />
+    </div>
+
+    <div class="modal-row">
+      <label class="modal-label" for="launch-categoria">Categoria</label>
+      <select class="modal-inp cat-select" id="launch-categoria">
+        <option value="">— Detectar automaticamente —</option>
+      </select>
+    </div>
+
+    <div class="modal-row">
+      <label class="modal-label" for="launch-alvo">Descrição</label>
+      <input class="modal-inp" id="launch-alvo" type="text" placeholder="Ex: Mercado, Salário, Uber..." maxlength="80" />
+    </div>
+
+    <div class="modal-row" style="margin-bottom:18px">
+      <label class="modal-label" for="launch-nota">Observação (opcional)</label>
+      <textarea class="modal-inp" id="launch-nota" placeholder="Detalhe adicional, se quiser" maxlength="200"></textarea>
+    </div>
+
+    <div class="modal-error" id="launch-error"></div>
+
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closeLaunchModal()">Cancelar</button>
+      <button class="btn-save" type="button" id="launch-submit-btn" onclick="submitLaunch()">Registrar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-success-toast" id="launch-success-toast"></div>
 
 <div class="overlay" id="investment-detail-overlay">
   <div class="modal wide">
@@ -1977,8 +2058,151 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     closeInvestmentDetail();
     closeInvestmentHelp();
+    closeLaunchModal();
   }
 });
+
+/* ═══════════════════════════════════════════════════════════════════════
+   LAUNCH MODAL — registra receita/despesa pelo dashboard
+═══════════════════════════════════════════════════════════════════════ */
+const LAUNCH_CATEGORIES = {
+  despesa: [
+    "alimentação","transporte","moradia","saúde","educação",
+    "lazer","assinaturas","compras online","pets","beleza","outros",
+  ],
+  receita: ["salário","freela","reembolso","rendimentos","outros"],
+};
+
+let launchTipo = "despesa";
+let launchSubmitting = false;
+
+function setLaunchTipo(tipo) {
+  if (tipo !== "receita" && tipo !== "despesa") return;
+  launchTipo = tipo;
+  document.querySelectorAll(".tipo-opt").forEach(el => {
+    const isActive = el.dataset.tipo === tipo;
+    el.classList.toggle("active", isActive);
+    el.setAttribute("aria-checked", String(isActive));
+  });
+  populateLaunchCategories();
+}
+
+function populateLaunchCategories() {
+  const sel = document.getElementById("launch-categoria");
+  const previous = sel.value;
+  const list = LAUNCH_CATEGORIES[launchTipo] || ["outros"];
+  sel.innerHTML = '<option value="">— Detectar automaticamente —</option>' +
+    list.map(c => `<option value="${c}">${c}</option>`).join("");
+  if (previous && [...sel.options].some(o => o.value === previous)) {
+    sel.value = previous;
+  }
+}
+
+function openLaunchModal(opts) {
+  opts = opts || {};
+  setLaunchTipo(opts.tipo || "despesa");
+  document.getElementById("launch-valor").value = opts.valor || "";
+  document.getElementById("launch-alvo").value = opts.alvo || "";
+  document.getElementById("launch-nota").value = opts.nota || "";
+  document.getElementById("launch-categoria").value = opts.categoria || "";
+  hideLaunchError();
+  document.getElementById("launch-overlay").classList.add("open");
+  setTimeout(() => document.getElementById("launch-valor").focus(), 50);
+}
+
+function closeLaunchModal() {
+  document.getElementById("launch-overlay").classList.remove("open");
+}
+
+function hideLaunchError() {
+  const el = document.getElementById("launch-error");
+  el.classList.remove("show");
+  el.textContent = "";
+}
+function showLaunchError(msg) {
+  const el = document.getElementById("launch-error");
+  el.textContent = msg;
+  el.classList.add("show");
+}
+
+function showLaunchSuccessToast(msg) {
+  const t = document.getElementById("launch-success-toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 2600);
+}
+
+async function submitLaunch() {
+  if (launchSubmitting) return;
+  hideLaunchError();
+
+  const valorRaw = (document.getElementById("launch-valor").value || "").replace(",", ".");
+  const valor = parseFloat(valorRaw);
+  if (!valor || isNaN(valor) || valor <= 0) {
+    showLaunchError("Informe um valor maior que zero.");
+    return;
+  }
+
+  const alvo = document.getElementById("launch-alvo").value.trim();
+  const nota = document.getElementById("launch-nota").value.trim();
+  const categoria = document.getElementById("launch-categoria").value;
+
+  const btn = document.getElementById("launch-submit-btn");
+  launchSubmitting = true;
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = "Registrando...";
+
+  try {
+    const res = await fetch(`${API}/launches/${USER_ID}`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        tipo: launchTipo,
+        valor,
+        alvo: alvo || null,
+        nota: nota || null,
+        categoria: categoria || null,
+      }),
+    });
+    const data = await readResponsePayload(res);
+    if (!res.ok) throw new Error(data.detail || "Erro ao registrar lançamento.");
+
+    closeLaunchModal();
+    const tipoLabel = launchTipo === "receita" ? "Receita" : "Despesa";
+    showLaunchSuccessToast(`✓ ${tipoLabel} registrada — #${data.launch_id}`);
+    sendRefresh();
+  } catch (err) {
+    showLaunchError(err.message || "Erro ao registrar lançamento.");
+  } finally {
+    launchSubmitting = false;
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+}
+
+document.getElementById("launch-overlay").addEventListener("click", e => {
+  if (e.target === e.currentTarget) closeLaunchModal();
+});
+document.getElementById("launch-valor").addEventListener("keydown", e => {
+  if (e.key === "Enter") submitLaunch();
+});
+
+// Auto-abre quando vem com ?action=launch (atalho da home)
+(function maybeOpenFromQuery() {
+  try {
+    const action = params.get("action");
+    if (action === "launch") {
+      // Aguarda init do dashboard rodar antes de abrir o modal
+      const tipoParam = params.get("tipo");
+      const opts = (tipoParam === "receita" || tipoParam === "despesa") ? { tipo: tipoParam } : {};
+      // Pequeno delay pra garantir que /auth/validate completou
+      setTimeout(() => openLaunchModal(opts), 400);
+    }
+  } catch {}
+})();
+
 
 /* ═══════════════════════════════════════════════════════════════════════
    EXPORT
