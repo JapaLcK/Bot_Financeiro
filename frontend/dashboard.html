@@ -1064,12 +1064,12 @@ async function logoutDashboard() {
     });
   } catch {}
   localStorage.setItem('finbot_logout_at', String(Date.now()));
-  window.location.href = '/';
+  window.location.replace('/?logout=1');
 }
 
 window.addEventListener('storage', (event) => {
   if (event.key === 'finbot_logout_at') {
-    window.location.href = '/';
+    window.location.replace('/?logout=1');
   }
 });
 

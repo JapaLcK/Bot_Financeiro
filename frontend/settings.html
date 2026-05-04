@@ -1465,7 +1465,7 @@ function authHeaders(extra={}) {
 function logoutSettings() {
   localStorage.setItem("finbot_logout_at", String(Date.now()));
   fetch(`${API}/auth/logout`, { method: "POST", credentials: "same-origin", headers: authHeaders() }).finally(() => {
-    window.location.href = "/";
+    window.location.replace("/?logout=1");
   });
 }
 function authOptions(options={}) {
@@ -1479,7 +1479,7 @@ async function validateSettingsSession() {
   return data;
 }
 function redirectHome() {
-  window.location.href = "/";
+  window.location.replace("/?logout=1");
 }
 window.addEventListener("storage", (event) => {
   if (event.key === "finbot_logout_at") redirectHome();

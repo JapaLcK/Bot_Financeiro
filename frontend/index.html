@@ -704,6 +704,18 @@ function goToDashboard(url) {
 
 // ─── Verifica autenticação ao carregar a página ───────────────────────────
 async function checkAuthState() {
+  // Pula o auto-redirect quando o usuário acabou de fazer logout
+  // (evita loop "Sair → landing → /home"). Limpa o param da URL pra
+  // permitir reload limpo depois.
+  if (params.get('logout') === '1') {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('logout');
+      window.history.replaceState({}, '', url.toString());
+    } catch {}
+    return;
+  }
+
   try {
     const resp = PENDING_DASHBOARD_CODE
       ? await fetch(`${API_BASE}/auth/dashboard-link`, {

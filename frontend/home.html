@@ -600,7 +600,8 @@ async function logoutFromHome() {
       headers: csrfHeaders()
     });
   } catch {}
-  window.location.replace("/");
+  try { localStorage.setItem("finbot_logout_at", String(Date.now())); } catch {}
+  window.location.replace("/?logout=1");
 }
 
 async function connectWhatsAppFromHome(event) {
