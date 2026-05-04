@@ -446,10 +446,12 @@ def create_email_verification_impl(
     password: str,
     phone_e164: str,
     minutes_valid: int = 15,
+    display_name: str | None = None,
 ) -> str:
     email = email.strip().lower()
     normalized_phone = normalize_phone_e164(phone_e164)
     phone_candidates = phone_lookup_candidates(normalized_phone)
+    display_name = (display_name or "").strip() or None
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -472,10 +474,10 @@ def create_email_verification_impl(
             )
             cur.execute(
                 """
-                insert into email_verification_codes (email, code, password_hash, phone_e164, expires_at)
-                values (%s, %s, %s, %s, %s)
+                insert into email_verification_codes (email, code, password_hash, phone_e164, display_name, expires_at)
+                values (%s, %s, %s, %s, %s, %s)
                 """,
-                (email, code, password_hash, normalized_phone, expires_at),
+                (email, code, password_hash, normalized_phone, display_name, expires_at),
             )
         conn.commit()
 
@@ -496,7 +498,7 @@ def confirm_email_verification_impl(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select id, password_hash, phone_e164, expires_at, used_at
+                select id, password_hash, phone_e164, display_name, expires_at, used_at
                 from email_verification_codes
                 where email = %s and code = %s
                 order by created_at desc
@@ -515,6 +517,7 @@ def confirm_email_verification_impl(
 
     password_hash = row["password_hash"]
     phone_e164 = normalize_phone_e164(row["phone_e164"])
+    display_name = (row.get("display_name") or "").strip() or None
     verification_id = row["id"]
     user_id = get_or_create_canonical_user("email", email)
 
@@ -522,18 +525,19 @@ def confirm_email_verification_impl(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into auth_accounts (user_id, email, password_hash, phone_e164, phone_status)
-                values (%s, %s, %s, %s, 'pending')
+                insert into auth_accounts (user_id, email, password_hash, phone_e164, display_name, phone_status)
+                values (%s, %s, %s, %s, %s, 'pending')
                 on conflict (email) do update
                 set user_id = excluded.user_id,
                     password_hash = excluded.password_hash,
                     phone_e164 = coalesce(auth_accounts.phone_e164, excluded.phone_e164),
+                    display_name = coalesce(auth_accounts.display_name, excluded.display_name),
                     phone_status = case
                         when auth_accounts.phone_e164 is null and excluded.phone_e164 is not null then 'pending'
                         else auth_accounts.phone_status
                     end
                 """,
-                (user_id, email, password_hash, phone_e164),
+                (user_id, email, password_hash, phone_e164, display_name),
             )
             cur.execute(
                 "update email_verification_codes set used_at = now() where id = %s",

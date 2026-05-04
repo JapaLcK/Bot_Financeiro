@@ -226,7 +226,7 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
 
     # --- saudações ---
     if intent == "greeting":
-        resp = h_greeting.handle_greeting(text)
+        resp = h_greeting.handle_greeting(text, user_id=user_id)
         return resp if resp is not None else "👋 Oi! Como posso te ajudar?"
 
     # --- saldo ---

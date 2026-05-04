@@ -335,7 +335,7 @@ def process_message(message: InboundMessage) -> None:
                     # Só interrompe para onboarding quando a mensagem era uma saudação.
                     # Se o usuário mandou "saldo", "gastei..." etc., segue e executa o comando.
                     try:
-                        send_welcome(reply_to)
+                        send_welcome(reply_to, user_id=uid)
                     except Exception as e:
                         logger.warning("WA send_welcome failed, falling back to text: %s", e)
                         _send_reply(

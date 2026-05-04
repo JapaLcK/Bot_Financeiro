@@ -291,16 +291,36 @@ _ACTION_MAP: dict[str, object] = {
 
 # ── API pública ──────────────────────────────────────────────────────────────
 
-def send_welcome(wa_id: str) -> None:
+def send_welcome(wa_id: str, user_id: int | None = None) -> None:
     """
     Envia a mensagem de boas-vindas interativa com botão para iniciar o tutorial.
     Chamada quando o WhatsApp é vinculado à conta com sucesso.
+    Personaliza o cabeçalho com o primeiro nome do usuário, se disponível.
     """
+    first_name: str | None = None
+    if user_id:
+        try:
+            from db import get_auth_user
+            user = get_auth_user(int(user_id))
+            if user:
+                full = (user.get("display_name") or "").strip()
+                if full:
+                    first_name = full.split()[0]
+        except Exception as exc:
+            logger.debug("send_welcome name lookup failed: %s", exc)
+
+    header = f"🎉 Bem-vindo, {first_name}!" if first_name else "🎉 Bem-vindo ao PigBank AI!"
+    intro = (
+        "Sou o Piggy, seu assistente financeiro pessoal no WhatsApp.\n\n"
+        if first_name
+        else "Sou seu assistente financeiro pessoal no WhatsApp.\n\n"
+    )
+
     send_interactive_buttons(
         to=wa_id,
-        header="🎉 Bem-vindo ao PigBank AI!",
+        header=header,
         body=(
-            "Sou seu assistente financeiro pessoal no WhatsApp.\n\n"
+            f"{intro}"
             "Com apenas uma mensagem de texto, você consegue:\n\n"
             "💰 Registrar gastos e receitas\n"
             "📊 Consultar seu saldo em tempo real\n"

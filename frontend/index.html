@@ -503,6 +503,10 @@ footer a:hover { color: var(--text); }
           <h2>Criar conta</h2>
           <p class="subtitle">Grátis para sempre nos limites do plano Free.</p>
           <div class="field">
+            <label>NOME</label>
+            <input type="text" id="reg-name" placeholder="Como podemos te chamar?" autocomplete="given-name" maxlength="50" />
+          </div>
+          <div class="field">
             <label>E-MAIL</label>
             <input type="email" id="reg-email" placeholder="seu@email.com" autocomplete="email" />
           </div>
@@ -848,15 +852,18 @@ let _pendingPhone = '';
 
 async function doRegister() {
   clearErrors();
+  const name     = document.getElementById('reg-name').value.trim();
   const email    = document.getElementById('reg-email').value.trim();
   const phone    = document.getElementById('reg-phone').value.trim();
   const password = document.getElementById('reg-password').value;
   const confirm  = document.getElementById('reg-confirm').value;
 
-  if (!email)               return showError('reg-error', 'Informe o e-mail.');
-  if (!phone)               return showError('reg-error', 'Informe seu número de WhatsApp.');
-  if (password.length < 6)  return showError('reg-error', 'Senha deve ter pelo menos 6 caracteres.');
-  if (password !== confirm)  return showError('reg-error', 'As senhas não coincidem.');
+  if (!name || name.length < 2) return showError('reg-error', 'Informe seu nome (mínimo 2 caracteres).');
+  if (name.length > 50)         return showError('reg-error', 'O nome deve ter no máximo 50 caracteres.');
+  if (!email)                   return showError('reg-error', 'Informe o e-mail.');
+  if (!phone)                   return showError('reg-error', 'Informe seu número de WhatsApp.');
+  if (password.length < 6)      return showError('reg-error', 'Senha deve ter pelo menos 6 caracteres.');
+  if (password !== confirm)     return showError('reg-error', 'As senhas não coincidem.');
 
   const btn = document.getElementById('btn-register');
   btn.disabled = true;
@@ -867,7 +874,7 @@ async function doRegister() {
       method: 'POST',
       credentials: 'same-origin',
       headers: csrfHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ email, password, phone }),
+      body: JSON.stringify({ email, password, phone, name }),
     });
     const data = await readResponsePayload(res);
     if (!res.ok) return showError('reg-error', data.detail || 'Erro ao enviar código.');

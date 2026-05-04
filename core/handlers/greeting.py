@@ -13,6 +13,44 @@ from utils_text import normalize_text
 
 logger = logging.getLogger(__name__)
 
+
+def _get_display_name(user_id: int | None) -> str | None:
+    """Retorna o nome de exibição do usuário (ou None se indisponível)."""
+    if not user_id:
+        return None
+    try:
+        from db import get_auth_user
+        user = get_auth_user(int(user_id))
+        if not user:
+            return None
+        name = (user.get("display_name") or "").strip()
+        if not name:
+            return None
+        # usa só o primeiro nome para soar natural numa saudação
+        return name.split()[0]
+    except Exception as exc:
+        logger.debug("greeting display name lookup failed: %s", exc)
+        return None
+
+
+def _personalize(message: str, name: str | None) -> str:
+    """Insere o nome após a primeira saudação detectada na mensagem.
+    Tenta ser sutil: 'Bom dia!' -> 'Bom dia, Lucas!'.
+    """
+    if not name:
+        return message
+    import re
+    pattern = re.compile(
+        r"(Bom dia|Boa tarde|Boa noite|Olá|Oi|Alô|Hey|Hello)([!?,.])",
+        re.IGNORECASE,
+    )
+
+    def _sub(m):
+        return f"{m.group(1)}, {name}{m.group(2)}"
+
+    new, n = pattern.subn(_sub, message, count=1)
+    return new if n else message
+
 # ---------------------------------------------------------------------------
 # Fallback local por tipo — usado se a IA falhar
 # ---------------------------------------------------------------------------
@@ -86,7 +124,7 @@ def _fallback_for_type(greeting_type: str) -> str:
     return random.choice(pools.get(greeting_type, _FALLBACK_OI))
 
 
-def _greeting_with_ai(text: str, greeting_type: str) -> str | None:
+def _greeting_with_ai(text: str, greeting_type: str, name: str | None = None) -> str | None:
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:
         return None
@@ -127,9 +165,17 @@ def _greeting_with_ai(text: str, greeting_type: str) -> str | None:
 
         instruction = type_instructions.get(greeting_type, type_instructions["ola"])
 
+        name_clause = (
+            f"O nome do usuário é {name}. Inclua o nome dele logo após a saudação inicial "
+            f"de forma natural (ex: 'Bom dia, {name}!'). Não repita o nome mais de uma vez. "
+            if name
+            else ""
+        )
+
         system_prompt = (
             "Você é o Piggy, um assistente financeiro pessoal brasileiro — simpático, animado e acolhedor. "
             f"{instruction} "
+            f"{name_clause}"
             f"O período do dia atual é: {period}. "
             "Use 1 emoji no início da mensagem. Seja breve: máximo 2-3 linhas. "
             "IMPORTANTE: varie o estilo, vocabulário e estrutura — nunca gere duas respostas iguais. "
@@ -154,16 +200,19 @@ def _greeting_with_ai(text: str, greeting_type: str) -> str | None:
         return None
 
 
-def handle_greeting(text: str) -> str:
+def handle_greeting(text: str, user_id: int | None = None) -> str:
     """
-    Gera uma resposta de saudação via IA.
-    Usa fallback local específico para o tipo de saudação se a IA falhar.
+    Gera uma resposta de saudação via IA, personalizando com o nome do usuário
+    quando disponível. Usa fallback local específico para o tipo de saudação
+    se a IA falhar.
     """
     norm = normalize_text((text or "").strip())
     greeting_type = _detect_greeting_type(norm)
 
-    ai_response = _greeting_with_ai(text, greeting_type)
+    name = _get_display_name(user_id)
+
+    ai_response = _greeting_with_ai(text, greeting_type, name=name)
     if ai_response:
         return ai_response
 
-    return _fallback_for_type(greeting_type)
+    return _personalize(_fallback_for_type(greeting_type), name)

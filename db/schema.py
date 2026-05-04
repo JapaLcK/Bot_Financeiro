@@ -465,6 +465,9 @@ def init_db():
         alter table email_verification_codes add column if not exists phone_e164 text
         """,
         """
+        alter table email_verification_codes add column if not exists display_name text
+        """,
+        """
         create table if not exists password_reset_tokens (
           token text primary key,
           user_id bigint not null references users(id) on delete cascade,

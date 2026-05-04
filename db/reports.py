@@ -137,10 +137,17 @@ def set_stripe_customer(user_id: int, stripe_customer_id: str) -> None:
 # Verificação de email / reset de senha
 # ──────────────────────────────────────────────────────────────────────────────
 
-def create_email_verification(email: str, password: str, phone: str, minutes_valid: int = 15) -> str:
+def create_email_verification(
+    email: str,
+    password: str,
+    phone: str,
+    minutes_valid: int = 15,
+    display_name: str | None = None,
+) -> str:
     phone_e164 = normalize_phone_e164(phone)
     return _db_support.create_email_verification_impl(
-        get_conn, _hash_password, email, password, phone_e164, minutes_valid
+        get_conn, _hash_password, email, password, phone_e164, minutes_valid,
+        display_name=display_name,
     )
 
 

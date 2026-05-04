@@ -1298,6 +1298,7 @@ class RegisterBody(BaseModel):
     email: str
     password: str
     phone: str
+    name: str | None = None
 
 class LoginBody(BaseModel):
     email: str
@@ -1377,13 +1378,22 @@ async def auth_register(request: Request, body: RegisterBody):
     if len(body.password) < 6:
         raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 6 caracteres.")
 
+    name = (body.name or "").strip() or None
+    if name is not None:
+        if len(name) < 2:
+            raise HTTPException(status_code=400, detail="O nome deve ter pelo menos 2 caracteres.")
+        if len(name) > 50:
+            raise HTTPException(status_code=400, detail="O nome deve ter no máximo 50 caracteres.")
+
     try:
         normalize_phone_e164(body.phone)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     try:
-        code = create_email_verification(body.email, body.password, body.phone)
+        code = create_email_verification(
+            body.email, body.password, body.phone, display_name=name,
+        )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
