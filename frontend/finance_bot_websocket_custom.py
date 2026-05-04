@@ -1207,6 +1207,12 @@ def _dashboard_url(path: str = "/app", view: str | None = None) -> str:
     return url
 
 
+def _post_login_url() -> str:
+    """URL para a qual o usuário deve ser direcionado logo após login.
+    O campo `dashboard_url` nas respostas de auth aponta para cá."""
+    return _dashboard_url("/home")
+
+
 def _public_site_url(path: str = "") -> str:
     base_url = DASHBOARD_URL if DASHBOARD_URL.startswith("https://") else "https://pigbankai.com"
     return f"{base_url.rstrip('/')}{path}"
@@ -1338,6 +1344,20 @@ async def auth_validate(request: Request, response: Response):
     return {"user_id": user_id}
 
 
+@app.get("/auth/dashboard-profile")
+async def auth_dashboard_profile(request: Request, response: Response):
+    """Retorna dados mínimos da conta para a UI do dashboard."""
+    user_id = _resolve_dashboard_user_id(request)
+    _raise_if_account_scheduled_for_deletion(int(user_id))
+    auth_user = await asyncio.to_thread(get_auth_user, int(user_id))
+    _no_store(response)
+    return {
+        "user_id": user_id,
+        "email": (auth_user or {}).get("email"),
+        "plan": (auth_user or {}).get("plan"),
+    }
+
+
 @app.post("/auth/register")
 @limiter.limit("3/hour")
 async def auth_register(request: Request, body: RegisterBody):
@@ -1401,7 +1421,7 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
         "email": body.email.strip().lower(),
         "link_code": link_code,
         "whatsapp_link": wa_link,
-        "dashboard_url": _dashboard_url("/app"),
+        "dashboard_url": _post_login_url(),
         "expires_in": 86400,
     }
 
@@ -1450,7 +1470,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         "plan": result["plan"],
         "link_code": link_code,
         "whatsapp_link": wa_link,
-        "dashboard_url": _dashboard_url("/app"),
+        "dashboard_url": _post_login_url(),
         "expires_in": 86400,
     }
 
@@ -1592,7 +1612,7 @@ async def auth_dashboard_token(response: Response, request: Request, user_id: in
     auth_payload = getattr(request.state, "auth_payload", {}) or {}
     return {
         "email": auth_payload.get("email"),
-        "dashboard_url": _dashboard_url("/app"),
+        "dashboard_url": _post_login_url(),
         "expires_in": int(DASHBOARD_SESSION_HOURS * 3600),
     }
 
@@ -1615,7 +1635,7 @@ async def auth_dashboard_link(response: Response, request: Request, body: Dashbo
     auth_payload = getattr(request.state, "auth_payload", {}) or {}
     return {
         "email": auth_payload.get("email"),
-        "dashboard_url": _dashboard_url("/app"),
+        "dashboard_url": _post_login_url(),
         "expires_in": int(DASHBOARD_SESSION_HOURS * 3600),
     }
 
@@ -1842,6 +1862,11 @@ async def serve_dashboard():
     return _html_file(HERE / "dashboard.html")
 
 
+@app.get("/home")
+async def serve_home():
+    return _html_file(HERE / "home.html")
+
+
 @app.get("/settings")
 async def serve_settings():
     return _html_file(HERE / "settings.html")
@@ -1890,6 +1915,7 @@ async def serve_robots_txt():
         "User-agent: *",
         "Allow: /",
         "Disallow: /app",
+        "Disallow: /home",
         "Disallow: /settings",
         "Disallow: /dashboard-login",
         "Disallow: /reset-password",

@@ -350,76 +350,11 @@ footer a:hover { color: var(--text); }
 }
 .privacy-note a:hover { color: var(--text); border-bottom-color: rgba(255,255,255,.36); }
 
-/* ─── Account center ── */
-.account-header {
-  display: flex; align-items: center; gap: 14px;
-  padding-bottom: 22px; margin-bottom: 22px;
-  border-bottom: 1px solid var(--glass-border);
-}
-.account-avatar {
-  width: 48px; height: 48px; border-radius: 14px; flex-shrink: 0;
-  background: linear-gradient(135deg, rgba(124,58,237,.35), rgba(59,130,246,.35));
-  border: 1px solid rgba(124,58,237,.4);
-  display: flex; align-items: center; justify-content: center; font-size: 1.5rem;
-}
-.account-info { flex: 1; min-width: 0; }
-.account-email-text { font-size: .88rem; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.account-plan-badge {
-  display: inline-block; margin-top: 4px;
-  background: rgba(52,211,153,.12); border: 1px solid rgba(52,211,153,.25);
-  color: #34d399; border-radius: 999px; padding: 2px 10px; font-size: .68rem; font-weight: 700; letter-spacing: .06em;
-}
-.account-logout-btn {
-  background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.2);
-  color: var(--red); border-radius: 10px; padding: 7px 14px;
-  font-size: .78rem; font-weight: 600; cursor: pointer; transition: all .2s var(--ease); white-space: nowrap;
-}
-.account-logout-btn:hover { background: rgba(248,113,113,.2); }
-.account-menu { display: flex; flex-direction: column; gap: 10px; }
-.account-menu-item {
-  display: flex; align-items: center; gap: 14px;
-  background: rgba(255,255,255,.045); border: 1px solid var(--glass-border);
-  border-radius: 16px; padding: 16px 18px; cursor: pointer;
-  text-decoration: none; color: var(--text);
-  transition: all .2s var(--ease);
-}
-.account-menu-item:hover { background: rgba(255,255,255,.09); transform: translateX(3px); border-color: rgba(255,255,255,.2); }
-.account-menu-icon {
-  width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
-  background: rgba(255,255,255,.07); border: 1px solid var(--glass-border);
-  display: flex; align-items: center; justify-content: center; font-size: 1.1rem;
-}
-.account-menu-body { flex: 1; }
-.account-menu-title { font-size: .88rem; font-weight: 700; margin-bottom: 3px; }
-.account-menu-sub { font-size: .75rem; color: var(--text-2); }
-.account-menu-arrow { font-size: 1rem; color: var(--text-3); }
-.badge-soon {
-  display: inline-block; margin-left: 6px;
-  background: rgba(167,139,250,.15); border: 1px solid rgba(167,139,250,.3);
-  color: var(--purple); border-radius: 999px; padding: 1px 8px; font-size: .62rem; font-weight: 700; letter-spacing: .05em;
-  vertical-align: middle;
-}
-
-/* ─── Nav logged-in state ── */
-.nav-account-btn {
-  display: flex; align-items: center; gap: 8px;
-  background: rgba(255,255,255,.08); border: 1px solid var(--glass-border);
-  color: var(--text); border-radius: 12px; padding: 7px 16px;
-  font-size: .82rem; font-weight: 600; cursor: pointer;
-  transition: all .2s var(--ease);
-}
-.nav-account-btn:hover { background: rgba(255,255,255,.14); }
-.nav-account-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: #34d399; box-shadow: 0 0 6px rgba(52,211,153,.6);
-}
-
 /* ─── Responsive ── */
 @media (max-width: 600px) {
   .hero { padding: 70px 0 40px; }
   .auth-panel { padding: 28px 22px 24px; border-radius: 22px; }
   h1 { font-size: 2.1rem; }
-  .account-email-text { font-size: .8rem; }
   nav { gap: 12px; flex-wrap: wrap; }
   .nav-links { order: 3; width: 100%; justify-content: center; gap: 12px; flex-wrap: wrap; }
   .nav-links a { font-size: .74rem; }
@@ -464,11 +399,6 @@ footer a:hover { color: var(--text); }
     </div>
     <!-- Estado deslogado -->
     <button class="nav-cta" id="nav-cta-guest" onclick="scrollToAuth()">Começar grátis</button>
-    <!-- Estado logado -->
-    <button class="nav-account-btn" id="nav-cta-user" style="display:none" onclick="scrollToAccount()">
-      <div class="nav-account-dot"></div>
-      <span id="nav-user-label">Minha conta</span>
-    </button>
   </nav>
 
   <!-- Hero -->
@@ -689,74 +619,6 @@ footer a:hover { color: var(--text); }
     </div>
   </div>
 
-  <!-- Account Center (shown when logged in) -->
-  <div id="account-center" style="display:none; scroll-margin-top:80px">
-    <div class="section-label" style="text-align:center;margin-bottom:20px">Minha Conta</div>
-    <div class="auth-section">
-      <div class="auth-panel" style="max-width:480px">
-
-        <!-- Header: avatar + email + logout -->
-        <div class="account-header">
-          <div class="account-avatar">🐷</div>
-          <div class="account-info">
-            <div class="account-email-text" id="account-email-display">carregando...</div>
-            <div class="account-plan-badge">Plano Free</div>
-          </div>
-          <button class="account-logout-btn" onclick="doLogout()">Sair</button>
-        </div>
-
-        <!-- Menu items -->
-        <div class="account-menu">
-
-          <a class="account-menu-item" id="account-dashboard-link" href="#" target="_blank">
-            <div class="account-menu-icon">📊</div>
-            <div class="account-menu-body">
-              <div class="account-menu-title">Dashboard</div>
-              <div class="account-menu-sub">Gráficos, transações e resumos em tempo real</div>
-            </div>
-            <div class="account-menu-arrow">→</div>
-          </a>
-
-          <a class="account-menu-item" id="account-whatsapp-link" href="#" target="_blank">
-            <div class="account-menu-icon">💬</div>
-            <div class="account-menu-body">
-              <div class="account-menu-title">Conectar WhatsApp</div>
-              <div class="account-menu-sub">Sincronize seu número automaticamente com o bot</div>
-            </div>
-            <div class="account-menu-arrow">→</div>
-          </a>
-
-          <a class="account-menu-item" id="account-discord-link" href="https://discord.com/oauth2/authorize?client_id=1468717460407455825&permissions=2147567616&integration_type=0&scope=bot+applications.commands" target="_blank" rel="noopener">
-            <div class="account-menu-icon">🎮</div>
-            <div class="account-menu-body">
-              <div class="account-menu-title">Adicionar ao Discord</div>
-              <div class="account-menu-sub">Adicione o bot ao seu servidor depois do cadastro</div>
-            </div>
-            <div class="account-menu-arrow">→</div>
-          </a>
-
-          <div class="account-menu-item" style="opacity:.55;cursor:default;pointer-events:none">
-            <div class="account-menu-icon">💳</div>
-            <div class="account-menu-body">
-              <div class="account-menu-title">Pagamentos <span class="badge-soon">Em breve</span></div>
-              <div class="account-menu-sub">Gerenciar plano, assinatura e faturas</div>
-            </div>
-          </div>
-
-          <a class="account-menu-item" id="account-settings-link" href="#" target="_blank">
-            <div class="account-menu-icon">⚙️</div>
-            <div class="account-menu-body">
-              <div class="account-menu-title">Configurações</div>
-              <div class="account-menu-sub">Open Finance, preferências e segurança</div>
-            </div>
-            <div class="account-menu-arrow">→</div>
-          </a>
-
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- Footer -->
   <footer>
     <p class="footer-copy">© 2026 PigBank AI · Feito com 🐷</p>
@@ -830,6 +692,12 @@ function settingsUrlFromDashboardUrl(url, view) {
   }
 }
 
+function goToDashboard(url) {
+  // Pós-login agora cai em /home (centro de comando do usuário); /app fica
+  // como fallback caso a URL retornada pela API venha vazia.
+  window.location.replace(sanitizeDashboardUrl(url) || `${DASHBOARD_URL}/home`);
+}
+
 // ─── Verifica autenticação ao carregar a página ───────────────────────────
 async function checkAuthState() {
   try {
@@ -846,64 +714,29 @@ async function checkAuthState() {
           headers: csrfHeaders()
         });
 
-    if (!resp.ok) {
+    if (resp.ok) {
+      const data = await resp.json();
+      goToDashboard(data.dashboard_url);
       return;
     }
 
-    const data = await resp.json();
-    const dashUrl = sanitizeDashboardUrl(data.dashboard_url) || `${DASHBOARD_URL}/app`;
-    applyLoggedInState(data.email || '', dashUrl);
-
-    if (PENDING_DASHBOARD_CODE) {
-      window.location.href = dashUrl;
+    if (!PENDING_DASHBOARD_CODE) {
+      const validateResp = await fetch(`${API_BASE}/auth/validate`, {
+        credentials: 'same-origin'
+      });
+      if (validateResp.ok) goToDashboard(`${DASHBOARD_URL}/home`);
     }
   } catch {}
-}
-
-// ─── Aplica estado logado na UI ────────────────────────────────────────────
-function applyLoggedInState(email, dashUrl) {
-  AUTHENTICATED = true;
-
-  // Navbar
-  document.getElementById('nav-cta-guest').style.display = 'none';
-  const navBtn = document.getElementById('nav-cta-user');
-  navBtn.style.display = 'flex';
-  const shortEmail = email.length > 20 ? email.split('@')[0] : email;
-  document.getElementById('nav-user-label').textContent = shortEmail || 'Minha conta';
-
-  // Botão hero dashboard
-  const heroDash = document.getElementById('hero-dashboard-btn');
-  heroDash.href = dashUrl;
-  heroDash.removeAttribute('onclick');
-
-  // Account center
-  document.getElementById('account-email-display').textContent = email || 'Minha conta';
-  document.getElementById('account-dashboard-link').href = dashUrl;
-  document.getElementById('account-settings-link').href = settingsUrlFromDashboardUrl(dashUrl, 'security');
-  document.getElementById('account-whatsapp-link').onclick = connectWhatsApp;
-  document.getElementById('account-center').style.display = 'block';
-
-  // Oculta o painel de auth (não precisa mais)
-  const authSection = document.getElementById('auth');
-  if (authSection) authSection.style.display = 'none';
 }
 
 function applyLoggedOutState() {
   AUTHENTICATED = false;
 
   document.getElementById('nav-cta-guest').style.display = '';
-  document.getElementById('nav-cta-user').style.display = 'none';
-  document.getElementById('nav-user-label').textContent = 'Minha conta';
 
   const heroDash = document.getElementById('hero-dashboard-btn');
   heroDash.href = '/app';
   heroDash.setAttribute('onclick', 'handleDashboardClick(event)');
-
-  document.getElementById('account-center').style.display = 'none';
-  document.getElementById('account-email-display').textContent = 'carregando...';
-  document.getElementById('account-dashboard-link').href = '#';
-  document.getElementById('account-settings-link').href = '#';
-  document.getElementById('account-whatsapp-link').removeAttribute('onclick');
 
   const authSection = document.getElementById('auth');
   if (authSection) authSection.style.display = '';
@@ -914,17 +747,13 @@ function applyLoggedOutState() {
   switchTab('login');
 }
 
-function scrollToAccount() {
-  document.getElementById('account-center').scrollIntoView({ behavior: 'smooth' });
-}
-
 function handleDashboardClick(e) {
   if (!AUTHENTICATED) {
     // Não logado: rola para auth
     e.preventDefault();
     scrollToAuth();
   }
-  // Se logado: o href já foi atualizado pelo applyLoggedInState, navega normalmente
+  // Se logado, a landing redireciona para o dashboard na inicialização.
 }
 
 async function doLogout() {
@@ -1149,7 +978,7 @@ async function doLogin() {
       if (!linkRes.ok) {
         return showError('login-error', linkData.detail || 'Nao foi possivel abrir este dashboard.');
       }
-      window.location.href = sanitizeDashboardUrl(linkData.dashboard_url) || `${DASHBOARD_URL}/app`;
+      goToDashboard(linkData.dashboard_url);
       return;
     }
 
@@ -1180,13 +1009,11 @@ function showSuccess(data, title, desc) {
     waBtn.style.display = 'none';
   }
 
-  const dashUrl = sanitizeDashboardUrl(data.dashboard_url) || `${DASHBOARD_URL}/app`;
+  const dashUrl = sanitizeDashboardUrl(data.dashboard_url) || `${DASHBOARD_URL}/home`;
   const dashBtn = document.getElementById('dashboard-btn');
   dashBtn.href = dashUrl;
 
-  applyLoggedInState(data.email || '', dashUrl);
-
-  document.getElementById('success-state').classList.add('show');
+  goToDashboard(dashUrl);
 }
 
 // ─── Inicialização ────────────────────────────────────────────────────────

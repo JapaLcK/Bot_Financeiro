@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PigBank · Início</title>
+<link rel="icon" type="image/png" href="/favicon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#070b14" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --glass-bg:      rgba(255,255,255,0.07);
+  --glass-border:  rgba(255,255,255,0.13);
+  --glass-shadow:  0 8px 32px rgba(0,0,0,0.35);
+  --radius:        22px;
+  --green:  #34d399; --red:    #f87171; --blue:   #60a5fa;
+  --purple: #a78bfa; --yellow: #fbbf24; --pink: #ec4899;
+  --text:   rgba(255,255,255,0.92);
+  --text-2: rgba(255,255,255,0.62);
+  --text-3: rgba(255,255,255,0.32);
+  --div:    rgba(255,255,255,0.08);
+  --ease:   cubic-bezier(.4,0,.2,1);
+}
+
+html { scroll-behavior: smooth; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  background: #070b14; color: var(--text);
+  min-height: 100vh; overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.orb { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .42; animation: drift 18s ease-in-out infinite alternate; }
+.orb-1 { width:620px;height:620px;background:radial-gradient(circle,#6d28d9,transparent 70%);top:-200px;left:-180px; }
+.orb-2 { width:500px;height:500px;background:radial-gradient(circle,#0ea5e9,transparent 70%);top:20%;right:-180px;animation-delay:-6s; }
+.orb-3 { width:420px;height:420px;background:radial-gradient(circle,#ec4899,transparent 70%);bottom:-150px;left:25%;animation-delay:-12s;opacity:.25; }
+.orb-4 { width:350px;height:350px;background:radial-gradient(circle,#10b981,transparent 70%);bottom:10%;right:10%;animation-delay:-4s;opacity:.2; }
+@keyframes drift { 0%{transform:translate(0,0) scale(1)} 33%{transform:translate(40px,-30px) scale(1.05)} 66%{transform:translate(-20px,50px) scale(.97)} 100%{transform:translate(30px,20px) scale(1.03)} }
+
+body::before {
+  content:""; position:fixed; inset:0; z-index:1; pointer-events:none;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E"); opacity:.6;
+}
+
+.page { position:relative; z-index:2; max-width:1200px; margin:0 auto; padding:24px 20px 64px; }
+
+/* Header */
+header {
+  position:relative; z-index:50;
+  display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;
+  margin-bottom:28px; background:rgba(255,255,255,0.055);
+  backdrop-filter:blur(28px) saturate(170%); -webkit-backdrop-filter:blur(28px) saturate(170%);
+  border:1px solid var(--glass-border); border-radius:18px; padding:13px 20px;
+  box-shadow:0 4px 24px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.12);
+}
+.header-left { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.logo {
+  width:36px;height:36px;border-radius:10px;
+  background:linear-gradient(135deg,#7c3aed,#3b82f6);
+  display:flex;align-items:center;justify-content:center;font-size:1rem;
+  box-shadow:0 4px 12px rgba(124,58,237,.4);
+}
+header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
+
+.nav-links { display:flex; gap:4px; margin-left:8px; flex-wrap:wrap; }
+.nav-link {
+  padding:6px 12px; border-radius:8px; font-size:.78rem; font-weight:600;
+  color:var(--text-2); text-decoration:none; transition:all .2s var(--ease);
+}
+.nav-link:hover { background:rgba(255,255,255,.07); color:var(--text); }
+.nav-link.active { background:rgba(255,255,255,.1); color:var(--text); }
+
+.header-right { display:flex; align-items:center; gap:10px; }
+
+.user-menu { position:relative; }
+.user-menu-btn {
+  display:flex; align-items:center; gap:10px;
+  background:rgba(255,255,255,.07); border:1px solid var(--glass-border);
+  color:var(--text); padding:7px 14px; border-radius:10px;
+  font-size:.8rem; font-weight:650; cursor:pointer;
+  transition:all .2s var(--ease); min-width:170px; justify-content:space-between;
+}
+.user-menu-btn:hover { background:rgba(255,255,255,.14); }
+.user-menu-main { display:flex; align-items:center; gap:8px; min-width:0; }
+.user-dot {
+  width:8px;height:8px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 0 2px rgba(52,211,153,.18),0 0 8px rgba(52,211,153,.36); flex-shrink:0;
+}
+.user-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.user-caret { color:var(--text-2); font-size:.7rem; }
+
+.user-dropdown {
+  position:absolute; top:calc(100% + 8px); right:0; width:280px;
+  display:none; padding:8px;
+  background:rgba(20,24,36,.96);
+  backdrop-filter:blur(24px) saturate(170%); -webkit-backdrop-filter:blur(24px) saturate(170%);
+  border:1px solid var(--glass-border); border-radius:14px;
+  box-shadow:0 18px 48px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.08);
+  z-index:40;
+}
+.user-dropdown.open { display:block; animation:dropIn .18s var(--ease); }
+@keyframes dropIn { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
+
+.user-dropdown-head { padding:10px 12px 12px; border-bottom:1px solid var(--div); margin-bottom:6px; }
+.user-email-line {
+  font-size:.8rem; font-weight:700;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.user-plan {
+  display:inline-block; margin-top:6px; padding:2px 8px;
+  background:rgba(52,211,153,.15); color:var(--green); border-radius:6px;
+  font-size:.65rem; font-weight:700; letter-spacing:.04em;
+}
+.dd-link {
+  display:flex; align-items:center; gap:10px;
+  padding:9px 12px; border-radius:10px; font-size:.82rem; font-weight:600;
+  color:var(--text-2); text-decoration:none; cursor:pointer;
+  border:0; background:transparent; width:100%; text-align:left;
+  transition:all .15s var(--ease);
+}
+.dd-link:hover { background:rgba(255,255,255,.08); color:var(--text); }
+.dd-link.danger { color:#fecaca; }
+.dd-link.danger:hover { background:rgba(248,113,113,.15); color:#fff1f2; }
+.dd-icon { width:18px; text-align:center; }
+
+/* Section title */
+.section-title {
+  font-size:.66rem; font-weight:700; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--text-3); margin:28px 4px 10px;
+}
+
+/* Greeting */
+.greeting-card {
+  background:linear-gradient(135deg, rgba(124,58,237,.18), rgba(59,130,246,.12));
+  border:1px solid rgba(167,139,250,.28); border-radius:var(--radius);
+  padding:24px 28px; margin-bottom:8px;
+  display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
+  animation:fadeIn .4s var(--ease) both;
+}
+.greeting-text h2 { font-size:1.6rem; font-weight:700; letter-spacing:-.02em; }
+.greeting-text p { color:var(--text-2); font-size:.88rem; margin-top:6px; line-height:1.5; }
+.greeting-text .live-dot { color:var(--green); }
+@keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+
+/* Stats grid */
+.stats-grid { display:grid; gap:14px; grid-template-columns:repeat(4,1fr); }
+@media(max-width:980px) { .stats-grid{grid-template-columns:repeat(2,1fr)} }
+@media(max-width:560px) { .stats-grid{grid-template-columns:1fr} }
+
+.stat-card {
+  background:var(--glass-bg);
+  backdrop-filter:blur(24px) saturate(160%); -webkit-backdrop-filter:blur(24px) saturate(160%);
+  border:1px solid var(--glass-border); border-radius:var(--radius); padding:20px;
+  box-shadow:var(--glass-shadow), inset 0 1px 0 rgba(255,255,255,.1);
+  transition:all .25s var(--ease); cursor:pointer; position:relative; overflow:hidden;
+  text-decoration:none; color:inherit; display:block;
+  animation:fadeIn .4s var(--ease) both;
+}
+.stat-card::before { content:""; position:absolute; top:0; left:0; right:0; height:1px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.18),transparent); }
+.stat-card:hover {
+  transform:translateY(-2px);
+  box-shadow:0 14px 40px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.12);
+  border-color:rgba(255,255,255,.22);
+}
+.stat-head {
+  display:flex; align-items:center; gap:8px;
+  font-size:.66rem; font-weight:700; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--text-3); margin-bottom:14px;
+}
+.stat-icon {
+  width:26px; height:26px; border-radius:8px;
+  display:inline-flex; align-items:center; justify-content:center; font-size:.78rem;
+}
+.stat-icon.green  { background:rgba(52,211,153,.16); color:var(--green); }
+.stat-icon.red    { background:rgba(248,113,113,.16); color:var(--red); }
+.stat-icon.blue   { background:rgba(96,165,250,.16); color:var(--blue); }
+.stat-icon.purple { background:rgba(167,139,250,.16); color:var(--purple); }
+.bignum { font-size:1.95rem; font-weight:740; letter-spacing:-.04em; line-height:1; margin-bottom:6px; font-variant-numeric:tabular-nums; }
+.bignum-sub { font-size:.78rem; color:var(--text-2); }
+.delta { font-size:.78rem; font-weight:700; }
+.delta.up   { color:var(--red); }
+.delta.down { color:var(--green); }
+
+/* Alert */
+.alert-banner {
+  margin-top:18px;
+  background:rgba(251,191,36,.08);
+  border:1px solid rgba(251,191,36,.28);
+  border-radius:14px; padding:16px 20px;
+  display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
+  animation:fadeIn .4s var(--ease) both;
+}
+.alert-banner.danger { background:rgba(248,113,113,.08); border-color:rgba(248,113,113,.28); }
+.alert-body { display:flex; align-items:center; gap:12px; flex:1; min-width:0; }
+.alert-icon {
+  width:36px; height:36px; border-radius:10px;
+  background:rgba(251,191,36,.18); color:var(--yellow);
+  display:flex; align-items:center; justify-content:center; font-size:1.1rem; flex-shrink:0;
+}
+.alert-banner.danger .alert-icon { background:rgba(248,113,113,.18); color:var(--red); }
+.alert-text { font-size:.86rem; line-height:1.4; }
+.alert-text strong { color:#fde68a; }
+.alert-banner.danger .alert-text strong { color:#fecaca; }
+.alert-actions { display:flex; gap:8px; flex-shrink:0; flex-wrap:wrap; }
+
+.btn-pill {
+  padding:8px 16px; border-radius:10px;
+  font-size:.78rem; font-weight:650; cursor:pointer;
+  border:1px solid var(--glass-border); transition:all .2s var(--ease);
+  white-space:nowrap; text-decoration:none; display:inline-flex; align-items:center; justify-content:center;
+}
+.btn-pill.primary {
+  background:linear-gradient(135deg,#7c3aed,#3b82f6); color:#fff; border-color:transparent;
+  box-shadow:0 4px 16px rgba(124,58,237,.4);
+}
+.btn-pill.primary:hover { transform:translateY(-1px); box-shadow:0 6px 20px rgba(124,58,237,.5); }
+.btn-pill.ghost { background:transparent; color:var(--text-2); }
+.btn-pill.ghost:hover { background:rgba(255,255,255,.08); color:var(--text); }
+
+/* Quick actions */
+.actions-grid { display:grid; gap:14px; grid-template-columns:repeat(3,1fr); }
+@media(max-width:780px) { .actions-grid{grid-template-columns:1fr} }
+.action-card {
+  background:var(--glass-bg);
+  border:1px solid var(--glass-border); border-radius:var(--radius);
+  padding:22px; cursor:pointer; transition:all .25s var(--ease);
+  display:flex; align-items:center; gap:16px; text-decoration:none; color:inherit;
+  position:relative; overflow:hidden;
+  animation:fadeIn .4s var(--ease) both;
+}
+.action-card:hover { transform:translateY(-2px); border-color:rgba(255,255,255,.24); background:rgba(255,255,255,.1); }
+.action-icon-lg {
+  width:46px; height:46px; border-radius:12px;
+  display:flex; align-items:center; justify-content:center; font-size:1.2rem; flex-shrink:0;
+}
+.action-icon-lg.purple { background:linear-gradient(135deg,rgba(124,58,237,.4),rgba(167,139,250,.2)); }
+.action-icon-lg.green  { background:linear-gradient(135deg,rgba(16,185,129,.4),rgba(52,211,153,.2)); }
+.action-icon-lg.blue   { background:linear-gradient(135deg,rgba(59,130,246,.4),rgba(96,165,250,.2)); }
+.action-body { min-width:0; }
+.action-title { font-size:.95rem; font-weight:700; margin-bottom:3px; }
+.action-sub { font-size:.76rem; color:var(--text-2); }
+.action-arrow { margin-left:auto; color:var(--text-3); transition:all .2s var(--ease); }
+.action-card:hover .action-arrow { color:var(--text); transform:translateX(3px); }
+
+/* Onboarding */
+.onboarding {
+  background:linear-gradient(135deg, rgba(52,211,153,.06), rgba(96,165,250,.06));
+  border:1px solid rgba(52,211,153,.2); border-radius:var(--radius); padding:24px;
+  animation:fadeIn .4s var(--ease) both;
+}
+.ob-head { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px; flex-wrap:wrap; }
+.ob-title { font-size:1.05rem; font-weight:700; }
+.ob-progress { display:flex; align-items:center; gap:10px; font-size:.78rem; color:var(--text-2); }
+.progress-bar { width:140px; height:6px; background:rgba(255,255,255,.08); border-radius:99px; overflow:hidden; }
+.progress-fill { height:100%; background:linear-gradient(90deg,var(--green),var(--blue)); border-radius:99px; transition:width .4s var(--ease); }
+.ob-list { display:flex; flex-direction:column; gap:6px; }
+.ob-item {
+  display:flex; align-items:center; gap:14px;
+  padding:10px 12px; border-radius:10px;
+  transition:background .2s var(--ease);
+}
+.ob-item.todo { cursor:pointer; }
+.ob-item.todo:hover { background:rgba(255,255,255,.04); }
+.ob-check {
+  width:22px; height:22px; border-radius:50%; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; font-size:.78rem; font-weight:700;
+}
+.ob-item.done .ob-check { background:var(--green); color:#0a1f17; }
+.ob-item.todo .ob-check { background:rgba(255,255,255,.08); border:1.5px dashed var(--text-3); }
+.ob-text { flex:1; min-width:0; }
+.ob-text-title { font-size:.86rem; font-weight:600; }
+.ob-item.done .ob-text-title { color:var(--text-2); text-decoration:line-through; }
+.ob-text-hint { font-size:.74rem; color:var(--text-3); margin-top:2px; }
+.ob-text-hint code { background:rgba(255,255,255,.06); padding:1px 6px; border-radius:4px; font-family:"SF Mono",monospace; font-size:.72rem; color:var(--purple); }
+
+/* Activity */
+.activity-card {
+  background:var(--glass-bg);
+  border:1px solid var(--glass-border); border-radius:var(--radius); padding:8px;
+  animation:fadeIn .4s var(--ease) both;
+}
+.activity-row {
+  display:grid; grid-template-columns:90px 1fr auto auto;
+  gap:14px; align-items:center;
+  padding:14px 16px; border-radius:14px;
+  transition:background .2s var(--ease);
+}
+.activity-row:hover { background:rgba(255,255,255,.04); }
+.activity-row + .activity-row { border-top:1px solid var(--div); }
+.activity-time { font-size:.74rem; color:var(--text-3); }
+.activity-desc { display:flex; align-items:center; gap:10px; min-width:0; }
+.activity-tag {
+  width:32px; height:32px; border-radius:9px;
+  display:flex; align-items:center; justify-content:center; font-size:.86rem; flex-shrink:0;
+}
+.activity-tag.income { background:rgba(52,211,153,.15); color:var(--green); }
+.activity-tag.expense { background:rgba(248,113,113,.15); color:var(--red); }
+.activity-tag.credit { background:rgba(167,139,250,.15); color:var(--purple); }
+.activity-name { font-size:.86rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.activity-cat { font-size:.72rem; color:var(--text-3); margin-top:2px; }
+.activity-amount { font-size:.92rem; font-weight:700; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.activity-amount.income { color:var(--green); }
+.activity-amount.expense { color:var(--red); }
+.see-all-link {
+  display:block; padding:14px; text-align:center; text-decoration:none;
+  color:var(--text-2); font-size:.78rem; font-weight:650;
+  border-top:1px solid var(--div); margin-top:6px;
+  transition:color .2s var(--ease);
+}
+.see-all-link:hover { color:var(--text); }
+
+@media(max-width:660px) {
+  .activity-row { grid-template-columns:1fr auto; gap:8px; }
+  .activity-time { display:none; }
+}
+
+/* Skeleton */
+.sk { border-radius:6px; background:linear-gradient(90deg,rgba(255,255,255,.06) 25%,rgba(255,255,255,.11) 50%,rgba(255,255,255,.06) 75%);
+  background-size:200% 100%; animation:shimmer 1.4s infinite; display:inline-block; }
+@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+/* Footer */
+footer {
+  margin-top:48px; padding:24px 0; text-align:center;
+  font-size:.75rem; color:var(--text-3);
+  border-top:1px solid var(--div);
+}
+footer a { color:var(--text-2); text-decoration:none; margin:0 10px; }
+footer a:hover { color:var(--text); }
+
+/* Access error */
+.access-error {
+  text-align:center; padding:60px 20px;
+}
+.access-error h2 { font-size:1.4rem; margin-bottom:12px; }
+.access-error p { color:var(--text-2); margin-bottom:20px; }
+
+@media(max-width:600px) {
+  .page { padding:14px 12px 48px; }
+  header { flex-direction:column; align-items:flex-start; }
+  .user-menu, .user-menu-btn { width:100%; max-width:none; }
+  .user-dropdown { left:0; right:auto; width:min(100%,300px); }
+  .nav-links { width:100%; }
+}
+</style>
+</head>
+<body>
+
+<div class="bg">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+  <div class="orb orb-4"></div>
+</div>
+
+<div class="page" id="page-root">
+
+  <header>
+    <div class="header-left">
+      <div class="logo">🐷</div>
+      <h1>PigBank AI</h1>
+      <div class="nav-links">
+        <a class="nav-link active" href="/home">Início</a>
+        <a class="nav-link" href="/app">Dashboard</a>
+        <a class="nav-link" href="/settings">Configurações</a>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="user-menu" id="user-menu">
+        <button class="user-menu-btn" id="user-menu-btn" type="button" aria-haspopup="menu" aria-expanded="false">
+          <span class="user-menu-main">
+            <span class="user-dot"></span>
+            <span class="user-label" id="user-label">Minha conta</span>
+          </span>
+          <span class="user-caret">▾</span>
+        </button>
+        <div class="user-dropdown" id="user-dropdown" role="menu">
+          <div class="user-dropdown-head">
+            <div class="user-email-line" id="user-email">carregando...</div>
+            <span class="user-plan" id="user-plan">PLANO FREE</span>
+          </div>
+          <a class="dd-link" href="/app"><span class="dd-icon">📊</span>Dashboard</a>
+          <button class="dd-link" type="button" onclick="connectWhatsAppFromHome(event)"><span class="dd-icon">💬</span>Conectar WhatsApp</button>
+          <a class="dd-link" href="https://discord.com/oauth2/authorize?client_id=1468717460407455825&permissions=2147567616&integration_type=0&scope=bot+applications.commands" target="_blank" rel="noopener"><span class="dd-icon">🎮</span>Adicionar ao Discord</a>
+          <a class="dd-link" href="/settings?view=security"><span class="dd-icon">⚙️</span>Configurações</a>
+          <button class="dd-link danger" type="button" onclick="logoutFromHome()"><span class="dd-icon">↪</span>Sair</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main id="content">
+
+    <div class="greeting-card">
+      <div class="greeting-text">
+        <h2 id="greeting-title"><span class="sk" style="height:32px;width:240px"></span></h2>
+        <p id="greeting-sub"><span class="sk" style="height:14px;width:280px"></span></p>
+      </div>
+      <a class="btn-pill primary" href="/app">+ Lançar agora</a>
+    </div>
+
+    <div class="section-title">Resumo</div>
+    <div class="stats-grid">
+      <a class="stat-card" href="/app">
+        <div class="stat-head"><span class="stat-icon green">💰</span>Saldo</div>
+        <div class="bignum" id="stat-balance"><span class="sk" style="height:30px;width:120px"></span></div>
+        <div class="bignum-sub">Conta corrente</div>
+      </a>
+      <a class="stat-card" href="/app">
+        <div class="stat-head"><span class="stat-icon red">📉</span>Gastos do mês</div>
+        <div class="bignum" id="stat-expense"><span class="sk" style="height:30px;width:120px"></span></div>
+        <div class="bignum-sub" id="stat-expense-delta">vs mês passado</div>
+      </a>
+      <a class="stat-card" href="/app" id="stat-bill-link">
+        <div class="stat-head"><span class="stat-icon purple">🧾</span>Próxima fatura</div>
+        <div class="bignum" id="stat-bill"><span class="sk" style="height:30px;width:120px"></span></div>
+        <div class="bignum-sub" id="stat-bill-sub">—</div>
+      </a>
+      <a class="stat-card" href="/app" id="stat-pockets-link">
+        <div class="stat-head"><span class="stat-icon blue">📦</span>Reservas</div>
+        <div class="bignum" id="stat-pockets"><span class="sk" style="height:30px;width:120px"></span></div>
+        <div class="bignum-sub" id="stat-pockets-sub">—</div>
+      </a>
+    </div>
+
+    <div id="alert-banner-slot"></div>
+
+    <div class="section-title">Ações rápidas</div>
+    <div class="actions-grid">
+      <a class="action-card" href="/app">
+        <div class="action-icon-lg green">➕</div>
+        <div class="action-body">
+          <div class="action-title">Lançar gasto</div>
+          <div class="action-sub">Pelo WhatsApp ou no dashboard</div>
+        </div>
+        <div class="action-arrow">→</div>
+      </a>
+      <a class="action-card" href="/app">
+        <div class="action-icon-lg purple">💳</div>
+        <div class="action-body">
+          <div class="action-title">Pagar fatura</div>
+          <div class="action-sub">Veja faturas em aberto</div>
+        </div>
+        <div class="action-arrow">→</div>
+      </a>
+      <a class="action-card" href="/app">
+        <div class="action-icon-lg blue">📊</div>
+        <div class="action-body">
+          <div class="action-title">Ver dashboard</div>
+          <div class="action-sub">Gráficos e relatórios completos</div>
+        </div>
+        <div class="action-arrow">→</div>
+      </a>
+    </div>
+
+    <div id="onboarding-slot"></div>
+
+    <div class="section-title">Atividade recente</div>
+    <div class="activity-card" id="activity-list">
+      <div style="padding:24px;text-align:center;color:var(--text-3);font-size:.85rem">
+        <span class="sk" style="height:14px;width:200px"></span>
+      </div>
+    </div>
+
+  </main>
+
+  <footer>
+    <p>© 2026 PigBank AI · Feito com 🐷</p>
+    <div style="margin-top:8px">
+      <a href="/suporte">Suporte</a>·<a href="/privacy">Privacidade</a>·<a href="/changelog">Novidades</a>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+const API = window.location.origin;
+const PT_MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+let USER_ID = 0;
+
+/* ─── Helpers ─────────────────────────────────────────────────────────── */
+function fmtBRL(n) {
+  if (n == null || isNaN(n)) return "R$ 0,00";
+  return new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(Number(n));
+}
+
+function getCookie(name) {
+  const m = document.cookie.match(new RegExp("(?:^|; )" + name.replace(/[.$?*|{}()\[\]\\\/+^]/g, "\\$&") + "=([^;]*)"));
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
+function csrfHeaders(extra = {}) {
+  const csrf = getCookie("finbot_csrf");
+  return csrf ? { ...extra, "X-CSRF-Token": csrf } : { ...extra };
+}
+
+function shortAccount(email) {
+  if (!email) return "Minha conta";
+  const [name] = email.split("@");
+  return name.length > 18 ? name.slice(0, 16) + "..." : name;
+}
+
+function planLabel(plan) {
+  const v = (plan || "free").trim().toLowerCase();
+  return v === "free" ? "PLANO FREE" : `PLANO ${v.toUpperCase()}`;
+}
+
+function greetingByHour() {
+  const h = new Date().getHours();
+  if (h < 6)  return "Boa madrugada";
+  if (h < 12) return "Bom dia";
+  if (h < 18) return "Boa tarde";
+  return "Boa noite";
+}
+
+function timeAgo(iso) {
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  const diff = Date.now() - then;
+  if (isNaN(diff) || diff < 0) return "";
+  const mins  = Math.floor(diff / 60000);
+  const hours = Math.floor(mins / 60);
+  const days  = Math.floor(hours / 24);
+  if (mins  < 1)  return "agora";
+  if (mins  < 60) return `há ${mins} min`;
+  if (hours < 24) return `há ${hours}h`;
+  if (days  < 30) return `há ${days}d`;
+  return new Date(iso).toLocaleDateString("pt-BR");
+}
+
+function fmtTimeFull(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const now = new Date();
+  const sameDay  = d.toDateString() === now.toDateString();
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  const sameYesterday = d.toDateString() === yesterday.toDateString();
+  const time = d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+  if (sameDay)       return `hoje · ${time}`;
+  if (sameYesterday) return `ontem · ${time}`;
+  return d.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"}) + ` · ${time}`;
+}
+
+function nextDueDate(period_end, due_day) {
+  // Próximo vencimento ≈ due_day no mês imediatamente após o period_end.
+  if (!period_end || !due_day) return null;
+  const pe = new Date(period_end);
+  if (isNaN(pe.getTime())) return null;
+  const due = new Date(pe.getFullYear(), pe.getMonth() + 1, Number(due_day));
+  return due;
+}
+
+function daysBetween(a, b) {
+  const ms = b.getTime() - a.getTime();
+  return Math.round(ms / (1000 * 60 * 60 * 24));
+}
+
+/* ─── User menu (dropdown) ────────────────────────────────────────────── */
+function toggleUserMenu(e) {
+  e.stopPropagation();
+  const dd = document.getElementById("user-dropdown");
+  const btn = document.getElementById("user-menu-btn");
+  const isOpen = dd.classList.toggle("open");
+  btn.setAttribute("aria-expanded", String(isOpen));
+}
+
+function closeUserMenu() {
+  const dd = document.getElementById("user-dropdown");
+  const btn = document.getElementById("user-menu-btn");
+  dd.classList.remove("open");
+  btn.setAttribute("aria-expanded", "false");
+}
+
+document.getElementById("user-menu-btn").addEventListener("click", toggleUserMenu);
+document.addEventListener("click", e => {
+  const m = document.getElementById("user-menu");
+  if (m && !m.contains(e.target)) closeUserMenu();
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeUserMenu(); });
+
+/* ─── Logout / Connect WhatsApp ───────────────────────────────────────── */
+async function logoutFromHome() {
+  try {
+    await fetch(`${API}/auth/logout`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders()
+    });
+  } catch {}
+  window.location.replace("/");
+}
+
+async function connectWhatsAppFromHome(event) {
+  if (event) event.preventDefault();
+  closeUserMenu();
+  try {
+    const res = await fetch(`${API}/auth/link-code`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders()
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.whatsapp_link) {
+      alert(data.detail || "Não foi possível gerar seu link do WhatsApp agora.");
+      return;
+    }
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
+    if (isMobile) window.location.href = data.whatsapp_link;
+    else          window.open(data.whatsapp_link, "_blank", "noopener");
+  } catch {
+    alert("Erro ao conectar o WhatsApp. Tente novamente.");
+  }
+}
+
+/* ─── Profile (email + plan) ──────────────────────────────────────────── */
+async function loadProfile() {
+  try {
+    const res = await fetch(`${API}/auth/dashboard-profile`, { credentials: "same-origin" });
+    if (!res.ok) return;
+    const data = await res.json();
+    const email = data.email || "";
+    const plan = data.plan  || "free";
+    document.getElementById("user-label").textContent = shortAccount(email);
+    document.getElementById("user-email").textContent = email || "Minha conta";
+    document.getElementById("user-plan").textContent  = planLabel(plan);
+  } catch {}
+}
+
+/* ─── Render: greeting ────────────────────────────────────────────────── */
+function renderGreeting(snapshot, email) {
+  const name = (email || "").split("@")[0] || "";
+  const firstName = name.charAt(0).toUpperCase() + name.slice(1);
+  document.getElementById("greeting-title").textContent = `${greetingByHour()}, ${firstName} 👋`;
+
+  const recent = (snapshot.recent_launches || []).filter(r => r.tipo !== "criar_caixinha");
+  const last = recent[0];
+  const sub = document.getElementById("greeting-sub");
+  if (last) {
+    const ago = timeAgo(last.criado_em);
+    const tipoLbl = last.tipo === "receita" ? "Receita" : last.tipo === "despesa" ? "Despesa" : last.tipo;
+    const desc = last.nota || last.alvo || "—";
+    sub.innerHTML = `<span class="live-dot">●</span> Última atividade: <strong>${tipoLbl}</strong> · ${desc} · ${ago}`;
+  } else {
+    sub.innerHTML = `<span class="live-dot">●</span> Que tal começar? Tente <code style="background:rgba(255,255,255,.08);padding:1px 6px;border-radius:4px">gastei 30 mercado</code> no WhatsApp.`;
+  }
+}
+
+/* ─── Render: stat cards ──────────────────────────────────────────────── */
+function renderStats(snapshot, history) {
+  // Saldo
+  document.getElementById("stat-balance").textContent = fmtBRL(snapshot.balance || 0);
+
+  // Gastos do mês + delta vs mês anterior
+  const expense = snapshot.monthly_expense || 0;
+  const expenseEl = document.getElementById("stat-expense");
+  expenseEl.textContent = fmtBRL(expense);
+
+  let prevExpense = null;
+  if (Array.isArray(history) && history.length >= 2) {
+    const prev = history[history.length - 2];
+    if (prev && typeof prev.expense === "number") prevExpense = prev.expense;
+  }
+  const deltaEl = document.getElementById("stat-expense-delta");
+  if (prevExpense != null && prevExpense > 0) {
+    const pct = ((expense - prevExpense) / prevExpense) * 100;
+    const arrow = pct >= 0 ? "↑" : "↓";
+    const cls   = pct >= 0 ? "up" : "down";
+    deltaEl.innerHTML = `<span class="delta ${cls}">${arrow} ${Math.abs(pct).toFixed(0)}%</span> vs mês passado`;
+  } else if (prevExpense === 0 && expense > 0) {
+    deltaEl.innerHTML = `<span class="delta up">↑ novo</span> vs mês passado`;
+  } else {
+    deltaEl.textContent = "vs mês passado";
+  }
+
+  // Próxima fatura
+  const cards = (snapshot.credit_cards || []).filter(c => (c.due_amount || 0) > 0);
+  const billEl = document.getElementById("stat-bill");
+  const billSubEl = document.getElementById("stat-bill-sub");
+  if (cards.length === 0) {
+    billEl.textContent = fmtBRL(0);
+    billSubEl.textContent = "Nenhuma fatura aberta";
+  } else {
+    cards.sort((a, b) => {
+      const da = nextDueDate(a.period_end, a.due_day);
+      const db = nextDueDate(b.period_end, b.due_day);
+      if (!da) return 1;
+      if (!db) return -1;
+      return da - db;
+    });
+    const next = cards[0];
+    const due = nextDueDate(next.period_end, next.due_day);
+    billEl.textContent = fmtBRL(next.due_amount || 0);
+    if (due) {
+      const dueStr = due.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"});
+      billSubEl.innerHTML = `${next.name} · vence <strong>${dueStr}</strong>`;
+    } else {
+      billSubEl.textContent = next.name || "—";
+    }
+  }
+
+  // Reservas
+  const pockets = snapshot.pockets || [];
+  const totalPockets = pockets.reduce((s, p) => s + (Number(p.balance) || 0), 0);
+  document.getElementById("stat-pockets").textContent = fmtBRL(totalPockets);
+  const n = pockets.length;
+  document.getElementById("stat-pockets-sub").textContent = n === 0
+    ? "Nenhuma caixinha"
+    : n === 1 ? "1 caixinha ativa"
+              : `${n} caixinhas ativas`;
+}
+
+/* ─── Render: alert banner ────────────────────────────────────────────── */
+function renderAlerts(snapshot) {
+  const slot = document.getElementById("alert-banner-slot");
+  slot.innerHTML = "";
+  const cards = (snapshot.credit_cards || []).filter(c => (c.due_amount || 0) > 0);
+  if (cards.length === 0) return;
+
+  // Primeiro alerta: fatura mais próxima do vencimento
+  const today = new Date(); today.setHours(0,0,0,0);
+  const dued = cards
+    .map(c => ({ c, due: nextDueDate(c.period_end, c.due_day) }))
+    .filter(x => x.due)
+    .sort((a, b) => a.due - b.due);
+
+  if (dued.length === 0) return;
+
+  const { c, due } = dued[0];
+  const days = daysBetween(today, due);
+  const monthName = PT_MONTHS[new Date(c.period_end).getMonth()];
+  const isOverdue = days < 0;
+  const isUrgent  = days >= 0 && days <= 5;
+  if (!isOverdue && !isUrgent) return;
+
+  const banner = document.createElement("div");
+  banner.className = "alert-banner" + (isOverdue ? " danger" : "");
+  const dueLabel = isOverdue
+    ? `vence<strong>u há ${Math.abs(days)} dia${Math.abs(days)===1?"":"s"}</strong>`
+    : days === 0 ? "vence <strong>hoje</strong>"
+    : days === 1 ? "vence <strong>amanhã</strong>"
+                 : `vence em <strong>${days} dias</strong>`;
+  banner.innerHTML = `
+    <div class="alert-body">
+      <div class="alert-icon">${isOverdue ? "🚨" : "⚠️"}</div>
+      <div class="alert-text">
+        Fatura <strong>${c.name}</strong> de ${monthName} ${dueLabel} — ${fmtBRL(c.due_amount || 0)} em aberto
+      </div>
+    </div>
+    <div class="alert-actions">
+      <a class="btn-pill primary" href="/app">Pagar agora</a>
+    </div>
+  `;
+  slot.appendChild(banner);
+}
+
+/* ─── Render: onboarding ──────────────────────────────────────────────── */
+function renderOnboarding(snapshot, profile) {
+  const slot = document.getElementById("onboarding-slot");
+  slot.innerHTML = "";
+
+  const items = [
+    { id:"account", title:"Conta criada", done:true, hint:null, action:null },
+    {
+      id:"whatsapp",
+      title:"Conectar WhatsApp",
+      done: Boolean(profile && profile.whatsapp_linked),
+      hint:"Receba e envie comandos pelo WhatsApp",
+      action:"whatsapp",
+    },
+    {
+      id:"card",
+      title:"Cadastrar primeiro cartão",
+      done: (snapshot.credit_cards || []).length > 0,
+      hint: "Tente: <code>criar cartao Nubank fecha 10 vence 17</code>",
+      action: null,
+    },
+    {
+      id:"launch",
+      title:"Fazer seu primeiro lançamento",
+      done: (snapshot.recent_launches || []).some(r => !r.is_internal_movement && (r.tipo === "despesa" || r.tipo === "receita")),
+      hint: "Tente: <code>gastei 30 mercado</code>",
+      action: null,
+    },
+  ];
+
+  const done = items.filter(i => i.done).length;
+  if (done >= items.length) return; // tudo concluído → não mostra
+
+  const pct = Math.round((done / items.length) * 100);
+  const html = `
+    <div class="section-title">Comece em 2 minutos</div>
+    <div class="onboarding">
+      <div class="ob-head">
+        <div class="ob-title">Configure sua conta</div>
+        <div class="ob-progress">
+          <span>${done} de ${items.length} concluídos</span>
+          <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+        </div>
+      </div>
+      <div class="ob-list">
+        ${items.map(i => `
+          <div class="ob-item ${i.done ? "done" : "todo"}" ${i.action === "whatsapp" ? `onclick="connectWhatsAppFromHome(event)"` : ""}>
+            <div class="ob-check">${i.done ? "✓" : ""}</div>
+            <div class="ob-text">
+              <div class="ob-text-title">${i.title}</div>
+              ${(!i.done && i.hint) ? `<div class="ob-text-hint">${i.hint}</div>` : ""}
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+  slot.innerHTML = html;
+}
+
+/* ─── Render: recent activity ─────────────────────────────────────────── */
+function renderActivity(snapshot) {
+  const list = document.getElementById("activity-list");
+  const launches = (snapshot.recent_launches || [])
+    .filter(r => !["criar_caixinha","delete_pocket","create_investment","delete_investment"].includes(r.tipo))
+    .slice(0, 5);
+
+  if (launches.length === 0) {
+    list.innerHTML = `
+      <div style="padding:32px 20px;text-align:center;color:var(--text-2);font-size:.86rem">
+        Nenhum lançamento ainda. Tente <code style="background:rgba(255,255,255,.08);padding:2px 8px;border-radius:6px;font-family:monospace">gastei 30 mercado</code> no WhatsApp.
+      </div>
+    `;
+    return;
+  }
+
+  const rows = launches.map(r => {
+    const isReceita = r.tipo === "receita";
+    const isDespesa = r.tipo === "despesa" || r.tipo === "saida";
+    const isCredito = (r.alvo || "").toLowerCase().includes("cart") || (r.nota || "").toLowerCase().includes("cart");
+    const tagClass = isReceita ? "income" : (isCredito && isDespesa) ? "credit" : "expense";
+    const amtClass = isReceita ? "income" : "expense";
+    const sign = isReceita ? "+" : "-";
+    const desc = r.alvo || r.nota || "—";
+    const cat  = r.categoria || (isReceita ? "outros" : "geral");
+    const emoji = isReceita ? "📥" : (isCredito ? "💳" : "💸");
+    return `
+      <div class="activity-row">
+        <div class="activity-time">${fmtTimeFull(r.criado_em)}</div>
+        <div class="activity-desc">
+          <div class="activity-tag ${tagClass}">${emoji}</div>
+          <div style="min-width:0">
+            <div class="activity-name">${escapeHtml(desc)}</div>
+            <div class="activity-cat">${escapeHtml(cat)}</div>
+          </div>
+        </div>
+        <div class="activity-amount ${amtClass}">${sign} ${fmtBRL(Math.abs(Number(r.valor) || 0))}</div>
+      </div>
+    `;
+  }).join("");
+
+  list.innerHTML = rows + `<a class="see-all-link" href="/app">Ver tudo no dashboard →</a>`;
+}
+
+function escapeHtml(s) {
+  return String(s || "")
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+/* ─── Profile flags (whatsapp linked) ─────────────────────────────────── */
+async function loadAuthMe() {
+  try {
+    const res = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+/* ─── Access error ────────────────────────────────────────────────────── */
+function showAccessError() {
+  document.getElementById("page-root").innerHTML = `
+    <div class="access-error">
+      <h2>🔒 Acesso restrito</h2>
+      <p>Sua sessão expirou ou você não está autenticado.</p>
+      <a class="btn-pill primary" href="/">Entrar</a>
+    </div>
+  `;
+}
+
+/* ─── Init ────────────────────────────────────────────────────────────── */
+(async () => {
+  // 1) Valida sessão
+  let userId = 0;
+  try {
+    const r = await fetch(`${API}/auth/validate`, { credentials: "same-origin" });
+    if (!r.ok) { showAccessError(); return; }
+    const v = await r.json();
+    userId = USER_ID = v.user_id;
+  } catch { showAccessError(); return; }
+
+  // 2) Carrega perfil (header dropdown)
+  loadProfile();
+
+  // 3) Carrega snapshot + histórico em paralelo
+  let snapshot = null, history = [], me = null;
+  try {
+    const [dataRes, histRes, meData] = await Promise.all([
+      fetch(`${API}/data/${USER_ID}`, { credentials: "same-origin" }),
+      fetch(`${API}/history/${USER_ID}?months=2`, { credentials: "same-origin" }),
+      loadAuthMe(),
+    ]);
+    if (!dataRes.ok) throw new Error("data");
+    snapshot = await dataRes.json();
+    if (histRes.ok) {
+      const hj = await histRes.json();
+      history = hj.data || [];
+    }
+    me = meData;
+  } catch {
+    document.getElementById("content").innerHTML = `
+      <div class="access-error">
+        <h2>⚠️ Erro ao carregar</h2>
+        <p>Não foi possível carregar seus dados. Tente novamente em instantes.</p>
+        <a class="btn-pill ghost" href="/home">Recarregar</a>
+      </div>
+    `;
+    return;
+  }
+
+  // 4) Renderiza tudo
+  const email = (me && me.email) || "";
+  renderGreeting(snapshot, email);
+  renderStats(snapshot, history);
+  renderAlerts(snapshot);
+  renderOnboarding(snapshot, me);
+  renderActivity(snapshot);
+})();
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+  });
+}
+</script>
+</body>
+</html>

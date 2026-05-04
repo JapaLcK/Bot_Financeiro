@@ -52,6 +52,7 @@ body::before { content:""; position:fixed; inset:0; z-index:1; pointer-events:no
 
 /* ─── Header ────────────────────────────────────────────────────────── */
 header {
+  position:relative; z-index:50;
   display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;
   margin-bottom:28px; background:rgba(255,255,255,0.055);
   backdrop-filter:blur(28px) saturate(170%); -webkit-backdrop-filter:blur(28px) saturate(170%);
@@ -86,17 +87,103 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   transition:all .2s var(--ease);display:flex;align-items:center;gap:5px;white-space:nowrap; }
 .hbtn:hover  { background:rgba(255,255,255,.14);color:var(--text);border-color:rgba(255,255,255,.24); }
 .hbtn:active { transform:scale(.96); }
-#logout-btn {
+.user-menu { position:relative; }
+.user-menu-btn {
+  min-width:150px;
+  max-width:220px;
+  justify-content:space-between;
+  color:var(--text);
+}
+.user-menu-main {
+  min-width:0;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.user-dot {
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:var(--green);
+  box-shadow:0 0 0 2px rgba(52,211,153,.18),0 0 8px rgba(52,211,153,.36);
+  flex-shrink:0;
+}
+#user-label {
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.hamburger-icon {
+  color:var(--text-2);
+  font-size:1rem;
+  line-height:1;
+  flex-shrink:0;
+}
+.user-dropdown {
+  position:absolute;
+  top:calc(100% + 8px);
+  right:0;
+  width:260px;
+  display:none;
+  padding:8px;
+  background:rgba(20,24,36,.96);
+  backdrop-filter:blur(24px) saturate(170%);
+  -webkit-backdrop-filter:blur(24px) saturate(170%);
+  border:1px solid var(--glass-border);
+  border-radius:14px;
+  box-shadow:0 18px 48px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.08);
+  z-index:40;
+}
+.user-dropdown.open { display:block; }
+.user-dropdown-head {
+  padding:8px 10px 10px;
+  border-bottom:1px solid var(--div);
+  margin-bottom:6px;
+}
+.user-email {
+  font-size:.78rem;
+  font-weight:700;
+  color:var(--text);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.user-plan {
+  margin-top:3px;
+  font-size:.68rem;
+  color:var(--green);
+  font-weight:700;
+}
+.user-menu-link {
+  width:100%;
+  min-height:38px;
+  border:0;
+  background:transparent;
+  color:var(--text-2);
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 10px;
+  border-radius:10px;
+  font-size:.8rem;
+  font-weight:650;
+  text-decoration:none;
+  cursor:pointer;
+  transition:background .2s var(--ease), color .2s var(--ease);
+}
+.user-menu-link:hover {
+  background:rgba(255,255,255,.08);
+  color:var(--text);
+}
+.user-menu-link.danger {
   background:rgba(248,113,113,.12);
-  border-color:rgba(248,113,113,.28);
   color:#fecaca;
 }
-#logout-btn:hover {
+.user-menu-link.danger:hover {
   background:rgba(248,113,113,.2);
-  border-color:rgba(248,113,113,.42);
   color:#fff1f2;
-  box-shadow:0 0 18px rgba(248,113,113,.12);
 }
+.user-menu-icon { width:18px;text-align:center;flex-shrink:0; }
 #ref-icon { display:inline-block;font-size:1rem; }
 .spinning #ref-icon { animation:spin .6s linear infinite; }
 @keyframes spin { to{transform:rotate(360deg)} }
@@ -140,7 +227,7 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .grid { display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); }
 .grid.charts-grid { grid-template-columns:1fr 2fr; }
 @media(max-width:860px) { .grid.charts-grid{grid-template-columns:1fr} }
-@media(max-width:600px) { .page{padding:12px 10px 48px} header{flex-direction:column;align-items:flex-start} }
+@media(max-width:600px) { .page{padding:12px 10px 48px} header{flex-direction:column;align-items:flex-start}.user-menu,.user-menu-btn{width:100%;max-width:none}.user-dropdown{left:0;right:auto;width:min(100%,300px)} }
 
 /* ─── Skeleton ──────────────────────────────────────────────────────── */
 .sk { border-radius:6px;background:linear-gradient(90deg,rgba(255,255,255,.06) 25%,rgba(255,255,255,.11) 50%,rgba(255,255,255,.06) 75%);
@@ -372,7 +459,26 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
       </div>
       <button class="hbtn" id="refresh-btn" onclick="sendRefresh()"><span id="ref-icon">↻</span> Atualizar</button>
       <button class="hbtn" onclick="exportCSV()">⬇ Exportar</button>
-      <button class="hbtn" id="logout-btn" onclick="logoutDashboard()">Sair</button>
+      <div class="user-menu" id="user-menu">
+        <button class="hbtn user-menu-btn" id="user-menu-btn" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleUserMenu(event)">
+          <span class="user-menu-main">
+            <span class="user-dot"></span>
+            <span id="user-label">Minha conta</span>
+          </span>
+          <span class="hamburger-icon" aria-hidden="true">☰</span>
+        </button>
+        <div class="user-dropdown" id="user-dropdown" role="menu" aria-label="Menu da conta">
+          <div class="user-dropdown-head">
+            <div class="user-email" id="user-email">carregando...</div>
+            <div class="user-plan" id="user-plan">Plano Free</div>
+          </div>
+          <a class="user-menu-link" href="/app" role="menuitem"><span class="user-menu-icon">📊</span>Dashboard</a>
+          <button class="user-menu-link" type="button" role="menuitem" onclick="connectWhatsAppFromDashboard(event)"><span class="user-menu-icon">💬</span>Conectar WhatsApp</button>
+          <a class="user-menu-link" href="https://discord.com/oauth2/authorize?client_id=1468717460407455825&permissions=2147567616&integration_type=0&scope=bot+applications.commands" target="_blank" rel="noopener" role="menuitem"><span class="user-menu-icon">🎮</span>Adicionar ao Discord</a>
+          <a class="user-menu-link" href="/settings?view=security" role="menuitem"><span class="user-menu-icon">⚙</span>Configurações</a>
+          <button class="user-menu-link danger" type="button" role="menuitem" onclick="logoutDashboard()"><span class="user-menu-icon">↪</span>Sair</button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -689,6 +795,8 @@ const API       = BASE_HTTP;
 // USER_ID e WS_URL são resolvidos após validação da sessão (ver seção INIT)
 let USER_ID = 0;
 let WS_URL  = "";
+let USER_EMAIL = "";
+let USER_PLAN = "";
 
 function getCookie(name) {
   return document.cookie.split("; ").find(row => row.startsWith(`${name}=`))?.split("=")[1] || "";
@@ -697,6 +805,97 @@ function getCookie(name) {
 function csrfHeaders(extra = {}) {
   const csrf = decodeURIComponent(getCookie("csrf_token") || "");
   return csrf ? { ...extra, "X-CSRF-Token": csrf } : { ...extra };
+}
+
+async function readResponsePayload(response) {
+  try {
+    return await response.json();
+  } catch {
+    return {};
+  }
+}
+
+function shortAccountLabel(email) {
+  const value = (email || "").trim();
+  if (!value) return "Minha conta";
+  const [name] = value.split("@");
+  return name.length > 18 ? `${name.slice(0, 16)}...` : name;
+}
+
+function formatPlanLabel(plan) {
+  const value = (plan || "free").trim();
+  return value.toLowerCase() === "free" ? "Plano Free" : `Plano ${value}`;
+}
+
+function applyUserMenuState(email, plan) {
+  USER_EMAIL = email || "";
+  USER_PLAN = plan || "free";
+  document.getElementById("user-label").textContent = shortAccountLabel(USER_EMAIL);
+  document.getElementById("user-email").textContent = USER_EMAIL || "Minha conta";
+  document.getElementById("user-plan").textContent = formatPlanLabel(USER_PLAN);
+}
+
+async function loadUserMenuState() {
+  try {
+    const res = await fetch(`${API}/auth/dashboard-profile`, { credentials: "same-origin" });
+    if (!res.ok) return;
+    const data = await readResponsePayload(res);
+    applyUserMenuState(data.email || "", data.plan || "free");
+  } catch {}
+}
+
+function closeUserMenu() {
+  const dropdown = document.getElementById("user-dropdown");
+  const button = document.getElementById("user-menu-btn");
+  dropdown.classList.remove("open");
+  button.setAttribute("aria-expanded", "false");
+}
+
+function toggleUserMenu(event) {
+  event.stopPropagation();
+  const dropdown = document.getElementById("user-dropdown");
+  const button = document.getElementById("user-menu-btn");
+  const isOpen = dropdown.classList.toggle("open");
+  button.setAttribute("aria-expanded", String(isOpen));
+}
+
+document.addEventListener("click", (event) => {
+  const menu = document.getElementById("user-menu");
+  if (menu && !menu.contains(event.target)) closeUserMenu();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeUserMenu();
+});
+
+async function connectWhatsAppFromDashboard(event) {
+  if (event) event.preventDefault();
+  closeUserMenu();
+
+  try {
+    const res = await fetch(`${API}/auth/link-code`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders()
+    });
+    const data = await readResponsePayload(res);
+    if (!res.ok) {
+      alert(data.detail || "Nao foi possivel gerar seu link do WhatsApp agora.");
+      return;
+    }
+    if (!data.whatsapp_link) {
+      alert("WhatsApp ainda nao configurado neste ambiente.");
+      return;
+    }
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
+    if (isMobile) {
+      window.location.href = data.whatsapp_link;
+    } else {
+      window.open(data.whatsapp_link, "_blank", "noopener");
+    }
+  } catch {
+    alert("Erro ao conectar o WhatsApp. Tente novamente.");
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -2114,6 +2313,7 @@ function _showAccessError() {
     if (!resp.ok) { _showAccessError(); return; }
     const data = await resp.json();
     USER_ID = data.user_id;
+    loadUserMenuState();
   } catch(e) {
     _showAccessError();
     return;
