@@ -451,6 +451,79 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
   transition:all .35s var(--ease);
 }
 .modal-success-toast.show { opacity:1;transform:translateX(-50%) translateY(0); }
+
+/* ─── Bill modals (detalhe + pagar + comprovante) ─────────────────────── */
+.bill-balance-line {
+  background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.22);
+  border-radius:10px;padding:10px 14px;margin-bottom:14px;
+  display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:.82rem;
+}
+.bill-balance-line .lbl-k { color:var(--text-2);font-weight:600; }
+.bill-balance-line .lbl-v { color:var(--blue);font-weight:740;font-variant-numeric:tabular-nums; }
+
+.bill-list { display:flex;flex-direction:column;gap:8px;margin-bottom:16px;max-height:46vh;overflow-y:auto; }
+.bill-opt {
+  background:rgba(255,255,255,.05);border:1px solid var(--glass-border);
+  border-radius:12px;padding:12px 14px;cursor:pointer;text-align:left;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  transition:all .2s var(--ease);
+}
+.bill-opt:hover { background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.22); }
+.bill-opt.selected { background:rgba(167,139,250,.14);border-color:rgba(167,139,250,.45); }
+.bill-opt .b-name { font-size:.85rem;font-weight:650; }
+.bill-opt .b-period { font-size:.7rem;color:var(--text-3); }
+.bill-opt .b-due { font-size:.92rem;font-weight:740;color:var(--purple);font-variant-numeric:tabular-nums; }
+.bill-opt .b-due-sub { font-size:.65rem;color:var(--text-3);font-weight:500; }
+
+.bill-summary {
+  background:rgba(255,255,255,.04);border:1px solid var(--glass-border);
+  border-radius:10px;padding:10px 14px;margin-bottom:14px;
+  display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:.78rem;
+}
+.bill-summary .it { display:flex;flex-direction:column;gap:2px; }
+.bill-summary .it .k { color:var(--text-3);font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;font-weight:650; }
+.bill-summary .it .v { font-weight:700;font-variant-numeric:tabular-nums; }
+.bill-summary .it.due .v { color:var(--purple); }
+
+.bill-tx-list { max-height:38vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:14px; }
+.bill-tx { display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:9px 12px;border-radius:9px;background:rgba(255,255,255,.04);border:1px solid var(--div); }
+.bill-tx .tx-desc { font-size:.78rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.bill-tx .tx-cat { font-size:.66rem;color:var(--text-3);margin-top:1px; }
+.bill-tx .tx-val { font-size:.82rem;font-weight:700;color:var(--red);font-variant-numeric:tabular-nums;flex-shrink:0; }
+.bill-tx .tx-val.refund { color:var(--green); }
+
+.receipt-card {
+  background:linear-gradient(135deg,rgba(52,211,153,.16),rgba(96,165,250,.1));
+  border:1px solid rgba(52,211,153,.4);border-radius:14px;padding:20px;margin-bottom:14px;
+  text-align:center;
+}
+.receipt-icon { font-size:2.2rem;margin-bottom:6px; }
+.receipt-title { font-size:1.05rem;font-weight:700;margin-bottom:4px; }
+.receipt-amount { font-size:1.6rem;font-weight:740;letter-spacing:-.02em;color:var(--green);margin:8px 0;font-variant-numeric:tabular-nums; }
+.receipt-grid { display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0; }
+.receipt-cell { background:rgba(255,255,255,.04);border:1px solid var(--div);border-radius:10px;padding:10px 12px;text-align:left; }
+.receipt-cell .k { font-size:.62rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:650;margin-bottom:3px; }
+.receipt-cell .v { font-size:.85rem;font-weight:650;font-variant-numeric:tabular-nums; }
+
+.cards-section-head { display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px; }
+.cards-section-head h2 { margin-bottom:0; }
+.btn-pay-bill {
+  background:linear-gradient(135deg,#7c3aed,#3b82f6);color:#fff;border:none;
+  padding:6px 12px;border-radius:8px;font-size:.72rem;font-weight:650;cursor:pointer;
+  transition:all .2s var(--ease);box-shadow:0 3px 10px rgba(124,58,237,.3);
+}
+.btn-pay-bill:hover { transform:translateY(-1px);box-shadow:0 5px 14px rgba(124,58,237,.45); }
+.btn-pay-bill:disabled { opacity:.5;cursor:not-allowed;transform:none;box-shadow:none; }
+
+.card-row-clickable {
+  cursor:pointer;
+  transition:background .15s var(--ease);
+  border-radius:8px;
+  padding:8px;
+  margin:-8px;
+}
+.card-row-clickable:hover { background:rgba(255,255,255,.05); }
 .detail-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0; }
 .detail-cell { background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:10px; }
 .detail-k { font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px; }
@@ -819,6 +892,81 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 </div>
 
 <div class="modal-success-toast" id="launch-success-toast"></div>
+
+<!-- ─── Detalhe da fatura ──────────────────────────────────────────────── -->
+<div class="overlay" id="bill-detail-overlay">
+  <div class="modal wide">
+    <h3 id="bill-detail-title">Fatura</h3>
+    <p class="msub" id="bill-detail-sub">—</p>
+    <div class="bill-summary" id="bill-detail-summary">
+      <div class="it"><span class="k">Total</span><span class="v" id="bill-detail-total">—</span></div>
+      <div class="it"><span class="k">Pago</span><span class="v" id="bill-detail-paid">—</span></div>
+      <div class="it due"><span class="k">Em aberto</span><span class="v" id="bill-detail-due">—</span></div>
+    </div>
+    <div style="font-size:.66rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:8px">
+      Compras desta fatura
+    </div>
+    <div class="bill-tx-list" id="bill-detail-tx"></div>
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closeBillDetailModal()">Fechar</button>
+      <button class="btn-save" type="button" id="bill-detail-pay-btn" onclick="payFromDetail()">Pagar fatura</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Pagar fatura ───────────────────────────────────────────────────── -->
+<div class="overlay" id="pay-bill-overlay">
+  <div class="modal">
+    <h3>Pagar fatura</h3>
+    <p class="msub">O valor sai do saldo da sua conta.</p>
+
+    <div class="bill-balance-line">
+      <span class="lbl-k">Saldo disponível</span>
+      <span class="lbl-v" id="pay-bill-balance">R$ 0,00</span>
+    </div>
+
+    <div id="pay-bill-empty" class="empty" style="display:none;padding:18px 4px;text-align:center;font-size:.85rem;color:var(--text-2)">
+      📭 Nenhuma fatura em aberto.
+    </div>
+
+    <div class="bill-list" id="pay-bill-list"></div>
+
+    <div id="pay-bill-form" style="display:none">
+      <div class="modal-row">
+        <label class="modal-label" for="pay-bill-amount">Valor a pagar (R$)</label>
+        <input class="modal-inp" id="pay-bill-amount" type="number" step="0.01" min="0.01" inputmode="decimal" />
+        <div style="font-size:.7rem;color:var(--text-3);margin-top:6px" id="pay-bill-hint">—</div>
+      </div>
+      <div class="modal-error" id="pay-bill-error"></div>
+    </div>
+
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closePayBillModal()">Cancelar</button>
+      <button class="btn-save" type="button" id="pay-bill-submit-btn" onclick="submitPayBill()" disabled>Pagar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Comprovante ────────────────────────────────────────────────────── -->
+<div class="overlay" id="pay-bill-receipt-overlay">
+  <div class="modal">
+    <div class="receipt-card">
+      <div class="receipt-icon">✅</div>
+      <div class="receipt-title">Pagamento realizado</div>
+      <div class="receipt-amount" id="receipt-amount">R$ 0,00</div>
+      <div style="font-size:.78rem;color:var(--text-2)" id="receipt-card-line">—</div>
+    </div>
+    <div class="receipt-grid">
+      <div class="receipt-cell"><div class="k">Saldo agora</div><div class="v" id="receipt-balance">—</div></div>
+      <div class="receipt-cell"><div class="k">Em aberto</div><div class="v" id="receipt-open">—</div></div>
+      <div class="receipt-cell"><div class="k">Status</div><div class="v" id="receipt-status">—</div></div>
+      <div class="receipt-cell"><div class="k">ID lançamento</div><div class="v" id="receipt-launch-id">—</div></div>
+    </div>
+    <div class="modal-acts">
+      <button class="btn-save" type="button" onclick="closePayReceiptModal()">Concluir</button>
+    </div>
+  </div>
+</div>
 
 <div class="overlay" id="investment-detail-overlay">
   <div class="modal wide">
@@ -2260,9 +2408,285 @@ document.getElementById("launch-valor").addEventListener("keydown", e => {
       const opts = (tipoParam === "receita" || tipoParam === "despesa") ? { tipo: tipoParam } : {};
       // Pequeno delay pra garantir que /auth/validate completou
       setTimeout(() => openLaunchModal(opts), 400);
+    } else if (action === "pay-bill") {
+      setTimeout(() => openPayBillModal(), 400);
     }
   } catch {}
 })();
+
+/* ═══════════════════════════════════════════════════════════════════════
+   BILL MODALS — detalhe + pagamento + comprovante
+═══════════════════════════════════════════════════════════════════════ */
+let payBillState = {
+  balance: 0,
+  bills: [],
+  selectedId: null,
+  submitting: false,
+};
+
+function fmtBillValue(n) {
+  return fmt(Number(n) || 0);
+}
+
+async function openBillDetailModal(billId) {
+  const overlay = document.getElementById("bill-detail-overlay");
+  document.getElementById("bill-detail-title").textContent = "Carregando...";
+  document.getElementById("bill-detail-sub").textContent = "—";
+  document.getElementById("bill-detail-total").textContent = "—";
+  document.getElementById("bill-detail-paid").textContent = "—";
+  document.getElementById("bill-detail-due").textContent = "—";
+  document.getElementById("bill-detail-tx").innerHTML = "";
+  document.getElementById("bill-detail-pay-btn").disabled = true;
+  document.getElementById("bill-detail-pay-btn").dataset.billId = "";
+  overlay.classList.add("open");
+
+  try {
+    const res = await fetch(`${API}/bills/${USER_ID}/${billId}`, { credentials: "same-origin" });
+    if (!res.ok) throw new Error(await readApiError(res));
+    const data = await res.json();
+    const b = data.bill || {};
+    document.getElementById("bill-detail-title").textContent = `Fatura · ${b.card_name || "—"}`;
+    document.getElementById("bill-detail-sub").textContent = b.label || "—";
+    document.getElementById("bill-detail-total").textContent = fmtBillValue(b.total);
+    document.getElementById("bill-detail-paid").textContent = fmtBillValue(b.paid_amount);
+    document.getElementById("bill-detail-due").textContent = fmtBillValue(b.due_amount);
+
+    const list = data.transactions || [];
+    const txEl = document.getElementById("bill-detail-tx");
+    if (!list.length) {
+      txEl.innerHTML = '<div class="empty" style="padding:14px;text-align:center;font-size:.78rem;color:var(--text-3)">Nenhuma compra nesta fatura.</div>';
+    } else {
+      txEl.innerHTML = list.map(t => {
+        const desc = t.nota || t.categoria || "Compra";
+        const dt = t.purchased_at ? new Date(t.purchased_at).toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"}) : "";
+        const inst = (t.installments_total && t.installments_total > 1)
+          ? ` · ${t.installment_no || "?"}/${t.installments_total}` : "";
+        const sign = t.is_refund ? "+" : "-";
+        return `
+          <div class="bill-tx">
+            <div style="min-width:0;flex:1">
+              <div class="tx-desc">${escapeHtmlSafe(desc)}${inst}</div>
+              <div class="tx-cat">${dt}${t.categoria ? " · " + escapeHtmlSafe(t.categoria) : ""}</div>
+            </div>
+            <div class="tx-val${t.is_refund ? " refund" : ""}">${sign} ${fmtBillValue(t.valor)}</div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    const payBtn = document.getElementById("bill-detail-pay-btn");
+    payBtn.disabled = !(b.due_amount > 0);
+    payBtn.dataset.billId = String(b.id || "");
+    payBtn.textContent = b.due_amount > 0 ? "Pagar fatura" : "Sem saldo em aberto";
+  } catch (err) {
+    document.getElementById("bill-detail-title").textContent = "Erro";
+    document.getElementById("bill-detail-sub").textContent = err.message || "Não foi possível carregar a fatura.";
+  }
+}
+
+function closeBillDetailModal() {
+  document.getElementById("bill-detail-overlay").classList.remove("open");
+}
+
+function escapeHtmlSafe(s) {
+  return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+function payFromDetail() {
+  const billId = Number(document.getElementById("bill-detail-pay-btn").dataset.billId || 0);
+  if (!billId) return;
+  closeBillDetailModal();
+  openPayBillModal({ preselectId: billId });
+}
+
+async function onCardRowClick(rowEl) {
+  const cardId = Number(rowEl && rowEl.dataset && rowEl.dataset.cardId);
+  if (!cardId) return;
+  // Busca lista de faturas em aberto e pega a do cartão clicado.
+  // Se não houver aberta, mostra a última fechada (fallback via /bills/{id}).
+  try {
+    const res = await fetch(`${API}/bills/${USER_ID}`, { credentials: "same-origin" });
+    if (!res.ok) throw new Error(await readApiError(res));
+    const data = await res.json();
+    const billsForCard = (data.bills || []).filter(b => b.card_id === cardId);
+    if (billsForCard.length > 0) {
+      // Abre a fatura mais recente em aberto desse cartão
+      billsForCard.sort((a, b) => (b.period_end || "").localeCompare(a.period_end || ""));
+      openBillDetailModal(billsForCard[0].id);
+      return;
+    }
+    // Sem fatura em aberto — mensagem amigável
+    showLaunchSuccessToast("Sem fatura em aberto para esse cartão.");
+  } catch (err) {
+    showLaunchSuccessToast(err.message || "Erro ao carregar fatura.");
+  }
+}
+
+async function openPayBillModal(opts) {
+  opts = opts || {};
+  const overlay = document.getElementById("pay-bill-overlay");
+  document.getElementById("pay-bill-balance").textContent = "—";
+  document.getElementById("pay-bill-list").innerHTML = '<div class="empty" style="padding:14px;text-align:center;font-size:.78rem;color:var(--text-3)">Carregando...</div>';
+  document.getElementById("pay-bill-empty").style.display = "none";
+  document.getElementById("pay-bill-form").style.display = "none";
+  document.getElementById("pay-bill-submit-btn").disabled = true;
+  hidePayBillError();
+  payBillState = { balance: 0, bills: [], selectedId: null, submitting: false };
+  overlay.classList.add("open");
+
+  try {
+    const res = await fetch(`${API}/bills/${USER_ID}`, { credentials: "same-origin" });
+    if (!res.ok) throw new Error(await readApiError(res));
+    const data = await res.json();
+    payBillState.balance = Number(data.balance) || 0;
+    payBillState.bills = data.bills || [];
+    document.getElementById("pay-bill-balance").textContent = fmtBillValue(payBillState.balance);
+    renderPayBillList();
+    if (opts.preselectId) selectPayBill(Number(opts.preselectId));
+    else if (payBillState.bills.length === 1) selectPayBill(payBillState.bills[0].id);
+  } catch (err) {
+    document.getElementById("pay-bill-list").innerHTML = `<div class="empty" style="padding:14px;text-align:center;font-size:.78rem;color:var(--red)">${escapeHtmlSafe(err.message || "Erro ao carregar faturas.")}</div>`;
+  }
+}
+
+function renderPayBillList() {
+  const list = payBillState.bills;
+  const el = document.getElementById("pay-bill-list");
+  if (!list.length) {
+    el.innerHTML = "";
+    document.getElementById("pay-bill-empty").style.display = "";
+    return;
+  }
+  el.innerHTML = list.map(b => `
+    <button type="button" class="bill-opt${payBillState.selectedId === b.id ? ' selected' : ''}" data-id="${b.id}" onclick="selectPayBill(${b.id})">
+      <div style="min-width:0">
+        <div class="b-name">${escapeHtmlSafe(b.card_name)}</div>
+        <div class="b-period">${escapeHtmlSafe(b.label || "")}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="b-due">${fmtBillValue(b.due_amount)}</div>
+        <div class="b-due-sub">em aberto</div>
+      </div>
+    </button>
+  `).join("");
+}
+
+function selectPayBill(billId) {
+  payBillState.selectedId = Number(billId);
+  renderPayBillList();
+  const b = payBillState.bills.find(x => x.id === payBillState.selectedId);
+  if (!b) return;
+  document.getElementById("pay-bill-form").style.display = "";
+  const amountEl = document.getElementById("pay-bill-amount");
+  amountEl.value = b.due_amount.toFixed(2);
+  amountEl.max = b.due_amount;
+  document.getElementById("pay-bill-hint").textContent = `Total ${fmtBillValue(b.total)} · Pago ${fmtBillValue(b.paid_amount)} · Em aberto ${fmtBillValue(b.due_amount)}`;
+  hidePayBillError();
+  document.getElementById("pay-bill-submit-btn").disabled = false;
+  setTimeout(() => amountEl.focus(), 30);
+}
+
+function hidePayBillError() {
+  const el = document.getElementById("pay-bill-error");
+  el.classList.remove("show");
+  el.textContent = "";
+}
+function showPayBillError(msg) {
+  const el = document.getElementById("pay-bill-error");
+  el.textContent = msg;
+  el.classList.add("show");
+}
+
+function closePayBillModal() {
+  document.getElementById("pay-bill-overlay").classList.remove("open");
+}
+
+async function submitPayBill() {
+  if (payBillState.submitting) return;
+  hidePayBillError();
+  const billId = payBillState.selectedId;
+  if (!billId) { showPayBillError("Selecione uma fatura."); return; }
+  const b = payBillState.bills.find(x => x.id === billId);
+  if (!b) { showPayBillError("Fatura inválida."); return; }
+
+  const valorRaw = (document.getElementById("pay-bill-amount").value || "").replace(",", ".");
+  const valor = parseFloat(valorRaw);
+  if (!valor || isNaN(valor) || valor <= 0) {
+    showPayBillError("Informe um valor maior que zero.");
+    return;
+  }
+  if (valor > b.due_amount + 0.005) {
+    showPayBillError(`Valor maior que o em aberto (${fmtBillValue(b.due_amount)}).`);
+    return;
+  }
+  if (valor > payBillState.balance + 0.005) {
+    showPayBillError(`Saldo insuficiente. Saldo atual: ${fmtBillValue(payBillState.balance)}.`);
+    return;
+  }
+
+  const btn = document.getElementById("pay-bill-submit-btn");
+  payBillState.submitting = true;
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = "Pagando...";
+
+  try {
+    const res = await fetch(`${API}/bills/${USER_ID}/${billId}/pay`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ amount: valor }),
+    });
+    const data = await readResponsePayload(res);
+    if (!res.ok) throw new Error(data.detail || "Erro ao pagar fatura.");
+
+    closePayBillModal();
+    showPayReceiptModal(data, b);
+    sendRefresh();
+  } catch (err) {
+    showPayBillError(err.message || "Erro ao pagar fatura.");
+  } finally {
+    payBillState.submitting = false;
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+}
+
+function showPayReceiptModal(data, bill) {
+  document.getElementById("receipt-amount").textContent = fmtBillValue(data.paid);
+  const cardName = data.card_name || (bill && bill.card_name) || "—";
+  const period = (bill && bill.label) ? ` · ${bill.label}` : "";
+  document.getElementById("receipt-card-line").textContent = `${cardName}${period}`;
+  document.getElementById("receipt-balance").textContent = fmtBillValue(data.new_balance);
+  document.getElementById("receipt-open").textContent = fmtBillValue(data.bill_due_amount);
+  document.getElementById("receipt-status").textContent = data.bill_status === "paid" ? "Paga ✓" : "Aberta";
+  document.getElementById("receipt-launch-id").textContent = data.launch_id ? `#${data.launch_id}` : "—";
+  document.getElementById("pay-bill-receipt-overlay").classList.add("open");
+}
+
+function closePayReceiptModal() {
+  document.getElementById("pay-bill-receipt-overlay").classList.remove("open");
+}
+
+document.getElementById("bill-detail-overlay").addEventListener("click", e => {
+  if (e.target === e.currentTarget) closeBillDetailModal();
+});
+document.getElementById("pay-bill-overlay").addEventListener("click", e => {
+  if (e.target === e.currentTarget) closePayBillModal();
+});
+document.getElementById("pay-bill-receipt-overlay").addEventListener("click", e => {
+  if (e.target === e.currentTarget) closePayReceiptModal();
+});
+document.getElementById("pay-bill-amount").addEventListener("keydown", e => {
+  if (e.key === "Enter") submitPayBill();
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    closeBillDetailModal();
+    closePayBillModal();
+    closePayReceiptModal();
+  }
+});
 
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -2527,7 +2951,10 @@ function render(d) {
     </div>
 
     <div class="card" style="animation-delay:300ms">
-      <h2>Cartões de Crédito</h2>
+      <div class="cards-section-head">
+        <h2>Cartões de Crédito</h2>
+        <button class="btn-pay-bill" type="button" onclick="openPayBillModal()">💳 Pagar fatura</button>
+      </div>
       ${!(d.credit_cards||[]).length?'<div class="empty">Nenhum cartão.</div>':
         d.credit_cards.map(c=>{
           const due   = c.due_amount != null ? c.due_amount : Math.max(0, (c.total||0) - (c.paid_amount||0));
@@ -2535,7 +2962,10 @@ function render(d) {
           const paid  = c.paid_amount || 0;
           const statusBadge = c.status === 'paid' ? 'paga' : c.status || '—';
           const hasData = total > 0 || paid > 0;
-          return `<div class="row">
+          const billRef = c.id ? ` data-card-id="${c.id}"` : '';
+          // Tenta achar a fatura aberta deste cartão pra abrir direto o detalhe
+          const openBills = (d.credit_cards||[]).filter(x=>x.id===c.id);
+          return `<div class="row card-row-clickable" onclick="onCardRowClick(this)"${billRef}>
             <span class="lbl">
               ${c.name}
               <span class="tag x">${statusBadge}</span>

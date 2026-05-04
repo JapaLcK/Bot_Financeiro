@@ -2261,6 +2261,224 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
     }
 
 
+def _months_pt():
+    return [
+        "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+        "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+    ]
+
+
+def _serialize_bill(row: dict) -> dict:
+    total = float(row.get("total") or 0)
+    paid = float(row.get("paid_amount") or 0)
+    due = max(0.0, total - paid)
+    pe = row.get("period_end")
+    label = ""
+    if pe:
+        label = f"{_months_pt()[pe.month - 1]}/{pe.year}"
+    return {
+        "id": int(row["id"]),
+        "card_id": int(row["card_id"]) if row.get("card_id") is not None else None,
+        "card_name": row.get("card_name") or "",
+        "period_start": pe and row.get("period_start").isoformat() if row.get("period_start") else None,
+        "period_end": pe.isoformat() if pe else None,
+        "label": label,
+        "status": row.get("status") or "open",
+        "total": total,
+        "paid_amount": paid,
+        "due_amount": due,
+    }
+
+
+@app.get("/bills/{user_id}")
+async def list_bills_route(request: Request, user_id: int):
+    """Lista todas as faturas em aberto do usuário (com cartão e valores)."""
+    _authorize_dashboard_access(request, user_id)
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import list_open_bills
+
+    rows = await asyncio.to_thread(list_open_bills, int(user_id))
+    bills = [_serialize_bill(dict(r)) for r in (rows or [])]
+    bills = [b for b in bills if b["due_amount"] > 0 or b["total"] > 0]
+
+    # saldo atual da conta — útil pro modal de pagamento
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT balance FROM accounts WHERE user_id=%s", (int(user_id),)
+            )
+            row = await cur.fetchone()
+    balance = float(row["balance"]) if row else 0.0
+
+    return {"ok": True, "balance": balance, "bills": bills}
+
+
+@app.get("/bills/{user_id}/{bill_id}")
+async def get_bill_detail_route(request: Request, user_id: int, bill_id: int):
+    """Detalhe da fatura: período, totais e lista de transações."""
+    _authorize_dashboard_access(request, user_id)
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT b.id, b.card_id, c.name AS card_name,
+                       b.period_start, b.period_end, b.status,
+                       b.total, COALESCE(b.paid_amount, 0) AS paid_amount
+                FROM credit_bills b
+                JOIN credit_cards c ON c.id = b.card_id
+                WHERE b.user_id=%s AND b.id=%s
+                LIMIT 1
+                """,
+                (int(user_id), int(bill_id)),
+            )
+            bill_row = await cur.fetchone()
+            if not bill_row:
+                raise HTTPException(status_code=404, detail="Fatura não encontrada.")
+
+            await cur.execute(
+                """
+                SELECT id, valor, categoria, nota, purchased_at, is_refund,
+                       installment_no, installments_total
+                FROM credit_transactions
+                WHERE user_id=%s AND bill_id=%s
+                ORDER BY purchased_at DESC, id DESC
+                """,
+                (int(user_id), int(bill_id)),
+            )
+            tx_rows = await cur.fetchall()
+
+    transactions = []
+    for t in (tx_rows or []):
+        transactions.append({
+            "id": int(t["id"]),
+            "valor": float(t["valor"] or 0),
+            "categoria": t.get("categoria"),
+            "nota": t.get("nota"),
+            "purchased_at": t["purchased_at"].isoformat() if t.get("purchased_at") else None,
+            "is_refund": bool(t.get("is_refund")),
+            "installment_no": t.get("installment_no"),
+            "installments_total": t.get("installments_total"),
+        })
+
+    return {"ok": True, "bill": _serialize_bill(dict(bill_row)), "transactions": transactions}
+
+
+class PayBillPayload(BaseModel):
+    amount: float | None = None  # None = paga total em aberto
+
+
+@app.post("/bills/{user_id}/{bill_id}/pay")
+async def pay_bill_route(
+    request: Request,
+    user_id: int,
+    bill_id: int,
+    payload: PayBillPayload,
+):
+    """Paga (parcial ou total) uma fatura. Bloqueia se saldo insuficiente.
+    Reusa `pay_bill_amount` (mesmo fluxo do `pagar fatura` do WhatsApp)."""
+    _authorize_dashboard_access(request, user_id)
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import pay_bill_amount
+
+    # Carrega fatura + saldo
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT b.id, b.card_id, c.name AS card_name,
+                       b.period_end, b.total,
+                       COALESCE(b.paid_amount, 0) AS paid_amount,
+                       b.status
+                FROM credit_bills b
+                JOIN credit_cards c ON c.id = b.card_id
+                WHERE b.user_id=%s AND b.id=%s
+                LIMIT 1
+                """,
+                (int(user_id), int(bill_id)),
+            )
+            bill = await cur.fetchone()
+            if not bill:
+                raise HTTPException(status_code=404, detail="Fatura não encontrada.")
+
+            await cur.execute(
+                "SELECT balance FROM accounts WHERE user_id=%s", (int(user_id),)
+            )
+            acc = await cur.fetchone()
+    balance = float(acc["balance"]) if acc else 0.0
+
+    total = float(bill["total"] or 0)
+    paid = float(bill["paid_amount"] or 0)
+    due = max(0.0, total - paid)
+    if due <= 0:
+        raise HTTPException(status_code=400, detail="Esta fatura já está paga.")
+
+    requested_amount = payload.amount
+    if requested_amount is None:
+        amount = due
+    else:
+        try:
+            amount = float(requested_amount)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Valor inválido.")
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="O valor deve ser maior que zero.")
+        if amount > due + 0.005:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Valor maior que o em aberto ({_fmt_money(due)})."
+                if False else f"Valor maior que o em aberto. Em aberto: R$ {due:.2f}",
+            )
+
+    # Saldo insuficiente bloqueia
+    if balance < amount - 0.005:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Saldo insuficiente. Saldo atual: R$ {balance:.2f}, valor pedido: R$ {amount:.2f}.",
+        )
+
+    card_name = bill["card_name"] or "cartão"
+    try:
+        res = await asyncio.to_thread(
+            pay_bill_amount, int(user_id), int(bill["card_id"]), card_name, float(amount), int(bill_id)
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Erro ao pagar fatura: {exc}") from exc
+
+    if isinstance(res, dict) and res.get("error") == "amount_too_high":
+        raise HTTPException(status_code=400, detail="Valor maior que o em aberto.")
+    if isinstance(res, dict) and res.get("error") == "invalid_amount":
+        raise HTTPException(status_code=400, detail="Valor inválido.")
+    if not res:
+        raise HTTPException(status_code=400, detail="Nada para pagar nessa fatura.")
+
+    # Re-lê o estado da fatura pós-pagamento
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT status, total, COALESCE(paid_amount,0) AS paid_amount FROM credit_bills WHERE id=%s",
+                (int(bill_id),),
+            )
+            after = await cur.fetchone()
+    new_total = float(after["total"] or 0) if after else total
+    new_paid = float(after["paid_amount"] or 0) if after else paid + amount
+    new_due = max(0.0, new_total - new_paid)
+
+    return {
+        "ok": True,
+        "paid": float(res.get("paid", amount)),
+        "launch_id": int(res.get("launch_id")) if res.get("launch_id") is not None else None,
+        "new_balance": float(res.get("new_balance", balance - amount)),
+        "card_name": card_name,
+        "bill_id": int(bill_id),
+        "bill_status": (after or {}).get("status") or "open",
+        "bill_total": new_total,
+        "bill_paid_amount": new_paid,
+        "bill_due_amount": new_due,
+    }
+
+
 @app.get("/export/{user_id}")
 async def export_csv(request: Request, user_id: int, year: int = None, month: int = None):
     _authorize_dashboard_access(request, user_id)
