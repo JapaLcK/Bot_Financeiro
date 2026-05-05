@@ -409,8 +409,9 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   background:rgba(96,165,250,.12);color:var(--blue);border:1px solid rgba(96,165,250,.2); }
 .tax-note { font-size:.72rem;color:var(--text-3);line-height:1.5; }
 .sim-result { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px; }
-.invest-titlebar { display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px; }
+.invest-titlebar { display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px; }
 .invest-titlebar .section-title { margin:0; }
+.invest-source-note { font-size:.72rem;color:var(--text-3);margin:0 0 14px;font-style:italic; }
 .invest-help-btn { display:inline-flex;align-items:center;gap:7px;background:rgba(96,165,250,.12);border:1px solid rgba(96,165,250,.28);
   color:var(--blue);border-radius:10px;padding:8px 12px;font-size:.78rem;font-weight:700;cursor:pointer;transition:all .2s var(--ease); }
 .invest-help-btn:hover { background:rgba(96,165,250,.18);color:var(--text); }
@@ -423,7 +424,7 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .help-step h4 { font-size:.86rem;margin-bottom:4px;color:var(--text); }
 .help-step p { font-size:.78rem;line-height:1.55;color:var(--text-2); }
 .help-note { background:rgba(52,211,153,.09);border:1px solid rgba(52,211,153,.2);border-radius:12px;
-  color:var(--text-2);font-size:.78rem;line-height:1.55;padding:12px;margin-top:12px; }
+  color:var(--text-2);font-size:.78rem;line-height:1.55;padding:12px;margin:12px 0 18px; }
 @media(max-width:900px) {
   .invest-layout{display:block}
   .invest-stack{display:flex;flex-direction:column;gap:12px}
@@ -704,6 +705,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
       <p class="section-title">Investimentos</p>
       <button class="invest-help-btn" type="button" onclick="openInvestmentHelp()">Como usar</button>
     </div>
+    <p class="invest-source-note">Taxas oficiais do Banco Central do Brasil (BCB).<br>A taxa CDI de cada dia útil só é divulgada na manhã do dia seguinte, então o saldo do dia atual é sempre estimado com a última taxa conhecida e corrigido automaticamente quando o dado oficial sai.</p>
     <div class="invest-layout">
       <div class="invest-stack">
         <div class="card">
@@ -1841,6 +1843,8 @@ function renderInvestmentsPanel(d) {
 	  document.getElementById("invest-list").innerHTML = invs.length ? invs.map(i => {
 	    const mRate = monthlyRate(i);
 	    const visibleName = displayInvestmentName(i);
+	    const useProj = (i.projected_days || 0) > 0 && i.projected_balance != null;
+	    const displayBal = useProj ? i.projected_balance : i.balance;
 	    return `
 	      <div class="invest-card" data-invest-name="${esc(i.name)}" onclick="openInvestmentDetail(this.dataset.investName)">
 	        <div class="invest-head">
@@ -1855,11 +1859,11 @@ function renderInvestmentsPanel(d) {
             </div>
           </div>
           <div style="text-align:right">
-            <div class="val b">${fmt(i.balance)}</div>
+            <div class="val b">${fmt(displayBal)}</div>
 	            <button class="ftab" style="margin-top:6px" data-invest-name="${esc(i.name)}" onclick="event.stopPropagation(); deleteInvestment(this.dataset.investName)">Remover</button>
           </div>
         </div>
-        <div class="tax-note">Estimativa mensal: bruto ${fmt(Number(i.balance || 0) * mRate)} · líquido ${fmt(Number(i.balance || 0) * mRate * .85)}</div>
+        <div class="tax-note">Estimativa mensal: bruto ${fmt(Number(displayBal || 0) * mRate)} · líquido ${fmt(Number(displayBal || 0) * mRate * .85)}</div>
       </div>
     `;
   }).join("") : `<div class="empty">Nenhum investimento cadastrado.</div>`;
@@ -3318,8 +3322,13 @@ function render(d) {
     <div class="card card-clickable" style="animation-delay:120ms" onclick="setMainView('investments')" title="Abrir aba de investimentos" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setMainView('investments');}">
 	      <h2>Investimentos</h2>
 	      ${!(d.investments||[]).length?'<div class="empty">Nenhum investimento.</div>':
-	        d.investments.map(i=>`<div class="row"><span class="lbl">${esc(displayInvestmentName(i))}</span>
-	          <span class="val b" data-num="inv_${i.name}" data-val="${i.balance}">${fmt(i.balance)}</span></div>`).join("")}
+	        d.investments.map(i=>{
+	          const useProj = (i.projected_days || 0) > 0 && i.projected_balance != null;
+	          const bal     = useProj ? i.projected_balance : i.balance;
+	          return `<div class="row"><span class="lbl">${esc(displayInvestmentName(i))}</span>
+	          <span class="val" data-num="inv_${i.name}" data-val="${bal}">${fmt(bal)}</span></div>`;
+	        }).join("")
+	      }
     </div>
 
     <div class="card" style="animation-delay:180ms">
@@ -3335,7 +3344,7 @@ function render(d) {
           ${p.description ? `<span style="display:block;font-size:.63rem;color:var(--text-3);margin-top:2px">${esc(p.description)}</span>` : ''}
         </span>
           <span class="pocket-right">
-            <span class="val" style="color:${PKT_CLR[i%3]}" data-num="pkt_${p.name}" data-val="${p.balance}">${fmt(p.balance)}</span>
+            <span class="val" data-num="pkt_${p.name}" data-val="${p.balance}">${fmt(p.balance)}</span>
             <button class="pocket-del" type="button" onclick="event.stopPropagation();confirmDeletePocket('${safeName}')" title="Excluir caixinha" aria-label="Excluir caixinha">×</button>
           </span>
         </div>`;
