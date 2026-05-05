@@ -2221,7 +2221,7 @@ async def serve_robots_txt():
 @app.get("/sitemap.xml")
 async def serve_sitemap_xml():
     urls = [
-        ("", "weekly", "1.0"),
+        ("/", "weekly", "1.0"),
         ("/whatsapp", "weekly", "0.8"),
         ("/funcionalidades", "weekly", "0.8"),
         ("/como-funciona", "weekly", "0.8"),
