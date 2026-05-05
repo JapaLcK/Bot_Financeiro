@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -11,14 +12,30 @@ from utils_text import (
     contains_word,
     extract_memory_candidates,
     canonicalize_category_label,
+    EXACT_WORD_KEYWORDS,
 )
 from db import get_memorized_category, upsert_category_rule
+
+
+# Tickers brasileiros (B3): 4 letras + 1 ou 2 dígitos.
+# Pega ações ON/PN (PETR3, VALE3, ITUB4), units (SANB11) e FIIs/ETFs
+# (MXRF11, HGLG11, BOVA11, IVVB11). Em MAIÚSCULAS aceita sem contexto;
+# em minúsculas (wege3, mxrf11) exige palavra-chave de operação financeira
+# na mesma frase pra evitar falsos positivos como "casa12 brinquedos".
+_BR_TICKER_UPPER_RE = re.compile(r"\b[A-Z]{4}\d{1,2}\b")
+_BR_TICKER_ANY_RE   = re.compile(r"\b[A-Za-z]{4}\d{1,2}\b")
+_INVEST_CONTEXT_RE  = re.compile(
+    r"\b(comprei|comprou|vendi|vendeu|aporte|aportei|investi|investir|"
+    r"aplique[ei]|aplicacao|aplicação|cotas?|dividendos?|proventos?|"
+    r"acoes|ações|acao|ação|fiis?|ticker|cot)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
 class InferResult:
     category: str
-    reason: str  # 'explicit' | 'user_rule' | 'local_rule' | 'default'
+    reason: str  # 'explicit' | 'user_rule' | 'local_rule' | 'ticker_match' | 'default'
 
 
 def infer_category(user_id: int, text_base: str, explicit_category: str | None = None) -> InferResult:
@@ -26,12 +43,28 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
     Prioridade:
       A) explícita (hashtag/cat=)
       B) regra do usuário (user_category_rules via get_memorized_category)
-      C) heurística local (LOCAL_RULES)
+      C) ticker brasileiro detectado (PETR4, MXRF11, …)
+      D) heurística local (LOCAL_RULES)
       default: 'outros'
     """
     if explicit_category:
         cat = canonicalize_category_label(explicit_category)
         return InferResult(category=cat or "outros", reason="explicit")
+
+    # C) ticker BR → aporte
+    if text_base:
+        if _BR_TICKER_UPPER_RE.search(text_base):
+            # MXRF11, PETR4 — em maiúsculas: aceita sempre
+            return InferResult(
+                category=canonicalize_category_label("investimento_aporte"),
+                reason="ticker_match",
+            )
+        if _BR_TICKER_ANY_RE.search(text_base) and _INVEST_CONTEXT_RE.search(text_base):
+            # wege3, mxrf11 — em minúsculas: só com contexto de operação
+            return InferResult(
+                category=canonicalize_category_label("investimento_aporte"),
+                reason="ticker_match",
+            )
 
     t = normalize_text(text_base or "")
     if not t:
@@ -48,9 +81,12 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
             kw_norm = normalize_text(kw)
             if not kw_norm:
                 continue
-            # evita falso positivo tipo "cavalcante" bater em "lca"
-            if len(kw_norm) <= 3:
-                ok = contains_word(t, kw_norm)          # só palavra inteira
+            # Casos que devem ser palavra inteira:
+            #  - keyword muito curta (≤3): evita "lca" bater em "cavalcante"
+            #  - keyword na lista EXACT_WORD_KEYWORDS: evita "acoes" bater em
+            #    "transações", "investi" em "investigar", etc.
+            if len(kw_norm) <= 3 or kw_norm in EXACT_WORD_KEYWORDS:
+                ok = contains_word(t, kw_norm)
             else:
                 ok = contains_word(t, kw_norm) or (kw_norm in t)
 

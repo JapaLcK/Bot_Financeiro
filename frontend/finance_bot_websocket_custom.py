@@ -517,6 +517,39 @@ async def get_financial_data(
             )
             categories = await cur.fetchall()
 
+            # Aportes do mês — saídas de conta corrente para investimentos/caixinhas.
+            # Captura:
+            #  - aporte_investimento (renda fixa via comando dedicado)
+            #  - deposito_caixinha (movimentação para caixinha)
+            #  - despesas marcadas como internas cuja categoria indica alocação
+            #    (compras de ação, "investi 1000", aportes em renda fixa via NLP, cripto, etc.)
+            await cur.execute(
+                """
+                SELECT
+                    CASE
+                        WHEN tipo = 'deposito_caixinha' THEN 'pockets'
+                        ELSE 'investments'
+                    END AS bucket,
+                    alvo,
+                    SUM(valor) AS total,
+                    COUNT(*)   AS count
+                FROM launches
+                WHERE user_id = %s
+                  AND criado_em >= %s AND criado_em < %s
+                  AND is_internal_movement = true
+                  AND (
+                    tipo IN ('aporte_investimento', 'deposito_caixinha')
+                    OR (tipo = 'despesa' AND LOWER(REPLACE(COALESCE(categoria, ''), ' ', '_')) IN (
+                        'investimentos', 'investimento_aporte', 'criptomoedas'
+                    ))
+                  )
+                GROUP BY bucket, alvo
+                ORDER BY bucket, total DESC
+                """,
+                (user_id, month_start, month_end),
+            )
+            allocations_rows = await cur.fetchall()
+
             # Credit cards — sempre listar TODOS os cartões do usuário,
             # mesmo sem nenhuma compra/fatura no mês selecionado.
             # Quando não houver fatura, o cartão deve aparecer com total/due/pago = 0.
@@ -632,6 +665,23 @@ async def get_financial_data(
     inc = monthly_map.get("receita", 0.0)
     exp = monthly_map.get("despesa", 0.0)
 
+    allocations = {"investments": {"total": 0.0, "count": 0, "by_target": []},
+                   "pockets":     {"total": 0.0, "count": 0, "by_target": []}}
+    for r in (allocations_rows or []):
+        bucket = r["bucket"]
+        if bucket not in allocations:
+            continue
+        v = float(r["total"] or 0)
+        allocations[bucket]["total"] += v
+        allocations[bucket]["count"] += int(r["count"] or 0)
+        allocations[bucket]["by_target"].append({
+            "alvo":  r.get("alvo") or "—",
+            "total": v,
+            "count": int(r["count"] or 0),
+        })
+    for bucket in allocations:
+        allocations[bucket]["by_target"].sort(key=lambda x: -x["total"])
+
     return {
         "user_id":            user_id,
         "timestamp":          datetime.now(timezone.utc).isoformat(),
@@ -653,6 +703,7 @@ async def get_financial_data(
         },
         "monthly_income":     inc,
         "monthly_expense":    exp,
+        "monthly_allocations": allocations,
         "expense_categories": cat_list,
         "credit_cards":       [dict(r) for r in cards],
         "budgets":            budget_map,

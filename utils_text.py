@@ -23,6 +23,36 @@ def contains_word(text: str, word: str) -> bool:
 
 # Regras locais (baratas) — já cobrindo mercado/psicologo/petshop
 LOCAL_RULES = [
+    # ─── Movimentações internas têm prioridade ────────────────────────────────
+    # Sem isso, frases como "mercado bitcoin" ou "fundo multimercado" caem em
+    # alimentação porque "mercado" bate primeiro.
+    #
+    # Aportes de investimento — movimentação interna (não é despesa real)
+    (["aporte", "aportei", "aportar", "aplicacao", "aplicação", "apliquei", "investi", "investir",
+      "compra de acoes", "compra de ações", "compra de acao", "compra de ação",
+      "acoes", "ações", "fii", "fiis", "cdb", "rdb", "lci", "lca", "cra", "cri",
+      "tesouro direto", "tesouro selic", "tesouro ipca", "tesouro pre", "tesouro pré",
+      "tesouro pos", "tesouro pós", "tesouro", "selic", "ipca", "etf",
+      "previdencia", "previdência", "previdencia privada", "previdência privada",
+      "pgbl", "vgbl", "fia", "fim", "multimercado", "fundo multimercado", "coe",
+      "debenture", "debênture",
+      "dolar", "dólar", "euro", "ouro",
+      "xp investimentos", "nuinvest", "btg", "btg pactual", "btg invest", "rico investimentos",
+      "clear corretora", "ágora", "agora corretora", "modal mais", "warren",
+      "binance", "mercado bitcoin", "mercado pago crypto", "coinbase",
+      ], "investimento_aporte"),
+    # Cripto — mantida separada porque o card "Aportes" usa essa categoria também
+    (["bitcoin", "btc", "ethereum", "eth", "solana", "sol", "cripto", "criptomoeda", "criptomoedas",
+      "doge", "dogecoin", "shiba", "shib", "ada", "cardano", "usdt", "tether",
+      "xrp", "ripple", "bnb", "polygon", "matic", "avax", "avalanche"], "criptomoedas"),
+    # Genérico "investimento" — ainda interno, captura quem digita "investi" sem produto
+    (["investimento", "investimentos"], "investimentos"),
+    # Resgates de investimento — movimentação interna (não é receita real)
+    (["resgate", "retirada de investimento", "retirei do investimento"], "investimento_resgate"),
+    # Rendimentos — receita real (lucro/juros/dividendos)
+    (["rendimento", "rendimentos", "juros", "dividendo", "dividendos", "lucro investimento"], "rendimentos"),
+
+    # ─── Despesas reais ───────────────────────────────────────────────────────
     (["mercado", "supermercado", "mercadinho", "hortifruti", "padaria", "cafe", "café", "cafeteria"], "alimentação"),
     (["aluguel", "condominio", "condomínio", "luz", "energia", "conta de luz", "agua", "água", "conta de agua",
       "conta de água", "gas", "gás", "internet", "wifi"], "moradia"),
@@ -33,18 +63,19 @@ LOCAL_RULES = [
     (["uber", "99", "taxi", "metro", "onibus", "gasolina", "combustivel"], "transporte"),
     (["academia", "remedio", "farmacia", "dentista", "consulta"], "saúde"),
     (["netflix", "spotify", "youtube", "prime video", "disney"], "assinaturas"),
-    # Aportes de investimento — movimentação interna (não é despesa real)
-    (["aporte", "aplicacao", "aplicação", "compra de acoes", "compra de ações", "compra de acao", "compra de ação",
-      "acao", "ação", "acoes", "ações", "fii", "fiis", "cdb", "rdb", "lci", "lca",
-      "tesouro", "selic", "ipca", "etf"], "investimento_aporte"),
-    # Cripto e referências diretas a investimentos também devem sair como movimentação interna
-    (["investimento", "investimentos"], "investimentos"),
-    (["bitcoin", "btc", "ethereum", "eth", "solana", "sol", "cripto", "criptomoeda", "criptomoedas"], "criptomoedas"),
-    # Resgates de investimento — movimentação interna (não é receita real)
-    (["resgate", "retirada de investimento", "retirei do investimento"], "investimento_resgate"),
-    # Rendimentos — receita real (lucro/juros/dividendos)
-    (["rendimento", "rendimentos", "juros", "dividendo", "dividendos", "lucro investimento"], "rendimentos")
 ]
+
+# Keywords que devem ser matchadas como palavra inteira (sem substring), para
+# evitar que "acoes" bata em "transações", "investi" em "investigar", etc.
+# A lista é normalizada (sem acento, lowercase) e checada antes da heurística
+# de substring em infer_category.
+EXACT_WORD_KEYWORDS = {
+    "acoes", "acao", "acoesp",
+    "investi", "investir", "investimento", "investimentos",
+    "aporte", "aportei", "aportar",
+    "ouro", "euro", "dolar",
+    "btg", "xp",
+}
 
 # Categorias que representam movimentações internas (não entram em receita/despesa do dashboard)
 INTERNAL_MOVEMENT_CATEGORIES = {

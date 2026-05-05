@@ -309,6 +309,32 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 }
 .pocket-del:hover { background:rgba(248,113,113,.14);color:var(--red); }
 
+/* ─── Aportes do mês card ──────────────────────────────────────────── */
+.aporte-summary {
+  background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.22);
+  border-radius:10px;padding:10px 14px;margin-bottom:14px;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+}
+.aporte-sum-k { font-size:.7rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:650; }
+.aporte-sum-v { font-size:1.05rem;font-weight:740;color:var(--blue);font-variant-numeric:tabular-nums; }
+.aporte-block { margin-bottom:14px; }
+.aporte-head {
+  display:flex;align-items:center;justify-content:space-between;
+  font-size:.78rem;font-weight:700;letter-spacing:.02em;
+  padding:6px 0;border-bottom:1px solid var(--div);margin-bottom:6px;
+}
+.aporte-row {
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:5px 0;font-size:.82rem;
+}
+.aporte-row .aporte-name {
+  color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  flex:1;min-width:0;
+}
+.aporte-row .aporte-val { color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;flex-shrink:0; }
+.aporte-more { font-size:.68rem;color:var(--text-3);text-align:right;margin-top:2px;font-style:italic; }
+.aporte-foot { font-size:.65rem;color:var(--text-3);font-style:italic;margin-top:8px;line-height:1.45; }
+
 /* ─── Pocket history modal ─────────────────────────────────────────── */
 .pkt-hist-summary {
   display:grid;grid-template-columns:repeat(3,1fr);gap:10px;
@@ -3288,8 +3314,10 @@ function render(d) {
   const np   = (d.pockets||[]).reduce((s,p)=>s+p.balance,0);
   const inc  = d.monthly_income  || 0;
   const exp  = d.monthly_expense || 0;
-  const sav  = inc - exp;
-  const rate = inc > 0 ? Math.round(sav/inc*100) : 0;
+  const allocSrc = d.monthly_allocations || {investments:{total:0}, pockets:{total:0}};
+  const apt  = (allocSrc.investments?.total || 0) + (allocSrc.pockets?.total || 0);
+  const sav  = inc - exp - apt;
+  const rate = inc > 0 ? Math.round(apt/inc*100) : 0;
   const rc   = rate>=20?"var(--green)":rate>=10?"var(--yellow)":"var(--red)";
   const hist = d.is_current_month !== undefined
     ? !d.is_current_month
@@ -3312,9 +3340,10 @@ function render(d) {
       <h2>Resumo — ${PT_MONTHS[rm-1]} ${ry}</h2>
       <div class="mrow"><span class="ml">💚 Receita</span><span class="mv g"><span data-num="inc" data-val="${inc}">${fmt(inc)}</span></span></div>
       <div class="mrow"><span class="ml">🔴 Despesas</span><span class="mv r"><span data-num="exp" data-val="${exp}">${fmt(exp)}</span></span></div>
+      <div class="mrow"><span class="ml">💎 Aportes</span><span class="mv b"><span data-num="apt" data-val="${apt}">${fmt(apt)}</span></span></div>
       <div class="mrow"><span class="ml">${sav>=0?'✨ Sobrou':'⚠ Déficit'}</span>
         <span class="mv" style="color:${sav>=0?'var(--green)':'var(--red)'}"><span data-num="sav" data-val="${sav}">${fmt(sav)}</span></span></div>
-      <div class="mrow"><span class="ml" style="font-size:.7rem;color:var(--text-3)">Taxa de poupança</span>
+      <div class="mrow"><span class="ml" style="font-size:.7rem;color:var(--text-3)" title="Aportes / Receita — % da renda que virou patrimônio">Taxa de poupança</span>
         <span class="mv" style="font-size:.95rem;color:${rc}">${rate}%</span></div>
       <div class="pbar-wrap"><div class="pbar-fill" style="width:${Math.min(Math.max(rate,0),100)}%;background:${rc}"></div></div>
     </div>
@@ -3349,6 +3378,45 @@ function render(d) {
           </span>
         </div>`;
         }).join("")}
+    </div>
+
+    <div class="card" style="animation-delay:210ms">
+      <h2>Aportes do mês</h2>
+      ${(() => {
+        const a = d.monthly_allocations || {investments:{total:0,by_target:[]}, pockets:{total:0,by_target:[]}};
+        const inv = a.investments || {total:0,by_target:[]};
+        const pkt = a.pockets     || {total:0,by_target:[]};
+        const totalAll = (inv.total || 0) + (pkt.total || 0);
+        if (!totalAll) return '<div class="empty">Sem aportes este mês.</div>';
+
+        const mkBlock = (title, item, color) => {
+          if (!item.total) return '';
+          const tgts = item.by_target.slice(0, 6).map(t => `
+            <div class="aporte-row">
+              <span class="aporte-name">${esc(t.alvo)}</span>
+              <span class="aporte-val">${fmt(t.total)}</span>
+            </div>`).join("");
+          const more = item.by_target.length > 6 ? `<div class="aporte-more">+${item.by_target.length - 6} outros</div>` : '';
+          return `
+            <div class="aporte-block">
+              <div class="aporte-head">
+                <span class="aporte-bucket" style="color:${color}">${title}</span>
+                <span class="aporte-total" style="color:${color}">${fmt(item.total)}</span>
+              </div>
+              ${tgts}${more}
+            </div>`;
+        };
+
+        return `
+          <div class="aporte-summary">
+            <div class="aporte-sum-k">Total alocado</div>
+            <div class="aporte-sum-v">${fmt(totalAll)}</div>
+          </div>
+          ${mkBlock("Investimentos", inv, "var(--blue)")}
+          ${mkBlock("Caixinhas",     pkt, "var(--purple)")}
+          <div class="aporte-foot">Não conta como despesa — é alocação de patrimônio.</div>
+        `;
+      })()}
     </div>
 
     <div class="card" style="animation-delay:240ms">
