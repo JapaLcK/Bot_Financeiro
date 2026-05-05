@@ -904,8 +904,8 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
     </div>
 
     <div class="modal-row" style="margin-bottom:18px">
-      <label class="modal-label" for="pocket-nota">Observação (opcional)</label>
-      <textarea class="modal-inp" id="pocket-nota" placeholder="Para que serve esta caixinha?" maxlength="200"></textarea>
+      <label class="modal-label" for="pocket-description">Descrição (opcional)</label>
+      <textarea class="modal-inp" id="pocket-description" placeholder="Para que serve esta caixinha?" maxlength="200"></textarea>
     </div>
 
     <div class="modal-error" id="pocket-error"></div>
@@ -913,6 +913,35 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
     <div class="modal-acts">
       <button class="btn-cancel" type="button" onclick="closePocketModal()">Cancelar</button>
       <button class="btn-save" type="button" id="pocket-submit-btn" onclick="submitPocket()">Criar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="card-overlay">
+  <div class="modal">
+    <h3>Novo cartão</h3>
+    <p class="msub">Cadastre um cartão de crédito para registrar compras e acompanhar a fatura.</p>
+
+    <div class="modal-row">
+      <label class="modal-label" for="card-name">Nome</label>
+      <input class="modal-inp" id="card-name" type="text" placeholder="Ex: Nubank, Inter Black, Itaú..." maxlength="80" />
+    </div>
+
+    <div class="modal-row">
+      <label class="modal-label" for="card-closing-day">Dia de fechamento</label>
+      <input class="modal-inp" id="card-closing-day" type="number" placeholder="Ex: 28" min="1" max="31" step="1" inputmode="numeric" />
+    </div>
+
+    <div class="modal-row" style="margin-bottom:18px">
+      <label class="modal-label" for="card-due-day">Dia de vencimento</label>
+      <input class="modal-inp" id="card-due-day" type="number" placeholder="Ex: 5" min="1" max="31" step="1" inputmode="numeric" />
+    </div>
+
+    <div class="modal-error" id="card-error"></div>
+
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closeCardModal()">Cancelar</button>
+      <button class="btn-save" type="button" id="card-submit-btn" onclick="submitCard()">Criar</button>
     </div>
   </div>
 </div>
@@ -2427,7 +2456,7 @@ let pocketSubmitting = false;
 
 function openPocketModal() {
   document.getElementById("pocket-name").value = "";
-  document.getElementById("pocket-nota").value = "";
+  document.getElementById("pocket-description").value = "";
   hidePocketError();
   document.getElementById("pocket-overlay").classList.add("open");
   setTimeout(() => document.getElementById("pocket-name").focus(), 50);
@@ -2454,7 +2483,7 @@ async function submitPocket() {
   hidePocketError();
 
   const name = document.getElementById("pocket-name").value.trim();
-  const nota = document.getElementById("pocket-nota").value.trim();
+  const description = document.getElementById("pocket-description").value.trim();
   if (!name) {
     showPocketError("Informe o nome da caixinha.");
     return;
@@ -2471,7 +2500,7 @@ async function submitPocket() {
       method: "POST",
       credentials: "same-origin",
       headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ name, nota: nota || null }),
+      body: JSON.stringify({ name, description: description || null }),
     });
     const data = await readResponsePayload(res);
     if (!res.ok) throw new Error(data.detail || "Erro ao criar caixinha.");
@@ -2495,6 +2524,93 @@ document.getElementById("pocket-overlay").addEventListener("click", e => {
 });
 document.getElementById("pocket-name").addEventListener("keydown", e => {
   if (e.key === "Enter") submitPocket();
+});
+
+// ─── Cartão de crédito (criar) ───────────────────────────────────────────────
+let cardSubmitting = false;
+
+function openCardModal() {
+  document.getElementById("card-name").value = "";
+  document.getElementById("card-closing-day").value = "";
+  document.getElementById("card-due-day").value = "";
+  hideCardError();
+  document.getElementById("card-overlay").classList.add("open");
+  setTimeout(() => document.getElementById("card-name").focus(), 50);
+}
+
+function closeCardModal() {
+  document.getElementById("card-overlay").classList.remove("open");
+}
+
+function hideCardError() {
+  const el = document.getElementById("card-error");
+  el.classList.remove("show");
+  el.textContent = "";
+}
+
+function showCardError(msg) {
+  const el = document.getElementById("card-error");
+  el.textContent = msg;
+  el.classList.add("show");
+}
+
+async function submitCard() {
+  if (cardSubmitting) return;
+  hideCardError();
+
+  const name = document.getElementById("card-name").value.trim();
+  const closingDay = parseInt(document.getElementById("card-closing-day").value, 10);
+  const dueDay = parseInt(document.getElementById("card-due-day").value, 10);
+
+  if (!name) {
+    showCardError("Informe o nome do cartão.");
+    return;
+  }
+  if (!closingDay || closingDay < 1 || closingDay > 31) {
+    showCardError("Dia de fechamento deve ser entre 1 e 31.");
+    return;
+  }
+  if (!dueDay || dueDay < 1 || dueDay > 31) {
+    showCardError("Dia de vencimento deve ser entre 1 e 31.");
+    return;
+  }
+
+  const btn = document.getElementById("card-submit-btn");
+  cardSubmitting = true;
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = "Criando...";
+
+  try {
+    const res = await fetch(`${API}/cards/${USER_ID}`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ name, closing_day: closingDay, due_day: dueDay }),
+    });
+    const data = await readResponsePayload(res);
+    if (!res.ok) throw new Error(data.detail || "Erro ao criar cartão.");
+
+    closeCardModal();
+    const canon = (data.card && data.card.name) || name;
+    showLaunchSuccessToast(`✓ Cartão "${canon}" criado`);
+    sendRefresh();
+  } catch (err) {
+    showCardError(err.message || "Erro ao criar cartão.");
+  } finally {
+    cardSubmitting = false;
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+}
+
+document.getElementById("card-overlay").addEventListener("click", e => {
+  if (e.target === e.currentTarget) closeCardModal();
+});
+["card-name", "card-closing-day", "card-due-day"].forEach(id => {
+  document.getElementById(id).addEventListener("keydown", e => {
+    if (e.key === "Enter") submitCard();
+  });
 });
 
 // Auto-abre quando vem com ?action=launch (atalho da home)
@@ -3024,7 +3140,10 @@ function render(d) {
         <button class="hbtn" type="button" onclick="openPocketModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Nova</button>
       </div>
       ${!(d.pockets||[]).length?'<div class="empty">Nenhuma caixinha.</div>':
-        d.pockets.map((p,i)=>`<div class="row"><span class="lbl">${p.name}</span>
+        d.pockets.map((p,i)=>`<div class="row"><span class="lbl">
+          ${esc(p.name)}
+          ${p.description ? `<span style="display:block;font-size:.63rem;color:var(--text-3);margin-top:2px">${esc(p.description)}</span>` : ''}
+        </span>
           <span class="val" style="color:${PKT_CLR[i%3]}" data-num="pkt_${p.name}" data-val="${p.balance}">${fmt(p.balance)}</span></div>`).join("")}
     </div>
 
@@ -3055,7 +3174,10 @@ function render(d) {
     <div class="card" style="animation-delay:300ms">
       <div class="cards-section-head">
         <h2>Cartões de Crédito</h2>
-        <button class="btn-pay-bill" type="button" onclick="openPayBillModal()">💳 Pagar fatura</button>
+        <div style="display:flex;gap:8px">
+          <button class="hbtn" type="button" onclick="openCardModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Novo</button>
+          <button class="btn-pay-bill" type="button" onclick="openPayBillModal()">💳 Pagar fatura</button>
+        </div>
       </div>
       ${!(d.credit_cards||[]).length?'<div class="empty">Nenhum cartão.</div>':
         d.credit_cards.map(c=>{

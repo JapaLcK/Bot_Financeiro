@@ -17,7 +17,7 @@ def list_pockets(user_id: int):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, name, balance from pockets where user_id=%s order by lower(name)",
+                "select id, name, balance, description from pockets where user_id=%s order by lower(name)",
                 (user_id,),
             )
             return cur.fetchall()
@@ -80,24 +80,28 @@ def pocket_withdraw_to_account(
     return launch_id, new_acc, new_pocket, canon
 
 
-def create_pocket(user_id: int, name: str, nota: str | None = None):
+def create_pocket(user_id: int, name: str, nota: str | None = None, description: str | None = None):
     """
     Cria caixinha. Retorna (launch_id, pocket_id, pocket_name).
     Se já existir, retorna (None, pocket_id, pocket_name).
+
+    `nota` vira o texto do lançamento (audit log).
+    `description` é a descrição visível da caixinha (mostrada no dashboard).
     """
     ensure_user(user_id)
     name = (name or "").strip()
     if not name:
         raise ValueError("EMPTY_NAME")
 
+    desc = (description or "").strip() or None
     criado_em = datetime.now(_tz())
 
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "insert into pockets(user_id, name, balance) values (%s, %s, 0) "
+                "insert into pockets(user_id, name, balance, description) values (%s, %s, 0, %s) "
                 "on conflict (user_id, name) do nothing returning id, name",
-                (user_id, name),
+                (user_id, name, desc),
             )
             row = cur.fetchone()
 

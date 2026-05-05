@@ -95,6 +95,9 @@ def init_db():
         alter table investments add column if not exists tax_profile text not null default 'regressive_ir_iof'
         """,
         """
+        alter table pockets add column if not exists description text
+        """,
+        """
         create table if not exists launches (
           id bigserial primary key,
           user_id bigint not null references users(id) on delete cascade,

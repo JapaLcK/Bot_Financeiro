@@ -55,6 +55,7 @@ from core.admin_dashboard import (
 )
 from db import (
     accrue_all_investments,
+    create_card,
     create_investment_db,
     create_pocket,
     delete_investment,
@@ -2264,7 +2265,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
 
 class PocketCreatePayload(BaseModel):
     name: str
-    nota: str | None = None
+    description: str | None = None
 
 
 @app.post("/pockets/{user_id}")
@@ -2273,14 +2274,17 @@ async def create_pocket_route(request: Request, user_id: int, payload: PocketCre
     _authorize_dashboard_access(request, user_id)
 
     name = (payload.name or "").strip()
+    description = (payload.description or "").strip() or None
     if not name:
         raise HTTPException(status_code=400, detail="Nome da caixinha é obrigatório.")
     if len(name) > 80:
         raise HTTPException(status_code=400, detail="Nome muito longo (máx. 80 caracteres).")
+    if description and len(description) > 200:
+        raise HTTPException(status_code=400, detail="Descrição muito longa (máx. 200 caracteres).")
 
     try:
         launch_id, pocket_id, canon = await asyncio.to_thread(
-            create_pocket, user_id, name, payload.nota,
+            create_pocket, user_id, name, None, description,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2289,7 +2293,50 @@ async def create_pocket_route(request: Request, user_id: int, payload: PocketCre
     return {
         "ok": True,
         "created": launch_id is not None,
-        "pocket": {"id": int(pocket_id), "name": canon},
+        "pocket": {"id": int(pocket_id), "name": canon, "description": description},
+    }
+
+
+class CardCreatePayload(BaseModel):
+    name: str
+    closing_day: int
+    due_day: int
+
+
+@app.post("/cards/{user_id}")
+async def create_card_route(request: Request, user_id: int, payload: CardCreatePayload):
+    """Cria um cartão de crédito."""
+    _authorize_dashboard_access(request, user_id)
+
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nome do cartão é obrigatório.")
+    if len(name) > 80:
+        raise HTTPException(status_code=400, detail="Nome muito longo (máx. 80 caracteres).")
+    if not (1 <= payload.closing_day <= 31):
+        raise HTTPException(status_code=400, detail="Dia de fechamento deve estar entre 1 e 31.")
+    if not (1 <= payload.due_day <= 31):
+        raise HTTPException(status_code=400, detail="Dia de vencimento deve estar entre 1 e 31.")
+
+    try:
+        card_id = await asyncio.to_thread(
+            create_card, user_id, name, payload.closing_day, payload.due_day,
+        )
+    except ValueError as exc:
+        msg = str(exc)
+        if msg.startswith("nome_duplicado:"):
+            raise HTTPException(status_code=409, detail=f"Já existe um cartão chamado \"{name}\".") from exc
+        raise HTTPException(status_code=400, detail=msg) from exc
+
+    _invalidate_dashboard_current_cache(user_id)
+    return {
+        "ok": True,
+        "card": {
+            "id": int(card_id),
+            "name": name,
+            "closing_day": payload.closing_day,
+            "due_day": payload.due_day,
+        },
     }
 
 
