@@ -1394,6 +1394,7 @@ async def auth_dashboard_profile(request: Request, response: Response):
         "email": (auth_user or {}).get("email"),
         "display_name": (auth_user or {}).get("display_name"),
         "plan": (auth_user or {}).get("plan"),
+        "whatsapp_linked": bool((auth_user or {}).get("whatsapp_verified_at")),
     }
 
 
