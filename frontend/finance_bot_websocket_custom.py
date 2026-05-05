@@ -56,6 +56,7 @@ from core.admin_dashboard import (
 from db import (
     accrue_all_investments,
     create_investment_db,
+    create_pocket,
     delete_investment,
     create_mock_open_finance_connection,
     disconnect_open_finance_connection,
@@ -2258,6 +2259,37 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         "nota": nota,
         "new_balance": float(new_balance),
         "is_internal_movement": is_internal,
+    }
+
+
+class PocketCreatePayload(BaseModel):
+    name: str
+    nota: str | None = None
+
+
+@app.post("/pockets/{user_id}")
+async def create_pocket_route(request: Request, user_id: int, payload: PocketCreatePayload):
+    """Cria uma caixinha (pocket) com saldo zero."""
+    _authorize_dashboard_access(request, user_id)
+
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nome da caixinha é obrigatório.")
+    if len(name) > 80:
+        raise HTTPException(status_code=400, detail="Nome muito longo (máx. 80 caracteres).")
+
+    try:
+        launch_id, pocket_id, canon = await asyncio.to_thread(
+            create_pocket, user_id, name, payload.nota,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    _invalidate_dashboard_current_cache(user_id)
+    return {
+        "ok": True,
+        "created": launch_id is not None,
+        "pocket": {"id": int(pocket_id), "name": canon},
     }
 
 

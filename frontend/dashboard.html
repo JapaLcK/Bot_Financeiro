@@ -893,6 +893,30 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 
 <div class="modal-success-toast" id="launch-success-toast"></div>
 
+<div class="overlay" id="pocket-overlay">
+  <div class="modal">
+    <h3>Nova caixinha</h3>
+    <p class="msub">Crie uma caixinha para reservar dinheiro para um objetivo (viagem, emergência, etc).</p>
+
+    <div class="modal-row">
+      <label class="modal-label" for="pocket-name">Nome</label>
+      <input class="modal-inp" id="pocket-name" type="text" placeholder="Ex: Viagem, Emergência, Carro..." maxlength="80" />
+    </div>
+
+    <div class="modal-row" style="margin-bottom:18px">
+      <label class="modal-label" for="pocket-nota">Observação (opcional)</label>
+      <textarea class="modal-inp" id="pocket-nota" placeholder="Para que serve esta caixinha?" maxlength="200"></textarea>
+    </div>
+
+    <div class="modal-error" id="pocket-error"></div>
+
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closePocketModal()">Cancelar</button>
+      <button class="btn-save" type="button" id="pocket-submit-btn" onclick="submitPocket()">Criar</button>
+    </div>
+  </div>
+</div>
+
 <!-- ─── Detalhe da fatura ──────────────────────────────────────────────── -->
 <div class="overlay" id="bill-detail-overlay">
   <div class="modal wide">
@@ -2398,6 +2422,81 @@ document.getElementById("launch-valor").addEventListener("keydown", e => {
   if (e.key === "Enter") submitLaunch();
 });
 
+// ─── Caixinha (criar) ────────────────────────────────────────────────────────
+let pocketSubmitting = false;
+
+function openPocketModal() {
+  document.getElementById("pocket-name").value = "";
+  document.getElementById("pocket-nota").value = "";
+  hidePocketError();
+  document.getElementById("pocket-overlay").classList.add("open");
+  setTimeout(() => document.getElementById("pocket-name").focus(), 50);
+}
+
+function closePocketModal() {
+  document.getElementById("pocket-overlay").classList.remove("open");
+}
+
+function hidePocketError() {
+  const el = document.getElementById("pocket-error");
+  el.classList.remove("show");
+  el.textContent = "";
+}
+
+function showPocketError(msg) {
+  const el = document.getElementById("pocket-error");
+  el.textContent = msg;
+  el.classList.add("show");
+}
+
+async function submitPocket() {
+  if (pocketSubmitting) return;
+  hidePocketError();
+
+  const name = document.getElementById("pocket-name").value.trim();
+  const nota = document.getElementById("pocket-nota").value.trim();
+  if (!name) {
+    showPocketError("Informe o nome da caixinha.");
+    return;
+  }
+
+  const btn = document.getElementById("pocket-submit-btn");
+  pocketSubmitting = true;
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = "Criando...";
+
+  try {
+    const res = await fetch(`${API}/pockets/${USER_ID}`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ name, nota: nota || null }),
+    });
+    const data = await readResponsePayload(res);
+    if (!res.ok) throw new Error(data.detail || "Erro ao criar caixinha.");
+
+    closePocketModal();
+    const created = data.created !== false;
+    const canon = (data.pocket && data.pocket.name) || name;
+    showLaunchSuccessToast(created ? `✓ Caixinha "${canon}" criada` : `Caixinha "${canon}" já existe`);
+    sendRefresh();
+  } catch (err) {
+    showPocketError(err.message || "Erro ao criar caixinha.");
+  } finally {
+    pocketSubmitting = false;
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+}
+
+document.getElementById("pocket-overlay").addEventListener("click", e => {
+  if (e.target === e.currentTarget) closePocketModal();
+});
+document.getElementById("pocket-name").addEventListener("keydown", e => {
+  if (e.key === "Enter") submitPocket();
+});
+
 // Auto-abre quando vem com ?action=launch (atalho da home)
 (function maybeOpenFromQuery() {
   try {
@@ -2920,7 +3019,10 @@ function render(d) {
     </div>
 
     <div class="card" style="animation-delay:180ms">
-      <h2>Caixinhas</h2>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <h2 style="margin:0">Caixinhas</h2>
+        <button class="hbtn" type="button" onclick="openPocketModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Nova</button>
+      </div>
       ${!(d.pockets||[]).length?'<div class="empty">Nenhuma caixinha.</div>':
         d.pockets.map((p,i)=>`<div class="row"><span class="lbl">${p.name}</span>
           <span class="val" style="color:${PKT_CLR[i%3]}" data-num="pkt_${p.name}" data-val="${p.balance}">${fmt(p.balance)}</span></div>`).join("")}
