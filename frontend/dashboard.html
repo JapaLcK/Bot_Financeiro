@@ -2614,17 +2614,31 @@ document.getElementById("card-overlay").addEventListener("click", e => {
 });
 
 // Auto-abre quando vem com ?action=launch (atalho da home)
-(function maybeOpenFromQuery() {
+function whenDashboardReady(maxWaitMs = 8000) {
+  return new Promise(resolve => {
+    if (lastData) { resolve(true); return; }
+    const start = Date.now();
+    const interval = setInterval(() => {
+      if (lastData || Date.now() - start > maxWaitMs) {
+        clearInterval(interval);
+        resolve(Boolean(lastData));
+      }
+    }, 50);
+  });
+}
+
+(async function maybeOpenFromQuery() {
   try {
     const action = params.get("action");
+    if (action !== "launch" && action !== "pay-bill") return;
+    await whenDashboardReady();
     if (action === "launch") {
-      // Aguarda init do dashboard rodar antes de abrir o modal
       const tipoParam = params.get("tipo");
-      const opts = (tipoParam === "receita" || tipoParam === "despesa") ? { tipo: tipoParam } : {};
-      // Pequeno delay pra garantir que /auth/validate completou
-      setTimeout(() => openLaunchModal(opts), 400);
+      const opts = (tipoParam === "receita" || tipoParam === "despesa" || tipoParam === "credito")
+        ? { tipo: tipoParam } : {};
+      openLaunchModal(opts);
     } else if (action === "pay-bill") {
-      setTimeout(() => openPayBillModal(), 400);
+      openPayBillModal();
     }
   } catch {}
 })();
