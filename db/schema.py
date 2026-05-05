@@ -483,6 +483,24 @@ def init_db():
         create index if not exists idx_password_reset_tokens_expires on password_reset_tokens (expires_at)
         """,
         """
+        create table if not exists data_export_tokens (
+          token text primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          expires_at timestamptz not null,
+          used_at timestamptz,
+          request_ip text,
+          request_user_agent text,
+          delivered_to_email text,
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_data_export_tokens_expires on data_export_tokens (expires_at)
+        """,
+        """
+        create index if not exists idx_data_export_tokens_user on data_export_tokens (user_id, created_at desc)
+        """,
+        """
         create table if not exists auth_rate_limits (
           bucket text not null,
           identifier text not null,

@@ -157,7 +157,23 @@ def test_logout_expires_auth_and_dashboard_cookies():
     assert any(cookie.startswith("dashboard_token=") and "Max-Age=0" in cookie for cookie in set_cookie)
 
 
-def test_account_export_downloads_full_archive_without_password_hash(user_id):
+def test_account_export_requires_password_and_emails_single_use_link(user_id, monkeypatch):
+    import core.services.email_service as email_service
+
+    sent_links: list[tuple[str, str]] = []
+    sent_completions: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        email_service,
+        "send_data_export_link_email",
+        lambda to, download_url, *a, **kw: sent_links.append((to, download_url)) or True,
+    )
+    monkeypatch.setattr(
+        email_service,
+        "send_data_export_completed_email",
+        lambda to, completed_at, *a, **kw: sent_completions.append((to, completed_at)) or True,
+    )
+
+    email = f"export-{user_id}@example.com"
     with db.get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -165,7 +181,7 @@ def test_account_export_downloads_full_archive_without_password_hash(user_id):
                 insert into auth_accounts (user_id, email, password_hash, phone_e164, phone_status)
                 values (%s, %s, %s, %s, 'confirmed')
                 """,
-                (user_id, f"export-{user_id}@example.com", _hash_password("secret123"), f"+1555{user_id}"),
+                (user_id, email, _hash_password("secret123"), f"+1555{user_id}"),
             )
             cur.execute(
                 """
@@ -204,11 +220,59 @@ def test_account_export_downloads_full_archive_without_password_hash(user_id):
             )
         conn.commit()
 
-    token = dashboard.make_dashboard_token(user_id, hours=1)
+    dash_token = dashboard.make_dashboard_token(user_id, hours=1)
     client = TestClient(dashboard.app)
-    client.cookies.set("dashboard_token", token)
+    client.cookies.set("dashboard_token", dash_token)
 
-    response = client.get("/auth/account/export")
+    # Senha errada → 401, sem e-mail enviado, sem token persistido.
+    wrong = client.post(
+        "/auth/account/export",
+        headers=_csrf_headers(client),
+        json={"password": "errada"},
+    )
+    assert wrong.status_code == 401
+    assert sent_links == []
+
+    # Senha correta → 200, e-mail enviado, token persistido.
+    ok = client.post(
+        "/auth/account/export",
+        headers=_csrf_headers(client),
+        json={"password": "secret123"},
+    )
+    assert ok.status_code == 200
+    body = ok.json()
+    assert body["status"] == "email_sent"
+    assert body["expires_in_minutes"] == 15
+    assert len(sent_links) == 1
+    sent_to, download_url = sent_links[0]
+    assert sent_to == email
+    assert "/auth/account/export/download/" in download_url
+
+    export_token = download_url.rsplit("/", 1)[-1]
+    assert len(export_token) >= 32  # secrets.token_urlsafe(32) → ~43 chars
+
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select user_id, used_at from data_export_tokens where token = %s",
+            (export_token,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    assert row["user_id"] == user_id
+    assert row["used_at"] is None
+
+    # Cooldown: pedido imediato repetido → 429.
+    repeat = client.post(
+        "/auth/account/export",
+        headers=_csrf_headers(client),
+        json={"password": "secret123"},
+    )
+    assert repeat.status_code == 429
+    assert len(sent_links) == 1
+
+    # Download válido (sem cookie de sessão — só posse do token basta).
+    download_client = TestClient(dashboard.app)
+    response = download_client.get(f"/auth/account/export/download/{export_token}")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/zip")
@@ -219,6 +283,14 @@ def test_account_export_downloads_full_archive_without_password_hash(user_id):
     assert payload["manifesto"]["datasets"]["lancamentos"] >= 1
     assert payload["manifesto"]["datasets"]["transacoes_cartao"] >= 1
     assert "password_hash" not in json.dumps(payload)
+
+    # Token agora foi consumido → segundo download retorna 410.
+    second = download_client.get(f"/auth/account/export/download/{export_token}")
+    assert second.status_code == 410
+
+    # Token desconhecido → 410.
+    unknown = download_client.get("/auth/account/export/download/token-que-nao-existe")
+    assert unknown.status_code == 410
 
 
 def test_delete_account_schedules_deletion_and_blocks_dashboard_token(user_id, monkeypatch):

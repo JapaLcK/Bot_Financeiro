@@ -201,6 +201,11 @@ from .privacy import (
     build_user_export_zip,
     delete_user_data,
     process_due_account_deletions,
+    verify_user_password,
+    get_user_email,
+    create_data_export_token,
+    consume_data_export_token,
+    has_recent_export_request,
 )
 
 __all__ = [
@@ -269,4 +274,7 @@ __all__ = [
     "ensure_account_deletion_columns", "is_account_scheduled_for_deletion",
     "schedule_account_deletion", "build_user_export_zip", "delete_user_data",
     "process_due_account_deletions",
+    "verify_user_password", "get_user_email",
+    "create_data_export_token", "consume_data_export_token",
+    "has_recent_export_request",
 ]

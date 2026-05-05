@@ -1366,13 +1366,18 @@ a { color: inherit; text-decoration: none; }
               <div class="data-row">
                 <span>
                   <span class="data-title">Exportação completa</span>
-                  <span class="data-sub">Gera um arquivo ZIP com JSON completo e CSVs de lançamentos, cartões, investimentos, caixinhas, Open Finance e preferências.</span>
+                  <span class="data-sub">Gera um arquivo ZIP com JSON completo e CSVs de lançamentos, cartões, investimentos, caixinhas, Open Finance e preferências. Por segurança, enviamos um link de download único para o seu e-mail (válido por 15 minutos).</span>
                 </span>
                 <span class="data-actions">
-                  <button class="btn-connect" type="button" id="export-data-btn" onclick="exportMyData()" style="width:auto; min-width:190px; padding:0 18px">
+                  <button class="btn-connect" type="button" id="export-data-btn" onclick="showExportConfirm()" style="width:auto; min-width:190px; padding:0 18px">
                     Exportar meus dados
                   </button>
                 </span>
+              </div>
+              <div class="delete-confirm" id="export-confirm" style="margin-top:12px">
+                <input class="privacy-input" id="export-password" type="password" autocomplete="current-password" placeholder="Confirme sua senha" />
+                <button class="btn-connect" type="button" id="export-confirm-btn" onclick="requestDataExport()" style="width:auto;min-width:190px;padding:0 18px">Enviar link por e-mail</button>
+                <button class="btn-sm" type="button" onclick="hideExportConfirm()">Cancelar</button>
               </div>
             </div>
           </div>
@@ -1772,30 +1777,41 @@ async function updateNotificationSettings(patch) {
   }
 }
 
-async function exportMyData() {
-  const btn = document.getElementById("export-data-btn");
+function showExportConfirm() {
+  document.getElementById("export-confirm").classList.add("show");
+  document.getElementById("export-password").focus();
+}
+
+function hideExportConfirm() {
+  document.getElementById("export-confirm").classList.remove("show");
+  document.getElementById("export-password").value = "";
+}
+
+async function requestDataExport() {
+  const password = document.getElementById("export-password").value;
+  if (!password) {
+    showToast("Confirme sua senha", "error");
+    return;
+  }
+
+  const btn = document.getElementById("export-confirm-btn");
   const original = btn.textContent;
   btn.disabled = true;
-  btn.textContent = "Gerando...";
+  btn.textContent = "Enviando...";
   try {
     const resp = await fetch(`${API}/auth/account/export`, {
-      method: "GET",
+      method: "POST",
       credentials: "same-origin",
-      headers: authHeaders(),
+      headers: authHeaders({ "Content-Type":"application/json" }),
+      body: JSON.stringify({ password }),
     });
     if (!resp.ok) throw new Error(await readApiError(resp));
-    const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filenameFromDisposition(resp.headers.get("content-disposition"), `pigbank_dados_${USER_ID}.zip`);
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    showToast("Exportação gerada", "ok");
+    const data = await resp.json();
+    hideExportConfirm();
+    const minutes = Number(data.expires_in_minutes || 15);
+    showToast(`Link enviado para o seu e-mail (válido por ${minutes} min). Verifique sua caixa de entrada.`, "ok");
   } catch (err) {
-    showToast(err.message || "Erro ao exportar dados", "error");
+    showToast(err.message || "Erro ao solicitar exportação", "error");
   } finally {
     btn.disabled = false;
     btn.textContent = original;

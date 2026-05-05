@@ -20,6 +20,7 @@ import asyncio
 import csv
 import io
 import json
+import logging
 import os
 import pathlib
 import secrets
@@ -65,6 +66,11 @@ from db import (
     get_open_finance_snapshot,
     get_auth_user,
     build_user_export_zip,
+    verify_user_password,
+    get_user_email,
+    create_data_export_token,
+    consume_data_export_token,
+    has_recent_export_request,
     ensure_account_deletion_columns,
     get_daily_report_prefs,
     is_account_scheduled_for_deletion,
@@ -1356,6 +1362,10 @@ class DeleteAccountBody(BaseModel):
     password: str
 
 
+class DataExportBody(BaseModel):
+    password: str
+
+
 class SecurityContactPayload(BaseModel):
     email: str | None = None
     phone: str | None = None
@@ -1605,13 +1615,171 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     return {"user_id": user_id, **dict(user)}
 
 
-@app.get("/auth/account/export")
-async def auth_account_export(request: Request):
-    """Exporta todos os dados do usuário autenticado em ZIP com JSON e CSVs."""
+@app.post("/auth/account/export")
+@limiter.limit("3/hour")
+async def auth_account_export_request(request: Request, body: DataExportBody):
+    """
+    Solicita exportação completa de dados.
+
+    Camadas de proteção (LGPD + segurança):
+      - Rate limit por IP (3/hora) — evita abuso por automação.
+      - Re-autenticação por senha — sessão roubada (cookie/token) não basta.
+      - Cooldown por usuário — máximo 1 link válido pendente por hora.
+      - Não devolve o ZIP nesta resposta. Em vez disso, gera um token de uso
+        único (15 min) e envia por e-mail um link de download.
+      - Audit log + e-mail de notificação confirmam quem solicitou.
+    """
     user_id = _resolve_dashboard_user_id(request)
     _raise_if_account_scheduled_for_deletion(user_id)
+
+    client_ip = get_remote_address(request)
+    user_agent = (request.headers.get("user-agent") or "").strip() or None
+
+    # 1) Re-auth por senha
+    password_ok = await asyncio.to_thread(verify_user_password, user_id, body.password)
+    if not password_ok:
+        await log_system_event(
+            "warning",
+            "data_export_password_failed",
+            f"Senha incorreta ao solicitar exportação para user_id={user_id}",
+            source="auth_account_export",
+            user_id=user_id,
+            details={"ip": client_ip, "user_agent": user_agent},
+        )
+        raise HTTPException(status_code=401, detail="Senha incorreta.")
+
+    # 2) Cooldown por usuário (1 link pendente por hora)
+    has_pending = await asyncio.to_thread(has_recent_export_request, user_id, 60)
+    if has_pending:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Já existe um link de exportação pendente enviado para o seu e-mail. "
+                "Aguarde alguns minutos antes de solicitar novamente."
+            ),
+            headers={"Retry-After": "900"},
+        )
+
+    # 3) Email do usuário (obrigatório para entregar o link)
+    email = await asyncio.to_thread(get_user_email, user_id)
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail="E-mail não cadastrado para esta conta. Vincule um e-mail antes de exportar seus dados.",
+        )
+
+    # 4) Gera token + persiste request
+    token, expires_at = await asyncio.to_thread(
+        create_data_export_token,
+        user_id,
+        minutes_valid=15,
+        request_ip=client_ip,
+        request_user_agent=user_agent,
+        delivered_to_email=email,
+    )
+
+    download_url = _dashboard_url(f"/auth/account/export/download/{token}")
+
+    # 5) Envia e-mail (em thread pra não bloquear)
+    from core.services.email_service import send_data_export_link_email  # noqa: PLC0415
+    sent = await asyncio.to_thread(
+        send_data_export_link_email,
+        email,
+        download_url,
+        15,
+        client_ip,
+        user_agent,
+    )
+
+    # 6) Audit log
+    await log_system_event(
+        "info" if sent else "error",
+        "data_export_requested" if sent else "data_export_email_failed",
+        f"Solicitação de exportação para user_id={user_id} ({'enviada' if sent else 'falha no envio'})",
+        source="auth_account_export",
+        user_id=user_id,
+        details={"ip": client_ip, "user_agent": user_agent, "email": email},
+    )
+
+    if not sent:
+        raise HTTPException(
+            status_code=500,
+            detail="Não foi possível enviar o e-mail com o link de exportação. Tente novamente em alguns minutos.",
+        )
+
+    return {
+        "status": "email_sent",
+        "message": "Enviamos um link de download para o seu e-mail. O link expira em 15 minutos e só pode ser usado uma vez.",
+        "expires_in_minutes": 15,
+        "expires_at": expires_at.isoformat(),
+    }
+
+
+@app.get("/auth/account/export/download/{token}")
+@limiter.limit("10/hour")
+async def auth_account_export_download(request: Request, token: str):
+    """
+    Consome o token de uso único e devolve o ZIP com os dados do usuário.
+
+    Não exige re-autenticação aqui — a posse do token (entregue por e-mail
+    de uma solicitação válida com senha) já é a credencial. O token é
+    invalidado de forma atômica antes de qualquer trabalho pesado, então
+    cliques duplicados ou tentativas concorrentes não baixam duas vezes.
+    """
+    user_id = await asyncio.to_thread(consume_data_export_token, token)
+    if not user_id:
+        await log_system_event(
+            "warning",
+            "data_export_token_invalid",
+            "Tentativa de download com token inválido, expirado ou já usado.",
+            source="auth_account_export_download",
+            details={"ip": get_remote_address(request)},
+        )
+        raise HTTPException(
+            status_code=410,
+            detail="Link de exportação inválido, expirado ou já utilizado. Solicite uma nova exportação.",
+        )
+
+    _raise_if_account_scheduled_for_deletion(user_id)
+
+    client_ip = get_remote_address(request)
+    user_agent = (request.headers.get("user-agent") or "").strip() or None
+
     content = await asyncio.to_thread(build_user_export_zip, user_id)
-    filename = f"pigbank_dados_usuario_{user_id}_{datetime.now(timezone.utc):%Y%m%d}.zip"
+
+    completed_at_dt = datetime.now(timezone.utc)
+    filename = f"pigbank_dados_usuario_{user_id}_{completed_at_dt:%Y%m%d}.zip"
+
+    # Notifica o dono por e-mail (auditoria) e loga o evento — em background
+    # pra não atrasar o stream do ZIP.
+    async def _notify_completed():
+        try:
+            email = await asyncio.to_thread(get_user_email, user_id)
+            if email:
+                from core.services.email_service import send_data_export_completed_email  # noqa: PLC0415
+                await asyncio.to_thread(
+                    send_data_export_completed_email,
+                    email,
+                    completed_at_dt.strftime("%d/%m/%Y %H:%M UTC"),
+                    client_ip,
+                    user_agent,
+                )
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Falha ao enviar e-mail de confirmação de export para user_id=%s: %s",
+                user_id, exc,
+            )
+        await log_system_event(
+            "info",
+            "data_export_completed",
+            f"Exportação baixada por user_id={user_id}",
+            source="auth_account_export_download",
+            user_id=user_id,
+            details={"ip": client_ip, "user_agent": user_agent},
+        )
+
+    asyncio.create_task(_notify_completed())
+
     return StreamingResponse(
         iter([content]),
         media_type="application/zip",

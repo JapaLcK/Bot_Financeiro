@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import secrets
 import zipfile
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -14,6 +15,112 @@ from uuid import UUID
 
 from .connection import get_conn
 from .users import _check_password
+
+
+def verify_user_password(user_id: int, password: str) -> bool:
+    """Confirma que `password` corresponde ao hash atual da conta do usuário."""
+    if not password:
+        return False
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select password_hash from auth_accounts where user_id = %s limit 1",
+            (user_id,),
+        )
+        row = cur.fetchone()
+    if not row or not row.get("password_hash"):
+        return False
+    return _check_password(password, row["password_hash"])
+
+
+def get_user_email(user_id: int) -> str | None:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select email from auth_accounts where user_id = %s limit 1",
+            (user_id,),
+        )
+        row = cur.fetchone()
+    return (row or {}).get("email")
+
+
+def create_data_export_token(
+    user_id: int,
+    *,
+    minutes_valid: int = 15,
+    request_ip: str | None = None,
+    request_user_agent: str | None = None,
+    delivered_to_email: str | None = None,
+) -> tuple[str, datetime]:
+    """Cria um token de uso único para baixar a exportação completa.
+
+    Retorna (token, expires_at). O token é opaco (urlsafe, ~43 chars).
+    """
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes_valid)
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into data_export_tokens
+              (token, user_id, expires_at, request_ip, request_user_agent, delivered_to_email)
+            values (%s, %s, %s, %s, %s, %s)
+            """,
+            (token, user_id, expires_at, request_ip, request_user_agent, delivered_to_email),
+        )
+        conn.commit()
+
+    return token, expires_at
+
+
+def consume_data_export_token(token: str) -> int | None:
+    """Valida e marca o token como usado em uma única transação atômica.
+
+    Retorna o `user_id` associado se o token era válido (existe, não expirou
+    e não foi usado). Retorna `None` em qualquer outro caso.
+    """
+    if not token:
+        return None
+    now = datetime.now(timezone.utc)
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            update data_export_tokens
+            set used_at = %s
+            where token = %s
+              and used_at is null
+              and expires_at > %s
+            returning user_id
+            """,
+            (now, token, now),
+        )
+        row = cur.fetchone()
+        conn.commit()
+    if not row:
+        return None
+    return int(row["user_id"])
+
+
+def has_recent_export_request(user_id: int, within_minutes: int = 60) -> bool:
+    """True se o usuário já solicitou um export nos últimos N minutos.
+
+    Usado como cooldown adicional ao rate-limit por IP, pra evitar que o
+    mesmo usuário gere múltiplos links válidos simultaneamente.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=within_minutes)
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            select 1
+            from data_export_tokens
+            where user_id = %s
+              and created_at >= %s
+              and used_at is null
+              and expires_at > now()
+            limit 1
+            """,
+            (user_id, cutoff),
+        )
+        row = cur.fetchone()
+    return bool(row)
 
 
 class PrivacyJSONEncoder(json.JSONEncoder):

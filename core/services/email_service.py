@@ -514,6 +514,84 @@ def send_password_reset_email(to: str, reset_url: str) -> bool:
     return send_email(to=to, subject="🔑 Redefinir senha — PigBank AI", html_body=html, text_body=text)
 
 
+def send_data_export_link_email(
+    to: str,
+    download_url: str,
+    expires_in_minutes: int = 15,
+    request_ip: str | None = None,
+    request_user_agent: str | None = None,
+) -> bool:
+    """Envia link de uso único para download da exportação de dados (LGPD)."""
+    safe_ip = (request_ip or "desconhecido").strip()
+    safe_ua = (request_user_agent or "desconhecido").strip()
+    if len(safe_ua) > 200:
+        safe_ua = safe_ua[:200] + "…"
+
+    content = f"""
+      <p>Olá!</p>
+      <p>Recebemos uma solicitação para baixar a cópia completa dos seus dados no <strong>PigBank AI</strong>.</p>
+      <p style="text-align:center"><a class="btn" href="{download_url}">📦 Baixar meus dados</a></p>
+      <p class="warn">⚠️ Este link expira em <strong>{expires_in_minutes} minutos</strong> e só pode ser usado <strong>uma única vez</strong>.</p>
+      <div class="highlight">
+        <p style="margin:0">Solicitação registrada a partir de:<br/>
+        <strong>IP:</strong> {safe_ip}<br/>
+        <strong>Dispositivo:</strong> {safe_ua}</p>
+      </div>
+      <p class="warn"><strong>Não foi você?</strong> Ignore este e-mail e troque sua senha imediatamente em <a href="https://pigbankai.com">pigbankai.com</a>. Sem o link acima, ninguém consegue baixar seus dados — mesmo com sua sessão ativa.</p>
+      <p style="font-size:12px;color:rgba(255,255,255,.25);word-break:break-all;text-align:center;margin-top:20px;">
+        Link: {download_url}</p>
+    """
+    html = _base_html("Baixar meus dados — PigBank AI", content)
+    text = (
+        "PigBank AI — link para baixar seus dados\n\n"
+        f"Use o link abaixo (expira em {expires_in_minutes} min, uso único):\n{download_url}\n\n"
+        f"Solicitado a partir de IP {safe_ip}.\n"
+        "Se não foi você, ignore este e-mail e troque sua senha em https://pigbankai.com."
+    )
+    return send_email(
+        to=to,
+        subject="📦 Link para baixar seus dados — PigBank AI",
+        html_body=html,
+        text_body=text,
+    )
+
+
+def send_data_export_completed_email(
+    to: str,
+    completed_at: str,
+    request_ip: str | None = None,
+    request_user_agent: str | None = None,
+) -> bool:
+    """Confirma que a exportação foi efetivamente baixada (auditoria pro usuário)."""
+    safe_ip = (request_ip or "desconhecido").strip()
+    safe_ua = (request_user_agent or "desconhecido").strip()
+    if len(safe_ua) > 200:
+        safe_ua = safe_ua[:200] + "…"
+
+    content = f"""
+      <p>Olá!</p>
+      <p>Confirmamos que a cópia completa dos seus dados no <strong>PigBank AI</strong> foi baixada com sucesso.</p>
+      <div class="highlight">
+        <p style="margin:0"><strong>Quando:</strong> {completed_at}<br/>
+        <strong>IP:</strong> {safe_ip}<br/>
+        <strong>Dispositivo:</strong> {safe_ua}</p>
+      </div>
+      <p class="warn"><strong>Não foi você?</strong> Sua sessão ou senha podem estar comprometidas. Acesse <a href="https://pigbankai.com">pigbankai.com</a>, troque sua senha imediatamente e entre em contato com <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>.</p>
+    """
+    html = _base_html("Seus dados foram baixados — PigBank AI", content)
+    text = (
+        "PigBank AI — seus dados foram baixados\n\n"
+        f"Quando: {completed_at}\nIP: {safe_ip}\n\n"
+        f"Se não foi você, troque sua senha em https://pigbankai.com e fale com {SUPPORT_EMAIL}."
+    )
+    return send_email(
+        to=to,
+        subject="📥 Seus dados foram baixados — PigBank AI",
+        html_body=html,
+        text_body=text,
+    )
+
+
 def send_account_deletion_scheduled_email(to: str, scheduled_for: str) -> bool:
     """Confirma que a exclusão da conta foi agendada."""
     content = f"""
