@@ -497,7 +497,7 @@ function getCookie(name) {
 }
 
 function csrfHeaders(extra = {}) {
-  const csrf = getCookie("finbot_csrf");
+  const csrf = getCookie("csrf_token");
   return csrf ? { ...extra, "X-CSRF-Token": csrf } : { ...extra };
 }
 
