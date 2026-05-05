@@ -11,7 +11,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from psycopg.types.json import Jsonb
 import psycopg
 
-from utils_date import _tz
+from utils_date import _tz, is_br_business_day
 
 from .connection import get_conn
 from .users import ensure_user
@@ -25,14 +25,17 @@ _warned_bcb_requests: set[tuple] = set()
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _business_days_between(d1: date, d2: date) -> int:
-    """Dias úteis entre d1 (exclusive) e d2 (inclusive), seg-sex."""
+    """
+    Dias úteis entre d1 (exclusive) e d2 (inclusive), considerando seg-sex
+    e feriados nacionais brasileiros (calendário ANBIMA aproximado).
+    """
     if d2 <= d1:
         return 0
     days = 0
     cur = d1
     while cur < d2:
         cur = cur.fromordinal(cur.toordinal() + 1)
-        if cur.weekday() < 5:
+        if is_br_business_day(cur):
             days += 1
     return days
 
@@ -1026,6 +1029,76 @@ def list_users_with_investments() -> list[int]:
             return [int(row["user_id"]) for row in cur.fetchall()]
 
 
+def _project_to_today(
+    cur,
+    balance: Decimal,
+    period: str,
+    rate_value: Decimal,
+    last_date: date | None,
+    today: date,
+) -> tuple[Decimal, date | None, int]:
+    """
+    Estima o saldo de last_date até today usando a última taxa conhecida como
+    proxy para dias úteis ainda não publicados pelo BCB.
+
+    NÃO persiste nada — somente para exibição. O saldo realizado em
+    investment_lots continua sendo atualizado apenas com taxas oficialmente
+    publicadas, então a projeção converge para o valor correto assim que o
+    BCB publica os dados.
+
+    Retorna (balance_projetado, data_alvo, dias_uteis_projetados).
+    """
+    if last_date is None or today <= last_date:
+        return balance, last_date, 0
+
+    n = _business_days_between(last_date, today)
+    if n <= 0:
+        return balance, last_date, 0
+
+    rate = float(rate_value)
+
+    if period in ("cdi", "cdi_spread"):
+        cur.execute(
+            "select value from market_rates where code='CDI' order by ref_date desc limit 1"
+        )
+        row = cur.fetchone()
+        if not row:
+            return balance, last_date, 0
+        latest_cdi = float(row["value"])
+
+        if period == "cdi":
+            factor = (1.0 + (latest_cdi / 100.0) * rate) ** n
+        else:
+            spread_daily = (1.0 + rate) ** (1.0 / 252.0) - 1.0
+            factor = ((1.0 + latest_cdi / 100.0) * (1.0 + spread_daily)) ** n
+        return Decimal(str(float(balance) * factor)), today, n
+
+    if period == "selic_spread":
+        cur.execute(
+            "select value from market_rates where code='SELIC_DAILY' order by ref_date desc limit 1"
+        )
+        row = cur.fetchone()
+        if not row:
+            return balance, last_date, 0
+        latest_selic = float(row["value"])
+        spread_daily = (1.0 + rate) ** (1.0 / 252.0) - 1.0
+        factor = ((1.0 + latest_selic / 100.0) * (1.0 + spread_daily)) ** n
+        return Decimal(str(float(balance) * factor)), today, n
+
+    if period == "daily":
+        daily_rate = rate
+    elif period == "monthly":
+        daily_rate = (1.0 + rate) ** (1.0 / 21.0) - 1.0
+    elif period == "yearly":
+        daily_rate = (1.0 + rate) ** (1.0 / 252.0) - 1.0
+    else:
+        return balance, last_date, 0
+
+    if daily_rate > 0:
+        return Decimal(str(float(balance) * (1.0 + daily_rate) ** n)), today, n
+    return balance, last_date, 0
+
+
 def accrue_all_investments(user_id: int):
     """Aplica juros em todos os investimentos do usuário e retorna a lista atualizada."""
     ensure_user(user_id)
@@ -1052,6 +1125,18 @@ def accrue_all_investments(user_id: int):
             lots_by_inv = _fetch_lots_for_investments(cur, user_id, [int(r["id"]) for r in out])
             for row in out:
                 row["lots"] = lots_by_inv.get(int(row["id"]), [])
+
+                projected_balance, projected_until, projected_days = _project_to_today(
+                    cur,
+                    Decimal(str(row["balance"] or 0)),
+                    row["period"],
+                    Decimal(str(row["rate"] or 0)),
+                    row["last_date"],
+                    today,
+                )
+                row["projected_balance"] = float(projected_balance)
+                row["projected_until"] = projected_until
+                row["projected_days"] = projected_days
 
         conn.commit()
 

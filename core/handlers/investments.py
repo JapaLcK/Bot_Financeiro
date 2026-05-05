@@ -36,12 +36,38 @@ def list_investments(user_id: int, intro: str | None = None) -> str:
         base_date = max(last_dates)
         base_date_txt = f"Atualizado até {base_date.strftime('%d/%m/%Y')}\n"
 
+    projected_untils = [
+        r.get("projected_until") for r in rows
+        if r.get("projected_days") and r.get("projected_until")
+    ]
+    projection_note = ""
+    if projected_untils:
+        proj_date = max(projected_untils)
+        projection_note = (
+            f"_Saldo estimado até {proj_date.strftime('%d/%m/%Y')} "
+            "usando a última taxa conhecida — será corrigido quando o BCB "
+            "publicar os dados oficiais._\n"
+        )
+
     lines = []
     for r in rows:
         rate_txt = fmt_rate(r.get("rate"), r.get("period"))
         asset = r.get("asset_type") or "CDB"
-        lines.append(f"• **{r['name']}** [{asset}]: {fmt_brl(float(r['balance']))} ({rate_txt})")
-    return f"{header}\n" + base_date_txt + "\n".join(lines) + "\n\n" + _investment_dashboard_link(user_id)
+        projected_balance = r.get("projected_balance")
+        projected_days = r.get("projected_days") or 0
+        if projected_days > 0 and projected_balance:
+            balance_txt = f"{fmt_brl(float(projected_balance))} *"
+        else:
+            balance_txt = fmt_brl(float(r["balance"]))
+        lines.append(f"• **{r['name']}** [{asset}]: {balance_txt} ({rate_txt})")
+    return (
+        f"{header}\n"
+        + base_date_txt
+        + projection_note
+        + "\n".join(lines)
+        + "\n\n"
+        + _investment_dashboard_link(user_id)
+    )
 
 
 def create(user_id: int, raw_name: str, original_text: str) -> str:

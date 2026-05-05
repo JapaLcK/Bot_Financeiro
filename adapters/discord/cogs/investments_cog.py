@@ -49,8 +49,19 @@ class InvestmentsCog(commands.Cog):
             for r in rows:
                 period_str = fmt_rate(r.get("rate"), r.get("period"))
                 asset = r.get("asset_type") or "CDB"
+                projected_balance = r.get("projected_balance")
+                projected_days = r.get("projected_days") or 0
+                if projected_days > 0 and projected_balance:
+                    saldo_txt = f"{fmt_brl(float(projected_balance))} *"
+                else:
+                    saldo_txt = fmt_brl(float(r["balance"]))
                 lines.append(
-                    f"• **{r['name']}** [{asset}] — {period_str} — saldo: {fmt_brl(float(r['balance']))}"
+                    f"• **{r['name']}** [{asset}] — {period_str} — saldo: {saldo_txt}"
+                )
+            if any((r.get("projected_days") or 0) > 0 for r in rows):
+                lines.append(
+                    "_* saldo estimado com a última taxa CDI conhecida — "
+                    "será corrigido quando o BCB publicar os dados oficiais._"
                 )
         else:
             lines.append("Você ainda não tem investimentos cadastrados.")
