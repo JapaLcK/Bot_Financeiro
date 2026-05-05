@@ -34,6 +34,7 @@ LOCAL_RULES = [
       "tesouro direto", "tesouro selic", "tesouro ipca", "tesouro pre", "tesouro pré",
       "tesouro pos", "tesouro pós", "tesouro", "selic", "ipca", "etf",
       "previdencia", "previdência", "previdencia privada", "previdência privada",
+      "poupanca", "poupança",
       "pgbl", "vgbl", "fia", "fim", "multimercado", "fundo multimercado", "coe",
       "debenture", "debênture",
       "dolar", "dólar", "euro", "ouro",

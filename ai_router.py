@@ -71,7 +71,12 @@ def _get_client() -> OpenAI | None:
 
 ALLOWED_CATEGORIES = [
     "alimentação", "transporte", "saúde", "moradia", "lazer",
-    "educação", "assinaturas", "pets", "compras online", "beleza", "outros",
+    "educação", "assinaturas", "pets", "compras online", "beleza",
+    # Movimentações internas (alocação de patrimônio, não consumo) — o bot
+    # marca essas como is_internal_movement=true e elas alimentam o card
+    # "Aportes do mês" no dashboard.
+    "investimento_aporte", "criptomoedas", "rendimentos",
+    "outros",
 ]
 
 _CATEGORY_ALIASES = {
@@ -83,6 +88,27 @@ _CATEGORY_ALIASES = {
     "online":      "compras online",
     "pet":         "pets",
     "petshop":     "pets",
+    # Aportes — variações de escrita
+    "investimento aporte":   "investimento_aporte",
+    "investimento_aporte":   "investimento_aporte",
+    "investimentos":         "investimento_aporte",
+    "investimento":          "investimento_aporte",
+    "renda fixa":            "investimento_aporte",
+    "renda variavel":        "investimento_aporte",
+    "renda variável":        "investimento_aporte",
+    "acoes":                 "investimento_aporte",
+    "ações":                 "investimento_aporte",
+    "previdencia":           "investimento_aporte",
+    "previdência":           "investimento_aporte",
+    # Cripto
+    "cripto":                "criptomoedas",
+    "criptomoeda":           "criptomoedas",
+    "bitcoin":               "criptomoedas",
+    "btc":                   "criptomoedas",
+    # Rendimentos
+    "dividendo":             "rendimentos",
+    "dividendos":            "rendimentos",
+    "juros":                 "rendimentos",
 }
 
 
@@ -168,7 +194,14 @@ def classify_category_with_gpt(descricao: str, *, user_id: int | None = None, so
         "mercado, ifood, restaurante, padaria → alimentação\n"
         "amazon, shopee, compra online → compras online\n"
         "livros, curso, aulas → educação\n"
-        "spotify, youtube, netflix → assinaturas\n\n"
+        "spotify, youtube, netflix → assinaturas\n"
+        # Movimentações internas (alocação de patrimônio)
+        "investi 1000, apliquei no CDB, comprei PETR4, aportei XP, "
+        "PGBL, tesouro selic, fundo multimercado, depositei na BTG → investimento_aporte\n"
+        "comprei bitcoin, btc 200, doge 50, comprei ethereum → criptomoedas\n"
+        "recebi dividendos, juros do CDB, lucro investimento → rendimentos\n\n"
+        "IMPORTANTE: 'investigar', 'transações', 'operações', 'informações' "
+        "NÃO são investimento — use 'outros' ou a categoria que fizer sentido pelo contexto.\n\n"
         f"Texto: {descricao}\n"
         "Resposta:"
     )

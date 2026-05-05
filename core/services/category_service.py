@@ -51,20 +51,15 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
         cat = canonicalize_category_label(explicit_category)
         return InferResult(category=cat or "outros", reason="explicit")
 
-    # C) ticker BR → aporte
-    if text_base:
-        if _BR_TICKER_UPPER_RE.search(text_base):
-            # MXRF11, PETR4 — em maiúsculas: aceita sempre
-            return InferResult(
-                category=canonicalize_category_label("investimento_aporte"),
-                reason="ticker_match",
-            )
-        if _BR_TICKER_ANY_RE.search(text_base) and _INVEST_CONTEXT_RE.search(text_base):
-            # wege3, mxrf11 — em minúsculas: só com contexto de operação
-            return InferResult(
-                category=canonicalize_category_label("investimento_aporte"),
-                reason="ticker_match",
-            )
+    # C) ticker BR em MAIÚSCULAS — convenção do mercado, baixíssimo risco
+    #    de falso positivo. Aceita direto.
+    #    Ticker em minúsculas (wege3, capa15) NÃO bate aqui pra evitar falsos
+    #    positivos como "comprei capa15 brinquedo"; o GPT (passo D) decide.
+    if text_base and _BR_TICKER_UPPER_RE.search(text_base):
+        return InferResult(
+            category=canonicalize_category_label("investimento_aporte"),
+            reason="ticker_match",
+        )
 
     t = normalize_text(text_base or "")
     if not t:
@@ -98,7 +93,10 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
         try:
             from ai_router import classify_category_with_gpt
             cat_ai = classify_category_with_gpt(t, user_id=user_id, source="core.services.category_service")
-            if cat_ai and cat_ai != "outros":
+            if cat_ai:
+                # Aceita até "outros" do GPT — significa que ele analisou e
+                # decidiu que não há categoria clara, em vez de cair em
+                # default por falta de tentativa.
                 return InferResult(category=cat_ai, reason="ai")
         except Exception:
             pass
