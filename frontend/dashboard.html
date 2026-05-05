@@ -2895,7 +2895,7 @@ function render(d) {
       <div class="bigsub">saldo disponível</div>
       <div class="chips">
         <div class="chip"><div class="chip-lbl">Investido</div><div class="chip-val b"><span data-num="invest" data-val="${ni}">${fmt(ni)}</span></div></div>
-        <div class="chip"><div class="chip-lbl">Bolsos</div><div class="chip-val"><span data-num="pockets" data-val="${np}">${fmt(np)}</span></div></div>
+        <div class="chip"><div class="chip-lbl">Caixinhas</div><div class="chip-val"><span data-num="pockets" data-val="${np}">${fmt(np)}</span></div></div>
         <div class="chip" style="flex-basis:100%"><div class="chip-lbl">Patrimônio Total</div>
           <div class="chip-val g"><span data-num="pat" data-val="${d.balance+ni+np}">${fmt(d.balance+ni+np)}</span></div></div>
       </div>
@@ -2920,8 +2920,8 @@ function render(d) {
     </div>
 
     <div class="card" style="animation-delay:180ms">
-      <h2>Bolsos</h2>
-      ${!(d.pockets||[]).length?'<div class="empty">Nenhum bolso.</div>':
+      <h2>Caixinhas</h2>
+      ${!(d.pockets||[]).length?'<div class="empty">Nenhuma caixinha.</div>':
         d.pockets.map((p,i)=>`<div class="row"><span class="lbl">${p.name}</span>
           <span class="val" style="color:${PKT_CLR[i%3]}" data-num="pkt_${p.name}" data-val="${p.balance}">${fmt(p.balance)}</span></div>`).join("")}
     </div>
