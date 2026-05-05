@@ -59,6 +59,7 @@ from db import (
     create_card,
     create_investment_db,
     create_pocket,
+    delete_pocket,
     delete_investment,
     create_mock_open_finance_connection,
     disconnect_open_finance_connection,
@@ -1316,7 +1317,26 @@ def _extract_bearer_token(request: Request) -> str | None:
     return token.strip()
 
 
+def _dashboard_dev_bypass_user_id() -> int | None:
+    """
+    DEV ONLY: quando DASHBOARD_DEV_BYPASS=1, ignora a autenticação do dashboard
+    e retorna DASHBOARD_DEV_USER_ID. NUNCA habilitar em produção.
+    """
+    if (os.getenv("DASHBOARD_DEV_BYPASS") or "").strip() != "1":
+        return None
+    raw = (os.getenv("DASHBOARD_DEV_USER_ID") or "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
 def _resolve_dashboard_user_id(request: Request) -> int:
+    bypass_uid = _dashboard_dev_bypass_user_id()
+    if bypass_uid is not None:
+        return bypass_uid
     token = (
         _extract_bearer_token(request)
         or (request.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
@@ -1328,6 +1348,9 @@ def _resolve_dashboard_user_id(request: Request) -> int:
 
 
 def _authorize_dashboard_access(request: Request, user_id: int) -> int:
+    bypass_uid = _dashboard_dev_bypass_user_id()
+    if bypass_uid is not None:
+        return int(user_id)
     current_user_id = _resolve_dashboard_user_id(request)
     if current_user_id != int(user_id):
         raise HTTPException(status_code=403, detail="Acesso negado para este usuário.")
@@ -2466,6 +2489,106 @@ async def create_pocket_route(request: Request, user_id: int, payload: PocketCre
     }
 
 
+@app.delete("/pockets/{user_id}/{pocket_name:path}")
+async def delete_pocket_route(request: Request, user_id: int, pocket_name: str):
+    """Exclui uma caixinha (apenas se o saldo estiver zerado)."""
+    _authorize_dashboard_access(request, user_id)
+    name = urllib.parse.unquote(pocket_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nome da caixinha é obrigatório.")
+
+    try:
+        launch_id, canon = await asyncio.to_thread(delete_pocket, int(user_id), name)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Caixinha não encontrada.") from exc
+    except ValueError as exc:
+        msg = str(exc)
+        if msg == "POCKET_NOT_ZERO":
+            raise HTTPException(
+                status_code=400,
+                detail="Zere o saldo (saque para a conta) antes de remover a caixinha.",
+            ) from exc
+        raise HTTPException(status_code=400, detail=msg) from exc
+
+    _invalidate_dashboard_current_cache(int(user_id))
+    return {"ok": True, "launch_id": launch_id, "name": canon}
+
+
+@app.get("/pockets/{user_id}/{pocket_name:path}/history")
+async def get_pocket_history_route(request: Request, user_id: int, pocket_name: str, limit: int = 100):
+    """Histórico de depósitos e saques de uma caixinha específica."""
+    _authorize_dashboard_access(request, user_id)
+    name = (pocket_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nome da caixinha é obrigatório.")
+    limit = max(min(int(limit or 100), 500), 1)
+
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id, name, balance, description
+                FROM pockets
+                WHERE user_id = %s AND lower(name) = lower(%s)
+                LIMIT 1
+                """,
+                (int(user_id), name),
+            )
+            pocket_row = await cur.fetchone()
+            if not pocket_row:
+                raise HTTPException(status_code=404, detail="Caixinha não encontrada.")
+
+            canon = pocket_row["name"]
+
+            await cur.execute(
+                """
+                SELECT id, tipo, valor, alvo, nota, criado_em
+                FROM launches
+                WHERE user_id = %s
+                  AND lower(alvo) = lower(%s)
+                  AND tipo IN ('deposito_caixinha', 'saque_caixinha', 'criar_caixinha')
+                ORDER BY criado_em DESC, id DESC
+                LIMIT %s
+                """,
+                (int(user_id), canon, limit),
+            )
+            rows = await cur.fetchall()
+
+    history = []
+    deposits_total = 0.0
+    withdrawals_total = 0.0
+    for r in (rows or []):
+        v = float(r["valor"] or 0)
+        tipo = r["tipo"]
+        if tipo == "deposito_caixinha":
+            deposits_total += v
+        elif tipo == "saque_caixinha":
+            withdrawals_total += v
+        history.append({
+            "id": int(r["id"]),
+            "tipo": tipo,
+            "valor": v,
+            "nota": r.get("nota"),
+            "criado_em": r["criado_em"].isoformat() if r.get("criado_em") else None,
+        })
+
+    return {
+        "ok": True,
+        "pocket": {
+            "id": int(pocket_row["id"]),
+            "name": canon,
+            "balance": float(pocket_row["balance"] or 0),
+            "description": pocket_row.get("description"),
+        },
+        "totals": {
+            "deposits": deposits_total,
+            "withdrawals": withdrawals_total,
+            "count": len(history),
+        },
+        "history": history,
+    }
+
+
 class CardCreatePayload(BaseModel):
     name: str
     closing_day: int
@@ -3303,11 +3426,13 @@ async def open_finance_disconnect_route(request: Request, user_id: int):
 
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(ws: WebSocket, user_id: int):
-    token = (ws.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
-    current_user_id = decode_dashboard_token(token)
-    if not current_user_id or int(current_user_id) != int(user_id):
-        await ws.close(code=1008)
-        return
+    bypass_uid = _dashboard_dev_bypass_user_id()
+    if bypass_uid is None:
+        token = (ws.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
+        current_user_id = decode_dashboard_token(token)
+        if not current_user_id or int(current_user_id) != int(user_id):
+            await ws.close(code=1008)
+            return
 
     now = datetime.now(timezone.utc)
     await manager.connect(ws, user_id, now.year, now.month)

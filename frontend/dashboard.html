@@ -298,6 +298,56 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .tag.delete_investment {
   background:rgba(251,191,36,.12); color:var(--yellow); border:1px solid rgba(251,191,36,.22);
 }
+
+/* ─── Pocket row (botão excluir) ───────────────────────────────────── */
+.pocket-right { display:flex;align-items:center;gap:10px; }
+.pocket-del {
+  background:transparent;border:none;color:var(--text-3);
+  width:24px;height:24px;border-radius:6px;cursor:pointer;font-size:1.05rem;
+  line-height:1;display:inline-flex;align-items:center;justify-content:center;
+  padding:0;transition:all .15s var(--ease);flex-shrink:0;
+}
+.pocket-del:hover { background:rgba(248,113,113,.14);color:var(--red); }
+
+/* ─── Pocket history modal ─────────────────────────────────────────── */
+.pkt-hist-summary {
+  display:grid;grid-template-columns:repeat(3,1fr);gap:10px;
+  background:rgba(255,255,255,.04);border:1px solid var(--glass-border);
+  border-radius:10px;padding:12px 14px;margin-bottom:14px;
+}
+.pkt-hist-summary .it { display:flex;flex-direction:column;gap:2px; }
+.pkt-hist-summary .it .k { color:var(--text-3);font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;font-weight:650; }
+.pkt-hist-summary .it .v { font-weight:700;font-variant-numeric:tabular-nums;font-size:.92rem; }
+.pkt-hist-summary .it.dep .v { color:var(--green); }
+.pkt-hist-summary .it.wd  .v { color:var(--red); }
+.pkt-hist-list {
+  display:flex;flex-direction:column;gap:6px;max-height:48vh;overflow-y:auto;
+  margin-bottom:14px;padding-right:4px;
+}
+.pkt-hist-row {
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid var(--div);
+}
+.pkt-hist-row .pkt-l { display:flex;flex-direction:column;gap:3px;min-width:0; }
+.pkt-hist-row .pkt-tag { font-size:.62rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase; }
+.pkt-hist-row .pkt-tag.dep  { color:var(--green); }
+.pkt-hist-row .pkt-tag.wd   { color:var(--red); }
+.pkt-hist-row .pkt-tag.crt  { color:var(--yellow); }
+.pkt-hist-row .pkt-date { font-size:.7rem;color:var(--text-3); }
+.pkt-hist-row .pkt-note {
+  font-size:.7rem;color:var(--text-2);margin-top:2px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:38ch;
+}
+.pkt-hist-row .pkt-val {
+  font-size:.92rem;font-weight:700;font-variant-numeric:tabular-nums;flex-shrink:0;
+}
+.pkt-hist-row .pkt-val.dep  { color:var(--green); }
+.pkt-hist-row .pkt-val.wd   { color:var(--red); }
+.pkt-hist-row .pkt-val.crt  { color:var(--text-2); }
+.pkt-hist-loading,.pkt-hist-empty,.pkt-hist-error {
+  text-align:center;color:var(--text-2);font-size:.82rem;padding:24px 12px;
+}
+.pkt-hist-error { color:#fecaca; }
 .tag.interno              { background:rgba(167,139,250,.1);  color:#a78bfa;      border:1px solid rgba(167,139,250,.22); }
 .tag.x                    { background:rgba(255,255,255,.06);color:var(--text-2);border:1px solid var(--div); }
 
@@ -520,10 +570,16 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
   cursor:pointer;
   transition:background .15s var(--ease);
   border-radius:8px;
-  padding:8px;
-  margin:-8px;
+  padding-left:8px;
+  padding-right:8px;
+  margin-left:-8px;
+  margin-right:-8px;
 }
 .card-row-clickable:hover { background:rgba(255,255,255,.05); }
+
+.card-clickable { cursor:pointer;transition:border-color .18s var(--ease); }
+.card-clickable:hover { border-color:rgba(96,165,250,.45); }
+.card-clickable:focus-visible { outline:2px solid rgba(96,165,250,.55);outline-offset:2px; }
 .detail-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0; }
 .detail-cell { background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:10px; }
 .detail-k { font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px; }
@@ -892,6 +948,27 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 </div>
 
 <div class="modal-success-toast" id="launch-success-toast"></div>
+
+<div class="overlay" id="pocket-history-overlay">
+  <div class="modal wide">
+    <h3 id="pkt-hist-title">Histórico da caixinha</h3>
+    <p class="msub" id="pkt-hist-sub">Depósitos e saques desta caixinha.</p>
+
+    <div class="pkt-hist-summary" id="pkt-hist-summary" style="display:none">
+      <div class="it"><span class="k">Saldo</span><span class="v" id="pkt-hist-balance">—</span></div>
+      <div class="it dep"><span class="k">Depósitos</span><span class="v" id="pkt-hist-deposits">—</span></div>
+      <div class="it wd"><span class="k">Saques</span><span class="v" id="pkt-hist-withdrawals">—</span></div>
+    </div>
+
+    <div id="pkt-hist-body">
+      <div class="pkt-hist-loading">Carregando…</div>
+    </div>
+
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closePocketHistory()">Fechar</button>
+    </div>
+  </div>
+</div>
 
 <div class="overlay" id="pocket-overlay">
   <div class="modal">
@@ -2526,6 +2603,103 @@ document.getElementById("pocket-name").addEventListener("keydown", e => {
   if (e.key === "Enter") submitPocket();
 });
 
+// ─── Caixinha (histórico) ────────────────────────────────────────────────────
+const PKT_HIST_LABELS = {
+  deposito_caixinha: { label: "Depósito",        cls: "dep" },
+  saque_caixinha:    { label: "Saque",           cls: "wd"  },
+  criar_caixinha:    { label: "Caixinha criada", cls: "crt" },
+};
+
+function closePocketHistory() {
+  document.getElementById("pocket-history-overlay").classList.remove("open");
+}
+
+async function openPocketHistory(pocketName) {
+  const overlay  = document.getElementById("pocket-history-overlay");
+  const titleEl  = document.getElementById("pkt-hist-title");
+  const subEl    = document.getElementById("pkt-hist-sub");
+  const sumEl    = document.getElementById("pkt-hist-summary");
+  const bodyEl   = document.getElementById("pkt-hist-body");
+
+  titleEl.textContent = `Histórico — ${pocketName}`;
+  subEl.textContent   = "Depósitos e saques desta caixinha.";
+  sumEl.style.display = "none";
+  bodyEl.innerHTML    = `<div class="pkt-hist-loading">Carregando…</div>`;
+  overlay.classList.add("open");
+
+  try {
+    const res = await fetch(`${API}/pockets/${USER_ID}/${encodeURIComponent(pocketName)}/history`, {
+      method: "GET",
+      credentials: "same-origin",
+      headers: csrfHeaders({}),
+    });
+    const data = await readResponsePayload(res);
+    if (!res.ok) throw new Error(data.detail || "Erro ao carregar histórico.");
+
+    const p = data.pocket || {};
+    const t = data.totals || {};
+    titleEl.textContent = `Histórico — ${p.name || pocketName}`;
+    if (p.description) {
+      subEl.textContent = p.description;
+    } else {
+      subEl.textContent = "Depósitos e saques desta caixinha.";
+    }
+
+    document.getElementById("pkt-hist-balance").textContent      = fmt(p.balance || 0);
+    document.getElementById("pkt-hist-deposits").textContent     = fmt(t.deposits || 0);
+    document.getElementById("pkt-hist-withdrawals").textContent  = fmt(t.withdrawals || 0);
+    sumEl.style.display = "grid";
+
+    const items = data.history || [];
+    if (!items.length) {
+      bodyEl.innerHTML = `<div class="pkt-hist-empty">Nenhum movimento registrado nesta caixinha ainda.</div>`;
+      return;
+    }
+
+    bodyEl.innerHTML = `<div class="pkt-hist-list">${
+      items.map(h => {
+        const meta = PKT_HIST_LABELS[h.tipo] || { label: h.tipo, cls: "crt" };
+        const sign = h.tipo === "deposito_caixinha" ? "+" : (h.tipo === "saque_caixinha" ? "−" : "");
+        const valTxt = h.tipo === "criar_caixinha" ? "—" : `${sign} ${fmt(h.valor)}`;
+        return `<div class="pkt-hist-row">
+          <div class="pkt-l">
+            <span class="pkt-tag ${meta.cls}">${meta.label}</span>
+            <span class="pkt-date">${fmtDate(h.criado_em)}</span>
+            ${h.nota ? `<span class="pkt-note" title="${esc(h.nota)}">${esc(h.nota)}</span>` : ""}
+          </div>
+          <span class="pkt-val ${meta.cls}">${valTxt}</span>
+        </div>`;
+      }).join("")
+    }</div>`;
+  } catch (err) {
+    bodyEl.innerHTML = `<div class="pkt-hist-error">${esc(err.message || "Erro ao carregar histórico.")}</div>`;
+  }
+}
+
+document.getElementById("pocket-history-overlay").addEventListener("click", e => {
+  if (e.target === e.currentTarget) closePocketHistory();
+});
+
+// ─── Caixinha (excluir) ──────────────────────────────────────────────────────
+async function confirmDeletePocket(pocketName) {
+  if (!confirm(`Excluir a caixinha "${pocketName}"?\n\nA caixinha precisa estar com saldo zerado.`)) return;
+
+  try {
+    const res = await fetch(`${API}/pockets/${USER_ID}/${encodeURIComponent(pocketName)}`, {
+      method: "DELETE",
+      credentials: "same-origin",
+      headers: csrfHeaders({}),
+    });
+    const data = await readResponsePayload(res);
+    if (!res.ok) throw new Error(data.detail || "Erro ao excluir caixinha.");
+
+    showLaunchSuccessToast(`✓ Caixinha "${data.name || pocketName}" removida`);
+    sendRefresh();
+  } catch (err) {
+    alert(err.message || "Erro ao excluir caixinha.");
+  }
+}
+
 // ─── Cartão de crédito (criar) ───────────────────────────────────────────────
 let cardSubmitting = false;
 
@@ -3141,7 +3315,7 @@ function render(d) {
       <div class="pbar-wrap"><div class="pbar-fill" style="width:${Math.min(Math.max(rate,0),100)}%;background:${rc}"></div></div>
     </div>
 
-    <div class="card" style="animation-delay:120ms">
+    <div class="card card-clickable" style="animation-delay:120ms" onclick="setMainView('investments')" title="Abrir aba de investimentos" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setMainView('investments');}">
 	      <h2>Investimentos</h2>
 	      ${!(d.investments||[]).length?'<div class="empty">Nenhum investimento.</div>':
 	        d.investments.map(i=>`<div class="row"><span class="lbl">${esc(displayInvestmentName(i))}</span>
@@ -3154,11 +3328,18 @@ function render(d) {
         <button class="hbtn" type="button" onclick="openPocketModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Nova</button>
       </div>
       ${!(d.pockets||[]).length?'<div class="empty">Nenhuma caixinha.</div>':
-        d.pockets.map((p,i)=>`<div class="row"><span class="lbl">
+        d.pockets.map((p,i)=>{
+          const safeName = String(p.name).replace(/\\/g,"\\\\").replace(/'/g,"\\'");
+          return `<div class="row card-row-clickable pocket-row" onclick="openPocketHistory('${safeName}')" title="Ver histórico"><span class="lbl">
           ${esc(p.name)}
           ${p.description ? `<span style="display:block;font-size:.63rem;color:var(--text-3);margin-top:2px">${esc(p.description)}</span>` : ''}
         </span>
-          <span class="val" style="color:${PKT_CLR[i%3]}" data-num="pkt_${p.name}" data-val="${p.balance}">${fmt(p.balance)}</span></div>`).join("")}
+          <span class="pocket-right">
+            <span class="val" style="color:${PKT_CLR[i%3]}" data-num="pkt_${p.name}" data-val="${p.balance}">${fmt(p.balance)}</span>
+            <button class="pocket-del" type="button" onclick="event.stopPropagation();confirmDeletePocket('${safeName}')" title="Excluir caixinha" aria-label="Excluir caixinha">×</button>
+          </span>
+        </div>`;
+        }).join("")}
     </div>
 
     <div class="card" style="animation-delay:240ms">
