@@ -3125,11 +3125,31 @@ document.addEventListener("keydown", e => {
 /* ═══════════════════════════════════════════════════════════════════════
    EXPORT
 ═══════════════════════════════════════════════════════════════════════ */
-function exportCSV() {
-  const a = document.createElement("a");
-  a.href = `${API}/export/${USER_ID}?year=${viewYear}&month=${viewMonth}`;
-  a.download = `financas_${viewYear}_${String(viewMonth).padStart(2,"0")}.csv`;
-  a.click();
+async function exportCSV() {
+  const url = `${API}/export/${USER_ID}?year=${viewYear}&month=${viewMonth}`;
+  const filename = `financas_${viewYear}_${String(viewMonth).padStart(2,"0")}.csv`;
+  try {
+    const resp = await fetch(url, { credentials: "same-origin" });
+    if (resp.status === 404) {
+      showToast("Nenhum lançamento neste mês para exportar.");
+      return;
+    }
+    if (!resp.ok) {
+      showToast("Erro ao exportar. Tente novamente.");
+      return;
+    }
+    const blob = await resp.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch (e) {
+    showToast("Erro ao exportar. Tente novamente.");
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

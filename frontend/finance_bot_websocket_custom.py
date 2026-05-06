@@ -747,7 +747,7 @@ async def get_monthly_history(user_id: int, n_months: int = 6) -> list:
 
 # ─── CSV export ──────────────────────────────────────────────────────────────
 
-async def build_csv(user_id: int, year: int, month: int) -> str:
+async def build_csv(user_id: int, year: int, month: int) -> str | None:
     month_start, month_end = _month_range(year, month)
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
@@ -762,6 +762,9 @@ async def build_csv(user_id: int, year: int, month: int) -> str:
                 (user_id, month_start, month_end),
             )
             rows = await cur.fetchall()
+
+    if not rows:
+        return None
 
     buf = io.StringIO()
     w   = csv.writer(buf)
@@ -2908,6 +2911,11 @@ async def export_csv(request: Request, user_id: int, year: int = None, month: in
     y = year  or now.year
     m = month or now.month
     content  = await build_csv(user_id, y, m)
+    if content is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Nenhum lançamento encontrado neste mês para exportar.",
+        )
     filename = f"financas_{y:04d}_{m:02d}.csv"
     return StreamingResponse(
         iter([content]),
