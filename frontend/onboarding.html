@@ -136,7 +136,7 @@ input:focus { border-color:#7c3aed; background:rgba(124,58,237,0.08); }
       </span>
     </label>
 
-    <button type="submit" class="btn" id="submit-btn">Criar minha conta</button>
+    <button type="submit" class="btn" id="submit-btn" disabled>Criar minha conta</button>
   </form>
 
   <a href="/" class="back">Cancelar</a>
@@ -193,6 +193,11 @@ async function loadPending() {
     submitBtn.disabled = true;
   }
 }
+
+const acceptCheckbox = document.getElementById("accept-terms");
+acceptCheckbox.addEventListener("change", () => {
+  submitBtn.disabled = !acceptCheckbox.checked;
+});
 
 document.getElementById("signup-form").addEventListener("submit", async (e) => {
   e.preventDefault();
