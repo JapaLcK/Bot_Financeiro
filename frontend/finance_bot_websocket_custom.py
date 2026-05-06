@@ -1571,9 +1571,24 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
     """Login via email+senha. Retorna JWT + link_code novo para vincular o bot."""
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import login_auth_user, create_link_code
-    
+    from db import login_auth_user, create_link_code, find_user_id_by_email, email_has_password
+
     await _check_auth_rate_limits("login", request, body.email)
+
+    # Conta criada apenas via Google (sem password_hash) → orienta usar o botão correto
+    existing_user_id = await asyncio.to_thread(find_user_id_by_email, body.email)
+    if existing_user_id and not await asyncio.to_thread(email_has_password, body.email):
+        await log_auth_login_event(
+            body.email,
+            False,
+            ip_address=get_remote_address(request),
+            user_agent=request.headers.get("user-agent"),
+            failure_reason="google_only_account",
+        )
+        raise HTTPException(
+            status_code=401,
+            detail="Esta conta foi criada com Google. Use o botão \"Continuar com Google\".",
+        )
 
     result = login_auth_user(body.email, body.password)
     if not result:
@@ -1937,6 +1952,221 @@ async def auth_dashboard_link(response: Response, request: Request, body: Dashbo
     }
 
 
+# ─── Login social (Google OAuth) ─────────────────────────────────────────────
+
+GOOGLE_OAUTH_STATE_COOKIE = "google_oauth_state"
+GOOGLE_OAUTH_STATE_MAX_AGE = 600  # 10 minutos
+
+
+class GoogleSignupCompleteBody(BaseModel):
+    token: str
+    name: str
+    phone: str
+    accepted_terms: bool = False
+
+
+def _google_redirect_to_landing(message: str) -> RedirectResponse:
+    """Volta pra landing com flag de erro pra UI mostrar."""
+    qs = urllib.parse.urlencode({"google_error": message})
+    return RedirectResponse(url=f"/?{qs}", status_code=302)
+
+
+@app.get("/auth/google/start")
+@limiter.limit("10/minute")
+async def auth_google_start(request: Request):
+    """Gera state, salva em cookie short-lived e redireciona pro Google."""
+    from core.services.google_oauth import (
+        GoogleOAuthError,
+        build_authorization_url,
+        is_configured,
+    )
+
+    if not is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Login com Google ainda não está configurado neste ambiente.",
+        )
+
+    state = secrets.token_urlsafe(32)
+    try:
+        url = build_authorization_url(state)
+    except GoogleOAuthError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    response = RedirectResponse(url=url, status_code=302)
+    # SameSite=lax: o cookie precisa retornar quando o Google fizer redirect cross-site.
+    response.set_cookie(
+        GOOGLE_OAUTH_STATE_COOKIE,
+        state,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=GOOGLE_OAUTH_STATE_MAX_AGE,
+        path="/auth/google",
+    )
+    return response
+
+
+@app.get("/auth/google/callback")
+async def auth_google_callback(
+    request: Request,
+    response: Response,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+):
+    """
+    Recebe o redirect do Google. Valida state, troca code por id_token,
+    decide login / vincular / criar pendente, e redireciona o usuário.
+    """
+    from core.services.google_oauth import (
+        GoogleOAuthError,
+        exchange_code_for_tokens,
+        verify_id_token,
+    )
+    from db import (
+        consume_dashboard_session as _unused_consume,  # noqa: F401  (silencia lint do import dinâmico)
+        find_user_by_google_sub,
+        find_user_id_by_email,
+        link_google_identity,
+        create_pending_google_signup,
+    )
+
+    cookie_state = request.cookies.get(GOOGLE_OAUTH_STATE_COOKIE) or ""
+    callback_response = RedirectResponse(url="/", status_code=302)
+    callback_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
+
+    if error:
+        return _google_redirect_to_landing(f"Login com Google cancelado: {error}")
+
+    if not code or not state or not cookie_state or not secrets.compare_digest(state, cookie_state):
+        return _google_redirect_to_landing("Sessão de login expirou. Tente novamente.")
+
+    try:
+        tokens = await exchange_code_for_tokens(code)
+        claims = verify_id_token(tokens["id_token"])
+    except GoogleOAuthError as exc:
+        return _google_redirect_to_landing(str(exc))
+
+    sub = claims["sub"]
+    email = (claims.get("email") or "").strip().lower()
+    email_verified = bool(claims.get("email_verified"))
+    name_hint = claims.get("name") or claims.get("given_name") or None
+
+    if not email or not email_verified:
+        return _google_redirect_to_landing(
+            "Sua conta Google não tem e-mail verificado. Verifique no Google e tente novamente."
+        )
+
+    # 1) Já existe vínculo? → login direto
+    user_id = await asyncio.to_thread(find_user_by_google_sub, sub)
+
+    # 2) Não existe vínculo, mas existe conta com este email? → auto-link
+    if not user_id:
+        existing = await asyncio.to_thread(find_user_id_by_email, email)
+        if existing:
+            await asyncio.to_thread(link_google_identity, existing, sub, email)
+            user_id = existing
+
+    # 3) Conta totalmente nova → cria pendente e manda pra /onboarding
+    if not user_id:
+        token = await asyncio.to_thread(create_pending_google_signup, sub, email, name_hint)
+        signup_response = RedirectResponse(url=f"/onboarding?token={token}", status_code=302)
+        signup_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
+        return signup_response
+
+    # Usuário existente: bloqueia se conta agendada para deletar
+    try:
+        _raise_if_account_scheduled_for_deletion(user_id)
+    except HTTPException as exc:
+        return _google_redirect_to_landing(exc.detail)
+
+    # Login bem-sucedido → cookies + redirect pra home
+    jwt_token = _make_jwt(user_id, email)
+    success_response = RedirectResponse(url=_post_login_url(), status_code=302)
+    success_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
+    _set_auth_cookie(success_response, jwt_token)
+    _set_dashboard_cookie(success_response, int(user_id))
+
+    await log_auth_login_event(
+        email,
+        True,
+        user_id=user_id,
+        ip_address=get_remote_address(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+
+    return success_response
+
+
+@app.get("/auth/google/pending/{token}")
+@limiter.limit("30/minute")
+async def auth_google_pending(request: Request, response: Response, token: str):
+    """Devolve dados do pré-cadastro (email + nome sugerido) pra preencher o form."""
+    from db import get_pending_google_signup
+
+    pending = await asyncio.to_thread(get_pending_google_signup, token)
+    if not pending:
+        raise HTTPException(status_code=404, detail="Cadastro expirado ou inválido.")
+
+    _no_store(response)
+    return {
+        "email": pending["email"],
+        "name_hint": pending["name_hint"] or "",
+    }
+
+
+@app.post("/auth/google/complete-signup")
+@limiter.limit("10/minute")
+async def auth_google_complete_signup(
+    request: Request,
+    response: Response,
+    body: GoogleSignupCompleteBody,
+):
+    """Finaliza o cadastro Google: cria conta com nome + telefone."""
+    from db import consume_pending_google_signup
+
+    if not body.accepted_terms:
+        raise HTTPException(
+            status_code=400,
+            detail="É necessário aceitar a Política de Privacidade.",
+        )
+
+    try:
+        result = await asyncio.to_thread(
+            consume_pending_google_signup,
+            body.token, body.name, body.phone,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    user_id = int(result["user_id"])
+    email = result["email"]
+
+    jwt_token = _make_jwt(user_id, email)
+    _set_auth_cookie(response, jwt_token)
+    _set_dashboard_cookie(response, user_id)
+
+    await log_auth_login_event(
+        email,
+        True,
+        user_id=user_id,
+        ip_address=get_remote_address(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+
+    wa_link = _build_whatsapp_onboarding_link(user_id)
+
+    return {
+        "user_id": user_id,
+        "email": email,
+        "link_code": result["link_code"],
+        "whatsapp_link": wa_link,
+        "dashboard_url": _post_login_url(),
+        "expires_in": 86400,
+    }
+
+
 # ─── Billing (Stripe) ────────────────────────────────────────────────────────
 
 @app.post("/billing/create-checkout")
@@ -2177,6 +2407,10 @@ async def serve_reset_password():
 @app.get("/dashboard-login")
 async def serve_dashboard_login():
     return _html_file(HERE / "dashboard-login.html")
+
+@app.get("/onboarding")
+async def serve_onboarding():
+    return _html_file(HERE / "onboarding.html")
 
 @app.get("/privacy")
 async def serve_privacy():

@@ -595,6 +595,42 @@ def init_db():
           on credit_transactions(user_id, card_id, external_id)
           where source = 'ofx' and external_id is not null
         """,
+
+        # ─── OAuth (Google login) ────────────────────────────────────────────────
+        # Contas criadas via Google ficam com password_hash NULL.
+        """
+        alter table auth_accounts alter column password_hash drop not null
+        """,
+        """
+        create table if not exists auth_identities (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          provider text not null,
+          provider_sub text not null,
+          email text,
+          created_at timestamptz not null default now(),
+          unique (provider, provider_sub)
+        )
+        """,
+        """
+        create index if not exists idx_auth_identities_user
+          on auth_identities (user_id)
+        """,
+        """
+        create table if not exists pending_google_signups (
+          token text primary key,
+          provider text not null,
+          provider_sub text not null,
+          email text not null,
+          name_hint text,
+          expires_at timestamptz not null,
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_pending_google_signups_expires
+          on pending_google_signups (expires_at)
+        """,
     ]
 
     with get_conn() as conn:
