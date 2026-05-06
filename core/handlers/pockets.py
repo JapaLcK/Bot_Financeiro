@@ -26,7 +26,7 @@ def create(user_id: int, name: str, nota: str | None = None) -> str:
         return "Deu erro ao criar caixinha. Veja os logs."
     if launch_id is None:
         return f"ℹ️ A caixinha **{canon}** já existe."
-    return f"✅ Caixinha criada: **{canon}** (ID: **#{launch_id}**)"
+    return f"✅ Caixinha criada: **{canon}** (ID: **#{db.display_id_for(user_id, launch_id)}**)"
 
 
 def propose_delete(user_id: int, pocket_name: str) -> str:
@@ -75,7 +75,7 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
         return (
             f"✅ Depósito na caixinha **{canon}**: +{fmt_brl(float(amount))}\n"
             f"🏦 Conta: {fmt_brl(float(new_acc))} • 📦 Caixinha: {fmt_brl(float(new_pocket))}\n"
-            f"ID: **#{launch_id}**"
+            f"ID: **#{db.display_id_for(user_id, launch_id)}**"
         )
     except LookupError:
         return f"Caixinha **{pocket_name}** não encontrada. Use *criar caixinha {pocket_name}*."
@@ -132,7 +132,7 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
         return (
             f"📤 Caixinha **{canon}**: -{fmt_brl(float(amount))}\n"
             f"🏦 Conta: {fmt_brl(float(new_acc))} • 📦 Caixinha: {fmt_brl(float(new_pocket))}\n"
-            f"ID: **#{launch_id}**"
+            f"ID: **#{db.display_id_for(user_id, launch_id)}**"
         )
     except LookupError:
         return f"Caixinha **{pocket_name}** não encontrada. Use *listar caixinhas* para ver as disponíveis."

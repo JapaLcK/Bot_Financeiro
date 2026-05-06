@@ -26,7 +26,7 @@ def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
     criado_em = parsed.get("criado_em")
     is_internal = parsed.get("is_internal_movement", False)
 
-    launch_id, new_balance = add_launch_and_update_balance(
+    launch_id, user_seq, new_balance = add_launch_and_update_balance(
         user_id=user_id,
         tipo=tipo,
         valor=valor,
@@ -52,6 +52,6 @@ def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
             f"{emoji} **{tipo.capitalize()} registrada**: {fmt_brl(valor)}\n"
             f"🏷️ Categoria: {cat_txt}\n"
             f"🏦 Conta: {fmt_brl(float(new_balance))}\n"
-            f"ID:#{launch_id}"
+            f"ID:#{user_seq}"
         )
     )

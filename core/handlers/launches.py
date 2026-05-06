@@ -100,7 +100,7 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
             nota   = r.get("nota") or r.get("alvo") or "-"
             cat    = r.get("categoria") or ""
             cat_txt = f" [{cat}]" if cat else ""
-            lines.append(f"#{r['id']} • {tipo} • {valor} • {nota}{cat_txt}")
+            lines.append(f"#{r.get('user_seq') or r['id']} • {tipo} • {valor} • {nota}{cat_txt}")
 
         header = f"🧾 **Lançamentos de {label}**"
         summary_parts = []
@@ -173,8 +173,10 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
 
         emoji     = _TIPO_EMOJI.get(tipo, "•")
         valor_str = fmt_brl(float(valor)) if valor is not None else "-"
-        launch_id = r.get("id")
-        id_str    = f" [#{launch_id}]" if launch_id else ""
+        # Mostra user_seq (numeração por usuário, começa em #1) em vez do
+        # id global. Fallback pro id interno enquanto o backfill não rodou.
+        display_id = r.get("user_seq") or r.get("id")
+        id_str    = f" [#{display_id}]" if display_id else ""
         lines.append(f"{emoji} {data_str} • {valor_str} • {descricao}{id_str}")
 
     # mini resumo de despesas/receitas no período exibido
@@ -236,7 +238,7 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> 
         criado_em = None
         is_int    = is_internal_category(categoria)
 
-    launch_id, new_balance = db.add_launch_and_update_balance(
+    launch_id, user_seq, new_balance = db.add_launch_and_update_balance(
         user_id=user_id,
         tipo=tipo,
         valor=valor,
@@ -257,12 +259,14 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> 
 
     # Oferece um botão de "categoria errada?" no WhatsApp (one-shot, lido por
     # _send_reply_with_optional_buttons no wa_runtime e limpo logo em seguida).
+    # O payload guarda o id INTERNO (botão é opaco pro usuário); só o display
+    # usa user_seq.
     if platform == "whatsapp" and launch_id:
         try:
             db.set_pending_action(
                 user_id,
                 "recategorize_launch_offer",
-                {"launch_id": int(launch_id)},
+                {"launch_id": int(launch_id), "user_seq": int(user_seq)},
             )
         except Exception:
             pass
@@ -272,7 +276,7 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> 
         f"{emoji} **{tipo.capitalize()} registrada**: {fmt_brl(valor)}\n"
         f"🏷️ Categoria: {categoria}\n"
         f"🏦 Saldo: {fmt_brl(float(new_balance))}\n"
-        f"ID: #{launch_id}"
+        f"ID: #{user_seq}"
     )
 
 
@@ -281,9 +285,31 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> 
 # ---------------------------------------------------------------------------
 
 def propose_delete(user_id: int, launch_id: int) -> str:
-    db.set_pending_action(user_id, "delete_launch", {"launch_id": launch_id})
+    """Propõe apagar um lançamento. `launch_id` é o id interno (PK).
+
+    O display usa o `user_seq` desse lançamento; se não conseguir resolver,
+    cai pro id interno.
+    """
+    display_id = launch_id
+    try:
+        with db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select user_seq from launches where id=%s and user_id=%s",
+                    (launch_id, user_id),
+                )
+                row = cur.fetchone()
+                if row and row.get("user_seq"):
+                    display_id = int(row["user_seq"])
+    except Exception:
+        pass
+    db.set_pending_action(
+        user_id,
+        "delete_launch",
+        {"launch_id": int(launch_id), "display_id": int(display_id)},
+    )
     return (
-        f"⚠️ Isso vai apagar o lançamento **#{launch_id}** e desfazer seus efeitos no saldo.\n"
+        f"⚠️ Isso vai apagar o lançamento **#{display_id}** e desfazer seus efeitos no saldo.\n"
         "Confirma? Responda **sim** ou **não**."
     )
 
@@ -292,11 +318,16 @@ def undo(user_id: int) -> str:
     rows = db.list_launches(user_id, limit=1)
     if not rows:
         return "Não há lançamentos para desfazer."
-    last_id = rows[0]["id"]
-    db.set_pending_action(user_id, "delete_launch", {"launch_id": last_id})
+    last_id = int(rows[0]["id"])
+    display_id = int(rows[0].get("user_seq") or last_id)
+    db.set_pending_action(
+        user_id,
+        "delete_launch",
+        {"launch_id": last_id, "display_id": display_id},
+    )
     tipo  = rows[0].get("tipo", "")
     valor = fmt_brl(float(rows[0].get("valor") or 0))
     return (
-        f"⚠️ Desfazer o último lançamento: **#{last_id}** ({tipo} {valor})?\n"
+        f"⚠️ Desfazer o último lançamento: **#{display_id}** ({tipo} {valor})?\n"
         "Confirma? Responda **sim** ou **não**."
     )

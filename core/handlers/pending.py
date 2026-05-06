@@ -50,16 +50,20 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
 
     if action_type == "delete_launch":
         launch_id = payload.get("launch_id")
+        # display_id é o user_seq mostrado pro usuário; cai pro id interno
+        # quando o pending foi criado em código antigo sem essa key.
+        display_id = payload.get("display_id") or launch_id
         try:
             db.delete_launch_and_rollback(user_id, launch_id)
             db.clear_pending_action(user_id)
-            return f"✅ Lançamento **#{launch_id}** apagado e saldo revertido."
+            return f"✅ Lançamento **#{display_id}** apagado e saldo revertido."
         except Exception as e:
             db.clear_pending_action(user_id)
-            return f"Erro ao apagar lançamento #{launch_id}: {e}"
+            return f"Erro ao apagar lançamento #{display_id}: {e}"
 
     if action_type == "delete_launch_bulk":
         ids = payload.get("launch_ids", [])
+        display_ids_map = payload.get("display_ids") or {}
         failed = []
         for lid in ids:
             try:
@@ -68,11 +72,14 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
                 failed.append(lid)
         ok_ids = [i for i in ids if i not in failed]
         db.clear_pending_action(user_id)
+        # converte ids internos pra user_seq pra exibição (fallback: id interno)
+        def _disp(lid):
+            return display_ids_map.get(str(lid), display_ids_map.get(lid, lid))
         parts = []
         if ok_ids:
-            parts.append("✅ Apagados: " + ", ".join(f"**#{i}**" for i in ok_ids))
+            parts.append("✅ Apagados: " + ", ".join(f"**#{_disp(i)}**" for i in ok_ids))
         if failed:
-            parts.append("⚠️ Falha: " + ", ".join(f"#{i}" for i in failed))
+            parts.append("⚠️ Falha: " + ", ".join(f"#{_disp(i)}" for i in failed))
         return "\n".join(parts) or "Nada foi apagado."
 
     if action_type == "delete_pocket":

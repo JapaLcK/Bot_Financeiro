@@ -98,7 +98,8 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
         launch_id, _new_acc, _new_inv, canon = db.investment_deposit_from_account(
             user_id, investment_name, float(amount), text
         )
-        return f"✅ Aporte de **{fmt_brl(float(amount))}** em **{canon}**. ID #{launch_id}."
+        display_id = db.display_id_for(user_id, launch_id)
+        return f"✅ Aporte de **{fmt_brl(float(amount))}** em **{canon}**. ID #{display_id}."
     except Exception as e:
         err = str(e)
         if "not found" in err.lower():
@@ -106,7 +107,7 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
         if "saldo insuficiente" in err.lower() or "insufficient" in err.lower():
             return "Saldo insuficiente na conta para esse aporte.\n\n" + _investment_dashboard_link(user_id)
         return f"Erro ao aportar: {err}"
-    return f"✅ Aporte de **{fmt_brl(float(amount))}** em **{canon}**. ID #{launch_id}.\n\n" + list_investments(user_id)
+    return f"✅ Aporte de **{fmt_brl(float(amount))}** em **{canon}**. ID #{db.display_id_for(user_id, launch_id)}.\n\n" + list_investments(user_id)
 
 
 def check_cdi() -> str:
@@ -163,7 +164,7 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
         tax_note = ""
         if taxes and float(taxes.get("iof", 0) or 0) + float(taxes.get("ir", 0) or 0) > 0:
             tax_note = f" Líquido: **{fmt_brl(float(taxes.get('net', 0)))}**."
-        return f"✅ Resgate de **{fmt_brl(float(amount))}** de **{canon}**.{tax_note} ID #{launch_id}.\n\n" + list_investments(user_id)
+        return f"✅ Resgate de **{fmt_brl(float(amount))}** de **{canon}**.{tax_note} ID #{db.display_id_for(user_id, launch_id)}.\n\n" + list_investments(user_id)
     except Exception as e:
         err = str(e)
         if "not found" in err.lower():

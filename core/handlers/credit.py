@@ -109,10 +109,11 @@ def _execute_pay_bill(user_id: int, bill_row: dict, amount: float | None) -> str
             return "❌ Valor inválido. Use: pagar fatura 300"
         if not res:
             return "📭 Nada para pagar nessa fatura."
+        from db import display_id_for as _display_id_for
         return (
             f"✅ Pagamento registrado: {fmt_brl(res['paid'])} ({_format_bill_label(bill_row)})\n"
             f"Conta agora: {fmt_brl(res['new_balance'])}\n"
-            f"ID lançamento: #{res['launch_id']}"
+            f"ID lançamento: #{_display_id_for(user_id, res['launch_id'])}"
         )
     except Exception as e:
         return f"❌ Erro ao pagar fatura: {e}"

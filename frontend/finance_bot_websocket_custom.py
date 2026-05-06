@@ -2715,7 +2715,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
     is_internal = is_internal_category(categoria)
 
     try:
-        launch_id, new_balance = await asyncio.to_thread(
+        launch_id, user_seq, new_balance = await asyncio.to_thread(
             add_launch_and_update_balance,
             int(user_id),
             tipo,
@@ -2742,6 +2742,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
     return {
         "ok": True,
         "launch_id": int(launch_id),
+        "user_seq": int(user_seq),
         "tipo": tipo,
         "valor": float(valor),
         "categoria": categoria,

@@ -194,16 +194,42 @@ def _handle_destructive(intent: str, user_id: int, entities: dict, text: str) ->
         launch_id = entities.get("launch_id")
         if not launch_id:
             return "Qual o ID do lançamento para apagar? Ex: *apagar #42*"
-        return h_launches.propose_delete(user_id, int(launch_id))
+        # O usuário digita user_seq (#1, #2...). Resolve pro id interno.
+        user_seq = int(launch_id)
+        internal_id = db.resolve_user_seq_to_id(user_id, user_seq)
+        if internal_id is None:
+            return f"Não encontrei o lançamento **#{user_seq}**. Use *listar lançamentos* pra ver os IDs."
+        return h_launches.propose_delete(user_id, int(internal_id))
 
     if intent == "launches.delete_bulk":
-        ids = entities.get("launch_ids") or []
-        if not ids:
+        seqs = entities.get("launch_ids") or []
+        if not seqs:
             return "Informe os IDs a apagar. Ex: *apagar id 757, 756*"
-        ids_fmt = ", ".join(f"**#{i}**" for i in ids)
-        db.set_pending_action(user_id, "delete_launch_bulk", {"launch_ids": ids})
+        # Mapeia user_seq → id interno; reporta os que não existem.
+        resolved: list[int] = []
+        display_map: dict[str, int] = {}
+        missing: list[int] = []
+        for seq in seqs:
+            seq_int = int(seq)
+            internal = db.resolve_user_seq_to_id(user_id, seq_int)
+            if internal is None:
+                missing.append(seq_int)
+            else:
+                resolved.append(int(internal))
+                display_map[str(int(internal))] = seq_int
+        if not resolved:
+            return f"Nenhum desses lançamentos existe: {', '.join(f'#{s}' for s in missing)}"
+        ids_fmt = ", ".join(f"**#{display_map[str(i)]}**" for i in resolved)
+        db.set_pending_action(
+            user_id,
+            "delete_launch_bulk",
+            {"launch_ids": resolved, "display_ids": display_map},
+        )
+        warn = ""
+        if missing:
+            warn = f"\n(ignorando {', '.join(f'#{s}' for s in missing)} — não encontrei)"
         return (
-            f"⚠️ Isso vai apagar os lançamentos {ids_fmt} e desfazer seus efeitos no saldo.\n"
+            f"⚠️ Isso vai apagar os lançamentos {ids_fmt} e desfazer seus efeitos no saldo.{warn}\n"
             "Confirma? Responda **sim** ou **não**."
         )
 

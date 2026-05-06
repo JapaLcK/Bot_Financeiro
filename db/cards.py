@@ -685,7 +685,7 @@ def pay_bill_amount(
                 pay = due
 
         # Pagamento de fatura é movimentação interna
-        launch_id, new_balance = add_launch_and_update_balance(
+        launch_id, _user_seq, new_balance = add_launch_and_update_balance(
             user_id=user_id,
             tipo="despesa",
             valor=float(pay),

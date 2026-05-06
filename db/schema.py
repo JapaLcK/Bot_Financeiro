@@ -147,6 +147,54 @@ def init_db():
         )
         and is_internal_movement = false
         """,
+        # ──────────────────────────────────────────────────────────────────
+        # user_seq: sequência por-usuário para que cada usuário veja seus
+        # lançamentos como #1, #2, #3... independente do id global.
+        # ──────────────────────────────────────────────────────────────────
+        """
+        alter table launches add column if not exists user_seq integer
+        """,
+        """
+        -- backfill: numera lançamentos existentes na ordem de criação
+        with ordered as (
+          select id,
+                 row_number() over (partition by user_id order by criado_em, id) as seq
+          from launches
+        )
+        update launches l set user_seq = ordered.seq
+        from ordered
+        where l.id = ordered.id and l.user_seq is null
+        """,
+        """
+        create unique index if not exists uq_launches_user_seq
+          on launches(user_id, user_seq)
+        """,
+        """
+        create or replace function assign_launch_user_seq()
+        returns trigger as $$
+        begin
+          if new.user_seq is null then
+            -- serializa por usuário pra evitar race entre INSERTs concorrentes;
+            -- o lock é liberado no fim da transação.
+            perform pg_advisory_xact_lock(new.user_id);
+            select coalesce(max(user_seq), 0) + 1
+              into new.user_seq
+              from launches
+              where user_id = new.user_id;
+          end if;
+          return new;
+        end;
+        $$ language plpgsql
+        """,
+        """
+        drop trigger if exists trg_assign_launch_user_seq on launches
+        """,
+        """
+        create trigger trg_assign_launch_user_seq
+          before insert on launches
+          for each row
+          execute function assign_launch_user_seq()
+        """,
         """
         create table if not exists pending_actions (
           user_id bigint primary key references users(id) on delete cascade,

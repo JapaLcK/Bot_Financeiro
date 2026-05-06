@@ -279,8 +279,12 @@ def _send_recategorize_list(to_wa_id: str, body: str, launch_id: int) -> None:
 
 
 def _apply_recategorize(user_id: int, launch_id: int, raw_categoria: str) -> str:
-    """Aplica uma nova categoria a um launch e devolve a mensagem de resposta."""
+    """Aplica uma nova categoria a um launch e devolve a mensagem de resposta.
+
+    `launch_id` é o id INTERNO (vem do payload do botão). O display usa user_seq.
+    """
     from utils_text import canonicalize_category_label  # local import (evita ciclo)
+    from db import display_id_for
 
     cat = (raw_categoria or "").strip()
     if not cat:
@@ -293,7 +297,8 @@ def _apply_recategorize(user_id: int, launch_id: int, raw_categoria: str) -> str
         return "Não consegui atualizar agora. Tente de novo em instantes."
     if not ok:
         return "Lançamento não encontrado (talvez já tenha sido apagado)."
-    return f"✅ Categoria do lançamento #{launch_id} atualizada para *{canon}*."
+    display = display_id_for(user_id, launch_id)
+    return f"✅ Categoria do lançamento #{display} atualizada para *{canon}*."
 
 
 def _download_attachments_sync(att_refs: list[InboundAttachmentRef]) -> list[Attachment]:
@@ -517,10 +522,11 @@ def process_message(message: InboundMessage) -> None:
                     launch_id = 0
                 logger.info("WA recategorize button clicked wa_id=%s launch=%s", reply_to, launch_id)
                 if launch_id:
+                    from db import display_id_for as _disp
                     try:
                         _send_recategorize_list(
                             reply_to,
-                            f"Escolha a nova categoria para o lançamento #{launch_id}.",
+                            f"Escolha a nova categoria para o lançamento #{_disp(uid, launch_id)}.",
                             launch_id,
                         )
                     except Exception as exc:

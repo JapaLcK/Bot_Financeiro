@@ -84,16 +84,18 @@ def add_launch_and_update_balance(
                 """
                 insert into launches(user_id, tipo, valor, alvo, nota, categoria, criado_em, efeitos, is_internal_movement)
                 values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                returning id
+                returning id, user_seq
                 """,
                 (user_id, tipo, v, alvo, nota, cat, criado_em,
                  Json({"delta_conta": float(delta)}), is_internal_movement),
             )
-            launch_id = cur.fetchone()["id"]
+            row = cur.fetchone()
+            launch_id = row["id"]
+            user_seq = row["user_seq"]
 
         conn.commit()
 
-    return launch_id, new_bal
+    return launch_id, user_seq, new_bal
 
 
 def list_launches(user_id: int, limit: int = 10):
@@ -102,7 +104,7 @@ def list_launches(user_id: int, limit: int = 10):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select id, tipo, valor, alvo, nota, categoria, source, criado_em
+                select id, user_seq, tipo, valor, alvo, nota, categoria, source, criado_em
                 from launches
                 where user_id=%s
                 order by criado_em desc, id desc
@@ -111,6 +113,44 @@ def list_launches(user_id: int, limit: int = 10):
                 (user_id, limit),
             )
             return cur.fetchall()
+
+
+def resolve_user_seq_to_id(user_id: int, user_seq: int) -> int | None:
+    """Converte o `#N` que o usuário digita (user_seq) no id interno do lançamento.
+
+    Retorna None se não houver lançamento com esse user_seq pra esse usuário.
+    """
+    if not user_seq or user_seq <= 0:
+        return None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id from launches where user_id=%s and user_seq=%s",
+                (user_id, int(user_seq)),
+            )
+            row = cur.fetchone()
+            return int(row["id"]) if row else None
+
+
+def get_launch_user_seq(user_id: int, launch_id: int) -> int | None:
+    """Inverso de resolve_user_seq_to_id: pega o user_seq de um id interno."""
+    if not launch_id:
+        return None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select user_seq from launches where id=%s and user_id=%s",
+                (int(launch_id), user_id),
+            )
+            row = cur.fetchone()
+            seq = row.get("user_seq") if row else None
+            return int(seq) if seq else None
+
+
+def display_id_for(user_id: int, launch_id: int) -> int:
+    """Retorna o user_seq pra exibir; cai no id interno se não encontrar."""
+    seq = get_launch_user_seq(user_id, launch_id)
+    return seq if seq is not None else int(launch_id)
 
 
 def update_launch_category(user_id: int, launch_id: int, categoria: str | None) -> bool:

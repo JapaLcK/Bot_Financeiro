@@ -47,6 +47,9 @@ from .accounts import (
     set_balance,
     add_launch_and_update_balance,
     list_launches,
+    resolve_user_seq_to_id,
+    get_launch_user_seq,
+    display_id_for,
     update_launch_category,
     update_launch_fields,
     update_launch_categories_bulk,
@@ -235,6 +238,7 @@ __all__ = [
     "link_platform_identity",
     # accounts
     "get_balance", "set_balance", "add_launch_and_update_balance", "list_launches",
+    "resolve_user_seq_to_id", "get_launch_user_seq", "display_id_for",
     "update_launch_category", "update_launch_fields", "update_launch_categories_bulk", "export_launches",
     "get_launches_by_period", "get_summary_by_period", "delete_launch_and_rollback",
     "get_ofx_import_by_hash", "import_ofx_launches_bulk",
