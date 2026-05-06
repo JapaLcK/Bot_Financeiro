@@ -2514,7 +2514,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
 
 class LaunchEditPayload(BaseModel):
     categoria: str | None = None
-    alvo: str | None = None
+    nota: str | None = None
 
 
 @app.patch("/launches/{user_id}/{launch_id}")
@@ -2542,13 +2542,13 @@ async def update_launch_route(
             raise HTTPException(status_code=400, detail="Categoria não pode ser vazia.")
         categoria_norm = canonicalize_category_label(raw) or raw.lower()
 
-    alvo_norm: str | None = None
-    if payload.alvo is not None:
-        alvo_norm = payload.alvo.strip()
-        if len(alvo_norm) > 80:
-            raise HTTPException(status_code=400, detail="Descrição muito longa (máx. 80 caracteres).")
+    nota_norm: str | None = None
+    if payload.nota is not None:
+        nota_norm = payload.nota.strip()
+        if len(nota_norm) > 200:
+            raise HTTPException(status_code=400, detail="Descrição muito longa (máx. 200 caracteres).")
 
-    if categoria_norm is None and alvo_norm is None:
+    if categoria_norm is None and nota_norm is None:
         raise HTTPException(status_code=400, detail="Nada para atualizar.")
 
     changed = await asyncio.to_thread(
@@ -2556,7 +2556,7 @@ async def update_launch_route(
         user_id,
         launch_id,
         categoria=categoria_norm,
-        alvo=alvo_norm,
+        nota=nota_norm,
     )
     if not changed:
         raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
@@ -2564,7 +2564,7 @@ async def update_launch_route(
         "ok": True,
         "launch_id": launch_id,
         "categoria": categoria_norm,
-        "alvo": alvo_norm,
+        "nota": nota_norm,
     }
 
 

@@ -275,6 +275,7 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   opacity:0;pointer-events:none;transform:translateY(4px);
   transition:opacity .18s,transform .18s; }
 .bgt-btn:hover::after { opacity:1;transform:translateY(0); }
+.bgt-btn.launch-edit-btn::after { content:"Editar lançamento"; }
 
 /* ─── Tags ──────────────────────────────────────────────────────────── */
 .tag { display:inline-block;border-radius:5px;padding:2px 7px;font-size:.65rem;font-weight:600;letter-spacing:.02em;margin-right:4px;vertical-align:middle; }
@@ -982,12 +983,17 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 
     <div class="modal-row">
       <label class="modal-label" for="edit-launch-categoria">Categoria</label>
-      <select class="modal-inp cat-select" id="edit-launch-categoria"></select>
+      <select class="modal-inp cat-select" id="edit-launch-categoria" onchange="_onEditCategoriaChange()"></select>
+    </div>
+
+    <div class="modal-row" id="edit-launch-categoria-custom-row" style="display:none">
+      <label class="modal-label" for="edit-launch-categoria-custom">Nova categoria</label>
+      <input class="modal-inp" id="edit-launch-categoria-custom" type="text" maxlength="40" placeholder="Digite a categoria personalizada" />
     </div>
 
     <div class="modal-row">
-      <label class="modal-label" for="edit-launch-alvo">Descrição</label>
-      <input class="modal-inp" id="edit-launch-alvo" type="text" maxlength="80" placeholder="Ex: Mercado, Uber, Salário..." />
+      <label class="modal-label" for="edit-launch-nota">Descrição</label>
+      <input class="modal-inp" id="edit-launch-nota" type="text" maxlength="200" placeholder="Ex: gastei 50 mercado..." />
     </div>
 
     <div class="modal-error" id="edit-launch-error"></div>
@@ -2498,14 +2504,47 @@ function closeLaunchModal() {
   document.getElementById("launch-overlay").classList.remove("open");
 }
 
-/* ─── Editar lançamento (categoria) ─────────────────────────────────── */
+/* ─── Editar lançamento (categoria + descrição) ────────────────────── */
 const EDIT_LAUNCH_CATEGORIES = [
   "alimentação","transporte","saúde","moradia","lazer","educação",
   "assinaturas","pets","compras online","beleza",
   "investimento_aporte","criptomoedas","rendimentos","outros",
 ];
+const EDIT_LAUNCH_CUSTOM_VALUE = "__custom__";
 let editingLaunchId = null;
 let editLaunchSubmitting = false;
+
+function _renderEditCategoriaOptions(currentCategoria) {
+  const sel = document.getElementById("edit-launch-categoria");
+  const opts = [];
+  // Se a categoria atual é "custom" (não está na lista canônica), aparece no topo
+  // como opção pré-selecionada, pra não perder o valor existente.
+  const isCustomCurrent = currentCategoria
+    && !EDIT_LAUNCH_CATEGORIES.includes(currentCategoria);
+  if (isCustomCurrent) {
+    opts.push(`<option value="${currentCategoria}">${currentCategoria}</option>`);
+  }
+  for (const c of EDIT_LAUNCH_CATEGORIES) {
+    opts.push(`<option value="${c}">${c}</option>`);
+  }
+  opts.push(`<option value="${EDIT_LAUNCH_CUSTOM_VALUE}">✏️ Outra (digitar)…</option>`);
+  sel.innerHTML = opts.join("");
+  if (currentCategoria) sel.value = currentCategoria;
+}
+
+function _onEditCategoriaChange() {
+  const sel = document.getElementById("edit-launch-categoria");
+  const row = document.getElementById("edit-launch-categoria-custom-row");
+  const inp = document.getElementById("edit-launch-categoria-custom");
+  if (sel.value === EDIT_LAUNCH_CUSTOM_VALUE) {
+    row.style.display = "";
+    inp.value = "";
+    setTimeout(() => inp.focus(), 30);
+  } else {
+    row.style.display = "none";
+    inp.value = "";
+  }
+}
 
 function openEditLaunchModal(launchId) {
   if (!launchId) return;
@@ -2517,14 +2556,10 @@ function openEditLaunchModal(launchId) {
   document.getElementById("edit-launch-summary").textContent =
     `${launch.tipo} • ${valStr} • ${fmtDate(launch.criado_em)}`;
 
-  const sel = document.getElementById("edit-launch-categoria");
-  sel.innerHTML = EDIT_LAUNCH_CATEGORIES
-    .map(c => `<option value="${c}">${c}</option>`).join("");
-  if (launch.categoria && EDIT_LAUNCH_CATEGORIES.includes(launch.categoria)) {
-    sel.value = launch.categoria;
-  }
-
-  document.getElementById("edit-launch-alvo").value = launch.alvo || "";
+  _renderEditCategoriaOptions(launch.categoria);
+  document.getElementById("edit-launch-categoria-custom-row").style.display = "none";
+  document.getElementById("edit-launch-categoria-custom").value = "";
+  document.getElementById("edit-launch-nota").value = launch.nota || launch.alvo || "";
 
   hideEditLaunchError();
   document.getElementById("edit-launch-overlay").classList.add("open");
@@ -2549,9 +2584,18 @@ function showEditLaunchError(msg) {
 async function submitEditLaunch() {
   if (editLaunchSubmitting || !editingLaunchId) return;
   hideEditLaunchError();
-  const categoria = document.getElementById("edit-launch-categoria").value;
-  const alvo = document.getElementById("edit-launch-alvo").value.trim();
+
+  let categoria = document.getElementById("edit-launch-categoria").value;
+  if (categoria === EDIT_LAUNCH_CUSTOM_VALUE) {
+    categoria = document.getElementById("edit-launch-categoria-custom").value.trim();
+    if (!categoria) {
+      showEditLaunchError("Digite a categoria personalizada.");
+      return;
+    }
+  }
   if (!categoria) { showEditLaunchError("Escolha uma categoria."); return; }
+
+  const nota = document.getElementById("edit-launch-nota").value.trim();
 
   const btn = document.getElementById("edit-launch-submit-btn");
   editLaunchSubmitting = true;
@@ -2561,7 +2605,7 @@ async function submitEditLaunch() {
       method: "PATCH",
       credentials: "same-origin",
       headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ categoria, alvo }),
+      body: JSON.stringify({ categoria, nota }),
     });
     if (!r.ok) {
       const detail = await r.json().catch(() => ({}));
