@@ -975,6 +975,25 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
   </div>
 </div>
 
+<div class="overlay" id="edit-launch-overlay">
+  <div class="modal">
+    <h3>Editar lançamento</h3>
+    <p class="msub" id="edit-launch-summary">—</p>
+
+    <div class="modal-row">
+      <label class="modal-label" for="edit-launch-categoria">Categoria</label>
+      <select class="modal-inp cat-select" id="edit-launch-categoria"></select>
+    </div>
+
+    <div class="modal-error" id="edit-launch-error"></div>
+
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closeEditLaunchModal()">Cancelar</button>
+      <button class="btn-save" type="button" id="edit-launch-submit-btn" onclick="submitEditLaunch()">Salvar</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-success-toast" id="launch-success-toast"></div>
 
 <div class="overlay" id="pocket-history-overlay">
@@ -2319,8 +2338,10 @@ function renderLaunches() {
       const valClass   = isInternal ? '' : (l.tipo==='receita'||l.tipo==='entrada' ? 'g' : 'r');
       const valStyle   = isInternal ? 'color:var(--text-2)' : '';
       const typeLabel  = TYPE_LABELS[l.tipo] || l.tipo.replaceAll("_", " ");
+      const editable   = l.id != null && l.tipo !== 'credito';
+      const clickAttr  = editable ? `onclick="openEditLaunchModal(${l.id})" style="cursor:pointer;${isInternal?'opacity:.75':''}"` : `style="${isInternal?'opacity:.75':''}"`;
       return `
-      <div class="row" style="${isInternal?'opacity:.75':''}">
+      <div class="row" ${clickAttr}>
         <span class="lbl">
 	          <span class="tag ${l.tipo}">${typeLabel}</span>
 	          ${isInternal ? '<span class="tag interno">mov. interna</span>' : ''}
@@ -2469,6 +2490,88 @@ function openLaunchModal(opts) {
 function closeLaunchModal() {
   document.getElementById("launch-overlay").classList.remove("open");
 }
+
+/* ─── Editar lançamento (categoria) ─────────────────────────────────── */
+const EDIT_LAUNCH_CATEGORIES = [
+  "alimentação","transporte","saúde","moradia","lazer","educação",
+  "assinaturas","pets","compras online","beleza",
+  "investimento_aporte","criptomoedas","rendimentos","outros",
+];
+let editingLaunchId = null;
+let editLaunchSubmitting = false;
+
+function openEditLaunchModal(launchId) {
+  if (!launchId) return;
+  const launch = (lastData?.recent_launches || []).find(l => l.id === launchId);
+  if (!launch) return;
+
+  editingLaunchId = launchId;
+  const desc = launch.alvo || launch.nota || "(sem descrição)";
+  const valStr = fmt(launch.valor);
+  document.getElementById("edit-launch-summary").textContent =
+    `${launch.tipo} • ${valStr} • ${desc}`;
+
+  const sel = document.getElementById("edit-launch-categoria");
+  sel.innerHTML = EDIT_LAUNCH_CATEGORIES
+    .map(c => `<option value="${c}">${c}</option>`).join("");
+  if (launch.categoria && EDIT_LAUNCH_CATEGORIES.includes(launch.categoria)) {
+    sel.value = launch.categoria;
+  }
+
+  hideEditLaunchError();
+  document.getElementById("edit-launch-overlay").classList.add("open");
+}
+
+function closeEditLaunchModal() {
+  document.getElementById("edit-launch-overlay").classList.remove("open");
+  editingLaunchId = null;
+}
+
+function hideEditLaunchError() {
+  const el = document.getElementById("edit-launch-error");
+  el.classList.remove("show");
+  el.textContent = "";
+}
+function showEditLaunchError(msg) {
+  const el = document.getElementById("edit-launch-error");
+  el.textContent = msg;
+  el.classList.add("show");
+}
+
+async function submitEditLaunch() {
+  if (editLaunchSubmitting || !editingLaunchId) return;
+  hideEditLaunchError();
+  const categoria = document.getElementById("edit-launch-categoria").value;
+  if (!categoria) { showEditLaunchError("Escolha uma categoria."); return; }
+
+  const btn = document.getElementById("edit-launch-submit-btn");
+  editLaunchSubmitting = true;
+  btn.disabled = true;
+  try {
+    const r = await fetch(`${API}/launches/${USER_ID}/${editingLaunchId}/category`, {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ categoria }),
+    });
+    if (!r.ok) {
+      const detail = await r.json().catch(() => ({}));
+      throw new Error(detail.detail || `HTTP ${r.status}`);
+    }
+    closeEditLaunchModal();
+    showLaunchSuccessToast("Categoria atualizada");
+    sendRefresh();
+  } catch (err) {
+    showEditLaunchError("Erro: " + err.message);
+  } finally {
+    editLaunchSubmitting = false;
+    btn.disabled = false;
+  }
+}
+
+document.getElementById("edit-launch-overlay").addEventListener("click", e => {
+  if (e.target === e.currentTarget) closeEditLaunchModal();
+});
 
 function hideLaunchError() {
   const el = document.getElementById("launch-error");

@@ -205,7 +205,7 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
 # add — registra receita/despesa
 # ---------------------------------------------------------------------------
 
-def add(user_id: int, text: str, entities: dict) -> str:
+def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> str:
     from core.handlers import credit as h_credit
 
     credit_response = h_credit.try_handle_natural_credit_purchase(user_id, text)
@@ -254,6 +254,18 @@ def add(user_id: int, text: str, entities: dict) -> str:
         target_hint=alvo,
         reason=category_reason,
     )
+
+    # Oferece um botão de "categoria errada?" no WhatsApp (one-shot, lido por
+    # _send_reply_with_optional_buttons no wa_runtime e limpo logo em seguida).
+    if platform == "whatsapp" and launch_id:
+        try:
+            db.set_pending_action(
+                user_id,
+                "recategorize_launch_offer",
+                {"launch_id": int(launch_id)},
+            )
+        except Exception:
+            pass
 
     emoji = "💸" if tipo == "despesa" else "💰"
     return (

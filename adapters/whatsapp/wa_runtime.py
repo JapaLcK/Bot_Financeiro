@@ -11,7 +11,13 @@ import traceback
 from dataclasses import dataclass
 from typing import Any
 
-from adapters.whatsapp.wa_client import download_media, send_interactive_buttons, send_text, send_typing_indicator
+from adapters.whatsapp.wa_client import (
+    download_media,
+    send_interactive_buttons,
+    send_interactive_list,
+    send_text,
+    send_typing_indicator,
+)
 from adapters.whatsapp.wa_parse import InboundAttachmentRef, InboundMessage, extract_messages, get_interactive_id
 from adapters.whatsapp.wa_tutorial import (
     TUTORIAL_BUTTON_IDS,
@@ -35,7 +41,9 @@ from db import (
     get_conn,
     get_or_create_canonical_user,
     get_pending_action,
+    set_pending_action,
     set_whatsapp_updates_opt_out,
+    update_launch_category,
 )
 from utils_phone import mask_phone
 
@@ -45,6 +53,9 @@ WA_CONFIRM_YES_ID = "confirm_yes"
 WA_CONFIRM_NO_ID = "confirm_no"
 WA_UNDO_LAUNCH_ID = "undo_launch"
 WA_DAILY_REPORT_DISABLE_ID = "daily_report_disable"
+WA_RECAT_BUTTON_PREFIX = "recat:"          # botão pós-lançamento
+WA_RECAT_PICK_PREFIX = "recatpick:"        # item da lista de categorias
+WA_RECAT_OTHER_PREFIX = "recatother:"      # opção "outra (digitar)"
 WA_UPDATES_DISABLE_IDS = {
     "parar atualizações",
     "parar atualizacoes",
@@ -177,6 +188,27 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
         except Exception as exc:
             logger.warning("WA send_interactive_buttons (undo) failed, fallback: %s", exc)
 
+    # Botão "categoria errada?" após confirmação de lançamento (one-shot)
+    elif pending and pending.get("action_type") == "recategorize_launch_offer":
+        launch_id = (pending.get("payload") or {}).get("launch_id")
+        if user_id is not None:
+            try:
+                clear_pending_action(int(user_id))
+            except Exception as exc:
+                logger.warning("WA clear recategorize_offer pending failed: %s", exc)
+        if launch_id:
+            logger.info("WA sending recategorize button to=%s launch_id=%s", to_wa_id, launch_id)
+            try:
+                send_interactive_buttons(
+                    to=to_wa_id,
+                    body=body,
+                    buttons=[{"id": f"{WA_RECAT_BUTTON_PREFIX}{int(launch_id)}", "title": "✏️ Categoria errada?"}],
+                    footer="Toque para trocar a categoria",
+                )
+                return
+            except Exception as exc:
+                logger.warning("WA send_interactive_buttons (recat) failed, fallback: %s", exc)
+
     elif _pending_supports_confirmation_buttons(pending):
         logger.info("WA sending interactive confirmation buttons to=%s", to_wa_id)
         try:
@@ -194,6 +226,72 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
             logger.warning("WA send_interactive_buttons failed, fallback para texto: %s", exc)
 
     _send_reply(to_wa_id, body)
+
+
+def _send_recategorize_list(to_wa_id: str, launch_id: int) -> None:
+    """Mostra a lista interativa com as categorias disponíveis para um launch."""
+    sections = [
+        {
+            "title": "Gastos do dia a dia",
+            "rows": [
+                {"id": f"{WA_RECAT_PICK_PREFIX}{launch_id}:alimentação",   "title": "alimentação"},
+                {"id": f"{WA_RECAT_PICK_PREFIX}{launch_id}:transporte",    "title": "transporte"},
+                {"id": f"{WA_RECAT_PICK_PREFIX}{launch_id}:compras online", "title": "compras online"},
+                {"id": f"{WA_RECAT_PICK_PREFIX}{launch_id}:lazer",         "title": "lazer"},
+                {"id": f"{WA_RECAT_PICK_PREFIX}{launch_id}:beleza",        "title": "beleza"},
+            ],
+        },
+        {
+            "title": "Casa e família",
+            "rows": [
+                {"id": f"{WA_RECAT_PICK_PREFIX}{launch_id}:moradia",     "title": "moradia"},
+                {"id": f"{WA_RECAT_PICK_PREFIX}{launch_id}:saúde",       "title": "saúde"},
+                {"id": f"{WA_RECAT_PICK_PREFIX}{launch_id}:educação",    "title": "educação"},
+                {"id": f"{WA_RECAT_PICK_PREFIX}{launch_id}:pets",        "title": "pets"},
+                {"id": f"{WA_RECAT_PICK_PREFIX}{launch_id}:assinaturas", "title": "assinaturas"},
+            ],
+        },
+        {
+            "title": "Investimentos",
+            "rows": [
+                {"id": f"{WA_RECAT_PICK_PREFIX}{launch_id}:investimento_aporte", "title": "investimento_aporte"},
+                {"id": f"{WA_RECAT_PICK_PREFIX}{launch_id}:criptomoedas",        "title": "criptomoedas"},
+                {"id": f"{WA_RECAT_PICK_PREFIX}{launch_id}:rendimentos",         "title": "rendimentos"},
+            ],
+        },
+        {
+            "title": "Outros",
+            "rows": [
+                {"id": f"{WA_RECAT_PICK_PREFIX}{launch_id}:outros",   "title": "outros"},
+                {"id": f"{WA_RECAT_OTHER_PREFIX}{launch_id}",         "title": "✏️ Outra (digitar)"},
+            ],
+        },
+    ]
+    send_interactive_list(
+        to=to_wa_id,
+        body=f"Escolha a nova categoria para o lançamento #{launch_id}.",
+        button_label="📂 Categorias",
+        sections=sections,
+        footer="Ou escolha 'Outra' para digitar",
+    )
+
+
+def _apply_recategorize(user_id: int, launch_id: int, raw_categoria: str) -> str:
+    """Aplica uma nova categoria a um launch e devolve a mensagem de resposta."""
+    from utils_text import canonicalize_category_label  # local import (evita ciclo)
+
+    cat = (raw_categoria or "").strip()
+    if not cat:
+        return "Categoria inválida. Tente novamente."
+    canon = canonicalize_category_label(cat) or cat.lower()
+    try:
+        ok = update_launch_category(user_id, launch_id, canon)
+    except Exception as exc:
+        logger.exception("WA recategorize update failed launch=%s: %s", launch_id, exc)
+        return "Não consegui atualizar agora. Tente de novo em instantes."
+    if not ok:
+        return "Lançamento não encontrado (talvez já tenha sido apagado)."
+    return f"✅ Categoria do lançamento #{launch_id} atualizada para *{canon}*."
 
 
 def _download_attachments_sync(att_refs: list[InboundAttachmentRef]) -> list[Attachment]:
@@ -407,6 +505,49 @@ def process_message(message: InboundMessage) -> None:
                     )
                 return
 
+            # Botão "Categoria errada?" pós-lançamento → abre lista de categorias
+            if interactive_id.startswith(WA_RECAT_BUTTON_PREFIX):
+                try:
+                    launch_id = int(interactive_id.split(":", 1)[1])
+                except (ValueError, IndexError):
+                    launch_id = 0
+                logger.info("WA recategorize button clicked wa_id=%s launch=%s", reply_to, launch_id)
+                if launch_id:
+                    try:
+                        _send_recategorize_list(reply_to, launch_id)
+                    except Exception as exc:
+                        logger.warning("WA send recat list failed: %s", exc)
+                        _send_reply(reply_to, "Não consegui abrir a lista de categorias agora.")
+                return
+
+            # Item da lista de categorias → atualiza direto
+            if interactive_id.startswith(WA_RECAT_PICK_PREFIX):
+                tail = interactive_id[len(WA_RECAT_PICK_PREFIX):]
+                lid_str, _, cat = tail.partition(":")
+                try:
+                    launch_id = int(lid_str)
+                except ValueError:
+                    launch_id = 0
+                logger.info("WA recategorize pick wa_id=%s launch=%s cat=%s", reply_to, launch_id, cat)
+                if launch_id and cat:
+                    _send_reply(reply_to, _apply_recategorize(uid, launch_id, cat))
+                return
+
+            # "Outra (digitar)" → grava pending para a próxima mensagem virar a categoria
+            if interactive_id.startswith(WA_RECAT_OTHER_PREFIX):
+                try:
+                    launch_id = int(interactive_id[len(WA_RECAT_OTHER_PREFIX):])
+                except ValueError:
+                    launch_id = 0
+                logger.info("WA recategorize other clicked wa_id=%s launch=%s", reply_to, launch_id)
+                if launch_id:
+                    try:
+                        set_pending_action(uid, "recategorize_launch_text", {"launch_id": launch_id}, minutes=5)
+                    except Exception as exc:
+                        logger.warning("WA set recat_text pending failed: %s", exc)
+                    _send_reply(reply_to, "Digite a nova categoria para esse lançamento:")
+                return
+
             # Botão de desfazer áudio
             if interactive_id == WA_UNDO_LAUNCH_ID:
                 logger.info("WA undo_launch button clicked wa_id=%s", reply_to)
@@ -444,6 +585,25 @@ def process_message(message: InboundMessage) -> None:
                         user_id=uid,
                     )
                 return
+
+        # ---------------------------------------------------------------
+        # Interceptação: usuário escolheu "Outra (digitar)" e agora digitou
+        # a categoria que quer aplicar ao lançamento.
+        # ---------------------------------------------------------------
+        if (message.text or "").strip():
+            try:
+                pending_recat = get_pending_action(uid)
+            except Exception:
+                pending_recat = None
+            if pending_recat and pending_recat.get("action_type") == "recategorize_launch_text":
+                launch_id = (pending_recat.get("payload") or {}).get("launch_id")
+                try:
+                    clear_pending_action(uid)
+                except Exception as exc:
+                    logger.warning("WA clear recat_text pending failed: %s", exc)
+                if launch_id:
+                    _send_reply(reply_to, _apply_recategorize(uid, int(launch_id), message.text))
+                    return
 
         # ---------------------------------------------------------------
         # Interceptação de comandos de texto simples para fluxo interativo

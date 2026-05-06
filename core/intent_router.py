@@ -241,7 +241,7 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
         return h_launches.list_launches(user_id, limit=limit, entities=entities, original_text=text)
 
     if intent == "launches.add":
-        return h_launches.add(user_id, text, entities)
+        return h_launches.add(user_id, text, entities, platform=platform)
 
     if intent == "launches.undo":
         return h_launches.undo(user_id)

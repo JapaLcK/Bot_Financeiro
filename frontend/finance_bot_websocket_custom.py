@@ -89,6 +89,7 @@ from db import (
     update_pluggy_open_finance_item_status,
     investment_deposit_from_account,
     investment_withdraw_to_account,
+    update_launch_category,
 )
 from core.services.pluggy import (
     PluggyApiError,
@@ -428,7 +429,8 @@ async def get_financial_data(
             if include_credit:
                 credit_union_sql = """
                     UNION ALL
-                    SELECT 'credito' AS tipo,
+                    SELECT NULL::bigint AS id,
+                           'credito' AS tipo,
                            t.valor AS valor,
                            c.name AS alvo,
                            t.nota AS nota,
@@ -446,11 +448,11 @@ async def get_financial_data(
 
             # Total launches for the requested month after filters (excluindo ações administrativas)
             # Importante: as duas pernas do UNION ALL precisam ter o mesmo shape, então
-            # selecionamos exatamente as mesmas 7 colunas em cada uma.
+            # selecionamos exatamente as mesmas 8 colunas em cada uma.
             await cur.execute(
                 f"""
                 SELECT COUNT(*) AS total FROM (
-                    SELECT tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
+                    SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
                     FROM launches
                     WHERE user_id = %s
                       AND criado_em >= %s AND criado_em < %s
@@ -467,9 +469,9 @@ async def get_financial_data(
             # Launches for the requested month after filters (paginated)
             await cur.execute(
                 f"""
-                SELECT tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
+                SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
                 FROM (
-                    SELECT tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
+                    SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
                     FROM launches
                     WHERE user_id = %s
                       AND criado_em >= %s AND criado_em < %s
@@ -2507,6 +2509,46 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         "new_balance": float(new_balance),
         "is_internal_movement": is_internal,
     }
+
+
+class LaunchCategoryPayload(BaseModel):
+    categoria: str
+
+
+@app.patch("/launches/{user_id}/{launch_id}/category")
+async def update_launch_category_route(
+    request: Request,
+    user_id: int,
+    launch_id: int,
+    payload: LaunchCategoryPayload,
+):
+    """Atualiza a categoria de um lançamento existente em `launches`.
+
+    Não altera saldo/efeitos. Usado pela edição manual no dashboard e pelo
+    botão de recategorização no WhatsApp. Lançamentos de cartão de crédito
+    (linhas com tipo='credito' no histórico) não passam por aqui.
+    """
+    _authorize_dashboard_access(request, user_id)
+
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from utils_text import canonicalize_category_label
+
+    raw = (payload.categoria or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Categoria é obrigatória.")
+
+    canon = canonicalize_category_label(raw) or raw.lower()
+
+    changed = await asyncio.to_thread(
+        update_launch_category, user_id, launch_id, canon
+    )
+    if not changed:
+        raise HTTPException(
+            status_code=404,
+            detail="Lançamento não encontrado.",
+        )
+    return {"ok": True, "launch_id": launch_id, "categoria": canon}
 
 
 class PocketCreatePayload(BaseModel):
