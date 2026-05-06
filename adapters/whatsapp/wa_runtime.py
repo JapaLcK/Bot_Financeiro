@@ -51,7 +51,8 @@ logger = logging.getLogger(__name__)
 
 WA_CONFIRM_YES_ID = "confirm_yes"
 WA_CONFIRM_NO_ID = "confirm_no"
-WA_UNDO_LAUNCH_ID = "undo_launch"
+WA_UNDO_LAUNCH_ID = "undo_launch"          # legado: undo do último (botão pós-áudio)
+WA_UNDO_LAUNCH_PREFIX = "undo_launch:"     # undo de lançamento específico (pós-confirmação)
 WA_DAILY_REPORT_DISABLE_ID = "daily_report_disable"
 WA_RECAT_BUTTON_PREFIX = "recat:"          # botão pós-lançamento
 WA_RECAT_PICK_PREFIX = "recatpick:"        # item da lista de categorias
@@ -188,7 +189,8 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
         except Exception as exc:
             logger.warning("WA send_interactive_buttons (undo) failed, fallback: %s", exc)
 
-    # Lista de categorias direto na confirmação de lançamento (one-shot)
+    # Confirmação de lançamento: dois botões — Trocar categoria abre a lista,
+    # Desfazer dispara propose_delete pra esse lançamento específico (one-shot)
     elif pending and pending.get("action_type") == "recategorize_launch_offer":
         launch_id = (pending.get("payload") or {}).get("launch_id")
         if user_id is not None:
@@ -197,9 +199,24 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
             except Exception as exc:
                 logger.warning("WA clear recategorize_offer pending failed: %s", exc)
         if launch_id:
-            logger.info("WA sending recategorize list to=%s launch_id=%s", to_wa_id, launch_id)
+            lid = int(launch_id)
+            logger.info("WA sending launch action buttons to=%s launch_id=%s", to_wa_id, lid)
             try:
-                _send_recategorize_list(to_wa_id, body, int(launch_id))
+                send_interactive_buttons(
+                    to=to_wa_id,
+                    body=body,
+                    buttons=[
+                        {"id": f"{WA_RECAT_BUTTON_PREFIX}{lid}", "title": "📂 Trocar categoria"},
+                        {"id": f"{WA_UNDO_LAUNCH_PREFIX}{lid}", "title": "↩️ Desfazer"},
+                    ],
+                    footer="Errou? Toque pra trocar a categoria ou desfazer",
+                )
+                return
+            except Exception as exc:
+                logger.warning("WA send launch action buttons failed, fallback list: %s", exc)
+            # Fallback: lista direta de categorias (sem o botão Desfazer)
+            try:
+                _send_recategorize_list(to_wa_id, body, lid)
                 return
             except Exception as exc:
                 logger.warning("WA send recategorize list failed, fallback texto: %s", exc)
@@ -539,7 +556,25 @@ def process_message(message: InboundMessage) -> None:
                     _send_reply(reply_to, "Digite a nova categoria para esse lançamento:")
                 return
 
-            # Botão de desfazer áudio
+            # Botão de desfazer um lançamento específico (pós-confirmação)
+            if interactive_id.startswith(WA_UNDO_LAUNCH_PREFIX):
+                try:
+                    launch_id = int(interactive_id[len(WA_UNDO_LAUNCH_PREFIX):])
+                except ValueError:
+                    launch_id = 0
+                logger.info("WA undo_launch (specific) clicked wa_id=%s launch=%s", reply_to, launch_id)
+                if launch_id:
+                    from core.handlers import launches as h_launches
+                    try:
+                        body = h_launches.propose_delete(uid, launch_id)
+                    except Exception as exc:
+                        logger.exception("WA propose_delete failed launch=%s: %s", launch_id, exc)
+                        _send_reply(reply_to, "Não consegui preparar o desfazer agora. Tente em instantes.")
+                        return
+                    _send_reply_with_optional_buttons(reply_to, body, user_id=uid)
+                return
+
+            # Botão de desfazer áudio (legado: undo do último lançamento)
             if interactive_id == WA_UNDO_LAUNCH_ID:
                 logger.info("WA undo_launch button clicked wa_id=%s", reply_to)
                 # Injeta "desfazer" para o classificador tratar normalmente
