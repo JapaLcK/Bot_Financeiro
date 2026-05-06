@@ -29,11 +29,13 @@ def D(x) -> Decimal:
 def test_saldo_e_lancamentos(user_id):
     assert get_balance(user_id) == D("0")
 
-    l1, bal = add_launch_and_update_balance(user_id, "receita", 1000, None, "salario")
+    l1, seq1, bal = add_launch_and_update_balance(user_id, "receita", 1000, None, "salario")
     assert bal == D("1000")
+    assert seq1 == 1
 
-    l2, bal = add_launch_and_update_balance(user_id, "despesa", 120, None, "mercado")
+    l2, seq2, bal = add_launch_and_update_balance(user_id, "despesa", 120, None, "mercado")
     assert bal == D("880")
+    assert seq2 == 2
 
     rows = list_launches(user_id, limit=10)
     assert len(rows) >= 2
@@ -67,8 +69,8 @@ def test_investimento_aporte_resgate(user_id):
 
 def test_delete_launch_and_rollback(user_id):
     assert get_balance(user_id) == D("0")
-    l1, bal = add_launch_and_update_balance(user_id, "receita", 1000, None, "salario")
-    l2, bal = add_launch_and_update_balance(user_id, "despesa", 200, None, "mercado")
+    l1, _seq1, bal = add_launch_and_update_balance(user_id, "receita", 1000, None, "salario")
+    l2, _seq2, bal = add_launch_and_update_balance(user_id, "despesa", 200, None, "mercado")
     assert get_balance(user_id) == D("800")
 
     delete_launch_and_rollback(user_id, int(l2))

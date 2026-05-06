@@ -72,7 +72,7 @@ def test_classify_mostra_meus_lancamentos():
 
 def test_resolve_delete_uses_correct_argument_order(user_id):
     add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
-    launch_id, _ = add_launch_and_update_balance(user_id, "despesa", 200, "conta de luz", "paguei 200 conta de luz")
+    launch_id, _user_seq, _bal = add_launch_and_update_balance(user_id, "despesa", 200, "conta de luz", "paguei 200 conta de luz")
     set_pending_action(user_id, "delete_launch", {"launch_id": int(launch_id)})
 
     response = resolve_delete(user_id, confirmed=True)
