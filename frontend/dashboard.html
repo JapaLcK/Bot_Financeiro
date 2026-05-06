@@ -3131,11 +3131,11 @@ async function exportCSV() {
   try {
     const resp = await fetch(url, { credentials: "same-origin" });
     if (resp.status === 404) {
-      showToast("Nenhum lançamento neste mês para exportar.");
+      showLaunchSuccessToast("Nenhum lançamento neste mês para exportar.");
       return;
     }
     if (!resp.ok) {
-      showToast("Erro ao exportar. Tente novamente.");
+      showLaunchSuccessToast("Erro ao exportar. Tente novamente.");
       return;
     }
     const blob = await resp.blob();
@@ -3148,7 +3148,7 @@ async function exportCSV() {
     a.remove();
     URL.revokeObjectURL(blobUrl);
   } catch (e) {
-    showToast("Erro ao exportar. Tente novamente.");
+    showLaunchSuccessToast("Erro ao exportar. Tente novamente.");
   }
 }
 
