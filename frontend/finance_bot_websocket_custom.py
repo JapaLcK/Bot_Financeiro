@@ -2019,22 +2019,24 @@ async def auth_google_callback(
     Recebe o redirect do Google. Valida state, troca code por id_token,
     decide login / vincular / criar pendente, e redireciona o usuário.
     """
+    import logging as _logging
+    import traceback as _traceback
+
     from core.services.google_oauth import (
         GoogleOAuthError,
         exchange_code_for_tokens,
         verify_id_token,
     )
     from db import (
-        consume_dashboard_session as _unused_consume,  # noqa: F401  (silencia lint do import dinâmico)
         find_user_by_google_sub,
         find_user_id_by_email,
         link_google_identity,
         create_pending_google_signup,
     )
 
+    _log = _logging.getLogger("auth.google")
+
     cookie_state = request.cookies.get(GOOGLE_OAUTH_STATE_COOKIE) or ""
-    callback_response = RedirectResponse(url="/", status_code=302)
-    callback_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
 
     if error:
         return _google_redirect_to_landing(f"Login com Google cancelado: {error}")
@@ -2043,60 +2045,68 @@ async def auth_google_callback(
         return _google_redirect_to_landing("Sessão de login expirou. Tente novamente.")
 
     try:
-        tokens = await exchange_code_for_tokens(code)
-        claims = verify_id_token(tokens["id_token"])
-    except GoogleOAuthError as exc:
-        return _google_redirect_to_landing(str(exc))
+        try:
+            tokens = await exchange_code_for_tokens(code)
+            claims = verify_id_token(tokens["id_token"])
+        except GoogleOAuthError as exc:
+            return _google_redirect_to_landing(str(exc))
 
-    sub = claims["sub"]
-    email = (claims.get("email") or "").strip().lower()
-    email_verified = bool(claims.get("email_verified"))
-    name_hint = claims.get("name") or claims.get("given_name") or None
+        sub = claims["sub"]
+        email = (claims.get("email") or "").strip().lower()
+        email_verified = bool(claims.get("email_verified"))
+        name_hint = claims.get("name") or claims.get("given_name") or None
 
-    if not email or not email_verified:
-        return _google_redirect_to_landing(
-            "Sua conta Google não tem e-mail verificado. Verifique no Google e tente novamente."
+        if not email or not email_verified:
+            return _google_redirect_to_landing(
+                "Sua conta Google não tem e-mail verificado. Verifique no Google e tente novamente."
+            )
+
+        # 1) Já existe vínculo? → login direto
+        user_id = await asyncio.to_thread(find_user_by_google_sub, sub)
+
+        # 2) Não existe vínculo, mas existe conta com este email? → auto-link
+        if not user_id:
+            existing = await asyncio.to_thread(find_user_id_by_email, email)
+            if existing:
+                await asyncio.to_thread(link_google_identity, existing, sub, email)
+                user_id = existing
+
+        # 3) Conta totalmente nova → cria pendente e manda pra /onboarding
+        if not user_id:
+            token = await asyncio.to_thread(create_pending_google_signup, sub, email, name_hint)
+            signup_response = RedirectResponse(url=f"/onboarding?token={token}", status_code=302)
+            signup_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
+            return signup_response
+
+        # Usuário existente: bloqueia se conta agendada para deletar
+        try:
+            _raise_if_account_scheduled_for_deletion(user_id)
+        except HTTPException as exc:
+            return _google_redirect_to_landing(exc.detail)
+
+        # Login bem-sucedido → cookies + redirect pra home
+        jwt_token = _make_jwt(user_id, email)
+        success_response = RedirectResponse(url=_post_login_url(), status_code=302)
+        success_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
+        _set_auth_cookie(success_response, jwt_token)
+        _set_dashboard_cookie(success_response, int(user_id))
+
+        await log_auth_login_event(
+            email,
+            True,
+            user_id=user_id,
+            ip_address=get_remote_address(request),
+            user_agent=request.headers.get("user-agent"),
         )
 
-    # 1) Já existe vínculo? → login direto
-    user_id = await asyncio.to_thread(find_user_by_google_sub, sub)
+        return success_response
 
-    # 2) Não existe vínculo, mas existe conta com este email? → auto-link
-    if not user_id:
-        existing = await asyncio.to_thread(find_user_id_by_email, email)
-        if existing:
-            await asyncio.to_thread(link_google_identity, existing, sub, email)
-            user_id = existing
-
-    # 3) Conta totalmente nova → cria pendente e manda pra /onboarding
-    if not user_id:
-        token = await asyncio.to_thread(create_pending_google_signup, sub, email, name_hint)
-        signup_response = RedirectResponse(url=f"/onboarding?token={token}", status_code=302)
-        signup_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
-        return signup_response
-
-    # Usuário existente: bloqueia se conta agendada para deletar
-    try:
-        _raise_if_account_scheduled_for_deletion(user_id)
-    except HTTPException as exc:
-        return _google_redirect_to_landing(exc.detail)
-
-    # Login bem-sucedido → cookies + redirect pra home
-    jwt_token = _make_jwt(user_id, email)
-    success_response = RedirectResponse(url=_post_login_url(), status_code=302)
-    success_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
-    _set_auth_cookie(success_response, jwt_token)
-    _set_dashboard_cookie(success_response, int(user_id))
-
-    await log_auth_login_event(
-        email,
-        True,
-        user_id=user_id,
-        ip_address=get_remote_address(request),
-        user_agent=request.headers.get("user-agent"),
-    )
-
-    return success_response
+    except Exception as exc:
+        _log.error("Falha inesperada no /auth/google/callback: %s\n%s",
+                   exc, _traceback.format_exc())
+        return _google_redirect_to_landing(
+            f"Falha inesperada no login Google ({type(exc).__name__}). Veja o terminal do servidor."
+        )
 
 
 @app.get("/auth/google/pending/{token}")
