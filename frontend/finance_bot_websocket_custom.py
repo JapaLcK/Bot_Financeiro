@@ -2404,10 +2404,6 @@ async def serve_reset_password():
     return _html_file(HERE / "reset-password.html")
 
 
-@app.get("/dashboard-login")
-async def serve_dashboard_login():
-    return _html_file(HERE / "dashboard-login.html")
-
 @app.get("/onboarding")
 async def serve_onboarding():
     return _html_file(HERE / "onboarding.html")
@@ -2448,7 +2444,7 @@ async def serve_robots_txt():
         "Disallow: /app",
         "Disallow: /home",
         "Disallow: /settings",
-        "Disallow: /dashboard-login",
+        "Disallow: /onboarding",
         "Disallow: /reset-password",
         "Disallow: /auth/",
         "Disallow: /admin",
