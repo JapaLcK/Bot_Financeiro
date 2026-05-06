@@ -289,39 +289,34 @@ def test_import_credit_ofx_nao_grava_limite_automaticamente(user_id):
 
 
 def test_confirm_email_verification_normaliza_telefone_armazenado_no_codigo():
+    # Limpeza do user_id criado dentro do teste fica a cargo do autouse
+    # _auto_cleanup_orphan_users (ver tests/conftest.py), que faz snapshot
+    # de `users` antes/depois e apaga qualquer registro novo respeitando FKs.
     email = f"verify-{uuid.uuid4().hex[:8]}@example.com"
     raw_phone = "+55 (65) 99274-1873"
-    result = None
 
     code = create_email_verification(email, "123456", "5565992741873")
 
-    try:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    update email_verification_codes
-                    set phone_e164 = %s
-                    where email = %s and code = %s
-                    """,
-                    (raw_phone, email, code),
-                )
-            conn.commit()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update email_verification_codes
+                set phone_e164 = %s
+                where email = %s and code = %s
+                """,
+                (raw_phone, email, code),
+            )
+        conn.commit()
 
-        result = confirm_email_verification(email, code)
+    result = confirm_email_verification(email, code)
 
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "select phone_e164 from auth_accounts where user_id = %s",
-                    (result["user_id"],),
-                )
-                row = cur.fetchone()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select phone_e164 from auth_accounts where user_id = %s",
+                (result["user_id"],),
+            )
+            row = cur.fetchone()
 
-        assert row["phone_e164"] == "5565992741873"
-    finally:
-        if result is not None:
-            with get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("delete from users where id = %s", (result["user_id"],))
-                conn.commit()
+    assert row["phone_e164"] == "5565992741873"
