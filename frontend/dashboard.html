@@ -985,6 +985,11 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
       <select class="modal-inp cat-select" id="edit-launch-categoria"></select>
     </div>
 
+    <div class="modal-row">
+      <label class="modal-label" for="edit-launch-alvo">Descrição</label>
+      <input class="modal-inp" id="edit-launch-alvo" type="text" maxlength="80" placeholder="Ex: Mercado, Uber, Salário..." />
+    </div>
+
     <div class="modal-error" id="edit-launch-error"></div>
 
     <div class="modal-acts">
@@ -2339,9 +2344,11 @@ function renderLaunches() {
       const valStyle   = isInternal ? 'color:var(--text-2)' : '';
       const typeLabel  = TYPE_LABELS[l.tipo] || l.tipo.replaceAll("_", " ");
       const editable   = l.id != null && l.tipo !== 'credito';
-      const clickAttr  = editable ? `onclick="openEditLaunchModal(${l.id})" style="cursor:pointer;${isInternal?'opacity:.75':''}"` : `style="${isInternal?'opacity:.75':''}"`;
+      const editBtn    = editable
+        ? `<button class="bgt-btn launch-edit-btn" onclick="event.stopPropagation();openEditLaunchModal(${l.id})" title="Editar lançamento">✏️</button>`
+        : '';
       return `
-      <div class="row" ${clickAttr}>
+      <div class="row" style="${isInternal?'opacity:.75':''}">
         <span class="lbl">
 	          <span class="tag ${l.tipo}">${typeLabel}</span>
 	          ${isInternal ? '<span class="tag interno">mov. interna</span>' : ''}
@@ -2351,7 +2358,7 @@ function renderLaunches() {
         <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
           <span class="val ${valClass}" style="${valStyle}"
                 data-num="lnc_${l.criado_em}_${l.valor}" data-val="${l.valor}">${fmt(l.valor)}</span>
-          <span style="font-size:.65rem;color:var(--text-3)">${fmtDate(l.criado_em)}</span>
+          <span style="font-size:.65rem;color:var(--text-3)">${fmtDate(l.criado_em)}${editBtn}</span>
         </span>
       </div>
     `}).join("")
@@ -2506,10 +2513,9 @@ function openEditLaunchModal(launchId) {
   if (!launch) return;
 
   editingLaunchId = launchId;
-  const desc = launch.alvo || launch.nota || "(sem descrição)";
   const valStr = fmt(launch.valor);
   document.getElementById("edit-launch-summary").textContent =
-    `${launch.tipo} • ${valStr} • ${desc}`;
+    `${launch.tipo} • ${valStr} • ${fmtDate(launch.criado_em)}`;
 
   const sel = document.getElementById("edit-launch-categoria");
   sel.innerHTML = EDIT_LAUNCH_CATEGORIES
@@ -2517,6 +2523,8 @@ function openEditLaunchModal(launchId) {
   if (launch.categoria && EDIT_LAUNCH_CATEGORIES.includes(launch.categoria)) {
     sel.value = launch.categoria;
   }
+
+  document.getElementById("edit-launch-alvo").value = launch.alvo || "";
 
   hideEditLaunchError();
   document.getElementById("edit-launch-overlay").classList.add("open");
@@ -2542,24 +2550,25 @@ async function submitEditLaunch() {
   if (editLaunchSubmitting || !editingLaunchId) return;
   hideEditLaunchError();
   const categoria = document.getElementById("edit-launch-categoria").value;
+  const alvo = document.getElementById("edit-launch-alvo").value.trim();
   if (!categoria) { showEditLaunchError("Escolha uma categoria."); return; }
 
   const btn = document.getElementById("edit-launch-submit-btn");
   editLaunchSubmitting = true;
   btn.disabled = true;
   try {
-    const r = await fetch(`${API}/launches/${USER_ID}/${editingLaunchId}/category`, {
+    const r = await fetch(`${API}/launches/${USER_ID}/${editingLaunchId}`, {
       method: "PATCH",
       credentials: "same-origin",
       headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ categoria }),
+      body: JSON.stringify({ categoria, alvo }),
     });
     if (!r.ok) {
       const detail = await r.json().catch(() => ({}));
       throw new Error(detail.detail || `HTTP ${r.status}`);
     }
     closeEditLaunchModal();
-    showLaunchSuccessToast("Categoria atualizada");
+    showLaunchSuccessToast("Lançamento atualizado");
     sendRefresh();
   } catch (err) {
     showEditLaunchError("Erro: " + err.message);

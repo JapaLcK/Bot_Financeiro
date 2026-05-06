@@ -48,6 +48,7 @@ from .accounts import (
     add_launch_and_update_balance,
     list_launches,
     update_launch_category,
+    update_launch_fields,
     update_launch_categories_bulk,
     export_launches,
     get_launches_by_period,
@@ -220,7 +221,7 @@ __all__ = [
     "link_platform_identity",
     # accounts
     "get_balance", "set_balance", "add_launch_and_update_balance", "list_launches",
-    "update_launch_category", "update_launch_categories_bulk", "export_launches",
+    "update_launch_category", "update_launch_fields", "update_launch_categories_bulk", "export_launches",
     "get_launches_by_period", "get_summary_by_period", "delete_launch_and_rollback",
     "get_ofx_import_by_hash", "import_ofx_launches_bulk",
     # pockets

@@ -90,6 +90,7 @@ from db import (
     investment_deposit_from_account,
     investment_withdraw_to_account,
     update_launch_category,
+    update_launch_fields,
 )
 from core.services.pluggy import (
     PluggyApiError,
@@ -2511,22 +2512,22 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
     }
 
 
-class LaunchCategoryPayload(BaseModel):
-    categoria: str
+class LaunchEditPayload(BaseModel):
+    categoria: str | None = None
+    alvo: str | None = None
 
 
-@app.patch("/launches/{user_id}/{launch_id}/category")
-async def update_launch_category_route(
+@app.patch("/launches/{user_id}/{launch_id}")
+async def update_launch_route(
     request: Request,
     user_id: int,
     launch_id: int,
-    payload: LaunchCategoryPayload,
+    payload: LaunchEditPayload,
 ):
-    """Atualiza a categoria de um lançamento existente em `launches`.
+    """Atualiza campos editáveis de um lançamento (categoria e/ou descrição).
 
-    Não altera saldo/efeitos. Usado pela edição manual no dashboard e pelo
-    botão de recategorização no WhatsApp. Lançamentos de cartão de crédito
-    (linhas com tipo='credito' no histórico) não passam por aqui.
+    Não altera saldo/efeitos. Lançamentos de cartão de crédito não passam
+    por aqui — eles ficam em `credit_transactions`.
     """
     _authorize_dashboard_access(request, user_id)
 
@@ -2534,21 +2535,37 @@ async def update_launch_category_route(
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from utils_text import canonicalize_category_label
 
-    raw = (payload.categoria or "").strip()
-    if not raw:
-        raise HTTPException(status_code=400, detail="Categoria é obrigatória.")
+    categoria_norm: str | None = None
+    if payload.categoria is not None:
+        raw = payload.categoria.strip()
+        if not raw:
+            raise HTTPException(status_code=400, detail="Categoria não pode ser vazia.")
+        categoria_norm = canonicalize_category_label(raw) or raw.lower()
 
-    canon = canonicalize_category_label(raw) or raw.lower()
+    alvo_norm: str | None = None
+    if payload.alvo is not None:
+        alvo_norm = payload.alvo.strip()
+        if len(alvo_norm) > 80:
+            raise HTTPException(status_code=400, detail="Descrição muito longa (máx. 80 caracteres).")
+
+    if categoria_norm is None and alvo_norm is None:
+        raise HTTPException(status_code=400, detail="Nada para atualizar.")
 
     changed = await asyncio.to_thread(
-        update_launch_category, user_id, launch_id, canon
+        update_launch_fields,
+        user_id,
+        launch_id,
+        categoria=categoria_norm,
+        alvo=alvo_norm,
     )
     if not changed:
-        raise HTTPException(
-            status_code=404,
-            detail="Lançamento não encontrado.",
-        )
-    return {"ok": True, "launch_id": launch_id, "categoria": canon}
+        raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
+    return {
+        "ok": True,
+        "launch_id": launch_id,
+        "categoria": categoria_norm,
+        "alvo": alvo_norm,
+    }
 
 
 class PocketCreatePayload(BaseModel):

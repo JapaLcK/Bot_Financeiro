@@ -127,6 +127,41 @@ def update_launch_category(user_id: int, launch_id: int, categoria: str | None) 
     return changed
 
 
+def update_launch_fields(
+    user_id: int,
+    launch_id: int,
+    *,
+    categoria: str | None = None,
+    alvo: str | None = None,
+) -> bool:
+    """Atualiza campos editáveis (categoria, alvo/descrição) de um lançamento.
+
+    Argumentos None são ignorados (mantém valor atual). Strings vazias viram
+    NULL no banco. Retorna False se não encontrou lançamento do usuário.
+    """
+    ensure_user(user_id)
+
+    sets: list[str] = []
+    params: list = []
+    if categoria is not None:
+        sets.append("categoria=%s")
+        params.append((categoria.strip() or None))
+    if alvo is not None:
+        sets.append("alvo=%s")
+        params.append((alvo.strip() or None))
+    if not sets:
+        return False
+
+    params.extend([user_id, launch_id])
+    sql = f"update launches set {', '.join(sets)} where user_id=%s and id=%s"
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, tuple(params))
+            changed = (cur.rowcount or 0) == 1
+        conn.commit()
+    return changed
+
+
 def update_launch_categories_bulk(user_id: int, items: list[tuple[int, str]]) -> int:
     ensure_user(user_id)
     if not items:
