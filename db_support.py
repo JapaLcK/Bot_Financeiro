@@ -455,8 +455,17 @@ def create_email_verification_impl(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("select user_id from auth_accounts where email = %s", (email,))
-            if cur.fetchone():
+            cur.execute(
+                "select user_id, password_hash from auth_accounts where email = %s",
+                (email,),
+            )
+            existing = cur.fetchone()
+            if existing:
+                if existing["password_hash"] is None:
+                    raise ValueError(
+                        "Este e-mail já tem conta criada com Google. "
+                        "Use \"Continuar com Google\" para entrar."
+                    )
                 raise ValueError("Este e-mail já está cadastrado.")
             cur.execute("select user_id from auth_accounts where phone_e164 = any(%s)", (phone_candidates,))
             if cur.fetchone():
