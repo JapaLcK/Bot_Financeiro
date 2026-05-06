@@ -2353,6 +2353,9 @@ function renderLaunches() {
       const editBtn    = editable
         ? `<button class="bgt-btn launch-edit-btn" onclick="event.stopPropagation();openEditLaunchModal(${l.id})" title="Editar lançamento">✏️</button>`
         : '';
+      const deleteBtn  = editable
+        ? `<button class="bgt-btn launch-delete-btn" onclick="event.stopPropagation();confirmDeleteLaunch(${l.id}, ${JSON.stringify(describeLaunch(l).replace(/<[^>]+>/g, '').trim()).replace(/"/g, '&quot;')}, ${l.valor})" title="Apagar lançamento">🗑️</button>`
+        : '';
       return `
       <div class="row" style="${isInternal?'opacity:.75':''}">
         <span class="lbl">
@@ -2364,7 +2367,7 @@ function renderLaunches() {
         <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
           <span class="val ${valClass}" style="${valStyle}"
                 data-num="lnc_${l.criado_em}_${l.valor}" data-val="${l.valor}">${fmt(l.valor)}</span>
-          <span style="font-size:.65rem;color:var(--text-3)">${fmtDate(l.criado_em)}${editBtn}</span>
+          <span style="font-size:.65rem;color:var(--text-3)">${fmtDate(l.criado_em)}${editBtn}${deleteBtn}</span>
         </span>
       </div>
     `}).join("")
@@ -2625,6 +2628,39 @@ async function submitEditLaunch() {
 document.getElementById("edit-launch-overlay").addEventListener("click", e => {
   if (e.target === e.currentTarget) closeEditLaunchModal();
 });
+
+let deleteLaunchInFlight = false;
+async function confirmDeleteLaunch(launchId, descricao, valor) {
+  if (deleteLaunchInFlight) return;
+  if (!launchId) return;
+  const valFmt = (typeof valor === "number") ? fmt(valor) : "";
+  const desc   = (descricao || "").trim() || "este lançamento";
+  const ok = confirm(
+    `Apagar este lançamento?\n\n` +
+    `${desc}${valFmt ? ` — ${valFmt}` : ""}\n\n` +
+    `O efeito no saldo (e em caixinhas/investimentos, se houver) será revertido. Essa ação não pode ser desfeita.`
+  );
+  if (!ok) return;
+
+  deleteLaunchInFlight = true;
+  try {
+    const r = await fetch(`${API}/launches/${USER_ID}/${launchId}`, {
+      method: "DELETE",
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+    });
+    if (!r.ok) {
+      const detail = await r.json().catch(() => ({}));
+      throw new Error(detail.detail || `HTTP ${r.status}`);
+    }
+    showLaunchSuccessToast("Lançamento apagado");
+    sendRefresh();
+  } catch (err) {
+    alert("Erro ao apagar: " + err.message);
+  } finally {
+    deleteLaunchInFlight = false;
+  }
+}
 
 function hideLaunchError() {
   const el = document.getElementById("launch-error");

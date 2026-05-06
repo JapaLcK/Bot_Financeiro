@@ -91,6 +91,7 @@ from db import (
     investment_withdraw_to_account,
     update_launch_category,
     update_launch_fields,
+    delete_launch_and_rollback,
 )
 from core.services.pluggy import (
     PluggyApiError,
@@ -2807,6 +2808,32 @@ async def update_launch_route(
         "categoria": categoria_norm,
         "nota": nota_norm,
     }
+
+
+@app.delete("/launches/{user_id}/{launch_id}")
+async def delete_launch_route(
+    request: Request,
+    user_id: int,
+    launch_id: int,
+):
+    """Apaga um lançamento e reverte seus efeitos no saldo.
+
+    Usa `delete_launch_and_rollback` em uma única transação. Se o lançamento
+    não pertence ao usuário ou já foi apagado, devolve 404.
+    """
+    _authorize_dashboard_access(request, user_id)
+
+    try:
+        await asyncio.to_thread(delete_launch_and_rollback, user_id, int(launch_id))
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Erro ao apagar lançamento: {exc}") from exc
+
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "launch_id": int(launch_id)}
 
 
 class PocketCreatePayload(BaseModel):
