@@ -681,7 +681,17 @@ def init_db():
         """,
     ]
 
+    # autocommit: cada DDL roda em sua propria transacao e libera locks
+    # imediatamente. Sem isso, todos os ALTER/CREATE INDEX seguram ACCESS
+    # EXCLUSIVE em varias tabelas ate o commit final do loop, o que:
+    #   1) bloqueia queries de leitura concorrentes (ex.: /admin/api/overview)
+    #      por toda a duracao do init, e
+    #   2) leva a deadlocks se duas instancias rodam init_db em paralelo
+    #      (deploy do Railway sobe um container novo antes do velho sair).
+    # Toda a DDL eh idempotente (if not exists / or replace / where ... is null),
+    # entao commit por instrucao eh seguro mesmo se o init_db rodar varias vezes.
     with get_conn() as conn:
+        conn.autocommit = True
         with conn.cursor() as cur:
             for i, stmt in enumerate(ddl_statements, 1):
                 try:
@@ -690,5 +700,4 @@ def init_db():
                     print(f"[init_db] erro no statement #{i}: {e}")
                     print(stmt)
                     raise
-        conn.commit()
     print("[init_db] OK")
