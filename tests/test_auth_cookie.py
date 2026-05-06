@@ -484,7 +484,7 @@ def test_sitemap_lists_public_pages_only():
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/xml")
-    assert "<loc>https://pigbankai.com</loc>" in response.text
+    assert "<loc>https://pigbankai.com/</loc>" in response.text
     assert "<loc>https://pigbankai.com/whatsapp</loc>" in response.text
     assert "<loc>https://pigbankai.com/funcionalidades</loc>" in response.text
     assert "<loc>https://pigbankai.com/como-funciona</loc>" in response.text
