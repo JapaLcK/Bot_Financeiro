@@ -13,7 +13,9 @@ def normalize_text(text: str) -> str:
         return ""
     text = unicodedata.normalize("NFKD", text)
     text = "".join(c for c in text if not unicodedata.combining(c))  # remove acentos
-    text = re.sub(r"[^a-z0-9\s]", " ", text)  # tira pontuação
+    # preserva _ pra rótulos canônicos como "investimento_aporte" sobreviverem
+    # à normalização e baterem em CATEGORY_LABELS / INTERNAL_MOVEMENT_CATEGORIES.
+    text = re.sub(r"[^a-z0-9_\s]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -134,7 +136,14 @@ def canonicalize_category_label(category: str | None) -> str:
     norm = normalize_text(category or "")
     if not norm:
         return ""
-    return CATEGORY_LABELS.get(norm, norm)
+    # Aceita rótulos digitados com espaço ("investimento aporte") como
+    # equivalentes à forma canônica com underscore ("investimento_aporte").
+    if norm in CATEGORY_LABELS:
+        return CATEGORY_LABELS[norm]
+    underscored = norm.replace(" ", "_")
+    if underscored in CATEGORY_LABELS:
+        return CATEGORY_LABELS[underscored]
+    return norm
 
 STOPWORDS_PT = {
     "gastei","paguei","comprei","debitei","recebi","ganhei","salario","reembolso",

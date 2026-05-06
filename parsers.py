@@ -185,15 +185,16 @@ def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
     if valor is None or valor <= 0:
         return None
 
-    # inferência única (A > B > C)
-    res = infer_category(user_id=user_id, text_base=raw_norm, explicit_category=explicit_cat)
+    # Passa o texto NÃO normalizado pra infer_category preservar maiúsculas
+    # (a detecção de ticker BR exige uppercase: PETR4, VALE3, MXRF11...).
+    res = infer_category(user_id=user_id, text_base=text_base, explicit_category=explicit_cat)
     categoria = res.category
 
     # aprendizado automático (somente se explícita)
     if explicit_cat:
         inferred_no_explicit = infer_category(
             user_id=user_id,
-            text_base=raw_norm,
+            text_base=text_base,
             explicit_category=None
         ).category
         learn_from_explicit_category(

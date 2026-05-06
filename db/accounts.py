@@ -114,13 +114,16 @@ def list_launches(user_id: int, limit: int = 10):
 
 
 def update_launch_category(user_id: int, launch_id: int, categoria: str | None) -> bool:
+    from utils_text import is_internal_category
+
     ensure_user(user_id)
     cat = (categoria or "").strip() or None
+    is_internal = is_internal_category(cat)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "update launches set categoria=%s where user_id=%s and id=%s",
-                (cat, user_id, launch_id),
+                "update launches set categoria=%s, is_internal_movement=%s where user_id=%s and id=%s",
+                (cat, is_internal, user_id, launch_id),
             )
             changed = (cur.rowcount or 0) == 1
         conn.commit()
@@ -140,13 +143,18 @@ def update_launch_fields(
     Argumentos None são ignorados (mantém valor atual). Strings vazias viram
     NULL no banco. Retorna False se não encontrou lançamento do usuário.
     """
+    from utils_text import is_internal_category
+
     ensure_user(user_id)
 
     sets: list[str] = []
     params: list = []
     if categoria is not None:
+        cat_clean = categoria.strip() or None
         sets.append("categoria=%s")
-        params.append((categoria.strip() or None))
+        params.append(cat_clean)
+        sets.append("is_internal_movement=%s")
+        params.append(is_internal_category(cat_clean))
     if alvo is not None:
         sets.append("alvo=%s")
         params.append((alvo.strip() or None))
@@ -167,14 +175,16 @@ def update_launch_fields(
 
 
 def update_launch_categories_bulk(user_id: int, items: list[tuple[int, str]]) -> int:
+    from utils_text import is_internal_category
+
     ensure_user(user_id)
     if not items:
         return 0
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.executemany(
-                "update launches set categoria=%s where user_id=%s and id=%s",
-                [(cat, user_id, lid) for (lid, cat) in items],
+                "update launches set categoria=%s, is_internal_movement=%s where user_id=%s and id=%s",
+                [(cat, is_internal_category(cat), user_id, lid) for (lid, cat) in items],
             )
             n = cur.rowcount or 0
         conn.commit()
