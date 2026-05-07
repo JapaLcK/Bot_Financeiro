@@ -682,6 +682,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
     <button class="main-tab active" data-view="overview" onclick="setMainView('overview')">Visão geral</button>
     <button class="main-tab" data-view="investments" onclick="setMainView('investments')">Investimentos</button>
     <button class="main-tab tab-launch" id="open-launch-btn" type="button" onclick="openLaunchModal()">+ Lançar</button>
+    <button class="main-tab tab-launch" id="open-invest-btn" type="button" onclick="openInvestmentModal()" style="display:none">+ Investir</button>
   </div>
 
   <div id="overview-view" class="dash-view active">
@@ -752,125 +753,6 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
           <div id="invest-list"></div>
         </div>
 
-        <div class="card">
-          <h2>Criar investimento</h2>
-          <form class="invest-form" onsubmit="createInvestment(event)">
-            <div class="form-row">
-              <div class="field">
-                <label for="inv-issuer">Emissor</label>
-                <input id="inv-issuer" autocomplete="off" placeholder="Tesouro Direto, Nubank" />
-              </div>
-              <div class="field">
-                <label for="inv-name">Nome do ativo</label>
-                <input id="inv-name" autocomplete="off" placeholder="Tesouro Selic 2027, CDB 110% CDI" required />
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="field">
-                <label for="inv-asset-type">Tipo</label>
-                <select id="inv-asset-type" onchange="updateInvestmentTaxHint()">
-                  <option value="CDB">CDB</option>
-                  <option value="LCI">LCI</option>
-                  <option value="LCA">LCA</option>
-                  <option value="Debênture">Debênture</option>
-                  <option value="CRI">CRI</option>
-                  <option value="CRA">CRA</option>
-                  <option value="ETF Renda Fixa">ETF Renda Fixa</option>
-                  <option value="Tesouro Selic">Tesouro Selic</option>
-                  <option value="Tesouro IPCA+">Tesouro IPCA+</option>
-                  <option value="Tesouro Prefixado">Tesouro Prefixado</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="inv-period">Indexador</label>
-                <select id="inv-period" onchange="updateInvestmentRateHint()">
-                  <option value="pct_cdi">% do CDI</option>
-                  <option value="cdi_spread">CDI + spread a.a.</option>
-                  <option value="ipca_spread">IPCA + spread a.a.</option>
-                  <option value="fixed">Prefixado a.a.</option>
-                  <option value="selic_spread">SELIC + spread a.a.</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="field">
-                <label for="inv-rate" id="inv-rate-label">Taxa (% do CDI)</label>
-                <input id="inv-rate" type="number" min="0.01" step="0.01" value="110" required />
-                <p class="tax-note" id="inv-rate-hint">Ex: 110 = 110% do CDI</p>
-              </div>
-              <div class="field">
-                <label for="inv-frequency">Pagamento de juros</label>
-                <select id="inv-frequency">
-                  <option value="maturity">Só no vencimento</option>
-                  <option value="monthly">Mensal</option>
-                  <option value="quarterly">Trimestral</option>
-                  <option value="semiannual">Semestral</option>
-                  <option value="annual">Anual</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="field">
-                <label for="inv-initial-amount">Valor investido (R$)</label>
-                <input id="inv-initial-amount" type="number" min="0" step="0.01" placeholder="10000" />
-              </div>
-              <div class="field">
-                <label for="inv-purchase-date">Data de compra</label>
-                <input id="inv-purchase-date" type="date" />
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="field">
-                <label for="inv-maturity-date">Data de vencimento</label>
-                <input id="inv-maturity-date" type="date" />
-              </div>
-            </div>
-            <p class="tax-note" id="inv-tax-hint">IR regressivo e IOF conforme regra do tipo selecionado.</p>
-            <div class="field">
-              <label for="inv-note">Observações</label>
-              <input id="inv-note" autocomplete="off" placeholder="Reserva de emergência, objetivo, liquidez" />
-            </div>
-            <button class="hbtn wide-btn" type="submit">Criar investimento</button>
-          </form>
-        </div>
-
-        <div class="card">
-          <h2>Aporte e resgate</h2>
-          <form class="invest-form" onsubmit="moveInvestment(event)">
-            <div class="field">
-              <label for="move-name">Investimento</label>
-              <select id="move-name" onchange="updateMoveFormVisibility()"></select>
-            </div>
-            <div class="form-row">
-              <div class="field">
-                <label for="move-kind">Operação</label>
-                <select id="move-kind" onchange="updateMoveFormVisibility()">
-                  <option value="deposit">Aporte</option>
-                  <option value="withdraw">Resgate</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="move-amount">Valor</label>
-                <input id="move-amount" type="number" min="0.01" step="0.01" placeholder="500.00" required />
-              </div>
-            </div>
-            <div class="form-row" id="move-rate-row" style="display:none">
-              <div class="field">
-                <label for="move-rate">Taxa desta compra (% a.a.)</label>
-                <input id="move-rate" type="number" min="0" step="0.0001" placeholder="6.85" />
-              </div>
-              <div class="field">
-                <label for="move-purchase-date">Data da compra</label>
-                <input id="move-purchase-date" type="date" />
-              </div>
-            </div>
-            <p id="move-rate-hint" class="tax-note" style="display:none;margin:4px 0 8px">
-              Tesouro IPCA+/Prefixado e títulos com taxa de mercado mudam por compra.
-              Deixe a taxa em branco para herdar a do investimento.
-            </p>
-            <button class="hbtn wide-btn" type="submit">Salvar movimentação</button>
-          </form>
-        </div>
       </div>
 
       <div class="invest-stack">
@@ -988,6 +870,151 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
     <div class="modal-acts">
       <button class="btn-cancel" type="button" onclick="closeLaunchModal()">Cancelar</button>
       <button class="btn-save" type="button" id="launch-submit-btn" onclick="submitLaunch()">Registrar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="invest-overlay">
+  <div class="modal wide">
+    <h3 id="invest-modal-title">Movimentar investimento</h3>
+    <p class="msub" id="invest-modal-sub">Aporte, resgate ou cadastre um novo ativo na sua carteira.</p>
+
+    <div class="tipo-toggle" role="radiogroup" aria-label="Operação de investimento">
+      <button type="button" class="tipo-opt active" data-invtab="deposit" onclick="setInvestModalTab('deposit')" role="radio" aria-checked="true">
+        <span class="tipo-icon">⬆️</span><span>Aporte</span>
+      </button>
+      <button type="button" class="tipo-opt" data-invtab="withdraw" onclick="setInvestModalTab('withdraw')" role="radio" aria-checked="false">
+        <span class="tipo-icon">⬇️</span><span>Resgate</span>
+      </button>
+      <button type="button" class="tipo-opt" data-invtab="create" onclick="setInvestModalTab('create')" role="radio" aria-checked="false">
+        <span class="tipo-icon">＋</span><span>Novo ativo</span>
+      </button>
+    </div>
+
+    <!-- Aba Aporte/Resgate -->
+    <div id="invest-pane-move" class="invest-pane">
+      <form class="invest-form" onsubmit="moveInvestment(event)">
+        <div class="modal-row">
+          <label class="modal-label" for="move-name">Investimento</label>
+          <select class="modal-inp cat-select" id="move-name" onchange="updateMoveFormVisibility()"></select>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label class="modal-label" for="move-kind">Operação</label>
+            <select class="modal-inp cat-select" id="move-kind" onchange="updateMoveFormVisibility()">
+              <option value="deposit">Aporte</option>
+              <option value="withdraw">Resgate</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="modal-label" for="move-amount">Valor</label>
+            <input class="modal-inp" id="move-amount" type="number" min="0.01" step="0.01" placeholder="500.00" />
+          </div>
+        </div>
+        <div class="form-row" id="move-rate-row" style="display:none">
+          <div class="field">
+            <label class="modal-label" for="move-rate">Taxa desta compra (% a.a.)</label>
+            <input class="modal-inp" id="move-rate" type="number" min="0" step="0.0001" placeholder="6.85" />
+          </div>
+          <div class="field">
+            <label class="modal-label" for="move-purchase-date">Data da compra</label>
+            <input class="modal-inp" id="move-purchase-date" type="date" />
+          </div>
+        </div>
+        <p id="move-rate-hint" class="tax-note" style="display:none;margin:4px 0 8px">
+          Tesouro IPCA+/Prefixado e títulos com taxa de mercado mudam por compra.
+          Deixe a taxa em branco para herdar a do investimento.
+        </p>
+        <div class="modal-acts">
+          <button class="btn-cancel" type="button" onclick="closeInvestmentModal()">Cancelar</button>
+          <button class="btn-save" type="submit">Salvar movimentação</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Aba Novo ativo -->
+    <div id="invest-pane-create" class="invest-pane" style="display:none">
+      <form class="invest-form" onsubmit="createInvestment(event)">
+        <div class="form-row">
+          <div class="field">
+            <label class="modal-label" for="inv-issuer">Emissor</label>
+            <input class="modal-inp" id="inv-issuer" autocomplete="off" placeholder="Tesouro Direto, Nubank" />
+          </div>
+          <div class="field">
+            <label class="modal-label" for="inv-name">Nome do ativo</label>
+            <input class="modal-inp" id="inv-name" autocomplete="off" placeholder="Tesouro Selic 2027, CDB 110% CDI" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label class="modal-label" for="inv-asset-type">Tipo</label>
+            <select class="modal-inp cat-select" id="inv-asset-type" onchange="updateInvestmentTaxHint()">
+              <option value="CDB">CDB</option>
+              <option value="LCI">LCI</option>
+              <option value="LCA">LCA</option>
+              <option value="Debênture">Debênture</option>
+              <option value="CRI">CRI</option>
+              <option value="CRA">CRA</option>
+              <option value="ETF Renda Fixa">ETF Renda Fixa</option>
+              <option value="Tesouro Selic">Tesouro Selic</option>
+              <option value="Tesouro IPCA+">Tesouro IPCA+</option>
+              <option value="Tesouro Prefixado">Tesouro Prefixado</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="modal-label" for="inv-period">Indexador</label>
+            <select class="modal-inp cat-select" id="inv-period" onchange="updateInvestmentRateHint()">
+              <option value="pct_cdi">% do CDI</option>
+              <option value="cdi_spread">CDI + spread a.a.</option>
+              <option value="ipca_spread">IPCA + spread a.a.</option>
+              <option value="fixed">Prefixado a.a.</option>
+              <option value="selic_spread">SELIC + spread a.a.</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label class="modal-label" for="inv-rate" id="inv-rate-label">Taxa (% do CDI)</label>
+            <input class="modal-inp" id="inv-rate" type="number" min="0.01" step="0.01" value="110" />
+            <p class="tax-note" id="inv-rate-hint">Ex: 110 = 110% do CDI</p>
+          </div>
+          <div class="field">
+            <label class="modal-label" for="inv-frequency">Pagamento de juros</label>
+            <select class="modal-inp cat-select" id="inv-frequency">
+              <option value="maturity">Só no vencimento</option>
+              <option value="monthly">Mensal</option>
+              <option value="quarterly">Trimestral</option>
+              <option value="semiannual">Semestral</option>
+              <option value="annual">Anual</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label class="modal-label" for="inv-initial-amount">Valor investido (R$)</label>
+            <input class="modal-inp" id="inv-initial-amount" type="number" min="0" step="0.01" placeholder="10000" />
+          </div>
+          <div class="field">
+            <label class="modal-label" for="inv-purchase-date">Data de compra</label>
+            <input class="modal-inp" id="inv-purchase-date" type="date" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label class="modal-label" for="inv-maturity-date">Data de vencimento</label>
+            <input class="modal-inp" id="inv-maturity-date" type="date" />
+          </div>
+        </div>
+        <p class="tax-note" id="inv-tax-hint">IR regressivo e IOF conforme regra do tipo selecionado.</p>
+        <div class="modal-row">
+          <label class="modal-label" for="inv-note">Observações</label>
+          <input class="modal-inp" id="inv-note" autocomplete="off" placeholder="Reserva de emergência, objetivo, liquidez" />
+        </div>
+        <div class="modal-acts">
+          <button class="btn-cancel" type="button" onclick="closeInvestmentModal()">Cancelar</button>
+          <button class="btn-save" type="submit">Criar investimento</button>
+        </div>
+      </form>
     </div>
   </div>
 </div>
@@ -1469,13 +1496,31 @@ const PERIOD_LABELS = {
   daily: "a.d."
 };
 
+// Taxa efetiva do investimento: média ponderada por saldo dos lotes abertos.
+// Se todos os lotes têm a mesma taxa (ou não há lotes), retorna a taxa do
+// investimento-pai. Sinaliza isWeighted=true quando os lotes diferem entre si.
+function effectiveInvestmentRate(inv) {
+  const fallback = { rate: Number(inv?.rate || 0), period: inv?.period, isWeighted: false };
+  const lots = (inv?.lots || []).filter(l => l.status === "open" && Number(l.balance || 0) > 0);
+  if (!lots.length) return fallback;
+  const totalBalance = lots.reduce((s, l) => s + Number(l.balance || 0), 0);
+  if (totalBalance <= 0) return fallback;
+  const firstRate = Number(lots[0].rate ?? inv?.rate ?? 0);
+  const allSame = lots.every(l => Math.abs(Number(l.rate ?? inv?.rate ?? 0) - firstRate) < 1e-9);
+  if (allSame) return { rate: firstRate, period: inv?.period, isWeighted: false };
+  const weighted = lots.reduce((s, l) => s + Number(l.balance || 0) * Number(l.rate ?? inv?.rate ?? 0), 0) / totalBalance;
+  return { rate: weighted, period: inv?.period, isWeighted: true };
+}
+
 function investmentRateLabel(i) {
-  const value = Number(i?.rate || 0) * 100;
-  if (i?.period === "cdi") return `${fmtPct(value)} do CDI`;
-  if (["cdi_spread", "ipca_spread", "selic_spread", "yearly"].includes(i?.period)) return `${fmtPct(value)} a.a.`;
-  if (i?.period === "monthly") return `${fmtPct(value)} a.m.`;
-  if (i?.period === "daily") return `${fmtPct(value)} a.d.`;
-  return fmtPct(value);
+  const eff = effectiveInvestmentRate(i);
+  const value = Number(eff.rate || 0) * 100;
+  const suffix = eff.isWeighted ? " (média)" : "";
+  if (i?.period === "cdi") return `${fmtPct(value)} do CDI${suffix}`;
+  if (["cdi_spread", "ipca_spread", "selic_spread", "yearly"].includes(i?.period)) return `${fmtPct(value)} a.a.${suffix}`;
+  if (i?.period === "monthly") return `${fmtPct(value)} a.m.${suffix}`;
+  if (i?.period === "daily") return `${fmtPct(value)} a.d.${suffix}`;
+  return `${fmtPct(value)}${suffix}`;
 }
 
 const INDEXER_TO_PERIOD = {
@@ -1555,9 +1600,63 @@ function setMainView(view) {
   document.querySelectorAll(".main-tab").forEach(b => b.classList.toggle("active", b.dataset.view === view));
   document.getElementById("overview-view").classList.toggle("active", view === "overview");
   document.getElementById("investments-view").classList.toggle("active", view === "investments");
+  // Alterna o botão de ação rápida conforme a aba: + Investir só na aba
+  // de investimentos; + Lançar nas demais.
+  const btnLaunch = document.getElementById("open-launch-btn");
+  const btnInvest = document.getElementById("open-invest-btn");
+  if (btnLaunch) btnLaunch.style.display = view === "investments" ? "none" : "";
+  if (btnInvest) btnInvest.style.display = view === "investments" ? "" : "none";
   if (view === "investments" && lastData) {
     renderInvestmentsPanel(lastData);
     runInvestmentSimulator();
+  }
+}
+
+// ── Modal de investimento ─────────────────────────────────────────────────
+function openInvestmentModal(tab) {
+  const overlay = document.getElementById("invest-overlay");
+  if (!overlay) return;
+  setInvestModalTab(tab || "deposit");
+  overlay.classList.add("open");
+}
+
+function closeInvestmentModal() {
+  const overlay = document.getElementById("invest-overlay");
+  if (!overlay) return;
+  overlay.classList.remove("open");
+}
+
+function setInvestModalTab(tab) {
+  // tab: "deposit" | "withdraw" | "create"
+  const isCreate = tab === "create";
+  document.querySelectorAll("#invest-overlay [data-invtab]").forEach(b => {
+    const active = b.dataset.invtab === tab;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-checked", active ? "true" : "false");
+  });
+  const paneMove = document.getElementById("invest-pane-move");
+  const paneCreate = document.getElementById("invest-pane-create");
+  if (paneMove) paneMove.style.display = isCreate ? "none" : "";
+  if (paneCreate) paneCreate.style.display = isCreate ? "" : "none";
+
+  const title = document.getElementById("invest-modal-title");
+  const sub = document.getElementById("invest-modal-sub");
+  if (tab === "create") {
+    if (title) title.textContent = "Novo investimento";
+    if (sub) sub.textContent = "Cadastre um novo ativo na sua carteira.";
+  } else if (tab === "withdraw") {
+    if (title) title.textContent = "Resgatar investimento";
+    if (sub) sub.textContent = "Retira valor do investimento de volta para a conta.";
+  } else {
+    if (title) title.textContent = "Aporte em investimento";
+    if (sub) sub.textContent = "Adiciona valor ao investimento. Tesouro IPCA+/Prefixado aceitam taxa por compra.";
+  }
+
+  // Em aporte/resgate, alinha o select de operação com a tab clicada.
+  if (!isCreate) {
+    const moveKind = document.getElementById("move-kind");
+    if (moveKind && moveKind.value !== tab) moveKind.value = tab;
+    if (typeof updateMoveFormVisibility === "function") updateMoveFormVisibility();
   }
 }
 
@@ -1631,7 +1730,7 @@ function updateInvestmentTaxHint() {
 }
 
 function monthlyRate(inv) {
-  const rate = Number(inv.rate || 0);
+  const rate = Number(effectiveInvestmentRate(inv).rate || 0);
   if (inv.period === "cdi") {
     const cdi = marketRate("cdi_aa")?.value || 0;
     return Math.pow(1 + ((cdi / 100) * rate), 1 / 12) - 1;
@@ -1747,6 +1846,7 @@ async function createInvestment(event) {
   document.getElementById("inv-name").value = "";
   document.getElementById("inv-note").value = "";
   document.getElementById("inv-initial-amount").value = "";
+  closeInvestmentModal();
   await refreshDashboardAfterInvestment("✓ Investimento criado");
 }
 
@@ -1763,6 +1863,15 @@ function updateMoveFormVisibility() {
   const rateInput = document.getElementById("move-rate");
   const dateInput = document.getElementById("move-purchase-date");
   if (!row || !hint || !rateInput || !dateInput) return;
+
+  // Mantém a tab visual do modal alinhada com o select de operação.
+  document.querySelectorAll("#invest-overlay [data-invtab]").forEach(b => {
+    if (b.dataset.invtab === "deposit" || b.dataset.invtab === "withdraw") {
+      const active = b.dataset.invtab === kind;
+      b.classList.toggle("active", active);
+      b.setAttribute("aria-checked", active ? "true" : "false");
+    }
+  });
 
   const inv = (lastData?.investments || []).find(i => i.name === name);
   const showRate = kind === "deposit" && inv && VARIABLE_RATE_PERIODS.has(inv.period);
@@ -1823,6 +1932,7 @@ async function moveInvestment(event) {
 	  document.getElementById("move-rate").value = "";
 	  document.getElementById("move-purchase-date").value = "";
 	  updateMoveFormVisibility();
+	  closeInvestmentModal();
 	  let message = kind === "deposit" ? "✓ Aporte salvo" : "✓ Resgate salvo";
 	  if (kind === "withdraw" && result.tax_summary) {
 	    const tax = Number(result.tax_summary.ir || 0) + Number(result.tax_summary.iof || 0);
@@ -1923,9 +2033,12 @@ function openInvestmentDetail(name) {
 	  `;
 
   document.getElementById("investment-detail-move").onclick = () => {
-    document.getElementById("move-name").value = inv.name;
     closeInvestmentDetail();
-    document.getElementById("move-amount").focus();
+    openInvestmentModal("deposit");
+    const moveName = document.getElementById("move-name");
+    if (moveName) moveName.value = inv.name;
+    if (typeof updateMoveFormVisibility === "function") updateMoveFormVisibility();
+    setTimeout(() => document.getElementById("move-amount")?.focus(), 50);
   };
   document.getElementById("investment-detail-overlay").classList.add("open");
 }
@@ -2829,6 +2942,9 @@ document.getElementById("launch-overlay").addEventListener("click", e => {
 });
 document.getElementById("launch-valor").addEventListener("keydown", e => {
   if (e.key === "Enter") submitLaunch();
+});
+document.getElementById("invest-overlay")?.addEventListener("click", e => {
+  if (e.target === e.currentTarget) closeInvestmentModal();
 });
 
 // ─── Caixinha (criar) ────────────────────────────────────────────────────────
