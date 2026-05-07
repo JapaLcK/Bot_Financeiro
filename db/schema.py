@@ -73,6 +73,26 @@ def init_db():
         create index if not exists idx_investment_lots_user_investment_opened
           on investment_lots(user_id, investment_id, status, opened_at, id)
         """,
+        # Per-lot rate/period: cada aporte pode travar uma taxa diferente
+        # (Tesouro IPCA+/Prefixado, Debêntures, CRI/CRA etc.).
+        """
+        alter table investment_lots add column if not exists rate numeric
+        """,
+        """
+        alter table investment_lots add column if not exists period text
+        """,
+        """
+        alter table investment_lots add column if not exists maturity_date date
+        """,
+        # Backfill: lotes legados herdam a taxa do investimento-pai.
+        # Mantém comportamento idêntico ao do accrual antigo.
+        """
+        update investment_lots l
+           set rate = i.rate, period = i.period
+          from investments i
+         where l.investment_id = i.id
+           and l.rate is null
+        """,
         """
         alter table investments add column if not exists asset_type text not null default 'CDB'
         """,

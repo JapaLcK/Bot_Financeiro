@@ -839,12 +839,12 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
           <form class="invest-form" onsubmit="moveInvestment(event)">
             <div class="field">
               <label for="move-name">Investimento</label>
-              <select id="move-name"></select>
+              <select id="move-name" onchange="updateMoveFormVisibility()"></select>
             </div>
             <div class="form-row">
               <div class="field">
                 <label for="move-kind">Operação</label>
-                <select id="move-kind">
+                <select id="move-kind" onchange="updateMoveFormVisibility()">
                   <option value="deposit">Aporte</option>
                   <option value="withdraw">Resgate</option>
                 </select>
@@ -854,6 +854,20 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
                 <input id="move-amount" type="number" min="0.01" step="0.01" placeholder="500.00" required />
               </div>
             </div>
+            <div class="form-row" id="move-rate-row" style="display:none">
+              <div class="field">
+                <label for="move-rate">Taxa desta compra (% a.a.)</label>
+                <input id="move-rate" type="number" min="0" step="0.0001" placeholder="6.85" />
+              </div>
+              <div class="field">
+                <label for="move-purchase-date">Data da compra</label>
+                <input id="move-purchase-date" type="date" />
+              </div>
+            </div>
+            <p id="move-rate-hint" class="tax-note" style="display:none;margin:4px 0 8px">
+              Tesouro IPCA+/Prefixado e títulos com taxa de mercado mudam por compra.
+              Deixe a taxa em branco para herdar a do investimento.
+            </p>
             <button class="hbtn wide-btn" type="submit">Salvar movimentação</button>
           </form>
         </div>
@@ -1736,6 +1750,43 @@ async function createInvestment(event) {
   await refreshDashboardAfterInvestment("✓ Investimento criado");
 }
 
+// Indexadores onde a taxa varia por compra (Tesouro IPCA+/Prefixado,
+// Debêntures, CRI/CRA, CDB prefixado etc.). Para % CDI/SELIC/daily/monthly
+// a taxa é estável dentro do investimento e o campo extra fica oculto.
+const VARIABLE_RATE_PERIODS = new Set(["ipca_spread", "selic_spread", "cdi_spread", "yearly"]);
+
+function updateMoveFormVisibility() {
+  const name = document.getElementById("move-name").value;
+  const kind = document.getElementById("move-kind").value;
+  const row = document.getElementById("move-rate-row");
+  const hint = document.getElementById("move-rate-hint");
+  const rateInput = document.getElementById("move-rate");
+  const dateInput = document.getElementById("move-purchase-date");
+  if (!row || !hint || !rateInput || !dateInput) return;
+
+  const inv = (lastData?.investments || []).find(i => i.name === name);
+  const showRate = kind === "deposit" && inv && VARIABLE_RATE_PERIODS.has(inv.period);
+
+  row.style.display = showRate ? "" : "none";
+  hint.style.display = showRate ? "" : "none";
+
+  if (showRate) {
+    if (!rateInput.value && inv.rate != null) {
+      const pctSuggestion = Number(inv.rate) * 100;
+      rateInput.placeholder = pctSuggestion ? pctSuggestion.toFixed(2) : "6.85";
+    }
+    if (!dateInput.value) {
+      const today = new Date();
+      const pad = n => String(n).padStart(2, "0");
+      dateInput.value = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+      dateInput.max = dateInput.value;
+    }
+  } else {
+    rateInput.value = "";
+    dateInput.value = "";
+  }
+}
+
 async function moveInvestment(event) {
   event.preventDefault();
   const name = document.getElementById("move-name").value;
@@ -1743,15 +1794,35 @@ async function moveInvestment(event) {
   const amount = Number(document.getElementById("move-amount").value);
   if (!name || !amount || amount <= 0) { alert("Selecione um investimento e informe o valor."); return; }
 
+  const body = { name, amount };
+  if (kind === "deposit") {
+    const inv = (lastData?.investments || []).find(i => i.name === name);
+    if (inv && VARIABLE_RATE_PERIODS.has(inv.period)) {
+      const rateRaw = document.getElementById("move-rate").value;
+      const dateRaw = document.getElementById("move-purchase-date").value;
+      if (rateRaw !== "") {
+        const rate = Number(rateRaw);
+        if (!Number.isFinite(rate) || rate < 0) { alert("Taxa inválida."); return; }
+        // Backend espera taxa em fração (ex.: 0.0685 para 6.85%).
+        body.rate = rate / 100;
+        body.period = inv.period;
+      }
+      if (dateRaw) body.purchase_date = dateRaw;
+    }
+  }
+
 	  const resp = await fetch(`${API}/investments/${USER_ID}/${kind}`, {
 	    method: "POST",
 	    credentials: "same-origin",
 	    headers: csrfHeaders({"Content-Type":"application/json"}),
-	    body: JSON.stringify({name, amount})
+	    body: JSON.stringify(body)
 	  });
 	  if (!resp.ok) { alert("Erro: " + await readApiError(resp)); return; }
 	  const result = await resp.json();
 	  document.getElementById("move-amount").value = "";
+	  document.getElementById("move-rate").value = "";
+	  document.getElementById("move-purchase-date").value = "";
+	  updateMoveFormVisibility();
 	  let message = kind === "deposit" ? "✓ Aporte salvo" : "✓ Resgate salvo";
 	  if (kind === "withdraw" && result.tax_summary) {
 	    const tax = Number(result.tax_summary.ir || 0) + Number(result.tax_summary.iof || 0);
@@ -1820,15 +1891,20 @@ function openInvestmentDetail(name) {
 	    : `<div class="empty">Sem movimentações recentes.</div>`;
 	  const lots = (inv.lots || []).filter(l => l.status === "open" && Number(l.balance || 0) > 0);
 	  const lotsHtml = lots.length
-	    ? lots.map(l => `
+	    ? lots.map(l => {
+	        const lotPeriod = l.period || inv.period;
+	        const lotRate = l.rate != null ? l.rate : inv.rate;
+	        const rateLabel = investmentRateLabel({ ...inv, period: lotPeriod, rate: lotRate });
+	        return `
 	        <div class="row">
 	          <span class="lbl">Lote de ${fmtDateOnly(l.opened_at)} · ${Number(l.age_days || 0)} dias</span>
 	          <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
 	            <span class="val">${fmt(l.balance)}</span>
-	            <span style="font-size:.65rem;color:var(--text-3)">principal ${fmt(l.principal_remaining)}</span>
+	            <span style="font-size:.65rem;color:var(--text-3)">${esc(rateLabel)} · principal ${fmt(l.principal_remaining)}</span>
 	          </span>
 	        </div>
-	      `).join("")
+	      `;
+	      }).join("")
 	    : `<div class="empty">Sem lotes abertos.</div>`;
 
 	  document.getElementById("investment-detail-body").innerHTML = `
@@ -1886,6 +1962,9 @@ function renderInvestmentsPanel(d) {
   move.innerHTML = invs.length
     ? invs.map(i => `<option value="${esc(i.name)}">${esc(displayInvestmentName(i))}</option>`).join("")
     : `<option value="">Nenhum investimento</option>`;
+  // Recalcula visibilidade dos campos extras do form de aporte sempre que
+  // o select é repopulado (refresh do dashboard, troca de investimento etc.).
+  if (typeof updateMoveFormVisibility === "function") updateMoveFormVisibility();
 
   const total = invs.reduce((s, i) => s + Number(i.balance || 0), 0);
   const grossMonth = invs.reduce((s, i) => s + Number(i.balance || 0) * monthlyRate(i), 0);

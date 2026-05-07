@@ -554,18 +554,45 @@ def _insert_investment_lot(
     amount: Decimal,
     opened_at: date,
     last_date: date | None = None,
+    rate: Decimal | float | None = None,
+    period: str | None = None,
+    maturity_date: date | None = None,
 ) -> int:
+    """
+    Insere um lote. Se rate/period não forem passados, herda do investimento-pai
+    (mesmo comportamento histórico). Permite gravar taxa específica do aporte
+    para ativos cuja taxa varia por compra (Tesouro IPCA+/Prefixado, Debênture,
+    CRI/CRA IPCA+, CDB prefixado).
+    """
     applied_date = last_date or opened_at
+
+    if rate is None or period is None:
+        cur.execute(
+            "select rate, period from investments where id=%s and user_id=%s",
+            (inv_id, user_id),
+        )
+        parent = cur.fetchone()
+        if parent is not None:
+            if rate is None:
+                rate = parent["rate"]
+            if period is None:
+                period = parent["period"]
+
+    rate_value = Decimal(str(rate)) if rate is not None else None
+
     cur.execute(
         """
         insert into investment_lots(
             user_id, investment_id, principal_initial, principal_remaining,
-            balance, opened_at, last_date, status
+            balance, opened_at, last_date, status, rate, period, maturity_date
         )
-        values (%s,%s,%s,%s,%s,%s,%s,'open')
+        values (%s,%s,%s,%s,%s,%s,%s,'open',%s,%s,%s)
         returning id
         """,
-        (user_id, inv_id, amount, amount, amount, opened_at, applied_date),
+        (
+            user_id, inv_id, amount, amount, amount, opened_at, applied_date,
+            rate_value, period, maturity_date,
+        ),
     )
     return cur.fetchone()["id"]
 
@@ -584,7 +611,11 @@ def _ensure_investment_lots(cur, user_id: int, inv: dict) -> None:
 
     opened_at = inv.get("purchase_date") or inv.get("last_date") or datetime.now(_tz()).date()
     last_date = inv.get("last_date") or opened_at
-    _insert_investment_lot(cur, user_id, inv["id"], balance, opened_at, last_date)
+    _insert_investment_lot(
+        cur, user_id, inv["id"], balance, opened_at, last_date,
+        rate=inv.get("rate"), period=inv.get("period"),
+        maturity_date=inv.get("maturity_date"),
+    )
 
 
 def _sync_investment_from_lots(cur, user_id: int, inv_id: int) -> Decimal:
@@ -616,7 +647,7 @@ def _fetch_lots_for_investments(cur, user_id: int, inv_ids: list[int]) -> dict[i
     cur.execute(
         """
         select id, investment_id, principal_initial, principal_remaining, balance,
-               opened_at, last_date, status, closed_at
+               opened_at, last_date, status, closed_at, rate, period, maturity_date
         from investment_lots
         where user_id=%s and investment_id = any(%s)
         order by investment_id, opened_at, id
@@ -664,7 +695,7 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
 
     cur.execute(
         """
-        select id, balance, last_date
+        select id, balance, last_date, rate, period
         from investment_lots
         where user_id=%s and investment_id=%s and status='open'
         order by opened_at, id
@@ -681,11 +712,18 @@ def accrue_investment_db(cur, user_id: int, inv_id: int, today: date | None = No
         return ZERO
 
     for lot in lots:
+        # Cada lote pode ter taxa/período próprios (Tesouro IPCA+, Prefixado,
+        # Debêntures etc.). Lotes legados sem rate/period caem no fallback do
+        # investimento — comportamento idêntico ao antigo.
+        lot_rate = lot.get("rate")
+        if lot_rate is None:
+            lot_rate = inv["rate"]
+        lot_period = lot.get("period") or inv["period"]
         new_balance, applied_until = _growth_for_period(
             cur,
             Decimal(str(lot["balance"] or 0)),
-            inv["period"],
-            Decimal(str(inv["rate"] or 0)),
+            lot_period,
+            Decimal(str(lot_rate or 0)),
             lot["last_date"],
             today,
         )
@@ -912,7 +950,10 @@ def create_investment_db(
                     (initial, user_id),
                 )
                 lot_opened_at = purchase_date or today
-                lot_id = _insert_investment_lot(cur, user_id, inv_id, initial, lot_opened_at, lot_opened_at)
+                lot_id = _insert_investment_lot(
+                    cur, user_id, inv_id, initial, lot_opened_at, lot_opened_at,
+                    rate=r, period=period, maturity_date=maturity_date,
+                )
                 _sync_investment_from_lots(cur, user_id, inv_id)
 
                 deposit_effects = {
@@ -1153,9 +1194,23 @@ def _canon_investment_name(cur, user_id: int, name: str) -> str | None:
 
 
 def investment_deposit_from_account(
-    user_id: int, investment_name: str, amount: float, nota: str | None = None
+    user_id: int,
+    investment_name: str,
+    amount: float,
+    nota: str | None = None,
+    *,
+    rate: float | Decimal | None = None,
+    period: str | None = None,
+    purchase_date: date | str | None = None,
 ):
-    """Conta → Investimento (com accrual antes). Retorna (launch_id, new_acc, new_inv, canon)."""
+    """Conta → Investimento (com accrual antes). Retorna (launch_id, new_acc, new_inv, canon).
+
+    Parâmetros opcionais (kwargs) para suportar ativos cuja taxa muda por compra
+    (Tesouro IPCA+/Prefixado, Debêntures, CRI/CRA IPCA+, CDB prefixado):
+    - rate: taxa específica deste aporte. Se None, herda do investimento.
+    - period: indexador específico deste aporte. Se None, herda do investimento.
+    - purchase_date: data da compra (opened_at do lote). Se None, usa hoje.
+    """
     ensure_user(user_id)
     v = Decimal(str(amount))
     if v <= 0:
@@ -1163,6 +1218,27 @@ def investment_deposit_from_account(
 
     criado_em = datetime.now(_tz())
     today = datetime.now(_tz()).date()
+
+    if isinstance(purchase_date, str) and purchase_date:
+        purchase_date = date.fromisoformat(purchase_date)
+    lot_opened_at = purchase_date or today
+    if lot_opened_at > today:
+        raise ValueError("PURCHASE_DATE_FUTURE")
+
+    if period is not None and period not in VALID_INVESTMENT_PERIODS:
+        raise ValueError("INVALID_PERIOD")
+
+    if rate is not None:
+        rate_dec = Decimal(str(rate))
+        # selic_spread aceita 0 (taxa zero é o título Selic puro);
+        # demais indexadores precisam de taxa positiva.
+        effective_period = period
+        if rate_dec < 0:
+            raise ValueError("INVALID_RATE")
+        if rate_dec == 0 and effective_period not in (None, "selic_spread"):
+            raise ValueError("INVALID_RATE")
+    else:
+        rate_dec = None
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -1174,7 +1250,7 @@ def investment_deposit_from_account(
                 raise ValueError("INSUFFICIENT_ACCOUNT")
 
             cur.execute(
-                "select id, name from investments "
+                "select id, name, rate, period from investments "
                 "where user_id=%s and lower(name)=lower(%s) for update",
                 (user_id, investment_name),
             )
@@ -1183,6 +1259,8 @@ def investment_deposit_from_account(
                 raise LookupError("INV_NOT_FOUND")
 
             inv_id, canon = inv["id"], inv["name"]
+            # Accrual antes do aporte: lotes existentes ficam atualizados até hoje.
+            # Como o lote novo abre hoje, ele não retroage.
             accrue_investment_db(cur, user_id, inv_id, today=today)
 
             cur.execute(
@@ -1191,14 +1269,27 @@ def investment_deposit_from_account(
             )
             new_acc = cur.fetchone()["balance"]
 
-            lot_id = _insert_investment_lot(cur, user_id, inv_id, v, today, today)
+            # Se rate==0 foi passado para selic_spread, repassa explicitamente;
+            # senão, None deixa o _insert herdar do investimento.
+            lot_rate = rate_dec if rate is not None else None
+            lot_period = period
+            lot_id = _insert_investment_lot(
+                cur, user_id, inv_id, v, lot_opened_at, lot_opened_at,
+                rate=lot_rate, period=lot_period,
+            )
             new_inv = _sync_investment_from_lots(cur, user_id, inv_id)
 
             efeitos = {
                 "delta_conta": -float(v), "delta_pocket": None,
                 "delta_invest": {"nome": canon, "delta": +float(v)},
                 "create_pocket": None, "create_investment": None,
-                "investment_lot_create": {"lot_id": lot_id, "investment_id": inv_id},
+                "investment_lot_create": {
+                    "lot_id": lot_id,
+                    "investment_id": inv_id,
+                    "rate": float(lot_rate) if lot_rate is not None else None,
+                    "period": lot_period,
+                    "opened_at": lot_opened_at.isoformat(),
+                },
             }
             cur.execute(
                 "insert into launches(user_id, tipo, valor, alvo, nota, criado_em, efeitos, is_internal_movement) "

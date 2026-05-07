@@ -3321,6 +3321,11 @@ class InvestmentMovementPayload(BaseModel):
     name: str
     amount: float
     note: str | None = None
+    # Aporte com taxa específica (Tesouro IPCA+/Prefixado, Debêntures etc.).
+    # Quando ausentes, o lote herda taxa/período do investimento.
+    rate: float | None = None
+    period: str | None = None
+    purchase_date: date | None = None
 
 
 class OpenFinanceMockConnectPayload(BaseModel):
@@ -3416,11 +3421,23 @@ async def deposit_investment_route(request: Request, user_id: int, payload: Inve
             payload.name.strip(),
             payload.amount,
             payload.note or _investment_action_note("Aporte em", payload.name),
+            rate=payload.rate,
+            period=payload.period,
+            purchase_date=payload.purchase_date,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="Investimento não encontrado.") from exc
     except ValueError as exc:
-        message = "Saldo insuficiente na conta." if str(exc) == "INSUFFICIENT_ACCOUNT" else str(exc)
+        if str(exc) == "INSUFFICIENT_ACCOUNT":
+            message = "Saldo insuficiente na conta."
+        elif str(exc) == "INVALID_RATE":
+            message = "Taxa inválida para este aporte."
+        elif str(exc) == "INVALID_PERIOD":
+            message = "Indexador inválido para este aporte."
+        elif str(exc) == "PURCHASE_DATE_FUTURE":
+            message = "Data de compra não pode ser futura."
+        else:
+            message = str(exc)
         raise HTTPException(status_code=400, detail=message) from exc
 
     _invalidate_dashboard_current_cache(user_id)

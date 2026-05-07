@@ -252,6 +252,80 @@ def test_aporte_em_investimento_cria_lote_individual(user_id):
     assert lot["status"] == "open"
 
 
+def test_aporte_sem_taxa_explicita_herda_do_investimento(user_id):
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    db.create_investment_db(user_id, "CDB Herdeiro", rate=0.01, period="monthly", nota="teste")
+
+    db.investment_deposit_from_account(user_id, "CDB Herdeiro", 200, "aporte")
+
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select rate, period
+                from investment_lots
+                where user_id=%s and investment_id=(
+                    select id from investments where user_id=%s and name='CDB Herdeiro'
+                )
+                """,
+                (user_id, user_id),
+            )
+            lot = cur.fetchone()
+
+    assert lot["rate"] == Decimal("0.01")
+    assert lot["period"] == "monthly"
+
+
+def test_aporte_com_taxa_explicita_grava_no_lote(user_id):
+    db.add_launch_and_update_balance(user_id, "receita", 5000, None, "seed")
+    _, inv_id, _ = db.create_investment_db(
+        user_id, "Tesouro IPCA+ 2032",
+        rate=0.0680, period="ipca_spread",
+        nota="teste",
+    )
+
+    db.investment_deposit_from_account(
+        user_id, "Tesouro IPCA+ 2032", 1000, "aporte 1",
+        rate=0.0712, period="ipca_spread",
+    )
+    db.investment_deposit_from_account(
+        user_id, "Tesouro IPCA+ 2032", 500, "aporte 2",
+    )
+
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select principal_initial, rate, period
+                from investment_lots
+                where user_id=%s and investment_id=%s
+                order by id
+                """,
+                (user_id, inv_id),
+            )
+            lots = cur.fetchall()
+
+    rates = {Decimal(str(l["principal_initial"])): l["rate"] for l in lots}
+    assert rates[Decimal("1000")] == Decimal("0.0712")
+    assert rates[Decimal("500")] == Decimal("0.0680")
+    assert all(l["period"] == "ipca_spread" for l in lots)
+
+
+def test_aporte_com_taxa_invalida_recusa(user_id):
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    db.create_investment_db(
+        user_id, "Tesouro Pref 2030",
+        rate=0.10, period="yearly", nota="teste",
+    )
+    import pytest as _pt
+    with _pt.raises(ValueError) as exc:
+        db.investment_deposit_from_account(
+            user_id, "Tesouro Pref 2030", 200, "aporte",
+            rate=-0.01, period="yearly",
+        )
+    assert "INVALID_RATE" in str(exc.value)
+
+
 def test_resgate_usa_peps_e_calcula_ir_por_lote(user_id):
     today = date.today()
     db.set_balance(user_id, Decimal("0"))
