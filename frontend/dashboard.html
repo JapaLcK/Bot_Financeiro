@@ -516,6 +516,9 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .tipo-opt.active.despesa { background:rgba(248,113,113,.14);border-color:rgba(248,113,113,.45);color:#fecaca; }
 .tipo-opt.active.receita { background:rgba(52,211,153,.14);border-color:rgba(52,211,153,.45);color:#a7f3d0; }
 .tipo-opt.active.credito { background:rgba(167,139,250,.16);border-color:rgba(167,139,250,.45);color:#ddd6fe; }
+.tipo-opt.active.aporte    { background:rgba(52,211,153,.14);border-color:rgba(52,211,153,.45);color:#a7f3d0; }
+.tipo-opt.active.resgate   { background:rgba(248,113,113,.14);border-color:rgba(248,113,113,.45);color:#fecaca; }
+.tipo-opt.active.novo-inv  { background:rgba(96,165,250,.16);border-color:rgba(96,165,250,.45);color:#bfdbfe; }
 .modal-inp.cat-select { appearance:none;-webkit-appearance:none;cursor:pointer;
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='rgba(255,255,255,.5)' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat:no-repeat;background-position:right 14px center;padding-right:36px; }
@@ -880,13 +883,13 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
     <p class="msub" id="invest-modal-sub">Aporte, resgate ou cadastre um novo ativo na sua carteira.</p>
 
     <div class="tipo-toggle" role="radiogroup" aria-label="Operação de investimento">
-      <button type="button" class="tipo-opt active" data-invtab="deposit" onclick="setInvestModalTab('deposit')" role="radio" aria-checked="true">
+      <button type="button" class="tipo-opt aporte active" data-invtab="deposit" onclick="setInvestModalTab('deposit')" role="radio" aria-checked="true">
         <span class="tipo-icon">⬆️</span><span>Aporte</span>
       </button>
-      <button type="button" class="tipo-opt" data-invtab="withdraw" onclick="setInvestModalTab('withdraw')" role="radio" aria-checked="false">
+      <button type="button" class="tipo-opt resgate" data-invtab="withdraw" onclick="setInvestModalTab('withdraw')" role="radio" aria-checked="false">
         <span class="tipo-icon">⬇️</span><span>Resgate</span>
       </button>
-      <button type="button" class="tipo-opt" data-invtab="create" onclick="setInvestModalTab('create')" role="radio" aria-checked="false">
+      <button type="button" class="tipo-opt novo-inv" data-invtab="create" onclick="setInvestModalTab('create')" role="radio" aria-checked="false">
         <span class="tipo-icon">＋</span><span>Novo ativo</span>
       </button>
     </div>
