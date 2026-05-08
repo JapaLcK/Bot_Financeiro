@@ -551,7 +551,7 @@ footer a:hover { color: var(--text); }
           </div>
           <div class="field">
             <label>SENHA</label>
-            <input type="password" id="reg-password" placeholder="Mínimo 6 caracteres" autocomplete="new-password" />
+            <input type="password" id="reg-password" placeholder="Mínimo 8 caracteres" autocomplete="new-password" />
           </div>
           <div class="field">
             <label>CONFIRMAR SENHA</label>
@@ -951,7 +951,7 @@ async function doRegister() {
   if (name.length > 50)         return showError('reg-error', 'O nome deve ter no máximo 50 caracteres.');
   if (!email)                   return showError('reg-error', 'Informe o e-mail.');
   if (!phone)                   return showError('reg-error', 'Informe seu número de WhatsApp.');
-  if (password.length < 6)      return showError('reg-error', 'Senha deve ter pelo menos 6 caracteres.');
+  if (password.length < 8)      return showError('reg-error', 'Senha deve ter pelo menos 8 caracteres.');
   if (password !== confirm)     return showError('reg-error', 'As senhas não coincidem.');
 
   const btn = document.getElementById('btn-register');

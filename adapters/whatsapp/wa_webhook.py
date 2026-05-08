@@ -17,6 +17,10 @@ app = Flask(__name__)
 
 VERIFY_TOKEN = (os.getenv("WA_VERIFY_TOKEN") or "").strip()
 APP_SECRET = (os.getenv("WA_APP_SECRET") or "").strip()
+if (os.getenv("APP_ENV") or "").strip().lower() == "prod" and not APP_SECRET:
+    raise RuntimeError(
+        "WA_APP_SECRET is required when APP_ENV=prod: webhook signature verification must not be bypassed."
+    )
 
 
 @app.get("/webhook")

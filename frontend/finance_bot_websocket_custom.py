@@ -1508,8 +1508,8 @@ async def auth_register(request: Request, body: RegisterBody):
 
     await _check_auth_rate_limits("register", request, body.email)
 
-    if len(body.password) < 6:
-        raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 6 caracteres.")
+    if len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 8 caracteres.")
 
     name = (body.name or "").strip() or None
     if name is not None:
@@ -1698,8 +1698,8 @@ async def auth_reset_password(request: Request, body: ResetPasswordBody):
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import consume_password_reset_token
 
-    if len(body.new_password) < 6:
-        raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 6 caracteres.")
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 8 caracteres.")
 
     ok = consume_password_reset_token(body.token, body.new_password)
     if not ok:
