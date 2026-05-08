@@ -982,7 +982,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
         <div class="form-row">
           <div class="field">
             <label class="modal-label" for="inv-rate" id="inv-rate-label">Taxa (% do CDI)</label>
-            <input class="modal-inp" id="inv-rate" type="number" min="0.01" step="0.01" value="110" placeholder="Ex: 110 = 110% do CDI" />
+            <input class="modal-inp" id="inv-rate" type="number" min="0.01" step="0.01" placeholder="Ex: 110 = 110% do CDI" />
           </div>
           <div class="field">
             <label class="modal-label" for="inv-frequency">Pagamento de juros</label>
@@ -1645,6 +1645,10 @@ function setInvestModalTab(tab) {
   if (paneMove) paneMove.style.display = isCreate ? "none" : "";
   if (paneCreate) paneCreate.style.display = isCreate ? "" : "none";
 
+  if (isCreate && typeof resetInvestmentCreateForm === "function") {
+    resetInvestmentCreateForm();
+  }
+
   const title = document.getElementById("invest-modal-title");
   const sub = document.getElementById("invest-modal-sub");
   if (tab === "create") {
@@ -1677,29 +1681,43 @@ function updateInvestmentRateHint() {
   if (p === "pct_cdi") {
     label.textContent = "Taxa (% do CDI)";
     input.placeholder = "Ex: 110 = 110% do CDI";
-    input.value = "110";
     input.min = "0.01";
   } else if (p === "cdi_spread") {
     label.textContent = "Spread sobre CDI (% a.a.)";
     input.placeholder = "Ex: 2.5 = CDI + 2,5% ao ano";
-    input.value = "2.5";
     input.min = "0";
   } else if (p === "ipca_spread") {
     label.textContent = "Spread sobre IPCA (% a.a.)";
     input.placeholder = "Ex: 7.43 = IPCA + 7,43% ao ano";
-    input.value = "7.43";
     input.min = "0.01";
   } else if (p === "selic_spread") {
     label.textContent = "Spread sobre SELIC (% a.a.)";
     input.placeholder = "Ex: 0 = SELIC pura, 0.07 = SELIC + 0,07%";
-    input.value = "0";
     input.min = "0";
   } else if (p === "fixed") {
     label.textContent = "Taxa prefixada (% a.a.)";
     input.placeholder = "Ex: 13.59 = 13,59% ao ano fixo";
-    input.value = "13.59";
     input.min = "0.01";
   }
+}
+
+// Limpa o form de "Novo ativo" sempre que o modal abrir nessa tab.
+// Mantem os defaults dos selects (CDB, % do CDI, Só no vencimento) por
+// serem os mais usados; zera inputs de texto/numero. Data de compra
+// volta a ser hoje (default util).
+function resetInvestmentCreateForm() {
+  ["inv-issuer","inv-name","inv-rate","inv-initial-amount",
+   "inv-maturity-date","inv-note"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+  const purchase = document.getElementById("inv-purchase-date");
+  if (purchase) {
+    const today = new Date();
+    const pad = n => String(n).padStart(2, "0");
+    purchase.value = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+  }
+  if (typeof updateInvestmentRateHint === "function") updateInvestmentRateHint();
 }
 
 function rateToPayload(indexer, pct) {
@@ -3947,8 +3965,6 @@ function _showAccessError() {
 
   WS_URL = `${BASE_WS}/ws/${USER_ID}`;
 
-  const purchaseInput = document.getElementById("inv-purchase-date");
-  if (purchaseInput && !purchaseInput.value) purchaseInput.value = NOW.toISOString().slice(0, 10);
 	  updateInvestmentRateHint();
 	  updateInvestmentTaxHint();
 	  updateMonthLabel();
