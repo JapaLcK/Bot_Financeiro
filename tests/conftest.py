@@ -17,6 +17,24 @@ def _init_schema():
     init_db()
 
 
+@pytest.fixture(autouse=True)
+def _block_outbound_emails(monkeypatch):
+    """Stub TODOS os envios de e-mail durante os testes.
+
+    Sem isso, register_auth_user e amigos disparam welcome/notifications
+    via Resend para enderecos fake (@t.com, @test.com), o que:
+      - polui o dashboard do Resend com 'Delivery Delayed' indefinidamente
+      - consome quota de envio
+      - deixa os testes lentos (HTTP para api.resend.com em cada chamada)
+
+    Tests que QUEREM observar envios podem usar patch local mais especifico
+    (ex: tests/test_audit.py mocka send_new_login_alert para contar chamadas).
+    """
+    def _noop_send_email(*args, **kwargs):
+        return True
+    monkeypatch.setattr("core.services.email_service.send_email", _noop_send_email)
+
+
 def _cleanup_user(user_id: int):
     """Apaga um user e todas as suas dependencias (NO ACTION + CASCADE)."""
     with get_conn() as conn:
