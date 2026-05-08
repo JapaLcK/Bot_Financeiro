@@ -45,7 +45,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from config.env import load_app_env
-from token_utils import decode_dashboard_token, make_dashboard_token
+from token_utils import decode_dashboard_token, decode_dashboard_token_full, make_dashboard_token
 from utils_phone import normalize_phone_e164
 from core.admin_dashboard import (
     ensure_admin_tables,
@@ -1254,16 +1254,17 @@ def _make_jwt(user_id: int, email: str, *, jti: str | None = None) -> str:
     return pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
-def _issue_session_token(user_id: int, email: str, request: Request) -> str:
-    """Cria uma sessao em auth_sessions e devolve um JWT que carrega o jti.
+def _issue_session_token(user_id: int, email: str, request: Request) -> tuple[str, str]:
+    """Cria uma sessao em auth_sessions e devolve (jwt, jti).
 
     Use em todo lugar que emite o cookie auth_token (login, OAuth, signup).
-    Falha de DB aqui levanta — login nao deve completar sem sessao registrada.
+    O jti retornado deve ser passado para `_set_dashboard_cookie` para que o
+    dashboard_token tambem seja session-bound (revogavel).
     """
     ip = get_remote_address(request) or None
     ua = request.headers.get("user-agent") or None
     jti = create_session(user_id, ip=ip, user_agent=ua)
-    return _make_jwt(user_id, email, jti=jti)
+    return _make_jwt(user_id, email, jti=jti), jti
 
 
 def _decode_jwt(token: str) -> dict | None:
@@ -1284,8 +1285,8 @@ def _set_auth_cookie(response: Response, token: str) -> None:
     )
 
 
-def _set_dashboard_cookie(response: Response, user_id: int) -> str:
-    token = make_dashboard_token(user_id, hours=DASHBOARD_SESSION_HOURS)
+def _set_dashboard_cookie(response: Response, user_id: int, *, jti: str | None = None) -> str:
+    token = make_dashboard_token(user_id, hours=DASHBOARD_SESSION_HOURS, jti=jti)
     response.set_cookie(
         DASHBOARD_COOKIE_NAME,
         token,
@@ -1442,9 +1443,18 @@ def _resolve_dashboard_user_id(request: Request) -> int:
         _extract_bearer_token(request)
         or (request.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
     )
-    user_id = decode_dashboard_token(token or "")
-    if not user_id:
+    payload = decode_dashboard_token_full(token or "")
+    if not payload:
         raise HTTPException(status_code=401, detail="Token de dashboard inválido ou expirado.")
+    user_id = payload["user_id"]
+    jti = payload.get("jti")
+    # Tokens com jti: validar contra auth_sessions (revogacao instantanea).
+    # Tokens sem jti (legacy / rollout) sao grandfathered ate expirarem.
+    if jti:
+        session = get_active_session(jti)
+        if not session or int(session.get("user_id") or 0) != user_id:
+            raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.")
+        request.state.session_jti = jti
     return int(user_id)
 
 
@@ -1597,9 +1607,9 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
 
     user_id    = result["user_id"]
     link_code  = result["link_code"]
-    token      = _issue_session_token(user_id, body.email.strip().lower(), request)
+    token, jti = _issue_session_token(user_id, body.email.strip().lower(), request)
     _set_auth_cookie(response, token)
-    _set_dashboard_cookie(response, int(user_id))
+    _set_dashboard_cookie(response, int(user_id), jti=jti)
 
     wa_link = _build_whatsapp_onboarding_link(user_id)
 
@@ -1674,9 +1684,9 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         }
 
     link_code  = create_link_code(user_id, minutes_valid=15)
-    token      = _issue_session_token(user_id, result["email"], request)
+    token, jti = _issue_session_token(user_id, result["email"], request)
     _set_auth_cookie(response, token)
-    _set_dashboard_cookie(response, int(user_id))
+    _set_dashboard_cookie(response, int(user_id), jti=jti)
 
     # Fire ANTES do log_auth_login_event: senao o IP atual ja vira "conhecido".
     await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
@@ -2024,9 +2034,9 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
 
     link_code = await asyncio.to_thread(create_link_code, user_id, 15)
-    token = _issue_session_token(user_id, user["email"], request)
+    token, jti = _issue_session_token(user_id, user["email"], request)
     _set_auth_cookie(response, token)
-    _set_dashboard_cookie(response, int(user_id))
+    _set_dashboard_cookie(response, int(user_id), jti=jti)
 
     # New-IP audit ANTES do log_auth_login_event de sucesso. Rows de
     # mfa_pending (criadas em /auth/login) sao filtradas pelo helper.
@@ -2268,7 +2278,8 @@ async def auth_delete_account(request: Request, response: Response, body: Delete
 @app.post("/auth/dashboard-token")
 async def auth_dashboard_token(response: Response, request: Request, user_id: int = Depends(_get_current_user)):
     """Troca o token de login por um cookie HttpOnly de acesso ao dashboard."""
-    _set_dashboard_cookie(response, int(user_id))
+    jti = getattr(request.state, "session_jti", None)
+    _set_dashboard_cookie(response, int(user_id), jti=jti)
     auth_payload = getattr(request.state, "auth_payload", {}) or {}
     return {
         "email": auth_payload.get("email"),
@@ -2291,7 +2302,8 @@ async def auth_dashboard_link(response: Response, request: Request, body: Dashbo
     if int(target_user_id) != int(user_id):
         raise HTTPException(status_code=403, detail="Este link pertence a outra conta.")
 
-    _set_dashboard_cookie(response, int(user_id))
+    jti = getattr(request.state, "session_jti", None)
+    _set_dashboard_cookie(response, int(user_id), jti=jti)
     auth_payload = getattr(request.state, "auth_payload", {}) or {}
     return {
         "email": auth_payload.get("email"),
@@ -2433,11 +2445,11 @@ async def auth_google_callback(
             return _google_redirect_to_landing(exc.detail)
 
         # Login bem-sucedido → cookies + redirect pra home
-        jwt_token = _issue_session_token(user_id, email, request)
+        jwt_token, jti = _issue_session_token(user_id, email, request)
         success_response = RedirectResponse(url=_post_login_url(), status_code=302)
         success_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
         _set_auth_cookie(success_response, jwt_token)
-        _set_dashboard_cookie(success_response, int(user_id))
+        _set_dashboard_cookie(success_response, int(user_id), jti=jti)
 
         await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
 
@@ -2503,9 +2515,9 @@ async def auth_google_complete_signup(
     user_id = int(result["user_id"])
     email = result["email"]
 
-    jwt_token = _issue_session_token(user_id, email, request)
+    jwt_token, jti = _issue_session_token(user_id, email, request)
     _set_auth_cookie(response, jwt_token)
-    _set_dashboard_cookie(response, user_id)
+    _set_dashboard_cookie(response, user_id, jti=jti)
 
     await log_auth_login_event(
         email,
@@ -2695,7 +2707,7 @@ async def billing_portal(user_id: int = Depends(_get_current_user)):
 # ─── Static file routes ──────────────────────────────────────────────────────
 
 @app.get("/d/{code}")
-async def dashboard_short_link(code: str, view: str | None = None):
+async def dashboard_short_link(request: Request, code: str, view: str | None = None):
     """
     Resolve um magic link gerado pelo bot.
     O link é de uso único e cria uma sessão curta no navegador.
@@ -2736,7 +2748,12 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
         f"/app?view={urllib.parse.quote(target_view)}" if target_view else "/app"
     )
     response = RedirectResponse(url=redirect_url, status_code=302)
-    _set_dashboard_cookie(response, int(user_id))
+    # Magic-link tambem cria auth_session — aparece em "Dispositivos conectados"
+    # e pode ser revogado individualmente como qualquer outra sessao.
+    ip = get_remote_address(request) or None
+    ua = request.headers.get("user-agent") or None
+    jti = await asyncio.to_thread(create_session, int(user_id), ip=ip, user_agent=ua)
+    _set_dashboard_cookie(response, int(user_id), jti=jti)
     return response
 
 
@@ -4290,10 +4307,16 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
     bypass_uid = _dashboard_dev_bypass_user_id()
     if bypass_uid is None:
         token = (ws.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
-        current_user_id = decode_dashboard_token(token)
-        if not current_user_id or int(current_user_id) != int(user_id):
+        payload = decode_dashboard_token_full(token)
+        if not payload or int(payload["user_id"]) != int(user_id):
             await ws.close(code=1008)
             return
+        jti = payload.get("jti")
+        if jti:
+            session = await asyncio.to_thread(get_active_session, jti)
+            if not session or int(session.get("user_id") or 0) != int(user_id):
+                await ws.close(code=1008)
+                return
 
     now = datetime.now(timezone.utc)
     await manager.connect(ws, user_id, now.year, now.month)

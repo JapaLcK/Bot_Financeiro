@@ -141,6 +141,8 @@ def test_users_endpoint_is_not_exposed_with_dashboard_cookie():
 
 
 def test_magic_link_redirect_sets_cookie_without_token_in_url(monkeypatch):
+    # Magic-link agora cria auth_session (FK p/ users.id), entao o user precisa existir.
+    db.ensure_user(123)
     monkeypatch.setattr(db, "consume_dashboard_session", lambda code: 123 if code == "one-time" else None)
 
     response = TestClient(dashboard.app).get("/d/one-time", follow_redirects=False)

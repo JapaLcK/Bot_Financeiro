@@ -259,3 +259,79 @@ def test_logout_revokes_current_session(user_id):
     resp = client.post("/auth/logout", headers=_csrf_headers(client))
     assert resp.status_code == 200
     assert get_active_session(jti) is None
+
+
+# ── dashboard_token jti binding ────────────────────────────────────────────
+
+def test_dashboard_token_with_revoked_jti_is_rejected(user_id):
+    """Apos revogar a sessao, o dashboard_token correspondente deixa de funcionar."""
+    email = f"dash-rev-{user_id}@t.com"
+    user = db.register_auth_user(email, "senha-forte-123")
+    real_uid = int(user["user_id"])
+
+    jti = create_session(real_uid, ip="1.1.1.1")
+    client = TestClient(dashboard.app)
+    # Apenas o dashboard_token (sem auth_token) — simula um dispositivo onde
+    # o usuario so abriu o dashboard via magic-link ou cookie do dashboard.
+    client.cookies.set(
+        dashboard.DASHBOARD_COOKIE_NAME,
+        dashboard.make_dashboard_token(real_uid, hours=1, jti=jti),
+    )
+
+    # Antes de revogar: o endpoint protegido por _authorize_dashboard_access funciona.
+    ok = client.get(f"/settings/{real_uid}/security", headers=_csrf_headers(client))
+    assert ok.status_code == 200, ok.text
+
+    revoke_session(real_uid, jti)
+
+    # Depois de revogar: 401, mesmo que o JWT do dashboard ainda nao tenha expirado.
+    blocked = client.get(f"/settings/{real_uid}/security", headers=_csrf_headers(client))
+    assert blocked.status_code == 401, blocked.text
+
+
+def test_dashboard_token_legacy_no_jti_is_grandfathered(user_id):
+    """dashboard_token sem jti (rollout) continua valido ate expirar naturalmente."""
+    email = f"dash-legacy-{user_id}@t.com"
+    user = db.register_auth_user(email, "senha-forte-123")
+    real_uid = int(user["user_id"])
+
+    client = TestClient(dashboard.app)
+    # Token sem jti (legacy)
+    client.cookies.set(
+        dashboard.DASHBOARD_COOKIE_NAME,
+        dashboard.make_dashboard_token(real_uid, hours=1),
+    )
+
+    resp = client.get(f"/settings/{real_uid}/security", headers=_csrf_headers(client))
+    assert resp.status_code == 200, resp.text
+
+
+def test_magic_link_creates_auth_session(user_id):
+    """/d/{code} agora cria uma row em auth_sessions e a lista de sessoes a inclui."""
+    email = f"magic-{user_id}@t.com"
+    user = db.register_auth_user(email, "senha-forte-123")
+    real_uid = int(user["user_id"])
+
+    # Cria um magic-link para esse usuario
+    from datetime import datetime, timedelta, timezone
+    code = f"magic-{user_id}-test"
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into dashboard_sessions (code, user_id, expires_at)
+                values (%s, %s, %s)
+                """,
+                (code, real_uid, datetime.now(timezone.utc) + timedelta(minutes=5)),
+            )
+        conn.commit()
+
+    before = len(list_user_sessions(real_uid))
+
+    client = TestClient(dashboard.app)
+    resp = client.get(f"/d/{code}", follow_redirects=False)
+    assert resp.status_code == 302, resp.text
+    assert "dashboard_token=" in resp.headers.get("set-cookie", "")
+
+    after = list_user_sessions(real_uid)
+    assert len(after) == before + 1  # uma sessao a mais foi criada
