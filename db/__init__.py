@@ -211,6 +211,22 @@ from .google_auth import (
     cleanup_expired_pending_signups,
 )
 
+# ── MFA (TOTP) ───────────────────────────────────────────────────────────────
+from .mfa import (
+    get_mfa_status,
+    setup_secret as mfa_setup_secret,
+    verify_and_enable as mfa_verify_and_enable,
+    regenerate_backup_codes as mfa_regenerate_backup_codes,
+    verify_totp as mfa_verify_totp,
+    consume_backup_code as mfa_consume_backup_code,
+    disable_mfa,
+    create_login_challenge as mfa_create_login_challenge,
+    consume_login_challenge as mfa_consume_login_challenge,
+    cleanup_expired_challenges as mfa_cleanup_expired_challenges,
+    should_show_mfa_onboarding,
+    mark_mfa_onboarding_shown,
+)
+
 # ── Privacidade / Retenção ───────────────────────────────────────────────────
 from .privacy import (
     ensure_account_deletion_columns,
@@ -301,4 +317,10 @@ __all__ = [
     "auth_account_has_password", "email_has_password", "link_google_identity",
     "create_pending_google_signup", "get_pending_google_signup",
     "consume_pending_google_signup", "cleanup_expired_pending_signups",
+    # mfa (totp)
+    "get_mfa_status", "mfa_setup_secret", "mfa_verify_and_enable",
+    "mfa_regenerate_backup_codes", "mfa_verify_totp", "mfa_consume_backup_code",
+    "disable_mfa", "mfa_create_login_challenge", "mfa_consume_login_challenge",
+    "mfa_cleanup_expired_challenges",
+    "should_show_mfa_onboarding", "mark_mfa_onboarding_shown",
 ]

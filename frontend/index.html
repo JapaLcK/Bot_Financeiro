@@ -628,6 +628,27 @@ footer a:hover { color: var(--text); }
           </p>
         </div>
 
+        <!-- MFA challenge step -->
+        <div id="form-mfa" style="display:none">
+          <h2>Verificação em 2 etapas</h2>
+          <p class="subtitle">Digite o código de 6 dígitos do seu app autenticador para <span id="mfa-email" style="color:var(--text)"></span>.</p>
+          <div class="field">
+            <label>CÓDIGO</label>
+            <input type="text" id="mfa-code-input" inputmode="numeric" autocomplete="one-time-code" placeholder="000000" maxlength="20" />
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2);margin-bottom:12px;cursor:pointer">
+            <input type="checkbox" id="mfa-use-backup" />
+            Usar um código de backup
+          </label>
+          <button class="submit-btn" id="btn-mfa-submit" onclick="submitMfaChallenge()">Verificar código</button>
+          <div class="form-error" id="mfa-error"></div>
+          <p style="text-align:center;margin-top:14px;">
+            <a href="#" onclick="event.preventDefault(); cancelMfaChallenge();" style="font-size:13px;color:var(--text-2);text-decoration:none;border-bottom:1px solid rgba(255,255,255,0.2);padding-bottom:1px;">
+              ← Voltar ao login
+            </a>
+          </p>
+        </div>
+
         <!-- Success state -->
         <div class="success-state" id="success-state">
           <div class="success-icon">✅</div>
@@ -876,7 +897,7 @@ function switchTab(tab) {
 }
 
 function clearErrors() {
-  ['reg-error', 'login-error', 'verify-error'].forEach(id => {
+  ['reg-error', 'login-error', 'verify-error', 'mfa-error'].forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.classList.remove('show'); el.textContent = ''; }
   });
@@ -1042,6 +1063,12 @@ async function doLogin() {
     const data = await readResponsePayload(res);
     if (!res.ok) return showError('login-error', data.detail || 'E-mail ou senha incorretos.');
 
+    // MFA ativado: backend nao emitiu cookie de auth ainda. Mostra tela de codigo.
+    if (data.mfa_required) {
+      showMfaChallenge(data.mfa_challenge, data.email);
+      return;
+    }
+
     if (PENDING_DASHBOARD_CODE) {
       const linkRes = await fetch(`${API_BASE}/auth/dashboard-link`, {
         method: 'POST',
@@ -1063,6 +1090,72 @@ async function doLogin() {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Entrar';
+  }
+}
+
+// ─── MFA challenge (login em 2 etapas) ──────────────────────────────────
+let _mfaChallengeToken = null;
+let _mfaChallengeEmail = null;
+
+function showMfaChallenge(challenge, email) {
+  _mfaChallengeToken = challenge;
+  _mfaChallengeEmail = email;
+  document.getElementById('form-login').style.display = 'none';
+  document.getElementById('form-register').style.display = 'none';
+  const mfaForm = document.getElementById('form-mfa');
+  if (mfaForm) {
+    mfaForm.style.display = '';
+    document.getElementById('mfa-email').textContent = email || '';
+    document.getElementById('mfa-code-input').value = '';
+    document.getElementById('mfa-use-backup').checked = false;
+    document.getElementById('mfa-code-input').focus();
+  }
+}
+
+function cancelMfaChallenge() {
+  _mfaChallengeToken = null;
+  _mfaChallengeEmail = null;
+  document.getElementById('form-mfa').style.display = 'none';
+  document.getElementById('form-login').style.display = '';
+}
+
+async function submitMfaChallenge() {
+  clearErrors();
+  if (!_mfaChallengeToken) return showError('mfa-error', 'Sessão expirada. Faça login novamente.');
+  const code = document.getElementById('mfa-code-input').value.trim();
+  const useBackup = document.getElementById('mfa-use-backup').checked;
+  if (!code) return showError('mfa-error', 'Digite o código.');
+
+  const btn = document.getElementById('btn-mfa-submit');
+  btn.disabled = true;
+  btn.textContent = 'Verificando…';
+  try {
+    const res = await fetch(`${API_BASE}/auth/mfa/verify-login`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: csrfHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ challenge: _mfaChallengeToken, code, use_backup: useBackup }),
+    });
+    const data = await readResponsePayload(res);
+    if (!res.ok) return showError('mfa-error', data.detail || 'Código inválido.');
+    if (PENDING_DASHBOARD_CODE) {
+      const linkRes = await fetch(`${API_BASE}/auth/dashboard-link`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: csrfHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ code: PENDING_DASHBOARD_CODE })
+      });
+      const linkData = await readResponsePayload(linkRes);
+      if (!linkRes.ok) return showError('mfa-error', linkData.detail || 'Nao foi possivel abrir este dashboard.');
+      goToDashboard(linkData.dashboard_url);
+      return;
+    }
+    showSuccess(data, 'Bem-vindo de volta!', 'Seu código de vinculação foi renovado.');
+  } catch (e) {
+    showError('mfa-error', 'Erro de conexão. Tente novamente.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Verificar código';
   }
 }
 

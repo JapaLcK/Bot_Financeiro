@@ -583,6 +583,46 @@ def init_db():
           on auth_rate_limits (updated_at)
         """,
 
+        # ─── MFA (TOTP) ───────────────────────────────────────────────────────────
+        """
+        create table if not exists user_mfa (
+          user_id bigint primary key references users(id) on delete cascade,
+          secret_encrypted text not null,
+          enabled boolean not null default false,
+          activated_at timestamptz,
+          last_used_at timestamptz,
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create table if not exists user_mfa_backup_codes (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          code_hash text not null,
+          used_at timestamptz,
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_user_mfa_backup_codes_user
+          on user_mfa_backup_codes (user_id, used_at)
+        """,
+        # Tabela de challenge: armazena state intermediario entre login (senha OK)
+        # e validacao TOTP. Token de uso unico, expira em 5min.
+        """
+        create table if not exists mfa_login_challenges (
+          token text primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          expires_at timestamptz not null,
+          used_at timestamptz,
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_mfa_login_challenges_expires
+          on mfa_login_challenges (expires_at)
+        """,
+
         # ─── Engagement tracking ──────────────────────────────────────────────────
         """
         alter table auth_accounts add column if not exists
@@ -668,6 +708,11 @@ def init_db():
         # Contas criadas via Google ficam com password_hash NULL.
         """
         alter table auth_accounts alter column password_hash drop not null
+        """,
+        # Onboarding MFA: vira not null timestampt apos o user ver e responder
+        # (sim/nao) a tela de incentivo. NULL = ainda nao viu.
+        """
+        alter table auth_accounts add column if not exists mfa_onboarding_shown_at timestamptz
         """,
         """
         create table if not exists auth_identities (

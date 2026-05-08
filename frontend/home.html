@@ -912,12 +912,19 @@ function showAccessError() {
 (async () => {
   // 1) Valida sessão
   let userId = 0;
+  let validateData = null;
   try {
     const r = await fetch(`${API}/auth/validate`, { credentials: "same-origin" });
     if (!r.ok) { showAccessError(); return; }
-    const v = await r.json();
-    userId = USER_ID = v.user_id;
+    validateData = await r.json();
+    userId = USER_ID = validateData.user_id;
   } catch { showAccessError(); return; }
+
+  // 1.5) Onboarding MFA: aparece UMA vez para usuarios sem MFA ativado.
+  // Esta e a primeira tela apos login, entao e o ponto certo para incentivar.
+  if (validateData && validateData.show_mfa_onboarding) {
+    showMfaOnboardingOverlay();
+  }
 
   // 2) Carrega perfil (header dropdown)
   loadProfile();
@@ -963,6 +970,107 @@ if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/service-worker.js").catch(() => {});
   });
 }
+
+// ─── MFA Onboarding (primeiro acesso pos-login) ─────────────────────────────
+function showMfaOnboardingOverlay() {
+  const ov = document.getElementById("mfa-onboarding-overlay");
+  if (ov) ov.classList.add("open");
+}
+
+function closeMfaOnboardingOverlay() {
+  const ov = document.getElementById("mfa-onboarding-overlay");
+  if (ov) ov.classList.remove("open");
+}
+
+async function _markMfaOnboardingSeen() {
+  try {
+    await fetch(`${API}/auth/mfa/onboarding-seen`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+    });
+  } catch (e) {
+    console.warn("[mfa-onboarding] erro ao marcar como visto", e);
+  }
+}
+
+async function mfaOnboardingActivate() {
+  await _markMfaOnboardingSeen();
+  window.location.href = "/settings?view=security&autoOpenMfa=1";
+}
+
+async function mfaOnboardingDismiss() {
+  await _markMfaOnboardingSeen();
+  closeMfaOnboardingOverlay();
+}
 </script>
+
+<!-- ── MFA Onboarding overlay ─────────────────────────────────────────────── -->
+<style>
+.mfa-ob-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.7);
+  display: none; align-items: center; justify-content: center;
+  z-index: 10000; padding: 20px;
+}
+.mfa-ob-overlay.open { display: flex; }
+.mfa-ob-card {
+  width: min(440px, 92vw); padding: 28px 26px;
+  background: linear-gradient(180deg, #1a1d2a, #14161e);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 18px; color: rgba(255,255,255,.92);
+  box-shadow: 0 24px 70px rgba(0,0,0,.5);
+}
+.mfa-ob-icon {
+  width: 56px; height: 56px; border-radius: 14px;
+  background: linear-gradient(135deg,#7c3aed,#3b82f6);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.6rem; margin-bottom: 16px;
+}
+.mfa-ob-card h2 { font-size: 1.18rem; font-weight: 650; margin-bottom: 8px; }
+.mfa-ob-card p { font-size: .88rem; color: rgba(255,255,255,.62); line-height: 1.5; margin-bottom: 14px; }
+.mfa-ob-list { font-size: .8rem; color: rgba(255,255,255,.7); line-height: 1.7; margin-bottom: 18px; padding-left: 20px; }
+.mfa-ob-list li { margin-bottom: 4px; }
+.mfa-ob-actions { display: flex; gap: 10px; flex-direction: column; }
+.mfa-ob-btn-primary {
+  padding: 12px 16px; border-radius: 12px; border: none;
+  background: linear-gradient(135deg,#7c3aed,#3b82f6);
+  color: #fff; font-weight: 650; font-size: .92rem; cursor: pointer;
+  transition: transform .15s, box-shadow .15s;
+}
+.mfa-ob-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(124,58,237,.4); }
+.mfa-ob-btn-secondary {
+  padding: 11px 16px; border-radius: 12px;
+  background: rgba(255,255,255,.05); color: rgba(255,255,255,.7);
+  border: 1px solid rgba(255,255,255,.1); font-size: .85rem; cursor: pointer;
+}
+.mfa-ob-btn-secondary:hover { background: rgba(255,255,255,.08); color: rgba(255,255,255,.92); }
+</style>
+
+<div class="mfa-ob-overlay" id="mfa-onboarding-overlay">
+  <div class="mfa-ob-card">
+    <div class="mfa-ob-icon">🔒</div>
+    <h2>Proteja sua conta com 2 etapas</h2>
+    <p>
+      Adicione uma camada extra de segurança usando um app autenticador
+      (Google Authenticator, Authy, 1Password). Mesmo que sua senha vaze,
+      ninguém entra sem o código do seu celular.
+    </p>
+    <ul class="mfa-ob-list">
+      <li>Setup leva 1 minuto</li>
+      <li>Funciona offline (sem internet no celular)</li>
+      <li>Você ganha 10 códigos de backup</li>
+      <li>Pode ativar depois em Configurações se preferir</li>
+    </ul>
+    <div class="mfa-ob-actions">
+      <button class="mfa-ob-btn-primary" type="button" onclick="mfaOnboardingActivate()">
+        Ativar agora
+      </button>
+      <button class="mfa-ob-btn-secondary" type="button" onclick="mfaOnboardingDismiss()">
+        Agora não
+      </button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

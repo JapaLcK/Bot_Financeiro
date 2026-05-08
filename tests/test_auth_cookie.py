@@ -121,7 +121,9 @@ def test_auth_validate_accepts_dashboard_cookie_without_url_token():
     response = client.get("/auth/validate")
 
     assert response.status_code == 200
-    assert response.json() == {"user_id": 123}
+    body = response.json()
+    assert body["user_id"] == 123
+    assert "show_mfa_onboarding" in body
 
 
 def test_users_endpoint_is_not_exposed_with_dashboard_cookie():

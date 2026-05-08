@@ -17,6 +17,7 @@ Endpoints:
 """
 
 import asyncio
+import base64
 import csv
 import io
 import json
@@ -1470,7 +1471,11 @@ async def auth_validate(request: Request, response: Response):
         raise HTTPException(status_code=401, detail="Token inválido")
     _raise_if_account_scheduled_for_deletion(int(user_id))
     _no_store(response)
-    return {"user_id": user_id}
+
+    # Anexa flag de onboarding pra o frontend decidir se mostra o prompt.
+    from db import should_show_mfa_onboarding
+    show_onboarding = await asyncio.to_thread(should_show_mfa_onboarding, int(user_id))
+    return {"user_id": user_id, "show_mfa_onboarding": show_onboarding}
 
 
 @app.get("/auth/dashboard-profile")
@@ -1604,6 +1609,28 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
 
     user_id    = result["user_id"]
     _raise_if_account_scheduled_for_deletion(user_id)
+
+    # Se o usuario tem MFA ativado, emite challenge token e retorna 200 com
+    # mfa_required=true (sem cookies de sessao). O cliente deve chamar
+    # /auth/mfa/verify-login para completar o login.
+    from db import get_mfa_status, mfa_create_login_challenge
+    mfa_status = await asyncio.to_thread(get_mfa_status, user_id)
+    if mfa_status.get("enabled"):
+        challenge = await asyncio.to_thread(mfa_create_login_challenge, user_id)
+        await log_auth_login_event(
+            result["email"],
+            True,
+            user_id=user_id,
+            ip_address=get_remote_address(request),
+            user_agent=request.headers.get("user-agent"),
+            failure_reason="mfa_pending",
+        )
+        return {
+            "mfa_required": True,
+            "mfa_challenge": challenge,
+            "email": result["email"],
+        }
+
     link_code  = create_link_code(user_id, minutes_valid=15)
     token      = _make_jwt(user_id, result["email"])
     _set_auth_cookie(response, token)
@@ -1703,12 +1730,231 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     """Retorna dados do usuário autenticado."""
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import get_auth_user
+    from db import get_auth_user, should_show_mfa_onboarding, get_mfa_status
 
     user = get_auth_user(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
-    return {"user_id": user_id, **dict(user)}
+
+    show_onboarding = await asyncio.to_thread(should_show_mfa_onboarding, user_id)
+    mfa = await asyncio.to_thread(get_mfa_status, user_id)
+    return {
+        "user_id": user_id,
+        **dict(user),
+        "show_mfa_onboarding": show_onboarding,
+        "mfa_enabled": bool(mfa.get("enabled")),
+    }
+
+
+# ── MFA (TOTP) ───────────────────────────────────────────────────────────────
+
+class MFASetupBody(BaseModel):
+    password: str
+
+
+class MFAEnableBody(BaseModel):
+    code: str
+
+
+class MFADisableBody(BaseModel):
+    password: str
+    code: str | None = None
+
+
+class MFAVerifyLoginBody(BaseModel):
+    challenge: str
+    code: str
+    use_backup: bool = False
+
+
+def _qr_data_url(uri: str) -> str:
+    """Gera SVG do QR code como data URL (sem dependencia de PIL)."""
+    import qrcode
+    import qrcode.image.svg
+    factory = qrcode.image.svg.SvgPathImage
+    img = qrcode.make(uri, image_factory=factory, box_size=10, border=2)
+    import io
+    buf = io.BytesIO()
+    img.save(buf)
+    svg = buf.getvalue().decode()
+    encoded = base64.b64encode(svg.encode()).decode()
+    return f"data:image/svg+xml;base64,{encoded}"
+
+
+@app.get("/auth/mfa/status")
+async def auth_mfa_status(user_id: int = Depends(_get_current_user)):
+    """Retorna status atual do MFA do usuario logado."""
+    from db import get_mfa_status
+    return await asyncio.to_thread(get_mfa_status, user_id)
+
+
+@app.post("/auth/mfa/onboarding-seen")
+async def auth_mfa_onboarding_seen(user_id: int = Depends(_get_current_user)):
+    """Grava que o usuario viu a tela de onboarding (independente da escolha).
+    Idempotente: chamadas subsequentes nao reescrevem o timestamp."""
+    from db import mark_mfa_onboarding_shown
+    await asyncio.to_thread(mark_mfa_onboarding_shown, user_id)
+    return {"ok": True}
+
+
+@app.post("/auth/mfa/setup")
+@limiter.limit("5/hour")
+async def auth_mfa_setup(request: Request, body: MFASetupBody, user_id: int = Depends(_get_current_user)):
+    """Inicia setup do MFA: pede senha, gera secret, retorna QR + URI."""
+    _block_setup_if_unsupported_user(user_id)
+
+    password_ok = await asyncio.to_thread(verify_user_password, user_id, body.password)
+    if not password_ok:
+        raise HTTPException(status_code=401, detail="Senha incorreta.")
+
+    from db import get_auth_user, mfa_setup_secret
+    user = await asyncio.to_thread(get_auth_user, user_id)
+    if not user or not user.get("email"):
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+
+    try:
+        result = await asyncio.to_thread(mfa_setup_secret, user_id, user["email"])
+    except ValueError as exc:
+        if str(exc) == "MFA_ALREADY_ENABLED":
+            raise HTTPException(status_code=409, detail="MFA já está ativado.") from exc
+        raise
+
+    return {
+        "secret": result["secret"],
+        "uri": result["uri"],
+        "qr_code": _qr_data_url(result["uri"]),
+    }
+
+
+@app.post("/auth/mfa/enable")
+@limiter.limit("10/hour")
+async def auth_mfa_enable(request: Request, body: MFAEnableBody, user_id: int = Depends(_get_current_user)):
+    """Confirma o primeiro codigo TOTP e ativa MFA. Retorna codigos de backup."""
+    from db import mfa_verify_and_enable
+    try:
+        backup_codes = await asyncio.to_thread(mfa_verify_and_enable, user_id, body.code)
+    except ValueError as exc:
+        msg = str(exc)
+        if msg == "MFA_NOT_INITIALIZED":
+            raise HTTPException(status_code=400, detail="Inicie o setup primeiro.") from exc
+        if msg == "MFA_ALREADY_ENABLED":
+            raise HTTPException(status_code=409, detail="MFA já está ativado.") from exc
+        if msg == "MFA_CODE_INVALID":
+            raise HTTPException(status_code=400, detail="Código inválido. Tente novamente.") from exc
+        raise
+
+    return {"ok": True, "backup_codes": backup_codes}
+
+
+@app.post("/auth/mfa/disable")
+@limiter.limit("5/hour")
+async def auth_mfa_disable(request: Request, body: MFADisableBody, user_id: int = Depends(_get_current_user)):
+    """Desativa MFA (pede senha + codigo TOTP atual ou backup code)."""
+    password_ok = await asyncio.to_thread(verify_user_password, user_id, body.password)
+    if not password_ok:
+        raise HTTPException(status_code=401, detail="Senha incorreta.")
+
+    from db import get_mfa_status, mfa_verify_totp, mfa_consume_backup_code, disable_mfa
+    status = await asyncio.to_thread(get_mfa_status, user_id)
+    if not status.get("enabled"):
+        # Idempotente: ja desativado.
+        return {"ok": True}
+
+    # Exige codigo TOTP ou backup code para desligar (defesa contra sequestro
+    # de sessao: roubar cookie nao basta).
+    code = (body.code or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Código de autenticação é obrigatório.")
+    ok = await asyncio.to_thread(mfa_verify_totp, user_id, code)
+    if not ok:
+        ok = await asyncio.to_thread(mfa_consume_backup_code, user_id, code)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Código inválido.")
+
+    await asyncio.to_thread(disable_mfa, user_id)
+    return {"ok": True}
+
+
+@app.post("/auth/mfa/regenerate-backup-codes")
+@limiter.limit("3/hour")
+async def auth_mfa_regenerate(request: Request, body: MFADisableBody, user_id: int = Depends(_get_current_user)):
+    """Gera novos backup codes (invalida os antigos). Pede senha + TOTP."""
+    password_ok = await asyncio.to_thread(verify_user_password, user_id, body.password)
+    if not password_ok:
+        raise HTTPException(status_code=401, detail="Senha incorreta.")
+
+    code = (body.code or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Código de autenticação é obrigatório.")
+
+    from db import mfa_verify_totp, mfa_regenerate_backup_codes
+    ok = await asyncio.to_thread(mfa_verify_totp, user_id, code)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Código TOTP inválido.")
+
+    try:
+        codes = await asyncio.to_thread(mfa_regenerate_backup_codes, user_id)
+    except ValueError as exc:
+        if str(exc) == "MFA_NOT_ENABLED":
+            raise HTTPException(status_code=400, detail="MFA não está ativado.") from exc
+        raise
+    return {"backup_codes": codes}
+
+
+@app.post("/auth/mfa/verify-login")
+@limiter.limit("10/minute")
+async def auth_mfa_verify_login(request: Request, response: Response, body: MFAVerifyLoginBody):
+    """Completa o login apos /auth/login retornar mfa_required=true.
+
+    O cliente envia (challenge, code). Se OK, emite JWT auth + cookie.
+    """
+    from db import (
+        mfa_consume_login_challenge,
+        mfa_verify_totp,
+        mfa_consume_backup_code,
+        get_auth_user,
+        create_link_code,
+    )
+
+    user_id = await asyncio.to_thread(mfa_consume_login_challenge, body.challenge)
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Sessão MFA expirada. Faça login novamente.")
+
+    code = (body.code or "").strip()
+    verified = False
+    if body.use_backup:
+        verified = await asyncio.to_thread(mfa_consume_backup_code, user_id, code)
+    else:
+        verified = await asyncio.to_thread(mfa_verify_totp, user_id, code)
+
+    if not verified:
+        raise HTTPException(status_code=400, detail="Código inválido.")
+
+    user = await asyncio.to_thread(get_auth_user, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+
+    link_code = await asyncio.to_thread(create_link_code, user_id, 15)
+    token = _make_jwt(user_id, user["email"])
+    _set_auth_cookie(response, token)
+    _set_dashboard_cookie(response, int(user_id))
+
+    wa_link = _build_whatsapp_onboarding_link(user_id)
+    return {
+        "user_id": user_id,
+        "email": user["email"],
+        "plan": user.get("plan", "free"),
+        "link_code": link_code,
+        "whatsapp_link": wa_link,
+        "dashboard_url": _post_login_url(),
+        "expires_in": 86400,
+    }
+
+
+def _block_setup_if_unsupported_user(user_id: int) -> None:
+    """Reserva pra futuras restricoes (ex: nao permitir MFA em conta deletada).
+    Por enquanto so respeita schedule de delecao."""
+    _raise_if_account_scheduled_for_deletion(user_id)
 
 
 @app.post("/auth/account/export")

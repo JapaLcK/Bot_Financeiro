@@ -1240,6 +1240,24 @@ a { color: inherit; text-decoration: none; }
         <div class="card">
           <div class="card-head">
             <div>
+              <div class="card-title">Autenticação em 2 etapas (MFA)</div>
+              <div class="card-sub" id="mfa-card-sub">Carregando...</div>
+            </div>
+            <button class="btn-connect" type="button" id="mfa-toggle-btn" onclick="onMfaToggleClick()" style="width:auto; min-width:170px; padding:0 18px">
+              —
+            </button>
+          </div>
+          <div class="card-body" id="mfa-card-body" style="display:none">
+            <div id="mfa-info" class="security-note" style="margin-bottom:8px"></div>
+            <button class="btn-sm" type="button" onclick="openMfaRegenerateModal()" id="mfa-regen-btn" style="display:none">
+              Gerar novos códigos de backup
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
               <div class="card-title">Resetar senha por e-mail</div>
               <div class="card-sub" id="security-reset-copy">O link expira em 30 minutos e abre uma página segura para definir a nova senha</div>
             </div>
@@ -1548,7 +1566,7 @@ function showSettingsSection(section) {
   const url = new URL(window.location.href);
   url.searchParams.set("view", target);
   window.history.replaceState({}, "", url);
-  if (target === "security") loadSecuritySettings();
+  if (target === "security") { loadSecuritySettings(); loadMfaStatus(); }
   if (target === "notifications" && !notificationSettingsLoaded) loadNotificationSettings();
 }
 
@@ -2185,6 +2203,199 @@ async function disconnectAll() {
   }
 }
 
+/* ── MFA (TOTP) ──────────────────────────────── */
+let _mfaStatus = { enabled: false, has_pending_secret: false, backup_codes_remaining: 0 };
+
+async function loadMfaStatus() {
+  try {
+    const resp = await fetch(`${API}/auth/mfa/status`, authOptions({ headers: authHeaders() }));
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    _mfaStatus = await resp.json();
+  } catch {
+    _mfaStatus = { enabled: false, has_pending_secret: false, backup_codes_remaining: 0 };
+  }
+  applyMfaUi();
+}
+
+function applyMfaUi() {
+  const sub = document.getElementById("mfa-card-sub");
+  const btn = document.getElementById("mfa-toggle-btn");
+  const body = document.getElementById("mfa-card-body");
+  const info = document.getElementById("mfa-info");
+  const regen = document.getElementById("mfa-regen-btn");
+  if (!sub || !btn) return;
+
+  if (_mfaStatus.enabled) {
+    sub.textContent = "MFA ativado. Você precisa do código do app autenticador para entrar.";
+    btn.textContent = "Desativar";
+    body.style.display = "";
+    info.textContent = `Códigos de backup restantes: ${_mfaStatus.backup_codes_remaining} de 10`;
+    regen.style.display = _mfaStatus.backup_codes_remaining < 4 ? "" : "";
+  } else {
+    sub.textContent = "Adicione uma camada extra de proteção com Google Authenticator, Authy ou similar.";
+    btn.textContent = "Ativar";
+    body.style.display = "none";
+    regen.style.display = "none";
+  }
+}
+
+function onMfaToggleClick() {
+  if (_mfaStatus.enabled) openMfaDisableModal();
+  else openMfaSetupModal();
+}
+
+/* ── Modal: Setup ─────────────────────────────── */
+function openMfaSetupModal() {
+  const overlay = document.getElementById("mfa-setup-overlay");
+  document.getElementById("mfa-setup-step1").style.display = "";
+  document.getElementById("mfa-setup-step2").style.display = "none";
+  document.getElementById("mfa-setup-step3").style.display = "none";
+  document.getElementById("mfa-setup-password").value = "";
+  document.getElementById("mfa-setup-code").value = "";
+  overlay.classList.add("open");
+}
+function closeMfaSetupModal() {
+  document.getElementById("mfa-setup-overlay").classList.remove("open");
+}
+
+async function mfaSetupStep1Submit() {
+  const password = document.getElementById("mfa-setup-password").value;
+  if (!password) { showToast("Digite sua senha", "error"); return; }
+  const btn = document.getElementById("mfa-setup-step1-btn");
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`${API}/auth/mfa/setup`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ password }),
+    });
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const data = await resp.json();
+    document.getElementById("mfa-qr-img").src = data.qr_code;
+    document.getElementById("mfa-secret-text").textContent = data.secret;
+    document.getElementById("mfa-setup-step1").style.display = "none";
+    document.getElementById("mfa-setup-step2").style.display = "";
+  } catch (err) {
+    showToast(err.message || "Erro ao iniciar setup", "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function mfaSetupStep2Submit() {
+  const code = document.getElementById("mfa-setup-code").value.trim();
+  if (!/^\d{6}$/.test(code)) { showToast("Digite os 6 dígitos do app", "error"); return; }
+  const btn = document.getElementById("mfa-setup-step2-btn");
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`${API}/auth/mfa/enable`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ code }),
+    });
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const data = await resp.json();
+    document.getElementById("mfa-backup-codes-list").innerHTML =
+      data.backup_codes.map(c => `<code>${c}</code>`).join("");
+    document.getElementById("mfa-setup-step2").style.display = "none";
+    document.getElementById("mfa-setup-step3").style.display = "";
+    await loadMfaStatus();
+  } catch (err) {
+    showToast(err.message || "Código inválido", "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function copyCodesFromList(listId) {
+  const codes = Array.from(document.querySelectorAll(`#${listId} code`))
+    .map(el => el.textContent)
+    .join("\n");
+  if (!codes) return;
+  navigator.clipboard.writeText(codes).then(
+    () => showToast("Códigos copiados", "ok"),
+    () => showToast("Não foi possível copiar", "error"),
+  );
+}
+
+function copyBackupCodes() { copyCodesFromList("mfa-backup-codes-list"); }
+function copyRegenBackupCodes() { copyCodesFromList("mfa-regen-codes-list"); }
+
+/* ── Modal: Disable ──────────────────────────── */
+function openMfaDisableModal() {
+  document.getElementById("mfa-disable-password").value = "";
+  document.getElementById("mfa-disable-code").value = "";
+  document.getElementById("mfa-disable-overlay").classList.add("open");
+}
+function closeMfaDisableModal() {
+  document.getElementById("mfa-disable-overlay").classList.remove("open");
+}
+
+async function mfaDisableSubmit() {
+  const password = document.getElementById("mfa-disable-password").value;
+  const code = document.getElementById("mfa-disable-code").value.trim();
+  if (!password || !code) { showToast("Preencha senha e código", "error"); return; }
+  const btn = document.getElementById("mfa-disable-btn");
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`${API}/auth/mfa/disable`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ password, code }),
+    });
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    closeMfaDisableModal();
+    showToast("MFA desativado", "ok");
+    await loadMfaStatus();
+  } catch (err) {
+    showToast(err.message || "Erro ao desativar", "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ── Modal: Regenerate backup codes ──────────── */
+function openMfaRegenerateModal() {
+  document.getElementById("mfa-regen-password").value = "";
+  document.getElementById("mfa-regen-code").value = "";
+  document.getElementById("mfa-regen-result").style.display = "none";
+  document.getElementById("mfa-regen-form").style.display = "";
+  document.getElementById("mfa-regen-overlay").classList.add("open");
+}
+function closeMfaRegenerateModal() {
+  document.getElementById("mfa-regen-overlay").classList.remove("open");
+}
+
+async function mfaRegenerateSubmit() {
+  const password = document.getElementById("mfa-regen-password").value;
+  const code = document.getElementById("mfa-regen-code").value.trim();
+  if (!password || !code) { showToast("Preencha senha e código", "error"); return; }
+  const btn = document.getElementById("mfa-regen-btn-submit");
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`${API}/auth/mfa/regenerate-backup-codes`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ password, code }),
+    });
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const data = await resp.json();
+    document.getElementById("mfa-regen-codes-list").innerHTML =
+      data.backup_codes.map(c => `<code>${c}</code>`).join("");
+    document.getElementById("mfa-regen-form").style.display = "none";
+    document.getElementById("mfa-regen-result").style.display = "";
+    await loadMfaStatus();
+  } catch (err) {
+    showToast(err.message || "Erro ao gerar códigos", "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 /* ── Init ────────────────────────────────────── */
 async function initSettings() {
   try {
@@ -2196,8 +2407,145 @@ async function initSettings() {
   document.getElementById("dashboard-link").href = "/app";
   showSettingsSection(["security", "notifications", "data", "legal"].includes(params.get("view")) ? params.get("view") : "security");
   loadData();
+
+  // Vindo do onboarding pos-login: abre o modal de setup MFA automaticamente
+  // depois que loadMfaStatus terminar (modal precisa do estado carregado).
+  if (params.get("autoOpenMfa") === "1") {
+    setTimeout(() => {
+      if (!_mfaStatus.enabled) openMfaSetupModal();
+    }, 400);
+    // Limpa o param da URL pra nao reabrir em refresh
+    const url = new URL(window.location.href);
+    url.searchParams.delete("autoOpenMfa");
+    window.history.replaceState({}, "", url);
+  }
 }
 initSettings();
 </script>
+
+<!-- ── MFA Modais ─────────────────────────────────────────────────────────── -->
+<style>
+.mfa-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 9999;
+  display: none; align-items: center; justify-content: center; padding: 20px;
+}
+.mfa-overlay.open { display: flex; }
+.mfa-modal {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+  width: min(480px, 92vw); max-height: 88vh; overflow: auto; padding: 24px;
+  color: var(--ink);
+}
+.mfa-modal h3 { font-size: 1.05rem; margin-bottom: 6px; font-weight: 650; }
+.mfa-modal .sub { font-size: .82rem; color: var(--muted); margin-bottom: 16px; }
+.mfa-modal label { display: block; font-size: .72rem; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em; margin: 12px 0 6px; }
+.mfa-modal input { width: 100%; padding: 10px 12px; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 10px; color: var(--ink); font-size: .92rem; }
+.mfa-modal input:focus { outline: none; border-color: var(--accent); }
+.mfa-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+.mfa-actions .btn-cancel, .mfa-actions .btn-primary {
+  padding: 9px 16px; border-radius: 10px; font-weight: 600; font-size: .85rem; cursor: pointer; border: none;
+}
+.mfa-actions .btn-cancel { background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
+.mfa-actions .btn-primary { background: var(--accent); color: #fff; }
+.mfa-actions .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+.mfa-qr-wrap { background: #fff; padding: 16px; border-radius: 12px; display: flex;
+  align-items: center; justify-content: center; margin: 8px 0 16px; }
+.mfa-qr-wrap img { width: 220px; height: 220px; }
+.mfa-secret { background: var(--surface-2); border: 1px dashed var(--border);
+  border-radius: 8px; padding: 8px 12px; font-family: monospace; font-size: .82rem;
+  color: var(--muted); word-break: break-all; user-select: all; }
+.mfa-codes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 12px 0; }
+.mfa-codes code { background: var(--surface-2); padding: 8px 12px; border-radius: 8px;
+  font-family: monospace; font-size: .88rem; text-align: center; user-select: all;
+  border: 1px solid var(--border); }
+.mfa-warn { background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.28);
+  border-radius: 10px; padding: 10px 12px; font-size: .82rem; color: #fbbf24; margin: 12px 0; }
+</style>
+
+<div class="mfa-overlay" id="mfa-setup-overlay">
+  <div class="mfa-modal">
+    <!-- Step 1: senha -->
+    <div id="mfa-setup-step1">
+      <h3>Ativar autenticação em 2 etapas</h3>
+      <p class="sub">Confirme sua senha para começar.</p>
+      <label for="mfa-setup-password">Senha atual</label>
+      <input type="password" id="mfa-setup-password" autocomplete="current-password" />
+      <div class="mfa-actions">
+        <button class="btn-cancel" type="button" onclick="closeMfaSetupModal()">Cancelar</button>
+        <button class="btn-primary" type="button" id="mfa-setup-step1-btn" onclick="mfaSetupStep1Submit()">Continuar</button>
+      </div>
+    </div>
+
+    <!-- Step 2: QR + código -->
+    <div id="mfa-setup-step2" style="display:none">
+      <h3>Escaneie o QR code</h3>
+      <p class="sub">Use Google Authenticator, Authy, 1Password ou similar.</p>
+      <div class="mfa-qr-wrap"><img id="mfa-qr-img" alt="QR code MFA" /></div>
+      <label>Ou digite manualmente este segredo</label>
+      <div class="mfa-secret" id="mfa-secret-text">—</div>
+      <label for="mfa-setup-code">Código gerado pelo app (6 dígitos)</label>
+      <input type="text" id="mfa-setup-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" />
+      <div class="mfa-actions">
+        <button class="btn-cancel" type="button" onclick="closeMfaSetupModal()">Cancelar</button>
+        <button class="btn-primary" type="button" id="mfa-setup-step2-btn" onclick="mfaSetupStep2Submit()">Ativar MFA</button>
+      </div>
+    </div>
+
+    <!-- Step 3: backup codes -->
+    <div id="mfa-setup-step3" style="display:none">
+      <h3>Códigos de backup</h3>
+      <p class="sub">Guarde esses códigos em local seguro. Cada um pode ser usado uma vez se você perder o app autenticador.</p>
+      <div class="mfa-warn">⚠ Você não verá esses códigos novamente. Salve agora.</div>
+      <div class="mfa-codes" id="mfa-backup-codes-list"></div>
+      <div class="mfa-actions">
+        <button class="btn-cancel" type="button" onclick="copyBackupCodes()">Copiar todos</button>
+        <button class="btn-primary" type="button" onclick="closeMfaSetupModal()">Concluído</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mfa-overlay" id="mfa-disable-overlay">
+  <div class="mfa-modal">
+    <h3>Desativar autenticação em 2 etapas</h3>
+    <p class="sub">Confirme com sua senha e código atual do app (ou um código de backup).</p>
+    <label for="mfa-disable-password">Senha</label>
+    <input type="password" id="mfa-disable-password" autocomplete="current-password" />
+    <label for="mfa-disable-code">Código TOTP ou de backup</label>
+    <input type="text" id="mfa-disable-code" autocomplete="one-time-code" />
+    <div class="mfa-actions">
+      <button class="btn-cancel" type="button" onclick="closeMfaDisableModal()">Cancelar</button>
+      <button class="btn-primary" type="button" id="mfa-disable-btn" onclick="mfaDisableSubmit()">Desativar</button>
+    </div>
+  </div>
+</div>
+
+<div class="mfa-overlay" id="mfa-regen-overlay">
+  <div class="mfa-modal">
+    <div id="mfa-regen-form">
+      <h3>Gerar novos códigos de backup</h3>
+      <p class="sub">Os códigos antigos serão invalidados. Confirme com senha e TOTP.</p>
+      <label for="mfa-regen-password">Senha</label>
+      <input type="password" id="mfa-regen-password" autocomplete="current-password" />
+      <label for="mfa-regen-code">Código TOTP atual</label>
+      <input type="text" id="mfa-regen-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" />
+      <div class="mfa-actions">
+        <button class="btn-cancel" type="button" onclick="closeMfaRegenerateModal()">Cancelar</button>
+        <button class="btn-primary" type="button" id="mfa-regen-btn-submit" onclick="mfaRegenerateSubmit()">Gerar novos</button>
+      </div>
+    </div>
+    <div id="mfa-regen-result" style="display:none">
+      <h3>Novos códigos de backup</h3>
+      <div class="mfa-warn">⚠ Os anteriores foram invalidados. Salve estes agora.</div>
+      <div class="mfa-codes" id="mfa-regen-codes-list"></div>
+      <div class="mfa-actions">
+        <button class="btn-cancel" type="button" onclick="copyRegenBackupCodes()">Copiar todos</button>
+        <button class="btn-primary" type="button" onclick="closeMfaRegenerateModal()">Concluído</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
