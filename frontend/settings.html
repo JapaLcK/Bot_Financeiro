@@ -861,6 +861,35 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* ─── Activity log ───────────────────────────── */
+.activity-embed {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.activity-embed-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.activity-embed-title {
+  font-size: .72rem;
+  font-weight: 760;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.activity-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: .78rem;
+  color: var(--accent, #a78bfa);
+  font-weight: 600;
+  cursor: pointer;
+}
+.activity-link:hover { text-decoration: underline; }
 .activity-list {
   display: flex;
   flex-direction: column;
@@ -869,7 +898,7 @@ a { color: inherit; text-decoration: none; }
   display: grid;
   grid-template-columns: 32px 1fr;
   gap: 12px;
-  padding: 12px 0;
+  padding: 10px 0;
   border-top: 1px solid var(--border);
 }
 .activity-row:first-child { border-top: 0; }
@@ -1274,6 +1303,16 @@ a { color: inherit; text-decoration: none; }
                 <div class="security-note">Este acesso expira automaticamente.</div>
               </div>
             </div>
+
+            <div class="activity-embed">
+              <div class="activity-embed-head">
+                <span class="activity-embed-title">Atividade recente</span>
+                <button class="activity-link" type="button" id="activity-show-all-btn" onclick="openActivityModal()" hidden>Ver todas →</button>
+              </div>
+              <div id="activity-list" class="activity-list activity-list-compact">
+                <div class="activity-loading">Carregando…</div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1292,21 +1331,6 @@ a { color: inherit; text-decoration: none; }
             <button class="btn-sm" type="button" onclick="openMfaRegenerateModal()" id="mfa-regen-btn" style="display:none">
               Gerar novos códigos de backup
             </button>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <div class="card-title">Atividade recente da conta</div>
-              <div class="card-sub">Últimas ações sensíveis registradas — login de novos dispositivos, alterações de e-mail, MFA e Open Finance.</div>
-            </div>
-            <button class="btn-sm" type="button" onclick="loadActivityLog()">↻ Atualizar</button>
-          </div>
-          <div class="card-body">
-            <div id="activity-list" class="activity-list">
-              <div class="activity-loading">Carregando…</div>
-            </div>
           </div>
         </div>
 
@@ -1763,17 +1787,21 @@ function formatActivityTime(iso) {
   return then.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
-function renderActivityList(events) {
-  const container = document.getElementById("activity-list");
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+function renderActivityList(events, containerId, opts = {}) {
+  const container = document.getElementById(containerId);
   if (!container) return;
   if (!Array.isArray(events) || events.length === 0) {
     container.innerHTML = '<div class="activity-empty">Sem atividade registrada ainda.</div>';
     return;
   }
-  const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-  }[c]));
-  const rows = events.map((ev) => {
+  const slice = opts.limit ? events.slice(0, opts.limit) : events;
+  container.innerHTML = slice.map((ev) => {
     const icon = ACTIVITY_ICONS[ev.event] || "•";
     const title = escapeHtml(ev.event_label || ev.event);
     const when = escapeHtml(formatActivityTime(ev.created_at));
@@ -1790,8 +1818,9 @@ function renderActivityList(events) {
         </div>
       </div>`;
   }).join("");
-  container.innerHTML = rows;
 }
+
+let _activityCache = [];
 
 async function loadActivityLog() {
   const container = document.getElementById("activity-list");
@@ -1801,10 +1830,25 @@ async function loadActivityLog() {
     const resp = await fetch(`${API}/settings/${USER_ID}/activity?limit=10`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
-    renderActivityList(data.events || []);
+    _activityCache = Array.isArray(data.events) ? data.events : [];
+    renderActivityList(_activityCache, "activity-list", { limit: 3 });
+    const showAllBtn = document.getElementById("activity-show-all-btn");
+    if (showAllBtn) showAllBtn.hidden = _activityCache.length <= 3;
   } catch (err) {
     container.innerHTML = '<div class="activity-empty">Não foi possível carregar a atividade.</div>';
   }
+}
+
+function openActivityModal() {
+  const overlay = document.getElementById("activity-modal-overlay");
+  if (!overlay) return;
+  renderActivityList(_activityCache, "activity-modal-list");
+  overlay.classList.add("open");
+}
+
+function closeActivityModal() {
+  const overlay = document.getElementById("activity-modal-overlay");
+  if (overlay) overlay.classList.remove("open");
 }
 
 async function sendPasswordResetEmail() {
@@ -2670,6 +2714,17 @@ initSettings();
         <button class="btn-cancel" type="button" onclick="copyRegenBackupCodes()">Copiar todos</button>
         <button class="btn-primary" type="button" onclick="closeMfaRegenerateModal()">Concluído</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="mfa-overlay" id="activity-modal-overlay" onclick="if (event.target === this) closeActivityModal()">
+  <div class="mfa-modal">
+    <h3>Atividade recente da conta</h3>
+    <p class="sub">Últimas ações sensíveis registradas — login de novos dispositivos, alterações de e-mail, MFA e Open Finance.</p>
+    <div id="activity-modal-list" class="activity-list"></div>
+    <div class="mfa-actions">
+      <button class="btn-cancel" type="button" onclick="closeActivityModal()">Fechar</button>
     </div>
   </div>
 </div>
