@@ -41,7 +41,7 @@ frontend/
   dashboard.html                — dashboard financeiro ao vivo
   reset-password.html           — página de redefinição de senha
 adapters/
-  whatsapp/wa_webhook.py        — webhook WhatsApp (não-oficial, risco de ban)
+  whatsapp/wa_app.py            — webhook WhatsApp (FastAPI)
 tests/                          — pytest
 ```
 

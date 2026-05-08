@@ -29,13 +29,6 @@ GET  /webhook
 POST /webhook
 ```
 
-Legado / compatibilidade Flask:
-
-```
-PORT=5001 python3 -m adapters.whatsapp.wa_webhook
-ngrok http 5001
-```
-
 ## WhatsApp Cloud API - checklist operacional
 
 Use este procedimento sempre que configurar um novo número, trocar token, migrar ambiente ou diagnosticar falhas de recebimento.
