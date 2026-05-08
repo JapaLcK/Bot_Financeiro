@@ -35,6 +35,10 @@ def test_login_sets_auth_token_cookie(monkeypatch):
     async def _noop_log(*args, **kwargs):
         return None
 
+    # _issue_session_token insere em auth_sessions (FK p/ users.id),
+    # entao precisamos do row em users mesmo com login_auth_user mockado.
+    db.ensure_user(123)
+
     monkeypatch.setattr(
         db,
         "login_auth_user",

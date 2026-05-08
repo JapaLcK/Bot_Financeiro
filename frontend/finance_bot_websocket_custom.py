@@ -61,6 +61,15 @@ from core.audit import (
     maybe_record_login_from_new_ip,
     record_audit_event,
 )
+from core.sessions import (
+    create_session,
+    device_label,
+    get_active_session,
+    list_user_sessions,
+    revoke_other_sessions,
+    revoke_session,
+    touch_session,
+)
 from db import (
     accrue_all_investments,
     create_card,
@@ -1232,15 +1241,30 @@ AUTH_COOKIE_NAME = "auth_token"
 AUTH_COOKIE_MAX_AGE = 86400
 DASHBOARD_COOKIE_NAME = "dashboard_token"
 
-def _make_jwt(user_id: int, email: str) -> str:
+def _make_jwt(user_id: int, email: str, *, jti: str | None = None) -> str:
     from datetime import timedelta
-    payload = {
+    payload: dict[str, Any] = {
         "sub": str(user_id),
         "email": email,
         "type": "auth",
         "exp": datetime.now(timezone.utc) + timedelta(hours=24),
     }
+    if jti:
+        payload["jti"] = jti
     return pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
+
+def _issue_session_token(user_id: int, email: str, request: Request) -> str:
+    """Cria uma sessao em auth_sessions e devolve um JWT que carrega o jti.
+
+    Use em todo lugar que emite o cookie auth_token (login, OAuth, signup).
+    Falha de DB aqui levanta — login nao deve completar sem sessao registrada.
+    """
+    ip = get_remote_address(request) or None
+    ua = request.headers.get("user-agent") or None
+    jti = create_session(user_id, ip=ip, user_agent=ua)
+    return _make_jwt(user_id, email, jti=jti)
+
 
 def _decode_jwt(token: str) -> dict | None:
     try:
@@ -1368,6 +1392,18 @@ async def _get_current_user(
         raise HTTPException(status_code=401, detail="Token inválido ou expirado.")
     request.state.auth_payload = payload
     user_id = int(payload["sub"])
+
+    # Sessao por jti: tokens novos sempre carregam jti; tokens legados (sem
+    # jti) sao grandfathered (rollout sem kick mass) ate expirarem em 24h.
+    jti = payload.get("jti")
+    if jti:
+        session = await asyncio.to_thread(get_active_session, jti)
+        if not session or int(session.get("user_id") or 0) != user_id:
+            raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.")
+        request.state.session_jti = jti
+        # Atualiza last_seen com debounce; falha silenciosa.
+        asyncio.create_task(asyncio.to_thread(touch_session, jti))
+
     _raise_if_account_scheduled_for_deletion(user_id)
     return user_id
 
@@ -1561,7 +1597,7 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
 
     user_id    = result["user_id"]
     link_code  = result["link_code"]
-    token      = _make_jwt(user_id, body.email.strip().lower())
+    token      = _issue_session_token(user_id, body.email.strip().lower(), request)
     _set_auth_cookie(response, token)
     _set_dashboard_cookie(response, int(user_id))
 
@@ -1638,7 +1674,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         }
 
     link_code  = create_link_code(user_id, minutes_valid=15)
-    token      = _make_jwt(user_id, result["email"])
+    token      = _issue_session_token(user_id, result["email"], request)
     _set_auth_cookie(response, token)
     _set_dashboard_cookie(response, int(user_id))
 
@@ -1667,7 +1703,21 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
 
 
 @app.post("/auth/logout")
-async def auth_logout(response: Response):
+async def auth_logout(request: Request, response: Response):
+    # Revoga a sessao corrente (se houver jti no JWT) antes de limpar cookies.
+    # Idempotente: token expirado / sem jti / sessao ja revogada = no-op.
+    token = _get_auth_token_from_request(request, None)
+    if token:
+        payload = _decode_jwt(token)
+        if payload and payload.get("type") == "auth":
+            jti = payload.get("jti")
+            user_id_raw = payload.get("sub")
+            if jti and user_id_raw:
+                try:
+                    await asyncio.to_thread(revoke_session, int(user_id_raw), jti)
+                except Exception:
+                    pass
+
     _clear_session_cookies(response)
     response.headers["Clear-Site-Data"] = '"cookies", "storage"'
     _no_store(response)
@@ -1974,7 +2024,7 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
 
     link_code = await asyncio.to_thread(create_link_code, user_id, 15)
-    token = _make_jwt(user_id, user["email"])
+    token = _issue_session_token(user_id, user["email"], request)
     _set_auth_cookie(response, token)
     _set_dashboard_cookie(response, int(user_id))
 
@@ -2383,7 +2433,7 @@ async def auth_google_callback(
             return _google_redirect_to_landing(exc.detail)
 
         # Login bem-sucedido → cookies + redirect pra home
-        jwt_token = _make_jwt(user_id, email)
+        jwt_token = _issue_session_token(user_id, email, request)
         success_response = RedirectResponse(url=_post_login_url(), status_code=302)
         success_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
         _set_auth_cookie(success_response, jwt_token)
@@ -2453,7 +2503,7 @@ async def auth_google_complete_signup(
     user_id = int(result["user_id"])
     email = result["email"]
 
-    jwt_token = _make_jwt(user_id, email)
+    jwt_token = _issue_session_token(user_id, email, request)
     _set_auth_cookie(response, jwt_token)
     _set_dashboard_cookie(response, user_id)
 
@@ -3973,6 +4023,62 @@ async def security_activity_route(
     rows = await asyncio.to_thread(list_audit_events, user_id, limit, before_id)
     next_before = rows[-1]["id"] if rows and len(rows) >= max(1, min(int(limit), 50)) else None
     return json.loads(jdump({"ok": True, "events": rows, "next_before": next_before}))
+
+
+def _current_session_jti(request: Request) -> str | None:
+    """Le o jti da sessao corrente a partir do cookie auth_token. None se ausente/legado."""
+    token = _get_auth_token_from_request(request, None)
+    if not token:
+        return None
+    payload = _decode_jwt(token)
+    if not payload or payload.get("type") != "auth":
+        return None
+    return payload.get("jti")
+
+
+@app.get("/settings/{user_id}/sessions")
+async def security_sessions_list_route(request: Request, user_id: int):
+    """Lista as sessoes ativas (dispositivos conectados) do usuario."""
+    _authorize_dashboard_access(request, user_id)
+    current_jti = _current_session_jti(request)
+    rows = await asyncio.to_thread(list_user_sessions, user_id)
+    sessions = []
+    for r in rows:
+        sessions.append({
+            "jti": r["jti"],
+            "device_label": device_label(r.get("user_agent")),
+            "ip": r.get("ip"),
+            "user_agent": r.get("user_agent"),
+            "created_at": r.get("created_at"),
+            "last_seen_at": r.get("last_seen_at"),
+            "is_current": r["jti"] == current_jti,
+        })
+    return json.loads(jdump({"ok": True, "sessions": sessions, "current_jti": current_jti}))
+
+
+@app.delete("/settings/{user_id}/sessions/{jti}")
+async def security_session_revoke_route(request: Request, user_id: int, jti: str):
+    """Revoga uma sessao especifica (que nao seja a corrente)."""
+    _authorize_dashboard_access(request, user_id)
+    current_jti = _current_session_jti(request)
+    if current_jti and jti == current_jti:
+        raise HTTPException(
+            status_code=400,
+            detail="Use o botão 'Sair' para encerrar a sessão atual.",
+        )
+    revoked = await asyncio.to_thread(revoke_session, user_id, jti)
+    if not revoked:
+        raise HTTPException(status_code=404, detail="Sessão não encontrada ou já encerrada.")
+    return {"ok": True}
+
+
+@app.delete("/settings/{user_id}/sessions")
+async def security_sessions_revoke_others_route(request: Request, user_id: int):
+    """Revoga todas as sessoes do usuario exceto a corrente."""
+    _authorize_dashboard_access(request, user_id)
+    current_jti = _current_session_jti(request)
+    revoked_count = await asyncio.to_thread(revoke_other_sessions, user_id, current_jti)
+    return {"ok": True, "revoked": revoked_count}
 
 
 @app.get("/settings/{user_id}/notifications")

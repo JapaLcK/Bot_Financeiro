@@ -745,6 +745,26 @@ def init_db():
           on pending_google_signups (expires_at)
         """,
 
+        # ─── Sessoes ativas do dashboard ────────────────────────────────────────
+        # Cada login bem-sucedido insere uma row aqui e o JWT carrega o jti.
+        # Permite "lista de dispositivos" + revogacao individual / "encerrar
+        # todas as outras". Helper em core/sessions.py.
+        """
+        create table if not exists auth_sessions (
+          jti text primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          ip text,
+          user_agent text,
+          created_at timestamptz not null default now(),
+          last_seen_at timestamptz not null default now(),
+          revoked_at timestamptz
+        )
+        """,
+        """
+        create index if not exists idx_auth_sessions_user_active
+          on auth_sessions (user_id, revoked_at, last_seen_at desc)
+        """,
+
         # ─── Audit log (forense focado no usuario) ──────────────────────────────
         # Distinto de system_event_logs (operacional). Cobre acoes sensiveis:
         # senha, email, MFA, Open Finance, login de IP novo. Helper em core/audit.py.
