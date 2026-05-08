@@ -3951,14 +3951,54 @@ function _showAccessError() {
     </div>`;
 }
 
+// Modo preview: a página foi aberta com ?preview=1&key=... pelo Launch
+// Preview do Claude ou por uma demo pública. Antes de validar a sessão
+// normal, troca a key por um JWT de preview (cookie cross-site) e segue
+// o fluxo padrão. Em caso de falha, mostra a tela de erro padrão.
+async function _maybeBootstrapPreviewSession() {
+  if (params.get("preview") !== "1") return false;
+  const key = params.get("key") || "";
+  try {
+    const resp = await fetch(`${API}/preview/login`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key }),
+    });
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
+function _showPreviewBanner() {
+  const banner = document.createElement("div");
+  banner.id = "preview-banner";
+  banner.style.cssText =
+    "position:fixed;top:0;left:0;right:0;z-index:9999;padding:8px 14px;" +
+    "background:linear-gradient(90deg,#7c3aed,#3b82f6);color:#fff;" +
+    "font:600 .82rem system-ui;text-align:center;letter-spacing:.02em;" +
+    "box-shadow:0 2px 8px rgba(0,0,0,.4)";
+  banner.textContent =
+    "MODO PREVIEW · Dados fictícios resetados a cada 24h. " +
+    "Ações de pagamento, exclusão de conta e Open Finance estão desabilitadas.";
+  document.body.appendChild(banner);
+  document.body.style.paddingTop =
+    (parseInt(getComputedStyle(document.body).paddingTop || "0") + 36) + "px";
+}
+
 (async () => {
   const view = params.get("view");
+  const isPreview = await _maybeBootstrapPreviewSession();
 
   try {
-    const resp = await fetch(`${API}/auth/validate`, { credentials: "same-origin" });
+    const resp = await fetch(`${API}/auth/validate`, {
+      credentials: isPreview ? "include" : "same-origin",
+    });
     if (!resp.ok) { _showAccessError(); return; }
     const data = await resp.json();
     USER_ID = data.user_id;
+    if (isPreview) _showPreviewBanner();
     loadUserMenuState();
   } catch(e) {
     _showAccessError();

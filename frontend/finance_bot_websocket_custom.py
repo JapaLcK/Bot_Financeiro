@@ -126,6 +126,10 @@ ENABLE_DEV_ENDPOINTS = (os.getenv("ENABLE_DEV_ENDPOINTS") or "").strip().lower()
     "yes",
     "on",
 }
+# Modo preview: chave de acesso ao endpoint /preview/login. Quando vazio,
+# o endpoint retorna 503 — usado para desligar a feature em produção se
+# alguma vez precisar.
+PREVIEW_KEY = (os.getenv("PREVIEW_KEY") or "").strip()
 
 HERE = pathlib.Path(__file__).parent  # directory of this file
 
@@ -949,6 +953,14 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[investment_accrual] erro: {exc}", file=sys.stderr)
 
+    async def _preview_reset():
+        try:
+            await asyncio.sleep(1)
+            from core.services.preview_scheduler import run_preview_reset_loop  # noqa: PLC0415
+            await run_preview_reset_loop()
+        except Exception as exc:
+            print(f"[preview_reset] erro: {exc}", file=sys.stderr)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -982,6 +994,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_engagement(), name="engagement"),
                 asyncio.create_task(_investment_accrual(), name="investment_accrual"),
                 asyncio.create_task(_account_deletion_worker(), name="account_deletion"),
+                asyncio.create_task(_preview_reset(), name="preview_reset"),
             ]
         )
     else:
@@ -1018,6 +1031,10 @@ CSRF_EXEMPT_PATHS = {
     "/open-finance/pluggy/webhook",
     "/wa/webhook",
     "/webhook",
+    # /preview/login eh chamado de outro dominio (Launch Preview do Claude),
+    # onde o cookie CSRF (samesite=strict) nao seria enviado. Protegido por
+    # PREVIEW_KEY secret + rate limit dedicado.
+    "/preview/login",
 }
 
 _SECURITY_HEADERS = {
@@ -1225,14 +1242,16 @@ AUTH_COOKIE_NAME = "auth_token"
 AUTH_COOKIE_MAX_AGE = 86400
 DASHBOARD_COOKIE_NAME = "dashboard_token"
 
-def _make_jwt(user_id: int, email: str) -> str:
+def _make_jwt(user_id: int, email: str, *, is_preview: bool = False, hours: int = 24) -> str:
     from datetime import timedelta
     payload = {
         "sub": str(user_id),
         "email": email,
         "type": "auth",
-        "exp": datetime.now(timezone.utc) + timedelta(hours=24),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=hours),
     }
+    if is_preview:
+        payload["is_preview"] = True
     return pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 def _decode_jwt(token: str) -> dict | None:
@@ -1360,9 +1379,44 @@ async def _get_current_user(
     if not payload or payload.get("type") != "auth":
         raise HTTPException(status_code=401, detail="Token inválido ou expirado.")
     request.state.auth_payload = payload
+    request.state.is_preview = bool(payload.get("is_preview"))
     user_id = int(payload["sub"])
-    _raise_if_account_scheduled_for_deletion(user_id)
+    if not request.state.is_preview:
+        _raise_if_account_scheduled_for_deletion(user_id)
     return user_id
+
+
+def _is_preview_request(request: Request) -> bool:
+    """True quando o JWT da request carrega claim `is_preview`.
+
+    Fallback: alguns endpoints nao passam por _get_current_user (que popula
+    request.state.is_preview), entao decodificamos o JWT direto do header
+    ou cookie como ultimo recurso.
+    """
+    state = getattr(request, "state", None)
+    if state is not None and getattr(state, "is_preview", False):
+        return True
+    # Extrai bearer manualmente (Depends nao roda em chamada direta)
+    token = _extract_bearer_token(request) or (
+        request.cookies.get(AUTH_COOKIE_NAME) or ""
+    ).strip()
+    if not token:
+        return False
+    payload = _decode_jwt(token)
+    return bool(payload and payload.get("is_preview"))
+
+
+def _block_if_preview(request: Request, action: str = "esta operação") -> None:
+    """Bloqueia ações destrutivas/sensíveis em sessão de preview.
+
+    Use em endpoints que apagam dados, mudam credenciais, conectam contas
+    externas ou disparam pagamentos. Lê o claim is_preview do JWT atual.
+    """
+    if _is_preview_request(request):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Modo preview: {action} está desabilitada.",
+        )
 
 
 def _extract_bearer_token(request: Request) -> str | None:
@@ -1638,6 +1692,87 @@ async def auth_logout(response: Response):
     return {"ok": True}
 
 
+# ── Modo preview / demo ──────────────────────────────────────────────────────
+# Usado pelo Launch Preview do Claude Code e por demos publicas. A chave
+# (PREVIEW_KEY) e exigida para evitar que o endpoint vire vetor de spam.
+# O JWT retornado carrega claim is_preview=true; ações destrutivas/sensíveis
+# verificam esse claim e respondem 403. Os dados do user demo são resetados
+# pelo scheduler (core/services/preview_scheduler.py).
+
+class PreviewLoginBody(BaseModel):
+    key: str | None = None
+
+
+@app.post("/preview/login")
+@limiter.limit("10/hour")
+async def preview_login(request: Request, response: Response, body: PreviewLoginBody | None = None):
+    if not PREVIEW_KEY:
+        raise HTTPException(status_code=503, detail="Modo preview não configurado.")
+
+    # Aceita chave por query param, header ou body — facilita uso em iframes/preview.
+    provided = (
+        (body.key if body and body.key else None)
+        or request.query_params.get("key")
+        or request.headers.get("x-preview-key")
+        or ""
+    ).strip()
+    if not provided or not secrets.compare_digest(provided, PREVIEW_KEY):
+        raise HTTPException(status_code=401, detail="Chave de preview inválida.")
+
+    from db import (
+        PREVIEW_USER_ID,
+        PREVIEW_USER_EMAIL,
+        ensure_preview_user,
+        reset_preview_user_data,
+    )
+
+    # Garante user existe e tem dados seed atualizados a cada login (idempotente).
+    await asyncio.to_thread(ensure_preview_user)
+    await asyncio.to_thread(reset_preview_user_data)
+
+    token = _make_jwt(PREVIEW_USER_ID, PREVIEW_USER_EMAIL, is_preview=True, hours=1)
+
+    # Cookies cross-site: necessário para o preview do Claude (outro domínio).
+    # SameSite=None só funciona com Secure=True, exigido em produção.
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=3600,
+    )
+    dashboard_token = make_dashboard_token(PREVIEW_USER_ID, hours=1)
+    response.set_cookie(
+        DASHBOARD_COOKIE_NAME,
+        dashboard_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=3600,
+    )
+    # Cookie CSRF tambem precisa ser cross-site para o preview funcionar.
+    csrf_token = _make_csrf_token()
+    response.set_cookie(
+        CSRF_COOKIE_NAME,
+        csrf_token,
+        httponly=False,
+        secure=True,
+        samesite="none",
+        max_age=CSRF_COOKIE_MAX_AGE,
+    )
+
+    return {
+        "ok": True,
+        "user_id": PREVIEW_USER_ID,
+        "is_preview": True,
+        "token": token,
+        "dashboard_token": dashboard_token,
+        "csrf_token": csrf_token,
+        "expires_in": 3600,
+    }
+
+
 @app.post("/auth/forgot-password")
 @limiter.limit("3/hour")
 async def auth_forgot_password(request: Request, body: EmailBody):
@@ -1714,6 +1849,7 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
 @app.post("/auth/account/export")
 @limiter.limit("3/hour")
 async def auth_account_export_request(request: Request, body: DataExportBody):
+    _block_if_preview(request, "exportar dados")
     """
     Solicita exportação completa de dados.
 
@@ -1890,6 +2026,7 @@ async def auth_account_export_download(request: Request, token: str):
 @limiter.limit("5/minute")
 async def auth_delete_account(request: Request, response: Response, body: DeleteAccountBody):
     """Agenda a exclusão definitiva da conta após o período de carência."""
+    _block_if_preview(request, "excluir conta")
     user_id = _resolve_dashboard_user_id(request)
     auth_user = await asyncio.to_thread(get_auth_user, user_id)
     email = (auth_user or {}).get("email")
@@ -2181,11 +2318,12 @@ async def auth_google_complete_signup(
 # ─── Billing (Stripe) ────────────────────────────────────────────────────────
 
 @app.post("/billing/create-checkout")
-async def billing_create_checkout(user_id: int = Depends(_get_current_user)):
+async def billing_create_checkout(request: Request, user_id: int = Depends(_get_current_user)):
     """
     Cria uma sessão de checkout no Stripe para upgrade para o plano Pro.
     Requer: STRIPE_SECRET_KEY e STRIPE_PRICE_ID_PRO configurados.
     """
+    _block_if_preview(request, "fazer upgrade no Stripe")
     if not STRIPE_SECRET_KEY or not STRIPE_PRICE_ID_PRO:
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
@@ -2318,11 +2456,12 @@ async def billing_webhook(request: Request):
 
 
 @app.post("/billing/portal")
-async def billing_portal(user_id: int = Depends(_get_current_user)):
+async def billing_portal(request: Request, user_id: int = Depends(_get_current_user)):
     """
     Cria uma sessão no Stripe Customer Portal para o usuário gerenciar
     a assinatura (cancelar, trocar cartão, ver faturas).
     """
+    _block_if_preview(request, "abrir portal de pagamento")
     if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
@@ -3718,6 +3857,7 @@ async def open_finance_snapshot_route(request: Request, user_id: int):
 @app.post("/open-finance/{user_id}/connect-token")
 async def open_finance_connect_token_route(request: Request, user_id: int):
     _authorize_dashboard_access(request, user_id)
+    _block_if_preview(request, "conectar bancos via Open Finance")
 
     webhook_url = (os.getenv("PLUGGY_WEBHOOK_URL") or "").strip()
     if not webhook_url and DASHBOARD_URL.startswith("https://"):
@@ -3745,6 +3885,7 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
 @app.post("/open-finance/{user_id}/pluggy-item")
 async def open_finance_pluggy_item_route(request: Request, user_id: int, payload: OpenFinancePluggyItemPayload):
     _authorize_dashboard_access(request, user_id)
+    _block_if_preview(request, "conectar bancos via Pluggy")
     try:
         connection = await asyncio.to_thread(save_pluggy_open_finance_item, user_id, payload.item)
     except ValueError as exc:
