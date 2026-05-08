@@ -55,6 +55,11 @@ from core.admin_dashboard import (
     admin_error_logging_middleware,
     register_admin_routes,
 )
+from core.audit import (
+    AuditEvent,
+    maybe_record_login_from_new_ip,
+    record_audit_event,
+)
 from db import (
     accrue_all_investments,
     create_card,
@@ -1636,6 +1641,9 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
     _set_auth_cookie(response, token)
     _set_dashboard_cookie(response, int(user_id))
 
+    # Fire ANTES do log_auth_login_event: senao o IP atual ja vira "conhecido".
+    await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
+
     await log_auth_login_event(
         result["email"],
         True,
@@ -1701,9 +1709,16 @@ async def auth_reset_password(request: Request, body: ResetPasswordBody):
     if len(body.new_password) < 8:
         raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 8 caracteres.")
 
-    ok = consume_password_reset_token(body.token, body.new_password)
-    if not ok:
+    user_id = consume_password_reset_token(body.token, body.new_password)
+    if not user_id:
         raise HTTPException(status_code=400, detail="Link inválido ou expirado. Solicite um novo.")
+
+    await asyncio.to_thread(
+        record_audit_event,
+        user_id,
+        AuditEvent.PASSWORD_RESET_COMPLETED,
+        request=request,
+    )
 
     return {"message": "Senha redefinida com sucesso! Faça login com sua nova senha."}
 
@@ -1843,6 +1858,13 @@ async def auth_mfa_enable(request: Request, body: MFAEnableBody, user_id: int = 
             raise HTTPException(status_code=400, detail="Código inválido. Tente novamente.") from exc
         raise
 
+    await asyncio.to_thread(
+        record_audit_event,
+        user_id,
+        AuditEvent.MFA_ENABLED,
+        request=request,
+    )
+
     return {"ok": True, "backup_codes": backup_codes}
 
 
@@ -1872,6 +1894,14 @@ async def auth_mfa_disable(request: Request, body: MFADisableBody, user_id: int 
         raise HTTPException(status_code=400, detail="Código inválido.")
 
     await asyncio.to_thread(disable_mfa, user_id)
+
+    await asyncio.to_thread(
+        record_audit_event,
+        user_id,
+        AuditEvent.MFA_DISABLED,
+        request=request,
+    )
+
     return {"ok": True}
 
 
@@ -1898,6 +1928,14 @@ async def auth_mfa_regenerate(request: Request, body: MFADisableBody, user_id: i
         if str(exc) == "MFA_NOT_ENABLED":
             raise HTTPException(status_code=400, detail="MFA não está ativado.") from exc
         raise
+
+    await asyncio.to_thread(
+        record_audit_event,
+        user_id,
+        AuditEvent.MFA_BACKUP_CODES_REGENERATED,
+        request=request,
+    )
+
     return {"backup_codes": codes}
 
 
@@ -1938,6 +1976,18 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
     token = _make_jwt(user_id, user["email"])
     _set_auth_cookie(response, token)
     _set_dashboard_cookie(response, int(user_id))
+
+    # New-IP audit ANTES do log_auth_login_event de sucesso. Rows de
+    # mfa_pending (criadas em /auth/login) sao filtradas pelo helper.
+    await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
+
+    await log_auth_login_event(
+        user["email"],
+        True,
+        user_id=user_id,
+        ip_address=get_remote_address(request),
+        user_agent=request.headers.get("user-agent"),
+    )
 
     wa_link = _build_whatsapp_onboarding_link(user_id)
     return {
@@ -2337,6 +2387,8 @@ async def auth_google_callback(
         success_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
         _set_auth_cookie(success_response, jwt_token)
         _set_dashboard_cookie(success_response, int(user_id))
+
+        await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
 
         await log_auth_login_event(
             email,
@@ -3842,6 +3894,9 @@ async def update_security_contact_route(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    old_email = (auth_user.get("email") or "").strip().lower() or None
+    email_actually_changed = bool(email) and email != old_email
+
     try:
         async with await db_connect() as conn:
             async with conn.cursor() as cur:
@@ -3870,6 +3925,15 @@ async def update_security_contact_route(
             await conn.commit()
     except psycopg.errors.UniqueViolation as exc:
         raise HTTPException(status_code=409, detail="Este e-mail ou telefone já está em uso.") from exc
+
+    if email_actually_changed:
+        await asyncio.to_thread(
+            record_audit_event,
+            user_id,
+            AuditEvent.EMAIL_CHANGED,
+            request=request,
+            details={"new_email": email},
+        )
 
     return await _get_security_settings(user_id)
 
@@ -3995,6 +4059,15 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         connection = await asyncio.to_thread(save_pluggy_open_finance_item, user_id, payload.item)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await asyncio.to_thread(
+        record_audit_event,
+        user_id,
+        AuditEvent.OPEN_FINANCE_CONNECTED,
+        request=request,
+        details={"provider": "pluggy", "item_id": (connection or {}).get("item_id")},
+    )
+
     snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
     return json.loads(jdump({"ok": True, "connection": connection, **snapshot}))
 
@@ -4060,6 +4133,15 @@ async def open_finance_mock_connect_route(request: Request, user_id: int, payloa
         user_id,
         payload.institution or "nubank",
     )
+
+    await asyncio.to_thread(
+        record_audit_event,
+        user_id,
+        AuditEvent.OPEN_FINANCE_CONNECTED,
+        request=request,
+        details={"provider": "mock", "institution": payload.institution or "nubank"},
+    )
+
     snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
     return json.loads(jdump({"ok": True, "sync": result, **snapshot}))
 
@@ -4068,6 +4150,15 @@ async def open_finance_mock_connect_route(request: Request, user_id: int, payloa
 async def open_finance_disconnect_route(request: Request, user_id: int):
     _authorize_dashboard_access(request, user_id)
     deleted = await asyncio.to_thread(disconnect_open_finance_connection, user_id)
+
+    if deleted:
+        await asyncio.to_thread(
+            record_audit_event,
+            user_id,
+            AuditEvent.OPEN_FINANCE_DISCONNECTED,
+            request=request,
+        )
+
     return {"ok": True, "deleted": deleted}
 
 

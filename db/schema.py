@@ -744,6 +744,29 @@ def init_db():
         create index if not exists idx_pending_google_signups_expires
           on pending_google_signups (expires_at)
         """,
+
+        # ─── Audit log (forense focado no usuario) ──────────────────────────────
+        # Distinto de system_event_logs (operacional). Cobre acoes sensiveis:
+        # senha, email, MFA, Open Finance, login de IP novo. Helper em core/audit.py.
+        """
+        create table if not exists audit_events (
+          id bigserial primary key,
+          user_id bigint references users(id) on delete cascade,
+          event text not null,
+          ip text,
+          user_agent text,
+          created_at timestamptz not null default now(),
+          details jsonb not null default '{}'::jsonb
+        )
+        """,
+        """
+        create index if not exists idx_audit_events_user_created
+          on audit_events (user_id, created_at desc)
+        """,
+        """
+        create index if not exists idx_audit_events_user_event
+          on audit_events (user_id, event, created_at desc)
+        """,
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks

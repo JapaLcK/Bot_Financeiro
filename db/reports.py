@@ -180,7 +180,7 @@ def create_password_reset_token(email: str, minutes_valid: int = 30) -> str | No
     return _db_support.create_password_reset_token_impl(get_conn, email, minutes_valid)
 
 
-def consume_password_reset_token(token: str, new_password: str) -> bool:
+def consume_password_reset_token(token: str, new_password: str) -> int | None:
     return _db_support.consume_password_reset_token_impl(get_conn, _hash_password, token, new_password)
 
 

@@ -696,7 +696,12 @@ def create_password_reset_token_impl(get_conn, email: str, minutes_valid: int = 
     return token
 
 
-def consume_password_reset_token_impl(get_conn, hash_password, token: str, new_password: str) -> bool:
+def consume_password_reset_token_impl(get_conn, hash_password, token: str, new_password: str) -> int | None:
+    """
+    Consome o token de reset e atualiza a senha. Retorna o user_id (truthy) em
+    sucesso ou None em falha (token invalido/expirado/ja usado).
+    Callers continuam podendo usar `if ok:` graças à truthiness de int positivo.
+    """
     now = datetime.now(timezone.utc)
 
     with get_conn() as conn:
@@ -712,11 +717,11 @@ def consume_password_reset_token_impl(get_conn, hash_password, token: str, new_p
             row = cur.fetchone()
 
     if not row:
-        return False
+        return None
     if row["used_at"] is not None:
-        return False
+        return None
     if row["expires_at"] < now:
-        return False
+        return None
 
     user_id = row["user_id"]
     new_hash = hash_password(new_password)
@@ -733,4 +738,4 @@ def consume_password_reset_token_impl(get_conn, hash_password, token: str, new_p
             )
         conn.commit()
 
-    return True
+    return user_id
