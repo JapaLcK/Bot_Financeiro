@@ -57,6 +57,7 @@ from core.admin_dashboard import (
 )
 from core.audit import (
     AuditEvent,
+    list_audit_events,
     maybe_record_login_from_new_ip,
     record_audit_event,
 )
@@ -3958,6 +3959,20 @@ async def security_password_reset_route(request: Request, user_id: int):
     if not sent:
         raise HTTPException(status_code=500, detail="Não foi possível enviar o e-mail de reset.")
     return {"ok": True, "message": "Enviamos um link de redefinição de senha para o seu e-mail."}
+
+
+@app.get("/settings/{user_id}/activity")
+async def security_activity_route(
+    request: Request,
+    user_id: int,
+    limit: int = 10,
+    before_id: int | None = None,
+):
+    """Lista os ultimos eventos de auditoria do usuario (Atividade da conta)."""
+    _authorize_dashboard_access(request, user_id)
+    rows = await asyncio.to_thread(list_audit_events, user_id, limit, before_id)
+    next_before = rows[-1]["id"] if rows and len(rows) >= max(1, min(int(limit), 50)) else None
+    return json.loads(jdump({"ok": True, "events": rows, "next_before": next_before}))
 
 
 @app.get("/settings/{user_id}/notifications")

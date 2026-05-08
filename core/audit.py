@@ -14,6 +14,7 @@ Falha sempre silenciosa: a auditoria nao pode quebrar o fluxo principal
 from __future__ import annotations
 
 import sys
+import threading
 from typing import Any
 
 from psycopg.types.json import Jsonb
@@ -30,6 +31,71 @@ class AuditEvent:
     OPEN_FINANCE_CONNECTED = "open_finance_connected"
     OPEN_FINANCE_DISCONNECTED = "open_finance_disconnected"
     LOGIN_FROM_NEW_IP = "login_from_new_ip"
+
+
+# Texto humano apresentado na tela "Atividade da conta" (settings → Segurança).
+# Mantenha em sync com AuditEvent.
+EVENT_LABELS_PT_BR: dict[str, str] = {
+    AuditEvent.PASSWORD_RESET_COMPLETED: "Senha redefinida",
+    AuditEvent.EMAIL_CHANGED: "E-mail da conta alterado",
+    AuditEvent.MFA_ENABLED: "Autenticação em dois fatores ativada",
+    AuditEvent.MFA_DISABLED: "Autenticação em dois fatores desativada",
+    AuditEvent.MFA_BACKUP_CODES_REGENERATED: "Códigos de backup do MFA renovados",
+    AuditEvent.OPEN_FINANCE_CONNECTED: "Conta bancária conectada via Open Finance",
+    AuditEvent.OPEN_FINANCE_DISCONNECTED: "Conta bancária desconectada do Open Finance",
+    AuditEvent.LOGIN_FROM_NEW_IP: "Login a partir de um novo dispositivo",
+}
+
+
+def event_label_pt(event: str) -> str:
+    """Devolve a label PT-BR de um evento, ou o proprio nome se desconhecido."""
+    return EVENT_LABELS_PT_BR.get(event, event)
+
+
+def list_audit_events(
+    user_id: int,
+    limit: int = 10,
+    before_id: int | None = None,
+) -> list[dict]:
+    """
+    Retorna os ultimos `limit` eventos do usuario (mais recentes primeiro),
+    opcionalmente paginando com cursor `before_id`. Cada row vem com
+    `event_label` ja traduzido pra PT-BR.
+    """
+    limit = max(1, min(int(limit), 50))
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                if before_id:
+                    cur.execute(
+                        """
+                        select id, event, ip, user_agent, created_at, details
+                        from audit_events
+                        where user_id = %s and id < %s
+                        order by id desc
+                        limit %s
+                        """,
+                        (user_id, int(before_id), limit),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        select id, event, ip, user_agent, created_at, details
+                        from audit_events
+                        where user_id = %s
+                        order by id desc
+                        limit %s
+                        """,
+                        (user_id, limit),
+                    )
+                rows = list(cur.fetchall())
+    except Exception as exc:
+        print(f"[audit] list_audit_events failed for user {user_id}: {exc}", file=sys.stderr)
+        return []
+
+    for row in rows:
+        row["event_label"] = event_label_pt(row["event"])
+    return rows
 
 
 def _client_ip(request: Any) -> str | None:
@@ -127,20 +193,81 @@ def maybe_record_login_from_new_ip(
     *,
     request: Any = None,
     details: dict[str, Any] | None = None,
+    notify: bool = True,
 ) -> None:
     """
     Detecta login a partir de IP nunca visto e grava o evento se for o caso.
+
+    Quando dispara, opcionalmente envia o e-mail "novo login detectado" em
+    background (daemon thread) — login nao espera por geolocalizacao/SMTP.
+    O PRIMEIRO evento login_from_new_ip de um usuario e suprimido (cobre o
+    fluxo cadastro→login imediato; nao avisa o proprio dono que ele acabou
+    de criar a conta).
 
     IMPORTANTE: chame ANTES de registrar o login atual em auth_login_events,
     senao o IP da request corrente passa a ser "conhecido" e o evento nunca
     dispara.
     """
     ip = _client_ip(request)
+    ua = _user_agent(request)
     if is_known_login_ip(user_id, ip):
         return
     record_audit_event(
         user_id,
         AuditEvent.LOGIN_FROM_NEW_IP,
-        request=request,
+        ip=ip,
+        user_agent=ua,
         details=details,
     )
+    if notify:
+        threading.Thread(
+            target=_dispatch_new_login_email,
+            args=(user_id, ip, ua),
+            daemon=True,
+        ).start()
+
+
+def _count_login_from_new_ip(user_id: int) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select count(*) as n from audit_events where user_id = %s and event = %s",
+                (user_id, AuditEvent.LOGIN_FROM_NEW_IP),
+            )
+            row = cur.fetchone()
+    if not row:
+        return 0
+    n = row.get("n") if isinstance(row, dict) else row[0]
+    return int(n or 0)
+
+
+def _user_email(user_id: int) -> str | None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select email from auth_accounts where user_id = %s", (user_id,))
+            row = cur.fetchone()
+    if not row:
+        return None
+    email = row.get("email") if isinstance(row, dict) else row[0]
+    email = (email or "").strip()
+    return email or None
+
+
+def _dispatch_new_login_email(user_id: int, ip: str | None, user_agent: str | None) -> None:
+    """
+    Envia o aviso de novo login. Suprime o PRIMEIRO evento do usuario
+    (cadastro recem-feito). Falha sempre silenciosa.
+    """
+    try:
+        if _count_login_from_new_ip(user_id) <= 1:
+            return  # primeiro evento — nao notifica (cadastro→primeiro login)
+        email = _user_email(user_id)
+        if not email:
+            return
+        from core.services.ipgeo import lookup_city  # lazy: evita import cycle
+        from core.services.email_service import send_new_login_alert
+
+        city = lookup_city(ip)
+        send_new_login_alert(to=email, ip=ip, city=city, user_agent=user_agent)
+    except Exception as exc:
+        print(f"[audit] new-login email dispatch failed for user {user_id}: {exc}", file=sys.stderr)

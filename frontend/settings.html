@@ -860,6 +860,46 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
 }
 
+/* ─── Activity log ───────────────────────────── */
+.activity-list {
+  display: flex;
+  flex-direction: column;
+}
+.activity-row {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.activity-row:first-child { border-top: 0; }
+.activity-icon {
+  font-size: 1.1rem;
+  line-height: 1.6;
+  text-align: center;
+  opacity: .85;
+}
+.activity-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.activity-title {
+  font-weight: 700;
+  font-size: .88rem;
+  color: var(--ink);
+  word-break: break-word;
+}
+.activity-meta {
+  font-size: .74rem;
+  color: var(--faint);
+  line-height: 1.45;
+}
+.activity-meta strong { color: var(--muted); font-weight: 660; }
+.activity-loading,
+.activity-empty {
+  text-align: center;
+  padding: 18px 8px;
+  color: var(--faint);
+  font-size: .8rem;
+}
+
 /* ─── Empty states ───────────────────────────── */
 .empty-state {
   display: flex;
@@ -1252,6 +1292,21 @@ a { color: inherit; text-decoration: none; }
             <button class="btn-sm" type="button" onclick="openMfaRegenerateModal()" id="mfa-regen-btn" style="display:none">
               Gerar novos códigos de backup
             </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <div class="card-title">Atividade recente da conta</div>
+              <div class="card-sub">Últimas ações sensíveis registradas — login de novos dispositivos, alterações de e-mail, MFA e Open Finance.</div>
+            </div>
+            <button class="btn-sm" type="button" onclick="loadActivityLog()">↻ Atualizar</button>
+          </div>
+          <div class="card-body">
+            <div id="activity-list" class="activity-list">
+              <div class="activity-loading">Carregando…</div>
+            </div>
           </div>
         </div>
 
@@ -1677,6 +1732,78 @@ async function loadSecuritySettings() {
   } catch (err) {
     applySecuritySettings({});
     showToast(err.message || "Erro ao carregar segurança", "error");
+  }
+  loadActivityLog();
+}
+
+const ACTIVITY_ICONS = {
+  password_reset_completed: "🔑",
+  email_changed: "✉️",
+  mfa_enabled: "🛡️",
+  mfa_disabled: "🛡️",
+  mfa_backup_codes_regenerated: "🎫",
+  open_finance_connected: "🏦",
+  open_finance_disconnected: "🏦",
+  login_from_new_ip: "🌐",
+};
+
+function formatActivityTime(iso) {
+  if (!iso) return "";
+  const then = new Date(iso);
+  if (isNaN(then.getTime())) return "";
+  const diffMs = Date.now() - then.getTime();
+  const diffSec = Math.max(1, Math.floor(diffMs / 1000));
+  if (diffSec < 60)        return `há ${diffSec}s`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60)        return `há ${diffMin} min`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24)         return `há ${diffHr}h`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 30)        return `há ${diffDay}d`;
+  return then.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function renderActivityList(events) {
+  const container = document.getElementById("activity-list");
+  if (!container) return;
+  if (!Array.isArray(events) || events.length === 0) {
+    container.innerHTML = '<div class="activity-empty">Sem atividade registrada ainda.</div>';
+    return;
+  }
+  const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+  const rows = events.map((ev) => {
+    const icon = ACTIVITY_ICONS[ev.event] || "•";
+    const title = escapeHtml(ev.event_label || ev.event);
+    const when = escapeHtml(formatActivityTime(ev.created_at));
+    const ip = ev.ip ? escapeHtml(ev.ip) : null;
+    const metaParts = [];
+    if (when) metaParts.push(`<strong>${when}</strong>`);
+    if (ip)   metaParts.push(`IP ${ip}`);
+    return `
+      <div class="activity-row">
+        <div class="activity-icon">${icon}</div>
+        <div class="activity-body">
+          <div class="activity-title">${title}</div>
+          <div class="activity-meta">${metaParts.join(" · ")}</div>
+        </div>
+      </div>`;
+  }).join("");
+  container.innerHTML = rows;
+}
+
+async function loadActivityLog() {
+  const container = document.getElementById("activity-list");
+  if (!USER_ID || !container) return;
+  container.innerHTML = '<div class="activity-loading">Carregando…</div>';
+  try {
+    const resp = await fetch(`${API}/settings/${USER_ID}/activity?limit=10`, authOptions({ headers: authHeaders() }));
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const data = await resp.json();
+    renderActivityList(data.events || []);
+  } catch (err) {
+    container.innerHTML = '<div class="activity-empty">Não foi possível carregar a atividade.</div>';
   }
 }
 

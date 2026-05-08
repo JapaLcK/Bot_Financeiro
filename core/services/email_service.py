@@ -498,6 +498,55 @@ def send_insight_email(to: str, user_id: int | None = None) -> bool:
     )
 
 
+def send_new_login_alert(
+    to: str,
+    *,
+    ip: Optional[str] = None,
+    city: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> bool:
+    """E-mail de aviso 'novo login detectado em sua conta'.
+
+    Disparado quando o usuario faz login a partir de um IP nunca visto
+    (excluindo o primeiro login pos-cadastro). Sem dados sensiveis no corpo
+    alem da cidade aproximada e prefixo do UA.
+    """
+    safe_ip = (ip or "desconhecido").strip()
+    safe_city = (city or "Localização não identificada").strip()
+    safe_ua = (user_agent or "Dispositivo desconhecido").strip()
+    if len(safe_ua) > 180:
+        safe_ua = safe_ua[:180] + "…"
+
+    content = f"""
+      <p>Olá!</p>
+      <p>Detectamos um <strong>novo login</strong> na sua conta do <strong>PigBank AI</strong> a partir de um dispositivo ou local que ainda não tínhamos visto.</p>
+      <div class="highlight">
+        <p style="margin:0">
+          <strong>Local:</strong> {safe_city}<br/>
+          <strong>IP:</strong> {safe_ip}<br/>
+          <strong>Dispositivo:</strong> {safe_ua}
+        </p>
+      </div>
+      <p>Foi você? Pode ignorar este aviso — registramos para que você sempre saiba quando alguém entra na sua conta.</p>
+      <p class="warn"><strong>Não foi você?</strong> Acesse <a href="https://pigbankai.com">pigbankai.com</a>, troque sua senha imediatamente e ative a autenticação em 2 etapas (MFA) se ainda não usa.</p>
+    """
+    html = _base_html("Novo login detectado — PigBank AI", content)
+    text = (
+        "PigBank AI — Novo login detectado\n\n"
+        f"Local: {safe_city}\n"
+        f"IP: {safe_ip}\n"
+        f"Dispositivo: {safe_ua}\n\n"
+        "Foi você? Pode ignorar este aviso.\n"
+        "Não foi você? Troque sua senha imediatamente em https://pigbankai.com"
+    )
+    return send_email(
+        to=to,
+        subject="🔔 Novo login detectado na sua conta — PigBank AI",
+        html_body=html,
+        text_body=text,
+    )
+
+
 def send_password_reset_email(to: str, reset_url: str) -> bool:
     """Envia e-mail com link de recuperação de senha."""
     content = f"""
