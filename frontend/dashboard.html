@@ -955,7 +955,8 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
         <div class="form-row">
           <div class="field">
             <label class="modal-label" for="inv-asset-type">Tipo</label>
-            <select class="modal-inp cat-select" id="inv-asset-type" onchange="updateInvestmentTaxHint()">
+            <select class="modal-inp cat-select" id="inv-asset-type" onchange="updateInvestmentTaxHint()" required>
+              <option value="" disabled selected hidden>Selecione o tipo</option>
               <option value="CDB">CDB</option>
               <option value="LCI">LCI</option>
               <option value="LCA">LCA</option>
@@ -970,7 +971,8 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
           </div>
           <div class="field">
             <label class="modal-label" for="inv-period">Indexador</label>
-            <select class="modal-inp cat-select" id="inv-period" onchange="updateInvestmentRateHint()">
+            <select class="modal-inp cat-select" id="inv-period" onchange="updateInvestmentRateHint()" required>
+              <option value="" disabled selected hidden>Selecione o indexador</option>
               <option value="pct_cdi">% do CDI</option>
               <option value="cdi_spread">CDI + spread a.a.</option>
               <option value="ipca_spread">IPCA + spread a.a.</option>
@@ -986,7 +988,8 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
           </div>
           <div class="field">
             <label class="modal-label" for="inv-frequency">Pagamento de juros</label>
-            <select class="modal-inp cat-select" id="inv-frequency">
+            <select class="modal-inp cat-select" id="inv-frequency" required>
+              <option value="" disabled selected hidden>Selecione a frequência</option>
               <option value="maturity">Só no vencimento</option>
               <option value="monthly">Mensal</option>
               <option value="quarterly">Trimestral</option>
@@ -1702,11 +1705,11 @@ function updateInvestmentRateHint() {
 }
 
 // Limpa o form de "Novo ativo" sempre que o modal abrir nessa tab.
-// Mantem os defaults dos selects (CDB, % do CDI, Só no vencimento) por
-// serem os mais usados; zera inputs de texto/numero. Data de compra
-// volta a ser hoje (default util).
+// Inputs de texto/numero e selects voltam para "" (placeholder).
+// Data de compra fica preenchida com hoje (default util).
 function resetInvestmentCreateForm() {
-  ["inv-issuer","inv-name","inv-rate","inv-initial-amount",
+  ["inv-issuer","inv-name","inv-asset-type","inv-period",
+   "inv-rate","inv-frequency","inv-initial-amount",
    "inv-maturity-date","inv-note"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = "";
@@ -1717,7 +1720,6 @@ function resetInvestmentCreateForm() {
     const pad = n => String(n).padStart(2, "0");
     purchase.value = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
   }
-  if (typeof updateInvestmentRateHint === "function") updateInvestmentRateHint();
 }
 
 function rateToPayload(indexer, pct) {
