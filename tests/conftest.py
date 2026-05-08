@@ -18,21 +18,65 @@ def _init_schema():
 
 
 @pytest.fixture(autouse=True)
-def _block_outbound_emails(monkeypatch):
-    """Stub TODOS os envios de e-mail durante os testes.
+def _block_outbound_network(monkeypatch):
+    """Kill switch de rede para testes — bloqueia qualquer chamada externa.
 
-    Sem isso, register_auth_user e amigos disparam welcome/notifications
-    via Resend para enderecos fake (@t.com, @test.com), o que:
-      - polui o dashboard do Resend com 'Delivery Delayed' indefinidamente
-      - consome quota de envio
-      - deixa os testes lentos (HTTP para api.resend.com em cada chamada)
+    Sem isso, register_auth_user disparava welcome via Resend, o ai_router
+    podia chamar OpenAI, ipgeo batia em ipapi.co, etc. Cada execucao do
+    pytest gastava quota de APIs pagas e poluia dashboards de provedores.
 
-    Tests que QUEREM observar envios podem usar patch local mais especifico
-    (ex: tests/test_audit.py mocka send_new_login_alert para contar chamadas).
+    Cobre:
+      - send_email (Resend)
+      - requests.get/post/put/delete/request (sync HTTP — ipapi, WhatsApp Cloud, CDI)
+      - httpx.get/post/put/delete (sync) e httpx.AsyncClient.request (async — Pluggy, Google OAuth)
+      - OpenAI client (categorizacao, intent, greeting, media)
+
+    Tests que precisam observar/simular respostas devem usar patch local
+    com mock especifico (e.g. mock requests.get retornando objeto fake).
     """
-    def _noop_send_email(*args, **kwargs):
-        return True
-    monkeypatch.setattr("core.services.email_service.send_email", _noop_send_email)
+    # E-mail
+    monkeypatch.setattr("core.services.email_service.send_email", lambda *a, **kw: True)
+
+    # Geolocation kill switch (env var ja suportada em core/services/ipgeo.py)
+    monkeypatch.setenv("IPGEO_DISABLED", "1")
+
+    def _blocked_call(*args, **kwargs):
+        raise RuntimeError(
+            "Outbound HTTP blocked in tests. Mock the call locally if you "
+            "need to simulate the response."
+        )
+
+    # requests (sync)
+    monkeypatch.setattr("requests.get", _blocked_call)
+    monkeypatch.setattr("requests.post", _blocked_call)
+    monkeypatch.setattr("requests.put", _blocked_call)
+    monkeypatch.setattr("requests.delete", _blocked_call)
+    monkeypatch.setattr("requests.request", _blocked_call)
+
+    # httpx (sync)
+    monkeypatch.setattr("httpx.get", _blocked_call)
+    monkeypatch.setattr("httpx.post", _blocked_call)
+    monkeypatch.setattr("httpx.put", _blocked_call)
+    monkeypatch.setattr("httpx.delete", _blocked_call)
+
+    # httpx async client — qualquer .request bloqueia
+    import httpx as _httpx
+    async def _blocked_async(*args, **kwargs):
+        raise RuntimeError(
+            "Outbound HTTP (async) blocked in tests. Mock the call locally."
+        )
+    monkeypatch.setattr(_httpx.AsyncClient, "request", _blocked_async, raising=False)
+    monkeypatch.setattr(_httpx.AsyncClient, "get", _blocked_async, raising=False)
+    monkeypatch.setattr(_httpx.AsyncClient, "post", _blocked_async, raising=False)
+
+    # OpenAI — qualquer atributo do client levanta
+    class _FakeOpenAIClient:
+        def __getattr__(self, name):
+            raise RuntimeError(
+                f"OpenAI client blocked in tests (acessou .{name}). "
+                "Mock the call locally."
+            )
+    monkeypatch.setattr("openai.OpenAI", lambda *a, **kw: _FakeOpenAIClient())
 
 
 def _cleanup_user(user_id: int):
