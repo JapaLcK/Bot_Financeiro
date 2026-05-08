@@ -881,7 +881,16 @@ async def lifespan(app: FastAPI):
         print(f"ERROR: Database connection failed: {exc}", file=sys.stderr, flush=True)
         raise
 
-    # ── 2. Setup de tabelas em paralelo ───────────────────────────────────────
+    # ── 2. Schema completo (idempotente) ─────────────────────────────────────
+    # init_db() era chamado apenas pelo bot.py (Discord); se o bot falhasse ou
+    # subisse depois do dashboard, tabelas novas (auth_sessions, audit_events…)
+    # nao existiam quando a primeira request chegasse. Roda aqui para nao
+    # depender do bot estar saudavel.
+    from db import init_db
+    await _startup_required("init_db", asyncio.to_thread(init_db))
+    print("OK: Schema migrado", flush=True)
+
+    # ── 3. Setup de tabelas adicionais em paralelo ───────────────────────────
     await _startup_required(
         "setup de tabelas",
         asyncio.gather(
