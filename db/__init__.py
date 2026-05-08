@@ -226,16 +226,6 @@ from .privacy import (
     has_recent_export_request,
 )
 
-# ── Preview / Demo ───────────────────────────────────────────────────────────
-from .preview import (
-    PREVIEW_USER_ID,
-    PREVIEW_USER_EMAIL,
-    PREVIEW_USER_NAME,
-    is_preview_user,
-    ensure_preview_user,
-    reset_preview_user_data,
-)
-
 __all__ = [
     # connection
     "get_conn",
@@ -311,7 +301,4 @@ __all__ = [
     "auth_account_has_password", "email_has_password", "link_google_identity",
     "create_pending_google_signup", "get_pending_google_signup",
     "consume_pending_google_signup", "cleanup_expired_pending_signups",
-    # preview
-    "PREVIEW_USER_ID", "PREVIEW_USER_EMAIL", "PREVIEW_USER_NAME",
-    "is_preview_user", "ensure_preview_user", "reset_preview_user_data",
 ]
