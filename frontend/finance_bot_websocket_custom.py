@@ -2883,6 +2883,13 @@ async def serve_sw():
     resp.headers["Cache-Control"]          = "no-cache"
     return resp
 
+
+@app.get("/modals.js")
+async def serve_modals_js():
+    """Componente de modal estilizado (alertModal/confirmModal) usado em todas
+    as paginas no lugar dos dialogs nativos do browser."""
+    return FileResponse(HERE / "modals.js", media_type="application/javascript")
+
 # ─── Unsubscribe ─────────────────────────────────────────────────────────────
 
 import hashlib as _hashlib

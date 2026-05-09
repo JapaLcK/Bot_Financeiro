@@ -391,6 +391,7 @@ footer a:hover { color: var(--text); }
   }
 }
 </style>
+<script src="/modals.js"></script>
 </head>
 <body>
 
@@ -865,11 +866,11 @@ async function connectWhatsApp(e) {
     });
     const data = await readResponsePayload(res);
     if (!res.ok) {
-      alert(data.detail || 'Nao foi possivel gerar seu link do WhatsApp agora.');
+      await alertModal(data.detail || 'Não foi possível gerar seu link do WhatsApp agora.', { title: 'WhatsApp' });
       return false;
     }
     if (!data.whatsapp_link) {
-      alert('WhatsApp ainda nao configurado neste ambiente.');
+      await alertModal('WhatsApp ainda não configurado neste ambiente.', { title: 'WhatsApp' });
       return false;
     }
     const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
@@ -879,7 +880,7 @@ async function connectWhatsApp(e) {
       window.open(data.whatsapp_link, '_blank', 'noopener');
     }
   } catch (err) {
-    alert('Erro ao conectar o WhatsApp. Tente novamente.');
+    await alertModal('Erro ao conectar o WhatsApp. Tente novamente.', { title: 'WhatsApp' });
   }
 
   return false;

@@ -349,6 +349,7 @@ footer a:hover { color:var(--text); }
   .nav-links { width:100%; }
 }
 </style>
+<script src="/modals.js"></script>
 </head>
 <body>
 
@@ -615,14 +616,14 @@ async function connectWhatsAppFromHome(event) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.whatsapp_link) {
-      alert(data.detail || "Não foi possível gerar seu link do WhatsApp agora.");
+      await alertModal(data.detail || "Não foi possível gerar seu link do WhatsApp agora.", { title: "WhatsApp" });
       return;
     }
     const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
     if (isMobile) window.location.href = data.whatsapp_link;
     else          window.open(data.whatsapp_link, "_blank", "noopener");
   } catch {
-    alert("Erro ao conectar o WhatsApp. Tente novamente.");
+    await alertModal("Erro ao conectar o WhatsApp. Tente novamente.", { title: "WhatsApp" });
   }
 }
 

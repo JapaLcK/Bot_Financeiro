@@ -632,6 +632,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 @keyframes flashGrid { 0%,100%{opacity:1} 40%{opacity:.4} }
 .grid-flash { animation:flashGrid .4s ease; }
 </style>
+<script src="/modals.js"></script>
 </head>
 <body>
 
@@ -1372,11 +1373,11 @@ async function connectWhatsAppFromDashboard(event) {
     });
     const data = await readResponsePayload(res);
     if (!res.ok) {
-      alert(data.detail || "Nao foi possivel gerar seu link do WhatsApp agora.");
+      await alertModal(data.detail || "Não foi possível gerar seu link do WhatsApp agora.", { title: "WhatsApp" });
       return;
     }
     if (!data.whatsapp_link) {
-      alert("WhatsApp ainda nao configurado neste ambiente.");
+      await alertModal("WhatsApp ainda não configurado neste ambiente.", { title: "WhatsApp" });
       return;
     }
     const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
@@ -1386,7 +1387,7 @@ async function connectWhatsAppFromDashboard(event) {
       window.open(data.whatsapp_link, "_blank", "noopener");
     }
   } catch {
-    alert("Erro ao conectar o WhatsApp. Tente novamente.");
+    await alertModal("Erro ao conectar o WhatsApp. Tente novamente.", { title: "WhatsApp" });
   }
 }
 
@@ -1839,7 +1840,7 @@ async function createInvestment(event) {
   const interestPaymentFrequency = document.getElementById("inv-frequency").value;
   const taxProfile = taxProfileForAsset(assetType);
   if (!name || Number.isNaN(ratePct) || (ratePct <= 0 && indexer !== "selic_spread")) {
-    alert("Preencha o nome do ativo e a taxa.");
+    await alertModal("Preencha o nome do ativo e a taxa.", { title: "Campos obrigatórios" });
     return;
   }
 
@@ -1862,7 +1863,7 @@ async function createInvestment(event) {
       note
     })
   });
-  if (!resp.ok) { alert("Erro: " + await readApiError(resp)); return; }
+  if (!resp.ok) { await alertModal(await readApiError(resp), { title: "Erro" }); return; }
   document.getElementById("inv-name").value = "";
   document.getElementById("inv-note").value = "";
   document.getElementById("inv-initial-amount").value = "";
@@ -1921,7 +1922,7 @@ async function moveInvestment(event) {
   const name = document.getElementById("move-name").value;
   const kind = document.getElementById("move-kind").value;
   const amount = Number(document.getElementById("move-amount").value);
-  if (!name || !amount || amount <= 0) { alert("Selecione um investimento e informe o valor."); return; }
+  if (!name || !amount || amount <= 0) { await alertModal("Selecione um investimento e informe o valor.", { title: "Campos obrigatórios" }); return; }
 
   const body = { name, amount };
   if (kind === "deposit") {
@@ -1931,7 +1932,7 @@ async function moveInvestment(event) {
       const dateRaw = document.getElementById("move-purchase-date").value;
       if (rateRaw !== "") {
         const rate = Number(rateRaw);
-        if (!Number.isFinite(rate) || rate < 0) { alert("Taxa inválida."); return; }
+        if (!Number.isFinite(rate) || rate < 0) { await alertModal("Taxa inválida.", { title: "Taxa" }); return; }
         // Backend espera taxa em fração (ex.: 0.0685 para 6.85%).
         body.rate = rate / 100;
         body.period = inv.period;
@@ -1946,7 +1947,7 @@ async function moveInvestment(event) {
 	    headers: csrfHeaders({"Content-Type":"application/json"}),
 	    body: JSON.stringify(body)
 	  });
-	  if (!resp.ok) { alert("Erro: " + await readApiError(resp)); return; }
+	  if (!resp.ok) { await alertModal(await readApiError(resp), { title: "Erro" }); return; }
 	  const result = await resp.json();
 	  document.getElementById("move-amount").value = "";
 	  document.getElementById("move-rate").value = "";
@@ -1964,13 +1965,18 @@ async function moveInvestment(event) {
 	}
 
 async function deleteInvestment(name) {
-  if (!confirm(`Remover ${name}? O saldo precisa estar zerado.`)) return;
+  const ok = await confirmModal(`Remover ${name}? O saldo precisa estar zerado.`, {
+    title: "Excluir investimento",
+    confirmText: "Excluir",
+    destructive: true,
+  });
+  if (!ok) return;
   const resp = await fetch(`${API}/investments/${USER_ID}/${encodeURIComponent(name)}`, {
     method: "DELETE",
     credentials: "same-origin",
     headers: csrfHeaders()
   });
-  if (!resp.ok) { alert("Erro: " + await readApiError(resp)); return; }
+  if (!resp.ok) { await alertModal(await readApiError(resp), { title: "Erro" }); return; }
   await refreshDashboardAfterInvestment("✓ Investimento removido");
 }
 
@@ -2606,7 +2612,7 @@ function closeBudget() {
 async function saveBudget() {
   if (!bgtTarget) return;
   const val = parseFloat(document.getElementById("bgt-input").value);
-  if (!val || val <= 0) { alert("Digite um valor maior que zero."); return; }
+  if (!val || val <= 0) { await alertModal("Digite um valor maior que zero.", { title: "Valor inválido" }); return; }
   try {
     const r = await fetch(`${API}/budgets/${USER_ID}`, {
       method:"POST",
@@ -2616,7 +2622,7 @@ async function saveBudget() {
     });
     if (!r.ok) throw new Error(await r.text());
     closeBudget(); sendRefresh(); showToast("✓ Orçamento salvo");
-  } catch(err) { alert("Erro: " + err.message); }
+  } catch(err) { await alertModal(err.message, { title: "Erro" }); }
 }
 document.getElementById("bgt-overlay").addEventListener("click", e => {
   if (e.target === e.currentTarget) closeBudget();
@@ -2849,10 +2855,14 @@ async function confirmDeleteLaunch(launchId, descricao, valor) {
   if (!launchId) return;
   const valFmt = (typeof valor === "number") ? fmt(valor) : "";
   const desc   = (descricao || "").trim() || "este lançamento";
-  const ok = confirm(
-    `Apagar este lançamento?\n\n` +
+  const ok = await confirmModal(
     `${desc}${valFmt ? ` — ${valFmt}` : ""}\n\n` +
-    `O efeito no saldo (e em caixinhas/investimentos, se houver) será revertido. Essa ação não pode ser desfeita.`
+    `O efeito no saldo (e em caixinhas/investimentos, se houver) será revertido. Essa ação não pode ser desfeita.`,
+    {
+      title: "Apagar lançamento",
+      confirmText: "Apagar",
+      destructive: true,
+    },
   );
   if (!ok) return;
 
@@ -2870,7 +2880,7 @@ async function confirmDeleteLaunch(launchId, descricao, valor) {
     showLaunchSuccessToast("Lançamento apagado");
     sendRefresh();
   } catch (err) {
-    alert("Erro ao apagar: " + err.message);
+    await alertModal(err.message, { title: "Erro ao apagar" });
   } finally {
     deleteLaunchInFlight = false;
   }
@@ -3121,7 +3131,15 @@ document.getElementById("pocket-history-overlay").addEventListener("click", e =>
 
 // ─── Caixinha (excluir) ──────────────────────────────────────────────────────
 async function confirmDeletePocket(pocketName) {
-  if (!confirm(`Excluir a caixinha "${pocketName}"?\n\nA caixinha precisa estar com saldo zerado.`)) return;
+  const ok = await confirmModal(
+    `A caixinha "${pocketName}" precisa estar com saldo zerado.`,
+    {
+      title: "Excluir caixinha",
+      confirmText: "Excluir",
+      destructive: true,
+    },
+  );
+  if (!ok) return;
 
   try {
     const res = await fetch(`${API}/pockets/${USER_ID}/${encodeURIComponent(pocketName)}`, {
@@ -3135,7 +3153,7 @@ async function confirmDeletePocket(pocketName) {
     showLaunchSuccessToast(`✓ Caixinha "${data.name || pocketName}" removida`);
     sendRefresh();
   } catch (err) {
-    alert(err.message || "Erro ao excluir caixinha.");
+    await alertModal(err.message || "Erro ao excluir caixinha.", { title: "Erro" });
   }
 }
 
