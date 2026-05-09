@@ -197,13 +197,22 @@ def pocket_deposit_from_account(
 
 
 def delete_pocket(user_id: int, pocket_name: str):
-    """Exclui caixinha (só se saldo=0). Retorna (launch_id, canon_name)."""
+    """Exclui caixinha (so se saldo=0) e remove o historico relacionado.
+
+    Apaga todos os launches que referenciam esta caixinha por nome
+    (deposito_caixinha, saque_caixinha, criar_caixinha, delete_pocket
+    de eventuais re-criacoes anteriores). Sem isso, recriar uma caixinha
+    com o mesmo nome ressuscita o historico antigo (a query de historico
+    filtra por `alvo`, nao por pocket_id).
+
+    Saldo zero garante que os deposito/saque se cancelam — apagar nao
+    afeta o saldo da conta principal. Retorna (None, canon_name) — o
+    `launch_id` antigo de auditoria foi removido junto com o resto.
+    """
     ensure_user(user_id)
     pocket_name = (pocket_name or "").strip()
     if not pocket_name:
         raise ValueError("EMPTY_NAME")
-
-    criado_em = datetime.now(_tz())
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -220,21 +229,18 @@ def delete_pocket(user_id: int, pocket_name: str):
             if Decimal(str(p["balance"])) != Decimal("0"):
                 raise ValueError("POCKET_NOT_ZERO")
 
-            cur.execute("delete from pockets where id=%s", (pocket_id,))
-
-            efeitos = {
-                "delta_conta": 0.0, "delta_pocket": None, "delta_invest": None,
-                "create_pocket": None, "create_investment": None,
-                "delete_pocket": {"nome": canon, "balance": 0.0},
-                "delete_investment": None,
-            }
             cur.execute(
-                "insert into launches(user_id, tipo, valor, alvo, nota, criado_em, efeitos) "
-                "values (%s,%s,%s,%s,%s,%s,%s) returning id",
-                (user_id, "delete_pocket", Decimal("0"), canon, None, criado_em, Jsonb(efeitos)),
+                """
+                delete from launches
+                 where user_id = %s
+                   and lower(alvo) = lower(%s)
+                   and tipo in ('deposito_caixinha', 'saque_caixinha',
+                                'criar_caixinha', 'delete_pocket')
+                """,
+                (user_id, canon),
             )
-            launch_id = cur.fetchone()["id"]
+            cur.execute("delete from pockets where id=%s", (pocket_id,))
 
         conn.commit()
 
-    return launch_id, canon
+    return None, canon

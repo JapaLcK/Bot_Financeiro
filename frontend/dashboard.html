@@ -311,6 +311,8 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   padding:0;transition:all .15s var(--ease);flex-shrink:0;
 }
 .pocket-del:hover { background:rgba(248,113,113,.14);color:var(--red); }
+.pocket-del.is-blocked { opacity: .35; cursor: not-allowed; }
+.pocket-del.is-blocked:hover { background: transparent; color: var(--text-3); }
 
 /* ─── Aportes do mês card ──────────────────────────────────────────── */
 .aporte-summary {
@@ -3130,11 +3132,20 @@ document.getElementById("pocket-history-overlay").addEventListener("click", e =>
 });
 
 // ─── Caixinha (excluir) ──────────────────────────────────────────────────────
-async function confirmDeletePocket(pocketName) {
+async function confirmDeletePocket(pocketName, balance) {
+  const saldo = Math.abs(Number(balance) || 0);
+  if (saldo >= 0.005) {
+    await alertModal(
+      `Esta caixinha tem ${fmt(balance)} em saldo. Faça um saque para a conta principal antes de excluir.`,
+      { title: "Saldo não zerado" },
+    );
+    return;
+  }
+
   const ok = await confirmModal(
-    `A caixinha "${pocketName}" precisa estar com saldo zerado.`,
+    `O histórico de aportes e saques desta caixinha será apagado permanentemente. Esta ação não pode ser desfeita.`,
     {
-      title: "Excluir caixinha",
+      title: `Excluir caixinha "${pocketName}"?`,
       confirmText: "Excluir",
       destructive: true,
     },
@@ -3815,13 +3826,16 @@ function render(d) {
       ${!(d.pockets||[]).length?'<div class="empty">Nenhuma caixinha.</div>':
         d.pockets.map((p,i)=>{
           const safeName = String(p.name).replace(/\\/g,"\\\\").replace(/'/g,"\\'");
+          const blocked = Math.abs(Number(p.balance) || 0) >= 0.005;
+          const delClass = blocked ? "pocket-del is-blocked" : "pocket-del";
+          const delTitle = blocked ? "Zere o saldo antes de excluir" : "Excluir caixinha";
           return `<div class="row card-row-clickable pocket-row" onclick="openPocketHistory('${safeName}')" title="Ver histórico"><span class="lbl">
           ${esc(p.name)}
           ${p.description ? `<span style="display:block;font-size:.63rem;color:var(--text-3);margin-top:2px">${esc(p.description)}</span>` : ''}
         </span>
           <span class="pocket-right">
             <span class="val" data-num="pkt_${p.name}" data-val="${p.balance}">${fmt(p.balance)}</span>
-            <button class="pocket-del" type="button" onclick="event.stopPropagation();confirmDeletePocket('${safeName}')" title="Excluir caixinha" aria-label="Excluir caixinha">×</button>
+            <button class="${delClass}" type="button" onclick="event.stopPropagation();confirmDeletePocket('${safeName}', ${Number(p.balance) || 0})" title="${delTitle}" aria-label="Excluir caixinha">×</button>
           </span>
         </div>`;
         }).join("")}

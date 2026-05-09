@@ -6,6 +6,7 @@ from db import (
     list_launches,
     get_summary_by_period,
     create_pocket,
+    delete_pocket,
     pocket_deposit_from_account,
     pocket_withdraw_to_account,
     create_investment_db,
@@ -52,6 +53,58 @@ def test_caixinha_deposito_saque(user_id):
     _, bal_acc, bal_pocket, _ = pocket_withdraw_to_account(user_id, "viagem", 100, "teste")
     assert bal_acc == D("800")
     assert bal_pocket == D("200")
+
+
+def test_delete_pocket_apaga_historico(user_id):
+    """Apos deletar uma caixinha, recriar com mesmo nome nao deve trazer
+    o historico antigo (bug: query de historico filtra por `alvo`/nome).
+    """
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    create_pocket(user_id, "aportes")
+    pocket_deposit_from_account(user_id, "aportes", 200, "primeiro aporte")
+    pocket_withdraw_to_account(user_id, "aportes", 200, "saquei tudo")
+
+    # Conta os launches da caixinha antes do delete
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select count(*) as n from launches
+                where user_id = %s and lower(alvo) = lower(%s)
+                  and tipo in ('deposito_caixinha','saque_caixinha','criar_caixinha','delete_pocket')
+                """,
+                (user_id, "aportes"),
+            )
+            assert cur.fetchone()["n"] >= 3  # criar + deposito + saque
+
+    delete_pocket(user_id, "aportes")
+
+    # Apos delete, todos os launches da caixinha devem estar apagados
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select count(*) as n from launches
+                where user_id = %s and lower(alvo) = lower(%s)
+                  and tipo in ('deposito_caixinha','saque_caixinha','criar_caixinha','delete_pocket')
+                """,
+                (user_id, "aportes"),
+            )
+            assert cur.fetchone()["n"] == 0
+
+    # E recriar a caixinha com o mesmo nome resulta em pocket "limpa" (sem historico)
+    create_pocket(user_id, "aportes")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select tipo from launches
+                where user_id = %s and lower(alvo) = lower(%s)
+                  and tipo in ('deposito_caixinha','saque_caixinha')
+                """,
+                (user_id, "aportes"),
+            )
+            assert cur.fetchall() == []  # sem historico antigo
 
 
 def test_investimento_aporte_resgate(user_id):
