@@ -105,6 +105,8 @@ from db import (
     update_pluggy_open_finance_item_status,
     investment_deposit_from_account,
     investment_withdraw_to_account,
+    pocket_deposit_from_account,
+    pocket_withdraw_to_account,
     update_launch_category,
     update_launch_fields,
     delete_launch_and_rollback,
@@ -3223,6 +3225,11 @@ class PocketCreatePayload(BaseModel):
     description: str | None = None
 
 
+class PocketMovePayload(BaseModel):
+    amount: float
+    nota: str | None = None
+
+
 @app.post("/pockets/{user_id}")
 async def create_pocket_route(request: Request, user_id: int, payload: PocketCreatePayload):
     """Cria uma caixinha (pocket) com saldo zero."""
@@ -3275,6 +3282,70 @@ async def delete_pocket_route(request: Request, user_id: int, pocket_name: str):
 
     _invalidate_dashboard_current_cache(int(user_id))
     return {"ok": True, "launch_id": launch_id, "name": canon}
+
+
+def _pocket_move_error(exc: ValueError) -> HTTPException:
+    msg = str(exc)
+    mapping = {
+        "AMOUNT_INVALID": "O valor precisa ser maior que zero.",
+        "INSUFFICIENT_ACCOUNT": "Saldo da conta principal não cobre esse valor.",
+        "INSUFFICIENT_POCKET": "A caixinha não tem esse valor disponível.",
+    }
+    return HTTPException(status_code=400, detail=mapping.get(msg, msg))
+
+
+@app.post("/pockets/{user_id}/{pocket_name:path}/deposit")
+async def pocket_deposit_route(request: Request, user_id: int, pocket_name: str, payload: PocketMovePayload):
+    """Conta principal → caixinha."""
+    _authorize_dashboard_access(request, user_id)
+    name = urllib.parse.unquote(pocket_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nome da caixinha é obrigatório.")
+    nota = (payload.nota or "").strip() or None
+    try:
+        launch_id, new_acc, new_pocket, canon = await asyncio.to_thread(
+            pocket_deposit_from_account, int(user_id), name, payload.amount, nota,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Caixinha não encontrada.") from exc
+    except ValueError as exc:
+        raise _pocket_move_error(exc) from exc
+
+    _invalidate_dashboard_current_cache(int(user_id))
+    return json.loads(jdump({
+        "ok": True,
+        "launch_id": launch_id,
+        "name": canon,
+        "account_balance": new_acc,
+        "pocket_balance": new_pocket,
+    }))
+
+
+@app.post("/pockets/{user_id}/{pocket_name:path}/withdraw")
+async def pocket_withdraw_route(request: Request, user_id: int, pocket_name: str, payload: PocketMovePayload):
+    """Caixinha → conta principal."""
+    _authorize_dashboard_access(request, user_id)
+    name = urllib.parse.unquote(pocket_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nome da caixinha é obrigatório.")
+    nota = (payload.nota or "").strip() or None
+    try:
+        launch_id, new_acc, new_pocket, canon = await asyncio.to_thread(
+            pocket_withdraw_to_account, int(user_id), name, payload.amount, nota,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Caixinha não encontrada.") from exc
+    except ValueError as exc:
+        raise _pocket_move_error(exc) from exc
+
+    _invalidate_dashboard_current_cache(int(user_id))
+    return json.loads(jdump({
+        "ok": True,
+        "launch_id": launch_id,
+        "name": canon,
+        "account_balance": new_acc,
+        "pocket_balance": new_pocket,
+    }))
 
 
 @app.get("/pockets/{user_id}/{pocket_name:path}/history")

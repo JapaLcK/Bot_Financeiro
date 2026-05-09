@@ -379,6 +379,41 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   text-align:center;color:var(--text-2);font-size:.82rem;padding:24px 12px;
 }
 .pkt-hist-error { color:#fecaca; }
+
+.pkt-move-actions { display:flex;gap:8px;margin:10px 0 14px; }
+.pkt-move-btn {
+  flex:1;padding:9px 12px;border-radius:10px;border:1px solid var(--border);
+  background:rgba(255,255,255,.04);color:var(--ink);font-size:.84rem;font-weight:650;
+  cursor:pointer;transition:background .15s var(--ease),border-color .15s var(--ease),color .15s var(--ease);
+}
+.pkt-move-btn:hover { background:rgba(255,255,255,.08); }
+.pkt-move-btn.dep:hover { color:var(--green);border-color:rgba(74,222,128,.35); }
+.pkt-move-btn.wd:hover  { color:var(--red);border-color:rgba(248,113,113,.35); }
+.pkt-move-form { display:none;flex-direction:column;gap:8px;
+  background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:12px;
+  padding:14px;margin-bottom:14px;
+}
+.pkt-move-form.show { display:flex; }
+.pkt-move-form-title { font-size:.78rem;font-weight:660;color:var(--text-2);
+  text-transform:uppercase;letter-spacing:.06em;
+}
+.pkt-move-form-title.dep { color:var(--green); }
+.pkt-move-form-title.wd  { color:var(--red); }
+.pkt-move-form input {
+  background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:8px;
+  padding:9px 12px;color:var(--ink);font-size:.92rem;font-family:inherit;
+}
+.pkt-move-form input:focus { outline:none;border-color:var(--accent); }
+.pkt-move-form-acts { display:flex;gap:8px;justify-content:flex-end; }
+.pkt-move-form-acts button {
+  padding:8px 16px;border-radius:9px;border:1px solid var(--border);
+  background:rgba(255,255,255,.04);color:var(--text-2);font-size:.82rem;font-weight:650;
+  cursor:pointer;
+}
+.pkt-move-form-acts .pkt-move-submit { color:#fff;border-color:transparent; }
+.pkt-move-form-acts .pkt-move-submit.dep { background:linear-gradient(135deg,#16a34a,#15803d); }
+.pkt-move-form-acts .pkt-move-submit.wd  { background:linear-gradient(135deg,#dc2626,#b91c1c); }
+.pkt-move-form-acts .pkt-move-submit:disabled { opacity:.5;cursor:not-allowed; }
 .tag.interno              { background:rgba(167,139,250,.1);  color:#a78bfa;      border:1px solid rgba(167,139,250,.22); }
 .tag.x                    { background:rgba(255,255,255,.06);color:var(--text-2);border:1px solid var(--div); }
 
@@ -1072,6 +1107,21 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
       <div class="it dep"><span class="k">Depósitos</span><span class="v" id="pkt-hist-deposits">—</span></div>
       <div class="it wd"><span class="k">Saques</span><span class="v" id="pkt-hist-withdrawals">—</span></div>
     </div>
+
+    <div class="pkt-move-actions" id="pkt-move-actions" style="display:none">
+      <button class="pkt-move-btn dep" type="button" onclick="openPocketMove('deposit')">+ Depositar</button>
+      <button class="pkt-move-btn wd"  type="button" onclick="openPocketMove('withdraw')">− Sacar</button>
+    </div>
+
+    <form class="pkt-move-form" id="pkt-move-form" onsubmit="submitPocketMove(event)">
+      <span class="pkt-move-form-title" id="pkt-move-form-title">Depositar</span>
+      <input type="number" id="pkt-move-amount" inputmode="decimal" step="0.01" min="0.01" placeholder="Valor (R$)" required />
+      <input type="text" id="pkt-move-nota" maxlength="120" placeholder="Nota (opcional)" />
+      <div class="pkt-move-form-acts">
+        <button type="button" onclick="closePocketMove()">Cancelar</button>
+        <button type="submit" class="pkt-move-submit" id="pkt-move-submit">Confirmar</button>
+      </div>
+    </form>
 
     <div id="pkt-hist-body">
       <div class="pkt-hist-loading">Carregando…</div>
@@ -3063,7 +3113,74 @@ const PKT_HIST_LABELS = {
 
 function closePocketHistory() {
   document.getElementById("pocket-history-overlay").classList.remove("open");
+  closePocketMove();
+  _currentPocketName = null;
 }
+
+function openPocketMove(mode) {
+  if (!_currentPocketName) return;
+  _pocketMoveMode = mode;
+  const form = document.getElementById("pkt-move-form");
+  const title = document.getElementById("pkt-move-form-title");
+  const submitBtn = document.getElementById("pkt-move-submit");
+  const isDep = mode === "deposit";
+  title.textContent = isDep ? `Depositar em "${_currentPocketName}"` : `Sacar de "${_currentPocketName}"`;
+  title.className = "pkt-move-form-title " + (isDep ? "dep" : "wd");
+  submitBtn.textContent = isDep ? "Depositar" : "Sacar";
+  submitBtn.className = "pkt-move-submit " + (isDep ? "dep" : "wd");
+  form.classList.add("show");
+  document.getElementById("pkt-move-amount").value = "";
+  document.getElementById("pkt-move-nota").value = "";
+  setTimeout(() => document.getElementById("pkt-move-amount").focus(), 50);
+}
+
+function closePocketMove() {
+  const form = document.getElementById("pkt-move-form");
+  if (form) form.classList.remove("show");
+  _pocketMoveMode = null;
+}
+
+async function submitPocketMove(event) {
+  event.preventDefault();
+  if (!_currentPocketName || !_pocketMoveMode) return;
+  const amount = parseFloat(document.getElementById("pkt-move-amount").value);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    await alertModal("Digite um valor maior que zero.", { title: "Valor inválido" });
+    return;
+  }
+  const nota = document.getElementById("pkt-move-nota").value.trim() || null;
+  const submitBtn = document.getElementById("pkt-move-submit");
+  const original = submitBtn.textContent;
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Enviando…";
+  try {
+    const path = _pocketMoveMode === "deposit" ? "deposit" : "withdraw";
+    const res = await fetch(
+      `${API}/pockets/${USER_ID}/${encodeURIComponent(_currentPocketName)}/${path}`,
+      {
+        method: "POST",
+        credentials: "same-origin",
+        headers: csrfHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ amount, nota }),
+      },
+    );
+    const data = await readResponsePayload(res);
+    if (!res.ok) throw new Error(data.detail || "Erro ao movimentar caixinha.");
+    showLaunchSuccessToast(_pocketMoveMode === "deposit" ? "✓ Depósito feito" : "✓ Saque feito");
+    closePocketMove();
+    sendRefresh();
+    // Recarrega o histórico no mesmo modal pra refletir o novo movimento
+    openPocketHistory(_currentPocketName || data.name);
+  } catch (err) {
+    await alertModal(err.message || "Erro ao movimentar caixinha.", { title: "Erro" });
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = original;
+  }
+}
+
+let _currentPocketName = null;
+let _pocketMoveMode = null;
 
 async function openPocketHistory(pocketName) {
   const overlay  = document.getElementById("pocket-history-overlay");
@@ -3071,10 +3188,14 @@ async function openPocketHistory(pocketName) {
   const subEl    = document.getElementById("pkt-hist-sub");
   const sumEl    = document.getElementById("pkt-hist-summary");
   const bodyEl   = document.getElementById("pkt-hist-body");
+  const actionsEl = document.getElementById("pkt-move-actions");
 
+  _currentPocketName = pocketName;
+  closePocketMove();
   titleEl.textContent = `Histórico — ${pocketName}`;
   subEl.textContent   = "Depósitos e saques desta caixinha.";
   sumEl.style.display = "none";
+  if (actionsEl) actionsEl.style.display = "none";
   bodyEl.innerHTML    = `<div class="pkt-hist-loading">Carregando…</div>`;
   overlay.classList.add("open");
 
@@ -3100,6 +3221,8 @@ async function openPocketHistory(pocketName) {
     document.getElementById("pkt-hist-deposits").textContent     = fmt(t.deposits || 0);
     document.getElementById("pkt-hist-withdrawals").textContent  = fmt(t.withdrawals || 0);
     sumEl.style.display = "grid";
+    const actionsEl = document.getElementById("pkt-move-actions");
+    if (actionsEl) actionsEl.style.display = "flex";
 
     const items = data.history || [];
     if (!items.length) {
