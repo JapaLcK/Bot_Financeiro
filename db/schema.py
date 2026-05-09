@@ -765,6 +765,20 @@ def init_db():
           on auth_sessions (user_id, revoked_at, last_seen_at desc)
         """,
 
+        # ─── Alertas de orcamento ja enviados ───────────────────────────────────
+        # Dedup: cada (user, categoria, mes, threshold) so dispara uma vez.
+        # Helper em core/budget_alerts.py.
+        """
+        create table if not exists budget_alert_sent (
+          user_id   bigint not null references users(id) on delete cascade,
+          categoria text not null,
+          ym        text not null,            -- 'YYYY-MM' do criado_em do gasto
+          threshold int  not null,            -- 80, 100, 120
+          sent_at   timestamptz not null default now(),
+          primary key (user_id, categoria, ym, threshold)
+        )
+        """,
+
         # ─── Audit log (forense focado no usuario) ──────────────────────────────
         # Distinto de system_event_logs (operacional). Cobre acoes sensiveis:
         # senha, email, MFA, Open Finance, login de IP novo. Helper em core/audit.py.

@@ -272,12 +272,29 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> 
             pass
 
     emoji = "💸" if tipo == "despesa" else "💰"
-    return (
+    resposta = (
         f"{emoji} **{tipo.capitalize()} registrada**: {fmt_brl(valor)}\n"
         f"🏷️ Categoria: {categoria}\n"
         f"🏦 Saldo: {fmt_brl(float(new_balance))}\n"
         f"ID: #{user_seq}"
     )
+
+    # Alerta de orcamento (só despesas com categoria nao-interna).
+    # Anexa a confirmacao se o gasto cruzou 80%/100%/120% do orcamento mensal
+    # (uma vez por threshold por mes por categoria — dedup em budget_alert_sent).
+    if tipo == "despesa" and not is_int and categoria:
+        try:
+            from datetime import datetime
+            from core.budget_alerts import evaluate_after_expense, format_alert_text
+            when = criado_em if isinstance(criado_em, datetime) else datetime.now()
+            alert = evaluate_after_expense(user_id, categoria, valor, when)
+            if alert:
+                resposta += format_alert_text(alert)
+        except Exception:
+            # Falha do alerta nunca pode quebrar o registro do gasto.
+            pass
+
+    return resposta
 
 
 # ---------------------------------------------------------------------------
