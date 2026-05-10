@@ -54,7 +54,8 @@ def append_message(
             ),
         )
         row = cur.fetchone()
-        return int(row[0])
+        conn.commit()
+        return int(row["id"])
 
 
 def get_recent_messages(user_id: int, limit: int = DEFAULT_CONTEXT_WINDOW) -> list[dict[str, Any]]:
@@ -65,22 +66,28 @@ def get_recent_messages(user_id: int, limit: int = DEFAULT_CONTEXT_WINDOW) -> li
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            select role, content, tool_calls, tool_call_id, tool_name, created_at
+            select id, role, content, tool_calls, tool_call_id, tool_name, created_at
             from (
-                select role, content, tool_calls, tool_call_id, tool_name, created_at
+                select id, role, content, tool_calls, tool_call_id, tool_name, created_at
                 from ai_messages
                 where user_id = %s
                 order by created_at desc, id desc
                 limit %s
             ) recent
-            order by created_at asc, role asc
+            order by created_at asc, id asc
             """,
             (int(user_id), int(limit)),
         )
-        rows = cur.fetchall()
+        rows = cur.fetchall() or []
 
     out: list[dict[str, Any]] = []
-    for role, content, tool_calls, tool_call_id, tool_name, _created_at in rows:
+    for r in rows:
+        role = r["role"]
+        content = r["content"]
+        tool_calls = r["tool_calls"]
+        tool_call_id = r["tool_call_id"]
+        tool_name = r["tool_name"]
+
         msg: dict[str, Any] = {"role": role}
         if content is not None:
             msg["content"] = content
@@ -120,6 +127,7 @@ def set_pending_action(
             """,
             (int(user_id), tool_name, json.dumps(tool_args), summary),
         )
+        conn.commit()
 
 
 def get_pending_action(user_id: int) -> Optional[dict[str, Any]]:
@@ -141,7 +149,10 @@ def get_pending_action(user_id: int) -> Optional[dict[str, Any]]:
         if not row:
             return None
 
-        tool_name, tool_args, summary, created_at = row
+        tool_name = row["tool_name"]
+        tool_args = row["tool_args"]
+        summary = row["summary"]
+        created_at = row["created_at"]
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=timezone.utc)
         if created_at < cutoff:
@@ -149,6 +160,7 @@ def get_pending_action(user_id: int) -> Optional[dict[str, Any]]:
                 "delete from ai_pending_actions where user_id = %s",
                 (int(user_id),),
             )
+            conn.commit()
             return None
 
     return {
@@ -165,6 +177,7 @@ def clear_pending_action(user_id: int) -> None:
             "delete from ai_pending_actions where user_id = %s",
             (int(user_id),),
         )
+        conn.commit()
 
 
 # ─── Rate limit mensal ──────────────────────────────────────────────────────
@@ -193,7 +206,8 @@ def get_usage_this_month(user_id: int) -> int:
         if not row:
             return 0
 
-        used, reset_at = row
+        used = row["ai_messages_this_month"]
+        reset_at = row["ai_month_reset_at"]
         if reset_at is None or reset_at < month_start:
             cur.execute(
                 """
@@ -204,6 +218,7 @@ def get_usage_this_month(user_id: int) -> int:
                 """,
                 (month_start, int(user_id)),
             )
+            conn.commit()
             return 0
         return int(used or 0)
 
@@ -233,4 +248,5 @@ def increment_usage(user_id: int) -> int:
             (month_start, month_start, month_start, int(user_id)),
         )
         row = cur.fetchone()
-        return int(row[0]) if row else 0
+        conn.commit()
+        return int(row["ai_messages_this_month"]) if row else 0
