@@ -2696,6 +2696,29 @@ async def billing_webhook(request: Request):
             return get_user_by_stripe_customer(cid)
         return None
 
+    def _subscription_period_end(sub):
+        # API >= 2025-09 movido pra subscription.items.data[].current_period_end.
+        ts = sub.get("current_period_end")
+        if ts is None:
+            items = (sub.get("items") or {}).get("data") or []
+            if items:
+                ts = items[0].get("current_period_end")
+        if ts is None:
+            return None
+        return datetime.fromtimestamp(ts, tz=timezone.utc)
+
+    def _invoice_subscription_id(invoice) -> str | None:
+        sub_id = invoice.get("subscription")
+        if sub_id:
+            return sub_id
+        # API >= 2025-09 movido pra invoice.parent.subscription_details.subscription.
+        parent = invoice.get("parent") or {}
+        details = parent.get("subscription_details") or {}
+        ref = details.get("subscription")
+        if isinstance(ref, dict):
+            return ref.get("id")
+        return ref
+
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         user_id = _resolve_user(session)
@@ -2704,15 +2727,19 @@ async def billing_webhook(request: Request):
         # Promover ja agora pra user nao ficar Free durante o trial.
         if user_id and sub_id:
             sub = stripe.Subscription.retrieve(sub_id)
-            expires_dt = datetime.fromtimestamp(sub["current_period_end"], tz=timezone.utc)
+            expires_dt = _subscription_period_end(sub)
             update_user_plan(user_id, "pro", expires_dt)
             await log_system_event(
                 "info",
                 "billing_checkout_completed",
-                f"Checkout concluido; plano pro ate {expires_dt.date()}.",
+                f"Checkout concluido; plano pro ate {expires_dt.date() if expires_dt else 'sem data'}.",
                 source="billing",
                 user_id=user_id,
-                details={"plan": "pro", "expires_at": expires_dt.isoformat(), "status": sub.get("status")},
+                details={
+                    "plan": "pro",
+                    "expires_at": expires_dt.isoformat() if expires_dt else None,
+                    "status": sub.get("status"),
+                },
             )
         elif user_id:
             await log_system_event(
@@ -2726,19 +2753,19 @@ async def billing_webhook(request: Request):
     elif event["type"] in ("invoice.paid", "invoice.payment_succeeded"):
         invoice  = event["data"]["object"]
         user_id  = _resolve_user(invoice)
-        sub_id   = invoice.get("subscription")
+        sub_id   = _invoice_subscription_id(invoice)
         if user_id and sub_id:
             sub = stripe.Subscription.retrieve(sub_id)
-            expires_dt = datetime.fromtimestamp(sub["current_period_end"], tz=timezone.utc)
+            expires_dt = _subscription_period_end(sub)
             update_user_plan(user_id, "pro", expires_dt)
-            print(f"[billing] user {user_id} → pro até {expires_dt.date()}")
+            print(f"[billing] user {user_id} → pro até {expires_dt.date() if expires_dt else 'sem data'}")
             await log_system_event(
                 "info",
                 "billing_plan_updated",
                 "Plano do usuario atualizado para pro.",
                 source="billing",
                 user_id=user_id,
-                details={"plan": "pro", "expires_at": expires_dt.isoformat()},
+                details={"plan": "pro", "expires_at": expires_dt.isoformat() if expires_dt else None},
             )
 
     elif event["type"] in ("customer.subscription.deleted", "invoice.payment_failed"):
