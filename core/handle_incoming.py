@@ -426,6 +426,14 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         if billing_reply is not None:
             return [OutgoingMessage(text=billing_reply)]
 
+        # Chat IA (Pro v1 Fase 2): roteia pra IA se houver pending action
+        # ou se a msg comecar com 'pergunta', 'piggy', 'ia'. Senao retorna None
+        # e o fluxo segue normal pelo intent classifier.
+        from core.services.ai_chat_commands import handle_ai_chat_command
+        ai_reply = handle_ai_chat_command(uid, text, platform=platform)
+        if ai_reply is not None:
+            return [OutgoingMessage(text=ai_reply)]
+
         intent_result = classify(text, user_id=uid)
 
         # ------------------------------------------------------------------
