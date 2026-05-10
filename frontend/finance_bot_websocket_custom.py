@@ -2662,7 +2662,7 @@ async def billing_webhook(request: Request):
     import stripe
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import update_user_plan, get_user_by_stripe_customer
+    from db import update_user_plan, get_user_by_stripe_customer, set_payment_status
 
     stripe.api_key = STRIPE_SECRET_KEY
     payload    = await request.body()
@@ -2741,7 +2741,9 @@ async def billing_webhook(request: Request):
         if user_id and sub_id:
             sub = stripe.Subscription.retrieve(sub_id)
             expires_dt = _subscription_period_end(sub)
+            sub_status = _g(sub, "status") or "trialing"
             update_user_plan(user_id, "pro", expires_dt)
+            set_payment_status(user_id, sub_status)
             await log_system_event(
                 "info",
                 "billing_checkout_completed",
@@ -2751,7 +2753,7 @@ async def billing_webhook(request: Request):
                 details={
                     "plan": "pro",
                     "expires_at": expires_dt.isoformat() if expires_dt else None,
-                    "status": _g(sub, "status"),
+                    "status": sub_status,
                 },
             )
         elif user_id:
@@ -2770,7 +2772,9 @@ async def billing_webhook(request: Request):
         if user_id and sub_id:
             sub = stripe.Subscription.retrieve(sub_id)
             expires_dt = _subscription_period_end(sub)
+            sub_status = _g(sub, "status") or "active"
             update_user_plan(user_id, "pro", expires_dt)
+            set_payment_status(user_id, sub_status)
             print(f"[billing] user {user_id} → pro até {expires_dt.date() if expires_dt else 'sem data'}")
             await log_system_event(
                 "info",
@@ -2778,19 +2782,36 @@ async def billing_webhook(request: Request):
                 "Plano do usuario atualizado para pro.",
                 source="billing",
                 user_id=user_id,
-                details={"plan": "pro", "expires_at": expires_dt.isoformat() if expires_dt else None},
+                details={"plan": "pro", "expires_at": expires_dt.isoformat() if expires_dt else None, "status": sub_status},
             )
 
-    elif event["type"] in ("customer.subscription.deleted", "invoice.payment_failed"):
+    elif event["type"] == "invoice.payment_failed":
+        # Stripe vai retentar (smart retries). NAO movemos pra free aqui;
+        # so marca past_due. O downgrade definitivo acontece em
+        # customer.subscription.deleted quando a sub for de fato cancelada.
+        invoice = event["data"]["object"]
+        user_id = _resolve_user(invoice)
+        if user_id:
+            set_payment_status(user_id, "past_due")
+            await log_system_event(
+                "warning",
+                "billing_payment_failed",
+                "Falha de pagamento; assinatura past_due (Stripe vai retentar).",
+                source="billing",
+                user_id=user_id,
+            )
+
+    elif event["type"] == "customer.subscription.deleted":
         obj     = event["data"]["object"]
         user_id = _resolve_user(obj)
         if user_id:
             update_user_plan(user_id, "free", None)
-            print(f"[billing] user {user_id} → free (cancelamento/falha)")
+            set_payment_status(user_id, "canceled")
+            print(f"[billing] user {user_id} → free (cancelado)")
             await log_system_event(
                 "warning",
-                "billing_payment_failed",
-                "Assinatura movida para free por falha de pagamento ou cancelamento.",
+                "billing_subscription_canceled",
+                "Assinatura cancelada; usuario voltou para free.",
                 source="billing",
                 user_id=user_id,
             )
