@@ -2715,6 +2715,47 @@ async def billing_portal(user_id: int = Depends(_get_current_user)):
     return {"portal_url": portal.url}
 
 
+@app.get("/conta")
+async def conta_redirect(request: Request):
+    """
+    Atalho público (GET) usado em invoices, recibos e emails do Stripe:
+    `pigbankai.com/conta` → leva o usuário direto para o ponto certo.
+
+    - Não autenticado → landing com flag `login_required=conta`.
+    - Autenticado sem assinatura ativa → página de planos.
+    - Autenticado com `stripe_customer_id` → Stripe Customer Portal.
+    """
+    token = _get_auth_token_from_request(request, None)
+    payload = _decode_jwt(token) if token else None
+    if not payload or payload.get("type") != "auth":
+        return RedirectResponse(url=_dashboard_url("/?login_required=conta"), status_code=302)
+
+    user_id = int(payload["sub"])
+    jti = payload.get("jti")
+    if jti:
+        session = await asyncio.to_thread(get_active_session, jti)
+        if not session or int(session.get("user_id") or 0) != user_id:
+            return RedirectResponse(url=_dashboard_url("/?login_required=conta"), status_code=302)
+
+    if not STRIPE_SECRET_KEY:
+        return RedirectResponse(url=_dashboard_url("/precos"), status_code=302)
+
+    import stripe
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import get_auth_user
+
+    stripe.api_key = STRIPE_SECRET_KEY
+    user = get_auth_user(user_id)
+    if not user or not user.get("stripe_customer_id"):
+        return RedirectResponse(url=_dashboard_url("/precos"), status_code=302)
+
+    portal = stripe.billing_portal.Session.create(
+        customer=user["stripe_customer_id"],
+        return_url=f"{DASHBOARD_URL}/settings",
+    )
+    return RedirectResponse(url=portal.url, status_code=302)
+
+
 # ─── Static file routes ──────────────────────────────────────────────────────
 
 @app.get("/d/{code}")
