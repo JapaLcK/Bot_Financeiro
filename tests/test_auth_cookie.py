@@ -67,7 +67,9 @@ def test_login_sets_auth_token_cookie(monkeypatch):
     assert "dashboard_token=" in set_cookie
     assert "HttpOnly" in set_cookie
     assert "Secure" in set_cookie
-    assert "SameSite=strict" in set_cookie
+    # auth_token e dashboard_token usam SameSite=Lax (não Strict) pra permitir
+    # links externos do bot/email abrirem autenticados; csrf_token segue Strict.
+    assert "SameSite=lax" in set_cookie
     assert "Max-Age=86400" in set_cookie
     assert "?token=" not in response.json()["dashboard_url"]
 
