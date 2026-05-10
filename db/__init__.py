@@ -228,6 +228,18 @@ from .mfa import (
     mark_mfa_onboarding_shown,
 )
 
+# ── Chat IA (Pro v1 Fase 2 Bloco A) ──────────────────────────────────────────
+from .ai_chat import (
+    append_message as ai_append_message,
+    get_recent_messages as ai_get_recent_messages,
+    set_pending_action as ai_set_pending_action,
+    get_pending_action as ai_get_pending_action,
+    clear_pending_action as ai_clear_pending_action,
+    get_usage_this_month as ai_get_usage_this_month,
+    increment_usage as ai_increment_usage,
+    DEFAULT_CONTEXT_WINDOW as AI_DEFAULT_CONTEXT_WINDOW,
+)
+
 # ── Privacidade / Retenção ───────────────────────────────────────────────────
 from .privacy import (
     ensure_account_deletion_columns,
@@ -324,4 +336,9 @@ __all__ = [
     "disable_mfa", "mfa_create_login_challenge", "mfa_consume_login_challenge",
     "mfa_cleanup_expired_challenges",
     "should_show_mfa_onboarding", "mark_mfa_onboarding_shown",
+    # ai chat
+    "ai_append_message", "ai_get_recent_messages",
+    "ai_set_pending_action", "ai_get_pending_action", "ai_clear_pending_action",
+    "ai_get_usage_this_month", "ai_increment_usage",
+    "AI_DEFAULT_CONTEXT_WINDOW",
 ]

@@ -842,6 +842,53 @@ def init_db():
         create index if not exists idx_auth_login_events_user_success
           on auth_login_events (user_id, success, created_at desc)
         """,
+
+        # ─── Chat IA (Pro v1 Fase 2 — Bloco A) ──────────────────────────────────
+        # Schema flat (sem multi-thread): cada user tem uma única conversa
+        # linear. Contexto da IA = sliding window das últimas N mensagens.
+        # role: 'user' | 'assistant' | 'tool'
+        # tool_calls/tool_call_id seguem o protocolo da OpenAI function calling.
+        """
+        create table if not exists ai_messages (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          role text not null,
+          content text,
+          tool_calls jsonb,
+          tool_call_id text,
+          tool_name text,
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_ai_messages_user_created
+          on ai_messages (user_id, created_at desc)
+        """,
+
+        # Pending action: write proposto pela IA aguardando confirmação do user.
+        # Quando o user manda "sim" / "confirma", a ação é executada e a linha
+        # é apagada. Quando manda "não" / "cancela", também é apagada sem
+        # executar. Expira automaticamente após 10min (limpeza lazy).
+        """
+        create table if not exists ai_pending_actions (
+          user_id bigint primary key references users(id) on delete cascade,
+          tool_name text not null,
+          tool_args jsonb not null,
+          summary text not null,
+          created_at timestamptz not null default now()
+        )
+        """,
+
+        # Rate limit mensal de mensagens IA por user.
+        # Reset lazy: quando incrementa, checa se mudou o mês desde reset_at.
+        """
+        alter table auth_accounts
+          add column if not exists ai_messages_this_month integer not null default 0
+        """,
+        """
+        alter table auth_accounts
+          add column if not exists ai_month_reset_at date
+        """,
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks
