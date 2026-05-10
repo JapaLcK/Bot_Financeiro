@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 EMAIL_FROM          = os.getenv("EMAIL_FROM",          "Piggy do PigBank <oi@pigbankai.com>")
 EMAIL_FROM_PIGGY    = os.getenv("EMAIL_FROM_PIGGY",    "Piggy do PigBank <oi@pigbankai.com>")
-SUPPORT_EMAIL       = os.getenv("SUPPORT_EMAIL",       "contato@pigbankai.com")
+SUPPORT_EMAIL       = os.getenv("SUPPORT_EMAIL",       "suporte@pigbankai.com")
 
 
 def _get_resend():
@@ -743,7 +743,11 @@ def send_pro_welcome_email(to: str, trial_end_at, dashboard_url: str = "") -> bo
         f"Abra o dashboard: {dash}/app\n"
         f"Pra cancelar antes: mande 'cancelar plano' no bot ou acesse {dash}/conta"
     )
-    return send_email(to=to, subject="🐷 Tá dentro do PigBank+!", html_body=html, text_body=text)
+    return send_email(
+        to=to, subject="🐷 Tá dentro do PigBank+!",
+        html_body=html, text_body=text,
+        headers={"Reply-To": SUPPORT_EMAIL},
+    )
 
 
 def send_trial_ending_email(to: str, trial_end_at, dashboard_url: str = "") -> bool:
@@ -768,7 +772,11 @@ def send_trial_ending_email(to: str, trial_end_at, dashboard_url: str = "") -> b
         f"Pra cancelar sem ser cobrado: mande 'cancelar plano' no bot até {trial_end}.\n\n"
         f"Gerenciar: {dash}/conta"
     )
-    return send_email(to=to, subject="🐷 Seu trial PigBank+ termina em 3 dias", html_body=html, text_body=text)
+    return send_email(
+        to=to, subject="🐷 Seu trial PigBank+ termina em 3 dias",
+        html_body=html, text_body=text,
+        headers={"Reply-To": SUPPORT_EMAIL},
+    )
 
 
 def send_pro_charged_email(to: str, amount_brl: float, next_charge_at, dashboard_url: str = "") -> bool:
@@ -793,7 +801,11 @@ def send_pro_charged_email(to: str, amount_brl: float, next_charge_at, dashboard
         f"Próxima cobrança: {proxima}\n\n"
         f"Histórico de pagamentos: {dash}/conta"
     )
-    return send_email(to=to, subject=f"✓ Pagamento confirmado — PigBank+ ({valor})", html_body=html, text_body=text)
+    return send_email(
+        to=to, subject=f"✓ Pagamento confirmado — PigBank+ ({valor})",
+        html_body=html, text_body=text,
+        headers={"Reply-To": SUPPORT_EMAIL},
+    )
 
 
 def send_payment_failed_email(to: str, dashboard_url: str = "") -> bool:
@@ -818,7 +830,11 @@ def send_payment_failed_email(to: str, dashboard_url: str = "") -> bool:
         f"Atualize o cartão em {dash}/conta\n\n"
         f"Se as tentativas falharem, o plano volta pra Free."
     )
-    return send_email(to=to, subject="⚠️ PigBank+ — pagamento falhou, atualize seu cartão", html_body=html, text_body=text)
+    return send_email(
+        to=to, subject="⚠️ PigBank+ — pagamento falhou, atualize seu cartão",
+        html_body=html, text_body=text,
+        headers={"Reply-To": SUPPORT_EMAIL},
+    )
 
 
 def send_subscription_canceled_email(to: str, expires_at, dashboard_url: str = "") -> bool:
@@ -842,4 +858,8 @@ def send_subscription_canceled_email(to: str, expires_at, dashboard_url: str = "
         f"Você mantém acesso aos recursos Pro até {fim}. Depois disso, a conta volta pra Free.\n\n"
         f"Mudou de ideia? Mande 'assinar plano' no bot."
     )
-    return send_email(to=to, subject="PigBank+ — assinatura cancelada", html_body=html, text_body=text)
+    return send_email(
+        to=to, subject="PigBank+ — assinatura cancelada",
+        html_body=html, text_body=text,
+        headers={"Reply-To": SUPPORT_EMAIL},
+    )
