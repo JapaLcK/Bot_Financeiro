@@ -2687,42 +2687,55 @@ async def billing_webhook(request: Request):
         details={"event_type": event["type"]},
     )
 
+    # Stripe SDK v8+ StripeObject nao herda de dict, entao .get nao existe.
+    # Usar acesso por colchete + try/except (suporta tanto StripeObject quanto dict puro).
+    def _g(obj, key, default=None):
+        if obj is None:
+            return default
+        try:
+            v = obj[key]
+        except (KeyError, TypeError, AttributeError):
+            return default
+        return v if v is not None else default
+
     def _resolve_user(obj) -> int | None:
-        uid = obj.get("metadata", {}).get("finbot_user_id")
+        metadata = _g(obj, "metadata", {})
+        uid = _g(metadata, "finbot_user_id")
         if uid:
             return int(uid)
-        cid = obj.get("customer")
+        cid = _g(obj, "customer")
         if cid:
             return get_user_by_stripe_customer(cid)
         return None
 
     def _subscription_period_end(sub):
         # API >= 2025-09 movido pra subscription.items.data[].current_period_end.
-        ts = sub.get("current_period_end")
+        ts = _g(sub, "current_period_end")
         if ts is None:
-            items = (sub.get("items") or {}).get("data") or []
-            if items:
-                ts = items[0].get("current_period_end")
+            items_obj = _g(sub, "items", {})
+            data = _g(items_obj, "data", []) or []
+            if data:
+                ts = _g(data[0], "current_period_end")
         if ts is None:
             return None
         return datetime.fromtimestamp(ts, tz=timezone.utc)
 
     def _invoice_subscription_id(invoice) -> str | None:
-        sub_id = invoice.get("subscription")
+        sub_id = _g(invoice, "subscription")
         if sub_id:
-            return sub_id
+            return sub_id if isinstance(sub_id, str) else _g(sub_id, "id")
         # API >= 2025-09 movido pra invoice.parent.subscription_details.subscription.
-        parent = invoice.get("parent") or {}
-        details = parent.get("subscription_details") or {}
-        ref = details.get("subscription")
-        if isinstance(ref, dict):
-            return ref.get("id")
-        return ref
+        parent = _g(invoice, "parent", {})
+        details = _g(parent, "subscription_details", {})
+        ref = _g(details, "subscription")
+        if ref is None:
+            return None
+        return ref if isinstance(ref, str) else _g(ref, "id")
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         user_id = _resolve_user(session)
-        sub_id  = session.get("subscription")
+        sub_id  = _g(session, "subscription")
         # Trial 7d: subscription nasce status=trialing, sem invoice paga.
         # Promover ja agora pra user nao ficar Free durante o trial.
         if user_id and sub_id:
@@ -2738,7 +2751,7 @@ async def billing_webhook(request: Request):
                 details={
                     "plan": "pro",
                     "expires_at": expires_dt.isoformat() if expires_dt else None,
-                    "status": sub.get("status"),
+                    "status": _g(sub, "status"),
                 },
             )
         elif user_id:
