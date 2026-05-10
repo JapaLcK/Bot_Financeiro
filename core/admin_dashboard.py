@@ -28,6 +28,9 @@ WHATSAPP_NUMBER = os.getenv("WHATSAPP_NUMBER", "")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PRICE_ID_PRO = os.getenv("STRIPE_PRICE_ID_PRO", "")
+STRIPE_PRICE_ID_PRO_MENSAL = os.getenv("STRIPE_PRICE_ID_PRO_MENSAL", "")
+STRIPE_PRICE_ID_PRO_ANUAL = os.getenv("STRIPE_PRICE_ID_PRO_ANUAL", "")
+_STRIPE_PRICE_CONFIGURED = bool(STRIPE_PRICE_ID_PRO_MENSAL or STRIPE_PRICE_ID_PRO_ANUAL or STRIPE_PRICE_ID_PRO)
 ADMIN_DASHBOARD_USERNAME = (os.getenv("ADMIN_DASHBOARD_USERNAME") or "admin").strip()
 ADMIN_DASHBOARD_PASSWORD = os.getenv("ADMIN_DASHBOARD_PASSWORD", "")
 ADMIN_DASHBOARD_PASSWORD_HASH = os.getenv("ADMIN_DASHBOARD_PASSWORD_HASH", "")
@@ -582,7 +585,7 @@ async def fetch_admin_overview(days: int = 30) -> dict[str, Any]:
             "wa_phone_number_id_configured": bool(os.getenv("WA_PHONE_NUMBER_ID")),
             "wa_verify_token_configured": bool(os.getenv("WA_VERIFY_TOKEN")),
             "wa_app_secret_configured": bool(os.getenv("WA_APP_SECRET")),
-            "stripe_configured": bool(STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET and STRIPE_PRICE_ID_PRO),
+            "stripe_configured": bool(STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET and _STRIPE_PRICE_CONFIGURED),
             "whatsapp_telemetry_inconsistent": bool(
                 (whatsapp_activity.get("whatsapp_real_activity_24h") or 0) > 0
                 and (ops_summary.get("whatsapp_webhooks_24h") or 0) == 0
@@ -614,7 +617,7 @@ async def log_admin_startup_warnings() -> None:
         warnings.append(("warning", "whatsapp_config_missing", "WA_VERIFY_TOKEN nao configurado no ambiente."))
     if not os.getenv("WA_APP_SECRET"):
         warnings.append(("warning", "whatsapp_config_missing", "WA_APP_SECRET nao configurado no ambiente."))
-    if not (STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET and STRIPE_PRICE_ID_PRO):
+    if not (STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET and _STRIPE_PRICE_CONFIGURED):
         warnings.append(("warning", "billing_config_incomplete", "Configuracao do Stripe incompleta no ambiente."))
 
     if not warnings:

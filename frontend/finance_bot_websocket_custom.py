@@ -131,7 +131,9 @@ DASHBOARD_URL = DASHBOARD_URL.rstrip("/")
 WHATSAPP_NUMBER         = os.getenv("WHATSAPP_NUMBER", "")
 STRIPE_SECRET_KEY       = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET   = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-STRIPE_PRICE_ID_PRO     = os.getenv("STRIPE_PRICE_ID_PRO", "")   # price_xxx do plano Pro
+STRIPE_PRICE_ID_PRO     = os.getenv("STRIPE_PRICE_ID_PRO", "")            # legacy: usado como fallback do mensal
+STRIPE_PRICE_ID_PRO_MENSAL = os.getenv("STRIPE_PRICE_ID_PRO_MENSAL", "")  # price_xxx Pro mensal (R$ 19,90)
+STRIPE_PRICE_ID_PRO_ANUAL  = os.getenv("STRIPE_PRICE_ID_PRO_ANUAL", "")   # price_xxx Pro anual  (R$ 199,00)
 PLUGGY_INCLUDE_SANDBOX  = os.getenv("PLUGGY_INCLUDE_SANDBOX", "1") != "0"
 DASHBOARD_MAGIC_LINK_MINUTES = int(os.getenv("DASHBOARD_MAGIC_LINK_MINUTES", "5"))
 DASHBOARD_SESSION_HOURS = float(os.getenv("DASHBOARD_SESSION_HOURS", "12"))
@@ -2572,13 +2574,39 @@ async def auth_google_complete_signup(
 
 # ─── Billing (Stripe) ────────────────────────────────────────────────────────
 
+class CreateCheckoutBody(BaseModel):
+    interval: str = "monthly"  # "monthly" | "annual"
+
+
+def _resolve_pro_price_id(interval: str) -> str:
+    """Mapeia interval -> price ID configurado nas env vars.
+
+    Mensal aceita fallback pro `STRIPE_PRICE_ID_PRO` legado pra não quebrar
+    deploys que ainda não migraram. Anual exige a env var nova.
+    """
+    if interval == "monthly":
+        return STRIPE_PRICE_ID_PRO_MENSAL or STRIPE_PRICE_ID_PRO
+    if interval == "annual":
+        return STRIPE_PRICE_ID_PRO_ANUAL
+    return ""
+
+
 @app.post("/billing/create-checkout")
-async def billing_create_checkout(user_id: int = Depends(_get_current_user)):
+async def billing_create_checkout(
+    payload: CreateCheckoutBody | None = None,
+    user_id: int = Depends(_get_current_user),
+):
     """
     Cria uma sessão de checkout no Stripe para upgrade para o plano Pro.
-    Requer: STRIPE_SECRET_KEY e STRIPE_PRICE_ID_PRO configurados.
+    Body opcional: {"interval": "monthly" | "annual"} (default monthly).
+    Requer: STRIPE_SECRET_KEY + price ID do interval escolhido.
     """
-    if not STRIPE_SECRET_KEY or not STRIPE_PRICE_ID_PRO:
+    interval = (payload.interval if payload else "monthly")
+    if interval not in ("monthly", "annual"):
+        raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
+
+    price_id = _resolve_pro_price_id(interval)
+    if not STRIPE_SECRET_KEY or not price_id:
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
     import stripe
@@ -2605,14 +2633,18 @@ async def billing_create_checkout(user_id: int = Depends(_get_current_user)):
     session = stripe.checkout.Session.create(
         customer=customer_id,
         payment_method_types=["card"],
-        line_items=[{"price": STRIPE_PRICE_ID_PRO, "quantity": 1}],
+        line_items=[{"price": price_id, "quantity": 1}],
         mode="subscription",
         success_url=f"{DASHBOARD_URL}/app?upgrade=success",
         cancel_url=f"{DASHBOARD_URL}/app?upgrade=cancelled",
-        metadata={"finbot_user_id": str(user_id)},
+        metadata={"finbot_user_id": str(user_id), "interval": interval},
+        subscription_data={
+            "trial_period_days": 7,
+            "metadata": {"finbot_user_id": str(user_id), "interval": interval},
+        },
     )
 
-    return {"checkout_url": session.url}
+    return {"checkout_url": session.url, "interval": interval}
 
 
 @app.post("/billing/webhook")
