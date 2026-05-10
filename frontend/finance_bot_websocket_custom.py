@@ -2652,8 +2652,8 @@ async def billing_create_checkout(
         line_items=[{"price": price_id, "quantity": 1}],
         mode="subscription",
         locale="pt-BR",
-        success_url=f"{DASHBOARD_URL}/app?upgrade=success",
-        cancel_url=f"{DASHBOARD_URL}/app?upgrade=cancelled",
+        success_url=f"{DASHBOARD_URL}/home?upgrade=success",
+        cancel_url=f"{DASHBOARD_URL}/home?upgrade=cancelled",
         metadata={"finbot_user_id": str(user_id), "interval": interval},
         subscription_data={
             "trial_period_days": 7,
