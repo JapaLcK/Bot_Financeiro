@@ -2626,6 +2626,8 @@ async def billing_create_checkout(
         customer = stripe.Customer.create(
             email=user["email"],
             metadata={"finbot_user_id": str(user_id)},
+            address={"country": "BR"},
+            preferred_locales=["pt-BR"],
         )
         customer_id = customer.id
         set_stripe_customer(user_id, customer_id)
@@ -2635,6 +2637,7 @@ async def billing_create_checkout(
         payment_method_types=["card"],
         line_items=[{"price": price_id, "quantity": 1}],
         mode="subscription",
+        locale="pt-BR",
         success_url=f"{DASHBOARD_URL}/app?upgrade=success",
         cancel_url=f"{DASHBOARD_URL}/app?upgrade=cancelled",
         metadata={"finbot_user_id": str(user_id), "interval": interval},

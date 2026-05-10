@@ -49,6 +49,7 @@ class _FakeStripe:
     def __init__(self):
         self.api_key = None
         self.last_session_kwargs: dict | None = None
+        self.last_customer_kwargs: dict | None = None
         self.customer_create_calls = 0
 
         outer = self
@@ -57,6 +58,7 @@ class _FakeStripe:
             @staticmethod
             def create(**kwargs):
                 outer.customer_create_calls += 1
+                outer.last_customer_kwargs = kwargs
                 return SimpleNamespace(id="cus_test_123")
 
         class _Session:
@@ -99,6 +101,8 @@ def test_checkout_default_uses_monthly_price(user_id, monkeypatch):
     assert fake.last_session_kwargs["metadata"]["interval"] == "monthly"
     # Trial 7 dias garantido pelo backend (price ja nao traz mais trial no Stripe novo)
     assert fake.last_session_kwargs["subscription_data"]["trial_period_days"] == 7
+    # Locale pt-BR forca interface em portugues e moeda BRL no Checkout
+    assert fake.last_session_kwargs["locale"] == "pt-BR"
 
 
 def test_checkout_annual_uses_annual_price(user_id, monkeypatch):
@@ -155,6 +159,26 @@ def test_checkout_returns_503_when_annual_price_missing(user_id, monkeypatch):
 
     resp = client.post("/billing/create-checkout", json={"interval": "annual"}, headers=_CSRF_HEADERS)
     assert resp.status_code == 503
+
+
+def test_checkout_creates_new_customer_with_brazil_country_and_locale(user_id, monkeypatch):
+    """Novo customer Stripe nasce com address.country=BR e preferred_locales pt-BR.
+
+    Sem isso, Stripe Checkout sugere USD e formulario em ingles para usuarios
+    brasileiros (problema visto em test em 2026-05-10).
+    """
+    _, _, client = _auth_user_setup(f"br-{user_id}")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    fake = _patch_stripe(monkeypatch)
+
+    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+
+    assert fake.customer_create_calls == 1
+    assert fake.last_customer_kwargs is not None
+    assert fake.last_customer_kwargs["address"] == {"country": "BR"}
+    assert fake.last_customer_kwargs["preferred_locales"] == ["pt-BR"]
 
 
 def test_checkout_reuses_existing_stripe_customer(user_id, monkeypatch):
