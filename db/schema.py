@@ -804,6 +804,44 @@ def init_db():
         create index if not exists idx_audit_events_user_event
           on audit_events (user_id, event, created_at desc)
         """,
+
+        # ─── Orcamentos por categoria ───────────────────────────────────────────
+        # Antes era criada lazy em frontend/finance_bot_websocket_custom.py:ensure_budget_table.
+        # Trazido pra schema.py pra existir tambem nos testes (init_db unico).
+        """
+        create table if not exists category_budgets (
+          id        bigserial primary key,
+          user_id   bigint  not null references users(id) on delete cascade,
+          categoria text    not null,
+          budget    numeric not null check (budget > 0),
+          created_at timestamptz default now(),
+          unique (user_id, categoria)
+        )
+        """,
+
+        # ─── Eventos de login (admin/observabilidade) ───────────────────────────
+        # Antes era criada lazy em core/admin_dashboard.py:ensure_admin_tables.
+        # Trazido pra schema.py pra audit/IP-tracking funcionarem nos testes.
+        """
+        create table if not exists auth_login_events (
+          id bigserial primary key,
+          user_id bigint references users(id) on delete set null,
+          email text,
+          success boolean not null,
+          ip_address text,
+          user_agent text,
+          failure_reason text,
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_auth_login_events_created_at
+          on auth_login_events (created_at desc)
+        """,
+        """
+        create index if not exists idx_auth_login_events_user_success
+          on auth_login_events (user_id, success, created_at desc)
+        """,
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks
