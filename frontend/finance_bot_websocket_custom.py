@@ -1288,12 +1288,17 @@ def _decode_jwt(token: str) -> dict | None:
 
 
 def _set_auth_cookie(response: Response, token: str) -> None:
+    # samesite=lax (vs strict): permite que clicar em link externo (WhatsApp,
+    # email, Slack) que aponte pra pigbankai chegue com o cookie ja anexado.
+    # Strict bloqueava magic links do bot — user caia em /?login_required.
+    # Protecao CSRF mantida pelo csrf_token cookie + header x-csrf-token
+    # (validados no csrf_middleware, mesma protecao que Stripe/GitHub usam).
     response.set_cookie(
         AUTH_COOKIE_NAME,
         token,
         httponly=True,
         secure=True,
-        samesite="strict",
+        samesite="lax",
         max_age=AUTH_COOKIE_MAX_AGE,
     )
 
@@ -1305,7 +1310,7 @@ def _set_dashboard_cookie(response: Response, user_id: int, *, jti: str | None =
         token,
         httponly=True,
         secure=True,
-        samesite="strict",
+        samesite="lax",
         max_age=int(DASHBOARD_SESSION_HOURS * 3600),
     )
     return token
