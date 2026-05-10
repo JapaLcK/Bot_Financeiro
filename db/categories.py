@@ -147,6 +147,49 @@ def list_user_category_rules(user_id: int) -> list[tuple[str, str]]:
     return out
 
 
+def get_uncategorized_launches(user_id: int, limit: int = 20) -> list[dict]:
+    """
+    Lançamentos em 'outros' ou sem categoria — candidatos a virar regra.
+    Útil pra IA sugerir criar regras de categorização.
+    """
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, tipo, valor, alvo, nota, categoria, criado_em
+                from launches
+                where user_id = %s
+                  and tipo = 'despesa'
+                  and is_internal_movement = false
+                  and (categoria is null or lower(categoria) = 'outros')
+                order by criado_em desc
+                limit %s
+                """,
+                (user_id, int(limit)),
+            )
+            rows = cur.fetchall() or []
+
+    out = []
+    for r in rows:
+        if isinstance(r, dict):
+            out.append({
+                "id": r.get("id"),
+                "tipo": r.get("tipo"),
+                "valor": float(r.get("valor") or 0),
+                "alvo": r.get("alvo"),
+                "nota": r.get("nota"),
+                "categoria": r.get("categoria"),
+                "criado_em": r.get("criado_em"),
+            })
+        else:
+            out.append({
+                "id": r[0], "tipo": r[1], "valor": float(r[2] or 0),
+                "alvo": r[3], "nota": r[4], "categoria": r[5], "criado_em": r[6],
+            })
+    return out
+
+
 def resolve_category_rule_target(user_id: int, target: str) -> tuple[str, str, int]:
     """
     Resolve um alvo de remoção informado pelo usuário.

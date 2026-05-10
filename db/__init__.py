@@ -102,6 +102,7 @@ from .categories import (
     upsert_category_rule,
     list_user_category_rules,
     resolve_category_rule_target,
+    get_uncategorized_launches,
 )
 
 # ── Ações pendentes ───────────────────────────────────────────────────────────
@@ -284,7 +285,7 @@ __all__ = [
     "list_category_rules", "add_category_rule", "delete_category_rule",
     "delete_category_rules_by_category", "list_categories",
     "get_memorized_category", "upsert_category_rule", "list_user_category_rules",
-    "resolve_category_rule_target",
+    "resolve_category_rule_target", "get_uncategorized_launches",
     # pending
     "set_pending_action", "get_pending_action", "clear_pending_action",
     # cards
