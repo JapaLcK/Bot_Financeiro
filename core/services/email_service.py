@@ -63,7 +63,13 @@ def send_email(
         if text_body:
             params["text"] = text_body
         if headers:
-            params["headers"] = headers
+            # Resend usa campo dedicado `reply_to`; header customizado é ignorado
+            hdrs = dict(headers)
+            reply_to = hdrs.pop("Reply-To", None) or hdrs.pop("reply-to", None)
+            if reply_to:
+                params["reply_to"] = reply_to
+            if hdrs:
+                params["headers"] = hdrs
         resend.Emails.send(params)
         logger.info("E-mail enviado para <%s>: %s", to, subject)
         _log_email_event("info", "email_sent", f"E-mail enviado para {to}", to=to, subject=subject)
