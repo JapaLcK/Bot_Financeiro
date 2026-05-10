@@ -561,6 +561,8 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .pro-locked:hover {
   opacity: .7;
 }
+/* Modal de upgrade sempre por cima dos outros overlays. */
+#upgrade-overlay { z-index: 900; }
 .upgrade-modal h3 {
   background: linear-gradient(135deg,#7c3aed,#3b82f6);
   -webkit-background-clip: text;
@@ -748,7 +750,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
         <span id="status-text">Conectando…</span>
       </div>
       <button class="hbtn" id="refresh-btn" onclick="sendRefresh()"><span id="ref-icon">↻</span> Atualizar</button>
-      <button class="hbtn" onclick="exportCSV()">⬇ Exportar</button>
+      <button class="hbtn" data-pro-feature="export" onclick="exportCSV()">⬇ Exportar</button>
       <div class="user-menu" id="user-menu">
         <button class="hbtn user-menu-btn" id="user-menu-btn" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleUserMenu(event)">
           <span class="user-menu-main">
@@ -802,7 +804,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
   <p class="section-title" id="history-title" style="display:none">Histórico Mensal</p>
   <div id="history-wrap" style="display:none">
     <div class="card">
-      <h2>Receita vs Despesa — Últimos 6 Meses</h2>
+      <h2 id="history-card-title">Receita vs Despesa — Últimos 6 Meses</h2>
       <div class="chart-wrap" style="height:230px"><canvas id="chart-history"></canvas></div>
     </div>
   </div>
@@ -1769,6 +1771,11 @@ const UPGRADE_MESSAGES = {
 function showUpgradeModal(feature) {
   const overlay = document.getElementById("upgrade-overlay");
   if (!overlay) return;
+  // Fecha qualquer outro overlay aberto (ex: "Nova caixinha") pra evitar
+  // que o modal de criacao fique por cima do upgrade.
+  document.querySelectorAll(".overlay.open").forEach(el => {
+    if (el.id !== "upgrade-overlay") el.classList.remove("open");
+  });
   const msgEl = document.getElementById("upg-feat-msg");
   if (msgEl) msgEl.textContent = UPGRADE_MESSAGES[feature] || UPGRADE_MESSAGES.generic;
   overlay.classList.add("open");
@@ -1792,6 +1799,13 @@ function applyProGates() {
       el.setAttribute("aria-disabled", "true");
     }
   });
+  // Titulo do grafico de historico reflete a janela real: 6 meses (Pro) vs 30 dias (Free).
+  const histTitle = document.getElementById("history-card-title");
+  if (histTitle) {
+    histTitle.textContent = isPro
+      ? "Receita vs Despesa — Últimos 6 Meses"
+      : "Receita vs Despesa — Últimos 30 dias";
+  }
 }
 
 // Esc fecha o modal
