@@ -644,7 +644,16 @@ async def admin_error_logging_middleware(request: Request, call_next):
     except HTTPException:
         raise
     except Exception as exc:
-        err_str = str(exc)
+        import traceback
+        tb_str = traceback.format_exc()
+        err_str = str(exc) or exc.__class__.__name__
+
+        # Imprime o traceback completo no stdout pra aparecer nos logs do Railway.
+        print(
+            f"[unhandled] {request.method} {request.url.path}: {exc.__class__.__name__}: {err_str}\n{tb_str}",
+            file=sys.stderr,
+            flush=True,
+        )
 
         # detecta timeout de banco → 503 Service Unavailable
         is_timeout = any(kw in err_str.lower() for kw in ("timeout", "connection", "could not connect"))
@@ -660,7 +669,12 @@ async def admin_error_logging_middleware(request: Request, call_next):
             "http_unhandled_exception",
             err_str,
             source=f"{request.method} {request.url.path}",
-            details={"query": dict(request.query_params), "status_code": status_code},
+            details={
+                "query": dict(request.query_params),
+                "status_code": status_code,
+                "exc_type": exc.__class__.__name__,
+                "traceback": tb_str[-2000:],
+            },
         )
 
         return JSONResponse(
