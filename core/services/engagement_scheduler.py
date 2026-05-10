@@ -55,6 +55,20 @@ async def run_engagement_loop() -> None:
                 source="engagement_scheduler",
             )
 
+        # Email "trial acaba em 3 dias" (item 38 do backlog). Independente do
+        # check de engagement — falha aqui nao deve afetar emails de
+        # dica/insight/reengajamento.
+        try:
+            await _check_trial_ending()
+        except Exception as exc:
+            logger.error("[engagement] Erro no check de trial ending: %s", exc, exc_info=True)
+            log_system_event_sync(
+                "error",
+                "trial_ending_check_error",
+                f"Erro no check de trial ending: {exc}",
+                source="engagement_scheduler",
+            )
+
         try:
             await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
         except asyncio.CancelledError:
@@ -155,3 +169,66 @@ async def _check_and_send() -> None:
                     source="engagement_scheduler",
                     user_id=user_id,
                 )
+
+
+# ─── Trial ending (PigBank+ acaba em 3 dias) ─────────────────────────────────
+
+# Janela apertada: pega trials cujo expires_at cai entre 2.5 e 3.5 dias no
+# futuro. Como o scheduler roda 1x/dia, cada user trialing entra na janela
+# exatamente uma vez no ciclo do trial — sem precisar de flag adicional no DB.
+TRIAL_ENDING_WINDOW_MIN_DAYS = 2.5
+TRIAL_ENDING_WINDOW_MAX_DAYS = 3.5
+
+
+async def _check_trial_ending() -> None:
+    """Envia email pra users em trial cujo PigBank+ termina em ~3 dias (item 38)."""
+    import os
+    import db
+    from core.services.email_service import send_trial_ending_email
+    from db.connection import get_conn
+
+    loop = asyncio.get_event_loop()
+    now = datetime.now(timezone.utc)
+    lo = now + timedelta(days=TRIAL_ENDING_WINDOW_MIN_DAYS)
+    hi = now + timedelta(days=TRIAL_ENDING_WINDOW_MAX_DAYS)
+
+    def _fetch_trials_ending():
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    select user_id, email, plan_expires_at
+                    from auth_accounts
+                    where plan = 'pro'
+                      and last_payment_status = 'trialing'
+                      and plan_expires_at between %s and %s
+                      and email is not null and email <> ''
+                    """,
+                    (lo, hi),
+                )
+                return cur.fetchall()
+
+    try:
+        users = await loop.run_in_executor(None, _fetch_trials_ending)
+    except Exception as exc:
+        logger.error("[engagement] Falha ao buscar trials ending: %s", exc, exc_info=True)
+        return
+
+    dashboard_url = os.getenv("DASHBOARD_URL", "https://pigbankai.com")
+    for row in users:
+        user_id = row["user_id"]
+        email = row["email"]
+        expires_at = row["plan_expires_at"]
+        try:
+            ok = await loop.run_in_executor(None, send_trial_ending_email, email, expires_at, dashboard_url)
+            if ok:
+                logger.info("[trial-ending] enviado → user_id=%s (%s)", user_id, email)
+                log_system_event_sync(
+                    "info",
+                    "trial_ending_email_sent",
+                    "Email de trial ending enviado (3 dias antes).",
+                    source="engagement_scheduler",
+                    user_id=user_id,
+                )
+        except Exception as exc:
+            logger.error("[trial-ending] falha enviando user_id=%s: %s", user_id, exc)

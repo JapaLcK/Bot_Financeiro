@@ -693,3 +693,153 @@ def send_account_deletion_completed_email(to: str) -> bool:
         html_body=html,
         text_body=text,
     )
+
+
+# ─── E-mails transacionais de billing (PigBank+) ─────────────────────────────
+
+def _fmt_brl_date(value) -> str:
+    """Formata datetime/date em DD/MM/YYYY (horário de Brasília)."""
+    if value is None:
+        return "—"
+    if isinstance(value, str):
+        try:
+            from datetime import datetime as _dt
+            value = _dt.fromisoformat(value)
+        except Exception:
+            return str(value)
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    if hasattr(value, "tzinfo"):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=_tz.utc)
+        local = value.astimezone(_tz(_td(hours=-3)))
+        return local.strftime("%d/%m/%Y")
+    return str(value)
+
+
+def send_pro_welcome_email(to: str, trial_end_at, dashboard_url: str = "") -> bool:
+    """E-mail pós-checkout — usuário acabou de assinar (item 37)."""
+    trial_end = _fmt_brl_date(trial_end_at)
+    dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    cta = f'<p style="text-align:center;margin:24px 0"><a class="btn" href="{dash}/app">🐷 Abrir meu dashboard</a></p>'
+    content = f"""
+      <p>🐷✨ <strong>Tá dentro do PigBank+!</strong></p>
+      <p>Sua assinatura começou agora. Os <strong>7 dias grátis</strong> vão até <strong>{trial_end}</strong> —
+      só tem cobrança depois disso, e você pode cancelar quando quiser sem ser cobrado.</p>
+      <p>Agora você desbloqueou:</p>
+      <ul>
+        <li>Caixinhas e cartões <strong>ilimitados</strong></li>
+        <li>Investimentos com IR e IOF no automático</li>
+        <li>Histórico completo + exportar CSV</li>
+        <li>Importar extrato e fatura por OFX</li>
+        <li>Piggy IA — converse sobre suas finanças</li>
+      </ul>
+      {cta}
+      <p style="font-size:13px;color:rgba(255,255,255,.55)">Pra cancelar antes do fim do trial, é só mandar <strong>cancelar plano</strong> no bot ou acessar <a href="{dash}/conta">{dash}/conta</a>.</p>
+    """
+    html = _base_html("Bem-vindo ao PigBank+", content)
+    text = (
+        f"PigBank+ ativado!\n\n"
+        f"Sua assinatura começou. 7 dias grátis até {trial_end} — só tem cobrança depois.\n\n"
+        f"Abra o dashboard: {dash}/app\n"
+        f"Pra cancelar antes: mande 'cancelar plano' no bot ou acesse {dash}/conta"
+    )
+    return send_email(to=to, subject="🐷 Tá dentro do PigBank+!", html_body=html, text_body=text)
+
+
+def send_trial_ending_email(to: str, trial_end_at, dashboard_url: str = "") -> bool:
+    """E-mail 3 dias antes do trial acabar (item 38)."""
+    trial_end = _fmt_brl_date(trial_end_at)
+    dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    content = f"""
+      <p>🐷 Oi, parceiro.</p>
+      <p>Seu trial do PigBank+ termina em <strong>3 dias</strong> ({trial_end}).
+      Na sequência, a primeira cobrança vai entrar automaticamente no cartão que você cadastrou.</p>
+      <p>Se tá curtindo, não precisa fazer nada — só relaxar e seguir usando.</p>
+      <p>Se mudou de ideia, sem stress: manda <strong>cancelar plano</strong> no bot até {trial_end} e
+      você não é cobrado.</p>
+      <p style="text-align:center;margin:24px 0">
+        <a class="btn" href="{dash}/conta">Gerenciar minha assinatura</a>
+      </p>
+    """
+    html = _base_html("Seu trial termina em 3 dias", content)
+    text = (
+        f"PigBank+ — trial termina em 3 dias ({trial_end}).\n\n"
+        f"Pra continuar: não precisa fazer nada, a cobrança entra automaticamente.\n"
+        f"Pra cancelar sem ser cobrado: mande 'cancelar plano' no bot até {trial_end}.\n\n"
+        f"Gerenciar: {dash}/conta"
+    )
+    return send_email(to=to, subject="🐷 Seu trial PigBank+ termina em 3 dias", html_body=html, text_body=text)
+
+
+def send_pro_charged_email(to: str, amount_brl: float, next_charge_at, dashboard_url: str = "") -> bool:
+    """E-mail de confirmação de cobrança após o trial (item 39)."""
+    valor = f"R$ {amount_brl:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    proxima = _fmt_brl_date(next_charge_at)
+    dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    content = f"""
+      <p>🐷 Cobrança confirmada — valeu por continuar com a gente!</p>
+      <p>Seu PigBank+ tá renovado. Detalhes da cobrança:</p>
+      <ul>
+        <li><strong>Valor:</strong> {valor}</li>
+        <li><strong>Próxima cobrança:</strong> {proxima}</li>
+      </ul>
+      <p>Sua nota fiscal e histórico de pagamentos ficam no portal Stripe — abra em <a href="{dash}/conta">{dash}/conta</a>.</p>
+      <p>Qualquer dúvida, é só responder este email ou usar <strong>ajuda</strong> no bot.</p>
+    """
+    html = _base_html("Pagamento confirmado — PigBank+", content)
+    text = (
+        f"PigBank+ renovado.\n\n"
+        f"Valor: {valor}\n"
+        f"Próxima cobrança: {proxima}\n\n"
+        f"Histórico de pagamentos: {dash}/conta"
+    )
+    return send_email(to=to, subject=f"✓ Pagamento confirmado — PigBank+ ({valor})", html_body=html, text_body=text)
+
+
+def send_payment_failed_email(to: str, dashboard_url: str = "") -> bool:
+    """E-mail quando pagamento falha — Stripe vai retentar (item 40)."""
+    dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    content = f"""
+      <p>🐷 Opa, tivemos um problema.</p>
+      <p>A cobrança do seu PigBank+ <strong>não passou</strong>. Pode ser cartão expirado, saldo insuficiente,
+      ou banco recusando a transação.</p>
+      <p>Não se preocupa — a gente vai tentar de novo automaticamente nos próximos dias. Mas pra evitar perder o
+      acesso aos recursos Pro, vale dar uma olhada agora:</p>
+      <p style="text-align:center;margin:24px 0">
+        <a class="btn" href="{dash}/conta">Atualizar cartão</a>
+      </p>
+      <p style="font-size:13px;color:rgba(255,255,255,.55)">Enquanto isso, seu plano fica como <strong>past_due</strong>.
+      Se as tentativas falharem, ele volta pra Free e os recursos Pro são bloqueados.</p>
+    """
+    html = _base_html("Pagamento falhou — atualize seu cartão", content)
+    text = (
+        f"PigBank+ — pagamento falhou.\n\n"
+        f"Vamos tentar de novo automaticamente, mas pra evitar perder acesso:\n"
+        f"Atualize o cartão em {dash}/conta\n\n"
+        f"Se as tentativas falharem, o plano volta pra Free."
+    )
+    return send_email(to=to, subject="⚠️ PigBank+ — pagamento falhou, atualize seu cartão", html_body=html, text_body=text)
+
+
+def send_subscription_canceled_email(to: str, expires_at, dashboard_url: str = "") -> bool:
+    """E-mail de confirmação de cancelamento (item 41)."""
+    fim = _fmt_brl_date(expires_at)
+    dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    content = f"""
+      <p>🐷 Sua assinatura PigBank+ foi cancelada.</p>
+      <p>Tudo certo — você continua com acesso aos recursos Pro <strong>até {fim}</strong>.
+      Depois disso, sua conta volta automaticamente pro plano Free e os limites Pro são desativados.</p>
+      <p>Se mudar de ideia antes dessa data, é só mandar <strong>assinar plano</strong> no bot.</p>
+      <p>Valeu por ter dado uma chance pra gente. Se quiser contar o que faltou ou poderia melhorar,
+      responde este email — leitura garantida.</p>
+      <p style="text-align:center;margin:24px 0">
+        <a class="btn" href="{dash}/app">Abrir o dashboard</a>
+      </p>
+    """
+    html = _base_html("Assinatura cancelada — PigBank+", content)
+    text = (
+        f"PigBank+ cancelado.\n\n"
+        f"Você mantém acesso aos recursos Pro até {fim}. Depois disso, a conta volta pra Free.\n\n"
+        f"Mudou de ideia? Mande 'assinar plano' no bot."
+    )
+    return send_email(to=to, subject="PigBank+ — assinatura cancelada", html_body=html, text_body=text)

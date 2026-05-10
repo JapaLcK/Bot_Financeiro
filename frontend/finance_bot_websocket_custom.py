@@ -2751,6 +2751,24 @@ async def billing_webhook(request: Request):
             return None
         return ref if isinstance(ref, str) else _g(ref, "id")
 
+    async def _user_email(uid: int) -> str:
+        try:
+            from db import get_auth_user as _gau
+            data = await asyncio.to_thread(_gau, int(uid))
+            return ((data or {}).get("email") or "").strip()
+        except Exception:
+            return ""
+
+    async def _fire_email(uid: int, fn, *args):
+        """Envia email transacional em background — falha silenciosa pra nao quebrar webhook."""
+        try:
+            email = await _user_email(uid)
+            if not email:
+                return
+            await asyncio.to_thread(fn, email, *args, DASHBOARD_URL)
+        except Exception as exc:
+            print(f"[billing] email {fn.__name__} falhou user={uid}: {exc}")
+
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         user_id = _resolve_user(session)
@@ -2775,6 +2793,9 @@ async def billing_webhook(request: Request):
                     "status": sub_status,
                 },
             )
+            # Email de boas-vindas Pro (item 37)
+            from core.services.email_service import send_pro_welcome_email
+            await _fire_email(user_id, send_pro_welcome_email, expires_dt)
         elif user_id:
             await log_system_event(
                 "info",
@@ -2803,6 +2824,13 @@ async def billing_webhook(request: Request):
                 user_id=user_id,
                 details={"plan": "pro", "expires_at": expires_dt.isoformat() if expires_dt else None, "status": sub_status},
             )
+            # Email de confirmacao de cobranca (item 39) — so quando valor > 0
+            # (invoices do trial vem com amount_paid=0 e nao precisam de notificacao).
+            amount_cents = _g(invoice, "amount_paid") or 0
+            if amount_cents and amount_cents > 0:
+                amount_brl = float(amount_cents) / 100.0
+                from core.services.email_service import send_pro_charged_email
+                await _fire_email(user_id, send_pro_charged_email, amount_brl, expires_dt)
 
     elif event["type"] == "invoice.payment_failed":
         # Stripe vai retentar (smart retries). NAO movemos pra free aqui;
@@ -2819,11 +2847,24 @@ async def billing_webhook(request: Request):
                 source="billing",
                 user_id=user_id,
             )
+            # Email com link pra atualizar cartao (item 40)
+            from core.services.email_service import send_payment_failed_email
+            try:
+                email = await _user_email(user_id)
+                if email:
+                    await asyncio.to_thread(send_payment_failed_email, email, DASHBOARD_URL)
+            except Exception as exc:
+                print(f"[billing] email payment_failed falhou user={user_id}: {exc}")
 
     elif event["type"] == "customer.subscription.deleted":
         obj     = event["data"]["object"]
         user_id = _resolve_user(obj)
         if user_id:
+            # Captura expires_at ANTES de zerar plan_expires_at (pro email
+            # mostrar ate quando o user mantem acesso aos recursos Pro).
+            from db import get_auth_user as _gau
+            user_snapshot = await asyncio.to_thread(_gau, int(user_id))
+            expires_for_email = (user_snapshot or {}).get("plan_expires_at")
             update_user_plan(user_id, "free", None)
             set_payment_status(user_id, "canceled")
             print(f"[billing] user {user_id} → free (cancelado)")
@@ -2834,6 +2875,14 @@ async def billing_webhook(request: Request):
                 source="billing",
                 user_id=user_id,
             )
+            # Email de confirmacao de cancelamento (item 41)
+            from core.services.email_service import send_subscription_canceled_email
+            try:
+                email = await _user_email(user_id)
+                if email:
+                    await asyncio.to_thread(send_subscription_canceled_email, email, expires_for_email, DASHBOARD_URL)
+            except Exception as exc:
+                print(f"[billing] email canceled falhou user={user_id}: {exc}")
 
     return {"received": True}
 
