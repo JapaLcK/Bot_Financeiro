@@ -148,6 +148,20 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     data = getattr(a, "data", None)
     filename = getattr(a, "filename", "audio.ogg")
 
+    # Gate Pro: transcrição de áudio é Pro
+    uid = _normalize_user_id(msg)
+    try:
+        from core.services.plan_service import is_pro
+        if not is_pro(uid):
+            return [OutgoingMessage(
+                text=(
+                    "🐷 Transcrever áudio é um recurso do PigBank+.\n"
+                    "Dá uma olhada nos planos: https://pigbankai.com/precos"
+                )
+            )]
+    except Exception:
+        pass
+
     if not data:
         return [OutgoingMessage(
             text="🎙️ Recebi um áudio, mas não consegui baixar o arquivo. Tente reenviar."
@@ -163,7 +177,6 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
             )
         )]
 
-    uid = _normalize_user_id(msg)
     db.ensure_user(uid)
     db.update_last_activity(uid)
 
@@ -212,6 +225,20 @@ def _handle_image(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     a = image_atts[0]
     data = getattr(a, "data", None)
     filename = getattr(a, "filename", "image.jpg")
+
+    # Gate Pro: leitura de cupom/comprovante por IA é Pro
+    uid = _normalize_user_id(msg)
+    try:
+        from core.services.plan_service import is_pro
+        if not is_pro(uid):
+            return [OutgoingMessage(
+                text=(
+                    "🐷 Ler foto de cupom ou comprovante é um recurso do PigBank+.\n"
+                    "Dá uma olhada nos planos: https://pigbankai.com/precos"
+                )
+            )]
+    except Exception:
+        pass
 
     if not data:
         return [OutgoingMessage(

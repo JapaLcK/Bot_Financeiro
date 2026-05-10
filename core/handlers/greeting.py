@@ -124,7 +124,16 @@ def _fallback_for_type(greeting_type: str) -> str:
     return random.choice(pools.get(greeting_type, _FALLBACK_OI))
 
 
-def _greeting_with_ai(text: str, greeting_type: str, name: str | None = None) -> str | None:
+def _greeting_with_ai(text: str, greeting_type: str, name: str | None = None, user_id: int | None = None) -> str | None:
+    # Gate Pro: greeting personalizado por IA é Pro v1; Free cai no fallback estático
+    if user_id is not None:
+        try:
+            from core.services.plan_service import is_pro
+            if not is_pro(int(user_id)):
+                return None
+        except Exception:
+            pass
+
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:
         return None
@@ -211,7 +220,7 @@ def handle_greeting(text: str, user_id: int | None = None) -> str:
 
     name = _get_display_name(user_id)
 
-    ai_response = _greeting_with_ai(text, greeting_type, name=name)
+    ai_response = _greeting_with_ai(text, greeting_type, name=name, user_id=user_id)
     if ai_response:
         return ai_response
 

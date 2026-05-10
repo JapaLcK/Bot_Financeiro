@@ -623,6 +623,15 @@ EXEMPLOS:
 def _classify_with_ai(text: str, user_id: int | None = None) -> IntentResult:
     from core.ai_rate_limiter import is_allowed
 
+    # Gate Pro: IA conversacional é Pro v1
+    if user_id is not None:
+        try:
+            from core.services.plan_service import is_pro
+            if not is_pro(int(user_id)):
+                return IntentResult(intent="out_of_scope", confidence=0.0)
+        except Exception:
+            pass
+
     if user_id is not None and not is_allowed(user_id):
         print(f"[intent_classifier] rate limit atingido para user_id={user_id}")
         return IntentResult(intent="out_of_scope", confidence=0.0)

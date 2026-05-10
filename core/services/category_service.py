@@ -88,18 +88,25 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
             if ok:
                 return InferResult(category=canonicalize_category_label(cat2), reason="local_rule")
 
-    # D) fallback IA (só se OPENAI_API_KEY configurada)
+    # D) fallback IA (só se OPENAI_API_KEY configurada e usuário Pro)
     if os.getenv("OPENAI_API_KEY"):
         try:
-            from ai_router import classify_category_with_gpt
-            cat_ai = classify_category_with_gpt(t, user_id=user_id, source="core.services.category_service")
-            if cat_ai:
-                # Aceita até "outros" do GPT — significa que ele analisou e
-                # decidiu que não há categoria clara, em vez de cair em
-                # default por falta de tentativa.
-                return InferResult(category=cat_ai, reason="ai")
+            from core.services.plan_service import is_pro
+            allow_ai = is_pro(int(user_id))
         except Exception:
-            pass
+            allow_ai = False
+
+        if allow_ai:
+            try:
+                from ai_router import classify_category_with_gpt
+                cat_ai = classify_category_with_gpt(t, user_id=user_id, source="core.services.category_service")
+                if cat_ai:
+                    # Aceita até "outros" do GPT — significa que ele analisou e
+                    # decidiu que não há categoria clara, em vez de cair em
+                    # default por falta de tentativa.
+                    return InferResult(category=cat_ai, reason="ai")
+            except Exception:
+                pass
 
     return InferResult(category="outros", reason="default")
 
