@@ -2962,6 +2962,20 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
     ua = request.headers.get("user-agent") or None
     jti = await asyncio.to_thread(create_session, int(user_id), ip=ip, user_agent=ua)
     _set_dashboard_cookie(response, int(user_id), jti=jti)
+    # Tambem seta auth_token (cookie principal) com o mesmo jti — permite acessar
+    # rotas que exigem auth completa (/conta, /api/me, etc) sem precisar logar
+    # de novo. Sem isso, ?next=/conta caia em /?login_required=conta porque
+    # /conta so olha pro auth_token, nao pro dashboard_token.
+    try:
+        from db import get_auth_user
+        u = await asyncio.to_thread(get_auth_user, int(user_id))
+        email = (u or {}).get("email") or ""
+        if email:
+            auth_jwt = _make_jwt(int(user_id), email, jti=jti)
+            _set_auth_cookie(response, auth_jwt)
+    except Exception:
+        # Falha silenciosa — o dashboard ainda funciona com o dashboard_token.
+        pass
     return response
 
 
