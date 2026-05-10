@@ -359,7 +359,7 @@ def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
                 select email, display_name, plan, plan_expires_at, created_at, phone_e164,
                        phone_status, phone_confirmed_at, whatsapp_verified_at,
                        engagement_opt_out, tip_email_opt_out, insight_email_opt_out,
-                       whatsapp_updates_opt_out
+                       whatsapp_updates_opt_out, stripe_customer_id, last_payment_status
                 from auth_accounts
                 where user_id=%s
                 """,
@@ -414,6 +414,20 @@ def update_user_plan_impl(get_conn, user_id: int, plan: str, expires_at=None) ->
             cur.execute(
                 "update auth_accounts set plan = %s, plan_expires_at = %s where user_id = %s",
                 (plan, expires_at, user_id),
+            )
+        conn.commit()
+
+
+def set_payment_status_impl(get_conn, user_id: int, status: str) -> None:
+    """
+    Atualiza last_payment_status. Valores esperados (alinhados com o ciclo do
+    Stripe Subscription): inactive, trialing, active, past_due, canceled, unpaid.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts set last_payment_status = %s where user_id = %s",
+                (status, user_id),
             )
         conn.commit()
 

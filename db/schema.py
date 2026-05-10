@@ -499,6 +499,9 @@ def init_db():
         alter table auth_accounts add column if not exists stripe_customer_id text unique
         """,
         """
+        alter table auth_accounts add column if not exists last_payment_status text not null default 'inactive'
+        """,
+        """
         create unique index if not exists idx_auth_accounts_phone_unique
           on auth_accounts (phone_e164)
           where phone_e164 is not null

@@ -133,6 +133,10 @@ def set_stripe_customer(user_id: int, stripe_customer_id: str) -> None:
     return _db_support.set_stripe_customer_impl(get_conn, user_id, stripe_customer_id)
 
 
+def set_payment_status(user_id: int, status: str) -> None:
+    return _db_support.set_payment_status_impl(get_conn, user_id, status)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Verificação de email / reset de senha
 # ──────────────────────────────────────────────────────────────────────────────

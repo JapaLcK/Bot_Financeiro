@@ -1420,6 +1420,26 @@ async def _get_current_user(
     return user_id
 
 
+def require_pro_feature(feature: str = "generic"):
+    """
+    Dependency factory que valida JWT (via _get_current_user) e exige plano Pro.
+    Uso: `Depends(require_pro_feature("ofx_import"))` em rotas Pro-only.
+    Bloqueio retorna 403 com payload `{"error": "pro_required", "feature": ...}`
+    para o frontend abrir modal de upgrade contextual.
+    """
+    from core.services.plan_service import is_pro
+
+    async def _dep(user_id: int = Depends(_get_current_user)) -> int:
+        if not is_pro(user_id):
+            raise HTTPException(
+                status_code=403,
+                detail={"error": "pro_required", "feature": feature},
+            )
+        return user_id
+
+    return _dep
+
+
 def _extract_bearer_token(request: Request) -> str | None:
     auth = request.headers.get("authorization", "").strip()
     if not auth:
