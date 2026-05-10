@@ -2,9 +2,13 @@
 core/services/billing_commands.py — handlers para comandos de assinatura.
 
 Comandos suportados (case-insensitive, sem acentos):
-- "assinar", "fazer upgrade", "upgrade", "quero pro", "pigbank+", "pigbank plus"
-- "cancelar", "cancelar assinatura", "encerrar assinatura"
+- "assinar plano", "assinar pigbank+", "fazer upgrade", "quero pro"
+- "cancelar plano", "cancelar assinatura", "encerrar plano", "encerrar assinatura"
 - "plano", "meu plano", "minha assinatura", "ver plano"
+
+IMPORTANTE: NUNCA aceitar "assinar" nem "cancelar" puros — esses verbos
+sao usados em outros fluxos do bot (confirmacao de delete, parcelamento,
+etc). Sempre exigir um substantivo junto ("plano", "assinatura", etc).
 
 Compartilhado entre Discord (cog) e WhatsApp (handle_incoming),
 pra resposta consistente entre canais.
@@ -18,13 +22,18 @@ from datetime import datetime, timezone
 from core.dashboard_links import build_dashboard_link
 
 
+# IMPORTANTE: NAO incluir "assinar" puro — pode colidir com fluxos futuros
+# de confirmacao. Sempre exigir substantivo.
 _ASSINAR_TRIGGERS = {
-    "assinar", "fazer upgrade", "upgrade", "quero pro", "quero o pro",
-    "pigbank+", "pigbank plus", "assinatura", "virar pro", "pagar",
+    "assinar plano", "assinar assinatura", "assinar pro", "assinar pigbank+",
+    "assinar pigbank plus", "fazer upgrade", "upgrade", "quero pro", "quero o pro",
+    "virar pro", "pigbank+", "pigbank plus",
 }
+# IMPORTANTE: NAO incluir "cancelar" puro — colide com confirmacao de
+# cancelamento de outras acoes (delete launch, parcelamento, etc).
 _CANCELAR_TRIGGERS = {
-    "cancelar", "cancelar assinatura", "cancelar pro", "cancelar pigbank+",
-    "cancelar plano", "encerrar assinatura", "encerrar plano",
+    "cancelar plano", "cancelar assinatura", "cancelar pro", "cancelar pigbank+",
+    "cancelar pigbank plus", "encerrar assinatura", "encerrar plano",
 }
 _PLANO_TRIGGERS = {
     "plano", "meu plano", "minha assinatura", "ver plano", "qual meu plano",
@@ -131,7 +140,7 @@ def _handle_plano(user_id: int, platform: str) -> str:
             f"• 1 caixinha e 1 cartão de crédito\n"
             f"• Histórico dos últimos 30 dias\n"
             f"• Lançamentos manuais por chat e dashboard\n\n"
-            f"Quer ver o que rola no PigBank+? Manda {b('assinar')} 🐷✨"
+            f"Quer ver o que rola no PigBank+? Manda {b('assinar plano')} 🐷✨"
         )
 
     expires_fmt = _format_plan_expires(expires)
@@ -152,7 +161,7 @@ def _handle_plano(user_id: int, platform: str) -> str:
         f"🐷 Plano: {b('PigBank+')}\n\n"
         f"Status: {status_label}\n"
         f"{next_label}: {b(expires_fmt)}\n\n"
-        f"Pra cancelar: manda {b('cancelar')}"
+        f"Pra cancelar: manda {b('cancelar plano')}"
     )
 
 
