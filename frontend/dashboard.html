@@ -544,6 +544,56 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   padding:8px 20px;border-radius:9px;cursor:pointer;font-size:.82rem;font-weight:600;transition:opacity .2s; }
 .btn-save:hover { opacity:.85; }
 .btn-save:disabled { opacity:.5;cursor:not-allowed; }
+
+/* ─── Pro feature gate (visível mas desabilitado pra Free) ─────────────── */
+.pro-locked {
+  opacity: .55;
+  cursor: not-allowed !important;
+  position: relative;
+}
+.pro-locked::after {
+  content: "🔒";
+  font-size: .72em;
+  margin-left: 6px;
+  filter: grayscale(.3);
+  vertical-align: baseline;
+}
+.pro-locked:hover {
+  opacity: .7;
+}
+.upgrade-modal h3 {
+  background: linear-gradient(135deg,#7c3aed,#3b82f6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-size: 1.05rem;
+  margin-bottom: 6px;
+}
+.upgrade-modal .upg-feat {
+  font-size: .82rem;
+  color: var(--text-2);
+  line-height: 1.5;
+  margin-bottom: 18px;
+}
+.upgrade-modal .upg-perks {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-bottom: 20px;
+}
+.upgrade-modal .upg-perk {
+  font-size: .8rem; color: var(--text-2);
+  display: flex; align-items: center; gap: 8px;
+}
+.upgrade-modal .upg-perk::before {
+  content: "✓"; color: #34d399; font-weight: 700;
+}
+.btn-upgrade {
+  background: linear-gradient(135deg,#7c3aed,#3b82f6);
+  border: none; color: #fff;
+  padding: 10px 22px; border-radius: 9px; cursor: pointer;
+  font-size: .85rem; font-weight: 650; transition: opacity .2s;
+  text-decoration: none; display: inline-block;
+}
+.btn-upgrade:hover { opacity: .88; }
 .modal-label { font-size:.7rem;color:var(--text-3);font-weight:650;letter-spacing:.06em;
   text-transform:uppercase;margin-bottom:6px;display:block; }
 .modal-row { margin-bottom:14px; }
@@ -725,7 +775,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 
   <div class="dashboard-tabs">
     <button class="main-tab active" data-view="overview" onclick="setMainView('overview')">Visão geral</button>
-    <button class="main-tab" data-view="investments" onclick="setMainView('investments')">Investimentos</button>
+    <button class="main-tab" data-view="investments" data-pro-feature="investments" onclick="setMainView('investments')">Investimentos</button>
     <button class="main-tab tab-launch" id="open-launch-btn" type="button" onclick="openLaunchModal()">+ Lançar</button>
     <button class="main-tab tab-launch" id="open-invest-btn" type="button" onclick="openInvestmentModal()" style="display:none">+ Investir</button>
   </div>
@@ -848,6 +898,24 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
   </div>
 
 <div id="toast">✓ Atualizado</div>
+
+<div class="overlay" id="upgrade-overlay" onclick="if(event.target===this) closeUpgradeModal()">
+  <div class="modal upgrade-modal" role="dialog" aria-labelledby="upg-title">
+    <h3 id="upg-title">Disponível no PigBank+</h3>
+    <p class="upg-feat" id="upg-feat-msg">Essa feature é exclusiva pra quem assina.</p>
+    <div class="upg-perks">
+      <div class="upg-perk">Caixinhas e cartões ilimitados</div>
+      <div class="upg-perk">Investimentos com acompanhamento automático</div>
+      <div class="upg-perk">Histórico completo + exportar CSV</div>
+      <div class="upg-perk">Importar extrato e fatura por OFX</div>
+      <div class="upg-perk">Piggy IA — converse sobre suas finanças</div>
+    </div>
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closeUpgradeModal()">Agora não</button>
+      <a class="btn-upgrade" href="/precos" id="upg-cta">Ver planos →</a>
+    </div>
+  </div>
+</div>
 
 <div class="overlay" id="bgt-overlay">
   <div class="modal">
@@ -1378,6 +1446,9 @@ function applyUserMenuState(email, plan, displayName) {
   document.getElementById("user-label").textContent = userMenuLabel(displayName, USER_EMAIL);
   document.getElementById("user-email").textContent = USER_EMAIL || "Minha conta";
   document.getElementById("user-plan").textContent = formatPlanLabel(USER_PLAN);
+  // Reaplicar gates Pro sempre que o plano for atualizado (login, refresh,
+  // upgrade no meio da sessao). Idempotente.
+  applyProGates();
 }
 
 async function loadUserMenuState() {
@@ -1659,6 +1730,12 @@ function taxProfileForAsset(assetType) {
 }
 
 function setMainView(view) {
+  // Free: bloqueia navegacao pra tela inteira de investimentos. Botao fica
+  // visivel mas desabilitado; click abre modal de upgrade (item 17/18).
+  if (view === "investments" && !isProUser()) {
+    showUpgradeModal("investments");
+    return;
+  }
   document.querySelectorAll(".main-tab").forEach(b => b.classList.toggle("active", b.dataset.view === view));
   document.getElementById("overview-view").classList.toggle("active", view === "overview");
   document.getElementById("investments-view").classList.toggle("active", view === "investments");
@@ -1673,6 +1750,77 @@ function setMainView(view) {
     runInvestmentSimulator();
   }
 }
+
+// ── Pro gates (visivel + desabilitado pra Free) ──────────────────────────
+function isProUser() {
+  return (USER_PLAN || "free").trim().toLowerCase() === "pro";
+}
+
+const UPGRADE_MESSAGES = {
+  investments: "Acompanhe sua carteira de investimentos com cálculo automático de rendimento, IR e IOF. Exclusivo do PigBank+.",
+  export: "Exportar seus lançamentos em CSV é uma feature do PigBank+.",
+  pockets_unlimited: "No Free você cria 1 caixinha. Com PigBank+ é ilimitado — separe sua reserva, viagens, presentes…",
+  cards_unlimited: "No Free você cadastra 1 cartão. Com PigBank+ é ilimitado — controle todos os seus cartões em um lugar.",
+  ofx_import: "Importar extrato bancário e fatura de cartão por OFX é exclusivo do PigBank+.",
+  history_unlimited: "Histórico além de 30 dias é exclusivo do PigBank+.",
+  generic: "Essa feature é exclusiva pra quem assina o PigBank+."
+};
+
+function showUpgradeModal(feature) {
+  const overlay = document.getElementById("upgrade-overlay");
+  if (!overlay) return;
+  const msgEl = document.getElementById("upg-feat-msg");
+  if (msgEl) msgEl.textContent = UPGRADE_MESSAGES[feature] || UPGRADE_MESSAGES.generic;
+  overlay.classList.add("open");
+}
+
+function closeUpgradeModal() {
+  const overlay = document.getElementById("upgrade-overlay");
+  if (overlay) overlay.classList.remove("open");
+}
+
+// Aplica estado visual disabled em todos os elementos com data-pro-feature
+// quando o user e Free. Idempotente — pode ser chamada varias vezes.
+function applyProGates() {
+  const isPro = isProUser();
+  document.querySelectorAll("[data-pro-feature]").forEach(el => {
+    if (isPro) {
+      el.classList.remove("pro-locked");
+      el.removeAttribute("aria-disabled");
+    } else {
+      el.classList.add("pro-locked");
+      el.setAttribute("aria-disabled", "true");
+    }
+  });
+}
+
+// Esc fecha o modal
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    const ov = document.getElementById("upgrade-overlay");
+    if (ov && ov.classList.contains("open")) closeUpgradeModal();
+  }
+});
+
+// Interceptor global: qualquer fetch que volte 403 com pro_required abre o
+// modal automaticamente. Cobre casos onde o user fura o gate visual (ex:
+// tenta criar 2a caixinha pelo botao "+ Nova" sem que a UI tenha bloqueado).
+const _origFetch = window.fetch;
+window.fetch = async function(...args) {
+  const res = await _origFetch.apply(this, args);
+  if (res.status === 403) {
+    // Clona pra nao consumir o body do caller
+    try {
+      const clone = res.clone();
+      const data = await clone.json();
+      const feature = data && data.detail && data.detail.error === "pro_required"
+        ? data.detail.feature
+        : null;
+      if (feature) showUpgradeModal(feature);
+    } catch {}
+  }
+  return res;
+};
 
 // ── Modal de investimento ─────────────────────────────────────────────────
 function openInvestmentModal(tab) {
@@ -3929,7 +4077,7 @@ function render(d) {
       <div class="pbar-wrap"><div class="pbar-fill" style="width:${Math.min(Math.max(rate,0),100)}%;background:${rc}"></div></div>
     </div>
 
-    <div class="card card-clickable" style="animation-delay:120ms" onclick="setMainView('investments')" title="Abrir aba de investimentos" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setMainView('investments');}">
+    <div class="card card-clickable" data-pro-feature="investments" style="animation-delay:120ms" onclick="setMainView('investments')" title="Abrir aba de investimentos" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setMainView('investments');}">
 	      <h2>Investimentos</h2>
 	      ${!(d.investments||[]).length?'<div class="empty">Nenhum investimento.</div>':
 	        d.investments.map(i=>{
@@ -4085,6 +4233,10 @@ function render(d) {
     "Última atualização: " + fmtDate(d.timestamp);
   renderInvestmentsPanel(d);
   runInvestmentSimulator();
+
+  // Re-aplicar gates Pro nos elementos recem-renderizados (ex: card de
+  // investimentos da visao geral, criado via innerHTML).
+  applyProGates();
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
