@@ -4360,6 +4360,21 @@ function _showAccessError() {
     return;
   }
 
+  // Stripe Checkout retorna pra /app?upgrade=success ou ?upgrade=cancelled.
+  // Mostra toast e limpa o query param pra nao reaparecer em refresh.
+  const upgradeStatus = params.get("upgrade");
+  if (upgradeStatus === "success") {
+    setTimeout(() => showLaunchSuccessToast("🎉 Bem-vindo ao PigBank+! Aproveite seus 7 dias grátis."), 600);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("upgrade");
+    window.history.replaceState({}, "", url.toString());
+  } else if (upgradeStatus === "cancelled") {
+    setTimeout(() => showLaunchSuccessToast("Tudo bem — você pode assinar quando quiser em /precos."), 600);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("upgrade");
+    window.history.replaceState({}, "", url.toString());
+  }
+
   WS_URL = `${BASE_WS}/ws/${USER_ID}`;
 
 	  updateInvestmentRateHint();
