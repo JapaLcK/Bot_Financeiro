@@ -2913,6 +2913,50 @@ async def billing_portal(user_id: int = Depends(_get_current_user)):
     return {"portal_url": portal.url}
 
 
+# ─── Chat IA (Pro v1 Fase 2 — Bloco A) ──────────────────────────────────────
+
+AI_CHAT_MONTHLY_LIMIT = int(os.getenv("AI_CHAT_MONTHLY_LIMIT", "100"))
+
+
+class AIChatBody(BaseModel):
+    message: str
+
+
+@app.post("/ai/chat")
+async def ai_chat(
+    body: AIChatBody,
+    user_id: int = Depends(require_pro_feature("ai_chat")),
+):
+    """
+    Chat conversacional com o Piggy (IA Pro). Function calling + confirmação
+    humana obrigatória em writes. Rate limit mensal (default 100 msgs).
+
+    Body: {"message": "texto"}
+    Response: {"reply": "...", "usage": {"used": N, "limit": N}}
+    """
+    text = (body.message or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="message vazio.")
+    if len(text) > 2000:
+        raise HTTPException(status_code=400, detail="message muito longo (máx 2000 chars).")
+
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from core.services.ai_chat_service import chat as ai_chat_run
+
+    reply = await asyncio.to_thread(
+        ai_chat_run, user_id, text, monthly_limit=AI_CHAT_MONTHLY_LIMIT,
+    )
+    used_after = await asyncio.to_thread(_db_ai_usage, user_id)
+    return {"reply": reply, "usage": {"used": used_after, "limit": AI_CHAT_MONTHLY_LIMIT}}
+
+
+def _db_ai_usage(user_id: int) -> int:
+    """Lê o contador sem incrementar (pra devolver no response)."""
+    from db import ai_get_usage_this_month
+    return ai_get_usage_this_month(user_id)
+
+
 @app.get("/conta")
 async def conta_redirect(request: Request):
     """
