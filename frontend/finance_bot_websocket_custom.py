@@ -1442,6 +1442,20 @@ def require_pro_feature(feature: str = "generic"):
     return _dep
 
 
+def _require_pro(user_id: int, feature: str) -> None:
+    """
+    Variante inline pra endpoints que ja fazem _authorize_dashboard_access no body
+    (em vez de Depends). Mesmo payload de 403 que require_pro_feature.
+    """
+    from core.services.plan_service import is_pro
+
+    if not is_pro(user_id):
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "pro_required", "feature": feature},
+        )
+
+
 def _extract_bearer_token(request: Request) -> str | None:
     auth = request.headers.get("authorization", "").strip()
     if not auth:
@@ -3162,6 +3176,12 @@ async def monthly_history(request: Request, user_id: int, months: int = 6):
     _authorize_dashboard_access(request, user_id)
     if not 1 <= months <= 24:
         raise HTTPException(status_code=400, detail="months must be 1-24")
+    # Free: limita janela ao history_days do plano (~1 mes). Nao retorna 403 pra
+    # nao quebrar dashboard — apenas capa silenciosamente. Frontend pode ler o
+    # plano e mostrar CTA "ver mais com Pro".
+    from core.services.plan_service import is_pro
+    if months > 1 and not is_pro(user_id):
+        months = 1
     data = await get_monthly_history(user_id, months)
     return {"data": data}
 
@@ -3406,6 +3426,19 @@ async def create_pocket_route(request: Request, user_id: int, payload: PocketCre
     """Cria uma caixinha (pocket) com saldo zero."""
     _authorize_dashboard_access(request, user_id)
 
+    # Free: respeita pockets_max do plano (1). Pro: ilimitado.
+    from core.services.plan_service import get_user_limits
+    from db.pockets import list_pockets
+    limits = get_user_limits(user_id)
+    pockets_max = limits["pockets_max"]
+    if pockets_max is not None:
+        existing = await asyncio.to_thread(list_pockets, user_id)
+        if len(existing) >= pockets_max:
+            raise HTTPException(
+                status_code=403,
+                detail={"error": "pro_required", "feature": "pockets_unlimited"},
+            )
+
     name = (payload.name or "").strip()
     description = (payload.description or "").strip() or None
     if not name:
@@ -3604,6 +3637,19 @@ class CardCreatePayload(BaseModel):
 async def create_card_route(request: Request, user_id: int, payload: CardCreatePayload):
     """Cria um cartão de crédito."""
     _authorize_dashboard_access(request, user_id)
+
+    # Free: respeita cards_max do plano (1). Pro: ilimitado.
+    from core.services.plan_service import get_user_limits
+    from db.cards import list_cards
+    limits = get_user_limits(user_id)
+    cards_max = limits["cards_max"]
+    if cards_max is not None:
+        existing = await asyncio.to_thread(list_cards, user_id)
+        if len(existing) >= cards_max:
+            raise HTTPException(
+                status_code=403,
+                detail={"error": "pro_required", "feature": "cards_unlimited"},
+            )
 
     name = (payload.name or "").strip()
     if not name:
@@ -3858,6 +3904,7 @@ async def pay_bill_route(
 @app.get("/export/{user_id}")
 async def export_csv(request: Request, user_id: int, year: int = None, month: int = None):
     _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "export")
     now = datetime.now(timezone.utc)
     y = year  or now.year
     m = month or now.month
@@ -3991,6 +4038,7 @@ async def investment_rates(request: Request, user_id: int):
 @app.post("/investments/{user_id}")
 async def create_investment_route(request: Request, user_id: int, payload: InvestmentCreatePayload):
     _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "investments")
 
     name = payload.name.strip()
     period = payload.period.strip().lower()

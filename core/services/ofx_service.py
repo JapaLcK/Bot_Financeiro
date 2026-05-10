@@ -60,8 +60,20 @@ def format_ofx_report(rep: dict) -> str:
     return "\n\n".join(blocks)
 
 
+_PRO_REQUIRED_OFX_MSG = (
+    "📄 **Importar OFX é uma feature do PigBank+ (Pro).**\n\n"
+    "No plano Free voce pode lançar gastos manualmente pelo chat ou pelo dashboard. "
+    "Pra importar extratos e faturas em lote, faça upgrade pelo `pigbankai.com/precos` "
+    "ou diga `/assinar` aqui mesmo.\n\n"
+    "🐷 — Piggy"
+)
+
+
 def handle_ofx_import(user_id: str, attachment_bytes: bytes, filename: str) -> str:
     uid = int(user_id)
+    from core.services.plan_service import is_pro
+    if not is_pro(uid):
+        return _PRO_REQUIRED_OFX_MSG
     rep = import_ofx_bytes(uid, attachment_bytes, filename)
     return format_ofx_report(rep)
 
@@ -135,8 +147,11 @@ def handle_credit_ofx_import(user_id: str, attachment_bytes: bytes, filename: st
     """
     from db import list_cards, get_default_card_id
     from ofx_credit_import import import_credit_ofx_bytes
+    from core.services.plan_service import is_pro
 
     uid = int(user_id)
+    if not is_pro(uid):
+        return _PRO_REQUIRED_OFX_MSG
     cards = list_cards(uid)
 
     # Sem cartões cadastrados
