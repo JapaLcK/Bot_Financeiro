@@ -2903,10 +2903,17 @@ async def conta_redirect(request: Request):
 # ─── Static file routes ──────────────────────────────────────────────────────
 
 @app.get("/d/{code}")
-async def dashboard_short_link(request: Request, code: str, view: str | None = None):
+async def dashboard_short_link(
+    request: Request,
+    code: str,
+    view: str | None = None,
+    next: str | None = None,
+):
     """
     Resolve um magic link gerado pelo bot.
     O link é de uso único e cria uma sessão curta no navegador.
+    `next` (opcional): rota interna pra redirecionar apos logar
+    (ex: /precos, /conta). Tem prioridade sobre `view`.
     """
     from db import consume_dashboard_session
 
@@ -2939,10 +2946,15 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
 </div></body></html>""".replace("__MAGIC_LINK_MINUTES__", str(DASHBOARD_MAGIC_LINK_MINUTES))
         return HTMLResponse(content=expired_html, status_code=401)
 
-    target_view = view if view in {"overview", "investments", "open-finance"} else None
-    redirect_url = "/settings?view=open-finance" if target_view == "open-finance" else (
-        f"/app?view={urllib.parse.quote(target_view)}" if target_view else "/app"
-    )
+    # next: rotas internas permitidas pra evitar open-redirect. Tem prioridade sobre view.
+    _ALLOWED_NEXT_PREFIXES = ("/precos", "/conta", "/app", "/home", "/settings")
+    if next and next.startswith("/") and any(next.startswith(p) for p in _ALLOWED_NEXT_PREFIXES):
+        redirect_url = next
+    else:
+        target_view = view if view in {"overview", "investments", "open-finance"} else None
+        redirect_url = "/settings?view=open-finance" if target_view == "open-finance" else (
+            f"/app?view={urllib.parse.quote(target_view)}" if target_view else "/app"
+        )
     response = RedirectResponse(url=redirect_url, status_code=302)
     # Magic-link tambem cria auth_session — aparece em "Dispositivos conectados"
     # e pode ser revogado individualmente como qualquer outra sessao.

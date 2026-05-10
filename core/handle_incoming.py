@@ -391,6 +391,14 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
             if open_finance_reply is not None:
                 return [OutgoingMessage(text=open_finance_reply)]
 
+        # Comandos de assinatura (assinar / cancelar / plano) — funcionam em
+        # whatsapp e discord. Roda antes do classifier pra nao depender de
+        # intent training.
+        from core.services.billing_commands import handle_billing_command
+        billing_reply = handle_billing_command(uid, text, platform=platform)
+        if billing_reply is not None:
+            return [OutgoingMessage(text=billing_reply)]
+
         intent_result = classify(text, user_id=uid)
 
         # ------------------------------------------------------------------

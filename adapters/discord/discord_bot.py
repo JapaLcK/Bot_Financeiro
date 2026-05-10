@@ -40,17 +40,19 @@ from adapters.discord.cogs.general_cog import GeneralCog
 from adapters.discord.cogs.pockets_cog import PocketsCog
 from adapters.discord.cogs.investments_cog import InvestmentsCog
 from adapters.discord.cogs.accounts_cog import AccountsCog
+from adapters.discord.cogs.billing_cog import BillingCog
 
 # ── Instâncias dos Cogs (acesso direto para chamar .handle()) ─────────────────
 _general_cog: GeneralCog | None = None
 _pockets_cog: PocketsCog | None = None
 _investments_cog: InvestmentsCog | None = None
 _accounts_cog: AccountsCog | None = None
+_billing_cog: BillingCog | None = None
 
 
 class FinanceBot(commands.Bot):
     async def setup_hook(self) -> None:
-        global _general_cog, _pockets_cog, _investments_cog, _accounts_cog
+        global _general_cog, _pockets_cog, _investments_cog, _accounts_cog, _billing_cog
 
         if self.get_cog("GeneralCog"):
             logger.info("Cogs ja estavam carregados; pulando setup.")
@@ -61,14 +63,16 @@ class FinanceBot(commands.Bot):
         _pockets_cog = PocketsCog(self)
         _investments_cog = InvestmentsCog(self)
         _accounts_cog = AccountsCog(self)
+        _billing_cog = BillingCog(self)
 
         await self.add_cog(_general_cog)
         await self.add_cog(_pockets_cog)
         await self.add_cog(_investments_cog)
         await self.add_cog(_accounts_cog)
+        await self.add_cog(_billing_cog)
 
         setup_daily_report(self)
-        logger.info("Cogs carregados: General, Pockets, Investments, Accounts")
+        logger.info("Cogs carregados: General, Pockets, Investments, Accounts, Billing")
 
 
 # ── Bot setup ─────────────────────────────────────────────────────────────────
@@ -170,6 +174,11 @@ async def _handle_message(message: discord.Message, text: str, t: str, external_
         if outs:
             for out in outs:
                 await message.reply(out.text)
+            return
+
+        # ── 2a. BillingCog (assinar, cancelar, plano) — antes de GeneralCog
+        # pra garantir que "plano" nao colida com nenhum trigger generico.
+        if _billing_cog and await _billing_cog.handle(message, t, uid):
             return
 
         # ── 2. GeneralCog (menu, ajuda, pending, dashboard, CDI) ─────────────
