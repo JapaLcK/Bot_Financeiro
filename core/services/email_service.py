@@ -3,9 +3,10 @@ email_service.py
 Serviço de envio de e-mails transacionais via Resend API.
 
 Variáveis de ambiente necessárias:
-  RESEND_API_KEY   — chave da API do Resend (re_xxxxxxxx)
-  EMAIL_FROM       — remetente (default: "PigBank AI <noreply@pigbankai.com>")
-  SUPPORT_EMAIL    — e-mail público de suporte (default: "contato@pigbankai.com")
+  RESEND_API_KEY      — chave da API do Resend (re_xxxxxxxx)
+  EMAIL_FROM          — remetente institucional (default: "PigBank AI <suporte@pigbankai.com>")
+  EMAIL_FROM_PIGGY    — remetente Piggy/conversacional (default: "Piggy do PigBank <oi@pigbankai.com>")
+  SUPPORT_EMAIL       — e-mail público de suporte (default: "suporte@pigbankai.com")
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-EMAIL_FROM          = os.getenv("EMAIL_FROM",          "Piggy do PigBank <oi@pigbankai.com>")
+EMAIL_FROM          = os.getenv("EMAIL_FROM",          "PigBank AI <suporte@pigbankai.com>")
 EMAIL_FROM_PIGGY    = os.getenv("EMAIL_FROM_PIGGY",    "Piggy do PigBank <oi@pigbankai.com>")
 SUPPORT_EMAIL       = os.getenv("SUPPORT_EMAIL",       "suporte@pigbankai.com")
 
@@ -752,7 +753,6 @@ def send_pro_welcome_email(to: str, trial_end_at, dashboard_url: str = "") -> bo
     return send_email(
         to=to, subject="🐷 Tá dentro do PigBank+!",
         html_body=html, text_body=text,
-        headers={"Reply-To": SUPPORT_EMAIL},
     )
 
 
@@ -781,7 +781,6 @@ def send_trial_ending_email(to: str, trial_end_at, dashboard_url: str = "") -> b
     return send_email(
         to=to, subject="🐷 Seu trial PigBank+ termina em 3 dias",
         html_body=html, text_body=text,
-        headers={"Reply-To": SUPPORT_EMAIL},
     )
 
 
@@ -810,7 +809,6 @@ def send_pro_charged_email(to: str, amount_brl: float, next_charge_at, dashboard
     return send_email(
         to=to, subject=f"✓ Pagamento confirmado — PigBank+ ({valor})",
         html_body=html, text_body=text,
-        headers={"Reply-To": SUPPORT_EMAIL},
     )
 
 
@@ -839,7 +837,6 @@ def send_payment_failed_email(to: str, dashboard_url: str = "") -> bool:
     return send_email(
         to=to, subject="⚠️ PigBank+ — pagamento falhou, atualize seu cartão",
         html_body=html, text_body=text,
-        headers={"Reply-To": SUPPORT_EMAIL},
     )
 
 
@@ -867,5 +864,4 @@ def send_subscription_canceled_email(to: str, expires_at, dashboard_url: str = "
     return send_email(
         to=to, subject="PigBank+ — assinatura cancelada",
         html_body=html, text_body=text,
-        headers={"Reply-To": SUPPORT_EMAIL},
     )
