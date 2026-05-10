@@ -2699,12 +2699,26 @@ async def billing_webhook(request: Request):
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         user_id = _resolve_user(session)
-        if user_id:
-            # Subscription ainda pode estar incompleta; aguarda invoice.paid
+        sub_id  = session.get("subscription")
+        # Trial 7d: subscription nasce status=trialing, sem invoice paga.
+        # Promover ja agora pra user nao ficar Free durante o trial.
+        if user_id and sub_id:
+            sub = stripe.Subscription.retrieve(sub_id)
+            expires_dt = datetime.fromtimestamp(sub["current_period_end"], tz=timezone.utc)
+            update_user_plan(user_id, "pro", expires_dt)
             await log_system_event(
                 "info",
                 "billing_checkout_completed",
-                "Checkout do Stripe concluido.",
+                f"Checkout concluido; plano pro ate {expires_dt.date()}.",
+                source="billing",
+                user_id=user_id,
+                details={"plan": "pro", "expires_at": expires_dt.isoformat(), "status": sub.get("status")},
+            )
+        elif user_id:
+            await log_system_event(
+                "info",
+                "billing_checkout_completed",
+                "Checkout do Stripe concluido (sem subscription).",
                 source="billing",
                 user_id=user_id,
             )
