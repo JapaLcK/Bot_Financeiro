@@ -750,6 +750,8 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
         <span id="status-text">Conectando…</span>
       </div>
       <button class="hbtn" id="refresh-btn" onclick="sendRefresh()"><span id="ref-icon">↻</span> Atualizar</button>
+      <button class="hbtn" data-pro-feature="ofx_import" onclick="openOfxImport()">⬆ Importar OFX</button>
+      <input type="file" id="ofx-file-input" accept=".ofx" style="display:none" onchange="handleOfxFileSelected(event)" />
       <button class="hbtn" data-pro-feature="export" onclick="exportCSV()">⬇ Exportar</button>
       <div class="user-menu" id="user-menu">
         <button class="hbtn user-menu-btn" id="user-menu-btn" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleUserMenu(event)">
@@ -900,6 +902,16 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
   </div>
 
 <div id="toast">✓ Atualizado</div>
+
+<div class="overlay" id="ofx-result-overlay" onclick="if(event.target===this) closeOfxResult()">
+  <div class="modal wide" role="dialog" aria-labelledby="ofx-result-title">
+    <h3 id="ofx-result-title">Importação OFX</h3>
+    <pre id="ofx-result-body" style="white-space:pre-wrap;font-family:inherit;font-size:.85rem;color:var(--text);background:rgba(255,255,255,.04);border:1px solid var(--glass-border);border-radius:10px;padding:14px;max-height:60vh;overflow:auto;margin-bottom:18px"></pre>
+    <div class="modal-acts">
+      <button class="btn-save" type="button" onclick="closeOfxResult()">Fechar</button>
+    </div>
+  </div>
+</div>
 
 <div class="overlay" id="upgrade-overlay" onclick="if(event.target===this) closeUpgradeModal()">
   <div class="modal upgrade-modal" role="dialog" aria-labelledby="upg-title">
@@ -3848,6 +3860,68 @@ document.addEventListener("keydown", e => {
 /* ═══════════════════════════════════════════════════════════════════════
    EXPORT
 ═══════════════════════════════════════════════════════════════════════ */
+// ── Importar OFX (extrato bancario ou fatura de cartao) ────────────────
+function openOfxImport() {
+  // Free: nao abre o picker — vai direto pro modal de upgrade.
+  if (!isProUser()) {
+    showUpgradeModal("ofx_import");
+    return;
+  }
+  const inp = document.getElementById("ofx-file-input");
+  if (inp) { inp.value = ""; inp.click(); }
+}
+
+async function handleOfxFileSelected(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith(".ofx")) {
+    showLaunchSuccessToast("Arquivo precisa ter extensão .ofx.");
+    return;
+  }
+
+  showLaunchSuccessToast("Enviando arquivo OFX…");
+  const form = new FormData();
+  form.append("file", file, file.name);
+
+  try {
+    const resp = await fetch(`${API}/ofx/import/${USER_ID}`, {
+      method: "POST",
+      body: form,
+      credentials: "same-origin",
+      // CSRF: o interceptor global em window.fetch nao mexe nos headers,
+      // entao incluimos manualmente igual outros POSTs.
+      headers: { "x-csrf-token": getCsrfToken() },
+    });
+    let data = {};
+    try { data = await resp.json(); } catch {}
+    if (!resp.ok) {
+      // 403 pro_required ja eh tratado pelo interceptor global (abre modal).
+      // Outros erros mostram toast com o detail amigavel.
+      if (resp.status !== 403) {
+        const msg = (data && (data.detail || data.error)) || `Erro ${resp.status}.`;
+        showLaunchSuccessToast(typeof msg === "string" ? msg : "Erro ao importar OFX.");
+      }
+      return;
+    }
+    // Sucesso: mostra resultado no modal e atualiza dashboard.
+    document.getElementById("ofx-result-body").textContent = data.message || "Importação concluída.";
+    document.getElementById("ofx-result-overlay").classList.add("open");
+    sendRefresh && sendRefresh();
+  } catch (e) {
+    showLaunchSuccessToast("Erro ao importar OFX. Tente novamente.");
+  }
+}
+
+function closeOfxResult() {
+  const ov = document.getElementById("ofx-result-overlay");
+  if (ov) ov.classList.remove("open");
+}
+
+function getCsrfToken() {
+  const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
 async function exportCSV() {
   const url = `${API}/export/${USER_ID}?year=${viewYear}&month=${viewMonth}`;
   const filename = `financas_${viewYear}_${String(viewMonth).padStart(2,"0")}.csv`;

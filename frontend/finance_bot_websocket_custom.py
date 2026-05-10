@@ -3901,6 +3901,52 @@ async def pay_bill_route(
     }
 
 
+MAX_OFX_BYTES = 8 * 1024 * 1024  # 8 MB — extratos OFX raramente passam disso
+
+
+@app.post("/ofx/import/{user_id}")
+async def ofx_import_route(request: Request, user_id: int):
+    """
+    Upload de arquivo OFX via dashboard. Aceita multipart/form-data com campo
+    `file`. Detecta automaticamente extrato bancario vs fatura de cartao e
+    roteia pro service correto. Pro-only.
+    """
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "ofx_import")
+
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None or not hasattr(upload, "read"):
+        raise HTTPException(status_code=400, detail="Arquivo OFX nao enviado (campo 'file' ausente).")
+
+    filename = (getattr(upload, "filename", "") or "arquivo.ofx").strip()
+    if not filename.lower().endswith(".ofx"):
+        raise HTTPException(status_code=400, detail="Arquivo precisa ter extensao .ofx.")
+
+    raw = await upload.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Arquivo OFX vazio.")
+    if len(raw) > MAX_OFX_BYTES:
+        raise HTTPException(status_code=413, detail=f"Arquivo grande demais (max {MAX_OFX_BYTES // (1024*1024)} MB).")
+
+    from ofx_import import detect_ofx_type
+    from core.services.ofx_service import handle_ofx_import, handle_credit_ofx_import
+
+    ofx_type = detect_ofx_type(raw)
+    if ofx_type == "credit_card":
+        message = await asyncio.to_thread(handle_credit_ofx_import, str(user_id), raw, filename)
+    elif ofx_type == "bank":
+        message = await asyncio.to_thread(handle_ofx_import, str(user_id), raw, filename)
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Nao consegui identificar o tipo de OFX (extrato bancario ou fatura de cartao).",
+        )
+
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "type": ofx_type, "message": message}
+
+
 @app.get("/export/{user_id}")
 async def export_csv(request: Request, user_id: int, year: int = None, month: int = None):
     _authorize_dashboard_access(request, user_id)
