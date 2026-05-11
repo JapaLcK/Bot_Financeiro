@@ -42,13 +42,19 @@ def _parse_iso_date(s: str | None) -> date | None:
 # ─── Read ───────────────────────────────────────────────────────────────────
 
 def _list_investments(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    rows = db.list_investments(user_id)
+    # accrue_all_investments aplica juros ate hoje E retorna a lista — usa
+    # ele em vez de db.list_investments pra evitar mostrar saldo defasado.
+    rows = db.accrue_all_investments(user_id)
     return {
         "investments": [
             {
                 "id": r["id"],
                 "name": r["name"],
-                "balance": float(r["balance"] or 0),
+                "balance": float(
+                    r.get("projected_balance")
+                    if r.get("projected_days") and r.get("projected_balance")
+                    else r["balance"] or 0
+                ),
                 # rate_display ja formatado (ex: "116% CDI", "13,78% a.a.",
                 # "IPCA + 7,62% a.a."). Use ele direto na resposta — NAO
                 # interprete `rate` cru, ele varia de significado (multiplier
@@ -66,8 +72,14 @@ def _list_investments(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _get_investment_summary(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    rows = db.list_investments(user_id)
-    total = sum(float(r["balance"] or 0) for r in rows)
+    # Mesma logica do _list_investments: aplica accrual antes de somar.
+    rows = db.accrue_all_investments(user_id)
+    total = 0.0
+    for r in rows:
+        if r.get("projected_days") and r.get("projected_balance"):
+            total += float(r["projected_balance"])
+        else:
+            total += float(r["balance"] or 0)
     return {
         "total_invested": total,
         "investment_count": len(rows),
