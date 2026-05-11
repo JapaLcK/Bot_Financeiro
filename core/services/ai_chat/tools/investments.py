@@ -124,17 +124,22 @@ def _create_investment_execute(user_id: int, args: dict[str, Any]) -> str:
     name = (args.get("name") or "").strip()
     period = (args.get("period") or "").strip()
     try:
-        rate = float(args.get("rate"))
+        rate_pct = float(args.get("rate"))  # 14.25 == 14,25%; 100 == 100% (do CDI ou a.a.)
     except (TypeError, ValueError):
         return "🐷 Informa uma taxa numérica."
     if not name:
         return "🐷 Faltou o nome do investimento."
     if period not in _PERIODS:
         return '🐷 O period precisa ser "daily", "monthly" ou "yearly".'
-    if rate <= 0:
+    if rate_pct <= 0:
         return "🐷 A taxa precisa ser maior que zero."
+    # Storage: a tabela investments guarda rate como decimal/multiplier
+    # (1.00 == 100%). O dashboard multiplica por 100 pra exibir. fmt_rate
+    # tolera ambas as escalas pra compat, mas o caminho consistente e
+    # sempre gravar decimal.
+    rate_decimal = rate_pct / 100
     try:
-        db.create_investment(user_id, name, rate, period)
+        db.create_investment(user_id, name, rate_decimal, period)
         return f'✅ Investimento "{name}" criado.'
     except ValueError as e:
         return f"🐷 Não consegui criar: {e}"
@@ -270,7 +275,11 @@ TOOLS: list[Tool] = [
                     "type": "object",
                     "properties": {
                         "name": {"type": "string", "description": "Nome do investimento (ex: 'Tesouro Selic 2029', 'CDB Nubank')."},
-                        "rate": {"type": "number", "minimum": 0.01, "description": "Taxa em % (ex: 14.25 para 14,25%)."},
+                        "rate": {
+                            "type": "number",
+                            "minimum": 0.01,
+                            "description": "Taxa em PORCENTAGEM como o user fala (ex: 14.25 → 14,25%; 100 → 100% do CDI). NÃO converter pra decimal — passa o número literal que o user disse.",
+                        },
                         "period": {"type": "string", "enum": list(_PERIODS), "description": "Periodicidade da taxa: daily, monthly ou yearly."},
                     },
                     "required": ["name", "rate", "period"],
