@@ -437,6 +437,32 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         intent_result = classify(text, user_id=uid)
 
         # ------------------------------------------------------------------
+        # 5b. Roteamento híbrido: se o classifier não reconheceu (out_of_scope
+        # ou baixa confiança), tenta a IA conversacional pra users Pro. Cobre
+        # variações que escapam dos regex do classifier — typos ("qual eh meu
+        # saldo"), gírias ("qto sobrou"), fraseamento solto. Free segue no
+        # fluxo padrão (mensagem "não entendi" com sugestões).
+        # ------------------------------------------------------------------
+        should_try_ai_fallback = (
+            intent_result.intent == "out_of_scope"
+            or intent_result.confidence < 0.55
+        )
+        if should_try_ai_fallback:
+            try:
+                from core.services.plan_service import is_pro
+                if is_pro(uid):
+                    from core.services.ai_chat import chat as ai_chat_run
+                    from core.services.ai_chat_commands import AI_CHAT_MONTHLY_LIMIT
+                    ai_reply = ai_chat_run(uid, text, monthly_limit=AI_CHAT_MONTHLY_LIMIT)
+                    return [OutgoingMessage(text=ai_reply)]
+            except Exception as exc:
+                logger.warning(
+                    "ai fallback falhou pra user %s: %s — caindo no fluxo normal",
+                    uid, exc,
+                )
+                # segue pro route() abaixo (resposta padrão "não entendi")
+
+        # ------------------------------------------------------------------
         # 6. Roteia → executa → obtém resposta bruta
         # ------------------------------------------------------------------
         raw_response = route(intent_result, msg_normalized)
