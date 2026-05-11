@@ -2935,7 +2935,7 @@ async def billing_portal(user_id: int = Depends(_get_current_user)):
 
 # ─── Chat IA (Pro v1 Fase 2 — Bloco A) ──────────────────────────────────────
 
-AI_CHAT_MONTHLY_LIMIT = int(os.getenv("AI_CHAT_MONTHLY_LIMIT", "100"))
+AI_CHAT_MONTHLY_LIMIT = int(os.getenv("AI_CHAT_MONTHLY_LIMIT", "1000"))
 
 
 class AIChatBody(BaseModel):

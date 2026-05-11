@@ -22,7 +22,7 @@ from core.services.plan_service import is_pro
 
 logger = logging.getLogger(__name__)
 
-AI_CHAT_MONTHLY_LIMIT = int(os.getenv("AI_CHAT_MONTHLY_LIMIT", "100"))
+AI_CHAT_MONTHLY_LIMIT = int(os.getenv("AI_CHAT_MONTHLY_LIMIT", "1000"))
 
 
 # Prefixos aceitos pra "chamar" o Piggy IA. Case-insensitive, sem acentos.

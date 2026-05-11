@@ -12,7 +12,7 @@ Pacote organizado por responsabilidade:
                      ├── __init__.py    agrega TOOLS + expõe SCHEMAS/WRITE_TOOL_NAMES
                      └── categories.py  tools de categorização
 
-Public API: `chat(user_id, user_text, *, monthly_limit=100) -> str`
+Public API: `chat(user_id, user_text, *, monthly_limit=1000) -> str`
 """
 from .runner import chat
 

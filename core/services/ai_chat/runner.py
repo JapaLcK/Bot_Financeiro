@@ -53,7 +53,7 @@ ERROR_MSG = (
 )
 
 
-def chat(user_id: int, user_text: str, *, monthly_limit: int = 100) -> str:
+def chat(user_id: int, user_text: str, *, monthly_limit: int = 1000) -> str:
     """
     Processa uma mensagem do user e retorna a resposta da IA.
 

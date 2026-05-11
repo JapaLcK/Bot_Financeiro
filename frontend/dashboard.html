@@ -4779,7 +4779,20 @@ if ("serviceWorker" in navigator) {
   function updateUsage(u) {
     if (!u) return;
     const el = document.getElementById("piggy-usage");
-    if (el) el.textContent = `${u.used} / ${u.limit} mensagens este mês`;
+    if (!el) return;
+    const pct = u.limit > 0 ? u.used / u.limit : 0;
+    // < 80% do limite: esconde o teto pra dar sensacao de "ilimitado".
+    // >= 80%: comeca a avisar com texto laranja. >= 100%: vermelho (bloqueado).
+    if (pct >= 1) {
+      el.textContent = `Limite mensal atingido (${u.used} / ${u.limit}). Reseta no dia 1º.`;
+      el.style.color = "#fb7185";
+    } else if (pct >= 0.8) {
+      el.textContent = `${u.used} / ${u.limit} mensagens este mês`;
+      el.style.color = "#fbbf24";
+    } else {
+      el.textContent = `${u.used} mensagens este mês`;
+      el.style.color = "";
+    }
   }
 
   // Fecha com Esc
