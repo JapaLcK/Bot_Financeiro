@@ -2974,7 +2974,11 @@ async def ai_chat(
     from core.services.ai_chat import chat as ai_chat_run
 
     reply = await asyncio.to_thread(
-        ai_chat_run, user_id, text, monthly_limit=AI_CHAT_MONTHLY_LIMIT,
+        ai_chat_run,
+        user_id,
+        text,
+        monthly_limit=AI_CHAT_MONTHLY_LIMIT,
+        platform="dashboard",
     )
     used_after = await asyncio.to_thread(_db_ai_usage, user_id)
     return {"reply": reply, "usage": {"used": used_after, "limit": AI_CHAT_MONTHLY_LIMIT}}

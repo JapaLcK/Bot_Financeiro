@@ -9,6 +9,7 @@ pra `core.handlers.launches.add_from_entities` — então os testes garantem:
 from decimal import Decimal
 
 import db
+from core.services.ai_chat._context import CURRENT_PLATFORM
 from core.services.ai_chat.tools.launches import _add_launch_execute
 
 
@@ -86,6 +87,43 @@ def test_execute_data_iso_define_criado_em(user_id):
     rows = db.list_launches(user_id, limit=10)
     padaria = next(r for r in rows if r.get("alvo") == "padaria")
     assert padaria["criado_em"].date().isoformat() == "2026-04-15"
+
+
+def test_execute_no_whatsapp_seta_pending_action_de_botao(user_id):
+    """Quando platform=whatsapp, o handler seta `recategorize_launch_offer`
+    pra o wa_runtime renderizar botões 'Trocar categoria' / 'Desfazer'."""
+    db.add_launch_and_update_balance(user_id, "receita", 500, None, "seed")
+
+    token = CURRENT_PLATFORM.set("whatsapp")
+    try:
+        _add_launch_execute(user_id, {
+            "tipo": "despesa",
+            "valor": 50,
+            "alvo": "mercado",
+        })
+    finally:
+        CURRENT_PLATFORM.reset(token)
+
+    pending = db.get_pending_action(user_id)
+    assert pending is not None
+    assert pending["action_type"] == "recategorize_launch_offer"
+    assert "launch_id" in pending["payload"]
+    assert "user_seq" in pending["payload"]
+
+
+def test_execute_no_dashboard_nao_seta_pending_action_de_botao(user_id):
+    """Dashboard não renderiza botões — não polui o pending_action slot."""
+    db.add_launch_and_update_balance(user_id, "receita", 500, None, "seed")
+
+    # default do CURRENT_PLATFORM = 'dashboard'
+    _add_launch_execute(user_id, {
+        "tipo": "despesa",
+        "valor": 50,
+        "alvo": "mercado",
+    })
+
+    pending = db.get_pending_action(user_id)
+    assert pending is None
 
 
 def test_execute_consistente_com_handler_tradicional(user_id):

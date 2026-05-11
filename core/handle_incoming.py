@@ -476,7 +476,9 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
                 if is_pro(uid):
                     from core.services.ai_chat import chat as ai_chat_run
                     from core.services.ai_chat_commands import AI_CHAT_MONTHLY_LIMIT
-                    ai_reply = ai_chat_run(uid, text, monthly_limit=AI_CHAT_MONTHLY_LIMIT)
+                    ai_reply = ai_chat_run(
+                        uid, text, monthly_limit=AI_CHAT_MONTHLY_LIMIT, platform=platform,
+                    )
                     return [OutgoingMessage(text=ai_reply)]
             except Exception as exc:
                 logger.warning(
@@ -502,7 +504,9 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
                 if is_pro(uid):
                     from core.services.ai_chat import chat as ai_chat_run
                     from core.services.ai_chat_commands import AI_CHAT_MONTHLY_LIMIT
-                    ai_reply = ai_chat_run(uid, text, monthly_limit=AI_CHAT_MONTHLY_LIMIT)
+                    ai_reply = ai_chat_run(
+                        uid, text, monthly_limit=AI_CHAT_MONTHLY_LIMIT, platform=platform,
+                    )
                     return [OutgoingMessage(text=ai_reply)]
             except Exception as exc:
                 logger.warning(

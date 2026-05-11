@@ -28,6 +28,7 @@ from typing import Any
 
 import db
 
+from ._context import CURRENT_PLATFORM
 from .confirmations import is_cancel, is_confirm
 from .history import trim_history_for_openai
 from .system_prompt import SYSTEM_PROMPT
@@ -53,13 +54,31 @@ ERROR_MSG = (
 )
 
 
-def chat(user_id: int, user_text: str, *, monthly_limit: int = 1000) -> str:
+def chat(
+    user_id: int,
+    user_text: str,
+    *,
+    monthly_limit: int = 1000,
+    platform: str = "dashboard",
+) -> str:
     """
     Processa uma mensagem do user e retorna a resposta da IA.
+
+    `platform` é propagada via contextvar pras tools que se comportam
+    diferente por canal (ex: `add_launch` aciona pending action de botão
+    "trocar categoria" só em `platform="whatsapp"`).
 
     NÃO checa plano Pro — quem chama (endpoint / bot) que decide se gateia.
     Aplica rate limit mensal aqui (incrementa contador APÓS resposta bem-sucedida).
     """
+    token = CURRENT_PLATFORM.set(platform)
+    try:
+        return _chat_inner(user_id, user_text, monthly_limit=monthly_limit)
+    finally:
+        CURRENT_PLATFORM.reset(token)
+
+
+def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
     user_id = int(user_id)
     user_text = (user_text or "").strip()
     if not user_text:

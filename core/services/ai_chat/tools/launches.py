@@ -17,6 +17,7 @@ from typing import Any
 import db
 from utils_date import _tz
 
+from .._context import CURRENT_PLATFORM
 from ._base import Tool
 
 
@@ -110,7 +111,7 @@ def _add_launch_execute(user_id: int, args: dict[str, Any]) -> str:
         nota=(args.get("nota") or "").strip() or None,
         categoria=(args.get("categoria") or "").strip() or None,
         criado_em=_parse_iso_datetime_for_launch(args.get("data")),
-        platform="ia",
+        platform=CURRENT_PLATFORM.get(),
     )
 
 
