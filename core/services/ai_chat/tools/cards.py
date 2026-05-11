@@ -4,6 +4,7 @@ core/services/ai_chat/tools/cards.py — tools de cartões de crédito.
 Read:
   - list_cards: cartões cadastrados (nome, fechamento, vencimento, default)
   - get_open_bill: fatura em aberto de um cartão (total, pagado, itens)
+  - get_card_limit_usage: limite, usado e disponível de um cartão
 
 Write:
   - add_credit_purchase (auto-execute): registra compra na fatura, opcionalmente
@@ -85,6 +86,48 @@ def _get_open_bill(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
             }
             for it in items
         ],
+    }
+
+
+# ─── Read: get_card_limit_usage ─────────────────────────────────────────────
+
+def _get_card_limit_usage(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    """Retorna limite, usado e livre de um cartão.
+
+    `usado` é a soma das faturas em aberto/fechadas (status='open' OR 'closed')
+    descontando o que já foi pago. Faturas 'paid' não comprometem limite. Se
+    o cartão não tem limite registrado (`credit_limit IS NULL`), retorna
+    apenas `used` e instrução pro user cadastrar via dashboard.
+    """
+    card_id = _resolve_card_id(user_id, args.get("card_name"))
+    if not card_id:
+        return {"error": "Nenhum cartão cadastrado ou nome não encontrado."}
+
+    card = db.get_card_by_id(user_id, card_id)
+    if not card:
+        return {"error": "Cartão não encontrado."}
+
+    name = card.get("name") or "cartão"
+    limit_raw = card.get("credit_limit")
+    used = float(db.get_card_credit_usage(user_id, card_id))
+
+    if limit_raw is None:
+        return {
+            "card_name": name,
+            "credit_limit": None,
+            "used": used,
+            "available": None,
+            "note": "Limite não cadastrado. Pra ver quanto sobra, cadastre o limite do cartão no dashboard.",
+        }
+
+    limit = float(limit_raw)
+    available = max(0.0, limit - used)
+    return {
+        "card_name": name,
+        "credit_limit": limit,
+        "used": used,
+        "available": available,
+        "used_pct": round(100 * used / limit, 1) if limit > 0 else 0.0,
     }
 
 
@@ -195,6 +238,33 @@ TOOLS: list[Tool] = [
         },
         is_write=False,
         execute=_get_open_bill,
+    ),
+    Tool(
+        schema={
+            "type": "function",
+            "function": {
+                "name": "get_card_limit_usage",
+                "description": (
+                    "Retorna limite, valor usado e disponível de um cartão "
+                    "de crédito. Use pra 'quanto tenho livre no Nubank?', "
+                    "'quanto já usei do limite?', 'qual meu limite disponível?'. "
+                    "Se card_name não for passado, usa o cartão padrão. Se o "
+                    "limite não estiver cadastrado, retorna apenas o usado e "
+                    "instrui o user a cadastrar no dashboard."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "card_name": {
+                            "type": "string",
+                            "description": "Nome do cartão (ex: 'Nubank'). Omitir usa o padrão.",
+                        },
+                    },
+                },
+            },
+        },
+        is_write=False,
+        execute=_get_card_limit_usage,
     ),
     Tool(
         schema={

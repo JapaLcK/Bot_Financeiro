@@ -8,6 +8,10 @@ Read:
 Write (auto-executado, SEM confirmação):
   - add_launch: IA extrai os args, delega pra `core.handlers.launches.add_from_entities`
     (a mesma fn que o bot tradicional usa) e devolve a resposta padrão.
+
+Write (PEDE confirmação — destrutivo):
+  - delete_launch: apaga um lançamento (despesa, receita ou compra no cartão).
+    Bifurca entre `launches` (user_seq) e `credit_transactions` (id global).
 """
 from __future__ import annotations
 
@@ -115,6 +119,50 @@ def _add_launch_execute(user_id: int, args: dict[str, Any]) -> str:
     )
 
 
+# ─── Write: delete_launch (PEDE confirmação — destrutivo) ───────────────────
+
+def _delete_launch_summary(args: dict[str, Any]) -> str:
+    lid = args.get("launch_id")
+    return f'apagar o lançamento #{lid}' if lid else "apagar lançamento"
+
+
+def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
+    """Apaga um lançamento. Tenta primeiro como user_seq de `launches`
+    (cenário comum: user digita "#5"). Se não achar, tenta como id de
+    `credit_transactions` — nesse caso, parcelamento derruba o grupo inteiro
+    via `undo_credit_transaction`."""
+    try:
+        lid = int(args.get("launch_id") or 0)
+    except (TypeError, ValueError):
+        return "🐷 ID inválido — informe o número do lançamento (ex: #5)."
+    if lid <= 0:
+        return "🐷 Faltou o ID do lançamento."
+
+    # 1. Lançamento normal (despesa/receita) — resolve user_seq → id interno
+    internal_id = db.resolve_user_seq_to_id(user_id, lid)
+    if internal_id:
+        try:
+            db.delete_launch_and_rollback(user_id, internal_id)
+            return f"🗑️ Lançamento #{lid} apagado. Saldo revertido."
+        except LookupError:
+            return f"🐷 Não achei o lançamento #{lid}."
+        except Exception as e:
+            return f"🐷 Não consegui apagar: {e}"
+
+    # 2. Compra no crédito — id global em credit_transactions
+    try:
+        result = db.undo_credit_transaction(user_id, lid)
+    except Exception as e:
+        return f"🐷 Não consegui apagar: {e}"
+    if result is None:
+        return f"🐷 Não achei o lançamento #{lid}."
+
+    removed = int(result.get("removed_count") or 1)
+    if removed > 1:
+        return f"🗑️ Parcelamento apagado ({removed} parcelas)."
+    return f"🗑️ Compra no crédito #{lid} apagada."
+
+
 TOOLS: list[Tool] = [
     Tool(
         schema={
@@ -214,5 +262,34 @@ TOOLS: list[Tool] = [
         is_write=True,
         requires_confirmation=False,
         execute=_add_launch_execute,
+    ),
+    Tool(
+        schema={
+            "type": "function",
+            "function": {
+                "name": "delete_launch",
+                "description": (
+                    "Apaga um lançamento (despesa, receita ou compra no "
+                    "cartão). Use pra 'apaga o gasto #5', 'remove o último', "
+                    "'apaga aquela compra'. Reverte saldo automaticamente. "
+                    "Se for parcela de parcelamento, derruba o grupo inteiro. "
+                    "ESCRITA DESTRUTIVA — pede confirmação (não tem undo)."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "launch_id": {
+                            "type": "integer",
+                            "description": "ID do lançamento (o #N que aparece no histórico, ex: 5, 142).",
+                        },
+                    },
+                    "required": ["launch_id"],
+                },
+            },
+        },
+        is_write=True,
+        requires_confirmation=True,
+        summary=_delete_launch_summary,
+        execute=_delete_launch_execute,
     ),
 ]
