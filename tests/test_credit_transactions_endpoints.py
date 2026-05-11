@@ -111,6 +111,60 @@ def test_patch_body_vazio_400(user_id):
     assert resp.status_code == 400
 
 
+def test_patch_em_parcelamento_propaga_para_o_grupo(user_id):
+    """Editar categoria de uma parcela atualiza TODAS as parcelas do grupo."""
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    result = db.add_credit_purchase_installments(
+        user_id=user_id,
+        card_id=card_id,
+        valor_total=300.0,
+        categoria="outros",
+        nota="celular",
+        purchased_at=date.today(),
+        installments=3,
+    )
+    info = result[0] if isinstance(result, tuple) else result
+    tx_ids = info["tx_ids"]
+
+    client = TestClient(dashboard.app)
+    _auth(client, user_id)
+
+    # Edita só a primeira parcela
+    resp = client.patch(
+        f"/credit-transactions/{user_id}/{tx_ids[0]}",
+        json={"categoria": "compras online"},
+        headers=_csrf_headers(client),
+    )
+    assert resp.status_code == 200, resp.text
+
+    # As outras 2 parcelas também devem ter mudado
+    for tx in tx_ids:
+        row = _get_tx_row(user_id, tx)
+        assert row["categoria"] == "compras online", f"tx {tx} não propagou"
+
+
+def test_patch_em_tx_single_nao_afeta_outras(user_id):
+    """Edit em compra à vista não toca em outras compras (sem group_id)."""
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    tx1, _, _ = db.add_credit_purchase(user_id, card_id, 50, "outros", "compra A", date.today())
+    tx2, _, _ = db.add_credit_purchase(user_id, card_id, 80, "outros", "compra B", date.today())
+
+    client = TestClient(dashboard.app)
+    _auth(client, user_id)
+
+    resp = client.patch(
+        f"/credit-transactions/{user_id}/{tx1}",
+        json={"categoria": "alimentação"},
+        headers=_csrf_headers(client),
+    )
+    assert resp.status_code == 200
+
+    assert _get_tx_row(user_id, tx1)["categoria"] == "alimentação"
+    assert _get_tx_row(user_id, tx2)["categoria"] == "outros"  # intacta
+
+
 def test_patch_tx_inexistente_404(user_id):
     _seed_card_and_purchase(user_id)  # cria cartão mas tx_id 99999999 não existe
     client = TestClient(dashboard.app)

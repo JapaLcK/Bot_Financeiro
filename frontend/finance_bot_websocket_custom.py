@@ -454,8 +454,8 @@ async def get_financial_data(
                 # `id` aqui é o id da credit_transaction (NÃO da launches). O
                 # frontend distingue pelo campo `tipo='credito'` e roteia o
                 # edit/delete pros endpoints /credit-transactions/...
-                # `installments_total` é informativo: o front avisa o user
-                # antes de apagar uma parcela (vai derrubar o grupo inteiro).
+                # `installments_total` + `installment_no` permitem o front
+                # mostrar "1/3, 2/3, 3/3" e avisar antes de apagar uma parcela.
                 credit_union_sql = """
                     UNION ALL
                     SELECT t.id AS id,
@@ -466,7 +466,8 @@ async def get_financial_data(
                            t.categoria AS categoria,
                            t.purchased_at::timestamptz AS criado_em,
                            false AS is_internal_movement,
-                           t.installments_total AS installments_total
+                           t.installments_total AS installments_total,
+                           t.installment_no AS installment_no
                     FROM credit_transactions t
                     JOIN credit_cards c ON c.id = t.card_id
                     WHERE t.user_id = %s
@@ -478,12 +479,14 @@ async def get_financial_data(
 
             # Total launches for the requested month after filters (excluindo ações administrativas)
             # Importante: as duas pernas do UNION ALL precisam ter o mesmo shape, então
-            # selecionamos exatamente as mesmas 9 colunas em cada uma (8 base + installments_total).
+            # selecionamos exatamente as mesmas 10 colunas em cada uma
+            # (8 base + installments_total + installment_no).
             await cur.execute(
                 f"""
                 SELECT COUNT(*) AS total FROM (
                     SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
-                           NULL::int AS installments_total
+                           NULL::int AS installments_total,
+                           NULL::int AS installment_no
                     FROM launches
                     WHERE user_id = %s
                       AND criado_em >= %s AND criado_em < %s
@@ -501,10 +504,11 @@ async def get_financial_data(
             await cur.execute(
                 f"""
                 SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
-                       installments_total
+                       installments_total, installment_no
                 FROM (
                     SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
-                           NULL::int AS installments_total
+                           NULL::int AS installments_total,
+                           NULL::int AS installment_no
                     FROM launches
                     WHERE user_id = %s
                       AND criado_em >= %s AND criado_em < %s

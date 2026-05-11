@@ -463,8 +463,15 @@ def update_credit_transaction_fields(
     """Atualiza categoria e/ou nota de uma compra no crédito.
 
     Não mexe em valor, cartão ou data — esses ficariam fora de scope (mudariam
-    o saldo da fatura ou a janela de fechamento). Retorna True se algo foi
-    alterado, False se não encontrou ou nada mudou.
+    o saldo da fatura ou a janela de fechamento).
+
+    Comportamento de parcelamento: se a transação pertence a um grupo
+    (group_id != NULL), a alteração propaga pra TODAS as parcelas do grupo.
+    Justificativa: parcelas do mesmo grupo são da mesma compra lógica;
+    editar categoria de uma e não das outras gera inconsistência (relatórios
+    por categoria viram errados).
+
+    Retorna True se algo foi alterado, False se não encontrou.
     """
     sets: list[str] = []
     params: list = []
@@ -477,17 +484,32 @@ def update_credit_transaction_fields(
     if not sets:
         return False
 
-    params.extend([user_id, ct_id])
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                f"update credit_transactions set {', '.join(sets)} "
-                f"where user_id = %s and id = %s returning id",
-                params,
+                "select group_id from credit_transactions where user_id = %s and id = %s",
+                (user_id, ct_id),
             )
             row = cur.fetchone()
+            if not row:
+                return False
+            group_id = row.get("group_id")
+
+            if group_id:
+                # Parcelado — propaga pra todas do grupo
+                cur.execute(
+                    f"update credit_transactions set {', '.join(sets)} "
+                    f"where user_id = %s and group_id = %s::uuid",
+                    [*params, user_id, group_id],
+                )
+            else:
+                cur.execute(
+                    f"update credit_transactions set {', '.join(sets)} "
+                    f"where user_id = %s and id = %s",
+                    [*params, user_id, ct_id],
+                )
         conn.commit()
-    return bool(row)
+    return True
 
 
 def undo_credit_transaction(user_id: int, ct_id: int):

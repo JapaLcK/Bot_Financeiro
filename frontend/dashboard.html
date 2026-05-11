@@ -2064,7 +2064,15 @@ function describeLaunch(l) {
   if (l.tipo === "create_investment" && !l.nota) return `Criou investimento ${target}`;
   if (l.tipo === "aporte_investimento" && !l.nota) return `Aporte em ${target}`;
   if (l.tipo === "resgate_investimento" && !l.nota) return `Resgate de ${target}`;
-  return l.nota || l.alvo || "—";
+
+  const base = l.nota || l.alvo || "—";
+  // Crédito parcelado: mostra "descrição · N/X" pra ficar claro que são parcelas
+  // do mesmo grupo (3 linhas com mesmo valor não são duplicatas).
+  if (l.tipo === "credito" && l.installments_total && l.installments_total > 1) {
+    const n = l.installment_no || "?";
+    return `${base} · ${n}/${l.installments_total}`;
+  }
+  return base;
 }
 
 function irRate(days) {
@@ -2560,6 +2568,16 @@ async function fetchMonthHttp(year, month, page = 1, limit = LAUNCHES_LIMIT, { b
    WEBSOCKET
 ═══════════════════════════════════════════════════════════════════════ */
 function sendRefresh() {
+  _doRefresh({ silent: false });
+}
+
+// Refresh em background — não dim o card nem trava o botão. Use depois de
+// updates otimistas pra sincronizar saldo/totais sem flash visual.
+function sendRefreshSilent() {
+  _doRefresh({ silent: true });
+}
+
+function _doRefresh({ silent }) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     const msg = {
       type: "get_month",
@@ -2572,10 +2590,12 @@ function sendRefresh() {
     };
     ws.send(JSON.stringify(msg));
 
-    const btn = document.getElementById("refresh-btn");
-    btn.classList.add("spinning");
-    btn.disabled = true;
-    setLaunchesLoading(true);
+    if (!silent) {
+      const btn = document.getElementById("refresh-btn");
+      btn.classList.add("spinning");
+      btn.disabled = true;
+      setLaunchesLoading(true);
+    }
     fetchHistory();
   }
 }
@@ -3118,9 +3138,34 @@ async function submitEditLaunch() {
       const detail = await r.json().catch(() => ({}));
       throw new Error(detail.detail || `HTTP ${r.status}`);
     }
+    // Update otimista — atualiza o item local imediatamente pra UI não
+    // ficar travada esperando o roundtrip do refresh. Pra crédito parcelado,
+    // tambem propaga pra outras linhas com mesmo nota+alvo+valor+installments_
+    // total (heurística: refresh corrige caso erre).
+    const items = lastData?.recent_launches || [];
+    const target = items.find(l => l.id === editingLaunchId);
+    if (target) {
+      const oldNota = target.nota;
+      const oldAlvo = target.alvo;
+      const oldTotal = target.installments_total;
+      target.categoria = categoria;
+      target.nota = nota;
+      if (editingLaunchIsCredit && oldTotal && oldTotal > 1) {
+        for (const l of items) {
+          if (l !== target && l.tipo === "credito"
+              && l.alvo === oldAlvo
+              && l.nota === oldNota
+              && l.installments_total === oldTotal) {
+            l.categoria = categoria;
+            l.nota = nota;
+          }
+        }
+      }
+      renderLaunches();
+    }
     closeEditLaunchModal();
     showLaunchSuccessToast(editingLaunchIsCredit ? "Compra atualizada" : "Lançamento atualizado");
-    sendRefresh();
+    sendRefreshSilent();
   } catch (err) {
     showEditLaunchError("Erro: " + err.message);
   } finally {
@@ -3168,16 +3213,33 @@ async function confirmDeleteLaunch(launchId, descricao, valor, isCredit = false,
       const detail = await r.json().catch(() => ({}));
       throw new Error(detail.detail || `HTTP ${r.status}`);
     }
+    let msg = "Lançamento apagado";
     if (isCredit) {
       const data = await r.json().catch(() => ({}));
-      const msg = data.mode === "group" && data.removed_count > 1
+      msg = data.mode === "group" && data.removed_count > 1
         ? `Parcelamento apagado (${data.removed_count} parcelas)`
         : "Compra apagada";
-      showLaunchSuccessToast(msg);
-    } else {
-      showLaunchSuccessToast("Lançamento apagado");
     }
-    sendRefresh();
+    // Update otimista — remove o item local imediatamente. Pra parcelado,
+    // remove todas as linhas do grupo (heurística: mesmo alvo+nota+
+    // installments_total). O refresh silencioso corrige se errou.
+    const items = lastData?.recent_launches || [];
+    const target = items.find(l => l.id === launchId);
+    let removeIds = new Set([launchId]);
+    if (isCredit && installmentsTotal && installmentsTotal > 1 && target) {
+      for (const l of items) {
+        if (l.tipo === "credito"
+            && l.alvo === target.alvo
+            && l.nota === target.nota
+            && l.installments_total === installmentsTotal) {
+          removeIds.add(l.id);
+        }
+      }
+    }
+    lastData.recent_launches = items.filter(l => !removeIds.has(l.id));
+    renderLaunches();
+    showLaunchSuccessToast(msg);
+    sendRefreshSilent();
   } catch (err) {
     await alertModal(err.message, { title: "Erro ao apagar" });
   } finally {
@@ -3751,8 +3813,10 @@ async function onCardRowClick(rowEl) {
     const data = await res.json();
     const billsForCard = (data.bills || []).filter(b => b.card_id === cardId);
     if (billsForCard.length > 0) {
-      // Abre a fatura mais recente em aberto desse cartão
-      billsForCard.sort((a, b) => (b.period_end || "").localeCompare(a.period_end || ""));
+      // Abre a fatura ATUAL desse cartão = a mais antiga em aberto (a próxima
+      // a vencer). Em parcelamento, evita pular pra fatura futura (3/3) em vez
+      // da do mês corrente (1/3). Ordena por period_end ASC.
+      billsForCard.sort((a, b) => (a.period_end || "").localeCompare(b.period_end || ""));
       openBillDetailModal(billsForCard[0].id);
       return;
     }
@@ -4690,20 +4754,23 @@ if ("serviceWorker" in navigator) {
   };
 
   async function loadPiggyHistory() {
+    // O widget abre VAZIO em cada nova sessão do browser. Mensagens antigas
+    // do user (do WhatsApp/Discord/sessão anterior) ficam só no DB pra
+    // contexto da IA — não pra exibição. Decisão de UX: histórico misturado
+    // entre canais confunde o user, e o widget no dashboard é um ponto de
+    // entrada novo (não deve "lembrar" o que aconteceu fora dele).
+    //
+    // O backend continua usando o histórico real pra montar o contexto da
+    // OpenAI; só a UI que esconde. Aqui só buscamos o `usage` pra renderizar
+    // o contador.
     piggyLoaded = true;
     try {
-      const r = await fetch("/ai/messages?limit=30", { credentials: "same-origin" });
+      const r = await fetch("/ai/messages?limit=1", { credentials: "same-origin" });
       if (!r.ok) return;
       const data = await r.json();
-      const msgs = data.messages || [];
-      if (msgs.length > 0) {
-        document.getElementById("piggy-empty").style.display = "none";
-        msgs.forEach(m => renderPiggyMsg(m.role, m.content, false));
-        scrollPiggyToBottom();
-      }
       updateUsage(data.usage);
     } catch (e) {
-      console.warn("[piggy] erro ao carregar histórico:", e);
+      console.warn("[piggy] erro ao buscar usage:", e);
     }
   }
 
