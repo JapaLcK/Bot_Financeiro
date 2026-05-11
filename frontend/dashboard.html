@@ -4429,5 +4429,368 @@ if ("serviceWorker" in navigator) {
   });
 }
 </script>
+
+<!-- ─── Chat IA widget (Piggy) — Item #49 ──────────────────────────────── -->
+<style>
+#piggy-fab {
+  position: fixed; right: 22px; bottom: 22px; width: 58px; height: 58px;
+  border-radius: 50%; border: none; cursor: pointer; z-index: 950;
+  background: linear-gradient(135deg, #7c3aed, #3b82f6);
+  box-shadow: 0 10px 28px rgba(124,58,237,.45), 0 0 0 1px rgba(167,139,250,.3);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.8rem; color: #fff;
+  transition: transform .18s cubic-bezier(.16,1,.3,1), box-shadow .18s;
+}
+#piggy-fab:hover { transform: translateY(-3px) scale(1.05); box-shadow: 0 16px 36px rgba(124,58,237,.55); }
+#piggy-fab.open { transform: rotate(360deg); }
+#piggy-fab .fab-badge {
+  position: absolute; top: -4px; right: -4px;
+  background: #ef4444; color: #fff; font-size: .58rem; font-weight: 800;
+  border-radius: 999px; padding: 2px 6px; min-width: 16px; text-align: center;
+  border: 2px solid var(--bg, #0a0b10);
+  display: none;
+}
+
+#piggy-panel {
+  position: fixed; right: 22px; bottom: 90px; z-index: 949;
+  width: min(400px, calc(100vw - 32px));
+  height: min(580px, calc(100vh - 130px));
+  background: linear-gradient(180deg, #1a1d2a 0%, #14161e 100%);
+  border: 1px solid rgba(167,139,250,.32);
+  border-radius: 22px;
+  box-shadow: 0 32px 80px rgba(0,0,0,.6), 0 0 60px rgba(124,58,237,.15);
+  display: none; flex-direction: column; overflow: hidden;
+  animation: piggyPanelOpen .28s cubic-bezier(.16,1,.3,1);
+}
+#piggy-panel.open { display: flex; }
+@keyframes piggyPanelOpen { from { transform: scale(.92) translateY(20px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
+.piggy-head {
+  display: flex; align-items: center; gap: 12px; padding: 16px 18px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  background: linear-gradient(135deg, rgba(124,58,237,.22), rgba(59,130,246,.16));
+}
+.piggy-head .avatar {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: linear-gradient(135deg,#7c3aed,#3b82f6);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.3rem; box-shadow: 0 4px 14px rgba(124,58,237,.4);
+}
+.piggy-head .title { flex: 1; min-width: 0; }
+.piggy-head .title b { font-size: .94rem; font-weight: 700; color: rgba(255,255,255,.95); }
+.piggy-head .title small { display: block; font-size: .7rem; color: rgba(255,255,255,.55); margin-top: 2px; }
+.piggy-head .close-btn {
+  background: transparent; border: none; color: rgba(255,255,255,.5);
+  font-size: 1.4rem; cursor: pointer; padding: 4px 8px; border-radius: 8px;
+  transition: background .12s, color .12s;
+}
+.piggy-head .close-btn:hover { background: rgba(255,255,255,.08); color: #fff; }
+
+.piggy-body {
+  flex: 1; overflow-y: auto; padding: 16px 14px;
+  display: flex; flex-direction: column; gap: 10px;
+  scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.15) transparent;
+}
+.piggy-body::-webkit-scrollbar { width: 6px; }
+.piggy-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 999px; }
+
+.piggy-empty {
+  margin: auto; padding: 24px 12px; text-align: center; color: rgba(255,255,255,.5);
+  font-size: .85rem; line-height: 1.5;
+}
+.piggy-empty .big { font-size: 2.6rem; margin-bottom: 10px; }
+.piggy-empty b { color: rgba(255,255,255,.78); }
+.piggy-suggestions {
+  display: flex; flex-direction: column; gap: 6px; margin-top: 14px;
+}
+.piggy-sugg {
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+  color: rgba(255,255,255,.78); font-size: .8rem;
+  padding: 8px 12px; border-radius: 12px; cursor: pointer; text-align: left;
+  transition: background .12s, border-color .12s;
+}
+.piggy-sugg:hover { background: rgba(124,58,237,.12); border-color: rgba(167,139,250,.4); }
+
+.piggy-msg { max-width: 86%; padding: 10px 14px; border-radius: 14px; font-size: .87rem; line-height: 1.5; word-wrap: break-word; animation: msgIn .22s ease; }
+@keyframes msgIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.piggy-msg.user {
+  align-self: flex-end;
+  background: linear-gradient(135deg, #7c3aed, #3b82f6);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.piggy-msg.assistant {
+  align-self: flex-start;
+  background: rgba(255,255,255,.06);
+  color: rgba(255,255,255,.92);
+  border: 1px solid rgba(255,255,255,.08);
+  border-bottom-left-radius: 4px;
+}
+.piggy-msg b { font-weight: 700; }
+.piggy-msg code { background: rgba(0,0,0,.3); padding: 1px 5px; border-radius: 4px; font-size: .82em; }
+.piggy-msg a { color: #a78bfa; text-decoration: underline; }
+
+.piggy-typing {
+  align-self: flex-start; padding: 12px 14px;
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08);
+  border-radius: 14px; border-bottom-left-radius: 4px;
+  display: flex; gap: 4px;
+}
+.piggy-typing span {
+  width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.5);
+  animation: dot 1.2s infinite;
+}
+.piggy-typing span:nth-child(2) { animation-delay: .15s; }
+.piggy-typing span:nth-child(3) { animation-delay: .3s; }
+@keyframes dot { 0%, 60%, 100% { opacity: .3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+
+.piggy-foot {
+  border-top: 1px solid rgba(255,255,255,.08); padding: 12px 14px;
+  background: rgba(0,0,0,.18);
+}
+.piggy-input-row { display: flex; gap: 8px; align-items: flex-end; }
+.piggy-input {
+  flex: 1; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+  border-radius: 12px; padding: 10px 12px; color: rgba(255,255,255,.95);
+  font-size: .88rem; resize: none; max-height: 120px; min-height: 40px;
+  font-family: inherit; outline: none;
+  transition: border-color .12s, background .12s;
+}
+.piggy-input:focus { border-color: rgba(167,139,250,.5); background: rgba(255,255,255,.08); }
+.piggy-input::placeholder { color: rgba(255,255,255,.4); }
+.piggy-send {
+  width: 40px; height: 40px; border-radius: 12px; border: none; cursor: pointer;
+  background: linear-gradient(135deg,#7c3aed,#3b82f6); color: #fff;
+  font-size: 1.1rem; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .12s, box-shadow .12s, opacity .12s;
+  box-shadow: 0 4px 12px rgba(124,58,237,.35);
+}
+.piggy-send:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(124,58,237,.5); }
+.piggy-send:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+.piggy-usage {
+  font-size: .68rem; color: rgba(255,255,255,.4);
+  margin-top: 6px; text-align: right;
+}
+
+@media(max-width:560px) {
+  #piggy-panel {
+    right: 8px; left: 8px; bottom: 80px;
+    width: auto;
+    height: calc(100vh - 100px);
+  }
+  #piggy-fab { right: 14px; bottom: 14px; }
+}
+</style>
+
+<button id="piggy-fab" type="button" aria-label="Abrir Piggy IA" onclick="togglePiggy()">
+  <span aria-hidden="true">🐷</span>
+  <span class="fab-badge" id="piggy-fab-badge"></span>
+</button>
+
+<div id="piggy-panel" role="dialog" aria-labelledby="piggy-title" aria-modal="false">
+  <div class="piggy-head">
+    <div class="avatar">🐷</div>
+    <div class="title">
+      <b id="piggy-title">Piggy</b>
+      <small id="piggy-sub">IA das suas finanças</small>
+    </div>
+    <button class="close-btn" type="button" aria-label="Fechar" onclick="closePiggy()">×</button>
+  </div>
+  <div class="piggy-body" id="piggy-body">
+    <div class="piggy-empty" id="piggy-empty">
+      <div class="big">🐷</div>
+      <div>Oi! Pergunta o que quiser sobre suas <b>finanças</b>.<br>Sei seus saldos, gastos, cartões e mais.</div>
+      <div class="piggy-suggestions">
+        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quanto eu gastei esse mês?')">💸 Quanto eu gastei esse mês?</button>
+        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quais minhas maiores categorias de gasto?')">📊 Quais minhas maiores categorias?</button>
+        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quanto tenho de saldo?')">💰 Quanto tenho de saldo?</button>
+        <button class="piggy-sugg" type="button" onclick="piggyAsk('Mostra meus últimos lançamentos')">📝 Mostra meus últimos lançamentos</button>
+      </div>
+    </div>
+  </div>
+  <div class="piggy-foot">
+    <div class="piggy-input-row">
+      <textarea class="piggy-input" id="piggy-input" placeholder="Pergunte algo…" rows="1" onkeydown="piggyKeyDown(event)" oninput="piggyAutoresize(this)"></textarea>
+      <button class="piggy-send" id="piggy-send" type="button" aria-label="Enviar" onclick="piggySend()">→</button>
+    </div>
+    <div class="piggy-usage" id="piggy-usage"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  let piggyLoaded = false;
+  let piggyBusy = false;
+
+  window.togglePiggy = function() {
+    if (!window.isProUser || !isProUser()) {
+      if (window.showUpgradeModal) showUpgradeModal("ai_chat");
+      return;
+    }
+    const panel = document.getElementById("piggy-panel");
+    const fab = document.getElementById("piggy-fab");
+    if (panel.classList.contains("open")) {
+      closePiggy();
+    } else {
+      panel.classList.add("open");
+      fab.classList.add("open");
+      if (!piggyLoaded) loadPiggyHistory();
+      setTimeout(() => document.getElementById("piggy-input").focus(), 200);
+    }
+  };
+
+  window.closePiggy = function() {
+    document.getElementById("piggy-panel").classList.remove("open");
+    document.getElementById("piggy-fab").classList.remove("open");
+  };
+
+  window.piggyKeyDown = function(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      piggySend();
+    }
+  };
+
+  window.piggyAutoresize = function(el) {
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 120) + "px";
+  };
+
+  window.piggyAsk = function(text) {
+    const input = document.getElementById("piggy-input");
+    input.value = text;
+    piggyAutoresize(input);
+    piggySend();
+  };
+
+  async function loadPiggyHistory() {
+    piggyLoaded = true;
+    try {
+      const r = await fetch("/ai/messages?limit=30", { credentials: "same-origin" });
+      if (!r.ok) return;
+      const data = await r.json();
+      const msgs = data.messages || [];
+      if (msgs.length > 0) {
+        document.getElementById("piggy-empty").style.display = "none";
+        msgs.forEach(m => renderPiggyMsg(m.role, m.content, false));
+        scrollPiggyToBottom();
+      }
+      updateUsage(data.usage);
+    } catch (e) {
+      console.warn("[piggy] erro ao carregar histórico:", e);
+    }
+  }
+
+  window.piggySend = async function() {
+    if (piggyBusy) return;
+    const input = document.getElementById("piggy-input");
+    const text = input.value.trim();
+    if (!text) return;
+    if (text.length > 2000) {
+      alert("Mensagem muito longa (máx 2000 caracteres).");
+      return;
+    }
+
+    piggyBusy = true;
+    document.getElementById("piggy-send").disabled = true;
+    document.getElementById("piggy-empty").style.display = "none";
+    renderPiggyMsg("user", text, true);
+    input.value = "";
+    input.style.height = "40px";
+    scrollPiggyToBottom();
+    showTyping();
+
+    try {
+      const r = await fetch("/ai/chat", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: csrfHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ message: text }),
+      });
+      hideTyping();
+      if (r.status === 403) {
+        // Plano Pro expirou ou foi rebaixado. Fecha o widget e abre upgrade.
+        const data = await r.json().catch(() => ({}));
+        renderPiggyMsg("assistant", "🔒 Conversar com a IA é um recurso do PigBank+. " +
+                                     "[Faça upgrade](/precos) pra liberar.", true);
+        return;
+      }
+      if (!r.ok) {
+        renderPiggyMsg("assistant", "🐷 Deu ruim aqui. Tenta de novo em instantes.", true);
+        return;
+      }
+      const data = await r.json();
+      renderPiggyMsg("assistant", data.reply || "🐷 Sem resposta.", true);
+      updateUsage(data.usage);
+    } catch (e) {
+      hideTyping();
+      console.error("[piggy] erro no send:", e);
+      renderPiggyMsg("assistant", "🐷 Sem conexão. Tenta de novo.", true);
+    } finally {
+      piggyBusy = false;
+      document.getElementById("piggy-send").disabled = false;
+      scrollPiggyToBottom();
+    }
+  };
+
+  function renderPiggyMsg(role, content, animate) {
+    const body = document.getElementById("piggy-body");
+    const div = document.createElement("div");
+    div.className = "piggy-msg " + role;
+    div.innerHTML = formatPiggy(content);
+    if (!animate) div.style.animation = "none";
+    body.appendChild(div);
+  }
+
+  function formatPiggy(text) {
+    // Markdown leve: escapa HTML, depois aplica **bold**, `code`, [link](url) e quebra de linha.
+    const esc = String(text)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    return esc
+      .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      .replace(/\n/g, "<br>");
+  }
+
+  function showTyping() {
+    if (document.getElementById("piggy-typing")) return;
+    const body = document.getElementById("piggy-body");
+    const div = document.createElement("div");
+    div.id = "piggy-typing";
+    div.className = "piggy-typing";
+    div.innerHTML = "<span></span><span></span><span></span>";
+    body.appendChild(div);
+    scrollPiggyToBottom();
+  }
+
+  function hideTyping() {
+    const t = document.getElementById("piggy-typing");
+    if (t) t.remove();
+  }
+
+  function scrollPiggyToBottom() {
+    const body = document.getElementById("piggy-body");
+    body.scrollTop = body.scrollHeight;
+  }
+
+  function updateUsage(u) {
+    if (!u) return;
+    const el = document.getElementById("piggy-usage");
+    if (el) el.textContent = `${u.used} / ${u.limit} mensagens este mês`;
+  }
+
+  // Fecha com Esc
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      const panel = document.getElementById("piggy-panel");
+      if (panel && panel.classList.contains("open")) closePiggy();
+    }
+  });
+})();
+</script>
+
 </body>
 </html>

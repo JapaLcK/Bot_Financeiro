@@ -2971,6 +2971,41 @@ async def ai_chat(
     return {"reply": reply, "usage": {"used": used_after, "limit": AI_CHAT_MONTHLY_LIMIT}}
 
 
+@app.get("/ai/messages")
+async def ai_messages(
+    user_id: int = Depends(require_pro_feature("ai_chat")),
+    limit: int = 30,
+):
+    """
+    Retorna as últimas mensagens visíveis do chat IA pra renderizar no widget.
+    Filtra tool calls e mensagens system — só user/assistant com texto.
+    """
+    if not 1 <= limit <= 200:
+        limit = 30
+
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import ai_get_recent_messages
+
+    rows = await asyncio.to_thread(ai_get_recent_messages, user_id, limit)
+    out = []
+    for r in rows:
+        role = r.get("role")
+        content = (r.get("content") or "").strip()
+        if role not in ("user", "assistant") or not content:
+            continue
+        # Pula assistants vazios (só tool_calls, sem texto pro usuário)
+        if role == "assistant" and r.get("tool_calls"):
+            continue
+        out.append({
+            "role": role,
+            "content": content,
+            "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
+        })
+    used_after = await asyncio.to_thread(_db_ai_usage, user_id)
+    return {"messages": out, "usage": {"used": used_after, "limit": AI_CHAT_MONTHLY_LIMIT}}
+
+
 def _db_ai_usage(user_id: int) -> int:
     """Lê o contador sem incrementar (pra devolver no response)."""
     from db import ai_get_usage_this_month
