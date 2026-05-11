@@ -2942,7 +2942,7 @@ async def ai_chat(
 
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from core.services.ai_chat_service import chat as ai_chat_run
+    from core.services.ai_chat import chat as ai_chat_run
 
     reply = await asyncio.to_thread(
         ai_chat_run, user_id, text, monthly_limit=AI_CHAT_MONTHLY_LIMIT,

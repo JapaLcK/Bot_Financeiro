@@ -125,7 +125,7 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
         )
 
     # 3. Roteia pra IA
-    from core.services.ai_chat_service import chat as ai_chat_run
+    from core.services.ai_chat import chat as ai_chat_run
     try:
         return ai_chat_run(user_id, user_message, monthly_limit=AI_CHAT_MONTHLY_LIMIT)
     except Exception as exc:
