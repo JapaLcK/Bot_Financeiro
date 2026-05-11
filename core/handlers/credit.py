@@ -707,6 +707,26 @@ def _build_credit_contextual_help(text: str) -> str:
         )
 
     if any(expr in norm for expr in ("pagar", "paguei")) or "fatura" in norm:
+        # Antes do help genérico, detecta situações comuns onde a resposta
+        # certa é uma frase amigável, não uma lista de comandos.
+        try:
+            cards = list_cards(user_id)
+            if not cards:
+                return (
+                    "🐷 Você ainda não tem cartão cadastrado. Pra criar:\n"
+                    "• `criar cartao Nubank fecha 10 vence 17`"
+                )
+            open_bills = list_open_bills(user_id)
+            if open_bills:
+                total_remaining = sum(
+                    float(b["total"] or 0) - float(b["paid_amount"] or 0)
+                    for b in open_bills
+                )
+                if total_remaining <= 0:
+                    return "🐷 Suas faturas em aberto estão zeradas — não tem o que pagar agora 👍"
+        except Exception:
+            pass  # cai pro help genérico
+
         return (
             "🧾 Posso te ajudar com fatura/pagamento assim:\n"
             "• `pagar fatura` — paga a fatura atual do cartão padrão\n"

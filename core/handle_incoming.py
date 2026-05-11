@@ -42,6 +42,28 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+_HELP_FALLBACK_MARKERS: tuple[str, ...] = (
+    "Posso te ajudar com",       # "🧾 Posso te ajudar com fatura/pagamento assim:" e variantes
+    "Não entendi exatamente",    # respostas de classifier confuso vindas dos handlers
+)
+
+
+def _looks_like_help_fallback(response: str | None) -> bool:
+    """
+    Detecta se `response` é o help genérico do bot tradicional (lista de
+    comandos "tente assim"). Pra usuários Pro a gente prefere passar pra IA,
+    que pode executar de fato com as tools ou dar uma resposta contextual
+    melhor que a lista de comandos.
+
+    Detecção por marker textual é frágil mas pragmática — os handlers usam
+    esses dois prefixos de forma consistente. Se um dia migrarmos pra um
+    sentinel explícito, basta trocar aqui.
+    """
+    if not response:
+        return False
+    return any(marker in response for marker in _HELP_FALLBACK_MARKERS)
+
+
 def _is_ofx_attachment(a) -> bool:
     fn = (getattr(a, "filename", "") or "").lower()
     ct = (getattr(a, "content_type", "") or "").lower()
@@ -466,6 +488,26 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         # 6. Roteia → executa → obtém resposta bruta
         # ------------------------------------------------------------------
         raw_response = route(intent_result, msg_normalized)
+
+        # ------------------------------------------------------------------
+        # 6b. Post-route fallback: o bot tradicional reconheceu intent mas
+        # caiu num help genérico ("Posso te ajudar com X assim..."). Pra Pro,
+        # tenta a IA — ela tem tools pra executar de fato ou dar resposta
+        # contextual melhor. Pra Free mantém o help (não tem IA mesmo).
+        # ------------------------------------------------------------------
+        if _looks_like_help_fallback(raw_response):
+            try:
+                from core.services.plan_service import is_pro
+                if is_pro(uid):
+                    from core.services.ai_chat import chat as ai_chat_run
+                    from core.services.ai_chat_commands import AI_CHAT_MONTHLY_LIMIT
+                    ai_reply = ai_chat_run(uid, text, monthly_limit=AI_CHAT_MONTHLY_LIMIT)
+                    return [OutgoingMessage(text=ai_reply)]
+            except Exception as exc:
+                logger.warning(
+                    "help→AI fallback falhou pra user %s: %s — devolve help original",
+                    uid, exc,
+                )
 
         # ------------------------------------------------------------------
         # 7. Formata para o canal
