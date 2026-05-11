@@ -2,6 +2,7 @@
 db/schema.py — DDL e inicialização do banco de dados.
 """
 from .connection import get_conn
+from .schema_repairs import repair_user_fk_cascades
 
 
 def init_db():
@@ -910,4 +911,14 @@ def init_db():
                     print(f"[init_db] erro no statement #{i}: {e}")
                     print(stmt)
                     raise
+
+            # Corrige FKs em users(id) que ficaram com on_delete errado
+            # porque a tabela já existia antes da FK ser declarada no schema.
+            try:
+                changes = repair_user_fk_cascades(cur)
+                if changes:
+                    print(f"[init_db] schema_repairs ajustou {len(changes)} FK(s): {changes}")
+            except Exception as e:
+                print(f"[init_db] schema_repairs falhou: {e}")
+                raise
     print("[init_db] OK")
