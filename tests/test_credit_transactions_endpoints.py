@@ -279,6 +279,71 @@ def test_delete_parcelamento_e_recriar_reabre_bills_zumbis(user_id):
     assert soma_totais == 300.0, f"esperava R$ 300 total, achei R$ {soma_totais}"
 
 
+def test_list_bills_default_so_abertas_com_saldo(user_id):
+    """`GET /bills/{user_id}` (sem params) só retorna bills em aberto com
+    saldo > 0 — comportamento histórico usado pelo modal de pagamento."""
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    db.add_credit_purchase(user_id, card_id, 100, "outros", "compra", date.today())
+
+    client = TestClient(dashboard.app)
+    _auth(client, user_id)
+
+    resp = client.get(f"/bills/{user_id}", headers={dashboard.CSRF_HEADER_NAME: ""})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert len(body["bills"]) == 1
+    assert body["bills"][0]["status"] == "open"
+
+
+def test_list_bills_card_id_filtra_por_cartao(pro_user_id):
+    """`?card_id=N` retorna só as bills daquele cartão. Pro pra criar 2."""
+    a_id = db.create_card(pro_user_id, "Nubank", closing_day=10, due_day=17)
+    b_id = db.create_card(pro_user_id, "Inter", closing_day=15, due_day=22)
+    db.add_credit_purchase(pro_user_id, a_id, 100, "outros", "a", date.today())
+    db.add_credit_purchase(pro_user_id, b_id, 200, "outros", "b", date.today())
+
+    client = TestClient(dashboard.app)
+    _auth(client, pro_user_id)
+
+    resp = client.get(f"/bills/{pro_user_id}?card_id={a_id}")
+    assert resp.status_code == 200
+    bills = resp.json()["bills"]
+    assert len(bills) == 1
+    assert bills[0]["card_id"] == a_id
+    assert bills[0]["total"] == 100.0
+
+
+def test_list_bills_include_closed_traz_paid(user_id):
+    """`?include_closed=true` retorna bills pagas/fechadas pra navegação."""
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    # Cria parcelamento (gera 3 bills) e depois apaga → bills viram open com total=0
+    # após o fix. Pra ter uma bill 'paid' real, precisamos pagar uma fatura,
+    # então criamos compra, recebemos saldo e pagamos.
+    db.add_launch_and_update_balance(user_id, "receita", 500, None, "seed")
+    tx_id, _, _ = db.add_credit_purchase(user_id, card_id, 100, "outros", "compra", date.today())
+
+    # Pega o bill_id da compra e paga
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select bill_id from credit_transactions where id=%s", (tx_id,))
+            bill_id = cur.fetchone()["bill_id"]
+    db.pay_bill_amount(user_id, card_id, "Nubank", 100.0)
+
+    client = TestClient(dashboard.app)
+    _auth(client, user_id)
+
+    # Sem include_closed: bill paga não aparece
+    resp_default = client.get(f"/bills/{user_id}?card_id={card_id}")
+    assert all(b["status"] == "open" for b in resp_default.json()["bills"])
+
+    # Com include_closed: aparece
+    resp_full = client.get(f"/bills/{user_id}?card_id={card_id}&include_closed=true")
+    statuses = {b["status"] for b in resp_full.json()["bills"]}
+    assert "paid" in statuses
+
+
 def test_delete_tx_inexistente_404(user_id):
     _seed_card_and_purchase(user_id)
     client = TestClient(dashboard.app)

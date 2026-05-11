@@ -630,6 +630,14 @@ async def get_financial_data(
                 )
                 bill = await cur.fetchone()
 
+                # `period_label` ajuda o front a deixar claro que o valor no card
+                # é da fatura DO MÊS, não total do cartão (parcelas futuras vivem
+                # em outras faturas — usuário acessa via setas no modal).
+                period_end = bill["period_end"] if bill else None
+                period_label = (
+                    f"{_months_pt()[period_end.month - 1]}/{period_end.year}"
+                    if period_end else None
+                )
                 card_row = {
                     "id": cc["id"],
                     "name": cc["name"],
@@ -640,7 +648,8 @@ async def get_financial_data(
                     "paid_amount": float(bill["paid_amount"]) if bill and bill["paid_amount"] is not None else 0.0,
                     "due_amount": float(bill["due_amount"]) if bill and bill["due_amount"] is not None else 0.0,
                     "period_start": bill["period_start"] if bill else None,
-                    "period_end": bill["period_end"] if bill else None,
+                    "period_end": period_end,
+                    "period_label": period_label,
                 }
                 cards.append(card_row)
 
@@ -4014,26 +4023,59 @@ def _serialize_bill(row: dict) -> dict:
 
 
 @app.get("/bills/{user_id}")
-async def list_bills_route(request: Request, user_id: int):
-    """Lista todas as faturas em aberto do usuário (com cartão e valores)."""
+async def list_bills_route(
+    request: Request,
+    user_id: int,
+    card_id: int | None = None,
+    include_closed: bool = False,
+):
+    """Lista faturas do usuário (cartão e valores).
+
+    - Sem params: só abertas com saldo > 0 (default histórico, usado por
+      `onCardRowClick` e modal de pagamento).
+    - `card_id`: filtra por um cartão específico.
+    - `include_closed=true`: inclui também `paid` e `closed` (usado pelas
+      setas de navegação no modal de fatura pra ver meses passados/
+      próximos cheios).
+    """
     _authorize_dashboard_access(request, user_id)
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import list_open_bills
 
-    rows = await asyncio.to_thread(list_open_bills, int(user_id))
-    bills = [_serialize_bill(dict(r)) for r in (rows or [])]
-    bills = [b for b in bills if b["due_amount"] > 0 or b["total"] > 0]
-
-    # saldo atual da conta — útil pro modal de pagamento
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
+            status_filter = "" if include_closed else "AND b.status = 'open'"
+            card_filter = "AND b.card_id = %s" if card_id else ""
+            params: list = [int(user_id)]
+            if card_id:
+                params.append(int(card_id))
+            await cur.execute(
+                f"""
+                SELECT b.id, b.card_id, c.name AS card_name,
+                       b.period_start, b.period_end, b.status,
+                       b.total, COALESCE(b.paid_amount, 0) AS paid_amount
+                FROM credit_bills b
+                JOIN credit_cards c ON c.id = b.card_id
+                WHERE b.user_id = %s
+                  {status_filter}
+                  {card_filter}
+                ORDER BY b.period_end ASC, c.name ASC
+                """,
+                params,
+            )
+            rows = await cur.fetchall()
+
             await cur.execute(
                 "SELECT balance FROM accounts WHERE user_id=%s", (int(user_id),)
             )
-            row = await cur.fetchone()
-    balance = float(row["balance"]) if row else 0.0
+            bal_row = await cur.fetchone()
 
+    bills = [_serialize_bill(dict(r)) for r in (rows or [])]
+    if not include_closed:
+        # Comportamento original — só esconde bills "vazias" no fluxo padrão.
+        bills = [b for b in bills if b["due_amount"] > 0 or b["total"] > 0]
+
+    balance = float(bal_row["balance"]) if bal_row else 0.0
     return {"ok": True, "balance": balance, "bills": bills}
 
 

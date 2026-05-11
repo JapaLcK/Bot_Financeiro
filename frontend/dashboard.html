@@ -1310,7 +1310,14 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 <!-- ─── Detalhe da fatura ──────────────────────────────────────────────── -->
 <div class="overlay" id="bill-detail-overlay">
   <div class="modal wide">
-    <h3 id="bill-detail-title">Fatura</h3>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:4px">
+      <h3 id="bill-detail-title" style="margin:0">Fatura</h3>
+      <div id="bill-detail-nav" style="display:none;gap:6px;align-items:center">
+        <button type="button" id="bill-detail-prev" class="hbtn" style="padding:4px 10px;min-height:28px;font-size:.85rem" onclick="navBill(-1)" title="Fatura anterior">◀</button>
+        <span id="bill-detail-nav-label" style="font-size:.7rem;color:var(--text-3);min-width:60px;text-align:center"></span>
+        <button type="button" id="bill-detail-next" class="hbtn" style="padding:4px 10px;min-height:28px;font-size:.85rem" onclick="navBill(1)" title="Próxima fatura">▶</button>
+      </div>
+    </div>
     <p class="msub" id="bill-detail-sub">—</p>
     <div class="bill-summary" id="bill-detail-summary">
       <div class="it"><span class="k">Total</span><span class="v" id="bill-detail-total">—</span></div>
@@ -3731,7 +3738,41 @@ function fmtBillValue(n) {
   return fmt(Number(n) || 0);
 }
 
-async function openBillDetailModal(billId) {
+// Estado de navegação entre faturas do mesmo cartão. Setado por
+// `onCardRowClick` (passa cardId + lista) e usado pelas setas ◀ ▶.
+let _billNav = { cardId: null, billIds: [], currentIdx: -1 };
+
+function _renderBillNav() {
+  const nav = document.getElementById("bill-detail-nav");
+  const prev = document.getElementById("bill-detail-prev");
+  const next = document.getElementById("bill-detail-next");
+  const label = document.getElementById("bill-detail-nav-label");
+  if (!_billNav.billIds.length || _billNav.currentIdx < 0) {
+    nav.style.display = "none";
+    return;
+  }
+  nav.style.display = "flex";
+  prev.disabled = _billNav.currentIdx <= 0;
+  next.disabled = _billNav.currentIdx >= _billNav.billIds.length - 1;
+  label.textContent = `${_billNav.currentIdx + 1} de ${_billNav.billIds.length}`;
+}
+
+window.navBill = function(direction) {
+  const idx = _billNav.currentIdx + direction;
+  if (idx < 0 || idx >= _billNav.billIds.length) return;
+  _billNav.currentIdx = idx;
+  openBillDetailModal(_billNav.billIds[idx], { preserveNav: true });
+};
+
+async function openBillDetailModal(billId, opts = {}) {
+  if (!opts.preserveNav) {
+    _billNav = { cardId: null, billIds: [billId], currentIdx: 0 };
+  } else {
+    // Sincroniza o índice com o billId mostrado
+    const found = _billNav.billIds.indexOf(billId);
+    if (found >= 0) _billNav.currentIdx = found;
+  }
+
   const overlay = document.getElementById("bill-detail-overlay");
   document.getElementById("bill-detail-title").textContent = "Carregando...";
   document.getElementById("bill-detail-sub").textContent = "—";
@@ -3741,6 +3782,7 @@ async function openBillDetailModal(billId) {
   document.getElementById("bill-detail-tx").innerHTML = "";
   document.getElementById("bill-detail-pay-btn").disabled = true;
   document.getElementById("bill-detail-pay-btn").dataset.billId = "";
+  _renderBillNav();
   overlay.classList.add("open");
 
   try {
@@ -3805,23 +3847,35 @@ function payFromDetail() {
 async function onCardRowClick(rowEl) {
   const cardId = Number(rowEl && rowEl.dataset && rowEl.dataset.cardId);
   if (!cardId) return;
-  // Busca lista de faturas em aberto e pega a do cartão clicado.
-  // Se não houver aberta, mostra a última fechada (fallback via /bills/{id}).
+  // Busca TODAS as faturas desse cartão (abertas + pagas/fechadas) pra
+  // popular as setas de navegação ◀ ▶. Ordenadas por period_end ASC, abre
+  // primeiro a corrente (mais antiga em aberto). Backend já ordena.
   try {
-    const res = await fetch(`${API}/bills/${USER_ID}`, { credentials: "same-origin" });
+    const res = await fetch(
+      `${API}/bills/${USER_ID}?card_id=${cardId}&include_closed=true`,
+      { credentials: "same-origin" },
+    );
     if (!res.ok) throw new Error(await readApiError(res));
     const data = await res.json();
-    const billsForCard = (data.bills || []).filter(b => b.card_id === cardId);
-    if (billsForCard.length > 0) {
-      // Abre a fatura ATUAL desse cartão = a mais antiga em aberto (a próxima
-      // a vencer). Em parcelamento, evita pular pra fatura futura (3/3) em vez
-      // da do mês corrente (1/3). Ordena por period_end ASC.
-      billsForCard.sort((a, b) => (a.period_end || "").localeCompare(b.period_end || ""));
-      openBillDetailModal(billsForCard[0].id);
+    const billsForCard = data.bills || [];
+    if (!billsForCard.length) {
+      showLaunchSuccessToast("Sem faturas pra esse cartão ainda.");
       return;
     }
-    // Sem fatura em aberto — mensagem amigável
-    showLaunchSuccessToast("Sem fatura em aberto para esse cartão.");
+
+    // Encontra a fatura "atual" = primeira em aberto com valor > 0.
+    // Fallback: a primeira da lista (cronologicamente mais antiga).
+    let currentIdx = billsForCard.findIndex(
+      b => b.status === "open" && (b.due_amount > 0 || b.total > 0),
+    );
+    if (currentIdx < 0) currentIdx = 0;
+
+    _billNav = {
+      cardId,
+      billIds: billsForCard.map(b => b.id),
+      currentIdx,
+    };
+    openBillDetailModal(billsForCard[currentIdx].id, { preserveNav: true });
   } catch (err) {
     showLaunchSuccessToast(err.message || "Erro ao carregar fatura.");
   }
@@ -4418,6 +4472,10 @@ function render(d) {
           const billRef = c.id ? ` data-card-id="${c.id}"` : '';
           // Tenta achar a fatura aberta deste cartão pra abrir direto o detalhe
           const openBills = (d.credit_cards||[]).filter(x=>x.id===c.id);
+          // Mostra o mês da fatura junto com o valor — esclarece que é a
+          // fatura DO MÊS (não total do cartão). Parcelas futuras vivem em
+          // outras faturas, acessíveis pelas setas no modal.
+          const periodLabel = c.period_label || '';
           return `<div class="row card-row-clickable" onclick="onCardRowClick(this)"${billRef}>
             <span class="lbl">
               ${c.name}
@@ -4426,6 +4484,7 @@ function render(d) {
             </span>
             <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
               <span class="val r" data-num="cc_${c.name}" data-val="${due}">${hasData ? fmt(due) : '—'}</span>
+              ${hasData && periodLabel ? `<span style="font-size:.63rem;color:var(--text-3)">fatura ${periodLabel}</span>` : ''}
               ${hasData && paid > 0 ? `<span style="font-size:.63rem;color:var(--text-3)">total ${fmt(total)} · pago ${fmt(paid)}</span>` : ''}
             </span>
           </div>`;
