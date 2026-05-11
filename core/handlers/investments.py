@@ -20,9 +20,46 @@ def _investment_dashboard_link(user_id: int) -> str:
     )
 
 
+_INV_NAME_UPPERCASE_TOKENS = {
+    "CDB", "CRA", "CRI", "LCI", "LCA", "LF", "LCD", "LFT", "LTN",
+    "IPCA", "SELIC", "CDI", "ETF", "FII", "FIAGRO",
+    "BTG", "XP", "BB", "USA",
+}
+_INV_NAME_LOWERCASE_TOKENS = {"de", "da", "do", "das", "dos", "e"}
+
+
+def _format_inv_name(name: str) -> str:
+    """Capitaliza nome de investimento preservando siglas (CDB, IPCA, etc).
+
+    "cdb banco luso"        → "CDB Banco Luso"
+    "reserva de emergencia" → "Reserva de Emergencia"
+    "Tesouro IPCA+ 2032"    → "Tesouro IPCA+ 2032"
+    """
+    parts = name.split()
+    out: list[str] = []
+    for i, w in enumerate(parts):
+        # Trata sufixo "+" (ex: "IPCA+", "IPCA+2032")
+        if "+" in w:
+            head, _, tail = w.partition("+")
+            if head.upper() in _INV_NAME_UPPERCASE_TOKENS:
+                out.append(f"{head.upper()}+{tail}")
+                continue
+        upper = w.upper()
+        lower = w.lower()
+        if upper in _INV_NAME_UPPERCASE_TOKENS:
+            out.append(upper)
+        elif w.isdigit():
+            out.append(w)
+        elif i > 0 and lower in _INV_NAME_LOWERCASE_TOKENS:
+            out.append(lower)
+        else:
+            out.append(w.capitalize())
+    return " ".join(out)
+
+
 def list_investments(user_id: int, intro: str | None = None) -> str:
     rows = db.accrue_all_investments(user_id)
-    header = intro or "📈 **Investimentos**"
+    header = intro or "📈 **Sua carteira**"
     if not rows:
         return (
             f"{header}\n"
@@ -30,40 +67,24 @@ def list_investments(user_id: int, intro: str | None = None) -> str:
             f"{_investment_dashboard_link(user_id)}"
         )
 
-    last_dates = [r.get("last_date") for r in rows if r.get("last_date")]
-    base_date_txt = ""
-    if last_dates:
-        base_date = max(last_dates)
-        base_date_txt = f"Atualizado até {base_date.strftime('%d/%m/%Y')}\n"
-
-    projected_untils = [
-        r.get("projected_until") for r in rows
-        if r.get("projected_days") and r.get("projected_until")
-    ]
-    projection_note = ""
-    if projected_untils:
-        proj_date = max(projected_untils)
-        projection_note = (
-            f"_Saldo estimado até {proj_date.strftime('%d/%m/%Y')} "
-            "usando a última taxa conhecida — será corrigido quando o BCB "
-            "publicar os dados oficiais._\n"
-        )
-
-    lines = []
+    total = 0.0
+    lines: list[str] = []
     for r in rows:
         rate_txt = fmt_rate(r.get("rate"), r.get("period"))
-        asset = r.get("asset_type") or "CDB"
         projected_balance = r.get("projected_balance")
         projected_days = r.get("projected_days") or 0
         if projected_days > 0 and projected_balance:
-            balance_txt = f"{fmt_brl(float(projected_balance))} *"
+            value = float(projected_balance)
         else:
-            balance_txt = fmt_brl(float(r["balance"]))
-        lines.append(f"• **{r['name']}** [{asset}]: {balance_txt} ({rate_txt})")
+            value = float(r["balance"] or 0)
+        total += value
+        name_pretty = _format_inv_name(r["name"])
+        rate_part = f" ({rate_txt})" if rate_txt else ""
+        lines.append(f"• **{name_pretty}** — {fmt_brl(value)}{rate_part}")
+
     return (
-        f"{header}\n"
-        + base_date_txt
-        + projection_note
+        f"{header}\n\n"
+        f"**{fmt_brl(total)}** no total\n\n"
         + "\n".join(lines)
         + "\n\n"
         + _investment_dashboard_link(user_id)
