@@ -4354,7 +4354,11 @@ function _showAccessError() {
     if (!resp.ok) { _showAccessError(); return; }
     const data = await resp.json();
     USER_ID = data.user_id;
-    loadUserMenuState();
+    // Aguardar o plano carregar antes de aplicar view=investments. Sem isso,
+    // setMainView roda com USER_PLAN ainda "" e isProUser() retorna false →
+    // dispara o paywall "Disponível no PigBank+" mesmo pra usuário Pro
+    // chegando por magic link do bot.
+    await loadUserMenuState();
   } catch(e) {
     _showAccessError();
     return;
