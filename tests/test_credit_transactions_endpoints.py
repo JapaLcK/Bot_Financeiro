@@ -235,6 +235,50 @@ def test_delete_compra_parcelada_desfaz_grupo(user_id):
         assert _get_tx_row(user_id, tx) is None
 
 
+def test_delete_parcelamento_e_recriar_reabre_bills_zumbis(user_id):
+    """Regression: apagar parcelamento esvaziava bills (total=0), mas elas
+    ficavam status='paid' (zumbis). Recriar parcelamento no mesmo período
+    reusava o id da bill zumbi e a fatura sumia do dashboard porque
+    `list_open_bills` filtra por status='open'.
+
+    Fix em duas frentes:
+      - `undo_credit_transaction` só fecha como paid se paid > 0
+      - `get_or_create_bill_by_period` reabre paid/closed sem pagamento real
+    """
+    card_id = db.create_card(user_id, "Nubank", closing_day=1, due_day=10)
+    db.set_default_card(user_id, card_id)
+
+    # Cria parcelamento — 3 bills 'open'
+    r1 = db.add_credit_purchase_installments(
+        user_id=user_id, card_id=card_id, valor_total=150,
+        categoria="outros", nota="primeiro", purchased_at=date.today(), installments=3,
+    )
+    info1 = r1[0] if isinstance(r1, tuple) else r1
+    tx_ids_1 = info1["tx_ids"]
+
+    # Apaga o grupo via endpoint (mesmo caminho do dashboard)
+    client = TestClient(dashboard.app)
+    _auth(client, user_id)
+    resp = client.delete(f"/credit-transactions/{user_id}/{tx_ids_1[0]}", headers=_csrf_headers(client))
+    assert resp.status_code == 200, resp.text
+
+    # Agora cria outro parcelamento NO MESMO PERÍODO
+    r2 = db.add_credit_purchase_installments(
+        user_id=user_id, card_id=card_id, valor_total=300,
+        categoria="outros", nota="segundo", purchased_at=date.today(), installments=3,
+    )
+    info2 = r2[0] if isinstance(r2, tuple) else r2
+    assert len(info2["tx_ids"]) == 3
+
+    # Todas as 3 bills devem aparecer em list_open_bills (não viraram zumbi)
+    open_bills = db.list_open_bills(user_id)
+    bills_card = [b for b in open_bills if b["card_id"] == card_id]
+    assert len(bills_card) == 3, f"esperava 3 bills abertas, achei {len(bills_card)}: {bills_card}"
+    # E o total deve ser R$ 300 (o novo parcelamento), não R$ 150 + R$ 300
+    soma_totais = sum(float(b["total"]) for b in bills_card)
+    assert soma_totais == 300.0, f"esperava R$ 300 total, achei R$ {soma_totais}"
+
+
 def test_delete_tx_inexistente_404(user_id):
     _seed_card_and_purchase(user_id)
     client = TestClient(dashboard.app)

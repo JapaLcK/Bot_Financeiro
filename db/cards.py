@@ -278,13 +278,25 @@ def get_or_create_bill_by_period(user_id: int, card_id: int, period_start: date,
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id from credit_bills "
+                "select id, status, coalesce(paid_amount, 0) as paid_amount from credit_bills "
                 "where user_id=%s and card_id=%s and period_start=%s and period_end=%s",
                 (user_id, card_id, period_start, period_end),
             )
             row = cur.fetchone()
             if row:
-                return int(row["id"])
+                bid = int(row["id"])
+                status = (row.get("status") or "").lower()
+                paid = Decimal(str(row.get("paid_amount") or 0))
+                # Bill existe mas tá fechada sem pagamento real (zumbi do
+                # undo de uma compra anterior) — reabre pra receber a nova.
+                if status in ("paid", "closed") and paid == 0:
+                    cur.execute(
+                        "update credit_bills set status='open', paid_at=null "
+                        "where id=%s and user_id=%s",
+                        (bid, user_id),
+                    )
+                    conn.commit()
+                return bid
 
             cur.execute(
                 "insert into credit_bills (user_id, card_id, period_start, period_end, status, total, paid_amount) "
@@ -562,7 +574,12 @@ def undo_credit_transaction(user_id: int, ct_id: int):
             if b:
                 total = Decimal(str(b["total"]))
                 paid = Decimal(str(b["paid_amount"]))
-                if paid >= total:
+                # Só fecha como 'paid' se houve pagamento DE FATO (paid > 0).
+                # Sem isso, esvaziar uma fatura (total=0, paid=0) deixava a bill
+                # zumbi como 'paid' — `list_open_bills` filtra por status='open'
+                # e a fatura sumia do dashboard. Pior: a próxima compra no mesmo
+                # período reabria o id antigo mas continuava 'paid'.
+                if paid > 0 and paid >= total:
                     cur.execute(
                         "update credit_bills set status='paid', paid_at=now() "
                         "where id=%s and user_id=%s",

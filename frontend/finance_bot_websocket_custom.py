@@ -456,6 +456,11 @@ async def get_financial_data(
                 # edit/delete pros endpoints /credit-transactions/...
                 # `installments_total` + `installment_no` permitem o front
                 # mostrar "1/3, 2/3, 3/3" e avisar antes de apagar uma parcela.
+                # `t.created_at` (timestamptz com hora exata da inserção) em vez
+                # de `purchased_at::timestamptz` — DATE cast vira meia-noite UTC
+                # → "20:00 horario_brasilia" pra TODAS as compras do mesmo dia,
+                # parecendo hardcoded. Filtro continua por purchased_at (semantica
+                # de "compras feitas neste mês"), mas display usa created_at.
                 credit_union_sql = """
                     UNION ALL
                     SELECT t.id AS id,
@@ -464,7 +469,7 @@ async def get_financial_data(
                            c.name AS alvo,
                            t.nota AS nota,
                            t.categoria AS categoria,
-                           t.purchased_at::timestamptz AS criado_em,
+                           t.created_at AS criado_em,
                            false AS is_internal_movement,
                            t.installments_total AS installments_total,
                            t.installment_no AS installment_no
@@ -516,7 +521,7 @@ async def get_financial_data(
                       {launch_filter_sql}
                     {credit_union_sql}
                 ) merged
-                ORDER BY criado_em DESC
+                ORDER BY criado_em DESC, id ASC
                 LIMIT %s OFFSET %s
                 """,
                 (user_id, month_start, month_end, *launch_filter_params, *credit_union_params, limit, offset),
