@@ -14,7 +14,6 @@ fluxo do bot tradicional por enquanto — esses fluxos têm parsing complexo
 """
 from __future__ import annotations
 
-from datetime import date
 from typing import Any
 
 import db
@@ -101,6 +100,9 @@ def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
     if not card_id:
         return "🐷 Não achei o cartão informado."
 
+    card = db.get_card_by_id(user_id, card_id)
+    card_name = card["name"] if card else "cartão"
+
     amount = args.get("amount")
     try:
         amount_f = float(amount) if amount is not None else None
@@ -110,7 +112,7 @@ def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
         return "🐷 Informa o valor a pagar."
 
     try:
-        db.pay_bill_amount(user_id, card_id, amount_f, as_of=date.today())
+        db.pay_bill_amount(user_id, card_id, card_name, amount_f)
         return f"✅ Pagamento de R$ {amount_f:.2f} registrado."
     except Exception as e:
         return f"🐷 Não consegui registrar o pagamento: {e}"

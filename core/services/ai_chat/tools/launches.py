@@ -60,7 +60,6 @@ def _get_period_summary(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         "end_date": end.isoformat(),
         "receita": float(summary.get("receita") or 0),
         "despesa": float(summary.get("despesa") or 0),
-        "aporte_investimento": float(summary.get("aporte_investimento") or 0),
         "saldo_periodo": float(summary.get("receita") or 0) - float(summary.get("despesa") or 0),
     }
 
@@ -94,7 +93,7 @@ TOOLS: list[Tool] = [
             "type": "function",
             "function": {
                 "name": "get_period_summary",
-                "description": "Retorna o resumo financeiro de um período: total de receitas, total de despesas, aportes de investimento e saldo do período (receita - despesa). Use pra 'quanto gastei esse mês?', 'meu resumo de abril', 'quanto recebi em maio'. Sem datas, retorna o mês corrente até hoje.",
+                "description": "Retorna o resumo financeiro de um período: total de receitas e despesas reais (NÃO inclui aportes de investimento — pra aportes, use `get_investment_contributions`). Use pra 'quanto gastei esse mês?', 'meu resumo de abril', 'quanto recebi em maio'. Sem datas, retorna o mês corrente até hoje.",
                 "parameters": {
                     "type": "object",
                     "properties": {

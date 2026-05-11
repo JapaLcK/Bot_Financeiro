@@ -18,14 +18,25 @@ quantia que o user pediu — nada disso é dar conselho. Conselho seria
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 import db
+from utils_text import fmt_rate
 
 from ._base import Tool
 
 
 _PERIODS = ("daily", "monthly", "yearly")
+
+
+def _parse_iso_date(s: str | None) -> date | None:
+    if not s:
+        return None
+    try:
+        return date.fromisoformat(s)
+    except ValueError:
+        return None
 
 
 # ─── Read ───────────────────────────────────────────────────────────────────
@@ -38,8 +49,11 @@ def _list_investments(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
                 "id": r["id"],
                 "name": r["name"],
                 "balance": float(r["balance"] or 0),
-                "rate": float(r["rate"]) if r.get("rate") is not None else None,
-                "period": r.get("period"),
+                # rate_display ja formatado (ex: "116% CDI", "13,78% a.a.",
+                # "IPCA + 7,62% a.a."). Use ele direto na resposta — NAO
+                # interprete `rate` cru, ele varia de significado (multiplier
+                # CDI vs % anual) conforme `period`/`indexer`.
+                "rate_display": fmt_rate(r.get("rate"), r.get("period")),
                 "asset_type": r.get("asset_type"),
                 "indexer": r.get("indexer"),
                 "issuer": r.get("issuer"),
@@ -58,6 +72,41 @@ def _get_investment_summary(user_id: int, args: dict[str, Any]) -> dict[str, Any
         "total_invested": total,
         "investment_count": len(rows),
         "investments_with_balance": sum(1 for r in rows if float(r["balance"] or 0) > 0),
+    }
+
+
+def _get_investment_contributions(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    """Conta aportes em investimentos num período. NÃO usa get_summary_by_period
+    porque essa filtra is_internal_movement=false e aportes sao internal."""
+    today = date.today()
+    start = _parse_iso_date(args.get("start_date")) or today.replace(day=1)
+    end = _parse_iso_date(args.get("end_date")) or today
+
+    if end < start:
+        return {"error": "end_date anterior a start_date"}
+
+    launches = db.get_launches_by_period(user_id, start, end)
+
+    total = 0.0
+    count = 0
+    by_investment: dict[str, float] = {}
+    for l in launches:
+        if l.get("tipo") != "aporte_investimento":
+            continue
+        val = float(l.get("valor") or 0)
+        total += val
+        count += 1
+        name = l.get("alvo") or "?"
+        by_investment[name] = by_investment.get(name, 0.0) + val
+
+    return {
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "total_contributed": total,
+        "contribution_count": count,
+        "by_investment": [
+            {"name": k, "total": v} for k, v in sorted(by_investment.items())
+        ],
     }
 
 
@@ -186,6 +235,30 @@ TOOLS: list[Tool] = [
         },
         is_write=False,
         execute=_get_investment_summary,
+    ),
+    Tool(
+        schema={
+            "type": "function",
+            "function": {
+                "name": "get_investment_contributions",
+                "description": "Retorna quanto o usuário APORTOU em investimentos num período (default: mês corrente). Total, quantidade e breakdown por investimento. Use pra 'quanto aportei esse mês?', 'meus aportes em abril', 'quanto investi semana passada'. NÃO use get_period_summary pra isso — ela exclui movimentos internos como aporte.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "start_date": {
+                            "type": "string",
+                            "description": "ISO 8601 (YYYY-MM-DD). Default: primeiro dia do mês corrente.",
+                        },
+                        "end_date": {
+                            "type": "string",
+                            "description": "ISO 8601 (YYYY-MM-DD), inclusiva. Default: hoje.",
+                        },
+                    },
+                },
+            },
+        },
+        is_write=False,
+        execute=_get_investment_contributions,
     ),
     Tool(
         schema={
