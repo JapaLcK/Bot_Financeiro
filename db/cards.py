@@ -765,7 +765,10 @@ def pay_bill_amount(
             else:
                 pay = due
 
-        # Pagamento de fatura é movimentação interna
+        # Pagamento de fatura é movimentação interna. `extra_efeitos`
+        # carrega `bill_id` + `paid_amount_added` pra `delete_launch_and_
+        # rollback` reverter o `paid_amount` da bill se o user apagar o
+        # lançamento de pagamento do histórico.
         launch_id, _user_seq, new_balance = add_launch_and_update_balance(
             user_id=user_id,
             tipo="despesa",
@@ -774,6 +777,10 @@ def pay_bill_amount(
             nota=f"Pagamento de fatura ({card_name})",
             categoria="pagamento_fatura",
             is_internal_movement=True,
+            extra_efeitos={
+                "bill_id": int(bill["id"]),
+                "paid_amount_added": float(pay),
+            },
         )
 
     with get_conn() as conn:

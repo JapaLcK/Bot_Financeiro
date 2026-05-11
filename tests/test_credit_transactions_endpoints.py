@@ -440,6 +440,92 @@ def test_post_launches_credito_parcelas_invalidas_400(user_id):
     assert resp.status_code == 400
 
 
+def test_delete_pagamento_fatura_reverte_paid_amount(user_id):
+    """Regression: apagar o launch de pagamento_fatura no histórico devolvia
+    o saldo mas deixava `paid_amount` da bill intacto (zumbi). Agora o
+    rollback usa `efeitos.bill_id` pra reverter o paid_amount E reabrir o
+    status caso o pagamento não cubra mais o total."""
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    db.add_launch_and_update_balance(user_id, "receita", 500, None, "seed")
+    tx_id, _due, bill_id = db.add_credit_purchase(
+        user_id, card_id, 100, "outros", "compra", date.today(),
+    )
+
+    # Paga a fatura inteira
+    db.pay_bill_amount(user_id, card_id, "Nubank", 100.0)
+
+    # Confere: bill paga, paid_amount=100, status='paid'
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select paid_amount, status from credit_bills where id = %s",
+                (bill_id,),
+            )
+            row = cur.fetchone()
+    assert float(row["paid_amount"]) == 100.0
+    assert row["status"] == "paid"
+
+    # Acha o launch de pagamento_fatura criado
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id from launches where user_id=%s and categoria='pagamento_fatura' "
+                "order by criado_em desc limit 1",
+                (user_id,),
+            )
+            launch_id = cur.fetchone()["id"]
+
+    # Apaga o launch — o rollback deve reverter o paid_amount E reabrir
+    db.delete_launch_and_rollback(user_id, launch_id)
+
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select paid_amount, status, paid_at from credit_bills where id = %s",
+                (bill_id,),
+            )
+            row = cur.fetchone()
+    assert float(row["paid_amount"]) == 0.0, f"paid_amount nao revertido: {row['paid_amount']}"
+    assert row["status"] == "open", f"status nao reaberto: {row['status']}"
+    assert row["paid_at"] is None
+
+
+def test_delete_pagamento_parcial_decrementa_paid_amount(user_id):
+    """Pagamento parcial: paid_amount=50 sobre total=100. Apagar o launch
+    deve decrementar paid pra 0 mas a bill já estava open."""
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    db.add_launch_and_update_balance(user_id, "receita", 500, None, "seed")
+    _, _, bill_id = db.add_credit_purchase(
+        user_id, card_id, 100, "outros", "compra", date.today(),
+    )
+
+    # Paga só R$ 50 (parcial)
+    db.pay_bill_amount(user_id, card_id, "Nubank", 50.0)
+
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id from launches where user_id=%s and categoria='pagamento_fatura' "
+                "order by criado_em desc limit 1",
+                (user_id,),
+            )
+            launch_id = cur.fetchone()["id"]
+
+    db.delete_launch_and_rollback(user_id, launch_id)
+
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select paid_amount, status from credit_bills where id = %s",
+                (bill_id,),
+            )
+            row = cur.fetchone()
+    assert float(row["paid_amount"]) == 0.0
+    assert row["status"] == "open"
+
+
 def test_delete_tx_inexistente_404(user_id):
     _seed_card_and_purchase(user_id)
     client = TestClient(dashboard.app)

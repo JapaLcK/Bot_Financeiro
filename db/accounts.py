@@ -52,10 +52,15 @@ def add_launch_and_update_balance(
     categoria: str | None = None,
     criado_em: datetime | None = None,
     is_internal_movement: bool = False,
+    extra_efeitos: dict | None = None,
 ):
     """
     Lança em launches e atualiza saldo em accounts na mesma transação.
     Regra: despesa → saldo -= valor; receita → saldo += valor.
+
+    `extra_efeitos` é mesclado dentro de `efeitos` jsonb. Use pra que
+    `delete_launch_and_rollback` consiga reverter side-effects além do
+    saldo (ex: `bill_id` pra pagamento de fatura).
     """
     ensure_user(user_id)
 
@@ -72,6 +77,10 @@ def add_launch_and_update_balance(
 
     cat = (categoria or "").strip() or "outros"
 
+    efeitos = {"delta_conta": float(delta)}
+    if extra_efeitos:
+        efeitos.update(extra_efeitos)
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -87,7 +96,7 @@ def add_launch_and_update_balance(
                 returning id, user_seq
                 """,
                 (user_id, tipo, v, alvo, nota, cat, criado_em,
-                 Json({"delta_conta": float(delta)}), is_internal_movement),
+                 Json(efeitos), is_internal_movement),
             )
             row = cur.fetchone()
             launch_id = row["id"]
@@ -302,6 +311,36 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
             investment_lot_create = efeitos.get("investment_lot_create")
             investment_lot_withdrawals = efeitos.get("investment_lot_withdrawals") or []
             investment_lots_handled = False
+            # Pagamento de fatura: bill_id + paid_amount_added permitem
+            # reverter o `paid_amount` da credit_bill correspondente.
+            paid_bill_id = efeitos.get("bill_id")
+            paid_amount_added = efeitos.get("paid_amount_added")
+
+            # desfazer pagamento de fatura — reverte paid_amount e reabre se
+            # necessário (paid não cobre mais o total).
+            if paid_bill_id and paid_amount_added is not None:
+                cur.execute(
+                    """
+                    update credit_bills
+                    set paid_amount = greatest(0, coalesce(paid_amount, 0) - %s),
+                        status = case
+                            when (coalesce(paid_amount, 0) - %s) < total then 'open'
+                            else status
+                        end,
+                        paid_at = case
+                            when (coalesce(paid_amount, 0) - %s) <= 0 then null
+                            else paid_at
+                        end
+                    where id = %s and user_id = %s
+                    """,
+                    (
+                        Decimal(str(paid_amount_added)),
+                        Decimal(str(paid_amount_added)),
+                        Decimal(str(paid_amount_added)),
+                        int(paid_bill_id),
+                        user_id,
+                    ),
+                )
 
             # desfazer criação de investimento (zera e deleta)
             if create_invest:
