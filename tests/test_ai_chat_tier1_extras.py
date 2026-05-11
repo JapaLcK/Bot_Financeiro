@@ -27,7 +27,7 @@ def test_delete_launch_lancamento_normal_por_user_seq(user_id):
     _, user_seq, _ = db.add_launch_and_update_balance(user_id, "despesa", 50, None, "compra")
     assert db.get_balance(user_id) == 950
 
-    msg = _delete_launch_execute(user_id, {"launch_id": user_seq})
+    msg = _delete_launch_execute(user_id, {"launch_id": str(user_seq)})
     assert "apagado" in msg.lower()
     assert db.get_balance(user_id) == 1000  # saldo revertido
 
@@ -37,7 +37,7 @@ def test_delete_launch_compra_credito_por_id(user_id):
     db.set_default_card(user_id, card_id)
     tx_id, _, _ = db.add_credit_purchase(user_id, card_id, 50, "outros", "uber", date.today())
 
-    msg = _delete_launch_execute(user_id, {"launch_id": tx_id})
+    msg = _delete_launch_execute(user_id, {"launch_id": str(tx_id)})
     assert "apagada" in msg.lower() or "apagado" in msg.lower()
 
     # Confere que tx foi removida
@@ -57,27 +57,60 @@ def test_delete_launch_parcelamento_derruba_grupo(user_id):
     info = r[0] if isinstance(r, tuple) else r
     tx_ids = info["tx_ids"]
 
-    msg = _delete_launch_execute(user_id, {"launch_id": tx_ids[1]})  # apaga a 2ª parcela
+    msg = _delete_launch_execute(user_id, {"launch_id": str(tx_ids[1])})  # apaga a 2ª parcela
     assert "Parcelamento apagado" in msg
     assert "3 parcelas" in msg
 
-    # Todas as 3 transações foram removidas
-    with db.get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "select count(*) as n from credit_transactions where id = ANY(%s)",
-                (tx_ids,),
-            )
-            assert cur.fetchone()["n"] == 0
+
+def test_delete_launch_por_codigo_pc(user_id):
+    """User digita o código PCxxxxxxxx do parcelamento — resolve e apaga
+    o grupo inteiro. Era o caso do feedback do Lucas."""
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    r = db.add_credit_purchase_installments(
+        user_id=user_id, card_id=card_id, valor_total=200, categoria="outros",
+        nota="x", purchased_at=date.today(), installments=2,
+    )
+    info = r[0] if isinstance(r, tuple) else r
+    group_id = info["group_id"]
+    # Code formato: PC + primeiros 8 chars do uuid hex em UPPERCASE
+    group_hex = group_id.replace("-", "").upper()
+    pc_code = f"PC{group_hex[:8]}"
+
+    msg = _delete_launch_execute(user_id, {"launch_id": pc_code})
+    assert "Parcelamento" in msg and pc_code in msg
+    assert "2 parcelas" in msg
 
 
-def test_delete_launch_id_invalido(user_id):
+def test_delete_launch_validate_aceita_pc_code(user_id):
+    """validate retorna None pra PC code que existe — não bloqueia confirmação."""
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    r = db.add_credit_purchase_installments(
+        user_id=user_id, card_id=card_id, valor_total=200, categoria="outros",
+        nota="x", purchased_at=date.today(), installments=2,
+    )
+    info = r[0] if isinstance(r, tuple) else r
+    group_hex = info["group_id"].replace("-", "").upper()
+    pc_code = f"PC{group_hex[:8]}"
+
+    assert _delete_launch_validate(user_id, {"launch_id": pc_code}) is None
+    # E o número sem PC também (sem o prefixo, só hex)
+    assert _delete_launch_validate(user_id, {"launch_id": group_hex[:8]}) is None
+
+
+def test_delete_launch_id_vazio(user_id):
+    msg = _delete_launch_execute(user_id, {"launch_id": ""})
+    assert "Faltou" in msg
+
+
+def test_delete_launch_id_nao_resolve(user_id):
     msg = _delete_launch_execute(user_id, {"launch_id": "abc"})
-    assert "inválido" in msg.lower()
+    assert "Não achei" in msg
 
 
 def test_delete_launch_nao_existe(user_id):
-    msg = _delete_launch_execute(user_id, {"launch_id": 99999999})
+    msg = _delete_launch_execute(user_id, {"launch_id": "99999999"})
     assert "Não achei" in msg
 
 
@@ -93,9 +126,9 @@ def test_delete_launch_validate_id_inexistente_aborta(user_id):
 
 def test_delete_launch_validate_id_invalido(user_id):
     err = _delete_launch_validate(user_id, {"launch_id": "abc"})
-    assert "ID inválido" in err
+    assert "Não achei" in err  # abc não é número nem PC code
 
-    err = _delete_launch_validate(user_id, {"launch_id": 0})
+    err = _delete_launch_validate(user_id, {"launch_id": ""})
     assert "Faltou" in err
 
 

@@ -126,73 +126,101 @@ def _delete_launch_summary(args: dict[str, Any]) -> str:
     return f'apagar o lançamento #{lid}' if lid else "apagar lançamento"
 
 
-def _delete_launch_validate(user_id: int, args: dict[str, Any]) -> str | None:
-    """Roda ANTES da confirmação. Se o ID nem existe, mostra erro imediato
-    em vez de pedir 'confirma apagar #X?' enganoso. Critico porque o LLM
-    às vezes inventa IDs quando o user diz 'aquele' sem especificar."""
+def _try_int(s: str) -> int | None:
     try:
-        lid = int(args.get("launch_id") or 0)
+        n = int(s)
+        return n if n > 0 else None
     except (TypeError, ValueError):
-        return "🐷 ID inválido — me diz o número do lançamento (ex: #5)."
-    if lid <= 0:
-        return "🐷 Faltou o ID do lançamento."
-
-    # Existe como user_seq de launches?
-    if db.resolve_user_seq_to_id(user_id, lid):
         return None
 
-    # Existe como id de credit_transaction?
-    with db.get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "select 1 from credit_transactions where user_id=%s and id=%s",
-                (user_id, lid),
-            )
-            if cur.fetchone():
-                return None
+
+def _delete_launch_validate(user_id: int, args: dict[str, Any]) -> str | None:
+    """Roda ANTES da confirmação. Se o ID nem existe, mostra erro imediato
+    em vez de pedir 'confirma apagar #X?' enganoso. Crítico porque o LLM
+    às vezes inventa IDs quando o user diz 'aquele' sem especificar.
+
+    Aceita 3 formas:
+      1. user_seq de launches (#5, #142) — número pequeno
+      2. id de credit_transaction (numérico, mais alto)
+      3. código de parcelamento (PCxxxxxxxx, ex: PC81524273)
+    """
+    raw_id = str(args.get("launch_id") or "").strip()
+    if not raw_id:
+        return "🐷 Faltou o ID do lançamento."
+
+    lid = _try_int(raw_id)
+    if lid is not None:
+        # user_seq de launches?
+        if db.resolve_user_seq_to_id(user_id, lid):
+            return None
+        # id de credit_transaction?
+        with db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select 1 from credit_transactions where user_id=%s and id=%s",
+                    (user_id, lid),
+                )
+                if cur.fetchone():
+                    return None
+
+    # Código de parcelamento (PCxxxxxxxx ou só os hex do início do group_id)
+    if db.resolve_installment_group_id(user_id, raw_id):
+        return None
 
     return (
-        f"🐷 Não achei o lançamento #{lid}. "
-        f"Manda o ID exato (aparece no histórico como #N) ou pede pra eu "
-        f"listar os últimos lançamentos."
+        f"🐷 Não achei o lançamento '{raw_id}'. "
+        f"Manda o ID exato (aparece no histórico como #N, ou o código do "
+        f"parcelamento tipo PCxxxxxxxx) ou pede pra eu listar os últimos lançamentos."
     )
 
 
 def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
-    """Apaga um lançamento. Tenta primeiro como user_seq de `launches`
-    (cenário comum: user digita "#5"). Se não achar, tenta como id de
-    `credit_transactions` — nesse caso, parcelamento derruba o grupo inteiro
-    via `undo_credit_transaction`."""
-    try:
-        lid = int(args.get("launch_id") or 0)
-    except (TypeError, ValueError):
-        return "🐷 ID inválido — informe o número do lançamento (ex: #5)."
-    if lid <= 0:
+    """Apaga um lançamento. Tenta na ordem:
+      1. user_seq de `launches` (cenário comum: "#5") → delete_launch_and_rollback
+      2. id global de credit_transactions → undo_credit_transaction (auto desfaz
+         grupo inteiro se for parcelado)
+      3. código de parcelamento (PCxxxxxxxx) → undo_installment_group
+    """
+    raw_id = str(args.get("launch_id") or "").strip()
+    if not raw_id:
         return "🐷 Faltou o ID do lançamento."
 
-    # 1. Lançamento normal (despesa/receita) — resolve user_seq → id interno
-    internal_id = db.resolve_user_seq_to_id(user_id, lid)
-    if internal_id:
+    lid = _try_int(raw_id)
+    if lid is not None:
+        # 1. user_seq de launches
+        internal_id = db.resolve_user_seq_to_id(user_id, lid)
+        if internal_id:
+            try:
+                db.delete_launch_and_rollback(user_id, internal_id)
+                return f"🗑️ Lançamento #{lid} apagado. Saldo revertido."
+            except LookupError:
+                return f"🐷 Não achei o lançamento #{lid}."
+            except Exception as e:
+                return f"🐷 Não consegui apagar: {e}"
+
+        # 2. id de credit_transaction
         try:
-            db.delete_launch_and_rollback(user_id, internal_id)
-            return f"🗑️ Lançamento #{lid} apagado. Saldo revertido."
-        except LookupError:
-            return f"🐷 Não achei o lançamento #{lid}."
+            result = db.undo_credit_transaction(user_id, lid)
         except Exception as e:
             return f"🐷 Não consegui apagar: {e}"
+        if result is not None:
+            removed = int(result.get("removed_count") or 1)
+            if removed > 1:
+                return f"🗑️ Parcelamento apagado ({removed} parcelas)."
+            return f"🗑️ Compra no crédito #{lid} apagada."
 
-    # 2. Compra no crédito — id global em credit_transactions
-    try:
-        result = db.undo_credit_transaction(user_id, lid)
-    except Exception as e:
-        return f"🐷 Não consegui apagar: {e}"
-    if result is None:
-        return f"🐷 Não achei o lançamento #{lid}."
+    # 3. Código de parcelamento (PCxxxxxxxx)
+    group_id = db.resolve_installment_group_id(user_id, raw_id)
+    if group_id:
+        try:
+            result = db.undo_installment_group(user_id, group_id)
+        except Exception as e:
+            return f"🐷 Não consegui apagar: {e}"
+        if result:
+            removed = int(result.get("removed_count") or 0)
+            return f"🗑️ Parcelamento {raw_id.upper()} apagado ({removed} parcelas)."
 
-    removed = int(result.get("removed_count") or 1)
-    if removed > 1:
-        return f"🗑️ Parcelamento apagado ({removed} parcelas)."
-    return f"🗑️ Compra no crédito #{lid} apagada."
+    return f"🐷 Não achei o lançamento '{raw_id}'."
 
 
 TOOLS: list[Tool] = [
@@ -311,8 +339,15 @@ TOOLS: list[Tool] = [
                     "type": "object",
                     "properties": {
                         "launch_id": {
-                            "type": "integer",
-                            "description": "ID do lançamento (o #N que aparece no histórico, ex: 5, 142).",
+                            "type": "string",
+                            "description": (
+                                "ID exatamente como aparece no histórico. "
+                                "Aceita: '#5' (user_seq de lançamento normal), "
+                                "número grande (id de compra no cartão), OU "
+                                "'PCxxxxxxxx' (código de parcelamento, ex: "
+                                "PC81524273). Use sempre o que o user disse "
+                                "literalmente, NUNCA invente."
+                            ),
                         },
                     },
                     "required": ["launch_id"],
