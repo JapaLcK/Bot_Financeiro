@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from db import get_auth_user
 
-from .plan_limits import PlanLimits, limits_for
+from .plan_limits import PlanLimits, PlanLimitExceeded, limits_for
 
 
 def is_pro(user_id: int) -> bool:
@@ -40,3 +40,36 @@ def is_pro(user_id: int) -> bool:
 def get_user_limits(user_id: int) -> PlanLimits:
     """Retorna os limites/features aplicáveis a este usuário."""
     return limits_for("pro" if is_pro(user_id) else "free")
+
+
+def check_can_create_pocket(user_id: int) -> None:
+    """Levanta PlanLimitExceeded se Free e já atingiu o limite de caixinhas.
+    Chamado do DB layer pra blindar TODOS os canais (HTTP, bot, IA)."""
+    limits = get_user_limits(user_id)
+    pockets_max = limits["pockets_max"]
+    if pockets_max is None:
+        return
+    from db.pockets import list_pockets
+    if len(list_pockets(user_id)) >= pockets_max:
+        raise PlanLimitExceeded(
+            "pockets_unlimited",
+            f"🐷 No Free você cria {pockets_max} caixinha. "
+            "Com PigBank+ é ilimitado — separe sua reserva, viagens, "
+            "presentes…\nFaça upgrade: https://pigbankai.com/precos",
+        )
+
+
+def check_can_create_card(user_id: int) -> None:
+    """Levanta PlanLimitExceeded se Free e já atingiu o limite de cartões."""
+    limits = get_user_limits(user_id)
+    cards_max = limits["cards_max"]
+    if cards_max is None:
+        return
+    from db.cards import list_cards
+    if len(list_cards(user_id)) >= cards_max:
+        raise PlanLimitExceeded(
+            "cards_unlimited",
+            f"🐷 No Free você adiciona {cards_max} cartão. "
+            "Com PigBank+ você organiza todos eles em um lugar só.\n"
+            "Faça upgrade: https://pigbankai.com/precos",
+        )

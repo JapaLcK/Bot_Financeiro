@@ -113,3 +113,32 @@ def log_system_event_sync(
             conn.commit()
     except Exception as exc:
         print(f"[observability] failed to record {event_type}: {exc}", file=sys.stderr)
+
+
+def recent_event_exists(event_type: str, user_id: int, within_days: float = 7.0) -> bool:
+    """
+    True se existe um system_event_logs com (event_type, user_id) nos últimos
+    `within_days`. Usado pra dedup de emails transacionais que podem ser
+    disparados por múltiplas fontes (webhook + scheduler).
+    Falha silenciosa retorna False — melhor mandar duplicado que perder.
+    """
+    database_url = _database_url()
+    if not database_url:
+        return False
+    try:
+        with psycopg.connect(database_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1 FROM system_event_logs
+                    WHERE event_type = %s
+                      AND user_id = %s
+                      AND created_at > now() - %s::interval
+                    LIMIT 1
+                    """,
+                    (event_type, int(user_id), f"{within_days} days"),
+                )
+                return cur.fetchone() is not None
+    except Exception as exc:
+        print(f"[observability] failed to check {event_type}: {exc}", file=sys.stderr)
+        return False

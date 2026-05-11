@@ -22,7 +22,10 @@ def create(user_id: int, name: str, nota: str | None = None) -> str:
         return "Qual o nome da caixinha?"
     try:
         launch_id, _pocket_id, canon = db.create_pocket(user_id, name.strip(), nota=nota)
-    except Exception:
+    except Exception as exc:
+        from core.services.plan_limits import PlanLimitExceeded
+        if isinstance(exc, PlanLimitExceeded):
+            return exc.message
         return "Deu erro ao criar caixinha. Veja os logs."
     if launch_id is None:
         return f"ℹ️ A caixinha **{canon}** já existe."

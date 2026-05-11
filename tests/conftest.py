@@ -130,3 +130,32 @@ def user_id():
     ensure_user(uid)
     yield uid
     _cleanup_user(uid)
+
+
+@pytest.fixture()
+def pro_user_id(user_id: int):
+    """user_id já promovido para plano Pro — use em testes que precisam criar
+    múltiplas caixinhas/cartões ou exercem features Pro.
+
+    Garante uma row em auth_accounts (necessária pra is_pro() ler o plano)
+    e seta plan='pro'. plan_expires_at=None significa "ilimitado".
+    """
+    import uuid as _uuid
+    from db.connection import get_conn
+    fake_email = f"pro-{_uuid.uuid4().hex[:8]}@test.local"
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select id from auth_accounts where user_id = %s limit 1", (user_id,))
+            row = cur.fetchone()
+            if row:
+                cur.execute(
+                    "update auth_accounts set plan='pro', plan_expires_at=null where user_id = %s",
+                    (user_id,),
+                )
+            else:
+                cur.execute(
+                    "insert into auth_accounts(user_id, email, password_hash, plan) values (%s, %s, 'x', 'pro')",
+                    (user_id, fake_email),
+                )
+        conn.commit()
+    return user_id

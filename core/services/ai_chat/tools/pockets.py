@@ -55,6 +55,9 @@ def _create_pocket_execute(user_id: int, args: dict[str, Any]) -> str:
         db.create_pocket(user_id, name, description=description)
         return f'✅ Caixinha "{name}" criada.'
     except Exception as e:
+        from core.services.plan_limits import PlanLimitExceeded
+        if isinstance(e, PlanLimitExceeded):
+            return e.message
         return f"🐷 Não consegui criar a caixinha: {e}"
 
 

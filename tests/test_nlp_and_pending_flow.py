@@ -11,6 +11,7 @@ from db import (
     add_credit_purchase_installments,
     add_launch_and_update_balance,
     create_card,
+    create_pocket,
     get_balance,
     get_memorized_category,
     get_open_bill_summary,
@@ -314,7 +315,30 @@ def test_route_pergunta_fatura_deste_cartao_usa_principal(user_id):
     assert "Nubank" in response
 
 
-def test_route_trocar_cartao_principal_abre_fluxo(user_id):
+def test_free_user_segundo_cartao_recebe_mensagem_amigavel(user_id):
+    """Free pode criar 1 cartão; ao tentar o 2º, bot devolve CTA pra upgrade."""
+    create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
+    # Inicia fluxo de criar cartão e avança até o ponto que chama create_card
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="criar cartao Visa")
+    route(classify(msg.text), msg)
+    route(classify("dia 5"), IncomingMessage(platform="discord", user_id=user_id, text="dia 5"))
+    # Esta é a chamada que dispara create_card → PlanLimitExceeded
+    response = route(classify("dia 10"), IncomingMessage(platform="discord", user_id=user_id, text="dia 10"))
+    assert "PigBank+" in response
+    assert "/precos" in response or "upgrade" in response.lower()
+
+
+def test_free_user_segunda_caixinha_recebe_mensagem_amigavel(user_id):
+    """Free pode criar 1 caixinha; ao tentar a 2ª, bot devolve CTA pra upgrade."""
+    create_pocket(user_id, "viagem")
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="criar caixinha presente")
+    response = route(classify(msg.text), msg)
+    assert "PigBank+" in response
+    assert "/precos" in response or "upgrade" in response.lower()
+
+
+def test_route_trocar_cartao_principal_abre_fluxo(pro_user_id):
+    user_id = pro_user_id
     create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
     create_card(user_id=user_id, name="Visa", closing_day=5, due_day=10)
     msg = IncomingMessage(platform="discord", user_id=user_id, text="quero mudar meu cartao principal")
@@ -780,7 +804,8 @@ def test_fluxo_completo_primeiro_cartao_define_principal_e_lembrete(user_id):
     assert card is not None
 
 
-def test_fluxo_segundo_cartao_pergunta_se_vira_principal(user_id):
+def test_fluxo_segundo_cartao_pergunta_se_vira_principal(pro_user_id):
+    user_id = pro_user_id
     create_card(user_id=user_id, name="Nubank", closing_day=1, due_day=8)
     msg = IncomingMessage(platform="discord", user_id=user_id, text="criar cartao Visa")
     route(classify(msg.text), msg)

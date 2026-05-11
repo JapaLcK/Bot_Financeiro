@@ -5,6 +5,7 @@ from collections import defaultdict
 
 from ai_router import classify_category_with_gpt
 from core.services.category_service import learn_from_inference
+from core.services.plan_limits import PlanLimitExceeded
 from db import (
     add_credit_purchase,
     add_credit_purchase_installments,
@@ -996,12 +997,15 @@ def start_card_create_flow(user_id: int, text: str = "") -> str:
 
     # Comando completo (nome + fechamento + vencimento) → cria direto sem perguntar
     if inferred_name and inferred_closing and inferred_due:
-        card_id = create_card(
-            user_id=user_id,
-            name=inferred_name,
-            closing_day=inferred_closing,
-            due_day=inferred_due,
-        )
+        try:
+            card_id = create_card(
+                user_id=user_id,
+                name=inferred_name,
+                closing_day=inferred_closing,
+                due_day=inferred_due,
+            )
+        except PlanLimitExceeded as exc:
+            return exc.message
         first_card = len(existing_cards) == 0
         if first_card:
             set_default_card(user_id, card_id)
@@ -1210,12 +1214,16 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
 
         # Se closing_day e due_day já foram coletados (via comando inline), cria direto
         if payload.get("closing_day") and payload.get("due_day"):
-            card_id = create_card(
-                user_id=user_id,
-                name=new_name,
-                closing_day=int(payload["closing_day"]),
-                due_day=int(payload["due_day"]),
-            )
+            try:
+                card_id = create_card(
+                    user_id=user_id,
+                    name=new_name,
+                    closing_day=int(payload["closing_day"]),
+                    due_day=int(payload["due_day"]),
+                )
+            except PlanLimitExceeded as exc:
+                clear_pending_action(user_id)
+                return exc.message
             first_card = int(payload.get("existing_count") or 0) == 0
             if first_card:
                 set_default_card(user_id, card_id)
@@ -1308,12 +1316,16 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         if card_name_exists(user_id, card_name):
             return _prompt_duplicate_card(user_id, card_name, payload)
 
-        card_id = create_card(
-            user_id=user_id,
-            name=card_name,
-            closing_day=int(payload["closing_day"]),
-            due_day=due_day,
-        )
+        try:
+            card_id = create_card(
+                user_id=user_id,
+                name=card_name,
+                closing_day=int(payload["closing_day"]),
+                due_day=due_day,
+            )
+        except PlanLimitExceeded as exc:
+            clear_pending_action(user_id)
+            return exc.message
         payload["card_id"] = card_id
         first_card = int(payload.get("existing_count") or 0) == 0
         if first_card:
@@ -1544,7 +1556,10 @@ def handle(user_id: int, text: str) -> str | None:
 
         try:
             existing_count = len(list_cards(user_id))
-            card_id = create_card(user_id=user_id, name=name, closing_day=fecha, due_day=vence)
+            try:
+                card_id = create_card(user_id=user_id, name=name, closing_day=fecha, due_day=vence)
+            except PlanLimitExceeded as exc:
+                return exc.message
             if existing_count == 0:
                 set_default_card(user_id, card_id)
             set_pending_action(

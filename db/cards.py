@@ -83,6 +83,11 @@ def create_card(user_id: int, name: str, closing_day: int, due_day: int) -> int:
     if card_name_exists(user_id, name):
         raise ValueError(f"nome_duplicado:{name}")
 
+    # Plan gate: blinda todos os canais. PlanLimitExceeded é capturado pelos
+    # callers (bot tradicional, HTTP, IA conversacional).
+    from core.services.plan_service import check_can_create_card
+    check_can_create_card(user_id)
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(

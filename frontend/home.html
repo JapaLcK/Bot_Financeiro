@@ -134,6 +134,32 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   text-transform:uppercase; color:var(--text-3); margin:28px 4px 10px;
 }
 
+/* Free banner — CTA pra Pro, aparece só pra users no plano free */
+.free-banner {
+  display:none;
+  background:linear-gradient(135deg, rgba(124,58,237,.22), rgba(59,130,246,.16));
+  border:1px solid rgba(167,139,250,.35); border-radius:var(--radius);
+  padding:14px 18px; margin-bottom:14px;
+  align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
+  animation:fadeIn .4s var(--ease) both;
+}
+.free-banner.show { display:flex; }
+.free-banner .fb-text { display:flex; align-items:center; gap:10px; font-size:.92rem; color:rgba(255,255,255,.92); line-height:1.4; flex:1; min-width:0; }
+.free-banner .fb-emoji { font-size:1.3rem; flex-shrink:0; }
+.free-banner .fb-text b { color:#fff; font-weight:700; }
+.free-banner .fb-cta {
+  background:linear-gradient(135deg,#7c3aed,#3b82f6); color:#fff;
+  padding:8px 16px; border-radius:10px; font-weight:700; font-size:.86rem;
+  text-decoration:none; white-space:nowrap;
+  box-shadow:0 6px 18px rgba(124,58,237,.35);
+  transition:transform .15s, box-shadow .15s;
+}
+.free-banner .fb-cta:hover { transform:translateY(-1px); box-shadow:0 10px 24px rgba(124,58,237,.5); }
+@media(max-width:560px) {
+  .free-banner { padding:12px 14px; }
+  .free-banner .fb-text { font-size:.86rem; }
+}
+
 /* Greeting */
 .greeting-card {
   background:linear-gradient(135deg, rgba(124,58,237,.18), rgba(59,130,246,.12));
@@ -398,6 +424,14 @@ footer a:hover { color:var(--text); }
   </header>
 
   <main id="content">
+
+    <div class="free-banner" id="free-banner">
+      <div class="fb-text">
+        <span class="fb-emoji">🐷</span>
+        <span>Você está no <b>Free</b>. Suba pro <b>PigBank+</b> e libere OFX, investimentos, export e caixinhas ilimitadas — 7 dias grátis.</span>
+      </div>
+      <a class="fb-cta" href="/precos">Fazer upgrade</a>
+    </div>
 
     <div class="greeting-card">
       <div class="greeting-text">
@@ -964,7 +998,15 @@ function showAccessError() {
   renderAlerts(snapshot);
   renderOnboarding(snapshot, me);
   renderActivity(snapshot);
+  renderFreeBanner(me);
 })();
+
+function renderFreeBanner(me) {
+  const banner = document.getElementById("free-banner");
+  if (!banner) return;
+  const plan = (me && me.plan) || "free";
+  if (plan === "free") banner.classList.add("show");
+}
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {

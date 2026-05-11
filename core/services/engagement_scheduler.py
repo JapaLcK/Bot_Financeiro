@@ -215,10 +215,18 @@ async def _check_trial_ending() -> None:
         return
 
     dashboard_url = os.getenv("DASHBOARD_URL", "https://pigbankai.com")
+    from core.observability import recent_event_exists
     for row in users:
         user_id = row["user_id"]
         email = row["email"]
         expires_at = row["plan_expires_at"]
+        # Dedup: o webhook customer.subscription.trial_will_end é a fonte
+        # primária. Scheduler é fallback — pula se já foi enviado nos
+        # últimos 6 dias (cobre janela 2.5-3.5d sem duplicar).
+        if await loop.run_in_executor(
+            None, recent_event_exists, "trial_ending_email_sent", user_id, 6.0
+        ):
+            continue
         try:
             ok = await loop.run_in_executor(None, send_trial_ending_email, email, expires_at, dashboard_url)
             if ok:

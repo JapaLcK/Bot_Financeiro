@@ -48,3 +48,14 @@ PRO_LIMITS: PlanLimits = {
 
 def limits_for(plan: str) -> PlanLimits:
     return PRO_LIMITS if (plan or "").lower() == "pro" else FREE_LIMITS
+
+
+class PlanLimitExceeded(Exception):
+    """Free atingiu o limite de uma feature. Carrega `feature` pra UIs decidirem
+    o que mostrar (badge, modal, mensagem amigável) e `message` pronta pra
+    canais texto (bot Discord/WhatsApp, IA conversacional)."""
+
+    def __init__(self, feature: str, message: str):
+        super().__init__(message)
+        self.feature = feature
+        self.message = message

@@ -32,6 +32,7 @@ from core.services.media_service import (
     analyze_image,
 )
 from core.observability import log_system_event_sync
+from core.services.plan_limits import PlanLimitExceeded
 from utils_text import fmt_brl
 from ai_router import _internal_user_id
 
@@ -515,6 +516,12 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         formatted = format_for_platform(raw_response, platform)
 
         return [OutgoingMessage(text=formatted)]
+
+    except PlanLimitExceeded as exc:
+        # Limite de plano Free atingido — qualquer handler que toca DB
+        # protegido (db.create_pocket, db.create_card, etc.) levanta isso.
+        # Mensagem já vem amigável, com CTA pra upgrade.
+        return [OutgoingMessage(text=format_for_platform(exc.message, msg.platform))]
 
     except Exception as exc:
         tb = traceback.format_exc()

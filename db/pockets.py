@@ -93,6 +93,12 @@ def create_pocket(user_id: int, name: str, nota: str | None = None, description:
     if not name:
         raise ValueError("EMPTY_NAME")
 
+    # Plan gate: blinda todos os canais (HTTP, bot, IA). Levanta
+    # PlanLimitExceeded com mensagem amigável; callers decidem se mostram em
+    # texto (bot) ou em 403 (HTTP).
+    from core.services.plan_service import check_can_create_pocket
+    check_can_create_pocket(user_id)
+
     desc = (description or "").strip() or None
     criado_em = datetime.now(_tz())
 

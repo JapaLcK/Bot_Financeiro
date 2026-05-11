@@ -2832,6 +2832,26 @@ async def billing_webhook(request: Request):
                 from core.services.email_service import send_pro_charged_email
                 await _fire_email(user_id, send_pro_charged_email, amount_brl, expires_dt)
 
+    elif event["type"] == "customer.subscription.trial_will_end":
+        # Stripe dispara ~3 dias antes do trial acabar. Email de aviso (item 38)
+        # — fonte primária; scheduler interno fica como fallback se o webhook
+        # falhar. Dedup via system_event_logs evita duplicar com o scheduler.
+        sub = event["data"]["object"]
+        user_id = _resolve_user(sub)
+        if user_id:
+            from core.observability import recent_event_exists
+            if not recent_event_exists("trial_ending_email_sent", user_id, within_days=6):
+                expires_dt = _subscription_period_end(sub)
+                from core.services.email_service import send_trial_ending_email
+                await _fire_email(user_id, send_trial_ending_email, expires_dt)
+                await log_system_event(
+                    "info",
+                    "trial_ending_email_sent",
+                    "Email de trial ending enviado (webhook trial_will_end).",
+                    source="billing",
+                    user_id=user_id,
+                )
+
     elif event["type"] == "invoice.payment_failed":
         # Stripe vai retentar (smart retries). NAO movemos pra free aqui;
         # so marca past_due. O downgrade definitivo acontece em
