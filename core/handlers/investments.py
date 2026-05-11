@@ -13,8 +13,7 @@ def _investment_dashboard_link(user_id: int) -> str:
     if not link:
         return "⚠️ Não consegui gerar o link do dashboard agora. Tente novamente em instantes."
     return (
-        "O bot cria investimentos pelo dashboard para evitar cadastro incompleto por mensagem.\n"
-        "Abra a aba de investimentos para criar, editar, aportar ou resgatar com todos os detalhes:\n"
+        "💡 No dashboard você gerencia com mais detalhes (taxas indexadas, lotes, datas):\n"
         f"{link}\n"
         "⏱️ Link mágico de uso único, expira em 5 minutos."
     )
