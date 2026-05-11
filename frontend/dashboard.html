@@ -2842,12 +2842,12 @@ function renderLaunches() {
       const valClass   = isInternal ? '' : (l.tipo==='receita'||l.tipo==='entrada' ? 'g' : 'r');
       const valStyle   = isInternal ? 'color:var(--text-2)' : '';
       const typeLabel  = TYPE_LABELS[l.tipo] || l.tipo.replaceAll("_", " ");
-      const editable   = l.id != null && l.tipo !== 'credito';
+      const editable   = l.id != null;
       const editBtn    = editable
         ? `<button class="bgt-btn launch-edit-btn" onclick="event.stopPropagation();openEditLaunchModal(${l.id})" title="Editar lançamento">✏️</button>`
         : '';
       const deleteBtn  = editable
-        ? `<button class="bgt-btn launch-delete-btn" onclick="event.stopPropagation();confirmDeleteLaunch(${l.id}, ${JSON.stringify(describeLaunch(l).replace(/<[^>]+>/g, '').trim()).replace(/"/g, '&quot;')}, ${l.valor})" title="Apagar lançamento">🗑️</button>`
+        ? `<button class="bgt-btn launch-delete-btn" onclick="event.stopPropagation();confirmDeleteLaunch(${l.id}, ${JSON.stringify(describeLaunch(l).replace(/<[^>]+>/g, '').trim()).replace(/"/g, '&quot;')}, ${l.valor}, ${l.tipo === 'credito' ? 'true' : 'false'}, ${l.installments_total || 'null'})" title="Apagar lançamento">🗑️</button>`
         : '';
       return `
       <div class="row" style="${isInternal?'opacity:.75':''}">
@@ -3042,20 +3042,28 @@ function _onEditCategoriaChange() {
   }
 }
 
+let editingLaunchIsCredit = false;
+
 function openEditLaunchModal(launchId) {
   if (!launchId) return;
   const launch = (lastData?.recent_launches || []).find(l => l.id === launchId);
   if (!launch) return;
 
   editingLaunchId = launchId;
+  editingLaunchIsCredit = (launch.tipo === 'credito');
   const valStr = fmt(launch.valor);
+  const prefix = editingLaunchIsCredit ? "compra crédito" : launch.tipo;
   document.getElementById("edit-launch-summary").textContent =
-    `${launch.tipo} • ${valStr} • ${fmtDate(launch.criado_em)}`;
+    `${prefix} • ${valStr} • ${fmtDate(launch.criado_em)}`;
 
   _renderEditCategoriaOptions(launch.categoria);
   document.getElementById("edit-launch-categoria-custom-row").style.display = "none";
   document.getElementById("edit-launch-categoria-custom").value = "";
-  document.getElementById("edit-launch-nota").value = launch.nota || launch.alvo || "";
+  // Pra crédito, `alvo` é o nome do cartão — não faz sentido pré-preencher
+  // como descrição. Usa só `nota` (que tem a descrição da compra).
+  document.getElementById("edit-launch-nota").value = editingLaunchIsCredit
+    ? (launch.nota || "")
+    : (launch.nota || launch.alvo || "");
 
   hideEditLaunchError();
   document.getElementById("edit-launch-overlay").classList.add("open");
@@ -3097,7 +3105,10 @@ async function submitEditLaunch() {
   editLaunchSubmitting = true;
   btn.disabled = true;
   try {
-    const r = await fetch(`${API}/launches/${USER_ID}/${editingLaunchId}`, {
+    const url = editingLaunchIsCredit
+      ? `${API}/credit-transactions/${USER_ID}/${editingLaunchId}`
+      : `${API}/launches/${USER_ID}/${editingLaunchId}`;
+    const r = await fetch(url, {
       method: "PATCH",
       credentials: "same-origin",
       headers: csrfHeaders({ "Content-Type": "application/json" }),
@@ -3108,7 +3119,7 @@ async function submitEditLaunch() {
       throw new Error(detail.detail || `HTTP ${r.status}`);
     }
     closeEditLaunchModal();
-    showLaunchSuccessToast("Lançamento atualizado");
+    showLaunchSuccessToast(editingLaunchIsCredit ? "Compra atualizada" : "Lançamento atualizado");
     sendRefresh();
   } catch (err) {
     showEditLaunchError("Erro: " + err.message);
@@ -3123,25 +3134,32 @@ document.getElementById("edit-launch-overlay").addEventListener("click", e => {
 });
 
 let deleteLaunchInFlight = false;
-async function confirmDeleteLaunch(launchId, descricao, valor) {
+async function confirmDeleteLaunch(launchId, descricao, valor, isCredit = false, installmentsTotal = null) {
   if (deleteLaunchInFlight) return;
   if (!launchId) return;
   const valFmt = (typeof valor === "number") ? fmt(valor) : "";
   const desc   = (descricao || "").trim() || "este lançamento";
-  const ok = await confirmModal(
-    `${desc}${valFmt ? ` — ${valFmt}` : ""}\n\n` +
-    `O efeito no saldo (e em caixinhas/investimentos, se houver) será revertido. Essa ação não pode ser desfeita.`,
-    {
-      title: "Apagar lançamento",
-      confirmText: "Apagar",
-      destructive: true,
-    },
-  );
+
+  const isInstallment = isCredit && installmentsTotal && installmentsTotal > 1;
+  const body = isCredit
+    ? (isInstallment
+        ? `${desc}${valFmt ? ` — ${valFmt}` : ""}\n\nEsta compra faz parte de um parcelamento em ${installmentsTotal}x. **TODAS as ${installmentsTotal} parcelas** serão apagadas. Essa ação não pode ser desfeita.`
+        : `${desc}${valFmt ? ` — ${valFmt}` : ""}\n\nA compra será removida da fatura. Essa ação não pode ser desfeita.`)
+    : `${desc}${valFmt ? ` — ${valFmt}` : ""}\n\nO efeito no saldo (e em caixinhas/investimentos, se houver) será revertido. Essa ação não pode ser desfeita.`;
+
+  const ok = await confirmModal(body, {
+    title: isCredit ? "Apagar compra no crédito" : "Apagar lançamento",
+    confirmText: "Apagar",
+    destructive: true,
+  });
   if (!ok) return;
 
   deleteLaunchInFlight = true;
   try {
-    const r = await fetch(`${API}/launches/${USER_ID}/${launchId}`, {
+    const url = isCredit
+      ? `${API}/credit-transactions/${USER_ID}/${launchId}`
+      : `${API}/launches/${USER_ID}/${launchId}`;
+    const r = await fetch(url, {
       method: "DELETE",
       credentials: "same-origin",
       headers: csrfHeaders(),
@@ -3150,7 +3168,15 @@ async function confirmDeleteLaunch(launchId, descricao, valor) {
       const detail = await r.json().catch(() => ({}));
       throw new Error(detail.detail || `HTTP ${r.status}`);
     }
-    showLaunchSuccessToast("Lançamento apagado");
+    if (isCredit) {
+      const data = await r.json().catch(() => ({}));
+      const msg = data.mode === "group" && data.removed_count > 1
+        ? `Parcelamento apagado (${data.removed_count} parcelas)`
+        : "Compra apagada";
+      showLaunchSuccessToast(msg);
+    } else {
+      showLaunchSuccessToast("Lançamento apagado");
+    }
     sendRefresh();
   } catch (err) {
     await alertModal(err.message, { title: "Erro ao apagar" });

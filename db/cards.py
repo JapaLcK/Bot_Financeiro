@@ -453,6 +453,43 @@ def add_credit_refund(
     return tx_id, total
 
 
+def update_credit_transaction_fields(
+    user_id: int,
+    ct_id: int,
+    *,
+    categoria: str | None = None,
+    nota: str | None = None,
+) -> bool:
+    """Atualiza categoria e/ou nota de uma compra no crédito.
+
+    Não mexe em valor, cartão ou data — esses ficariam fora de scope (mudariam
+    o saldo da fatura ou a janela de fechamento). Retorna True se algo foi
+    alterado, False se não encontrou ou nada mudou.
+    """
+    sets: list[str] = []
+    params: list = []
+    if categoria is not None:
+        sets.append("categoria = %s")
+        params.append(categoria)
+    if nota is not None:
+        sets.append("nota = %s")
+        params.append(nota)
+    if not sets:
+        return False
+
+    params.extend([user_id, ct_id])
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"update credit_transactions set {', '.join(sets)} "
+                f"where user_id = %s and id = %s returning id",
+                params,
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return bool(row)
+
+
 def undo_credit_transaction(user_id: int, ct_id: int):
     """
     Desfaz um crédito CT#.

@@ -109,6 +109,8 @@ from db import (
     pocket_withdraw_to_account,
     update_launch_category,
     update_launch_fields,
+    update_credit_transaction_fields,
+    undo_credit_transaction,
     delete_launch_and_rollback,
 )
 from core.services.pluggy import (
@@ -449,16 +451,22 @@ async def get_financial_data(
             credit_union_sql = ""
             credit_union_params: list = []
             if include_credit:
+                # `id` aqui é o id da credit_transaction (NÃO da launches). O
+                # frontend distingue pelo campo `tipo='credito'` e roteia o
+                # edit/delete pros endpoints /credit-transactions/...
+                # `installments_total` é informativo: o front avisa o user
+                # antes de apagar uma parcela (vai derrubar o grupo inteiro).
                 credit_union_sql = """
                     UNION ALL
-                    SELECT NULL::bigint AS id,
+                    SELECT t.id AS id,
                            'credito' AS tipo,
                            t.valor AS valor,
                            c.name AS alvo,
                            t.nota AS nota,
                            t.categoria AS categoria,
                            t.purchased_at::timestamptz AS criado_em,
-                           false AS is_internal_movement
+                           false AS is_internal_movement,
+                           t.installments_total AS installments_total
                     FROM credit_transactions t
                     JOIN credit_cards c ON c.id = t.card_id
                     WHERE t.user_id = %s
@@ -470,11 +478,12 @@ async def get_financial_data(
 
             # Total launches for the requested month after filters (excluindo ações administrativas)
             # Importante: as duas pernas do UNION ALL precisam ter o mesmo shape, então
-            # selecionamos exatamente as mesmas 8 colunas em cada uma.
+            # selecionamos exatamente as mesmas 9 colunas em cada uma (8 base + installments_total).
             await cur.execute(
                 f"""
                 SELECT COUNT(*) AS total FROM (
-                    SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
+                    SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
+                           NULL::int AS installments_total
                     FROM launches
                     WHERE user_id = %s
                       AND criado_em >= %s AND criado_em < %s
@@ -491,9 +500,11 @@ async def get_financial_data(
             # Launches for the requested month after filters (paginated)
             await cur.execute(
                 f"""
-                SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
+                SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
+                       installments_total
                 FROM (
-                    SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
+                    SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
+                           NULL::int AS installments_total
                     FROM launches
                     WHERE user_id = %s
                       AND criado_em >= %s AND criado_em < %s
@@ -3601,6 +3612,95 @@ async def delete_launch_route(
 
     _invalidate_dashboard_current_cache(user_id)
     return {"ok": True, "launch_id": int(launch_id)}
+
+
+@app.patch("/credit-transactions/{user_id}/{tx_id}")
+async def update_credit_transaction_route(
+    request: Request,
+    user_id: int,
+    tx_id: int,
+    payload: LaunchEditPayload,
+):
+    """Atualiza categoria e/ou descrição de uma compra no cartão de crédito.
+
+    Não altera valor, cartão ou data — esses mudariam o saldo da fatura ou a
+    janela de fechamento; pra mexer nesses campos, o user deve apagar e
+    recriar.
+    """
+    _authorize_dashboard_access(request, user_id)
+
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from utils_text import canonicalize_category_label
+
+    categoria_norm: str | None = None
+    if payload.categoria is not None:
+        raw = payload.categoria.strip()
+        if not raw:
+            raise HTTPException(status_code=400, detail="Categoria não pode ser vazia.")
+        categoria_norm = canonicalize_category_label(raw) or raw.lower()
+
+    nota_norm: str | None = None
+    if payload.nota is not None:
+        nota_norm = payload.nota.strip()
+        if len(nota_norm) > 200:
+            raise HTTPException(status_code=400, detail="Descrição muito longa (máx. 200 caracteres).")
+
+    if categoria_norm is None and nota_norm is None:
+        raise HTTPException(status_code=400, detail="Nada para atualizar.")
+
+    changed = await asyncio.to_thread(
+        update_credit_transaction_fields,
+        user_id,
+        tx_id,
+        categoria=categoria_norm,
+        nota=nota_norm,
+    )
+    if not changed:
+        raise HTTPException(status_code=404, detail="Compra no crédito não encontrada.")
+    _invalidate_dashboard_current_cache(user_id)
+    return {
+        "ok": True,
+        "tx_id": tx_id,
+        "categoria": categoria_norm,
+        "nota": nota_norm,
+    }
+
+
+@app.delete("/credit-transactions/{user_id}/{tx_id}")
+async def delete_credit_transaction_route(
+    request: Request,
+    user_id: int,
+    tx_id: int,
+):
+    """Apaga uma compra no cartão de crédito.
+
+    Se a compra faz parte de um parcelamento (group_id), TODO o grupo é
+    desfeito — `undo_credit_transaction` já implementa esse comportamento.
+    Retorna `mode` ('single' ou 'group') pro front exibir feedback adequado.
+    """
+    _authorize_dashboard_access(request, user_id)
+
+    try:
+        result = await asyncio.to_thread(undo_credit_transaction, user_id, int(tx_id))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Erro ao apagar compra: {exc}") from exc
+
+    if result is None:
+        raise HTTPException(status_code=404, detail="Compra no crédito não encontrada.")
+
+    # `undo_credit_transaction` retorna mode="single"; `undo_installment_group`
+    # retorna {group_id, removed_count, removed_total} sem mode — normalizamos aqui.
+    mode = result.get("mode") or ("group" if result.get("group_id") else "single")
+
+    _invalidate_dashboard_current_cache(user_id)
+    return {
+        "ok": True,
+        "tx_id": int(tx_id),
+        "mode": mode,
+        "removed_total": float(result.get("removed_total") or 0),
+        "removed_count": int(result.get("removed_count") or 1),
+    }
 
 
 class PocketCreatePayload(BaseModel):
