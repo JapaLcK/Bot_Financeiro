@@ -204,63 +204,71 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
 
 
 # ---------------------------------------------------------------------------
-# add — registra receita/despesa
+# add / add_from_entities — registra receita/despesa
 # ---------------------------------------------------------------------------
 
-def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> str:
-    from core.handlers import credit as h_credit
+def add_from_entities(
+    user_id: int,
+    *,
+    tipo: str,
+    valor: float,
+    alvo: str | None = None,
+    nota: str | None = None,
+    categoria: str | None = None,
+    category_reason: str | None = None,
+    criado_em=None,
+    is_internal: bool | None = None,
+    platform: str = "whatsapp",
+) -> str:
+    """Registra um lançamento a partir de args já estruturados (sem regex).
 
-    credit_response = h_credit.try_handle_natural_credit_purchase(user_id, text)
-    if credit_response is not None:
-        return credit_response
+    Chamado por:
+      - `add()` quando o parser regex já extraiu (ou caiu nos entities)
+      - tool de IA `add_launch` (LLM extrai os args)
 
-    parsed = parse_receita_despesa_natural(user_id, text)
+    Toda lógica compartilhada (categorização, learn, DB write, botão WhatsApp,
+    alerta de orçamento) vive aqui — fonte única de verdade.
+    """
+    if valor <= 0:
+        return "Não consegui identificar o valor. Tente: *gastei 50 no mercado*"
 
-    if parsed:
-        tipo      = parsed["tipo"]
-        valor     = float(parsed["valor"])
-        categoria = parsed.get("categoria") or "outros"
-        category_reason = parsed.get("category_reason")
-        alvo      = parsed.get("alvo") or ""
-        nota      = parsed.get("nota") or text
-        criado_em = parsed.get("criado_em")
-        is_int    = parsed.get("is_internal_movement", False)
+    alvo_clean = (alvo or "").strip()
+    nota_clean = (nota or "").strip() or alvo_clean
+
+    if categoria:
+        categoria_final = categoria
+        reason_final = category_reason or "explicit"
     else:
-        tipo  = entities.get("tipo", "despesa")
-        valor = float(entities.get("valor", 0))
-        if valor <= 0:
-            return "Não consegui identificar o valor. Tente: *gastei 50 no mercado*"
-        alvo  = entities.get("alvo") or ""
-        nota  = text
-        res   = infer_category(user_id, nota, entities.get("categoria"))
-        categoria = res.category
-        category_reason = res.reason
-        criado_em = None
-        is_int    = is_internal_category(categoria)
+        res = infer_category(user_id, nota_clean, None)
+        categoria_final = res.category or "outros"
+        reason_final = res.reason
+
+    is_int = (
+        is_internal if is_internal is not None
+        else is_internal_category(categoria_final)
+    )
 
     launch_id, user_seq, new_balance = db.add_launch_and_update_balance(
         user_id=user_id,
         tipo=tipo,
         valor=valor,
-        alvo=alvo or None,
-        nota=nota,
-        categoria=categoria,
+        alvo=alvo_clean or None,
+        nota=nota_clean,
+        categoria=categoria_final,
         criado_em=criado_em,
         is_internal_movement=is_int,
     )
 
     learn_from_inference(
         user_id,
-        nota,
-        categoria,
-        target_hint=alvo,
-        reason=category_reason,
+        nota_clean,
+        categoria_final,
+        target_hint=alvo_clean,
+        reason=reason_final,
     )
 
-    # Oferece um botão de "categoria errada?" no WhatsApp (one-shot, lido por
-    # _send_reply_with_optional_buttons no wa_runtime e limpo logo em seguida).
-    # O payload guarda o id INTERNO (botão é opaco pro usuário); só o display
-    # usa user_seq.
+    # Botão "categoria errada?" no WhatsApp (one-shot, lido por
+    # _send_reply_with_optional_buttons no wa_runtime e limpo em seguida).
     if platform == "whatsapp" and launch_id:
         try:
             db.set_pending_action(
@@ -274,27 +282,60 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> 
     emoji = "💸" if tipo == "despesa" else "💰"
     resposta = (
         f"{emoji} **{tipo.capitalize()} registrada**: {fmt_brl(valor)}\n"
-        f"🏷️ Categoria: {categoria}\n"
+        f"🏷️ Categoria: {categoria_final}\n"
         f"🏦 Saldo: {fmt_brl(float(new_balance))}\n"
         f"ID: #{user_seq}"
     )
 
-    # Alerta de orcamento (só despesas com categoria nao-interna).
-    # Anexa a confirmacao se o gasto cruzou 80%/100%/120% do orcamento mensal
-    # (uma vez por threshold por mes por categoria — dedup em budget_alert_sent).
-    if tipo == "despesa" and not is_int and categoria:
+    if tipo == "despesa" and not is_int and categoria_final:
         try:
             from datetime import datetime
             from core.budget_alerts import evaluate_after_expense, format_alert_text
             when = criado_em if isinstance(criado_em, datetime) else datetime.now()
-            alert = evaluate_after_expense(user_id, categoria, valor, when)
+            alert = evaluate_after_expense(user_id, categoria_final, valor, when)
             if alert:
                 resposta += format_alert_text(alert)
         except Exception:
-            # Falha do alerta nunca pode quebrar o registro do gasto.
             pass
 
     return resposta
+
+
+def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> str:
+    from core.handlers import credit as h_credit
+
+    credit_response = h_credit.try_handle_natural_credit_purchase(user_id, text)
+    if credit_response is not None:
+        return credit_response
+
+    parsed = parse_receita_despesa_natural(user_id, text)
+
+    if parsed:
+        return add_from_entities(
+            user_id,
+            tipo=parsed["tipo"],
+            valor=float(parsed["valor"]),
+            alvo=parsed.get("alvo") or "",
+            nota=parsed.get("nota") or text,
+            categoria=parsed.get("categoria") or "outros",
+            category_reason=parsed.get("category_reason"),
+            criado_em=parsed.get("criado_em"),
+            is_internal=parsed.get("is_internal_movement", False),
+            platform=platform,
+        )
+
+    tipo = entities.get("tipo", "despesa")
+    valor = float(entities.get("valor", 0))
+    return add_from_entities(
+        user_id,
+        tipo=tipo,
+        valor=valor,
+        alvo=entities.get("alvo") or "",
+        nota=text,
+        categoria=entities.get("categoria"),
+        criado_em=None,
+        platform=platform,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -5,8 +5,9 @@ Read:
   - list_recent_launches: últimos N lançamentos do user (default 10)
   - get_period_summary: soma de despesas e receitas em um período (default: mês corrente)
 
-Write (precisam de confirmação humana):
-  - add_launch: registra despesa/receita NÃO-CARTÃO (saída/entrada da conta corrente)
+Write (auto-executado, SEM confirmação):
+  - add_launch: IA extrai os args, delega pra `core.handlers.launches.add_from_entities`
+    (a mesma fn que o bot tradicional usa) e devolve a resposta padrão.
 """
 from __future__ import annotations
 
@@ -15,7 +16,6 @@ from typing import Any
 
 import db
 from utils_date import _tz
-from utils_text import fmt_brl, is_internal_category
 
 from ._base import Tool
 
@@ -85,33 +85,10 @@ def _parse_iso_datetime_for_launch(s: str | None) -> datetime | None:
     return datetime.combine(d, time(12, 0), tzinfo=_tz())
 
 
-def _add_launch_summary(args: dict[str, Any]) -> str:
-    tipo = (args.get("tipo") or "").strip().lower()
-    valor = args.get("valor")
-    alvo = (args.get("alvo") or "").strip()
-    categoria = (args.get("categoria") or "").strip()
-    data_str = args.get("data")
-
-    if not isinstance(valor, (int, float)) or tipo not in _TIPOS_VALIDOS:
-        return "registrar um lançamento"
-
-    valor_fmt = fmt_brl(float(valor))
-    prep = "em" if tipo == "despesa" else "como"
-    base = f"registrar {tipo} de {valor_fmt}"
-    if alvo:
-        base += f" {prep} {alvo}"
-    if categoria:
-        base += f" ({categoria})"
-    if isinstance(data_str, str):
-        try:
-            d = date.fromisoformat(data_str)
-            base += f" em {d.strftime('%d/%m/%Y')}"
-        except ValueError:
-            pass
-    return base
-
-
 def _add_launch_execute(user_id: int, args: dict[str, Any]) -> str:
+    """IA já extraiu os args; aqui só valida e delega pra fonte única de
+    verdade (`add_from_entities` no handler). Toda lógica de categorização,
+    learn, budget alert e formato de resposta vive lá."""
     tipo = (args.get("tipo") or "").strip().lower()
     if tipo not in _TIPOS_VALIDOS:
         return "🐷 Tipo inválido — precisa ser despesa ou receita."
@@ -123,61 +100,17 @@ def _add_launch_execute(user_id: int, args: dict[str, Any]) -> str:
     if valor <= 0:
         return "🐷 O valor precisa ser maior que zero."
 
-    alvo = (args.get("alvo") or "").strip() or None
-    nota_raw = (args.get("nota") or "").strip()
-    nota = nota_raw or None
-    categoria_explicit = (args.get("categoria") or "").strip() or None
-    criado_em = _parse_iso_datetime_for_launch(args.get("data"))
+    from core.handlers.launches import add_from_entities
 
-    text_base = nota or alvo or ""
-
-    from core.services.category_service import infer_category, learn_from_inference
-
-    infer = infer_category(user_id, text_base, explicit_category=categoria_explicit)
-    categoria = infer.category or "outros"
-    is_internal = is_internal_category(categoria)
-
-    try:
-        launch_id, user_seq, new_balance = db.add_launch_and_update_balance(
-            user_id=user_id,
-            tipo=tipo,
-            valor=valor,
-            alvo=alvo,
-            nota=nota or alvo,
-            categoria=categoria,
-            criado_em=criado_em,
-            is_internal_movement=is_internal,
-        )
-    except Exception as e:
-        return f"🐷 Não consegui registrar o lançamento: {e}"
-
-    try:
-        learn_from_inference(
-            user_id,
-            text_base,
-            categoria,
-            target_hint=alvo,
-            reason=infer.reason,
-        )
-    except Exception:
-        pass
-
-    extra = ""
-    if tipo == "despesa" and not is_internal and categoria:
-        try:
-            from core.budget_alerts import evaluate_after_expense, format_alert_text
-            when = criado_em or datetime.now(_tz())
-            alert = evaluate_after_expense(user_id, categoria, valor, when)
-            if alert:
-                extra = "\n" + format_alert_text(alert).lstrip()
-        except Exception:
-            pass
-
-    emoji = "💸" if tipo == "despesa" else "💰"
-    alvo_str = f" — {alvo}" if alvo else ""
-    return (
-        f"{emoji} {tipo.capitalize()} de {fmt_brl(valor)}{alvo_str} ({categoria}). "
-        f"Saldo: {fmt_brl(float(new_balance))}. ID: #{user_seq}.{extra}"
+    return add_from_entities(
+        user_id,
+        tipo=tipo,
+        valor=valor,
+        alvo=(args.get("alvo") or "").strip() or None,
+        nota=(args.get("nota") or "").strip() or None,
+        categoria=(args.get("categoria") or "").strip() or None,
+        criado_em=_parse_iso_datetime_for_launch(args.get("data")),
+        platform="ia",
     )
 
 
@@ -235,12 +168,13 @@ TOOLS: list[Tool] = [
             "function": {
                 "name": "add_launch",
                 "description": (
-                    "Registra uma despesa ou receita NÃO-CARTÃO (saída/entrada "
-                    "da conta corrente). Use pra 'gastei 50 no mercado', "
-                    "'recebi 1000 de salário', 'paguei 80 de luz'. NÃO use pra "
-                    "compras no cartão de crédito — isso é outra ferramenta. "
-                    "Categoria é inferida automaticamente; só passe `categoria` "
-                    "se o user disse explicitamente. ESCRITA — pede confirmação."
+                    "Registra uma despesa ou receita NÃO-CARTÃO (sai/entra da "
+                    "conta corrente). Use pra 'gastei 50 no mercado', 'recebi "
+                    "1000 de salário', 'paguei 80 de luz'. NÃO use pra compras "
+                    "no cartão de crédito (essa é outra ferramenta). Categoria "
+                    "é inferida automaticamente — só passe `categoria` se o "
+                    "user disse explicitamente. EXECUTA DIRETO (sem perguntar "
+                    "'confirma?'); o user reverte depois se quiser."
                 ),
                 "parameters": {
                     "type": "object",
@@ -277,7 +211,7 @@ TOOLS: list[Tool] = [
             },
         },
         is_write=True,
-        summary=_add_launch_summary,
+        requires_confirmation=False,
         execute=_add_launch_execute,
     ),
 ]

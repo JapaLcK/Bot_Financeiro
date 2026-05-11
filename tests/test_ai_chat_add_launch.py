@@ -1,47 +1,16 @@
 """
-Cobre a tool `add_launch` da IA conversacional:
-  - summary: monta texto pra template 3 de confirmação
-  - execute: registra o lançamento via add_launch_and_update_balance,
-    atualiza o saldo e respeita categoria explícita / inferência local.
+Cobre a tool `add_launch` da IA conversacional. A tool valida args e delega
+pra `core.handlers.launches.add_from_entities` — então os testes garantem:
+  - validação de args (tipo enum, valor > 0) não escreve no DB
+  - delegação ao handler produz a mesma mensagem padrão do bot tradicional
+  - categoria inferida vs explícita
+  - data ISO 8601 vira criado_em correto
 """
 from decimal import Decimal
 
 import db
-from core.services.ai_chat.tools.launches import (
-    _add_launch_execute,
-    _add_launch_summary,
-)
+from core.services.ai_chat.tools.launches import _add_launch_execute
 
-
-# ─── Summary (pure, sem DB) ────────────────────────────────────────────────
-
-def test_summary_despesa_basica():
-    out = _add_launch_summary({"tipo": "despesa", "valor": 50, "alvo": "mercado"})
-    assert out == "registrar despesa de R$ 50,00 em mercado"
-
-
-def test_summary_receita_sem_alvo():
-    out = _add_launch_summary({"tipo": "receita", "valor": 1234.56})
-    assert out == "registrar receita de R$ 1.234,56"
-
-
-def test_summary_com_categoria_explicita_e_data():
-    out = _add_launch_summary({
-        "tipo": "despesa",
-        "valor": 80,
-        "alvo": "luz",
-        "categoria": "moradia",
-        "data": "2026-04-15",
-    })
-    assert out == "registrar despesa de R$ 80,00 em luz (moradia) em 15/04/2026"
-
-
-def test_summary_tipo_invalido_fallback():
-    out = _add_launch_summary({"tipo": "transferencia", "valor": 100})
-    assert out == "registrar um lançamento"
-
-
-# ─── Execute (DB-backed) ───────────────────────────────────────────────────
 
 def test_execute_despesa_basica(user_id):
     db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
@@ -52,10 +21,11 @@ def test_execute_despesa_basica(user_id):
         "alvo": "mercado",
     })
 
-    assert "Despesa de R$ 50,00" in msg
-    assert "mercado" in msg
-    # "mercado" cai em alimentação pela LOCAL_RULES (utils_text.py)
-    assert "alimentação" in msg
+    # Formato do handler (mesmo do bot tradicional)
+    assert "💸 **Despesa registrada**: R$ 50,00" in msg
+    assert "🏷️ Categoria: alimentação" in msg  # "mercado" cai em alimentação via LOCAL_RULES
+    assert "🏦 Saldo: R$ 950,00" in msg
+    assert "ID: #" in msg
     assert db.get_balance(user_id) == Decimal("950")
 
 
@@ -66,7 +36,8 @@ def test_execute_receita_atualiza_saldo(user_id):
         "alvo": "freela",
     })
 
-    assert "Receita de R$ 200,00" in msg
+    assert "💰 **Receita registrada**: R$ 200,00" in msg
+    assert "🏦 Saldo: R$ 200,00" in msg
     assert db.get_balance(user_id) == Decimal("200")
 
 
@@ -80,9 +51,8 @@ def test_execute_categoria_explicita_respeitada(user_id):
         "categoria": "lazer",
     })
 
-    assert "(lazer)" in msg
+    assert "🏷️ Categoria: lazer" in msg
     rows = db.list_launches(user_id, limit=2)
-    # Primeira row é a mais recente (despesa que acabamos de criar)
     assert rows[0]["categoria"] == "lazer"
 
 
@@ -116,3 +86,47 @@ def test_execute_data_iso_define_criado_em(user_id):
     rows = db.list_launches(user_id, limit=10)
     padaria = next(r for r in rows if r.get("alvo") == "padaria")
     assert padaria["criado_em"].date().isoformat() == "2026-04-15"
+
+
+def test_execute_consistente_com_handler_tradicional(user_id):
+    """Tool da IA usa a mesma fn `add_from_entities` que o bot — então a
+    resposta deve ser IDÊNTICA pra args equivalentes (modulo balance/IDs
+    que dependem do estado, por isso comparamos campos estruturais)."""
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    msg_ia = _add_launch_execute(user_id, {
+        "tipo": "despesa",
+        "valor": 25,
+        "alvo": "uber",
+    })
+
+    # Mesma chamada via handler direto, num user separado, deve produzir
+    # estrutura idêntica de linhas (despesa, categoria, saldo, ID).
+    from core.handlers.launches import add_from_entities
+    db.ensure_user(user_id + 1)
+    try:
+        db.add_launch_and_update_balance(user_id + 1, "receita", 1000, None, "seed")
+        msg_handler = add_from_entities(
+            user_id + 1,
+            tipo="despesa",
+            valor=25,
+            alvo="uber",
+            platform="ia",
+        )
+
+        # Mesma quebra de linhas; só o ID interno pode diferir
+        ia_lines = msg_ia.split("\n")
+        handler_lines = msg_handler.split("\n")
+        assert len(ia_lines) == len(handler_lines)
+        for i, (a, b) in enumerate(zip(ia_lines, handler_lines)):
+            if i == len(ia_lines) - 1:  # última linha = ID, depende do estado
+                assert a.startswith("ID: #") and b.startswith("ID: #")
+            else:
+                assert a == b
+    finally:
+        # Cleanup do user secundário
+        with db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("delete from launches where user_id = %s", (user_id + 1,))
+                cur.execute("delete from accounts where user_id = %s", (user_id + 1,))
+                cur.execute("delete from users where id = %s", (user_id + 1,))
+            conn.commit()

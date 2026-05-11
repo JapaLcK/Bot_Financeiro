@@ -169,6 +169,7 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]]) -> str:
             "tool_calls": tool_calls_dicts,
         })
 
+        terminal_msg: str | None = None
         for tc in tool_calls:
             name = tc.function.name
             try:
@@ -176,55 +177,89 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]]) -> str:
             except Exception:
                 args = {}
 
-            tool_result = _dispatch_tool(user_id, name, args)
+            history_content, this_terminal = _dispatch_tool(user_id, name, args)
 
             db.ai_append_message(
                 user_id,
                 "tool",
-                tool_result,
+                history_content,
                 tool_call_id=tc.id,
                 tool_name=name,
             )
             messages.append({
                 "role": "tool",
-                "content": tool_result,
+                "content": history_content,
                 "tool_call_id": tc.id,
                 "name": name,
             })
+
+            if this_terminal is not None and terminal_msg is None:
+                terminal_msg = this_terminal
+
+        # Write auto-executado entrega a resposta final sem 2º round-trip.
+        # Se múltiplas tools rodaram no mesmo turno, vence a primeira terminal.
+        if terminal_msg is not None:
+            return terminal_msg
 
     logger.warning("MAX_TOOL_LOOPS atingido pra user %s", user_id)
     return ERROR_MSG
 
 
-def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> str:
+def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, str | None]:
     """
-    Executa a tool ou cria pending action (se for write).
-    Retorna sempre uma string JSON pronta pra virar `tool` message na OpenAI.
+    Despacha a tool e retorna (history_content, terminal_msg).
+
+      history_content: string que vira a `tool` message no histórico/OpenAI.
+      terminal_msg: se não-None, é a resposta final pro user — o runner sai
+        do loop sem chamar OpenAI de novo. Usado por writes auto-executados
+        (`is_write=True, requires_confirmation=False`).
     """
     tool = get_tool(name)
     if tool is None:
-        return json.dumps({"error": f"tool desconhecida: {name}"}, ensure_ascii=False)
+        return (
+            json.dumps({"error": f"tool desconhecida: {name}"}, ensure_ascii=False),
+            None,
+        )
 
-    if tool.is_write:
+    if tool.is_write and tool.requires_confirmation:
         summary_fn = tool.summary
         summary = summary_fn(args) if summary_fn else f"executar {name} com {args}"
         db.ai_set_pending_action(user_id, name, args, summary)
-        return json.dumps(
-            {
-                "status": "pending_user_confirmation",
-                "summary": summary,
-                "args": args,
-                "instruction": "Use o template 3 para mostrar o resumo ao user e pedir 'sim' ou 'não'. NÃO confirme automaticamente.",
-            },
-            ensure_ascii=False,
+        return (
+            json.dumps(
+                {
+                    "status": "pending_user_confirmation",
+                    "summary": summary,
+                    "args": args,
+                    "instruction": "Use o template 3 para mostrar o resumo ao user e pedir 'sim' ou 'não'. NÃO confirme automaticamente.",
+                },
+                ensure_ascii=False,
+            ),
+            None,
         )
 
+    if tool.is_write:
+        # Auto-execute: ação rolou; a mensagem retornada é a resposta final.
+        try:
+            user_msg = tool.execute(user_id, args)
+        except Exception as e:
+            logger.error("erro em auto-write %s: %s", name, e)
+            return (
+                json.dumps({"error": str(e)}, ensure_ascii=False),
+                ERROR_MSG,
+            )
+        history = json.dumps(
+            {"status": "done", "message": user_msg}, ensure_ascii=False, default=str
+        )
+        return (history, user_msg if isinstance(user_msg, str) else str(user_msg))
+
+    # Read tool
     try:
         result = tool.execute(user_id, args)
     except Exception as e:
         logger.error("erro em read tool %s: %s", name, e)
         result = {"error": str(e)}
-    return json.dumps(result, ensure_ascii=False, default=str)
+    return (json.dumps(result, ensure_ascii=False, default=str), None)
 
 
 __all__ = ["chat"]
