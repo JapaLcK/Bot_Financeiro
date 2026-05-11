@@ -890,30 +890,39 @@ async def lifespan(app: FastAPI):
     # subisse depois do dashboard, tabelas novas (auth_sessions, audit_events…)
     # nao existiam quando a primeira request chegasse. Roda aqui para nao
     # depender do bot estar saudavel.
-    from db import init_db
-    await _startup_required("init_db", asyncio.to_thread(init_db))
-    print("OK: Schema migrado", flush=True)
+    #
+    # SKIP_INIT_DB=1: pula migrations no startup. Util quando o dashboard local
+    # aponta pra Railway prod (so pra ver /admin): o deploy do Railway ja roda
+    # init_db, nao precisa repetir via internet — round-trips somam >12s e
+    # adquirem locks em tabelas reais.
+    skip_init = (os.getenv("SKIP_INIT_DB") or "").strip() in ("1", "true", "True")
+    if skip_init:
+        print("⚠️  SKIP_INIT_DB=1 — pulando migrations no startup", flush=True)
+    else:
+        from db import init_db
+        await _startup_required("init_db", asyncio.to_thread(init_db))
+        print("OK: Schema migrado", flush=True)
 
-    # ── 3. Setup de tabelas adicionais em paralelo ───────────────────────────
-    await _startup_required(
-        "setup de tabelas",
-        asyncio.gather(
-            ensure_budget_table(),
-            ensure_auth_rate_limit_table(),
-            ensure_investment_metadata_columns(),
-            ensure_open_finance_tables(),
-            ensure_notification_preference_columns(),
-            asyncio.to_thread(ensure_account_deletion_columns),
-            ensure_admin_tables(),
-        ),
-    )
-    print("OK: Budget table ready", flush=True)
-    print("OK: Auth rate-limit table ready", flush=True)
-    print("OK: Investment metadata ready", flush=True)
-    print("OK: Open Finance tables ready", flush=True)
-    print("OK: Notification preferences ready", flush=True)
-    print("OK: Account deletion controls ready", flush=True)
-    print("OK: Admin observability tables ready", flush=True)
+        # ── 3. Setup de tabelas adicionais em paralelo ───────────────────────
+        await _startup_required(
+            "setup de tabelas",
+            asyncio.gather(
+                ensure_budget_table(),
+                ensure_auth_rate_limit_table(),
+                ensure_investment_metadata_columns(),
+                ensure_open_finance_tables(),
+                ensure_notification_preference_columns(),
+                asyncio.to_thread(ensure_account_deletion_columns),
+                ensure_admin_tables(),
+            ),
+        )
+        print("OK: Budget table ready", flush=True)
+        print("OK: Auth rate-limit table ready", flush=True)
+        print("OK: Investment metadata ready", flush=True)
+        print("OK: Open Finance tables ready", flush=True)
+        print("OK: Notification preferences ready", flush=True)
+        print("OK: Account deletion controls ready", flush=True)
+        print("OK: Admin observability tables ready", flush=True)
 
     # ── 3. Warnings + detecção de usuário em paralelo ─────────────────────────
     async def _resolve_uid() -> int | None:
