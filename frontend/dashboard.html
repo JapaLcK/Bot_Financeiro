@@ -546,20 +546,59 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .btn-save:disabled { opacity:.5;cursor:not-allowed; }
 
 /* ─── Pro feature gate (visível mas desabilitado pra Free) ─────────────── */
+/* Estratégia: não usar opacity no parent (cascata via compositing destrói o
+   badge). Em botões/tabs apagamos o conteúdo via `color`; em cards a barra
+   superior fica desbotada via border-color. O badge tem background sólido
+   próprio e fica sempre destacado. */
 .pro-locked {
-  opacity: .55;
   cursor: not-allowed !important;
   position: relative;
 }
-.pro-locked::after {
-  content: "🔒";
-  font-size: .72em;
-  margin-left: 6px;
-  filter: grayscale(.3);
-  vertical-align: baseline;
+.hbtn.pro-locked,
+.main-tab.pro-locked {
+  color: rgba(255,255,255,.42);
+  border-color: rgba(255,255,255,.08) !important;
 }
-.pro-locked:hover {
-  opacity: .7;
+.hbtn.pro-locked:hover,
+.main-tab.pro-locked:hover {
+  color: rgba(255,255,255,.55);
+  transform: none;
+}
+.card.pro-locked,
+.card-clickable.pro-locked {
+  border-color: rgba(124,58,237,.35) !important;
+}
+.card.pro-locked:hover,
+.card-clickable.pro-locked:hover {
+  transform: none;
+  border-color: rgba(124,58,237,.45) !important;
+}
+
+/* Badge "PigBank+" — injetado via JS em applyProGates() pra Free, removido
+   pra Pro. Background gradient sólido + cor branca garante destaque. Em
+   .hbtn/.main-tab fica inline; em .card vai pro canto sup. dir. */
+.pro-badge {
+  display: inline-flex; align-items: center;
+  font-size: .62rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  padding: 3px 8px;
+  margin-left: 8px;
+  border-radius: 999px;
+  background: linear-gradient(135deg,#7c3aed,#3b82f6);
+  color: #fff;
+  vertical-align: middle;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(124,58,237,.35), 0 0 0 1px rgba(167,139,250,.25);
+  pointer-events: none;
+}
+.card.pro-locked .pro-badge,
+.card-clickable.pro-locked .pro-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  margin-left: 0;
+  z-index: 2;
 }
 /* Modal de upgrade sempre por cima dos outros overlays. */
 #upgrade-overlay { z-index: 900; }
@@ -918,11 +957,11 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
     <h3 id="upg-title">Disponível no PigBank+</h3>
     <p class="upg-feat" id="upg-feat-msg">Essa feature é exclusiva pra quem assina.</p>
     <div class="upg-perks">
+      <div class="upg-perk">Piggy IA — converse sobre suas finanças</div>
       <div class="upg-perk">Caixinhas e cartões ilimitados</div>
       <div class="upg-perk">Investimentos com acompanhamento automático</div>
       <div class="upg-perk">Histórico completo + exportar CSV</div>
       <div class="upg-perk">Importar extrato e fatura por OFX</div>
-      <div class="upg-perk">Piggy IA — converse sobre suas finanças</div>
     </div>
     <div class="modal-acts">
       <button class="btn-cancel" type="button" onclick="closeUpgradeModal()">Agora não</button>
@@ -1806,9 +1845,17 @@ function applyProGates() {
     if (isPro) {
       el.classList.remove("pro-locked");
       el.removeAttribute("aria-disabled");
+      const b = el.querySelector(":scope > .pro-badge");
+      if (b) b.remove();
     } else {
       el.classList.add("pro-locked");
       el.setAttribute("aria-disabled", "true");
+      if (!el.querySelector(":scope > .pro-badge")) {
+        const b = document.createElement("span");
+        b.className = "pro-badge";
+        b.textContent = "PigBank+";
+        el.appendChild(b);
+      }
     }
   });
   // Titulo do grafico de historico reflete a janela real: 6 meses (Pro) vs 30 dias (Free).
