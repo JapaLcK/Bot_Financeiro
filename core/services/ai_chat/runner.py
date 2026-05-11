@@ -241,6 +241,18 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
         )
 
     if tool.is_write and tool.requires_confirmation:
+        # Pre-check: se a tool define validate() e ele retorna erro, pula a
+        # confirmação e mostra direto pro user. Evita IA pedir "confirma
+        # apagar #X?" pra X que ela inventou e nem existe.
+        if tool.validate is not None:
+            err = tool.validate(user_id, args)
+            if err:
+                history = json.dumps(
+                    {"status": "validation_failed", "message": err},
+                    ensure_ascii=False,
+                )
+                return (history, err)
+
         summary_fn = tool.summary
         summary = summary_fn(args) if summary_fn else f"executar {name} com {args}"
         db.ai_set_pending_action(user_id, name, args, summary)

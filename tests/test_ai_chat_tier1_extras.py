@@ -11,6 +11,7 @@ from core.services.ai_chat.tools.cards import _get_card_limit_usage
 from core.services.ai_chat.tools.launches import (
     _delete_launch_execute,
     _delete_launch_summary,
+    _delete_launch_validate,
 )
 
 
@@ -78,6 +79,41 @@ def test_delete_launch_id_invalido(user_id):
 def test_delete_launch_nao_existe(user_id):
     msg = _delete_launch_execute(user_id, {"launch_id": 99999999})
     assert "Não achei" in msg
+
+
+# ─── delete_launch validate (anti-hallucination de IDs) ────────────────────
+
+def test_delete_launch_validate_id_inexistente_aborta(user_id):
+    """ID que LLM inventou (não existe nem como user_seq nem como CT) deve
+    falhar a validação ANTES de pedir confirmação enganosa."""
+    err = _delete_launch_validate(user_id, {"launch_id": 81524273})
+    assert err is not None
+    assert "Não achei" in err
+
+
+def test_delete_launch_validate_id_invalido(user_id):
+    err = _delete_launch_validate(user_id, {"launch_id": "abc"})
+    assert "ID inválido" in err
+
+    err = _delete_launch_validate(user_id, {"launch_id": 0})
+    assert "Faltou" in err
+
+
+def test_delete_launch_validate_user_seq_existe(user_id):
+    """user_seq válido de launches passa pela validação."""
+    db.add_launch_and_update_balance(user_id, "receita", 100, None, "seed")
+    _, user_seq, _ = db.add_launch_and_update_balance(user_id, "despesa", 50, None, "x")
+
+    assert _delete_launch_validate(user_id, {"launch_id": user_seq}) is None
+
+
+def test_delete_launch_validate_credit_transaction_existe(user_id):
+    """ID de credit_transaction passa pela validação."""
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    tx_id, _, _ = db.add_credit_purchase(user_id, card_id, 50, "outros", "uber", date.today())
+
+    assert _delete_launch_validate(user_id, {"launch_id": tx_id}) is None
 
 
 # ─── get_card_limit_usage ───────────────────────────────────────────────────

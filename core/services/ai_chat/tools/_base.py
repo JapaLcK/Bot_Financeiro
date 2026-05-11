@@ -33,6 +33,15 @@ class Tool:
     execute: Callable[[int, dict[str, Any]], Any]
     summary: Optional[Callable[[dict[str, Any]], str]] = None
     requires_confirmation: bool = True
+    validate: Optional[Callable[[int, dict[str, Any]], Optional[str]]] = None
+    """Pre-check opcional pra writes com confirmação. Recebe (user_id, args)
+    e retorna msg de erro (string) se algo já está obviamente inválido —
+    runner pula a pending_action e mostra a msg direto pro user. Retornar
+    None = OK, segue pro fluxo normal de confirmação.
+
+    Caso de uso principal: evitar pedir confirmação pra apagar/editar um
+    ID que nem existe (LLM pode ter inventado). Sem validate, o user
+    confirma achando que era real e só depois vê o 'não achei'."""
 
     @property
     def name(self) -> str:

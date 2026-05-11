@@ -126,6 +126,38 @@ def _delete_launch_summary(args: dict[str, Any]) -> str:
     return f'apagar o lançamento #{lid}' if lid else "apagar lançamento"
 
 
+def _delete_launch_validate(user_id: int, args: dict[str, Any]) -> str | None:
+    """Roda ANTES da confirmação. Se o ID nem existe, mostra erro imediato
+    em vez de pedir 'confirma apagar #X?' enganoso. Critico porque o LLM
+    às vezes inventa IDs quando o user diz 'aquele' sem especificar."""
+    try:
+        lid = int(args.get("launch_id") or 0)
+    except (TypeError, ValueError):
+        return "🐷 ID inválido — me diz o número do lançamento (ex: #5)."
+    if lid <= 0:
+        return "🐷 Faltou o ID do lançamento."
+
+    # Existe como user_seq de launches?
+    if db.resolve_user_seq_to_id(user_id, lid):
+        return None
+
+    # Existe como id de credit_transaction?
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select 1 from credit_transactions where user_id=%s and id=%s",
+                (user_id, lid),
+            )
+            if cur.fetchone():
+                return None
+
+    return (
+        f"🐷 Não achei o lançamento #{lid}. "
+        f"Manda o ID exato (aparece no histórico como #N) ou pede pra eu "
+        f"listar os últimos lançamentos."
+    )
+
+
 def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
     """Apaga um lançamento. Tenta primeiro como user_seq de `launches`
     (cenário comum: user digita "#5"). Se não achar, tenta como id de
@@ -291,5 +323,6 @@ TOOLS: list[Tool] = [
         requires_confirmation=True,
         summary=_delete_launch_summary,
         execute=_delete_launch_execute,
+        validate=_delete_launch_validate,
     ),
 ]
