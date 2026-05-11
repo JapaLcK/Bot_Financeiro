@@ -3848,22 +3848,9 @@ async function openBillDetailModal(billId, opts = {}) {
     }
 
     const payBtn = document.getElementById("bill-detail-pay-btn");
+    payBtn.disabled = !(b.due_amount > 0);
     payBtn.dataset.billId = String(b.id || "");
-    // Faturas FUTURAS (ainda não fecharam) não podem ser pagas — bloqueio
-    // pra evitar o user pagar adiantado uma parcela que ainda nem fechou.
-    // Comparamos period_end com hoje em ISO (YYYY-MM-DD).
-    const todayIso = new Date().toISOString().slice(0, 10);
-    const isFuture = b.period_end && b.period_end > todayIso;
-    if (isFuture) {
-      payBtn.disabled = true;
-      payBtn.textContent = "Fatura ainda não fechou";
-    } else if (!(b.due_amount > 0)) {
-      payBtn.disabled = true;
-      payBtn.textContent = "Sem saldo em aberto";
-    } else {
-      payBtn.disabled = false;
-      payBtn.textContent = "Pagar fatura";
-    }
+    payBtn.textContent = b.due_amount > 0 ? "Pagar fatura" : "Sem saldo em aberto";
   } catch (err) {
     document.getElementById("bill-detail-title").textContent = "Erro";
     document.getElementById("bill-detail-sub").textContent = err.message || "Não foi possível carregar a fatura.";
