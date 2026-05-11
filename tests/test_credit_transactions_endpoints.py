@@ -344,6 +344,102 @@ def test_list_bills_include_closed_traz_paid(user_id):
     assert "paid" in statuses
 
 
+def test_post_launches_credito_a_vista(user_id):
+    """POST /launches com tipo=credito sem parcelas registra compra à vista."""
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+
+    client = TestClient(dashboard.app)
+    _auth(client, user_id)
+
+    resp = client.post(
+        f"/launches/{user_id}",
+        json={
+            "tipo": "credito",
+            "valor": 50,
+            "alvo": "mercado",
+            "card_id": card_id,
+        },
+        headers=_csrf_headers(client),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["tipo"] == "credito"
+    assert "credit_transaction_id" in body
+    assert body.get("mode") != "installments"
+
+
+def test_post_launches_credito_parcelado_cria_n_transacoes(user_id):
+    """POST /launches com tipo=credito + parcelas=3 cria 3 transações."""
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+
+    client = TestClient(dashboard.app)
+    _auth(client, user_id)
+
+    resp = client.post(
+        f"/launches/{user_id}",
+        json={
+            "tipo": "credito",
+            "valor": 300,
+            "alvo": "celular",
+            "card_id": card_id,
+            "parcelas": 3,
+        },
+        headers=_csrf_headers(client),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["mode"] == "installments"
+    assert body["installments_total"] == 3
+    assert len(body["tx_ids"]) == 3
+
+
+def test_post_launches_credito_parcelas_1_eh_a_vista(user_id):
+    """`parcelas=1` cai no caminho à vista, não installments."""
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+
+    client = TestClient(dashboard.app)
+    _auth(client, user_id)
+
+    resp = client.post(
+        f"/launches/{user_id}",
+        json={
+            "tipo": "credito",
+            "valor": 100,
+            "card_id": card_id,
+            "parcelas": 1,
+        },
+        headers=_csrf_headers(client),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body.get("mode") != "installments"
+    assert "credit_transaction_id" in body
+
+
+def test_post_launches_credito_parcelas_invalidas_400(user_id):
+    """parcelas fora do range [1,60] retorna 400."""
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+
+    client = TestClient(dashboard.app)
+    _auth(client, user_id)
+
+    resp = client.post(
+        f"/launches/{user_id}",
+        json={
+            "tipo": "credito",
+            "valor": 100,
+            "card_id": card_id,
+            "parcelas": 100,
+        },
+        headers=_csrf_headers(client),
+    )
+    assert resp.status_code == 400
+
+
 def test_delete_tx_inexistente_404(user_id):
     _seed_card_and_purchase(user_id)
     client = TestClient(dashboard.app)

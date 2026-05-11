@@ -1014,6 +1014,26 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
       </select>
     </div>
 
+    <div class="modal-row" id="launch-parcelas-row" style="display:none">
+      <label class="modal-label" for="launch-parcelas">Parcelas</label>
+      <select class="modal-inp cat-select" id="launch-parcelas">
+        <option value="1">1x (à vista)</option>
+        <option value="2">2x</option>
+        <option value="3">3x</option>
+        <option value="4">4x</option>
+        <option value="5">5x</option>
+        <option value="6">6x</option>
+        <option value="7">7x</option>
+        <option value="8">8x</option>
+        <option value="9">9x</option>
+        <option value="10">10x</option>
+        <option value="12">12x</option>
+        <option value="15">15x</option>
+        <option value="18">18x</option>
+        <option value="24">24x</option>
+      </select>
+    </div>
+
     <div class="modal-row">
       <label class="modal-label" for="launch-categoria">Categoria</label>
       <select class="modal-inp cat-select" id="launch-categoria">
@@ -2971,13 +2991,17 @@ function setLaunchTipo(tipo) {
     el.classList.toggle("active", isActive);
     el.setAttribute("aria-checked", String(isActive));
   });
-  // Mostra/esconde linha do cartão e popula opções específicas do tipo
+  // Mostra/esconde linha do cartão e parcelas — só fazem sentido pra crédito
   const cardRow = document.getElementById("launch-card-row");
+  const parcRow = document.getElementById("launch-parcelas-row");
   if (tipo === "credito") {
     cardRow.style.display = "";
+    parcRow.style.display = "";
     populateLaunchCards();
   } else {
     cardRow.style.display = "none";
+    parcRow.style.display = "none";
+    document.getElementById("launch-parcelas").value = "1";
   }
   populateLaunchCategories();
 }
@@ -3288,12 +3312,15 @@ async function submitLaunch() {
   const categoria = document.getElementById("launch-categoria").value;
 
   let cardId = null;
+  let parcelas = null;
   if (launchTipo === "credito") {
     cardId = document.getElementById("launch-card").value;
     if (!cardId) {
       showLaunchError("Selecione um cartão para registrar a compra no crédito.");
       return;
     }
+    const parc = parseInt(document.getElementById("launch-parcelas").value || "1", 10);
+    if (Number.isFinite(parc) && parc > 1) parcelas = parc;
   }
 
   const btn = document.getElementById("launch-submit-btn");
@@ -3314,6 +3341,7 @@ async function submitLaunch() {
         nota: nota || null,
         categoria: categoria || null,
         card_id: cardId ? Number(cardId) : null,
+        parcelas: parcelas,
       }),
     });
     const data = await readResponsePayload(res);
@@ -3820,9 +3848,22 @@ async function openBillDetailModal(billId, opts = {}) {
     }
 
     const payBtn = document.getElementById("bill-detail-pay-btn");
-    payBtn.disabled = !(b.due_amount > 0);
     payBtn.dataset.billId = String(b.id || "");
-    payBtn.textContent = b.due_amount > 0 ? "Pagar fatura" : "Sem saldo em aberto";
+    // Faturas FUTURAS (ainda não fecharam) não podem ser pagas — bloqueio
+    // pra evitar o user pagar adiantado uma parcela que ainda nem fechou.
+    // Comparamos period_end com hoje em ISO (YYYY-MM-DD).
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const isFuture = b.period_end && b.period_end > todayIso;
+    if (isFuture) {
+      payBtn.disabled = true;
+      payBtn.textContent = "Fatura ainda não fechou";
+    } else if (!(b.due_amount > 0)) {
+      payBtn.disabled = true;
+      payBtn.textContent = "Sem saldo em aberto";
+    } else {
+      payBtn.disabled = false;
+      payBtn.textContent = "Pagar fatura";
+    }
   } catch (err) {
     document.getElementById("bill-detail-title").textContent = "Erro";
     document.getElementById("bill-detail-sub").textContent = err.message || "Não foi possível carregar a fatura.";

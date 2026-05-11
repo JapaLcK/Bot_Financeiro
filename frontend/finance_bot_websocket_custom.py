@@ -3412,7 +3412,8 @@ class LaunchCreatePayload(BaseModel):
     alvo: str | None = None
     nota: str | None = None
     categoria: str | None = None
-    card_id: int | None = None  # obrigatório quando tipo='credito'
+    card_id: int | None = None    # obrigatório quando tipo='credito'
+    parcelas: int | None = None   # opcional pra tipo='credito' (1 ou null = à vista)
 
 
 @app.post("/launches/{user_id}")
@@ -3447,14 +3448,24 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
     # Resolve categoria — explícita do form ou inferência (mesmo fluxo do bot).
     explicit = (payload.categoria or "").strip() or None
 
-    # ── Crédito → add_credit_purchase ─────────────────────────────────────
+    # ── Crédito → add_credit_purchase (à vista) ou installments (parcelado) ─
     if tipo == "credito":
-        from db import add_credit_purchase, get_card_by_id
+        from db import add_credit_purchase, add_credit_purchase_installments, get_card_by_id
         from utils_date import today_tz
 
         card_id = payload.card_id
         if not card_id:
             raise HTTPException(status_code=400, detail="Selecione um cartão para a compra no crédito.")
+
+        # Valida parcelas
+        n_parc = 1
+        if payload.parcelas is not None:
+            try:
+                n_parc = int(payload.parcelas)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="Número de parcelas inválido.")
+            if n_parc < 1 or n_parc > 60:
+                raise HTTPException(status_code=400, detail="Parcelas deve ser entre 1 e 60.")
 
         card = await asyncio.to_thread(get_card_by_id, int(user_id), int(card_id))
         if not card:
@@ -3466,6 +3477,50 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         categoria = canonicalize_category_label(inferred.category) or "outros"
 
         purchased_at = await asyncio.to_thread(today_tz)
+
+        # Parcelado (2x+) → cria N transações em N faturas futuras
+        if n_parc > 1:
+            try:
+                result = await asyncio.to_thread(
+                    add_credit_purchase_installments,
+                    int(user_id),
+                    int(card_id),
+                    valor,
+                    categoria,
+                    nota,
+                    purchased_at,
+                    n_parc,
+                )
+                await asyncio.to_thread(
+                    learn_from_inference,
+                    int(user_id),
+                    nota,
+                    categoria,
+                    target_hint=alvo or card_name,
+                    reason=inferred.reason,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=f"Erro ao registrar parcelamento: {exc}") from exc
+
+            info, total = (result[0], result[1]) if isinstance(result, tuple) else (result, valor)
+            return {
+                "ok": True,
+                "tipo": "credito",
+                "mode": "installments",
+                "installments_total": n_parc,
+                "group_id": info.get("group_id"),
+                "tx_ids": info.get("tx_ids"),
+                "card_id": int(card_id),
+                "card_name": card_name,
+                "valor_total": float(total),
+                "categoria": categoria,
+                "alvo": alvo or card_name,
+                "nota": nota,
+            }
+
+        # À vista (1x)
         try:
             tx_id, due, bill_id = await asyncio.to_thread(
                 add_credit_purchase,
