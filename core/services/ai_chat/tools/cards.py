@@ -5,15 +5,17 @@ Read:
   - list_cards: cartões cadastrados (nome, fechamento, vencimento, default)
   - get_open_bill: fatura em aberto de um cartão (total, pagado, itens)
 
-Write (precisam de confirmação humana):
-  - pay_bill: paga (parcial ou total) a fatura em aberto
+Write:
+  - add_credit_purchase (auto-execute): registra compra na fatura, opcionalmente
+    parcelada. Delega pro handler tradicional (`add_credit_from_entities`).
+  - pay_bill (com confirmação): paga (parcial ou total) a fatura em aberto.
 
-NOTA: criar/apagar cartão, lançar compras parceladas, refunds etc seguem no
-fluxo do bot tradicional por enquanto — esses fluxos têm parsing complexo
-(OFX, parcelamento) que não compensa duplicar via IA agora.
+NOTA: criar/apagar cartão e refunds seguem no fluxo do bot tradicional por
+enquanto.
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 import db
@@ -86,6 +88,50 @@ def _get_open_bill(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# ─── Write: add_credit_purchase (auto-execute) ──────────────────────────────
+
+def _parse_iso_date_or_none(s: str | None) -> "date | None":
+    if not s:
+        return None
+    try:
+        return date.fromisoformat(s)
+    except (ValueError, TypeError):
+        return None
+
+
+def _add_credit_purchase_execute(user_id: int, args: dict[str, Any]) -> str:
+    try:
+        valor = float(args.get("valor") or 0)
+    except (TypeError, ValueError):
+        return "🐷 Valor inválido."
+    if valor <= 0:
+        return "🐷 O valor precisa ser maior que zero."
+
+    parcelas_raw = args.get("parcelas")
+    parcelas: int | None = None
+    if parcelas_raw is not None:
+        try:
+            parcelas = int(parcelas_raw)
+        except (TypeError, ValueError):
+            return "🐷 Número de parcelas inválido."
+        if parcelas < 1 or parcelas > 60:
+            return "🐷 Número de parcelas inválido (1 a 60)."
+        if parcelas == 1:
+            parcelas = None  # à vista
+
+    from core.handlers.credit import add_credit_from_entities
+
+    return add_credit_from_entities(
+        user_id,
+        valor=valor,
+        card_name=(args.get("card_name") or "").strip() or None,
+        descricao=(args.get("descricao") or "").strip() or None,
+        categoria=(args.get("categoria") or "").strip() or None,
+        purchased_at=_parse_iso_date_or_none(args.get("data")),
+        installments=parcelas,
+    )
+
+
 # ─── Write: pay_bill ────────────────────────────────────────────────────────
 
 def _pay_bill_summary(args: dict[str, Any]) -> str:
@@ -149,6 +195,59 @@ TOOLS: list[Tool] = [
         },
         is_write=False,
         execute=_get_open_bill,
+    ),
+    Tool(
+        schema={
+            "type": "function",
+            "function": {
+                "name": "add_credit_purchase",
+                "description": (
+                    "Registra uma compra no cartão de crédito (vai pra "
+                    "fatura, NÃO debita a conta corrente). Use pra 'gastei "
+                    "100 no cartão Nubank', 'paguei 50 no crédito', 'Crédito "
+                    "44,90 Pagamento Claro', 'parcelei 300 em 3x'. Suporta "
+                    "parcelamento via `parcelas`. NÃO use pra despesas que "
+                    "saíram da conta corrente — pra essas use `add_launch`. "
+                    "EXECUTA DIRETO (sem perguntar 'confirma?')."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "valor": {
+                            "type": "number",
+                            "minimum": 0.01,
+                            "description": "Valor TOTAL da compra (não da parcela). Ex: 100, 44.90.",
+                        },
+                        "card_name": {
+                            "type": "string",
+                            "description": "Nome do cartão. Omita pra usar o cartão padrão.",
+                        },
+                        "descricao": {
+                            "type": "string",
+                            "description": "Descrição da compra. Ex: 'mercado', 'Pagamento Claro', 'Uber'.",
+                        },
+                        "categoria": {
+                            "type": "string",
+                            "description": "Categoria explícita. Omita pra inferir.",
+                        },
+                        "data": {
+                            "type": "string",
+                            "description": "Data da compra em ISO 8601 (YYYY-MM-DD). Omita pra usar hoje.",
+                        },
+                        "parcelas": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 60,
+                            "description": "Número de parcelas (omita ou 1 = à vista).",
+                        },
+                    },
+                    "required": ["valor"],
+                },
+            },
+        },
+        is_write=True,
+        requires_confirmation=False,
+        execute=_add_credit_purchase_execute,
     ),
     Tool(
         schema={

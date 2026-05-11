@@ -434,6 +434,92 @@ def _clean_credit_purchase_description(text: str, card_name: str | None) -> str:
     return desc
 
 
+def add_credit_from_entities(
+    user_id: int,
+    *,
+    valor: float,
+    card_name: str | None = None,
+    descricao: str | None = None,
+    categoria: str | None = None,
+    purchased_at=None,
+    installments: int | None = None,
+) -> str:
+    """Registra compra no cartão de crédito a partir de args já estruturados.
+
+    Chamada por:
+      - `try_handle_natural_credit_purchase` (linguagem natural: "gastei 50 no cartão")
+      - branch `credito X` (formato compacto)
+      - tool de IA `add_credit_purchase` (LLM extrai os args)
+
+    Toda lógica compartilhada (resolução de cartão, validação de limite,
+    categorização, learn, parcelamento, formato da resposta) vive aqui.
+    """
+    if valor is None or float(valor) <= 0:
+        return "❌ Valor inválido."
+
+    if purchased_at is None:
+        purchased_at = now_tz().date()
+
+    card_name_clean = (card_name or "").strip() or None
+    if card_name_clean:
+        card_id = get_card_id_by_name(user_id, card_name_clean)
+        if not card_id:
+            return (
+                f"❌ Não achei o cartão '{card_name_clean}'. "
+                f"Crie com: criar cartao {card_name_clean} fecha 10 vence 17"
+            )
+    else:
+        card_id = get_default_card_id(user_id)
+        if not card_id:
+            return (
+                "❓ Você não tem cartão padrão. Defina com: padrao NOME "
+                "(ou crie: criar cartao nubank fecha 10 vence 17)"
+            )
+
+    card = get_card_by_id(user_id, card_id)
+    card_label = card["name"] if card else (card_name_clean or "cartão")
+
+    limit_error = _validate_credit_limit_before_purchase(user_id, card_id, float(valor))
+    if limit_error is not None:
+        return limit_error
+
+    desc_clean = (descricao or "").strip() or None
+    if not categoria:
+        categoria = _infer_category(user_id, desc_clean or "")
+    nota = normalize_text(desc_clean) if desc_clean else "compra no credito"
+
+    n = int(installments) if installments else 1
+    if n > 1:
+        return _create_installments(
+            user_id=user_id,
+            card_id=card_id,
+            resolved_name=card_label,
+            valor=float(valor),
+            n=n,
+            nota=nota,
+            categoria=categoria or "outros",
+            purchased_at=purchased_at,
+        )
+
+    try:
+        tx_id, due, _bill_id = add_credit_purchase(
+            user_id=user_id,
+            card_id=card_id,
+            valor=float(valor),
+            categoria=categoria,
+            nota=nota,
+            purchased_at=purchased_at,
+        )
+        if desc_clean:
+            learn_from_inference(
+                user_id, desc_clean, categoria,
+                target_hint=desc_clean, reason="manual",
+            )
+        return _format_credit_purchase_success(card_label, float(valor), purchased_at, float(due), int(tx_id))
+    except Exception as e:
+        return f"❌ Erro registrando compra no crédito: {e}"
+
+
 def try_handle_natural_credit_purchase(user_id: int, text: str) -> str | None:
     if not _is_natural_credit_purchase(text):
         return None
@@ -452,39 +538,15 @@ def try_handle_natural_credit_purchase(user_id: int, text: str) -> str | None:
     if unknown_card_candidate and not get_card_id_by_name(user_id, unknown_card_candidate):
         return f"❌ Não achei o cartão '{unknown_card_candidate}'. Crie com: criar cartao {unknown_card_candidate} fecha 10 vence 17"
 
-    card_id, _resolved_name = _pick_card_id(user_id, card_name_hint)
-    if not card_id:
-        return "❓ Você não tem cartão padrão. Defina com: padrao NOME (ou crie: criar cartao nubank fecha 10 vence 17)"
-
-    card = get_card_by_id(user_id, card_id)
-    card_label = card["name"] if card else (card_name_hint or "cartão")
-    limit_error = _validate_credit_limit_before_purchase(user_id, card_id, float(valor))
-    if limit_error is not None:
-        return limit_error
-
     desc = _clean_credit_purchase_description(base_text, card_name_hint or unknown_card_candidate)
-    nota = normalize_text(desc) if desc else "compra no credito"
-    categoria = _infer_category(user_id, desc or base_text)
 
-    try:
-        tx_id, due, _bill_id = add_credit_purchase(
-            user_id=user_id,
-            card_id=card_id,
-            valor=float(valor),
-            categoria=categoria,
-            nota=nota,
-            purchased_at=purchased_at,
-        )
-        learn_from_inference(
-            user_id,
-            desc or base_text,
-            categoria,
-            target_hint=desc,
-            reason="manual",
-        )
-        return _format_credit_purchase_success(card_label, float(valor), purchased_at, float(due), int(tx_id))
-    except Exception as e:
-        return f"❌ Erro registrando compra no crédito: {e}"
+    return add_credit_from_entities(
+        user_id,
+        valor=float(valor),
+        card_name=card_name_hint,
+        descricao=desc or None,
+        purchased_at=purchased_at,
+    )
 
 
 def _extract_credit_transaction_id(text: str) -> int | None:
@@ -1598,8 +1660,10 @@ def handle(user_id: int, text: str) -> str | None:
             return "📭 Você ainda não tem cartões. Crie com: criar cartao nubank fecha 10 vence 17"
         return _format_cards_list(user_id, cards)
 
-    if t_low.startswith("credito"):
-        rest = t[len("credito"):].strip()
+    # Aceita "credito" e "Crédito" (com acento). `.lower()` preserva o acento,
+    # então tem que checar ambas variações — ambas têm 7 chars.
+    if t_low.startswith("credito") or t_low.startswith("crédito"):
+        rest = t[7:].strip()
         if not rest:
             return "Use: credito 120 mercado OU credito nubank 120 mercado"
 
@@ -1620,38 +1684,13 @@ def handle(user_id: int, text: str) -> str | None:
         else:
             rest_desc = rest2
 
-        nota = normalize_text(rest_desc)
-        categoria = _infer_category(user_id, rest_desc)
-
-        card_id, resolved_name = _pick_card_id(user_id, card_name)
-        if not card_id:
-            if card_name:
-                return f"❌ Não achei o cartão '{card_name}'. Crie com: criar cartao {card_name} fecha 10 vence 17"
-            return "❓ Você não tem cartão padrão. Defina com: padrao NOME (ou crie: criar cartao nubank fecha 10 vence 17)"
-
-        limit_error = _validate_credit_limit_before_purchase(user_id, card_id, float(valor))
-        if limit_error is not None:
-            return limit_error
-
-        try:
-            tx_id, due, _bill_id = add_credit_purchase(
-                user_id=user_id,
-                card_id=card_id,
-                valor=float(valor),
-                categoria=categoria,
-                nota=nota,
-                purchased_at=purchased_at,
-            )
-            learn_from_inference(
-                user_id,
-                rest_desc,
-                categoria,
-                target_hint=rest_desc,
-                reason="manual",
-            )
-            return _format_credit_purchase_success(resolved_name, float(valor), purchased_at, float(due), int(tx_id))
-        except Exception as e:
-            return f"❌ Erro registrando compra no crédito: {e}"
+        return add_credit_from_entities(
+            user_id,
+            valor=float(valor),
+            card_name=card_name,
+            descricao=rest_desc.strip() or None,
+            purchased_at=purchased_at,
+        )
 
     if t_low in ("criar parcelas", "criar parcela"):
         return "Use: `parcelar 300 em 3x no cartao nubank` (ex: `parcelar 120 em 4x no cartao nubank`)"
