@@ -224,6 +224,95 @@ def test_accrue_investment_db_ipca_spread_composto(user_id):
             conn.commit()
 
 
+def test_accrue_all_projeta_lots_individualmente_sem_subestimar_lots_antigos(user_id):
+    """
+    Regressão: lot novo do mesmo dia não pode subestimar a projection de lots
+    mais antigos. Antes do fix, inv.last_date = MAX(lots.last_date) e a projection
+    rodava sobre o balance agregado, dando 1 dia útil em vez dos N que o lot
+    antigo merecia. Reproduzido em prod na Reserva de Emergência (2026-05-11).
+    """
+    inv_id = None
+    today_ = date(2026, 4, 20)  # segunda
+
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into investments(user_id, name, balance, rate, period, last_date)
+                values (%s, %s, %s, %s, %s, %s)
+                returning id
+                """,
+                (user_id, "CDB Projecao Por Lote", Decimal("1500"), Decimal("1.0"), "cdi", date(2026, 4, 16)),
+            )
+            inv_id = cur.fetchone()["id"]
+
+            # Lot antigo: last_date 14/04 (terça) → 4 dias úteis até 20/04 (15, 16, 17, 20).
+            # Lot novo:  last_date 16/04 (quinta) → 2 dias úteis até 20/04 (17, 20).
+            cur.execute(
+                """
+                insert into investment_lots(
+                    user_id, investment_id, principal_initial, principal_remaining,
+                    balance, opened_at, last_date, status, rate, period
+                )
+                values (%s, %s, %s, %s, %s, %s, %s, 'open', %s, %s)
+                """,
+                (user_id, inv_id, Decimal("1000"), Decimal("1000"), Decimal("1000"),
+                 date(2026, 4, 14), date(2026, 4, 14), Decimal("1.0"), "cdi"),
+            )
+            cur.execute(
+                """
+                insert into investment_lots(
+                    user_id, investment_id, principal_initial, principal_remaining,
+                    balance, opened_at, last_date, status, rate, period
+                )
+                values (%s, %s, %s, %s, %s, %s, %s, 'open', %s, %s)
+                """,
+                (user_id, inv_id, Decimal("500"), Decimal("500"), Decimal("500"),
+                 date(2026, 4, 16), date(2026, 4, 16), Decimal("1.0"), "cdi"),
+            )
+
+            # Último CDI publicado, usado como proxy pelo _project_to_today.
+            cur.execute(
+                "insert into market_rates(code, ref_date, value) values ('CDI', %s, %s) "
+                "on conflict (code, ref_date) do update set value=excluded.value",
+                (date(2026, 4, 16), Decimal("0.05")),
+            )
+        conn.commit()
+
+    try:
+        original_fetch = db._get_cdi_daily_map
+        db._get_cdi_daily_map = lambda _cur, start, end: {}  # BCB sem dados novos
+        try:
+            out = db.accrue_all_investments(user_id, today=today_)
+        finally:
+            db._get_cdi_daily_map = original_fetch
+
+        inv_row = next(r for r in out if r["id"] == inv_id)
+
+        # Projection esperada (por lote, somando):
+        #   Lot antigo: 1000 × (1 + 0.0005)^4 = 1002.0015...
+        #   Lot novo:    500 × (1 + 0.0005)^2 =  500.5001...
+        rate = Decimal("0.05") / Decimal("100")
+        expected = float(
+            Decimal("1000") * (Decimal("1") + rate) ** 4
+            + Decimal("500") * (Decimal("1") + rate) ** 2
+        )
+        assert abs(inv_row["projected_balance"] - expected) < 0.01
+
+        # Bug original projetaria 1500 × (1.0005)^2 = 1501.50 — claramente menor.
+        assert inv_row["projected_balance"] > 1502.0
+        # Máximo de dias úteis projetados entre todos os lotes = 4 (lot antigo).
+        assert inv_row["projected_days"] == 4
+
+    finally:
+        with db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("delete from investment_lots where investment_id=%s and user_id=%s", (inv_id, user_id))
+                cur.execute("delete from investments where id=%s and user_id=%s", (inv_id, user_id))
+                cur.execute("delete from market_rates where code='CDI' and ref_date=%s", (date(2026, 4, 16),))
+            conn.commit()
+
+
 def test_aporte_em_investimento_cria_lote_individual(user_id):
     db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
     db.create_investment_db(user_id, "CDB Lote", rate=0.01, period="monthly", nota="teste")

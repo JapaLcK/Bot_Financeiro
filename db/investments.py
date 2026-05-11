@@ -1140,10 +1140,11 @@ def _project_to_today(
     return balance, last_date, 0
 
 
-def accrue_all_investments(user_id: int):
+def accrue_all_investments(user_id: int, today: date | None = None):
     """Aplica juros em todos os investimentos do usuário e retorna a lista atualizada."""
     ensure_user(user_id)
-    today = datetime.now(_tz()).date()
+    if today is None:
+        today = datetime.now(_tz()).date()
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -1167,17 +1168,46 @@ def accrue_all_investments(user_id: int):
             for row in out:
                 row["lots"] = lots_by_inv.get(int(row["id"]), [])
 
-                projected_balance, projected_until, projected_days = _project_to_today(
-                    cur,
-                    Decimal(str(row["balance"] or 0)),
-                    row["period"],
-                    Decimal(str(row["rate"] or 0)),
-                    row["last_date"],
-                    today,
-                )
-                row["projected_balance"] = float(projected_balance)
-                row["projected_until"] = projected_until
-                row["projected_days"] = projected_days
+                # Projeção por lote: cada lote acumula independente, então um lote
+                # criado hoje não pode "esconder" o gap de projection de lotes mais
+                # antigos via inv.last_date = MAX(...). Soma as projeções de cada
+                # lote aberto; fallback no agregado se não houver lotes (cenário
+                # legado pré-migração de lots).
+                open_lots = [lot for lot in row["lots"] if lot.get("status") == "open"]
+                if open_lots:
+                    proj_total = Decimal("0")
+                    proj_days = 0
+                    proj_until = None
+                    for lot in open_lots:
+                        lot_rate = lot.get("rate") if lot.get("rate") is not None else row["rate"]
+                        lot_period = lot.get("period") or row["period"]
+                        lot_pb, lot_until, lot_days = _project_to_today(
+                            cur,
+                            Decimal(str(lot["balance"] or 0)),
+                            lot_period,
+                            Decimal(str(lot_rate or 0)),
+                            lot["last_date"],
+                            today,
+                        )
+                        proj_total += lot_pb
+                        proj_days = max(proj_days, lot_days)
+                        if lot_until and (proj_until is None or lot_until > proj_until):
+                            proj_until = lot_until
+                    row["projected_balance"] = float(proj_total)
+                    row["projected_until"] = proj_until or row["last_date"]
+                    row["projected_days"] = proj_days
+                else:
+                    projected_balance, projected_until, projected_days = _project_to_today(
+                        cur,
+                        Decimal(str(row["balance"] or 0)),
+                        row["period"],
+                        Decimal(str(row["rate"] or 0)),
+                        row["last_date"],
+                        today,
+                    )
+                    row["projected_balance"] = float(projected_balance)
+                    row["projected_until"] = projected_until
+                    row["projected_days"] = projected_days
 
         conn.commit()
 

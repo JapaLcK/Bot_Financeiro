@@ -16,7 +16,8 @@ def test_list_investments_capitaliza_antes_de_responder():
 
     accrue.assert_called_once_with(123)
     link.assert_called_once_with(123, view="investments")
-    assert "Atualizado até 16/04/2026" in msg
+    assert "CDB Banco Luso" in msg
+    assert "Nu Reserva Planejada" in msg
     assert "R$ 821,91 (116% CDI)" in msg
     assert "R$ 11.287,35 (14%)" in msg
     assert "https://app.test/d/abc" in msg
