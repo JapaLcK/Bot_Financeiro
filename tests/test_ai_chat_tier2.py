@@ -6,7 +6,10 @@ from datetime import date, datetime
 
 import db
 from core.services.ai_chat.tools.launches import (
+    _compare_periods,
+    _forecast_month_end,
     _get_largest_expenses,
+    _get_spending_trend,
     _get_top_categories,
 )
 
@@ -176,6 +179,113 @@ def test_largest_expenses_vazio_sem_gastos(user_id):
     result = _get_largest_expenses(user_id, {})
     assert result["expenses"] == []
     assert result["count"] == 0
+
+
+# ─── compare_periods ────────────────────────────────────────────────────────
+
+def test_compare_periods_diff_correto(user_id):
+    """Período A com R$ 100 despesa, B com R$ 250 → diff_despesa = +150."""
+    db.add_launch_and_update_balance(
+        user_id, "despesa", 100, "a", "a",
+        categoria="outros",
+        criado_em=datetime(2026, 4, 10),
+    )
+    db.add_launch_and_update_balance(
+        user_id, "despesa", 250, "b", "b",
+        categoria="outros",
+        criado_em=datetime(2026, 5, 5),
+    )
+
+    result = _compare_periods(user_id, {
+        "period_a_start": "2026-04-01", "period_a_end": "2026-04-30",
+        "period_b_start": "2026-05-01", "period_b_end": "2026-05-31",
+        "period_a_label": "Abril", "period_b_label": "Maio",
+    })
+    assert result["period_a"]["despesa"] == 100.0
+    assert result["period_b"]["despesa"] == 250.0
+    assert result["diff_despesa"] == 150.0
+    assert result["period_a"]["label"] == "Abril"
+
+
+def test_compare_periods_falta_arg(user_id):
+    result = _compare_periods(user_id, {"period_a_start": "2026-04-01"})
+    assert "error" in result
+
+
+def test_compare_periods_end_anterior_a_start(user_id):
+    result = _compare_periods(user_id, {
+        "period_a_start": "2026-05-01", "period_a_end": "2026-04-01",
+        "period_b_start": "2026-05-01", "period_b_end": "2026-05-31",
+    })
+    assert "error" in result
+
+
+# ─── get_spending_trend ─────────────────────────────────────────────────────
+
+def test_spending_trend_retorna_dados_dos_meses(user_id):
+    """Cria gasto em meses diferentes, confere que aparecem na lista."""
+    today = date.today()
+    # Gasto no mês corrente
+    db.add_launch_and_update_balance(user_id, "despesa", 50, "x", "x", categoria="outros")
+
+    result = _get_spending_trend(user_id, {"months": 3})
+    assert result["months"] == 3
+    assert isinstance(result["data"], list)
+    # Pelo menos o mês corrente deve aparecer (com o gasto que criamos)
+    current_month = [r for r in result["data"]
+                     if r["year"] == today.year and r["month"] == today.month]
+    assert len(current_month) == 1
+    assert current_month[0]["despesa"] >= 50.0
+
+
+def test_spending_trend_clamp_limite(user_id):
+    result = _get_spending_trend(user_id, {"months": 100})
+    assert result["months"] == 24  # clamp em 24
+
+
+def test_spending_trend_inclui_credito(user_id):
+    """Compra no cartão deve entrar como despesa do mês."""
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    db.add_credit_purchase(user_id, card_id, 200, "outros", "x", date.today())
+
+    result = _get_spending_trend(user_id, {"months": 1})
+    today = date.today()
+    cur = next((r for r in result["data"]
+                if r["year"] == today.year and r["month"] == today.month), None)
+    assert cur is not None
+    assert cur["despesa"] >= 200.0
+
+
+# ─── forecast_month_end ─────────────────────────────────────────────────────
+
+def test_forecast_month_end_sem_gastos_projeta_zero(user_id):
+    result = _forecast_month_end(user_id, {})
+    assert result["despesa_atual"] == 0.0
+    assert result["despesa_projetada_fim_do_mes"] == 0.0
+
+
+def test_forecast_month_end_projeta_baseado_em_ritmo(user_id):
+    """Despesa atual = R$ 100, gastei só hoje → projeção considera ritmo
+    diário e extrapola pro mês."""
+    db.add_launch_and_update_balance(user_id, "despesa", 100, "x", "x", categoria="outros")
+
+    result = _forecast_month_end(user_id, {})
+    assert result["despesa_atual"] == 100.0
+    # Projeção deve ser >= valor atual (mês continua)
+    assert result["despesa_projetada_fim_do_mes"] >= 100.0
+    # Deve incluir todas as chaves esperadas
+    for key in ("days_elapsed", "days_in_month", "saldo_parcial", "vai_fechar_negativo"):
+        assert key in result
+
+
+def test_forecast_month_end_vai_fechar_negativo(user_id):
+    """Gasto > receita → vai_fechar_negativo = True."""
+    db.add_launch_and_update_balance(user_id, "receita", 50, None, "seed")
+    db.add_launch_and_update_balance(user_id, "despesa", 200, "x", "x", categoria="outros")
+
+    result = _forecast_month_end(user_id, {})
+    assert result["vai_fechar_negativo"] is True
 
 
 def test_top_categories_exclui_reembolso_cartao(user_id):

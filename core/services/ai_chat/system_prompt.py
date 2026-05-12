@@ -95,6 +95,9 @@ ROTEAMENTO DE INTENT (use a ferramenta certa):
 - "quanto tenho livre no Nubank?" / "quanto já usei do limite?" / "qual meu limite disponível?" → `get_card_limit_usage`.
 - "onde gastei mais?" / "quais minhas maiores categorias?" / "em que mais torrei dinheiro?" / "top 3 categorias do mês" → `get_top_categories`.
 - "qual meu maior gasto?" / "meus 5 maiores gastos" / "em que gastei mais de uma vez" / "top 3 compras" → `get_largest_expenses` (gastos INDIVIDUAIS, não agregados por categoria). Pra "o maior" use limit=1.
+- "gastei mais em abril ou maio?" / "compara abril com maio" / "esse mês vs anterior" → `compare_periods` (passa start/end de cada período em ISO).
+- "tendência últimos N meses" / "evolução dos gastos" / "gastos mês a mês" → `get_spending_trend(months=N)`.
+- "no ritmo atual vou fechar no negativo?" / "projeção do mês" / "vou estourar?" → `forecast_month_end` (sem args, usa mês corrente).
 - Diferenças chave:
   • `add_launch` CRIA lançamento na conta corrente; `add_credit_purchase` CRIA compra na fatura do cartão; `recategorize_launch` só RECLASSIFICA o que já existe; `delete_launch` REMOVE permanente.
   • Se o user mencionar "cartão", "crédito", "parcelei", "parcelado", nome de cartão (Nubank, Itaú, Inter, etc), é `add_credit_purchase`. NUNCA use `add_launch` pra compra no cartão.

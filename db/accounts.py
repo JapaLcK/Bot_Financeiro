@@ -273,6 +273,73 @@ def get_summary_by_period(user_id: int, start_date: date, end_date: date):
     return _db_support.get_summary_by_period_impl(get_conn, ensure_user, user_id, start_date, end_date)
 
 
+def get_spending_trend(user_id: int, months: int = 6) -> list[dict]:
+    """Tendência de gastos dos últimos N meses (default 6, contando o atual).
+
+    Cada item: {year, month, despesa, receita}. Despesas incluem launches
+    (não-internos) + compras no cartão. Receita só de launches.
+    """
+    ensure_user(user_id)
+    months = max(1, min(int(months), 24))
+    today = date.today()
+
+    # Calcula primeiro dia do mês mais antigo a incluir
+    y, m = today.year, today.month
+    for _ in range(months - 1):
+        if m == 1:
+            m = 12
+            y -= 1
+        else:
+            m -= 1
+    range_start = datetime(y, m, 1)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                select y::int as year, m::int as month,
+                       sum(case when tipo = 'despesa' then valor else 0 end) as despesa,
+                       sum(case when tipo = 'receita' then valor else 0 end) as receita
+                from (
+                    select extract(year from criado_em at time zone %s)::int as y,
+                           extract(month from criado_em at time zone %s)::int as m,
+                           tipo, valor
+                    from launches
+                    where user_id = %s
+                      and criado_em >= %s
+                      and is_internal_movement = false
+                      and tipo in ('despesa', 'receita')
+                    union all
+                    select extract(year from purchased_at)::int as y,
+                           extract(month from purchased_at)::int as m,
+                           'despesa' as tipo, valor
+                    from credit_transactions
+                    where user_id = %s
+                      and purchased_at >= %s::date
+                      and is_refund = false
+                ) agg
+                group by y, m
+                order by y, m
+                """,
+                (
+                    "America/Sao_Paulo", "America/Sao_Paulo",
+                    user_id, range_start,
+                    user_id, range_start.date(),
+                ),
+            )
+            rows = cur.fetchall()
+
+    return [
+        {
+            "year": int(r["year"]),
+            "month": int(r["month"]),
+            "despesa": float(r["despesa"] or 0),
+            "receita": float(r["receita"] or 0),
+        }
+        for r in rows
+    ]
+
+
 def get_largest_expenses(
     user_id: int,
     start_date: date,

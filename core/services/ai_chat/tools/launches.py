@@ -6,6 +6,9 @@ Read:
   - get_period_summary: soma de despesas e receitas em um período (default: mês corrente)
   - get_top_categories: top N categorias de gasto no período (despesas + cartão)
   - get_largest_expenses: top N gastos INDIVIDUAIS (não agregados) no período
+  - compare_periods: compara totais de receita/despesa entre dois períodos
+  - get_spending_trend: tendência mensal (totais dos últimos N meses)
+  - forecast_month_end: projeção de fechamento do mês baseado no ritmo atual
 
 Write (auto-executado, SEM confirmação):
   - add_launch: IA extrai os args, delega pra `core.handlers.launches.add_from_entities`
@@ -96,6 +99,93 @@ def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         "end_date": end.isoformat(),
         "expenses": rows,
         "count": len(rows),
+    }
+
+
+def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    """Compara totais de receita/despesa entre 2 períodos."""
+    a_start = _parse_iso_date(args.get("period_a_start"))
+    a_end = _parse_iso_date(args.get("period_a_end"))
+    b_start = _parse_iso_date(args.get("period_b_start"))
+    b_end = _parse_iso_date(args.get("period_b_end"))
+
+    if not (a_start and a_end and b_start and b_end):
+        return {"error": "informe period_a_start, period_a_end, period_b_start, period_b_end em ISO (YYYY-MM-DD)."}
+    if a_end < a_start or b_end < b_start:
+        return {"error": "end anterior a start."}
+
+    sum_a = db.get_summary_by_period(user_id, a_start, a_end)
+    sum_b = db.get_summary_by_period(user_id, b_start, b_end)
+
+    return {
+        "period_a": {
+            "start": a_start.isoformat(),
+            "end": a_end.isoformat(),
+            "label": args.get("period_a_label") or "Período A",
+            "receita": float(sum_a.get("receita") or 0),
+            "despesa": float(sum_a.get("despesa") or 0),
+        },
+        "period_b": {
+            "start": b_start.isoformat(),
+            "end": b_end.isoformat(),
+            "label": args.get("period_b_label") or "Período B",
+            "receita": float(sum_b.get("receita") or 0),
+            "despesa": float(sum_b.get("despesa") or 0),
+        },
+        "diff_despesa": float(sum_b.get("despesa") or 0) - float(sum_a.get("despesa") or 0),
+        "diff_receita": float(sum_b.get("receita") or 0) - float(sum_a.get("receita") or 0),
+    }
+
+
+def _get_spending_trend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        months = int(args.get("months") or 6)
+    except (TypeError, ValueError):
+        months = 6
+    months = max(1, min(months, 24))
+
+    rows = db.get_spending_trend(user_id, months)
+    return {
+        "months": months,
+        "data": rows,  # list of {year, month, despesa, receita}
+    }
+
+
+def _forecast_month_end(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    """Projeção do fim do mês corrente baseado no ritmo de gastos.
+
+    Algoritmo simples: ritmo_diario = gasto_atual / dias_decorridos.
+    Projeção = ritmo_diario * dias_totais_do_mes.
+    Receita: assume mesmo total (não projeta — recibos são pontuais).
+    """
+    from calendar import monthrange
+
+    today = date.today()
+    month_start = today.replace(day=1)
+    days_in_month = monthrange(today.year, today.month)[1]
+    days_elapsed = today.day
+
+    sum_current = db.get_summary_by_period(user_id, month_start, today)
+    despesa_atual = float(sum_current.get("despesa") or 0)
+    receita_atual = float(sum_current.get("receita") or 0)
+
+    if days_elapsed <= 0:
+        despesa_projetada = despesa_atual
+    else:
+        ritmo_diario = despesa_atual / days_elapsed
+        despesa_projetada = ritmo_diario * days_in_month
+
+    return {
+        "today": today.isoformat(),
+        "month_start": month_start.isoformat(),
+        "days_elapsed": days_elapsed,
+        "days_in_month": days_in_month,
+        "despesa_atual": round(despesa_atual, 2),
+        "receita_atual": round(receita_atual, 2),
+        "saldo_parcial": round(receita_atual - despesa_atual, 2),
+        "despesa_projetada_fim_do_mes": round(despesa_projetada, 2),
+        "saldo_projetado": round(receita_atual - despesa_projetada, 2),
+        "vai_fechar_negativo": (receita_atual - despesa_projetada) < 0,
     }
 
 
@@ -395,6 +485,80 @@ TOOLS: list[Tool] = [
         },
         is_write=False,
         execute=_get_largest_expenses,
+    ),
+    Tool(
+        schema={
+            "type": "function",
+            "function": {
+                "name": "compare_periods",
+                "description": (
+                    "Compara totais de receita/despesa entre 2 períodos. "
+                    "Use pra 'gastei mais em abril ou maio?', 'comparar último "
+                    "mês com este', 'esse mês vs o anterior'. Retorna totais "
+                    "+ diferença pra cada métrica."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "period_a_start": {"type": "string", "description": "Início do período A em ISO (YYYY-MM-DD)."},
+                        "period_a_end":   {"type": "string", "description": "Fim do período A em ISO (YYYY-MM-DD)."},
+                        "period_b_start": {"type": "string", "description": "Início do período B em ISO (YYYY-MM-DD)."},
+                        "period_b_end":   {"type": "string", "description": "Fim do período B em ISO (YYYY-MM-DD)."},
+                        "period_a_label": {"type": "string", "description": "Nome amigável (ex: 'Abril', 'Mês passado')."},
+                        "period_b_label": {"type": "string", "description": "Nome amigável (ex: 'Maio', 'Este mês')."},
+                    },
+                    "required": ["period_a_start", "period_a_end", "period_b_start", "period_b_end"],
+                },
+            },
+        },
+        is_write=False,
+        execute=_compare_periods,
+    ),
+    Tool(
+        schema={
+            "type": "function",
+            "function": {
+                "name": "get_spending_trend",
+                "description": (
+                    "Retorna a tendência mensal (totais de despesa e receita) "
+                    "dos últimos N meses, incluindo o atual. Use pra "
+                    "'tendência últimos 6 meses', 'evolução dos gastos', "
+                    "'gastos mês a mês'."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "months": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 24,
+                            "default": 6,
+                            "description": "Quantos meses olhar pra trás (1 a 24, padrão 6).",
+                        },
+                    },
+                },
+            },
+        },
+        is_write=False,
+        execute=_get_spending_trend,
+    ),
+    Tool(
+        schema={
+            "type": "function",
+            "function": {
+                "name": "forecast_month_end",
+                "description": (
+                    "Projeta como o mês corrente vai fechar baseado no ritmo "
+                    "atual de gastos. Use pra 'no ritmo atual vou fechar no "
+                    "negativo?', 'projeção do mês', 'vou estourar?'. Retorna "
+                    "gasto atual, receita atual, projeção de despesa pro fim "
+                    "do mês e saldo projetado."
+                ),
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        is_write=False,
+        execute=_forecast_month_end,
     ),
     Tool(
         schema={
