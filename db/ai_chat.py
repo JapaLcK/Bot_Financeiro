@@ -250,3 +250,31 @@ def increment_usage(user_id: int) -> int:
         row = cur.fetchone()
         conn.commit()
         return int(row["ai_messages_this_month"]) if row else 0
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Telemetria de fallback (perguntas in-scope sem tool adequada)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def log_ai_fallback(user_id: int, question: str, ai_reason: str | None = None) -> None:
+    """Registra uma pergunta que a IA reconheceu como de finanças mas não soube
+    responder. Alimenta análise de quais tools criar no futuro.
+
+    Não levanta exceção em falha — telemetria não deve quebrar o fluxo do user.
+    """
+    q = (question or "").strip()
+    if not q:
+        return
+    reason = (ai_reason or "").strip() or None
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "insert into ai_fallback_log (user_id, question, ai_reason) "
+                    "values (%s, %s, %s)",
+                    (int(user_id), q[:2000], reason[:500] if reason else None),
+                )
+            conn.commit()
+    except Exception:
+        # Telemetria silenciosa — não quebra o turno do user.
+        pass

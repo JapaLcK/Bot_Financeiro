@@ -15,3 +15,9 @@ import contextvars
 CURRENT_PLATFORM: contextvars.ContextVar[str] = contextvars.ContextVar(
     "ai_chat_platform", default="dashboard"
 )
+
+CURRENT_USER_MESSAGE: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "ai_chat_user_message", default=""
+)
+"""Mensagem do user no turno atual. Setada pelo runner e lida por tools que
+precisam logar/registrar a pergunta original (ex: `report_out_of_scope`)."""

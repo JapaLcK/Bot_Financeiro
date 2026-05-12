@@ -241,6 +241,7 @@ from .ai_chat import (
     clear_pending_action as ai_clear_pending_action,
     get_usage_this_month as ai_get_usage_this_month,
     increment_usage as ai_increment_usage,
+    log_ai_fallback,
     DEFAULT_CONTEXT_WINDOW as AI_DEFAULT_CONTEXT_WINDOW,
 )
 
@@ -346,6 +347,6 @@ __all__ = [
     # ai chat
     "ai_append_message", "ai_get_recent_messages",
     "ai_set_pending_action", "ai_get_pending_action", "ai_clear_pending_action",
-    "ai_get_usage_this_month", "ai_increment_usage",
+    "ai_get_usage_this_month", "ai_increment_usage", "log_ai_fallback",
     "AI_DEFAULT_CONTEXT_WINDOW",
 ]

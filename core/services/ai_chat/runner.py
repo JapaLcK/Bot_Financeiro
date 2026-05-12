@@ -28,7 +28,7 @@ from typing import Any
 
 import db
 
-from ._context import CURRENT_PLATFORM
+from ._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
 from .confirmations import is_cancel, is_confirm
 from .history import trim_history_for_openai
 from .system_prompt import SYSTEM_PROMPT
@@ -71,11 +71,13 @@ def chat(
     NÃO checa plano Pro — quem chama (endpoint / bot) que decide se gateia.
     Aplica rate limit mensal aqui (incrementa contador APÓS resposta bem-sucedida).
     """
-    token = CURRENT_PLATFORM.set(platform)
+    token_pf = CURRENT_PLATFORM.set(platform)
+    token_msg = CURRENT_USER_MESSAGE.set((user_text or "").strip())
     try:
         return _chat_inner(user_id, user_text, monthly_limit=monthly_limit)
     finally:
-        CURRENT_PLATFORM.reset(token)
+        CURRENT_USER_MESSAGE.reset(token_msg)
+        CURRENT_PLATFORM.reset(token_pf)
 
 
 def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:

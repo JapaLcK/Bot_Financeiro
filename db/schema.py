@@ -880,6 +880,26 @@ def init_db():
         )
         """,
 
+        # Telemetria de perguntas que a IA reconheceu como dentro de finanças
+        # mas sem tool adequada. Alimenta decisão de quais tools criar.
+        """
+        create table if not exists ai_fallback_log (
+          id bigserial primary key,
+          user_id bigint references users(id) on delete cascade,
+          question text not null,
+          ai_reason text,
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_ai_fallback_log_created
+          on ai_fallback_log (created_at desc)
+        """,
+        """
+        create index if not exists idx_ai_fallback_log_user
+          on ai_fallback_log (user_id, created_at desc)
+        """,
+
         # Rate limit mensal de mensagens IA por user.
         # Reset lazy: quando incrementa, checa se mudou o mês desde reset_at.
         """
