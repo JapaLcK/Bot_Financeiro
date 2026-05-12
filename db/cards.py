@@ -863,6 +863,67 @@ def get_next_bill_summary(user_id: int, card_id: int):
     return bill
 
 
+def rebuild_bill_totals(user_id: int) -> dict[str, int]:
+    """Reconciliação FORTE: recalcula `total` de cada bill do user a partir
+    de `sum(credit_transactions.valor)` e reabre bills que voltam a ter
+    saldo devedor.
+
+    Diferente da reconciliação preguiçosa em `list_open_bills` (que confia
+    no `total` armazenado), esse helper recalcula do zero. Cobre casos
+    onde o `total` ficou inconsistente por bug passado, edição manual no
+    DB, ou rollback que esqueceu de decrementar.
+
+    Uso: rodar 1x via Railway shell quando suspeitar que `total` divergiu
+    da soma real das transações.
+
+        from db import rebuild_bill_totals
+        print(rebuild_bill_totals(<user_id>))
+
+    Retorna `{totals_updated, reopened}` — quantas bills tiveram total
+    corrigido e quantas voltaram pra status='open'.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # Passo 1: recalcular total = SUM(credit_transactions.valor)
+            # pra cada bill do user. Retorna IDs onde houve mudança.
+            cur.execute(
+                """
+                with computed as (
+                    select b.id as bill_id,
+                           coalesce(sum(t.valor), 0) as new_total
+                      from credit_bills b
+                      left join credit_transactions t on t.bill_id = b.id
+                     where b.user_id = %s
+                     group by b.id
+                )
+                update credit_bills b
+                   set total = c.new_total
+                  from computed c
+                 where b.id = c.bill_id
+                   and b.total <> c.new_total
+                returning b.id
+                """,
+                (user_id,),
+            )
+            totals_updated = len(cur.fetchall())
+
+            # Passo 2: reabrir bills paid/closed que tem saldo devedor.
+            cur.execute(
+                """
+                update credit_bills
+                   set status='open', paid_at=null
+                 where user_id=%s
+                   and status in ('paid','closed')
+                   and total > coalesce(paid_amount, 0)
+                returning id
+                """,
+                (user_id,),
+            )
+            reopened = len(cur.fetchall())
+        conn.commit()
+    return {"totals_updated": totals_updated, "reopened": reopened}
+
+
 def list_open_bills(user_id: int):
     with get_conn() as conn:
         with conn.cursor() as cur:

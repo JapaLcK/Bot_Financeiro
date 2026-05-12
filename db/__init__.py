@@ -162,6 +162,7 @@ from .cards import (
     monthly_summary_credit_debit,
     import_credit_ofx_bulk,
     consolidate_duplicate_bills,
+    rebuild_bill_totals,
     get_installment_group_summaries,
 )
 
@@ -321,7 +322,7 @@ __all__ = [
     "get_open_bill_summary", "pay_bill_amount", "close_bill", "get_next_bill_summary",
     "list_open_bills", "list_credit_card_due_reminders", "list_installment_groups",
     "monthly_summary_credit_debit", "import_credit_ofx_bulk", "consolidate_duplicate_bills",
-    "get_installment_group_summaries",
+    "get_installment_group_summaries", "rebuild_bill_totals",
     # open finance
     "create_mock_open_finance_connection", "get_open_finance_snapshot",
     "disconnect_open_finance_connection", "save_pluggy_open_finance_item",

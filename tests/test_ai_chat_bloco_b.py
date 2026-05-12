@@ -248,6 +248,71 @@ def test_list_open_bills_reconcilia_zumbi_com_saldo(user_id):
     assert row["status"] == "open"
 
 
+def test_rebuild_bill_totals_recalcula_e_reabre(user_id):
+    """Helper de reconciliação forte — usado pra reparar DB inconsistente
+    em prod. Recalcula `total` somando credit_transactions reais e reabre
+    bills com saldo devedor.
+
+    Cenário: bill com total fora de sincronia com a soma das transações
+    + status='paid' indevido.
+    """
+    import db
+
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    db.add_launch_and_update_balance(user_id, "receita", 500, None, "seed")
+
+    _, _, bill_id = db.add_credit_purchase(
+        user_id, card_id, 100, "outros", "compra", date.today(),
+    )
+
+    # Bagunça o estado: total fica errado E status virou 'paid'.
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update credit_bills set total = 0, status='paid', paid_at=now() "
+                "where id=%s",
+                (bill_id,),
+            )
+        conn.commit()
+
+    # Pré-condição: bill bagunçada.
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select total, status from credit_bills where id=%s", (bill_id,))
+            row = cur.fetchone()
+    assert float(row["total"]) == 0.0
+    assert row["status"] == "paid"
+
+    # Reconcilia.
+    out = db.rebuild_bill_totals(user_id)
+    assert out["totals_updated"] >= 1
+    assert out["reopened"] >= 1
+
+    # Pós: total recalculado, status reaberto.
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select total, status, paid_at from credit_bills where id=%s", (bill_id,))
+            row = cur.fetchone()
+    assert float(row["total"]) == 100.0
+    assert row["status"] == "open"
+    assert row["paid_at"] is None
+
+
+def test_rebuild_bill_totals_idempotente(user_id):
+    """Rodar 2x não muda nada na 2ª passada."""
+    import db
+
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    db.add_launch_and_update_balance(user_id, "receita", 500, None, "seed")
+    db.add_credit_purchase(user_id, card_id, 100, "outros", "compra", date.today())
+
+    db.rebuild_bill_totals(user_id)
+    out2 = db.rebuild_bill_totals(user_id)
+    assert out2 == {"totals_updated": 0, "reopened": 0}
+
+
 def test_forecast_next_bill_pega_open_mais_proxima_nao_mais_distante(user_id):
     """
     Bug visto em prod: parcelei 500 em 5 → forecast_next_bill retornou
