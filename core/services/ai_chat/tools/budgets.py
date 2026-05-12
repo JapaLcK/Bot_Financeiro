@@ -202,8 +202,21 @@ def _set_budget_execute(user_id: int, args: dict[str, Any]) -> str:
             "_confirmed": True,
         }
         db.ai_set_pending_action(user_id, "set_budget", pending_args, summary)
+
+        # Se o user digitou diferente da canônica (typo aceito via fuzzy,
+        # variação de acento/case ignorada pela normalização), avisa
+        # explicitamente — senão ele pode achar que tá criando categoria
+        # nova quando na verdade vai atualizar uma existente.
+        raw_clean = (raw_cat or "").strip()
+        intro = f"🐷 Já tem orçamento de R$ {existing['budget']:.2f} em *{canon}*."
+        if raw_clean and raw_clean.lower() != canon.lower():
+            intro = (
+                f"🐷 Você digitou *{raw_clean}* — tratei como *{canon}* "
+                f"(mesma categoria pra mim). Já tem orçamento de "
+                f"R$ {existing['budget']:.2f} aí."
+            )
         return (
-            f"🐷 Já tem orçamento de R$ {existing['budget']:.2f} em *{canon}*.\n\n"
+            f"{intro}\n\n"
             f"Atualizar pra R$ {budget:.2f}?\n\n"
             f"Confirma com *sim* ou cancela com *não*."
         )

@@ -135,6 +135,28 @@ def test_set_budget_confirmed_executa(user_id):
     assert db.get_budget(user_id, "alimentação")["budget"] == 800.0
 
 
+def test_set_budget_update_aviso_quando_input_difere_da_canonica(user_id):
+    """User digitou 'alimentacao' (sem acento), canônica é 'alimentação'.
+    Confirmação deve avisar explicitamente que foi normalizada — senão
+    user pode achar que tá criando nova quando vai atualizar existente.
+    """
+    db.upsert_budget(user_id, "alimentação", 500)
+    msg = _set_budget_execute(user_id, {"categoria": "alimentacao", "budget": 800})
+    assert "Você digitou" in msg
+    assert "alimentacao" in msg  # input bruto
+    assert "alimentação" in msg  # canônica
+    assert "Atualizar" in msg
+
+
+def test_set_budget_update_sem_aviso_quando_input_bate_canonica(user_id):
+    """User digitou exatamente a canônica — mensagem padrão, sem aviso de tradução."""
+    db.upsert_budget(user_id, "alimentação", 500)
+    msg = _set_budget_execute(user_id, {"categoria": "alimentação", "budget": 800})
+    assert "Você digitou" not in msg
+    assert "Já tem orçamento" in msg
+    assert "Atualizar" in msg
+
+
 def test_set_budget_budget_zero_rejeita(user_id):
     msg = _set_budget_execute(user_id, {"categoria": "x", "budget": 0})
     assert "maior que zero" in msg
