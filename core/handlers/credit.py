@@ -598,12 +598,18 @@ def _create_installments(
             target_hint=nota,
             reason="manual",
         )
+        # Valor por parcela arredondado pra exibição (último ajuste de centavos
+        # fica na última parcela; aqui mostramos o nominal pra UX limpa).
+        v_parc = valor / n if n else valor
+        code = _group_code(group_id)
         return (
-            f"💳 Parcelado no **{resolved_name}**: {fmt_brl(valor)} em {n}x\n"
-            f"📝 {nota}\n"
-            f"📌 Total lançado: {fmt_brl(total)}\n"
-            f"🔢 Código: **{_group_code(group_id)}**\n"
-            f"🗑️ Para apagar: `apagar {_group_code(group_id)}`"
+            f"✅ **Parcelamento Registrado!**\n\n"
+            f"📝 **Descrição:** {nota}\n"
+            f"🛍️ **Categoria:** {categoria}\n"
+            f"💳 **Valor:** {n}x de {fmt_brl(v_parc)} (total {fmt_brl(total)})\n"
+            f"🪪 **Cartão:** {resolved_name}\n"
+            f"⚙️ **Código:** {code}\n\n"
+            f"Pra apagar: `apagar {code}`"
         )
     except Exception as e:
         return f"❌ Erro ao parcelar no cartão: {e}"
@@ -872,13 +878,13 @@ def _group_code(group_id) -> str:
 def _format_credit_purchase_success(card_label: str, valor: float, purchased_at, due: float, tx_id: int) -> str:
     code = _purchase_code(tx_id)
     return (
-        f"💳 **Compra no crédito registrada**\n"
-        f"🪪 Cartão: **{card_label}**\n"
-        f"💰 Valor: {fmt_brl(valor)}\n"
-        f"📅 Data da compra: {fmt_br(purchased_at)}\n"
-        f"📌 Fatura atual: {fmt_brl(due)}\n"
-        f"🔢 Código da compra: **{code}**\n"
-        f"🗑️ Para apagar: `apagar {code}`"
+        f"✅ **Compra no Crédito Registrada!**\n\n"
+        f"💰 **Valor:** {fmt_brl(valor)}\n"
+        f"🪪 **Cartão:** {card_label}\n"
+        f"📅 **Data:** {fmt_br(purchased_at)}\n"
+        f"📌 **Fatura atual:** {fmt_brl(due)}\n"
+        f"⚙️ **Código:** {code}\n\n"
+        f"Pra apagar: `apagar {code}`"
     )
 
 

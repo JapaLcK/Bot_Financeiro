@@ -24,9 +24,18 @@ from ._base import Tool
 logger = logging.getLogger(__name__)
 
 
-_FALLBACK_MESSAGE = (
-    "🐷 Isso tá além do que consigo te dar aqui — "
-    "dá uma olhada no dashboard: https://pigbankai.com/app"
+_FALLBACK_BASE = (
+    "🐷 Isso tá além do que consigo te dar aqui."
+)
+
+_FALLBACK_ALTERNATIVES = (
+    "Posso te ajudar com:\n"
+    "• Registrar gasto/receita ('gastei 50 mercado')\n"
+    "• Ver saldo e maiores gastos do mês\n"
+    "• Top categorias / últimos lançamentos\n"
+    "• Apagar/editar lançamentos\n"
+    "• Faturas e limite de cartão\n\n"
+    "Pra análises mais profundas, dá uma olhada no dashboard: https://pigbankai.com/app"
 )
 
 
@@ -40,7 +49,7 @@ def _report_out_of_scope_execute(user_id: int, args: dict[str, Any]) -> str:
         # Telemetria silenciosa — não pode quebrar a resposta pro user.
         logger.warning("falha ao logar fallback: %s", e)
 
-    return _FALLBACK_MESSAGE
+    return f"{_FALLBACK_BASE}\n\n{_FALLBACK_ALTERNATIVES}"
 
 
 TOOLS: list[Tool] = [

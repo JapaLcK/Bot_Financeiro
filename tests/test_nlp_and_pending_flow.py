@@ -140,8 +140,8 @@ def test_route_gasto_no_cartao_nao_debita_saldo(user_id):
 
     response = route(classify(msg.text), msg)
 
-    assert "Compra no crédito registrada" in response
-    assert "Código da compra" in response
+    assert "Compra no Crédito Registrada" in response
+    assert "Código:" in response
     assert get_balance(user_id) == 0
     bill, _items = get_open_bill_summary(user_id, card_id, as_of=date.today())
     assert float(bill["total"]) == 150.0
@@ -154,8 +154,8 @@ def test_quick_entry_gasto_no_cartao_nao_debita_saldo(user_id):
     response = handle_quick_entry(user_id, "gastei 90 no cartao nubank")
 
     assert response is not None
-    assert "Compra no crédito registrada" in response.text
-    assert "Código da compra" in response.text
+    assert "Compra no Crédito Registrada" in response.text
+    assert "Código:" in response.text
     assert get_balance(user_id) == 0
     bill, _items = get_open_bill_summary(user_id, card_id, as_of=date.today())
     assert float(bill["total"]) == 90.0

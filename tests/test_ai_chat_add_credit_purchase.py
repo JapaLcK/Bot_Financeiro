@@ -29,8 +29,8 @@ def test_execute_compra_simples_no_cartao_default(user_id):
         "descricao": "Pagamento Claro",
     })
 
-    assert "💳" in msg
-    assert "Compra no crédito registrada" in msg
+    assert "✅" in msg
+    assert "Compra no Crédito Registrada" in msg
     assert "Nubank" in msg
     assert "R$ 44,90" in msg
 
@@ -59,7 +59,7 @@ def test_execute_compra_parcelada(user_id):
         "parcelas": 3,
     })
 
-    assert "Parcelado" in msg
+    assert "Parcelamento Registrado" in msg
     assert "3x" in msg
     assert "R$ 300,00" in msg
 
@@ -74,8 +74,8 @@ def test_execute_parcelas_1_eh_a_vista(user_id):
         "parcelas": 1,
     })
 
-    assert "Compra no crédito registrada" in msg
-    assert "Parcelado" not in msg
+    assert "Compra no Crédito Registrada" in msg
+    assert "Parcelamento" not in msg
 
 
 def test_execute_valor_zero_nao_escreve(user_id):
@@ -135,7 +135,7 @@ def test_execute_consistente_com_handler_tradicional(user_id):
         )
 
         # Linha de "Cartão: Nubank" e "Valor: R$ 75,00" devem aparecer iguais
-        for marker in ("Cartão", "Nubank", "R$ 75,00", "Compra no crédito"):
+        for marker in ("Cartão", "Nubank", "R$ 75,00", "Compra no Crédito"):
             assert marker in msg_ia
             assert marker in msg_handler
     finally:
@@ -162,5 +162,5 @@ def test_handler_tradicional_aceita_credito_com_acento(user_id):
 
     assert msg_sem_acento is not None
     assert msg_com_acento is not None
-    assert "Compra no crédito registrada" in msg_sem_acento
-    assert "Compra no crédito registrada" in msg_com_acento
+    assert "Compra no Crédito Registrada" in msg_sem_acento
+    assert "Compra no Crédito Registrada" in msg_com_acento

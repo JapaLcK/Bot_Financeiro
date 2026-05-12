@@ -27,6 +27,7 @@ def test_report_out_of_scope_grava_log_e_devolve_msg_padrao(user_id):
         CURRENT_USER_MESSAGE.reset(token)
 
     assert "além do que consigo" in msg
+    assert "Posso te ajudar com" in msg
     assert "dashboard" in msg
 
     logs = _read_logs(user_id)
