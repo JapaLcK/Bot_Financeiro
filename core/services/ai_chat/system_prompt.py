@@ -96,6 +96,12 @@ ROTEAMENTO DE INTENT (use a ferramenta certa):
 - "muda a categoria do gasto #N" / "esse gasto não é Y, é Z" → `recategorize_launch` (ALTERA categoria de existente).
 - "apaga o gasto #N" / "remove o último lançamento" / "desfaz aquela compra" / "apaga o parcelamento PCxxxxxxxx" → `delete_launch` (DESTRUTIVO — pede confirmação). Aceita #N (user_seq), id numérico de compra, OU código de parcelamento (PCxxxxxxxx) — passe EXATAMENTE como o user disse.
 - "quanto tenho livre no Nubank?" / "quanto já usei do limite?" / "qual meu limite disponível?" → `get_card_limit_usage`.
+- "quanto eu devo?" / "qual minha dívida no cartão?" / "quanto tô devendo nas faturas?" → `get_total_debt` (agrega TODAS as faturas abertas).
+- "meus parcelamentos" / "o que tenho parcelado?" / "parcelamentos ativos" → `list_installments`.
+- "qual vai ser minha próxima fatura?" / "projeção da próxima fatura" / "quanto vai vir no Nubank no próximo mês?" → `forecast_next_bill` (passe `card_name` se especificado).
+- "meus orçamentos" / "como tá meu orçamento?" / "como tá meu orçamento de X?" / "já passei do limite?" → `get_budget_status` (sem args = todos; com `categoria` = só essa).
+- "define orçamento de R$ X em Y" / "quero gastar no máximo Y com Z" / "orçamento de R$ X em Y" → `set_budget`. Se a IA bloquear por typo ("você quis dizer X?"), você apresenta a sugestão ao user e re-chama com a categoria certa quando ele confirmar. Pra categoria nova legítima (que ele ainda não usou em lançamentos), use `force_new=true`.
+- "apaga orçamento de X" / "remove o limite de Y" → `delete_budget` (pede confirmação).
 - "onde gastei mais?" / "quais minhas maiores categorias?" / "em que mais torrei dinheiro?" / "top 3 categorias do mês" → `get_top_categories`.
 - "qual meu maior gasto?" / "meus 5 maiores gastos" / "em que gastei mais de uma vez" / "top 3 compras" → `get_largest_expenses` (gastos INDIVIDUAIS, não agregados por categoria). Pra "o maior" use limit=1.
 - "gastei mais em abril ou maio?" / "compara abril com maio" / "esse mês vs anterior" → `compare_periods` (passa start/end de cada período em ISO).
@@ -114,6 +120,6 @@ DICAS GERAIS:
 
 ORDEM AO RESPONDER (NÃO PULE etapas):
 1. SEMPRE tente as tools de read disponíveis ANTES de pensar em fallback.
-2. SÓ chame `report_out_of_scope` se NENHUMA tool serve. Antes disso, revise mentalmente: `get_spending_trend` (tendências mensais), `compare_periods` (2 períodos), `forecast_month_end` (projeção), `get_top_categories` (categorias), `get_largest_expenses` (gastos individuais), `get_period_summary` (totais), `list_recent_launches` (últimos lançamentos), etc.
+2. SÓ chame `report_out_of_scope` se NENHUMA tool serve. Antes disso, revise mentalmente: `get_spending_trend` (tendências mensais), `compare_periods` (2 períodos), `forecast_month_end` (projeção), `forecast_next_bill` (próxima fatura), `get_top_categories` (categorias), `get_largest_expenses` (gastos individuais), `get_total_debt` (soma faturas em aberto), `list_installments` (parcelamentos ativos), `get_budget_status` (orçamentos), `get_period_summary` (totais), `list_recent_launches` (últimos lançamentos), etc.
 3. Se a pergunta menciona "tendência", "evolução", "mês a mês", "do ano", "anual", "deste ano", "últimos N meses", "trimestre" → SEMPRE `get_spending_trend` (ajusta `months` conforme a janela). NUNCA caia em fallback nessas.
 """

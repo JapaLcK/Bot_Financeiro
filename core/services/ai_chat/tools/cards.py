@@ -5,6 +5,10 @@ Read:
   - list_cards: cartões cadastrados (nome, fechamento, vencimento, default)
   - get_open_bill: fatura em aberto de um cartão (total, pagado, itens)
   - get_card_limit_usage: limite, usado e disponível de um cartão
+  - get_total_debt: soma das faturas em aberto de TODOS os cartões
+  - list_installments: parcelamentos ativos (com parcelas pendentes)
+  - forecast_next_bill: projeção da próxima fatura (já considera parcelas
+    futuras, que ficam materializadas no DB ao registrar uma compra)
 
 Write:
   - add_credit_purchase (auto-execute): registra compra na fatura, opcionalmente
@@ -128,6 +132,125 @@ def _get_card_limit_usage(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         "used": used,
         "available": available,
         "used_pct": round(100 * used / limit, 1) if limit > 0 else 0.0,
+    }
+
+
+# ─── Read: get_total_debt ───────────────────────────────────────────────────
+
+def _get_total_debt(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    """Soma o que falta pagar de TODAS as faturas em aberto.
+
+    `remaining = total - paid_amount`, nunca negativo. Cartão sem fatura
+    aberta simplesmente não aparece. Útil pra "quanto devo no cartão?"
+    sem precisar perguntar cartão por cartão.
+    """
+    bills = db.list_open_bills(user_id)
+    items = []
+    total = 0.0
+    for b in bills:
+        remaining = max(0.0, float(b.get("total") or 0) - float(b.get("paid_amount") or 0))
+        if remaining <= 0:
+            continue
+        total += remaining
+        items.append({
+            "card_name": b.get("card_name"),
+            "bill_id": b.get("id"),
+            "period_start": b["period_start"].isoformat() if b.get("period_start") else None,
+            "period_end": b["period_end"].isoformat() if b.get("period_end") else None,
+            "total": float(b.get("total") or 0),
+            "paid": float(b.get("paid_amount") or 0),
+            "remaining": remaining,
+        })
+    return {
+        "total_debt": round(total, 2),
+        "bills": items,
+        "count": len(items),
+    }
+
+
+# ─── Read: list_installments ────────────────────────────────────────────────
+
+def _list_installments(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    """Parcelamentos ativos do user (com pelo menos 1 parcela pendente).
+
+    Por padrão filtra `only_pending=True` — só mostra os que ainda têm
+    parcela a vencer. Útil pra "meus parcelamentos?", "o que tenho parcelado?".
+    """
+    only_pending = bool(args.get("only_pending", True))
+    try:
+        limit = int(args.get("limit") or 15)
+    except (TypeError, ValueError):
+        limit = 15
+    limit = max(1, min(limit, 50))
+
+    rows = db.list_installment_groups(user_id, limit=limit)
+    groups = []
+    for r in rows:
+        n_pending = int(r.get("n_pending") or 0)
+        if only_pending and n_pending == 0:
+            continue
+        groups.append({
+            "group_id": r.get("group_id"),
+            "card_name": r.get("card_name"),
+            "nota": r.get("nota"),
+            "n_total": int(r.get("n_total") or 0),
+            "n_pending": n_pending,
+            "total": float(r.get("total") or 0),
+            "total_pending": float(r.get("total_pending") or 0),
+            "last_purchase": r["last_purchase"].isoformat() if r.get("last_purchase") else None,
+        })
+    return {
+        "groups": groups,
+        "count": len(groups),
+    }
+
+
+# ─── Read: forecast_next_bill ───────────────────────────────────────────────
+
+def _forecast_next_bill(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    """Projeção da PRÓXIMA fatura, por cartão e total.
+
+    Parcelamentos já materializaram registros nas bills futuras quando
+    a compra foi feita — `get_next_bill_summary` simplesmente lê o
+    período seguinte ao último período registrado. Se filtrar por
+    `card_name`, retorna só esse cartão.
+    """
+    card_name = (args.get("card_name") or "").strip() or None
+
+    if card_name:
+        card_id = db.get_card_id_by_name(user_id, card_name)
+        if not card_id:
+            return {"error": f"Não achei cartão com nome '{card_name}'."}
+        cards = [db.get_card_by_id(user_id, int(card_id))]
+    else:
+        cards = db.list_cards(user_id)
+
+    items = []
+    total = 0.0
+    for c in cards:
+        if not c:
+            continue
+        cid = int(c["id"])
+        try:
+            bill = db.get_next_bill_summary(user_id, cid)
+        except Exception:
+            continue
+        if not bill:
+            continue
+        amount = float(bill.get("total") or 0)
+        total += amount
+        items.append({
+            "card_name": c.get("name"),
+            "bill_id": bill.get("id"),
+            "period_start": bill["period_start"].isoformat() if bill.get("period_start") else None,
+            "period_end": bill["period_end"].isoformat() if bill.get("period_end") else None,
+            "total": amount,
+        })
+
+    return {
+        "total": round(total, 2),
+        "cards": items,
+        "count": len(items),
     }
 
 
@@ -265,6 +388,85 @@ TOOLS: list[Tool] = [
         },
         is_write=False,
         execute=_get_card_limit_usage,
+    ),
+    Tool(
+        schema={
+            "type": "function",
+            "function": {
+                "name": "get_total_debt",
+                "description": (
+                    "Soma o que falta pagar de TODAS as faturas em aberto, "
+                    "agregando todos os cartões. Use SEMPRE pra 'quanto eu "
+                    "devo?', 'qual minha dívida total no cartão?', 'quanto "
+                    "tô devendo nas faturas?', 'minha dívida hoje'. Retorna "
+                    "o total e o detalhe por cartão. Sem args."
+                ),
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        is_write=False,
+        execute=_get_total_debt,
+    ),
+    Tool(
+        schema={
+            "type": "function",
+            "function": {
+                "name": "list_installments",
+                "description": (
+                    "Lista parcelamentos do user — por padrão só os com "
+                    "parcelas ainda a vencer (`only_pending=true`). Use pra "
+                    "'meus parcelamentos', 'o que tenho parcelado?', 'quais "
+                    "parcelamentos ativos?'. Retorna cartão, descrição, "
+                    "total, total pendente e quantas parcelas faltam."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "only_pending": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Se true (padrão), filtra os que ainda têm parcela a pagar.",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 50,
+                            "default": 15,
+                            "description": "Quantos grupos retornar (1–50, padrão 15).",
+                        },
+                    },
+                },
+            },
+        },
+        is_write=False,
+        execute=_list_installments,
+    ),
+    Tool(
+        schema={
+            "type": "function",
+            "function": {
+                "name": "forecast_next_bill",
+                "description": (
+                    "Projeção da PRÓXIMA fatura — por cartão e total. "
+                    "Já considera parcelas futuras (que foram registradas "
+                    "na hora da compra). Use pra 'quanto vai vir na próxima "
+                    "fatura?', 'projeção do próximo mês no cartão', 'qual "
+                    "vai ser minha próxima fatura?'. Se card_name for "
+                    "passado, retorna só esse cartão; senão, agrega todos."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "card_name": {
+                            "type": "string",
+                            "description": "Nome do cartão (ex: 'Nubank'). Omitir agrega todos.",
+                        },
+                    },
+                },
+            },
+        },
+        is_write=False,
+        execute=_forecast_next_bill,
     ),
     Tool(
         schema={

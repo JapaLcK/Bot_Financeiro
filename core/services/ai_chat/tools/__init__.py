@@ -15,12 +15,13 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from . import balance, cards, categories, investments, launches, meta, pockets, reports
+from . import balance, budgets, cards, categories, investments, launches, meta, pockets, reports
 from ._base import Tool
 
 
 _ALL_TOOLS: list[Tool] = [
     *balance.TOOLS,
+    *budgets.TOOLS,
     *cards.TOOLS,
     *categories.TOOLS,
     *investments.TOOLS,
