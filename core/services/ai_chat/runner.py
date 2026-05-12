@@ -31,6 +31,7 @@ import db
 from ._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
 from .confirmations import is_cancel, is_confirm
 from .history import trim_history_for_openai
+from .sanitizer import detect_trend_window, strip_markdown_headers
 from .system_prompt import SYSTEM_PROMPT
 from .tools import SCHEMAS, WRITE_TOOL_NAMES, get_tool
 
@@ -127,6 +128,11 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
 
     history = db.ai_get_recent_messages(user_id, limit=db.AI_DEFAULT_CONTEXT_WINDOW)
     history = trim_history_for_openai(history)
+    # Limpa `###` que possa ter ficado em mensagens antigas — senão o LLM
+    # faz few-shot a partir do próprio histórico e replica o erro.
+    for m in history:
+        if m.get("role") == "assistant" and isinstance(m.get("content"), str):
+            m["content"] = strip_markdown_headers(m["content"])
 
     today_str = date.today().strftime("%d/%m/%Y")
     system_with_date = SYSTEM_PROMPT + f"\n\nData de hoje: {today_str}."
@@ -174,27 +180,39 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]]) -> str:
         tool_calls = getattr(msg, "tool_calls", None) or []
 
         if not tool_calls:
-            return (msg.content or "").strip() or ERROR_MSG
+            final = strip_markdown_headers((msg.content or "").strip())
+            return final or ERROR_MSG
 
-        # Persistir assistant message com tool_calls
+        # Persistir assistant message com tool_calls — limpa `###`
+        # também aqui pra não contaminar histórico futuro.
+        cleaned_content = strip_markdown_headers(msg.content)
         tool_calls_dicts = [tc.model_dump() for tc in tool_calls]
+
+        # Override defensivo (Bug 2): se o LLM escolheu `report_out_of_scope`
+        # mas o user pediu tendência ("tendência deste ano", "evolução mês a
+        # mês"...), reescreve o tool_call ANTES de persistir/despachar.
+        # Reescrever antes da persistência evita mismatch entre o `name` no
+        # assistant.tool_calls e a tool response que de fato roda.
+        _maybe_override_trend(tool_calls_dicts, user_id)
+
         db.ai_append_message(
             user_id,
             "assistant",
-            msg.content,
+            cleaned_content,
             tool_calls=tool_calls_dicts,
         )
         messages.append({
             "role": "assistant",
-            "content": msg.content,
+            "content": cleaned_content,
             "tool_calls": tool_calls_dicts,
         })
 
         terminal_msg: str | None = None
-        for tc in tool_calls:
-            name = tc.function.name
+        for tc_dict in tool_calls_dicts:
+            tc_id = tc_dict["id"]
+            name = tc_dict["function"]["name"]
             try:
-                args = json.loads(tc.function.arguments or "{}")
+                args = json.loads(tc_dict["function"]["arguments"] or "{}")
             except Exception:
                 args = {}
 
@@ -204,13 +222,13 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]]) -> str:
                 user_id,
                 "tool",
                 history_content,
-                tool_call_id=tc.id,
+                tool_call_id=tc_id,
                 tool_name=name,
             )
             messages.append({
                 "role": "tool",
                 "content": history_content,
-                "tool_call_id": tc.id,
+                "tool_call_id": tc_id,
                 "name": name,
             })
 
@@ -224,6 +242,31 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]]) -> str:
 
     logger.warning("MAX_TOOL_LOOPS atingido pra user %s", user_id)
     return ERROR_MSG
+
+
+def _maybe_override_trend(tool_calls_dicts: list[dict[str, Any]], user_id: int) -> None:
+    """Reescreve `report_out_of_scope` → `get_spending_trend` in-place.
+
+    Pro Bug 2: o LLM ignora a regra de tendência mesmo com prompt reforçado.
+    Quando o user pediu tendência (heurística em `detect_trend_window`) E o
+    LLM escolheu fallback, troca o `function.name`/`function.arguments` no
+    próprio dict. Mantém o `id` original pra preservar coerência com a tool
+    response que vai vir em seguida.
+    """
+    user_text = CURRENT_USER_MESSAGE.get()
+    months = detect_trend_window(user_text)
+    if months is None:
+        return
+    for tc in tool_calls_dicts:
+        fn = tc.get("function") or {}
+        if fn.get("name") == "report_out_of_scope":
+            logger.info(
+                "ai_chat: override report_out_of_scope → get_spending_trend(months=%d) user=%s",
+                months,
+                user_id,
+            )
+            fn["name"] = "get_spending_trend"
+            fn["arguments"] = json.dumps({"months": months})
 
 
 def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, str | None]:
