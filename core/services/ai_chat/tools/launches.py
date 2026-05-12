@@ -184,17 +184,18 @@ def _get_spending_trend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _forecast_month_end(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    """Projeção do fim do mês corrente baseado no ritmo de saídas do caixa.
+    """Projeção do fim do mês corrente.
 
-    Algoritmo: ritmo_diario = saídas_totais / dias_decorridos.
-    Projeção = ritmo_diario * dias_totais_do_mes.
+    Modelo:
+      - Despesa real → escala pelo ritmo diário (gastos do dia-a-dia).
+      - Aportes → trata como CONSTANTE (eventos pontuais, não fluxo).
+        Soma só o que já foi feito; não projeta novos aportes futuros.
+      - Receita → assume mesma (pontual, recibos não acontecem em ritmo).
 
-    `saidas_totais` = despesa real + aportes (movimentação interna que sai
-    do caixa). Aportes contam porque debitam a conta corrente, mesmo não
-    sendo "gasto" no sentido contábil — saldo projetado precisa refletir
-    realidade do caixa.
-
-    Receita: assume mesmo total (não projeta — recibos são pontuais).
+    Saídas totais = despesa real projetada + aportes já feitos.
+    `fluxo_do_mes` (parcial) = receita - despesa - aportes do MÊS CORRENTE
+    (não confundir com saldo da conta corrente, que reflete meses
+    anteriores também).
     """
     from calendar import monthrange
 
@@ -204,31 +205,45 @@ def _forecast_month_end(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     days_elapsed = today.day
 
     sum_current = db.get_summary_by_period(user_id, month_start, today)
-    despesa_real = float(sum_current.get("despesa") or 0)
+    despesa_real_atual = float(sum_current.get("despesa") or 0)
     receita_atual = float(sum_current.get("receita") or 0)
     aportes_atual = float(db.get_internal_movement_total(user_id, month_start, today))
 
-    saidas_atual = despesa_real + aportes_atual
+    saidas_atual = despesa_real_atual + aportes_atual
 
+    # Projeção: SÓ despesa escala por ritmo. Aportes ficam constantes
+    # (eventos pontuais, não fluxo contínuo).
     if days_elapsed <= 0:
-        saidas_projetadas = saidas_atual
+        despesa_projetada = despesa_real_atual
     else:
-        ritmo_diario = saidas_atual / days_elapsed
-        saidas_projetadas = ritmo_diario * days_in_month
+        ritmo_diario = despesa_real_atual / days_elapsed
+        despesa_projetada = ritmo_diario * days_in_month
+
+    saidas_projetadas = despesa_projetada + aportes_atual
 
     return {
         "today": today.isoformat(),
         "month_start": month_start.isoformat(),
         "days_elapsed": days_elapsed,
         "days_in_month": days_in_month,
-        "despesa_real_atual": round(despesa_real, 2),
+        "despesa_real_atual": round(despesa_real_atual, 2),
         "aportes_atual": round(aportes_atual, 2),
         "saidas_atual": round(saidas_atual, 2),
         "receita_atual": round(receita_atual, 2),
-        "saldo_parcial": round(receita_atual - saidas_atual, 2),
+        # Fluxo do mês = receita - saidas DO MÊS CORRENTE.
+        # NÃO é saldo da conta (que reflete histórico anterior tb).
+        "fluxo_do_mes": round(receita_atual - saidas_atual, 2),
+        "despesa_projetada_fim_do_mes": round(despesa_projetada, 2),
+        "aportes_projetados_fim_do_mes": round(aportes_atual, 2),  # constante
         "saidas_projetadas_fim_do_mes": round(saidas_projetadas, 2),
         "saldo_projetado": round(receita_atual - saidas_projetadas, 2),
         "vai_fechar_negativo": (receita_atual - saidas_projetadas) < 0,
+        "nota_metodologia": (
+            "Despesa projetada por ritmo (extrapola dia-a-dia). "
+            "Aportes são eventos pontuais — somados como constante, "
+            "não projetados. `fluxo_do_mes` é o saldo do MÊS, não o "
+            "saldo da conta corrente."
+        ),
     }
 
 
@@ -564,9 +579,16 @@ TOOLS: list[Tool] = [
                 "name": "get_spending_trend",
                 "description": (
                     "Retorna a tendência mensal (totais de despesa e receita) "
-                    "dos últimos N meses, incluindo o atual. Use pra "
-                    "'tendência últimos 6 meses', 'evolução dos gastos', "
-                    "'gastos mês a mês'."
+                    "dos últimos N meses, incluindo o atual. JÁ inclui análise "
+                    "calculada (média, saldo médio, direção da tendência, "
+                    "variação %). USE SEMPRE QUE O USER PEDIR algo sobre "
+                    "histórico mensal, comparação no tempo ou direção dos "
+                    "gastos. Exemplos: 'tendência últimos 6 meses', 'tendência "
+                    "deste ano', 'como tá evoluindo meus gastos', 'meus gastos "
+                    "estão subindo ou caindo?', 'gastos mês a mês', 'evolução "
+                    "anual', 'meus últimos 3 meses', 'gastos do trimestre'. "
+                    "Pra 'deste ano' use months=12; pra 'trimestre' use "
+                    "months=3. Default é 6."
                 ),
                 "parameters": {
                     "type": "object",
@@ -591,12 +613,14 @@ TOOLS: list[Tool] = [
             "function": {
                 "name": "forecast_month_end",
                 "description": (
-                    "Projeta como o mês corrente vai fechar baseado no ritmo "
-                    "atual de saídas (despesa + aportes pra caixinha/investimento). "
-                    "Use pra 'no ritmo atual vou fechar no negativo?', "
-                    "'projeção do mês', 'vou estourar?'. Retorna despesa real, "
-                    "aportes, receita, saldo parcial e projetado. Aportes "
-                    "contam porque saem do caixa, mesmo sendo alocação."
+                    "Projeta como o mês corrente vai fechar. Use pra 'no ritmo "
+                    "atual vou fechar no negativo?', 'projeção do mês', 'vou "
+                    "estourar?'. Retorna despesa real, aportes, receita, "
+                    "fluxo do mês atual e projeções. IMPORTANTE pra mensagem: "
+                    "(1) `fluxo_do_mes` é o saldo do mês corrente, NÃO o saldo "
+                    "da conta corrente (que tem histórico). (2) Despesa é "
+                    "projetada por ritmo diário; aportes são CONSTANTES (eventos "
+                    "pontuais já feitos, não escalados). Mostra ambos separado."
                 ),
                 "parameters": {"type": "object", "properties": {}},
             },

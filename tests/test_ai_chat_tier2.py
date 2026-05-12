@@ -275,9 +275,9 @@ def test_forecast_month_end_projeta_baseado_em_ritmo(user_id):
     result = _forecast_month_end(user_id, {})
     assert result["despesa_real_atual"] == 100.0
     assert result["saidas_atual"] == 100.0  # sem aportes
-    # Projeção deve ser >= valor atual (mês continua)
-    assert result["saidas_projetadas_fim_do_mes"] >= 100.0
-    for key in ("days_elapsed", "days_in_month", "saldo_parcial", "vai_fechar_negativo"):
+    # Despesa projetada deve ser >= valor atual (ritmo escala)
+    assert result["despesa_projetada_fim_do_mes"] >= 100.0
+    for key in ("days_elapsed", "days_in_month", "fluxo_do_mes", "vai_fechar_negativo"):
         assert key in result
 
 
@@ -290,11 +290,9 @@ def test_forecast_month_end_vai_fechar_negativo(user_id):
     assert result["vai_fechar_negativo"] is True
 
 
-def test_forecast_month_end_conta_aportes_como_saida(user_id):
-    """Aporte de investimento é movimentação interna mas SAI do caixa —
-    forecast tem que contar pra refletir o saldo real."""
+def test_forecast_month_end_conta_aportes_no_fluxo_do_mes(user_id):
+    """Aporte de investimento entra no fluxo_do_mes (sai do caixa)."""
     db.add_launch_and_update_balance(user_id, "receita", 1000, None, "salario")
-    # Aporte de R$ 500 — não é despesa real, mas é alocação que tira do caixa
     db.add_launch_and_update_balance(
         user_id, "despesa", 500, "carteira", "aporte",
         categoria="investimento_aporte",
@@ -302,12 +300,38 @@ def test_forecast_month_end_conta_aportes_como_saida(user_id):
     )
 
     result = _forecast_month_end(user_id, {})
-    assert result["despesa_real_atual"] == 0.0  # nenhuma despesa real
+    assert result["despesa_real_atual"] == 0.0
     assert result["aportes_atual"] == 500.0
     assert result["saidas_atual"] == 500.0
     assert result["receita_atual"] == 1000.0
-    # Saldo parcial = 1000 - 500 = 500 (positivo)
-    assert result["saldo_parcial"] == 500.0
+    # fluxo_do_mes = receita - saidas do mês = 1000 - 500 = 500
+    assert result["fluxo_do_mes"] == 500.0
+
+
+def test_forecast_month_end_aportes_constantes_na_projecao(user_id):
+    """REGRESSION do bug do Lucas: aporte de R$ 300 nos primeiros dias do
+    mês NÃO deve escalar pelo ritmo (não projeta R$ 900 num mês de 30 dias).
+    Deve aparecer como constante R$ 300 nos aportes projetados."""
+    db.add_launch_and_update_balance(user_id, "receita", 5000, None, "salario")
+    # Aporte único de R$ 300
+    db.add_launch_and_update_balance(
+        user_id, "despesa", 300, "carteira", "aporte",
+        categoria="investimento_aporte",
+        is_internal_movement=True,
+    )
+    # Despesa real "comum" de R$ 50 — essa SIM escala
+    db.add_launch_and_update_balance(user_id, "despesa", 50, "x", "x", categoria="outros")
+
+    result = _forecast_month_end(user_id, {})
+    # Aportes projetados = aportes atuais (constante, NÃO escala)
+    assert result["aportes_projetados_fim_do_mes"] == 300.0
+    assert result["aportes_atual"] == 300.0
+    # Despesa projetada escala (será > 50 se days_elapsed < days_in_month)
+    if result["days_elapsed"] < result["days_in_month"]:
+        assert result["despesa_projetada_fim_do_mes"] > 50.0
+    # Saída total projetada = despesa projetada + aportes constantes
+    expected_total = result["despesa_projetada_fim_do_mes"] + 300.0
+    assert abs(result["saidas_projetadas_fim_do_mes"] - expected_total) < 0.01
 
 
 # ─── get_spending_trend summary (média, tendência) ──────────────────────────
