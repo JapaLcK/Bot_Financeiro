@@ -273,6 +273,81 @@ def get_summary_by_period(user_id: int, start_date: date, end_date: date):
     return _db_support.get_summary_by_period_impl(get_conn, ensure_user, user_id, start_date, end_date)
 
 
+def get_largest_expenses(
+    user_id: int,
+    start_date: date,
+    end_date: date,
+    limit: int = 5,
+):
+    """Top N maiores gastos INDIVIDUAIS no período (não agregados por categoria).
+
+    Difere de `get_top_expense_categories` que soma por categoria. Esta
+    retorna os lançamentos/compras de maior valor, um por um.
+
+    Fontes:
+      - launches.tipo='despesa' AND is_internal_movement=false
+      - credit_transactions onde is_refund=false
+
+    Retorna lista [{valor, categoria, descricao, data, fonte}].
+    `fonte` = 'launches' | 'credito' (frontend pode renderizar tag).
+    `descricao` = alvo (se launches) ou nota (se credito).
+    """
+    ensure_user(user_id)
+
+    start_dt = datetime.combine(start_date, datetime.min.time())
+    end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select valor, categoria, descricao, dt, fonte
+                from (
+                    select valor,
+                           coalesce(nullif(categoria, ''), 'outros') as categoria,
+                           coalesce(nullif(alvo, ''), nullif(nota, ''), '—') as descricao,
+                           criado_em::date as dt,
+                           'launches' as fonte
+                    from launches
+                    where user_id = %s
+                      and tipo = 'despesa'
+                      and is_internal_movement = false
+                      and criado_em >= %s and criado_em < %s
+                    union all
+                    select valor,
+                           coalesce(nullif(categoria, ''), 'outros') as categoria,
+                           coalesce(nullif(nota, ''), 'compra no crédito') as descricao,
+                           purchased_at as dt,
+                           'credito' as fonte
+                    from credit_transactions
+                    where user_id = %s
+                      and is_refund = false
+                      and purchased_at >= %s::date
+                      and purchased_at <= %s::date
+                ) agg
+                order by valor desc
+                limit %s
+                """,
+                (
+                    user_id, start_dt, end_excl,
+                    user_id, start_date, end_date,
+                    int(limit),
+                ),
+            )
+            rows = cur.fetchall()
+
+    return [
+        {
+            "valor": float(r["valor"] or 0),
+            "categoria": r["categoria"],
+            "descricao": r["descricao"],
+            "data": r["dt"].isoformat() if r.get("dt") else None,
+            "fonte": r["fonte"],
+        }
+        for r in rows
+    ]
+
+
 def get_top_expense_categories(
     user_id: int,
     start_date: date,

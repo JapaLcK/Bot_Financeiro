@@ -5,7 +5,10 @@ Cobre as tools Tier 2 da E2 (analítics que respondem perguntas como
 from datetime import date, datetime
 
 import db
-from core.services.ai_chat.tools.launches import _get_top_categories
+from core.services.ai_chat.tools.launches import (
+    _get_largest_expenses,
+    _get_top_categories,
+)
 
 
 # ─── get_top_categories ─────────────────────────────────────────────────────
@@ -93,6 +96,85 @@ def test_top_categories_end_anterior_a_start(user_id):
 def test_top_categories_vazio_quando_sem_gastos(user_id):
     result = _get_top_categories(user_id, {})
     assert result["categories"] == []
+    assert result["count"] == 0
+
+
+# ─── get_largest_expenses ───────────────────────────────────────────────────
+
+def test_largest_expenses_retorna_o_maior_individual(user_id):
+    """O caso real do Lucas: tem R$ 150, R$ 22, R$ 349 — maior é o de 349."""
+    db.add_launch_and_update_balance(user_id, "despesa", 150, "laranja", "Mandei 150 pra Laranja", categoria="outros")
+    db.add_launch_and_update_balance(user_id, "despesa", 22.46, "x", "x", categoria="outros")
+    db.add_launch_and_update_balance(user_id, "despesa", 349, "stanley", "stanley presente", categoria="lazer")
+
+    result = _get_largest_expenses(user_id, {"limit": 1})
+    assert len(result["expenses"]) == 1
+    top = result["expenses"][0]
+    assert top["valor"] == 349.0
+    assert top["categoria"] == "lazer"
+
+
+def test_largest_expenses_ordena_desc(user_id):
+    db.add_launch_and_update_balance(user_id, "despesa", 10, "a", "a", categoria="outros")
+    db.add_launch_and_update_balance(user_id, "despesa", 80, "b", "b", categoria="outros")
+    db.add_launch_and_update_balance(user_id, "despesa", 50, "c", "c", categoria="outros")
+
+    result = _get_largest_expenses(user_id, {})
+    values = [e["valor"] for e in result["expenses"]]
+    assert values == [80.0, 50.0, 10.0]
+
+
+def test_largest_expenses_inclui_credito(user_id):
+    """Compra no cartão deve aparecer junto com despesas normais."""
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    db.add_launch_and_update_balance(user_id, "despesa", 50, "x", "x", categoria="outros")
+    db.add_credit_purchase(user_id, card_id, 200, "lazer", "show", date.today())
+
+    result = _get_largest_expenses(user_id, {"limit": 2})
+    fontes = {e["fonte"] for e in result["expenses"]}
+    assert "credito" in fontes
+    assert "launches" in fontes
+    assert result["expenses"][0]["valor"] == 200.0
+    assert result["expenses"][0]["fonte"] == "credito"
+
+
+def test_largest_expenses_exclui_movimentacao_interna_e_refund(user_id):
+    """Aporte de investimento e reembolso de cartão não contam."""
+    db.add_launch_and_update_balance(
+        user_id, "despesa", 1000, "aporte", "aporte",
+        categoria="investimento_aporte", is_internal_movement=True,
+    )
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    db.add_credit_refund(
+        user_id=user_id, card_id=card_id, valor=500,
+        categoria="lazer", nota="estornado", purchased_at=date.today(),
+    )
+    db.add_launch_and_update_balance(user_id, "despesa", 50, "real", "real", categoria="outros")
+
+    result = _get_largest_expenses(user_id, {})
+    assert len(result["expenses"]) == 1
+    assert result["expenses"][0]["valor"] == 50.0
+
+
+def test_largest_expenses_respeita_limit(user_id):
+    for i in range(7):
+        db.add_launch_and_update_balance(
+            user_id, "despesa", 10 + i, f"d{i}", f"d{i}", categoria="outros",
+        )
+    result = _get_largest_expenses(user_id, {"limit": 3})
+    assert len(result["expenses"]) == 3
+
+
+def test_largest_expenses_end_anterior_a_start(user_id):
+    result = _get_largest_expenses(user_id, {"start_date": "2026-05-01", "end_date": "2026-04-01"})
+    assert "error" in result
+
+
+def test_largest_expenses_vazio_sem_gastos(user_id):
+    result = _get_largest_expenses(user_id, {})
+    assert result["expenses"] == []
     assert result["count"] == 0
 
 

@@ -5,6 +5,7 @@ Read:
   - list_recent_launches: últimos N lançamentos do user (default 10)
   - get_period_summary: soma de despesas e receitas em um período (default: mês corrente)
   - get_top_categories: top N categorias de gasto no período (despesas + cartão)
+  - get_largest_expenses: top N gastos INDIVIDUAIS (não agregados) no período
 
 Write (auto-executado, SEM confirmação):
   - add_launch: IA extrai os args, delega pra `core.handlers.launches.add_from_entities`
@@ -72,6 +73,29 @@ def _get_period_summary(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         "receita": float(summary.get("receita") or 0),
         "despesa": float(summary.get("despesa") or 0),
         "saldo_periodo": float(summary.get("receita") or 0) - float(summary.get("despesa") or 0),
+    }
+
+
+def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    today = date.today()
+    start = _parse_iso_date(args.get("start_date")) or today.replace(day=1)
+    end = _parse_iso_date(args.get("end_date")) or today
+
+    if end < start:
+        return {"error": "end_date anterior a start_date"}
+
+    try:
+        limit = int(args.get("limit") or 5)
+    except (TypeError, ValueError):
+        limit = 5
+    limit = max(1, min(limit, 20))
+
+    rows = db.get_largest_expenses(user_id, start, end, limit)
+    return {
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "expenses": rows,
+        "count": len(rows),
     }
 
 
@@ -332,6 +356,45 @@ TOOLS: list[Tool] = [
         },
         is_write=False,
         execute=_get_top_categories,
+    ),
+    Tool(
+        schema={
+            "type": "function",
+            "function": {
+                "name": "get_largest_expenses",
+                "description": (
+                    "Retorna os MAIORES GASTOS INDIVIDUAIS do user no "
+                    "período — um a um, não agregado. Diferente de "
+                    "`get_top_categories` (que soma por categoria). Use pra "
+                    "'qual meu maior gasto?', 'meus 5 maiores gastos do "
+                    "mês', 'top 3 compras', 'em que gastei mais de uma vez "
+                    "só'. Inclui despesas reais + compras no cartão. Sem "
+                    "datas, usa o mês corrente até hoje."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "start_date": {
+                            "type": "string",
+                            "description": "ISO 8601 (YYYY-MM-DD). Omita pra usar o primeiro dia do mês corrente.",
+                        },
+                        "end_date": {
+                            "type": "string",
+                            "description": "ISO 8601 (YYYY-MM-DD), inclusivo. Omita pra usar hoje.",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 20,
+                            "default": 5,
+                            "description": "Top N gastos (1 a 20, padrão 5). Use 1 pra 'qual meu maior gasto'.",
+                        },
+                    },
+                },
+            },
+        },
+        is_write=False,
+        execute=_get_largest_expenses,
     ),
     Tool(
         schema={
