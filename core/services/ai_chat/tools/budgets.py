@@ -94,9 +94,9 @@ def _resolve_category(
             suggestion = norm_map[close[0]]
             msg = (
                 f'🐷 Não achei "{cat}" nos teus lançamentos. '
-                f'Você quis dizer *{suggestion}*? '
-                f'Se sim, me confirma com a categoria certa. '
-                f'Se é uma categoria nova mesmo, repete com `force_new=true`.'
+                f'Você quis dizer *{suggestion}*?\n\n'
+                f'Manda *sim* pra usar essa, ou *é categoria nova* se quiser '
+                f'criar como você digitou.'
             )
             return (msg, "block")
 

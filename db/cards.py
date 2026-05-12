@@ -866,6 +866,24 @@ def get_next_bill_summary(user_id: int, card_id: int):
 def list_open_bills(user_id: int):
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # Reconciliação preguiçosa: bills marcadas como paid/closed que
+            # voltaram a ter saldo devedor (estorno, parcelamento que caiu
+            # no período de uma bill paga, edição de transação) precisam
+            # voltar pra `open` — senão somem da listagem mesmo devendo.
+            # Cobre casos onde o caller esqueceu de reabrir após mexer no
+            # `total`. Custo: UPDATE com filtro indexado, ~0 rows na maioria
+            # das vezes.
+            cur.execute(
+                """
+                update credit_bills
+                   set status='open', paid_at=null
+                 where user_id=%s
+                   and status in ('paid','closed')
+                   and total > coalesce(paid_amount, 0)
+                """,
+                (user_id,),
+            )
+
             cur.execute(
                 """
                 select b.id, b.card_id, c.name as card_name, b.period_start, b.period_end,
@@ -877,7 +895,9 @@ def list_open_bills(user_id: int):
                 """,
                 (user_id,),
             )
-            return cur.fetchall()
+            rows = cur.fetchall()
+        conn.commit()
+    return rows
 
 
 def list_credit_card_due_reminders(user_id: int, today: date):

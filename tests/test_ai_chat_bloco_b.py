@@ -192,3 +192,81 @@ def test_parcelamento_em_bill_paga_reabre_pra_open(user_id):
     out = _get_total_debt(user_id, {})
     bill_ids = {b["bill_id"] for b in out["bills"]}
     assert bill_id in bill_ids, "bill reaberta deve aparecer em get_total_debt"
+
+
+def test_list_open_bills_reconcilia_zumbi_com_saldo(user_id):
+    """
+    Reconciliação preguiçosa: bill que ficou status='paid' mas tem total
+    > paid_amount (por bug anterior, edição manual, etc) deve ser
+    REABERTA quando alguém chama list_open_bills.
+
+    Cobre casos onde o caller que escreveu na bill esqueceu de atualizar
+    o status — sem isso, dados antigos ficam "presos" mostrando dívida
+    menor do que é.
+    """
+    import db
+    today = date.today()
+
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    db.add_launch_and_update_balance(user_id, "receita", 500, None, "seed")
+
+    _, _, bill_id = db.add_credit_purchase(
+        user_id, card_id, 100, "outros", "compra", today,
+    )
+    db.pay_bill_amount(user_id, card_id, "Nubank", 100.0)
+
+    # Força estado inconsistente: total cresce sem reabrir (simula bug
+    # passado que possa ter deixado bills nesse estado em prod).
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update credit_bills set total = total + 50 where id=%s",
+                (bill_id,),
+            )
+        conn.commit()
+
+    # Pré-condição: bill está paid com total > paid
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select status, total, paid_amount from credit_bills where id=%s", (bill_id,))
+            row = cur.fetchone()
+    assert row["status"] == "paid"
+    assert float(row["total"]) == 150.0
+    assert float(row["paid_amount"]) == 100.0
+
+    # list_open_bills deve reconciliar e listar a bill
+    rows = db.list_open_bills(user_id)
+    bill_ids = {r["id"] for r in rows}
+    assert bill_id in bill_ids
+
+    # E o status no DB ficou 'open' depois da reconciliação
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select status from credit_bills where id=%s", (bill_id,))
+            row = cur.fetchone()
+    assert row["status"] == "open"
+
+
+def test_forecast_next_bill_pega_open_mais_proxima_nao_mais_distante(user_id):
+    """
+    Bug visto em prod: parcelei 500 em 5 → forecast_next_bill retornou
+    bill da PARCELA i=4 (mais distante) em vez da i=0 (próxima de hoje).
+
+    Fix: forecast lê list_open_bills (ordenada por period_end asc) e
+    pega a 1ª de cada cartão — sempre a mais próxima do today.
+    """
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    db.add_credit_purchase_installments(
+        user_id, card_id, 500, "outros", "tv", date.today(), installments=5
+    )
+
+    out = _forecast_next_bill(user_id, {})
+    assert out["count"] == 1  # 1 cartão
+    assert out["total"] == 100.0  # 1 parcela de 100, não 100 da última nem 500 do total
+
+    # A bill retornada deve ser a mais cedo (period_end mais próximo de hoje).
+    open_bills = db.list_open_bills(user_id)
+    expected_first_id = open_bills[0]["id"]
+    assert out["cards"][0]["bill_id"] == expected_first_id
