@@ -145,17 +145,55 @@ def _get_spending_trend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     months = max(1, min(months, 24))
 
     rows = db.get_spending_trend(user_id, months)
+
+    # Calcula análise: média, saldo médio, tendência (subindo/descendo/estável).
+    # Tendência olha o ÚLTIMO mês vs média dos anteriores — se variou +/-10%
+    # marca como subindo/descendo, senão estável.
+    summary = {
+        "media_despesa": 0.0,
+        "media_receita": 0.0,
+        "saldo_medio": 0.0,
+        "tendencia_despesa": "estavel",
+        "variacao_pct": 0.0,
+    }
+    if rows:
+        total_d = sum(r["despesa"] for r in rows)
+        total_r = sum(r["receita"] for r in rows)
+        n = len(rows)
+        summary["media_despesa"] = round(total_d / n, 2)
+        summary["media_receita"] = round(total_r / n, 2)
+        summary["saldo_medio"] = round((total_r - total_d) / n, 2)
+
+        if n >= 2:
+            anteriores = rows[:-1]
+            ultimo = rows[-1]
+            media_ant = sum(r["despesa"] for r in anteriores) / len(anteriores)
+            if media_ant > 0:
+                var = ((ultimo["despesa"] - media_ant) / media_ant) * 100
+                summary["variacao_pct"] = round(var, 1)
+                if var > 10:
+                    summary["tendencia_despesa"] = "subindo"
+                elif var < -10:
+                    summary["tendencia_despesa"] = "descendo"
+
     return {
         "months": months,
         "data": rows,  # list of {year, month, despesa, receita}
+        "summary": summary,
     }
 
 
 def _forecast_month_end(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    """Projeção do fim do mês corrente baseado no ritmo de gastos.
+    """Projeção do fim do mês corrente baseado no ritmo de saídas do caixa.
 
-    Algoritmo simples: ritmo_diario = gasto_atual / dias_decorridos.
+    Algoritmo: ritmo_diario = saídas_totais / dias_decorridos.
     Projeção = ritmo_diario * dias_totais_do_mes.
+
+    `saidas_totais` = despesa real + aportes (movimentação interna que sai
+    do caixa). Aportes contam porque debitam a conta corrente, mesmo não
+    sendo "gasto" no sentido contábil — saldo projetado precisa refletir
+    realidade do caixa.
+
     Receita: assume mesmo total (não projeta — recibos são pontuais).
     """
     from calendar import monthrange
@@ -166,26 +204,31 @@ def _forecast_month_end(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     days_elapsed = today.day
 
     sum_current = db.get_summary_by_period(user_id, month_start, today)
-    despesa_atual = float(sum_current.get("despesa") or 0)
+    despesa_real = float(sum_current.get("despesa") or 0)
     receita_atual = float(sum_current.get("receita") or 0)
+    aportes_atual = float(db.get_internal_movement_total(user_id, month_start, today))
+
+    saidas_atual = despesa_real + aportes_atual
 
     if days_elapsed <= 0:
-        despesa_projetada = despesa_atual
+        saidas_projetadas = saidas_atual
     else:
-        ritmo_diario = despesa_atual / days_elapsed
-        despesa_projetada = ritmo_diario * days_in_month
+        ritmo_diario = saidas_atual / days_elapsed
+        saidas_projetadas = ritmo_diario * days_in_month
 
     return {
         "today": today.isoformat(),
         "month_start": month_start.isoformat(),
         "days_elapsed": days_elapsed,
         "days_in_month": days_in_month,
-        "despesa_atual": round(despesa_atual, 2),
+        "despesa_real_atual": round(despesa_real, 2),
+        "aportes_atual": round(aportes_atual, 2),
+        "saidas_atual": round(saidas_atual, 2),
         "receita_atual": round(receita_atual, 2),
-        "saldo_parcial": round(receita_atual - despesa_atual, 2),
-        "despesa_projetada_fim_do_mes": round(despesa_projetada, 2),
-        "saldo_projetado": round(receita_atual - despesa_projetada, 2),
-        "vai_fechar_negativo": (receita_atual - despesa_projetada) < 0,
+        "saldo_parcial": round(receita_atual - saidas_atual, 2),
+        "saidas_projetadas_fim_do_mes": round(saidas_projetadas, 2),
+        "saldo_projetado": round(receita_atual - saidas_projetadas, 2),
+        "vai_fechar_negativo": (receita_atual - saidas_projetadas) < 0,
     }
 
 
@@ -549,10 +592,11 @@ TOOLS: list[Tool] = [
                 "name": "forecast_month_end",
                 "description": (
                     "Projeta como o mês corrente vai fechar baseado no ritmo "
-                    "atual de gastos. Use pra 'no ritmo atual vou fechar no "
-                    "negativo?', 'projeção do mês', 'vou estourar?'. Retorna "
-                    "gasto atual, receita atual, projeção de despesa pro fim "
-                    "do mês e saldo projetado."
+                    "atual de saídas (despesa + aportes pra caixinha/investimento). "
+                    "Use pra 'no ritmo atual vou fechar no negativo?', "
+                    "'projeção do mês', 'vou estourar?'. Retorna despesa real, "
+                    "aportes, receita, saldo parcial e projetado. Aportes "
+                    "contam porque saem do caixa, mesmo sendo alocação."
                 ),
                 "parameters": {"type": "object", "properties": {}},
             },

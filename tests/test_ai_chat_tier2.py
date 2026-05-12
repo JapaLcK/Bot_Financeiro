@@ -261,8 +261,10 @@ def test_spending_trend_inclui_credito(user_id):
 
 def test_forecast_month_end_sem_gastos_projeta_zero(user_id):
     result = _forecast_month_end(user_id, {})
-    assert result["despesa_atual"] == 0.0
-    assert result["despesa_projetada_fim_do_mes"] == 0.0
+    assert result["despesa_real_atual"] == 0.0
+    assert result["aportes_atual"] == 0.0
+    assert result["saidas_atual"] == 0.0
+    assert result["saidas_projetadas_fim_do_mes"] == 0.0
 
 
 def test_forecast_month_end_projeta_baseado_em_ritmo(user_id):
@@ -271,21 +273,89 @@ def test_forecast_month_end_projeta_baseado_em_ritmo(user_id):
     db.add_launch_and_update_balance(user_id, "despesa", 100, "x", "x", categoria="outros")
 
     result = _forecast_month_end(user_id, {})
-    assert result["despesa_atual"] == 100.0
+    assert result["despesa_real_atual"] == 100.0
+    assert result["saidas_atual"] == 100.0  # sem aportes
     # Projeção deve ser >= valor atual (mês continua)
-    assert result["despesa_projetada_fim_do_mes"] >= 100.0
-    # Deve incluir todas as chaves esperadas
+    assert result["saidas_projetadas_fim_do_mes"] >= 100.0
     for key in ("days_elapsed", "days_in_month", "saldo_parcial", "vai_fechar_negativo"):
         assert key in result
 
 
 def test_forecast_month_end_vai_fechar_negativo(user_id):
-    """Gasto > receita → vai_fechar_negativo = True."""
+    """Despesa real > receita → vai_fechar_negativo."""
     db.add_launch_and_update_balance(user_id, "receita", 50, None, "seed")
     db.add_launch_and_update_balance(user_id, "despesa", 200, "x", "x", categoria="outros")
 
     result = _forecast_month_end(user_id, {})
     assert result["vai_fechar_negativo"] is True
+
+
+def test_forecast_month_end_conta_aportes_como_saida(user_id):
+    """Aporte de investimento é movimentação interna mas SAI do caixa —
+    forecast tem que contar pra refletir o saldo real."""
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "salario")
+    # Aporte de R$ 500 — não é despesa real, mas é alocação que tira do caixa
+    db.add_launch_and_update_balance(
+        user_id, "despesa", 500, "carteira", "aporte",
+        categoria="investimento_aporte",
+        is_internal_movement=True,
+    )
+
+    result = _forecast_month_end(user_id, {})
+    assert result["despesa_real_atual"] == 0.0  # nenhuma despesa real
+    assert result["aportes_atual"] == 500.0
+    assert result["saidas_atual"] == 500.0
+    assert result["receita_atual"] == 1000.0
+    # Saldo parcial = 1000 - 500 = 500 (positivo)
+    assert result["saldo_parcial"] == 500.0
+
+
+# ─── get_spending_trend summary (média, tendência) ──────────────────────────
+
+def test_spending_trend_calcula_medias(user_id):
+    """Cria gasto só no mês corrente → média = valor / N meses pedidos."""
+    db.add_launch_and_update_balance(user_id, "despesa", 300, "x", "x", categoria="outros")
+    db.add_launch_and_update_balance(user_id, "receita", 600, None, "seed")
+
+    result = _get_spending_trend(user_id, {"months": 3})
+    summary = result["summary"]
+    # 300 / 1 mes com dado retornado
+    # Mas só temos 1 row de dado (mês corrente) — média conta sobre os rows
+    n_rows = len(result["data"])
+    assert summary["media_despesa"] == round(300.0 / n_rows, 2)
+    assert summary["media_receita"] == round(600.0 / n_rows, 2)
+
+
+def test_spending_trend_tendencia_subindo(user_id):
+    """Mês anterior com R$ 100, mês atual com R$ 300 → tendência 'subindo'."""
+    today = date.today()
+    # Mês anterior (calcular data)
+    if today.month == 1:
+        prev_y, prev_m = today.year - 1, 12
+    else:
+        prev_y, prev_m = today.year, today.month - 1
+    prev_dt = datetime(prev_y, prev_m, 15)
+
+    db.add_launch_and_update_balance(
+        user_id, "despesa", 100, "x", "x", categoria="outros", criado_em=prev_dt,
+    )
+    db.add_launch_and_update_balance(
+        user_id, "despesa", 300, "y", "y", categoria="outros",
+    )
+
+    result = _get_spending_trend(user_id, {"months": 2})
+    assert result["summary"]["tendencia_despesa"] == "subindo"
+    # 300 vs 100 = +200% de variação
+    assert result["summary"]["variacao_pct"] > 10
+
+
+def test_spending_trend_tendencia_estavel_com_1_mes(user_id):
+    """1 mês só → não dá pra ter tendência."""
+    db.add_launch_and_update_balance(user_id, "despesa", 100, "x", "x", categoria="outros")
+
+    result = _get_spending_trend(user_id, {"months": 1})
+    assert result["summary"]["tendencia_despesa"] == "estavel"
+    assert result["summary"]["variacao_pct"] == 0.0
 
 
 def test_top_categories_exclui_reembolso_cartao(user_id):

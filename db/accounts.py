@@ -273,6 +273,34 @@ def get_summary_by_period(user_id: int, start_date: date, end_date: date):
     return _db_support.get_summary_by_period_impl(get_conn, ensure_user, user_id, start_date, end_date)
 
 
+def get_internal_movement_total(user_id: int, start_date: date, end_date: date) -> float:
+    """Soma de saídas internas (aportes, transferências pra caixinha) no período.
+
+    `is_internal_movement=true` marca alocação que sai do caixa corrente mas
+    não é gasto. Pra projeção de saldo (`forecast_month_end`), conta junto
+    com despesa porque debita a conta corrente igual.
+    """
+    ensure_user(user_id)
+    start_dt = datetime.combine(start_date, datetime.min.time())
+    end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select coalesce(sum(valor), 0) as total
+                from launches
+                where user_id = %s
+                  and tipo = 'despesa'
+                  and is_internal_movement = true
+                  and criado_em >= %s and criado_em < %s
+                """,
+                (user_id, start_dt, end_excl),
+            )
+            row = cur.fetchone()
+    return float(row["total"] or 0) if row else 0.0
+
+
 def get_spending_trend(user_id: int, months: int = 6) -> list[dict]:
     """Tendência de gastos dos últimos N meses (default 6, contando o atual).
 
