@@ -604,11 +604,27 @@ def undo_credit_transaction(user_id: int, ct_id: int):
 
 
 def undo_installment_group(user_id: int, group_id: str):
-    """Desfaz parcelamento inteiro removendo todas as transactions do grupo."""
+    """Desfaz parcelamento inteiro removendo todas as transactions do grupo.
+
+    Se alguma bill afetada estava parcialmente/totalmente paga (paid > 0),
+    o decremento de `total` deixaria `paid > novo_total` (overpayment
+    fantasma — bill some da listagem mesmo com saldo aparente). Pra evitar:
+
+    - Decrementa `paid_amount` pelo excesso (paid → min(paid, novo_total)).
+    - Soma os excessos de todas as bills e cria UM launch de receita
+      "Estorno de pagamento" na conta corrente — devolvendo o dinheiro
+      que tinha sido pago. Internal movement (não afeta categoria de
+      receita/despesa do user).
+    - Ajusta status: bills com saldo voltam pra 'open'; bills com
+      total=paid=0 ficam como estavam.
+    """
+    refund_total = Decimal("0")
+    card_name: str | None = None
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, bill_id, valor from credit_transactions "
+                "select id, bill_id, valor, card_id from credit_transactions "
                 "where user_id = %s and group_id = %s::uuid and is_refund = false for update",
                 (user_id, group_id),
             )
@@ -625,6 +641,14 @@ def undo_installment_group(user_id: int, group_id: str):
 
             removed_count = len(rows)
 
+            # Pega nome do cartão (todas as txs do grupo são do mesmo card)
+            cur.execute(
+                "select name from credit_cards where id = %s",
+                (rows[0]["card_id"],),
+            )
+            row_card = cur.fetchone()
+            card_name = row_card["name"] if row_card else "cartão"
+
             cur.execute(
                 "delete from credit_transactions "
                 "where user_id = %s and group_id = %s::uuid and is_refund = false",
@@ -632,17 +656,71 @@ def undo_installment_group(user_id: int, group_id: str):
             )
             for bill_id, bill_sum in by_bill.items():
                 cur.execute(
-                    "update credit_bills set total = greatest(0, total - %s) "
-                    "where id = %s and user_id = %s",
-                    (float(bill_sum), bill_id, user_id),
+                    "select total, coalesce(paid_amount, 0) as paid_amount "
+                    "from credit_bills where id = %s and user_id = %s for update",
+                    (bill_id, user_id),
                 )
+                row = cur.fetchone()
+                if not row:
+                    continue
+                old_total = Decimal(str(row["total"]))
+                old_paid = Decimal(str(row["paid_amount"]))
+
+                new_total = max(Decimal("0"), old_total - bill_sum)
+                # Excesso = quanto sobra de paid sem cobertura de total
+                excess = max(Decimal("0"), old_paid - new_total)
+                new_paid = old_paid - excess
+                refund_total += excess
+
+                # Status: open se ainda devendo, paid se exatamente saldado,
+                # mantém status anterior se zerada completamente.
+                if new_total > new_paid:
+                    cur.execute(
+                        "update credit_bills set total = %s, paid_amount = %s, "
+                        "status='open', paid_at=null "
+                        "where id = %s and user_id = %s",
+                        (new_total, new_paid, bill_id, user_id),
+                    )
+                elif new_total > 0 and new_paid >= new_total:
+                    cur.execute(
+                        "update credit_bills set total = %s, paid_amount = %s, "
+                        "status='paid', paid_at=now() "
+                        "where id = %s and user_id = %s",
+                        (new_total, new_paid, bill_id, user_id),
+                    )
+                else:
+                    # new_total == 0: mantém status como está
+                    cur.execute(
+                        "update credit_bills set total = %s, paid_amount = %s "
+                        "where id = %s and user_id = %s",
+                        (new_total, new_paid, bill_id, user_id),
+                    )
 
             conn.commit()
+
+    refund_launch_id: int | None = None
+    if refund_total > 0 and card_name:
+        # Estorno na conta corrente: dinheiro que tinha sido pago volta.
+        # is_internal_movement=True pra não inflar receitas do user nos
+        # relatórios — espelha o pagamento de fatura original que também
+        # é internal_movement.
+        launch_id, _user_seq, _balance = add_launch_and_update_balance(
+            user_id=user_id,
+            tipo="receita",
+            valor=float(refund_total),
+            alvo=f"estorno_fatura:{card_name}",
+            nota=f"Estorno de pagamento ({card_name}) — parcelamento apagado",
+            categoria="estorno_pagamento_fatura",
+            is_internal_movement=True,
+        )
+        refund_launch_id = launch_id
 
     return {
         "group_id": group_id,
         "removed_count": removed_count,
         "removed_total": float(total_removed),
+        "refunded": float(refund_total),
+        "refund_launch_id": refund_launch_id,
     }
 
 
@@ -863,7 +941,11 @@ def get_next_bill_summary(user_id: int, card_id: int):
     return bill
 
 
-def rebuild_bill_totals(user_id: int) -> dict[str, int]:
+def rebuild_bill_totals(
+    user_id: int,
+    *,
+    refund_overpayments: bool = False,
+) -> dict[str, int | float]:
     """Reconciliação FORTE: recalcula `total` de cada bill do user a partir
     de `sum(credit_transactions.valor)` e reabre bills que voltam a ter
     saldo devedor.
@@ -873,15 +955,23 @@ def rebuild_bill_totals(user_id: int) -> dict[str, int]:
     onde o `total` ficou inconsistente por bug passado, edição manual no
     DB, ou rollback que esqueceu de decrementar.
 
-    Uso: rodar 1x via Railway shell quando suspeitar que `total` divergiu
-    da soma real das transações.
+    `refund_overpayments` controla o que fazer com bills onde
+    `paid_amount > total` (overpayment fantasma, geralmente legado de
+    `undo_installment_group` antigo que não revertia paid_amount):
+      - False (default): clampa `paid_amount = total` silenciosamente.
+        Perde a memória do pagamento extra, mas estado fica consistente.
+      - True: clampa E cria UM launch de receita (per cartão) com o
+        excesso somado, devolvendo o dinheiro pra conta corrente. Use
+        quando o DB do user tem lixo herdado pra normalizar de vez.
 
+    Uso pelo CLI:
         from db import rebuild_bill_totals
-        print(rebuild_bill_totals(<user_id>))
+        print(rebuild_bill_totals(<user_id>, refund_overpayments=True))
 
-    Retorna `{totals_updated, reopened}` — quantas bills tiveram total
-    corrigido e quantas voltaram pra status='open'.
+    Retorna `{totals_updated, reopened, paid_clamped, refunded}`.
     """
+    overpayments_by_card: dict[int, tuple[Decimal, str]] = {}
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             # Passo 1: recalcular total = SUM(credit_transactions.valor)
@@ -907,7 +997,43 @@ def rebuild_bill_totals(user_id: int) -> dict[str, int]:
             )
             totals_updated = len(cur.fetchall())
 
-            # Passo 2: reabrir bills paid/closed que tem saldo devedor.
+            # Passo 2: detectar e clampar overpayments (paid_amount > total).
+            # Antes do clamp, captura o excesso por cartão pra opcionalmente
+            # estornar na conta corrente.
+            cur.execute(
+                """
+                select b.id, b.card_id, c.name as card_name,
+                       coalesce(b.paid_amount, 0) - b.total as overpaid
+                  from credit_bills b
+                  join credit_cards c on c.id = b.card_id
+                 where b.user_id = %s
+                   and coalesce(b.paid_amount, 0) > b.total
+                """,
+                (user_id,),
+            )
+            paid_clamped = 0
+            for row in cur.fetchall():
+                paid_clamped += 1
+                if refund_overpayments:
+                    over = Decimal(str(row["overpaid"]))
+                    cid = int(row["card_id"])
+                    if cid in overpayments_by_card:
+                        acc, _ = overpayments_by_card[cid]
+                        overpayments_by_card[cid] = (acc + over, row["card_name"])
+                    else:
+                        overpayments_by_card[cid] = (over, row["card_name"])
+
+            cur.execute(
+                """
+                update credit_bills
+                   set paid_amount = total
+                 where user_id = %s
+                   and coalesce(paid_amount, 0) > total
+                """,
+                (user_id,),
+            )
+
+            # Passo 3: reabrir bills paid/closed que (após clamp) ainda tem saldo.
             cur.execute(
                 """
                 update credit_bills
@@ -921,7 +1047,31 @@ def rebuild_bill_totals(user_id: int) -> dict[str, int]:
             )
             reopened = len(cur.fetchall())
         conn.commit()
-    return {"totals_updated": totals_updated, "reopened": reopened}
+
+    # Passo 4: estorno opcional. Fora da transação anterior pra evitar
+    # bloqueios cruzados com `add_launch_and_update_balance`.
+    refunded_total = Decimal("0")
+    if refund_overpayments:
+        for cid, (amount, card_name) in overpayments_by_card.items():
+            if amount <= 0:
+                continue
+            add_launch_and_update_balance(
+                user_id=user_id,
+                tipo="receita",
+                valor=float(amount),
+                alvo=f"estorno_fatura:{card_name}",
+                nota=f"Estorno de pagamento ({card_name}) — reconciliação retroativa",
+                categoria="estorno_pagamento_fatura",
+                is_internal_movement=True,
+            )
+            refunded_total += amount
+
+    return {
+        "totals_updated": totals_updated,
+        "reopened": reopened,
+        "paid_clamped": paid_clamped,
+        "refunded": float(refunded_total),
+    }
 
 
 def list_open_bills(user_id: int):

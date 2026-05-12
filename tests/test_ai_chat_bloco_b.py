@@ -310,7 +310,157 @@ def test_rebuild_bill_totals_idempotente(user_id):
 
     db.rebuild_bill_totals(user_id)
     out2 = db.rebuild_bill_totals(user_id)
-    assert out2 == {"totals_updated": 0, "reopened": 0}
+    assert out2["totals_updated"] == 0
+    assert out2["reopened"] == 0
+    assert out2["paid_clamped"] == 0
+    assert out2["refunded"] == 0
+
+
+def test_rebuild_clampa_overpayment_sem_refund(user_id):
+    """B: paid > total é clampado pra paid=total, sem criar launch.
+
+    Cenário: estado herdado de bug anterior (undo_installment_group antigo
+    que não revertia paid_amount). Bill #250 do print real do Lucas era
+    assim: total=100, paid=200, status='paid' → sumia da listagem.
+    """
+    import db
+    today = date.today()
+
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    db.add_launch_and_update_balance(user_id, "receita", 500, None, "seed")
+
+    _, _, bill_id = db.add_credit_purchase(
+        user_id, card_id, 100, "outros", "compra", today,
+    )
+
+    # Bagunça: força paid > total (simula estado herdado de bug).
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update credit_bills set paid_amount=200, status='paid', paid_at=now() "
+                "where id=%s",
+                (bill_id,),
+            )
+        conn.commit()
+
+    # Saldo da conta antes do rebuild
+    saldo_antes = db.get_balance(user_id)
+
+    out = db.rebuild_bill_totals(user_id)
+    assert out["paid_clamped"] == 1
+    assert out["refunded"] == 0  # sem refund, só clamp
+
+    # Bill: paid clampado pra total. Status mantém (paid >= total)
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select total, paid_amount, status from credit_bills where id=%s", (bill_id,))
+            row = cur.fetchone()
+    assert float(row["total"]) == 100.0
+    assert float(row["paid_amount"]) == 100.0
+
+    # Saldo da conta NÃO foi tocado (sem estorno)
+    assert db.get_balance(user_id) == saldo_antes
+
+
+def test_rebuild_com_refund_cria_launch_de_estorno(user_id):
+    """B + estorno: clampa E devolve a diferença pra conta corrente."""
+    import db
+    today = date.today()
+
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    db.add_launch_and_update_balance(user_id, "receita", 500, None, "seed")
+
+    _, _, bill_id = db.add_credit_purchase(
+        user_id, card_id, 100, "outros", "compra", today,
+    )
+
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update credit_bills set paid_amount=200, status='paid', paid_at=now() "
+                "where id=%s",
+                (bill_id,),
+            )
+        conn.commit()
+
+    saldo_antes = db.get_balance(user_id)
+    out = db.rebuild_bill_totals(user_id, refund_overpayments=True)
+
+    assert out["paid_clamped"] == 1
+    assert out["refunded"] == 100.0  # 200 paid - 100 total
+    # Saldo subiu pelo estorno
+    assert float(db.get_balance(user_id)) - float(saldo_antes) == 100.0
+
+
+def test_undo_installment_estorna_overpayment(user_id):
+    """A+C: apagar parcelamento que estava pago → estorno na conta corrente."""
+    import db
+    today = date.today()
+
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+
+    out, _vtotal = db.add_credit_purchase_installments(
+        user_id, card_id, 500, "outros", "tv", today, installments=5
+    )
+    group_id = out["group_id"]
+
+    # Paga a 1ª fatura (R$ 100) inteira
+    open_bills = db.list_open_bills(user_id)
+    bill_paga = open_bills[0]  # menor period_end
+    db.pay_bill_amount(user_id, card_id, "Nubank", 100.0, bill_id=bill_paga["id"])
+
+    # Bill paga: paid=100, total=100, status='paid'
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select paid_amount, total, status from credit_bills where id=%s", (bill_paga["id"],))
+            row = cur.fetchone()
+    assert float(row["paid_amount"]) == 100.0
+    assert float(row["status"] == "paid") if isinstance(row["status"], bool) else row["status"] == "paid"
+
+    saldo_antes = float(db.get_balance(user_id))
+
+    # Apaga o parcelamento → bill paga deve perder a parcela E ganhar estorno
+    result = db.undo_installment_group(user_id, group_id)
+    assert result is not None
+    assert result["refunded"] == 100.0  # R$ 100 estornados
+    assert result["refund_launch_id"] is not None
+
+    # Bill: total=0 (parcela removida), paid=0 (estornado)
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select paid_amount, total from credit_bills where id=%s", (bill_paga["id"],))
+            row = cur.fetchone()
+    assert float(row["total"]) == 0.0
+    assert float(row["paid_amount"]) == 0.0
+
+    # Saldo da conta voltou (estornado)
+    assert float(db.get_balance(user_id)) - saldo_antes == 100.0
+
+
+def test_undo_installment_sem_pagamento_nao_estorna(user_id):
+    """A: undo de parcelamento NÃO pago — sem estorno, sem launch."""
+    import db
+    today = date.today()
+
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    db.add_launch_and_update_balance(user_id, "receita", 500, None, "seed")
+
+    out, _ = db.add_credit_purchase_installments(
+        user_id, card_id, 500, "outros", "tv", today, installments=5
+    )
+
+    saldo_antes = float(db.get_balance(user_id))
+    result = db.undo_installment_group(user_id, out["group_id"])
+
+    assert result["refunded"] == 0
+    assert result["refund_launch_id"] is None
+    # Saldo intacto
+    assert float(db.get_balance(user_id)) == saldo_antes
 
 
 def test_forecast_next_bill_pega_open_mais_proxima_nao_mais_distante(user_id):
