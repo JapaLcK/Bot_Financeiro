@@ -224,31 +224,85 @@ def _set_budget_execute(user_id: int, args: dict[str, Any]) -> str:
 # ─── Write: delete_budget ───────────────────────────────────────────────────
 
 
+def _normalize_cat_list(args: dict[str, Any]) -> list[str]:
+    """Aceita `categorias` (lista) ou `categoria` (string) como input.
+
+    O LLM às vezes passa singular mesmo quando o user pediu múltiplas. Por
+    isso a tool aceita os 2 e normaliza pra lista. Pra apagar várias de uma
+    vez (1 confirma só), passar `categorias=["x","y"]`.
+    """
+    cats = args.get("categorias")
+    if cats is None:
+        single = args.get("categoria")
+        cats = [single] if single else []
+    elif isinstance(cats, str):
+        cats = [cats]
+    return [c.strip() for c in cats if isinstance(c, str) and c.strip()]
+
+
 def _delete_budget_summary(args: dict[str, Any]) -> str:
-    cat = (args.get("categoria") or "").strip() or "(sem categoria)"
-    return f"apagar o orçamento de {cat}"
+    cats = _normalize_cat_list(args)
+    if not cats:
+        return "apagar orçamento (sem categoria)"
+    if len(cats) == 1:
+        return f"apagar o orçamento de {cats[0]}"
+    return f"apagar os orçamentos: {', '.join(cats)}"
 
 
 def _delete_budget_validate(user_id: int, args: dict[str, Any]) -> str | None:
-    cat = (args.get("categoria") or "").strip()
-    if not cat:
-        return "🐷 Me diz qual categoria você quer apagar."
-    canon, action = _resolve_category(user_id, cat)
-    if action == "block":
-        return canon
-    if not db.get_budget(user_id, canon):
-        return f'🐷 Você não tem orçamento em "{canon}" pra apagar.'
-    # Normaliza pra canônica antes da confirmação
-    args["categoria"] = canon
+    cats = _normalize_cat_list(args)
+    if not cats:
+        return "🐷 Me diz qual orçamento você quer apagar."
+
+    resolved: list[str] = []
+    nao_existem: list[str] = []
+    for c in cats:
+        canon, action = _resolve_category(user_id, c)
+        if action == "block":
+            return canon
+        if not db.get_budget(user_id, canon):
+            nao_existem.append(canon)
+            continue
+        resolved.append(canon)
+
+    if nao_existem and not resolved:
+        if len(nao_existem) == 1:
+            return f'🐷 Você não tem orçamento em "{nao_existem[0]}" pra apagar.'
+        joined = ", ".join(f'"{c}"' for c in nao_existem)
+        return f"🐷 Você não tem orçamento em {joined} pra apagar."
+    if nao_existem:
+        # Misto: filtra os inexistentes e segue só com os que existem.
+        joined = ", ".join(f'"{c}"' for c in nao_existem)
+        # Não retorna erro — só normaliza args e segue. Mensagem com aviso
+        # é construída no execute pra não bloquear o flow.
+        args["_skipped"] = nao_existem
+
+    args["categorias"] = resolved
+    args.pop("categoria", None)
     return None
 
 
 def _delete_budget_execute(user_id: int, args: dict[str, Any]) -> str:
-    cat = (args.get("categoria") or "").strip()
-    removed = db.delete_budget(user_id, cat)
-    if not removed:
-        return f'🐷 Não achei orçamento em "{cat}" pra apagar.'
-    return f"✅ Orçamento de *{cat}* apagado."
+    cats = _normalize_cat_list(args)
+    deleted: list[str] = []
+    for c in cats:
+        if db.delete_budget(user_id, c):
+            deleted.append(c)
+
+    if not deleted:
+        return "🐷 Não consegui apagar — nenhum orçamento encontrado."
+
+    if len(deleted) == 1:
+        msg = f"✅ Orçamento de *{deleted[0]}* apagado."
+    else:
+        joined = ", ".join(f"*{c}*" for c in deleted)
+        msg = f"✅ Orçamentos apagados: {joined}."
+
+    skipped = args.get("_skipped") or []
+    if skipped:
+        joined = ", ".join(f'"{c}"' for c in skipped)
+        msg += f"\n(Não tinha orçamento em {joined} — pulei.)"
+    return msg
 
 
 # ─── Tools registry ─────────────────────────────────────────────────────────
@@ -335,19 +389,23 @@ TOOLS: list[Tool] = [
             "function": {
                 "name": "delete_budget",
                 "description": (
-                    "Remove o orçamento de uma categoria. Use pra 'apaga "
-                    "orçamento de alimentação', 'remove o limite de lazer'. "
-                    "DESTRUTIVO — pede confirmação."
+                    "Remove o orçamento de uma OU MAIS categorias. Use pra "
+                    "'apaga orçamento de alimentação', 'remove orçamento de "
+                    "lazer e transporte', 'apaga todos meus orçamentos de X "
+                    "e Y'. DESTRUTIVO — pede uma única confirmação cobrindo "
+                    "TODAS as categorias passadas. Pra apagar várias de uma "
+                    "vez, passe lista em `categorias`."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "categoria": {
-                            "type": "string",
-                            "description": "Categoria do orçamento a remover.",
+                        "categorias": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Lista de categorias a remover. Aceita 1 ou mais.",
                         },
                     },
-                    "required": ["categoria"],
+                    "required": ["categorias"],
                 },
             },
         },

@@ -200,14 +200,14 @@ def test_get_budget_status_categoria_com_typo_da_hint(user_id):
 
 
 def test_delete_budget_validate_bloqueia_sem_orcamento(user_id):
-    err = _delete_budget_validate(user_id, {"categoria": "lazer"})
+    err = _delete_budget_validate(user_id, {"categorias": ["lazer"]})
     assert err is not None
-    assert "não tem orçamento" in err.lower() or "não tem orçamento" in err
+    assert "não tem orçamento" in err.lower()
 
 
 def test_delete_budget_executa(user_id):
     db.upsert_budget(user_id, "lazer", 300)
-    args = {"categoria": "lazer"}
+    args = {"categorias": ["lazer"]}
     err = _delete_budget_validate(user_id, args)
     assert err is None
     msg = _delete_budget_execute(user_id, args)
@@ -216,12 +216,60 @@ def test_delete_budget_executa(user_id):
 
 
 def test_delete_budget_normaliza_case(user_id):
-    """User digita 'LAZER', validate normaliza pra 'lazer'."""
+    """User digita 'LAZER', validate normaliza pra 'lazer' canônica."""
     db.upsert_budget(user_id, "lazer", 300)
-    args = {"categoria": "LAZER"}
+    args = {"categorias": ["LAZER"]}
     err = _delete_budget_validate(user_id, args)
     assert err is None
-    assert args["categoria"] == "lazer"  # mutado in-place
+    assert args["categorias"] == ["lazer"]  # mutado in-place
+
+
+def test_delete_budget_aceita_categoria_singular_legado(user_id):
+    """Compat: se LLM passar `categoria` (str), normaliza pra lista."""
+    db.upsert_budget(user_id, "lazer", 300)
+    args = {"categoria": "lazer"}
+    err = _delete_budget_validate(user_id, args)
+    assert err is None
+    assert args["categorias"] == ["lazer"]
+    assert "categoria" not in args
+
+
+def test_delete_budget_em_lote(user_id):
+    """1 chamada apaga várias com 1 confirmação só (fix do bug2)."""
+    db.upsert_budget(user_id, "viagem", 1000)
+    db.upsert_budget(user_id, "namorada", 500)
+
+    args = {"categorias": ["viagem", "namorada"]}
+    err = _delete_budget_validate(user_id, args)
+    assert err is None
+
+    msg = _delete_budget_execute(user_id, args)
+    assert "viagem" in msg and "namorada" in msg
+    assert db.get_budget(user_id, "viagem") is None
+    assert db.get_budget(user_id, "namorada") is None
+
+
+def test_delete_budget_em_lote_misto(user_id):
+    """Lista mista (alguns existem, outros não): apaga os que existem,
+    avisa dos que não."""
+    db.upsert_budget(user_id, "viagem", 1000)
+
+    args = {"categorias": ["viagem", "fantasma"]}
+    err = _delete_budget_validate(user_id, args)
+    assert err is None
+    assert args["_skipped"] == ["fantasma"]
+    assert args["categorias"] == ["viagem"]
+
+    msg = _delete_budget_execute(user_id, args)
+    assert "viagem" in msg
+    assert "fantasma" in msg.lower()  # avisa que pulou
+    assert db.get_budget(user_id, "viagem") is None
+
+
+def test_delete_budget_summary_singular_vs_plural(user_id):
+    from core.services.ai_chat.tools.budgets import _delete_budget_summary
+    assert _delete_budget_summary({"categorias": ["lazer"]}).startswith("apagar o orçamento")
+    assert _delete_budget_summary({"categorias": ["lazer", "viagem"]}).startswith("apagar os orçamentos")
 
 
 # ─── db.sum_spent_in_category_this_month ────────────────────────────────────

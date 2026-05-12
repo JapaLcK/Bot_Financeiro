@@ -127,3 +127,68 @@ def test_forecast_next_bill_filtra_por_card_name(pro_user_id):
 def test_forecast_next_bill_card_inexistente_retorna_erro(user_id):
     out = _forecast_next_bill(user_id, {"card_name": "Bradesco"})
     assert "error" in out
+
+
+# ─── Bug fix: bill paga reaberta quando ganha parcela nova ──────────────────
+
+
+def test_parcelamento_em_bill_paga_reabre_pra_open(user_id):
+    """
+    Bug visto em prod: Lucas pagou fatura X, depois parcelou algo cuja
+    parcela caía em X. A bill X virou `total > paid_amount` mas status
+    continuou `paid` — `list_open_bills` ignorou. Get_total_debt
+    sub-reportava a dívida e a fatura sumia da listagem.
+
+    Fix: `add_credit_purchase_installments` agora reabre bill paid/closed
+    quando a parcela nova faz o total ficar > paid_amount.
+    """
+    from datetime import date as _date
+    import db
+    today = _date.today()
+
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+
+    # 1. Compra que cai na fatura corrente, paga a fatura inteira.
+    _, _, bill_id = db.add_credit_purchase(
+        user_id, card_id, 100, "outros", "compra", today,
+    )
+    db.add_launch_and_update_balance(user_id, "receita", 200, None, "seed")
+    db.pay_bill_amount(user_id, card_id, "Nubank", 100.0)
+
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status, total, paid_amount from credit_bills where id=%s",
+                (bill_id,),
+            )
+            row = cur.fetchone()
+    assert row["status"] == "paid"
+    assert float(row["total"]) == 100.0
+    assert float(row["paid_amount"]) == 100.0
+
+    # 2. Parcelamento 4x — a 1ª parcela cai exatamente na bill que acabou
+    # de ser paga. Outras 3 vão pra bills futuras.
+    db.add_credit_purchase_installments(
+        user_id, card_id, 400, "outros", "tv", today, installments=4
+    )
+
+    # A bill paga deve ter sido reaberta: total > paid_amount.
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status, total, paid_amount, paid_at from credit_bills where id=%s",
+                (bill_id,),
+            )
+            row = cur.fetchone()
+    assert row["status"] == "open", (
+        f"bill com saldo devedor ficou status={row['status']} — bug!"
+    )
+    assert row["paid_at"] is None
+    assert float(row["total"]) == 200.0  # 100 antiga + 100 parcela
+    assert float(row["paid_amount"]) == 100.0  # paid permanece
+
+    # E aparece em list_open_bills com remaining=100.
+    out = _get_total_debt(user_id, {})
+    bill_ids = {b["bill_id"] for b in out["bills"]}
+    assert bill_id in bill_ids, "bill reaberta deve aparecer em get_total_debt"

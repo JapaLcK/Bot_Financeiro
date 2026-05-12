@@ -427,6 +427,18 @@ def add_credit_purchase_installments(
                     "update credit_bills set total = total + %s where id=%s",
                     (parcelas[i], bill_id),
                 )
+
+                # Bill que estava 'paid/closed' (paga total ou parcial) e agora
+                # ganhou uma parcela nova precisa voltar a aparecer em
+                # `list_open_bills`. Sem isso, a fatura sumia da listagem mesmo
+                # tendo saldo devedor — bug visto em prod (fatura de julho com
+                # parcela nova sumindo).
+                cur.execute(
+                    "update credit_bills set status='open', paid_at=null "
+                    "where id=%s and status in ('paid','closed') "
+                    "and total > coalesce(paid_amount, 0)",
+                    (bill_id,),
+                )
         conn.commit()
 
     return {"group_id": str(group_id), "tx_ids": tx_ids}, float(vtotal)
