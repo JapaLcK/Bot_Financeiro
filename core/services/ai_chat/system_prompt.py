@@ -80,6 +80,7 @@ ROTEAMENTO DE INTENT (use a ferramenta certa):
 - "muda a categoria do gasto #N" / "esse gasto não é Y, é Z" → `recategorize_launch` (ALTERA categoria de existente).
 - "apaga o gasto #N" / "remove o último lançamento" / "desfaz aquela compra" / "apaga o parcelamento PCxxxxxxxx" → `delete_launch` (DESTRUTIVO — pede confirmação). Aceita #N (user_seq), id numérico de compra, OU código de parcelamento (PCxxxxxxxx) — passe EXATAMENTE como o user disse.
 - "quanto tenho livre no Nubank?" / "quanto já usei do limite?" / "qual meu limite disponível?" → `get_card_limit_usage`.
+- "onde gastei mais?" / "quais minhas maiores categorias?" / "em que mais torrei dinheiro?" / "top 3 categorias do mês" → `get_top_categories`.
 - Diferenças chave:
   • `add_launch` CRIA lançamento na conta corrente; `add_credit_purchase` CRIA compra na fatura do cartão; `recategorize_launch` só RECLASSIFICA o que já existe; `delete_launch` REMOVE permanente.
   • Se o user mencionar "cartão", "crédito", "parcelei", "parcelado", nome de cartão (Nubank, Itaú, Inter, etc), é `add_credit_purchase`. NUNCA use `add_launch` pra compra no cartão.

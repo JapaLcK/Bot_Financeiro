@@ -273,6 +273,67 @@ def get_summary_by_period(user_id: int, start_date: date, end_date: date):
     return _db_support.get_summary_by_period_impl(get_conn, ensure_user, user_id, start_date, end_date)
 
 
+def get_top_expense_categories(
+    user_id: int,
+    start_date: date,
+    end_date: date,
+    limit: int = 5,
+):
+    """Top N categorias de gasto no período.
+
+    Agrega:
+      - despesas reais em launches (tipo='despesa', is_internal_movement=false)
+      - compras no cartão (credit_transactions, is_refund=false)
+
+    NÃO inclui movimentações internas (aporte, resgate, transfer caixinha)
+    nem reembolsos de cartão.
+
+    Retorna lista [{categoria, total}] ordenada desc por total.
+    """
+    ensure_user(user_id)
+
+    start_dt = datetime.combine(start_date, datetime.min.time())
+    end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select coalesce(nullif(categoria, ''), 'outros') as categoria,
+                       sum(valor) as total
+                from (
+                    select categoria, valor
+                    from launches
+                    where user_id = %s
+                      and tipo = 'despesa'
+                      and is_internal_movement = false
+                      and criado_em >= %s and criado_em < %s
+                    union all
+                    select categoria, valor
+                    from credit_transactions
+                    where user_id = %s
+                      and is_refund = false
+                      and purchased_at >= %s::date
+                      and purchased_at <= %s::date
+                ) agg
+                group by coalesce(nullif(categoria, ''), 'outros')
+                order by total desc
+                limit %s
+                """,
+                (
+                    user_id, start_dt, end_excl,
+                    user_id, start_date, end_date,
+                    int(limit),
+                ),
+            )
+            rows = cur.fetchall()
+
+    return [
+        {"categoria": r["categoria"], "total": float(r["total"] or 0)}
+        for r in rows
+    ]
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Desfazer lançamento
 # ──────────────────────────────────────────────────────────────────────────────
