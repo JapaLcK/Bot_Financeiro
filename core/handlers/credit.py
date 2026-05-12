@@ -1718,8 +1718,14 @@ def handle(user_id: int, text: str) -> str | None:
             return "Use: parcelar 300 em 3x no cartao nubank"
 
         # ── número de parcelas ──────────────────────────────────────────────
+        # Aceita variações: "em 3x", "em 3 vezes", "em 3", "3x" — usuário fala
+        # de várias formas. Tenta "em N" primeiro (mais específico, evita
+        # capturar o valor da compra como número de parcelas), depois "Nx"
+        # como fallback pra quem digita "300 3x".
         n = 1
-        mx = re.search(r"(\d+)\s*x", t_low)
+        mx = re.search(r"\bem\s+(\d+)\s*(?:x|vezes?|parcelas?)?\b", t_low)
+        if mx is None:
+            mx = re.search(r"(\d+)\s*x\b", t_low)
         if mx:
             try:
                 n = int(mx.group(1))
