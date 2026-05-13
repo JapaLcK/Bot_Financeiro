@@ -1166,29 +1166,61 @@ def list_credit_card_due_reminders(user_id: int, today: date):
 
 
 def list_installment_groups(user_id: int, limit: int = 15):
+    """Grupos de parcelamento do user, agregando bills pendentes.
+
+    `upcoming_due_dates` é a lista (ordenada) das datas de vencimento das
+    parcelas pendentes — calculada por cartão: se `due_day >= closing_day`,
+    vence no mesmo mês do period_end; senão vence no mês seguinte. Usada
+    no display de "meus parcelamentos" pra mostrar quando cada parcela cai.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 select t.group_id, c.name as card_name,
+                       c.closing_day, c.due_day,
                        max(t.installments_total) as n_total,
                        count(*) as n_registered,
                        sum(t.valor) as total,
                        sum(case when b.status = 'open' then t.valor else 0 end) as total_pending,
                        count(case when b.status = 'open' then 1 end) as n_pending,
                        max(t.purchased_at) as last_purchase,
-                       min(t.nota) as nota
+                       min(t.nota) as nota,
+                       array_remove(
+                         array_agg(
+                           case when b.status = 'open' then b.period_end end
+                           order by b.period_end asc
+                         ),
+                         null
+                       ) as pending_period_ends
                 from credit_transactions t
                 join credit_cards c on c.id = t.card_id
                 join credit_bills b on b.id = t.bill_id
                 where t.user_id=%s and t.group_id is not null and t.is_refund=false
-                group by t.group_id, c.name
+                group by t.group_id, c.name, c.closing_day, c.due_day
                 order by max(t.purchased_at) desc
                 limit %s
                 """,
                 (user_id, limit),
             )
-            return cur.fetchall()
+            rows = cur.fetchall()
+
+    def _due_date(period_end: date, closing_day: int, due_day: int) -> date:
+        if due_day >= closing_day:
+            return date(period_end.year, period_end.month, due_day)
+        m = period_end.month + 1
+        y = period_end.year + (m - 1) // 12
+        m = (m - 1) % 12 + 1
+        return date(y, m, due_day)
+
+    for r in rows:
+        closing_day = int(r["closing_day"])
+        due_day = int(r["due_day"])
+        period_ends = r.get("pending_period_ends") or []
+        r["upcoming_due_dates"] = [
+            _due_date(pe, closing_day, due_day) for pe in period_ends
+        ]
+    return rows
 
 
 def consolidate_duplicate_bills(user_id: int, card_id: int, closing_day: int) -> int:

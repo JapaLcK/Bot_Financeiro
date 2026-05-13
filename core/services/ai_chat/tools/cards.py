@@ -212,6 +212,9 @@ def _list_installments(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
             "total": float(r.get("total") or 0),
             "total_pending": float(r.get("total_pending") or 0),
             "last_purchase": r["last_purchase"].isoformat() if r.get("last_purchase") else None,
+            "upcoming_due_dates": [
+                d.isoformat() for d in (r.get("upcoming_due_dates") or [])
+            ],
         })
     return {
         "groups": groups,
@@ -438,7 +441,10 @@ TOOLS: list[Tool] = [
                     "parcelas ainda a vencer (`only_pending=true`). Use pra "
                     "'meus parcelamentos', 'o que tenho parcelado?', 'quais "
                     "parcelamentos ativos?'. Retorna cartão, descrição, "
-                    "total, total pendente e quantas parcelas faltam."
+                    "total, total pendente, quantas parcelas faltam e "
+                    "`upcoming_due_dates` (datas de vencimento das parcelas "
+                    "pendentes em ordem). Liste as datas como bullets simples "
+                    "no formato dd/mm/aaaa quando o user pedir."
                 ),
                 "parameters": {
                     "type": "object",

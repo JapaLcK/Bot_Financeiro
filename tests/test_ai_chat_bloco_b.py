@@ -113,6 +113,12 @@ def test_list_installments_mostra_grupo_parcelado(user_id):
     assert g["n_pending"] == 3
     assert g["total"] == 300.0
     assert g["total_pending"] == 300.0
+    # 3 parcelas pendentes → 3 datas de vencimento ordenadas
+    assert len(g["upcoming_due_dates"]) == 3
+    assert g["upcoming_due_dates"] == sorted(g["upcoming_due_dates"])
+    # Cada data é ISO yyyy-mm-dd
+    for s in g["upcoming_due_dates"]:
+        date.fromisoformat(s)
 
 
 def test_list_installments_only_pending_false_inclui_quitado(user_id):
