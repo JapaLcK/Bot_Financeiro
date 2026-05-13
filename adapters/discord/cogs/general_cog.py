@@ -36,7 +36,12 @@ class GeneralCog(commands.Cog):
         Tenta processar a mensagem. Retorna True se tratou, False se deve continuar.
         """
         # ── Menu ──────────────────────────────────────────────────────────────
-        if t in {"comandos", "listar comandos", "menu"}:
+        if t in {
+            "comandos", "listar comandos", "menu",
+            "exemplos", "o que pedir", "que pedir",
+            "o que voce faz", "o que vc faz",
+            "o que pode fazer", "o que voce pode fazer", "o que vc pode fazer",
+        }:
             await message.reply(embed=help_embed("start"), view=HelpView(message.author.id))
             return True
 

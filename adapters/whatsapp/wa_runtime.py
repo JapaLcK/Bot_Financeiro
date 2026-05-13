@@ -642,7 +642,15 @@ def process_message(message: InboundMessage) -> None:
         # ---------------------------------------------------------------
         text_cmd = (message.text or "").strip().lower()
 
-        if text_cmd in {"ajuda", "help", "menu", "/ajuda", "/help"}:
+        if text_cmd in {
+            "ajuda", "help", "menu",
+            "/ajuda", "/help", "/menu",
+            "comandos", "/comandos",
+            "exemplos", "/exemplos",
+            "o que voce faz", "o que vc faz", "o que pode fazer",
+            "o que voce pode fazer", "o que vc pode fazer",
+            "o que pedir", "que pedir",
+        }:
             logger.info("WA help menu via texto wa_id=%s", reply_to)
             try:
                 send_help_menu(reply_to)
