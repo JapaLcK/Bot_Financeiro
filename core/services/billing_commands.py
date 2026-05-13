@@ -22,18 +22,19 @@ from datetime import datetime, timezone
 from core.dashboard_links import build_dashboard_link
 
 
-# IMPORTANTE: NAO incluir "assinar" puro — pode colidir com fluxos futuros
-# de confirmacao. Sempre exigir substantivo.
+# "assinar"/"cancelar" puros são ambíguos (colisão com confirmação de outros
+# fluxos) — antes de processar, checamos pending action no DB e devolvemos
+# None se houver. Assim a confirmação tem prioridade.
 _ASSINAR_TRIGGERS = {
-    "assinar plano", "assinar assinatura", "assinar pro", "assinar pigbank+",
-    "assinar pigbank plus", "fazer upgrade", "upgrade", "quero pro", "quero o pro",
-    "virar pro", "pigbank+", "pigbank plus",
+    "assinar", "assinar plano", "assinar assinatura", "assinar pro",
+    "assinar pigbank+", "assinar pigbank plus", "fazer upgrade", "upgrade",
+    "quero pro", "quero o pro", "virar pro", "pigbank+", "pigbank plus",
+    "renovar", "renovar plano", "renovar assinatura",
 }
-# IMPORTANTE: NAO incluir "cancelar" puro — colide com confirmacao de
-# cancelamento de outras acoes (delete launch, parcelamento, etc).
 _CANCELAR_TRIGGERS = {
-    "cancelar plano", "cancelar assinatura", "cancelar pro", "cancelar pigbank+",
-    "cancelar pigbank plus", "encerrar assinatura", "encerrar plano",
+    "cancelar", "cancelar plano", "cancelar assinatura", "cancelar pro",
+    "cancelar pigbank+", "cancelar pigbank plus", "encerrar assinatura",
+    "encerrar plano",
 }
 _PLANO_TRIGGERS = {
     "plano", "meu plano", "minha assinatura", "ver plano", "qual meu plano",
@@ -144,18 +145,27 @@ def _handle_plano(user_id: int, platform: str) -> str:
         )
 
     expires_fmt = _format_plan_expires(expires)
-    status_label = {
-        "trialing": "Trial em andamento (7 dias grátis)",
-        "active": "Ativo",
-        "past_due": "Pagamento em atraso",
-        "canceled": "Cancelado",
-        "unpaid": "Não pago",
-        "inactive": "Inativo",
-    }.get(status, status)
-
-    next_label = "Próxima renovação" if status == "active" else (
-        "Fim do trial / primeira cobrança" if status == "trialing" else "Expira em"
+    # is_pro=True mas last_payment_status vazio/None/"inactive" significa
+    # que o user é Pro mas o webhook do Stripe nunca rodou (acesso manual,
+    # ambiente de teste, etc). Não faz sentido dizer "Status: Inativo"
+    # quando o acesso tá liberado — mostra como "Ativo" pra não confundir.
+    is_uninitialized = (
+        not status or status in ("—", "inactive")
     )
+    if is_uninitialized:
+        status_label = "Ativo"
+        next_label = "Renovação"
+    else:
+        status_label = {
+            "trialing": "Trial em andamento (7 dias grátis)",
+            "active": "Ativo",
+            "past_due": "Pagamento em atraso",
+            "canceled": "Cancelado",
+            "unpaid": "Não pago",
+        }.get(status, status)
+        next_label = "Próxima renovação" if status == "active" else (
+            "Fim do trial / primeira cobrança" if status == "trialing" else "Expira em"
+        )
 
     return (
         f"🐷 Plano: {b('PigBank+')}\n\n"
@@ -169,6 +179,11 @@ def handle_billing_command(user_id: int, text: str, platform: str = "whatsapp") 
     """
     Retorna a resposta pro comando de billing, ou None se nao for um comando reconhecido.
     `platform` controla a formatacao (negrito etc): "whatsapp" ou "discord".
+
+    Importante: se o user tem pending action no DB (confirmação de delete,
+    parcelamento etc), retorna None pra deixar o ai_chat_command resolver
+    a confirmação. Senão "cancelar" puro durante uma confirmação de delete
+    viraria comando de billing.
     """
     norm = _normalize(text)
     if not norm:
@@ -177,6 +192,25 @@ def handle_billing_command(user_id: int, text: str, platform: str = "whatsapp") 
     # Aceita prefixo "/" do Discord (ex: "/assinar")
     if norm.startswith("/"):
         norm = norm[1:].strip()
+
+    # Match rápido: se nem encosta nos triggers, retorna sem mexer no DB.
+    if (
+        norm not in _ASSINAR_TRIGGERS
+        and norm not in _CANCELAR_TRIGGERS
+        and norm not in _PLANO_TRIGGERS
+    ):
+        return None
+
+    # Pending action → cede o turno pro ai_chat_command. Cobre "cancelar"
+    # puro durante confirmação de delete, etc.
+    try:
+        import db
+        if db.ai_get_pending_action(user_id):
+            return None
+    except Exception:
+        # Falha de DB no check não pode bloquear o billing — segue pra
+        # resposta normal.
+        pass
 
     if norm in _ASSINAR_TRIGGERS:
         return _handle_assinar(user_id, platform)
