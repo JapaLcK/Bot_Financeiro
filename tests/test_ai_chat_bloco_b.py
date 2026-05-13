@@ -23,7 +23,7 @@ from core.services.ai_chat.tools.cards import (
 
 def test_total_debt_zero_sem_cartao(user_id):
     out = _get_total_debt(user_id, {})
-    assert out == {"total_debt": 0, "bills": [], "count": 0}
+    assert out == {"total_debt": 0, "overdue_debt": 0, "bills": [], "count": 0}
 
 
 def test_total_debt_soma_faturas_em_aberto(user_id):
@@ -33,9 +33,11 @@ def test_total_debt_soma_faturas_em_aberto(user_id):
 
     out = _get_total_debt(user_id, {})
     assert out["total_debt"] == 150.0
+    assert out["overdue_debt"] == 0.0
     assert out["count"] == 1  # uma fatura aberta
     assert out["bills"][0]["card_name"] == "Nubank"
     assert out["bills"][0]["remaining"] == 150.0
+    assert out["bills"][0]["is_overdue"] is False
 
 
 def test_total_debt_agrega_dois_cartoes(pro_user_id):
@@ -47,6 +49,45 @@ def test_total_debt_agrega_dois_cartoes(pro_user_id):
     out = _get_total_debt(pro_user_id, {})
     assert out["total_debt"] == 280.0
     assert out["count"] == 2
+
+
+def test_total_debt_inclui_fatura_closed_com_saldo_como_overdue(user_id):
+    """
+    Bill `closed` (fatura já fechou) com saldo residual é débito atrasado.
+    Deve aparecer em `get_total_debt` com `is_overdue=True` e contribuir
+    pro `overdue_debt`. A reconciliação preguiçosa de list_open_bills NÃO
+    deve reabrir essa bill (segue closed).
+    """
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.add_credit_purchase(user_id, card_id, 100, "lazer", "show", date.today())
+
+    # Fecha a bill manualmente com saldo (simula fatura passada não paga).
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update credit_bills set status='closed', paid_amount=20 "
+                "where user_id=%s and card_id=%s",
+                (user_id, card_id),
+            )
+        conn.commit()
+
+    out = _get_total_debt(user_id, {})
+    assert out["count"] == 1
+    assert out["total_debt"] == 80.0
+    assert out["overdue_debt"] == 80.0
+    assert out["bills"][0]["is_overdue"] is True
+
+    # Confere que list_open_bills NÃO reabriu (closed continua closed).
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status from credit_bills where user_id=%s and card_id=%s",
+                (user_id, card_id),
+            )
+            row = cur.fetchone()
+    assert row["status"] == "closed", (
+        "reconciliação preguiçosa não deve reabrir bill closed (B1)"
+    )
 
 
 # ─── list_installments ──────────────────────────────────────────────────────

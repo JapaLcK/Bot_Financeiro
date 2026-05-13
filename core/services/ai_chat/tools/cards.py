@@ -138,20 +138,32 @@ def _get_card_limit_usage(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
 # ─── Read: get_total_debt ───────────────────────────────────────────────────
 
 def _get_total_debt(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    """Soma o que falta pagar de TODAS as faturas em aberto.
+    """Soma o que falta pagar de TODAS as faturas com saldo.
+
+    Inclui fatura corrente (`open`) e fatura atrasada (`closed` com
+    saldo). `is_overdue=True` marca fatura passada — a IA usa esse flag
+    pra diferenciar "fatura atual" de "atrasado" na resposta.
 
     `remaining = total - paid_amount`, nunca negativo. Cartão sem fatura
-    aberta simplesmente não aparece. Útil pra "quanto devo no cartão?"
-    sem precisar perguntar cartão por cartão.
+    com saldo simplesmente não aparece.
+
+    Antes de listar, dispara a reconciliação preguiçosa de
+    `list_open_bills` (reabre bills `paid` com saldo) — assim débitos
+    presos como paid não somem.
     """
-    bills = db.list_open_bills(user_id)
+    db.list_open_bills(user_id)  # reconcilia paid → open (efeito colateral)
+    bills = db.list_bills_with_debt(user_id)
     items = []
     total = 0.0
+    overdue_total = 0.0
     for b in bills:
         remaining = max(0.0, float(b.get("total") or 0) - float(b.get("paid_amount") or 0))
         if remaining <= 0:
             continue
         total += remaining
+        is_overdue = bool(b.get("is_overdue"))
+        if is_overdue:
+            overdue_total += remaining
         items.append({
             "card_name": b.get("card_name"),
             "bill_id": b.get("id"),
@@ -160,9 +172,11 @@ def _get_total_debt(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
             "total": float(b.get("total") or 0),
             "paid": float(b.get("paid_amount") or 0),
             "remaining": remaining,
+            "is_overdue": is_overdue,
         })
     return {
         "total_debt": round(total, 2),
+        "overdue_debt": round(overdue_total, 2),
         "bills": items,
         "count": len(items),
     }
@@ -399,11 +413,14 @@ TOOLS: list[Tool] = [
             "function": {
                 "name": "get_total_debt",
                 "description": (
-                    "Soma o que falta pagar de TODAS as faturas em aberto, "
+                    "Soma o que falta pagar de TODAS as faturas com saldo, "
                     "agregando todos os cartões. Use SEMPRE pra 'quanto eu "
                     "devo?', 'qual minha dívida total no cartão?', 'quanto "
                     "tô devendo nas faturas?', 'minha dívida hoje'. Retorna "
-                    "o total e o detalhe por cartão. Sem args."
+                    "`total_debt` (soma geral), `overdue_debt` (parte que tá "
+                    "atrasada, faturas já fechadas com saldo) e o detalhe "
+                    "por cartão (cada bill tem `is_overdue`). Quando "
+                    "overdue_debt > 0, sinaliza atraso pro user. Sem args."
                 ),
                 "parameters": {"type": "object", "properties": {}},
             },

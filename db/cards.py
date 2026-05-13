@@ -1077,19 +1077,20 @@ def rebuild_bill_totals(
 def list_open_bills(user_id: int):
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # Reconciliação preguiçosa: bills marcadas como paid/closed que
-            # voltaram a ter saldo devedor (estorno, parcelamento que caiu
-            # no período de uma bill paga, edição de transação) precisam
-            # voltar pra `open` — senão somem da listagem mesmo devendo.
-            # Cobre casos onde o caller esqueceu de reabrir após mexer no
-            # `total`. Custo: UPDATE com filtro indexado, ~0 rows na maioria
-            # das vezes.
+            # Reconciliação preguiçosa: bill `paid` que voltou a ter saldo
+            # (estorno, parcelamento que caiu no período de uma bill paga,
+            # edição) volta pra `open`. Cobre casos onde o caller esqueceu
+            # de reabrir após mexer no `total`.
+            #
+            # `closed` NÃO é reaberta aqui: fatura que já fechou (period_end
+            # passou) com saldo residual é débito atrasado, não fatura
+            # corrente. Pra consumir essas, use `list_bills_with_debt`.
             cur.execute(
                 """
                 update credit_bills
                    set status='open', paid_at=null
                  where user_id=%s
-                   and status in ('paid','closed')
+                   and status = 'paid'
                    and total > coalesce(paid_amount, 0)
                 """,
                 (user_id,),
@@ -1109,6 +1110,38 @@ def list_open_bills(user_id: int):
             rows = cur.fetchall()
         conn.commit()
     return rows
+
+
+def list_bills_with_debt(user_id: int):
+    """Bills com saldo a pagar: faturas atuais (`open`) e atrasadas
+    (`closed` com `total > paid_amount`).
+
+    Usada pelo `get_total_debt` da IA pra agregar TUDO que o user deve no
+    cartão, separando o que ainda tá em curso do que já passou e segue
+    em aberto. Cada row tem `is_overdue=True` quando status='closed'.
+
+    Não inclui `paid` (mesmo com inconsistência) — pra reabrir paid com
+    saldo, chame `list_open_bills` antes (faz reconciliação preguiçosa).
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select b.id, b.card_id, c.name as card_name,
+                       b.period_start, b.period_end,
+                       b.total, coalesce(b.paid_amount, 0) as paid_amount,
+                       b.status,
+                       (b.status = 'closed') as is_overdue
+                from credit_bills b
+                join credit_cards c on c.id = b.card_id
+                where b.user_id=%s
+                  and b.status in ('open', 'closed')
+                  and b.total > coalesce(b.paid_amount, 0)
+                order by b.period_end asc, c.name asc
+                """,
+                (user_id,),
+            )
+            return cur.fetchall()
 
 
 def list_credit_card_due_reminders(user_id: int, today: date):
