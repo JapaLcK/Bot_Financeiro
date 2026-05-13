@@ -4,9 +4,12 @@ core/services/ai_chat_commands.py — handler do comando "pergunta" no bot.
 Roteamento:
   - Se há pending action no DB (write esperando confirmação) → toda mensagem
     do user é roteada pra IA, que decide se executa/cancela/descarta.
-  - Senão, se o texto começa com prefixo de IA ("pergunta", "piggy", "ia") →
-    roteia pra IA com o resto da frase.
-  - Senão → retorna None (segue o fluxo normal do bot).
+  - Senão, se o user é **Pro** → toda mensagem vai pra IA (Sprint 3). O
+    prefix "piggy"/"pergunta"/"ia" continua aceito mas é opcional — se
+    presente, é removido pra não poluir o input da IA.
+  - Senão (Free), só roteia pra IA se o texto começa com prefixo. Aí cai
+    no gate Pro com mensagem "isso é PigBank+".
+  - Senão → retorna None (segue o fluxo normal do bot tradicional).
 
 Gate Pro: usuários Free recebem mensagem explícita "isso é PigBank+".
 """
@@ -73,15 +76,16 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
     Retorna None se a msg NÃO é pra IA (segue fluxo normal do bot).
 
     Roteamento:
-      1. Tem pending action → toda msg vai pra IA (mesmo sem prefixo)
-      2. Msg começa com prefixo IA → vai pra IA
-      3. Senão → None
+      1. Tem pending action → toda msg vai pra IA (mesmo sem prefixo).
+      2. User é Pro → toda msg vai pra IA, prefix opcional (Sprint 3).
+      3. User é Free + msg começa com prefixo → cai no gate "isso é PigBank+".
+      4. Senão (Free sem prefixo) → None (segue fluxo tradicional do bot).
     """
     text = (text or "").strip()
     if not text:
         return None
 
-    # 1. Há pending action? Toda msg passa pela IA.
+    # 1. Há pending action? Toda msg passa pela IA, qualquer plano.
     try:
         pending = db.ai_get_pending_action(user_id)
     except Exception as exc:
@@ -89,32 +93,46 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
         pending = None
 
     has_pending = bool(pending)
-    user_message: str | None = None
 
-    if has_pending:
-        user_message = text
-    else:
-        stripped = _strip_ai_prefix(text)
-        if stripped is None:
-            return None
-        # Prefixo presente, mas sem conteúdo (só "piggy" puro)
-        if not stripped:
-            return (
-                "🐷 Manda sua pergunta aí depois do meu nome.\n"
-                'Ex.: "piggy, quanto gastei em alimentação esse mês?"'
-            )
-        user_message = stripped
-
-    # 2. Gate Pro
+    # 2. Plano determina o roteamento default.
     try:
         user_is_pro = is_pro(user_id)
     except Exception as exc:
         logger.warning("is_pro falhou: %s", exc)
         user_is_pro = False
 
+    user_message: str | None = None
+
+    if has_pending:
+        # Pending action sempre passa, com texto cru. Se Pro também tem
+        # prefix, removemos pra não confundir a IA.
+        if user_is_pro:
+            stripped = _strip_ai_prefix(text)
+            user_message = stripped if stripped else text
+        else:
+            user_message = text
+    elif user_is_pro:
+        # Pro sem pending: toda msg vai pra IA. Se tem prefix "piggy", remove
+        # pra IA não receber "piggy saldo" — recebe "saldo".
+        stripped = _strip_ai_prefix(text)
+        if stripped is not None:
+            # Prefix presente: usa o resto (mesmo se vazio — "piggy" sozinho
+            # vira saudação ambígua tratada pela IA).
+            user_message = stripped or text
+        else:
+            user_message = text
+    else:
+        # Free sem pending: prefix obrigatório pra cair no gate Pro.
+        stripped = _strip_ai_prefix(text)
+        if stripped is None:
+            return None
+        # Cai no gate Pro abaixo (mesmo se for só "piggy" puro).
+
+    # 3. Free → mensagem de upgrade.
     if not user_is_pro:
-        # Se tinha pending e o user virou Free no meio (edge case), limpa
         if has_pending:
+            # Edge case: tinha pending e o user virou Free no meio. Limpa
+            # pra não deixar o estado preso.
             try:
                 db.ai_clear_pending_action(user_id)
             except Exception:
@@ -124,7 +142,7 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
             "Dá uma olhada nos planos: https://pigbankai.com/precos"
         )
 
-    # 3. Roteia pra IA
+    # 4. Pro: roteia pra IA.
     from core.services.ai_chat import chat as ai_chat_run
     try:
         return ai_chat_run(
