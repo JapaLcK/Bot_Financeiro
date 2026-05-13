@@ -15,6 +15,7 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
+  --bg-page:       #070b14;
   --glass-bg:      rgba(255,255,255,0.07);
   --glass-border:  rgba(255,255,255,0.13);
   --glass-shadow:  0 8px 32px rgba(0,0,0,0.35);
@@ -26,15 +27,59 @@
   --text-3: rgba(255,255,255,0.28);
   --div:    rgba(255,255,255,0.08);
   --ease:   cubic-bezier(.4,0,.2,1);
+  --orb-opacity: .42;
+}
+
+/* ─── Light mode override ──────────────────────────────────────────── */
+body.light {
+  --bg-page:       #e6eaf2;
+  --glass-bg:      rgba(255,255,255,0.85);
+  --glass-border:  rgba(15,23,42,0.09);
+  --glass-shadow:  0 6px 20px rgba(15,23,42,0.07);
+  --text:   #0f172a;
+  --text-2: #475569;
+  --text-3: #94a3b8;
+  --div:    rgba(15,23,42,0.08);
+  --orb-opacity: .12;
 }
 
 html { scroll-behavior: smooth; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
-  background: #070b14; color: var(--text);
+  background: var(--bg-page); color: var(--text);
   min-height: 100vh; overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
+  transition: background .3s ease, color .3s ease;
 }
+.orb { opacity: var(--orb-opacity) !important; }
+body.light .orb-1 { background:radial-gradient(circle,#c4b5fd,transparent 70%) !important; }
+body.light .orb-2 { background:radial-gradient(circle,#bae6fd,transparent 70%) !important; }
+body.light .orb-3 { background:radial-gradient(circle,#fbcfe8,transparent 70%) !important; opacity:.1 !important; }
+body.light .orb-4 { background:radial-gradient(circle,#bbf7d0,transparent 70%) !important; opacity:.08 !important; }
+body.light::before { opacity:.25; }
+
+/* Inputs/buttons em light */
+body.light .hbtn { background:rgba(255,255,255,.7); color:var(--text-2); border-color:var(--glass-border); }
+body.light .hbtn:hover { background:#fff; color:var(--text); }
+body.light .mbtn { background:rgba(255,255,255,.7); color:var(--text-2); }
+body.light .mbtn:hover:not(:disabled) { background:#fff; color:var(--text); }
+body.light header { background:rgba(255,255,255,.75); }
+body.light .sidenav-item:hover:not([disabled]) { background:rgba(15,23,42,0.04); }
+body.light .sidenav-item.active { background:linear-gradient(135deg, rgba(124,58,237,.12), rgba(59,130,246,.08)); color:#5b21b6; }
+body.light .sidenav-item.active .sidenav-title { color:#5b21b6; }
+body.light .sidenav-item .sn-icon { background:rgba(15,23,42,0.04); }
+body.light .sidenav-toggle { background:rgba(255,255,255,.7); }
+body.light .filter-input { background:#fff; color:var(--text); }
+body.light .ftab { background:rgba(255,255,255,.7); color:var(--text-2); }
+body.light .ftab.active { background:linear-gradient(135deg,#7c3aed,#3b82f6); color:#fff; }
+body.light .bar-track { background:rgba(15,23,42,0.07); }
+body.light .parcel-row { background:rgba(15,23,42,0.025); }
+body.light .parcel-row.next { background:rgba(96,165,250,.12); }
+body.light .inst-btn { background:#fff; }
+body.light .inst-btn:hover { background:#f8fafc; }
+body.light .mock-cta.outline { background:rgba(255,255,255,.6); color:var(--text-2); }
+body.light .mock-cta.outline:hover { background:#fff; color:var(--text); }
+body.light .user-dropdown { background:#fff; }
 
 /* ─── Ambient orbs ──────────────────────────────────────────────────── */
 .bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
@@ -49,6 +94,485 @@ body::before { content:""; position:fixed; inset:0; z-index:1; pointer-events:no
 
 /* ─── Layout ────────────────────────────────────────────────────────── */
 .page { position:relative; z-index:2; max-width:1400px; margin:0 auto; padding:24px 20px 64px; }
+body.has-sidenav .page { margin-left:248px; max-width:none; padding-right:32px; }
+@media (max-width: 980px) {
+  body.has-sidenav .page { margin-left:0; padding-right:20px; }
+}
+
+/* ─── Side navigation ───────────────────────────────────────────────── */
+.sidenav {
+  position:fixed; top:0; left:0; bottom:0; width:240px; z-index:40;
+  display:flex; flex-direction:column;
+  padding:18px 14px 14px;
+  background:rgba(255,255,255,.045);
+  backdrop-filter:blur(28px) saturate(170%); -webkit-backdrop-filter:blur(28px) saturate(170%);
+  border-right:1px solid var(--glass-border);
+  box-shadow:inset -1px 0 0 rgba(255,255,255,.04), 4px 0 24px rgba(0,0,0,.25);
+  overflow-y:auto;
+}
+.sidenav::-webkit-scrollbar { width:6px; }
+.sidenav::-webkit-scrollbar-thumb { background:rgba(255,255,255,.08); border-radius:3px; }
+.sidenav-brand {
+  display:flex; align-items:center; gap:10px;
+  padding:6px 8px 16px;
+  border-bottom:1px solid var(--div);
+  margin-bottom:12px;
+}
+.sidenav-brand .logo {
+  width:38px; height:38px; border-radius:11px;
+  background:linear-gradient(135deg,#ec4899,#7c3aed 55%,#3b82f6);
+  display:flex;align-items:center;justify-content:center; font-size:1.05rem;
+  box-shadow:0 6px 16px rgba(124,58,237,.45), inset 0 1px 0 rgba(255,255,255,.18);
+}
+.sidenav-brand .brand-text { display:flex; flex-direction:column; line-height:1.15; min-width:0; }
+.sidenav-brand .brand-name { font-size:.92rem; font-weight:700; color:var(--text); letter-spacing:-.01em; }
+.sidenav-brand .brand-sub  { font-size:.66rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.08em; }
+
+.sidenav-section {
+  font-size:.62rem; text-transform:uppercase; letter-spacing:.1em;
+  color:var(--text-3); padding:14px 10px 6px;
+}
+.sidenav-item {
+  display:flex; align-items:center; gap:11px;
+  width:100%; padding:9px 11px; margin:1px 0;
+  background:transparent; border:1px solid transparent; border-radius:10px;
+  color:var(--text-2); font-size:.83rem; font-weight:500; text-align:left;
+  cursor:pointer; transition:all .18s var(--ease); text-decoration:none;
+  font-family:inherit;
+}
+.sidenav-item:hover:not([disabled]) {
+  background:rgba(255,255,255,.06);
+  color:var(--text);
+  border-color:rgba(255,255,255,.07);
+}
+.sidenav-item.active {
+  background:linear-gradient(135deg, rgba(124,58,237,.22), rgba(59,130,246,.18));
+  color:#fff;
+  border-color:rgba(124,58,237,.4);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.1), 0 4px 14px rgba(124,58,237,.18);
+}
+.sidenav-item .sn-icon {
+  width:22px; height:22px; border-radius:7px;
+  display:inline-flex; align-items:center; justify-content:center;
+  font-size:.92rem; flex-shrink:0;
+  background:rgba(255,255,255,.04);
+  color:var(--text-2);
+}
+.sidenav-item.active .sn-icon {
+  background:linear-gradient(135deg, rgba(167,139,250,.35), rgba(96,165,250,.25));
+  color:#fff;
+}
+.sidenav-item .sn-label { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sidenav-item .sn-tag {
+  font-size:.55rem; font-weight:700; padding:2px 6px; border-radius:6px;
+  letter-spacing:.06em; text-transform:uppercase;
+  background:rgba(251,191,36,.18); color:#fbbf24;
+}
+.sidenav-item .sn-tag.beta { background:rgba(96,165,250,.18); color:#60a5fa; }
+.sidenav-item .sn-tag.new  { background:rgba(52,211,153,.18); color:#34d399; }
+
+.sidenav-footer {
+  margin-top:auto; padding-top:12px; border-top:1px solid var(--div);
+  display:flex; flex-direction:column; gap:2px;
+}
+
+/* Mobile drawer */
+.sidenav-toggle { display:none; }
+.sidenav-backdrop { display:none; }
+@media (max-width: 980px) {
+  .sidenav {
+    transform:translateX(-100%);
+    transition:transform .25s var(--ease);
+  }
+  .sidenav.open { transform:translateX(0); }
+  .sidenav-toggle {
+    display:inline-flex; align-items:center; justify-content:center;
+    width:36px; height:36px; border-radius:10px;
+    background:rgba(255,255,255,.07); border:1px solid var(--glass-border);
+    color:var(--text); font-size:1rem; cursor:pointer;
+    margin-right:6px;
+  }
+  .sidenav-backdrop.open {
+    display:block; position:fixed; inset:0; z-index:39;
+    background:rgba(0,0,0,.5); backdrop-filter:blur(2px);
+  }
+}
+
+/* Hide old top tabs when sidenav is active (we move primary nav to side) */
+body.has-sidenav .dashboard-tabs .main-tab[data-view] { display:none; }
+body.has-sidenav .dashboard-tabs { margin-top:6px; }
+
+/* Placeholder views (Cartões, Metas, Orçamentos, etc.) */
+.view-placeholder {
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  text-align:center; padding:60px 24px;
+  background:var(--glass-bg); border:1px dashed var(--glass-border);
+  border-radius:var(--radius); min-height:340px;
+  backdrop-filter:blur(20px) saturate(150%); -webkit-backdrop-filter:blur(20px) saturate(150%);
+}
+.view-placeholder .vp-emoji { font-size:3.4rem; margin-bottom:14px; filter:drop-shadow(0 4px 18px rgba(124,58,237,.4)); }
+.view-placeholder h2 { font-size:1.45rem; font-weight:700; margin-bottom:10px; }
+.view-placeholder p { color:var(--text-2); max-width:520px; line-height:1.55; font-size:.92rem; }
+.view-placeholder .vp-chips { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:22px; }
+.view-placeholder .vp-chip {
+  background:rgba(255,255,255,.06); border:1px solid var(--glass-border);
+  padding:7px 13px; border-radius:999px; font-size:.78rem; color:var(--text-2);
+}
+
+/* ─── Mock components (Cartões, Parcelamentos, Metas, etc.) ─────────── */
+.mock-grid { display:grid; gap:14px; }
+.mock-grid.cols-2 { grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); }
+.mock-grid.cols-3 { grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); }
+.mock-grid.cols-4 { grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); }
+
+.mock-card {
+  background:var(--glass-bg); border:1px solid var(--glass-border);
+  border-radius:var(--radius); padding:18px;
+  backdrop-filter:blur(18px) saturate(150%); -webkit-backdrop-filter:blur(18px) saturate(150%);
+  box-shadow:var(--glass-shadow);
+}
+.mock-card h3 { font-size:.78rem; color:var(--text-2); font-weight:600; text-transform:uppercase; letter-spacing:.06em; margin-bottom:14px; }
+
+/* Cartões de crédito visuais */
+.cc-card {
+  position:relative; padding:18px 20px; border-radius:18px;
+  min-height:170px; display:flex; flex-direction:column; justify-content:space-between;
+  color:#fff; overflow:hidden;
+  box-shadow:0 12px 32px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.18);
+  border:1px solid rgba(255,255,255,.08);
+}
+.cc-card::after {
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background:radial-gradient(circle at 80% -10%, rgba(255,255,255,.22), transparent 60%);
+}
+.cc-card.purple { background:linear-gradient(135deg,#7c3aed 0%, #5b21b6 45%, #1e1b4b 100%); }
+.cc-card.coral  { background:linear-gradient(135deg,#ec4899 0%, #db2777 45%, #831843 100%); }
+.cc-card.green  { background:linear-gradient(135deg,#10b981 0%, #047857 45%, #064e3b 100%); }
+.cc-card.gold   { background:linear-gradient(135deg,#f59e0b 0%, #c2410c 45%, #7c2d12 100%); }
+.cc-top { display:flex; justify-content:space-between; align-items:flex-start; z-index:1; position:relative; }
+.cc-brand { font-weight:700; font-size:.95rem; letter-spacing:.02em; }
+.cc-flag  { font-size:.65rem; padding:3px 8px; background:rgba(255,255,255,.18); border-radius:6px; text-transform:uppercase; letter-spacing:.08em; font-weight:700; }
+.cc-nickname { font-size:1.4rem; font-weight:800; letter-spacing:-.02em; line-height:1.1; z-index:1; position:relative; }
+.cc-number {
+  font-family:'SF Mono','Menlo','Courier New',monospace;
+  font-size:1.2rem; letter-spacing:.18em; opacity:.95;
+  z-index:1; position:relative;
+}
+.cc-bg-icon { position:absolute; right:-14px; bottom:-22px; font-size:7rem; opacity:.08; line-height:1; pointer-events:none; }
+
+.cc-meta { display:grid; grid-template-columns:1fr 1fr; gap:10px 18px; margin-top:14px; font-size:.78rem; }
+.cc-meta .row { display:flex; justify-content:space-between; gap:8px; padding:6px 0; border-bottom:1px solid var(--div); }
+.cc-meta .row:last-child { border-bottom:0; }
+.cc-meta .label { color:var(--text-2); }
+.cc-meta .val { color:var(--text); font-weight:600; }
+.cc-meta .val.red { color:var(--red); }
+.cc-meta .val.green { color:var(--green); }
+
+/* Barras de progresso */
+.bar-row { display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid var(--div); }
+.bar-row:last-child { border-bottom:0; }
+.bar-icon {
+  width:32px; height:32px; border-radius:9px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; font-size:.95rem;
+  background:rgba(255,255,255,.06); border:1px solid var(--glass-border);
+}
+.bar-body { flex:1; min-width:0; }
+.bar-head { display:flex; justify-content:space-between; gap:8px; margin-bottom:6px; font-size:.83rem; }
+.bar-head .name { color:var(--text); font-weight:600; }
+.bar-head .val { color:var(--text-2); font-variant-numeric:tabular-nums; }
+.bar-track { height:7px; border-radius:999px; background:rgba(255,255,255,.07); overflow:hidden; }
+.bar-fill { height:100%; border-radius:999px; transition:width .4s ease; }
+.bar-fill.green  { background:linear-gradient(90deg, #10b981, #34d399); }
+.bar-fill.yellow { background:linear-gradient(90deg, #f59e0b, #fbbf24); }
+.bar-fill.red    { background:linear-gradient(90deg, #ef4444, #f87171); }
+.bar-fill.blue   { background:linear-gradient(90deg, #3b82f6, #60a5fa); }
+.bar-fill.purple { background:linear-gradient(90deg, #7c3aed, #a78bfa); }
+.bar-sub { font-size:.7rem; color:var(--text-3); margin-top:4px; }
+
+/* Lista de transações / timeline */
+.tx-list { display:flex; flex-direction:column; }
+.tx-row {
+  display:flex; align-items:center; gap:12px; padding:11px 0;
+  border-bottom:1px solid var(--div);
+}
+.tx-row:last-child { border-bottom:0; }
+.tx-row .tx-icon {
+  width:34px; height:34px; border-radius:10px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; font-size:1rem;
+  background:rgba(255,255,255,.06); border:1px solid var(--glass-border);
+}
+.tx-row .tx-main { flex:1; min-width:0; }
+.tx-row .tx-desc { font-size:.88rem; color:var(--text); font-weight:600; }
+.tx-row .tx-meta { font-size:.72rem; color:var(--text-3); margin-top:2px; }
+.tx-row .tx-amt  { font-size:.93rem; font-weight:700; font-variant-numeric:tabular-nums; }
+.tx-row .tx-amt.red   { color:var(--red); }
+.tx-row .tx-amt.green { color:var(--green); }
+.tx-row .tx-tag {
+  font-size:.62rem; font-weight:600; padding:2px 7px; border-radius:5px;
+  background:rgba(255,255,255,.07); color:var(--text-2); margin-left:6px;
+  text-transform:lowercase;
+}
+
+/* Pílulas de categoria coloridas */
+.cat-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:10px; }
+.cat-pill {
+  display:flex; align-items:center; gap:10px;
+  padding:11px 13px; border-radius:12px;
+  background:rgba(255,255,255,.04); border:1px solid var(--glass-border);
+  transition:all .2s var(--ease); cursor:pointer;
+}
+.cat-pill:hover { background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.18); }
+.cat-pill .cat-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+.cat-pill .cat-body { flex:1; min-width:0; }
+.cat-pill .cat-name { font-size:.78rem; font-weight:600; color:var(--text); }
+.cat-pill .cat-val  { font-size:.7rem; color:var(--text-3); font-variant-numeric:tabular-nums; }
+
+/* Metas — card com ring de progresso (svg) */
+.goal-card {
+  display:flex; gap:16px; padding:16px;
+  background:var(--glass-bg); border:1px solid var(--glass-border);
+  border-radius:16px;
+  backdrop-filter:blur(18px) saturate(150%); -webkit-backdrop-filter:blur(18px) saturate(150%);
+}
+.goal-ring { position:relative; width:78px; height:78px; flex-shrink:0; }
+.goal-ring svg { transform:rotate(-90deg); }
+.goal-ring .ring-bg { stroke:rgba(255,255,255,.07); }
+.goal-ring .ring-fg { stroke-linecap:round; transition:stroke-dashoffset .5s ease; }
+.goal-ring .ring-pct {
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-size:.84rem; font-weight:700; color:var(--text);
+}
+.goal-info { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
+.goal-info .goal-name { font-size:.95rem; font-weight:700; color:var(--text); }
+.goal-info .goal-amt  { font-size:.82rem; color:var(--text-2); font-variant-numeric:tabular-nums; }
+.goal-info .goal-deadline { font-size:.7rem; color:var(--text-3); margin-top:auto; }
+
+/* Stats row (KPIs em destaque) */
+.stats-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:14px; margin-bottom:18px; }
+.stat-tile {
+  padding:16px 18px; background:var(--glass-bg); border:1px solid var(--glass-border);
+  border-radius:14px;
+  backdrop-filter:blur(18px) saturate(150%); -webkit-backdrop-filter:blur(18px) saturate(150%);
+}
+.stat-tile .stat-label { font-size:.7rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.06em; }
+.stat-tile .stat-value { font-size:1.45rem; font-weight:700; margin-top:6px; font-variant-numeric:tabular-nums; }
+.stat-tile .stat-delta { font-size:.72rem; margin-top:4px; }
+.stat-tile .stat-delta.up   { color:var(--green); }
+.stat-tile .stat-delta.down { color:var(--red); }
+
+/* CTA "Adicionar" inline */
+.mock-cta {
+  display:inline-flex; align-items:center; gap:6px;
+  padding:8px 14px; border-radius:10px;
+  background:linear-gradient(135deg, #7c3aed, #3b82f6);
+  border:1px solid rgba(124,58,237,.5); color:#fff; font-size:.78rem; font-weight:600;
+  cursor:pointer; transition:all .2s var(--ease);
+  box-shadow:0 4px 14px rgba(124,58,237,.25);
+}
+.mock-cta:hover { filter:brightness(1.08); box-shadow:0 6px 18px rgba(124,58,237,.4); transform:translateY(-1px); }
+.mock-cta.outline {
+  background:transparent; border-color:var(--glass-border); color:var(--text-2);
+}
+.mock-cta.outline:hover { background:rgba(255,255,255,.06); color:var(--text); }
+.mock-header {
+  display:flex; justify-content:space-between; align-items:center; gap:12px;
+  margin-bottom:14px; flex-wrap:wrap;
+}
+
+/* ─── Parcelamento v2 — layout horizontal, expansão inline (empurra pra baixo) ─── */
+.inst-list { display:flex; flex-direction:column; gap:12px; }
+
+details.inst-card {
+  padding:0; overflow:hidden;
+  transition:border-color .2s var(--ease);
+}
+details.inst-card[open] { border-color:rgba(124,58,237,.45); }
+details.inst-card summary {
+  list-style:none; cursor:pointer;
+  padding:16px 20px;
+  display:flex; align-items:center; gap:18px;
+  transition:background .2s var(--ease);
+}
+details.inst-card summary::-webkit-details-marker { display:none; }
+details.inst-card summary:hover { background:rgba(255,255,255,.025); }
+body.light details.inst-card summary:hover { background:rgba(15,23,42,.025); }
+
+/* Ícone do parcelamento — gradient PigBank */
+.inst-icon-box {
+  width:54px; height:54px; border-radius:14px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  font-size:1.55rem;
+  background:linear-gradient(135deg, #7c3aed 0%, #3b82f6 100%);
+  box-shadow:0 6px 18px rgba(124,58,237,.35), inset 0 1px 0 rgba(255,255,255,.18);
+}
+
+/* Bloco central — nome + tags + barra */
+.inst-body { flex:1; min-width:0; display:flex; flex-direction:column; gap:7px; }
+.inst-row-1 { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.inst-name { font-size:1rem; font-weight:700; color:var(--text); letter-spacing:-.01em; }
+.inst-tag-cat {
+  font-size:.68rem; font-weight:700; padding:3px 9px; border-radius:6px;
+  text-transform:uppercase; letter-spacing:.06em;
+  background:linear-gradient(135deg, rgba(124,58,237,.22), rgba(59,130,246,.16));
+  color:#c4b5fd; border:1px solid rgba(124,58,237,.3);
+}
+body.light .inst-tag-cat {
+  background:linear-gradient(135deg, rgba(124,58,237,.12), rgba(59,130,246,.08));
+  color:#5b21b6; border-color:rgba(124,58,237,.2);
+}
+.inst-tag-card { font-size:.75rem; color:var(--text-3); display:inline-flex; align-items:center; gap:5px; }
+.inst-tag-date { font-size:.72rem; color:var(--text-3); font-variant-numeric:tabular-nums; }
+.inst-tag-date::before { content:"·"; margin-right:6px; opacity:.6; }
+
+.inst-progress-mini {
+  display:flex; align-items:center; gap:10px; margin-top:2px;
+}
+.progress-blocks {
+  flex:1; display:flex; gap:3px; height:10px;
+}
+.progress-block {
+  flex:1; height:100%; border-radius:3px;
+  background:rgba(255,255,255,.07);
+  border:1px solid var(--glass-border);
+  transition:all .3s var(--ease);
+}
+body.light .progress-block { background:rgba(15,23,42,.06); border-color:rgba(15,23,42,.08); }
+.progress-block.paid {
+  background:linear-gradient(135deg, #7c3aed 0%, #6366f1 50%, #3b82f6 100%);
+  border-color:transparent;
+  box-shadow:0 0 6px rgba(124,58,237,.5);
+}
+body.light .progress-block.paid {
+  background:linear-gradient(135deg, #6d28d9 0%, #4f46e5 50%, #2563eb 100%);
+  box-shadow:0 1px 3px rgba(76,29,149,.25);
+}
+.progress-block.next {
+  background:rgba(124,58,237,.18);
+  border:1.5px dashed #a78bfa;
+  animation:nextBlockPulse 1.8s ease-in-out infinite;
+}
+body.light .progress-block.next {
+  border-color:#7c3aed; background:rgba(124,58,237,.08);
+  animation:none;
+}
+@keyframes nextBlockPulse {
+  0%, 100% { box-shadow:0 0 0 0 rgba(124,58,237,.3); }
+  50%      { box-shadow:0 0 0 4px rgba(124,58,237,0); }
+}
+.inst-progress-text { font-size:.72rem; color:var(--text-3); font-variant-numeric:tabular-nums; white-space:nowrap; }
+
+/* Bloco direita — total + parcelas + chevron */
+.inst-right { display:flex; align-items:center; gap:14px; flex-shrink:0; }
+.inst-amounts { text-align:right; }
+.inst-amounts .tot { font-size:1.15rem; font-weight:800; color:var(--text); font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+.inst-amounts .sub { font-size:.7rem; color:var(--text-3); margin-top:2px; }
+.inst-chevron {
+  width:34px; height:34px; border-radius:10px;
+  background:rgba(255,255,255,.05); border:1px solid var(--glass-border);
+  display:flex; align-items:center; justify-content:center;
+  font-size:.85rem; color:var(--text-2);
+  transition:all .25s var(--ease);
+}
+body.light .inst-chevron { background:rgba(15,23,42,.04); }
+details.inst-card[open] .inst-chevron {
+  background:linear-gradient(135deg, #7c3aed, #3b82f6); color:#fff;
+  border-color:rgba(124,58,237,.5);
+  transform:rotate(180deg);
+}
+
+/* Detalhes expandidos — empurra pra baixo, sem absolute */
+.inst-detail-body {
+  padding:0 20px 18px;
+  animation:detailSlide .25s var(--ease);
+}
+@keyframes detailSlide {
+  from { opacity:0; transform:translateY(-6px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+.inst-detail-divider {
+  height:1px; background:linear-gradient(90deg, transparent, var(--div) 20%, var(--div) 80%, transparent);
+  margin-bottom:18px;
+}
+.inst-detail-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px; }
+.inst-detail-head h4 {
+  font-size:.7rem; font-weight:700; color:var(--text-3);
+  text-transform:uppercase; letter-spacing:.1em;
+}
+.inst-pay-summary { display:flex; gap:14px; font-size:.78rem; }
+.inst-pay-summary .paid-amt { color:#34d399; font-weight:600; }
+.inst-pay-summary .left-amt { color:#fb923c; font-weight:600; }
+.inst-pay-summary .paid-amt::before, .inst-pay-summary .left-amt::before {
+  content:""; display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:6px; vertical-align:middle;
+}
+.inst-pay-summary .paid-amt::before { background:#34d399; }
+.inst-pay-summary .left-amt::before { background:#fb923c; }
+
+.inst-delete-btn {
+  padding:6px 12px; border-radius:7px; font-size:.72rem; font-weight:700;
+  background:#dc2626; color:#fff; border:1px solid #dc2626; cursor:pointer;
+  transition:all .15s var(--ease); white-space:nowrap;
+  box-shadow:0 2px 6px rgba(220,38,38,.25);
+}
+.inst-delete-btn:hover { background:#b91c1c; border-color:#b91c1c; transform:translateY(-1px); box-shadow:0 4px 12px rgba(220,38,38,.4); }
+
+/* Lista de parcelas nos detalhes — info clara: data, valor, status */
+.parcel-rows { display:flex; flex-direction:column; gap:6px; }
+.parcel-row {
+  display:flex; align-items:center; gap:14px;
+  padding:10px 14px; border-radius:10px;
+  background:rgba(255,255,255,.022);
+  border:1px solid var(--glass-border);
+  transition:all .15s var(--ease);
+}
+body.light .parcel-row { background:rgba(15,23,42,.02); }
+.parcel-row:hover { background:rgba(255,255,255,.05); border-color:rgba(124,58,237,.25); }
+body.light .parcel-row:hover { background:rgba(124,58,237,.04); }
+
+.parcel-row.paid {
+  background:linear-gradient(90deg, rgba(124,58,237,.08), rgba(59,130,246,.04));
+  border-color:rgba(124,58,237,.2);
+}
+.parcel-row.next {
+  background:linear-gradient(90deg, rgba(124,58,237,.14), rgba(59,130,246,.08));
+  border-color:rgba(124,58,237,.4);
+}
+
+.parcel-status-icon {
+  width:26px; height:26px; border-radius:50%; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; font-size:.75rem; font-weight:700;
+}
+.parcel-status-icon.paid {
+  background:linear-gradient(135deg, #7c3aed, #3b82f6); color:#fff;
+  box-shadow:0 2px 8px rgba(124,58,237,.4);
+}
+.parcel-status-icon.next {
+  background:transparent; color:#a78bfa;
+  border:1.5px dashed #7c3aed;
+}
+body.light .parcel-status-icon.next { color:#7c3aed; }
+.parcel-status-icon.future {
+  background:transparent; color:var(--text-3);
+  border:1.5px solid var(--glass-border);
+}
+
+.parcel-info { flex:1; min-width:0; display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+.parcel-name { font-size:.88rem; font-weight:700; color:var(--text); }
+.parcel-date { font-size:.78rem; color:var(--text-3); font-variant-numeric:tabular-nums; }
+.parcel-tag {
+  font-size:.62rem; padding:2px 7px; border-radius:5px;
+  text-transform:uppercase; letter-spacing:.06em; font-weight:700;
+}
+.parcel-tag.paid { background:rgba(52,211,153,.16); color:#34d399; }
+.parcel-tag.next { background:linear-gradient(135deg, rgba(124,58,237,.25), rgba(59,130,246,.18)); color:#c4b5fd; border:1px solid rgba(124,58,237,.3); }
+body.light .parcel-tag.next { color:#5b21b6; }
+.parcel-val { font-size:.95rem; font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; }
+.parcel-trash {
+  width:28px; height:28px; border-radius:7px; background:transparent; border:none;
+  color:var(--text-3); cursor:pointer; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; font-size:.85rem;
+  transition:all .15s var(--ease);
+}
+.parcel-trash:hover { color:#dc2626; background:rgba(220,38,38,.1); }
 
 /* ─── Header ────────────────────────────────────────────────────────── */
 header {
@@ -189,9 +713,11 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 
 /* ─── Alert banner ──────────────────────────────────────────────────── */
 #alert-banner { display:none;margin-bottom:16px;backdrop-filter:blur(16px);
-  border-radius:14px;padding:12px 18px;font-size:.81rem; }
-#alert-banner.exceeded { background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.28);color:var(--red); }
-#alert-banner.warning  { background:rgba(251,191,36,.1); border:1px solid rgba(251,191,36,.28); color:var(--yellow); }
+  border-radius:14px;padding:12px 18px;font-size:.81rem;color:var(--text-2); }
+#alert-banner.exceeded { background:rgba(248,113,113,.05);border:1px solid rgba(248,113,113,.18); }
+#alert-banner.warning  { background:rgba(251,191,36,.05); border:1px solid rgba(251,191,36,.18); }
+body.light #alert-banner.exceeded { background:rgba(220,38,38,.04); border-color:rgba(220,38,38,.15); }
+body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-color:rgba(245,158,11,.18); }
 #alert-banner .alert-banner-head { display:flex;align-items:flex-start;justify-content:space-between;gap:12px; }
 #alert-banner .alert-banner-body { flex:1;min-width:0; }
 .alert-row { display:flex;align-items:center;gap:8px;padding:2px 0; }
@@ -461,20 +987,99 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .field input:focus,.field select:focus { background:rgba(255,255,255,.1);border-color:rgba(96,165,250,.5);box-shadow:0 0 0 2px rgba(96,165,250,.14); }
 .field select option { color:#0f172a; }
 .wide-btn { width:100%;justify-content:center;padding:9px 14px; }
-.rate-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px; }
-.rate-tile { background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:10px; }
-.rate-name { font-size:.62rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px; }
-.rate-val { font-size:1rem;font-weight:750;color:var(--text); }
-.rate-date { font-size:.62rem;color:var(--text-3);margin-top:3px; }
-.invest-card { padding:13px 0;border-bottom:1px solid var(--div); }
-.invest-card:last-child { border-bottom:none; }
-.invest-head { display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:8px; }
-.invest-name { font-weight:700;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
-.invest-meta { display:flex;gap:6px;flex-wrap:wrap;margin-top:5px; }
-.mini-tag { display:inline-flex;align-items:center;border-radius:6px;padding:3px 7px;font-size:.64rem;font-weight:650;
-  background:rgba(96,165,250,.12);color:var(--blue);border:1px solid rgba(96,165,250,.2); }
-.tax-note { font-size:.72rem;color:var(--text-3);line-height:1.4;margin:2px 0 0 2px; }
-.sim-result { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px; }
+.rate-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px; }
+.rate-tile {
+  background:rgba(15,23,42,0.55); border:1px solid var(--glass-border);
+  border-radius:14px; padding:14px 16px;
+  backdrop-filter:blur(18px) saturate(150%); -webkit-backdrop-filter:blur(18px) saturate(150%);
+}
+body.light .rate-tile { background:rgba(255,255,255,0.85); }
+.rate-name { font-size:.66rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;font-weight:600; }
+.rate-val {
+  font-size:1.45rem; font-weight:800; letter-spacing:-.01em;
+  background:linear-gradient(135deg, #a78bfa, #60a5fa);
+  -webkit-background-clip:text; background-clip:text;
+  -webkit-text-fill-color:transparent;
+  font-variant-numeric:tabular-nums;
+}
+body.light .rate-val { background:linear-gradient(135deg, #6d28d9, #2563eb); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+.rate-date { font-size:.66rem;color:var(--text-3);margin-top:4px; }
+
+/* Cards de investimento — horizontal compacto, igual parcelamentos */
+.invest-card {
+  display:flex; align-items:center; gap:16px;
+  padding:14px 18px; margin-bottom:10px;
+  background:rgba(15,23,42,0.55); border:1px solid var(--glass-border);
+  border-radius:14px;
+  backdrop-filter:blur(18px) saturate(150%); -webkit-backdrop-filter:blur(18px) saturate(150%);
+  cursor:pointer; transition:all .15s var(--ease);
+}
+body.light .invest-card { background:rgba(255,255,255,0.85); }
+.invest-card:last-child { margin-bottom:0; }
+.invest-card:hover { border-color:rgba(124,58,237,.4); transform:translateY(-1px); }
+.invest-head { flex:1; min-width:0; display:flex; align-items:center; gap:14px; }
+.invest-head > div:first-child { flex:1; min-width:0; }
+.invest-name {
+  font-size:1rem; font-weight:700; color:var(--text);
+  min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  margin-bottom:6px; text-transform:capitalize;
+}
+.invest-card:hover .invest-name {
+  background:linear-gradient(135deg, #a78bfa, #60a5fa);
+  -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+}
+body.light .invest-card:hover .invest-name {
+  background:linear-gradient(135deg, #6d28d9, #2563eb);
+  -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+}
+.invest-meta { display:flex;gap:6px;flex-wrap:wrap; }
+.mini-tag {
+  display:inline-flex; align-items:center; border-radius:6px; padding:3px 9px;
+  font-size:.66rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em;
+  background:linear-gradient(135deg, rgba(124,58,237,.22), rgba(59,130,246,.14));
+  color:#c4b5fd;
+  border:1px solid rgba(124,58,237,.3);
+}
+body.light .mini-tag {
+  background:linear-gradient(135deg, rgba(124,58,237,.1), rgba(59,130,246,.06));
+  color:#5b21b6; border-color:rgba(124,58,237,.2);
+}
+.invest-head .val.b {
+  font-size:1.1rem; font-weight:800; color:var(--text);
+  font-variant-numeric:tabular-nums; letter-spacing:-.01em; white-space:nowrap;
+}
+.invest-card .ftab {
+  padding:6px 12px; border-radius:7px; font-size:.72rem; font-weight:700;
+  background:#dc2626; color:#fff; border:1px solid #dc2626; cursor:pointer;
+  transition:all .15s var(--ease); margin-top:6px;
+  box-shadow:0 2px 6px rgba(220,38,38,.25);
+}
+.invest-card .ftab:hover { background:#b91c1c; border-color:#b91c1c; transform:translateY(-1px); box-shadow:0 4px 12px rgba(220,38,38,.4); }
+.invest-card .tax-note {
+  flex-basis:100%; margin-top:8px;
+  font-size:.72rem; color:var(--text-3); line-height:1.4;
+  padding-top:8px; border-top:1px solid var(--div);
+}
+.invest-card { flex-wrap:wrap; }
+
+/* Chips do summary → estilo stats-tile */
+.chips { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:14px; margin:0 0 16px; }
+.chip {
+  padding:14px 18px; background:rgba(15,23,42,0.55); border:1px solid var(--glass-border);
+  border-radius:14px; min-width:0;
+  backdrop-filter:blur(18px) saturate(150%); -webkit-backdrop-filter:blur(18px) saturate(150%);
+}
+body.light .chip { background:rgba(255,255,255,0.85); }
+.chip-lbl { font-size:.66rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;font-weight:600; }
+.chip-val { font-size:1.35rem;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.01em; }
+.chip-val.g { color:#22c55e; }
+.chip-val.b {
+  background:linear-gradient(135deg, #a78bfa, #60a5fa);
+  -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+}
+body.light .chip-val.b { background:linear-gradient(135deg, #6d28d9, #2563eb); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+
+.sim-result { display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-top:14px; }
 .invest-titlebar { display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px; }
 .invest-titlebar .section-title { margin:0; }
 .invest-source-note { font-size:.72rem;color:var(--text-3);margin:0 0 14px;font-style:italic; }
@@ -763,17 +1368,84 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 </style>
 <script src="/modals.js"></script>
 </head>
-<body>
+<body class="has-sidenav">
 
 <div class="bg">
   <div class="orb orb-1"></div><div class="orb orb-2"></div>
   <div class="orb orb-3"></div><div class="orb orb-4"></div>
 </div>
 
+<div class="sidenav-backdrop" id="sidenav-backdrop" onclick="toggleSidenav(false)"></div>
+<aside class="sidenav" id="sidenav" aria-label="Navegação principal">
+  <div class="sidenav-brand">
+    <div class="logo">🐷</div>
+    <div class="brand-text">
+      <span class="brand-name">PigBank AI</span>
+      <span class="brand-sub">Assistente financeiro</span>
+    </div>
+  </div>
+
+  <div class="sidenav-section">Geral</div>
+  <button class="sidenav-item active" type="button" data-nav="overview" onclick="navigateTo('overview')">
+    <span class="sn-icon">📊</span><span class="sn-label">Visão Geral</span>
+  </button>
+  <button class="sidenav-item" type="button" data-nav="analytics" onclick="navigateTo('analytics')">
+    <span class="sn-icon">📈</span><span class="sn-label">Análises</span>
+  </button>
+  <button class="sidenav-item" type="button" data-nav="history" onclick="navigateTo('history')">
+    <span class="sn-icon">🕒</span><span class="sn-label">Histórico</span>
+  </button>
+
+  <div class="sidenav-section">Planejamento</div>
+  <button class="sidenav-item" type="button" data-nav="fixed" onclick="navigateTo('fixed')">
+    <span class="sn-icon">🔁</span><span class="sn-label">Gastos Fixos</span>
+  </button>
+  <button class="sidenav-item" type="button" data-nav="budgets" onclick="navigateTo('budgets')">
+    <span class="sn-icon">📝</span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span>
+  </button>
+  <button class="sidenav-item" type="button" data-nav="goals" onclick="navigateTo('goals')">
+    <span class="sn-icon">🎯</span><span class="sn-label">Metas</span><span class="sn-tag new">novo</span>
+  </button>
+  <button class="sidenav-item" type="button" data-nav="categories" onclick="navigateTo('categories')">
+    <span class="sn-icon">🏷️</span><span class="sn-label">Categorias</span>
+  </button>
+
+  <div class="sidenav-section">Crédito</div>
+  <button class="sidenav-item" type="button" data-nav="installments" onclick="navigateTo('installments')">
+    <span class="sn-icon">💳</span><span class="sn-label">Parcelamentos</span>
+  </button>
+  <button class="sidenav-item" type="button" data-nav="cards" onclick="navigateTo('cards')">
+    <span class="sn-icon">💳</span><span class="sn-label">Cartões</span><span class="sn-tag new">novo</span>
+  </button>
+  <button class="sidenav-item" type="button" data-nav="payment-methods" onclick="navigateTo('payment-methods')">
+    <span class="sn-icon">💰</span><span class="sn-label">Formas de pagamento</span>
+  </button>
+  <button class="sidenav-item" type="button" data-nav="investments" data-pro-feature="investments" onclick="navigateTo('investments')">
+    <span class="sn-icon">💹</span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span>
+  </button>
+
+  <div class="sidenav-footer">
+    <div class="sidenav-section" style="padding-top:0">Conta</div>
+    <a class="sidenav-item" href="/settings?view=security">
+      <span class="sn-icon">👤</span><span class="sn-label">Conta</span>
+    </a>
+    <a class="sidenav-item" href="/suporte" target="_blank" rel="noopener">
+      <span class="sn-icon">❓</span><span class="sn-label">Suporte</span>
+    </a>
+    <button class="sidenav-item" type="button" onclick="connectWhatsAppFromDashboard(event)">
+      <span class="sn-icon" style="color:#22c55e">💬</span><span class="sn-label">WhatsApp</span>
+    </button>
+    <button class="sidenav-item" type="button" id="theme-toggle-btn" onclick="toggleTheme()">
+      <span class="sn-icon" id="theme-toggle-icon">🌙</span><span class="sn-label" id="theme-toggle-label">Modo escuro</span>
+    </button>
+  </div>
+</aside>
+
 <div class="page">
 
   <header>
     <div class="header-left">
+      <button class="sidenav-toggle" type="button" aria-label="Abrir menu" onclick="toggleSidenav()">☰</button>
       <div class="logo">💰</div>
       <h1>Finance Dashboard</h1>
     </div>
@@ -828,7 +1500,72 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
   <div id="overview-view" class="dash-view active">
   <div id="alert-banner"></div>
 
-  <p class="section-title">Visão Geral</p>
+  <div class="mock-header">
+    <p class="section-title" style="margin:0">Visão Geral · maio/2026</p>
+    <div style="display:flex;gap:8px">
+      <button class="mock-cta outline" onclick="navigateTo('analytics')">📊 Análises</button>
+      <button class="mock-cta outline" onclick="navigateTo('budgets')">📝 Orçamentos</button>
+    </div>
+  </div>
+
+  <!-- Atalhos rápidos pras outras seções -->
+  <div class="mock-grid cols-4" style="margin-bottom:18px">
+    <button onclick="navigateTo('cards')" style="all:unset;cursor:pointer">
+      <div class="mock-card" style="padding:14px 16px;display:flex;align-items:center;gap:12px;transition:all .2s var(--ease)" onmouseover="this.style.borderColor='rgba(124,58,237,.4)'" onmouseout="this.style.borderColor=''">
+        <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#7c3aed,#5b21b6);display:flex;align-items:center;justify-content:center;font-size:1rem">💳</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.78rem;color:var(--text-3)">Cartões</div>
+          <div style="font-size:.95rem;color:var(--text);font-weight:700">3 ativos</div>
+        </div>
+        <span style="color:var(--text-3);font-size:.85rem">→</span>
+      </div>
+    </button>
+    <button onclick="navigateTo('installments')" style="all:unset;cursor:pointer">
+      <div class="mock-card" style="padding:14px 16px;display:flex;align-items:center;gap:12px" onmouseover="this.style.borderColor='rgba(96,165,250,.4)'" onmouseout="this.style.borderColor=''">
+        <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#1e40af);display:flex;align-items:center;justify-content:center;font-size:1rem">📦</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.78rem;color:var(--text-3)">Parcelamentos</div>
+          <div style="font-size:.95rem;color:var(--text);font-weight:700">R$ 1.385</div>
+        </div>
+        <span style="color:var(--text-3);font-size:.85rem">→</span>
+      </div>
+    </button>
+    <button onclick="navigateTo('goals')" style="all:unset;cursor:pointer">
+      <div class="mock-card" style="padding:14px 16px;display:flex;align-items:center;gap:12px" onmouseover="this.style.borderColor='rgba(52,211,153,.4)'" onmouseout="this.style.borderColor=''">
+        <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#10b981,#047857);display:flex;align-items:center;justify-content:center;font-size:1rem">🎯</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.78rem;color:var(--text-3)">Metas</div>
+          <div style="font-size:.95rem;color:var(--text);font-weight:700">17% do total</div>
+        </div>
+        <span style="color:var(--text-3);font-size:.85rem">→</span>
+      </div>
+    </button>
+    <button onclick="navigateTo('fixed')" style="all:unset;cursor:pointer">
+      <div class="mock-card" style="padding:14px 16px;display:flex;align-items:center;gap:12px" onmouseover="this.style.borderColor='rgba(245,158,11,.4)'" onmouseout="this.style.borderColor=''">
+        <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#f59e0b,#c2410c);display:flex;align-items:center;justify-content:center;font-size:1rem">🔁</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.78rem;color:var(--text-3)">Gastos fixos</div>
+          <div style="font-size:.95rem;color:var(--text);font-weight:700">R$ 1.776/mês</div>
+        </div>
+        <span style="color:var(--text-3);font-size:.85rem">→</span>
+      </div>
+    </button>
+  </div>
+
+  <!-- Insight do Piggy em destaque -->
+  <div class="mock-card" style="margin-bottom:18px;background:linear-gradient(135deg, rgba(124,58,237,.12), rgba(59,130,246,.08));border-color:rgba(124,58,237,.3)">
+    <div style="display:flex;gap:14px;align-items:center">
+      <div style="font-size:2rem;flex-shrink:0">🐷</div>
+      <div style="flex:1">
+        <div style="font-size:.7rem;color:#c4b5fd;text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:4px">Piggy notou</div>
+        <div style="font-size:.92rem;color:var(--text);line-height:1.45">
+          Sua categoria <strong>Alimentação</strong> já está em <strong>97%</strong> do orçamento de maio (R$ 487,30 de R$ 500), e ainda faltam 19 dias.
+        </div>
+      </div>
+      <button class="mock-cta" onclick="navigateTo('budgets')">Ajustar →</button>
+    </div>
+  </div>
+
   <div class="grid" id="grid">
     <div class="card"><div class="sk sk-h2"></div><div class="sk sk-h1"></div><div class="sk sk-line w80"></div><div class="sk sk-line w60"></div><div class="sk sk-line w70"></div></div>
     <div class="card"><div class="sk sk-h2"></div><div class="sk sk-line w80"></div><div class="sk sk-line w60"></div><div class="sk sk-line w80"></div></div>
@@ -870,34 +1607,1228 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
   <div id="last-update"></div>
   </div>
 
-  <div id="investments-view" class="dash-view">
-    <div class="invest-titlebar">
-      <p class="section-title">Investimentos</p>
-      <button class="invest-help-btn" type="button" onclick="openInvestmentHelp()">Como usar</button>
+  <div id="analytics-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Análises</p>
+      <div style="display:flex;gap:8px">
+        <button class="mock-cta outline">📅 Últimos 6 meses</button>
+        <button class="mock-cta outline">⬇ Exportar PDF</button>
+      </div>
     </div>
-    <p class="invest-source-note">Taxas oficiais do Banco Central do Brasil (BCB).<br>A taxa CDI de cada dia útil só é divulgada na manhã do dia seguinte, então o saldo do dia atual é sempre estimado com a última taxa conhecida e corrigido automaticamente quando o dado oficial sai.</p>
-    <div class="invest-layout">
-      <div class="invest-stack">
-        <div class="card">
-          <h2>Taxas BCB</h2>
-          <div class="rate-grid" id="invest-rate-grid">
-            <div class="rate-tile"><div class="rate-name">CDI a.a.</div><div class="rate-val">—</div></div>
-            <div class="rate-tile"><div class="rate-name">SELIC a.a.</div><div class="rate-val">—</div></div>
-            <div class="rate-tile"><div class="rate-name">IPCA 12m</div><div class="rate-val">—</div></div>
+
+    <div class="stats-row">
+      <div class="stat-tile">
+        <div class="stat-label">Gasto médio mensal</div>
+        <div class="stat-value">R$ 1.487,30</div>
+        <div class="stat-delta down">+8% vs últimos 6m</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Receita média</div>
+        <div class="stat-value" style="color:var(--green)">R$ 4.200,00</div>
+        <div class="stat-delta up">estável</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Taxa de poupança</div>
+        <div class="stat-value" style="color:#60a5fa">64,6%</div>
+        <div class="stat-delta up">acima da média BR (15%)</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Maior dia do mês</div>
+        <div class="stat-value">12/05</div>
+        <div class="stat-delta down">R$ 400,00 em compras</div>
+      </div>
+    </div>
+
+    <div class="mock-grid cols-2" style="margin-bottom:14px">
+      <div class="mock-card">
+        <h3>Evolução de gastos · últimos 6 meses</h3>
+        <div style="height:240px;position:relative"><canvas id="mock-evolution-chart"></canvas></div>
+      </div>
+      <div class="mock-card">
+        <h3>Receita vs Despesa · 2026</h3>
+        <div style="height:240px;position:relative"><canvas id="mock-income-expense-chart"></canvas></div>
+      </div>
+      <div class="mock-card">
+        <h3>Distribuição por categoria · maio</h3>
+        <div style="height:240px;position:relative"><canvas id="mock-category-donut"></canvas></div>
+      </div>
+      <div class="mock-card">
+        <h3>Padrão semanal · gastos por dia da semana</h3>
+        <div style="height:240px;position:relative"><canvas id="mock-weekday-chart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="mock-grid cols-2">
+      <div class="mock-card">
+        <h3>Insights do Piggy 🐷</h3>
+        <div class="tx-list">
+          <div class="tx-row">
+            <div class="tx-icon" style="color:#fbbf24">💡</div>
+            <div class="tx-main">
+              <div class="tx-desc">Alimentação subiu 32% em maio</div>
+              <div class="tx-meta">De R$ 369 (abr) pra R$ 487 (maio). Quer ajustar o orçamento?</div>
+            </div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon" style="color:#60a5fa">📊</div>
+            <div class="tx-main">
+              <div class="tx-desc">Seu CDB rendeu R$ 28 esse mês</div>
+              <div class="tx-meta">CDI atual 11,15% a.a. — projeção pro próximo mês: R$ 30,40</div>
+            </div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon" style="color:#f87171">⚠️</div>
+            <div class="tx-main">
+              <div class="tx-desc">3 assinaturas com cobrança próxima</div>
+              <div class="tx-meta">Netflix (28/05) • Spotify (02/06) • iCloud (05/06)</div>
+            </div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon" style="color:#34d399">✅</div>
+            <div class="tx-main">
+              <div class="tx-desc">Reserva atingiu 40% do alvo</div>
+              <div class="tx-meta">Mais 14 meses no ritmo atual e você fecha R$ 6.000.</div>
+            </div>
           </div>
         </div>
-
-        <div class="card">
-          <h2>Carteira unificada</h2>
-          <div id="invest-summary"></div>
-          <div id="invest-list"></div>
-        </div>
-
       </div>
 
-      <div class="invest-stack">
-        <div class="card">
-          <h2>Simulador líquido</h2>
+      <div class="mock-card">
+        <h3>Comparativo mês a mês</h3>
+        <div class="tx-list">
+          <div class="bar-row">
+            <div class="bar-icon">📅</div>
+            <div class="bar-body">
+              <div class="bar-head"><span class="name">Dezembro/2025</span><span class="val">R$ 1.890</span></div>
+              <div class="bar-track"><div class="bar-fill red" style="width:78%"></div></div>
+              <div class="bar-sub">Festas + presentes</div>
+            </div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-icon">📅</div>
+            <div class="bar-body">
+              <div class="bar-head"><span class="name">Janeiro/2026</span><span class="val">R$ 1.620</span></div>
+              <div class="bar-track"><div class="bar-fill yellow" style="width:67%"></div></div>
+              <div class="bar-sub">Pós-feriado</div>
+            </div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-icon">📅</div>
+            <div class="bar-body">
+              <div class="bar-head"><span class="name">Fevereiro/2026</span><span class="val">R$ 1.180</span></div>
+              <div class="bar-track"><div class="bar-fill green" style="width:49%"></div></div>
+              <div class="bar-sub">Mês econômico</div>
+            </div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-icon">📅</div>
+            <div class="bar-body">
+              <div class="bar-head"><span class="name">Março/2026</span><span class="val">R$ 1.420</span></div>
+              <div class="bar-track"><div class="bar-fill yellow" style="width:59%"></div></div>
+              <div class="bar-sub">Volta às aulas</div>
+            </div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-icon">📅</div>
+            <div class="bar-body">
+              <div class="bar-head"><span class="name">Abril/2026</span><span class="val">R$ 1.345</span></div>
+              <div class="bar-track"><div class="bar-fill green" style="width:56%"></div></div>
+              <div class="bar-sub">Estável</div>
+            </div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-icon" style="color:#60a5fa">📅</div>
+            <div class="bar-body">
+              <div class="bar-head"><span class="name" style="color:#60a5fa">Maio/2026 (atual)</span><span class="val">R$ 1.213</span></div>
+              <div class="bar-track"><div class="bar-fill blue" style="width:50%"></div></div>
+              <div class="bar-sub">Parcial — 12 dias decorridos</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mock-card">
+        <h3>Top 5 estabelecimentos do semestre</h3>
+        <div class="tx-list">
+          <div class="tx-row"><div class="tx-icon">🍔</div><div class="tx-main"><div class="tx-desc">iFood</div><div class="tx-meta">38 pedidos • Alimentação</div></div><div class="tx-amt red">-R$ 1.214,90</div></div>
+          <div class="tx-row"><div class="tx-icon">🚗</div><div class="tx-main"><div class="tx-desc">Uber</div><div class="tx-meta">52 corridas • Transporte</div></div><div class="tx-amt red">-R$ 642,30</div></div>
+          <div class="tx-row"><div class="tx-icon">🛒</div><div class="tx-main"><div class="tx-desc">Pão de Açúcar</div><div class="tx-meta">9 compras • Mercado</div></div><div class="tx-amt red">-R$ 510,40</div></div>
+          <div class="tx-row"><div class="tx-icon">🎵</div><div class="tx-main"><div class="tx-desc">Spotify Premium</div><div class="tx-meta">6 cobranças • Recorrente</div></div><div class="tx-amt red">-R$ 119,40</div></div>
+          <div class="tx-row"><div class="tx-icon">📺</div><div class="tx-main"><div class="tx-desc">Netflix</div><div class="tx-meta">6 cobranças • Recorrente</div></div><div class="tx-amt red">-R$ 239,40</div></div>
+        </div>
+      </div>
+
+      <div class="mock-card">
+        <h3>Padrões detectados pela IA</h3>
+        <div class="tx-list">
+          <div class="tx-row">
+            <div class="tx-icon">🌙</div>
+            <div class="tx-main">
+              <div class="tx-desc">Você gasta 2,3x mais em iFood depois das 22h</div>
+              <div class="tx-meta">média noturna R$ 67 vs R$ 29 nas outras refeições</div>
+            </div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon">📆</div>
+            <div class="tx-main">
+              <div class="tx-desc">Sextas e sábados concentram 51% do lazer</div>
+              <div class="tx-meta">média R$ 95 no fim de semana, R$ 18 nos dias úteis</div>
+            </div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon">💸</div>
+            <div class="tx-main">
+              <div class="tx-desc">Salário gasto em 12 dias na média</div>
+              <div class="tx-meta">de 5/mês até dia 17 cai 80% da renda recebida</div>
+            </div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon">🐷</div>
+            <div class="tx-main">
+              <div class="tx-desc">Dica do Piggy: pular 1 iFood/semana = R$ 240/mês</div>
+              <div class="tx-meta">Daria pra completar a viagem do Japão 3 meses antes.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="history-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Histórico</p>
+      <div style="display:flex;gap:8px">
+        <button class="mock-cta outline">🔍 Buscar</button>
+        <button class="mock-cta outline">⚙ Filtros</button>
+        <button class="mock-cta">⬇ Exportar CSV</button>
+      </div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-tile">
+        <div class="stat-label">Lançamentos (maio)</div>
+        <div class="stat-value">38</div>
+        <div class="stat-delta" style="color:var(--text-3)">12 dias decorridos</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Via WhatsApp</div>
+        <div class="stat-value" style="color:#22c55e">24</div>
+        <div class="stat-delta up">63% das entradas</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Via Discord</div>
+        <div class="stat-value" style="color:#5865f2">9</div>
+        <div class="stat-delta up">24%</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Via Web</div>
+        <div class="stat-value">5</div>
+        <div class="stat-delta" style="color:var(--text-3)">13%</div>
+      </div>
+    </div>
+
+    <div class="mock-card">
+      <div style="font-size:.78rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Hoje · 13 mai</div>
+      <div class="tx-list">
+        <div class="tx-row">
+          <div class="tx-icon" style="color:#fbbf24">🍔</div>
+          <div class="tx-main"><div class="tx-desc">iFood — Burger King<span class="tx-tag">whatsapp</span></div><div class="tx-meta">Alimentação • Nubank • 12:34</div></div>
+          <div class="tx-amt red">-R$ 38,90</div>
+        </div>
+        <div class="tx-row">
+          <div class="tx-icon" style="color:#60a5fa">🚗</div>
+          <div class="tx-main"><div class="tx-desc">Uber → trabalho<span class="tx-tag">whatsapp</span></div><div class="tx-meta">Transporte • Pix • 09:12</div></div>
+          <div class="tx-amt red">-R$ 18,50</div>
+        </div>
+      </div>
+
+      <div style="font-size:.78rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:18px 0 10px">Ontem · 12 mai</div>
+      <div class="tx-list">
+        <div class="tx-row">
+          <div class="tx-icon">🛒</div>
+          <div class="tx-main"><div class="tx-desc">Pão de Açúcar<span class="tx-tag">web</span></div><div class="tx-meta">Mercado • Nubank • 19:48</div></div>
+          <div class="tx-amt red">-R$ 142,50</div>
+        </div>
+        <div class="tx-row">
+          <div class="tx-icon">📦</div>
+          <div class="tx-main"><div class="tx-desc">Compra parcelada (1/4)<span class="tx-tag">discord</span></div><div class="tx-meta">Outros • Cartão Nubank • 18:22</div></div>
+          <div class="tx-amt red">-R$ 100,00</div>
+        </div>
+        <div class="tx-row">
+          <div class="tx-icon" style="color:#34d399">💰</div>
+          <div class="tx-main"><div class="tx-desc">Reembolso Uber<span class="tx-tag">whatsapp</span></div><div class="tx-meta">Transporte • Pix • 15:10</div></div>
+          <div class="tx-amt green">+R$ 24,00</div>
+        </div>
+        <div class="tx-row">
+          <div class="tx-icon">🎮</div>
+          <div class="tx-main"><div class="tx-desc">Steam — Hollow Knight<span class="tx-tag">whatsapp</span></div><div class="tx-meta">Lazer • Cartão Itaú • 11:03</div></div>
+          <div class="tx-amt red">-R$ 32,99</div>
+        </div>
+      </div>
+
+      <div style="font-size:.78rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:18px 0 10px">10 mai · sábado</div>
+      <div class="tx-list">
+        <div class="tx-row">
+          <div class="tx-icon" style="color:#34d399">💸</div>
+          <div class="tx-main"><div class="tx-desc">Salário<span class="tx-tag">whatsapp</span></div><div class="tx-meta">Receita • Itaú • 08:00</div></div>
+          <div class="tx-amt green">+R$ 4.200,00</div>
+        </div>
+        <div class="tx-row">
+          <div class="tx-icon">📺</div>
+          <div class="tx-main"><div class="tx-desc">Netflix Premium<span class="tx-tag">recorrente</span></div><div class="tx-meta">Lazer • Cartão Nubank • 03:00</div></div>
+          <div class="tx-amt red">-R$ 39,90</div>
+        </div>
+        <div class="tx-row">
+          <div class="tx-icon">🍔</div>
+          <div class="tx-main"><div class="tx-desc">iFood — Mc Donalds<span class="tx-tag">whatsapp</span></div><div class="tx-meta">Alimentação • Cartão Nubank • 22:48</div></div>
+          <div class="tx-amt red">-R$ 47,80</div>
+        </div>
+      </div>
+
+      <div style="font-size:.78rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:18px 0 10px">8 mai · quinta</div>
+      <div class="tx-list">
+        <div class="tx-row">
+          <div class="tx-icon">💊</div>
+          <div class="tx-main"><div class="tx-desc">Drogasil — paracetamol<span class="tx-tag">discord</span></div><div class="tx-meta">Saúde • Pix • 20:14</div></div>
+          <div class="tx-amt red">-R$ 14,90</div>
+        </div>
+        <div class="tx-row">
+          <div class="tx-icon">🎵</div>
+          <div class="tx-main"><div class="tx-desc">Spotify Premium<span class="tx-tag">recorrente</span></div><div class="tx-meta">Lazer • Cartão Itaú • 09:00</div></div>
+          <div class="tx-amt red">-R$ 21,90</div>
+        </div>
+      </div>
+
+      <div style="font-size:.78rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:18px 0 10px">5 mai · segunda</div>
+      <div class="tx-list">
+        <div class="tx-row">
+          <div class="tx-icon">🏠</div>
+          <div class="tx-main"><div class="tx-desc">Aluguel<span class="tx-tag">recorrente</span></div><div class="tx-meta">Casa • Boleto • 08:00</div></div>
+          <div class="tx-amt red">-R$ 1.450,00</div>
+        </div>
+        <div class="tx-row">
+          <div class="tx-icon" style="color:#34d399">🛟</div>
+          <div class="tx-main"><div class="tx-desc">Aporte caixinha Reserva<span class="tx-tag">automático</span></div><div class="tx-meta">Transferência interna • Itaú → Caixinha</div></div>
+          <div class="tx-amt green">→ R$ 200,00</div>
+        </div>
+      </div>
+
+      <div style="text-align:center;padding:18px 0 6px">
+        <button class="mock-cta outline">Carregar mais (32 anteriores)</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="fixed-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Gastos Fixos</p>
+      <button class="mock-cta">+ Novo recorrente</button>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-tile">
+        <div class="stat-label">Total mensal</div>
+        <div class="stat-value" style="color:var(--red)">R$ 1.776,70</div>
+        <div class="stat-delta down">42% da renda média</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Recorrentes ativos</div>
+        <div class="stat-value">9</div>
+        <div class="stat-delta" style="color:var(--text-3)">5 essenciais • 4 lazer</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Próximo vencimento</div>
+        <div class="stat-value" style="font-size:1.15rem">Netflix</div>
+        <div class="stat-delta down">15/05 — em 2 dias</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Reajustes recentes</div>
+        <div class="stat-value" style="color:#fbbf24">2</div>
+        <div class="stat-delta down">Netflix +R$3 • Aluguel +R$50</div>
+      </div>
+    </div>
+
+    <div class="mock-grid cols-2">
+      <div class="mock-card">
+        <h3>Essenciais</h3>
+        <div class="tx-list">
+          <div class="tx-row">
+            <div class="tx-icon">🏠</div>
+            <div class="tx-main"><div class="tx-desc">Aluguel</div><div class="tx-meta">Boleto • dia 5 • R$ 1.400 → <span style="color:#fbbf24">R$ 1.450 ↑</span></div></div>
+            <div class="tx-amt red">-R$ 1.450,00</div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon">💡</div>
+            <div class="tx-main"><div class="tx-desc">Conta de luz (Enel)</div><div class="tx-meta">Débito • dia 12 • média R$ 128</div></div>
+            <div class="tx-amt red">~R$ 128,00</div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon">💧</div>
+            <div class="tx-main"><div class="tx-desc">Água (Sabesp)</div><div class="tx-meta">Débito • dia 8 • média R$ 64</div></div>
+            <div class="tx-amt red">~R$ 64,00</div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon">🌐</div>
+            <div class="tx-main"><div class="tx-desc">Internet Vivo Fibra</div><div class="tx-meta">Boleto • dia 10 • fixo</div></div>
+            <div class="tx-amt red">-R$ 99,90</div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon">📱</div>
+            <div class="tx-main"><div class="tx-desc">Plano celular Claro</div><div class="tx-meta">Cartão Itaú • dia 20 • fixo</div></div>
+            <div class="tx-amt red">-R$ 59,90</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mock-card">
+        <h3>Assinaturas / lazer</h3>
+        <div class="tx-list">
+          <div class="tx-row">
+            <div class="tx-icon">📺</div>
+            <div class="tx-main"><div class="tx-desc">Netflix Premium</div><div class="tx-meta">Cartão Nubank • dia 15 • R$ 36,90 → <span style="color:#fbbf24">R$ 39,90 ↑</span></div></div>
+            <div class="tx-amt red">-R$ 39,90</div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon">🎵</div>
+            <div class="tx-main"><div class="tx-desc">Spotify Premium</div><div class="tx-meta">Cartão Itaú • dia 2 • fixo</div></div>
+            <div class="tx-amt red">-R$ 21,90</div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon">☁️</div>
+            <div class="tx-main"><div class="tx-desc">iCloud 200GB</div><div class="tx-meta">Cartão Itaú • dia 5 • fixo</div></div>
+            <div class="tx-amt red">-R$ 6,90</div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon">📚</div>
+            <div class="tx-main"><div class="tx-desc">Audible</div><div class="tx-meta">Cartão Inter • dia 22 • fixo</div></div>
+            <div class="tx-amt red">-R$ 6,20</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mock-card">
+        <h3>Próximos 7 dias</h3>
+        <div class="tx-list">
+          <div class="tx-row">
+            <div class="tx-icon" style="color:#f87171">📺</div>
+            <div class="tx-main"><div class="tx-desc">Netflix · 15 mai</div><div class="tx-meta">em 2 dias • Cartão Nubank</div></div>
+            <div class="tx-amt red">-R$ 39,90</div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon" style="color:#fbbf24">📱</div>
+            <div class="tx-main"><div class="tx-desc">Claro · 20 mai</div><div class="tx-meta">em 7 dias • Cartão Itaú</div></div>
+            <div class="tx-amt red">-R$ 59,90</div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon">💡</div>
+            <div class="tx-main"><div class="tx-desc">Enel (estimado) · 12 jun</div><div class="tx-meta">próximo mês</div></div>
+            <div class="tx-amt red">~R$ 128,00</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mock-card">
+        <h3>Alertas do Piggy 🐷</h3>
+        <div class="tx-list">
+          <div class="tx-row">
+            <div class="tx-icon" style="color:#fbbf24">⚠️</div>
+            <div class="tx-main"><div class="tx-desc">Netflix aumentou R$ 3,00</div><div class="tx-meta">+8,1% vs mês passado • reajuste detectado em 15/04</div></div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon" style="color:#fbbf24">⚠️</div>
+            <div class="tx-main"><div class="tx-desc">Aluguel ajustou IGPM</div><div class="tx-meta">+R$ 50,00 (3,5%) • detectado em 05/05</div></div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon" style="color:#34d399">💡</div>
+            <div class="tx-main"><div class="tx-desc">Renegociar Audible?</div><div class="tx-meta">Você usou só 1 vez nos últimos 3 meses</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="budgets-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Orçamentos · maio/2026</p>
+      <div style="display:flex;gap:8px">
+        <button class="mock-cta outline">🤖 Sugerir pela IA</button>
+        <button class="mock-cta">+ Novo orçamento</button>
+      </div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-tile">
+        <div class="stat-label">Orçamento total</div>
+        <div class="stat-value">R$ 2.300,00</div>
+        <div class="stat-delta" style="color:var(--text-3)">7 categorias</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Gasto este mês</div>
+        <div class="stat-value" style="color:var(--red)">R$ 1.213,60</div>
+        <div class="stat-delta down">52,8% do orçamento</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Disponível</div>
+        <div class="stat-value" style="color:var(--green)">R$ 1.086,40</div>
+        <div class="stat-delta up">19 dias restantes</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Categorias em risco</div>
+        <div class="stat-value" style="color:#fbbf24">2</div>
+        <div class="stat-delta down">acima de 80%</div>
+      </div>
+    </div>
+
+    <div class="mock-card" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <h3 style="margin:0">Por categoria</h3>
+        <div style="font-size:.72rem;color:var(--text-3)">🟢 ≤ 60% &nbsp;•&nbsp; 🟡 60–80% &nbsp;•&nbsp; 🔴 &gt; 80%</div>
+      </div>
+      <div class="tx-list">
+        <div class="bar-row">
+          <div class="bar-icon" style="color:#fbbf24">🍔</div>
+          <div class="bar-body">
+            <div class="bar-head"><span class="name">Alimentação</span><span class="val">R$ 487,30 / R$ 500,00</span></div>
+            <div class="bar-track"><div class="bar-fill red" style="width:97.5%"></div></div>
+            <div class="bar-sub" style="color:#f87171">⚠️ 97% — sobram R$ 12,70 pra 19 dias. Piggy vai te avisar no WhatsApp.</div>
+          </div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-icon" style="color:#a78bfa">🎮</div>
+          <div class="bar-body">
+            <div class="bar-head"><span class="name">Lazer</span><span class="val">R$ 180,00 / R$ 200,00</span></div>
+            <div class="bar-track"><div class="bar-fill red" style="width:90%"></div></div>
+            <div class="bar-sub" style="color:#f87171">⚠️ 90% — segura os jogos novos por enquanto.</div>
+          </div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-icon" style="color:#60a5fa">🚗</div>
+          <div class="bar-body">
+            <div class="bar-head"><span class="name">Transporte</span><span class="val">R$ 230,80 / R$ 350,00</span></div>
+            <div class="bar-track"><div class="bar-fill yellow" style="width:66%"></div></div>
+            <div class="bar-sub">66% — no caminho. R$ 119,20 restantes.</div>
+          </div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-icon" style="color:#34d399">🛒</div>
+          <div class="bar-body">
+            <div class="bar-head"><span class="name">Mercado</span><span class="val">R$ 142,50 / R$ 400,00</span></div>
+            <div class="bar-track"><div class="bar-fill green" style="width:35.6%"></div></div>
+            <div class="bar-sub">36% — folga boa. Mês passado terminou em R$ 380.</div>
+          </div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-icon" style="color:#f87171">💊</div>
+          <div class="bar-body">
+            <div class="bar-head"><span class="name">Saúde</span><span class="val">R$ 95,00 / R$ 250,00</span></div>
+            <div class="bar-track"><div class="bar-fill green" style="width:38%"></div></div>
+            <div class="bar-sub">38% — dentro do limite.</div>
+          </div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-icon" style="color:#ec4899">👕</div>
+          <div class="bar-body">
+            <div class="bar-head"><span class="name">Roupas</span><span class="val">R$ 78,00 / R$ 300,00</span></div>
+            <div class="bar-track"><div class="bar-fill green" style="width:26%"></div></div>
+            <div class="bar-sub">26% — folga.</div>
+          </div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-icon" style="color:#6b7280">📦</div>
+          <div class="bar-body">
+            <div class="bar-head"><span class="name">Outros</span><span class="val">R$ 0,00 / R$ 300,00</span></div>
+            <div class="bar-track"><div class="bar-fill green" style="width:0%"></div></div>
+            <div class="bar-sub">0% — nada gasto.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="goals-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Metas</p>
+      <button class="mock-cta">+ Nova meta</button>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-tile">
+        <div class="stat-label">Metas ativas</div>
+        <div class="stat-value">4</div>
+        <div class="stat-delta" style="color:var(--text-3)">2 no prazo • 1 atrasada</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Total guardado</div>
+        <div class="stat-value" style="color:var(--green)">R$ 3.840,00</div>
+        <div class="stat-delta up">+R$ 280 este mês</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Total alvo</div>
+        <div class="stat-value">R$ 22.500,00</div>
+        <div class="stat-delta" style="color:var(--text-3)">17% completo</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Próximo aporte</div>
+        <div class="stat-value">R$ 200,00</div>
+        <div class="stat-delta" style="color:var(--text-3)">automático • 05/06</div>
+      </div>
+    </div>
+
+    <div class="mock-grid cols-2">
+      <div class="goal-card">
+        <div class="goal-ring">
+          <svg width="78" height="78" viewBox="0 0 78 78">
+            <circle class="ring-bg" cx="39" cy="39" r="33" fill="none" stroke-width="7"/>
+            <circle class="ring-fg" cx="39" cy="39" r="33" fill="none" stroke="#34d399" stroke-width="7" stroke-dasharray="207.3" stroke-dashoffset="124.4"/>
+          </svg>
+          <div class="ring-pct">40%</div>
+        </div>
+        <div class="goal-info">
+          <div class="goal-name">🛟 Reserva de emergência</div>
+          <div class="goal-amt">R$ 2.400,00 / R$ 6.000,00</div>
+          <div class="bar-track" style="margin-top:6px"><div class="bar-fill green" style="width:40%"></div></div>
+          <div class="goal-deadline">Vinculada à caixinha "Reserva" • prazo: dez/2026</div>
+        </div>
+      </div>
+
+      <div class="goal-card">
+        <div class="goal-ring">
+          <svg width="78" height="78" viewBox="0 0 78 78">
+            <circle class="ring-bg" cx="39" cy="39" r="33" fill="none" stroke-width="7"/>
+            <circle class="ring-fg" cx="39" cy="39" r="33" fill="none" stroke="#60a5fa" stroke-width="7" stroke-dasharray="207.3" stroke-dashoffset="160.7"/>
+          </svg>
+          <div class="ring-pct">23%</div>
+        </div>
+        <div class="goal-info">
+          <div class="goal-name">✈️ Viagem Japão</div>
+          <div class="goal-amt">R$ 920,00 / R$ 4.000,00</div>
+          <div class="bar-track" style="margin-top:6px"><div class="bar-fill blue" style="width:23%"></div></div>
+          <div class="goal-deadline">Vinculada à caixinha "Japão" • prazo: out/2026</div>
+        </div>
+      </div>
+
+      <div class="goal-card">
+        <div class="goal-ring">
+          <svg width="78" height="78" viewBox="0 0 78 78">
+            <circle class="ring-bg" cx="39" cy="39" r="33" fill="none" stroke-width="7"/>
+            <circle class="ring-fg" cx="39" cy="39" r="33" fill="none" stroke="#a78bfa" stroke-width="7" stroke-dasharray="207.3" stroke-dashoffset="166.0"/>
+          </svg>
+          <div class="ring-pct">20%</div>
+        </div>
+        <div class="goal-info">
+          <div class="goal-name">💻 Trocar o notebook</div>
+          <div class="goal-amt">R$ 500,00 / R$ 2.500,00</div>
+          <div class="bar-track" style="margin-top:6px"><div class="bar-fill purple" style="width:20%"></div></div>
+          <div class="goal-deadline">Sem caixinha • prazo: fev/2027</div>
+        </div>
+      </div>
+
+      <div class="goal-card">
+        <div class="goal-ring">
+          <svg width="78" height="78" viewBox="0 0 78 78">
+            <circle class="ring-bg" cx="39" cy="39" r="33" fill="none" stroke-width="7"/>
+            <circle class="ring-fg" cx="39" cy="39" r="33" fill="none" stroke="#fbbf24" stroke-width="7" stroke-dasharray="207.3" stroke-dashoffset="187.5"/>
+          </svg>
+          <div class="ring-pct">10%</div>
+        </div>
+        <div class="goal-info">
+          <div class="goal-name">🏠 Entrada do apê</div>
+          <div class="goal-amt">R$ 1.020,00 / R$ 10.000,00</div>
+          <div class="bar-track" style="margin-top:6px"><div class="bar-fill yellow" style="width:10%"></div></div>
+          <div class="goal-deadline" style="color:#f87171">⚠️ Ritmo atual chega só em mai/2028 — prazo era dez/2027</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="categories-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Categorias</p>
+      <div style="display:flex;gap:8px">
+        <button class="mock-cta outline">⚙ Auto-categorização IA</button>
+        <button class="mock-cta">+ Nova categoria</button>
+      </div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-tile">
+        <div class="stat-label">Categorias ativas</div>
+        <div class="stat-value">12</div>
+        <div class="stat-delta" style="color:var(--text-3)">8 com gasto em maio</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Maior categoria do mês</div>
+        <div class="stat-value" style="font-size:1.15rem;color:#fbbf24">🍔 Alimentação</div>
+        <div class="stat-delta down">R$ 487,30 (38%)</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Acertos da IA</div>
+        <div class="stat-value" style="color:var(--green)">94%</div>
+        <div class="stat-delta up">Últimos 30 dias</div>
+      </div>
+    </div>
+
+    <div class="mock-grid cols-2">
+      <div class="mock-card">
+        <h3>Distribuição do mês</h3>
+        <div class="tx-list">
+          <div class="bar-row">
+            <div class="bar-icon" style="color:#fbbf24">🍔</div>
+            <div class="bar-body">
+              <div class="bar-head"><span class="name">Alimentação</span><span class="val">R$ 487,30</span></div>
+              <div class="bar-track"><div class="bar-fill yellow" style="width:38%"></div></div>
+              <div class="bar-sub">38% do mês • 21 lançamentos</div>
+            </div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-icon" style="color:#60a5fa">🚗</div>
+            <div class="bar-body">
+              <div class="bar-head"><span class="name">Transporte</span><span class="val">R$ 230,80</span></div>
+              <div class="bar-track"><div class="bar-fill blue" style="width:18%"></div></div>
+              <div class="bar-sub">18% do mês • Uber + Combustível</div>
+            </div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-icon" style="color:#a78bfa">🎮</div>
+            <div class="bar-body">
+              <div class="bar-head"><span class="name">Lazer</span><span class="val">R$ 180,00</span></div>
+              <div class="bar-track"><div class="bar-fill purple" style="width:14%"></div></div>
+              <div class="bar-sub">14% do mês • Spotify, cinema, jogos</div>
+            </div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-icon" style="color:#34d399">🛒</div>
+            <div class="bar-body">
+              <div class="bar-head"><span class="name">Mercado</span><span class="val">R$ 142,50</span></div>
+              <div class="bar-track"><div class="bar-fill green" style="width:11%"></div></div>
+              <div class="bar-sub">11% do mês • 4 compras</div>
+            </div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-icon" style="color:#f87171">💊</div>
+            <div class="bar-body">
+              <div class="bar-head"><span class="name">Saúde</span><span class="val">R$ 95,00</span></div>
+              <div class="bar-track"><div class="bar-fill red" style="width:7%"></div></div>
+              <div class="bar-sub">7% do mês • Farmácia</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mock-card">
+        <h3>Todas as categorias</h3>
+        <div class="cat-grid">
+          <div class="cat-pill"><span class="cat-dot" style="background:#fbbf24"></span><div class="cat-body"><div class="cat-name">🍔 Alimentação</div><div class="cat-val">R$ 487,30</div></div></div>
+          <div class="cat-pill"><span class="cat-dot" style="background:#60a5fa"></span><div class="cat-body"><div class="cat-name">🚗 Transporte</div><div class="cat-val">R$ 230,80</div></div></div>
+          <div class="cat-pill"><span class="cat-dot" style="background:#a78bfa"></span><div class="cat-body"><div class="cat-name">🎮 Lazer</div><div class="cat-val">R$ 180,00</div></div></div>
+          <div class="cat-pill"><span class="cat-dot" style="background:#34d399"></span><div class="cat-body"><div class="cat-name">🛒 Mercado</div><div class="cat-val">R$ 142,50</div></div></div>
+          <div class="cat-pill"><span class="cat-dot" style="background:#f87171"></span><div class="cat-body"><div class="cat-name">💊 Saúde</div><div class="cat-val">R$ 95,00</div></div></div>
+          <div class="cat-pill"><span class="cat-dot" style="background:#ec4899"></span><div class="cat-body"><div class="cat-name">👕 Roupas</div><div class="cat-val">R$ 78,00</div></div></div>
+          <div class="cat-pill"><span class="cat-dot" style="background:#0ea5e9"></span><div class="cat-body"><div class="cat-name">📚 Educação</div><div class="cat-val">R$ 90,00</div></div></div>
+          <div class="cat-pill"><span class="cat-dot" style="background:#10b981"></span><div class="cat-body"><div class="cat-name">🏠 Casa</div><div class="cat-val">R$ 0,00</div></div></div>
+          <div class="cat-pill"><span class="cat-dot" style="background:#8b5cf6"></span><div class="cat-body"><div class="cat-name">🐶 Pet</div><div class="cat-val">R$ 0,00</div></div></div>
+          <div class="cat-pill"><span class="cat-dot" style="background:#f59e0b"></span><div class="cat-body"><div class="cat-name">✈️ Viagem</div><div class="cat-val">R$ 0,00</div></div></div>
+          <div class="cat-pill"><span class="cat-dot" style="background:#6b7280"></span><div class="cat-body"><div class="cat-name">📦 Outros</div><div class="cat-val">R$ 60,00</div></div></div>
+          <div class="cat-pill" style="border-style:dashed;justify-content:center;color:var(--text-3)">+ Adicionar</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="installments-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Parcelamentos</p>
+      <button class="mock-cta">+ Novo parcelamento</button>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-tile">
+        <div class="stat-label">Compras parceladas</div>
+        <div class="stat-value">4</div>
+        <div class="stat-delta" style="color:var(--text-3)">em andamento</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Total devido</div>
+        <div class="stat-value" style="color:var(--red)">R$ 1.385,00</div>
+        <div class="stat-delta" style="color:var(--text-3)">11 parcelas futuras</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Próximo mês</div>
+        <div class="stat-value">R$ 245,83</div>
+        <div class="stat-delta" style="color:var(--text-3)">4 parcelas em junho</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Já pago</div>
+        <div class="stat-value" style="color:var(--green)">R$ 615,00</div>
+        <div class="stat-delta up">7 parcelas concluídas</div>
+      </div>
+    </div>
+
+    <p style="font-size:.72rem;color:var(--text-3);margin:0 0 12px;display:flex;align-items:center;gap:8px">
+      <span>Ordenado por urgência</span> · <span>próxima parcela primeiro</span>
+    </p>
+
+    <div class="inst-list">
+
+      <details class="mock-card inst-card">
+        <summary>
+          <div class="inst-icon-box">💻</div>
+          <div class="inst-body">
+            <div class="inst-row-1">
+              <span class="inst-name">Notebook Lenovo</span>
+              <span class="inst-tag-cat">Eletrônicos</span>
+              <span class="inst-tag-card">💳 Nubank Roxinho</span>
+              <span class="inst-tag-date">comprado 18/04/2026</span>
+            </div>
+            <div class="inst-progress-mini">
+              <div class="progress-blocks">
+                <span class="progress-block paid" title="Parcela 1 · paga"></span>
+                <span class="progress-block next" title="Parcela 2 · próxima (10/06)"></span>
+                <span class="progress-block" title="Parcela 3 · pendente"></span>
+              </div>
+              <span class="inst-progress-text">1/3 · próx. 10/06</span>
+            </div>
+          </div>
+          <div class="inst-right">
+            <div class="inst-amounts">
+              <div class="tot">R$ 600,00</div>
+              <div class="sub">3× R$ 200,00</div>
+            </div>
+            <div class="inst-chevron">⌄</div>
+          </div>
+        </summary>
+        <div class="inst-detail-body">
+          <div class="inst-detail-head">
+            <h4>Parcelas</h4>
+            <div class="inst-pay-summary">
+              <span class="paid-amt">Pago R$ 200,00</span>
+              <span class="left-amt">Restante R$ 400,00</span>
+            </div>
+            <button class="inst-delete-btn">Excluir parcelamento</button>
+          </div>
+          <div class="parcel-rows">
+            <div class="parcel-row paid">
+              <div class="parcel-status-icon paid">✓</div>
+              <div class="parcel-info"><span class="parcel-name">Parcela 1</span><span class="parcel-date">10/05/2026</span><span class="parcel-tag paid">paga</span></div>
+              <span class="parcel-val">R$ 200,00</span>
+              <button class="parcel-trash">🗑</button>
+            </div>
+            <div class="parcel-row next">
+              <div class="parcel-status-icon next">2</div>
+              <div class="parcel-info"><span class="parcel-name">Parcela 2</span><span class="parcel-date">10/06/2026</span><span class="parcel-tag next">próxima</span></div>
+              <span class="parcel-val">R$ 200,00</span>
+              <button class="parcel-trash">🗑</button>
+            </div>
+            <div class="parcel-row">
+              <div class="parcel-status-icon future">3</div>
+              <div class="parcel-info"><span class="parcel-name">Parcela 3</span><span class="parcel-date">10/07/2026</span></div>
+              <span class="parcel-val">R$ 200,00</span>
+              <button class="parcel-trash">🗑</button>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="mock-card inst-card">
+        <summary>
+          <div class="inst-icon-box">📱</div>
+          <div class="inst-body">
+            <div class="inst-row-1">
+              <span class="inst-name">iPhone capa MagSafe</span>
+              <span class="inst-tag-cat">Eletrônicos</span>
+              <span class="inst-tag-card">💳 Nubank Roxinho</span>
+              <span class="inst-tag-date">comprado 12/03/2026</span>
+            </div>
+            <div class="inst-progress-mini">
+              <div class="progress-blocks">
+                <span class="progress-block paid" title="Parcela 1 · paga"></span>
+                <span class="progress-block next" title="Parcela 2 · próxima (10/06)"></span>
+                <span class="progress-block" title="Parcela 3 · pendente"></span>
+                <span class="progress-block" title="Parcela 4 · pendente"></span>
+              </div>
+              <span class="inst-progress-text">1/4 · próx. 10/06</span>
+            </div>
+          </div>
+          <div class="inst-right">
+            <div class="inst-amounts">
+              <div class="tot">R$ 400,00</div>
+              <div class="sub">4× R$ 100,00</div>
+            </div>
+            <div class="inst-chevron">⌄</div>
+          </div>
+        </summary>
+        <div class="inst-detail-body">
+          <div class="inst-detail-head">
+            <h4>Parcelas</h4>
+            <div class="inst-pay-summary">
+              <span class="paid-amt">Pago R$ 100,00</span>
+              <span class="left-amt">Restante R$ 300,00</span>
+            </div>
+            <button class="inst-delete-btn">Excluir parcelamento</button>
+          </div>
+          <div class="parcel-rows">
+            <div class="parcel-row paid">
+              <div class="parcel-status-icon paid">✓</div>
+              <div class="parcel-info"><span class="parcel-name">Parcela 1</span><span class="parcel-date">10/04/2026</span><span class="parcel-tag paid">paga</span></div>
+              <span class="parcel-val">R$ 100,00</span>
+              <button class="parcel-trash">🗑</button>
+            </div>
+            <div class="parcel-row next">
+              <div class="parcel-status-icon next">2</div>
+              <div class="parcel-info"><span class="parcel-name">Parcela 2</span><span class="parcel-date">10/06/2026</span><span class="parcel-tag next">próxima</span></div>
+              <span class="parcel-val">R$ 100,00</span>
+              <button class="parcel-trash">🗑</button>
+            </div>
+            <div class="parcel-row">
+              <div class="parcel-status-icon future">3</div>
+              <div class="parcel-info"><span class="parcel-name">Parcela 3</span><span class="parcel-date">10/07/2026</span></div>
+              <span class="parcel-val">R$ 100,00</span>
+              <button class="parcel-trash">🗑</button>
+            </div>
+            <div class="parcel-row">
+              <div class="parcel-status-icon future">4</div>
+              <div class="parcel-info"><span class="parcel-name">Parcela 4</span><span class="parcel-date">10/08/2026</span></div>
+              <span class="parcel-val">R$ 100,00</span>
+              <button class="parcel-trash">🗑</button>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="mock-card inst-card">
+        <summary>
+          <div class="inst-icon-box">📚</div>
+          <div class="inst-body">
+            <div class="inst-row-1">
+              <span class="inst-name">Curso de inglês Cambly</span>
+              <span class="inst-tag-cat">Educação</span>
+              <span class="inst-tag-card">💳 Itaú Click</span>
+              <span class="inst-tag-date">comprado 17/02/2026</span>
+            </div>
+            <div class="inst-progress-mini">
+              <div class="progress-blocks">
+                <span class="progress-block paid" title="Parcela 1 · paga"></span>
+                <span class="progress-block paid" title="Parcela 2 · paga"></span>
+                <span class="progress-block paid" title="Parcela 3 · paga"></span>
+                <span class="progress-block next" title="Parcela 4 · próxima (17/06)"></span>
+                <span class="progress-block" title="Parcela 5 · pendente"></span>
+                <span class="progress-block" title="Parcela 6 · pendente"></span>
+              </div>
+              <span class="inst-progress-text">3/6 · próx. 17/06</span>
+            </div>
+          </div>
+          <div class="inst-right">
+            <div class="inst-amounts">
+              <div class="tot">R$ 540,00</div>
+              <div class="sub">6× R$ 90,00</div>
+            </div>
+            <div class="inst-chevron">⌄</div>
+          </div>
+        </summary>
+        <div class="inst-detail-body">
+          <div class="inst-detail-head">
+            <h4>Parcelas</h4>
+            <div class="inst-pay-summary">
+              <span class="paid-amt">Pago R$ 270,00</span>
+              <span class="left-amt">Restante R$ 270,00</span>
+            </div>
+            <button class="inst-delete-btn">Excluir parcelamento</button>
+          </div>
+          <div class="parcel-rows">
+            <div class="parcel-row paid"><div class="parcel-status-icon paid">✓</div><div class="parcel-info"><span class="parcel-name">Parcela 1</span><span class="parcel-date">17/03/2026</span><span class="parcel-tag paid">paga</span></div><span class="parcel-val">R$ 90,00</span><button class="parcel-trash">🗑</button></div>
+            <div class="parcel-row paid"><div class="parcel-status-icon paid">✓</div><div class="parcel-info"><span class="parcel-name">Parcela 2</span><span class="parcel-date">17/04/2026</span><span class="parcel-tag paid">paga</span></div><span class="parcel-val">R$ 90,00</span><button class="parcel-trash">🗑</button></div>
+            <div class="parcel-row paid"><div class="parcel-status-icon paid">✓</div><div class="parcel-info"><span class="parcel-name">Parcela 3</span><span class="parcel-date">17/05/2026</span><span class="parcel-tag paid">paga</span></div><span class="parcel-val">R$ 90,00</span><button class="parcel-trash">🗑</button></div>
+            <div class="parcel-row next"><div class="parcel-status-icon next">4</div><div class="parcel-info"><span class="parcel-name">Parcela 4</span><span class="parcel-date">17/06/2026</span><span class="parcel-tag next">próxima</span></div><span class="parcel-val">R$ 90,00</span><button class="parcel-trash">🗑</button></div>
+            <div class="parcel-row"><div class="parcel-status-icon future">5</div><div class="parcel-info"><span class="parcel-name">Parcela 5</span><span class="parcel-date">17/07/2026</span></div><span class="parcel-val">R$ 90,00</span><button class="parcel-trash">🗑</button></div>
+            <div class="parcel-row"><div class="parcel-status-icon future">6</div><div class="parcel-info"><span class="parcel-name">Parcela 6</span><span class="parcel-date">17/08/2026</span></div><span class="parcel-val">R$ 90,00</span><button class="parcel-trash">🗑</button></div>
+          </div>
+        </div>
+      </details>
+
+      <details class="mock-card inst-card">
+        <summary>
+          <div class="inst-icon-box">👟</div>
+          <div class="inst-body">
+            <div class="inst-row-1">
+              <span class="inst-name">Tênis Nike Air Zoom</span>
+              <span class="inst-tag-cat">Roupas</span>
+              <span class="inst-tag-card">💳 Itaú Click</span>
+              <span class="inst-tag-date">comprado 17/01/2026</span>
+            </div>
+            <div class="inst-progress-mini">
+              <div class="progress-blocks">
+                <span class="progress-block paid" title="Parcela 1 · paga"></span>
+                <span class="progress-block paid" title="Parcela 2 · paga"></span>
+                <span class="progress-block paid" title="Parcela 3 · paga"></span>
+                <span class="progress-block paid" title="Parcela 4 · paga"></span>
+                <span class="progress-block next" title="Última! · 17/06"></span>
+              </div>
+              <span class="inst-progress-text">4/5 · última 17/06</span>
+            </div>
+          </div>
+          <div class="inst-right">
+            <div class="inst-amounts">
+              <div class="tot">R$ 460,00</div>
+              <div class="sub">5× R$ 92,00</div>
+            </div>
+            <div class="inst-chevron">⌄</div>
+          </div>
+        </summary>
+        <div class="inst-detail-body">
+          <div class="inst-detail-head">
+            <h4>Parcelas</h4>
+            <div class="inst-pay-summary">
+              <span class="paid-amt">Pago R$ 368,00</span>
+              <span class="left-amt">Restante R$ 92,00</span>
+            </div>
+            <button class="inst-delete-btn">Excluir parcelamento</button>
+          </div>
+          <div class="parcel-rows">
+            <div class="parcel-row paid"><div class="parcel-status-icon paid">✓</div><div class="parcel-info"><span class="parcel-name">Parcela 1</span><span class="parcel-date">17/02/2026</span><span class="parcel-tag paid">paga</span></div><span class="parcel-val">R$ 92,00</span><button class="parcel-trash">🗑</button></div>
+            <div class="parcel-row paid"><div class="parcel-status-icon paid">✓</div><div class="parcel-info"><span class="parcel-name">Parcela 2</span><span class="parcel-date">17/03/2026</span><span class="parcel-tag paid">paga</span></div><span class="parcel-val">R$ 92,00</span><button class="parcel-trash">🗑</button></div>
+            <div class="parcel-row paid"><div class="parcel-status-icon paid">✓</div><div class="parcel-info"><span class="parcel-name">Parcela 3</span><span class="parcel-date">17/04/2026</span><span class="parcel-tag paid">paga</span></div><span class="parcel-val">R$ 92,00</span><button class="parcel-trash">🗑</button></div>
+            <div class="parcel-row paid"><div class="parcel-status-icon paid">✓</div><div class="parcel-info"><span class="parcel-name">Parcela 4</span><span class="parcel-date">17/05/2026</span><span class="parcel-tag paid">paga</span></div><span class="parcel-val">R$ 92,00</span><button class="parcel-trash">🗑</button></div>
+            <div class="parcel-row next"><div class="parcel-status-icon next">5</div><div class="parcel-info"><span class="parcel-name">Parcela 5</span><span class="parcel-date">17/06/2026</span><span class="parcel-tag next">última!</span></div><span class="parcel-val">R$ 92,00</span><button class="parcel-trash">🗑</button></div>
+          </div>
+        </div>
+      </details>
+
+    </div>
+  </div>
+
+  <div id="cards-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Cartões</p>
+      <button class="mock-cta">+ Novo cartão</button>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-tile">
+        <div class="stat-label">Limite total</div>
+        <div class="stat-value">R$ 8.500,00</div>
+        <div class="stat-delta" style="color:var(--text-3)">3 cartões ativos</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Usado este mês</div>
+        <div class="stat-value" style="color:var(--red)">R$ 462,07</div>
+        <div class="stat-delta down">5,4% do limite</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Disponível agora</div>
+        <div class="stat-value" style="color:var(--green)">R$ 8.037,93</div>
+        <div class="stat-delta up">94,6% livre</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Próxima fatura</div>
+        <div class="stat-value">R$ 262,07</div>
+        <div class="stat-delta" style="color:var(--text-3)">vence 10/06</div>
+      </div>
+    </div>
+
+    <div class="mock-grid cols-2">
+      <div class="mock-card">
+        <div class="cc-card purple">
+          <div class="cc-bg-icon">💳</div>
+          <div class="cc-top"><span class="cc-flag">Mastercard</span></div>
+          <div class="cc-number">•••• •••• •••• 4821</div>
+          <div class="cc-nickname">Nubank Roxinho</div>
+        </div>
+        <div class="cc-meta">
+          <div class="row"><span class="label">Fatura aberta</span><span class="val red">R$ 262,07</span></div>
+          <div class="row"><span class="label">Fatura passada</span><span class="val">R$ 242,23 ⚠️</span></div>
+          <div class="row"><span class="label">Limite</span><span class="val">R$ 5.000,00</span></div>
+          <div class="row"><span class="label">Melhor dia</span><span class="val">3 do mês</span></div>
+          <div class="row"><span class="label">Fecha em</span><span class="val">28/05</span></div>
+          <div class="row"><span class="label">Vence em</span><span class="val">04/06</span></div>
+        </div>
+        <div class="bar-body" style="margin-top:12px">
+          <div class="bar-head"><span class="name">Limite usado</span><span class="val">R$ 262,07 / R$ 5.000</span></div>
+          <div class="bar-track"><div class="bar-fill green" style="width:5.2%"></div></div>
+        </div>
+      </div>
+
+      <div class="mock-card">
+        <div class="cc-card coral">
+          <div class="cc-bg-icon">💳</div>
+          <div class="cc-top"><span class="cc-flag">Visa</span></div>
+          <div class="cc-number">•••• •••• •••• 1187</div>
+          <div class="cc-nickname">Itaú Click</div>
+        </div>
+        <div class="cc-meta">
+          <div class="row"><span class="label">Fatura aberta</span><span class="val red">R$ 145,30</span></div>
+          <div class="row"><span class="label">Fatura passada</span><span class="val green">paga ✓</span></div>
+          <div class="row"><span class="label">Limite</span><span class="val">R$ 2.500,00</span></div>
+          <div class="row"><span class="label">Melhor dia</span><span class="val">15 do mês</span></div>
+          <div class="row"><span class="label">Fecha em</span><span class="val">10/06</span></div>
+          <div class="row"><span class="label">Vence em</span><span class="val">17/06</span></div>
+        </div>
+        <div class="bar-body" style="margin-top:12px">
+          <div class="bar-head"><span class="name">Limite usado</span><span class="val">R$ 145,30 / R$ 2.500</span></div>
+          <div class="bar-track"><div class="bar-fill green" style="width:5.8%"></div></div>
+        </div>
+      </div>
+
+      <div class="mock-card">
+        <div class="cc-card gold">
+          <div class="cc-bg-icon">💳</div>
+          <div class="cc-top"><span class="cc-flag">Mastercard</span></div>
+          <div class="cc-number">•••• •••• •••• 9923</div>
+          <div class="cc-nickname">Inter Black</div>
+        </div>
+        <div class="cc-meta">
+          <div class="row"><span class="label">Fatura aberta</span><span class="val">R$ 54,70</span></div>
+          <div class="row"><span class="label">Fatura passada</span><span class="val green">paga ✓</span></div>
+          <div class="row"><span class="label">Limite</span><span class="val">R$ 1.000,00</span></div>
+          <div class="row"><span class="label">Melhor dia</span><span class="val">25 do mês</span></div>
+          <div class="row"><span class="label">Fecha em</span><span class="val">20/06</span></div>
+          <div class="row"><span class="label">Vence em</span><span class="val">27/06</span></div>
+        </div>
+        <div class="bar-body" style="margin-top:12px">
+          <div class="bar-head"><span class="name">Limite usado</span><span class="val">R$ 54,70 / R$ 1.000</span></div>
+          <div class="bar-track"><div class="bar-fill green" style="width:5.5%"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="payment-methods-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Formas de pagamento</p>
+      <div style="display:flex;gap:8px">
+        <button class="mock-cta outline">🔗 Conectar via Open Finance</button>
+        <button class="mock-cta">+ Cadastrar manualmente</button>
+      </div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-tile">
+        <div class="stat-label">Patrimônio líquido</div>
+        <div class="stat-value" style="color:var(--green)">R$ 12.840,60</div>
+        <div class="stat-delta up">+R$ 320 vs mês anterior</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Saldo em conta</div>
+        <div class="stat-value">R$ 4.620,30</div>
+        <div class="stat-delta" style="color:var(--text-3)">3 contas + caixinhas</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Em investimentos</div>
+        <div class="stat-value" style="color:#60a5fa">R$ 8.220,30</div>
+        <div class="stat-delta up">CDB + Tesouro Selic</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Cartões (fatura aberta)</div>
+        <div class="stat-value" style="color:var(--red)">-R$ 462,07</div>
+        <div class="stat-delta down">vence em 22 dias</div>
+      </div>
+    </div>
+
+    <div class="mock-grid cols-2">
+      <div class="mock-card">
+        <h3>Contas bancárias</h3>
+        <div class="tx-list">
+          <div class="tx-row">
+            <div class="tx-icon" style="background:linear-gradient(135deg,#8a05be,#5b21b6);color:#fff;border:none">N</div>
+            <div class="tx-main"><div class="tx-desc">Nubank · conta corrente</div><div class="tx-meta">Cadastro manual • Pix favorito</div></div>
+            <div class="tx-amt green">R$ 1.820,40</div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon" style="background:linear-gradient(135deg,#ec7000,#f7941d);color:#fff;border:none">I</div>
+            <div class="tx-main"><div class="tx-desc">Itaú · conta corrente</div><div class="tx-meta">Open Finance (em breve)</div></div>
+            <div class="tx-amt green">R$ 2.460,90</div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon" style="background:linear-gradient(135deg,#ff7a00,#e84d00);color:#fff;border:none">i</div>
+            <div class="tx-main"><div class="tx-desc">Inter · conta digital</div><div class="tx-meta">Cadastro manual</div></div>
+            <div class="tx-amt green">R$ 339,00</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mock-card">
+        <h3>Carteiras digitais</h3>
+        <div class="tx-list">
+          <div class="tx-row">
+            <div class="tx-icon" style="background:linear-gradient(135deg,#0099ff,#00d4ff);color:#fff;border:none">P</div>
+            <div class="tx-main"><div class="tx-desc">PicPay</div><div class="tx-meta">Cadastro manual</div></div>
+            <div class="tx-amt">R$ 142,00</div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon" style="background:linear-gradient(135deg,#00b9f1,#0099d6);color:#fff;border:none">M</div>
+            <div class="tx-main"><div class="tx-desc">Mercado Pago</div><div class="tx-meta">Cadastro manual</div></div>
+            <div class="tx-amt">R$ 8,40</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mock-card">
+        <h3>Como adicionar uma conta?</h3>
+        <p style="font-size:.86rem;color:var(--text-2);line-height:1.55;margin-bottom:14px">
+          Conecte por <strong>Open Finance</strong> (em breve) ou cadastre na mão. O cadastro manual pede 4 coisas:
+        </p>
+        <div class="tx-list">
+          <div class="tx-row">
+            <div class="tx-icon">📝</div>
+            <div class="tx-main"><div class="tx-desc">Apelido</div><div class="tx-meta">Ex: "Nubank PJ", "Inter Mary", "Banco do meu pai"</div></div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon">🏦</div>
+            <div class="tx-main"><div class="tx-desc">Tipo</div><div class="tx-meta">Conta corrente • poupança • carteira digital</div></div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon">💰</div>
+            <div class="tx-main"><div class="tx-desc">Saldo inicial</div><div class="tx-meta">Pra o Piggy partir do número certo</div></div>
+          </div>
+          <div class="tx-row">
+            <div class="tx-icon">🎨</div>
+            <div class="tx-main"><div class="tx-desc">Cor + ícone</div><div class="tx-meta">Pra você identificar rápido no histórico</div></div>
+          </div>
+        </div>
+        <p style="margin-top:14px;font-size:.78rem;color:var(--text-3);line-height:1.5">
+          A cada lançamento (WhatsApp, Discord ou web) você escolhe a conta. O Piggy aprende qual você usa mais e sugere por padrão.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div id="investments-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Investimentos</p>
+      <div style="display:flex;gap:8px">
+        <button class="mock-cta outline" type="button" onclick="openInvestmentHelp()">❓ Como usar</button>
+        <button class="mock-cta" type="button" onclick="openInvestmentModal()">+ Novo investimento</button>
+      </div>
+    </div>
+    <p style="font-size:.72rem;color:var(--text-3);margin:0 0 14px;line-height:1.5">
+      Taxas oficiais do Banco Central (BCB) · CDI do dia atual é estimado e corrigido quando o oficial sai na manhã seguinte.
+    </p>
+
+    <div class="invest-layout-v2">
+      <!-- 1. Taxas BCB -->
+      <div class="mock-card" style="margin-bottom:14px">
+        <h3>Taxas oficiais do mercado</h3>
+        <div class="rate-grid" id="invest-rate-grid">
+          <div class="rate-tile"><div class="rate-name">CDI a.a.</div><div class="rate-val">—</div></div>
+          <div class="rate-tile"><div class="rate-name">SELIC a.a.</div><div class="rate-val">—</div></div>
+          <div class="rate-tile"><div class="rate-name">IPCA 12m</div><div class="rate-val">—</div></div>
+        </div>
+      </div>
+
+      <!-- 2. Resumo da carteira (KPIs) — populado por JS dentro de #invest-summary -->
+      <div id="invest-summary"></div>
+
+      <!-- 3. Lista de investimentos -->
+      <div class="mock-card" style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <h3 style="margin:0">Carteira</h3>
+          <span style="font-size:.7rem;color:var(--text-3)">clique em um investimento pra ver detalhes</span>
+        </div>
+        <div id="invest-list"></div>
+      </div>
+
+      <!-- 4. Simulador líquido -->
+      <div class="mock-card">
+        <h3>Simulador líquido</h3>
           <div class="invest-form">
             <div class="form-row">
               <div class="field">
@@ -937,7 +2868,6 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
             IR regressivo: até 180 dias 22,5%; 181–360 dias 20%; 361–720 dias 17,5%; acima de 720 dias 15%.
             IOF estimado apenas para resgates nos primeiros 30 dias.
           </p>
-        </div>
       </div>
     </div>
   </div>
@@ -1418,6 +3348,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
     <div id="investment-detail-body"></div>
     <div class="modal-acts">
       <button class="btn-cancel" onclick="closeInvestmentDetail()">Fechar</button>
+      <button class="inst-delete-btn" id="investment-detail-delete" type="button">Remover investimento</button>
       <button class="btn-save" id="investment-detail-move" type="button">Movimentar</button>
     </div>
   </div>
@@ -1811,6 +3742,12 @@ function taxProfileForAsset(assetType) {
   return TAX_BY_ASSET[assetType] || "regressive_ir_iof";
 }
 
+// Mapa view-id → elemento. Inclui as novas seções acessíveis pelo sidebar.
+const DASH_VIEWS = [
+  "overview", "analytics", "history", "fixed", "budgets", "goals",
+  "categories", "installments", "cards", "payment-methods", "investments"
+];
+
 function setMainView(view) {
   // Free: bloqueia navegacao pra tela inteira de investimentos. Botao fica
   // visivel mas desabilitado; click abre modal de upgrade (item 17/18).
@@ -1819,8 +3756,13 @@ function setMainView(view) {
     return;
   }
   document.querySelectorAll(".main-tab").forEach(b => b.classList.toggle("active", b.dataset.view === view));
-  document.getElementById("overview-view").classList.toggle("active", view === "overview");
-  document.getElementById("investments-view").classList.toggle("active", view === "investments");
+  document.querySelectorAll(".sidenav-item[data-nav]").forEach(b => b.classList.toggle("active", b.dataset.nav === view));
+
+  DASH_VIEWS.forEach(v => {
+    const el = document.getElementById(`${v}-view`);
+    if (el) el.classList.toggle("active", v === view);
+  });
+
   // Alterna o botão de ação rápida conforme a aba: + Investir só na aba
   // de investimentos; + Lançar nas demais.
   const btnLaunch = document.getElementById("open-launch-btn");
@@ -1832,6 +3774,161 @@ function setMainView(view) {
     runInvestmentSimulator();
   }
 }
+
+// Atalho usado pelos itens do sidebar. Fecha o drawer no mobile.
+function navigateTo(view) {
+  setMainView(view);
+  toggleSidenav(false);
+  // Scrollar pro topo quando troca de view
+  try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch(_) {}
+  // Lazy render dos gráficos mockados da view Análises
+  if (view === "analytics") renderMockAnalyticsCharts();
+}
+
+// ── Gráficos mockados da view Análises ─────────────────────────────────
+let _mockChartsRendered = false;
+let _mockChartInstances = [];
+function renderMockAnalyticsCharts() {
+  if (_mockChartsRendered) return;
+  if (typeof Chart === "undefined") return;
+  _mockChartsRendered = true;
+
+  const isLight = document.body.classList.contains("light");
+  const tickColor = isLight ? "rgba(15,23,42,0.65)" : "rgba(255,255,255,0.55)";
+  const grid = isLight ? "rgba(15,23,42,0.08)" : "rgba(255,255,255,0.05)";
+  Chart.defaults.color = tickColor;
+  Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif";
+
+  const trackChart = (el, cfg) => { if (el) _mockChartInstances.push(new Chart(el, cfg)); };
+
+  // 1) Evolução de gastos (line, 6 meses)
+  const evoEl = document.getElementById("mock-evolution-chart");
+  if (evoEl) trackChart(evoEl, {
+    type: "line",
+    data: {
+      labels: ["Dez/25", "Jan/26", "Fev/26", "Mar/26", "Abr/26", "Mai/26"],
+      datasets: [{
+        label: "Gastos",
+        data: [1890, 1620, 1180, 1420, 1345, 1213],
+        borderColor: "#a78bfa",
+        backgroundColor: "rgba(167,139,250,.15)",
+        fill: true, tension: .35, borderWidth: 2.5,
+        pointBackgroundColor: "#a78bfa", pointBorderColor: "#fff", pointBorderWidth: 2, pointRadius: 4,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: grid }, ticks: { color: tickColor } },
+        y: { grid: { color: grid }, ticks: { color: tickColor, callback: v => "R$ " + v } }
+      }
+    }
+  });
+
+  // 2) Receita vs Despesa (bar grouped)
+  const incEl = document.getElementById("mock-income-expense-chart");
+  if (incEl) trackChart(incEl, {
+    type: "bar",
+    data: {
+      labels: ["Jan", "Fev", "Mar", "Abr", "Mai"],
+      datasets: [
+        { label: "Receita", data: [4200, 4200, 4380, 4200, 4200], backgroundColor: "#34d399", borderRadius: 6 },
+        { label: "Despesa", data: [1620, 1180, 1420, 1345, 1213], backgroundColor: "#f87171", borderRadius: 6 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: "bottom", labels: { color: tickColor, boxWidth: 12 } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: tickColor } },
+        y: { grid: { color: grid }, ticks: { color: tickColor, callback: v => "R$ " + v } }
+      }
+    }
+  });
+
+  // 3) Distribuição por categoria (donut)
+  const donutEl = document.getElementById("mock-category-donut");
+  if (donutEl) trackChart(donutEl, {
+    type: "doughnut",
+    data: {
+      labels: ["Alimentação", "Transporte", "Lazer", "Mercado", "Saúde", "Roupas", "Educação", "Outros"],
+      datasets: [{
+        data: [487.30, 230.80, 180, 142.50, 95, 78, 90, 60],
+        backgroundColor: ["#fbbf24","#60a5fa","#a78bfa","#34d399","#f87171","#ec4899","#0ea5e9","#6b7280"],
+        borderColor: "rgba(0,0,0,.2)", borderWidth: 2
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      cutout: "62%",
+      plugins: {
+        legend: { position: "right", labels: { color: tickColor, boxWidth: 10, padding: 8, font: { size: 11 } } }
+      }
+    }
+  });
+
+  // 4) Padrão semanal (bar)
+  const wkEl = document.getElementById("mock-weekday-chart");
+  if (wkEl) trackChart(wkEl, {
+    type: "bar",
+    data: {
+      labels: ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"],
+      datasets: [{
+        label: "Média de gasto",
+        data: [42, 28, 35, 31, 95, 128, 64],
+        backgroundColor: ["#60a5fa","#60a5fa","#60a5fa","#60a5fa","#f87171","#f87171","#fbbf24"],
+        borderRadius: 8
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: tickColor } },
+        y: { grid: { color: grid }, ticks: { color: tickColor, callback: v => "R$ " + v } }
+      }
+    }
+  });
+}
+
+function toggleSidenav(force) {
+  const nav = document.getElementById("sidenav");
+  const bd  = document.getElementById("sidenav-backdrop");
+  if (!nav) return;
+  const open = (typeof force === "boolean") ? force : !nav.classList.contains("open");
+  nav.classList.toggle("open", open);
+  if (bd) bd.classList.toggle("open", open);
+}
+
+// ── Theme toggle (dark/light) ────────────────────────────────────────
+function applyTheme(theme) {
+  const isLight = theme === "light";
+  document.body.classList.toggle("light", isLight);
+  const icon  = document.getElementById("theme-toggle-icon");
+  const label = document.getElementById("theme-toggle-label");
+  if (icon)  icon.textContent  = isLight ? "☀️" : "🌙";
+  if (label) label.textContent = isLight ? "Modo claro" : "Modo escuro";
+
+  // Re-renderiza os gráficos mockados pra pegar as cores novas
+  if (Array.isArray(_mockChartInstances) && _mockChartInstances.length) {
+    _mockChartInstances.forEach(c => { try { c.destroy(); } catch(_) {} });
+    _mockChartInstances = [];
+    _mockChartsRendered = false;
+    const analyticsVisible = document.getElementById("analytics-view")?.classList.contains("active");
+    if (analyticsVisible) renderMockAnalyticsCharts();
+  }
+}
+function toggleTheme() {
+  const next = document.body.classList.contains("light") ? "dark" : "light";
+  try { localStorage.setItem("pigbank_theme", next); } catch(_) {}
+  applyTheme(next);
+}
+(function initTheme(){
+  let saved = "dark";
+  try { saved = localStorage.getItem("pigbank_theme") || "dark"; } catch(_) {}
+  applyTheme(saved);
+})();
 
 // ── Pro gates (visivel + desabilitado pra Free) ──────────────────────────
 function isProUser() {
@@ -2390,6 +4487,10 @@ function openInvestmentDetail(name) {
     if (typeof updateMoveFormVisibility === "function") updateMoveFormVisibility();
     setTimeout(() => document.getElementById("move-amount")?.focus(), 50);
   };
+  document.getElementById("investment-detail-delete").onclick = () => {
+    closeInvestmentDetail();
+    deleteInvestment(inv.name);
+  };
   document.getElementById("investment-detail-overlay").classList.add("open");
 }
 
@@ -2460,7 +4561,6 @@ function renderInvestmentsPanel(d) {
           </div>
           <div style="text-align:right">
             <div class="val b">${fmt(displayBal)}</div>
-	            <button class="ftab" style="margin-top:6px" data-invest-name="${esc(i.name)}" onclick="event.stopPropagation(); deleteInvestment(this.dataset.investName)">Remover</button>
           </div>
         </div>
         <div class="tax-note">Estimativa mensal: bruto ${fmt(Number(displayBal || 0) * mRate)} · líquido ${fmt(Number(displayBal || 0) * mRate * .85)}</div>
