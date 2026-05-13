@@ -1879,6 +1879,7 @@ function applyProGates() {
     } else {
       el.classList.add("pro-locked");
       el.setAttribute("aria-disabled", "true");
+      el.setAttribute("title", "Funcionalidade do PigBank+ — clica pra fazer upgrade");
       if (!el.querySelector(":scope > .pro-badge")) {
         const b = document.createElement("span");
         b.className = "pro-badge";
@@ -1895,6 +1896,19 @@ function applyProGates() {
       : "Receita vs Despesa — Últimos 30 dias";
   }
 }
+
+// Intercepta click em qualquer elemento .pro-locked ANTES de cair no onclick
+// original. Em vez de deixar o fetch sair, retornar 403 e o interceptor abrir
+// o modal, abre o modal direto — corta ~500ms de UX. O fetch interceptor
+// continua como backup pra casos onde o user fura o gate visual.
+document.addEventListener("click", (e) => {
+  const locked = e.target.closest(".pro-locked[data-pro-feature]");
+  if (!locked) return;
+  if (isProUser()) return;
+  e.preventDefault();
+  e.stopPropagation();
+  showUpgradeModal(locked.dataset.proFeature || "generic");
+}, true);  // capture: pega antes dos onclicks inline
 
 // Esc fecha o modal
 document.addEventListener("keydown", (e) => {
