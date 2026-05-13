@@ -14,6 +14,7 @@ from db import (
 from core.help_text import resolve_section
 from core.dashboard_links import build_dashboard_link
 from adapters.discord.help_ui import help_embed, HelpView
+from adapters.discord.commands_embed import commands_embed
 from core.observability import get_logger
 
 logger = get_logger(__name__)
@@ -35,19 +36,20 @@ class GeneralCog(commands.Cog):
         """
         Tenta processar a mensagem. Retorna True se tratou, False se deve continuar.
         """
-        # ── Menu ──────────────────────────────────────────────────────────────
+        # ── "Comandos" → catalogo completo de tools (pra quem ja sabe usar) ──
         if t in {
-            "comandos", "listar comandos", "menu",
+            "comandos", "listar comandos",
             "exemplos", "o que pedir", "que pedir",
             "o que voce faz", "o que vc faz",
             "o que pode fazer", "o que voce pode fazer", "o que vc pode fazer",
+            "explorar",
         }:
-            await message.reply(embed=help_embed("start"), view=HelpView(message.author.id))
+            await message.reply(embed=commands_embed())
             return True
 
-        # ── Ajuda ─────────────────────────────────────────────────────────────
-        if t.startswith("ajuda") or t.startswith("help"):
-            section = resolve_section(message.content)
+        # ── "Ajuda"/"menu" → tutor com tour interativo (pra quem ta comecando) ─
+        if t == "menu" or t.startswith("ajuda") or t.startswith("help"):
+            section = resolve_section(message.content) if t != "menu" else "start"
             await message.reply(embed=help_embed(section), view=HelpView(message.author.id))
             return True
 

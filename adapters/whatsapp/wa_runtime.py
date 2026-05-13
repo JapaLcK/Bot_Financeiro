@@ -31,6 +31,11 @@ from adapters.whatsapp.wa_help_menu import (
     send_help_menu,
     send_help_section,
 )
+from adapters.whatsapp.wa_commands_menu import (
+    get_commands_menu_id,
+    send_commands_menu,
+    send_commands_section,
+)
 from core.handle_incoming import handle_incoming
 from core.handlers import report as h_report
 from core.observability import log_system_event_sync
@@ -512,6 +517,23 @@ def process_message(message: InboundMessage) -> None:
                     )
                 return
 
+            # Itens do menu "O que pedir" (catalogo de comandos)
+            cmds_id = get_commands_menu_id(raw_msg)
+            if cmds_id:
+                logger.info("WA commands menu id=%s wa_id=%s", cmds_id, reply_to)
+                try:
+                    send_commands_section(reply_to, cmds_id)
+                except Exception as e:
+                    logger.exception("WA commands menu error id=%s: %s", cmds_id, e)
+                    log_system_event_sync(
+                        "warning",
+                        "whatsapp_commands_menu_error",
+                        f"Erro ao processar menu de comandos no WhatsApp: {e}",
+                        source="wa_runtime",
+                        user_id=uid,
+                    )
+                return
+
             # Botão "Categoria errada?" pós-lançamento (legado — agora a lista
             # vem direto na confirmação, mas mantemos o handler para mensagens
             # antigas ainda na tela do usuário).
@@ -642,21 +664,35 @@ def process_message(message: InboundMessage) -> None:
         # ---------------------------------------------------------------
         text_cmd = (message.text or "").strip().lower()
 
+        # "ajuda" → tutor pra quem ta aprendendo (send_help_menu, com link
+        # pro tutorial). "comandos" → catalogo completo de tools pra quem
+        # ja sabe o basico e quer explorar (send_commands_menu).
         if text_cmd in {
             "ajuda", "help", "menu",
             "/ajuda", "/help", "/menu",
-            "comandos", "/comandos",
-            "exemplos", "/exemplos",
-            "o que voce faz", "o que vc faz", "o que pode fazer",
-            "o que voce pode fazer", "o que vc pode fazer",
-            "o que pedir", "que pedir",
         }:
             logger.info("WA help menu via texto wa_id=%s", reply_to)
             try:
                 send_help_menu(reply_to)
             except Exception as e:
                 logger.warning("WA send_help_menu failed, usando texto: %s", e)
-                # fallback para o fluxo normal de texto
+                pass
+            else:
+                return
+
+        elif text_cmd in {
+            "comandos", "/comandos",
+            "exemplos", "/exemplos",
+            "o que voce faz", "o que vc faz", "o que pode fazer",
+            "o que voce pode fazer", "o que vc pode fazer",
+            "o que pedir", "que pedir",
+            "/explorar", "explorar",
+        }:
+            logger.info("WA commands menu via texto wa_id=%s", reply_to)
+            try:
+                send_commands_menu(reply_to)
+            except Exception as e:
+                logger.warning("WA send_commands_menu failed, usando texto: %s", e)
                 pass
             else:
                 return
