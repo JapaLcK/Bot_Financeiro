@@ -15,6 +15,7 @@ from core.help_text import resolve_section
 from core.dashboard_links import build_dashboard_link
 from adapters.discord.help_ui import help_embed, HelpView
 from adapters.discord.commands_embed import commands_embed
+from core.services.commands_intent import is_commands_intent
 from core.observability import get_logger
 
 logger = get_logger(__name__)
@@ -37,13 +38,10 @@ class GeneralCog(commands.Cog):
         Tenta processar a mensagem. Retorna True se tratou, False se deve continuar.
         """
         # ── "Comandos" → catalogo completo de tools (pra quem ja sabe usar) ──
-        if t in {
-            "comandos", "listar comandos",
-            "exemplos", "o que pedir", "que pedir",
-            "o que voce faz", "o que vc faz",
-            "o que pode fazer", "o que voce pode fazer", "o que vc pode fazer",
-            "explorar",
-        }:
+        # Usa is_commands_intent pra cobrir tambem "do que voce eh capaz?",
+        # "quais sao suas funcoes?", etc. sem precisar listar variacao a
+        # variacao aqui (helper centraliza em core/services/commands_intent).
+        if is_commands_intent(t):
             await message.reply(embed=commands_embed())
             return True
 

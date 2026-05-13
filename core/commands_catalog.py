@@ -161,15 +161,24 @@ def get_category(cat_id: str) -> CommandCategory | None:
     return None
 
 
-def render_category_text(cat: CommandCategory) -> str:
-    """Formato pronto pra WhatsApp (negrito com *).
+def render_category_body(cat: CommandCategory) -> str:
+    """Conteúdo da categoria SEM repetir o título.
 
-    Cabeçalho com emoji + título + descrição, depois lista os comandos
-    com bullets. Notas aparecem em linha abaixo do comando.
+    Usado no `body` de mensagens com header próprio (WhatsApp interactive
+    buttons já mostra o título no header do componente — se a gente
+    repetir aqui fica duplicado na tela). Começa pela descrição, depois
+    lista os comandos com bullets. Notas aparecem em linha abaixo.
     """
-    lines = [f"{cat['emoji']} *{cat['title']}*", cat["description"], ""]
+    lines = [cat["description"], ""]
     for cmd in cat["commands"]:
         lines.append(f"• {cmd['text']}")
         if cmd.get("note"):
             lines.append(f"  _{cmd['note']}_")
     return "\n".join(lines)
+
+
+def render_category_full(cat: CommandCategory) -> str:
+    """Mesma coisa mas com cabeçalho. Usado em fallback de texto puro
+    (quando o body é grande demais pra caber no interactive_buttons e
+    a gente manda como send_text antes)."""
+    return f"{cat['emoji']} *{cat['title']}*\n{render_category_body(cat)}"

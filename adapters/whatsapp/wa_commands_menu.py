@@ -28,7 +28,8 @@ from core.commands_catalog import (
     CATALOG,
     CATEGORY_IDS,
     get_category,
-    render_category_text,
+    render_category_body,
+    render_category_full,
 )
 
 logger = logging.getLogger(__name__)
@@ -110,13 +111,15 @@ def send_commands_section(wa_id: str, cat_id: str) -> None:
         send_commands_menu(wa_id)
         return
 
-    body_text = render_category_text(cat)
+    # `body` SEM título — o header do interactive_buttons já mostra
+    # "{emoji} {title}". Senão fica duplicado visualmente.
+    body_text = render_category_body(cat)
 
     # WhatsApp limita o body de interactive_buttons a ~1024 chars. Se passar,
-    # manda como texto puro primeiro e o botão "Ver outras" em mensagem
-    # separada.
+    # manda como texto puro primeiro (com cabeçalho próprio) e o botão
+    # "Ver outras" em mensagem separada.
     if len(body_text) > 900:
-        send_text(to=wa_id, body=body_text)
+        send_text(to=wa_id, body=render_category_full(cat))
         send_interactive_buttons(
             to=wa_id,
             body="Quer explorar outro tema?",

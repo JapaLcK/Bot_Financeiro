@@ -665,45 +665,35 @@ def process_message(message: InboundMessage) -> None:
         text_cmd = (message.text or "").strip().lower()
 
         # "ajuda" → tutor pra quem ta aprendendo (send_help_menu, com link
-        # pro tutorial). "comandos" → catalogo completo de tools pra quem
-        # ja sabe o basico e quer explorar (send_commands_menu).
-        if text_cmd in {
-            "ajuda", "help", "menu",
-            "/ajuda", "/help", "/menu",
-        }:
+        # pro tutorial).
+        if text_cmd in {"ajuda", "help", "menu", "/ajuda", "/help", "/menu"}:
             logger.info("WA help menu via texto wa_id=%s", reply_to)
             try:
                 send_help_menu(reply_to)
             except Exception as e:
                 logger.warning("WA send_help_menu failed, usando texto: %s", e)
-                pass
             else:
                 return
 
-        elif text_cmd in {
-            "comandos", "/comandos",
-            "exemplos", "/exemplos",
-            "o que voce faz", "o que vc faz", "o que pode fazer",
-            "o que voce pode fazer", "o que vc pode fazer",
-            "o que pedir", "que pedir",
-            "/explorar", "explorar",
-        }:
-            logger.info("WA commands menu via texto wa_id=%s", reply_to)
+        # "comandos"/"do que voce eh capaz"/"quais suas funcoes" → catalogo
+        # COMPLETO de tools. Detecção permissiva pra cobrir variações que
+        # antes caíam na IA e viravam texto improvisado.
+        from core.services.commands_intent import is_commands_intent
+        if is_commands_intent(message.text):
+            logger.info("WA commands menu via intent wa_id=%s", reply_to)
             try:
                 send_commands_menu(reply_to)
             except Exception as e:
                 logger.warning("WA send_commands_menu failed, usando texto: %s", e)
-                pass
             else:
                 return
 
-        elif text_cmd in {"tutorial", "/tutorial"}:
+        if text_cmd in {"tutorial", "/tutorial"}:
             logger.info("WA tutorial welcome via texto wa_id=%s", reply_to)
             try:
                 send_welcome(reply_to)
             except Exception as e:
                 logger.warning("WA send_welcome failed, usando texto: %s", e)
-                pass
             else:
                 return
 
