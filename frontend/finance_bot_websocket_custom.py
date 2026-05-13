@@ -3222,6 +3222,25 @@ async def serve_funcionalidades():
 async def serve_comandos():
     return _html_file(HERE / "comandos.html")
 
+
+@app.get("/comandos-app")
+async def serve_comandos_app():
+    """Versao logged-in da pagina /comandos. Layout interno (mesmo header
+    da home), personalizado com base no snapshot/plano. Mantém a URL
+    /comandos pra landing publica intacta."""
+    return _html_file(HERE / "comandos-app.html")
+
+
+@app.get("/api/commands-catalog")
+async def get_commands_catalog():
+    """Catálogo de "O que pedir ao Piggy" pra o modal da home.
+
+    Source-of-truth em core/commands_catalog.CATALOG (mesma usada pelo
+    WhatsApp e Discord). Endpoint público — não tem dado sensível.
+    """
+    from core.commands_catalog import CATALOG
+    return {"catalog": CATALOG}
+
 @app.get("/como-funciona")
 async def serve_como_funciona():
     return _html_file(HERE / "como-funciona.html")
