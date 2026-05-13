@@ -61,6 +61,41 @@ def test_strip_nao_mexe_em_negrito_existente():
     assert strip_markdown_headers("*Resumo*\n· total: 100") == "*Resumo*\n· total: 100"
 
 
+# ─── strip de **bold** (markdown padrão) pra *bold* (WhatsApp) ──────────────
+
+
+def test_strip_colapsa_double_bold_inline():
+    assert strip_markdown_headers("**Descrição:** parcela") == "*Descrição:* parcela"
+
+
+def test_strip_colapsa_double_bold_em_varias_ocorrencias_na_mesma_linha():
+    raw = "**Total:** R$ 100 **Pendente:** R$ 50"
+    out = strip_markdown_headers(raw)
+    assert out == "*Total:* R$ 100 *Pendente:* R$ 50"
+
+
+def test_strip_colapsa_double_bold_multilinha():
+    raw = "- **Descrição:** parcela\n- **Total:** R$ 500,00\n- **Pendentes:** 5 de 5"
+    out = strip_markdown_headers(raw)
+    assert out == "- *Descrição:* parcela\n- *Total:* R$ 500,00\n- *Pendentes:* 5 de 5"
+
+
+def test_strip_double_bold_lazy_nao_engole_blocos_separados():
+    # Lazy match: cada par `**...**` é convertido isoladamente
+    raw = "**a** texto **b**"
+    assert strip_markdown_headers(raw) == "*a* texto *b*"
+
+
+def test_strip_preserva_asterisco_isolado():
+    # `*X*` (já WhatsApp bold) deve continuar intacto
+    assert strip_markdown_headers("*Resumo*") == "*Resumo*"
+
+
+def test_strip_funciona_em_combo_header_mais_double_bold():
+    raw = "### Resumo\n**Total:** R$ 100"
+    assert strip_markdown_headers(raw) == "*Resumo*\n*Total:* R$ 100"
+
+
 # ─── detect_trend_window ────────────────────────────────────────────────────
 
 

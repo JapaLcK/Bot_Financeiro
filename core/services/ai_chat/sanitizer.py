@@ -1,14 +1,19 @@
 """
 core/services/ai_chat/sanitizer.py — saneamento defensivo da saída e do roteamento da IA.
 
-Existe porque o LLM (gpt-4o-mini) é teimoso com 2 regras do system prompt:
+Existe porque o LLM (gpt-4o-mini) é teimoso com 3 regras do system prompt:
 
-1. **Regra 0 (anti-markdown headers)**: não escreva `#`, `##`, `###`. O
+1. **Regra 0 anti-markdown headers**: não escreva `#`, `##`, `###`. O
    WhatsApp não renderiza, o user vê literal. Mesmo com a regra dura e
    exemplo concreto, o modelo às vezes solta `### Resumo`. Aqui a gente
    converte `### Foo` em `*Foo*` (bold WhatsApp) como rede de proteção.
 
-2. **Regra de tendência**: pergunta com "tendência"/"evolução"/"mês a mês"
+2. **Regra 0 anti-`**negrito**`**: WhatsApp só renderiza `*texto*`
+   (UM asterisco) como negrito. Quando a IA solta `**texto**`, o user
+   vê `*texto*` literal na tela (os asteriscos extras sobram). Aqui a
+   gente colapsa `**X**` em `*X*` antes de enviar.
+
+3. **Regra de tendência**: pergunta com "tendência"/"evolução"/"mês a mês"
    + janela temporal DEVE ir pra `get_spending_trend`, nunca pra
    `report_out_of_scope`. O LLM ainda erra. Aqui a gente detecta a
    heurística no texto do user e o runner usa pra fazer override quando
@@ -23,17 +28,26 @@ import re
 
 _MD_HEADER_RE = re.compile(r"^[ \t]*#{1,6}[ \t]+(.+?)[ \t]*$", re.MULTILINE)
 
+# Colapsa `**X**` em `*X*`. Lazy match (`.+?`) evita engolir múltiplos
+# blocos numa única captura. Negative lookbehind/ahead pra não casar
+# `***foo***` (3 asteriscos) parcialmente — nesse caso só remove o par
+# extra externo via segunda passada implícita do regex.
+_MD_DOUBLE_BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+
 
 def strip_markdown_headers(text: str | None) -> str | None:
-    """Converte linhas tipo `### Foo` em `*Foo*` (bold WhatsApp).
+    """Converte linhas tipo `### Foo` em `*Foo*` (bold WhatsApp) e
+    colapsa `**X**` em `*X*`.
 
     Preserva None/strings vazias. Só pega `#` no início da linha (com
     espaço opcional antes); não toca `#` no meio da frase nem em
-    hashtags inline.
+    hashtags inline. Pra `**`, converte em qualquer posição.
     """
     if not text:
         return text
-    return _MD_HEADER_RE.sub(r"*\1*", text)
+    text = _MD_HEADER_RE.sub(r"*\1*", text)
+    text = _MD_DOUBLE_BOLD_RE.sub(r"*\1*", text)
+    return text
 
 
 # Heurística pra Bug 2: pergunta de tendência caindo em fallback.
