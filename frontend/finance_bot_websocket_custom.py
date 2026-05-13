@@ -3218,6 +3218,10 @@ async def serve_whatsapp():
 async def serve_funcionalidades():
     return _html_file(HERE / "funcionalidades.html")
 
+@app.get("/comandos")
+async def serve_comandos():
+    return _html_file(HERE / "comandos.html")
+
 @app.get("/como-funciona")
 async def serve_como_funciona():
     return _html_file(HERE / "como-funciona.html")

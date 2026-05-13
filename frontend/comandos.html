@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Comandos — PigBank AI</title>
+<meta name="description" content="Lista completa dos comandos que o PigBank AI entende no WhatsApp e Discord — assinatura, cartões, parcelamentos, orçamentos, caixinhas, investimentos e mais." />
+<link rel="canonical" href="https://pigbankai.com/comandos" />
+<link rel="icon" type="image/png" href="/favicon.png" />
+<meta name="theme-color" content="#070b14" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="PigBank AI" />
+<meta property="og:title" content="Comandos — PigBank AI" />
+<meta property="og:description" content="Tudo que você pode pedir ao Piggy direto pelo chat." />
+<meta property="og:url" content="https://pigbankai.com/comandos" />
+<meta property="og:image" content="https://pigbankai.com/favicon.png" />
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--glass-bg:rgba(255,255,255,.07);--glass-border:rgba(255,255,255,.13);--text:rgba(255,255,255,.92);--text-2:rgba(255,255,255,.58);--text-3:rgba(255,255,255,.32);--purple:#a78bfa;--blue:#60a5fa;--green:#34d399;--yellow:#fbbf24;--pink:#f472b6;--orange:#fb923c;--ease:cubic-bezier(.4,0,.2,1)}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;background:#070b14;color:var(--text);min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+.bg{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+.orb{position:absolute;border-radius:50%;filter:blur(90px);opacity:.34;animation:drift 18s ease-in-out infinite alternate}
+.orb-1{width:700px;height:700px;background:radial-gradient(circle,#6d28d9,transparent 70%);top:-260px;left:-220px}
+.orb-2{width:520px;height:520px;background:radial-gradient(circle,#0ea5e9,transparent 70%);top:28%;right:-220px;animation-delay:-6s}
+.orb-3{width:420px;height:420px;background:radial-gradient(circle,#10b981,transparent 70%);bottom:-130px;left:18%;animation-delay:-12s;opacity:.2}
+@keyframes drift{0%{transform:translate(0,0) scale(1)}50%{transform:translate(34px,-28px) scale(1.04)}100%{transform:translate(-18px,42px) scale(.98)}}
+.page{position:relative;z-index:1;max-width:1030px;margin:0 auto;padding:0 24px 90px}
+nav{position:sticky;top:16px;z-index:10;display:flex;align-items:center;justify-content:space-between;gap:18px;margin:16px 0 0;background:rgba(255,255,255,.06);backdrop-filter:blur(32px) saturate(180%);border:1px solid var(--glass-border);border-radius:18px;padding:12px 20px;box-shadow:0 4px 24px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.1)}
+.nav-logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text)}
+.logo-icon{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#7c3aed,#3b82f6);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(124,58,237,.4)}
+.nav-logo span{font-size:1rem;font-weight:750}
+.nav-links{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.nav-links a{color:var(--text-2);font-size:.78rem;font-weight:650;text-decoration:none}
+.nav-links a:hover,.nav-links a.active{color:var(--text)}
+.hero{padding:88px 0 28px;text-align:center}
+.eyebrow{display:inline-flex;background:rgba(167,139,250,.13);border:1px solid rgba(167,139,250,.28);border-radius:999px;padding:6px 14px;color:var(--purple);font-size:.74rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;margin-bottom:22px}
+.hero h1{font-size:clamp(2.2rem,5.6vw,3.6rem);line-height:1.06;letter-spacing:-.03em;margin-bottom:20px}
+.grad{background:linear-gradient(135deg,#a78bfa,#60a5fa,#34d399);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero p{max-width:680px;margin:0 auto;color:var(--text-2);font-size:1.04rem;line-height:1.7}
+.tip{max-width:680px;margin:24px auto 0;background:rgba(167,139,250,.08);border:1px solid rgba(167,139,250,.2);border-radius:14px;padding:14px 18px;color:var(--text-2);font-size:.86rem;line-height:1.55;text-align:left}
+.tip b{color:var(--text);font-weight:700}
+.section-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:16px;margin:36px 0 18px}
+.cat{background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:18px;padding:22px;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+.cat-head{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.cat-icon{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;background:rgba(167,139,250,.14);border:1px solid rgba(167,139,250,.24)}
+.cat:nth-child(6n+2) .cat-icon{background:rgba(96,165,250,.14);border-color:rgba(96,165,250,.24)}
+.cat:nth-child(6n+3) .cat-icon{background:rgba(52,211,153,.14);border-color:rgba(52,211,153,.24)}
+.cat:nth-child(6n+4) .cat-icon{background:rgba(251,191,36,.14);border-color:rgba(251,191,36,.24)}
+.cat:nth-child(6n+5) .cat-icon{background:rgba(244,114,182,.14);border-color:rgba(244,114,182,.24)}
+.cat:nth-child(6n+0) .cat-icon{background:rgba(251,146,60,.14);border-color:rgba(251,146,60,.24)}
+.cat h2{font-size:1.02rem;font-weight:750;letter-spacing:-.01em}
+.cat-desc{color:var(--text-3);font-size:.78rem;margin-bottom:14px;line-height:1.5}
+.cmds{display:flex;flex-direction:column;gap:8px}
+.cmd{background:rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:10px 13px;font-family:"SF Mono","JetBrains Mono",Consolas,monospace;font-size:.82rem;color:var(--text);line-height:1.45;cursor:pointer;transition:all .15s var(--ease);position:relative}
+.cmd:hover{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.13)}
+.cmd-note{display:block;margin-top:4px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:var(--text-3);font-size:.75rem;font-style:italic}
+.copied{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:rgba(52,211,153,.18);border:1px solid rgba(52,211,153,.32);color:var(--green);font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:.7rem;font-weight:700;padding:3px 8px;border-radius:6px;opacity:0;transition:opacity .15s var(--ease);pointer-events:none}
+.cmd.just-copied .copied{opacity:1}
+.callout{margin:42px 0 0;background:linear-gradient(135deg,rgba(124,58,237,.18),rgba(59,130,246,.18));border:1px solid rgba(167,139,250,.3);border-radius:20px;padding:28px;text-align:center}
+.callout h3{font-size:1.2rem;margin-bottom:8px}
+.callout p{color:var(--text-2);font-size:.92rem;line-height:1.6;max-width:600px;margin:0 auto}
+footer{margin-top:60px;border-top:1px solid rgba(255,255,255,.08);padding-top:28px;color:var(--text-3);font-size:.78rem}
+.footer-copy{text-align:center;margin-bottom:18px}
+.footer-links{display:grid;grid-template-columns:max-content max-content max-content;justify-content:center;align-items:start;gap:72px;max-width:100%;margin:0 auto}
+.footer-col{display:flex;flex-direction:column;gap:8px;text-align:left}
+.footer-title{color:var(--text);font-size:.72rem;font-weight:850;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}
+.footer-links a{color:var(--text-2);text-decoration:none}
+.footer-links a:hover{color:var(--text)}
+@media(max-width:760px){nav{flex-wrap:wrap}.nav-links{width:100%;justify-content:center}.hero{padding:66px 0 24px}.page{padding-inline:18px}.footer-links{grid-template-columns:1fr;gap:18px}.footer-col{justify-self:center}}
+</style>
+</head>
+<body>
+<div class="bg"><div class="orb orb-1"></div><div class="orb orb-2"></div><div class="orb orb-3"></div></div>
+<div class="page">
+  <nav>
+    <a class="nav-logo" href="/"><div class="logo-icon">🐷</div><span>PigBank AI</span></a>
+    <div class="nav-links">
+      <a href="/whatsapp">WhatsApp</a>
+      <a href="/funcionalidades">Funcionalidades</a>
+      <a class="active" href="/comandos">Comandos</a>
+      <a href="/como-funciona">Como funciona</a>
+      <a href="/precos">Preços</a>
+      <a href="/suporte">Suporte</a>
+    </div>
+  </nav>
+  <main>
+    <section class="hero">
+      <div class="eyebrow">Comandos</div>
+      <h1>Tudo que você pode <span class="grad">pedir ao Piggy</span></h1>
+      <p>Manda no WhatsApp ou Discord do mesmo jeito que você fala com gente. Aqui em baixo tá a lista do que ele entende — clica em qualquer comando pra copiar.</p>
+      <div class="tip">💡 <b>Plano Pro:</b> escreve do jeito que sair. <b>Plano Free:</b> precisa começar a mensagem com <b>piggy</b> pra IA entender (ex: <i>piggy quanto gastei?</i>).</div>
+    </section>
+
+    <section class="section-list">
+
+      <article class="cat">
+        <div class="cat-head"><div class="cat-icon">💳</div><h2>Plano e assinatura</h2></div>
+        <p class="cat-desc">Vira Pro, gerencia, vê status. Funciona no Free e no Pro, sem prefixo.</p>
+        <div class="cmds">
+          <div class="cmd">assinar plano<span class="copied">copiado</span></div>
+          <div class="cmd">cancelar plano<span class="copied">copiado</span></div>
+          <div class="cmd">plano<span class="cmd-note">vê seu status atual</span><span class="copied">copiado</span></div>
+          <div class="cmd">renovar plano<span class="copied">copiado</span></div>
+        </div>
+      </article>
+
+      <article class="cat">
+        <div class="cat-head"><div class="cat-icon">💰</div><h2>Saldo e lançamentos</h2></div>
+        <p class="cat-desc">O básico — quanto tem, o que entrou, o que saiu.</p>
+        <div class="cmds">
+          <div class="cmd">saldo<span class="copied">copiado</span></div>
+          <div class="cmd">gastei 50 no mercado<span class="copied">copiado</span></div>
+          <div class="cmd">recebi 2000 de salário<span class="copied">copiado</span></div>
+          <div class="cmd">últimos lançamentos<span class="copied">copiado</span></div>
+          <div class="cmd">apaga o lançamento #N<span class="cmd-note">N = número que aparece na listagem</span><span class="copied">copiado</span></div>
+          <div class="cmd">muda a categoria do #N pra alimentação<span class="copied">copiado</span></div>
+        </div>
+      </article>
+
+      <article class="cat">
+        <div class="cat-head"><div class="cat-icon">💳</div><h2>Cartão de crédito</h2></div>
+        <p class="cat-desc">Compras, faturas, limite e pagamento — o cartão sem mistério.</p>
+        <div class="cmds">
+          <div class="cmd">gastei 200 no Nubank<span class="copied">copiado</span></div>
+          <div class="cmd">parcelei 1200 em 6x no Nubank<span class="copied">copiado</span></div>
+          <div class="cmd">minha fatura do Nubank<span class="copied">copiado</span></div>
+          <div class="cmd">próxima fatura<span class="cmd-note">projeção da fatura que vai fechar</span><span class="copied">copiado</span></div>
+          <div class="cmd">quanto eu devo<span class="cmd-note">soma de todas as faturas em aberto</span><span class="copied">copiado</span></div>
+          <div class="cmd">quanto tenho de limite no Nubank<span class="copied">copiado</span></div>
+          <div class="cmd">paguei a fatura do Nubank<span class="copied">copiado</span></div>
+        </div>
+      </article>
+
+      <article class="cat">
+        <div class="cat-head"><div class="cat-icon">📅</div><h2>Parcelamentos</h2></div>
+        <p class="cat-desc">Acompanha o que tá parcelado e quando vence cada parcela.</p>
+        <div class="cmds">
+          <div class="cmd">meus parcelamentos<span class="cmd-note">mostra grupos ativos + datas das próximas cobranças</span><span class="copied">copiado</span></div>
+          <div class="cmd">apaga o parcelamento PCxxxxxx<span class="cmd-note">PCxxxxxx é o código que aparece nos parcelamentos</span><span class="copied">copiado</span></div>
+        </div>
+      </article>
+
+      <article class="cat">
+        <div class="cat-head"><div class="cat-icon">🎯</div><h2>Orçamentos</h2></div>
+        <p class="cat-desc">Define limite por categoria e o Piggy te avisa quando passar.</p>
+        <div class="cmds">
+          <div class="cmd">define orçamento de 500 em alimentação<span class="copied">copiado</span></div>
+          <div class="cmd">meus orçamentos<span class="cmd-note">mostra todos e o quanto já gastou</span><span class="copied">copiado</span></div>
+          <div class="cmd">como tá meu orçamento de lazer<span class="copied">copiado</span></div>
+          <div class="cmd">apaga orçamento de lazer<span class="copied">copiado</span></div>
+        </div>
+      </article>
+
+      <article class="cat">
+        <div class="cat-head"><div class="cat-icon">🏦</div><h2>Caixinhas</h2></div>
+        <p class="cat-desc">Reservas separadas — viagem, emergência, reforma. Dinheiro que não tá no saldo principal.</p>
+        <div class="cmds">
+          <div class="cmd">cria caixinha viagem<span class="copied">copiado</span></div>
+          <div class="cmd">deposita 200 na caixinha viagem<span class="copied">copiado</span></div>
+          <div class="cmd">saca 50 da caixinha viagem<span class="copied">copiado</span></div>
+          <div class="cmd">minhas caixinhas<span class="copied">copiado</span></div>
+          <div class="cmd">apaga caixinha viagem<span class="cmd-note">precisa ter saldo zero</span><span class="copied">copiado</span></div>
+        </div>
+      </article>
+
+      <article class="cat">
+        <div class="cat-head"><div class="cat-icon">📈</div><h2>Investimentos</h2></div>
+        <p class="cat-desc">CDB, Tesouro, LCI — cadastro, aporta, resgata. Calcula IR/IOF no resgate sozinho.</p>
+        <div class="cmds">
+          <div class="cmd">cria investimento Tesouro Selic 13.75 anual<span class="cmd-note">nome, taxa (% anual), periodicidade</span><span class="copied">copiado</span></div>
+          <div class="cmd">aporta 500 no Tesouro Selic<span class="copied">copiado</span></div>
+          <div class="cmd">resgata 200 do Tesouro Selic<span class="copied">copiado</span></div>
+          <div class="cmd">meus investimentos<span class="copied">copiado</span></div>
+          <div class="cmd">quanto tenho investido<span class="cmd-note">total da carteira</span><span class="copied">copiado</span></div>
+          <div class="cmd">quanto aportei esse mês<span class="copied">copiado</span></div>
+        </div>
+      </article>
+
+      <article class="cat">
+        <div class="cat-head"><div class="cat-icon">📊</div><h2>Análise e relatórios</h2></div>
+        <p class="cat-desc">Onde tá indo a grana, comparações, projeções. Tudo pronto, sem precisar abrir o dashboard.</p>
+        <div class="cmds">
+          <div class="cmd">onde gastei mais esse mês<span class="cmd-note">top categorias</span><span class="copied">copiado</span></div>
+          <div class="cmd">meus 5 maiores gastos do mês<span class="copied">copiado</span></div>
+          <div class="cmd">tendência últimos 6 meses<span class="copied">copiado</span></div>
+          <div class="cmd">compara abril com maio<span class="copied">copiado</span></div>
+          <div class="cmd">projeção do mês<span class="cmd-note">"vou fechar no negativo?"</span><span class="copied">copiado</span></div>
+        </div>
+      </article>
+
+      <article class="cat">
+        <div class="cat-head"><div class="cat-icon">🌅</div><h2>Relatório diário</h2></div>
+        <p class="cat-desc">Resumo financeiro automático todo dia, no horário que você escolher.</p>
+        <div class="cmds">
+          <div class="cmd">liga relatório diário<span class="copied">copiado</span></div>
+          <div class="cmd">desliga relatório diário<span class="copied">copiado</span></div>
+          <div class="cmd">muda hora do relatório pra 8h<span class="copied">copiado</span></div>
+        </div>
+      </article>
+
+    </section>
+
+    <div class="callout">
+      <h3>🐷 Não tá listado aqui?</h3>
+      <p>Pergunta do jeito que vier. O Piggy entende português corrido e pede confirmação antes de mexer em qualquer coisa importante.</p>
+    </div>
+  </main>
+  <footer>
+    <p class="footer-copy">© 2026 PigBank AI</p>
+    <div class="footer-links">
+      <div class="footer-col"><span class="footer-title">Navegue</span><a href="/como-funciona">Como funciona</a><a href="/funcionalidades">Funcionalidades</a><a href="/comandos">Comandos</a><a href="/whatsapp">WhatsApp</a></div>
+      <div class="footer-col"><span class="footer-title">Produto</span><a href="/precos">Preços</a><a href="/changelog">Novidades</a></div>
+      <div class="footer-col"><span class="footer-title">Institucional</span><a href="/privacy">Política de Privacidade</a><a href="/suporte">Suporte</a><a href="mailto:contato@pigbankai.com">Contato</a></div>
+    </div>
+  </footer>
+</div>
+<script>
+document.querySelectorAll(".cmd").forEach(el => {
+  el.addEventListener("click", () => {
+    // Pega só o texto principal, sem .cmd-note e .copied
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll(".cmd-note,.copied").forEach(n => n.remove());
+    const txt = clone.textContent.trim();
+    if (!txt) return;
+    navigator.clipboard?.writeText(txt).catch(() => {});
+    el.classList.add("just-copied");
+    setTimeout(() => el.classList.remove("just-copied"), 1200);
+  });
+});
+</script>
+</body>
+</html>
