@@ -442,9 +442,11 @@ TOOLS: list[Tool] = [
                     "'meus parcelamentos', 'o que tenho parcelado?', 'quais "
                     "parcelamentos ativos?'. Retorna cartão, descrição, "
                     "total, total pendente, quantas parcelas faltam e "
-                    "`upcoming_due_dates` (datas de vencimento das parcelas "
-                    "pendentes em ordem). Liste as datas como bullets simples "
-                    "no formato dd/mm/aaaa quando o user pedir."
+                    "`upcoming_due_dates` (datas das próximas cobranças, "
+                    "em ordem). Na resposta, intitule a seção como "
+                    "*Próximas cobranças:* (NUNCA 'Datas de Vencimento' "
+                    "nem 'Próximos Vencimentos') e liste só as datas como "
+                    "bullets simples em dd/mm/aaaa, sem repetir cartão/desc."
                 ),
                 "parameters": {
                     "type": "object",
