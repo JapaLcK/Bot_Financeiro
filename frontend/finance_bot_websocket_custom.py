@@ -130,6 +130,9 @@ DASHBOARD_URL           = os.getenv("DASHBOARD_URL", "http://localhost:8000").st
 if DASHBOARD_URL.startswith("DASHBOARD_URL="):
     DASHBOARD_URL = DASHBOARD_URL[len("DASHBOARD_URL="):]
 DASHBOARD_URL = DASHBOARD_URL.rstrip("/")
+# Em dev local (http://localhost) o navegador rejeita cookies Secure. Em prod
+# DASHBOARD_URL é https → Secure=True como sempre.
+COOKIE_SECURE = DASHBOARD_URL.startswith("https://")
 WHATSAPP_NUMBER         = os.getenv("WHATSAPP_NUMBER", "")
 STRIPE_SECRET_KEY       = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET   = os.getenv("STRIPE_WEBHOOK_SECRET", "")
@@ -1128,7 +1131,7 @@ def _set_csrf_cookie(response: Response, token: str) -> None:
         CSRF_COOKIE_NAME,
         token,
         httponly=False,
-        secure=True,
+        secure=COOKIE_SECURE,
         samesite="strict",
         max_age=CSRF_COOKIE_MAX_AGE,
     )
@@ -1335,7 +1338,7 @@ def _set_auth_cookie(response: Response, token: str) -> None:
         AUTH_COOKIE_NAME,
         token,
         httponly=True,
-        secure=True,
+        secure=COOKIE_SECURE,
         samesite="lax",
         max_age=AUTH_COOKIE_MAX_AGE,
     )
@@ -1347,7 +1350,7 @@ def _set_dashboard_cookie(response: Response, user_id: int, *, jti: str | None =
         DASHBOARD_COOKIE_NAME,
         token,
         httponly=True,
-        secure=True,
+        secure=COOKIE_SECURE,
         samesite="lax",
         max_age=int(DASHBOARD_SESSION_HOURS * 3600),
     )
@@ -1360,7 +1363,7 @@ def _expire_cookie(response: Response, name: str, domain: str | None = None) -> 
         path="/",
         domain=domain,
         httponly=True,
-        secure=True,
+        secure=COOKIE_SECURE,
         samesite="strict",
     )
 
@@ -2449,7 +2452,7 @@ async def auth_google_start(request: Request):
         GOOGLE_OAUTH_STATE_COOKIE,
         state,
         httponly=True,
-        secure=True,
+        secure=COOKIE_SECURE,
         samesite="lax",
         max_age=GOOGLE_OAUTH_STATE_MAX_AGE,
         path="/auth/google",
