@@ -695,6 +695,30 @@ def init_db():
         alter table credit_cards add column if not exists credit_limit numeric
         """,
 
+        # ─── Personalização visual do cartão (color/flag/last4) ───────────────────
+        # color: chave da paleta predefinida (purple|coral|gold|green|blue|gray)
+        # flag: bandeira (Visa|Mastercard|Elo|Amex|Hipercard|Outros)
+        # last4: últimos 4 dígitos (opcional, só pra distinguir cartões)
+        """
+        alter table credit_cards add column if not exists color text
+        """,
+        """
+        alter table credit_cards add column if not exists flag text
+        """,
+        """
+        alter table credit_cards add column if not exists last4 text
+        """,
+        """
+        do $$
+        begin
+          if not exists (select 1 from pg_constraint where conrelid = 'credit_cards'::regclass
+            and conname = 'credit_cards_last4_check') then
+            alter table credit_cards add constraint credit_cards_last4_check
+              check (last4 is null or last4 ~ '^[0-9]{4}$');
+          end if;
+        end $$;
+        """,
+
         # ─── OFX import de fatura: deduplicação em credit_transactions ────────────
         """
         alter table credit_transactions add column if not exists source text not null default 'manual'
@@ -817,6 +841,24 @@ def init_db():
           budget    numeric not null check (budget > 0),
           created_at timestamptz default now(),
           unique (user_id, categoria)
+        )
+        """,
+
+        # ─── Metadata visual das categorias (Sprint 3) ──────────────────────────
+        # name = chave funcional lowercase, batendo com launches.categoria (sem FK).
+        # is_system = seed lazy das 14 canonicas (controle de idempotencia).
+        # Rename emite UPDATE em cascata em launches/category_budgets/budget_alert_sent.
+        """
+        create table if not exists user_categories (
+          id          bigserial primary key,
+          user_id     bigint  not null references users(id) on delete cascade,
+          name        text    not null,
+          emoji       text    not null default '🏷️',
+          color       text    not null default '#7c3aed',
+          is_archived boolean not null default false,
+          is_system   boolean not null default false,
+          created_at  timestamptz not null default now(),
+          unique (user_id, name)
         )
         """,
 

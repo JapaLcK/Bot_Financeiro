@@ -441,8 +441,11 @@ def test_rebuild_com_refund_cria_launch_de_estorno(user_id):
     assert float(db.get_balance(user_id)) - float(saldo_antes) == 100.0
 
 
-def test_undo_installment_estorna_overpayment(user_id):
-    """A+C: apagar parcelamento que estava pago → estorno na conta corrente."""
+def test_undo_installment_mantem_paid_bills_intactas(user_id):
+    """Option B (2026-05-14): apagar parcelamento com parcelas pagas
+    NÃO estorna dinheiro. Tx em fatura paga viram órfãs (group_id=null,
+    nota+sufixo), fatura paga continua intacta. Tx em open bill são
+    deletadas. Sem refund launch."""
     import db
     today = date.today()
 
@@ -457,35 +460,41 @@ def test_undo_installment_estorna_overpayment(user_id):
 
     # Paga a 1ª fatura (R$ 100) inteira
     open_bills = db.list_open_bills(user_id)
-    bill_paga = open_bills[0]  # menor period_end
+    bill_paga = open_bills[0]
     db.pay_bill_amount(user_id, card_id, "Nubank", 100.0, bill_id=bill_paga["id"])
 
-    # Bill paga: paid=100, total=100, status='paid'
+    saldo_antes = float(db.get_balance(user_id))
+
+    result = db.undo_installment_group(user_id, group_id)
+    assert result is not None
+    assert result["refunded"] == 0.0  # nunca estorna agora
+    assert result["refund_launch_id"] is None
+    assert result["orphaned_count"] == 1  # 1 tx em paid bill
+    assert result["removed_count"] == 4   # 4 tx em open bills
+
+    # Bill paga: intacta (total e paid preservados)
     with db.get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("select paid_amount, total, status from credit_bills where id=%s", (bill_paga["id"],))
             row = cur.fetchone()
+    assert float(row["total"]) == 100.0
     assert float(row["paid_amount"]) == 100.0
-    assert float(row["status"] == "paid") if isinstance(row["status"], bool) else row["status"] == "paid"
+    assert row["status"] == "paid"
 
-    saldo_antes = float(db.get_balance(user_id))
-
-    # Apaga o parcelamento → bill paga deve perder a parcela E ganhar estorno
-    result = db.undo_installment_group(user_id, group_id)
-    assert result is not None
-    assert result["refunded"] == 100.0  # R$ 100 estornados
-    assert result["refund_launch_id"] is not None
-
-    # Bill: total=0 (parcela removida), paid=0 (estornado)
+    # Tx órfã: group_id null, nota com sufixo
     with db.get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("select paid_amount, total from credit_bills where id=%s", (bill_paga["id"],))
-            row = cur.fetchone()
-    assert float(row["total"]) == 0.0
-    assert float(row["paid_amount"]) == 0.0
+            cur.execute(
+                "select group_id, nota from credit_transactions "
+                "where user_id=%s and bill_id=%s and is_refund=false",
+                (user_id, bill_paga["id"]),
+            )
+            tx_orphan = cur.fetchone()
+    assert tx_orphan["group_id"] is None
+    assert "[Parcelamento removido" in (tx_orphan["nota"] or "")
 
-    # Saldo da conta voltou (estornado)
-    assert float(db.get_balance(user_id)) - saldo_antes == 100.0
+    # Saldo da conta NÃO mudou (sem estorno)
+    assert float(db.get_balance(user_id)) == saldo_antes
 
 
 def test_undo_installment_sem_pagamento_nao_estorna(user_id):

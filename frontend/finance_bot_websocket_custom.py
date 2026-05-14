@@ -174,14 +174,59 @@ class FinanceEncoder(json.JSONEncoder):
 def jdump(data: dict) -> str:
     return json.dumps(data, cls=FinanceEncoder, ensure_ascii=False)
 
-# ─── DB helpers ──────────────────────────────────────────────────────────────
+# ─── DB helpers (com connection pool) ────────────────────────────────────────
+# Pool global de conexões assíncronas. Em vez de abrir nova conn a cada query
+# (custa 1-2s no Railway), reusa de um pool. O `_PooledConn` mantém a interface
+# antiga (`async with await db_connect() as conn:`) intacta — todos os callers
+# antigos continuam funcionando sem mudança.
+from psycopg_pool import AsyncConnectionPool
+
+_db_pool: AsyncConnectionPool | None = None
+_db_pool_lock = asyncio.Lock()
+
+
+async def _get_db_pool() -> AsyncConnectionPool:
+    global _db_pool
+    if _db_pool is not None:
+        return _db_pool
+    async with _db_pool_lock:
+        if _db_pool is not None:  # double-check após pegar lock
+            return _db_pool
+        pool = AsyncConnectionPool(
+            DATABASE_URL,
+            min_size=1,
+            max_size=int(os.getenv("DB_POOL_MAX", "8")),
+            timeout=DB_CONNECT_TIMEOUT,
+            kwargs={"row_factory": dict_row},
+            open=False,
+        )
+        await pool.open(wait=True, timeout=DB_CONNECT_TIMEOUT)
+        _db_pool = pool
+        return _db_pool
+
+
+class _PooledConn:
+    """Adapter pra preservar a interface `async with await db_connect() as conn`.
+    `pool.connection()` retorna um async-context-manager direto, mas o caller
+    legado faz `await db_connect()` antes de entrar no async-with — esse wrapper
+    casa os dois protocolos."""
+    def __init__(self, pool: AsyncConnectionPool):
+        self._pool = pool
+        self._cm = None
+
+    async def __aenter__(self):
+        self._cm = self._pool.connection()
+        return await self._cm.__aenter__()
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if self._cm is None:
+            return False
+        return await self._cm.__aexit__(exc_type, exc, tb)
+
 
 async def db_connect():
-    return await psycopg.AsyncConnection.connect(
-        DATABASE_URL,
-        row_factory=dict_row,
-        connect_timeout=DB_CONNECT_TIMEOUT,
-    )
+    pool = await _get_db_pool()
+    return _PooledConn(pool)
 
 async def list_users() -> list:
     async with await db_connect() as conn:
@@ -428,257 +473,260 @@ async def get_financial_data(
     launch_filter_clauses, launch_filter_params = _dashboard_launch_filter_sql(filter_type, query)
     launch_filter_sql = "".join(f"\n                  AND ({clause})" for clause in launch_filter_clauses)
 
-    async with await db_connect() as conn:
-        async with conn.cursor() as cur:
+    # Helper que roda 1 query num conn próprio do pool. Permite paralelizar
+    # via asyncio.gather (cada gather pega uma conn diferente do pool).
+    async def _q(sql: str, params: tuple = ()):
+        async with await db_connect() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql, params)
+                return await cur.fetchall()
 
-            # Account balance (always current)
-            await cur.execute(
-                "SELECT balance FROM accounts WHERE user_id = %s", (user_id,)
-            )
-            account = await cur.fetchone()
+    investments = current_investments  # do cache
 
-            # Savings pockets (always current)
-            await cur.execute(
-                "SELECT name, balance FROM pockets WHERE user_id = %s ORDER BY name",
-                (user_id,),
-            )
-            pockets = await cur.fetchall()
+    # Compras no crédito viram linhas virtuais com tipo='credito' no
+    # histórico — só quando o filtro permitir (no filtro "all" ou sem filtro).
+    include_credit = (filter_type or "all").strip().lower() in ("", "all")
 
-            # Investments (always current)
-            investments = current_investments
+    credit_union_sql = ""
+    credit_union_params: list = []
+    if include_credit:
+        credit_union_sql = """
+            UNION ALL
+            SELECT t.id AS id,
+                   'credito' AS tipo,
+                   t.valor AS valor,
+                   c.name AS alvo,
+                   t.nota AS nota,
+                   t.categoria AS categoria,
+                   t.created_at AS criado_em,
+                   false AS is_internal_movement,
+                   t.installments_total AS installments_total,
+                   t.installment_no AS installment_no
+            FROM credit_transactions t
+            JOIN credit_cards c ON c.id = t.card_id
+            WHERE t.user_id = %s
+              AND t.purchased_at >= %s::date
+              AND t.purchased_at < %s::date
+              AND t.is_refund = false
+        """
+        credit_union_params = [user_id, month_start, month_end]
 
-            # Compras no crédito viram linhas virtuais com tipo='credito' no
-            # histórico — só quando o filtro permitir (no filtro "all" ou sem filtro).
-            include_credit = (filter_type or "all").strip().lower() in ("", "all")
-
-            credit_union_sql = ""
-            credit_union_params: list = []
-            if include_credit:
-                # `id` aqui é o id da credit_transaction (NÃO da launches). O
-                # frontend distingue pelo campo `tipo='credito'` e roteia o
-                # edit/delete pros endpoints /credit-transactions/...
-                # `installments_total` + `installment_no` permitem o front
-                # mostrar "1/3, 2/3, 3/3" e avisar antes de apagar uma parcela.
-                # `t.created_at` (timestamptz com hora exata da inserção) em vez
-                # de `purchased_at::timestamptz` — DATE cast vira meia-noite UTC
-                # → "20:00 horario_brasilia" pra TODAS as compras do mesmo dia,
-                # parecendo hardcoded. Filtro continua por purchased_at (semantica
-                # de "compras feitas neste mês"), mas display usa created_at.
-                credit_union_sql = """
-                    UNION ALL
-                    SELECT t.id AS id,
-                           'credito' AS tipo,
-                           t.valor AS valor,
-                           c.name AS alvo,
-                           t.nota AS nota,
-                           t.categoria AS categoria,
-                           t.created_at AS criado_em,
-                           false AS is_internal_movement,
-                           t.installments_total AS installments_total,
-                           t.installment_no AS installment_no
-                    FROM credit_transactions t
-                    JOIN credit_cards c ON c.id = t.card_id
-                    WHERE t.user_id = %s
-                      AND t.purchased_at >= %s::date
-                      AND t.purchased_at < %s::date
-                      AND t.is_refund = false
-                """
-                credit_union_params = [user_id, month_start, month_end]
-
-            # Total launches for the requested month after filters (excluindo ações administrativas)
-            # Importante: as duas pernas do UNION ALL precisam ter o mesmo shape, então
-            # selecionamos exatamente as mesmas 10 colunas em cada uma
-            # (8 base + installments_total + installment_no).
-            await cur.execute(
-                f"""
-                SELECT COUNT(*) AS total FROM (
-                    SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
-                           NULL::int AS installments_total,
-                           NULL::int AS installment_no
-                    FROM launches
-                    WHERE user_id = %s
-                      AND criado_em >= %s AND criado_em < %s
-                      AND tipo NOT IN ('criar_caixinha', 'delete_pocket', 'create_investment', 'delete_investment')
-                      {launch_filter_sql}
-                    {credit_union_sql}
-                ) merged
-                """,
-                (user_id, month_start, month_end, *launch_filter_params, *credit_union_params),
-            )
-            launches_total_row = await cur.fetchone()
-            launches_total = int(launches_total_row["total"] or 0)
-
-            # Launches for the requested month after filters (paginated)
-            await cur.execute(
-                f"""
+    # ───── Paraleliza 10 queries independentes via asyncio.gather ─────
+    # Cada _q() pega uma conn do pool. Antes era sequencial dentro de UMA
+    # conn → 10 round-trips somados. Agora roda simultâneo → tempo total
+    # ≈ tempo da query mais lenta. Ganho enorme em DB com latência alta.
+    (
+        account_rows,
+        pockets,
+        launches_total_rows,
+        launches,
+        monthly,
+        categories,
+        allocations_rows,
+        card_rows,
+        daily_rows,
+        budget_rows,
+    ) = await asyncio.gather(
+        # 1) Account balance
+        _q("SELECT balance FROM accounts WHERE user_id = %s", (user_id,)),
+        # 2) Savings pockets
+        _q("SELECT name, balance FROM pockets WHERE user_id = %s ORDER BY name", (user_id,)),
+        # 3) Total launches (com filtros + credit union)
+        _q(
+            f"""
+            SELECT COUNT(*) AS total FROM (
                 SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
-                       installments_total, installment_no
-                FROM (
-                    SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
-                           NULL::int AS installments_total,
-                           NULL::int AS installment_no
-                    FROM launches
-                    WHERE user_id = %s
-                      AND criado_em >= %s AND criado_em < %s
-                      AND tipo NOT IN ('criar_caixinha', 'delete_pocket', 'create_investment', 'delete_investment')
-                      {launch_filter_sql}
-                    {credit_union_sql}
-                ) merged
-                ORDER BY criado_em DESC, id ASC
-                LIMIT %s OFFSET %s
-                """,
-                (user_id, month_start, month_end, *launch_filter_params, *credit_union_params, limit, offset),
-            )
-            launches = await cur.fetchall()
-
-            # Monthly income / expense totals — EXCLUINDO movimentações internas
-            await cur.execute(
-                """
-                SELECT tipo, SUM(valor) AS total
+                       NULL::int AS installments_total,
+                       NULL::int AS installment_no
+                FROM launches
+                WHERE user_id = %s
+                  AND criado_em >= %s AND criado_em < %s
+                  AND tipo NOT IN ('criar_caixinha', 'delete_pocket', 'create_investment', 'delete_investment')
+                  {launch_filter_sql}
+                {credit_union_sql}
+            ) merged
+            """,
+            (user_id, month_start, month_end, *launch_filter_params, *credit_union_params),
+        ),
+        # 4) Launches paginado
+        _q(
+            f"""
+            SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
+                   installments_total, installment_no
+            FROM (
+                SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
+                       NULL::int AS installments_total,
+                       NULL::int AS installment_no
+                FROM launches
+                WHERE user_id = %s
+                  AND criado_em >= %s AND criado_em < %s
+                  AND tipo NOT IN ('criar_caixinha', 'delete_pocket', 'create_investment', 'delete_investment')
+                  {launch_filter_sql}
+                {credit_union_sql}
+            ) merged
+            ORDER BY criado_em DESC, id ASC
+            LIMIT %s OFFSET %s
+            """,
+            (user_id, month_start, month_end, *launch_filter_params, *credit_union_params, limit, offset),
+        ),
+        # 5) Monthly income/expense totals (sem internas).
+        # Compras no cartão entram como 'despesa' alocadas pelo mês em que a
+        # FATURA fecha (`credit_bills.period_end`), não pelo `purchased_at`.
+        # Assim parcelamento aparece distribuído (1/3 maio, 2/3 junho, 3/3 julho)
+        # em vez de tudo no mês da compra. Pagamento da fatura é launch interna,
+        # então não dobra.
+        _q(
+            """
+            SELECT tipo, SUM(valor) AS total FROM (
+                SELECT tipo, valor
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
                   AND is_internal_movement = false
-                GROUP BY tipo
-                """,
-                (user_id, month_start, month_end),
-            )
-            monthly = await cur.fetchall()
-
-            # Expense categories for the month — EXCLUINDO movimentações internas
-            await cur.execute(
-                """
-                SELECT COALESCE(categoria, 'sem categoria') AS categoria,
-                       SUM(valor) AS total,
-                       COUNT(*)   AS count
+                UNION ALL
+                SELECT 'despesa' AS tipo, ct.valor
+                FROM credit_transactions ct
+                JOIN credit_bills b ON b.id = ct.bill_id
+                WHERE ct.user_id = %s
+                  AND ct.is_refund = false
+                  AND b.period_end >= %s AND b.period_end < %s
+            ) merged
+            GROUP BY tipo
+            """,
+            (
+                user_id, month_start, month_end,
+                user_id, month_start, month_end,
+            ),
+        ),
+        # 6) Categories (despesas do mês — credit_transactions alocadas por
+        # `bill.period_end`, igual query 5).
+        _q(
+            """
+            SELECT COALESCE(categoria, 'sem categoria') AS categoria,
+                   SUM(valor) AS total,
+                   SUM(cnt)   AS count
+            FROM (
+                SELECT categoria, valor, 1 AS cnt
                 FROM launches
                 WHERE user_id = %s
-                  AND tipo     = 'despesa'
+                  AND tipo = 'despesa'
                   AND is_internal_movement = false
                   AND criado_em >= %s AND criado_em < %s
-                GROUP BY COALESCE(categoria, 'sem categoria')
-                ORDER BY total DESC
-                LIMIT 10
-                """,
-                (user_id, month_start, month_end),
-            )
-            categories = await cur.fetchall()
-
-            # Aportes do mês — saídas de conta corrente para investimentos/caixinhas.
-            # Captura:
-            #  - aporte_investimento (renda fixa via comando dedicado)
-            #  - deposito_caixinha (movimentação para caixinha)
-            #  - despesas marcadas como internas cuja categoria indica alocação
-            #    (compras de ação, "investi 1000", aportes em renda fixa via NLP, cripto, etc.)
-            await cur.execute(
-                """
+                UNION ALL
+                SELECT ct.categoria, ct.valor, 1 AS cnt
+                FROM credit_transactions ct
+                JOIN credit_bills b ON b.id = ct.bill_id
+                WHERE ct.user_id = %s
+                  AND ct.is_refund = false
+                  AND b.period_end >= %s AND b.period_end < %s
+            ) merged
+            GROUP BY COALESCE(categoria, 'sem categoria')
+            ORDER BY total DESC
+            LIMIT 10
+            """,
+            (
+                user_id, month_start, month_end,
+                user_id, month_start, month_end,
+            ),
+        ),
+        # 7) Allocations (aportes do mês)
+        _q(
+            """
+            SELECT
+                CASE
+                    WHEN tipo = 'deposito_caixinha' THEN 'pockets'
+                    ELSE 'investments'
+                END AS bucket,
+                alvo,
+                SUM(valor) AS total,
+                COUNT(*)   AS count
+            FROM launches
+            WHERE user_id = %s
+              AND criado_em >= %s AND criado_em < %s
+              AND is_internal_movement = true
+              AND (
+                tipo IN ('aporte_investimento', 'deposito_caixinha')
+                OR (tipo = 'despesa' AND LOWER(REPLACE(COALESCE(categoria, ''), ' ', '_')) IN (
+                    'investimentos', 'investimento_aporte', 'criptomoedas'
+                ))
+              )
+            GROUP BY bucket, alvo
+            ORDER BY bucket, total DESC
+            """,
+            (user_id, month_start, month_end),
+        ),
+        # 8) Cards + faturas do mês via LATERAL JOIN (1 query, sem N+1)
+        _q(
+            """
+            SELECT
+                c.id, c.name, c.closing_day, c.due_day,
+                b.status, b.total, b.paid_amount, b.due_amount,
+                b.period_start, b.period_end
+            FROM credit_cards c
+            LEFT JOIN LATERAL (
                 SELECT
-                    CASE
-                        WHEN tipo = 'deposito_caixinha' THEN 'pockets'
-                        ELSE 'investments'
-                    END AS bucket,
-                    alvo,
-                    SUM(valor) AS total,
-                    COUNT(*)   AS count
-                FROM launches
-                WHERE user_id = %s
-                  AND criado_em >= %s AND criado_em < %s
-                  AND is_internal_movement = true
-                  AND (
-                    tipo IN ('aporte_investimento', 'deposito_caixinha')
-                    OR (tipo = 'despesa' AND LOWER(REPLACE(COALESCE(categoria, ''), ' ', '_')) IN (
-                        'investimentos', 'investimento_aporte', 'criptomoedas'
-                    ))
-                  )
-                GROUP BY bucket, alvo
-                ORDER BY bucket, total DESC
-                """,
-                (user_id, month_start, month_end),
-            )
-            allocations_rows = await cur.fetchall()
+                    status,
+                    total,
+                    COALESCE(paid_amount, 0)                          AS paid_amount,
+                    GREATEST(0, total - COALESCE(paid_amount, 0))     AS due_amount,
+                    period_start,
+                    period_end
+                FROM credit_bills
+                WHERE card_id = c.id
+                  AND period_start >= %s
+                  AND period_start < %s
+                ORDER BY period_start DESC
+                LIMIT 1
+            ) b ON TRUE
+            WHERE c.user_id = %s
+            ORDER BY c.name
+            """,
+            (month_start, month_end, user_id),
+        ),
+        # 9) Daily expenses (bar chart)
+        _q(
+            f"""
+            SELECT EXTRACT(DAY FROM criado_em AT TIME ZONE '{TZ}')::int AS dia,
+                   SUM(valor) AS total
+            FROM launches
+            WHERE user_id = %s
+              AND tipo IN ('despesa', 'saida')
+              AND is_internal_movement = false
+              AND criado_em >= %s AND criado_em < %s
+            GROUP BY dia
+            ORDER BY dia
+            """,
+            (user_id, month_start, month_end),
+        ),
+        # 10) Budgets per category
+        _q("SELECT categoria, budget FROM category_budgets WHERE user_id = %s", (user_id,)),
+    )
 
-            # Credit cards — sempre listar TODOS os cartões do usuário,
-            # mesmo sem nenhuma compra/fatura no mês selecionado.
-            # Quando não houver fatura, o cartão deve aparecer com total/due/pago = 0.
-            await cur.execute(
-                """
-                SELECT id, name, closing_day, due_day
-                FROM credit_cards
-                WHERE user_id = %s
-                ORDER BY name
-                """,
-                (user_id,),
-            )
-            base_cards = await cur.fetchall()
+    # Desempacota fetchone-style
+    account = account_rows[0] if account_rows else None
+    launches_total = int(launches_total_rows[0]["total"] or 0) if launches_total_rows else 0
 
-            cards = []
-            for cc in base_cards:
-                await cur.execute(
-                    """
-                    SELECT
-                        status,
-                        total,
-                        COALESCE(paid_amount, 0)                          AS paid_amount,
-                        GREATEST(0, total - COALESCE(paid_amount, 0))     AS due_amount,
-                        period_start,
-                        period_end
-                    FROM credit_bills
-                    WHERE card_id = %s
-                      AND period_start >= %s
-                      AND period_start < %s
-                    ORDER BY period_start DESC
-                    LIMIT 1
-                    """,
-                    (cc["id"], month_start, month_end),
-                )
-                bill = await cur.fetchone()
-
-                # `period_label` ajuda o front a deixar claro que o valor no card
-                # é da fatura DO MÊS, não total do cartão (parcelas futuras vivem
-                # em outras faturas — usuário acessa via setas no modal).
-                period_end = bill["period_end"] if bill else None
-                period_label = (
-                    f"{_months_pt()[period_end.month - 1]}/{period_end.year}"
-                    if period_end else None
-                )
-                card_row = {
-                    "id": cc["id"],
-                    "name": cc["name"],
-                    "closing_day": cc["closing_day"],
-                    "due_day": cc["due_day"],
-                    "status": bill["status"] if bill else "open",
-                    "total": float(bill["total"]) if bill and bill["total"] is not None else 0.0,
-                    "paid_amount": float(bill["paid_amount"]) if bill and bill["paid_amount"] is not None else 0.0,
-                    "due_amount": float(bill["due_amount"]) if bill and bill["due_amount"] is not None else 0.0,
-                    "period_start": bill["period_start"] if bill else None,
-                    "period_end": period_end,
-                    "period_label": period_label,
-                }
-                cards.append(card_row)
-
-            # Daily expenses for the month (for bar chart) — EXCLUINDO movimentações internas
-            await cur.execute(
-                f"""
-                SELECT EXTRACT(DAY FROM criado_em AT TIME ZONE '{TZ}')::int AS dia,
-                       SUM(valor) AS total
-                FROM launches
-                WHERE user_id = %s
-                  AND tipo IN ('despesa', 'saida')
-                  AND is_internal_movement = false
-                  AND criado_em >= %s AND criado_em < %s
-                GROUP BY dia
-                ORDER BY dia
-                """,
-                (user_id, month_start, month_end),
-            )
-            daily_rows = await cur.fetchall()
-
-            # Budgets per category
-            await cur.execute(
-                "SELECT categoria, budget FROM category_budgets WHERE user_id = %s",
-                (user_id,),
-            )
-            budget_rows = await cur.fetchall()
+    # Reformat cards (era loop dentro do bloco de queries)
+    cards = []
+    for r in card_rows:
+        period_end = r["period_end"]
+        period_label = (
+            f"{_months_pt()[period_end.month - 1]}/{period_end.year}"
+            if period_end else None
+        )
+        cards.append({
+            "id": r["id"],
+            "name": r["name"],
+            "closing_day": r["closing_day"],
+            "due_day": r["due_day"],
+            "status": r["status"] or "open",
+            "total": float(r["total"]) if r["total"] is not None else 0.0,
+            "paid_amount": float(r["paid_amount"]) if r["paid_amount"] is not None else 0.0,
+            "due_amount": float(r["due_amount"]) if r["due_amount"] is not None else 0.0,
+            "period_start": r["period_start"],
+            "period_end": period_end,
+            "period_label": period_label,
+        })
 
     # Build maps
     monthly_map = {row["tipo"]: float(row["total"]) for row in monthly}
@@ -4022,6 +4070,10 @@ class CardCreatePayload(BaseModel):
     name: str
     closing_day: int
     due_day: int
+    color: str | None = None
+    flag: str | None = None
+    last4: str | None = None
+    credit_limit: float | None = None
 
 
 @app.post("/cards/{user_id}")
@@ -4051,15 +4103,25 @@ async def create_card_route(request: Request, user_id: int, payload: CardCreateP
         raise HTTPException(status_code=400, detail="Dia de fechamento deve estar entre 1 e 31.")
     if not (1 <= payload.due_day <= 31):
         raise HTTPException(status_code=400, detail="Dia de vencimento deve estar entre 1 e 31.")
+    if payload.credit_limit is not None and payload.credit_limit < 0:
+        raise HTTPException(status_code=400, detail="Limite não pode ser negativo.")
 
     try:
         card_id = await asyncio.to_thread(
             create_card, user_id, name, payload.closing_day, payload.due_day,
+            color=payload.color, flag=payload.flag, last4=payload.last4,
+            credit_limit=payload.credit_limit,
         )
     except ValueError as exc:
         msg = str(exc)
         if msg.startswith("nome_duplicado:"):
             raise HTTPException(status_code=409, detail=f"Já existe um cartão chamado \"{name}\".") from exc
+        if msg.startswith("color_invalido:"):
+            raise HTTPException(status_code=400, detail="Cor inválida. Use: purple, coral, gold, green, blue ou gray.") from exc
+        if msg.startswith("flag_invalida:"):
+            raise HTTPException(status_code=400, detail="Bandeira inválida. Use: Visa, Mastercard, Elo, Amex, Hipercard ou Outros.") from exc
+        if msg.startswith("last4_invalido:"):
+            raise HTTPException(status_code=400, detail="Últimos 4 dígitos devem ser exatamente 4 números.") from exc
         raise HTTPException(status_code=400, detail=msg) from exc
 
     _invalidate_dashboard_current_cache(user_id)
@@ -4070,8 +4132,328 @@ async def create_card_route(request: Request, user_id: int, payload: CardCreateP
             "name": name,
             "closing_day": payload.closing_day,
             "due_day": payload.due_day,
+            "color": payload.color,
+            "flag": payload.flag,
+            "last4": payload.last4,
+            "credit_limit": payload.credit_limit,
         },
     }
+
+
+class CardUpdatePayload(BaseModel):
+    name: str | None = None
+    closing_day: int | None = None
+    due_day: int | None = None
+    color: str | None = None
+    flag: str | None = None
+    last4: str | None = None
+    credit_limit: float | None = None
+    clear_last4: bool = False
+    clear_limit: bool = False
+
+
+@app.get("/cards/{user_id}/summary")
+async def cards_summary_route(request: Request, user_id: int):
+    """Lista todos os cartões com dados agregados (fatura aberta, limite usado).
+    Alimenta a view /app#cards do dashboard.
+
+    Performance: faz 1 query Postgres com subqueries agregadas em vez de
+    N+1 (era ~22 queries × latência por chamada).
+    """
+    _authorize_dashboard_access(request, user_id)
+    from db.connection import get_conn
+
+    def _build():
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    select
+                      c.id, c.name, c.color, c.flag, c.last4,
+                      c.closing_day, c.due_day, c.credit_limit,
+                      (u.default_card_id = c.id) as is_default,
+                      coalesce((
+                        select b.total - coalesce(b.paid_amount, 0)
+                          from credit_bills b
+                         where b.card_id = c.id and b.user_id = c.user_id and b.status = 'open'
+                         order by b.period_end desc
+                         limit 1
+                      ), 0) as open_due,
+                      coalesce((
+                        select b.total
+                          from credit_bills b
+                         where b.card_id = c.id and b.user_id = c.user_id and b.status = 'open'
+                         order by b.period_end desc
+                         limit 1
+                      ), 0) as open_total,
+                      coalesce((
+                        select b.paid_amount
+                          from credit_bills b
+                         where b.card_id = c.id and b.user_id = c.user_id and b.status = 'open'
+                         order by b.period_end desc
+                         limit 1
+                      ), 0) as open_paid,
+                      (
+                        select b.id
+                          from credit_bills b
+                         where b.card_id = c.id and b.user_id = c.user_id and b.status = 'open'
+                         order by b.period_end desc
+                         limit 1
+                      ) as open_bill_id,
+                      (
+                        select b.period_end
+                          from credit_bills b
+                         where b.card_id = c.id and b.user_id = c.user_id and b.status = 'open'
+                         order by b.period_end desc
+                         limit 1
+                      ) as open_period_end,
+                      coalesce((
+                        select sum(b.total - coalesce(b.paid_amount, 0))
+                          from credit_bills b
+                         where b.card_id = c.id and b.user_id = c.user_id
+                      ), 0) as credit_used
+                    from credit_cards c
+                    left join users u on u.id = c.user_id
+                    where c.user_id = %s
+                    order by c.name
+                    """,
+                    (user_id,),
+                )
+                rows = cur.fetchall()
+
+        out = []
+        for r in rows:
+            credit_limit = float(r["credit_limit"]) if r.get("credit_limit") is not None else None
+            usage = float(r["credit_used"] or 0)
+            available = (credit_limit - usage) if credit_limit is not None else None
+            out.append({
+                "id": int(r["id"]),
+                "name": r["name"],
+                "color": r.get("color"),
+                "flag": r.get("flag"),
+                "last4": r.get("last4"),
+                "closing_day": r["closing_day"],
+                "due_day": r["due_day"],
+                "credit_limit": credit_limit,
+                "is_default": bool(r.get("is_default")),
+                "open_bill": {
+                    "id": int(r["open_bill_id"]) if r.get("open_bill_id") else None,
+                    "total": float(r["open_total"] or 0),
+                    "paid_amount": float(r["open_paid"] or 0),
+                    "due_amount": float(r["open_due"] or 0),
+                    "period_end": r["open_period_end"].isoformat() if r.get("open_period_end") else None,
+                },
+                "next_bill": {"total": 0.0, "period_end": None},  # TODO Sprint 2: calcular se necessário
+                "credit_used": usage,
+                "credit_available": available,
+            })
+        return out
+
+    cards = await asyncio.to_thread(_build)
+    return {"ok": True, "cards": cards}
+
+
+@app.patch("/cards/{user_id}/{card_id}")
+async def update_card_route(request: Request, user_id: int, card_id: int, payload: CardUpdatePayload):
+    """Edita campos de um cartão (name, dias, color, flag, last4, credit_limit).
+    Use clear_last4=true ou clear_limit=true pra apagar explicitamente."""
+    _authorize_dashboard_access(request, user_id)
+
+    from db.cards import update_card_meta, get_card_by_id
+
+    if payload.name is not None:
+        n = (payload.name or "").strip()
+        if not n:
+            raise HTTPException(status_code=400, detail="Nome do cartão é obrigatório.")
+        if len(n) > 80:
+            raise HTTPException(status_code=400, detail="Nome muito longo (máx. 80 caracteres).")
+    if payload.closing_day is not None and not (1 <= payload.closing_day <= 31):
+        raise HTTPException(status_code=400, detail="Dia de fechamento deve estar entre 1 e 31.")
+    if payload.due_day is not None and not (1 <= payload.due_day <= 31):
+        raise HTTPException(status_code=400, detail="Dia de vencimento deve estar entre 1 e 31.")
+    if payload.credit_limit is not None and payload.credit_limit < 0:
+        raise HTTPException(status_code=400, detail="Limite não pode ser negativo.")
+
+    try:
+        updated = await asyncio.to_thread(
+            update_card_meta, user_id, card_id,
+            name=payload.name,
+            closing_day=payload.closing_day,
+            due_day=payload.due_day,
+            color=payload.color,
+            flag=payload.flag,
+            last4=payload.last4,
+            credit_limit=payload.credit_limit,
+            clear_last4=payload.clear_last4,
+            clear_limit=payload.clear_limit,
+        )
+    except ValueError as exc:
+        msg = str(exc)
+        if msg.startswith("nome_duplicado:"):
+            raise HTTPException(status_code=409, detail="Já existe outro cartão com esse nome.") from exc
+        if msg.startswith("color_invalido:"):
+            raise HTTPException(status_code=400, detail="Cor inválida.") from exc
+        if msg.startswith("flag_invalida:"):
+            raise HTTPException(status_code=400, detail="Bandeira inválida.") from exc
+        if msg.startswith("last4_invalido:"):
+            raise HTTPException(status_code=400, detail="Últimos 4 dígitos devem ser exatamente 4 números.") from exc
+        raise HTTPException(status_code=400, detail=msg) from exc
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Cartão não encontrado ou nenhum campo alterado.")
+
+    _invalidate_dashboard_current_cache(user_id)
+    fresh = await asyncio.to_thread(get_card_by_id, user_id, card_id)
+    return {
+        "ok": True,
+        "card": {
+            "id": int(fresh["id"]),
+            "name": fresh["name"],
+            "closing_day": fresh["closing_day"],
+            "due_day": fresh["due_day"],
+            "color": fresh.get("color"),
+            "flag": fresh.get("flag"),
+            "last4": fresh.get("last4"),
+            "credit_limit": float(fresh["credit_limit"]) if fresh.get("credit_limit") is not None else None,
+        },
+    }
+
+
+@app.get("/cards/{user_id}/{card_id}/delete-impact")
+async def card_delete_impact_route(request: Request, user_id: int, card_id: int):
+    """Retorna o que será apagado se o cartão for excluído.
+    Frontend usa pra mostrar confirmação ao usuário."""
+    _authorize_dashboard_access(request, user_id)
+    from db.cards import get_card_delete_impact, get_card_by_id
+
+    card = await asyncio.to_thread(get_card_by_id, user_id, card_id)
+    if not card:
+        raise HTTPException(status_code=404, detail="Cartão não encontrado.")
+    impact = await asyncio.to_thread(get_card_delete_impact, user_id, card_id)
+    return {
+        "ok": True,
+        "card_name": card["name"],
+        "impact": impact,
+    }
+
+
+@app.delete("/cards/{user_id}/{card_id}")
+async def delete_card_route(request: Request, user_id: int, card_id: int):
+    """Exclui um cartão e tudo vinculado (faturas, parcelamentos).
+    ON DELETE CASCADE cuida das tabelas credit_bills/credit_transactions."""
+    _authorize_dashboard_access(request, user_id)
+    from db.cards import delete_card, get_card_by_id
+
+    card = await asyncio.to_thread(get_card_by_id, user_id, card_id)
+    if not card:
+        raise HTTPException(status_code=404, detail="Cartão não encontrado.")
+
+    deleted = await asyncio.to_thread(delete_card, user_id, card_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Cartão não encontrado.")
+
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "deleted_card_id": card_id, "deleted_card_name": card["name"]}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Parcelamentos (Sprint 2 — 2026-05-14)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class InstallmentUpdatePayload(BaseModel):
+    nome: str | None = None
+    categoria: str | None = None
+
+
+@app.get("/installments/{user_id}/list")
+async def installments_list_route(
+    request: Request,
+    user_id: int,
+    sort: str = "urgency",
+):
+    """Lista parcelamentos do user com detalhe por parcela.
+    Alimenta a view /app#installments do dashboard."""
+    _authorize_dashboard_access(request, user_id)
+    from db.cards import list_installment_groups_detailed
+
+    if sort not in ("urgency", "recent"):
+        sort = "urgency"
+    groups = await asyncio.to_thread(list_installment_groups_detailed, user_id, sort)
+    return {"ok": True, "installments": groups}
+
+
+@app.get("/installments/{user_id}/{group_id}/delete-impact")
+async def installment_delete_impact_route(request: Request, user_id: int, group_id: str):
+    """Retorna o impacto de excluir o parcelamento (sem excluir).
+    Frontend usa pra escolher mensagem do modal: com vs sem parcelas pagas."""
+    _authorize_dashboard_access(request, user_id)
+    from db.cards import get_installment_group_delete_impact
+
+    impact = await asyncio.to_thread(get_installment_group_delete_impact, user_id, group_id)
+    if not impact:
+        raise HTTPException(status_code=404, detail="Parcelamento não encontrado.")
+    return {"ok": True, "impact": impact}
+
+
+@app.post("/installments/{user_id}/{group_id}/anticipate")
+async def installment_anticipate_route(request: Request, user_id: int, group_id: str):
+    """Antecipa a próxima parcela pendente: paga à vista da conta corrente.
+    Deleta a tx do parcelamento + reduz fatura aberta + cria launch de despesa."""
+    _authorize_dashboard_access(request, user_id)
+    from db.cards import anticipate_installment
+
+    result = await asyncio.to_thread(anticipate_installment, user_id, group_id)
+    if not result:
+        raise HTTPException(
+            status_code=404,
+            detail="Sem parcelas pendentes pra antecipar (parcelamento já quitado).",
+        )
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "result": result}
+
+
+@app.delete("/installments/{user_id}/{group_id}")
+async def installment_delete_route(request: Request, user_id: int, group_id: str):
+    """Exclui parcelamento. Comportamento Option B:
+    - tx em faturas abertas: deletadas (open bill cai, saldo do mês volta)
+    - tx em faturas pagas: viram órfãs (group_id=null, nota+sufixo).
+      Fatura paga intacta — dinheiro não volta pra conta."""
+    _authorize_dashboard_access(request, user_id)
+    from db.cards import undo_installment_group
+
+    result = await asyncio.to_thread(undo_installment_group, user_id, group_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Parcelamento não encontrado.")
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "result": result}
+
+
+@app.patch("/installments/{user_id}/{group_id}")
+async def installment_update_route(
+    request: Request, user_id: int, group_id: str,
+    payload: InstallmentUpdatePayload,
+):
+    """Edita nome (nota) e/ou categoria de todas as parcelas do grupo."""
+    _authorize_dashboard_access(request, user_id)
+    from db.cards import update_installment_group_meta
+
+    if payload.nome is not None:
+        n = (payload.nome or "").strip()
+        if len(n) > 200:
+            raise HTTPException(status_code=400, detail="Nome muito longo (máx. 200 caracteres).")
+    if payload.categoria is not None:
+        c = (payload.categoria or "").strip()
+        if len(c) > 80:
+            raise HTTPException(status_code=400, detail="Categoria muito longa (máx. 80 caracteres).")
+
+    updated = await asyncio.to_thread(
+        update_installment_group_meta, user_id, group_id,
+        nome=payload.nome, categoria=payload.categoria,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Parcelamento não encontrado ou nenhum campo alterado.")
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True}
 
 
 def _months_pt():
@@ -4409,13 +4791,45 @@ class BudgetPayload(BaseModel):
     categoria: str
     budget: float
 
+FREE_BUDGETS_LIMIT = 3
+
+
 @app.post("/budgets/{user_id}")
 async def set_budget(request: Request, user_id: int, payload: BudgetPayload):
     _authorize_dashboard_access(request, user_id)
     if payload.budget <= 0:
         raise HTTPException(status_code=400, detail="budget must be > 0")
+
+    from core.services.plan_service import is_pro
+
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
+            # Pro gate: Free pode ter até FREE_BUDGETS_LIMIT orçamentos.
+            # Update de orçamento existente não conta — só novo INSERT.
+            if not is_pro(user_id):
+                await cur.execute(
+                    "SELECT 1 FROM category_budgets "
+                    "WHERE user_id=%s AND lower(categoria)=lower(%s)",
+                    (user_id, payload.categoria),
+                )
+                is_existing = await cur.fetchone() is not None
+                if not is_existing:
+                    await cur.execute(
+                        "SELECT COUNT(*) AS n FROM category_budgets WHERE user_id=%s",
+                        (user_id,),
+                    )
+                    row = await cur.fetchone()
+                    current = int((row.get("n") if isinstance(row, dict) else row[0]) or 0)
+                    if current >= FREE_BUDGETS_LIMIT:
+                        raise HTTPException(
+                            status_code=403,
+                            detail={
+                                "error": "pro_required",
+                                "feature": "budgets_limit",
+                                "limit": FREE_BUDGETS_LIMIT,
+                            },
+                        )
+
             await cur.execute(
                 """
                 INSERT INTO category_budgets (user_id, categoria, budget)
@@ -4426,6 +4840,7 @@ async def set_budget(request: Request, user_id: int, payload: BudgetPayload):
                 (user_id, payload.categoria, payload.budget),
             )
         await conn.commit()
+    _invalidate_dashboard_current_cache(user_id)
     return {"ok": True, "categoria": payload.categoria, "budget": payload.budget}
 
 @app.delete("/budgets/{user_id}/{categoria}")
@@ -4438,6 +4853,148 @@ async def delete_budget(request: Request, user_id: int, categoria: str):
                 (user_id, categoria),
             )
         await conn.commit()
+    return {"ok": True}
+
+
+@app.get("/budgets/{user_id}/status")
+async def budgets_status_route(request: Request, user_id: int, month: str | None = None):
+    """Semáforo de orçamentos do mês: gasto vs limite com cor por categoria.
+
+    `month` no formato 'YYYY-MM'. Default = mês corrente.
+    Resposta inclui emoji/cor da categoria (joins com user_categories).
+    """
+    _authorize_dashboard_access(request, user_id)
+    from db.budgets import get_budgets_status_for_month
+
+    status = await asyncio.to_thread(get_budgets_status_for_month, user_id, month)
+    return {"ok": True, **status}
+
+
+# ─── Category metadata routes (Sprint 3) ─────────────────────────────────────
+
+class CategoryCreatePayload(BaseModel):
+    name: str
+    emoji: str | None = None
+    color: str | None = None
+
+
+class CategoryUpdatePayload(BaseModel):
+    name: str | None = None
+    emoji: str | None = None
+    color: str | None = None
+
+
+@app.get("/categories/{user_id}")
+async def categories_list_route(
+    request: Request, user_id: int, include_archived: bool = True
+):
+    """Lista categorias do user (metadata visual). Faz seed lazy das 14 canônicas."""
+    _authorize_dashboard_access(request, user_id)
+    from db.categories import list_user_categories_full
+
+    cats = await asyncio.to_thread(list_user_categories_full, user_id, include_archived)
+    return {"ok": True, "categories": cats}
+
+
+@app.post("/categories/{user_id}")
+async def categories_create_route(
+    request: Request, user_id: int, payload: CategoryCreatePayload
+):
+    """Cria categoria custom. Pro-only — Free fica com as 14 canônicas."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "custom_categories")
+    from db.categories import create_user_category
+
+    try:
+        cat = await asyncio.to_thread(
+            create_user_category, user_id, payload.name, payload.emoji, payload.color
+        )
+    except ValueError as exc:
+        code = str(exc)
+        if code == "CATEGORIA_DUPLICADA":
+            raise HTTPException(status_code=409, detail="Já existe uma categoria com esse nome.")
+        if code == "CATEGORIA_INVALIDA":
+            raise HTTPException(status_code=400, detail="Nome de categoria inválido.")
+        raise HTTPException(status_code=400, detail=code)
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "category": cat}
+
+
+@app.patch("/categories/{user_id}/{cat_id}")
+async def categories_update_route(
+    request: Request, user_id: int, cat_id: int, payload: CategoryUpdatePayload
+):
+    """Edita nome (faz UPDATE em cascata em launches/cards/etc), emoji ou cor."""
+    _authorize_dashboard_access(request, user_id)
+    from db.categories import update_user_category
+
+    try:
+        cat = await asyncio.to_thread(
+            update_user_category,
+            user_id, cat_id,
+            new_name=payload.name, emoji=payload.emoji, color=payload.color,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        if code == "CATEGORIA_NAO_ENCONTRADA":
+            raise HTTPException(status_code=404, detail="Categoria não encontrada.")
+        if code == "CATEGORIA_DUPLICADA":
+            raise HTTPException(status_code=409, detail="Já existe uma categoria com esse nome.")
+        if code == "CATEGORIA_INVALIDA":
+            raise HTTPException(status_code=400, detail="Nome de categoria inválido.")
+        raise HTTPException(status_code=400, detail=code)
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "category": cat}
+
+
+@app.post("/categories/{user_id}/{cat_id}/archive")
+async def categories_archive_route(request: Request, user_id: int, cat_id: int):
+    """Arquiva categoria: some dos dropdowns mas continua no histórico."""
+    _authorize_dashboard_access(request, user_id)
+    from db.categories import set_user_category_archived
+
+    try:
+        cat = await asyncio.to_thread(set_user_category_archived, user_id, cat_id, True)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Categoria não encontrada.")
+    return {"ok": True, "category": cat}
+
+
+@app.post("/categories/{user_id}/{cat_id}/unarchive")
+async def categories_unarchive_route(request: Request, user_id: int, cat_id: int):
+    _authorize_dashboard_access(request, user_id)
+    from db.categories import set_user_category_archived
+
+    try:
+        cat = await asyncio.to_thread(set_user_category_archived, user_id, cat_id, False)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Categoria não encontrada.")
+    return {"ok": True, "category": cat}
+
+
+@app.delete("/categories/{user_id}/{cat_id}")
+async def categories_delete_route(request: Request, user_id: int, cat_id: int):
+    """Deleta categoria. Bloqueado se: (1) é system, (2) tem lançamentos. Sugerir arquivar."""
+    _authorize_dashboard_access(request, user_id)
+    from db.categories import delete_user_category
+
+    try:
+        await asyncio.to_thread(delete_user_category, user_id, cat_id)
+    except ValueError as exc:
+        code = str(exc)
+        if code == "CATEGORIA_NAO_ENCONTRADA":
+            raise HTTPException(status_code=404, detail="Categoria não encontrada.")
+        if code == "CATEGORIA_SISTEMA_INDELETAVEL":
+            raise HTTPException(
+                status_code=400,
+                detail="Categorias do sistema só podem ser arquivadas, não excluídas.",
+            )
+        if code == "CATEGORIA_COM_LANCAMENTOS":
+            raise HTTPException(
+                status_code=400,
+                detail="Essa categoria tem lançamentos. Arquive em vez de excluir.",
+            )
+        raise HTTPException(status_code=400, detail=code)
     return {"ok": True}
 
 

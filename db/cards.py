@@ -75,7 +75,37 @@ def card_name_exists(user_id: int, name: str) -> bool:
             return cur.fetchone() is not None
 
 
-def create_card(user_id: int, name: str, closing_day: int, due_day: int) -> int:
+_VALID_COLORS = {"purple", "coral", "gold", "green", "blue", "gray"}
+_VALID_FLAGS  = {"Visa", "Mastercard", "Elo", "Amex", "Hipercard", "Outros"}
+
+
+def _normalize_card_meta(color, flag, last4):
+    """Normaliza color/flag/last4. Levanta ValueError se inválidos."""
+    if color is not None:
+        color = (color or "").strip().lower() or None
+        if color and color not in _VALID_COLORS:
+            raise ValueError(f"color_invalido:{color}")
+    if flag is not None:
+        flag = (flag or "").strip() or None
+        if flag and flag not in _VALID_FLAGS:
+            raise ValueError(f"flag_invalida:{flag}")
+    if last4 is not None:
+        last4 = (last4 or "").strip() or None
+        if last4 and (len(last4) != 4 or not last4.isdigit()):
+            raise ValueError(f"last4_invalido:{last4}")
+    return color, flag, last4
+
+
+def create_card(
+    user_id: int,
+    name: str,
+    closing_day: int,
+    due_day: int,
+    color: str | None = None,
+    flag: str | None = None,
+    last4: str | None = None,
+    credit_limit: float | None = None,
+) -> int:
     ensure_user(user_id)
     name = (name or "").strip()
     if not name:
@@ -83,21 +113,141 @@ def create_card(user_id: int, name: str, closing_day: int, due_day: int) -> int:
     if card_name_exists(user_id, name):
         raise ValueError(f"nome_duplicado:{name}")
 
+    color, flag, last4 = _normalize_card_meta(color, flag, last4)
+
     # Plan gate: blinda todos os canais. PlanLimitExceeded é capturado pelos
     # callers (bot tradicional, HTTP, IA conversacional).
     from core.services.plan_service import check_can_create_card
     check_can_create_card(user_id)
 
+    limit_dec = Decimal(str(credit_limit)) if credit_limit is not None else None
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "insert into credit_cards (user_id, name, closing_day, due_day) "
-                "values (%s, %s, %s, %s) returning id",
-                (user_id, name, int(closing_day), int(due_day)),
+                "insert into credit_cards (user_id, name, closing_day, due_day, "
+                "color, flag, last4, credit_limit) "
+                "values (%s, %s, %s, %s, %s, %s, %s, %s) returning id",
+                (user_id, name, int(closing_day), int(due_day), color, flag, last4, limit_dec),
             )
             card_id = cur.fetchone()["id"]
         conn.commit()
     return card_id
+
+
+def update_card_meta(
+    user_id: int,
+    card_id: int,
+    *,
+    name: str | None = None,
+    closing_day: int | None = None,
+    due_day: int | None = None,
+    color: str | None = None,
+    flag: str | None = None,
+    last4: str | None = None,
+    credit_limit: float | None = None,
+    clear_last4: bool = False,
+    clear_limit: bool = False,
+) -> bool:
+    """Atualiza campos de um cartão. Só altera os passados (não-None).
+    Use clear_last4=True / clear_limit=True pra limpar explicitamente."""
+    sets: list[str] = []
+    params: list = []
+
+    if name is not None:
+        n = (name or "").strip()
+        if not n:
+            raise ValueError("nome do cartão vazio")
+        # Checa duplicado entre cartões DIFERENTES do mesmo user
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select id from credit_cards where user_id=%s and name=%s and id<>%s",
+                    (user_id, n, card_id),
+                )
+                if cur.fetchone():
+                    raise ValueError(f"nome_duplicado:{n}")
+        sets.append("name=%s"); params.append(n)
+
+    if closing_day is not None:
+        sets.append("closing_day=%s"); params.append(int(closing_day))
+    if due_day is not None:
+        sets.append("due_day=%s"); params.append(int(due_day))
+
+    color_n, flag_n, last4_n = _normalize_card_meta(color, flag, last4)
+    if color is not None:
+        sets.append("color=%s"); params.append(color_n)
+    if flag is not None:
+        sets.append("flag=%s"); params.append(flag_n)
+    if clear_last4:
+        sets.append("last4=NULL")
+    elif last4 is not None:
+        sets.append("last4=%s"); params.append(last4_n)
+    if clear_limit:
+        sets.append("credit_limit=NULL")
+    elif credit_limit is not None:
+        sets.append("credit_limit=%s")
+        params.append(Decimal(str(credit_limit)))
+
+    if not sets:
+        return False
+
+    params.extend([user_id, card_id])
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"update credit_cards set {', '.join(sets)} where user_id=%s and id=%s",
+                tuple(params),
+            )
+            updated = cur.rowcount > 0
+        conn.commit()
+    return updated
+
+
+def get_card_delete_impact(user_id: int, card_id: int) -> dict:
+    """Retorna o que será apagado se o cartão for excluído.
+    {open_bill_total, future_installments_count, total_bills_count, total_transactions_count}"""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id from credit_cards where id=%s and user_id=%s",
+                (card_id, user_id),
+            )
+            if not cur.fetchone():
+                return {}
+
+            cur.execute(
+                "select coalesce(sum(total - paid_amount), 0) as v "
+                "from credit_bills where card_id=%s and user_id=%s and status<>'paid'",
+                (card_id, user_id),
+            )
+            open_bill_total = float(cur.fetchone()["v"] or 0)
+
+            cur.execute(
+                "select count(*) as n from credit_transactions "
+                "where card_id=%s and user_id=%s and purchased_at > current_date "
+                "and is_refund=false and installment_no is not null",
+                (card_id, user_id),
+            )
+            future_installments = int(cur.fetchone()["n"] or 0)
+
+            cur.execute(
+                "select count(*) as n from credit_bills where card_id=%s and user_id=%s",
+                (card_id, user_id),
+            )
+            total_bills = int(cur.fetchone()["n"] or 0)
+
+            cur.execute(
+                "select count(*) as n from credit_transactions where card_id=%s and user_id=%s",
+                (card_id, user_id),
+            )
+            total_tx = int(cur.fetchone()["n"] or 0)
+
+    return {
+        "open_bill_total": open_bill_total,
+        "future_installments_count": future_installments,
+        "total_bills_count": total_bills,
+        "total_transactions_count": total_tx,
+    }
 
 
 def delete_card(user_id: int, card_id: int) -> bool:
@@ -147,7 +297,7 @@ def list_cards(user_id: int):
                 """
                 select c.id, c.name, c.closing_day, c.due_day,
                        c.reminders_enabled, c.reminders_days_before, c.reminder_last_sent_on,
-                       c.credit_limit,
+                       c.credit_limit, c.color, c.flag, c.last4,
                        (u.default_card_id = c.id) as is_default
                 from credit_cards c
                 left join users u on u.id = c.user_id
@@ -166,7 +316,7 @@ def get_card_by_id(user_id: int, card_id: int):
                 """
                 select c.id, c.name, c.closing_day, c.due_day,
                        c.reminders_enabled, c.reminders_days_before, c.reminder_last_sent_on,
-                       c.credit_limit,
+                       c.credit_limit, c.color, c.flag, c.last4,
                        (u.default_card_id = c.id) as is_default
                 from credit_cards c
                 left join users u on u.id = c.user_id
@@ -604,44 +754,51 @@ def undo_credit_transaction(user_id: int, ct_id: int):
 
 
 def undo_installment_group(user_id: int, group_id: str):
-    """Desfaz parcelamento inteiro removendo todas as transactions do grupo.
+    """Apaga um parcelamento. Comportamento Option B (decidido 2026-05-14):
 
-    Se alguma bill afetada estava parcialmente/totalmente paga (paid > 0),
-    o decremento de `total` deixaria `paid > novo_total` (overpayment
-    fantasma — bill some da listagem mesmo com saldo aparente). Pra evitar:
+    - Tx em faturas ABERTAS: DELETADAS. Open bill total cai.
+      Saldo do mês "volta" naturalmente porque despesa daquela parcela some.
+    - Tx em faturas PAGAS/FECHADAS: MANTIDAS como órfãs (group_id=null),
+      nota ganha sufixo "[Parcelamento removido em DD/MM]". Faturas pagas
+      ficam intactas — dinheiro já saiu da conta, não volta.
+    - NUNCA cria refund launch. Se user precisa corrigir cagada do passado,
+      cria lançamento de ajuste manual.
 
-    - Decrementa `paid_amount` pelo excesso (paid → min(paid, novo_total)).
-    - Soma os excessos de todas as bills e cria UM launch de receita
-      "Estorno de pagamento" na conta corrente — devolvendo o dinheiro
-      que tinha sido pago. Internal movement (não afeta categoria de
-      receita/despesa do user).
-    - Ajusta status: bills com saldo voltam pra 'open'; bills com
-      total=paid=0 ficam como estavam.
+    Edge case raro: open bill com paid_amount > new_total (user pagou
+    parcial e parcelamento ocupava boa parte da fatura). Clampa paid=total,
+    bill vira 'paid'. Diferença ignorada — sem refund. User pode criar
+    ajuste manual se sentir falta.
+
+    Mudança de comportamento (era refundar paid_amount via launch).
     """
-    refund_total = Decimal("0")
+    today = date.today()
+    note_suffix = f" [Parcelamento removido em {today.strftime('%d/%m/%Y')}]"
     card_name: str | None = None
 
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, bill_id, valor, card_id from credit_transactions "
-                "where user_id = %s and group_id = %s::uuid and is_refund = false for update",
+                """
+                select t.id, t.bill_id, t.valor, t.card_id, t.nota,
+                       b.status as bill_status
+                from credit_transactions t
+                join credit_bills b on b.id = t.bill_id
+                where t.user_id = %s and t.group_id = %s::uuid and t.is_refund = false
+                """,
                 (user_id, group_id),
             )
             rows = cur.fetchall()
             if not rows:
                 return None
 
-            total_removed = Decimal("0")
-            by_bill: dict[int, Decimal] = {}
+            tx_to_delete: list[dict] = []
+            tx_to_orphan: list[dict] = []
             for r in rows:
-                v = Decimal(str(r["valor"]))
-                total_removed += v
-                by_bill[r["bill_id"]] = by_bill.get(r["bill_id"], Decimal("0")) + v
+                if r["bill_status"] == "open":
+                    tx_to_delete.append(r)
+                else:
+                    tx_to_orphan.append(r)
 
-            removed_count = len(rows)
-
-            # Pega nome do cartão (todas as txs do grupo são do mesmo card)
             cur.execute(
                 "select name from credit_cards where id = %s",
                 (rows[0]["card_id"],),
@@ -649,12 +806,32 @@ def undo_installment_group(user_id: int, group_id: str):
             row_card = cur.fetchone()
             card_name = row_card["name"] if row_card else "cartão"
 
-            cur.execute(
-                "delete from credit_transactions "
-                "where user_id = %s and group_id = %s::uuid and is_refund = false",
-                (user_id, group_id),
-            )
-            for bill_id, bill_sum in by_bill.items():
+            removed_total = Decimal("0")
+            orphaned_total = Decimal("0")
+            by_bill_delete: dict[int, Decimal] = {}
+            for r in tx_to_delete:
+                v = Decimal(str(r["valor"]))
+                removed_total += v
+                by_bill_delete[r["bill_id"]] = by_bill_delete.get(r["bill_id"], Decimal("0")) + v
+            for r in tx_to_orphan:
+                orphaned_total += Decimal(str(r["valor"]))
+
+            if tx_to_delete:
+                ids = [r["id"] for r in tx_to_delete]
+                cur.execute(
+                    "delete from credit_transactions where id = any(%s)",
+                    (ids,),
+                )
+
+            for r in tx_to_orphan:
+                old_nota = r["nota"] or ""
+                new_nota = (old_nota + note_suffix).strip()
+                cur.execute(
+                    "update credit_transactions set group_id = null, nota = %s where id = %s",
+                    (new_nota, r["id"]),
+                )
+
+            for bill_id, bill_sum in by_bill_delete.items():
                 cur.execute(
                     "select total, coalesce(paid_amount, 0) as paid_amount "
                     "from credit_bills where id = %s and user_id = %s for update",
@@ -665,31 +842,23 @@ def undo_installment_group(user_id: int, group_id: str):
                     continue
                 old_total = Decimal(str(row["total"]))
                 old_paid = Decimal(str(row["paid_amount"]))
-
                 new_total = max(Decimal("0"), old_total - bill_sum)
-                # Excesso = quanto sobra de paid sem cobertura de total
-                excess = max(Decimal("0"), old_paid - new_total)
-                new_paid = old_paid - excess
-                refund_total += excess
 
-                # Status: open se ainda devendo, paid se exatamente saldado,
-                # mantém status anterior se zerada completamente.
-                if new_total > new_paid:
-                    cur.execute(
-                        "update credit_bills set total = %s, paid_amount = %s, "
-                        "status='open', paid_at=null "
-                        "where id = %s and user_id = %s",
-                        (new_total, new_paid, bill_id, user_id),
-                    )
-                elif new_total > 0 and new_paid >= new_total:
+                if new_total > 0 and old_paid >= new_total:
                     cur.execute(
                         "update credit_bills set total = %s, paid_amount = %s, "
                         "status='paid', paid_at=now() "
                         "where id = %s and user_id = %s",
-                        (new_total, new_paid, bill_id, user_id),
+                        (new_total, new_total, bill_id, user_id),
+                    )
+                elif new_total > old_paid:
+                    cur.execute(
+                        "update credit_bills set total = %s "
+                        "where id = %s and user_id = %s",
+                        (new_total, bill_id, user_id),
                     )
                 else:
-                    # new_total == 0: mantém status como está
+                    new_paid = min(old_paid, new_total)
                     cur.execute(
                         "update credit_bills set total = %s, paid_amount = %s "
                         "where id = %s and user_id = %s",
@@ -698,30 +867,300 @@ def undo_installment_group(user_id: int, group_id: str):
 
             conn.commit()
 
-    refund_launch_id: int | None = None
-    if refund_total > 0 and card_name:
-        # Estorno na conta corrente: dinheiro que tinha sido pago volta.
-        # is_internal_movement=True pra não inflar receitas do user nos
-        # relatórios — espelha o pagamento de fatura original que também
-        # é internal_movement.
-        launch_id, _user_seq, _balance = add_launch_and_update_balance(
-            user_id=user_id,
-            tipo="receita",
-            valor=float(refund_total),
-            alvo=f"estorno_fatura:{card_name}",
-            nota=f"Estorno de pagamento ({card_name}) — parcelamento apagado",
-            categoria="estorno_pagamento_fatura",
-            is_internal_movement=True,
-        )
-        refund_launch_id = launch_id
+    return {
+        "group_id": group_id,
+        "removed_count": len(tx_to_delete),
+        "orphaned_count": len(tx_to_orphan),
+        "removed_total": float(removed_total),
+        "orphaned_total": float(orphaned_total),
+        "refunded": 0.0,
+        "refund_launch_id": None,
+        "card_name": card_name,
+    }
+
+
+def get_installment_group_delete_impact(user_id: int, group_id: str):
+    """Retorna o impacto de deletar o parcelamento (sem deletar).
+
+    Frontend usa pra escolher entre 2 mensagens de confirmação:
+    - sem parcelas pagas: explica que fatura aberta diminui, sem impacto na conta
+    - com parcelas pagas: avisa que R$ Y já pagos NÃO voltam, sugere lançamento manual
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select
+                    count(*) filter (where b.status = 'open') as future_count,
+                    coalesce(sum(t.valor) filter (where b.status = 'open'), 0) as future_total,
+                    count(*) filter (where b.status != 'open') as paid_count,
+                    coalesce(sum(t.valor) filter (where b.status != 'open'), 0) as paid_total,
+                    coalesce(sum(t.valor), 0) as full_total,
+                    max(t.installments_total) as installments_total,
+                    min(t.nota) as nota,
+                    max(c.name) as card_name
+                from credit_transactions t
+                join credit_bills b on b.id = t.bill_id
+                join credit_cards c on c.id = t.card_id
+                where t.user_id = %s and t.group_id = %s::uuid and t.is_refund = false
+                """,
+                (user_id, group_id),
+            )
+            row = cur.fetchone()
+            if not row or int(row["future_count"] or 0) + int(row["paid_count"] or 0) == 0:
+                return None
 
     return {
         "group_id": group_id,
-        "removed_count": removed_count,
-        "removed_total": float(total_removed),
-        "refunded": float(refund_total),
-        "refund_launch_id": refund_launch_id,
+        "future_count": int(row["future_count"] or 0),
+        "future_total": float(row["future_total"] or 0),
+        "paid_count": int(row["paid_count"] or 0),
+        "paid_total": float(row["paid_total"] or 0),
+        "full_total": float(row["full_total"] or 0),
+        "installments_total": int(row["installments_total"] or 0),
+        "nota": row["nota"],
+        "card_name": row["card_name"],
     }
+
+
+def anticipate_installment(user_id: int, group_id: str):
+    """Antecipa a próxima parcela pendente do parcelamento.
+
+    Option A (decidido 2026-05-14): "antecipar" = paguei à vista.
+    - Identifica a próxima parcela pendente (menor period_end + menor installment_no)
+    - DELETA a tx do parcelamento
+    - REDUZ total da fatura aberta correspondente
+    - CRIA launch (despesa) na conta corrente com mesmo valor/categoria
+      e nota explicitando que foi antecipação. is_internal_movement=False
+      pra contar nas analytics do user (preserva categoria original).
+
+    Retorna None se não há parcela pendente.
+    """
+    today = date.today()
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select t.id, t.bill_id, t.valor, t.categoria, t.nota,
+                       t.installment_no, t.installments_total, t.card_id,
+                       c.name as card_name
+                from credit_transactions t
+                join credit_bills b on b.id = t.bill_id
+                join credit_cards c on c.id = t.card_id
+                where t.user_id = %s and t.group_id = %s::uuid
+                  and t.is_refund = false and b.status = 'open'
+                order by b.period_end asc, t.installment_no asc
+                limit 1
+                for update of t
+                """,
+                (user_id, group_id),
+            )
+            tx = cur.fetchone()
+            if not tx:
+                return None
+
+            valor = Decimal(str(tx["valor"]))
+            bill_id = tx["bill_id"]
+
+            cur.execute(
+                "delete from credit_transactions where id = %s",
+                (tx["id"],),
+            )
+
+            cur.execute(
+                "select total, coalesce(paid_amount, 0) as paid_amount "
+                "from credit_bills where id = %s and user_id = %s for update",
+                (bill_id, user_id),
+            )
+            bill = cur.fetchone()
+            old_total = Decimal(str(bill["total"]))
+            old_paid = Decimal(str(bill["paid_amount"]))
+            new_total = max(Decimal("0"), old_total - valor)
+
+            if new_total > 0 and old_paid >= new_total:
+                cur.execute(
+                    "update credit_bills set total = %s, paid_amount = %s, "
+                    "status='paid', paid_at=now() where id = %s and user_id = %s",
+                    (new_total, new_total, bill_id, user_id),
+                )
+            else:
+                cur.execute(
+                    "update credit_bills set total = %s where id = %s and user_id = %s",
+                    (new_total, bill_id, user_id),
+                )
+
+            conn.commit()
+
+    inst_no = tx.get("installment_no") or 0
+    inst_total = tx.get("installments_total") or 0
+    original_nota = (tx.get("nota") or "").strip()
+    nota_str = f"Antecipou parcela {inst_no}/{inst_total}"
+    if original_nota:
+        nota_str += f" — {original_nota}"
+    nota_str += f" ({today.strftime('%d/%m/%Y')})"
+
+    launch_id, _seq, _bal = add_launch_and_update_balance(
+        user_id=user_id,
+        tipo="despesa",
+        valor=float(valor),
+        alvo=f"antecipacao:{tx['card_name']}",
+        nota=nota_str,
+        categoria=tx.get("categoria") or "outros",
+    )
+
+    return {
+        "group_id": group_id,
+        "anticipated_installment_no": inst_no,
+        "installments_total": inst_total,
+        "valor": float(valor),
+        "launch_id": launch_id,
+        "card_name": tx["card_name"],
+        "nota": nota_str,
+    }
+
+
+def list_installment_groups_detailed(user_id: int, sort: str = "urgency"):
+    """Lista parcelamentos ativos do user com detalhe por parcela.
+
+    Cada grupo inclui lista 'parcelas' ordenada por installment_no. Cada
+    parcela: tx_id, installment_no, valor, is_paid, is_next, due_date.
+
+    sort:
+      - 'urgency' (default): pendentes primeiro, próxima parcela ASC,
+        tiebreaker compra recente DESC. Parcelamentos 100% pagos vão pro fim.
+      - 'recent': compra mais recente DESC.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select
+                    t.id as tx_id,
+                    t.group_id::text as group_id, t.bill_id, t.valor,
+                    t.categoria, t.nota,
+                    t.installment_no, t.installments_total, t.purchased_at,
+                    t.card_id, c.name as card_name, c.color as card_color,
+                    c.flag as card_flag, c.last4 as card_last4,
+                    c.closing_day, c.due_day,
+                    b.period_end, b.status as bill_status
+                from credit_transactions t
+                join credit_cards c on c.id = t.card_id
+                join credit_bills b on b.id = t.bill_id
+                where t.user_id = %s and t.group_id is not null and t.is_refund = false
+                order by t.group_id, t.installment_no asc nulls last, b.period_end asc
+                """,
+                (user_id,),
+            )
+            rows = cur.fetchall()
+
+    def _due_date(period_end: date, closing_day: int, due_day: int) -> date:
+        if due_day >= closing_day:
+            return _safe_date(period_end.year, period_end.month, due_day)
+        m = period_end.month + 1
+        y = period_end.year + (m - 1) // 12
+        m = (m - 1) % 12 + 1
+        return _safe_date(y, m, due_day)
+
+    groups: dict[str, dict] = {}
+    for r in rows:
+        gid = r["group_id"]
+        if gid not in groups:
+            groups[gid] = {
+                "group_id": gid,
+                "name": (r["nota"] or "Parcelamento").strip(),
+                "categoria": r["categoria"],
+                "card_id": int(r["card_id"]),
+                "card_name": r["card_name"],
+                "card_color": r["card_color"],
+                "card_flag": r["card_flag"],
+                "card_last4": r["card_last4"],
+                "installments_total": int(r["installments_total"] or 0),
+                "purchased_at": r["purchased_at"].isoformat() if r["purchased_at"] else None,
+                "parcelas": [],
+            }
+        is_paid = r["bill_status"] != "open"
+        due = _due_date(r["period_end"], int(r["closing_day"]), int(r["due_day"]))
+        groups[gid]["parcelas"].append({
+            "tx_id": int(r["tx_id"]),
+            "installment_no": int(r["installment_no"] or 0),
+            "valor": float(r["valor"]),
+            "is_paid": is_paid,
+            "is_next": False,
+            "due_date": due.isoformat(),
+            "period_end": r["period_end"].isoformat(),
+            "bill_id": int(r["bill_id"]),
+        })
+
+    out = []
+    for gid, g in groups.items():
+        parcelas = g["parcelas"]
+        parcelas.sort(key=lambda p: (p["installment_no"], p["due_date"]))
+
+        total = sum(p["valor"] for p in parcelas)
+        paid_total = sum(p["valor"] for p in parcelas if p["is_paid"])
+        n_paid = sum(1 for p in parcelas if p["is_paid"])
+
+        next_due = None
+        for p in parcelas:
+            if not p["is_paid"]:
+                p["is_next"] = True
+                next_due = p["due_date"]
+                break
+
+        g["total"] = total
+        g["paid_amount"] = paid_total
+        g["remaining_amount"] = total - paid_total
+        g["n_paid"] = n_paid
+        g["n_pending"] = len(parcelas) - n_paid
+        g["next_due_date"] = next_due
+        g["valor_parcela"] = parcelas[0]["valor"] if parcelas else 0
+        out.append(g)
+
+    if sort == "urgency":
+        # Sort estável: 1º por compra DESC (tiebreaker), depois por urgência.
+        out.sort(key=lambda g: g["purchased_at"] or "0000-01-01", reverse=True)
+        out.sort(key=lambda g: (
+            0 if g["n_pending"] > 0 else 1,
+            g["next_due_date"] or "9999-12-31",
+        ))
+    else:
+        out.sort(key=lambda g: g["purchased_at"] or "0000-01-01", reverse=True)
+
+    return out
+
+
+def update_installment_group_meta(user_id: int, group_id: str,
+                                  nome: str | None = None,
+                                  categoria: str | None = None) -> bool:
+    """Edita nome (nota) e/ou categoria em TODAS as tx do parcelamento.
+
+    Retorna True se algo foi alterado.
+    """
+    if nome is None and categoria is None:
+        return False
+
+    sets = []
+    params: list = []
+    if nome is not None:
+        sets.append("nota = %s")
+        params.append((nome or "").strip() or None)
+    if categoria is not None:
+        sets.append("categoria = %s")
+        params.append((categoria or "").strip() or None)
+    params.extend([user_id, group_id])
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"update credit_transactions set {', '.join(sets)} "
+                f"where user_id = %s and group_id = %s::uuid and is_refund = false",
+                tuple(params),
+            )
+            n = cur.rowcount
+            conn.commit()
+
+    return n > 0
 
 
 def resolve_installment_group_id(user_id: int, identifier: str) -> str | None:
