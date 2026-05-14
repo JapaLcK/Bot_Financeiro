@@ -447,6 +447,75 @@ details.cc-details[open] summary .cc-card {
 /* ─── Parcelamento v2 — layout horizontal, expansão inline (empurra pra baixo) ─── */
 .inst-list { display:flex; flex-direction:column; gap:12px; }
 
+/* Tabs estilo fichário (Atuais / Histórico) */
+.inst-tabs {
+  display: flex;
+  align-items: flex-end;
+  margin: 18px 0 0;
+  padding: 0 16px;
+  position: relative;
+  z-index: 2;
+}
+.inst-tab {
+  background: rgba(255,255,255,.06);
+  border: none;
+  padding: 14px 36px 14px;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: .9rem;
+  font-weight: 600;
+  font-family: inherit;
+  letter-spacing: .02em;
+  position: relative;
+  transition: background .25s var(--ease), color .25s var(--ease), opacity .25s var(--ease), transform .25s var(--ease);
+  min-width: 130px;
+  text-align: center;
+  /* Trapézio com topo arredondado (pontos aproximando curva nos cantos) */
+  clip-path: polygon(
+    4px 12px, 6px 7px, 10px 3px, 15px 1px, 20px 0,
+    calc(100% - 20px) 0, calc(100% - 15px) 1px, calc(100% - 10px) 3px, calc(100% - 6px) 7px, calc(100% - 4px) 12px,
+    100% 100%, 0 100%
+  );
+}
+.inst-tab + .inst-tab { margin-left: -28px; }
+.inst-tab:not(.active) {
+  opacity: .6;
+  transform: translateY(4px);
+  z-index: 1;
+  color: var(--text-3);
+}
+.inst-tab:hover:not(.active) {
+  opacity: .9;
+  transform: translateY(2px);
+  background: rgba(255,255,255,.09);
+}
+.inst-tab.active {
+  background: #232b48;
+  color: var(--text);
+  z-index: 3;
+  transform: translateY(2px);
+  margin-bottom: -2px;
+}
+body.light .inst-tab {
+  background: rgba(0,0,0,.05);
+}
+body.light .inst-tab.active {
+  background: #ffffff;
+}
+
+/* Corpo do fichário — onde as parcelas vivem */
+.inst-folder {
+  background: #232b48;
+  border: none;
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255,255,255,.06);
+  position: relative;
+  z-index: 2;
+  margin-top: 0;
+}
+body.light .inst-folder { background: #ffffff; }
+
 details.inst-card {
   padding:0; overflow:hidden;
   transition:border-color .2s var(--ease);
@@ -2257,11 +2326,18 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 
     <div id="installments-stats" class="stats-row"></div>
 
-    <p id="installments-sort-hint" style="font-size:.72rem;color:var(--text-3);margin:0 0 12px;display:none;align-items:center;gap:8px">
-      <span>Ordenado por urgência</span> · <span>próxima parcela primeiro</span>
-    </p>
+    <div id="installments-tabs" class="inst-tabs" role="tablist">
+      <button class="inst-tab active" data-tab="active" type="button" role="tab" onclick="setInstallmentsTab('active')">📂 Atuais</button>
+      <button class="inst-tab" data-tab="history" type="button" role="tab" onclick="setInstallmentsTab('history')">📁 Histórico</button>
+    </div>
 
-    <div id="installments-list" class="inst-list"></div>
+    <div id="installments-folder" class="inst-folder">
+      <p id="installments-sort-hint" style="font-size:.72rem;color:var(--text-3);margin:0 0 12px;display:none;align-items:center;gap:8px">
+        <span>Ordenado por urgência</span> · <span>próxima parcela primeiro</span>
+      </p>
+
+      <div id="installments-list" class="inst-list"></div>
+    </div>
   </div>
 
   <div id="cards-view" class="dash-view">
@@ -3972,21 +4048,38 @@ function _isNextMonthIso(iso) {
   return y === nextYear && m === realMonth;
 }
 
+let _instTab = "active"; // 'active' (n_pending > 0) | 'history' (n_pending === 0)
+
+function setInstallmentsTab(tab) {
+  if (tab !== "active" && tab !== "history") return;
+  if (tab === _instTab) return;
+  _instTab = tab;
+  document.querySelectorAll("#installments-tabs .inst-tab").forEach(b => {
+    b.classList.toggle("active", b.dataset.tab === tab);
+  });
+  if (_instCache) renderInstallmentsView(_instCache);
+}
+
 function renderInstallmentsView(groups) {
   const stats = document.getElementById("installments-stats");
   const list = document.getElementById("installments-list");
   const hint = document.getElementById("installments-sort-hint");
   if (!stats || !list) return;
 
-  const totalDevido = groups.reduce((s, g) => s + (g.remaining_amount || 0), 0);
-  const totalPago = groups.reduce((s, g) => s + (g.paid_amount || 0), 0);
-  const nParcelasFuturas = groups.reduce((s, g) => s + (g.n_pending || 0), 0);
-  const nParcelasPagas = groups.reduce((s, g) => s + (g.n_paid || 0), 0);
+  const isHistory = _instTab === "history";
+  const filtered = (groups || []).filter(g => isHistory
+    ? (g.n_pending || 0) === 0
+    : (g.n_pending || 0) > 0);
+
+  const totalDevido = filtered.reduce((s, g) => s + (g.remaining_amount || 0), 0);
+  const totalPago = filtered.reduce((s, g) => s + (g.paid_amount || 0), 0);
+  const nParcelasFuturas = filtered.reduce((s, g) => s + (g.n_pending || 0), 0);
+  const nParcelasPagas = filtered.reduce((s, g) => s + (g.n_paid || 0), 0);
 
   // Próximo mês: soma das próximas parcelas que caem no mês seguinte
   let proxMes = 0;
   let nProxMes = 0;
-  groups.forEach(g => {
+  filtered.forEach(g => {
     (g.parcelas || []).forEach(p => {
       if (!p.is_paid && _isNextMonthIso(p.due_date)) {
         proxMes += p.valor;
@@ -3995,42 +4088,84 @@ function renderInstallmentsView(groups) {
     });
   });
 
-  stats.innerHTML = `
-    <div class="stat-tile" style="animation-delay:0ms">
-      <div class="stat-label">Compras parceladas</div>
-      <div class="stat-value">${groups.length}</div>
-      <div class="stat-delta" style="color:var(--text-3)">em andamento</div>
-    </div>
-    <div class="stat-tile" style="animation-delay:60ms">
-      <div class="stat-label">Total devido</div>
-      <div class="stat-value" style="color:var(--red)">${_fmtBRL(totalDevido)}</div>
-      <div class="stat-delta" style="color:var(--text-3)">${nParcelasFuturas} parcela${nParcelasFuturas === 1 ? "" : "s"} futura${nParcelasFuturas === 1 ? "" : "s"}</div>
-    </div>
-    <div class="stat-tile" style="animation-delay:120ms">
-      <div class="stat-label">Próximo mês</div>
-      <div class="stat-value">${_fmtBRL(proxMes)}</div>
-      <div class="stat-delta" style="color:var(--text-3)">${nProxMes} parcela${nProxMes === 1 ? "" : "s"}</div>
-    </div>
-    <div class="stat-tile" style="animation-delay:180ms">
-      <div class="stat-label">Já pago</div>
-      <div class="stat-value" style="color:var(--green)">${_fmtBRL(totalPago)}</div>
-      <div class="stat-delta up">${nParcelasPagas} parcela${nParcelasPagas === 1 ? "" : "s"} concluída${nParcelasPagas === 1 ? "" : "s"}</div>
-    </div>
-  `;
+  if (isHistory) {
+    // Maior parcelamento concluído (em valor total)
+    const maior = filtered.reduce((max, g) => (g.total || 0) > (max?.total || 0) ? g : max, null);
+    stats.innerHTML = `
+      <div class="stat-tile" style="animation-delay:0ms">
+        <div class="stat-label">Parcelamentos concluídos</div>
+        <div class="stat-value">${filtered.length}</div>
+        <div class="stat-delta up">${nParcelasPagas} parcela${nParcelasPagas === 1 ? "" : "s"} paga${nParcelasPagas === 1 ? "" : "s"}</div>
+      </div>
+      <div class="stat-tile" style="animation-delay:60ms">
+        <div class="stat-label">Total quitado</div>
+        <div class="stat-value" style="color:var(--green)">${_fmtBRL(totalPago)}</div>
+        <div class="stat-delta" style="color:var(--text-3)">soma de tudo que já foi pago</div>
+      </div>
+      <div class="stat-tile" style="animation-delay:120ms">
+        <div class="stat-label">Maior compra</div>
+        <div class="stat-value">${maior ? _fmtBRL(maior.total) : "—"}</div>
+        <div class="stat-delta" style="color:var(--text-3)">${maior ? (maior.name || "—").slice(0, 26) : "sem histórico"}</div>
+      </div>
+      <div class="stat-tile" style="animation-delay:180ms">
+        <div class="stat-label">Categoria mais comum</div>
+        <div class="stat-value" style="font-size:1.15rem">${_instMostCommonCategory(filtered) || "—"}</div>
+        <div class="stat-delta" style="color:var(--text-3)">no histórico</div>
+      </div>
+    `;
+  } else {
+    stats.innerHTML = `
+      <div class="stat-tile" style="animation-delay:0ms">
+        <div class="stat-label">Compras parceladas</div>
+        <div class="stat-value">${filtered.length}</div>
+        <div class="stat-delta" style="color:var(--text-3)">em andamento</div>
+      </div>
+      <div class="stat-tile" style="animation-delay:60ms">
+        <div class="stat-label">Total devido</div>
+        <div class="stat-value" style="color:var(--red)">${_fmtBRL(totalDevido)}</div>
+        <div class="stat-delta" style="color:var(--text-3)">${nParcelasFuturas} parcela${nParcelasFuturas === 1 ? "" : "s"} futura${nParcelasFuturas === 1 ? "" : "s"}</div>
+      </div>
+      <div class="stat-tile" style="animation-delay:120ms">
+        <div class="stat-label">Próximo mês</div>
+        <div class="stat-value">${_fmtBRL(proxMes)}</div>
+        <div class="stat-delta" style="color:var(--text-3)">${nProxMes} parcela${nProxMes === 1 ? "" : "s"}</div>
+      </div>
+      <div class="stat-tile" style="animation-delay:180ms">
+        <div class="stat-label">Já pago</div>
+        <div class="stat-value" style="color:var(--green)">${_fmtBRL(totalPago)}</div>
+        <div class="stat-delta up">${nParcelasPagas} parcela${nParcelasPagas === 1 ? "" : "s"} concluída${nParcelasPagas === 1 ? "" : "s"}</div>
+      </div>
+    `;
+  }
 
-  if (groups.length === 0) {
+  if (filtered.length === 0) {
+    const msg = isHistory
+      ? { icon: "📂", title: "Nenhum parcelamento concluído ainda", body: "Quando você terminar de pagar um parcelamento, ele aparece aqui." }
+      : { icon: "📦", title: "Nenhum parcelamento ativo", body: "Quando você comprar parcelado no cartão (pelo bot ou WhatsApp), aparecem aqui." };
     list.innerHTML = `
       <div class="empty" style="padding:50px;text-align:center;color:var(--text-3);background:var(--glass-bg);border:1px dashed var(--glass-border);border-radius:var(--radius)">
-        <div style="font-size:2.5rem;margin-bottom:10px">📦</div>
-        <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Nenhum parcelamento ativo</div>
-        <div>Quando você comprar parcelado no cartão (pelo bot ou WhatsApp), aparecem aqui.</div>
+        <div style="font-size:2.5rem;margin-bottom:10px">${msg.icon}</div>
+        <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">${msg.title}</div>
+        <div>${msg.body}</div>
       </div>`;
     if (hint) hint.style.display = "none";
     return;
   }
 
-  if (hint) hint.style.display = "flex";
-  list.innerHTML = groups.map((g, i) => _renderInstallmentItem(g, i)).join("");
+  if (hint) hint.style.display = isHistory ? "none" : "flex";
+  list.innerHTML = filtered.map((g, i) => _renderInstallmentItem(g, i)).join("");
+}
+
+function _instMostCommonCategory(groups) {
+  const counts = {};
+  groups.forEach(g => {
+    const c = (g.categoria || "outros").toLowerCase();
+    counts[c] = (counts[c] || 0) + 1;
+  });
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  if (!sorted.length) return null;
+  const [cat] = sorted[0];
+  return cat.charAt(0).toUpperCase() + cat.slice(1);
 }
 
 function _renderInstallmentItem(g, idx = 0) {
