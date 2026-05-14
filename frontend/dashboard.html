@@ -1640,7 +1640,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
         <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#7c3aed,#5b21b6);display:flex;align-items:center;justify-content:center;font-size:1rem">💳</div>
         <div style="flex:1;min-width:0">
           <div style="font-size:.78rem;color:var(--text-3)">Cartões</div>
-          <div style="font-size:.95rem;color:var(--text);font-weight:700">3 ativos</div>
+          <div id="overview-cards-stat" style="font-size:.95rem;color:var(--text);font-weight:700">—</div>
         </div>
         <span style="color:var(--text-3);font-size:.85rem">→</span>
       </div>
@@ -1650,7 +1650,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
         <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#1e40af);display:flex;align-items:center;justify-content:center;font-size:1rem">📦</div>
         <div style="flex:1;min-width:0">
           <div style="font-size:.78rem;color:var(--text-3)">Parcelamentos</div>
-          <div style="font-size:.95rem;color:var(--text);font-weight:700">R$ 1.385</div>
+          <div id="overview-installments-stat" style="font-size:.95rem;color:var(--text);font-weight:700">—</div>
         </div>
         <span style="color:var(--text-3);font-size:.85rem">→</span>
       </div>
@@ -7833,8 +7833,34 @@ async function fetchHistory() {
 /* ═══════════════════════════════════════════════════════════════════════
    RENDER
 ═══════════════════════════════════════════════════════════════════════ */
+async function updateOverviewShortcuts(d) {
+  // Cartões — texto baseado em d.credit_cards
+  const cardsEl = document.getElementById("overview-cards-stat");
+  if (cardsEl) {
+    const n = (d?.credit_cards || []).length;
+    cardsEl.textContent = n === 0 ? "Nenhum" : (n === 1 ? "1 ativo" : `${n} ativos`);
+  }
+
+  // Parcelamentos — total devido (soma de remaining_amount dos grupos com n_pending > 0).
+  // Tenta cache primeiro, fetch silencioso senão.
+  const instEl = document.getElementById("overview-installments-stat");
+  if (instEl) {
+    let groups = _instCache;
+    if (!groups && USER_ID) {
+      try { groups = await _fetchInstallments(); _instCache = groups; } catch (_) { groups = null; }
+    }
+    if (groups) {
+      const totalDevido = groups
+        .filter(g => (g.n_pending || 0) > 0)
+        .reduce((s, g) => s + (g.remaining_amount || 0), 0);
+      instEl.textContent = totalDevido > 0 ? _fmtBRL(totalDevido) : "Nada devido";
+    }
+  }
+}
+
 function render(d) {
   cacheMonthData(d);
+  updateOverviewShortcuts(d);
   const grid = document.getElementById("grid");
   if (d.launches_pagination?.page) {
     launchesPage = d.launches_pagination.page;
