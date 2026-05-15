@@ -503,6 +503,33 @@ body.light .inst-tab.active {
   background: #ffffff;
 }
 
+/* Wizard de Setup */
+.wizard-modal {
+  max-width: 480px;
+}
+.wizard-progress {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.wizard-progress .wizard-dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.15);
+  transition: all .25s var(--ease);
+}
+.wizard-progress .wizard-dot.done {
+  background: var(--green);
+  opacity: .55;
+}
+.wizard-progress .wizard-dot.active {
+  background: #7c3aed;
+  width: 26px;
+  border-radius: 6px;
+}
+.wizard-step h3 { margin: 0 0 6px; font-size: 1.2rem; }
+
 /* Corpo do fichário — onde as parcelas vivem */
 .inst-folder {
   background: #232b48;
@@ -3693,7 +3720,7 @@ function _renderCardItem(c, idx = 0) {
         <div class="cc-detail-actions">
           ${c.open_bill?.id ? `<button class="mock-cta" onclick='event.stopPropagation(); openCardBillDetail(${c.id}, ${c.open_bill.id})'>📄 Ver fatura</button>` : ""}
           <button class="mock-cta outline" onclick='event.stopPropagation(); openCardEditModal(${JSON.stringify(c)})'>✏️ Editar</button>
-          <button class="inst-delete-btn" onclick="event.stopPropagation(); openCardDeleteModal(${c.id}, ${JSON.stringify(c.name).replace(/'/g, "&apos;")})">🗑 Excluir</button>
+          <button class="inst-delete-btn" onclick="event.stopPropagation(); openCardDeleteModal(${c.id}, ${JSON.stringify(c.name || '').replace(/"/g, '&quot;')})">🗑 Excluir</button>
         </div>
       </div>
     </details>
@@ -5148,6 +5175,233 @@ function alertModal(message, opts = {}) {
   okBtn.className = "btn-save";
   document.getElementById("generic-confirm-overlay").classList.add("open");
   return new Promise(resolve => { _genericModalResolver = () => resolve(undefined); _genericModalResolver = resolve; });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Wizard de Setup (primeira vez + reconfigurar)
+// 4 steps: Boas-vindas → Saldo inicial → Cartões → Pronto
+// ══════════════════════════════════════════════════════════════════════
+
+let _wizardState = { step: 1, balance: null, openedManually: false };
+
+function _ensureWizardOverlay() {
+  if (document.getElementById("wizard-overlay")) return;
+  const html = `
+    <div class="overlay" id="wizard-overlay" data-wizard>
+      <div class="modal wizard-modal">
+        <div class="wizard-progress" id="wizard-progress">
+          <span class="wizard-dot active" data-step="1"></span>
+          <span class="wizard-dot" data-step="2"></span>
+          <span class="wizard-dot" data-step="3"></span>
+          <span class="wizard-dot" data-step="4"></span>
+        </div>
+
+        <div class="wizard-step" data-step="1">
+          <div style="text-align:center;padding:8px 0 4px">
+            <div style="font-size:3.4rem;margin-bottom:8px">🐷</div>
+            <h3 style="margin:0 0 8px">Bem-vindo ao PigBank AI!</h3>
+            <p class="msub" style="max-width:380px;margin:0 auto">
+              Em 3 passos rápidos seu painel fica configurado pra você começar a usar agora.<br/>
+              Vamos lá?
+            </p>
+          </div>
+          <div class="modal-acts" style="margin-top:22px;display:flex;justify-content:space-between;align-items:center">
+            <button type="button" class="btn-cancel" onclick="wizardSkip()">Pular tudo</button>
+            <button type="button" class="btn-save" onclick="wizardNext()">Vamos lá →</button>
+          </div>
+        </div>
+
+        <div class="wizard-step" data-step="2" style="display:none">
+          <h3 style="margin:0 0 6px">💰 Saldo inicial</h3>
+          <p class="msub" style="margin-bottom:16px">
+            Quanto você tem na conta corrente <strong>agora</strong>?<br/>
+            <span style="font-size:.78rem">A gente cria um lançamento "Saldo inicial" pro Piggy começar a contar do número certo.</span>
+          </p>
+          <div class="invest-form">
+            <div class="field">
+              <label for="wizard-balance">Saldo atual (R$)</label>
+              <input type="number" id="wizard-balance" min="0" step="0.01" placeholder="0,00" autofocus />
+            </div>
+          </div>
+          <div class="modal-acts" style="margin-top:18px;display:flex;justify-content:space-between">
+            <button type="button" class="btn-cancel" onclick="wizardBack()">← Voltar</button>
+            <div style="display:flex;gap:8px">
+              <button type="button" class="btn-cancel" onclick="wizardSkipStep()">Pular</button>
+              <button type="button" class="btn-save" onclick="wizardSaveBalance()">Salvar e continuar →</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="wizard-step" data-step="3" style="display:none">
+          <h3 style="margin:0 0 6px">💳 Seus cartões</h3>
+          <p class="msub" style="margin-bottom:16px">
+            Tem cartão de crédito? Cadastre aqui pra a gente já contabilizar as faturas.<br/>
+            <span style="font-size:.78rem">Você pode pular e adicionar depois em Cartões.</span>
+          </p>
+          <div id="wizard-cards-list" style="margin-bottom:14px"></div>
+          <button type="button" class="mock-cta" style="width:100%" onclick="wizardOpenCardModal()">+ Adicionar cartão</button>
+          <div class="modal-acts" style="margin-top:18px;display:flex;justify-content:space-between">
+            <button type="button" class="btn-cancel" onclick="wizardBack()">← Voltar</button>
+            <div style="display:flex;gap:8px">
+              <button type="button" class="btn-cancel" onclick="wizardSkipStep()">Pular</button>
+              <button type="button" class="btn-save" onclick="wizardNext()">Continuar →</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="wizard-step" data-step="4" style="display:none">
+          <div style="text-align:center;padding:8px 0 4px">
+            <div style="font-size:3.4rem;margin-bottom:8px">🎉</div>
+            <h3 style="margin:0 0 8px">Tudo pronto!</h3>
+            <p class="msub" style="max-width:380px;margin:0 auto">
+              Seu painel tá configurado. Agora é só lançar suas despesas pelo bot, WhatsApp ou aqui no dashboard.<br/>
+              <span style="font-size:.8rem;color:var(--text-3)">Quer reconfigurar depois? Use o menu da sua conta.</span>
+            </p>
+          </div>
+          <div class="modal-acts" style="margin-top:22px;justify-content:center">
+            <button type="button" class="btn-save" onclick="wizardFinish()">Começar a usar →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML("beforeend", html);
+}
+
+function _setWizardStep(step) {
+  _wizardState.step = step;
+  document.querySelectorAll("#wizard-overlay .wizard-step").forEach(el => {
+    el.style.display = parseInt(el.dataset.step, 10) === step ? "" : "none";
+  });
+  document.querySelectorAll("#wizard-progress .wizard-dot").forEach(el => {
+    const n = parseInt(el.dataset.step, 10);
+    el.classList.toggle("active", n === step);
+    el.classList.toggle("done", n < step);
+  });
+}
+
+function _wizardRenderCardsList() {
+  const wrap = document.getElementById("wizard-cards-list");
+  if (!wrap) return;
+  const cards = (lastData && lastData.credit_cards) || [];
+  if (!cards.length) {
+    wrap.innerHTML = `<div style="padding:14px;text-align:center;color:var(--text-3);font-size:.85rem;background:rgba(255,255,255,.03);border:1px dashed var(--glass-border);border-radius:10px">Nenhum cartão ainda</div>`;
+    return;
+  }
+  wrap.innerHTML = cards.map(c => `
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(255,255,255,.04);border:1px solid var(--glass-border);border-radius:10px;margin-bottom:8px">
+      <span style="font-size:1.1rem">💳</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.88rem;color:var(--text);font-weight:600">${escapeHtmlSafe(c.name || "Cartão")}</div>
+        <div style="font-size:.7rem;color:var(--text-3)">fecha dia ${c.closing_day || "?"} · vence dia ${c.due_day || "?"}</div>
+      </div>
+      <span style="color:var(--green);font-size:.7rem">✓</span>
+    </div>
+  `).join("");
+}
+
+async function openWizard(opts = {}) {
+  _ensureWizardOverlay();
+  _wizardState = { step: 1, balance: null, openedManually: !!opts.manual };
+  _setWizardStep(1);
+  _wizardRenderCardsList();
+  document.getElementById("wizard-overlay").classList.add("open");
+}
+
+function closeWizard() {
+  document.getElementById("wizard-overlay")?.classList.remove("open");
+}
+
+function wizardNext() {
+  if (_wizardState.step === 3) _wizardRenderCardsList();
+  _setWizardStep(Math.min(4, _wizardState.step + 1));
+  if (_wizardState.step === 3) _wizardRenderCardsList();
+}
+function wizardBack() {
+  _setWizardStep(Math.max(1, _wizardState.step - 1));
+}
+function wizardSkipStep() {
+  wizardNext();
+}
+async function wizardSkip() {
+  // Pular tudo: salva timestamp pra não auto-abrir de novo nos próximos 7 dias.
+  try { localStorage.setItem("pigbank_wizard_skipped_at", String(Date.now())); } catch(_) {}
+  closeWizard();
+  showToast("Você pode reconfigurar depois no menu da sua conta.");
+}
+async function wizardFinish() {
+  closeWizard();
+  showToast("✓ Tudo pronto!");
+  sendRefresh();
+}
+
+async function wizardSaveBalance() {
+  const v = parseFloat(document.getElementById("wizard-balance").value);
+  if (isNaN(v) || v < 0) {
+    await alertModal("Digite um valor válido (zero ou positivo).", { title: "Valor inválido" });
+    return;
+  }
+  try {
+    const resp = await fetch(`${API}/account/${USER_ID}/initial-balance`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ amount: v }),
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      if (resp.status === 409) {
+        // Conta já tem saldo. Não bloqueia o wizard — pula direto.
+        await alertModal(
+          "Sua conta já tem saldo. Pra ajustar o saldo, use Conta → Ajustar saldo (em breve).",
+          { title: "Saldo já definido" },
+        );
+        wizardNext();
+        return;
+      }
+      throw new Error(detail);
+    }
+    _wizardState.balance = v;
+    showToast(`✓ Saldo inicial: ${_fmtBRL(v)}`);
+    wizardNext();
+  } catch (err) {
+    await alertModal(String(err.message || err), { title: "Erro" });
+  }
+}
+
+function wizardOpenCardModal() {
+  // Reusa modal existente. Quando salvar, re-renderiza a lista do wizard.
+  openCardEditModal();
+  // Hook: depois que cadastrar cartão, sendRefresh atualiza lastData. Vamos
+  // observar via setTimeout pra recarregar a lista no wizard.
+  const checkInterval = setInterval(() => {
+    const modal = document.getElementById("card-edit-overlay");
+    if (modal && !modal.classList.contains("open")) {
+      clearInterval(checkInterval);
+      // Aguardar o lastData atualizar
+      setTimeout(_wizardRenderCardsList, 800);
+    }
+  }, 300);
+}
+
+async function maybeOpenWizardOnLoad() {
+  if (!USER_ID) return;
+  try {
+    const resp = await fetch(`${API}/account/${USER_ID}/setup-status`, {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    // Só auto-abre se conta virgem E usuário não pulou recentemente.
+    const skipped = localStorage.getItem("pigbank_wizard_skipped_at");
+    const skippedRecently = skipped && (Date.now() - parseInt(skipped, 10) < 7 * 24 * 60 * 60 * 1000);
+    if (data.is_virgin && !skippedRecently) {
+      openWizard();
+    }
+  } catch (_) {}
 }
 
 // ── Gráficos mockados da view Análises ─────────────────────────────────
@@ -8119,6 +8373,8 @@ function _showAccessError() {
 	  loadUserMenuState().then(() => {
 	    if (view === "investments") setMainView("investments");
 	  });
+	  // Wizard: abre auto se conta virgem (não bloqueante).
+	  maybeOpenWizardOnLoad();
 	  // fetchHistory() removido daqui — connect() já chama via ws.onopen.
 	})();
 

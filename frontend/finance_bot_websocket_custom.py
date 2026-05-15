@@ -4998,6 +4998,102 @@ async def categories_delete_route(request: Request, user_id: int, cat_id: int):
     return {"ok": True}
 
 
+# ─── Account setup routes (Sprint Wizard) ────────────────────────────────────
+
+class InitialBalancePayload(BaseModel):
+    amount: float
+
+
+@app.get("/account/{user_id}/setup-status")
+async def setup_status_route(request: Request, user_id: int):
+    """Retorna se a conta está virgem (balance=0, nenhum launch, nenhum cartão).
+    Usado pelo Wizard de Setup pra decidir se mostra automático."""
+    _authorize_dashboard_access(request, user_id)
+
+    def _query():
+        from db.connection import get_conn
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT balance FROM accounts WHERE user_id=%s", (user_id,))
+                row = cur.fetchone()
+                balance = float(row["balance"]) if row else 0.0
+                cur.execute("SELECT COUNT(*) AS n FROM launches WHERE user_id=%s", (user_id,))
+                n_launches = int(cur.fetchone()["n"] or 0)
+                cur.execute("SELECT COUNT(*) AS n FROM credit_cards WHERE user_id=%s", (user_id,))
+                n_cards = int(cur.fetchone()["n"] or 0)
+        return {"balance": balance, "n_launches": n_launches, "n_cards": n_cards}
+
+    data = await asyncio.to_thread(_query)
+    is_virgin = data["balance"] == 0 and data["n_launches"] == 0 and data["n_cards"] == 0
+    return {"ok": True, "is_virgin": is_virgin, **data}
+
+
+@app.post("/account/{user_id}/initial-balance")
+async def set_initial_balance_route(request: Request, user_id: int, payload: InitialBalancePayload):
+    """Cria lançamento 'Saldo inicial' (receita interna) que atualiza accounts.balance.
+
+    Bloqueia se balance != 0 (use ajuste manual depois). Idempotente no sentido de
+    que se chamar com amount=0 não cria nada.
+    """
+    _authorize_dashboard_access(request, user_id)
+    if payload.amount < 0:
+        raise HTTPException(status_code=400, detail="Saldo não pode ser negativo.")
+
+    from db.accounts import get_balance, add_launch_and_update_balance
+
+    current = await asyncio.to_thread(get_balance, user_id)
+    if float(current) != 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Conta já tem saldo. Saldo inicial só pode ser definido em conta virgem.",
+        )
+    if payload.amount == 0:
+        return {"ok": True, "balance": 0.0, "launch_id": None}
+
+    launch_id, _user_seq, new_bal = await asyncio.to_thread(
+        add_launch_and_update_balance,
+        user_id, "receita", float(payload.amount), "setup", "Saldo inicial",
+        categoria="saldo_inicial", is_internal_movement=True,
+    )
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "balance": float(new_bal), "launch_id": launch_id}
+
+
+class AdjustBalancePayload(BaseModel):
+    target_balance: float
+
+
+@app.post("/account/{user_id}/adjust-balance")
+async def adjust_balance_route(request: Request, user_id: int, payload: AdjustBalancePayload):
+    """Ajusta saldo via lançamento de delta.
+
+    Calcula `target_balance - saldo_atual` e cria um launch interno
+    ('ajuste de saldo') com o valor da diferença. Saldo é atualizado pela
+    própria função de lançamento. Mantém rastreabilidade — vê no histórico.
+
+    Se delta == 0, não cria nada (idempotente).
+    """
+    _authorize_dashboard_access(request, user_id)
+    from db.accounts import get_balance, add_launch_and_update_balance
+
+    current = await asyncio.to_thread(get_balance, user_id)
+    delta = float(payload.target_balance) - float(current)
+    if abs(delta) < 0.005:
+        return {"ok": True, "balance": float(current), "delta": 0.0, "launch_id": None}
+
+    tipo = "receita" if delta > 0 else "despesa"
+    valor = abs(delta)
+    nota = "Ajuste de saldo manual"
+
+    launch_id, _seq, new_bal = await asyncio.to_thread(
+        add_launch_and_update_balance,
+        user_id, tipo, valor, "ajuste", nota,
+        categoria="ajuste", is_internal_movement=True,
+    )
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "balance": float(new_bal), "delta": delta, "launch_id": launch_id}
+
+
 # ─── Investment routes ───────────────────────────────────────────────────────
 
 class InvestmentCreatePayload(BaseModel):
