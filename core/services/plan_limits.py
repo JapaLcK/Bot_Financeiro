@@ -20,6 +20,7 @@ class PlanLimits(TypedDict):
     export_enabled: bool
     ai_conversational_enabled: bool
     ai_categorization_enabled: bool
+    recurring_expenses_enabled: bool
 
 
 FREE_LIMITS: PlanLimits = {
@@ -31,6 +32,7 @@ FREE_LIMITS: PlanLimits = {
     "export_enabled": False,
     "ai_conversational_enabled": False,
     "ai_categorization_enabled": True,
+    "recurring_expenses_enabled": False,
 }
 
 
@@ -43,6 +45,7 @@ PRO_LIMITS: PlanLimits = {
     "export_enabled": True,
     "ai_conversational_enabled": True,
     "ai_categorization_enabled": True,
+    "recurring_expenses_enabled": True,
 }
 
 

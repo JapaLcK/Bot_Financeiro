@@ -862,6 +862,58 @@ def init_db():
         )
         """,
 
+        # ─── Gastos Fixos / Recorrentes (Sprint 4) ──────────────────────────────
+        # Pro-only. Cobrança automática via cron no dia `due_day` de cada mês.
+        # `last_charged_ym` = idempotência (não cobra 2x no mesmo mês).
+        # `last_amount` + `last_amount_changed_at` = detector de reajuste quando user edita.
+        # `payment_type='credit_card'` → cria credit_transaction na bill open atual.
+        # `payment_type='account'`     → cria launch despesa.
+        """
+        create table if not exists recurring_expenses (
+          id          bigserial primary key,
+          user_id     bigint  not null references users(id) on delete cascade,
+          name        text    not null,
+          amount      numeric not null check (amount > 0),
+          category    text    not null,
+          due_day     int     not null check (due_day between 1 and 31),
+          payment_type text   not null check (payment_type in ('account', 'credit_card')),
+          card_id     bigint  references credit_cards(id) on delete set null,
+          is_essential boolean not null default false,
+          is_active   boolean not null default true,
+          last_amount numeric,
+          last_amount_changed_at timestamptz,
+          last_charged_ym text,
+          notes       text,
+          created_at  timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_recurring_user_active
+          on recurring_expenses (user_id, is_active)
+        """,
+
+        # Histórico de cobranças automáticas. Garante idempotência via unique
+        # (recurring_id, ym) + serve pra alertas no banner do dashboard até user
+        # marcar como visto (acknowledged=true).
+        """
+        create table if not exists recurring_charges (
+          id           bigserial primary key,
+          recurring_id bigint not null references recurring_expenses(id) on delete cascade,
+          user_id      bigint not null references users(id) on delete cascade,
+          launch_id    bigint references launches(id) on delete set null,
+          credit_tx_id bigint references credit_transactions(id) on delete set null,
+          amount       numeric not null,
+          ym           text not null,
+          charged_at   timestamptz not null default now(),
+          acknowledged boolean not null default false,
+          unique (recurring_id, ym)
+        )
+        """,
+        """
+        create index if not exists idx_recurring_charges_user_ack
+          on recurring_charges (user_id, acknowledged)
+        """,
+
         # ─── Eventos de login (admin/observabilidade) ───────────────────────────
         # Antes era criada lazy em core/admin_dashboard.py:ensure_admin_tables.
         # Trazido pra schema.py pra audit/IP-tracking funcionarem nos testes.

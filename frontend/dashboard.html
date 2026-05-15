@@ -1147,6 +1147,68 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
   border-radius:10px;padding:9px 11px;color:var(--text);font-size:.82rem;outline:none;transition:all .2s; }
 .field input:focus,.field select:focus { background:rgba(255,255,255,.1);border-color:rgba(96,165,250,.5);box-shadow:0 0 0 2px rgba(96,165,250,.14); }
 .field select option { color:#0f172a; }
+
+/* ─── PigBank Checkbox ──────────────────────────────────────────────── */
+input[type="checkbox"],
+.field input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1.5px solid var(--glass-border);
+  border-radius: 6px;
+  background: rgba(255,255,255,.05);
+  cursor: pointer;
+  position: relative;
+  transition: background .2s var(--ease), border-color .2s var(--ease), box-shadow .2s var(--ease), transform .15s var(--ease);
+  flex-shrink: 0;
+  vertical-align: middle;
+  display: inline-block;
+  margin: 0;
+}
+input[type="checkbox"]:hover:not(:disabled) {
+  border-color: rgba(124,58,237,.55);
+  background: rgba(124,58,237,.12);
+}
+input[type="checkbox"]:checked {
+  background: linear-gradient(135deg, #7c3aed 0%, #3b82f6 100%);
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 0 rgba(124,58,237,.4), 0 4px 12px rgba(124,58,237,.25);
+}
+input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 2px;
+  width: 5px;
+  height: 10px;
+  border: solid #fff;
+  border-width: 0 2.5px 2.5px 0;
+  transform: rotate(45deg);
+  animation: checkPop .2s var(--ease) both;
+}
+@keyframes checkPop {
+  0% { transform: rotate(45deg) scale(0); opacity: 0; }
+  60% { transform: rotate(45deg) scale(1.15); }
+  100% { transform: rotate(45deg) scale(1); opacity: 1; }
+}
+input[type="checkbox"]:focus-visible {
+  outline: 2px solid rgba(124,58,237,.5);
+  outline-offset: 2px;
+}
+input[type="checkbox"]:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+body.light input[type="checkbox"] {
+  background: rgba(0,0,0,.03);
+  border-color: rgba(0,0,0,.18);
+}
+body.light input[type="checkbox"]:hover:not(:disabled) {
+  background: rgba(124,58,237,.08);
+  border-color: rgba(124,58,237,.45);
+}
 .wide-btn { width:100%;justify-content:center;padding:9px 14px; }
 .rate-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px; }
 .rate-tile {
@@ -1697,7 +1759,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
         <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#f59e0b,#c2410c);display:flex;align-items:center;justify-content:center;font-size:1rem">🔁</div>
         <div style="flex:1;min-width:0">
           <div style="font-size:.78rem;color:var(--text-3)">Gastos fixos</div>
-          <div style="font-size:.95rem;color:var(--text);font-weight:700">R$ 1.776/mês</div>
+          <div id="overview-fixed-stat" style="font-size:.95rem;color:var(--text);font-weight:700">—</div>
         </div>
         <span style="color:var(--text-3);font-size:.85rem">→</span>
       </div>
@@ -2074,127 +2136,30 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
   <div id="fixed-view" class="dash-view">
     <div class="mock-header">
       <p class="section-title" style="margin:0">Gastos Fixos</p>
-      <button class="mock-cta">+ Novo recorrente</button>
+      <button class="mock-cta" data-pro-feature="recurring_expenses" onclick="openRecurringEditModal()">+ Novo recorrente</button>
     </div>
 
-    <div class="stats-row">
-      <div class="stat-tile">
-        <div class="stat-label">Total mensal</div>
-        <div class="stat-value" style="color:var(--red)">R$ 1.776,70</div>
-        <div class="stat-delta down">42% da renda média</div>
-      </div>
-      <div class="stat-tile">
-        <div class="stat-label">Recorrentes ativos</div>
-        <div class="stat-value">9</div>
-        <div class="stat-delta" style="color:var(--text-3)">5 essenciais • 4 lazer</div>
-      </div>
-      <div class="stat-tile">
-        <div class="stat-label">Próximo vencimento</div>
-        <div class="stat-value" style="font-size:1.15rem">Netflix</div>
-        <div class="stat-delta down">15/05 — em 2 dias</div>
-      </div>
-      <div class="stat-tile">
-        <div class="stat-label">Reajustes recentes</div>
-        <div class="stat-value" style="color:#fbbf24">2</div>
-        <div class="stat-delta down">Netflix +R$3 • Aluguel +R$50</div>
-      </div>
-    </div>
+    <div id="recurring-stats" class="stats-row"></div>
 
     <div class="mock-grid cols-2">
       <div class="mock-card">
         <h3>Essenciais</h3>
-        <div class="tx-list">
-          <div class="tx-row">
-            <div class="tx-icon">🏠</div>
-            <div class="tx-main"><div class="tx-desc">Aluguel</div><div class="tx-meta">Boleto • dia 5 • R$ 1.400 → <span style="color:#fbbf24">R$ 1.450 ↑</span></div></div>
-            <div class="tx-amt red">-R$ 1.450,00</div>
-          </div>
-          <div class="tx-row">
-            <div class="tx-icon">💡</div>
-            <div class="tx-main"><div class="tx-desc">Conta de luz (Enel)</div><div class="tx-meta">Débito • dia 12 • média R$ 128</div></div>
-            <div class="tx-amt red">~R$ 128,00</div>
-          </div>
-          <div class="tx-row">
-            <div class="tx-icon">💧</div>
-            <div class="tx-main"><div class="tx-desc">Água (Sabesp)</div><div class="tx-meta">Débito • dia 8 • média R$ 64</div></div>
-            <div class="tx-amt red">~R$ 64,00</div>
-          </div>
-          <div class="tx-row">
-            <div class="tx-icon">🌐</div>
-            <div class="tx-main"><div class="tx-desc">Internet Vivo Fibra</div><div class="tx-meta">Boleto • dia 10 • fixo</div></div>
-            <div class="tx-amt red">-R$ 99,90</div>
-          </div>
-          <div class="tx-row">
-            <div class="tx-icon">📱</div>
-            <div class="tx-main"><div class="tx-desc">Plano celular Claro</div><div class="tx-meta">Cartão Itaú • dia 20 • fixo</div></div>
-            <div class="tx-amt red">-R$ 59,90</div>
-          </div>
-        </div>
+        <div id="recurring-essentials-list" class="tx-list"></div>
       </div>
 
       <div class="mock-card">
         <h3>Assinaturas / lazer</h3>
-        <div class="tx-list">
-          <div class="tx-row">
-            <div class="tx-icon">📺</div>
-            <div class="tx-main"><div class="tx-desc">Netflix Premium</div><div class="tx-meta">Cartão Nubank • dia 15 • R$ 36,90 → <span style="color:#fbbf24">R$ 39,90 ↑</span></div></div>
-            <div class="tx-amt red">-R$ 39,90</div>
-          </div>
-          <div class="tx-row">
-            <div class="tx-icon">🎵</div>
-            <div class="tx-main"><div class="tx-desc">Spotify Premium</div><div class="tx-meta">Cartão Itaú • dia 2 • fixo</div></div>
-            <div class="tx-amt red">-R$ 21,90</div>
-          </div>
-          <div class="tx-row">
-            <div class="tx-icon">☁️</div>
-            <div class="tx-main"><div class="tx-desc">iCloud 200GB</div><div class="tx-meta">Cartão Itaú • dia 5 • fixo</div></div>
-            <div class="tx-amt red">-R$ 6,90</div>
-          </div>
-          <div class="tx-row">
-            <div class="tx-icon">📚</div>
-            <div class="tx-main"><div class="tx-desc">Audible</div><div class="tx-meta">Cartão Inter • dia 22 • fixo</div></div>
-            <div class="tx-amt red">-R$ 6,20</div>
-          </div>
-        </div>
+        <div id="recurring-leisure-list" class="tx-list"></div>
       </div>
 
       <div class="mock-card">
         <h3>Próximos 7 dias</h3>
-        <div class="tx-list">
-          <div class="tx-row">
-            <div class="tx-icon" style="color:#f87171">📺</div>
-            <div class="tx-main"><div class="tx-desc">Netflix · 15 mai</div><div class="tx-meta">em 2 dias • Cartão Nubank</div></div>
-            <div class="tx-amt red">-R$ 39,90</div>
-          </div>
-          <div class="tx-row">
-            <div class="tx-icon" style="color:#fbbf24">📱</div>
-            <div class="tx-main"><div class="tx-desc">Claro · 20 mai</div><div class="tx-meta">em 7 dias • Cartão Itaú</div></div>
-            <div class="tx-amt red">-R$ 59,90</div>
-          </div>
-          <div class="tx-row">
-            <div class="tx-icon">💡</div>
-            <div class="tx-main"><div class="tx-desc">Enel (estimado) · 12 jun</div><div class="tx-meta">próximo mês</div></div>
-            <div class="tx-amt red">~R$ 128,00</div>
-          </div>
-        </div>
+        <div id="recurring-upcoming-list" class="tx-list"></div>
       </div>
 
       <div class="mock-card">
-        <h3>Alertas do Piggy 🐷</h3>
-        <div class="tx-list">
-          <div class="tx-row">
-            <div class="tx-icon" style="color:#fbbf24">⚠️</div>
-            <div class="tx-main"><div class="tx-desc">Netflix aumentou R$ 3,00</div><div class="tx-meta">+8,1% vs mês passado • reajuste detectado em 15/04</div></div>
-          </div>
-          <div class="tx-row">
-            <div class="tx-icon" style="color:#fbbf24">⚠️</div>
-            <div class="tx-main"><div class="tx-desc">Aluguel ajustou IGPM</div><div class="tx-meta">+R$ 50,00 (3,5%) • detectado em 05/05</div></div>
-          </div>
-          <div class="tx-row">
-            <div class="tx-icon" style="color:#34d399">💡</div>
-            <div class="tx-main"><div class="tx-desc">Renegociar Audible?</div><div class="tx-meta">Você usou só 1 vez nos últimos 3 meses</div></div>
-          </div>
-        </div>
+        <h3>Reajustes recentes 🐷</h3>
+        <div id="recurring-adjustments-list" class="tx-list"></div>
       </div>
     </div>
   </div>
@@ -3505,6 +3470,7 @@ function navigateTo(view) {
   if (view === "installments") loadInstallmentsView();
   if (view === "categories") loadCategoriesView();
   if (view === "budgets") loadBudgetsView();
+  if (view === "fixed") loadFixedView();
 }
 
 // ── Cartões (view dinâmica conectada ao backend) ──────────────────────
@@ -5404,6 +5370,453 @@ async function maybeOpenWizardOnLoad() {
   } catch (_) {}
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Gastos Fixos / Recorrentes (Sprint 4 — Pro-only)
+// ══════════════════════════════════════════════════════════════════════
+
+const RECURRING_CATEGORY_EMOJI = {
+  "alimentação": "🍔", "transporte": "🚗", "saúde": "💊", "moradia": "🏠",
+  "lazer": "🎬", "educação": "📚", "assinaturas": "📺", "pets": "🐾",
+  "compras online": "🛒", "beleza": "💄", "outros": "🏷️",
+  "internet": "🌐", "telefone": "📱", "água": "💧", "luz": "💡",
+};
+
+let _recurringCache = null;
+let _recurringFetchInFlight = null;
+
+async function _fetchRecurring() {
+  if (_recurringFetchInFlight) return _recurringFetchInFlight;
+  _recurringFetchInFlight = (async () => {
+    try {
+      const resp = await fetch(`${API}/recurring-expenses/${USER_ID}`, {
+        credentials: "same-origin",
+        headers: csrfHeaders(),
+      });
+      if (resp.status === 403) {
+        const data = await resp.json().catch(() => ({}));
+        if (data?.detail?.error === "pro_required") return { pro_required: true };
+      }
+      if (!resp.ok) {
+        const txt = await resp.text();
+        let detail = txt;
+        try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+        throw new Error(`(HTTP ${resp.status}) ${detail}`);
+      }
+      const data = await resp.json();
+      return data.recurring || [];
+    } finally {
+      _recurringFetchInFlight = null;
+    }
+  })();
+  return _recurringFetchInFlight;
+}
+
+async function loadFixedView(forceFresh = false) {
+  const stats = document.getElementById("recurring-stats");
+  if (!stats) return;
+  if (!USER_ID) {
+    setTimeout(() => loadFixedView(forceFresh), 300);
+    return;
+  }
+  if (_recurringCache && !forceFresh) {
+    _renderFixedView(_recurringCache);
+    _fetchRecurring().then(fresh => {
+      if (fresh && !fresh.pro_required) { _recurringCache = fresh; _renderFixedView(fresh); }
+    }).catch(() => {});
+    return;
+  }
+
+  stats.innerHTML = `
+    <div class="stat-tile"><div class="stat-label">Total mensal</div><div class="sk sk-h2"></div></div>
+    <div class="stat-tile"><div class="stat-label">Recorrentes ativos</div><div class="sk sk-h2"></div></div>
+    <div class="stat-tile"><div class="stat-label">Próximo vencimento</div><div class="sk sk-h2"></div></div>
+    <div class="stat-tile"><div class="stat-label">Reajustes</div><div class="sk sk-h2"></div></div>
+  `;
+  try {
+    const data = await _fetchRecurring();
+    if (data && data.pro_required) {
+      _renderFixedProGate();
+      return;
+    }
+    _recurringCache = data;
+    _renderFixedView(data);
+  } catch (err) {
+    stats.innerHTML = `<div class="empty" style="grid-column:1/-1;color:var(--red)">Erro: ${escapeHtmlSafe(String(err.message || err))}</div>`;
+  }
+}
+
+function _renderFixedProGate() {
+  const stats = document.getElementById("recurring-stats");
+  if (stats) stats.innerHTML = "";
+  ["recurring-essentials-list", "recurring-leisure-list", "recurring-upcoming-list", "recurring-adjustments-list"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = "";
+  });
+  const ess = document.getElementById("recurring-essentials-list");
+  if (ess) {
+    ess.innerHTML = `
+      <div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">
+        <div style="font-size:2.5rem;margin-bottom:10px">🔒</div>
+        <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Gastos Fixos é Pro</div>
+        <div style="margin-bottom:14px">Cadastre suas assinaturas e contas recorrentes pra o Piggy lançar automaticamente todo mês.</div>
+        <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')">⭐ Ver Pro</button>
+      </div>`;
+  }
+}
+
+function _renderFixedView(items) {
+  const stats = document.getElementById("recurring-stats");
+  const essEl = document.getElementById("recurring-essentials-list");
+  const leiEl = document.getElementById("recurring-leisure-list");
+  const upEl = document.getElementById("recurring-upcoming-list");
+  const adjEl = document.getElementById("recurring-adjustments-list");
+
+  const list = items || [];
+  const active = list.filter(r => r.is_active);
+  const total = active.reduce((s, r) => s + (r.amount || 0), 0);
+  const nEssentials = active.filter(r => r.is_essential).length;
+  const nLeisure = active.filter(r => !r.is_essential).length;
+
+  // Próximo vencimento (próxima data >= hoje considerando due_day desse mês ou próximo)
+  const today = new Date();
+  const nextDue = active.map(r => {
+    let d = new Date(today.getFullYear(), today.getMonth(), Math.min(r.due_day, 28));
+    if (d < today) d = new Date(today.getFullYear(), today.getMonth() + 1, Math.min(r.due_day, 28));
+    return { rec: r, date: d };
+  }).sort((a, b) => a.date - b.date);
+  const next = nextDue[0];
+
+  const adjustments = active.filter(r => r.last_amount != null && r.last_amount_changed_at);
+  const incomeMonth = (lastData && lastData.monthly_income) || 0;
+  const renderPct = incomeMonth > 0 ? ((total / incomeMonth) * 100).toFixed(0) : null;
+
+  stats.innerHTML = `
+    <div class="stat-tile" style="animation-delay:0ms">
+      <div class="stat-label">Total mensal</div>
+      <div class="stat-value" style="color:var(--red)">${_fmtBRL(total)}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${renderPct != null ? renderPct + "% da renda do mês" : active.length + " ativos"}</div>
+    </div>
+    <div class="stat-tile" style="animation-delay:60ms">
+      <div class="stat-label">Recorrentes ativos</div>
+      <div class="stat-value">${active.length}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${nEssentials} essenciais · ${nLeisure} lazer</div>
+    </div>
+    <div class="stat-tile" style="animation-delay:120ms">
+      <div class="stat-label">Próximo vencimento</div>
+      <div class="stat-value" style="font-size:1.15rem">${next ? escapeHtmlSafe(next.rec.name) : "—"}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${next ? _formatDueIn(next.date) : "sem agendamentos"}</div>
+    </div>
+    <div class="stat-tile" style="animation-delay:180ms">
+      <div class="stat-label">Reajustes recentes</div>
+      <div class="stat-value" style="color:${adjustments.length ? '#fbbf24' : 'var(--text-3)'}">${adjustments.length}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${adjustments.length ? "este mês" : "sem reajustes"}</div>
+    </div>
+  `;
+
+  const essentials = active.filter(r => r.is_essential);
+  const leisure = active.filter(r => !r.is_essential);
+
+  essEl.innerHTML = essentials.length
+    ? essentials.map(r => _renderRecurringRow(r)).join("")
+    : `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Sem gastos essenciais cadastrados.</div>`;
+  leiEl.innerHTML = leisure.length
+    ? leisure.map(r => _renderRecurringRow(r)).join("")
+    : `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Sem assinaturas cadastradas.</div>`;
+
+  // Próximos 7 dias
+  const upcoming = nextDue.filter(x => {
+    const diffDays = (x.date - today) / (1000 * 60 * 60 * 24);
+    return diffDays <= 7;
+  });
+  upEl.innerHTML = upcoming.length
+    ? upcoming.map(x => `
+        <div class="tx-row">
+          <div class="tx-icon" style="color:${(x.date - today) / (1000 * 60 * 60 * 24) <= 2 ? '#f87171' : '#fbbf24'}">${_recurringEmoji(x.rec)}</div>
+          <div class="tx-main">
+            <div class="tx-desc">${escapeHtmlSafe(x.rec.name)} · ${x.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</div>
+            <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.payment_type === "credit_card" ? "Cartão " + escapeHtmlSafe(x.rec.card_name || "?") : "Débito automático"}</div>
+          </div>
+          <div class="tx-amt red">-${_fmtBRL(x.rec.amount)}</div>
+        </div>
+      `).join("")
+    : `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Nada nos próximos 7 dias.</div>`;
+
+  // Reajustes
+  adjEl.innerHTML = adjustments.length
+    ? adjustments.map(r => {
+        const delta = r.amount - r.last_amount;
+        const sign = delta > 0 ? "+" : "−";
+        const pct = r.last_amount > 0 ? ((delta / r.last_amount) * 100).toFixed(1) : "—";
+        const when = r.last_amount_changed_at ? new Date(r.last_amount_changed_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : "";
+        return `
+          <div class="tx-row">
+            <div class="tx-icon" style="color:#fbbf24">⚠️</div>
+            <div class="tx-main">
+              <div class="tx-desc">${escapeHtmlSafe(r.name)} ${delta > 0 ? "aumentou" : "diminuiu"} ${sign}${_fmtBRL(Math.abs(delta))}</div>
+              <div class="tx-meta">${pct}% vs valor anterior · detectado em ${when}</div>
+            </div>
+          </div>`;
+      }).join("")
+    : `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Nenhum reajuste detectado ainda.</div>`;
+}
+
+function _recurringEmoji(r) {
+  const name = (r.name || "").toLowerCase();
+  if (name.includes("netflix") || name.includes("hbo") || name.includes("prime")) return "📺";
+  if (name.includes("spotify") || name.includes("apple music") || name.includes("deezer")) return "🎵";
+  if (name.includes("icloud") || name.includes("drive") || name.includes("dropbox")) return "☁️";
+  if (name.includes("audible") || name.includes("kindle")) return "📚";
+  if (name.includes("internet") || name.includes("vivo") || name.includes("claro")) return "🌐";
+  if (name.includes("celular") || name.includes("telefone")) return "📱";
+  if (name.includes("luz") || name.includes("enel") || name.includes("cemig")) return "💡";
+  if (name.includes("água") || name.includes("sabesp")) return "💧";
+  if (name.includes("aluguel") || name.includes("condomínio")) return "🏠";
+  return RECURRING_CATEGORY_EMOJI[(r.category || "").toLowerCase()] || "🏷️";
+}
+
+function _renderRecurringRow(r) {
+  const payment = r.payment_type === "credit_card"
+    ? `Cartão ${escapeHtmlSafe(r.card_name || "?")} · dia ${r.due_day}`
+    : `Débito · dia ${r.due_day}`;
+  let adjustText = "";
+  if (r.last_amount != null && r.last_amount > 0) {
+    const delta = r.amount - r.last_amount;
+    if (Math.abs(delta) > 0.005) {
+      const arrow = delta > 0 ? "↑" : "↓";
+      const color = delta > 0 ? "#fbbf24" : "#22c55e";
+      adjustText = ` · <span style="color:${color}">${_fmtBRL(r.last_amount)} → ${_fmtBRL(r.amount)} ${arrow}</span>`;
+    }
+  }
+  const safeRecJson = JSON.stringify(r).replace(/"/g, "&quot;");
+  return `
+    <div class="tx-row" style="cursor:pointer" onclick="openRecurringEditModal(${safeRecJson})">
+      <div class="tx-icon">${_recurringEmoji(r)}</div>
+      <div class="tx-main">
+        <div class="tx-desc">${escapeHtmlSafe(r.name)}</div>
+        <div class="tx-meta">${payment}${adjustText}</div>
+      </div>
+      <div class="tx-amt red">-${_fmtBRL(r.amount)}</div>
+    </div>
+  `;
+}
+
+function _formatDueIn(date) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(date);
+  target.setHours(0, 0, 0, 0);
+  const diff = Math.round((target - today) / (1000 * 60 * 60 * 24));
+  if (diff === 0) return "hoje";
+  if (diff === 1) return "amanhã";
+  if (diff < 0) return `há ${-diff} dia${diff === -1 ? "" : "s"}`;
+  return `em ${diff} dias`;
+}
+
+// ── Modal cadastrar/editar recorrente ─────────────────────────────────
+
+let _recurringEditState = { id: null };
+
+function _ensureRecurringModal() {
+  if (document.getElementById("recurring-edit-overlay")) return;
+  const html = `
+    <div class="overlay" id="recurring-edit-overlay">
+      <div class="modal wide">
+        <h3 id="recurring-edit-title">Novo gasto fixo</h3>
+        <p class="msub" style="background:rgba(124,58,237,.1);border:1px solid rgba(124,58,237,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:.78rem">
+          ⚠️ <strong>Importante:</strong> esse gasto será <strong>lançado automaticamente</strong> todo mês no dia escolhido. Você poderá excluir o lançamento depois se necessário.
+        </p>
+        <form id="recurring-edit-form" onsubmit="event.preventDefault(); saveRecurring();">
+          <div class="invest-form">
+            <div class="form-row">
+              <div class="field" style="flex:2">
+                <label for="recurring-name">Nome *</label>
+                <input type="text" id="recurring-name" required maxlength="80" placeholder="Ex: Netflix, Aluguel..." />
+              </div>
+              <div class="field" style="flex:1">
+                <label for="recurring-amount">Valor (R$) *</label>
+                <input type="number" id="recurring-amount" min="0.01" step="0.01" required placeholder="0,00" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="recurring-due-day">Dia do vencimento *</label>
+                <input type="number" id="recurring-due-day" min="1" max="31" required placeholder="1-31" />
+              </div>
+              <div class="field">
+                <label for="recurring-category">Categoria *</label>
+                <input type="text" id="recurring-category" required maxlength="40" placeholder="alimentação, lazer..." />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="recurring-payment-type">Forma de pagamento *</label>
+                <select id="recurring-payment-type" onchange="_toggleRecurringCardField()">
+                  <option value="account">Débito automático na conta</option>
+                  <option value="credit_card">Cartão de crédito</option>
+                </select>
+              </div>
+              <div class="field" id="recurring-card-field" style="display:none">
+                <label for="recurring-card">Cartão</label>
+                <select id="recurring-card"></select>
+              </div>
+            </div>
+            <div class="field">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal">
+                <input type="checkbox" id="recurring-is-essential" />
+                <span>Marcar como gasto essencial (não-discricionário)</span>
+              </label>
+            </div>
+            <div class="field">
+              <label for="recurring-notes">Notas (opcional)</label>
+              <input type="text" id="recurring-notes" maxlength="200" placeholder="Anotações..." />
+            </div>
+          </div>
+          <div class="modal-acts" style="margin-top:18px;display:flex;gap:8px;align-items:center">
+            <button type="button" class="inst-delete-btn" id="recurring-delete-btn" style="display:none" onclick="deleteRecurringFromModal()">🗑 Excluir</button>
+            <span style="flex:1"></span>
+            <button type="button" class="btn-cancel" onclick="closeRecurringEditModal()">Cancelar</button>
+            <button type="submit" class="btn-save">Salvar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML("beforeend", html);
+  document.getElementById("recurring-edit-overlay").addEventListener("click", e => {
+    if (e.target === e.currentTarget) closeRecurringEditModal();
+  });
+}
+
+function _toggleRecurringCardField() {
+  const type = document.getElementById("recurring-payment-type").value;
+  const field = document.getElementById("recurring-card-field");
+  field.style.display = type === "credit_card" ? "" : "none";
+  if (type === "credit_card") _populateRecurringCardOptions();
+}
+
+function _populateRecurringCardOptions(selectedId = null) {
+  const sel = document.getElementById("recurring-card");
+  const cards = (lastData && lastData.credit_cards) || [];
+  if (!cards.length) {
+    sel.innerHTML = `<option value="">— Nenhum cartão cadastrado —</option>`;
+    return;
+  }
+  sel.innerHTML = cards.map(c => `<option value="${c.id}"${selectedId == c.id ? " selected" : ""}>${escapeHtmlSafe(c.name)}</option>`).join("");
+}
+
+function openRecurringEditModal(rec) {
+  _ensureRecurringModal();
+  const isEdit = !!(rec && rec.id);
+  _recurringEditState = { id: isEdit ? rec.id : null };
+
+  document.getElementById("recurring-edit-title").textContent = isEdit ? "Editar gasto fixo" : "Novo gasto fixo";
+  document.getElementById("recurring-name").value = isEdit ? rec.name : "";
+  document.getElementById("recurring-amount").value = isEdit ? Number(rec.amount).toFixed(2) : "";
+  document.getElementById("recurring-due-day").value = isEdit ? rec.due_day : "";
+  document.getElementById("recurring-category").value = isEdit ? rec.category : "";
+  document.getElementById("recurring-payment-type").value = isEdit ? rec.payment_type : "account";
+  document.getElementById("recurring-is-essential").checked = isEdit ? !!rec.is_essential : false;
+  document.getElementById("recurring-notes").value = isEdit ? (rec.notes || "") : "";
+  document.getElementById("recurring-delete-btn").style.display = isEdit ? "" : "none";
+  _toggleRecurringCardField();
+  if (isEdit && rec.payment_type === "credit_card") _populateRecurringCardOptions(rec.card_id);
+
+  document.getElementById("recurring-edit-overlay").classList.add("open");
+  setTimeout(() => document.getElementById("recurring-name").focus(), 50);
+}
+
+function closeRecurringEditModal() {
+  document.getElementById("recurring-edit-overlay")?.classList.remove("open");
+}
+
+let _recurringSaving = false;
+async function saveRecurring() {
+  if (_recurringSaving) return;  // bloqueia double-submit
+
+  // Coleta + valida ANTES de fechar (pra reabrir com dados se erro)
+  const payload = {
+    name: document.getElementById("recurring-name").value.trim(),
+    amount: parseFloat(document.getElementById("recurring-amount").value),
+    category: document.getElementById("recurring-category").value.trim(),
+    due_day: parseInt(document.getElementById("recurring-due-day").value, 10),
+    payment_type: document.getElementById("recurring-payment-type").value,
+    card_id: null,
+    is_essential: document.getElementById("recurring-is-essential").checked,
+    notes: document.getElementById("recurring-notes").value.trim() || null,
+  };
+  if (payload.payment_type === "credit_card") {
+    const cardVal = document.getElementById("recurring-card").value;
+    if (!cardVal) {
+      await alertModal("Escolha um cartão.", { title: "Cartão obrigatório" });
+      return;
+    }
+    payload.card_id = parseInt(cardVal, 10);
+  }
+
+  _recurringSaving = true;
+  const isEdit = !!_recurringEditState.id;
+  const editingId = _recurringEditState.id;
+
+  // Optimistic: fecha modal imediatamente. Se der erro, reabre.
+  closeRecurringEditModal();
+
+  try {
+    const url = isEdit
+      ? `${API}/recurring-expenses/${USER_ID}/${editingId}`
+      : `${API}/recurring-expenses/${USER_ID}`;
+    const method = isEdit ? "PATCH" : "POST";
+    const resp = await fetch(url, {
+      method,
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      if (resp.status === 403) {
+        await alertModal("Gastos fixos é uma feature Pro.", { title: "Recurso Pro" });
+        return;
+      }
+      throw new Error(detail);
+    }
+    showToast(isEdit ? "✓ Gasto fixo atualizado" : "✓ Gasto fixo cadastrado");
+    _recurringCache = null;
+    loadFixedView(true);  // sem await — re-render em paralelo
+    sendRefresh();
+  } catch (err) {
+    // Reabre modal com dados preservados pro user corrigir
+    openRecurringEditModal(isEdit ? { ...payload, id: editingId } : payload);
+    await alertModal(String(err.message || err), { title: "Erro ao salvar" });
+  } finally {
+    _recurringSaving = false;
+  }
+}
+
+async function deleteRecurringFromModal() {
+  if (!_recurringEditState.id) return;
+  const ok = await confirmModal(
+    "Excluir este gasto fixo? Lançamentos passados ficam preservados — só não vai mais cobrar automaticamente.",
+    { title: "Excluir gasto fixo", okText: "Excluir", danger: true },
+  );
+  if (!ok) return;
+  try {
+    const resp = await fetch(`${API}/recurring-expenses/${USER_ID}/${_recurringEditState.id}`, {
+      method: "DELETE",
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    closeRecurringEditModal();
+    showToast("✓ Gasto fixo excluído");
+    _recurringCache = null;
+    await loadFixedView(true);
+  } catch (err) {
+    await alertModal(String(err.message || err), { title: "Erro" });
+  }
+}
+
 // ── Gráficos mockados da view Análises ─────────────────────────────────
 let _mockChartsRendered = false;
 let _mockChartInstances = [];
@@ -6444,8 +6857,13 @@ function renderAlerts(alerts) {
   const exceeded = alerts.filter(a => a.type === "budget_exceeded");
   let html = "";
   alerts.forEach(a => {
-    const icon = a.type === "budget_exceeded" ? "🔴" : "⚠️";
-    html += `<div class="alert-row">${icon} <b>${a.categoria}</b>: ${fmt(a.spent)} de ${fmt(a.budget)} (${a.pct}%)</div>`;
+    if (a.type === "recurring_charged") {
+      const where = a.payment_type === "credit_card" ? "no cartão" : "da conta";
+      html += `<div class="alert-row">🐷 Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> R$ ${fmt(a.amount)} ${where} hoje. <button onclick="ackRecurringCharge(${a.charge_id})" style="background:none;border:none;color:var(--text-2);text-decoration:underline;cursor:pointer;font-size:.78rem;padding:0;margin-left:6px">Ok, vi</button></div>`;
+    } else {
+      const icon = a.type === "budget_exceeded" ? "🔴" : "⚠️";
+      html += `<div class="alert-row">${icon} <b>${a.categoria}</b>: ${fmt(a.spent)} de ${fmt(a.budget)} (${a.pct}%)</div>`;
+    }
   });
   b.innerHTML = `
     <div class="alert-banner-head">
@@ -6461,6 +6879,18 @@ function dismissAlerts() {
   alertsDismissed = true;
   const b = document.getElementById("alert-banner");
   b.style.display = "none";
+}
+
+async function ackRecurringCharge(chargeId) {
+  if (!chargeId || !USER_ID) return;
+  try {
+    await fetch(`${API}/recurring-expenses/${USER_ID}/charges/${chargeId}/ack`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+    });
+    sendRefresh();
+  } catch (_) {}
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -8108,6 +8538,24 @@ async function updateOverviewShortcuts(d) {
         .filter(g => (g.n_pending || 0) > 0)
         .reduce((s, g) => s + (g.remaining_amount || 0), 0);
       instEl.textContent = totalDevido > 0 ? _fmtBRL(totalDevido) : "Nada devido";
+    }
+  }
+
+  // Gastos fixos — soma dos recorrentes ativos. Pro-only: Free retorna 403 → mostra "Pro".
+  const fixedEl = document.getElementById("overview-fixed-stat");
+  if (fixedEl) {
+    let recs = _recurringCache;
+    if (!recs && USER_ID) {
+      try {
+        recs = await _fetchRecurring();
+        if (recs && !recs.pro_required) _recurringCache = recs;
+      } catch (_) { recs = null; }
+    }
+    if (recs && recs.pro_required) {
+      fixedEl.innerHTML = `<span style="color:var(--text-3);font-weight:500">🔒 Pro</span>`;
+    } else if (recs) {
+      const total = recs.filter(r => r.is_active).reduce((s, r) => s + (r.amount || 0), 0);
+      fixedEl.textContent = total > 0 ? `${_fmtBRL(total)}/mês` : "Nenhum";
     }
   }
 }

@@ -766,6 +766,37 @@ async def get_financial_data(
 
         cat_list.append(cat)
 
+    # Alertas de cobranças automáticas (recurring_charges) ainda não vistas.
+    try:
+        async with await db_connect() as _alert_conn:
+            async with _alert_conn.cursor() as _alert_cur:
+                await _alert_cur.execute(
+                    """
+                    select rc.id, rc.amount, rc.charged_at, rc.ym,
+                           r.name, r.payment_type, r.id as recurring_id
+                    from recurring_charges rc
+                    join recurring_expenses r on r.id = rc.recurring_id
+                    where rc.user_id = %s and rc.acknowledged = false
+                    order by rc.charged_at desc
+                    limit 10
+                    """,
+                    (user_id,),
+                )
+                for r in await _alert_cur.fetchall():
+                    alerts.append({
+                        "type":         "recurring_charged",
+                        "charge_id":    r["id"],
+                        "recurring_id": r["recurring_id"],
+                        "name":         r["name"],
+                        "amount":       float(r["amount"]),
+                        "payment_type": r["payment_type"],
+                        "ym":           r["ym"],
+                        "charged_at":   r["charged_at"].isoformat() if r["charged_at"] else None,
+                    })
+    except Exception:
+        # Tabela pode não existir ainda no init_db da primeira subida — silencia.
+        pass
+
     inc = monthly_map.get("receita", 0.0)
     exp = monthly_map.get("despesa", 0.0)
 
@@ -1067,6 +1098,14 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[investment_accrual] erro: {exc}", file=sys.stderr)
 
+    async def _recurring_charger():
+        try:
+            await asyncio.sleep(5)
+            from core.services.recurring_charger import run_recurring_charger_loop  # noqa: PLC0415
+            await run_recurring_charger_loop()
+        except Exception as exc:
+            print(f"[recurring_charger] erro: {exc}", file=sys.stderr)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -1100,6 +1139,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_engagement(), name="engagement"),
                 asyncio.create_task(_investment_accrual(), name="investment_accrual"),
                 asyncio.create_task(_account_deletion_worker(), name="account_deletion"),
+                asyncio.create_task(_recurring_charger(), name="recurring_charger"),
             ]
         )
     else:
@@ -5092,6 +5132,138 @@ async def adjust_balance_route(request: Request, user_id: int, payload: AdjustBa
     )
     _invalidate_dashboard_current_cache(user_id)
     return {"ok": True, "balance": float(new_bal), "delta": delta, "launch_id": launch_id}
+
+
+# ─── Recurring expenses / Gastos Fixos (Sprint 4) ────────────────────────────
+
+class RecurringCreatePayload(BaseModel):
+    name: str
+    amount: float
+    category: str
+    due_day: int
+    payment_type: str
+    card_id: int | None = None
+    is_essential: bool = False
+    notes: str | None = None
+
+
+class RecurringUpdatePayload(BaseModel):
+    name: str | None = None
+    amount: float | None = None
+    category: str | None = None
+    due_day: int | None = None
+    payment_type: str | None = None
+    card_id: int | None = None
+    is_essential: bool | None = None
+    is_active: bool | None = None
+    notes: str | None = None
+
+
+def _recurring_value_error(code: str) -> HTTPException:
+    msg = {
+        "NOME_INVALIDO": "Nome inválido.",
+        "VALOR_INVALIDO": "Valor deve ser maior que zero.",
+        "DIA_INVALIDO": "Dia do vencimento deve estar entre 1 e 31.",
+        "FORMA_PAGAMENTO_INVALIDA": "Forma de pagamento inválida (use 'account' ou 'credit_card').",
+        "CARTAO_OBRIGATORIO": "Cartão é obrigatório quando a forma de pagamento é cartão de crédito.",
+        "CARTAO_NAO_ENCONTRADO": "Cartão não encontrado.",
+        "RECORRENTE_NAO_ENCONTRADO": "Gasto fixo não encontrado.",
+    }
+    return HTTPException(status_code=400, detail=msg.get(code, code))
+
+
+@app.get("/recurring-expenses/{user_id}")
+async def recurring_list_route(request: Request, user_id: int, include_inactive: bool = False):
+    """Lista os gastos fixos do user. Pro-only."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "recurring_expenses")
+
+    from db.recurring import list_recurring_expenses
+
+    items = await asyncio.to_thread(list_recurring_expenses, user_id, include_inactive)
+    return {"ok": True, "recurring": items}
+
+
+@app.post("/recurring-expenses/{user_id}")
+async def recurring_create_route(request: Request, user_id: int, payload: RecurringCreatePayload):
+    """Cria um gasto fixo. Pro-only."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "recurring_expenses")
+
+    from db.recurring import create_recurring_expense
+
+    try:
+        item = await asyncio.to_thread(
+            create_recurring_expense,
+            user_id, payload.name, payload.amount, payload.category, payload.due_day,
+            payload.payment_type, payload.card_id, payload.is_essential, payload.notes,
+        )
+    except ValueError as exc:
+        raise _recurring_value_error(str(exc))
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "recurring": item}
+
+
+@app.patch("/recurring-expenses/{user_id}/{rec_id}")
+async def recurring_update_route(
+    request: Request, user_id: int, rec_id: int, payload: RecurringUpdatePayload
+):
+    """Edita um gasto fixo. Reajuste detectado quando amount muda."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "recurring_expenses")
+
+    from db.recurring import update_recurring_expense
+
+    try:
+        item = await asyncio.to_thread(
+            update_recurring_expense,
+            user_id, rec_id,
+            name=payload.name, amount=payload.amount, category=payload.category,
+            due_day=payload.due_day, payment_type=payload.payment_type, card_id=payload.card_id,
+            is_essential=payload.is_essential, is_active=payload.is_active, notes=payload.notes,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        if code == "RECORRENTE_NAO_ENCONTRADO":
+            raise HTTPException(status_code=404, detail="Gasto fixo não encontrado.")
+        raise _recurring_value_error(code)
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "recurring": item}
+
+
+@app.post("/recurring-expenses/{user_id}/charges/{charge_id}/ack")
+async def recurring_charge_ack_route(request: Request, user_id: int, charge_id: int):
+    """Marca uma cobrança automática como vista (some do banner)."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "recurring_expenses")
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE recurring_charges SET acknowledged=true "
+                "WHERE id=%s AND user_id=%s",
+                (charge_id, user_id),
+            )
+        await conn.commit()
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True}
+
+
+@app.delete("/recurring-expenses/{user_id}/{rec_id}")
+async def recurring_delete_route(request: Request, user_id: int, rec_id: int):
+    """Exclui um gasto fixo. Lançamentos passados ficam intactos."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "recurring_expenses")
+
+    from db.recurring import delete_recurring_expense
+
+    try:
+        await asyncio.to_thread(delete_recurring_expense, user_id, rec_id)
+    except ValueError as exc:
+        if str(exc) == "RECORRENTE_NAO_ENCONTRADO":
+            raise HTTPException(status_code=404, detail="Gasto fixo não encontrado.")
+        raise _recurring_value_error(str(exc))
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True}
 
 
 # ─── Investment routes ───────────────────────────────────────────────────────
