@@ -483,7 +483,9 @@ function fRelTime(v) {
   return `${Math.floor(diff/86400)}d atrás`;
 }
 function esc(v) {
-  return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(v??'')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 function getCookie(name) {
   return document.cookie.split('; ').find(row => row.startsWith(`${name}=`))?.split('=')[1] || '';

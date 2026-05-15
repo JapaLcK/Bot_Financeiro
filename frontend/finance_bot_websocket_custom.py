@@ -1604,26 +1604,7 @@ def _extract_bearer_token(request: Request) -> str | None:
     return token.strip()
 
 
-def _dashboard_dev_bypass_user_id() -> int | None:
-    """
-    DEV ONLY: quando DASHBOARD_DEV_BYPASS=1, ignora a autenticação do dashboard
-    e retorna DASHBOARD_DEV_USER_ID. NUNCA habilitar em produção.
-    """
-    if (os.getenv("DASHBOARD_DEV_BYPASS") or "").strip() != "1":
-        return None
-    raw = (os.getenv("DASHBOARD_DEV_USER_ID") or "").strip()
-    if not raw:
-        return None
-    try:
-        return int(raw)
-    except ValueError:
-        return None
-
-
 def _resolve_dashboard_user_id(request: Request) -> int:
-    bypass_uid = _dashboard_dev_bypass_user_id()
-    if bypass_uid is not None:
-        return bypass_uid
     token = (
         _extract_bearer_token(request)
         or (request.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
@@ -1644,9 +1625,6 @@ def _resolve_dashboard_user_id(request: Request) -> int:
 
 
 def _authorize_dashboard_access(request: Request, user_id: int) -> int:
-    bypass_uid = _dashboard_dev_bypass_user_id()
-    if bypass_uid is not None:
-        return int(user_id)
     current_user_id = _resolve_dashboard_user_id(request)
     if current_user_id != int(user_id):
         raise HTTPException(status_code=403, detail="Acesso negado para este usuário.")
@@ -1935,7 +1913,7 @@ async def auth_forgot_password(request: Request, body: EmailBody):
 
     token = create_password_reset_token(body.email)
     if token:
-        reset_url = f"{DASHBOARD_URL}/reset-password?token={token}"
+        reset_url = f"{DASHBOARD_URL}/reset-password#token={token}"
         send_password_reset_email(body.email.strip().lower(), reset_url)
 
     # sempre retorna 200 — não revela se o e-mail existe ou não
@@ -5791,7 +5769,7 @@ async def security_password_reset_route(request: Request, user_id: int):
     token = await asyncio.to_thread(create_password_reset_token, email)
     if not token:
         raise HTTPException(status_code=404, detail="Conta de e-mail não encontrada.")
-    reset_url = f"{DASHBOARD_URL}/reset-password?token={token}"
+    reset_url = f"{DASHBOARD_URL}/reset-password#token={token}"
     sent = await asyncio.to_thread(send_password_reset_email, email.strip().lower(), reset_url)
     if not sent:
         raise HTTPException(status_code=500, detail="Não foi possível enviar o e-mail de reset.")
@@ -6074,19 +6052,17 @@ async def open_finance_disconnect_route(request: Request, user_id: int):
 
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(ws: WebSocket, user_id: int):
-    bypass_uid = _dashboard_dev_bypass_user_id()
-    if bypass_uid is None:
-        token = (ws.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
-        payload = decode_dashboard_token_full(token)
-        if not payload or int(payload["user_id"]) != int(user_id):
+    token = (ws.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
+    payload = decode_dashboard_token_full(token)
+    if not payload or int(payload["user_id"]) != int(user_id):
+        await ws.close(code=1008)
+        return
+    jti = payload.get("jti")
+    if jti:
+        session = await asyncio.to_thread(get_active_session, jti)
+        if not session or int(session.get("user_id") or 0) != int(user_id):
             await ws.close(code=1008)
             return
-        jti = payload.get("jti")
-        if jti:
-            session = await asyncio.to_thread(get_active_session, jti)
-            if not session or int(session.get("user_id") or 0) != int(user_id):
-                await ws.close(code=1008)
-                return
 
     now = datetime.now(timezone.utc)
     await manager.connect(ws, user_id, now.year, now.month)

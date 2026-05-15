@@ -700,7 +700,7 @@ function renderGreeting(snapshot, email, displayName) {
     const ago = timeAgo(last.criado_em);
     const tipoLbl = last.tipo === "receita" ? "Receita" : last.tipo === "despesa" ? "Despesa" : last.tipo;
     const desc = last.nota || last.alvo || "—";
-    sub.innerHTML = `<span class="live-dot">●</span> Última atividade: <strong>${tipoLbl}</strong> · ${desc} · ${ago}`;
+    sub.innerHTML = `<span class="live-dot">●</span> Última atividade: <strong>${tipoLbl}</strong> · ${escapeHtml(desc)} · ${ago}`;
   } else {
     sub.innerHTML = `<span class="live-dot">●</span> Que tal começar? Tente <code style="background:rgba(255,255,255,.08);padding:1px 6px;border-radius:4px">gastei 30 mercado</code> no WhatsApp.`;
   }
@@ -753,7 +753,7 @@ function renderStats(snapshot, history) {
     billEl.textContent = fmtBRL(next.due_amount || 0);
     if (due) {
       const dueStr = due.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"});
-      billSubEl.innerHTML = `${next.name} · vence <strong>${dueStr}</strong>`;
+      billSubEl.innerHTML = `${escapeHtml(next.name)} · vence <strong>${dueStr}</strong>`;
     } else {
       billSubEl.textContent = next.name || "—";
     }
@@ -804,7 +804,7 @@ function renderAlerts(snapshot) {
     <div class="alert-body">
       <div class="alert-icon">${isOverdue ? "🚨" : "⚠️"}</div>
       <div class="alert-text">
-        Fatura <strong>${c.name}</strong> de ${monthName} ${dueLabel} — ${fmtBRL(c.due_amount || 0)} em aberto
+        Fatura <strong>${escapeHtml(c.name)}</strong> de ${monthName} ${dueLabel} — ${fmtBRL(c.due_amount || 0)} em aberto
       </div>
     </div>
     <div class="alert-actions">
