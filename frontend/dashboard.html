@@ -1627,7 +1627,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
     <span class="sn-icon">📝</span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="goals" onclick="navigateTo('goals')">
-    <span class="sn-icon">🎯</span><span class="sn-label">Metas</span><span class="sn-tag new">novo</span>
+    <span class="sn-icon">🎯</span><span class="sn-label">Caixinhas e metas</span><span class="sn-tag new">novo</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="categories" onclick="navigateTo('categories')">
     <span class="sn-icon">🏷️</span><span class="sn-label">Categorias</span>
@@ -1748,8 +1748,8 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
       <div class="mock-card" style="padding:14px 16px;display:flex;align-items:center;gap:12px" onmouseover="this.style.borderColor='rgba(52,211,153,.4)'" onmouseout="this.style.borderColor=''">
         <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#10b981,#047857);display:flex;align-items:center;justify-content:center;font-size:1rem">🎯</div>
         <div style="flex:1;min-width:0">
-          <div style="font-size:.78rem;color:var(--text-3)">Metas</div>
-          <div style="font-size:.95rem;color:var(--text);font-weight:700">17% do total</div>
+          <div style="font-size:.78rem;color:var(--text-3)">Caixinhas e metas</div>
+          <div id="overview-goals-stat" style="font-size:.95rem;color:var(--text);font-weight:700">—</div>
         </div>
         <span style="color:var(--text-3);font-size:.85rem">→</span>
       </div>
@@ -2185,98 +2185,13 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 
   <div id="goals-view" class="dash-view">
     <div class="mock-header">
-      <p class="section-title" style="margin:0">Metas</p>
-      <button class="mock-cta">+ Nova meta</button>
+      <p class="section-title" style="margin:0">Caixinhas e metas</p>
+      <button class="mock-cta" onclick="openGoalEditModal()">+ Nova</button>
     </div>
 
-    <div class="stats-row">
-      <div class="stat-tile">
-        <div class="stat-label">Metas ativas</div>
-        <div class="stat-value">4</div>
-        <div class="stat-delta" style="color:var(--text-3)">2 no prazo • 1 atrasada</div>
-      </div>
-      <div class="stat-tile">
-        <div class="stat-label">Total guardado</div>
-        <div class="stat-value" style="color:var(--green)">R$ 3.840,00</div>
-        <div class="stat-delta up">+R$ 280 este mês</div>
-      </div>
-      <div class="stat-tile">
-        <div class="stat-label">Total alvo</div>
-        <div class="stat-value">R$ 22.500,00</div>
-        <div class="stat-delta" style="color:var(--text-3)">17% completo</div>
-      </div>
-      <div class="stat-tile">
-        <div class="stat-label">Próximo aporte</div>
-        <div class="stat-value">R$ 200,00</div>
-        <div class="stat-delta" style="color:var(--text-3)">automático • 05/06</div>
-      </div>
-    </div>
+    <div id="goals-stats" class="stats-row"></div>
 
-    <div class="mock-grid cols-2">
-      <div class="goal-card">
-        <div class="goal-ring">
-          <svg width="78" height="78" viewBox="0 0 78 78">
-            <circle class="ring-bg" cx="39" cy="39" r="33" fill="none" stroke-width="7"/>
-            <circle class="ring-fg" cx="39" cy="39" r="33" fill="none" stroke="#34d399" stroke-width="7" stroke-dasharray="207.3" stroke-dashoffset="124.4"/>
-          </svg>
-          <div class="ring-pct">40%</div>
-        </div>
-        <div class="goal-info">
-          <div class="goal-name">🛟 Reserva de emergência</div>
-          <div class="goal-amt">R$ 2.400,00 / R$ 6.000,00</div>
-          <div class="bar-track" style="margin-top:6px"><div class="bar-fill green" style="width:40%"></div></div>
-          <div class="goal-deadline">Vinculada à caixinha "Reserva" • prazo: dez/2026</div>
-        </div>
-      </div>
-
-      <div class="goal-card">
-        <div class="goal-ring">
-          <svg width="78" height="78" viewBox="0 0 78 78">
-            <circle class="ring-bg" cx="39" cy="39" r="33" fill="none" stroke-width="7"/>
-            <circle class="ring-fg" cx="39" cy="39" r="33" fill="none" stroke="#60a5fa" stroke-width="7" stroke-dasharray="207.3" stroke-dashoffset="160.7"/>
-          </svg>
-          <div class="ring-pct">23%</div>
-        </div>
-        <div class="goal-info">
-          <div class="goal-name">✈️ Viagem Japão</div>
-          <div class="goal-amt">R$ 920,00 / R$ 4.000,00</div>
-          <div class="bar-track" style="margin-top:6px"><div class="bar-fill blue" style="width:23%"></div></div>
-          <div class="goal-deadline">Vinculada à caixinha "Japão" • prazo: out/2026</div>
-        </div>
-      </div>
-
-      <div class="goal-card">
-        <div class="goal-ring">
-          <svg width="78" height="78" viewBox="0 0 78 78">
-            <circle class="ring-bg" cx="39" cy="39" r="33" fill="none" stroke-width="7"/>
-            <circle class="ring-fg" cx="39" cy="39" r="33" fill="none" stroke="#a78bfa" stroke-width="7" stroke-dasharray="207.3" stroke-dashoffset="166.0"/>
-          </svg>
-          <div class="ring-pct">20%</div>
-        </div>
-        <div class="goal-info">
-          <div class="goal-name">💻 Trocar o notebook</div>
-          <div class="goal-amt">R$ 500,00 / R$ 2.500,00</div>
-          <div class="bar-track" style="margin-top:6px"><div class="bar-fill purple" style="width:20%"></div></div>
-          <div class="goal-deadline">Sem caixinha • prazo: fev/2027</div>
-        </div>
-      </div>
-
-      <div class="goal-card">
-        <div class="goal-ring">
-          <svg width="78" height="78" viewBox="0 0 78 78">
-            <circle class="ring-bg" cx="39" cy="39" r="33" fill="none" stroke-width="7"/>
-            <circle class="ring-fg" cx="39" cy="39" r="33" fill="none" stroke="#fbbf24" stroke-width="7" stroke-dasharray="207.3" stroke-dashoffset="187.5"/>
-          </svg>
-          <div class="ring-pct">10%</div>
-        </div>
-        <div class="goal-info">
-          <div class="goal-name">🏠 Entrada do apê</div>
-          <div class="goal-amt">R$ 1.020,00 / R$ 10.000,00</div>
-          <div class="bar-track" style="margin-top:6px"><div class="bar-fill yellow" style="width:10%"></div></div>
-          <div class="goal-deadline" style="color:#f87171">⚠️ Ritmo atual chega só em mai/2028 — prazo era dez/2027</div>
-        </div>
-      </div>
-    </div>
+    <div id="goals-grid" class="mock-grid cols-2"></div>
   </div>
 
   <div id="categories-view" class="dash-view">
@@ -3088,6 +3003,34 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 
 <script>
 /* ═══════════════════════════════════════════════════════════════════════
+   Tradução de mensagens nativas de validação HTML5 (sem inline)
+═══════════════════════════════════════════════════════════════════════ */
+document.addEventListener("invalid", (e) => {
+  const el = e.target;
+  if (!(el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement)) return;
+  const v = el.validity;
+  let msg = "";
+  if (v.valueMissing) msg = "Preencha este campo.";
+  else if (v.typeMismatch && el.type === "email") msg = "Digite um email válido.";
+  else if (v.typeMismatch && el.type === "url") msg = "Digite uma URL válida.";
+  else if (v.typeMismatch) msg = "Formato inválido.";
+  else if (v.rangeUnderflow) msg = `Valor mínimo: ${el.min}.`;
+  else if (v.rangeOverflow) msg = `Valor máximo: ${el.max}.`;
+  else if (v.tooShort) msg = `Mínimo de ${el.minLength} caracteres.`;
+  else if (v.tooLong) msg = `Máximo de ${el.maxLength} caracteres.`;
+  else if (v.patternMismatch) msg = el.title || "Formato inválido.";
+  else if (v.stepMismatch) msg = "Use um valor com a precisão correta.";
+  else if (v.badInput) msg = "Entrada inválida.";
+  el.setCustomValidity(msg);
+}, true);
+document.addEventListener("input", (e) => {
+  if (e.target && typeof e.target.setCustomValidity === "function") e.target.setCustomValidity("");
+}, true);
+document.addEventListener("change", (e) => {
+  if (e.target && typeof e.target.setCustomValidity === "function") e.target.setCustomValidity("");
+}, true);
+
+/* ═══════════════════════════════════════════════════════════════════════
    CONFIG
 ═══════════════════════════════════════════════════════════════════════ */
 const params    = new URLSearchParams(window.location.search);
@@ -3471,6 +3414,7 @@ function navigateTo(view) {
   if (view === "categories") loadCategoriesView();
   if (view === "budgets") loadBudgetsView();
   if (view === "fixed") loadFixedView();
+  if (view === "goals") loadGoalsView();
 }
 
 // ── Cartões (view dinâmica conectada ao backend) ──────────────────────
@@ -5141,6 +5085,431 @@ function alertModal(message, opts = {}) {
   okBtn.className = "btn-save";
   document.getElementById("generic-confirm-overlay").classList.add("open");
   return new Promise(resolve => { _genericModalResolver = () => resolve(undefined); _genericModalResolver = resolve; });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Metas (Sprint 5 — cada caixinha pode ter target_amount/date opcional)
+// ══════════════════════════════════════════════════════════════════════
+
+const GOAL_EMOJI_OPTIONS = [
+  "🎯","💰","🛟","✈️","🏠","💻","📱","🚗","💍","🎓",
+  "🎂","👶","🐶","💼","💎","🎮","📸","🎸","🛏️","🏖️",
+];
+const GOAL_COLOR_OPTIONS = [
+  "#34d399","#3b82f6","#7c3aed","#fbbf24","#ec4899",
+  "#06b6d4","#f97316","#a855f7","#10b981","#ef4444",
+];
+
+let _goalsCache = null;
+let _goalsFetchInFlight = null;
+
+async function _fetchGoalsStatus() {
+  if (_goalsFetchInFlight) return _goalsFetchInFlight;
+  _goalsFetchInFlight = (async () => {
+    try {
+      const resp = await fetch(`${API}/goals/${USER_ID}/status`, {
+        credentials: "same-origin",
+        headers: csrfHeaders(),
+      });
+      if (!resp.ok) {
+        const txt = await resp.text();
+        let detail = txt;
+        try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+        throw new Error(`(HTTP ${resp.status}) ${detail}`);
+      }
+      const data = await resp.json();
+      return data.goals || [];
+    } finally {
+      _goalsFetchInFlight = null;
+    }
+  })();
+  return _goalsFetchInFlight;
+}
+
+async function loadGoalsView(forceFresh = false) {
+  const stats = document.getElementById("goals-stats");
+  const grid = document.getElementById("goals-grid");
+  if (!stats || !grid) return;
+  if (!USER_ID) { setTimeout(() => loadGoalsView(forceFresh), 300); return; }
+
+  if (_goalsCache && !forceFresh) {
+    _renderGoalsView(_goalsCache);
+    _fetchGoalsStatus().then(fresh => {
+      if (fresh) { _goalsCache = fresh; _renderGoalsView(fresh); }
+    }).catch(() => {});
+    return;
+  }
+
+  stats.innerHTML = `
+    <div class="stat-tile"><div class="stat-label">Metas ativas</div><div class="sk sk-h2"></div></div>
+    <div class="stat-tile"><div class="stat-label">Total guardado</div><div class="sk sk-h2"></div></div>
+    <div class="stat-tile"><div class="stat-label">Total alvo</div><div class="sk sk-h2"></div></div>
+    <div class="stat-tile"><div class="stat-label">Progresso geral</div><div class="sk sk-h2"></div></div>
+  `;
+  grid.innerHTML = "";
+
+  try {
+    const data = await _fetchGoalsStatus();
+    _goalsCache = data;
+    _renderGoalsView(data);
+  } catch (err) {
+    grid.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:30px;color:var(--red)">Erro: ${escapeHtmlSafe(String(err.message || err))}</div>`;
+  }
+}
+
+function _renderGoalsView(goals) {
+  const stats = document.getElementById("goals-stats");
+  const grid = document.getElementById("goals-grid");
+  if (!stats || !grid) return;
+
+  const list = goals || [];
+  const goalsWithTarget = list.filter(g => g.is_goal);
+  const pocketsOnly = list.filter(g => !g.is_goal);
+  const onTrack = goalsWithTarget.filter(g => g.indicator === "on_track" || g.indicator === "ahead").length;
+  const behind = goalsWithTarget.filter(g => g.indicator === "behind").length;
+  const totalSaved = list.reduce((s, g) => s + (g.balance || 0), 0);
+  const totalTarget = goalsWithTarget.reduce((s, g) => s + (g.target_amount || 0), 0);
+  const overallPct = totalTarget > 0
+    ? (goalsWithTarget.reduce((s, g) => s + (g.balance || 0), 0) / totalTarget * 100)
+    : 0;
+
+  stats.innerHTML = `
+    <div class="stat-tile" style="animation-delay:0ms">
+      <div class="stat-label">Metas ativas</div>
+      <div class="stat-value">${goalsWithTarget.length}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${onTrack} no prazo${behind ? " · " + behind + " atrasada" + (behind === 1 ? "" : "s") : ""}${pocketsOnly.length ? " · " + pocketsOnly.length + " sem meta" : ""}</div>
+    </div>
+    <div class="stat-tile" style="animation-delay:60ms">
+      <div class="stat-label">Total guardado</div>
+      <div class="stat-value" style="color:var(--green)">${_fmtBRL(totalSaved)}</div>
+      <div class="stat-delta" style="color:var(--text-3)">em ${list.length} caixinha${list.length === 1 ? "" : "s"}</div>
+    </div>
+    <div class="stat-tile" style="animation-delay:120ms">
+      <div class="stat-label">Total alvo</div>
+      <div class="stat-value">${_fmtBRL(totalTarget)}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${overallPct.toFixed(0)}% completo</div>
+    </div>
+    <div class="stat-tile" style="animation-delay:180ms">
+      <div class="stat-label">Próximo prazo</div>
+      <div class="stat-value" style="font-size:1.15rem">${_nextGoalDeadline(goalsWithTarget) || "—"}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${goalsWithTarget.length ? "vencimento mais próximo" : "sem metas"}</div>
+    </div>
+  `;
+
+  if (!list.length) {
+    grid.innerHTML = `
+      <div class="empty" style="grid-column:1/-1;padding:50px;text-align:center;color:var(--text-3);background:var(--glass-bg);border:1px dashed var(--glass-border);border-radius:var(--radius)">
+        <div style="font-size:2.5rem;margin-bottom:10px">🎯</div>
+        <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Sem caixinhas ainda</div>
+        <div style="margin-bottom:14px">Crie uma caixinha pra guardar dinheiro (com ou sem meta).</div>
+        <button class="mock-cta" onclick="openGoalEditModal()">+ Criar</button>
+      </div>`;
+    return;
+  }
+  // Render: metas com target primeiro, depois caixinhas sem meta
+  const ordered = [...goalsWithTarget, ...pocketsOnly];
+  grid.innerHTML = ordered.map((g, i) => g.is_goal
+    ? _renderGoalCard(g, i)
+    : _renderPocketOnlyCard(g, i)
+  ).join("");
+}
+
+function _renderPocketOnlyCard(p, idx = 0) {
+  const emoji = p.emoji || "🐷";
+  const color = p.color || "#7c3aed";
+  const safeJson = JSON.stringify(p).replace(/"/g, "&quot;");
+  return `
+    <div class="goal-card" style="animation-delay:${idx * 80}ms;cursor:pointer" onclick="openGoalEditModal(${safeJson})">
+      <div class="goal-ring">
+        <div style="width:78px;height:78px;border-radius:50%;background:${color}22;display:flex;align-items:center;justify-content:center;font-size:1.6rem">${emoji}</div>
+      </div>
+      <div class="goal-info">
+        <div class="goal-name">${emoji} ${escapeHtmlSafe(p.name)}</div>
+        <div class="goal-amt">${_fmtBRL(p.balance || 0)} guardado</div>
+        <div class="goal-deadline" style="color:var(--text-3)">Caixinha sem meta — depósitos livres</div>
+        ${p.description ? `<div class="goal-deadline" style="color:var(--text-3);font-style:italic">${escapeHtmlSafe(p.description)}</div>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function _nextGoalDeadline(goals) {
+  const withDate = goals.filter(g => g.target_date).sort((a, b) => a.target_date.localeCompare(b.target_date));
+  if (!withDate.length) return null;
+  const next = withDate[0];
+  try {
+    const [y, m] = next.target_date.split("-").map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString("pt-BR", { month: "short", year: "numeric" });
+  } catch (_) { return next.target_date; }
+}
+
+function _renderGoalCard(g, idx = 0) {
+  const pct = Math.min(100, g.pct_complete || 0);
+  const color = g.color || GOAL_COLOR_OPTIONS[idx % GOAL_COLOR_OPTIONS.length];
+  const emoji = g.emoji || "🎯";
+  const circumference = 207.3;
+  const offset = circumference * (1 - pct / 100);
+
+  let deadlineText = "Sem prazo definido";
+  let deadlineColor = "var(--text-3)";
+  if (g.target_date) {
+    const [y, m] = g.target_date.split("-").map(Number);
+    const monthYear = new Date(y, m - 1, 1).toLocaleDateString("pt-BR", { month: "short", year: "numeric" });
+    deadlineText = `Prazo: ${monthYear}`;
+  }
+
+  let alertText = "";
+  if (g.indicator === "behind" && g.projected_months) {
+    const today = new Date();
+    const proj = new Date(today.getFullYear(), today.getMonth() + Math.ceil(g.projected_months), 1);
+    const projStr = proj.toLocaleDateString("pt-BR", { month: "short", year: "numeric" });
+    alertText = `<div class="goal-deadline" style="color:#f87171">⚠️ Ritmo atual chega só em ${projStr}${g.target_date ? " — prazo era " + deadlineText.replace("Prazo: ", "") : ""}</div>`;
+  } else if (g.indicator === "tight") {
+    alertText = `<div class="goal-deadline" style="color:#fbbf24">🟡 Ritmo apertado — pode atrasar</div>`;
+  } else if (g.indicator === "ahead") {
+    alertText = `<div class="goal-deadline" style="color:#34d399">🚀 Adiantado — no melhor caminho</div>`;
+  } else if (g.indicator === "on_track") {
+    alertText = `<div class="goal-deadline" style="color:#34d399">🟢 No prazo</div>`;
+  } else if (g.indicator === "achieved") {
+    alertText = `<div class="goal-deadline" style="color:#34d399">✓ Meta atingida</div>`;
+  }
+
+  const safeJson = JSON.stringify(g).replace(/"/g, "&quot;");
+  return `
+    <div class="goal-card" style="animation-delay:${idx * 80}ms;cursor:pointer" onclick="openGoalEditModal(${safeJson})">
+      <div class="goal-ring">
+        <svg width="78" height="78" viewBox="0 0 78 78">
+          <circle class="ring-bg" cx="39" cy="39" r="33" fill="none" stroke-width="7"/>
+          <circle class="ring-fg" cx="39" cy="39" r="33" fill="none" stroke="${color}" stroke-width="7" stroke-dasharray="${circumference}" stroke-dashoffset="${offset.toFixed(1)}"/>
+        </svg>
+        <div class="ring-pct">${pct.toFixed(0)}%</div>
+      </div>
+      <div class="goal-info">
+        <div class="goal-name">${emoji} ${escapeHtmlSafe(g.name)}</div>
+        <div class="goal-amt">${_fmtBRL(g.balance || 0)} / ${_fmtBRL(g.target_amount || 0)}</div>
+        <div class="bar-track" style="margin-top:6px"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
+        <div class="goal-deadline" style="color:${deadlineColor}">${deadlineText}${g.days_left !== null ? " · " + (g.days_left >= 0 ? "em " + g.days_left + " dias" : "vencido há " + (-g.days_left) + " dias") : ""}</div>
+        ${alertText}
+      </div>
+    </div>
+  `;
+}
+
+// ── Modal Meta ────────────────────────────────────────────────────────
+
+let _goalEditState = { pocket_id: null, emoji: "🎯", color: "#7c3aed" };
+let _goalSaving = false;
+
+function _ensureGoalModal() {
+  if (document.getElementById("goal-edit-overlay")) return;
+  const html = `
+    <div class="overlay" id="goal-edit-overlay">
+      <div class="modal wide">
+        <h3 id="goal-edit-title">Nova meta ou caixinha</h3>
+        <p class="msub" style="font-size:.78rem;margin-bottom:14px">
+          Toda meta vira uma caixinha. Se você deixar o <strong>valor alvo vazio</strong>, vira só uma caixinha pra guardar dinheiro sem objetivo definido.
+        </p>
+        <form id="goal-edit-form" onsubmit="event.preventDefault(); saveGoal();">
+          <div class="invest-form">
+            <div class="form-row">
+              <div class="field" style="flex:2">
+                <label for="goal-name">Nome *</label>
+                <input type="text" id="goal-name" required maxlength="80" placeholder="Ex: Viagem Japão, Reserva..." />
+              </div>
+              <div class="field" style="flex:1">
+                <label for="goal-target">Valor alvo (R$)</label>
+                <input type="number" id="goal-target" min="0.01" step="0.01" placeholder="vazio = sem meta" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="goal-target-date">Prazo (opcional)</label>
+                <input type="date" id="goal-target-date" />
+              </div>
+              <div class="field">
+                <label>Status</label>
+                <select id="goal-status">
+                  <option value="active">Ativa</option>
+                  <option value="achieved">Concluída</option>
+                  <option value="abandoned">Abandonada</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label>Emoji</label>
+              <div id="goal-emoji-picker" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+            </div>
+            <div class="field">
+              <label>Cor</label>
+              <div id="goal-color-picker" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+            </div>
+            <div class="field">
+              <label for="goal-description">Descrição (opcional)</label>
+              <input type="text" id="goal-description" maxlength="200" placeholder="Anotações..." />
+            </div>
+          </div>
+          <div class="modal-acts" style="margin-top:18px;display:flex;gap:8px;align-items:center">
+            <button type="button" class="inst-delete-btn" id="goal-delete-btn" style="display:none" onclick="deleteGoalFromModal()">🗑 Excluir</button>
+            <span style="flex:1"></span>
+            <button type="button" class="btn-cancel" onclick="closeGoalEditModal()">Cancelar</button>
+            <button type="submit" class="btn-save">Salvar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML("beforeend", html);
+  document.getElementById("goal-edit-overlay").addEventListener("click", e => {
+    if (e.target === e.currentTarget) closeGoalEditModal();
+  });
+}
+
+function _renderGoalPickers() {
+  const ePick = document.getElementById("goal-emoji-picker");
+  const cPick = document.getElementById("goal-color-picker");
+  ePick.innerHTML = GOAL_EMOJI_OPTIONS.map(e => {
+    const sel = e === _goalEditState.emoji;
+    return `<button type="button" onclick="_setGoalEmoji('${e}')"
+      style="width:36px;height:36px;border-radius:8px;font-size:1.2rem;cursor:pointer;
+             border:2px solid ${sel ? "#fff" : "transparent"};
+             background:${sel ? "rgba(124,58,237,.25)" : "var(--glass-bg)"};
+             display:flex;align-items:center;justify-content:center">${e}</button>`;
+  }).join("");
+  cPick.innerHTML = GOAL_COLOR_OPTIONS.map(c => {
+    const sel = c === _goalEditState.color;
+    return `<button type="button" onclick="_setGoalColor('${c}')"
+      style="width:32px;height:32px;border-radius:8px;cursor:pointer;
+             border:2px solid ${sel ? "#fff" : "transparent"};
+             background:${c};
+             box-shadow:${sel ? "0 0 0 2px rgba(124,58,237,.5)" : "none"}"></button>`;
+  }).join("");
+}
+function _setGoalEmoji(e) { _goalEditState.emoji = e; _renderGoalPickers(); }
+function _setGoalColor(c) { _goalEditState.color = c; _renderGoalPickers(); }
+
+function openGoalEditModal(goal) {
+  _ensureGoalModal();
+  const isEdit = !!(goal && goal.id);
+  _goalEditState = {
+    pocket_id: isEdit ? goal.id : null,
+    emoji: isEdit ? (goal.emoji || "🎯") : "🎯",
+    color: isEdit ? (goal.color || "#7c3aed") : "#7c3aed",
+    original_name: isEdit ? goal.name : null,
+  };
+  document.getElementById("goal-edit-title").textContent = isEdit ? "Editar meta" : "Nova meta";
+  document.getElementById("goal-name").value = isEdit ? goal.name : "";
+  document.getElementById("goal-target").value = isEdit ? Number(goal.target_amount).toFixed(2) : "";
+  document.getElementById("goal-target-date").value = isEdit && goal.target_date ? goal.target_date : "";
+  document.getElementById("goal-status").value = isEdit ? (goal.status || "active") : "active";
+  document.getElementById("goal-description").value = isEdit ? (goal.description || "") : "";
+  document.getElementById("goal-delete-btn").style.display = isEdit ? "" : "none";
+  _renderGoalPickers();
+  document.getElementById("goal-edit-overlay").classList.add("open");
+  setTimeout(() => document.getElementById("goal-name").focus(), 50);
+}
+
+function closeGoalEditModal() {
+  document.getElementById("goal-edit-overlay")?.classList.remove("open");
+}
+
+async function saveGoal() {
+  if (_goalSaving) return;
+  const targetRaw = document.getElementById("goal-target").value.trim();
+  const hasTarget = targetRaw !== "";
+  const targetVal = hasTarget ? parseFloat(targetRaw) : null;
+  const payload = {
+    name: document.getElementById("goal-name").value.trim(),
+    description: document.getElementById("goal-description").value.trim() || null,
+    target_amount: hasTarget ? targetVal : null,
+    target_date: document.getElementById("goal-target-date").value || null,
+    emoji: _goalEditState.emoji,
+    color: _goalEditState.color,
+    status: document.getElementById("goal-status").value,
+    clear_target: !hasTarget,
+  };
+  if (!payload.name) { await alertModal("Digite um nome.", { title: "Nome obrigatório" }); return; }
+  if (hasTarget && (!targetVal || targetVal <= 0)) {
+    await alertModal("Valor alvo deve ser maior que zero ou deixe vazio pra criar só uma caixinha.", { title: "Valor inválido" });
+    return;
+  }
+  _goalSaving = true;
+  const isEdit = !!_goalEditState.pocket_id;
+  closeGoalEditModal();
+  try {
+    let pocketId = _goalEditState.pocket_id;
+    if (!isEdit) {
+      // Criar caixinha primeiro
+      const r = await fetch(`${API}/pockets/${USER_ID}`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: csrfHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ name: payload.name, description: payload.description || null }),
+      });
+      if (!r.ok) {
+        const txt = await r.text();
+        let detail = txt;
+        try {
+          const parsed = JSON.parse(txt);
+          if (parsed.detail?.error === "pro_required") {
+            await alertModal("Você atingiu o limite de caixinhas do Free. Pro libera ilimitado.", { title: "Recurso Pro" });
+            openGoalEditModal({ id: null, ...payload });
+            return;
+          }
+          detail = parsed.detail || txt;
+        } catch(_) {}
+        throw new Error(detail);
+      }
+      const data = await r.json();
+      pocketId = data.pocket?.id;
+    }
+    // Agora PATCH com metadata da meta
+    const metaResp = await fetch(`${API}/pockets/${USER_ID}/${pocketId}/meta`, {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+    });
+    if (!metaResp.ok) throw new Error(await metaResp.text());
+    showToast(isEdit ? "✓ Meta atualizada" : "✓ Meta criada");
+    _goalsCache = null;
+    loadGoalsView(true);
+    sendRefresh();
+  } catch (err) {
+    openGoalEditModal({ id: _goalEditState.pocket_id, ...payload });
+    await alertModal(String(err.message || err), { title: "Erro" });
+  } finally {
+    _goalSaving = false;
+  }
+}
+
+async function deleteGoalFromModal() {
+  if (!_goalEditState.pocket_id) return;
+  const ok = await confirmModal(
+    "Excluir essa meta? A caixinha também será excluída se estiver vazia. Se tiver saldo, esvazie primeiro.",
+    { title: "Excluir meta", okText: "Excluir", danger: true },
+  );
+  if (!ok) return;
+  try {
+    // Reusa o endpoint de delete de pocket — exige saldo zero
+    const r = await fetch(`${API}/pockets/${USER_ID}/${encodeURIComponent(_goalEditState.original_name || "")}`, {
+      method: "DELETE",
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+    });
+    if (!r.ok) {
+      const txt = await r.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      throw new Error(detail);
+    }
+    closeGoalEditModal();
+    showToast("✓ Meta excluída");
+    _goalsCache = null;
+    await loadGoalsView(true);
+    sendRefresh();
+  } catch (err) {
+    await alertModal(String(err.message || err), { title: "Erro" });
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -8538,6 +8907,26 @@ async function updateOverviewShortcuts(d) {
         .filter(g => (g.n_pending || 0) > 0)
         .reduce((s, g) => s + (g.remaining_amount || 0), 0);
       instEl.textContent = totalDevido > 0 ? _fmtBRL(totalDevido) : "Nada devido";
+    }
+  }
+
+  // Caixinhas e metas — total guardado. Se tem metas, mostra também % completo.
+  const goalsEl = document.getElementById("overview-goals-stat");
+  if (goalsEl) {
+    const pockets = (d?.pockets || []);
+    if (!pockets.length) {
+      goalsEl.textContent = "Nenhuma";
+    } else {
+      const totalSaved = pockets.reduce((s, p) => s + (p.balance || 0), 0);
+      const withTarget = pockets.filter(p => p.target_amount != null && p.target_amount > 0);
+      if (withTarget.length > 0) {
+        const totalTarget = withTarget.reduce((s, p) => s + (p.target_amount || 0), 0);
+        const totalInGoals = withTarget.reduce((s, p) => s + (p.balance || 0), 0);
+        const pct = totalTarget > 0 ? Math.round(totalInGoals / totalTarget * 100) : 0;
+        goalsEl.innerHTML = `${_fmtBRL(totalSaved)} <span style="font-size:.72rem;color:var(--text-3);font-weight:500">· ${pct}% das metas</span>`;
+      } else {
+        goalsEl.textContent = `${_fmtBRL(totalSaved)} guardados`;
+      }
     }
   }
 

@@ -35,6 +35,16 @@ def init_db():
           unique(user_id, name)
         )
         """,
+
+        # Sprint 5 — Metas: cada caixinha pode (opcionalmente) virar uma meta
+        # com target_amount/target_date + emoji/color/status. Sem target = só
+        # guardar dinheiro sem objetivo. Filtro `target_amount IS NOT NULL` na
+        # view Metas, todas aparecem na view Caixinhas.
+        """alter table pockets add column if not exists target_amount numeric""",
+        """alter table pockets add column if not exists target_date date""",
+        """alter table pockets add column if not exists emoji text""",
+        """alter table pockets add column if not exists color text""",
+        """alter table pockets add column if not exists status text not null default 'active'""",
         """
         create table if not exists investments (
           id bigserial primary key,

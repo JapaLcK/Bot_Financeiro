@@ -529,8 +529,12 @@ async def get_financial_data(
     ) = await asyncio.gather(
         # 1) Account balance
         _q("SELECT balance FROM accounts WHERE user_id = %s", (user_id,)),
-        # 2) Savings pockets
-        _q("SELECT name, balance FROM pockets WHERE user_id = %s ORDER BY name", (user_id,)),
+        # 2) Savings pockets (Sprint 5 — inclui campos de meta opcionais)
+        _q(
+            "SELECT id, name, balance, description, target_amount, target_date, "
+            "emoji, color, status FROM pockets WHERE user_id = %s ORDER BY name",
+            (user_id,),
+        ),
         # 3) Total launches (com filtros + credit union)
         _q(
             f"""
@@ -3940,6 +3944,171 @@ async def create_pocket_route(request: Request, user_id: int, payload: PocketCre
         "created": launch_id is not None,
         "pocket": {"id": int(pocket_id), "name": canon, "description": description},
     }
+
+
+class PocketMetaPayload(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    target_amount: float | None = None
+    target_date: str | None = None
+    emoji: str | None = None
+    color: str | None = None
+    status: str | None = None
+    clear_target: bool = False
+
+
+@app.patch("/pockets/{user_id}/{pocket_id}/meta")
+async def update_pocket_meta_route(
+    request: Request, user_id: int, pocket_id: int, payload: PocketMetaPayload
+):
+    """PATCH em metadata da caixinha — incluindo target_amount/date pra virar meta.
+
+    Pra remover a meta (mantendo a caixinha), passar `clear_target=true`.
+    """
+    _authorize_dashboard_access(request, user_id)
+    from db.pockets import update_pocket_meta
+
+    try:
+        row = await asyncio.to_thread(
+            update_pocket_meta,
+            user_id, pocket_id,
+            name=payload.name, description=payload.description,
+            target_amount=payload.target_amount, target_date=payload.target_date,
+            emoji=payload.emoji, color=payload.color, status=payload.status,
+            clear_target=payload.clear_target,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not row:
+        raise HTTPException(status_code=404, detail="Caixinha não encontrada.")
+    _invalidate_dashboard_current_cache(user_id)
+    pocket = dict(row)
+    if pocket.get("target_amount") is not None:
+        pocket["target_amount"] = float(pocket["target_amount"])
+    if pocket.get("target_date"):
+        pocket["target_date"] = pocket["target_date"].isoformat()
+    if pocket.get("balance") is not None:
+        pocket["balance"] = float(pocket["balance"])
+    return {"ok": True, "pocket": pocket}
+
+
+@app.get("/goals/{user_id}/status")
+async def goals_status_route(request: Request, user_id: int):
+    """Lista as caixinhas COM meta (target_amount NOT NULL) + cálculo de ritmo.
+
+    Retorna pra cada meta: pct_complete, days_left, monthly_pace_needed,
+    monthly_pace_current (média dos últimos 3 meses), projected_at_current_pace,
+    status_indicator ('ahead'|'on_track'|'tight'|'behind').
+    """
+    _authorize_dashboard_access(request, user_id)
+    from db.pockets import list_pockets
+    from db.connection import get_conn
+    from datetime import date
+
+    def _compute():
+        pockets = list_pockets(user_id)
+        goals = []
+        today = date.today()
+        for p in pockets:
+            ta = p.get("target_amount")
+            saved = float(p.get("balance") or 0)
+            is_goal = ta is not None
+            if not is_goal:
+                # Caixinha sem meta: retorna info mínima
+                goals.append({
+                    "id": p["id"],
+                    "name": p["name"],
+                    "balance": saved,
+                    "target_amount": None,
+                    "target_date": None,
+                    "emoji": p.get("emoji"),
+                    "color": p.get("color"),
+                    "status": p.get("status") or "active",
+                    "description": p.get("description"),
+                    "is_goal": False,
+                    "pct_complete": None,
+                    "remaining": None,
+                    "days_left": None,
+                    "monthly_pace_needed": None,
+                    "monthly_pace_current": None,
+                    "projected_months": None,
+                    "indicator": "no_target",
+                })
+                continue
+            tgt = float(ta)
+            pct = (saved / tgt * 100.0) if tgt > 0 else 0.0
+            td = p.get("target_date")
+            days_left = (td - today).days if td else None
+            remaining = max(0.0, tgt - saved)
+            monthly_pace_needed = None
+            if td and days_left and days_left > 0 and remaining > 0:
+                months_left = max(1, days_left / 30.0)
+                monthly_pace_needed = remaining / months_left
+
+            # Ritmo atual: médio dos últimos 90 dias (depositos - saques)
+            monthly_pace_current = None
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        select
+                          coalesce(sum(case when tipo = 'deposito_caixinha' then valor else 0 end), 0) -
+                          coalesce(sum(case when tipo = 'saque_caixinha' then valor else 0 end), 0)
+                          as net
+                        from launches
+                        where user_id=%s and alvo=%s
+                          and criado_em >= now() - interval '90 days'
+                        """,
+                        (user_id, p["name"]),
+                    )
+                    r = cur.fetchone()
+                    net90 = float(r["net"] or 0)
+                    monthly_pace_current = net90 / 3.0  # média mensal
+
+            # Status indicator
+            indicator = "active"
+            if pct >= 100:
+                indicator = "achieved"
+            elif days_left is not None and days_left < 0:
+                indicator = "behind"
+            elif monthly_pace_needed and monthly_pace_current is not None:
+                if monthly_pace_current >= monthly_pace_needed * 1.1:
+                    indicator = "ahead"
+                elif monthly_pace_current >= monthly_pace_needed * 0.9:
+                    indicator = "on_track"
+                elif monthly_pace_current >= monthly_pace_needed * 0.5:
+                    indicator = "tight"
+                else:
+                    indicator = "behind"
+
+            # Projeção: a esse ritmo, quanto tempo até atingir?
+            projected_months = None
+            if monthly_pace_current and monthly_pace_current > 0 and remaining > 0:
+                projected_months = remaining / monthly_pace_current
+
+            goals.append({
+                "id": p["id"],
+                "name": p["name"],
+                "balance": saved,
+                "target_amount": tgt,
+                "target_date": td.isoformat() if td else None,
+                "emoji": p.get("emoji"),
+                "color": p.get("color"),
+                "status": p.get("status") or "active",
+                "description": p.get("description"),
+                "is_goal": True,
+                "pct_complete": round(pct, 1),
+                "remaining": round(remaining, 2),
+                "days_left": days_left,
+                "monthly_pace_needed": round(monthly_pace_needed, 2) if monthly_pace_needed else None,
+                "monthly_pace_current": round(monthly_pace_current, 2) if monthly_pace_current is not None else None,
+                "projected_months": round(projected_months, 1) if projected_months else None,
+                "indicator": indicator,
+            })
+        return goals
+
+    goals = await asyncio.to_thread(_compute)
+    return {"ok": True, "goals": goals}
 
 
 @app.delete("/pockets/{user_id}/{pocket_name:path}")

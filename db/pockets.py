@@ -17,10 +17,77 @@ def list_pockets(user_id: int):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, name, balance, description from pockets where user_id=%s order by lower(name)",
+                """
+                select id, name, balance, description,
+                       target_amount, target_date, emoji, color, status
+                from pockets
+                where user_id=%s
+                order by (target_amount is null), lower(name)
+                """,
                 (user_id,),
             )
             return cur.fetchall()
+
+
+def update_pocket_meta(
+    user_id: int,
+    pocket_id: int,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    target_amount: float | None = None,
+    target_date: str | None = None,  # ISO 'YYYY-MM-DD' ou None pra limpar
+    emoji: str | None = None,
+    color: str | None = None,
+    status: str | None = None,
+    clear_target: bool = False,
+):
+    """PATCH em metadata da caixinha (não mexe em balance — usar deposit/withdraw)."""
+    ensure_user(user_id)
+    sets: list[str] = []
+    params: list = []
+    if name is not None:
+        sets.append("name = %s")
+        params.append(name.strip())
+    if description is not None:
+        sets.append("description = %s")
+        params.append(description.strip() or None)
+    if clear_target:
+        sets.append("target_amount = NULL")
+        sets.append("target_date = NULL")
+    else:
+        if target_amount is not None:
+            sets.append("target_amount = %s")
+            params.append(Decimal(str(target_amount)) if target_amount is not None else None)
+        if target_date is not None:
+            sets.append("target_date = %s")
+            params.append(target_date or None)
+    if emoji is not None:
+        sets.append("emoji = %s")
+        params.append(emoji.strip() or None)
+    if color is not None:
+        sets.append("color = %s")
+        params.append(color.strip() or None)
+    if status is not None:
+        if status not in ("active", "achieved", "abandoned"):
+            raise ValueError("STATUS_INVALIDO")
+        sets.append("status = %s")
+        params.append(status)
+    if not sets:
+        return None
+    params.extend([user_id, int(pocket_id)])
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"update pockets set {', '.join(sets)} "
+                "where user_id=%s and id=%s "
+                "returning id, name, balance, description, target_amount, target_date, "
+                "emoji, color, status",
+                params,
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return row
 
 
 def pocket_withdraw_to_account(
