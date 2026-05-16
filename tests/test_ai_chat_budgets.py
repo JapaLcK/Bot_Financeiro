@@ -38,7 +38,9 @@ def test_resolve_fuzzy_bloqueia_e_sugere(user_id):
     msg, action = _resolve_category(user_id, "alimemtacao")
     assert action == "block"
     assert "alimentação" in msg
-    assert "force_new" in msg
+    # Mensagem do bot foi humanizada — em vez do "force_new" técnico, o user
+    # diz "é categoria nova" pra confirmar criação (Sprint 3).
+    assert "categoria nova" in msg
 
 
 def test_resolve_force_new_pula_fuzzy(user_id):
@@ -302,7 +304,13 @@ def test_sum_spent_soma_launches_e_credito(user_id):
     db.add_launch_and_update_balance(
         user_id, "despesa", 50, "x", "x", categoria="alimentação",
     )
-    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    # closing_day=31 garante que a compra (em date.today()) caia na fatura
+    # cujo period_end fecha no mês atual — sum_spent_in_category_this_month
+    # filtra credit_transactions por bill.period_end (regra Sprint 3:
+    # consumo do mês = mês em que a fatura FECHA, não da compra). Com
+    # closing_day menor (ex: 10), uma compra após o dia 10 cairia na
+    # fatura do mês seguinte e o teste passa a depender do dia do mês.
+    card_id = db.create_card(user_id, "Nubank", closing_day=31, due_day=20)
     db.add_credit_purchase(user_id, card_id, 30, "alimentação", "ifood", date.today())
 
     total = db.sum_spent_in_category_this_month(user_id, "alimentação")

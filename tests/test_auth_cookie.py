@@ -39,6 +39,11 @@ def test_login_sets_auth_token_cookie(monkeypatch):
     # entao precisamos do row em users mesmo com login_auth_user mockado.
     db.ensure_user(123)
 
+    # COOKIE_SECURE é derivado de DASHBOARD_URL.startswith("https://") — em
+    # dev/CI o URL é http, então o cookie sai sem Secure por design. Forçamos
+    # True aqui pra validar que EM PRODUÇÃO (https) o flag está presente.
+    monkeypatch.setattr(dashboard, "COOKIE_SECURE", True)
+
     monkeypatch.setattr(
         db,
         "login_auth_user",
