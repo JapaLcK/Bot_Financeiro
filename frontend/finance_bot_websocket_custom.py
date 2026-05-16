@@ -34,7 +34,7 @@ from typing import Any, Dict
 
 import psycopg
 from psycopg.rows import dict_row
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request, Response
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -4894,6 +4894,144 @@ async def pay_bill_route(
         "bill_paid_amount": new_paid,
         "bill_due_amount": new_due,
     }
+
+
+# ─── Analytics routes (Sprint 6) ─────────────────────────────────────────────
+# 5 endpoints separados pra alimentar a view Análises. Separados (em vez de
+# 1 unificado) porque o painel personalizável vai deixar o user escolher quais
+# widgets ver — assim cada widget pode buscar só seu dado.
+
+def _parse_date_param(value: str | None, name: str) -> date | None:
+    """Parsea 'YYYY-MM-DD' → date. None se vazio. 400 se inválido."""
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Parâmetro '{name}' inválido (esperado YYYY-MM-DD).")
+
+
+def _resolve_analytics_window(months: int, from_str: str | None, to_str: str | None):
+    """Wrapper de resolve_window que parseia strings de query."""
+    from db import resolve_window
+    fd = _parse_date_param(from_str, "from")
+    td = _parse_date_param(to_str, "to")
+    return resolve_window(months=months, from_date=fd, to_date=td)
+
+
+@app.get("/analytics/{user_id}/kpis")
+async def analytics_kpis_route(
+    request: Request,
+    user_id: int,
+    months: int = 6,
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+):
+    """KPIs do período: receita, despesa, líquido, taxa de poupança + comparativo
+    com período anterior. Default = últimos 6 meses."""
+    _authorize_dashboard_access(request, user_id)
+    from db import compute_kpis
+    fd, td = _resolve_analytics_window(months, from_, to)
+    result = await asyncio.to_thread(compute_kpis, user_id, fd, td)
+    return {"ok": True, "kpis": result}
+
+
+@app.get("/analytics/{user_id}/evolution")
+async def analytics_evolution_route(
+    request: Request,
+    user_id: int,
+    months: int = 6,
+):
+    """Evolução mensal de receita/despesa/líquido nos últimos N meses (sempre
+    buckets mensais terminando no mês atual)."""
+    _authorize_dashboard_access(request, user_id)
+    from db import compute_evolution
+    n = max(1, min(int(months or 6), 36))
+    result = await asyncio.to_thread(compute_evolution, user_id, n)
+    return {"ok": True, "evolution": result, "months": n}
+
+
+@app.get("/analytics/{user_id}/categories")
+async def analytics_categories_route(
+    request: Request,
+    user_id: int,
+    months: int = 6,
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+    limit: int = 10,
+):
+    """Distribuição de despesas por categoria no período. Inclui pct, count,
+    e emoji/color quando user customizou via user_categories."""
+    _authorize_dashboard_access(request, user_id)
+    from db import compute_categories
+    fd, td = _resolve_analytics_window(months, from_, to)
+    lim = max(1, min(int(limit or 10), 50))
+    result = await asyncio.to_thread(compute_categories, user_id, fd, td, lim)
+    return {"ok": True, "categories": result, "window": {"from": fd.isoformat(), "to": td.isoformat()}}
+
+
+@app.get("/analytics/{user_id}/weekday-pattern")
+async def analytics_weekday_route(
+    request: Request,
+    user_id: int,
+    months: int = 6,
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+):
+    """Padrão de gasto por dia da semana (seg→dom). Total, count e média
+    diária por DOW no período. Inclui credit_transactions por purchased_at
+    (não bill.period_end — aqui interessa o dia da compra real)."""
+    _authorize_dashboard_access(request, user_id)
+    from db import compute_weekday_pattern
+    fd, td = _resolve_analytics_window(months, from_, to)
+    result = await asyncio.to_thread(compute_weekday_pattern, user_id, fd, td)
+    return {"ok": True, "weekdays": result, "window": {"from": fd.isoformat(), "to": td.isoformat()}}
+
+
+@app.get("/analytics/{user_id}/top-merchants")
+async def analytics_top_merchants_route(
+    request: Request,
+    user_id: int,
+    months: int = 6,
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+    limit: int = 10,
+):
+    """Top estabelecimentos no período. Junta launches (alvo/nota) +
+    credit_transactions (nota). Agrupa por chave normalizada (lower/trim).
+    Retorna sources = {debito, credito} pra desbobinar na UI se quiser."""
+    _authorize_dashboard_access(request, user_id)
+    from db import compute_top_merchants
+    fd, td = _resolve_analytics_window(months, from_, to)
+    lim = max(1, min(int(limit or 10), 50))
+    result = await asyncio.to_thread(compute_top_merchants, user_id, fd, td, lim)
+    return {"ok": True, "merchants": result, "window": {"from": fd.isoformat(), "to": td.isoformat()}}
+
+
+# ─── History route (Sprint 6) ────────────────────────────────────────────────
+
+@app.get("/history/{user_id}/list")
+async def history_list_route(
+    request: Request,
+    user_id: int,
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+    categoria: str | None = None,
+    tipo: str | None = None,
+    page: int = 1,
+    limit: int = 50,
+):
+    """Timeline paginada de lançamentos. Junta launches + credit_transactions
+    (alocadas por bill.period_end). Filtros: faixa de datas, categoria, tipo."""
+    _authorize_dashboard_access(request, user_id)
+    from db import list_history
+    fd = _parse_date_param(from_, "from")
+    td = _parse_date_param(to, "to")
+    result = await asyncio.to_thread(
+        list_history,
+        user_id, fd, td, categoria, tipo, page, limit,
+    )
+    return {"ok": True, **result}
 
 
 MAX_OFX_BYTES = 8 * 1024 * 1024  # 8 MB — extratos OFX raramente passam disso

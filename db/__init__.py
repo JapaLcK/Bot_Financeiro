@@ -278,6 +278,17 @@ from .privacy import (
     has_recent_export_request,
 )
 
+# ── Analytics (Sprint 6) ────────────────────────────────────────────────────
+from .analytics import (
+    resolve_window,
+    compute_kpis,
+    compute_evolution,
+    compute_categories,
+    compute_weekday_pattern,
+    compute_top_merchants,
+    list_history,
+)
+
 __all__ = [
     # connection
     "get_conn",
@@ -374,4 +385,7 @@ __all__ = [
     "ai_set_pending_action", "ai_get_pending_action", "ai_clear_pending_action",
     "ai_get_usage_this_month", "ai_increment_usage", "log_ai_fallback",
     "AI_DEFAULT_CONTEXT_WINDOW",
+    # analytics (Sprint 6)
+    "resolve_window", "compute_kpis", "compute_evolution", "compute_categories",
+    "compute_weekday_pattern", "compute_top_merchants", "list_history",
 ]
