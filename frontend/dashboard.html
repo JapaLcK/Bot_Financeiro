@@ -2624,6 +2624,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
           <input class="modal-inp" id="pocket-interest-rate" type="number" min="1" max="300" step="0.01" value="100" inputmode="decimal" style="width:112px;flex:0 0 112px" />
           <span style="color:var(--text-2);font-size:.86rem;white-space:nowrap">% do CDI</span>
         </div>
+        <div style="color:var(--text-3);font-size:.78rem;margin-top:8px;line-height:1.35">💡 Valor simulado — o PigBank não custodia seu dinheiro. Use a taxa do banco onde o saldo realmente está aplicado.</div>
       </div>
     </div>
 
@@ -5054,7 +5055,7 @@ function _cdiPercentFromRate(rate) {
 
 function _formatCdiRate(rate) {
   const pct = _cdiPercentFromRate(rate);
-  return `Rende ${pct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}% do CDI`;
+  return `Rende ${pct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}% do CDI · simulado`;
 }
 
 let _goalsCache = null;
@@ -5316,6 +5317,7 @@ function _ensureGoalModal() {
                   <input type="number" id="goal-interest-rate" min="1" max="300" step="0.01" value="100" inputmode="decimal" style="width:112px;flex:0 0 112px" />
                   <span style="color:var(--text-2);font-size:.86rem;white-space:nowrap">% do CDI</span>
                 </div>
+                <div style="color:var(--text-3);font-size:.78rem;margin-top:8px;line-height:1.35">💡 Valor simulado — o PigBank não custodia seu dinheiro. Use a taxa do banco onde o saldo realmente está aplicado.</div>
               </div>
             </div>
           </div>
@@ -7548,8 +7550,8 @@ function openInvestmentDetail(name) {
   const cells = [
     ["Saldo atual", fmt(inv.balance || 0)],
     ["Taxa", investmentRateLabel(inv)],
-    ["Rendimento bruto/mês", fmt(grossMonth)],
-    ["Líquido estimado/mês", fmt(netMonth)],
+    ["Rendimento bruto/mês (simulado)", fmt(grossMonth)],
+    ["Líquido estimado/mês (simulado)", fmt(netMonth)],
     ["Emissor", inv.issuer || "—"],
     ["Tributação", taxProfileLabel(inv.tax_profile)],
     ["Compra", fmtDateOnly(inv.purchase_date)],
@@ -7659,11 +7661,12 @@ function renderInvestmentsPanel(d) {
   const grossMonth = invs.reduce((s, i) => s + Number(i.balance || 0) * monthlyRate(i), 0);
   const netMonth = grossMonth * (1 - .15);
   document.getElementById("invest-summary").innerHTML = `
-    <div class="chips" style="margin-top:0;margin-bottom:12px">
+    <div class="chips" style="margin-top:0;margin-bottom:6px">
       <div class="chip"><div class="chip-lbl">Patrimônio</div><div class="chip-val b">${fmt(total)}</div></div>
-      <div class="chip"><div class="chip-lbl">Rend. bruto/mês</div><div class="chip-val g">${fmt(grossMonth)}</div></div>
-      <div class="chip"><div class="chip-lbl">Líquido estimado</div><div class="chip-val">${fmt(netMonth)}</div></div>
+      <div class="chip"><div class="chip-lbl">Rend. bruto/mês <span style="opacity:.6;font-weight:400">(simulado)</span></div><div class="chip-val g">${fmt(grossMonth)}</div></div>
+      <div class="chip"><div class="chip-lbl">Líquido estimado <span style="opacity:.6;font-weight:400">(simulado)</span></div><div class="chip-val">${fmt(netMonth)}</div></div>
     </div>
+    <div style="color:var(--text-3);font-size:.75rem;margin-bottom:12px;line-height:1.35">💡 Rendimentos exibidos são simulações baseadas na taxa informada. O PigBank não custodia os valores aplicados.</div>
   `;
 
 	  document.getElementById("invest-list").innerHTML = invs.length ? invs.map(i => {
@@ -7688,7 +7691,7 @@ function renderInvestmentsPanel(d) {
             <div class="val b">${fmt(displayBal)}</div>
           </div>
         </div>
-        <div class="tax-note">Estimativa mensal: bruto ${fmt(Number(displayBal || 0) * mRate)} · líquido ${fmt(Number(displayBal || 0) * mRate * .85)}</div>
+        <div class="tax-note">Simulação mensal: bruto ${fmt(Number(displayBal || 0) * mRate)} · líquido ${fmt(Number(displayBal || 0) * mRate * .85)}</div>
       </div>
     `;
   }).join("") : `<div class="empty">Nenhum investimento cadastrado.</div>`;
