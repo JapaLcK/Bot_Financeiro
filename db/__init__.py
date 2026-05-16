@@ -286,6 +286,7 @@ from .analytics import (
     compute_categories,
     compute_weekday_pattern,
     compute_top_merchants,
+    compute_history_quick_stats,
     list_history,
 )
 
@@ -387,5 +388,6 @@ __all__ = [
     "AI_DEFAULT_CONTEXT_WINDOW",
     # analytics (Sprint 6)
     "resolve_window", "compute_kpis", "compute_evolution", "compute_categories",
-    "compute_weekday_pattern", "compute_top_merchants", "list_history",
+    "compute_weekday_pattern", "compute_top_merchants",
+    "compute_history_quick_stats", "list_history",
 ]

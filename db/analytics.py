@@ -84,7 +84,10 @@ def compute_kpis(user_id: int, from_date: date, to_date: date) -> dict:
       total_income, total_expense, net, savings_rate,
       transactions_count,
       prev: { total_income, total_expense, net, savings_rate },
-      delta_pct: { income, expense, net }  # variação % vs período anterior
+      delta_pct: { income, expense, net },        # variação % vs período anterior
+      peak_day: { date, total } | None,           # dia de maior despesa total
+      largest_expense: { date, valor, alvo,
+                         nota, categoria } | None # maior despesa individual
     }
     """
     span_days = (to_date - from_date).days
@@ -141,8 +144,100 @@ def compute_kpis(user_id: int, from_date: date, to_date: date) -> dict:
             "transactions_count": count,
         }
 
+    def _highlights(start: date, end: date) -> tuple[dict | None, dict | None]:
+        """Retorna (peak_day, largest_expense) — pode ser None se sem dados.
+
+        Regra de alocação (consistente com total_expense — Sprint 3):
+          - launches: filtra por `criado_em ∈ [start, end)`
+          - credit_transactions: filtra por `bill.period_end ∈ [start, end)`
+                                 (NÃO por purchased_at — senão compra de maio
+                                 que fecha em junho ficaria fora do
+                                 total_expense mas dentro do peak_day,
+                                 quebrando a intuição "soma dos dias = total")
+
+        A DATA exibida (`peak_day.date`, `largest_expense.date`) usa a data
+        real da compra (`criado_em` / `purchased_at`) — é o que o user
+        reconhece. Só o filtro do PERÍODO usa a regra da fatura.
+        """
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                # Peak day
+                cur.execute(
+                    """
+                    SELECT day, SUM(valor) AS total
+                    FROM (
+                      SELECT DATE(criado_em) AS day, valor
+                      FROM launches
+                      WHERE user_id = %s
+                        AND tipo IN ('despesa', 'saida')
+                        AND is_internal_movement = false
+                        AND criado_em >= %s AND criado_em < %s
+                      UNION ALL
+                      SELECT ct.purchased_at AS day, ct.valor
+                      FROM credit_transactions ct
+                      JOIN credit_bills b ON b.id = ct.bill_id
+                      WHERE ct.user_id = %s
+                        AND ct.is_refund = false
+                        AND b.period_end >= %s AND b.period_end < %s
+                    ) merged
+                    GROUP BY day
+                    ORDER BY total DESC
+                    LIMIT 1
+                    """,
+                    (user_id, start, end, user_id, start, end),
+                )
+                row = cur.fetchone()
+                peak = None
+                if row and row["day"]:
+                    peak = {
+                        "date": row["day"].isoformat(),
+                        "total": round(_to_float(row["total"]), 2),
+                    }
+
+                # Largest individual expense — junta launches + credit_tx,
+                # devolve um único top 1 com metadados úteis.
+                cur.execute(
+                    """
+                    SELECT day, valor, alvo, nota, categoria
+                    FROM (
+                      SELECT DATE(criado_em) AS day, valor,
+                             alvo, nota, categoria
+                      FROM launches
+                      WHERE user_id = %s
+                        AND tipo IN ('despesa', 'saida')
+                        AND is_internal_movement = false
+                        AND criado_em >= %s AND criado_em < %s
+                      UNION ALL
+                      SELECT ct.purchased_at AS day, ct.valor,
+                             c.name AS alvo, ct.nota, ct.categoria
+                      FROM credit_transactions ct
+                      JOIN credit_cards c ON c.id = ct.card_id
+                      JOIN credit_bills b ON b.id = ct.bill_id
+                      WHERE ct.user_id = %s
+                        AND ct.is_refund = false
+                        AND b.period_end >= %s AND b.period_end < %s
+                    ) merged
+                    ORDER BY valor DESC
+                    LIMIT 1
+                    """,
+                    (user_id, start, end, user_id, start, end),
+                )
+                row = cur.fetchone()
+                largest = None
+                if row:
+                    largest = {
+                        "date": row["day"].isoformat() if row["day"] else None,
+                        "valor": round(_to_float(row["valor"]), 2),
+                        "alvo": row["alvo"],
+                        "nota": row["nota"],
+                        "categoria": row["categoria"],
+                    }
+
+        return peak, largest
+
     cur = _totals(from_date, to_date)
     prev = _totals(prev_from, prev_to)
+    peak_day, largest_expense = _highlights(from_date, to_date)
 
     def _pct(a: float, b: float) -> float | None:
         """Variação % de b → a. None se b é 0 (indefinido)."""
@@ -160,6 +255,8 @@ def compute_kpis(user_id: int, from_date: date, to_date: date) -> dict:
             "expense": _pct(cur["total_expense"], prev["total_expense"]),
             "net": _pct(cur["net"], prev["net"]),
         },
+        "peak_day": peak_day,
+        "largest_expense": largest_expense,
     }
 
 
@@ -466,12 +563,84 @@ def compute_top_merchants(
 # Histórico paginado — timeline com filtros
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# History — atalhos de filtro (KPIs do topo da view Histórico)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def compute_history_quick_stats(
+    user_id: int,
+    from_date: date,
+    to_date: date,
+) -> dict:
+    """
+    Retorna stats agregados do período pros 4 cards do topo do Histórico:
+      - total_count:       total de lançamentos (launches + credit_tx)
+      - avg_per_month:     média de lançamentos por mês (total/n_meses)
+      - receitas_count:    só receitas (launches tipo=receita)
+      - despesas_count:    despesas (launches tipo=despesa + credit_tx)
+      - months_in_period:  número de meses cobertos pelo período
+
+    Despesas incluem credit_transactions (compras no cartão), alocadas por
+    bill.period_end — mesma regra do total_expense (Sprint 3).
+    """
+    # Calcula número de meses cobertos pelo período [from, to)
+    months_in_period = (
+        (to_date.year - from_date.year) * 12
+        + (to_date.month - from_date.month)
+    )
+    months_in_period = max(1, months_in_period)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                  SUM(CASE WHEN tipo = 'receita'                      THEN 1 ELSE 0 END) AS receitas,
+                  SUM(CASE WHEN tipo IN ('despesa', 'saida', 'credito') THEN 1 ELSE 0 END) AS despesas,
+                  COUNT(*) AS total
+                FROM (
+                  SELECT tipo
+                  FROM launches
+                  WHERE user_id = %s
+                    AND criado_em >= %s AND criado_em < %s
+                    AND is_internal_movement = false
+                    AND tipo IN ('despesa', 'receita', 'saida')
+                  UNION ALL
+                  SELECT 'credito' AS tipo
+                  FROM credit_transactions ct
+                  JOIN credit_bills b ON b.id = ct.bill_id
+                  WHERE ct.user_id = %s
+                    AND ct.is_refund = false
+                    AND b.period_end >= %s AND b.period_end < %s
+                ) merged
+                """,
+                (user_id, from_date, to_date, user_id, from_date, to_date),
+            )
+            row = cur.fetchone() or {}
+            receitas_count = int(row.get("receitas") or 0)
+            despesas_count = int(row.get("despesas") or 0)
+            total_count = int(row.get("total") or 0)
+
+    avg_per_month = round(total_count / months_in_period, 1)
+
+    return {
+        "total_count": total_count,
+        "avg_per_month": avg_per_month,
+        "receitas_count": receitas_count,
+        "despesas_count": despesas_count,
+        "months_in_period": months_in_period,
+    }
+
+
 def list_history(
     user_id: int,
     from_date: date | None = None,
     to_date: date | None = None,
     categoria: str | None = None,
     tipo: str | None = None,
+    q: str | None = None,
+    uncategorized: bool = False,
+    refunds_only: bool = False,
     page: int = 1,
     limit: int = 50,
 ) -> dict:
@@ -483,9 +652,26 @@ def list_history(
       - from_date / to_date  (faixa inclusiva → exclusiva)
       - categoria            (case-insensitive)
       - tipo                 ('despesa' | 'receita' | 'credito' | 'all')
+      - q                    (busca textual livre — AND entre palavras,
+                              OR entre campos: alvo, nota, categoria)
+      - uncategorized        (só lançamentos sem categoria — atalho de
+                              investigação)
+      - refunds_only         (só estornos: credit_transactions.is_refund=true.
+                              Implica tipo='credito' — refunds só existem
+                              no cartão hoje)
 
     Filtro 'receita' exclui credit_transactions (todas são despesas no cartão).
     Filtro 'credito' devolve só credit_transactions.
+
+    Busca textual: cada palavra digitada é casada contra alvo+nota+categoria
+    via ILIKE (case-insensitive, substring). Múltiplas palavras viram AND
+    (todas precisam aparecer em algum lugar). Ex.: "compra shopping" casa
+    com nota="parcela de compra de roupa shopping".
+
+    LIMITAÇÃO conhecida: ILIKE não normaliza acentos — "credito" não casa
+    "crédito". Pra resolver definitivamente: `CREATE EXTENSION unaccent;`
+    no Postgres e trocar pra `unaccent(...) ILIKE unaccent(%s)`. Anotado
+    como melhoria pós-Sprint 6.
     """
     page = max(1, int(page or 1))
     limit = max(1, min(int(limit or 50), 200))
@@ -494,8 +680,41 @@ def list_history(
     if tipo_norm not in ("despesa", "receita", "credito", "all"):
         tipo_norm = "all"
 
+    # refunds_only força credit-only (refunds só vivem em credit_transactions)
+    if refunds_only:
+        tipo_norm = "credito"
+
     include_launches = tipo_norm in ("all", "despesa", "receita")
     include_credit = tipo_norm in ("all", "credito")
+
+    # Quebra a busca em palavras (até 6 — limita custo da query).
+    # Filtra tokens muito curtos pra evitar match excessivo (ex.: "a", "e").
+    search_terms: list[str] = []
+    if q:
+        for raw in str(q).strip().split():
+            term = raw.strip().lower()
+            if len(term) >= 2:
+                search_terms.append(term)
+            if len(search_terms) >= 6:
+                break
+
+    def _search_clause(prefix: str) -> tuple[str, list[Any]]:
+        """Retorna (SQL fragment, params) — todas as palavras AND'ed,
+        cada palavra OR entre campos. `prefix` deixa o caller decidir o
+        alias (ex.: '' pra launches, 'ct.' pra credit_transactions)."""
+        if not search_terms:
+            return ("", [])
+        per_term_sqls: list[str] = []
+        per_term_params: list[Any] = []
+        for term in search_terms:
+            pattern = f"%{term}%"
+            per_term_sqls.append(
+                f"(COALESCE({prefix}alvo, '') ILIKE %s "
+                f"OR COALESCE({prefix}nota, '') ILIKE %s "
+                f"OR COALESCE({prefix}categoria, '') ILIKE %s)"
+            )
+            per_term_params.extend([pattern, pattern, pattern])
+        return (" AND ".join(per_term_sqls), per_term_params)
 
     # ── Sub-query de launches ────────────────────────────────────────────────
     launches_sql = ""
@@ -512,6 +731,8 @@ def list_history(
         if categoria:
             clauses.append("LOWER(COALESCE(categoria, '')) = LOWER(%s)")
             launches_params.append(categoria)
+        if uncategorized:
+            clauses.append("(categoria IS NULL OR categoria = '')")
         if tipo_norm in ("despesa", "receita"):
             clauses.append("tipo = %s")
             launches_params.append(tipo_norm)
@@ -520,6 +741,10 @@ def list_history(
             # criar_caixinha, etc.)
             clauses.append("tipo IN ('despesa', 'receita', 'saida')")
         clauses.append("is_internal_movement = false")
+        search_sql, search_params = _search_clause("")
+        if search_sql:
+            clauses.append(search_sql)
+            launches_params.extend(search_params)
         launches_sql = f"""
           SELECT id, tipo, valor, alvo, nota, categoria, criado_em
           FROM launches
@@ -530,7 +755,8 @@ def list_history(
     credit_sql = ""
     credit_params: list[Any] = []
     if include_credit:
-        clauses = ["ct.user_id = %s", "ct.is_refund = false"]
+        # is_refund: true se refunds_only, false caso contrário (default).
+        clauses = ["ct.user_id = %s", f"ct.is_refund = {'true' if refunds_only else 'false'}"]
         credit_params.append(user_id)
         if from_date:
             clauses.append("b.period_end >= %s")
@@ -541,6 +767,22 @@ def list_history(
         if categoria:
             clauses.append("LOWER(COALESCE(ct.categoria, '')) = LOWER(%s)")
             credit_params.append(categoria)
+        if uncategorized:
+            clauses.append("(ct.categoria IS NULL OR ct.categoria = '')")
+        # Pra credit_transactions, "alvo" no SELECT é c.name (alias de card);
+        # mas a busca textual deve casar contra ct.nota e ct.categoria (e
+        # opcionalmente nome do cartão também — útil pra "nubank").
+        if search_terms:
+            per_term_sqls: list[str] = []
+            for term in search_terms:
+                pattern = f"%{term}%"
+                per_term_sqls.append(
+                    "(COALESCE(c.name, '') ILIKE %s "
+                    "OR COALESCE(ct.nota, '') ILIKE %s "
+                    "OR COALESCE(ct.categoria, '') ILIKE %s)"
+                )
+                credit_params.extend([pattern, pattern, pattern])
+            clauses.append(" AND ".join(per_term_sqls))
         credit_sql = f"""
           SELECT ct.id, 'credito' AS tipo, ct.valor,
                  c.name AS alvo, ct.nota, ct.categoria, ct.created_at AS criado_em

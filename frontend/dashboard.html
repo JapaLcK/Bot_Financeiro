@@ -439,10 +439,109 @@ details.cc-details[open] summary .cc-card {
   background:transparent; border-color:var(--glass-border); color:var(--text-2);
 }
 .mock-cta.outline:hover { background:rgba(255,255,255,.06); color:var(--text); }
+
+/* Dropdown de período — versão destacada do `mock-cta outline` pra controle
+   importante (filtro de tempo do dashboard). Mais contraste e seta visível. */
+.period-pill {
+  display:inline-flex; align-items:center; gap:6px;
+  padding:9px 36px 9px 14px; border-radius:10px;
+  background:rgba(124,58,237,.12);
+  border:1px solid rgba(124,58,237,.55);
+  color:var(--text); font-size:.82rem; font-weight:600;
+  cursor:pointer; transition:all .2s var(--ease);
+  appearance:none; -webkit-appearance:none;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23a78bfa' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
+  background-repeat:no-repeat;
+  background-position:right 12px center;
+  box-shadow:0 2px 10px rgba(124,58,237,.18);
+}
+.period-pill:hover {
+  background:rgba(124,58,237,.2);
+  border-color:rgba(124,58,237,.75);
+  box-shadow:0 4px 16px rgba(124,58,237,.3);
+}
+.period-pill:focus { outline:none; border-color:#a78bfa; }
+.period-pill option { background:#0f1422; color:var(--text); }
+body.light .period-pill {
+  background:rgba(124,58,237,.08);
+  border-color:rgba(124,58,237,.4);
+  color:var(--text);
+  box-shadow:0 2px 8px rgba(124,58,237,.12);
+}
+body.light .period-pill option { background:#fff; color:var(--text); }
 .mock-header {
   display:flex; justify-content:space-between; align-items:center; gap:12px;
   margin-bottom:14px; flex-wrap:wrap;
 }
+
+/* Barra de busca da view Histórico */
+.search-bar input {
+  width:100%;
+  padding:11px 16px;
+  border-radius:10px;
+  border:1px solid var(--glass-border);
+  background:rgba(255,255,255,0.04);
+  color:var(--text);
+  font-size:.92rem;
+  transition:all .2s var(--ease);
+}
+.search-bar input::placeholder { color:var(--text-3); }
+.search-bar input:focus {
+  outline:none;
+  border-color:#7c3aed;
+  background:rgba(124,58,237,.06);
+  box-shadow:0 0 0 3px rgba(124,58,237,.15);
+}
+body.light .search-bar input { background:rgba(15,23,42,0.03); }
+body.light .search-bar input:focus { background:rgba(124,58,237,.05); }
+
+/* Stat tiles clicáveis (atalhos de filtro do Histórico) */
+.stats-row.history-stats .stat-tile.clickable {
+  cursor:pointer;
+  transition:all .15s var(--ease);
+}
+.stats-row.history-stats .stat-tile.clickable:hover {
+  transform:translateY(-2px);
+  border-color:rgba(124,58,237,.4);
+  box-shadow:0 6px 20px rgba(124,58,237,.18);
+}
+.stats-row.history-stats .stat-tile.clickable.active {
+  border-color:#a78bfa;
+  background:rgba(124,58,237,.12);
+  box-shadow:0 4px 14px rgba(124,58,237,.25);
+}
+
+/* Filter chips */
+.filter-chip {
+  padding:6px 12px; border-radius:999px;
+  border:1px solid var(--glass-border);
+  background:transparent; color:var(--text-2);
+  font-size:.8rem; font-weight:500; cursor:pointer;
+  transition:all .15s var(--ease);
+}
+.filter-chip:hover { border-color:rgba(124,58,237,.4); color:var(--text); }
+.filter-chip.active {
+  background:rgba(124,58,237,.15);
+  border-color:rgba(124,58,237,.6);
+  color:var(--text);
+}
+
+/* Badge "Filtrando por X" com botão de limpar */
+.active-filter-badge {
+  display:inline-flex; align-items:center; gap:6px;
+  padding:4px 10px 4px 12px; border-radius:999px;
+  background:rgba(124,58,237,.18);
+  border:1px solid rgba(124,58,237,.5);
+  color:var(--text); font-size:.78rem;
+}
+.active-filter-badge .clear-x {
+  display:inline-flex; align-items:center; justify-content:center;
+  width:18px; height:18px; border-radius:50%; margin-left:4px;
+  background:rgba(255,255,255,.1); color:var(--text-2);
+  cursor:pointer; font-size:.85rem; line-height:1;
+}
+.active-filter-badge .clear-x:hover { background:rgba(255,255,255,.2); color:var(--text); }
+body.light .active-filter-badge { background:rgba(124,58,237,.08); }
 
 /* ─── Parcelamento v2 — layout horizontal, expansão inline (empurra pra baixo) ─── */
 .inst-list { display:flex; flex-direction:column; gap:12px; }
@@ -1825,49 +1924,36 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
     <div class="mock-header">
       <p class="section-title" style="margin:0">Análises</p>
       <div style="display:flex;gap:8px">
-        <button class="mock-cta outline">📅 Últimos 6 meses</button>
-        <button class="mock-cta outline">⬇ Exportar PDF</button>
+        <select id="analytics-period-select" class="period-pill" aria-label="Período de análise">
+          <option value="3">📅 Últimos 3 meses</option>
+          <option value="6" selected>📅 Últimos 6 meses</option>
+          <option value="12">📅 Últimos 12 meses</option>
+        </select>
       </div>
     </div>
 
-    <div class="stats-row">
-      <div class="stat-tile">
-        <div class="stat-label">Gasto médio mensal</div>
-        <div class="stat-value">R$ 1.487,30</div>
-        <div class="stat-delta down">+8% vs últimos 6m</div>
-      </div>
-      <div class="stat-tile">
-        <div class="stat-label">Receita média</div>
-        <div class="stat-value" style="color:var(--green)">R$ 4.200,00</div>
-        <div class="stat-delta up">estável</div>
-      </div>
-      <div class="stat-tile">
-        <div class="stat-label">Taxa de poupança</div>
-        <div class="stat-value" style="color:#60a5fa">64,6%</div>
-        <div class="stat-delta up">acima da média BR (15%)</div>
-      </div>
-      <div class="stat-tile">
-        <div class="stat-label">Maior dia do mês</div>
-        <div class="stat-value">12/05</div>
-        <div class="stat-delta down">R$ 400,00 em compras</div>
-      </div>
+    <div id="analytics-stats" class="stats-row">
+      <div class="stat-tile"><div class="stat-label">Gasto médio mensal</div><div class="sk sk-h2"></div></div>
+      <div class="stat-tile"><div class="stat-label">Receita média</div><div class="sk sk-h2"></div></div>
+      <div class="stat-tile"><div class="stat-label">Taxa de poupança</div><div class="sk sk-h2"></div></div>
+      <div class="stat-tile"><div class="stat-label">Maior dia do período</div><div class="sk sk-h2"></div></div>
     </div>
 
     <div class="mock-grid cols-2" style="margin-bottom:14px">
       <div class="mock-card">
-        <h3>Evolução de gastos · últimos 6 meses</h3>
+        <h3>Evolução de gastos</h3>
         <div style="height:240px;position:relative"><canvas id="mock-evolution-chart"></canvas></div>
       </div>
       <div class="mock-card">
-        <h3>Receita vs Despesa · 2026</h3>
+        <h3>Receita vs Despesa</h3>
         <div style="height:240px;position:relative"><canvas id="mock-income-expense-chart"></canvas></div>
       </div>
       <div class="mock-card">
-        <h3>Distribuição por categoria · maio</h3>
+        <h3>Distribuição por categoria</h3>
         <div style="height:240px;position:relative"><canvas id="mock-category-donut"></canvas></div>
       </div>
       <div class="mock-card">
-        <h3>Padrão semanal · gastos por dia da semana</h3>
+        <h3>Gasto por dia da semana</h3>
         <div style="height:240px;position:relative"><canvas id="mock-weekday-chart"></canvas></div>
       </div>
     </div>
@@ -1875,134 +1961,35 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
     <div class="mock-grid cols-2">
       <div class="mock-card">
         <h3>Insights do Piggy 🐷</h3>
-        <div class="tx-list">
-          <div class="tx-row">
-            <div class="tx-icon" style="color:#fbbf24">💡</div>
-            <div class="tx-main">
-              <div class="tx-desc">Alimentação subiu 32% em maio</div>
-              <div class="tx-meta">De R$ 369 (abr) pra R$ 487 (maio). Quer ajustar o orçamento?</div>
-            </div>
-          </div>
-          <div class="tx-row">
-            <div class="tx-icon" style="color:#60a5fa">📊</div>
-            <div class="tx-main">
-              <div class="tx-desc">Seu CDB rendeu R$ 28 esse mês</div>
-              <div class="tx-meta">CDI atual 11,15% a.a. — projeção pro próximo mês: R$ 30,40</div>
-            </div>
-          </div>
-          <div class="tx-row">
-            <div class="tx-icon" style="color:#f87171">⚠️</div>
-            <div class="tx-main">
-              <div class="tx-desc">3 assinaturas com cobrança próxima</div>
-              <div class="tx-meta">Netflix (28/05) • Spotify (02/06) • iCloud (05/06)</div>
-            </div>
-          </div>
-          <div class="tx-row">
-            <div class="tx-icon" style="color:#34d399">✅</div>
-            <div class="tx-main">
-              <div class="tx-desc">Reserva atingiu 40% do alvo</div>
-              <div class="tx-meta">Mais 14 meses no ritmo atual e você fecha R$ 6.000.</div>
-            </div>
-          </div>
+        <div class="empty" style="padding:30px 16px;text-align:center;color:var(--text-3);font-size:.92rem">
+          <div style="font-size:2rem;margin-bottom:6px">🐷</div>
+          <div style="font-weight:600;color:var(--text-2);margin-bottom:4px">Em breve</div>
+          <div style="font-size:.84rem">A Piggy vai te avisar quando uma categoria estourar, quando um recorrente reajustar, e outras dicas baseadas no seu histórico.</div>
         </div>
       </div>
 
       <div class="mock-card">
-        <h3>Comparativo mês a mês</h3>
-        <div class="tx-list">
-          <div class="bar-row">
-            <div class="bar-icon">📅</div>
-            <div class="bar-body">
-              <div class="bar-head"><span class="name">Dezembro/2025</span><span class="val">R$ 1.890</span></div>
-              <div class="bar-track"><div class="bar-fill red" style="width:78%"></div></div>
-              <div class="bar-sub">Festas + presentes</div>
-            </div>
-          </div>
-          <div class="bar-row">
-            <div class="bar-icon">📅</div>
-            <div class="bar-body">
-              <div class="bar-head"><span class="name">Janeiro/2026</span><span class="val">R$ 1.620</span></div>
-              <div class="bar-track"><div class="bar-fill yellow" style="width:67%"></div></div>
-              <div class="bar-sub">Pós-feriado</div>
-            </div>
-          </div>
-          <div class="bar-row">
-            <div class="bar-icon">📅</div>
-            <div class="bar-body">
-              <div class="bar-head"><span class="name">Fevereiro/2026</span><span class="val">R$ 1.180</span></div>
-              <div class="bar-track"><div class="bar-fill green" style="width:49%"></div></div>
-              <div class="bar-sub">Mês econômico</div>
-            </div>
-          </div>
-          <div class="bar-row">
-            <div class="bar-icon">📅</div>
-            <div class="bar-body">
-              <div class="bar-head"><span class="name">Março/2026</span><span class="val">R$ 1.420</span></div>
-              <div class="bar-track"><div class="bar-fill yellow" style="width:59%"></div></div>
-              <div class="bar-sub">Volta às aulas</div>
-            </div>
-          </div>
-          <div class="bar-row">
-            <div class="bar-icon">📅</div>
-            <div class="bar-body">
-              <div class="bar-head"><span class="name">Abril/2026</span><span class="val">R$ 1.345</span></div>
-              <div class="bar-track"><div class="bar-fill green" style="width:56%"></div></div>
-              <div class="bar-sub">Estável</div>
-            </div>
-          </div>
-          <div class="bar-row">
-            <div class="bar-icon" style="color:#60a5fa">📅</div>
-            <div class="bar-body">
-              <div class="bar-head"><span class="name" style="color:#60a5fa">Maio/2026 (atual)</span><span class="val">R$ 1.213</span></div>
-              <div class="bar-track"><div class="bar-fill blue" style="width:50%"></div></div>
-              <div class="bar-sub">Parcial — 12 dias decorridos</div>
-            </div>
-          </div>
+        <h3 id="analytics-comparative-title">Comparativo mês a mês</h3>
+        <div id="analytics-comparative-list" class="tx-list">
+          <div class="bar-row"><div class="bar-icon">📅</div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:40%"></div></div></div></div>
+          <div class="bar-row"><div class="bar-icon">📅</div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:50%"></div></div></div></div>
+          <div class="bar-row"><div class="bar-icon">📅</div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:60%"></div></div></div></div>
         </div>
       </div>
 
       <div class="mock-card">
-        <h3>Top 5 estabelecimentos do semestre</h3>
-        <div class="tx-list">
-          <div class="tx-row"><div class="tx-icon">🍔</div><div class="tx-main"><div class="tx-desc">iFood</div><div class="tx-meta">38 pedidos • Alimentação</div></div><div class="tx-amt red">-R$ 1.214,90</div></div>
-          <div class="tx-row"><div class="tx-icon">🚗</div><div class="tx-main"><div class="tx-desc">Uber</div><div class="tx-meta">52 corridas • Transporte</div></div><div class="tx-amt red">-R$ 642,30</div></div>
-          <div class="tx-row"><div class="tx-icon">🛒</div><div class="tx-main"><div class="tx-desc">Pão de Açúcar</div><div class="tx-meta">9 compras • Mercado</div></div><div class="tx-amt red">-R$ 510,40</div></div>
-          <div class="tx-row"><div class="tx-icon">🎵</div><div class="tx-main"><div class="tx-desc">Spotify Premium</div><div class="tx-meta">6 cobranças • Recorrente</div></div><div class="tx-amt red">-R$ 119,40</div></div>
-          <div class="tx-row"><div class="tx-icon">📺</div><div class="tx-main"><div class="tx-desc">Netflix</div><div class="tx-meta">6 cobranças • Recorrente</div></div><div class="tx-amt red">-R$ 239,40</div></div>
+        <h3 id="analytics-merchants-title">Top estabelecimentos do período</h3>
+        <div id="analytics-merchants-list" class="tx-list">
+          <div class="empty" style="padding:16px;text-align:center;color:var(--text-3)">Carregando…</div>
         </div>
       </div>
 
       <div class="mock-card">
         <h3>Padrões detectados pela IA</h3>
-        <div class="tx-list">
-          <div class="tx-row">
-            <div class="tx-icon">🌙</div>
-            <div class="tx-main">
-              <div class="tx-desc">Você gasta 2,3x mais em iFood depois das 22h</div>
-              <div class="tx-meta">média noturna R$ 67 vs R$ 29 nas outras refeições</div>
-            </div>
-          </div>
-          <div class="tx-row">
-            <div class="tx-icon">📆</div>
-            <div class="tx-main">
-              <div class="tx-desc">Sextas e sábados concentram 51% do lazer</div>
-              <div class="tx-meta">média R$ 95 no fim de semana, R$ 18 nos dias úteis</div>
-            </div>
-          </div>
-          <div class="tx-row">
-            <div class="tx-icon">💸</div>
-            <div class="tx-main">
-              <div class="tx-desc">Salário gasto em 12 dias na média</div>
-              <div class="tx-meta">de 5/mês até dia 17 cai 80% da renda recebida</div>
-            </div>
-          </div>
-          <div class="tx-row">
-            <div class="tx-icon">🐷</div>
-            <div class="tx-main">
-              <div class="tx-desc">Dica do Piggy: pular 1 iFood/semana = R$ 240/mês</div>
-              <div class="tx-meta">Daria pra completar a viagem do Japão 3 meses antes.</div>
-            </div>
-          </div>
+        <div class="empty" style="padding:30px 16px;text-align:center;color:var(--text-3);font-size:.92rem">
+          <div style="font-size:2rem;margin-bottom:6px">🐷</div>
+          <div style="font-weight:600;color:var(--text-2);margin-bottom:4px">Em breve</div>
+          <div style="font-size:.84rem">Padrões temporais (noturno vs diurno, fins de semana, dias até queimar o salário) chegam na próxima Sprint junto da IA proativa.</div>
         </div>
       </div>
     </div>
@@ -2012,123 +1999,60 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
     <div class="mock-header">
       <p class="section-title" style="margin:0">Histórico</p>
       <div style="display:flex;gap:8px">
-        <button class="mock-cta outline">🔍 Buscar</button>
-        <button class="mock-cta outline">⚙ Filtros</button>
-        <button class="mock-cta">⬇ Exportar CSV</button>
+        <select id="history-period-select" class="period-pill" aria-label="Período">
+          <option value="1">📅 Últimos 30 dias</option>
+          <option value="3">📅 Últimos 3 meses</option>
+          <option value="6" selected>📅 Últimos 6 meses</option>
+          <option value="12">📅 Últimos 12 meses</option>
+        </select>
       </div>
     </div>
 
-    <div class="stats-row">
+    <div id="history-stats" class="stats-row history-stats">
       <div class="stat-tile">
-        <div class="stat-label">Lançamentos (maio)</div>
-        <div class="stat-value">38</div>
-        <div class="stat-delta" style="color:var(--text-3)">12 dias decorridos</div>
+        <div class="stat-label">Média / mês</div>
+        <div class="sk sk-h2"></div>
+        <div class="stat-delta" style="color:var(--text-3)">lançamentos</div>
       </div>
       <div class="stat-tile">
-        <div class="stat-label">Via WhatsApp</div>
-        <div class="stat-value" style="color:#22c55e">24</div>
-        <div class="stat-delta up">63% das entradas</div>
+        <div class="stat-label">Receitas</div>
+        <div class="sk sk-h2"></div>
+        <div class="stat-delta" style="color:var(--text-3)">no período</div>
       </div>
       <div class="stat-tile">
-        <div class="stat-label">Via Discord</div>
-        <div class="stat-value" style="color:#5865f2">9</div>
-        <div class="stat-delta up">24%</div>
+        <div class="stat-label">Despesas</div>
+        <div class="sk sk-h2"></div>
+        <div class="stat-delta" style="color:var(--text-3)">débito + cartão</div>
       </div>
       <div class="stat-tile">
-        <div class="stat-label">Via Web</div>
-        <div class="stat-value">5</div>
-        <div class="stat-delta" style="color:var(--text-3)">13%</div>
+        <div class="stat-label">Total no período</div>
+        <div class="sk sk-h2"></div>
+        <div class="stat-delta" style="color:var(--text-3)">todos os lançamentos</div>
       </div>
+    </div>
+
+    <div id="history-filter-chips" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:.78rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-right:4px">Tipo:</span>
+      <button class="filter-chip active" data-tipo="all">Todos</button>
+      <button class="filter-chip" data-tipo="despesa">Despesas</button>
+      <button class="filter-chip" data-tipo="receita">Receitas</button>
+      <button class="filter-chip" data-tipo="credito">Cartão</button>
+      <span id="history-active-filter" class="active-filter-badge" style="display:none"></span>
+    </div>
+
+    <div class="search-bar" style="margin-bottom:14px">
+      <input id="history-search-input" type="search"
+             placeholder="🔍 Buscar por nome, categoria ou nota… (ex: compra shopping)"
+             autocomplete="off" />
     </div>
 
     <div class="mock-card">
-      <div style="font-size:.78rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Hoje · 13 mai</div>
-      <div class="tx-list">
-        <div class="tx-row">
-          <div class="tx-icon" style="color:#fbbf24">🍔</div>
-          <div class="tx-main"><div class="tx-desc">iFood — Burger King<span class="tx-tag">whatsapp</span></div><div class="tx-meta">Alimentação • Nubank • 12:34</div></div>
-          <div class="tx-amt red">-R$ 38,90</div>
-        </div>
-        <div class="tx-row">
-          <div class="tx-icon" style="color:#60a5fa">🚗</div>
-          <div class="tx-main"><div class="tx-desc">Uber → trabalho<span class="tx-tag">whatsapp</span></div><div class="tx-meta">Transporte • Pix • 09:12</div></div>
-          <div class="tx-amt red">-R$ 18,50</div>
-        </div>
+      <div id="history-timeline">
+        <div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">Carregando lançamentos…</div>
       </div>
 
-      <div style="font-size:.78rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:18px 0 10px">Ontem · 12 mai</div>
-      <div class="tx-list">
-        <div class="tx-row">
-          <div class="tx-icon">🛒</div>
-          <div class="tx-main"><div class="tx-desc">Pão de Açúcar<span class="tx-tag">web</span></div><div class="tx-meta">Mercado • Nubank • 19:48</div></div>
-          <div class="tx-amt red">-R$ 142,50</div>
-        </div>
-        <div class="tx-row">
-          <div class="tx-icon">📦</div>
-          <div class="tx-main"><div class="tx-desc">Compra parcelada (1/4)<span class="tx-tag">discord</span></div><div class="tx-meta">Outros • Cartão Nubank • 18:22</div></div>
-          <div class="tx-amt red">-R$ 100,00</div>
-        </div>
-        <div class="tx-row">
-          <div class="tx-icon" style="color:#34d399">💰</div>
-          <div class="tx-main"><div class="tx-desc">Reembolso Uber<span class="tx-tag">whatsapp</span></div><div class="tx-meta">Transporte • Pix • 15:10</div></div>
-          <div class="tx-amt green">+R$ 24,00</div>
-        </div>
-        <div class="tx-row">
-          <div class="tx-icon">🎮</div>
-          <div class="tx-main"><div class="tx-desc">Steam — Hollow Knight<span class="tx-tag">whatsapp</span></div><div class="tx-meta">Lazer • Cartão Itaú • 11:03</div></div>
-          <div class="tx-amt red">-R$ 32,99</div>
-        </div>
-      </div>
-
-      <div style="font-size:.78rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:18px 0 10px">10 mai · sábado</div>
-      <div class="tx-list">
-        <div class="tx-row">
-          <div class="tx-icon" style="color:#34d399">💸</div>
-          <div class="tx-main"><div class="tx-desc">Salário<span class="tx-tag">whatsapp</span></div><div class="tx-meta">Receita • Itaú • 08:00</div></div>
-          <div class="tx-amt green">+R$ 4.200,00</div>
-        </div>
-        <div class="tx-row">
-          <div class="tx-icon">📺</div>
-          <div class="tx-main"><div class="tx-desc">Netflix Premium<span class="tx-tag">recorrente</span></div><div class="tx-meta">Lazer • Cartão Nubank • 03:00</div></div>
-          <div class="tx-amt red">-R$ 39,90</div>
-        </div>
-        <div class="tx-row">
-          <div class="tx-icon">🍔</div>
-          <div class="tx-main"><div class="tx-desc">iFood — Mc Donalds<span class="tx-tag">whatsapp</span></div><div class="tx-meta">Alimentação • Cartão Nubank • 22:48</div></div>
-          <div class="tx-amt red">-R$ 47,80</div>
-        </div>
-      </div>
-
-      <div style="font-size:.78rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:18px 0 10px">8 mai · quinta</div>
-      <div class="tx-list">
-        <div class="tx-row">
-          <div class="tx-icon">💊</div>
-          <div class="tx-main"><div class="tx-desc">Drogasil — paracetamol<span class="tx-tag">discord</span></div><div class="tx-meta">Saúde • Pix • 20:14</div></div>
-          <div class="tx-amt red">-R$ 14,90</div>
-        </div>
-        <div class="tx-row">
-          <div class="tx-icon">🎵</div>
-          <div class="tx-main"><div class="tx-desc">Spotify Premium<span class="tx-tag">recorrente</span></div><div class="tx-meta">Lazer • Cartão Itaú • 09:00</div></div>
-          <div class="tx-amt red">-R$ 21,90</div>
-        </div>
-      </div>
-
-      <div style="font-size:.78rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:18px 0 10px">5 mai · segunda</div>
-      <div class="tx-list">
-        <div class="tx-row">
-          <div class="tx-icon">🏠</div>
-          <div class="tx-main"><div class="tx-desc">Aluguel<span class="tx-tag">recorrente</span></div><div class="tx-meta">Casa • Boleto • 08:00</div></div>
-          <div class="tx-amt red">-R$ 1.450,00</div>
-        </div>
-        <div class="tx-row">
-          <div class="tx-icon" style="color:#34d399">🛟</div>
-          <div class="tx-main"><div class="tx-desc">Aporte caixinha Reserva<span class="tx-tag">automático</span></div><div class="tx-meta">Transferência interna • Itaú → Caixinha</div></div>
-          <div class="tx-amt green">→ R$ 200,00</div>
-        </div>
-      </div>
-
-      <div style="text-align:center;padding:18px 0 6px">
-        <button class="mock-cta outline">Carregar mais (32 anteriores)</button>
+      <div id="history-load-more-wrap" style="text-align:center;padding:18px 0 6px;display:none">
+        <button id="history-load-more-btn" class="mock-cta outline">Carregar mais</button>
       </div>
     </div>
   </div>
@@ -3407,8 +3331,9 @@ function navigateTo(view) {
   toggleSidenav(false);
   // Scrollar pro topo quando troca de view
   try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch(_) {}
-  // Lazy render dos gráficos mockados da view Análises
-  if (view === "analytics") renderMockAnalyticsCharts();
+  // Lazy load da view Análises (5 endpoints em paralelo, stale-while-revalidate)
+  if (view === "analytics") loadAnalyticsView();
+  if (view === "history") loadHistoryView();
   if (view === "cards") loadCardsView();
   if (view === "installments") loadInstallmentsView();
   if (view === "categories") loadCategoriesView();
@@ -6186,112 +6111,721 @@ async function deleteRecurringFromModal() {
   }
 }
 
-// ── Gráficos mockados da view Análises ─────────────────────────────────
-let _mockChartsRendered = false;
-let _mockChartInstances = [];
-function renderMockAnalyticsCharts() {
-  if (_mockChartsRendered) return;
-  if (typeof Chart === "undefined") return;
-  _mockChartsRendered = true;
+// ── View Análises (Sprint 6) ─────────────────────────────────────────────
+// Cada widget tem dado próprio vindo de um endpoint separado, pra preparar o
+// painel personalizável que vem em breve (user vai poder ligar/desligar cards).
+let _analyticsCache = null;        // { kpis, evolution, categories, weekday, merchants, months }
+let _analyticsRetryTimer = null;
+let _analyticsFetchInFlight = null;
+let _analyticsChartInstances = [];
+let _analyticsCurrentMonths = 6;
 
+function _analyticsTheme() {
   const isLight = document.body.classList.contains("light");
-  const tickColor = isLight ? "rgba(15,23,42,0.65)" : "rgba(255,255,255,0.55)";
-  const grid = isLight ? "rgba(15,23,42,0.08)" : "rgba(255,255,255,0.05)";
-  Chart.defaults.color = tickColor;
+  return {
+    isLight,
+    tickColor: isLight ? "rgba(15,23,42,0.65)" : "rgba(255,255,255,0.55)",
+    grid:      isLight ? "rgba(15,23,42,0.08)" : "rgba(255,255,255,0.05)",
+  };
+}
+
+function _destroyAnalyticsCharts() {
+  if (Array.isArray(_analyticsChartInstances) && _analyticsChartInstances.length) {
+    _analyticsChartInstances.forEach(c => { try { c.destroy(); } catch(_) {} });
+  }
+  _analyticsChartInstances = [];
+}
+
+async function loadAnalyticsView(forceFresh = false, months = null) {
+  if (months != null) _analyticsCurrentMonths = Math.max(1, Math.min(36, parseInt(months, 10) || 6));
+
+  const statsEl = document.getElementById("analytics-stats");
+  if (!statsEl) return;
+
+  if (!USER_ID) {
+    if (!_analyticsRetryTimer) {
+      _analyticsRetryTimer = setInterval(() => {
+        if (USER_ID) {
+          clearInterval(_analyticsRetryTimer);
+          _analyticsRetryTimer = null;
+          loadAnalyticsView(forceFresh);
+        }
+      }, 250);
+    }
+    return;
+  }
+
+  // Stale-while-revalidate: já tem cache do mesmo período → renderiza e
+  // revalida em background.
+  if (_analyticsCache && _analyticsCache.months === _analyticsCurrentMonths && !forceFresh) {
+    renderAnalyticsView(_analyticsCache);
+    _fetchAnalyticsAll(_analyticsCurrentMonths).then(fresh => {
+      if (fresh) {
+        _analyticsCache = fresh;
+        renderAnalyticsView(fresh);
+      }
+    }).catch(() => {});
+    return;
+  }
+
+  try {
+    const data = await _fetchAnalyticsAll(_analyticsCurrentMonths);
+    _analyticsCache = data;
+    renderAnalyticsView(data);
+  } catch (err) {
+    statsEl.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:30px;text-align:center;color:var(--red)">Erro ao carregar análises: ${escapeHtmlSafe(String(err.message || err))}</div>`;
+  }
+}
+
+async function _fetchAnalyticsAll(months) {
+  if (_analyticsFetchInFlight) return _analyticsFetchInFlight;
+  _analyticsFetchInFlight = (async () => {
+    try {
+      const base = `/analytics/${USER_ID}`;
+      const qs = `?months=${months}`;
+      const [k, ev, cat, wk, tm] = await Promise.all([
+        fetch(`${base}/kpis${qs}`,           { credentials:"same-origin" }).then(r => r.json()),
+        fetch(`${base}/evolution${qs}`,      { credentials:"same-origin" }).then(r => r.json()),
+        fetch(`${base}/categories${qs}`,     { credentials:"same-origin" }).then(r => r.json()),
+        fetch(`${base}/weekday-pattern${qs}`,{ credentials:"same-origin" }).then(r => r.json()),
+        fetch(`${base}/top-merchants${qs}&limit=8`, { credentials:"same-origin" }).then(r => r.json()),
+      ]);
+      return {
+        kpis:       k.kpis       || null,
+        evolution:  ev.evolution || [],
+        categories: cat.categories || [],
+        weekday:    wk.weekdays  || [],
+        merchants:  tm.merchants || [],
+        months,
+      };
+    } finally {
+      _analyticsFetchInFlight = null;
+    }
+  })();
+  return _analyticsFetchInFlight;
+}
+
+function renderAnalyticsView(data) {
+  _destroyAnalyticsCharts();
+  renderAnalyticsKPIs(data.kpis, data.months);
+  renderAnalyticsEvolution(data.evolution);
+  renderAnalyticsIncomeExpense(data.evolution);
+  renderAnalyticsCategoryDonut(data.categories);
+  renderAnalyticsWeekday(data.weekday);
+  renderAnalyticsComparative(data.evolution);
+  renderAnalyticsMerchants(data.merchants, data.months);
+}
+
+function _fmtBRL(v) {
+  return "R$ " + Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+function _fmtBRLshort(v) {
+  // formato compacto pros gráficos: "R$ 1,2k" / "R$ 487"
+  const n = Number(v || 0);
+  if (Math.abs(n) >= 1000) return "R$ " + (n / 1000).toFixed(1).replace(".", ",") + "k";
+  return "R$ " + Math.round(n);
+}
+function _fmtMonthLabel(ym) {
+  // "2026-05" → "Mai/26"
+  const m = /^(\d{4})-(\d{2})$/.exec(String(ym || ""));
+  if (!m) return ym || "";
+  const months = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+  return months[parseInt(m[2], 10) - 1] + "/" + m[1].slice(2);
+}
+function _fmtDateBR(iso) {
+  if (!iso) return "—";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  return m ? `${m[3]}/${m[2]}` : iso;
+}
+function _deltaLabel(pct) {
+  if (pct == null) return { text: "—", cls: "" };
+  const sign = pct > 0 ? "+" : "";
+  const cls = pct > 0 ? "down" : (pct < 0 ? "up" : "");
+  return { text: `${sign}${pct.toFixed(1).replace(".", ",")}% vs período anterior`, cls };
+}
+
+function renderAnalyticsKPIs(k, months) {
+  const root = document.getElementById("analytics-stats");
+  if (!root) return;
+  if (!k) {
+    root.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:20px;text-align:center;color:var(--text-3)">Sem dados no período.</div>`;
+    return;
+  }
+  const n = Math.max(1, months || 6);
+  const avgExpense = k.total_expense / n;
+  const avgIncome  = k.total_income  / n;
+  const dExpense = _deltaLabel(k.delta_pct?.expense ?? null);
+  const dIncome  = _deltaLabel(k.delta_pct?.income  ?? null);
+  // Inverte semântica do delta de despesa: mais despesa = ruim, então
+  // delta positivo deve ficar "down" (vermelho). Recebe assim do _deltaLabel.
+  const savings = (k.savings_rate || 0) * 100;
+  const savingsLabel = savings >= 15
+    ? "acima da média BR (15%)"
+    : (savings > 0 ? "abaixo da média BR (15%)" : "negativo no período");
+  const savingsCls = savings >= 15 ? "up" : "down";
+
+  const peak = k.peak_day;
+  const peakHTML = peak
+    ? `<div class="stat-value">${_fmtDateBR(peak.date)}</div>
+       <div class="stat-delta down">${_fmtBRL(peak.total)} em gastos</div>`
+    : `<div class="stat-value" style="color:var(--text-3)">—</div>
+       <div class="stat-delta">sem gastos no período</div>`;
+
+  root.innerHTML = `
+    <div class="stat-tile">
+      <div class="stat-label">Gasto médio mensal</div>
+      <div class="stat-value">${_fmtBRL(avgExpense)}</div>
+      <div class="stat-delta ${dExpense.cls}">${dExpense.text}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">Receita média</div>
+      <div class="stat-value" style="color:var(--green)">${_fmtBRL(avgIncome)}</div>
+      <div class="stat-delta ${dIncome.cls}">${dIncome.text}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">Taxa de poupança</div>
+      <div class="stat-value" style="color:#60a5fa">${savings.toFixed(1).replace(".", ",")}%</div>
+      <div class="stat-delta ${savingsCls}">${savingsLabel}</div>
+    </div>
+    <div class="stat-tile">
+      <div class="stat-label">Maior dia do período</div>
+      ${peakHTML}
+    </div>
+  `;
+}
+
+function _trackAnalyticsChart(el, cfg) {
+  if (!el || typeof Chart === "undefined") return;
+  _analyticsChartInstances.push(new Chart(el, cfg));
+}
+
+function renderAnalyticsEvolution(evolution) {
+  const el = document.getElementById("mock-evolution-chart");
+  if (!el || typeof Chart === "undefined") return;
+  const t = _analyticsTheme();
+  Chart.defaults.color = t.tickColor;
   Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif";
-
-  const trackChart = (el, cfg) => { if (el) _mockChartInstances.push(new Chart(el, cfg)); };
-
-  // 1) Evolução de gastos (line, 6 meses)
-  const evoEl = document.getElementById("mock-evolution-chart");
-  if (evoEl) trackChart(evoEl, {
+  const labels  = evolution.map(b => _fmtMonthLabel(b.month));
+  const expense = evolution.map(b => b.expense);
+  _trackAnalyticsChart(el, {
     type: "line",
     data: {
-      labels: ["Dez/25", "Jan/26", "Fev/26", "Mar/26", "Abr/26", "Mai/26"],
+      labels,
       datasets: [{
         label: "Gastos",
-        data: [1890, 1620, 1180, 1420, 1345, 1213],
+        data: expense,
         borderColor: "#a78bfa",
         backgroundColor: "rgba(167,139,250,.15)",
         fill: true, tension: .35, borderWidth: 2.5,
-        pointBackgroundColor: "#a78bfa", pointBorderColor: "#fff", pointBorderWidth: 2, pointRadius: 4,
+        pointBackgroundColor: "#a78bfa",
+        pointBorderColor: t.isLight ? "#fff" : "#0f1422",
+        pointBorderWidth: 2, pointRadius: 4,
       }]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false } },
       scales: {
-        x: { grid: { color: grid }, ticks: { color: tickColor } },
-        y: { grid: { color: grid }, ticks: { color: tickColor, callback: v => "R$ " + v } }
-      }
-    }
-  });
-
-  // 2) Receita vs Despesa (bar grouped)
-  const incEl = document.getElementById("mock-income-expense-chart");
-  if (incEl) trackChart(incEl, {
-    type: "bar",
-    data: {
-      labels: ["Jan", "Fev", "Mar", "Abr", "Mai"],
-      datasets: [
-        { label: "Receita", data: [4200, 4200, 4380, 4200, 4200], backgroundColor: "#34d399", borderRadius: 6 },
-        { label: "Despesa", data: [1620, 1180, 1420, 1345, 1213], backgroundColor: "#f87171", borderRadius: 6 }
-      ]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: "bottom", labels: { color: tickColor, boxWidth: 12 } } },
-      scales: {
-        x: { grid: { display: false }, ticks: { color: tickColor } },
-        y: { grid: { color: grid }, ticks: { color: tickColor, callback: v => "R$ " + v } }
-      }
-    }
-  });
-
-  // 3) Distribuição por categoria (donut)
-  const donutEl = document.getElementById("mock-category-donut");
-  if (donutEl) trackChart(donutEl, {
-    type: "doughnut",
-    data: {
-      labels: ["Alimentação", "Transporte", "Lazer", "Mercado", "Saúde", "Roupas", "Educação", "Outros"],
-      datasets: [{
-        data: [487.30, 230.80, 180, 142.50, 95, 78, 90, 60],
-        backgroundColor: ["#fbbf24","#60a5fa","#a78bfa","#34d399","#f87171","#ec4899","#0ea5e9","#6b7280"],
-        borderColor: "rgba(0,0,0,.2)", borderWidth: 2
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      cutout: "62%",
-      plugins: {
-        legend: { position: "right", labels: { color: tickColor, boxWidth: 10, padding: 8, font: { size: 11 } } }
-      }
-    }
-  });
-
-  // 4) Padrão semanal (bar)
-  const wkEl = document.getElementById("mock-weekday-chart");
-  if (wkEl) trackChart(wkEl, {
-    type: "bar",
-    data: {
-      labels: ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"],
-      datasets: [{
-        label: "Média de gasto",
-        data: [42, 28, 35, 31, 95, 128, 64],
-        backgroundColor: ["#60a5fa","#60a5fa","#60a5fa","#60a5fa","#f87171","#f87171","#fbbf24"],
-        borderRadius: 8
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { grid: { display: false }, ticks: { color: tickColor } },
-        y: { grid: { color: grid }, ticks: { color: tickColor, callback: v => "R$ " + v } }
+        x: { grid: { color: t.grid }, ticks: { color: t.tickColor } },
+        y: { grid: { color: t.grid }, ticks: { color: t.tickColor, callback: v => _fmtBRLshort(v) } }
       }
     }
   });
 }
+
+function renderAnalyticsIncomeExpense(evolution) {
+  const el = document.getElementById("mock-income-expense-chart");
+  if (!el || typeof Chart === "undefined") return;
+  const t = _analyticsTheme();
+  const labels  = evolution.map(b => _fmtMonthLabel(b.month));
+  _trackAnalyticsChart(el, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { label: "Receita", data: evolution.map(b => b.income),  backgroundColor: "#34d399", borderRadius: 6 },
+        { label: "Despesa", data: evolution.map(b => b.expense), backgroundColor: "#f87171", borderRadius: 6 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: "bottom", labels: { color: t.tickColor, boxWidth: 12 } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: t.tickColor } },
+        y: { grid: { color: t.grid }, ticks: { color: t.tickColor, callback: v => _fmtBRLshort(v) } }
+      }
+    }
+  });
+}
+
+const _CATEGORY_PALETTE = [
+  "#fbbf24","#60a5fa","#a78bfa","#34d399","#f87171","#ec4899","#0ea5e9","#6b7280","#facc15","#22d3ee"
+];
+
+function renderAnalyticsCategoryDonut(categories) {
+  const el = document.getElementById("mock-category-donut");
+  if (!el || typeof Chart === "undefined") return;
+  const t = _analyticsTheme();
+  if (!categories || !categories.length) {
+    const ctx = el.getContext("2d");
+    ctx.clearRect(0, 0, el.width, el.height);
+    return;
+  }
+  const labels = categories.map(c => c.name);
+  const data   = categories.map(c => c.total);
+  const colors = categories.map((c, i) => c.color || _CATEGORY_PALETTE[i % _CATEGORY_PALETTE.length]);
+  _trackAnalyticsChart(el, {
+    type: "doughnut",
+    data: { labels, datasets: [{
+      data, backgroundColor: colors,
+      borderColor: t.isLight ? "rgba(15,23,42,0.08)" : "rgba(0,0,0,.2)",
+      borderWidth: 2,
+    }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      cutout: "62%",
+      plugins: {
+        legend: { position: "right", labels: { color: t.tickColor, boxWidth: 10, padding: 8, font: { size: 11 } } },
+        tooltip: { callbacks: { label: ctx => `${ctx.label}: ${_fmtBRL(ctx.parsed)}` } }
+      }
+    }
+  });
+}
+
+function renderAnalyticsWeekday(weekday) {
+  const el = document.getElementById("mock-weekday-chart");
+  if (!el || typeof Chart === "undefined") return;
+  const t = _analyticsTheme();
+  const labels  = weekday.map(w => w.label[0].toUpperCase() + w.label.slice(1));
+  const data    = weekday.map(w => w.avg);
+  const max     = Math.max(...data, 1);
+  const colors  = weekday.map(w => {
+    if ([0, 6].includes(w.dow)) return "#f87171"; // dom/sáb
+    if (w.avg / max > 0.8)       return "#fbbf24";
+    return "#60a5fa";
+  });
+  _trackAnalyticsChart(el, {
+    type: "bar",
+    data: { labels, datasets: [{ label: "Média/dia", data, backgroundColor: colors, borderRadius: 8 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => `Média: ${_fmtBRL(ctx.parsed.y)}` } }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: t.tickColor } },
+        y: { grid: { color: t.grid }, ticks: { color: t.tickColor, callback: v => _fmtBRLshort(v) } }
+      }
+    }
+  });
+}
+
+function renderAnalyticsComparative(evolution) {
+  const root = document.getElementById("analytics-comparative-list");
+  const title = document.getElementById("analytics-comparative-title");
+  if (!root) return;
+  if (title) title.textContent = `Comparativo mês a mês`;
+  if (!evolution || !evolution.length) {
+    root.innerHTML = `<div class="empty" style="padding:16px;text-align:center;color:var(--text-3)">Sem dados.</div>`;
+    return;
+  }
+  const max = Math.max(...evolution.map(b => b.expense), 1);
+  const todayY = new Date().getFullYear();
+  const todayM = new Date().getMonth() + 1;
+  const rows = evolution.map(b => {
+    const [yStr, mStr] = b.month.split("-");
+    const y = parseInt(yStr, 10);
+    const m = parseInt(mStr, 10);
+    const isCurrent = (y === todayY && m === todayM);
+    const pct = (b.expense / max) * 100;
+    const cls = b.expense / max > 0.75 ? "red"
+              : b.expense / max > 0.5  ? "yellow"
+              : "green";
+    const monthNames = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+    const label = `${monthNames[m - 1]}/${y}${isCurrent ? " (atual)" : ""}`;
+    return `
+      <div class="bar-row">
+        <div class="bar-icon" ${isCurrent ? 'style="color:#60a5fa"' : ""}>📅</div>
+        <div class="bar-body">
+          <div class="bar-head">
+            <span class="name" ${isCurrent ? 'style="color:#60a5fa"' : ""}>${escapeHtmlSafe(label)}</span>
+            <span class="val">${_fmtBRL(b.expense)}</span>
+          </div>
+          <div class="bar-track"><div class="bar-fill ${isCurrent ? "blue" : cls}" style="width:${pct.toFixed(1)}%"></div></div>
+        </div>
+      </div>`;
+  }).join("");
+  root.innerHTML = rows;
+}
+
+const _MERCHANT_EMOJIS = {
+  ifood: "🍔", uber: "🚗", "99": "🚗", spotify: "🎵", netflix: "📺",
+  mercado: "🛒", padoca: "🥖", farma: "💊", droga: "💊", posto: "⛽",
+  amazon: "📦", aliexpress: "📦", magalu: "📦", americanas: "📦",
+  steam: "🎮", playstation: "🎮", apple: "🍎", icloud: "☁️",
+  google: "🔎", youtube: "▶️", aluguel: "🏠", condom: "🏠",
+};
+function _merchantEmoji(name) {
+  const key = (name || "").toLowerCase();
+  for (const [k, v] of Object.entries(_MERCHANT_EMOJIS)) {
+    if (key.includes(k)) return v;
+  }
+  return "💸";
+}
+
+function renderAnalyticsMerchants(merchants, months) {
+  const root  = document.getElementById("analytics-merchants-list");
+  const title = document.getElementById("analytics-merchants-title");
+  if (!root) return;
+  if (title) title.textContent = `Top estabelecimentos · últimos ${months || 6} meses`;
+  if (!merchants || !merchants.length) {
+    root.innerHTML = `<div class="empty" style="padding:16px;text-align:center;color:var(--text-3)">Sem estabelecimentos registrados no período.</div>`;
+    return;
+  }
+  root.innerHTML = merchants.slice(0, 8).map(m => {
+    const emoji = _merchantEmoji(m.name);
+    // Trunca nome muito longo (>40 chars) — protege layout contra notas
+    // bagunçadas tipo "compras [Parcelamento removido em DD/MM/YYYY]".
+    const rawName = String(m.name || "Sem nome");
+    const displayName = rawName.length > 40 ? rawName.slice(0, 37) + "…" : rawName;
+    const debCred = (m.sources?.debito && m.sources?.credito)
+      ? `${m.count}× • débito + crédito`
+      : (m.sources?.credito)
+        ? `${m.count}× • crédito`
+        : `${m.count}× • débito`;
+    return `
+      <div class="tx-row">
+        <div class="tx-icon">${emoji}</div>
+        <div class="tx-main">
+          <div class="tx-desc" title="${escapeHtmlSafe(rawName)}">${escapeHtmlSafe(displayName)}</div>
+          <div class="tx-meta">${escapeHtmlSafe(debCred)}</div>
+        </div>
+        <div class="tx-amt red">-${_fmtBRL(m.total)}</div>
+      </div>`;
+  }).join("");
+}
+
+// Wire up: dropdown de período recarrega view.
+document.addEventListener("change", (e) => {
+  if (e.target && e.target.id === "analytics-period-select") {
+    loadAnalyticsView(true, e.target.value);
+  }
+  if (e.target && e.target.id === "history-period-select") {
+    _historyFilters.months = parseInt(e.target.value, 10) || 6;
+    _historyResetAndReload();
+  }
+});
+
+// ── View Histórico (Sprint 6) ────────────────────────────────────────────
+// Estado dos filtros — guarda tudo num objeto pra facilitar diff e reload.
+let _historyFilters = {
+  months: 6,           // período principal (dropdown)
+  tipo: "all",         // chip de tipo: all|despesa|receita|credito
+  q: "",               // busca textual (debounce)
+  page: 1,
+};
+let _historyStatsCache = null;
+let _historyRetryTimer = null;
+let _historyListInFlight = null;
+let _historySearchDebounce = null;
+
+function _historyResetAndReload() {
+  _historyFilters.page = 1;
+  _renderHistoryActiveFilter();
+  loadHistoryView(true);
+}
+
+async function loadHistoryView(forceFresh = false) {
+  const timeline = document.getElementById("history-timeline");
+  if (!timeline) return;
+  if (!USER_ID) {
+    if (!_historyRetryTimer) {
+      _historyRetryTimer = setInterval(() => {
+        if (USER_ID) {
+          clearInterval(_historyRetryTimer);
+          _historyRetryTimer = null;
+          loadHistoryView(forceFresh);
+        }
+      }, 250);
+    }
+    return;
+  }
+
+  // Stats e lista são fetched em paralelo. Stats só depende do período
+  // (não dos filtros), então serve do cache se o período não mudou.
+  const statsNeeded = !_historyStatsCache || _historyStatsCache.months !== _historyFilters.months || forceFresh;
+  const [stats, list] = await Promise.all([
+    statsNeeded ? _fetchHistoryStats(_historyFilters.months) : Promise.resolve(_historyStatsCache),
+    _fetchHistoryList(_historyFilters),
+  ]);
+  if (statsNeeded && stats) _historyStatsCache = { ...stats, months: _historyFilters.months };
+
+  renderHistoryStats(_historyStatsCache);
+  renderHistoryTimeline(list, /*append=*/false);
+}
+
+async function _fetchHistoryStats(months) {
+  try {
+    const r = await fetch(`/history/${USER_ID}/quick-stats?months=${months}`, { credentials:"same-origin" });
+    return await r.json();
+  } catch (_) { return null; }
+}
+
+async function _fetchHistoryList(filters, opts = {}) {
+  if (_historyListInFlight && !opts.allowParallel) {
+    // Cancel anterior implicitamente — espera o último vencer no DOM.
+    // Suficiente pra debounce de digitação.
+    try { await _historyListInFlight; } catch (_) {}
+  }
+  const qs = _buildHistoryQuery(filters);
+  _historyListInFlight = (async () => {
+    try {
+      const r = await fetch(`/history/${USER_ID}/list?${qs}`, { credentials:"same-origin" });
+      return await r.json();
+    } finally {
+      _historyListInFlight = null;
+    }
+  })();
+  return _historyListInFlight;
+}
+
+function _buildHistoryQuery(filters) {
+  const p = new URLSearchParams();
+  // Janela de N meses cheios terminando no mês atual (resolve_window).
+  // Calcula localmente pq o endpoint /list não aceita ?months.
+  const today = new Date();
+  const start = new Date(today.getFullYear(), today.getMonth() - (filters.months - 1), 1);
+  const end = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  p.set("from", _isoDate(start));
+  p.set("to", _isoDate(end));
+  if (filters.tipo && filters.tipo !== "all") p.set("tipo", filters.tipo);
+  if (filters.q && filters.q.trim()) p.set("q", filters.q.trim());
+  p.set("page", String(filters.page || 1));
+  p.set("limit", "50");
+  return p.toString();
+}
+
+function _isoDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function renderHistoryStats(s) {
+  if (!s) return;
+  const grid = document.getElementById("history-stats");
+  if (!grid) return;
+  const tiles = grid.querySelectorAll(".stat-tile");
+  // Ordem fixa: Média/mês, Receitas, Despesas, Total no período
+  const data = [
+    {
+      value: s.avg_per_month != null ? Number(s.avg_per_month).toLocaleString("pt-BR", { maximumFractionDigits:1 }) : "—",
+      sub: "lançamentos / mês",
+      color: "#60a5fa",
+    },
+    {
+      value: s.receitas_count != null ? s.receitas_count : "—",
+      sub: "no período",
+      color: "var(--green)",
+    },
+    {
+      value: s.despesas_count != null ? s.despesas_count : "—",
+      sub: "débito + cartão",
+      color: "#f87171",
+    },
+    {
+      value: s.total_count != null ? s.total_count : "—",
+      sub: "todos os lançamentos",
+      color: "var(--text)",
+    },
+  ];
+  tiles.forEach((tile, i) => {
+    const d = data[i];
+    if (!d) return;
+    const valueOld = tile.querySelector(".stat-value, .sk");
+    const delta = tile.querySelector(".stat-delta");
+    if (valueOld) {
+      const newVal = document.createElement("div");
+      newVal.className = "stat-value";
+      newVal.style.color = d.color;
+      newVal.textContent = String(d.value);
+      valueOld.replaceWith(newVal);
+    }
+    if (delta) {
+      delta.textContent = d.sub;
+      delta.style.color = "var(--text-3)";
+    }
+  });
+}
+
+function _renderHistoryActiveFilter() {
+  const badge = document.getElementById("history-active-filter");
+  if (!badge) return;
+  const parts = [];
+  if (_historyFilters.q && _historyFilters.q.trim()) parts.push(`busca: "${_historyFilters.q.trim()}"`);
+  if (!parts.length) {
+    badge.style.display = "none";
+    badge.innerHTML = "";
+    return;
+  }
+  badge.style.display = "inline-flex";
+  badge.innerHTML = `Filtrando: ${escapeHtmlSafe(parts.join(" · "))}<span class="clear-x" onclick="_clearHistoryFilters()">×</span>`;
+}
+
+function _clearHistoryFilters() {
+  _historyFilters.q = "";
+  const input = document.getElementById("history-search-input");
+  if (input) input.value = "";
+  _historyResetAndReload();
+}
+
+function renderHistoryTimeline(payload, append = false) {
+  const root = document.getElementById("history-timeline");
+  const moreWrap = document.getElementById("history-load-more-wrap");
+  if (!root) return;
+  if (!payload || !payload.ok) {
+    root.innerHTML = `<div class="empty" style="padding:30px;text-align:center;color:var(--red)">Erro ao carregar histórico.</div>`;
+    if (moreWrap) moreWrap.style.display = "none";
+    return;
+  }
+
+  const items = payload.items || [];
+  if (!items.length) {
+    root.innerHTML = `<div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">Nenhum lançamento encontrado com os filtros atuais.</div>`;
+    if (moreWrap) moreWrap.style.display = "none";
+    return;
+  }
+
+  // Agrupa por dia (date string YYYY-MM-DD).
+  const groups = new Map();
+  for (const i of items) {
+    const key = (i.criado_em || "").slice(0, 10);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(i);
+  }
+
+  const html = Array.from(groups.entries()).map(([dayKey, list]) => {
+    const header = _historyDayHeader(dayKey);
+    const rows = list.map(_historyRowHTML).join("");
+    return `
+      <div style="font-size:.78rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:18px 0 10px">${escapeHtmlSafe(header)}</div>
+      <div class="tx-list">${rows}</div>
+    `;
+  }).join("");
+
+  if (append) {
+    // Append: tira a mensagem "empty" se houver e concatena novo HTML.
+    const empty = root.querySelector(".empty");
+    if (empty) empty.remove();
+    root.insertAdjacentHTML("beforeend", html);
+  } else {
+    root.innerHTML = html;
+  }
+
+  // Paginação: mostra "Carregar mais" se há mais páginas.
+  const totalPages = payload.total_pages || 0;
+  const currentPage = payload.page || 1;
+  if (totalPages > currentPage) {
+    if (moreWrap) {
+      moreWrap.style.display = "";
+      const btn = document.getElementById("history-load-more-btn");
+      if (btn) {
+        btn.textContent = `Carregar mais (${payload.total - currentPage * 50} restantes)`;
+        btn.disabled = false;
+      }
+    }
+  } else {
+    if (moreWrap) moreWrap.style.display = "none";
+  }
+}
+
+function _historyDayHeader(dayKey) {
+  if (!dayKey) return "—";
+  const today = new Date();
+  const todayKey = _isoDate(today);
+  const yesterday = new Date(today.getTime() - 86400000);
+  const yesterdayKey = _isoDate(yesterday);
+  if (dayKey === todayKey) {
+    return `Hoje · ${_fmtDayLabel(dayKey)}`;
+  }
+  if (dayKey === yesterdayKey) {
+    return `Ontem · ${_fmtDayLabel(dayKey)}`;
+  }
+  return _fmtDayLabel(dayKey, /*includeWeekday=*/true);
+}
+function _fmtDayLabel(dayKey, includeWeekday = false) {
+  const [y, m, d] = dayKey.split("-").map(s => parseInt(s, 10));
+  if (!y || !m || !d) return dayKey;
+  const months = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
+  const weekdays = ["domingo","segunda","terça","quarta","quinta","sexta","sábado"];
+  const base = `${d} ${months[m - 1]}`;
+  if (!includeWeekday) return base;
+  const dt = new Date(y, m - 1, d);
+  return `${base} · ${weekdays[dt.getDay()]}`;
+}
+
+function _historyRowHTML(i) {
+  const isReceita = i.tipo === "receita";
+  const isCredito = i.tipo === "credito";
+  const isDespesa = i.tipo === "despesa" || i.tipo === "saida";
+  const valor = Number(i.valor || 0);
+  const sign = isReceita ? "+" : (isCredito || isDespesa ? "-" : "");
+  const amtClass = isReceita ? "green" : "red";
+  const icon = isReceita ? "💸" : (isCredito ? "💳" : "🧾");
+  const time = (i.criado_em || "").slice(11, 16);
+  const desc = i.alvo || i.nota || "—";
+  const meta = [];
+  if (i.categoria) meta.push(i.categoria);
+  if (isCredito && i.alvo)  meta.push(`Cartão ${i.alvo}`);
+  if (!isCredito && i.nota && i.alvo && i.nota !== i.alvo) meta.push(i.nota);
+  if (time) meta.push(time);
+  return `
+    <div class="tx-row">
+      <div class="tx-icon" style="color:${isReceita ? "#34d399" : (isCredito ? "#a78bfa" : "#fbbf24")}">${icon}</div>
+      <div class="tx-main">
+        <div class="tx-desc">${escapeHtmlSafe(_truncate(desc, 60))}</div>
+        <div class="tx-meta">${escapeHtmlSafe(meta.join(" • "))}</div>
+      </div>
+      <div class="tx-amt ${amtClass}">${sign}${_fmtBRL(valor)}</div>
+    </div>
+  `;
+}
+
+function _truncate(s, n) {
+  s = String(s || "");
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+// ── Wire-up de eventos da view Histórico ─────────────────────────────────
+document.addEventListener("input", (e) => {
+  if (e.target && e.target.id === "history-search-input") {
+    if (_historySearchDebounce) clearTimeout(_historySearchDebounce);
+    _historySearchDebounce = setTimeout(() => {
+      _historyFilters.q = e.target.value || "";
+      _historyResetAndReload();
+    }, 300);
+  }
+});
+
+document.addEventListener("click", async (e) => {
+  // Filter chip (tipo)
+  const chip = e.target.closest?.('#history-filter-chips .filter-chip');
+  if (chip) {
+    document.querySelectorAll('#history-filter-chips .filter-chip').forEach(c => c.classList.remove("active"));
+    chip.classList.add("active");
+    _historyFilters.tipo = chip.dataset.tipo || "all";
+    _historyResetAndReload();
+    return;
+  }
+  // Botão "Carregar mais"
+  if (e.target && e.target.id === "history-load-more-btn") {
+    e.target.disabled = true;
+    e.target.textContent = "Carregando…";
+    _historyFilters.page += 1;
+    const more = await _fetchHistoryList(_historyFilters);
+    renderHistoryTimeline(more, /*append=*/true);
+    return;
+  }
+});
 
 function toggleSidenav(force) {
   const nav = document.getElementById("sidenav");
@@ -6319,13 +6853,12 @@ function applyTheme(theme) {
   if (icon)  icon.textContent  = isLight ? "☀️" : "🌙";
   if (label) label.textContent = isLight ? "Modo claro" : "Modo escuro";
 
-  // Re-renderiza os gráficos mockados pra pegar as cores novas
-  if (Array.isArray(_mockChartInstances) && _mockChartInstances.length) {
-    _mockChartInstances.forEach(c => { try { c.destroy(); } catch(_) {} });
-    _mockChartInstances = [];
-    _mockChartsRendered = false;
-    const analyticsVisible = document.getElementById("analytics-view")?.classList.contains("active");
-    if (analyticsVisible) renderMockAnalyticsCharts();
+  // Re-renderiza os gráficos da view Análises pra pegar as cores novas do tema.
+  // Se o user está na view Análises, força re-fetch (cores dependem de tema,
+  // mas dados são os mesmos — usa cache).
+  const analyticsVisible = document.getElementById("analytics-view")?.classList.contains("active");
+  if (analyticsVisible && _analyticsCache) {
+    renderAnalyticsView(_analyticsCache);
   }
 }
 function toggleTheme() {
@@ -8832,7 +9365,7 @@ function buildHistoryChart(history) {
       plugins: {
         legend: {
           labels: {
-            color: "rgba(255,255,255,.55)",
+            color: _isLightMode() ? "rgba(15,23,42,.7)" : "rgba(255,255,255,.55)",
             font: { size: 11 },
             usePointStyle: true,
             padding: 16
@@ -8849,17 +9382,21 @@ function buildHistoryChart(history) {
       },
       scales: {
         x: {
-          grid: { color: "rgba(255,255,255,.04)" },
-          ticks: { color: "rgba(255,255,255,.4)", font: { size: 10 } }
+          grid: { color: _isLightMode() ? "rgba(15,23,42,.06)" : "rgba(255,255,255,.04)" },
+          ticks: { color: _isLightMode() ? "rgba(15,23,42,.55)" : "rgba(255,255,255,.4)", font: { size: 10 } }
         },
         y: {
-          grid: { color: "rgba(255,255,255,.05)" },
-          ticks: { color: "rgba(255,255,255,.4)", font: { size: 10 }, callback: v => fmtShort(v) }
+          grid: { color: _isLightMode() ? "rgba(15,23,42,.08)" : "rgba(255,255,255,.05)" },
+          ticks: { color: _isLightMode() ? "rgba(15,23,42,.55)" : "rgba(255,255,255,.4)", font: { size: 10 }, callback: v => fmtShort(v) }
         }
       },
       animation: { duration: 700, easing: "easeInOutQuart" }
     }
   });
+}
+
+function _isLightMode() {
+  return document.body.classList.contains("light");
 }
 
 async function fetchHistory() {

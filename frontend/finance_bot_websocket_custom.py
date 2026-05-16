@@ -5018,20 +5018,51 @@ async def history_list_route(
     to: str | None = None,
     categoria: str | None = None,
     tipo: str | None = None,
+    q: str | None = None,
+    uncategorized: bool = False,
+    refunds_only: bool = False,
     page: int = 1,
     limit: int = 50,
 ):
     """Timeline paginada de lançamentos. Junta launches + credit_transactions
-    (alocadas por bill.period_end). Filtros: faixa de datas, categoria, tipo."""
+    (alocadas por bill.period_end). Filtros: faixa de datas, categoria, tipo,
+    busca textual livre (q — AND entre palavras, OR entre campos alvo/nota/
+    categoria/card-name), uncategorized (só sem categoria), refunds_only
+    (só estornos)."""
     _authorize_dashboard_access(request, user_id)
     from db import list_history
     fd = _parse_date_param(from_, "from")
     td = _parse_date_param(to, "to")
     result = await asyncio.to_thread(
         list_history,
-        user_id, fd, td, categoria, tipo, page, limit,
+        user_id, fd, td, categoria, tipo, q,
+        bool(uncategorized), bool(refunds_only),
+        page, limit,
     )
     return {"ok": True, **result}
+
+
+@app.get("/history/{user_id}/quick-stats")
+async def history_quick_stats_route(
+    request: Request,
+    user_id: int,
+    months: int = 6,
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+):
+    """Atalhos de filtro pro topo da view Histórico:
+      - uncategorized_count: lançamentos sem categoria no período
+      - largest_expense: o maior lançamento individual
+      - refunds_count: estornos no cartão no período
+      - recent_7d_count: atividade dos últimos 7 dias (sempre 7d,
+        independente do período principal)
+
+    Cada um vira um card clicável que aplica filtro correspondente."""
+    _authorize_dashboard_access(request, user_id)
+    from db import compute_history_quick_stats
+    fd, td = _resolve_analytics_window(months, from_, to)
+    result = await asyncio.to_thread(compute_history_quick_stats, user_id, fd, td)
+    return {"ok": True, **result, "window": {"from": fd.isoformat(), "to": td.isoformat()}}
 
 
 MAX_OFX_BYTES = 8 * 1024 * 1024  # 8 MB — extratos OFX raramente passam disso
