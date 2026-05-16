@@ -6459,17 +6459,132 @@ function renderAnalyticsComparative(evolution) {
   root.innerHTML = rows;
 }
 
-const _MERCHANT_EMOJIS = {
-  ifood: "🍔", uber: "🚗", "99": "🚗", spotify: "🎵", netflix: "📺",
-  mercado: "🛒", padoca: "🥖", farma: "💊", droga: "💊", posto: "⛽",
-  amazon: "📦", aliexpress: "📦", magalu: "📦", americanas: "📦",
-  steam: "🎮", playstation: "🎮", apple: "🍎", icloud: "☁️",
-  google: "🔎", youtube: "▶️", aluguel: "🏠", condom: "🏠",
-};
+// Dicionário de palavras-chave → emoji pros estabelecimentos.
+// Array de pares (não objeto) pra garantir a ordem de match: termos mais
+// específicos PRIMEIRO, genéricos depois. "burger king" antes de "king",
+// "investimento bitcoin" → bate "bitcoin" (mais específico) antes de
+// "investimento".
+const _MERCHANT_EMOJIS = [
+  // Marcas / Apps específicos
+  ["ifood",          "🍔"],
+  ["mc donalds",     "🍔"], ["mcdonalds", "🍔"], ["mcdonald", "🍔"],
+  ["burger king",    "🍔"], ["bk delivery", "🍔"],
+  ["subway",         "🥪"],
+  ["dominos",        "🍕"], ["pizza hut", "🍕"],
+  ["starbucks",      "☕"],
+  ["padaria",        "🥖"], ["padoca", "🥖"],
+  ["acougue",        "🥩"], ["açougue", "🥩"],
+  ["pao de acucar",  "🛒"], ["pão de açúcar", "🛒"],
+  ["carrefour",      "🛒"], ["assai", "🛒"], ["assaí", "🛒"],
+  ["atacadao",       "🛒"], ["atacadão", "🛒"], ["extra hiper", "🛒"],
+  ["sams club",      "🛒"], ["sam's club", "🛒"],
+  ["drogasil",       "💊"], ["droga raia", "💊"], ["pacheco", "💊"],
+  ["raia",           "💊"], ["pague menos", "💊"],
+  ["uber eats",      "🍔"], ["rappi", "🍔"], ["ze delivery", "🍺"],
+  ["uber",           "🚗"], ["99 taxi", "🚗"], ["99pop", "🚗"],
+  ["cabify",         "🚗"],
+  ["shell",          "⛽"], ["petrobras", "⛽"], ["ipiranga", "⛽"],
+  ["br mania",       "⛽"], ["ale combustivel", "⛽"],
+  ["sabesp",         "💧"], ["comgas", "🔥"], ["comgás", "🔥"],
+  ["enel",           "💡"], ["cpfl", "💡"], ["light energia", "💡"],
+  ["eletropaulo",    "💡"],
+  ["vivo",           "📡"], ["claro tim", "📡"], ["oi telefone", "📡"],
+  ["nextel",         "📡"],
+  ["netflix",        "📺"], ["disney plus", "📺"], ["hbo max", "📺"],
+  ["prime video",    "📺"], ["globoplay", "📺"], ["paramount", "📺"],
+  ["spotify",        "🎵"], ["deezer", "🎵"], ["apple music", "🎵"],
+  ["amazon music",   "🎵"], ["tidal", "🎵"],
+  ["youtube premium","▶️"], ["youtube", "▶️"],
+  ["steam games",    "🎮"], ["steam", "🎮"], ["playstation", "🎮"],
+  ["xbox",           "🎮"], ["nintendo", "🎮"], ["epic games", "🎮"],
+  ["icloud",         "☁️"], ["onedrive", "☁️"], ["dropbox", "☁️"],
+  ["apple store",    "🍎"], ["apple",   "🍎"],
+  ["google play",    "🔎"], ["google",  "🔎"],
+  ["microsoft",      "💻"], ["adobe",   "🖌️"],
+  ["amazon",         "📦"], ["mercado livre", "📦"], ["mercadolivre", "📦"],
+  ["aliexpress",     "📦"], ["shopee",  "📦"], ["magalu", "📦"],
+  ["magazine luiza", "📦"], ["americanas", "📦"], ["casas bahia", "📦"],
+  ["shein",          "👕"], ["zara",    "👕"], ["renner", "👕"],
+  ["riachuelo",      "👕"], ["c&a",     "👕"], ["c e a", "👕"],
+  ["smart fit",      "🏋️"], ["smartfit","🏋️"], ["bodytech", "🏋️"],
+  ["alura",          "📚"], ["coursera","📚"], ["udemy",   "📚"],
+  ["airbnb",         "🛏️"], ["booking", "🛏️"], ["decolar", "✈️"],
+  ["latam",          "✈️"], ["gol",     "✈️"], ["azul aerolinea", "✈️"],
+  ["bitcoin",        "₿"], ["ethereum","₿"], ["binance", "₿"],
+  ["mercado bitcoin","₿"], ["foxbit",  "₿"],
+
+  // Palavras-chave genéricas (mais específicas → mais genéricas)
+  ["dia das maes",   "🎁"], ["dia das mães", "🎁"],
+  ["dia dos pais",   "🎁"], ["aniversario", "🎂"], ["aniversário", "🎂"],
+  ["natal",          "🎄"], ["pascoa", "🐣"], ["páscoa", "🐣"],
+  ["dentista",       "🦷"], ["odonto", "🦷"],
+  ["consulta",       "🏥"], ["medico", "🏥"], ["médico", "🏥"],
+  ["hospital",       "🏥"], ["clinica", "🏥"], ["clínica", "🏥"],
+  ["estacionamento", "🅿️"], ["pedagio", "🛣️"], ["pedágio", "🛣️"],
+  ["onibus",         "🚇"], ["ônibus", "🚇"], ["metro", "🚇"],
+  ["metrô",          "🚇"], ["uber",   "🚗"], ["taxi", "🚗"],
+  ["gasolina",       "⛽"], ["combustivel", "⛽"], ["combustível", "⛽"],
+  ["farmacia",       "💊"], ["farmácia", "💊"], ["remedio", "💊"],
+  ["remédio",        "💊"], ["droga", "💊"],
+  ["mercado",        "🛒"], ["supermercado", "🛒"], ["hortifruti", "🥦"],
+  ["restaurante",    "🍽️"], ["lanchonete", "🍽️"], ["churrascaria", "🥩"],
+  ["pizzaria",       "🍕"], ["cafeteria", "☕"], ["cafe", "☕"], ["café", "☕"],
+  ["bar ",           "🍺"], ["cerveja",   "🍺"], ["choperia", "🍺"],
+  ["balada",         "🪩"],
+  ["aluguel",        "🏠"], ["condominio", "🏢"], ["condomínio", "🏢"],
+  ["financiamento",  "🏦"], ["iptu",     "🏛️"], ["ipva", "🚗"],
+  ["agua",           "💧"], ["água",     "💧"],
+  ["luz",            "💡"], ["energia",  "💡"],
+  ["internet",       "📡"], ["telefone", "📡"], ["celular", "📱"],
+  ["gas ",           "🔥"], ["gás",      "🔥"],
+  ["cinema",         "🎬"], ["teatro",   "🎭"], ["show",  "🎤"],
+  ["shopping",       "🛍️"], ["loja",    "🛍️"],
+  ["presente",       "🎁"], ["gift",     "🎁"], ["flores", "💐"],
+  ["floricultura",   "💐"],
+  ["roupa",          "👕"], ["camiseta", "👕"], ["calcado", "👟"],
+  ["calçado",        "👟"], ["sapato",   "👟"], ["tenis",  "👟"],
+  ["tênis",          "👟"], ["bolsa",    "👜"],
+  ["perfume",        "💄"], ["cosmetic", "💄"], ["maquiagem", "💄"],
+  ["salao",          "💇"], ["salão",    "💇"], ["cabeleireiro", "💇"],
+  ["manicure",       "💅"], ["barbearia","💈"], ["spa", "💆"],
+  ["academia",       "🏋️"], ["yoga",    "🧘"], ["pilates", "🧘"],
+  ["pet",            "🐾"], ["racao",    "🐾"], ["ração",  "🐾"],
+  ["veterinario",    "🐾"], ["veterinário", "🐾"],
+  ["escola",         "📚"], ["faculdade","📚"], ["curso",  "📚"],
+  ["livro",          "📖"], ["livraria", "📖"],
+  ["passagem",       "✈️"], ["voo",      "✈️"], ["aviao",  "✈️"],
+  ["avião",          "✈️"], ["hotel",    "🛏️"], ["pousada", "🛏️"],
+  ["hospedagem",     "🛏️"],
+  ["acao",           "📈"], ["ação",     "📈"], ["acoes",  "📈"],
+  ["ações",          "📈"], ["dividendo","📈"], ["aporte", "💰"],
+  ["investimento",   "📈"], ["renda fixa", "📈"], ["tesouro", "📈"],
+  ["cripto",         "₿"], ["cryptocurrency", "₿"], ["crypto", "₿"],
+  ["doacao",         "❤️"], ["doação",   "❤️"], ["caridade","❤️"],
+  ["dizimo",         "⛪"], ["dízimo",   "⛪"], ["igreja", "⛪"],
+  ["emprestimo",     "🤝"], ["empréstimo", "🤝"],
+  ["rifa",           "🎟️"], ["sorteio", "🎟️"], ["loteria", "🎰"],
+  ["mega sena",      "🎰"], ["megasena", "🎰"],
+  ["pescaria",       "🎣"], ["camping",  "⛺"], ["viagem", "✈️"],
+  ["seguro",         "🛡️"], ["plano de saude", "🩺"],
+  ["plano de saúde", "🩺"],
+  ["mecanica",       "🔧"], ["mecânica", "🔧"], ["oficina", "🔧"],
+  ["lavanderia",     "🧺"], ["limpeza",  "🧹"],
+];
+
+function _normalizeMerchantKey(name) {
+  // Lower + remove acentos pra "ações" bater com "acoes" e "Stanley
+  // PRESENTE dia das mães" → "stanley presente dia das maes".
+  // NFD decompõe acento + range ̀-ͯ remove a marca diacrítica.
+  return String(name || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+}
+
 function _merchantEmoji(name) {
-  const key = (name || "").toLowerCase();
-  for (const [k, v] of Object.entries(_MERCHANT_EMOJIS)) {
-    if (key.includes(k)) return v;
+  const key = _normalizeMerchantKey(name);
+  for (const [k, emoji] of _MERCHANT_EMOJIS) {
+    if (key.includes(_normalizeMerchantKey(k))) return emoji;
   }
   return "💸";
 }
