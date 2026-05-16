@@ -129,6 +129,56 @@ def init_db():
         alter table pockets add column if not exists description text
         """,
         """
+        alter table pockets add column if not exists interest_enabled boolean not null default true
+        """,
+        """
+        alter table pockets add column if not exists interest_rate numeric not null default 1
+        """,
+        """
+        alter table pockets add column if not exists interest_period text not null default 'cdi'
+        """,
+        """
+        alter table pockets add column if not exists interest_tax_profile text not null default 'regressive_ir_iof'
+        """,
+        """
+        alter table pockets add column if not exists last_interest_date date not null default current_date
+        """,
+        """
+        create table if not exists pocket_lots (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          pocket_id bigint not null references pockets(id) on delete cascade,
+          principal_initial numeric not null,
+          principal_remaining numeric not null,
+          balance numeric not null,
+          opened_at date not null,
+          last_date date not null,
+          status text not null default 'open',
+          closed_at date,
+          created_at timestamptz default now()
+        )
+        """,
+        """
+        create index if not exists idx_pocket_lots_user_pocket_opened
+          on pocket_lots(user_id, pocket_id, status, opened_at, id)
+        """,
+        """
+        insert into pocket_lots(
+          user_id, pocket_id, principal_initial, principal_remaining,
+          balance, opened_at, last_date, status
+        )
+        select p.user_id, p.id, p.balance, p.balance, p.balance,
+               coalesce(p.last_interest_date, current_date),
+               coalesce(p.last_interest_date, current_date),
+               'open'
+          from pockets p
+         where p.balance > 0
+           and not exists (
+             select 1 from pocket_lots l
+              where l.user_id = p.user_id and l.pocket_id = p.id
+           )
+        """,
+        """
         create table if not exists launches (
           id bigserial primary key,
           user_id bigint not null references users(id) on delete cascade,
@@ -169,7 +219,7 @@ def init_db():
         -- migration: marca retroativamente aportes, resgates e categorias de investimento como movimentações internas
         update launches set is_internal_movement = true
         where (
-          tipo in ('aporte_investimento', 'resgate_investimento')
+          tipo in ('aporte_investimento', 'resgate_investimento', 'deposito_caixinha', 'saque_caixinha')
           or lower(coalesce(categoria, '')) in (
             'investimentos', 'investimento',
             'criptomoedas', 'criptomoeda', 'cripto',

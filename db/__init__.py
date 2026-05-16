@@ -68,6 +68,8 @@ from .accounts import (
 # ── Caixinhas ─────────────────────────────────────────────────────────────────
 from .pockets import (
     list_pockets,
+    accrue_all_pockets,
+    accrue_pocket_db,
     pocket_withdraw_to_account,
     create_pocket,
     pocket_deposit_from_account,

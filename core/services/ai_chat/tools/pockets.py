@@ -30,6 +30,9 @@ def _list_pockets(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
                 "name": r["name"],
                 "balance": float(r["balance"] or 0),
                 "description": r.get("description"),
+                "interest_enabled": bool(r.get("interest_enabled")),
+                "interest_rate": float(r.get("interest_rate") or 1),
+                "interest_period": r.get("interest_period") or "cdi",
             }
             for r in rows
         ]

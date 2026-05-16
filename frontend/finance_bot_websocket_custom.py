@@ -71,6 +71,7 @@ from core.sessions import (
     touch_session,
 )
 from db import (
+    accrue_all_pockets,
     accrue_all_investments,
     create_card,
     create_investment_db,
@@ -388,7 +389,7 @@ def _month_range(year: int, month: int):
 # ─── Core data fetcher ───────────────────────────────────────────────────────
 
 _DASHBOARD_CURRENT_CACHE_TTL_SECONDS = 45
-_dashboard_current_cache: Dict[int, tuple[float, Any, Any]] = {}
+_dashboard_current_cache: Dict[int, tuple[float, Any, Any, Any]] = {}
 
 
 def _invalidate_dashboard_current_cache(user_id: int) -> None:
@@ -399,18 +400,20 @@ async def _get_dashboard_current_state(user_id: int):
     now_mono = _startup_time.monotonic()
     cached = _dashboard_current_cache.get(int(user_id))
     if cached and now_mono - cached[0] < _DASHBOARD_CURRENT_CACHE_TTL_SECONDS:
-        return cached[1], cached[2]
+        return cached[1], cached[2], cached[3]
 
-    current_investments, market_rates = await asyncio.gather(
+    current_pockets, current_investments, market_rates = await asyncio.gather(
+        asyncio.to_thread(accrue_all_pockets, user_id),
         asyncio.to_thread(accrue_all_investments, user_id),
         asyncio.to_thread(get_dashboard_market_rates),
     )
     _dashboard_current_cache[int(user_id)] = (
         _startup_time.monotonic(),
+        current_pockets,
         current_investments,
         market_rates,
     )
-    return current_investments, market_rates
+    return current_pockets, current_investments, market_rates
 
 
 def _dashboard_launch_filter_sql(filter_type: str | None, query: str | None) -> tuple[list[str], list]:
@@ -469,7 +472,7 @@ async def get_financial_data(
     page = max(int(page or 1), 1)
     limit = max(min(int(limit or 25), 100), 1)
     offset = (page - 1) * limit
-    current_investments, market_rates = await _get_dashboard_current_state(user_id)
+    current_pockets, current_investments, market_rates = await _get_dashboard_current_state(user_id)
     launch_filter_clauses, launch_filter_params = _dashboard_launch_filter_sql(filter_type, query)
     launch_filter_sql = "".join(f"\n                  AND ({clause})" for clause in launch_filter_clauses)
 
@@ -481,6 +484,7 @@ async def get_financial_data(
                 await cur.execute(sql, params)
                 return await cur.fetchall()
 
+    pockets = current_pockets
     investments = current_investments  # do cache
 
     # Compras no crédito viram linhas virtuais com tipo='credito' no
@@ -511,13 +515,12 @@ async def get_financial_data(
         """
         credit_union_params = [user_id, month_start, month_end]
 
-    # ───── Paraleliza 10 queries independentes via asyncio.gather ─────
+    # ───── Paraleliza queries independentes via asyncio.gather ─────
     # Cada _q() pega uma conn do pool. Antes era sequencial dentro de UMA
     # conn → 10 round-trips somados. Agora roda simultâneo → tempo total
     # ≈ tempo da query mais lenta. Ganho enorme em DB com latência alta.
     (
         account_rows,
-        pockets,
         launches_total_rows,
         launches,
         monthly,
@@ -529,12 +532,6 @@ async def get_financial_data(
     ) = await asyncio.gather(
         # 1) Account balance
         _q("SELECT balance FROM accounts WHERE user_id = %s", (user_id,)),
-        # 2) Savings pockets (Sprint 5 — inclui campos de meta opcionais)
-        _q(
-            "SELECT id, name, balance, description, target_amount, target_date, "
-            "emoji, color, status FROM pockets WHERE user_id = %s ORDER BY name",
-            (user_id,),
-        ),
         # 3) Total launches (com filtros + credit union)
         _q(
             f"""
@@ -3877,6 +3874,8 @@ async def delete_credit_transaction_route(
 class PocketCreatePayload(BaseModel):
     name: str
     description: str | None = None
+    interest_enabled: bool = True
+    interest_rate: float = 1.0
 
 
 class PocketMovePayload(BaseModel):
@@ -3904,16 +3903,25 @@ async def create_pocket_route(request: Request, user_id: int, payload: PocketCre
 
     name = (payload.name or "").strip()
     description = (payload.description or "").strip() or None
+    interest_rate = float(payload.interest_rate or 1.0)
     if not name:
         raise HTTPException(status_code=400, detail="Nome da caixinha é obrigatório.")
     if len(name) > 80:
         raise HTTPException(status_code=400, detail="Nome muito longo (máx. 80 caracteres).")
     if description and len(description) > 200:
         raise HTTPException(status_code=400, detail="Descrição muito longa (máx. 200 caracteres).")
+    if interest_rate <= 0:
+        raise HTTPException(status_code=400, detail="Rendimento inválido.")
 
     try:
         launch_id, pocket_id, canon = await asyncio.to_thread(
-            create_pocket, user_id, name, None, description,
+            create_pocket,
+            user_id,
+            name,
+            None,
+            description,
+            interest_enabled=payload.interest_enabled,
+            interest_rate=interest_rate,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -3922,7 +3930,14 @@ async def create_pocket_route(request: Request, user_id: int, payload: PocketCre
     return {
         "ok": True,
         "created": launch_id is not None,
-        "pocket": {"id": int(pocket_id), "name": canon, "description": description},
+        "pocket": {
+            "id": int(pocket_id),
+            "name": canon,
+            "description": description,
+            "interest_enabled": bool(payload.interest_enabled),
+            "interest_rate": interest_rate,
+            "interest_period": "cdi",
+        },
     }
 
 
@@ -3934,6 +3949,8 @@ class PocketMetaPayload(BaseModel):
     emoji: str | None = None
     color: str | None = None
     status: str | None = None
+    interest_enabled: bool | None = None
+    interest_rate: float | None = None
     clear_target: bool = False
 
 
@@ -3955,6 +3972,7 @@ async def update_pocket_meta_route(
             name=payload.name, description=payload.description,
             target_amount=payload.target_amount, target_date=payload.target_date,
             emoji=payload.emoji, color=payload.color, status=payload.status,
+            interest_enabled=payload.interest_enabled, interest_rate=payload.interest_rate,
             clear_target=payload.clear_target,
         )
     except ValueError as exc:
@@ -3969,6 +3987,10 @@ async def update_pocket_meta_route(
         pocket["target_date"] = pocket["target_date"].isoformat()
     if pocket.get("balance") is not None:
         pocket["balance"] = float(pocket["balance"])
+    if pocket.get("interest_rate") is not None:
+        pocket["interest_rate"] = float(pocket["interest_rate"])
+    if pocket.get("last_interest_date"):
+        pocket["last_interest_date"] = pocket["last_interest_date"].isoformat()
     return {"ok": True, "pocket": pocket}
 
 
@@ -4005,6 +4027,9 @@ async def goals_status_route(request: Request, user_id: int):
                     "color": p.get("color"),
                     "status": p.get("status") or "active",
                     "description": p.get("description"),
+                    "interest_enabled": bool(p.get("interest_enabled")),
+                    "interest_rate": float(p.get("interest_rate") or 1),
+                    "interest_period": p.get("interest_period") or "cdi",
                     "is_goal": False,
                     "pct_complete": None,
                     "remaining": None,
@@ -4076,6 +4101,9 @@ async def goals_status_route(request: Request, user_id: int):
                 "color": p.get("color"),
                 "status": p.get("status") or "active",
                 "description": p.get("description"),
+                "interest_enabled": bool(p.get("interest_enabled")),
+                "interest_rate": float(p.get("interest_rate") or 1),
+                "interest_period": p.get("interest_period") or "cdi",
                 "is_goal": True,
                 "pct_complete": round(pct, 1),
                 "remaining": round(remaining, 2),
@@ -4162,7 +4190,7 @@ async def pocket_withdraw_route(request: Request, user_id: int, pocket_name: str
         raise HTTPException(status_code=400, detail="Nome da caixinha é obrigatório.")
     nota = (payload.nota or "").strip() or None
     try:
-        launch_id, new_acc, new_pocket, canon = await asyncio.to_thread(
+        launch_id, new_acc, new_pocket, canon, taxes = await asyncio.to_thread(
             pocket_withdraw_to_account, int(user_id), name, payload.amount, nota,
         )
     except LookupError as exc:
@@ -4177,6 +4205,7 @@ async def pocket_withdraw_route(request: Request, user_id: int, pocket_name: str
         "name": canon,
         "account_balance": new_acc,
         "pocket_balance": new_pocket,
+        "tax_summary": taxes,
     }))
 
 
@@ -4193,7 +4222,8 @@ async def get_pocket_history_route(request: Request, user_id: int, pocket_name: 
         async with conn.cursor() as cur:
             await cur.execute(
                 """
-                SELECT id, name, balance, description
+                SELECT id, name, balance, description, interest_enabled, interest_rate,
+                       interest_period, interest_tax_profile, last_interest_date
                 FROM pockets
                 WHERE user_id = %s AND lower(name) = lower(%s)
                 LIMIT 1
@@ -4245,6 +4275,12 @@ async def get_pocket_history_route(request: Request, user_id: int, pocket_name: 
             "name": canon,
             "balance": float(pocket_row["balance"] or 0),
             "description": pocket_row.get("description"),
+            "interest_enabled": bool(pocket_row.get("interest_enabled")),
+            "interest_rate": float(pocket_row.get("interest_rate") or 1),
+            "interest_period": pocket_row.get("interest_period") or "cdi",
+            "interest_tax_profile": pocket_row.get("interest_tax_profile"),
+            "last_interest_date": pocket_row["last_interest_date"].isoformat()
+                                  if pocket_row.get("last_interest_date") else None,
         },
         "totals": {
             "deposits": deposits_total,

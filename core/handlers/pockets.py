@@ -129,12 +129,15 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
         return "Qual o valor? Tente: *retirei 100 da caixinha viagem*"
 
     try:
-        launch_id, new_acc, new_pocket, canon = db.pocket_withdraw_to_account(
+        launch_id, new_acc, new_pocket, canon, taxes = db.pocket_withdraw_to_account(
             user_id, pocket_name, float(amount), text
         )
+        tax_note = ""
+        if taxes and (taxes.get("iof", 0) or taxes.get("ir", 0)):
+            tax_note = f" • IR/IOF: {fmt_brl(float(taxes.get('ir', 0) + taxes.get('iof', 0)))}"
         return (
             f"📤 Caixinha **{canon}**: -{fmt_brl(float(amount))}\n"
-            f"🏦 Conta: {fmt_brl(float(new_acc))} • 📦 Caixinha: {fmt_brl(float(new_pocket))}\n"
+            f"🏦 Conta: {fmt_brl(float(new_acc))} • 📦 Caixinha: {fmt_brl(float(new_pocket))}{tax_note}\n"
             f"ID: **#{db.display_id_for(user_id, launch_id)}**"
         )
     except LookupError:

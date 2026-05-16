@@ -50,7 +50,7 @@ def test_caixinha_deposito_saque(user_id):
     assert bal_acc == D("700")
     assert bal_pocket == D("300")
 
-    _, bal_acc, bal_pocket, _ = pocket_withdraw_to_account(user_id, "viagem", 100, "teste")
+    _, bal_acc, bal_pocket, _, _ = pocket_withdraw_to_account(user_id, "viagem", 100, "teste")
     assert bal_acc == D("800")
     assert bal_pocket == D("200")
 
