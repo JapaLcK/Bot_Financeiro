@@ -22,7 +22,7 @@ from utils_text import normalize_text, contains_word, LOCAL_RULES
 from db import import_credit_ofx_bulk, list_user_category_rules
 
 # Hard cap defensivo: ver nota em ofx_import.py.
-MAX_OFX_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_OFX_BYTES = 8 * 1024 * 1024  # 8 MB
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -12,9 +12,9 @@ from db import list_user_category_rules
 from utils_text import normalize_text, contains_word, LOCAL_RULES, INTERNAL_MOVEMENT_CATEGORIES
 
 # Hard cap defensivo: parser OFX vira DoS se receber arquivo gigante (memória
-# + CPU do regex/SGML). O endpoint HTTP já valida 8MB, mas handlers do bot
-# (Discord/WhatsApp) também chamam esta função — proteção em profundidade.
-MAX_OFX_BYTES = 10 * 1024 * 1024  # 10 MB
+# + CPU do regex/SGML). Alinhado com o cap do endpoint HTTP (8 MB) — handlers
+# do bot (Discord/WhatsApp) também chamam esta função; proteção em profundidade.
+MAX_OFX_BYTES = 8 * 1024 * 1024  # 8 MB
 
 
 def detect_ofx_type(ofx_bytes: bytes) -> str:

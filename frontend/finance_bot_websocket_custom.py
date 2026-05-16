@@ -4900,7 +4900,7 @@ MAX_OFX_BYTES = 8 * 1024 * 1024  # 8 MB — extratos OFX raramente passam disso
 
 
 @app.post("/ofx/import/{user_id}")
-@limiter.limit("10/hour")
+@limiter.limit("5/hour")
 async def ofx_import_route(request: Request, user_id: int):
     """
     Upload de arquivo OFX via dashboard. Aceita multipart/form-data com campo
