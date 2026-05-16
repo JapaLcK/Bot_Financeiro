@@ -2591,6 +2591,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
     </div>
 
     <div class="modal-acts">
+      <button class="btn-cancel" type="button" id="pkt-hist-edit-btn" onclick="editCurrentPocketFromHistory()" style="margin-right:auto">Editar</button>
       <button class="btn-cancel" type="button" onclick="closePocketHistory()">Fechar</button>
     </div>
   </div>
@@ -3184,6 +3185,12 @@ const fmtDate = iso => {
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({
   "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
 }[c]));
+
+const escapeJsString = s => esc(String(s ?? "")
+  .replace(/\\/g, "\\\\")
+  .replace(/\r/g, "\\r")
+  .replace(/\n/g, "\\n")
+  .replace(/'/g, "\\'"));
 
 const displayInvestmentName = (i) => {
   const name = String(i?.name || "").trim();
@@ -5167,9 +5174,8 @@ function _renderGoalsView(goals) {
 function _renderPocketOnlyCard(p, idx = 0) {
   const emoji = p.emoji || "🐷";
   const color = p.color || "#7c3aed";
-  const safeJson = JSON.stringify(p).replace(/"/g, "&quot;");
   return `
-    <div class="goal-card" style="animation-delay:${idx * 80}ms;cursor:pointer" onclick="openGoalEditModal(${safeJson})">
+    <div class="goal-card" style="animation-delay:${idx * 80}ms;cursor:pointer" onclick="openPocketHistory('${escapeJsString(p.name)}')">
       <div class="goal-ring">
         <div style="width:78px;height:78px;border-radius:50%;background:${color}22;display:flex;align-items:center;justify-content:center;font-size:1.6rem">${emoji}</div>
       </div>
@@ -5225,9 +5231,8 @@ function _renderGoalCard(g, idx = 0) {
     alertText = `<div class="goal-deadline" style="color:#34d399">✓ Meta atingida</div>`;
   }
 
-  const safeJson = JSON.stringify(g).replace(/"/g, "&quot;");
   return `
-    <div class="goal-card" style="animation-delay:${idx * 80}ms;cursor:pointer" onclick="openGoalEditModal(${safeJson})">
+    <div class="goal-card" style="animation-delay:${idx * 80}ms;cursor:pointer" onclick="openPocketHistory('${escapeJsString(g.name)}')">
       <div class="goal-ring">
         <svg width="78" height="78" viewBox="0 0 78 78">
           <circle class="ring-bg" cx="39" cy="39" r="33" fill="none" stroke-width="7"/>
@@ -8792,6 +8797,7 @@ async function submitPocketMove(event) {
 
 let _currentPocketName = null;
 let _pocketMoveMode = null;
+let _currentPocketForEdit = null;
 
 async function openPocketHistory(pocketName) {
   const overlay  = document.getElementById("pocket-history-overlay");
@@ -8802,6 +8808,7 @@ async function openPocketHistory(pocketName) {
   const actionsEl = document.getElementById("pkt-move-actions");
 
   _currentPocketName = pocketName;
+  _currentPocketForEdit = null;
   closePocketMove();
   titleEl.textContent = `Histórico — ${pocketName}`;
   subEl.textContent   = "Depósitos e saques desta caixinha.";
@@ -8821,6 +8828,7 @@ async function openPocketHistory(pocketName) {
 
     const p = data.pocket || {};
     const t = data.totals || {};
+    _currentPocketForEdit = p;
     titleEl.textContent = `Histórico — ${p.name || pocketName}`;
     const interestTxt = p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate);
     subEl.textContent = p.description ? `${p.description} · ${interestTxt}` : interestTxt;
@@ -8856,6 +8864,27 @@ async function openPocketHistory(pocketName) {
   } catch (err) {
     bodyEl.innerHTML = `<div class="pkt-hist-error">${esc(err.message || "Erro ao carregar histórico.")}</div>`;
   }
+}
+
+function editCurrentPocketFromHistory() {
+  if (!_currentPocketForEdit) return;
+  const p = _currentPocketForEdit;
+  closePocketHistory();
+  openGoalEditModal({
+    id: p.id,
+    name: p.name,
+    balance: p.balance,
+    description: p.description,
+    interest_enabled: p.interest_enabled,
+    interest_rate: p.interest_rate,
+    interest_period: p.interest_period,
+    target_amount: p.target_amount,
+    target_date: p.target_date,
+    emoji: p.emoji,
+    color: p.color,
+    status: p.status,
+    is_goal: p.target_amount != null,
+  });
 }
 
 document.getElementById("pocket-history-overlay").addEventListener("click", e => {
@@ -9748,7 +9777,7 @@ function render(d) {
       </div>
       ${!(d.pockets||[]).length?'<div class="empty">Nenhuma caixinha.</div>':
         d.pockets.map((p,i)=>{
-          const safeName = String(p.name).replace(/\\/g,"\\\\").replace(/'/g,"\\'");
+          const safeName = escapeJsString(p.name);
           const blocked = Math.abs(Number(p.balance) || 0) >= 0.005;
           const delClass = blocked ? "pocket-del is-blocked" : "pocket-del";
           const delTitle = blocked ? "Zere o saldo antes de excluir" : "Excluir caixinha";

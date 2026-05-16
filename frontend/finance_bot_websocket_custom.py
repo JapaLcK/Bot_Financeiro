@@ -4222,8 +4222,9 @@ async def get_pocket_history_route(request: Request, user_id: int, pocket_name: 
         async with conn.cursor() as cur:
             await cur.execute(
                 """
-                SELECT id, name, balance, description, interest_enabled, interest_rate,
-                       interest_period, interest_tax_profile, last_interest_date
+                SELECT id, name, balance, target_amount, target_date, emoji, color, status,
+                       description, interest_enabled, interest_rate, interest_period,
+                       interest_tax_profile, last_interest_date
                 FROM pockets
                 WHERE user_id = %s AND lower(name) = lower(%s)
                 LIMIT 1
@@ -4274,6 +4275,11 @@ async def get_pocket_history_route(request: Request, user_id: int, pocket_name: 
             "id": int(pocket_row["id"]),
             "name": canon,
             "balance": float(pocket_row["balance"] or 0),
+            "target_amount": float(pocket_row["target_amount"]) if pocket_row.get("target_amount") is not None else None,
+            "target_date": pocket_row["target_date"].isoformat() if pocket_row.get("target_date") else None,
+            "emoji": pocket_row.get("emoji"),
+            "color": pocket_row.get("color"),
+            "status": pocket_row.get("status") or "active",
             "description": pocket_row.get("description"),
             "interest_enabled": bool(pocket_row.get("interest_enabled")),
             "interest_rate": float(pocket_row.get("interest_rate") or 1),
