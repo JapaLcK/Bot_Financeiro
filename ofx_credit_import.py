@@ -21,6 +21,9 @@ from utils_date import _tz
 from utils_text import normalize_text, contains_word, LOCAL_RULES
 from db import import_credit_ofx_bulk, list_user_category_rules
 
+# Hard cap defensivo: ver nota em ofx_import.py.
+MAX_OFX_BYTES = 10 * 1024 * 1024  # 10 MB
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Extratores de campos específicos de cartão de crédito
@@ -162,6 +165,10 @@ def import_credit_ofx_bytes(
     """
     if not ofx_bytes:
         raise ValueError("OFX vazio.")
+    if len(ofx_bytes) > MAX_OFX_BYTES:
+        raise ValueError(
+            f"OFX muito grande (max {MAX_OFX_BYTES // (1024 * 1024)} MB)."
+        )
 
     # Normaliza encoding: OFX pode declarar CHARSET:1252 (Windows-1252/latin-1).
     # Se os bytes não forem UTF-8 válido, redecodifica em cp1252 e converte para UTF-8

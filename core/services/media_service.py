@@ -31,6 +31,11 @@ logger = logging.getLogger(__name__)
 AUDIO_EXTENSIONS = {".ogg", ".mp3", ".m4a", ".wav", ".webm", ".mpeg", ".mp4"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
+# Hard caps defensivos. Whisper aceita até 25MB; mantemos margem.
+# Sem isso, áudio gigante consome RAM + quota OpenAI sem teto.
+MAX_AUDIO_BYTES = 20 * 1024 * 1024  # 20 MB
+MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
+
 AUDIO_CONTENT_TYPES = {
     "audio/ogg", "audio/mpeg", "audio/mp4", "audio/wav",
     "audio/webm", "video/webm", "audio/x-wav", "audio/m4a",
@@ -68,6 +73,15 @@ def transcribe_audio(data: bytes, filename: str) -> str | None:
     Transcreve áudio usando Whisper da OpenAI.
     Retorna o texto transcrito ou None em caso de falha.
     """
+    if not data:
+        return None
+    if len(data) > MAX_AUDIO_BYTES:
+        logger.warning(
+            "[media_service] Audio rejeitado por tamanho: %d bytes (max %d).",
+            len(data), MAX_AUDIO_BYTES,
+        )
+        return None
+
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     print(f"[media_service] transcribe_audio chamado | filename={filename} | api_key={'OK' if api_key else 'AUSENTE'}")
     if not api_key:
@@ -139,6 +153,15 @@ def analyze_image(data: bytes, filename: str) -> dict[str, Any] | None:
     Analisa uma imagem com GPT-4o Vision para extrair dados financeiros.
     Retorna dict com os dados ou None em caso de falha.
     """
+    if not data:
+        return None
+    if len(data) > MAX_IMAGE_BYTES:
+        logger.warning(
+            "[media_service] Imagem rejeitada por tamanho: %d bytes (max %d).",
+            len(data), MAX_IMAGE_BYTES,
+        )
+        return None
+
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:
         logger.warning("[media_service] OPENAI_API_KEY não configurada — análise de imagem indisponível.")

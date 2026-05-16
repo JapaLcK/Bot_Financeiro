@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import os
+import secrets
 import sys
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -176,6 +178,18 @@ def admin_enabled() -> bool:
     return bool(ADMIN_DASHBOARD_PASSWORD or ADMIN_DASHBOARD_PASSWORD_HASH)
 
 
+_admin_log = logging.getLogger("admin_dashboard")
+
+# Warning loud no startup se admin estiver em modo plaintext (sem hash bcrypt).
+# Fica visível no log de boot pra operador notar e configurar o hash.
+if ADMIN_DASHBOARD_PASSWORD and not ADMIN_DASHBOARD_PASSWORD_HASH:
+    _admin_log.warning(
+        "[admin] ADMIN_DASHBOARD_PASSWORD em plaintext detectada. "
+        "Em produção, configure ADMIN_DASHBOARD_PASSWORD_HASH (bcrypt) e "
+        "remova ADMIN_DASHBOARD_PASSWORD."
+    )
+
+
 def _check_admin_password(password: str) -> bool:
     if ADMIN_DASHBOARD_PASSWORD_HASH:
         try:
@@ -183,9 +197,18 @@ def _check_admin_password(password: str) -> bool:
                 password.encode("utf-8"),
                 ADMIN_DASHBOARD_PASSWORD_HASH.encode("utf-8"),
             )
-        except Exception:
+        except Exception as exc:
+            # Hash malformado / chave incompatível. Loga loud e NEGA o login —
+            # nunca cai pro fallback plaintext (era o bug original).
+            _admin_log.error(
+                "[admin] Falha ao verificar bcrypt do admin (hash malformado?): %s",
+                exc,
+            )
             return False
-    return bool(ADMIN_DASHBOARD_PASSWORD) and password == ADMIN_DASHBOARD_PASSWORD
+    if not ADMIN_DASHBOARD_PASSWORD:
+        return False
+    # compare_digest pra evitar timing leak no fallback plaintext.
+    return secrets.compare_digest(password, ADMIN_DASHBOARD_PASSWORD)
 
 
 def _make_admin_jwt(username: str, jwt_secret: str) -> str:

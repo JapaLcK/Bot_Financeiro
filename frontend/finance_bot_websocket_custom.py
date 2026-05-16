@@ -1799,6 +1799,9 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
     # Conta criada apenas via Google (sem password_hash) → orienta usar o botão correto
     existing_user_id = await asyncio.to_thread(find_user_id_by_email, body.email)
     if existing_user_id and not await asyncio.to_thread(email_has_password, body.email):
+        # Mensagem genérica pra não diferenciar "conta existe via Google" de
+        # "email não cadastrado" — evita enumeração de e-mails. O motivo real
+        # fica no audit log (failure_reason="google_only_account").
         await log_auth_login_event(
             body.email,
             False,
@@ -1806,10 +1809,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
             user_agent=request.headers.get("user-agent"),
             failure_reason="google_only_account",
         )
-        raise HTTPException(
-            status_code=401,
-            detail="Esta conta foi criada com Google. Use o botão \"Continuar com Google\".",
-        )
+        raise HTTPException(status_code=401, detail="E-mail ou senha incorretos.")
 
     result = login_auth_user(body.email, body.password)
     if not result:
@@ -2164,7 +2164,9 @@ async def auth_mfa_regenerate(request: Request, body: MFADisableBody, user_id: i
 
 
 @app.post("/auth/mfa/verify-login")
-@limiter.limit("10/minute")
+# 5/min é apertado mas não atrapalha usuário legítimo (que erra 1-2 vezes).
+# TOTP tem só 10^6 valores — 10/min seria brute-force viável em ~16 dias.
+@limiter.limit("5/minute")
 async def auth_mfa_verify_login(request: Request, response: Response, body: MFAVerifyLoginBody):
     """Completa o login apos /auth/login retornar mfa_required=true.
 
@@ -4898,6 +4900,7 @@ MAX_OFX_BYTES = 8 * 1024 * 1024  # 8 MB — extratos OFX raramente passam disso
 
 
 @app.post("/ofx/import/{user_id}")
+@limiter.limit("10/hour")
 async def ofx_import_route(request: Request, user_id: int):
     """
     Upload de arquivo OFX via dashboard. Aceita multipart/form-data com campo
