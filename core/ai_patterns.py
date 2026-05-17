@@ -40,8 +40,8 @@ PATTERNS_CACHE_TTL_SECONDS = 24 * 3600    # 24h
 
 # Bumpe quando mudar prompt/payload de forma significativa. Cache antigo
 # vira garbage instantaneamente (kind diferente = miss).
-_PROMPT_VERSION_PATTERNS = 4
-_PROMPT_VERSION_INSIGHTS = 4
+_PROMPT_VERSION_PATTERNS = 5
+_PROMPT_VERSION_INSIGHTS = 5
 
 
 def _cache_kind(base: str) -> str:
@@ -442,6 +442,10 @@ não uma regra genérica. Exemplos do tom que queremos:
 ║ 5. Para comparar gasto por horário, use 'avg_monthly' OU                ║
 ║    'avg_per_transaction' dos hour_buckets — NUNCA 'total' (que é a soma ║
 ║    dos 6 meses inteiros).                                                ║
+║    ⚠️ NUNCA compare dois hour_buckets se UM DELES tem `low_sample: true`║
+║    — amostra pequena causa distorção gigante. Se Manhã é low_sample,    ║
+║    NÃO faça "Você gasta Nx mais à tarde que de manhã". Pule esse        ║
+║    padrão.                                                               ║
 ║                                                                          ║
 ║ 6. Para dia da semana, use 'avg_daily' dentro do weekend_split.          ║
 ║                                                                          ║
@@ -695,6 +699,70 @@ _ALLOWED_SEVERITIES = {"critical", "warning", "info"}
 _ALLOWED_VIEWS = {"budgets", "fixed", "goals", "analytics", "pockets", "recurring"}
 
 
+# Regex pra extrair "Nx" / "N,Mx" / "N.Mx" do título — busca alegação de ratio.
+import re as _re
+_RATIO_RE = _re.compile(r"(\d+[\.,]?\d*)\s*x\b", _re.IGNORECASE)
+# Captura R$ X,XX (formato BR) ou R$ X.XX no subtitle/title.
+_MONEY_RE = _re.compile(r"R\$\s*([\d\.]+,\d{2}|\d+[\.,]?\d*)")
+
+
+def _parse_brl(s: str) -> float | None:
+    """Converte '1.660,91' → 1660.91 ou '1660.91' → 1660.91 ou retorna None."""
+    if not s:
+        return None
+    try:
+        s = s.strip()
+        # Formato BR: "1.660,91" → "1660.91"
+        if "," in s and "." in s:
+            return float(s.replace(".", "").replace(",", "."))
+        if "," in s:
+            return float(s.replace(",", "."))
+        return float(s)
+    except (ValueError, AttributeError):
+        return None
+
+
+def _ratio_claim_is_consistent(title: str, subtitle: str) -> bool:
+    """Se title alega 'Nx mais', valida que N ≈ maior_valor / menor_valor
+    dos R$ encontrados no subtitle. Tolerância de 15%.
+
+    Retorna True se:
+      - title não tem alegação de "Nx" (nada a validar)
+      - subtitle tem ≥2 valores R$ e o ratio bate (com tolerância)
+
+    Retorna False se claim de Nx existe mas não bate ou não tem 2 valores
+    pra checar. Itens com False são DESCARTADOS (segurança > completude).
+    """
+    m = _RATIO_RE.search(title)
+    if not m:
+        return True  # sem claim de Nx → nada a validar
+    claimed = _parse_brl(m.group(1))
+    if claimed is None or claimed <= 0:
+        return False
+
+    money_values = [
+        _parse_brl(v) for v in _MONEY_RE.findall(subtitle or "")
+    ]
+    money_values = [v for v in money_values if v and v > 0]
+    if len(money_values) < 2:
+        # Claim de ratio sem 2 valores no subtitle pra verificar → suspeito
+        return False
+
+    hi = max(money_values)
+    lo = min(money_values)
+    if lo == 0:
+        return False
+    actual = hi / lo
+    # Tolerância 15% pra absorver arredondamento
+    if abs(actual - claimed) / actual <= 0.15:
+        return True
+    logger.info(
+        "ai_patterns: ratio inconsistente descartado — title=%r claimed=%.2f actual=%.2f",
+        title, claimed, actual,
+    )
+    return False
+
+
 def _sanitize_pattern_items(items: list[dict]) -> list[dict]:
     out: list[dict] = []
     for i, it in enumerate(items or []):
@@ -703,10 +771,15 @@ def _sanitize_pattern_items(items: list[dict]) -> list[dict]:
         title = str(it.get("title", "") or "").strip()
         if not title:
             continue
+        subtitle = str(it.get("subtitle") or "")[:200]
+        # Cinto de segurança: se o item afirma "Nx" e os valores do subtitle
+        # não confirmam, descarta (provavelmente alucinação aritmética).
+        if not _ratio_claim_is_consistent(title, subtitle):
+            continue
         out.append({
             "icon": str(it.get("icon") or "🐷")[:4],
             "title": title[:140],
-            "subtitle": str(it.get("subtitle") or "")[:200],
+            "subtitle": subtitle,
             "tone": it.get("tone") if it.get("tone") in _ALLOWED_TONES else "neutral",
         })
         if len(out) >= 6:

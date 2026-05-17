@@ -930,6 +930,9 @@ def compute_behavioral_patterns(user_id: int, months: int = 6) -> dict:
         # avg_monthly = quanto o user gasta nesse bucket em média por mês
         avg_per_tx = (total / count) if count > 0 else 0.0
         avg_monthly = total / period_months
+        # Sample size — buckets com count < 5 viram low_sample (a comparação
+        # "Nx mais" baseada neles distorce muito por outlier).
+        low_sample = count < 5
         buckets_out.append({
             "label": label,
             "hour_start": h_start,
@@ -939,6 +942,7 @@ def compute_behavioral_patterns(user_id: int, months: int = 6) -> dict:
             "pct": round(pct, 1),
             "avg_per_transaction": round(avg_per_tx, 2),
             "avg_monthly": round(avg_monthly, 2),
+            "low_sample": low_sample,
         })
 
     # ── 2) Weekend vs weekday ────────────────────────────────────────────────
