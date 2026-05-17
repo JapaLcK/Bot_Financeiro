@@ -5094,6 +5094,28 @@ async def analytics_patterns_route(
     return {"ok": True, "patterns": result or []}
 
 
+@app.get("/debug/ai/{user_id}/payload")
+async def debug_ai_payload_route(
+    request: Request,
+    user_id: int,
+    kind: str = "patterns",
+):
+    """[DEBUG] Retorna o JSON EXATO que vai pro LLM, sem chamar a LLM.
+
+    Serve pra diagnosticar alucinações: se o LLM cita "delivery" mas o
+    payload não tem nada de delivery, sabemos que é invenção.
+
+    `kind` ∈ {'patterns', 'insights'}. Protegido pelo mesmo auth do dashboard.
+    """
+    _authorize_dashboard_access(request, user_id)
+    from core.ai_patterns import _collect_patterns_data, _collect_insights_data
+    if kind == "insights":
+        data = await asyncio.to_thread(_collect_insights_data, user_id)
+    else:
+        data = await asyncio.to_thread(_collect_patterns_data, user_id)
+    return {"ok": True, "kind": kind, "payload": data}
+
+
 # ─── History route (Sprint 6) ────────────────────────────────────────────────
 
 @app.get("/history/{user_id}/list")

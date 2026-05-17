@@ -40,8 +40,8 @@ PATTERNS_CACHE_TTL_SECONDS = 24 * 3600    # 24h
 
 # Bumpe quando mudar prompt/payload de forma significativa. Cache antigo
 # vira garbage instantaneamente (kind diferente = miss).
-_PROMPT_VERSION_PATTERNS = 2
-_PROMPT_VERSION_INSIGHTS = 2
+_PROMPT_VERSION_PATTERNS = 3
+_PROMPT_VERSION_INSIGHTS = 3
 
 
 def _cache_kind(base: str) -> str:
@@ -363,21 +363,35 @@ não uma regra genérica. Exemplos do tom que queremos:
 ║ ANTI-ALUCINAÇÃO — REGRAS ABSOLUTAS                                       ║
 ╠══════════════════════════════════════════════════════════════════════════╣
 ║ 1. Use SOMENTE números EXATOS que existem no JSON. NUNCA invente.        ║
-║ 2. Comparações 'Nx mais' SÓ se conseguir mostrar a divisão X/Y onde X e ║
+║ 2. NUNCA mencione marcas, lojas, apps ou produtos específicos a menos    ║
+║    que apareçam LITERALMENTE em `behaviors.top_merchants[].name`.        ║
+║    PROIBIDO inferir "iFood", "Uber", "delivery", "Netflix", "Spotify"   ║
+║    a partir de categorias genéricas como "alimentacao", "transporte",   ║
+║    "lazer", "compras online", "assinaturas". Se quiser falar de uma     ║
+║    categoria, use o NOME DELA tal como aparece no JSON                  ║
+║    (ex: "Você gasta R$ 200/mês em alimentação", NÃO                     ║
+║     "Você gasta R$ 200/mês em delivery").                                ║
+║ 3. Comparações 'Nx mais' SÓ se conseguir mostrar a divisão X/Y onde X e ║
 ║    Y são VALORES COMPARÁVEIS — ou seja, AMBOS são médias diárias, ou    ║
 ║    AMBOS médias mensais, ou AMBOS tickets médios. NUNCA misture total   ║
 ║    acumulado com média.                                                  ║
-║ 3. Para comparar gasto por horário, use 'avg_monthly' OU                ║
+║ 4. Para comparar gasto por horário, use 'avg_monthly' OU                ║
 ║    'avg_per_transaction' dos hour_buckets — NUNCA 'total' (que é a soma ║
 ║    dos 6 meses inteiros).                                                ║
-║ 4. Para dia da semana, use 'avg_daily' dentro do weekend_split.          ║
-║ 5. Se o JSON traz um número fracionário (ex: avg_day_to_80pct: 14),      ║
+║ 5. Para dia da semana, use 'avg_daily' dentro do weekend_split.          ║
+║ 6. Se o JSON traz um número fracionário (ex: avg_day_to_80pct: 14),      ║
 ║    use o INTEIRO direto, sem '.5' ou '.0'. Dia 14, não dia 14,5.        ║
-║ 6. SEMPRE cite o período coberto explicitamente no subtitle, usando o    ║
+║ 7. SEMPRE cite o período coberto explicitamente no subtitle, usando o    ║
 ║    `_meta.period_label` (ex: "nos últimos 6 meses (dez/2025 a mai/2026)").║
-║ 7. Se uma seção do JSON está null ou vazia, NÃO faça pattern sobre ela. ║
-║ 8. Categoria "outros" / "sem categoria" é ruído — evite padrões focados ║
+║ 8. Se uma seção do JSON está null ou vazia, NÃO faça pattern sobre ela. ║
+║ 9. Categoria "outros" / "sem categoria" é ruído — evite padrões focados ║
 ║    nela. Foque em categorias específicas com nome claro.                 ║
+║10. Se top_merchants contém merchants pouco descritivos (tipo "outros",  ║
+║    "rifa", "ações", "investimento bitcoin", "stanley presente dia das    ║
+║    maes"), prefira agregar por CATEGORIA em vez de citar um merchant.   ║
+║    Nomes de merchant só viram narrativa se forem claramente             ║
+║    estabelecimentos recorrentes (ex: "Uber", "iFood", "Netflix" — DESDE ║
+║    QUE estejam literalmente em top_merchants[].name).                    ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 
 OUTRAS REGRAS:
@@ -427,6 +441,9 @@ descobertas de comportamento ao longo do tempo.
 ║ 4. Para "faltam X dias no mês", use `_meta.days_left_in_month`.          ║
 ║ 5. Inteiros sem '.5'. Não use 'dia 14,5' — arredonde pra inteiro.        ║
 ║ 6. Se nada relevante na seção, NÃO faça insight forçado.                ║
+║ 7. NUNCA invente marcas, lojas, apps ou produtos. Se for citar um       ║
+║    estabelecimento, ele tem que aparecer LITERALMENTE no JSON. Categoria║
+║    como "alimentacao" NÃO autoriza falar "iFood" ou "delivery".          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 
 OUTRAS REGRAS:
