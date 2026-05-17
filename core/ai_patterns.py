@@ -40,8 +40,8 @@ PATTERNS_CACHE_TTL_SECONDS = 24 * 3600    # 24h
 
 # Bumpe quando mudar prompt/payload de forma significativa. Cache antigo
 # vira garbage instantaneamente (kind diferente = miss).
-_PROMPT_VERSION_PATTERNS = 6
-_PROMPT_VERSION_INSIGHTS = 6
+_PROMPT_VERSION_PATTERNS = 7
+_PROMPT_VERSION_INSIGHTS = 7
 
 
 def _cache_kind(base: str) -> str:
@@ -486,10 +486,23 @@ Qualitativo > quantitativo errado.
 ║    vez de citar um merchant individual.                                  ║
 ║                                                                          ║
 ║12. Dicas acionáveis (tone='tip'): a economia sugerida deve ser um valor ║
-║    PRONTO do JSON, não calculado por você. Padrão certo:                ║
-║      "Cortar 1 visita à pescaria economiza R$ X/mês" — onde R$ X é      ║
-║      EXATAMENTE igual a top_merchants[i].avg_per_month do merchant      ║
-║      em questão.                                                         ║
+║    PRONTO do JSON, não calculado por você. Há SÓ DUAS formas válidas:   ║
+║                                                                          ║
+║    (a) "Cortar 1 visita ao [merchant] economiza R$ X" — onde R$ X é     ║
+║        EXATAMENTE igual a top_merchants[i].avg_per_transaction.         ║
+║        Aqui, "1 visita" = "1 transação" = ticket médio. NUNCA escreva  ║
+║        '/mês' nesse caso — é o valor de UMA transação.                  ║
+║        Exemplo: "Cortar 1 visita à pescaria economiza ~R$ 85"           ║
+║                                                                          ║
+║    (b) "Eliminar gastos com [merchant/categoria] economiza R$ X/mês" —  ║
+║        onde R$ X é EXATAMENTE top_merchants[i].avg_per_month OU         ║
+║        top_categories[i].avg_per_month. Aqui é o gasto MENSAL inteiro. ║
+║        Exemplo: "Cortar gastos com rifa economiza R$ 426/mês"           ║
+║                                                                          ║
+║    Confusão a EVITAR: "Cortar 1 visita economiza R$ Y/mês" onde R$ Y =  ║
+║    avg_per_month. Isso é INCORRETO — 1 visita ≠ todo o gasto mensal.    ║
+║    Cortar 1 visita = 1 ticket = avg_per_transaction (sem /mês).         ║
+║                                                                          ║
 ║    NÃO componha frases tipo "cortar metade", "reduzir 20%", "cortar 1   ║
 ║    por semana" — exigem aritmética sua e levam a alucinação.            ║
 ╚══════════════════════════════════════════════════════════════════════════╝
