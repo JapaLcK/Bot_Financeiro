@@ -40,8 +40,8 @@ PATTERNS_CACHE_TTL_SECONDS = 24 * 3600    # 24h
 
 # Bumpe quando mudar prompt/payload de forma significativa. Cache antigo
 # vira garbage instantaneamente (kind diferente = miss).
-_PROMPT_VERSION_PATTERNS = 5
-_PROMPT_VERSION_INSIGHTS = 5
+_PROMPT_VERSION_PATTERNS = 6
+_PROMPT_VERSION_INSIGHTS = 6
 
 
 def _cache_kind(base: str) -> str:
@@ -399,12 +399,26 @@ um JSON com métricas comportamentais agregadas de um usuário e identificar
 
 Tom: amigo curioso e observador, anti-fricção, sem julgar. PT-BR coloquial.
 
-Cada padrão é uma DESCOBERTA específica e numérica sobre o comportamento,
-não uma regra genérica. Exemplos do tom que queremos:
+Cada padrão é uma DESCOBERTA específica sobre o comportamento, não regra
+genérica. Pode ser QUANTITATIVO (com números) ou QUALITATIVO (só
+descrevendo o padrão) — escolha QUALITATIVO sempre que a amostra é
+pequena ou os valores muito disparatados.
+
+Exemplos do tom que queremos:
+
+Quantitativos (quando dados são robustos):
 - "Você gasta 2,3x mais em iFood depois das 22h" (subtitle: "ticket médio R$ 67 vs R$ 29")
 - "Sextas e sábados concentram 51% do seu lazer"
 - "Você queima 80% do salário até o dia 12"
 - "Dica do Piggy: cortar 1 jantar fora por semana economiza ~R$ 240/mês"
+
+Qualitativos (quando dados são frágeis — preferíveis a alucinar números):
+- "Você tende a gastar mais à tarde do que de manhã"
+- "Seu padrão de consumo se concentra no fim de semana"
+- "Quase todo seu gasto noturno vem de delivery"
+
+Regra prática: SE não tem certeza do número, NÃO cite o número.
+Qualitativo > quantitativo errado.
 
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║ ANTI-ALUCINAÇÃO — REGRAS ABSOLUTAS                                       ║
@@ -442,10 +456,14 @@ não uma regra genérica. Exemplos do tom que queremos:
 ║ 5. Para comparar gasto por horário, use 'avg_monthly' OU                ║
 ║    'avg_per_transaction' dos hour_buckets — NUNCA 'total' (que é a soma ║
 ║    dos 6 meses inteiros).                                                ║
-║    ⚠️ NUNCA compare dois hour_buckets se UM DELES tem `low_sample: true`║
-║    — amostra pequena causa distorção gigante. Se Manhã é low_sample,    ║
-║    NÃO faça "Você gasta Nx mais à tarde que de manhã". Pule esse        ║
-║    padrão.                                                               ║
+║    ⚠️ Se UM dos buckets tem `low_sample: true` (count<5), AINDA dá pra  ║
+║    falar do padrão MAS sem citar números nem Nx — vire QUALITATIVO:     ║
+║       ✅ "Você tende a gastar mais à tarde do que de manhã"             ║
+║       ✅ "Quase todo seu gasto se concentra à noite"                    ║
+║       ❌ "Você gasta 4,4x mais à tarde" (proibido com low_sample)       ║
+║       ❌ "R$ 1.660 à tarde vs R$ 32 de manhã" (proibido com low_sample) ║
+║    Quando os dois lados têm sample bom (low_sample=false), aí pode citar║
+║    valores e Nx como sempre.                                             ║
 ║                                                                          ║
 ║ 6. Para dia da semana, use 'avg_daily' dentro do weekend_split.          ║
 ║                                                                          ║
