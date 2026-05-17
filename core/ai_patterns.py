@@ -40,8 +40,8 @@ PATTERNS_CACHE_TTL_SECONDS = 24 * 3600    # 24h
 
 # Bumpe quando mudar prompt/payload de forma significativa. Cache antigo
 # vira garbage instantaneamente (kind diferente = miss).
-_PROMPT_VERSION_PATTERNS = 7
-_PROMPT_VERSION_INSIGHTS = 7
+_PROMPT_VERSION_PATTERNS = 8
+_PROMPT_VERSION_INSIGHTS = 8
 
 
 def _cache_kind(base: str) -> str:
@@ -153,6 +153,7 @@ def _collect_patterns_data(user_id: int) -> dict[str, Any]:
     from db import (
         compute_behavioral_patterns,
         compute_categories,
+        compute_kpis,
         resolve_window,
     )
 
@@ -233,6 +234,23 @@ def _collect_patterns_data(user_id: int) -> dict[str, Any]:
     except Exception as e:
         logger.warning("ai_patterns: categories falhou: %s", e)
         out["top_categories"] = []
+
+    # Adiciona kpi highlights — peak_day e largest_expense — são fontes
+    # ricas de padrão (ex: "Seu pior dia gastou R$ 800") que não exigem
+    # aritmética nenhuma.
+    try:
+        fd, td = resolve_window(months=months_covered)
+        kpis = compute_kpis(user_id, fd, td)
+        out["highlights"] = {
+            "peak_day": kpis.get("peak_day"),
+            "largest_expense": kpis.get("largest_expense"),
+            "total_income": kpis.get("total_income"),
+            "total_expense": kpis.get("total_expense"),
+            "savings_rate": kpis.get("savings_rate"),
+        }
+    except Exception as e:
+        logger.warning("ai_patterns: kpi highlights falhou: %s", e)
+        out["highlights"] = None
 
     return out
 
@@ -395,30 +413,59 @@ def _compact_goals_status(user_id: int) -> list[dict]:
 PATTERNS_SYSTEM_PROMPT = """\
 Você é o Piggy 🐷, o assistente financeiro do PigBank AI. Sua tarefa: analisar
 um JSON com métricas comportamentais agregadas de um usuário e identificar
-3 a 5 PADRÕES INTERESSANTES.
+**4 a 6 PADRÕES INTERESSANTES E VARIADOS**. Tente cobrir tipos diferentes
+de padrão pra não ficar repetitivo — não force todos no mesmo molde.
 
 Tom: amigo curioso e observador, anti-fricção, sem julgar. PT-BR coloquial.
 
-Cada padrão é uma DESCOBERTA específica sobre o comportamento, não regra
-genérica. Pode ser QUANTITATIVO (com números) ou QUALITATIVO (só
-descrevendo o padrão) — escolha QUALITATIVO sempre que a amostra é
-pequena ou os valores muito disparatados.
+Cada padrão é uma DESCOBERTA específica sobre o comportamento. Pode ser
+QUANTITATIVO (com números) ou QUALITATIVO (só descrevendo o padrão).
+Quando a amostra é pequena ou valores disparatados, prefira QUALITATIVO.
 
-Exemplos do tom que queremos:
+═══ TIPOS DE PADRÃO QUE VOCÊ PODE EXPLORAR ═══
 
-Quantitativos (quando dados são robustos):
+1. **Concentração** — categoria/merchant/dia que domina o gasto.
+   - "34% do seu gasto é em [categoria_top]" (use pct_of_total_spending)
+   - "Você fez X visitas à [merchant] em 6 meses" (use frequency_per_month × 6)
+   - "Seu maior gasto único foi R$ X em [largest_expense.alvo]"
+
+2. **Periodicidade** — quando o gasto se concentra.
+   - "84% do seu gasto é em dias úteis"
+   - "Você tende a gastar mais à tarde do que de manhã" (qualitativo se low_sample)
+   - "Sextas concentram boa parte do seu gasto"
+
+3. **Comparação direta (Nx)** — SÓ se ambos lados têm sample bom.
+   - "Você gasta 2,3x mais em [X] do que em [Y]"
+   - Use o sanitizer mental: o número Nx tem que bater com os valores citados.
+
+4. **Salary burn / ritmo** — relação com a renda.
+   - "Você consome 80% da renda até o dia X" (use salary_burn)
+   - "Sua taxa de poupança é Y%" (use highlights.savings_rate × 100)
+
+5. **Pico** — momento extremo identificável.
+   - "Seu pior dia foi [peak_day.date] com R$ X em gastos"
+   - "Seu maior gasto: R$ X em [largest_expense.alvo]"
+
+6. **Acionável (tone='tip')** — dica baseada em ticket médio ou avg/mês.
+   - "Cortar 1 visita à [merchant] economiza ~R$ X" (avg_per_transaction)
+   - "Eliminar gastos com [merchant] economiza R$ X/mês" (avg_per_month)
+
+═══ EXEMPLOS DE TOM ═══
+
+Quantitativos (dados robustos):
 - "Você gasta 2,3x mais em iFood depois das 22h" (subtitle: "ticket médio R$ 67 vs R$ 29")
-- "Sextas e sábados concentram 51% do seu lazer"
-- "Você queima 80% do salário até o dia 12"
-- "Dica do Piggy: cortar 1 jantar fora por semana economiza ~R$ 240/mês"
+- "Sextas concentram 51% do seu lazer"
+- "Você consome 80% da renda até o dia 12"
 
-Qualitativos (quando dados são frágeis — preferíveis a alucinar números):
+Qualitativos (dados frágeis — preferíveis a alucinar):
 - "Você tende a gastar mais à tarde do que de manhã"
 - "Seu padrão de consumo se concentra no fim de semana"
 - "Quase todo seu gasto noturno vem de delivery"
 
 Regra prática: SE não tem certeza do número, NÃO cite o número.
-Qualitativo > quantitativo errado.
+Qualitativo > quantitativo errado, mas pattern existente > silêncio.
+NÃO seja tímido — tente entregar 4-6 padrões variados. Vazio é pior
+que conservador.
 
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║ ANTI-ALUCINAÇÃO — REGRAS ABSOLUTAS                                       ║
@@ -813,7 +860,7 @@ def _sanitize_pattern_items(items: list[dict]) -> list[dict]:
             "subtitle": subtitle,
             "tone": it.get("tone") if it.get("tone") in _ALLOWED_TONES else "neutral",
         })
-        if len(out) >= 6:
+        if len(out) >= 8:
             break
     return out
 
