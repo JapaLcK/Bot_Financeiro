@@ -1961,10 +1961,8 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
     <div class="mock-grid cols-2">
       <div class="mock-card">
         <h3>Insights do Piggy 🐷</h3>
-        <div class="empty" style="padding:30px 16px;text-align:center;color:var(--text-3);font-size:.92rem">
-          <div style="font-size:2rem;margin-bottom:6px">🐷</div>
-          <div style="font-weight:600;color:var(--text-2);margin-bottom:4px">Em breve</div>
-          <div style="font-size:.84rem">A Piggy vai te avisar quando uma categoria estourar, quando um recorrente reajustar, e outras dicas baseadas no seu histórico.</div>
+        <div id="analytics-insights-list" class="tx-list">
+          <div class="empty" style="padding:16px;text-align:center;color:var(--text-3);font-size:.85rem">Carregando…</div>
         </div>
       </div>
 
@@ -1985,11 +1983,9 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
       </div>
 
       <div class="mock-card">
-        <h3>Padrões detectados pela IA</h3>
-        <div class="empty" style="padding:30px 16px;text-align:center;color:var(--text-3);font-size:.92rem">
-          <div style="font-size:2rem;margin-bottom:6px">🐷</div>
-          <div style="font-weight:600;color:var(--text-2);margin-bottom:4px">Em breve</div>
-          <div style="font-size:.84rem">Padrões temporais (noturno vs diurno, fins de semana, dias até queimar o salário) chegam na próxima Sprint junto da IA proativa.</div>
+        <h3>Padrões detectados pela IA 🐷</h3>
+        <div id="analytics-patterns-list">
+          <div class="empty" style="padding:16px;text-align:center;color:var(--text-3);font-size:.85rem">Carregando…</div>
         </div>
       </div>
     </div>
@@ -6253,12 +6249,14 @@ async function _fetchAnalyticsAll(months) {
     try {
       const base = `/analytics/${USER_ID}`;
       const qs = `?months=${months}`;
-      const [k, ev, cat, wk, tm] = await Promise.all([
+      const [k, ev, cat, wk, tm, pat, ins] = await Promise.all([
         fetch(`${base}/kpis${qs}`,           { credentials:"same-origin" }).then(r => r.json()),
         fetch(`${base}/evolution${qs}`,      { credentials:"same-origin" }).then(r => r.json()),
         fetch(`${base}/categories${qs}`,     { credentials:"same-origin" }).then(r => r.json()),
         fetch(`${base}/weekday-pattern${qs}`,{ credentials:"same-origin" }).then(r => r.json()),
         fetch(`${base}/top-merchants${qs}&limit=8`, { credentials:"same-origin" }).then(r => r.json()),
+        fetch(`${base}/patterns${qs}`,       { credentials:"same-origin" }).then(r => r.json()).catch(() => ({})),
+        fetch(`/insights/${USER_ID}/current`,{ credentials:"same-origin" }).then(r => r.json()).catch(() => ({})),
       ]);
       return {
         kpis:       k.kpis       || null,
@@ -6266,6 +6264,8 @@ async function _fetchAnalyticsAll(months) {
         categories: cat.categories || [],
         weekday:    wk.weekdays  || [],
         merchants:  tm.merchants || [],
+        patterns:   pat.patterns || [],     // Sprint 7: narrativas LLM
+        insights:   ins.insights || [],
         months,
       };
     } finally {
@@ -6284,6 +6284,8 @@ function renderAnalyticsView(data) {
   renderAnalyticsWeekday(data.weekday);
   renderAnalyticsComparative(data.evolution);
   renderAnalyticsMerchants(data.merchants, data.months);
+  renderAnalyticsInsights(data.insights);
+  renderAnalyticsPatterns(data.patterns);
 }
 
 function _fmtBRL(v) {
@@ -6687,6 +6689,124 @@ function renderAnalyticsMerchants(merchants, months) {
           <div class="tx-meta">${escapeHtmlSafe(debCred)}</div>
         </div>
         <div class="tx-amt red">-${_fmtBRL(m.total)}</div>
+      </div>`;
+  }).join("");
+}
+
+// ── Sprint 7: Insights proativos do Piggy ────────────────────────────────
+
+// localStorage de dismissed insights (TTL 24h). Key = `_pigInsightsDismissed`.
+function _getDismissedInsights() {
+  try {
+    const raw = localStorage.getItem("_pigInsightsDismissed");
+    if (!raw) return {};
+    const obj = JSON.parse(raw);
+    const now = Date.now();
+    // Limpa entradas expiradas (>24h)
+    const cleaned = {};
+    for (const k in obj) {
+      if (obj[k] && (now - obj[k]) < 24 * 60 * 60 * 1000) cleaned[k] = obj[k];
+    }
+    return cleaned;
+  } catch (e) { return {}; }
+}
+function _dismissInsight(key) {
+  const obj = _getDismissedInsights();
+  obj[key] = Date.now();
+  try { localStorage.setItem("_pigInsightsDismissed", JSON.stringify(obj)); } catch (e) {}
+  // Re-render
+  if (_analyticsCache) renderAnalyticsInsights(_analyticsCache.insights);
+}
+
+// Mapeia action_view do backend pra nome real da view no app
+const _INSIGHT_VIEW_MAP = {
+  budgets: "budgets",
+  recurring: "fixed",
+  fixed: "fixed",
+  goals: "goals",
+  pockets: "goals",
+  analytics: "analytics",
+};
+
+function _switchToInsightView(view) {
+  const target = _INSIGHT_VIEW_MAP[view] || view;
+  if (typeof navigateTo === "function") navigateTo(target);
+}
+
+function renderAnalyticsInsights(insights) {
+  const root = document.getElementById("analytics-insights-list");
+  if (!root) return;
+  const dismissed = _getDismissedInsights();
+  const visible = (insights || []).filter(i => !dismissed[i.key]);
+
+  if (!visible.length) {
+    root.innerHTML = `
+      <div class="empty" style="padding:24px 16px;text-align:center;color:var(--text-3);font-size:.88rem">
+        <div style="font-size:2rem;margin-bottom:6px">🐷</div>
+        <div style="font-weight:600;color:var(--text-2);margin-bottom:4px">Tudo sob controle</div>
+        <div>Sem alertas relevantes pra você agora. Piggy continua de olho.</div>
+      </div>`;
+    return;
+  }
+
+  const sevColor = {
+    critical: "var(--red, #ef4444)",
+    warning:  "#f59e0b",
+    info:     "var(--text-2)",
+  };
+
+  root.innerHTML = visible.map(i => {
+    const color = sevColor[i.severity] || "var(--text-2)";
+    const action = i.action_label && i.action_view
+      ? `<button class="mini-action" onclick="_switchToInsightView('${escapeJsString(i.action_view)}')" style="background:rgba(124,58,237,.12);border:none;color:var(--purple,#7c3aed);font-size:.75rem;font-weight:600;padding:5px 10px;border-radius:6px;cursor:pointer;white-space:nowrap">${escapeHtmlSafe(i.action_label)} →</button>`
+      : "";
+    const closeBtn = `<button title="Dispensar" aria-label="Dispensar" onclick="_dismissInsight('${escapeJsString(i.key)}')" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;border-radius:6px;opacity:.6" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.6">✕</button>`;
+    return `
+      <div class="tx-row" style="border-left:3px solid ${color};padding-left:10px;align-items:flex-start">
+        <div class="tx-icon">${i.icon || "🐷"}</div>
+        <div class="tx-main" style="min-width:0">
+          <div class="tx-desc" style="font-weight:600;color:var(--text-1)">${escapeHtmlSafe(i.title)}</div>
+          <div class="tx-meta" style="color:var(--text-2);font-size:.84rem;line-height:1.35;white-space:normal">${escapeHtmlSafe(i.message)}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0">
+          ${action}
+          ${closeBtn}
+        </div>
+      </div>`;
+  }).join("");
+}
+
+function renderAnalyticsPatterns(patterns) {
+  const root = document.getElementById("analytics-patterns-list");
+  if (!root) return;
+
+  const items = Array.isArray(patterns) ? patterns : [];
+  if (!items.length) {
+    root.innerHTML = `
+      <div class="empty" style="padding:24px 16px;text-align:center;color:var(--text-3);font-size:.85rem">
+        <div style="font-size:2rem;margin-bottom:6px">🐷</div>
+        <div style="font-weight:600;color:var(--text-2);margin-bottom:4px">Sem padrões ainda</div>
+        <div>A IA precisa de mais histórico pra detectar padrões. Continue lançando — vai aparecer aqui em breve.</div>
+      </div>`;
+    return;
+  }
+
+  // Borda lateral colorida por tom
+  const toneColor = {
+    neutral: "var(--purple, #7c3aed)",
+    warn:    "#f59e0b",
+    tip:     "#10b981",
+  };
+
+  root.innerHTML = items.map(p => {
+    const color = toneColor[p.tone] || toneColor.neutral;
+    return `
+      <div class="tx-row" style="border-left:3px solid ${color};padding-left:10px;align-items:flex-start">
+        <div class="tx-icon">${p.icon || "🐷"}</div>
+        <div class="tx-main" style="min-width:0">
+          <div class="tx-desc" style="font-weight:600;color:var(--text-1);white-space:normal">${escapeHtmlSafe(p.title)}</div>
+          ${p.subtitle ? `<div class="tx-meta" style="color:var(--text-2);font-size:.82rem;line-height:1.4;white-space:normal;margin-top:2px">${escapeHtmlSafe(p.subtitle)}</div>` : ""}
+        </div>
       </div>`;
   }).join("");
 }

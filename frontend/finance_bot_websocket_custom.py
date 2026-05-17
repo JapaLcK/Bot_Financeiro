@@ -5050,6 +5050,50 @@ async def analytics_top_merchants_route(
     return {"ok": True, "merchants": result, "window": {"from": fd.isoformat(), "to": td.isoformat()}}
 
 
+# ─── Sprint 7: Insights proativos + padrões comportamentais (IA) ─────────────
+
+@app.get("/insights/{user_id}/current")
+async def insights_current_route(request: Request, user_id: int, force: bool = False):
+    """Insights acionáveis do Piggy, gerados via LLM (gpt-4o-mini).
+
+    Recebe estado financeiro ATUAL (orçamentos, recorrentes, metas, KPIs) e
+    devolve 3-5 insights priorizados por severidade. Cache 6h por user.
+
+    Fallback: se OPENAI_API_KEY ausente ou LLM falha, usa heurística antiga
+    (`compute_active_insights`) pra não deixar o card vazio.
+
+    `?force=true` ignora cache (útil só pra debug).
+    """
+    _authorize_dashboard_access(request, user_id)
+    from core.ai_patterns import generate_ai_insights
+    result = await asyncio.to_thread(generate_ai_insights, user_id, force=force)
+    return {"ok": True, "insights": result or []}
+
+
+@app.get("/analytics/{user_id}/patterns")
+async def analytics_patterns_route(
+    request: Request,
+    user_id: int,
+    force: bool = False,
+):
+    """Padrões comportamentais via LLM (gpt-4o-mini). Cache 24h.
+
+    O LLM recebe métricas agregadas (gastos por hora, weekend split, salary
+    burn, top merchants, top categorias) e devolve narrativas descobertas
+    dinamicamente (variam por user). Retorna lista de items `{icon, title,
+    subtitle, tone}` no campo `patterns`.
+
+    Fallback: se LLM indisponível, retorna lista vazia (frontend mostra
+    empty state). NÃO retorna a agregação bruta — só formato narrativo.
+
+    `?force=true` ignora cache (útil só pra debug).
+    """
+    _authorize_dashboard_access(request, user_id)
+    from core.ai_patterns import generate_ai_patterns
+    result = await asyncio.to_thread(generate_ai_patterns, user_id, force=force)
+    return {"ok": True, "patterns": result or []}
+
+
 # ─── History route (Sprint 6) ────────────────────────────────────────────────
 
 @app.get("/history/{user_id}/list")

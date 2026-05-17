@@ -1064,6 +1064,23 @@ def init_db():
         alter table auth_accounts
           add column if not exists ai_month_reset_at date
         """,
+
+        # Sprint 7 — Cache de IA proativa (insights/padrões gerados via LLM).
+        # `kind` ∈ {'insights', 'patterns'}. `payload` = JSON da lista de
+        # narrativas. `generated_at` controla TTL (TTL é decidido em runtime).
+        """
+        create table if not exists ai_proactive_cache (
+          user_id bigint not null references users(id) on delete cascade,
+          kind text not null,
+          payload jsonb not null,
+          generated_at timestamptz not null default now(),
+          primary key (user_id, kind)
+        )
+        """,
+        """
+        create index if not exists idx_ai_proactive_cache_generated
+          on ai_proactive_cache (generated_at desc)
+        """,
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks

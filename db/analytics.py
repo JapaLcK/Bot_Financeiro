@@ -845,3 +845,274 @@ def list_history(
         "limit": limit,
         "total_pages": total_pages,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Behavioral patterns — Sprint 7 (view Análises > "Padrões detectados pela IA")
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Buckets de hora do dia. (`hour_start_incl`, `hour_end_incl`, label)
+_HOUR_BUCKETS = [
+    (0, 5, "Madrugada"),    # 00-05
+    (6, 11, "Manhã"),       # 06-11
+    (12, 17, "Tarde"),      # 12-17
+    (18, 23, "Noite"),      # 18-23
+]
+
+
+def compute_behavioral_patterns(user_id: int, months: int = 6) -> dict:
+    """Padrões comportamentais agregados para a view Análises.
+
+    Janela default = últimos 6 meses cheios + mês corrente.
+
+    Retorna:
+      {
+        "window": { "from": "YYYY-MM-DD", "to": "YYYY-MM-DD", "months": N },
+        "hour_buckets": [
+          { "label": "Madrugada", "hour_start": 0, "hour_end": 5,
+            "total": X, "count": Y, "pct": Z }, ...
+        ],
+        "weekend_split": {
+          "weekday":  { "total": X, "count": Y, "pct": Z, "avg_daily": W },
+          "weekend":  { "total": X, "count": Y, "pct": Z, "avg_daily": W }
+        },
+        "salary_burn": {
+          "expected_income":   12345.67,  # média mensal nas últimas competências
+          "avg_day_to_80pct":  18,         # média de dias até bater 80% (1-31)
+          "samples":           4,          # quantos meses tinham dado suficiente
+          "ok":                true        # false se receita média <= 0
+        },
+        "top_merchants": [ { name, total, count, ... } ]    # top 5 do semestre
+      }
+    """
+    from_date, to_date = resolve_window(months=months)
+
+    # ── 1) Hour buckets (gastos por horário) ─────────────────────────────────
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT EXTRACT(HOUR FROM criado_em)::int AS h,
+                       SUM(valor)::float AS total,
+                       COUNT(*) AS count
+                FROM (
+                  SELECT criado_em, valor FROM launches
+                  WHERE user_id=%s
+                    AND tipo IN ('despesa', 'saida')
+                    AND is_internal_movement = false
+                    AND criado_em >= %s AND criado_em < %s
+                  UNION ALL
+                  SELECT ct.purchased_at AS criado_em, ct.valor
+                  FROM credit_transactions ct
+                  WHERE ct.user_id=%s
+                    AND ct.is_refund = false
+                    AND ct.purchased_at >= %s AND ct.purchased_at < %s
+                ) merged
+                GROUP BY h
+                """,
+                (user_id, from_date, to_date, user_id, from_date, to_date),
+            )
+            hour_rows = cur.fetchall() or []
+    by_hour: dict[int, tuple[float, int]] = {
+        int(r["h"]): (float(r["total"] or 0), int(r["count"] or 0))
+        for r in hour_rows
+    }
+    total_all_buckets = sum(v[0] for v in by_hour.values()) or 1.0
+    buckets_out: list[dict] = []
+    for h_start, h_end, label in _HOUR_BUCKETS:
+        total = sum(by_hour.get(h, (0.0, 0))[0] for h in range(h_start, h_end + 1))
+        count = sum(by_hour.get(h, (0.0, 0))[1] for h in range(h_start, h_end + 1))
+        pct = (total / total_all_buckets) * 100.0
+        buckets_out.append({
+            "label": label,
+            "hour_start": h_start,
+            "hour_end": h_end,
+            "total": round(total, 2),
+            "count": count,
+            "pct": round(pct, 1),
+        })
+
+    # ── 2) Weekend vs weekday ────────────────────────────────────────────────
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                  CASE WHEN EXTRACT(DOW FROM criado_em)::int IN (0, 6)
+                       THEN 'weekend' ELSE 'weekday' END AS kind,
+                  SUM(valor)::float AS total,
+                  COUNT(*) AS count
+                FROM (
+                  SELECT criado_em, valor FROM launches
+                  WHERE user_id=%s
+                    AND tipo IN ('despesa', 'saida')
+                    AND is_internal_movement = false
+                    AND criado_em >= %s AND criado_em < %s
+                  UNION ALL
+                  SELECT ct.purchased_at AS criado_em, ct.valor
+                  FROM credit_transactions ct
+                  WHERE ct.user_id=%s
+                    AND ct.is_refund = false
+                    AND ct.purchased_at >= %s AND ct.purchased_at < %s
+                ) merged
+                GROUP BY kind
+                """,
+                (user_id, from_date, to_date, user_id, from_date, to_date),
+            )
+            wk_rows = {r["kind"]: r for r in cur.fetchall()}
+
+    # Conta dias úteis vs fim de semana no período
+    weekend_days = 0
+    weekday_days = 0
+    cursor_d = from_date
+    while cursor_d < to_date:
+        if cursor_d.weekday() >= 5:  # 5=sáb, 6=dom
+            weekend_days += 1
+        else:
+            weekday_days += 1
+        cursor_d += timedelta(days=1)
+
+    wk_total = float(wk_rows.get("weekday", {}).get("total") or 0)
+    we_total = float(wk_rows.get("weekend", {}).get("total") or 0)
+    grand = wk_total + we_total or 1.0
+    weekend_split = {
+        "weekday": {
+            "total": round(wk_total, 2),
+            "count": int(wk_rows.get("weekday", {}).get("count") or 0),
+            "pct": round(wk_total / grand * 100.0, 1),
+            "avg_daily": round(wk_total / weekday_days, 2) if weekday_days else 0.0,
+        },
+        "weekend": {
+            "total": round(we_total, 2),
+            "count": int(wk_rows.get("weekend", {}).get("count") or 0),
+            "pct": round(we_total / grand * 100.0, 1),
+            "avg_daily": round(we_total / weekend_days, 2) if weekend_days else 0.0,
+        },
+    }
+
+    # ── 3) Salary burn pace ──────────────────────────────────────────────────
+    # Por mês: dia em que o gasto acumulado atinge 80% da receita média
+    salary_burn = _compute_salary_burn(user_id, from_date, to_date)
+
+    # ── 4) Top merchants do período (já existe helper) ───────────────────────
+    try:
+        top = compute_top_merchants(user_id, from_date, to_date, limit=5)
+    except Exception:
+        top = []
+
+    return {
+        "window": {
+            "from": from_date.isoformat(),
+            "to": to_date.isoformat(),
+            "months": months,
+        },
+        "hour_buckets": buckets_out,
+        "weekend_split": weekend_split,
+        "salary_burn": salary_burn,
+        "top_merchants": top,
+    }
+
+
+def _compute_salary_burn(user_id: int, from_date: date, to_date: date) -> dict:
+    """Por mês fechado dentro da janela, calcula o dia em que o gasto
+    acumulado bate 80% da receita média mensal nesse intervalo.
+
+    Considera só meses fechados (exclui o corrente). Se a janela só tem o
+    mês corrente, retorna ok=false.
+    """
+    # Receita média mensal (todos os meses na janela, incluindo corrente)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT date_part('year', criado_em)::int AS y,
+                       date_part('month', criado_em)::int AS m,
+                       SUM(valor)::float AS total
+                FROM launches
+                WHERE user_id=%s
+                  AND tipo = 'receita'
+                  AND is_internal_movement = false
+                  AND criado_em >= %s AND criado_em < %s
+                GROUP BY 1, 2
+                """,
+                (user_id, from_date, to_date),
+            )
+            inc_rows = cur.fetchall() or []
+    incomes = [float(r["total"] or 0) for r in inc_rows if float(r["total"] or 0) > 0]
+    if not incomes:
+        return {"expected_income": 0.0, "avg_day_to_80pct": None, "samples": 0, "ok": False}
+    expected_income = sum(incomes) / len(incomes)
+    if expected_income <= 0:
+        return {"expected_income": 0.0, "avg_day_to_80pct": None, "samples": 0, "ok": False}
+
+    target = expected_income * 0.8
+    today = date.today()
+    cutoff_excl = date(today.year, today.month, 1)  # exclui mês corrente
+
+    # Por mês, soma despesas dia-a-dia até atingir target. Faz só pra meses
+    # fechados da janela.
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT date_part('year', dt)::int AS y,
+                       date_part('month', dt)::int AS m,
+                       date_part('day', dt)::int AS d,
+                       SUM(valor)::float AS total
+                FROM (
+                  SELECT criado_em AS dt, valor FROM launches
+                  WHERE user_id=%s
+                    AND tipo IN ('despesa', 'saida')
+                    AND is_internal_movement = false
+                    AND criado_em >= %s AND criado_em < %s
+                  UNION ALL
+                  SELECT ct.purchased_at AS dt, ct.valor
+                  FROM credit_transactions ct
+                  WHERE ct.user_id=%s
+                    AND ct.is_refund = false
+                    AND ct.purchased_at >= %s AND ct.purchased_at < %s
+                ) merged
+                GROUP BY 1, 2, 3
+                ORDER BY 1, 2, 3
+                """,
+                (
+                    user_id, from_date, cutoff_excl,
+                    user_id, from_date, cutoff_excl,
+                ),
+            )
+            day_rows = cur.fetchall() or []
+
+    # Indexa por (y, m) → list[(d, total)]
+    by_month: dict[tuple[int, int], list[tuple[int, float]]] = {}
+    for r in day_rows:
+        by_month.setdefault((int(r["y"]), int(r["m"])), []).append(
+            (int(r["d"]), float(r["total"] or 0))
+        )
+
+    days_until_80: list[int] = []
+    for _, daily in by_month.items():
+        acc = 0.0
+        hit_day = None
+        for d, t in sorted(daily):
+            acc += t
+            if acc >= target:
+                hit_day = d
+                break
+        if hit_day is not None:
+            days_until_80.append(hit_day)
+
+    if not days_until_80:
+        return {
+            "expected_income": round(expected_income, 2),
+            "avg_day_to_80pct": None,
+            "samples": 0,
+            "ok": False,
+        }
+
+    avg_day = sum(days_until_80) / len(days_until_80)
+    return {
+        "expected_income": round(expected_income, 2),
+        "avg_day_to_80pct": round(avg_day, 1),
+        "samples": len(days_until_80),
+        "ok": True,
+    }

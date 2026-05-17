@@ -280,7 +280,7 @@ from .privacy import (
     has_recent_export_request,
 )
 
-# ── Analytics (Sprint 6) ────────────────────────────────────────────────────
+# ── Analytics (Sprint 6 + 7) ────────────────────────────────────────────────
 from .analytics import (
     resolve_window,
     compute_kpis,
@@ -290,7 +290,11 @@ from .analytics import (
     compute_top_merchants,
     compute_history_quick_stats,
     list_history,
+    compute_behavioral_patterns,
 )
+
+# ── Insights proativos (Sprint 7) ───────────────────────────────────────────
+from .insights import compute_active_insights
 
 __all__ = [
     # connection
@@ -388,8 +392,11 @@ __all__ = [
     "ai_set_pending_action", "ai_get_pending_action", "ai_clear_pending_action",
     "ai_get_usage_this_month", "ai_increment_usage", "log_ai_fallback",
     "AI_DEFAULT_CONTEXT_WINDOW",
-    # analytics (Sprint 6)
+    # analytics (Sprint 6 + 7)
     "resolve_window", "compute_kpis", "compute_evolution", "compute_categories",
     "compute_weekday_pattern", "compute_top_merchants",
     "compute_history_quick_stats", "list_history",
+    "compute_behavioral_patterns",
+    # insights (Sprint 7)
+    "compute_active_insights",
 ]
