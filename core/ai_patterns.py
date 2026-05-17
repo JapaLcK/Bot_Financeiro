@@ -40,8 +40,8 @@ PATTERNS_CACHE_TTL_SECONDS = 24 * 3600    # 24h
 
 # Bumpe quando mudar prompt/payload de forma significativa. Cache antigo
 # vira garbage instantaneamente (kind diferente = miss).
-_PROMPT_VERSION_PATTERNS = 3
-_PROMPT_VERSION_INSIGHTS = 3
+_PROMPT_VERSION_PATTERNS = 4
+_PROMPT_VERSION_INSIGHTS = 4
 
 
 def _cache_kind(base: str) -> str:
@@ -158,8 +158,9 @@ def _collect_patterns_data(user_id: int) -> dict[str, Any]:
 
     out: dict[str, Any] = {}
 
+    months_covered = 6
     try:
-        behaviors = compute_behavioral_patterns(user_id, months=6)
+        behaviors = compute_behavioral_patterns(user_id, months=months_covered)
         window = behaviors.get("window") or {}
         period_label = _fmt_period_pt(window.get("from"), window.get("to"))
 
@@ -168,14 +169,32 @@ def _collect_patterns_data(user_id: int) -> dict[str, Any]:
         for hb in (behaviors.get("hour_buckets") or []):
             total_expense_all += float(hb.get("total") or 0)
 
+        # ── Enriquece TOP_MERCHANTS com avg_per_month + freq_per_month ──
+        # Pra LLM nunca precisar dividir total/meses sozinho (a fonte da
+        # alucinação "dividido por 10 meses" quando o período é 6).
+        enriched_merchants = []
+        for m in (behaviors.get("top_merchants") or []):
+            total = float(m.get("total") or 0)
+            count = int(m.get("count") or 0)
+            avg_per_month = total / months_covered if months_covered > 0 else 0
+            avg_per_tx = (total / count) if count > 0 else 0
+            freq_per_month = count / months_covered if months_covered > 0 else 0
+            enriched_merchants.append({
+                **m,
+                "avg_per_month": round(avg_per_month, 2),
+                "avg_per_transaction": round(avg_per_tx, 2),
+                "frequency_per_month": round(freq_per_month, 2),
+            })
+
         out["_meta"] = {
             "period_label": period_label,           # ex: "dez/2025 a mai/2026"
-            "months_covered": window.get("months", 6),
+            "months_covered": months_covered,       # SEMPRE 6 — usar este divisor
             "total_expense_period": round(total_expense_all, 2),
             "data_source_note": (
-                "Todos os valores são acumulados do período inteiro. "
-                "Use 'avg_monthly' pra falar de gasto mensal, 'avg_per_transaction' "
-                "pra ticket médio, e 'avg_daily' (em weekend_split) pra gasto/dia."
+                "Todos os valores no JSON são EXATOS — não faça aritmética. "
+                "Use SEMPRE valores prontos: avg_per_month/avg_per_transaction/"
+                "avg_monthly/avg_daily/frequency_per_month. NUNCA divida você "
+                "mesmo um 'total' por meses/semanas — o divisor é 6 (months_covered)."
             ),
         }
         out["behaviors"] = {
@@ -183,17 +202,34 @@ def _collect_patterns_data(user_id: int) -> dict[str, Any]:
             "hour_buckets": behaviors.get("hour_buckets"),
             "weekend_split": behaviors.get("weekend_split"),
             "salary_burn": behaviors.get("salary_burn"),
-            "top_merchants": behaviors.get("top_merchants"),
+            "top_merchants": enriched_merchants,
         }
     except Exception as e:
         logger.warning("ai_patterns: behaviors falhou: %s", e)
         out["behaviors"] = None
 
     try:
-        fd, td = resolve_window(months=6)
+        fd, td = resolve_window(months=months_covered)
         cats = compute_categories(user_id, fd, td)
-        # Top 8 categorias por gasto pra LLM ter contexto sem explodir tokens
-        out["top_categories"] = (cats or [])[:8]
+        # Top 8 categorias por gasto pra LLM ter contexto sem explodir tokens.
+        # Enriquecemos com avg_per_month e pct_of_total (não confiar no LLM
+        # pra calcular nada).
+        total_cats = sum(float(c.get("total") or 0) for c in (cats or []))
+        top_cats_raw = (cats or [])[:8]
+        enriched_cats = []
+        for c in top_cats_raw:
+            total = float(c.get("total") or 0)
+            count = int(c.get("count") or 0)
+            avg_pm = total / months_covered if months_covered > 0 else 0
+            avg_tx = (total / count) if count > 0 else 0
+            pct = (total / total_cats * 100.0) if total_cats > 0 else 0.0
+            enriched_cats.append({
+                **c,
+                "avg_per_month": round(avg_pm, 2),
+                "avg_per_transaction": round(avg_tx, 2),
+                "pct_of_total_spending": round(pct, 1),
+            })
+        out["top_categories"] = enriched_cats
     except Exception as e:
         logger.warning("ai_patterns: categories falhou: %s", e)
         out["top_categories"] = []
@@ -230,21 +266,32 @@ def _collect_insights_data(user_id: int) -> dict[str, Any]:
         logger.warning("ai_patterns: budgets falhou: %s", e)
         out["budgets"] = None
 
-    # Recurring com reajustes recentes
+    # Recurring com reajustes recentes (enrich com change_pct e change_brl
+    # pré-calculados — LLM não precisa fazer (atual-anterior)/anterior).
     try:
         recurrings = list_recurring_expenses(user_id, include_inactive=False)
-        out["recurrings"] = [
-            {
+        enriched_recs = []
+        for r in (recurrings or []):
+            cur_amt = float(r.get("amount") or 0)
+            prev_amt = r.get("last_amount")
+            change_pct = None
+            change_brl = None
+            if prev_amt is not None and float(prev_amt) > 0:
+                prev_f = float(prev_amt)
+                change_brl = round(cur_amt - prev_f, 2)
+                change_pct = round((cur_amt - prev_f) / prev_f * 100.0, 1)
+            enriched_recs.append({
                 "name": r.get("name"),
-                "amount": r.get("amount"),
-                "last_amount": r.get("last_amount"),
+                "amount": cur_amt,
+                "last_amount": prev_amt,
                 "last_amount_changed_at": r.get("last_amount_changed_at"),
+                "change_brl": change_brl,           # ex: 5.00 (subiu R$ 5)
+                "change_pct": change_pct,           # ex: 11.1 (subiu 11,1%)
                 "category": r.get("category"),
                 "is_essential": r.get("is_essential"),
                 "due_day": r.get("due_day"),
-            }
-            for r in (recurrings or [])
-        ]
+            })
+        out["recurrings"] = enriched_recs
     except Exception as e:
         logger.warning("ai_patterns: recurrings falhou: %s", e)
         out["recurrings"] = []
@@ -363,7 +410,22 @@ não uma regra genérica. Exemplos do tom que queremos:
 ║ ANTI-ALUCINAÇÃO — REGRAS ABSOLUTAS                                       ║
 ╠══════════════════════════════════════════════════════════════════════════╣
 ║ 1. Use SOMENTE números EXATOS que existem no JSON. NUNCA invente.        ║
-║ 2. NUNCA mencione marcas, lojas, apps ou produtos específicos a menos    ║
+║                                                                          ║
+║ 2. ⚠️ PROIBIDO FAZER ARITMÉTICA. Não some, não divida, não multiplique.  ║
+║    Todos os números que você precisa já estão calculados:                ║
+║      • Gasto/mês de uma categoria   → top_categories[i].avg_per_month    ║
+║      • Gasto/mês de um merchant     → top_merchants[i].avg_per_month     ║
+║      • Ticket médio (1 transação)   → ...[i].avg_per_transaction         ║
+║      • Frequência de visitas/mês    → top_merchants[i].frequency_per_month║
+║      • Gasto/mês por horário        → hour_buckets[i].avg_monthly        ║
+║      • Gasto/dia útil ou fim semana → weekend_split.weekday.avg_daily    ║
+║      • % do gasto total             → top_categories[i].pct_of_total_spending║
+║    Se você se pegar dividindo "total/N meses", PARE. O valor pronto      ║
+║    já existe. O período coberto é SEMPRE `_meta.months_covered` (=6).   ║
+║    Erros típicos a evitar: "R$ 4000 dividido por 10 meses = R$ 400" —   ║
+║    isso é alucinação de divisor; o divisor correto sempre é 6.          ║
+║                                                                          ║
+║ 3. NUNCA mencione marcas, lojas, apps ou produtos específicos a menos    ║
 ║    que apareçam LITERALMENTE em `behaviors.top_merchants[].name`.        ║
 ║    PROIBIDO inferir "iFood", "Uber", "delivery", "Netflix", "Spotify"   ║
 ║    a partir de categorias genéricas como "alimentacao", "transporte",   ║
@@ -371,27 +433,43 @@ não uma regra genérica. Exemplos do tom que queremos:
 ║    categoria, use o NOME DELA tal como aparece no JSON                  ║
 ║    (ex: "Você gasta R$ 200/mês em alimentação", NÃO                     ║
 ║     "Você gasta R$ 200/mês em delivery").                                ║
-║ 3. Comparações 'Nx mais' SÓ se conseguir mostrar a divisão X/Y onde X e ║
+║                                                                          ║
+║ 4. Comparações 'Nx mais' SÓ se conseguir mostrar a divisão X/Y onde X e ║
 ║    Y são VALORES COMPARÁVEIS — ou seja, AMBOS são médias diárias, ou    ║
 ║    AMBOS médias mensais, ou AMBOS tickets médios. NUNCA misture total   ║
 ║    acumulado com média.                                                  ║
-║ 4. Para comparar gasto por horário, use 'avg_monthly' OU                ║
+║                                                                          ║
+║ 5. Para comparar gasto por horário, use 'avg_monthly' OU                ║
 ║    'avg_per_transaction' dos hour_buckets — NUNCA 'total' (que é a soma ║
 ║    dos 6 meses inteiros).                                                ║
-║ 5. Para dia da semana, use 'avg_daily' dentro do weekend_split.          ║
-║ 6. Se o JSON traz um número fracionário (ex: avg_day_to_80pct: 14),      ║
+║                                                                          ║
+║ 6. Para dia da semana, use 'avg_daily' dentro do weekend_split.          ║
+║                                                                          ║
+║ 7. Se o JSON traz um número fracionário (ex: avg_day_to_80pct: 14),      ║
 ║    use o INTEIRO direto, sem '.5' ou '.0'. Dia 14, não dia 14,5.        ║
-║ 7. SEMPRE cite o período coberto explicitamente no subtitle, usando o    ║
-║    `_meta.period_label` (ex: "nos últimos 6 meses (dez/2025 a mai/2026)").║
-║ 8. Se uma seção do JSON está null ou vazia, NÃO faça pattern sobre ela. ║
-║ 9. Categoria "outros" / "sem categoria" é ruído — evite padrões focados ║
+║                                                                          ║
+║ 8. SEMPRE cite o período coberto explicitamente no subtitle, usando o    ║
+║    `_meta.period_label` (ex: "últimos 6 meses (dez/2025 a mai/2026)").  ║
+║    Nunca cite outro número de meses no texto — só o que está em          ║
+║    `_meta.months_covered` (=6).                                          ║
+║                                                                          ║
+║ 9. Se uma seção do JSON está null ou vazia, NÃO faça pattern sobre ela. ║
+║                                                                          ║
+║10. Categoria "outros" / "sem categoria" é ruído — evite padrões focados ║
 ║    nela. Foque em categorias específicas com nome claro.                 ║
-║10. Se top_merchants contém merchants pouco descritivos (tipo "outros",  ║
-║    "rifa", "ações", "investimento bitcoin", "stanley presente dia das    ║
-║    maes"), prefira agregar por CATEGORIA em vez de citar um merchant.   ║
-║    Nomes de merchant só viram narrativa se forem claramente             ║
-║    estabelecimentos recorrentes (ex: "Uber", "iFood", "Netflix" — DESDE ║
-║    QUE estejam literalmente em top_merchants[].name).                    ║
+║                                                                          ║
+║11. Se top_merchants contém merchants pouco descritivos (tipo "outros",  ║
+║    "rifa", "ações", "investimento bitcoin", "gastei 800 pescaria",      ║
+║    "stanley presente dia das maes"), prefira agregar por CATEGORIA em   ║
+║    vez de citar um merchant individual.                                  ║
+║                                                                          ║
+║12. Dicas acionáveis (tone='tip'): a economia sugerida deve ser um valor ║
+║    PRONTO do JSON, não calculado por você. Padrão certo:                ║
+║      "Cortar 1 visita à pescaria economiza R$ X/mês" — onde R$ X é      ║
+║      EXATAMENTE igual a top_merchants[i].avg_per_month do merchant      ║
+║      em questão.                                                         ║
+║    NÃO componha frases tipo "cortar metade", "reduzir 20%", "cortar 1   ║
+║    por semana" — exigem aritmética sua e levam a alucinação.            ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 
 OUTRAS REGRAS:
@@ -432,16 +510,36 @@ descobertas de comportamento ao longo do tempo.
 ║ ANTI-ALUCINAÇÃO — REGRAS ABSOLUTAS                                       ║
 ╠══════════════════════════════════════════════════════════════════════════╣
 ║ 1. Use SOMENTE números EXATOS do JSON. NUNCA invente valores.            ║
-║ 2. Cada insight precisa ser sobre uma row VERIFICÁVEL no JSON:           ║
+║                                                                          ║
+║ 2. ⚠️ PROIBIDO FAZER ARITMÉTICA. Nada de divisões, multiplicações, %    ║
+║    calculadas por você. Os valores prontos a usar:                       ║
+║      • Orçamento atual                  → budgets.budgets[i].pct, .spent,║
+║                                           .budget, .remaining            ║
+║      • Recorrente reajustado           → recurrings[i].amount,           ║
+║                                           recurrings[i].last_amount      ║
+║      • Meta atrasada                    → goals[i].pct_complete,         ║
+║                                           goals[i].monthly_pace_current, ║
+║                                           goals[i].monthly_pace_needed   ║
+║      • Dias restantes no mês           → _meta.days_left_in_month        ║
+║      • Mês atual                       → _meta.month_label               ║
+║    Se quiser citar "subiu 12%", o JSON precisa ter ESSE 12% pronto.     ║
+║    Senão, descreva sem o ratio (ex: "passou de R$ X pra R$ Y").         ║
+║                                                                          ║
+║ 3. Cada insight precisa ser sobre uma row VERIFICÁVEL no JSON:           ║
 ║    - Orçamento → tem que existir em budgets.budgets[]                    ║
 ║    - Recorrente → tem que existir em recurrings[] com last_amount preenchido║
 ║    - Meta → tem que existir em goals[] com indicator='behind'/'tight'    ║
-║ 3. Insights são sobre o MÊS CORRENTE (`_meta.month_label`). Sempre cite  ║
+║                                                                          ║
+║ 4. Insights são sobre o MÊS CORRENTE (`_meta.month_label`). Sempre cite  ║
 ║    o mês quando o insight é sobre orçamento ou consumo do mês.           ║
-║ 4. Para "faltam X dias no mês", use `_meta.days_left_in_month`.          ║
-║ 5. Inteiros sem '.5'. Não use 'dia 14,5' — arredonde pra inteiro.        ║
-║ 6. Se nada relevante na seção, NÃO faça insight forçado.                ║
-║ 7. NUNCA invente marcas, lojas, apps ou produtos. Se for citar um       ║
+║                                                                          ║
+║ 5. Para "faltam X dias no mês", use `_meta.days_left_in_month`.          ║
+║                                                                          ║
+║ 6. Inteiros sem '.5'. Não use 'dia 14,5' — arredonde pra inteiro.        ║
+║                                                                          ║
+║ 7. Se nada relevante na seção, NÃO faça insight forçado.                ║
+║                                                                          ║
+║ 8. NUNCA invente marcas, lojas, apps ou produtos. Se for citar um       ║
 ║    estabelecimento, ele tem que aparecer LITERALMENTE no JSON. Categoria║
 ║    como "alimentacao" NÃO autoriza falar "iFood" ou "delivery".          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
