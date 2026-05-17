@@ -38,6 +38,27 @@ TEMPERATURE = 0.4  # ligeiramente acima do chat IA pra ter variedade nas narrati
 INSIGHTS_CACHE_TTL_SECONDS = 6 * 3600     # 6h
 PATTERNS_CACHE_TTL_SECONDS = 24 * 3600    # 24h
 
+# Bumpe quando mudar prompt/payload de forma significativa. Cache antigo
+# vira garbage instantaneamente (kind diferente = miss).
+_PROMPT_VERSION_PATTERNS = 2
+_PROMPT_VERSION_INSIGHTS = 2
+
+
+def _cache_kind(base: str) -> str:
+    if base == "patterns":
+        return f"patterns_v{_PROMPT_VERSION_PATTERNS}"
+    if base == "insights":
+        return f"insights_v{_PROMPT_VERSION_INSIGHTS}"
+    return base
+
+
+def _days_left_in_month(today: date) -> int:
+    if today.month == 12:
+        nxt = date(today.year + 1, 1, 1)
+    else:
+        nxt = date(today.year, today.month + 1, 1)
+    return (nxt - today).days
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Cache
@@ -101,6 +122,29 @@ def _save_cache(user_id: int, kind: str, items: list[dict]) -> None:
 # Coleta de dados estruturados
 # ─────────────────────────────────────────────────────────────────────────────
 
+_MONTH_PT = ["jan", "fev", "mar", "abr", "mai", "jun",
+             "jul", "ago", "set", "out", "nov", "dez"]
+
+
+def _fmt_period_pt(from_iso: str | None, to_iso: str | None) -> str:
+    """'2025-12-01' / '2026-06-01' → 'dez/2025 a mai/2026'."""
+    try:
+        from datetime import date as _date
+        if not from_iso or not to_iso:
+            return "últimos 6 meses"
+        fd = _date.fromisoformat(from_iso[:10])
+        td = _date.fromisoformat(to_iso[:10])
+        # to_date é exclusive (1º dia do mês seguinte). Subtrai 1 dia pra
+        # pegar o último mês COBERTO.
+        from datetime import timedelta as _td
+        td_inclusive = td - _td(days=1)
+        f_lbl = f"{_MONTH_PT[fd.month - 1]}/{fd.year}"
+        t_lbl = f"{_MONTH_PT[td_inclusive.month - 1]}/{td_inclusive.year}"
+        return f"{f_lbl} a {t_lbl}"
+    except Exception:
+        return "últimos 6 meses"
+
+
 def _collect_patterns_data(user_id: int) -> dict[str, Any]:
     """Junta tudo que o LLM precisa pra descobrir padrões comportamentais.
 
@@ -116,8 +160,26 @@ def _collect_patterns_data(user_id: int) -> dict[str, Any]:
 
     try:
         behaviors = compute_behavioral_patterns(user_id, months=6)
+        window = behaviors.get("window") or {}
+        period_label = _fmt_period_pt(window.get("from"), window.get("to"))
+
+        # Pré-calcula totais agregados pra ajudar o LLM a citar números corretos
+        total_expense_all = 0.0
+        for hb in (behaviors.get("hour_buckets") or []):
+            total_expense_all += float(hb.get("total") or 0)
+
+        out["_meta"] = {
+            "period_label": period_label,           # ex: "dez/2025 a mai/2026"
+            "months_covered": window.get("months", 6),
+            "total_expense_period": round(total_expense_all, 2),
+            "data_source_note": (
+                "Todos os valores são acumulados do período inteiro. "
+                "Use 'avg_monthly' pra falar de gasto mensal, 'avg_per_transaction' "
+                "pra ticket médio, e 'avg_daily' (em weekend_split) pra gasto/dia."
+            ),
+        }
         out["behaviors"] = {
-            "window": behaviors.get("window"),
+            "window": window,
             "hour_buckets": behaviors.get("hour_buckets"),
             "weekend_split": behaviors.get("weekend_split"),
             "salary_burn": behaviors.get("salary_burn"),
@@ -143,12 +205,23 @@ def _collect_insights_data(user_id: int) -> dict[str, Any]:
     """Junta estado financeiro ATUAL pro LLM gerar alertas/dicas acionáveis."""
     from db import (
         get_budgets_status_for_month,
-        list_recurring_expenses,
         compute_kpis,
         resolve_window,
     )
+    from db.recurring import list_recurring_expenses
 
     out: dict[str, Any] = {}
+    today = date.today()
+    out["_meta"] = {
+        "today": today.isoformat(),
+        "month_label": f"{_MONTH_PT[today.month - 1]}/{today.year}",
+        "day_of_month": today.day,
+        "days_left_in_month": _days_left_in_month(today),
+        "data_source_note": (
+            "Todos os números refletem o ESTADO ATUAL no mês corrente, exceto "
+            "onde explicitamente indicado outro período."
+        ),
+    }
 
     # Orçamentos do mês corrente
     try:
@@ -274,52 +347,66 @@ def _compact_goals_status(user_id: int) -> list[dict]:
 
 PATTERNS_SYSTEM_PROMPT = """\
 Você é o Piggy 🐷, o assistente financeiro do PigBank AI. Sua tarefa: analisar
-um JSON com métricas comportamentais agregadas de um usuário (gastos por
-horário, dia da semana, top categorias, top estabelecimentos, ritmo de
-queima do salário) e identificar 3 a 5 PADRÕES INTERESSANTES.
+um JSON com métricas comportamentais agregadas de um usuário e identificar
+3 a 5 PADRÕES INTERESSANTES.
 
 Tom: amigo curioso e observador, anti-fricção, sem julgar. PT-BR coloquial.
 
 Cada padrão é uma DESCOBERTA específica e numérica sobre o comportamento,
 não uma regra genérica. Exemplos do tom que queremos:
-- "Você gasta 2,3x mais em iFood depois das 22h"
+- "Você gasta 2,3x mais em iFood depois das 22h" (subtitle: "ticket médio R$ 67 vs R$ 29")
 - "Sextas e sábados concentram 51% do seu lazer"
 - "Você queima 80% do salário até o dia 12"
-- "Suas assinaturas somam R$ 287/mês — mais que o gasto médio com transporte"
 - "Dica do Piggy: cortar 1 jantar fora por semana economiza ~R$ 240/mês"
 
-REGRAS:
-1. Use SÓ números reais do JSON. NUNCA invente valores ou estabelecimentos.
-2. Se uma seção do JSON está vazia ou null, NÃO faça pattern sobre ela.
-3. Cada padrão deve ter um cálculo verificável no JSON (ex: "2,3x" precisa
-   ser X / Y onde X e Y existem nos dados).
-4. Evite redundância — não repita o mesmo padrão com palavras diferentes.
-5. Pelo menos 1 padrão deve ser ACIONÁVEL (uma dica de economia/ajuste).
-6. Formatação de R$: usar vírgula como decimal (R$ 1.234,56). Não escrever USD.
-7. Use no máximo 1 emoji por padrão e só se fizer sentido contextual.
+╔══════════════════════════════════════════════════════════════════════════╗
+║ ANTI-ALUCINAÇÃO — REGRAS ABSOLUTAS                                       ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║ 1. Use SOMENTE números EXATOS que existem no JSON. NUNCA invente.        ║
+║ 2. Comparações 'Nx mais' SÓ se conseguir mostrar a divisão X/Y onde X e ║
+║    Y são VALORES COMPARÁVEIS — ou seja, AMBOS são médias diárias, ou    ║
+║    AMBOS médias mensais, ou AMBOS tickets médios. NUNCA misture total   ║
+║    acumulado com média.                                                  ║
+║ 3. Para comparar gasto por horário, use 'avg_monthly' OU                ║
+║    'avg_per_transaction' dos hour_buckets — NUNCA 'total' (que é a soma ║
+║    dos 6 meses inteiros).                                                ║
+║ 4. Para dia da semana, use 'avg_daily' dentro do weekend_split.          ║
+║ 5. Se o JSON traz um número fracionário (ex: avg_day_to_80pct: 14),      ║
+║    use o INTEIRO direto, sem '.5' ou '.0'. Dia 14, não dia 14,5.        ║
+║ 6. SEMPRE cite o período coberto explicitamente no subtitle, usando o    ║
+║    `_meta.period_label` (ex: "nos últimos 6 meses (dez/2025 a mai/2026)").║
+║ 7. Se uma seção do JSON está null ou vazia, NÃO faça pattern sobre ela. ║
+║ 8. Categoria "outros" / "sem categoria" é ruído — evite padrões focados ║
+║    nela. Foque em categorias específicas com nome claro.                 ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+OUTRAS REGRAS:
+- Evite redundância — não repita padrão com palavras diferentes.
+- Pelo menos 1 padrão deve ser ACIONÁVEL (uma dica de economia).
+- Formatação de R$: vírgula decimal (R$ 1.234,56). Não escrever USD.
+- Use no máximo 1 emoji por padrão e só se fizer sentido contextual.
+- Subtitle deve mostrar o cálculo de forma transparente.
 
 FORMATO DE SAÍDA — JSON ESTRITO, NADA ALÉM DISSO:
 {
   "items": [
     {
-      "icon": "🌙",                                 // 1 emoji
-      "title": "Você gasta 2,3x mais em iFood depois das 22h",
-      "subtitle": "média noturna R$ 67 vs R$ 29 nas outras refeições",
-      "tone": "neutral"                            // "neutral" | "warn" | "tip"
-    },
-    ...
+      "icon": "🌙",
+      "title": "Você gasta 2,3x mais em delivery à noite",
+      "subtitle": "ticket médio R$ 67 vs R$ 29 nas outras refeições · últimos 6 meses (dez/2025 a mai/2026)",
+      "tone": "neutral"                     // "neutral" | "warn" | "tip"
+    }
   ]
 }
 
-Se não houver dados suficientes pra padrões reais, retorne {"items": []}.
+Se não houver sinal suficiente pra padrões verificáveis, retorne {"items": []}.
 """
 
 
 INSIGHTS_SYSTEM_PROMPT = """\
 Você é o Piggy 🐷, o assistente financeiro do PigBank AI. Sua tarefa: analisar
 um JSON com o ESTADO FINANCEIRO ATUAL de um usuário (orçamentos do mês,
-recorrentes, metas, KPIs) e gerar 3 a 5 INSIGHTS ACIONÁVEIS — alertas,
-alertas iminentes, observações importantes.
+recorrentes, metas, KPIs) e gerar 3 a 5 INSIGHTS ACIONÁVEIS.
 
 Tom: amigo presente, anti-fricção, direto. PT-BR coloquial.
 
@@ -327,31 +414,43 @@ Diferença para padrões: insights são sobre o ESTADO ATUAL (orçamento
 estourando AGORA, recorrente reajustou, meta atrasada). Padrões são
 descobertas de comportamento ao longo do tempo.
 
-REGRAS:
-1. Use SÓ números reais do JSON. NUNCA invente.
-2. Insights precisam ser SOBRE O ESTADO ATUAL — não invenções históricas.
-3. Cada insight tem severidade: critical (urgente), warning (atenção), info
-   (informativo). Distribuir conforme prioridade.
-4. Se um budget está vermelho (≥100%), é crítico.
-5. Se um recorrente reajustou recentemente, é warning.
-6. Se uma meta tá behind, é warning.
-7. Formatação de R$: vírgula decimal (R$ 1.234,56).
-8. Use no máximo 1 emoji por insight (deixe o título limpo).
-9. Se nada relevante, retorne {"items": []}.
+╔══════════════════════════════════════════════════════════════════════════╗
+║ ANTI-ALUCINAÇÃO — REGRAS ABSOLUTAS                                       ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║ 1. Use SOMENTE números EXATOS do JSON. NUNCA invente valores.            ║
+║ 2. Cada insight precisa ser sobre uma row VERIFICÁVEL no JSON:           ║
+║    - Orçamento → tem que existir em budgets.budgets[]                    ║
+║    - Recorrente → tem que existir em recurrings[] com last_amount preenchido║
+║    - Meta → tem que existir em goals[] com indicator='behind'/'tight'    ║
+║ 3. Insights são sobre o MÊS CORRENTE (`_meta.month_label`). Sempre cite  ║
+║    o mês quando o insight é sobre orçamento ou consumo do mês.           ║
+║ 4. Para "faltam X dias no mês", use `_meta.days_left_in_month`.          ║
+║ 5. Inteiros sem '.5'. Não use 'dia 14,5' — arredonde pra inteiro.        ║
+║ 6. Se nada relevante na seção, NÃO faça insight forçado.                ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+OUTRAS REGRAS:
+- Severidade:
+  - critical → orçamento vermelho (≥100%), meta vencida, recorrente subiu >20%
+  - warning  → orçamento amarelo (80-99%), meta behind, recorrente subiu 5-20%
+  - info     → observação relevante mas sem ação urgente
+- action_view permitidos: budgets | fixed | goals | analytics | null
+- Formatação de R$: vírgula decimal (R$ 1.234,56)
+- Máximo 1 emoji por insight (deixe o título limpo)
+- Se nada relevante, retorne {"items": []}.
 
 FORMATO DE SAÍDA — JSON ESTRITO:
 {
   "items": [
     {
       "icon": "🍔",
-      "title": "Alimentação estourou o orçamento",
-      "message": "R$ 487 de R$ 500 (97%) e faltam 19 dias no mês.",
-      "severity": "critical",                   // critical | warning | info
-      "action_label": "Ajustar",                // texto curto ou null
-      "action_view": "budgets",                 // budgets|fixed|goals|analytics|null
-      "key": "budget:alimentacao"               // identificador estável p/ dismiss
-    },
-    ...
+      "title": "Alimentação estourou o orçamento de mai/2026",
+      "message": "R$ 487,00 de R$ 500,00 (97%) e faltam 19 dias no mês.",
+      "severity": "critical",
+      "action_label": "Ajustar",
+      "action_view": "budgets",
+      "key": "budget:alimentacao:2026-05"
+    }
   ]
 }
 """
@@ -418,8 +517,9 @@ def generate_ai_patterns(user_id: int, *, force: bool = False) -> list[dict]:
 
     `force=True` ignora cache e regenera. Use só pra debug ou refresh manual.
     """
+    kind = _cache_kind("patterns")
     if not force:
-        cached = _get_cached(user_id, "patterns", PATTERNS_CACHE_TTL_SECONDS)
+        cached = _get_cached(user_id, kind, PATTERNS_CACHE_TTL_SECONDS)
         if cached is not None:
             return cached
 
@@ -434,12 +534,12 @@ def generate_ai_patterns(user_id: int, *, force: bool = False) -> list[dict]:
         )
     )
     if not has_signal:
-        _save_cache(user_id, "patterns", [])
+        _save_cache(user_id, kind, [])
         return []
 
     items = _call_llm(PATTERNS_SYSTEM_PROMPT, data) or []
     items = _sanitize_pattern_items(items)
-    _save_cache(user_id, "patterns", items)
+    _save_cache(user_id, kind, items)
     return items
 
 
@@ -449,8 +549,9 @@ def generate_ai_insights(user_id: int, *, force: bool = False) -> list[dict]:
     Fallback: se LLM falha por qualquer motivo, usa heurística antiga
     (`db.insights.compute_active_insights`) pra não deixar o card vazio.
     """
+    kind = _cache_kind("insights")
     if not force:
-        cached = _get_cached(user_id, "insights", INSIGHTS_CACHE_TTL_SECONDS)
+        cached = _get_cached(user_id, kind, INSIGHTS_CACHE_TTL_SECONDS)
         if cached is not None:
             return cached
 
@@ -466,7 +567,7 @@ def generate_ai_insights(user_id: int, *, force: bool = False) -> list[dict]:
             items = []
 
     items = _sanitize_insight_items(items)
-    _save_cache(user_id, "insights", items)
+    _save_cache(user_id, kind, items)
     return items
 
 

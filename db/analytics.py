@@ -918,11 +918,18 @@ def compute_behavioral_patterns(user_id: int, months: int = 6) -> dict:
         for r in hour_rows
     }
     total_all_buckets = sum(v[0] for v in by_hour.values()) or 1.0
+    # Nº de dias no período (pra calcular médias diárias/mensais)
+    period_days = max(1, (to_date - from_date).days)
+    period_months = max(1.0, period_days / 30.0)
     buckets_out: list[dict] = []
     for h_start, h_end, label in _HOUR_BUCKETS:
         total = sum(by_hour.get(h, (0.0, 0))[0] for h in range(h_start, h_end + 1))
         count = sum(by_hour.get(h, (0.0, 0))[1] for h in range(h_start, h_end + 1))
         pct = (total / total_all_buckets) * 100.0
+        # avg_per_transaction = quanto custa uma transação típica nesse bucket
+        # avg_monthly = quanto o user gasta nesse bucket em média por mês
+        avg_per_tx = (total / count) if count > 0 else 0.0
+        avg_monthly = total / period_months
         buckets_out.append({
             "label": label,
             "hour_start": h_start,
@@ -930,6 +937,8 @@ def compute_behavioral_patterns(user_id: int, months: int = 6) -> dict:
             "total": round(total, 2),
             "count": count,
             "pct": round(pct, 1),
+            "avg_per_transaction": round(avg_per_tx, 2),
+            "avg_monthly": round(avg_monthly, 2),
         })
 
     # ── 2) Weekend vs weekday ────────────────────────────────────────────────
@@ -1112,7 +1121,10 @@ def _compute_salary_burn(user_id: int, from_date: date, to_date: date) -> dict:
     avg_day = sum(days_until_80) / len(days_until_80)
     return {
         "expected_income": round(expected_income, 2),
-        "avg_day_to_80pct": round(avg_day, 1),
+        # Inteiro para evitar narrativas tipo "dia 14,5". Quem precisar do
+        # fracionário pode olhar `avg_day_to_80pct_raw`.
+        "avg_day_to_80pct": int(round(avg_day)),
+        "avg_day_to_80pct_raw": round(avg_day, 1),
         "samples": len(days_until_80),
         "ok": True,
     }

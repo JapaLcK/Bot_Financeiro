@@ -126,6 +126,7 @@ from .budgets import (
     delete_budget,
     list_user_categories,
     sum_spent_in_category_this_month,
+    get_budgets_status_for_month,
 )
 
 # ── Cartões de crédito ────────────────────────────────────────────────────────
@@ -333,6 +334,7 @@ __all__ = [
     # budgets
     "list_budgets", "get_budget", "upsert_budget", "delete_budget",
     "list_user_categories", "sum_spent_in_category_this_month",
+    "get_budgets_status_for_month",
     # cards
     "card_name_exists", "create_card", "delete_card", "get_card_id_by_name",
     "set_default_card", "get_default_card_id", "list_cards", "get_card_by_id",
