@@ -6,6 +6,14 @@ import pytest
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 os.environ.setdefault("JWT_SECRET", "test-jwt-secret-for-pytest-only-32-bytes")
 
+# Cifragem PII (core/crypto.py): testes precisam de chaves válidas.
+# Geramos dinamicamente a Fernet pra não vazar uma chave fixa em CI.
+from cryptography.fernet import Fernet as _Fernet  # noqa: E402
+os.environ.setdefault("PII_ENCRYPTION_KEY", _Fernet.generate_key().decode())
+os.environ.setdefault("PII_HASH_PEPPER", "test-pepper-for-pytest-only-must-be-32-chars-long")
+# Não polui pii_access_log durante testes (cada decrypt registra uma row).
+os.environ.setdefault("PII_AUDIT_DISABLED", "1")
+
 from db import init_db, ensure_user, get_conn
 
 

@@ -26,6 +26,7 @@ from core.crypto import (
     PiiAccessContext,
     decrypt_pii_optional,
     encrypt_pii_optional,
+    pii_audit_batch,
 )
 
 
@@ -329,6 +330,19 @@ def _decrypt_admin_row(row: dict, admin_user: str, purpose: str) -> dict:
 
 
 async def fetch_admin_overview(days: int = 30, admin_user: str = "admin") -> dict[str, Any]:
+    """Wrapper que envolve a coleta de dados num pii_audit_batch — os ~30
+    decrypts (top_users + recent_signups + recent_logins) acumulam e geram
+    1 INSERT batch no fim em vez de N inserts individuais. Evita congestionar
+    o pool sync durante request async (causa raiz do connection timeout em prod)."""
+    audit = pii_audit_batch()
+    audit.__enter__()
+    try:
+        return await _fetch_admin_overview_inner(days, admin_user)
+    finally:
+        audit.__exit__(None, None, None)
+
+
+async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin") -> dict[str, Any]:
     days = max(7, min(int(days or 30), 180))
     now = datetime.now(timezone.utc)
     start_30d = now - timedelta(days=30)

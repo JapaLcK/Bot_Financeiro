@@ -67,6 +67,12 @@ _fernet_cache: dict[str, Fernet] = {}
 _pepper_cache: bytes | None = None
 _cache_lock = threading.Lock()
 
+# Buffer thread-local pra batch audit. Quando ativo (entries é lista), as chamadas
+# de _record_access acumulam no buffer e o flush single-INSERT acontece no exit
+# do context manager. Evita N inserts sequenciais durante endpoints que decifram
+# muitos campos (ex: admin overview com 30+ decrypts).
+_audit_buffer = threading.local()
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Carregamento de chaves (cacheado)
@@ -244,10 +250,20 @@ def decrypt_pii_optional(ct: str | None, *, ctx: PiiAccessContext) -> str | None
 
 
 def _record_access(ctx: PiiAccessContext) -> None:
-    """Insere uma linha em pii_access_log. Falha silenciosa — audit NUNCA
-    pode bloquear o fluxo principal."""
+    """Registra acesso em pii_access_log. Se um pii_audit_batch() estiver ativo
+    no thread atual, acumula no buffer (flush no exit). Senão, INSERT imediato.
+
+    Falha silenciosa — audit NUNCA pode bloquear o fluxo principal."""
     if os.getenv("PII_AUDIT_DISABLED", "").strip() in {"1", "true", "True"}:
         return
+
+    # Batch ativo? Só acumula, flush é no __exit__.
+    buf = getattr(_audit_buffer, "entries", None)
+    if buf is not None:
+        buf.append(ctx)
+        return
+
+    # Sem batch: INSERT direto
     try:
         from db.connection import get_conn
         with get_conn() as conn, conn.cursor() as cur:
@@ -257,18 +273,72 @@ def _record_access(ctx: PiiAccessContext) -> None:
                   (purpose, actor, subject_user_id, field, endpoint, extra)
                 values (%s, %s, %s, %s, %s, %s)
                 """,
-                (
-                    (ctx.purpose or "?")[:120],
-                    (ctx.actor or "?")[:160],
-                    int(ctx.subject_user_id),
-                    (ctx.field or "?")[:60],
-                    (ctx.endpoint or None) and ctx.endpoint[:200],
-                    Jsonb(ctx.extra) if ctx.extra else None,
-                ),
+                _ctx_to_row(ctx),
             )
             conn.commit()
     except Exception as exc:
         print(f"[crypto] failed to record pii access: {exc}", file=sys.stderr)
+
+
+def _ctx_to_row(ctx: PiiAccessContext) -> tuple:
+    """Converte PiiAccessContext em tupla pronta pra INSERT."""
+    return (
+        (ctx.purpose or "?")[:120],
+        (ctx.actor or "?")[:160],
+        int(ctx.subject_user_id),
+        (ctx.field or "?")[:60],
+        (ctx.endpoint or None) and ctx.endpoint[:200],
+        Jsonb(ctx.extra) if ctx.extra else None,
+    )
+
+
+class pii_audit_batch:
+    """Context manager: durante o bloco, decrypts acumulam um buffer thread-local
+    em vez de fazer INSERT por chamada. No __exit__, faz UM batch INSERT.
+
+    Use em endpoints/funções que decifram muitos PIIs:
+
+        with pii_audit_batch():
+            for user in users:
+                email = decrypt_pii_optional(user.email_enc, ctx=...)
+                # ... mais decrypts ...
+        # Aqui, 1 INSERT batch com todas as entries acumuladas.
+
+    Aninhamento: chamadas reentrantes herdam o buffer mais externo. Falha do
+    flush é silenciosa (não quebra o fluxo)."""
+
+    def __enter__(self):
+        # Aninhamento: se já há buffer ativo, deixa o externo cuidar
+        self._was_outer = getattr(_audit_buffer, "entries", None) is None
+        if self._was_outer:
+            _audit_buffer.entries = []
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if not self._was_outer:
+            return False  # buffer externo cuida do flush
+        entries = getattr(_audit_buffer, "entries", None) or []
+        _audit_buffer.entries = None
+        if not entries:
+            return False
+        if os.getenv("PII_AUDIT_DISABLED", "").strip() in {"1", "true", "True"}:
+            return False
+        try:
+            from db.connection import get_conn
+            rows = [_ctx_to_row(e) for e in entries]
+            with get_conn() as conn, conn.cursor() as cur:
+                cur.executemany(
+                    """
+                    insert into pii_access_log
+                      (purpose, actor, subject_user_id, field, endpoint, extra)
+                    values (%s, %s, %s, %s, %s, %s)
+                    """,
+                    rows,
+                )
+                conn.commit()
+        except Exception as exc:
+            print(f"[crypto] failed to batch record pii access: {exc}", file=sys.stderr)
+        return False  # nunca suprime exceção do bloco
 
 
 # ──────────────────────────────────────────────────────────────────────────────
