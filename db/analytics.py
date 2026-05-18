@@ -664,14 +664,12 @@ def list_history(
     Filtro 'credito' devolve só credit_transactions.
 
     Busca textual: cada palavra digitada é casada contra alvo+nota+categoria
-    via ILIKE (case-insensitive, substring). Múltiplas palavras viram AND
-    (todas precisam aparecer em algum lugar). Ex.: "compra shopping" casa
-    com nota="parcela de compra de roupa shopping".
+    via `unaccent(...) ILIKE unaccent(?)` — case-insensitive, substring, com
+    normalização de acentos ("credito" casa "crédito"). Múltiplas palavras
+    viram AND (todas precisam aparecer em algum lugar). Ex.: "compra shopping"
+    casa com nota="parcela de compra de roupa shopping".
 
-    LIMITAÇÃO conhecida: ILIKE não normaliza acentos — "credito" não casa
-    "crédito". Pra resolver definitivamente: `CREATE EXTENSION unaccent;`
-    no Postgres e trocar pra `unaccent(...) ILIKE unaccent(%s)`. Anotado
-    como melhoria pós-Sprint 6.
+    Requer extension `unaccent` instalada (criada no init_db).
     """
     page = max(1, int(page or 1))
     limit = max(1, min(int(limit or 50), 200))
@@ -709,9 +707,9 @@ def list_history(
         for term in search_terms:
             pattern = f"%{term}%"
             per_term_sqls.append(
-                f"(COALESCE({prefix}alvo, '') ILIKE %s "
-                f"OR COALESCE({prefix}nota, '') ILIKE %s "
-                f"OR COALESCE({prefix}categoria, '') ILIKE %s)"
+                f"(unaccent(COALESCE({prefix}alvo, '')) ILIKE unaccent(%s) "
+                f"OR unaccent(COALESCE({prefix}nota, '')) ILIKE unaccent(%s) "
+                f"OR unaccent(COALESCE({prefix}categoria, '')) ILIKE unaccent(%s))"
             )
             per_term_params.extend([pattern, pattern, pattern])
         return (" AND ".join(per_term_sqls), per_term_params)
@@ -777,9 +775,9 @@ def list_history(
             for term in search_terms:
                 pattern = f"%{term}%"
                 per_term_sqls.append(
-                    "(COALESCE(c.name, '') ILIKE %s "
-                    "OR COALESCE(ct.nota, '') ILIKE %s "
-                    "OR COALESCE(ct.categoria, '') ILIKE %s)"
+                    "(unaccent(COALESCE(c.name, '')) ILIKE unaccent(%s) "
+                    "OR unaccent(COALESCE(ct.nota, '')) ILIKE unaccent(%s) "
+                    "OR unaccent(COALESCE(ct.categoria, '')) ILIKE unaccent(%s))"
                 )
                 credit_params.extend([pattern, pattern, pattern])
             clauses.append(" AND ".join(per_term_sqls))

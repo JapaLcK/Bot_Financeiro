@@ -7,6 +7,11 @@ from .schema_repairs import repair_user_fk_cascades
 
 def init_db():
     ddl_statements = [
+        # ─── Extensions ──────────────────────────────────────────────────────────
+        # unaccent: normaliza acentos pra busca textual ("credito" casa "crédito").
+        # Usado em db/analytics.py:list_history.
+        """create extension if not exists unaccent""",
+
         # -----------------------------
         # Core
         # -----------------------------
