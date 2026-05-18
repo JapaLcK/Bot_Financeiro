@@ -11,6 +11,13 @@ import psycopg
 
 from utils_phone import normalize_phone_e164, phone_lookup_candidates
 
+from core.crypto import (
+    PiiAccessContext,
+    decrypt_pii_optional,
+    encrypt_pii_optional,
+    hash_pii_optional,
+)
+
 
 def get_launches_by_period_impl(
     get_conn: Callable[[], Any],
@@ -184,7 +191,7 @@ def list_identities_by_user_impl(get_conn, user_id: int) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select provider, external_id
+                select provider, external_id, external_id_enc
                 from user_identities
                 where user_id=%s
                 """,
@@ -194,7 +201,21 @@ def list_identities_by_user_impl(get_conn, user_id: int) -> list[dict]:
             out = []
             for r in rows:
                 try:
-                    out.append({"provider": r["provider"], "external_id": r["external_id"]})
+                    provider = r["provider"]
+                    enc = r.get("external_id_enc")
+                    if enc:
+                        ext = decrypt_pii_optional(
+                            enc,
+                            ctx=PiiAccessContext(
+                                purpose="list_identities",
+                                actor=f"user:{user_id}",
+                                subject_user_id=user_id,
+                                field=f"{provider}_id",
+                            ),
+                        )
+                    else:
+                        ext = r["external_id"]
+                    out.append({"provider": provider, "external_id": ext})
                 except Exception:
                     out.append({"provider": r[0], "external_id": r[1]})
             return out
@@ -291,7 +312,10 @@ def register_auth_user_impl(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("select user_id from auth_accounts where email=%s", (email,))
+            cur.execute(
+                "select user_id from auth_accounts where email_hash=%s",
+                (hash_pii_optional(email, kind="email"),),
+            )
             if cur.fetchone():
                 raise ValueError("Este e-mail já está cadastrado.")
 
@@ -302,11 +326,14 @@ def register_auth_user_impl(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into auth_accounts (user_id, email, password_hash)
-                values (%s, %s, %s)
+                insert into auth_accounts (user_id, email, password_hash,
+                                           email_hash, email_enc)
+                values (%s, %s, %s, %s, %s)
                 on conflict (email) do nothing
                 """,
-                (user_id, email, password_hash),
+                (user_id, email, password_hash,
+                 hash_pii_optional(email, kind="email"),
+                 encrypt_pii_optional(email)),
             )
         conn.commit()
 
@@ -331,8 +358,8 @@ def login_auth_user_impl(get_conn, check_password, email: str, password: str) ->
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select user_id, password_hash, plan, plan_expires_at, phone_e164, phone_status from auth_accounts where email=%s",
-                (email,),
+                "select user_id, password_hash, plan, plan_expires_at, phone_e164, phone_status from auth_accounts where email_hash=%s",
+                (hash_pii_optional(email, kind="email"),),
             )
             row = cur.fetchone()
 
@@ -356,7 +383,8 @@ def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select email, display_name, plan, plan_expires_at, created_at, phone_e164,
+                select email, email_enc, display_name, display_name_enc,
+                       plan, plan_expires_at, created_at, phone_e164, phone_enc,
                        phone_status, phone_confirmed_at, whatsapp_verified_at,
                        engagement_opt_out, tip_email_opt_out, insight_email_opt_out,
                        whatsapp_updates_opt_out, stripe_customer_id, last_payment_status
@@ -365,7 +393,30 @@ def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
                 """,
                 (user_id,),
             )
-            return cur.fetchone()
+            row = cur.fetchone()
+    if not row:
+        return None
+
+    # Decifra PII (cai pro claro se _enc ausente — defensivo durante transição)
+    if row.get("email_enc"):
+        row["email"] = decrypt_pii_optional(
+            row["email_enc"],
+            ctx=PiiAccessContext(purpose="get_auth_user", actor=f"user:{user_id}",
+                                 subject_user_id=user_id, field="email"),
+        )
+    if row.get("phone_enc"):
+        row["phone_e164"] = decrypt_pii_optional(
+            row["phone_enc"],
+            ctx=PiiAccessContext(purpose="get_auth_user", actor=f"user:{user_id}",
+                                 subject_user_id=user_id, field="phone"),
+        )
+    if row.get("display_name_enc"):
+        row["display_name"] = decrypt_pii_optional(
+            row["display_name_enc"],
+            ctx=PiiAccessContext(purpose="get_auth_user", actor=f"user:{user_id}",
+                                 subject_user_id=user_id, field="name"),
+        )
+    return row
 
 
 def create_dashboard_session_impl(get_conn, user_id: int, hours: float = 2) -> str:
@@ -470,8 +521,8 @@ def create_email_verification_impl(
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select user_id, password_hash from auth_accounts where email = %s",
-                (email,),
+                "select user_id, password_hash from auth_accounts where email_hash = %s",
+                (hash_pii_optional(email, kind="email"),),
             )
             existing = cur.fetchone()
             if existing:
@@ -481,7 +532,8 @@ def create_email_verification_impl(
                         "Use \"Continuar com Google\" para entrar."
                     )
                 raise ValueError("Este e-mail já está cadastrado.")
-            cur.execute("select user_id from auth_accounts where phone_e164 = any(%s)", (phone_candidates,))
+            _phone_hashes = [hash_pii_optional(c, kind="phone") for c in phone_candidates if c]
+            cur.execute("select user_id from auth_accounts where phone_hash = any(%s)", (_phone_hashes,))
             if cur.fetchone():
                 raise ValueError("Este número de WhatsApp já está em uso por outra conta.")
 
@@ -492,15 +544,22 @@ def create_email_verification_impl(
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "update email_verification_codes set used_at = now() where email = %s and used_at is null",
-                (email,),
+                "update email_verification_codes set used_at = now() where email_hash = %s and used_at is null",
+                (hash_pii_optional(email, kind="email"),),
             )
             cur.execute(
                 """
-                insert into email_verification_codes (email, code, password_hash, phone_e164, display_name, expires_at)
-                values (%s, %s, %s, %s, %s, %s)
+                insert into email_verification_codes
+                  (email, code, password_hash, phone_e164, display_name, expires_at,
+                   email_hash, email_enc, phone_hash, phone_enc, display_name_enc)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (email, code, password_hash, normalized_phone, display_name, expires_at),
+                (email, code, password_hash, normalized_phone, display_name, expires_at,
+                 hash_pii_optional(email, kind="email"),
+                 encrypt_pii_optional(email),
+                 hash_pii_optional(normalized_phone, kind="phone"),
+                 encrypt_pii_optional(normalized_phone),
+                 encrypt_pii_optional(display_name)),
             )
         conn.commit()
 
@@ -523,11 +582,11 @@ def confirm_email_verification_impl(
                 """
                 select id, password_hash, phone_e164, display_name, expires_at, used_at
                 from email_verification_codes
-                where email = %s and code = %s
+                where email_hash = %s and code = %s
                 order by created_at desc
                 limit 1
                 """,
-                (email, code),
+                (hash_pii_optional(email, kind="email"), code),
             )
             row = cur.fetchone()
 
@@ -548,8 +607,10 @@ def confirm_email_verification_impl(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into auth_accounts (user_id, email, password_hash, phone_e164, display_name, phone_status)
-                values (%s, %s, %s, %s, %s, 'pending')
+                insert into auth_accounts
+                  (user_id, email, password_hash, phone_e164, display_name, phone_status,
+                   email_hash, email_enc, phone_hash, phone_enc, display_name_enc)
+                values (%s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s)
                 on conflict (email) do update
                 set user_id = excluded.user_id,
                     password_hash = excluded.password_hash,
@@ -558,9 +619,19 @@ def confirm_email_verification_impl(
                     phone_status = case
                         when auth_accounts.phone_e164 is null and excluded.phone_e164 is not null then 'pending'
                         else auth_accounts.phone_status
-                    end
+                    end,
+                    email_hash = coalesce(auth_accounts.email_hash, excluded.email_hash),
+                    email_enc = coalesce(auth_accounts.email_enc, excluded.email_enc),
+                    phone_hash = coalesce(auth_accounts.phone_hash, excluded.phone_hash),
+                    phone_enc = coalesce(auth_accounts.phone_enc, excluded.phone_enc),
+                    display_name_enc = coalesce(auth_accounts.display_name_enc, excluded.display_name_enc)
                 """,
-                (user_id, email, password_hash, phone_e164, display_name),
+                (user_id, email, password_hash, phone_e164, display_name,
+                 hash_pii_optional(email, kind="email"),
+                 encrypt_pii_optional(email),
+                 hash_pii_optional(phone_e164, kind="phone"),
+                 encrypt_pii_optional(phone_e164),
+                 encrypt_pii_optional(display_name)),
             )
             cur.execute(
                 "update email_verification_codes set used_at = now() where id = %s",
@@ -590,13 +661,14 @@ def attempt_whatsapp_phone_link_impl(
 ) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
+            wa_hashes = [hash_pii_optional(c, kind="phone") for c in wa_candidates if c]
             cur.execute(
                 """
                 select user_id, phone_e164
                 from auth_accounts
-                where phone_e164 = any(%s)
+                where phone_hash = any(%s)
                 """,
-                (wa_candidates,),
+                (wa_hashes,),
             )
             matches = cur.fetchall() or []
 
@@ -623,7 +695,7 @@ def attempt_whatsapp_phone_link_impl(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select external_id
+                select external_id, external_id_enc
                 from user_identities
                 where provider = 'whatsapp' and user_id = %s
                 limit 1
@@ -632,7 +704,21 @@ def attempt_whatsapp_phone_link_impl(
             )
             target_wa = cur.fetchone()
 
-            target_wa_id = target_wa["external_id"] if target_wa else None
+            if target_wa:
+                if target_wa.get("external_id_enc"):
+                    target_wa_id = decrypt_pii_optional(
+                        target_wa["external_id_enc"],
+                        ctx=PiiAccessContext(
+                            purpose="whatsapp_link_check",
+                            actor="system:whatsapp_link",
+                            subject_user_id=target_user_id,
+                            field="whatsapp_id",
+                        ),
+                    )
+                else:
+                    target_wa_id = target_wa["external_id"]
+            else:
+                target_wa_id = None
             same_phone_alias = False
             if target_wa_id:
                 try:
@@ -655,12 +741,17 @@ def attempt_whatsapp_phone_link_impl(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into user_identities (provider, external_id, user_id)
-                values ('whatsapp', %s, %s)
+                insert into user_identities (provider, external_id, user_id,
+                                              external_id_hash, external_id_enc)
+                values ('whatsapp', %s, %s, %s, %s)
                 on conflict (provider, external_id)
-                do update set user_id = excluded.user_id
+                do update set user_id = excluded.user_id,
+                              external_id_hash = coalesce(excluded.external_id_hash, user_identities.external_id_hash),
+                              external_id_enc = coalesce(excluded.external_id_enc, user_identities.external_id_enc)
                 """,
-                (wa_phone, target_user_id),
+                (wa_phone, target_user_id,
+                 hash_pii_optional(wa_phone, kind="external_id"),
+                 encrypt_pii_optional(wa_phone)),
             )
             cur.execute(
                 """
@@ -686,7 +777,10 @@ def create_password_reset_token_impl(get_conn, email: str, minutes_valid: int = 
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("select user_id from auth_accounts where email = %s", (email,))
+            cur.execute(
+                "select user_id from auth_accounts where email_hash = %s",
+                (hash_pii_optional(email, kind="email"),),
+            )
             row = cur.fetchone()
 
     if not row:

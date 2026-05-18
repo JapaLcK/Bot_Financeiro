@@ -244,6 +244,24 @@ button:disabled { opacity: .6; cursor: wait; }
 .filter-btn { padding: 5px 12px; font-size: 12px; border-radius: 999px; }
 .filter-btn.active { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.2); color: var(--text); }
 
+/* ── Pagination ──────────────────────────────────────────────────── */
+.pagination {
+  display: flex; align-items: center; justify-content: center;
+  gap: 8px; margin-top: 12px; padding: 8px 0;
+  border-top: 1px solid rgba(255,255,255,.05);
+}
+.pagination-btn {
+  padding: 5px 12px; font-size: 12px;
+  border-radius: 8px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  color: var(--muted); cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.pagination-btn:hover:not(:disabled) { background: rgba(255,255,255,.1); color: var(--text); }
+.pagination-btn:disabled { opacity: .35; cursor: default; }
+.pagination-info { font-size: 12px; color: var(--soft); min-width: 90px; text-align: center; }
+
 @media (max-width: 1100px) {
   .grid, .grid-3, .grid-2 { grid-template-columns: 1fr; }
   .hero { flex-direction: column; align-items: flex-start; }
@@ -256,29 +274,28 @@ button:disabled { opacity: .6; cursor: wait; }
 <body>
 <div class="shell">
 
-  <!-- ── Hero ─────────────────────────────────────────────────────── -->
+  <!-- ── Hero (enxuto) ────────────────────────────────────────────── -->
   <section class="hero">
     <div class="hero-left">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:10px">
         <span style="font-size:26px">🐷</span>
         <h1>PigBank — Monitoramento</h1>
         <span id="error-count-badge" style="display:none" class="badge badge-error">0 erros</span>
       </div>
-      <p>Visão em tempo real de erros, saúde operacional e métricas do bot. Atualização automática a cada 60 segundos.</p>
     </div>
     <div class="hero-right">
       <div class="hero-controls">
-        <select id="window-select">
-          <option value="7">Últimos 7 dias</option>
-          <option value="30" selected>Últimos 30 dias</option>
-          <option value="60">Últimos 60 dias</option>
-          <option value="90">Últimos 90 dias</option>
+        <select id="window-select" title="Janela do gráfico temporal">
+          <option value="7">7d</option>
+          <option value="30" selected>30d</option>
+          <option value="60">60d</option>
+          <option value="90">90d</option>
         </select>
-        <button id="refresh-btn" class="btn-primary" type="button">↻ Atualizar</button>
+        <button id="refresh-btn" class="btn-primary" type="button">↻</button>
         <button id="logout-btn" type="button">Sair</button>
       </div>
       <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end">
-        <span class="auto-badge"><span class="dot"></span>Auto-refresh 60s</span>
+        <span class="auto-badge"><span class="dot"></span>Auto 60s</span>
         <span class="refresh-status" id="refresh-status"></span>
       </div>
     </div>
@@ -314,6 +331,7 @@ button:disabled { opacity: .6; cursor: wait; }
         </div>
       </div>
       <div class="error-list" id="error-list"></div>
+      <div class="pagination" id="errors-pagination"></div>
     </div>
 
     <div class="card">
@@ -343,24 +361,6 @@ button:disabled { opacity: .6; cursor: wait; }
     </div>
   </section>
 
-  <!-- ── IA de categorização ────────────────────────────────────────── -->
-  <section class="grid-2" style="margin-bottom:16px">
-    <div class="card">
-      <div class="section-title">
-        <h2>🧠 IA de categorização</h2>
-        <span class="meta" id="category-ai-meta">Últimas 24h</span>
-      </div>
-      <div class="health-grid" id="category-ai-health-grid"></div>
-    </div>
-    <div class="card">
-      <div class="section-title">
-        <h2>📝 Últimos eventos da IA</h2>
-        <span class="meta" id="category-ai-list-meta">Últimos 10</span>
-      </div>
-      <div class="error-list" id="category-ai-list"></div>
-    </div>
-  </section>
-
   <!-- ── Eventos operacionais ────────────────────────────────────────── -->
   <section class="grid-2" style="margin-bottom:16px">
     <div class="card">
@@ -369,13 +369,15 @@ button:disabled { opacity: .6; cursor: wait; }
         <span class="meta">Últimos 25 (WhatsApp · Billing · Engagement)</span>
       </div>
       <div class="error-list" id="ops-list"></div>
+      <div class="pagination" id="ops-pagination"></div>
     </div>
     <div class="card">
       <div class="section-title">
         <h2>🔑 Logins recentes</h2>
-        <span class="meta">Últimos 20</span>
+        <span class="meta" id="logins-meta">—</span>
       </div>
       <div id="recent-logins"></div>
+      <div class="pagination" id="logins-pagination"></div>
     </div>
   </section>
 
@@ -388,6 +390,7 @@ button:disabled { opacity: .6; cursor: wait; }
       </div>
       <div style="display:flex;gap:12px;margin-bottom:12px" id="email-stats-bar"></div>
       <div class="error-list" id="email-list"></div>
+      <div class="pagination" id="emails-pagination"></div>
     </div>
     <div class="card">
       <div class="section-title">
@@ -415,7 +418,7 @@ button:disabled { opacity: .6; cursor: wait; }
   </section>
 
   <!-- ── Financeiro mensal ───────────────────────────────────────────── -->
-  <section class="card">
+  <section class="card" style="margin-bottom:16px">
     <div class="section-title">
       <h2>📅 Relatório mensal agregado</h2>
       <span class="meta">Últimos 6 meses</span>
@@ -426,6 +429,36 @@ button:disabled { opacity: .6; cursor: wait; }
         <tbody id="monthly-financials"></tbody>
       </table>
     </div>
+  </section>
+
+  <!-- ── Acessos PII (LGPD audit) ───────────────────────────────────── -->
+  <section class="card">
+    <div class="section-title">
+      <h2>🔐 Acessos PII</h2>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <input id="pii-filter-actor" type="text" placeholder="ator (ex: admin)" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 10px;font-size:12px;width:140px"/>
+        <input id="pii-filter-user" type="number" placeholder="user_id" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 10px;font-size:12px;width:120px"/>
+        <select id="pii-filter-field" style="font-size:12px;padding:5px 10px">
+          <option value="">Todos os campos</option>
+          <option value="email">email</option>
+          <option value="phone">phone</option>
+          <option value="name">name</option>
+          <option value="discord_id">discord_id</option>
+          <option value="whatsapp_id">whatsapp_id</option>
+          <option value="email_id">email_id</option>
+        </select>
+        <span class="meta" id="pii-access-meta">—</span>
+      </div>
+    </div>
+    <div style="overflow:auto">
+      <table class="table">
+        <thead><tr>
+          <th>Quando</th><th>Ator</th><th>Sobre user</th><th>Campo</th><th>Propósito</th>
+        </tr></thead>
+        <tbody id="pii-access-list"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="pii-access-pagination"></div>
   </section>
 
 </div><!-- .shell -->
@@ -442,11 +475,90 @@ let activeFilter     = "all";
 let lastErrorData    = [];
 let alertsClearedAt  = sessionStorage.getItem('alertsClearedAt') || null;
 
-function clearAlerts() {
-  alertsClearedAt = new Date().toISOString();
-  sessionStorage.setItem('alertsClearedAt', alertsClearedAt);
-  applyFilter(activeFilter);
-  updateErrorBanner(lastErrorData);
+// Paginação client-side: estado por lista
+const pageState = { errors: 0, ops: 0, emails: 0, logins: 0, piiAccess: 0 };
+const PER_PAGE = 10;
+
+/**
+ * Renderiza lista paginada. Devolve só o slice da página atual + controles.
+ *
+ * @param {string} listElId       — id do <div> onde os items vão
+ * @param {string} metaElId       — id do <span> meta (mostra "N de M") — opcional, pode ser null
+ * @param {Array}  rows           — itens completos
+ * @param {string} stateKey       — chave em pageState ('errors', 'ops', etc)
+ * @param {(row,i)=>string} itemHTML — renderiza UM item
+ * @param {string} emptyMsg       — texto quando lista vazia
+ * @param {string} paginationContainerId — id do <div> com controles de paginação (opcional)
+ */
+function renderPaginated({ listElId, metaElId, rows, stateKey, itemHTML, emptyMsg, paginationContainerId }) {
+  const root = $id(listElId);
+  if (!root) return;
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+  // Garante página dentro dos limites se rows mudou
+  if (pageState[stateKey] >= totalPages) pageState[stateKey] = 0;
+  const page = pageState[stateKey];
+  const start = page * PER_PAGE;
+  const slice = rows.slice(start, start + PER_PAGE);
+
+  if (!total) {
+    root.innerHTML = `<div class="empty">${emptyMsg}</div>`;
+    if (metaElId) $id(metaElId).textContent = '0';
+    if (paginationContainerId) $id(paginationContainerId).innerHTML = '';
+    return;
+  }
+
+  root.innerHTML = slice.map(itemHTML).join('');
+  if (metaElId) $id(metaElId).textContent = `${start + 1}–${start + slice.length} de ${total}`;
+
+  if (paginationContainerId) {
+    const pagEl = $id(paginationContainerId);
+    if (totalPages <= 1) {
+      pagEl.innerHTML = '';
+    } else {
+      pagEl.innerHTML = `
+        <button class="pagination-btn" ${page === 0 ? 'disabled' : ''} onclick="changePage('${stateKey}', -1)">◀</button>
+        <span class="pagination-info">Página ${page + 1} de ${totalPages}</span>
+        <button class="pagination-btn" ${page >= totalPages - 1 ? 'disabled' : ''} onclick="changePage('${stateKey}', 1)">▶</button>
+      `;
+    }
+  }
+}
+
+function changePage(stateKey, delta) {
+  pageState[stateKey] = Math.max(0, pageState[stateKey] + delta);
+  // Re-renderiza com os mesmos dados em cache
+  if (stateKey === 'errors')  applyFilter(activeFilter);
+  if (stateKey === 'ops')     renderOpsList(window._lastOps || []);
+  if (stateKey === 'emails')  renderEmails(window._lastEmailStats || {}, window._lastEmails || []);
+  if (stateKey === 'logins')  renderLogins(window._lastLogins || []);
+  if (stateKey === 'piiAccess') loadPiiAccess();
+}
+
+async function clearAlerts() {
+  // Captura o maior id atualmente visível pra deletar tudo até esse momento
+  const maxId = lastErrorData.reduce((m, e) => Math.max(m, Number(e.id||0)), 0);
+  if (!maxId) return;
+
+  const ok = window.confirm(
+    `Apagar permanentemente todos os ${lastErrorData.length} eventos até este momento?\n\n` +
+    `Eventos novos a partir de agora continuarão aparecendo.`
+  );
+  if (!ok) return;
+
+  try {
+    const res = await fetch(`/admin/api/events?before_id=${maxId}`, {
+      method: 'DELETE', headers: authH()
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    setStatus(`✓ ${data.deleted} evento${data.deleted===1?'':'s'} apagado${data.deleted===1?'':'s'}`);
+    // Recarrega imediatamente pra refletir o novo estado
+    refresh(true);
+  } catch (e) {
+    setStatus('Falha ao limpar eventos.', true);
+    console.error(e);
+  }
 }
 
 function navigateToFilter(level) {
@@ -526,7 +638,7 @@ function updateErrorBanner(errors) {
     errorBadge.style.display = 'none';
   }
 
-  // Banner de alerta
+  // Banner de alerta — SÓ erros críticos (warnings não disparam mais)
   if (critical.length > 0) {
     const newest = critical[0];
     $id('banner-title').textContent =
@@ -534,10 +646,8 @@ function updateErrorBanner(errors) {
     $id('banner-detail').textContent =
       `Mais recente: ${newest.event_type} (${fRelTime(newest.created_at)}) — ${newest.message.slice(0,100)}`;
     errorBanner.classList.add('visible');
-  } else if (warnings.length > 3) {
-    $id('banner-title').textContent = `${warnings.length} alertas ativos`;
-    $id('banner-detail').textContent = warnings[0]?.message?.slice(0,120) || '';
-    errorBanner.classList.add('visible');
+  } else {
+    errorBanner.classList.remove('visible');
   }
 }
 
@@ -663,6 +773,7 @@ function renderErrorList(errors) {
 }
 
 function applyFilter(level) {
+  if (level !== activeFilter) pageState.errors = 0;
   activeFilter = level;
   document.querySelectorAll('#error-filter-bar .filter-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.level === level);
@@ -670,14 +781,19 @@ function applyFilter(level) {
   // Cleared state só se aplica em "Todos" — filtros específicos sempre mostram tudo
   const base     = level === 'all' ? _visibleErrors(lastErrorData) : lastErrorData;
   const filtered = level === 'all' ? base : base.filter(e => e.level === level);
-  const root = $id('error-list');
-  const hiddenCount = level === 'all' ? (lastErrorData.length - base.length) : 0;
-  $id('error-list-meta').textContent = `${filtered.length} de ${lastErrorData.length}${hiddenCount > 0 ? ` (${hiddenCount} oculto${hiddenCount>1?'s':''})` : ''}`;
-  if (!filtered.length) {
-    root.innerHTML = `<div class="empty">✅ Nenhum evento ${level === 'all' ? '' : 'nível ' + level} encontrado.</div>`;
-    return;
-  }
-  root.innerHTML = filtered.map(renderErrorItem).join('');
+  const emptyMsg = level === 'all'
+    ? `✅ Nenhum evento encontrado.`
+    : `✅ Nenhum evento nível ${level} encontrado.`;
+
+  renderPaginated({
+    listElId: 'error-list',
+    metaElId: 'error-list-meta',
+    rows: filtered,
+    stateKey: 'errors',
+    itemHTML: renderErrorItem,
+    emptyMsg,
+    paginationContainerId: 'errors-pagination',
+  });
 }
 
 /* ── Health grid ─────────────────────────────────────────────────── */
@@ -744,63 +860,6 @@ function renderOpsHealthGrid(ops) {
   `).join('');
 }
 
-function renderCategoryAiHealth(ops) {
-  const items = [
-    { label: "Classificações ok 24h", val: fInt(ops.category_ai_success_24h), color: ops.category_ai_success_24h > 0 ? 'green' : 'blue',
-      hint: "Fallback de IA que retornou categoria valida" },
-    { label: "Respostas inválidas 24h", val: fInt(ops.category_ai_invalid_response_24h), color: ops.category_ai_invalid_response_24h > 0 ? 'yellow' : 'green',
-      cls: ops.category_ai_invalid_response_24h > 0 ? 'warning' : '',
-      hint: "IA respondeu algo fora da whitelist e virou 'outros'" },
-    { label: "Erros 24h", val: fInt(ops.category_ai_errors_24h), color: ops.category_ai_errors_24h > 0 ? 'red' : 'green',
-      cls: ops.category_ai_errors_24h > 0 ? 'danger' : '',
-      hint: "Excecoes na chamada do fallback de categoria" },
-    { label: "Indisponível 24h", val: fInt(ops.category_ai_unavailable_24h), color: ops.category_ai_unavailable_24h > 0 ? 'yellow' : 'green',
-      cls: ops.category_ai_unavailable_24h > 0 ? 'warning' : '',
-      hint: "Sem chave ou sem cliente OpenAI no fallback" },
-    { label: "Último uso da IA", val: fRelTime(ops.last_category_ai_at), color: ops.last_category_ai_at ? 'blue' : 'yellow',
-      cls: ops.last_category_ai_at ? '' : 'warning',
-      hint: ops.last_category_ai_at ? `Último evento: ${fDate(ops.last_category_ai_at)}` : 'Nenhum evento recente de IA de categoria' },
-  ];
-
-  $id('category-ai-health-grid').innerHTML = items.map(it => `
-    <div class="health-item ${it.cls||''}">
-      <div class="health-item-val ${it.color||''}">${it.val}</div>
-      <div class="health-item-label">${it.label}</div>
-      ${it.hint ? `<div class="health-item-hint">${it.hint}</div>` : ''}
-    </div>
-  `).join('');
-}
-
-function renderCategoryAiList(ops) {
-  const rows = (ops || []).filter(row => String(row.event_type || '').startsWith('category_ai_')).slice(0, 10);
-  $id('category-ai-list-meta').textContent = `${rows.length} recente${rows.length === 1 ? '' : 's'}`;
-
-  const root = $id('category-ai-list');
-  if (!rows.length) {
-    root.innerHTML = `<div class="empty">Sem eventos recentes da IA de categorização.</div>`;
-    return;
-  }
-
-  root.innerHTML = rows.map(row => {
-    const content = buildExpandContent(row);
-    const hasTb   = !!row.details?.traceback;
-    return `
-    <div class="error-item level-${row.level}" onclick="toggleExpand(this)" style="cursor:pointer">
-      <div class="error-item-header">
-        ${levelBadge(row.level)}
-        <span class="error-item-title">${esc(EVENT_LABELS[row.event_type] || row.event_type)}</span>
-        <span class="error-item-time">${fRelTime(row.created_at)}</span>
-      </div>
-      <div class="error-item-msg">${esc(row.message.slice(0,160))}</div>
-      ${row.details?.input_text ? `<div class="error-item-source">📝 ${esc(row.details.input_text)}</div>` : ''}
-      ${row.details?.raw_category ? `<div class="error-item-source">🤖 resposta: ${esc(row.details.raw_category)}</div>` : ''}
-      ${row.details?.normalized_category ? `<div class="error-item-source">🏷️ final: ${esc(row.details.normalized_category)}</div>` : ''}
-      ${row.source ? `<div class="error-item-source">📍 ${esc(row.source)}</div>` : ''}
-      <div class="expand-hint">${hasTb ? '▼ ver traceback' : '▼ ver detalhes'}</div>
-      <div class="error-item-tb">${content}</div>
-    </div>`;
-  }).join('');
-}
 
 /* ── Summary cards ───────────────────────────────────────────────── */
 function renderSummary(s) {
@@ -825,9 +884,8 @@ function renderSummary(s) {
 
 /* ── Ops list ────────────────────────────────────────────────────── */
 function renderOpsList(ops) {
-  const root = $id('ops-list');
-  if (!ops.length) { root.innerHTML = `<div class="empty">Sem eventos operacionais recentes.</div>`; return; }
-  root.innerHTML = ops.map(row => {
+  window._lastOps = ops;
+  const opItem = (row) => {
     const content = buildExpandContent(row);
     const hasTb   = !!row.details?.traceback;
     return `
@@ -842,7 +900,16 @@ function renderOpsList(ops) {
       <div class="expand-hint">${hasTb ? '▼ ver traceback' : '▼ ver detalhes'}</div>
       <div class="error-item-tb">${content}</div>
     </div>`;
-  }).join('');
+  };
+  renderPaginated({
+    listElId: 'ops-list',
+    metaElId: null,
+    rows: ops,
+    stateKey: 'ops',
+    itemHTML: opItem,
+    emptyMsg: 'Sem eventos operacionais recentes.',
+    paginationContainerId: 'ops-pagination',
+  });
 }
 
 /* ── Signups / Logins ────────────────────────────────────────────── */
@@ -858,6 +925,9 @@ function renderSimple(id, rows, fn) {
 }
 
 function renderEmails(stats, rows) {
+  window._lastEmailStats = stats;
+  window._lastEmails = rows || [];
+
   // Stats bar
   const bar = $id('email-stats-bar');
   if (bar) {
@@ -874,19 +944,13 @@ function renderEmails(stats, rows) {
       </div>`).join('');
   }
 
-  // Lista de emails
-  const root = $id('email-list');
-  if (!rows || !rows.length) {
-    root.innerHTML = `<div class="empty">Nenhum e-mail registrado ainda.</div>`;
-    return;
-  }
-  $id('email-meta').textContent = `Últimos ${rows.length}`;
+  // Lista de emails paginada
   const EMAIL_TYPE_LABEL = {
     email_sent:   { badge: '<span class="badge" style="background:rgba(74,222,128,.12);color:#4ade80;border:1px solid rgba(74,222,128,.25)">ENVIADO</span>', icon: '✉️' },
     email_failed: { badge: '<span class="badge" style="background:rgba(248,113,113,.12);color:#f87171;border:1px solid rgba(248,113,113,.25)">FALHOU</span>',  icon: '❌' },
   };
-  root.innerHTML = rows.map(row => {
-    const meta  = EMAIL_TYPE_LABEL[row.event_type] || { badge: '', icon: '📧' };
+  const emailItem = (row) => {
+    const meta    = EMAIL_TYPE_LABEL[row.event_type] || { badge: '', icon: '📧' };
     const to      = row.details?.to      || '—';
     const subject = row.details?.subject || row.message || '—';
     const error   = row.details?.error   || '';
@@ -900,7 +964,17 @@ function renderEmails(stats, rows) {
         <div class="error-item-msg">${esc(subject.slice(0, 120))}${subject.length > 120 ? '…' : ''}</div>
         ${error ? `<div class="error-item-source" style="color:#f87171">⚠️ ${esc(error.slice(0,120))}</div>` : ''}
       </div>`;
-  }).join('');
+  };
+
+  renderPaginated({
+    listElId: 'email-list',
+    metaElId: 'email-meta',
+    rows: rows || [],
+    stateKey: 'emails',
+    itemHTML: emailItem,
+    emptyMsg: 'Nenhum e-mail registrado ainda.',
+    paginationContainerId: 'emails-pagination',
+  });
 }
 
 function renderSignups(rows) {
@@ -912,13 +986,23 @@ function renderSignups(rows) {
 }
 
 function renderLogins(rows) {
-  renderSimple('recent-logins', rows, row => `
+  window._lastLogins = rows || [];
+  const loginItem = (row) => `
     <div class="list-item">
       <strong class="${row.success ? 'status-ok' : 'status-error'}" style="color:${row.success?'#86efac':'#fca5a5'}">
         ${row.success ? '✅ Login OK' : '❌ Falha de login'}
       </strong>
       <small>${esc(row.email||'sem email')} · ${fRelTime(row.created_at)}<br>${esc(row.failure_reason||row.ip_address||'')}</small>
-    </div>`);
+    </div>`;
+  renderPaginated({
+    listElId: 'recent-logins',
+    metaElId: 'logins-meta',
+    rows: rows || [],
+    stateKey: 'logins',
+    itemHTML: loginItem,
+    emptyMsg: 'Sem logins recentes.',
+    paginationContainerId: 'logins-pagination',
+  });
 }
 
 /* ── Tables ──────────────────────────────────────────────────────── */
@@ -999,8 +1083,6 @@ async function loadOverview(force=false) {
   renderErrorList(data.recent_errors);
   renderHealthGrid(data.summary, data.recent_errors, data.ops_summary);
   renderOpsHealthGrid(data.ops_summary);
-  renderCategoryAiHealth(data.ops_summary);
-  renderCategoryAiList(data.recent_ops);
   renderOpsList(data.recent_ops);
   renderEmails(data.email_stats || {}, data.recent_emails || []);
   renderSignups(data.recent_signups);
@@ -1029,6 +1111,58 @@ async function refresh(force=false) {
   }
 }
 
+/* ── Acessos PII (LGPD audit) ───────────────────────────────────── */
+async function loadPiiAccess() {
+  const limit = PER_PAGE;
+  const offset = pageState.piiAccess * PER_PAGE;
+  const params = new URLSearchParams({ limit, offset });
+  const actor = $id('pii-filter-actor')?.value?.trim();
+  const user  = $id('pii-filter-user')?.value?.trim();
+  const field = $id('pii-filter-field')?.value?.trim();
+  if (actor) params.set('actor', actor);
+  if (user)  params.set('subject_user_id', user);
+  if (field) params.set('field', field);
+
+  try {
+    const res = await fetch(`/admin/api/pii-access?${params}`, { headers: authH(), cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const root = $id('pii-access-list');
+    const totalPages = Math.max(1, Math.ceil(data.total / PER_PAGE));
+    if (!data.items.length) {
+      root.innerHTML = `<tr><td colspan="5" class="empty">Sem acessos PII registrados ${actor||user||field ? 'com esse filtro' : 'ainda'}.</td></tr>`;
+      $id('pii-access-meta').textContent = `0`;
+      $id('pii-access-pagination').innerHTML = '';
+      return;
+    }
+    root.innerHTML = data.items.map(r => `
+      <tr>
+        <td title="${fDate(r.created_at)}">${fRelTime(r.created_at)}</td>
+        <td><code style="font-size:11px">${esc(r.actor)}</code></td>
+        <td>${r.subject_user_id ?? '—'}</td>
+        <td><span class="badge badge-muted">${esc(r.field||'?')}</span></td>
+        <td><small>${esc(r.purpose)}</small></td>
+      </tr>`).join('');
+    $id('pii-access-meta').textContent = `${offset+1}–${offset+data.items.length} de ${data.total}`;
+    $id('pii-access-pagination').innerHTML = totalPages <= 1 ? '' : `
+      <button class="pagination-btn" ${pageState.piiAccess === 0 ? 'disabled' : ''} onclick="changePage('piiAccess', -1)">◀</button>
+      <span class="pagination-info">Página ${pageState.piiAccess+1} de ${totalPages}</span>
+      <button class="pagination-btn" ${pageState.piiAccess >= totalPages-1 ? 'disabled' : ''} onclick="changePage('piiAccess', 1)">▶</button>
+    `;
+  } catch (e) {
+    console.error('pii-access:', e);
+  }
+}
+
+let piiFilterDebounce = null;
+function onPiiFilterChange() {
+  clearTimeout(piiFilterDebounce);
+  piiFilterDebounce = setTimeout(() => {
+    pageState.piiAccess = 0;
+    loadPiiAccess();
+  }, 250);
+}
+
 /* ── Auto-refresh ────────────────────────────────────────────────── */
 function startAutoRefresh() {
   clearInterval(autoInterval);
@@ -1054,10 +1188,16 @@ document.querySelectorAll('#error-filter-bar .filter-btn').forEach(btn => {
   btn.addEventListener('click', () => applyFilter(btn.dataset.level));
 });
 
+// Filtros do PII Access
+['pii-filter-actor', 'pii-filter-user'].forEach(id => {
+  $id(id)?.addEventListener('input', onPiiFilterChange);
+});
+$id('pii-filter-field')?.addEventListener('change', onPiiFilterChange);
+
 window.addEventListener('beforeunload', () => { refreshController?.abort(); clearInterval(autoInterval); });
 
 /* ── Boot ────────────────────────────────────────────────────────── */
-refresh(false).catch(() => {
+refresh(false).then(() => loadPiiAccess()).catch(() => {
   localStorage.removeItem(tokenKey);
   window.location.href = '/admin/login';
 });

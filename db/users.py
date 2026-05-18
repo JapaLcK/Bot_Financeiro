@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 
+from core.crypto import encrypt_pii_optional, hash_pii_optional
+
 from .connection import get_conn
 
 
@@ -185,8 +187,8 @@ def get_or_create_canonical_user(provider: str, external_id: str) -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select user_id from user_identities where provider=%s and external_id=%s",
-                (provider, external_id),
+                "select user_id from user_identities where provider=%s and external_id_hash=%s",
+                (provider, hash_pii_optional(external_id, kind="external_id")),
             )
             row = cur.fetchone()
             if row:
@@ -201,8 +203,14 @@ def get_or_create_canonical_user(provider: str, external_id: str) -> int:
 
                 try:
                     cur.execute(
-                        "insert into user_identities(provider, external_id, user_id) values (%s,%s,%s)",
-                        (provider, external_id, new_id),
+                        """
+                        insert into user_identities(provider, external_id, user_id,
+                                                    external_id_hash, external_id_enc)
+                        values (%s, %s, %s, %s, %s)
+                        """,
+                        (provider, external_id, new_id,
+                         hash_pii_optional(external_id, kind="external_id"),
+                         encrypt_pii_optional(external_id)),
                     )
                     conn.commit()
                     return new_id
@@ -211,8 +219,8 @@ def get_or_create_canonical_user(provider: str, external_id: str) -> int:
                     with get_conn() as conn2:
                         with conn2.cursor() as cur2:
                             cur2.execute(
-                                "select user_id from user_identities where provider=%s and external_id=%s",
-                                (provider, external_id),
+                                "select user_id from user_identities where provider=%s and external_id_hash=%s",
+                                (provider, hash_pii_optional(external_id, kind="external_id")),
                             )
                             r2 = cur2.fetchone()
                             if r2:
@@ -296,9 +304,18 @@ def bind_identity(provider: str, external_id: str, user_id: int) -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "insert into user_identities(provider, external_id, user_id) values (%s,%s,%s) "
-                "on conflict (provider, external_id) do update set user_id=excluded.user_id",
-                (provider, external_id, user_id),
+                """
+                insert into user_identities(provider, external_id, user_id,
+                                            external_id_hash, external_id_enc)
+                values (%s, %s, %s, %s, %s)
+                on conflict (provider, external_id) do update
+                set user_id = excluded.user_id,
+                    external_id_hash = coalesce(excluded.external_id_hash, user_identities.external_id_hash),
+                    external_id_enc = coalesce(excluded.external_id_enc, user_identities.external_id_enc)
+                """,
+                (provider, external_id, user_id,
+                 hash_pii_optional(external_id, kind="external_id"),
+                 encrypt_pii_optional(external_id)),
             )
         conn.commit()
 

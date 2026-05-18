@@ -19,6 +19,7 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
+from core.crypto import PiiAccessContext, decrypt_pii_optional
 from db.connection import get_conn
 
 
@@ -244,11 +245,23 @@ def _count_login_from_new_ip(user_id: int) -> int:
 def _user_email(user_id: int) -> str | None:
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("select email from auth_accounts where user_id = %s", (user_id,))
+            cur.execute("select email, email_enc from auth_accounts where user_id = %s", (user_id,))
             row = cur.fetchone()
     if not row:
         return None
-    email = row.get("email") if isinstance(row, dict) else row[0]
+    enc = row.get("email_enc") if isinstance(row, dict) else None
+    if enc:
+        email = decrypt_pii_optional(
+            enc,
+            ctx=PiiAccessContext(
+                purpose="audit_new_login_notice",
+                actor="system:audit",
+                subject_user_id=user_id,
+                field="email",
+            ),
+        )
+    else:
+        email = row.get("email") if isinstance(row, dict) else row[0]
     email = (email or "").strip()
     return email or None
 

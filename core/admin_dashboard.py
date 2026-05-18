@@ -22,6 +22,12 @@ from slowapi.util import get_remote_address
 
 from config.env import load_app_env
 
+from core.crypto import (
+    PiiAccessContext,
+    decrypt_pii_optional,
+    encrypt_pii_optional,
+)
+
 
 load_app_env()
 
@@ -134,16 +140,18 @@ async def log_auth_login_event(
     failure_reason: str | None = None,
 ):
     try:
+        normalized_email = (email or "").strip().lower() or None
         async with await db_connect() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
                     """
                     INSERT INTO auth_login_events (
-                        user_id, email, success, ip_address, user_agent, failure_reason
+                        user_id, email, email_enc, success, ip_address, user_agent, failure_reason
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (user_id, (email or "").strip().lower() or None, success, ip_address, user_agent, failure_reason),
+                    (user_id, normalized_email, encrypt_pii_optional(normalized_email),
+                     success, ip_address, user_agent, failure_reason),
                 )
             await conn.commit()
     except Exception as exc:
@@ -276,7 +284,51 @@ class AdminLoginBody(BaseModel):
     password: str
 
 
-async def fetch_admin_overview(days: int = 30) -> dict[str, Any]:
+def _decrypt_admin_row(row: dict, admin_user: str, purpose: str) -> dict:
+    """Decifra colunas email/phone/display_name de uma row de auth_accounts/auth_login_events.
+
+    Cai pra coluna em claro se _enc estiver ausente. Registra cada decrypt em
+    pii_access_log com actor=admin:{username}.
+    """
+    user_id = int(row.get("user_id") or 0)
+    if row.get("email_enc"):
+        row["email"] = decrypt_pii_optional(
+            row["email_enc"],
+            ctx=PiiAccessContext(
+                purpose=purpose,
+                actor=f"admin:{admin_user}",
+                subject_user_id=user_id,
+                field="email",
+            ),
+        )
+    if row.get("phone_enc"):
+        row["phone_e164"] = decrypt_pii_optional(
+            row["phone_enc"],
+            ctx=PiiAccessContext(
+                purpose=purpose,
+                actor=f"admin:{admin_user}",
+                subject_user_id=user_id,
+                field="phone",
+            ),
+        )
+    if row.get("display_name_enc"):
+        row["display_name"] = decrypt_pii_optional(
+            row["display_name_enc"],
+            ctx=PiiAccessContext(
+                purpose=purpose,
+                actor=f"admin:{admin_user}",
+                subject_user_id=user_id,
+                field="name",
+            ),
+        )
+    # Não vaza colunas _enc pro JSON do frontend
+    row.pop("email_enc", None)
+    row.pop("phone_enc", None)
+    row.pop("display_name_enc", None)
+    return row
+
+
+async def fetch_admin_overview(days: int = 30, admin_user: str = "admin") -> dict[str, Any]:
     days = max(7, min(int(days or 30), 180))
     now = datetime.now(timezone.utc)
     start_30d = now - timedelta(days=30)
@@ -408,6 +460,7 @@ async def fetch_admin_overview(days: int = 30) -> dict[str, Any]:
                 SELECT
                     a.user_id,
                     a.email,
+                    a.email_enc,
                     a.created_at,
                     a.last_activity_at,
                     COALESCE(COUNT(l.id), 0) AS total_transactions,
@@ -422,19 +475,21 @@ async def fetch_admin_overview(days: int = 30) -> dict[str, Any]:
                 LEFT JOIN launches l
                     ON l.user_id = a.user_id
                    AND l.criado_em >= %s
-                GROUP BY a.user_id, a.email, a.created_at, a.last_activity_at
+                GROUP BY a.user_id, a.email, a.email_enc, a.created_at, a.last_activity_at
                 ORDER BY total_transactions DESC, a.created_at DESC
                 LIMIT 10
                 """,
                 (start_30d,),
             )
-            top_users = [dict(row) for row in await cur.fetchall()]
+            top_users = [_decrypt_admin_row(dict(row), admin_user, "render_admin_top_users")
+                         for row in await cur.fetchall()]
 
             await cur.execute(
                 """
                 SELECT
                     a.user_id,
                     a.email,
+                    a.email_enc,
                     a.plan,
                     a.created_at,
                     a.last_activity_at,
@@ -451,17 +506,19 @@ async def fetch_admin_overview(days: int = 30) -> dict[str, Any]:
                 LIMIT 10
                 """
             )
-            recent_signups = [dict(row) for row in await cur.fetchall()]
+            recent_signups = [_decrypt_admin_row(dict(row), admin_user, "render_admin_recent_signups")
+                              for row in await cur.fetchall()]
 
             await cur.execute(
                 """
-                SELECT email, user_id, success, failure_reason, ip_address, created_at
+                SELECT email, email_enc, user_id, success, failure_reason, ip_address, created_at
                 FROM auth_login_events
                 ORDER BY created_at DESC
                 LIMIT 20
                 """
             )
-            recent_logins = [dict(row) for row in await cur.fetchall()]
+            recent_logins = [_decrypt_admin_row(dict(row), admin_user, "render_admin_recent_logins")
+                             for row in await cur.fetchall()]
 
             await cur.execute(
                 """
@@ -779,7 +836,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
 
     @app.get("/admin/api/overview")
     async def admin_api_overview(days: int = 30, username: str = Depends(_get_current_admin)):
-        data = await fetch_admin_overview(days=days)
+        data = await fetch_admin_overview(days=days, admin_user=username)
         data["admin_user"] = username
         return JSONResponse(content=_json_safe(data))
 
@@ -796,6 +853,83 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         if not deleted:
             raise HTTPException(status_code=404, detail="Evento não encontrado.")
         return {"deleted": event_id}
+
+    @app.delete("/admin/api/events")
+    async def admin_bulk_delete_events(
+        level: str | None = None,
+        before_id: int | None = None,
+        username: str = Depends(_get_current_admin),
+    ):
+        """Bulk delete em system_event_logs. Filtros opcionais combinam com AND:
+          - level: 'error' | 'warning' | 'info' (sem filtro = todos os níveis)
+          - before_id: deleta eventos com id <= before_id (snapshot do client)
+
+        Use sem filtros pra apagar tudo, ou só `before_id` pra "limpar tudo até este momento".
+        """
+        clauses, params = [], []
+        if level in ("error", "warning", "info"):
+            clauses.append("level = %s")
+            params.append(level)
+        if before_id is not None:
+            clauses.append("id <= %s")
+            params.append(int(before_id))
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+
+        async with await db_connect() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(f"DELETE FROM system_event_logs {where}", tuple(params))
+                deleted = cur.rowcount
+            await conn.commit()
+        return {"deleted": int(deleted or 0), "filters": {"level": level, "before_id": before_id}}
+
+    @app.get("/admin/api/pii-access")
+    async def admin_pii_access_log(
+        limit: int = 50,
+        offset: int = 0,
+        actor: str | None = None,
+        subject_user_id: int | None = None,
+        field: str | None = None,
+        username: str = Depends(_get_current_admin),
+    ):
+        """Lista entries de pii_access_log com paginação e filtros."""
+        limit = max(1, min(int(limit or 50), 200))
+        offset = max(0, int(offset or 0))
+
+        clauses, params = [], []
+        if actor:
+            clauses.append("actor ILIKE %s")
+            params.append(f"%{actor}%")
+        if subject_user_id is not None:
+            clauses.append("subject_user_id = %s")
+            params.append(int(subject_user_id))
+        if field:
+            clauses.append("field = %s")
+            params.append(field)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+
+        async with await db_connect() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(f"SELECT count(*) AS n FROM pii_access_log {where}", tuple(params))
+                total = int((await cur.fetchone())["n"])
+
+                await cur.execute(
+                    f"""
+                    SELECT id, purpose, actor, subject_user_id, field, endpoint, extra, created_at
+                    FROM pii_access_log
+                    {where}
+                    ORDER BY created_at DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    tuple([*params, limit, offset]),
+                )
+                rows = [dict(r) for r in await cur.fetchall()]
+
+        return JSONResponse(content=_json_safe({
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "items": rows,
+        }))
 
     @app.get("/admin")
     async def serve_admin_dashboard(request: Request):

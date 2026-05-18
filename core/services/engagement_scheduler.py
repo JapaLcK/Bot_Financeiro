@@ -19,6 +19,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 
+from core.crypto import PiiAccessContext, decrypt_pii_optional
 from core.observability import log_system_event_sync
 
 logger = logging.getLogger(__name__)
@@ -197,7 +198,7 @@ async def _check_trial_ending() -> None:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    select user_id, email, plan_expires_at
+                    select user_id, email, email_enc, plan_expires_at
                     from auth_accounts
                     where plan = 'pro'
                       and last_payment_status = 'trialing'
@@ -218,7 +219,18 @@ async def _check_trial_ending() -> None:
     from core.observability import recent_event_exists
     for row in users:
         user_id = row["user_id"]
-        email = row["email"]
+        if row.get("email_enc"):
+            email = decrypt_pii_optional(
+                row["email_enc"],
+                ctx=PiiAccessContext(
+                    purpose="send_trial_ending_email",
+                    actor="system:engagement",
+                    subject_user_id=user_id,
+                    field="email",
+                ),
+            )
+        else:
+            email = row["email"]
         expires_at = row["plan_expires_at"]
         # Dedup: o webhook customer.subscription.trial_will_end é a fonte
         # primária. Scheduler é fallback — pula se já foi enviado nos

@@ -891,8 +891,7 @@ def init_db():
         """,
 
         # ─── Orcamentos por categoria ───────────────────────────────────────────
-        # Antes era criada lazy em frontend/finance_bot_websocket_custom.py:ensure_budget_table.
-        # Trazido pra schema.py pra existir tambem nos testes (init_db unico).
+        # Centralizada em init_db para existir tambem nos testes.
         """
         create table if not exists category_budgets (
           id        bigserial primary key,
@@ -1080,6 +1079,104 @@ def init_db():
         """
         create index if not exists idx_ai_proactive_cache_generated
           on ai_proactive_cache (generated_at desc)
+        """,
+
+        # ─── Cifragem column-level de PII (LGPD art. 46) ────────────────────────
+        # Cada coluna PII pesquisável vira par (hash, enc):
+        #   hash = HMAC-SHA256(plain, PEPPER) — indexável, irreversível, pro WHERE
+        #   enc  = Fernet(plain, KEY) — reversível só com a chave, pro display/envio
+        # Colunas só-display (display_name, name_hint) viram só *_enc.
+        # Módulo: core/crypto.py. Migration de backfill: scripts/migrate_pii_to_encrypted.py
+        # Durante a fase de migração, as colunas em claro (email, phone_e164,
+        # external_id, display_name, name_hint) permanecem populadas em paralelo
+        # — drop é Fase 5, depois de N dias rodando estável.
+
+        # auth_accounts: email, phone_e164, display_name
+        """alter table auth_accounts add column if not exists email_hash text""",
+        """alter table auth_accounts add column if not exists email_enc text""",
+        """alter table auth_accounts add column if not exists phone_hash text""",
+        """alter table auth_accounts add column if not exists phone_enc text""",
+        """alter table auth_accounts add column if not exists display_name_enc text""",
+        """
+        create unique index if not exists idx_auth_accounts_email_hash
+          on auth_accounts (email_hash)
+          where email_hash is not null
+        """,
+        """
+        create unique index if not exists idx_auth_accounts_phone_hash_unique
+          on auth_accounts (phone_hash)
+          where phone_hash is not null
+        """,
+
+        # user_identities: external_id (Discord ID, WhatsApp ID)
+        """alter table user_identities add column if not exists external_id_hash text""",
+        """alter table user_identities add column if not exists external_id_enc text""",
+        """
+        create unique index if not exists idx_user_identities_provider_hash
+          on user_identities (provider, external_id_hash)
+          where external_id_hash is not null
+        """,
+
+        # email_verification_codes: email, phone_e164, display_name (transitório)
+        """alter table email_verification_codes add column if not exists email_hash text""",
+        """alter table email_verification_codes add column if not exists email_enc text""",
+        """alter table email_verification_codes add column if not exists phone_hash text""",
+        """alter table email_verification_codes add column if not exists phone_enc text""",
+        """alter table email_verification_codes add column if not exists display_name_enc text""",
+        """
+        create index if not exists idx_email_verification_email_hash
+          on email_verification_codes (email_hash, expires_at)
+          where email_hash is not null
+        """,
+
+        # pending_google_signups: email, name_hint (transitório)
+        """alter table pending_google_signups add column if not exists email_hash text""",
+        """alter table pending_google_signups add column if not exists email_enc text""",
+        """alter table pending_google_signups add column if not exists name_hint_enc text""",
+
+        # auth_identities (Google OAuth): email snapshot — lookup é por provider_sub,
+        # então não precisa de hash, só de cifragem.
+        """alter table auth_identities add column if not exists email_enc text""",
+
+        # auth_login_events: snapshot de email pra audit — sem hash
+        # (filtros são por user_id/data, e bypassar lookup por email é parte da blindagem)
+        """alter table auth_login_events add column if not exists email_enc text""",
+
+        # data_export_tokens: snapshot delivered_to_email — sem hash
+        """alter table data_export_tokens add column if not exists delivered_to_email_enc text""",
+
+        # ─── pii_access_log (audit de acesso a PII) ─────────────────────────────
+        # Toda chamada a core/crypto.decrypt_pii(ctx=...) registra aqui.
+        # Pintado em /admin → aba "Acessos PII".
+        # Distinto de audit_events (eventos de segurança do user) e
+        # system_event_logs (operacional/erros).
+        """
+        create table if not exists pii_access_log (
+          id bigserial primary key,
+          purpose text not null,                   -- 'login' | 'send_email' | 'render_admin' | 'bot_message' | ...
+          actor text not null,                     -- 'system' | 'system:<componente>' | 'admin:<user>' | 'user:<id>' | 'webhook:<provider>'
+          subject_user_id bigint references users(id) on delete set null,
+          field text not null,                     -- 'email' | 'phone' | 'discord_id' | 'whatsapp_id' | 'name'
+          endpoint text,
+          extra jsonb,
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_pii_access_log_subject_created
+          on pii_access_log (subject_user_id, created_at desc)
+        """,
+        """
+        create index if not exists idx_pii_access_log_actor_created
+          on pii_access_log (actor, created_at desc)
+        """,
+        """
+        create index if not exists idx_pii_access_log_created
+          on pii_access_log (created_at desc)
+        """,
+        """
+        create index if not exists idx_pii_access_log_field_created
+          on pii_access_log (field, created_at desc)
         """,
     ]
 

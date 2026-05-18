@@ -13,6 +13,8 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+from core.crypto import PiiAccessContext, decrypt_pii_optional, encrypt_pii_optional
+
 from .connection import get_conn
 from .users import _check_password
 
@@ -35,11 +37,23 @@ def verify_user_password(user_id: int, password: str) -> bool:
 def get_user_email(user_id: int) -> str | None:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "select email from auth_accounts where user_id = %s limit 1",
+            "select email, email_enc from auth_accounts where user_id = %s limit 1",
             (user_id,),
         )
         row = cur.fetchone()
-    return (row or {}).get("email")
+    if not row:
+        return None
+    if row.get("email_enc"):
+        return decrypt_pii_optional(
+            row["email_enc"],
+            ctx=PiiAccessContext(
+                purpose="get_user_email",
+                actor="system",
+                subject_user_id=user_id,
+                field="email",
+            ),
+        )
+    return row.get("email")
 
 
 def create_data_export_token(
@@ -61,10 +75,12 @@ def create_data_export_token(
         cur.execute(
             """
             insert into data_export_tokens
-              (token, user_id, expires_at, request_ip, request_user_agent, delivered_to_email)
-            values (%s, %s, %s, %s, %s, %s)
+              (token, user_id, expires_at, request_ip, request_user_agent,
+               delivered_to_email, delivered_to_email_enc)
+            values (%s, %s, %s, %s, %s, %s, %s)
             """,
-            (token, user_id, expires_at, request_ip, request_user_agent, delivered_to_email),
+            (token, user_id, expires_at, request_ip, request_user_agent,
+             delivered_to_email, encrypt_pii_optional(delivered_to_email)),
         )
         conn.commit()
 
@@ -421,8 +437,25 @@ def delete_user_data(user_id: int) -> dict:
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("select email from auth_accounts where user_id = %s", (user_id,))
-            emails = [row["email"] for row in cur.fetchall() if row.get("email")]
+            cur.execute(
+                "select email, email_enc from auth_accounts where user_id = %s",
+                (user_id,),
+            )
+            ctx_del = PiiAccessContext(
+                purpose="account_deletion_lookup",
+                actor="system:account_deletion_job",
+                subject_user_id=user_id,
+                field="email",
+            )
+            emails: list[str] = []
+            for row in cur.fetchall():
+                enc = row.get("email_enc")
+                if enc:
+                    val = decrypt_pii_optional(enc, ctx=ctx_del)
+                else:
+                    val = row.get("email")
+                if val:
+                    emails.append(val)
             primary_email = emails[0] if emails else None
 
             if _table_exists(cur, "auth_login_events"):

@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 
 from utils_phone import normalize_phone_e164, phone_lookup_candidates
 
+from core.crypto import encrypt_pii_optional, hash_pii_optional
+
 from .connection import get_conn
 from .users import create_link_code, get_or_create_canonical_user
 
@@ -38,7 +40,10 @@ def find_user_id_by_email(email: str) -> int | None:
     if not email:
         return None
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select user_id from auth_accounts where email=%s", (email,))
+        cur.execute(
+            "select user_id from auth_accounts where email_hash=%s",
+            (hash_pii_optional(email, kind="email"),),
+        )
         row = cur.fetchone()
     return int(row["user_id"]) if row else None
 
@@ -61,8 +66,8 @@ def email_has_password(email: str) -> bool:
         return False
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "select 1 from auth_accounts where email=%s and password_hash is not null",
-            (email,),
+            "select 1 from auth_accounts where email_hash=%s and password_hash is not null",
+            (hash_pii_optional(email, kind="email"),),
         )
         return cur.fetchone() is not None
 
@@ -77,13 +82,16 @@ def link_google_identity(user_id: int, sub: str, email: str) -> None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into auth_identities (user_id, provider, provider_sub, email)
-                values (%s, %s, %s, %s)
+                insert into auth_identities (user_id, provider, provider_sub,
+                                              email, email_enc)
+                values (%s, %s, %s, %s, %s)
                 on conflict (provider, provider_sub) do update
                 set user_id = excluded.user_id,
-                    email = coalesce(excluded.email, auth_identities.email)
+                    email = coalesce(excluded.email, auth_identities.email),
+                    email_enc = coalesce(excluded.email_enc, auth_identities.email_enc)
                 """,
-                (int(user_id), PROVIDER_GOOGLE, sub, email),
+                (int(user_id), PROVIDER_GOOGLE, sub, email,
+                 encrypt_pii_optional(email)),
             )
         conn.commit()
 
@@ -109,10 +117,14 @@ def create_pending_google_signup(sub: str, email: str, name_hint: str | None) ->
             cur.execute(
                 """
                 insert into pending_google_signups
-                  (token, provider, provider_sub, email, name_hint, expires_at)
-                values (%s, %s, %s, %s, %s, %s)
+                  (token, provider, provider_sub, email, name_hint, expires_at,
+                   email_hash, email_enc, name_hint_enc)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (token, PROVIDER_GOOGLE, sub, email, name_hint, expires_at),
+                (token, PROVIDER_GOOGLE, sub, email, name_hint, expires_at,
+                 hash_pii_optional(email, kind="email"),
+                 encrypt_pii_optional(email),
+                 encrypt_pii_optional(name_hint)),
             )
         conn.commit()
 
@@ -172,9 +184,10 @@ def consume_pending_google_signup(
 
     # Verifica colisão de telefone com outras contas
     with get_conn() as conn, conn.cursor() as cur:
+        phone_hashes = [hash_pii_optional(c, kind="phone") for c in phone_candidates if c]
         cur.execute(
-            "select user_id from auth_accounts where phone_e164 = any(%s)",
-            (phone_candidates,),
+            "select user_id from auth_accounts where phone_hash = any(%s)",
+            (phone_hashes,),
         )
         if cur.fetchone():
             raise ValueError("Este número de WhatsApp já está em uso por outra conta.")
@@ -187,22 +200,37 @@ def consume_pending_google_signup(
             cur.execute(
                 """
                 insert into auth_accounts
-                  (user_id, email, password_hash, phone_e164, display_name, phone_status)
-                values (%s, %s, NULL, %s, %s, 'pending')
+                  (user_id, email, password_hash, phone_e164, display_name, phone_status,
+                   email_hash, email_enc, phone_hash, phone_enc, display_name_enc)
+                values (%s, %s, NULL, %s, %s, 'pending', %s, %s, %s, %s, %s)
                 on conflict (email) do update
                 set phone_e164 = coalesce(auth_accounts.phone_e164, excluded.phone_e164),
-                    display_name = coalesce(auth_accounts.display_name, excluded.display_name)
+                    display_name = coalesce(auth_accounts.display_name, excluded.display_name),
+                    email_hash = coalesce(auth_accounts.email_hash, excluded.email_hash),
+                    email_enc = coalesce(auth_accounts.email_enc, excluded.email_enc),
+                    phone_hash = coalesce(auth_accounts.phone_hash, excluded.phone_hash),
+                    phone_enc = coalesce(auth_accounts.phone_enc, excluded.phone_enc),
+                    display_name_enc = coalesce(auth_accounts.display_name_enc, excluded.display_name_enc)
                 """,
-                (user_id, email, normalized_phone, name),
+                (user_id, email, normalized_phone, name,
+                 hash_pii_optional(email, kind="email"),
+                 encrypt_pii_optional(email),
+                 hash_pii_optional(normalized_phone, kind="phone"),
+                 encrypt_pii_optional(normalized_phone),
+                 encrypt_pii_optional(name)),
             )
             cur.execute(
                 """
-                insert into auth_identities (user_id, provider, provider_sub, email)
-                values (%s, %s, %s, %s)
+                insert into auth_identities (user_id, provider, provider_sub,
+                                              email, email_enc)
+                values (%s, %s, %s, %s, %s)
                 on conflict (provider, provider_sub) do update
-                set user_id = excluded.user_id, email = excluded.email
+                set user_id = excluded.user_id,
+                    email = excluded.email,
+                    email_enc = excluded.email_enc
                 """,
-                (user_id, PROVIDER_GOOGLE, sub, email),
+                (user_id, PROVIDER_GOOGLE, sub, email,
+                 encrypt_pii_optional(email)),
             )
             cur.execute("delete from pending_google_signups where token = %s", (token,))
         conn.commit()

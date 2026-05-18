@@ -842,15 +842,33 @@ def send_payment_failed_email(to: str, dashboard_url: str = "") -> bool:
 
 def send_subscription_canceled_email(to: str, expires_at, dashboard_url: str = "") -> bool:
     """E-mail de confirmação de cancelamento (item 41)."""
-    fim = _fmt_brl_date(expires_at)
+    has_grace = expires_at is not None
+    fim = _fmt_brl_date(expires_at) if has_grace else None
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    support_email = os.getenv("SUPPORT_EMAIL", "suporte@pigbankai.com").strip() or "suporte@pigbankai.com"
+
+    if has_grace:
+        access_html = (
+            f"<p>Tudo certo — você continua com acesso aos recursos Pro <strong>até {fim}</strong>. "
+            f"Depois disso, sua conta volta automaticamente pro plano Free e os limites Pro são desativados.</p>"
+            f"<p>Se mudar de ideia antes dessa data, é só mandar <strong>assinar plano</strong> no bot.</p>"
+        )
+        access_text = (
+            f"Você mantém acesso aos recursos Pro até {fim}. Depois disso, a conta volta pra Free."
+        )
+    else:
+        access_html = (
+            "<p>Tudo certo — sua conta voltou pro plano <strong>Free</strong> a partir de agora. "
+            "Os limites Pro foram desativados.</p>"
+            "<p>Se mudar de ideia, é só mandar <strong>assinar plano</strong> no bot.</p>"
+        )
+        access_text = "Sua conta voltou pro plano Free a partir de agora. Os limites Pro foram desativados."
+
     content = f"""
       <p>🐷 Sua assinatura PigBank+ foi cancelada.</p>
-      <p>Tudo certo — você continua com acesso aos recursos Pro <strong>até {fim}</strong>.
-      Depois disso, sua conta volta automaticamente pro plano Free e os limites Pro são desativados.</p>
-      <p>Se mudar de ideia antes dessa data, é só mandar <strong>assinar plano</strong> no bot.</p>
+      {access_html}
       <p>Valeu por ter dado uma chance pra gente. Se quiser contar o que faltou ou poderia melhorar,
-      responde este email — leitura garantida.</p>
+      responde este email ou escreve pra <a href="mailto:{support_email}">{support_email}</a> — leitura garantida.</p>
       <p style="text-align:center;margin:24px 0">
         <a class="btn" href="{dash}/app">Abrir o dashboard</a>
       </p>
@@ -858,8 +876,9 @@ def send_subscription_canceled_email(to: str, expires_at, dashboard_url: str = "
     html = _base_html("Assinatura cancelada — PigBank+", content)
     text = (
         f"PigBank+ cancelado.\n\n"
-        f"Você mantém acesso aos recursos Pro até {fim}. Depois disso, a conta volta pra Free.\n\n"
-        f"Mudou de ideia? Mande 'assinar plano' no bot."
+        f"{access_text}\n\n"
+        f"Mudou de ideia? Mande 'assinar plano' no bot.\n\n"
+        f"Dúvidas ou feedback? Responde este email ou escreve pra {support_email} — leitura garantida."
     )
     return send_email(
         to=to, subject="PigBank+ — assinatura cancelada",
