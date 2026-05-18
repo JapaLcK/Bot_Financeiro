@@ -235,151 +235,6 @@ async def list_users() -> list:
             await cur.execute("SELECT id FROM users ORDER BY created_at")
             return await cur.fetchall()
 
-async def ensure_budget_table():
-    """Create category_budgets table if it doesn't exist yet."""
-    async with await db_connect() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute("""
-                CREATE TABLE IF NOT EXISTS category_budgets (
-                    id        BIGSERIAL PRIMARY KEY,
-                    user_id   BIGINT  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    categoria TEXT    NOT NULL,
-                    budget    NUMERIC NOT NULL CHECK (budget > 0),
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    UNIQUE (user_id, categoria)
-                )
-            """)
-        await conn.commit()
-
-
-async def ensure_auth_rate_limit_table():
-    async with await db_connect() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute("""
-                CREATE TABLE IF NOT EXISTS auth_rate_limits (
-                    bucket TEXT NOT NULL,
-                    identifier TEXT NOT NULL,
-                    window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    attempts INT NOT NULL DEFAULT 0,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    PRIMARY KEY (bucket, identifier)
-                )
-            """)
-            await cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_auth_rate_limits_updated_at
-                ON auth_rate_limits (updated_at)
-            """)
-        await conn.commit()
-
-
-async def ensure_investment_metadata_columns():
-    """Migrations leves usadas pela aba de investimentos do dashboard."""
-    statements = [
-        "ALTER TABLE investments ADD COLUMN IF NOT EXISTS asset_type TEXT NOT NULL DEFAULT 'CDB'",
-        "ALTER TABLE investments ADD COLUMN IF NOT EXISTS indexer TEXT",
-        "ALTER TABLE investments ADD COLUMN IF NOT EXISTS issuer TEXT",
-        "ALTER TABLE investments ADD COLUMN IF NOT EXISTS purchase_date DATE",
-        "ALTER TABLE investments ADD COLUMN IF NOT EXISTS maturity_date DATE",
-        "ALTER TABLE investments ADD COLUMN IF NOT EXISTS interest_payment_frequency TEXT NOT NULL DEFAULT 'maturity'",
-        "ALTER TABLE investments ADD COLUMN IF NOT EXISTS tax_profile TEXT NOT NULL DEFAULT 'regressive_ir_iof'",
-    ]
-    async with await db_connect() as conn:
-        async with conn.cursor() as cur:
-            for stmt in statements:
-                await cur.execute(stmt)
-        await conn.commit()
-
-
-async def ensure_open_finance_tables():
-    """Tabelas usadas pela tela de Open Finance."""
-    statements = [
-        """
-        create table if not exists open_finance_connections (
-          id bigserial primary key,
-          user_id bigint not null references users(id) on delete cascade,
-          provider text not null,
-          provider_item_id text not null,
-          status text not null,
-          institution_id text not null,
-          institution_name text not null,
-          consent_url text,
-          consent_expires_at timestamptz,
-          last_sync_at timestamptz,
-          raw jsonb,
-          created_at timestamptz not null default now(),
-          updated_at timestamptz not null default now(),
-          unique(user_id, provider, provider_item_id)
-        )
-        """,
-        """
-        create table if not exists open_finance_accounts (
-          id bigserial primary key,
-          connection_id bigint not null references open_finance_connections(id) on delete cascade,
-          provider_account_id text not null,
-          name text not null,
-          type text not null,
-          subtype text,
-          currency text not null default 'BRL',
-          balance numeric not null default 0,
-          raw jsonb,
-          updated_at timestamptz not null default now(),
-          unique(connection_id, provider_account_id)
-        )
-        """,
-        """
-        create table if not exists open_finance_transactions (
-          id bigserial primary key,
-          account_id bigint not null references open_finance_accounts(id) on delete cascade,
-          provider_transaction_id text not null,
-          description text not null,
-          amount numeric not null,
-          transaction_date date not null,
-          category text,
-          raw jsonb,
-          imported_launch_id bigint references launches(id) on delete set null,
-          created_at timestamptz not null default now(),
-          unique(account_id, provider_transaction_id)
-        )
-        """,
-        """
-        create index if not exists idx_open_finance_connections_user
-          on open_finance_connections(user_id, status)
-        """,
-        """
-        create index if not exists idx_open_finance_transactions_account_date
-          on open_finance_transactions(account_id, transaction_date desc)
-        """,
-    ]
-    async with await db_connect() as conn:
-        async with conn.cursor() as cur:
-            for stmt in statements:
-                await cur.execute(stmt)
-        await conn.commit()
-
-
-async def ensure_notification_preference_columns():
-    """Colunas usadas pela tela de notificações."""
-    statements = [
-        "ALTER TABLE auth_accounts ADD COLUMN IF NOT EXISTS tip_email_opt_out BOOLEAN NOT NULL DEFAULT FALSE",
-        "ALTER TABLE auth_accounts ADD COLUMN IF NOT EXISTS insight_email_opt_out BOOLEAN NOT NULL DEFAULT FALSE",
-        "ALTER TABLE auth_accounts ADD COLUMN IF NOT EXISTS whatsapp_updates_opt_out BOOLEAN NOT NULL DEFAULT FALSE",
-        """
-        UPDATE auth_accounts
-        SET tip_email_opt_out = TRUE,
-            insight_email_opt_out = TRUE
-        WHERE engagement_opt_out = TRUE
-          AND tip_email_opt_out = FALSE
-          AND insight_email_opt_out = FALSE
-        """,
-    ]
-    async with await db_connect() as conn:
-        async with conn.cursor() as cur:
-            for stmt in statements:
-                await cur.execute(stmt)
-        await conn.commit()
-
-
-
 def _month_range(year: int, month: int):
     """Returns (start_date, exclusive_end_date) for the given month."""
     start = date(year, month, 1)
@@ -1019,20 +874,10 @@ async def lifespan(app: FastAPI):
         await _startup_required(
             "setup de tabelas",
             asyncio.gather(
-                ensure_budget_table(),
-                ensure_auth_rate_limit_table(),
-                ensure_investment_metadata_columns(),
-                ensure_open_finance_tables(),
-                ensure_notification_preference_columns(),
                 asyncio.to_thread(ensure_account_deletion_columns),
                 ensure_admin_tables(),
             ),
         )
-        print("OK: Budget table ready", flush=True)
-        print("OK: Auth rate-limit table ready", flush=True)
-        print("OK: Investment metadata ready", flush=True)
-        print("OK: Open Finance tables ready", flush=True)
-        print("OK: Notification preferences ready", flush=True)
         print("OK: Account deletion controls ready", flush=True)
         print("OK: Admin observability tables ready", flush=True)
 
@@ -1107,6 +952,14 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[recurring_charger] erro: {exc}", file=sys.stderr)
 
+    async def _proactive_ai():
+        try:
+            await asyncio.sleep(1)
+            from core.services.proactive_ai_scheduler import run_proactive_ai_loop  # noqa: PLC0415
+            await run_proactive_ai_loop()
+        except Exception as exc:
+            print(f"[proactive_ai] erro: {exc}", file=sys.stderr)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -1141,6 +994,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_investment_accrual(), name="investment_accrual"),
                 asyncio.create_task(_account_deletion_worker(), name="account_deletion"),
                 asyncio.create_task(_recurring_charger(), name="recurring_charger"),
+                asyncio.create_task(_proactive_ai(), name="proactive_ai"),
             ]
         )
     else:
