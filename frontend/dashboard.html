@@ -3114,9 +3114,10 @@ let viewYear = NOW.getFullYear(), viewMonth = NOW.getMonth() + 1;
 
 const PT_MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
                    "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-// Paleta de 12 cores bem distintas no espectro (hue espaçado 30°) — facilita
-// diferenciar categorias adjacentes no donut. Usada em CAT_CLR, PALETTE e
-// _CATEGORY_PALETTE pra manter consistência entre os 3 gráficos.
+const CAT_CLR   = ["#f87171","#fb923c","#fbbf24","#a78bfa","#60a5fa","#34d399","#e879f9","#38bdf8","#4ade80","#94a3b8"];
+const PALETTE   = ["#a78bfa","#60a5fa","#34d399","#fbbf24","#f87171","#e879f9","#38bdf8","#4ade80","#fb923c","#94a3b8"];
+// Paleta usada SÓ no donut da view Análises — 12 cores bem distintas no espectro
+// (hue espaçado 30°). Visão Geral mantém PALETTE/CAT_CLR antigos.
 const CATEGORY_PALETTE_12 = [
   "#ef4444",  /*   0° vermelho */
   "#f97316",  /*  30° laranja  */
@@ -3131,8 +3132,6 @@ const CATEGORY_PALETTE_12 = [
   "#d946ef",  /* 300° magenta  */
   "#ec4899",  /* 330° rosa     */
 ];
-const CAT_CLR   = CATEGORY_PALETTE_12;
-const PALETTE   = CATEGORY_PALETTE_12;
 const PKT_CLR   = ["var(--purple)","var(--blue)","var(--green)"];
 
 function getFilterText() {
