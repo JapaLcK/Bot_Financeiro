@@ -6461,7 +6461,11 @@ function renderAnalyticsCategoryDonut(categories) {
   }
   const labels = categories.map(c => c.name);
   const data   = categories.map(c => c.total);
-  const colors = categories.map((c, i) => c.color || _CATEGORY_PALETTE[i % _CATEGORY_PALETTE.length]);
+  // Ignora c.color de propósito: a maioria das categorias herda o default roxo
+  // (#7c3aed) do banco, então respeitar c.color resultava em várias fatias
+  // visualmente idênticas no donut. Sequencial pela paleta de 12 garante distinção.
+  // Cor customizada do user continua aparecendo na lista de categorias.
+  const colors = categories.map((_, i) => _CATEGORY_PALETTE[i % _CATEGORY_PALETTE.length]);
   _trackAnalyticsChart(el, {
     type: "doughnut",
     data: { labels, datasets: [{
