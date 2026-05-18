@@ -1866,17 +1866,17 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
     </button>
   </div>
 
-  <!-- Insight do Piggy em destaque -->
-  <div class="mock-card" style="margin-bottom:18px;background:linear-gradient(135deg, rgba(124,58,237,.12), rgba(59,130,246,.08));border-color:rgba(124,58,237,.3)">
+  <!-- Insight do Piggy — populado via /insights/{user_id}/current (LLM) -->
+  <!-- Visível só quando há insight; vazio = some -->
+  <div id="piggy-insight-card" class="mock-card" style="display:none;margin-bottom:18px;background:linear-gradient(135deg, rgba(124,58,237,.12), rgba(59,130,246,.08));border-color:rgba(124,58,237,.3)">
     <div style="display:flex;gap:14px;align-items:center">
-      <div style="font-size:2rem;flex-shrink:0">🐷</div>
+      <div id="piggy-insight-icon" style="font-size:2rem;flex-shrink:0">🐷</div>
       <div style="flex:1">
         <div style="font-size:.7rem;color:#c4b5fd;text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:4px">Piggy notou</div>
-        <div style="font-size:.92rem;color:var(--text);line-height:1.45">
-          Sua categoria <strong>Alimentação</strong> já está em <strong>97%</strong> do orçamento de maio (R$ 487,30 de R$ 500), e ainda faltam 19 dias.
-        </div>
+        <div id="piggy-insight-title" style="font-size:.92rem;color:var(--text);line-height:1.45;font-weight:600"></div>
+        <div id="piggy-insight-message" style="font-size:.86rem;color:var(--text-2);line-height:1.4;margin-top:4px;display:none"></div>
       </div>
-      <button class="mock-cta" onclick="navigateTo('budgets')">Ajustar →</button>
+      <button id="piggy-insight-cta" class="mock-cta" style="display:none">Ajustar →</button>
     </div>
   </div>
 
@@ -9834,9 +9834,67 @@ async function updateOverviewShortcuts(d) {
   }
 }
 
+// Popula o card "Piggy notou" com o insight de maior prioridade vindo do LLM.
+// Cache 6h em ai_proactive_cache + cron diário (proactive_ai_scheduler) garantem
+// que a request seja rápida (~200ms quando cache quente). Em miss, fallback heurístico
+// preenche pra não deixar vazio. Falha silenciosa: log no console, card escondido.
+let _piggyInsightLoaded = false;
+async function loadPiggyInsight() {
+  if (!USER_ID || _piggyInsightLoaded) return;
+  _piggyInsightLoaded = true;
+  const card = document.getElementById("piggy-insight-card");
+  if (!card) return;
+  try {
+    const r = await fetch(`${API}/insights/${USER_ID}/current`, { credentials: "same-origin" });
+    if (!r.ok) { card.style.display = "none"; return; }
+    const data = await r.json();
+    const list = (data && data.insights) || [];
+    if (!list.length) { card.style.display = "none"; return; }
+
+    // Backend já prioriza por severidade — pega o primeiro
+    const insight = list[0];
+
+    document.getElementById("piggy-insight-icon").textContent  = insight.icon || "🐷";
+    document.getElementById("piggy-insight-title").textContent = insight.title || "";
+
+    const msgEl = document.getElementById("piggy-insight-message");
+    if (insight.message) {
+      msgEl.textContent = insight.message;
+      msgEl.style.display = "";
+    } else {
+      msgEl.style.display = "none";
+    }
+
+    // Border colorida por severity
+    const borderBySeverity = {
+      critical: "rgba(239,68,68,.45)",
+      warning:  "rgba(245,158,11,.45)",
+      info:     "rgba(124,58,237,.3)",
+    };
+    card.style.borderColor = borderBySeverity[insight.severity] || borderBySeverity.info;
+
+    // CTA condicional: se LLM apontou uma view com label, navega
+    const cta = document.getElementById("piggy-insight-cta");
+    if (insight.action_view && typeof navigateTo === "function") {
+      cta.style.display = "";
+      cta.textContent = `${insight.action_label || "Ajustar"} →`;
+      cta.onclick = () => navigateTo(insight.action_view);
+    } else {
+      cta.style.display = "none";
+    }
+
+    card.style.display = "";
+  } catch (e) {
+    console.warn("[piggy-insight] erro:", e);
+    card.style.display = "none";
+  }
+}
+
 function render(d) {
   cacheMonthData(d);
   updateOverviewShortcuts(d);
+  // Insight do Piggy: kick em paralelo, não bloqueia o render
+  loadPiggyInsight();
   const grid = document.getElementById("grid");
   if (d.launches_pagination?.page) {
     launchesPage = d.launches_pagination.page;
