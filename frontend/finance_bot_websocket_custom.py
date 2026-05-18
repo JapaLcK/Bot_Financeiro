@@ -3165,6 +3165,10 @@ async def serve_onboarding():
 async def serve_privacy():
     return _html_file(HERE / "privacy.html")
 
+@app.get("/termos")
+async def serve_termos():
+    return _html_file(HERE / "termos.html")
+
 @app.get("/changelog")
 async def serve_changelog():
     return _html_file(HERE / "changelog.html")
@@ -3240,6 +3244,7 @@ async def serve_sitemap_xml():
         ("/precos", "weekly", "0.7"),
         ("/suporte", "weekly", "0.7"),
         ("/privacy", "monthly", "0.4"),
+        ("/termos", "monthly", "0.4"),
         ("/changelog", "weekly", "0.5"),
     ]
     items = "\n".join(
