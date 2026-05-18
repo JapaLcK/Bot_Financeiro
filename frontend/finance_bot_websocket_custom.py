@@ -2760,6 +2760,20 @@ async def billing_webhook(request: Request):
             # Email de boas-vindas Pro (item 37)
             from core.services.email_service import send_pro_welcome_email
             await _fire_email(user_id, send_pro_welcome_email, expires_dt)
+            # Notificação admin (Slack/Discord webhook)
+            try:
+                from core.services.admin_notify import notify_new_pro
+                _admin_email = await _user_email(user_id)
+                _line_items = _g(session, "line_items") or {}
+                _interval = None  # interval (monthly/annual) vem do price; best-effort
+                await asyncio.to_thread(
+                    notify_new_pro,
+                    user_id=user_id, email=_admin_email,
+                    plan="pro", status=sub_status, expires_at=expires_dt,
+                    interval=_interval,
+                )
+            except Exception as exc:
+                print(f"[billing] admin notify falhou user={user_id}: {exc}")
         elif user_id:
             await log_system_event(
                 "info",
@@ -2839,6 +2853,16 @@ async def billing_webhook(request: Request):
                     await asyncio.to_thread(send_payment_failed_email, email, DASHBOARD_URL)
             except Exception as exc:
                 print(f"[billing] email payment_failed falhou user={user_id}: {exc}")
+            # Notificação admin
+            try:
+                from core.services.admin_notify import notify_payment_failed
+                _attempt = _g(invoice, "attempt_count")
+                await asyncio.to_thread(
+                    notify_payment_failed,
+                    user_id=user_id, email=email, attempt_count=_attempt,
+                )
+            except Exception as exc:
+                print(f"[billing] admin notify payment_failed falhou user={user_id}: {exc}")
 
     elif event["type"] == "customer.subscription.deleted":
         obj     = event["data"]["object"]
@@ -2867,6 +2891,15 @@ async def billing_webhook(request: Request):
                     await asyncio.to_thread(send_subscription_canceled_email, email, expires_for_email, DASHBOARD_URL)
             except Exception as exc:
                 print(f"[billing] email canceled falhou user={user_id}: {exc}")
+            # Notificação admin
+            try:
+                from core.services.admin_notify import notify_subscription_canceled
+                await asyncio.to_thread(
+                    notify_subscription_canceled,
+                    user_id=user_id, email=email, expires_at=expires_for_email,
+                )
+            except Exception as exc:
+                print(f"[billing] admin notify canceled falhou user={user_id}: {exc}")
 
     return {"received": True}
 
