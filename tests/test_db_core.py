@@ -22,6 +22,7 @@ from db import (
     import_credit_ofx_bulk,
     list_cards,
 )
+from tests._helpers_pii import bind_identity_pii, insert_auth_account_pii
 import uuid
 
 def D(x) -> Decimal:
@@ -162,30 +163,11 @@ def test_attempt_whatsapp_phone_link_religa_quando_stale_uid_tem_auth_diferente(
         with get_conn() as conn:
             with conn.cursor() as cur:
                 # conta correta: telefone bate com o WA
-                cur.execute(
-                    """
-                    insert into auth_accounts (user_id, email, password_hash, phone_e164, phone_status)
-                    values (%s, %s, %s, %s, 'pending')
-                    """,
-                    (user_id, wa_email, "hash", wa_phone),
-                )
+                insert_auth_account_pii(cur, user_id, wa_email, phone=wa_phone)
                 # stale: tem auth_account, mas com outro telefone
-                cur.execute(
-                    """
-                    insert into auth_accounts (user_id, email, password_hash, phone_e164, phone_status)
-                    values (%s, %s, %s, %s, 'pending')
-                    """,
-                    (stale_wa_uid, stale_email, "hash", "5511000000000"),
-                )
+                insert_auth_account_pii(cur, stale_wa_uid, stale_email, phone="5511000000000")
                 # simula identidade WA stale apontando para stale_wa_uid
-                cur.execute(
-                    """
-                    insert into user_identities (provider, external_id, user_id)
-                    values ('whatsapp', %s, %s)
-                    on conflict (provider, external_id) do update set user_id = excluded.user_id
-                    """,
-                    (wa_phone, stale_wa_uid),
-                )
+                bind_identity_pii(cur, "whatsapp", wa_phone, stale_wa_uid)
             conn.commit()
 
         result = attempt_whatsapp_phone_link(wa_phone, current_user_id=stale_wa_uid)
@@ -225,20 +207,19 @@ def test_attempt_whatsapp_phone_link_aceita_variacao_com_e_sem_nono_digito(user_
     email = f"wa-link-{uuid.uuid4().hex[:8]}@example.com"
     other_uid = int(uuid.uuid4().int % 10_000_000_000)
     ensure_user(other_uid)
+    # Phone único por execução pra não colidir com users reais em prod que
+    # tenham o mesmo número (causava 'multiple_accounts' em vez de 'linked').
+    suffix = f"{uuid.uuid4().int % 100_000_000:08d}"
+    phone_without_9 = f"5565{suffix}"     # 12 dígitos
+    phone_with_9    = f"55659{suffix}"    # 13 dígitos (mesma raiz + 9)
 
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    insert into auth_accounts (user_id, email, password_hash, phone_e164, phone_status)
-                    values (%s, %s, %s, %s, 'pending')
-                    """,
-                    (user_id, email, "hash", "556592741873"),
-                )
+                insert_auth_account_pii(cur, user_id, email, phone=phone_without_9)
             conn.commit()
 
-        result = attempt_whatsapp_phone_link("5565992741873", current_user_id=other_uid)
+        result = attempt_whatsapp_phone_link(phone_with_9, current_user_id=other_uid)
 
         assert result["status"] == "linked"
 
@@ -250,7 +231,7 @@ def test_attempt_whatsapp_phone_link_aceita_variacao_com_e_sem_nono_digito(user_
                     from user_identities
                     where provider = 'whatsapp' and external_id = %s
                     """,
-                    ("5565992741873",),
+                    (phone_with_9,),
                 )
                 row = cur.fetchone()
 
@@ -264,35 +245,21 @@ def test_attempt_whatsapp_phone_link_aceita_variacao_com_e_sem_nono_digito(user_
 
 def test_attempt_whatsapp_phone_link_aceita_identidade_existente_com_alias_do_mesmo_numero(user_id):
     email = f"wa-alias-{uuid.uuid4().hex[:8]}@example.com"
-    old_wa = "556592741873"
-    new_wa = "5565992741873"
+    # Phone único pra não colidir com users reais em prod.
+    suffix = f"{uuid.uuid4().int % 100_000_000:08d}"
+    old_wa = f"5565{suffix}"      # 12 dígitos (sem 9)
+    new_wa = f"55659{suffix}"     # 13 dígitos (mesma raiz + 9)
     new_uid = int(uuid.uuid4().int % 10_000_000_000)
     ensure_user(new_uid)
 
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    insert into auth_accounts (user_id, email, password_hash, phone_e164, phone_status)
-                    values (%s, %s, %s, %s, 'confirmed')
-                    """,
-                    (user_id, email, "hash", old_wa),
+                insert_auth_account_pii(
+                    cur, user_id, email, phone=old_wa, phone_status="confirmed"
                 )
-                cur.execute(
-                    """
-                    insert into user_identities (provider, external_id, user_id)
-                    values ('whatsapp', %s, %s)
-                    """,
-                    (old_wa, user_id),
-                )
-                cur.execute(
-                    """
-                    insert into user_identities (provider, external_id, user_id)
-                    values ('whatsapp', %s, %s)
-                    """,
-                    (new_wa, new_uid),
-                )
+                bind_identity_pii(cur, "whatsapp", old_wa, user_id)
+                bind_identity_pii(cur, "whatsapp", new_wa, new_uid)
             conn.commit()
 
         add_launch_and_update_balance(new_uid, "despesa", 109, None, "rifa")
