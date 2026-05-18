@@ -17,7 +17,6 @@ et_xmlfile==2.0.0
 frozenlist==1.8.0
 google-auth==2.48.0
 google-auth-oauthlib==1.2.4
-gspread==6.2.1
 h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
