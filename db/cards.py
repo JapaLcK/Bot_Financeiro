@@ -297,16 +297,39 @@ def list_cards(user_id: int):
                 """
                 select c.id, c.name, c.closing_day, c.due_day,
                        c.reminders_enabled, c.reminders_days_before, c.reminder_last_sent_on,
-                       c.credit_limit, c.color, c.flag, c.last4,
+                       c.credit_limit, c.color, c.flag, c.last4, c.display_order,
                        (u.default_card_id = c.id) as is_default
                 from credit_cards c
                 left join users u on u.id = c.user_id
                 where c.user_id = %s
-                order by c.name
+                order by c.display_order nulls last, c.name
                 """,
                 (user_id,),
             )
             return cur.fetchall()
+
+
+def reorder_cards(user_id: int, ordered_ids: list[int]) -> int:
+    """
+    Atribui display_order sequencial (0..N-1) aos cartões na ordem recebida.
+    Cartões do user que não estiverem na lista mantêm display_order atual
+    (cliente sempre envia a lista completa, mas defensivo).
+    Retorna quantidade de linhas afetadas.
+    """
+    if not ordered_ids:
+        return 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            updated = 0
+            for idx, card_id in enumerate(ordered_ids):
+                cur.execute(
+                    "update credit_cards set display_order = %s "
+                    "where id = %s and user_id = %s",
+                    (idx, int(card_id), user_id),
+                )
+                updated += cur.rowcount
+            conn.commit()
+            return updated
 
 
 def get_card_by_id(user_id: int, card_id: int):

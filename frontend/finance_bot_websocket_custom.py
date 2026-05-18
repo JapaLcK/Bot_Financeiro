@@ -515,7 +515,7 @@ async def get_financial_data(
         _q(
             """
             SELECT
-                c.id, c.name, c.closing_day, c.due_day,
+                c.id, c.name, c.closing_day, c.due_day, c.color,
                 b.status, b.total, b.paid_amount, b.due_amount,
                 b.period_start, b.period_end
             FROM credit_cards c
@@ -535,7 +535,7 @@ async def get_financial_data(
                 LIMIT 1
             ) b ON TRUE
             WHERE c.user_id = %s
-            ORDER BY c.name
+            ORDER BY c.display_order NULLS LAST, c.name
             """,
             (month_start, month_end, user_id),
         ),
@@ -575,6 +575,7 @@ async def get_financial_data(
             "name": r["name"],
             "closing_day": r["closing_day"],
             "due_day": r["due_day"],
+            "color": r["color"] or "purple",
             "status": r["status"] or "open",
             "total": float(r["total"]) if r["total"] is not None else 0.0,
             "paid_amount": float(r["paid_amount"]) if r["paid_amount"] is not None else 0.0,
@@ -4388,6 +4389,10 @@ class CardUpdatePayload(BaseModel):
     clear_limit: bool = False
 
 
+class CardReorderPayload(BaseModel):
+    ordered_ids: list[int]
+
+
 @app.get("/cards/{user_id}/summary")
 async def cards_summary_route(request: Request, user_id: int):
     """Lista todos os cartões com dados agregados (fatura aberta, limite usado).
@@ -4487,6 +4492,25 @@ async def cards_summary_route(request: Request, user_id: int):
 
     cards = await asyncio.to_thread(_build)
     return {"ok": True, "cards": cards}
+
+
+@app.patch("/cards/{user_id}/reorder")
+async def reorder_cards_route(request: Request, user_id: int, payload: CardReorderPayload):
+    """Salva nova ordem manual dos cartões (drag-to-reorder).
+    Recebe ordered_ids = [id_primeiro, id_segundo, ...] e grava display_order
+    sequencial (0..N-1). Cartões fora da lista mantêm o que já tinham."""
+    _authorize_dashboard_access(request, user_id)
+
+    if not payload.ordered_ids:
+        raise HTTPException(status_code=400, detail="Lista de cartões vazia.")
+    if len(payload.ordered_ids) > 200:
+        raise HTTPException(status_code=400, detail="Muitos cartões na lista.")
+
+    from db.cards import reorder_cards
+
+    updated = await asyncio.to_thread(reorder_cards, user_id, payload.ordered_ids)
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "updated": updated}
 
 
 @app.patch("/cards/{user_id}/{card_id}")

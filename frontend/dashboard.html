@@ -10,6 +10,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 <style>
 /* ─── Reset ─────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1028,8 +1029,14 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
 
 .chips { display:flex;flex-wrap:wrap;gap:8px;margin-top:14px; }
 .chip  { flex:1;min-width:110px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:13px;padding:9px 12px; }
-.chip-lbl { font-size:.63rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px; }
+.chip-lbl { font-size:.63rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px;display:flex;align-items:center;justify-content:space-between;gap:6px; }
 .chip-val { font-size:.93rem;font-weight:680; }
+.chip-clickable { cursor:pointer;transition:border-color .18s var(--ease), background .18s var(--ease), transform .18s var(--ease); }
+.chip-clickable:hover { border-color:rgba(96,165,250,.5);background:rgba(255,255,255,.08); }
+.chip-clickable:active { transform:scale(.98); }
+.chip-clickable:focus-visible { outline:2px solid rgba(96,165,250,.5);outline-offset:2px; }
+.chip-arrow { color:var(--text-3);font-size:.78rem;transition:transform .18s var(--ease), color .18s var(--ease); }
+.chip-clickable:hover .chip-arrow { color:var(--text);transform:translateX(2px); }
 
 .row { display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--div);font-size:.87rem; }
 .row:last-child { border-bottom:none; }
@@ -1673,6 +1680,134 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 .card-clickable { cursor:pointer;transition:border-color .18s var(--ease); }
 .card-clickable:hover { border-color:rgba(96,165,250,.45); }
 .card-clickable:focus-visible { outline:2px solid rgba(96,165,250,.55);outline-offset:2px; }
+
+/* ── Wallet: cartões empilhados estilo carteira ──────────────────────── */
+/* Layout: flex column com margin-top negativo cria o overlap natural. Posterior
+   no DOM fica por cima (sem z-index). Sortable lida bem com fluxo flex, então
+   drag-and-drop não precisa mudar o tipo de layout — só anima margin. */
+.wallet {
+  --wallet-h: 160px;          /* altura de cada card */
+  --wallet-peek: 46px;        /* parte visível por baixo de cada card (só nome+badge) */
+  display:flex;flex-direction:column;
+  margin-top:4px;padding-bottom:14px;
+  /* Flex column com margin-top negativo nos filhos não compõe altura natural —
+     o engine ignora o negative margin pro cálculo. Força min-height pelo --n. */
+  min-height: calc(var(--wallet-h) + (var(--n, 1) - 1) * var(--wallet-peek));
+}
+.wallet-item {
+  position:relative;
+  flex:0 0 var(--wallet-h);     /* sem flex-shrink — mantém 160px */
+  height: var(--wallet-h);
+  margin-top: calc(-1 * (var(--wallet-h) - var(--wallet-peek)));
+  border-radius:14px;padding:13px 18px;
+  background:linear-gradient(135deg,#7c3aed 0%, #5b21b6 45%, #1e1b4b 100%);
+  border:1px solid rgba(255,255,255,.10);
+  box-shadow:0 8px 22px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.14);
+  color:#fff;overflow:hidden;
+  transition:transform .22s var(--ease), box-shadow .22s var(--ease), margin-top .22s var(--ease);
+  pointer-events:none; /* O card em si não captura mouse — só o .wallet-trigger */
+  -webkit-user-select:none;user-select:none;
+  -webkit-user-drag:none;
+}
+.wallet-item:first-child { margin-top:0; }
+.wallet-item img, .wallet-item span { -webkit-user-drag:none; }
+.wallet-item::after {
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(circle at 85% -10%, rgba(255,255,255,.22), transparent 60%);
+}
+/* Zona de interação: ocupa só o strip visível (peek). No último card, ocupa
+   o card inteiro (já que está totalmente visível e clicável em qualquer área). */
+.wallet-trigger {
+  position:absolute;top:0;left:0;right:0;
+  height:var(--wallet-peek);
+  z-index:5;
+  pointer-events:auto;
+  cursor:pointer;
+}
+.wallet-item:last-child .wallet-trigger { height:var(--wallet-h); }
+.wallet-trigger:focus-visible { outline:2px solid rgba(96,165,250,.55);outline-offset:2px; }
+
+.wallet-item:has(.wallet-trigger:hover),
+.wallet-item:has(.wallet-trigger:focus-visible) {
+  transform:translateY(-6px);
+  box-shadow:0 18px 36px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.18);
+  z-index:30;
+}
+/* Detalhes (valor, sub, progresso, meta) ficam ocultos por padrão; aparecem
+   apenas no último cartão (visível total) ou quando o trigger recebe hover/focus. */
+.wallet-item .wallet-body,
+.wallet-item .wallet-meta,
+.wallet-item .wallet-progress {
+  opacity:0;
+  transition: opacity .22s var(--ease);
+}
+.wallet-item:last-child .wallet-body,
+.wallet-item:last-child .wallet-meta,
+.wallet-item:last-child .wallet-progress,
+.wallet-item:has(.wallet-trigger:hover) .wallet-body,
+.wallet-item:has(.wallet-trigger:hover) .wallet-meta,
+.wallet-item:has(.wallet-trigger:hover) .wallet-progress,
+.wallet-item:has(.wallet-trigger:focus-visible) .wallet-body,
+.wallet-item:has(.wallet-trigger:focus-visible) .wallet-meta,
+.wallet-item:has(.wallet-trigger:focus-visible) .wallet-progress {
+  opacity:1;
+}
+/* Cores do cartão definidas pelo usuário (espelham as classes da view Cartões) */
+.wallet-item.color-purple { background:linear-gradient(135deg,#7c3aed 0%, #5b21b6 45%, #1e1b4b 100%); }
+.wallet-item.color-coral  { background:linear-gradient(135deg,#ec4899 0%, #db2777 45%, #831843 100%); }
+.wallet-item.color-green  { background:linear-gradient(135deg,#10b981 0%, #047857 45%, #064e3b 100%); }
+.wallet-item.color-gold   { background:linear-gradient(135deg,#f59e0b 0%, #c2410c 45%, #7c2d12 100%); }
+.wallet-item.color-blue   { background:linear-gradient(135deg,#3b82f6 0%, #1d4ed8 45%, #1e3a8a 100%); }
+.wallet-item.color-gray   { background:linear-gradient(135deg,#6b7280 0%, #374151 45%, #1f2937 100%); }
+
+.wallet-head { display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;position:relative;z-index:1; }
+.wallet-name {
+  font-size:.95rem;font-weight:800;letter-spacing:-.01em;
+  display:flex;align-items:center;gap:7px;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.wallet-name .wallet-icon { font-size:1rem;opacity:.95;flex-shrink:0; }
+.wallet-status {
+  font-size:.58rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;
+  padding:4px 9px;border-radius:999px;white-space:nowrap;flex-shrink:0;
+  background:rgba(255,255,255,.18);color:#fff;border:1px solid rgba(255,255,255,.22);
+  font-family:inherit;cursor:pointer;
+  pointer-events:auto; /* card pai tem pointer-events:none — reabilita pro botão */
+  position:relative;z-index:6; /* fica acima do .wallet-trigger (z 5) */
+  transition:transform .15s var(--ease), background .15s var(--ease);
+}
+.wallet-status:hover { transform:scale(1.06); background:rgba(255,255,255,.25); }
+.wallet-status:active { transform:scale(.96); }
+.wallet-status:focus-visible { outline:2px solid #fff;outline-offset:2px; }
+.wallet-status.s-paid  { background:rgba(34,197,94,.42);border-color:rgba(34,197,94,.55); }
+.wallet-status.s-open  { background:rgba(239,68,68,.40);border-color:rgba(239,68,68,.55); }
+.wallet-status.s-due   { background:rgba(245,158,11,.45);border-color:rgba(245,158,11,.6); }
+.wallet-status.s-empty { background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.22); }
+.wallet-body { display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:8px;position:relative;z-index:1; }
+.wallet-due { font-size:1.55rem;font-weight:740;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1; }
+.wallet-due-sub { font-size:.62rem;opacity:.82;letter-spacing:.02em;text-transform:uppercase;font-weight:600; }
+.wallet-meta { display:flex;justify-content:space-between;align-items:center;font-size:.65rem;opacity:.82;margin-top:10px;letter-spacing:.02em;position:relative;z-index:1; }
+.wallet-progress { margin-top:8px;height:3px;background:rgba(255,255,255,.22);border-radius:3px;overflow:hidden;position:relative;z-index:1; }
+.wallet-progress-fill { height:100%;background:rgba(255,255,255,.9);transition:width .6s var(--ease); }
+.wallet-empty { padding:18px;text-align:center;color:var(--text-3);font-size:.82rem; }
+
+/* Modo drag (manual): mantém stack visual; apenas anima transforms.
+   Card sendo arrastado (.wallet-item--drag) ganha sombra forte + z-index alto;
+   outros cards usam transform translateY pra "abrir espaço". */
+.wallet.wallet--dragging .wallet-item {
+  /* desliga transition de margin/transform pra resposta mais snappy do JS */
+  transition: transform .14s var(--ease), box-shadow .18s var(--ease);
+}
+.wallet-item--drag {
+  z-index:100;
+  box-shadow:0 24px 48px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.18) !important;
+  cursor:grabbing;
+}
+.wallet-item--drag .wallet-body,
+.wallet-item--drag .wallet-meta,
+.wallet-item--drag .wallet-progress { opacity:1 !important; }
+.cc-card-grid--ghost { opacity:.4; }
+.cc-card-grid--drag { opacity:.95;cursor:grabbing; }
 .detail-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0; }
 .detail-cell { background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:10px; }
 .detail-k { font-size:.6rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px; }
@@ -1821,50 +1956,6 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
   <div id="alert-banner"></div>
 
   <p class="section-title" style="margin:0 0 14px">Visão Geral · maio/2026</p>
-
-  <!-- Atalhos rápidos pras outras seções -->
-  <div class="mock-grid cols-4" style="margin-bottom:18px">
-    <button onclick="navigateTo('cards')" style="all:unset;cursor:pointer">
-      <div class="mock-card" style="padding:14px 16px;display:flex;align-items:center;gap:12px;transition:all .2s var(--ease)" onmouseover="this.style.borderColor='rgba(124,58,237,.4)'" onmouseout="this.style.borderColor=''">
-        <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#7c3aed,#5b21b6);display:flex;align-items:center;justify-content:center;font-size:1rem">💳</div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:.78rem;color:var(--text-3)">Cartões</div>
-          <div id="overview-cards-stat" style="font-size:.95rem;color:var(--text);font-weight:700">—</div>
-        </div>
-        <span style="color:var(--text-3);font-size:.85rem">→</span>
-      </div>
-    </button>
-    <button onclick="navigateTo('installments')" style="all:unset;cursor:pointer">
-      <div class="mock-card" style="padding:14px 16px;display:flex;align-items:center;gap:12px" onmouseover="this.style.borderColor='rgba(96,165,250,.4)'" onmouseout="this.style.borderColor=''">
-        <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#1e40af);display:flex;align-items:center;justify-content:center;font-size:1rem">📦</div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:.78rem;color:var(--text-3)">Parcelamentos</div>
-          <div id="overview-installments-stat" style="font-size:.95rem;color:var(--text);font-weight:700">—</div>
-        </div>
-        <span style="color:var(--text-3);font-size:.85rem">→</span>
-      </div>
-    </button>
-    <button onclick="navigateTo('goals')" style="all:unset;cursor:pointer">
-      <div class="mock-card" style="padding:14px 16px;display:flex;align-items:center;gap:12px" onmouseover="this.style.borderColor='rgba(52,211,153,.4)'" onmouseout="this.style.borderColor=''">
-        <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#10b981,#047857);display:flex;align-items:center;justify-content:center;font-size:1rem">🎯</div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:.78rem;color:var(--text-3)">Caixinhas e metas</div>
-          <div id="overview-goals-stat" style="font-size:.95rem;color:var(--text);font-weight:700">—</div>
-        </div>
-        <span style="color:var(--text-3);font-size:.85rem">→</span>
-      </div>
-    </button>
-    <button onclick="navigateTo('fixed')" style="all:unset;cursor:pointer">
-      <div class="mock-card" style="padding:14px 16px;display:flex;align-items:center;gap:12px" onmouseover="this.style.borderColor='rgba(245,158,11,.4)'" onmouseout="this.style.borderColor=''">
-        <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#f59e0b,#c2410c);display:flex;align-items:center;justify-content:center;font-size:1rem">🔁</div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:.78rem;color:var(--text-3)">Gastos fixos</div>
-          <div id="overview-fixed-stat" style="font-size:.95rem;color:var(--text);font-weight:700">—</div>
-        </div>
-        <span style="color:var(--text-3);font-size:.85rem">→</span>
-      </div>
-    </button>
-  </div>
 
   <!-- Insight do Piggy — populado via /insights/{user_id}/current (LLM) -->
   <!-- Visível só quando há insight; vazio = some -->
@@ -3527,6 +3618,7 @@ function renderCardsView(cards) {
   }
 
   grid.innerHTML = cards.map((c, i) => _renderCardItem(c, i)).join("");
+  setupCardsGridSort();
 }
 
 function _renderCardItem(c, idx = 0) {
@@ -9331,6 +9423,152 @@ async function onCardRowClick(rowEl) {
   }
 }
 
+/* ─── Drag-to-reorder dos cartões (desktop only) ───────────────────────────
+   Drag manual com pointer events: o card arrastado segue o cursor via
+   transform translateY; outros cards "abrem espaço" também via transform.
+   Nenhum elemento é duplicado no DOM, e o layout do stack (margin-top
+   negativo) fica intacto durante toda a operação. */
+function setupCardWalletSort() {
+  if (!window.matchMedia("(pointer: fine)").matches) return; // mobile: skip
+  document.querySelectorAll(".wallet").forEach(wallet => {
+    if (wallet.__dragInstalled) return;
+    wallet.__dragInstalled = true;
+    _installWalletDrag(wallet);
+  });
+}
+
+function _installWalletDrag(wallet) {
+  const STEP = 46;          // = --wallet-peek; espaçamento entre slots
+  const HOLD_MS = 50;       // tempo de hold antes de iniciar drag
+  const MOVE_THRESHOLD = 4; // px de movimento que já cancela o "hold" timer
+
+  let state = null;
+  let holdTimer = null;
+
+  wallet.addEventListener("pointerdown", e => {
+    if (e.button !== 0) return;
+    // Não inicia drag se gesto começou no badge (que abre fatura)
+    if (e.target.closest(".wallet-status")) return;
+    const item = e.target.closest(".wallet-item");
+    if (!item) return;
+
+    const items = [...wallet.querySelectorAll(".wallet-item")];
+    const fromIndex = items.indexOf(item);
+    if (fromIndex < 0) return;
+
+    const startY = e.clientY;
+    const startX = e.clientX;
+    let armed = false; // vira true após HOLD_MS sem movimento brusco
+
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(() => {
+      armed = true;
+      wallet.classList.add("wallet--dragging");
+      item.classList.add("wallet-item--drag");
+      try { wallet.setPointerCapture && wallet.setPointerCapture(e.pointerId); } catch (_) {}
+      state = { items, item, fromIndex, toIndex: fromIndex, startY, pointerId: e.pointerId };
+    }, HOLD_MS);
+
+    const onMove = (ev) => {
+      if (!armed) {
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > MOVE_THRESHOLD) {
+          clearTimeout(holdTimer); holdTimer = null;
+        }
+        return;
+      }
+      if (!state) return;
+      const dy = ev.clientY - state.startY;
+      state.item.style.transform = `translateY(${dy}px) scale(1.015) rotate(-1deg)`;
+      state.item.style.zIndex = 100;
+      // Calcula slot alvo baseado em quantos passos de STEP percorreu.
+      let slotShift = Math.round(dy / STEP);
+      let toIndex = Math.max(0, Math.min(state.items.length - 1, state.fromIndex + slotShift));
+      state.toIndex = toIndex;
+      // Anima outros cards pra abrir espaço
+      state.items.forEach((other, i) => {
+        if (other === state.item) return;
+        let shift = 0;
+        if (state.fromIndex < toIndex && i > state.fromIndex && i <= toIndex) shift = -STEP;
+        else if (state.fromIndex > toIndex && i < state.fromIndex && i >= toIndex) shift = STEP;
+        other.style.transform = shift ? `translateY(${shift}px)` : "";
+      });
+    };
+
+    const onUp = async () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      clearTimeout(holdTimer); holdTimer = null;
+      if (!armed || !state) { state = null; return; }
+      const { items, item, fromIndex, toIndex } = state;
+      // Reset transforms (animação volta visualmente, depois reordenamos DOM)
+      items.forEach(el => { el.style.transform = ""; el.style.zIndex = ""; });
+      item.classList.remove("wallet-item--drag");
+      wallet.classList.remove("wallet--dragging");
+      state = null;
+      if (toIndex !== fromIndex) {
+        // Reordena DOM
+        const moving = items[fromIndex];
+        const ref = items[toIndex];
+        if (toIndex > fromIndex) ref.after(moving); else ref.before(moving);
+        // Persiste
+        const orderedIds = [...wallet.querySelectorAll(".wallet-item")]
+          .map(el => Number(el.querySelector(".wallet-trigger")?.dataset.cardId))
+          .filter(id => Number.isFinite(id) && id > 0);
+        if (orderedIds.length) await persistCardOrder(orderedIds);
+      }
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  });
+}
+
+/* Drag-to-reorder na view Cartões (#cards-grid). Cards são <details>, então
+   `delay` evita conflito com click no <summary> (expandir/colapsar). */
+function setupCardsGridSort() {
+  if (typeof Sortable === "undefined") return;
+  if (!window.matchMedia("(pointer: fine)").matches) return;
+  const grid = document.getElementById("cards-grid");
+  if (!grid) return;
+  if (grid.__sortable) {
+    try { grid.__sortable.destroy(); } catch (_) {}
+  }
+  grid.__sortable = Sortable.create(grid, {
+    animation: 180,
+    forceFallback: true,
+    delay: 180,
+    delayOnTouchOnly: false,
+    ghostClass: "cc-card-grid--ghost",
+    dragClass: "cc-card-grid--drag",
+    // Botões/ações dentro do detail não devem iniciar drag.
+    filter: ".cc-detail-actions, .cc-detail-actions *, button, .mock-cta, .inst-delete-btn",
+    preventOnFilter: false,
+    onEnd: async () => {
+      const orderedIds = [...grid.querySelectorAll("details.cc-details[data-card-id]")]
+        .map(el => Number(el.dataset.cardId))
+        .filter(id => Number.isFinite(id) && id > 0);
+      if (orderedIds.length) await persistCardOrder(orderedIds);
+    },
+  });
+}
+
+async function persistCardOrder(orderedIds) {
+  if (!USER_ID) return;
+  try {
+    const r = await fetch(`${API}/cards/${USER_ID}/reorder`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ ordered_ids: orderedIds }),
+    });
+    if (!r.ok) throw new Error(await readApiError(r));
+  } catch (e) {
+    console.warn("[reorder] erro:", e);
+  }
+}
+
 async function openPayBillModal(opts) {
   opts = opts || {};
   const overlay = document.getElementById("pay-bill-overlay");
@@ -9776,69 +10014,6 @@ async function fetchHistory() {
 /* ═══════════════════════════════════════════════════════════════════════
    RENDER
 ═══════════════════════════════════════════════════════════════════════ */
-async function updateOverviewShortcuts(d) {
-  // Cartões — texto baseado em d.credit_cards
-  const cardsEl = document.getElementById("overview-cards-stat");
-  if (cardsEl) {
-    const n = (d?.credit_cards || []).length;
-    cardsEl.textContent = n === 0 ? "Nenhum" : (n === 1 ? "1 ativo" : `${n} ativos`);
-  }
-
-  // Parcelamentos — total devido (soma de remaining_amount dos grupos com n_pending > 0).
-  // Tenta cache primeiro, fetch silencioso senão.
-  const instEl = document.getElementById("overview-installments-stat");
-  if (instEl) {
-    let groups = _instCache;
-    if (!groups && USER_ID) {
-      try { groups = await _fetchInstallments(); _instCache = groups; } catch (_) { groups = null; }
-    }
-    if (groups) {
-      const totalDevido = groups
-        .filter(g => (g.n_pending || 0) > 0)
-        .reduce((s, g) => s + (g.remaining_amount || 0), 0);
-      instEl.textContent = totalDevido > 0 ? _fmtBRL(totalDevido) : "Nada devido";
-    }
-  }
-
-  // Caixinhas e metas — total guardado. Se tem metas, mostra também % completo.
-  const goalsEl = document.getElementById("overview-goals-stat");
-  if (goalsEl) {
-    const pockets = (d?.pockets || []);
-    if (!pockets.length) {
-      goalsEl.textContent = "Nenhuma";
-    } else {
-      const totalSaved = pockets.reduce((s, p) => s + (p.balance || 0), 0);
-      const withTarget = pockets.filter(p => p.target_amount != null && p.target_amount > 0);
-      if (withTarget.length > 0) {
-        const totalTarget = withTarget.reduce((s, p) => s + (p.target_amount || 0), 0);
-        const totalInGoals = withTarget.reduce((s, p) => s + (p.balance || 0), 0);
-        const pct = totalTarget > 0 ? Math.round(totalInGoals / totalTarget * 100) : 0;
-        goalsEl.innerHTML = `${_fmtBRL(totalSaved)} <span style="font-size:.72rem;color:var(--text-3);font-weight:500">· ${pct}% das metas</span>`;
-      } else {
-        goalsEl.textContent = `${_fmtBRL(totalSaved)} guardados`;
-      }
-    }
-  }
-
-  // Gastos fixos — soma dos recorrentes ativos. Pro-only: Free retorna 403 → mostra "Pro".
-  const fixedEl = document.getElementById("overview-fixed-stat");
-  if (fixedEl) {
-    let recs = _recurringCache;
-    if (!recs && USER_ID) {
-      try {
-        recs = await _fetchRecurring();
-        if (recs && !recs.pro_required) _recurringCache = recs;
-      } catch (_) { recs = null; }
-    }
-    if (recs && recs.pro_required) {
-      fixedEl.innerHTML = `<span style="color:var(--text-3);font-weight:500">🔒 Pro</span>`;
-    } else if (recs) {
-      const total = recs.filter(r => r.is_active).reduce((s, r) => s + (r.amount || 0), 0);
-      fixedEl.textContent = total > 0 ? `${_fmtBRL(total)}/mês` : "Nenhum";
-    }
-  }
-}
-
 // Popula o card "Piggy notou" com o insight de maior prioridade vindo do LLM.
 // Cache 6h em ai_proactive_cache + cron diário (proactive_ai_scheduler) garantem
 // que a request seja rápida (~200ms quando cache quente). Em miss, fallback heurístico
@@ -9897,7 +10072,6 @@ async function loadPiggyInsight() {
 
 function render(d) {
   cacheMonthData(d);
-  updateOverviewShortcuts(d);
   // Insight do Piggy: kick em paralelo, não bloqueia o render
   loadPiggyInsight();
   const grid = document.getElementById("grid");
@@ -9925,8 +10099,14 @@ function render(d) {
       <div class="bignum"><span class="cur">R$</span><span data-num="balance" data-val="${d.balance}">${fmt(d.balance)}</span></div>
       <div class="bigsub">saldo disponível</div>
       <div class="chips">
-        <div class="chip"><div class="chip-lbl">Investido</div><div class="chip-val b"><span data-num="invest" data-val="${ni}">${fmt(ni)}</span></div></div>
-        <div class="chip"><div class="chip-lbl">Caixinhas</div><div class="chip-val"><span data-num="pockets" data-val="${np}">${fmt(np)}</span></div></div>
+        <div class="chip chip-clickable" data-pro-feature="investments" role="button" tabindex="0" title="Abrir investimentos" onclick="setMainView('investments')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setMainView('investments');}">
+          <div class="chip-lbl"><span>Investido</span><span class="chip-arrow">→</span></div>
+          <div class="chip-val b"><span data-num="invest" data-val="${ni}">${fmt(ni)}</span></div>
+        </div>
+        <div class="chip chip-clickable" role="button" tabindex="0" title="Abrir caixinhas e metas" onclick="navigateTo('goals')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();navigateTo('goals');}">
+          <div class="chip-lbl"><span>Caixinhas</span><span class="chip-arrow">→</span></div>
+          <div class="chip-val"><span data-num="pockets" data-val="${np}">${fmt(np)}</span></div>
+        </div>
         <div class="chip" style="flex-basis:100%"><div class="chip-lbl">Patrimônio Total</div>
           <div class="chip-val g"><span data-num="pat" data-val="${d.balance+ni+np}">${fmt(d.balance+ni+np)}</span></div></div>
       </div>
@@ -9945,43 +10125,78 @@ function render(d) {
       <div class="pbar-wrap"><div class="pbar-fill" style="width:${Math.min(Math.max(rate,0),100)}%;background:${rc}"></div></div>
     </div>
 
-    <div class="card card-clickable" data-pro-feature="investments" style="animation-delay:120ms" onclick="setMainView('investments')" title="Abrir aba de investimentos" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setMainView('investments');}">
-	      <h2>Investimentos</h2>
-	      ${!(d.investments||[]).length?'<div class="empty">Nenhum investimento.</div>':
-	        d.investments.map(i=>{
-	          const useProj = (i.projected_days || 0) > 0 && i.projected_balance != null;
-	          const bal     = useProj ? i.projected_balance : i.balance;
-	          return `<div class="row"><span class="lbl">${esc(displayInvestmentName(i))}</span>
-	          <span class="val" data-num="inv_${i.name}" data-val="${bal}">${fmt(bal)}</span></div>`;
-	        }).join("")
-	      }
-    </div>
-
     <div class="card" style="animation-delay:180ms">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-        <h2 style="margin:0">Caixinhas</h2>
-        <button class="hbtn" type="button" onclick="openPocketModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Nova</button>
-      </div>
-      ${!(d.pockets||[]).length?'<div class="empty">Nenhuma caixinha.</div>':
-        d.pockets.map((p,i)=>{
-          const safeName = escapeJsString(p.name);
-          const blocked = Math.abs(Number(p.balance) || 0) >= 0.005;
-          const delClass = blocked ? "pocket-del is-blocked" : "pocket-del";
-          const delTitle = blocked ? "Zere o saldo antes de excluir" : "Excluir caixinha";
-          return `<div class="row card-row-clickable pocket-row" onclick="openPocketHistory('${safeName}')" title="Ver histórico"><span class="lbl">
-          ${esc(p.name)}
-          ${p.description ? `<span style="display:block;font-size:.63rem;color:var(--text-3);margin-top:2px">${esc(p.description)}</span>` : ''}
-          <span style="display:block;font-size:.63rem;color:var(--text-3);margin-top:2px">${p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate)}</span>
-        </span>
-          <span class="pocket-right">
-            <span class="val" data-num="pkt_${p.name}" data-val="${p.balance}">${fmt(p.balance)}</span>
-            <button class="${delClass}" type="button" onclick="event.stopPropagation();confirmDeletePocket('${safeName}', ${Number(p.balance) || 0})" title="${delTitle}" aria-label="Excluir caixinha">×</button>
-          </span>
-        </div>`;
-        }).join("")}
+      <h2>Categorias (mês)</h2>
+      ${!(d.expense_categories||[]).length?'<div class="empty">Sem despesas este mês.</div>':
+        (() => {
+          const mx = Math.max(...d.expense_categories.map(c=>c.total));
+          return d.expense_categories.map((c,i)=>{
+            const hb  = c.budget != null;
+            const bw  = hb ? Math.min(c.budget_pct,100) : Math.round(c.total/mx*100);
+            const bc  = hb ? (c.budget_pct>100?"var(--red)":c.budget_pct>85?"var(--yellow)":"var(--green)") : CAT_CLR[i%CAT_CLR.length];
+            const catSafe = c.categoria.replace(/'/g,"\\'");
+            return `<div class="cat-row">
+              <div class="cat-hdr">
+                <span class="cat-lbl">${c.categoria==="sem categoria"?"⚠ Sem Categoria":c.categoria}</span>
+                <span class="cat-val" data-num="cat_${c.categoria}" data-val="${c.total}">${fmt(c.total)}</span>
+                <button class="bgt-btn" onclick="openBudget('${catSafe}')" title="Definir limite de orçamento">✏️</button>
+              </div>
+              ${hb?`<div class="cat-budget-info">${c.budget_pct}% de ${fmt(c.budget)}</div>`:""}
+              <div class="bar-wrap"><div class="bar-fill" style="width:${bw}%;background:${bc}"></div></div>
+            </div>`;
+          }).join("");
+        })()
+      }
     </div>
 
-    <div class="card" style="animation-delay:210ms">
+    <div class="card" style="animation-delay:240ms">
+      <div class="cards-section-head">
+        <h2>Cartões de Crédito</h2>
+        <div style="display:flex;gap:8px">
+          <button class="hbtn" type="button" onclick="openCardModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Novo</button>
+          <button class="btn-pay-bill" type="button" onclick="openPayBillModal()">💳 Pagar fatura</button>
+        </div>
+      </div>
+      ${!(d.credit_cards||[]).length?'<div class="wallet-empty">Nenhum cartão.</div>':
+        `<div class="wallet" style="--n:${d.credit_cards.length}">${d.credit_cards.map((c,i)=>{
+          const due   = c.due_amount != null ? c.due_amount : Math.max(0, (c.total||0) - (c.paid_amount||0));
+          const total = c.total || 0;
+          const paid  = c.paid_amount || 0;
+          const hasData = total > 0 || paid > 0;
+          const billRef = c.id ? ` data-card-id="${c.id}"` : '';
+          const periodLabel = c.period_label || '';
+          const colorCls = `color-${c.color || 'purple'}`;
+
+          let statusCls = 's-empty', statusTxt = 'Sem fatura';
+          if (c.status === 'paid') { statusCls = 's-paid'; statusTxt = 'Paga'; }
+          else if (c.status === 'overdue' || c.status === 'vencida') { statusCls = 's-due'; statusTxt = 'Vencida'; }
+          else if (hasData) { statusCls = 's-open'; statusTxt = 'Em aberto'; }
+
+          const showProgress = paid > 0 && total > 0 && c.status !== 'paid';
+          const pctPaid = showProgress ? Math.min(100, Math.round((paid/total)*100)) : 0;
+
+          const dueLbl = c.due_day ? `Vence dia ${c.due_day}` : (c.closing_day ? `Fecha dia ${c.closing_day}` : '');
+
+          return `<div class="wallet-item ${colorCls}">
+            <div class="wallet-trigger"${billRef} title="Arraste pra reordenar"></div>
+            <div class="wallet-head">
+              <div class="wallet-name"><span class="wallet-icon">💳</span><span>${esc(c.name)}</span></div>
+              <button type="button" class="wallet-status ${statusCls}"${billRef} onclick="onCardRowClick(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onCardRowClick(this);}" title="Ver detalhes da fatura">${statusTxt}</button>
+            </div>
+            <div class="wallet-body">
+              <span class="wallet-due" data-num="cc_${c.name}" data-val="${due}">${hasData ? fmt(due) : 'R$ —'}</span>
+              <span class="wallet-due-sub">${hasData ? (periodLabel ? `Fatura ${periodLabel}` : 'Fatura atual') : 'Sem fatura aberta'}</span>
+            </div>
+            ${showProgress ? `<div class="wallet-progress"><div class="wallet-progress-fill" style="width:${pctPaid}%"></div></div>` : ''}
+            <div class="wallet-meta">
+              <span>${dueLbl || '—'}</span>
+              ${showProgress ? `<span>${pctPaid}% pago</span>` : ''}
+            </div>
+          </div>`;
+        }).join("")}</div>`}
+    </div>
+
+    <div class="card" style="animation-delay:300ms">
       <h2>Aportes do mês</h2>
       ${(() => {
         const a = d.monthly_allocations || {investments:{total:0,by_target:[]}, pockets:{total:0,by_target:[]}};
@@ -10019,67 +10234,6 @@ function render(d) {
         `;
       })()}
     </div>
-
-    <div class="card" style="animation-delay:240ms">
-      <h2>Categorias (mês)</h2>
-      ${!(d.expense_categories||[]).length?'<div class="empty">Sem despesas este mês.</div>':
-        (() => {
-          const mx = Math.max(...d.expense_categories.map(c=>c.total));
-          return d.expense_categories.map((c,i)=>{
-            const hb  = c.budget != null;
-            const bw  = hb ? Math.min(c.budget_pct,100) : Math.round(c.total/mx*100);
-            const bc  = hb ? (c.budget_pct>100?"var(--red)":c.budget_pct>85?"var(--yellow)":"var(--green)") : CAT_CLR[i%CAT_CLR.length];
-            const catSafe = c.categoria.replace(/'/g,"\\'");
-            return `<div class="cat-row">
-              <div class="cat-hdr">
-                <span class="cat-lbl">${c.categoria==="sem categoria"?"⚠ Sem Categoria":c.categoria}</span>
-                <span class="cat-val" data-num="cat_${c.categoria}" data-val="${c.total}">${fmt(c.total)}</span>
-                <button class="bgt-btn" onclick="openBudget('${catSafe}')" title="Definir limite de orçamento">✏️</button>
-              </div>
-              ${hb?`<div class="cat-budget-info">${c.budget_pct}% de ${fmt(c.budget)}</div>`:""}
-              <div class="bar-wrap"><div class="bar-fill" style="width:${bw}%;background:${bc}"></div></div>
-            </div>`;
-          }).join("");
-        })()
-      }
-    </div>
-
-    <div class="card" style="animation-delay:300ms">
-      <div class="cards-section-head">
-        <h2>Cartões de Crédito</h2>
-        <div style="display:flex;gap:8px">
-          <button class="hbtn" type="button" onclick="openCardModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Novo</button>
-          <button class="btn-pay-bill" type="button" onclick="openPayBillModal()">💳 Pagar fatura</button>
-        </div>
-      </div>
-      ${!(d.credit_cards||[]).length?'<div class="empty">Nenhum cartão.</div>':
-        d.credit_cards.map(c=>{
-          const due   = c.due_amount != null ? c.due_amount : Math.max(0, (c.total||0) - (c.paid_amount||0));
-          const total = c.total || 0;
-          const paid  = c.paid_amount || 0;
-          const statusBadge = c.status === 'paid' ? 'paga' : c.status || '—';
-          const hasData = total > 0 || paid > 0;
-          const billRef = c.id ? ` data-card-id="${c.id}"` : '';
-          // Tenta achar a fatura aberta deste cartão pra abrir direto o detalhe
-          const openBills = (d.credit_cards||[]).filter(x=>x.id===c.id);
-          // Mostra o mês da fatura junto com o valor — esclarece que é a
-          // fatura DO MÊS (não total do cartão). Parcelas futuras vivem em
-          // outras faturas, acessíveis pelas setas no modal.
-          const periodLabel = c.period_label || '';
-          return `<div class="row card-row-clickable" onclick="onCardRowClick(this)"${billRef}>
-            <span class="lbl">
-              ${c.name}
-              <span class="tag x">${statusBadge}</span>
-              ${hasData ? `<span style="font-size:.63rem;color:var(--text-3)">fecha dia ${c.closing_day}</span>` : ''}
-            </span>
-            <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
-              <span class="val r" data-num="cc_${c.name}" data-val="${due}">${hasData ? fmt(due) : '—'}</span>
-              ${hasData && periodLabel ? `<span style="font-size:.63rem;color:var(--text-3)">fatura ${periodLabel}</span>` : ''}
-              ${hasData && paid > 0 ? `<span style="font-size:.63rem;color:var(--text-3)">total ${fmt(total)} · pago ${fmt(paid)}</span>` : ''}
-            </span>
-          </div>`;
-        }).join("")}
-    </div>
   `;
 
   // Show launches section
@@ -10111,6 +10265,9 @@ function render(d) {
   // Re-aplicar gates Pro nos elementos recem-renderizados (ex: card de
   // investimentos da visao geral, criado via innerHTML).
   applyProGates();
+
+  // Reinicializa drag-to-reorder na wallet stack (recriada por innerHTML).
+  setupCardWalletSort();
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

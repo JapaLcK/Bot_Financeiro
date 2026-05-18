@@ -784,6 +784,13 @@ def init_db():
         end $$;
         """,
 
+        # ─── Ordem manual de exibição (drag-to-reorder) ───────────────────────────
+        # Cartões sem display_order definido (NULL) ficam no final, ordenados por
+        # nome — preserva comportamento antigo até user reordenar.
+        """
+        alter table credit_cards add column if not exists display_order int
+        """,
+
         # ─── OFX import de fatura: deduplicação em credit_transactions ────────────
         """
         alter table credit_transactions add column if not exists source text not null default 'manual'
