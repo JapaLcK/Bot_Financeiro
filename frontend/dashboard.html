@@ -3116,22 +3116,6 @@ const PT_MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
                    "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 const CAT_CLR   = ["#f87171","#fb923c","#fbbf24","#a78bfa","#60a5fa","#34d399","#e879f9","#38bdf8","#4ade80","#94a3b8"];
 const PALETTE   = ["#a78bfa","#60a5fa","#34d399","#fbbf24","#f87171","#e879f9","#38bdf8","#4ade80","#fb923c","#94a3b8"];
-// Paleta usada SÓ no donut da view Análises — 12 cores bem distintas no espectro
-// (hue espaçado 30°). Visão Geral mantém PALETTE/CAT_CLR antigos.
-const CATEGORY_PALETTE_12 = [
-  "#ef4444",  /*   0° vermelho */
-  "#f97316",  /*  30° laranja  */
-  "#eab308",  /*  60° amarelo  */
-  "#84cc16",  /*  90° lima     */
-  "#22c55e",  /* 120° verde    */
-  "#14b8a6",  /* 150° teal     */
-  "#06b6d4",  /* 180° ciano    */
-  "#0ea5e9",  /* 210° azul     */
-  "#6366f1",  /* 240° índigo   */
-  "#a855f7",  /* 270° roxo     */
-  "#d946ef",  /* 300° magenta  */
-  "#ec4899",  /* 330° rosa     */
-];
 const PKT_CLR   = ["var(--purple)","var(--blue)","var(--green)"];
 
 function getFilterText() {
@@ -6447,7 +6431,10 @@ function renderAnalyticsIncomeExpense(evolution) {
   });
 }
 
-const _CATEGORY_PALETTE = CATEGORY_PALETTE_12;
+// Mesma paleta do donut da Visão Geral (PALETTE) — mantém identidade visual
+// PigBank (roxo/azul/verde/amarelo/etc). Sequencial pra garantir distinção
+// entre fatias adjacentes (não usa c.color, que herda default roxo na maioria).
+const _CATEGORY_PALETTE = PALETTE;
 
 function renderAnalyticsCategoryDonut(categories) {
   const el = document.getElementById("mock-category-donut");
