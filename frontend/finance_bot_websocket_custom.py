@@ -1235,8 +1235,13 @@ register_admin_routes(app, HERE, JWT_SECRET, limiter)
 
 _bearer = HTTPBearer(auto_error=False)
 AUTH_COOKIE_NAME = "auth_token"
-AUTH_COOKIE_MAX_AGE = 86400
+# Access token TTL: 15min (curto, vai em toda request).
+# Renovação automática via refresh_token (14d, idle 7d).
+AUTH_COOKIE_MAX_AGE = 15 * 60
 DASHBOARD_COOKIE_NAME = "dashboard_token"
+REFRESH_COOKIE_NAME = "refresh_token"
+REFRESH_COOKIE_MAX_AGE = 14 * 24 * 3600  # 14 dias absolutos
+REFRESH_COOKIE_PATH = "/auth/refresh"     # só vai em request específica
 
 def _make_jwt(user_id: int, email: str, *, jti: str | None = None) -> str:
     from datetime import timedelta
@@ -1244,24 +1249,31 @@ def _make_jwt(user_id: int, email: str, *, jti: str | None = None) -> str:
         "sub": str(user_id),
         "email": email,
         "type": "auth",
-        "exp": datetime.now(timezone.utc) + timedelta(hours=24),
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
     }
     if jti:
         payload["jti"] = jti
     return pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
-def _issue_session_token(user_id: int, email: str, request: Request) -> tuple[str, str]:
-    """Cria uma sessao em auth_sessions e devolve (jwt, jti).
+def _issue_session_token(user_id: int, email: str, request: Request) -> tuple[str, str, str]:
+    """Cria uma sessao em auth_sessions + emite access JWT + refresh token.
 
-    Use em todo lugar que emite o cookie auth_token (login, OAuth, signup).
-    O jti retornado deve ser passado para `_set_dashboard_cookie` para que o
-    dashboard_token tambem seja session-bound (revogavel).
+    Retorna (access_jwt, jti, refresh_token_plain). O jti deve ser passado para
+    `_set_dashboard_cookie` (dashboard_token também session-bound) e o refresh
+    deve ser setado no cookie `refresh_token` via `_set_refresh_cookie`.
+
+    Use em todo lugar que emite o cookie auth_token (login, OAuth, signup,
+    magic_link, etc).
     """
+    from core.refresh_tokens import create_refresh_token
+
     ip = get_remote_address(request) or None
     ua = request.headers.get("user-agent") or None
     jti = create_session(user_id, ip=ip, user_agent=ua)
-    return _make_jwt(user_id, email, jti=jti), jti
+    access = _make_jwt(user_id, email, jti=jti)
+    refresh = create_refresh_token(user_id, session_jti=jti, ip=ip, user_agent=ua)
+    return access, jti, refresh
 
 
 def _decode_jwt(token: str) -> dict | None:
@@ -1300,6 +1312,21 @@ def _set_dashboard_cookie(response: Response, user_id: int, *, jti: str | None =
     return token
 
 
+def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
+    """Seta o refresh_token cookie com path restrito a /auth/refresh.
+    Significa que esse cookie só viaja na 1 request específica de renovação —
+    muito menos exposto que o access cookie (que vai em toda request)."""
+    response.set_cookie(
+        REFRESH_COOKIE_NAME,
+        refresh_token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+        max_age=REFRESH_COOKIE_MAX_AGE,
+        path=REFRESH_COOKIE_PATH,
+    )
+
+
 def _expire_cookie(response: Response, name: str, domain: str | None = None) -> None:
     response.delete_cookie(
         name,
@@ -1320,6 +1347,11 @@ def _clear_session_cookies(response: Response) -> None:
         _expire_cookie(response, AUTH_COOKIE_NAME, domain)
         _expire_cookie(response, DASHBOARD_COOKIE_NAME, domain)
         _expire_cookie(response, CSRF_COOKIE_NAME, domain)
+    # Refresh cookie tem path restrito — limpa com mesmo path pra remover
+    response.delete_cookie(
+        REFRESH_COOKIE_NAME, path=REFRESH_COOKIE_PATH,
+        httponly=True, secure=COOKIE_SECURE, samesite="lax",
+    )
 
 
 def _no_store(response: Response) -> Response:
@@ -1621,8 +1653,9 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
 
     user_id    = result["user_id"]
     link_code  = result["link_code"]
-    token, jti = _issue_session_token(user_id, body.email.strip().lower(), request)
+    token, jti, refresh = _issue_session_token(user_id, body.email.strip().lower(), request)
     _set_auth_cookie(response, token)
+    _set_refresh_cookie(response, refresh)
     _set_dashboard_cookie(response, int(user_id), jti=jti)
 
     wa_link = _build_whatsapp_onboarding_link(user_id)
@@ -1698,8 +1731,9 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         }
 
     link_code  = create_link_code(user_id, minutes_valid=15)
-    token, jti = _issue_session_token(user_id, result["email"], request)
+    token, jti, refresh = _issue_session_token(user_id, result["email"], request)
     _set_auth_cookie(response, token)
+    _set_refresh_cookie(response, refresh)
     _set_dashboard_cookie(response, int(user_id), jti=jti)
 
     # Fire ANTES do log_auth_login_event: senao o IP atual ja vira "conhecido".
@@ -1739,11 +1773,74 @@ async def auth_logout(request: Request, response: Response):
             if jti and user_id_raw:
                 try:
                     await asyncio.to_thread(revoke_session, int(user_id_raw), jti)
+                    # Revoga também TODOS os refresh tokens dessa sessão
+                    from core.refresh_tokens import revoke_session_refresh_tokens
+                    await asyncio.to_thread(revoke_session_refresh_tokens, jti)
                 except Exception:
                     pass
 
+    # Revoga também o refresh_token específico do cookie (caso a sessão já
+    # não bata — defesa em profundidade).
+    refresh_in_cookie = (request.cookies.get(REFRESH_COOKIE_NAME) or "").strip()
+    if refresh_in_cookie:
+        try:
+            from core.refresh_tokens import revoke_refresh_token
+            await asyncio.to_thread(revoke_refresh_token, refresh_in_cookie)
+        except Exception:
+            pass
+
     _clear_session_cookies(response)
     response.headers["Clear-Site-Data"] = '"cookies", "storage"'
+    _no_store(response)
+    return {"ok": True}
+
+
+@app.post("/auth/refresh")
+@limiter.limit("60/minute")
+async def auth_refresh(request: Request, response: Response):
+    """Renova o access token usando o refresh_token do cookie.
+
+    Fluxo:
+      1. Lê refresh_token do cookie (path=/auth/refresh).
+      2. Rotaciona: marca antigo como usado, emite novo refresh com mesmo session_jti.
+      3. Emite novo access token (15min) + dashboard_token.
+      4. Atualiza auth_sessions.last_seen_at.
+
+    Falhas (token revogado, expirado, replay, idle, sessão revogada): retorna 401
+    e limpa cookies. Frontend deve mandar pro login.
+    """
+    refresh_in_cookie = (request.cookies.get(REFRESH_COOKIE_NAME) or "").strip()
+    if not refresh_in_cookie:
+        raise HTTPException(status_code=401, detail="missing_refresh_token")
+
+    from core.refresh_tokens import consume_refresh_token
+    ip = get_remote_address(request) or None
+    ua = request.headers.get("user-agent") or None
+    result = await asyncio.to_thread(
+        consume_refresh_token, refresh_in_cookie, ip=ip, user_agent=ua,
+    )
+    if not result:
+        # Limpa cookies — qualquer motivo de falha vira deslogue.
+        _clear_session_cookies(response)
+        raise HTTPException(status_code=401, detail="invalid_refresh_token")
+
+    user_id = int(result["user_id"])
+    session_jti = result["session_jti"]
+    new_refresh = result["new_refresh_token"]
+
+    # Recupera email pra montar o access JWT
+    try:
+        from db import get_auth_user
+        u = await asyncio.to_thread(get_auth_user, user_id)
+        email = (u or {}).get("email") or ""
+    except Exception:
+        email = ""
+
+    access = _make_jwt(user_id, email, jti=session_jti)
+    _set_auth_cookie(response, access)
+    _set_refresh_cookie(response, new_refresh)
+    # Renova dashboard_token também (mesmo jti)
+    _set_dashboard_cookie(response, user_id, jti=session_jti)
     _no_store(response)
     return {"ok": True}
 
@@ -2050,8 +2147,9 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
 
     link_code = await asyncio.to_thread(create_link_code, user_id, 15)
-    token, jti = _issue_session_token(user_id, user["email"], request)
+    token, jti, refresh = _issue_session_token(user_id, user["email"], request)
     _set_auth_cookie(response, token)
+    _set_refresh_cookie(response, refresh)
     _set_dashboard_cookie(response, int(user_id), jti=jti)
 
     # New-IP audit ANTES do log_auth_login_event de sucesso. Rows de
@@ -2461,10 +2559,11 @@ async def auth_google_callback(
             return _google_redirect_to_landing(exc.detail)
 
         # Login bem-sucedido → cookies + redirect pra home
-        jwt_token, jti = _issue_session_token(user_id, email, request)
+        jwt_token, jti, refresh = _issue_session_token(user_id, email, request)
         success_response = RedirectResponse(url=_post_login_url(), status_code=302)
         success_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
         _set_auth_cookie(success_response, jwt_token)
+        _set_refresh_cookie(success_response, refresh)
         _set_dashboard_cookie(success_response, int(user_id), jti=jti)
 
         await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
@@ -2531,8 +2630,9 @@ async def auth_google_complete_signup(
     user_id = int(result["user_id"])
     email = result["email"]
 
-    jwt_token, jti = _issue_session_token(user_id, email, request)
+    jwt_token, jti, refresh = _issue_session_token(user_id, email, request)
     _set_auth_cookie(response, jwt_token)
+    _set_refresh_cookie(response, refresh)
     _set_dashboard_cookie(response, user_id, jti=jti)
 
     await log_auth_login_event(
@@ -3120,13 +3220,19 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
     # rotas que exigem auth completa (/conta, /api/me, etc) sem precisar logar
     # de novo. Sem isso, ?next=/conta caia em /?login_required=conta porque
     # /conta so olha pro auth_token, nao pro dashboard_token.
+    # Magic link também emite refresh_token (sessão de 14d com idle 7d).
     try:
         from db import get_auth_user
+        from core.refresh_tokens import create_refresh_token
         u = await asyncio.to_thread(get_auth_user, int(user_id))
         email = (u or {}).get("email") or ""
         if email:
             auth_jwt = _make_jwt(int(user_id), email, jti=jti)
             _set_auth_cookie(response, auth_jwt)
+            refresh = await asyncio.to_thread(
+                create_refresh_token, int(user_id), jti, ip=ip, user_agent=ua,
+            )
+            _set_refresh_cookie(response, refresh)
     except Exception:
         # Falha silenciosa — o dashboard ainda funciona com o dashboard_token.
         pass
@@ -3160,6 +3266,13 @@ async def serve_reset_password():
 @app.get("/onboarding")
 async def serve_onboarding():
     return _html_file(HERE / "onboarding.html")
+
+@app.get("/static/auth-refresh.js")
+async def serve_auth_refresh_js():
+    """Interceptor de fetch que renova access em 401. Incluído nas páginas
+    autenticadas (dashboard, home, settings, onboarding)."""
+    path = HERE / "auth-refresh.js"
+    return FileResponse(path, media_type="application/javascript", headers={"Cache-Control": "public, max-age=300"})
 
 @app.get("/privacy")
 async def serve_privacy():

@@ -1086,6 +1086,45 @@ def init_db():
           on ai_proactive_cache (generated_at desc)
         """,
 
+        # ─── Refresh tokens (auth: access curto 15min + refresh longo 14d) ─────
+        # Sessão (auth_sessions) hospeda o jti. Refresh token é o "permite trocar
+        # access expirado" — armazenamos só SHA-256 do plain token, nunca o valor.
+        #
+        # Lifecycle:
+        #   - emit:    POST /auth/login → cria 1 row (issued_at=now, used_at=null)
+        #   - rotate:  POST /auth/refresh → marca antigo como used_at=now,
+        #              cria new row, mesma session_jti.
+        #   - replay:  se refresh já com used_at tentar usar → revoga TODO o
+        #              user (token roubado).
+        #   - idle:    se auth_sessions.last_seen_at < now - 7d → rejeita +
+        #              revoga sessão.
+        #   - logout:  revoga refresh + revoga session (auth_sessions.revoked_at).
+        """
+        create table if not exists auth_refresh_tokens (
+          token_hash text primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          session_jti text not null,
+          issued_at timestamptz not null default now(),
+          expires_at timestamptz not null,
+          used_at timestamptz,
+          revoked_at timestamptz,
+          ip text,
+          user_agent text
+        )
+        """,
+        """
+        create index if not exists idx_auth_refresh_tokens_user_active
+          on auth_refresh_tokens (user_id, revoked_at, used_at)
+        """,
+        """
+        create index if not exists idx_auth_refresh_tokens_session
+          on auth_refresh_tokens (session_jti)
+        """,
+        """
+        create index if not exists idx_auth_refresh_tokens_expires
+          on auth_refresh_tokens (expires_at)
+        """,
+
         # ─── Cifragem column-level de PII (LGPD art. 46) ────────────────────────
         # Cada coluna PII pesquisável vira par (hash, enc):
         #   hash = HMAC-SHA256(plain, PEPPER) — indexável, irreversível, pro WHERE
