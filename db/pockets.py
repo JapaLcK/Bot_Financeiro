@@ -165,7 +165,7 @@ def accrue_all_pockets(user_id: int, today: date | None = None):
                 select {POCKET_COLUMNS}
                   from pockets
                 where user_id=%s
-                order by (target_amount is null), lower(name)
+                order by balance desc, lower(name)
                 """,
                 (user_id,),
             )
@@ -185,7 +185,7 @@ def list_pockets(user_id: int, *, accrue: bool = True):
                 select {POCKET_COLUMNS}
                   from pockets
                  where user_id=%s
-                 order by (target_amount is null), lower(name)
+                 order by balance desc, lower(name)
                 """,
                 (user_id,),
             )

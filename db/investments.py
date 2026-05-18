@@ -1052,7 +1052,7 @@ def list_investments(user_id: int):
                        asset_type, indexer, issuer, purchase_date, maturity_date,
                        interest_payment_frequency, tax_profile
                 """
-                "from investments where user_id=%s order by lower(name)",
+                "from investments where user_id=%s order by balance desc, lower(name)",
                 (user_id,),
             )
             rows = [dict(r) for r in cur.fetchall()]
@@ -1160,7 +1160,7 @@ def accrue_all_investments(user_id: int, today: date | None = None):
                        asset_type, indexer, issuer, purchase_date, maturity_date,
                        interest_payment_frequency, tax_profile
                 """
-                "from investments where user_id=%s order by lower(name)",
+                "from investments where user_id=%s order by balance desc, lower(name)",
                 (user_id,),
             )
             out = [dict(r) for r in cur.fetchall()]
