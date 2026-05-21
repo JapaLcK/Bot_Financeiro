@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import unicodedata
 from datetime import date
 from typing import Any
 
@@ -53,6 +54,37 @@ LIMIT_MSG_TEMPLATE = (
 ERROR_MSG = (
     "🐷 Deu ruim aqui — tenta de novo. Se persistir, fala com a gente: suporte@pigbankai.com"
 )
+
+
+# Comandos óbvios que mapeiam direto pra uma tool — pulam o LLM. Evita
+# o LLM replicar padrões antigos do histórico (ex: pedir "dashboard" e ele
+# listar saldo+gastos+investimentos em vez de devolver o link).
+_FAST_PATH_DASHBOARD: frozenset[str] = frozenset({
+    "dashboard", "painel", "web",
+    "ver dashboard", "ver painel",
+    "abrir dashboard", "abrir painel",
+    "abre dashboard", "abre painel",
+    "abre o dashboard", "abre o painel",
+    "link", "link do dashboard", "link do painel", "link dashboard", "link painel",
+    "manda dashboard", "manda painel",
+    "manda o dashboard", "manda o painel",
+    "meu dashboard", "meu painel",
+})
+
+
+def _fast_path_norm(text: str) -> str:
+    t = (text or "").strip().lower()
+    t = "".join(c for c in unicodedata.normalize("NFKD", t) if not unicodedata.combining(c))
+    # remove pontuação básica do início/fim
+    return t.strip(" .,!?:;")
+
+
+def _try_fast_path(user_id: int, user_text: str) -> str | None:
+    norm = _fast_path_norm(user_text)
+    if norm in _FAST_PATH_DASHBOARD:
+        from core.handlers.dashboard import open_dashboard
+        return open_dashboard(user_id)
+    return None
 
 
 def chat(
@@ -109,6 +141,13 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
     used = db.ai_get_usage_this_month(user_id)
     if used >= monthly_limit:
         return LIMIT_MSG_TEMPLATE.format(limit=monthly_limit)
+
+    # 2b. Fast-path: comandos óbvios pulam o LLM (ver _FAST_PATH_DASHBOARD).
+    fast = _try_fast_path(user_id, user_text)
+    if fast is not None:
+        db.ai_append_message(user_id, "user", user_text)
+        db.ai_append_message(user_id, "assistant", fast)
+        return fast
 
     # 3. Salva msg do user
     db.ai_append_message(user_id, "user", user_text)
