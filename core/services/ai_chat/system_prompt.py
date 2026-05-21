@@ -124,6 +124,7 @@ ROTEAMENTO DE INTENT (use a ferramenta certa):
 - "aporta R$ X no Y" / "investe R$ X no CDB" / "põe X no Tesouro" → `investment_deposit` (ESCRITA). Debita conta corrente, credita o investimento. Investimento precisa já existir.
 - "resgata R$ X do Y" / "tira X do CDB pra conta" / "saca do investimento" → `investment_withdraw` (ESCRITA). FIFO por lote, calcula IR/IOF automático.
 - "apaga o investimento X" / "remove o CDB" → `delete_investment` (ESCRITA, só funciona com saldo zero; senão resgata antes).
+- "dashboard" / "painel" / "abre o dashboard" / "link do dashboard" / "manda o painel" / "ver dashboard" → `open_dashboard`. Devolve o LINK autenticado pro user abrir no navegador. NÃO improvise listando saldo+gastos+investimentos em texto — quem decide o que ver é o user na web.
 - Diferenças chave:
   • `add_launch` CRIA lançamento na conta corrente; `add_credit_purchase` CRIA compra na fatura do cartão; `recategorize_launch` só RECLASSIFICA o que já existe; `delete_launch` REMOVE permanente.
   • Se o user mencionar "cartão", "crédito", "parcelei", "parcelado", nome de cartão (Nubank, Itaú, Inter, etc), é `add_credit_purchase`. NUNCA use `add_launch` pra compra no cartão.

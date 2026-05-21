@@ -17,6 +17,8 @@ from typing import Any
 
 import db
 
+from core.handlers.dashboard import open_dashboard as _open_dashboard_link
+
 from .._context import CURRENT_USER_MESSAGE
 from ._base import Tool
 
@@ -52,7 +54,32 @@ def _report_out_of_scope_execute(user_id: int, args: dict[str, Any]) -> str:
     return f"{_FALLBACK_BASE}\n\n{_FALLBACK_ALTERNATIVES}"
 
 
+def _open_dashboard_execute(user_id: int, args: dict[str, Any]) -> str:
+    return _open_dashboard_link(user_id)
+
+
 TOOLS: list[Tool] = [
+    Tool(
+        schema={
+            "type": "function",
+            "function": {
+                "name": "open_dashboard",
+                "description": (
+                    "Devolve o LINK autenticado do dashboard web do user. "
+                    "USE sempre que o user pedir o dashboard / painel / link "
+                    "do dashboard (ex: 'dashboard', 'manda o painel', 'abre "
+                    "o dashboard', 'link do dashboard', 'painel', 'web'). "
+                    "NÃO liste os dados em texto — quem decide o que ver é "
+                    "o user no navegador. A tool já retorna a resposta "
+                    "pronta com o link, expiração e instruções."
+                ),
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        is_write=True,
+        requires_confirmation=False,
+        execute=_open_dashboard_execute,
+    ),
     Tool(
         schema={
             "type": "function",
