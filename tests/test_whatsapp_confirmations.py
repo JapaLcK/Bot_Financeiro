@@ -33,6 +33,27 @@ def test_credit_limit_question_stays_as_text_input():
     assert _pending_supports_confirmation_buttons(pending) is False
 
 
+def test_credit_purchase_pending_renders_delete_button(monkeypatch):
+    """Confirmação de compra no crédito anexa o botão "🗑️ Apagar" (id del_cc:<tx>)
+    e consome o pending na 1ª renderização (one-shot)."""
+    import adapters.whatsapp.wa_runtime as wr
+
+    sent: list[dict] = []
+    cleared: list[int] = []
+    monkeypatch.setattr(
+        wr, "get_pending_action",
+        lambda uid: {"action_type": "delete_credit_purchase", "payload": {"tx_id": 42}},
+    )
+    monkeypatch.setattr(wr, "clear_pending_action", lambda uid: cleared.append(uid))
+    monkeypatch.setattr(wr, "send_interactive_buttons", lambda **kw: sent.append(kw))
+
+    wr._send_reply_with_optional_buttons("5511999998888", "✅ Compra registrada! CC42", user_id=7)
+
+    assert cleared == [7]
+    assert len(sent) == 1
+    assert sent[0]["buttons"] == [{"id": "del_cc:42", "title": "🗑️ Apagar"}]
+
+
 def test_autolink_com_comando_nao_interrompe_para_boas_vindas(monkeypatch):
     replies = []
     handled = []

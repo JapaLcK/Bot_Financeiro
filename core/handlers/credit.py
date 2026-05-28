@@ -515,6 +515,13 @@ def add_credit_from_entities(
                 user_id, desc_clean, categoria,
                 target_hint=desc_clean, reason="manual",
             )
+        # Pending efêmero: o runtime do WhatsApp lê e anexa um botão "🗑️ Apagar"
+        # na confirmação (consome na 1ª renderização). Demais canais ignoram;
+        # expira sozinho se não for consumido.
+        try:
+            set_pending_action(user_id, "delete_credit_purchase", {"tx_id": int(tx_id)})
+        except Exception:
+            pass
         return _format_credit_purchase_success(card_label, float(valor), purchased_at, float(due), int(tx_id))
     except Exception as e:
         return f"❌ Erro registrando compra no crédito: {e}"

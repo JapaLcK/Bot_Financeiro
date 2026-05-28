@@ -62,6 +62,7 @@ WA_DAILY_REPORT_DISABLE_ID = "daily_report_disable"
 WA_RECAT_BUTTON_PREFIX = "recat:"          # botão pós-lançamento
 WA_RECAT_PICK_PREFIX = "recatpick:"        # item da lista de categorias
 WA_RECAT_OTHER_PREFIX = "recatother:"      # opção "outra (digitar)"
+WA_DELETE_CC_PREFIX = "del_cc:"            # botão "Apagar" pós-compra no crédito
 WA_UPDATES_DISABLE_IDS = {
     "parar atualizações",
     "parar atualizacoes",
@@ -225,6 +226,28 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
                 return
             except Exception as exc:
                 logger.warning("WA send recategorize list failed, fallback texto: %s", exc)
+
+    # Botão "Apagar" pós-compra no crédito (one-shot, igual ao undo de áudio)
+    elif pending and pending.get("action_type") == "delete_credit_purchase":
+        tx_id = (pending.get("payload") or {}).get("tx_id")
+        if user_id is not None:
+            try:
+                clear_pending_action(int(user_id))
+            except Exception as exc:
+                logger.warning("WA clear delete_credit_purchase pending failed: %s", exc)
+        if tx_id:
+            cid = int(tx_id)
+            logger.info("WA sending credit delete button to=%s tx_id=%s", to_wa_id, cid)
+            try:
+                send_interactive_buttons(
+                    to=to_wa_id,
+                    body=body,
+                    buttons=[{"id": f"{WA_DELETE_CC_PREFIX}{cid}", "title": "🗑️ Apagar"}],
+                    footer="Errou? Toque pra apagar essa compra",
+                )
+                return
+            except Exception as exc:
+                logger.warning("WA send credit delete button failed, fallback texto: %s", exc)
 
     elif _pending_supports_confirmation_buttons(pending):
         logger.info("WA sending interactive confirmation buttons to=%s", to_wa_id)
@@ -600,6 +623,25 @@ def process_message(message: InboundMessage) -> None:
                         _send_reply(reply_to, "Não consegui preparar o desfazer agora. Tente em instantes.")
                         return
                     _send_reply_with_optional_buttons(reply_to, body, user_id=uid)
+                return
+
+            # Botão "🗑️ Apagar" da confirmação de compra no crédito.
+            # Reusa o comando textual "apagar CCnn" — mesmo delete, mesma msg.
+            if interactive_id.startswith(WA_DELETE_CC_PREFIX):
+                try:
+                    tx_id = int(interactive_id[len(WA_DELETE_CC_PREFIX):])
+                except ValueError:
+                    tx_id = 0
+                logger.info("WA credit delete button clicked wa_id=%s tx=%s", reply_to, tx_id)
+                if tx_id:
+                    from core.handlers import credit as h_credit
+                    try:
+                        body = h_credit.handle(uid, f"apagar CC{tx_id}")
+                    except Exception as exc:
+                        logger.exception("WA credit delete failed tx=%s: %s", tx_id, exc)
+                        _send_reply(reply_to, "Não consegui apagar essa compra agora. Tente em instantes.")
+                        return
+                    _send_reply(reply_to, body or f"Não achei a compra CC{tx_id}.")
                 return
 
             # Botão de desfazer áudio (legado: undo do último lançamento)
