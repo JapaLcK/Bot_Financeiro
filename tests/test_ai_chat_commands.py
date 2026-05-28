@@ -1,13 +1,17 @@
 """
-Cobre o roteamento de `core/services/ai_chat_commands.handle_ai_chat_command`,
-incluindo o comportamento da Sprint 3: Pro user não precisa mais de prefix
-"piggy/pergunta/ia" — toda mensagem cai na IA.
+Cobre o roteamento de `core/services/ai_chat_commands.handle_ai_chat_command`.
+
+Comandos determinísticos têm precedência sobre a IA: um user Pro sem prefix
+"piggy/pergunta/ia" e sem pending da IA recebe None aqui, pra que o
+classify/route trate o comando (saldo, listar, "apagar CC17"). A IA só entra
+quando há prefix explícito, pending da IA, ou pelo fallback de baixa confiança
+em handle_incoming.
 
 Estrutura dos cenários:
   - Free sem prefix → None (segue fluxo tradicional)
   - Free com prefix → gate "PigBank+"
   - Free com pending → gate + limpa pending
-  - Pro sem prefix → IA é chamada com texto cru
+  - Pro sem prefix → None (comando determinístico tem precedência)
   - Pro com prefix → IA é chamada com o prefix removido
   - Pro com pending → IA é chamada
   - Texto vazio → None
@@ -118,26 +122,27 @@ def test_free_com_pending_recebe_gate_e_limpa_pending(patches):
     assert patches["ai_called_with"] is None
 
 
-# ─── Pro sem prefix → IA com texto cru (Sprint 3) ───────────────────────────
+# ─── Pro sem prefix → None (comando determinístico tem precedência) ──────────
 
 
-def test_pro_sem_prefix_chama_ia_com_texto_cru(patches):
+def test_pro_sem_prefix_retorna_none_deixa_classifier_rodar(patches):
+    # Pro sem prefix e sem pending: não interceptamos aqui. Devolve None pra
+    # que o comando determinístico (saldo→balance.check) rode pelo route().
+    # A IA só entra no fallback de handle_incoming se o classifier falhar.
     patches["is_pro"] = True
     out = mod.handle_ai_chat_command(42, "saldo", platform="whatsapp")
-    assert out == "🐷 IA disse: saldo"
-    assert patches["ai_called_with"] == {
-        "user_id": 42,
-        "text": "saldo",
-        "platform": "whatsapp",
-    }
+    assert out is None
+    assert patches["ai_called_with"] is None
 
 
-def test_pro_msg_complexa_sem_prefix_chama_ia(patches):
+def test_pro_msg_complexa_sem_prefix_tambem_retorna_none(patches):
+    # Mesmo uma pergunta solta sem prefix devolve None aqui — o roteamento
+    # pra IA acontece no fallback de baixa confiança em handle_incoming, não
+    # neste gate.
     patches["is_pro"] = True
     out = mod.handle_ai_chat_command(42, "quanto gastei em alimentação esse mês?", platform="discord")
-    assert "IA disse" in out
-    assert patches["ai_called_with"]["text"] == "quanto gastei em alimentação esse mês?"
-    assert patches["ai_called_with"]["platform"] == "discord"
+    assert out is None
+    assert patches["ai_called_with"] is None
 
 
 # ─── Pro com prefix → prefix é removido ─────────────────────────────────────
@@ -194,7 +199,8 @@ def test_pro_com_pending_e_prefix_remove_prefix(patches):
 def test_ia_falha_retorna_mensagem_de_erro_padrao(patches):
     patches["is_pro"] = True
     patches["ai_raises"] = True
-    out = mod.handle_ai_chat_command(42, "saldo", platform="whatsapp")
+    # Prefix força o caminho da IA, que aqui está mockada pra falhar.
+    out = mod.handle_ai_chat_command(42, "piggy saldo", platform="whatsapp")
     assert out is not None
     assert "🐷" in out
     assert "ruim" in out.lower() or "suporte" in out.lower()
@@ -208,6 +214,6 @@ def test_pending_action_check_falha_continua_como_sem_pending(patches, monkeypat
 
     monkeypatch.setattr(mod.db, "ai_get_pending_action", boom)
 
-    out = mod.handle_ai_chat_command(42, "saldo", platform="whatsapp")
-    # IA continua sendo chamada — a falha no pending é só warning
+    # Com prefix, a IA é chamada normalmente apesar da falha no check de pending.
+    out = mod.handle_ai_chat_command(42, "piggy saldo", platform="whatsapp")
     assert out == "🐷 IA disse: saldo"

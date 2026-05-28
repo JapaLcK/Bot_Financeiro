@@ -4,9 +4,12 @@ core/services/ai_chat_commands.py — handler do comando "pergunta" no bot.
 Roteamento:
   - Se há pending action no DB (write esperando confirmação) → toda mensagem
     do user é roteada pra IA, que decide se executa/cancela/descarta.
-  - Senão, se o user é **Pro** → toda mensagem vai pra IA (Sprint 3). O
-    prefix "piggy"/"pergunta"/"ia" continua aceito mas é opcional — se
-    presente, é removido pra não poluir o input da IA.
+  - Senão, se o user é **Pro**:
+      • com prefix "piggy"/"pergunta"/"ia" → vai pra IA (prefix removido).
+      • sem prefix → retorna None: os comandos determinísticos (saldo,
+        listar, "apagar CC17", etc.) rodam pelo classify/route. A IA ainda
+        cobre frases que o classifier não reconhece, via o fallback de baixa
+        confiança em handle_incoming.
   - Senão (Free), só roteia pra IA se o texto começa com prefixo. Aí cai
     no gate Pro com mensagem "isso é PigBank+".
   - Senão → retorna None (segue o fluxo normal do bot tradicional).
@@ -77,7 +80,8 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
 
     Roteamento:
       1. Tem pending action → toda msg vai pra IA (mesmo sem prefixo).
-      2. User é Pro → toda msg vai pra IA, prefix opcional (Sprint 3).
+      2. User é Pro + prefixo → vai pra IA. Pro sem prefixo → None (comandos
+         determinísticos têm precedência; a IA cobre o resto via fallback).
       3. User é Free + msg começa com prefixo → cai no gate "isso é PigBank+".
       4. Senão (Free sem prefixo) → None (segue fluxo tradicional do bot).
     """
@@ -112,15 +116,19 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
         else:
             user_message = text
     elif user_is_pro:
-        # Pro sem pending: toda msg vai pra IA. Se tem prefix "piggy", remove
-        # pra IA não receber "piggy saldo" — recebe "saldo".
+        # Pro sem pending. O prefix "piggy"/"ia"/"pergunta" é o sinal explícito
+        # de que o user quer falar com a IA — só nesse caso interceptamos aqui.
+        # Sem prefix, devolvemos None pra deixar os comandos determinísticos
+        # (saldo, listar lançamentos, "apagar CC17", etc.) rodarem pelo
+        # classify/route. A IA ainda cobre o que o classifier não reconhecer,
+        # via o fallback de baixa confiança em handle_incoming.
         stripped = _strip_ai_prefix(text)
         if stripped is not None:
             # Prefix presente: usa o resto (mesmo se vazio — "piggy" sozinho
             # vira saudação ambígua tratada pela IA).
             user_message = stripped or text
         else:
-            user_message = text
+            return None
     else:
         # Free sem pending: prefix obrigatório pra cair no gate Pro.
         stripped = _strip_ai_prefix(text)
