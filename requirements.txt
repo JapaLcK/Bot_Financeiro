@@ -61,3 +61,5 @@ stripe>=8.0.0
 resend
 pyotp>=2.9.0
 qrcode>=8.0
+reportlab==4.5.0
+pillow==12.2.0

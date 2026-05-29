@@ -12,7 +12,7 @@ Endpoints:
   GET  /budgets/{user_id}       → list budgets
   POST /budgets/{user_id}       → set budget {categoria, budget}
   DEL  /budgets/{user_id}/{cat} → delete budget
-  GET  /export/{user_id}        → CSV download (query: year, month)
+  POST /export/{user_id}        → envia extrato (PDF+XLSX+CSV) p/ email (query: year, month)
   WS   /ws/{user_id}            → real-time updates
 """
 
@@ -739,7 +739,8 @@ async def get_monthly_history(user_id: int, n_months: int = 6) -> list:
 
 # ─── CSV export ──────────────────────────────────────────────────────────────
 
-async def build_csv(user_id: int, year: int, month: int) -> str | None:
+async def _fetch_export_rows(user_id: int, year: int, month: int) -> list[dict]:
+    """Lançamentos do mês p/ export (CSV e PDF compartilham a mesma fonte)."""
     month_start, month_end = _month_range(year, month)
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
@@ -753,8 +754,11 @@ async def build_csv(user_id: int, year: int, month: int) -> str | None:
                 """,
                 (user_id, month_start, month_end),
             )
-            rows = await cur.fetchall()
+            return await cur.fetchall()
 
+
+async def build_csv(user_id: int, year: int, month: int) -> str | None:
+    rows = await _fetch_export_rows(user_id, year, month)
     if not rows:
         return None
 
@@ -771,6 +775,257 @@ async def build_csv(user_id: int, year: int, month: int) -> str | None:
             r["categoria"] or "",
         ])
     return buf.getvalue()
+
+
+_MESES_PT = [
+    "", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+]
+
+
+def _export_summary(rows: list[dict]) -> dict:
+    """Agrega receitas, despesas, saldo e totais de despesa por categoria."""
+    from collections import defaultdict
+    receitas = sum(float(r["valor"]) for r in rows if r["tipo"] == "receita")
+    despesas = sum(float(r["valor"]) for r in rows if r["tipo"] == "despesa")
+    by_cat: dict[str, float] = defaultdict(float)
+    for r in rows:
+        if r["tipo"] == "despesa":
+            by_cat[r["categoria"] or "sem categoria"] += float(r["valor"])
+    cats = sorted(by_cat.items(), key=lambda kv: kv[1], reverse=True)
+    return {
+        "receitas": receitas,
+        "despesas": despesas,
+        "saldo": receitas - despesas,
+        "by_category": cats,
+        "count": len(rows),
+    }
+
+
+async def build_xlsx(user_id: int, year: int, month: int) -> bytes | None:
+    rows = await _fetch_export_rows(user_id, year, month)
+    if not rows:
+        return None
+    return await asyncio.to_thread(_render_xlsx, rows)
+
+
+def _render_xlsx(rows: list[dict]) -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+
+    BRAND = "2563EB"   # azul PigBank (mesma cor do PDF)
+    ZEBRA = "EFF6FF"   # azul bem claro
+    POS   = "16A34A"   # verde — receita
+    NEG   = "DC2626"   # vermelho — despesa
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Lançamentos"
+    ws.append(["Data", "Tipo", "Valor", "Alvo", "Nota", "Categoria"])
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor=BRAND)
+        cell.alignment = Alignment(vertical="center")
+
+    for idx, r in enumerate(rows, start=2):
+        is_rec = r["tipo"] == "receita"
+        ws.append([
+            r["criado_em"].strftime("%d/%m/%Y %H:%M") if r["criado_em"] else "",
+            r["tipo"].capitalize(),
+            round(float(r["valor"]), 2),
+            r["alvo"] or "",
+            r["nota"] or "",
+            r["categoria"] or "",
+        ])
+        ws.cell(row=idx, column=2).font = Font(bold=True, color=POS if is_rec else NEG)
+        ws.cell(row=idx, column=3).number_format = '"R$" #,##0.00'
+        if idx % 2 == 0:
+            for col in range(1, 7):
+                ws.cell(row=idx, column=col).fill = PatternFill("solid", fgColor=ZEBRA)
+
+    for i, width in enumerate((18, 11, 14, 26, 32, 16), start=1):
+        ws.column_dimensions[get_column_letter(i)].width = width
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:F{len(rows) + 1}"
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
+
+
+async def build_pdf(user_id: int, year: int, month: int) -> bytes | None:
+    rows = await _fetch_export_rows(user_id, year, month)
+    if not rows:
+        return None
+    return await asyncio.to_thread(_render_pdf, rows, year, month)
+
+
+def _render_pdf(rows: list[dict], year: int, month: int) -> bytes:
+    from datetime import datetime as _dt
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.graphics.shapes import Drawing, Rect
+    from utils_text import fmt_brl
+
+    # Paleta "Azul PigBank" (sai do roxo cara-de-Nubank)
+    BRAND    = colors.HexColor("#2563EB")
+    BRAND_D  = colors.HexColor("#1E40AF")
+    POS      = colors.HexColor("#16A34A")
+    NEG      = colors.HexColor("#DC2626")
+    INK      = colors.HexColor("#1E293B")
+    MUTED    = colors.HexColor("#64748B")
+    LINE     = colors.HexColor("#E2E8F0")
+    ZEBRA    = colors.HexColor("#EFF6FF")
+    POS_BG   = colors.HexColor("#ECFDF5")
+    NEG_BG   = colors.HexColor("#FEF2F2")
+    BRAND_BG = colors.HexColor("#EFF6FF")
+    BAR_BG   = colors.HexColor("#E2E8F0")
+    HEAD_SUB = colors.HexColor("#DBEAFE")
+
+    base = getSampleStyleSheet()
+
+    def par(text, size=9, color=INK, bold=False, align=TA_LEFT):
+        return Paragraph(str(text), ParagraphStyle(
+            "p", parent=base["Normal"],
+            fontName="Helvetica-Bold" if bold else "Helvetica",
+            fontSize=size, textColor=color, alignment=align, leading=size + 3,
+        ))
+
+    summary = _export_summary(rows)
+    bio = io.BytesIO()
+    doc = SimpleDocTemplate(
+        bio, pagesize=A4,
+        topMargin=14 * mm, bottomMargin=15 * mm, leftMargin=15 * mm, rightMargin=15 * mm,
+        title=f"Extrato {_MESES_PT[month]}/{year}", author="PigBank AI",
+    )
+    W = doc.width
+    el = []
+
+    # ── Banner ───────────────────────────────────────────────────────────
+    banner = Table(
+        [[par("PigBank AI", 22, colors.white, bold=True)],
+         [par(f"Extrato de {_MESES_PT[month]} de {year}", 11, HEAD_SUB)]],
+        colWidths=[W],
+    )
+    banner.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), BRAND),
+        ("LEFTPADDING", (0, 0), (-1, -1), 18),
+        ("TOPPADDING", (0, 0), (0, 0), 16),
+        ("BOTTOMPADDING", (0, 0), (0, 0), 1),
+        ("TOPPADDING", (0, 1), (0, 1), 0),
+        ("BOTTOMPADDING", (0, 1), (0, 1), 16),
+    ]))
+    el.append(banner)
+    el.append(Spacer(1, 16))
+
+    # ── Cards de resumo (Receitas | Despesas | Saldo) ────────────────────
+    gap = 10
+    card_w = (W - 2 * gap) / 3.0
+    saldo_color = POS if summary["saldo"] >= 0 else NEG
+    kpi = Table(
+        [[par("RECEITAS", 8, MUTED, bold=True), "", par("DESPESAS", 8, MUTED, bold=True), "", par("SALDO", 8, MUTED, bold=True)],
+         [par(fmt_brl(summary["receitas"]), 15, POS, bold=True), "",
+          par(fmt_brl(summary["despesas"]), 15, NEG, bold=True), "",
+          par(fmt_brl(summary["saldo"]), 15, saldo_color, bold=True)]],
+        colWidths=[card_w, gap, card_w, gap, card_w],
+    )
+    kpi.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, 1), POS_BG),
+        ("BACKGROUND", (2, 0), (2, 1), NEG_BG),
+        ("BACKGROUND", (4, 0), (4, 1), BRAND_BG),
+        ("LEFTPADDING", (0, 0), (-1, -1), 12),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+        ("TOPPADDING", (0, 0), (-1, 0), 12),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 2),
+        ("TOPPADDING", (0, 1), (-1, 1), 0),
+        ("BOTTOMPADDING", (0, 1), (-1, 1), 12),
+        ("LEFTPADDING", (1, 0), (1, -1), 0), ("RIGHTPADDING", (1, 0), (1, -1), 0),
+        ("LEFTPADDING", (3, 0), (3, -1), 0), ("RIGHTPADDING", (3, 0), (3, -1), 0),
+    ]))
+    el.append(kpi)
+
+    # ── Despesas por categoria (com barra de proporção) ──────────────────
+    if summary["by_category"]:
+        el.append(Spacer(1, 20))
+        el.append(par("Despesas por categoria", 13, BRAND_D, bold=True))
+        el.append(Spacer(1, 7))
+        total_desp = summary["despesas"] or 1.0
+        bar_w = W * 0.26
+
+        def make_bar(frac):
+            d = Drawing(bar_w, 9)
+            d.add(Rect(0, 0, bar_w, 9, fillColor=BAR_BG, strokeColor=None))
+            d.add(Rect(0, 0, max(3.0, bar_w * min(frac, 1.0)), 9, fillColor=BRAND, strokeColor=None))
+            d.hAlign = "LEFT"
+            return d
+
+        cat_data = []
+        for cat, total in summary["by_category"]:
+            frac = float(total) / total_desp
+            cat_data.append([
+                par(cat, 9, INK),
+                make_bar(frac),
+                par(f"{fmt_brl(total)}  ({frac * 100:.0f}%)", 9, MUTED, align=TA_RIGHT),
+            ])
+        cat_table = Table(cat_data, colWidths=[W * 0.36, W * 0.30, W * 0.34])
+        cat_table.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LINEBELOW", (0, 0), (-1, -1), 0.5, LINE),
+            ("TOPPADDING", (0, 0), (-1, -1), 7),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+            ("LEFTPADDING", (1, 0), (1, -1), 6),
+            ("RIGHTPADDING", (1, 0), (1, -1), 10),
+        ]))
+        el.append(cat_table)
+
+    # ── Lançamentos ──────────────────────────────────────────────────────
+    el.append(Spacer(1, 20))
+    el.append(par("Lançamentos", 13, BRAND_D, bold=True))
+    el.append(Spacer(1, 7))
+    head = [par(h, 8, colors.white, bold=True, align=(TA_RIGHT if h == "Valor" else TA_LEFT))
+            for h in ("Data", "Tipo", "Categoria", "Descrição", "Valor")]
+    lanc_rows = [head]
+    for r in rows:
+        is_rec = r["tipo"] == "receita"
+        tcolor = POS if is_rec else NEG
+        sign   = "+" if is_rec else "-"
+        desc   = (r["alvo"] or r["nota"] or "")[:55]
+        lanc_rows.append([
+            par(r["criado_em"].strftime("%d/%m %H:%M") if r["criado_em"] else "", 8, MUTED),
+            par(r["tipo"].capitalize(), 8, tcolor, bold=True),
+            par(r["categoria"] or "-", 8, INK),
+            par(desc, 8, INK),
+            par(f"{sign} {fmt_brl(float(r['valor']))}", 8, tcolor, bold=True, align=TA_RIGHT),
+        ])
+    lanc = Table(
+        lanc_rows,
+        colWidths=[W * 0.14, W * 0.13, W * 0.20, W * 0.38, W * 0.15],
+        repeatRows=1,
+    )
+    lanc.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), BRAND),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, ZEBRA]),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    el.append(lanc)
+
+    el.append(Spacer(1, 16))
+    el.append(par(
+        f"Gerado em {_dt.now().strftime('%d/%m/%Y às %H:%M')}  •  pigbankai.com  •  {summary['count']} lançamentos",
+        8, MUTED, align=TA_CENTER,
+    ))
+
+    doc.build(el)
+    return bio.getvalue()
 
 # ─── Connection manager ───────────────────────────────────────────────────────
 
@@ -5249,25 +5504,75 @@ async def ofx_import_route(request: Request, user_id: int):
     return {"ok": True, "type": ofx_type, "message": message}
 
 
-@app.get("/export/{user_id}")
-async def export_csv(request: Request, user_id: int, year: int = None, month: int = None):
+def _mask_email(email: str) -> str:
+    local, _, domain = (email or "").partition("@")
+    if not domain:
+        return "seu email"
+    return f"{local[:1]}***@{domain}"
+
+
+@app.post("/export/{user_id}")
+async def export_email(request: Request, user_id: int, year: int = None, month: int = None):
+    """Gera o extrato do mês (PDF + XLSX + CSV) e envia pro email cadastrado."""
     _authorize_dashboard_access(request, user_id)
     _require_pro(user_id, "export")
     now = datetime.now(timezone.utc)
     y = year  or now.year
     m = month or now.month
-    content  = await build_csv(user_id, y, m)
-    if content is None:
+
+    csv_content = await build_csv(user_id, y, m)
+    if csv_content is None:
         raise HTTPException(
             status_code=404,
             detail="Nenhum lançamento encontrado neste mês para exportar.",
         )
-    filename = f"financas_{y:04d}_{m:02d}.csv"
-    return StreamingResponse(
-        iter([content]),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    xlsx_bytes = await build_xlsx(user_id, y, m)
+    pdf_bytes  = await build_pdf(user_id, y, m)
+
+    from db.privacy import get_user_email
+    to_email = await asyncio.to_thread(get_user_email, user_id)
+    if not to_email:
+        raise HTTPException(
+            status_code=400,
+            detail="Você não tem um email cadastrado para receber o extrato.",
+        )
+
+    import base64
+    tag = f"{y:04d}_{m:02d}"
+    attachments = [
+        {"filename": f"extrato_{tag}.pdf",   "content": base64.b64encode(pdf_bytes).decode(),
+         "content_type": "application/pdf"},
+        {"filename": f"financas_{tag}.xlsx", "content": base64.b64encode(xlsx_bytes).decode(),
+         "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+        {"filename": f"financas_{tag}.csv",  "content": base64.b64encode(csv_content.encode("utf-8")).decode(),
+         "content_type": "text/csv"},
+    ]
+
+    mes_label = f"{_MESES_PT[m]} de {y}"
+    subject = f"Seu extrato PigBank — {mes_label}"
+    from core.services.email_service import send_email, _base_html
+    inner = (
+        "<p>Oi! 🐷</p>"
+        f"<p>Segue em anexo o seu extrato de <strong>{mes_label}</strong>:</p>"
+        "<ul>"
+        "<li><strong>PDF</strong> — resumo pra ler ou imprimir</li>"
+        "<li><strong>XLSX / CSV</strong> — pra abrir em planilha</li>"
+        "</ul>"
+        "<p>Qualquer dúvida, fala com a gente em "
+        "<a href=\"mailto:suporte@pigbankai.com\">suporte@pigbankai.com</a>.</p>"
     )
+    html = _base_html(subject, inner)
+
+    ok = await asyncio.to_thread(
+        send_email, to_email, subject, html, attachments=attachments
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=502,
+            detail="Não consegui enviar o email agora. Tente novamente em instantes.",
+        )
+
+    return {"ok": True, "email": _mask_email(to_email)}
 
 # ─── Budget routes ────────────────────────────────────────────────────────────
 

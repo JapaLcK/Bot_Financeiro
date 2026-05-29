@@ -47,8 +47,13 @@ def send_email(
     text_body: Optional[str] = None,
     from_addr: Optional[str] = None,
     headers: Optional[dict] = None,
+    attachments: Optional[list] = None,
 ) -> bool:
-    """Envia e-mail via Resend API. Retorna True em sucesso, nunca lança exceção."""
+    """Envia e-mail via Resend API. Retorna True em sucesso, nunca lança exceção.
+
+    attachments: lista no formato Resend, ex:
+    [{"filename": "x.pdf", "content": <base64 str>, "content_type": "application/pdf"}].
+    """
     api_key = os.getenv("RESEND_API_KEY", "")
     if not api_key:
         logger.warning("Resend não configurado (RESEND_API_KEY ausente). E-mail para <%s> não enviado.", to)
@@ -71,6 +76,8 @@ def send_email(
                 params["reply_to"] = reply_to
             if hdrs:
                 params["headers"] = hdrs
+        if attachments:
+            params["attachments"] = attachments
         resend.Emails.send(params)
         logger.info("E-mail enviado para <%s>: %s", to, subject)
         _log_email_event("info", "email_sent", f"E-mail enviado para {to}", to=to, subject=subject)

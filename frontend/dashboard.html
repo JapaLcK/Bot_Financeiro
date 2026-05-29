@@ -1600,6 +1600,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
   transition:all .35s var(--ease);
 }
 .modal-success-toast.show { opacity:1;transform:translateX(-50%) translateY(0); }
+.modal-success-toast.error { background:linear-gradient(135deg,#dc2626,#f87171); }
 
 /* ─── Bill modals (detalhe + pagar + comprovante) ─────────────────────── */
 .bill-balance-line {
@@ -1919,7 +1920,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
       <button class="hbtn" id="refresh-btn" onclick="sendRefresh()"><span id="ref-icon">↻</span> Atualizar</button>
       <button class="hbtn" data-pro-feature="ofx_import" onclick="openOfxImport()">⬇ Importar OFX</button>
       <input type="file" id="ofx-file-input" accept=".ofx" style="display:none" onchange="handleOfxFileSelected(event)" />
-      <button class="hbtn" data-pro-feature="export" onclick="exportCSV()">⬆ Exportar</button>
+      <button class="hbtn" data-pro-feature="export" onclick="exportToEmail()">📧 Exportar</button>
       <div class="user-menu" id="user-menu">
         <button class="hbtn user-menu-btn" id="user-menu-btn" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleUserMenu(event)">
           <span class="user-menu-main">
@@ -7282,7 +7283,7 @@ function isProUser() {
 
 const UPGRADE_MESSAGES = {
   investments: "Acompanhe sua carteira de investimentos com cálculo automático de rendimento, IR e IOF. Exclusivo do PigBank+.",
-  export: "Exportar seus lançamentos em CSV é uma feature do PigBank+.",
+  export: "Exportar seus lançamentos (PDF, planilha) por email é uma feature do PigBank+.",
   pockets_unlimited: "No Free você cria 1 caixinha. Com PigBank+ é ilimitado — separe sua reserva, viagens, presentes…",
   cards_unlimited: "No Free você cadastra 1 cartão. Com PigBank+ é ilimitado — controle todos os seus cartões em um lugar.",
   ofx_import: "Importar extrato bancário e fatura de cartão por OFX é exclusivo do PigBank+.",
@@ -8762,9 +8763,10 @@ function showLaunchError(msg) {
   el.classList.add("show");
 }
 
-function showLaunchSuccessToast(msg) {
+function showLaunchSuccessToast(msg, isError = false) {
   const t = document.getElementById("launch-success-toast");
   t.textContent = msg;
+  t.classList.toggle("error", !!isError);   // vermelho quando erro, verde no sucesso
   t.classList.add("show");
   setTimeout(() => t.classList.remove("show"), 2600);
 }
@@ -9813,30 +9815,23 @@ function getCsrfToken() {
   return m ? decodeURIComponent(m[1]) : "";
 }
 
-async function exportCSV() {
+async function exportToEmail() {
   const url = `${API}/export/${USER_ID}?year=${viewYear}&month=${viewMonth}`;
-  const filename = `financas_${viewYear}_${String(viewMonth).padStart(2,"0")}.csv`;
+  showLaunchSuccessToast("📧 Gerando e enviando o extrato…");
   try {
-    const resp = await fetch(url, { credentials: "same-origin" });
+    const resp = await fetch(url, { method: "POST", credentials: "same-origin" });
     if (resp.status === 404) {
-      showLaunchSuccessToast("Nenhum lançamento neste mês para exportar.");
+      showLaunchSuccessToast("Nenhum lançamento neste mês para exportar.", true);
       return;
     }
     if (!resp.ok) {
-      showLaunchSuccessToast("Erro ao exportar. Tente novamente.");
+      showLaunchSuccessToast("Não consegui enviar agora. Tente novamente.", true);
       return;
     }
-    const blob = await resp.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(blobUrl);
+    const data = await resp.json().catch(() => ({}));
+    showLaunchSuccessToast(`📧 Extrato enviado pro seu email ${data.email || "cadastrado"}.`);
   } catch (e) {
-    showLaunchSuccessToast("Erro ao exportar. Tente novamente.");
+    showLaunchSuccessToast("Não consegui enviar agora. Tente novamente.", true);
   }
 }
 
