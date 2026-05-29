@@ -875,10 +875,9 @@ async def build_csv(user_id: int, year: int, month: int) -> str | None:
 
 
 def _export_summary(items: list[dict]) -> dict:
-    """Receitas, despesas (conta + cartão), aportes, sobrou e despesas/categoria.
+    """Receitas, despesas (conta + cartão), aportes e despesas/categoria.
 
-    Sobrou = Receitas − Despesas − Aportes (mesma conta do resumo do dashboard;
-    'aportes' considera só as saídas pra investimento/caixinha)."""
+    'aportes' considera só as saídas pra investimento/caixinha."""
     from collections import defaultdict
     receitas = sum(it["valor"] for it in items if it["natureza"] == "receita")
     despesas = sum(it["valor"] for it in items if it["natureza"] == "despesa")
@@ -892,7 +891,6 @@ def _export_summary(items: list[dict]) -> dict:
         "receitas": receitas,
         "despesas": despesas,
         "aportes": aportes,
-        "sobrou": receitas - despesas - aportes,
         "by_category": cats,
         "count": len(items),
     }
@@ -957,10 +955,16 @@ async def build_pdf(user_id: int, year: int, month: int) -> bytes | None:
     items = await _fetch_export_items(user_id, year, month)
     if not items:
         return None
-    return await asyncio.to_thread(_render_pdf, items, year, month)
+    # Saldo atual da conta (não escopado ao mês) — mesmo número do card do dashboard.
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT balance FROM accounts WHERE user_id = %s", (user_id,))
+            row = await cur.fetchone()
+    balance = float(row["balance"]) if row else 0.0
+    return await asyncio.to_thread(_render_pdf, items, year, month, balance)
 
 
-def _render_pdf(items: list[dict], year: int, month: int) -> bytes:
+def _render_pdf(items: list[dict], year: int, month: int, balance: float = 0.0) -> bytes:
     from datetime import datetime as _dt
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
@@ -982,7 +986,6 @@ def _render_pdf(items: list[dict], year: int, month: int) -> bytes:
     ZEBRA    = colors.HexColor("#EFF6FF")
     POS_BG   = colors.HexColor("#ECFDF5")
     NEG_BG   = colors.HexColor("#FEF2F2")
-    BRAND_BG = colors.HexColor("#EFF6FF")
     BAR_BG   = colors.HexColor("#E2E8F0")
     HEAD_SUB = colors.HexColor("#DBEAFE")
 
@@ -1022,25 +1025,26 @@ def _render_pdf(items: list[dict], year: int, month: int) -> bytes:
     el.append(banner)
     el.append(Spacer(1, 16))
 
-    # ── Cards de resumo (Receitas | Despesas | Aportes | Sobrou) ─────────
+    # ── Cards de resumo (Receitas | Despesas | Saldo) ────────────────────
+    # Despesas = despesas + aportes (aporte é saída de caixa).
+    # Saldo = saldo atual da conta (≠ "sobrou do mês"); mesmo número do dashboard.
     gap = 8
-    card_w = (W - 3 * gap) / 4.0
-    SOBROU_BG = colors.HexColor("#F1F5F9")
-    sobrou_color = POS if summary["sobrou"] >= 0 else NEG
+    card_w = (W - 2 * gap) / 3.0
+    SALDO_BG = colors.HexColor("#F1F5F9")
+    saldo_color = POS if balance >= 0 else NEG
+    despesas_total = summary["despesas"] + summary["aportes"]
     kpi = Table(
         [[par("RECEITAS", 8, MUTED, bold=True), "", par("DESPESAS", 8, MUTED, bold=True), "",
-          par("APORTES", 8, MUTED, bold=True), "", par("SOBROU", 8, MUTED, bold=True)],
+          par("SALDO", 8, MUTED, bold=True)],
          [par(fmt_brl(summary["receitas"]), 13, POS, bold=True), "",
-          par(fmt_brl(summary["despesas"]), 13, NEG, bold=True), "",
-          par(fmt_brl(summary["aportes"]), 13, BRAND, bold=True), "",
-          par(fmt_brl(summary["sobrou"]), 13, sobrou_color, bold=True)]],
-        colWidths=[card_w, gap, card_w, gap, card_w, gap, card_w],
+          par(fmt_brl(despesas_total), 13, NEG, bold=True), "",
+          par(fmt_brl(balance), 13, saldo_color, bold=True)]],
+        colWidths=[card_w, gap, card_w, gap, card_w],
     )
     kpi.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (0, 1), POS_BG),
         ("BACKGROUND", (2, 0), (2, 1), NEG_BG),
-        ("BACKGROUND", (4, 0), (4, 1), BRAND_BG),
-        ("BACKGROUND", (6, 0), (6, 1), SOBROU_BG),
+        ("BACKGROUND", (4, 0), (4, 1), SALDO_BG),
         ("LEFTPADDING", (0, 0), (-1, -1), 10),
         ("RIGHTPADDING", (0, 0), (-1, -1), 10),
         ("TOPPADDING", (0, 0), (-1, 0), 11),
@@ -1049,7 +1053,6 @@ def _render_pdf(items: list[dict], year: int, month: int) -> bytes:
         ("BOTTOMPADDING", (0, 1), (-1, 1), 11),
         ("LEFTPADDING", (1, 0), (1, -1), 0), ("RIGHTPADDING", (1, 0), (1, -1), 0),
         ("LEFTPADDING", (3, 0), (3, -1), 0), ("RIGHTPADDING", (3, 0), (3, -1), 0),
-        ("LEFTPADDING", (5, 0), (5, -1), 0), ("RIGHTPADDING", (5, 0), (5, -1), 0),
     ]))
     el.append(kpi)
 
