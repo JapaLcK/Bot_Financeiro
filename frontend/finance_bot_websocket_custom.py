@@ -750,27 +750,38 @@ _EXPORT_DESPESA_TIPOS = {"despesa", "saida"}
 _EXPORT_RECEITA_TIPOS = {"receita", "entrada"}
 _EXPORT_APORTE_OUT    = {"aporte_investimento", "deposito_caixinha"}   # sai da conta
 _EXPORT_APORTE_IN     = {"resgate_investimento", "saque_caixinha"}     # volta pra conta
+_EXPORT_INVEST_CATS   = {"investimentos", "investimento_aporte", "criptomoedas"}
 _EXPORT_TIPO_LABEL = {
     "aporte_investimento": "Aporte", "deposito_caixinha": "Depósito",
     "resgate_investimento": "Resgate", "saque_caixinha": "Saque",
 }
 
 
-def _classify_launch(tipo: str, is_internal: bool):
+def _classify_launch(tipo: str, is_internal: bool, categoria: str = ""):
     """Retorna (natureza, sinal, label) ou None se a ação não entra no relatório.
 
-    Exclui ações não-monetárias (criar/deletar caixinha/investimento) e
-    movimentações que não são consumo nem alocação (saldo_inicial, ajuste,
-    pagamento_fatura — esta já contabilizada via credit_transactions)."""
+    natureza ∈ {despesa, receita, aporte}; sinal '+'/'-' = entrou/saiu na conta.
+    'aporte' cobre movimentações de investimento e caixinha (is_internal),
+    INCLUSIVE as registradas como tipo 'despesa'/'receita' com categoria de
+    investimento — mesma regra do resumo do dashboard. Exclui ações
+    não-monetárias (criar/deletar) e internas que não são aporte
+    (saldo_inicial, ajuste, pagamento_fatura — esta já entra via cartão)."""
     t = (tipo or "").lower()
-    if not is_internal and t in _EXPORT_DESPESA_TIPOS:
+    if is_internal:
+        cat_norm = (categoria or "").lower().replace(" ", "_")
+        if t in _EXPORT_APORTE_OUT:
+            return ("aporte", "-", _EXPORT_TIPO_LABEL[t])
+        if t in _EXPORT_APORTE_IN:
+            return ("aporte", "+", _EXPORT_TIPO_LABEL[t])
+        if cat_norm in _EXPORT_INVEST_CATS:
+            if t in _EXPORT_RECEITA_TIPOS:
+                return ("aporte", "+", "Resgate")
+            return ("aporte", "-", "Aporte")
+        return None   # demais movimentações internas ficam de fora
+    if t in _EXPORT_DESPESA_TIPOS:
         return ("despesa", "-", "Despesa")
-    if not is_internal and t in _EXPORT_RECEITA_TIPOS:
+    if t in _EXPORT_RECEITA_TIPOS:
         return ("receita", "+", "Receita")
-    if t in _EXPORT_APORTE_OUT:
-        return ("aporte", "-", _EXPORT_TIPO_LABEL[t])
-    if t in _EXPORT_APORTE_IN:
-        return ("aporte", "+", _EXPORT_TIPO_LABEL[t])
     return None
 
 
@@ -800,7 +811,7 @@ async def _fetch_export_items(user_id: int, year: int, month: int) -> list[dict]
                 (user_id, month_start, month_end),
             )
             for r in await cur.fetchall():
-                cls = _classify_launch(r["tipo"], r.get("is_internal_movement"))
+                cls = _classify_launch(r["tipo"], r.get("is_internal_movement"), r.get("categoria"))
                 if not cls:
                     continue
                 natureza, sign, label = cls
@@ -864,10 +875,14 @@ async def build_csv(user_id: int, year: int, month: int) -> str | None:
 
 
 def _export_summary(items: list[dict]) -> dict:
-    """Receitas, despesas (conta + cartão), saldo e despesas por categoria."""
+    """Receitas, despesas (conta + cartão), aportes, sobrou e despesas/categoria.
+
+    Sobrou = Receitas − Despesas − Aportes (mesma conta do resumo do dashboard;
+    'aportes' considera só as saídas pra investimento/caixinha)."""
     from collections import defaultdict
     receitas = sum(it["valor"] for it in items if it["natureza"] == "receita")
     despesas = sum(it["valor"] for it in items if it["natureza"] == "despesa")
+    aportes  = sum(it["valor"] for it in items if it["natureza"] == "aporte" and it["sign"] == "-")
     by_cat: dict[str, float] = defaultdict(float)
     for it in items:
         if it["natureza"] == "despesa":
@@ -876,7 +891,8 @@ def _export_summary(items: list[dict]) -> dict:
     return {
         "receitas": receitas,
         "despesas": despesas,
-        "saldo": receitas - despesas,
+        "aportes": aportes,
+        "sobrou": receitas - despesas - aportes,
         "by_category": cats,
         "count": len(items),
     }
@@ -1006,29 +1022,34 @@ def _render_pdf(items: list[dict], year: int, month: int) -> bytes:
     el.append(banner)
     el.append(Spacer(1, 16))
 
-    # ── Cards de resumo (Receitas | Despesas | Saldo) ────────────────────
-    gap = 10
-    card_w = (W - 2 * gap) / 3.0
-    saldo_color = POS if summary["saldo"] >= 0 else NEG
+    # ── Cards de resumo (Receitas | Despesas | Aportes | Sobrou) ─────────
+    gap = 8
+    card_w = (W - 3 * gap) / 4.0
+    SOBROU_BG = colors.HexColor("#F1F5F9")
+    sobrou_color = POS if summary["sobrou"] >= 0 else NEG
     kpi = Table(
-        [[par("RECEITAS", 8, MUTED, bold=True), "", par("DESPESAS", 8, MUTED, bold=True), "", par("SALDO", 8, MUTED, bold=True)],
-         [par(fmt_brl(summary["receitas"]), 15, POS, bold=True), "",
-          par(fmt_brl(summary["despesas"]), 15, NEG, bold=True), "",
-          par(fmt_brl(summary["saldo"]), 15, saldo_color, bold=True)]],
-        colWidths=[card_w, gap, card_w, gap, card_w],
+        [[par("RECEITAS", 8, MUTED, bold=True), "", par("DESPESAS", 8, MUTED, bold=True), "",
+          par("APORTES", 8, MUTED, bold=True), "", par("SOBROU", 8, MUTED, bold=True)],
+         [par(fmt_brl(summary["receitas"]), 13, POS, bold=True), "",
+          par(fmt_brl(summary["despesas"]), 13, NEG, bold=True), "",
+          par(fmt_brl(summary["aportes"]), 13, BRAND, bold=True), "",
+          par(fmt_brl(summary["sobrou"]), 13, sobrou_color, bold=True)]],
+        colWidths=[card_w, gap, card_w, gap, card_w, gap, card_w],
     )
     kpi.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (0, 1), POS_BG),
         ("BACKGROUND", (2, 0), (2, 1), NEG_BG),
         ("BACKGROUND", (4, 0), (4, 1), BRAND_BG),
-        ("LEFTPADDING", (0, 0), (-1, -1), 12),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 12),
-        ("TOPPADDING", (0, 0), (-1, 0), 12),
+        ("BACKGROUND", (6, 0), (6, 1), SOBROU_BG),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, 0), 11),
         ("BOTTOMPADDING", (0, 0), (-1, 0), 2),
         ("TOPPADDING", (0, 1), (-1, 1), 0),
-        ("BOTTOMPADDING", (0, 1), (-1, 1), 12),
+        ("BOTTOMPADDING", (0, 1), (-1, 1), 11),
         ("LEFTPADDING", (1, 0), (1, -1), 0), ("RIGHTPADDING", (1, 0), (1, -1), 0),
         ("LEFTPADDING", (3, 0), (3, -1), 0), ("RIGHTPADDING", (3, 0), (3, -1), 0),
+        ("LEFTPADDING", (5, 0), (5, -1), 0), ("RIGHTPADDING", (5, 0), (5, -1), 0),
     ]))
     el.append(kpi)
 
