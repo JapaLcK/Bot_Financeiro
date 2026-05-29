@@ -19,6 +19,8 @@ import frontend.finance_bot_websocket_custom as app_mod
 def _no_auth(monkeypatch):
     monkeypatch.setattr(app_mod, "_authorize_dashboard_access", lambda req, user_id: None)
     monkeypatch.setattr(app_mod, "_require_pro", lambda user_id, feature: None)
+    # chamamos export_email direto (sem Request HTTP); desliga o rate-limit do slowapi
+    monkeypatch.setattr(app_mod.limiter, "enabled", False)
 
 
 @pytest.fixture

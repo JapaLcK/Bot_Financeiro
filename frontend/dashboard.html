@@ -9824,6 +9824,10 @@ async function exportToEmail() {
       showLaunchSuccessToast("Nenhum lançamento neste mês para exportar.", true);
       return;
     }
+    if (resp.status === 429) {
+      showLaunchSuccessToast("Você exportou agora há pouco. Aguarde um instante e tente de novo.", true);
+      return;
+    }
     if (!resp.ok) {
       showLaunchSuccessToast("Não consegui enviar agora. Tente novamente.", true);
       return;

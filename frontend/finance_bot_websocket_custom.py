@@ -739,115 +739,198 @@ async def get_monthly_history(user_id: int, n_months: int = 6) -> list:
 
 # ─── CSV export ──────────────────────────────────────────────────────────────
 
-async def _fetch_export_rows(user_id: int, year: int, month: int) -> list[dict]:
-    """Lançamentos do mês p/ export (CSV e PDF compartilham a mesma fonte)."""
-    month_start, month_end = _month_range(year, month)
-    async with await db_connect() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                """
-                SELECT tipo, valor, alvo, nota, categoria, criado_em
-                FROM launches
-                WHERE user_id = %s
-                  AND criado_em >= %s AND criado_em < %s
-                ORDER BY criado_em DESC
-                """,
-                (user_id, month_start, month_end),
-            )
-            return await cur.fetchall()
-
-
-async def build_csv(user_id: int, year: int, month: int) -> str | None:
-    rows = await _fetch_export_rows(user_id, year, month)
-    if not rows:
-        return None
-
-    buf = io.StringIO()
-    w   = csv.writer(buf)
-    w.writerow(["data", "tipo", "valor", "alvo", "nota", "categoria"])
-    for r in rows:
-        w.writerow([
-            r["criado_em"].strftime("%Y-%m-%d %H:%M") if r["criado_em"] else "",
-            r["tipo"],
-            f"{float(r['valor']):.2f}",
-            r["alvo"]      or "",
-            r["nota"]      or "",
-            r["categoria"] or "",
-        ])
-    return buf.getvalue()
-
-
 _MESES_PT = [
     "", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
     "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
 ]
 
+# Classificação por natureza (alinha com o resumo do dashboard). A natureza
+# define a cor no relatório: despesa→vermelho, receita→verde, aporte→azul.
+_EXPORT_DESPESA_TIPOS = {"despesa", "saida"}
+_EXPORT_RECEITA_TIPOS = {"receita", "entrada"}
+_EXPORT_APORTE_OUT    = {"aporte_investimento", "deposito_caixinha"}   # sai da conta
+_EXPORT_APORTE_IN     = {"resgate_investimento", "saque_caixinha"}     # volta pra conta
+_EXPORT_TIPO_LABEL = {
+    "aporte_investimento": "Aporte", "deposito_caixinha": "Depósito",
+    "resgate_investimento": "Resgate", "saque_caixinha": "Saque",
+}
 
-def _export_summary(rows: list[dict]) -> dict:
-    """Agrega receitas, despesas, saldo e totais de despesa por categoria."""
+
+def _classify_launch(tipo: str, is_internal: bool):
+    """Retorna (natureza, sinal, label) ou None se a ação não entra no relatório.
+
+    Exclui ações não-monetárias (criar/deletar caixinha/investimento) e
+    movimentações que não são consumo nem alocação (saldo_inicial, ajuste,
+    pagamento_fatura — esta já contabilizada via credit_transactions)."""
+    t = (tipo or "").lower()
+    if not is_internal and t in _EXPORT_DESPESA_TIPOS:
+        return ("despesa", "-", "Despesa")
+    if not is_internal and t in _EXPORT_RECEITA_TIPOS:
+        return ("receita", "+", "Receita")
+    if t in _EXPORT_APORTE_OUT:
+        return ("aporte", "-", _EXPORT_TIPO_LABEL[t])
+    if t in _EXPORT_APORTE_IN:
+        return ("aporte", "+", _EXPORT_TIPO_LABEL[t])
+    return None
+
+
+def _item_sort_key(it: dict):
+    d = it.get("data")
+    if d is None:
+        return (0, 0, 0, 0, 0)
+    return (d.year, d.month, d.day, getattr(d, "hour", 0), getattr(d, "minute", 0))
+
+
+async def _fetch_export_items(user_id: int, year: int, month: int) -> list[dict]:
+    """Itens monetários do mês p/ relatório (CSV/XLSX/PDF compartilham):
+    despesas/receitas reais da conta, aportes/movimentações de investimento e
+    caixinha, e compras no cartão (alocadas por bill.period_end, igual ao
+    dashboard). Ações não-monetárias ficam de fora."""
+    month_start, month_end = _month_range(year, month)
+    items: list[dict] = []
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement
+                FROM launches
+                WHERE user_id = %s
+                  AND criado_em >= %s AND criado_em < %s
+                """,
+                (user_id, month_start, month_end),
+            )
+            for r in await cur.fetchall():
+                cls = _classify_launch(r["tipo"], r.get("is_internal_movement"))
+                if not cls:
+                    continue
+                natureza, sign, label = cls
+                items.append({
+                    "data": r["criado_em"],
+                    "natureza": natureza,
+                    "label": label,
+                    "sign": sign,
+                    "categoria": (r.get("categoria") or "").strip(),
+                    "descricao": (r.get("alvo") or r.get("nota") or "").strip(),
+                    "valor": float(r["valor"]),
+                })
+
+            # Compras no cartão de crédito, alocadas pelo fechamento da fatura.
+            await cur.execute(
+                """
+                SELECT ct.valor, ct.categoria, ct.nota, ct.purchased_at, c.name AS card_name
+                FROM credit_transactions ct
+                JOIN credit_bills b ON b.id = ct.bill_id
+                JOIN credit_cards c ON c.id = ct.card_id
+                WHERE ct.user_id = %s
+                  AND ct.is_refund = false
+                  AND b.period_end >= %s AND b.period_end < %s
+                """,
+                (user_id, month_start, month_end),
+            )
+            for r in await cur.fetchall():
+                desc = (r.get("nota") or "").strip()
+                card = (r.get("card_name") or "").strip()
+                items.append({
+                    "data": r["purchased_at"],
+                    "natureza": "despesa",
+                    "label": "Cartão",
+                    "sign": "-",
+                    "categoria": (r.get("categoria") or "").strip(),
+                    "descricao": f"{desc} · {card}".strip(" ·") if card else desc,
+                    "valor": float(r["valor"]),
+                })
+
+    items.sort(key=_item_sort_key, reverse=True)
+    return items
+
+
+async def build_csv(user_id: int, year: int, month: int) -> str | None:
+    items = await _fetch_export_items(user_id, year, month)
+    if not items:
+        return None
+    buf = io.StringIO()
+    w   = csv.writer(buf)
+    w.writerow(["data", "tipo", "valor", "categoria", "descricao"])
+    for it in items:
+        d = it["data"]
+        w.writerow([
+            d.strftime("%Y-%m-%d") if d else "",
+            it["label"],
+            f"{it['sign']}{it['valor']:.2f}",
+            it["categoria"],
+            it["descricao"],
+        ])
+    return buf.getvalue()
+
+
+def _export_summary(items: list[dict]) -> dict:
+    """Receitas, despesas (conta + cartão), saldo e despesas por categoria."""
     from collections import defaultdict
-    receitas = sum(float(r["valor"]) for r in rows if r["tipo"] == "receita")
-    despesas = sum(float(r["valor"]) for r in rows if r["tipo"] == "despesa")
+    receitas = sum(it["valor"] for it in items if it["natureza"] == "receita")
+    despesas = sum(it["valor"] for it in items if it["natureza"] == "despesa")
     by_cat: dict[str, float] = defaultdict(float)
-    for r in rows:
-        if r["tipo"] == "despesa":
-            by_cat[r["categoria"] or "sem categoria"] += float(r["valor"])
-    cats = sorted(by_cat.items(), key=lambda kv: kv[1], reverse=True)
+    for it in items:
+        if it["natureza"] == "despesa":
+            by_cat[it["categoria"] or "sem categoria"] += it["valor"]
+    cats = sorted(by_cat.items(), key=lambda kv: kv[1], reverse=True)[:10]
     return {
         "receitas": receitas,
         "despesas": despesas,
         "saldo": receitas - despesas,
         "by_category": cats,
-        "count": len(rows),
+        "count": len(items),
     }
 
 
 async def build_xlsx(user_id: int, year: int, month: int) -> bytes | None:
-    rows = await _fetch_export_rows(user_id, year, month)
-    if not rows:
+    items = await _fetch_export_items(user_id, year, month)
+    if not items:
         return None
-    return await asyncio.to_thread(_render_xlsx, rows)
+    return await asyncio.to_thread(_render_xlsx, items)
 
 
-def _render_xlsx(rows: list[dict]) -> bytes:
+def _render_xlsx(items: list[dict]) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
     from openpyxl.utils import get_column_letter
 
-    BRAND = "2563EB"   # azul PigBank (mesma cor do PDF)
+    BRAND = "2563EB"   # azul PigBank (cabeçalho)
     ZEBRA = "EFF6FF"   # azul bem claro
-    POS   = "16A34A"   # verde — receita
-    NEG   = "DC2626"   # vermelho — despesa
+    POS   = "16A34A"   # verde = entrou
+    NEG   = "DC2626"   # vermelho = saiu
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Lançamentos"
-    ws.append(["Data", "Tipo", "Valor", "Alvo", "Nota", "Categoria"])
+    ws.append(["Data", "Tipo", "Categoria", "Descrição", "Valor"])
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor=BRAND)
         cell.alignment = Alignment(vertical="center")
 
-    for idx, r in enumerate(rows, start=2):
-        is_rec = r["tipo"] == "receita"
+    for idx, it in enumerate(items, start=2):
+        d = it["data"]
+        signed = it["valor"] if it["sign"] == "+" else -it["valor"]
+        color = POS if it["sign"] == "+" else NEG   # verde = entrou, vermelho = saiu
         ws.append([
-            r["criado_em"].strftime("%d/%m/%Y %H:%M") if r["criado_em"] else "",
-            r["tipo"].capitalize(),
-            round(float(r["valor"]), 2),
-            r["alvo"] or "",
-            r["nota"] or "",
-            r["categoria"] or "",
+            d.strftime("%d/%m/%Y") if d else "",
+            it["label"],
+            it["categoria"],
+            it["descricao"],
+            round(signed, 2),
         ])
-        ws.cell(row=idx, column=2).font = Font(bold=True, color=POS if is_rec else NEG)
-        ws.cell(row=idx, column=3).number_format = '"R$" #,##0.00'
+        ws.cell(row=idx, column=2).font = Font(bold=True, color=color)
+        valor_cell = ws.cell(row=idx, column=5)
+        valor_cell.font = Font(bold=True, color=color)
+        valor_cell.number_format = '"R$" #,##0.00'
         if idx % 2 == 0:
-            for col in range(1, 7):
+            for col in range(1, 6):
                 ws.cell(row=idx, column=col).fill = PatternFill("solid", fgColor=ZEBRA)
 
-    for i, width in enumerate((18, 11, 14, 26, 32, 16), start=1):
+    for i, width in enumerate((14, 12, 18, 38, 16), start=1):
         ws.column_dimensions[get_column_letter(i)].width = width
     ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:F{len(rows) + 1}"
+    ws.auto_filter.ref = f"A1:E{len(items) + 1}"
 
     bio = io.BytesIO()
     wb.save(bio)
@@ -855,13 +938,13 @@ def _render_xlsx(rows: list[dict]) -> bytes:
 
 
 async def build_pdf(user_id: int, year: int, month: int) -> bytes | None:
-    rows = await _fetch_export_rows(user_id, year, month)
-    if not rows:
+    items = await _fetch_export_items(user_id, year, month)
+    if not items:
         return None
-    return await asyncio.to_thread(_render_pdf, rows, year, month)
+    return await asyncio.to_thread(_render_pdf, items, year, month)
 
 
-def _render_pdf(rows: list[dict], year: int, month: int) -> bytes:
+def _render_pdf(items: list[dict], year: int, month: int) -> bytes:
     from datetime import datetime as _dt
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
@@ -896,7 +979,7 @@ def _render_pdf(rows: list[dict], year: int, month: int) -> bytes:
             fontSize=size, textColor=color, alignment=align, leading=size + 3,
         ))
 
-    summary = _export_summary(rows)
+    summary = _export_summary(items)
     bio = io.BytesIO()
     doc = SimpleDocTemplate(
         bio, pagesize=A4,
@@ -990,17 +1073,15 @@ def _render_pdf(rows: list[dict], year: int, month: int) -> bytes:
     head = [par(h, 8, colors.white, bold=True, align=(TA_RIGHT if h == "Valor" else TA_LEFT))
             for h in ("Data", "Tipo", "Categoria", "Descrição", "Valor")]
     lanc_rows = [head]
-    for r in rows:
-        is_rec = r["tipo"] == "receita"
-        tcolor = POS if is_rec else NEG
-        sign   = "+" if is_rec else "-"
-        desc   = (r["alvo"] or r["nota"] or "")[:55]
+    for it in items:
+        color = POS if it["sign"] == "+" else NEG   # verde = entrou, vermelho = saiu
+        d = it["data"]
         lanc_rows.append([
-            par(r["criado_em"].strftime("%d/%m %H:%M") if r["criado_em"] else "", 8, MUTED),
-            par(r["tipo"].capitalize(), 8, tcolor, bold=True),
-            par(r["categoria"] or "-", 8, INK),
-            par(desc, 8, INK),
-            par(f"{sign} {fmt_brl(float(r['valor']))}", 8, tcolor, bold=True, align=TA_RIGHT),
+            par(d.strftime("%d/%m") if d else "", 8, MUTED),
+            par(it["label"], 8, color, bold=True),
+            par(it["categoria"] or "-", 8, INK),
+            par((it["descricao"] or "-")[:55], 8, INK),
+            par(f"{it['sign']} {fmt_brl(it['valor'])}", 8, color, bold=True, align=TA_RIGHT),
         ])
     lanc = Table(
         lanc_rows,
@@ -5512,6 +5593,7 @@ def _mask_email(email: str) -> str:
 
 
 @app.post("/export/{user_id}")
+@limiter.limit("3/minute")
 async def export_email(request: Request, user_id: int, year: int = None, month: int = None):
     """Gera o extrato do mês (PDF + XLSX + CSV) e envia pro email cadastrado."""
     _authorize_dashboard_access(request, user_id)
