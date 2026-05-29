@@ -9819,7 +9819,7 @@ async function exportToEmail() {
   const url = `${API}/export/${USER_ID}?year=${viewYear}&month=${viewMonth}`;
   showLaunchSuccessToast("📧 Gerando e enviando o extrato…");
   try {
-    const resp = await fetch(url, { method: "POST", credentials: "same-origin" });
+    const resp = await fetch(url, { method: "POST", credentials: "same-origin", headers: csrfHeaders() });
     if (resp.status === 404) {
       showLaunchSuccessToast("Nenhum lançamento neste mês para exportar.", true);
       return;
