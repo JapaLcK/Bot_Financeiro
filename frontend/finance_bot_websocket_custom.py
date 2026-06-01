@@ -2027,7 +2027,6 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
         "link_code": link_code,
         "whatsapp_link": wa_link,
         "dashboard_url": _post_login_url(),
-        "expires_in": 86400,
     }
 
 
@@ -2117,7 +2116,6 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         "link_code": link_code,
         "whatsapp_link": wa_link,
         "dashboard_url": _post_login_url(),
-        "expires_in": 86400,
     }
 
 
@@ -2533,7 +2531,6 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
         "link_code": link_code,
         "whatsapp_link": wa_link,
         "dashboard_url": _post_login_url(),
-        "expires_in": 86400,
     }
 
 
@@ -3012,7 +3009,6 @@ async def auth_google_complete_signup(
         "link_code": result["link_code"],
         "whatsapp_link": wa_link,
         "dashboard_url": _post_login_url(),
-        "expires_in": 86400,
     }
 
 
