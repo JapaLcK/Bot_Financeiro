@@ -826,9 +826,15 @@ async def _fetch_export_items(user_id: int, year: int, month: int) -> list[dict]
                 })
 
             # Compras no cartão de crédito, alocadas pelo fechamento da fatura.
+            # `data` exibida = b.period_end (dia em que a fatura fecha) — assim
+            # uma compra de 20/04 cuja fatura fecha em maio aparece com data de
+            # maio no relatório de maio, em vez de confundir o leitor com a data
+            # da compra. Parcelas ganham sufixo "(i/N)" pra distinguir linhas.
             await cur.execute(
                 """
-                SELECT ct.valor, ct.categoria, ct.nota, ct.purchased_at, c.name AS card_name
+                SELECT ct.valor, ct.categoria, ct.nota,
+                       ct.installment_no, ct.installments_total,
+                       b.period_end, c.name AS card_name
                 FROM credit_transactions ct
                 JOIN credit_bills b ON b.id = ct.bill_id
                 JOIN credit_cards c ON c.id = ct.card_id
@@ -841,8 +847,12 @@ async def _fetch_export_items(user_id: int, year: int, month: int) -> list[dict]
             for r in await cur.fetchall():
                 desc = (r.get("nota") or "").strip()
                 card = (r.get("card_name") or "").strip()
+                inst_no = r.get("installment_no")
+                inst_total = r.get("installments_total")
+                if inst_total and int(inst_total) > 1:
+                    desc = f"{desc} ({inst_no}/{inst_total})".strip()
                 items.append({
-                    "data": r["purchased_at"],
+                    "data": r["period_end"],
                     "natureza": "despesa",
                     "label": "Cartão",
                     "sign": "-",
