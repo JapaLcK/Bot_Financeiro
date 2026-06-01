@@ -31,6 +31,25 @@ def _csrf_headers(client: TestClient) -> dict[str, str]:
     return {dashboard.CSRF_HEADER_NAME: token}
 
 
+def _parse_set_cookies(headers: list[str]) -> dict[str, dict[str, str]]:
+    """Quebra a lista de Set-Cookie em {nome: {attr_minusculo: valor}}.
+    Flags booleanas (HttpOnly, Secure) entram como chave com valor "" — então
+    o callsite checa via `"httponly" in cookie`.
+    """
+    parsed: dict[str, dict[str, str]] = {}
+    for header in headers:
+        first, *rest = [seg.strip() for seg in header.split(";")]
+        name, _, value = first.partition("=")
+        cookie: dict[str, str] = {"value": value}
+        for seg in rest:
+            if not seg:
+                continue
+            k, _, v = seg.partition("=")
+            cookie[k.strip().lower()] = v.strip()
+        parsed[name] = cookie
+    return parsed
+
+
 def test_login_sets_auth_token_cookie(monkeypatch):
     async def _noop_log(*args, **kwargs):
         return None
@@ -67,16 +86,41 @@ def test_login_sets_auth_token_cookie(monkeypatch):
     data = response.json()
     assert data["email"] == "user@example.com"
     assert "token" not in data
-    set_cookie = response.headers["set-cookie"]
-    assert "auth_token=" in set_cookie
-    assert "dashboard_token=" in set_cookie
-    assert "HttpOnly" in set_cookie
-    assert "Secure" in set_cookie
-    # auth_token e dashboard_token usam SameSite=Lax (não Strict) pra permitir
-    # links externos do bot/email abrirem autenticados; csrf_token segue Strict.
-    assert "SameSite=lax" in set_cookie
-    assert "Max-Age=86400" in set_cookie
-    assert "?token=" not in response.json()["dashboard_url"]
+    assert "?token=" not in data["dashboard_url"]
+
+    # Pós-refactor 1e1e26f (JWT refresh rotativo): cada cookie tem TTL e
+    # papel próprio — validamos um por um (Max-Age hard-coded de propósito
+    # pra que qualquer mudança de TTL exija revisão consciente deste teste,
+    # que documenta a decisão de segurança).
+    #
+    # SameSite=Lax em todos: magic links do bot/email precisam abrir
+    # autenticados; CSRF é protegido via cookie+header pelo csrf_middleware.
+    cookies = _parse_set_cookies(response.headers.get_list("set-cookie"))
+
+    # auth_token: access JWT curto (15min) — viaja em toda request, renovado
+    # automaticamente via /auth/refresh.
+    auth = cookies["auth_token"]
+    assert auth["max-age"] == "900"  # 15 * 60
+    assert auth["samesite"].lower() == "lax"
+    assert "httponly" in auth
+    assert "secure" in auth
+
+    # dashboard_token: 12h (DASHBOARD_SESSION_HOURS) — segunda camada
+    # session-bound usada pelo dashboard, mesmo jti do auth_token.
+    dash = cookies["dashboard_token"]
+    assert dash["max-age"] == "43200"  # 12 * 3600
+    assert dash["samesite"].lower() == "lax"
+    assert "httponly" in dash
+    assert "secure" in dash
+
+    # refresh_token: 14d absolutos (idle 7d), path restrito a /auth/refresh
+    # — só viaja nessa request específica, muito menos exposto que o access.
+    refresh = cookies["refresh_token"]
+    assert refresh["max-age"] == "1209600"  # 14 * 24 * 3600
+    assert refresh["path"] == "/auth/refresh"
+    assert refresh["samesite"].lower() == "lax"
+    assert "httponly" in refresh
+    assert "secure" in refresh
 
 
 def test_dashboard_token_accepts_auth_cookie_without_authorization_header():
