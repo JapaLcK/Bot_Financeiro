@@ -1088,3 +1088,62 @@ def test_route_clarification_sem_valor_refaz_pergunta(user_id):
     pend = get_pending_action(user_id)
     assert pend is not None and pend["payload"]["intent"] == "launches.add"
     assert round(float(get_balance(user_id)), 2) == 0.00
+
+
+def test_handle_incoming_clarification_tem_precedencia_sobre_fallback_ia():
+    """Regressão (bug do screenshot 77,90 → cinema → 'valor precisa ser maior
+    que zero').
+
+    O bot perguntou 'Em que você gastou R$ 77,90?' e guardou um pending de
+    clarification determinístico. A resposta 'cinema' classifica como baixa
+    confiança (out_of_scope, pois a OpenAI está bloqueada nos testes) e, SEM o
+    guard em handle_incoming, seria sequestrada pelo fallback de IA — que não
+    conhece o valor 77,90 e falha. O guard garante que o route() determinístico
+    resolva a clarification primeiro, completando o lançamento.
+
+    Usa uid < 2 bi pra não sofrer remap em _normalize_user_id. Promove a Pro
+    porque é justamente quando o fallback de IA *seria* acionado — provando a
+    precedência do caminho determinístico.
+    """
+    import uuid as _uuid
+    import db
+    from db.connection import get_conn
+    from core.handle_incoming import handle_incoming
+
+    uid = int(_uuid.uuid4().int % 1_000_000_000) + 1  # < 2 bilhões
+    db.ensure_user(uid)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select id from auth_accounts where user_id = %s limit 1", (uid,))
+            if cur.fetchone():
+                cur.execute(
+                    "update auth_accounts set plan='pro', plan_expires_at=null where user_id = %s",
+                    (uid,),
+                )
+            else:
+                cur.execute(
+                    "insert into auth_accounts(user_id, email, password_hash, plan) "
+                    "values (%s, %s, 'x', 'pro')",
+                    (uid, f"pro-clarif-{uid}@test.local"),
+                )
+        conn.commit()
+
+    set_pending_action(
+        uid,
+        "clarification",
+        {
+            "intent": "launches.add",
+            "entities": {"tipo": "despesa", "valor": 77.90},
+            "question": "Em que você gastou R$ 77,90?",
+            "orig_text": "77,90",
+        },
+    )
+
+    msg = IncomingMessage(platform="discord", user_id=uid, text="cinema")
+    out = handle_incoming(msg)
+
+    assert out, "handle_incoming não retornou resposta"
+    response = out[0].text
+    assert "despesa registrada" in response.lower(), f"esperava lançamento, veio: {response!r}"
+    assert round(float(get_balance(uid)), 2) == -77.90
+    assert get_pending_action(uid) is None  # clarification consumida

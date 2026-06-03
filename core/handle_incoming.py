@@ -49,6 +49,27 @@ _HELP_FALLBACK_MARKERS: tuple[str, ...] = (
 )
 
 
+# Pendências determinísticas que o route() retoma com PRIORIDADE MÁXIMA — o bot
+# fez uma pergunta e está esperando a resposta. Espelha as checagens do topo do
+# route(): clarification de lançamento ("Em que você gastou?") e os fluxos
+# guiados de cartão. Enquanto uma delas está aberta, a resposta do user TEM que
+# passar pelo route() determinístico — nunca pelo fallback de IA. Sem isso, uma
+# resposta curta ("cinema", "dia 5") classifica como baixa confiança e a IA
+# sequestra o turno, perdendo o contexto (ex: o valor 77,90 já informado) e
+# falhando com "valor precisa ser maior que zero".
+#
+# NÃO inclui ofertas one-shot (recategorize_launch_offer, undo_audio): essas não
+# são perguntas e não devem bloquear a IA nas mensagens seguintes.
+_RESUMABLE_PENDING_TYPES: frozenset[str] = frozenset({
+    "clarification",
+    "credit_card_setup",
+    "credit_card_set_primary",
+    "credit_delete_card",
+    "installment_pending",
+    "pay_bill_choice",
+})
+
+
 def _looks_like_help_fallback(response: str | None) -> bool:
     """
     Detecta se `response` é o help genérico do bot tradicional (lista de
@@ -466,9 +487,26 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         # saldo"), gírias ("qto sobrou"), fraseamento solto. Free segue no
         # fluxo padrão (mensagem "não entendi" com sugestões).
         # ------------------------------------------------------------------
+        # Pendência determinística aguardando resposta tem precedência ABSOLUTA
+        # sobre o fallback de IA. Ex: o bot perguntou "Em que você gastou R$
+        # 77,90?" e guardou um pending de clarification. A resposta "cinema"
+        # classifica como baixa confiança e, sem este guard, seria sequestrada
+        # pela IA — que não conhece o valor já informado e falha com "valor
+        # precisa ser maior que zero". route() resolve a pendência primeiro.
+        has_resumable_pending = False
+        try:
+            _pend = db.get_pending_action(uid)
+            if _pend and _pend.get("action_type") in _RESUMABLE_PENDING_TYPES:
+                has_resumable_pending = True
+        except Exception:
+            has_resumable_pending = False
+
         should_try_ai_fallback = (
-            intent_result.intent == "out_of_scope"
-            or intent_result.confidence < 0.55
+            not has_resumable_pending
+            and (
+                intent_result.intent == "out_of_scope"
+                or intent_result.confidence < 0.55
+            )
         )
         if should_try_ai_fallback:
             try:
