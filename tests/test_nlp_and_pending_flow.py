@@ -1,4 +1,4 @@
-from core.intent_classifier import classify
+from core.intent_classifier import classify, _try_alias, _normalize
 from core.intent_router import route
 from core.reports.reports_daily import build_due_bill_reminders
 from core.services.quick_entry import handle_quick_entry
@@ -902,3 +902,104 @@ def test_build_due_bill_reminders(user_id):
 
     assert len(reminders) == 1
     assert "vence em 3 dia(s)" in reminders[0]["message"].lower()
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Valor primeiro sem palavra-chave → despesa por padrão.
+# "77,90 mercado" = gastei 77,90 no mercado, sem precisar do verbo.
+# Receita SEMPRE exige "recebi"/"receita"/"ganhei".
+# ───────────────────────────────────────────────────────────────────────────
+
+
+def test_parse_valor_primeiro_sem_palavra_chave_vira_despesa(user_id):
+    parsed = parse_receita_despesa_natural(user_id, "77,90 mercado")
+
+    assert parsed is not None
+    assert parsed["tipo"] == "despesa"
+    assert parsed["valor"] == 77.90
+    assert parsed["alvo"] == "mercado"
+
+
+def test_parse_valor_primeiro_inteiro(user_id):
+    parsed = parse_receita_despesa_natural(user_id, "50 uber")
+
+    assert parsed is not None
+    assert parsed["tipo"] == "despesa"
+    assert parsed["valor"] == 50
+    assert parsed["alvo"] == "uber"
+
+
+def test_parse_valor_primeiro_com_rs_limpa_o_alvo(user_id):
+    """O prefixo 'R$' não deve vazar pro alvo."""
+    parsed = parse_receita_despesa_natural(user_id, "R$ 1.234,56 aluguel")
+
+    assert parsed is not None
+    assert parsed["tipo"] == "despesa"
+    assert parsed["valor"] == 1234.56
+    assert parsed["alvo"] == "aluguel"
+
+
+def test_parse_receita_sem_palavra_chave_continua_despesa(user_id):
+    """Sem 'recebi'/'receita'/'ganhei', valor-primeiro é GASTO mesmo que a
+    descrição soe como entrada ('salario'). Receita exige marcação explícita."""
+    sem_kw = parse_receita_despesa_natural(user_id, "1000 salario")
+    com_kw = parse_receita_despesa_natural(user_id, "recebi 1000 salario")
+
+    assert sem_kw is not None and sem_kw["tipo"] == "despesa"
+    assert com_kw is not None and com_kw["tipo"] == "receita"
+
+
+def test_parse_descricao_primeiro_nao_vira_despesa(user_id):
+    """Só valor-PRIMEIRO dispara o default. Descrição-primeiro ('mercado 50')
+    fica pro fallback de IA decidir — o parser determinístico não chuta."""
+    assert parse_receita_despesa_natural(user_id, "mercado 50") is None
+
+
+def test_parse_sem_valor_retorna_none(user_id):
+    assert parse_receita_despesa_natural(user_id, "mercado") is None
+
+
+def test_classify_valor_primeiro_vai_para_launches_add():
+    assert classify("77,90 mercado").intent == "launches.add"
+    assert classify("50 uber").intent == "launches.add"
+    assert classify("30 farmacia").intent == "launches.add"
+
+
+def test_classify_numero_solto_nao_vira_launch():
+    """Número solto ('50', resposta a uma pergunta) NÃO pode virar lançamento —
+    o pattern exige descrição após o valor. Testa o alias direto pra não cair
+    no tier 3 (IA)."""
+    assert _try_alias(_normalize("50"), "50") is None
+
+
+def test_classify_descricao_primeiro_nao_captura_no_aliase():
+    """'mercado 50' não bate no alias determinístico (valor-primeiro só)."""
+    assert _try_alias(_normalize("mercado 50"), "mercado 50") is None
+
+
+def test_classify_valor_primeiro_com_cartao_vai_para_credito():
+    """Keyword de domínio vence o default: '50 no cartao nubank' é crédito,
+    não despesa de conta corrente."""
+    assert classify("50 no cartao nubank").intent == "credit.handle"
+
+
+def test_route_valor_primeiro_debita_saldo(user_id):
+    """Ponta-a-ponta: '77,90 mercado' registra DESPESA e debita o saldo."""
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="77,90 mercado")
+
+    response = route(classify(msg.text), msg)
+
+    assert "despesa registrada" in response.lower()  # não receita
+    assert round(float(get_balance(user_id)), 2) == -77.90
+
+
+def test_route_receita_exige_palavra_chave(user_id):
+    """'recebi 300 salario' credita (+300); depois '50 mercado' debita (-50).
+    Confirma que receita só acontece com a palavra-chave."""
+    msg_in = IncomingMessage(platform="discord", user_id=user_id, text="recebi 300 salario")
+    route(classify(msg_in.text), msg_in)
+    assert round(float(get_balance(user_id)), 2) == 300.00
+
+    msg_out = IncomingMessage(platform="discord", user_id=user_id, text="50 mercado")
+    route(classify(msg_out.text), msg_out)
+    assert round(float(get_balance(user_id)), 2) == 250.00

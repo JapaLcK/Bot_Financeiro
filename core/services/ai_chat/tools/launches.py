@@ -648,7 +648,12 @@ TOOLS: list[Tool] = [
                         "tipo": {
                             "type": "string",
                             "enum": ["despesa", "receita"],
-                            "description": "despesa (saiu) ou receita (entrou).",
+                            "description": (
+                                "despesa (saiu) ou receita (entrou). PADRÃO = despesa: "
+                                "só use receita quando o user marca entrada explícita "
+                                "('recebi', 'receita', 'ganhei', 'salário', 'caiu'). "
+                                "Mensagem que é só valor+descrição ('77,90 mercado') é despesa."
+                            ),
                         },
                         "valor": {
                             "type": "number",

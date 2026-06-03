@@ -358,6 +358,14 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
     (r"^(ajuda|help)\s+\w+",
      "help"),
 
+    # valor primeiro, sem palavra-chave: "77,90 mercado", "50 uber" → despesa.
+    # Receita SEMPRE exige "recebi"/"receita"/"ganhei" (capturado acima). Vem por
+    # último pra não roubar intents com keyword de domínio (cartão, caixinha,
+    # investimento). Exige descrição após o valor pra não pegar número solto
+    # (ex: resposta "50" a uma pergunta). Em `norm`, "77,90" já virou "77 90".
+    (r"^(?:r\s+)?\d+(?:\s+\d+)*\s+[a-z]",
+     "launches.add"),
+
     # confirmação textual
     (r"^(sim|s|confirmo|confirmar|pode|vai)$",
      "confirm.yes"),

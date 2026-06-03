@@ -149,11 +149,18 @@ def _extract_target_after_amount(text_base: str) -> str:
         return ""
 
     t = re.sub(r"^\s*(gastei|gasto|paguei|pagar|comprei|debitei|mandei|enviei|pixei|recebi|receita|ganhei)\b", "", t, flags=re.IGNORECASE).strip()
-    t = re.sub(r"^\s*\d+(?:[.,]\d+)?\b", "", t, count=1).strip()
+    t = re.sub(r"^\s*r\$\s*", "", t, flags=re.IGNORECASE).strip()
+    # Consome o valor inteiro, incl. separador de milhar + decimal ("1.234,56").
+    t = re.sub(r"^\s*\d[\d.,]*", "", t, count=1).strip()
     t = re.sub(r"^\s*reais?\b", "", t, flags=re.IGNORECASE).strip()
     t = re.sub(r"^\s*(de|do|da|dos|das|no|na|nos|nas|em|pra|para)\b", "", t, flags=re.IGNORECASE).strip()
     t = re.sub(r"\s+", " ", t).strip(" -:;,.")
     return t
+
+
+# Mensagem que começa com o valor, com ou sem "R$": "77,90 mercado", "50 uber",
+# "R$ 1.234,56 aluguel". Sem palavra-chave, isso é despesa por padrão (atalho).
+_STARTS_WITH_VALUE_RE = re.compile(r"^\s*(?:r\$\s*)?\d", re.IGNORECASE)
 
 
 def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
@@ -171,12 +178,17 @@ def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
     text_base = text_without_date.strip() if text_without_date else text_for_parse.strip()
     raw_norm = normalize_text(text_base)
 
-    # tipo
+    # tipo — receita SEMPRE exige palavra-chave explícita ("recebi"/"receita"/
+    # "ganhei"). Sem palavra-chave, uma mensagem que começa com o valor
+    # ("77,90 mercado") é despesa por padrão: é o atalho mais usado pra lançar
+    # gasto, então o user não precisa escrever "gastei" toda vez.
     tipo = None
     if raw_norm.startswith(("gastei ", "gasto ", "paguei ", "pagar ", "comprei ", "debitei ", "mandei ", "enviei ", "pixei ")):
         tipo = "despesa"
     elif raw_norm.startswith(("recebi ", "receita ", "ganhei ")):
         tipo = "receita"
+    elif _STARTS_WITH_VALUE_RE.match(text_base):
+        tipo = "despesa"
     else:
         return None
 
