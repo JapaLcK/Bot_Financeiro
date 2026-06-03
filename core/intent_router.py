@@ -391,7 +391,40 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
     # limpa o pending antes de executar
     db.clear_pending_action(user_id)
 
-    # tenta extrair data da resposta do usuário
+    # se o usuário negou / cancelou explicitamente
+    resp_norm = user_response.strip().lower()
+    if resp_norm in ("nao", "não", "n", "cancelar", "cancela"):
+        return "❌ Cancelado."
+
+    # launches.add: o bot tinha feito uma pergunta pra completar o lançamento —
+    # ou faltava o VALOR ("Qual foi o valor?") ou faltava a DESCRIÇÃO ("Em que
+    # você gastou?"). Junta a resposta do usuário com o texto original e
+    # reexecuta pelo fluxo normal de add, reaproveitando parser de valor/data,
+    # categorização e aprendizado.
+    if original_intent == "launches.add":
+        from parsers import _extract_valor
+        tipo = (original_entities.get("tipo") or "despesa").lower()
+        verbo = "recebi" if tipo == "receita" else "gastei"
+        if _extract_valor(user_response) is not None:
+            # resposta trouxe o VALOR que faltava → descrição vem do texto
+            # original (sem o verbo, pra não duplicar "gastei 150 gastei ...").
+            desc = re.sub(
+                r"^\s*(gastei|gasto|paguei|pagar|comprei|debitei|mandei|enviei|pixei|recebi|receita|ganhei)\b",
+                "", orig_text, flags=re.IGNORECASE,
+            ).strip()
+            combined = f"{verbo} {user_response.strip()} {desc}".strip()
+        elif original_entities.get("valor") or _extract_valor(orig_text) is not None:
+            # já tínhamos o valor (no texto/entidades) → a resposta é a
+            # descrição/alvo que faltava. O orig_text já carrega tipo + valor.
+            combined = f"{orig_text} {user_response.strip()}".strip()
+        else:
+            # ainda sem valor reconhecível — refaz a pergunta e mantém o pending
+            # pra não perder a descrição original.
+            db.set_pending_action(user_id, "clarification", payload)
+            return payload.get("question") or "Qual foi o valor? Tente: *150*"
+        return _execute("launches.add", user_id, combined, original_entities, platform, external_id)
+
+    # demais intents (ex: launches.list "dia 4 de qual mês?") → extrai data
     dt, _ = extract_date_from_text(user_response)
     if not dt:
         # tenta extrair do texto original (ex: "quanto gastei dia 4")
@@ -399,11 +432,6 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
 
     if dt:
         original_entities["date_filter"] = dt.date().isoformat()
-
-    # se o usuário negou / cancelou explicitamente
-    resp_norm = user_response.strip().lower()
-    if resp_norm in ("nao", "não", "n", "cancelar", "cancela"):
-        return "❌ Consulta cancelada."
 
     # re-executa a intent original com as entidades completas
     return _execute(original_intent, user_id, orig_text or user_response, original_entities, platform, external_id)

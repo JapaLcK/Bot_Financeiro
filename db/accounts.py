@@ -186,8 +186,9 @@ def update_launch_fields(
     categoria: str | None = None,
     alvo: str | None = None,
     nota: str | None = None,
+    criado_em: datetime | None = None,
 ) -> bool:
-    """Atualiza campos editáveis (categoria, alvo, nota) de um lançamento.
+    """Atualiza campos editáveis (categoria, alvo, nota, criado_em) de um lançamento.
 
     Argumentos None são ignorados (mantém valor atual). Strings vazias viram
     NULL no banco. Retorna False se não encontrou lançamento do usuário.
@@ -210,6 +211,9 @@ def update_launch_fields(
     if nota is not None:
         sets.append("nota=%s")
         params.append((nota.strip() or None))
+    if criado_em is not None:
+        sets.append("criado_em=%s")
+        params.append(criado_em)
     if not sets:
         return False
 

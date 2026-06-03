@@ -4075,6 +4075,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
 class LaunchEditPayload(BaseModel):
     categoria: str | None = None
     nota: str | None = None
+    criado_em: str | None = None
 
 
 @app.patch("/launches/{user_id}/{launch_id}")
@@ -4108,7 +4109,18 @@ async def update_launch_route(
         if len(nota_norm) > 200:
             raise HTTPException(status_code=400, detail="Descrição muito longa (máx. 200 caracteres).")
 
-    if categoria_norm is None and nota_norm is None:
+    criado_em_dt: datetime | None = None
+    if payload.criado_em is not None and payload.criado_em.strip():
+        from utils_date import _tz
+        raw_dt = payload.criado_em.strip().replace("Z", "+00:00")
+        try:
+            criado_em_dt = datetime.fromisoformat(raw_dt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Data inválida.")
+        if criado_em_dt.tzinfo is None:
+            criado_em_dt = criado_em_dt.replace(tzinfo=_tz())
+
+    if categoria_norm is None and nota_norm is None and criado_em_dt is None:
         raise HTTPException(status_code=400, detail="Nada para atualizar.")
 
     changed = await asyncio.to_thread(
@@ -4117,14 +4129,17 @@ async def update_launch_route(
         launch_id,
         categoria=categoria_norm,
         nota=nota_norm,
+        criado_em=criado_em_dt,
     )
     if not changed:
         raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
+    _invalidate_dashboard_current_cache(user_id)
     return {
         "ok": True,
         "launch_id": launch_id,
         "categoria": categoria_norm,
         "nota": nota_norm,
+        "criado_em": criado_em_dt.isoformat() if criado_em_dt else None,
     }
 
 

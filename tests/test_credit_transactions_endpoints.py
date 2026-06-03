@@ -178,6 +178,56 @@ def test_patch_tx_inexistente_404(user_id):
     assert resp.status_code == 404
 
 
+# ─── PATCH /launches (edição de data) ───────────────────────────────────────
+
+def _get_launch_row(user_id: int, launch_id: int) -> dict | None:
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id, categoria, nota, valor, criado_em from launches where user_id=%s and id=%s",
+                (user_id, launch_id),
+            )
+            return cur.fetchone()
+
+
+def test_patch_launch_edita_data(user_id):
+    """PATCH /launches/.../criado_em altera a data de um lançamento normal."""
+    from zoneinfo import ZoneInfo
+    launch_id, _seq, _bal = db.add_launch_and_update_balance(
+        user_id, "despesa", 50.0, None, "lavagem carro", categoria="transporte"
+    )
+    client = TestClient(dashboard.app)
+    _auth(client, user_id)
+
+    # 12:30Z equivale a 09:30 em São Paulo (UTC-3)
+    resp = client.patch(
+        f"/launches/{user_id}/{launch_id}",
+        json={"criado_em": "2026-06-02T12:30:00.000Z"},
+        headers=_csrf_headers(client),
+    )
+    assert resp.status_code == 200, resp.text
+
+    row = _get_launch_row(user_id, launch_id)
+    sp = row["criado_em"].astimezone(ZoneInfo("America/Sao_Paulo"))
+    assert (sp.year, sp.month, sp.day) == (2026, 6, 2)
+    assert (sp.hour, sp.minute) == (9, 30)
+
+
+def test_patch_launch_data_invalida_400(user_id):
+    launch_id, _seq, _bal = db.add_launch_and_update_balance(
+        user_id, "despesa", 10.0, None, "cafe", categoria="alimentação"
+    )
+    client = TestClient(dashboard.app)
+    _auth(client, user_id)
+
+    resp = client.patch(
+        f"/launches/{user_id}/{launch_id}",
+        json={"criado_em": "not-a-date"},
+        headers=_csrf_headers(client),
+    )
+    assert resp.status_code == 400, resp.text
+
+
 # ─── DELETE ─────────────────────────────────────────────────────────────────
 
 def test_delete_compra_a_vista(user_id):

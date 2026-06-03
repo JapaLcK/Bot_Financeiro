@@ -2638,6 +2638,11 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
       <input class="modal-inp" id="edit-launch-nota" type="text" maxlength="200" placeholder="Ex: gastei 50 mercado..." />
     </div>
 
+    <div class="modal-row" id="edit-launch-data-row">
+      <label class="modal-label" for="edit-launch-data">Data e hora</label>
+      <input class="modal-inp" id="edit-launch-data" type="datetime-local" />
+    </div>
+
     <div class="modal-error" id="edit-launch-error"></div>
 
     <div class="modal-acts">
@@ -8569,6 +8574,16 @@ function _onEditCategoriaChange() {
 
 let editingLaunchIsCredit = false;
 
+// ISO instant → "YYYY-MM-DDTHH:MM" no fuso local do navegador (formato do
+// input datetime-local). Espelha o que o fmtDate mostra na lista.
+function toLocalDatetimeInput(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+       + `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function openEditLaunchModal(launchId) {
   if (!launchId) return;
   const launch = (lastData?.recent_launches || []).find(l => l.id === launchId);
@@ -8589,6 +8604,18 @@ function openEditLaunchModal(launchId) {
   document.getElementById("edit-launch-nota").value = editingLaunchIsCredit
     ? (launch.nota || "")
     : (launch.nota || launch.alvo || "");
+
+  // Data — só editável em lançamentos normais. Crédito não muda data aqui
+  // (alteraria a janela de fechamento da fatura).
+  const dataRow = document.getElementById("edit-launch-data-row");
+  const dataInp = document.getElementById("edit-launch-data");
+  if (editingLaunchIsCredit) {
+    dataRow.style.display = "none";
+    dataInp.value = "";
+  } else {
+    dataRow.style.display = "";
+    dataInp.value = launch.criado_em ? toLocalDatetimeInput(launch.criado_em) : "";
+  }
 
   hideEditLaunchError();
   document.getElementById("edit-launch-overlay").classList.add("open");
@@ -8626,6 +8653,18 @@ async function submitEditLaunch() {
 
   const nota = document.getElementById("edit-launch-nota").value.trim();
 
+  // Data — só pra lançamentos normais. Converte o wall-clock local do input
+  // pra um instante ISO (com fuso) que o backend grava direto.
+  let criadoEmISO = null;
+  if (!editingLaunchIsCredit) {
+    const dataVal = document.getElementById("edit-launch-data").value;
+    if (dataVal) {
+      const d = new Date(dataVal);
+      if (isNaN(d.getTime())) { showEditLaunchError("Data inválida."); return; }
+      criadoEmISO = d.toISOString();
+    }
+  }
+
   const btn = document.getElementById("edit-launch-submit-btn");
   editLaunchSubmitting = true;
   btn.disabled = true;
@@ -8633,11 +8672,13 @@ async function submitEditLaunch() {
     const url = editingLaunchIsCredit
       ? `${API}/credit-transactions/${USER_ID}/${editingLaunchId}`
       : `${API}/launches/${USER_ID}/${editingLaunchId}`;
+    const reqBody = { categoria, nota };
+    if (criadoEmISO) reqBody.criado_em = criadoEmISO;
     const r = await fetch(url, {
       method: "PATCH",
       credentials: "same-origin",
       headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ categoria, nota }),
+      body: JSON.stringify(reqBody),
     });
     if (!r.ok) {
       const detail = await r.json().catch(() => ({}));
@@ -8655,6 +8696,7 @@ async function submitEditLaunch() {
       const oldTotal = target.installments_total;
       target.categoria = categoria;
       target.nota = nota;
+      if (criadoEmISO) target.criado_em = criadoEmISO;
       if (editingLaunchIsCredit && oldTotal && oldTotal > 1) {
         for (const l of items) {
           if (l !== target && l.tipo === "credito"

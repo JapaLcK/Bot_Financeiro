@@ -18,6 +18,7 @@ from db import (
     get_pending_action,
     get_summary_by_period,
     list_cards,
+    list_launches,
     set_default_card,
     set_pending_action,
 )
@@ -1003,3 +1004,87 @@ def test_route_receita_exige_palavra_chave(user_id):
     msg_out = IncomingMessage(platform="discord", user_id=user_id, text="50 mercado")
     route(classify(msg_out.text), msg_out)
     assert round(float(get_balance(user_id)), 2) == 250.00
+
+
+def test_route_clarification_valor_completa_lancamento(user_id):
+    """Bot perguntou o valor; a resposta '150' completa o lançamento mantendo
+    descrição e data do texto original ('lavagem carro 02/06')."""
+    set_pending_action(
+        user_id,
+        "clarification",
+        {
+            "intent": "launches.add",
+            "entities": {"tipo": "despesa", "alvo": "lavagem carro", "categoria": "transporte"},
+            "question": "Qual foi o valor da lavagem do carro?",
+            "orig_text": "lavagem carro 02/06",
+        },
+    )
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="150")
+    response = route(classify(msg.text), msg)
+
+    assert "despesa registrada" in response.lower()
+    assert round(float(get_balance(user_id)), 2) == -150.00
+    assert get_pending_action(user_id) is None  # clarification consumida
+    # data preservada (02/06) — normaliza pro fuso do app, já que o driver
+    # devolve o timestamptz no fuso da sessão (varia por máquina/CI).
+    from zoneinfo import ZoneInfo
+    sp = list_launches(user_id, limit=1)[0]["criado_em"].astimezone(ZoneInfo("America/Sao_Paulo"))
+    assert sp.month == 6 and sp.day == 2
+
+
+def test_route_clarification_receita_preserva_tipo(user_id):
+    """Clarification de receita preserva o tipo: '5000' credita (+5000)."""
+    set_pending_action(
+        user_id,
+        "clarification",
+        {
+            "intent": "launches.add",
+            "entities": {"tipo": "receita", "alvo": "salario", "categoria": "rendimentos"},
+            "question": "Qual foi o valor recebido?",
+            "orig_text": "recebi salario",
+        },
+    )
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="5000")
+    response = route(classify(msg.text), msg)
+
+    assert "receita registrada" in response.lower()
+    assert round(float(get_balance(user_id)), 2) == 5000.00
+
+
+def test_route_clarification_descricao_completa_lancamento(user_id):
+    """Bot já tinha o valor e perguntou a descrição ('Em que você gastou?');
+    a resposta 'mercado' completa o lançamento sem re-perguntar."""
+    set_pending_action(
+        user_id,
+        "clarification",
+        {
+            "intent": "launches.add",
+            "entities": {"tipo": "despesa", "valor": 50},
+            "question": "Em que você gastou R$ 50?",
+            "orig_text": "gastei 50",
+        },
+    )
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="mercado")
+    response = route(classify(msg.text), msg)
+
+    assert "despesa registrada" in response.lower()
+    assert round(float(get_balance(user_id)), 2) == -50.00
+    assert get_pending_action(user_id) is None
+
+
+def test_route_clarification_sem_valor_refaz_pergunta(user_id):
+    """Resposta sem valor reconhecível refaz a pergunta e mantém o pending."""
+    payload = {
+        "intent": "launches.add",
+        "entities": {"tipo": "despesa", "alvo": "uber", "categoria": "transporte"},
+        "question": "Qual foi o valor do uber?",
+        "orig_text": "uber",
+    }
+    set_pending_action(user_id, "clarification", payload)
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="sei la")
+    response = route(classify(msg.text), msg)
+
+    assert response == "Qual foi o valor do uber?"
+    pend = get_pending_action(user_id)
+    assert pend is not None and pend["payload"]["intent"] == "launches.add"
+    assert round(float(get_balance(user_id)), 2) == 0.00
