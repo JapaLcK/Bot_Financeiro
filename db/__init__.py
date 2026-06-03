@@ -61,6 +61,8 @@ from .accounts import (
     get_spending_trend,
     get_internal_movement_total,
     delete_launch_and_rollback,
+    count_launches,
+    delete_all_launches_and_rollback,
     get_ofx_import_by_hash,
     import_ofx_launches_bulk,
 )
@@ -313,7 +315,7 @@ __all__ = [
     "update_launch_category", "update_launch_fields", "update_launch_categories_bulk", "export_launches",
     "get_launches_by_period", "get_summary_by_period", "get_top_expense_categories",
     "get_largest_expenses", "get_spending_trend", "get_internal_movement_total",
-    "delete_launch_and_rollback",
+    "delete_launch_and_rollback", "count_launches", "delete_all_launches_and_rollback",
     "get_ofx_import_by_hash", "import_ofx_launches_bulk",
     # pockets
     "list_pockets", "pocket_withdraw_to_account", "create_pocket",

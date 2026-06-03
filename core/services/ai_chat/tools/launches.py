@@ -17,6 +17,8 @@ Write (auto-executado, SEM confirmação):
 Write (PEDE confirmação — destrutivo):
   - delete_launch: apaga um lançamento (despesa, receita ou compra no cartão).
     Bifurca entre `launches` (user_seq) e `credit_transactions` (id global).
+  - delete_all_launches: apaga TODOS os lançamentos da conta corrente de uma vez,
+    revertendo o saldo. Só pra pedidos explícitos de "apagar tudo".
 """
 from __future__ import annotations
 
@@ -419,6 +421,49 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
     return f"🐷 Não achei o lançamento '{raw_id}'."
 
 
+# ─── Write: delete_all_launches (PEDE confirmação — destrutivo em massa) ─────
+
+def _delete_all_launches_summary(args: dict[str, Any]) -> str:
+    return (
+        "apagar TODOS os seus lançamentos (todas as despesas e receitas da "
+        "conta corrente) e reverter os efeitos no saldo"
+    )
+
+
+def _delete_all_launches_validate(user_id: int, args: dict[str, Any]) -> str | None:
+    """Bloqueia a confirmação se não há nada pra apagar — evita um 'confirma
+    apagar tudo?' inútil quando o histórico já está vazio."""
+    try:
+        n = db.count_launches(user_id)
+    except Exception:
+        return None  # deixa seguir; o execute lida com lista vazia
+    if n <= 0:
+        return "🐷 Você não tem nenhum lançamento pra apagar — seu histórico já está limpo."
+    return None
+
+
+def _delete_all_launches_execute(user_id: int, args: dict[str, Any]) -> str:
+    try:
+        result = db.delete_all_launches_and_rollback(user_id)
+    except Exception as e:
+        return f"🐷 Não consegui apagar: {e}"
+
+    deleted = int(result.get("deleted") or 0)
+    failed = int(result.get("failed") or 0)
+    if deleted == 0 and failed == 0:
+        return "🐷 Não havia nenhum lançamento pra apagar."
+
+    plural = "s" if deleted != 1 else ""
+    msg = f"🗑️ Apaguei {deleted} lançamento{plural} e reverti o saldo."
+    if failed:
+        fp = "s" if failed != 1 else ""
+        msg += (
+            f"\n⚠️ {failed} lançamento{fp} antigo{fp} não pôde ser revertido "
+            f"automaticamente e foi mantido."
+        )
+    return msg
+
+
 TOOLS: list[Tool] = [
     Tool(
         schema={
@@ -721,5 +766,28 @@ TOOLS: list[Tool] = [
         summary=_delete_launch_summary,
         execute=_delete_launch_execute,
         validate=_delete_launch_validate,
+    ),
+    Tool(
+        schema={
+            "type": "function",
+            "function": {
+                "name": "delete_all_launches",
+                "description": (
+                    "Apaga TODOS os lançamentos (despesas e receitas da conta "
+                    "corrente) do usuário de uma vez e reverte o saldo. Use SOMENTE "
+                    "quando o user pedir explicitamente pra apagar/zerar/limpar "
+                    "TUDO: 'apaga todos os lançamentos', 'limpa meu histórico', "
+                    "'zera meus lançamentos', 'apaga tudo'. NÃO use pra apagar um "
+                    "lançamento específico — pra isso é `delete_launch`. "
+                    "ESCRITA DESTRUTIVA EM MASSA — pede confirmação, não tem undo."
+                ),
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        is_write=True,
+        requires_confirmation=True,
+        summary=_delete_all_launches_summary,
+        execute=_delete_all_launches_execute,
+        validate=_delete_all_launches_validate,
     ),
 ]

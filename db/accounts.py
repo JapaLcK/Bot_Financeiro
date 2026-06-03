@@ -763,6 +763,53 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
         conn.commit()
 
 
+def count_launches(user_id: int) -> int:
+    """Conta os lançamentos (despesas/receitas da conta corrente) do usuário."""
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select count(*) as n from launches where user_id=%s", (user_id,))
+            row = cur.fetchone()
+            return int(row["n"]) if row else 0
+
+
+def delete_all_launches_and_rollback(user_id: int) -> dict:
+    """Apaga TODOS os lançamentos do usuário, revertendo os efeitos de cada um.
+
+    Reusa `delete_launch_and_rollback` linha a linha (em vez de um `delete`
+    em massa) porque cada lançamento guarda seus efeitos colaterais no jsonb
+    `efeitos` — saldo da conta, caixinha, aporte/resgate de investimento,
+    pagamento de fatura. Apagar em massa sem reverter deixaria esses saldos
+    inconsistentes.
+
+    Ordena por `id desc` (mais novo primeiro): se um aporte criou um lote de
+    investimento e um resgate posterior mexeu nele, o resgate é desfeito antes
+    do aporte — senão a reversão do aporte falharia ("lote já teve resgate").
+
+    Retorna {"deleted": N, "failed": M}. `failed` cobre lançamentos legados
+    sem `efeitos` (não dá pra reverter com segurança) — esses são mantidos
+    intactos pra não corromper o saldo, em vez de apagados às cegas.
+    """
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id from launches where user_id=%s order by id desc",
+                (user_id,),
+            )
+            ids = [row["id"] for row in cur.fetchall()]
+
+    deleted = 0
+    failed = 0
+    for lid in ids:
+        try:
+            delete_launch_and_rollback(user_id, lid)
+            deleted += 1
+        except Exception:
+            failed += 1
+    return {"deleted": deleted, "failed": failed}
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # OFX import (idempotente)
 # ──────────────────────────────────────────────────────────────────────────────

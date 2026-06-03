@@ -1,0 +1,93 @@
+"""
+Regressão pra tool `delete_all_launches` da IA conversacional.
+
+Contexto do bug (screenshot WhatsApp): user mandou "Apague todos os lançamentos";
+a IA NÃO tinha tool pra isso e improvisou um "Confirma com sim ou não?" como
+texto livre — sem registrar pending. Aí o "Sim" caía no determinístico e morria
+em "Não entendi". Conserto: tool real `delete_all_launches` que pede confirmação
+de verdade (seta ai_pending_action), e o "sim" seguinte executa.
+
+Os testes do fluxo de confirmação NÃO tocam OpenAI: o caminho pending+"sim" em
+`_chat_inner` executa a tool e retorna ANTES de chamar o LLM, então roda mesmo
+com o kill switch de rede do conftest ativo.
+"""
+
+import db
+from db import add_launch_and_update_balance, get_balance
+from core.services.ai_chat import chat
+from core.services.ai_chat.tools import get_tool
+
+
+def _bal(uid: int) -> float:
+    return round(float(get_balance(uid)), 2)
+
+
+def test_delete_all_launches_tool_registrada():
+    tool = get_tool("delete_all_launches")
+    assert tool is not None, "tool delete_all_launches não registrada"
+    assert tool.is_write is True
+    assert tool.requires_confirmation is True, "precisa pedir confirmação (destrutivo em massa)"
+    assert tool.summary is not None and tool.validate is not None
+
+
+def test_delete_all_launches_db_reverte_saldo(user_id: int):
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    add_launch_and_update_balance(user_id, "despesa", 200, "luz", "paguei 200 luz")
+    add_launch_and_update_balance(user_id, "despesa", 50, "mercado", "gastei 50 mercado")
+    assert _bal(user_id) == 750.0
+    assert db.count_launches(user_id) == 3
+
+    result = db.delete_all_launches_and_rollback(user_id)
+    assert result == {"deleted": 3, "failed": 0}
+    assert db.count_launches(user_id) == 0
+    assert _bal(user_id) == 0.0, "saldo deve voltar ao estado pré-lançamentos"
+
+
+def test_delete_all_launches_validate_bloqueia_quando_vazio(user_id: int):
+    tool = get_tool("delete_all_launches")
+    # Sem lançamentos → valida com mensagem amigável (evita 'confirma apagar tudo?' inútil)
+    err = tool.validate(user_id, {})
+    assert err is not None and "nenhum lançamento" in err.lower()
+
+    # Com lançamento → valida None (segue pro fluxo de confirmação)
+    add_launch_and_update_balance(user_id, "despesa", 10, "cafe", "gastei 10 cafe")
+    assert tool.validate(user_id, {}) is None
+
+
+def test_delete_all_launches_confirmacao_sim_executa(user_id: int):
+    """End-to-end do caminho de confirmação, SEM OpenAI: seta o pending (como
+    a tool faria) e manda 'sim' — o chat() executa a tool e limpa o pending."""
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    add_launch_and_update_balance(user_id, "despesa", 300, "aluguel", "paguei 300 aluguel")
+    assert _bal(user_id) == 700.0
+
+    # Simula o que `_dispatch_tool` faz quando o LLM chama a tool de write.
+    db.ai_set_pending_action(
+        user_id,
+        "delete_all_launches",
+        {},
+        "apagar TODOS os seus lançamentos e reverter o saldo",
+    )
+    assert db.ai_get_pending_action(user_id) is not None
+
+    resp = chat(user_id, "sim", monthly_limit=1000, platform="whatsapp")
+
+    assert "apaguei" in resp.lower(), f"esperava confirmação de exclusão, veio: {resp!r}"
+    assert db.count_launches(user_id) == 0
+    assert _bal(user_id) == 0.0
+    assert db.ai_get_pending_action(user_id) is None, "pending deve ser limpo após executar"
+
+
+def test_delete_all_launches_confirmacao_nao_cancela(user_id: int):
+    """'não' após o pending NÃO apaga nada e limpa o pending."""
+    add_launch_and_update_balance(user_id, "despesa", 80, "uber", "gastei 80 uber")
+    assert db.count_launches(user_id) == 1
+
+    db.ai_set_pending_action(
+        user_id, "delete_all_launches", {}, "apagar TODOS os seus lançamentos"
+    )
+    resp = chat(user_id, "não", monthly_limit=1000, platform="whatsapp")
+
+    assert db.count_launches(user_id) == 1, "cancelar não pode apagar nada"
+    assert db.ai_get_pending_action(user_id) is None
+    assert resp  # alguma mensagem de "não fiz nada"
