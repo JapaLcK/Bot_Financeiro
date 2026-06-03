@@ -150,6 +150,46 @@ def test_execute_consistente_com_handler_tradicional(user_id):
             conn.commit()
 
 
+def test_execute_ticker_acao_nao_vira_despesa_no_cartao(user_id):
+    """Compra de ação (ticker B3) NÃO vira compra no cartão. O LLM confunde
+    'ITUB4' com o cartão Itaú — o guard determinístico barra antes de lançar."""
+    _create_card(user_id, "Nubank")
+
+    msg = _add_credit_purchase_execute(user_id, {
+        "valor": 77.63,
+        "descricao": "ITUB4",
+        "categoria": "ações",
+    })
+
+    assert "Compra no Crédito Registrada" not in msg
+    assert "ITUB4" in msg
+    assert "Investimentos" in msg
+    # Nada foi parar na fatura.
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select count(*) as n from credit_transactions where user_id=%s", (user_id,))
+            assert cur.fetchone()["n"] == 0
+
+
+def test_execute_ticker_no_meio_da_descricao(user_id):
+    """Detecta o ticker mesmo com quantidade junto ('10 PETR4')."""
+    _create_card(user_id, "Nubank")
+
+    msg = _add_credit_purchase_execute(user_id, {"valor": 100, "descricao": "10 PETR4"})
+
+    assert "Compra no Crédito Registrada" not in msg
+    assert "PETR4" in msg
+
+
+def test_execute_descricao_comum_nao_dispara_falso_positivo(user_id):
+    """Descrição comum (não-ticker) segue registrando no cartão normalmente."""
+    _create_card(user_id, "Nubank")
+
+    msg = _add_credit_purchase_execute(user_id, {"valor": 50, "descricao": "uber"})
+
+    assert "Compra no Crédito Registrada" in msg
+
+
 def test_handler_tradicional_aceita_credito_com_acento(user_id):
     """Bug: `t_low.startswith('credito')` perdia 'Crédito' porque `.lower()`
     preserva o acento. Agora aceita ambos."""

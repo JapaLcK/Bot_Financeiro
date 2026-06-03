@@ -20,12 +20,31 @@ enquanto.
 """
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Any
 
 import db
 
 from ._base import Tool
+
+
+# Ticker da B3: 4 letras + 1-2 dígitos, sufixo F opcional (fracionário).
+# Ex: ITUB4, PETR4, VALE3, BBAS3, MGLU3, MXRF11, HGLG11, ITUB4F.
+_B3_TICKER_RE = re.compile(r"^[A-Z]{4}\d{1,2}F?$")
+
+
+def _equity_ticker_in(descricao: str | None) -> str | None:
+    """Retorna o ticker B3 se a descrição indicar compra de ação/ativo, senão None.
+
+    Renda variável (ITUB4, PETR4...) é investimento, não consumo no cartão. O LLM
+    tende a confundir 'ITUB4' com o cartão Itaú e jogar na fatura — esta é a rede
+    de segurança determinística (o system prompt sozinho não basta)."""
+    for raw in (descricao or "").split():
+        token = raw.strip(".,;:!?")
+        if _B3_TICKER_RE.match(token):
+            return token
+    return None
 
 
 # ─── Read ───────────────────────────────────────────────────────────────────
@@ -287,6 +306,14 @@ def _parse_iso_date_or_none(s: str | None) -> "date | None":
 
 
 def _add_credit_purchase_execute(user_id: int, args: dict[str, Any]) -> str:
+    ticker = _equity_ticker_in(args.get("descricao"))
+    if ticker:
+        return (
+            f"🐷 {ticker} é compra de ação — isso é investimento, não gasto no cartão, "
+            f"então não lancei nada na fatura. Por enquanto eu não registro compra de "
+            f"ativo individual; pra acompanhar seus aportes, é na aba Investimentos do painel."
+        )
+
     try:
         valor = float(args.get("valor") or 0)
     except (TypeError, ValueError):

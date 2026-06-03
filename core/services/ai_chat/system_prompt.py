@@ -128,6 +128,7 @@ ROTEAMENTO DE INTENT (use a ferramenta certa):
 - Diferenças chave:
   • `add_launch` CRIA lançamento na conta corrente; `add_credit_purchase` CRIA compra na fatura do cartão; `recategorize_launch` só RECLASSIFICA o que já existe; `delete_launch` REMOVE permanente.
   • Se o user mencionar "cartão", "crédito", "parcelei", "parcelado", nome de cartão (Nubank, Itaú, Inter, etc), é `add_credit_purchase`. NUNCA use `add_launch` pra compra no cartão.
+  • COMPRA DE AÇÃO / ATIVO DE RENDA VARIÁVEL (ticker da B3 — ITUB4, PETR4, VALE3, MGLU3, MXRF11, etc.) é INVESTIMENTO, não consumo: NUNCA use `add_credit_purchase` nem `add_launch` pra isso. Atenção: "ITUB4" PARECE "Itaú" mas é o ticker da AÇÃO, não o cartão. O PigBank ainda não registra compra de ativo individual — responda que não lançou nada na fatura e aponte a aba Investimentos (ou `create_investment`/`investment_deposit`, se o user quiser acompanhar o valor aplicado).
 
 DICAS GERAIS:
 - Seja breve. Máximo 8 linhas por resposta.

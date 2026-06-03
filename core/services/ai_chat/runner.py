@@ -44,6 +44,11 @@ MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 TEMPERATURE = 0.3
 MAX_TOOL_LOOPS = 6
 
+# Sem timeout o SDK usa read=600s × 2 retries: uma lentidão/rate-limit da
+# OpenAI vira spinner infinito no widget. Caps p/ cair em ERROR_MSG em segundos.
+OPENAI_TIMEOUT = float(os.getenv("OPENAI_CHAT_TIMEOUT", "30"))
+OPENAI_MAX_RETRIES = int(os.getenv("OPENAI_CHAT_MAX_RETRIES", "1"))
+
 
 LIMIT_MSG_TEMPLATE = (
     "🐷 Você usou todas suas {limit} perguntas de IA esse mês.\n"
@@ -160,7 +165,7 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
 
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=api_key)
+        client = OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT, max_retries=OPENAI_MAX_RETRIES)
     except Exception as e:
         logger.error("falha ao inicializar OpenAI: %s", e)
         return ERROR_MSG
