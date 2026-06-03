@@ -425,8 +425,9 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
 
 def _delete_all_launches_summary(args: dict[str, Any]) -> str:
     return (
-        "apagar TODOS os seus lançamentos (todas as despesas e receitas da "
-        "conta corrente) e reverter os efeitos no saldo"
+        "apagar todas as despesas e receitas da conta corrente (e desfazer "
+        "pagamentos de fatura), revertendo o saldo da conta. Suas caixinhas e "
+        "investimentos NÃO são afetados"
     )
 
 
@@ -454,7 +455,10 @@ def _delete_all_launches_execute(user_id: int, args: dict[str, Any]) -> str:
         return "🐷 Não havia nenhum lançamento pra apagar."
 
     plural = "s" if deleted != 1 else ""
-    msg = f"🗑️ Apaguei {deleted} lançamento{plural} e reverti o saldo."
+    msg = (
+        f"🗑️ Apaguei {deleted} lançamento{plural} da conta corrente e reverti o "
+        f"saldo. Suas caixinhas e investimentos seguem intactos."
+    )
     if failed:
         fp = "s" if failed != 1 else ""
         msg += (
@@ -773,12 +777,13 @@ TOOLS: list[Tool] = [
             "function": {
                 "name": "delete_all_launches",
                 "description": (
-                    "Apaga TODOS os lançamentos (despesas e receitas da conta "
-                    "corrente) do usuário de uma vez e reverte o saldo. Use SOMENTE "
-                    "quando o user pedir explicitamente pra apagar/zerar/limpar "
-                    "TUDO: 'apaga todos os lançamentos', 'limpa meu histórico', "
-                    "'zera meus lançamentos', 'apaga tudo'. NÃO use pra apagar um "
-                    "lançamento específico — pra isso é `delete_launch`. "
+                    "Apaga de uma vez todas as despesas e receitas da CONTA "
+                    "CORRENTE (e desfaz pagamentos de fatura), revertendo o saldo "
+                    "da conta. NÃO mexe em caixinhas nem investimentos — eles ficam "
+                    "intactos. Use SOMENTE quando o user pedir explicitamente pra "
+                    "apagar/zerar/limpar TUDO: 'apaga todos os lançamentos', 'limpa "
+                    "meu histórico', 'zera meus lançamentos', 'apaga tudo'. NÃO use "
+                    "pra apagar um lançamento específico — pra isso é `delete_launch`. "
                     "ESCRITA DESTRUTIVA EM MASSA — pede confirmação, não tem undo."
                 ),
                 "parameters": {"type": "object", "properties": {}},

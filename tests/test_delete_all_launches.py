@@ -91,3 +91,63 @@ def test_delete_all_launches_confirmacao_nao_cancela(user_id: int):
     assert db.count_launches(user_id) == 1, "cancelar não pode apagar nada"
     assert db.ai_get_pending_action(user_id) is None
     assert resp  # alguma mensagem de "não fiz nada"
+
+
+def _pocket_balance(user_id: int, name: str):
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select balance from pockets where user_id=%s and lower(name)=lower(%s)",
+                (user_id, name),
+            )
+            row = cur.fetchone()
+            return float(row["balance"]) if row else None
+
+
+def _investment_balance(user_id: int, name: str):
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select balance from investments where user_id=%s and lower(name)=lower(%s)",
+                (user_id, name),
+            )
+            row = cur.fetchone()
+            return float(row["balance"]) if row else None
+
+
+def test_delete_all_launches_preserva_caixinha_e_investimento(user_id: int):
+    """Regressão do bug 'apaga tudo zerava o usuário do começo': caixinhas e
+    investimentos NÃO podem ser tocados — só despesas/receitas (e pagamento de
+    fatura) somem.
+
+    Armadilha que isto trava: criar caixinha/investimento gera um launch com
+    `is_internal_movement=false`; se o filtro fosse por essa flag (em vez de
+    `tipo in ('despesa','receita')`), apagá-lo deletaria a caixinha/o
+    investimento junto (efeitos.create_pocket → delete from pockets)."""
+    from db.pockets import create_pocket, pocket_deposit_from_account
+    from db.investments import create_investment_db, investment_deposit_from_account
+
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "salario")
+    add_launch_and_update_balance(user_id, "despesa", 200, "luz", "paguei 200 luz")
+    create_pocket(user_id, "viagem")
+    pocket_deposit_from_account(user_id, "viagem", 300, "guardando")
+    create_investment_db(user_id, "CDB Teste", 1.0, "monthly")
+    investment_deposit_from_account(user_id, "CDB Teste", 250)
+
+    # só a despesa e a receita entram no conjunto "apagável"; a criação e os
+    # aportes de caixinha/investimento ficam de fora.
+    assert db.count_launches(user_id) == 2
+
+    pocket_before = _pocket_balance(user_id, "viagem")
+    inv_before = _investment_balance(user_id, "CDB Teste")
+    assert pocket_before == 300.0
+    assert inv_before is not None and inv_before >= 250.0
+
+    result = db.delete_all_launches_and_rollback(user_id)
+    assert result == {"deleted": 2, "failed": 0}
+
+    # o ponto do teste: caixinha e investimento INTACTOS (registro + saldo).
+    assert _pocket_balance(user_id, "viagem") == pocket_before, "caixinha não pode ser tocada"
+    assert _investment_balance(user_id, "CDB Teste") == inv_before, "investimento não pode ser tocado"
+    # as despesas/receitas sumiram.
+    assert db.count_launches(user_id) == 0

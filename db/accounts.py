@@ -763,28 +763,56 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
         conn.commit()
 
 
+# Lançamentos "da conta corrente" no sentido do produto: SÓ `despesa` e `receita`.
+# Isso já cobre os pagamentos de fatura (gravados como tipo='despesa') e exclui
+# TODO o ciclo de vida de caixinha/investimento, que usa tipos próprios
+# (deposito_caixinha, aporte_investimento, criar_caixinha, create_investment,
+# saque_caixinha, resgate_investimento...).
+#
+# NÃO use `is_internal_movement = false`: a CRIAÇÃO de caixinha/investimento gera
+# um launch com is_internal_movement=false, e apagá-lo deleta a caixinha/o
+# investimento junto (efeitos.create_pocket → delete from pockets). O filtro por
+# tipo evita essa armadilha. Validado no staging: 0 launches despesa/receita
+# carregam efeitos de caixinha/investimento.
+#
+# Usado por count_launches e delete_all_launches_and_rollback pra ficarem
+# consistentes (o que se conta é o que se apaga).
+_CONTA_CORRENTE_LAUNCH_FILTER = "tipo in ('despesa', 'receita')"
+
+
 def count_launches(user_id: int) -> int:
-    """Conta os lançamentos (despesas/receitas da conta corrente) do usuário."""
+    """Conta os lançamentos da conta corrente (despesas/receitas + pagamentos de
+    fatura) — o conjunto que `delete_all_launches_and_rollback` apaga. NÃO conta
+    movimentação interna de caixinha/investimento."""
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("select count(*) as n from launches where user_id=%s", (user_id,))
+            cur.execute(
+                "select count(*) as n from launches "
+                f"where user_id=%s and {_CONTA_CORRENTE_LAUNCH_FILTER}",
+                (user_id,),
+            )
             row = cur.fetchone()
             return int(row["n"]) if row else 0
 
 
 def delete_all_launches_and_rollback(user_id: int) -> dict:
-    """Apaga TODOS os lançamentos do usuário, revertendo os efeitos de cada um.
+    """Apaga os lançamentos da CONTA CORRENTE (despesas/receitas) e desfaz
+    pagamentos de fatura, revertendo os efeitos de cada um no saldo da conta.
+
+    NÃO toca em caixinhas nem investimentos: o depósito/saque de caixinha e o
+    aporte/resgate de investimento são `is_internal_movement=true` sem `bill_id`,
+    então ficam de fora do filtro — seus saldos e registros permanecem intactos.
+    (Sem esse filtro, "apagar tudo" zerava caixinhas/investimentos junto e dava
+    a sensação de resetar o usuário do zero.)
 
     Reusa `delete_launch_and_rollback` linha a linha (em vez de um `delete`
     em massa) porque cada lançamento guarda seus efeitos colaterais no jsonb
-    `efeitos` — saldo da conta, caixinha, aporte/resgate de investimento,
-    pagamento de fatura. Apagar em massa sem reverter deixaria esses saldos
-    inconsistentes.
+    `efeitos` — saldo da conta e reabertura de fatura. Apagar em massa sem
+    reverter deixaria esses saldos inconsistentes.
 
-    Ordena por `id desc` (mais novo primeiro): se um aporte criou um lote de
-    investimento e um resgate posterior mexeu nele, o resgate é desfeito antes
-    do aporte — senão a reversão do aporte falharia ("lote já teve resgate").
+    Ordena por `id desc` (mais novo primeiro) por segurança em reversões
+    encadeadas (ex.: múltiplos pagamentos da mesma fatura).
 
     Retorna {"deleted": N, "failed": M}. `failed` cobre lançamentos legados
     sem `efeitos` (não dá pra reverter com segurança) — esses são mantidos
@@ -794,7 +822,9 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id from launches where user_id=%s order by id desc",
+                "select id from launches "
+                f"where user_id=%s and {_CONTA_CORRENTE_LAUNCH_FILTER} "
+                "order by id desc",
                 (user_id,),
             )
             ids = [row["id"] for row in cur.fetchall()]
