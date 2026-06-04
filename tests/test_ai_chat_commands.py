@@ -217,3 +217,61 @@ def test_pending_action_check_falha_continua_como_sem_pending(patches, monkeypat
     # Com prefix, a IA é chamada normalmente apesar da falha no check de pending.
     out = mod.handle_ai_chat_command(42, "piggy saldo", platform="whatsapp")
     assert out == "🐷 IA disse: saldo"
+
+
+# ─── Guard anti-sequestro: comando determinístico não é engolido por ──────────
+# ─── ai_pending órfão (regressão das confirmações empilhadas/inconsistentes) ───
+#
+# O ai_pending só existe pra confirmar um write (delete, etc.) esperando
+# "sim"/"não". Se o user, em vez de confirmar, manda OUTRO comando determinístico
+# claro, ele abandonou a confirmação: o guard limpa o pending órfão e devolve
+# None, pra o comando rodar pelo fluxo determinístico em vez de a IA gerar uma
+# 2ª confirmação (com formatação diferente — origem do bug da screenshot).
+
+
+def test_pending_orfao_comando_deterministico_limpa_e_devolve_none(patches):
+    patches["is_pro"] = True
+    patches["pending"] = {"tool_name": "delete_launch"}
+    out = mod.handle_ai_chat_command(42, "Apagar id 5", platform="whatsapp")
+    assert out is None, "comando determinístico deve seguir pelo route(), não pela IA"
+    assert patches["clear_pending_called"] is True, "pending órfão deve ser limpo"
+    assert patches["ai_called_with"] is None, "IA não pode gerar uma 2ª confirmação"
+
+
+def test_pending_orfao_outro_comando_deterministico_tambem_limpa(patches):
+    # "saldo" classifica com confiança máxima → mesmo tratamento.
+    patches["is_pro"] = True
+    patches["pending"] = {"tool_name": "delete_all_launches"}
+    out = mod.handle_ai_chat_command(42, "saldo", platform="whatsapp")
+    assert out is None
+    assert patches["clear_pending_called"] is True
+    assert patches["ai_called_with"] is None
+
+
+def test_pending_sim_nao_dispara_guard_vai_pra_ia(patches):
+    """'sim' é a resposta esperada da confirmação — o guard NÃO pode limpar o
+    pending; a msg segue pra IA retomar a ação."""
+    patches["is_pro"] = True
+    patches["pending"] = {"tool_name": "delete_launch"}
+    out = mod.handle_ai_chat_command(42, "sim", platform="whatsapp")
+    assert out == "🐷 IA disse: sim"
+    assert patches["clear_pending_called"] is False
+    assert patches["ai_called_with"] is not None
+
+
+def test_pending_nao_dispara_guard_vai_pra_ia(patches):
+    patches["is_pro"] = True
+    patches["pending"] = {"tool_name": "delete_launch"}
+    out = mod.handle_ai_chat_command(42, "não", platform="whatsapp")
+    assert out == "🐷 IA disse: não"
+    assert patches["clear_pending_called"] is False
+
+
+def test_pending_frase_ambigua_nao_dispara_guard_vai_pra_ia(patches):
+    """Frase de baixa confiança (out_of_scope) NÃO mata o pending — pode ser
+    continuação da conversa; segue pra IA, que retoma ou cancela."""
+    patches["is_pro"] = True
+    patches["pending"] = {"tool_name": "delete_launch"}
+    out = mod.handle_ai_chat_command(42, "na verdade deixa quieto", platform="whatsapp")
+    assert patches["clear_pending_called"] is False
+    assert patches["ai_called_with"] is not None

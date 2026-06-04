@@ -476,7 +476,7 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         from core.services.ai_chat_commands import handle_ai_chat_command
         ai_reply = handle_ai_chat_command(uid, text, platform=platform)
         if ai_reply is not None:
-            return [OutgoingMessage(text=ai_reply)]
+            return [OutgoingMessage(text=format_for_platform(ai_reply, platform))]
 
         intent_result = classify(text, user_id=uid)
 
@@ -517,7 +517,7 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
                     ai_reply = ai_chat_run(
                         uid, text, monthly_limit=AI_CHAT_MONTHLY_LIMIT, platform=platform,
                     )
-                    return [OutgoingMessage(text=ai_reply)]
+                    return [OutgoingMessage(text=format_for_platform(ai_reply, platform))]
             except Exception as exc:
                 logger.warning(
                     "ai fallback falhou pra user %s: %s — caindo no fluxo normal",
@@ -545,7 +545,7 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
                     ai_reply = ai_chat_run(
                         uid, text, monthly_limit=AI_CHAT_MONTHLY_LIMIT, platform=platform,
                     )
-                    return [OutgoingMessage(text=ai_reply)]
+                    return [OutgoingMessage(text=format_for_platform(ai_reply, platform))]
             except Exception as exc:
                 logger.warning(
                     "help→AI fallback falhou pra user %s: %s — devolve help original",

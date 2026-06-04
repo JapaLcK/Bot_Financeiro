@@ -108,6 +108,26 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
     user_message: str | None = None
 
     if has_pending:
+        # Guard anti-sequestro: o ai_pending só existe pra confirmar um write
+        # (delete, etc.) esperando "sim"/"não". Se o user, em vez de confirmar,
+        # manda OUTRO comando determinístico claro (ex: "Apagar id 5", "saldo"),
+        # ele abandonou a confirmação — limpa o pending órfão e devolve None pra
+        # o comando rodar pelo fluxo determinístico, em vez de ser engolido pela
+        # IA (que geraria uma 2ª confirmação, inconsistente e empilhada).
+        # "sim"/"não" (confirm.*) e frases ambíguas (out_of_scope/baixa
+        # confiança) seguem pra IA normalmente — podem retomar/cancelar o pending.
+        try:
+            from core.intent_classifier import classify as _classify
+            _res = _classify(text, user_id=user_id)
+            _is_confirm = _res.intent in ("confirm.yes", "confirm.no")
+            if (not _is_confirm
+                    and _res.intent != "out_of_scope"
+                    and _res.confidence >= 0.55):
+                db.ai_clear_pending_action(user_id)
+                return None
+        except Exception as exc:
+            logger.warning("guard anti-sequestro do ai_pending falhou: %s", exc)
+
         # Pending action sempre passa, com texto cru. Se Pro também tem
         # prefix, removemos pra não confundir a IA.
         if user_is_pro:
