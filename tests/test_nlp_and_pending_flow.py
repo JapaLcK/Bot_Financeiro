@@ -1147,3 +1147,81 @@ def test_handle_incoming_clarification_tem_precedencia_sobre_fallback_ia():
     assert "despesa registrada" in response.lower(), f"esperava lançamento, veio: {response!r}"
     assert round(float(get_balance(uid)), 2) == -77.90
     assert get_pending_action(uid) is None  # clarification consumida
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Guard anti-órfão da confirmação destrutiva determinística.
+#
+# Footgun da screenshot: "apagar #N" arma uma confirmação no pending_actions
+# (TTL 10 min). Se o user manda OUTRO comando claro ("saldo") em vez de
+# "sim/não", o comando roda mas NÃO limpava o pending — então um "sim" depois
+# disparava a exclusão antiga sem querer. O guard limpa o pending órfão quando
+# chega um comando claro (alta confiança, não-confirmação, não-out_of_scope).
+# ───────────────────────────────────────────────────────────────────────────
+
+
+def test_route_comando_claro_cancela_delete_pendente_orfao(user_id):
+    """Confirmação de exclusão armada + 'saldo' no meio → pending é abandonado.
+    Um 'sim' depois NÃO apaga o lançamento (continua vivo, saldo intacto)."""
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    launch_id, user_seq, _bal = add_launch_and_update_balance(
+        user_id, "despesa", 200, "conta de luz", "paguei 200 conta de luz"
+    )
+    set_pending_action(
+        user_id, "delete_launch",
+        {"launch_id": int(launch_id), "display_id": int(user_seq)},
+    )
+
+    # Comando claro no meio (balance.check, confiança alta) → abandona o pending.
+    msg_saldo = IncomingMessage(platform="discord", user_id=user_id, text="saldo")
+    route(classify(msg_saldo.text), msg_saldo)
+    assert get_pending_action(user_id) is None, "comando claro deve limpar o pending órfão"
+
+    # 'sim' depois não acha nada pra confirmar — o lançamento sobrevive.
+    msg_sim = IncomingMessage(platform="discord", user_id=user_id, text="sim")
+    route(classify(msg_sim.text), msg_sim)
+
+    assert get_pending_action(user_id) is None
+    # saldo: 1000 - 200 = 800 (a despesa NÃO foi revertida)
+    assert round(float(get_balance(user_id)), 2) == 800.00
+    assert launch_id in [r["id"] for r in list_launches(user_id, limit=10)]
+
+
+def test_route_sim_imediato_apaga_normalmente(user_id):
+    """Sem comando no meio, o fluxo normal segue intacto: 'sim' logo após a
+    confirmação apaga o lançamento (o guard não dispara em confirm.yes)."""
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    launch_id, user_seq, _bal = add_launch_and_update_balance(
+        user_id, "despesa", 200, "conta de luz", "paguei 200 conta de luz"
+    )
+    set_pending_action(
+        user_id, "delete_launch",
+        {"launch_id": int(launch_id), "display_id": int(user_seq)},
+    )
+
+    msg_sim = IncomingMessage(platform="discord", user_id=user_id, text="sim")
+    response = route(classify(msg_sim.text), msg_sim)
+
+    assert "apagado" in response.lower()
+    assert get_pending_action(user_id) is None
+    # despesa revertida → volta pra 1000
+    assert round(float(get_balance(user_id)), 2) == 1000.00
+
+
+def test_route_frase_ambigua_nao_cancela_delete_pendente(user_id):
+    """Frase de baixa confiança/out_of_scope NÃO mata a confirmação — pode ser
+    continuação da conversa; o pending sobrevive pra um 'sim/não' seguinte."""
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    launch_id, user_seq, _bal = add_launch_and_update_balance(
+        user_id, "despesa", 200, "conta de luz", "paguei 200 conta de luz"
+    )
+    set_pending_action(
+        user_id, "delete_launch",
+        {"launch_id": int(launch_id), "display_id": int(user_seq)},
+    )
+
+    msg = IncomingMessage(platform="discord", user_id=user_id, text="na verdade deixa quieto")
+    route(classify(msg.text), msg)
+
+    pend = get_pending_action(user_id)
+    assert pend is not None and pend["action_type"] == "delete_launch"

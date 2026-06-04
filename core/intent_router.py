@@ -44,6 +44,17 @@ DESTRUCTIVE_INTENTS = {
     "investments.delete",
 }
 
+# action_types de pending_actions que representam uma confirmação destrutiva
+# armada (esperando "sim"/"não"). Diferente de DESTRUCTIVE_INTENTS (nomes de
+# intent): aqui são os action_type gravados por propose_delete no DB. Usado
+# pelo guard anti-órfão em route().
+DESTRUCTIVE_PENDING_TYPES = {
+    "delete_launch",
+    "delete_launch_bulk",
+    "delete_pocket",
+    "delete_investment",
+}
+
 OUT_OF_SCOPE_MSG = (
     "Só consigo ajudar com finanças pessoais: "
     "saldo, lançamentos, cartões, caixinhas e investimentos.\n"
@@ -119,6 +130,25 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
         resp = h_credit.resolve_pending(user_id, text, pending)
         if resp is not None:
             return resp
+
+    # -----------------------------------------------------------------------
+    # 0c. Guard anti-órfão: uma confirmação destrutiva armada (delete_launch/
+    #     pocket/investment esperando "sim"/"não") só vale enquanto o user está
+    #     respondendo a confirmação. Se, em vez de confirmar, ele manda OUTRO
+    #     comando claro (saldo, listar, novo lançamento, outro apagar...), ele
+    #     abandonou a confirmação — limpa o pending pra que um "sim" posterior
+    #     não dispare a exclusão antiga. (Footgun: "apagar #285" → "saldo" →
+    #     "sim" apagava #285 sem querer.) confirm.yes/no resolvem normalmente;
+    #     out_of_scope e baixa confiança seguem sem mexer no pending (podem ser
+    #     continuação da conversa que ainda retoma ou cancela a confirmação).
+    # -----------------------------------------------------------------------
+    if (pending
+            and pending.get("action_type") in DESTRUCTIVE_PENDING_TYPES
+            and intent not in ("confirm.yes", "confirm.no")
+            and intent != "out_of_scope"
+            and confidence >= 0.55):
+        db.clear_pending_action(user_id)
+        pending = None
 
     # -----------------------------------------------------------------------
     # 1. Confirmações (sim / não) para ações destrutivas
