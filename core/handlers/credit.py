@@ -1720,10 +1720,6 @@ def handle(user_id: int, text: str) -> str | None:
         t_low = "parcelar " + t_low[len("parcelei "):]
 
     if t_low.startswith("parcelar"):
-        valor = parse_money(t_low)
-        if valor is None:
-            return "Use: parcelar 300 em 3x no cartao nubank"
-
         # ── número de parcelas ──────────────────────────────────────────────
         # Aceita variações: "em 3x", "em 3 vezes", "em 3", "3x" — usuário fala
         # de várias formas. Tenta "em N" primeiro (mais específico, evita
@@ -1732,12 +1728,36 @@ def handle(user_id: int, text: str) -> str | None:
         n = 1
         mx = re.search(r"\bem\s+(\d+)\s*(?:x|vezes?|parcelas?)?\b", t_low)
         if mx is None:
-            mx = re.search(r"(\d+)\s*x\b", t_low)
+            # sem "em": aceita "3x", "3 vezes", "3 parcelas" (a unidade explícita
+            # garante que é a contagem, não o valor da compra).
+            mx = re.search(r"(\d+)\s*(?:x|vezes?|parcelas?)\b", t_low)
         if mx:
             try:
                 n = int(mx.group(1))
             except Exception:
                 n = 1
+
+        # ── valor: total financiado OU valor da parcela ─────────────────────
+        # Dois jeitos naturais de informar o dinheiro:
+        #   (a) TOTAL financiado: "parcelar 958,80 em 12x" → divide por N (padrão).
+        #   (b) valor da PARCELA: "parcelei 12x de 79,90"  → total = parcela × N.
+        # O "de <valor>" logo após a contagem ("Nx de Y") distingue (b): é o
+        # número que a maquininha/app mostra ("12x de R$ 79,90"), com o juros já
+        # embutido — assim o user não precisa multiplicar na mão. Sem o "de Y",
+        # cai no total (a) e divide, como antes.
+        valor = None
+        parc_m = re.search(
+            r"\b\d+\s*(?:x|vezes?|parcelas?)\s+de\s+((?:r\$\s*)?\d[\d.,]*)",
+            t_low,
+        )
+        if parc_m and n > 1:
+            parcela_valor = parse_money(parc_m.group(1))
+            if parcela_valor is not None:
+                valor = round(parcela_valor * n, 2)
+        if valor is None:
+            valor = parse_money(t_low)
+        if valor is None:
+            return "Use: parcelar 300 em 3x no cartao nubank"
 
         # ── data ────────────────────────────────────────────────────────────
         dt_evento, rest2 = extract_date_from_text(t)
@@ -1782,6 +1802,13 @@ def handle(user_id: int, text: str) -> str | None:
         # ── descrição (o que sobrar) ─────────────────────────────────────────
         desc_clean = rest2
         desc_clean = re.sub(r"\bparcelei?\b", "", desc_clean, flags=re.IGNORECASE)
+        # remove o bloco "Nx de Y" inteiro (incl. o "de" e o valor da parcela)
+        # ANTES da remoção genérica de números — senão o "de" sobra solto na
+        # descrição ("parcelei 12x de 79,90 celular" → "de celular").
+        desc_clean = re.sub(
+            r"\b\d+\s*(?:x|vezes?|parcelas?)\s+de\s+(?:r\$\s*)?\d[\d.,]*",
+            "", desc_clean, flags=re.IGNORECASE,
+        )
         desc_clean = re.sub(r"\b\d+[\.,]?\d*\b", "", desc_clean)
         desc_clean = re.sub(r"\b\d+\s*x\b", "", desc_clean, flags=re.IGNORECASE)
         desc_clean = re.sub(r"\bem\b", "", desc_clean, flags=re.IGNORECASE)

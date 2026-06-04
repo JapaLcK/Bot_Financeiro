@@ -29,6 +29,26 @@ def _last_group_id_count(user_id: int):
             return (row["group_id"], int(row["n"])) if row else (None, 0)
 
 
+def _group_summary(user_id: int, group_id):
+    """Retorna (qtd, total, valor_parcela, nota) do parcelamento `group_id`."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select count(*) as n, sum(valor) as total, "
+                "min(valor) as vmin, max(nota) as nota "
+                "from credit_transactions "
+                "where user_id = %s and group_id = %s",
+                (user_id, group_id),
+            )
+            row = cur.fetchone()
+            return (
+                int(row["n"]),
+                float(row["total"]),
+                float(row["vmin"]),
+                row["nota"],
+            )
+
+
 def test_parcelei_600_em_3_sem_x(user_id):
     """Bug do Lucas: 'parcelei 600 em 3' deve criar 3 parcelas (não 1)."""
     _seed_card(user_id)
@@ -72,3 +92,60 @@ def test_parcelar_500_3x_sem_em(user_id):
     assert msg is not None
     _, n = _last_group_id_count(user_id)
     assert n == 3
+
+
+# ── "Nx de Y" = valor da PARCELA (juros já embutido) → total = parcela × N ────
+
+def test_parcelei_12x_de_79_90_usa_valor_parcela(user_id):
+    """'parcelei 12x de 79,90' → 12 parcelas, total 958,80 (não 12÷algo).
+
+    O '12x de 79,90' é o que a maquininha/app mostra com o juros embutido; o
+    bot multiplica pelo número de parcelas em vez de exigir a conta na mão.
+    """
+    _seed_card(user_id)
+    msg = handle(user_id, "parcelei 12x de 79,90 celular")
+    assert msg is not None
+    gid, n = _last_group_id_count(user_id)
+    assert n == 12, f"esperava 12 parcelas, criou {n}"
+    _, total, vparc, nota = _group_summary(user_id, gid)
+    assert total == 958.80, f"esperava total 958,80, veio {total}"
+    assert vparc == 79.90, f"esperava parcela 79,90, veio {vparc}"
+    # o "de" e o valor da parcela não podem vazar na descrição
+    assert nota == "celular", f"descrição suja: {nota!r}"
+
+
+def test_parcelei_em_12x_de_79_90(user_id):
+    """Variação com 'em': 'parcelei em 12x de 79,90' → mesmo resultado."""
+    _seed_card(user_id)
+    msg = handle(user_id, "parcelei em 12x de 79,90 celular")
+    assert msg is not None
+    gid, n = _last_group_id_count(user_id)
+    assert n == 12
+    _, total, vparc, nota = _group_summary(user_id, gid)
+    assert total == 958.80
+    assert vparc == 79.90
+    assert nota == "celular"
+
+
+def test_parcelei_3_vezes_de_100(user_id):
+    """'3 vezes de 100' (coloquial) → total 300."""
+    _seed_card(user_id)
+    msg = handle(user_id, "parcelei 3 vezes de 100 geladeira")
+    assert msg is not None
+    gid, n = _last_group_id_count(user_id)
+    assert n == 3
+    _, total, vparc, _ = _group_summary(user_id, gid)
+    assert total == 300.00
+    assert vparc == 100.00
+
+
+def test_parcelar_total_em_12x_continua_dividindo(user_id):
+    """Regressão: 'parcelar 958,80 em 12x' (TOTAL, sem 'de') ainda divide."""
+    _seed_card(user_id)
+    msg = handle(user_id, "parcelar 958,80 em 12x celular")
+    assert msg is not None
+    gid, n = _last_group_id_count(user_id)
+    assert n == 12
+    _, total, vparc, _ = _group_summary(user_id, gid)
+    assert total == 958.80, f"total deveria ser o informado 958,80, veio {total}"
+    assert vparc == 79.90, f"958,80÷12 = 79,90, veio {vparc}"
