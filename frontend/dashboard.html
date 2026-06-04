@@ -1585,6 +1585,18 @@ body.light .chip-val.b { background:linear-gradient(135deg, #6d28d9, #2563eb); -
 .tipo-opt.active.aporte    { background:rgba(52,211,153,.14);border-color:rgba(52,211,153,.45);color:#a7f3d0; }
 .tipo-opt.active.resgate   { background:rgba(248,113,113,.14);border-color:rgba(248,113,113,.45);color:#fecaca; }
 .tipo-opt.active.novo-inv  { background:rgba(96,165,250,.16);border-color:rgba(96,165,250,.45);color:#bfdbfe; }
+/* Toggle "valor da parcela" vs "valor total" + preview do parcelamento */
+.valor-mode-toggle { display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:8px; }
+.vmode-opt { background:rgba(255,255,255,.05);border:1px solid var(--glass-border);
+  border-radius:9px;padding:8px 6px;cursor:pointer;text-align:center;
+  font-size:.74rem;font-weight:650;color:var(--text-2);transition:all .2s var(--ease); }
+.vmode-opt:hover { background:rgba(255,255,255,.08);color:var(--text); }
+.vmode-opt.active { background:rgba(167,139,250,.16);border-color:rgba(167,139,250,.45);color:#ddd6fe; }
+.parc-preview { font-size:.78rem;color:var(--text-2);margin:0;
+  background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.2);
+  border-radius:8px;padding:8px 11px;line-height:1.4; }
+.parc-preview strong { color:var(--text);font-weight:700; }
+.parc-preview.empty { display:none; }
 .modal-inp.cat-select { appearance:none;-webkit-appearance:none;cursor:pointer;
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='rgba(255,255,255,.5)' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat:no-repeat;background-position:right 14px center;padding-right:36px; }
@@ -2427,7 +2439,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 
     <div class="modal-row" id="launch-parcelas-row" style="display:none">
       <label class="modal-label" for="launch-parcelas">Parcelas</label>
-      <select class="modal-inp cat-select" id="launch-parcelas">
+      <select class="modal-inp cat-select" id="launch-parcelas" onchange="syncParcUI()">
         <option value="1">1x (à vista)</option>
         <option value="2">2x</option>
         <option value="3">3x</option>
@@ -2443,6 +2455,14 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
         <option value="18">18x</option>
         <option value="24">24x</option>
       </select>
+    </div>
+
+    <div class="modal-row" id="launch-valor-mode-row" style="display:none">
+      <div class="valor-mode-toggle" role="radiogroup" aria-label="O valor digitado é o da parcela ou o total?">
+        <button type="button" class="vmode-opt active" data-vmode="parcela" onclick="setValorMode('parcela')" role="radio" aria-checked="true">Valor da parcela</button>
+        <button type="button" class="vmode-opt" data-vmode="total" onclick="setValorMode('total')" role="radio" aria-checked="false">Valor total</button>
+      </div>
+      <p class="parc-preview empty" id="launch-parc-preview"></p>
     </div>
 
     <div class="modal-row">
@@ -8461,6 +8481,10 @@ const LAUNCH_CATEGORIES = {
 
 let launchTipo = "despesa";
 let launchSubmitting = false;
+// Quando parcelado, o "Valor (R$)" digitado pode ser o da PARCELA ("12x de
+// 79,90", já com juros embutido) ou o TOTAL financiado. Default = parcela,
+// que é o número que o app/maquininha mostra — poupa a conta na mão.
+let launchValorMode = "parcela";
 
 function setLaunchTipo(tipo) {
   if (!["receita","despesa","credito"].includes(tipo)) return;
@@ -8482,7 +8506,58 @@ function setLaunchTipo(tipo) {
     parcRow.style.display = "none";
     document.getElementById("launch-parcelas").value = "1";
   }
+  syncParcUI();
   populateLaunchCategories();
+}
+
+/* ─── Parcelamento: toggle parcela/total + preview ao vivo ──────────────── */
+function setValorMode(mode) {
+  if (!["parcela","total"].includes(mode)) return;
+  launchValorMode = mode;
+  document.querySelectorAll("#launch-valor-mode-row .vmode-opt").forEach(el => {
+    const on = el.dataset.vmode === mode;
+    el.classList.toggle("active", on);
+    el.setAttribute("aria-checked", String(on));
+  });
+  updateParcPreview();
+}
+
+function _launchParcCount() {
+  const parc = parseInt(document.getElementById("launch-parcelas").value || "1", 10);
+  return Number.isFinite(parc) ? parc : 1;
+}
+
+// Visibilidade do toggle (só crédito parcelado) + atualiza o preview.
+function syncParcUI() {
+  const row = document.getElementById("launch-valor-mode-row");
+  if (!row) return;
+  const show = launchTipo === "credito" && _launchParcCount() > 1;
+  row.style.display = show ? "" : "none";
+  updateParcPreview();
+}
+
+// "12× de R$ 79,90 = total R$ 958,80" — deriva o lado que falta a partir do modo.
+function updateParcPreview() {
+  const el = document.getElementById("launch-parc-preview");
+  if (!el) return;
+  const parc = _launchParcCount();
+  const raw = (document.getElementById("launch-valor").value || "").replace(",", ".");
+  const v = parseFloat(raw);
+  if (launchTipo !== "credito" || parc <= 1 || !v || isNaN(v) || v <= 0) {
+    el.classList.add("empty");
+    el.textContent = "";
+    return;
+  }
+  let parcela, total;
+  if (launchValorMode === "parcela") {
+    parcela = v;
+    total = Math.round(v * parc * 100) / 100;
+  } else {
+    total = v;
+    parcela = Math.round((v / parc) * 100) / 100;
+  }
+  el.classList.remove("empty");
+  el.innerHTML = `${parc}× de <strong>${fmt(parcela)}</strong> = total <strong>${fmt(total)}</strong>`;
 }
 
 function populateLaunchCards() {
@@ -8515,12 +8590,15 @@ function populateLaunchCategories() {
 
 function openLaunchModal(opts) {
   opts = opts || {};
+  setValorMode("parcela");           // reseta o toggle pro default a cada abertura
   setLaunchTipo(opts.tipo || "despesa");
   document.getElementById("launch-valor").value = opts.valor || "";
   document.getElementById("launch-alvo").value = opts.alvo || "";
   document.getElementById("launch-nota").value = opts.nota || "";
   document.getElementById("launch-categoria").value = opts.categoria || "";
   if (opts.card_id) document.getElementById("launch-card").value = String(opts.card_id);
+  if (opts.parcelas) document.getElementById("launch-parcelas").value = String(opts.parcelas);
+  syncParcUI();                       // recalcula visibilidade + preview com os valores já setados
   hideLaunchError();
   document.getElementById("launch-overlay").classList.add("open");
   setTimeout(() => document.getElementById("launch-valor").focus(), 50);
@@ -8830,6 +8908,7 @@ async function submitLaunch() {
 
   let cardId = null;
   let parcelas = null;
+  let valorToSend = valor;
   if (launchTipo === "credito") {
     cardId = document.getElementById("launch-card").value;
     if (!cardId) {
@@ -8837,7 +8916,14 @@ async function submitLaunch() {
       return;
     }
     const parc = parseInt(document.getElementById("launch-parcelas").value || "1", 10);
-    if (Number.isFinite(parc) && parc > 1) parcelas = parc;
+    if (Number.isFinite(parc) && parc > 1) {
+      parcelas = parc;
+      // Modo "parcela": o valor digitado é o de cada parcela → total = parcela × N.
+      // O endpoint sempre recebe o TOTAL e divide de volta por N (mesma lógica do bot).
+      if (launchValorMode === "parcela") {
+        valorToSend = Math.round(valor * parc * 100) / 100;
+      }
+    }
   }
 
   const btn = document.getElementById("launch-submit-btn");
@@ -8853,7 +8939,7 @@ async function submitLaunch() {
       headers: csrfHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         tipo: launchTipo,
-        valor,
+        valor: valorToSend,
         alvo: alvo || null,
         nota: nota || null,
         categoria: categoria || null,
@@ -8886,6 +8972,7 @@ document.getElementById("launch-overlay").addEventListener("click", e => {
 document.getElementById("launch-valor").addEventListener("keydown", e => {
   if (e.key === "Enter") submitLaunch();
 });
+document.getElementById("launch-valor").addEventListener("input", updateParcPreview);
 document.getElementById("invest-overlay")?.addEventListener("click", e => {
   if (e.target === e.currentTarget) closeInvestmentModal();
 });
