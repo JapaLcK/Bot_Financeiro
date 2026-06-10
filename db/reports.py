@@ -5,6 +5,7 @@ As funções delegam para db_support para manter lógica de negócio isolada.
 """
 import db_support as _db_support
 
+from core.crypto import hash_pii_optional
 from utils_phone import normalize_phone_e164, phone_lookup_candidates
 
 from .connection import get_conn
@@ -309,10 +310,13 @@ def sync_engagement_opt_out(user_id: int) -> None:
 
 
 def get_user_by_email(email: str) -> dict | None:
+    email_hash = hash_pii_optional((email or "").strip(), kind="email")
+    if not email_hash:
+        return None
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT user_id, email, engagement_opt_out FROM auth_accounts WHERE email = %s",
-                (email,),
+                "SELECT user_id, engagement_opt_out FROM auth_accounts WHERE email_hash = %s",
+                (email_hash,),
             )
             return cur.fetchone()
