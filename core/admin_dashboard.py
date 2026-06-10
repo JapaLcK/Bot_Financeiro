@@ -189,13 +189,21 @@ def admin_enabled() -> bool:
 
 _admin_log = logging.getLogger("admin_dashboard")
 
-# Warning loud no startup se admin estiver em modo plaintext (sem hash bcrypt).
-# Fica visível no log de boot pra operador notar e configurar o hash.
+# Plaintext só é tolerado fora de prod (testes/dev local). Em prod o boot
+# falha — mesmo padrão do WA_APP_SECRET em adapters/whatsapp/wa_app.py.
 if ADMIN_DASHBOARD_PASSWORD and not ADMIN_DASHBOARD_PASSWORD_HASH:
+    if (os.getenv("APP_ENV") or "").strip().lower() == "prod":
+        raise RuntimeError(
+            "ADMIN_DASHBOARD_PASSWORD (plaintext) não é permitida com APP_ENV=prod. "
+            "Configure ADMIN_DASHBOARD_PASSWORD_HASH (bcrypt) e remova "
+            "ADMIN_DASHBOARD_PASSWORD. Gere o hash com:\n"
+            '  python -c "import bcrypt; print(bcrypt.hashpw(b\'SUA_SENHA\', '
+            'bcrypt.gensalt()).decode())"'
+        )
     _admin_log.warning(
-        "[admin] ADMIN_DASHBOARD_PASSWORD em plaintext detectada. "
-        "Em produção, configure ADMIN_DASHBOARD_PASSWORD_HASH (bcrypt) e "
-        "remova ADMIN_DASHBOARD_PASSWORD."
+        "[admin] ADMIN_DASHBOARD_PASSWORD em plaintext detectada (tolerada fora "
+        "de prod). Configure ADMIN_DASHBOARD_PASSWORD_HASH (bcrypt) e remova "
+        "ADMIN_DASHBOARD_PASSWORD."
     )
 
 
