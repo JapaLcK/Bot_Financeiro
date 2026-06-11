@@ -80,6 +80,25 @@ def jdump(data: dict) -> str:
     return json.dumps(data, cls=FinanceEncoder, ensure_ascii=False)
 
 
+def months_pt():
+    return [
+        "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+        "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+    ]
+
+
+# ─── Cache do snapshot "mês corrente" do dashboard ───────────────────────────
+# Estado compartilhado: o data fetcher (monólito) lê/escreve; launches
+# (monólito) e pockets/cards (routers) invalidam após cada escrita.
+
+DASHBOARD_CURRENT_CACHE_TTL_SECONDS = 45
+dashboard_current_cache: dict[int, tuple[float, Any, Any, Any]] = {}
+
+
+def invalidate_dashboard_current_cache(user_id: int) -> None:
+    dashboard_current_cache.pop(int(user_id), None)
+
+
 # ─── DB helpers (com connection pool) ────────────────────────────────────────
 # Pool global de conexões assíncronas. Em vez de abrir nova conn a cada query
 # (custa 1-2s no Railway), reusa de um pool. O `_PooledConn` mantém a interface
