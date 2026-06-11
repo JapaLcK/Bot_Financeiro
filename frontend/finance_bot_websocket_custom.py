@@ -32,16 +32,12 @@ from decimal import Decimal
 from datetime import datetime, date, timedelta, timezone
 from typing import Any, Dict
 
-import psycopg
-from psycopg.rows import dict_row
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
 from pydantic import BaseModel, EmailStr
-import jwt as pyjwt
-from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from config.env import load_app_env
@@ -57,16 +53,12 @@ from core.admin_dashboard import (
 )
 from core.audit import (
     AuditEvent,
-    list_audit_events,
     maybe_record_login_from_new_ip,
     record_audit_event,
 )
 from core.sessions import (
     create_session,
-    device_label,
     get_active_session,
-    list_user_sessions,
-    revoke_other_sessions,
     revoke_session,
     touch_session,
 )
@@ -90,18 +82,9 @@ from db import (
     consume_data_export_token,
     has_recent_export_request,
     ensure_account_deletion_columns,
-    get_daily_report_prefs,
-    list_identities_by_user,
     process_due_account_deletions,
     save_pluggy_open_finance_item,
     schedule_account_deletion,
-    set_daily_report_enabled,
-    set_daily_report_hour,
-    set_engagement_opt_out,
-    set_tip_email_opt_out,
-    set_insight_email_opt_out,
-    set_whatsapp_updates_opt_out,
-    sync_engagement_opt_out,
     update_pluggy_open_finance_item_status,
     investment_deposit_from_account,
     investment_withdraw_to_account,
@@ -119,11 +102,20 @@ from core.services.pluggy import (
     create_pluggy_connect_token,
 )
 from frontend.routes.analytics import router as analytics_router
+from frontend.routes.settings import router as settings_router
 from frontend.routes.shared import (
+    AUTH_COOKIE_NAME,
     DASHBOARD_COOKIE_NAME,
     DASHBOARD_URL,
+    JWT_SECRET,
     authorize_dashboard_access as _authorize_dashboard_access,
+    db_connect,
+    decode_jwt as _decode_jwt,
     extract_bearer_token as _extract_bearer_token,
+    get_auth_token_from_request as _get_auth_token_from_request,
+    jdump,
+    limiter,
+    make_jwt as _make_jwt,
     parse_date_param as _parse_date_param,
     raise_if_account_scheduled_for_deletion as _raise_if_account_scheduled_for_deletion,
     resolve_analytics_window as _resolve_analytics_window,
@@ -136,8 +128,7 @@ load_app_env()
 DATABASE_URL      = os.getenv("DATABASE_URL")
 DASHBOARD_USER_ID = os.getenv("DASHBOARD_USER_ID")
 TZ                = os.getenv("TZ", "America/Sao_Paulo")
-JWT_SECRET              = (os.getenv("JWT_SECRET") or "").strip()
-# DASHBOARD_URL (leitura + sanitização do env) vem de frontend/routes/shared.py
+# JWT_SECRET e DASHBOARD_URL (leitura + sanitização do env) vêm de frontend/routes/shared.py
 # Em dev local (http://localhost) o navegador rejeita cookies Secure. Em prod
 # DASHBOARD_URL é https → Secure=True como sempre.
 COOKIE_SECURE = DASHBOARD_URL.startswith("https://")
@@ -170,71 +161,7 @@ if not JWT_SECRET:
     print("ERROR: JWT_SECRET not set. Refusing to start with insecure default.", file=sys.stderr)
     sys.exit(1)
 
-# ─── JSON serializer ─────────────────────────────────────────────────────────
-
-class FinanceEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, Decimal):  return float(obj)
-        if isinstance(obj, datetime): return obj.isoformat()
-        if isinstance(obj, date):     return obj.isoformat()
-        return super().default(obj)
-
-def jdump(data: dict) -> str:
-    return json.dumps(data, cls=FinanceEncoder, ensure_ascii=False)
-
-# ─── DB helpers (com connection pool) ────────────────────────────────────────
-# Pool global de conexões assíncronas. Em vez de abrir nova conn a cada query
-# (custa 1-2s no Railway), reusa de um pool. O `_PooledConn` mantém a interface
-# antiga (`async with await db_connect() as conn:`) intacta — todos os callers
-# antigos continuam funcionando sem mudança.
-from psycopg_pool import AsyncConnectionPool
-
-_db_pool: AsyncConnectionPool | None = None
-_db_pool_lock = asyncio.Lock()
-
-
-async def _get_db_pool() -> AsyncConnectionPool:
-    global _db_pool
-    if _db_pool is not None:
-        return _db_pool
-    async with _db_pool_lock:
-        if _db_pool is not None:  # double-check após pegar lock
-            return _db_pool
-        pool = AsyncConnectionPool(
-            DATABASE_URL,
-            min_size=1,
-            max_size=int(os.getenv("DB_POOL_MAX", "8")),
-            timeout=DB_CONNECT_TIMEOUT,
-            kwargs={"row_factory": dict_row},
-            open=False,
-        )
-        await pool.open(wait=True, timeout=DB_CONNECT_TIMEOUT)
-        _db_pool = pool
-        return _db_pool
-
-
-class _PooledConn:
-    """Adapter pra preservar a interface `async with await db_connect() as conn`.
-    `pool.connection()` retorna um async-context-manager direto, mas o caller
-    legado faz `await db_connect()` antes de entrar no async-with — esse wrapper
-    casa os dois protocolos."""
-    def __init__(self, pool: AsyncConnectionPool):
-        self._pool = pool
-        self._cm = None
-
-    async def __aenter__(self):
-        self._cm = self._pool.connection()
-        return await self._cm.__aenter__()
-
-    async def __aexit__(self, exc_type, exc, tb):
-        if self._cm is None:
-            return False
-        return await self._cm.__aexit__(exc_type, exc, tb)
-
-
-async def db_connect():
-    pool = await _get_db_pool()
-    return _PooledConn(pool)
+# jdump (serializer JSON) e db_connect (pool async) vêm de frontend/routes/shared.py
 
 async def list_users() -> list:
     async with await db_connect() as conn:
@@ -1592,8 +1519,7 @@ async def _check_auth_rate_limits(action: str, request: Request, email: str) -> 
     )
 
 
-limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
-app.state.limiter = limiter
+app.state.limiter = limiter  # instância compartilhada em frontend/routes/shared.py
 
 
 async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
@@ -1620,7 +1546,7 @@ register_admin_routes(app, HERE, JWT_SECRET, limiter)
 # ─── Auth helpers ────────────────────────────────────────────────────────────
 
 _bearer = HTTPBearer(auto_error=False)
-AUTH_COOKIE_NAME = "auth_token"
+# AUTH_COOKIE_NAME vem de frontend/routes/shared.py
 # Access token TTL: 15min (curto, vai em toda request).
 # Renovação automática via refresh_token (14d, idle 7d).
 AUTH_COOKIE_MAX_AGE = 15 * 60
@@ -1628,19 +1554,6 @@ AUTH_COOKIE_MAX_AGE = 15 * 60
 REFRESH_COOKIE_NAME = "refresh_token"
 REFRESH_COOKIE_MAX_AGE = 14 * 24 * 3600  # 14 dias absolutos
 REFRESH_COOKIE_PATH = "/auth/refresh"     # só vai em request específica
-
-def _make_jwt(user_id: int, email: str, *, jti: str | None = None) -> str:
-    from datetime import timedelta
-    payload: dict[str, Any] = {
-        "sub": str(user_id),
-        "email": email,
-        "type": "auth",
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
-    }
-    if jti:
-        payload["jti"] = jti
-    return pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
-
 
 def _issue_session_token(user_id: int, email: str, request: Request) -> tuple[str, str, str]:
     """Cria uma sessao em auth_sessions + emite access JWT + refresh token.
@@ -1660,13 +1573,6 @@ def _issue_session_token(user_id: int, email: str, request: Request) -> tuple[st
     access = _make_jwt(user_id, email, jti=jti)
     refresh = create_refresh_token(user_id, session_jti=jti, ip=ip, user_agent=ua)
     return access, jti, refresh
-
-
-def _decode_jwt(token: str) -> dict | None:
-    try:
-        return pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-    except Exception:
-        return None
 
 
 def _set_auth_cookie(response: Response, token: str) -> None:
@@ -1757,16 +1663,6 @@ def _post_login_url() -> str:
     """URL para a qual o usuário deve ser direcionado logo após login.
     O campo `dashboard_url` nas respostas de auth aponta para cá."""
     return _dashboard_url("/home")
-
-
-def _get_auth_token_from_request(
-    request: Request,
-    creds: HTTPAuthorizationCredentials | None = None,
-) -> str | None:
-    if creds and creds.credentials:
-        return creds.credentials
-    cookie_token = (request.cookies.get(AUTH_COOKIE_NAME) or "").strip()
-    return cookie_token or None
 
 
 def _build_whatsapp_onboarding_link(user_id: int, minutes_valid: int = 15) -> str:
@@ -1871,12 +1767,6 @@ class DeleteAccountBody(BaseModel):
 
 class DataExportBody(BaseModel):
     password: str
-
-
-class SecurityContactPayload(BaseModel):
-    email: str | None = None
-    phone: str | None = None
-    display_name: str | None = None
 
 
 class DashboardLinkBody(BaseModel):
@@ -5860,16 +5750,6 @@ class OpenFinancePluggyItemPayload(BaseModel):
     item: dict
 
 
-class NotificationSettingsPayload(BaseModel):
-    engagement_email_enabled: bool | None = None
-    tip_email_enabled: bool | None = None
-    insight_email_enabled: bool | None = None
-    whatsapp_updates_enabled: bool | None = None
-    daily_report_enabled: bool | None = None
-    daily_report_hour: int | None = None
-    daily_report_minute: int | None = None
-
-
 def _investment_action_note(action: str, name: str, issuer: str | None = None, note: str | None = None) -> str:
     clean_name = (name or "").strip() or "investimento"
     clean_issuer = (issuer or "").strip()
@@ -6020,299 +5900,8 @@ async def delete_investment_route(request: Request, user_id: int, name: str):
     return {"ok": True, "launch_id": launch_id, "name": canon}
 
 
-async def _get_notification_settings(user_id: int) -> dict:
-    auth_user, daily_prefs = await asyncio.gather(
-        asyncio.to_thread(get_auth_user, user_id),
-        asyncio.to_thread(get_daily_report_prefs, user_id),
-    )
-    auth_user = auth_user or {}
-    daily_prefs = daily_prefs or {}
-    email = auth_user.get("email")
-    phone = auth_user.get("phone_e164")
-    email_available = bool(email)
-    whatsapp_updates_available = bool(phone)
-    engagement_opt_out = bool(auth_user.get("engagement_opt_out", False))
-    tip_email_enabled = email_available and not engagement_opt_out and not bool(auth_user.get("tip_email_opt_out", False))
-    insight_email_enabled = email_available and not engagement_opt_out and not bool(auth_user.get("insight_email_opt_out", False))
-    whatsapp_updates_enabled = whatsapp_updates_available and not bool(auth_user.get("whatsapp_updates_opt_out", False))
-    return {
-        "ok": True,
-        "email": email,
-        "whatsapp_destination": phone,
-        "email_notifications_available": email_available,
-        "whatsapp_updates_available": whatsapp_updates_available,
-        "engagement_email_enabled": tip_email_enabled or insight_email_enabled,
-        "tip_email_enabled": tip_email_enabled,
-        "insight_email_enabled": insight_email_enabled,
-        "whatsapp_updates_enabled": whatsapp_updates_enabled,
-        "daily_report_enabled": bool(daily_prefs.get("enabled", True)),
-        "daily_report_hour": int(daily_prefs.get("hour", 9)),
-        "daily_report_minute": int(daily_prefs.get("minute", 0)),
-    }
-
-
-async def _get_security_settings(user_id: int) -> dict:
-    auth_user, identities = await asyncio.gather(
-        asyncio.to_thread(get_auth_user, user_id),
-        asyncio.to_thread(list_identities_by_user, user_id),
-    )
-    auth_user = auth_user or {}
-    identities = identities or []
-    whatsapp_identity = next((i for i in identities if i.get("provider") == "whatsapp"), None)
-    phone = auth_user.get("phone_e164") or (whatsapp_identity or {}).get("external_id")
-    return json.loads(jdump({
-        "ok": True,
-        "user_id": user_id,
-        "email": auth_user.get("email"),
-        "display_name": auth_user.get("display_name"),
-        "phone": phone,
-        "phone_status": auth_user.get("phone_status"),
-        "phone_confirmed_at": auth_user.get("phone_confirmed_at"),
-        "whatsapp_verified_at": auth_user.get("whatsapp_verified_at"),
-        "plan": auth_user.get("plan"),
-        "plan_expires_at": auth_user.get("plan_expires_at"),
-        "created_at": auth_user.get("created_at"),
-        "identities": identities,
-    }))
-
-
-@app.get("/settings/{user_id}/security")
-async def security_settings_route(request: Request, user_id: int):
-    _authorize_dashboard_access(request, user_id)
-    return await _get_security_settings(user_id)
-
-
-@app.patch("/settings/{user_id}/security/contact")
-async def update_security_contact_route(
-    request: Request,
-    user_id: int,
-    payload: SecurityContactPayload,
-):
-    _authorize_dashboard_access(request, user_id)
-    auth_user = await asyncio.to_thread(get_auth_user, user_id)
-    if not auth_user:
-        raise HTTPException(status_code=400, detail="Esta conta ainda não tem login por e-mail configurado.")
-
-    email = payload.email.strip().lower() if payload.email else None
-    phone = (payload.phone or "").strip() or None
-
-    display_name_raw = payload.display_name
-    display_name_provided = display_name_raw is not None
-    display_name: str | None = None
-    if display_name_provided:
-        display_name = display_name_raw.strip()
-        if display_name == "":
-            display_name = None  # remove o nome
-        else:
-            if len(display_name) > 50:
-                raise HTTPException(status_code=400, detail="O nome deve ter no máximo 50 caracteres.")
-            if len(display_name) < 2:
-                raise HTTPException(status_code=400, detail="O nome deve ter pelo menos 2 caracteres.")
-
-    if not email and not phone and not display_name_provided:
-        raise HTTPException(status_code=400, detail="Informe e-mail, telefone ou nome.")
-    if email and ("@" not in email or "." not in email.rsplit("@", 1)[-1]):
-        raise HTTPException(status_code=400, detail="E-mail inválido.")
-
-    normalized_phone = None
-    if phone:
-        try:
-            normalized_phone = normalize_phone_e164(phone)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    old_email = (auth_user.get("email") or "").strip().lower() or None
-    email_actually_changed = bool(email) and email != old_email
-
-    try:
-        async with await db_connect() as conn:
-            async with conn.cursor() as cur:
-                if email:
-                    await cur.execute(
-                        "UPDATE auth_accounts SET email = %s WHERE user_id = %s",
-                        (email, user_id),
-                    )
-                if normalized_phone:
-                    await cur.execute(
-                        """
-                        UPDATE auth_accounts
-                        SET phone_e164 = %s,
-                            phone_status = 'pending',
-                            phone_confirmed_at = NULL,
-                            whatsapp_verified_at = NULL
-                        WHERE user_id = %s
-                        """,
-                        (normalized_phone, user_id),
-                    )
-                if display_name_provided:
-                    await cur.execute(
-                        "UPDATE auth_accounts SET display_name = %s WHERE user_id = %s",
-                        (display_name, user_id),
-                    )
-            await conn.commit()
-    except psycopg.errors.UniqueViolation as exc:
-        raise HTTPException(status_code=409, detail="Este e-mail ou telefone já está em uso.") from exc
-
-    if email_actually_changed:
-        await asyncio.to_thread(
-            record_audit_event,
-            user_id,
-            AuditEvent.EMAIL_CHANGED,
-            request=request,
-            details={"new_email": email},
-        )
-
-    return await _get_security_settings(user_id)
-
-
-@app.post("/settings/{user_id}/password-reset")
-@limiter.limit("3/minute")
-async def security_password_reset_route(request: Request, user_id: int):
-    _authorize_dashboard_access(request, user_id)
-    auth_user = await asyncio.to_thread(get_auth_user, user_id)
-    email = (auth_user or {}).get("email")
-    if not email:
-        raise HTTPException(status_code=400, detail="Adicione um e-mail antes de resetar a senha.")
-
-    from db import create_password_reset_token
-    from core.services.email_service import send_password_reset_email
-
-    token = await asyncio.to_thread(create_password_reset_token, email)
-    if not token:
-        raise HTTPException(status_code=404, detail="Conta de e-mail não encontrada.")
-    reset_url = f"{DASHBOARD_URL}/reset-password#token={token}"
-    sent = await asyncio.to_thread(send_password_reset_email, email.strip().lower(), reset_url)
-    if not sent:
-        raise HTTPException(status_code=500, detail="Não foi possível enviar o e-mail de reset.")
-    return {"ok": True, "message": "Enviamos um link de redefinição de senha para o seu e-mail."}
-
-
-@app.get("/settings/{user_id}/activity")
-async def security_activity_route(
-    request: Request,
-    user_id: int,
-    limit: int = 10,
-    before_id: int | None = None,
-):
-    """Lista os ultimos eventos de auditoria do usuario (Atividade da conta)."""
-    _authorize_dashboard_access(request, user_id)
-    rows = await asyncio.to_thread(list_audit_events, user_id, limit, before_id)
-    next_before = rows[-1]["id"] if rows and len(rows) >= max(1, min(int(limit), 50)) else None
-    return json.loads(jdump({"ok": True, "events": rows, "next_before": next_before}))
-
-
-def _current_session_jti(request: Request) -> str | None:
-    """Le o jti da sessao corrente a partir do cookie auth_token. None se ausente/legado."""
-    token = _get_auth_token_from_request(request, None)
-    if not token:
-        return None
-    payload = _decode_jwt(token)
-    if not payload or payload.get("type") != "auth":
-        return None
-    return payload.get("jti")
-
-
-@app.get("/settings/{user_id}/sessions")
-async def security_sessions_list_route(request: Request, user_id: int):
-    """Lista as sessoes ativas (dispositivos conectados) do usuario."""
-    _authorize_dashboard_access(request, user_id)
-    current_jti = _current_session_jti(request)
-    rows = await asyncio.to_thread(list_user_sessions, user_id)
-    sessions = []
-    for r in rows:
-        sessions.append({
-            "jti": r["jti"],
-            "device_label": device_label(r.get("user_agent")),
-            "ip": r.get("ip"),
-            "user_agent": r.get("user_agent"),
-            "created_at": r.get("created_at"),
-            "last_seen_at": r.get("last_seen_at"),
-            "is_current": r["jti"] == current_jti,
-        })
-    return json.loads(jdump({"ok": True, "sessions": sessions, "current_jti": current_jti}))
-
-
-@app.delete("/settings/{user_id}/sessions/{jti}")
-async def security_session_revoke_route(request: Request, user_id: int, jti: str):
-    """Revoga uma sessao especifica (que nao seja a corrente)."""
-    _authorize_dashboard_access(request, user_id)
-    current_jti = _current_session_jti(request)
-    if current_jti and jti == current_jti:
-        raise HTTPException(
-            status_code=400,
-            detail="Use o botão 'Sair' para encerrar a sessão atual.",
-        )
-    revoked = await asyncio.to_thread(revoke_session, user_id, jti)
-    if not revoked:
-        raise HTTPException(status_code=404, detail="Sessão não encontrada ou já encerrada.")
-    return {"ok": True}
-
-
-@app.delete("/settings/{user_id}/sessions")
-async def security_sessions_revoke_others_route(request: Request, user_id: int):
-    """Revoga todas as sessoes do usuario exceto a corrente."""
-    _authorize_dashboard_access(request, user_id)
-    current_jti = _current_session_jti(request)
-    revoked_count = await asyncio.to_thread(revoke_other_sessions, user_id, current_jti)
-    return {"ok": True, "revoked": revoked_count}
-
-
-@app.get("/settings/{user_id}/notifications")
-async def notification_settings_route(request: Request, user_id: int):
-    _authorize_dashboard_access(request, user_id)
-    return await _get_notification_settings(user_id)
-
-
-@app.patch("/settings/{user_id}/notifications")
-async def update_notification_settings_route(
-    request: Request,
-    user_id: int,
-    payload: NotificationSettingsPayload,
-):
-    _authorize_dashboard_access(request, user_id)
-
-    touches_email_prefs = (
-        payload.engagement_email_enabled is not None
-        or payload.tip_email_enabled is not None
-        or payload.insight_email_enabled is not None
-    )
-    if touches_email_prefs:
-        auth_user = await asyncio.to_thread(get_auth_user, user_id)
-        if not auth_user or not auth_user.get("email"):
-            raise HTTPException(status_code=400, detail="Vincule um e-mail para configurar notificações por e-mail.")
-
-    if payload.engagement_email_enabled is not None:
-        await asyncio.to_thread(set_engagement_opt_out, user_id, not payload.engagement_email_enabled)
-
-    if payload.tip_email_enabled is not None:
-        await asyncio.to_thread(set_tip_email_opt_out, user_id, not payload.tip_email_enabled)
-
-    if payload.insight_email_enabled is not None:
-        await asyncio.to_thread(set_insight_email_opt_out, user_id, not payload.insight_email_enabled)
-
-    if payload.tip_email_enabled is not None or payload.insight_email_enabled is not None:
-        await asyncio.to_thread(sync_engagement_opt_out, user_id)
-
-    if payload.whatsapp_updates_enabled is not None:
-        auth_user = await asyncio.to_thread(get_auth_user, user_id)
-        if not auth_user or not auth_user.get("phone_e164"):
-            raise HTTPException(status_code=400, detail="Vincule um WhatsApp para receber atualizações.")
-        await asyncio.to_thread(set_whatsapp_updates_opt_out, user_id, not payload.whatsapp_updates_enabled)
-
-    if payload.daily_report_hour is not None or payload.daily_report_minute is not None:
-        current = await asyncio.to_thread(get_daily_report_prefs, user_id)
-        hour = payload.daily_report_hour if payload.daily_report_hour is not None else int(current.get("hour", 9))
-        minute = payload.daily_report_minute if payload.daily_report_minute is not None else int(current.get("minute", 0))
-        if not 0 <= int(hour) <= 23:
-            raise HTTPException(status_code=400, detail="Hora inválida.")
-        if not 0 <= int(minute) <= 59:
-            raise HTTPException(status_code=400, detail="Minuto inválido.")
-        await asyncio.to_thread(set_daily_report_hour, user_id, int(hour), int(minute))
-
-    if payload.daily_report_enabled is not None:
-        await asyncio.to_thread(set_daily_report_enabled, user_id, payload.daily_report_enabled)
-
-    return await _get_notification_settings(user_id)
+# ─── Settings (segurança/sessões/notificações) → frontend/routes/settings.py ─
+app.include_router(settings_router)
 
 
 @app.get("/open-finance/{user_id}")
