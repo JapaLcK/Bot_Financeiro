@@ -91,7 +91,6 @@ from db import (
     has_recent_export_request,
     ensure_account_deletion_columns,
     get_daily_report_prefs,
-    is_account_scheduled_for_deletion,
     list_identities_by_user,
     process_due_account_deletions,
     save_pluggy_open_finance_item,
@@ -119,7 +118,17 @@ from core.services.pluggy import (
     PluggyConfigError,
     create_pluggy_connect_token,
 )
-from frontend.routes.shared import DASHBOARD_URL
+from frontend.routes.analytics import router as analytics_router
+from frontend.routes.shared import (
+    DASHBOARD_COOKIE_NAME,
+    DASHBOARD_URL,
+    authorize_dashboard_access as _authorize_dashboard_access,
+    extract_bearer_token as _extract_bearer_token,
+    parse_date_param as _parse_date_param,
+    raise_if_account_scheduled_for_deletion as _raise_if_account_scheduled_for_deletion,
+    resolve_analytics_window as _resolve_analytics_window,
+    resolve_dashboard_user_id as _resolve_dashboard_user_id,
+)
 from frontend.routes.static_pages import router as static_pages_router
 
 load_app_env()
@@ -1615,7 +1624,7 @@ AUTH_COOKIE_NAME = "auth_token"
 # Access token TTL: 15min (curto, vai em toda request).
 # Renovação automática via refresh_token (14d, idle 7d).
 AUTH_COOKIE_MAX_AGE = 15 * 60
-DASHBOARD_COOKIE_NAME = "dashboard_token"
+# DASHBOARD_COOKIE_NAME vem de frontend/routes/shared.py
 REFRESH_COOKIE_NAME = "refresh_token"
 REFRESH_COOKIE_MAX_AGE = 14 * 24 * 3600  # 14 dias absolutos
 REFRESH_COOKIE_PATH = "/auth/refresh"     # só vai em request específica
@@ -1770,16 +1779,6 @@ def _build_whatsapp_onboarding_link(user_id: int, minutes_valid: int = 15) -> st
     return f"https://api.whatsapp.com/send?phone={safe_number}&text={text}"
 
 
-def _raise_if_account_scheduled_for_deletion(user_id: int) -> None:
-    deletion = is_account_scheduled_for_deletion(int(user_id))
-    if deletion:
-        scheduled = deletion.get("deletion_scheduled_for")
-        scheduled_txt = scheduled.isoformat() if hasattr(scheduled, "isoformat") else str(scheduled)
-        raise HTTPException(
-            status_code=403,
-            detail=f"Esta conta está agendada para exclusão em {scheduled_txt}.",
-        )
-
 async def _get_current_user(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
@@ -1841,43 +1840,6 @@ def _require_pro(user_id: int, feature: str) -> None:
             detail={"error": "pro_required", "feature": feature},
         )
 
-
-def _extract_bearer_token(request: Request) -> str | None:
-    auth = request.headers.get("authorization", "").strip()
-    if not auth:
-        return None
-    scheme, _, token = auth.partition(" ")
-    if scheme.lower() != "bearer" or not token:
-        return None
-    return token.strip()
-
-
-def _resolve_dashboard_user_id(request: Request) -> int:
-    token = (
-        _extract_bearer_token(request)
-        or (request.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
-    )
-    payload = decode_dashboard_token_full(token or "")
-    if not payload:
-        raise HTTPException(status_code=401, detail="Token de dashboard inválido ou expirado.")
-    user_id = payload["user_id"]
-    jti = payload.get("jti")
-    # Tokens com jti: validar contra auth_sessions (revogacao instantanea).
-    # Tokens sem jti (legacy / rollout) sao grandfathered ate expirarem.
-    if jti:
-        session = get_active_session(jti)
-        if not session or int(session.get("user_id") or 0) != user_id:
-            raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.")
-        request.state.session_jti = jti
-    return int(user_id)
-
-
-def _authorize_dashboard_access(request: Request, user_id: int) -> int:
-    current_user_id = _resolve_dashboard_user_id(request)
-    if current_user_id != int(user_id):
-        raise HTTPException(status_code=403, detail="Acesso negado para este usuário.")
-    _raise_if_account_scheduled_for_deletion(current_user_id)
-    return current_user_id
 
 # ─── Auth models ─────────────────────────────────────────────────────────────
 
@@ -5198,160 +5160,8 @@ async def pay_bill_route(
     }
 
 
-# ─── Analytics routes (Sprint 6) ─────────────────────────────────────────────
-# 5 endpoints separados pra alimentar a view Análises. Separados (em vez de
-# 1 unificado) porque o painel personalizável vai deixar o user escolher quais
-# widgets ver — assim cada widget pode buscar só seu dado.
-
-def _parse_date_param(value: str | None, name: str) -> date | None:
-    """Parsea 'YYYY-MM-DD' → date. None se vazio. 400 se inválido."""
-    if not value:
-        return None
-    try:
-        return date.fromisoformat(value)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Parâmetro '{name}' inválido (esperado YYYY-MM-DD).")
-
-
-def _resolve_analytics_window(months: int, from_str: str | None, to_str: str | None):
-    """Wrapper de resolve_window que parseia strings de query."""
-    from db import resolve_window
-    fd = _parse_date_param(from_str, "from")
-    td = _parse_date_param(to_str, "to")
-    return resolve_window(months=months, from_date=fd, to_date=td)
-
-
-@app.get("/analytics/{user_id}/kpis")
-async def analytics_kpis_route(
-    request: Request,
-    user_id: int,
-    months: int = 6,
-    from_: str | None = Query(None, alias="from"),
-    to: str | None = None,
-):
-    """KPIs do período: receita, despesa, líquido, taxa de poupança + comparativo
-    com período anterior. Default = últimos 6 meses."""
-    _authorize_dashboard_access(request, user_id)
-    from db import compute_kpis
-    fd, td = _resolve_analytics_window(months, from_, to)
-    result = await asyncio.to_thread(compute_kpis, user_id, fd, td)
-    return {"ok": True, "kpis": result}
-
-
-@app.get("/analytics/{user_id}/evolution")
-async def analytics_evolution_route(
-    request: Request,
-    user_id: int,
-    months: int = 6,
-):
-    """Evolução mensal de receita/despesa/líquido nos últimos N meses (sempre
-    buckets mensais terminando no mês atual)."""
-    _authorize_dashboard_access(request, user_id)
-    from db import compute_evolution
-    n = max(1, min(int(months or 6), 36))
-    result = await asyncio.to_thread(compute_evolution, user_id, n)
-    return {"ok": True, "evolution": result, "months": n}
-
-
-@app.get("/analytics/{user_id}/categories")
-async def analytics_categories_route(
-    request: Request,
-    user_id: int,
-    months: int = 6,
-    from_: str | None = Query(None, alias="from"),
-    to: str | None = None,
-    limit: int = 10,
-):
-    """Distribuição de despesas por categoria no período. Inclui pct, count,
-    e emoji/color quando user customizou via user_categories."""
-    _authorize_dashboard_access(request, user_id)
-    from db import compute_categories
-    fd, td = _resolve_analytics_window(months, from_, to)
-    lim = max(1, min(int(limit or 10), 50))
-    result = await asyncio.to_thread(compute_categories, user_id, fd, td, lim)
-    return {"ok": True, "categories": result, "window": {"from": fd.isoformat(), "to": td.isoformat()}}
-
-
-@app.get("/analytics/{user_id}/weekday-pattern")
-async def analytics_weekday_route(
-    request: Request,
-    user_id: int,
-    months: int = 6,
-    from_: str | None = Query(None, alias="from"),
-    to: str | None = None,
-):
-    """Padrão de gasto por dia da semana (seg→dom). Total, count e média
-    diária por DOW no período. Inclui credit_transactions por purchased_at
-    (não bill.period_end — aqui interessa o dia da compra real)."""
-    _authorize_dashboard_access(request, user_id)
-    from db import compute_weekday_pattern
-    fd, td = _resolve_analytics_window(months, from_, to)
-    result = await asyncio.to_thread(compute_weekday_pattern, user_id, fd, td)
-    return {"ok": True, "weekdays": result, "window": {"from": fd.isoformat(), "to": td.isoformat()}}
-
-
-@app.get("/analytics/{user_id}/top-merchants")
-async def analytics_top_merchants_route(
-    request: Request,
-    user_id: int,
-    months: int = 6,
-    from_: str | None = Query(None, alias="from"),
-    to: str | None = None,
-    limit: int = 10,
-):
-    """Top estabelecimentos no período. Junta launches (alvo/nota) +
-    credit_transactions (nota). Agrupa por chave normalizada (lower/trim).
-    Retorna sources = {debito, credito} pra desbobinar na UI se quiser."""
-    _authorize_dashboard_access(request, user_id)
-    from db import compute_top_merchants
-    fd, td = _resolve_analytics_window(months, from_, to)
-    lim = max(1, min(int(limit or 10), 50))
-    result = await asyncio.to_thread(compute_top_merchants, user_id, fd, td, lim)
-    return {"ok": True, "merchants": result, "window": {"from": fd.isoformat(), "to": td.isoformat()}}
-
-
-# ─── Sprint 7: Insights proativos + padrões comportamentais (IA) ─────────────
-
-@app.get("/insights/{user_id}/current")
-async def insights_current_route(request: Request, user_id: int, force: bool = False):
-    """Insights acionáveis do Piggy, gerados via LLM (gpt-4o-mini).
-
-    Recebe estado financeiro ATUAL (orçamentos, recorrentes, metas, KPIs) e
-    devolve 3-5 insights priorizados por severidade. Cache 6h por user.
-
-    Fallback: se OPENAI_API_KEY ausente ou LLM falha, usa heurística antiga
-    (`compute_active_insights`) pra não deixar o card vazio.
-
-    `?force=true` ignora cache (útil só pra debug).
-    """
-    _authorize_dashboard_access(request, user_id)
-    from core.ai_patterns import generate_ai_insights
-    result = await asyncio.to_thread(generate_ai_insights, user_id, force=force)
-    return {"ok": True, "insights": result or []}
-
-
-@app.get("/analytics/{user_id}/patterns")
-async def analytics_patterns_route(
-    request: Request,
-    user_id: int,
-    force: bool = False,
-):
-    """Padrões comportamentais via LLM (gpt-4o-mini). Cache 24h.
-
-    O LLM recebe métricas agregadas (gastos por hora, weekend split, salary
-    burn, top merchants, top categorias) e devolve narrativas descobertas
-    dinamicamente (variam por user). Retorna lista de items `{icon, title,
-    subtitle, tone}` no campo `patterns`.
-
-    Fallback: se LLM indisponível, retorna lista vazia (frontend mostra
-    empty state). NÃO retorna a agregação bruta — só formato narrativo.
-
-    `?force=true` ignora cache (útil só pra debug).
-    """
-    _authorize_dashboard_access(request, user_id)
-    from core.ai_patterns import generate_ai_patterns
-    result = await asyncio.to_thread(generate_ai_patterns, user_id, force=force)
-    return {"ok": True, "patterns": result or []}
+# ─── Analytics + insights → frontend/routes/analytics.py (refactor F1 E2) ────
+app.include_router(analytics_router)
 
 
 @app.get("/debug/ai/{user_id}/payload")
