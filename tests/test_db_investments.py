@@ -277,6 +277,21 @@ def test_accrue_all_projeta_lots_individualmente_sem_subestimar_lots_antigos(use
                 "on conflict (code, ref_date) do update set value=excluded.value",
                 (date(2026, 4, 16), Decimal("0.05")),
             )
+
+            # Isolamento: _project_to_today usa o CDI MAIS RECENTE da tabela, e
+            # o startup do app (TestClient de outros testes, dev local) grava o
+            # CDI real do BCB aqui. Qualquer linha além de 16/04 trocaria a taxa
+            # proxy e quebraria o `expected` abaixo. Guarda, remove e restaura
+            # no finally.
+            cur.execute(
+                "select ref_date, value from market_rates where code='CDI' and ref_date > %s",
+                (date(2026, 4, 16),),
+            )
+            cdi_newer_rows = [(r["ref_date"], r["value"]) for r in cur.fetchall()]
+            cur.execute(
+                "delete from market_rates where code='CDI' and ref_date > %s",
+                (date(2026, 4, 16),),
+            )
         conn.commit()
 
     try:
@@ -310,6 +325,12 @@ def test_accrue_all_projeta_lots_individualmente_sem_subestimar_lots_antigos(use
                 cur.execute("delete from investment_lots where investment_id=%s and user_id=%s", (inv_id, user_id))
                 cur.execute("delete from investments where id=%s and user_id=%s", (inv_id, user_id))
                 cur.execute("delete from market_rates where code='CDI' and ref_date=%s", (date(2026, 4, 16),))
+                for _ref_date, _value in cdi_newer_rows:
+                    cur.execute(
+                        "insert into market_rates(code, ref_date, value) values ('CDI', %s, %s) "
+                        "on conflict (code, ref_date) do update set value=excluded.value",
+                        (_ref_date, _value),
+                    )
             conn.commit()
 
 
