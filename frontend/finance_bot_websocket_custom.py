@@ -119,6 +119,8 @@ from core.services.pluggy import (
     PluggyConfigError,
     create_pluggy_connect_token,
 )
+from frontend.routes.shared import DASHBOARD_URL
+from frontend.routes.static_pages import router as static_pages_router
 
 load_app_env()
 
@@ -126,11 +128,7 @@ DATABASE_URL      = os.getenv("DATABASE_URL")
 DASHBOARD_USER_ID = os.getenv("DASHBOARD_USER_ID")
 TZ                = os.getenv("TZ", "America/Sao_Paulo")
 JWT_SECRET              = (os.getenv("JWT_SECRET") or "").strip()
-DASHBOARD_URL           = os.getenv("DASHBOARD_URL", "http://localhost:8000").strip()
-# Sanitiza caso a var de ambiente tenha sido definida como "DASHBOARD_URL=https://..."
-if DASHBOARD_URL.startswith("DASHBOARD_URL="):
-    DASHBOARD_URL = DASHBOARD_URL[len("DASHBOARD_URL="):]
-DASHBOARD_URL = DASHBOARD_URL.rstrip("/")
+# DASHBOARD_URL (leitura + sanitização do env) vem de frontend/routes/shared.py
 # Em dev local (http://localhost) o navegador rejeita cookies Secure. Em prod
 # DASHBOARD_URL é https → Secure=True como sempre.
 COOKIE_SECURE = DASHBOARD_URL.startswith("https://")
@@ -1739,13 +1737,6 @@ def _no_store(response: Response) -> Response:
     return response
 
 
-def _html_file(path: pathlib.Path) -> FileResponse:
-    response = FileResponse(path, media_type="text/html")
-    response.headers["Cache-Control"] = "no-store"
-    response.headers["Pragma"] = "no-cache"
-    return response
-
-
 def _dashboard_url(path: str = "/app", view: str | None = None) -> str:
     url = f"{DASHBOARD_URL}{path}"
     if view:
@@ -1757,11 +1748,6 @@ def _post_login_url() -> str:
     """URL para a qual o usuário deve ser direcionado logo após login.
     O campo `dashboard_url` nas respostas de auth aponta para cá."""
     return _dashboard_url("/home")
-
-
-def _public_site_url(path: str = "") -> str:
-    base_url = DASHBOARD_URL if DASHBOARD_URL.startswith("https://") else "https://pigbankai.com"
-    return f"{base_url.rstrip('/')}{path}"
 
 
 def _get_auth_token_from_request(
@@ -3540,7 +3526,7 @@ async def conta_redirect(request: Request):
     return RedirectResponse(url=portal.url, status_code=302)
 
 
-# ─── Static file routes ──────────────────────────────────────────────────────
+# ─── Magic link de acesso ao dashboard ───────────────────────────────────────
 
 @app.get("/d/{code}")
 async def dashboard_short_link(
@@ -3629,164 +3615,9 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
     return response
 
 
-@app.get("/")
-async def serve_landing():
-    return _html_file(HERE / "index.html")
-
-@app.get("/app")
-async def serve_dashboard():
-    return _html_file(HERE / "dashboard.html")
-
-
-@app.get("/home")
-async def serve_home():
-    return _html_file(HERE / "home.html")
-
-
-@app.get("/settings")
-async def serve_settings():
-    return _html_file(HERE / "settings.html")
-
-
-@app.get("/reset-password")
-async def serve_reset_password():
-    return _html_file(HERE / "reset-password.html")
-
-
-@app.get("/onboarding")
-async def serve_onboarding():
-    return _html_file(HERE / "onboarding.html")
-
-@app.get("/static/auth-refresh.js")
-async def serve_auth_refresh_js():
-    """Interceptor de fetch que renova access em 401. Incluído nas páginas
-    autenticadas (dashboard, home, settings, onboarding)."""
-    path = HERE / "auth-refresh.js"
-    return FileResponse(path, media_type="application/javascript", headers={"Cache-Control": "public, max-age=300"})
-
-@app.get("/privacy")
-async def serve_privacy():
-    return _html_file(HERE / "privacy.html")
-
-@app.get("/termos")
-async def serve_termos():
-    return _html_file(HERE / "termos.html")
-
-@app.get("/changelog")
-async def serve_changelog():
-    return _html_file(HERE / "changelog.html")
-
-@app.get("/whatsapp")
-async def serve_whatsapp():
-    return _html_file(HERE / "whatsapp.html")
-
-@app.get("/funcionalidades")
-async def serve_funcionalidades():
-    return _html_file(HERE / "funcionalidades.html")
-
-@app.get("/comandos")
-async def serve_comandos():
-    return _html_file(HERE / "comandos.html")
-
-
-@app.get("/comandos-app")
-async def serve_comandos_app():
-    """Versao logged-in da pagina /comandos. Layout interno (mesmo header
-    da home), personalizado com base no snapshot/plano. Mantém a URL
-    /comandos pra landing publica intacta."""
-    return _html_file(HERE / "comandos-app.html")
-
-
-@app.get("/api/commands-catalog")
-async def get_commands_catalog():
-    """Catálogo de "O que pedir ao Piggy" pra o modal da home.
-
-    Source-of-truth em core/commands_catalog.CATALOG (mesma usada pelo
-    WhatsApp e Discord). Endpoint público — não tem dado sensível.
-    """
-    from core.commands_catalog import CATALOG
-    return {"catalog": CATALOG}
-
-@app.get("/como-funciona")
-async def serve_como_funciona():
-    return _html_file(HERE / "como-funciona.html")
-
-@app.get("/precos")
-async def serve_precos():
-    return _html_file(HERE / "precos.html")
-
-@app.get("/suporte")
-async def serve_suporte():
-    return _html_file(HERE / "suporte.html")
-
-@app.get("/robots.txt")
-async def serve_robots_txt():
-    content = "\n".join([
-        "User-agent: *",
-        "Allow: /",
-        "Disallow: /app",
-        "Disallow: /home",
-        "Disallow: /settings",
-        "Disallow: /onboarding",
-        "Disallow: /reset-password",
-        "Disallow: /auth/",
-        "Disallow: /admin",
-        f"Sitemap: {_public_site_url('/sitemap.xml')}",
-        "",
-    ])
-    return Response(content=content, media_type="text/plain")
-
-
-@app.get("/sitemap.xml")
-async def serve_sitemap_xml():
-    urls = [
-        ("/", "weekly", "1.0"),
-        ("/whatsapp", "weekly", "0.8"),
-        ("/funcionalidades", "weekly", "0.8"),
-        ("/como-funciona", "weekly", "0.8"),
-        ("/precos", "weekly", "0.7"),
-        ("/suporte", "weekly", "0.7"),
-        ("/privacy", "monthly", "0.4"),
-        ("/termos", "monthly", "0.4"),
-        ("/changelog", "weekly", "0.5"),
-    ]
-    items = "\n".join(
-        "  <url>\n"
-        f"    <loc>{_public_site_url(path)}</loc>\n"
-        f"    <changefreq>{changefreq}</changefreq>\n"
-        f"    <priority>{priority}</priority>\n"
-        "  </url>"
-        for path, changefreq, priority in urls
-    )
-    content = (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-        f"{items}\n"
-        "</urlset>\n"
-    )
-    return Response(content=content, media_type="application/xml")
-
-@app.get("/favicon.png")
-async def serve_favicon():
-    return FileResponse(HERE / "favicon.png", media_type="image/png")
-
-@app.get("/manifest.json")
-async def serve_manifest():
-    return FileResponse(HERE / "manifest.json", media_type="application/manifest+json")
-
-@app.get("/service-worker.js")
-async def serve_sw():
-    resp = FileResponse(HERE / "service-worker.js", media_type="application/javascript")
-    resp.headers["Service-Worker-Allowed"] = "/"
-    resp.headers["Cache-Control"]          = "no-cache"
-    return resp
-
-
-@app.get("/modals.js")
-async def serve_modals_js():
-    """Componente de modal estilizado (alertModal/confirmModal) usado em todas
-    as paginas no lugar dos dialogs nativos do browser."""
-    return FileResponse(HERE / "modals.js", media_type="application/javascript")
+# ─── Páginas estáticas, assets, SEO e health ─────────────────────────────────
+# Movidas pra frontend/routes/static_pages.py (refactor Fase 1, Etapa 1).
+app.include_router(static_pages_router)
 
 # ─── Unsubscribe ─────────────────────────────────────────────────────────────
 
@@ -3863,10 +3694,6 @@ async def unsubscribe(uid: int, token: str):
 
 
 # ─── HTTP API routes ─────────────────────────────────────────────────────────
-
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
 
 @app.get("/data/{user_id}")
 async def get_data(
