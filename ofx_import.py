@@ -17,6 +17,21 @@ from utils_text import normalize_text, contains_word, LOCAL_RULES, INTERNAL_MOVE
 MAX_OFX_BYTES = 8 * 1024 * 1024  # 8 MB
 
 
+def reject_dangerous_xml(ofx_bytes: bytes) -> None:
+    """Bloqueia DOCTYPE/ENTITY antes do parse.
+
+    O ofxparse usa parser XML sem proteção contra entidades externas (XXE) e
+    expansão de entidades (billion laughs). Nenhum banco emite OFX com
+    DOCTYPE/ENTITY — rejeitar de cara é seguro e barato (scan de bytes, sem
+    parse). Usada também pelo ofx_credit_import.
+    """
+    upper = ofx_bytes.upper()
+    if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+        raise ValueError(
+            "OFX rejeitado: contém declarações XML não suportadas (DOCTYPE/ENTITY)."
+        )
+
+
 def detect_ofx_type(ofx_bytes: bytes) -> str:
     """
     Detecta se o OFX é de conta bancária ('bank') ou fatura de cartão de crédito ('credit_card').
@@ -52,6 +67,7 @@ def import_ofx_bytes(user_id: int, ofx_bytes: bytes, filename: str | None = None
         raise ValueError(
             f"OFX muito grande (max {MAX_OFX_BYTES // (1024 * 1024)} MB)."
         )
+    reject_dangerous_xml(ofx_bytes)
 
     file_hash = hashlib.sha256(ofx_bytes).hexdigest()
     ofx = OfxParser.parse(io.BytesIO(ofx_bytes))

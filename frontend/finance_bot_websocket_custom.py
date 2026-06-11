@@ -1145,13 +1145,21 @@ def _render_pdf(items: list[dict], year: int, month: int, balance: float = 0.0) 
 # ─── Connection manager ───────────────────────────────────────────────────────
 
 class ConnectionManager:
+    # Cap por usuário: evita um cliente abrir conexões em loop e esgotar
+    # memória/file descriptors do servidor. 5 cobre multi-aba legítimo.
+    MAX_CONNECTIONS_PER_USER = 5
+
     def __init__(self):
         # active[user_id][ws] = {"year": int, "month": int}
         self.active: Dict[int, Dict[WebSocket, dict]] = {}
 
-    async def connect(self, ws: WebSocket, user_id: int, year: int, month: int):
+    async def connect(self, ws: WebSocket, user_id: int, year: int, month: int) -> bool:
         await ws.accept()
+        if len(self.active.get(user_id, {})) >= self.MAX_CONNECTIONS_PER_USER:
+            await ws.close(code=1008, reason="Limite de conexões simultâneas atingido")
+            return False
         self.active.setdefault(user_id, {})[ws] = {"year": year, "month": month}
+        return True
 
     def disconnect(self, ws: WebSocket, user_id: int):
         if user_id in self.active:
@@ -1930,6 +1938,7 @@ class DashboardLinkBody(BaseModel):
 # ─── Auth endpoints ──────────────────────────────────────────────────────────
 
 @app.get("/auth/validate")
+@limiter.limit("120/minute")
 async def auth_validate(request: Request, response: Response):
     """
     Valida uma sessão de dashboard usando apenas cookie HttpOnly ou Bearer.
@@ -1948,6 +1957,7 @@ async def auth_validate(request: Request, response: Response):
 
 
 @app.get("/auth/dashboard-profile")
+@limiter.limit("60/minute")
 async def auth_dashboard_profile(request: Request, response: Response):
     """Retorna dados mínimos da conta para a UI do dashboard."""
     user_id = _resolve_dashboard_user_id(request)
@@ -2130,6 +2140,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
 
 
 @app.post("/auth/logout")
+@limiter.limit("30/minute")
 async def auth_logout(request: Request, response: Response):
     # Revoga a sessao corrente (se houver jti no JWT) antes de limpar cookies.
     # Idempotente: token expirado / sem jti / sessao ja revogada = no-op.
@@ -2146,7 +2157,12 @@ async def auth_logout(request: Request, response: Response):
                     from core.refresh_tokens import revoke_session_refresh_tokens
                     await asyncio.to_thread(revoke_session_refresh_tokens, jti)
                 except Exception:
-                    pass
+                    # Cookies são limpos mesmo assim, mas a sessão segue válida
+                    # no servidor — precisa aparecer no log.
+                    logging.getLogger(__name__).warning(
+                        "logout: falha ao revogar sessão/refresh tokens (user %s, jti %s)",
+                        user_id_raw, jti, exc_info=True,
+                    )
 
     # Revoga também o refresh_token específico do cookie (caso a sessão já
     # não bata — defesa em profundidade).
@@ -2156,7 +2172,9 @@ async def auth_logout(request: Request, response: Response):
             from core.refresh_tokens import revoke_refresh_token
             await asyncio.to_thread(revoke_refresh_token, refresh_in_cookie)
         except Exception:
-            pass
+            logging.getLogger(__name__).warning(
+                "logout: falha ao revogar refresh token do cookie", exc_info=True,
+            )
 
     _clear_session_cookies(response)
     response.headers["Clear-Site-Data"] = '"cookies", "storage"'
@@ -2345,7 +2363,8 @@ async def auth_mfa_status(user_id: int = Depends(_get_current_user)):
 
 
 @app.post("/auth/mfa/onboarding-seen")
-async def auth_mfa_onboarding_seen(user_id: int = Depends(_get_current_user)):
+@limiter.limit("30/hour")
+async def auth_mfa_onboarding_seen(request: Request, user_id: int = Depends(_get_current_user)):
     """Grava que o usuario viu a tela de onboarding (independente da escolha).
     Idempotente: chamadas subsequentes nao reescrevem o timestamp."""
     from db import mark_mfa_onboarding_shown
@@ -3601,8 +3620,12 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
             )
             _set_refresh_cookie(response, refresh)
     except Exception:
-        # Falha silenciosa — o dashboard ainda funciona com o dashboard_token.
-        pass
+        # Fail-soft — o dashboard ainda funciona com o dashboard_token, mas o
+        # user vai "deslogar" ao navegar pra /conta. Logado pra ser visível.
+        logging.getLogger(__name__).warning(
+            "magic link: não emitiu auth/refresh token pro user %s — sessão degradada (só dashboard_token)",
+            user_id, exc_info=True,
+        )
     return response
 
 
@@ -5606,6 +5629,16 @@ async def ofx_import_route(request: Request, user_id: int):
     if not filename.lower().endswith(".ofx"):
         raise HTTPException(status_code=400, detail="Arquivo precisa ter extensao .ofx.")
 
+    # Allowlist de content-type: browsers mapeiam .ofx de formas variadas
+    # (octet-stream, text/plain, xml...), então a lista é generosa — o objetivo
+    # é só barrar spoof óbvio (image/*, video/*, application/pdf etc).
+    content_type = (getattr(upload, "content_type", "") or "").lower().split(";")[0].strip()
+    if content_type not in {
+        "", "application/x-ofx", "text/x-ofx", "application/ofx",
+        "text/plain", "application/octet-stream", "text/xml", "application/xml",
+    }:
+        raise HTTPException(status_code=400, detail="Content-Type inválido para arquivo OFX.")
+
     raw = await upload.read()
     if not raw:
         raise HTTPException(status_code=400, detail="Arquivo OFX vazio.")
@@ -6806,7 +6839,8 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
             return
 
     now = datetime.now(timezone.utc)
-    await manager.connect(ws, user_id, now.year, now.month)
+    if not await manager.connect(ws, user_id, now.year, now.month):
+        return
     print(f"Connected: user={user_id} total={len(manager.active.get(user_id, {}))}")
     try:
         # Send initial snapshot with current month

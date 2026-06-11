@@ -11,6 +11,7 @@ Diferenças em relação ao extrato bancário (ofx_import.py):
 """
 import io
 import hashlib
+import logging
 import re
 from collections import Counter
 from datetime import datetime, date
@@ -21,8 +22,20 @@ from utils_date import _tz
 from utils_text import normalize_text, contains_word, LOCAL_RULES
 from db import import_credit_ofx_bulk, list_user_category_rules
 
+logger = logging.getLogger(__name__)
+
 # Hard cap defensivo: ver nota em ofx_import.py.
 MAX_OFX_BYTES = 8 * 1024 * 1024  # 8 MB
+
+
+def _dec_or_none(raw: str, field: str) -> Decimal | None:
+    """Decimal(raw) tolerante: campo OFX presente mas ilegível vira None com
+    warning — explica "por que o limite/saldo não importou" sem quebrar o resto."""
+    try:
+        return Decimal(raw)
+    except Exception:
+        logger.warning("OFX crédito: campo %s presente mas não parseou: %r", field, raw[:40])
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -34,10 +47,7 @@ def _extract_credit_limit(ofx_bytes: bytes) -> Decimal | None:
     s = ofx_bytes.decode("utf-8", errors="ignore")
     m = re.search(r"<CREDITLIMIT>\s*([-0-9.]+)", s, re.I)
     if m:
-        try:
-            return Decimal(m.group(1))
-        except Exception:
-            pass
+        return _dec_or_none(m.group(1), "CREDITLIMIT")
     return None
 
 
@@ -49,16 +59,14 @@ def _extract_available_credit(ofx_bytes: bytes) -> Decimal | None:
     s = ofx_bytes.decode("utf-8", errors="ignore")
     m = re.search(r"<AVAILCREDIT>\s*([-0-9.]+)", s, re.I)
     if m:
-        try:
-            return Decimal(m.group(1))
-        except Exception:
-            pass
+        val = _dec_or_none(m.group(1), "AVAILCREDIT")
+        if val is not None:
+            return val
     m = re.search(r"<AVAILBAL>.*?<BALAMT>\s*([-0-9.]+)", s, re.I | re.S)
     if m:
-        try:
-            return Decimal(m.group(1))
-        except Exception:
-            pass
+        val = _dec_or_none(m.group(1), "AVAILBAL.BALAMT")
+        if val is not None:
+            return val
     return None
 
 
@@ -71,10 +79,7 @@ def _extract_ledger_balance(ofx_bytes: bytes) -> Decimal | None:
     s = ofx_bytes.decode("utf-8", errors="ignore")
     m = re.search(r"<LEDGERBAL>.*?<BALAMT>\s*([-0-9.]+)", s, re.I | re.S)
     if m:
-        try:
-            return Decimal(m.group(1))
-        except Exception:
-            pass
+        return _dec_or_none(m.group(1), "LEDGERBAL.BALAMT")
     return None
 
 
@@ -169,6 +174,8 @@ def import_credit_ofx_bytes(
         raise ValueError(
             f"OFX muito grande (max {MAX_OFX_BYTES // (1024 * 1024)} MB)."
         )
+    from ofx_import import reject_dangerous_xml
+    reject_dangerous_xml(ofx_bytes)
 
     # Normaliza encoding: OFX pode declarar CHARSET:1252 (Windows-1252/latin-1).
     # Se os bytes não forem UTF-8 válido, redecodifica em cp1252 e converte para UTF-8
