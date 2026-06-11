@@ -11,6 +11,7 @@ Retorna sempre um IntentResult com:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import unicodedata
@@ -18,6 +19,8 @@ from difflib import get_close_matches
 from dataclasses import dataclass, field
 from typing import Any
 from utils_text import parse_money
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -638,7 +641,10 @@ def _classify_with_ai(text: str, user_id: int | None = None) -> IntentResult:
             if not is_pro(int(user_id)):
                 return IntentResult(intent="out_of_scope", confidence=0.0)
         except Exception:
-            pass
+            logger.warning(
+                "gate Pro do tier-3 falhou pro user %s — seguindo fail-open (classify IA liberado)",
+                user_id, exc_info=True,
+            )
 
     if user_id is not None and not is_allowed(user_id):
         print(f"[intent_classifier] rate limit atingido para user_id={user_id}")

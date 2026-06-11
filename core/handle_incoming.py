@@ -204,7 +204,10 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
                 )
             )]
     except Exception:
-        pass
+        logger.warning(
+            "gate Pro do áudio falhou pro user %s — seguindo fail-open (transcrição liberada)",
+            uid, exc_info=True,
+        )
 
     if not data:
         return [OutgoingMessage(
@@ -282,7 +285,10 @@ def _handle_image(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
                 )
             )]
     except Exception:
-        pass
+        logger.warning(
+            "gate Pro da leitura de imagem falhou pro user %s — seguindo fail-open (OCR liberado)",
+            uid, exc_info=True,
+        )
 
     if not data:
         return [OutgoingMessage(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from collections import defaultdict
 
@@ -36,6 +37,8 @@ from db import (
 )
 from utils_date import extract_date_from_text, fmt_br, now_tz, today_tz
 from utils_text import fmt_brl, normalize_text, parse_money
+
+logger = logging.getLogger(__name__)
 
 _CARD_CREATE_VERBS = (
     "criar",
@@ -521,7 +524,10 @@ def add_credit_from_entities(
         try:
             set_pending_action(user_id, "delete_credit_purchase", {"tx_id": int(tx_id)})
         except Exception:
-            pass
+            logger.warning(
+                "falha ao salvar pending delete_credit_purchase (user %s, tx %s) — botão Apagar não vai aparecer",
+                user_id, tx_id, exc_info=True,
+            )
         return _format_credit_purchase_success(card_label, float(valor), purchased_at, float(due), int(tx_id))
     except Exception as e:
         return f"❌ Erro registrando compra no crédito: {e}"

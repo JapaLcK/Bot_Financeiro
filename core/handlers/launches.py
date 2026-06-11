@@ -1,5 +1,6 @@
 # core/handlers/launches.py
 from __future__ import annotations
+import logging
 import re
 from datetime import date, timedelta
 
@@ -8,6 +9,8 @@ from utils_text import fmt_brl, is_internal_category
 from utils_date import extract_date_from_text, today_tz
 from core.services.category_service import infer_category, learn_from_inference
 from parsers import parse_receita_despesa_natural
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +280,10 @@ def add_from_entities(
                 {"launch_id": int(launch_id), "user_seq": int(user_seq)},
             )
         except Exception:
-            pass
+            logger.warning(
+                "falha ao salvar pending recategorize_launch_offer (user %s, launch %s) — botão de recategorizar não vai aparecer",
+                user_id, launch_id, exc_info=True,
+            )
 
     emoji = "💸" if tipo == "despesa" else "💰"
     resposta = (
@@ -296,7 +302,10 @@ def add_from_entities(
             if alert:
                 resposta += format_alert_text(alert)
         except Exception:
-            pass
+            logger.warning(
+                "avaliação de alerta de orçamento falhou (user %s, categoria %r) — alerta pode ter sido perdido",
+                user_id, categoria_final, exc_info=True,
+            )
 
     return resposta
 

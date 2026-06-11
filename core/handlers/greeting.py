@@ -132,7 +132,10 @@ def _greeting_with_ai(text: str, greeting_type: str, name: str | None = None, us
             if not is_pro(int(user_id)):
                 return None
         except Exception:
-            pass
+            logger.warning(
+                "gate Pro do greeting IA falhou pro user %s — seguindo fail-open (chamada IA liberada)",
+                user_id, exc_info=True,
+            )
 
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:

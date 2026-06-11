@@ -252,19 +252,33 @@ def _get_ipca_monthly_map(cur, start: date, end: date) -> dict[date, float]:
     return _get_sgs_monthly_map(cur, "IPCA_MONTHLY", 433, start, end)
 
 
+def _parse_sgs_latest(data, *, series: str) -> tuple[date, float] | None:
+    """Extrai o (ref_date, valor) mais recente de uma resposta SGS em JSON.
+
+    Item malformado é tolerado um a um; mas se a resposta veio com itens e
+    NENHUM parseou (formato da API mudou?), loga warning — senão a taxa fica
+    stale no cache local pra sempre, sem ninguém perceber.
+    """
+    latest: tuple[date, float] | None = None
+    for item in data or []:
+        try:
+            d = datetime.strptime(item["data"], "%d/%m/%Y").date()
+            v = float(str(item["valor"]).replace(",", "."))
+            if latest is None or d > latest[0]:
+                latest = (d, v)
+        except Exception:
+            continue
+    if data and latest is None:
+        logger.warning(
+            "SGS %s: resposta com %d item(ns) mas nenhum parseou — caindo pro cache local",
+            series, len(data),
+        )
+    return latest
+
+
 def get_latest_cdi(cur) -> tuple[date, float] | None:
     """Retorna (data, valor_percent_ao_dia) da CDI mais recente."""
-    data = _fetch_sgs_latest_json(12)
-    latest: tuple[date, float] | None = None
-    if data:
-        for item in data:
-            try:
-                d = datetime.strptime(item["data"], "%d/%m/%Y").date()
-                v = float(str(item["valor"]).replace(",", "."))
-                if latest is None or d > latest[0]:
-                    latest = (d, v)
-            except Exception:
-                continue
+    latest = _parse_sgs_latest(_fetch_sgs_latest_json(12), series="CDI (12)")
 
     if latest:
         cur.execute(
@@ -283,17 +297,7 @@ def get_latest_cdi(cur) -> tuple[date, float] | None:
 
 def get_latest_cdi_aa(cur) -> tuple[date, float] | None:
     """CDI a.a. (base 252) direto do SGS/BCB (série 4389)."""
-    data = _fetch_sgs_latest_json(4389)
-    latest: tuple[date, float] | None = None
-    if data:
-        for item in data:
-            try:
-                d = datetime.strptime(item["data"], "%d/%m/%Y").date()
-                v = float(str(item["valor"]).replace(",", "."))
-                if latest is None or d > latest[0]:
-                    latest = (d, v)
-            except Exception:
-                continue
+    latest = _parse_sgs_latest(_fetch_sgs_latest_json(4389), series="CDI_AA (4389)")
 
     if latest:
         cur.execute(
@@ -312,17 +316,9 @@ def get_latest_cdi_aa(cur) -> tuple[date, float] | None:
 
 def get_latest_market_rate(cur, code: str, series_code: int) -> tuple[date, float] | None:
     """Retorna a taxa mais recente de uma série SGS, usando cache local como fallback."""
-    data = _fetch_sgs_latest_json(series_code)
-    latest: tuple[date, float] | None = None
-    if data:
-        for item in data:
-            try:
-                d = datetime.strptime(item["data"], "%d/%m/%Y").date()
-                v = float(str(item["valor"]).replace(",", "."))
-                if latest is None or d > latest[0]:
-                    latest = (d, v)
-            except Exception:
-                continue
+    latest = _parse_sgs_latest(
+        _fetch_sgs_latest_json(series_code), series=f"{code} ({series_code})"
+    )
 
     if latest:
         cur.execute(
