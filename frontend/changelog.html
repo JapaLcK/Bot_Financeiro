@@ -52,10 +52,13 @@ body::before { content:""; position:fixed; inset:0; z-index:1; pointer-events:no
 .page { position: relative; z-index: 2; max-width: 780px; margin: 0 auto; padding: 0 24px 120px; }
 
 /* ─── Navbar ── */
-nav {
+/* Shell na largura padrão do site (980px) — o .page fica em 780px só pro texto. */
+.nav-shell {
   position: sticky; top: 16px; z-index: 100;
+  max-width: 980px; margin: 16px auto 0; padding: 0 24px;
+}
+nav {
   display: flex; align-items: center; justify-content: space-between;
-  margin: 16px 0 0;
   background: rgba(255,255,255,0.06);
   backdrop-filter: blur(32px) saturate(180%); -webkit-backdrop-filter: blur(32px) saturate(180%);
   border: 1px solid var(--glass-border); border-radius: 18px;
@@ -269,9 +272,8 @@ footer a:hover { color: var(--text); }
   <div class="orb orb-4"></div>
 </div>
 
-<div class="page">
-
-  <!-- Navbar -->
+<!-- Navbar — fora do .page (780px) pra ter a mesma largura das outras páginas (980px) -->
+<div class="nav-shell">
   <nav>
     <a class="nav-logo" href="/">
       <div class="logo-icon">🐷</div>
@@ -286,6 +288,9 @@ footer a:hover { color: var(--text); }
       <a href="/suporte">Suporte</a>
     </div>
   </nav>
+</div>
+
+<div class="page">
 
   <!-- Hero -->
   <div class="hero">
