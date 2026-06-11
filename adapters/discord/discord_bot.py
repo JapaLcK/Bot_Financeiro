@@ -5,14 +5,20 @@ Responsabilidades:
   - Configurar o bot e os intents
   - Carregar os Cogs (um por domínio)
   - Orquestrar o pipeline on_message:
-      1. core_handle_incoming  (OFX, help compartilhado)
+      1. core_handle_incoming  (pipeline unificado: classify → route; cobre
+         crédito, saldo, lançamentos, OFX, áudio, imagem, billing, IA)
       2. GeneralCog            (menu, ajuda, pending, dashboard, CDI)
       3. PocketsCog            (caixinhas)
       4. InvestmentsCog        (investimentos)
       5. AccountsCog           (saldo, lançamentos, excel)
-      6. handle_credit_commands (cartão de crédito)
-      7. handle_quick_entry    (receita/despesa natural)
-      8. fallback              (mensagem de erro)
+      6. handle_quick_entry    (receita/despesa natural)
+      7. fallback              (mensagem de erro)
+
+  Nota: para texto não-vazio o core_handle_incoming SEMPRE responde (route()
+  devolve help contextual até pra out_of_scope), então os passos 2-7 só são
+  alcançáveis em edge cases (ex: mensagem só com anexo não reconhecido). O
+  handler legado de crédito (handlers/credit.py) foi removido por isso —
+  crédito é 100% core/handlers/credit.py.
 """
 import asyncio
 import os
@@ -34,7 +40,6 @@ from core.types import IncomingMessage, Attachment
 from core.handle_incoming import handle_incoming as core_handle_incoming
 from core.services.quick_entry import handle_quick_entry
 from core.reports.reports_daily import setup_daily_report
-from handlers.credit import handle_credit_commands
 
 from adapters.discord.cogs.general_cog import GeneralCog
 from adapters.discord.cogs.pockets_cog import PocketsCog
@@ -158,8 +163,11 @@ async def _handle_message(message: discord.Message, text: str, t: str, external_
                         content_type=a.content_type or "application/octet-stream",
                         data=data,
                     ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning(
+                        "anexo %r do user %s não pôde ser baixado e foi ignorado: %s",
+                        getattr(a, "filename", "?"), uid, exc,
+                    )
 
         incoming = IncomingMessage(
             platform="discord",
@@ -197,17 +205,13 @@ async def _handle_message(message: discord.Message, text: str, t: str, external_
         if _accounts_cog and await _accounts_cog.handle(message, t, uid):
             return
 
-        # ── 6. Crédito (cartão, fatura, parcelamento) ─────────────────────────
-        if await handle_credit_commands(message, uid):
-            return
-
-        # ── 7. Entrada rápida (receita/despesa natural) ───────────────────────
+        # ── 6. Entrada rápida (receita/despesa natural) ───────────────────────
         msg_out = handle_quick_entry(uid, text)
         if msg_out:
             await message.reply(msg_out.text)
             return
 
-        # ── 8. Fallback ───────────────────────────────────────────────────────
+        # ── 7. Fallback ───────────────────────────────────────────────────────
         await message.reply("❓ **Não entendi seu comando. Tente um destes exemplos:**\n\n" + HELP_TEXT_SHORT)
 
 
