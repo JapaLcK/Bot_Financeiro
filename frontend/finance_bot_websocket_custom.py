@@ -70,10 +70,7 @@ from db import (
     create_pocket,
     delete_pocket,
     delete_investment,
-    create_mock_open_finance_connection,
-    disconnect_open_finance_connection,
     get_dashboard_market_rates,
-    get_open_finance_snapshot,
     get_auth_user,
     build_user_export_zip,
     verify_user_password,
@@ -83,9 +80,7 @@ from db import (
     has_recent_export_request,
     ensure_account_deletion_columns,
     process_due_account_deletions,
-    save_pluggy_open_finance_item,
     schedule_account_deletion,
-    update_pluggy_open_finance_item_status,
     investment_deposit_from_account,
     investment_withdraw_to_account,
     pocket_deposit_from_account,
@@ -96,12 +91,8 @@ from db import (
     undo_credit_transaction,
     delete_launch_and_rollback,
 )
-from core.services.pluggy import (
-    PluggyApiError,
-    PluggyConfigError,
-    create_pluggy_connect_token,
-)
 from frontend.routes.analytics import router as analytics_router
+from frontend.routes.open_finance import router as open_finance_router
 from frontend.routes.settings import router as settings_router
 from frontend.routes.shared import (
     AUTH_COOKIE_NAME,
@@ -138,7 +129,6 @@ STRIPE_WEBHOOK_SECRET   = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PRICE_ID_PRO     = os.getenv("STRIPE_PRICE_ID_PRO", "")            # legacy: usado como fallback do mensal
 STRIPE_PRICE_ID_PRO_MENSAL = os.getenv("STRIPE_PRICE_ID_PRO_MENSAL", "")  # price_xxx Pro mensal (R$ 19,90)
 STRIPE_PRICE_ID_PRO_ANUAL  = os.getenv("STRIPE_PRICE_ID_PRO_ANUAL", "")   # price_xxx Pro anual  (R$ 199,00)
-PLUGGY_INCLUDE_SANDBOX  = os.getenv("PLUGGY_INCLUDE_SANDBOX", "1") != "0"
 DASHBOARD_MAGIC_LINK_MINUTES = int(os.getenv("DASHBOARD_MAGIC_LINK_MINUTES", "5"))
 DASHBOARD_SESSION_HOURS = float(os.getenv("DASHBOARD_SESSION_HOURS", "12"))
 DB_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "5"))
@@ -5742,14 +5732,6 @@ class InvestmentMovementPayload(BaseModel):
     purchase_date: date | None = None
 
 
-class OpenFinanceMockConnectPayload(BaseModel):
-    institution: str | None = None
-
-
-class OpenFinancePluggyItemPayload(BaseModel):
-    item: dict
-
-
 def _investment_action_note(action: str, name: str, issuer: str | None = None, note: str | None = None) -> str:
     clean_name = (name or "").strip() or "investimento"
     clean_issuer = (issuer or "").strip()
@@ -5904,148 +5886,8 @@ async def delete_investment_route(request: Request, user_id: int, name: str):
 app.include_router(settings_router)
 
 
-@app.get("/open-finance/{user_id}")
-async def open_finance_snapshot_route(request: Request, user_id: int):
-    _authorize_dashboard_access(request, user_id)
-    snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
-    return json.loads(jdump({"ok": True, **snapshot}))
-
-
-@app.post("/open-finance/{user_id}/connect-token")
-async def open_finance_connect_token_route(request: Request, user_id: int):
-    _authorize_dashboard_access(request, user_id)
-
-    webhook_url = (os.getenv("PLUGGY_WEBHOOK_URL") or "").strip()
-    if not webhook_url and DASHBOARD_URL.startswith("https://"):
-        webhook_url = f"{DASHBOARD_URL}/open-finance/pluggy/webhook"
-
-    try:
-        token_data = await asyncio.to_thread(
-            create_pluggy_connect_token,
-            user_id,
-            webhook_url or None,
-        )
-    except PluggyConfigError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except PluggyApiError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    return {
-        "ok": True,
-        "accessToken": token_data["accessToken"],
-        "includeSandbox": PLUGGY_INCLUDE_SANDBOX,
-        "provider": "pluggy",
-    }
-
-
-@app.post("/open-finance/{user_id}/pluggy-item")
-async def open_finance_pluggy_item_route(request: Request, user_id: int, payload: OpenFinancePluggyItemPayload):
-    _authorize_dashboard_access(request, user_id)
-    try:
-        connection = await asyncio.to_thread(save_pluggy_open_finance_item, user_id, payload.item)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    await asyncio.to_thread(
-        record_audit_event,
-        user_id,
-        AuditEvent.OPEN_FINANCE_CONNECTED,
-        request=request,
-        details={"provider": "pluggy", "item_id": (connection or {}).get("item_id")},
-    )
-
-    snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
-    return json.loads(jdump({"ok": True, "connection": connection, **snapshot}))
-
-
-def _verify_pluggy_webhook_signature(raw_body: bytes, signature_header: str, secret: str) -> bool:
-    signature = (signature_header or "").strip()
-    if signature.startswith("sha256="):
-        signature = signature.split("=", 1)[1]
-    if not signature:
-        return False
-
-    expected = _hmac.new(secret.encode("utf-8"), raw_body, _hashlib.sha256).hexdigest()
-    return _hmac.compare_digest(signature, expected)
-
-
-@app.post("/open-finance/pluggy/webhook")
-async def open_finance_pluggy_webhook(request: Request):
-    """
-    Recebe eventos da Pluggy e responde rapido.
-    Trabalho pesado de sync deve rodar fora do request.
-    """
-    secret = (os.getenv("PLUGGY_WEBHOOK_SECRET") or "").strip()
-    if not secret:
-        raise HTTPException(status_code=503, detail="Webhook não configurado.")
-
-    raw_body = await request.body()
-    received_sig = request.headers.get("X-Pluggy-Signature") or ""
-    if not _verify_pluggy_webhook_signature(raw_body, received_sig, secret):
-        raise HTTPException(status_code=401, detail="Assinatura inválida.")
-
-    try:
-        event = json.loads(raw_body)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail="Webhook inválido.") from exc
-
-    event_name = str(event.get("event") or event.get("type") or "")
-    item_id = str(event.get("itemId") or event.get("item_id") or event.get("item", {}).get("id") or "")
-    status_by_event = {
-        "item/created": "UPDATING",
-        "item/updated": "ACTIVE",
-        "item/error": "ERROR",
-        "item/deleted": "DELETED",
-    }
-    status = status_by_event.get(event_name)
-    if item_id and status:
-        await asyncio.to_thread(update_pluggy_open_finance_item_status, item_id, status, event)
-
-    await log_system_event(
-        "info" if event_name != "item/error" else "warning",
-        "pluggy_webhook_received",
-        f"Webhook Pluggy recebido: {event_name or 'evento desconhecido'}",
-        source="open_finance",
-        details={"event": event_name, "item_id": item_id},
-    )
-    return {"received": True}
-
-
-@app.post("/open-finance/{user_id}/mock-connect")
-async def open_finance_mock_connect_route(request: Request, user_id: int, payload: OpenFinanceMockConnectPayload):
-    _authorize_dashboard_access(request, user_id)
-    result = await asyncio.to_thread(
-        create_mock_open_finance_connection,
-        user_id,
-        payload.institution or "nubank",
-    )
-
-    await asyncio.to_thread(
-        record_audit_event,
-        user_id,
-        AuditEvent.OPEN_FINANCE_CONNECTED,
-        request=request,
-        details={"provider": "mock", "institution": payload.institution or "nubank"},
-    )
-
-    snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
-    return json.loads(jdump({"ok": True, "sync": result, **snapshot}))
-
-
-@app.delete("/open-finance/{user_id}")
-async def open_finance_disconnect_route(request: Request, user_id: int):
-    _authorize_dashboard_access(request, user_id)
-    deleted = await asyncio.to_thread(disconnect_open_finance_connection, user_id)
-
-    if deleted:
-        await asyncio.to_thread(
-            record_audit_event,
-            user_id,
-            AuditEvent.OPEN_FINANCE_DISCONNECTED,
-            request=request,
-        )
-
-    return {"ok": True, "deleted": deleted}
+# ─── Open Finance (Pluggy + mock) → frontend/routes/open_finance.py (F1 E4) ──
+app.include_router(open_finance_router)
 
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────

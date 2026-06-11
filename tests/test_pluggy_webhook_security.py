@@ -5,6 +5,7 @@ import json
 from fastapi.testclient import TestClient
 
 import frontend.finance_bot_websocket_custom as dashboard
+import frontend.routes.open_finance as open_finance_routes
 
 
 def _signed_headers(raw_body: bytes, secret: str) -> dict[str, str]:
@@ -43,7 +44,7 @@ def test_pluggy_webhook_accepts_valid_sha256_signature(monkeypatch):
         return None
 
     monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "test-webhook-secret")
-    monkeypatch.setattr(dashboard, "log_system_event", _noop_log)
+    monkeypatch.setattr(open_finance_routes, "log_system_event", _noop_log)
 
     raw_body = json.dumps(
         {"event": "item/updated", "itemId": ""},
