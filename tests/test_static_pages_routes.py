@@ -86,6 +86,8 @@ def test_assets_estaticos():
         ("/modals.js", "application/javascript"),
         ("/favicon.png", "image/png"),
         ("/manifest.json", "application/manifest+json"),
+        ("/dashboard.js", "application/javascript"),
+        ("/dashboard-chat.js", "application/javascript"),
     ]:
         resp = client.get(path)
         assert resp.status_code == 200, path

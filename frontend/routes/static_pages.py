@@ -187,6 +187,29 @@ async def serve_modals_js():
     return FileResponse(FRONTEND_DIR / "modals.js", media_type="application/javascript")
 
 
+@router.get("/dashboard.js")
+async def serve_dashboard_js():
+    """JS principal do dashboard, extraído do inline de dashboard.html
+    (refactor Fase 1: viabiliza remover 'unsafe-inline' do script-src).
+    no-cache: revalida via etag a cada load pra não dessincronizar do HTML
+    (servido no-store) em deploys."""
+    return FileResponse(
+        FRONTEND_DIR / "dashboard.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/dashboard-chat.js")
+async def serve_dashboard_chat_js():
+    """Widget de chat IA (Piggy) do dashboard, extraído do inline."""
+    return FileResponse(
+        FRONTEND_DIR / "dashboard-chat.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/health")
 async def health():
     return {"status": "ok"}
