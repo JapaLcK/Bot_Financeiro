@@ -4702,8 +4702,8 @@ async function moveInvestment(event) {
 	  await refreshDashboardAfterInvestment(message);
 	}
 
-async function investmentWithdrawAll() {
-  const name = document.getElementById("move-name").value;
+async function investmentWithdrawAll(nameArg) {
+  const name = nameArg || document.getElementById("move-name")?.value;
   if (!name) { await alertModal("Selecione um investimento.", { title: "Campos obrigatórios" }); return; }
   const ok = await confirmModal(
     `Resgatar todo o saldo de "${name}" e zerar o investimento? O IR/IOF sobre o rendimento é descontado automaticamente.`,
@@ -4718,7 +4718,8 @@ async function investmentWithdrawAll() {
   });
   if (!resp.ok) { await alertModal(await readApiError(resp), { title: "Erro" }); return; }
   const result = await resp.json();
-  document.getElementById("move-amount").value = "";
+  const moveAmount = document.getElementById("move-amount");
+  if (moveAmount) moveAmount.value = "";
   closeInvestmentModal();
   let message = "✓ Investimento zerado";
   if (result.tax_summary) {
@@ -4837,6 +4838,14 @@ function openInvestmentDetail(name) {
     closeInvestmentDetail();
     deleteInvestment(inv.name);
   };
+  const detailWithdrawAll = document.getElementById("investment-detail-withdraw-all");
+  if (detailWithdrawAll) {
+    detailWithdrawAll.style.display = Number(inv.balance || 0) > 0 ? "" : "none";
+    detailWithdrawAll.onclick = () => {
+      closeInvestmentDetail();
+      investmentWithdrawAll(inv.name);
+    };
+  }
   document.getElementById("investment-detail-overlay").classList.add("open");
 }
 
