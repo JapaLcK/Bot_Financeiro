@@ -4650,6 +4650,9 @@ function updateMoveFormVisibility() {
     rateInput.value = "";
     dateInput.value = "";
   }
+
+  const allBtn = document.getElementById("move-withdraw-all");
+  if (allBtn) allBtn.style.display = kind === "withdraw" ? "" : "none";
 }
 
 async function moveInvestment(event) {
@@ -4698,6 +4701,35 @@ async function moveInvestment(event) {
 	  }
 	  await refreshDashboardAfterInvestment(message);
 	}
+
+async function investmentWithdrawAll() {
+  const name = document.getElementById("move-name").value;
+  if (!name) { await alertModal("Selecione um investimento.", { title: "Campos obrigatórios" }); return; }
+  const ok = await confirmModal(
+    `Resgatar todo o saldo de "${name}" e zerar o investimento? O IR/IOF sobre o rendimento é descontado automaticamente.`,
+    { title: "Resgatar tudo", confirmText: "Resgatar tudo" },
+  );
+  if (!ok) return;
+  const resp = await fetch(`${API}/investments/${USER_ID}/withdraw`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: csrfHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name, withdraw_all: true }),
+  });
+  if (!resp.ok) { await alertModal(await readApiError(resp), { title: "Erro" }); return; }
+  const result = await resp.json();
+  document.getElementById("move-amount").value = "";
+  closeInvestmentModal();
+  let message = "✓ Investimento zerado";
+  if (result.tax_summary) {
+    const t = result.tax_summary;
+    const tax = Number(t.ir || 0) + Number(t.iof || 0);
+    message = tax > 0
+      ? `✓ Investimento zerado · líquido ${fmt(t.net)} (IR/IOF ${fmt(tax)})`
+      : `✓ Investimento zerado · resgatado ${fmt(t.gross || 0)}`;
+  }
+  await refreshDashboardAfterInvestment(message);
+}
 
 async function deleteInvestment(name) {
   const ok = await confirmModal(`Remover ${name}? O saldo precisa estar zerado.`, {

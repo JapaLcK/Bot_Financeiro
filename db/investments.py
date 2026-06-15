@@ -387,6 +387,11 @@ MONEY = Decimal("0.01")
 ZERO = Decimal("0")
 LOT_EPSILON = Decimal("0.000001")
 
+# Saque/resgate a menos de 1 centavo do saldo real conta como "tudo": a tela mostra o
+# saldo arredondado a 2 casas, mas o rendimento deixa frações de sub-centavo, então o
+# usuário nunca consegue digitar o valor exato pra zerar a caixinha/investimento.
+WITHDRAW_ALL_TOLERANCE = Decimal("0.01")
+
 IOF_REGRESSIVE_RATES = {
     1: Decimal("0.96"),
     2: Decimal("0.93"),
@@ -1330,13 +1335,27 @@ def investment_deposit_from_account(
 
 
 def investment_withdraw_to_account(
-    user_id: int, investment_name: str, amount: float, nota: str | None = None
+    user_id: int,
+    investment_name: str,
+    amount: float | None = None,
+    nota: str | None = None,
+    *,
+    withdraw_all: bool = False,
 ):
-    """Investimento → Conta via PEPS/FIFO. Retorna (launch_id, new_acc, new_inv, canon, tax_summary)."""
+    """Investimento → Conta via PEPS/FIFO. Retorna (launch_id, new_acc, new_inv, canon, tax_summary).
+
+    Se ``withdraw_all=True``, resgata o saldo cheio pós-rendimento (zera o investimento
+    de forma atômica) e ignora ``amount``. Caso contrário resgata ``amount``; mas se o
+    valor pedido ficar a menos de 1 centavo do saldo real, resgata tudo — a tela arredonda
+    o saldo a 2 casas e o rendimento deixa frações de sub-centavo (ver ``WITHDRAW_ALL_TOLERANCE``).
+    """
     ensure_user(user_id)
-    v = Decimal(str(amount))
-    if v <= 0:
-        raise ValueError("AMOUNT_INVALID")
+    if not withdraw_all:
+        if amount is None:
+            raise ValueError("AMOUNT_INVALID")
+        v = Decimal(str(amount))
+        if v <= 0:
+            raise ValueError("AMOUNT_INVALID")
 
     criado_em = datetime.now(_tz())
     today = datetime.now(_tz()).date()
@@ -1355,7 +1374,12 @@ def investment_withdraw_to_account(
             inv_id, canon = inv["id"], inv["name"]
             new_bal_before = accrue_investment_db(cur, user_id, inv_id, today=today)
 
-            if new_bal_before < v:
+            if withdraw_all or abs(new_bal_before - v) < WITHDRAW_ALL_TOLERANCE:
+                # resgatar tudo (ou pediu ~tudo, dentro da tolerância de arredondamento da tela)
+                v = new_bal_before
+            elif new_bal_before < v:
+                raise ValueError("INSUFFICIENT_INVEST")
+            if v <= 0:
                 raise ValueError("INSUFFICIENT_INVEST")
 
             cur.execute(

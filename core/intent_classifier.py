@@ -332,6 +332,11 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "investments.withdraw"),
     (r"^(retirei|saquei|tirei|resgatei)\s+\d",
      "funds.withdraw"),
+    # resgatar tudo / esvaziar / zerar investimento (sem valor) → resgate total que zera
+    (r"\b(resgata|resgatar|saca|sacar|saque|retira|retirar|tira|tirar)\b.*\btudo\b.*\binvestimento",
+     "funds.withdraw"),
+    (r"\b(esvaziar|esvazia|esvaziei|zerar|zera|zerei)\b.*\binvestimento",
+     "funds.withdraw"),
 
     # categorias
     (r"^(regras|regras de categoria|regras de categorias|listar regras|ver regras)$",

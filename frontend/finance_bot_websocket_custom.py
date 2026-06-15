@@ -4628,8 +4628,9 @@ class InvestmentCreatePayload(BaseModel):
 
 class InvestmentMovementPayload(BaseModel):
     name: str
-    amount: float
+    amount: float | None = None
     note: str | None = None
+    withdraw_all: bool = False
     # Aporte com taxa específica (Tesouro IPCA+/Prefixado, Debêntures etc.).
     # Quando ausentes, o lote herda taxa/período do investimento.
     rate: float | None = None
@@ -4739,7 +4740,7 @@ async def deposit_investment_route(request: Request, user_id: int, payload: Inve
 @app.post("/investments/{user_id}/withdraw")
 async def withdraw_investment_route(request: Request, user_id: int, payload: InvestmentMovementPayload):
     _authorize_dashboard_access(request, user_id)
-    if payload.amount <= 0:
+    if not payload.withdraw_all and (payload.amount is None or payload.amount <= 0):
         raise HTTPException(status_code=400, detail="Valor deve ser maior que zero.")
     try:
         launch_id, new_acc, new_inv, canon, tax_summary = await asyncio.to_thread(
@@ -4748,6 +4749,7 @@ async def withdraw_investment_route(request: Request, user_id: int, payload: Inv
             payload.name.strip(),
             payload.amount,
             payload.note or _investment_action_note("Resgate de", payload.name),
+            withdraw_all=bool(payload.withdraw_all),
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="Investimento não encontrado.") from exc

@@ -1,5 +1,6 @@
 # core/handlers/investments.py
 from __future__ import annotations
+import re
 import db
 from utils_text import fmt_brl, fmt_rate
 from core.dashboard_links import build_dashboard_link
@@ -168,27 +169,38 @@ def check_cdi() -> str:
         )
 
 
+_WITHDRAW_ALL_RX = re.compile(r"\b(tudo|esvaziar|esvazia|zerar|zera)\b", re.I)
+
+
 def withdraw(user_id: int, text: str, entities: dict) -> str:
     investment_name = entities.get("investment_name")
     amount = entities.get("amount")
+    want_all = bool(_WITHDRAW_ALL_RX.search(text or ""))
 
     if not investment_name:
         return list_investments(user_id, "De qual investimento você quer resgatar?")
-    if not amount or float(amount) <= 0:
+    if not want_all and (not amount or float(amount) <= 0):
         return list_investments(user_id, "Qual valor você quer resgatar?")
 
     try:
         launch_id, _new_acc, _new_inv, canon, taxes = db.investment_withdraw_to_account(
-            user_id, investment_name, float(amount), text
+            user_id,
+            investment_name,
+            None if want_all else float(amount),
+            text,
+            withdraw_all=want_all,
         )
-        tax_note = ""
-        if taxes and float(taxes.get("iof", 0) or 0) + float(taxes.get("ir", 0) or 0) > 0:
-            tax_note = f" Líquido: **{fmt_brl(float(taxes.get('net', 0)))}**."
-        return f"✅ Resgate de **{fmt_brl(float(amount))}** de **{canon}**.{tax_note} ID #{db.display_id_for(user_id, launch_id)}.\n\n" + list_investments(user_id)
     except Exception as e:
         err = str(e)
-        if "not found" in err.lower():
+        if "not found" in err.lower() or "inv_not_found" in err.lower():
             return list_investments(user_id, f"Não encontrei **{investment_name}**. Estes são seus investimentos:")
         if "saldo insuficiente" in err.lower() or "insufficient" in err.lower():
             return f"Saldo insuficiente no investimento **{investment_name}**.\n\n" + list_investments(user_id)
         return f"Erro ao resgatar: {err}"
+
+    gross = float(taxes.get("gross", amount or 0)) if taxes else float(amount or 0)
+    tax_note = ""
+    if taxes and float(taxes.get("iof", 0) or 0) + float(taxes.get("ir", 0) or 0) > 0:
+        tax_note = f" Líquido: **{fmt_brl(float(taxes.get('net', 0)))}**."
+    verb = "Resgate total" if want_all else "Resgate"
+    return f"✅ {verb} de **{fmt_brl(gross)}** de **{canon}**.{tax_note} ID #{db.display_id_for(user_id, launch_id)}.\n\n" + list_investments(user_id)

@@ -11,6 +11,7 @@ from utils_date import _tz
 from .connection import get_conn
 from .investments import (
     LOT_EPSILON,
+    WITHDRAW_ALL_TOLERANCE,
     ZERO,
     _growth_for_period,
     _iof_rate_for_days,
@@ -26,11 +27,6 @@ POCKET_COLUMNS = """
     interest_enabled, interest_rate, interest_period,
     interest_tax_profile, last_interest_date
 """
-
-# Saque a menos de 1 centavo do saldo real conta como "sacar tudo": a tela mostra o
-# saldo arredondado a 2 casas, mas o rendimento deixa frações de sub-centavo, então o
-# usuário nunca consegue digitar o valor exato pra zerar a caixinha.
-WITHDRAW_ALL_TOLERANCE = Decimal("0.01")
 
 
 def _today() -> date:

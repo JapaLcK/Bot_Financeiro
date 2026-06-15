@@ -188,6 +188,8 @@ def _investment_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
 
 def _investment_withdraw_summary(args: dict[str, Any]) -> str:
     name = args.get("name")
+    if args.get("withdraw_all"):
+        return f'resgatar tudo do investimento "{name}" (zerar o saldo)'
     amount = args.get("amount")
     if isinstance(amount, (int, float)):
         return f'resgatar R$ {amount:.2f} do investimento "{name}"'
@@ -196,15 +198,31 @@ def _investment_withdraw_summary(args: dict[str, Any]) -> str:
 
 def _investment_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
     name = (args.get("name") or "").strip()
+    withdraw_all = bool(args.get("withdraw_all"))
     try:
         amount = float(args.get("amount") or 0)
     except (TypeError, ValueError):
         return "🐷 Valor inválido."
-    if not name or amount <= 0:
-        return "🐷 Faltou o nome do investimento ou o valor."
+    if not name:
+        return "🐷 Faltou o nome do investimento."
+    if not withdraw_all and amount <= 0:
+        return "🐷 Faltou o valor (ou peça pra 'resgatar tudo')."
     try:
-        db.investment_withdraw_to_account(user_id, name, amount)
-        return f'✅ Resgate de R$ {amount:.2f} do "{name}" registrado.'
+        _lid, _acc, _inv, canon, taxes = db.investment_withdraw_to_account(
+            user_id, name, None if withdraw_all else amount, withdraw_all=withdraw_all,
+        )
+        gross = float(taxes.get("gross", 0)) if taxes else 0.0
+        tax = (float(taxes.get("ir", 0)) + float(taxes.get("iof", 0))) if taxes else 0.0
+        tax_txt = f" — IR/IOF R$ {tax:.2f}" if tax > 0 else ""
+        if withdraw_all:
+            return f'✅ Investimento "{canon}" zerado: resgatado R$ {gross:.2f}{tax_txt}.'
+        return f'✅ Resgate de R$ {gross:.2f} do "{canon}"{tax_txt}.'
+    except ValueError as e:
+        if "INSUFFICIENT_INVEST" in str(e):
+            return f'🐷 O investimento "{name}" não tem esse saldo.'
+        return "🐷 Valor inválido pra resgate."
+    except LookupError:
+        return f'🐷 Não achei o investimento "{name}".'
     except Exception as e:
         return f"🐷 Não consegui resgatar: {e}"
 
@@ -327,14 +345,15 @@ TOOLS: list[Tool] = [
             "type": "function",
             "function": {
                 "name": "investment_withdraw",
-                "description": "Resgata dinheiro de um investimento de volta pra conta corrente. FIFO por lotes. Use pra 'resgatar 500 do CDB Nubank'. ESCRITA — pede confirmação.",
+                "description": "Resgata dinheiro de um investimento de volta pra conta corrente. FIFO por lotes. Use pra 'resgatar 500 do CDB Nubank'. Para zerar/esvaziar o investimento (ex: 'resgata tudo do CDB', 'esvazia o Tesouro'), passe withdraw_all=true e omita amount — IR/IOF calculado automaticamente. ESCRITA — pede confirmação.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "name": {"type": "string"},
-                        "amount": {"type": "number", "minimum": 0.01},
+                        "amount": {"type": "number", "minimum": 0.01, "description": "Valor a resgatar. Omita quando withdraw_all=true."},
+                        "withdraw_all": {"type": "boolean", "description": "true para resgatar TODO o saldo e zerar o investimento (IR/IOF sobre o rendimento calculado automaticamente)."},
                     },
-                    "required": ["name", "amount"],
+                    "required": ["name"],
                 },
             },
         },
