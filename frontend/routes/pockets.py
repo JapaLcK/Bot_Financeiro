@@ -30,8 +30,9 @@ class PocketCreatePayload(BaseModel):
 
 
 class PocketMovePayload(BaseModel):
-    amount: float
+    amount: float | None = None
     nota: str | None = None
+    withdraw_all: bool = False
 
 
 @router.post("/pockets/{user_id}")
@@ -343,6 +344,7 @@ async def pocket_withdraw_route(request: Request, user_id: int, pocket_name: str
     try:
         launch_id, new_acc, new_pocket, canon, taxes = await asyncio.to_thread(
             pocket_withdraw_to_account, int(user_id), name, payload.amount, nota,
+            withdraw_all=bool(payload.withdraw_all),
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="Caixinha não encontrada.") from exc

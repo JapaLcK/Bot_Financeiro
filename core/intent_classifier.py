@@ -313,6 +313,11 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "pockets.deposit"),
     (r"^(retirei|saquei|tirei)\s+\d.*\bcaixinha\b",
      "pockets.withdraw"),
+    # sacar tudo / esvaziar / zerar a caixinha (sem valor) → saque total que zera o saldo
+    (r"\b(saca|sacar|saque|saquei|retira|retirar|retirei|tira|tirar|tirei|resgata|resgatar)\b.*\btudo\b.*\bcaixinha\b",
+     "pockets.withdraw"),
+    (r"\b(esvaziar|esvazia|esvaziei|zerar|zera|zerei)\b.*\bcaixinha\b",
+     "pockets.withdraw"),
 
     # investimentos
     (r"^(ver|mostrar|listar)\s+(meus\s+)?investimentos?$",

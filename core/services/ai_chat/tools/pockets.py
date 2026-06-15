@@ -90,6 +90,8 @@ def _pocket_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
 # ─── Write: pocket_withdraw ─────────────────────────────────────────────────
 
 def _pocket_withdraw_summary(args: dict[str, Any]) -> str:
+    if args.get("withdraw_all"):
+        return f'sacar tudo da caixinha "{args.get("pocket_name")}" (zerar o saldo)'
     return (
         f'sacar R$ {args.get("amount"):.2f} da caixinha '
         f'"{args.get("pocket_name")}"'
@@ -100,12 +102,28 @@ def _pocket_withdraw_summary(args: dict[str, Any]) -> str:
 
 def _pocket_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
     pocket_name = (args.get("pocket_name") or "").strip()
+    withdraw_all = bool(args.get("withdraw_all"))
     amount = float(args.get("amount") or 0)
-    if not pocket_name or amount <= 0:
-        return "🐷 Faltou o nome da caixinha ou o valor."
+    if not pocket_name:
+        return "🐷 Faltou o nome da caixinha."
+    if not withdraw_all and amount <= 0:
+        return "🐷 Faltou o valor (ou peça pra 'sacar tudo')."
     try:
-        db.pocket_withdraw_to_account(user_id, pocket_name, amount)
-        return f'✅ Sacado R$ {amount:.2f} da caixinha "{pocket_name}".'
+        _lid, _acc, _pkt, canon, taxes = db.pocket_withdraw_to_account(
+            user_id, pocket_name, None if withdraw_all else amount, withdraw_all=withdraw_all,
+        )
+        gross = float(taxes.get("gross", 0)) if taxes else 0.0
+        tax = (float(taxes.get("ir", 0)) + float(taxes.get("iof", 0))) if taxes else 0.0
+        tax_txt = f" — IR/IOF R$ {tax:.2f}" if tax > 0 else ""
+        if withdraw_all:
+            return f'✅ Caixinha "{canon}" esvaziada: sacado R$ {gross:.2f}{tax_txt}.'
+        return f'✅ Sacado R$ {gross:.2f} da caixinha "{canon}"{tax_txt}.'
+    except ValueError as e:
+        if "INSUFFICIENT_POCKET" in str(e):
+            return f'🐷 A caixinha "{pocket_name}" não tem esse saldo.'
+        return "🐷 Valor inválido pra saque."
+    except LookupError:
+        return f'🐷 Não achei a caixinha "{pocket_name}".'
     except Exception as e:
         return f"🐷 Não consegui sacar: {e}"
 
@@ -194,14 +212,15 @@ TOOLS: list[Tool] = [
             "type": "function",
             "function": {
                 "name": "pocket_withdraw",
-                "description": "Retira dinheiro de uma caixinha (cofrinho) e devolve pra conta corrente. ESCRITA — pede confirmação.",
+                "description": "Retira dinheiro de uma caixinha (cofrinho) e devolve pra conta corrente. Para esvaziar/zerar a caixinha (ex: 'saca tudo', 'esvazia a reserva', 'tira tudo da viagem'), passe withdraw_all=true e omita amount — o IR/IOF sobre o rendimento é calculado automaticamente. ESCRITA — pede confirmação.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "pocket_name": {"type": "string"},
-                        "amount": {"type": "number", "minimum": 0.01},
+                        "amount": {"type": "number", "minimum": 0.01, "description": "Valor a sacar. Omita quando withdraw_all=true."},
+                        "withdraw_all": {"type": "boolean", "description": "true para sacar TODO o saldo e zerar a caixinha (IR/IOF calculado sobre o rendimento)."},
                     },
-                    "required": ["pocket_name", "amount"],
+                    "required": ["pocket_name"],
                 },
             },
         },

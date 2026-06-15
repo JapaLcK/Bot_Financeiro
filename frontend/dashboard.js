@@ -6090,6 +6090,39 @@ async function submitPocketMove(event) {
   }
 }
 
+async function pocketWithdrawAll() {
+  if (!_currentPocketName) return;
+  const ok = await confirmModal(
+    `Sacar todo o saldo de "${_currentPocketName}" e zerar a caixinha? O IR/IOF sobre o rendimento é descontado automaticamente.`,
+    { title: "Sacar tudo", confirmText: "Sacar tudo" },
+  );
+  if (!ok) return;
+  try {
+    const res = await fetch(
+      `${API}/pockets/${USER_ID}/${encodeURIComponent(_currentPocketName)}/withdraw`,
+      {
+        method: "POST",
+        credentials: "same-origin",
+        headers: csrfHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ withdraw_all: true }),
+      },
+    );
+    const data = await readResponsePayload(res);
+    if (!res.ok) throw new Error(data.detail || "Erro ao sacar.");
+    const t = data.tax_summary || {};
+    const tax = Number(t.ir || 0) + Number(t.iof || 0);
+    const msg = tax > 0
+      ? `✓ Caixinha zerada · líquido ${fmt(t.net || 0)} (IR/IOF ${fmt(tax)})`
+      : `✓ Caixinha zerada · sacado ${fmt(t.gross || 0)}`;
+    showLaunchSuccessToast(msg);
+    closePocketMove();
+    sendRefresh();
+    openPocketHistory(_currentPocketName || data.name);
+  } catch (err) {
+    await alertModal(err.message || "Erro ao sacar.", { title: "Erro" });
+  }
+}
+
 let _currentPocketName = null;
 let _pocketMoveMode = null;
 let _currentPocketForEdit = null;

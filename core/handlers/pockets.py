@@ -1,5 +1,6 @@
 # core/handlers/pockets.py
 from __future__ import annotations
+import re
 import db
 from utils_text import fmt_brl, parse_pocket_deposit_natural
 
@@ -92,10 +93,12 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
 
 _WITHDRAW_VERBS = ["retirei", "retirar", "sacar", "saquei", "resgatei", "resgatar", "tirei", "tirar"]
 
+# "sacar tudo" / "esvaziar" / "zerar a caixinha" → saca o saldo cheio e zera
+_WITHDRAW_ALL_RX = re.compile(r"\b(tudo|esvaziar|esvazia|zerar|zera)\b", re.I)
+
 
 def _parse_pocket_withdraw_natural(text: str):
     """Extrai (amount, pocket_name) de frases de saque como 'retirei 50 da caixinha viagem'."""
-    import re
     from utils_text import parse_money, normalize_spaces
     raw = normalize_spaces(text.lower())
     if not any(v in raw for v in _WITHDRAW_VERBS):
@@ -111,34 +114,74 @@ def _parse_pocket_withdraw_natural(text: str):
     return None, None
 
 
+def _pocket_name_from_text(text: str):
+    """Extrai só o nome da caixinha (sem exigir valor) de 'sacar tudo da caixinha viagem'."""
+    from utils_text import normalize_spaces
+    raw = normalize_spaces(text.lower())
+    if "caixinha" not in raw:
+        return None
+    pocket = raw.split("caixinha", 1)[1].strip()
+    pocket = re.sub(r"^(da|do|de|na|no|para|pra)\s+", "", pocket).strip()
+    return pocket or None
+
+
+def _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id, *, emptied=False):
+    tax_note = ""
+    if taxes and (taxes.get("iof", 0) or taxes.get("ir", 0)):
+        tax_note = f" • IR/IOF: {fmt_brl(float(taxes.get('ir', 0) + taxes.get('iof', 0)))}"
+    head = (
+        f"📤 Caixinha **{canon}** esvaziada: -{fmt_brl(sacado)}"
+        if emptied
+        else f"📤 Caixinha **{canon}**: -{fmt_brl(sacado)}"
+    )
+    return (
+        f"{head}\n"
+        f"🏦 Conta: {fmt_brl(float(new_acc))} • 📦 Caixinha: {fmt_brl(float(new_pocket))}{tax_note}\n"
+        f"ID: **#{db.display_id_for(user_id, launch_id)}**"
+    )
+
+
 def withdraw(user_id: int, text: str, entities: dict) -> str:
     pocket_name = entities.get("pocket_name")
     amount      = entities.get("amount")
+    want_all    = bool(_WITHDRAW_ALL_RX.search(text or ""))
 
     # tenta extrair do texto se as entidades não trouxerem
-    if not pocket_name or not amount:
+    if not pocket_name or (not amount and not want_all):
         _a, _p = _parse_pocket_withdraw_natural(text)
         if not _a and not _p:
             _a, _p = parse_pocket_deposit_natural(text)
         pocket_name = pocket_name or _p
         amount      = amount or _a
 
+    if not pocket_name and want_all:
+        pocket_name = _pocket_name_from_text(text)
+
     if not pocket_name:
         return "Qual caixinha? Tente: *retirei 100 da caixinha viagem*"
+
+    if want_all:
+        try:
+            launch_id, new_acc, new_pocket, canon, taxes = db.pocket_withdraw_to_account(
+                user_id, pocket_name, None, text, withdraw_all=True
+            )
+        except LookupError:
+            return f"Caixinha **{pocket_name}** não encontrada. Use *listar caixinhas* para ver as disponíveis."
+        except ValueError as e:
+            if "INSUFFICIENT_POCKET" in str(e):
+                return f"A caixinha **{pocket_name}** já está zerada."
+            return "Não consegui sacar."
+        except Exception as e:
+            return f"Erro ao retirar: {e}"
+        sacado = float(taxes.get("gross", 0)) if taxes else 0.0
+        return _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id, emptied=True)
+
     if not amount or float(amount) <= 0:
         return "Qual o valor? Tente: *retirei 100 da caixinha viagem*"
 
     try:
         launch_id, new_acc, new_pocket, canon, taxes = db.pocket_withdraw_to_account(
             user_id, pocket_name, float(amount), text
-        )
-        tax_note = ""
-        if taxes and (taxes.get("iof", 0) or taxes.get("ir", 0)):
-            tax_note = f" • IR/IOF: {fmt_brl(float(taxes.get('ir', 0) + taxes.get('iof', 0)))}"
-        return (
-            f"📤 Caixinha **{canon}**: -{fmt_brl(float(amount))}\n"
-            f"🏦 Conta: {fmt_brl(float(new_acc))} • 📦 Caixinha: {fmt_brl(float(new_pocket))}{tax_note}\n"
-            f"ID: **#{db.display_id_for(user_id, launch_id)}**"
         )
     except LookupError:
         return f"Caixinha **{pocket_name}** não encontrada. Use *listar caixinhas* para ver as disponíveis."
@@ -148,3 +191,6 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
         return "Valor inválido."
     except Exception as e:
         return f"Erro ao retirar: {e}"
+    # o backend pode sacar um pouco mais que o pedido (tolerância de zeragem)
+    sacado = float(taxes.get("gross", amount)) if taxes else float(amount)
+    return _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id)

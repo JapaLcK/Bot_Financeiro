@@ -27,6 +27,11 @@ POCKET_COLUMNS = """
     interest_tax_profile, last_interest_date
 """
 
+# Saque a menos de 1 centavo do saldo real conta como "sacar tudo": a tela mostra o
+# saldo arredondado a 2 casas, mas o rendimento deixa frações de sub-centavo, então o
+# usuário nunca consegue digitar o valor exato pra zerar a caixinha.
+WITHDRAW_ALL_TOLERANCE = Decimal("0.01")
+
 
 def _today() -> date:
     return datetime.now(_tz()).date()
@@ -293,13 +298,28 @@ def update_pocket_meta(
 
 
 def pocket_withdraw_to_account(
-    user_id: int, pocket_name: str, amount: float, nota: str | None = None
+    user_id: int,
+    pocket_name: str,
+    amount: float | None = None,
+    nota: str | None = None,
+    *,
+    withdraw_all: bool = False,
 ):
-    """Caixinha → Conta via FIFO. Retorna (launch_id, new_acc, new_pocket, canon, tax_summary)."""
+    """Caixinha → Conta via FIFO. Retorna (launch_id, new_acc, new_pocket, canon, tax_summary).
+
+    Se ``withdraw_all=True``, saca o saldo cheio pós-rendimento (zera a caixinha de
+    forma atômica) e ignora ``amount``. Caso contrário saca ``amount``; mas se o valor
+    pedido estiver a menos de 1 centavo do saldo real, saca tudo — a tela arredonda o
+    saldo a 2 casas e o rendimento deixa frações de sub-centavo, então digitar o valor
+    exato pra zerar é impossível (ver ``WITHDRAW_ALL_TOLERANCE``).
+    """
     ensure_user(user_id)
-    v = Decimal(str(amount))
-    if v <= 0:
-        raise ValueError("AMOUNT_INVALID")
+    if not withdraw_all:
+        if amount is None:
+            raise ValueError("AMOUNT_INVALID")
+        v = Decimal(str(amount))
+        if v <= 0:
+            raise ValueError("AMOUNT_INVALID")
 
     criado_em = datetime.now(_tz())
 
@@ -317,7 +337,12 @@ def pocket_withdraw_to_account(
             pocket_id = p["id"]
             canon = p["name"]
             new_bal_before = accrue_pocket_db(cur, user_id, pocket_id, today=criado_em.date())
-            if new_bal_before < v:
+            if withdraw_all or abs(new_bal_before - v) < WITHDRAW_ALL_TOLERANCE:
+                # sacar tudo (ou pediu ~tudo, dentro da tolerância de arredondamento da tela)
+                v = new_bal_before
+            elif new_bal_before < v:
+                raise ValueError("INSUFFICIENT_POCKET")
+            if v <= 0:
                 raise ValueError("INSUFFICIENT_POCKET")
 
             cur.execute(
