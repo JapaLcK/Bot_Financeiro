@@ -2133,11 +2133,14 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
 
     show_onboarding = await asyncio.to_thread(should_show_mfa_onboarding, user_id)
     mfa = await asyncio.to_thread(get_mfa_status, user_id)
+    from core.services.plan_service import has_app_access, paywall_enabled
     return {
         "user_id": user_id,
         **dict(user),
         "show_mfa_onboarding": show_onboarding,
         "mfa_enabled": bool(mfa.get("enabled")),
+        "app_access": has_app_access(user_id),
+        "paywall_enabled": paywall_enabled(),
     }
 
 

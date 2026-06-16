@@ -230,11 +230,28 @@ def resolve_dashboard_user_id(request: Request) -> int:
     return int(user_id)
 
 
+# Prefixos de rota que continuam acessíveis sem assinatura ativa — senão o
+# usuário bloqueado não conseguiria nem assinar nem sair.
+_GATE_EXEMPT_PREFIXES = ("/billing", "/auth", "/conta")
+
+
+def _enforce_subscription_gate(request: Request, user_id: int) -> None:
+    """Com o paywall ligado, bloqueia as rotas de dados do dashboard pra quem
+    não tem assinatura ativa/trial. Retorna 402 pro front mandar ao paywall."""
+    path = request.url.path or ""
+    if any(path.startswith(p) for p in _GATE_EXEMPT_PREFIXES):
+        return
+    from core.services.plan_service import has_app_access
+    if not has_app_access(user_id):
+        raise HTTPException(status_code=402, detail={"error": "subscription_required"})
+
+
 def authorize_dashboard_access(request: Request, user_id: int) -> int:
     current_user_id = resolve_dashboard_user_id(request)
     if current_user_id != int(user_id):
         raise HTTPException(status_code=403, detail="Acesso negado para este usuário.")
     raise_if_account_scheduled_for_deletion(current_user_id)
+    _enforce_subscription_gate(request, current_user_id)
     return current_user_id
 
 

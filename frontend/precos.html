@@ -35,26 +35,12 @@
 <div class="page">
   <nav><a class="nav-logo" href="/"><div class="logo-icon">🐷</div><span>PigBank AI</span></a><div class="nav-links"><a href="/whatsapp">WhatsApp</a><a href="/funcionalidades">Funcionalidades</a><a href="/como-funciona">Como funciona</a><a href="/comandos">O que pedir</a><a class="active" href="/precos">Preços</a><a href="/changelog">Novidades</a><a href="/suporte">Suporte</a></div></nav>
   <main>
-    <section class="hero"><div class="eyebrow">Preços</div><h1>Comece grátis, <span class="grad">faça upgrade quando precisar</span></h1><p>Experimente o PigBank+ por 7 dias sem pagar nada. Cancele a qualquer momento, sem letras miúdas.</p></section>
+    <section class="hero"><div class="eyebrow" id="precos-eyebrow">Preços</div><h1 id="precos-title">Escolha seu <span class="grad">PigBank+</span></h1><p id="precos-sub">7 dias grátis pra testar. Cancele quando quiser, sem letras miúdas.</p></section>
     <section class="plans" aria-label="Planos">
-      <article class="plan">
-        <div class="label">Free</div>
-        <h2>Grátis</h2>
-        <p>Pra começar a organizar suas finanças sem compromisso.</p>
-        <div class="price">R$ 0 <span>/ sempre</span></div>
-        <ul>
-          <li>Lançamentos manuais por chat e dashboard</li>
-          <li>1 caixinha e 1 cartão de crédito</li>
-          <li>Histórico dos últimos 30 dias</li>
-          <li>Bot no Discord e WhatsApp</li>
-          <li>Categorização automática</li>
-        </ul>
-        <a class="btn btn-secondary" href="/#auth">Criar conta grátis</a>
-      </article>
       <article class="plan featured">
         <div class="label">Mensal</div>
         <h2>PigBank+</h2>
-        <p>Tudo do Free, mais automação, relatórios e investimentos.</p>
+        <p>Tudo do PigBank, com automação, relatórios e investimentos.</p>
         <div class="price">R$ 19,90 <span>/ mês</span></div>
         <ul>
           <li>Caixinhas e cartões ilimitados</li>
@@ -102,6 +88,18 @@ function getCsrfToken() {
   const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
   return m ? decodeURIComponent(m[1]) : "";
 }
+
+// Modo paywall (?ativar=1): usuário recém-cadastrado, ainda sem assinatura.
+(function applyPaywallMode(){
+  const p = new URLSearchParams(location.search);
+  if (p.get("ativar") !== "1") return;
+  const e = document.getElementById("precos-eyebrow");
+  const t = document.getElementById("precos-title");
+  const s = document.getElementById("precos-sub");
+  if (e) e.textContent = "Falta um passo";
+  if (t) t.innerHTML = 'Ative o <span class="grad">PigBank+</span> pra começar';
+  if (s) s.textContent = "Sua conta está pronta. Escolha um plano (7 dias grátis, cancela quando quiser) pra liberar o app.";
+})();
 
 async function startCheckout(interval, btn) {
   if (btn.classList.contains("loading")) return;

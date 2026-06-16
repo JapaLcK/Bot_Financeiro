@@ -992,6 +992,15 @@ function showAccessError() {
     return;
   }
 
+  // 3.5) Paywall: sem assinatura ativa → vai pro paywall em vez do dashboard.
+  // Exceção: acabou de voltar do checkout (?upgrade=success); o webhook do Stripe
+  // pode levar alguns segundos, então não joga de volta no paywall nesse caso.
+  const _justUpgraded = new URLSearchParams(location.search).get("upgrade") === "success";
+  if (me && me.app_access === false && !_justUpgraded) {
+    window.location.replace("/precos?ativar=1");
+    return;
+  }
+
   // 4) Renderiza tudo
   const email = (me && me.email) || PROFILE_EMAIL || "";
   const displayName = (me && me.display_name) || PROFILE_DISPLAY_NAME || "";

@@ -7447,6 +7447,19 @@ function _showAccessError() {
     return;
   }
 
+  // Paywall: sem assinatura ativa → manda pro paywall antes de carregar o app.
+  // (As rotas de dados também devolvem 402 como reforço server-side.)
+  try {
+    const meResp = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
+    if (meResp.ok) {
+      const me = await meResp.json();
+      if (me && me.app_access === false) {
+        window.location.replace("/precos?ativar=1");
+        return;
+      }
+    }
+  } catch (e) { /* se /auth/me falhar, segue; o 402 protege os dados */ }
+
   WS_URL = `${BASE_WS}/ws/${USER_ID}`;
 
 	  updateInvestmentRateHint();
