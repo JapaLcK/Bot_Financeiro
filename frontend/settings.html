@@ -2783,6 +2783,15 @@ async function initSettings() {
     redirectHome();
     return;
   }
+  // Paywall: sem assinatura ativa → vai pro paywall (settings é gated).
+  try {
+    const meResp = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
+    if (meResp.ok) {
+      const me = await meResp.json();
+      if (me && me.app_access === false) { window.location.replace("/precos?ativar=1"); return; }
+    }
+  } catch (e) { /* segue; as rotas de dados protegem com 402 */ }
+
   document.getElementById("dashboard-link").href = "/app";
   showSettingsSection(["security", "notifications", "data", "legal"].includes(params.get("view")) ? params.get("view") : "security");
   loadData();

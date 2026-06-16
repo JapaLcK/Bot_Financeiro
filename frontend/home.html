@@ -966,13 +966,22 @@ function showAccessError() {
   // 2) Carrega perfil (header dropdown)
   loadProfile();
 
+  // 2.5) Paywall: checa acesso ANTES de carregar os dados. As rotas de dados
+  // devolvem 402 sem assinatura, o que cairia no "Erro ao carregar"; já /auth/me
+  // não é gated e sempre carrega. Exceção: ?upgrade=success (webhook em trânsito).
+  const me = await loadAuthMe();
+  const _justUpgraded = new URLSearchParams(location.search).get("upgrade") === "success";
+  if (me && me.app_access === false && !_justUpgraded) {
+    window.location.replace("/precos?ativar=1");
+    return;
+  }
+
   // 3) Carrega snapshot + histórico em paralelo
-  let snapshot = null, history = [], me = null;
+  let snapshot = null, history = [];
   try {
-    const [dataRes, histRes, meData] = await Promise.all([
+    const [dataRes, histRes] = await Promise.all([
       fetch(`${API}/data/${USER_ID}`, { credentials: "same-origin" }),
       fetch(`${API}/history/${USER_ID}?months=2`, { credentials: "same-origin" }),
-      loadAuthMe(),
     ]);
     if (!dataRes.ok) throw new Error("data");
     snapshot = await dataRes.json();
@@ -980,7 +989,6 @@ function showAccessError() {
       const hj = await histRes.json();
       history = hj.data || [];
     }
-    me = meData;
   } catch {
     document.getElementById("content").innerHTML = `
       <div class="access-error">
@@ -989,15 +997,6 @@ function showAccessError() {
         <a class="btn-pill ghost" href="/home">Recarregar</a>
       </div>
     `;
-    return;
-  }
-
-  // 3.5) Paywall: sem assinatura ativa → vai pro paywall em vez do dashboard.
-  // Exceção: acabou de voltar do checkout (?upgrade=success); o webhook do Stripe
-  // pode levar alguns segundos, então não joga de volta no paywall nesse caso.
-  const _justUpgraded = new URLSearchParams(location.search).get("upgrade") === "success";
-  if (me && me.app_access === false && !_justUpgraded) {
-    window.location.replace("/precos?ativar=1");
     return;
   }
 
