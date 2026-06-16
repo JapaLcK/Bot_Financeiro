@@ -145,6 +145,16 @@ def _handle_plano(user_id: int, platform: str) -> str:
         )
 
     expires_fmt = _format_plan_expires(expires)
+
+    # Grandfathered = Pro vitalício de brinde (backfill pré-paywall). Não tem
+    # assinatura no Stripe, então não há expiração nem "cancelar plano".
+    if status == "grandfathered":
+        return (
+            f"🐷 Plano: {b('PigBank+')}\n\n"
+            f"Status: {b('Ativo · acesso vitalício')}\n"
+            f"Você tem o PigBank+ de brinde, pra sempre — sem cobrança. 🐷✨"
+        )
+
     # is_pro=True mas last_payment_status vazio/None/"inactive" significa
     # que o user é Pro mas o webhook do Stripe nunca rodou (acesso manual,
     # ambiente de teste, etc). Não faz sentido dizer "Status: Inativo"

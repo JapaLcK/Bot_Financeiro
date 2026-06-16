@@ -1808,13 +1808,21 @@ function applySecuritySettings(data) {
   document.getElementById("security-phone-note").textContent = data.phone ? `WhatsApp ${phoneStatus}.` : "Nenhum telefone vinculado a esta conta.";
   document.getElementById("security-plan-value").textContent = displayValue(data.plan, "Plano não identificado");
   const isPro = String(data.plan || "").toLowerCase() === "pro";
+  // Pro sem expiração = acesso vitalício (grandfathered/manual): não há
+  // assinatura no Stripe pra gerenciar ou cancelar.
+  const isLifetime = isPro && !data.plan_expires_at;
   const planBtn = document.getElementById("security-plan-btn");
   if (planBtn) {
-    planBtn.textContent = isPro ? "Gerenciar" : "Fazer upgrade";
-    planBtn.href = isPro ? "/conta" : "/precos";
+    if (isLifetime) {
+      planBtn.style.display = "none";
+    } else {
+      planBtn.style.display = "";
+      planBtn.textContent = isPro ? "Gerenciar" : "Fazer upgrade";
+      planBtn.href = isPro ? "/conta" : "/precos";
+    }
   }
   document.getElementById("security-plan-note").textContent = isPro
-    ? (data.plan_expires_at ? `Renova em ${fmtDate(data.plan_expires_at)}.` : "Cobrança automática mensal. Cancele a qualquer momento.")
+    ? (data.plan_expires_at ? `Renova em ${fmtDate(data.plan_expires_at)}.` : "Acesso vitalício — sem cobrança.")
     : "Assine o Pro para desbloquear todos os recursos.";
   document.getElementById("security-session-value").textContent = formatSessionExpiry();
   document.getElementById("security-reset-btn").disabled = !hasEmail;
