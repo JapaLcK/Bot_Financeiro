@@ -1642,9 +1642,16 @@ def _dashboard_url(path: str = "/app", view: str | None = None) -> str:
     return url
 
 
-def _post_login_url() -> str:
+def _post_login_url(user_id: int | None = None) -> str:
     """URL para a qual o usuário deve ser direcionado logo após login.
-    O campo `dashboard_url` nas respostas de auth aponta para cá."""
+    O campo `dashboard_url` nas respostas de auth aponta para cá.
+
+    Sem assinatura ativa (paywall ligado), manda DIRETO pro paywall em vez do
+    /home — evita o flash de carregar o /home e rebater pro /precos."""
+    if user_id is not None:
+        from core.services.plan_service import has_app_access
+        if not has_app_access(int(user_id)):
+            return f"{DASHBOARD_URL}/precos?ativar=1"
     return _dashboard_url("/home")
 
 
@@ -1867,7 +1874,7 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
         "email": body.email.strip().lower(),
         "link_code": link_code,
         "whatsapp_link": wa_link,
-        "dashboard_url": _post_login_url(),
+        "dashboard_url": _post_login_url(user_id),
     }
 
 
@@ -1956,7 +1963,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         "plan": result["plan"],
         "link_code": link_code,
         "whatsapp_link": wa_link,
-        "dashboard_url": _post_login_url(),
+        "dashboard_url": _post_login_url(user_id),
     }
 
 
@@ -2383,7 +2390,7 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
         "plan": user.get("plan", "free"),
         "link_code": link_code,
         "whatsapp_link": wa_link,
-        "dashboard_url": _post_login_url(),
+        "dashboard_url": _post_login_url(user_id),
     }
 
 
@@ -2608,7 +2615,7 @@ async def auth_dashboard_token(response: Response, request: Request, user_id: in
     auth_payload = getattr(request.state, "auth_payload", {}) or {}
     return {
         "email": auth_payload.get("email"),
-        "dashboard_url": _post_login_url(),
+        "dashboard_url": _post_login_url(user_id),
         "expires_in": int(DASHBOARD_SESSION_HOURS * 3600),
     }
 
@@ -2632,7 +2639,7 @@ async def auth_dashboard_link(response: Response, request: Request, body: Dashbo
     auth_payload = getattr(request.state, "auth_payload", {}) or {}
     return {
         "email": auth_payload.get("email"),
-        "dashboard_url": _post_login_url(),
+        "dashboard_url": _post_login_url(user_id),
         "expires_in": int(DASHBOARD_SESSION_HOURS * 3600),
     }
 
@@ -2771,7 +2778,7 @@ async def auth_google_callback(
 
         # Login bem-sucedido → cookies + redirect pra home
         jwt_token, jti, refresh = _issue_session_token(user_id, email, request)
-        success_response = RedirectResponse(url=_post_login_url(), status_code=302)
+        success_response = RedirectResponse(url=_post_login_url(user_id), status_code=302)
         success_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
         _set_auth_cookie(success_response, jwt_token)
         _set_refresh_cookie(success_response, refresh)
@@ -2861,7 +2868,7 @@ async def auth_google_complete_signup(
         "email": email,
         "link_code": result["link_code"],
         "whatsapp_link": wa_link,
-        "dashboard_url": _post_login_url(),
+        "dashboard_url": _post_login_url(user_id),
     }
 
 
