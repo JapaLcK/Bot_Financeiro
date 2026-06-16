@@ -2920,32 +2920,49 @@ async def billing_create_checkout(
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
 
-    # Recupera ou cria o customer no Stripe
-    customer_id = user.get("stripe_customer_id")
-    if not customer_id:
-        customer = stripe.Customer.create(
+    def _new_customer() -> str:
+        c = stripe.Customer.create(
             email=user["email"],
             metadata={"finbot_user_id": str(user_id)},
             address={"country": "BR"},
             preferred_locales=["pt-BR"],
         )
-        customer_id = customer.id
-        set_stripe_customer(user_id, customer_id)
+        set_stripe_customer(user_id, c.id)
+        return c.id
 
-    session = stripe.checkout.Session.create(
-        customer=customer_id,
-        payment_method_types=["card"],
-        line_items=[{"price": price_id, "quantity": 1}],
-        mode="subscription",
-        locale="pt-BR",
-        success_url=f"{DASHBOARD_URL}/home?upgrade=success",
-        cancel_url=f"{DASHBOARD_URL}/home?upgrade=cancelled",
-        metadata={"finbot_user_id": str(user_id), "interval": interval},
-        subscription_data={
-            "trial_period_days": 7,
-            "metadata": {"finbot_user_id": str(user_id), "interval": interval},
-        },
-    )
+    def _new_session(cust_id: str):
+        return stripe.checkout.Session.create(
+            customer=cust_id,
+            payment_method_types=["card"],
+            line_items=[{"price": price_id, "quantity": 1}],
+            mode="subscription",
+            locale="pt-BR",
+            success_url=f"{DASHBOARD_URL}/home?upgrade=success",
+            cancel_url=f"{DASHBOARD_URL}/home?upgrade=cancelled",
+            metadata={"finbot_user_id": str(user_id), "interval": interval},
+            subscription_data={
+                "trial_period_days": 7,
+                "metadata": {"finbot_user_id": str(user_id), "interval": interval},
+            },
+        )
+
+    # Recupera ou cria o customer no Stripe
+    customer_id = user.get("stripe_customer_id") or _new_customer()
+
+    try:
+        session = _new_session(customer_id)
+    except stripe.error.InvalidRequestError as exc:
+        # Customer salvo é inválido (ex.: criado em test e a chave virou live, ou
+        # deletado no Stripe) → recria e tenta de novo, sem quebrar pro usuário.
+        if "no such customer" in str(exc).lower():
+            customer_id = _new_customer()
+            session = _new_session(customer_id)
+        else:
+            logging.getLogger(__name__).error("billing_checkout_invalid_request: %s", exc)
+            raise HTTPException(status_code=502, detail=f"Stripe recusou o checkout: {exc}")
+    except stripe.error.StripeError as exc:
+        logging.getLogger(__name__).error("billing_checkout_stripe_error: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Erro no Stripe ao iniciar o checkout: {exc}")
 
     return {"checkout_url": session.url, "interval": interval}
 
