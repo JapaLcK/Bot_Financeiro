@@ -294,6 +294,28 @@ class AdminLoginBody(BaseModel):
     password: str
 
 
+def _decrypt_admin_field(ct: str, fallback, *, purpose: str, admin_user: str,
+                         user_id: int, field: str):
+    """decrypt_pii_optional que NÃO derruba o painel se a row for indecifrável
+    (ex.: lixo de teste cifrado com chave errada). Uma linha ruim vira um
+    marcador visível em vez de um 500 no /admin inteiro."""
+    try:
+        return decrypt_pii_optional(
+            ct,
+            ctx=PiiAccessContext(
+                purpose=purpose,
+                actor=f"admin:{admin_user}",
+                subject_user_id=user_id,
+                field=field,
+            ),
+        )
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "PII indecifrável no admin: user_id=%s field=%s (chave errada?)", user_id, field
+        )
+        return fallback or "⚠️ indecifrável"
+
+
 def _decrypt_admin_row(row: dict, admin_user: str, purpose: str) -> dict:
     """Decifra colunas email/phone/display_name de uma row de auth_accounts/auth_login_events.
 
@@ -302,34 +324,19 @@ def _decrypt_admin_row(row: dict, admin_user: str, purpose: str) -> dict:
     """
     user_id = int(row.get("user_id") or 0)
     if row.get("email_enc"):
-        row["email"] = decrypt_pii_optional(
-            row["email_enc"],
-            ctx=PiiAccessContext(
-                purpose=purpose,
-                actor=f"admin:{admin_user}",
-                subject_user_id=user_id,
-                field="email",
-            ),
+        row["email"] = _decrypt_admin_field(
+            row["email_enc"], row.get("email"),
+            purpose=purpose, admin_user=admin_user, user_id=user_id, field="email",
         )
     if row.get("phone_enc"):
-        row["phone_e164"] = decrypt_pii_optional(
-            row["phone_enc"],
-            ctx=PiiAccessContext(
-                purpose=purpose,
-                actor=f"admin:{admin_user}",
-                subject_user_id=user_id,
-                field="phone",
-            ),
+        row["phone_e164"] = _decrypt_admin_field(
+            row["phone_enc"], row.get("phone_e164"),
+            purpose=purpose, admin_user=admin_user, user_id=user_id, field="phone",
         )
     if row.get("display_name_enc"):
-        row["display_name"] = decrypt_pii_optional(
-            row["display_name_enc"],
-            ctx=PiiAccessContext(
-                purpose=purpose,
-                actor=f"admin:{admin_user}",
-                subject_user_id=user_id,
-                field="name",
-            ),
+        row["display_name"] = _decrypt_admin_field(
+            row["display_name_enc"], row.get("display_name"),
+            purpose=purpose, admin_user=admin_user, user_id=user_id, field="name",
         )
     # Não vaza colunas _enc pro JSON do frontend
     row.pop("email_enc", None)
@@ -958,14 +965,10 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
     def _decrypt_affiliate_row(row: dict, admin_user: str) -> dict:
         row = _decrypt_admin_row(dict(row), admin_user, "render_admin_affiliates")
         if row.get("pix_key_enc"):
-            row["pix_key"] = decrypt_pii_optional(
-                row["pix_key_enc"],
-                ctx=PiiAccessContext(
-                    purpose="render_admin_affiliates",
-                    actor=f"admin:{admin_user}",
-                    subject_user_id=int(row.get("user_id") or 0),
-                    field="pix_key",
-                ),
+            row["pix_key"] = _decrypt_admin_field(
+                row["pix_key_enc"], None,
+                purpose="render_admin_affiliates", admin_user=admin_user,
+                user_id=int(row.get("user_id") or 0), field="pix_key",
             )
         row.pop("pix_key_enc", None)
         return row
