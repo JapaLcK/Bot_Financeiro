@@ -1,1 +1,63 @@
-/* ─── Dashboard mobile (≤900px) — carregado via media query no <link> ── */
+/* ─── Dashboard mobile — carregado só em viewport ≤900px (media no <link>) ──
+   Overrides em cima do dashboard.css (mesma especificidade vence por ordem).
+   Faixa 641–900px (tablet) fica com o comportamento padrão; os ajustes de
+   telefone vivem no bloco ≤640px. */
+
+/* Guarda: nenhum elemento largo (gráfico, valor longo) cria scroll lateral
+   da página inteira. */
+html, body { overflow-x: hidden; }
+
+@media (max-width: 640px) {
+
+  .page { padding: 10px 10px 48px; }
+
+  /* ── Header compacto: marca + navegação de mês na MESMA linha ──────────
+     (anula o flex-direction:column da regra de 600px do dashboard.css) */
+  header {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px 10px;
+    padding: 10px 12px;
+    margin-bottom: 14px;
+  }
+  .header-left { flex: 1 1 auto; gap: 8px; }
+  .logo { width: 30px; height: 30px; font-size: .85rem; border-radius: 8px; }
+  header h1 { font-size: .92rem; }
+  .month-nav { flex: 0 0 auto; }
+  .mbtn { width: 34px; height: 34px; }
+  #month-label { min-width: 0; font-size: .74rem; padding: 0 4px; }
+
+  /* Linha 2: dot de conexão (sem texto) + ações dividindo a largura
+     (os .hbtn têm flex-basis 0 e nunca quebram; o .user-menu, com basis
+     100%, desce pra linha própria) */
+  .header-right { width: 100%; gap: 8px; flex-wrap: wrap; }
+  #status { flex-shrink: 0; }
+  #status-text { display: none; } /* a cor do dot já diz o estado */
+  .hbtn {
+    flex: 1 1 0;
+    justify-content: center;
+    min-height: 38px;
+    padding: 6px 4px;
+    font-size: .72rem;
+  }
+  .user-menu { flex: 1 1 100%; } /* “Minha conta” continua em linha própria */
+  .user-menu-btn { min-height: 40px; }
+
+  /* ── Botão “+ Lançar” vira alvo de polegar: largura total ────────────── */
+  .dashboard-tabs { margin: -4px 0 16px; }
+  .main-tab.tab-launch { margin-left: 0; width: 100%; min-height: 44px; font-size: .85rem; }
+
+  /* ── Cards respiram menos pra sobrar tela pro conteúdo ───────────────── */
+  .card { padding: 16px 14px; }
+
+  /* ── Toast: acima do FAB da Piggy e sem colar na borda ───────────────── */
+  #toast { left: 12px; right: 12px; bottom: 84px; text-align: center; }
+
+  /* ── iOS Safari dá zoom automático ao focar campo com fonte <16px, o que
+     desloca o layout inteiro. 16px trava o zoom sem quebrar o visual.
+     (!important: precisa vencer .filter-input/.piggy-input etc. de
+     especificidade maior no dashboard.css) ─────────────────────────────── */
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea { font-size: 16px !important; }
+}
