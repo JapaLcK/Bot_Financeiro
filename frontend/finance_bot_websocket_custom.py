@@ -84,6 +84,7 @@ from db import (
     undo_credit_transaction,
     delete_launch_and_rollback,
 )
+from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.analytics import router as analytics_router
 from frontend.routes.cards import router as cards_router
 from frontend.routes.open_finance import router as open_finance_router
@@ -1801,6 +1802,29 @@ async def auth_dashboard_profile(request: Request, response: Response):
     }
 
 
+async def _apply_referral_attribution(request: Request, response: Response, user_id: int) -> None:
+    """Se o cadastro veio de um link de afiliado (cookie ref_code do /r/{code}),
+    grava a atribuição e consome o cookie. Nunca pode quebrar o signup."""
+    code = (request.cookies.get("ref_code") or "").strip()
+    if not code:
+        return
+    try:
+        from db.affiliates import record_referral
+        attributed = await asyncio.to_thread(record_referral, code, int(user_id))
+        if attributed:
+            await log_system_event(
+                "info",
+                "affiliate_referral_recorded",
+                f"Cadastro atribuido ao afiliado (code={code}).",
+                source="affiliates",
+                user_id=int(user_id),
+            )
+    except Exception as exc:
+        print(f"[affiliates] atribuicao de referral falhou user={user_id}: {exc}")
+    finally:
+        response.delete_cookie("ref_code")
+
+
 @app.post("/auth/register")
 @limiter.limit("3/hour")
 async def auth_register(request: Request, body: RegisterBody):
@@ -1866,6 +1890,8 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
     _set_auth_cookie(response, token)
     _set_refresh_cookie(response, refresh)
     _set_dashboard_cookie(response, int(user_id), jti=jti)
+
+    await _apply_referral_attribution(request, response, int(user_id))
 
     wa_link = _build_whatsapp_onboarding_link(user_id)
 
@@ -2853,6 +2879,8 @@ async def auth_google_complete_signup(
     _set_refresh_cookie(response, refresh)
     _set_dashboard_cookie(response, user_id, jti=jti)
 
+    await _apply_referral_attribution(request, response, user_id)
+
     await log_auth_login_event(
         email,
         True,
@@ -3143,6 +3171,32 @@ async def billing_webhook(request: Request):
                 amount_brl = float(amount_cents) / 100.0
                 from core.services.email_service import send_pro_charged_email
                 await _fire_email(user_id, send_pro_charged_email, amount_brl, expires_dt)
+
+                # Comissão de afiliado: se o pagante foi indicado por um afiliado
+                # ativo, credita a % da fatura. Idempotente por invoice id (retry
+                # de webhook não duplica). Nunca pode derrubar o webhook.
+                try:
+                    from db.affiliates import record_commission_for_invoice
+                    invoice_id = _g(invoice, "id")
+                    commission = await asyncio.to_thread(
+                        record_commission_for_invoice,
+                        user_id, invoice_id, int(amount_cents),
+                    )
+                    if commission:
+                        await log_system_event(
+                            "info",
+                            "affiliate_commission_created",
+                            f"Comissao de afiliado criada: R$ {commission['amount_cents'] / 100:.2f}.",
+                            source="affiliates",
+                            user_id=user_id,
+                            details={
+                                "affiliate_id": commission["affiliate_id"],
+                                "invoice_id": invoice_id,
+                                "amount_cents": commission["amount_cents"],
+                            },
+                        )
+                except Exception as exc:
+                    print(f"[affiliates] comissao falhou user={user_id}: {exc}")
 
     elif event["type"] == "customer.subscription.trial_will_end":
         # Stripe dispara ~3 dias antes do trial acabar. Email de aviso (item 38)
@@ -3974,6 +4028,10 @@ app.include_router(cards_router)
 
 # ─── Analytics + insights → frontend/routes/analytics.py (refactor F1 E2) ────
 app.include_router(analytics_router)
+
+
+# ─── Programa de afiliados → frontend/routes/affiliates.py ───────────────────
+app.include_router(affiliates_router)
 
 
 @app.get("/debug/ai/{user_id}/payload")
