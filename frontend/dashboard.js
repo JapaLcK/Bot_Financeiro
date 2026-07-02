@@ -7528,11 +7528,17 @@ function _renderAffiliateView(data) {
   const payoutRowsArr = (data.payouts || []).map(p => {
     const label = p.status === "paid" ? "pago" : (p.status === "rejected" ? "rejeitado" : "em análise");
     const color = p.status === "paid" ? "var(--green)" : (p.status === "rejected" ? "var(--red)" : "var(--blue)");
+    // Rejeição: motivo em destaque (linha própria, em vermelho) — o saldo
+    // voltou pro disponível, mas o afiliado precisa entender o porquê.
+    const noteHtml = p.note ? `
+          <div style="font-size:.75rem;margin-top:3px;color:${p.status === "rejected" ? "var(--red)" : "var(--text-3)"}">
+            ${p.status === "rejected" ? "❌ Motivo da rejeição: " : "💬 "}${esc(p.note)}
+          </div>` : "";
     return `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--glass-border)">
         <div>
           <div style="font-weight:600">${fmt(p.amount)}</div>
-          <div style="font-size:.72rem;color:var(--text-3)">pedido em ${fmtDate(p.requested_at)}${p.note ? " · " + esc(p.note) : ""}</div>
+          <div style="font-size:.72rem;color:var(--text-3)">pedido em ${fmtDate(p.requested_at)}</div>${noteHtml}
         </div>
         <span style="font-size:.75rem;color:${color}">${label}</span>
       </div>`;
