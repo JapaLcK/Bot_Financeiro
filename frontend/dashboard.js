@@ -7498,7 +7498,21 @@ function _renderAffiliateView(data) {
     </div>
   `;
 
-  const commissionRows = (data.commissions || []).map(c => {
+  // Lista compacta: mostra as N mais recentes; o resto fica atrás de
+  // "Mostrar todas" (o backend já limita em 50 comissões / 20 saques).
+  const AFF_LIST_VISIBLE = 8;
+  const _collapsibleList = (rowsHtmlArr, keyId, visible = AFF_LIST_VISIBLE) => {
+    if (rowsHtmlArr.length <= visible) return rowsHtmlArr.join("");
+    const head = rowsHtmlArr.slice(0, visible).join("");
+    const rest = rowsHtmlArr.slice(visible).join("");
+    return `${head}
+      <div id="${keyId}" style="display:none">${rest}</div>
+      <button class="mock-cta" type="button" style="margin-top:10px;font-size:.72rem"
+        onclick="toggleAffiliateList('${keyId}', this, ${rowsHtmlArr.length - visible})">
+        Mostrar todas (+${rowsHtmlArr.length - visible})</button>`;
+  };
+
+  const commissionRowsArr = (data.commissions || []).map(c => {
     const st = _affiliateCommissionStatus(c);
     return `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--glass-border)">
@@ -7508,9 +7522,10 @@ function _renderAffiliateView(data) {
         </div>
         <span style="font-size:.75rem;color:${st.color}">${st.label}</span>
       </div>`;
-  }).join("");
+  });
+  const commissionRows = _collapsibleList(commissionRowsArr, "aff-comm-extra");
 
-  const payoutRows = (data.payouts || []).map(p => {
+  const payoutRowsArr = (data.payouts || []).map(p => {
     const label = p.status === "paid" ? "pago" : (p.status === "rejected" ? "rejeitado" : "em análise");
     const color = p.status === "paid" ? "var(--green)" : (p.status === "rejected" ? "var(--red)" : "var(--blue)");
     return `
@@ -7521,7 +7536,8 @@ function _renderAffiliateView(data) {
         </div>
         <span style="font-size:.75rem;color:${color}">${label}</span>
       </div>`;
-  }).join("");
+  });
+  const payoutRows = _collapsibleList(payoutRowsArr, "aff-payout-extra", 5);
 
   const canRequest = Number(s.available || 0) >= Number(data.min_payout || 50) && !(data.payouts || []).some(p => p.status === "requested");
 
@@ -7559,6 +7575,14 @@ function _renderAffiliateView(data) {
       <div class="tx-list">${payoutRows || '<div style="padding:16px 0;color:var(--text-3);font-size:.8rem">Nenhum saque solicitado.</div>'}</div>
     </div>
   `;
+}
+
+function toggleAffiliateList(keyId, btn, hiddenCount) {
+  const el = document.getElementById(keyId);
+  if (!el) return;
+  const showing = el.style.display !== "none";
+  el.style.display = showing ? "none" : "";
+  if (btn) btn.textContent = showing ? `Mostrar todas (+${hiddenCount})` : "Mostrar menos";
 }
 
 async function copyAffiliateLink() {
