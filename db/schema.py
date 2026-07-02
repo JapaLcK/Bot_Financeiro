@@ -1229,6 +1229,77 @@ def init_db():
         create index if not exists idx_pii_access_log_field_created
           on pii_access_log (field, created_at desc)
         """,
+
+        # ─── Programa de afiliados ───────────────────────────────────────────────
+        # Afiliado divulga link /r/{code}; quem cadastrar via link vira referral;
+        # cada fatura Stripe paga do indicado gera comissão (commission_bps) enquanto
+        # o afiliado estiver status='active'. Saque via Pix manual (admin marca pago).
+        """
+        create table if not exists affiliates (
+          id bigserial primary key,
+          user_id bigint not null unique references users(id) on delete cascade,
+          code text not null unique,               -- código do link /r/{code}
+          status text not null default 'active',   -- 'active' | 'disabled' (desativado não acumula comissão nova)
+          commission_bps integer not null default 1000,  -- 1000 = 10% da fatura paga
+          pix_key_hash text,                       -- hash_pii(chave pix) — lookup/dedupe
+          pix_key_enc text,                        -- encrypt_pii(chave pix) — exibição no admin
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create table if not exists affiliate_referrals (
+          id bigserial primary key,
+          affiliate_id bigint not null references affiliates(id) on delete cascade,
+          referred_user_id bigint not null unique references users(id) on delete cascade,
+          code_used text,
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_affiliate_referrals_affiliate
+          on affiliate_referrals (affiliate_id, created_at desc)
+        """,
+        """
+        create table if not exists affiliate_payouts (
+          id bigserial primary key,
+          affiliate_id bigint not null references affiliates(id) on delete cascade,
+          amount_cents bigint not null,
+          status text not null default 'requested', -- 'requested' | 'paid' | 'rejected'
+          pix_key_enc text,                         -- snapshot da chave no momento do pedido
+          note text,
+          requested_at timestamptz not null default now(),
+          paid_at timestamptz
+        )
+        """,
+        """
+        create index if not exists idx_affiliate_payouts_affiliate
+          on affiliate_payouts (affiliate_id, requested_at desc)
+        """,
+        """
+        create index if not exists idx_affiliate_payouts_status
+          on affiliate_payouts (status, requested_at desc)
+        """,
+        # 1 linha por fatura paga (stripe_invoice_id unique = idempotência do webhook).
+        # status: 'pending' (aguardando carência ou saque) | 'paid' | 'reversed'.
+        # "Disponível pra saque" = pending + available_at <= now() + payout_id is null.
+        """
+        create table if not exists affiliate_commissions (
+          id bigserial primary key,
+          affiliate_id bigint not null references affiliates(id) on delete cascade,
+          referred_user_id bigint not null references users(id) on delete cascade,
+          stripe_invoice_id text not null unique,
+          invoice_amount_cents bigint not null,
+          amount_cents bigint not null,
+          status text not null default 'pending',
+          available_at timestamptz not null,        -- created_at + carência (estorno/chargeback)
+          payout_id bigint references affiliate_payouts(id) on delete set null,
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_affiliate_commissions_affiliate
+          on affiliate_commissions (affiliate_id, status, available_at)
+        """,
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks
