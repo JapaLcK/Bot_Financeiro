@@ -1242,7 +1242,9 @@ async function loadAffiliates() {
     $id('aff-meta').textContent = affs.length + ' afiliado' + (affs.length === 1 ? '' : 's');
     $id('aff-list').innerHTML = affs.map(a => `
       <tr>
-        <td><code>${esc(a.code)}</code></td>
+        <td style="white-space:nowrap"><code>${esc(a.code)}</code>
+          <button class="btn-primary" type="button" style="font-size:11px;padding:3px 8px;margin-left:6px"
+            onclick="copyAffiliateAdminLink('${esc(a.code)}', this)">⧉ Copiar link</button></td>
         <td>${esc(a.email || '—')}</td>
         <td>${(a.commission_bps / 100).toFixed(0)}%</td>
         <td>${a.referrals}</td>
@@ -1276,6 +1278,21 @@ async function loadAffiliates() {
     console.error('loadAffiliates', e);
     const meta = $id('aff-meta');
     if (meta) meta.textContent = 'erro ao carregar';
+  }
+}
+
+async function copyAffiliateAdminLink(code, btn) {
+  const link = `${location.origin}/r/${code}`;
+  try {
+    await navigator.clipboard.writeText(link);
+    if (btn) {
+      const original = btn.textContent;
+      btn.textContent = '✓ Copiado';
+      setTimeout(() => { btn.textContent = original; }, 1500);
+    }
+  } catch {
+    // Clipboard bloqueado (permissão/contexto) → mostra pro admin copiar à mão
+    prompt('Copie o link do afiliado:', link);
   }
 }
 
