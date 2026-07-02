@@ -375,7 +375,7 @@ function taxProfileForAsset(assetType) {
 // Mapa view-id → elemento. Inclui as novas seções acessíveis pelo sidebar.
 const DASH_VIEWS = [
   "overview", "analytics", "history", "fixed", "budgets", "goals",
-  "categories", "installments", "cards", "investments"
+  "categories", "installments", "cards", "investments", "affiliate"
 ];
 
 function setMainView(view) {
@@ -420,6 +420,7 @@ function navigateTo(view) {
   if (view === "budgets") loadBudgetsView();
   if (view === "fixed") loadFixedView();
   if (view === "goals") loadGoalsView();
+  if (view === "affiliate") loadAffiliateView();
 }
 
 // ── Cartões (view dinâmica conectada ao backend) ──────────────────────
@@ -7416,6 +7417,194 @@ function render(d) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   PROGRAMA DE AFILIADOS — aba só aparece pra quem é afiliado
+═══════════════════════════════════════════════════════════════════════ */
+let _affiliateCache = null;
+
+// Chamado no init: se o user é afiliado, mostra o item "Afiliados" no sidenav.
+async function initAffiliateNav() {
+  try {
+    const res = await fetch(`${API}/api/affiliate/me`, { credentials: "same-origin" });
+    if (!res.ok) return; // 404 = não é afiliado
+    _affiliateCache = await res.json();
+    const item = document.getElementById("sidenav-affiliate");
+    if (item) item.style.display = "";
+  } catch {}
+}
+
+async function loadAffiliateView(forceFresh = false) {
+  const stats = document.getElementById("affiliate-stats");
+  const body = document.getElementById("affiliate-body");
+  if (!stats || !body) return;
+
+  if (_affiliateCache && !forceFresh) {
+    _renderAffiliateView(_affiliateCache);
+  } else {
+    stats.innerHTML = `
+      <div class="stat-tile"><div class="stat-label">Indicados</div><div class="sk sk-h2"></div></div>
+      <div class="stat-tile"><div class="stat-label">Disponível</div><div class="sk sk-h2"></div></div>
+      <div class="stat-tile"><div class="stat-label">Em carência</div><div class="sk sk-h2"></div></div>
+      <div class="stat-tile"><div class="stat-label">Já recebido</div><div class="sk sk-h2"></div></div>
+    `;
+    body.innerHTML = "";
+  }
+
+  try {
+    const res = await fetch(`${API}/api/affiliate/me`, { credentials: "same-origin" });
+    const data = await readResponsePayload(res);
+    if (!res.ok) throw new Error(data.detail || "Não foi possível carregar seus dados de afiliado.");
+    _affiliateCache = data;
+    _renderAffiliateView(data);
+  } catch (err) {
+    body.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:30px;color:var(--red)">Erro: ${esc(String(err.message || err))}</div>`;
+  }
+}
+
+function _affiliateCommissionStatus(c) {
+  if (c.status === "reversed") return { label: "estornada", color: "var(--red)" };
+  if (c.status === "paid") return { label: "paga", color: "var(--green)" };
+  if (c.payout_id) return { label: "em saque", color: "var(--blue)" };
+  if (new Date(c.available_at) <= new Date()) return { label: "disponível", color: "var(--green)" };
+  const d = new Date(c.available_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  return { label: `libera ${d}`, color: "var(--text-3)" };
+}
+
+function _renderAffiliateView(data) {
+  const stats = document.getElementById("affiliate-stats");
+  const body = document.getElementById("affiliate-body");
+  if (!stats || !body) return;
+
+  const s = data.stats || {};
+  stats.innerHTML = `
+    <div class="stat-tile" style="animation-delay:0ms">
+      <div class="stat-label">Indicados</div>
+      <div class="stat-value">${Number(s.referrals || 0)}</div>
+      <div class="stat-delta" style="color:var(--text-3)">cadastros pelo seu link</div>
+    </div>
+    <div class="stat-tile" style="animation-delay:60ms">
+      <div class="stat-label">Disponível pra saque</div>
+      <div class="stat-value" style="color:var(--green)">${fmt(s.available || 0)}</div>
+      <div class="stat-delta" style="color:var(--text-3)">mínimo ${fmt(data.min_payout || 50)}</div>
+    </div>
+    <div class="stat-tile" style="animation-delay:120ms">
+      <div class="stat-label">Em carência</div>
+      <div class="stat-value">${fmt(s.held || 0)}</div>
+      <div class="stat-delta" style="color:var(--text-3)">libera 30 dias após a cobrança</div>
+    </div>
+    <div class="stat-tile" style="animation-delay:180ms">
+      <div class="stat-label">Já recebido</div>
+      <div class="stat-value">${fmt(s.paid || 0)}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${s.requested ? fmt(s.requested) + " em saque pendente" : "comissão de " + Number(data.commission_percent || 10) + "% por cobrança"}</div>
+    </div>
+  `;
+
+  const commissionRows = (data.commissions || []).map(c => {
+    const st = _affiliateCommissionStatus(c);
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--glass-border)">
+        <div>
+          <div style="font-weight:600">${fmt(c.amount)}</div>
+          <div style="font-size:.72rem;color:var(--text-3)">fatura de ${fmt(c.invoice_amount)} · ${fmtDate(c.created_at)}</div>
+        </div>
+        <span style="font-size:.75rem;color:${st.color}">${st.label}</span>
+      </div>`;
+  }).join("");
+
+  const payoutRows = (data.payouts || []).map(p => {
+    const label = p.status === "paid" ? "pago" : (p.status === "rejected" ? "rejeitado" : "em análise");
+    const color = p.status === "paid" ? "var(--green)" : (p.status === "rejected" ? "var(--red)" : "var(--blue)");
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--glass-border)">
+        <div>
+          <div style="font-weight:600">${fmt(p.amount)}</div>
+          <div style="font-size:.72rem;color:var(--text-3)">pedido em ${fmtDate(p.requested_at)}${p.note ? " · " + esc(p.note) : ""}</div>
+        </div>
+        <span style="font-size:.75rem;color:${color}">${label}</span>
+      </div>`;
+  }).join("");
+
+  const canRequest = Number(s.available || 0) >= Number(data.min_payout || 50) && !(data.payouts || []).some(p => p.status === "requested");
+
+  body.innerHTML = `
+    <div class="mock-card">
+      <h3 style="margin:0 0 6px">Seu link de divulgação</h3>
+      <p style="font-size:.78rem;color:var(--text-3);margin:0 0 12px">
+        Quem se cadastrar por ele e assinar o PigBank+ gera ${Number(data.commission_percent || 10)}% de comissão
+        pra você em cada cobrança, enquanto a assinatura durar.
+      </p>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="affiliate-link-input" type="text" readonly value="${esc(data.link)}"
+          style="flex:1;min-width:0;padding:10px 12px;border-radius:10px;border:1px solid var(--glass-border);background:var(--glass-bg);color:var(--text);font-size:.82rem">
+        <button class="mock-cta" type="button" onclick="copyAffiliateLink()">Copiar</button>
+      </div>
+      ${data.status !== "active" ? '<p style="font-size:.75rem;color:var(--red);margin:10px 0 0">Seu cadastro de afiliado está desativado — o link não gera novas comissões.</p>' : ""}
+
+      <h3 style="margin:18px 0 6px">Solicitar saque</h3>
+      <p style="font-size:.78rem;color:var(--text-3);margin:0 0 10px">
+        Saque mínimo de ${fmt(data.min_payout || 50)}. O pagamento é feito por Pix em até alguns dias úteis.
+      </p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="affiliate-pix-input" type="text" placeholder="Sua chave Pix (CPF, email, celular...)"
+          style="flex:1;min-width:180px;padding:10px 12px;border-radius:10px;border:1px solid var(--glass-border);background:var(--glass-bg);color:var(--text);font-size:.82rem">
+        <button class="mock-cta" type="button" id="affiliate-payout-btn" onclick="requestAffiliatePayout()" ${canRequest ? "" : "disabled style='opacity:.5;cursor:not-allowed'"}>
+          Sacar ${fmt(s.available || 0)}
+        </button>
+      </div>
+    </div>
+
+    <div class="mock-card">
+      <h3 style="margin:0 0 10px">Comissões</h3>
+      <div class="tx-list">${commissionRows || '<div style="padding:16px 0;color:var(--text-3);font-size:.8rem">Nenhuma comissão ainda — divulgue seu link! 🐷</div>'}</div>
+      <h3 style="margin:18px 0 10px">Saques</h3>
+      <div class="tx-list">${payoutRows || '<div style="padding:16px 0;color:var(--text-3);font-size:.8rem">Nenhum saque solicitado.</div>'}</div>
+    </div>
+  `;
+}
+
+async function copyAffiliateLink() {
+  const input = document.getElementById("affiliate-link-input");
+  if (!input) return;
+  try {
+    await navigator.clipboard.writeText(input.value);
+    showToast("✓ Link copiado");
+  } catch {
+    input.select();
+    document.execCommand("copy");
+    showToast("✓ Link copiado");
+  }
+}
+
+async function requestAffiliatePayout() {
+  const pixInput = document.getElementById("affiliate-pix-input");
+  const pixKey = (pixInput?.value || "").trim();
+  if (pixKey.length < 5) {
+    await alertModal("Informe sua chave Pix pra receber o pagamento.", { title: "Saque" });
+    return;
+  }
+  const btn = document.getElementById("affiliate-payout-btn");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch(`${API}/api/affiliate/payout`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ pix_key: pixKey }),
+    });
+    const data = await readResponsePayload(res);
+    if (!res.ok) {
+      await alertModal(data.detail || "Não foi possível solicitar o saque.", { title: "Saque" });
+      return;
+    }
+    showToast("✓ Saque solicitado");
+    loadAffiliateView(true);
+  } catch (err) {
+    await alertModal("Erro ao solicitar o saque. Tente de novo.", { title: "Saque" });
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    INIT — valida token antes de conectar
 ═══════════════════════════════════════════════════════════════════════ */
 function _showAccessError() {
@@ -7476,6 +7665,8 @@ function _showAccessError() {
 	  });
 	  // Wizard: abre auto se conta virgem (não bloqueante).
 	  maybeOpenWizardOnLoad();
+	  // Afiliados: mostra o item do sidenav se o user for afiliado (não bloqueante).
+	  initAffiliateNav();
 	  // fetchHistory() removido daqui — connect() já chama via ws.onopen.
 	})();
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import secrets
@@ -952,6 +953,171 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             "offset": offset,
             "items": rows,
         }))
+
+    # ── Programa de afiliados ────────────────────────────────────────────────
+    def _decrypt_affiliate_row(row: dict, admin_user: str) -> dict:
+        row = _decrypt_admin_row(dict(row), admin_user, "render_admin_affiliates")
+        if row.get("pix_key_enc"):
+            row["pix_key"] = decrypt_pii_optional(
+                row["pix_key_enc"],
+                ctx=PiiAccessContext(
+                    purpose="render_admin_affiliates",
+                    actor=f"admin:{admin_user}",
+                    subject_user_id=int(row.get("user_id") or 0),
+                    field="pix_key",
+                ),
+            )
+        row.pop("pix_key_enc", None)
+        return row
+
+    @app.get("/admin/api/affiliates")
+    async def admin_affiliates_overview(username: str = Depends(_get_current_admin)):
+        """Lista afiliados (com saldos) + pedidos de saque em aberto."""
+        from db.affiliates import admin_list_affiliates, admin_list_payouts
+
+        affiliates = await asyncio.to_thread(admin_list_affiliates)
+        payouts = await asyncio.to_thread(admin_list_payouts, None, 100)
+        return JSONResponse(content=_json_safe({
+            "affiliates": [_decrypt_affiliate_row(r, username) for r in affiliates],
+            "payouts": [_decrypt_affiliate_row(r, username) for r in payouts],
+        }))
+
+    @app.post("/admin/api/affiliates")
+    async def admin_affiliate_create(request: Request, username: str = Depends(_get_current_admin)):
+        """Cria um afiliado a partir do email de uma conta existente.
+        Body: {"email": "...", "code": "OPCIONAL", "commission_bps": 1000}"""
+        from db import find_user_id_by_email
+        from db.affiliates import DEFAULT_COMMISSION_BPS, create_affiliate
+
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+
+        email = str(payload.get("email") or "").strip()
+        if not email:
+            raise HTTPException(status_code=422, detail="Informe o email da conta.")
+        user_id = await asyncio.to_thread(find_user_id_by_email, email)
+        if not user_id:
+            raise HTTPException(status_code=404, detail="Nenhuma conta com esse email.")
+
+        code = (payload.get("code") or None)
+        bps = int(payload.get("commission_bps") or DEFAULT_COMMISSION_BPS)
+        try:
+            affiliate = await asyncio.to_thread(create_affiliate, int(user_id), code, bps)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        await log_system_event(
+            "info",
+            "affiliate_created",
+            f"Afiliado criado pelo admin (code={affiliate['code']}).",
+            source="affiliates",
+            user_id=int(user_id),
+            details={"affiliate_id": affiliate["id"], "commission_bps": bps},
+        )
+        return JSONResponse(content=_json_safe({"ok": True, "affiliate": {
+            "id": affiliate["id"], "code": affiliate["code"],
+            "status": affiliate["status"], "commission_bps": affiliate["commission_bps"],
+        }}))
+
+    @app.post("/admin/api/affiliates/{affiliate_id}/status")
+    async def admin_affiliate_set_status(
+        affiliate_id: int, request: Request, username: str = Depends(_get_current_admin)
+    ):
+        """Body: {"status": "active" | "disabled"}. Desativado para de acumular
+        comissão nova; o saldo já acumulado continua sacável."""
+        from db.affiliates import set_affiliate_status
+
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+        status = str(payload.get("status") or "")
+        try:
+            ok = await asyncio.to_thread(set_affiliate_status, affiliate_id, status)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        if not ok:
+            raise HTTPException(status_code=404, detail="Afiliado não encontrado.")
+        await log_system_event(
+            "info",
+            "affiliate_status_changed",
+            f"Afiliado {affiliate_id} → {status}.",
+            source="affiliates",
+            details={"affiliate_id": affiliate_id, "status": status},
+        )
+        return {"ok": True, "status": status}
+
+    @app.post("/admin/api/affiliates/payouts/{payout_id}/paid")
+    async def admin_affiliate_payout_paid(
+        payout_id: int, request: Request, username: str = Depends(_get_current_admin)
+    ):
+        """Marca o saque como pago (Pix já feito por fora). Body: {"note": "..."}"""
+        from db.affiliates import mark_payout_paid
+
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        note = (payload.get("note") or "").strip() or None
+        ok = await asyncio.to_thread(mark_payout_paid, payout_id, note)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Saque não encontrado ou já processado.")
+        await log_system_event(
+            "info",
+            "affiliate_payout_paid",
+            f"Saque {payout_id} marcado como pago.",
+            source="affiliates",
+            details={"payout_id": payout_id},
+        )
+        return {"ok": True}
+
+    @app.post("/admin/api/affiliates/payouts/{payout_id}/reject")
+    async def admin_affiliate_payout_reject(
+        payout_id: int, request: Request, username: str = Depends(_get_current_admin)
+    ):
+        """Rejeita o saque e devolve as comissões pro saldo. Body: {"note": "..."}"""
+        from db.affiliates import reject_payout
+
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        note = (payload.get("note") or "").strip() or None
+        ok = await asyncio.to_thread(reject_payout, payout_id, note)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Saque não encontrado ou já processado.")
+        await log_system_event(
+            "warning",
+            "affiliate_payout_rejected",
+            f"Saque {payout_id} rejeitado.",
+            source="affiliates",
+            details={"payout_id": payout_id, "note": note},
+        )
+        return {"ok": True}
+
+    @app.post("/admin/api/affiliates/commissions/{commission_id}/reverse")
+    async def admin_affiliate_commission_reverse(
+        commission_id: int, username: str = Depends(_get_current_admin)
+    ):
+        """Estorna uma comissão (fatura reembolsada/chargeback no Stripe)."""
+        from db.affiliates import reverse_commission
+
+        ok = await asyncio.to_thread(reverse_commission, commission_id)
+        if not ok:
+            raise HTTPException(
+                status_code=409,
+                detail="Comissão não encontrada, já paga ou dentro de um saque em andamento.",
+            )
+        await log_system_event(
+            "warning",
+            "affiliate_commission_reversed",
+            f"Comissão {commission_id} estornada.",
+            source="affiliates",
+            details={"commission_id": commission_id},
+        )
+        return {"ok": True}
 
     @app.get("/admin")
     async def serve_admin_dashboard(request: Request):

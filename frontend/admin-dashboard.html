@@ -431,6 +431,39 @@ button:disabled { opacity: .6; cursor: wait; }
     </div>
   </section>
 
+  <!-- ── Programa de afiliados ──────────────────────────────────────── -->
+  <section class="card" style="margin-bottom:16px">
+    <div class="section-title">
+      <h2>🤝 Afiliados</h2>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <input id="aff-new-email" type="email" placeholder="email da conta" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 10px;font-size:12px;width:200px"/>
+        <input id="aff-new-code" type="text" placeholder="código (opcional)" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 10px;font-size:12px;width:130px"/>
+        <button class="btn-primary" type="button" onclick="createAffiliate()">+ Criar afiliado</button>
+        <span class="meta" id="aff-meta">—</span>
+      </div>
+    </div>
+    <div style="overflow:auto">
+      <table class="table">
+        <thead><tr>
+          <th>Código</th><th>Email</th><th>%</th><th>Indicados</th><th>A pagar</th><th>Já pago</th><th>Chave Pix</th><th>Status</th><th></th>
+        </tr></thead>
+        <tbody id="aff-list"></tbody>
+      </table>
+    </div>
+    <div class="section-title" style="margin-top:18px">
+      <h2>💸 Saques de afiliados</h2>
+      <span class="meta">Pague o Pix por fora e marque como pago aqui</span>
+    </div>
+    <div style="overflow:auto">
+      <table class="table">
+        <thead><tr>
+          <th>Pedido em</th><th>Afiliado</th><th>Valor</th><th>Chave Pix</th><th>Status</th><th></th>
+        </tr></thead>
+        <tbody id="aff-payouts"></tbody>
+      </table>
+    </div>
+  </section>
+
   <!-- ── Acessos PII (LGPD audit) ───────────────────────────────────── -->
   <section class="card">
     <div class="section-title">
@@ -1196,8 +1229,101 @@ $id('pii-filter-field')?.addEventListener('change', onPiiFilterChange);
 
 window.addEventListener('beforeunload', () => { refreshController?.abort(); clearInterval(autoInterval); });
 
+/* ── Programa de afiliados ──────────────────────────────────────── */
+const fmtCents = c => 'R$ ' + (Number(c || 0) / 100).toLocaleString('pt-BR', {minimumFractionDigits: 2});
+
+async function loadAffiliates() {
+  try {
+    const res = await fetch('/admin/api/affiliates', { headers: authH(), cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+
+    const affs = data.affiliates || [];
+    $id('aff-meta').textContent = affs.length + ' afiliado' + (affs.length === 1 ? '' : 's');
+    $id('aff-list').innerHTML = affs.map(a => `
+      <tr>
+        <td><code>${esc(a.code)}</code></td>
+        <td>${esc(a.email || '—')}</td>
+        <td>${(a.commission_bps / 100).toFixed(0)}%</td>
+        <td>${a.referrals}</td>
+        <td>${fmtCents(a.owed_cents)}</td>
+        <td>${fmtCents(a.paid_cents)}</td>
+        <td>${esc(a.pix_key || '—')}</td>
+        <td>${a.status === 'active' ? '🟢 ativo' : '🔴 desativado'}</td>
+        <td><button class="btn-primary" type="button" style="font-size:11px;padding:4px 10px"
+          onclick="toggleAffiliateStatus(${a.id}, '${a.status === 'active' ? 'disabled' : 'active'}')">
+          ${a.status === 'active' ? 'Desativar' : 'Reativar'}</button></td>
+      </tr>`).join('') || '<tr><td colspan="9" style="color:var(--muted)">Nenhum afiliado ainda.</td></tr>';
+
+    const payouts = data.payouts || [];
+    $id('aff-payouts').innerHTML = payouts.map(p => {
+      const when = new Date(p.requested_at).toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+      const st = p.status === 'paid' ? '🟢 pago' : (p.status === 'rejected' ? '🔴 rejeitado' : '🟡 aguardando');
+      const actions = p.status === 'requested' ? `
+        <button class="btn-primary" type="button" style="font-size:11px;padding:4px 10px" onclick="payoutAction(${p.id}, 'paid')">Marcar pago</button>
+        <button class="btn-danger" type="button" style="font-size:11px;padding:4px 10px" onclick="payoutAction(${p.id}, 'reject')">Rejeitar</button>` : '';
+      return `
+      <tr>
+        <td>${when}</td>
+        <td><code>${esc(p.code)}</code> ${esc(p.email || '')}</td>
+        <td><strong>${fmtCents(p.amount_cents)}</strong></td>
+        <td>${esc(p.pix_key || '—')}</td>
+        <td>${st}${p.note ? ' · ' + esc(p.note) : ''}</td>
+        <td style="white-space:nowrap">${actions}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="6" style="color:var(--muted)">Nenhum saque solicitado.</td></tr>';
+  } catch (e) {
+    console.error('loadAffiliates', e);
+    const meta = $id('aff-meta');
+    if (meta) meta.textContent = 'erro ao carregar';
+  }
+}
+
+async function createAffiliate() {
+  const email = ($id('aff-new-email')?.value || '').trim();
+  const code = ($id('aff-new-code')?.value || '').trim();
+  if (!email) { alert('Informe o email da conta que vira afiliado.'); return; }
+  const res = await fetch('/admin/api/affiliates', {
+    method: 'POST',
+    headers: { ...authH(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(code ? { email, code } : { email }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { alert(data.detail || 'Erro ao criar afiliado.'); return; }
+  $id('aff-new-email').value = '';
+  $id('aff-new-code').value = '';
+  alert('Afiliado criado! Link: ' + location.origin + '/r/' + data.affiliate.code);
+  loadAffiliates();
+}
+
+async function toggleAffiliateStatus(id, status) {
+  const verb = status === 'disabled' ? 'DESATIVAR' : 'reativar';
+  if (!confirm(`Tem certeza que quer ${verb} este afiliado?` +
+    (status === 'disabled' ? ' Ele para de acumular comissão nova (o saldo atual continua sacável).' : ''))) return;
+  const res = await fetch(`/admin/api/affiliates/${id}/status`, {
+    method: 'POST',
+    headers: { ...authH(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.detail || 'Erro.'); return; }
+  loadAffiliates();
+}
+
+async function payoutAction(id, action) {
+  const label = action === 'paid' ? 'Confirmar que o Pix deste saque JÁ FOI PAGO?' : 'Rejeitar este saque? As comissões voltam pro saldo do afiliado.';
+  if (!confirm(label)) return;
+  const note = prompt('Observação (opcional):') || '';
+  const res = await fetch(`/admin/api/affiliates/payouts/${id}/${action}`, {
+    method: 'POST',
+    headers: { ...authH(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(note ? { note } : {}),
+  });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.detail || 'Erro.'); return; }
+  loadAffiliates();
+}
+
 /* ── Boot ────────────────────────────────────────────────────────── */
-refresh(false).then(() => loadPiiAccess()).catch(() => {
+refresh(false).then(() => { loadPiiAccess(); loadAffiliates(); }).catch(() => {
   localStorage.removeItem(tokenKey);
   window.location.href = '/admin/login';
 });

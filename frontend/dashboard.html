@@ -1891,6 +1891,10 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
   <button class="sidenav-item" type="button" data-nav="investments" data-pro-feature="investments" onclick="navigateTo('investments')">
     <span class="sn-icon">💹</span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span>
   </button>
+  <!-- Só aparece pra quem é afiliado (initAffiliateNav mostra se /api/affiliate/me responder 200) -->
+  <button class="sidenav-item" type="button" data-nav="affiliate" id="sidenav-affiliate" style="display:none" onclick="navigateTo('affiliate')">
+    <span class="sn-icon">🤝</span><span class="sn-label">Afiliados</span>
+  </button>
 
   <div class="sidenav-footer">
     <div class="sidenav-section" style="padding-top:0">Conta</div>
@@ -2218,6 +2222,16 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
     <div id="goals-stats" class="stats-row"></div>
 
     <div id="goals-grid" class="mock-grid cols-2"></div>
+  </div>
+
+  <div id="affiliate-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Programa de afiliados</p>
+    </div>
+
+    <div id="affiliate-stats" class="stats-row"></div>
+
+    <div id="affiliate-body" class="mock-grid cols-2"></div>
   </div>
 
   <div id="categories-view" class="dash-view">
