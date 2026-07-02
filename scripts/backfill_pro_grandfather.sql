@@ -1,5 +1,7 @@
 -- =====================================================================
 -- Backfill: Pro vitalício (grandfather) para a base atual
+-- >>> JÁ EXECUTADO EM PROD em 2026-06-16 (Lucas). Paywall ligado em seguida. <<<
+-- (mantido no repo como referência/idempotente; não precisa rodar de novo)
 -- =====================================================================
 -- Contexto: o paywall (PAYWALL_ENABLED) passa a exigir assinatura ativa/trial
 -- pra usar o app. Decisão de produto: TODA conta que já existe hoje ganha Pro
