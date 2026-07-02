@@ -7242,7 +7242,7 @@ function render(d) {
   grid.innerHTML = `
     <div class="card" style="animation-delay:0ms">
       <h2>Saldo Conta${hist?' <span style="font-size:.58rem;opacity:.6">(atual)</span>':''}</h2>
-      <div class="bignum"><span class="cur">R$</span><span data-num="balance" data-val="${d.balance}">${fmt(d.balance)}</span></div>
+      <div class="bignum"><span data-num="balance" data-val="${d.balance}">${fmt(d.balance)}</span></div>
       <div class="bigsub">saldo disponível</div>
       <div class="chips">
         <div class="chip chip-clickable" data-pro-feature="investments" role="button" tabindex="0" title="Abrir investimentos" onclick="setMainView('investments')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setMainView('investments');}">

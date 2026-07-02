@@ -1010,7 +1010,6 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
 
 /* ─── Numbers / rows ────────────────────────────────────────────────── */
 .bignum { font-size:2.25rem;font-weight:740;letter-spacing:-.04em;color:var(--text);line-height:1;margin-bottom:3px; }
-.bignum .cur { font-size:1rem;color:var(--text-2);margin-right:3px;font-weight:500; }
 .bigsub { font-size:.7rem;color:var(--text-3);margin-bottom:14px; }
 
 .chips { display:flex;flex-wrap:wrap;gap:8px;margin-top:14px; }
