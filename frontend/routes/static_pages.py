@@ -210,6 +210,27 @@ async def serve_dashboard_chat_js():
     )
 
 
+@router.get("/dashboard.css")
+async def serve_dashboard_css():
+    """CSS do dashboard, extraído do inline de dashboard.html.
+    no-cache: revalida via etag pra não dessincronizar do HTML em deploys."""
+    return FileResponse(
+        FRONTEND_DIR / "dashboard.css",
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/dashboard-mobile.css")
+async def serve_dashboard_mobile_css():
+    """Overrides mobile do dashboard (o <link> só baixa em viewport ≤900px)."""
+    return FileResponse(
+        FRONTEND_DIR / "dashboard-mobile.css",
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/health")
 async def health():
     return {"status": "ok"}
