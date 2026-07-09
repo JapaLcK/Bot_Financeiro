@@ -146,9 +146,23 @@ def send_verification_email(to: str, code: str) -> bool:
     return send_email(to=to, subject=f"🔐 {code} — seu código de verificação PigBank AI", html_body=html, text_body=text)
 
 
+def _whatsapp_link(greeting: str = "Oi! Quero ativar minha conta no PigBank 🐷") -> str:
+    """Link que abre o chat DIRETO com o bot no WhatsApp, já com uma saudação
+    preenchida — o usuário só toca em enviar. O bot reconhece o número pelo
+    phone_hash do cadastro e vincula sozinho (auto-link), sem código nem prazo.
+    Usa WHATSAPP_NUMBER (número dialável do bot) do ambiente; sem esse número,
+    cai no seletor genérico do WhatsApp (degradado, mas não quebra o e-mail)."""
+    import urllib.parse
+    text = urllib.parse.quote(greeting)
+    number = "".join(ch for ch in os.getenv("WHATSAPP_NUMBER", "") if ch.isdigit())
+    if number:
+        return f"https://api.whatsapp.com/send?phone={number}&text={text}"
+    return f"https://wa.me/?text={text}"
+
+
 def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool:
     """Envia e-mail de boas-vindas após o cadastro."""
-    vincular_wpp = f"https://wa.me/?text=vincular%20{link_code}"
+    vincular_wpp = _whatsapp_link()
     dashboard_url = dashboard_url.rstrip("/") if dashboard_url else ""
     dashboard_section = f"""<p>Acompanhe tudo no seu dashboard:</p>
       <p style="text-align:center"><a class="btn" href="{dashboard_url}">📊 Abrir Dashboard</a></p>""" if dashboard_url else ""
@@ -156,12 +170,10 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
     content = f"""
       <p>Olá! 👋</p>
       <p>Sua conta no <strong>PigBank AI</strong> foi criada com sucesso!
-         Vincule o bot ao WhatsApp ou Discord para começar.</p>
-      <p><strong>Vincular no WhatsApp:</strong></p>
-      <p style="text-align:center"><a class="btn" href="{vincular_wpp}">📱 Vincular no WhatsApp</a></p>
-      <p><strong>Vincular no Discord:</strong> envie no servidor do bot:</p>
-      <code class="cmd">vincular {link_code}</code>
-      <p class="warn">⚠️ Este código expira em <strong>15 minutos</strong>. Faça login novamente se expirar.</p>
+         Vamos conectar o Piggy ao seu WhatsApp pra você começar.</p>
+      <p><strong>É só abrir o chat e mandar um oi</strong> — o Piggy reconhece o
+         seu número automaticamente e já começa. Sem código, sem prazo. 🎉</p>
+      <p style="text-align:center"><a class="btn" href="{vincular_wpp}">📱 Abrir chat no WhatsApp</a></p>
       {dashboard_section}
       <p><strong>Primeiros comandos:</strong></p>
       <ul>
@@ -173,7 +185,10 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
       <p>Bom controle financeiro! 🚀</p>
     """
     html = _base_html("Bem-vindo ao PigBank AI!", content)
-    text = f"Bem-vindo ao PigBank AI!\n\nCódigo de vinculação: {link_code}\n\nExpira em 15 minutos."
+    text = (
+        "Bem-vindo ao PigBank AI!\n\n"
+        "Abra o chat com o bot no WhatsApp e mande um oi — reconhecemos seu número automaticamente.\n"
+    )
     return send_email(to=to, subject="✅ Bem-vindo ao PigBank AI — vincule o bot e comece agora", html_body=html, text_body=text)
 
 
