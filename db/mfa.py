@@ -72,7 +72,7 @@ def _generate_secret() -> str:
     return pyotp.random_base32()
 
 
-def _provisioning_uri(email: str, secret: str, issuer: str = "PigBank AI") -> str:
+def _provisioning_uri(email: str, secret: str, issuer: str = "PigBank") -> str:
     """Gera URI otpauth:// para o QR code."""
     return pyotp.totp.TOTP(secret).provisioning_uri(name=email, issuer_name=issuer)
 

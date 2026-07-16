@@ -2588,7 +2588,7 @@ function _ensureWizardOverlay() {
         <div class="wizard-step" data-step="1">
           <div style="text-align:center;padding:8px 0 4px">
             <div style="font-size:3.4rem;margin-bottom:8px">🐷</div>
-            <h3 style="margin:0 0 8px">Bem-vindo ao PigBank AI!</h3>
+            <h3 style="margin:0 0 8px">Bem-vindo ao PigBank!</h3>
             <p class="msub" style="max-width:380px;margin:0 auto">
               Em 3 passos rápidos seu painel fica configurado pra você começar a usar agora.<br/>
               Vamos lá?

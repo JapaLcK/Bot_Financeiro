@@ -931,14 +931,14 @@ def _render_pdf(items: list[dict], year: int, month: int, balance: float = 0.0) 
     doc = SimpleDocTemplate(
         bio, pagesize=A4,
         topMargin=14 * mm, bottomMargin=15 * mm, leftMargin=15 * mm, rightMargin=15 * mm,
-        title=f"Extrato {_MESES_PT[month]}/{year}", author="PigBank AI",
+        title=f"Extrato {_MESES_PT[month]}/{year}", author="PigBank",
     )
     W = doc.width
     el = []
 
     # ── Banner ───────────────────────────────────────────────────────────
     banner = Table(
-        [[par("PigBank AI", 22, colors.white, bold=True)],
+        [[par("PigBank", 22, colors.white, bold=True)],
          [par(f"Extrato de {_MESES_PT[month]} de {year}", 11, HEAD_SUB)]],
         colWidths=[W],
     )
@@ -3581,7 +3581,7 @@ async def unsubscribe(uid: int, token: str):
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>Descadastro — PigBank AI</title>
+  <title>Descadastro — PigBank</title>
   <style>
     body{margin:0;padding:0;background:#0a0d18;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
          color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh}

@@ -2,7 +2,7 @@
 core/services/engagement_scheduler.py
 
 Loop assíncrono que roda uma vez por dia e dispara emails de engajamento
-para os usuários do PigBank AI.
+para os usuários do PigBank.
 
 Lógica:
   - Usuário inativo há 7+ dias  → email de reengajamento (uma vez por período de

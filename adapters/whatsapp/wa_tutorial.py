@@ -237,7 +237,7 @@ def _step_done(wa_id: str) -> None:
         to=wa_id,
         body=(
             "🎉 *Tutorial concluído — parabéns!*\n\n"
-            "Agora você domina o PigBank AI.\n\n"
+            "Agora você domina o PigBank.\n\n"
             "📌 *Atalhos para não esquecer:*\n"
             "• *ajuda* → menu completo de comandos\n"
             "• *ajuda cartoes* → ajuda por tema\n"
@@ -309,7 +309,7 @@ def send_welcome(wa_id: str, user_id: int | None = None) -> None:
         except Exception as exc:
             logger.debug("send_welcome name lookup failed: %s", exc)
 
-    header = f"🎉 Bem-vindo, {first_name}!" if first_name else "🎉 Bem-vindo ao PigBank AI!"
+    header = f"🎉 Bem-vindo, {first_name}!" if first_name else "🎉 Bem-vindo ao PigBank!"
     intro = (
         "Sou o Piggy, seu assistente financeiro pessoal no WhatsApp.\n\n"
         if first_name
@@ -331,7 +331,7 @@ def send_welcome(wa_id: str, user_id: int | None = None) -> None:
             "🖥️ Acessar seu dashboard interativo\n\n"
             "Quer um tour rápido de 2 minutos? 👇"
         ),
-        footer="PigBank AI — seu dinheiro, sob controle",
+        footer="PigBank — seu dinheiro, sob controle",
         buttons=[
             {"id": "tut_start", "title": "🚀 Começar tour!"},
             {"id": "tut_skip",  "title": "⚡ Usar direto"},

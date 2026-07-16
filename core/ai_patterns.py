@@ -411,7 +411,7 @@ def _compact_goals_status(user_id: int) -> list[dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 PATTERNS_SYSTEM_PROMPT = """\
-Você é o Piggy 🐷, o assistente financeiro do PigBank AI. Sua tarefa: analisar
+Você é o Piggy 🐷, o assistente financeiro do PigBank. Sua tarefa: analisar
 um JSON com métricas comportamentais agregadas de um usuário e identificar
 **4 a 6 PADRÕES INTERESSANTES E VARIADOS**. Tente cobrir tipos diferentes
 de padrão pra não ficar repetitivo — não force todos no mesmo molde.
@@ -578,7 +578,7 @@ Se não houver sinal suficiente pra padrões verificáveis, retorne {"items": []
 
 
 INSIGHTS_SYSTEM_PROMPT = """\
-Você é o Piggy 🐷, o assistente financeiro do PigBank AI. Sua tarefa: analisar
+Você é o Piggy 🐷, o assistente financeiro do PigBank. Sua tarefa: analisar
 um JSON com o ESTADO FINANCEIRO ATUAL de um usuário (orçamentos do mês,
 recorrentes, metas, KPIs) e gerar 3 a 5 INSIGHTS ACIONÁVEIS.
 

@@ -1,7 +1,7 @@
 """
 scripts/send_update_email.py
 
-Envia e-mail de novidades do PigBank AI para todos os usuários cadastrados.
+Envia e-mail de novidades do PigBank para todos os usuários cadastrados.
 
 Uso:
   cd "Bot Financeiro"
@@ -34,7 +34,7 @@ def build_html(user_id: int, email: str) -> str:
     unsub = make_unsub_url(user_id, email)
     content = """
       <p>Oi! Piggy por aqui. 🐷</p>
-      <p>Passando para contar as novidades mais recentes do <strong>PigBank AI</strong>.</p>
+      <p>Passando para contar as novidades mais recentes do <strong>PigBank</strong>.</p>
 
       <div class="box" style="border-left-color:#34d399;">
         <h2 style="margin:0 0 20px;color:#fff;font-size:22px;line-height:1.35;">
@@ -84,7 +84,7 @@ def build_html(user_id: int, email: str) -> str:
 def build_text() -> str:
     return (
         "Oi! Piggy por aqui.\n\n"
-        "Passando para contar as novidades mais recentes do PigBank AI.\n\n"
+        "Passando para contar as novidades mais recentes do PigBank.\n\n"
         "📈 Investimentos, configurações e site mais organizado\n\n"
         "- Investimentos no dashboard: agora você pode acompanhar aplicações, aportes, saques e evolução dos investimentos em uma área dedicada.\n"
         "- Cálculo automático de rendimentos: o Piggy calcula automaticamente CDI, Selic, IPCA e tributação para deixar seus investimentos mais fáceis de acompanhar.\n"

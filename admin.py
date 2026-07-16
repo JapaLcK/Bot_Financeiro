@@ -1,5 +1,5 @@
 """
-admin.py — CLI administrativa do PigBank AI.
+admin.py — CLI administrativa do PigBank.
 
 Toda leitura de PII via este CLI passa por core/crypto.decrypt_pii com
 actor=cli:<user> — acessos ficam registrados em pii_access_log e podem

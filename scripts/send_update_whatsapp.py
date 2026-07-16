@@ -1,7 +1,7 @@
 """
 scripts/send_update_whatsapp.py
 
-Envia a mensagem de novidades do PigBank AI via template aprovado do WhatsApp.
+Envia a mensagem de novidades do PigBank via template aprovado do WhatsApp.
 
 Uso:
   cd "Bot Financeiro"

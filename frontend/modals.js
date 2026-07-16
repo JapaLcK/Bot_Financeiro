@@ -1,6 +1,6 @@
 /**
  * modals.js — Substitui os dialogs nativos do browser (alert/confirm) por
- * modais com a identidade visual do PigBank AI. Auto-injeta CSS no primeiro
+ * modais com a identidade visual do PigBank. Auto-injeta CSS no primeiro
  * uso, sem dependencias.
  *
  * API publica:

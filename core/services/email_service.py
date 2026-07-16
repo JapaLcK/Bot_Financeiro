@@ -4,7 +4,7 @@ Serviço de envio de e-mails transacionais via Resend API.
 
 Variáveis de ambiente necessárias:
   RESEND_API_KEY      — chave da API do Resend (re_xxxxxxxx)
-  EMAIL_FROM          — remetente institucional (default: "PigBank AI <suporte@pigbankai.com>")
+  EMAIL_FROM          — remetente institucional (default: "PigBank <suporte@pigbankai.com>")
   EMAIL_FROM_PIGGY    — remetente Piggy/conversacional (default: "Piggy do PigBank <oi@pigbankai.com>")
   SUPPORT_EMAIL       — e-mail público de suporte (default: "suporte@pigbankai.com")
 """
@@ -17,7 +17,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-EMAIL_FROM          = os.getenv("EMAIL_FROM",          "PigBank AI <suporte@pigbankai.com>")
+EMAIL_FROM          = os.getenv("EMAIL_FROM",          "PigBank <suporte@pigbankai.com>")
 EMAIL_FROM_PIGGY    = os.getenv("EMAIL_FROM_PIGGY",    "Piggy do PigBank <oi@pigbankai.com>")
 SUPPORT_EMAIL       = os.getenv("SUPPORT_EMAIL",       "suporte@pigbankai.com")
 
@@ -119,12 +119,12 @@ def _base_html(title: str, content: str) -> str:
   <div class="wrapper">
     <div class="header">
       <div class="logo-icon">🐷</div>
-      <h1>PigBank AI</h1>
+      <h1>PigBank</h1>
       <p>Seu assistente financeiro inteligente</p>
     </div>
     <div class="body">{content}</div>
     <div class="footer">
-      Você recebeu este e-mail porque criou uma conta no PigBank AI.<br/>
+      Você recebeu este e-mail porque criou uma conta no PigBank.<br/>
       Dúvidas? Use o comando <strong>ajuda</strong> no bot ou acesse <a href="https://pigbankai.com">pigbankai.com</a>
     </div>
   </div>
@@ -136,14 +136,14 @@ def send_verification_email(to: str, code: str) -> bool:
     """Envia o código de verificação de 6 dígitos para confirmar o e-mail no cadastro."""
     content = f"""
       <p>Olá! 👋</p>
-      <p>Use o código abaixo para confirmar seu e-mail e finalizar o cadastro no <strong>PigBank AI</strong>.</p>
+      <p>Use o código abaixo para confirmar seu e-mail e finalizar o cadastro no <strong>PigBank</strong>.</p>
       <div class="code-box"><code>{code}</code>
       <p class="warn">⚠️ Este código expira em <strong>15 minutos</strong>.<br/>
         Se você não tentou criar uma conta, ignore este e-mail.</p>
     """
-    html = _base_html("Confirme seu e-mail — PigBank AI", content)
-    text = f"PigBank AI — Código de verificação: {code}\n\nExpira em 15 minutos."
-    return send_email(to=to, subject=f"🔐 {code} — seu código de verificação PigBank AI", html_body=html, text_body=text)
+    html = _base_html("Confirme seu e-mail — PigBank", content)
+    text = f"PigBank — Código de verificação: {code}\n\nExpira em 15 minutos."
+    return send_email(to=to, subject=f"🔐 {code} — seu código de verificação PigBank", html_body=html, text_body=text)
 
 
 def _whatsapp_link(greeting: str = "Oi! Quero ativar minha conta no PigBank 🐷") -> str:
@@ -169,7 +169,7 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
 
     content = f"""
       <p>Olá! 👋</p>
-      <p>Sua conta no <strong>PigBank AI</strong> foi criada com sucesso!
+      <p>Sua conta no <strong>PigBank</strong> foi criada com sucesso!
          Vamos conectar o Piggy ao seu WhatsApp pra você começar.</p>
       <p><strong>É só abrir o chat e mandar um oi</strong> — o Piggy reconhece o
          seu número automaticamente e já começa. Sem código, sem prazo. 🎉</p>
@@ -184,12 +184,12 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
       </ul>
       <p>Bom controle financeiro! 🚀</p>
     """
-    html = _base_html("Bem-vindo ao PigBank AI!", content)
+    html = _base_html("Bem-vindo ao PigBank!", content)
     text = (
-        "Bem-vindo ao PigBank AI!\n\n"
+        "Bem-vindo ao PigBank!\n\n"
         "Abra o chat com o bot no WhatsApp e mande um oi — reconhecemos seu número automaticamente.\n"
     )
-    return send_email(to=to, subject="✅ Bem-vindo ao PigBank AI — vincule o bot e comece agora", html_body=html, text_body=text)
+    return send_email(to=to, subject="✅ Bem-vindo ao PigBank — vincule o bot e comece agora", html_body=html, text_body=text)
 
 
 # ─── Unsubscribe helpers ──────────────────────────────────────────────────────
@@ -250,12 +250,12 @@ def _piggy_html(title: str, content: str, unsub_url: str = "") -> str:
   <div class="wrap">
     <div class="hdr">
       <div class="pig">🐷</div>
-      <h1>PigBank AI</h1>
+      <h1>PigBank</h1>
       <p>Seu assistente financeiro inteligente</p>
     </div>
     <div class="body">{content}</div>
     <div class="footer">
-      Você recebe este email porque tem uma conta no PigBank AI.<br/>
+      Você recebe este email porque tem uma conta no PigBank.<br/>
       Dúvidas? Use o comando <strong>ajuda</strong> no bot ou acesse
       <a href="https://pigbankai.com">pigbankai.com</a><br/><br/>
       {unsub_line}
@@ -276,7 +276,7 @@ _TIPS: list[tuple[str, str, str]] = [
         <code class="cmd">gastei 50 mercado</code>
         <code class="cmd">paguei 120 conta de luz</code>
         <code class="cmd">gastei 35 ifood</code>
-        <p>O PigBank AI entende linguagem natural — sem menus, sem formulários. 🚀</p>""",
+        <p>O PigBank entende linguagem natural — sem menus, sem formulários. 🚀</p>""",
     ),
     (
         "Crie caixinhas para seus objetivos",
@@ -290,7 +290,7 @@ _TIPS: list[tuple[str, str, str]] = [
     (
         "Categorias automáticas que aprendem com você",
         "Quanto mais você usa o bot, mais ele aprende seus padrões de gasto.",
-        """<p>O PigBank AI <strong>memoriza</strong> suas categorias automaticamente.</p>
+        """<p>O PigBank <strong>memoriza</strong> suas categorias automaticamente.</p>
         <p>Se você digitar <code>gastei 30 ifood</code> e confirmar a categoria "Alimentação",
         da próxima vez que mencionar <em>ifood</em> o bot já categoriza sozinho — sem perguntar.</p>
         <p>Você também pode criar regras manualmente:</p>
@@ -300,7 +300,7 @@ _TIPS: list[tuple[str, str, str]] = [
     (
         "Acompanhe investimentos com rendimento automático",
         "Cadastre seus investimentos e veja o saldo crescer com o CDI em tempo real.",
-        """<p>O PigBank AI calcula o rendimento dos seus investimentos automaticamente:</p>
+        """<p>O PigBank calcula o rendimento dos seus investimentos automaticamente:</p>
         <code class="cmd">investimento: Tesouro Selic, R$ 2000, 100% CDI</code>
         <p>O saldo aparece atualizado no seu dashboard a cada acesso, com os juros já aplicados. 📈</p>
         <p>Use o comando <strong>investimentos</strong> para ver um resumo rápido pelo bot.</p>""",
@@ -324,7 +324,7 @@ _TIPS: list[tuple[str, str, str]] = [
         "Cansou de lançar tudo manualmente? Importe meses inteiros de uma vez.",
         """<p>A maioria dos bancos permite exportar o extrato em formato <strong>.OFX</strong>.
         Basta baixar o arquivo no app do seu banco e enviar direto no bot.</p>
-        <p>O PigBank AI importa automaticamente, detecta duplicatas e mantém
+        <p>O PigBank importa automaticamente, detecta duplicatas e mantém
         seu histórico limpo. 🏦</p>
         <p><em>Procure por "exportar extrato" ou "exportar OFX" no app do seu banco.</em></p>""",
     ),
@@ -355,7 +355,7 @@ _INSIGHTS: list[tuple[str, str, str]] = [
           <li><strong>3 meses</strong> de despesas para quem tem emprego CLT</li>
           <li><strong>6 meses</strong> para autônomos e empreendedores</li>
         </ul>
-        <p>Com o PigBank AI você pode acompanhar exatamente qual é o seu custo mensal
+        <p>Com o PigBank você pode acompanhar exatamente qual é o seu custo mensal
         e saber quanto falta para atingir essa meta. 🎯</p>""",
     ),
     (
@@ -444,7 +444,7 @@ def send_reengagement_email(to: str, user_id: int | None = None) -> bool:
       <p>Dois segundinhos e você já sabe onde estão as coisas. Simples assim.</p>
       <p class="sig">Com carinho (e fome),<br/><strong>Piggy 🐷</strong></p>
     """
-    html = _piggy_html("Piggy com saudade — PigBank AI", content, unsub)
+    html = _piggy_html("Piggy com saudade — PigBank", content, unsub)
     text = (
         "Oi, sumido! Aqui é o Piggy.\n\n"
         "Faz um tempinho que você não aparece. Manda 'saldo' no bot para "
@@ -470,7 +470,7 @@ def send_tip_email(to: str, user_id: int | None = None) -> bool:
     unsub = make_unsub_url(user_id, to) if user_id else ""
     content = f"""
       <p>Eita! Piggy aqui com uma dica boa. 🐷</p>
-      <p>Descobri que muita gente não conhece esse recurso do PigBank AI, e achei
+      <p>Descobri que muita gente não conhece esse recurso do PigBank, e achei
          que você ia curtir saber:</p>
       <p style="font-size:18px;font-weight:700;color:#fff;margin:20px 0 6px;">{title}</p>
       <p style="color:rgba(255,255,255,.5);margin-top:0">{subtitle}</p>
@@ -548,7 +548,7 @@ def send_new_login_alert(
 
     content = f"""
       <p>Olá!</p>
-      <p>Detectamos um <strong>novo login</strong> na sua conta do <strong>PigBank AI</strong> a partir de um dispositivo ou local que ainda não tínhamos visto.</p>
+      <p>Detectamos um <strong>novo login</strong> na sua conta do <strong>PigBank</strong> a partir de um dispositivo ou local que ainda não tínhamos visto.</p>
       <div class="highlight">
         <p style="margin:0">
           <strong>Local:</strong> {safe_city}<br/>
@@ -559,9 +559,9 @@ def send_new_login_alert(
       <p>Foi você? Pode ignorar este aviso — registramos para que você sempre saiba quando alguém entra na sua conta.</p>
       <p class="warn"><strong>Não foi você?</strong> Acesse <a href="https://pigbankai.com">pigbankai.com</a>, troque sua senha imediatamente e ative a autenticação em 2 etapas (MFA) se ainda não usa.</p>
     """
-    html = _base_html("Novo login detectado — PigBank AI", content)
+    html = _base_html("Novo login detectado — PigBank", content)
     text = (
-        "PigBank AI — Novo login detectado\n\n"
+        "PigBank — Novo login detectado\n\n"
         f"Local: {safe_city}\n"
         f"IP: {safe_ip}\n"
         f"Dispositivo: {safe_ua}\n\n"
@@ -570,7 +570,7 @@ def send_new_login_alert(
     )
     return send_email(
         to=to,
-        subject="🔔 Novo login detectado na sua conta — PigBank AI",
+        subject="🔔 Novo login detectado na sua conta — PigBank",
         html_body=html,
         text_body=text,
     )
@@ -580,16 +580,16 @@ def send_password_reset_email(to: str, reset_url: str) -> bool:
     """Envia e-mail com link de recuperação de senha."""
     content = f"""
       <p>Olá!</p>
-      <p>Recebemos uma solicitação para redefinir a senha da sua conta no <strong>PigBank AI</strong>.</p>
+      <p>Recebemos uma solicitação para redefinir a senha da sua conta no <strong>PigBank</strong>.</p>
       <p style="text-align:center"><a class="btn" href="{reset_url}">🔑 Redefinir minha senha</a></p>
       <p class="warn">⚠️ Este link expira em <strong>30 minutos</strong> e só pode ser usado uma vez.<br/>
         Se você não solicitou isso, ignore este e-mail.</p>
       <p style="font-size:12px;color:rgba(255,255,255,.25);word-break:break-all;text-align:center;margin-top:20px;">
         Link: {reset_url}</p>
     """
-    html = _base_html("Redefinição de senha — PigBank AI", content)
-    text = f"Redefinição de senha — PigBank AI\n\nLink (expira em 30 min):\n{reset_url}"
-    return send_email(to=to, subject="🔑 Redefinir senha — PigBank AI", html_body=html, text_body=text)
+    html = _base_html("Redefinição de senha — PigBank", content)
+    text = f"Redefinição de senha — PigBank\n\nLink (expira em 30 min):\n{reset_url}"
+    return send_email(to=to, subject="🔑 Redefinir senha — PigBank", html_body=html, text_body=text)
 
 
 def send_data_export_link_email(
@@ -607,7 +607,7 @@ def send_data_export_link_email(
 
     content = f"""
       <p>Olá!</p>
-      <p>Recebemos uma solicitação para baixar a cópia completa dos seus dados no <strong>PigBank AI</strong>.</p>
+      <p>Recebemos uma solicitação para baixar a cópia completa dos seus dados no <strong>PigBank</strong>.</p>
       <p style="text-align:center"><a class="btn" href="{download_url}">📦 Baixar meus dados</a></p>
       <p class="warn">⚠️ Este link expira em <strong>{expires_in_minutes} minutos</strong> e só pode ser usado <strong>uma única vez</strong>.</p>
       <div class="highlight">
@@ -619,16 +619,16 @@ def send_data_export_link_email(
       <p style="font-size:12px;color:rgba(255,255,255,.25);word-break:break-all;text-align:center;margin-top:20px;">
         Link: {download_url}</p>
     """
-    html = _base_html("Baixar meus dados — PigBank AI", content)
+    html = _base_html("Baixar meus dados — PigBank", content)
     text = (
-        "PigBank AI — link para baixar seus dados\n\n"
+        "PigBank — link para baixar seus dados\n\n"
         f"Use o link abaixo (expira em {expires_in_minutes} min, uso único):\n{download_url}\n\n"
         f"Solicitado a partir de IP {safe_ip}.\n"
         "Se não foi você, ignore este e-mail e troque sua senha em https://pigbankai.com."
     )
     return send_email(
         to=to,
-        subject="📦 Link para baixar seus dados — PigBank AI",
+        subject="📦 Link para baixar seus dados — PigBank",
         html_body=html,
         text_body=text,
     )
@@ -648,7 +648,7 @@ def send_data_export_completed_email(
 
     content = f"""
       <p>Olá!</p>
-      <p>Confirmamos que a cópia completa dos seus dados no <strong>PigBank AI</strong> foi baixada com sucesso.</p>
+      <p>Confirmamos que a cópia completa dos seus dados no <strong>PigBank</strong> foi baixada com sucesso.</p>
       <div class="highlight">
         <p style="margin:0"><strong>Quando:</strong> {completed_at}<br/>
         <strong>IP:</strong> {safe_ip}<br/>
@@ -656,15 +656,15 @@ def send_data_export_completed_email(
       </div>
       <p class="warn"><strong>Não foi você?</strong> Sua sessão ou senha podem estar comprometidas. Acesse <a href="https://pigbankai.com">pigbankai.com</a>, troque sua senha imediatamente e entre em contato com <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>.</p>
     """
-    html = _base_html("Seus dados foram baixados — PigBank AI", content)
+    html = _base_html("Seus dados foram baixados — PigBank", content)
     text = (
-        "PigBank AI — seus dados foram baixados\n\n"
+        "PigBank — seus dados foram baixados\n\n"
         f"Quando: {completed_at}\nIP: {safe_ip}\n\n"
         f"Se não foi você, troque sua senha em https://pigbankai.com e fale com {SUPPORT_EMAIL}."
     )
     return send_email(
         to=to,
-        subject="📥 Seus dados foram baixados — PigBank AI",
+        subject="📥 Seus dados foram baixados — PigBank",
         html_body=html,
         text_body=text,
     )
@@ -674,7 +674,7 @@ def send_account_deletion_scheduled_email(to: str, scheduled_for: str) -> bool:
     """Confirma que a exclusão da conta foi agendada."""
     content = f"""
       <p>Olá!</p>
-      <p>Recebemos uma solicitação para excluir sua conta no <strong>PigBank AI</strong>.</p>
+      <p>Recebemos uma solicitação para excluir sua conta no <strong>PigBank</strong>.</p>
       <div class="highlight">
         <p style="margin:0">A exclusão definitiva está agendada para:<br/>
         <strong>{scheduled_for}</strong></p>
@@ -684,16 +684,16 @@ def send_account_deletion_scheduled_email(to: str, scheduled_for: str) -> bool:
       <p class="warn">Se você não solicitou essa exclusão, entre em contato com o suporte imediatamente:
         <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>.</p>
     """
-    html = _base_html("Exclusão de conta agendada — PigBank AI", content)
+    html = _base_html("Exclusão de conta agendada — PigBank", content)
     text = (
-        "PigBank AI — exclusão de conta agendada\n\n"
+        "PigBank — exclusão de conta agendada\n\n"
         f"A exclusão definitiva está agendada para: {scheduled_for}\n\n"
         "Durante o período de carência, sua conta fica bloqueada. "
         f"Se você não solicitou essa exclusão, entre em contato com o suporte imediatamente: {SUPPORT_EMAIL}."
     )
     return send_email(
         to=to,
-        subject="Exclusão de conta agendada — PigBank AI",
+        subject="Exclusão de conta agendada — PigBank",
         html_body=html,
         text_body=text,
     )
@@ -703,22 +703,22 @@ def send_account_deletion_completed_email(to: str) -> bool:
     """Confirma que a exclusão definitiva foi concluída."""
     content = f"""
       <p>Olá!</p>
-      <p>A exclusão da sua conta no <strong>PigBank AI</strong> foi concluída.</p>
+      <p>A exclusão da sua conta no <strong>PigBank</strong> foi concluída.</p>
       <p>Removemos os dados pessoais e financeiros vinculados à conta, salvo registros mínimos que precisem ser preservados por obrigação legal, segurança, prevenção de fraude ou defesa de direitos.</p>
       <p>Se você acredita que isso foi um erro, fale com o suporte:
         <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>.</p>
       <p>Este é o último e-mail transacional relacionado a essa conta.</p>
     """
-    html = _base_html("Conta excluída — PigBank AI", content)
+    html = _base_html("Conta excluída — PigBank", content)
     text = (
-        "PigBank AI — conta excluída\n\n"
+        "PigBank — conta excluída\n\n"
         "A exclusão da sua conta foi concluída. "
         f"Se você acredita que isso foi um erro, fale com o suporte: {SUPPORT_EMAIL}. "
         "Este é o último e-mail transacional relacionado a essa conta."
     )
     return send_email(
         to=to,
-        subject="Conta excluída — PigBank AI",
+        subject="Conta excluída — PigBank",
         html_body=html,
         text_body=text,
     )

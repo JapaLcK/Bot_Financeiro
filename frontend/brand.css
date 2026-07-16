@@ -1,0 +1,197 @@
+/* ==========================================================================
+   PigBank — Design Tokens (Brand Book v1.0, Matheus Calhão)
+   --------------------------------------------------------------------------
+   FONTE ÚNICA DE VERDADE da identidade visual. Nenhuma página/CSS deve
+   hardcodar hex de marca — sempre puxar via var(--...) daqui.
+
+   Estrutura:
+     1. Paleta crua      → cores oficiais da marca (não mudam com o tema)
+     2. Tokens semânticos → papéis (bg, texto, borda...) que VIRAM no tema
+                            :root = DARK (padrão) · .light / body.light = LIGHT
+     3. Tipografia        → família (Inter como fallback da Söhne), pesos, escala
+     4. Raio / sombra / z → primitivos de layout
+
+   Trocar Inter → Söhne no futuro: basta substituir os .woff2 e a linha
+   --font-brand. Nada mais muda.
+   ========================================================================== */
+
+:root {
+  /* ----------------------------------------------------------------------
+     1. PALETA CRUA — cores oficiais (idênticas em dark e light)
+     ---------------------------------------------------------------------- */
+  --pig-pink:          #FF2D8E;   /* Rosa PigBank — primária, ação, destaque */
+  --pig-pink-support:  #F7D7E3;   /* Rosa Suporte — detalhes, fundos suaves  */
+  --pig-neon:          #C6F11A;   /* Verde Neon — sucesso, progresso, acento */
+  --pig-black:         #111111;   /* Preto Base — fundo dark, contraste      */
+  --pig-offwhite:      #F6F4F1;   /* Off-White — fundo light, respiro        */
+  --pig-gray:          #6B6B6B;   /* Cinza Neutro — apoio, texto secundário  */
+
+  /* Shades derivados (hover/press/tints) — mantêm a marca coerente */
+  --pig-pink-700:      #C7186B;   /* rosa mais escura — press                */
+  --pig-pink-600:      #E71E7C;   /* rosa hover                              */
+  --pig-pink-050:      #FFE7F2;   /* rosa tint bem clara                     */
+  --pig-neon-600:      #A7CE12;   /* neon um tom abaixo — hover em fill      */
+  --pig-neon-ink:      #3FA400;   /* verde legível p/ TEXTO em fundo claro   */
+
+  /* ----------------------------------------------------------------------
+     2. TOKENS SEMÂNTICOS — TEMA DARK (padrão)
+     ---------------------------------------------------------------------- */
+  /* Superfícies */
+  --bg-page:      #111111;                    /* fundo da página             */
+  --bg-elev:      #1B1B1E;                     /* cards, painéis              */
+  --bg-elev-2:    #242428;                     /* elevação sobre card         */
+  --bg-inset:     #0C0C0D;                     /* campos, poços               */
+
+  /* Texto */
+  --text:         #F6F4F1;                     /* corpo principal             */
+  --text-muted:   #B2B2B0;                     /* secundário                  */
+  --text-subtle:  #7E7E7C;                     /* terciário, placeholders     */
+  --text-on-brand:#FFFFFF;                     /* texto sobre rosa            */
+  --text-on-accent:#111111;                    /* texto sobre neon            */
+
+  /* Bordas / divisores */
+  --border:        rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(255, 255, 255, 0.18);
+
+  /* Papéis de marca */
+  --primary:        var(--pig-pink);
+  --primary-hover:  var(--pig-pink-600);
+  --primary-press:  var(--pig-pink-700);
+  --primary-contrast: #FFFFFF;
+  --accent:         var(--pig-neon);
+  --accent-hover:   var(--pig-neon-600);
+  --accent-contrast: #111111;
+
+  /* Semânticos de finanças / status */
+  --pos:      var(--pig-neon);                 /* entradas, ganhos, sucesso   */
+  --pos-ink:  var(--pig-neon);                 /* texto de valor positivo     */
+  --neg:      #FF6B6B;                         /* saídas, gastos              */
+  --warn:     #FFB020;
+  --info:     #4F9BFF;
+
+  /* Interação */
+  --focus-ring:  var(--pig-pink);
+  --link:        var(--pig-pink);
+  --overlay:     rgba(0, 0, 0, 0.60);
+
+  /* ----------------------------------------------------------------------
+     3. TIPOGRAFIA
+     ---------------------------------------------------------------------- */
+  /* Söhne é paga (Klim). Até licenciar, Inter é o fallback mais próximo.
+     Trocar aqui + adicionar @font-face da Söhne = migração completa. */
+  --font-brand: "Inter", "Söhne", -apple-system, BlinkMacSystemFont,
+                "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-sans:  var(--font-brand);
+
+  --fw-regular:   400;   /* corpo, interface        (Söhne Regular)   */
+  --fw-medium:    500;
+  --fw-bold:      700;   /* subtítulos              (Söhne Bold)      */
+  --fw-extrabold: 800;   /* logo / marca            (Söhne Extra Bold)*/
+  --fw-black:     900;   /* títulos de impacto      (Söhne Black)     */
+
+  /* Escala de tipo (rem, base 16px) */
+  --fs-xs:   0.75rem;    /* 12 */
+  --fs-sm:   0.875rem;   /* 14 */
+  --fs-md:   1rem;       /* 16 */
+  --fs-lg:   1.125rem;   /* 18 */
+  --fs-xl:   1.375rem;   /* 22 */
+  --fs-2xl:  1.75rem;    /* 28 */
+  --fs-3xl:  2.25rem;    /* 36 */
+  --fs-4xl:  3rem;       /* 48 */
+  --fs-5xl:  4rem;       /* 64 — hero */
+
+  --lh-tight:  1.1;
+  --lh-snug:   1.25;
+  --lh-normal: 1.5;
+
+  /* ----------------------------------------------------------------------
+     4. RAIO / SOMBRA / MOVIMENTO / Z
+     ---------------------------------------------------------------------- */
+  --radius-sm:   8px;
+  --radius-md:   14px;
+  --radius-lg:   22px;
+  --radius-xl:   32px;
+  --radius-pill: 999px;
+
+  --shadow-sm:  0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-md:  0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-lg:  0 18px 50px rgba(0, 0, 0, 0.45);
+  --shadow-brand: 0 8px 30px rgba(255, 45, 142, 0.30);  /* glow rosa */
+
+  --ease:       cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast:   120ms;
+  --dur:        200ms;
+  --dur-slow:   360ms;
+
+  --z-header:   100;
+  --z-overlay:  900;
+  --z-modal:    1000;
+  --z-toast:    1100;
+}
+
+/* ==========================================================================
+   TEMA LIGHT — override dos tokens semânticos (paleta crua e tipografia
+   não mudam). Ativa com <body class="light"> ou [data-theme="light"].
+   ========================================================================== */
+body.light,
+.light,
+[data-theme="light"] {
+  --bg-page:      #F6F4F1;
+  --bg-elev:      #FFFFFF;
+  --bg-elev-2:    #FFFFFF;
+  --bg-inset:     #EFEDE9;
+
+  --text:         #111111;
+  --text-muted:   #55554F;
+  --text-subtle:  #6B6B6B;
+  --text-on-brand:#FFFFFF;
+  --text-on-accent:#111111;
+
+  --border:        rgba(17, 17, 17, 0.10);
+  --border-strong: rgba(17, 17, 17, 0.18);
+
+  /* neon é ilegível como texto no claro → usa a versão "ink" escura */
+  --pos-ink:  var(--pig-neon-ink);
+  --neg:      #E23D3D;
+
+  --overlay:  rgba(17, 17, 17, 0.45);
+
+  --shadow-sm:  0 1px 2px rgba(17, 17, 17, 0.06);
+  --shadow-md:  0 8px 24px rgba(17, 17, 17, 0.08);
+  --shadow-lg:  0 18px 50px rgba(17, 17, 17, 0.12);
+  --shadow-brand: 0 8px 30px rgba(255, 45, 142, 0.22);
+}
+
+/* ==========================================================================
+   Helpers de marca reutilizáveis (opt-in — não afetam nada sozinhos)
+   ========================================================================== */
+
+/* Logotipo textual: "Pig" rosa + "Bank" na cor do texto (fallback do símbolo) */
+.pb-wordmark {
+  font-family: var(--font-brand);
+  font-weight: var(--fw-extrabold);
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.pb-wordmark .pig { color: var(--pig-pink); }
+
+/* Botão primário da marca */
+.pb-btn-primary {
+  background: var(--primary);
+  color: var(--primary-contrast);
+  font-family: var(--font-brand);
+  font-weight: var(--fw-bold);
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 0.75rem 1.5rem;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), transform var(--dur-fast) var(--ease);
+}
+.pb-btn-primary:hover  { background: var(--primary-hover); }
+.pb-btn-primary:active { background: var(--primary-press); transform: translateY(1px); }
+
+/* Anel de foco acessível padrão da marca */
+.pb-focusable:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}

@@ -66,7 +66,7 @@ def send_help_menu(wa_id: str) -> None:
     """
     send_interactive_list(
         to=wa_id,
-        header="📋 Menu de Ajuda — PigBank AI",
+        header="📋 Menu de Ajuda — PigBank",
         body=(
             "Selecione um tópico para ver os comandos disponíveis.\n\n"
             "Você também pode digitar diretamente, ex:\n"
@@ -186,7 +186,7 @@ def send_help_section(wa_id: str, menu_id: str) -> None:
             to=wa_id,
             header=f"{emoji} {title}",
             body="Escolha o próximo passo:",
-            footer="Ajuda do PigBank AI",
+            footer="Ajuda do PigBank",
             buttons=[
                 {"id": "help_menu", "title": "📋 Menu"},
                 {"id": "tut_start", "title": "🚀 Tutorial"},
