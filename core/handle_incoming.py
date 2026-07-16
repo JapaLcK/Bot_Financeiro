@@ -234,14 +234,36 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     parts = _split_audio_transactions(transcription)
 
     responses = []
+    fallbacks = []
     for part in parts:
         result_text = _process_audio_transaction(uid, part, msg, platform)
-        responses.append(result_text)
+        # A quebra em múltiplos lançamentos (_split_audio_transactions) pode
+        # separar um pedaço real ("comprei 550 de pão doce") de um pedaço que
+        # é só ruído da fala ("fala pig, sei que lá, sei que lá,"). O pedaço
+        # de ruído roteia pro help genérico ("Não entendi..."). Colar esse
+        # fallback num "Despesa registrada" gera resposta contraditória —
+        # então separamos e só mostramos o fallback se NADA foi registrado.
+        if _looks_like_help_fallback(result_text):
+            fallbacks.append(result_text)
+        else:
+            responses.append(result_text)
 
-    body = "\n\n".join(responses)
+    registered_something = bool(responses)
 
-    # Dica de desfazer
-    if platform == "discord":
+    if registered_something:
+        body = "\n\n".join(responses)
+    else:
+        # Nenhum pedaço virou lançamento válido — mostra UM fallback só
+        # (não repetido por pedaço).
+        body = fallbacks[0] if fallbacks else (
+            "🎙️ Recebi seu áudio, mas não entendi o que registrar.\n"
+            'Tente algo como: "gastei 50 no mercado".'
+        )
+
+    # Dica de desfazer — só faz sentido se algo foi de fato registrado
+    if not registered_something:
+        undo_hint = ""
+    elif platform == "discord":
         undo_hint = "\n\n↩️ Para desfazer, diga: _desfazer_"
     else:
         # No WhatsApp, o botão "↩️ Desfazer" aparece na mensagem — salva pending para o runtime exibi-lo
