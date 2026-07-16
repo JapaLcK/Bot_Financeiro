@@ -22,10 +22,10 @@
   --faint:        rgba(200,210,240,.34);
 
   /* Accent */
-  --accent:     #7c3aed;
-  --accent-soft: rgba(124,58,237,.1);
-  --accent-text: #6d28d9;
-  --blue:       #2563eb;
+  --accent:     #FF2D8E;
+  --accent-soft: rgba(255,45,142,.1);
+  --accent-text: #C7186B;
+  --blue:       #FF2D8E;
   --blue-soft:  rgba(37,99,235,.1);
   --green:      #059669;
   --green-soft: rgba(5,150,105,.1);
@@ -105,9 +105,9 @@ a { color: inherit; text-decoration: none; }
   border-radius: 9px;
   display: grid;
   place-items: center;
-  background: linear-gradient(135deg, #7c3aed, #3b82f6);
+  background: linear-gradient(135deg, #FF2D8E, #C7186B);
   font-size: .95rem;
-  box-shadow: 0 4px 12px rgba(124,58,237,.28);
+  box-shadow: 0 4px 12px rgba(255,45,142,.28);
 }
 
 .top-actions { position: relative; z-index: 2; display: flex; gap: 8px; align-items: center; }
@@ -236,11 +236,11 @@ a { color: inherit; text-decoration: none; }
 }
 .sidebar-item.active .sidebar-icon {
   background: var(--accent-soft);
-  border-color: rgba(124,58,237,.24);
+  border-color: rgba(255,45,142,.24);
 }
 .sidebar-title { display: block; font-size: .84rem; font-weight: 760; color: var(--ink); }
 .sidebar-sub { display: block; font-size: .7rem; color: var(--faint); margin-top: 1px; }
-.sidebar-item.active .sidebar-title { color: #c4b5fd; }
+.sidebar-item.active .sidebar-title { color: #F7D7E3; }
 .badge-soon {
   display: inline-block;
   background: rgba(255,255,255,.07);
@@ -336,8 +336,8 @@ a { color: inherit; text-decoration: none; }
   outline: none;
 }
 .privacy-input:focus {
-  border-color: rgba(124,58,237,.45);
-  box-shadow: 0 0 0 3px rgba(124,58,237,.12);
+  border-color: rgba(255,45,142,.45);
+  box-shadow: 0 0 0 3px rgba(255,45,142,.12);
 }
 
 /* ─── Stats strip ────────────────────────────── */
@@ -441,7 +441,7 @@ a { color: inherit; text-decoration: none; }
   min-height: 44px;
   border-radius: var(--radius-md);
   border: 0;
-  background: linear-gradient(135deg, #7c3aed, #2563eb);
+  background: linear-gradient(135deg, #FF2D8E, #FF2D8E);
   color: #fff;
   font-size: .88rem;
   font-weight: 760;
@@ -449,10 +449,10 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   justify-content: center;
   gap: 8px;
-  box-shadow: 0 4px 14px rgba(124,58,237,.3);
+  box-shadow: 0 4px 14px rgba(255,45,142,.3);
   transition: opacity .15s var(--ease), transform .15s var(--ease), box-shadow .15s var(--ease);
 }
-.btn-connect:hover { opacity: .92; transform: translateY(-1px); box-shadow: 0 7px 20px rgba(124,58,237,.36); }
+.btn-connect:hover { opacity: .92; transform: translateY(-1px); box-shadow: 0 7px 20px rgba(255,45,142,.36); }
 .btn-connect:active { transform: scale(.98); }
 .btn-connect:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
 
@@ -510,7 +510,7 @@ a { color: inherit; text-decoration: none; }
   padding: 10px 13px;
   border-radius: var(--radius-sm);
   background: var(--accent-soft);
-  border: 1px solid rgba(124,58,237,.18);
+  border: 1px solid rgba(255,45,142,.18);
   font-size: .8rem;
   color: var(--accent-text);
   margin-bottom: 10px;
@@ -520,7 +520,7 @@ a { color: inherit; text-decoration: none; }
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  border: 2px solid rgba(124,58,237,.25);
+  border: 2px solid rgba(255,45,142,.25);
   border-top-color: var(--accent);
   animation: spin .65s linear infinite;
   flex-shrink: 0;
@@ -756,8 +756,8 @@ a { color: inherit; text-decoration: none; }
   transition: transform .16s var(--ease-spring);
 }
 .switch input:checked + .switch-slider {
-  background: linear-gradient(135deg, #7c3aed, #2563eb);
-  border-color: rgba(124,58,237,.55);
+  background: linear-gradient(135deg, #FF2D8E, #FF2D8E);
+  border-color: rgba(255,45,142,.55);
 }
 .switch input:checked + .switch-slider::before { transform: translateX(20px); }
 .switch input:disabled + .switch-slider { opacity: .55; cursor: not-allowed; }
@@ -885,7 +885,7 @@ a { color: inherit; text-decoration: none; }
   border: 0;
   padding: 0;
   font-size: .78rem;
-  color: var(--accent, #a78bfa);
+  color: var(--accent, #FF2D8E);
   font-weight: 600;
   cursor: pointer;
 }
@@ -954,8 +954,8 @@ a { color: inherit; text-decoration: none; }
   display: inline-block;
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(124,58,237,.18);
-  color: #c4b5fd;
+  background: rgba(255,45,142,.18);
+  color: #F7D7E3;
   font-size: .68rem;
   font-weight: 700;
   letter-spacing: .04em;

@@ -6,7 +6,7 @@
 <title>Novidades — PigBank</title>
 <meta name="description" content="Veja todas as atualizações e melhorias do PigBank." />
 <link rel="icon" type="image/png" href="/favicon.png" />
-<meta name="theme-color" content="#070b14" />
+<meta name="theme-color" content="#111111" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="PigBank" />
 <meta property="og:title" content="Novidades — PigBank" />
@@ -21,8 +21,8 @@
   --glass-border: rgba(255,255,255,0.13);
   --glass-shadow: 0 8px 32px rgba(0,0,0,0.35);
   --radius:       22px;
-  --green:  #34d399; --red: #f87171; --blue: #60a5fa;
-  --purple: #a78bfa; --yellow: #fbbf24;
+  --green:  #C6F11A; --red: #f87171; --blue: #FF80B8;
+  --purple: #FF2D8E; --yellow: #fbbf24;
   --text:   rgba(255,255,255,0.92);
   --text-2: rgba(255,255,255,0.52);
   --text-3: rgba(255,255,255,0.28);
@@ -32,7 +32,7 @@
 html { scroll-behavior: smooth; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
-  background: #070b14; color: var(--text);
+  background: #111111; color: var(--text);
   min-height: 100vh; overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
 }
@@ -40,10 +40,10 @@ body {
 /* ─── Ambient orbs ── */
 .bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
 .orb { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .38; animation: drift 18s ease-in-out infinite alternate; }
-.orb-1 { width:700px;height:700px;background:radial-gradient(circle,#6d28d9,transparent 70%);top:-250px;left:-200px; }
-.orb-2 { width:500px;height:500px;background:radial-gradient(circle,#0ea5e9,transparent 70%);top:30%;right:-200px;animation-delay:-6s; }
-.orb-3 { width:450px;height:450px;background:radial-gradient(circle,#ec4899,transparent 70%);bottom:-150px;left:20%;animation-delay:-12s;opacity:.22; }
-.orb-4 { width:380px;height:380px;background:radial-gradient(circle,#10b981,transparent 70%);bottom:15%;right:5%;animation-delay:-4s;opacity:.18; }
+.orb-1 { width:700px;height:700px;background:radial-gradient(circle,#C7186B,transparent 70%);top:-250px;left:-200px; }
+.orb-2 { width:500px;height:500px;background:radial-gradient(circle,#FF2D8E,transparent 70%);top:30%;right:-200px;animation-delay:-6s; }
+.orb-3 { width:450px;height:450px;background:radial-gradient(circle,#FF2D8E,transparent 70%);bottom:-150px;left:20%;animation-delay:-12s;opacity:.22; }
+.orb-4 { width:380px;height:380px;background:radial-gradient(circle,#C7186B,transparent 70%);bottom:15%;right:5%;animation-delay:-4s;opacity:.18; }
 @keyframes drift { 0%{transform:translate(0,0) scale(1)} 33%{transform:translate(40px,-30px) scale(1.05)} 66%{transform:translate(-20px,50px) scale(.97)} 100%{transform:translate(30px,20px) scale(1.03)} }
 body::before { content:""; position:fixed; inset:0; z-index:1; pointer-events:none;
   background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E"); opacity:.6; }
@@ -68,9 +68,9 @@ nav {
 .nav-logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
 .logo-icon {
   width: 34px; height: 34px; border-radius: 10px;
-  background: linear-gradient(135deg, #7c3aed, #3b82f6);
+  background: linear-gradient(135deg, #FF2D8E, #C7186B);
   display: flex; align-items: center; justify-content: center; font-size: 1rem;
-  box-shadow: 0 4px 12px rgba(124,58,237,.4);
+  box-shadow: 0 4px 12px rgba(255,45,142,.4);
 }
 .nav-logo span { font-size: 1rem; font-weight: 700; letter-spacing: -.02em; color: var(--text); }
 .nav-links { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
@@ -87,8 +87,8 @@ nav {
 }
 .hero-badge {
   display: inline-flex; align-items: center; gap: 6px;
-  background: rgba(167,139,250,0.12);
-  border: 1px solid rgba(167,139,250,0.25);
+  background: rgba(255,45,142,0.12);
+  border: 1px solid rgba(255,45,142,0.25);
   border-radius: 999px; padding: 5px 14px;
   font-size: .78rem; font-weight: 600; color: var(--purple);
   letter-spacing: .04em; text-transform: uppercase;
@@ -100,7 +100,7 @@ nav {
   margin-bottom: 14px;
 }
 .hero h1 span {
-  background: linear-gradient(135deg, #a78bfa, #60a5fa);
+  background: linear-gradient(135deg, #FF2D8E, #FF80B8);
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   background-clip: text; color: transparent;
 }
@@ -116,7 +116,7 @@ nav {
   top: 8px;
   bottom: 0;
   width: 2px;
-  background: linear-gradient(to bottom, rgba(167,139,250,.4), rgba(96,165,250,.1) 80%, transparent);
+  background: linear-gradient(to bottom, rgba(255,45,142,.4), rgba(255,128,184,.1) 80%, transparent);
   border-radius: 2px;
 }
 
@@ -138,8 +138,8 @@ nav {
   top: 10px;
   width: 18px; height: 18px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #7c3aed, #3b82f6);
-  box-shadow: 0 0 0 4px rgba(124,58,237,.18);
+  background: linear-gradient(135deg, #FF2D8E, #C7186B);
+  box-shadow: 0 0 0 4px rgba(255,45,142,.18);
 }
 
 .release-meta {
@@ -154,8 +154,8 @@ nav {
   font-size: .72rem; font-weight: 700; padding: 3px 10px; border-radius: 999px;
   letter-spacing: .03em; text-transform: uppercase;
 }
-.tag-new { background: rgba(52,211,153,.12); color: var(--green); border: 1px solid rgba(52,211,153,.25); }
-.tag-fix { background: rgba(96,165,250,.12); color: var(--blue);  border: 1px solid rgba(96,165,250,.25); }
+.tag-new { background: rgba(198,241,26,.12); color: var(--green); border: 1px solid rgba(198,241,26,.25); }
+.tag-fix { background: rgba(255,128,184,.12); color: var(--blue);  border: 1px solid rgba(255,128,184,.25); }
 .tag-improve { background: rgba(251,191,36,.12); color: var(--yellow); border: 1px solid rgba(251,191,36,.25); }
 
 .release-card {
@@ -197,7 +197,7 @@ nav {
 }
 .feature-code {
   display: inline-block; margin-top: 4px;
-  background: rgba(124,58,237,.15); border-radius: 6px;
+  background: rgba(255,45,142,.15); border-radius: 6px;
   padding: 2px 8px; color: var(--purple);
   font-family: "SF Mono", "Fira Code", monospace; font-size: .78rem;
 }
@@ -214,13 +214,13 @@ nav {
 .cta-wrap p { color: var(--text-2); font-size: .9rem; margin-bottom: 14px; }
 .cta-btn {
   display: inline-flex; align-items: center; gap: 8px;
-  background: linear-gradient(135deg, #7c3aed, #3b82f6);
+  background: linear-gradient(135deg, #FF2D8E, #C7186B);
   color: #fff; border: none; padding: 13px 28px; border-radius: 14px;
   font-size: .95rem; font-weight: 700; cursor: pointer; text-decoration: none;
-  box-shadow: 0 4px 24px rgba(124,58,237,.35);
+  box-shadow: 0 4px 24px rgba(255,45,142,.35);
   transition: all .2s var(--ease);
 }
-.cta-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(124,58,237,.45); }
+.cta-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(255,45,142,.45); }
 
 /* ─── Footer ── */
 footer {
@@ -304,12 +304,12 @@ footer a:hover { color: var(--text); }
 
     <!-- Release: Maio 2026 — Mais recente -->
     <div class="release">
-      <div class="release-dot" style="background:linear-gradient(135deg,#10b981,#3b82f6);box-shadow:0 0 0 4px rgba(16,185,129,.18);"></div>
+      <div class="release-dot" style="background:linear-gradient(135deg,#A7CE12,#C7186B);box-shadow:0 0 0 4px rgba(198,241,26,.18);"></div>
       <div class="release-meta">
         <span class="release-date">Maio de 2026</span>
         <span class="release-tag tag-new">Novo</span>
         <span class="release-tag tag-improve">Melhoria</span>
-        <span class="release-tag" style="background:rgba(16,185,153,.12);color:#34d399;border:1px solid rgba(52,211,153,.25);">✦ Mais recente</span>
+        <span class="release-tag" style="background:rgba(16,185,153,.12);color:#C6F11A;border:1px solid rgba(198,241,26,.25);">✦ Mais recente</span>
       </div>
       <div class="release-card">
         <div class="release-title">📈 Investimentos, configurações e site mais organizado</div>

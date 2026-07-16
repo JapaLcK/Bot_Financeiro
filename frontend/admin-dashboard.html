@@ -17,19 +17,19 @@
   --soft:      rgba(237,246,255,.38);
   --green:     #22c55e;
   --teal:      #14b8a6;
-  --blue:      #60a5fa;
+  --blue:      #FF80B8;
   --orange:    #fb923c;
   --red:       #f87171;
   --red-deep:  #dc2626;
   --yellow:    #facc15;
-  --purple:    #a78bfa;
+  --purple:    #FF2D8E;
 }
 body {
   font-family: "Segoe UI", system-ui, sans-serif;
   color: var(--text);
   background:
     radial-gradient(circle at top left,  rgba(20,184,166,.16), transparent 28%),
-    radial-gradient(circle at top right, rgba(96,165,250,.12), transparent 32%),
+    radial-gradient(circle at top right, rgba(255,128,184,.12), transparent 32%),
     linear-gradient(180deg, #07121d, #091726 55%, #08111a);
   min-height: 100vh;
 }
@@ -160,7 +160,7 @@ button:disabled { opacity: .6; cursor: wait; }
 .badge-error   { background: rgba(220,38,38,.18);  color: #fca5a5; border: 1px solid rgba(248,113,113,.3); }
 .badge-warning { background: rgba(250,204,21,.12); color: #fde68a; border: 1px solid rgba(250,204,21,.25); }
 .badge-ok      { background: rgba(34,197,94,.1);   color: #86efac; border: 1px solid rgba(34,197,94,.2); }
-.badge-info    { background: rgba(96,165,250,.1);  color: #93c5fd; border: 1px solid rgba(96,165,250,.2); }
+.badge-info    { background: rgba(255,128,184,.1);  color: #93c5fd; border: 1px solid rgba(255,128,184,.2); }
 .badge-muted   { background: rgba(255,255,255,.05); color: var(--muted); }
 
 /* ── Error list ──────────────────────────────────────────────────────── */
@@ -176,7 +176,7 @@ button:disabled { opacity: .6; cursor: wait; }
 .error-item:hover { background: rgba(255,255,255,.055); }
 .error-item.level-error   { border-color: rgba(248,113,113,.18); background: rgba(220,38,38,.06); }
 .error-item.level-warning { border-color: rgba(250,204,21,.15); background: rgba(250,204,21,.04); }
-.error-item.level-info    { border-color: rgba(96,165,250,.12); }
+.error-item.level-info    { border-color: rgba(255,128,184,.12); }
 .error-item-header {
   display: flex; align-items: center; gap: 8px; margin-bottom: 5px; flex-wrap: wrap;
 }
@@ -967,8 +967,8 @@ function renderEmails(stats, rows) {
     const items = [
       { label: '24h enviados',  val: stats.sent_24h   || 0, color: '#4ade80' },
       { label: '24h falhas',    val: stats.failed_24h || 0, color: stats.failed_24h > 0 ? '#f87171' : '#4ade80' },
-      { label: '7d enviados',   val: stats.sent_7d    || 0, color: '#60a5fa' },
-      { label: '30d enviados',  val: stats.sent_30d   || 0, color: '#a78bfa' },
+      { label: '7d enviados',   val: stats.sent_7d    || 0, color: '#FF80B8' },
+      { label: '30d enviados',  val: stats.sent_30d   || 0, color: '#FF2D8E' },
     ];
     bar.innerHTML = items.map(it => `
       <div style="flex:1;background:rgba(255,255,255,.04);border-radius:10px;padding:10px 12px;text-align:center;border:1px solid rgba(255,255,255,.07)">
@@ -1069,7 +1069,7 @@ function renderChart(data) {
       labels,
       datasets: [
         { label:'Cadastros',   data: data.time_series.map(i=>i.signups),      borderColor:'#22c55e', tension:.3, fill:false },
-        { label:'Logins',      data: data.time_series.map(i=>i.logins),       borderColor:'#60a5fa', tension:.3, fill:false },
+        { label:'Logins',      data: data.time_series.map(i=>i.logins),       borderColor:'#FF80B8', tension:.3, fill:false },
         { label:'Ativos',      data: data.time_series.map(i=>i.active_users), borderColor:'#facc15', tension:.3, fill:false },
         { label:'Transações',  data: data.time_series.map(i=>i.transactions), borderColor:'#fb923c', tension:.3, fill:false },
       ]
