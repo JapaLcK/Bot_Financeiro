@@ -1876,7 +1876,7 @@ function _renderBudgetRow(b, idx = 0) {
   const pct = b.pct || 0;
   const fillClass = b.status === "vermelho" ? "red" : (b.status === "amarelo" ? "yellow" : "green");
   const widthPct = Math.min(100, pct);
-  const subColor = b.status === "vermelho" ? "color:#FF4D4D" : "";
+  const subColor = b.status === "vermelho" ? "color:#FF2D2D" : "";
   const dotEmoji = b.status === "vermelho" ? "🔴" : (b.status === "amarelo" ? "🟡" : "🟢");
   let subText = `${pct.toFixed(0)}% — ${_fmtBRL(b.remaining)} restantes`;
   if (b.status === "vermelho") {
@@ -2288,15 +2288,15 @@ function _renderGoalCard(g, idx = 0) {
     const today = new Date();
     const proj = new Date(today.getFullYear(), today.getMonth() + Math.ceil(g.projected_months), 1);
     const projStr = proj.toLocaleDateString("pt-BR", { month: "short", year: "numeric" });
-    alertText = `<div class="goal-deadline" style="color:#FF4D4D">⚠️ Ritmo atual chega só em ${projStr}${g.target_date ? " — prazo era " + deadlineText.replace("Prazo: ", "") : ""}</div>`;
+    alertText = `<div class="goal-deadline" style="color:#FF2D2D">⚠️ Ritmo atual chega só em ${projStr}${g.target_date ? " — prazo era " + deadlineText.replace("Prazo: ", "") : ""}</div>`;
   } else if (g.indicator === "tight") {
     alertText = `<div class="goal-deadline" style="color:#fbbf24">🟡 Ritmo apertado — pode atrasar</div>`;
   } else if (g.indicator === "ahead") {
-    alertText = `<div class="goal-deadline" style="color:#10E37B">🚀 Adiantado — no melhor caminho</div>`;
+    alertText = `<div class="goal-deadline" style="color:#00F078">🚀 Adiantado — no melhor caminho</div>`;
   } else if (g.indicator === "on_track") {
-    alertText = `<div class="goal-deadline" style="color:#10E37B">🟢 No prazo</div>`;
+    alertText = `<div class="goal-deadline" style="color:#00F078">🟢 No prazo</div>`;
   } else if (g.indicator === "achieved") {
-    alertText = `<div class="goal-deadline" style="color:#10E37B">✓ Meta atingida</div>`;
+    alertText = `<div class="goal-deadline" style="color:#00F078">✓ Meta atingida</div>`;
   }
 
   return `
@@ -2962,7 +2962,7 @@ function _renderFixedView(items) {
   upEl.innerHTML = upcoming.length
     ? upcoming.map(x => `
         <div class="tx-row">
-          <div class="tx-icon" style="color:${(x.date - today) / (1000 * 60 * 60 * 24) <= 2 ? '#FF4D4D' : '#fbbf24'}">${_recurringEmoji(x.rec)}</div>
+          <div class="tx-icon" style="color:${(x.date - today) / (1000 * 60 * 60 * 24) <= 2 ? '#FF2D2D' : '#fbbf24'}">${_recurringEmoji(x.rec)}</div>
           <div class="tx-main">
             <div class="tx-desc">${escapeHtmlSafe(x.rec.name)} · ${x.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</div>
             <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.payment_type === "credit_card" ? "Cartão " + escapeHtmlSafe(x.rec.card_name || "?") : "Débito automático"}</div>
@@ -3486,8 +3486,8 @@ function renderAnalyticsIncomeExpense(evolution) {
     data: {
       labels,
       datasets: [
-        { label: "Receita", data: evolution.map(b => b.income),  backgroundColor: "#10E37B", borderRadius: 6 },
-        { label: "Despesa", data: evolution.map(b => b.expense), backgroundColor: "#FF4D4D", borderRadius: 6 },
+        { label: "Receita", data: evolution.map(b => b.income),  backgroundColor: "#00F078", borderRadius: 6 },
+        { label: "Despesa", data: evolution.map(b => b.expense), backgroundColor: "#FF2D2D", borderRadius: 6 },
       ]
     },
     options: {
@@ -3549,7 +3549,7 @@ function renderAnalyticsWeekday(weekday) {
   const data    = weekday.map(w => w.avg);
   const max     = Math.max(...data, 1);
   const colors  = weekday.map(w => {
-    if ([0, 6].includes(w.dow)) return "#FF4D4D"; // dom/sáb
+    if ([0, 6].includes(w.dow)) return "#FF2D2D"; // dom/sáb
     if (w.avg / max > 0.8)       return "#fbbf24";
     return "#FF2D8E";
   });
@@ -4012,7 +4012,7 @@ function renderHistoryStats(s) {
     {
       value: s.despesas_count != null ? s.despesas_count : "—",
       sub: "débito + cartão",
-      color: "#FF4D4D",
+      color: "#FF2D2D",
     },
     {
       value: s.total_count != null ? s.total_count : "—",
@@ -4162,7 +4162,7 @@ function _historyRowHTML(i) {
   if (time) meta.push(time);
   return `
     <div class="tx-row">
-      <div class="tx-icon" style="color:${isReceita ? "#10E37B" : (isCredito ? "#7E5FE6" : "#fbbf24")}">${icon}</div>
+      <div class="tx-icon" style="color:${isReceita ? "#00F078" : (isCredito ? "#7E5FE6" : "#fbbf24")}">${icon}</div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(_truncate(desc, 60))}</div>
         <div class="tx-meta">${escapeHtmlSafe(meta.join(" • "))}</div>
@@ -7095,8 +7095,8 @@ function buildHistoryChart(history) {
         {
           label: "Receita",
           data: incomes,
-          backgroundColor: "rgba(16,227,123,.55)",
-          borderColor: "rgba(16,227,123,1)",
+          backgroundColor: "rgba(0,240,120,.55)",
+          borderColor: "rgba(0,240,120,1)",
           borderWidth: 1.5,
           borderRadius: 5,
           borderSkipped: false
@@ -7104,8 +7104,8 @@ function buildHistoryChart(history) {
         {
           label: "Despesa",
           data: expenses,
-          backgroundColor: "rgba(255,77,77,.55)",
-          borderColor: "rgba(255,77,77,1)",
+          backgroundColor: "rgba(255,45,45,.55)",
+          borderColor: "rgba(255,45,45,1)",
           borderWidth: 1.5,
           borderRadius: 5,
           borderSkipped: false
