@@ -174,8 +174,16 @@ let viewYear = NOW.getFullYear(), viewMonth = NOW.getMonth() + 1;
 
 const PT_MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
                    "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-const CAT_CLR   = ["#f87171","#fb923c","#fbbf24","#a78bfa","#60a5fa","#34d399","#e879f9","#38bdf8","#4ade80","#94a3b8"];
-const PALETTE   = ["#a78bfa","#60a5fa","#34d399","#fbbf24","#f87171","#e879f9","#38bdf8","#4ade80","#fb923c","#94a3b8"];
+// Paleta categórica PigBank — reharmonizada e validada (CVD-safe, dark+light).
+// Ordem = mecanismo de segurança CVD (pior par ΔE ~26). Slots 9-10 = overflow.
+// Canvas não lê CSS var, então hex direto; catColors() escolhe pelo tema.
+const PALETTE_DARK  = ["#FF2D8E","#5FA83C","#2E7FE0","#E84545","#12A892","#BE8200","#7E5FE6","#E85F2A","#22C3D6","#94A3B8"];
+const PALETTE_LIGHT = ["#C7186B","#3E8E23","#1E6FD0","#D42E2E","#0A8F7A","#A66E00","#6544D8","#D24A17","#0E8D9E","#64748B"];
+function catColors() {
+  return document.body.classList.contains("light") ? PALETTE_LIGHT : PALETTE_DARK;
+}
+const CAT_CLR = PALETTE_DARK;   // legado: refs diretas caem no dark; charts usam catColors()
+const PALETTE = PALETTE_DARK;
 const PKT_CLR   = ["var(--purple)","var(--blue)","var(--green)"];
 
 function getFilterText() {
@@ -425,7 +433,7 @@ function navigateTo(view) {
 
 // ── Cartões (view dinâmica conectada ao backend) ──────────────────────
 const CARD_COLOR_OPTIONS = [
-  { key: "purple", label: "Roxo",    sample: "linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)" },
+  { key: "purple", label: "Rosa",    sample: "linear-gradient(135deg,#FF2D8E 0%,#C7186B 100%)" },
   { key: "coral",  label: "Coral",   sample: "linear-gradient(135deg,#ec4899 0%,#db2777 100%)" },
   { key: "gold",   label: "Dourado", sample: "linear-gradient(135deg,#f59e0b 0%,#c2410c 100%)" },
   { key: "green",  label: "Verde",   sample: "linear-gradient(135deg,#10b981 0%,#047857 100%)" },
@@ -654,7 +662,7 @@ function _renderCardColorPicker(selected) {
       onclick="_pickCardColor('${opt.key}')"
       style="width:44px;height:30px;border-radius:8px;border:2px solid ${opt.key === selected ? "#fff" : "transparent"};
              background:${opt.sample};cursor:pointer;
-             box-shadow:${opt.key === selected ? "0 0 0 2px rgba(124,58,237,.5)" : "none"}"
+             box-shadow:${opt.key === selected ? "0 0 0 2px rgba(255,45,142,.5)" : "none"}"
     ></button>
   `).join("");
 }
@@ -1407,8 +1415,8 @@ const CATEGORY_EMOJI_OPTIONS = [
 ];
 
 const CATEGORY_COLOR_OPTIONS = [
-  "#7c3aed","#3b82f6","#f59e0b","#10b981","#ec4899",
-  "#8b5cf6","#06b6d4","#6366f1","#f97316","#a855f7",
+  "#FF2D8E","#5FA83C","#2E7FE0","#E84545","#12A892",
+  "#BE8200","#7E5FE6","#E85F2A","#22C3D6","#94A3B8",
   "#f43f5e","#22c55e","#eab308","#14b8a6","#64748b",
 ];
 
@@ -1528,7 +1536,7 @@ function _renderCategoriesDistribution(categories) {
   dist.innerHTML = monthly.map((m, i) => {
     const meta = metaByName[(m.categoria || "").toLowerCase()] || {};
     const emoji = meta.emoji || "🏷️";
-    const color = meta.color || "#7c3aed";
+    const color = meta.color || "#FF2D8E";
     const pct = total > 0 ? (m.total / total * 100) : 0;
     const fillClass = pct > 30 ? "red" : pct > 15 ? "yellow" : "green";
     return `
@@ -1563,7 +1571,7 @@ function _renderCategoryPill(cat, idx = 0) {
 
 // ── Modal cadastrar/editar categoria ──────────────────────────────────
 
-let _catEditState = { id: null, emoji: "🏷️", color: "#7c3aed", is_system: false };
+let _catEditState = { id: null, emoji: "🏷️", color: "#FF2D8E", is_system: false };
 
 function _ensureCategoryModal() {
   if (document.getElementById("cat-edit-overlay")) return;
@@ -1612,7 +1620,7 @@ function _renderCategoryPickers() {
     return `<button type="button" onclick="_setCatEmoji('${e}')"
       style="width:36px;height:36px;border-radius:8px;font-size:1.2rem;cursor:pointer;
              border:2px solid ${sel ? "#fff" : "transparent"};
-             background:${sel ? "rgba(124,58,237,.25)" : "var(--glass-bg)"};
+             background:${sel ? "rgba(255,45,142,.25)" : "var(--glass-bg)"};
              display:flex;align-items:center;justify-content:center">${e}</button>`;
   }).join("");
   cPick.innerHTML = CATEGORY_COLOR_OPTIONS.map(c => {
@@ -1621,7 +1629,7 @@ function _renderCategoryPickers() {
       style="width:32px;height:32px;border-radius:8px;cursor:pointer;
              border:2px solid ${sel ? "#fff" : "transparent"};
              background:${c};
-             box-shadow:${sel ? "0 0 0 2px rgba(124,58,237,.5)" : "none"}"></button>`;
+             box-shadow:${sel ? "0 0 0 2px rgba(255,45,142,.5)" : "none"}"></button>`;
   }).join("");
 }
 function _setCatEmoji(e) { _catEditState.emoji = e; _renderCategoryPickers(); }
@@ -1633,7 +1641,7 @@ function openCategoryEditModal(category) {
   _catEditState = {
     id: isEdit ? category.id : null,
     emoji: isEdit ? category.emoji : "🏷️",
-    color: isEdit ? category.color : "#7c3aed",
+    color: isEdit ? category.color : "#FF2D8E",
     is_system: isEdit ? !!category.is_system : false,
     is_archived: isEdit ? !!category.is_archived : false,
     original_name: isEdit ? category.name : "",
@@ -1868,7 +1876,7 @@ function _renderBudgetRow(b, idx = 0) {
   const pct = b.pct || 0;
   const fillClass = b.status === "vermelho" ? "red" : (b.status === "amarelo" ? "yellow" : "green");
   const widthPct = Math.min(100, pct);
-  const subColor = b.status === "vermelho" ? "color:#f87171" : "";
+  const subColor = b.status === "vermelho" ? "color:#FF4D4D" : "";
   const dotEmoji = b.status === "vermelho" ? "🔴" : (b.status === "amarelo" ? "🟡" : "🟢");
   let subText = `${pct.toFixed(0)}% — ${_fmtBRL(b.remaining)} restantes`;
   if (b.status === "vermelho") {
@@ -2103,8 +2111,8 @@ const GOAL_EMOJI_OPTIONS = [
   "🎂","👶","🐶","💼","💎","🎮","📸","🎸","🛏️","🏖️",
 ];
 const GOAL_COLOR_OPTIONS = [
-  "#34d399","#3b82f6","#7c3aed","#fbbf24","#ec4899",
-  "#06b6d4","#f97316","#a855f7","#10b981","#ef4444",
+  "#FF2D8E","#5FA83C","#2E7FE0","#E84545","#12A892",
+  "#BE8200","#7E5FE6","#E85F2A","#22C3D6","#94A3B8",
 ];
 
 function _cdiPercentFromRate(rate) {
@@ -2233,7 +2241,7 @@ function _renderGoalsView(goals) {
 
 function _renderPocketOnlyCard(p, idx = 0) {
   const emoji = p.emoji || "🐷";
-  const color = p.color || "#7c3aed";
+  const color = p.color || "#FF2D8E";
   return `
     <div class="goal-card" style="animation-delay:${idx * 80}ms;cursor:pointer" onclick="openPocketHistory('${escapeJsString(p.name)}')">
       <div class="goal-ring">
@@ -2280,15 +2288,15 @@ function _renderGoalCard(g, idx = 0) {
     const today = new Date();
     const proj = new Date(today.getFullYear(), today.getMonth() + Math.ceil(g.projected_months), 1);
     const projStr = proj.toLocaleDateString("pt-BR", { month: "short", year: "numeric" });
-    alertText = `<div class="goal-deadline" style="color:#f87171">⚠️ Ritmo atual chega só em ${projStr}${g.target_date ? " — prazo era " + deadlineText.replace("Prazo: ", "") : ""}</div>`;
+    alertText = `<div class="goal-deadline" style="color:#FF4D4D">⚠️ Ritmo atual chega só em ${projStr}${g.target_date ? " — prazo era " + deadlineText.replace("Prazo: ", "") : ""}</div>`;
   } else if (g.indicator === "tight") {
     alertText = `<div class="goal-deadline" style="color:#fbbf24">🟡 Ritmo apertado — pode atrasar</div>`;
   } else if (g.indicator === "ahead") {
-    alertText = `<div class="goal-deadline" style="color:#34d399">🚀 Adiantado — no melhor caminho</div>`;
+    alertText = `<div class="goal-deadline" style="color:#10E37B">🚀 Adiantado — no melhor caminho</div>`;
   } else if (g.indicator === "on_track") {
-    alertText = `<div class="goal-deadline" style="color:#34d399">🟢 No prazo</div>`;
+    alertText = `<div class="goal-deadline" style="color:#10E37B">🟢 No prazo</div>`;
   } else if (g.indicator === "achieved") {
-    alertText = `<div class="goal-deadline" style="color:#34d399">✓ Meta atingida</div>`;
+    alertText = `<div class="goal-deadline" style="color:#10E37B">✓ Meta atingida</div>`;
   }
 
   return `
@@ -2314,7 +2322,7 @@ function _renderGoalCard(g, idx = 0) {
 
 // ── Modal Meta ────────────────────────────────────────────────────────
 
-let _goalEditState = { pocket_id: null, emoji: "🎯", color: "#7c3aed" };
+let _goalEditState = { pocket_id: null, emoji: "🎯", color: "#FF2D8E" };
 let _goalSaving = false;
 
 function _ensureGoalModal() {
@@ -2404,7 +2412,7 @@ function _renderGoalPickers() {
     return `<button type="button" onclick="_setGoalEmoji('${e}')"
       style="width:36px;height:36px;border-radius:8px;font-size:1.2rem;cursor:pointer;
              border:2px solid ${sel ? "#fff" : "transparent"};
-             background:${sel ? "rgba(124,58,237,.25)" : "var(--glass-bg)"};
+             background:${sel ? "rgba(255,45,142,.25)" : "var(--glass-bg)"};
              display:flex;align-items:center;justify-content:center">${e}</button>`;
   }).join("");
   cPick.innerHTML = GOAL_COLOR_OPTIONS.map(c => {
@@ -2413,7 +2421,7 @@ function _renderGoalPickers() {
       style="width:32px;height:32px;border-radius:8px;cursor:pointer;
              border:2px solid ${sel ? "#fff" : "transparent"};
              background:${c};
-             box-shadow:${sel ? "0 0 0 2px rgba(124,58,237,.5)" : "none"}"></button>`;
+             box-shadow:${sel ? "0 0 0 2px rgba(255,45,142,.5)" : "none"}"></button>`;
   }).join("");
 }
 function _setGoalEmoji(e) { _goalEditState.emoji = e; _renderGoalPickers(); }
@@ -2431,7 +2439,7 @@ function openGoalEditModal(goal) {
   _goalEditState = {
     pocket_id: isEdit ? goal.id : null,
     emoji: isEdit ? (goal.emoji || "🎯") : "🎯",
-    color: isEdit ? (goal.color || "#7c3aed") : "#7c3aed",
+    color: isEdit ? (goal.color || "#FF2D8E") : "#FF2D8E",
     original_name: isEdit ? goal.name : null,
   };
   document.getElementById("goal-edit-title").textContent = isEdit ? "Editar meta" : "Nova meta";
@@ -2954,7 +2962,7 @@ function _renderFixedView(items) {
   upEl.innerHTML = upcoming.length
     ? upcoming.map(x => `
         <div class="tx-row">
-          <div class="tx-icon" style="color:${(x.date - today) / (1000 * 60 * 60 * 24) <= 2 ? '#f87171' : '#fbbf24'}">${_recurringEmoji(x.rec)}</div>
+          <div class="tx-icon" style="color:${(x.date - today) / (1000 * 60 * 60 * 24) <= 2 ? '#FF4D4D' : '#fbbf24'}">${_recurringEmoji(x.rec)}</div>
           <div class="tx-main">
             <div class="tx-desc">${escapeHtmlSafe(x.rec.name)} · ${x.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</div>
             <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.payment_type === "credit_card" ? "Cartão " + escapeHtmlSafe(x.rec.card_name || "?") : "Débito automático"}</div>
@@ -3045,7 +3053,7 @@ function _ensureRecurringModal() {
     <div class="overlay" id="recurring-edit-overlay">
       <div class="modal wide">
         <h3 id="recurring-edit-title">Novo gasto fixo</h3>
-        <p class="msub" style="background:rgba(124,58,237,.1);border:1px solid rgba(124,58,237,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:.78rem">
+        <p class="msub" style="background:rgba(255,45,142,.1);border:1px solid rgba(255,45,142,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:.78rem">
           ⚠️ <strong>Importante:</strong> esse gasto será <strong>lançado automaticamente</strong> todo mês no dia escolhido. Você poderá excluir o lançamento depois se necessário.
         </p>
         <form id="recurring-edit-form" onsubmit="event.preventDefault(); saveRecurring();">
@@ -3419,7 +3427,7 @@ function renderAnalyticsKPIs(k, months) {
     </div>
     <div class="stat-tile">
       <div class="stat-label">Taxa de poupança</div>
-      <div class="stat-value" style="color:#60a5fa">${savings.toFixed(1).replace(".", ",")}%</div>
+      <div class="stat-value" style="color:#FF2D8E">${savings.toFixed(1).replace(".", ",")}%</div>
       <div class="stat-delta ${savingsCls}">${savingsLabel}</div>
     </div>
     <div class="stat-tile">
@@ -3449,10 +3457,10 @@ function renderAnalyticsEvolution(evolution) {
       datasets: [{
         label: "Gastos",
         data: expense,
-        borderColor: "#a78bfa",
+        borderColor: "#FF2D8E",
         backgroundColor: "rgba(167,139,250,.15)",
         fill: true, tension: .35, borderWidth: 2.5,
-        pointBackgroundColor: "#a78bfa",
+        pointBackgroundColor: "#FF2D8E",
         pointBorderColor: t.isLight ? "#fff" : "#0f1422",
         pointBorderWidth: 2, pointRadius: 4,
       }]
@@ -3478,8 +3486,8 @@ function renderAnalyticsIncomeExpense(evolution) {
     data: {
       labels,
       datasets: [
-        { label: "Receita", data: evolution.map(b => b.income),  backgroundColor: "#34d399", borderRadius: 6 },
-        { label: "Despesa", data: evolution.map(b => b.expense), backgroundColor: "#f87171", borderRadius: 6 },
+        { label: "Receita", data: evolution.map(b => b.income),  backgroundColor: "#10E37B", borderRadius: 6 },
+        { label: "Despesa", data: evolution.map(b => b.expense), backgroundColor: "#FF4D4D", borderRadius: 6 },
       ]
     },
     options: {
@@ -3510,10 +3518,11 @@ function renderAnalyticsCategoryDonut(categories) {
   const labels = categories.map(c => c.name);
   const data   = categories.map(c => c.total);
   // Ignora c.color de propósito: a maioria das categorias herda o default roxo
-  // (#7c3aed) do banco, então respeitar c.color resultava em várias fatias
+  // (#FF2D8E) do banco, então respeitar c.color resultava em várias fatias
   // visualmente idênticas no donut. Sequencial pela paleta de 12 garante distinção.
   // Cor customizada do user continua aparecendo na lista de categorias.
-  const colors = categories.map((_, i) => _CATEGORY_PALETTE[i % _CATEGORY_PALETTE.length]);
+  const _pal = catColors();
+  const colors = categories.map((_, i) => _pal[i % _pal.length]);
   _trackAnalyticsChart(el, {
     type: "doughnut",
     data: { labels, datasets: [{
@@ -3540,9 +3549,9 @@ function renderAnalyticsWeekday(weekday) {
   const data    = weekday.map(w => w.avg);
   const max     = Math.max(...data, 1);
   const colors  = weekday.map(w => {
-    if ([0, 6].includes(w.dow)) return "#f87171"; // dom/sáb
+    if ([0, 6].includes(w.dow)) return "#FF4D4D"; // dom/sáb
     if (w.avg / max > 0.8)       return "#fbbf24";
-    return "#60a5fa";
+    return "#FF2D8E";
   });
   _trackAnalyticsChart(el, {
     type: "bar",
@@ -3586,10 +3595,10 @@ function renderAnalyticsComparative(evolution) {
     const label = `${monthNames[m - 1]}/${y}${isCurrent ? " (atual)" : ""}`;
     return `
       <div class="bar-row">
-        <div class="bar-icon" ${isCurrent ? 'style="color:#60a5fa"' : ""}>📅</div>
+        <div class="bar-icon" ${isCurrent ? 'style="color:#FF2D8E"' : ""}>📅</div>
         <div class="bar-body">
           <div class="bar-head">
-            <span class="name" ${isCurrent ? 'style="color:#60a5fa"' : ""}>${escapeHtmlSafe(label)}</span>
+            <span class="name" ${isCurrent ? 'style="color:#FF2D8E"' : ""}>${escapeHtmlSafe(label)}</span>
             <span class="val">${_fmtBRL(b.expense)}</span>
           </div>
           <div class="bar-track"><div class="bar-fill ${isCurrent ? "blue" : cls}" style="width:${pct.toFixed(1)}%"></div></div>
@@ -3826,7 +3835,7 @@ function renderAnalyticsInsights(insights) {
   root.innerHTML = visible.map(i => {
     const color = sevColor[i.severity] || "var(--text-2)";
     const action = i.action_label && i.action_view
-      ? `<button class="mini-action" onclick="_switchToInsightView('${escapeJsString(i.action_view)}')" style="background:rgba(124,58,237,.12);border:none;color:var(--purple,#7c3aed);font-size:.75rem;font-weight:600;padding:5px 10px;border-radius:6px;cursor:pointer;white-space:nowrap">${escapeHtmlSafe(i.action_label)} →</button>`
+      ? `<button class="mini-action" onclick="_switchToInsightView('${escapeJsString(i.action_view)}')" style="background:rgba(255,45,142,.12);border:none;color:var(--purple,#FF2D8E);font-size:.75rem;font-weight:600;padding:5px 10px;border-radius:6px;cursor:pointer;white-space:nowrap">${escapeHtmlSafe(i.action_label)} →</button>`
       : "";
     const closeBtn = `<button title="Dispensar" aria-label="Dispensar" onclick="_dismissInsight('${escapeJsString(i.key)}')" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;border-radius:6px;opacity:.6" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.6">✕</button>`;
     return `
@@ -3861,7 +3870,7 @@ function renderAnalyticsPatterns(patterns) {
 
   // Borda lateral colorida por tom
   const toneColor = {
-    neutral: "var(--purple, #7c3aed)",
+    neutral: "var(--purple, #FF2D8E)",
     warn:    "#f59e0b",
     tip:     "#10b981",
   };
@@ -3993,7 +4002,7 @@ function renderHistoryStats(s) {
     {
       value: s.avg_per_month != null ? Number(s.avg_per_month).toLocaleString("pt-BR", { maximumFractionDigits:1 }) : "—",
       sub: "lançamentos / mês",
-      color: "#60a5fa",
+      color: "#FF2D8E",
     },
     {
       value: s.receitas_count != null ? s.receitas_count : "—",
@@ -4003,7 +4012,7 @@ function renderHistoryStats(s) {
     {
       value: s.despesas_count != null ? s.despesas_count : "—",
       sub: "débito + cartão",
-      color: "#f87171",
+      color: "#FF4D4D",
     },
     {
       value: s.total_count != null ? s.total_count : "—",
@@ -4153,7 +4162,7 @@ function _historyRowHTML(i) {
   if (time) meta.push(time);
   return `
     <div class="tx-row">
-      <div class="tx-icon" style="color:${isReceita ? "#34d399" : (isCredito ? "#a78bfa" : "#fbbf24")}">${icon}</div>
+      <div class="tx-icon" style="color:${isReceita ? "#10E37B" : (isCredito ? "#7E5FE6" : "#fbbf24")}">${icon}</div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(_truncate(desc, 60))}</div>
         <div class="tx-meta">${escapeHtmlSafe(meta.join(" • "))}</div>
@@ -6993,7 +7002,8 @@ function buildCatChart(cats) {
   const el = document.getElementById("chart-cat"); if (!el) return;
   const labels = cats.map(c => c.categoria === "sem categoria" ? "⚠ Sem Cat." : c.categoria);
   const data   = cats.map(c => c.total);
-  const colors = cats.map((_, i) => PALETTE[i % PALETTE.length]);
+  const _pal = catColors();
+  const colors = cats.map((_, i) => _pal[i % _pal.length]);
   if (chartCat) chartCat.destroy();
   chartCat = new Chart(el, {
     type:"doughnut",
@@ -7079,8 +7089,8 @@ function buildHistoryChart(history) {
         {
           label: "Receita",
           data: incomes,
-          backgroundColor: "rgba(52,211,153,.55)",
-          borderColor: "rgba(52,211,153,1)",
+          backgroundColor: "rgba(16,227,123,.55)",
+          borderColor: "rgba(16,227,123,1)",
           borderWidth: 1.5,
           borderRadius: 5,
           borderSkipped: false
@@ -7088,8 +7098,8 @@ function buildHistoryChart(history) {
         {
           label: "Despesa",
           data: expenses,
-          backgroundColor: "rgba(248,113,113,.55)",
-          borderColor: "rgba(248,113,113,1)",
+          backgroundColor: "rgba(255,77,77,.55)",
+          borderColor: "rgba(255,77,77,1)",
           borderWidth: 1.5,
           borderRadius: 5,
           borderSkipped: false
@@ -7195,7 +7205,7 @@ async function loadPiggyInsight() {
     const borderBySeverity = {
       critical: "rgba(239,68,68,.45)",
       warning:  "rgba(245,158,11,.45)",
-      info:     "rgba(124,58,237,.3)",
+      info:     "rgba(255,45,142,.3)",
     };
     card.style.borderColor = borderBySeverity[insight.severity] || borderBySeverity.info;
 
@@ -7279,7 +7289,7 @@ function render(d) {
           return d.expense_categories.map((c,i)=>{
             const hb  = c.budget != null;
             const bw  = hb ? Math.min(c.budget_pct,100) : Math.round(c.total/mx*100);
-            const bc  = hb ? (c.budget_pct>100?"var(--red)":c.budget_pct>85?"var(--yellow)":"var(--green)") : CAT_CLR[i%CAT_CLR.length];
+            const bc  = hb ? (c.budget_pct>100?"var(--red)":c.budget_pct>85?"var(--yellow)":"var(--green)") : catColors()[i%catColors().length];
             const catSafe = c.categoria.replace(/'/g,"\\'");
             return `<div class="cat-row">
               <div class="cat-hdr">
@@ -7638,7 +7648,7 @@ async function requestAffiliatePayout() {
    INIT — valida token antes de conectar
 ═══════════════════════════════════════════════════════════════════════ */
 function _showAccessError() {
-  document.body.style.cssText = "background:#070b14;display:flex;align-items:center;justify-content:center;min-height:100vh;";
+  document.body.style.cssText = "background:#111111;display:flex;align-items:center;justify-content:center;min-height:100vh;";
   document.body.innerHTML = `
     <div style="text-align:center;color:rgba(255,255,255,0.85);font-family:system-ui;max-width:400px;padding:40px">
       <div style="font-size:3rem;margin-bottom:16px">🔒</div>
@@ -7646,8 +7656,8 @@ function _showAccessError() {
       <p style="color:rgba(255,255,255,0.5);line-height:1.6;margin-bottom:24px">
         Solicite um novo link digitando <strong style="color:rgba(255,255,255,0.8)">dashboard</strong> no bot.
       </p>
-      <a href="/" style="display:inline-block;padding:10px 24px;background:rgba(124,58,237,0.5);
-        border:1px solid rgba(124,58,237,0.6);border-radius:12px;color:white;text-decoration:none;font-size:.9rem;">
+      <a href="/" style="display:inline-block;padding:10px 24px;background:rgba(255,45,142,0.5);
+        border:1px solid rgba(255,45,142,0.6);border-radius:12px;color:white;text-decoration:none;font-size:.9rem;">
         ← Ir para a página inicial
       </a>
     </div>`;

@@ -7,7 +7,7 @@
   --glass-border:  rgba(255,255,255,0.13);
   --glass-shadow:  0 8px 32px rgba(0,0,0,0.35);
   --radius:        22px;
-  --green:  #C6F11A; --red:    #f87171; --blue:   #FF80B8;
+  --green:  #10E37B; --neon:   #C6F11A; --red:    #FF4D4D; --blue:   #FF80B8;
   --purple: #FF2D8E; --yellow: #fbbf24;
   --text:   rgba(255,255,255,0.92);
   --text-2: rgba(255,255,255,0.52);
@@ -328,9 +328,9 @@ details.cc-details[open] summary .cc-card {
 .bar-head .val { color:var(--text-2); font-variant-numeric:tabular-nums; }
 .bar-track { height:7px; border-radius:999px; background:rgba(255,255,255,.07); overflow:hidden; }
 .bar-fill { height:100%; border-radius:999px; transition:width .4s ease; }
-.bar-fill.green  { background:linear-gradient(90deg, #A7CE12, #C6F11A); }
+.bar-fill.green  { background:linear-gradient(90deg, #059669, #10E37B); }
 .bar-fill.yellow { background:linear-gradient(90deg, #f59e0b, #fbbf24); }
-.bar-fill.red    { background:linear-gradient(90deg, #ef4444, #f87171); }
+.bar-fill.red    { background:linear-gradient(90deg, #ef4444, #FF4D4D); }
 .bar-fill.blue   { background:linear-gradient(90deg, #C7186B, #FF80B8); }
 .bar-fill.purple { background:linear-gradient(90deg, #FF2D8E, #FF2D8E); }
 .bar-sub { font-size:.7rem; color:var(--text-3); margin-top:4px; }
@@ -746,12 +746,12 @@ details.inst-card[open] .inst-chevron {
   text-transform:uppercase; letter-spacing:.1em;
 }
 .inst-pay-summary { display:flex; gap:14px; font-size:.78rem; }
-.inst-pay-summary .paid-amt { color:#C6F11A; font-weight:600; }
+.inst-pay-summary .paid-amt { color:#10E37B; font-weight:600; }
 .inst-pay-summary .left-amt { color:#fb923c; font-weight:600; }
 .inst-pay-summary .paid-amt::before, .inst-pay-summary .left-amt::before {
   content:""; display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:6px; vertical-align:middle;
 }
-.inst-pay-summary .paid-amt::before { background:#C6F11A; }
+.inst-pay-summary .paid-amt::before { background:#10E37B; }
 .inst-pay-summary .left-amt::before { background:#fb923c; }
 
 .inst-delete-btn {
@@ -809,7 +809,7 @@ body.light .parcel-status-icon.next { color:#FF2D8E; }
   font-size:.62rem; padding:2px 7px; border-radius:5px;
   text-transform:uppercase; letter-spacing:.06em; font-weight:700;
 }
-.parcel-tag.paid { background:rgba(198,241,26,.16); color:#C6F11A; }
+.parcel-tag.paid { background:rgba(16,227,123,.16); color:#10E37B; }
 .parcel-tag.next { background:linear-gradient(135deg, rgba(255,45,142,.25), rgba(199,24,107,.18)); color:#F7D7E3; border:1px solid rgba(255,45,142,.3); }
 body.light .parcel-tag.next { color:#5b21b6; }
 .parcel-val { font-size:.95rem; font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; }
@@ -848,8 +848,8 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .header-right { display:flex;align-items:center;gap:10px;flex-wrap:wrap; }
 #status { display:flex;align-items:center;gap:7px;font-size:.75rem;color:var(--text-2); }
 #dot { width:8px;height:8px;border-radius:50%;background:var(--red);flex-shrink:0;
-  box-shadow:0 0 0 2px rgba(248,113,113,.2);transition:all .3s; }
-#dot.connected  { background:var(--green);box-shadow:0 0 0 2px rgba(198,241,26,.25),0 0 8px rgba(198,241,26,.4); }
+  box-shadow:0 0 0 2px rgba(255,77,77,.2);transition:all .3s; }
+#dot.connected  { background:var(--neon);box-shadow:0 0 0 2px rgba(198,241,26,.25),0 0 8px rgba(198,241,26,.4); }
 #dot.connecting { background:var(--yellow);box-shadow:0 0 0 2px rgba(251,191,36,.25);animation:pulse 1.1s ease-in-out infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
@@ -874,7 +874,7 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   width:8px;
   height:8px;
   border-radius:50%;
-  background:var(--green);
+  background:var(--neon);
   box-shadow:0 0 0 2px rgba(198,241,26,.18),0 0 8px rgba(198,241,26,.36);
   flex-shrink:0;
 }
@@ -946,11 +946,11 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   color:var(--text);
 }
 .user-menu-link.danger {
-  background:rgba(248,113,113,.12);
+  background:rgba(255,77,77,.12);
   color:#fecaca;
 }
 .user-menu-link.danger:hover {
-  background:rgba(248,113,113,.2);
+  background:rgba(255,77,77,.2);
   color:#fff1f2;
 }
 .user-menu-icon { width:18px;text-align:center;flex-shrink:0; }
@@ -961,7 +961,7 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 /* ─── Alert banner ──────────────────────────────────────────────────── */
 #alert-banner { display:none;margin-bottom:16px;backdrop-filter:blur(16px);
   border-radius:14px;padding:12px 18px;font-size:.81rem;color:var(--text-2); }
-#alert-banner.exceeded { background:rgba(248,113,113,.05);border:1px solid rgba(248,113,113,.18); }
+#alert-banner.exceeded { background:rgba(255,77,77,.05);border:1px solid rgba(255,77,77,.18); }
 #alert-banner.warning  { background:rgba(251,191,36,.05); border:1px solid rgba(251,191,36,.18); }
 body.light #alert-banner.exceeded { background:rgba(220,38,38,.04); border-color:rgba(220,38,38,.15); }
 body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-color:rgba(245,158,11,.18); }
@@ -1059,8 +1059,8 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
 
 /* ─── Tags ──────────────────────────────────────────────────────────── */
 .tag { display:inline-block;border-radius:5px;padding:2px 7px;font-size:.65rem;font-weight:600;letter-spacing:.02em;margin-right:4px;vertical-align:middle; }
-.tag.saida,.tag.despesa   { background:rgba(248,113,113,.14);color:var(--red);  border:1px solid rgba(248,113,113,.22); }
-.tag.entrada,.tag.receita { background:rgba(198,241,26,.12); color:var(--green);border:1px solid rgba(198,241,26,.2); }
+.tag.saida,.tag.despesa   { background:rgba(255,77,77,.14);color:var(--red);  border:1px solid rgba(255,77,77,.22); }
+.tag.entrada,.tag.receita { background:rgba(16,227,123,.12); color:var(--green);border:1px solid rgba(16,227,123,.2); }
 .tag.investimento         { background:rgba(255,128,184,.12); color:var(--blue); border:1px solid rgba(255,128,184,.2); }
 .tag.credito              { background:rgba(255,45,142,.14); color:var(--purple);border:1px solid rgba(255,45,142,.28); }
 .tag.deposito_caixinha,
@@ -1088,7 +1088,7 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
   line-height:1;display:inline-flex;align-items:center;justify-content:center;
   padding:0;transition:all .15s var(--ease);flex-shrink:0;
 }
-.pocket-del:hover { background:rgba(248,113,113,.14);color:var(--red); }
+.pocket-del:hover { background:rgba(255,77,77,.14);color:var(--red); }
 .pocket-del.is-blocked { opacity: .35; cursor: not-allowed; }
 .pocket-del.is-blocked:hover { background: transparent; color: var(--text-3); }
 
@@ -1166,7 +1166,7 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
 }
 .pkt-move-btn:hover { background:rgba(255,255,255,.08); }
 .pkt-move-btn.dep:hover { color:var(--green);border-color:rgba(74,222,128,.35); }
-.pkt-move-btn.wd:hover  { color:var(--red);border-color:rgba(248,113,113,.35); }
+.pkt-move-btn.wd:hover  { color:var(--red);border-color:rgba(255,77,77,.35); }
 .pkt-move-form { display:none;flex-direction:column;gap:8px;
   background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:12px;
   padding:14px;margin-bottom:14px;
@@ -1430,8 +1430,8 @@ body.light .chip-val.b { background:linear-gradient(135deg, #C7186B, #FF2D8E); -
 
 /* ─── Toast ─────────────────────────────────────────────────────────── */
 #toast { position:fixed;bottom:26px;right:26px;z-index:999;
-  background:rgba(198,241,26,.14);backdrop-filter:blur(20px);
-  border:1px solid rgba(198,241,26,.3);color:var(--green);
+  background:rgba(16,227,123,.14);backdrop-filter:blur(20px);
+  border:1px solid rgba(16,227,123,.3);color:var(--green);
   padding:9px 18px;border-radius:12px;font-size:.8rem;font-weight:600;
   opacity:0;transform:translateY(10px);transition:opacity .22s,transform .22s;
   pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.3); }
@@ -1544,7 +1544,7 @@ body.light .chip-val.b { background:linear-gradient(135deg, #C7186B, #FF2D8E); -
   display: flex; align-items: center; gap: 8px;
 }
 .upgrade-modal .upg-perk::before {
-  content: "✓"; color: #C6F11A; font-weight: 700;
+  content: "✓"; color: #10E37B; font-weight: 700;
 }
 .btn-upgrade {
   background: linear-gradient(135deg,#FF2D8E,#C7186B);
@@ -1564,11 +1564,11 @@ body.light .chip-val.b { background:linear-gradient(135deg, #C7186B, #FF2D8E); -
   font-size:.78rem;font-weight:650;color:var(--text-2);transition:all .2s var(--ease); }
 .tipo-opt .tipo-icon { font-size:1.2rem;line-height:1; }
 .tipo-opt:hover { background:rgba(255,255,255,.08);color:var(--text); }
-.tipo-opt.active.despesa { background:rgba(248,113,113,.14);border-color:rgba(248,113,113,.45);color:#fecaca; }
-.tipo-opt.active.receita { background:rgba(198,241,26,.14);border-color:rgba(198,241,26,.45);color:#a7f3d0; }
+.tipo-opt.active.despesa { background:rgba(255,77,77,.14);border-color:rgba(255,77,77,.45);color:#fecaca; }
+.tipo-opt.active.receita { background:rgba(16,227,123,.14);border-color:rgba(16,227,123,.45);color:#a7f3d0; }
 .tipo-opt.active.credito { background:rgba(255,45,142,.16);border-color:rgba(255,45,142,.45);color:#ddd6fe; }
-.tipo-opt.active.aporte    { background:rgba(198,241,26,.14);border-color:rgba(198,241,26,.45);color:#a7f3d0; }
-.tipo-opt.active.resgate   { background:rgba(248,113,113,.14);border-color:rgba(248,113,113,.45);color:#fecaca; }
+.tipo-opt.active.aporte    { background:rgba(16,227,123,.14);border-color:rgba(16,227,123,.45);color:#a7f3d0; }
+.tipo-opt.active.resgate   { background:rgba(255,77,77,.14);border-color:rgba(255,77,77,.45);color:#fecaca; }
 .tipo-opt.active.novo-inv  { background:rgba(255,128,184,.16);border-color:rgba(255,128,184,.45);color:#bfdbfe; }
 /* Toggle "valor da parcela" vs "valor total" + preview do parcelamento */
 .valor-mode-toggle { display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:8px; }
@@ -1586,18 +1586,18 @@ body.light .chip-val.b { background:linear-gradient(135deg, #C7186B, #FF2D8E); -
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='rgba(255,255,255,.5)' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat:no-repeat;background-position:right 14px center;padding-right:36px; }
 textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
-.modal-error { background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.28);
+.modal-error { background:rgba(255,77,77,.1);border:1px solid rgba(255,77,77,.28);
   color:#fecaca;border-radius:9px;padding:8px 12px;font-size:.78rem;margin-bottom:12px;display:none; }
 .modal-error.show { display:block; }
 .modal-success-toast {
   position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);
-  background:linear-gradient(135deg,#059669,#C6F11A);color:#fff;padding:11px 20px;
+  background:linear-gradient(135deg,#059669,#10E37B);color:#fff;padding:11px 20px;
   border-radius:12px;font-size:.85rem;font-weight:650;letter-spacing:-.01em;
   box-shadow:0 12px 32px rgba(0,0,0,.4);z-index:900;opacity:0;pointer-events:none;
   transition:all .35s var(--ease);
 }
 .modal-success-toast.show { opacity:1;transform:translateX(-50%) translateY(0); }
-.modal-success-toast.error { background:linear-gradient(135deg,#dc2626,#f87171); }
+.modal-success-toast.error { background:linear-gradient(135deg,#dc2626,#FF4D4D); }
 
 /* ─── Bill modals (detalhe + pagar + comprovante) ─────────────────────── */
 .bill-balance-line {

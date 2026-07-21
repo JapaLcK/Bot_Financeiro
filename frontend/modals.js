@@ -96,11 +96,11 @@
       color: #e2e8f0;
     }
     .pig-modal-btn-primary {
-      background: linear-gradient(135deg, #7c3aed, #6d28d9);
+      background: linear-gradient(135deg, #FF2D8E, #C7186B);
       color: #fff;
     }
     .pig-modal-btn-primary:hover {
-      background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+      background: linear-gradient(135deg, #FF66AB, #FF2D8E);
     }
     .pig-modal-btn-destructive {
       background: linear-gradient(135deg, #dc2626, #b91c1c);
