@@ -3,6 +3,8 @@
 !.env.example
 !.env.*.example
 .venv/
+.DS_Store
+identidade/
 __pycache__/
 *.pyc
 *.log

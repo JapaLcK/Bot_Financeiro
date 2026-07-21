@@ -15,6 +15,18 @@
    --font-brand. Nada mais muda.
    ========================================================================== */
 
+/* --------------------------------------------------------------------------
+   Fonte da marca — Inter self-hostada (fallback da Söhne). woff2 em
+   /fonts/, servidos por rota própria. font-display:swap = sem FOIT.
+   Pesos: 400 corpo · 500/600 UI · 700 subtítulo · 800 logo · 900 display.
+   -------------------------------------------------------------------------- */
+@font-face { font-family:"Inter"; font-style:normal; font-weight:400; font-display:swap; src:url("/fonts/Inter-Regular.woff2") format("woff2"); }
+@font-face { font-family:"Inter"; font-style:normal; font-weight:500; font-display:swap; src:url("/fonts/Inter-Medium.woff2") format("woff2"); }
+@font-face { font-family:"Inter"; font-style:normal; font-weight:600; font-display:swap; src:url("/fonts/Inter-SemiBold.woff2") format("woff2"); }
+@font-face { font-family:"Inter"; font-style:normal; font-weight:700; font-display:swap; src:url("/fonts/Inter-Bold.woff2") format("woff2"); }
+@font-face { font-family:"Inter"; font-style:normal; font-weight:800; font-display:swap; src:url("/fonts/Inter-ExtraBold.woff2") format("woff2"); }
+@font-face { font-family:"Inter"; font-style:normal; font-weight:900; font-display:swap; src:url("/fonts/Inter-Black.woff2") format("woff2"); }
+
 :root {
   /* ----------------------------------------------------------------------
      1. PALETA CRUA — cores oficiais (idênticas em dark e light)

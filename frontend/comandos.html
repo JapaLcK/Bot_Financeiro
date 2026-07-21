@@ -14,10 +14,11 @@
 <meta property="og:description" content="Pergunta do jeito que vier. O Piggy entende português corrido e cuida do resto." />
 <meta property="og:url" content="https://pigbankai.com/comandos" />
 <meta property="og:image" content="https://pigbankai.com/favicon.png" />
+<link rel="stylesheet" href="/brand.css" />
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--glass-bg:rgba(255,255,255,.07);--glass-border:rgba(255,255,255,.13);--text:rgba(255,255,255,.92);--text-2:rgba(255,255,255,.58);--text-3:rgba(255,255,255,.32);--purple:#FF2D8E;--blue:#FF80B8;--green:#C6F11A;--yellow:#fbbf24;--pink:#f472b6;--orange:#fb923c;--ease:cubic-bezier(.4,0,.2,1)}
-body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;background:#111111;color:var(--text);min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+body{font-family:"Inter", -apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;background:#111111;color:var(--text);min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased}
 .bg{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
 .orb{position:absolute;border-radius:50%;filter:blur(90px);opacity:.34;animation:drift 18s ease-in-out infinite alternate}
 .orb-1{width:700px;height:700px;background:radial-gradient(circle,#C7186B,transparent 70%);top:-260px;left:-220px}
@@ -53,8 +54,8 @@ nav{position:sticky;top:16px;z-index:10;display:flex;align-items:center;justify-
 .cmds{display:flex;flex-direction:column;gap:8px}
 .cmd{background:rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:10px 13px;font-family:"SF Mono","JetBrains Mono",Consolas,monospace;font-size:.82rem;color:var(--text);line-height:1.45;cursor:pointer;transition:all .15s var(--ease);position:relative}
 .cmd:hover{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.13)}
-.cmd-note{display:block;margin-top:4px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:var(--text-3);font-size:.75rem;font-style:italic}
-.copied{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:rgba(198,241,26,.18);border:1px solid rgba(198,241,26,.32);color:var(--green);font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:.7rem;font-weight:700;padding:3px 8px;border-radius:6px;opacity:0;transition:opacity .15s var(--ease);pointer-events:none}
+.cmd-note{display:block;margin-top:4px;font-family:"Inter", -apple-system,BlinkMacSystemFont,sans-serif;color:var(--text-3);font-size:.75rem;font-style:italic}
+.copied{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:rgba(198,241,26,.18);border:1px solid rgba(198,241,26,.32);color:var(--green);font-family:"Inter", -apple-system,BlinkMacSystemFont,sans-serif;font-size:.7rem;font-weight:700;padding:3px 8px;border-radius:6px;opacity:0;transition:opacity .15s var(--ease);pointer-events:none}
 .cmd.just-copied .copied{opacity:1}
 .callout{margin:42px 0 0;background:linear-gradient(135deg,rgba(255,45,142,.18),rgba(199,24,107,.18));border:1px solid rgba(255,45,142,.3);border-radius:20px;padding:28px;text-align:center}
 .callout h3{font-size:1.2rem;margin-bottom:8px}

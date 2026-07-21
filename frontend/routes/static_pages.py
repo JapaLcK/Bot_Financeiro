@@ -231,6 +231,65 @@ async def serve_dashboard_mobile_css():
     )
 
 
+@router.get("/brand.css")
+async def serve_brand_css():
+    """Design tokens da marca (paleta, tokens semânticos, @font-face Inter).
+    Cache longo — muda pouco; querystring de versão invalida se precisar."""
+    return FileResponse(
+        FRONTEND_DIR / "brand.css",
+        media_type="text/css",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@router.get("/fonts/{name}")
+async def serve_font(name: str):
+    """Serve as woff2 da Inter self-hostada. Allowlist explícita — sem path
+    traversal, só arquivos conhecidos."""
+    allowed = {
+        "Inter-Regular.woff2", "Inter-Medium.woff2", "Inter-SemiBold.woff2",
+        "Inter-Bold.woff2", "Inter-ExtraBold.woff2", "Inter-Black.woff2",
+    }
+    if name not in allowed:
+        return Response(status_code=404)
+    return FileResponse(
+        FRONTEND_DIR / "fonts" / name,
+        media_type="font/woff2",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+_BRAND_MEDIA = {".png": "image/png", ".webp": "image/webp"}
+
+
+@router.get("/brand/{path:path}")
+async def serve_brand_asset(path: str):
+    """Serve os assets de marca de frontend/brand/ (favicon, avatar, mascote,
+    stickers). Sem path traversal: só nomes [a-z0-9_-], um nível opcional de
+    subpasta (stickers/), extensão png/webp. Cache imutável."""
+    import posixpath
+    import re
+
+    parts = [p for p in path.split("/") if p]
+    if not 1 <= len(parts) <= 2 or any(
+        not re.fullmatch(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9]+)?", p) for p in parts
+    ):
+        return Response(status_code=404)
+
+    base = (FRONTEND_DIR / "brand").resolve()
+    target = (base / posixpath.join(*parts)).resolve()
+    if base not in target.parents or not target.is_file():
+        return Response(status_code=404)
+    media = _BRAND_MEDIA.get(target.suffix.lower())
+    if media is None:
+        return Response(status_code=404)
+    return FileResponse(
+        target,
+        media_type=media,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
 @router.get("/health")
 async def health():
     return {"status": "ok"}
