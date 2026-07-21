@@ -477,7 +477,7 @@ async function loadCardsView(forceFresh = false) {
   // tentando até resolver, em vez de desistir após 500ms.
   if (!USER_ID) {
     stats.innerHTML = "";
-    grid.innerHTML = '<div class="empty" style="grid-column:1/-1;padding:30px;text-align:center;color:var(--text-3)">Conectando à sua conta…</div>';
+    grid.innerHTML = '<div class="empty" style="grid-column:1/-1;padding:30px;text-align:center;color:var(--text-3)"><img class="loading-sticker" src="/brand/stickers/loading.webp" alt="" />Conectando à sua conta…</div>';
     if (!_cardsRetryTimer) {
       _cardsRetryTimer = setInterval(() => {
         if (USER_ID) {
@@ -587,7 +587,7 @@ function renderCardsView(cards) {
   if (cards.length === 0) {
     grid.innerHTML = `
       <div class="empty" style="grid-column:1/-1;padding:50px;text-align:center;color:var(--text-3);background:var(--glass-bg);border:1px dashed var(--glass-border);border-radius:var(--radius)">
-        <div style="font-size:2.5rem;margin-bottom:10px">💳</div>
+        <img class="empty-sticker" src="/brand/stickers/report.webp" alt="" />
         <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Nenhum cartão cadastrado</div>
         <div style="margin-bottom:14px">Cadastre seu primeiro cartão pra acompanhar fatura, limite e parcelamentos.</div>
         <button class="mock-cta" onclick="openCardEditModal()">+ Cadastrar cartão</button>
@@ -1092,11 +1092,11 @@ function renderInstallmentsView(groups) {
 
   if (filtered.length === 0) {
     const msg = isHistory
-      ? { icon: "📂", title: "Nenhum parcelamento concluído ainda", body: "Quando você terminar de pagar um parcelamento, ele aparece aqui." }
-      : { icon: "📦", title: "Nenhum parcelamento ativo", body: "Quando você comprar parcelado no cartão (pelo bot ou WhatsApp), aparecem aqui." };
+      ? { sticker: "chill", title: "Nenhum parcelamento concluído ainda", body: "Quando você terminar de pagar um parcelamento, ele aparece aqui." }
+      : { sticker: "report", title: "Nenhum parcelamento ativo", body: "Quando você comprar parcelado no cartão (pelo bot ou WhatsApp), aparecem aqui." };
     list.innerHTML = `
       <div class="empty" style="padding:50px;text-align:center;color:var(--text-3);background:var(--glass-bg);border:1px dashed var(--glass-border);border-radius:var(--radius)">
-        <div style="font-size:2.5rem;margin-bottom:10px">${msg.icon}</div>
+        <img class="empty-sticker" src="/brand/stickers/${msg.sticker}.webp" alt="" />
         <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">${msg.title}</div>
         <div>${msg.body}</div>
       </div>`;
@@ -1860,7 +1860,7 @@ function renderBudgetsView(payload) {
   if (buds.length === 0) {
     list.innerHTML = `
       <div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">
-        <div style="font-size:2.5rem;margin-bottom:8px">📝</div>
+        <img class="empty-sticker" src="/brand/stickers/report.webp" alt="" />
         <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Nenhum orçamento ainda</div>
         <div style="margin-bottom:14px">Defina um limite mensal por categoria e o Piggy avisa quando você se aproxima.</div>
         <button class="mock-cta" onclick="openBudgetEditModal()">+ Criar orçamento</button>
@@ -2224,7 +2224,7 @@ function _renderGoalsView(goals) {
   if (!list.length) {
     grid.innerHTML = `
       <div class="empty" style="grid-column:1/-1;padding:50px;text-align:center;color:var(--text-3);background:var(--glass-bg);border:1px dashed var(--glass-border);border-radius:var(--radius)">
-        <div style="font-size:2.5rem;margin-bottom:10px">🎯</div>
+        <img class="empty-sticker" src="/brand/stickers/goal.webp" alt="" />
         <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Sem caixinhas ainda</div>
         <div style="margin-bottom:14px">Crie uma caixinha pra guardar dinheiro (com ou sem meta).</div>
         <button class="mock-cta" onclick="openGoalEditModal()">+ Criar</button>
@@ -5118,7 +5118,13 @@ function showToast(msg = "✓ Atualizado") {
   const t = document.getElementById("toast");
   const g = document.getElementById("grid");
   g.classList.remove("grid-flash"); void g.offsetWidth; g.classList.add("grid-flash");
-  t.textContent = msg; t.classList.add("show");
+  if (/^\s*✓/.test(msg)) {
+    t.innerHTML = `<img class="toast-sticker" src="/brand/stickers/ok.webp" alt="" />` +
+                  escapeHtmlSafe(msg.replace(/^\s*✓\s*/, ""));
+  } else {
+    t.textContent = msg;
+  }
+  t.classList.add("show");
   clearTimeout(toastT);
   toastT = setTimeout(() => t.classList.remove("show"), 2000);
 }
@@ -7190,8 +7196,7 @@ async function loadPiggyInsight() {
     // Backend já prioriza por severidade — pega o primeiro
     const insight = list[0];
 
-    document.getElementById("piggy-insight-icon").textContent  = insight.icon || "🐷";
-    document.getElementById("piggy-insight-title").textContent = insight.title || "";
+    document.getElementById("piggy-insight-title").textContent = (insight.icon ? insight.icon + " " : "") + (insight.title || "");
 
     const msgEl = document.getElementById("piggy-insight-message");
     if (insight.message) {
