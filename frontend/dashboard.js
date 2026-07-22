@@ -7254,37 +7254,60 @@ function render(d) {
     ? !d.is_current_month
     : (ry !== NOW.getFullYear() || rm !== NOW.getMonth() + 1);
 
+  const pat = d.balance + ni + np;
+  const pocketsStrip = (d.pockets||[]).length ? `
+    <div class="ov-section-lbl">Caixinhas</div>
+    <div class="ov-pockets">${d.pockets.map((p,i)=>{
+      const emoji = p.emoji || "🐷";
+      const tgt = p.target_amount;
+      const hasGoal = tgt != null && tgt > 0;
+      const pct = hasGoal ? Math.min(100, Math.round((p.balance||0)/tgt*100)) : 0;
+      const barCls = (i%2===1) ? "neon" : "";
+      const jn = escapeJsString(p.name);
+      return `<div class="ov-pk" role="button" tabindex="0" onclick="openPocketHistory('${jn}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openPocketHistory('${jn}');}">
+        <div class="ov-pk-top"><span class="ov-pk-ico">${emoji}</span><span>${esc(p.name)}</span></div>
+        <div class="ov-pk-val"><span data-num="pk_${esc(p.name)}" data-val="${p.balance||0}">${fmt(p.balance||0)}</span></div>
+        ${hasGoal
+          ? `<div class="ov-pk-bar"><i class="${barCls}" style="width:${pct}%"></i></div><div class="ov-pk-goal">${pct}% de ${fmt(tgt)}</div>`
+          : `<div class="ov-pk-goal">Depósitos livres</div>`}
+      </div>`;
+    }).join("")}</div>` : "";
+
+  const svgWallet  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v3m0 4v3a1 1 0 0 1-1 1H5a2 2 0 0 1-2-2V5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>';
+  const svgTrend   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 7 13.5 15.5l-4-4L2 19"/><path d="M16 7h6v6"/></svg>';
+  const svgReceipt = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v20l2-1.5L8 22l2-1.5L12 22l2-1.5L16 22l2-1.5L20 22V2l-2 1.5L16 2l-2 1.5L12 2l-2 1.5L8 2 6 3.5 4 2Z"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>';
+  const svgIncome  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>';
+
   grid.innerHTML = `
-    <div class="card" style="animation-delay:0ms">
-      <h2>Saldo Conta${hist?' <span style="font-size:.58rem;opacity:.6">(atual)</span>':''}</h2>
-      <div class="bignum"><span data-num="balance" data-val="${d.balance}">${fmt(d.balance)}</span></div>
-      <div class="bigsub">saldo disponível</div>
-      <div class="chips">
-        <div class="chip chip-clickable" data-pro-feature="investments" role="button" tabindex="0" title="Abrir investimentos" onclick="setMainView('investments')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setMainView('investments');}">
-          <div class="chip-lbl"><span>Investido</span><span class="chip-arrow">→</span></div>
-          <div class="chip-val b"><span data-num="invest" data-val="${ni}">${fmt(ni)}</span></div>
-        </div>
-        <div class="chip chip-clickable" role="button" tabindex="0" title="Abrir caixinhas e metas" onclick="navigateTo('goals')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();navigateTo('goals');}">
-          <div class="chip-lbl"><span>Caixinhas</span><span class="chip-arrow">→</span></div>
-          <div class="chip-val"><span data-num="pockets" data-val="${np}">${fmt(np)}</span></div>
-        </div>
-        <div class="chip" style="flex-basis:100%"><div class="chip-lbl">Patrimônio Total</div>
-          <div class="chip-val g"><span data-num="pat" data-val="${d.balance+ni+np}">${fmt(d.balance+ni+np)}</span></div></div>
+    <div class="ov-wrap">
+    <div class="ov-stats">
+      <div class="ov-stat" style="animation-delay:0ms">
+        <div class="ov-ico">${svgWallet}</div>
+        <div class="ov-lbl">Saldo atual${hist?' (do mês)':''}</div>
+        <div class="ov-val"><span data-num="balance" data-val="${d.balance}">${fmt(d.balance)}</span></div>
+        <div class="ov-delta">Patrimônio total <b style="color:var(--text-2)"><span data-num="pat" data-val="${pat}">${fmt(pat)}</span></b></div>
+      </div>
+      <div class="ov-stat" style="animation-delay:60ms">
+        <div class="ov-ico neon">${svgTrend}</div>
+        <div class="ov-lbl">${sav>=0?'Sobrou este mês':'Déficit do mês'}</div>
+        <div class="ov-val ${sav>=0?'pos':'neg'}"><span data-num="sav" data-val="${sav}">${fmt(sav)}</span></div>
+        <div class="ov-delta ${rate>=20?'up':rate>=10?'':'down'}">${rate}% da renda poupada</div>
+      </div>
+      <div class="ov-stat" style="animation-delay:120ms">
+        <div class="ov-ico">${svgReceipt}</div>
+        <div class="ov-lbl">Gastos do mês</div>
+        <div class="ov-val"><span data-num="exp" data-val="${exp}">${fmt(exp)}</span></div>
+        <div class="ov-delta">💎 Aportes <b style="color:var(--text-2)"><span data-num="apt" data-val="${apt}">${fmt(apt)}</span></b></div>
+      </div>
+      <div class="ov-stat" style="animation-delay:180ms">
+        <div class="ov-ico neon">${svgIncome}</div>
+        <div class="ov-lbl">Receitas do mês</div>
+        <div class="ov-val"><span data-num="inc" data-val="${inc}">${fmt(inc)}</span></div>
+        <div class="ov-delta up">💚 entradas de ${PT_MONTHS[rm-1]}</div>
       </div>
     </div>
-
-    <div class="card" style="animation-delay:60ms">
-      <h2>Resumo — ${PT_MONTHS[rm-1]} ${ry}</h2>
-      <div class="mrow"><span class="ml">💚 Receita</span><span class="mv g"><span data-num="inc" data-val="${inc}">${fmt(inc)}</span></span></div>
-      <div class="mrow"><span class="ml">🔴 Despesas</span><span class="mv r"><span data-num="exp" data-val="${exp}">${fmt(exp)}</span></span></div>
-      <div class="mrow"><span class="ml">💎 Aportes</span><span class="mv b"><span data-num="apt" data-val="${apt}">${fmt(apt)}</span></span></div>
-      <div class="mrow"><span class="ml">${sav>=0?'✨ Sobrou':'⚠ Déficit'}</span>
-        <span class="mv" style="color:${sav>=0?'var(--green)':'var(--red)'}"><span data-num="sav" data-val="${sav}">${fmt(sav)}</span></span></div>
-      <div style="font-size:.65rem;color:var(--text-3);margin:-4px 0 6px;letter-spacing:.02em">consumo vs receita do mês</div>
-      <div class="mrow"><span class="ml" style="font-size:.7rem;color:var(--text-3)" title="Aportes / Receita — % da renda que virou patrimônio">Taxa de poupança</span>
-        <span class="mv" style="font-size:.95rem;color:${rc}">${rate}%</span></div>
-      <div class="pbar-wrap"><div class="pbar-fill" style="width:${Math.min(Math.max(rate,0),100)}%;background:${rc}"></div></div>
-    </div>
+    ${pocketsStrip}
+    <div class="ov-cards">
 
     <div class="card" style="animation-delay:180ms">
       <h2>Categorias (mês)</h2>
@@ -7395,7 +7418,12 @@ function render(d) {
         `;
       })()}
     </div>
+    </div>
+    </div>
   `;
+
+  const _oh = document.getElementById("overview-heading");
+  if (_oh) _oh.textContent = `Visão geral · ${PT_MONTHS[rm-1]} ${ry}`;
 
   // Show launches section
   document.getElementById("launches-title").style.display = "";
