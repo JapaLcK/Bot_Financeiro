@@ -4,12 +4,24 @@ Etapa 1 do refactor Fase 1 (docs/refactor_plan.md): movidas de
 finance_bot_websocket_custom.py sem mudança de comportamento.
 """
 
-from fastapi import APIRouter
-from fastapi.responses import FileResponse, RedirectResponse, Response
+import asyncio
+import html as _html
 
-from frontend.routes.shared import FRONTEND_DIR, html_file, public_site_url
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse, RedirectResponse, Response
+from pydantic import BaseModel
+
+from frontend.routes.shared import FRONTEND_DIR, html_file, limiter, public_site_url
 
 router = APIRouter()
+
+
+class ContactBody(BaseModel):
+    name: str = ""
+    email: str = ""
+    subject: str = ""
+    message: str = ""
+    website: str = ""  # honeypot: bots preenchem; humanos não veem
 
 
 @router.get("/")
@@ -329,6 +341,54 @@ async def open_whatsapp_bot():
         else f"https://wa.me/?text={text}"
     )
     return RedirectResponse(url, status_code=302)
+
+
+@router.post("/contact")
+@limiter.limit("4/hour")
+async def contact_submit(request: Request, body: ContactBody):
+    """Recebe o formulário de contato do site e envia por e-mail pra equipe
+    (Reply-To = e-mail do usuário, pra responder direto). Honeypot + rate
+    limit contra spam. Substitui o mailto: frágil (que exigia cliente de
+    e-mail configurado no dispositivo)."""
+    # Honeypot: se o campo oculto veio preenchido, é bot — finge sucesso e dropa.
+    if (body.website or "").strip():
+        return {"ok": True}
+
+    name = (body.name or "").strip()[:80]
+    email = (body.email or "").strip()[:120]
+    subject = (body.subject or "").strip()[:120]
+    message = (body.message or "").strip()[:4000]
+
+    if not name or not email or not message:
+        raise HTTPException(status_code=400, detail="Preencha nome, e-mail e mensagem.")
+    if "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(status_code=400, detail="Informe um e-mail válido.")
+
+    from core.services.email_service import send_email
+
+    esc = _html.escape
+    html_body = (
+        f"<p><b>Nome:</b> {esc(name)}</p>"
+        f"<p><b>E-mail:</b> {esc(email)}</p>"
+        f"<p><b>Assunto:</b> {esc(subject) or '(sem assunto)'}</p>"
+        f"<hr><p>{esc(message).replace(chr(10), '<br>')}</p>"
+    )
+    text_body = f"Nome: {name}\nE-mail: {email}\nAssunto: {subject}\n\n{message}"
+
+    ok = await asyncio.to_thread(
+        send_email,
+        "contato@pigbankai.com",
+        f"[Contato site] {subject or 'Sem assunto'} — {name}",
+        html_body,
+        text_body=text_body,
+        headers={"Reply-To": email},
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=502,
+            detail="Não conseguimos enviar agora. Escreva pra contato@pigbankai.com.",
+        )
+    return {"ok": True}
 
 
 @router.get("/health")

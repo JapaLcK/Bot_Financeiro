@@ -281,6 +281,10 @@ img { max-width: 100%; display: block; }
 .contact-item h4 { font-size: .95rem; font-weight: 700; margin-bottom: 2px; }
 .contact-item p, .contact-item a { color: var(--ink-2); font-size: .9rem; }
 .form-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px; }
+.contact-msg { display: none; padding: 11px 14px; border-radius: 10px; font-size: .84rem; margin-bottom: 16px; line-height: 1.45; }
+.contact-msg.show { display: block; }
+.contact-msg.err { background: rgba(255,45,45,.1); border: 1px solid rgba(255,45,45,.3); color: #ffb4b4; }
+.contact-msg.ok { background: rgba(0,240,120,.1); border: 1px solid rgba(0,240,120,.3); color: #93f7c4; }
 .field { margin-bottom: 16px; }
 .field label { display: block; font-size: .78rem; font-weight: 600; color: var(--ink-2); margin-bottom: 7px; }
 .field input, .field textarea, .field select { width: 100%; background: var(--bg-elev); border: 1px solid var(--line-2); border-radius: 12px; padding: 12px 14px; color: var(--ink); font-family: var(--font); font-size: .92rem; outline: none; transition: border-color .15s; }

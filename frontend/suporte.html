@@ -58,6 +58,7 @@
         </div>
 
         <form class="form-card" id="contact-form">
+          <div id="contact-msg" class="contact-msg"></div>
           <div class="field">
             <label for="nome">Nome</label>
             <input type="text" id="nome" placeholder="Seu nome" required />
@@ -74,7 +75,8 @@
             <label for="msg">Mensagem</label>
             <textarea id="msg" placeholder="Como podemos ajudar?" required></textarea>
           </div>
-          <button type="submit" class="btn btn-primary btn-block btn-lg">Enviar mensagem</button>
+          <input type="text" id="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" />
+          <button type="submit" id="contact-btn" class="btn btn-primary btn-block btn-lg">Enviar mensagem</button>
         </form>
       </div>
     </section>
@@ -110,14 +112,33 @@
   </footer>
 
 <script>
-  // Sem backend de formulário: abre o cliente de e-mail com os campos preenchidos.
-  document.getElementById('contact-form').addEventListener('submit', function(e){
+  // Envia via endpoint real /contact (Resend no backend). Sem depender de
+  // cliente de e-mail no dispositivo (o mailto: antigo falhava sem handler).
+  document.getElementById('contact-form').addEventListener('submit', async function(e){
     e.preventDefault();
-    var nome = encodeURIComponent(document.getElementById('nome').value);
-    var email = encodeURIComponent(document.getElementById('email').value);
-    var assunto = encodeURIComponent(document.getElementById('assunto').value);
-    var msg = encodeURIComponent(document.getElementById('msg').value + '\n\n— ' + document.getElementById('nome').value + ' (' + document.getElementById('email').value + ')');
-    window.location.href = 'mailto:contato@pigbankai.com?subject=' + assunto + '&body=' + msg;
+    var box = document.getElementById('contact-msg');
+    var btn = document.getElementById('contact-btn');
+    function show(t, ok){ box.textContent = t; box.className = 'contact-msg show ' + (ok ? 'ok' : 'err'); }
+    var body = {
+      name:    document.getElementById('nome').value.trim(),
+      email:   document.getElementById('email').value.trim(),
+      subject: document.getElementById('assunto').value.trim(),
+      message: document.getElementById('msg').value.trim(),
+      website: document.getElementById('website').value
+    };
+    if (!body.name || !body.email || !body.message) { show('Preencha nome, e-mail e mensagem.', false); return; }
+    var csrf = decodeURIComponent((document.cookie.split('; ').find(function(r){ return r.indexOf('csrf_token=') === 0; }) || '').split('=')[1] || '');
+    var headers = { 'Content-Type': 'application/json' };
+    if (csrf) headers['x-csrf-token'] = csrf;
+    btn.disabled = true; var orig = btn.textContent; btn.textContent = 'Enviando…';
+    try {
+      var res = await fetch('/contact', { method: 'POST', credentials: 'same-origin', headers: headers, body: JSON.stringify(body) });
+      var data = await res.json().catch(function(){ return {}; });
+      if (res.ok) { show('Mensagem enviada! Respondemos no seu e-mail em breve. 🐷', true); e.target.reset(); }
+      else if (res.status === 429) { show('Muitas mensagens em pouco tempo. Tente mais tarde ou escreva pra contato@pigbankai.com.', false); }
+      else { show(data.detail || 'Não foi possível enviar. Escreva pra contato@pigbankai.com.', false); }
+    } catch (err) { show('Erro de conexão. Tente de novo ou escreva pra contato@pigbankai.com.', false); }
+    finally { btn.disabled = false; btn.textContent = orig; }
   });
 </script>
 </body>
