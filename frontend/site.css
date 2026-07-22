@@ -140,16 +140,20 @@ img { max-width: 100%; display: block; }
 
 /* ─── Footer ────────────────────────────────────────────────────────── */
 .footer { border-top: 1px solid var(--line); margin-top: 40px; padding: 46px 0 40px; }
-.footer-inner { display: flex; flex-wrap: wrap; gap: 40px; justify-content: space-between; }
-.footer-brand { max-width: 280px; }
+.footer-inner { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 40px; align-items: start; }
+.footer-brand { max-width: 300px; }
 .footer-brand .nav-logo { margin-bottom: 12px; }
 .footer-brand p { color: var(--ink-3); font-size: .86rem; line-height: 1.6; }
-.footer-cols { display: flex; gap: 64px; flex-wrap: wrap; }
+.footer-cols { display: contents; }
 .footer-col { display: flex; flex-direction: column; gap: 10px; }
 .footer-col .footer-title { color: var(--ink); font-size: .72rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 4px; }
 .footer-col a { color: var(--ink-2); font-size: .86rem; }
 .footer-col a:hover { color: var(--ink); }
 .footer-copy { text-align: center; color: var(--ink-3); font-size: .8rem; margin-top: 36px; }
+@media (max-width: 760px) {
+  .footer-inner { grid-template-columns: 1fr 1fr; gap: 30px; }
+  .footer-brand { grid-column: 1 / -1; max-width: none; }
+}
 
 /* ─── Landing: hero ─────────────────────────────────────────────────── */
 .hero-grid {
