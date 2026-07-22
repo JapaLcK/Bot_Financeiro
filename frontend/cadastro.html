@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Criar conta — PigBank</title>
+<meta name="description" content="Crie sua conta PigBank e comece a organizar sua vida financeira no WhatsApp." />
+<link rel="icon" type="image/png" href="/favicon.png" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+<meta name="theme-color" content="#0c0c0d" />
+<link rel="stylesheet" href="/brand.css" />
+<link rel="stylesheet" href="/site.css" />
+<style>
+  .auth-error { display: none; background: rgba(255,45,45,.1); border: 1px solid rgba(255,45,45,.3); color: #ffb4b4; padding: 10px 13px; border-radius: 10px; font-size: .82rem; margin-bottom: 14px; line-height: 1.4; }
+  .auth-error.show { display: block; }
+  .auth-error.ok { background: rgba(0,240,120,.1); border-color: rgba(0,240,120,.3); color: #93f7c4; }
+  .field .hint { font-size: .74rem; color: var(--ink-3); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="glow"></div>
+
+  <nav class="nav">
+    <a class="nav-logo" href="/"><img class="logo-badge" src="/brand/avatar.webp" alt="" /><span>PigBank</span></a>
+    <div class="nav-links">
+      <a href="/funcionalidades">Funcionalidades</a>
+      <a href="/como-funciona">Como funciona</a>
+      <a href="/precos">Preços</a>
+      <a href="/changelog">Blog</a>
+    </div>
+    <div class="nav-right">
+      <a class="link-entrar" href="/login">Entrar</a>
+    </div>
+  </nav>
+
+  <div class="wrap auth-wrap">
+    <div class="auth-card">
+      <div class="auth-logo"><img src="/brand/avatar.webp" alt="" /><span>PigBank</span></div>
+
+      <!-- Passo 1: cadastro -->
+      <form id="form-register" onsubmit="doRegister(event)">
+        <h1>Crie sua conta</h1>
+        <p class="auth-sub">Comece sua jornada financeira agora.</p>
+        <div id="reg-error" class="auth-error"></div>
+        <div class="field">
+          <label for="reg-name">Nome completo</label>
+          <input type="text" id="reg-name" placeholder="Seu nome completo" autocomplete="name" required />
+        </div>
+        <div class="field">
+          <label for="reg-email">E-mail</label>
+          <input type="email" id="reg-email" placeholder="seu@email.com" autocomplete="email" required />
+        </div>
+        <div class="field">
+          <label for="reg-phone">WhatsApp</label>
+          <input type="tel" id="reg-phone" placeholder="(11) 99999-9999" autocomplete="tel" required />
+          <div class="hint">Use o mesmo número com que você vai falar com a Piggy.</div>
+        </div>
+        <div class="field">
+          <label for="reg-password">Senha</label>
+          <input type="password" id="reg-password" placeholder="Mínimo 8 caracteres" autocomplete="new-password" required />
+        </div>
+        <div class="field">
+          <label for="reg-confirm">Confirmar senha</label>
+          <input type="password" id="reg-confirm" placeholder="Confirme sua senha" autocomplete="new-password" required />
+        </div>
+        <label class="checkbox-row">
+          <input type="checkbox" id="terms" required />
+          <span>Eu aceito os <a href="/termos" style="color:var(--pink)">Termos de Uso</a> e a <a href="/privacy" style="color:var(--pink)">Política de Privacidade</a>.</span>
+        </label>
+        <button type="submit" id="btn-register" class="btn btn-primary btn-block btn-lg">Criar conta</button>
+
+        <div class="auth-divider">ou cadastre-se com</div>
+        <div class="social-btns">
+          <a class="social-btn" href="/auth/google/start">
+            <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38z"/></svg>
+            Continuar com Google
+          </a>
+        </div>
+        <p class="auth-alt">Já tem uma conta? <a href="/login">Entrar</a></p>
+      </form>
+
+      <!-- Passo 2: verificação -->
+      <form id="form-verify" onsubmit="doVerify(event)" style="display:none">
+        <h1>Confirme seu e-mail</h1>
+        <p class="auth-sub">Enviamos um código de 6 dígitos para <b id="verify-email-display"></b>.</p>
+        <div id="verify-error" class="auth-error"></div>
+        <div class="field">
+          <label for="verify-code">Código de verificação</label>
+          <input type="text" id="verify-code" inputmode="numeric" maxlength="6" placeholder="000000" style="letter-spacing:.4em;text-align:center;font-size:1.2rem" />
+        </div>
+        <button type="submit" id="btn-verify" class="btn btn-primary btn-block btn-lg">Confirmar</button>
+        <p class="auth-alt"><a href="#" onclick="resendCode(event)">Reenviar código</a> · <a href="#" onclick="backToRegister(event)">Voltar</a></p>
+      </form>
+    </div>
+  </div>
+
+<script>
+  function getCookie(n){return document.cookie.split('; ').find(r=>r.startsWith(n+'='))?.split('=')[1]||''}
+  function csrfHeaders(e){e=e||{};var c=decodeURIComponent(getCookie('csrf_token')||'');if(c)e['X-CSRF-Token']=c;return e}
+  async function payload(r){var t=await r.text();if(!t)return{};try{return JSON.parse(t)}catch(_){return{detail:t}}}
+  function goDash(u){u=u||'/home';if(u.indexOf('DASHBOARD_URL=')===0)u=u.slice(14);if(u.indexOf('http')!==0)u=location.origin+'/'+u.replace(/^\//,'');location.replace(u)}
+  function err(id,m,ok){var e=document.getElementById(id);e.textContent=m;e.classList.toggle('ok',!!ok);e.classList.add('show')}
+  function clrErr(){['reg-error','verify-error'].forEach(function(i){var e=document.getElementById(i);if(e){e.classList.remove('show','ok');e.textContent=''}})}
+
+  var _email='', _phone='';
+
+  async function doRegister(ev){ev.preventDefault();clrErr();
+    var name=document.getElementById('reg-name').value.trim(),
+        email=document.getElementById('reg-email').value.trim(),
+        phone=document.getElementById('reg-phone').value.trim(),
+        pass=document.getElementById('reg-password').value,
+        conf=document.getElementById('reg-confirm').value;
+    if(!name||name.length<2)return err('reg-error','Informe seu nome (mínimo 2 caracteres).');
+    if(!email)return err('reg-error','Informe o e-mail.');
+    if(!phone)return err('reg-error','Informe seu número de WhatsApp.');
+    if(pass.length<8)return err('reg-error','A senha deve ter pelo menos 8 caracteres.');
+    if(pass!==conf)return err('reg-error','As senhas não coincidem.');
+    if(!document.getElementById('terms').checked)return err('reg-error','Aceite os termos para continuar.');
+    var b=document.getElementById('btn-register');b.disabled=true;b.textContent='Enviando código…';
+    try{
+      var res=await fetch('/auth/register',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({email:email,password:pass,phone:phone,name:name})});
+      var d=await payload(res);
+      if(!res.ok){err('reg-error',d.detail||'Erro ao enviar código.');return}
+      _email=email;_phone=phone;
+      document.getElementById('form-register').style.display='none';
+      document.getElementById('verify-email-display').textContent=email;
+      document.getElementById('form-verify').style.display='';
+      document.getElementById('verify-code').focus();
+    }catch(e){err('reg-error','Erro de conexão. Tente novamente.')}
+    finally{b.disabled=false;b.textContent='Criar conta'}
+  }
+
+  async function doVerify(ev){ev.preventDefault();clrErr();
+    var code=document.getElementById('verify-code').value.trim();
+    if(code.length!==6)return err('verify-error','Digite os 6 dígitos do código.');
+    var b=document.getElementById('btn-verify');b.disabled=true;b.textContent='Verificando…';
+    try{
+      var res=await fetch('/auth/verify-email',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({email:_email,code:code})});
+      var d=await payload(res);
+      if(!res.ok){err('verify-error',d.detail||'Código inválido.');return}
+      goDash(d.dashboard_url);
+    }catch(e){err('verify-error','Erro de conexão. Tente novamente.')}
+    finally{b.disabled=false;b.textContent='Confirmar'}
+  }
+
+  function backToRegister(ev){ev.preventDefault();document.getElementById('form-verify').style.display='none';document.getElementById('form-register').style.display='';clrErr()}
+  async function resendCode(ev){ev.preventDefault();if(!_email)return;
+    var pass=document.getElementById('reg-password').value;
+    try{await fetch('/auth/register',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({email:_email,password:pass,phone:_phone})})}catch(e){}
+    err('verify-error','Novo código enviado!',true);
+  }
+</script>
+</body>
+</html>

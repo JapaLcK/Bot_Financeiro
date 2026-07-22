@@ -4,42 +4,233 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Funcionalidades — PigBank</title>
-<meta name="description" content="Conheça as funcionalidades do PigBank: registros por mensagem, dashboard, cartões, caixinhas, investimentos e relatórios financeiros." />
+<meta name="description" content="Conheça os recursos do PigBank: registro por conversa, categorização automática, caixinhas, cartões, alertas e segurança — tudo no WhatsApp." />
 <link rel="canonical" href="https://pigbankai.com/funcionalidades" />
 <link rel="icon" type="image/png" href="/favicon.png" />
-<meta name="theme-color" content="#111111" />
-<meta property="og:type" content="website" />
-<meta property="og:site_name" content="PigBank" />
-<meta property="og:title" content="Funcionalidades — PigBank" />
-<meta property="og:description" content="Tudo que o PigBank faz para simplificar seu controle financeiro." />
-<meta property="og:url" content="https://pigbankai.com/funcionalidades" />
-<meta property="og:image" content="https://pigbankai.com/favicon.png" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+<meta name="theme-color" content="#0c0c0d" />
 <link rel="stylesheet" href="/brand.css" />
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}:root{--glass-bg:rgba(255,255,255,.07);--glass-border:rgba(255,255,255,.13);--text:rgba(255,255,255,.92);--text-2:rgba(255,255,255,.58);--text-3:rgba(255,255,255,.32);--purple:#FF2D8E;--blue:#FF80B8;--green:#C6F11A;--yellow:#fbbf24;--ease:cubic-bezier(.4,0,.2,1)}body{font-family:"Inter", -apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;background:#111111;color:var(--text);min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased}.bg{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}.orb{position:absolute;border-radius:50%;filter:blur(90px);opacity:.34;animation:drift 18s ease-in-out infinite alternate}.orb-1{width:700px;height:700px;background:radial-gradient(circle,#C7186B,transparent 70%);top:-260px;left:-220px}.orb-2{width:520px;height:520px;background:radial-gradient(circle,#FF2D8E,transparent 70%);top:28%;right:-220px;animation-delay:-6s}.orb-3{width:420px;height:420px;background:radial-gradient(circle,#C7186B,transparent 70%);bottom:-130px;left:18%;animation-delay:-12s;opacity:.2}@keyframes drift{0%{transform:translate(0,0) scale(1)}50%{transform:translate(34px,-28px) scale(1.04)}100%{transform:translate(-18px,42px) scale(.98)}}.page{position:relative;z-index:1;max-width:1030px;margin:0 auto;padding:0 24px 90px}nav{position:sticky;top:16px;z-index:10;display:flex;align-items:center;justify-content:space-between;gap:18px;margin:16px 0 0;background:rgba(255,255,255,.06);backdrop-filter:blur(32px) saturate(180%);border:1px solid var(--glass-border);border-radius:18px;padding:12px 20px;box-shadow:0 4px 24px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.1)}.nav-logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text)}.logo-icon{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#FF2D8E,#C7186B);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(255,45,142,.4)}.nav-logo span{font-size:1rem;font-weight:750}.nav-links{display:flex;align-items:center;gap:16px;flex-wrap:wrap}.nav-links a{color:var(--text-2);font-size:.78rem;font-weight:650;text-decoration:none}.nav-links a:hover,.nav-links a.active{color:var(--text)}.hero{padding:88px 0 54px;text-align:center}.eyebrow{display:inline-flex;background:rgba(255,45,142,.13);border:1px solid rgba(255,45,142,.28);border-radius:999px;padding:6px 14px;color:var(--purple);font-size:.74rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;margin-bottom:22px}.hero h1{font-size:clamp(2.4rem,6vw,4.1rem);line-height:1.06;letter-spacing:-.03em;margin-bottom:20px}.grad{background:linear-gradient(135deg,#FF2D8E,#FF7AB8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}.hero p{max-width:710px;margin:0 auto;color:var(--text-2);font-size:1.08rem;line-height:1.7}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin:22px 0 50px}.card{background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:18px;padding:24px;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}.icon{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:16px;background:rgba(255,45,142,.12);border:1px solid rgba(255,45,142,.22)}.card:nth-child(2n) .icon{background:rgba(255,128,184,.12);border-color:rgba(255,128,184,.22)}.card:nth-child(3n) .icon{background:rgba(198,241,26,.12);border-color:rgba(198,241,26,.22)}.card h2{font-size:1rem;margin-bottom:9px}.card p{color:var(--text-2);font-size:.9rem;line-height:1.65}.wide{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:center;margin:20px 0 52px}.panel{background:rgba(255,255,255,.055);border:1px solid var(--glass-border);border-radius:20px;padding:28px}.panel h2{font-size:1.45rem;letter-spacing:-.02em;margin-bottom:12px}.panel p,.panel li{color:var(--text-2);line-height:1.7;font-size:.92rem}.panel ul{padding-left:18px}.btn{display:inline-flex;margin-top:20px;color:#fff;background:linear-gradient(135deg,#FF2D8E,#C7186B);border-radius:14px;padding:13px 24px;font-weight:750;text-decoration:none;box-shadow:0 6px 24px rgba(255,45,142,.38)}footer{border-top:1px solid rgba(255,255,255,.08);padding-top:28px;color:var(--text-3);font-size:.78rem}.footer-copy{text-align:center;margin-bottom:18px}.footer-links{display:grid;grid-template-columns:max-content max-content max-content;justify-content:center;align-items:start;gap:72px;max-width:100%;margin:0 auto}.footer-col{display:flex;flex-direction:column;gap:8px;text-align:left}.footer-title{color:var(--text);font-size:.72rem;font-weight:850;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}.footer-col-left{justify-self:start}.footer-col-center{justify-self:start}.footer-col-right{justify-self:start}.footer-links a{color:var(--text-2);text-decoration:none}.footer-links a:hover{color:var(--text)}@media(max-width:760px){nav{flex-wrap:wrap}.nav-links{width:100%;justify-content:center}.wide{grid-template-columns:1fr}.hero{padding:66px 0 40px}.page{padding-inline:18px}}
-@media(max-width:760px){.footer-links{grid-template-columns:1fr;gap:18px}.footer-col,.footer-col-left,.footer-col-center,.footer-col-right{justify-self:center;text-align:left}}
-</style>
+<link rel="stylesheet" href="/site.css" />
 </head>
 <body>
-<div class="bg"><div class="orb orb-1"></div><div class="orb orb-2"></div><div class="orb orb-3"></div></div>
-<div class="page">
-  <nav><a class="nav-logo" href="/"><div class="logo-icon">🐷</div><span>PigBank</span></a><div class="nav-links"><a href="/whatsapp">WhatsApp</a><a class="active" href="/funcionalidades">Funcionalidades</a><a href="/como-funciona">Como funciona</a><a href="/comandos">O que pedir</a><a href="/precos">Preços</a><a href="/changelog">Novidades</a><a href="/suporte">Suporte</a></div></nav>
-  <main>
-    <section class="hero"><div class="eyebrow">Funcionalidades</div><h1>Um controle financeiro que <span class="grad">entende sua rotina</span></h1><p>O PigBank junta conversa, dashboard e automação para deixar seus registros financeiros mais rápidos e fáceis de acompanhar.</p></section>
-    <section class="grid" aria-label="Lista de funcionalidades">
-      <article class="card"><div class="icon">💬</div><h2>Registro por mensagem</h2><p>Gastos, receitas, transferências e observações entram por linguagem natural no WhatsApp ou Discord.</p></article>
-      <article class="card"><div class="icon">📊</div><h2>Dashboard em tempo real</h2><p>Veja saldo, histórico, categorias, cartões e relatórios em uma tela visual conectada aos seus registros.</p></article>
-      <article class="card"><div class="icon">💳</div><h2>Cartão de crédito</h2><p>Acompanhe compras no crédito, faturas, parcelas e datas importantes para evitar sustos.</p></article>
-      <article class="card"><div class="icon">🏦</div><h2>Caixinhas</h2><p>Organize dinheiro por objetivo e acompanhe reservas separadas do saldo principal.</p></article>
-      <article class="card"><div class="icon">📈</div><h2>Investimentos</h2><p>Cadastre aplicações e acompanhe rendimento com referência ao CDI direto no dashboard.</p></article>
-      <article class="card"><div class="icon">🤖</div><h2>Categorização inteligente</h2><p>O sistema aprende padrões e ajuda a classificar transações com menos trabalho manual.</p></article>
+<div class="glow"></div>
+
+  <nav class="nav">
+    <a class="nav-logo" href="/"><img class="logo-badge" src="/brand/avatar.webp" alt="" /><span>PigBank</span></a>
+    <div class="nav-links">
+      <a href="/funcionalidades" class="active">Funcionalidades</a>
+      <a href="/como-funciona">Como funciona</a>
+      <a href="/precos">Preços</a>
+      <a href="/changelog">Blog</a>
+    </div>
+    <div class="nav-right">
+      <a class="link-entrar" href="/login">Entrar</a>
+      <a class="btn btn-primary" href="/cadastro">Começar agora</a>
+    </div>
+  </nav>
+
+  <div class="wrap">
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Recursos que fazem<br>a <span class="grad">diferença</span></h2>
+        <p>Tudo que você precisa pra organizar sua vida financeira — sem planilha, sem app pra baixar, direto no WhatsApp.</p>
+      </div>
+
+      <div class="grid-3">
+        <div class="card feature-card">
+          <div class="icon-box">💬</div>
+          <h3>Registro por conversa</h3>
+          <p>Fale como você fala. A IA entende, categoriza e registra o gasto na hora — em segundos.</p>
+        </div>
+        <div class="card feature-card">
+          <div class="icon-box neon">🏷️</div>
+          <h3>Categorização automática</h3>
+          <p>Cada gasto cai na categoria certa sozinho. Você não precisa marcar nada manualmente.</p>
+        </div>
+        <div class="card feature-card">
+          <div class="icon-box">🐷</div>
+          <h3>Caixinhas & metas</h3>
+          <p>Separe dinheiro por objetivo e acompanhe o progresso de cada meta que você criar.</p>
+        </div>
+        <div class="card feature-card">
+          <div class="icon-box neon">💳</div>
+          <h3>Cartões & faturas</h3>
+          <p>Limite, fatura aberta e parcelamentos de todos os seus cartões num lugar só.</p>
+        </div>
+        <div class="card feature-card">
+          <div class="icon-box">🔔</div>
+          <h3>Alertas inteligentes</h3>
+          <p>A Piggy te avisa quando um gasto foge do padrão ou o orçamento começa a apertar.</p>
+        </div>
+        <div class="card feature-card">
+          <div class="icon-box neon">🔒</div>
+          <h3>Segurança & privacidade</h3>
+          <p>Seus dados sensíveis são cifrados. Você fica no controle das suas informações, sempre.</p>
+        </div>
+      </div>
     </section>
-    <section class="wide">
-      <div class="panel"><h2>Feito para uso diário</h2><p>A ideia é reduzir atrito: você registra na hora em que lembra e consulta quando precisa. O PigBank organiza o restante.</p><a class="btn" href="/#auth">Começar grátis</a></div>
-      <div class="panel"><h2>Também no dashboard</h2><ul><li>Resumo mensal por categoria</li><li>Histórico de lançamentos</li><li>Cartões, caixinhas e investimentos</li><li>Configurações e preferências da conta</li></ul></div>
+
+    <section class="tech-split">
+      <div class="tech-copy">
+        <div class="eyebrow">Tecnologia</div>
+        <h2>A inteligência que<br><span class="grad">facilita sua vida</span></h2>
+        <ul class="tech-list">
+          <li><span class="tick">✓</span> IA que entende português do dia a dia</li>
+          <li><span class="tick">✓</span> Categorização que aprende com você</li>
+          <li><span class="tick">✓</span> Dashboard atualizado em tempo real</li>
+          <li><span class="tick">✓</span> Tudo no WhatsApp — zero apps pra baixar</li>
+        </ul>
+        <a class="btn btn-primary btn-lg" href="/cadastro">Começar agora →</a>
+      </div>
+      <div class="tech-visual">
+        <div class="hologram" aria-label="Cubo AI holográfico em wireframe">
+          <div class="floating">
+            <svg viewBox="0 0 800 800" role="img" aria-labelledby="holoTitle holoDesc">
+              <title id="holoTitle">Cubo AI holográfico com texto em relevo</title>
+              <desc id="holoDesc">Cubo isométrico em wireframe rosa neon, com letras AI em perspectiva e extrusão tridimensional sobre a face superior.</desc>
+
+              <defs>
+                <linearGradient id="edgeGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#ff2d75" /><stop offset="52%" stop-color="#ec1758" /><stop offset="100%" stop-color="#b10c42" />
+                </linearGradient>
+                <linearGradient id="hotGradient" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#ff86b1" /><stop offset="28%" stop-color="#ff2d75" /><stop offset="100%" stop-color="#ec1758" />
+                </linearGradient>
+                <linearGradient id="aiGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#ff79aa" /><stop offset="38%" stop-color="#ff2d75" /><stop offset="100%" stop-color="#e31455" />
+                </linearGradient>
+                <filter id="neonGlow" x="-100%" y="-100%" width="300%" height="300%">
+                  <feGaussianBlur stdDeviation="3.5" result="a" /><feGaussianBlur stdDeviation="8.5" result="b" />
+                  <feMerge><feMergeNode in="b" /><feMergeNode in="a" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+                <filter id="softGlow" x="-100%" y="-100%" width="300%" height="300%">
+                  <feGaussianBlur stdDeviation="2.5" result="a" /><feMerge><feMergeNode in="a" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+                <filter id="nodeGlow" x="-200%" y="-200%" width="500%" height="500%">
+                  <feGaussianBlur stdDeviation="4" result="a" /><feGaussianBlur stdDeviation="8" result="b" />
+                  <feMerge><feMergeNode in="b" /><feMergeNode in="a" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+                <filter id="textGlow" x="-100%" y="-100%" width="300%" height="300%">
+                  <feGaussianBlur stdDeviation="4" result="a" /><feGaussianBlur stdDeviation="12" result="b" />
+                  <feMerge><feMergeNode in="b" /><feMergeNode in="a" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+                <filter id="particleGlow" x="-250%" y="-250%" width="600%" height="600%">
+                  <feGaussianBlur stdDeviation="2.2" result="a" /><feMerge><feMergeNode in="a" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+                <clipPath id="topClip"><polygon points="400,148 648,292 400,436 152,292" /></clipPath>
+              </defs>
+
+              <g aria-hidden="true">
+                <path class="circuit" d="M66 332 H165 L212 379 H276" /><path class="circuit" d="M70 546 H170 L222 494 H282" />
+                <path class="circuit" d="M734 332 H635 L588 379 H524" /><path class="circuit" d="M730 546 H630 L578 494 H518" />
+                <path class="circuit" d="M400 58 V118 L366 152" /><path class="circuit" d="M400 744 V684 L435 649" />
+                <path class="circuit" d="M116 228 H186 L221 263" /><path class="circuit" d="M684 228 H614 L579 263" />
+                <path class="circuit" d="M95 642 H176 L226 592" /><path class="circuit" d="M705 642 H624 L574 592" />
+                <circle class="circuit-dot" cx="66" cy="332" r="2.2"/><circle class="circuit-dot" cx="70" cy="546" r="2.2"/>
+                <circle class="circuit-dot" cx="734" cy="332" r="2.2"/><circle class="circuit-dot" cx="730" cy="546" r="2.2"/>
+                <circle class="circuit-dot" cx="400" cy="58" r="2.2"/><circle class="circuit-dot" cx="400" cy="744" r="2.2"/>
+              </g>
+
+              <g aria-hidden="true">
+                <circle class="particle" cx="126" cy="275" r="2.2" style="--duration:5.4s;--delay:-1.1s"/>
+                <circle class="particle soft" cx="174" cy="421" r="1.7" style="--duration:6.2s;--delay:-3.5s"/>
+                <circle class="particle dim" cx="124" cy="554" r="2.8" style="--duration:7s;--delay:-2.4s"/>
+                <circle class="particle" cx="235" cy="655" r="1.9" style="--duration:5s;--delay:-.8s"/>
+                <circle class="particle soft" cx="340" cy="706" r="2.2" style="--duration:5.8s;--delay:-4.1s"/>
+                <circle class="particle dim" cx="478" cy="691" r="2.5" style="--duration:6.8s;--delay:-1.8s"/>
+                <circle class="particle soft" cx="588" cy="626" r="1.8" style="--duration:5.1s;--delay:-2.3s"/>
+                <circle class="particle" cx="684" cy="518" r="2.5" style="--duration:6.4s;--delay:-4.7s"/>
+                <circle class="particle dim" cx="692" cy="363" r="2.7" style="--duration:7.2s;--delay:-3s"/>
+                <circle class="particle" cx="637" cy="218" r="1.8" style="--duration:5.7s;--delay:-1.5s"/>
+                <circle class="particle soft" cx="530" cy="115" r="2.2" style="--duration:6.5s;--delay:-4.4s"/>
+                <circle class="particle dim" cx="365" cy="82" r="2.5" style="--duration:7.3s;--delay:-2.9s"/>
+                <circle class="particle soft" cx="247" cy="125" r="1.8" style="--duration:5.3s;--delay:-.5s"/>
+              </g>
+
+              <g class="cube">
+                <g class="face-grid top-grid">
+                  <path d="M214 256 L462 400"/><path d="M276 220 L524 364"/><path d="M338 184 L586 328"/>
+                  <path d="M586 256 L338 400"/><path d="M524 220 L276 364"/><path d="M462 184 L214 328"/>
+                </g>
+                <g class="face-grid">
+                  <path d="M214 328 L400 436 L400 690"/><path d="M276 364 L400 436"/><path d="M338 400 L400 436"/>
+                  <path d="M152 356 L400 500"/><path d="M152 420 L400 564"/><path d="M152 484 L400 628"/>
+                  <path d="M586 328 L400 436 L400 690"/><path d="M524 364 L400 436"/><path d="M462 400 L400 436"/>
+                  <path d="M648 356 L400 500"/><path d="M648 420 L400 564"/><path d="M648 484 L400 628"/>
+                </g>
+
+                <path class="inner" d="M400 148 L400 436 L400 690"/>
+                <path class="inner" d="M152 292 L400 436 L648 292"/>
+                <path class="inner" d="M152 548 L400 436 L648 548"/>
+                <path class="inner" d="M276 364 L276 620"/><path class="inner" d="M524 364 L524 620"/>
+
+                <path class="edge back" d="M400 148 L152 292"/><path class="edge back" d="M400 148 L648 292"/><path class="edge back" d="M400 148 L400 436"/>
+                <path class="edge strong" d="M400 148 L648 292 L400 436 L152 292 Z"/>
+                <path class="edge" d="M152 292 L400 436 L400 690 L152 548 Z"/>
+                <path class="edge strong" d="M648 292 L400 436 L400 690 L648 548 Z"/>
+                <path class="edge" d="M152 548 L400 690 L648 548"/>
+                <path class="edge" d="M152 292 L152 548"/><path class="edge strong" d="M400 436 L400 690"/><path class="edge strong" d="M648 292 L648 548"/>
+
+                <g clip-path="url(#topClip)" aria-label="AI">
+                  <g transform="translate(0 18)"><g transform="matrix(0.78 0.45 -0.78 0.45 400 276)"><text class="ai-text ai-depth-deep" x="-36" y="0">A</text><text class="ai-text ai-depth-deep" x="36" y="0">I</text></g></g>
+                  <g transform="translate(0 12)"><g transform="matrix(0.78 0.45 -0.78 0.45 400 276)"><text class="ai-text ai-depth-mid" x="-36" y="0">A</text><text class="ai-text ai-depth-mid" x="36" y="0">I</text></g></g>
+                  <g transform="translate(0 6)"><g transform="matrix(0.78 0.45 -0.78 0.45 400 276)"><text class="ai-text ai-depth-mid" x="-36" y="0">A</text><text class="ai-text ai-depth-mid" x="36" y="0">I</text></g></g>
+                  <g transform="matrix(0.78 0.45 -0.78 0.45 400 276)"><text class="ai-text ai-letter-top" x="-36" y="0">A</text><text class="ai-text ai-letter-top" x="36" y="0">I</text></g>
+                </g>
+
+                <path class="scan" d="M232 363 L400 460 L568 363"/>
+
+                <circle class="node" cx="400" cy="148" r="4.2"/><circle class="node" cx="152" cy="292" r="4.2"/><circle class="node" cx="648" cy="292" r="4.2"/>
+                <circle class="node" cx="400" cy="436" r="4.8"/><circle class="node" cx="152" cy="548" r="4.1"/><circle class="node" cx="648" cy="548" r="4.1"/>
+                <circle class="node" cx="400" cy="690" r="4.8"/>
+                <circle class="node small" cx="276" cy="220" r="2.2"/><circle class="node small" cx="524" cy="220" r="2.2"/>
+                <circle class="node small" cx="276" cy="364" r="2.2"/><circle class="node small" cx="524" cy="364" r="2.2"/>
+                <circle class="node small" cx="152" cy="420" r="2.1"/><circle class="node small" cx="648" cy="420" r="2.1"/>
+                <circle class="node small" cx="400" cy="564" r="2.3"/><circle class="node small" cx="276" cy="620" r="2.1"/><circle class="node small" cx="524" cy="620" r="2.1"/>
+
+                <circle class="particle" cx="330" cy="340" r="1.8" style="--duration:4.7s;--delay:-1.1s"/>
+                <circle class="particle soft" cx="474" cy="350" r="2" style="--duration:5.7s;--delay:-3.4s"/>
+                <circle class="particle dim" cx="316" cy="468" r="2.3" style="--duration:6.5s;--delay:-2.1s"/>
+                <circle class="particle" cx="484" cy="494" r="1.7" style="--duration:5.1s;--delay:-4.1s"/>
+                <circle class="particle soft" cx="365" cy="575" r="2" style="--duration:6s;--delay:-.9s"/>
+                <circle class="particle" cx="442" cy="610" r="1.8" style="--duration:4.8s;--delay:-2.8s"/>
+              </g>
+            </svg>
+          </div>
+        </div>
+      </div>
     </section>
-  </main>
-  <footer><p class="footer-copy">© 2026 PigBank</p><div class="footer-links"><div class="footer-col footer-col-left"><span class="footer-title">Navegue</span><a href="/como-funciona">Como funciona</a><a href="/funcionalidades">Funcionalidades</a><a href="/whatsapp">WhatsApp</a></div><div class="footer-col footer-col-center"><span class="footer-title">Produto</span><a href="/precos">Preços</a><a href="/changelog">Novidades</a></div><div class="footer-col footer-col-right"><span class="footer-title">Institucional</span><a href="/termos">Termos de Uso</a><a href="/privacy">Política de Privacidade</a><a href="/suporte">Suporte</a><a href="mailto:contato@pigbankai.com">Contato</a></div></div></footer>
-</div>
+
+  </div>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <a class="nav-logo" href="/"><img class="logo-badge" src="/brand/avatar.webp" alt="" /><span>PigBank</span></a>
+        <p>Seu dinheiro, suas regras — direto no WhatsApp, com a IA da Piggy.</p>
+      </div>
+      <div class="footer-cols">
+        <div class="footer-col"><span class="footer-title">Navegue</span>
+          <a href="/funcionalidades">Funcionalidades</a>
+          <a href="/como-funciona">Como funciona</a>
+          <a href="/precos">Preços</a>
+          <a href="/changelog">Blog</a>
+        </div>
+        <div class="footer-col"><span class="footer-title">Produto</span>
+          <a href="/whatsapp">WhatsApp</a>
+          <a href="/comandos">O que pedir</a>
+          <a href="/suporte">Suporte</a>
+        </div>
+        <div class="footer-col"><span class="footer-title">Institucional</span>
+          <a href="/termos">Termos de Uso</a>
+          <a href="/privacy">Privacidade</a>
+          <a href="mailto:contato@pigbankai.com">Contato</a>
+        </div>
+      </div>
+    </div>
+    <p class="footer-copy">© 2026 PigBank · Feito com 🐷</p>
+  </footer>
+
 </body>
 </html>

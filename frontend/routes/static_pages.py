@@ -42,6 +42,16 @@ async def serve_onboarding():
     return html_file(FRONTEND_DIR / "onboarding.html")
 
 
+@router.get("/login")
+async def serve_login():
+    return html_file(FRONTEND_DIR / "login.html")
+
+
+@router.get("/cadastro")
+async def serve_cadastro():
+    return html_file(FRONTEND_DIR / "cadastro.html")
+
+
 @router.get("/static/auth-refresh.js")
 async def serve_auth_refresh_js():
     """Interceptor de fetch que renova access em 401. Incluído nas páginas
@@ -228,6 +238,16 @@ async def serve_dashboard_mobile_css():
         FRONTEND_DIR / "dashboard-mobile.css",
         media_type="text/css",
         headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/site.css")
+async def serve_site_css():
+    """Sistema de design do site de marketing (protótipo v2)."""
+    return FileResponse(
+        FRONTEND_DIR / "site.css",
+        media_type="text/css",
+        headers={"Cache-Control": "public, max-age=3600"},
     )
 
 

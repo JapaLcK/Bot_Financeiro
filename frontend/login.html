@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Entrar — PigBank</title>
+<meta name="description" content="Entre na sua conta PigBank e acompanhe sua vida financeira." />
+<link rel="icon" type="image/png" href="/favicon.png" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+<meta name="theme-color" content="#0c0c0d" />
+<link rel="stylesheet" href="/brand.css" />
+<link rel="stylesheet" href="/site.css" />
+<style>
+  .auth-error { display: none; background: rgba(255,45,45,.1); border: 1px solid rgba(255,45,45,.3); color: #ffb4b4; padding: 10px 13px; border-radius: 10px; font-size: .82rem; margin-bottom: 14px; line-height: 1.4; }
+  .auth-error.show { display: block; }
+  .auth-error.ok { background: rgba(0,240,120,.1); border-color: rgba(0,240,120,.3); color: #93f7c4; }
+</style>
+</head>
+<body>
+<div class="glow"></div>
+
+  <nav class="nav">
+    <a class="nav-logo" href="/"><img class="logo-badge" src="/brand/avatar.webp" alt="" /><span>PigBank</span></a>
+    <div class="nav-links">
+      <a href="/funcionalidades">Funcionalidades</a>
+      <a href="/como-funciona">Como funciona</a>
+      <a href="/precos">Preços</a>
+      <a href="/changelog">Blog</a>
+    </div>
+    <div class="nav-right">
+      <a class="btn btn-primary" href="/cadastro">Começar agora</a>
+    </div>
+  </nav>
+
+  <div class="wrap auth-wrap">
+    <div class="auth-card">
+      <div class="auth-logo"><img src="/brand/avatar.webp" alt="" /><span>PigBank</span></div>
+
+      <!-- Login -->
+      <form id="form-login" onsubmit="doLogin(event)">
+        <h1>Bem-vindo de volta!</h1>
+        <p class="auth-sub">Entre na sua conta para continuar.</p>
+        <div id="login-error" class="auth-error"></div>
+        <div class="field">
+          <label for="email">E-mail</label>
+          <input type="email" id="email" placeholder="seu@email.com" autocomplete="email" required />
+        </div>
+        <div class="field">
+          <label for="senha">Senha</label>
+          <input type="password" id="senha" placeholder="Sua senha" autocomplete="current-password" required />
+        </div>
+        <div class="forgot"><a href="#" onclick="doForgot(event)">Esqueci minha senha</a></div>
+        <button type="submit" id="btn-login" class="btn btn-primary btn-block btn-lg" style="margin-top:8px">Entrar</button>
+
+        <div class="auth-divider">ou continue com</div>
+        <div class="social-btns">
+          <a class="social-btn" href="/auth/google/start">
+            <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38z"/></svg>
+            Continuar com Google
+          </a>
+        </div>
+        <p class="auth-alt">Não tem uma conta? <a href="/cadastro">Cadastre-se</a></p>
+      </form>
+
+      <!-- MFA -->
+      <form id="form-mfa" onsubmit="doMfa(event)" style="display:none">
+        <h1>Verificação em 2 etapas</h1>
+        <p class="auth-sub">Digite o código do seu app autenticador para <b id="mfa-email"></b>.</p>
+        <div id="mfa-error" class="auth-error"></div>
+        <div class="field">
+          <label for="mfa-code">Código</label>
+          <input type="text" id="mfa-code" inputmode="numeric" autocomplete="one-time-code" placeholder="000000" />
+        </div>
+        <label class="checkbox-row"><input type="checkbox" id="mfa-backup" /><span>Usar um código de backup</span></label>
+        <button type="submit" id="btn-mfa" class="btn btn-primary btn-block btn-lg">Verificar código</button>
+        <p class="auth-alt"><a href="#" onclick="cancelMfa();return false">← Voltar</a></p>
+      </form>
+    </div>
+  </div>
+
+<script>
+  function getCookie(n){return document.cookie.split('; ').find(r=>r.startsWith(n+'='))?.split('=')[1]||''}
+  function csrfHeaders(e){e=e||{};var c=decodeURIComponent(getCookie('csrf_token')||'');if(c)e['X-CSRF-Token']=c;return e}
+  async function payload(r){var t=await r.text();if(!t)return{};try{return JSON.parse(t)}catch(_){return{detail:t}}}
+  function goDash(u){u=u||'/home';if(u.indexOf('DASHBOARD_URL=')===0)u=u.slice(14);if(u.indexOf('http')!==0)u=location.origin+'/'+u.replace(/^\//,'');location.replace(u)}
+  function err(id,m,ok){var e=document.getElementById(id);e.textContent=m;e.classList.toggle('ok',!!ok);e.classList.add('show')}
+  function clrErr(){['login-error','mfa-error'].forEach(function(i){var e=document.getElementById(i);if(e){e.classList.remove('show','ok');e.textContent=''}})}
+
+  async function doLogin(ev){ev.preventDefault();clrErr();
+    var email=document.getElementById('email').value.trim(),pass=document.getElementById('senha').value;
+    if(!email||!pass)return err('login-error','Preencha e-mail e senha.');
+    var b=document.getElementById('btn-login');b.disabled=true;b.textContent='Entrando…';
+    try{
+      var res=await fetch('/auth/login',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({email:email,password:pass})});
+      var d=await payload(res);
+      if(!res.ok){err('login-error',d.detail||'E-mail ou senha incorretos.');return}
+      if(d.mfa_required){showMfa(d.mfa_challenge,d.email);return}
+      goDash(d.dashboard_url);
+    }catch(e){err('login-error','Erro de conexão. Tente novamente.')}
+    finally{b.disabled=false;b.textContent='Entrar'}
+  }
+
+  var _ch=null;
+  function showMfa(ch,email){_ch=ch;document.getElementById('form-login').style.display='none';document.getElementById('form-mfa').style.display='';document.getElementById('mfa-email').textContent=email||'';document.getElementById('mfa-code').focus()}
+  function cancelMfa(){_ch=null;document.getElementById('form-mfa').style.display='none';document.getElementById('form-login').style.display=''}
+  async function doMfa(ev){ev.preventDefault();clrErr();
+    var code=document.getElementById('mfa-code').value.trim(),bk=document.getElementById('mfa-backup').checked;
+    if(!code)return err('mfa-error','Digite o código.');
+    var b=document.getElementById('btn-mfa');b.disabled=true;b.textContent='Verificando…';
+    try{
+      var res=await fetch('/auth/mfa/verify-login',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({challenge:_ch,code:code,use_backup:bk})});
+      var d=await payload(res);
+      if(!res.ok){err('mfa-error',d.detail||'Código inválido.');return}
+      goDash(d.dashboard_url);
+    }catch(e){err('mfa-error','Erro de conexão. Tente novamente.')}
+    finally{b.disabled=false;b.textContent='Verificar código'}
+  }
+
+  async function doForgot(ev){ev.preventDefault();
+    var email=document.getElementById('email').value.trim();
+    if(!email){document.getElementById('email').focus();return err('login-error','Digite seu e-mail acima primeiro.')}
+    try{await fetch('/auth/forgot-password',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({email:email})})}catch(e){}
+    err('login-error','Se o e-mail existir, enviamos um link pra redefinir a senha.',true);
+  }
+</script>
+</body>
+</html>
