@@ -7259,55 +7259,74 @@ function render(d) {
     : (ry !== NOW.getFullYear() || rm !== NOW.getMonth() + 1);
 
   const pat = d.balance + ni + np;
-  const pocketsStrip = (d.pockets||[]).length ? `
-    <div class="ov-section-lbl">Caixinhas</div>
-    <div class="ov-pockets">${d.pockets.map((p,i)=>{
-      const emoji = p.emoji || "🐷";
-      const tgt = p.target_amount;
-      const hasGoal = tgt != null && tgt > 0;
-      const pct = hasGoal ? Math.min(100, Math.round((p.balance||0)/tgt*100)) : 0;
-      const barCls = (i%2===1) ? "neon" : "";
-      const jn = escapeJsString(p.name);
-      return `<div class="ov-pk" role="button" tabindex="0" onclick="openPocketHistory('${jn}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openPocketHistory('${jn}');}">
-        <div class="ov-pk-top"><span class="ov-pk-ico">${emoji}</span><span>${esc(p.name)}</span></div>
-        <div class="ov-pk-val"><span data-num="pk_${esc(p.name)}" data-val="${p.balance||0}">${fmt(p.balance||0)}</span></div>
-        ${hasGoal
-          ? `<div class="ov-pk-bar"><i class="${barCls}" style="width:${pct}%"></i></div><div class="ov-pk-goal">${pct}% de ${fmt(tgt)}</div>`
-          : `<div class="ov-pk-goal">Depósitos livres</div>`}
-      </div>`;
-    }).join("")}</div>` : "";
 
-  const cardsStrip = (d.credit_cards||[]).length ? `
+  const nPk = (d.pockets||[]).length;
+  const nCc = (d.credit_cards||[]).length;
+
+  const pocketTiles = (d.pockets||[]).map((p,i)=>{
+    const emoji = p.emoji || "🐷";
+    const tgt = p.target_amount;
+    const hasGoal = tgt != null && tgt > 0;
+    const pct = hasGoal ? Math.min(100, Math.round((p.balance||0)/tgt*100)) : 0;
+    const barCls = (i%2===1) ? "neon" : "";
+    const jn = escapeJsString(p.name);
+    return `<div class="ov-pk" role="button" tabindex="0" onclick="openPocketHistory('${jn}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openPocketHistory('${jn}');}">
+      <div class="ov-pk-top"><span class="ov-pk-ico">${emoji}</span><span>${esc(p.name)}</span></div>
+      <div class="ov-pk-val"><span data-num="pk_${esc(p.name)}" data-val="${p.balance||0}">${fmt(p.balance||0)}</span></div>
+      ${hasGoal
+        ? `<div class="ov-pk-bar"><i class="${barCls}" style="width:${pct}%"></i></div><div class="ov-pk-goal">${pct}% de ${fmt(tgt)}</div>`
+        : `<div class="ov-pk-goal">Depósitos livres</div>`}
+    </div>`;
+  }).join("");
+
+  const cardTiles = (d.credit_cards||[]).map((c,i)=>{
+    const due   = c.due_amount != null ? c.due_amount : Math.max(0, (c.total||0) - (c.paid_amount||0));
+    const total = c.total || 0;
+    const paid  = c.paid_amount || 0;
+    const hasData = total > 0 || paid > 0;
+    const periodLabel = c.period_label || '';
+    let statusCls = 's-empty', statusTxt = 'Sem fatura';
+    if (c.status === 'paid') { statusCls = 's-paid'; statusTxt = 'Paga'; }
+    else if (c.status === 'overdue' || c.status === 'vencida') { statusCls = 's-due'; statusTxt = 'Vencida'; }
+    else if (hasData) { statusCls = 's-open'; statusTxt = 'Em aberto'; }
+    const showProgress = paid > 0 && total > 0 && c.status !== 'paid';
+    const pctPaid = showProgress ? Math.min(100, Math.round((paid/total)*100)) : 0;
+    const dueLbl = c.due_day ? `Vence dia ${c.due_day}` : (c.closing_day ? `Fecha dia ${c.closing_day}` : '');
+    const barCls = (i%2===1) ? "neon" : "";
+    const clickAttr = c.id ? ` role="button" tabindex="0" data-card-id="${c.id}" onclick="onCardRowClick(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onCardRowClick(this);}"` : '';
+    return `<div class="ov-pk ov-cc"${clickAttr}>
+      <div class="ov-pk-top"><span class="ov-pk-ico">💳</span><span class="ov-cc-name">${esc(c.name)}</span><span class="ov-cc-status ${statusCls}">${statusTxt}</span></div>
+      <div class="ov-cc-sub">${hasData ? (periodLabel ? `Fatura ${periodLabel}` : 'Fatura atual') : 'Sem fatura aberta'}</div>
+      <div class="ov-pk-val"><span data-num="cc_${esc(c.name)}" data-val="${due}">${hasData ? fmt(due) : 'R$ —'}</span></div>
+      ${showProgress ? `<div class="ov-pk-bar"><i class="${barCls}" style="width:${pctPaid}%"></i></div>` : ''}
+      <div class="ov-pk-goal">${[dueLbl, showProgress ? `${pctPaid}% pago` : ''].filter(Boolean).join(' · ') || '—'}</div>
+    </div>`;
+  }).join("");
+
+  const cardActions = `
+    <button class="hbtn" type="button" onclick="openCardModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Novo</button>
+    <button class="btn-pay-bill" type="button" onclick="openPayBillModal()">💳 Pagar fatura</button>`;
+
+  // Poucos itens dos dois lados → mescla numa faixa só; senão, seções separadas.
+  const mergeStrips = nPk > 0 && nCc > 0 && (nPk + nCc) <= 4;
+  let stripsHtml;
+  if (mergeStrips) {
+    stripsHtml = `
     <div class="ov-section-head">
-      <div class="ov-section-lbl" style="margin:0">Cartões</div>
-      <div class="ov-section-actions">
-        <button class="hbtn" type="button" onclick="openCardModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Novo</button>
-        <button class="btn-pay-bill" type="button" onclick="openPayBillModal()">💳 Pagar fatura</button>
-      </div>
+      <div class="ov-section-lbl" style="margin:0">Caixinhas e cartões</div>
+      <div class="ov-section-actions">${cardActions}</div>
     </div>
-    <div class="ov-pockets ov-cc-grid">${d.credit_cards.map((c,i)=>{
-      const due   = c.due_amount != null ? c.due_amount : Math.max(0, (c.total||0) - (c.paid_amount||0));
-      const total = c.total || 0;
-      const paid  = c.paid_amount || 0;
-      const hasData = total > 0 || paid > 0;
-      const periodLabel = c.period_label || '';
-      let statusCls = 's-empty', statusTxt = 'Sem fatura';
-      if (c.status === 'paid') { statusCls = 's-paid'; statusTxt = 'Paga'; }
-      else if (c.status === 'overdue' || c.status === 'vencida') { statusCls = 's-due'; statusTxt = 'Vencida'; }
-      else if (hasData) { statusCls = 's-open'; statusTxt = 'Em aberto'; }
-      const showProgress = paid > 0 && total > 0 && c.status !== 'paid';
-      const pctPaid = showProgress ? Math.min(100, Math.round((paid/total)*100)) : 0;
-      const dueLbl = c.due_day ? `Vence dia ${c.due_day}` : (c.closing_day ? `Fecha dia ${c.closing_day}` : '');
-      const barCls = (i%2===1) ? "neon" : "";
-      const clickAttr = c.id ? ` role="button" tabindex="0" data-card-id="${c.id}" onclick="onCardRowClick(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onCardRowClick(this);}"` : '';
-      return `<div class="ov-pk ov-cc"${clickAttr}>
-        <div class="ov-pk-top"><span class="ov-pk-ico">💳</span><span class="ov-cc-name">${esc(c.name)}</span><span class="ov-cc-status ${statusCls}">${statusTxt}</span></div>
-        <div class="ov-cc-sub">${hasData ? (periodLabel ? `Fatura ${periodLabel}` : 'Fatura atual') : 'Sem fatura aberta'}</div>
-        <div class="ov-pk-val"><span data-num="cc_${esc(c.name)}" data-val="${due}">${hasData ? fmt(due) : 'R$ —'}</span></div>
-        ${showProgress ? `<div class="ov-pk-bar"><i class="${barCls}" style="width:${pctPaid}%"></i></div>` : ''}
-        <div class="ov-pk-goal">${[dueLbl, showProgress ? `${pctPaid}% pago` : ''].filter(Boolean).join(' · ') || '—'}</div>
-      </div>`;
-    }).join("")}</div>` : "";
+    <div class="ov-pockets">${pocketTiles}${cardTiles}</div>`;
+  } else {
+    stripsHtml = `
+    ${nPk ? `<div class="ov-section-lbl">Caixinhas</div>
+    <div class="ov-pockets ov-strip-capped">${pocketTiles}</div>` : ""}
+    ${nCc ? `<div class="ov-section-head">
+      <div class="ov-section-lbl" style="margin:0">Cartões</div>
+      <div class="ov-section-actions">${cardActions}</div>
+    </div>
+    <div class="ov-pockets ov-cc-grid ov-strip-capped">${cardTiles}</div>` : ""}`;
+  }
 
   const svgWallet  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v3m0 4v3a1 1 0 0 1-1 1H5a2 2 0 0 1-2-2V5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>';
   const svgTrend   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 7 13.5 15.5l-4-4L2 19"/><path d="M16 7h6v6"/></svg>';
@@ -7342,8 +7361,7 @@ function render(d) {
         <div class="ov-delta up">💚 entradas de ${PT_MONTHS[rm-1]}</div>
       </div>
     </div>
-    ${pocketsStrip}
-    ${cardsStrip}
+    ${stripsHtml}
     <div class="ov-cards">
 
     <div class="card" style="animation-delay:180ms">

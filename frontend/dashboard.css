@@ -1029,7 +1029,9 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
 .ov-section-lbl { font-size:.67rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
   color:var(--text-3); margin:4px 0 -8px 2px; }
 
-.ov-pockets { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:12px; }
+.ov-pockets { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px; }
+/* Modo separado (muitos itens): tiles não esticam além de um tamanho confortável */
+.ov-strip-capped > * { max-width:380px; }
 .ov-pk {
   background:var(--glass-bg); border:1px solid var(--glass-border); border-radius:16px; padding:15px;
   cursor:pointer; transition:transform .18s var(--ease),border-color .18s var(--ease);
@@ -1053,7 +1055,7 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
 .ov-section-head { display:flex; align-items:center; justify-content:space-between; gap:12px;
   margin:4px 0 10px 2px; flex-wrap:wrap; }
 .ov-section-actions { display:flex; gap:8px; }
-.ov-cc-grid { grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); }
+.ov-cc-grid { grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
 .ov-cc .ov-pk-top { align-items:center; }
 .ov-cc-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ov-cc-status { flex-shrink:0; font-size:.6rem; font-weight:700; text-transform:uppercase;
