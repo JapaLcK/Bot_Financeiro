@@ -80,11 +80,8 @@
       width: 32px;
       height: 32px;
       border-radius: 9px;
-      display: grid;
-      place-items: center;
-      background: linear-gradient(135deg, var(--accent), var(--blue));
-      color: white;
-      font-weight: 850;
+      object-fit: cover;
+      display: block;
       box-shadow: 0 4px 12px rgba(255,45,142,.28);
     }
 
@@ -242,7 +239,7 @@
   <nav class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="/">
-        <span class="brand-mark">🐷</span>
+        <img class="brand-mark" src="/brand/avatar.webp" alt="" />
         <span>PigBank</span>
       </a>
       <div class="top-actions">
@@ -474,7 +471,7 @@
   </main>
   <footer class="site-footer">
     <div class="footer-inner">
-      <a class="brand" href="/"><span class="brand-mark">🐷</span><span>PigBank</span></a>
+      <a class="brand" href="/"><img class="brand-mark" src="/brand/avatar.webp" alt="" /><span>PigBank</span></a>
       <nav class="footer-nav">
         <a href="/">Início</a>
         <a href="/como-funciona">Como funciona</a>
