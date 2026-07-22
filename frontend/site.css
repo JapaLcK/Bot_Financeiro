@@ -291,6 +291,43 @@ img { max-width: 100%; display: block; }
 .field input:focus, .field textarea:focus { border-color: var(--pink); }
 .field textarea { resize: vertical; min-height: 110px; }
 
+/* ─── Legal / prose (termos, privacy) ───────────────────────────────── */
+.legal { max-width: 800px; margin: 0 auto; padding: 30px 0 60px; }
+.legal .breadcrumb { color: var(--neon); font-size: .72rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 14px; }
+.legal h1 { font-size: clamp(2rem,4vw,2.8rem); font-weight: 800; letter-spacing: -.02em; margin-bottom: 8px; }
+.legal .updated { color: var(--ink-3); font-size: .84rem; margin-bottom: 30px; }
+.legal .privacy-panel { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 34px 34px 20px; }
+.legal .intro p, .legal section p, .legal li { color: var(--ink-2); font-size: .95rem; line-height: 1.7; margin-bottom: 12px; }
+.legal section { margin-bottom: 28px; padding-top: 6px; border-top: 1px solid var(--line); }
+.legal .intro { margin-bottom: 20px; }
+.legal h2 { font-size: 1.18rem; font-weight: 700; margin: 14px 0 12px; color: var(--ink); }
+.legal h3 { font-size: 1rem; font-weight: 700; margin: 16px 0 8px; color: var(--ink); }
+.legal ul, .legal ol { padding-left: 20px; margin-bottom: 12px; }
+.legal li { margin-bottom: 7px; }
+.legal a { color: var(--pink); }
+.legal strong { color: var(--ink); font-weight: 700; }
+
+/* ─── Comandos ("O que pedir") ──────────────────────────────────────── */
+.cmds-page .hero { text-align: center; max-width: 680px; margin: 0 auto 40px; padding-top: 20px; }
+.cmds-page .hero h1 { font-size: clamp(2rem,4.5vw,3rem); font-weight: 800; letter-spacing: -.02em; text-transform: uppercase; line-height: 1.06; margin: 16px 0; }
+.cmds-page .hero p { color: var(--ink-2); line-height: 1.65; }
+.cmds-page .section-list { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.cmds-page .cat { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; }
+.cmds-page .cat-head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.cmds-page .cat-icon { width: 40px; height: 40px; border-radius: 11px; display: flex; align-items: center; justify-content: center; background: var(--pink-soft); border: 1px solid rgba(255,45,142,.3); font-size: 1.15rem; }
+.cmds-page .cat-head h2 { font-size: 1.05rem; font-weight: 700; }
+.cmds-page .cat-desc { color: var(--ink-3); font-size: .85rem; line-height: 1.5; margin-bottom: 16px; }
+.cmds-page .cmds { display: grid; gap: 8px; }
+.cmds-page .cmd { position: relative; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 10px; padding: 10px 13px; font-size: .85rem; color: var(--ink); cursor: pointer; font-family: ui-monospace,"SF Mono",Menlo,monospace; transition: border-color .15s, background .15s; }
+.cmds-page .cmd:hover { border-color: var(--line-2); background: var(--card-2); }
+.cmds-page .cmd-note { display: block; font-family: var(--font); font-size: .72rem; color: var(--ink-3); margin-top: 4px; }
+.cmds-page .copied { position: absolute; top: 10px; right: 12px; font-family: var(--font); font-size: .68rem; color: var(--neon); opacity: 0; transition: opacity .15s; }
+.cmds-page .cmd.just-copied .copied { opacity: 1; }
+.cmds-page .callout { text-align: center; background: linear-gradient(180deg,rgba(255,45,142,.08),transparent); border: 1px solid rgba(255,45,142,.2); border-radius: var(--radius); padding: 30px; margin-top: 24px; }
+.cmds-page .callout h3 { font-size: 1.1rem; margin-bottom: 8px; }
+.cmds-page .callout p { color: var(--ink-2); max-width: 560px; margin: 0 auto; line-height: 1.6; }
+@media (max-width: 760px) { .cmds-page .section-list { grid-template-columns: 1fr; } }
+
 /* ─── Auth (login/cadastro) ─────────────────────────────────────────── */
 .auth-wrap { min-height: 82vh; display: flex; align-items: center; justify-content: center; padding: 40px 0; }
 .auth-card { width: min(420px,100%); background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 38px 32px; box-shadow: var(--shadow); }

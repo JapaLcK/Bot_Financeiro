@@ -3,89 +3,34 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>O que pedir ao Piggy — PigBank</title>
-<meta name="description" content="Exemplos do que você pode pedir ao Piggy no WhatsApp e Discord — assinatura, cartões, parcelamentos, orçamentos, caixinhas, investimentos. Pergunte do jeito que vier, ele entende." />
+<title>O que pedir — PigBank</title>
+<meta name="description" content="Exemplos do que você pode pedir pra Piggy no WhatsApp — em português corrido, sem comando decorado." />
 <link rel="canonical" href="https://pigbankai.com/comandos" />
 <link rel="icon" type="image/png" href="/favicon.png" />
-<meta name="theme-color" content="#111111" />
-<meta property="og:type" content="website" />
-<meta property="og:site_name" content="PigBank" />
-<meta property="og:title" content="O que pedir ao Piggy — PigBank" />
-<meta property="og:description" content="Pergunta do jeito que vier. O Piggy entende português corrido e cuida do resto." />
-<meta property="og:url" content="https://pigbankai.com/comandos" />
-<meta property="og:image" content="https://pigbankai.com/favicon.png" />
-<link rel="stylesheet" href="/brand.css" />
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{--glass-bg:rgba(255,255,255,.07);--glass-border:rgba(255,255,255,.13);--text:rgba(255,255,255,.92);--text-2:rgba(255,255,255,.58);--text-3:rgba(255,255,255,.32);--purple:#FF2D8E;--blue:#FF80B8;--green:#C6F11A;--yellow:#fbbf24;--pink:#f472b6;--orange:#fb923c;--ease:cubic-bezier(.4,0,.2,1)}
-body{font-family:"Inter", -apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;background:#111111;color:var(--text);min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased}
-.bg{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
-.orb{position:absolute;border-radius:50%;filter:blur(90px);opacity:.34;animation:drift 18s ease-in-out infinite alternate}
-.orb-1{width:700px;height:700px;background:radial-gradient(circle,#C7186B,transparent 70%);top:-260px;left:-220px}
-.orb-2{width:520px;height:520px;background:radial-gradient(circle,#FF2D8E,transparent 70%);top:28%;right:-220px;animation-delay:-6s}
-.orb-3{width:420px;height:420px;background:radial-gradient(circle,#C7186B,transparent 70%);bottom:-130px;left:18%;animation-delay:-12s;opacity:.2}
-@keyframes drift{0%{transform:translate(0,0) scale(1)}50%{transform:translate(34px,-28px) scale(1.04)}100%{transform:translate(-18px,42px) scale(.98)}}
-.page{position:relative;z-index:1;max-width:1030px;margin:0 auto;padding:0 24px 90px}
-nav{position:sticky;top:16px;z-index:10;display:flex;align-items:center;justify-content:space-between;gap:18px;margin:16px 0 0;background:rgba(255,255,255,.06);backdrop-filter:blur(32px) saturate(180%);border:1px solid var(--glass-border);border-radius:18px;padding:12px 20px;box-shadow:0 4px 24px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.1)}
-.nav-logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text)}
-.logo-icon{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#FF2D8E,#C7186B);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(255,45,142,.4)}
-.nav-logo span{font-size:1rem;font-weight:750}
-.nav-links{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
-.nav-links a{color:var(--text-2);font-size:.78rem;font-weight:650;text-decoration:none}
-.nav-links a:hover,.nav-links a.active{color:var(--text)}
-.hero{padding:88px 0 28px;text-align:center}
-.eyebrow{display:inline-flex;background:rgba(255,45,142,.13);border:1px solid rgba(255,45,142,.28);border-radius:999px;padding:6px 14px;color:var(--purple);font-size:.74rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;margin-bottom:22px}
-.hero h1{font-size:clamp(2.2rem,5.6vw,3.6rem);line-height:1.06;letter-spacing:-.03em;margin-bottom:20px}
-.grad{background:linear-gradient(135deg,#FF2D8E,#FF7AB8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.hero p{max-width:680px;margin:0 auto;color:var(--text-2);font-size:1.04rem;line-height:1.7}
-.tip{max-width:680px;margin:24px auto 0;background:rgba(255,45,142,.08);border:1px solid rgba(255,45,142,.2);border-radius:14px;padding:14px 18px;color:var(--text-2);font-size:.86rem;line-height:1.55;text-align:left}
-.tip b{color:var(--text);font-weight:700}
-.section-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:16px;margin:36px 0 18px}
-.cat{background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:18px;padding:22px;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
-.cat-head{display:flex;align-items:center;gap:12px;margin-bottom:14px}
-.cat-icon{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;background:rgba(255,45,142,.14);border:1px solid rgba(255,45,142,.24)}
-.cat:nth-child(6n+2) .cat-icon{background:rgba(255,128,184,.14);border-color:rgba(255,128,184,.24)}
-.cat:nth-child(6n+3) .cat-icon{background:rgba(198,241,26,.14);border-color:rgba(198,241,26,.24)}
-.cat:nth-child(6n+4) .cat-icon{background:rgba(251,191,36,.14);border-color:rgba(251,191,36,.24)}
-.cat:nth-child(6n+5) .cat-icon{background:rgba(244,114,182,.14);border-color:rgba(244,114,182,.24)}
-.cat:nth-child(6n+0) .cat-icon{background:rgba(251,146,60,.14);border-color:rgba(251,146,60,.24)}
-.cat h2{font-size:1.02rem;font-weight:750;letter-spacing:-.01em}
-.cat-desc{color:var(--text-3);font-size:.78rem;margin-bottom:14px;line-height:1.5}
-.cmds{display:flex;flex-direction:column;gap:8px}
-.cmd{background:rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:10px 13px;font-family:"SF Mono","JetBrains Mono",Consolas,monospace;font-size:.82rem;color:var(--text);line-height:1.45;cursor:pointer;transition:all .15s var(--ease);position:relative}
-.cmd:hover{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.13)}
-.cmd-note{display:block;margin-top:4px;font-family:"Inter", -apple-system,BlinkMacSystemFont,sans-serif;color:var(--text-3);font-size:.75rem;font-style:italic}
-.copied{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:rgba(198,241,26,.18);border:1px solid rgba(198,241,26,.32);color:var(--green);font-family:"Inter", -apple-system,BlinkMacSystemFont,sans-serif;font-size:.7rem;font-weight:700;padding:3px 8px;border-radius:6px;opacity:0;transition:opacity .15s var(--ease);pointer-events:none}
-.cmd.just-copied .copied{opacity:1}
-.callout{margin:42px 0 0;background:linear-gradient(135deg,rgba(255,45,142,.18),rgba(199,24,107,.18));border:1px solid rgba(255,45,142,.3);border-radius:20px;padding:28px;text-align:center}
-.callout h3{font-size:1.2rem;margin-bottom:8px}
-.callout p{color:var(--text-2);font-size:.92rem;line-height:1.6;max-width:600px;margin:0 auto}
-footer{margin-top:60px;border-top:1px solid rgba(255,255,255,.08);padding-top:28px;color:var(--text-3);font-size:.78rem}
-.footer-copy{text-align:center;margin-bottom:18px}
-.footer-links{display:grid;grid-template-columns:max-content max-content max-content;justify-content:center;align-items:start;gap:72px;max-width:100%;margin:0 auto}
-.footer-col{display:flex;flex-direction:column;gap:8px;text-align:left}
-.footer-title{color:var(--text);font-size:.72rem;font-weight:850;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}
-.footer-links a{color:var(--text-2);text-decoration:none}
-.footer-links a:hover{color:var(--text)}
-@media(max-width:760px){nav{flex-wrap:wrap}.nav-links{width:100%;justify-content:center}.hero{padding:66px 0 24px}.page{padding-inline:18px}.footer-links{grid-template-columns:1fr;gap:18px}.footer-col{justify-self:center}}
-</style>
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+<meta name="theme-color" content="#0c0c0d" />
+<link rel="stylesheet" href="/brand.css?v=2" />
+<link rel="stylesheet" href="/site.css?v=2" />
 </head>
 <body>
-<div class="bg"><div class="orb orb-1"></div><div class="orb orb-2"></div><div class="orb orb-3"></div></div>
-<div class="page">
-  <nav>
-    <a class="nav-logo" href="/"><div class="logo-icon">🐷</div><span>PigBank</span></a>
+<div class="glow"></div>
+
+  <nav class="nav">
+    <a class="nav-logo" href="/"><img class="logo-badge" src="/brand/avatar.webp" alt="" /><span>PigBank</span></a>
     <div class="nav-links">
-      <a href="/whatsapp">WhatsApp</a>
       <a href="/funcionalidades">Funcionalidades</a>
-      
-      <a href="/como-funciona">Como funciona</a><a class="active" href="/comandos">O que pedir</a>
+      <a href="/como-funciona">Como funciona</a>
       <a href="/precos">Preços</a>
-      <a href="/changelog">Novidades</a>
-      <a href="/suporte">Suporte</a>
+      <a href="/changelog">Blog</a>
+    </div>
+    <div class="nav-right">
+      <a class="link-entrar" href="/login">Entrar</a>
+      <a class="btn btn-primary" href="/cadastro">Começar agora</a>
     </div>
   </nav>
-  <main>
+
+  <div class="wrap cmds-page">
+
     <section class="hero">
       <div class="eyebrow">O que pedir</div>
       <h1>Pergunta do jeito que <span class="grad">sair na cabeça</span></h1>
@@ -205,27 +150,39 @@ footer{margin-top:60px;border-top:1px solid rgba(255,255,255,.08);padding-top:28
       <h3>🐷 Não viu aqui?</h3>
       <p>Pergunta mesmo assim. O Piggy entende português corrido e sempre pede confirmação antes de mexer em qualquer coisa importante.</p>
     </div>
-  </main>
-  <footer>
-    <p class="footer-copy">© 2026 PigBank</p>
-    <div class="footer-links">
-      <div class="footer-col"><span class="footer-title">Navegue</span><a href="/como-funciona">Como funciona</a><a href="/funcionalidades">Funcionalidades</a><a href="/comandos">O que pedir</a><a href="/whatsapp">WhatsApp</a></div>
-      <div class="footer-col"><span class="footer-title">Produto</span><a href="/precos">Preços</a><a href="/changelog">Novidades</a></div>
-      <div class="footer-col"><span class="footer-title">Institucional</span><a href="/privacy">Política de Privacidade</a><a href="/suporte">Suporte</a><a href="mailto:contato@pigbankai.com">Contato</a></div>
+  </div>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <a class="nav-logo" href="/"><img class="logo-badge" src="/brand/avatar.webp" alt="" /><span>PigBank</span></a>
+        <p>Seu dinheiro, suas regras — direto no WhatsApp, com a IA da Piggy.</p>
+      </div>
+      <div class="footer-cols">
+        <div class="footer-col"><span class="footer-title">Navegue</span>
+          <a href="/funcionalidades">Funcionalidades</a><a href="/como-funciona">Como funciona</a><a href="/precos">Preços</a><a href="/changelog">Blog</a>
+        </div>
+        <div class="footer-col"><span class="footer-title">Produto</span>
+          <a href="/whatsapp">WhatsApp</a><a href="/comandos">O que pedir</a><a href="/suporte">Suporte</a>
+        </div>
+        <div class="footer-col"><span class="footer-title">Institucional</span>
+          <a href="/termos">Termos de Uso</a><a href="/privacy">Privacidade</a><a href="mailto:contato@pigbankai.com">Contato</a>
+        </div>
+      </div>
     </div>
+    <p class="footer-copy">© 2026 PigBank · Feito com 🐷</p>
   </footer>
-</div>
+
 <script>
-document.querySelectorAll(".cmd").forEach(el => {
-  el.addEventListener("click", () => {
-    // Pega só o texto principal, sem .cmd-note e .copied
-    const clone = el.cloneNode(true);
-    clone.querySelectorAll(".cmd-note,.copied").forEach(n => n.remove());
-    const txt = clone.textContent.trim();
-    if (!txt) return;
-    navigator.clipboard?.writeText(txt).catch(() => {});
+document.querySelectorAll(".cmd").forEach(function(el){
+  el.addEventListener("click", function(){
+    var clone = el.cloneNode(true);
+    clone.querySelectorAll(".cmd-note,.copied").forEach(function(n){ n.remove(); });
+    var txt = clone.textContent.trim();
+    if(!txt) return;
+    if(navigator.clipboard) navigator.clipboard.writeText(txt).catch(function(){});
     el.classList.add("just-copied");
-    setTimeout(() => el.classList.remove("just-copied"), 1200);
+    setTimeout(function(){ el.classList.remove("just-copied"); }, 1200);
   });
 });
 </script>

@@ -4,84 +4,100 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>WhatsApp — PigBank</title>
-<meta name="description" content="Use o PigBank pelo WhatsApp para registrar gastos, receitas, cartões e consultar seu dinheiro em linguagem natural." />
+<meta name="description" content="Controle seu dinheiro mandando mensagem no WhatsApp. Registre gastos, cartões e veja seu saldo conversando com a Piggy." />
 <link rel="canonical" href="https://pigbankai.com/whatsapp" />
 <link rel="icon" type="image/png" href="/favicon.png" />
-<meta name="theme-color" content="#111111" />
-<meta property="og:type" content="website" />
-<meta property="og:site_name" content="PigBank" />
-<meta property="og:title" content="WhatsApp — PigBank" />
-<meta property="og:description" content="Controle suas finanças pelo WhatsApp com mensagens simples e respostas na hora." />
-<meta property="og:url" content="https://pigbankai.com/whatsapp" />
-<meta property="og:image" content="https://pigbankai.com/favicon.png" />
-<link rel="stylesheet" href="/brand.css" />
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{--glass-bg:rgba(255,255,255,.07);--glass-border:rgba(255,255,255,.13);--text:rgba(255,255,255,.92);--text-2:rgba(255,255,255,.58);--text-3:rgba(255,255,255,.32);--purple:#FF2D8E;--blue:#FF80B8;--green:#C6F11A;--ease:cubic-bezier(.4,0,.2,1)}
-body{font-family:"Inter", -apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;background:#111111;color:var(--text);min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased}
-.bg{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}.orb{position:absolute;border-radius:50%;filter:blur(90px);opacity:.34;animation:drift 18s ease-in-out infinite alternate}.orb-1{width:700px;height:700px;background:radial-gradient(circle,#C7186B,transparent 70%);top:-260px;left:-220px}.orb-2{width:520px;height:520px;background:radial-gradient(circle,#FF2D8E,transparent 70%);top:28%;right:-220px;animation-delay:-6s}.orb-3{width:420px;height:420px;background:radial-gradient(circle,#C7186B,transparent 70%);bottom:-130px;left:18%;animation-delay:-12s;opacity:.2}@keyframes drift{0%{transform:translate(0,0) scale(1)}50%{transform:translate(34px,-28px) scale(1.04)}100%{transform:translate(-18px,42px) scale(.98)}}
-.page{position:relative;z-index:1;max-width:980px;margin:0 auto;padding:0 24px 90px}
-nav{position:sticky;top:16px;z-index:10;display:flex;align-items:center;justify-content:space-between;gap:18px;margin:16px 0 0;background:rgba(255,255,255,.06);backdrop-filter:blur(32px) saturate(180%);border:1px solid var(--glass-border);border-radius:18px;padding:12px 20px;box-shadow:0 4px 24px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.1)}
-.nav-logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text)}.logo-icon{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#FF2D8E,#C7186B);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(255,45,142,.4)}.nav-logo span{font-size:1rem;font-weight:750}.nav-links{display:flex;align-items:center;gap:16px;flex-wrap:wrap}.nav-links a{color:var(--text-2);font-size:.78rem;font-weight:650;text-decoration:none}.nav-links a:hover,.nav-links a.active{color:var(--text)}
-.hero{padding:88px 0 54px;text-align:center}.eyebrow{display:inline-flex;align-items:center;gap:8px;background:rgba(198,241,26,.12);border:1px solid rgba(198,241,26,.28);border-radius:999px;padding:6px 14px;color:var(--green);font-size:.74rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;margin-bottom:22px}.hero h1{font-size:clamp(2.4rem,6vw,4.3rem);line-height:1.06;letter-spacing:-.03em;margin-bottom:20px}.grad{background:linear-gradient(135deg,#FF2D8E,#FF7AB8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}.hero p{max-width:660px;margin:0 auto;color:var(--text-2);font-size:1.08rem;line-height:1.7}
-.cta-row{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;margin-top:34px}.btn{display:inline-flex;align-items:center;justify-content:center;color:#fff;background:linear-gradient(135deg,#FF2D8E,#C7186B);border:none;border-radius:14px;padding:13px 24px;font-weight:750;text-decoration:none;box-shadow:0 6px 24px rgba(255,45,142,.38)}.btn.secondary{background:rgba(255,255,255,.07);border:1px solid var(--glass-border);box-shadow:none;color:var(--text)}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:32px 0 48px}.card{background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:18px;padding:22px;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}.card h2,.card h3{font-size:1rem;margin-bottom:9px;letter-spacing:-.01em}.card p,.card li{color:var(--text-2);font-size:.9rem;line-height:1.65}.card ul{padding-left:18px}
-.section-title{font-size:1.55rem;letter-spacing:-.02em;margin:18px 0 14px}.conversation{display:grid;gap:12px;margin:18px 0 48px}.bubble{max-width:680px;padding:15px 18px;border-radius:18px;font-size:.94rem;line-height:1.55}.bubble.user{justify-self:end;background:rgba(198,241,26,.14);border:1px solid rgba(198,241,26,.26)}.bubble.bot{justify-self:start;background:rgba(255,255,255,.07);border:1px solid var(--glass-border);color:var(--text-2)}
-footer{border-top:1px solid rgba(255,255,255,.08);padding-top:28px;color:var(--text-3);font-size:.78rem}.footer-copy{text-align:center;margin-bottom:18px}.footer-links{display:grid;grid-template-columns:max-content max-content max-content;justify-content:center;align-items:start;gap:72px;max-width:100%;margin:0 auto}.footer-col{display:flex;flex-direction:column;gap:8px;text-align:left}.footer-title{color:var(--text);font-size:.72rem;font-weight:850;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}.footer-col-left{justify-self:start}.footer-col-center{justify-self:start}.footer-col-right{justify-self:start}.footer-links a{color:var(--text-2);text-decoration:none}.footer-links a:hover{color:var(--text)}
-@media(max-width:720px){nav{flex-wrap:wrap}.nav-links{width:100%;justify-content:center}.hero{padding:66px 0 40px}.page{padding-inline:18px}.bubble{max-width:92%}.footer-links{grid-template-columns:1fr;gap:18px}.footer-col,.footer-col-left,.footer-col-center,.footer-col-right{justify-self:center;text-align:left}}
-</style>
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+<meta name="theme-color" content="#0c0c0d" />
+<link rel="stylesheet" href="/brand.css?v=2" />
+<link rel="stylesheet" href="/site.css?v=2" />
 </head>
 <body>
-<div class="bg"><div class="orb orb-1"></div><div class="orb orb-2"></div><div class="orb orb-3"></div></div>
-<div class="page">
-  <nav>
-    <a class="nav-logo" href="/"><div class="logo-icon">🐷</div><span>PigBank</span></a>
-    <div class="nav-links" aria-label="Navegação principal">
-      <a class="active" href="/whatsapp">WhatsApp</a>
+<div class="glow"></div>
+
+  <nav class="nav">
+    <a class="nav-logo" href="/"><img class="logo-badge" src="/brand/avatar.webp" alt="" /><span>PigBank</span></a>
+    <div class="nav-links">
       <a href="/funcionalidades">Funcionalidades</a>
-      <a href="/como-funciona">Como funciona</a><a href="/comandos">O que pedir</a>
+      <a href="/como-funciona">Como funciona</a>
       <a href="/precos">Preços</a>
-      <a href="/changelog">Novidades</a>
-      <a href="/suporte">Suporte</a>
+      <a href="/changelog">Blog</a>
+    </div>
+    <div class="nav-right">
+      <a class="link-entrar" href="/login">Entrar</a>
+      <a class="btn btn-primary" href="/cadastro">Começar agora</a>
     </div>
   </nav>
-  <main>
-    <section class="hero">
-      <div class="eyebrow">WhatsApp financeiro</div>
-      <h1>Controle seu dinheiro <span class="grad">mandando mensagem</span></h1>
-      <p>O PigBank transforma mensagens simples em registros financeiros organizados. Você envia o que aconteceu, o bot entende, categoriza e atualiza seu saldo.</p>
-      <div class="cta-row">
-        <a class="btn" href="/wa">💬 Abrir conversa com a Piggy</a>
-        <a class="btn secondary" href="/cadastro">Criar conta grátis</a>
+
+  <div class="wrap">
+
+    <section class="section" style="padding-bottom:40px">
+      <div class="section-head">
+        <div class="eyebrow">WhatsApp financeiro</div>
+        <h2>Controle seu dinheiro<br><span class="grad">mandando mensagem</span></h2>
+        <p>O PigBank transforma mensagens simples em registros financeiros organizados. Você envia o que aconteceu, a Piggy entende, categoriza e atualiza seu saldo.</p>
+      </div>
+      <div class="hero-cta" style="justify-content:center;margin-bottom:8px">
+        <a class="btn btn-primary btn-lg" href="/wa">💬 Abrir conversa com a Piggy</a>
+        <a class="btn btn-outline btn-lg" href="/cadastro">Criar conta grátis</a>
       </div>
     </section>
-    <section class="grid" aria-label="Recursos no WhatsApp">
-      <article class="card"><h2>Gastos e receitas</h2><p>Registre frases como "gastei 42 no almoço" ou "recebi 250 de freelance" sem abrir planilha.</p></article>
-      <article class="card"><h2>Cartões e faturas</h2><p>Controle compras no crédito, parcelamentos e vencimentos com mensagens curtas.</p></article>
-      <article class="card"><h2>Saldo e resumo</h2><p>Peça seu saldo, relatório do mês ou detalhes por categoria diretamente na conversa.</p></article>
+
+    <section style="padding-bottom:40px">
+      <div class="grid-3">
+        <div class="card feature-card"><div class="icon-box">💸</div><h3>Gastos e receitas</h3><p>Registre frases como "gastei 42 no almoço" ou "recebi 250 de freelance" sem abrir planilha.</p></div>
+        <div class="card feature-card"><div class="icon-box neon">💳</div><h3>Cartões e faturas</h3><p>Controle compras no crédito, parcelamentos e vencimentos com mensagens curtas.</p></div>
+        <div class="card feature-card"><div class="icon-box">📊</div><h3>Saldo e resumo</h3><p>Peça seu saldo, relatório do mês ou detalhes por categoria direto na conversa.</p></div>
+      </div>
     </section>
-    <section>
-      <h2 class="section-title">Exemplos de conversa</h2>
-      <div class="conversation">
+
+    <section style="padding-bottom:50px">
+      <div class="section-head" style="margin-bottom:28px"><h2>Exemplos de <span class="grad">conversa</span></h2></div>
+      <div class="chat-card" style="max-width:440px;margin:0 auto">
+        <div class="chat-head"><img src="/brand/avatar.webp" alt="" /> <strong>PigBank</strong><span class="online"><i></i> online</span></div>
         <div class="bubble user">Gastei 89,90 no mercado no débito</div>
-        <div class="bubble bot">Registrado em Mercado. Seu saldo foi atualizado.</div>
+        <div class="bubble bot">Registrado em <b>Mercado</b>. Seu saldo foi atualizado 👍</div>
         <div class="bubble user">Quanto gastei com comida esse mês?</div>
-        <div class="bubble bot">Você gastou R$ 432,70 em alimentação neste mês.</div>
+        <div class="bubble bot">Você gastou <b>R$ 432,70</b> em alimentação neste mês. 🍔</div>
       </div>
     </section>
-    <section class="grid">
-      <article class="card"><h3>Seguro para começar</h3><p>O acesso nasce pela sua conta PigBank, com vinculação do número de WhatsApp cadastrado.</p></article>
-      <article class="card"><h3>Feito para rotina</h3><p>O fluxo é rápido para você registrar antes de esquecer, inclusive fora de casa.</p></article>
+
+    <section style="padding-bottom:50px">
+      <div class="grid-2">
+        <div class="card feature-card"><div class="icon-box">🔒</div><h3>Seguro para começar</h3><p>O acesso nasce pela sua conta PigBank, com vinculação do número de WhatsApp cadastrado.</p></div>
+        <div class="card feature-card"><div class="icon-box neon">⚡</div><h3>Feito para a rotina</h3><p>O fluxo é rápido pra você registrar antes de esquecer, inclusive fora de casa.</p></div>
+      </div>
     </section>
-  </main>
-  <footer>
-    <p class="footer-copy">© 2026 PigBank</p>
-    <div class="footer-links">
-      <div class="footer-col footer-col-left"><span class="footer-title">Navegue</span><a href="/como-funciona">Como funciona</a><a href="/funcionalidades">Funcionalidades</a><a href="/whatsapp">WhatsApp</a></div>
-      <div class="footer-col footer-col-center"><span class="footer-title">Produto</span><a href="/precos">Preços</a><a href="/changelog">Novidades</a></div>
-      <div class="footer-col footer-col-right"><span class="footer-title">Institucional</span><a href="/termos">Termos de Uso</a><a href="/privacy">Política de Privacidade</a><a href="/suporte">Suporte</a><a href="mailto:contato@pigbankai.com">Contato</a></div>
+
+  </div>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <a class="nav-logo" href="/"><img class="logo-badge" src="/brand/avatar.webp" alt="" /><span>PigBank</span></a>
+        <p>Seu dinheiro, suas regras — direto no WhatsApp, com a IA da Piggy.</p>
+      </div>
+      <div class="footer-cols">
+        <div class="footer-col"><span class="footer-title">Navegue</span>
+          <a href="/funcionalidades">Funcionalidades</a>
+          <a href="/como-funciona">Como funciona</a>
+          <a href="/precos">Preços</a>
+          <a href="/changelog">Blog</a>
+        </div>
+        <div class="footer-col"><span class="footer-title">Produto</span>
+          <a href="/whatsapp">WhatsApp</a>
+          <a href="/comandos">O que pedir</a>
+          <a href="/suporte">Suporte</a>
+        </div>
+        <div class="footer-col"><span class="footer-title">Institucional</span>
+          <a href="/termos">Termos de Uso</a>
+          <a href="/privacy">Privacidade</a>
+          <a href="mailto:contato@pigbankai.com">Contato</a>
+        </div>
+      </div>
     </div>
+    <p class="footer-copy">© 2026 PigBank · Feito com 🐷</p>
   </footer>
-</div>
+
 </body>
 </html>

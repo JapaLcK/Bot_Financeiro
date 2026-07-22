@@ -4,146 +4,65 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Finalize seu cadastro — PigBank</title>
-<meta name="theme-color" content="#111111" />
-<link rel="stylesheet" href="/brand.css" />
+<meta name="robots" content="noindex" />
+<link rel="icon" type="image/png" href="/favicon.png" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+<meta name="theme-color" content="#0c0c0d" />
+<link rel="stylesheet" href="/brand.css?v=2" />
+<link rel="stylesheet" href="/site.css?v=2" />
 <style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-:root {
-  --glass-bg: rgba(255,255,255,0.07);
-  --glass-border: rgba(255,255,255,0.13);
-  --glass-shadow: 0 8px 32px rgba(0,0,0,0.35);
-  --radius: 22px;
-  --red: #f87171;
-  --text: rgba(255,255,255,0.92);
-  --text-2: rgba(255,255,255,0.52);
-  --text-3: rgba(255,255,255,0.35);
-  --ease: cubic-bezier(.4,0,.2,1);
-}
-body {
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
-  background: #111111; color: var(--text);
-  min-height: 100vh; display: flex; align-items: center; justify-content: center;
-  -webkit-font-smoothing: antialiased;
-}
-.bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
-.orb { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .38; animation: drift 18s ease-in-out infinite alternate; }
-.orb-1 { width:700px;height:700px;background:radial-gradient(circle,#C7186B,transparent 70%);top:-250px;left:-200px; }
-.orb-2 { width:500px;height:500px;background:radial-gradient(circle,#FF2D8E,transparent 70%);top:30%;right:-200px;animation-delay:-6s; }
-.orb-3 { width:450px;height:450px;background:radial-gradient(circle,#FF2D8E,transparent 70%);bottom:-150px;left:20%;animation-delay:-12s;opacity:.22; }
-@keyframes drift { 0%{transform:translate(0,0) scale(1)} 33%{transform:translate(40px,-30px) scale(1.05)} 66%{transform:translate(-20px,50px) scale(.97)} 100%{transform:translate(30px,20px) scale(1.03)} }
-.card {
-  position: relative; z-index: 2;
-  width: 100%; max-width: 460px; margin: 24px;
-  background: var(--glass-bg);
-  backdrop-filter: blur(32px) saturate(180%);
-  -webkit-backdrop-filter: blur(32px) saturate(180%);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius);
-  padding: 40px 36px;
-  box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255,255,255,.1);
-}
-.logo { display:flex; align-items:center; justify-content:center; gap:12px; margin-bottom:24px; }
-.logo-icon { width:42px; height:42px; border-radius:12px; background:linear-gradient(135deg, #FF2D8E, #C7186B); display:flex; align-items:center; justify-content:center; font-size:20px; }
-.logo-text { font-size:18px; font-weight:700; letter-spacing:-.3px; }
-h1 { font-size:22px; font-weight:700; margin-bottom:6px; text-align:center; }
-.subtitle { font-size:14px; color: var(--text-2); text-align:center; margin-bottom:24px; line-height:1.5; }
-.email-pill {
-  display:flex; align-items:center; gap:10px;
-  padding:10px 14px;
-  background:rgba(255,45,142,0.10);
-  border:1px solid rgba(255,45,142,0.25);
-  border-radius:12px;
-  font-size:13px; color:var(--text-2);
-  margin-bottom:24px;
-}
-.email-pill strong { color: var(--text); font-weight:500; word-break:break-all; }
-.email-pill svg { flex-shrink:0; }
-.field { margin-bottom: 16px; }
-label { display:block; font-size:12px; font-weight:600; color:var(--text-2); margin-bottom:7px; letter-spacing:.5px; text-transform:uppercase; }
-input[type=text], input[type=tel] {
-  width:100%; padding:12px 14px; background:rgba(255,255,255,0.06);
-  border:1px solid var(--glass-border); border-radius:12px; color:var(--text);
-  font-size:15px; outline:none; transition:border-color .2s var(--ease), background .2s;
-}
-input:focus { border-color:#FF2D8E; background:rgba(255,45,142,0.08); }
-.help { font-size:12px; color:var(--text-3); margin-top:6px; line-height:1.5; }
-.terms {
-  display:flex; align-items:flex-start; gap:10px;
-  margin: 14px 0 18px;
-  font-size:13px; color:var(--text-2); line-height:1.5;
-  cursor:pointer; user-select:none;
-}
-.terms input[type=checkbox] {
-  flex-shrink:0; margin-top:2px; width:16px; height:16px; accent-color:#FF2D8E; cursor:pointer;
-}
-.terms a { color: rgba(255,255,255,.85); border-bottom:1px solid rgba(255,255,255,.25); text-decoration:none; }
-.terms a:hover { color: var(--text); border-bottom-color: rgba(255,255,255,.5); }
-.btn {
-  width:100%; padding:13px; background:linear-gradient(135deg, #FF2D8E, #C7186B);
-  color:#fff; border:none; border-radius:12px; font-size:15px; font-weight:600; cursor:pointer;
-  transition:opacity .2s, transform .15s;
-}
-.btn:hover { opacity:.92; transform:translateY(-1px); }
-.btn:disabled { opacity:.5; cursor:not-allowed; transform:none; }
-.msg { border-radius:12px; padding:12px 14px; font-size:13.5px; line-height:1.5; margin-bottom:18px; display:none; }
-.msg.error { background:rgba(248,113,113,0.12); border:1px solid rgba(248,113,113,0.3); color:#fca5a5; }
-.msg.show { display:block; }
-.back { display:block; text-align:center; margin-top:18px; font-size:13px; color:var(--text-2); text-decoration:none; }
-.back:hover { color: var(--text); }
-.skeleton { color: var(--text-3); font-style: italic; }
+  .auth-error { display: none; background: rgba(255,45,45,.1); border: 1px solid rgba(255,45,45,.3); color: #ffb4b4; padding: 10px 13px; border-radius: 10px; font-size: .82rem; margin-bottom: 14px; line-height: 1.4; }
+  .auth-error.show { display: block; }
+  .email-pill { display: flex; align-items: center; gap: 9px; background: var(--bg-elev); border: 1px solid var(--line-2); border-radius: 12px; padding: 11px 14px; color: var(--ink-2); font-size: .86rem; margin-bottom: 18px; }
+  .email-pill svg { color: var(--pink); flex-shrink: 0; }
+  .email-pill strong { color: var(--ink); }
+  .email-pill .skeleton { color: var(--ink-3); }
+  .field .help { font-size: .74rem; color: var(--ink-3); margin-top: 6px; }
+  .back { display: inline-block; text-align: center; width: 100%; color: var(--ink-3); font-size: .84rem; margin-top: 16px; }
+  .back:hover { color: var(--pink); }
 </style>
-<script src="/static/auth-refresh.js"></script>
 </head>
 <body>
-<div class="bg">
-  <div class="orb orb-1"></div>
-  <div class="orb orb-2"></div>
-  <div class="orb orb-3"></div>
-</div>
-<div class="card">
-  <div class="logo">
-    <div class="logo-icon">🐷</div>
-    <span class="logo-text">PigBank</span>
-  </div>
-  <img src="/brand/mascot.webp" alt="" style="width:128px;height:auto;display:block;margin:2px auto 6px;filter:drop-shadow(0 8px 22px rgba(0,0,0,.45))" />
-  <h1>Quase lá!</h1>
-  <p class="subtitle">Só precisamos de mais alguns dados pra criar sua conta.</p>
+<div class="glow"></div>
 
-  <div class="email-pill">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-      <polyline points="22,6 12,13 2,6"/>
-    </svg>
-    <span>Conectado como <strong id="email-display" class="skeleton">carregando...</strong></span>
-  </div>
+  <nav class="nav">
+    <a class="nav-logo" href="/"><img class="logo-badge" src="/brand/avatar.webp" alt="" /><span>PigBank</span></a>
+    <div class="nav-right"><a class="link-entrar" href="/login">Entrar</a></div>
+  </nav>
 
-  <div class="msg error" id="msg-error"></div>
+  <div class="wrap auth-wrap">
+    <div class="auth-card">
+      <img src="/brand/mascot.webp" alt="" style="width:120px;height:auto;display:block;margin:0 auto 6px;filter:drop-shadow(0 8px 22px rgba(0,0,0,.45))" />
+      <h1>Quase lá!</h1>
+      <p class="auth-sub">Só precisamos de mais alguns dados pra criar sua conta.</p>
 
-  <form id="signup-form">
-    <div class="field">
-      <label for="name">Nome</label>
-      <input type="text" id="name" placeholder="Como podemos te chamar?" autocomplete="given-name" maxlength="50" required />
+      <div class="email-pill">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        <span>Conectado como <strong id="email-display" class="skeleton">carregando…</strong></span>
+      </div>
+
+      <div class="auth-error" id="msg-error"></div>
+
+      <form id="signup-form">
+        <div class="field">
+          <label for="name">Nome</label>
+          <input type="text" id="name" placeholder="Como podemos te chamar?" autocomplete="given-name" maxlength="50" required />
+        </div>
+        <div class="field">
+          <label for="phone">WhatsApp</label>
+          <input type="tel" id="phone" placeholder="(11) 99999-9999" autocomplete="tel" inputmode="tel" required />
+          <div class="help">Use o mesmo número de WhatsApp com que você vai falar com a Piggy.</div>
+        </div>
+        <label class="checkbox-row">
+          <input type="checkbox" id="accept-terms" />
+          <span>Li e aceito os <a href="/termos" target="_blank" rel="noopener" style="color:var(--pink)">Termos</a> e a <a href="/privacy" target="_blank" rel="noopener" style="color:var(--pink)">Política de Privacidade</a> do PigBank.</span>
+        </label>
+        <button type="submit" class="btn btn-primary btn-block btn-lg" id="submit-btn" disabled>Criar minha conta</button>
+      </form>
+
+      <a href="/" class="back">Cancelar</a>
     </div>
-    <div class="field">
-      <label for="phone">WhatsApp</label>
-      <input type="tel" id="phone" placeholder="(11) 99999-9999" autocomplete="tel" inputmode="tel" required />
-      <div class="help">Use o mesmo número de WhatsApp com que você vai falar com o bot.</div>
-    </div>
-
-    <label class="terms">
-      <input type="checkbox" id="accept-terms" />
-      <span>
-        Li e aceito a
-        <a href="/privacy" target="_blank" rel="noopener">Política de Privacidade</a>
-        do PigBank.
-      </span>
-    </label>
-
-    <button type="submit" class="btn" id="submit-btn" disabled>Criar minha conta</button>
-  </form>
-
-  <a href="/" class="back">Cancelar</a>
-</div>
+  </div>
 
 <script>
 const params = new URLSearchParams(window.location.search);
@@ -153,90 +72,49 @@ const submitBtn = document.getElementById("submit-btn");
 const emailDisplay = document.getElementById("email-display");
 const nameInput = document.getElementById("name");
 
-function getCookie(name) {
-  return document.cookie.split("; ").find(row => row.startsWith(`${name}=`))?.split("=")[1] || "";
-}
-function csrfHeaders(extra = {}) {
-  const csrf = decodeURIComponent(getCookie("csrf_token") || "");
-  return csrf ? { ...extra, "X-CSRF-Token": csrf } : { ...extra };
-}
-function showError(msg) {
-  msgError.textContent = msg;
-  msgError.classList.add("show");
-}
-function hideError() {
-  msgError.textContent = "";
-  msgError.classList.remove("show");
-}
+function getCookie(name) { return document.cookie.split("; ").find(function(r){ return r.indexOf(name + "=") === 0; })?.split("=")[1] || ""; }
+function csrfHeaders(extra) { extra = extra || {}; var c = decodeURIComponent(getCookie("csrf_token") || ""); if (c) extra["X-CSRF-Token"] = c; return extra; }
+function showError(msg) { msgError.textContent = msg; msgError.classList.add("show"); }
+function hideError() { msgError.textContent = ""; msgError.classList.remove("show"); }
 
 async function loadPending() {
-  if (!signupToken) {
-    showError("Link inválido. Inicie o login com Google novamente.");
-    submitBtn.disabled = true;
-    emailDisplay.textContent = "—";
-    return;
-  }
+  if (!signupToken) { showError("Link inválido. Inicie o login com Google novamente."); submitBtn.disabled = true; emailDisplay.textContent = "—"; return; }
   try {
-    const res = await fetch(`/auth/google/pending/${encodeURIComponent(signupToken)}`, {
-      credentials: "same-origin"
-    });
+    const res = await fetch("/auth/google/pending/" + encodeURIComponent(signupToken), { credentials: "same-origin" });
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json().catch(function(){ return {}; });
       showError(data.detail || "Cadastro expirado. Faça login com Google novamente.");
-      submitBtn.disabled = true;
-      emailDisplay.textContent = "—";
-      return;
+      submitBtn.disabled = true; emailDisplay.textContent = "—"; return;
     }
     const data = await res.json();
     emailDisplay.textContent = data.email || "—";
     emailDisplay.classList.remove("skeleton");
     if (data.name_hint) nameInput.value = data.name_hint;
-  } catch (e) {
-    showError("Falha ao carregar dados. Recarregue a página.");
-    submitBtn.disabled = true;
-  }
+  } catch (e) { showError("Falha ao carregar dados. Recarregue a página."); submitBtn.disabled = true; }
 }
 
 const acceptCheckbox = document.getElementById("accept-terms");
-acceptCheckbox.addEventListener("change", () => {
-  submitBtn.disabled = !acceptCheckbox.checked;
-});
+acceptCheckbox.addEventListener("change", function () { submitBtn.disabled = !acceptCheckbox.checked; });
 
-document.getElementById("signup-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  hideError();
-
+document.getElementById("signup-form").addEventListener("submit", async function (e) {
+  e.preventDefault(); hideError();
   const name = nameInput.value.trim();
   const phone = document.getElementById("phone").value.trim();
   const accepted = document.getElementById("accept-terms").checked;
-
   if (name.length < 2) return showError("O nome deve ter pelo menos 2 caracteres.");
   if (!phone) return showError("Informe seu número de WhatsApp.");
-  if (!accepted) return showError("Você precisa aceitar a Política de Privacidade pra continuar.");
-
-  submitBtn.disabled = true;
-  submitBtn.textContent = "Criando conta...";
-
+  if (!accepted) return showError("Você precisa aceitar os termos pra continuar.");
+  submitBtn.disabled = true; submitBtn.textContent = "Criando conta…";
   try {
     const res = await fetch("/auth/google/complete-signup", {
-      method: "POST",
-      credentials: "same-origin",
+      method: "POST", credentials: "same-origin",
       headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ token: signupToken, name, phone, accepted_terms: true })
+      body: JSON.stringify({ token: signupToken, name: name, phone: phone, accepted_terms: true })
     });
-    const data = await res.json();
-    if (!res.ok) {
-      showError(data.detail || "Não foi possível criar sua conta.");
-      submitBtn.disabled = false;
-      submitBtn.textContent = "Criar minha conta";
-      return;
-    }
+    const data = await res.json().catch(function(){ return {}; });
+    if (!res.ok) { showError(data.detail || "Não foi possível criar sua conta."); submitBtn.disabled = false; submitBtn.textContent = "Criar minha conta"; return; }
     window.location.replace(data.dashboard_url || "/home");
-  } catch (err) {
-    showError(`Erro de conexão. ${err?.message || "Tente novamente."}`);
-    submitBtn.disabled = false;
-    submitBtn.textContent = "Criar minha conta";
-  }
+  } catch (err) { showError("Erro de conexão. Tente novamente."); submitBtn.disabled = false; submitBtn.textContent = "Criar minha conta"; }
 });
 
 loadPending();
