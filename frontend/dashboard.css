@@ -834,6 +834,8 @@ header {
 .logo { width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#FF2D8E,#C7186B);
   display:flex;align-items:center;justify-content:center;font-size:1rem;
   box-shadow:0 4px 12px rgba(255,45,142,.4); }
+.logo-img { width:36px;height:36px;border-radius:10px;object-fit:cover;display:block;
+  box-shadow:0 4px 12px rgba(255,45,142,.4); }
 header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 
 .month-nav { display:flex; align-items:center; }
