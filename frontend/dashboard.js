@@ -7307,6 +7307,9 @@ function render(d) {
     <button class="hbtn" type="button" onclick="openCardModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Novo</button>
     <button class="btn-pay-bill" type="button" onclick="openPayBillModal()">💳 Pagar fatura</button>`;
 
+  const pocketActions = `
+    <button class="hbtn" type="button" onclick="openGoalEditModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Nova</button>`;
+
   // Poucos itens dos dois lados → mescla numa faixa só; senão, seções separadas.
   const mergeStrips = nPk > 0 && nCc > 0 && (nPk + nCc) <= 4;
   let stripsHtml;
@@ -7314,12 +7317,15 @@ function render(d) {
     stripsHtml = `
     <div class="ov-section-head">
       <div class="ov-section-lbl" style="margin:0">Caixinhas e cartões</div>
-      <div class="ov-section-actions">${cardActions}</div>
+      <div class="ov-section-actions">${pocketActions}${cardActions}</div>
     </div>
     <div class="ov-pockets">${pocketTiles}${cardTiles}</div>`;
   } else {
     stripsHtml = `
-    ${nPk ? `<div class="ov-section-lbl">Caixinhas</div>
+    ${nPk ? `<div class="ov-section-head">
+      <div class="ov-section-lbl" style="margin:0">Caixinhas</div>
+      <div class="ov-section-actions">${pocketActions}</div>
+    </div>
     <div class="ov-pockets ov-strip-capped">${pocketTiles}</div>` : ""}
     ${nCc ? `<div class="ov-section-head">
       <div class="ov-section-lbl" style="margin:0">Cartões</div>
