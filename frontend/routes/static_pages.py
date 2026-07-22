@@ -243,11 +243,13 @@ async def serve_dashboard_mobile_css():
 
 @router.get("/site.css")
 async def serve_site_css():
-    """Sistema de design do site de marketing (protótipo v2)."""
+    """Sistema de design do site de marketing (protótipo v2).
+    no-cache: revalida sempre (304 se não mudou) — o site está em iteração
+    ativa, então mudanças de CSS precisam aparecer na hora."""
     return FileResponse(
         FRONTEND_DIR / "site.css",
         media_type="text/css",
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers={"Cache-Control": "no-cache"},
     )
 
 

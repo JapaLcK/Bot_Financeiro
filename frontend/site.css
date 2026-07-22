@@ -140,8 +140,8 @@ img { max-width: 100%; display: block; }
 
 /* ─── Footer ────────────────────────────────────────────────────────── */
 .footer { border-top: 1px solid var(--line); margin-top: 40px; padding: 46px 0 40px; }
-.footer-inner { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 40px; align-items: start; }
-.footer-brand { max-width: 300px; }
+.footer-inner { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 40px; align-items: start; justify-items: start; }
+.footer-brand { max-width: 320px; }
 .footer-brand .nav-logo { margin-bottom: 12px; }
 .footer-brand p { color: var(--ink-3); font-size: .86rem; line-height: 1.6; }
 .footer-cols { display: contents; }
