@@ -2442,7 +2442,7 @@ function openGoalEditModal(goal) {
     color: isEdit ? (goal.color || "#FF2D8E") : "#FF2D8E",
     original_name: isEdit ? goal.name : null,
   };
-  document.getElementById("goal-edit-title").textContent = isEdit ? "Editar meta" : "Nova meta";
+  document.getElementById("goal-edit-title").textContent = isEdit ? "Editar meta" : "Nova caixinha / meta";
   document.getElementById("goal-name").value = isEdit ? goal.name : "";
   document.getElementById("goal-target").value = isEdit && goal.target_amount != null ? Number(goal.target_amount).toFixed(2) : "";
   document.getElementById("goal-target-date").value = isEdit && goal.target_date ? goal.target_date : "";
