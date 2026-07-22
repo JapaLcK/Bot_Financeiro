@@ -408,23 +408,27 @@ async def get_financial_data(
             """
             SELECT
                 CASE
-                    WHEN tipo = 'deposito_caixinha' THEN 'pockets'
+                    WHEN tipo IN ('deposito_caixinha', 'saque_caixinha') THEN 'pockets'
                     ELSE 'investments'
                 END AS bucket,
                 alvo,
-                SUM(valor) AS total,
+                SUM(CASE WHEN tipo IN ('saque_caixinha', 'resgate_investimento')
+                         THEN -valor ELSE valor END) AS total,
                 COUNT(*)   AS count
             FROM launches
             WHERE user_id = %s
               AND criado_em >= %s AND criado_em < %s
               AND is_internal_movement = true
               AND (
-                tipo IN ('aporte_investimento', 'deposito_caixinha')
+                tipo IN ('aporte_investimento', 'deposito_caixinha',
+                         'saque_caixinha', 'resgate_investimento')
                 OR (tipo = 'despesa' AND LOWER(REPLACE(COALESCE(categoria, ''), ' ', '_')) IN (
                     'investimentos', 'investimento_aporte', 'criptomoedas'
                 ))
               )
             GROUP BY bucket, alvo
+            HAVING SUM(CASE WHEN tipo IN ('saque_caixinha', 'resgate_investimento')
+                            THEN -valor ELSE valor END) > 0
             ORDER BY bucket, total DESC
             """,
             (user_id, month_start, month_end),
