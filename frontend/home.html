@@ -4,7 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>PigBank · Início</title>
-<link rel="icon" type="image/png" href="/favicon.png" />
+<link rel="icon" type="image/png" href="/favicon.png?v=2" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=2" />
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#111111" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -208,6 +209,7 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 .stat-icon.red    { background:rgba(248,113,113,.16); color:var(--red); }
 .stat-icon.blue   { background:rgba(255,128,184,.16); color:var(--blue); }
 .stat-icon.purple { background:rgba(255,45,142,.16); color:var(--purple); }
+.stat-icon svg { width:15px; height:15px; }
 .bignum { font-size:1.95rem; font-weight:740; letter-spacing:-.04em; line-height:1; margin-bottom:6px; font-variant-numeric:tabular-nums; }
 .bignum-sub { font-size:.78rem; color:var(--text-2); }
 .delta { font-size:.78rem; font-weight:700; }
@@ -448,22 +450,22 @@ footer a:hover { color:var(--text); }
     <div class="section-title">Resumo</div>
     <div class="stats-grid">
       <a class="stat-card" href="/app">
-        <div class="stat-head"><span class="stat-icon green">💰</span>Saldo</div>
+        <div class="stat-head"><span class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v3m0 4v3a1 1 0 0 1-1 1H5a2 2 0 0 1-2-2V5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></span>Saldo</div>
         <div class="bignum" id="stat-balance"><span class="sk" style="height:30px;width:120px"></span></div>
         <div class="bignum-sub">Conta corrente</div>
       </a>
       <a class="stat-card" href="/app">
-        <div class="stat-head"><span class="stat-icon red">📉</span>Gastos do mês</div>
+        <div class="stat-head"><span class="stat-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 17 13.5 8.5l-4 4L2 5"/><path d="M16 17h6v-6"/></svg></span>Gastos do mês</div>
         <div class="bignum" id="stat-expense"><span class="sk" style="height:30px;width:120px"></span></div>
         <div class="bignum-sub" id="stat-expense-delta">vs mês passado</div>
       </a>
       <a class="stat-card" href="/app" id="stat-bill-link">
-        <div class="stat-head"><span class="stat-icon purple">🧾</span>Próxima fatura</div>
+        <div class="stat-head"><span class="stat-icon purple"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v20l2-1.5L8 22l2-1.5L12 22l2-1.5L16 22l2-1.5L20 22V2l-2 1.5L16 2l-2 1.5L12 2l-2 1.5L8 2 6 3.5 4 2Z"/><path d="M8 7h8M8 11h8M8 15h5"/></svg></span>Próxima fatura</div>
         <div class="bignum" id="stat-bill"><span class="sk" style="height:30px;width:120px"></span></div>
         <div class="bignum-sub" id="stat-bill-sub">—</div>
       </a>
       <a class="stat-card" href="/app" id="stat-pockets-link">
-        <div class="stat-head"><span class="stat-icon blue">📦</span>Reservas</div>
+        <div class="stat-head"><span class="stat-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/></svg></span>Reservas</div>
         <div class="bignum" id="stat-pockets"><span class="sk" style="height:30px;width:120px"></span></div>
         <div class="bignum-sub" id="stat-pockets-sub">—</div>
       </a>
