@@ -1055,6 +1055,16 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
 .ov-section-head { display:flex; align-items:center; justify-content:space-between; gap:12px;
   margin:4px 0 10px 2px; flex-wrap:wrap; }
 .ov-section-actions { display:flex; gap:8px; }
+.ov-section-head-grp { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+/* Botões "+ Nova"/"+ Novo" em rosa (create actions) */
+.hbtn.hbtn-pink,
+body.light .hbtn.hbtn-pink {
+  background:rgba(255,45,142,.14); border-color:rgba(255,45,142,.5); color:#FF2D8E;
+}
+.hbtn.hbtn-pink:hover,
+body.light .hbtn.hbtn-pink:hover {
+  background:rgba(255,45,142,.24); border-color:rgba(255,45,142,.75); color:#FF2D8E;
+}
 .ov-cc-grid { grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
 .ov-cc .ov-pk-top { align-items:center; }
 .ov-cc-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

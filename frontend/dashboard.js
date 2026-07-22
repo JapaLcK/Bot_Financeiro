@@ -7304,11 +7304,11 @@ function render(d) {
   }).join("");
 
   const cardActions = `
-    <button class="hbtn" type="button" onclick="openCardModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Novo</button>
+    <button class="hbtn hbtn-pink" type="button" onclick="openCardModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Novo</button>
     <button class="btn-pay-bill" type="button" onclick="openPayBillModal()">💳 Pagar fatura</button>`;
 
   const pocketActions = `
-    <button class="hbtn" type="button" onclick="openGoalEditModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Nova</button>`;
+    <button class="hbtn hbtn-pink" type="button" onclick="openGoalEditModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Nova</button>`;
 
   // Poucos itens dos dois lados → mescla numa faixa só; senão, seções separadas.
   const mergeStrips = nPk > 0 && nCc > 0 && (nPk + nCc) <= 4;
@@ -7316,8 +7316,11 @@ function render(d) {
   if (mergeStrips) {
     stripsHtml = `
     <div class="ov-section-head">
-      <div class="ov-section-lbl" style="margin:0">Caixinhas e cartões</div>
-      <div class="ov-section-actions">${pocketActions}${cardActions}</div>
+      <div class="ov-section-head-grp">
+        <div class="ov-section-lbl" style="margin:0">Caixinhas e cartões</div>
+        <div class="ov-section-actions">${pocketActions}</div>
+      </div>
+      <div class="ov-section-actions">${cardActions}</div>
     </div>
     <div class="ov-pockets">${pocketTiles}${cardTiles}</div>`;
   } else {
