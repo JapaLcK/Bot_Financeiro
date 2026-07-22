@@ -5,7 +5,7 @@ finance_bot_websocket_custom.py sem mudança de comportamento.
 """
 
 from fastapi import APIRouter
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from frontend.routes.shared import FRONTEND_DIR, html_file, public_site_url
 
@@ -310,6 +310,25 @@ async def serve_brand_asset(path: str):
         media_type=media,
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
+
+
+@router.get("/wa")
+async def open_whatsapp_bot():
+    """Abre o chat DIRETO com a Piggy no WhatsApp (deep link), com saudação
+    pré-preenchida. Botões do site apontam pra cá — o número real fica no
+    servidor (WHATSAPP_NUMBER), nada hardcoded no HTML. Serve pra reencontrar
+    o bot rápido. Sem número configurado, cai no seletor genérico do WhatsApp."""
+    import os
+    import urllib.parse
+
+    text = urllib.parse.quote("Oi Piggy! Quero acessar minha conta PigBank 🐷")
+    number = "".join(ch for ch in os.getenv("WHATSAPP_NUMBER", "") if ch.isdigit())
+    url = (
+        f"https://api.whatsapp.com/send?phone={number}&text={text}"
+        if number
+        else f"https://wa.me/?text={text}"
+    )
+    return RedirectResponse(url, status_code=302)
 
 
 @router.get("/health")
