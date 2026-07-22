@@ -7315,12 +7315,15 @@ function render(d) {
   let stripsHtml;
   if (mergeStrips) {
     stripsHtml = `
-    <div class="ov-section-head">
-      <div class="ov-section-head-grp">
-        <div class="ov-section-lbl" style="margin:0">Caixinhas e cartões</div>
+    <div class="ov-section-head-merged">
+      <div class="ov-merge-half">
+        <div class="ov-section-lbl" style="margin:0">Caixinhas</div>
         <div class="ov-section-actions">${pocketActions}</div>
       </div>
-      <div class="ov-section-actions">${cardActions}</div>
+      <div class="ov-merge-half">
+        <div class="ov-section-lbl" style="margin:0">Cartões</div>
+        <div class="ov-section-actions">${cardActions}</div>
+      </div>
     </div>
     <div class="ov-pockets">${pocketTiles}${cardTiles}</div>`;
   } else {

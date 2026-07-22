@@ -1056,6 +1056,10 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
   margin:4px 0 10px 2px; flex-wrap:wrap; }
 .ov-section-actions { display:flex; gap:8px; }
 .ov-section-head-grp { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+/* Header mesclado: duas metades alinhadas às colunas de tiles, botão no canto direito de cada área */
+.ov-section-head-merged { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:4px 0 10px 2px; }
+.ov-merge-half { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; min-width:0; }
+@media(max-width:600px){ .ov-section-head-merged{grid-template-columns:1fr} }
 /* Botões "+ Nova"/"+ Novo" em rosa (create actions) */
 .hbtn.hbtn-pink,
 body.light .hbtn.hbtn-pink {
