@@ -1030,8 +1030,10 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
   color:var(--text-3); margin:4px 0 -8px 2px; }
 
 .ov-pockets { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px; }
-/* Modo separado (muitos itens): tiles não esticam além de um tamanho confortável */
-.ov-strip-capped > * { max-width:380px; }
+/* Modo separado (muitos itens): tiles agrupados à ESQUERDA (flex left-pack),
+   largura confortável, vazio à direita — em vez do grid auto-fit que espalha */
+.ov-strip-capped { display:flex; flex-wrap:wrap; }
+.ov-strip-capped > * { flex:1 1 260px; max-width:380px; }
 .ov-pk {
   background:var(--glass-bg); border:1px solid var(--glass-border); border-radius:16px; padding:15px;
   cursor:pointer; transition:transform .18s var(--ease),border-color .18s var(--ease);
