@@ -997,7 +997,7 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
 
 /* ─── Grid ──────────────────────────────────────────────────────────── */
 .grid { display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); }
-.grid.charts-grid { grid-template-columns:1fr 2fr; }
+.grid.charts-grid { grid-template-columns:1.6fr 1fr; }
 @media(max-width:860px) { .grid.charts-grid{grid-template-columns:1fr} }
 
 /* ═══ Visão geral — redesign v2 (stat cards + faixas) ═══════════════════ */
@@ -1048,6 +1048,21 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
 .ov-pk .ov-pk-goal { font-size:.71rem; color:var(--text-3); margin-top:7px; }
 
 .ov-cards { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); }
+
+/* faixa de Cartões (mesmo padrão das caixinhas + badge de status) */
+.ov-section-head { display:flex; align-items:center; justify-content:space-between; gap:12px;
+  margin:4px 0 10px 2px; flex-wrap:wrap; }
+.ov-section-actions { display:flex; gap:8px; }
+.ov-cc-grid { grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); }
+.ov-cc .ov-pk-top { align-items:center; }
+.ov-cc-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ov-cc-status { flex-shrink:0; font-size:.6rem; font-weight:700; text-transform:uppercase;
+  letter-spacing:.04em; padding:3px 8px; border-radius:999px; }
+.ov-cc-status.s-open  { background:rgba(255,45,142,.16); color:var(--purple); }
+.ov-cc-status.s-paid  { background:rgba(0,240,120,.16);  color:var(--green); }
+.ov-cc-status.s-due   { background:rgba(255,45,45,.16);  color:var(--red); }
+.ov-cc-status.s-empty { background:rgba(255,255,255,.06); color:var(--text-3); }
+.ov-cc-sub { font-size:.68rem; color:var(--text-3); margin:-5px 0 8px; }
 @media(max-width:600px) { .page{padding:12px 10px 48px} header{flex-direction:column;align-items:flex-start}.user-menu,.user-menu-btn{width:100%;max-width:none}.user-dropdown{left:0;right:auto;width:min(100%,300px)} }
 
 /* ─── Skeleton ──────────────────────────────────────────────────────── */
@@ -1476,6 +1491,7 @@ body.light .chip-val.b { background:linear-gradient(135deg, #C7186B, #FF2D8E); -
 .chart-wrap { position:relative;width:100%; }
 .chart-wrap.donut { max-width:230px;margin:0 auto; }
 .chart-wrap.bar   { height:210px; }
+.chart-wrap.line  { height:240px; }
 
 /* ─── Toast ─────────────────────────────────────────────────────────── */
 #toast { position:fixed;bottom:26px;right:26px;z-index:999;

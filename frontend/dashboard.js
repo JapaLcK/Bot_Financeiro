@@ -7049,12 +7049,16 @@ function buildDayChart(daily) {
   const isCurrent = viewYear === NOW.getFullYear() && viewMonth === NOW.getMonth() + 1;
   const today = isCurrent ? NOW.getDate() : daysInMonth;
   const labels = Array.from({length:daysInMonth},(_,i)=>i+1);
-  const bg = labels.map((_,i) => i<today-1?"rgba(167,139,250,.65)":i===today-1?"rgba(167,139,250,1)":"rgba(167,139,250,.12)");
-  const br = labels.map((_,i) => i<=today-1?"rgba(167,139,250,1)":"rgba(167,139,250,.2)");
   if (chartDay) chartDay.destroy();
   chartDay = new Chart(el, {
-    type:"bar",
-    data:{ labels, datasets:[{ label:"Gastos",data:totals,backgroundColor:bg,borderColor:br,borderWidth:1,borderRadius:5,borderSkipped:false }] },
+    type:"line",
+    data:{ labels, datasets:[{
+      label:"Gastos", data:totals,
+      borderColor:"#FF2D8E", borderWidth:2.5,
+      fill:true, backgroundColor:"rgba(255,45,142,.14)",
+      tension:.4, pointRadius:0, pointHoverRadius:5,
+      pointHoverBackgroundColor:"#FF2D8E", pointHoverBorderColor:"#fff", pointHoverBorderWidth:2
+    }] },
     options:{
       responsive:true,maintainAspectRatio:false,
       scales:{
@@ -7273,6 +7277,38 @@ function render(d) {
       </div>`;
     }).join("")}</div>` : "";
 
+  const cardsStrip = (d.credit_cards||[]).length ? `
+    <div class="ov-section-head">
+      <div class="ov-section-lbl" style="margin:0">Cartões</div>
+      <div class="ov-section-actions">
+        <button class="hbtn" type="button" onclick="openCardModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Novo</button>
+        <button class="btn-pay-bill" type="button" onclick="openPayBillModal()">💳 Pagar fatura</button>
+      </div>
+    </div>
+    <div class="ov-pockets ov-cc-grid">${d.credit_cards.map((c,i)=>{
+      const due   = c.due_amount != null ? c.due_amount : Math.max(0, (c.total||0) - (c.paid_amount||0));
+      const total = c.total || 0;
+      const paid  = c.paid_amount || 0;
+      const hasData = total > 0 || paid > 0;
+      const periodLabel = c.period_label || '';
+      let statusCls = 's-empty', statusTxt = 'Sem fatura';
+      if (c.status === 'paid') { statusCls = 's-paid'; statusTxt = 'Paga'; }
+      else if (c.status === 'overdue' || c.status === 'vencida') { statusCls = 's-due'; statusTxt = 'Vencida'; }
+      else if (hasData) { statusCls = 's-open'; statusTxt = 'Em aberto'; }
+      const showProgress = paid > 0 && total > 0 && c.status !== 'paid';
+      const pctPaid = showProgress ? Math.min(100, Math.round((paid/total)*100)) : 0;
+      const dueLbl = c.due_day ? `Vence dia ${c.due_day}` : (c.closing_day ? `Fecha dia ${c.closing_day}` : '');
+      const barCls = (i%2===1) ? "neon" : "";
+      const clickAttr = c.id ? ` role="button" tabindex="0" data-card-id="${c.id}" onclick="onCardRowClick(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onCardRowClick(this);}"` : '';
+      return `<div class="ov-pk ov-cc"${clickAttr}>
+        <div class="ov-pk-top"><span class="ov-pk-ico">💳</span><span class="ov-cc-name">${esc(c.name)}</span><span class="ov-cc-status ${statusCls}">${statusTxt}</span></div>
+        <div class="ov-cc-sub">${hasData ? (periodLabel ? `Fatura ${periodLabel}` : 'Fatura atual') : 'Sem fatura aberta'}</div>
+        <div class="ov-pk-val"><span data-num="cc_${esc(c.name)}" data-val="${due}">${hasData ? fmt(due) : 'R$ —'}</span></div>
+        ${showProgress ? `<div class="ov-pk-bar"><i class="${barCls}" style="width:${pctPaid}%"></i></div>` : ''}
+        <div class="ov-pk-goal">${[dueLbl, showProgress ? `${pctPaid}% pago` : ''].filter(Boolean).join(' · ') || '—'}</div>
+      </div>`;
+    }).join("")}</div>` : "";
+
   const svgWallet  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v3m0 4v3a1 1 0 0 1-1 1H5a2 2 0 0 1-2-2V5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>';
   const svgTrend   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 7 13.5 15.5l-4-4L2 19"/><path d="M16 7h6v6"/></svg>';
   const svgReceipt = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v20l2-1.5L8 22l2-1.5L12 22l2-1.5L16 22l2-1.5L20 22V2l-2 1.5L16 2l-2 1.5L12 2l-2 1.5L8 2 6 3.5 4 2Z"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>';
@@ -7307,6 +7343,7 @@ function render(d) {
       </div>
     </div>
     ${pocketsStrip}
+    ${cardsStrip}
     <div class="ov-cards">
 
     <div class="card" style="animation-delay:180ms">
@@ -7331,53 +7368,6 @@ function render(d) {
           }).join("");
         })()
       }
-    </div>
-
-    <div class="card" style="animation-delay:240ms">
-      <div class="cards-section-head">
-        <h2>Cartões de Crédito</h2>
-        <div style="display:flex;gap:8px">
-          <button class="hbtn" type="button" onclick="openCardModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Novo</button>
-          <button class="btn-pay-bill" type="button" onclick="openPayBillModal()">💳 Pagar fatura</button>
-        </div>
-      </div>
-      ${!(d.credit_cards||[]).length?'<div class="wallet-empty">Nenhum cartão.</div>':
-        `<div class="wallet" style="--n:${d.credit_cards.length}">${d.credit_cards.map((c,i)=>{
-          const due   = c.due_amount != null ? c.due_amount : Math.max(0, (c.total||0) - (c.paid_amount||0));
-          const total = c.total || 0;
-          const paid  = c.paid_amount || 0;
-          const hasData = total > 0 || paid > 0;
-          const billRef = c.id ? ` data-card-id="${c.id}"` : '';
-          const periodLabel = c.period_label || '';
-          const colorCls = `color-${c.color || 'purple'}`;
-
-          let statusCls = 's-empty', statusTxt = 'Sem fatura';
-          if (c.status === 'paid') { statusCls = 's-paid'; statusTxt = 'Paga'; }
-          else if (c.status === 'overdue' || c.status === 'vencida') { statusCls = 's-due'; statusTxt = 'Vencida'; }
-          else if (hasData) { statusCls = 's-open'; statusTxt = 'Em aberto'; }
-
-          const showProgress = paid > 0 && total > 0 && c.status !== 'paid';
-          const pctPaid = showProgress ? Math.min(100, Math.round((paid/total)*100)) : 0;
-
-          const dueLbl = c.due_day ? `Vence dia ${c.due_day}` : (c.closing_day ? `Fecha dia ${c.closing_day}` : '');
-
-          return `<div class="wallet-item ${colorCls}">
-            <div class="wallet-trigger"${billRef} title="Arraste pra reordenar"></div>
-            <div class="wallet-head">
-              <div class="wallet-name"><span class="wallet-icon">💳</span><span>${esc(c.name)}</span></div>
-              <button type="button" class="wallet-status ${statusCls}"${billRef} onclick="onCardRowClick(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onCardRowClick(this);}" title="Ver detalhes da fatura">${statusTxt}</button>
-            </div>
-            <div class="wallet-body">
-              <span class="wallet-due" data-num="cc_${c.name}" data-val="${due}">${hasData ? fmt(due) : 'R$ —'}</span>
-              <span class="wallet-due-sub">${hasData ? (periodLabel ? `Fatura ${periodLabel}` : 'Fatura atual') : 'Sem fatura aberta'}</span>
-            </div>
-            ${showProgress ? `<div class="wallet-progress"><div class="wallet-progress-fill" style="width:${pctPaid}%"></div></div>` : ''}
-            <div class="wallet-meta">
-              <span>${dueLbl || '—'}</span>
-              ${showProgress ? `<span>${pctPaid}% pago</span>` : ''}
-            </div>
-          </div>`;
-        }).join("")}</div>`}
     </div>
 
     <div class="card" style="animation-delay:300ms">
