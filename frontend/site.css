@@ -327,6 +327,71 @@ a.article:hover .article-source-cta { text-decoration: underline; }
 .card-sticker { width: 104px; height: 104px; object-fit: contain; filter: drop-shadow(0 8px 18px rgba(0,0,0,.45)); transition: transform .2s ease; }
 a.article:hover .card-sticker { transform: scale(1.07) rotate(-3deg); }
 
+/* ── Blocos ricos embutidos no corpo dos guias (.guide-prose) ─────────────── */
+/* 1 — Callout "Dica da Piggy" */
+.guide-prose .g-callout { display: flex; gap: 15px; background: var(--pink-soft); border: 1px solid rgba(255,45,142,.28); border-left: 3px solid var(--pink); border-radius: 14px; padding: 17px 19px; margin: 26px 0; }
+.g-callout-ico { font-size: 1.6rem; line-height: 1; flex: none; margin-top: 2px; }
+.g-callout-k { display: block; color: var(--pink); font-weight: 800; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 5px; }
+.guide-prose .g-callout p { margin: 0; color: var(--ink); font-size: 1.02rem; }
+/* 2 — Números grandes */
+.g-stats { display: flex; align-items: stretch; gap: 10px; flex-wrap: wrap; margin: 28px 0; }
+.g-stat { flex: 1; min-width: 128px; background: var(--card-2); border: 1px solid var(--line); border-radius: 14px; padding: 18px; text-align: center; }
+.g-stat .n { display: block; font-size: 1.8rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--ink); }
+.g-stat.win { border-color: rgba(198,241,26,.35); background: rgba(198,241,26,.06); }
+.g-stat.win .n { color: var(--neon); }
+.g-stat .l { display: block; color: var(--ink-3); font-size: .8rem; margin-top: 4px; }
+.g-arrow { display: flex; align-items: center; color: var(--ink-3); font-size: 1.2rem; }
+/* 3 — Gráfico */
+.g-chart { margin: 28px 0; background: var(--card-2); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
+.g-chart-t { font-weight: 700; font-size: 1rem; color: var(--ink); }
+.g-chart-s { color: var(--ink-3); font-size: .82rem; margin: 2px 0 14px; }
+.g-chart figcaption { color: var(--ink-3); font-size: .8rem; margin-top: 10px; }
+/* 4 — Barras por categoria */
+.g-bars { display: flex; flex-direction: column; gap: 11px; margin: 26px 0; }
+.g-bar { display: grid; grid-template-columns: 110px 1fr 48px; align-items: center; gap: 12px; }
+.g-bar-l { color: var(--ink-2); font-size: .9rem; }
+.g-bar-track { height: 11px; background: rgba(255,255,255,.06); border-radius: 999px; overflow: hidden; }
+.g-bar-f { height: 100%; border-radius: 999px; background: linear-gradient(90deg, rgba(255,45,142,.55), var(--pink)); }
+.g-bar.top .g-bar-f { background: linear-gradient(90deg, var(--pink), var(--neon)); }
+.g-bar-v { color: var(--ink); font-weight: 700; font-size: .88rem; text-align: right; font-variant-numeric: tabular-nums; }
+/* 5 — Barra de meta / 6 — Card de caixinha (réplica do produto) */
+.g-goal, .g-cardshot { background: var(--card-2); border: 1px solid var(--line); border-radius: 16px; padding: 20px; margin: 28px 0; }
+.g-goal-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 13px; }
+.g-goal-name { font-weight: 700; color: var(--ink); }
+.g-goal-pct { color: var(--neon); font-weight: 800; font-variant-numeric: tabular-nums; }
+.g-track { height: 15px; background: rgba(255,255,255,.06); border-radius: 999px; overflow: hidden; }
+.g-track-f { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--pink), var(--neon)); }
+.g-goal-nums { display: flex; justify-content: space-between; color: var(--ink-3); font-size: .84rem; margin-top: 9px; font-variant-numeric: tabular-nums; }
+.g-goal-nums b { color: var(--ink); }
+.g-cardshot { max-width: 430px; }
+.g-cardshot-top { display: flex; align-items: center; gap: 11px; margin-bottom: 12px; }
+.g-cardshot-ico { width: 38px; height: 38px; border-radius: 11px; background: var(--card); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; font-size: 1.15rem; }
+.g-cardshot-name { font-weight: 700; color: var(--ink); }
+.g-cardshot-val { font-size: 1.7rem; font-weight: 800; letter-spacing: -.02em; margin-bottom: 12px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.g-cardshot-sub { color: var(--ink-3); font-size: .85rem; margin-top: 9px; font-variant-numeric: tabular-nums; }
+/* 7 — Antes × Depois */
+.g-vs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 28px 0; }
+.g-vs-col { border: 1px solid var(--line); border-radius: 14px; padding: 17px; }
+.g-vs-col.good { background: rgba(198,241,26,.05); border-color: rgba(198,241,26,.3); }
+.g-vs-h { font-weight: 800; font-size: .92rem; margin-bottom: 11px; color: var(--ink); }
+.g-vs-col.good .g-vs-h { color: var(--neon); }
+.g-vs-li { display: flex; gap: 8px; color: var(--ink-2); font-size: .9rem; margin-bottom: 8px; }
+.g-vs-li:last-child { margin-bottom: 0; }
+.g-vs-li .m { flex: none; font-weight: 800; }
+.g-vs-col.bad .m { color: #ff5b6a; }
+.g-vs-col.good .m { color: var(--neon); }
+/* 8 — Resumindo */
+.g-takeaways { background: linear-gradient(180deg, rgba(255,45,142,.08), rgba(255,45,142,.03)); border: 1px solid rgba(255,45,142,.25); border-radius: 16px; padding: 22px; margin: 34px 0 8px; }
+.g-takeaways h4 { margin: 0 0 15px; font-size: 1.08rem; color: var(--ink); display: flex; align-items: center; gap: 8px; }
+.g-tk { display: flex; gap: 11px; align-items: flex-start; margin-bottom: 10px; color: var(--ink); font-size: .98rem; }
+.g-tk:last-child { margin-bottom: 0; }
+.g-tk .c { flex: none; width: 21px; height: 21px; border-radius: 50%; background: var(--neon); color: #10140a; font-weight: 900; font-size: .75rem; display: flex; align-items: center; justify-content: center; margin-top: 2px; }
+
+@media (max-width: 560px) {
+  .g-bar { grid-template-columns: 82px 1fr 44px; }
+  .g-vs { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 640px) {
   .guide-hero h1 { font-size: 1.7rem; }
   .guide-sticker-wrap { width: 140px; height: 140px; }

@@ -51,6 +51,8 @@ e espera seu ok antes de gravar. Anotou errado? Responde ali mesmo que ela ajust
 imagem que a Piggy lê os dados e monta o lançamento pra você conferir. (Leitura de
 imagem faz parte do PigBank+.)</p>
 
+<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica da Piggy</span><p>Anote na hora que gasta — ainda no caixa ou dentro do Uber. Deixar pra depois é a receita pra esquecer, e o que não é anotado não aparece nos seus relatórios.</p></div></aside>
+
 <h2>Comandos rápidos que vale conhecer</h2>
 <ul>
   <li><strong>saldo</strong> — quanto você tem na conta agora</li>
@@ -62,6 +64,12 @@ normal. A Piggy responde com base nos seus próprios números.</p>
 
 <p>A ideia é essa: quanto menos fricção pra anotar, mais você anota. E quanto mais
 você anota, mais o PigBank te mostra pra onde seu dinheiro está indo.</p>
+
+<div class="g-takeaways"><h4>🐷 Resumindo</h4>
+<div class="g-tk"><span class="c">1</span><span>Registrar é só mandar mensagem pra Piggy, do jeito que a frase sair na cabeça.</span></div>
+<div class="g-tk"><span class="c">2</span><span>Ela confirma antes de salvar — anotou errado, corrige ali mesmo.</span></div>
+<div class="g-tk"><span class="c">3</span><span>Foto de cupom ou comprovante também vira lançamento (recurso do PigBank+).</span></div>
+</div>
 """,
     },
     {
@@ -83,6 +91,13 @@ chegando. As caixinhas do PigBank existem justamente pra isso.</p>
 quanto quer juntar, e vai <strong>aportando</strong> aos poucos. O PigBank separa
 esse valor e mostra o quanto você já caminhou até a meta.</p>
 
+<div class="g-cardshot">
+  <div class="g-cardshot-top"><span class="g-cardshot-ico">🐷</span><span class="g-cardshot-name">Reserva de emergência</span></div>
+  <div class="g-cardshot-val">R$ 4.500,00</div>
+  <div class="g-track"><div class="g-track-f" style="width:45%"></div></div>
+  <div class="g-cardshot-sub">45% de R$ 10.000,00</div>
+</div>
+
 <h2>Como criar e usar</h2>
 <ul>
   <li>No dashboard, clique em <strong>+ Nova</strong> na área de caixinhas.</li>
@@ -92,6 +107,21 @@ esse valor e mostra o quanto você já caminhou até a meta.</p>
 </ul>
 <p>Suas caixinhas se organizam sozinhas por saldo, então a que tem mais dinheiro
 guardado aparece primeiro.</p>
+
+<figure class="g-chart">
+  <div class="g-chart-t">Guardando R$ 500 por mês</div>
+  <div class="g-chart-s">Exemplo · saldo da caixinha ao longo de 12 meses</div>
+  <svg viewBox="0 0 600 220" width="100%" role="img" aria-label="Reserva crescendo de zero a R$ 6.740 em 12 meses">
+    <defs><linearGradient id="gc1" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#FF2D8E" stop-opacity=".42"/><stop offset="1" stop-color="#FF2D8E" stop-opacity="0"/></linearGradient></defs>
+    <g stroke="rgba(255,255,255,.07)" stroke-width="1"><line x1="48" y1="30" x2="576" y2="30"/><line x1="48" y1="85" x2="576" y2="85"/><line x1="48" y1="140" x2="576" y2="140"/><line x1="48" y1="196" x2="576" y2="196"/></g>
+    <path d="M48,196 L136,171 L224,145 L312,118 L400,90 L488,61 L576,30 L576,196 Z" fill="url(#gc1)"/>
+    <polyline points="48,196 136,171 224,145 312,118 400,90 488,61 576,30" fill="none" stroke="#FF2D8E" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="576" cy="30" r="5" fill="#C6F11A" stroke="#0c0c0d" stroke-width="2"/>
+    <text x="560" y="22" text-anchor="end" fill="#C6F11A" font-size="13" font-weight="700">R$ 6.740</text>
+    <g fill="rgba(255,255,255,.42)" font-size="11" text-anchor="middle"><text x="48" y="212">Mês 1</text><text x="312" y="212">Mês 6</text><text x="576" y="212">Mês 12</text></g>
+  </svg>
+  <figcaption>Cada aporte te aproxima da meta — e ver a linha subir é o que segura a disciplina.</figcaption>
+</figure>
 
 <h2>"Saldo" e "sobrou" não são a mesma coisa</h2>
 <p>Vale entender essa diferença pra não se confundir:</p>
@@ -103,6 +133,8 @@ guardado aparece primeiro.</p>
 <p>Ou seja: aportar numa caixinha não some com o seu dinheiro — ele continua seu,
 só que reservado pra um objetivo.</p>
 
+<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica da Piggy</span><p>Guarde <strong>assim que o dinheiro entra</strong>, não com o que sobra no fim do mês. O que sobra pra guardar é sempre menor do que a gente imagina.</p></div></aside>
+
 <h2>Uma regra importante</h2>
 <p>Uma caixinha <strong>não pode ser apagada enquanto tiver saldo</strong>. É de
 propósito: evita que você delete uma reserva e "perca" o dinheiro de vista. Quer
@@ -110,6 +142,12 @@ encerrar? Primeiro resgate o valor de volta pra conta, aí a caixinha some.</p>
 
 <p>Comece com uma só — a clássica reserva de emergência — e sinta como é diferente
 guardar quando cada real tem endereço.</p>
+
+<div class="g-takeaways"><h4>🐷 Resumindo</h4>
+<div class="g-tk"><span class="c">1</span><span>Cada caixinha é um objetivo com nome e meta — dá cara pro dinheiro.</span></div>
+<div class="g-tk"><span class="c">2</span><span>Guarde assim que o dinheiro entra, não com o que sobra.</span></div>
+<div class="g-tk"><span class="c">3</span><span>Uma caixinha não some enquanto tem saldo — primeiro resgata, depois encerra.</span></div>
+</div>
 """,
     },
     {
@@ -140,14 +178,33 @@ da fatura que ainda vai fechar. Nada de esperar o e-mail do banco pra descobrir.
 faturas dos próximos meses, com a identificação de qual parcela é qual (1/12,
 2/12…), pra você saber exatamente quanto do cartão já está comprometido lá na frente.</p>
 
+<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica da Piggy</span><p>Pagou só o mínimo? O resto vira <strong>crédito rotativo</strong> — os juros mais caros que existem. Acompanhar a fatura durante o mês é o que te ajuda a pagar tudo e fugir dessa bola de neve.</p></div></aside>
+
 <h2>Lembretes pra não perder o vencimento</h2>
 <p>Dá pra ligar lembretes por cartão, avisando alguns dias antes do vencimento.
 Assim você paga em dia e não paga juros à toa.</p>
+
+<div class="g-vs">
+  <div class="g-vs-col bad"><div class="g-vs-h">😬 Sem acompanhar</div>
+    <div class="g-vs-li"><span class="m">✕</span>Fatura vira surpresa no fim do mês</div>
+    <div class="g-vs-li"><span class="m">✕</span>Descobre o valor tarde demais</div>
+    <div class="g-vs-li"><span class="m">✕</span>Parcela some no meio das outras</div></div>
+  <div class="g-vs-col good"><div class="g-vs-h">🐷 Com o PigBank</div>
+    <div class="g-vs-li"><span class="m">✓</span>Vê a fatura crescendo em tempo real</div>
+    <div class="g-vs-li"><span class="m">✓</span>Lembrete antes do vencimento</div>
+    <div class="g-vs-li"><span class="m">✓</span>Sabe quanto já está comprometido</div></div>
+</div>
 
 <h2>O resultado</h2>
 <p>Quando você acompanha a fatura enquanto ela cresce, duas coisas mudam: some o
 susto no fim do mês, e você começa a segurar a mão <em>antes</em> de estourar — que
 é o que realmente protege o seu bolso.</p>
+
+<div class="g-takeaways"><h4>🐷 Resumindo</h4>
+<div class="g-tk"><span class="c">1</span><span>A fatura cresce à vista no PigBank — sem susto quando ela fecha.</span></div>
+<div class="g-tk"><span class="c">2</span><span>Parcelamento entra distribuído nos próximos meses, cada parcela identificada.</span></div>
+<div class="g-tk"><span class="c">3</span><span>Lembrete antes do vencimento pra você nunca pagar juros à toa.</span></div>
+</div>
 """,
     },
     {
@@ -172,6 +229,16 @@ tendência: você está gastando mais do que ganha? Melhorando ou piorando?</p>
 visão que mais surpreende — quase sempre tem uma categoria maior do que você
 imaginava.</p>
 
+<div class="g-chart-t" style="margin:24px 0 16px">Gasto médio de um mês (exemplo)</div>
+<div class="g-bars">
+  <div class="g-bar top"><span class="g-bar-l">Moradia</span><span class="g-bar-track"><span class="g-bar-f" style="width:28%"></span></span><span class="g-bar-v">28%</span></div>
+  <div class="g-bar"><span class="g-bar-l">Alimentação</span><span class="g-bar-track"><span class="g-bar-f" style="width:22%"></span></span><span class="g-bar-v">22%</span></div>
+  <div class="g-bar"><span class="g-bar-l">Transporte</span><span class="g-bar-track"><span class="g-bar-f" style="width:14%"></span></span><span class="g-bar-v">14%</span></div>
+  <div class="g-bar"><span class="g-bar-l">Lazer</span><span class="g-bar-track"><span class="g-bar-f" style="width:11%"></span></span><span class="g-bar-v">11%</span></div>
+  <div class="g-bar"><span class="g-bar-l">Assinaturas</span><span class="g-bar-track"><span class="g-bar-f" style="width:8%"></span></span><span class="g-bar-v">8%</span></div>
+  <div class="g-bar"><span class="g-bar-l">Outros</span><span class="g-bar-track"><span class="g-bar-f" style="width:17%"></span></span><span class="g-bar-v">17%</span></div>
+</div>
+
 <h2>3. Padrão por dia da semana</h2>
 <p>Você gasta mais na sexta? No fim de semana? Esse recorte mostra os dias em que a
 mão pesa, o que ajuda a criar pequenas regras ("sexta é dia de segurar").</p>
@@ -184,10 +251,18 @@ mão pesa, o que ajuda a criar pequenas regras ("sexta é dia de segurar").</p>
 <p>Um resumo direto: quanto entrou, quanto saiu, quanto <strong>sobrou</strong> e o
 que você guardou. É o "como foi o mês" em uma olhada.</p>
 
+<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica da Piggy</span><p>Olhou o relatório e uma categoria te surpreendeu? Esse é o ouro. <strong>Ataque a surpresa</strong> — quase sempre é onde tem gordura pra cortar sem dor.</p></div></aside>
+
 <h2>Como usar de verdade</h2>
 <p>Não precisa virar analista. Escolha <strong>uma</strong> visão por mês pra
 investigar e uma atitude pra tomar em cima dela. Pequenos ajustes, repetidos,
 mudam o ano inteiro.</p>
+
+<div class="g-takeaways"><h4>🐷 Resumindo</h4>
+<div class="g-tk"><span class="c">1</span><span>Os relatórios transformam lançamentos em padrões que dá pra agir.</span></div>
+<div class="g-tk"><span class="c">2</span><span>A categoria que mais surpreende costuma ser a maior alavanca.</span></div>
+<div class="g-tk"><span class="c">3</span><span>Uma visão pra investigar + uma atitude por mês já muda o ano.</span></div>
+</div>
 """,
     },
     {
@@ -214,19 +289,41 @@ primeiro imprevisto.</p>
 parcela mensal deixa o objetivo tangível — e mostra na hora se ele é realista ou
 se precisa de mais prazo.</p>
 
+<div class="g-stats">
+  <div class="g-stat"><span class="n">R$ 500</span><span class="l">guardados por mês</span></div>
+  <div class="g-arrow">→</div>
+  <div class="g-stat"><span class="n">R$ 6 mil</span><span class="l">em 1 ano</span></div>
+  <div class="g-arrow">→</div>
+  <div class="g-stat win"><span class="n">R$ 34 mil</span><span class="l">em 5 anos rendendo</span></div>
+</div>
+
 <h2>3. Transforme a meta numa caixinha</h2>
 <p>Crie uma caixinha com o nome do objetivo e a meta em reais. Cada aporte te
 mostra a barrinha andando — e ver o progresso é o que mantém você no jogo. Se
 quiser, peça pra Piggy guardar assim que o salário cair.</p>
 
+<div class="g-goal">
+  <div class="g-goal-top"><span class="g-goal-name">✈️ Viagem pro Chile</span><span class="g-goal-pct">45%</span></div>
+  <div class="g-track"><div class="g-track-f" style="width:45%"></div></div>
+  <div class="g-goal-nums"><span>Guardado <b>R$ 2.700</b></span><span>Meta <b>R$ 6.000</b></span></div>
+</div>
+
 <h2>4. Comemore os marcos</h2>
 <p>Bateu 25%, metade, 75%? Reconheça. Meta longa sem marco pelo caminho cansa;
 com marcos, cada etapa vira uma pequena vitória.</p>
 
+<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica da Piggy</span><p>Meta que só funciona "num mês perfeito" quebra no primeiro imprevisto. Melhor uma <strong>meta menor que você cumpre</strong> do que uma enorme que você abandona.</p></div></aside>
+
 <h2>5. Reavalie sem culpa</h2>
 <p>Mudou de vida, apertou o mês? Ajuste o valor ou o prazo. Uma meta é uma
-ferramenta a seu favor, não uma prova. Melhor uma meta menor que você cumpre do
-que uma enorme que você abandona.</p>
+ferramenta a seu favor, não uma prova — reavaliar no meio do caminho não é
+fracassar.</p>
+
+<div class="g-takeaways"><h4>🐷 Resumindo</h4>
+<div class="g-tk"><span class="c">1</span><span>A meta mensal precisa caber no que sobra — não no sonho.</span></div>
+<div class="g-tk"><span class="c">2</span><span>Quebre o objetivo grande em parcela mensal; vira tangível.</span></div>
+<div class="g-tk"><span class="c">3</span><span>Meta longa sem marco cansa — comemore 25%, 50%, 75%.</span></div>
+</div>
 """,
     },
     {
@@ -246,6 +343,8 @@ a sério no PigBank, em várias camadas — não como enfeite, mas por padrão.<
 no banco de dados. Mesmo internamente, esses dados não trafegam em texto puro —
 seguem a lógica de minimizar quem consegue enxergar o quê, em linha com a LGPD.</p>
 
+<aside class="g-callout"><div class="g-callout-ico">🐷</div><div><span class="g-callout-k">Dica da Piggy</span><p>Ative a <strong>verificação em duas etapas</strong> hoje — leva 2 minutos e é a barreira que segura sua conta mesmo se sua senha vazar em algum outro site.</p></div></aside>
+
 <h2>Verificação em duas etapas (2FA)</h2>
 <p>Você pode ativar a autenticação em dois fatores na sua conta. Com ela ligada,
 além da senha é preciso um código temporário do seu aplicativo autenticador pra
@@ -260,6 +359,12 @@ hora se não tiver sido você.</p>
 <p>Você pode <strong>exportar</strong> tudo o que registrou e também
 <strong>excluir</strong> sua conta e seus dados quando quiser. Sem pegadinha:
 transparência faz parte da proposta.</p>
+
+<div class="g-takeaways"><h4>🐷 Resumindo</h4>
+<div class="g-tk"><span class="c">1</span><span>Dados sensíveis (e-mail, telefone) ficam criptografados no banco.</span></div>
+<div class="g-tk"><span class="c">2</span><span>Ative o 2FA — a proteção que sobrevive a um vazamento de senha.</span></div>
+<div class="g-tk"><span class="c">3</span><span>Os dados são seus: dá pra exportar tudo e excluir a conta quando quiser.</span></div>
+</div>
 
 <p>Ficou com alguma dúvida de segurança? Fale com a gente em
 <strong>suporte@pigbankai.com</strong>.</p>
