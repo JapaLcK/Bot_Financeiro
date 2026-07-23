@@ -1262,6 +1262,7 @@ async function loadAffiliates() {
       const when = new Date(p.requested_at).toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
       const st = p.status === 'paid' ? '🟢 pago' : (p.status === 'rejected' ? '🔴 rejeitado' : '🟡 aguardando');
       const actions = p.status === 'requested' ? `
+        <button class="btn-primary" type="button" style="font-size:11px;padding:4px 10px;background:#0ea5e9" onclick="showPayoutPix(${p.id})">💠 Pagar via Pix</button>
         <button class="btn-primary" type="button" style="font-size:11px;padding:4px 10px" onclick="payoutAction(${p.id}, 'paid')">Marcar pago</button>
         <button class="btn-danger" type="button" style="font-size:11px;padding:4px 10px" onclick="payoutAction(${p.id}, 'reject')">Rejeitar</button>` : '';
       return `
@@ -1337,6 +1338,69 @@ async function payoutAction(id, action) {
   });
   if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.detail || 'Erro.'); return; }
   loadAffiliates();
+}
+
+/* Mostra o QR + copia e cola pra pagar o saque. O BR Code vem pronto do
+   servidor com chave e valor embutidos — o admin só escaneia e confirma. */
+async function showPayoutPix(id) {
+  const res = await fetch(`/admin/api/affiliates/payouts/${id}/pix`, { headers: authH() });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    alert(d.detail || 'Não consegui gerar o Pix deste saque.');
+    return;
+  }
+  const d = await res.json();
+
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px';
+  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#12121a;border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:22px;max-width:380px;width:100%;text-align:center';
+
+  const h = document.createElement('h3');
+  h.textContent = 'Pagar ' + fmtCents(d.amount_cents);
+  h.style.cssText = 'margin:0 0 4px;font-size:1.15rem';
+
+  const sub = document.createElement('div');
+  sub.textContent = 'Afiliado ' + (d.code || '') + ' · chave ' + d.pix_key;
+  sub.style.cssText = 'color:var(--muted);font-size:.78rem;margin-bottom:16px;word-break:break-all';
+
+  const img = document.createElement('img');
+  img.src = d.qr;
+  img.alt = 'QR Code Pix';
+  img.style.cssText = 'width:230px;height:230px;background:#fff;border-radius:12px;padding:8px';
+
+  const hint = document.createElement('div');
+  hint.textContent = 'Escaneie com o app do banco — chave e valor já vêm preenchidos.';
+  hint.style.cssText = 'color:var(--muted);font-size:.76rem;margin:12px 0 10px';
+
+  const inp = document.createElement('input');
+  inp.readOnly = true;
+  inp.value = d.brcode;
+  inp.style.cssText = 'width:100%;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:#fff;font-size:.68rem';
+
+  const copy = document.createElement('button');
+  copy.className = 'btn-primary';
+  copy.type = 'button';
+  copy.textContent = 'Copiar código';
+  copy.style.cssText = 'margin-top:10px;width:100%';
+  copy.onclick = () => {
+    inp.select();
+    const done = () => { copy.textContent = 'Copiado ✓'; setTimeout(() => { copy.textContent = 'Copiar código'; }, 1500); };
+    if (navigator.clipboard) navigator.clipboard.writeText(d.brcode).then(done).catch(() => { document.execCommand('copy'); done(); });
+    else { document.execCommand('copy'); done(); }
+  };
+
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.textContent = 'Fechar';
+  close.style.cssText = 'margin-top:8px;width:100%;background:transparent;border:1px solid rgba(255,255,255,.18);color:#fff;border-radius:8px;padding:8px;cursor:pointer';
+  close.onclick = () => ov.remove();
+
+  box.append(h, sub, img, hint, inp, copy, close);
+  ov.appendChild(box);
+  document.body.appendChild(ov);
 }
 
 /* ── Boot ────────────────────────────────────────────────────────── */

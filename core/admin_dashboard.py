@@ -1052,6 +1052,42 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         )
         return {"ok": True, "status": status}
 
+    @app.get("/admin/api/affiliates/payouts/{payout_id}/pix")
+    async def admin_affiliate_payout_pix(
+        payout_id: int, username: str = Depends(_get_current_admin)
+    ):
+        """Pix copia e cola + QR pra pagar este saque.
+
+        Nenhuma chamada a banco: o BR Code é montado localmente com a chave do
+        afiliado e o valor do saque já embutido — o admin escaneia e confirma,
+        sem digitar chave nem valor (que é onde mora o erro).
+        """
+        from core.services.pix_brcode import build_pix_brcode, qr_svg_data_url
+        from db.affiliates import get_payout
+
+        row = await asyncio.to_thread(get_payout, payout_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Saque não encontrado.")
+
+        payout = _decrypt_affiliate_row(row, username)  # registra o acesso à PII
+        pix_key = (payout.get("pix_key") or "").strip()
+        if not pix_key:
+            raise HTTPException(
+                status_code=422, detail="Este saque não tem chave Pix registrada."
+            )
+        try:
+            brcode = build_pix_brcode(pix_key, amount_cents=int(payout["amount_cents"]))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+        return {
+            "brcode": brcode,
+            "qr": qr_svg_data_url(brcode),
+            "amount_cents": int(payout["amount_cents"]),
+            "pix_key": pix_key,
+            "code": payout.get("code"),
+        }
+
     @app.post("/admin/api/affiliates/payouts/{payout_id}/paid")
     async def admin_affiliate_payout_paid(
         payout_id: int, request: Request, username: str = Depends(_get_current_admin)

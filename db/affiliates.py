@@ -437,6 +437,24 @@ def admin_list_affiliates() -> list[dict]:
             return cur.fetchall()
 
 
+def get_payout(payout_id: int) -> dict | None:
+    """Um saque específico (mesmas colunas do admin_list_payouts). Usado pra
+    montar o Pix copia e cola / QR do pagamento no admin."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select p.*, a.code, a.user_id, aa.email_enc
+                  from affiliate_payouts p
+                  join affiliates a on a.id = p.affiliate_id
+                  left join auth_accounts aa on aa.user_id = a.user_id
+                 where p.id = %s
+                """,
+                (int(payout_id),),
+            )
+            return cur.fetchone()
+
+
 def admin_list_payouts(status: str | None = None, limit: int = 100) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
