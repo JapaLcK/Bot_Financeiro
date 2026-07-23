@@ -19,6 +19,7 @@
 </head>
 <body>
 <div class="glow"></div>
+<div class="read-progress" id="readProgress"></div>
 
   <nav class="nav">
     <a class="nav-logo" href="/"><img class="logo-badge" src="/brand/avatar.webp" alt="" /><span>PigBank</span></a>
@@ -38,11 +39,17 @@
 
     <article class="guide">
       <a class="guide-back" href="/changelog">← Voltar pro Blog</a>
-      <div class="guide-head">
+      <header class="guide-hero">
+        <div class="guide-sticker-wrap">
+          <img class="guide-sticker" src="/brand/stickers/{{STICKER}}.webp" alt="" width="132" height="132" />
+        </div>
         <span class="tag-cat">{{CATEGORY}}</span>
         <h1>{{TITLE}}</h1>
-        <div class="guide-meta">Leitura de {{READ_TIME}}</div>
-      </div>
+        <div class="guide-byline">
+          <img class="byline-avatar" src="/brand/avatar.webp" alt="" width="26" height="26" />
+          <span>Por <strong>Piggy</strong> · Leitura de {{READ_TIME}}</span>
+        </div>
+      </header>
       <div class="guide-prose">
         {{BODY}}
       </div>
@@ -95,5 +102,6 @@
   </footer>
 
   <script src="/nav-auth.js?v=2" defer></script>
+  <script src="/blog-article.js?v=1" defer></script>
 </body>
 </html>

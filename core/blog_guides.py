@@ -22,6 +22,7 @@ GUIDES: list[dict] = [
         "title": "Como registrar gastos falando com a Piggy no WhatsApp",
         "category": "Guia",
         "emoji": "💬",
+        "sticker": "hello",
         "read_time": "4 min",
         "description": "Registrar um gasto no PigBank é só mandar mensagem pra Piggy no WhatsApp, do jeito que sair na cabeça. Veja como.",
         "body": """
@@ -68,6 +69,7 @@ você anota, mais o PigBank te mostra pra onde seu dinheiro está indo.</p>
         "title": "Caixinhas: o método simples pra guardar dinheiro com objetivo",
         "category": "Dica",
         "emoji": "🐷",
+        "sticker": "income",
         "read_time": "5 min",
         "description": "Guardar dinheiro fica mais fácil quando cada real tem um destino. É pra isso que servem as caixinhas do PigBank.",
         "body": """
@@ -115,6 +117,7 @@ guardar quando cada real tem endereço.</p>
         "title": "Nunca mais seja pego de surpresa pela fatura do cartão",
         "category": "Cartões",
         "emoji": "💳",
+        "sticker": "expense-alert",
         "read_time": "6 min",
         "description": "A fatura do cartão só assusta quem não acompanha. Veja como o PigBank te mostra o valor crescendo em tempo real.",
         "body": """
@@ -152,6 +155,7 @@ susto no fim do mês, e você começa a segurar a mão <em>antes</em> de estoura
         "title": "5 relatórios do dashboard que mostram pra onde seu dinheiro vai",
         "category": "Organização",
         "emoji": "📊",
+        "sticker": "report",
         "read_time": "5 min",
         "description": "Registrar é metade do caminho. A outra metade é olhar. Conheça 5 visões do dashboard que revelam seus padrões.",
         "body": """
@@ -191,6 +195,7 @@ mudam o ano inteiro.</p>
         "title": "Como definir metas realistas e realmente alcançá-las",
         "category": "Metas",
         "emoji": "🎯",
+        "sticker": "goal",
         "read_time": "4 min",
         "description": "Meta que não cabe no orçamento vira frustração. Veja como definir objetivos que você de fato consegue cumprir.",
         "body": """
@@ -229,6 +234,7 @@ que uma enorme que você abandona.</p>
         "title": "Como o PigBank protege seus dados financeiros",
         "category": "Segurança",
         "emoji": "🔒",
+        "sticker": "approved",
         "read_time": "3 min",
         "description": "Seu dinheiro é assunto sério. Veja as camadas de segurança que protegem seus dados no PigBank.",
         "body": """

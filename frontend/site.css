@@ -286,26 +286,53 @@ a.article:hover .article-source-cta { text-decoration: underline; }
 .blog-subhead-note { color: var(--ink-3); font-size: .82rem; }
 .news-section { margin-bottom: 8px; }
 
+/* ── Barra de progresso de leitura ────────────────────────────────────────── */
+.read-progress { position: fixed; top: 0; left: 0; height: 3px; width: 0; z-index: 1000;
+  background: linear-gradient(90deg, var(--pink), var(--neon)); box-shadow: 0 0 10px rgba(255,45,142,.5);
+  transition: width .12s linear; }
+
 /* ── Página de artigo do blog (/blog/<slug>) ──────────────────────────────── */
 .guide { max-width: 720px; margin: 0 auto; padding: 12px 0 8px; }
-.guide-back { display: inline-block; color: var(--ink-3); font-size: .84rem; font-weight: 600; margin-bottom: 22px; }
+.guide-back { display: inline-block; color: var(--ink-3); font-size: .84rem; font-weight: 600; margin-bottom: 8px; }
 .guide-back:hover { color: var(--ink); }
-.guide-head { margin-bottom: 28px; }
-.guide-head .tag-cat { display: inline-block; background: var(--pink-soft); border: 1px solid rgba(255,45,142,.28); color: var(--pink); font-size: .64rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; margin-bottom: 16px; }
-.guide-head h1 { font-size: 2.1rem; font-weight: 800; line-height: 1.2; letter-spacing: -.01em; }
-.guide-meta { color: var(--ink-3); font-size: .84rem; margin-top: 12px; }
-.guide-prose { color: var(--ink-2); font-size: 1.06rem; line-height: 1.72; }
+
+/* Hero: sticker da Piggy num disco gradiente + título centralizado */
+.guide-hero { text-align: center; padding: 12px 0 34px; margin-bottom: 30px; border-bottom: 1px solid var(--line); }
+.guide-sticker-wrap { width: 168px; height: 168px; margin: 6px auto 20px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle at 50% 40%, rgba(255,45,142,.20), rgba(198,241,26,.10) 65%, transparent 72%); }
+.guide-sticker { width: 132px; height: 132px; object-fit: contain;
+  filter: drop-shadow(0 12px 26px rgba(0,0,0,.5)); animation: guideStickerIn .5s ease both; }
+@keyframes guideStickerIn { from { opacity: 0; transform: translateY(10px) scale(.9) rotate(-4deg); } to { opacity: 1; transform: none; } }
+.guide-hero .tag-cat { display: inline-block; background: var(--pink-soft); border: 1px solid rgba(255,45,142,.28); color: var(--pink); font-size: .66rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 4px 11px; border-radius: 999px; margin-bottom: 16px; }
+.guide-hero h1 { font-size: 2.3rem; font-weight: 800; line-height: 1.16; letter-spacing: -.015em; max-width: 16ch; margin: 0 auto; }
+.guide-byline { display: inline-flex; align-items: center; gap: 9px; margin-top: 18px; color: var(--ink-3); font-size: .88rem; }
+.guide-byline strong { color: var(--ink-2); font-weight: 700; }
+.byline-avatar { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line-2); }
+
+/* Prosa */
+.guide-prose { color: var(--ink-2); font-size: 1.07rem; line-height: 1.75; }
+.guide-prose > p:first-of-type { font-size: 1.2rem; line-height: 1.6; color: var(--ink); }
 .guide-prose p { margin: 0 0 18px; }
-.guide-prose h2 { color: var(--ink); font-size: 1.34rem; font-weight: 800; line-height: 1.3; margin: 34px 0 12px; }
-.guide-prose ul { margin: 0 0 18px; padding-left: 22px; }
-.guide-prose li { margin: 0 0 8px; }
+.guide-prose h2 { color: var(--ink); font-size: 1.4rem; font-weight: 800; line-height: 1.3; margin: 38px 0 14px; padding-left: 14px; border-left: 3px solid var(--pink); }
+.guide-prose ul { margin: 0 0 20px; padding-left: 0; list-style: none; }
+.guide-prose li { position: relative; margin: 0 0 10px; padding-left: 24px; }
+.guide-prose li::before { content: "•"; color: var(--pink); font-weight: 900; position: absolute; left: 7px; top: -1px; }
 .guide-prose strong { color: var(--ink); font-weight: 700; }
 .guide-prose em { font-style: italic; }
-.more-guides { border-top: 1px solid var(--line); margin-top: 48px; padding-top: 12px; }
+.more-guides { border-top: 1px solid var(--line); margin-top: 52px; padding-top: 12px; }
+
+/* Thumb dos cards de guia = sticker da Piggy sobre o gradiente do card */
+.article-thumb-sticker { display: flex; align-items: center; justify-content: center; }
+.card-sticker { width: 104px; height: 104px; object-fit: contain; filter: drop-shadow(0 8px 18px rgba(0,0,0,.45)); transition: transform .2s ease; }
+a.article:hover .card-sticker { transform: scale(1.07) rotate(-3deg); }
 
 @media (max-width: 640px) {
-  .guide-head h1 { font-size: 1.6rem; }
-  .guide-prose { font-size: 1rem; }
+  .guide-hero h1 { font-size: 1.7rem; }
+  .guide-sticker-wrap { width: 140px; height: 140px; }
+  .guide-sticker { width: 110px; height: 110px; }
+  .guide-prose { font-size: 1.02rem; }
+  .guide-prose > p:first-of-type { font-size: 1.1rem; }
 }
 
 /* ─── Contato ───────────────────────────────────────────────────────── */

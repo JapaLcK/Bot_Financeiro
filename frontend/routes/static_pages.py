@@ -91,7 +91,9 @@ def _guide_card_html(g: dict) -> str:
     """Card de um guia pra seção 'Continue lendo' (link interno /blog/<slug>)."""
     return (
         f'<a class="article" href="/blog/{g["slug"]}">'
-        f'<div class="article-thumb article-thumb-emoji">{g["emoji"]}</div>'
+        f'<div class="article-thumb article-thumb-sticker">'
+        f'<img class="card-sticker" src="/brand/stickers/{g["sticker"]}.webp" alt="" loading="lazy" />'
+        f'</div>'
         f'<div class="article-body">'
         f'<span class="tag-cat">{_html.escape(g["category"])}</span>'
         f'<h3>{_html.escape(g["title"])}</h3>'
@@ -122,6 +124,7 @@ async def serve_blog_guide(slug: str):
         .replace("{{CANONICAL}}", f"https://pigbankai.com/blog/{slug}")
         .replace("{{CATEGORY}}", _html.escape(guide["category"]))
         .replace("{{READ_TIME}}", _html.escape(guide["read_time"]))
+        .replace("{{STICKER}}", guide["sticker"])
         .replace("{{EMOJI}}", guide["emoji"])
         .replace("{{BODY}}", guide["body"])            # HTML confiável (nosso)
         .replace("{{MORE_GUIDES}}", more)
@@ -299,6 +302,16 @@ async def serve_blog_news_js():
     Externalizado (não inline) pra viabilizar remover 'unsafe-inline' do CSP."""
     return FileResponse(
         FRONTEND_DIR / "blog-news.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@router.get("/blog-article.js")
+async def serve_blog_article_js():
+    """Barra de progresso de leitura da página de artigo /blog/<slug>."""
+    return FileResponse(
+        FRONTEND_DIR / "blog-article.js",
         media_type="application/javascript",
         headers={"Cache-Control": "public, max-age=300"},
     )
