@@ -1512,6 +1512,13 @@ body.light .chip-val.b { background:linear-gradient(135deg, #C7186B, #FF2D8E); -
 .chart-wrap.donut { max-width:230px;margin:0 auto; }
 .chart-wrap.bar   { height:210px; }
 .chart-wrap.line  { height:240px; }
+.ov-chart-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:14px; }
+.ov-chart-head h2 { margin-bottom:0; }
+.ov-period-tabs { display:flex; gap:3px; background:rgba(255,255,255,.05); border:1px solid var(--glass-border); border-radius:9px; padding:3px; }
+.ov-period-tabs button { font-size:.72rem; font-weight:600; color:var(--text-3); padding:4px 11px; border-radius:6px; border:none; background:transparent; cursor:pointer; transition:background .15s var(--ease),color .15s var(--ease); }
+.ov-period-tabs button:hover { color:var(--text-2); }
+.ov-period-tabs button.on { background:var(--purple); color:#fff; }
+body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
 
 /* ─── Toast ─────────────────────────────────────────────────────────── */
 #toast { position:fixed;bottom:26px;right:26px;z-index:999;

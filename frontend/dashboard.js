@@ -4248,12 +4248,8 @@ function applyTheme(theme) {
   const overviewVisible = document.getElementById("overview-view")?.classList.contains("active");
   if (overviewVisible && lastData) {
     const d = lastData;
-    const ry = d.year || viewYear, rm = d.month || viewMonth;
     if ((d.expense_categories || []).length) buildCatChart(d.expense_categories);
-    const dailyData = (d.daily_expenses && d.daily_expenses.length)
-      ? d.daily_expenses
-      : computeDailyFromLaunches(d.recent_launches || [], ry, rm);
-    buildDayChart(dailyData);
+    if (_expenseSeries) buildExpenseChart(_expenseSeries, _expensePeriod);
     if (_lastHistory && _lastHistory.length) buildHistoryChart(_lastHistory);
   }
 }
@@ -7055,14 +7051,26 @@ function computeDailyFromLaunches(launches, year, month) {
   return Object.entries(result).map(([day, total]) => ({ day: parseInt(day), total }));
 }
 
-function buildDayChart(daily) {
+// Gráfico de evolução dos gastos com janela rolante (7D / 30D / 3M).
+// Série vem de /expenses/daily?days=N como [{date:"YYYY-MM-DD", total}].
+let _expensePeriod = 30;
+let _expenseSeries = null;
+
+function buildExpenseChart(series, days) {
   const el = document.getElementById("chart-day"); if (!el) return;
-  const daysInMonth = new Date(viewYear, viewMonth, 0).getDate();
-  const totals = Array(daysInMonth).fill(0);
-  (daily || []).forEach(r => { if (r.day >= 1 && r.day <= daysInMonth) totals[r.day-1] = r.total; });
-  const isCurrent = viewYear === NOW.getFullYear() && viewMonth === NOW.getMonth() + 1;
-  const today = isCurrent ? NOW.getDate() : daysInMonth;
-  const labels = Array.from({length:daysInMonth},(_,i)=>i+1);
+  const byDate = {};
+  (series || []).forEach(r => { byDate[r.date] = r.total; });
+  const pad = n => String(n).padStart(2, "0");
+  const labels = [], totals = [];
+  const base = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const dt = new Date(base.getFullYear(), base.getMonth(), base.getDate() - i);
+    const key = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+    totals.push(byDate[key] || 0);
+    labels.push(`${pad(dt.getDate())}/${pad(dt.getMonth() + 1)}`);
+  }
+  const step = days <= 7 ? 1 : days <= 30 ? 5 : 15;
+  const light = _isLightMode();
   if (chartDay) chartDay.destroy();
   chartDay = new Chart(el, {
     type:"line",
@@ -7076,18 +7084,35 @@ function buildDayChart(daily) {
     options:{
       responsive:true,maintainAspectRatio:false,
       scales:{
-        x:{ grid:{color:_isLightMode()?"rgba(15,23,42,.06)":"rgba(255,255,255,.04)"}, ticks:{color:_isLightMode()?"rgba(15,23,42,.55)":"rgba(255,255,255,.35)",font:{size:9},maxRotation:0,callback:(v,i)=>(i+1)%5===0||i===0?i+1:""} },
-        y:{ grid:{color:_isLightMode()?"rgba(15,23,42,.08)":"rgba(255,255,255,.05)"}, ticks:{color:_isLightMode()?"rgba(15,23,42,.55)":"rgba(255,255,255,.35)",font:{size:9},callback:v=>fmtShort(v)} }
+        x:{ grid:{color:light?"rgba(15,23,42,.06)":"rgba(255,255,255,.04)"}, ticks:{color:light?"rgba(15,23,42,.55)":"rgba(255,255,255,.35)",font:{size:9},maxRotation:0,autoSkip:false,callback:(v,i)=>(i%step===0||i===labels.length-1)?labels[i]:""} },
+        y:{ grid:{color:light?"rgba(15,23,42,.08)":"rgba(255,255,255,.05)"}, ticks:{color:light?"rgba(15,23,42,.55)":"rgba(255,255,255,.35)",font:{size:9},callback:v=>fmtShort(v)} }
       },
       plugins:{
         legend:{display:false},
         tooltip:{ backgroundColor:"rgba(10,12,24,.88)",borderColor:"rgba(255,255,255,.1)",borderWidth:1,
           titleColor:"rgba(255,255,255,.9)",bodyColor:"rgba(255,255,255,.6)",
-          callbacks:{title:ctx=>"Dia "+ctx[0].label,label:ctx=>" "+fmt(ctx.parsed.y)} }
+          callbacks:{title:ctx=>ctx[0].label,label:ctx=>" "+fmt(ctx.parsed.y)} }
       },
       animation:{duration:600,easing:"easeInOutQuart"}
     }
   });
+}
+
+async function loadExpenseChart(days) {
+  _expensePeriod = days;
+  try {
+    const r = await fetch(`${API}/expenses/daily/${USER_ID}?days=${days}`, { credentials: "same-origin" });
+    if (!r.ok) return;
+    const payload = await r.json();
+    _expenseSeries = payload.data || [];
+    buildExpenseChart(_expenseSeries, days);
+  } catch (e) { console.warn("[expenses] fetch error:", e); }
+}
+
+function setExpensePeriod(days, btn) {
+  const tabs = document.getElementById("expense-period-tabs");
+  if (tabs) tabs.querySelectorAll("button").forEach(b => b.classList.toggle("on", b === btn));
+  loadExpenseChart(days);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -7473,11 +7498,8 @@ function render(d) {
   document.getElementById("charts-grid").style.display  = "";
   setTimeout(() => {
     if ((d.expense_categories||[]).length) buildCatChart(d.expense_categories);
-    // Prefer server-provided daily_expenses; fall back to computing from launches
-    const dailyData = (d.daily_expenses && d.daily_expenses.length)
-      ? d.daily_expenses
-      : computeDailyFromLaunches(d.recent_launches || [], ry, rm);
-    buildDayChart(dailyData);
+    // Gráfico de evolução: janela rolante via /expenses/daily (7D/30D/3M).
+    loadExpenseChart(_expensePeriod);
   }, 50);
 
   requestAnimationFrame(animateCounters);

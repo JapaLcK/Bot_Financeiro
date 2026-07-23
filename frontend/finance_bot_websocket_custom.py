@@ -659,6 +659,30 @@ async def get_monthly_history(user_id: int, n_months: int = 6) -> list:
 
     return list(history.values())
 
+
+async def get_daily_expenses_window(user_id: int, days: int = 30) -> list:
+    """Gastos (despesas de conta) por dia nos últimos ``days`` dias, mais antigo
+    primeiro. Cada item: ``{"date": "YYYY-MM-DD", "total": float}``. Mesmo filtro
+    do gráfico de gastos por dia do mês (tipo despesa/saida, não interno)."""
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"""
+                SELECT TO_CHAR(DATE(criado_em AT TIME ZONE '{TZ}'), 'YYYY-MM-DD') AS dia,
+                       SUM(valor) AS total
+                FROM launches
+                WHERE user_id = %s
+                  AND tipo IN ('despesa', 'saida')
+                  AND is_internal_movement = false
+                  AND criado_em >= NOW() - INTERVAL '{int(days)} days'
+                GROUP BY dia
+                ORDER BY dia
+                """,
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+    return [{"date": r["dia"], "total": float(r["total"] or 0)} for r in rows]
+
 # ─── CSV export ──────────────────────────────────────────────────────────────
 
 _MESES_PT = [
@@ -3639,6 +3663,23 @@ async def monthly_history(request: Request, user_id: int, months: int = 6):
         months = 1
     data = await get_monthly_history(user_id, months)
     return {"data": data}
+
+
+@app.get("/expenses/daily/{user_id}")
+async def daily_expenses_window(request: Request, user_id: int, days: int = 30):
+    """Série de gastos diários (despesas de conta) numa janela rolante de N dias.
+    Alimenta o seletor 7D/30D/3M do gráfico de evolução. Free: janela capada
+    silenciosamente (~1 mês), como /history (sem 403 pra não quebrar o gráfico)."""
+    _authorize_dashboard_access(request, user_id)
+    if days not in (7, 30, 90):
+        raise HTTPException(status_code=400, detail="days must be 7, 30 or 90")
+    from core.services.plan_service import is_pro
+    effective = days
+    if days > 31 and not is_pro(user_id):
+        effective = 31
+    data = await get_daily_expenses_window(user_id, effective)
+    return {"data": data, "days": days, "effective_days": effective}
+
 
 class LaunchCreatePayload(BaseModel):
     tipo: str  # 'receita' | 'despesa' | 'credito'

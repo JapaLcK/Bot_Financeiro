@@ -178,7 +178,17 @@
 
   <p class="section-title" id="charts-title" style="display:none">Análise do Mês</p>
   <div class="grid charts-grid" id="charts-grid" style="display:none">
-    <div class="card"><h2>Evolução dos gastos (mês)</h2><div class="chart-wrap line"><canvas id="chart-day"></canvas></div></div>
+    <div class="card">
+      <div class="ov-chart-head">
+        <h2>Evolução dos gastos</h2>
+        <div class="ov-period-tabs" id="expense-period-tabs" role="tablist">
+          <button type="button" data-days="7" onclick="setExpensePeriod(7,this)">7D</button>
+          <button type="button" data-days="30" class="on" onclick="setExpensePeriod(30,this)">30D</button>
+          <button type="button" data-days="90" onclick="setExpensePeriod(90,this)">3M</button>
+        </div>
+      </div>
+      <div class="chart-wrap line"><canvas id="chart-day"></canvas></div>
+    </div>
     <div class="card"><h2>Gastos por categoria</h2><div class="chart-wrap donut"><canvas id="chart-cat"></canvas></div></div>
   </div>
 
