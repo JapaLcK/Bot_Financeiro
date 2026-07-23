@@ -350,8 +350,8 @@ a.article:hover .card-sticker { transform: scale(1.07) rotate(-3deg); }
 .g-bars { display: flex; flex-direction: column; gap: 11px; margin: 26px 0; }
 .g-bar { display: grid; grid-template-columns: 110px 1fr 48px; align-items: center; gap: 12px; }
 .g-bar-l { color: var(--ink-2); font-size: .9rem; }
-.g-bar-track { height: 11px; background: rgba(255,255,255,.06); border-radius: 999px; overflow: hidden; }
-.g-bar-f { height: 100%; border-radius: 999px; background: linear-gradient(90deg, rgba(255,45,142,.55), var(--pink)); }
+.g-bar-track { display: block; height: 11px; background: rgba(255,255,255,.06); border-radius: 999px; overflow: hidden; }
+.g-bar-f { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, rgba(255,45,142,.55), var(--pink)); }
 .g-bar.top .g-bar-f { background: linear-gradient(90deg, var(--pink), var(--neon)); }
 .g-bar-v { color: var(--ink); font-weight: 700; font-size: .88rem; text-align: right; font-variant-numeric: tabular-nums; }
 /* 5 — Barra de meta / 6 — Card de caixinha (réplica do produto) */
