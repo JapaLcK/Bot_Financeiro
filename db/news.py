@@ -29,6 +29,7 @@ def insert_news_post(
     summary: str,
     category: str | None = None,
     thumb_emoji: str | None = None,
+    image_url: str | None = None,
     published_at: datetime | None = None,
 ) -> bool:
     """
@@ -40,12 +41,12 @@ def insert_news_post(
             cur.execute(
                 """
                 insert into news_posts
-                    (source, source_url, title, summary, category, thumb_emoji, published_at)
-                values (%s, %s, %s, %s, %s, %s, %s)
+                    (source, source_url, title, summary, category, thumb_emoji, image_url, published_at)
+                values (%s, %s, %s, %s, %s, %s, %s, %s)
                 on conflict (source_url) do nothing
                 returning id
                 """,
-                (source, source_url, title, summary, category, thumb_emoji, published_at),
+                (source, source_url, title, summary, category, thumb_emoji, image_url, published_at),
             )
             return cur.fetchone() is not None
 
@@ -58,7 +59,7 @@ def get_recent_news(limit: int = 12) -> list[dict]:
             cur.execute(
                 """
                 select source, source_url, title, summary, category,
-                       thumb_emoji, published_at
+                       thumb_emoji, image_url, published_at
                 from news_posts
                 order by published_at desc nulls last, id desc
                 limit %s

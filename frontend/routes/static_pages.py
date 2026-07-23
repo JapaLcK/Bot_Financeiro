@@ -144,6 +144,7 @@ async def get_blog_news(limit: int = 12):
             "summary": r["summary"],
             "category": r.get("category"),
             "emoji": r.get("thumb_emoji") or "📰",
+            "image": r.get("image_url"),
             "published_at": r["published_at"].isoformat() if r.get("published_at") else None,
         }
         for r in rows

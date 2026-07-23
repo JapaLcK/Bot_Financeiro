@@ -35,7 +35,25 @@
     a.target = "_blank";
     a.rel = "noopener noreferrer";
 
-    var thumb = el("div", "article-thumb", n.emoji || "📰");
+    var thumb = el("div", "article-thumb");
+    if (n.image) {
+      // Foto real da matéria. Se falhar ao carregar, cai no emoji.
+      var img = document.createElement("img");
+      img.className = "article-photo";
+      img.src = n.image;
+      img.alt = "";
+      img.loading = "lazy";
+      img.referrerPolicy = "no-referrer"; // alguns CDNs bloqueiam hotlink com referer
+      img.onerror = function () {
+        thumb.removeChild(img);
+        thumb.classList.add("article-thumb-emoji");
+        thumb.textContent = n.emoji || "📰";
+      };
+      thumb.appendChild(img);
+    } else {
+      thumb.classList.add("article-thumb-emoji");
+      thumb.textContent = n.emoji || "📰";
+    }
     var body = el("div", "article-body");
     if (n.category) body.appendChild(el("span", "tag-cat", n.category));
     body.appendChild(el("h3", null, n.title));

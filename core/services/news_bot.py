@@ -72,6 +72,55 @@ def _strip_html(text: str | None) -> str:
     return _WS_RE.sub(" ", unescaped).strip()
 
 
+_IMG_SRC_RE = re.compile(r'<img[^>]+src="([^"]+)"', re.I)
+
+
+def _looks_like_image(url: str) -> bool:
+    """Filtra URLs que claramente não são a foto da matéria (logos, ícones, svg)."""
+    if not url or not url.lower().startswith("http"):
+        return False
+    low = url.lower()
+    if low.endswith(".svg") or "logo" in low or "/icons/" in low or "sprite" in low:
+        return False
+    return True
+
+
+def _extract_image(it) -> str | None:
+    """
+    Puxa a foto de destaque da matéria a partir do <item> do RSS. Cada veículo
+    expõe de um jeito:
+      - G1: <media:content url=… medium=image>  (e também <img> no description)
+      - Agência Brasil: <imagem-destaque>URL</imagem-destaque>
+      - genérico: primeiro <img src> no description ou content:encoded
+    Retorna None se não achar nada usável (o card cai no emoji).
+    """
+    # 1. Elementos com URL em atributo (media:content/thumbnail, enclosure) ou
+    #    a tag própria da Agência Brasil.
+    for c in it:
+        tag = c.tag.split("}")[-1]
+        if tag in ("content", "thumbnail") and c.get("url"):
+            medium = (c.get("medium") or "").lower()
+            typ = (c.get("type") or "").lower()
+            if medium == "image" or typ.startswith("image") or not (medium or typ):
+                if _looks_like_image(c.get("url")):
+                    return c.get("url")
+        if tag == "enclosure" and c.get("url") and (c.get("type") or "").lower().startswith("image"):
+            if _looks_like_image(c.get("url")):
+                return c.get("url")
+        if tag == "imagem-destaque" and (c.text or "").strip():
+            url = c.text.strip()
+            if _looks_like_image(url):
+                return url
+    # 2. Primeiro <img> embutido no HTML de description / content:encoded.
+    for c in it:
+        tag = c.tag.split("}")[-1]
+        if tag in ("description", "encoded", "content"):
+            m = _IMG_SRC_RE.search(c.text or "")
+            if m and _looks_like_image(m.group(1)):
+                return m.group(1)
+    return None
+
+
 def _parse_pubdate(raw: str | None) -> datetime | None:
     if not raw:
         return None
@@ -115,6 +164,7 @@ def _fetch_feed(source: str, url: str) -> list[dict]:
             "title": html.unescape(title),
             "link": link,
             "snippet": _strip_html(it.findtext("description"))[:600],
+            "image": _extract_image(it),
             "published_at": _parse_pubdate(it.findtext("pubDate")),
         })
     return items
@@ -226,6 +276,7 @@ def _collect_once() -> int:
                     summary=summary["resumo"][:600],
                     category=summary["categoria"],
                     thumb_emoji=summary["emoji"],
+                    image_url=item.get("image"),
                     published_at=item["published_at"],
                 )
                 if ok:

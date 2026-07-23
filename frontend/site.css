@@ -274,6 +274,9 @@ img { max-width: 100%; display: block; }
 .article .meta { color: var(--ink-3); font-size: .78rem; margin-top: auto; }
 /* Cards de notícia são links (link-out pra fonte) — sem sublinhado, herda cor */
 a.article { text-decoration: none; color: inherit; }
+/* Foto real da matéria preenche o thumb; o gradiente só aparece no fallback emoji */
+.article-thumb { overflow: hidden; }
+.article-photo { width: 100%; height: 100%; object-fit: cover; display: block; }
 .article .article-summary { color: var(--ink-2); font-size: .88rem; line-height: 1.5; margin-bottom: 14px; }
 .article .article-source-cta { color: var(--pink); font-size: .8rem; font-weight: 700; margin-top: 10px; }
 a.article:hover .article-source-cta { text-decoration: underline; }

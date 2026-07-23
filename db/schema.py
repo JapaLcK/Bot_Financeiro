@@ -330,6 +330,11 @@ def init_db():
         create index if not exists idx_news_posts_published
           on news_posts (published_at desc nulls last, id desc)
         """,
+        # image_url veio depois do create original — ADD COLUMN IF NOT EXISTS
+        # cobre bancos que já criaram news_posts sem a coluna (idempotente).
+        """
+        alter table news_posts add column if not exists image_url text
+        """,
         """
         create table if not exists open_finance_connections (
           id bigserial primary key,
