@@ -257,15 +257,18 @@ def _collect_once() -> int:
         return 0
 
     inserted = 0
+    healed = 0
     for source, url in FEEDS:
-        if inserted >= MAX_NEW_PER_RUN:
-            break
         for item in _fetch_feed(source, url):
-            if inserted >= MAX_NEW_PER_RUN:
-                break
             try:
                 if db.news_url_exists(item["link"]):
+                    # Já existe: se está sem foto e a fonte agora tem uma, preenche
+                    # (self-heal — cobre notícias salvas antes da feature de imagem).
+                    if item.get("image") and db.backfill_news_image(item["link"], item["image"]):
+                        healed += 1
                     continue
+                if inserted >= MAX_NEW_PER_RUN:
+                    continue  # teto de novas atingido, mas segue backfillando as existentes
                 summary = _summarize(client, item)
                 if summary is None:
                     continue  # não-relevante ou erro
@@ -284,11 +287,11 @@ def _collect_once() -> int:
             except Exception as exc:
                 logger.warning("[news] erro processando item de %s: %s", source, exc)
 
-    if inserted:
-        logger.info("[news] %d notícias novas inseridas.", inserted)
+    if inserted or healed:
+        logger.info("[news] %d novas inseridas, %d imagens preenchidas.", inserted, healed)
         log_system_event_sync(
             "info", "news_bot_run",
-            f"news_bot inseriu {inserted} notícia(s).",
+            f"news_bot: {inserted} nova(s), {healed} imagem(ns) backfill.",
             source="news_bot",
         )
     return inserted

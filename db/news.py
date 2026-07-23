@@ -51,6 +51,30 @@ def insert_news_post(
             return cur.fetchone() is not None
 
 
+def backfill_news_image(source_url: str, image_url: str) -> bool:
+    """
+    Preenche a imagem de uma notícia que já existe mas está SEM imagem
+    (self-heal): usado quando a notícia foi salva antes da feature de foto, ou
+    quando a fonte não trouxe imagem na 1ª vez. Só toca linhas com image_url
+    nulo/vazio — idempotente, não sobrescreve. Retorna True se atualizou.
+    """
+    if not image_url:
+        return False
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update news_posts
+                   set image_url = %s
+                 where source_url = %s
+                   and (image_url is null or image_url = '')
+                returning id
+                """,
+                (image_url, source_url),
+            )
+            return cur.fetchone() is not None
+
+
 def get_recent_news(limit: int = 12) -> list[dict]:
     """Últimas notícias, mais recentes primeiro (por data de publicação)."""
     limit = max(1, min(int(limit), 50))

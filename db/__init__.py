@@ -300,7 +300,7 @@ from .analytics import (
 from .insights import compute_active_insights
 
 # ── Notícias financeiras curadas (news_bot) ─────────────────────────────────
-from .news import news_url_exists, insert_news_post, get_recent_news
+from .news import news_url_exists, insert_news_post, backfill_news_image, get_recent_news
 
 __all__ = [
     # connection
@@ -377,7 +377,7 @@ __all__ = [
     "sync_engagement_opt_out",
     "get_user_by_email",
     # news (news_bot)
-    "news_url_exists", "insert_news_post", "get_recent_news",
+    "news_url_exists", "insert_news_post", "backfill_news_image", "get_recent_news",
     # privacy
     "ensure_account_deletion_columns", "is_account_scheduled_for_deletion",
     "schedule_account_deletion", "build_user_export_zip", "delete_user_data",
