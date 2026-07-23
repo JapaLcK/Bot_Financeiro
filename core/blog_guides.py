@@ -114,10 +114,10 @@ guardado aparece primeiro.</p>
   <svg viewBox="0 0 600 220" width="100%" role="img" aria-label="Reserva crescendo de zero a R$ 6.740 em 12 meses">
     <defs><linearGradient id="gc1" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#FF2D8E" stop-opacity=".42"/><stop offset="1" stop-color="#FF2D8E" stop-opacity="0"/></linearGradient></defs>
     <g stroke="rgba(255,255,255,.07)" stroke-width="1"><line x1="48" y1="30" x2="576" y2="30"/><line x1="48" y1="85" x2="576" y2="85"/><line x1="48" y1="140" x2="576" y2="140"/><line x1="48" y1="196" x2="576" y2="196"/></g>
-    <path d="M48,196 L136,171 L224,145 L312,118 L400,90 L488,61 L576,30 L576,196 Z" fill="url(#gc1)"/>
-    <polyline points="48,196 136,171 224,145 312,118 400,90 488,61 576,30" fill="none" stroke="#FF2D8E" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="576" cy="30" r="5" fill="#C6F11A" stroke="#0c0c0d" stroke-width="2"/>
-    <text x="560" y="22" text-anchor="end" fill="#C6F11A" font-size="13" font-weight="700">R$ 6.740</text>
+    <path class="g-chart-area" d="M48,196 L136,171 L224,145 L312,118 L400,90 L488,61 L576,30 L576,196 Z" fill="url(#gc1)"/>
+    <polyline class="g-chart-line" points="48,196 136,171 224,145 312,118 400,90 488,61 576,30" fill="none" stroke="#FF2D8E" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle class="g-chart-dot" cx="576" cy="30" r="5" fill="#C6F11A" stroke="#0c0c0d" stroke-width="2"/>
+    <text class="g-chart-endlabel" x="560" y="22" text-anchor="end" fill="#C6F11A" font-size="13" font-weight="700">R$ 6.740</text>
     <g fill="rgba(255,255,255,.42)" font-size="11" text-anchor="middle"><text x="48" y="212">Mês 1</text><text x="312" y="212">Mês 6</text><text x="576" y="212">Mês 12</text></g>
   </svg>
   <figcaption>Cada aporte te aproxima da meta — e ver a linha subir é o que segura a disciplina.</figcaption>

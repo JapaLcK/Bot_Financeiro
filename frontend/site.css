@@ -392,6 +392,22 @@ a.article:hover .card-sticker { transform: scale(1.07) rotate(-3deg); }
   .g-vs { grid-template-columns: 1fr; }
 }
 
+/* Animação ao rolar — opt-in via JS (.g-anim colapsa; .in-view dispara).
+   Sem JS os blocos ficam no estado cheio; JS respeita prefers-reduced-motion. */
+.g-anim .g-bar-f, .g-anim .g-track-f { transform: scaleX(0); transform-origin: left center; transition: transform 1s cubic-bezier(.2,.85,.25,1); }
+.g-anim.in-view .g-bar-f, .g-anim.in-view .g-track-f { transform: scaleX(1); }
+.g-bars.g-anim .g-bar:nth-child(2) .g-bar-f { transition-delay: .07s; }
+.g-bars.g-anim .g-bar:nth-child(3) .g-bar-f { transition-delay: .14s; }
+.g-bars.g-anim .g-bar:nth-child(4) .g-bar-f { transition-delay: .21s; }
+.g-bars.g-anim .g-bar:nth-child(5) .g-bar-f { transition-delay: .28s; }
+.g-bars.g-anim .g-bar:nth-child(6) .g-bar-f { transition-delay: .35s; }
+.g-anim .g-chart-area, .g-anim .g-chart-dot, .g-anim .g-chart-endlabel { opacity: 0; }
+.g-anim.in-view .g-chart-area, .g-anim.in-view .g-chart-dot, .g-anim.in-view .g-chart-endlabel { opacity: 1; transition: opacity .55s ease .55s; }
+@media (prefers-reduced-motion: reduce) {
+  .g-anim .g-bar-f, .g-anim .g-track-f { transform: none; transition: none; }
+  .g-anim .g-chart-area, .g-anim .g-chart-dot, .g-anim .g-chart-endlabel { opacity: 1; }
+}
+
 @media (max-width: 640px) {
   .guide-hero h1 { font-size: 1.7rem; }
   .guide-sticker-wrap { width: 140px; height: 140px; }
