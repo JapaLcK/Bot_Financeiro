@@ -3002,6 +3002,9 @@ async def billing_create_checkout(
             line_items=[{"price": price_id, "quantity": 1}],
             mode="subscription",
             locale="pt-BR",
+            # Mostra o campo "Adicionar código promocional" no checkout. Sem isso
+            # os cupons criados no Stripe não têm como ser aplicados pelo usuário.
+            allow_promotion_codes=True,
             success_url=f"{DASHBOARD_URL}/home?upgrade=success",
             cancel_url=f"{DASHBOARD_URL}/home?upgrade=cancelled",
             metadata={"finbot_user_id": str(user_id), "interval": interval},
