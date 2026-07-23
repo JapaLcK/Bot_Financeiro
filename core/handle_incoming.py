@@ -394,10 +394,60 @@ def _handle_image(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
 # Entrada principal
 # ---------------------------------------------------------------------------
 
+def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] | None:
+    """
+    Com o paywall ligado, o bot só atende quem tem assinatura ativa (ou trial).
+    Retorna a mensagem de convite quando o usuário não tem acesso, ou None pra
+    seguir o fluxo normal.
+
+    Roda DEPOIS da auto-vinculação por telefone (wa_runtime chama
+    attempt_whatsapp_phone_link antes de handle_incoming), então o uid aqui já
+    é a conta real do usuário — não corre o risco de barrar quem ia vincular.
+
+    Fail-open igual aos outros gates Pro: se a checagem quebrar, deixa passar.
+    Trancar quem está pagando é pior do que escapar uma mensagem.
+    """
+    try:
+        from core.services.plan_service import has_app_access, paywall_enabled
+        if not paywall_enabled():
+            return None
+        uid = _normalize_user_id(msg)
+        if has_app_access(uid):
+            return None
+    except Exception:
+        logger.warning("gate do paywall falhou — seguindo fail-open", exc_info=True)
+        return None
+
+    # Link autenticado que já cai no /precos logado; usa o público se falhar.
+    link = "https://pigbankai.com/precos"
+    try:
+        from core.dashboard_links import build_dashboard_link
+        link = build_dashboard_link(uid, hours=1.0, next_path="/precos") or link
+    except Exception:
+        logger.warning("não consegui gerar link autenticado do /precos", exc_info=True)
+
+    return [OutgoingMessage(text=(
+        "🐷 Oi! Que bom te ver por aqui.\n\n"
+        "Pra eu poder cuidar do seu dinheiro, sua conta precisa estar ativa — e "
+        f"dá pra começar com {_bold('7 dias grátis', platform)}, sem cobrança "
+        "agora e cancelando quando quiser.\n\n"
+        f"👉 {link}\n\n"
+        "Assim que ativar, é só me mandar uma mensagem que eu já começo a anotar "
+        "tudo pra você 💚"
+    ))]
+
+
 def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
     platform = msg.platform
 
     try:
+        # ------------------------------------------------------------------
+        # 0. Paywall — sem assinatura ativa, o bot não processa nada
+        # ------------------------------------------------------------------
+        gated = _paywall_gate(msg, platform)
+        if gated is not None:
+            return gated
+
         # ------------------------------------------------------------------
         # 1. Anexo OFX — tratamento especial (não passa pelo classificador)
         # ------------------------------------------------------------------
