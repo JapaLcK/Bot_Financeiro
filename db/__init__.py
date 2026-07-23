@@ -299,6 +299,9 @@ from .analytics import (
 # ── Insights proativos (Sprint 7) ───────────────────────────────────────────
 from .insights import compute_active_insights
 
+# ── Notícias financeiras curadas (news_bot) ─────────────────────────────────
+from .news import news_url_exists, insert_news_post, get_recent_news
+
 __all__ = [
     # connection
     "get_conn",
@@ -373,6 +376,8 @@ __all__ = [
     "set_tip_email_opt_out", "set_insight_email_opt_out", "set_whatsapp_updates_opt_out",
     "sync_engagement_opt_out",
     "get_user_by_email",
+    # news (news_bot)
+    "news_url_exists", "insert_news_post", "get_recent_news",
     # privacy
     "ensure_account_deletion_columns", "is_account_scheduled_for_deletion",
     "schedule_account_deletion", "build_user_export_zip", "delete_user_data",

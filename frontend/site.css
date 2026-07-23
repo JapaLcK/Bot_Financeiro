@@ -272,6 +272,16 @@ img { max-width: 100%; display: block; }
 .article .tag-cat { align-self: flex-start; background: var(--pink-soft); border: 1px solid rgba(255,45,142,.28); color: var(--pink); font-size: .64rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; margin-bottom: 12px; }
 .article h3 { font-size: 1.02rem; font-weight: 700; line-height: 1.35; margin-bottom: 8px; }
 .article .meta { color: var(--ink-3); font-size: .78rem; margin-top: auto; }
+/* Cards de notícia são links (link-out pra fonte) — sem sublinhado, herda cor */
+a.article { text-decoration: none; color: inherit; }
+.article .article-summary { color: var(--ink-2); font-size: .88rem; line-height: 1.5; margin-bottom: 14px; }
+.article .article-source-cta { color: var(--pink); font-size: .8rem; font-weight: 700; margin-top: 10px; }
+a.article:hover .article-source-cta { text-decoration: underline; }
+/* Sub-cabeçalhos das seções do blog (Notícias / Guias) */
+.blog-subhead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 22px 0 4px; }
+.blog-subhead h3 { font-size: 1.28rem; font-weight: 800; }
+.blog-subhead-note { color: var(--ink-3); font-size: .82rem; }
+.news-section { margin-bottom: 8px; }
 
 /* ─── Contato ───────────────────────────────────────────────────────── */
 .contact-grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: 40px; padding: 10px 0 40px; }

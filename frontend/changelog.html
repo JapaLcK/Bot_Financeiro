@@ -37,6 +37,20 @@
         <p>Dicas, guias e novidades pra tirar o máximo da Piggy e da sua vida financeira.</p>
       </div>
 
+      <!-- Notícias do mercado: preenchida via /api/blog/news pelo blog-news.js.
+           Começa oculta e é revelada quando há notícias (news_bot as coleta). -->
+      <div id="news-section" class="news-section" style="display:none">
+        <div class="blog-subhead">
+          <h3>📈 Notícias do mercado</h3>
+          <span class="blog-subhead-note">Resumos da Piggy · atualizado ao longo do dia</span>
+        </div>
+        <div id="news-grid" class="blog-grid"></div>
+      </div>
+
+      <div class="blog-subhead">
+        <h3>Guias e dicas</h3>
+      </div>
+
       <div class="blog-grid">
         <article class="article">
           <div class="article-thumb">💬</div>
@@ -126,5 +140,6 @@
   </footer>
 
   <script src="/nav-auth.js?v=2" defer></script>
+  <script src="/blog-news.js?v=1" defer></script>
 </body>
 </html>

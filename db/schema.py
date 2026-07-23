@@ -309,6 +309,27 @@ def init_db():
           primary key (code, ref_date)
         )
         """,
+        # Notícias financeiras curadas pelo news_bot (core/services/news_bot.py).
+        # Curadoria (link-out): guardamos só título + resumo ORIGINAL gerado por
+        # LLM + link pra fonte. NUNCA o corpo do artigo (conteúdo de terceiros).
+        # `source_url` é unique → idempotência do coletor (ON CONFLICT DO NOTHING).
+        """
+        create table if not exists news_posts (
+          id bigserial primary key,
+          source text not null,
+          source_url text not null unique,
+          title text not null,
+          summary text not null,
+          category text,
+          thumb_emoji text,
+          published_at timestamptz,
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_news_posts_published
+          on news_posts (published_at desc nulls last, id desc)
+        """,
         """
         create table if not exists open_finance_connections (
           id bigserial primary key,

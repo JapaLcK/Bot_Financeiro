@@ -121,6 +121,36 @@ async def get_commands_catalog():
     return {"catalog": CATALOG}
 
 
+@router.get("/api/blog/news")
+async def get_blog_news(limit: int = 12):
+    """Notícias financeiras curadas pelo news_bot (core/services/news_bot.py).
+
+    Curadoria/link-out: título + resumo original + link pra fonte. Público, sem
+    dado sensível. db.get_recent_news é síncrono → roda em thread pool.
+    """
+    import db
+
+    try:
+        rows = await asyncio.to_thread(db.get_recent_news, limit)
+    except Exception:
+        # Tabela pode não existir ainda numa primeira subida — degrada pra vazio.
+        return {"news": []}
+
+    news = [
+        {
+            "source": r["source"],
+            "url": r["source_url"],
+            "title": r["title"],
+            "summary": r["summary"],
+            "category": r.get("category"),
+            "emoji": r.get("thumb_emoji") or "📰",
+            "published_at": r["published_at"].isoformat() if r.get("published_at") else None,
+        }
+        for r in rows
+    ]
+    return {"news": news}
+
+
 @router.get("/como-funciona")
 async def serve_como_funciona():
     return html_file(FRONTEND_DIR / "como-funciona.html")
@@ -215,6 +245,17 @@ async def serve_nav_auth_js():
     por 'Ir para o dashboard' quando o usuário está autenticado."""
     return FileResponse(
         FRONTEND_DIR / "nav-auth.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@router.get("/blog-news.js")
+async def serve_blog_news_js():
+    """JS da seção 'Notícias do mercado' do /blog (consome /api/blog/news).
+    Externalizado (não inline) pra viabilizar remover 'unsafe-inline' do CSP."""
+    return FileResponse(
+        FRONTEND_DIR / "blog-news.js",
         media_type="application/javascript",
         headers={"Cache-Control": "public, max-age=300"},
     )

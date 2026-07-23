@@ -1285,6 +1285,14 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[proactive_ai] erro: {exc}", file=sys.stderr)
 
+    async def _news_bot():
+        try:
+            await asyncio.sleep(1)
+            from core.services.news_bot import run_news_loop  # noqa: PLC0415
+            await run_news_loop()
+        except Exception as exc:
+            print(f"[news_bot] erro: {exc}", file=sys.stderr)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -1320,6 +1328,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_account_deletion_worker(), name="account_deletion"),
                 asyncio.create_task(_recurring_charger(), name="recurring_charger"),
                 asyncio.create_task(_proactive_ai(), name="proactive_ai"),
+                asyncio.create_task(_news_bot(), name="news_bot"),
             ]
         )
     else:
