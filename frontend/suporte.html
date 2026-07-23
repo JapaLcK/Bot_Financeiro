@@ -112,18 +112,6 @@
   </footer>
 
 <script>
-  // Nav ciente de login: se o usuário já está autenticado, troca os CTAs
-  // "Entrar / Começar agora" por "Ir para o dashboard" (evita parecer deslogado
-  // ao abrir esta página a partir do app já logado).
-  (async function(){
-    try {
-      var r = await fetch('/auth/validate', { credentials: 'same-origin' });
-      if (!r.ok) return;
-      var nr = document.querySelector('.nav .nav-right');
-      if (nr) nr.innerHTML = '<a class="btn btn-primary" href="/app">Ir para o dashboard</a>';
-    } catch (e) { /* offline/erro: mantém CTAs padrão */ }
-  })();
-
   // Envia via endpoint real /contact (Resend no backend). Sem depender de
   // cliente de e-mail no dispositivo (o mailto: antigo falhava sem handler).
   document.getElementById('contact-form').addEventListener('submit', async function(e){
@@ -153,5 +141,6 @@
     finally { btn.disabled = false; btn.textContent = orig; }
   });
 </script>
+  <script src="/nav-auth.js?v=1" defer></script>
 </body>
 </html>

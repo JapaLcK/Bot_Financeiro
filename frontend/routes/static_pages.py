@@ -209,6 +209,17 @@ async def serve_modals_js():
     return FileResponse(FRONTEND_DIR / "modals.js", media_type="application/javascript")
 
 
+@router.get("/nav-auth.js")
+async def serve_nav_auth_js():
+    """Nav ciente de login nas páginas de marketing: troca 'Entrar/Começar'
+    por 'Ir para o dashboard' quando o usuário está autenticado."""
+    return FileResponse(
+        FRONTEND_DIR / "nav-auth.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @router.get("/dashboard.js")
 async def serve_dashboard_js():
     """JS principal do dashboard, extraído do inline de dashboard.html
