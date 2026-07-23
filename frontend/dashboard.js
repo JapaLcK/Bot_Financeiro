@@ -4242,6 +4242,20 @@ function applyTheme(theme) {
   if (analyticsVisible && _analyticsCache) {
     renderAnalyticsView(_analyticsCache);
   }
+
+  // Idem pros gráficos do overview: Chart.js não relê as cores no toggle,
+  // então reconstrói com os últimos dados pra pegar o tema novo.
+  const overviewVisible = document.getElementById("overview-view")?.classList.contains("active");
+  if (overviewVisible && lastData) {
+    const d = lastData;
+    const ry = d.year || viewYear, rm = d.month || viewMonth;
+    if ((d.expense_categories || []).length) buildCatChart(d.expense_categories);
+    const dailyData = (d.daily_expenses && d.daily_expenses.length)
+      ? d.daily_expenses
+      : computeDailyFromLaunches(d.recent_launches || [], ry, rm);
+    buildDayChart(dailyData);
+    if (_lastHistory && _lastHistory.length) buildHistoryChart(_lastHistory);
+  }
 }
 function toggleTheme() {
   const next = document.body.classList.contains("light") ? "dark" : "light";
@@ -7017,7 +7031,7 @@ function buildCatChart(cats) {
     options:{
       cutout:"68%",
       plugins:{
-        legend:{ position:"bottom", labels:{color:"rgba(255,255,255,.5)",font:{size:10},padding:10,boxWidth:9,usePointStyle:true} },
+        legend:{ position:"bottom", labels:{color:_isLightMode()?"rgba(15,23,42,.6)":"rgba(255,255,255,.5)",font:{size:10},padding:10,boxWidth:9,usePointStyle:true} },
         tooltip:{ backgroundColor:"rgba(10,12,24,.88)",borderColor:"rgba(255,255,255,.1)",borderWidth:1,
           titleColor:"rgba(255,255,255,.9)",bodyColor:"rgba(255,255,255,.6)",
           callbacks:{label:ctx=>" "+fmt(ctx.parsed)} }
@@ -7062,8 +7076,8 @@ function buildDayChart(daily) {
     options:{
       responsive:true,maintainAspectRatio:false,
       scales:{
-        x:{ grid:{color:"rgba(255,255,255,.04)"}, ticks:{color:"rgba(255,255,255,.35)",font:{size:9},maxRotation:0,callback:(v,i)=>(i+1)%5===0||i===0?i+1:""} },
-        y:{ grid:{color:"rgba(255,255,255,.05)"}, ticks:{color:"rgba(255,255,255,.35)",font:{size:9},callback:v=>fmtShort(v)} }
+        x:{ grid:{color:_isLightMode()?"rgba(15,23,42,.06)":"rgba(255,255,255,.04)"}, ticks:{color:_isLightMode()?"rgba(15,23,42,.55)":"rgba(255,255,255,.35)",font:{size:9},maxRotation:0,callback:(v,i)=>(i+1)%5===0||i===0?i+1:""} },
+        y:{ grid:{color:_isLightMode()?"rgba(15,23,42,.08)":"rgba(255,255,255,.05)"}, ticks:{color:_isLightMode()?"rgba(15,23,42,.55)":"rgba(255,255,255,.35)",font:{size:9},callback:v=>fmtShort(v)} }
       },
       plugins:{
         legend:{display:false},
@@ -7156,6 +7170,7 @@ function _isLightMode() {
   return document.body.classList.contains("light");
 }
 
+let _lastHistory = null;
 async function fetchHistory() {
   try {
     const r = await fetch(`${API}/history/${USER_ID}`, {
@@ -7165,6 +7180,7 @@ async function fetchHistory() {
 
     const payload = await r.json();
     const history = payload.data || [];
+    _lastHistory = history;
 
     if (!history.length) return;
 
