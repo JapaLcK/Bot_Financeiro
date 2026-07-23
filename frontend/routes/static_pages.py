@@ -87,6 +87,48 @@ async def serve_changelog():
     return html_file(FRONTEND_DIR / "changelog.html")
 
 
+def _guide_card_html(g: dict) -> str:
+    """Card de um guia pra seção 'Continue lendo' (link interno /blog/<slug>)."""
+    return (
+        f'<a class="article" href="/blog/{g["slug"]}">'
+        f'<div class="article-thumb article-thumb-emoji">{g["emoji"]}</div>'
+        f'<div class="article-body">'
+        f'<span class="tag-cat">{_html.escape(g["category"])}</span>'
+        f'<h3>{_html.escape(g["title"])}</h3>'
+        f'<div class="meta">Leitura de {_html.escape(g["read_time"])}</div>'
+        f'</div></a>'
+    )
+
+
+@router.get("/blog/{slug}")
+async def serve_blog_guide(slug: str):
+    """Página de um guia/dica evergreen (conteúdo próprio do PigBank).
+
+    Renderizada no servidor a partir de core.blog_guides + o template
+    blog-article.html. Embaixo do artigo vão os outros guias ('Continue lendo').
+    """
+    from core.blog_guides import get_guide, other_guides
+
+    guide = get_guide(slug)
+    if not guide:
+        raise HTTPException(status_code=404, detail="Guia não encontrado.")
+
+    more = "".join(_guide_card_html(g) for g in other_guides(slug))
+    template = (FRONTEND_DIR / "blog-article.html").read_text(encoding="utf-8")
+    page = (
+        template
+        .replace("{{TITLE}}", _html.escape(guide["title"]))
+        .replace("{{DESCRIPTION}}", _html.escape(guide["description"]))
+        .replace("{{CANONICAL}}", f"https://pigbankai.com/blog/{slug}")
+        .replace("{{CATEGORY}}", _html.escape(guide["category"]))
+        .replace("{{READ_TIME}}", _html.escape(guide["read_time"]))
+        .replace("{{EMOJI}}", guide["emoji"])
+        .replace("{{BODY}}", guide["body"])            # HTML confiável (nosso)
+        .replace("{{MORE_GUIDES}}", more)
+    )
+    return Response(content=page, media_type="text/html; charset=utf-8")
+
+
 @router.get("/whatsapp")
 async def serve_whatsapp():
     return html_file(FRONTEND_DIR / "whatsapp.html")

@@ -286,6 +286,28 @@ a.article:hover .article-source-cta { text-decoration: underline; }
 .blog-subhead-note { color: var(--ink-3); font-size: .82rem; }
 .news-section { margin-bottom: 8px; }
 
+/* ── Página de artigo do blog (/blog/<slug>) ──────────────────────────────── */
+.guide { max-width: 720px; margin: 0 auto; padding: 12px 0 8px; }
+.guide-back { display: inline-block; color: var(--ink-3); font-size: .84rem; font-weight: 600; margin-bottom: 22px; }
+.guide-back:hover { color: var(--ink); }
+.guide-head { margin-bottom: 28px; }
+.guide-head .tag-cat { display: inline-block; background: var(--pink-soft); border: 1px solid rgba(255,45,142,.28); color: var(--pink); font-size: .64rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; margin-bottom: 16px; }
+.guide-head h1 { font-size: 2.1rem; font-weight: 800; line-height: 1.2; letter-spacing: -.01em; }
+.guide-meta { color: var(--ink-3); font-size: .84rem; margin-top: 12px; }
+.guide-prose { color: var(--ink-2); font-size: 1.06rem; line-height: 1.72; }
+.guide-prose p { margin: 0 0 18px; }
+.guide-prose h2 { color: var(--ink); font-size: 1.34rem; font-weight: 800; line-height: 1.3; margin: 34px 0 12px; }
+.guide-prose ul { margin: 0 0 18px; padding-left: 22px; }
+.guide-prose li { margin: 0 0 8px; }
+.guide-prose strong { color: var(--ink); font-weight: 700; }
+.guide-prose em { font-style: italic; }
+.more-guides { border-top: 1px solid var(--line); margin-top: 48px; padding-top: 12px; }
+
+@media (max-width: 640px) {
+  .guide-head h1 { font-size: 1.6rem; }
+  .guide-prose { font-size: 1rem; }
+}
+
 /* ─── Contato ───────────────────────────────────────────────────────── */
 .contact-grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: 40px; padding: 10px 0 40px; }
 .contact-info { display: grid; gap: 18px; align-content: start; }
