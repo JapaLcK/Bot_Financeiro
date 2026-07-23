@@ -7294,6 +7294,11 @@ function render(d) {
   const apt  = (allocSrc.investments?.total || 0) + (allocSrc.pockets?.total || 0);
   const sav  = inc - exp - apt;
   const rate = inc > 0 ? Math.round(apt/inc*100) : 0;
+  // Déficit (sav<0): despesas+aportes passaram da renda. Nesse caso NÃO exibir
+  // "X% da renda poupada" — soa positivo num mês negativo (você aportou puxando
+  // do saldo, não é poupança sustentável). Mostra o motivo, em vermelho.
+  const savDeltaCls = sav < 0 ? "down" : (rate>=20?"up":rate>=10?"":"down");
+  const savDeltaTxt = sav < 0 ? "Aportes e gastos passaram da renda" : `${rate}% da renda poupada`;
   const rc   = rate>=20?"var(--green)":rate>=10?"var(--yellow)":"var(--red)";
   const hist = d.is_current_month !== undefined
     ? !d.is_current_month
@@ -7399,7 +7404,7 @@ function render(d) {
         <div class="ov-ico neon">${svgTrend}</div>
         <div class="ov-lbl">${sav>=0?'Sobrou este mês':'Déficit do mês'}</div>
         <div class="ov-val ${sav>=0?'pos':'neg'}"><span data-num="sav" data-val="${sav}">${fmt(sav)}</span></div>
-        <div class="ov-delta ${rate>=20?'up':rate>=10?'':'down'}">${rate}% da renda poupada</div>
+        <div class="ov-delta ${savDeltaCls}">${savDeltaTxt}</div>
       </div>
       <div class="ov-stat" style="animation-delay:120ms">
         <div class="ov-ico">${svgReceipt}</div>
