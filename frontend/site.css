@@ -229,6 +229,23 @@ img { max-width: 100%; display: block; }
   .nav-links { display: none; }
   .section { padding: 60px 0; }
 }
+
+/* Nav em tela estreita: o mínimo necessário era 374px (padding 36 + logo 111 +
+   gap 22 + "Entrar" 41 + gap 16 + botão 148). Como .nav é flex nowrap e o .btn
+   tem white-space:nowrap, nada quebrava linha — o CTA "Começar agora" era
+   empurrado pra fora da viewport e a parte cortada não recebia toque em Android
+   de 360px e iPhone SE. Apertando padding/gaps/botão o mínimo cai pra 326px
+   ("Ir para o dashboard", do usuário logado, fica em 352px — também cabe). */
+@media (max-width: 480px) {
+  .nav { gap: 10px; padding: 10px 12px; }
+  .nav-right { gap: 10px; }
+  .nav .btn { padding: 10px 14px; font-size: .85rem; }
+}
+/* Abaixo de 380px (iPhone SE e afins) esconde o nome ao lado do mascote:
+   o mínimo cai pra ~249px e sobra folga até em 320px. */
+@media (max-width: 380px) {
+  .nav-logo span { display: none; }
+}
 @media (max-width: 560px) {
   .features-row { grid-template-columns: 1fr; }
   .hero-mascot { width: 150px; }
