@@ -6,8 +6,10 @@ Fluxo:
   2. Visitante clica no link → cookie ref_code (30 dias) → ao criar conta,
      record_referral() grava a atribuição (1 afiliado por usuário, primeiro ganha).
   3. Webhook Stripe invoice.paid (valor > 0) chama record_commission_for_invoice():
-     comissão = commission_bps da fatura, idempotente por stripe_invoice_id,
-     só acumula se o afiliado estiver status='active'.
+     comissão = commission_bps da fatura, APENAS na primeira cobrança paga do
+     indicado — renovações não geram nada (mudou de recorrente pra primeira
+     cobrança em 2026-07-23). Idempotente por stripe_invoice_id, só acumula se
+     o afiliado estiver status='active'.
   4. Comissão fica 'pending' com carência (COMMISSION_HOLD_DAYS) antes de virar
      sacável; saque via request_payout() (mínimo MIN_PAYOUT_CENTS) trava as
      comissões no payout; admin paga por Pix fora do sistema e marca pago.
@@ -163,10 +165,11 @@ def get_referral_for_user(referred_user_id: int) -> dict | None:
 
 def record_commission_for_invoice(referred_user_id: int, stripe_invoice_id: str,
                                   invoice_amount_cents: int) -> dict | None:
-    """Gera a comissão de uma fatura Stripe paga do usuário indicado.
+    """Gera a comissão da PRIMEIRA cobrança paga do usuário indicado.
 
     Retorna a linha criada, ou None se: usuário não tem afiliado, afiliado
-    desativado, valor <= 0, ou fatura já comissionada (idempotência).
+    desativado, valor <= 0, fatura já comissionada (idempotência), ou o
+    indicado já gerou comissão antes (renovação — só a 1ª cobrança conta).
     """
     if not stripe_invoice_id or int(invoice_amount_cents) <= 0:
         return None
@@ -184,6 +187,17 @@ def record_commission_for_invoice(referred_user_id: int, stripe_invoice_id: str,
             )
             row = cur.fetchone()
             if not row:
+                return None
+            # Comissão SÓ na primeira cobrança paga do indicado (decisão do Lucas
+            # em 2026-07-23 — antes era recorrente em toda fatura). Se já existe
+            # qualquer comissão desse usuário, as renovações não geram mais nada.
+            # Conta inclusive comissão estornada: se a 1ª foi reembolsada, a
+            # renovação seguinte não deve virar uma nova comissão.
+            cur.execute(
+                "select 1 from affiliate_commissions where referred_user_id = %s limit 1",
+                (int(referred_user_id),),
+            )
+            if cur.fetchone():
                 return None
             amount_cents = int(invoice_amount_cents) * int(row["commission_bps"]) // 10_000
             if amount_cents <= 0:

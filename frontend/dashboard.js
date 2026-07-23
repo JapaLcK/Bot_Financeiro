@@ -7658,7 +7658,7 @@ function _renderAffiliateView(data) {
       <h3 style="margin:0 0 6px">Seu link de divulgação</h3>
       <p style="font-size:.78rem;color:var(--text-3);margin:0 0 12px">
         Quem se cadastrar por ele e assinar o PigBank+ gera ${Number(data.commission_percent || 10)}% de comissão
-        pra você em cada cobrança, enquanto a assinatura durar.
+        pra você na primeira cobrança da assinatura.
       </p>
       <div style="display:flex;gap:8px;align-items:center">
         <input id="affiliate-link-input" type="text" readonly value="${esc(data.link)}"
