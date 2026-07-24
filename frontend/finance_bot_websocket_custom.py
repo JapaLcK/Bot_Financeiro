@@ -576,6 +576,36 @@ async def get_financial_data(
         # Tabela pode não existir ainda no init_db da primeira subida — silencia.
         pass
 
+    # Alertas de créditos automáticos (recurring_income_credits) ainda não vistos.
+    try:
+        async with await db_connect() as _alert_conn:
+            async with _alert_conn.cursor() as _alert_cur:
+                await _alert_cur.execute(
+                    """
+                    select ric.id, ric.amount, ric.credited_at, ric.ym,
+                           r.name, r.id as income_id
+                    from recurring_income_credits ric
+                    join recurring_incomes r on r.id = ric.income_id
+                    where ric.user_id = %s and ric.acknowledged = false
+                    order by ric.credited_at desc
+                    limit 10
+                    """,
+                    (user_id,),
+                )
+                for r in await _alert_cur.fetchall():
+                    alerts.append({
+                        "type":        "recurring_credited",
+                        "credit_id":   r["id"],
+                        "income_id":   r["income_id"],
+                        "name":        r["name"],
+                        "amount":      float(r["amount"]),
+                        "ym":          r["ym"],
+                        "credited_at": r["credited_at"].isoformat() if r["credited_at"] else None,
+                    })
+    except Exception:
+        # Tabela pode não existir ainda no init_db da primeira subida — silencia.
+        pass
+
     inc = monthly_map.get("receita", 0.0)
     exp = monthly_map.get("despesa", 0.0)
 
@@ -4747,6 +4777,135 @@ async def recurring_delete_route(request: Request, user_id: int, rec_id: int):
         if str(exc) == "RECORRENTE_NAO_ENCONTRADO":
             raise HTTPException(status_code=404, detail="Gasto fixo não encontrado.")
         raise _recurring_value_error(str(exc))
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True}
+
+
+# ─── Receitas recorrentes ────────────────────────────────────────────────────
+# Espelho das rotas de gasto fixo. Mesma feature Pro (`recurring_expenses`),
+# então quem tem gasto fixo tem receita recorrente sem gate novo.
+
+class RecurringIncomeCreatePayload(BaseModel):
+    name: str
+    amount: float
+    category: str
+    pay_day: int
+    is_primary: bool = False
+    notes: str | None = None
+
+
+class RecurringIncomeUpdatePayload(BaseModel):
+    name: str | None = None
+    amount: float | None = None
+    category: str | None = None
+    pay_day: int | None = None
+    is_primary: bool | None = None
+    is_active: bool | None = None
+    notes: str | None = None
+
+
+def _recurring_income_value_error(code: str) -> HTTPException:
+    msg = {
+        "NOME_INVALIDO": "Nome inválido.",
+        "VALOR_INVALIDO": "Valor deve ser maior que zero.",
+        "DIA_INVALIDO": "Dia do recebimento deve estar entre 1 e 31.",
+        "RECEITA_NAO_ENCONTRADA": "Receita recorrente não encontrada.",
+    }
+    return HTTPException(status_code=400, detail=msg.get(code, code))
+
+
+@app.get("/recurring-incomes/{user_id}")
+async def recurring_income_list_route(request: Request, user_id: int, include_inactive: bool = False):
+    """Lista as receitas recorrentes do user. Pro-only."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "recurring_expenses")
+
+    from db.recurring_income import list_recurring_incomes
+
+    items = await asyncio.to_thread(list_recurring_incomes, user_id, include_inactive)
+    return {"ok": True, "incomes": items}
+
+
+@app.post("/recurring-incomes/{user_id}")
+async def recurring_income_create_route(
+    request: Request, user_id: int, payload: RecurringIncomeCreatePayload
+):
+    """Cria uma receita recorrente. Pro-only."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "recurring_expenses")
+
+    from db.recurring_income import create_recurring_income
+
+    try:
+        item = await asyncio.to_thread(
+            create_recurring_income,
+            user_id, payload.name, payload.amount, payload.category,
+            payload.pay_day, payload.is_primary, payload.notes,
+        )
+    except ValueError as exc:
+        raise _recurring_income_value_error(str(exc))
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "income": item}
+
+
+@app.patch("/recurring-incomes/{user_id}/{inc_id}")
+async def recurring_income_update_route(
+    request: Request, user_id: int, inc_id: int, payload: RecurringIncomeUpdatePayload
+):
+    """Edita uma receita recorrente. Reajuste detectado quando amount muda."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "recurring_expenses")
+
+    from db.recurring_income import update_recurring_income
+
+    try:
+        item = await asyncio.to_thread(
+            update_recurring_income,
+            user_id, inc_id,
+            name=payload.name, amount=payload.amount, category=payload.category,
+            pay_day=payload.pay_day, is_primary=payload.is_primary,
+            is_active=payload.is_active, notes=payload.notes,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        if code == "RECEITA_NAO_ENCONTRADA":
+            raise HTTPException(status_code=404, detail="Receita recorrente não encontrada.")
+        raise _recurring_income_value_error(code)
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "income": item}
+
+
+@app.post("/recurring-incomes/{user_id}/credits/{credit_id}/ack")
+async def recurring_income_credit_ack_route(request: Request, user_id: int, credit_id: int):
+    """Marca um crédito automático como visto (some do banner)."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "recurring_expenses")
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE recurring_income_credits SET acknowledged=true "
+                "WHERE id=%s AND user_id=%s",
+                (credit_id, user_id),
+            )
+        await conn.commit()
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True}
+
+
+@app.delete("/recurring-incomes/{user_id}/{inc_id}")
+async def recurring_income_delete_route(request: Request, user_id: int, inc_id: int):
+    """Exclui uma receita recorrente. Lançamentos passados ficam intactos."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "recurring_expenses")
+
+    from db.recurring_income import delete_recurring_income
+
+    try:
+        await asyncio.to_thread(delete_recurring_income, user_id, inc_id)
+    except ValueError as exc:
+        if str(exc) == "RECEITA_NAO_ENCONTRADA":
+            raise HTTPException(status_code=404, detail="Receita recorrente não encontrada.")
+        raise _recurring_income_value_error(str(exc))
     _invalidate_dashboard_current_cache(user_id)
     return {"ok": True}
 
