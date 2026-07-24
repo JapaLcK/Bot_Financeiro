@@ -426,7 +426,11 @@ function navigateTo(view) {
   if (view === "installments") loadInstallmentsView();
   if (view === "categories") loadCategoriesView();
   if (view === "budgets") loadBudgetsView();
-  if (view === "fixed") loadFixedView();
+  // View Recorrentes: carrega só a aba ativa (gastos fixos ou receitas fixas).
+  if (view === "fixed") {
+    if (_recurringTab === "incomes") loadRecurringIncomeView();
+    else loadFixedView();
+  }
   if (view === "goals") loadGoalsView();
   if (view === "affiliate") loadAffiliateView();
 }
@@ -3248,6 +3252,447 @@ async function deleteRecurringFromModal() {
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Receitas Recorrentes (Pro-only — mesma feature/gate do gasto fixo)
+// ══════════════════════════════════════════════════════════════════════
+// Espelho do bloco acima, do lado da entrada. Sem forma de pagamento:
+// receita sempre cai na conta. `is_primary` separa renda principal de extras.
+
+const RECURRING_INCOME_CATEGORY_EMOJI = {
+  "salário": "💼", "salario": "💼", "freela": "🧑‍💻", "freelance": "🧑‍💻",
+  "aluguel": "🏠", "dividendos": "📈", "investimentos": "📈", "rendimentos": "📈",
+  "vendas": "🛍️", "pensão": "🤝", "aposentadoria": "🧓", "bolsa": "🎓",
+  "comissão": "🤑", "bônus": "🎁", "outros": "🏷️",
+};
+
+// Aba ativa da view Recorrentes: "expenses" | "incomes"
+let _recurringTab = "expenses";
+let _recurringIncomeCache = null;
+let _recurringIncomeFetchInFlight = null;
+
+function setRecurringTab(tab) {
+  if (tab !== "expenses" && tab !== "incomes") return;
+  _recurringTab = tab;
+  document.querySelectorAll("#recurring-tabs .ftab").forEach(b => {
+    b.classList.toggle("active", b.dataset.rectab === tab);
+  });
+  const expPane = document.getElementById("recurring-expenses-pane");
+  const incPane = document.getElementById("recurring-incomes-pane");
+  if (expPane) expPane.style.display = tab === "expenses" ? "" : "none";
+  if (incPane) incPane.style.display = tab === "incomes" ? "" : "none";
+
+  const btn = document.getElementById("recurring-new-btn");
+  if (btn) btn.textContent = tab === "expenses" ? "+ Novo gasto fixo" : "+ Nova receita fixa";
+
+  if (tab === "incomes") loadRecurringIncomeView();
+  else loadFixedView();
+}
+
+// O botão do header muda de destino conforme a aba ativa.
+function openRecurringNewFromTab() {
+  if (_recurringTab === "incomes") openRecurringIncomeEditModal();
+  else openRecurringEditModal();
+}
+
+async function _fetchRecurringIncomes() {
+  if (_recurringIncomeFetchInFlight) return _recurringIncomeFetchInFlight;
+  _recurringIncomeFetchInFlight = (async () => {
+    try {
+      const resp = await fetch(`${API}/recurring-incomes/${USER_ID}`, {
+        credentials: "same-origin",
+        headers: csrfHeaders(),
+      });
+      if (resp.status === 403) {
+        const data = await resp.json().catch(() => ({}));
+        if (data?.detail?.error === "pro_required") return { pro_required: true };
+      }
+      if (!resp.ok) {
+        const txt = await resp.text();
+        let detail = txt;
+        try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+        throw new Error(`(HTTP ${resp.status}) ${detail}`);
+      }
+      const data = await resp.json();
+      return data.incomes || [];
+    } finally {
+      _recurringIncomeFetchInFlight = null;
+    }
+  })();
+  return _recurringIncomeFetchInFlight;
+}
+
+async function loadRecurringIncomeView(forceFresh = false) {
+  const stats = document.getElementById("recurring-income-stats");
+  if (!stats) return;
+  if (!USER_ID) {
+    setTimeout(() => loadRecurringIncomeView(forceFresh), 300);
+    return;
+  }
+  if (_recurringIncomeCache && !forceFresh) {
+    _renderRecurringIncomeView(_recurringIncomeCache);
+    _fetchRecurringIncomes().then(fresh => {
+      if (fresh && !fresh.pro_required) {
+        _recurringIncomeCache = fresh;
+        _renderRecurringIncomeView(fresh);
+      }
+    }).catch(() => {});
+    return;
+  }
+
+  stats.innerHTML = `
+    <div class="stat-tile"><div class="stat-label">Total mensal</div><div class="sk sk-h2"></div></div>
+    <div class="stat-tile"><div class="stat-label">Receitas ativas</div><div class="sk sk-h2"></div></div>
+    <div class="stat-tile"><div class="stat-label">Próximo recebimento</div><div class="sk sk-h2"></div></div>
+    <div class="stat-tile"><div class="stat-label">Sobra prevista</div><div class="sk sk-h2"></div></div>
+  `;
+  try {
+    const data = await _fetchRecurringIncomes();
+    if (data && data.pro_required) {
+      _renderRecurringIncomeProGate();
+      return;
+    }
+    _recurringIncomeCache = data;
+    _renderRecurringIncomeView(data);
+    // Sobra prevista precisa do total de gastos fixos: puxa em background
+    // se o user entrou direto na aba de receitas.
+    if (!_recurringCache) {
+      _fetchRecurring().then(exp => {
+        if (exp && !exp.pro_required) {
+          _recurringCache = exp;
+          _renderRecurringIncomeView(_recurringIncomeCache);
+        }
+      }).catch(() => {});
+    }
+  } catch (err) {
+    stats.innerHTML = `<div class="empty" style="grid-column:1/-1;color:var(--red)">Erro: ${escapeHtmlSafe(String(err.message || err))}</div>`;
+  }
+}
+
+function _renderRecurringIncomeProGate() {
+  const stats = document.getElementById("recurring-income-stats");
+  if (stats) stats.innerHTML = "";
+  ["recurring-income-primary-list", "recurring-income-extra-list",
+   "recurring-income-upcoming-list", "recurring-income-adjustments-list"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = "";
+  });
+  const primary = document.getElementById("recurring-income-primary-list");
+  if (primary) {
+    primary.innerHTML = `
+      <div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">
+        <div style="font-size:2.5rem;margin-bottom:10px">🔒</div>
+        <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Receitas fixas é Pro</div>
+        <div style="margin-bottom:14px">Cadastre salário, aluguel e freelas recorrentes pra o Piggy lançar automaticamente todo mês.</div>
+        <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')">⭐ Ver Pro</button>
+      </div>`;
+  }
+}
+
+function _renderRecurringIncomeView(items) {
+  const stats = document.getElementById("recurring-income-stats");
+  const priEl = document.getElementById("recurring-income-primary-list");
+  const extEl = document.getElementById("recurring-income-extra-list");
+  const upEl = document.getElementById("recurring-income-upcoming-list");
+  const adjEl = document.getElementById("recurring-income-adjustments-list");
+  if (!stats || !priEl) return;
+
+  const list = items || [];
+  const active = list.filter(r => r.is_active);
+  const total = active.reduce((s, r) => s + (r.amount || 0), 0);
+  const nPrimary = active.filter(r => r.is_primary).length;
+  const nExtra = active.filter(r => !r.is_primary).length;
+
+  // Próximo recebimento (pay_day desse mês, ou do mês que vem se já passou)
+  const today = new Date();
+  const nextPay = active.map(r => {
+    let d = new Date(today.getFullYear(), today.getMonth(), Math.min(r.pay_day, 28));
+    if (d < today) d = new Date(today.getFullYear(), today.getMonth() + 1, Math.min(r.pay_day, 28));
+    return { rec: r, date: d };
+  }).sort((a, b) => a.date - b.date);
+  const next = nextPay[0];
+
+  const adjustments = active.filter(r => r.last_amount != null && r.last_amount_changed_at);
+
+  // Sobra prevista = receitas fixas − gastos fixos. Projeção do mês, NÃO é
+  // o saldo da conta nem o "sobrou" real (que conta lançamentos avulsos).
+  const hasExpenseData = Array.isArray(_recurringCache);
+  const fixedExpenses = (hasExpenseData ? _recurringCache : []).filter(r => r.is_active)
+    .reduce((s, r) => s + (r.amount || 0), 0);
+  const leftover = total - fixedExpenses;
+
+  stats.innerHTML = `
+    <div class="stat-tile" style="animation-delay:0ms">
+      <div class="stat-label">Total mensal</div>
+      <div class="stat-value" style="color:var(--green)">${_fmtBRL(total)}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${active.length} recorrente${active.length === 1 ? "" : "s"}</div>
+    </div>
+    <div class="stat-tile" style="animation-delay:60ms">
+      <div class="stat-label">Receitas ativas</div>
+      <div class="stat-value">${active.length}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${nPrimary} principal · ${nExtra} extra${nExtra === 1 ? "" : "s"}</div>
+    </div>
+    <div class="stat-tile" style="animation-delay:120ms">
+      <div class="stat-label">Próximo recebimento</div>
+      <div class="stat-value" style="font-size:1.15rem">${next ? escapeHtmlSafe(next.rec.name) : "—"}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${next ? _formatDueIn(next.date) : "sem agendamentos"}</div>
+    </div>
+    <div class="stat-tile" style="animation-delay:180ms">
+      <div class="stat-label">Sobra prevista</div>
+      <div class="stat-value" style="color:${!hasExpenseData ? "var(--text-3)" : (leftover >= 0 ? "var(--green)" : "var(--red)")}">${hasExpenseData ? _fmtBRL(leftover) : "—"}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${hasExpenseData ? "receitas fixas − gastos fixos" : "calculando…"}</div>
+    </div>
+  `;
+
+  const primary = active.filter(r => r.is_primary);
+  const extra = active.filter(r => !r.is_primary);
+
+  priEl.innerHTML = primary.length
+    ? primary.map(r => _renderRecurringIncomeRow(r)).join("")
+    : `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Sem renda principal cadastrada.</div>`;
+  extEl.innerHTML = extra.length
+    ? extra.map(r => _renderRecurringIncomeRow(r)).join("")
+    : `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Sem rendas extras cadastradas.</div>`;
+
+  // Próximos 7 dias
+  const upcoming = nextPay.filter(x => (x.date - today) / (1000 * 60 * 60 * 24) <= 7);
+  upEl.innerHTML = upcoming.length
+    ? upcoming.map(x => `
+        <div class="tx-row">
+          <div class="tx-icon" style="color:var(--green)">${_recurringIncomeEmoji(x.rec)}</div>
+          <div class="tx-main">
+            <div class="tx-desc">${escapeHtmlSafe(x.rec.name)} · ${x.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</div>
+            <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.is_primary ? "Renda principal" : "Renda extra"}</div>
+          </div>
+          <div class="tx-amt green">+${_fmtBRL(x.rec.amount)}</div>
+        </div>
+      `).join("")
+    : `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Nada nos próximos 7 dias.</div>`;
+
+  // Reajustes (aumento de salário aparece aqui)
+  adjEl.innerHTML = adjustments.length
+    ? adjustments.map(r => {
+        const delta = r.amount - r.last_amount;
+        const sign = delta > 0 ? "+" : "−";
+        const pct = r.last_amount > 0 ? ((delta / r.last_amount) * 100).toFixed(1) : "—";
+        const when = r.last_amount_changed_at ? new Date(r.last_amount_changed_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : "";
+        return `
+          <div class="tx-row">
+            <div class="tx-icon" style="color:${delta > 0 ? "#22c55e" : "#fbbf24"}">${delta > 0 ? "🎉" : "⚠️"}</div>
+            <div class="tx-main">
+              <div class="tx-desc">${escapeHtmlSafe(r.name)} ${delta > 0 ? "aumentou" : "diminuiu"} ${sign}${_fmtBRL(Math.abs(delta))}</div>
+              <div class="tx-meta">${pct}% vs valor anterior · detectado em ${when}</div>
+            </div>
+          </div>`;
+      }).join("")
+    : `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Nenhum reajuste detectado ainda.</div>`;
+}
+
+function _recurringIncomeEmoji(r) {
+  const name = (r.name || "").toLowerCase();
+  if (name.includes("salário") || name.includes("salario") || name.includes("clt")) return "💼";
+  if (name.includes("aluguel")) return "🏠";
+  if (name.includes("freela") || name.includes("pj")) return "🧑‍💻";
+  if (name.includes("dividendo") || name.includes("rendimento")) return "📈";
+  if (name.includes("pensão") || name.includes("pensao")) return "🤝";
+  if (name.includes("aposentadoria") || name.includes("inss")) return "🧓";
+  if (name.includes("bolsa") || name.includes("estágio") || name.includes("estagio")) return "🎓";
+  return RECURRING_INCOME_CATEGORY_EMOJI[(r.category || "").toLowerCase()] || "💰";
+}
+
+function _renderRecurringIncomeRow(r) {
+  const when = `${r.is_primary ? "Renda principal" : "Renda extra"} · dia ${r.pay_day}`;
+  let adjustText = "";
+  if (r.last_amount != null && r.last_amount > 0) {
+    const delta = r.amount - r.last_amount;
+    if (Math.abs(delta) > 0.005) {
+      const arrow = delta > 0 ? "↑" : "↓";
+      const color = delta > 0 ? "#22c55e" : "#fbbf24";
+      adjustText = ` · <span style="color:${color}">${_fmtBRL(r.last_amount)} → ${_fmtBRL(r.amount)} ${arrow}</span>`;
+    }
+  }
+  const safeRecJson = JSON.stringify(r).replace(/"/g, "&quot;");
+  return `
+    <div class="tx-row" style="cursor:pointer" onclick="openRecurringIncomeEditModal(${safeRecJson})">
+      <div class="tx-icon">${_recurringIncomeEmoji(r)}</div>
+      <div class="tx-main">
+        <div class="tx-desc">${escapeHtmlSafe(r.name)}</div>
+        <div class="tx-meta">${when}${adjustText}</div>
+      </div>
+      <div class="tx-amt green">+${_fmtBRL(r.amount)}</div>
+    </div>
+  `;
+}
+
+// ── Modal cadastrar/editar receita recorrente ─────────────────────────
+
+let _recurringIncomeEditState = { id: null };
+
+function _ensureRecurringIncomeModal() {
+  if (document.getElementById("recurring-income-edit-overlay")) return;
+  const html = `
+    <div class="overlay" id="recurring-income-edit-overlay">
+      <div class="modal wide">
+        <h3 id="recurring-income-edit-title">Nova receita fixa</h3>
+        <p class="msub" style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:.78rem">
+          💰 <strong>Importante:</strong> essa receita será <strong>lançada automaticamente</strong> todo mês no dia escolhido. Se o valor variar, é só editar aqui — o Piggy registra o reajuste.
+        </p>
+        <form id="recurring-income-edit-form" onsubmit="event.preventDefault(); saveRecurringIncome();">
+          <div class="invest-form">
+            <div class="form-row">
+              <div class="field" style="flex:2">
+                <label for="recurring-income-name">Nome *</label>
+                <input type="text" id="recurring-income-name" required maxlength="80" placeholder="Ex: Salário, Aluguel recebido..." />
+              </div>
+              <div class="field" style="flex:1">
+                <label for="recurring-income-amount">Valor (R$) *</label>
+                <input type="number" id="recurring-income-amount" min="0.01" step="0.01" required placeholder="0,00" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="recurring-income-pay-day">Dia do recebimento *</label>
+                <input type="number" id="recurring-income-pay-day" min="1" max="31" required placeholder="1-31" />
+              </div>
+              <div class="field">
+                <label for="recurring-income-category">Categoria *</label>
+                <input type="text" id="recurring-income-category" required maxlength="40" list="recurring-income-categories" placeholder="salário, freela, aluguel..." />
+                <datalist id="recurring-income-categories">
+                  <option value="salário"></option>
+                  <option value="freela"></option>
+                  <option value="aluguel"></option>
+                  <option value="dividendos"></option>
+                  <option value="vendas"></option>
+                  <option value="pensão"></option>
+                  <option value="aposentadoria"></option>
+                  <option value="bolsa"></option>
+                  <option value="outros"></option>
+                </datalist>
+              </div>
+            </div>
+            <div class="field">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal">
+                <input type="checkbox" id="recurring-income-is-primary" />
+                <span>Marcar como renda principal (salário / fonte fixa)</span>
+              </label>
+            </div>
+            <div class="field">
+              <label for="recurring-income-notes">Notas (opcional)</label>
+              <input type="text" id="recurring-income-notes" maxlength="200" placeholder="Anotações..." />
+            </div>
+          </div>
+          <div class="modal-acts" style="margin-top:18px;display:flex;gap:8px;align-items:center">
+            <button type="button" class="inst-delete-btn" id="recurring-income-delete-btn" style="display:none" onclick="deleteRecurringIncomeFromModal()">🗑 Excluir</button>
+            <span style="flex:1"></span>
+            <button type="button" class="btn-cancel" onclick="closeRecurringIncomeEditModal()">Cancelar</button>
+            <button type="submit" class="btn-save">Salvar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML("beforeend", html);
+  document.getElementById("recurring-income-edit-overlay").addEventListener("click", e => {
+    if (e.target === e.currentTarget) closeRecurringIncomeEditModal();
+  });
+}
+
+function openRecurringIncomeEditModal(rec) {
+  _ensureRecurringIncomeModal();
+  const isEdit = !!(rec && rec.id);
+  _recurringIncomeEditState = { id: isEdit ? rec.id : null };
+
+  document.getElementById("recurring-income-edit-title").textContent = isEdit ? "Editar receita fixa" : "Nova receita fixa";
+  document.getElementById("recurring-income-name").value = isEdit ? rec.name : "";
+  document.getElementById("recurring-income-amount").value = isEdit ? Number(rec.amount).toFixed(2) : "";
+  document.getElementById("recurring-income-pay-day").value = isEdit ? rec.pay_day : "";
+  document.getElementById("recurring-income-category").value = isEdit ? rec.category : "";
+  document.getElementById("recurring-income-is-primary").checked = isEdit ? !!rec.is_primary : false;
+  document.getElementById("recurring-income-notes").value = isEdit ? (rec.notes || "") : "";
+  document.getElementById("recurring-income-delete-btn").style.display = isEdit ? "" : "none";
+
+  document.getElementById("recurring-income-edit-overlay").classList.add("open");
+  setTimeout(() => document.getElementById("recurring-income-name").focus(), 50);
+}
+
+function closeRecurringIncomeEditModal() {
+  document.getElementById("recurring-income-edit-overlay")?.classList.remove("open");
+}
+
+let _recurringIncomeSaving = false;
+async function saveRecurringIncome() {
+  if (_recurringIncomeSaving) return;  // bloqueia double-submit
+
+  const payload = {
+    name: document.getElementById("recurring-income-name").value.trim(),
+    amount: parseFloat(document.getElementById("recurring-income-amount").value),
+    category: document.getElementById("recurring-income-category").value.trim(),
+    pay_day: parseInt(document.getElementById("recurring-income-pay-day").value, 10),
+    is_primary: document.getElementById("recurring-income-is-primary").checked,
+    notes: document.getElementById("recurring-income-notes").value.trim() || null,
+  };
+
+  _recurringIncomeSaving = true;
+  const isEdit = !!_recurringIncomeEditState.id;
+  const editingId = _recurringIncomeEditState.id;
+
+  // Optimistic: fecha modal imediatamente. Se der erro, reabre com os dados.
+  closeRecurringIncomeEditModal();
+
+  try {
+    const url = isEdit
+      ? `${API}/recurring-incomes/${USER_ID}/${editingId}`
+      : `${API}/recurring-incomes/${USER_ID}`;
+    const resp = await fetch(url, {
+      method: isEdit ? "PATCH" : "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      if (resp.status === 403) {
+        await alertModal("Receitas fixas é uma feature Pro.", { title: "Recurso Pro" });
+        return;
+      }
+      throw new Error(detail);
+    }
+    showToast(isEdit ? "✓ Receita fixa atualizada" : "✓ Receita fixa cadastrada");
+    _recurringIncomeCache = null;
+    loadRecurringIncomeView(true);  // sem await — re-render em paralelo
+    sendRefresh();
+  } catch (err) {
+    openRecurringIncomeEditModal(isEdit ? { ...payload, id: editingId } : payload);
+    await alertModal(String(err.message || err), { title: "Erro ao salvar" });
+  } finally {
+    _recurringIncomeSaving = false;
+  }
+}
+
+async function deleteRecurringIncomeFromModal() {
+  if (!_recurringIncomeEditState.id) return;
+  const ok = await confirmModal(
+    "Excluir esta receita fixa? Lançamentos passados ficam preservados — só não vai mais lançar automaticamente.",
+    { title: "Excluir receita fixa", okText: "Excluir", danger: true },
+  );
+  if (!ok) return;
+  try {
+    const resp = await fetch(`${API}/recurring-incomes/${USER_ID}/${_recurringIncomeEditState.id}`, {
+      method: "DELETE",
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    closeRecurringIncomeEditModal();
+    showToast("✓ Receita fixa excluída");
+    _recurringIncomeCache = null;
+    await loadRecurringIncomeView(true);
+  } catch (err) {
+    await alertModal(String(err.message || err), { title: "Erro" });
+  }
+}
+
 // ── View Análises (Sprint 6) ─────────────────────────────────────────────
 // Cada widget tem dado próprio vindo de um endpoint separado, pra preparar o
 // painel personalizável que vem em breve (user vai poder ligar/desligar cards).
@@ -5202,6 +5647,8 @@ function renderAlerts(alerts) {
     if (a.type === "recurring_charged") {
       const where = a.payment_type === "credit_card" ? "no cartão" : "da conta";
       html += `<div class="alert-row">🐷 Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> R$ ${fmt(a.amount)} ${where} hoje. <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'">✕</button></div>`;
+    } else if (a.type === "recurring_credited") {
+      html += `<div class="alert-row">🐷 Piggy recebeu <b>${escapeHtmlSafe(a.name)}</b> R$ ${fmt(a.amount)} na conta hoje. <button onclick="ackRecurringIncomeCredit(${a.credit_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'">✕</button></div>`;
     } else {
       const icon = a.type === "budget_exceeded" ? "🔴" : "⚠️";
       html += `<div class="alert-row">${icon} <b>${a.categoria}</b>: ${fmt(a.spent)} de ${fmt(a.budget)} (${a.pct}%)</div>`;
@@ -5227,6 +5674,18 @@ async function ackRecurringCharge(chargeId) {
   if (!chargeId || !USER_ID) return;
   try {
     await fetch(`${API}/recurring-expenses/${USER_ID}/charges/${chargeId}/ack`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+    });
+    sendRefresh();
+  } catch (_) {}
+}
+
+async function ackRecurringIncomeCredit(creditId) {
+  if (!creditId || !USER_ID) return;
+  try {
+    await fetch(`${API}/recurring-incomes/${USER_ID}/credits/${creditId}/ack`, {
       method: "POST",
       credentials: "same-origin",
       headers: csrfHeaders(),

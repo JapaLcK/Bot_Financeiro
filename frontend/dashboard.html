@@ -48,7 +48,7 @@
 
   <div class="sidenav-section">Planejamento</div>
   <button class="sidenav-item" type="button" data-nav="fixed" onclick="navigateTo('fixed')">
-    <span class="sn-icon">🔁</span><span class="sn-label">Gastos Fixos</span>
+    <span class="sn-icon">🔁</span><span class="sn-label">Recorrentes</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="budgets" onclick="navigateTo('budgets')">
     <span class="sn-icon">📝</span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span>
@@ -353,31 +353,64 @@
 
   <div id="fixed-view" class="dash-view">
     <div class="mock-header">
-      <p class="section-title" style="margin:0">Gastos Fixos</p>
-      <button class="mock-cta" data-pro-feature="recurring_expenses" onclick="openRecurringEditModal()">+ Novo recorrente</button>
+      <p class="section-title" style="margin:0" id="recurring-section-title">Recorrentes</p>
+      <button class="mock-cta" id="recurring-new-btn" data-pro-feature="recurring_expenses" onclick="openRecurringNewFromTab()">+ Novo gasto fixo</button>
     </div>
 
-    <div id="recurring-stats" class="stats-row"></div>
+    <div class="filter-tabs" id="recurring-tabs" role="tablist" style="margin:-6px 0 16px">
+      <button class="ftab active" type="button" role="tab" data-rectab="expenses" onclick="setRecurringTab('expenses')">🔻 Gastos fixos</button>
+      <button class="ftab" type="button" role="tab" data-rectab="incomes" onclick="setRecurringTab('incomes')">🔺 Receitas fixas</button>
+    </div>
 
-    <div class="mock-grid cols-2">
-      <div class="mock-card">
-        <h3>Essenciais</h3>
-        <div id="recurring-essentials-list" class="tx-list"></div>
+    <div id="recurring-expenses-pane">
+      <div id="recurring-stats" class="stats-row"></div>
+
+      <div class="mock-grid cols-2">
+        <div class="mock-card">
+          <h3>Essenciais</h3>
+          <div id="recurring-essentials-list" class="tx-list"></div>
+        </div>
+
+        <div class="mock-card">
+          <h3>Assinaturas / lazer</h3>
+          <div id="recurring-leisure-list" class="tx-list"></div>
+        </div>
+
+        <div class="mock-card">
+          <h3>Próximos 7 dias</h3>
+          <div id="recurring-upcoming-list" class="tx-list"></div>
+        </div>
+
+        <div class="mock-card">
+          <h3>Reajustes recentes 🐷</h3>
+          <div id="recurring-adjustments-list" class="tx-list"></div>
+        </div>
       </div>
+    </div>
 
-      <div class="mock-card">
-        <h3>Assinaturas / lazer</h3>
-        <div id="recurring-leisure-list" class="tx-list"></div>
-      </div>
+    <div id="recurring-incomes-pane" style="display:none">
+      <div id="recurring-income-stats" class="stats-row"></div>
 
-      <div class="mock-card">
-        <h3>Próximos 7 dias</h3>
-        <div id="recurring-upcoming-list" class="tx-list"></div>
-      </div>
+      <div class="mock-grid cols-2">
+        <div class="mock-card">
+          <h3>Renda principal</h3>
+          <div id="recurring-income-primary-list" class="tx-list"></div>
+        </div>
 
-      <div class="mock-card">
-        <h3>Reajustes recentes 🐷</h3>
-        <div id="recurring-adjustments-list" class="tx-list"></div>
+        <div class="mock-card">
+          <h3>Rendas extras</h3>
+          <div id="recurring-income-extra-list" class="tx-list"></div>
+        </div>
+
+        <div class="mock-card">
+          <h3>Próximos 7 dias</h3>
+          <div id="recurring-income-upcoming-list" class="tx-list"></div>
+        </div>
+
+        <div class="mock-card">
+          <h3>Reajustes recentes 🐷</h3>
+          <div id="recurring-income-adjustments-list" class="tx-list"></div>
+        </div>
       </div>
     </div>
   </div>

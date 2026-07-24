@@ -1011,6 +1011,54 @@ def init_db():
           on recurring_charges (user_id, acknowledged)
         """,
 
+        # ─── Receitas Recorrentes ──────────────────────────────────────────────
+        # Espelho de `recurring_expenses` do lado da entrada. Pro-only, mesma flag
+        # (recurring_expenses_enabled). Lança receita na conta no dia `pay_day`.
+        # Não tem payment_type/card_id: receita sempre cai na conta.
+        # `is_primary` = renda principal (salário) vs extra (freela, aluguel).
+        # `last_credited_ym` = idempotência (não credita 2x no mesmo mês).
+        """
+        create table if not exists recurring_incomes (
+          id          bigserial primary key,
+          user_id     bigint  not null references users(id) on delete cascade,
+          name        text    not null,
+          amount      numeric not null check (amount > 0),
+          category    text    not null,
+          pay_day     int     not null check (pay_day between 1 and 31),
+          is_primary  boolean not null default false,
+          is_active   boolean not null default true,
+          last_amount numeric,
+          last_amount_changed_at timestamptz,
+          last_credited_ym text,
+          notes       text,
+          created_at  timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_recurring_income_user_active
+          on recurring_incomes (user_id, is_active)
+        """,
+
+        # Histórico de créditos automáticos. Idempotência via unique (income_id, ym)
+        # + alimenta o banner do dashboard até user marcar como visto.
+        """
+        create table if not exists recurring_income_credits (
+          id           bigserial primary key,
+          income_id    bigint not null references recurring_incomes(id) on delete cascade,
+          user_id      bigint not null references users(id) on delete cascade,
+          launch_id    bigint references launches(id) on delete set null,
+          amount       numeric not null,
+          ym           text not null,
+          credited_at  timestamptz not null default now(),
+          acknowledged boolean not null default false,
+          unique (income_id, ym)
+        )
+        """,
+        """
+        create index if not exists idx_recurring_income_credits_user_ack
+          on recurring_income_credits (user_id, acknowledged)
+        """,
+
         # ─── Eventos de login (admin/observabilidade) ───────────────────────────
         # Antes era criada lazy em core/admin_dashboard.py:ensure_admin_tables.
         # Trazido pra schema.py pra audit/IP-tracking funcionarem nos testes.

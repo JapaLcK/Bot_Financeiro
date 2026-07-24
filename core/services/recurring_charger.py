@@ -1,10 +1,15 @@
 """
-core/services/recurring_charger.py — Cobra gastos fixos automaticamente.
+core/services/recurring_charger.py — Cobra gastos fixos e credita receitas
+recorrentes automaticamente.
 
-Roda como background task no startup. Verifica a cada hora se há
-`recurring_expenses` com `due_day <= today` e não cobrados neste mês.
-Cria launch (account) ou credit_transaction (cartão) + registra em
-`recurring_charges` (idempotência via UNIQUE(recurring_id, ym)).
+Roda como background task no startup. Verifica a cada hora:
+
+1. `recurring_expenses` com `due_day <= today` não cobrados neste mês.
+   Cria launch (account) ou credit_transaction (cartão) + registra em
+   `recurring_charges` (idempotência via UNIQUE(recurring_id, ym)).
+2. `recurring_incomes` com `pay_day <= today` não creditadas neste mês.
+   Cria launch receita + registra em `recurring_income_credits`
+   (idempotência via UNIQUE(income_id, ym)).
 
 Cobrança em cartão de crédito:
 - Acha a `credit_bills` open atual do cartão (status='open', period contendo today).
@@ -16,14 +21,14 @@ from __future__ import annotations
 import asyncio
 import sys
 import traceback
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
 from db.connection import get_conn
 
 
 async def run_recurring_charger_loop():
-    """Loop infinito: verifica e cobra a cada hora."""
+    """Loop infinito: verifica e cobra/credita a cada hora."""
     while True:
         try:
             await asyncio.sleep(5)  # delay inicial pra não pegar startup
@@ -32,6 +37,15 @@ async def run_recurring_charger_loop():
             raise
         except Exception as exc:
             print(f"[recurring_charger] erro: {exc}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+        try:
+            # Receitas rodam em try separado: falha na despesa não pode
+            # impedir o crédito da receita (e vice-versa).
+            await asyncio.to_thread(credit_due_recurring_incomes_once)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[recurring_income] erro: {exc}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
         await asyncio.sleep(60 * 60)  # 1 hora entre verificações
 
@@ -183,7 +197,89 @@ def _charge_on_credit_card(
     return tx_id
 
 
+def credit_due_recurring_incomes_once(today: date | None = None) -> list[dict]:
+    """Roda uma passada nas receitas recorrentes. Retorna lista de créditos
+    efetuados (pra logging). Idempotente — pode rodar várias vezes no mesmo dia
+    sem duplicar (UNIQUE(income_id, ym) + last_credited_ym).
+    """
+    today = today or date.today()
+    ym = today.strftime("%Y-%m")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select r.id, r.user_id, r.name, r.amount, r.category, r.pay_day
+                from recurring_incomes r
+                where r.is_active = true
+                  and r.pay_day <= %s
+                  and (r.last_credited_ym is null or r.last_credited_ym <> %s)
+                """,
+                (today.day, ym),
+            )
+            due = cur.fetchall() or []
+
+    results: list[dict] = []
+    for r in due:
+        try:
+            results.append(_credit_one(dict(r), today, ym))
+        except Exception as exc:
+            print(
+                f"[recurring_income] falhou creditar inc={r['id']} user={r['user_id']}: {exc}",
+                file=sys.stderr,
+            )
+            traceback.print_exc(file=sys.stderr)
+
+    if results:
+        print(f"[recurring_income] {len(results)} receitas creditadas em {today}.", flush=True)
+    return results
+
+
+def _credit_one(inc: dict, today: date, ym: str) -> dict:
+    """Credita UMA receita recorrente. Retorna dict com info do crédito."""
+    from db.accounts import add_launch_and_update_balance
+
+    user_id = int(inc["user_id"])
+    inc_id = int(inc["id"])
+    amount = float(inc["amount"])
+    name = inc["name"]
+    category = inc["category"] or "salário"
+
+    nota = f"Receita recorrente · {name}"
+
+    launch_id, _seq, _bal = add_launch_and_update_balance(
+        user_id, "receita", amount, alvo=f"recorrente:{name}", nota=nota,
+        categoria=category, is_internal_movement=False,
+    )
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into recurring_income_credits (income_id, user_id, launch_id, amount, ym)
+                values (%s, %s, %s, %s, %s)
+                on conflict (income_id, ym) do nothing
+                returning id
+                """,
+                (inc_id, user_id, launch_id, Decimal(str(amount)), ym),
+            )
+            row = cur.fetchone()
+            credit_id = row["id"] if row else None
+            cur.execute(
+                "update recurring_incomes set last_credited_ym=%s where id=%s and user_id=%s",
+                (ym, inc_id, user_id),
+            )
+        conn.commit()
+
+    return {
+        "income_id": inc_id, "user_id": user_id, "name": name,
+        "amount": amount, "launch_id": launch_id,
+        "credit_id": credit_id, "ym": ym,
+    }
+
+
 __all__ = [
     "run_recurring_charger_loop",
     "charge_due_recurring_expenses_once",
+    "credit_due_recurring_incomes_once",
 ]
