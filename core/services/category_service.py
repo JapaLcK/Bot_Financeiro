@@ -13,6 +13,7 @@ from utils_text import (
     extract_memory_candidates,
     canonicalize_category_label,
     EXACT_WORD_KEYWORDS,
+    KEYWORD_BLOCKERS,
 )
 from db import get_memorized_category, upsert_category_rule
 
@@ -84,6 +85,11 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
                 ok = contains_word(t, kw_norm)
             else:
                 ok = contains_word(t, kw_norm) or (kw_norm in t)
+
+            # Contexto que invalida a keyword (ex.: "feira" em "sexta-feira").
+            blocker = KEYWORD_BLOCKERS.get(kw_norm)
+            if ok and blocker and blocker.search(t):
+                ok = False
 
             if ok:
                 return InferResult(category=canonicalize_category_label(cat2), reason="local_rule")

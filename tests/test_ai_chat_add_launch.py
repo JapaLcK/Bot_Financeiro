@@ -24,7 +24,7 @@ def test_execute_despesa_basica(user_id):
 
     # Formato do handler (mesmo do bot tradicional)
     assert "💸 **Despesa registrada**: R$ 50,00" in msg
-    assert "🏷️ Categoria: alimentação" in msg  # "mercado" cai em alimentação via LOCAL_RULES
+    assert "🏷️ Categoria: mercado" in msg  # "mercado" tem categoria própria via LOCAL_RULES
     assert "🏦 Saldo: R$ 950,00" in msg
     assert "ID: #" in msg
     assert db.get_balance(user_id) == Decimal("950")

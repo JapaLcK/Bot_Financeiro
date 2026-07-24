@@ -19,7 +19,7 @@ from decimal import Decimal
 
 from ofxparse import OfxParser
 from utils_date import _tz
-from utils_text import normalize_text, contains_word, LOCAL_RULES
+from utils_text import normalize_text, contains_word, LOCAL_RULES, keyword_blocked
 from db import import_credit_ofx_bulk, list_user_category_rules
 
 logger = logging.getLogger(__name__)
@@ -144,6 +144,8 @@ def _categorize(memo_norm: str, rules_norm: list[tuple[str, str]]) -> str:
         for kw in keywords:
             kw_n = normalize_text(kw or "")
             if not kw_n:
+                continue
+            if keyword_blocked(kw_n, memo_norm):
                 continue
             if contains_word(memo_norm, kw_n) or (kw_n in memo_norm):
                 return cat_norm

@@ -615,7 +615,8 @@ PARA launches.add, extraia as entities:
   tipo: "despesa" ou "receita"
   valor: número
   alvo: estabelecimento/destinatário (se mencionado)
-  categoria: alimentação|transporte|saúde|moradia|lazer|educação|assinaturas|pets|compras online|beleza|outros
+  categoria: alimentação|mercado|transporte|saúde|moradia|lazer|educação|assinaturas|pets|compras online|beleza|outros
+  (mercado = compra de supermercado/limpeza/higiene; alimentação = comer fora, delivery, padaria)
 
 FORMATO OBRIGATÓRIO (JSON puro, sem markdown):
 {"intent":"<intent>","confidence":<0.0-1.0>,"entities":{...},"needs_clarification":<true|false>,"clarification_question":<"pergunta" ou null>}

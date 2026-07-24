@@ -2806,9 +2806,9 @@ async function maybeOpenWizardOnLoad() {
 // ══════════════════════════════════════════════════════════════════════
 
 const RECURRING_CATEGORY_EMOJI = {
-  "alimentação": "🍔", "transporte": "🚗", "saúde": "💊", "moradia": "🏠",
+  "alimentação": "🍔", "mercado": "🛒", "transporte": "🚗", "saúde": "💊", "moradia": "🏠",
   "lazer": "🎬", "educação": "📚", "assinaturas": "📺", "pets": "🐾",
-  "compras online": "🛒", "beleza": "💄", "outros": "🏷️",
+  "compras online": "📦", "beleza": "💄", "outros": "🏷️",
   "internet": "🌐", "telefone": "📱", "água": "💧", "luz": "💡",
 };
 
@@ -5479,12 +5479,12 @@ document.addEventListener("keydown", e => {
 ═══════════════════════════════════════════════════════════════════════ */
 const LAUNCH_CATEGORIES = {
   despesa: [
-    "alimentação","transporte","moradia","saúde","educação",
+    "alimentação","mercado","transporte","moradia","saúde","educação",
     "lazer","assinaturas","compras online","pets","beleza","outros",
   ],
   receita: ["salário","freela","reembolso","rendimentos","outros"],
   credito: [
-    "alimentação","transporte","moradia","saúde","educação",
+    "alimentação","mercado","transporte","moradia","saúde","educação",
     "lazer","assinaturas","compras online","pets","beleza","outros",
   ],
 };
@@ -5620,7 +5620,7 @@ function closeLaunchModal() {
 
 /* ─── Editar lançamento (categoria + descrição) ────────────────────── */
 const EDIT_LAUNCH_CATEGORIES = [
-  "alimentação","transporte","saúde","moradia","lazer","educação",
+  "alimentação","mercado","transporte","saúde","moradia","lazer","educação",
   "assinaturas","pets","compras online","beleza",
   "investimento_aporte","criptomoedas","rendimentos","outros",
 ];

@@ -9,7 +9,7 @@ from ofxparse import OfxParser
 from utils_date import _tz
 from db import set_balance, import_ofx_launches_bulk, get_last_ofx_import_end_date
 from db import list_user_category_rules
-from utils_text import normalize_text, contains_word, LOCAL_RULES, INTERNAL_MOVEMENT_CATEGORIES
+from utils_text import normalize_text, contains_word, LOCAL_RULES, INTERNAL_MOVEMENT_CATEGORIES, keyword_blocked
 
 # Hard cap defensivo: parser OFX vira DoS se receber arquivo gigante (memória
 # + CPU do regex/SGML). Alinhado com o cap do endpoint HTTP (8 MB) — handlers
@@ -182,6 +182,8 @@ def import_ofx_bytes(user_id: int, ofx_bytes: bytes, filename: str | None = None
                 for kw in keywords:
                     kw2_norm = normalize_text(kw or "")
                     if not kw2_norm:
+                        continue
+                    if keyword_blocked(kw2_norm, memo_norm):
                         continue
                     if contains_word(memo_norm, kw2_norm) or (kw2_norm in memo_norm):
                         categoria = cat2_norm

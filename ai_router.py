@@ -70,7 +70,7 @@ def _get_client() -> OpenAI | None:
 # ---------------------------------------------------------------------------
 
 ALLOWED_CATEGORIES = [
-    "alimentação", "transporte", "saúde", "moradia", "lazer",
+    "alimentação", "mercado", "transporte", "saúde", "moradia", "lazer",
     "educação", "assinaturas", "pets", "compras online", "beleza",
     # Movimentações internas (alocação de patrimônio, não consumo) — o bot
     # marca essas como is_internal_movement=true e elas alimentam o card
@@ -86,6 +86,10 @@ _CATEGORY_ALIASES = {
     "compra online": "compras online",
     "compras":     "compras online",
     "online":      "compras online",
+    "supermercado": "mercado",
+    "mercearia":   "mercado",
+    "compras do mes": "mercado",
+    "compras do mês": "mercado",
     "pet":         "pets",
     "petshop":     "pets",
     # Aportes — variações de escrita
@@ -191,7 +195,9 @@ def classify_category_with_gpt(descricao: str, *, user_id: int | None = None, so
         "psicólogo, terapia, remédio, dentista → saúde\n"
         "aluguel, condomínio, luz, internet → moradia\n"
         "uber, 99, gasolina, ônibus, metrô → transporte\n"
-        "mercado, ifood, restaurante, padaria → alimentação\n"
+        "ifood, restaurante, padaria, almoço, comida → alimentação\n"
+        "mercado, supermercado, atacadão, compras do mês, "
+        "produtos de limpeza, papel higiênico → mercado\n"
         "amazon, shopee, compra online → compras online\n"
         "livros, curso, aulas → educação\n"
         "spotify, youtube, netflix → assinaturas\n"

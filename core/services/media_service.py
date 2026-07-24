@@ -128,7 +128,8 @@ REGRAS:
 3. Se contiver, extraia os campos que conseguir identificar com segurança.
 4. Nunca invente valores. Se não conseguir ler um número claramente, omita o campo ou coloque null.
 5. tipo deve ser "despesa" para gastos/pagamentos e "receita" para recebimentos/depósitos.
-6. Para categoria, use: alimentação | transporte | saúde | moradia | lazer | educação | assinaturas | pets | compras online | beleza | outros
+6. Para categoria, use: alimentação | mercado | transporte | saúde | moradia | lazer | educação | assinaturas | pets | compras online | beleza | outros
+   (mercado = cupom de supermercado/limpeza/higiene; alimentação = restaurante, delivery, padaria)
 
 FORMATO OBRIGATÓRIO (JSON puro):
 {
@@ -142,7 +143,7 @@ FORMATO OBRIGATÓRIO (JSON puro):
 }
 
 EXEMPLOS:
-- Foto de cupom fiscal do supermercado → {"tem_dado_financeiro": true, "tipo": "despesa", "valor": 87.50, "alvo": "Pão de Açúcar", "data": null, "categoria": "alimentação", "descricao_extra": "Cupom fiscal de supermercado"}
+- Foto de cupom fiscal do supermercado → {"tem_dado_financeiro": true, "tipo": "despesa", "valor": 87.50, "alvo": "Pão de Açúcar", "data": null, "categoria": "mercado", "descricao_extra": "Cupom fiscal de supermercado"}
 - Screenshot de Pix recebido → {"tem_dado_financeiro": true, "tipo": "receita", "valor": 500.00, "alvo": "João Silva", "data": "2026-04-20", "categoria": "outros", "descricao_extra": "Comprovante de Pix recebido"}
 - Foto de paisagem → {"tem_dado_financeiro": false}
 """

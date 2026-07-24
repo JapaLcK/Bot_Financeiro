@@ -47,25 +47,322 @@ LOCAL_RULES = [
     # Cripto — mantida separada porque o card "Aportes" usa essa categoria também
     (["bitcoin", "btc", "ethereum", "eth", "solana", "sol", "cripto", "criptomoeda", "criptomoedas",
       "doge", "dogecoin", "shiba", "shib", "ada", "cardano", "usdt", "tether",
-      "xrp", "ripple", "bnb", "polygon", "matic", "avax", "avalanche"], "criptomoedas"),
+      "xrp", "ripple", "bnb", "polygon", "matic", "avax", "avalanche",
+      # conceito
+      "criptoativo", "criptoativos", "moeda digital", "moedas digitais",
+      "altcoin", "stablecoin", "memecoin", "shitcoin", "blockchain", "web3",
+      "satoshi", "sats", "hodl",
+      # operação
+      "staking", "stake", "mineracao", "mineração", "minerar", "minerador",
+      "airdrop", "yield farming", "defi", "nft",
+      # carteira
+      "carteira cripto", "hardware wallet", "cold wallet", "metamask",
+      "ledger", "trezor", "trust wallet",
+      # exchanges
+      "kucoin", "kraken", "bybit", "okx", "bitget", "gate io",
+      "foxbit", "novadax", "bitpreco", "bitpreço", "bitso",
+      ], "criptomoedas"),
     # Genérico "investimento" — ainda interno, captura quem digita "investi" sem produto
     (["investimento", "investimentos"], "investimentos"),
     # Resgates de investimento — movimentação interna (não é receita real)
     (["resgate", "retirada de investimento", "retirei do investimento"], "investimento_resgate"),
     # Rendimentos — receita real (lucro/juros/dividendos)
-    (["rendimento", "rendimentos", "juros", "dividendo", "dividendos", "lucro investimento"], "rendimentos"),
+    # Receita real (lucro/juros/dividendos). "juros do cartão/cheque especial/
+    # atraso" é despesa e é bloqueado (ver KEYWORD_BLOCKERS) pra não virar receita.
+    (["rendimento", "rendimentos", "juros", "dividendo", "dividendos", "lucro investimento",
+      # proventos (termos que NÃO colidem com nome de produto do bloco de aporte)
+      "proventos", "provento", "jcp", "juros sobre capital",
+      "juros sobre capital proprio", "juros sobre capital próprio",
+      "juros recebidos", "juros da renda fixa", "rendimento do fundo",
+      # genéricos de retorno realizado
+      "rendeu", "rendendo", "lucrei", "ganho de capital",
+      "retorno do investimento", "remuneracao do capital",
+      "remuneração do capital", "correcao monetaria", "correção monetária",
+      # NOTA: "juros do cdb", "rendimento do tesouro", "dividendos de ações",
+      # "rendimento de fii", "staking" etc. NÃO entram aqui: o nome do produto
+      # (cdb/tesouro/ações/fii/staking) é capturado antes pelo bloco de aporte
+      # ou de cripto. Esses casos ficam a cargo da IA.
+      ], "rendimentos"),
 
     # ─── Despesas reais ───────────────────────────────────────────────────────
-    (["mercado", "supermercado", "mercadinho", "hortifruti", "padaria", "cafe", "café", "cafeteria"], "alimentação"),
+    # E-commerce vem antes de mercado pra "mercado livre" não virar supermercado.
+    # "amazon" tem blocker pra não roubar "amazon prime" de assinaturas.
+    (["mercado livre", "mercado envios", "shopee", "aliexpress", "shein",
+      "magalu", "magazine luiza", "americanas", "casas bahia", "amazon",
+      "ebay", "temu", "compra online", "compras online",
+      # ato de comprar online (genéricos)
+      "comprei online", "pedido online", "loja virtual", "e-commerce",
+      "ecommerce", "site de compras", "checkout"], "compras online"),
+    # Categoria própria (compra de casa), separada de alimentação (comer fora).
+    # É a primeira regra de despesa, então "material de limpeza" ganha de
+    # "material"/educação e "escova de dente" ganha de "escova"/beleza.
+    # Fica DEPOIS do bloco de investimentos pra "mercado bitcoin" seguir aporte.
+    (["mercado", "supermercado", "mercadinho", "hipermercado", "mercearia",
+      "atacadao", "atacadão", "atacarejo", "sacolao", "sacolão",
+      "hortifruti", "quitanda", "armazem", "armazém",
+      # compra da casa
+      "compras do mes", "compras do mês", "compra do mes", "compra do mês",
+      "lista de compras", "mantimentos", "compras da casa",
+      # higiene e limpeza
+      "papel higienico", "papel higiênico", "produtos de limpeza",
+      "material de limpeza", "detergente", "amaciante", "sabao em po",
+      "sabão em pó", "desinfetante", "agua sanitaria", "água sanitária",
+      "escova de dente", "escova de dentes",
+      # papelaria de compra corriqueira — ficam aqui, não em educação
+      "caneta", "canetas", "lapis", "lápis", "caderno", "cadernos",
+      # enxoval/utensílios — "jogo" sozinho é lazer, "jogo de cama" é mercado
+      "jogo de cama", "jogo de panela", "jogo de panelas", "jogo de jantar",
+      "jogo de toalhas", "jogo de lencois", "jogo de lençóis",
+      # redes
+      "carrefour", "assai", "assaí", "pao de acucar", "pão de açúcar",
+      "sams club", "makro", "zaffari", "angeloni", "walmart", "costco",
+      ], "mercado"),
+    (["padaria", "cafe", "café", "cafeteria"], "alimentação"),
     (["aluguel", "condominio", "condomínio", "luz", "energia", "conta de luz", "agua", "água", "conta de agua",
-      "conta de água", "gas", "gás", "internet", "wifi"], "moradia"),
-    (["psicologo", "psicologa", "terapia", "terapeuta", "psiquiatra"], "saúde"),
-    (["petshop", "pet shop", "racao", "veterinario", "vet", "banho", "tosa"], "pets"),
+      "conta de água", "gas", "gás", "internet", "wifi",
+      # contas da casa
+      "conta de energia", "conta de gas", "conta de gás", "conta de internet",
+      "iptu", "taxa de lixo", "esgoto", "saneamento", "telefone fixo", "tv a cabo",
+      # financiamento — só com qualificador, pra não pegar financiamento de carro
+      "financiamento imobiliario", "financiamento imobiliário",
+      "prestacao da casa", "prestação da casa", "parcela do apartamento",
+      "hipoteca", "consorcio imobiliario", "consórcio imobiliário",
+      "entrada do imovel", "entrada do imóvel",
+      # a moradia em si — "casa" e "cama" só como palavra inteira (ver
+      # EXACT_WORD_KEYWORDS e KEYWORD_BLOCKERS)
+      "casa", "apartamento", "imovel", "imóvel", "moradia", "quarto",
+      "republica", "república", "kitnet", "aluguel de temporada",
+      # manutenção e reforma — "manutenção" sozinha fica de fora: o usuário
+      # sempre escreve o complemento (da casa, do carro, …)
+      "reforma", "obra", "pintura", "pedreiro", "encanador", "eletricista",
+      "marceneiro", "chaveiro", "dedetizacao", "dedetização",
+      "conserto", "reparo", "manutencao da casa", "manutenção da casa",
+      "manutencao do apartamento", "manutenção do apartamento",
+      "manutencao residencial", "manutenção residencial",
+      # serviços domésticos
+      "diarista", "faxina", "faxineira", "empregada", "jardineiro",
+      "porteiro", "zelador", "lavanderia",
+      # utilidades da casa
+      "movel", "móvel", "moveis", "móveis", "sofa", "sofá", "cama",
+      "colchao", "colchão", "geladeira", "fogao", "fogão",
+      "maquina de lavar", "máquina de lavar", "ar condicionado",
+      "ar-condicionado", "eletrodomestico", "eletrodoméstico",
+      # seguro e taxas
+      "seguro residencial", "seguro incendio", "seguro incêndio",
+      "taxa de condominio", "taxa de condomínio", "fundo de reserva",
+      ], "moradia"),
+    # "plano de saúde" fica aqui em cima pra ganhar do bloco de assinaturas
+    # (que tem "plano mensal", "plano de celular" etc.).
+    # "vacina" pura é saúde; "vacina do gato/cachorro/pet" é bloqueada aqui e
+    # capturada pela regra de pets logo abaixo.
+    (["psicologo", "psicologa", "terapia", "terapeuta", "psiquiatra", "vacina",
+      "plano de saude", "plano de saúde", "plano medico", "plano médico",
+      "convenio medico", "convênio médico", "convenio de saude", "convênio de saúde"], "saúde"),
+    # "banho" e "tosa" continuam em pets — não entram em beleza de propósito.
+    # "cao"/"gato"/"gata"/"pet" só como palavra inteira (ver EXACT_WORD_KEYWORDS):
+    # "cao" senão bateria em "educacao", "pet" em "tapete"/"carpete".
+    (["petshop", "pet shop", "pet", "racao", "racao seca", "veterinario",
+      "veterinaria", "veterinária", "vet", "banho", "tosa",
+      # animal
+      "cachorro", "cao", "cão", "cadela", "gato", "gata", "filhote",
+      "animal de estimacao", "animal de estimação", "bicho de estimacao",
+      "bicho de estimação", "hamster", "coelho", "passaro", "pássaro",
+      # alimentação do pet
+      "sache", "sachê", "petisco", "areia higienica", "areia higiênica",
+      "areia para gato", "areia de gato",
+      # saúde do pet — "vacina do gato" etc. resolvido pelo termo do animal;
+      # "vacina" pura fica em saúde (ver regra de saúde + blocker)
+      "vermifugo", "vermífugo", "antipulgas", "castracao", "castração",
+      "consulta veterinaria", "consulta veterinária", "clinica veterinaria",
+      "clínica veterinária", "plano pet", "hotelzinho", "creche pet",
+      # higiene do pet
+      "tosa higienica", "tosa higiênica", "banho e tosa", "escovacao do pet",
+      "escovação do pet",
+      # acessórios do pet
+      "coleira", "focinheira", "casinha de cachorro", "arranhador",
+      "comedouro", "bebedouro",
+      # serviços
+      "adestrador", "adestramento", "dog walker", "passeador", "pet sitter",
+      ], "pets"),
+    # Beleza — vem depois de pets e saúde, então "banho/tosa" seguem pet e
+    # "terapia" segue saúde. Laser, botox e massagem são tratados como estética.
+    (["beleza", "estetica", "estética", "autocuidado",
+      "salao", "salão", "salao de beleza", "salão de beleza",
+      "cabeleireiro", "cabeleireira", "barbearia", "barbeiro",
+      "cabelo", "corte de cabelo", "progressiva", "luzes", "mechas",
+      # "escova" sozinho pegaria "escova de dente" — só as formas de cabelo entram.
+      "escova progressiva", "escova no cabelo", "escova modeladora",
+      "coloracao", "coloração", "tintura", "hidratacao capilar", "hidratação capilar",
+      "manicure", "pedicure", "unha", "unhas", "alongamento de unha", "esmalte",
+      "depilacao", "depilação", "cera", "laser",
+      "sobrancelha", "sobrancelhas", "design de sobrancelha", "henna",
+      "cilios", "cílios", "extensao de cilios", "extensão de cílios",
+      "limpeza de pele", "botox", "preenchimento", "peeling",
+      "massagem", "drenagem", "spa",
+      "maquiagem", "batom", "perfume", "cosmetico", "cosmético", "cosmeticos",
+      "skincare", "protetor solar",
+      # marcas
+      "sephora", "boticario", "boticário", "avon", "quem disse berenice",
+      ], "beleza"),
     (["ifood", "restaurante", "lanchonete"], "alimentação"),
-    (["livro", "livros", "ebook", "curso", "cursos", "aula", "aulas", "material", "apostila", "faculdade", "escola"], "educação"),
-    (["uber", "99", "taxi", "metro", "onibus", "gasolina", "combustivel"], "transporte"),
-    (["academia", "remedio", "farmacia", "dentista", "consulta"], "saúde"),
-    (["netflix", "spotify", "youtube", "prime video", "disney"], "assinaturas"),
+    # Educação vem ANTES do bloco genérico de comida de propósito: assim
+    # "curso de japonês" cai em educação, e "japonês" sozinho cai em alimentação.
+    (["livro", "livros", "ebook", "curso", "cursos", "aula", "aulas", "material", "apostila", "faculdade", "escola",
+      # instituição
+      "universidade", "colegio", "colégio", "creche", "bercario", "berçário",
+      "cursinho", "pre vestibular", "pré-vestibular", "pos graduacao",
+      "pós-graduação", "posgraduacao", "mba", "mestrado", "doutorado",
+      "ensino medio", "ensino médio",
+      # pagamentos
+      "matricula", "matrícula", "mensalidade", "semestralidade", "anuidade",
+      "taxa escolar", "bolsa de estudos",
+      # aulas e reforço
+      "aula particular", "reforco escolar", "reforço escolar",
+      "professor particular", "tutoria", "monitoria", "workshop",
+      "treinamento", "palestra", "seminario", "seminário", "certificacao", "certificação",
+      # idiomas — sempre com "curso"/"aula" na frente, pra "japonês" e "francês"
+      # sozinhos continuarem em alimentação (restaurante).
+      "curso de idiomas", "curso de ingles", "curso de inglês", "aula de ingles",
+      "curso de espanhol", "curso de frances", "curso de francês",
+      "curso de alemao", "curso de alemão", "curso de japones", "curso de japonês",
+      "curso de italiano", "intercambio", "intercâmbio",
+      # material escolar (caneta/lápis/caderno ficam em mercado, de propósito)
+      "material escolar", "mochila escolar", "estojo", "papelaria",
+      "uniforme escolar", "calculadora",
+      # provas e inscrições
+      "enem", "vestibular", "concurso", "inscricao de concurso",
+      "inscrição de concurso", "prova", "simulado",
+      # plataformas
+      "alura", "hotmart", "domestika", "duolingo", "rocketseat",
+      "khan academy", "edx", "skillshare", "udemy", "coursera",
+      ], "educação"),
+    # Termos genéricos de comida — "gastei 50 com comida" caía em "outros" antes.
+    (["comida", "comidas", "alimentacao", "alimentação", "alimento", "alimentos",
+      "almoco", "almoço", "almocei", "janta", "jantar", "jantei", "cafe da manha",
+      "café da manhã", "lanche", "lanches", "lanchei", "marmita", "quentinha",
+      "refeicao", "refeição", "refeicoes", "refeições",
+      "delivery", "uber eats", "rappi", "zedelivery", "food truck",
+      "pizza", "pizzaria", "hamburguer", "hambúrguer", "burger", "sanduiche",
+      "sanduíche", "sushi", "japones", "japonês", "churrasco", "churrascaria",
+      "acai", "açaí", "sorvete", "sorveteria", "doceria", "confeitaria",
+      "acougue", "açougue", "feira", "feira livre",
+      "bebida", "bebidas", "cerveja", "cervejas", "boteco", "botequim",
+      # bar e noite ficam em alimentação ("night" não entra: cai em outros)
+      "bar", "pub", "happy hour", "drinks", "chopp", "chope",
+      "buffet", "bufe", "bufê", "self service", "por quilo", "self-service",
+      "salgado", "salgados", "pastel", "esfiha", "coxinha",
+      # "prime rib" é comida; "prime" sozinho é assinatura (regra mais abaixo).
+      # Este bloco vem antes de assinaturas, então o prato ganha a disputa.
+      "prime rib", "prime ribs"], "alimentação"),
+    # ─── Lazer ────────────────────────────────────────────────────────────────
+    # Fica depois de alimentação pra bar/boteco/chopp seguirem sendo comida.
+    # "clube" e "jogo" entram só como palavra inteira: "clube de assinatura" e
+    # "jogo de cama" são bloqueados/capturados antes e vão pra IA ou mercado.
+    (["lazer", "passeio", "diversao", "diversão", "entretenimento", "role",
+      # cinema e teatro
+      "cinema", "filme", "ingresso", "ingresso online", "ticket de cinema",
+      "ticket de show", "ticket de evento", "teatro", "peca de teatro",
+      "peça de teatro", "espetaculo", "espetáculo", "musical", "opera", "ópera",
+      "stand up", "comedia", "comédia",
+      # música e eventos
+      # "concerto" (com C) é música/lazer; "conserto" (com S) é moradia.
+      "concerto", "concertos",
+      "show", "festival", "evento", "festa", "balada", "camarote", "boate",
+      "casa de show", "sympla", "eventbrite",
+      # viagem e hospedagem
+      "viagem", "passagem", "passagem aerea", "passagem aérea", "hospedagem",
+      "hotel", "pousada", "resort", "hostel", "booking", "airbnb",
+      "excursao", "excursão", "turismo", "aluguel de carro",
+      # passeios e atividades
+      "parque", "parque aquatico", "parque aquático", "zoologico", "zoológico",
+      "museu", "exposicao", "exposição", "boliche", "kart", "paintball",
+      "escalada", "trilha", "praia", "piscina", "clube",
+      # jogos
+      "jogo", "jogos", "game", "games", "videogame", "video game",
+      "fliperama", "sinuca", "bilhar",
+      ], "lazer"),
+    # Transporte. Termos ambíguos (corrida, álcool, multa pura, revisão pura,
+    # peças pura, bateria pura, bicicleta, patinete, marcas de posto) ficam de
+    # fora: vão pra IA decidir.
+    (["uber", "99", "taxi", "metro", "onibus", "gasolina", "combustivel",
+      # apps e corridas
+      "indriver", "cabify", "mototaxi", "moto taxi", "blablacar",
+      # combustível e posto
+      "etanol", "diesel", "abastecimento", "posto de gasolina",
+      # transporte público — "trem"/"barca"/"balsa" só palavra inteira
+      "passagem de onibus", "passagem de ônibus", "bilhete unico", "bilhete único",
+      "cartao de transporte", "cartão de transporte", "vale transporte",
+      "vale-transporte", "brt", "trem", "vlt", "barca", "balsa", "rodoviaria",
+      "rodoviária",
+      # carro e manutenção — formas ambíguas só com "do carro"
+      "oficina", "mecanico", "mecânico", "troca de oleo", "troca de óleo",
+      "pneu", "pneus", "alinhamento", "balanceamento", "funilaria",
+      "lava rapido", "lava-rápido", "lavagem do carro", "pecas de carro",
+      "peças de carro", "autopecas", "autopeças", "bateria do carro",
+      "revisao do carro", "revisão do carro",
+      # documentos e taxas
+      "ipva", "licenciamento", "dpvat", "cnh", "detran", "pedagio", "pedágio",
+      "seguro do carro", "seguro auto", "multa de transito", "multa de trânsito",
+      # estacionamento
+      "estacionamento", "zona azul", "valet",
+      # bike (aluguel) — compra de bicicleta fica pra IA
+      "aluguel de bike",
+      ], "transporte"),
+    # Saúde (parte 2) — fica DEPOIS de pets pra "clínica/consulta veterinária"
+    # seguirem em pets. Termos ambíguos (vitamina, suplemento, receita, óculos,
+    # aparelho, canal, lente) ficam de fora: vão pra IA decidir.
+    (["academia", "remedio", "farmacia", "dentista", "consulta",
+      # profissionais
+      "medico", "médico", "clinico", "clínico", "cardiologista",
+      "dermatologista", "ginecologista", "ortopedista", "pediatra",
+      "oftalmologista", "nutricionista", "fisioterapeuta", "fonoaudiologo",
+      "fonoaudiólogo", "ortodontista",
+      # locais
+      "hospital", "clinica", "clínica", "posto de saude", "posto de saúde",
+      "upa", "laboratorio", "laboratório", "pronto socorro",
+      # exames e procedimentos
+      "exame", "exames", "raio x", "ultrassom", "ressonancia", "ressonância",
+      "tomografia", "endoscopia", "check up", "check-up", "cirurgia",
+      "internacao", "internação", "vacinacao", "vacinação",
+      # odontologia
+      "aparelho dental", "aparelho nos dentes", "tratamento de canal",
+      "clareamento dental", "limpeza dental", "implante dentario",
+      "implante dentário",
+      # medicamentos
+      "medicamento", "drogaria", "antibiotico", "antibiótico",
+      # óptica
+      "oculos de grau", "óculos de grau", "lente de contato", "optica", "óptica",
+      # terapias e bem-estar
+      "fisioterapia", "psicoterapia", "acupuntura", "quiropraxia", "nutricao",
+      "nutrição",
+      # convênio
+      "consulta medica", "consulta médica", "coparticipacao", "coparticipação",
+      ], "saúde"),
+    # Assinaturas — genéricos + marcas. "prime" sozinho cai aqui (palavra inteira,
+    # pra não bater em "primeiro"); "prime rib" já foi capturado por alimentação.
+    (["netflix", "spotify", "youtube", "prime video", "amazon prime", "prime", "disney",
+      # genéricos
+      "assinatura", "assinaturas", "assinei", "plano mensal", "plano anual",
+      "renovacao", "renovação", "renovei", "subscription", "recorrente",
+      "plano de celular", "plano do celular", "plano celular",
+      # streaming de vídeo
+      # "star+" vira "star" na normalização e bateria em "starbucks" — por isso
+      # só a forma escrita por extenso entra na lista.
+      "streaming", "hbo", "globoplay", "paramount", "star plus", "apple tv",
+      "crunchyroll", "telecine", "mubi",
+      # música e áudio
+      "deezer", "tidal", "apple music", "youtube music", "audible",
+      # nuvem e armazenamento
+      "icloud", "google one", "dropbox", "onedrive",
+      # software e produtividade
+      "office 365", "microsoft 365", "adobe", "photoshop", "canva", "notion",
+      "figma", "chatgpt", "copilot", "licenca", "licença", "saas",
+      # games
+      "steam", "game pass", "xbox game pass", "playstation plus", "ps plus",
+      "nintendo online",
+      # conteúdo
+      "jornal", "revista", "patreon", "newsletter",
+      ], "assinaturas"),
 ]
 
 # Keywords que devem ser matchadas como palavra inteira (sem substring), para
@@ -78,7 +375,85 @@ EXACT_WORD_KEYWORDS = {
     "aporte", "aportei", "aportar",
     "ouro", "euro", "dolar",
     "btg", "xp",
+    # "feira" (alimentação) precisa ser palavra inteira pra não bater em "feirao"
+    # de carros/móveis; o caso "segunda-feira" é tratado em KEYWORD_BLOCKERS.
+    "feira",
+    # "prime" (assinaturas) como palavra inteira pra não bater em "primeiro",
+    # "primavera", "primo". "prime rib" é resolvido pela ordem das regras.
+    "prime",
+    # "plano" nunca entra sozinho, mas "steam"/"saas" precisam de palavra inteira
+    # pra não pegar pedaços de outras palavras.
+    "steam", "saas", "star",
+    # Beleza: "unha" bateria em "punhal", "cera" em "ceramica", "avon" em
+    # "pavonear". Só valem como palavra inteira.
+    "unha", "cera", "avon",
+    # Cripto: "defi" bateria em "definir"/"deficit", "sats" e "stake" em
+    # palavras maiores. Só valem como palavra inteira.
+    "defi", "sats", "stake",
+    # Educação: "prova" bateria em "aprovado", "comprovante", "provador".
+    "prova", "concurso",
+    # Lazer: "role" (rolê) bateria em "controle", "festa" em "manifesta",
+    # "opera" em "operacao". "clube" e "jogo" precisam ser palavra inteira pra
+    # o blocker de contexto funcionar ("clube de assinatura", "jogo de cama").
+    "role", "festa", "opera", "clube", "jogo", "kart",
+    # "game" é substring de "pagamento" (pa-game-nto) — obrigatoriamente
+    # palavra inteira, senão todo lançamento com "pagamento" viraria lazer.
+    "game", "games",
+    # Moradia: "casa" bateria em "casaco"/"casas bahia", "cama" em "camarote",
+    # "obra" em "obrigado", "reparo" em "preparo", "movel/moveis" em
+    # "automóvel/automóveis". Só valem como palavra inteira.
+    "casa", "cama", "obra", "reparo", "movel", "moveis",
+    # Pets: "cao" bateria em "educacao"/"aplicacao", "pet" em "tapete"/"carpete",
+    # "gato"/"gata" em palavras maiores. Só valem como palavra inteira.
+    "cao", "pet", "gato", "gata", "coelho",
+    # Transporte: "trem" bateria em "tremendo"/"extremo", "valet" em "cavalete",
+    # "balsa" em "bálsamo", "barca" em "embarcação". Só como palavra inteira.
+    "trem", "valet", "balsa", "barca",
 }
+
+# Contextos que INVALIDAM uma keyword mesmo quando ela aparece no texto.
+# Chave = keyword normalizada; valor = regex que, se casar, descarta o match.
+# Ex.: "feira" é alimentação, mas "sexta-feira" (normalizada pra "sexta feira")
+# é só uma data e não deve virar despesa de comida.
+KEYWORD_BLOCKERS = {
+    "feira": re.compile(r"\b(segunda|terca|quarta|quinta|sexta)\s+feira\b"),
+    # "amazon prime" é assinatura, não compra online.
+    "amazon": re.compile(r"\bamazon\s+prime\b"),
+    # "mercado pago" é meio de pagamento — não é compra de supermercado.
+    "mercado": re.compile(r"\bmercado\s+pago\b"),
+    # "clube" sozinho é lazer; qualquer "clube de/do/da ..." (assinatura, vinho,
+    # livro) sai da regra local e vai pra IA decidir a categoria certa.
+    "clube": re.compile(r"\bclube\s+d[eoa]\b"),
+    # "jogo" sozinho é lazer; "jogo de cama/panelas" já foi capturado por
+    # mercado antes — o blocker cobre os enxovais que não estão na lista.
+    "jogo": re.compile(r"\bjogos?\s+de\s+(cama|panela|panelas|jantar|toalha|toalhas|lencol|lencois)\b"),
+    # "game pass" é assinatura (regra avaliada depois de lazer) — o blocker
+    # impede que a palavra "game" roube esse caso pra lazer.
+    "game": re.compile(r"\bgame\s+pass\b"),
+    # "casa" sozinha é moradia; "casa de show", "casa de festa", "casa do
+    # carro" etc. saem da regra local pra IA decidir o destino certo.
+    "casa": re.compile(r"\bcasa\s+d[eoa]\b"),
+    # "quarto" sozinho é moradia; "quarto de hotel"/"de pousada" segue pra
+    # regra de lazer, e qualquer outro complemento vai pra IA decidir.
+    "quarto": re.compile(r"\bquartos?\s+d[eoa]\b"),
+    # "vacina" pura é saúde; "vacina do gato/cachorro/pet/animal" sai da regra
+    # de saúde pra ser capturada por pets (avaliada logo depois).
+    "vacina": re.compile(r"\bvacina\w*\b.{0,20}\b(pet|cachorro|cao|gat[oa]|animal|bicho|filhote|veterinari)"),
+    # "juros" é rendimento (receita); mas juros de dívida são DESPESA — esses
+    # saem da regra de rendimentos e vão pra IA decidir a categoria certa.
+    "juros": re.compile(r"\bjuros\s+d[eoa]\s+(cartao|cartão|cheque|rotativo|atraso|financiamento|emprestimo|empréstimo|mora|parcelamento)\b"),
+    # "aluguel de carro/bike" é transporte/lazer, não moradia.
+    "aluguel": re.compile(r"\baluguel\s+de\s+(carro|carros|veiculo|veiculos|bicicleta|bike|moto)\b"),
+    # "passagem" é lazer (viagem); "passagem de ônibus/metrô/trem" é transporte
+    # urbano — sai da regra de lazer pra ser capturada por transporte.
+    "passagem": re.compile(r"\bpassagem\s+de\s+(onibus|metro|trem|barca|balsa)\b"),
+}
+
+
+def keyword_blocked(kw_norm: str, text_norm: str) -> bool:
+    """True se a keyword aparece num contexto que a invalida (ver KEYWORD_BLOCKERS)."""
+    blocker = KEYWORD_BLOCKERS.get(kw_norm)
+    return bool(blocker and blocker.search(text_norm or ""))
 
 # Categorias que representam movimentações internas (não entram em receita/despesa do dashboard)
 INTERNAL_MOVEMENT_CATEGORIES = {
@@ -99,6 +474,7 @@ CATEGORY_LABELS = {
     "assinaturas": "assinaturas",
     "pets": "pets",
     "compras online": "compras online",
+    "mercado": "mercado",
     "beleza": "beleza",
     "outros": "outros",
     "investimento_aporte": "investimento_aporte",
@@ -226,6 +602,9 @@ def extract_keyword_for_memory(text_norm: str) -> str:
                     ok = contains_word(text_norm, kw_norm)
                 else:
                     ok = contains_word(text_norm, kw_norm) or (kw_norm in text_norm)
+
+                if ok and keyword_blocked(kw_norm, text_norm):
+                    ok = False
 
                 if ok:
                     return kw_norm
@@ -355,25 +734,118 @@ def should_use_ai(text: str) -> bool:
 
     return False
 
-# Categorias por palavras-chave (bem simples e eficaz)
+# Categorias por palavras-chave (bem simples e eficaz).
+# A ordem importa: guess_category retorna o primeiro match, então "educação"
+# vem antes de "alimentação" pra "curso de japonês" não virar comida.
 CATEGORY_KEYWORDS = {
-    "alimentação": ["ifood", "uber eats", "rappi", "restaurante", "lanche", "pizza", "hamburguer", "cafe", "café", "cafeteria", "padaria"],
-    "mercado": ["mercado", "supermercado", "carrefour", "whole foods", "walmart", "target", "costco"],
-    "transporte": ["uber", "lyft", "99", "metro", "trem", "ônibus", "gasolina", "combustível", "posto", "estacionamento", "parking"],
-    "moradia": ["aluguel", "rent", "condomínio", "luz", "energia", "água", "internet", "wifi", "gás"],
-    "saúde": ["farmácia", "remédio", "medicina", "consulta", "dentista", "hospital"],
-    "assinaturas": ["netflix", "spotify", "prime", "amazon prime", "hbo", "disney", "icloud", "google one"],
+    "educação": ["curso", "udemy", "coursera", "livro", "faculdade", "mensalidade",
+                 "universidade", "colégio", "colegio", "creche", "berçário", "bercario",
+                 "cursinho", "pré-vestibular", "pós-graduação", "mba", "mestrado", "doutorado",
+                 "matrícula", "matricula", "semestralidade", "anuidade", "bolsa de estudos",
+                 "aula particular", "reforço escolar", "professor particular", "tutoria",
+                 "monitoria", "workshop", "treinamento", "palestra", "seminário", "certificação",
+                 "curso de idiomas", "curso de inglês", "intercâmbio", "intercambio",
+                 "material escolar", "mochila escolar", "estojo", "papelaria",
+                 "uniforme escolar", "calculadora",
+                 "enem", "vestibular", "concurso", "prova", "simulado",
+                 "alura", "hotmart", "domestika", "duolingo", "rocketseat", "khan academy"],
+    # mercado antes de alimentação: "compras do mês" é mercado, não refeição.
+    "compras online": ["mercado livre", "shopee", "aliexpress", "shein", "magalu",
+                       "magazine luiza", "americanas", "amazon", "temu", "compra online",
+                       "comprei online", "pedido online", "loja virtual", "e-commerce",
+                       "ecommerce", "site de compras", "checkout"],
+    "mercado": ["mercado", "supermercado", "mercadinho", "hipermercado", "mercearia",
+                "atacadão", "atacadao", "atacarejo", "sacolão", "sacolao", "hortifruti", "quitanda",
+                "compras do mês", "compras do mes", "lista de compras", "mantimentos",
+                "papel higiênico", "papel higienico", "produtos de limpeza", "material de limpeza",
+                "detergente", "amaciante", "sabão em pó", "sabao em po", "desinfetante",
+                "escova de dente", "escova de dentes",
+                "caneta", "canetas", "lápis", "lapis", "caderno", "cadernos",
+                "jogo de cama", "jogo de panela", "jogo de panelas", "jogo de jantar",
+                "jogo de toalhas", "jogo de lençóis", "jogo de lencois",
+                "carrefour", "assaí", "assai", "pão de açúcar", "pao de acucar",
+                "walmart", "costco", "whole foods", "makro", "zaffari", "angeloni"],
+    "alimentação": ["ifood", "uber eats", "rappi", "restaurante", "lanche", "pizza", "hamburguer", "cafe", "café", "cafeteria", "padaria",
+                    "comida", "alimento", "almoço", "almoco", "janta", "jantar", "marmita", "refeição", "refeicao", "delivery", "açaí", "acai", "sushi", "churrasco",
+                    "food truck", "self service", "buffet", "boteco", "botequim", "cerveja", "japonês", "japones", "feira livre", "prime rib",
+                    "bar", "pub", "happy hour", "drinks", "chopp", "chope"],
+    "transporte": ["uber", "lyft", "99", "metro", "trem", "ônibus", "gasolina", "combustível", "posto", "estacionamento", "parking",
+                   "indriver", "cabify", "mototáxi", "blablacar", "etanol", "diesel", "abastecimento",
+                   "posto de gasolina", "passagem de ônibus", "bilhete único", "vale-transporte",
+                   "brt", "vlt", "barca", "balsa", "rodoviária", "oficina", "mecânico", "troca de óleo",
+                   "pneu", "pneus", "alinhamento", "balanceamento", "funilaria", "lava-rápido",
+                   "peças de carro", "autopeças", "bateria do carro", "revisão do carro",
+                   "ipva", "licenciamento", "dpvat", "cnh", "detran", "pedágio", "seguro do carro",
+                   "multa de trânsito", "zona azul", "valet", "aluguel de bike"],
+    "moradia": ["aluguel", "rent", "condomínio", "luz", "energia", "água", "internet", "wifi", "gás",
+                "conta de energia", "conta de gás", "conta de internet", "iptu", "taxa de lixo",
+                "esgoto", "saneamento", "telefone fixo", "tv a cabo",
+                "financiamento imobiliário", "prestação da casa", "parcela do apartamento",
+                "hipoteca", "consórcio imobiliário", "entrada do imóvel",
+                "casa", "apartamento", "imóvel", "moradia", "quarto", "república", "kitnet",
+                "reforma", "obra", "pintura", "pedreiro", "encanador", "eletricista",
+                "marceneiro", "chaveiro", "dedetização", "conserto", "reparo",
+                "manutenção da casa", "manutenção do apartamento",
+                "diarista", "faxina", "faxineira", "empregada", "jardineiro",
+                "porteiro", "zelador", "lavanderia",
+                "móvel", "móveis", "sofá", "cama", "colchão", "geladeira", "fogão",
+                "máquina de lavar", "ar condicionado", "eletrodoméstico",
+                "seguro residencial", "taxa de condomínio", "fundo de reserva"],
+    "saúde": ["farmácia", "remédio", "medicina", "consulta", "dentista", "hospital",
+              "plano de saúde", "plano de saude", "plano médico", "plano medico",
+              "convênio médico", "convenio medico",
+              "médico", "clínico", "cardiologista", "dermatologista", "ginecologista",
+              "ortopedista", "pediatra", "oftalmologista", "nutricionista",
+              "fisioterapeuta", "ortodontista", "clínica", "posto de saúde", "upa",
+              "laboratório", "pronto socorro", "exame", "raio x", "ultrassom",
+              "ressonância", "tomografia", "endoscopia", "check-up", "cirurgia",
+              "internação", "aparelho dental", "tratamento de canal", "limpeza dental",
+              "implante dentário", "medicamento", "drogaria", "antibiótico",
+              "óculos de grau", "lente de contato", "óptica", "fisioterapia",
+              "psicoterapia", "acupuntura", "quiropraxia", "consulta médica",
+              "coparticipação"],
+    "beleza": ["beleza", "estética", "estetica", "salão", "salao", "cabeleireiro", "barbearia", "barbeiro",
+               "cabelo", "escova progressiva", "escova no cabelo", "progressiva", "manicure", "pedicure", "unha", "unhas", "esmalte",
+               "depilação", "depilacao", "cera", "laser", "sobrancelha", "cílios", "cilios",
+               "limpeza de pele", "botox", "preenchimento", "peeling", "massagem", "drenagem", "spa",
+               "maquiagem", "batom", "perfume", "cosmético", "cosmetico", "skincare",
+               "sephora", "boticário", "boticario", "avon"],
+    "assinaturas": ["netflix", "spotify", "prime", "amazon prime", "hbo", "disney", "icloud", "google one",
+                    "assinatura", "assinaturas", "renovação", "renovacao", "subscription", "recorrente",
+                    "plano mensal", "plano anual", "plano de celular", "plano do celular",
+                    "streaming", "globoplay", "paramount", "star plus", "apple tv", "crunchyroll",
+                    "deezer", "tidal", "apple music", "youtube music", "audible",
+                    "dropbox", "onedrive", "office 365", "microsoft 365", "adobe", "canva", "notion",
+                    "figma", "chatgpt", "copilot", "steam", "game pass", "playstation plus", "ps plus"],
     "compras": ["amazon", "shopee", "aliexpress", "loja", "compra", "roupa", "tenis", "sapato"],
-    "lazer": ["cinema", "show", "bar", "balada", "viagem", "hotel", "airbnb"],
-    "educação": ["curso", "udemy", "coursera", "livro", "faculdade", "mensalidade"],
+    "lazer": ["cinema", "show", "balada", "viagem", "hotel", "airbnb",
+              "lazer", "passeio", "diversão", "diversao", "entretenimento",
+              "filme", "ingresso", "ticket de cinema", "teatro", "peça de teatro",
+              "espetáculo", "espetaculo", "musical", "stand up", "comédia",
+              "festival", "evento", "festa", "camarote", "boate", "casa de show",
+              "sympla", "eventbrite", "concerto",
+              "passagem", "passagem aérea", "hospedagem", "pousada", "resort",
+              "hostel", "booking", "excursão", "turismo", "aluguel de carro",
+              "parque", "zoológico", "museu", "exposição", "boliche", "kart",
+              "paintball", "escalada", "trilha", "praia", "piscina", "clube",
+              "jogo", "game", "games", "videogame", "fliperama", "sinuca", "bilhar"],
     "outros": []
 }
 
 def guess_category(text: str) -> str:
-    t = text.lower()
+    # Normaliza pra que EXACT_WORD_KEYWORDS/KEYWORD_BLOCKERS funcionem igual ao
+    # infer_category (ex.: "prime" não pode bater em "primeiro").
+    t = normalize_text(text)
     for cat, words in CATEGORY_KEYWORDS.items():
         for w in words:
-            if w in t:
+            w_norm = normalize_text(w)
+            if not w_norm:
+                continue
+            if len(w_norm) <= 3 or w_norm in EXACT_WORD_KEYWORDS:
+                ok = contains_word(t, w_norm)
+            else:
+                ok = w_norm in t
+            if ok and not keyword_blocked(w_norm, t):
                 return cat
     return "outros"
 

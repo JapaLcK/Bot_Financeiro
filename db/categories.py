@@ -14,11 +14,12 @@ from .users import ensure_user
 from utils_text import normalize_text
 
 
-# ─── Seed das 14 categorias canônicas (Sprint 3) ─────────────────────────────
+# ─── Seed das 15 categorias canônicas (Sprint 3) ─────────────────────────────
 # Mesma lista de `ai_router.py:ALLOWED_CATEGORIES`. Emoji/cor escolhidos pra
 # bater com a paleta do dashboard (gradient roxo→azul) e contraste visual.
 SYSTEM_CATEGORIES_SEED: list[tuple[str, str, str]] = [
     ("alimentação",         "🍔", "#f59e0b"),
+    ("mercado",             "🛒", "#84cc16"),
     ("transporte",          "🚗", "#3b82f6"),
     ("saúde",               "💊", "#ec4899"),
     ("moradia",             "🏠", "#8b5cf6"),
@@ -26,7 +27,7 @@ SYSTEM_CATEGORIES_SEED: list[tuple[str, str, str]] = [
     ("educação",            "📚", "#06b6d4"),
     ("assinaturas",         "📺", "#6366f1"),
     ("pets",                "🐾", "#f97316"),
-    ("compras online",      "🛒", "#a855f7"),
+    ("compras online",      "📦", "#a855f7"),
     ("beleza",              "💄", "#f43f5e"),
     ("investimento_aporte", "📈", "#22c55e"),
     ("criptomoedas",        "₿",  "#eab308"),
@@ -228,11 +229,14 @@ def _normalize_category_name(name: str) -> str:
 
 
 def ensure_user_categories_seeded(user_id: int) -> None:
-    """Seed lazy: na primeira chamada, popula as 14 canônicas com is_system=true.
+    """Seed lazy: popula as canônicas com is_system=true.
 
-    Idempotente: se já existe qualquer row com is_system=true pro user, sai.
+    O insert das canônicas roda SEMPRE (on conflict do nothing), pra que
+    categorias novas adicionadas ao seed — como "mercado" — cheguem também
+    aos usuários que já tinham sido semeados antes.
     Adicional: importa categorias customizadas que o user JÁ TEM em launches
-    (lower distinto) — assim a tela começa povoada com a realidade dele.
+    (lower distinto) — assim a tela começa povoada com a realidade dele. Essa
+    parte só roda na primeira vez.
     """
     ensure_user(user_id)
     with get_conn() as conn:
@@ -241,8 +245,7 @@ def ensure_user_categories_seeded(user_id: int) -> None:
                 "select 1 from user_categories where user_id=%s and is_system=true limit 1",
                 (user_id,),
             )
-            if cur.fetchone():
-                return
+            already_seeded = cur.fetchone() is not None
 
             for name, emoji, color in SYSTEM_CATEGORIES_SEED:
                 cur.execute(
@@ -253,6 +256,9 @@ def ensure_user_categories_seeded(user_id: int) -> None:
                     """,
                     (user_id, name, emoji, color),
                 )
+
+            if already_seeded:
+                return
 
             # Importa categorias customizadas já presentes em launches.
             cur.execute(

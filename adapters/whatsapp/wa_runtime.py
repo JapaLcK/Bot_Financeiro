@@ -279,13 +279,16 @@ def _send_recategorize_list(to_wa_id: str, body: str, launch_id: int) -> None:
         {
             "title": "Mais comuns",
             "rows": [
+                # Limite de 10 rows por lista no WhatsApp (8 aqui + 2 em "Outras").
+                # "mercado" entrou no lugar de "compras online", que é bem menos
+                # frequente — quem precisa dela usa "✏️ Outra (digitar)".
                 pick("alimentação"),
+                pick("mercado"),
                 pick("transporte"),
                 pick("lazer"),
                 pick("moradia"),
                 pick("saúde"),
                 pick("educação"),
-                pick("compras online"),
                 pick("assinaturas"),
             ],
         },
