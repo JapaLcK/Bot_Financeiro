@@ -12,7 +12,8 @@ Write (precisam de confirmação humana):
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+import math
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import db
@@ -133,6 +134,87 @@ def _create_pocket_execute(user_id: int, args: dict[str, Any]) -> str:
         return f"🐷 Não consegui criar a caixinha: {e}"
 
 
+# ─── Helpers de status/progresso pra mensagens de depósito ───────────────────
+
+def _brl(v: float) -> str:
+    """Formata em R$ pt-BR: 4550.0 -> 'R$ 4.550,00'."""
+    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _pct(p: float) -> str:
+    """45.0 -> '45%'; 45.5 -> '45,5%'."""
+    if p == int(p):
+        return f"{int(p)}%"
+    return f"{p:.1f}%".replace(".", ",")
+
+
+def _pace_line(amount: float, remaining: float, today: date) -> str:
+    """Projeta quanto tempo pra completar a meta MANTENDO o ritmo deste depósito
+    (assume aportes mensais do mesmo valor). Ex: faltam 5.500, depositou 50 ->
+    ~110 meses (~9 anos)."""
+    if amount <= 0 or remaining <= 0:
+        return ""
+    months = remaining / amount
+    months_ceil = max(1, math.ceil(months))
+    projected = today + timedelta(days=round(months * 30.44))
+    quando = projected.strftime("%m/%Y")
+    if months_ceil <= 1:
+        tempo = "~1 mês"
+    elif months_ceil >= 24:
+        anos = months_ceil / 12
+        tempo = f"~{months_ceil} meses (~{anos:.0f} anos)"
+    else:
+        tempo = f"~{months_ceil} meses"
+    return (
+        f"⏳ Mantendo esse ritmo de {_brl(amount)}/mês, você completa a meta em "
+        f"{tempo} (por volta de {quando})."
+    )
+
+
+def _deposit_followup_lines(
+    user_id: int, canon: str, amount: float, new_balance: float
+) -> str:
+    """Bloco de status + ritmo mostrado após um depósito na caixinha.
+
+    Retorna string vazia se não achar a caixinha. Sem meta → mostra só o saldo.
+    """
+    try:
+        rows = db.list_pockets(user_id, accrue=False)
+    except Exception:
+        return ""
+    row = next(
+        (r for r in rows if (r.get("name") or "").lower() == canon.lower()), None
+    )
+    if not row:
+        return ""
+    today = datetime.now(_tz()).date()
+    ins = _pocket_goal_insight(
+        new_balance, row.get("target_amount"), row.get("target_date"), today
+    )
+    if ins["target_amount"] is None:
+        return f"🐷 Saldo da caixinha: {_brl(new_balance)}."
+    if ins["achieved"]:
+        over = new_balance - ins["target_amount"]
+        extra = f" (passou {_brl(over)} da meta)" if over > 0.005 else ""
+        return (
+            f"🎉 Meta batida! {_brl(new_balance)} de "
+            f"{_brl(ins['target_amount'])}{extra}."
+        )
+    lines = [
+        f"📊 Agora: {_brl(new_balance)} de {_brl(ins['target_amount'])} "
+        f"({_pct(ins['progress_pct'])}). Faltam {_brl(ins['remaining_to_goal'])}."
+    ]
+    pace = _pace_line(amount, ins["remaining_to_goal"], today)
+    if pace:
+        lines.append(pace)
+    if ins.get("monthly_needed") and (ins.get("days_to_target") or 0) > 0:
+        lines.append(
+            f"🎯 Pra bater no prazo ({ins['target_date']}), o ritmo seria "
+            f"~{_brl(ins['monthly_needed'])}/mês."
+        )
+    return "\n".join(lines)
+
+
 # ─── Write: pocket_deposit ──────────────────────────────────────────────────
 
 def _pocket_deposit_summary(args: dict[str, Any]) -> str:
@@ -150,8 +232,14 @@ def _pocket_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
     if not pocket_name or amount <= 0:
         return "🐷 Faltou o nome da caixinha ou o valor."
     try:
-        db.pocket_deposit_from_account(user_id, pocket_name, amount)
-        return f'✅ Depositado R$ {amount:.2f} na caixinha "{pocket_name}".'
+        _lid, _acc, new_pocket, canon = db.pocket_deposit_from_account(
+            user_id, pocket_name, amount
+        )
+        msg = f'✅ Depositado {_brl(amount)} na caixinha "{canon}".'
+        followup = _deposit_followup_lines(user_id, canon, amount, float(new_pocket))
+        if followup:
+            msg += "\n" + followup
+        return msg
     except Exception as e:
         return f"🐷 Não consegui depositar: {e}"
 
