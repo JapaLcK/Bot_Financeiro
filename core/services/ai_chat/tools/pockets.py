@@ -12,31 +12,100 @@ Write (precisam de confirmação humana):
 """
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any
 
 import db
+from utils_date import _tz
 
 from ._base import Tool
 
 
 # ─── Read ───────────────────────────────────────────────────────────────────
 
+def _pocket_goal_insight(balance: float, target_amount, target_date, today: date) -> dict[str, Any]:
+    """Deriva o progresso da caixinha rumo à meta pra IA comentar.
+
+    Retorna dict com progress_pct, remaining_to_goal, achieved, days_to_target
+    e monthly_needed (quanto guardar por mês pra bater no prazo). Campos ficam
+    None quando não há meta/prazo definidos.
+    """
+    out: dict[str, Any] = {
+        "target_amount": None,
+        "target_date": None,
+        "progress_pct": None,
+        "remaining_to_goal": None,
+        "achieved": None,
+        "days_to_target": None,
+        "monthly_needed": None,
+        "target_overdue": None,
+    }
+
+    goal = None
+    if target_amount is not None:
+        try:
+            goal = float(target_amount)
+        except (TypeError, ValueError):
+            goal = None
+
+    if goal and goal > 0:
+        out["target_amount"] = round(goal, 2)
+        remaining = max(0.0, goal - balance)
+        out["remaining_to_goal"] = round(remaining, 2)
+        out["progress_pct"] = round(min(balance / goal * 100, 100.0), 1)
+        out["achieved"] = balance >= goal
+
+    if target_date is not None:
+        # target_date pode vir como date ou string ISO
+        td = target_date
+        if isinstance(td, str):
+            try:
+                td = datetime.strptime(td[:10], "%Y-%m-%d").date()
+            except ValueError:
+                td = None
+        if isinstance(td, datetime):
+            td = td.date()
+        if isinstance(td, date):
+            out["target_date"] = td.isoformat()
+            days_left = (td - today).days
+            out["days_to_target"] = days_left
+            out["target_overdue"] = days_left < 0 and not (out["achieved"] or False)
+            # Ritmo: só faz sentido se há meta em aberto e prazo futuro.
+            if (
+                out.get("remaining_to_goal")
+                and out["remaining_to_goal"] > 0
+                and days_left > 0
+            ):
+                months_left = days_left / 30.44
+                if months_left > 0:
+                    out["monthly_needed"] = round(out["remaining_to_goal"] / months_left, 2)
+
+    return out
+
+
 def _list_pockets(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     rows = db.list_pockets(user_id)
-    return {
-        "pockets": [
+    today = datetime.now(_tz()).date()
+    pockets = []
+    for r in rows:
+        balance = float(r["balance"] or 0)
+        insight = _pocket_goal_insight(
+            balance, r.get("target_amount"), r.get("target_date"), today
+        )
+        pockets.append(
             {
                 "id": r["id"],
                 "name": r["name"],
-                "balance": float(r["balance"] or 0),
+                "balance": balance,
                 "description": r.get("description"),
+                "status": r.get("status") or "active",
                 "interest_enabled": bool(r.get("interest_enabled")),
                 "interest_rate": float(r.get("interest_rate") or 1),
                 "interest_period": r.get("interest_period") or "cdi",
+                **insight,
             }
-            for r in rows
-        ]
-    }
+        )
+    return {"pockets": pockets}
 
 
 # ─── Write: create_pocket ───────────────────────────────────────────────────
@@ -160,7 +229,7 @@ TOOLS: list[Tool] = [
             "type": "function",
             "function": {
                 "name": "list_pockets",
-                "description": "Lista as caixinhas (cofrinhos) do usuário com nome, saldo e descrição. Use pra 'quais minhas caixinhas?', 'mostra meus cofrinhos', 'quanto tem na caixinha de viagem?'.",
+                "description": "Lista as caixinhas (cofrinhos) com nome, saldo, meta (target_amount), data-alvo (target_date) e progresso: progress_pct (% da meta), remaining_to_goal (quanto falta), achieved (se já bateu), days_to_target (dias até o prazo), monthly_needed (quanto guardar por mês pra bater no prazo), target_overdue (prazo estourado sem bater). Use pra 'quais minhas caixinhas?', 'quanto tem na de viagem?', 'já bati a meta?', 'quanto falta pra minha reserva?', 'tô no ritmo?'.",
                 "parameters": {"type": "object", "properties": {}},
             },
         },
