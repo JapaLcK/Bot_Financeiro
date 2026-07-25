@@ -154,7 +154,7 @@ async function startCheckout(interval, btn) {
 
     if (resp.status === 401) {
       showToast("Faça login pra continuar a assinatura.", "err");
-      setTimeout(() => { window.location.href = "/?next=" + encodeURIComponent("/precos"); }, 900);
+      setTimeout(() => { window.location.href = "/login?next=" + encodeURIComponent("/precos"); }, 900);
       return;
     }
 
