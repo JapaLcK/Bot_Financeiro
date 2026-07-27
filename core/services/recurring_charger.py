@@ -67,8 +67,19 @@ def charge_due_recurring_expenses_once(today: date | None = None) -> list[dict]:
                 where r.is_active = true
                   and r.due_day <= %s
                   and (r.last_charged_ym is null or r.last_charged_ym <> %s)
+                  -- Não retroagir: a recorrência começa em start_date (escolhido
+                  -- pelo user; fallback created_at). Se o vencimento deste mês é
+                  -- anterior ao início, só cobra a partir do mês do start_date.
+                  -- start_date em mês futuro → nenhum ramo dispara → não cobra.
+                  and (
+                      to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') < %s
+                      or (
+                          to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') = %s
+                          and r.due_day >= extract(day from coalesce(r.start_date, r.created_at::date))
+                      )
+                  )
                 """,
-                (today.day, ym),
+                (today.day, ym, ym, ym),
             )
             due = cur.fetchall() or []
 
@@ -214,8 +225,17 @@ def credit_due_recurring_incomes_once(today: date | None = None) -> list[dict]:
                 where r.is_active = true
                   and r.pay_day <= %s
                   and (r.last_credited_ym is null or r.last_credited_ym <> %s)
+                  -- Mesmo guard das despesas: começa a valer em start_date
+                  -- (fallback created_at). start_date futuro → não credita ainda.
+                  and (
+                      to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') < %s
+                      or (
+                          to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') = %s
+                          and r.pay_day >= extract(day from coalesce(r.start_date, r.created_at::date))
+                      )
+                  )
                 """,
-                (today.day, ym),
+                (today.day, ym, ym, ym),
             )
             due = cur.fetchall() or []
 

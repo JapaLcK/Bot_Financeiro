@@ -1059,6 +1059,15 @@ def init_db():
           on recurring_income_credits (user_id, acknowledged)
         """,
 
+        # migration: data de início da recorrência (escolhida pelo user). A
+        # cobrança/crédito só começa a valer a partir dela — evita retroagir um
+        # vencimento que já passou antes do cadastro. Backfill = created_at::date
+        # (só toca linhas legadas: novas linhas já nascem com start_date).
+        """alter table recurring_expenses add column if not exists start_date date""",
+        """update recurring_expenses set start_date = created_at::date where start_date is null""",
+        """alter table recurring_incomes add column if not exists start_date date""",
+        """update recurring_incomes set start_date = created_at::date where start_date is null""",
+
         # ─── Eventos de login (admin/observabilidade) ───────────────────────────
         # Antes era criada lazy em core/admin_dashboard.py:ensure_admin_tables.
         # Trazido pra schema.py pra audit/IP-tracking funcionarem nos testes.

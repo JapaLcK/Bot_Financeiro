@@ -2816,6 +2816,22 @@ const RECURRING_CATEGORY_EMOJI = {
   "internet": "🌐", "telefone": "📱", "água": "💧", "luz": "💡",
 };
 
+// 1ª ocorrência do dia `dayNum` (1-31) em/depois de hoje E de `startISO`
+// (YYYY-MM-DD, opcional). Espelha o guard do charger: recorrência com início
+// futuro só "vence" a partir do start_date.
+function _nextRecurringOccurrence(dayNum, startISO) {
+  const floor = new Date();
+  floor.setHours(0, 0, 0, 0);
+  if (startISO) {
+    const s = new Date(startISO + "T00:00:00");
+    if (s > floor) { floor.setTime(s.getTime()); }
+  }
+  const dd = Math.min(dayNum, 28);
+  let d = new Date(floor.getFullYear(), floor.getMonth(), dd);
+  if (d < floor) d = new Date(floor.getFullYear(), floor.getMonth() + 1, dd);
+  return d;
+}
+
 let _recurringCache = null;
 let _recurringFetchInFlight = null;
 
@@ -2912,13 +2928,11 @@ function _renderFixedView(items) {
   const nEssentials = active.filter(r => r.is_essential).length;
   const nLeisure = active.filter(r => !r.is_essential).length;
 
-  // Próximo vencimento (próxima data >= hoje considerando due_day desse mês ou próximo)
+  // Próximo vencimento (1ª data do due_day em/depois de hoje E do start_date)
   const today = new Date();
-  const nextDue = active.map(r => {
-    let d = new Date(today.getFullYear(), today.getMonth(), Math.min(r.due_day, 28));
-    if (d < today) d = new Date(today.getFullYear(), today.getMonth() + 1, Math.min(r.due_day, 28));
-    return { rec: r, date: d };
-  }).sort((a, b) => a.date - b.date);
+  const nextDue = active.map(r => ({
+    rec: r, date: _nextRecurringOccurrence(r.due_day, r.start_date),
+  })).sort((a, b) => a.date - b.date);
   const next = nextDue[0];
 
   const adjustments = active.filter(r => r.last_amount != null && r.last_amount_changed_at);
@@ -3022,17 +3036,27 @@ function _renderRecurringRow(r) {
       adjustText = ` · <span style="color:${color}">${_fmtBRL(r.last_amount)} → ${_fmtBRL(r.amount)} ${arrow}</span>`;
     }
   }
+  const startText = _futureStartHint(r.start_date);
   const safeRecJson = JSON.stringify(r).replace(/"/g, "&quot;");
   return `
     <div class="tx-row" style="cursor:pointer" onclick="openRecurringEditModal(${safeRecJson})">
       <div class="tx-icon">${_recurringEmoji(r)}</div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(r.name)}</div>
-        <div class="tx-meta">${payment}${adjustText}</div>
+        <div class="tx-meta">${payment}${adjustText}${startText}</div>
       </div>
       <div class="tx-amt red">-${_fmtBRL(r.amount)}</div>
     </div>
   `;
+}
+
+// Mostra "· começa DD/MM" só quando o início ainda está no futuro.
+function _futureStartHint(startISO) {
+  if (!startISO) return "";
+  const s = new Date(startISO + "T00:00:00");
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  if (s <= today) return "";
+  return ` · <span style="color:var(--text-3)">começa ${s.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</span>`;
 }
 
 function _formatDueIn(date) {
@@ -3095,6 +3119,13 @@ function _ensureRecurringModal() {
                 <select id="recurring-card"></select>
               </div>
             </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="recurring-start-date">Começa a partir de</label>
+                <input type="date" id="recurring-start-date" />
+                <span style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">A 1ª cobrança é no dia do vencimento em/após esta data. Deixe hoje pra começar já.</span>
+              </div>
+            </div>
             <div class="field">
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal">
                 <input type="checkbox" id="recurring-is-essential" />
@@ -3148,6 +3179,7 @@ function openRecurringEditModal(rec) {
   document.getElementById("recurring-name").value = isEdit ? rec.name : "";
   document.getElementById("recurring-amount").value = isEdit ? Number(rec.amount).toFixed(2) : "";
   document.getElementById("recurring-due-day").value = isEdit ? rec.due_day : "";
+  document.getElementById("recurring-start-date").value = isEdit ? (rec.start_date || "") : new Date().toLocaleDateString("en-CA");
   document.getElementById("recurring-category").value = isEdit ? rec.category : "";
   document.getElementById("recurring-payment-type").value = isEdit ? rec.payment_type : "account";
   document.getElementById("recurring-is-essential").checked = isEdit ? !!rec.is_essential : false;
@@ -3174,6 +3206,7 @@ async function saveRecurring() {
     amount: parseFloat(document.getElementById("recurring-amount").value),
     category: document.getElementById("recurring-category").value.trim(),
     due_day: parseInt(document.getElementById("recurring-due-day").value, 10),
+    start_date: document.getElementById("recurring-start-date").value || null,
     payment_type: document.getElementById("recurring-payment-type").value,
     card_id: null,
     is_essential: document.getElementById("recurring-is-essential").checked,
@@ -3402,13 +3435,11 @@ function _renderRecurringIncomeView(items) {
   const nPrimary = active.filter(r => r.is_primary).length;
   const nExtra = active.filter(r => !r.is_primary).length;
 
-  // Próximo recebimento (pay_day desse mês, ou do mês que vem se já passou)
+  // Próximo recebimento (1ª data do pay_day em/depois de hoje E do start_date)
   const today = new Date();
-  const nextPay = active.map(r => {
-    let d = new Date(today.getFullYear(), today.getMonth(), Math.min(r.pay_day, 28));
-    if (d < today) d = new Date(today.getFullYear(), today.getMonth() + 1, Math.min(r.pay_day, 28));
-    return { rec: r, date: d };
-  }).sort((a, b) => a.date - b.date);
+  const nextPay = active.map(r => ({
+    rec: r, date: _nextRecurringOccurrence(r.pay_day, r.start_date),
+  })).sort((a, b) => a.date - b.date);
   const next = nextPay[0];
 
   const adjustments = active.filter(r => r.last_amount != null && r.last_amount_changed_at);
@@ -3516,7 +3547,7 @@ function _renderRecurringIncomeRow(r) {
       <div class="tx-icon">${_recurringIncomeEmoji(r)}</div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(r.name)}</div>
-        <div class="tx-meta">${when}${adjustText}</div>
+        <div class="tx-meta">${when}${adjustText}${_futureStartHint(r.start_date)}</div>
       </div>
       <div class="tx-amt green">+${_fmtBRL(r.amount)}</div>
     </div>
@@ -3569,6 +3600,13 @@ function _ensureRecurringIncomeModal() {
                 </datalist>
               </div>
             </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="recurring-income-start-date">Começa a partir de</label>
+                <input type="date" id="recurring-income-start-date" />
+                <span style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">O 1º crédito é no dia do recebimento em/após esta data. Deixe hoje pra começar já.</span>
+              </div>
+            </div>
             <div class="field">
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal">
                 <input type="checkbox" id="recurring-income-is-primary" />
@@ -3605,6 +3643,7 @@ function openRecurringIncomeEditModal(rec) {
   document.getElementById("recurring-income-name").value = isEdit ? rec.name : "";
   document.getElementById("recurring-income-amount").value = isEdit ? Number(rec.amount).toFixed(2) : "";
   document.getElementById("recurring-income-pay-day").value = isEdit ? rec.pay_day : "";
+  document.getElementById("recurring-income-start-date").value = isEdit ? (rec.start_date || "") : new Date().toLocaleDateString("en-CA");
   document.getElementById("recurring-income-category").value = isEdit ? rec.category : "";
   document.getElementById("recurring-income-is-primary").checked = isEdit ? !!rec.is_primary : false;
   document.getElementById("recurring-income-notes").value = isEdit ? (rec.notes || "") : "";
@@ -3627,6 +3666,7 @@ async function saveRecurringIncome() {
     amount: parseFloat(document.getElementById("recurring-income-amount").value),
     category: document.getElementById("recurring-income-category").value.trim(),
     pay_day: parseInt(document.getElementById("recurring-income-pay-day").value, 10),
+    start_date: document.getElementById("recurring-income-start-date").value || null,
     is_primary: document.getElementById("recurring-income-is-primary").checked,
     notes: document.getElementById("recurring-income-notes").value.trim() || null,
   };

@@ -19,6 +19,7 @@ from decimal import Decimal
 from typing import Any
 
 from .connection import get_conn
+from .recurring import _parse_start_date
 from .users import ensure_user
 
 
@@ -32,7 +33,7 @@ def list_recurring_incomes(user_id: int, include_inactive: bool = False) -> list
                 select r.id, r.name, r.amount, r.category, r.pay_day,
                        r.is_primary, r.is_active,
                        r.last_amount, r.last_amount_changed_at,
-                       r.last_credited_ym, r.notes, r.created_at
+                       r.last_credited_ym, r.notes, r.created_at, r.start_date
                 from recurring_incomes r
                 where r.user_id = %s
                   and (%s::boolean = true or r.is_active = true)
@@ -53,7 +54,7 @@ def get_recurring_income(user_id: int, inc_id: int) -> dict[str, Any] | None:
                 select r.id, r.name, r.amount, r.category, r.pay_day,
                        r.is_primary, r.is_active,
                        r.last_amount, r.last_amount_changed_at,
-                       r.last_credited_ym, r.notes, r.created_at
+                       r.last_credited_ym, r.notes, r.created_at, r.start_date
                 from recurring_incomes r
                 where r.user_id = %s and r.id = %s
                 """,
@@ -77,6 +78,7 @@ def _row_to_dict(r: Any) -> dict[str, Any]:
         "last_credited_ym": r["last_credited_ym"],
         "notes": r["notes"],
         "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        "start_date": r["start_date"].isoformat() if r["start_date"] else None,
     }
 
 
@@ -99,8 +101,12 @@ def create_recurring_income(
     pay_day: int,
     is_primary: bool = False,
     notes: str | None = None,
+    start_date: date | str | None = None,
 ) -> dict[str, Any]:
-    """Cria receita recorrente. Levanta ValueError se input inválido."""
+    """Cria receita recorrente. Levanta ValueError se input inválido.
+
+    `start_date` = a partir de quando a recorrência vale (default: hoje).
+    """
     ensure_user(user_id)
     name = (name or "").strip()
     if not name:
@@ -109,6 +115,7 @@ def create_recurring_income(
         raise ValueError("VALOR_INVALIDO")
     if pay_day < 1 or pay_day > 31:
         raise ValueError("DIA_INVALIDO")
+    start = _parse_start_date(start_date, default=date.today())
 
     cat = (category or "").strip() or "salário"
     note = (notes or "").strip() or None
@@ -119,13 +126,13 @@ def create_recurring_income(
                 """
                 insert into recurring_incomes (
                     user_id, name, amount, category, pay_day,
-                    is_primary, is_active, notes
-                ) values (%s, %s, %s, %s, %s, %s, true, %s)
+                    is_primary, is_active, notes, start_date
+                ) values (%s, %s, %s, %s, %s, %s, true, %s, %s)
                 returning id
                 """,
                 (
                     user_id, name, Decimal(str(amount)), cat, int(pay_day),
-                    bool(is_primary), note,
+                    bool(is_primary), note, start,
                 ),
             )
             new_id = cur.fetchone()["id"]
@@ -144,6 +151,7 @@ def update_recurring_income(
     is_primary: bool | None = None,
     is_active: bool | None = None,
     notes: str | None = None,
+    start_date: date | str | None = None,
 ) -> dict[str, Any]:
     """PATCH. Quando amount muda, registra `last_amount` + timestamp (detector de reajuste)."""
     ensure_user(user_id)
@@ -187,6 +195,9 @@ def update_recurring_income(
     if notes is not None:
         sets.append("notes = %s")
         params.append((notes or "").strip() or None)
+    if start_date is not None:
+        sets.append("start_date = %s")
+        params.append(_parse_start_date(start_date, default=date.today()))
 
     if not sets:
         return current
@@ -234,8 +245,16 @@ def list_due_recurring_incomes(today: date | None = None) -> list[dict[str, Any]
                 where r.is_active = true
                   and r.pay_day <= %s
                   and (r.last_credited_ym is null or r.last_credited_ym != %s)
+                  -- Não retroagir: começa em start_date (ver charger).
+                  and (
+                      to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') < %s
+                      or (
+                          to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') = %s
+                          and r.pay_day >= extract(day from coalesce(r.start_date, r.created_at::date))
+                      )
+                  )
                 """,
-                (today.day, ym),
+                (today.day, ym, ym, ym),
             )
             rows = cur.fetchall() or []
     return [dict(r) for r in rows]

@@ -18,6 +18,18 @@ from .connection import get_conn
 from .users import ensure_user
 
 
+def _parse_start_date(value: Any, default: date | None = None) -> date | None:
+    """Aceita date, 'YYYY-MM-DD' ou None. Vazio/None → default. Inválido → erro."""
+    if value is None or value == "":
+        return default
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        raise ValueError("DATA_INICIO_INVALIDA")
+
+
 def list_recurring_expenses(user_id: int, include_inactive: bool = False) -> list[dict[str, Any]]:
     """Lista todos os gastos fixos do user."""
     ensure_user(user_id)
@@ -29,7 +41,7 @@ def list_recurring_expenses(user_id: int, include_inactive: bool = False) -> lis
                        r.payment_type, r.card_id, c.name as card_name,
                        r.is_essential, r.is_active,
                        r.last_amount, r.last_amount_changed_at,
-                       r.last_charged_ym, r.notes, r.created_at
+                       r.last_charged_ym, r.notes, r.created_at, r.start_date
                 from recurring_expenses r
                 left join credit_cards c on c.id = r.card_id
                 where r.user_id = %s
@@ -57,6 +69,7 @@ def list_recurring_expenses(user_id: int, include_inactive: bool = False) -> lis
             "last_charged_ym": r["last_charged_ym"],
             "notes": r["notes"],
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "start_date": r["start_date"].isoformat() if r["start_date"] else None,
         })
     return out
 
@@ -71,7 +84,7 @@ def get_recurring_expense(user_id: int, rec_id: int) -> dict[str, Any] | None:
                        r.payment_type, r.card_id, c.name as card_name,
                        r.is_essential, r.is_active,
                        r.last_amount, r.last_amount_changed_at,
-                       r.last_charged_ym, r.notes, r.created_at
+                       r.last_charged_ym, r.notes, r.created_at, r.start_date
                 from recurring_expenses r
                 left join credit_cards c on c.id = r.card_id
                 where r.user_id = %s and r.id = %s
@@ -92,6 +105,7 @@ def get_recurring_expense(user_id: int, rec_id: int) -> dict[str, Any] | None:
                 "last_charged_ym": r["last_charged_ym"],
                 "notes": r["notes"],
                 "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                "start_date": r["start_date"].isoformat() if r["start_date"] else None,
             }
 
 
@@ -116,8 +130,13 @@ def create_recurring_expense(
     card_id: int | None = None,
     is_essential: bool = False,
     notes: str | None = None,
+    start_date: date | str | None = None,
 ) -> dict[str, Any]:
-    """Cria gasto fixo. Levanta ValueError se input inválido."""
+    """Cria gasto fixo. Levanta ValueError se input inválido.
+
+    `start_date` = a partir de quando a recorrência vale (default: hoje). A
+    primeira cobrança é a primeira ocorrência de `due_day` em/depois dessa data.
+    """
     ensure_user(user_id)
     name = (name or "").strip()
     if not name:
@@ -126,6 +145,7 @@ def create_recurring_expense(
         raise ValueError("VALOR_INVALIDO")
     if due_day < 1 or due_day > 31:
         raise ValueError("DIA_INVALIDO")
+    start = _parse_start_date(start_date, default=date.today())
     if payment_type not in ("account", "credit_card"):
         raise ValueError("FORMA_PAGAMENTO_INVALIDA")
     if payment_type == "credit_card" and not card_id:
@@ -150,13 +170,13 @@ def create_recurring_expense(
                 """
                 insert into recurring_expenses (
                     user_id, name, amount, category, due_day, payment_type,
-                    card_id, is_essential, is_active, notes
-                ) values (%s, %s, %s, %s, %s, %s, %s, %s, true, %s)
+                    card_id, is_essential, is_active, notes, start_date
+                ) values (%s, %s, %s, %s, %s, %s, %s, %s, true, %s, %s)
                 returning id
                 """,
                 (
                     user_id, name, Decimal(str(amount)), cat, int(due_day),
-                    payment_type, card_id, bool(is_essential), note,
+                    payment_type, card_id, bool(is_essential), note, start,
                 ),
             )
             new_id = cur.fetchone()["id"]
@@ -177,6 +197,7 @@ def update_recurring_expense(
     is_essential: bool | None = None,
     is_active: bool | None = None,
     notes: str | None = None,
+    start_date: date | str | None = None,
 ) -> dict[str, Any]:
     """PATCH. Quando amount muda, registra `last_amount` + timestamp (detector de reajuste)."""
     ensure_user(user_id)
@@ -230,6 +251,9 @@ def update_recurring_expense(
     if notes is not None:
         sets.append("notes = %s")
         params.append((notes or "").strip() or None)
+    if start_date is not None:
+        sets.append("start_date = %s")
+        params.append(_parse_start_date(start_date, default=date.today()))
 
     if not sets:
         return current
@@ -278,8 +302,16 @@ def list_due_recurring_expenses(today: date | None = None) -> list[dict[str, Any
                 where r.is_active = true
                   and r.due_day <= %s
                   and (r.last_charged_ym is null or r.last_charged_ym != %s)
+                  -- Não retroagir: recorrência começa em start_date (ver charger).
+                  and (
+                      to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') < %s
+                      or (
+                          to_char(coalesce(r.start_date, r.created_at::date), 'YYYY-MM') = %s
+                          and r.due_day >= extract(day from coalesce(r.start_date, r.created_at::date))
+                      )
+                  )
                 """,
-                (today.day, ym),
+                (today.day, ym, ym, ym),
             )
             rows = cur.fetchall() or []
     return [dict(r) for r in rows]
