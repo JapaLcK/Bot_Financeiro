@@ -125,10 +125,8 @@ body.light .sidenav-toggle:hover { background:rgba(15,23,42,.05); color:var(--te
   margin-bottom:12px;
 }
 .sidenav-brand .logo {
-  width:38px; height:38px; border-radius:11px;
-  background:linear-gradient(135deg,#FF2D8E,#FF2D8E 55%,#C7186B);
-  display:flex;align-items:center;justify-content:center; font-size:1.05rem;
-  box-shadow:0 6px 16px rgba(255,45,142,.45), inset 0 1px 0 rgba(255,255,255,.18);
+  width:38px; height:38px; object-fit:contain; display:block;
+  background:none; box-shadow:none; border-radius:0;   /* anula a regra genérica .logo (caixa rosa) */
 }
 .sidenav-brand .brand-text { display:flex; flex-direction:column; line-height:1.15; min-width:0; }
 .sidenav-brand .brand-name { font-size:.92rem; font-weight:700; color:var(--text); letter-spacing:-.01em; }
@@ -834,8 +832,7 @@ header {
 .logo { width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#FF2D8E,#C7186B);
   display:flex;align-items:center;justify-content:center;font-size:1rem;
   box-shadow:0 4px 12px rgba(255,45,142,.4); }
-.logo-img { width:36px;height:36px;border-radius:10px;object-fit:cover;display:block;
-  box-shadow:0 4px 12px rgba(255,45,142,.4); }
+.logo-img { width:36px;height:36px;object-fit:contain;display:block; }
 header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 
 .month-nav { display:flex; align-items:center; }
