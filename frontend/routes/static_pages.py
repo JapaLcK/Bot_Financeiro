@@ -217,7 +217,21 @@ async def serve_precos():
 
 @router.get("/suporte")
 async def serve_suporte():
-    return html_file(FRONTEND_DIR / "suporte.html")
+    """Suporte + FAQ. As perguntas do FAQ são os guias/dicas evergreen
+    (core.blog_guides), renderizados como acordeão — fonte única de conteúdo."""
+    from core.blog_guides import list_guides
+
+    faq = "\n".join(
+        '<div class="faq-item">'
+        f'<button class="faq-q" type="button" aria-expanded="false">'
+        f'{_html.escape(g["title"])} <span class="chev">+</span></button>'
+        f'<div class="faq-a"><div class="guide-prose">{g["body"]}</div></div>'
+        "</div>"
+        for g in list_guides()
+    )
+    template = (FRONTEND_DIR / "suporte.html").read_text(encoding="utf-8")
+    return Response(content=template.replace("{{FAQ}}", faq),
+                    media_type="text/html; charset=utf-8")
 
 
 @router.get("/robots.txt")

@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Blog — PigBank</title>
-<meta name="description" content="Dicas, guias e novidades pra você cuidar melhor do seu dinheiro com o PigBank." />
+<title>Notícias — PigBank</title>
+<meta name="description" content="Notícias e resumos do mercado financeiro pela Piggy — exclusivo pra assinantes do PigBank+." />
 <link rel="canonical" href="https://pigbankai.com/changelog" />
 <link rel="icon" type="image/png" href="/favicon.png?v=2" />
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=2" />
@@ -33,82 +33,22 @@
 
     <section class="section">
       <div class="section-head">
-        <h2>Conteúdos que fazem<br>você <span class="grad">cuidar melhor</span> do seu dinheiro</h2>
-        <p>Dicas, guias e novidades pra tirar o máximo da Piggy e da sua vida financeira.</p>
+        <div class="eyebrow">PigBank+</div>
+        <h2>Notícias do <span class="grad">mercado</span></h2>
+        <p>Resumos do mercado financeiro feitos pela Piggy, atualizados ao longo do dia. Exclusivo pra assinantes.</p>
       </div>
 
       <!-- Notícias do mercado: preenchida via /api/blog/news pelo blog-news.js.
            Começa oculta e é revelada quando há notícias (news_bot as coleta). -->
       <div id="news-section" class="news-section" style="display:none">
-        <div class="blog-subhead">
-          <h3>📈 Notícias do mercado</h3>
-          <span class="blog-subhead-note">Resumos da Piggy · atualizado ao longo do dia</span>
-        </div>
         <div id="news-grid" class="blog-grid"></div>
       </div>
 
-      <div class="blog-subhead">
-        <h3>Guias e dicas</h3>
-      </div>
-
-      <!-- Guias evergreen: fonte de verdade em core/blog_guides.py (títulos/slugs
-           devem bater). Cada card abre a página do artigo em /blog/<slug>. -->
-      <div class="blog-grid">
-        <a class="article" href="/blog/registrar-gastos-whatsapp">
-          <div class="article-thumb article-thumb-sticker"><img class="card-sticker" src="/brand/stickers/hello.webp" alt="" loading="lazy" /></div>
-          <div class="article-body">
-            <span class="tag-cat">Guia</span>
-            <h3>Como registrar gastos falando com a Piggy no WhatsApp</h3>
-            <div class="meta">Leitura de 4 min</div>
-          </div>
-        </a>
-        <a class="article" href="/blog/caixinhas-guardar-dinheiro">
-          <div class="article-thumb article-thumb-sticker"><img class="card-sticker" src="/brand/stickers/income.webp" alt="" loading="lazy" /></div>
-          <div class="article-body">
-            <span class="tag-cat">Dica</span>
-            <h3>Caixinhas: o método simples pra guardar dinheiro com objetivo</h3>
-            <div class="meta">Leitura de 5 min</div>
-          </div>
-        </a>
-        <a class="article" href="/blog/fatura-cartao-sem-surpresa">
-          <div class="article-thumb article-thumb-sticker"><img class="card-sticker" src="/brand/stickers/expense-alert.webp" alt="" loading="lazy" /></div>
-          <div class="article-body">
-            <span class="tag-cat">Cartões</span>
-            <h3>Nunca mais seja pego de surpresa pela fatura do cartão</h3>
-            <div class="meta">Leitura de 6 min</div>
-          </div>
-        </a>
-        <a class="article" href="/blog/relatorios-dashboard">
-          <div class="article-thumb article-thumb-sticker"><img class="card-sticker" src="/brand/stickers/report.webp" alt="" loading="lazy" /></div>
-          <div class="article-body">
-            <span class="tag-cat">Organização</span>
-            <h3>5 relatórios do dashboard que mostram pra onde seu dinheiro vai</h3>
-            <div class="meta">Leitura de 5 min</div>
-          </div>
-        </a>
-        <a class="article" href="/blog/metas-realistas">
-          <div class="article-thumb article-thumb-sticker"><img class="card-sticker" src="/brand/stickers/goal.webp" alt="" loading="lazy" /></div>
-          <div class="article-body">
-            <span class="tag-cat">Metas</span>
-            <h3>Como definir metas realistas e realmente alcançá-las</h3>
-            <div class="meta">Leitura de 4 min</div>
-          </div>
-        </a>
-        <a class="article" href="/blog/seguranca-dados">
-          <div class="article-thumb article-thumb-sticker"><img class="card-sticker" src="/brand/stickers/approved.webp" alt="" loading="lazy" /></div>
-          <div class="article-body">
-            <span class="tag-cat">Segurança</span>
-            <h3>Como o PigBank protege seus dados financeiros</h3>
-            <div class="meta">Leitura de 3 min</div>
-          </div>
-        </a>
-      </div>
-
-      <div class="cta-band">
-        <h2>Comece agora, aprenda no caminho</h2>
-        <p>Crie sua conta e deixe a Piggy cuidar do resto.</p>
-        <a class="btn btn-primary btn-lg" href="/cadastro">Começar agora →</a>
-      </div>
+      <!-- Estado vazio: some assim que o blog-news.js revela #news-section -->
+      <p id="news-empty" class="plans-note" style="margin-top:20px">
+        Nenhuma notícia por aqui ainda — a Piggy publica os resumos ao longo do dia. 🐷<br>
+        Procurando os guias e dicas? Agora eles ficam no <a href="/suporte" style="color:var(--pink);font-weight:700">Suporte</a>.
+      </p>
     </section>
 
   </div>
@@ -142,6 +82,6 @@
   </footer>
 
   <script src="/nav-auth.js?v=2" defer></script>
-  <script src="/blog-news.js?v=1" defer></script>
+  <script src="/blog-news.js?v=2" defer></script>
 </body>
 </html>

@@ -11,6 +11,13 @@
 <meta name="theme-color" content="#0c0c0d" />
 <link rel="stylesheet" href="/brand.css?v=4" />
 <link rel="stylesheet" href="/site.css?v=4" />
+<style>
+  /* Respostas do FAQ = corpo dos guias (.guide-prose) dentro do acordeão */
+  .faq-a .guide-prose { padding: 4px 20px 22px; font-size: .96rem; }
+  .faq-a .guide-prose p { padding: 0; }              /* neutraliza o padding do .faq-a p */
+  .faq-a .guide-prose > *:first-child { margin-top: 0; }
+  .faq-a .guide-prose > p:first-of-type { font-size: 1rem; color: var(--ink); }
+</style>
 </head>
 <body>
 <div class="glow"></div>
@@ -30,6 +37,18 @@
   </nav>
 
   <div class="wrap">
+
+    <!-- FAQ: guias e dicas evergreen (renderizados de core/blog_guides.py via {{FAQ}}) -->
+    <section class="section" id="faq">
+      <div class="section-head">
+        <div class="eyebrow">Ajuda</div>
+        <h2>Guias &amp; <span class="grad">dicas</span></h2>
+        <p>As dúvidas mais comuns sobre usar o PigBank. Toque numa pergunta pra abrir.</p>
+      </div>
+      <div class="faq">
+        {{FAQ}}
+      </div>
+    </section>
 
     <section class="section">
       <div class="section-head">
@@ -139,6 +158,17 @@
       else { show(data.detail || 'Não foi possível enviar. Escreva pra contato@pigbankai.com.', false); }
     } catch (err) { show('Erro de conexão. Tente de novo ou escreva pra contato@pigbankai.com.', false); }
     finally { btn.disabled = false; btn.textContent = orig; }
+  });
+
+  // FAQ acordeão — perguntas = guias/dicas (respostas longas, maxHeight via scrollHeight)
+  document.querySelectorAll('.faq-q').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var item = btn.closest('.faq-item');
+      var a = item.querySelector('.faq-a');
+      var open = item.classList.toggle('open');
+      a.style.maxHeight = open ? a.scrollHeight + 'px' : '0';
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
   });
 </script>
   <script src="/nav-auth.js?v=2" defer></script>

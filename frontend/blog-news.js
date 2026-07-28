@@ -6,6 +6,7 @@
 
   var grid = document.getElementById("news-grid");
   var section = document.getElementById("news-section");
+  var empty = document.getElementById("news-empty");
   if (!grid || !section) return;
 
   function timeAgo(iso) {
@@ -85,6 +86,7 @@
       grid.textContent = "";
       news.forEach(function (n) { grid.appendChild(card(n)); });
       section.style.display = ""; // revela (começa oculta pra não piscar vazio)
+      if (empty) empty.style.display = "none"; // some com o estado vazio
     })
     .catch(function () {
       section.style.display = "none";
