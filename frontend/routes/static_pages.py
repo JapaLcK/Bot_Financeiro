@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
-from frontend.routes.shared import FRONTEND_DIR, html_file, limiter, public_site_url
+from frontend.routes.shared import FRONTEND_DIR, gate_pro_page, html_file, limiter, public_site_url
 
 router = APIRouter()
 
@@ -83,7 +83,11 @@ async def serve_termos():
 
 
 @router.get("/changelog")
-async def serve_changelog():
+async def serve_changelog(request: Request):
+    # Pro-only (Novidades/Blog é perk de assinante). Deslogado → login, Free → /precos.
+    gate = gate_pro_page(request)
+    if gate is not None:
+        return gate
     return html_file(FRONTEND_DIR / "changelog.html")
 
 
@@ -103,12 +107,16 @@ def _guide_card_html(g: dict) -> str:
 
 
 @router.get("/blog/{slug}")
-async def serve_blog_guide(slug: str):
+async def serve_blog_guide(slug: str, request: Request):
     """Página de um guia/dica evergreen (conteúdo próprio do PigBank).
 
     Renderizada no servidor a partir de core.blog_guides + o template
     blog-article.html. Embaixo do artigo vão os outros guias ('Continue lendo').
+    Pro-only (mesmo gate do /changelog) pra não ter brecha por link direto.
     """
+    gate = gate_pro_page(request)
+    if gate is not None:
+        return gate
     from core.blog_guides import get_guide, other_guides
 
     guide = get_guide(slug)
@@ -241,7 +249,8 @@ async def serve_sitemap_xml():
         ("/suporte", "weekly", "0.7"),
         ("/privacy", "monthly", "0.4"),
         ("/termos", "monthly", "0.4"),
-        ("/changelog", "weekly", "0.5"),
+        # /changelog e /blog/* saíram do sitemap: agora são Pro-only (redirecionam
+        # pro login/paywall), não devem ser anunciados como público pro crawler.
     ]
     items = "\n".join(
         "  <url>\n"

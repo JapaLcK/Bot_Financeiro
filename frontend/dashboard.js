@@ -4761,6 +4761,7 @@ const UPGRADE_MESSAGES = {
   cards_unlimited: "No Free você cadastra 1 cartão. Com PigBank+ é ilimitado — controle todos os seus cartões em um lugar.",
   ofx_import: "Importar extrato bancário e fatura de cartão por OFX é exclusivo do PigBank+.",
   history_unlimited: "Histórico além de 30 dias é exclusivo do PigBank+.",
+  changelog: "Novidades, dicas e guias da Piggy são exclusivos do PigBank+. Assine pra desbloquear.",
   generic: "Essa feature é exclusiva pra quem assina o PigBank+."
 };
 

@@ -255,6 +255,38 @@ def authorize_dashboard_access(request: Request, user_id: int) -> int:
     return current_user_id
 
 
+def gate_pro_page(request: Request):
+    """Gate de PÁGINA só-Pro, pra rotas que servem HTML (ex: /changelog, /blog/*).
+
+    Retorna None quando o acesso é permitido (usuário Pro/trial autenticado — is_pro
+    inclui trial). Caso contrário, devolve um RedirectResponse:
+      - deslogado / sessão inválida → /login?next=<path>
+      - logado mas sem Pro         → /precos
+    Diferente de authorize_dashboard_access (que levanta HTTP p/ APIs), aqui a gente
+    redireciona porque é navegação de página no browser.
+    """
+    from urllib.parse import quote
+    from fastapi.responses import RedirectResponse
+    from core.services.plan_service import is_pro
+
+    path = request.url.path or "/"
+    login_redirect = RedirectResponse(url=f"/login?next={quote(path)}", status_code=302)
+
+    token = get_auth_token_from_request(request, None)
+    payload = decode_jwt(token) if token else None
+    if not payload or payload.get("type") != "auth":
+        return login_redirect
+    user_id = int(payload["sub"])
+    jti = payload.get("jti")
+    if jti:
+        session = get_active_session(jti)
+        if not session or int(session.get("user_id") or 0) != user_id:
+            return login_redirect
+    if not is_pro(user_id):
+        return RedirectResponse(url="/precos", status_code=302)
+    return None
+
+
 # ─── Janela de análise (rotas de analytics e history) ────────────────────────
 
 def parse_date_param(value: str | None, name: str) -> date | None:
