@@ -9,22 +9,19 @@
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=2" />
 <meta name="theme-color" content="#0c0c0d" />
 <meta property="og:type" content="website" />
-<link rel="stylesheet" href="/brand.css?v=2" />
-<link rel="stylesheet" href="/site.css?v=2" />
+<link rel="stylesheet" href="/brand.css?v=3" />
+<link rel="stylesheet" href="/site.css?v=3" />
 </head>
 <body>
 <div class="glow"></div>
 
   <!-- ─── Nav ─────────────────────────────────────────────────────── -->
   <nav class="nav">
-    <a class="nav-logo" href="/">
-      <img class="logo-badge" src="/brand/avatar.webp" alt="" />
-      <span>PigBank</span>
-    </a>
+    <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.png?v=1" alt="PigBank" /></a>
     <div class="nav-links">
-      <a href="/funcionalidades">Funcionalidades</a>
-      <a href="/como-funciona">Como funciona</a>
-      <a href="/precos">Preços</a>
+      <a href="#funcionalidades">Funcionalidades</a>
+      <a href="#como-funciona">Como funciona</a>
+      <a href="#precos">Preços</a>
       <a href="/changelog">Blog</a>
     </div>
     <div class="nav-right">
@@ -43,7 +40,7 @@
         <p class="hero-sub">Registre gastos, acompanhe seu saldo e entenda sua vida financeira conversando com a IA da PigBank — sem planilha, sem app pra baixar.</p>
         <div class="hero-cta">
           <a class="btn btn-primary btn-lg" href="/cadastro">Começar agora →</a>
-          <a class="btn btn-outline btn-lg" href="/como-funciona">Ver como funciona</a>
+          <a class="btn btn-outline btn-lg" href="#como-funciona">Ver como funciona</a>
         </div>
         <div class="trust">
           <span><i class="dot"></i> Seguro e confiável</span>
@@ -110,33 +107,322 @@
       </div>
     </section>
 
-    <!-- ─── Feature cards ─────────────────────────────────────────── -->
-    <section class="features-row">
-      <div class="card feature-card">
-        <div class="icon-box">💬</div>
-        <h3>Linguagem natural</h3>
-        <p>Fale como você fala. A Piggy entende você.</p>
-        <div class="arrow-btn">→</div>
+    <!-- ─── Faixa de valor ────────────────────────────────────────── -->
+    <div class="value-strip" data-reveal>
+      <span class="value-chip"><i></i> Sem planilha</span>
+      <span class="value-chip"><i></i> Sem app pra baixar</span>
+      <span class="value-chip"><i></i> Registra em segundos</span>
+      <span class="value-chip"><i></i> Dados cifrados</span>
+      <span class="value-chip"><i></i> Cancela quando quiser</span>
+    </div>
+
+    <!-- ─── Funcionalidades ───────────────────────────────────────── -->
+    <section class="section" id="funcionalidades">
+      <div class="section-head" data-reveal>
+        <div class="eyebrow">Funcionalidades</div>
+        <h2>Recursos que fazem<br>a <span class="grad">diferença</span></h2>
+        <p>Tudo que você precisa pra organizar sua vida financeira — sem planilha, sem app pra baixar, direto no WhatsApp.</p>
       </div>
-      <div class="card feature-card">
-        <div class="icon-box neon">📊</div>
-        <h3>Dashboard ao vivo</h3>
-        <p>Acompanhe seu saldo, gastos e evolução.</p>
-        <div class="arrow-btn neon">→</div>
-      </div>
-      <div class="card feature-card">
-        <div class="icon-box">🎯</div>
-        <h3>Controle de gastos</h3>
-        <p>Categorização automática e relatórios inteligentes.</p>
-        <div class="arrow-btn">→</div>
-      </div>
-      <div class="card feature-card">
-        <div class="icon-box neon">🐷</div>
-        <h3>Metas e caixinhas</h3>
-        <p>Crie metas, organize e alcance seus objetivos.</p>
-        <div class="arrow-btn neon">→</div>
+
+      <div class="grid-3" data-reveal>
+        <div class="card feature-card">
+          <div class="icon-box">💬</div>
+          <h3>Registro por conversa</h3>
+          <p>Fale como você fala. A IA entende, categoriza e registra o gasto na hora — em segundos.</p>
+        </div>
+        <div class="card feature-card">
+          <div class="icon-box neon">🏷️</div>
+          <h3>Categorização automática</h3>
+          <p>Cada gasto cai na categoria certa sozinho. Você não precisa marcar nada manualmente.</p>
+        </div>
+        <div class="card feature-card">
+          <div class="icon-box">🐷</div>
+          <h3>Caixinhas &amp; metas</h3>
+          <p>Separe dinheiro por objetivo e acompanhe o progresso de cada meta que você criar.</p>
+        </div>
+        <div class="card feature-card">
+          <div class="icon-box neon">💳</div>
+          <h3>Cartões &amp; faturas</h3>
+          <p>Limite, fatura aberta e parcelamentos de todos os seus cartões num lugar só.</p>
+        </div>
+        <div class="card feature-card">
+          <div class="icon-box">🔔</div>
+          <h3>Alertas inteligentes</h3>
+          <p>A Piggy te avisa quando um gasto foge do padrão ou o orçamento começa a apertar.</p>
+        </div>
+        <div class="card feature-card">
+          <div class="icon-box neon">🔒</div>
+          <h3>Segurança &amp; privacidade</h3>
+          <p>Seus dados sensíveis são cifrados. Você fica no controle das suas informações, sempre.</p>
+        </div>
       </div>
     </section>
+
+    <div class="sec-sep"></div>
+
+    <!-- ─── Como funciona ─────────────────────────────────────────── -->
+    <section class="section" id="como-funciona">
+      <div class="section-head" data-reveal>
+        <div class="eyebrow">Como funciona</div>
+        <h2>Simples, rápido e<br>no seu <span class="grad">WhatsApp</span></h2>
+        <p>Em poucos minutos você já está no controle do seu dinheiro — sem planilha, sem app pra baixar.</p>
+      </div>
+
+      <div class="how-grid">
+        <div class="steps" data-reveal>
+          <div class="step">
+            <div class="step-num">1</div>
+            <div><h3>Crie sua conta</h3><p>Grátis e em segundos, entrando com o Google. Sem cadastro chato.</p></div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div><h3>Conecte o WhatsApp</h3><p>Fale com a Piggy pelo número do bot. É onde tudo acontece — nada pra instalar.</p></div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div><h3>Registre falando</h3><p>"Gastei R$ 50 no mercado" e pronto: a IA entende, categoriza e salva na hora.</p></div>
+          </div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <div><h3>Acompanhe tudo</h3><p>Saldo, gastos, caixinhas e metas no dashboard, atualizados em tempo real.</p></div>
+          </div>
+        </div>
+
+        <div class="phone" data-reveal>
+          <div class="phone-notch"></div>
+          <div class="chat-head">
+            <img src="/brand/avatar.webp" alt="" /> <strong>PigBank</strong>
+            <span class="online"><i></i> online</span>
+          </div>
+          <div class="bubble user">Gastei 32 no uber</div>
+          <div class="bubble bot">Anotado! 🚗<br>Categoria: <b>Transporte</b><br>Saldo atual: <b>R$ 1.218,00</b></div>
+          <div class="bubble user">quanto sobrou esse mês?</div>
+          <div class="bubble bot">Você tem <b>R$ 1.218,00</b> 💰<br>Já guardou <b>R$ 300</b> na caixinha "Viagem". Bora? 🐷</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── IA / Tecnologia ───────────────────────────────────────── -->
+    <section class="tech-split">
+      <div class="tech-copy" data-reveal>
+        <div class="eyebrow">Tecnologia</div>
+        <h2>A inteligência que<br><span class="grad">facilita sua vida</span></h2>
+        <ul class="tech-list">
+          <li><span class="tick">✓</span> IA que entende português do dia a dia</li>
+          <li><span class="tick">✓</span> Categorização que aprende com você</li>
+          <li><span class="tick">✓</span> Dashboard atualizado em tempo real</li>
+          <li><span class="tick">✓</span> Tudo no WhatsApp — zero apps pra baixar</li>
+        </ul>
+        <a class="btn btn-primary btn-lg" href="/cadastro">Começar agora →</a>
+      </div>
+      <div class="tech-visual" data-reveal>
+        <div class="hologram" aria-label="Cubo AI holográfico em wireframe">
+          <div class="floating">
+            <svg viewBox="0 0 800 800" role="img" aria-labelledby="holoTitle holoDesc">
+              <title id="holoTitle">Cubo AI holográfico com texto em relevo</title>
+              <desc id="holoDesc">Cubo isométrico em wireframe rosa neon, com letras AI em perspectiva e extrusão tridimensional sobre a face superior.</desc>
+
+              <defs>
+                <linearGradient id="edgeGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#ff2d75" /><stop offset="52%" stop-color="#ec1758" /><stop offset="100%" stop-color="#b10c42" />
+                </linearGradient>
+                <linearGradient id="hotGradient" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#ff86b1" /><stop offset="28%" stop-color="#ff2d75" /><stop offset="100%" stop-color="#ec1758" />
+                </linearGradient>
+                <linearGradient id="aiGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#ff79aa" /><stop offset="38%" stop-color="#ff2d75" /><stop offset="100%" stop-color="#e31455" />
+                </linearGradient>
+                <filter id="neonGlow" x="-100%" y="-100%" width="300%" height="300%">
+                  <feGaussianBlur stdDeviation="3.5" result="a" /><feGaussianBlur stdDeviation="8.5" result="b" />
+                  <feMerge><feMergeNode in="b" /><feMergeNode in="a" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+                <filter id="softGlow" x="-100%" y="-100%" width="300%" height="300%">
+                  <feGaussianBlur stdDeviation="2.5" result="a" /><feMerge><feMergeNode in="a" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+                <filter id="nodeGlow" x="-200%" y="-200%" width="500%" height="500%">
+                  <feGaussianBlur stdDeviation="4" result="a" /><feGaussianBlur stdDeviation="8" result="b" />
+                  <feMerge><feMergeNode in="b" /><feMergeNode in="a" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+                <filter id="textGlow" x="-100%" y="-100%" width="300%" height="300%">
+                  <feGaussianBlur stdDeviation="4" result="a" /><feGaussianBlur stdDeviation="12" result="b" />
+                  <feMerge><feMergeNode in="b" /><feMergeNode in="a" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+                <filter id="particleGlow" x="-250%" y="-250%" width="600%" height="600%">
+                  <feGaussianBlur stdDeviation="2.2" result="a" /><feMerge><feMergeNode in="a" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+                <clipPath id="topClip"><polygon points="400,148 648,292 400,436 152,292" /></clipPath>
+              </defs>
+
+              <g aria-hidden="true">
+                <path class="circuit" d="M66 332 H165 L212 379 H276" /><path class="circuit" d="M70 546 H170 L222 494 H282" />
+                <path class="circuit" d="M734 332 H635 L588 379 H524" /><path class="circuit" d="M730 546 H630 L578 494 H518" />
+                <path class="circuit" d="M400 58 V118 L366 152" /><path class="circuit" d="M400 744 V684 L435 649" />
+                <path class="circuit" d="M116 228 H186 L221 263" /><path class="circuit" d="M684 228 H614 L579 263" />
+                <path class="circuit" d="M95 642 H176 L226 592" /><path class="circuit" d="M705 642 H624 L574 592" />
+                <circle class="circuit-dot" cx="66" cy="332" r="2.2"/><circle class="circuit-dot" cx="70" cy="546" r="2.2"/>
+                <circle class="circuit-dot" cx="734" cy="332" r="2.2"/><circle class="circuit-dot" cx="730" cy="546" r="2.2"/>
+                <circle class="circuit-dot" cx="400" cy="58" r="2.2"/><circle class="circuit-dot" cx="400" cy="744" r="2.2"/>
+              </g>
+
+              <g aria-hidden="true">
+                <circle class="particle" cx="126" cy="275" r="2.2" style="--duration:5.4s;--delay:-1.1s"/>
+                <circle class="particle soft" cx="174" cy="421" r="1.7" style="--duration:6.2s;--delay:-3.5s"/>
+                <circle class="particle dim" cx="124" cy="554" r="2.8" style="--duration:7s;--delay:-2.4s"/>
+                <circle class="particle" cx="235" cy="655" r="1.9" style="--duration:5s;--delay:-.8s"/>
+                <circle class="particle soft" cx="340" cy="706" r="2.2" style="--duration:5.8s;--delay:-4.1s"/>
+                <circle class="particle dim" cx="478" cy="691" r="2.5" style="--duration:6.8s;--delay:-1.8s"/>
+                <circle class="particle soft" cx="588" cy="626" r="1.8" style="--duration:5.1s;--delay:-2.3s"/>
+                <circle class="particle" cx="684" cy="518" r="2.5" style="--duration:6.4s;--delay:-4.7s"/>
+                <circle class="particle dim" cx="692" cy="363" r="2.7" style="--duration:7.2s;--delay:-3s"/>
+                <circle class="particle" cx="637" cy="218" r="1.8" style="--duration:5.7s;--delay:-1.5s"/>
+                <circle class="particle soft" cx="530" cy="115" r="2.2" style="--duration:6.5s;--delay:-4.4s"/>
+                <circle class="particle dim" cx="365" cy="82" r="2.5" style="--duration:7.3s;--delay:-2.9s"/>
+                <circle class="particle soft" cx="247" cy="125" r="1.8" style="--duration:5.3s;--delay:-.5s"/>
+              </g>
+
+              <g class="cube">
+                <g class="face-grid top-grid">
+                  <path d="M214 256 L462 400"/><path d="M276 220 L524 364"/><path d="M338 184 L586 328"/>
+                  <path d="M586 256 L338 400"/><path d="M524 220 L276 364"/><path d="M462 184 L214 328"/>
+                </g>
+                <g class="face-grid">
+                  <path d="M214 328 L400 436 L400 690"/><path d="M276 364 L400 436"/><path d="M338 400 L400 436"/>
+                  <path d="M152 356 L400 500"/><path d="M152 420 L400 564"/><path d="M152 484 L400 628"/>
+                  <path d="M586 328 L400 436 L400 690"/><path d="M524 364 L400 436"/><path d="M462 400 L400 436"/>
+                  <path d="M648 356 L400 500"/><path d="M648 420 L400 564"/><path d="M648 484 L400 628"/>
+                </g>
+
+                <path class="inner" d="M400 148 L400 436 L400 690"/>
+                <path class="inner" d="M152 292 L400 436 L648 292"/>
+                <path class="inner" d="M152 548 L400 436 L648 548"/>
+                <path class="inner" d="M276 364 L276 620"/><path class="inner" d="M524 364 L524 620"/>
+
+                <path class="edge back" d="M400 148 L152 292"/><path class="edge back" d="M400 148 L648 292"/><path class="edge back" d="M400 148 L400 436"/>
+                <path class="edge strong" d="M400 148 L648 292 L400 436 L152 292 Z"/>
+                <path class="edge" d="M152 292 L400 436 L400 690 L152 548 Z"/>
+                <path class="edge strong" d="M648 292 L400 436 L400 690 L648 548 Z"/>
+                <path class="edge" d="M152 548 L400 690 L648 548"/>
+                <path class="edge" d="M152 292 L152 548"/><path class="edge strong" d="M400 436 L400 690"/><path class="edge strong" d="M648 292 L648 548"/>
+
+                <g clip-path="url(#topClip)" aria-label="AI">
+                  <g transform="translate(0 18)"><g transform="matrix(0.78 0.45 -0.78 0.45 400 276)"><text class="ai-text ai-depth-deep" x="-36" y="0">A</text><text class="ai-text ai-depth-deep" x="36" y="0">I</text></g></g>
+                  <g transform="translate(0 12)"><g transform="matrix(0.78 0.45 -0.78 0.45 400 276)"><text class="ai-text ai-depth-mid" x="-36" y="0">A</text><text class="ai-text ai-depth-mid" x="36" y="0">I</text></g></g>
+                  <g transform="translate(0 6)"><g transform="matrix(0.78 0.45 -0.78 0.45 400 276)"><text class="ai-text ai-depth-mid" x="-36" y="0">A</text><text class="ai-text ai-depth-mid" x="36" y="0">I</text></g></g>
+                  <g transform="matrix(0.78 0.45 -0.78 0.45 400 276)"><text class="ai-text ai-letter-top" x="-36" y="0">A</text><text class="ai-text ai-letter-top" x="36" y="0">I</text></g>
+                </g>
+
+                <path class="scan" d="M232 363 L400 460 L568 363"/>
+
+                <circle class="node" cx="400" cy="148" r="4.2"/><circle class="node" cx="152" cy="292" r="4.2"/><circle class="node" cx="648" cy="292" r="4.2"/>
+                <circle class="node" cx="400" cy="436" r="4.8"/><circle class="node" cx="152" cy="548" r="4.1"/><circle class="node" cx="648" cy="548" r="4.1"/>
+                <circle class="node" cx="400" cy="690" r="4.8"/>
+                <circle class="node small" cx="276" cy="220" r="2.2"/><circle class="node small" cx="524" cy="220" r="2.2"/>
+                <circle class="node small" cx="276" cy="364" r="2.2"/><circle class="node small" cx="524" cy="364" r="2.2"/>
+                <circle class="node small" cx="152" cy="420" r="2.1"/><circle class="node small" cx="648" cy="420" r="2.1"/>
+                <circle class="node small" cx="400" cy="564" r="2.3"/><circle class="node small" cx="276" cy="620" r="2.1"/><circle class="node small" cx="524" cy="620" r="2.1"/>
+
+                <circle class="particle" cx="330" cy="340" r="1.8" style="--duration:4.7s;--delay:-1.1s"/>
+                <circle class="particle soft" cx="474" cy="350" r="2" style="--duration:5.7s;--delay:-3.4s"/>
+                <circle class="particle dim" cx="316" cy="468" r="2.3" style="--duration:6.5s;--delay:-2.1s"/>
+                <circle class="particle" cx="484" cy="494" r="1.7" style="--duration:5.1s;--delay:-4.1s"/>
+                <circle class="particle soft" cx="365" cy="575" r="2" style="--duration:6s;--delay:-.9s"/>
+                <circle class="particle" cx="442" cy="610" r="1.8" style="--duration:4.8s;--delay:-2.8s"/>
+              </g>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="sec-sep"></div>
+
+    <!-- ─── Preços ────────────────────────────────────────────────── -->
+    <section class="section" id="precos">
+      <div class="section-head" data-reveal>
+        <div class="eyebrow">Preços</div>
+        <h2>Escolha seu <span class="grad">PigBank+</span></h2>
+        <p>7 dias grátis pra testar. Cancele quando quiser, sem letras miúdas.</p>
+      </div>
+
+      <div class="plans" data-reveal>
+        <article class="plan">
+          <h3>Mensal</h3>
+          <div class="plan-sub">Pra começar sem compromisso</div>
+          <div class="price">R$ 19,90 <span>/ mês</span></div>
+          <ul>
+            <li><span class="tick">✓</span> Caixinhas, metas e cartões ilimitados</li>
+            <li><span class="tick">✓</span> Categorização automática por IA</li>
+            <li><span class="tick">✓</span> Dashboard em tempo real</li>
+            <li><span class="tick">✓</span> Histórico completo + exportar CSV/PDF</li>
+            <li><span class="tick">✓</span> Piggy IA — converse sobre suas finanças</li>
+          </ul>
+          <a class="btn btn-outline btn-block" href="/cadastro">Começar trial</a>
+        </article>
+
+        <article class="plan featured">
+          <span class="plan-badge">Economize 17%</span>
+          <h3>Anual</h3>
+          <div class="plan-sub">Equivale a R$ 16,58/mês</div>
+          <div class="price">R$ 199 <span>/ ano</span></div>
+          <ul>
+            <li><span class="tick">✓</span> Tudo do plano mensal</li>
+            <li><span class="tick">✓</span> 2 meses de graça no ano</li>
+            <li><span class="tick">✓</span> Cobrança única, sem surpresa</li>
+            <li><span class="tick">✓</span> Suporte prioritário</li>
+            <li><span class="tick">✓</span> Ideal pra quem já decidiu</li>
+          </ul>
+          <a class="btn btn-primary btn-block" href="/cadastro">Começar trial</a>
+        </article>
+      </div>
+
+      <p class="plans-note">🎉 7 dias grátis com cartão; a primeira cobrança só acontece depois do trial. Cancele quando quiser pelo dashboard antes do fim do trial, sem ser cobrado. Pagamentos processados pela Stripe.</p>
+      <div class="plans-cta"><a href="/precos">Ver todos os detalhes dos planos →</a></div>
+    </section>
+
+    <div class="sec-sep"></div>
+
+    <!-- ─── FAQ ───────────────────────────────────────────────────── -->
+    <section class="section" id="faq">
+      <div class="section-head" data-reveal>
+        <div class="eyebrow">Dúvidas</div>
+        <h2>Perguntas <span class="grad">frequentes</span></h2>
+        <p>O que a galera mais quer saber antes de começar com a Piggy.</p>
+      </div>
+
+      <div class="faq" data-reveal>
+        <div class="faq-item">
+          <button class="faq-q" type="button" aria-expanded="false">Preciso baixar algum aplicativo? <span class="chev">+</span></button>
+          <div class="faq-a"><p>Não. Tudo acontece no seu WhatsApp — é só conversar com a Piggy. O dashboard abre no navegador, sem instalar nada.</p></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" aria-expanded="false">Como eu registro um gasto? <span class="chev">+</span></button>
+          <div class="faq-a"><p>Você só fala como falaria com um amigo: "gastei 50 no mercado". A IA entende, categoriza e salva na hora — em segundos.</p></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" aria-expanded="false">Meus dados estão seguros? <span class="chev">+</span></button>
+          <div class="faq-a"><p>Sim. Seus dados sensíveis são cifrados e você fica no controle das suas informações, sempre. Nada é vendido nem compartilhado.</p></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" aria-expanded="false">Tem período grátis? <span class="chev">+</span></button>
+          <div class="faq-a"><p>Tem 7 dias grátis pra testar tudo. A primeira cobrança só acontece depois do trial, e você pode cancelar antes sem pagar nada.</p></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" aria-expanded="false">Posso cancelar quando quiser? <span class="chev">+</span></button>
+          <div class="faq-a"><p>Pode, pelo próprio dashboard, sem letra miúda e sem falar com ninguém. Cancelou, não é mais cobrado.</p></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" aria-expanded="false">A Piggy entende português do dia a dia? <span class="chev">+</span></button>
+          <div class="faq-a"><p>Entende. Você não precisa decorar comando nenhum — fala do seu jeito e a IA faz o resto.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── CTA final ─────────────────────────────────────────────── -->
+    <div class="cta-band" data-reveal>
+      <h2>Pronto para começar?</h2>
+      <p>Sua vida financeira resolvida no WhatsApp, a partir de agora.</p>
+      <a class="btn btn-primary btn-lg" href="/cadastro">Começar agora →</a>
+    </div>
 
   </div>
 
@@ -144,14 +430,14 @@
   <footer class="footer">
     <div class="wrap footer-inner">
       <div class="footer-brand">
-        <a class="nav-logo" href="/"><img class="logo-badge" src="/brand/avatar.webp" alt="" /><span>PigBank</span></a>
+        <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=1" alt="" /> <span>PigBank</span></a>
         <p>Seu dinheiro, suas regras — direto no WhatsApp, com a IA da Piggy.</p>
       </div>
       <div class="footer-cols">
         <div class="footer-col"><span class="footer-title">Navegue</span>
-          <a href="/funcionalidades">Funcionalidades</a>
-          <a href="/como-funciona">Como funciona</a>
-          <a href="/precos">Preços</a>
+          <a href="#funcionalidades">Funcionalidades</a>
+          <a href="#como-funciona">Como funciona</a>
+          <a href="#precos">Preços</a>
           <a href="/changelog">Blog</a>
         </div>
         <div class="footer-col"><span class="footer-title">Produto</span>
@@ -169,6 +455,33 @@
     <p class="footer-copy">© 2026 PigBank · Feito com 🐷</p>
   </footer>
 
+  <!-- Reveal on scroll + FAQ acordeão (progressive enhancement) -->
+  <script>
+  (function () {
+    // FAQ acordeão
+    document.querySelectorAll(".faq-q").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var item = btn.closest(".faq-item");
+        var a = item.querySelector(".faq-a");
+        var open = item.classList.toggle("open");
+        a.style.maxHeight = open ? a.scrollHeight + "px" : "0";
+        btn.setAttribute("aria-expanded", open ? "true" : "false");
+      });
+    });
+
+    // Reveal on scroll — só ativa se houver suporte e sem reduced-motion.
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var els = document.querySelectorAll("[data-reveal]");
+    if (!("IntersectionObserver" in window) || reduce) return;  // sem JS/observer: conteúdo já visível
+    els.forEach(function (el) { el.classList.add("reveal"); });
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+      });
+    }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
+    els.forEach(function (el) { io.observe(el); });
+  })();
+  </script>
   <script src="/nav-auth.js?v=2" defer></script>
 </body>
 </html>
