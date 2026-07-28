@@ -642,7 +642,10 @@ EXEMPLOS:
 """
 
 
-def _classify_with_ai(text: str, user_id: int | None = None) -> IntentResult:
+def _classify_llm_call(user_content: str, user_id: int | None) -> IntentResult:
+    """Núcleo da classificação via IA (Tier 3): aplica gate Pro + rate limit e
+    chama o LLM com `_SYSTEM_PROMPT`. `user_content` é a mensagem de usuário
+    (pode ser o texto cru OU um bloco de contexto de esclarecimento)."""
     from core.ai_rate_limiter import is_allowed
 
     # Gate Pro: IA conversacional é Pro v1
@@ -676,7 +679,7 @@ def _classify_with_ai(text: str, user_id: int | None = None) -> IntentResult:
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": text},
+                {"role": "user", "content": user_content},
             ],
         )
 
@@ -694,6 +697,37 @@ def _classify_with_ai(text: str, user_id: int | None = None) -> IntentResult:
     except Exception as e:
         print(f"[intent_classifier] AI error: {e}")
         return IntentResult(intent="out_of_scope", confidence=0.0)
+
+
+def _classify_with_ai(text: str, user_id: int | None = None) -> IntentResult:
+    return _classify_llm_call(text, user_id)
+
+
+def classify_with_context(
+    orig_text: str,
+    question: str,
+    answer: str,
+    user_id: int | None = None,
+) -> IntentResult:
+    """Reclassifica a resposta de um esclarecimento COM contexto.
+
+    Junta [mensagem original + pergunta que o bot fez + resposta do usuário] e
+    pede ao LLM a intenção COMPLETA já com as entities preenchidas — em vez de
+    tentar remendar a resposta crua com regras. Funciona pra qualquer intent.
+    Degrada como `_classify_with_ai` (out_of_scope 0.0) se IA indisponível.
+    """
+    content = (
+        "CONTEXTO DE ESCLARECIMENTO — o bot fez uma pergunta e o usuário respondeu. "
+        "Junte as três partes numa ÚNICA intenção completa e executável.\n\n"
+        f'Mensagem original do usuário: "{orig_text}"\n'
+        f'Pergunta que o bot fez: "{question}"\n'
+        f'Resposta do usuário agora: "{answer}"\n\n'
+        "A resposta preenche a informação que faltava. Retorne a intent final com TODAS as "
+        "entities preenchidas e needs_clarification=false — a não ser que a resposta seja "
+        "incompreensível ou o usuário tenha mudado de assunto (aí classifique a nova mensagem "
+        "normalmente). Se o usuário claramente desistiu/cancelou, use out_of_scope."
+    )
+    return _classify_llm_call(content, user_id)
 
 
 # ---------------------------------------------------------------------------

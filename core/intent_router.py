@@ -44,6 +44,14 @@ DESTRUCTIVE_INTENTS = {
     "investments.delete",
 }
 
+# Intents que modificam dados — confiança moderada (<0.85) pede confirmação.
+WRITE_INTENTS = {
+    "launches.add", "pockets.create", "pockets.deposit", "pockets.withdraw",
+    "investments.deposit", "investments.withdraw",
+    "funds.withdraw",
+    "categories.create", "categories.delete",
+}
+
 # action_types de pending_actions que representam uma confirmação destrutiva
 # armada (esperando "sim"/"não"). Diferente de DESTRUCTIVE_INTENTS (nomes de
 # intent): aqui são os action_type gravados por propose_delete no DB. Usado
@@ -191,27 +199,25 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
         return result.clarification_question
 
     # -----------------------------------------------------------------------
-    # 5. Ações destrutivas → pede confirmação antes de executar
+    # 5-7. Destrutivo → confirma; write com confiança moderada → confirma;
+    #      senão executa direto. (Mesma lógica reusada pelo esclarecimento.)
     # -----------------------------------------------------------------------
+    return _dispatch_actionable(intent, user_id, text, entities, confidence, platform, external_id)
+
+
+def _dispatch_actionable(
+    intent: str, user_id: int, text: str, entities: dict,
+    confidence: float, platform: str, external_id: str,
+) -> str:
+    """Etapa final do roteamento pra uma intent já classificada e acionável:
+    destrutivo → confirma; write com confiança <0.85 → confirma; senão executa."""
     if intent in DESTRUCTIVE_INTENTS:
         return _handle_destructive(intent, user_id, entities, text)
 
-    # -----------------------------------------------------------------------
-    # 6. Confiança moderada (entre 0.55 e 0.85) para ações que modificam dados
-    # -----------------------------------------------------------------------
-    WRITE_INTENTS = {
-        "launches.add", "pockets.create", "pockets.deposit", "pockets.withdraw",
-        "investments.deposit", "investments.withdraw",
-        "funds.withdraw",
-        "categories.create", "categories.delete",
-    }
     if intent in WRITE_INTENTS and confidence < CONFIDENCE_EXECUTE:
         label = _intent_label(intent)
         return f"Entendi como *{label}*. Confirma? Responda **sim** ou **não**."
 
-    # -----------------------------------------------------------------------
-    # 7. Executa direto
-    # -----------------------------------------------------------------------
     return _execute(intent, user_id, text, entities, platform, external_id)
 
 
@@ -425,6 +431,38 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
     resp_norm = user_response.strip().lower()
     if resp_norm in ("nao", "não", "n", "cancelar", "cancela"):
         return "❌ Cancelado."
+
+    # Reclassifica COM contexto (mensagem original + pergunta que o bot fez +
+    # resposta). Se a IA montar a intenção completa, despacha por ela — resolve
+    # pra QUALQUER intent (caixinha, cartão, investimento…), não só launches.add.
+    # Se a IA não resolver (out_of_scope / baixa confiança / IA indisponível),
+    # cai no fluxo legado abaixo, que segue inalterado.
+    question = payload.get("question", "")
+    try:
+        from core.intent_classifier import classify_with_context
+        res = classify_with_context(orig_text, question, user_response, user_id=user_id)
+    except Exception:
+        res = None
+    if (res is not None
+            and res.confidence >= 0.55
+            and not res.needs_clarification
+            and res.intent not in ("out_of_scope", "confirm.yes", "confirm.no")):
+        merged_entities = {**original_entities, **(res.entities or {})}
+        if res.intent == "launches.add":
+            # cai na construção de texto limpo do bloco legado de launches.add,
+            # agora com as entities enriquecidas pela IA.
+            original_intent = "launches.add"
+            original_entities = merged_entities
+        elif res.intent == "launches.list":
+            # datas ("março", "dia 4") ficam com a extração legada, que resolve o
+            # ano relativo à data de HOJE (a IA não sabe a data atual e chuta o ano).
+            pass
+        else:
+            combined = f"{orig_text} {user_response}".strip()
+            return _dispatch_actionable(
+                res.intent, user_id, combined, merged_entities,
+                res.confidence, platform, external_id,
+            )
 
     # launches.add: o bot tinha feito uma pergunta pra completar o lançamento —
     # ou faltava o VALOR ("Qual foi o valor?") ou faltava a DESCRIÇÃO ("Em que
