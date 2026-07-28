@@ -160,16 +160,58 @@
     finally { btn.disabled = false; btn.textContent = orig; }
   });
 
-  // FAQ acordeão — perguntas = guias/dicas (respostas longas, maxHeight via scrollHeight)
-  document.querySelectorAll('.faq-q').forEach(function(btn){
-    btn.addEventListener('click', function(){
-      var item = btn.closest('.faq-item');
-      var a = item.querySelector('.faq-a');
-      var open = item.classList.toggle('open');
-      a.style.maxHeight = open ? a.scrollHeight + 'px' : '0';
-      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  // FAQ acordeão — perguntas = guias/dicas. Ao abrir o card, os blocos visuais
+  // (gráficos, barras, metas) se animam — mesma mecânica do /blog (.g-anim + .in-view).
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var ANIM_SEL = ".g-chart, .g-bars, .g-goal, .g-cardshot";
+
+    // No load: prepara as linhas de gráfico e colapsa os blocos (só com JS —
+    // sem JS ou com reduced-motion eles já ficam cheios, via CSS).
+    if (!reduce) {
+      [].slice.call(document.querySelectorAll(".g-chart-line")).forEach(function (line) {
+        try {
+          var len = line.getTotalLength();
+          line.style.strokeDasharray = len;
+          line.style.strokeDashoffset = len;
+          line.style.transition = "stroke-dashoffset 1.2s ease";
+        } catch (e) { /* getTotalLength indisponível — linha fica estática */ }
+      });
+      [].slice.call(document.querySelectorAll(ANIM_SEL)).forEach(function (el) { el.classList.add("g-anim"); });
+    }
+
+    function revealBlocks(root) {
+      [].slice.call(root.querySelectorAll(ANIM_SEL)).forEach(function (el) {
+        el.classList.add("in-view");
+        [].slice.call(el.querySelectorAll(".g-chart-line")).forEach(function (line) { line.style.strokeDashoffset = "0"; });
+      });
+    }
+    function resetBlocks(root) {  // volta ao estado colapsado pra reanimar na próxima abertura
+      [].slice.call(root.querySelectorAll(ANIM_SEL)).forEach(function (el) {
+        el.classList.remove("in-view");
+        [].slice.call(el.querySelectorAll(".g-chart-line")).forEach(function (line) {
+          try { line.style.strokeDashoffset = line.getTotalLength(); } catch (e) {}
+        });
+      });
+    }
+
+    document.querySelectorAll('.faq-q').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var item = btn.closest('.faq-item');
+        var a = item.querySelector('.faq-a');
+        var open = item.classList.toggle('open');
+        a.style.maxHeight = open ? a.scrollHeight + 'px' : '0';
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (reduce) return;
+        if (open) {
+          // deixa o card começar a expandir, então dispara a animação dos gráficos
+          setTimeout(function () { revealBlocks(a); }, 160);
+        } else {
+          resetBlocks(a);
+        }
+      });
     });
-  });
+  })();
 </script>
   <script src="/nav-auth.js?v=2" defer></script>
 </body>
