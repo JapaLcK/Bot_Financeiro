@@ -65,6 +65,8 @@ def add(user_id: int, text: str, entities: dict) -> str:
 
     categoria = (entities.get("categoria") or entities.get("category") or "").strip()
     nome = (entities.get("nome") or entities.get("name") or entities.get("alvo") or "").strip()
+    if nome:  # 1ª letra maiúscula pra ficar bonito no dashboard ("aluguel" → "Aluguel")
+        nome = nome[0].upper() + nome[1:]
 
     if is_income:
         from db.recurring_income import create_recurring_income
@@ -84,6 +86,13 @@ def add(user_id: int, text: str, entities: dict) -> str:
         )
 
     from db.recurring import create_recurring_expense
+    # Se a IA não classificou a categoria, infere pelo nome (aluguel→moradia,
+    # netflix→assinaturas, etc.) usando o mesmo motor dos lançamentos.
+    if not categoria and nome:
+        from utils_text import guess_category
+        guessed = guess_category(nome)
+        if guessed and guessed != "outros":
+            categoria = guessed
     cat = categoria or "outros"
     name = nome or cat.capitalize() or "Gasto fixo"
     try:

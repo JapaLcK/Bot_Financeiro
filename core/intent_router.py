@@ -464,11 +464,27 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
             # ano relativo à data de HOJE (a IA não sabe a data atual e chuta o ano).
             pass
         else:
+            # Recorrente cujo esclarecimento era "do que é?": se a IA não trouxe
+            # o nome, a própria resposta do usuário É o nome (ex: "aluguel").
+            if res.intent == "recurring.add" and not merged_entities.get("nome"):
+                merged_entities["nome"] = user_response.strip()
             combined = f"{orig_text} {user_response}".strip()
             return _dispatch_actionable(
                 res.intent, user_id, combined, merged_entities,
                 res.confidence, platform, external_id,
             )
+
+    # Fallback quando a IA-com-contexto não resolveu (rate limit / API / baixa
+    # confiança): se o pending era um recorrente pedindo o NOME, usa a resposta
+    # como nome e cria mesmo assim — não perde o "aluguel".
+    if original_intent == "recurring.add":
+        ents = dict(original_entities)
+        if not ents.get("nome"):
+            ents["nome"] = user_response.strip()
+        return _dispatch_actionable(
+            "recurring.add", user_id, f"{orig_text} {user_response}".strip(),
+            ents, 0.9, platform, external_id,
+        )
 
     # launches.add: o bot tinha feito uma pergunta pra completar o lançamento —
     # ou faltava o VALOR ("Qual foi o valor?") ou faltava a DESCRIÇÃO ("Em que
