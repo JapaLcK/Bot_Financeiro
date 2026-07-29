@@ -2839,6 +2839,13 @@ function _nextRecurringOccurrence(dayNum, startISO, frequency, monthNum) {
   return d;
 }
 
+// Custo/renda mensal-equivalente de um recorrente: anual conta valor/12 no total
+// mensal; mensal conta o valor cheio. (Usado nos cards "Total mensal".)
+function _recMonthlyEquiv(r) {
+  const v = r.amount || 0;
+  return r.frequency === "annual" ? v / 12 : v;
+}
+
 let _recurringCache = null;
 let _recurringFetchInFlight = null;
 
@@ -2931,7 +2938,9 @@ function _renderFixedView(items) {
 
   const list = items || [];
   const active = list.filter(r => r.is_active);
-  const total = active.reduce((s, r) => s + (r.amount || 0), 0);
+  // Total MENSAL: anual entra prorrateado (valor/12) pra refletir o custo médio
+  // por mês. Um domínio de R$55/ano pesa ~R$4,58/mês, não R$55.
+  const total = active.reduce((s, r) => s + _recMonthlyEquiv(r), 0);
   const nEssentials = active.filter(r => r.is_essential).length;
   const nLeisure = active.filter(r => !r.is_essential).length;
 
@@ -3474,7 +3483,7 @@ function _renderRecurringIncomeView(items) {
 
   const list = items || [];
   const active = list.filter(r => r.is_active);
-  const total = active.reduce((s, r) => s + (r.amount || 0), 0);
+  const total = active.reduce((s, r) => s + _recMonthlyEquiv(r), 0);
   const nPrimary = active.filter(r => r.is_primary).length;
   const nExtra = active.filter(r => !r.is_primary).length;
 
@@ -3491,7 +3500,7 @@ function _renderRecurringIncomeView(items) {
   // o saldo da conta nem o "sobrou" real (que conta lançamentos avulsos).
   const hasExpenseData = Array.isArray(_recurringCache);
   const fixedExpenses = (hasExpenseData ? _recurringCache : []).filter(r => r.is_active)
-    .reduce((s, r) => s + (r.amount || 0), 0);
+    .reduce((s, r) => s + _recMonthlyEquiv(r), 0);
   const leftover = total - fixedExpenses;
 
   stats.innerHTML = `

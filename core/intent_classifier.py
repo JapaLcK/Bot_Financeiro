@@ -456,6 +456,32 @@ def _contains_domain_hint(norm: str) -> bool:
     return False
 
 
+# Marcadores de RECORRÊNCIA (texto normalizado, sem acento). Quando presentes
+# junto de um valor, a mensagem é sobre criar gasto/receita recorrente — que só
+# a IA (Tier 3) sabe classificar em recurring.add. Sem este desvio, o Tier 2
+# pega "300 em aluguel todo mes" como launches.add (avulso) e o domain-hint
+# devolve out_of_scope antes da IA ver.
+_RECURRENCE_MARKERS = (
+    "recorrente", "gasto fixo", "gastos fixos", "despesa fixa", "conta fixa",
+    "receita fixa", "renda fixa", "receita recorrente", "salario fixo",
+    "todo mes", "todos os meses", "todo ano", "todos os anos",
+    "mensal", "mensais", "mensalmente", "anual", "anuais", "anualmente",
+    "por mes", "por ano", "todo dia", "uma vez por ano", "uma vez por mes",
+    "uma vez ao ano", "uma vez ao mes", "1x por ano", "1x por mes",
+)
+
+
+def _has_recurrence_marker(norm: str) -> bool:
+    """True se a mensagem tem marcador de recorrência E um número (valor).
+    Exclui pedidos de ORÇAMENTO ("orçamento mensal de X") — esses são budget,
+    não recorrente, e seguem o fluxo normal (IA conversacional)."""
+    if not any(c.isdigit() for c in norm):
+        return False
+    if "orcamento" in norm:
+        return False
+    return any(mk in norm for mk in _RECURRENCE_MARKERS)
+
+
 # ---------------------------------------------------------------------------
 # Tier 1 — busca exata
 # ---------------------------------------------------------------------------
@@ -751,6 +777,13 @@ def classify(text: str, user_id: int | None = None) -> IntentResult:
     user_id: quando fornecido, aplica rate limiting no Tier 3 (chamada à IA).
     """
     norm = _normalize(text)
+
+    # Recorrência (valor + "todo mes"/"mensal"/"recorrente"/"gasto fixo"/"anual"…)
+    # vai DIRETO pra IA (Tier 3), que classifica recurring.add. Precede os atalhos
+    # de Tier 1/2 e o domain-hint, que senão mandariam pra launches.add ou
+    # out_of_scope (→ IA conversacional criava orçamento por engano).
+    if _has_recurrence_marker(norm):
+        return _classify_with_ai(text, user_id=user_id)
 
     # Tier 1
     result = _try_exact(norm)

@@ -40,14 +40,16 @@ def add(user_id: int, text: str, entities: dict) -> str:
     if valor <= 0:
         return "Qual o valor desse recorrente? Ex: *gasto fixo de 100 todo dia 10*"
 
-    # dia do mês (vencimento/recebimento)
+    # dia do mês (vencimento/recebimento). Se o usuário não disser ("todo mês"
+    # sem dia), assume o dia de HOJE — cria mesmo assim (anti-fricção); dá pra
+    # editar no dashboard. Melhor que travar pedindo o dia.
     dia_raw = entities.get("dia") or entities.get("due_day") or entities.get("pay_day")
     try:
         dia = int(dia_raw)
     except (TypeError, ValueError):
         dia = 0
     if not (1 <= dia <= 31):
-        return "Em que dia do mês? (1 a 31) Ex: *todo dia 10*"
+        dia = date.today().day
 
     # data de início — "a partir de 10/09". Tenta extrair do hint da IA, senão do
     # texto todo; fallback None = default do banco (hoje). extract_date_from_text
@@ -99,11 +101,12 @@ def add(user_id: int, text: str, entities: dict) -> str:
         )
 
     from db.recurring import create_recurring_expense
-    # Se a IA não classificou a categoria, infere pelo nome (aluguel→moradia,
-    # netflix→assinaturas, etc.) usando o mesmo motor dos lançamentos.
-    if not categoria and nome:
+    # Se a IA não classificou a categoria, infere pelo nome OU pelo texto todo
+    # (aluguel→moradia, agua→moradia, netflix→assinaturas) — mesmo motor dos
+    # lançamentos. Usar o texto cobre quando a IA não extraiu o nome.
+    if not categoria:
         from utils_text import guess_category
-        guessed = guess_category(nome)
+        guessed = guess_category(nome or text)
         if guessed and guessed != "outros":
             categoria = guessed
     cat = categoria or "outros"
