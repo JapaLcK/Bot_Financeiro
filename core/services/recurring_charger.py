@@ -19,6 +19,7 @@ Cobrança em cartão de crédito:
 from __future__ import annotations
 
 import asyncio
+import calendar
 import sys
 import traceback
 from datetime import date
@@ -47,7 +48,67 @@ async def run_recurring_charger_loop():
         except Exception as exc:
             print(f"[recurring_income] erro: {exc}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
+        try:
+            # Contas a pagar (manual): gera as instâncias do ciclo. NÃO debita —
+            # só cria a pendência; o lembrete sai pelo report diário e o
+            # pagamento é confirmado pelo user.
+            await asyncio.to_thread(sync_manual_bills_once)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[bills] erro: {exc}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
         await asyncio.sleep(60 * 60)  # 1 hora entre verificações
+
+
+def _cycle_due_date(rec: dict, today: date) -> date | None:
+    """Vencimento do ciclo atual de um recorrente manual.
+    Mensal → dia due_day deste mês; anual → dia due_day do due_month deste ano.
+    due_day é clampado ao último dia do mês. None se dados inválidos."""
+    try:
+        due_day = int(rec.get("due_day") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not (1 <= due_day <= 31):
+        return None
+    freq = (rec.get("frequency") or "monthly")
+    if freq == "annual":
+        month = rec.get("due_month")
+        try:
+            month = int(month)
+        except (TypeError, ValueError):
+            return None
+        if not (1 <= month <= 12):
+            return None
+        year = today.year
+    else:
+        month = today.month
+        year = today.year
+    dim = calendar.monthrange(year, month)[1]
+    return date(year, month, min(due_day, dim))
+
+
+def sync_manual_bills_once(today: date | None = None) -> int:
+    """Gera as instâncias (bill_instances) do ciclo atual pros recorrentes
+    'manual', respeitando start_date. Idempotente (UNIQUE recurring_id+due_date).
+    Retorna quantas instâncias novas foram garantidas."""
+    from db.bills import list_active_manual_recurrings, ensure_bill_instance
+
+    today = today or date.today()
+    n = 0
+    for rec in list_active_manual_recurrings():
+        due = _cycle_due_date(rec, today)
+        if due is None:
+            continue
+        start = rec.get("start_date")
+        if start and start > due:
+            continue  # não retroage antes do início
+        try:
+            ensure_bill_instance(int(rec["id"]), int(rec["user_id"]), due, float(rec["amount"]))
+            n += 1
+        except Exception as exc:
+            print(f"[bills] falhou gerar instancia rec={rec.get('id')}: {exc}", file=sys.stderr)
+    return n
 
 
 def charge_due_recurring_expenses_once(today: date | None = None) -> list[dict]:
@@ -65,6 +126,9 @@ def charge_due_recurring_expenses_once(today: date | None = None) -> list[dict]:
                        r.due_day, r.payment_type, r.card_id
                 from recurring_expenses r
                 where r.is_active = true
+                  -- só autopay lança sozinho; 'manual' (conta a pagar) é tratado
+                  -- por sync_manual_bills_once (lembra + espera confirmação).
+                  and coalesce(r.payment_mode, 'autopay') = 'autopay'
                   and r.due_day <= %s
                   and (
                       -- MENSAL (default): cobra todo mês; idempotência por ym.
@@ -319,4 +383,5 @@ __all__ = [
     "run_recurring_charger_loop",
     "charge_due_recurring_expenses_once",
     "credit_due_recurring_incomes_once",
+    "sync_manual_bills_once",
 ]

@@ -1076,6 +1076,38 @@ def init_db():
         """alter table recurring_incomes add column if not exists frequency text not null default 'monthly'""",
         """alter table recurring_incomes add column if not exists pay_month int""",
 
+        # migration: modo de pagamento do recorrente.
+        #   'autopay' (default, comportamento antigo) → o charger LANÇA sozinho no dia.
+        #   'manual'  (conta a pagar / boleto)        → NÃO lança; a Piggy lembra e
+        #     só lança quando o user confirma o pagamento. Aparece na sub-aba
+        #     "Contas a pagar". Cada ciclo vira uma linha em bill_instances.
+        """alter table recurring_expenses add column if not exists payment_mode text not null default 'autopay'""",
+
+        # Instâncias de conta a pagar (1 por ciclo do recorrente 'manual').
+        # amount é editável (contas de luz/água variam). status: pending | paid.
+        # 'vencida' é derivado (pending + due_date < hoje). reminder_last_sent_on
+        # deduplica o lembrete diário (mesmo padrão do lembrete de cartão).
+        """
+        create table if not exists bill_instances (
+          id            bigserial primary key,
+          recurring_id  bigint not null references recurring_expenses(id) on delete cascade,
+          user_id       bigint not null references users(id) on delete cascade,
+          due_date      date   not null,
+          amount        numeric not null,
+          status        text   not null default 'pending',
+          paid_at       timestamptz,
+          paid_amount   numeric,
+          launch_id     bigint references launches(id) on delete set null,
+          reminder_last_sent_on date,
+          created_at    timestamptz not null default now(),
+          unique (recurring_id, due_date)
+        )
+        """,
+        """
+        create index if not exists idx_bill_instances_user_status
+          on bill_instances (user_id, status, due_date)
+        """,
+
         # ─── Eventos de login (admin/observabilidade) ───────────────────────────
         # Antes era criada lazy em core/admin_dashboard.py:ensure_admin_tables.
         # Trazido pra schema.py pra audit/IP-tracking funcionarem nos testes.
