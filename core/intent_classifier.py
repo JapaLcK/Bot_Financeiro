@@ -482,6 +482,28 @@ def _has_recurrence_marker(norm: str) -> bool:
     return any(mk in norm for mk in _RECURRENCE_MARKERS)
 
 
+# Marcadores de CRIAÇÃO de conta a pagar / boleto — recorrente manual, que a
+# IA classifica como recurring.add (com pagamento='manual'). Não confundir com
+# PAGAMENTO ("paguei o boleto" → launches.add, tratado no router).
+_BILL_CREATE_MARKERS = (
+    "boleto", "boletos", "conta a pagar", "contas a pagar", "conta pra pagar",
+    "conta para pagar", "me lembra", "me lembre", "lembrete", "lembra de pagar",
+    "lembrar de pagar",
+)
+
+
+def _has_bill_marker(norm: str) -> bool:
+    """True se a mensagem parece CRIAR uma conta a pagar (marcador de boleto/
+    lembrete + um valor), e não é um pagamento nem um orçamento."""
+    if not any(c.isdigit() for c in norm):
+        return False
+    if "orcamento" in norm:
+        return False
+    if re.match(r"^(ja\s+)?(paguei|quitei)\b", norm):
+        return False
+    return any(mk in norm for mk in _BILL_CREATE_MARKERS)
+
+
 # ---------------------------------------------------------------------------
 # Tier 1 — busca exata
 # ---------------------------------------------------------------------------
@@ -612,7 +634,7 @@ CATÁLOGO DE INTENTS:
 - launches.add         → quer registrar receita ou despesa
 - launches.delete      → quer apagar um lançamento (entities: launch_id)
 - launches.undo        → quer desfazer o último lançamento
-- recurring.add        → quer CADASTRAR um gasto/receita RECORRENTE (fixo, todo mês OU todo ano). Sinais: "recorrente", "todo dia N", "todo mês", "mensal(mente)", "gasto fixo", "assinatura", "salário todo dia 5"; ANUAL: "todo ano", "por ano", "anual(mente)", "1x por ano", "todo ano em <mês>". entities: tipo("despesa"|"receita"), valor, dia(1-31, dia do vencimento/recebimento), nome(do que é, se disser), categoria, inicio("10/09" — se disser), frequencia("mensal"|"anual", default "mensal"), mes(1-12, só se anual — o mês do vencimento; ex: "todo ano em setembro" → mes=9)
+- recurring.add        → quer CADASTRAR um gasto/receita RECORRENTE (fixo, todo mês OU todo ano). Sinais: "recorrente", "todo dia N", "todo mês", "mensal(mente)", "gasto fixo", "assinatura", "salário todo dia 5"; ANUAL: "todo ano", "por ano", "anual(mente)", "1x por ano", "todo ano em <mês>". TAMBÉM cobre CONTA A PAGAR / BOLETO (o usuário paga na mão, não é débito automático): sinais "boleto", "conta a pagar", "me lembra de pagar", "lembrete" → nesses casos entities.pagamento="manual". entities: tipo("despesa"|"receita"), valor, dia(1-31, dia do vencimento/recebimento), nome(do que é, se disser), categoria, inicio("10/09" — se disser), frequencia("mensal"|"anual", default "mensal"), mes(1-12, só se anual — o mês do vencimento; ex: "todo ano em setembro" → mes=9), pagamento("manual" só se for boleto/conta a pagar/lembrete; senão omita)
 - credit.handle        → quer criar/listar/consultar cartão, fatura, crédito ou parcelamento
 - pockets.list         → quer listar caixinhas
 - pockets.create       → quer criar caixinha (entities: name)
@@ -671,6 +693,8 @@ EXEMPLOS:
 "dominio do site 60 reais todo ano em setembro dia 15" → {"intent":"recurring.add","confidence":0.95,"entities":{"tipo":"despesa","valor":60,"dia":15,"nome":"domínio","categoria":"assinaturas","frequencia":"anual","mes":9}}
 "ipva de 1200 uma vez por ano em janeiro" → {"intent":"recurring.add","confidence":0.94,"entities":{"tipo":"despesa","valor":1200,"dia":1,"nome":"IPVA","categoria":"transporte","frequencia":"anual","mes":1}}
 "recebo 5000 de bonus todo ano em dezembro dia 20" → {"intent":"recurring.add","confidence":0.95,"entities":{"tipo":"receita","valor":5000,"dia":20,"nome":"bônus","categoria":"bônus","frequencia":"anual","mes":12}}
+"boleto da luz de 150 todo mes dia 10" → {"intent":"recurring.add","confidence":0.95,"entities":{"tipo":"despesa","valor":150,"dia":10,"nome":"luz","categoria":"moradia","pagamento":"manual"}}
+"me lembra de pagar o condominio dia 5, 800 reais" → {"intent":"recurring.add","confidence":0.93,"entities":{"tipo":"despesa","valor":800,"dia":5,"nome":"condomínio","categoria":"moradia","pagamento":"manual"}}
 "quanto gastei hoje?" → {"intent":"launches.list","confidence":0.96,"entities":{"date_filter":"hoje"},"needs_clarification":false,"clarification_question":null}
 "tive algum gasto ontem?" → {"intent":"launches.list","confidence":0.95,"entities":{"date_filter":"ontem"},"needs_clarification":false,"clarification_question":null}
 "gastos do dia 4" → {"intent":"launches.list","confidence":0.90,"entities":{"date_filter":"dia 4"},"needs_clarification":true,"clarification_question":"Você gostaria de ver os gastos do dia 4 de qual mês?"}
@@ -782,7 +806,7 @@ def classify(text: str, user_id: int | None = None) -> IntentResult:
     # vai DIRETO pra IA (Tier 3), que classifica recurring.add. Precede os atalhos
     # de Tier 1/2 e o domain-hint, que senão mandariam pra launches.add ou
     # out_of_scope (→ IA conversacional criava orçamento por engano).
-    if _has_recurrence_marker(norm):
+    if _has_recurrence_marker(norm) or _has_bill_marker(norm):
         return _classify_with_ai(text, user_id=user_id)
 
     # Tier 1

@@ -32,6 +32,7 @@ from core.handlers import (
     pending    as h_pending,
     greeting   as h_greeting,
     recurring  as h_recurring,
+    bills      as h_bills,
 )
 
 # Limiar de confiança para executar sem pedir confirmação
@@ -305,6 +306,12 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
         return h_launches.list_launches(user_id, limit=limit, entities=entities, original_text=text)
 
     if intent == "launches.add":
+        # "paguei a luz" pode quitar uma CONTA A PAGAR pendente (boleto) em vez
+        # de criar um lançamento avulso. Só intercepta se casar uma conta
+        # pendente; senão segue o fluxo normal de despesa.
+        paid = h_bills.try_pay_from_text(user_id, text)
+        if paid is not None:
+            return paid
         return h_launches.add(user_id, text, entities, platform=platform)
 
     if intent == "launches.undo":

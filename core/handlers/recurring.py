@@ -17,6 +17,29 @@ from utils_text import fmt_brl
 
 _INCOME_WORDS = ("receita", "recebimento", "entrada", "renda", "salario", "salário")
 
+# Marcadores de "conta a pagar / boleto" (payment_mode='manual'): a Piggy só
+# LEMBRA e o débito só entra quando o usuário confirma o pagamento — diferente
+# do gasto fixo (autopay), que debita sozinho no dia. Ver [[db/bills.py]].
+_MANUAL_MARKERS = (
+    "boleto", "boletos", "conta a pagar", "contas a pagar", "conta pra pagar",
+    "conta para pagar", "me lembra", "me lembre", "me lembrar", "lembrete",
+    "lembra de pagar", "lembrar de pagar", "quando vencer", "vou pagar",
+    "preciso pagar", "tenho que pagar", "pagar manualmente", "aviso de conta",
+)
+
+
+def _is_manual_bill(text: str, entities: dict) -> bool:
+    """Detecta se o recorrente é uma conta a pagar (manual) e não um gasto fixo
+    (autopay). A IA pode marcar `pagamento='manual'`; o texto é a fonte da
+    verdade (mais robusto que confiar só no LLM)."""
+    pg = str(entities.get("pagamento") or entities.get("payment_mode") or "").strip().lower()
+    if pg in ("manual", "boleto", "conta"):
+        return True
+    import unicodedata
+    norm = unicodedata.normalize("NFKD", (text or "").lower())
+    norm = "".join(c for c in norm if not unicodedata.combining(c))
+    return any(mk in norm for mk in _MANUAL_MARKERS)
+
 
 def add(user_id: int, text: str, entities: dict) -> str:
     """Cadastra um recorrente a partir das entities classificadas pela IA."""
@@ -122,15 +145,25 @@ def add(user_id: int, text: str, entities: dict) -> str:
         if guessed and guessed != "outros":
             categoria = guessed
     cat = categoria or "outros"
-    name = nome or cat.capitalize() or "Gasto fixo"
+    is_manual = _is_manual_bill(text, entities)
+    name = nome or cat.capitalize() or ("Conta a pagar" if is_manual else "Gasto fixo")
     try:
         rec = create_recurring_expense(
             user_id, name, valor, cat, dia, "account",
             notes=text, start_date=start_date,
             frequency=frequency, due_month=mes,
+            payment_mode="manual" if is_manual else "autopay",
         )
     except ValueError as exc:
         return _err(str(exc))
+    if is_manual:
+        return (
+            f"🧾 *Conta a pagar criada:* {rec['name']}\n"
+            f"💸 {fmt_brl(valor)} · vence {_fmt_quando(frequency, dia, mes)}\n"
+            f"📅 {_fmt_start(rec.get('start_date'))}\n"
+            f"A Piggy vai *te lembrar* — nada é debitado até você confirmar. "
+            f"Quando pagar, é só mandar *paguei {rec['name'].lower()}*. 🐷"
+        )
     return (
         f"✅ *Gasto fixo criado:* {rec['name']}\n"
         f"💸 {fmt_brl(valor)} · débito na conta {_fmt_quando(frequency, dia, mes)}\n"
