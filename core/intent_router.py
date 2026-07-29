@@ -31,6 +31,7 @@ from core.handlers import (
     account    as h_account,
     pending    as h_pending,
     greeting   as h_greeting,
+    recurring  as h_recurring,
 )
 
 # Limiar de confiança para executar sem pedir confirmação
@@ -50,6 +51,7 @@ WRITE_INTENTS = {
     "investments.deposit", "investments.withdraw",
     "funds.withdraw",
     "categories.create", "categories.delete",
+    "recurring.add",
 }
 
 # action_types de pending_actions que representam uma confirmação destrutiva
@@ -308,6 +310,10 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
     if intent == "launches.undo":
         return h_launches.undo(user_id)
 
+    # --- recorrentes (gastos fixos / rendas fixas) ---
+    if intent == "recurring.add":
+        return h_recurring.add(user_id, text, entities)
+
     # --- cartões / crédito ---
     if intent == "credit.handle":
         resp = h_credit.handle(user_id, text)
@@ -517,6 +523,7 @@ def _intent_label(intent: str) -> str:
         "investments.withdraw": "resgatar investimento",
         "categories.create":    "criar regra de categoria",
         "categories.delete":    "remover regra de categoria",
+        "recurring.add":        "cadastrar recorrente (gasto/receita fixa)",
     }
     return labels.get(intent, intent)
 

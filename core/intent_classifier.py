@@ -578,6 +578,7 @@ REGRAS ABSOLUTAS:
 4. Se não souber com segurança, use "out_of_scope".
 5. Se faltar informação essencial para executar, ative needs_clarification.
 6. confidence deve refletir sua certeza real.
+7. NÃO confunda recorrente com lançamento avulso: "gastei 50 no mercado" = launches.add (uma vez); "gasto fixo de 100 todo dia 10" / "salário todo dia 5" = recurring.add (todo mês). Em recurring.add, se o usuário NÃO disser DO QUE é (nome/descrição), ative needs_clarification perguntando do que é o gasto/receita.
 
 CATÁLOGO DE INTENTS:
 - balance.check        → usuário quer saber o saldo da conta
@@ -585,6 +586,7 @@ CATÁLOGO DE INTENTS:
 - launches.add         → quer registrar receita ou despesa
 - launches.delete      → quer apagar um lançamento (entities: launch_id)
 - launches.undo        → quer desfazer o último lançamento
+- recurring.add        → quer CADASTRAR um gasto/receita RECORRENTE (fixo, todo mês). Sinais: "recorrente", "todo dia N", "todo mês", "mensal(mente)", "gasto fixo", "assinatura", "salário todo dia 5". entities: tipo("despesa"|"receita"), valor, dia(1-31, o dia do vencimento/recebimento), nome(do que é, se disser), categoria, inicio(a partir de quando, ex: "10/09" — se disser)
 - credit.handle        → quer criar/listar/consultar cartão, fatura, crédito ou parcelamento
 - pockets.list         → quer listar caixinhas
 - pockets.create       → quer criar caixinha (entities: name)
@@ -636,6 +638,10 @@ EXEMPLOS:
 "quero mudar meu cartao principal" → {"intent":"credit.handle","confidence":0.94,"entities":{},"needs_clarification":false,"clarification_question":null}
 "me recomenda uma ação da bolsa" → {"intent":"out_of_scope","confidence":0.98,"entities":{},"needs_clarification":false,"clarification_question":null}
 "gastei cinquenta" → {"intent":"launches.add","confidence":0.72,"entities":{"tipo":"despesa","valor":50},"needs_clarification":true,"clarification_question":"Em que você gastou R$ 50?"}
+"gasto recorrente de 100 reais todo dia 10 comecando a partir do dia 10/09" → {"intent":"recurring.add","confidence":0.95,"entities":{"tipo":"despesa","valor":100,"dia":10,"inicio":"10/09"},"needs_clarification":true,"clarification_question":"Do que é esse gasto fixo? (ex: aluguel, academia)"}
+"aluguel de 1500 todo dia 5" → {"intent":"recurring.add","confidence":0.96,"entities":{"tipo":"despesa","valor":1500,"dia":5,"nome":"aluguel","categoria":"moradia"},"needs_clarification":false,"clarification_question":null}
+"netflix 44,90 todo mes dia 9" → {"intent":"recurring.add","confidence":0.95,"entities":{"tipo":"despesa","valor":44.90,"dia":9,"nome":"netflix","categoria":"assinaturas"},"needs_clarification":false,"clarification_question":null}
+"recebo meu salario de 3000 todo dia 5" → {"intent":"recurring.add","confidence":0.96,"entities":{"tipo":"receita","valor":3000,"dia":5,"nome":"salário","categoria":"salário"},"needs_clarification":false,"clarification_question":null}
 "quanto gastei hoje?" → {"intent":"launches.list","confidence":0.96,"entities":{"date_filter":"hoje"},"needs_clarification":false,"clarification_question":null}
 "tive algum gasto ontem?" → {"intent":"launches.list","confidence":0.95,"entities":{"date_filter":"ontem"},"needs_clarification":false,"clarification_question":null}
 "gastos do dia 4" → {"intent":"launches.list","confidence":0.90,"entities":{"date_filter":"dia 4"},"needs_clarification":true,"clarification_question":"Você gostaria de ver os gastos do dia 4 de qual mês?"}
