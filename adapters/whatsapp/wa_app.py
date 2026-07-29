@@ -392,6 +392,128 @@ def _daily_report_tick() -> None:
                 )
 
 
+# ---------------------------------------------------------------------------
+# Lembretes de CONTAS A PAGAR (boletos)
+#
+# Proativo → WhatsApp NÃO deixa mandar texto livre fora da janela de 24h, só
+# TEMPLATE aprovado pela Meta. Por isso este loop fica DORMENTE até
+# WA_BILL_REMINDER_TEMPLATE_NAME estar setado (o template que o Lucas vai criar
+# e submeter à Meta). Sem a env, _bill_reminder_tick retorna na hora — nada é
+# enviado. Ver db/bills.py (list_due_bill_reminders) e o spec do template no
+# fim deste arquivo / na entrega ao Lucas.
+# ---------------------------------------------------------------------------
+
+def _bill_reminder_template_config() -> dict[str, str] | None:
+    name = (os.getenv("WA_BILL_REMINDER_TEMPLATE_NAME") or "").strip()
+    if not name:
+        return None
+    return {
+        "name": name,
+        "language_code": (os.getenv("WA_BILL_REMINDER_TEMPLATE_LANGUAGE") or "pt_BR").strip(),
+    }
+
+
+def _bill_reminder_named_params(bill: dict, today) -> dict[str, str]:
+    """Params do corpo do template (named). O template da Meta deve declarar as
+    variáveis {{conta}}, {{valor}} e {{vencimento}}."""
+    from utils_text import fmt_brl
+
+    due = bill.get("due_date")
+    amount = bill.get("amount")
+    try:
+        valor = fmt_brl(float(amount)) if amount is not None else "—"
+    except (TypeError, ValueError):
+        valor = "—"
+    try:
+        vencimento = due.strftime("%d/%m") if due else "—"
+    except Exception:
+        vencimento = str(due or "—")
+    return {
+        "conta": str(bill.get("name") or "sua conta"),
+        "valor": valor,
+        "vencimento": vencimento,
+    }
+
+
+def _bill_reminder_tick() -> None:
+    cfg = _bill_reminder_template_config()
+    if not cfg:
+        return  # dormente: template Meta ainda não configurado
+
+    now = now_tz()
+    send_hour = int(os.getenv("WA_BILL_REMINDER_HOUR", "9") or 9)
+    if now.hour < send_hour:
+        return  # manda de manhã (>= hora configurada), 1x/dia por conta
+
+    today = now.date()
+    days_before = int(os.getenv("WA_BILL_REMINDER_DAYS_BEFORE", "3") or 3)
+
+    from db.bills import (
+        list_users_with_pending_bills,
+        list_due_bill_reminders,
+        mark_bill_reminder_sent,
+    )
+
+    for uid in list_users_with_pending_bills():
+        try:
+            due = list_due_bill_reminders(uid, today, days_before=days_before)
+        except Exception as exc:
+            logger.warning("WA bill reminder query error uid=%s error=%s", uid, exc)
+            continue
+        if not due:
+            continue
+
+        wa_targets = _dedupe_whatsapp_targets(list_identities_by_user(uid))
+        if not wa_targets:
+            continue
+
+        for bill in due:
+            params = _bill_reminder_named_params(bill, today)
+            sent_any = False
+            for to in wa_targets:
+                try:
+                    send_template(
+                        to,
+                        cfg["name"],
+                        language_code=cfg["language_code"],
+                        named_body_params=params,
+                    )
+                    sent_any = True
+                    log_system_event_sync(
+                        "info",
+                        "whatsapp_bill_reminder_sent",
+                        "Lembrete de conta a pagar enviado via template WhatsApp.",
+                        source="wa_app",
+                        user_id=uid,
+                        details={"to": to, "bill_id": bill.get("id"), "template_name": cfg["name"]},
+                    )
+                except Exception as exc:
+                    logger.warning("WA bill reminder send error uid=%s to=%s error=%s", uid, to, exc)
+            if sent_any:
+                try:
+                    mark_bill_reminder_sent(int(bill["id"]), today)
+                except Exception as exc:
+                    logger.warning("WA bill reminder mark error uid=%s bill_id=%s error=%s", uid, bill.get("id"), exc)
+
+
+async def _bill_reminder_loop():
+    await asyncio.sleep(8)
+    while True:
+        try:
+            await asyncio.to_thread(_bill_reminder_tick)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.exception("WA bill reminder loop error: %s", exc)
+            log_system_event_sync(
+                "error",
+                "whatsapp_bill_reminder_loop_error",
+                f"Erro no loop de lembretes de contas a pagar: {exc}",
+                source="wa_app",
+            )
+        await asyncio.sleep(60 * 5)
+
+
 async def _daily_report_loop():
     await asyncio.sleep(5)
 

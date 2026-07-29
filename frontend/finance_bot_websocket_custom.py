@@ -1283,6 +1283,14 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[wa_daily] erro: {exc}", file=sys.stderr)
 
+    async def _wa_bill_reminders():
+        try:
+            await asyncio.sleep(1)
+            from adapters.whatsapp.wa_app import _bill_reminder_loop  # noqa: PLC0415
+            await _bill_reminder_loop()
+        except Exception as exc:
+            print(f"[wa_bill_reminders] erro: {exc}", file=sys.stderr)
+
     async def _engagement():
         try:
             await asyncio.sleep(1)
@@ -1353,6 +1361,7 @@ async def lifespan(app: FastAPI):
             [
                 asyncio.create_task(_wa_worker(), name="wa_worker"),
                 asyncio.create_task(_wa_daily(), name="wa_daily"),
+                asyncio.create_task(_wa_bill_reminders(), name="wa_bill_reminders"),
                 asyncio.create_task(_engagement(), name="engagement"),
                 asyncio.create_task(_investment_accrual(), name="investment_accrual"),
                 asyncio.create_task(_account_deletion_worker(), name="account_deletion"),

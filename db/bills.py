@@ -146,6 +146,15 @@ def list_active_manual_recurrings() -> list[dict[str, Any]]:
             return [dict(r) for r in (cur.fetchall() or [])]
 
 
+def list_users_with_pending_bills() -> list[int]:
+    """Distintos user_ids com pelo menos uma conta a pagar pendente. Usado pelo
+    loop de lembretes pra saber a quem perguntar por vencimentos."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select distinct user_id from bill_instances where status = 'pending'")
+            return [int(r["user_id"]) for r in (cur.fetchall() or [])]
+
+
 def list_due_bill_reminders(user_id: int, today: date, days_before: int = 3) -> list[dict[str, Any]]:
     """Contas pendentes que merecem lembrete HOJE: faltam `days_before` dias, ou
     vence hoje, ou venceu ontem — e ainda não lembramos hoje."""
@@ -171,5 +180,5 @@ def list_due_bill_reminders(user_id: int, today: date, days_before: int = 3) -> 
 __all__ = [
     "list_bills", "get_bill", "ensure_bill_instance", "mark_bill_paid",
     "mark_bill_reminder_sent", "list_active_manual_recurrings",
-    "list_due_bill_reminders",
+    "list_users_with_pending_bills", "list_due_bill_reminders",
 ]
