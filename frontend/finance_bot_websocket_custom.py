@@ -4663,6 +4663,7 @@ class RecurringCreatePayload(BaseModel):
     start_date: str | None = None  # 'YYYY-MM-DD'; default = hoje
     frequency: str = "monthly"     # 'monthly' | 'annual'
     due_month: int | None = None   # 1-12, obrigatório se annual
+    payment_mode: str = "autopay"  # 'autopay' (gasto fixo) | 'manual' (conta a pagar)
 
 
 class RecurringUpdatePayload(BaseModel):
@@ -4678,6 +4679,7 @@ class RecurringUpdatePayload(BaseModel):
     start_date: str | None = None
     frequency: str | None = None
     due_month: int | None = None
+    payment_mode: str | None = None
 
 
 def _recurring_value_error(code: str) -> HTTPException:
@@ -4692,8 +4694,40 @@ def _recurring_value_error(code: str) -> HTTPException:
         "DATA_INICIO_INVALIDA": "Data de início inválida.",
         "FREQUENCIA_INVALIDA": "Frequência inválida (use 'monthly' ou 'annual').",
         "MES_INVALIDO": "Mês inválido — para recorrência anual, informe o mês (1 a 12).",
+        "MODO_PAGAMENTO_INVALIDO": "Modo de pagamento inválido (use 'autopay' ou 'manual').",
     }
     return HTTPException(status_code=400, detail=msg.get(code, code))
+
+
+class BillPayPayload(BaseModel):
+    amount: float | None = None  # opcional: valor real do boleto (variável)
+
+
+@app.get("/recurring-bills/{user_id}")
+async def recurring_bills_route(request: Request, user_id: int, include_paid: bool = False):
+    """Lista as contas a pagar (instâncias dos recorrentes 'manual'). Pro-only."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "recurring_expenses")
+    from db.bills import list_bills
+    items = await asyncio.to_thread(list_bills, user_id, include_paid)
+    return {"ok": True, "bills": items}
+
+
+@app.post("/recurring-bills/{user_id}/{bill_id}/pay")
+async def recurring_bill_pay_route(request: Request, user_id: int, bill_id: int, payload: BillPayPayload):
+    """Confirma pagamento de uma conta: lança a despesa (debita + categoriza) e
+    marca a conta como paga. Pro-only."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "recurring_expenses")
+    from db.bills import mark_bill_paid
+    try:
+        bill = await asyncio.to_thread(mark_bill_paid, user_id, bill_id, payload.amount)
+    except ValueError as exc:
+        raise _recurring_value_error(str(exc))
+    if bill is None:
+        raise HTTPException(status_code=404, detail="Conta a pagar não encontrada ou já paga.")
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "bill": bill}
 
 
 @app.get("/recurring-expenses/{user_id}")
@@ -4721,7 +4755,7 @@ async def recurring_create_route(request: Request, user_id: int, payload: Recurr
             create_recurring_expense,
             user_id, payload.name, payload.amount, payload.category, payload.due_day,
             payload.payment_type, payload.card_id, payload.is_essential, payload.notes,
-            payload.start_date, payload.frequency, payload.due_month,
+            payload.start_date, payload.frequency, payload.due_month, payload.payment_mode,
         )
     except ValueError as exc:
         raise _recurring_value_error(str(exc))
@@ -4747,6 +4781,7 @@ async def recurring_update_route(
             due_day=payload.due_day, payment_type=payload.payment_type, card_id=payload.card_id,
             is_essential=payload.is_essential, is_active=payload.is_active, notes=payload.notes,
             start_date=payload.start_date, frequency=payload.frequency, due_month=payload.due_month,
+            payment_mode=payload.payment_mode,
         )
     except ValueError as exc:
         code = str(exc)

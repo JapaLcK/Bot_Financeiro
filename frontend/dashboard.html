@@ -363,6 +363,7 @@
     <div class="filter-tabs" id="recurring-tabs" role="tablist" style="margin:-6px 0 16px">
       <button class="ftab active" type="button" role="tab" data-rectab="expenses" onclick="setRecurringTab('expenses')">🔻 Gastos fixos</button>
       <button class="ftab" type="button" role="tab" data-rectab="incomes" onclick="setRecurringTab('incomes')">🔺 Receitas fixas</button>
+      <button class="ftab" type="button" role="tab" data-rectab="bills" onclick="setRecurringTab('bills')">🧾 Contas a pagar</button>
     </div>
 
     <div id="recurring-expenses-pane">
@@ -413,6 +414,20 @@
         <div class="mock-card">
           <h3>Reajustes recentes 🐷</h3>
           <div id="recurring-income-adjustments-list" class="tx-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="recurring-bills-pane" style="display:none">
+      <div id="recurring-bills-stats" class="stats-row"></div>
+      <div class="mock-grid cols-2">
+        <div class="mock-card">
+          <h3>A vencer / vencidas</h3>
+          <div id="recurring-bills-pending-list" class="tx-list"></div>
+        </div>
+        <div class="mock-card">
+          <h3>Pagas recentemente</h3>
+          <div id="recurring-bills-paid-list" class="tx-list"></div>
         </div>
       </div>
     </div>

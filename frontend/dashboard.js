@@ -2937,7 +2937,8 @@ function _renderFixedView(items) {
   const adjEl = document.getElementById("recurring-adjustments-list");
 
   const list = items || [];
-  const active = list.filter(r => r.is_active);
+  // 'manual' (conta a pagar) não entra em Gastos fixos — vive na aba própria.
+  const active = list.filter(r => r.is_active && (r.payment_mode || "autopay") === "autopay");
   // Total MENSAL: anual entra prorrateado (valor/12) pra refletir o custo médio
   // por mês. Um domínio de R$55/ano pesa ~R$4,58/mês, não R$55.
   const total = active.reduce((s, r) => s + _recMonthlyEquiv(r), 0);
@@ -3100,11 +3101,18 @@ function _ensureRecurringModal() {
     <div class="overlay" id="recurring-edit-overlay">
       <div class="modal wide">
         <h3 id="recurring-edit-title">Novo gasto fixo</h3>
-        <p class="msub" style="background:rgba(255,45,142,.1);border:1px solid rgba(255,45,142,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:.78rem">
-          ⚠️ <strong>Importante:</strong> esse gasto será <strong>lançado automaticamente</strong> todo mês no dia escolhido. Você poderá excluir o lançamento depois se necessário.
-        </p>
+        <p class="msub" id="recurring-mode-hint" style="background:rgba(255,45,142,.1);border:1px solid rgba(255,45,142,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:.78rem"></p>
         <form id="recurring-edit-form" onsubmit="event.preventDefault(); saveRecurring();">
           <div class="invest-form">
+            <div class="form-row">
+              <div class="field">
+                <label for="recurring-mode">Tipo *</label>
+                <select id="recurring-mode" onchange="_toggleRecurringModeHint()">
+                  <option value="autopay">Gasto fixo (débito automático)</option>
+                  <option value="manual">Conta a pagar (boleto/lembrete)</option>
+                </select>
+              </div>
+            </div>
             <div class="form-row">
               <div class="field" style="flex:2">
                 <label for="recurring-name">Nome *</label>
@@ -3206,6 +3214,21 @@ function _toggleRecurringMonthField(prefix = "recurring") {
   field.style.display = freq.value === "annual" ? "" : "none";
 }
 
+// Ajusta o texto de ajuda + título do modal conforme o modo (gasto fixo vs conta a pagar).
+function _toggleRecurringModeHint() {
+  const mode = (document.getElementById("recurring-mode") || {}).value || "autopay";
+  const hint = document.getElementById("recurring-mode-hint");
+  const title = document.getElementById("recurring-edit-title");
+  const isEdit = !!(_recurringEditState && _recurringEditState.id);
+  if (mode === "manual") {
+    if (hint) hint.innerHTML = "🧾 <strong>Conta a pagar:</strong> a Piggy te <strong>lembra</strong> do vencimento e <strong>nada sai da conta</strong> até você confirmar. Ao marcar como paga, o valor é lançado e categorizado.";
+    if (title && !isEdit) title.textContent = "Nova conta a pagar";
+  } else {
+    if (hint) hint.innerHTML = "⚠️ <strong>Gasto fixo:</strong> é <strong>lançado automaticamente</strong> no dia escolhido (débito na conta). Pra contas que você paga na mão (boleto), use \"Conta a pagar\".";
+    if (title && !isEdit) title.textContent = "Novo gasto fixo";
+  }
+}
+
 function _populateRecurringCardOptions(selectedId = null) {
   const sel = document.getElementById("recurring-card");
   const cards = (lastData && lastData.credit_cards) || [];
@@ -3227,6 +3250,7 @@ function openRecurringEditModal(rec) {
   document.getElementById("recurring-due-day").value = isEdit ? rec.due_day : "";
   document.getElementById("recurring-start-date").value = isEdit ? (rec.start_date || "") : new Date().toLocaleDateString("en-CA");
   document.getElementById("recurring-category").value = isEdit ? rec.category : "";
+  document.getElementById("recurring-mode").value = isEdit ? (rec.payment_mode || "autopay") : ((rec && rec._mode) || "autopay");
   document.getElementById("recurring-payment-type").value = isEdit ? rec.payment_type : "account";
   document.getElementById("recurring-frequency").value = isEdit ? (rec.frequency || "monthly") : "monthly";
   document.getElementById("recurring-month").value = (isEdit && rec.due_month) ? rec.due_month : (new Date().getMonth() + 1);
@@ -3235,6 +3259,7 @@ function openRecurringEditModal(rec) {
   document.getElementById("recurring-delete-btn").style.display = isEdit ? "" : "none";
   _toggleRecurringCardField();
   _toggleRecurringMonthField("recurring");
+  _toggleRecurringModeHint();
   if (isEdit && rec.payment_type === "credit_card") _populateRecurringCardOptions(rec.card_id);
 
   document.getElementById("recurring-edit-overlay").classList.add("open");
@@ -3259,6 +3284,7 @@ async function saveRecurring() {
     frequency: document.getElementById("recurring-frequency").value,
     due_month: document.getElementById("recurring-frequency").value === "annual"
       ? parseInt(document.getElementById("recurring-month").value, 10) : null,
+    payment_mode: document.getElementById("recurring-mode").value,
     payment_type: document.getElementById("recurring-payment-type").value,
     card_id: null,
     is_essential: document.getElementById("recurring-is-essential").checked,
@@ -3301,9 +3327,12 @@ async function saveRecurring() {
       }
       throw new Error(detail);
     }
-    showToast(isEdit ? "✓ Gasto fixo atualizado" : "✓ Gasto fixo cadastrado");
+    const isBill = payload.payment_mode === "manual";
+    showToast(isEdit ? (isBill ? "✓ Conta a pagar atualizada" : "✓ Gasto fixo atualizado")
+                     : (isBill ? "✓ Conta a pagar cadastrada" : "✓ Gasto fixo cadastrado"));
     _recurringCache = null;
-    loadFixedView(true);  // sem await — re-render em paralelo
+    loadFixedView(true);           // re-render gastos fixos (sem await)
+    if (isBill) loadBillsView(true);
     sendRefresh();
   } catch (err) {
     // Reabre modal com dados preservados pro user corrigir
@@ -3356,27 +3385,144 @@ let _recurringIncomeCache = null;
 let _recurringIncomeFetchInFlight = null;
 
 function setRecurringTab(tab) {
-  if (tab !== "expenses" && tab !== "incomes") return;
+  if (!["expenses", "incomes", "bills"].includes(tab)) return;
   _recurringTab = tab;
   document.querySelectorAll("#recurring-tabs .ftab").forEach(b => {
     b.classList.toggle("active", b.dataset.rectab === tab);
   });
-  const expPane = document.getElementById("recurring-expenses-pane");
-  const incPane = document.getElementById("recurring-incomes-pane");
-  if (expPane) expPane.style.display = tab === "expenses" ? "" : "none";
-  if (incPane) incPane.style.display = tab === "incomes" ? "" : "none";
+  const panes = {
+    expenses: document.getElementById("recurring-expenses-pane"),
+    incomes:  document.getElementById("recurring-incomes-pane"),
+    bills:    document.getElementById("recurring-bills-pane"),
+  };
+  Object.entries(panes).forEach(([k, el]) => { if (el) el.style.display = k === tab ? "" : "none"; });
 
   const btn = document.getElementById("recurring-new-btn");
-  if (btn) btn.textContent = tab === "expenses" ? "+ Novo gasto fixo" : "+ Nova receita fixa";
+  if (btn) btn.textContent = tab === "incomes" ? "+ Nova receita fixa"
+    : tab === "bills" ? "+ Nova conta a pagar" : "+ Novo gasto fixo";
 
   if (tab === "incomes") loadRecurringIncomeView();
+  else if (tab === "bills") loadBillsView();
   else loadFixedView();
 }
 
 // O botão do header muda de destino conforme a aba ativa.
 function openRecurringNewFromTab() {
   if (_recurringTab === "incomes") openRecurringIncomeEditModal();
+  else if (_recurringTab === "bills") openRecurringEditModal({ _mode: "manual" });
   else openRecurringEditModal();
+}
+
+// ── Contas a pagar (boletos) ──────────────────────────────────────────
+async function loadBillsView(forceFresh = false) {
+  const pendEl = document.getElementById("recurring-bills-pending-list");
+  if (!pendEl) return;
+  try {
+    const resp = await fetch(`${API}/recurring-bills/${USER_ID}?include_paid=true`, {
+      credentials: "same-origin",
+    });
+    if (resp.status === 403) {
+      pendEl.innerHTML = `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Contas a pagar é uma feature <b>PigBank+</b>.</div>`;
+      return;
+    }
+    if (!resp.ok) throw new Error(await resp.text());
+    const data = await resp.json();
+    _renderBillsView(data.bills || []);
+  } catch (_) {
+    pendEl.innerHTML = `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Não consegui carregar. Toque em Atualizar.</div>`;
+  }
+}
+
+function _billOverdue(b) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return new Date(b.due_date + "T00:00:00") < today;
+}
+
+function _renderBillsView(bills) {
+  const pendEl = document.getElementById("recurring-bills-pending-list");
+  const paidEl = document.getElementById("recurring-bills-paid-list");
+  const statsEl = document.getElementById("recurring-bills-stats");
+  const pending = bills.filter(b => b.status === "pending");
+  const paid = bills.filter(b => b.status === "paid");
+  const totalPend = pending.reduce((s, b) => s + (b.amount || 0), 0);
+  const overdue = pending.filter(_billOverdue).length;
+
+  if (statsEl) statsEl.innerHTML = `
+    <div class="stat-tile"><div class="stat-label">A pagar</div>
+      <div class="stat-value" style="color:var(--red)">${_fmtBRL(totalPend)}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${pending.length} pendente(s)</div></div>
+    <div class="stat-tile"><div class="stat-label">Vencidas</div>
+      <div class="stat-value" style="color:${overdue ? 'var(--red)' : 'var(--text-3)'}">${overdue}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${overdue ? 'pague pra não atrasar' : 'em dia'}</div></div>`;
+
+  pendEl.innerHTML = pending.length
+    ? pending.map(_renderBillRow).join("")
+    : `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Nenhuma conta a pagar. Toque em <b>+ Nova conta a pagar</b>.</div>`;
+  if (paidEl) paidEl.innerHTML = paid.length
+    ? paid.slice(0, 12).map(_renderBillPaidRow).join("")
+    : `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Nada pago ainda.</div>`;
+}
+
+function _renderBillRow(b) {
+  const due = new Date(b.due_date + "T00:00:00");
+  const overdue = _billOverdue(b);
+  const quando = overdue ? "vencida" : _formatDueIn(due);
+  const color = overdue ? "#FF2D2D" : "#fbbf24";
+  return `
+    <div class="tx-row">
+      <div class="tx-icon" style="color:${color}">🧾</div>
+      <div class="tx-main">
+        <div class="tx-desc">${escapeHtmlSafe(b.name || "Conta")}</div>
+        <div class="tx-meta">vence ${due.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })} · <span style="color:${color}">${quando}</span></div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+        <div class="tx-amt red">-${_fmtBRL(b.amount)}</div>
+        <button class="mock-cta" style="padding:4px 10px;font-size:.72rem" onclick="payBill(${b.id}, ${b.amount || 0}, '${escapeHtmlSafe(b.name || "").replace(/'/g, "")}')">✓ Marcar paga</button>
+      </div>
+    </div>`;
+}
+
+function _renderBillPaidRow(b) {
+  const paidVal = b.paid_amount != null ? b.paid_amount : b.amount;
+  const when = b.paid_at ? new Date(b.paid_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }) : "";
+  return `
+    <div class="tx-row">
+      <div class="tx-icon" style="color:#22c55e">✓</div>
+      <div class="tx-main">
+        <div class="tx-desc">${escapeHtmlSafe(b.name || "Conta")}</div>
+        <div class="tx-meta">paga ${when}</div>
+      </div>
+      <div class="tx-amt" style="color:var(--text-2)">-${_fmtBRL(paidVal)}</div>
+    </div>`;
+}
+
+async function payBill(billId, estimate, name) {
+  // Boleto pode ter valor diferente do estimado → deixa ajustar na hora.
+  const raw = window.prompt(`Quanto você pagou de "${name}"? (R$)`, Number(estimate || 0).toFixed(2));
+  if (raw === null) return;                       // cancelou
+  const amount = parseFloat(String(raw).replace(",", "."));
+  if (isNaN(amount) || amount <= 0) {
+    await alertModal("Digite um valor válido (maior que zero).", { title: "Valor inválido" });
+    return;
+  }
+  try {
+    const resp = await fetch(`${API}/recurring-bills/${USER_ID}/${billId}/pay`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ amount }),
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt; try { detail = JSON.parse(txt).detail || txt; } catch (_) {}
+      throw new Error(detail);
+    }
+    showToast(`✓ Conta paga: ${_fmtBRL(amount)}`);
+    loadBillsView(true);
+    sendRefresh();
+  } catch (err) {
+    await alertModal(String(err.message || err), { title: "Erro ao pagar" });
+  }
 }
 
 async function _fetchRecurringIncomes() {
