@@ -19,7 +19,7 @@ from decimal import Decimal
 from typing import Any
 
 from .connection import get_conn
-from .recurring import _parse_start_date
+from .recurring import _parse_start_date, validate_frequency
 from .users import ensure_user
 
 
@@ -33,7 +33,8 @@ def list_recurring_incomes(user_id: int, include_inactive: bool = False) -> list
                 select r.id, r.name, r.amount, r.category, r.pay_day,
                        r.is_primary, r.is_active,
                        r.last_amount, r.last_amount_changed_at,
-                       r.last_credited_ym, r.notes, r.created_at, r.start_date
+                       r.last_credited_ym, r.notes, r.created_at, r.start_date,
+                       r.frequency, r.pay_month
                 from recurring_incomes r
                 where r.user_id = %s
                   and (%s::boolean = true or r.is_active = true)
@@ -54,7 +55,8 @@ def get_recurring_income(user_id: int, inc_id: int) -> dict[str, Any] | None:
                 select r.id, r.name, r.amount, r.category, r.pay_day,
                        r.is_primary, r.is_active,
                        r.last_amount, r.last_amount_changed_at,
-                       r.last_credited_ym, r.notes, r.created_at, r.start_date
+                       r.last_credited_ym, r.notes, r.created_at, r.start_date,
+                       r.frequency, r.pay_month
                 from recurring_incomes r
                 where r.user_id = %s and r.id = %s
                 """,
@@ -79,6 +81,8 @@ def _row_to_dict(r: Any) -> dict[str, Any]:
         "notes": r["notes"],
         "created_at": r["created_at"].isoformat() if r["created_at"] else None,
         "start_date": r["start_date"].isoformat() if r["start_date"] else None,
+        "frequency": r["frequency"] or "monthly",
+        "pay_month": int(r["pay_month"]) if r["pay_month"] is not None else None,
     }
 
 
@@ -102,10 +106,14 @@ def create_recurring_income(
     is_primary: bool = False,
     notes: str | None = None,
     start_date: date | str | None = None,
+    frequency: str = "monthly",
+    pay_month: int | None = None,
 ) -> dict[str, Any]:
     """Cria receita recorrente. Levanta ValueError se input inválido.
 
     `start_date` = a partir de quando a recorrência vale (default: hoje).
+    `frequency` = 'monthly' (todo mês no pay_day) ou 'annual' (1x/ano no
+    `pay_month`/pay_day).
     """
     ensure_user(user_id)
     name = (name or "").strip()
@@ -115,6 +123,7 @@ def create_recurring_income(
         raise ValueError("VALOR_INVALIDO")
     if pay_day < 1 or pay_day > 31:
         raise ValueError("DIA_INVALIDO")
+    freq, month = validate_frequency(frequency, pay_month)
     start = _parse_start_date(start_date, default=date.today())
 
     cat = (category or "").strip() or "salário"
@@ -126,13 +135,13 @@ def create_recurring_income(
                 """
                 insert into recurring_incomes (
                     user_id, name, amount, category, pay_day,
-                    is_primary, is_active, notes, start_date
-                ) values (%s, %s, %s, %s, %s, %s, true, %s, %s)
+                    is_primary, is_active, notes, start_date, frequency, pay_month
+                ) values (%s, %s, %s, %s, %s, %s, true, %s, %s, %s, %s)
                 returning id
                 """,
                 (
                     user_id, name, Decimal(str(amount)), cat, int(pay_day),
-                    bool(is_primary), note, start,
+                    bool(is_primary), note, start, freq, month,
                 ),
             )
             new_id = cur.fetchone()["id"]
@@ -152,6 +161,8 @@ def update_recurring_income(
     is_active: bool | None = None,
     notes: str | None = None,
     start_date: date | str | None = None,
+    frequency: str | None = None,
+    pay_month: int | None = None,
 ) -> dict[str, Any]:
     """PATCH. Quando amount muda, registra `last_amount` + timestamp (detector de reajuste)."""
     ensure_user(user_id)
@@ -198,6 +209,17 @@ def update_recurring_income(
     if start_date is not None:
         sets.append("start_date = %s")
         params.append(_parse_start_date(start_date, default=date.today()))
+    if frequency is not None:
+        month_src = pay_month if pay_month is not None else current.get("pay_month")
+        freq, month = validate_frequency(frequency, month_src)
+        sets.append("frequency = %s")
+        params.append(freq)
+        sets.append("pay_month = %s")
+        params.append(month)
+    elif pay_month is not None and (current.get("frequency") == "annual"):
+        _f, month = validate_frequency("annual", pay_month)
+        sets.append("pay_month = %s")
+        params.append(month)
 
     if not sets:
         return current

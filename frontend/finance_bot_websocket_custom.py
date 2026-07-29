@@ -4661,6 +4661,8 @@ class RecurringCreatePayload(BaseModel):
     is_essential: bool = False
     notes: str | None = None
     start_date: str | None = None  # 'YYYY-MM-DD'; default = hoje
+    frequency: str = "monthly"     # 'monthly' | 'annual'
+    due_month: int | None = None   # 1-12, obrigatório se annual
 
 
 class RecurringUpdatePayload(BaseModel):
@@ -4674,6 +4676,8 @@ class RecurringUpdatePayload(BaseModel):
     is_active: bool | None = None
     notes: str | None = None
     start_date: str | None = None
+    frequency: str | None = None
+    due_month: int | None = None
 
 
 def _recurring_value_error(code: str) -> HTTPException:
@@ -4686,6 +4690,8 @@ def _recurring_value_error(code: str) -> HTTPException:
         "CARTAO_NAO_ENCONTRADO": "Cartão não encontrado.",
         "RECORRENTE_NAO_ENCONTRADO": "Gasto fixo não encontrado.",
         "DATA_INICIO_INVALIDA": "Data de início inválida.",
+        "FREQUENCIA_INVALIDA": "Frequência inválida (use 'monthly' ou 'annual').",
+        "MES_INVALIDO": "Mês inválido — para recorrência anual, informe o mês (1 a 12).",
     }
     return HTTPException(status_code=400, detail=msg.get(code, code))
 
@@ -4715,7 +4721,7 @@ async def recurring_create_route(request: Request, user_id: int, payload: Recurr
             create_recurring_expense,
             user_id, payload.name, payload.amount, payload.category, payload.due_day,
             payload.payment_type, payload.card_id, payload.is_essential, payload.notes,
-            payload.start_date,
+            payload.start_date, payload.frequency, payload.due_month,
         )
     except ValueError as exc:
         raise _recurring_value_error(str(exc))
@@ -4740,7 +4746,7 @@ async def recurring_update_route(
             name=payload.name, amount=payload.amount, category=payload.category,
             due_day=payload.due_day, payment_type=payload.payment_type, card_id=payload.card_id,
             is_essential=payload.is_essential, is_active=payload.is_active, notes=payload.notes,
-            start_date=payload.start_date,
+            start_date=payload.start_date, frequency=payload.frequency, due_month=payload.due_month,
         )
     except ValueError as exc:
         code = str(exc)
@@ -4798,6 +4804,8 @@ class RecurringIncomeCreatePayload(BaseModel):
     is_primary: bool = False
     notes: str | None = None
     start_date: str | None = None  # 'YYYY-MM-DD'; default = hoje
+    frequency: str = "monthly"     # 'monthly' | 'annual'
+    pay_month: int | None = None   # 1-12, obrigatório se annual
 
 
 class RecurringIncomeUpdatePayload(BaseModel):
@@ -4809,6 +4817,8 @@ class RecurringIncomeUpdatePayload(BaseModel):
     is_active: bool | None = None
     notes: str | None = None
     start_date: str | None = None
+    frequency: str | None = None
+    pay_month: int | None = None
 
 
 def _recurring_income_value_error(code: str) -> HTTPException:
@@ -4818,6 +4828,8 @@ def _recurring_income_value_error(code: str) -> HTTPException:
         "DIA_INVALIDO": "Dia do recebimento deve estar entre 1 e 31.",
         "RECEITA_NAO_ENCONTRADA": "Receita recorrente não encontrada.",
         "DATA_INICIO_INVALIDA": "Data de início inválida.",
+        "FREQUENCIA_INVALIDA": "Frequência inválida (use 'monthly' ou 'annual').",
+        "MES_INVALIDO": "Mês inválido — para recorrência anual, informe o mês (1 a 12).",
     }
     return HTTPException(status_code=400, detail=msg.get(code, code))
 
@@ -4849,6 +4861,7 @@ async def recurring_income_create_route(
             create_recurring_income,
             user_id, payload.name, payload.amount, payload.category,
             payload.pay_day, payload.is_primary, payload.notes, payload.start_date,
+            payload.frequency, payload.pay_month,
         )
     except ValueError as exc:
         raise _recurring_income_value_error(str(exc))
@@ -4873,7 +4886,7 @@ async def recurring_income_update_route(
             name=payload.name, amount=payload.amount, category=payload.category,
             pay_day=payload.pay_day, is_primary=payload.is_primary,
             is_active=payload.is_active, notes=payload.notes,
-            start_date=payload.start_date,
+            start_date=payload.start_date, frequency=payload.frequency, pay_month=payload.pay_month,
         )
     except ValueError as exc:
         code = str(exc)

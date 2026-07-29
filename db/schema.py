@@ -1068,6 +1068,14 @@ def init_db():
         """alter table recurring_incomes add column if not exists start_date date""",
         """update recurring_incomes set start_date = created_at::date where start_date is null""",
 
+        # migration: frequência da recorrência. 'monthly' (default, comportamento
+        # antigo) cobra/credita todo mês no due_day/pay_day; 'annual' cobra 1x por
+        # ano no mês due_month/pay_month (1-12). Linhas legadas ficam 'monthly'.
+        """alter table recurring_expenses add column if not exists frequency text not null default 'monthly'""",
+        """alter table recurring_expenses add column if not exists due_month int""",
+        """alter table recurring_incomes add column if not exists frequency text not null default 'monthly'""",
+        """alter table recurring_incomes add column if not exists pay_month int""",
+
         # ─── Eventos de login (admin/observabilidade) ───────────────────────────
         # Antes era criada lazy em core/admin_dashboard.py:ensure_admin_tables.
         # Trazido pra schema.py pra audit/IP-tracking funcionarem nos testes.

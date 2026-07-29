@@ -68,6 +68,18 @@ def add(user_id: int, text: str, entities: dict) -> str:
     if nome:  # 1ª letra maiúscula pra ficar bonito no dashboard ("aluguel" → "Aluguel")
         nome = nome[0].upper() + nome[1:]
 
+    # frequência: mensal (default) ou anual. Se anual sem mês, usa o mês do
+    # start_date (ou de hoje) como o mês do vencimento.
+    freq_raw = str(entities.get("frequencia") or entities.get("frequency") or "mensal").strip().lower()
+    frequency = "annual" if freq_raw in ("anual", "annual", "ano", "yearly") else "monthly"
+    mes = entities.get("mes") or entities.get("month") or entities.get("due_month") or entities.get("pay_month")
+    try:
+        mes = int(mes) if mes is not None else None
+    except (TypeError, ValueError):
+        mes = None
+    if frequency == "annual" and not (mes and 1 <= mes <= 12):
+        mes = (start_date.month if start_date else date.today().month)
+
     if is_income:
         from db.recurring_income import create_recurring_income
         cat = categoria or "salário"
@@ -75,12 +87,13 @@ def add(user_id: int, text: str, entities: dict) -> str:
         try:
             rec = create_recurring_income(
                 user_id, name, valor, cat, dia, notes=text, start_date=start_date,
+                frequency=frequency, pay_month=mes,
             )
         except ValueError as exc:
             return _err(str(exc))
         return (
             f"✅ *Receita fixa criada:* {rec['name']}\n"
-            f"💰 {fmt_brl(valor)} · todo dia {dia}\n"
+            f"💰 {fmt_brl(valor)} · {_fmt_quando(frequency, dia, mes)}\n"
             f"📅 {_fmt_start(rec.get('start_date'))}\n"
             f"É só o cadastro — a Piggy credita sozinha no dia. Edite na aba *Recorrentes* do dashboard."
         )
@@ -99,15 +112,26 @@ def add(user_id: int, text: str, entities: dict) -> str:
         rec = create_recurring_expense(
             user_id, name, valor, cat, dia, "account",
             notes=text, start_date=start_date,
+            frequency=frequency, due_month=mes,
         )
     except ValueError as exc:
         return _err(str(exc))
     return (
         f"✅ *Gasto fixo criado:* {rec['name']}\n"
-        f"💸 {fmt_brl(valor)} · débito na conta todo dia {dia}\n"
+        f"💸 {fmt_brl(valor)} · débito na conta {_fmt_quando(frequency, dia, mes)}\n"
         f"📅 {_fmt_start(rec.get('start_date'))}\n"
         f"Não tira nada agora — só no dia. Edite na aba *Recorrentes* do dashboard."
     )
+
+
+_MESES_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
+             "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
+
+
+def _fmt_quando(frequency: str, dia: int, mes: int | None) -> str:
+    if frequency == "annual" and mes and 1 <= mes <= 12:
+        return f"todo ano no dia {dia} de {_MESES_PT[mes - 1]}"
+    return f"todo dia {dia}"
 
 
 def _fmt_start(start_iso) -> str:

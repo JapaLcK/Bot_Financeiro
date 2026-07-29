@@ -2819,7 +2819,7 @@ const RECURRING_CATEGORY_EMOJI = {
 // 1ª ocorrência do dia `dayNum` (1-31) em/depois de hoje E de `startISO`
 // (YYYY-MM-DD, opcional). Espelha o guard do charger: recorrência com início
 // futuro só "vence" a partir do start_date.
-function _nextRecurringOccurrence(dayNum, startISO) {
+function _nextRecurringOccurrence(dayNum, startISO, frequency, monthNum) {
   const floor = new Date();
   floor.setHours(0, 0, 0, 0);
   if (startISO) {
@@ -2827,6 +2827,13 @@ function _nextRecurringOccurrence(dayNum, startISO) {
     if (s > floor) { floor.setTime(s.getTime()); }
   }
   const dd = Math.min(dayNum, 28);
+  // Anual: próxima ocorrência no mês monthNum (1-12), este ano ou o que vem.
+  if (frequency === "annual" && monthNum) {
+    const m = monthNum - 1; // JS: 0-11
+    let d = new Date(floor.getFullYear(), m, dd);
+    if (d < floor) d = new Date(floor.getFullYear() + 1, m, dd);
+    return d;
+  }
   let d = new Date(floor.getFullYear(), floor.getMonth(), dd);
   if (d < floor) d = new Date(floor.getFullYear(), floor.getMonth() + 1, dd);
   return d;
@@ -2931,7 +2938,7 @@ function _renderFixedView(items) {
   // Próximo vencimento (1ª data do due_day em/depois de hoje E do start_date)
   const today = new Date();
   const nextDue = active.map(r => ({
-    rec: r, date: _nextRecurringOccurrence(r.due_day, r.start_date),
+    rec: r, date: _nextRecurringOccurrence(r.due_day, r.start_date, r.frequency, r.due_month),
   })).sort((a, b) => a.date - b.date);
   const next = nextDue[0];
 
@@ -3024,9 +3031,12 @@ function _recurringEmoji(r) {
 }
 
 function _renderRecurringRow(r) {
+  const quando = r.frequency === "annual" && r.due_month
+    ? `anual · ${r.due_day}/${_MESES_ABREV[r.due_month - 1]}`
+    : `dia ${r.due_day}`;
   const payment = r.payment_type === "credit_card"
-    ? `Cartão ${escapeHtmlSafe(r.card_name || "?")} · dia ${r.due_day}`
-    : `Débito · dia ${r.due_day}`;
+    ? `Cartão ${escapeHtmlSafe(r.card_name || "?")} · ${quando}`
+    : `Débito · ${quando}`;
   let adjustText = "";
   if (r.last_amount != null && r.last_amount > 0) {
     const delta = r.amount - r.last_amount;
@@ -3108,6 +3118,19 @@ function _ensureRecurringModal() {
             </div>
             <div class="form-row">
               <div class="field">
+                <label for="recurring-frequency">Frequência *</label>
+                <select id="recurring-frequency" onchange="_toggleRecurringMonthField()">
+                  <option value="monthly">Mensal (todo mês)</option>
+                  <option value="annual">Anual (1x por ano)</option>
+                </select>
+              </div>
+              <div class="field" id="recurring-month-field" style="display:none">
+                <label for="recurring-month">Mês do vencimento *</label>
+                <select id="recurring-month">${_monthOptionsHTML()}</select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
                 <label for="recurring-payment-type">Forma de pagamento *</label>
                 <select id="recurring-payment-type" onchange="_toggleRecurringCardField()">
                   <option value="account">Débito automático na conta</option>
@@ -3160,6 +3183,20 @@ function _toggleRecurringCardField() {
   if (type === "credit_card") _populateRecurringCardOptions();
 }
 
+const _MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+const _MESES_ABREV = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
+function _monthOptionsHTML(selected) {
+  return _MESES.map((m, i) => `<option value="${i + 1}"${selected == i + 1 ? " selected" : ""}>${m}</option>`).join("");
+}
+// Mostra o campo "Mês" só quando a frequência é Anual (vale pros dois modais:
+// prefix "recurring" (gasto) ou "recurring-income" (receita)).
+function _toggleRecurringMonthField(prefix = "recurring") {
+  const freq = document.getElementById(`${prefix}-frequency`);
+  const field = document.getElementById(`${prefix}-month-field`);
+  if (!freq || !field) return;
+  field.style.display = freq.value === "annual" ? "" : "none";
+}
+
 function _populateRecurringCardOptions(selectedId = null) {
   const sel = document.getElementById("recurring-card");
   const cards = (lastData && lastData.credit_cards) || [];
@@ -3182,10 +3219,13 @@ function openRecurringEditModal(rec) {
   document.getElementById("recurring-start-date").value = isEdit ? (rec.start_date || "") : new Date().toLocaleDateString("en-CA");
   document.getElementById("recurring-category").value = isEdit ? rec.category : "";
   document.getElementById("recurring-payment-type").value = isEdit ? rec.payment_type : "account";
+  document.getElementById("recurring-frequency").value = isEdit ? (rec.frequency || "monthly") : "monthly";
+  document.getElementById("recurring-month").value = (isEdit && rec.due_month) ? rec.due_month : (new Date().getMonth() + 1);
   document.getElementById("recurring-is-essential").checked = isEdit ? !!rec.is_essential : false;
   document.getElementById("recurring-notes").value = isEdit ? (rec.notes || "") : "";
   document.getElementById("recurring-delete-btn").style.display = isEdit ? "" : "none";
   _toggleRecurringCardField();
+  _toggleRecurringMonthField("recurring");
   if (isEdit && rec.payment_type === "credit_card") _populateRecurringCardOptions(rec.card_id);
 
   document.getElementById("recurring-edit-overlay").classList.add("open");
@@ -3207,6 +3247,9 @@ async function saveRecurring() {
     category: document.getElementById("recurring-category").value.trim(),
     due_day: parseInt(document.getElementById("recurring-due-day").value, 10),
     start_date: document.getElementById("recurring-start-date").value || null,
+    frequency: document.getElementById("recurring-frequency").value,
+    due_month: document.getElementById("recurring-frequency").value === "annual"
+      ? parseInt(document.getElementById("recurring-month").value, 10) : null,
     payment_type: document.getElementById("recurring-payment-type").value,
     card_id: null,
     is_essential: document.getElementById("recurring-is-essential").checked,
@@ -3438,7 +3481,7 @@ function _renderRecurringIncomeView(items) {
   // Próximo recebimento (1ª data do pay_day em/depois de hoje E do start_date)
   const today = new Date();
   const nextPay = active.map(r => ({
-    rec: r, date: _nextRecurringOccurrence(r.pay_day, r.start_date),
+    rec: r, date: _nextRecurringOccurrence(r.pay_day, r.start_date, r.frequency, r.pay_month),
   })).sort((a, b) => a.date - b.date);
   const next = nextPay[0];
 
@@ -3531,7 +3574,10 @@ function _recurringIncomeEmoji(r) {
 }
 
 function _renderRecurringIncomeRow(r) {
-  const when = `${r.is_primary ? "Renda principal" : "Renda extra"} · dia ${r.pay_day}`;
+  const quandoInc = r.frequency === "annual" && r.pay_month
+    ? `anual · ${r.pay_day}/${_MESES_ABREV[r.pay_month - 1]}`
+    : `dia ${r.pay_day}`;
+  const when = `${r.is_primary ? "Renda principal" : "Renda extra"} · ${quandoInc}`;
   let adjustText = "";
   if (r.last_amount != null && r.last_amount > 0) {
     const delta = r.amount - r.last_amount;
@@ -3602,6 +3648,19 @@ function _ensureRecurringIncomeModal() {
             </div>
             <div class="form-row">
               <div class="field">
+                <label for="recurring-income-frequency">Frequência *</label>
+                <select id="recurring-income-frequency" onchange="_toggleRecurringMonthField('recurring-income')">
+                  <option value="monthly">Mensal (todo mês)</option>
+                  <option value="annual">Anual (1x por ano)</option>
+                </select>
+              </div>
+              <div class="field" id="recurring-income-month-field" style="display:none">
+                <label for="recurring-income-month">Mês do recebimento *</label>
+                <select id="recurring-income-month">${_monthOptionsHTML()}</select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
                 <label for="recurring-income-start-date">Começa a partir de</label>
                 <input type="date" id="recurring-income-start-date" />
                 <span style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">O 1º crédito é no dia do recebimento em/após esta data. Deixe hoje pra começar já.</span>
@@ -3645,9 +3704,12 @@ function openRecurringIncomeEditModal(rec) {
   document.getElementById("recurring-income-pay-day").value = isEdit ? rec.pay_day : "";
   document.getElementById("recurring-income-start-date").value = isEdit ? (rec.start_date || "") : new Date().toLocaleDateString("en-CA");
   document.getElementById("recurring-income-category").value = isEdit ? rec.category : "";
+  document.getElementById("recurring-income-frequency").value = isEdit ? (rec.frequency || "monthly") : "monthly";
+  document.getElementById("recurring-income-month").value = (isEdit && rec.pay_month) ? rec.pay_month : (new Date().getMonth() + 1);
   document.getElementById("recurring-income-is-primary").checked = isEdit ? !!rec.is_primary : false;
   document.getElementById("recurring-income-notes").value = isEdit ? (rec.notes || "") : "";
   document.getElementById("recurring-income-delete-btn").style.display = isEdit ? "" : "none";
+  _toggleRecurringMonthField("recurring-income");
 
   document.getElementById("recurring-income-edit-overlay").classList.add("open");
   setTimeout(() => document.getElementById("recurring-income-name").focus(), 50);
@@ -3667,6 +3729,9 @@ async function saveRecurringIncome() {
     category: document.getElementById("recurring-income-category").value.trim(),
     pay_day: parseInt(document.getElementById("recurring-income-pay-day").value, 10),
     start_date: document.getElementById("recurring-income-start-date").value || null,
+    frequency: document.getElementById("recurring-income-frequency").value,
+    pay_month: document.getElementById("recurring-income-frequency").value === "annual"
+      ? parseInt(document.getElementById("recurring-income-month").value, 10) : null,
     is_primary: document.getElementById("recurring-income-is-primary").checked,
     notes: document.getElementById("recurring-income-notes").value.trim() || null,
   };

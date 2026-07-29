@@ -30,6 +30,23 @@ def _parse_start_date(value: Any, default: date | None = None) -> date | None:
         raise ValueError("DATA_INICIO_INVALIDA")
 
 
+def validate_frequency(frequency: Any, month: Any) -> tuple[str, int | None]:
+    """Valida frequency ('monthly'|'annual') + o mês. Anual exige mês 1-12;
+    mensal ignora o mês (retorna None). Levanta ValueError se inválido."""
+    freq = (str(frequency) if frequency is not None else "monthly").strip().lower() or "monthly"
+    if freq not in ("monthly", "annual"):
+        raise ValueError("FREQUENCIA_INVALIDA")
+    if freq == "annual":
+        try:
+            m = int(month)
+        except (TypeError, ValueError):
+            raise ValueError("MES_INVALIDO")
+        if not (1 <= m <= 12):
+            raise ValueError("MES_INVALIDO")
+        return "annual", m
+    return "monthly", None
+
+
 def list_recurring_expenses(user_id: int, include_inactive: bool = False) -> list[dict[str, Any]]:
     """Lista todos os gastos fixos do user."""
     ensure_user(user_id)
@@ -41,7 +58,8 @@ def list_recurring_expenses(user_id: int, include_inactive: bool = False) -> lis
                        r.payment_type, r.card_id, c.name as card_name,
                        r.is_essential, r.is_active,
                        r.last_amount, r.last_amount_changed_at,
-                       r.last_charged_ym, r.notes, r.created_at, r.start_date
+                       r.last_charged_ym, r.notes, r.created_at, r.start_date,
+                       r.frequency, r.due_month
                 from recurring_expenses r
                 left join credit_cards c on c.id = r.card_id
                 where r.user_id = %s
@@ -70,6 +88,8 @@ def list_recurring_expenses(user_id: int, include_inactive: bool = False) -> lis
             "notes": r["notes"],
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
             "start_date": r["start_date"].isoformat() if r["start_date"] else None,
+            "frequency": r["frequency"] or "monthly",
+            "due_month": int(r["due_month"]) if r["due_month"] is not None else None,
         })
     return out
 
@@ -84,7 +104,8 @@ def get_recurring_expense(user_id: int, rec_id: int) -> dict[str, Any] | None:
                        r.payment_type, r.card_id, c.name as card_name,
                        r.is_essential, r.is_active,
                        r.last_amount, r.last_amount_changed_at,
-                       r.last_charged_ym, r.notes, r.created_at, r.start_date
+                       r.last_charged_ym, r.notes, r.created_at, r.start_date,
+                       r.frequency, r.due_month
                 from recurring_expenses r
                 left join credit_cards c on c.id = r.card_id
                 where r.user_id = %s and r.id = %s
@@ -106,6 +127,8 @@ def get_recurring_expense(user_id: int, rec_id: int) -> dict[str, Any] | None:
                 "notes": r["notes"],
                 "created_at": r["created_at"].isoformat() if r["created_at"] else None,
                 "start_date": r["start_date"].isoformat() if r["start_date"] else None,
+                "frequency": r["frequency"] or "monthly",
+                "due_month": int(r["due_month"]) if r["due_month"] is not None else None,
             }
 
 
@@ -131,11 +154,15 @@ def create_recurring_expense(
     is_essential: bool = False,
     notes: str | None = None,
     start_date: date | str | None = None,
+    frequency: str = "monthly",
+    due_month: int | None = None,
 ) -> dict[str, Any]:
     """Cria gasto fixo. Levanta ValueError se input inválido.
 
     `start_date` = a partir de quando a recorrência vale (default: hoje). A
     primeira cobrança é a primeira ocorrência de `due_day` em/depois dessa data.
+    `frequency` = 'monthly' (todo mês no due_day) ou 'annual' (1x/ano no
+    `due_month`/due_day).
     """
     ensure_user(user_id)
     name = (name or "").strip()
@@ -145,6 +172,7 @@ def create_recurring_expense(
         raise ValueError("VALOR_INVALIDO")
     if due_day < 1 or due_day > 31:
         raise ValueError("DIA_INVALIDO")
+    freq, month = validate_frequency(frequency, due_month)
     start = _parse_start_date(start_date, default=date.today())
     if payment_type not in ("account", "credit_card"):
         raise ValueError("FORMA_PAGAMENTO_INVALIDA")
@@ -170,13 +198,15 @@ def create_recurring_expense(
                 """
                 insert into recurring_expenses (
                     user_id, name, amount, category, due_day, payment_type,
-                    card_id, is_essential, is_active, notes, start_date
-                ) values (%s, %s, %s, %s, %s, %s, %s, %s, true, %s, %s)
+                    card_id, is_essential, is_active, notes, start_date,
+                    frequency, due_month
+                ) values (%s, %s, %s, %s, %s, %s, %s, %s, true, %s, %s, %s, %s)
                 returning id
                 """,
                 (
                     user_id, name, Decimal(str(amount)), cat, int(due_day),
                     payment_type, card_id, bool(is_essential), note, start,
+                    freq, month,
                 ),
             )
             new_id = cur.fetchone()["id"]
@@ -198,6 +228,8 @@ def update_recurring_expense(
     is_active: bool | None = None,
     notes: str | None = None,
     start_date: date | str | None = None,
+    frequency: str | None = None,
+    due_month: int | None = None,
 ) -> dict[str, Any]:
     """PATCH. Quando amount muda, registra `last_amount` + timestamp (detector de reajuste)."""
     ensure_user(user_id)
@@ -254,6 +286,20 @@ def update_recurring_expense(
     if start_date is not None:
         sets.append("start_date = %s")
         params.append(_parse_start_date(start_date, default=date.today()))
+    if frequency is not None:
+        # valida frequency + mês juntos; se mudar pra anual, precisa do mês
+        # (usa o due_month enviado ou o atual do registro).
+        month_src = due_month if due_month is not None else current.get("due_month")
+        freq, month = validate_frequency(frequency, month_src)
+        sets.append("frequency = %s")
+        params.append(freq)
+        sets.append("due_month = %s")
+        params.append(month)
+    elif due_month is not None and (current.get("frequency") == "annual"):
+        # só mudou o mês de um anual já existente
+        _f, month = validate_frequency("annual", due_month)
+        sets.append("due_month = %s")
+        params.append(month)
 
     if not sets:
         return current

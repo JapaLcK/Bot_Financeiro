@@ -66,7 +66,16 @@ def charge_due_recurring_expenses_once(today: date | None = None) -> list[dict]:
                 from recurring_expenses r
                 where r.is_active = true
                   and r.due_day <= %s
-                  and (r.last_charged_ym is null or r.last_charged_ym <> %s)
+                  and (
+                      -- MENSAL (default): cobra todo mês; idempotência por ym.
+                      (coalesce(r.frequency, 'monthly') = 'monthly'
+                           and (r.last_charged_ym is null or r.last_charged_ym <> %s))
+                      -- ANUAL: só no mês due_month; idempotência por ANO (prefixo
+                      -- YYYY do last_charged_ym, que guardamos como o ym da cobrança).
+                      or (r.frequency = 'annual'
+                           and r.due_month = %s
+                           and (r.last_charged_ym is null or left(r.last_charged_ym, 4) <> %s))
+                  )
                   -- Não retroagir: a recorrência começa em start_date (escolhido
                   -- pelo user; fallback created_at). Se o vencimento deste mês é
                   -- anterior ao início, só cobra a partir do mês do start_date.
@@ -79,7 +88,7 @@ def charge_due_recurring_expenses_once(today: date | None = None) -> list[dict]:
                       )
                   )
                 """,
-                (today.day, ym, ym, ym),
+                (today.day, ym, today.month, str(today.year), ym, ym),
             )
             due = cur.fetchall() or []
 
@@ -224,7 +233,15 @@ def credit_due_recurring_incomes_once(today: date | None = None) -> list[dict]:
                 from recurring_incomes r
                 where r.is_active = true
                   and r.pay_day <= %s
-                  and (r.last_credited_ym is null or r.last_credited_ym <> %s)
+                  and (
+                      -- MENSAL (default): credita todo mês; idempotência por ym.
+                      (coalesce(r.frequency, 'monthly') = 'monthly'
+                           and (r.last_credited_ym is null or r.last_credited_ym <> %s))
+                      -- ANUAL: só no mês pay_month; idempotência por ANO.
+                      or (r.frequency = 'annual'
+                           and r.pay_month = %s
+                           and (r.last_credited_ym is null or left(r.last_credited_ym, 4) <> %s))
+                  )
                   -- Mesmo guard das despesas: começa a valer em start_date
                   -- (fallback created_at). start_date futuro → não credita ainda.
                   and (
@@ -235,7 +252,7 @@ def credit_due_recurring_incomes_once(today: date | None = None) -> list[dict]:
                       )
                   )
                 """,
-                (today.day, ym, ym, ym),
+                (today.day, ym, today.month, str(today.year), ym, ym),
             )
             due = cur.fetchall() or []
 
