@@ -66,14 +66,25 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
 
     scored = sorted(((_score(b), b) for b in pend), key=lambda x: x[0], reverse=True)
     best_score, best = scored[0]
-    if best_score == 0:
-        return None  # nenhuma conta casa → vira lançamento normal
 
-    # empate real e usuário não deu pista suficiente → pergunta qual
-    ties = [b for s, b in scored if s == best_score]
-    if len(ties) > 1 and best_score < 3:
-        nomes = ", ".join(b.get("name") or "?" for b in ties[:5])
-        return f"Você tem contas a pagar pendentes: {nomes}. Qual delas você pagou?"
+    if best_score == 0:
+        # Nenhuma conta casou pelo nome. Se o usuário NÃO deu um alvo específico
+        # (respondeu só "paguei" / "paguei essa conta" — como o lembrete pede) e
+        # só existe UMA conta pendente, paga ela. Se houver várias, pergunta qual.
+        # Se o alvo era específico e não casou, deixa virar lançamento avulso.
+        if target:
+            return None
+        if len(pend) == 1:
+            best = pend[0]
+        else:
+            nomes = ", ".join(b.get("name") or "?" for b in pend[:5])
+            return f"Você tem contas a pagar pendentes: {nomes}. Qual delas você pagou?"
+    else:
+        # empate real e usuário não deu pista suficiente → pergunta qual
+        ties = [b for s, b in scored if s == best_score]
+        if len(ties) > 1 and best_score < 3:
+            nomes = ", ".join(b.get("name") or "?" for b in ties[:5])
+            return f"Você tem contas a pagar pendentes: {nomes}. Qual delas você pagou?"
 
     paid = mark_bill_paid(user_id, int(best["id"]), amount)
     if paid is None:
