@@ -38,7 +38,19 @@ def add(user_id: int, text: str, entities: dict) -> str:
     except (TypeError, ValueError):
         valor = 0.0
     if valor <= 0:
-        return "Qual o valor desse recorrente? Ex: *gasto fixo de 100 todo dia 10*"
+        # Falta o valor (ex.: typo "00 reais"). Re-arma um pending de esclarecimento
+        # PRA NÃO PERDER O CONTEXTO de recorrente — senão a próxima msg ("100") é
+        # classificada do zero e vira despesa avulsa. A resposta cai no
+        # _resolve_clarification, que reclassifica com contexto e volta pra cá.
+        import db
+        pergunta = "Qual o valor desse recorrente? Ex: *gasto fixo de 100 todo dia 10*"
+        db.set_pending_action(user_id, "clarification", {
+            "intent": "recurring.add",
+            "entities": dict(entities),
+            "question": pergunta,
+            "orig_text": text,
+        })
+        return pergunta
 
     # dia do mês (vencimento/recebimento). Se o usuário não disser ("todo mês"
     # sem dia), assume o dia de HOJE — cria mesmo assim (anti-fricção); dá pra

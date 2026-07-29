@@ -475,11 +475,16 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
             )
 
     # Fallback quando a IA-com-contexto não resolveu (rate limit / API / baixa
-    # confiança): se o pending era um recorrente pedindo o NOME, usa a resposta
-    # como nome e cria mesmo assim — não perde o "aluguel".
+    # confiança): mantém o contexto de recorrente. Resposta numérica = o VALOR
+    # que faltava; resposta textual = o NOME. Assim não perde nem vira avulso.
     if original_intent == "recurring.add":
+        from parsers import _extract_valor
         ents = dict(original_entities)
-        if not ents.get("nome"):
+        v = _extract_valor(user_response)
+        has_valor = bool(ents.get("valor")) and float(ents.get("valor") or 0) > 0
+        if v is not None and not has_valor:
+            ents["valor"] = v
+        elif not ents.get("nome"):
             ents["nome"] = user_response.strip()
         return _dispatch_actionable(
             "recurring.add", user_id, f"{orig_text} {user_response}".strip(),
