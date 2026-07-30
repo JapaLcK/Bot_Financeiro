@@ -74,10 +74,13 @@ def add(user_id: int, text: str, entities: dict) -> str:
     tipo = (entities.get("tipo") or "despesa").strip().lower()
     is_income = tipo in _INCOME_WORDS
 
-    # conta a pagar de valor variável (água/luz) pode nascer SEM valor — nesse
-    # caso não pedimos a estimativa (é opcional). Só receita/gasto fixo/conta
-    # fixa exigem o valor.
-    is_variable = (not is_income) and _is_variable_amount(text, entities)
+    # Conta a pagar (boleto/lembrete): o valor é SEMPRE uma estimativa (o valor
+    # real é informado ao pagar), então pode nascer sem valor. Gasto fixo/receita
+    # exigem o valor (o charger debita/credita esse valor sozinho).
+    is_manual = (not is_income) and (
+        _is_manual_bill(text, entities) or _is_variable_amount(text, entities)
+    )
+    is_variable = is_manual  # conta a pagar = valor sempre estimado
 
     # valor
     try:
@@ -169,10 +172,7 @@ def add(user_id: int, text: str, entities: dict) -> str:
         if guessed and guessed != "outros":
             categoria = guessed
     cat = categoria or "outros"
-    # is_variable já foi calculado no topo (antes do guard de valor). valor
-    # variável implica conta a pagar (não dá pra debitar sozinho um valor que
-    # muda todo mês) — força manual.
-    is_manual = is_variable or _is_manual_bill(text, entities)
+    # is_manual / is_variable já foram calculados no topo (antes do guard de valor).
     name = nome or cat.capitalize() or ("Conta a pagar" if is_manual else "Gasto fixo")
     try:
         rec = create_recurring_expense(
