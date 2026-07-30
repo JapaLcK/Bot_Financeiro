@@ -345,7 +345,7 @@ TOOLS: list[Tool] = [
                     "properties": {
                         "name": {"type": "string", "description": "Descrição/fornecedor (ex: 'Distribuidora XYZ', 'IPTU')."},
                         "amount": {"type": "number", "description": "Valor do boleto."},
-                        "due_date": {"type": "string", "description": "Vencimento: 'AAAA-MM-DD' ou 'DD/MM' (ano inferido)."},
+                        "due_date": {"type": "string", "description": "Vencimento: 'AAAA-MM-DD' ou 'DD/MM' (ano inferido). Se só o dia for dito ('dia 10'), passe SÓ o dia ('10')."},
                         "days": {"type": "integer", "description": "Alternativa: vencimento em N dias a partir de hoje."},
                     },
                     "required": ["name", "amount"],
@@ -372,7 +372,7 @@ TOOLS: list[Tool] = [
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "date": {"type": "string", "description": "Data limite do prazo: 'AAAA-MM-DD' ou 'DD/MM'."},
+                        "date": {"type": "string", "description": "Data limite do prazo: 'AAAA-MM-DD' ou 'DD/MM'. Se o usuário NÃO disser o mês (ex: 'dia 17'), passe SÓ o dia ('17') — o sistema usa o próximo dia 17. NÃO invente um mês."},
                         "days": {"type": "integer", "description": "Alternativa: prazo em N dias a partir de hoje."},
                         "amount": {"type": "number", "description": "Opcional: valor de um boleto novo que ele está pensando em aceitar nesse prazo."},
                     },

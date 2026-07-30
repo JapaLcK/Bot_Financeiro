@@ -504,6 +504,33 @@ def _has_bill_marker(norm: str) -> bool:
     return any(mk in norm for mk in _BILL_CREATE_MARKERS)
 
 
+# Marcadores de BOLETO / AGENDA / PRAZO — tudo isso vive na IA conversacional
+# (tools get_bills_to_pay, add_boleto, check_cashflow, mark_bill_paid), NÃO no
+# route() determinístico. Sem este desvio, "como tô de boletos no dia 17" era
+# classificado como launches.list (por causa do "dia 17") e o bot pedia o mês.
+_BOLETO_DOMAIN_MARKERS = (
+    "boleto", "boletos", "conta a pagar", "contas a pagar", "conta pra pagar",
+    "contas pra pagar", "conta para pagar", "contas para pagar",
+)
+_PRAZO_MARKERS = (
+    "to tranquilo", "tranquilo nesse prazo", "tranquilo ate", "aguento esse prazo",
+    "aguento o prazo", "aguento pagar", "da pra pegar", "consigo pagar ate",
+    "como to de boleto", "como to de conta", "como estou de boleto",
+)
+
+
+def _is_boleto_ai_query(norm: str) -> bool:
+    """True se a mensagem é sobre boletos/contas a pagar/prazo e deve ir pra IA
+    (não pro route determinístico). Exclui pagamento ("paguei", tratado no
+    launches.add) e criação RECORRENTE ("boleto todo mês" → recurring.add)."""
+    if re.match(r"^(ja\s+)?(paguei|quitei)\b", norm):
+        return False
+    if any(mk in norm for mk in _RECURRENCE_MARKERS):
+        return False  # boleto recorrente ("todo mês") segue pro recurring.add
+    return (any(mk in norm for mk in _BOLETO_DOMAIN_MARKERS)
+            or any(mk in norm for mk in _PRAZO_MARKERS))
+
+
 # ---------------------------------------------------------------------------
 # Tier 1 — busca exata
 # ---------------------------------------------------------------------------
@@ -802,6 +829,12 @@ def classify(text: str, user_id: int | None = None) -> IntentResult:
     user_id: quando fornecido, aplica rate limiting no Tier 3 (chamada à IA).
     """
     norm = _normalize(text)
+
+    # Boletos / contas a pagar / prazo → IA conversacional (é lá que estão as
+    # tools). Retorna out_of_scope pra cair no fallback de IA (handle_incoming),
+    # em vez de o determinístico tratar como launches.list por causa da data.
+    if _is_boleto_ai_query(norm):
+        return IntentResult(intent="out_of_scope", confidence=0.4)
 
     # Recorrência (valor + "todo mes"/"mensal"/"recorrente"/"gasto fixo"/"anual"…)
     # vai DIRETO pra IA (Tier 3), que classifica recurring.add. Precede os atalhos
