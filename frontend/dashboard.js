@@ -426,11 +426,8 @@ function navigateTo(view) {
   if (view === "installments") loadInstallmentsView();
   if (view === "categories") loadCategoriesView();
   if (view === "budgets") loadBudgetsView();
-  // View Recorrentes: carrega só a aba ativa (gastos fixos ou receitas fixas).
-  if (view === "fixed") {
-    if (_recurringTab === "incomes") loadRecurringIncomeView();
-    else loadFixedView();
-  }
+  // View Recorrentes: abre sempre na Visão geral (resumo das 3 áreas).
+  if (view === "fixed") setRecurringTab("overview");
   if (view === "goals") loadGoalsView();
   if (view === "affiliate") loadAffiliateView();
 }
@@ -3482,31 +3479,93 @@ const RECURRING_INCOME_CATEGORY_EMOJI = {
   "comissão": "🤑", "bônus": "🎁", "outros": "🏷️",
 };
 
-// Aba ativa da view Recorrentes: "expenses" | "incomes"
-let _recurringTab = "expenses";
+// Aba ativa da view Recorrentes: "overview" | "expenses" | "incomes" | "bills"
+let _recurringTab = "overview";
 let _recurringIncomeCache = null;
 let _recurringIncomeFetchInFlight = null;
 
 function setRecurringTab(tab) {
-  if (!["expenses", "incomes", "bills"].includes(tab)) return;
+  if (!["overview", "expenses", "incomes", "bills"].includes(tab)) return;
   _recurringTab = tab;
   document.querySelectorAll("#recurring-tabs .ftab").forEach(b => {
     b.classList.toggle("active", b.dataset.rectab === tab);
   });
   const panes = {
+    overview: document.getElementById("recurring-overview-pane"),
     expenses: document.getElementById("recurring-expenses-pane"),
     incomes:  document.getElementById("recurring-incomes-pane"),
     bills:    document.getElementById("recurring-bills-pane"),
   };
   Object.entries(panes).forEach(([k, el]) => { if (el) el.style.display = k === tab ? "" : "none"; });
 
+  // Botão "+ Novo" some na Visão geral (cada card tem seu próprio atalho).
   const btn = document.getElementById("recurring-new-btn");
-  if (btn) btn.textContent = tab === "incomes" ? "+ Nova receita fixa"
-    : tab === "bills" ? "+ Nova conta a pagar" : "+ Novo gasto fixo";
+  if (btn) {
+    btn.style.display = tab === "overview" ? "none" : "";
+    btn.textContent = tab === "incomes" ? "+ Nova receita fixa"
+      : tab === "bills" ? "+ Nova conta a pagar" : "+ Novo gasto fixo";
+  }
 
-  if (tab === "incomes") loadRecurringIncomeView();
+  if (tab === "overview") loadRecurringOverview();
+  else if (tab === "incomes") loadRecurringIncomeView();
   else if (tab === "bills") loadBillsView();
   else loadFixedView();
+}
+
+// ── Visão geral: resumo das 3 áreas em cards, com atalho pra cada aba ────────
+async function loadRecurringOverview() {
+  const wrap = document.getElementById("recurring-overview-cards");
+  if (!wrap) return;
+  wrap.innerHTML = `<div class="mock-card"><div class="empty" style="padding:16px;color:var(--text-3)">Carregando…</div></div>`;
+  // Busca as 3 áreas em paralelo; cada uma tolera falha (403/erro) sem derrubar as outras.
+  const j = async (url) => {
+    try { const r = await fetch(url, { credentials: "same-origin" }); if (!r.ok) return null; return await r.json(); }
+    catch (_) { return null; }
+  };
+  const [exp, inc, bills] = await Promise.all([
+    j(`${API}/recurring-expenses/${USER_ID}`),
+    j(`${API}/recurring-incomes/${USER_ID}`),
+    j(`${API}/recurring-bills/${USER_ID}?include_paid=false`),
+  ]);
+
+  // Gastos fixos (autopay)
+  const gastos = ((exp && exp.recurring) || []).filter(r => r.is_active && (r.payment_mode || "autopay") === "autopay");
+  const totalGastos = gastos.reduce((s, r) => s + _recMonthlyEquiv(r), 0);
+
+  // Receitas fixas (endpoint retorna a chave "incomes")
+  const receitas = ((inc && inc.incomes) || []).filter(r => r.is_active);
+  const totalReceitas = receitas.reduce((s, r) => s + _recMonthlyEquiv(r), 0);
+
+  // Contas a pagar (pendentes)
+  const pend = ((bills && bills.bills) || []).filter(b => b.status === "pending");
+  const totalPend = pend.reduce((s, b) => s + (b.amount || 0), 0);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const overdue = pend.filter(b => new Date(b.due_date + "T00:00:00") < today).length;
+  const prox = pend
+    .map(b => ({ b, d: new Date(b.due_date + "T00:00:00") }))
+    .filter(x => x.d >= today)
+    .sort((a, b) => a.d - b.d)[0];
+
+  const proText = prox
+    ? `${escapeHtmlSafe(prox.b.name || "conta")} · ${prox.d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}`
+    : (pend.length ? "todas vencidas" : "nenhuma pendente");
+
+  const card = (accent, titulo, valorLabel, valor, sub, tab, cta) => `
+    <div class="mock-card" style="border-top:3px solid ${accent}">
+      <h3 style="margin-bottom:6px">${titulo}</h3>
+      <div style="font-size:.72rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em">${valorLabel}</div>
+      <div style="font-size:1.5rem;font-weight:700;color:${accent}">${valor}</div>
+      <div style="font-size:.8rem;color:var(--text-2);margin:6px 0 12px">${sub}</div>
+      <button class="mock-cta outline" style="width:100%" onclick="setRecurringTab('${tab}')">${cta}</button>
+    </div>`;
+
+  wrap.innerHTML =
+    card("#22c55e", "🔺 Receitas fixas", "Entra por mês", _fmtBRL(totalReceitas),
+         `${receitas.length} recorrente(s)`, "incomes", "Ver receitas fixas") +
+    card("#fb7185", "🔻 Gastos fixos", "Sai por mês (equiv.)", _fmtBRL(totalGastos),
+         `${gastos.length} recorrente(s)`, "expenses", "Ver gastos fixos") +
+    card("#fbbf24", "🧾 Contas a pagar", "A pagar", _fmtBRL(totalPend),
+         `${pend.length} pendente(s)${overdue ? ` · ${overdue} vencida(s)` : ""} · próxima: ${proText}`, "bills", "Ver contas a pagar");
 }
 
 // O botão do header muda de destino conforme a aba ativa.

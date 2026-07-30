@@ -361,12 +361,17 @@
     </div>
 
     <div class="filter-tabs" id="recurring-tabs" role="tablist" style="margin:-6px 0 16px">
-      <button class="ftab active" type="button" role="tab" data-rectab="expenses" onclick="setRecurringTab('expenses')">🔻 Gastos fixos</button>
+      <button class="ftab active" type="button" role="tab" data-rectab="overview" onclick="setRecurringTab('overview')">📊 Visão geral</button>
+      <button class="ftab" type="button" role="tab" data-rectab="expenses" onclick="setRecurringTab('expenses')">🔻 Gastos fixos</button>
       <button class="ftab" type="button" role="tab" data-rectab="incomes" onclick="setRecurringTab('incomes')">🔺 Receitas fixas</button>
       <button class="ftab" type="button" role="tab" data-rectab="bills" onclick="setRecurringTab('bills')">🧾 Contas a pagar</button>
     </div>
 
-    <div id="recurring-expenses-pane">
+    <div id="recurring-overview-pane">
+      <div id="recurring-overview-cards" class="mock-grid cols-2"></div>
+    </div>
+
+    <div id="recurring-expenses-pane" style="display:none">
       <div id="recurring-stats" class="stats-row"></div>
 
       <div class="mock-grid cols-2">
