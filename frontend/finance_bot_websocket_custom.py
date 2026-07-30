@@ -4764,6 +4764,22 @@ async def recurring_bill_pay_route(request: Request, user_id: int, bill_id: int,
     return {"ok": True, "bill": bill}
 
 
+@app.get("/recurring-bills/{user_id}/projection")
+async def boleto_projection_route(request: Request, user_id: int, date: str, amount: float | None = None):
+    """Projeção de caixa até uma data ('tô tranquilo nesse prazo?'). `date`=alvo
+    (YYYY-MM-DD), `amount`=boleto novo em consideração (opcional)."""
+    _authorize_dashboard_access(request, user_id)
+    _require_boletos_access(user_id)
+    from datetime import date as _date
+    try:
+        target = _date.fromisoformat(str(date)[:10])
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Data inválida (use AAAA-MM-DD).")
+    from core.services.cashflow import project
+    result = await asyncio.to_thread(project, user_id, target, float(amount or 0))
+    return {"ok": True, "projection": result}
+
+
 @app.post("/recurring-bills/{user_id}")
 async def boleto_create_route(request: Request, user_id: int, payload: BoletoPayload):
     """Cria um boleto AVULSO na agenda (fornecedor + valor + vencimento)."""

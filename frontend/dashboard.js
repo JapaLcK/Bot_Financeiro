@@ -3826,6 +3826,57 @@ async function deleteBoleto(id, name) {
   }
 }
 
+// Simulador "tô tranquilo nesse prazo?" — projeta o caixa até uma data.
+async function simularPrazo() {
+  const dateEl = document.getElementById("boleto-sim-date");
+  const amtEl = document.getElementById("boleto-sim-amount");
+  const resEl = document.getElementById("boleto-sim-result");
+  if (!dateEl || !resEl) return;
+  const d = dateEl.value;
+  if (!d) { await alertModal("Escolha a data do prazo.", { title: "Prazo" }); return; }
+  const amount = parseFloat(amtEl.value);
+  const q = new URLSearchParams({ date: d });
+  if (Number.isFinite(amount) && amount > 0) q.set("amount", String(amount));
+  resEl.innerHTML = `<div class="empty" style="color:var(--text-3);padding:8px">Calculando…</div>`;
+  try {
+    const resp = await fetch(`${API}/recurring-bills/${USER_ID}/projection?${q.toString()}`, { credentials: "same-origin" });
+    if (!resp.ok) throw new Error(await resp.text());
+    const data = await resp.json();
+    _renderProjection(data.projection);
+  } catch (_) {
+    resEl.innerHTML = `<div class="empty" style="color:var(--text-3);padding:8px">Não consegui calcular agora.</div>`;
+  }
+}
+
+function _renderProjection(p) {
+  const resEl = document.getElementById("boleto-sim-result");
+  if (!resEl || !p) return;
+  const ok = p.tranquilo;
+  const accent = ok ? "#22c55e" : "#FF2D2D";
+  const alvo = new Date(p.target + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "long" });
+  const header = ok
+    ? `😌 Tranquilo até ${alvo} — sobra ${_fmtBRL(p.projetado)}`
+    : `⚠️ Aperta até ${alvo} — falta ${_fmtBRL(Math.abs(p.projetado))}`;
+  const line = (label, val, positive) => `
+    <div style="display:flex;justify-content:space-between;font-size:.82rem;padding:2px 0">
+      <span style="color:var(--text-2)">${label}</span>
+      <span style="color:${positive ? 'var(--text)' : 'var(--red)'}">${positive ? '+' : '−'} ${_fmtBRL(Math.abs(val))}</span>
+    </div>`;
+  resEl.innerHTML = `
+    <div style="border-radius:10px;padding:12px;background:${ok ? 'rgba(34,197,94,.10)' : 'rgba(255,45,45,.10)'};border:1px solid ${ok ? 'rgba(34,197,94,.35)' : 'rgba(255,45,45,.35)'}">
+      <div style="font-weight:700;color:${accent};margin-bottom:8px">${header}</div>
+      ${line("Saldo hoje", p.saldo_atual, p.saldo_atual >= 0)}
+      ${p.receitas_previstas > 0 ? line("Receitas previstas", p.receitas_previstas, true) : ""}
+      ${p.gastos_fixos_previstos > 0 ? line("Gastos fixos", p.gastos_fixos_previstos, false) : ""}
+      ${line(`Boletos até lá (${p.n_boletos})`, p.boletos_ate, false)}
+      ${p.boleto_novo > 0 ? line("Boleto novo em análise", p.boleto_novo, false) : ""}
+      <div style="border-top:1px solid rgba(128,128,128,.25);margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;font-weight:700">
+        <span>Projeção do caixa</span><span style="color:${accent}">${_fmtBRL(p.projetado)}</span>
+      </div>
+      <div style="font-size:.68rem;color:var(--text-3);margin-top:6px">Estimativa: saldo + receitas fixas − gastos fixos − boletos. Não inclui gastos avulsos futuros.</div>
+    </div>`;
+}
+
 async function _fetchRecurringIncomes() {
   if (_recurringIncomeFetchInFlight) return _recurringIncomeFetchInFlight;
   _recurringIncomeFetchInFlight = (async () => {
