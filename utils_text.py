@@ -702,13 +702,30 @@ def fmt_rate(rate, period: str | None) -> str:
 
 DEPOSIT_VERBS = [
     "transferi", "coloquei", "adicionei", "depositei", "pus", "botei",
-    "mandei", "joguei", "colocar", "adicionar", "depositar", "por", "botar"
+    "mandei", "joguei", "colocar", "adicionar", "depositar", "por", "botar",
+    # variações de "adicionar/somar" (áudio/imperativo) — mesma família aceita
+    # no saldo; aqui habilita "adicione 300 na caixinha viagem".
+    "adicione", "adiciona", "adicionou", "somar", "soma", "some", "somei",
 ]
 
 def normalize_spaces(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 def parse_money(text: str) -> float | None:
+    # multiplicador "mil"/"milhão" com dígito: "10 mil" → 10000, "1 mil e 500" →
+    # 1500. Precisa vir antes do número contínuo, senão pegaria só o "10".
+    mm = re.search(
+        r'\b(\d+(?:[.,]\d+)?)\s*(mil|milh[oõ]es|milhao|milhão)\b(?:\s*e\s*(\d+))?',
+        text or "", re.IGNORECASE,
+    )
+    if mm:
+        base = float(mm.group(1).replace(".", "").replace(",", "."))
+        mult = 1_000_000 if mm.group(2).lower().startswith("milh") else 1_000
+        total = base * mult
+        if mm.group(3):
+            total += float(mm.group(3))
+        return total
+
     # pega o primeiro número contínuo (com possíveis separadores)
     m = re.search(r'(\d[\d.,\s]*)', text)
     if not m:

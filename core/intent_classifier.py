@@ -214,6 +214,23 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      r"|me fala (o )?meu saldo|me fala o saldo|me diz (o )?saldo|qual (e )?meu saldo|ver meu saldo"
      r"|quero saber (o )?saldo|quanto (tem|tenho) na (minha )?conta)$",
      "balance.check"),
+    # adicionar/somar dinheiro AO saldo → lançamento de receita ("adicione 10
+    # mil de saldo"). Vem antes de pockets.deposit ("adicionei \d") pra não cair
+    # em caixinha; o "saldo" desambigua de "adicionar cartão/caixinha".
+    (r"^(adicionar|adicione|adiciona|adicionei|adicionou|somar|soma|some|somei)\b.*\bsaldo\b",
+     "launches.add"),
+    # "adicione 300 na caixinha viagem" → depósito na caixinha (verbos já no
+    # DEPOSIT_VERBS). O destino explícito ("caixinha") desambigua.
+    (r"^(adicionar|adicione|adiciona|adicionei|adicionou|somar|soma|some|somei)\b.*\bcaixinha\b",
+     "pockets.deposit"),
+    # "adicione 500 no investimento X" → aporte no investimento.
+    (r"^(adicionar|adicione|adiciona|adicionei|adicionou|somar|soma|some|somei)\b.*\binvestimento\b",
+     "investments.deposit"),
+    # "adicione 10 mil" SEM destino → pergunta onde (saldo/caixinha/investimento).
+    # Exclui cartão/categoria (fluxos próprios) e exige um valor. saldo/caixinha/
+    # investimento já foram capturados pelas regras acima (first-match vence).
+    (r"^(?!.*\b(cartao|categoria)\b)(adicionar|adicione|adiciona|adicionei|adicionou|somar|soma|some|somei)\s+(r\$\s*)?\d",
+     "funds.add_ask"),
 
     # lançamentos — com data (hoje/ontem)
     (r"\b(lancamentos?|gastos?|despesas?|receitas?|historico|extrato)\b.*(hoje|ontem)",

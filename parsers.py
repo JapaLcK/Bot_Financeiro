@@ -105,6 +105,21 @@ def _extract_valor(text: str) -> float | None:
         except ValueError:
             pass
 
+    # 2.5 Multiplicador "mil"/"milhão" com número em dígito: "10 mil", "2,5 mil",
+    #     "3 milhões", "1 mil e 500". Precisa vir ANTES do inteiro simples — que
+    #     pegaria só o "10" de "10 mil" e devolveria 10 em vez de 10000.
+    m = re.search(
+        r"\b(\d+(?:[.,]\d+)?)\s*(mil|milh[oõ]es|milhao|milhão)\b(?:\s*e\s*(\d+))?",
+        text, re.IGNORECASE,
+    )
+    if m:
+        base = float(m.group(1).replace(".", "").replace(",", "."))
+        mult = 1_000_000 if m.group(2).lower().startswith("milh") else 1_000
+        total = base * mult
+        if m.group(3):
+            total += float(m.group(3))
+        return total
+
     # 3. Número inteiro simples
     m = re.search(r"\b(\d+)\b", text)
     if m:
@@ -148,12 +163,14 @@ def _extract_target_after_amount(text_base: str) -> str:
     if not t:
         return ""
 
-    t = re.sub(r"^\s*(gastei|gasto|paguei|pagar|comprei|debitei|mandei|enviei|pixei|recebi|receita|ganhei)\b", "", t, flags=re.IGNORECASE).strip()
+    t = re.sub(r"^\s*(gastei|gasto|paguei|pagar|comprei|debitei|mandei|enviei|pixei|recebi|receita|ganhei|adicionar|adicione|adiciona|adicionei|adicionou|somar|soma|some|somei)\b", "", t, flags=re.IGNORECASE).strip()
     t = re.sub(r"^\s*r\$\s*", "", t, flags=re.IGNORECASE).strip()
     # Consome o valor inteiro, incl. separador de milhar + decimal ("1.234,56").
     t = re.sub(r"^\s*\d[\d.,]*", "", t, count=1).strip()
+    # multiplicador "mil"/"milhão" que sobrou depois do dígito ("10 mil" → "mil")
+    t = re.sub(r"^\s*(mil|milh[oõ]es|milhao|milhão)\b", "", t, flags=re.IGNORECASE).strip()
     t = re.sub(r"^\s*reais?\b", "", t, flags=re.IGNORECASE).strip()
-    t = re.sub(r"^\s*(de|do|da|dos|das|no|na|nos|nas|em|pra|para)\b", "", t, flags=re.IGNORECASE).strip()
+    t = re.sub(r"^\s*(de|do|da|dos|das|no|na|nos|nas|em|pra|para|ao|aos|a)\b", "", t, flags=re.IGNORECASE).strip()
     t = re.sub(r"\s+", " ", t).strip(" -:;,.")
     return t
 
@@ -273,6 +290,14 @@ def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
     if raw_norm.startswith(("gastei ", "gasto ", "paguei ", "pagar ", "comprei ", "debitei ", "mandei ", "enviei ", "pixei ")):
         tipo = "despesa"
     elif raw_norm.startswith(("recebi ", "receita ", "ganhei ")):
+        tipo = "receita"
+    elif "saldo" in raw_norm and raw_norm.startswith((
+        "adicionar ", "adicione ", "adiciona ", "adicionei ", "adicionou ",
+        "somar ", "soma ", "some ", "somei ",
+    )):
+        # "adicione 10 mil de saldo" / "somar 500 ao saldo" → adiciona dinheiro
+        # ao saldo, tratado como receita. "adicionar" sozinho é ambíguo (cartão,
+        # caixinha, categoria), então só vale quando a frase fala de "saldo".
         tipo = "receita"
     elif _STARTS_WITH_VALUE_RE.match(text_base):
         tipo = "despesa"

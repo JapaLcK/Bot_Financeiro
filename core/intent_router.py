@@ -296,7 +296,38 @@ def _handle_destructive(intent: str, user_id: int, entities: dict, text: str) ->
     return NOT_UNDERSTOOD_MSG
 
 
+def _ask_add_destination(user_id: int, text: str) -> str:
+    """
+    "adicione 10 mil" sem destino → pergunta ONDE (saldo/caixinha/investimento) e
+    arma uma clarification. A resposta é combinada com o texto original e
+    reclassificada (ver `_resolve_clarification`), roteando pro destino certo.
+    """
+    from parsers import _extract_valor
+    from utils_text import fmt_brl
+
+    valor = _extract_valor(text)
+    if not valor or valor <= 0:
+        return ("Quanto e onde você quer adicionar? Ex: *adicione 500 no saldo* "
+                "ou *adicione 500 na caixinha viagem*")
+
+    pergunta = (
+        f"Onde você quer adicionar {fmt_brl(valor)}?\n"
+        "Responda: *saldo*, *caixinha NOME* ou *investimento NOME*."
+    )
+    db.set_pending_action(user_id, "clarification", {
+        "intent":    "funds.add_ask",
+        "entities":  {"valor": valor},
+        "question":  pergunta,
+        "orig_text": text,
+    })
+    return pergunta
+
+
 def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str, external_id: str) -> str:
+
+    # --- adicionar dinheiro sem destino → pergunta onde ---
+    if intent == "funds.add_ask":
+        return _ask_add_destination(user_id, text)
 
     # --- saudações ---
     if intent == "greeting":
@@ -453,6 +484,21 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
     resp_norm = user_response.strip().lower()
     if resp_norm in ("nao", "não", "n", "cancelar", "cancela"):
         return "❌ Cancelado."
+
+    # "adicione 10 mil" → perguntamos ONDE. A resposta traz o destino (saldo /
+    # caixinha X / investimento Y). Combina com o texto original e reclassifica:
+    # as regras de alias já roteiam "adicionar ... saldo/caixinha/investimento"
+    # pro handler certo, preservando o valor.
+    if original_intent == "funds.add_ask":
+        from core.intent_classifier import classify
+        combined = f"{orig_text} {user_response}".strip()
+        res2 = classify(combined, user_id=user_id)
+        if res2.intent in ("launches.add", "pockets.deposit", "investments.deposit"):
+            return _execute(res2.intent, user_id, combined, res2.entities or {}, platform, external_id)
+        # destino não reconhecido → re-arma a pergunta pra não perder o valor
+        db.set_pending_action(user_id, "clarification", payload)
+        return ("Não entendi o destino. Responda: *saldo*, *caixinha NOME* ou "
+                "*investimento NOME* (ou *cancelar*).")
 
     # Reclassifica COM contexto (mensagem original + pergunta que o bot fez +
     # resposta). Se a IA montar a intenção completa, despacha por ela — resolve
