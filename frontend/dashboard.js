@@ -3568,21 +3568,43 @@ async function loadRecurringOverview() {
   receitas.forEach(r => { const d = _nextRecurringOccurrence(r.pay_day, r.start_date, r.frequency, r.pay_month); if (d) up.push({ d, name: r.name || "Receita", amt: +(r.amount || 0), tag: "🔺" }); });
   const upcoming = up.filter(x => x.d >= today && x.d <= horizon).sort((a, b) => a.d - b.d).slice(0, 8);
 
+  // Gráfico: duas barras comparáveis — Entra (verde) vs Sai (gastos fixos rosa +
+  // boletos âmbar). A folga entre elas é a sobra. Identidade por rótulo+posição
+  // (não só cor): âmbar/verde ficam perto no daltonismo, então cada barra tem
+  // rótulo e há legenda com valores. Gap de 2px entre segmentos empilhados.
+  const maxVal = Math.max(totalReceitas, compromissos, 1);
+  const pctOf = (v) => Math.max(0, (v / maxVal * 100)).toFixed(2);
+  const seg = (v, color, title) => v > 0
+    ? `<div style="width:${pctOf(v)}%;background:${color}" title="${title}: ${_fmtBRL(v)}"></div>` : "";
+  const barRow = (label, labelColor, segsHtml, valTxt, valColor) => `
+    <div style="display:flex;align-items:center;gap:10px;margin:5px 0">
+      <div style="width:46px;font-size:.72rem;color:${labelColor};font-weight:600">${label}</div>
+      <div style="flex:1;height:22px;border-radius:6px;background:rgba(128,128,128,.16);display:flex;gap:2px;overflow:hidden">${segsHtml}</div>
+      <div style="min-width:104px;text-align:right;font-weight:700;font-size:.86rem;color:${valColor}">${valTxt}</div>
+    </div>`;
+  const dot = (c) => `<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${c};margin-right:4px;vertical-align:middle"></span>`;
+
+  const chart = `
+    <div style="margin-top:14px">
+      ${barRow("Entra", "#22c55e", seg(totalReceitas, "#22c55e", "Receitas"), _fmtBRL(totalReceitas), "#22c55e")}
+      ${barRow("Sai", "#fb7185",
+        seg(totalGastos, "#fb7185", "Gastos fixos") + seg(boletosMes, "#fbbf24", "Boletos do mês"),
+        _fmtBRL(compromissos), "#fb7185")}
+    </div>
+    <div style="font-size:.72rem;color:var(--text-2);margin-top:8px;display:flex;gap:14px;flex-wrap:wrap">
+      <span>${dot("#fb7185")}Gastos fixos ${_fmtBRL(totalGastos)}</span>
+      <span>${dot("#fbbf24")}Boletos do mês ${_fmtBRL(boletosMes)}</span>
+      <span>${dot(sobraColor)}Sobra ${_fmtBRL(sobra)}</span>
+    </div>`;
+
   const hero = `
     <div class="mock-card" style="margin-bottom:14px">
-      <h3 style="margin-bottom:12px">Balanço do mês</h3>
-      <div style="display:flex;gap:24px;flex-wrap:wrap">
-        <div><div style="font-size:.68rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em">Entra por mês</div>
-          <div style="font-size:1.45rem;font-weight:700;color:#22c55e">${_fmtBRL(totalReceitas)}</div></div>
-        <div><div style="font-size:.68rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em">Compromissos (fixos + boletos)</div>
-          <div style="font-size:1.45rem;font-weight:700;color:#fb7185">${_fmtBRL(compromissos)}</div></div>
-        <div><div style="font-size:.68rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em">Sobra estimada</div>
-          <div style="font-size:1.45rem;font-weight:700;color:${sobraColor}">${_fmtBRL(sobra)}</div></div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0">Balanço do mês</h3>
+        <div style="font-size:.82rem;color:var(--text-2)">Sobra estimada: <b style="color:${sobraColor}">${_fmtBRL(sobra)}</b></div>
       </div>
-      <div style="height:8px;border-radius:6px;background:rgba(128,128,128,.2);margin-top:14px;overflow:hidden">
-        <div style="height:100%;width:${pctSai}%;background:${sobra >= 0 ? '#fb7185' : '#FF2D2D'}"></div>
-      </div>
-      <div style="font-size:.7rem;color:var(--text-3);margin-top:6px">${totalReceitas > 0
+      ${chart}
+      <div style="font-size:.7rem;color:var(--text-3);margin-top:8px">${totalReceitas > 0
         ? (sobra >= 0 ? `Você compromete ${pctSai}% do que entra por mês.` : `Seus compromissos passam do que entra em ${_fmtBRL(-sobra)}.`)
         : "Cadastre suas receitas fixas pra ver a sobra do mês."}</div>
     </div>`;
