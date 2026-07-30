@@ -424,16 +424,36 @@
     </div>
 
     <div id="recurring-bills-pane" style="display:none">
+      <!-- Entrada rápida: o representante entrega o boleto → 3 campos e pronto -->
+      <div class="mock-card" style="margin-bottom:14px">
+        <h3 style="margin-bottom:10px">➕ Novo boleto</h3>
+        <div class="form-row" style="align-items:flex-end;gap:8px;flex-wrap:wrap">
+          <div class="field" style="flex:2;min-width:160px">
+            <label for="boleto-quick-name">Fornecedor / descrição</label>
+            <input type="text" id="boleto-quick-name" maxlength="80" placeholder="Ex: Distribuidora XYZ" onkeydown="if(event.key==='Enter')quickAddBoleto()" />
+          </div>
+          <div class="field" style="flex:1;min-width:110px">
+            <label for="boleto-quick-amount">Valor (R$)</label>
+            <input type="number" id="boleto-quick-amount" min="0.01" step="0.01" placeholder="0,00" onkeydown="if(event.key==='Enter')quickAddBoleto()" />
+          </div>
+          <div class="field" style="flex:1;min-width:130px">
+            <label for="boleto-quick-due">Vencimento</label>
+            <input type="date" id="boleto-quick-due" onkeydown="if(event.key==='Enter')quickAddBoleto()" />
+          </div>
+          <button class="mock-cta" id="boleto-quick-btn" onclick="quickAddBoleto()">Adicionar</button>
+        </div>
+      </div>
+
       <div id="recurring-bills-stats" class="stats-row"></div>
-      <div class="mock-grid cols-2">
-        <div class="mock-card">
-          <h3>A vencer / vencidas</h3>
-          <div id="recurring-bills-pending-list" class="tx-list"></div>
-        </div>
-        <div class="mock-card">
-          <h3>Pagas recentemente</h3>
-          <div id="recurring-bills-paid-list" class="tx-list"></div>
-        </div>
+
+      <div class="mock-card" style="margin-bottom:14px">
+        <h3>🗓️ Agenda de vencimentos</h3>
+        <div id="recurring-bills-agenda"></div>
+      </div>
+
+      <div class="mock-card">
+        <h3>✓ Pagos recentemente</h3>
+        <div id="recurring-bills-paid-list" class="tx-list"></div>
       </div>
     </div>
   </div>

@@ -3503,7 +3503,7 @@ function setRecurringTab(tab) {
   if (btn) {
     btn.style.display = tab === "overview" ? "none" : "";
     btn.textContent = tab === "incomes" ? "+ Nova receita fixa"
-      : tab === "bills" ? "+ Nova conta a pagar" : "+ Novo gasto fixo";
+      : tab === "bills" ? "+ Novo boleto" : "+ Novo gasto fixo";
   }
 
   if (tab === "overview") loadRecurringOverview();
@@ -3570,82 +3570,121 @@ async function loadRecurringOverview() {
 
 // O botão do header muda de destino conforme a aba ativa.
 function openRecurringNewFromTab() {
-  if (_recurringTab === "incomes") openRecurringIncomeEditModal();
-  else if (_recurringTab === "bills") openRecurringEditModal({ _mode: "manual" });
-  else openRecurringEditModal();
+  if (_recurringTab === "incomes") { openRecurringIncomeEditModal(); return; }
+  if (_recurringTab === "bills") {
+    // Boleto agora é entrada rápida inline (avulso) — foca o primeiro campo.
+    const el = document.getElementById("boleto-quick-name");
+    if (el) { try { el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (_) {} el.focus(); }
+    return;
+  }
+  openRecurringEditModal();
 }
 
-// ── Contas a pagar (boletos) ──────────────────────────────────────────
+// ── Agenda de boletos (a pagar) ───────────────────────────────────────
 async function loadBillsView(forceFresh = false) {
-  const pendEl = document.getElementById("recurring-bills-pending-list");
-  if (!pendEl) return;
+  const agendaEl = document.getElementById("recurring-bills-agenda");
+  if (!agendaEl) return;
   try {
     const resp = await fetch(`${API}/recurring-bills/${USER_ID}?include_paid=true`, {
       credentials: "same-origin",
     });
     if (resp.status === 403) {
-      pendEl.innerHTML = `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Contas a pagar é uma feature <b>PigBank+</b>.</div>`;
+      agendaEl.innerHTML = `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Boletos é uma feature <b>PigBank+</b>.</div>`;
       return;
     }
     if (!resp.ok) throw new Error(await resp.text());
     const data = await resp.json();
     _renderBillsView(data.bills || []);
   } catch (_) {
-    pendEl.innerHTML = `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Não consegui carregar. Toque em Atualizar.</div>`;
+    agendaEl.innerHTML = `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Não consegui carregar. Toque em Atualizar.</div>`;
   }
 }
 
-function _billOverdue(b) {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  return new Date(b.due_date + "T00:00:00") < today;
-}
+const _billToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
+const _billDate = (b) => { const d = new Date(b.due_date + "T00:00:00"); d.setHours(0, 0, 0, 0); return d; };
+const _billDaysUntil = (b) => Math.round((_billDate(b) - _billToday()) / 86400000);
+function _billOverdue(b) { return _billDaysUntil(b) < 0; }
 
 function _renderBillsView(bills) {
-  const pendEl = document.getElementById("recurring-bills-pending-list");
+  const agendaEl = document.getElementById("recurring-bills-agenda");
   const paidEl = document.getElementById("recurring-bills-paid-list");
   const statsEl = document.getElementById("recurring-bills-stats");
+  const today = _billToday();
+  const endMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0); endMonth.setHours(0, 0, 0, 0);
   const pending = bills.filter(b => b.status === "pending");
   const paid = bills.filter(b => b.status === "paid");
-  const totalPend = pending.reduce((s, b) => s + (b.amount || 0), 0);
-  const overdue = pending.filter(_billOverdue).length;
+
+  const sum = (arr) => arr.reduce((s, b) => s + (b.amount || 0), 0);
+  const totalPend = sum(pending);
+  const overdue = pending.filter(b => _billDaysUntil(b) < 0);
+  const wk = pending.filter(b => { const n = _billDaysUntil(b); return n >= 0 && n <= 7; });
+  const mo = pending.filter(b => _billDate(b) >= today && _billDate(b) <= endMonth);
+  const prox = pending.filter(b => _billDaysUntil(b) >= 0).sort((a, b) => _billDate(a) - _billDate(b))[0];
+  const proxTxt = prox
+    ? `${escapeHtmlSafe(prox.name || "boleto")} · ${_billDate(prox).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}`
+    : "—";
 
   if (statsEl) statsEl.innerHTML = `
-    <div class="stat-tile"><div class="stat-label">A pagar</div>
+    <div class="stat-tile"><div class="stat-label">Em aberto</div>
       <div class="stat-value" style="color:var(--red)">${_fmtBRL(totalPend)}</div>
-      <div class="stat-delta" style="color:var(--text-3)">${pending.length} pendente(s)</div></div>
-    <div class="stat-tile"><div class="stat-label">Vencidas</div>
-      <div class="stat-value" style="color:${overdue ? 'var(--red)' : 'var(--text-3)'}">${overdue}</div>
-      <div class="stat-delta" style="color:var(--text-3)">${overdue ? 'pague pra não atrasar' : 'em dia'}</div></div>`;
+      <div class="stat-delta" style="color:var(--text-3)">${pending.length} boleto(s)</div></div>
+    <div class="stat-tile"><div class="stat-label">Próx. 7 dias</div>
+      <div class="stat-value">${_fmtBRL(sum(wk))}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${wk.length} boleto(s)</div></div>
+    <div class="stat-tile"><div class="stat-label">Ainda este mês</div>
+      <div class="stat-value">${_fmtBRL(sum(mo))}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${mo.length} boleto(s)</div></div>
+    <div class="stat-tile"><div class="stat-label">${overdue.length ? "⚠️ Vencidos" : "Próximo"}</div>
+      <div class="stat-value" style="color:${overdue.length ? 'var(--red)' : 'var(--text)'}">${overdue.length ? _fmtBRL(sum(overdue)) : proxTxt}</div>
+      <div class="stat-delta" style="color:var(--text-3)">${overdue.length ? `${overdue.length} atrasado(s)` : "a vencer"}</div></div>`;
 
-  pendEl.innerHTML = pending.length
-    ? pending.map(_renderBillRow).join("")
-    : `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Nenhuma conta a pagar. Toque em <b>+ Nova conta a pagar</b>.</div>`;
+  const buckets = [
+    { label: "⚠️ Vencidos", color: "#FF2D2D", items: pending.filter(b => _billDaysUntil(b) < 0) },
+    { label: "Hoje", color: "#fbbf24", items: pending.filter(b => _billDaysUntil(b) === 0) },
+    { label: "Próximos 7 dias", color: "#fbbf24", items: pending.filter(b => { const n = _billDaysUntil(b); return n >= 1 && n <= 7; }) },
+    { label: "Ainda este mês", color: "var(--text-2)", items: pending.filter(b => _billDaysUntil(b) > 7 && _billDate(b) <= endMonth) },
+    { label: "Mais pra frente", color: "var(--text-3)", items: pending.filter(b => _billDate(b) > endMonth) },
+  ];
+  const agendaHtml = buckets.filter(bk => bk.items.length).map(bk => {
+    const rows = bk.items.sort((a, b) => _billDate(a) - _billDate(b)).map(_renderBillRow).join("");
+    return `<div style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:${bk.color};margin:4px 0 6px;font-weight:600">
+        <span>${bk.label} · ${bk.items.length}</span><span>${_fmtBRL(sum(bk.items))}</span></div>
+      ${rows}</div>`;
+  }).join("");
+  if (agendaEl) agendaEl.innerHTML = agendaHtml
+    || `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Nenhum boleto pendente. Adicione um acima 👆</div>`;
+
   if (paidEl) paidEl.innerHTML = paid.length
     ? paid.slice(0, 12).map(_renderBillPaidRow).join("")
     : `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Nada pago ainda.</div>`;
 }
 
 function _renderBillRow(b) {
-  const due = new Date(b.due_date + "T00:00:00");
+  const due = _billDate(b);
   const overdue = _billOverdue(b);
-  const quando = overdue ? "vencida" : _formatDueIn(due);
+  const quando = overdue ? "vencido" : _formatDueIn(due);
   const color = overdue ? "#FF2D2D" : "#fbbf24";
   const variavel = !!b.variable_amount;
   const temEstimativa = (b.amount || 0) > 0;
   const amtLabel = variavel
     ? (temEstimativa ? `~-${_fmtBRL(b.amount)}` : "a confirmar")
     : `-${_fmtBRL(b.amount)}`;
-  const nameSafe = escapeHtmlSafe(b.name || "").replace(/'/g, "");
+  const nameSafe = escapeHtmlSafe(b.name || "").replace(/'/g, "\\'");
   return `
     <div class="tx-row">
       <div class="tx-icon" style="color:${color}">🧾</div>
       <div class="tx-main">
-        <div class="tx-desc">${escapeHtmlSafe(b.name || "Conta")}${variavel ? ' <span style="font-size:.68rem;color:var(--text-3)">· valor varia</span>' : ""}</div>
+        <div class="tx-desc">${escapeHtmlSafe(b.name || "Boleto")}${variavel ? ' <span style="font-size:.68rem;color:var(--text-3)">· valor varia</span>' : ""}</div>
         <div class="tx-meta">vence ${due.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })} · <span style="color:${color}">${quando}</span></div>
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
         <div class="tx-amt red">${amtLabel}</div>
-        <button class="mock-cta" style="padding:4px 10px;font-size:.72rem" onclick="payBill(${b.id}, ${b.amount || 0}, '${nameSafe}', ${variavel})">✓ Marcar paga</button>
+        <div style="display:flex;gap:4px">
+          <button class="mock-cta" style="padding:3px 9px;font-size:.72rem" onclick="payBill(${b.id}, ${b.amount || 0}, '${nameSafe}', ${variavel})">✓ Pago</button>
+          <button class="mock-cta outline" title="Editar" style="padding:3px 8px;font-size:.72rem" onclick="editBoleto(${b.id}, '${nameSafe}', ${b.amount || 0}, '${b.due_date}')">✎</button>
+          <button class="mock-cta outline" title="Apagar" style="padding:3px 8px;font-size:.72rem" onclick="deleteBoleto(${b.id}, '${nameSafe}')">🗑</button>
+        </div>
       </div>
     </div>`;
 }
@@ -3690,11 +3729,100 @@ async function payBill(billId, estimate, name, variavel) {
       let detail = txt; try { detail = JSON.parse(txt).detail || txt; } catch (_) {}
       throw new Error(detail);
     }
-    showToast(`✓ Conta paga: ${_fmtBRL(amount)}`);
+    showToast(`✓ Boleto pago: ${_fmtBRL(amount)}`);
     loadBillsView(true);
     sendRefresh();
   } catch (err) {
     await alertModal(String(err.message || err), { title: "Erro ao pagar" });
+  }
+}
+
+// Entrada rápida de boleto avulso (fornecedor + valor + vencimento).
+let _boletoAdding = false;
+async function quickAddBoleto() {
+  if (_boletoAdding) return;
+  const nameEl = document.getElementById("boleto-quick-name");
+  const amtEl = document.getElementById("boleto-quick-amount");
+  const dueEl = document.getElementById("boleto-quick-due");
+  if (!nameEl) return;
+  const name = nameEl.value.trim();
+  const amount = parseFloat(amtEl.value);
+  const due = dueEl.value;
+  if (!name) { await alertModal("Informe o fornecedor ou a descrição do boleto.", { title: "Falta o nome" }); nameEl.focus(); return; }
+  if (!Number.isFinite(amount) || amount <= 0) { await alertModal("Informe um valor válido.", { title: "Valor" }); amtEl.focus(); return; }
+  if (!due) { await alertModal("Informe a data de vencimento.", { title: "Vencimento" }); dueEl.focus(); return; }
+  const btn = document.getElementById("boleto-quick-btn");
+  _boletoAdding = true;
+  if (btn) btn.disabled = true;
+  try {
+    const resp = await fetch(`${API}/recurring-bills/${USER_ID}`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ name, amount, due_date: due }),
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt; try { detail = JSON.parse(txt).detail || txt; } catch (_) {}
+      throw new Error(detail);
+    }
+    showToast("✓ Boleto adicionado");
+    nameEl.value = ""; amtEl.value = "";  // mantém a data (costuma cadastrar vários próximos)
+    nameEl.focus();
+    loadBillsView(true);
+    sendRefresh();
+  } catch (err) {
+    await alertModal(String(err.message || err), { title: "Erro ao adicionar" });
+  } finally {
+    _boletoAdding = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function editBoleto(id, name, amount, dueISO) {
+  const nv = window.prompt(`Novo valor de "${name}" (R$):`, Number(amount || 0).toFixed(2));
+  if (nv === null) return;
+  const amt = parseFloat(String(nv).replace(",", "."));
+  if (isNaN(amt) || amt <= 0) { await alertModal("Valor inválido.", { title: "Valor" }); return; }
+  const nd = window.prompt("Vencimento (AAAA-MM-DD):", dueISO);
+  if (nd === null) return;
+  try {
+    const resp = await fetch(`${API}/recurring-bills/${USER_ID}/${id}`, {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ amount: amt, due_date: nd }),
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt; try { detail = JSON.parse(txt).detail || txt; } catch (_) {}
+      throw new Error(detail);
+    }
+    showToast("✓ Boleto atualizado");
+    loadBillsView(true);
+  } catch (err) {
+    await alertModal(String(err.message || err), { title: "Erro ao editar" });
+  }
+}
+
+async function deleteBoleto(id, name) {
+  const ok = await confirmModal(`Apagar o boleto "${name}"? (não afeta boletos já pagos)`, { title: "Apagar boleto" });
+  if (!ok) return;
+  try {
+    const resp = await fetch(`${API}/recurring-bills/${USER_ID}/${id}`, {
+      method: "DELETE",
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt; try { detail = JSON.parse(txt).detail || txt; } catch (_) {}
+      throw new Error(detail);
+    }
+    showToast("🗑 Boleto apagado");
+    loadBillsView(true);
+  } catch (err) {
+    await alertModal(String(err.message || err), { title: "Erro ao apagar" });
   }
 }
 
