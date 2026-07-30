@@ -1089,6 +1089,13 @@ def init_db():
         # em vez de lançar a estimativa.
         """alter table recurring_expenses add column if not exists variable_amount boolean not null default false""",
 
+        # Conta a pagar de valor variável pode nascer SEM estimativa (amount=0).
+        # A check original exigia amount > 0 — relaxa pra >= 0. O código continua
+        # exigindo > 0 pra gasto fixo (autopay), então 0 só acontece em conta a
+        # pagar variável sem estimativa.
+        """alter table recurring_expenses drop constraint if exists recurring_expenses_amount_check""",
+        """alter table recurring_expenses add constraint recurring_expenses_amount_check check (amount >= 0)""",
+
         # Instâncias de conta a pagar (1 por ciclo do recorrente 'manual').
         # amount é editável (contas de luz/água variam). status: pending | paid.
         # 'vencida' é derivado (pending + due_date < hoje). reminder_last_sent_on
