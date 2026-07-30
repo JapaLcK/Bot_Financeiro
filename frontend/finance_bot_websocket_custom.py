@@ -4703,6 +4703,7 @@ def _recurring_value_error(code: str) -> HTTPException:
         "CARTAO_NAO_ENCONTRADO": "Cartão não encontrado.",
         "RECORRENTE_NAO_ENCONTRADO": "Gasto fixo não encontrado.",
         "DATA_INICIO_INVALIDA": "Data de início inválida.",
+        "DATA_INVALIDA": "Data de vencimento inválida.",
         "FREQUENCIA_INVALIDA": "Frequência inválida (use 'monthly' ou 'annual').",
         "MES_INVALIDO": "Mês inválido — para recorrência anual, informe o mês (1 a 12).",
         "MODO_PAGAMENTO_INVALIDO": "Modo de pagamento inválido (use 'autopay' ou 'manual').",
@@ -4714,11 +4715,26 @@ class BillPayPayload(BaseModel):
     amount: float | None = None  # opcional: valor real do boleto (variável)
 
 
+class BoletoPayload(BaseModel):
+    """Boleto avulso (agenda de boletos)."""
+    name: str | None = None       # fornecedor / descrição
+    amount: float | None = None
+    due_date: str | None = None   # 'YYYY-MM-DD'
+    category: str | None = None
+
+
+def _require_boletos_access(user_id: int) -> None:
+    """Ponto ÚNICO de permissão da agenda de boletos. Hoje reaproveita o gate Pro
+    dos recorrentes; no futuro **PigBank Enterprise** (conta empresa) este é o
+    único lugar a trocar pra liberar só pra empresas."""
+    _require_pro(user_id, "recurring_expenses")
+
+
 @app.get("/recurring-bills/{user_id}")
 async def recurring_bills_route(request: Request, user_id: int, include_paid: bool = False):
-    """Lista as contas a pagar (instâncias dos recorrentes 'manual'). Pro-only."""
+    """Lista os boletos a pagar (avulsos + instâncias de recorrentes manual)."""
     _authorize_dashboard_access(request, user_id)
-    _require_pro(user_id, "recurring_expenses")
+    _require_boletos_access(user_id)
     from db.bills import list_bills
     # Gera as instâncias do próximo ciclo sob demanda, pra conta recém-criada
     # já aparecer (sem esperar o loop do charger). Idempotente; falha não bloqueia.
@@ -4734,9 +4750,9 @@ async def recurring_bills_route(request: Request, user_id: int, include_paid: bo
 @app.post("/recurring-bills/{user_id}/{bill_id}/pay")
 async def recurring_bill_pay_route(request: Request, user_id: int, bill_id: int, payload: BillPayPayload):
     """Confirma pagamento de uma conta: lança a despesa (debita + categoriza) e
-    marca a conta como paga. Pro-only."""
+    marca a conta como paga."""
     _authorize_dashboard_access(request, user_id)
-    _require_pro(user_id, "recurring_expenses")
+    _require_boletos_access(user_id)
     from db.bills import mark_bill_paid
     try:
         bill = await asyncio.to_thread(mark_bill_paid, user_id, bill_id, payload.amount)
@@ -4746,6 +4762,54 @@ async def recurring_bill_pay_route(request: Request, user_id: int, bill_id: int,
         raise HTTPException(status_code=404, detail="Conta a pagar não encontrada ou já paga.")
     _invalidate_dashboard_current_cache(user_id)
     return {"ok": True, "bill": bill}
+
+
+@app.post("/recurring-bills/{user_id}")
+async def boleto_create_route(request: Request, user_id: int, payload: BoletoPayload):
+    """Cria um boleto AVULSO na agenda (fornecedor + valor + vencimento)."""
+    _authorize_dashboard_access(request, user_id)
+    _require_boletos_access(user_id)
+    from db.bills import create_boleto
+    try:
+        bill = await asyncio.to_thread(
+            create_boleto, user_id, payload.name, payload.amount, payload.due_date, payload.category
+        )
+    except ValueError as exc:
+        raise _recurring_value_error(str(exc))
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "bill": bill}
+
+
+@app.patch("/recurring-bills/{user_id}/{bill_id}")
+async def boleto_update_route(request: Request, user_id: int, bill_id: int, payload: BoletoPayload):
+    """Edita um boleto pendente."""
+    _authorize_dashboard_access(request, user_id)
+    _require_boletos_access(user_id)
+    from db.bills import update_boleto
+    try:
+        bill = await asyncio.to_thread(
+            update_boleto, user_id, bill_id, name=payload.name, amount=payload.amount,
+            due_date=payload.due_date, category=payload.category,
+        )
+    except ValueError as exc:
+        raise _recurring_value_error(str(exc))
+    if bill is None:
+        raise HTTPException(status_code=404, detail="Boleto não encontrado.")
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True, "bill": bill}
+
+
+@app.delete("/recurring-bills/{user_id}/{bill_id}")
+async def boleto_delete_route(request: Request, user_id: int, bill_id: int):
+    """Apaga um boleto pendente da agenda."""
+    _authorize_dashboard_access(request, user_id)
+    _require_boletos_access(user_id)
+    from db.bills import delete_boleto
+    deleted = await asyncio.to_thread(delete_boleto, user_id, bill_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Boleto não encontrado ou já pago.")
+    _invalidate_dashboard_current_cache(user_id)
+    return {"ok": True}
 
 
 @app.get("/recurring-expenses/{user_id}")

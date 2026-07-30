@@ -39,11 +39,13 @@ def list_bills(user_id: int, include_paid: bool = False, limit: int = 120) -> li
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select b.id, b.recurring_id, r.name, r.category, b.due_date,
-                       b.amount, b.status, b.paid_at, b.paid_amount, b.launch_id,
-                       r.variable_amount
+                select b.id, b.recurring_id,
+                       coalesce(b.name, r.name) as name,
+                       coalesce(b.category, r.category) as category,
+                       b.due_date, b.amount, b.status, b.paid_at, b.paid_amount,
+                       b.launch_id, coalesce(r.variable_amount, false) as variable_amount
                 from bill_instances b
-                join recurring_expenses r on r.id = b.recurring_id
+                left join recurring_expenses r on r.id = b.recurring_id
                 where b.user_id = %s
                   and (%s::boolean = true or b.status = 'pending')
                 order by (b.status = 'pending') desc, b.due_date asc
@@ -60,17 +62,96 @@ def get_bill(user_id: int, bill_id: int) -> dict[str, Any] | None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select b.id, b.recurring_id, r.name, r.category, b.due_date,
-                       b.amount, b.status, b.paid_at, b.paid_amount, b.launch_id,
-                       r.variable_amount
+                select b.id, b.recurring_id,
+                       coalesce(b.name, r.name) as name,
+                       coalesce(b.category, r.category) as category,
+                       b.due_date, b.amount, b.status, b.paid_at, b.paid_amount,
+                       b.launch_id, coalesce(r.variable_amount, false) as variable_amount
                 from bill_instances b
-                join recurring_expenses r on r.id = b.recurring_id
+                left join recurring_expenses r on r.id = b.recurring_id
                 where b.user_id = %s and b.id = %s
                 """,
                 (user_id, int(bill_id)),
             )
             r = cur.fetchone()
             return _row(r) if r else None
+
+
+def _parse_due(value: Any) -> date:
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (ValueError, TypeError):
+        raise ValueError("DATA_INVALIDA")
+
+
+def create_boleto(user_id: int, name: str, amount: float, due_date: Any,
+                  category: str | None = None) -> dict[str, Any]:
+    """Cria um BOLETO AVULSO (agenda de boletos) — sem recorrência. name =
+    fornecedor/descrição, valor obrigatório (>0), due_date = vencimento."""
+    nome = (name or "").strip() or "Boleto"
+    if amount is None or float(amount) <= 0:
+        raise ValueError("VALOR_INVALIDO")
+    due = _parse_due(due_date)
+    cat = (category or "").strip() or None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into bill_instances
+                    (recurring_id, user_id, due_date, amount, status, name, category)
+                values (null, %s, %s, %s, 'pending', %s, %s)
+                returning id
+                """,
+                (int(user_id), due, Decimal(str(amount)), nome, cat),
+            )
+            new_id = cur.fetchone()["id"]
+        conn.commit()
+    return get_bill(user_id, new_id)
+
+
+def update_boleto(user_id: int, bill_id: int, *, name: str | None = None,
+                  amount: float | None = None, due_date: Any = None,
+                  category: str | None = None) -> dict[str, Any] | None:
+    """Edita um boleto pendente (nome, valor, vencimento, categoria)."""
+    sets: list[str] = []
+    params: list[Any] = []
+    if name is not None:
+        sets.append("name = %s"); params.append((name or "").strip() or "Boleto")
+    if amount is not None:
+        if float(amount) <= 0:
+            raise ValueError("VALOR_INVALIDO")
+        sets.append("amount = %s"); params.append(Decimal(str(amount)))
+    if due_date is not None:
+        sets.append("due_date = %s"); params.append(_parse_due(due_date))
+    if category is not None:
+        sets.append("category = %s"); params.append((category or "").strip() or None)
+    if not sets:
+        return get_bill(user_id, bill_id)
+    params.extend([int(user_id), int(bill_id)])
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"update bill_instances set {', '.join(sets)} "
+                f"where user_id=%s and id=%s and status='pending'",
+                params,
+            )
+        conn.commit()
+    return get_bill(user_id, bill_id)
+
+
+def delete_boleto(user_id: int, bill_id: int) -> bool:
+    """Apaga um boleto pendente. Não mexe em boleto já pago (tem lançamento)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "delete from bill_instances where user_id=%s and id=%s and status='pending'",
+                (int(user_id), int(bill_id)),
+            )
+            deleted = cur.rowcount > 0
+        conn.commit()
+    return deleted
 
 
 def ensure_bill_instance(recurring_id: int, user_id: int, due_date: date, amount: float) -> None:
@@ -178,10 +259,13 @@ def list_due_bill_reminders(user_id: int, today: date, days_before: int = 3) -> 
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select b.id, b.recurring_id, r.name, r.category, b.due_date,
-                       b.amount, b.status, b.reminder_last_sent_on, r.variable_amount
+                select b.id, b.recurring_id,
+                       coalesce(b.name, r.name) as name,
+                       coalesce(b.category, r.category) as category,
+                       b.due_date, b.amount, b.status, b.reminder_last_sent_on,
+                       coalesce(r.variable_amount, false) as variable_amount
                 from bill_instances b
-                join recurring_expenses r on r.id = b.recurring_id
+                left join recurring_expenses r on r.id = b.recurring_id
                 where b.user_id = %s
                   and b.status = 'pending'
                   and (b.reminder_last_sent_on is null or b.reminder_last_sent_on <> %s)
@@ -195,6 +279,7 @@ def list_due_bill_reminders(user_id: int, today: date, days_before: int = 3) -> 
 
 __all__ = [
     "list_bills", "get_bill", "ensure_bill_instance", "mark_bill_paid",
+    "create_boleto", "update_boleto", "delete_boleto",
     "mark_bill_reminder_sent", "list_active_manual_recurrings",
     "list_users_with_pending_bills", "list_due_bill_reminders",
 ]

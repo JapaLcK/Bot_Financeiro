@@ -1121,6 +1121,20 @@ def init_db():
           on bill_instances (user_id, status, due_date)
         """,
 
+        # Boleto AVULSO (agenda de boletos — futuro PigBank Enterprise): um boleto
+        # não precisa vir de um recorrente. recurring_id vira nullable e o boleto
+        # carrega name/category próprios. Boletos recorrentes seguem com
+        # recurring_id preenchido e (opcionalmente) name/category via join.
+        # UNIQUE(recurring_id, due_date) tolera vários avulsos no mesmo dia porque
+        # NULL != NULL no Postgres.
+        """alter table bill_instances alter column recurring_id drop not null""",
+        """alter table bill_instances add column if not exists name text""",
+        """alter table bill_instances add column if not exists category text""",
+        """
+        create index if not exists idx_bill_instances_user_due
+          on bill_instances (user_id, due_date)
+        """,
+
         # ─── Eventos de login (admin/observabilidade) ───────────────────────────
         # Antes era criada lazy em core/admin_dashboard.py:ensure_admin_tables.
         # Trazido pra schema.py pra audit/IP-tracking funcionarem nos testes.
