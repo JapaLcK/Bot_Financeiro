@@ -700,7 +700,7 @@ FORMATO OBRIGATÓRIO (JSON puro, sem markdown):
 
 EXEMPLOS:
 "qual meu saldo?" → {"intent":"balance.check","confidence":0.99,"entities":{},"needs_clarification":false,"clarification_question":null}
-"gastei 50 no mercado" → {"intent":"launches.add","confidence":0.97,"entities":{"tipo":"despesa","valor":50,"alvo":"mercado","categoria":"alimentação"},"needs_clarification":false,"clarification_question":null}
+"gastei 50 no mercado" → {"intent":"launches.add","confidence":0.97,"entities":{"tipo":"despesa","valor":50,"alvo":"mercado","categoria":"mercado"},"needs_clarification":false,"clarification_question":null}
 "deposita 200 na caixinha viagem" → {"intent":"pockets.deposit","confidence":0.97,"entities":{"pocket_name":"viagem","amount":200},"needs_clarification":false,"clarification_question":null}
 "quais cartoes tenho registrado?" → {"intent":"credit.handle","confidence":0.96,"entities":{},"needs_clarification":false,"clarification_question":null}
 "quais sao meus cartoes?" → {"intent":"credit.handle","confidence":0.96,"entities":{},"needs_clarification":false,"clarification_question":null}

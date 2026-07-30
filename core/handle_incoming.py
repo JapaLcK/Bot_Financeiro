@@ -120,26 +120,13 @@ def _bold(text: str, platform: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _split_audio_transactions(text: str) -> list[str]:
+    """Separa múltiplos lançamentos num único áudio.
+
+    Wrapper fino sobre `parsers.split_financial_transactions` — a mesma lógica
+    é usada no path de texto digitado (`core.handlers.launches.add`).
     """
-    Detecta múltiplos lançamentos em um único áudio e os separa.
-    Ex: "recebi 600 da mãe e gastei 100 no mercado" → ["recebi 600 da mãe", "gastei 100 no mercado"]
-    Retorna lista com um único item se não detectar múltiplos lançamentos.
-    """
-    # Verbos que iniciam um lançamento financeiro
-    FINANCIAL_VERBS = (
-        r"gastei|paguei|comprei|debitei|mandei|enviei|pix|gasto|"
-        r"recebi|ganhei|receita"
-    )
-    # Separadores que podem introduzir um segundo lançamento
-    # "e gastei", "mas também recebi", "além disso gastei", etc.
-    split_pattern = re.compile(
-        r"\s+(?:e\s+também|também|mas\s+também|além\s+disso|e)\s+"
-        rf"(?={FINANCIAL_VERBS})",
-        re.IGNORECASE,
-    )
-    parts = split_pattern.split(text)
-    cleaned = [p.strip() for p in parts if p.strip()]
-    return cleaned if len(cleaned) > 1 else [text]
+    from parsers import split_financial_transactions
+    return split_financial_transactions(text)
 
 
 def _process_audio_transaction(uid: int, transcription: str, msg: IncomingMessage, platform: str) -> str:
@@ -378,14 +365,26 @@ def _handle_image(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     uid = _normalize_user_id(msg)
     db.ensure_user(uid)
 
-    # Monta comando de texto equivalente para salvar como pendência
+    # Salva os dados ESTRUTURADOS da prévia. No confirm ("Sim") o lançamento é
+    # registrado exatamente com a categoria e a data que o usuário viu — sem
+    # re-inferir a partir de texto reconstruído (o que fazia "Amazônia" virar
+    # "compras online" e descartava a data extraída). O `text` fica só como
+    # fallback pra pendências antigas.
     if valor is not None:
         valor_fmt = f"{float(valor):.2f}".replace(".", ",")
         cmd_parts = [f"gastei {valor_fmt}" if tipo == "despesa" else f"recebi {valor_fmt}"]
         if alvo:
             cmd_parts.append(alvo)
         pending_text = " ".join(cmd_parts)
-        db.set_pending_action(uid, "confirm_media_launch", {"text": pending_text})
+        db.set_pending_action(uid, "confirm_media_launch", {
+            "tipo": tipo,
+            "valor": float(valor),
+            "alvo": alvo or "",
+            "categoria": cat,
+            "data": data_str,
+            "platform": platform,
+            "text": pending_text,
+        })
 
     return [OutgoingMessage(text="\n".join(linhas))]
 

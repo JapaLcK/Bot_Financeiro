@@ -5,10 +5,15 @@ import re
 from datetime import date, timedelta
 
 import db
-from utils_text import fmt_brl, is_internal_category
+from utils_text import fmt_brl, is_internal_category, canonicalize_category_label
 from utils_date import extract_date_from_text, today_tz
 from core.services.category_service import infer_category, learn_from_inference
-from parsers import parse_receita_despesa_natural
+from parsers import (
+    parse_receita_despesa_natural,
+    split_financial_transactions,
+    describe_valueless_launch,
+    _extract_valor,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -239,8 +244,27 @@ def add_from_entities(
     nota_clean = (nota or "").strip() or alvo_clean
 
     if categoria:
-        categoria_final = categoria
         reason_final = category_reason or "explicit"
+        if reason_final == "ai":
+            # Categoria veio do LLM (entities do classificador ou tool add_launch),
+            # não de hashtag explícita nem do parser determinístico. O LLM erra
+            # categoria de vez em quando (ex.: áudio "gastei 500 no mercado" indo
+            # pra "alimentação"). Faz cross-check com as regras determinísticas:
+            # um match confiante de regra do usuário / ticker / LOCAL_RULES que
+            # CONTRADIZ a IA vence. allow_ai=False pra não gastar 2ª chamada de LLM.
+            categoria_ai = canonicalize_category_label(categoria) or categoria
+            local = infer_category(user_id, nota_clean, None, allow_ai=False)
+            if local.reason in {"user_rule", "ticker_match", "local_rule"} and local.category != categoria_ai:
+                logger.info(
+                    "categoria da IA (%s) sobreposta por regra local (%s via %s) — nota=%r",
+                    categoria_ai, local.category, local.reason, nota_clean,
+                )
+                categoria_final = local.category
+                reason_final = local.reason
+            else:
+                categoria_final = categoria_ai
+        else:
+            categoria_final = categoria
     else:
         res = infer_category(user_id, nota_clean, None)
         categoria_final = res.category or "outros"
@@ -310,6 +334,87 @@ def add_from_entities(
     return resposta
 
 
+def _ask_value_question(item: dict) -> str:
+    """Pergunta amigável pelo valor de um lançamento que veio sem número."""
+    desc = item.get("desc") or "esse lançamento"
+    if item.get("tipo") == "receita":
+        return f"🐷 Faltou o valor de *{desc}*. Quanto você recebeu? (só o número)"
+    return f"🐷 Faltou o valor de *{desc}*. Quanto foi? (só o número)"
+
+
+# Palavras que cancelam a pergunta de valor pendente.
+_CANCEL_WORDS = {"nao", "n", "cancelar", "cancela", "deixa", "esquece", "esquecer", "para", "pare"}
+
+
+def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform: str = "whatsapp") -> str | None:
+    """
+    Resolve a pergunta de valor pendente de um lançamento múltiplo. O bot havia
+    perguntado "quanto foi *aluguel*?"; esta resposta traz o valor.
+
+    - resposta com valor → registra o item da frente da fila; se sobra fila,
+      pergunta o próximo; senão encerra.
+    - resposta de cancelamento → descarta o que faltava.
+    - resposta sem valor (o user mudou de assunto) → abandona a pendência e
+      retorna None pra que o roteador processe a mensagem normalmente.
+    """
+    from utils_text import normalize_text
+
+    payload = pending.get("payload", {})
+    queue: list[dict] = list(payload.get("queue") or [])
+    if not queue:
+        db.clear_pending_action(user_id)
+        return None
+
+    resp_norm = normalize_text(text).strip()
+    if resp_norm in _CANCEL_WORDS:
+        db.clear_pending_action(user_id)
+        restantes = ", ".join(i.get("desc", "?") for i in queue)
+        return f"❌ Beleza, deixei de lado: {restantes}."
+
+    valor = _extract_valor(text)
+    if valor is None or valor <= 0:
+        # Não é um valor — o usuário mudou de assunto. Abandona a pendência e
+        # deixa o roteador tratar a mensagem como um comando novo.
+        db.clear_pending_action(user_id)
+        return None
+
+    head = queue.pop(0)
+    resp = add_from_entities(
+        user_id,
+        tipo=head.get("tipo", "despesa"),
+        valor=float(valor),
+        alvo=head.get("desc"),
+        nota=head.get("desc"),
+        platform=platform,
+    )
+
+    if queue:
+        db.set_pending_action(
+            user_id, "multi_launch_values",
+            {"queue": queue, "platform": platform},
+        )
+        return f"{resp}\n\n{_ask_value_question(queue[0])}"
+    # fila vazia: não re-arma multi_launch_values. O add_from_entities acima já
+    # gravou o pending de "categoria errada?" (WhatsApp), que fica valendo.
+    return resp
+
+
+def _register_parsed(user_id: int, parsed: dict, fallback_note: str, platform: str) -> str:
+    """Registra um lançamento já parseado por `parse_receita_despesa_natural`."""
+    return add_from_entities(
+        user_id,
+        tipo=parsed["tipo"],
+        valor=float(parsed["valor"]),
+        alvo=parsed.get("alvo") or "",
+        nota=parsed.get("nota") or fallback_note,
+        categoria=parsed.get("categoria") or "outros",
+        category_reason=parsed.get("category_reason"),
+        criado_em=parsed.get("criado_em"),
+        is_internal=parsed.get("is_internal_movement", False),
+        platform=platform,
+    )
+
+
 def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> str:
     from core.handlers import credit as h_credit
 
@@ -317,21 +422,39 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> 
     if credit_response is not None:
         return credit_response
 
+    # Múltiplos lançamentos na mesma mensagem ("gastei 500 no ifood e mais 800
+    # no mercado") — separa e registra cada um. split_financial_transactions só
+    # devolve >1 item quando detecta de fato mais de um lançamento. Pedaços com
+    # verbo mas SEM valor ("... e paguei o aluguel") viram pergunta: o bot
+    # registra o que deu, enfileira os que faltam valor e pergunta um a um.
+    parts = split_financial_transactions(text)
+    if len(parts) > 1:
+        responses = []
+        missing: list[dict] = []
+        for part in parts:
+            p = parse_receita_despesa_natural(user_id, part)
+            if p:
+                responses.append(_register_parsed(user_id, p, part, platform))
+                continue
+            info = describe_valueless_launch(part)
+            if info:
+                tipo, desc = info
+                missing.append({"tipo": tipo, "desc": desc})
+        if missing:
+            db.set_pending_action(
+                user_id, "multi_launch_values",
+                {"queue": missing, "platform": platform},
+            )
+            question = _ask_value_question(missing[0])
+            return "\n\n".join(responses + [question]) if responses else question
+        if responses:
+            return "\n\n".join(responses)
+        # nenhum pedaço virou lançamento válido — cai no fluxo single abaixo
+
     parsed = parse_receita_despesa_natural(user_id, text)
 
     if parsed:
-        return add_from_entities(
-            user_id,
-            tipo=parsed["tipo"],
-            valor=float(parsed["valor"]),
-            alvo=parsed.get("alvo") or "",
-            nota=parsed.get("nota") or text,
-            categoria=parsed.get("categoria") or "outros",
-            category_reason=parsed.get("category_reason"),
-            criado_em=parsed.get("criado_em"),
-            is_internal=parsed.get("is_internal_movement", False),
-            platform=platform,
-        )
+        return _register_parsed(user_id, parsed, text, platform)
 
     tipo = entities.get("tipo", "despesa")
     valor = float(entities.get("valor", 0))
@@ -342,6 +465,7 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> 
         alvo=entities.get("alvo") or "",
         nota=text,
         categoria=entities.get("categoria"),
+        category_reason="ai",
         criado_em=None,
         platform=platform,
     )

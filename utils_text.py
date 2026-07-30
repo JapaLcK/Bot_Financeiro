@@ -409,6 +409,10 @@ EXACT_WORD_KEYWORDS = {
     # Transporte: "trem" bateria em "tremendo"/"extremo", "valet" em "cavalete",
     # "balsa" em "bálsamo", "barca" em "embarcação". Só como palavra inteira.
     "trem", "valet", "balsa", "barca",
+    # Compras online: "amazon" bateria em "amazonia" (região/nome de
+    # estabelecimento). Só vale como palavra inteira; "amazon prime" continua
+    # tratado pelo blocker (assinaturas) e "amazon.com" ainda casa (\b no ponto).
+    "amazon",
 }
 
 # Contextos que INVALIDAM uma keyword mesmo quando ela aparece no texto.

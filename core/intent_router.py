@@ -137,6 +137,15 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
         return _resolve_clarification(clarif, text, user_id, platform, external_id)
 
     pending = db.get_pending_action(user_id)
+
+    # Pergunta de valor pendente de um lançamento múltiplo ("... e paguei o
+    # aluguel" sem número → "quanto foi o aluguel?"). A resposta com valor
+    # registra o item; sem valor, abandona e segue o roteamento normal.
+    if pending and pending.get("action_type") == "multi_launch_values":
+        resp = h_launches.resolve_multi_launch_value(user_id, text, pending, platform)
+        if resp is not None:
+            return resp
+        pending = None  # abandonado → mensagem roteia como comando novo
     if pending and pending.get("action_type") in {"credit_card_setup", "credit_card_set_primary", "credit_delete_card", "installment_pending", "pay_bill_choice"}:
         resp = h_credit.resolve_pending(user_id, text, pending)
         if resp is not None:

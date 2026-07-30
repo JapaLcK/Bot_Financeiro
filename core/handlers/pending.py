@@ -27,11 +27,44 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
         if not confirmed:
             return "❌ Lançamento cancelado. Se quiser corrigir, escreva o comando manualmente."
 
+        # Caminho novo: prévia estruturada. Registra EXATAMENTE o que o usuário
+        # confirmou — categoria e data da prévia — sem re-inferir do texto. É o
+        # que corrige "Amazônia" virar "compras online" na re-classificação.
+        if payload.get("valor") is not None and payload.get("categoria"):
+            from core.handlers.launches import add_from_entities
+
+            criado_em = None
+            data_iso = payload.get("data")
+            if data_iso:
+                from datetime import date as _date, datetime as _datetime, time as _time
+                from utils_date import _tz
+                try:
+                    _d = _date.fromisoformat(data_iso)
+                    criado_em = _datetime.combine(_d, _time(12, 0), tzinfo=_tz())
+                except (ValueError, TypeError):
+                    criado_em = None
+
+            alvo = payload.get("alvo") or ""
+            resp = add_from_entities(
+                user_id,
+                tipo=payload.get("tipo") or "despesa",
+                valor=float(payload["valor"]),
+                alvo=alvo,
+                nota=alvo or None,
+                categoria=payload.get("categoria") or "outros",
+                # != "ai": respeita a categoria que o usuário confirmou; não
+                # dispara o cross-check com regras locais.
+                category_reason="image_confirmed",
+                criado_em=criado_em,
+                platform=payload.get("platform") or "whatsapp",
+            )
+            return f"✅ Lançamento registrado!\n{resp}"
+
+        # Fallback legado: pendências antigas que só guardaram o texto.
         text = payload.get("text", "")
         if not text:
             return "⚠️ Não encontrei os dados do lançamento para confirmar. Tente digitar manualmente."
 
-        # Processa o texto montado como se o usuário tivesse digitado
         from core.services.quick_entry import handle_quick_entry
         msg_out = handle_quick_entry(user_id, text)
         if msg_out:

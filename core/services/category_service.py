@@ -39,14 +39,19 @@ class InferResult:
     reason: str  # 'explicit' | 'user_rule' | 'local_rule' | 'ticker_match' | 'default'
 
 
-def infer_category(user_id: int, text_base: str, explicit_category: str | None = None) -> InferResult:
+def infer_category(user_id: int, text_base: str, explicit_category: str | None = None, *, allow_ai: bool = True) -> InferResult:
     """
     Prioridade:
       A) explícita (hashtag/cat=)
       B) regra do usuário (user_category_rules via get_memorized_category)
       C) ticker brasileiro detectado (PETR4, MXRF11, …)
       D) heurística local (LOCAL_RULES)
+      E) fallback IA (só se allow_ai e Pro)
       default: 'outros'
+
+    `allow_ai=False` pula o passo E — usado quando já existe uma categoria da
+    IA e só se quer o veredito determinístico (regra do usuário/ticker/local)
+    pra fazer cross-check, sem gastar uma segunda chamada de LLM.
     """
     if explicit_category:
         cat = canonicalize_category_label(explicit_category)
@@ -95,7 +100,7 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
                 return InferResult(category=canonicalize_category_label(cat2), reason="local_rule")
 
     # D) fallback IA (só se OPENAI_API_KEY configurada e usuário Pro)
-    if os.getenv("OPENAI_API_KEY"):
+    if allow_ai and os.getenv("OPENAI_API_KEY"):
         try:
             from core.services.plan_service import is_pro
             allow_ai = is_pro(int(user_id))

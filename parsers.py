@@ -163,6 +163,93 @@ def _extract_target_after_amount(text_base: str) -> str:
 _STARTS_WITH_VALUE_RE = re.compile(r"^\s*(?:r\$\s*)?\d", re.IGNORECASE)
 
 
+# ---------------------------------------------------------------------------
+# Separação de múltiplos lançamentos numa única mensagem
+# ---------------------------------------------------------------------------
+
+# Verbos que iniciam um lançamento financeiro.
+_FINANCIAL_VERBS = (
+    r"gastei|paguei|comprei|debitei|mandei|enviei|pix|gasto|"
+    r"recebi|ganhei|receita"
+)
+
+# Conectores de soma que podem introduzir um segundo lançamento. Ordenados do
+# mais longo pro mais curto (a alternância do regex é ordenada), senão "e"
+# casaria antes de "e mais". O segundo lançamento pode começar com um verbo
+# ("e gastei 100") OU direto com um valor ("e mais 800", "mais R$ 30") — nesse
+# caso é implícito e herda o verbo/tipo do lançamento anterior.
+_SPLIT_TX_RE = re.compile(
+    r"\s+(?:e\s+mais|mais\s+também|e\s+também|mas\s+também|além\s+disso|também|mais|e)\s+"
+    rf"(?={_FINANCIAL_VERBS}|r\$|\d)",
+    re.IGNORECASE,
+)
+_LEAD_VERB_RE = re.compile(rf"^\s*({_FINANCIAL_VERBS})\b", re.IGNORECASE)
+
+
+def split_financial_transactions(text: str) -> list[str]:
+    """
+    Detecta múltiplos lançamentos numa única mensagem (texto ou áudio) e os
+    separa.
+    Ex: "recebi 600 da mãe e gastei 100 no mercado"
+        → ["recebi 600 da mãe", "gastei 100 no mercado"]
+        "gastei 500 no ifood e mais 800 no mercado"
+        → ["gastei 500 no ifood", "gastei 800 no mercado"]
+
+    O segundo lançamento pode vir com verbo explícito ("... e gastei 100 ...")
+    ou implícito, só somando um valor ("... e mais 800 ..."). No caso implícito
+    o segmento herda o verbo do lançamento anterior — o usuário quase sempre
+    soma mexidas do mesmo tipo (despesa com despesa, receita com receita).
+
+    Retorna lista com um único item se não detectar múltiplos lançamentos.
+    """
+    parts = _SPLIT_TX_RE.split(text)
+    cleaned = [p.strip() for p in parts if p.strip()]
+    if len(cleaned) <= 1:
+        return [text]
+
+    # Herança de verbo: segmentos que começam só com valor ("800 no mercado")
+    # ganham o verbo do último lançamento com verbo explícito.
+    result: list[str] = []
+    last_verb: str | None = None
+    for seg in cleaned:
+        m = _LEAD_VERB_RE.match(seg)
+        if m:
+            last_verb = m.group(1)
+            result.append(seg)
+        elif last_verb:
+            result.append(f"{last_verb} {seg}")
+        else:
+            result.append(seg)
+    return result
+
+
+_RECEITA_VERBS = {"recebi", "receita", "ganhei"}
+
+
+def describe_valueless_launch(text: str) -> tuple[str, str] | None:
+    """
+    Para um trecho que parece um lançamento mas está SEM valor ("paguei o
+    aluguel", "e o mercado"), retorna (tipo, descrição_limpa) — usado pra
+    perguntar o valor ao usuário em vez de dropar o lançamento.
+
+    Retorna None se o trecho já tem valor, não tem verbo financeiro
+    reconhecível, ou sobra sem descrição (ex: só "paguei").
+    """
+    if _extract_valor(text) is not None:
+        return None
+    m = _LEAD_VERB_RE.match(text)
+    if not m:
+        return None
+    verb = m.group(1).lower()
+    tipo = "receita" if verb in _RECEITA_VERBS else "despesa"
+    # remove verbo + preposição inicial; depois tira artigos que sobrarem
+    desc = _extract_target_after_amount(text)
+    desc = re.sub(r"^\s*(o|a|os|as|um|uma|uns|umas)\b", "", desc, flags=re.IGNORECASE).strip()
+    if not desc:
+        return None
+    return tipo, desc
+
+
 def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
     text_clean = (raw_text or "").strip()
     if not text_clean:

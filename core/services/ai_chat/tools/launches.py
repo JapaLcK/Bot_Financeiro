@@ -312,6 +312,7 @@ def _add_launch_execute(user_id: int, args: dict[str, Any]) -> str:
         alvo=(args.get("alvo") or "").strip() or None,
         nota=(args.get("nota") or "").strip() or None,
         categoria=(args.get("categoria") or "").strip() or None,
+        category_reason="ai",
         criado_em=_parse_iso_datetime_for_launch(args.get("data")),
         platform=CURRENT_PLATFORM.get(),
     )
