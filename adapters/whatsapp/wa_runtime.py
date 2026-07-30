@@ -63,6 +63,7 @@ WA_RECAT_BUTTON_PREFIX = "recat:"          # botão pós-lançamento
 WA_RECAT_PICK_PREFIX = "recatpick:"        # item da lista de categorias
 WA_RECAT_OTHER_PREFIX = "recatother:"      # opção "outra (digitar)"
 WA_DELETE_CC_PREFIX = "del_cc:"            # botão "Apagar" pós-compra no crédito
+WA_BILL_PAID_PREFIX = "bill_paid:"         # botão "Já paguei" do lembrete de conta a pagar
 WA_UPDATES_DISABLE_IDS = {
     "parar atualizações",
     "parar atualizacoes",
@@ -645,6 +646,37 @@ def process_message(message: InboundMessage) -> None:
                         _send_reply(reply_to, "Não consegui apagar essa compra agora. Tente em instantes.")
                         return
                     _send_reply(reply_to, body or f"Não achei a compra CC{tx_id}.")
+                return
+
+            # Botão "✅ Já paguei" do lembrete de conta a pagar (boleto).
+            # Payload traz o id da conta → quita exatamente aquela, sem depender
+            # de o usuário digitar o nome.
+            if interactive_id.startswith(WA_BILL_PAID_PREFIX):
+                try:
+                    bill_id = int(interactive_id[len(WA_BILL_PAID_PREFIX):])
+                except ValueError:
+                    bill_id = 0
+                logger.info("WA bill_paid button clicked wa_id=%s uid=%s bill=%s", reply_to, uid, bill_id)
+                if bill_id and uid:
+                    from db.bills import mark_bill_paid
+                    from utils_text import fmt_brl
+                    try:
+                        paid = mark_bill_paid(uid, bill_id)
+                    except Exception as exc:
+                        logger.exception("WA bill_paid failed bill=%s: %s", bill_id, exc)
+                        _send_reply(reply_to, "Não consegui registrar o pagamento agora. Tente em instantes.")
+                        return
+                    if paid is None:
+                        _send_reply(reply_to, "Essa conta já estava paga (ou não achei mais). 👍")
+                    else:
+                        val = paid.get("paid_amount") or paid.get("amount") or 0
+                        _send_reply(
+                            reply_to,
+                            f"✅ Conta paga: *{paid.get('name')}* — {fmt_brl(val)} lançado e "
+                            f"categorizado. Tá tudo em dia! 🐷",
+                        )
+                else:
+                    _send_reply(reply_to, "Não consegui identificar a conta desse lembrete.")
                 return
 
             # Botão de desfazer áudio (legado: undo do último lançamento)

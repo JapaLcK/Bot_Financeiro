@@ -469,6 +469,9 @@ def _bill_reminder_tick() -> None:
 
         for bill in due:
             params = _bill_reminder_named_params(bill, today)
+            # botão "✅ Já paguei" carrega o id da conta → quita exatamente ela.
+            from adapters.whatsapp.wa_runtime import WA_BILL_PAID_PREFIX
+            buttons = [{"index": 0, "payload": f"{WA_BILL_PAID_PREFIX}{bill.get('id')}"}]
             sent_any = False
             for to in wa_targets:
                 try:
@@ -477,6 +480,7 @@ def _bill_reminder_tick() -> None:
                         cfg["name"],
                         language_code=cfg["language_code"],
                         named_body_params=params,
+                        quick_reply_buttons=buttons,
                     )
                     sent_any = True
                     log_system_event_sync(
