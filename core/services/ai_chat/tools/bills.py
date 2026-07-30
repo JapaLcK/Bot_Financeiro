@@ -19,7 +19,7 @@ variável (água/luz): `amount` é só estimativa; pagar exige o valor real.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from ._base import Tool
@@ -171,6 +171,105 @@ def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
             f"categorizado. Tá tudo em dia! 🐷")
 
 
+# ─── Add boleto (avulso) + projeção de caixa ─────────────────────────────────
+
+def _resolve_date(s: Any, days: Any = None) -> date | None:
+    """Resolve uma data alvo a partir de 'YYYY-MM-DD' / 'DD/MM' / 'DD/MM/YYYY' ou
+    de um número de dias a partir de hoje. Pra 'DD/MM' sem ano, usa o próximo
+    (este ano se ainda não passou, senão o que vem) — prazo é sempre futuro."""
+    today = _today()
+    if days is not None:
+        try:
+            return today + timedelta(days=int(days))
+        except (TypeError, ValueError):
+            pass
+    if not s:
+        return None
+    txt = str(s).strip()
+    try:
+        return date.fromisoformat(txt[:10])
+    except ValueError:
+        pass
+    import re
+    # dia do mês solto ("dia 10" → o LLM manda "10"): próxima ocorrência >= hoje
+    if re.fullmatch(r"\d{1,2}", txt):
+        d = int(txt)
+        if 1 <= d <= 31:
+            import calendar
+            y, mo = today.year, today.month
+            for _ in range(2):
+                dim = calendar.monthrange(y, mo)[1]
+                cand = date(y, mo, min(d, dim))
+                if cand >= today:
+                    return cand
+                mo += 1
+                if mo > 12:
+                    mo, y = 1, y + 1
+        return None
+    m = re.match(r"^(\d{1,2})[/\-](\d{1,2})(?:[/\-](\d{2,4}))?$", txt)
+    if not m:
+        return None
+    d, mo = int(m.group(1)), int(m.group(2))
+    if m.group(3):
+        y = int(m.group(3)); y = y + 2000 if y < 100 else y
+    else:
+        y = today.year
+    try:
+        cand = date(y, mo, d)
+    except ValueError:
+        return None
+    if not m.group(3) and cand < today:
+        try:
+            cand = date(y + 1, mo, d)
+        except ValueError:
+            return None
+    return cand
+
+
+def _add_boleto_execute(user_id: int, args: dict[str, Any]) -> str:
+    from db.bills import create_boleto
+    from utils_text import fmt_brl
+
+    name = (args.get("name") or "").strip()
+    if not name:
+        return "🐷 Qual a descrição do boleto? (ex: Distribuidora XYZ, IPTU)"
+    amount = args.get("amount")
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        amount = 0.0
+    if amount <= 0:
+        return "🐷 Qual o valor do boleto?"
+    due = _resolve_date(args.get("due_date"), args.get("days"))
+    if due is None:
+        return "🐷 Qual o vencimento do boleto? (ex: 15/08)"
+    try:
+        b = create_boleto(user_id, name, amount, due)
+    except Exception as e:
+        return f"🐷 Não consegui cadastrar o boleto: {e}"
+    d = date.fromisoformat(b["due_date"][:10]) if b.get("due_date") else due
+    return (f"🧾 Boleto anotado: *{b.get('name')}* — {fmt_brl(amount)}, vence "
+            f"{d.strftime('%d/%m')}. Eu te lembro perto do vencimento. 🐷")
+
+
+def _check_cashflow(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    from core.services.cashflow import project
+
+    target = _resolve_date(args.get("date"), args.get("days"))
+    if target is None:
+        return {"error": "informe a data do prazo (ex: 16/08) ou 'daqui N dias'."}
+    extra = args.get("amount")
+    try:
+        extra = float(extra) if extra is not None else 0.0
+    except (TypeError, ValueError):
+        extra = 0.0
+    p = project(user_id, target, extra)
+    p["note"] = ("projetado = saldo + receitas previstas − gastos fixos − boletos até a data"
+                 + (" − boleto novo em análise" if extra > 0 else "")
+                 + ". tranquilo=true significa que o caixa fica positivo até lá.")
+    return p
+
+
 # ─── Tools registry ───────────────────────────────────────────────────────────
 
 TOOLS: list[Tool] = [
@@ -228,5 +327,59 @@ TOOLS: list[Tool] = [
         is_write=True,
         requires_confirmation=False,  # reversível (undo), igual add_launch
         execute=_pay_bill_execute,
+    ),
+    Tool(
+        schema={
+            "type": "function",
+            "function": {
+                "name": "add_boleto",
+                "description": (
+                    "Cadastra um BOLETO a pagar na agenda (avulso). Use quando o usuário disser "
+                    "que recebeu/tem um boleto pra pagar com um vencimento específico — ex: 'boleto "
+                    "de 500 da Distribuidora X vence 15/08', 'anota um boleto de 1200 do IPTU pra "
+                    "dia 10', 'chegou uma conta de 350 pro dia 20'. NÃO é gasto avulso (add_launch) "
+                    "nem recorrente: é uma conta pontual com data de vencimento futura."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Descrição/fornecedor (ex: 'Distribuidora XYZ', 'IPTU')."},
+                        "amount": {"type": "number", "description": "Valor do boleto."},
+                        "due_date": {"type": "string", "description": "Vencimento: 'AAAA-MM-DD' ou 'DD/MM' (ano inferido)."},
+                        "days": {"type": "integer", "description": "Alternativa: vencimento em N dias a partir de hoje."},
+                    },
+                    "required": ["name", "amount"],
+                },
+            },
+        },
+        is_write=True,
+        requires_confirmation=False,  # reversível (dá pra apagar); baixa fricção
+        execute=_add_boleto_execute,
+    ),
+    Tool(
+        schema={
+            "type": "function",
+            "function": {
+                "name": "check_cashflow",
+                "description": (
+                    "Projeta o caixa até uma data pra responder 'tô tranquilo nesse prazo?' / 'como "
+                    "tô de prazo no dia X?' / 'dá pra pegar esse boleto pra tal dia?'. Retorna saldo "
+                    "atual, receitas previstas, gastos fixos e boletos até a data, e o valor PROJETADO "
+                    "(sobra se >=0, falta se <0) + 'tranquilo' (bool). Use SEMPRE que o usuário quiser "
+                    "saber se aguenta um prazo/compromisso — NÃO responda só listando os boletos. Passe "
+                    "`amount` se ele estiver considerando pegar um boleto novo naquele prazo."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "date": {"type": "string", "description": "Data limite do prazo: 'AAAA-MM-DD' ou 'DD/MM'."},
+                        "days": {"type": "integer", "description": "Alternativa: prazo em N dias a partir de hoje."},
+                        "amount": {"type": "number", "description": "Opcional: valor de um boleto novo que ele está pensando em aceitar nesse prazo."},
+                    },
+                },
+            },
+        },
+        is_write=False,
+        execute=_check_cashflow,
     ),
 ]
