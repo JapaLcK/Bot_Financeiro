@@ -59,7 +59,7 @@ def list_recurring_expenses(user_id: int, include_inactive: bool = False) -> lis
                        r.is_essential, r.is_active,
                        r.last_amount, r.last_amount_changed_at,
                        r.last_charged_ym, r.notes, r.created_at, r.start_date,
-                       r.frequency, r.due_month, r.payment_mode
+                       r.frequency, r.due_month, r.payment_mode, r.variable_amount
                 from recurring_expenses r
                 left join credit_cards c on c.id = r.card_id
                 where r.user_id = %s
@@ -91,6 +91,7 @@ def list_recurring_expenses(user_id: int, include_inactive: bool = False) -> lis
             "frequency": r["frequency"] or "monthly",
             "due_month": int(r["due_month"]) if r["due_month"] is not None else None,
             "payment_mode": r["payment_mode"] or "autopay",
+            "variable_amount": bool(r["variable_amount"]),
         })
     return out
 
@@ -106,7 +107,7 @@ def get_recurring_expense(user_id: int, rec_id: int) -> dict[str, Any] | None:
                        r.is_essential, r.is_active,
                        r.last_amount, r.last_amount_changed_at,
                        r.last_charged_ym, r.notes, r.created_at, r.start_date,
-                       r.frequency, r.due_month, r.payment_mode
+                       r.frequency, r.due_month, r.payment_mode, r.variable_amount
                 from recurring_expenses r
                 left join credit_cards c on c.id = r.card_id
                 where r.user_id = %s and r.id = %s
@@ -131,6 +132,7 @@ def get_recurring_expense(user_id: int, rec_id: int) -> dict[str, Any] | None:
                 "frequency": r["frequency"] or "monthly",
                 "due_month": int(r["due_month"]) if r["due_month"] is not None else None,
                 "payment_mode": r["payment_mode"] or "autopay",
+                "variable_amount": bool(r["variable_amount"]),
             }
 
 
@@ -159,6 +161,7 @@ def create_recurring_expense(
     frequency: str = "monthly",
     due_month: int | None = None,
     payment_mode: str = "autopay",
+    variable_amount: bool = False,
 ) -> dict[str, Any]:
     """Cria gasto fixo. Levanta ValueError se input inválido.
 
@@ -205,14 +208,14 @@ def create_recurring_expense(
                 insert into recurring_expenses (
                     user_id, name, amount, category, due_day, payment_type,
                     card_id, is_essential, is_active, notes, start_date,
-                    frequency, due_month, payment_mode
-                ) values (%s, %s, %s, %s, %s, %s, %s, %s, true, %s, %s, %s, %s, %s)
+                    frequency, due_month, payment_mode, variable_amount
+                ) values (%s, %s, %s, %s, %s, %s, %s, %s, true, %s, %s, %s, %s, %s, %s)
                 returning id
                 """,
                 (
                     user_id, name, Decimal(str(amount)), cat, int(due_day),
                     payment_type, card_id, bool(is_essential), note, start,
-                    freq, month, mode,
+                    freq, month, mode, bool(variable_amount),
                 ),
             )
             new_id = cur.fetchone()["id"]
@@ -237,6 +240,7 @@ def update_recurring_expense(
     frequency: str | None = None,
     due_month: int | None = None,
     payment_mode: str | None = None,
+    variable_amount: bool | None = None,
 ) -> dict[str, Any]:
     """PATCH. Quando amount muda, registra `last_amount` + timestamp (detector de reajuste)."""
     ensure_user(user_id)
@@ -313,6 +317,9 @@ def update_recurring_expense(
             raise ValueError("MODO_PAGAMENTO_INVALIDO")
         sets.append("payment_mode = %s")
         params.append(mode)
+    if variable_amount is not None:
+        sets.append("variable_amount = %s")
+        params.append(bool(variable_amount))
 
     if not sets:
         return current

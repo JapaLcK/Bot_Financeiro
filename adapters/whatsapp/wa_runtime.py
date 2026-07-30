@@ -657,26 +657,54 @@ def process_message(message: InboundMessage) -> None:
                 except ValueError:
                     bill_id = 0
                 logger.info("WA bill_paid button clicked wa_id=%s uid=%s bill=%s", reply_to, uid, bill_id)
-                if bill_id and uid:
-                    from db.bills import mark_bill_paid
-                    from utils_text import fmt_brl
-                    try:
-                        paid = mark_bill_paid(uid, bill_id)
-                    except Exception as exc:
-                        logger.exception("WA bill_paid failed bill=%s: %s", bill_id, exc)
-                        _send_reply(reply_to, "Não consegui registrar o pagamento agora. Tente em instantes.")
-                        return
-                    if paid is None:
-                        _send_reply(reply_to, "Essa conta já estava paga (ou não achei mais). 👍")
-                    else:
-                        val = paid.get("paid_amount") or paid.get("amount") or 0
-                        _send_reply(
-                            reply_to,
-                            f"✅ Conta paga: *{paid.get('name')}* — {fmt_brl(val)} lançado e "
-                            f"categorizado. Tá tudo em dia! 🐷",
-                        )
-                else:
+                if not (bill_id and uid):
                     _send_reply(reply_to, "Não consegui identificar a conta desse lembrete.")
+                    return
+                from db.bills import get_bill, mark_bill_paid
+                from utils_text import fmt_brl
+                try:
+                    bill = get_bill(uid, bill_id)
+                except Exception as exc:
+                    logger.exception("WA bill_paid get_bill failed bill=%s: %s", bill_id, exc)
+                    _send_reply(reply_to, "Não consegui registrar o pagamento agora. Tente em instantes.")
+                    return
+                if bill is None or bill.get("status") == "paid":
+                    _send_reply(reply_to, "Essa conta já estava paga (ou não achei mais). 👍")
+                    return
+                # Valor variável (água/luz): o estimado não serve — pergunta quanto
+                # veio e a próxima mensagem (número) fecha o pagamento.
+                if bill.get("variable_amount"):
+                    try:
+                        set_pending_action(
+                            uid, "bill_pay_amount",
+                            {"bill_id": bill_id, "name": bill.get("name")}, minutes=30,
+                        )
+                    except Exception as exc:
+                        logger.warning("WA set bill_pay_amount pending failed: %s", exc)
+                    est = bill.get("amount")
+                    hint = f" (estimado {fmt_brl(est)})" if est else ""
+                    _send_reply(
+                        reply_to,
+                        f"Quanto veio a conta de *{bill.get('name')}* este mês?{hint}\n"
+                        f"É só mandar o valor. Ex: *132,50*",
+                    )
+                    return
+                # Valor fixo: quita direto no valor cadastrado.
+                try:
+                    paid = mark_bill_paid(uid, bill_id)
+                except Exception as exc:
+                    logger.exception("WA bill_paid failed bill=%s: %s", bill_id, exc)
+                    _send_reply(reply_to, "Não consegui registrar o pagamento agora. Tente em instantes.")
+                    return
+                if paid is None:
+                    _send_reply(reply_to, "Essa conta já estava paga (ou não achei mais). 👍")
+                else:
+                    val = paid.get("paid_amount") or paid.get("amount") or 0
+                    _send_reply(
+                        reply_to,
+                        f"✅ Conta paga: *{paid.get('name')}* — {fmt_brl(val)} lançado e "
+                        f"categorizado. Tá tudo em dia! 🐷",
+                    )
                 return
 
             # Botão de desfazer áudio (legado: undo do último lançamento)
@@ -734,6 +762,52 @@ def process_message(message: InboundMessage) -> None:
                     logger.warning("WA clear recat_text pending failed: %s", exc)
                 if launch_id:
                     _send_reply(reply_to, _apply_recategorize(uid, int(launch_id), message.text))
+                    return
+
+            # Conta a pagar de valor variável: o usuário tocou "✅ Já paguei" e
+            # agora está mandando o valor real que veio no boleto.
+            if pending_recat and pending_recat.get("action_type") == "bill_pay_amount":
+                payload_bp = pending_recat.get("payload") or {}
+                bill_id = payload_bp.get("bill_id")
+                name = payload_bp.get("name") or "conta"
+                txt = (message.text or "").strip()
+                if txt.lower() in {"cancelar", "cancela", "nao", "não", "deixa", "depois"}:
+                    try:
+                        clear_pending_action(uid)
+                    except Exception:
+                        pass
+                    _send_reply(reply_to, f"Ok, deixei a conta de *{name}* pendente. Quando pagar é só avisar. 🐷")
+                    return
+                from utils_text import parse_money, fmt_brl
+                try:
+                    amount = parse_money(txt)
+                except Exception:
+                    amount = None
+                if amount is None or amount <= 0:
+                    # não entendeu o valor → re-pergunta, mantém o pending
+                    _send_reply(reply_to, f"Não peguei o valor. Manda só o número da conta de *{name}*. Ex: *132,50* (ou *cancelar*)")
+                    return
+                try:
+                    clear_pending_action(uid)
+                except Exception as exc:
+                    logger.warning("WA clear bill_pay_amount pending failed: %s", exc)
+                if bill_id:
+                    from db.bills import mark_bill_paid
+                    try:
+                        paid = mark_bill_paid(uid, int(bill_id), amount)
+                    except Exception as exc:
+                        logger.exception("WA bill_pay_amount mark failed bill=%s: %s", bill_id, exc)
+                        _send_reply(reply_to, "Não consegui registrar o pagamento agora. Tente em instantes.")
+                        return
+                    if paid is None:
+                        _send_reply(reply_to, "Essa conta já estava paga (ou não achei mais). 👍")
+                    else:
+                        val = paid.get("paid_amount") or paid.get("amount") or amount
+                        _send_reply(
+                            reply_to,
+                            f"✅ Conta paga: *{paid.get('name')}* — {fmt_brl(val)} lançado e "
+                            f"categorizado. Tá tudo em dia! 🐷",
+                        )
                     return
 
         # ---------------------------------------------------------------

@@ -1083,6 +1083,12 @@ def init_db():
         #     "Contas a pagar". Cada ciclo vira uma linha em bill_instances.
         """alter table recurring_expenses add column if not exists payment_mode text not null default 'autopay'""",
 
+        # Conta a pagar de valor VARIÁVEL (água, luz, gás): o `amount` cadastrado
+        # é só uma estimativa; o valor real é informado na hora de pagar. Muda o
+        # lembrete ("~R$ 80 (varia)") e faz o botão "Já paguei" perguntar o valor
+        # em vez de lançar a estimativa.
+        """alter table recurring_expenses add column if not exists variable_amount boolean not null default false""",
+
         # Instâncias de conta a pagar (1 por ciclo do recorrente 'manual').
         # amount é editável (contas de luz/água variam). status: pending | paid.
         # 'vencida' é derivado (pending + due_date < hoje). reminder_last_sent_on

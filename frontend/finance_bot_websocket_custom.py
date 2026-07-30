@@ -4673,6 +4673,7 @@ class RecurringCreatePayload(BaseModel):
     frequency: str = "monthly"     # 'monthly' | 'annual'
     due_month: int | None = None   # 1-12, obrigatório se annual
     payment_mode: str = "autopay"  # 'autopay' (gasto fixo) | 'manual' (conta a pagar)
+    variable_amount: bool = False  # conta a pagar de valor variável (água/luz)
 
 
 class RecurringUpdatePayload(BaseModel):
@@ -4689,6 +4690,7 @@ class RecurringUpdatePayload(BaseModel):
     frequency: str | None = None
     due_month: int | None = None
     payment_mode: str | None = None
+    variable_amount: bool | None = None
 
 
 def _recurring_value_error(code: str) -> HTTPException:
@@ -4765,6 +4767,7 @@ async def recurring_create_route(request: Request, user_id: int, payload: Recurr
             user_id, payload.name, payload.amount, payload.category, payload.due_day,
             payload.payment_type, payload.card_id, payload.is_essential, payload.notes,
             payload.start_date, payload.frequency, payload.due_month, payload.payment_mode,
+            payload.variable_amount,
         )
     except ValueError as exc:
         raise _recurring_value_error(str(exc))
@@ -4790,7 +4793,7 @@ async def recurring_update_route(
             due_day=payload.due_day, payment_type=payload.payment_type, card_id=payload.card_id,
             is_essential=payload.is_essential, is_active=payload.is_active, notes=payload.notes,
             start_date=payload.start_date, frequency=payload.frequency, due_month=payload.due_month,
-            payment_mode=payload.payment_mode,
+            payment_mode=payload.payment_mode, variable_amount=payload.variable_amount,
         )
     except ValueError as exc:
         code = str(exc)

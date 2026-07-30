@@ -424,6 +424,9 @@ def _bill_reminder_named_params(bill: dict, today) -> dict[str, str]:
         valor = fmt_brl(float(amount)) if amount is not None else "—"
     except (TypeError, ValueError):
         valor = "—"
+    # Conta de valor variável (água/luz): o valor cadastrado é só estimativa.
+    if bill.get("variable_amount"):
+        valor = f"~{valor} (varia)" if amount is not None else "valor variável"
     try:
         vencimento = due.strftime("%d/%m") if due else "—"
     except Exception:

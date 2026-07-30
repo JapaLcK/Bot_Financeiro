@@ -28,6 +28,7 @@ def _row(r: Any) -> dict[str, Any]:
         "paid_at": r["paid_at"].isoformat() if r.get("paid_at") else None,
         "paid_amount": float(r["paid_amount"]) if r.get("paid_amount") is not None else None,
         "launch_id": r.get("launch_id"),
+        "variable_amount": bool(r.get("variable_amount")),
     }
 
 
@@ -39,7 +40,8 @@ def list_bills(user_id: int, include_paid: bool = False, limit: int = 120) -> li
             cur.execute(
                 """
                 select b.id, b.recurring_id, r.name, r.category, b.due_date,
-                       b.amount, b.status, b.paid_at, b.paid_amount, b.launch_id
+                       b.amount, b.status, b.paid_at, b.paid_amount, b.launch_id,
+                       r.variable_amount
                 from bill_instances b
                 join recurring_expenses r on r.id = b.recurring_id
                 where b.user_id = %s
@@ -59,7 +61,8 @@ def get_bill(user_id: int, bill_id: int) -> dict[str, Any] | None:
             cur.execute(
                 """
                 select b.id, b.recurring_id, r.name, r.category, b.due_date,
-                       b.amount, b.status, b.paid_at, b.paid_amount, b.launch_id
+                       b.amount, b.status, b.paid_at, b.paid_amount, b.launch_id,
+                       r.variable_amount
                 from bill_instances b
                 join recurring_expenses r on r.id = b.recurring_id
                 where b.user_id = %s and b.id = %s
@@ -163,7 +166,7 @@ def list_due_bill_reminders(user_id: int, today: date, days_before: int = 3) -> 
             cur.execute(
                 """
                 select b.id, b.recurring_id, r.name, r.category, b.due_date,
-                       b.amount, b.status, b.reminder_last_sent_on
+                       b.amount, b.status, b.reminder_last_sent_on, r.variable_amount
                 from bill_instances b
                 join recurring_expenses r on r.id = b.recurring_id
                 where b.user_id = %s

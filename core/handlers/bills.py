@@ -86,6 +86,17 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
             nomes = ", ".join(b.get("name") or "?" for b in ties[:5])
             return f"Você tem contas a pagar pendentes: {nomes}. Qual delas você pagou?"
 
+    # Conta de valor variável (água/luz) sem valor informado: o estimado não
+    # serve. Pede o valor real de forma explícita (sem estado — funciona em
+    # qualquer canal). Se o usuário já disse o valor ("paguei 132 de água"),
+    # `amount` vem preenchido e segue direto.
+    if best.get("variable_amount") and amount is None:
+        nome = (best.get("name") or "conta")
+        return (
+            f"A conta de *{nome}* tem valor variável. Quanto veio este mês?\n"
+            f"Manda assim: *paguei {nome.lower()} 132,50*"
+        )
+
     paid = mark_bill_paid(user_id, int(best["id"]), amount)
     if paid is None:
         return None
