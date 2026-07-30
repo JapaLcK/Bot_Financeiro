@@ -3512,12 +3512,13 @@ function setRecurringTab(tab) {
   else loadFixedView();
 }
 
-// ── Visão geral: resumo das 3 áreas em cards, com atalho pra cada aba ────────
+// ── Previsão mensal: o que entra (receitas fixas) × o que sai (gastos fixos +
+// boletos) × resultado, + próximos vencimentos. Deixa explícito que é RECORRENTE
+// (não colide com "Receitas/Gastos do mês" do dashboard principal). ─────────────
 async function loadRecurringOverview() {
   const wrap = document.getElementById("recurring-overview-cards");
   if (!wrap) return;
   wrap.innerHTML = `<div class="mock-card"><div class="empty" style="padding:16px;color:var(--text-3)">Carregando…</div></div>`;
-  // Busca as 3 áreas em paralelo; cada uma tolera falha (403/erro) sem derrubar as outras.
   const j = async (url) => {
     try { const r = await fetch(url, { credentials: "same-origin" }); if (!r.ok) return null; return await r.json(); }
     catch (_) { return null; }
@@ -3528,118 +3529,137 @@ async function loadRecurringOverview() {
     j(`${API}/recurring-bills/${USER_ID}?include_paid=false`),
   ]);
 
-  // Gastos fixos (autopay)
   const gastos = ((exp && exp.recurring) || []).filter(r => r.is_active && (r.payment_mode || "autopay") === "autopay");
   const totalGastos = gastos.reduce((s, r) => s + _recMonthlyEquiv(r), 0);
-
-  // Receitas fixas (endpoint retorna a chave "incomes")
   const receitas = ((inc && inc.incomes) || []).filter(r => r.is_active);
   const totalReceitas = receitas.reduce((s, r) => s + _recMonthlyEquiv(r), 0);
-
-  // Contas a pagar (pendentes)
   const pend = ((bills && bills.bills) || []).filter(b => b.status === "pending");
   const totalPend = pend.reduce((s, b) => s + (b.amount || 0), 0);
+
+  const entradas = totalReceitas;
+  const saidas = totalGastos + totalPend;
+  const resultado = entradas - saidas;
+  const positivo = resultado >= 0;
+  const resColor = positivo ? "#22c55e" : "#FF2D2D";
+  const plural = (n) => n === 1 ? "" : "s";
+
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const overdue = pend.filter(b => new Date(b.due_date + "T00:00:00") < today).length;
-  const prox = pend
-    .map(b => ({ b, d: new Date(b.due_date + "T00:00:00") }))
-    .filter(x => x.d >= today)
-    .sort((a, b) => a.d - b.d)[0];
-
-  const proText = prox
-    ? `${escapeHtmlSafe(prox.b.name || "conta")} · ${prox.d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}`
-    : (pend.length ? "todas vencidas" : "nenhuma pendente");
-
-  // Balanço do mês: o que entra vs. o que já está comprometido (fixos + boletos
-  // que vencem neste mês) → sobra estimada.
-  const endMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0); endMonth.setHours(0, 0, 0, 0);
+  const daysUntil = (d) => Math.round((d - today) / 86400000);
   const dOf = (b) => { const d = new Date(b.due_date + "T00:00:00"); d.setHours(0, 0, 0, 0); return d; };
-  const boletosMes = pend.filter(b => dOf(b) <= endMonth).reduce((s, b) => s + (b.amount || 0), 0);
-  const compromissos = totalGastos + boletosMes;
-  const sobra = totalReceitas - compromissos;
-  const sobraColor = sobra >= 0 ? "#22c55e" : "#FF2D2D";
-  const pctSai = totalReceitas > 0 ? Math.min(100, Math.round(compromissos / totalReceitas * 100)) : 100;
 
-  // Consolidado: o que mexe no caixa nos próximos 14 dias (boletos + fixos + receitas).
-  const horizon = new Date(today.getTime() + 14 * 86400000);
+  // Próximos vencimentos (30 dias): boletos + gastos fixos + receitas fixas.
+  const horizon = new Date(today.getTime() + 30 * 86400000);
   const up = [];
   pend.forEach(b => up.push({ d: dOf(b), name: b.name || "Boleto", amt: -(b.amount || 0), tag: "🧾" }));
   gastos.forEach(r => { const d = _nextRecurringOccurrence(r.due_day, r.start_date, r.frequency, r.due_month); if (d) up.push({ d, name: r.name || "Gasto fixo", amt: -(r.amount || 0), tag: "🔻" }); });
   receitas.forEach(r => { const d = _nextRecurringOccurrence(r.pay_day, r.start_date, r.frequency, r.pay_month); if (d) up.push({ d, name: r.name || "Receita", amt: +(r.amount || 0), tag: "🔺" }); });
-  const upcoming = up.filter(x => x.d >= today && x.d <= horizon).sort((a, b) => a.d - b.d).slice(0, 8);
+  const upAll = up.filter(x => x.d >= today && x.d <= horizon).sort((a, b) => a.d - b.d);
+  const upcoming = upAll.slice(0, 6);
 
-  // Gráfico: duas barras comparáveis — Entra (verde) vs Sai (gastos fixos rosa +
-  // boletos âmbar). A folga entre elas é a sobra. Identidade por rótulo+posição
-  // (não só cor): âmbar/verde ficam perto no daltonismo, então cada barra tem
-  // rótulo e há legenda com valores. Gap de 2px entre segmentos empilhados.
-  const maxVal = Math.max(totalReceitas, compromissos, 1);
-  const pctOf = (v) => Math.max(0, (v / maxVal * 100)).toFixed(2);
-  const seg = (v, color, title) => v > 0
-    ? `<div style="width:${pctOf(v)}%;background:${color}" title="${title}: ${_fmtBRL(v)}"></div>` : "";
-  const barRow = (label, labelColor, segsHtml, valTxt, valColor) => `
-    <div style="display:flex;align-items:center;gap:10px;margin:5px 0">
-      <div style="width:46px;font-size:.72rem;color:${labelColor};font-weight:600">${label}</div>
-      <div style="flex:1;height:22px;border-radius:6px;background:rgba(128,128,128,.16);display:flex;gap:2px;overflow:hidden">${segsHtml}</div>
-      <div style="min-width:104px;text-align:right;font-weight:700;font-size:.86rem;color:${valColor}">${valTxt}</div>
-    </div>`;
-  const dot = (c) => `<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${c};margin-right:4px;vertical-align:middle"></span>`;
+  const vencBadge = (d) => {
+    const n = daysUntil(d);
+    if (n < 0) return { txt: "Vencido", bg: "rgba(255,45,45,.15)", fg: "#FF6B6B" };
+    if (n === 0) return { txt: "Hoje", bg: "rgba(255,45,142,.18)", fg: "#FF2D8E" };
+    if (n === 1) return { txt: "Amanhã", bg: "rgba(251,191,36,.15)", fg: "#fbbf24" };
+    if (n <= 7) return { txt: `Em ${n} dias`, bg: "rgba(251,191,36,.15)", fg: "#fbbf24" };
+    return { txt: `Dia ${d.getDate()}`, bg: "rgba(168,85,247,.18)", fg: "#c084fc" };
+  };
 
-  const chart = `
-    <div style="margin-top:14px">
-      ${barRow("Entra", "#22c55e", seg(totalReceitas, "#22c55e", "Receitas"), _fmtBRL(totalReceitas), "#22c55e")}
-      ${barRow("Sai", "#fb7185",
-        seg(totalGastos, "#fb7185", "Gastos fixos") + seg(boletosMes, "#fbbf24", "Boletos do mês"),
-        _fmtBRL(compromissos), "#fb7185")}
-    </div>
-    <div style="font-size:.72rem;color:var(--text-2);margin-top:8px;display:flex;gap:14px;flex-wrap:wrap">
-      <span>${dot("#fb7185")}Gastos fixos ${_fmtBRL(totalGastos)}</span>
-      <span>${dot("#fbbf24")}Boletos do mês ${_fmtBRL(boletosMes)}</span>
-      <span>${dot(sobraColor)}Sobra ${_fmtBRL(sobra)}</span>
+  // ── Título ──
+  const head = `
+    <div style="margin-bottom:14px">
+      <h2 style="margin:0 0 2px;font-size:1.5rem">Previsão mensal</h2>
+      <div style="font-size:.86rem;color:var(--text-3)">Veja rapidamente o que entra, o que sai e o que vence primeiro — só do que é recorrente.</div>
     </div>`;
 
-  const hero = `
-    <div class="mock-card" style="margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
-        <h3 style="margin:0">Balanço do mês</h3>
-        <div style="font-size:.82rem;color:var(--text-2)">Sobra estimada: <b style="color:${sobraColor}">${_fmtBRL(sobra)}</b></div>
+  // ── Alerta (déficit ou no azul) ──
+  const alerta = positivo
+    ? `<div class="mock-card" style="border:1px solid rgba(34,197,94,.35);margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <div style="font-size:1.5rem">✅</div>
+        <div style="flex:1;min-width:220px">
+          <div style="font-weight:700">Suas entradas cobrem os compromissos — sobra <span style="color:#22c55e">${_fmtBRL(resultado)}</span>.</div>
+          <div style="font-size:.82rem;color:var(--text-3)">Mês recorrente equilibrado. Bom trabalho! 🐷</div>
+        </div>
+      </div>`
+    : `<div class="mock-card" style="border:1px solid rgba(255,45,142,.4);margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <div style="font-size:1.5rem">⚠️</div>
+        <div style="flex:1;min-width:220px">
+          <div style="font-weight:700">Saídas previstas maiores que entradas em <span style="color:#FF2D8E">${_fmtBRL(-resultado)}</span>.</div>
+          <div style="font-size:.82rem;color:var(--text-3)">Revise contas a pagar ou planeje novas entradas para equilibrar o mês.</div>
+        </div>
+        <button class="mock-cta" onclick="setRecurringTab('bills')">Revisar →</button>
+      </div>`;
+
+  // ── 3 cards (Entradas / Saídas / Resultado) ──
+  const statCard = (accent, iconBg, icon, label, value, valColor, sub) => `
+    <div class="mock-card" style="flex:1;min-width:190px;border-left:3px solid ${accent}">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <div style="width:40px;height:40px;border-radius:11px;background:${iconBg};display:flex;align-items:center;justify-content:center;font-size:1.15rem;flex-shrink:0">${icon}</div>
+        <div style="min-width:0">
+          <div style="font-size:.82rem;color:var(--text-2)">${label}</div>
+          <div style="font-size:1.55rem;font-weight:700;color:${valColor};line-height:1.15">${value}</div>
+          <div style="font-size:.76rem;color:var(--text-3)">${sub}</div>
+        </div>
       </div>
-      ${chart}
-      <div style="font-size:.7rem;color:var(--text-3);margin-top:8px">${totalReceitas > 0
-        ? (sobra >= 0 ? `Você compromete ${pctSai}% do que entra por mês.` : `Seus compromissos passam do que entra em ${_fmtBRL(-sobra)}.`)
-        : "Cadastre suas receitas fixas pra ver a sobra do mês."}</div>
     </div>`;
-
-  const card = (accent, titulo, valorLabel, valor, sub, tab, cta) => `
-    <div class="mock-card" style="border-top:3px solid ${accent}">
-      <h3 style="margin-bottom:6px">${titulo}</h3>
-      <div style="font-size:.72rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em">${valorLabel}</div>
-      <div style="font-size:1.5rem;font-weight:700;color:${accent}">${valor}</div>
-      <div style="font-size:.8rem;color:var(--text-2);margin:6px 0 12px">${sub}</div>
-      <button class="mock-cta outline" style="width:100%" onclick="setRecurringTab('${tab}')">${cta}</button>
-    </div>`;
-
-  const cards = `<div class="mock-grid cols-2" style="margin-bottom:14px">
-    ${card("#22c55e", "🔺 Receitas fixas", "Entra por mês", _fmtBRL(totalReceitas),
-         `${receitas.length} recorrente(s)`, "incomes", "Ver receitas fixas")}
-    ${card("#fb7185", "🔻 Gastos fixos", "Sai por mês (equiv.)", _fmtBRL(totalGastos),
-         `${gastos.length} recorrente(s)`, "expenses", "Ver gastos fixos")}
-    ${card("#fbbf24", "🧾 Contas a pagar", "Em aberto", _fmtBRL(totalPend),
-         `${pend.length} boleto(s)${overdue ? ` · ${overdue} vencido(s)` : ""} · próximo: ${proText}`, "bills", "Ver boletos")}
+  const statsRow = `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">
+    ${statCard("#22c55e", "rgba(34,197,94,.15)", "📈", "Entradas previstas", _fmtBRL(entradas), "#22c55e",
+      `${receitas.length} receita${plural(receitas.length)} fixa${plural(receitas.length)}`)}
+    ${statCard("#fb7185", "rgba(251,113,133,.15)", "📉", "Saídas previstas", _fmtBRL(saidas), "#fb7185",
+      `${gastos.length} gasto${plural(gastos.length)} fixo${plural(gastos.length)} + ${pend.length} boleto${plural(pend.length)}`)}
+    ${statCard(resColor, positivo ? "rgba(34,197,94,.15)" : "rgba(255,45,45,.15)", positivo ? "➕" : "➖", "Resultado previsto",
+      (positivo ? "" : "- ") + _fmtBRL(Math.abs(resultado)), resColor, "Projeção até o fim do mês")}
   </div>`;
 
-  const upList = upcoming.length ? upcoming.map(x => `
-    <div class="tx-row">
-      <div class="tx-icon">${x.tag}</div>
-      <div class="tx-main">
-        <div class="tx-desc">${escapeHtmlSafe(x.name)}</div>
-        <div class="tx-meta">${x.d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })} · ${_formatDueIn(x.d)}</div>
-      </div>
-      <div class="tx-amt" style="color:${x.amt >= 0 ? '#22c55e' : 'var(--red)'}">${x.amt >= 0 ? '+' : '−'} ${_fmtBRL(Math.abs(x.amt))}</div>
-    </div>`).join("")
-    : `<div class="empty" style="padding:16px;text-align:center;color:var(--text-3)">Nada movimenta seu caixa nos próximos 14 dias.</div>`;
-  const proxCard = `<div class="mock-card"><h3>📆 Próximos 14 dias</h3><div class="tx-list">${upList}</div></div>`;
+  // ── Próximos vencimentos (esquerda) ──
+  const vencRows = upcoming.length ? upcoming.map(x => {
+    const b = vencBadge(x.d);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid rgba(128,128,128,.13)">
+      <div style="width:30px;text-align:center;font-size:1rem">${x.tag}</div>
+      <div style="flex:1;min-width:0;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtmlSafe(x.name)}</div>
+      <div style="font-size:.72rem;font-weight:600;padding:3px 9px;border-radius:20px;background:${b.bg};color:${b.fg}">${b.txt}</div>
+      <div style="min-width:92px;text-align:right;font-weight:600;color:${x.amt >= 0 ? '#22c55e' : 'var(--red)'}">${x.amt >= 0 ? '+ ' : '- '}${_fmtBRL(Math.abs(x.amt))}</div>
+    </div>`;
+  }).join("") : `<div class="empty" style="padding:16px;text-align:center;color:var(--text-3)">Nada nos próximos 30 dias.</div>`;
+  const vencCard = `
+    <div class="mock-card" style="flex:2;min-width:300px">
+      <h3>📅 Próximos vencimentos</h3>
+      ${vencRows}
+      ${upAll.length > upcoming.length ? `<div style="text-align:center;margin-top:10px"><a onclick="setRecurringTab('bills')" style="color:var(--pink,#FF2D8E);cursor:pointer;font-size:.84rem;font-weight:600">Ver todos os vencimentos →</a></div>` : ""}
+    </div>`;
 
-  wrap.innerHTML = hero + cards + proxCard;
+  // ── Resumo rápido + Próxima ação (direita) ──
+  const resumoRow = (label, val, color) => `
+    <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:.88rem">
+      <span style="color:var(--text-2)">${label}</span><span style="font-weight:600;color:${color}">${val}</span></div>`;
+  const resumoCard = `
+    <div class="mock-card">
+      <h3>📊 Resumo rápido</h3>
+      ${resumoRow("Receitas fixas", _fmtBRL(totalReceitas), "#22c55e")}
+      ${resumoRow("Gastos fixos", "- " + _fmtBRL(totalGastos), "#fb7185")}
+      ${resumoRow("Boletos / contas", "- " + _fmtBRL(totalPend), "#fb7185")}
+      <div style="border-top:1px solid rgba(128,128,128,.2);margin:6px 0;padding-top:6px;display:flex;justify-content:space-between;font-weight:700">
+        <span>Resultado do mês</span><span style="color:${resColor}">${(positivo ? "" : "- ") + _fmtBRL(Math.abs(resultado))}</span></div>
+    </div>`;
+
+  let acaoMsg, acaoTab, acaoCta;
+  if (entradas === 0 && saidas === 0) { acaoMsg = "Cadastre suas receitas e gastos fixos pra ver a previsão do mês."; acaoTab = "expenses"; acaoCta = "Começar"; }
+  else if (positivo) { acaoMsg = "Você está no azul este mês. Que tal adiantar um boleto?"; acaoTab = "bills"; acaoCta = "Ver boletos"; }
+  else if (totalPend >= totalGastos) { acaoMsg = "O maior peso está em boletos e contas a pagar."; acaoTab = "bills"; acaoCta = "Ver contas"; }
+  else { acaoMsg = "O maior peso está nos gastos fixos."; acaoTab = "expenses"; acaoCta = "Ver gastos fixos"; }
+  const acaoCard = `
+    <div class="mock-card">
+      <h3>🎯 Próxima ação</h3>
+      <div style="font-size:.88rem;color:var(--text-2);margin-bottom:10px">${acaoMsg}</div>
+      <button class="mock-cta outline" style="width:100%" onclick="setRecurringTab('${acaoTab}')">${acaoCta} →</button>
+    </div>`;
+
+  const twoCol = `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start">
+    ${vencCard}
+    <div style="flex:1;min-width:250px;display:flex;flex-direction:column;gap:14px">${resumoCard}${acaoCard}</div>
+  </div>`;
+
+  wrap.innerHTML = head + alerta + statsRow + twoCol;
 }
 
 // O botão do header muda de destino conforme a aba ativa.
