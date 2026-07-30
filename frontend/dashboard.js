@@ -3550,6 +3550,43 @@ async function loadRecurringOverview() {
     ? `${escapeHtmlSafe(prox.b.name || "conta")} · ${prox.d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}`
     : (pend.length ? "todas vencidas" : "nenhuma pendente");
 
+  // Balanço do mês: o que entra vs. o que já está comprometido (fixos + boletos
+  // que vencem neste mês) → sobra estimada.
+  const endMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0); endMonth.setHours(0, 0, 0, 0);
+  const dOf = (b) => { const d = new Date(b.due_date + "T00:00:00"); d.setHours(0, 0, 0, 0); return d; };
+  const boletosMes = pend.filter(b => dOf(b) <= endMonth).reduce((s, b) => s + (b.amount || 0), 0);
+  const compromissos = totalGastos + boletosMes;
+  const sobra = totalReceitas - compromissos;
+  const sobraColor = sobra >= 0 ? "#22c55e" : "#FF2D2D";
+  const pctSai = totalReceitas > 0 ? Math.min(100, Math.round(compromissos / totalReceitas * 100)) : 100;
+
+  // Consolidado: o que mexe no caixa nos próximos 14 dias (boletos + fixos + receitas).
+  const horizon = new Date(today.getTime() + 14 * 86400000);
+  const up = [];
+  pend.forEach(b => up.push({ d: dOf(b), name: b.name || "Boleto", amt: -(b.amount || 0), tag: "🧾" }));
+  gastos.forEach(r => { const d = _nextRecurringOccurrence(r.due_day, r.start_date, r.frequency, r.due_month); if (d) up.push({ d, name: r.name || "Gasto fixo", amt: -(r.amount || 0), tag: "🔻" }); });
+  receitas.forEach(r => { const d = _nextRecurringOccurrence(r.pay_day, r.start_date, r.frequency, r.pay_month); if (d) up.push({ d, name: r.name || "Receita", amt: +(r.amount || 0), tag: "🔺" }); });
+  const upcoming = up.filter(x => x.d >= today && x.d <= horizon).sort((a, b) => a.d - b.d).slice(0, 8);
+
+  const hero = `
+    <div class="mock-card" style="margin-bottom:14px">
+      <h3 style="margin-bottom:12px">Balanço do mês</h3>
+      <div style="display:flex;gap:24px;flex-wrap:wrap">
+        <div><div style="font-size:.68rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em">Entra por mês</div>
+          <div style="font-size:1.45rem;font-weight:700;color:#22c55e">${_fmtBRL(totalReceitas)}</div></div>
+        <div><div style="font-size:.68rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em">Compromissos (fixos + boletos)</div>
+          <div style="font-size:1.45rem;font-weight:700;color:#fb7185">${_fmtBRL(compromissos)}</div></div>
+        <div><div style="font-size:.68rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em">Sobra estimada</div>
+          <div style="font-size:1.45rem;font-weight:700;color:${sobraColor}">${_fmtBRL(sobra)}</div></div>
+      </div>
+      <div style="height:8px;border-radius:6px;background:rgba(128,128,128,.2);margin-top:14px;overflow:hidden">
+        <div style="height:100%;width:${pctSai}%;background:${sobra >= 0 ? '#fb7185' : '#FF2D2D'}"></div>
+      </div>
+      <div style="font-size:.7rem;color:var(--text-3);margin-top:6px">${totalReceitas > 0
+        ? (sobra >= 0 ? `Você compromete ${pctSai}% do que entra por mês.` : `Seus compromissos passam do que entra em ${_fmtBRL(-sobra)}.`)
+        : "Cadastre suas receitas fixas pra ver a sobra do mês."}</div>
+    </div>`;
+
   const card = (accent, titulo, valorLabel, valor, sub, tab, cta) => `
     <div class="mock-card" style="border-top:3px solid ${accent}">
       <h3 style="margin-bottom:6px">${titulo}</h3>
@@ -3559,13 +3596,28 @@ async function loadRecurringOverview() {
       <button class="mock-cta outline" style="width:100%" onclick="setRecurringTab('${tab}')">${cta}</button>
     </div>`;
 
-  wrap.innerHTML =
-    card("#22c55e", "🔺 Receitas fixas", "Entra por mês", _fmtBRL(totalReceitas),
-         `${receitas.length} recorrente(s)`, "incomes", "Ver receitas fixas") +
-    card("#fb7185", "🔻 Gastos fixos", "Sai por mês (equiv.)", _fmtBRL(totalGastos),
-         `${gastos.length} recorrente(s)`, "expenses", "Ver gastos fixos") +
-    card("#fbbf24", "🧾 Contas a pagar", "A pagar", _fmtBRL(totalPend),
-         `${pend.length} pendente(s)${overdue ? ` · ${overdue} vencida(s)` : ""} · próxima: ${proText}`, "bills", "Ver contas a pagar");
+  const cards = `<div class="mock-grid cols-2" style="margin-bottom:14px">
+    ${card("#22c55e", "🔺 Receitas fixas", "Entra por mês", _fmtBRL(totalReceitas),
+         `${receitas.length} recorrente(s)`, "incomes", "Ver receitas fixas")}
+    ${card("#fb7185", "🔻 Gastos fixos", "Sai por mês (equiv.)", _fmtBRL(totalGastos),
+         `${gastos.length} recorrente(s)`, "expenses", "Ver gastos fixos")}
+    ${card("#fbbf24", "🧾 Contas a pagar", "Em aberto", _fmtBRL(totalPend),
+         `${pend.length} boleto(s)${overdue ? ` · ${overdue} vencido(s)` : ""} · próximo: ${proText}`, "bills", "Ver boletos")}
+  </div>`;
+
+  const upList = upcoming.length ? upcoming.map(x => `
+    <div class="tx-row">
+      <div class="tx-icon">${x.tag}</div>
+      <div class="tx-main">
+        <div class="tx-desc">${escapeHtmlSafe(x.name)}</div>
+        <div class="tx-meta">${x.d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })} · ${_formatDueIn(x.d)}</div>
+      </div>
+      <div class="tx-amt" style="color:${x.amt >= 0 ? '#22c55e' : 'var(--red)'}">${x.amt >= 0 ? '+' : '−'} ${_fmtBRL(Math.abs(x.amt))}</div>
+    </div>`).join("")
+    : `<div class="empty" style="padding:16px;text-align:center;color:var(--text-3)">Nada movimenta seu caixa nos próximos 14 dias.</div>`;
+  const proxCard = `<div class="mock-card"><h3>📆 Próximos 14 dias</h3><div class="tx-list">${upList}</div></div>`;
+
+  wrap.innerHTML = hero + cards + proxCard;
 }
 
 // O botão do header muda de destino conforme a aba ativa.
