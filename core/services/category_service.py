@@ -188,4 +188,13 @@ def learn_from_inference(
 ) -> None:
     if reason in {"default", "user_rule"}:
         return
-    learn_from_signals(user_id, chosen_category, target_hint, text_base, guard_local_conflict=True)
+    # Aprende do ALVO LIMPO (target_hint = `alvo` extraído pelo parser) quando ele
+    # existe, e NÃO do text_base inteiro. O text_base é a mensagem/transcrição
+    # crua — com wake-word ("pig"), valor por extenso ("reais"/"centavos"),
+    # conectores e frases longas — que poluía user_category_rules com keywords
+    # como "pig eu mercado mais" ou "reais centavos almoco". Só cai no text_base
+    # quando não há alvo (o filtro de ruído em extract_memory_candidates ainda
+    # limpa o resto).
+    hint = (target_hint or "").strip()
+    signal = target_hint if hint else text_base
+    learn_from_signals(user_id, chosen_category, signal, guard_local_conflict=True)

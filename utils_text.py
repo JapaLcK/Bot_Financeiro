@@ -538,6 +538,35 @@ MEMORY_NOISE_TOKENS = {
     "ltda", "me", "epp", "sa", "eireli", "banco", "bank", "loja",
 }
 
+# Ruído de fala/transcrição do auto-aprendizado: a wake-word do bot, pronomes,
+# "valor por extenso" (reais/centavos), conectores de fala e números por extenso.
+# Nunca podem virar — nem compor — uma keyword de regra. Diferente de
+# MEMORY_NOISE_TOKENS (jargão bancário de extrato), estes vêm de mensagem de
+# texto/áudio: "pig eu mercado mais", "pig reais ifood", "reais centavos almoco".
+MEMORY_STOP_TOKENS = {
+    # wake-word / marca
+    "pig", "piggy", "porquinho", "porquim",
+    # pronomes / dêixis de fala
+    "eu", "tu", "voce", "vc", "meu", "minha", "meus", "minhas",
+    "teu", "tua", "seu", "sua", "nosso", "nossa", "isso", "isto", "aqui", "ai",
+    # "valor por extenso" / moeda falada
+    "reais", "real", "centavos", "centavo", "conto", "contos", "pila", "pilas",
+    "mango", "mangos",
+    # conectores / preenchimento de fala
+    "mais", "menos", "tambem", "entao", "tipo", "mano", "cara", "acho",
+    "acredita", "valor",
+    # verbos/particípios de registro (já há variantes em STOPWORDS_PT)
+    "recebido", "recebida", "registrada", "registrado", "registrei",
+    "pelo", "pela", "dashboard",
+    # números por extenso (acentos já caem em normalize_text: "três" -> "tres")
+    "zero", "um", "uma", "dois", "duas", "tres", "quatro", "cinco", "seis",
+    "sete", "oito", "nove", "dez", "onze", "doze", "treze", "quatorze",
+    "catorze", "quinze", "dezesseis", "dezessete", "dezoito", "dezenove",
+    "vinte", "trinta", "quarenta", "cinquenta", "sessenta", "setenta",
+    "oitenta", "noventa", "cem", "cento", "duzentos", "trezentos", "quinhentos",
+    "mil", "milhao", "milhoes", "bilhao", "bilhoes",
+}
+
 
 def is_useful_memory_keyword(keyword: str | None) -> bool:
     kw = normalize_text(keyword or "")
@@ -551,9 +580,14 @@ def is_useful_memory_keyword(keyword: str | None) -> bool:
     tokens = [tok for tok in kw.split() if tok]
     if not tokens:
         return False
-    if len(tokens) > 6:
+    # Cap de ~2 palavras: keyword de regra é um alvo curto (merchant/coisa),
+    # não uma frase. Frases longas ("pao doce mano acredita") são ruído.
+    if len(tokens) > 2:
         return False
-    if all(tok in STOPWORDS_PT or tok in MEMORY_NOISE_TOKENS for tok in tokens):
+    if all(
+        tok in STOPWORDS_PT or tok in MEMORY_NOISE_TOKENS or tok in MEMORY_STOP_TOKENS
+        for tok in tokens
+    ):
         return False
     return True
 
@@ -570,15 +604,13 @@ def extract_memory_candidates(text: str | None, limit: int = 3) -> list[str]:
         and not tok.isdigit()
         and tok not in STOPWORDS_PT
         and tok not in MEMORY_NOISE_TOKENS
+        and tok not in MEMORY_STOP_TOKENS
     ]
 
     candidates: list[str] = []
 
     if filtered:
-        phrase = " ".join(filtered[:4])
-        if is_useful_memory_keyword(phrase):
-            candidates.append(phrase)
-
+        # No máx 2 palavras — o alvo limpo, sem os conectores/ruído já removidos.
         first_two = " ".join(filtered[:2])
         if is_useful_memory_keyword(first_two):
             candidates.append(first_two)
@@ -619,6 +651,7 @@ def extract_keyword_for_memory(text_norm: str) -> str:
         if t
         and t not in STOPWORDS_PT
         and t not in MEMORY_NOISE_TOKENS
+        and t not in MEMORY_STOP_TOKENS
         and len(t) >= 3
         and not t.replace(",", "").replace(".", "").isdigit()
     ]
