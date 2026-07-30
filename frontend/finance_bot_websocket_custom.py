@@ -4664,7 +4664,7 @@ class RecurringCreatePayload(BaseModel):
     name: str
     amount: float | None = None  # opcional só p/ conta a pagar de valor variável
     category: str
-    due_day: int
+    due_day: int | None = None   # obrigatório só p/ mensal/anual; senão derivado do start_date
     payment_type: str
     card_id: int | None = None
     is_essential: bool = False

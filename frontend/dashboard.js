@@ -2826,7 +2826,18 @@ function _nextRecurringOccurrence(dayNum, startISO, frequency, monthNum) {
     const s = new Date(startISO + "T00:00:00");
     if (s > floor) { floor.setTime(s.getTime()); }
   }
-  const dd = Math.min(dayNum, 28);
+  // Frequências ancoradas no start_date.
+  const startDate = startISO ? new Date(startISO + "T00:00:00") : null;
+  if (frequency === "once") return startDate || floor;
+  if (frequency === "daily") return floor;
+  if (frequency === "weekly") {
+    const base = startDate || floor;
+    if (base >= floor) return base;
+    const days = Math.round((floor - base) / 86400000);
+    const bumps = Math.ceil(days / 7);
+    return new Date(base.getTime() + bumps * 7 * 86400000);
+  }
+  const dd = Math.min(dayNum || 1, 28);
   // Anual: próxima ocorrência no mês monthNum (1-12), este ano ou o que vem.
   if (frequency === "annual" && monthNum) {
     const m = monthNum - 1; // JS: 0-11
@@ -2843,7 +2854,13 @@ function _nextRecurringOccurrence(dayNum, startISO, frequency, monthNum) {
 // mensal; mensal conta o valor cheio. (Usado nos cards "Total mensal".)
 function _recMonthlyEquiv(r) {
   const v = r.amount || 0;
-  return r.frequency === "annual" ? v / 12 : v;
+  switch (r.frequency) {
+    case "annual": return v / 12;
+    case "weekly": return v * 52 / 12;   // ~4,33 ocorrências/mês
+    case "daily":  return v * 365 / 12;  // ~30,4 ocorrências/mês
+    case "once":   return 0;             // pagamento único não é custo mensal recorrente
+    default:       return v;             // monthly
+  }
 }
 
 let _recurringCache = null;
@@ -3040,10 +3057,30 @@ function _recurringEmoji(r) {
   return RECURRING_CATEGORY_EMOJI[(r.category || "").toLowerCase()] || "🏷️";
 }
 
+// Rótulo curto da frequência de um recorrente (gasto fixo / receita fixa).
+function _recFreqLabel(r) {
+  const dia = r.due_day || r.pay_day;
+  switch (r.frequency) {
+    case "once":   return r.start_date ? `único · ${_fmtDateBR(r.start_date)}` : "pagamento único";
+    case "daily":  return "todo dia";
+    case "weekly": return r.start_date ? `semanal · a partir de ${_fmtDateBR(r.start_date)}` : "semanal";
+    case "annual":
+      return (r.due_month || r.pay_month)
+        ? `anual · ${dia}/${_MESES_ABREV[(r.due_month || r.pay_month) - 1]}`
+        : "anual";
+    default:       return `dia ${dia}`;
+  }
+}
+
+function _fmtDateBR(iso) {
+  try {
+    const d = new Date(String(iso).slice(0, 10) + "T00:00:00");
+    return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+  } catch (_) { return String(iso); }
+}
+
 function _renderRecurringRow(r) {
-  const quando = r.frequency === "annual" && r.due_month
-    ? `anual · ${r.due_day}/${_MESES_ABREV[r.due_month - 1]}`
-    : `dia ${r.due_day}`;
+  const quando = _recFreqLabel(r);
   const payment = r.payment_type === "credit_card"
     ? `Cartão ${escapeHtmlSafe(r.card_name || "?")} · ${quando}`
     : `Débito · ${quando}`;
@@ -3124,9 +3161,9 @@ function _ensureRecurringModal() {
               </div>
             </div>
             <div class="form-row">
-              <div class="field">
+              <div class="field" id="recurring-dueday-field">
                 <label for="recurring-due-day">Dia do vencimento *</label>
-                <input type="number" id="recurring-due-day" min="1" max="31" required placeholder="1-31" />
+                <input type="number" id="recurring-due-day" min="1" max="31" placeholder="1-31" />
               </div>
               <div class="field">
                 <label for="recurring-category">Categoria *</label>
@@ -3136,7 +3173,10 @@ function _ensureRecurringModal() {
             <div class="form-row">
               <div class="field">
                 <label for="recurring-frequency">Frequência *</label>
-                <select id="recurring-frequency" onchange="_toggleRecurringMonthField()">
+                <select id="recurring-frequency" onchange="_toggleRecurringFreqFields()">
+                  <option value="once">Único (1x)</option>
+                  <option value="daily">Diária (todo dia)</option>
+                  <option value="weekly">Semanal (a cada 7 dias)</option>
                   <option value="monthly">Mensal (todo mês)</option>
                   <option value="annual">Anual (1x por ano)</option>
                 </select>
@@ -3161,9 +3201,9 @@ function _ensureRecurringModal() {
             </div>
             <div class="form-row">
               <div class="field">
-                <label for="recurring-start-date">Começa a partir de</label>
+                <label for="recurring-start-date" id="recurring-start-label">Começa a partir de</label>
                 <input type="date" id="recurring-start-date" />
-                <span style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">A 1ª cobrança é no dia do vencimento em/após esta data. Deixe hoje pra começar já.</span>
+                <span id="recurring-start-hint" style="font-size:.68rem;color:var(--text-3);margin-top:4px;display:block">A 1ª cobrança é no dia do vencimento em/após esta data. Deixe hoje pra começar já.</span>
               </div>
             </div>
             <div class="field">
@@ -3212,6 +3252,40 @@ function _toggleRecurringMonthField(prefix = "recurring") {
   const field = document.getElementById(`${prefix}-month-field`);
   if (!freq || !field) return;
   field.style.display = freq.value === "annual" ? "" : "none";
+}
+
+// Modal de gasto/conta a pagar: ajusta os campos conforme a frequência.
+//  - anual  → mostra "Mês do vencimento"
+//  - mensal/anual → "Dia do vencimento" (1-31) obrigatório
+//  - única  → sem dia do mês; a data é o próprio vencimento ("Data do vencimento")
+//  - semanal/diária → sem dia do mês; ancora no start_date ("A partir de")
+function _toggleRecurringFreqFields() {
+  const freq = (document.getElementById("recurring-frequency") || {}).value || "monthly";
+  _toggleRecurringMonthField("recurring");
+  const dueField = document.getElementById("recurring-dueday-field");
+  const dueInput = document.getElementById("recurring-due-day");
+  const usesDay = (freq === "monthly" || freq === "annual");
+  if (dueField) dueField.style.display = usesDay ? "" : "none";
+  if (dueInput) dueInput.required = usesDay;
+
+  const startLabel = document.getElementById("recurring-start-label");
+  const startHint = document.getElementById("recurring-start-hint");
+  const startInput = document.getElementById("recurring-start-date");
+  if (freq === "once") {
+    if (startLabel) startLabel.textContent = "Data do vencimento *";
+    if (startHint) startHint.textContent = "A conta vence nesta data (pagamento único).";
+    if (startInput) startInput.required = true;
+  } else if (freq === "weekly" || freq === "daily") {
+    if (startLabel) startLabel.textContent = "A partir de *";
+    if (startHint) startHint.textContent = freq === "weekly"
+      ? "Repete a cada 7 dias a partir desta data."
+      : "Repete todo dia a partir desta data.";
+    if (startInput) startInput.required = true;
+  } else {
+    if (startLabel) startLabel.textContent = "Começa a partir de";
+    if (startHint) startHint.textContent = "A 1ª cobrança é no dia do vencimento em/após esta data. Deixe hoje pra começar já.";
+    if (startInput) startInput.required = false;
+  }
 }
 
 // Ajusta ajuda + título + campos do modal conforme o modo (gasto fixo vs conta
@@ -3281,6 +3355,7 @@ function openRecurringEditModal(rec) {
   _toggleRecurringCardField();
   _toggleRecurringMonthField("recurring");
   _toggleRecurringModeHint();
+  _toggleRecurringFreqFields();
   if (isEdit && rec.payment_type === "credit_card") _populateRecurringCardOptions(rec.card_id);
 
   document.getElementById("recurring-edit-overlay").classList.add("open");
@@ -3297,14 +3372,18 @@ async function saveRecurring() {
 
   // Coleta + valida ANTES de fechar (pra reabrir com dados se erro)
   const _amtRaw = parseFloat(document.getElementById("recurring-amount").value);
+  const _freq = document.getElementById("recurring-frequency").value;
+  const _usesDay = (_freq === "monthly" || _freq === "annual");
+  const _dueRaw = parseInt(document.getElementById("recurring-due-day").value, 10);
   const payload = {
     name: document.getElementById("recurring-name").value.trim(),
     amount: Number.isFinite(_amtRaw) ? _amtRaw : null,  // conta variável pode ficar sem estimativa
     category: document.getElementById("recurring-category").value.trim(),
-    due_day: parseInt(document.getElementById("recurring-due-day").value, 10),
+    // dia do mês só vale pra mensal/anual; nas outras o servidor deriva do start_date
+    due_day: (_usesDay && Number.isFinite(_dueRaw)) ? _dueRaw : null,
     start_date: document.getElementById("recurring-start-date").value || null,
-    frequency: document.getElementById("recurring-frequency").value,
-    due_month: document.getElementById("recurring-frequency").value === "annual"
+    frequency: _freq,
+    due_month: _freq === "annual"
       ? parseInt(document.getElementById("recurring-month").value, 10) : null,
     payment_mode: document.getElementById("recurring-mode").value,
     // conta a pagar: valor é sempre estimativa (informado ao pagar)
