@@ -39,6 +39,39 @@ class InferResult:
     reason: str  # 'explicit' | 'user_rule' | 'local_rule' | 'ticker_match' | 'default'
 
 
+def local_rule_category(text_norm: str) -> str | None:
+    """
+    Categoria canônica das LOCAL_RULES para um texto JÁ normalizado — sem regra
+    de usuário, ticker ou IA. Fonte única do passo C de `infer_category` e também
+    usada como guard no auto-aprendizado (não deixar um keyword canônico como
+    "mercado" ser reaprendido com outra categoria).
+    """
+    if not text_norm:
+        return None
+    for keywords, cat2 in LOCAL_RULES:
+        for kw in keywords:
+            kw_norm = normalize_text(kw)
+            if not kw_norm:
+                continue
+            # Casos que devem ser palavra inteira:
+            #  - keyword muito curta (≤3): evita "lca" bater em "cavalcante"
+            #  - keyword na lista EXACT_WORD_KEYWORDS: evita "acoes" bater em
+            #    "transações", "investi" em "investigar", etc.
+            if len(kw_norm) <= 3 or kw_norm in EXACT_WORD_KEYWORDS:
+                ok = contains_word(text_norm, kw_norm)
+            else:
+                ok = contains_word(text_norm, kw_norm) or (kw_norm in text_norm)
+
+            # Contexto que invalida a keyword (ex.: "feira" em "sexta-feira").
+            blocker = KEYWORD_BLOCKERS.get(kw_norm)
+            if ok and blocker and blocker.search(text_norm):
+                ok = False
+
+            if ok:
+                return canonicalize_category_label(cat2)
+    return None
+
+
 def infer_category(user_id: int, text_base: str, explicit_category: str | None = None, *, allow_ai: bool = True) -> InferResult:
     """
     Prioridade:
@@ -77,27 +110,9 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
         return InferResult(category=canonicalize_category_label(cat), reason="user_rule")
 
     # C) LOCAL_RULES
-    for keywords, cat2 in LOCAL_RULES:
-        for kw in keywords:
-            kw_norm = normalize_text(kw)
-            if not kw_norm:
-                continue
-            # Casos que devem ser palavra inteira:
-            #  - keyword muito curta (≤3): evita "lca" bater em "cavalcante"
-            #  - keyword na lista EXACT_WORD_KEYWORDS: evita "acoes" bater em
-            #    "transações", "investi" em "investigar", etc.
-            if len(kw_norm) <= 3 or kw_norm in EXACT_WORD_KEYWORDS:
-                ok = contains_word(t, kw_norm)
-            else:
-                ok = contains_word(t, kw_norm) or (kw_norm in t)
-
-            # Contexto que invalida a keyword (ex.: "feira" em "sexta-feira").
-            blocker = KEYWORD_BLOCKERS.get(kw_norm)
-            if ok and blocker and blocker.search(t):
-                ok = False
-
-            if ok:
-                return InferResult(category=canonicalize_category_label(cat2), reason="local_rule")
+    local_cat = local_rule_category(t)
+    if local_cat:
+        return InferResult(category=local_cat, reason="local_rule")
 
     # D) fallback IA (só se OPENAI_API_KEY configurada e usuário Pro)
     if allow_ai and os.getenv("OPENAI_API_KEY"):
@@ -137,6 +152,7 @@ def learn_from_signals(
     user_id: int,
     chosen_category: str,
     *signals: str | None,
+    guard_local_conflict: bool = False,
 ) -> None:
     cat = normalize_text(chosen_category or "")
     if not cat or cat == "outros":
@@ -150,6 +166,15 @@ def learn_from_signals(
             if candidate in seen:
                 continue
             seen.add(candidate)
+            # Guard (só no auto-aprendizado): não memoriza um keyword que já tem
+            # categoria canônica DIFERENTE nas LOCAL_RULES. Sem isso, "gastei no
+            # mercado" classificado errado como "alimentação" aprendia
+            # mercado→alimentação e travava pra sempre (regra de usuário vence a
+            # LOCAL_RULE). Escolha EXPLÍCITA do usuário não passa por aqui.
+            if guard_local_conflict:
+                local_cat = local_rule_category(normalize_text(candidate))
+                if local_cat and normalize_text(local_cat) != cat:
+                    continue
             upsert_category_rule(user_id, candidate, cat)
 
 
@@ -163,4 +188,4 @@ def learn_from_inference(
 ) -> None:
     if reason in {"default", "user_rule"}:
         return
-    learn_from_signals(user_id, chosen_category, target_hint, text_base)
+    learn_from_signals(user_id, chosen_category, target_hint, text_base, guard_local_conflict=True)
