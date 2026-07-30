@@ -74,12 +74,17 @@ def add(user_id: int, text: str, entities: dict) -> str:
     tipo = (entities.get("tipo") or "despesa").strip().lower()
     is_income = tipo in _INCOME_WORDS
 
+    # conta a pagar de valor variável (água/luz) pode nascer SEM valor — nesse
+    # caso não pedimos a estimativa (é opcional). Só receita/gasto fixo/conta
+    # fixa exigem o valor.
+    is_variable = (not is_income) and _is_variable_amount(text, entities)
+
     # valor
     try:
         valor = float(entities.get("valor") or 0)
     except (TypeError, ValueError):
         valor = 0.0
-    if valor <= 0:
+    if valor <= 0 and not is_variable:
         # Falta o valor (ex.: typo "00 reais"). Re-arma um pending de esclarecimento
         # PRA NÃO PERDER O CONTEXTO de recorrente — senão a próxima msg ("100") é
         # classificada do zero e vira despesa avulsa. A resposta cai no
@@ -164,9 +169,9 @@ def add(user_id: int, text: str, entities: dict) -> str:
         if guessed and guessed != "outros":
             categoria = guessed
     cat = categoria or "outros"
-    is_variable = _is_variable_amount(text, entities)
-    # valor variável implica conta a pagar (não dá pra debitar sozinho um valor
-    # que muda todo mês) — força manual.
+    # is_variable já foi calculado no topo (antes do guard de valor). valor
+    # variável implica conta a pagar (não dá pra debitar sozinho um valor que
+    # muda todo mês) — força manual.
     is_manual = is_variable or _is_manual_bill(text, entities)
     name = nome or cat.capitalize() or ("Conta a pagar" if is_manual else "Gasto fixo")
     try:
@@ -180,7 +185,10 @@ def add(user_id: int, text: str, entities: dict) -> str:
     except ValueError as exc:
         return _err(str(exc))
     if is_manual:
-        valor_txt = f"~{fmt_brl(valor)} (varia)" if is_variable else fmt_brl(valor)
+        if is_variable:
+            valor_txt = f"~{fmt_brl(valor)} (varia)" if valor > 0 else "valor a confirmar (varia)"
+        else:
+            valor_txt = fmt_brl(valor)
         return (
             f"🧾 *Conta a pagar criada:* {rec['name']}\n"
             f"💸 {valor_txt} · vence {_fmt_quando(frequency, dia, mes)}\n"

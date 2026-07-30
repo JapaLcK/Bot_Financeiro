@@ -3119,14 +3119,14 @@ function _ensureRecurringModal() {
                 <input type="text" id="recurring-name" required maxlength="80" placeholder="Ex: Netflix, Aluguel..." />
               </div>
               <div class="field" style="flex:1">
-                <label for="recurring-amount">Valor (R$) *</label>
+                <label for="recurring-amount" id="recurring-amount-label">Valor (R$) *</label>
                 <input type="number" id="recurring-amount" min="0.01" step="0.01" required placeholder="0,00" />
               </div>
             </div>
             <div class="form-row" id="recurring-variable-field" style="display:none">
               <div class="field">
                 <label style="display:flex;align-items:center;gap:8px;font-weight:400;cursor:pointer">
-                  <input type="checkbox" id="recurring-variable" style="width:auto" />
+                  <input type="checkbox" id="recurring-variable" style="width:auto" onchange="_toggleRecurringVariable()" />
                   <span>Valor varia todo mês (água, luz, gás) — informo o valor ao pagar. O campo acima vira só uma estimativa.</span>
                 </label>
               </div>
@@ -3154,7 +3154,7 @@ function _ensureRecurringModal() {
                 <select id="recurring-month">${_monthOptionsHTML()}</select>
               </div>
             </div>
-            <div class="form-row">
+            <div class="form-row" id="recurring-paytype-row">
               <div class="field">
                 <label for="recurring-payment-type">Forma de pagamento *</label>
                 <select id="recurring-payment-type" onchange="_toggleRecurringCardField()">
@@ -3229,15 +3229,43 @@ function _toggleRecurringModeHint() {
   const title = document.getElementById("recurring-edit-title");
   const isEdit = !!(_recurringEditState && _recurringEditState.id);
   const varField = document.getElementById("recurring-variable-field");
+  const paytypeRow = document.getElementById("recurring-paytype-row");
   if (mode === "manual") {
     if (hint) hint.innerHTML = "🧾 <strong>Conta a pagar:</strong> a Piggy te <strong>lembra</strong> do vencimento e <strong>nada sai da conta</strong> até você confirmar. Ao marcar como paga, o valor é lançado e categorizado.";
     if (title && !isEdit) title.textContent = "Nova conta a pagar";
     if (varField) varField.style.display = "";
+    // Conta a pagar nunca é débito automático — o user sempre confirma na mão.
+    // A "forma de pagamento" (autopay/cartão) não se aplica: esconde e fixa account.
+    if (paytypeRow) paytypeRow.style.display = "none";
+    const pt = document.getElementById("recurring-payment-type");
+    if (pt) pt.value = "account";
+    _toggleRecurringCardField();
   } else {
     if (hint) hint.innerHTML = "⚠️ <strong>Gasto fixo:</strong> é <strong>lançado automaticamente</strong> no dia escolhido (débito na conta). Pra contas que você paga na mão (boleto), use \"Conta a pagar\".";
     if (title && !isEdit) title.textContent = "Novo gasto fixo";
     // gasto fixo (autopay) não tem valor variável — precisa de valor certo pra debitar
     if (varField) { varField.style.display = "none"; const cb = document.getElementById("recurring-variable"); if (cb) cb.checked = false; }
+    if (paytypeRow) paytypeRow.style.display = "";
+  }
+  _toggleRecurringVariable();
+}
+
+// Valor variável: o campo de valor vira estimativa OPCIONAL (água/luz não têm
+// valor fixo). Sem "varia" marcado, o valor é obrigatório (conta fixa/aluguel).
+function _toggleRecurringVariable() {
+  const cb = document.getElementById("recurring-variable");
+  const isVar = !!(cb && cb.checked && cb.offsetParent !== null);
+  const label = document.getElementById("recurring-amount-label");
+  const input = document.getElementById("recurring-amount");
+  if (!input) return;
+  if (isVar) {
+    if (label) label.textContent = "Valor estimado (opcional)";
+    input.required = false;
+    input.placeholder = "estimativa, ex: 80,00";
+  } else {
+    if (label) label.textContent = "Valor (R$) *";
+    input.required = true;
+    input.placeholder = "0,00";
   }
 }
 
@@ -3288,9 +3316,10 @@ async function saveRecurring() {
   if (_recurringSaving) return;  // bloqueia double-submit
 
   // Coleta + valida ANTES de fechar (pra reabrir com dados se erro)
+  const _amtRaw = parseFloat(document.getElementById("recurring-amount").value);
   const payload = {
     name: document.getElementById("recurring-name").value.trim(),
-    amount: parseFloat(document.getElementById("recurring-amount").value),
+    amount: Number.isFinite(_amtRaw) ? _amtRaw : null,  // conta variável pode ficar sem estimativa
     category: document.getElementById("recurring-category").value.trim(),
     due_day: parseInt(document.getElementById("recurring-due-day").value, 10),
     start_date: document.getElementById("recurring-start-date").value || null,
@@ -3484,7 +3513,10 @@ function _renderBillRow(b) {
   const quando = overdue ? "vencida" : _formatDueIn(due);
   const color = overdue ? "#FF2D2D" : "#fbbf24";
   const variavel = !!b.variable_amount;
-  const amtLabel = variavel ? `~-${_fmtBRL(b.amount)}` : `-${_fmtBRL(b.amount)}`;
+  const temEstimativa = (b.amount || 0) > 0;
+  const amtLabel = variavel
+    ? (temEstimativa ? `~-${_fmtBRL(b.amount)}` : "a confirmar")
+    : `-${_fmtBRL(b.amount)}`;
   const nameSafe = escapeHtmlSafe(b.name || "").replace(/'/g, "");
   return `
     <div class="tx-row">

@@ -174,7 +174,11 @@ def create_recurring_expense(
     name = (name or "").strip()
     if not name:
         raise ValueError("NOME_INVALIDO")
-    if amount is None or float(amount) <= 0:
+    # Conta a pagar de valor variável (água/luz) pode não ter estimativa — guarda 0.
+    # Nos demais casos o valor é obrigatório (> 0).
+    if variable_amount and (amount is None or float(amount) <= 0):
+        amount = 0
+    elif amount is None or float(amount) <= 0:
         raise ValueError("VALOR_INVALIDO")
     if due_day < 1 or due_day > 31:
         raise ValueError("DIA_INVALIDO")

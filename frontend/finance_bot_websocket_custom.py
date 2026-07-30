@@ -4662,7 +4662,7 @@ async def adjust_balance_route(request: Request, user_id: int, payload: AdjustBa
 
 class RecurringCreatePayload(BaseModel):
     name: str
-    amount: float
+    amount: float | None = None  # opcional só p/ conta a pagar de valor variável
     category: str
     due_day: int
     payment_type: str
