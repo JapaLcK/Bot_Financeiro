@@ -62,15 +62,26 @@ async def run_recurring_charger_loop():
 
 
 def _cycle_due_date(rec: dict, today: date) -> date | None:
-    """Vencimento do ciclo atual de um recorrente manual.
-    Mensal → dia due_day deste mês; anual → dia due_day do due_month deste ano.
-    due_day é clampado ao último dia do mês. None se dados inválidos."""
+    """PRÓXIMO vencimento de um recorrente manual, em/após a âncora
+    (max(hoje, start_date)). Mensal → próxima ocorrência de due_day; anual →
+    próxima ocorrência de due_day/due_month (neste ano ou no próximo). due_day é
+    clampado ao último dia do mês. None se dados inválidos.
+
+    Antes calculava só o vencimento DO MÊS ATUAL — quando o dia já tinha passado
+    (ou start_date era hoje/futuro) ele caía no passado e a instância nunca era
+    gerada, deixando a conta invisível. Agora rola pro próximo ciclo."""
     try:
         due_day = int(rec.get("due_day") or 0)
     except (TypeError, ValueError):
         return None
     if not (1 <= due_day <= 31):
         return None
+
+    anchor = today
+    start = rec.get("start_date")
+    if start and start > anchor:
+        anchor = start
+
     freq = (rec.get("frequency") or "monthly")
     if freq == "annual":
         month = rec.get("due_month")
@@ -80,29 +91,39 @@ def _cycle_due_date(rec: dict, today: date) -> date | None:
             return None
         if not (1 <= month <= 12):
             return None
-        year = today.year
-    else:
-        month = today.month
-        year = today.year
-    dim = calendar.monthrange(year, month)[1]
-    return date(year, month, min(due_day, dim))
+        for year in (anchor.year, anchor.year + 1):
+            dim = calendar.monthrange(year, month)[1]
+            cand = date(year, month, min(due_day, dim))
+            if cand >= anchor:
+                return cand
+        return None
+
+    # mensal: primeira ocorrência de due_day em/após a âncora (este mês ou o próximo)
+    y, m = anchor.year, anchor.month
+    for _ in range(2):
+        dim = calendar.monthrange(y, m)[1]
+        cand = date(y, m, min(due_day, dim))
+        if cand >= anchor:
+            return cand
+        m += 1
+        if m > 12:
+            m, y = 1, y + 1
+    return None
 
 
-def sync_manual_bills_once(today: date | None = None) -> int:
-    """Gera as instâncias (bill_instances) do ciclo atual pros recorrentes
+def sync_manual_bills_once(today: date | None = None, user_id: int | None = None) -> int:
+    """Gera as instâncias (bill_instances) do próximo ciclo pros recorrentes
     'manual', respeitando start_date. Idempotente (UNIQUE recurring_id+due_date).
+    `user_id` opcional restringe a um usuário (sync sob demanda ao abrir a lista).
     Retorna quantas instâncias novas foram garantidas."""
     from db.bills import list_active_manual_recurrings, ensure_bill_instance
 
     today = today or date.today()
     n = 0
-    for rec in list_active_manual_recurrings():
-        due = _cycle_due_date(rec, today)
+    for rec in list_active_manual_recurrings(user_id=user_id):
+        due = _cycle_due_date(rec, today)  # já respeita start_date (âncora)
         if due is None:
             continue
-        start = rec.get("start_date")
-        if start and start > due:
-            continue  # não retroage antes do início
         try:
             ensure_bill_instance(int(rec["id"]), int(rec["user_id"]), due, float(rec["amount"]))
             n += 1

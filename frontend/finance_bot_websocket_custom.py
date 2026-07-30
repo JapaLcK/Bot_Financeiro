@@ -4720,6 +4720,13 @@ async def recurring_bills_route(request: Request, user_id: int, include_paid: bo
     _authorize_dashboard_access(request, user_id)
     _require_pro(user_id, "recurring_expenses")
     from db.bills import list_bills
+    # Gera as instâncias do próximo ciclo sob demanda, pra conta recém-criada
+    # já aparecer (sem esperar o loop do charger). Idempotente; falha não bloqueia.
+    try:
+        from core.services.recurring_charger import sync_manual_bills_once
+        await asyncio.to_thread(sync_manual_bills_once, None, user_id)
+    except Exception:
+        pass
     items = await asyncio.to_thread(list_bills, user_id, include_paid)
     return {"ok": True, "bills": items}
 

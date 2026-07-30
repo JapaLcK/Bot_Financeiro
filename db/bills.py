@@ -133,19 +133,32 @@ def mark_bill_reminder_sent(bill_id: int, sent_on: date) -> None:
         conn.commit()
 
 
-def list_active_manual_recurrings() -> list[dict[str, Any]]:
-    """Global (todos os users) — recorrentes 'manual' ativos, pro loop gerar as
-    instâncias do ciclo. Traz o que o cálculo de vencimento precisa."""
+def list_active_manual_recurrings(user_id: int | None = None) -> list[dict[str, Any]]:
+    """Recorrentes 'manual' ativos, pro loop/geração sob demanda criar as
+    instâncias do ciclo. Sem user_id = todos (loop global); com user_id =
+    só daquele usuário (sync ao abrir a lista). Traz o que o cálculo de
+    vencimento precisa."""
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                select id, user_id, name, amount, category, due_day,
-                       frequency, due_month, start_date
-                from recurring_expenses
-                where is_active = true and payment_mode = 'manual'
-                """
-            )
+            if user_id is None:
+                cur.execute(
+                    """
+                    select id, user_id, name, amount, category, due_day,
+                           frequency, due_month, start_date
+                    from recurring_expenses
+                    where is_active = true and payment_mode = 'manual'
+                    """
+                )
+            else:
+                cur.execute(
+                    """
+                    select id, user_id, name, amount, category, due_day,
+                           frequency, due_month, start_date
+                    from recurring_expenses
+                    where is_active = true and payment_mode = 'manual' and user_id = %s
+                    """,
+                    (int(user_id),),
+                )
             return [dict(r) for r in (cur.fetchall() or [])]
 
 

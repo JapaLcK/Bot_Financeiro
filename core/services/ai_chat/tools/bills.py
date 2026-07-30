@@ -66,6 +66,12 @@ def _get_bills_to_pay(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
 
     include_paid = bool(args.get("include_paid"))
     today = _today()
+    # Garante que as instâncias do próximo ciclo existem (conta recém-criada).
+    try:
+        from core.services.recurring_charger import sync_manual_bills_once
+        sync_manual_bills_once(None, user_id)
+    except Exception:
+        pass
     rows = list_bills(user_id, include_paid=include_paid, limit=200)
     all_bills = [_bill_view(r, today) for r in rows]
     pend = [b for b in all_bills if b["status"] == "pending"]
