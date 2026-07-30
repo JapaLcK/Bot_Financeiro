@@ -30,11 +30,16 @@ def _parse_start_date(value: Any, default: date | None = None) -> date | None:
         raise ValueError("DATA_INICIO_INVALIDA")
 
 
+# Frequências suportadas. 'once' = pagamento único (não recorre); 'weekly'/
+# 'daily' ancoram no start_date (a cada 7 dias / todo dia). Só 'annual' usa o mês.
+VALID_FREQUENCIES = ("once", "daily", "weekly", "monthly", "annual")
+
+
 def validate_frequency(frequency: Any, month: Any) -> tuple[str, int | None]:
-    """Valida frequency ('monthly'|'annual') + o mês. Anual exige mês 1-12;
-    mensal ignora o mês (retorna None). Levanta ValueError se inválido."""
+    """Valida frequency (once|daily|weekly|monthly|annual) + o mês. Anual exige
+    mês 1-12; as demais ignoram o mês (retorna None). Levanta ValueError se inválido."""
     freq = (str(frequency) if frequency is not None else "monthly").strip().lower() or "monthly"
-    if freq not in ("monthly", "annual"):
+    if freq not in VALID_FREQUENCIES:
         raise ValueError("FREQUENCIA_INVALIDA")
     if freq == "annual":
         try:
@@ -44,7 +49,7 @@ def validate_frequency(frequency: Any, month: Any) -> tuple[str, int | None]:
         if not (1 <= m <= 12):
             raise ValueError("MES_INVALIDO")
         return "annual", m
-    return "monthly", None
+    return freq, None
 
 
 def list_recurring_expenses(user_id: int, include_inactive: bool = False) -> list[dict[str, Any]]:
@@ -180,13 +185,23 @@ def create_recurring_expense(
         amount = 0
     elif amount is None or float(amount) <= 0:
         raise ValueError("VALOR_INVALIDO")
-    if due_day < 1 or due_day > 31:
-        raise ValueError("DIA_INVALIDO")
     freq, month = validate_frequency(frequency, due_month)
     mode = (payment_mode or "autopay").strip().lower()
     if mode not in ("autopay", "manual"):
         raise ValueError("MODO_PAGAMENTO_INVALIDO")
     start = _parse_start_date(start_date, default=date.today())
+    # due_day só é obrigatório (1-31) pra mensal/anual. Em única/semanal/diária o
+    # vencimento é ancorado no start_date, então derivamos due_day dele (satisfaz
+    # a check 1-31 do banco e serve de referência).
+    if freq in ("monthly", "annual"):
+        try:
+            due_day = int(due_day)
+        except (TypeError, ValueError):
+            raise ValueError("DIA_INVALIDO")
+        if due_day < 1 or due_day > 31:
+            raise ValueError("DIA_INVALIDO")
+    else:
+        due_day = (start or date.today()).day
     if payment_type not in ("account", "credit_card"):
         raise ValueError("FORMA_PAGAMENTO_INVALIDA")
     if payment_type == "credit_card" and not card_id:

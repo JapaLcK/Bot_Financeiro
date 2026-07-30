@@ -22,7 +22,7 @@ import asyncio
 import calendar
 import sys
 import traceback
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from db.connection import get_conn
@@ -70,6 +70,31 @@ def _cycle_due_date(rec: dict, today: date) -> date | None:
     Antes calculava só o vencimento DO MÊS ATUAL — quando o dia já tinha passado
     (ou start_date era hoje/futuro) ele caía no passado e a instância nunca era
     gerada, deixando a conta invisível. Agora rola pro próximo ciclo."""
+    anchor = today
+    start = rec.get("start_date")
+    if start and start > anchor:
+        anchor = start
+
+    freq = (rec.get("frequency") or "monthly")
+
+    # ── Frequências ancoradas no start_date (não usam due_day) ───────────
+    if freq == "once":
+        # pagamento único: vence na data escolhida (start_date). Retorna essa
+        # data (a instância é gerada uma vez; idempotente).
+        return start or today
+    if freq == "daily":
+        # todo dia: o próximo vencimento é a própria âncora (hoje ou o início).
+        return anchor
+    if freq == "weekly":
+        # a cada 7 dias a partir do start_date. Próxima ocorrência >= âncora.
+        base = start or today
+        if anchor <= base:
+            return base
+        delta = (anchor - base).days
+        bumps = (delta + 6) // 7  # arredonda pra cima em semanas
+        return base + timedelta(days=7 * bumps)
+
+    # ── Mensal / anual: dependem de due_day (1-31) ───────────────────────
     try:
         due_day = int(rec.get("due_day") or 0)
     except (TypeError, ValueError):
@@ -77,12 +102,6 @@ def _cycle_due_date(rec: dict, today: date) -> date | None:
     if not (1 <= due_day <= 31):
         return None
 
-    anchor = today
-    start = rec.get("start_date")
-    if start and start > anchor:
-        anchor = start
-
-    freq = (rec.get("frequency") or "monthly")
     if freq == "annual":
         month = rec.get("due_month")
         try:
@@ -189,8 +208,78 @@ def charge_due_recurring_expenses_once(today: date | None = None) -> list[dict]:
             )
             traceback.print_exc(file=sys.stderr)
 
+    # Pass separado (Python) pras frequências ancoradas no start_date —
+    # once/weekly/daily. Fica fora do SQL mensal/anual (que é provado) pra não
+    # arriscar o motor existente; idempotência própria por period_key.
+    try:
+        results.extend(_charge_anchored_autopay_once(today))
+    except Exception as exc:
+        print(f"[recurring_charger] falhou pass ancorado: {exc}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+
     if results:
         print(f"[recurring_charger] {len(results)} cobranças efetuadas em {today}.", flush=True)
+    return results
+
+
+def _anchored_charge_plan(rec: dict, today: date) -> tuple[date, str] | None:
+    """(data_esperada, period_key) da cobrança de um autopay ancorado no
+    start_date, ou None se ainda não é pra cobrar. daily=todo dia; weekly=a cada
+    7 dias; once=uma vez na data. period_key vai pro recurring_charges.ym e
+    last_charged_ym (idempotência)."""
+    freq = rec.get("frequency")
+    start = rec.get("start_date")
+    if start is None or today < start:
+        return None
+    if freq == "daily":
+        return today, f"d:{today.isoformat()}"
+    if freq == "weekly":
+        weeks = (today - start).days // 7
+        charge_date = start + timedelta(days=7 * weeks)
+        return charge_date, f"w:{charge_date.isoformat()}"
+    if freq == "once":
+        return start, f"o:{start.isoformat()}"
+    return None
+
+
+def _charge_anchored_autopay_once(today: date) -> list[dict]:
+    """Cobra gastos fixos autopay de frequência ancorada no start_date
+    (daily/weekly/once). Idempotência por period_key: o pré-check em
+    last_charged_ym evita re-debitar (loop é sequencial), e o UNIQUE
+    (recurring_id, ym) em recurring_charges é a rede de segurança."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select r.id, r.user_id, r.name, r.amount, r.category, r.due_day,
+                       r.payment_type, r.card_id, r.frequency,
+                       coalesce(r.start_date, r.created_at::date) as start_date,
+                       r.last_charged_ym
+                from recurring_expenses r
+                where r.is_active = true
+                  and coalesce(r.payment_mode, 'autopay') = 'autopay'
+                  and r.frequency in ('daily', 'weekly', 'once')
+                """
+            )
+            rows = cur.fetchall() or []
+
+    results: list[dict] = []
+    for row in rows:
+        rec = dict(row)
+        plan = _anchored_charge_plan(rec, today)
+        if plan is None:
+            continue
+        _charge_date, period_key = plan
+        if rec.get("last_charged_ym") == period_key:
+            continue  # já cobrado neste período
+        try:
+            results.append(_charge_one(rec, today, period_key))
+        except Exception as exc:
+            print(
+                f"[recurring_charger] falhou cobrar (ancorado) rec={rec['id']} user={rec['user_id']}: {exc}",
+                file=sys.stderr,
+            )
+            traceback.print_exc(file=sys.stderr)
     return results
 
 
