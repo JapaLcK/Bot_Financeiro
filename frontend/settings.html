@@ -1484,6 +1484,28 @@ a { color: inherit; text-decoration: none; }
                   </label>
                 </div>
 
+                <div class="notification-row">
+                  <div class="notification-copy">
+                    <div class="notification-title">Resumo semanal</div>
+                    <div class="notification-sub">Receba um resumo dos seus gastos toda segunda-feira, referente à semana anterior.</div>
+                  </div>
+                  <label class="switch" aria-label="Ativar resumo semanal">
+                    <input type="checkbox" id="notif-weekly-report" onchange="updateNotificationSettings({ weekly_report_enabled: this.checked })">
+                    <span class="switch-slider"></span>
+                  </label>
+                </div>
+
+                <div class="notification-row">
+                  <div class="notification-copy">
+                    <div class="notification-title">Resumo mensal</div>
+                    <div class="notification-sub">Receba um resumo dos seus gastos todo dia 1º, referente ao mês anterior.</div>
+                  </div>
+                  <label class="switch" aria-label="Ativar resumo mensal">
+                    <input type="checkbox" id="notif-monthly-report" onchange="updateNotificationSettings({ monthly_report_enabled: this.checked })">
+                    <span class="switch-slider"></span>
+                  </label>
+                </div>
+
                 <label class="notification-row" for="notif-daily-hour">
                   <div class="notification-copy">
                     <div class="notification-title">Horário do resumo</div>
@@ -2076,7 +2098,7 @@ async function sendPasswordResetEmail() {
 }
 
 function setNotificationControlsDisabled(disabled) {
-  ["notif-tip-email", "notif-insight-email", "notif-whatsapp-updates", "notif-daily-report", "notif-daily-hour"].forEach(id => {
+  ["notif-tip-email", "notif-insight-email", "notif-whatsapp-updates", "notif-daily-report", "notif-weekly-report", "notif-monthly-report", "notif-daily-hour"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = disabled;
   });
@@ -2089,6 +2111,9 @@ function applyNotificationSettings(data) {
   const insightEmail = Boolean(data.insight_email_enabled ?? data.engagement_email_enabled);
   const whatsappUpdates = Boolean(data.whatsapp_updates_enabled);
   const daily = Boolean(data.daily_report_enabled);
+  const weekly = Boolean(data.weekly_report_enabled);
+  const monthly = Boolean(data.monthly_report_enabled);
+  const anyScheduled = daily || weekly || monthly;
   const hour = Number(data.daily_report_hour ?? 9);
   const emailAvailable = Boolean(data.email_notifications_available);
   const whatsappAvailable = Boolean(data.whatsapp_updates_available);
@@ -2102,13 +2127,17 @@ function applyNotificationSettings(data) {
   document.getElementById("notif-insight-email").disabled = !emailAvailable;
   document.getElementById("notif-whatsapp-updates").disabled = !whatsappAvailable;
   document.getElementById("notif-daily-report").checked = daily;
+  document.getElementById("notif-weekly-report").checked = weekly;
+  document.getElementById("notif-monthly-report").checked = monthly;
   document.getElementById("notif-daily-hour").value = String(hour);
-  document.getElementById("notif-daily-hour").disabled = !daily;
+  document.getElementById("notif-daily-hour").disabled = !anyScheduled;
   document.getElementById("notif-status-value").textContent = [
     emailAvailable ? (tipEmail ? "dicas ativas" : "dicas pausadas") : "e-mail não vinculado",
     emailAvailable ? (insightEmail ? "insights ativos" : "insights pausados") : "notificações por e-mail pausadas",
     whatsappAvailable ? (whatsappUpdates ? "atualizações ativas" : "atualizações pausadas") : "WhatsApp não vinculado",
-    daily ? `resumo às ${String(hour).padStart(2, "0")}:00` : "resumo pausado",
+    daily ? `resumo diário às ${String(hour).padStart(2, "0")}:00` : "resumo diário pausado",
+    weekly ? "semanal ativo" : "semanal pausado",
+    monthly ? "mensal ativo" : "mensal pausado",
   ].join(" · ");
 }
 
@@ -2128,6 +2157,9 @@ async function loadNotificationSettings() {
     showToast(err.message || "Erro ao carregar notificações", "error");
   } finally {
     const daily = document.getElementById("notif-daily-report")?.checked;
+    const anyScheduled = daily
+      || document.getElementById("notif-weekly-report")?.checked
+      || document.getElementById("notif-monthly-report")?.checked;
     const destinationText = document.getElementById("notif-email-value")?.textContent || "";
     const hasEmail = !destinationText.startsWith("E-mail não vinculado");
     const hasWhatsapp = !destinationText.includes("WhatsApp não vinculado");
@@ -2135,7 +2167,7 @@ async function loadNotificationSettings() {
     document.getElementById("notif-tip-email").disabled = !hasEmail;
     document.getElementById("notif-insight-email").disabled = !hasEmail;
     document.getElementById("notif-whatsapp-updates").disabled = !hasWhatsapp;
-    document.getElementById("notif-daily-hour").disabled = !daily;
+    document.getElementById("notif-daily-hour").disabled = !anyScheduled;
   }
 }
 
@@ -2157,6 +2189,9 @@ async function updateNotificationSettings(patch) {
     await loadNotificationSettings();
   } finally {
     const daily = document.getElementById("notif-daily-report")?.checked;
+    const anyScheduled = daily
+      || document.getElementById("notif-weekly-report")?.checked
+      || document.getElementById("notif-monthly-report")?.checked;
     const destinationText = document.getElementById("notif-email-value")?.textContent || "";
     const hasEmail = !destinationText.startsWith("E-mail não vinculado");
     const hasWhatsapp = !destinationText.includes("WhatsApp não vinculado");
@@ -2164,7 +2199,7 @@ async function updateNotificationSettings(patch) {
     document.getElementById("notif-tip-email").disabled = !hasEmail;
     document.getElementById("notif-insight-email").disabled = !hasEmail;
     document.getElementById("notif-whatsapp-updates").disabled = !hasWhatsapp;
-    document.getElementById("notif-daily-hour").disabled = !daily;
+    document.getElementById("notif-daily-hour").disabled = !anyScheduled;
   }
 }
 

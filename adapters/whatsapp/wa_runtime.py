@@ -59,6 +59,8 @@ WA_CONFIRM_NO_ID = "confirm_no"
 WA_UNDO_LAUNCH_ID = "undo_launch"          # legado: undo do último (botão pós-áudio)
 WA_UNDO_LAUNCH_PREFIX = "undo_launch:"     # undo de lançamento específico (pós-confirmação)
 WA_DAILY_REPORT_DISABLE_ID = "daily_report_disable"
+WA_WEEKLY_REPORT_DISABLE_ID = "weekly_report_disable"
+WA_MONTHLY_REPORT_DISABLE_ID = "monthly_report_disable"
 WA_RECAT_BUTTON_PREFIX = "recat:"          # botão pós-lançamento
 WA_RECAT_PICK_PREFIX = "recatpick:"        # item da lista de categorias
 WA_RECAT_OTHER_PREFIX = "recatother:"      # opção "outra (digitar)"
@@ -722,6 +724,34 @@ def process_message(message: InboundMessage) -> None:
                         "warning",
                         "whatsapp_daily_report_disable_button_error",
                         f"Erro ao processar botão de desligar report diário: {e}",
+                        source="wa_runtime",
+                        user_id=uid,
+                    )
+                return
+            elif interactive_id == WA_WEEKLY_REPORT_DISABLE_ID:
+                logger.info("WA weekly_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
+                try:
+                    _send_reply(reply_to, h_report.disable_weekly(uid))
+                except Exception as e:
+                    logger.exception("WA weekly_report_disable button error wa_id=%s: %s", reply_to, e)
+                    log_system_event_sync(
+                        "warning",
+                        "whatsapp_weekly_report_disable_button_error",
+                        f"Erro ao processar botão de desligar resumo semanal: {e}",
+                        source="wa_runtime",
+                        user_id=uid,
+                    )
+                return
+            elif interactive_id == WA_MONTHLY_REPORT_DISABLE_ID:
+                logger.info("WA monthly_report_disable button clicked wa_id=%s uid=%s", reply_to, uid)
+                try:
+                    _send_reply(reply_to, h_report.disable_monthly(uid))
+                except Exception as e:
+                    logger.exception("WA monthly_report_disable button error wa_id=%s: %s", reply_to, e)
+                    log_system_event_sync(
+                        "warning",
+                        "whatsapp_monthly_report_disable_button_error",
+                        f"Erro ao processar botão de desligar resumo mensal: {e}",
                         source="wa_runtime",
                         user_id=uid,
                     )

@@ -404,6 +404,20 @@ def init_db():
         """
         alter table daily_report_prefs add column if not exists last_sent_date date;
         """,
+        # resumos periódicos: dedup do envio semanal (segunda) e mensal (dia 1)
+        """
+        alter table daily_report_prefs add column if not exists last_weekly_sent_date date;
+        """,
+        """
+        alter table daily_report_prefs add column if not exists last_monthly_sent_date date;
+        """,
+        # resumos periódicos: liga/desliga independente (default ligado, igual ao diário)
+        """
+        alter table daily_report_prefs add column if not exists weekly_enabled boolean not null default true;
+        """,
+        """
+        alter table daily_report_prefs add column if not exists monthly_enabled boolean not null default true;
+        """,
 
         # -----------------------------
         # Credit cards

@@ -1,11 +1,23 @@
 # core/handlers/report.py
 from __future__ import annotations
 import db
-from core.reports.reports_daily import build_daily_report_text
+from core.reports.reports_daily import (
+    build_daily_report_text,
+    build_weekly_report_text,
+    build_monthly_report_text,
+)
 
 
 def daily(user_id: int) -> str:
     return build_daily_report_text(user_id)
+
+
+def weekly(user_id: int) -> str:
+    return build_weekly_report_text(user_id)
+
+
+def monthly(user_id: int) -> str:
+    return build_monthly_report_text(user_id)
 
 
 def enable(user_id: int) -> str:
@@ -33,3 +45,33 @@ def set_hour(user_id: int, hour: int, minute: int = 0) -> str:
 def disable(user_id: int) -> str:
     db.set_daily_report_enabled(user_id, False)
     return "✅ Report diário desligado. Para ligar de novo: *ligar report diario*"
+
+
+# --- resumo semanal ---
+
+def enable_weekly(user_id: int) -> str:
+    db.set_weekly_report_enabled(user_id, True)
+    return (
+        "✅ Resumo semanal ligado. Você recebe toda segunda-feira, referente à semana anterior.\n"
+        "Para desligar: *desligar resumo semanal*"
+    )
+
+
+def disable_weekly(user_id: int) -> str:
+    db.set_weekly_report_enabled(user_id, False)
+    return "✅ Resumo semanal desligado. Para ligar de novo: *ligar resumo semanal*"
+
+
+# --- resumo mensal ---
+
+def enable_monthly(user_id: int) -> str:
+    db.set_monthly_report_enabled(user_id, True)
+    return (
+        "✅ Resumo mensal ligado. Você recebe todo dia 1º, referente ao mês anterior.\n"
+        "Para desligar: *desligar resumo mensal*"
+    )
+
+
+def disable_monthly(user_id: int) -> str:
+    db.set_monthly_report_enabled(user_id, False)
+    return "✅ Resumo mensal desligado. Para ligar de novo: *ligar resumo mensal*"

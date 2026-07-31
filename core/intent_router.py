@@ -411,6 +411,24 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
     if intent == "report.daily":
         return h_report.daily(user_id)
 
+    if intent == "report.weekly":
+        return h_report.weekly(user_id)
+
+    if intent == "report.monthly":
+        return h_report.monthly(user_id)
+
+    if intent == "report.weekly_enable":
+        return h_report.enable_weekly(user_id)
+
+    if intent == "report.weekly_disable":
+        return h_report.disable_weekly(user_id)
+
+    if intent == "report.monthly_enable":
+        return h_report.enable_monthly(user_id)
+
+    if intent == "report.monthly_disable":
+        return h_report.disable_monthly(user_id)
+
     if intent == "report.enable":
         return h_report.enable(user_id)
 

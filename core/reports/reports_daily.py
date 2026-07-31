@@ -3,6 +3,7 @@ from utils_date import now_tz, _tz
 from db import (
     get_balance, get_launches_by_period, get_summary_by_period,
     list_users_with_daily_report_enabled, list_identities_by_user,
+    list_users_with_weekly_report_enabled, list_users_with_monthly_report_enabled,
     list_credit_card_due_reminders, mark_card_reminder_sent,
 )
 from datetime import time, timedelta, date
@@ -101,6 +102,87 @@ def build_daily_report_text(user_id: int) -> str:
 
     return "\n".join(lines).strip()
 
+
+# --- resumos por período (semanal / mensal) ---
+
+def _build_period_report_summary(user_id: int, start_date: date, end_date: date) -> dict[str, str]:
+    saldo = float(get_balance(user_id) or 0)
+
+    launches = get_launches_by_period(user_id, start_date, end_date) or []
+    summary  = get_summary_by_period(user_id, start_date, end_date)
+
+    return {
+        "start": start_date.strftime("%d/%m/%Y"),
+        "end": end_date.strftime("%d/%m/%Y"),
+        "saldo": _fmt_brl(saldo),
+        "gastos": _fmt_brl(summary.get("despesa", 0.0)),
+        "receita": _fmt_brl(summary.get("receita", 0.0)),
+        "lancamentos": str(len(launches)),
+    }
+
+
+def build_weekly_report_summary(user_id: int, closed: bool = False) -> dict[str, str]:
+    """Resumo semanal.
+
+    closed=False (sob demanda): semana atual, de segunda até hoje.
+    closed=True  (agendado na segunda): semana anterior completa (seg → dom).
+    """
+    today = now_tz().date()
+    this_monday = today - timedelta(days=today.weekday())
+    if closed:
+        start = this_monday - timedelta(days=7)   # segunda da semana passada
+        end   = this_monday - timedelta(days=1)   # domingo da semana passada
+    else:
+        start = this_monday
+        end   = today
+    return _build_period_report_summary(user_id, start, end)
+
+
+def build_monthly_report_summary(user_id: int, closed: bool = False) -> dict[str, str]:
+    """Resumo mensal.
+
+    closed=False (sob demanda): mês atual, do dia 1 até hoje.
+    closed=True  (agendado no dia 1): mês anterior completo.
+    """
+    today = now_tz().date()
+    if closed:
+        end   = today.replace(day=1) - timedelta(days=1)  # último dia do mês anterior
+        start = end.replace(day=1)                         # dia 1 do mês anterior
+    else:
+        start = today.replace(day=1)
+        end   = today
+    return _build_period_report_summary(user_id, start, end)
+
+
+def build_weekly_report_text(user_id: int, closed: bool = False) -> str:
+    summary = build_weekly_report_summary(user_id, closed=closed)
+
+    lines = []
+    lines.append("📊 *Resumo semanal do Bot Financeiro*")
+    lines.append(f"📅 Período: {summary['start']} a {summary['end']}")
+    lines.append("")
+    lines.append(f"🏦 Saldo atual: {summary['saldo']}")
+    lines.append(f"📉 Gastos da semana: {summary['gastos']}")
+    lines.append(f"📈 Receitas da semana: {summary['receita']}")
+    lines.append(f"📊 Lançamentos da semana: {summary['lancamentos']}")
+
+    return "\n".join(lines).strip()
+
+
+def build_monthly_report_text(user_id: int, closed: bool = False) -> str:
+    summary = build_monthly_report_summary(user_id, closed=closed)
+
+    lines = []
+    lines.append("📊 *Resumo mensal do Bot Financeiro*")
+    lines.append(f"📅 Período: {summary['start']} a {summary['end']}")
+    lines.append("")
+    lines.append(f"🏦 Saldo atual: {summary['saldo']}")
+    lines.append(f"📉 Gastos do mês: {summary['gastos']}")
+    lines.append(f"📈 Receitas do mês: {summary['receita']}")
+    lines.append(f"📊 Lançamentos do mês: {summary['lancamentos']}")
+
+    return "\n".join(lines).strip()
+
 # --- scheduler Discord (09:00) ---
 
 @tasks.loop(time=time(hour=9, minute=0, tzinfo=_tz()))
@@ -134,7 +216,59 @@ async def _daily_report_discord(bot):
                 logger.error("Falha ao marcar reminder como enviado (card_id=%s): %s", reminder.get("card_id"), e, exc_info=True)
 
 
+# --- scheduler Discord resumos periódicos (semanal seg / mensal dia 1, 09:00) ---
+
+@tasks.loop(time=time(hour=9, minute=0, tzinfo=_tz()))
+async def _periodic_reports_discord(bot):
+    today     = now_tz().date()
+    is_monday = today.weekday() == 0   # segunda-feira → resumo semanal
+    is_first  = today.day == 1         # dia 1 do mês  → resumo mensal
+
+    if not (is_monday or is_first):
+        return
+
+    # toggles independentes: cada resumo tem seu próprio liga/desliga
+    weekly_users  = set(list_users_with_weekly_report_enabled())  if is_monday else set()
+    monthly_users = set(list_users_with_monthly_report_enabled()) if is_first else set()
+    user_ids = weekly_users | monthly_users
+    logger.info(
+        "Resumos periódicos iniciados (semanal=%d, mensal=%d usuários)",
+        len(weekly_users), len(monthly_users),
+    )
+
+    for uid in user_ids:
+        ids = list_identities_by_user(uid)
+        discord_targets = [x["external_id"] for x in ids if x["provider"] == "discord"]
+        if not discord_targets:
+            continue
+
+        # closed=True → resume o período que acabou de fechar (semana/mês anterior).
+        # Sem claim aqui: o tasks.loop dispara uma vez ao dia (mesma estratégia do
+        # _daily_report_discord). O claim é usado só no WhatsApp, cujo loop faz
+        # polling a cada 30s e precisa do dedup atômico — se o Discord também
+        # consumisse o claim, usuários com os dois canais receberiam em um só.
+        messages = []
+        if uid in weekly_users:
+            messages.append(build_weekly_report_text(uid, closed=True))
+        if uid in monthly_users:
+            messages.append(build_monthly_report_text(uid, closed=True))
+
+        if not messages:
+            continue
+
+        for discord_id in discord_targets:
+            try:
+                user = await bot.fetch_user(int(discord_id))
+                if user:
+                    for msg in messages:
+                        await user.send(msg)
+            except Exception as e:
+                logger.error("Falha ao enviar resumo periódico para discord_id=%s: %s", discord_id, e, exc_info=True)
+
+
 def setup_daily_report(bot):
     # evita duplicar task quando o bot reinicia/reconecta
     if not _daily_report_discord.is_running():
         _daily_report_discord.start(bot)
+    if not _periodic_reports_discord.is_running():
+        _periodic_reports_discord.start(bot)

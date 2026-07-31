@@ -32,6 +32,22 @@ def set_daily_report_hour(user_id: int, hour: int, minute: int = 0) -> None:
     return _db_support.set_daily_report_hour_impl(get_conn, ensure_user, user_id, hour, minute)
 
 
+def set_weekly_report_enabled(user_id: int, enabled: bool) -> None:
+    return _db_support.set_weekly_report_enabled_impl(get_conn, ensure_user, user_id, enabled)
+
+
+def set_monthly_report_enabled(user_id: int, enabled: bool) -> None:
+    return _db_support.set_monthly_report_enabled_impl(get_conn, ensure_user, user_id, enabled)
+
+
+def list_users_with_weekly_report_enabled() -> list[int]:
+    return _db_support.list_users_with_weekly_report_enabled_impl(get_conn)
+
+
+def list_users_with_monthly_report_enabled() -> list[int]:
+    return _db_support.list_users_with_monthly_report_enabled_impl(get_conn)
+
+
 def get_daily_report_prefs(user_id: int) -> dict:
     return _db_support.get_daily_report_prefs_impl(get_conn, ensure_user, user_id)
 
@@ -54,6 +70,14 @@ def claim_daily_report_send(user_id: int, sent_date) -> bool:
 
 def was_daily_report_sent_today(user_id: int, today) -> bool:
     return _db_support.was_daily_report_sent_today_impl(get_conn, ensure_user, user_id, today)
+
+
+def claim_weekly_report_send(user_id: int, period_date) -> bool:
+    return _db_support.claim_weekly_report_send_impl(get_conn, ensure_user, user_id, period_date)
+
+
+def claim_monthly_report_send(user_id: int, period_date) -> bool:
+    return _db_support.claim_monthly_report_send_impl(get_conn, ensure_user, user_id, period_date)
 
 
 def get_last_ofx_import_end_date(user_id: int):

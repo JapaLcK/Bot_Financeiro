@@ -121,13 +121,43 @@ def set_daily_report_hour_impl(get_conn, ensure_user, user_id: int, hour: int, m
         conn.commit()
 
 
+def set_weekly_report_enabled_impl(get_conn, ensure_user, user_id: int, enabled: bool) -> None:
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into daily_report_prefs(user_id, weekly_enabled)
+                values (%s, %s)
+                on conflict (user_id) do update set weekly_enabled=excluded.weekly_enabled
+                """,
+                (user_id, enabled),
+            )
+        conn.commit()
+
+
+def set_monthly_report_enabled_impl(get_conn, ensure_user, user_id: int, enabled: bool) -> None:
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into daily_report_prefs(user_id, monthly_enabled)
+                values (%s, %s)
+                on conflict (user_id) do update set monthly_enabled=excluded.monthly_enabled
+                """,
+                (user_id, enabled),
+            )
+        conn.commit()
+
+
 def get_daily_report_prefs_impl(get_conn, ensure_user, user_id: int) -> dict:
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select enabled, hour, minute
+                select enabled, hour, minute, weekly_enabled, monthly_enabled
                 from daily_report_prefs
                 where user_id=%s
                 """,
@@ -135,12 +165,24 @@ def get_daily_report_prefs_impl(get_conn, ensure_user, user_id: int) -> dict:
             )
             row = cur.fetchone()
             if not row:
-                return {"enabled": True, "hour": 9, "minute": 0}
+                return {"enabled": True, "hour": 9, "minute": 0, "weekly_enabled": True, "monthly_enabled": True}
 
             try:
-                return {"enabled": bool(row["enabled"]), "hour": int(row["hour"]), "minute": int(row["minute"])}
+                return {
+                    "enabled": bool(row["enabled"]),
+                    "hour": int(row["hour"]),
+                    "minute": int(row["minute"]),
+                    "weekly_enabled": bool(row["weekly_enabled"]),
+                    "monthly_enabled": bool(row["monthly_enabled"]),
+                }
             except Exception:
-                return {"enabled": bool(row[0]), "hour": int(row[1]), "minute": int(row[2])}
+                return {
+                    "enabled": bool(row[0]),
+                    "hour": int(row[1]),
+                    "minute": int(row[2]),
+                    "weekly_enabled": bool(row[3]),
+                    "monthly_enabled": bool(row[4]),
+                }
 
 
 def list_users_with_daily_report_enabled_impl(get_conn, hour: int | None = None, minute: int | None = None) -> list[int]:
@@ -184,6 +226,37 @@ def list_users_with_daily_report_enabled_impl(get_conn, hour: int | None = None,
                 except Exception:
                     out.append(int(r[0]))
             return out
+
+
+def _list_users_with_flag_enabled(get_conn, column: str) -> list[int]:
+    # column é controlado internamente (nunca vem do usuário) → seguro interpolar
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                select u.id
+                from users u
+                left join daily_report_prefs p on p.user_id=u.id
+                where coalesce(p.{column}, true) = true
+                order by u.id asc
+                """,
+            )
+            rows = cur.fetchall() or []
+            out = []
+            for r in rows:
+                try:
+                    out.append(int(r["id"]))
+                except Exception:
+                    out.append(int(r[0]))
+            return out
+
+
+def list_users_with_weekly_report_enabled_impl(get_conn) -> list[int]:
+    return _list_users_with_flag_enabled(get_conn, "weekly_enabled")
+
+
+def list_users_with_monthly_report_enabled_impl(get_conn) -> list[int]:
+    return _list_users_with_flag_enabled(get_conn, "monthly_enabled")
 
 
 def list_identities_by_user_impl(get_conn, user_id: int) -> list[dict]:
@@ -257,6 +330,55 @@ def claim_daily_report_send_impl(get_conn, ensure_user, user_id: int, sent_date)
                 returning user_id
                 """,
                 (user_id, sent_date),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return row is not None
+
+
+def claim_weekly_report_send_impl(get_conn, ensure_user, user_id: int, period_date) -> bool:
+    """Reserva atomicamente o envio do resumo semanal para `period_date` (a segunda-feira da semana).
+
+    Retorna True apenas para o primeiro processo que gravar a data — evita
+    envio duplicado quando há múltiplas instâncias/reinícios.
+    """
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into daily_report_prefs(user_id, last_weekly_sent_date)
+                values (%s, %s)
+                on conflict (user_id) do update
+                   set last_weekly_sent_date = excluded.last_weekly_sent_date
+                 where daily_report_prefs.last_weekly_sent_date is distinct from excluded.last_weekly_sent_date
+                returning user_id
+                """,
+                (user_id, period_date),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return row is not None
+
+
+def claim_monthly_report_send_impl(get_conn, ensure_user, user_id: int, period_date) -> bool:
+    """Reserva atomicamente o envio do resumo mensal para `period_date` (o dia 1 do mês).
+
+    Mesma lógica do semanal: só o primeiro processo consegue gravar a data.
+    """
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into daily_report_prefs(user_id, last_monthly_sent_date)
+                values (%s, %s)
+                on conflict (user_id) do update
+                   set last_monthly_sent_date = excluded.last_monthly_sent_date
+                 where daily_report_prefs.last_monthly_sent_date is distinct from excluded.last_monthly_sent_date
+                returning user_id
+                """,
+                (user_id, period_date),
             )
             row = cur.fetchone()
         conn.commit()

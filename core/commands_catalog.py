@@ -130,6 +130,9 @@ CATALOG: list[CommandCategory] = [
         "title": "Análise e relatórios",
         "description": "Onde vai a grana, comparações, projeções",
         "commands": [
+            {"text": "resumo", "note": "resumo do dia"},
+            {"text": "resumo semanal", "note": "gastos da semana"},
+            {"text": "resumo mensal", "note": "gastos do mês"},
             {"text": "onde gastei mais esse mês", "note": "top categorias"},
             {"text": "meus 5 maiores gastos do mês"},
             {"text": "tendência últimos 6 meses"},
@@ -140,12 +143,16 @@ CATALOG: list[CommandCategory] = [
     {
         "id": "cmds_diario",
         "emoji": "🌅",
-        "title": "Relatório diário",
-        "description": "Resumo automático todo dia no horário que quiser",
+        "title": "Resumos automáticos",
+        "description": "Resumo diário, semanal e mensal no horário que quiser",
         "commands": [
             {"text": "liga relatório diário"},
             {"text": "desliga relatório diário"},
             {"text": "muda hora do relatório pra 8h"},
+            {"text": "liga resumo semanal", "note": "toda segunda-feira"},
+            {"text": "desliga resumo semanal"},
+            {"text": "liga resumo mensal", "note": "todo dia 1º"},
+            {"text": "desliga resumo mensal"},
         ],
     },
 ]

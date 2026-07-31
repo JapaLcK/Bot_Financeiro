@@ -24,6 +24,8 @@ from db import (
     list_identities_by_user,
     set_daily_report_enabled,
     set_daily_report_hour,
+    set_weekly_report_enabled,
+    set_monthly_report_enabled,
     set_engagement_opt_out,
     set_insight_email_opt_out,
     set_tip_email_opt_out,
@@ -50,6 +52,8 @@ class NotificationSettingsPayload(BaseModel):
     daily_report_enabled: bool | None = None
     daily_report_hour: int | None = None
     daily_report_minute: int | None = None
+    weekly_report_enabled: bool | None = None
+    monthly_report_enabled: bool | None = None
 
 
 async def _get_notification_settings(user_id: int) -> dict:
@@ -80,6 +84,8 @@ async def _get_notification_settings(user_id: int) -> dict:
         "daily_report_enabled": bool(daily_prefs.get("enabled", True)),
         "daily_report_hour": int(daily_prefs.get("hour", 9)),
         "daily_report_minute": int(daily_prefs.get("minute", 0)),
+        "weekly_report_enabled": bool(daily_prefs.get("weekly_enabled", True)),
+        "monthly_report_enabled": bool(daily_prefs.get("monthly_enabled", True)),
     }
 
 
@@ -343,5 +349,11 @@ async def update_notification_settings_route(
 
     if payload.daily_report_enabled is not None:
         await asyncio.to_thread(set_daily_report_enabled, user_id, payload.daily_report_enabled)
+
+    if payload.weekly_report_enabled is not None:
+        await asyncio.to_thread(set_weekly_report_enabled, user_id, payload.weekly_report_enabled)
+
+    if payload.monthly_report_enabled is not None:
+        await asyncio.to_thread(set_monthly_report_enabled, user_id, payload.monthly_report_enabled)
 
     return await _get_notification_settings(user_id)

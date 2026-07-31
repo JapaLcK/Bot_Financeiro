@@ -107,6 +107,20 @@ _EXACT: dict[str, str] = {
     "report diario":            "report.daily",
     "resumo":                   "report.daily",
     "resumo diario":            "report.daily",
+    # resumo semanal
+    "resumo semanal":           "report.weekly",
+    "relatorio semanal":        "report.weekly",
+    "report semanal":           "report.weekly",
+    "resumo da semana":         "report.weekly",
+    "resumo semana":            "report.weekly",
+    "gastos da semana":         "report.weekly",
+    # resumo mensal
+    "resumo mensal":            "report.monthly",
+    "relatorio mensal":         "report.monthly",
+    "report mensal":            "report.monthly",
+    "resumo do mes":            "report.monthly",
+    "resumo mes":               "report.monthly",
+    "gastos do mes":            "report.monthly",
     # toggle report
     "ligar report diario":      "report.enable",
     "ativar report diario":     "report.enable",
@@ -114,6 +128,20 @@ _EXACT: dict[str, str] = {
     "desligar report diario":   "report.disable",
     "desativar report diario":  "report.disable",
     "parar report diario":      "report.disable",
+    # liga/desliga resumo semanal
+    "ligar resumo semanal":     "report.weekly_enable",
+    "ativar resumo semanal":    "report.weekly_enable",
+    "voltar resumo semanal":    "report.weekly_enable",
+    "desligar resumo semanal":  "report.weekly_disable",
+    "desativar resumo semanal": "report.weekly_disable",
+    "parar resumo semanal":     "report.weekly_disable",
+    # liga/desliga resumo mensal
+    "ligar resumo mensal":      "report.monthly_enable",
+    "ativar resumo mensal":     "report.monthly_enable",
+    "voltar resumo mensal":     "report.monthly_enable",
+    "desligar resumo mensal":   "report.monthly_disable",
+    "desativar resumo mensal":  "report.monthly_disable",
+    "parar resumo mensal":      "report.monthly_disable",
     # emails de engajamento
     "reativar emails":          "emails.resubscribe",
     "receber emails":           "emails.resubscribe",
@@ -377,6 +405,25 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "report.set_hour"),
     (r"\b(report|relatorio)\b.*\b(diario|daily)\b.*\b\d{1,2}h\b",
      "report.set_hour"),
+
+    # liga/desliga do semanal — precisa vir ANTES do alias de report.weekly,
+    # senão "desligar resumo semanal" cairia em report.weekly.
+    (r"\b(desligar|desliga|desligue|desativar|desativa|desative|parar|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
+     "report.weekly_disable"),
+    (r"\b(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
+     "report.weekly_enable"),
+    # liga/desliga do mensal — idem, antes de report.monthly.
+    (r"\b(desligar|desliga|desligue|desativar|desativa|desative|parar|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
+     "report.monthly_disable"),
+    (r"\b(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
+     "report.monthly_enable"),
+
+    # resumo semanal: "resumo da semana", "relatorio semanal", "gastos da semana"
+    (r"\b(resumo|relatorio|report|gastos?)\b.*\b(semanal|semana)\b",
+     "report.weekly"),
+    # resumo mensal: "resumo do mes", "relatorio mensal", "gastos do mes"
+    (r"\b(resumo|relatorio|report|gastos?)\b.*\b(mensal|mes)\b",
+     "report.monthly"),
 
     # vinculação de contas
     (r"^link(\s+\d{6})?$",
@@ -694,6 +741,12 @@ CATÁLOGO DE INTENTS:
 - categories.create    → quer criar regra de categoria (entities: keyword, category_name)
 - categories.delete    → quer remover regra (entities: keyword)
 - report.daily         → quer o resumo/relatório do dia
+- report.weekly        → quer o resumo/relatório da semana (gastos da semana)
+- report.monthly       → quer o resumo/relatório do mês (gastos do mês)
+- report.weekly_enable → quer ativar o resumo semanal automático
+- report.weekly_disable→ quer desativar o resumo semanal automático
+- report.monthly_enable→ quer ativar o resumo mensal automático
+- report.monthly_disable→ quer desativar o resumo mensal automático
 - report.enable        → quer ativar relatório diário (sem especificar horário)
 - report.set_hour      → quer ativar relatório diário com horário específico (entities: hour, minute)
 - report.disable       → quer desativar relatório diário

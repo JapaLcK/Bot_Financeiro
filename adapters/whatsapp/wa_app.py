@@ -19,12 +19,18 @@ from core.reports.reports_daily import (
     build_daily_report_summary,
     build_daily_report_text,
     build_due_bill_reminders,
+    build_weekly_report_summary,
+    build_monthly_report_summary,
 )
 from db import (
     claim_daily_report_send,
+    claim_weekly_report_send,
+    claim_monthly_report_send,
     get_daily_report_prefs,
     list_identities_by_user,
     list_users_with_daily_report_enabled,
+    list_users_with_weekly_report_enabled,
+    list_users_with_monthly_report_enabled,
     mark_card_reminder_sent,
 )
 from utils_phone import phone_lookup_candidates
@@ -42,6 +48,8 @@ if (os.getenv("APP_ENV") or "").strip().lower() == "prod" and not APP_SECRET:
     )
 _queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=500)
 WA_DAILY_REPORT_DISABLE_ID = "daily_report_disable"
+WA_WEEKLY_REPORT_DISABLE_ID = "weekly_report_disable"
+WA_MONTHLY_REPORT_DISABLE_ID = "monthly_report_disable"
 
 
 def _env_flag(name: str) -> bool:
@@ -136,6 +144,52 @@ def _proactive_template_quick_reply_buttons() -> list[dict] | None:
     if not _proactive_template_stop_button_enabled():
         return None
     return [{"index": 0, "payload": WA_DAILY_REPORT_DISABLE_ID}]
+
+
+# ── Resumos periódicos (semanal / mensal) via template proativo ───────────────
+#
+# Envios proativos no WhatsApp (fora da janela de 24h) exigem template aprovado
+# pela Meta. Cada período usa seu próprio template, configurado por env var:
+#   WA_WEEKLY_TEMPLATE_NAME   → enviado toda segunda-feira (semana anterior)
+#   WA_MONTHLY_TEMPLATE_NAME  → enviado todo dia 1º (mês anterior)
+# O idioma reaproveita WA_PROACTIVE_TEMPLATE_LANGUAGE (default pt_BR).
+#
+# O corpo do template deve declarar estes parâmetros nomeados:
+#   {{periodo}} {{saldo}} {{gastos}} {{receita}} {{lancamentos}}
+
+def _periodic_template_config(kind: str) -> dict[str, str] | None:
+    env_name = "WA_WEEKLY_TEMPLATE_NAME" if kind == "weekly" else "WA_MONTHLY_TEMPLATE_NAME"
+    template_name = (os.getenv(env_name) or "").strip()
+    if not template_name:
+        return None
+
+    return {
+        "name": template_name,
+        "language_code": (os.getenv("WA_PROACTIVE_TEMPLATE_LANGUAGE") or "pt_BR").strip(),
+    }
+
+
+def _periodic_template_named_body_params(summary: dict[str, str]) -> dict[str, str]:
+    return {
+        "periodo": f"{summary['start']} a {summary['end']}",
+        "saldo": summary["saldo"],
+        "gastos": summary["gastos"],
+        "receita": summary["receita"],
+        "lancamentos": summary["lancamentos"],
+    }
+
+
+def _periodic_template_stop_button_enabled() -> bool:
+    # ligue quando os templates semanal/mensal tiverem o botão de resposta rápida
+    # "Desligar" (quick reply). Independente do botão do report diário.
+    return (os.getenv("WA_PERIODIC_TEMPLATE_STOP_BUTTON", "0") or "").strip() == "1"
+
+
+def _periodic_template_quick_reply_buttons(kind: str) -> list[dict] | None:
+    if not _periodic_template_stop_button_enabled():
+        return None
+    payload = WA_WEEKLY_REPORT_DISABLE_ID if kind == "weekly" else WA_MONTHLY_REPORT_DISABLE_ID
+    return [{"index": 0, "payload": payload}]
 
 
 def _strip_daily_report_disable_hint(message: str) -> str:
@@ -540,6 +594,113 @@ async def _daily_report_loop():
                 "error",
                 "whatsapp_daily_report_loop_error",
                 f"Erro no loop de relatorio diario do WhatsApp: {exc}",
+                source="wa_app",
+            )
+
+        await asyncio.sleep(30)
+
+
+def _send_periodic_template(uid, wa_targets, cfg, summary, kind, instance) -> None:
+    named_params = _periodic_template_named_body_params(summary)
+    quick_reply_buttons = _periodic_template_quick_reply_buttons(kind)
+    label = "semanal" if kind == "weekly" else "mensal"
+
+    for to in wa_targets:
+        try:
+            send_template(
+                to,
+                cfg["name"],
+                language_code=cfg["language_code"],
+                named_body_params=named_params,
+                quick_reply_buttons=quick_reply_buttons,
+            )
+            logger.info(
+                "WA %s report template sent uid=%s to=%s pid=%s hostname=%s",
+                kind, uid, to, instance["pid"], instance["hostname"],
+            )
+            log_system_event_sync(
+                "info",
+                f"whatsapp_{kind}_report_template_sent",
+                f"Template proativo de relatorio {label} enviado para o WhatsApp.",
+                source="wa_app",
+                user_id=uid,
+                details={
+                    "to": to,
+                    "template_name": cfg["name"],
+                    "language_code": cfg["language_code"],
+                    "periodo": named_params["periodo"],
+                },
+            )
+        except Exception as exc:
+            logger.warning("WA %s report send error to=%s error=%s", kind, to, exc)
+            log_system_event_sync(
+                "warning",
+                f"whatsapp_{kind}_report_send_failed",
+                f"Falha ao enviar relatorio {label} via WhatsApp: {exc}",
+                source="wa_app",
+                user_id=uid,
+                details={"to": to},
+            )
+
+
+def _periodic_report_tick() -> None:
+    now = now_tz()
+    today = now.date()
+    is_monday = today.weekday() == 0   # segunda → resumo semanal (semana anterior)
+    is_first  = today.day == 1         # dia 1  → resumo mensal (mês anterior)
+
+    if not (is_monday or is_first):
+        return
+
+    weekly_cfg  = _periodic_template_config("weekly") if is_monday else None
+    monthly_cfg = _periodic_template_config("monthly") if is_first else None
+    if not weekly_cfg and not monthly_cfg:
+        # nenhum template configurado para hoje → nada a fazer (e não consome o claim)
+        return
+
+    # toggles independentes: cada resumo tem seu próprio liga/desliga
+    weekly_users  = set(list_users_with_weekly_report_enabled())  if weekly_cfg else set()
+    monthly_users = set(list_users_with_monthly_report_enabled()) if monthly_cfg else set()
+
+    instance = _runtime_instance_details()
+
+    for uid in (weekly_users | monthly_users):
+        prefs = get_daily_report_prefs(uid)
+
+        # entrega no mesmo horário configurado para o report diário do usuário
+        if (now.hour, now.minute) < (prefs["hour"], prefs["minute"]):
+            continue
+
+        ids = list_identities_by_user(uid)
+        wa_targets = _dedupe_whatsapp_targets(ids)
+        if not wa_targets:
+            continue
+
+        # claim atômico por período: o loop faz polling a cada 30s, o claim garante
+        # que cada resumo saia uma única vez (mesmo com reinício / múltiplas instâncias)
+        if uid in weekly_users and claim_weekly_report_send(uid, today):
+            summary = build_weekly_report_summary(uid, closed=True)
+            _send_periodic_template(uid, wa_targets, weekly_cfg, summary, "weekly", instance)
+
+        if uid in monthly_users and claim_monthly_report_send(uid, today):
+            summary = build_monthly_report_summary(uid, closed=True)
+            _send_periodic_template(uid, wa_targets, monthly_cfg, summary, "monthly", instance)
+
+
+async def _periodic_report_loop():
+    await asyncio.sleep(10)
+
+    while True:
+        try:
+            await asyncio.to_thread(_periodic_report_tick)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.exception("WA periodic report loop error: %s", exc)
+            log_system_event_sync(
+                "error",
+                "whatsapp_periodic_report_loop_error",
+                f"Erro no loop de relatorios periodicos do WhatsApp: {exc}",
                 source="wa_app",
             )
 
