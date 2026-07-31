@@ -1,5 +1,5 @@
 import re
-from utils_text import normalize_text, is_internal_category
+from utils_text import normalize_text, is_internal_category, parse_money
 from utils_date import extract_date_from_text
 from core.services.category_service import infer_category, learn_from_explicit_category
 
@@ -84,11 +84,13 @@ def _words_to_number(text: str) -> float | None:
 def _extract_valor(text: str) -> float | None:
     """
     Extrai o valor monetário de um texto, suportando:
-      - Números: "30", "30,50", "30.50", "R$ 30,50"
+      - Números: "30", "30,50", "R$ 30,50", "2.000" (=2000), "10.000" (=10000)
+      - Multiplicador: "10 mil" (=10000), "2,5 mil", "3 milhões"
       - "X reais e Y centavos": "30 reais e 50 centavos" → 30.50
       - Números por extenso: "mil e trezentos" → 1300
     """
-    # 1. "X reais e Y centavos" (saída comum do Whisper)
+    # 1. "X reais e Y centavos" (saída comum do Whisper) — antes do parse_money,
+    #    que só pegaria a parte inteira e ignoraria os centavos.
     m = re.search(
         r"(\d+)\s+reais?\s+e\s+(\d+)\s+centavos?",
         text, re.IGNORECASE
@@ -96,36 +98,15 @@ def _extract_valor(text: str) -> float | None:
     if m:
         return float(m.group(1)) + float(m.group(2)) / 100
 
-    # 2. Número com separador decimal ("30,50" ou "30.50")
-    m = re.search(r"(\d+(?:[.,]\d{3})*[.,]\d{2})\b", text)
-    if m:
-        raw = m.group(1).replace(".", "").replace(",", ".")
-        try:
-            return float(raw)
-        except ValueError:
-            pass
+    # 2. Qualquer número em dígitos → delega pro parse_money, fonte ÚNICA que
+    #    trata milhar/decimal BR ("2.000"=2000, "10.000"=10000, "30,50"=30.5) e
+    #    o multiplicador "mil"/"milhão". Antes, a lógica local aqui pegava só o
+    #    "2" de "2.000" (bug do áudio "adicione 2.000 de saldo" → R$ 2,00).
+    val = parse_money(text)
+    if val is not None:
+        return val
 
-    # 2.5 Multiplicador "mil"/"milhão" com número em dígito: "10 mil", "2,5 mil",
-    #     "3 milhões", "1 mil e 500". Precisa vir ANTES do inteiro simples — que
-    #     pegaria só o "10" de "10 mil" e devolveria 10 em vez de 10000.
-    m = re.search(
-        r"\b(\d+(?:[.,]\d+)?)\s*(mil|milh[oõ]es|milhao|milhão)\b(?:\s*e\s*(\d+))?",
-        text, re.IGNORECASE,
-    )
-    if m:
-        base = float(m.group(1).replace(".", "").replace(",", "."))
-        mult = 1_000_000 if m.group(2).lower().startswith("milh") else 1_000
-        total = base * mult
-        if m.group(3):
-            total += float(m.group(3))
-        return total
-
-    # 3. Número inteiro simples
-    m = re.search(r"\b(\d+)\b", text)
-    if m:
-        return float(m.group(1))
-
-    # 4. Número por extenso (mil, trezentos, etc.)
+    # 3. Número por extenso ("dez mil", "trezentos") — parse_money não cobre.
     return _words_to_number(text)
 
 

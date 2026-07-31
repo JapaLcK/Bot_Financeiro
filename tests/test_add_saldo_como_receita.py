@@ -30,6 +30,15 @@ from core.handlers import launches
     ("50", 50.0),            # inteiro simples inalterado
     ("30,50", 30.5),         # decimal inalterado
     ("3 milhas de corrida", 3.0),   # "milhas" não é multiplicador (pega o "3" simples, não 3000)
+    # separador de milhar em ponto (saída do Whisper) — regressão do áudio
+    # "adicione 2.000 de saldo" que registrava R$ 2,00
+    ("2.000", 2000.0),
+    ("10.000", 10000.0),
+    ("1.500", 1500.0),
+    ("1.234.567", 1234567.0),
+    ("2.000,50", 2000.5),
+    ("Adicione 2.000 de saldo", 2000.0),
+    ("Adicione 10.000 de saldo", 10000.0),
 ])
 def test_extract_valor_mil(text, expected):
     assert _extract_valor(text) == expected
