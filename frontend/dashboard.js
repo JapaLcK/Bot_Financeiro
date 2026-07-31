@@ -3797,6 +3797,20 @@ function _renderBillPaidRow(b) {
     </div>`;
 }
 
+// Extrai uma mensagem de erro LEGÍVEL da resposta, nunca "[object Object]".
+// Cobre: texto puro, {detail:"..."} (HTTPException), {detail:[{msg}]} (422 do
+// FastAPI) e {detail:{...}} (ex: pro_required).
+async function _errDetail(resp) {
+  const txt = await resp.text().catch(() => "");
+  let d;
+  try { d = JSON.parse(txt).detail; } catch (_) { return txt || `Erro (HTTP ${resp.status})`; }
+  if (d == null) return txt || `Erro (HTTP ${resp.status})`;
+  if (typeof d === "string") return d;
+  if (Array.isArray(d)) return d.map(e => (e && e.msg) || String(e)).join("; ");
+  if (typeof d === "object") return d.message || d.msg || d.error || JSON.stringify(d);
+  return String(d);
+}
+
 async function payBill(billId, estimate, name, variavel) {
   // Valor da conta a pagar é sempre confirmado na hora (pode variar). Se tem
   // estimativa, pré-preenche pra ser só ajustar/confirmar; senão abre vazio.
@@ -3818,10 +3832,9 @@ async function payBill(billId, estimate, name, variavel) {
       headers: csrfHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ amount }),
     });
+    if (resp.status === 403) return;   // pro_required: interceptor abre upgrade
     if (!resp.ok) {
-      const txt = await resp.text();
-      let detail = txt; try { detail = JSON.parse(txt).detail || txt; } catch (_) {}
-      throw new Error(detail);
+      throw new Error(await _errDetail(resp));
     }
     showToast(`✓ Boleto pago: ${_fmtBRL(amount)}`);
     loadBillsView(true);
@@ -3855,10 +3868,13 @@ async function quickAddBoleto() {
       headers: csrfHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ name, amount, due_date: due }),
     });
+    if (resp.status === 403) {
+      // Free furou o gate visual: o interceptor global já abre o modal de
+      // upgrade. Só saímos sem mostrar erro (o detail é um objeto pro_required).
+      return;
+    }
     if (!resp.ok) {
-      const txt = await resp.text();
-      let detail = txt; try { detail = JSON.parse(txt).detail || txt; } catch (_) {}
-      throw new Error(detail);
+      throw new Error(await _errDetail(resp));
     }
     showToast("✓ Boleto adicionado");
     nameEl.value = ""; amtEl.value = "";  // mantém a data (costuma cadastrar vários próximos)
@@ -3887,10 +3903,9 @@ async function editBoleto(id, name, amount, dueISO) {
       headers: csrfHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ amount: amt, due_date: nd }),
     });
+    if (resp.status === 403) return;   // pro_required: interceptor abre upgrade
     if (!resp.ok) {
-      const txt = await resp.text();
-      let detail = txt; try { detail = JSON.parse(txt).detail || txt; } catch (_) {}
-      throw new Error(detail);
+      throw new Error(await _errDetail(resp));
     }
     showToast("✓ Boleto atualizado");
     loadBillsView(true);
@@ -3908,10 +3923,9 @@ async function deleteBoleto(id, name) {
       credentials: "same-origin",
       headers: csrfHeaders(),
     });
+    if (resp.status === 403) return;   // pro_required: interceptor abre upgrade
     if (!resp.ok) {
-      const txt = await resp.text();
-      let detail = txt; try { detail = JSON.parse(txt).detail || txt; } catch (_) {}
-      throw new Error(detail);
+      throw new Error(await _errDetail(resp));
     }
     showToast("🗑 Boleto apagado");
     loadBillsView(true);
@@ -5428,6 +5442,7 @@ const UPGRADE_MESSAGES = {
   ofx_import: "Importar extrato bancário e fatura de cartão por OFX é exclusivo do PigBank+.",
   history_unlimited: "Histórico além de 30 dias é exclusivo do PigBank+.",
   changelog: "As notícias e resumos do mercado feitos pela Piggy são exclusivos do PigBank+. Assine pra desbloquear.",
+  recurring_expenses: "A agenda de boletos e os gastos fixos são exclusivos do PigBank+. Cadastre suas contas a pagar e nunca mais perca um vencimento.",
   generic: "Essa feature é exclusiva pra quem assina o PigBank+."
 };
 
