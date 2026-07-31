@@ -5,6 +5,7 @@ Read:
   - list_recent_launches: últimos N lançamentos do user (default 10)
   - get_period_summary: soma de despesas e receitas em um período (default: mês corrente)
   - get_top_categories: top N categorias de gasto no período (despesas + cartão)
+  - get_category_spend: total gasto em UMA categoria específica no período
   - get_largest_expenses: top N gastos INDIVIDUAIS (não agregados) no período
   - compare_periods: compara totais de receita/despesa entre dois períodos
   - get_spending_trend: tendência mensal (totais dos últimos N meses)
@@ -95,10 +96,13 @@ def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         limit = 5
     limit = max(1, min(limit, 20))
 
-    rows = db.get_largest_expenses(user_id, start, end, limit)
+    categoria = (args.get("categoria") or "").strip() or None
+
+    rows = db.get_largest_expenses(user_id, start, end, limit, categoria=categoria)
     return {
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
+        "categoria": categoria,
         "expenses": rows,
         "count": len(rows),
     }
@@ -269,6 +273,27 @@ def _get_top_categories(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         "end_date": end.isoformat(),
         "categories": rows,
         "count": len(rows),
+    }
+
+
+def _get_category_spend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    today = date.today()
+    start = _parse_iso_date(args.get("start_date")) or today.replace(day=1)
+    end = _parse_iso_date(args.get("end_date")) or today
+
+    if end < start:
+        return {"error": "end_date anterior a start_date"}
+
+    categoria = (args.get("categoria") or "").strip()
+    if not categoria:
+        return {"error": "categoria obrigatória"}
+
+    total = db.sum_spent_in_category_period(user_id, categoria, start, end)
+    return {
+        "categoria": categoria,
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "total": total,
     }
 
 
@@ -559,6 +584,44 @@ TOOLS: list[Tool] = [
         schema={
             "type": "function",
             "function": {
+                "name": "get_category_spend",
+                "description": (
+                    "Retorna quanto o user gastou em UMA categoria específica "
+                    "num período (soma despesas reais + compras no cartão, "
+                    "exclui movimentações internas e reembolsos). Use quando o "
+                    "user nomeia a categoria: 'quanto gastei na categoria "
+                    "outros esta semana?', 'quanto torrei em mercado em julho?', "
+                    "'gastei quanto com transporte esse mês?'. Pra ranking de "
+                    "várias categorias use `get_top_categories`. Sem datas, usa "
+                    "o mês corrente até hoje."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "categoria": {
+                            "type": "string",
+                            "description": "Nome da categoria (ex: 'outros', 'mercado', 'transporte').",
+                        },
+                        "start_date": {
+                            "type": "string",
+                            "description": "ISO 8601 (YYYY-MM-DD). Omita pra usar o primeiro dia do mês corrente.",
+                        },
+                        "end_date": {
+                            "type": "string",
+                            "description": "ISO 8601 (YYYY-MM-DD), inclusivo. Omita pra usar hoje.",
+                        },
+                    },
+                    "required": ["categoria"],
+                },
+            },
+        },
+        is_write=False,
+        execute=_get_category_spend,
+    ),
+    Tool(
+        schema={
+            "type": "function",
+            "function": {
                 "name": "get_largest_expenses",
                 "description": (
                     "Retorna os MAIORES GASTOS INDIVIDUAIS do user no "
@@ -566,8 +629,9 @@ TOOLS: list[Tool] = [
                     "`get_top_categories` (que soma por categoria). Use pra "
                     "'qual meu maior gasto?', 'meus 5 maiores gastos do "
                     "mês', 'top 3 compras', 'em que gastei mais de uma vez "
-                    "só'. Inclui despesas reais + compras no cartão. Sem "
-                    "datas, usa o mês corrente até hoje."
+                    "só'. Passe `categoria` pra restringir a uma categoria "
+                    "('meus maiores gastos em mercado'). Inclui despesas reais "
+                    "+ compras no cartão. Sem datas, usa o mês corrente até hoje."
                 ),
                 "parameters": {
                     "type": "object",
@@ -586,6 +650,10 @@ TOOLS: list[Tool] = [
                             "maximum": 20,
                             "default": 5,
                             "description": "Top N gastos (1 a 20, padrão 5). Use 1 pra 'qual meu maior gasto'.",
+                        },
+                        "categoria": {
+                            "type": "string",
+                            "description": "Opcional. Restringe os maiores gastos a essa categoria (ex: 'outros', 'mercado').",
                         },
                     },
                 },

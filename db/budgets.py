@@ -18,7 +18,7 @@ filtradas — não fazem sentido como orçamento.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -211,6 +211,51 @@ def sum_spent_in_category_this_month(user_id: int, categoria: str) -> float:
                 (
                     user_id, categoria, today.year, today.month,
                     user_id, categoria, today.year, today.month,
+                ),
+            )
+            row = cur.fetchone()
+            return float(row["total"] or 0)
+
+
+def sum_spent_in_category_period(
+    user_id: int, categoria: str, start_date: date, end_date: date
+) -> float:
+    """Soma o gasto de uma categoria num período arbitrário [start, end] inclusivo.
+
+    Generaliza `sum_spent_in_category_this_month` pra qualquer intervalo de
+    datas: mesma lógica (launches de conta corrente + compras no cartão), mas
+    filtrando por `criado_em`/`purchased_at` em vez do mês corrente fixo.
+    Comparação de categoria case-insensitive.
+    """
+    ensure_user(user_id)
+    start_dt = datetime.combine(start_date, datetime.min.time())
+    end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select
+                  coalesce((
+                    select sum(valor) from launches
+                    where user_id=%s
+                      and tipo in ('despesa', 'saida')
+                      and lower(categoria) = lower(%s)
+                      and is_internal_movement = false
+                      and criado_em >= %s
+                      and criado_em <  %s
+                  ), 0) +
+                  coalesce((
+                    select sum(valor) from credit_transactions
+                    where user_id=%s
+                      and lower(categoria) = lower(%s)
+                      and is_refund = false
+                      and purchased_at >= %s::date
+                      and purchased_at <= %s::date
+                  ), 0) as total
+                """,
+                (
+                    user_id, categoria, start_dt, end_excl,
+                    user_id, categoria, start_date, end_date,
                 ),
             )
             row = cur.fetchone()

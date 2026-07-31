@@ -377,6 +377,7 @@ def get_largest_expenses(
     start_date: date,
     end_date: date,
     limit: int = 5,
+    categoria: str | None = None,
 ):
     """Top N maiores gastos INDIVIDUAIS no período (não agregados por categoria).
 
@@ -387,6 +388,10 @@ def get_largest_expenses(
       - launches.tipo='despesa' AND is_internal_movement=false
       - credit_transactions onde is_refund=false
 
+    Se `categoria` for informada, filtra pelos gastos daquela categoria
+    (match case-insensitive, mesmo critério de `sum_spent_in_category_period`
+    — assim a lista é sempre um subconjunto do total).
+
     Retorna lista [{valor, categoria, descricao, data, fonte}].
     `fonte` = 'launches' | 'credito' (frontend pode renderizar tag).
     `descricao` = alvo (se launches) ou nota (se credito).
@@ -396,10 +401,22 @@ def get_largest_expenses(
     start_dt = datetime.combine(start_date, datetime.min.time())
     end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
 
+    cat_filter = "and lower(categoria) = lower(%s)" if categoria else ""
+
+    launches_params = [user_id]
+    if categoria:
+        launches_params.append(categoria)
+    launches_params += [start_dt, end_excl]
+
+    credit_params = [user_id]
+    if categoria:
+        credit_params.append(categoria)
+    credit_params += [start_date, end_date]
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select valor, categoria, descricao, dt, fonte
                 from (
                     select valor,
@@ -411,6 +428,7 @@ def get_largest_expenses(
                     where user_id = %s
                       and tipo = 'despesa'
                       and is_internal_movement = false
+                      {cat_filter}
                       and criado_em >= %s and criado_em < %s
                     union all
                     select valor,
@@ -421,6 +439,7 @@ def get_largest_expenses(
                     from credit_transactions
                     where user_id = %s
                       and is_refund = false
+                      {cat_filter}
                       and purchased_at >= %s::date
                       and purchased_at <= %s::date
                 ) agg
@@ -428,8 +447,8 @@ def get_largest_expenses(
                 limit %s
                 """,
                 (
-                    user_id, start_dt, end_excl,
-                    user_id, start_date, end_date,
+                    *launches_params,
+                    *credit_params,
                     int(limit),
                 ),
             )

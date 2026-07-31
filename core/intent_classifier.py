@@ -265,8 +265,12 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "launches.list"),
     (r"\b(hoje|ontem)\b.*(lancamentos?|gastos?|despesas?|receitas?)",
      "launches.list"),
-    (r"^(quanto|algum|tive|tivemos?|houve)\s.*(gastei|gastou|gasto|gasta|despesa|despesas|lancamentos?)\b",
-     "launches.list"),
+    # "quanto gastei [na categoria X] [período]" → soma do gasto (não listagem).
+    # Ex: "quanto gastei na categoria outros esta semana", "quanto gasto em
+    # julho", "quanto gastei ontem". A listagem fica com os padrões
+    # "ver/mostrar/listar gastos" logo abaixo.
+    (r"^(quanto|algum|tive|tivemos?|houve)\s.*(gastei|gastou|gasto|gasta|despesa|despesas)\b",
+     "launches.spend_query"),
     # lançamentos / gastos — perguntas naturais sem data
     (r"^(ver|mostrar|mostra|listar)\s+(meus\s+)?(lancamentos?|gastos?|despesas?|extrato)(\s+recentes?)?$",
      "launches.list"),
@@ -722,6 +726,7 @@ REGRAS ABSOLUTAS:
 CATÁLOGO DE INTENTS:
 - balance.check        → usuário quer saber o saldo da conta
 - launches.list        → quer listar lançamentos/histórico (entities: limit?, date_filter? ex: "hoje","ontem","2026-04-03")
+- launches.spend_query → quer saber QUANTO gastou (um total, não a lista) num período e/ou categoria. Ex: "quanto gastei na categoria outros esta semana", "quanto gasto em julho", "quanto gastei ontem". O handler re-lê o texto pra extrair período e categoria — não precisa de entities.
 - launches.add         → quer registrar receita ou despesa
 - launches.delete      → quer apagar um lançamento (entities: launch_id)
 - launches.undo        → quer desfazer o último lançamento

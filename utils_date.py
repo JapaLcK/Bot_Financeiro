@@ -1,6 +1,7 @@
 import os
 import re
 import calendar
+import unicodedata
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
 from dateutil.relativedelta import relativedelta
@@ -172,6 +173,110 @@ def month_range_today():
     last_day = calendar.monthrange(today.year, today.month)[1]
     end = today.replace(day=last_day)
     return start, end
+
+# ---------------- parsing de PERÍODO em linguagem natural ----------------
+
+# Nomes de mês (sem acento — o texto é normalizado antes de casar). Inclui
+# abreviações comuns. Usado por parse_period_from_text.
+_MONTHS_PT: dict[str, int] = {
+    "janeiro": 1, "fevereiro": 2, "marco": 3, "abril": 4, "maio": 5, "junho": 6,
+    "julho": 7, "agosto": 8, "setembro": 9, "outubro": 10, "novembro": 11, "dezembro": 12,
+    "jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6,
+    "jul": 7, "ago": 8, "set": 9, "out": 10, "nov": 11, "dez": 12,
+}
+
+_MONTH_NAMES_PT = [
+    "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+    "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+]
+
+
+def _strip_accents(s: str) -> str:
+    s = unicodedata.normalize("NFKD", s or "").lower()
+    return "".join(c for c in s if not unicodedata.combining(c))
+
+
+def parse_period_from_text(text: str) -> tuple[date, date, str] | None:
+    """Interpreta um período em linguagem natural PT-BR.
+
+    Retorna ``(start_date, end_date, label)`` com datas INCLUSIVAS e um rótulo
+    pronto pra frase (ex.: "esta semana", "no mês passado", "em julho"), ou
+    ``None`` se nenhum período for reconhecido.
+
+    Reconhece: hoje, ontem, anteontem, esta/essa semana, semana passada,
+    este/esse mês, mês passado, últimos N dias, este/esse ano, ano passado,
+    nome de mês ("julho", "em julho") e data única dd/mm(/aaaa).
+    """
+    if not text:
+        return None
+
+    t = _strip_accents(text)
+    today = today_tz()
+
+    # --- dias pontuais ---
+    if re.search(r"\bhoje\b", t):
+        return today, today, "hoje"
+    if re.search(r"\banteontem\b", t):
+        d = today - timedelta(days=2)
+        return d, d, "anteontem"
+    if re.search(r"\bontem\b", t):
+        d = today - timedelta(days=1)
+        return d, d, "ontem"
+
+    # --- últimos N dias ---
+    m = re.search(r"\bultim[oa]s?\s+(\d{1,3})\s+dias?\b", t)
+    if m:
+        n = max(1, int(m.group(1)))
+        return today - timedelta(days=n - 1), today, f"nos últimos {n} dias"
+
+    # --- semana ---
+    if re.search(r"\b(semana passada|ultima semana|semana anterior)\b", t):
+        base = today - timedelta(days=7)
+        monday = base - timedelta(days=base.weekday())
+        return monday, monday + timedelta(days=6), "na semana passada"
+    if re.search(r"\bsemana\b", t):
+        monday = today - timedelta(days=today.weekday())
+        return monday, today, "esta semana"
+
+    # --- ano ---
+    if re.search(r"\b(ano passado|ultimo ano|ano anterior)\b", t):
+        y = today.year - 1
+        return date(y, 1, 1), date(y, 12, 31), "no ano passado"
+    if re.search(r"\b(este|esse|neste|nesse)\s+ano\b", t) or re.search(r"\bno ano\b", t):
+        return date(today.year, 1, 1), today, "neste ano"
+
+    # --- mês passado (antes de casar nome de mês / "mês" genérico) ---
+    if re.search(r"\b(mes passado|ultimo mes|mes anterior)\b", t):
+        first_this = today.replace(day=1)
+        last_prev = first_this - timedelta(days=1)
+        return last_prev.replace(day=1), last_prev, "no mês passado"
+
+    # --- nome de mês ("julho", "em julho") ---
+    for name, num in _MONTHS_PT.items():
+        if re.search(rf"\b{name}\b", t):
+            year = today.year
+            # se o mês ainda não chegou neste ano, assume o ano passado
+            if num > today.month:
+                year -= 1
+            last_day = calendar.monthrange(year, num)[1]
+            start = date(year, num, 1)
+            end = date(year, num, last_day)
+            if end > today:
+                end = today
+            return start, end, f"em {_MONTH_NAMES_PT[num - 1]}"
+
+    # --- mês corrente ("este mês", "do mês", "mês") ---
+    if re.search(r"\bmes\b", t):
+        return today.replace(day=1), today, "neste mês"
+
+    # --- data única dd/mm(/aaaa) ---
+    dt, _ = extract_date_from_text(text)
+    if dt:
+        d = dt.date()
+        return d, d, d.strftime("%d/%m/%Y")
+
+    return None
+
 
 def months_between(d1: date, d2: date):
     if d2 <= d1:

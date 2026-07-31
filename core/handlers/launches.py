@@ -5,8 +5,8 @@ import re
 from datetime import date, timedelta
 
 import db
-from utils_text import fmt_brl, is_internal_category, canonicalize_category_label
-from utils_date import extract_date_from_text, today_tz
+from utils_text import fmt_brl, is_internal_category, canonicalize_category_label, normalize_text
+from utils_date import extract_date_from_text, today_tz, parse_period_from_text
 from core.services.category_service import infer_category, learn_from_inference
 from parsers import (
     parse_receita_despesa_natural,
@@ -209,6 +209,101 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
     header = f"🧾 **Últimos {len(rows)} lançamentos**:"
     body   = "\n".join(lines)
     return f"{header}\n{body}" + (f"\n\n{summary}" if summary else "")
+
+
+# ---------------------------------------------------------------------------
+# spend_query — "quanto gastei [na categoria X] [período]"
+# ---------------------------------------------------------------------------
+
+# Palavras de período/conectores que NÃO fazem parte de um nome de categoria.
+# Usadas pra limpar o rabo capturado depois de "categoria"/"com"/"no".
+_CAT_STOP_WORDS = {
+    "hoje", "ontem", "anteontem", "semana", "mes", "ano", "passado", "passada",
+    "ultimo", "ultima", "ultimos", "ultimas", "dias", "dia", "essa", "esta",
+    "esse", "este", "nessa", "nesta", "nesse", "neste", "dessa", "desta",
+    "desse", "deste", "no", "na", "do", "da", "de", "em", "dos", "das", "nos",
+    "nas", "recentes", "recente", "total", "gastei", "gastou", "gasto", "gasta",
+    "janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho",
+    "agosto", "setembro", "outubro", "novembro", "dezembro",
+}
+
+
+def _extract_query_category(text: str) -> str | None:
+    """Extrai o nome da categoria de uma pergunta de gasto.
+
+    Reconhece "na categoria X", "categoria X" e, como fallback, "com/no/na X".
+    Remove palavras de período ("esta semana", "julho", ...) do rabo capturado.
+    Retorna o rótulo canônico da categoria ou None se não houver categoria.
+    """
+    norm = normalize_text(text)  # sem acento, minúsculo
+
+    m = re.search(r"\bcategoria\s+(?:de\s+)?(.+)$", norm)
+    if not m:
+        # "gastei com/em/no/na X". Palavras de período ("em julho", "no mes")
+        # caem no filtro _CAT_STOP_WORDS abaixo, então não viram categoria.
+        m = re.search(r"\b(?:com|em|no|na)\s+(.+)$", norm)
+    if not m:
+        return None
+
+    toks = [
+        tk for tk in m.group(1).split()
+        if tk not in _CAT_STOP_WORDS and not tk.isdigit()
+    ]
+    cat = " ".join(toks).strip()
+    if not cat:
+        return None
+    return canonicalize_category_label(cat) or cat
+
+
+def spend_query(user_id: int, text: str, entities: dict | None = None) -> str:
+    """Responde "quanto gastei [na categoria X] [período]" com o total gasto.
+
+    - Interpreta o período em linguagem natural (esta semana, este mês, julho,
+      últimos 7 dias, ontem, ...). Sem período reconhecido → mês corrente.
+    - Com categoria → total daquela categoria (launches + cartão).
+    - Sem categoria → total de despesas no período + top categorias.
+    """
+    period = parse_period_from_text(text)
+    if period:
+        start, end, period_label = period
+    else:
+        today = today_tz()
+        start, end, period_label = today.replace(day=1), today, "neste mês"
+
+    categoria = _extract_query_category(text)
+
+    if categoria:
+        total = db.sum_spent_in_category_period(user_id, categoria, start, end)
+        label = canonicalize_category_label(categoria) or categoria
+        if total <= 0:
+            return f"🐷 Você não teve gastos em **{label}** {period_label}."
+
+        lines = [f"💸 Você gastou **{fmt_brl(total)}** em **{label}** {period_label}."]
+
+        # top 5 maiores lançamentos dessa categoria no período
+        maiores = db.get_largest_expenses(user_id, start, end, limit=5, categoria=categoria)
+        if maiores:
+            lines.append("")
+            lines.append("🔝 Maiores gastos:")
+            for m in maiores:
+                desc = (m.get("descricao") or "").strip() or "—"
+                lines.append(f"• {fmt_brl(m['valor'])} • {desc}")
+        return "\n".join(lines)
+
+    # sem categoria → total geral + top categorias do período
+    summary = db.get_summary_by_period(user_id, start, end)
+    total = float(summary.get("despesa", 0) or 0)
+    if total <= 0:
+        return f"🐷 Você não teve gastos {period_label}."
+
+    lines = [f"💸 Você gastou **{fmt_brl(total)}** {period_label}."]
+    tops = db.get_top_expense_categories(user_id, start, end, limit=3)
+    if tops:
+        lines.append("")
+        lines.append("📊 Top categorias:")
+        for t in tops:
+            lines.append(f"• {t['categoria']}: {fmt_brl(t['total'])}")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------

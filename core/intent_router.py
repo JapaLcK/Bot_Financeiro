@@ -345,6 +345,10 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
         limit = int(entities.get("limit", 10))
         return h_launches.list_launches(user_id, limit=limit, entities=entities, original_text=text)
 
+    # --- "quanto gastei [na categoria X] [período]" → total gasto ---
+    if intent == "launches.spend_query":
+        return h_launches.spend_query(user_id, text, entities=entities)
+
     if intent == "launches.add":
         # "paguei a luz" pode quitar uma CONTA A PAGAR pendente (boleto) em vez
         # de criar um lançamento avulso. Só intercepta se casar uma conta
