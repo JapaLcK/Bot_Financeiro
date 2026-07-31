@@ -36,7 +36,10 @@ from db import (
     update_card_reminder_settings,
 )
 from utils_date import extract_date_from_text, fmt_br, now_tz, today_tz
-from utils_text import fmt_brl, normalize_text, parse_money
+from utils_text import (
+    fmt_brl, normalize_text, parse_money, parse_pt_number,
+    PT_PHRASE, PT_VALUE, PT_NUM_ALT_NO_ARTICLE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1742,6 +1745,18 @@ def handle(user_id: int, text: str) -> str | None:
                 n = int(mx.group(1))
             except Exception:
                 n = 1
+        else:
+            # contagem por extenso: "em doze vezes", "doze parcelas". Exige a
+            # unidade (vezes/parcelas/x) — número por extenso solto é ambíguo
+            # demais pra assumir que é a contagem.
+            smx = (
+                re.search(rf"\bem\s+({PT_PHRASE})\s+(?:x|vezes?|parcelas?)\b", t_low, re.IGNORECASE)
+                or re.search(rf"\b({PT_PHRASE})\s+(?:x|vezes?|parcelas?)\b", t_low, re.IGNORECASE)
+            )
+            if smx:
+                c = parse_pt_number(smx.group(1))
+                if c and c >= 1:
+                    n = int(c)
 
         # ── valor: total financiado OU valor da parcela ─────────────────────
         # Dois jeitos naturais de informar o dinheiro:
@@ -1752,12 +1767,14 @@ def handle(user_id: int, text: str) -> str | None:
         # embutido — assim o user não precisa multiplicar na mão. Sem o "de Y",
         # cai no total (a) e divide, como antes.
         valor = None
+        # Contagem e valor podem vir em dígito OU por extenso: "12 parcelas de
+        # 100", "12x de 79,90", "doze parcelas de cem", "12 parcelas de mil".
         parc_m = re.search(
-            r"\b\d+\s*(?:x|vezes?|parcelas?)\s+de\s+((?:r\$\s*)?\d[\d.,]*)",
-            t_low,
+            rf"\b(?:\d+|{PT_PHRASE})\s*(?:x|vezes?|parcelas?)\s+de\s+({PT_VALUE})",
+            t_low, re.IGNORECASE,
         )
         if parc_m and n > 1:
-            parcela_valor = parse_money(parc_m.group(1))
+            parcela_valor = parse_pt_number(parc_m.group(1))
             if parcela_valor is not None:
                 valor = round(parcela_valor * n, 2)
         if valor is None:
@@ -1815,8 +1832,26 @@ def handle(user_id: int, text: str) -> str | None:
             r"\b\d+\s*(?:x|vezes?|parcelas?)\s+de\s+(?:r\$\s*)?\d[\d.,]*",
             "", desc_clean, flags=re.IGNORECASE,
         )
+        # idem pro bloco "Nx de Y" por extenso: "doze parcelas de cem",
+        # "12 parcelas de mil" — remove contagem+valor de uma vez.
+        desc_clean = re.sub(
+            rf"\b(?:\d+|{PT_PHRASE})\s*(?:x|vezes?|parcelas?)\s+de\s+{PT_VALUE}",
+            "", desc_clean, flags=re.IGNORECASE,
+        )
         desc_clean = re.sub(r"\b\d+[\.,]?\d*\b", "", desc_clean)
         desc_clean = re.sub(r"\b\d+\s*x\b", "", desc_clean, flags=re.IGNORECASE)
+        # remove multiplicadores/unidades monetárias que sobraram quando o valor
+        # foi escrito por extenso ("mil reais em 10 vezes" → não vira descrição).
+        desc_clean = re.sub(
+            r"\b(mil|milh[oõ]es|milhao|milh[aã]o|reais|real|r\$|vezes?|parcelas?)\b",
+            "", desc_clean, flags=re.IGNORECASE,
+        )
+        # sobras de números por extenso ("dez", "doze", "cem"...) que faziam
+        # parte da contagem/valor. "um"/"uma" ficam de fora pra não perder o
+        # artigo em descrições comuns.
+        desc_clean = re.sub(
+            rf"\b(?:{PT_NUM_ALT_NO_ARTICLE})\b", "", desc_clean, flags=re.IGNORECASE,
+        )
         desc_clean = re.sub(r"\bem\b", "", desc_clean, flags=re.IGNORECASE)
         # remove trecho do cartão (incluindo palavras de parada como "padrao")
         desc_clean = re.sub(r"(?:no\s+)?cart[aã]o\s+\S+(?:\s+\S+)*", "", desc_clean, flags=re.IGNORECASE)

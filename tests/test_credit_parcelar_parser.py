@@ -149,3 +149,64 @@ def test_parcelar_total_em_12x_continua_dividindo(user_id):
     _, total, vparc, _ = _group_summary(user_id, gid)
     assert total == 958.80, f"total deveria ser o informado 958,80, veio {total}"
     assert vparc == 79.90, f"958,80÷12 = 79,90, veio {vparc}"
+
+
+# ── valor por extenso ("mil reais") não pode virar o número de parcelas ───────
+
+def test_parcelei_mil_reais_em_10_vezes(user_id):
+    """Bug do Lucas: 'parcelei mil reais em 10 vezes' criava 10x de R$1,00.
+
+    O 'mil' (sem dígito) não era reconhecido, então o parser pegava o '10' de
+    '10 vezes' como o valor. Deve ser total 1000, 10 parcelas de 100.
+    """
+    _seed_card(user_id)
+    msg = handle(user_id, "parcelei mil reais em 10 vezes sofa")
+    assert msg is not None
+    gid, n = _last_group_id_count(user_id)
+    assert n == 10, f"esperava 10 parcelas, criou {n}"
+    _, total, vparc, nota = _group_summary(user_id, gid)
+    assert total == 1000.00, f"esperava total 1000, veio {total}"
+    assert vparc == 100.00, f"esperava parcela 100, veio {vparc}"
+    # 'mil'/'reais'/'vezes' não podem vazar na descrição
+    assert nota == "sofa", f"descrição suja: {nota!r}"
+
+
+# ── "N parcelas de Y" = valor por parcela (Y × N), dígito e por extenso ────────
+
+def test_parcelei_12_parcelas_de_100(user_id):
+    """'12 parcelas de 100' → 12 parcelas, total 1200 (valor por parcela × N)."""
+    _seed_card(user_id)
+    msg = handle(user_id, "parcelei 12 parcelas de 100 celular")
+    assert msg is not None
+    gid, n = _last_group_id_count(user_id)
+    assert n == 12, f"esperava 12 parcelas, criou {n}"
+    _, total, vparc, nota = _group_summary(user_id, gid)
+    assert total == 1200.00, f"esperava total 1200, veio {total}"
+    assert vparc == 100.00, f"esperava parcela 100, veio {vparc}"
+    assert nota == "celular", f"descrição suja: {nota!r}"
+
+
+def test_parcelei_doze_parcelas_de_cem_por_extenso(user_id):
+    """Contagem E valor por extenso: 'doze parcelas de cem' → total 1200."""
+    _seed_card(user_id)
+    msg = handle(user_id, "parcelei doze parcelas de cem sofa")
+    assert msg is not None
+    gid, n = _last_group_id_count(user_id)
+    assert n == 12, f"esperava 12 parcelas, criou {n}"
+    _, total, vparc, nota = _group_summary(user_id, gid)
+    assert total == 1200.00, f"esperava total 1200, veio {total}"
+    assert vparc == 100.00, f"esperava parcela 100, veio {vparc}"
+    assert nota == "sofa", f"descrição suja: {nota!r}"
+
+
+def test_parcelei_12_parcelas_de_mil(user_id):
+    """Valor da parcela por extenso 'mil': '12 parcelas de mil' → total 12000."""
+    _seed_card(user_id)
+    msg = handle(user_id, "parcelei 12 parcelas de mil geladeira")
+    assert msg is not None
+    gid, n = _last_group_id_count(user_id)
+    assert n == 12
+    _, total, vparc, nota = _group_summary(user_id, gid)
+    assert total == 12000.00, f"esperava total 12000, veio {total}"
+    assert vparc == 1000.00, f"esperava parcela 1000, veio {vparc}"
+    assert nota == "geladeira", f"descrição suja: {nota!r}"

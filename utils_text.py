@@ -711,15 +711,105 @@ DEPOSIT_VERBS = [
 def normalize_spaces(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
+# Números por extenso até 999 (o que costuma preceder "mil"/"milhão"): cobre
+# "dez mil", "cem mil", "dois mil", "cento e cinquenta mil". Cada palavra é um
+# token aditivo distinto em português abaixo de 1000, então basta somar
+# ("cento" 100 + "cinquenta" 50 = 150). Inclui variantes sem acento porque o
+# usuário digita/fala dos dois jeitos.
+_PT_NUM_WORDS: dict[str, int] = {
+    "um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "três": 3, "quatro": 4,
+    "cinco": 5, "seis": 6, "sete": 7, "oito": 8, "nove": 9, "dez": 10,
+    "onze": 11, "doze": 12, "treze": 13, "quatorze": 14, "catorze": 14,
+    "quinze": 15, "dezesseis": 16, "dezasseis": 16, "dezessete": 17,
+    "dezassete": 17, "dezoito": 18, "dezenove": 19, "dezanove": 19,
+    "vinte": 20, "trinta": 30, "quarenta": 40, "cinquenta": 50, "cincoenta": 50,
+    "sessenta": 60, "setenta": 70, "oitenta": 80, "noventa": 90,
+    "cem": 100, "cento": 100, "duzentos": 200, "duzentas": 200,
+    "trezentos": 300, "trezentas": 300, "quatrocentos": 400, "quatrocentas": 400,
+    "quinhentos": 500, "quinhentas": 500, "seiscentos": 600, "seiscentas": 600,
+    "setecentos": 700, "setecentas": 700, "oitocentos": 800, "oitocentas": 800,
+    "novecentos": 900, "novecentas": 900,
+}
+# Alternância ordenada por tamanho (desc) pra o regex casar "dezessete" antes de
+# "dez", "cento" antes de "cem" etc.
+_PT_NUM_ALT = "|".join(sorted(map(re.escape, _PT_NUM_WORDS), key=len, reverse=True))
+# Uma frase = palavra-número, opcionalmente encadeada com "e" ("vinte e cinco").
+_PT_PHRASE = rf"(?:{_PT_NUM_ALT})(?:\s+e\s+(?:{_PT_NUM_ALT})|\s+(?:{_PT_NUM_ALT}))*"
+_PT_SPELLED_MULT_RE = re.compile(
+    rf"\b({_PT_PHRASE})\s+(mil|milh[oõ]es|milhao|milhão)\b"
+    rf"(?:\s*e\s+({_PT_PHRASE}|\d+(?:[.,]\d+)?))?",
+    re.IGNORECASE,
+)
+
+# Aliases públicos + padrões reutilizáveis pra outros módulos (ex.: o parser de
+# parcelamento) montarem regex de contagem/valor aceitando número por extenso.
+PT_NUM_ALT = _PT_NUM_ALT
+PT_PHRASE = _PT_PHRASE
+# Igual, mas sem "um"/"uma": seguro pra apagar de uma descrição sem risco de
+# remover o artigo ("cama de casal um lugar" não perde o "um").
+PT_NUM_ALT_NO_ARTICLE = "|".join(
+    sorted((re.escape(w) for w in _PT_NUM_WORDS if w not in ("um", "uma")),
+           key=len, reverse=True)
+)
+_PT_MULT = r"mil|milh[oõ]es|milhao|milhão"
+# Um "valor" = dígitos OU número por extenso, com "mil/milhão" opcional e
+# encadeamento por "e" ("cento e vinte", "dez mil", "cem mil e quinhentos").
+PT_VALUE = (
+    rf"(?:r\$\s*)?(?:\d[\d.,]*|{_PT_NUM_ALT}|{_PT_MULT})"
+    rf"(?:\s+(?:e\s+)?(?:\d[\d.,]*|{_PT_NUM_ALT}|{_PT_MULT}))*"
+)
+
+
+def _pt_words_to_int(phrase: str) -> int | None:
+    """Soma as palavras-número de uma frase ('cento e cinquenta' → 150).
+
+    Retorna None se algum token não for número por extenso conhecido.
+    """
+    total = 0
+    found = False
+    for w in re.findall(r"[a-zãõáéíóúâêôç]+", (phrase or "").lower()):
+        if w == "e":
+            continue
+        if w in _PT_NUM_WORDS:
+            total += _PT_NUM_WORDS[w]
+            found = True
+        else:
+            return None
+    return total if found else None
+
+
 def parse_money(text: str) -> float | None:
-    # multiplicador "mil"/"milhão" com dígito: "10 mil" → 10000, "1 mil e 500" →
-    # 1500. Precisa vir antes do número contínuo, senão pegaria só o "10".
+    # multiplicador por extenso composto: "dez mil" → 10000, "cento e cinquenta
+    # mil" → 150000, "dois milhões" → 2000000. Vem ANTES da regra de dígito
+    # (que agora aceita "mil" sozinho); senão "dez mil" casaria só o "mil" e
+    # daria 1000. Suporta resto opcional: "dez mil e quinhentos"/"dez mil e 500".
+    sm = _PT_SPELLED_MULT_RE.search(text or "")
+    if sm:
+        base = _pt_words_to_int(sm.group(1))
+        if base is not None:
+            mult = 1_000_000 if sm.group(2).lower().startswith("milh") else 1_000
+            total = float(base * mult)
+            resto = sm.group(3)
+            if resto:
+                if resto[0].isdigit():
+                    total += float(resto.replace(".", "").replace(",", "."))
+                else:
+                    r = _pt_words_to_int(resto)
+                    if r is not None:
+                        total += r
+            return total
+
+    # multiplicador "mil"/"milhão": "10 mil" → 10000, "1 mil e 500" → 1500.
+    # O dígito antes é OPCIONAL: "mil reais" (sem número) = 1000 e "um milhão" =
+    # 1000000 — senão cairia no número contínuo abaixo e pegaria um valor errado
+    # (ex.: "parcelei mil reais em 10 vezes" pegaria o "10" de "10 vezes").
+    # Precisa vir antes do número contínuo.
     mm = re.search(
-        r'\b(\d+(?:[.,]\d+)?)\s*(mil|milh[oõ]es|milhao|milhão)\b(?:\s*e\s*(\d+))?',
+        r'\b(\d+(?:[.,]\d+)?\s*)?(mil|milh[oõ]es|milhao|milhão)\b(?:\s*e\s*(\d+))?',
         text or "", re.IGNORECASE,
     )
     if mm:
-        base = float(mm.group(1).replace(".", "").replace(",", "."))
+        base = float(mm.group(1).strip().replace(".", "").replace(",", ".")) if mm.group(1) else 1.0
         mult = 1_000_000 if mm.group(2).lower().startswith("milh") else 1_000
         total = base * mult
         if mm.group(3):
@@ -756,7 +846,33 @@ def parse_money(text: str) -> float | None:
         return float(raw)
     except ValueError:
         return None
-    
+
+
+def parse_pt_number(text: str) -> float | None:
+    """Converte um número em valor, aceitando dígitos OU por extenso.
+
+    '100' → 100, '79,90' → 79.9, 'cem' → 100, 'cento e vinte' → 120,
+    'mil' → 1000, 'dez mil' → 10000, 'dois milhões' → 2000000.
+
+    Diferente de `parse_money`, entende número por extenso PURO (< 1000) como
+    'cem'/'doze' — por isso é restrito a contextos onde já se sabe que o trecho
+    é um valor (ex.: o "de <valor>" de um parcelamento), evitando confundir o
+    artigo "um" com o número 1 em texto livre.
+    """
+    if not text:
+        return None
+    t = str(text).strip().lower()
+    if not t:
+        return None
+    # dígitos ou multiplicador mil/milhão → parse_money já cobre
+    if re.search(r"\d", t) or re.search(r"mil|milh", t):
+        return parse_money(t)
+    # por extenso puro (< 1000): 'cem', 'cento e vinte', 'doze'
+    t = re.sub(r"\b(reais|real|r\$)\b", " ", t)
+    v = _pt_words_to_int(t)
+    return float(v) if v is not None else None
+
+
 # foca a IA para responder questoes so do bot e nao geral
 def should_use_ai(text: str) -> bool:
     t = text.lower().strip()
