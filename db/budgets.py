@@ -22,7 +22,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from .connection import get_conn
+from .connection import get_conn, cat_norm_sql
 from .users import ensure_user
 
 
@@ -230,16 +230,18 @@ def sum_spent_in_category_period(
     ensure_user(user_id)
     start_dt = datetime.combine(start_date, datetime.min.time())
     end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+    _cat = cat_norm_sql("categoria")
+    _arg = cat_norm_sql("%s")
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select
                   coalesce((
                     select sum(valor) from launches
                     where user_id=%s
                       and tipo in ('despesa', 'saida')
-                      and lower(categoria) = lower(%s)
+                      and {_cat} = {_arg}
                       and is_internal_movement = false
                       and criado_em >= %s
                       and criado_em <  %s
@@ -247,7 +249,7 @@ def sum_spent_in_category_period(
                   coalesce((
                     select sum(valor) from credit_transactions
                     where user_id=%s
-                      and lower(categoria) = lower(%s)
+                      and {_cat} = {_arg}
                       and is_refund = false
                       and purchased_at >= %s::date
                       and purchased_at <= %s::date

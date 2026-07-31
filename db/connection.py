@@ -44,3 +44,18 @@ def _get_pool() -> ConnectionPool:
 def get_conn():
     """Retorna um conn do pool. Compatível com `with get_conn() as conn:`."""
     return _get_pool().connection()
+
+
+# ── comparação de categoria case- E acento-insensível ────────────────────────
+# Dados legados guardam a mesma categoria com/sem acento ("alimentacao" vs
+# "alimentação"). Pra somar/filtrar por categoria sem perder linhas, comparamos
+# ambos os lados normalizados (lower + remove acento) via translate — portável,
+# não depende da extensão unaccent.
+_CAT_ACCENTS_FROM = "áàâãäéèêëíìîïóòôõöúùûüç"
+_CAT_ACCENTS_TO   = "aaaaaeeeeiiiiooooouuuuc"
+
+
+def cat_norm_sql(expr: str) -> str:
+    """Fragmento SQL que normaliza `expr` (coluna ou placeholder %s) pra
+    comparação de categoria case- e acento-insensível."""
+    return f"translate(lower({expr}), '{_CAT_ACCENTS_FROM}', '{_CAT_ACCENTS_TO}')"

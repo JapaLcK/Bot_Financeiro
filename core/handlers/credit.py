@@ -1824,7 +1824,10 @@ def handle(user_id: int, text: str) -> str | None:
 
         # ── descrição (o que sobrar) ─────────────────────────────────────────
         desc_clean = rest2
-        desc_clean = re.sub(r"\bparcelei?\b", "", desc_clean, flags=re.IGNORECASE)
+        # remove o verbo do comando em qualquer forma ("parcelar"/"parcelei"/
+        # "parcele"/"parcelamos") — senão "parcelar 958 em 12x tv" deixava
+        # "parcelar" na descrição.
+        desc_clean = re.sub(r"\bparcel(?:ar|ei|e|amos|ou)\b", "", desc_clean, flags=re.IGNORECASE)
         # remove o bloco "Nx de Y" inteiro (incl. o "de" e o valor da parcela)
         # ANTES da remoção genérica de números — senão o "de" sobra solto na
         # descrição ("parcelei 12x de 79,90 celular" → "de celular").

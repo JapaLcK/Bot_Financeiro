@@ -10,7 +10,7 @@ from psycopg.types.json import Json, Jsonb
 import db_support as _db_support
 from utils_date import _tz
 
-from .connection import get_conn
+from .connection import get_conn, cat_norm_sql
 from .users import ensure_user, ensure_user_tx
 
 
@@ -401,7 +401,9 @@ def get_largest_expenses(
     start_dt = datetime.combine(start_date, datetime.min.time())
     end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
 
-    cat_filter = "and lower(categoria) = lower(%s)" if categoria else ""
+    cat_filter = (
+        f"and {cat_norm_sql('categoria')} = {cat_norm_sql('%s')}" if categoria else ""
+    )
 
     launches_params = [user_id]
     if categoria:
