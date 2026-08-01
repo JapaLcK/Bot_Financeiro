@@ -625,7 +625,7 @@ function _renderCardItem(c, idx = 0) {
   const animDelay = 240 + idx * 80; // começa depois dos 4 stat-tiles (180+60)
 
   return `
-    <details class="mock-card cc-details" data-card-id="${c.id}" style="animation-delay:${animDelay}ms">
+    <details class="mock-card cc-details" data-card-id="${c.id}" data-open-bill-id="${c.open_bill?.id || ''}" style="animation-delay:${animDelay}ms">
       <summary>
         <div class="cc-card ${color}${isMinimal ? " minimal" : ""}">${ccInner}</div>
       </summary>
@@ -878,13 +878,22 @@ async function openCardBillDetail(cardId, fallbackBillId) {
       }
       return;
     }
-    let currentIdx = bills.findIndex(
-      b => b.status === "open" && (b.due_amount > 0 || b.total > 0),
-    );
+    // Abre PRIMEIRO a fatura que o card mostra (a clicada). Só se não vier,
+    // cai pra fatura aberta com valor mais RECENTE (lista vem period_end ASC,
+    // então varre de trás pra frente) — nunca a mais antiga em aberto, que era
+    // o bug (parcelamento deixa várias faturas futuras "open" ao mesmo tempo).
+    let currentIdx = fallbackBillId
+      ? bills.findIndex(b => b.id === fallbackBillId)
+      : -1;
     if (currentIdx < 0) {
-      currentIdx = fallbackBillId ? bills.findIndex(b => b.id === fallbackBillId) : 0;
-      if (currentIdx < 0) currentIdx = 0;
+      for (let i = bills.length - 1; i >= 0; i--) {
+        if (bills[i].status === "open" && (bills[i].due_amount > 0 || bills[i].total > 0)) {
+          currentIdx = i;
+          break;
+        }
+      }
     }
+    if (currentIdx < 0) currentIdx = bills.length - 1;
     _billNav = {
       cardId,
       billIds: bills.map(b => b.id),
@@ -7744,6 +7753,7 @@ function payFromDetail() {
 async function onCardRowClick(rowEl) {
   const cardId = Number(rowEl && rowEl.dataset && rowEl.dataset.cardId);
   if (!cardId) return;
+  const openBillId = Number(rowEl && rowEl.dataset && rowEl.dataset.openBillId) || null;
   // Busca TODAS as faturas desse cartão (abertas + pagas/fechadas) pra
   // popular as setas de navegação ◀ ▶. Ordenadas por period_end ASC, abre
   // primeiro a corrente (mais antiga em aberto). Backend já ordena.
@@ -7760,12 +7770,22 @@ async function onCardRowClick(rowEl) {
       return;
     }
 
-    // Encontra a fatura "atual" = primeira em aberto com valor > 0.
-    // Fallback: a primeira da lista (cronologicamente mais antiga).
-    let currentIdx = billsForCard.findIndex(
-      b => b.status === "open" && (b.due_amount > 0 || b.total > 0),
-    );
-    if (currentIdx < 0) currentIdx = 0;
+    // Abre a fatura que o card mostra (open_bill). Só se não vier, cai pra
+    // fatura aberta com valor mais RECENTE (lista é period_end ASC → varre de
+    // trás). Antes pegava a mais antiga em aberto, que com parcelamento (várias
+    // faturas futuras "open") abria uma fatura errada.
+    let currentIdx = openBillId
+      ? billsForCard.findIndex(b => b.id === openBillId)
+      : -1;
+    if (currentIdx < 0) {
+      for (let i = billsForCard.length - 1; i >= 0; i--) {
+        if (billsForCard[i].status === "open" && (billsForCard[i].due_amount > 0 || billsForCard[i].total > 0)) {
+          currentIdx = i;
+          break;
+        }
+      }
+    }
+    if (currentIdx < 0) currentIdx = billsForCard.length - 1;
 
     _billNav = {
       cardId,
@@ -8520,7 +8540,7 @@ function render(d) {
     const pctPaid = showProgress ? Math.min(100, Math.round((paid/total)*100)) : 0;
     const dueLbl = c.due_day ? `Vence dia ${c.due_day}` : (c.closing_day ? `Fecha dia ${c.closing_day}` : '');
     const barCls = (i%2===1) ? "neon" : "";
-    const clickAttr = c.id ? ` role="button" tabindex="0" data-card-id="${c.id}" onclick="onCardRowClick(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onCardRowClick(this);}"` : '';
+    const clickAttr = c.id ? ` role="button" tabindex="0" data-card-id="${c.id}" data-open-bill-id="${c.bill_id || ''}" onclick="onCardRowClick(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onCardRowClick(this);}"` : '';
     return `<div class="ov-pk ov-cc"${clickAttr}>
       <div class="ov-pk-top"><span class="ov-pk-ico">💳</span><span class="ov-cc-name">${esc(c.name)}</span><span class="ov-cc-status ${statusCls}">${statusTxt}</span></div>
       <div class="ov-cc-sub">${hasData ? (periodLabel ? `Fatura ${periodLabel}` : 'Fatura atual') : 'Sem fatura aberta'}</div>

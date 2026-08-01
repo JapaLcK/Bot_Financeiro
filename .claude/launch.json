@@ -6,6 +6,12 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8899", "--directory", "frontend"],
       "port": 8899
+    },
+    {
+      "name": "dashboard",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["dashboard_dev.py"],
+      "port": 8000
     }
   ]
 }

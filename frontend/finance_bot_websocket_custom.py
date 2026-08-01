@@ -438,11 +438,13 @@ async def get_financial_data(
             """
             SELECT
                 c.id, c.name, c.closing_day, c.due_day, c.color,
+                b.bill_id,
                 b.status, b.total, b.paid_amount, b.due_amount,
                 b.period_start, b.period_end
             FROM credit_cards c
             LEFT JOIN LATERAL (
                 SELECT
+                    id                                                AS bill_id,
                     status,
                     total,
                     COALESCE(paid_amount, 0)                          AS paid_amount,
@@ -495,6 +497,7 @@ async def get_financial_data(
         cards.append({
             "id": r["id"],
             "name": r["name"],
+            "bill_id": r["bill_id"],  # fatura exibida no tile — modal abre nela
             "closing_day": r["closing_day"],
             "due_day": r["due_day"],
             "color": r["color"] or "purple",
