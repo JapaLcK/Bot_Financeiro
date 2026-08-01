@@ -239,10 +239,15 @@ def parse_period_from_text(text: str) -> tuple[date, date, str] | None:
         return monday, today, "esta semana"
 
     # --- ano ---
+    _has_explicit_year = re.search(r"(?<![\d/\-])20\d{2}(?![\d/\-])", t)
     if re.search(r"\b(ano passado|ultimo ano|ano anterior)\b", t):
         y = today.year - 1
         return date(y, 1, 1), date(y, 12, 31), "no ano passado"
-    if re.search(r"\b(este|esse|neste|nesse)\s+ano\b", t) or re.search(r"\bno ano\b", t):
+    # "este ano"/"no ano" = ano corrente — mas só se NÃO houver um ano explícito
+    # ("no ano de 2023" deve virar 2023, tratado no bloco de ano específico).
+    if not _has_explicit_year and (
+        re.search(r"\b(este|esse|neste|nesse)\s+ano\b", t) or re.search(r"\bno ano\b", t)
+    ):
         return date(today.year, 1, 1), today, "neste ano"
 
     # --- mês passado (antes de casar nome de mês / "mês" genérico) ---
@@ -268,6 +273,19 @@ def parse_period_from_text(text: str) -> tuple[date, date, str] | None:
     # --- mês corrente ("este mês", "do mês", "mês") ---
     if re.search(r"\bmes\b", t):
         return today.replace(day=1), today, "neste mês"
+
+    # --- ano específico ("em 2026", "de 2025") ---
+    # Lookarounds excluem anos que fazem parte de uma data dd/mm/aaaa (tratada
+    # logo abaixo) ou de um número maior. Consultas de gasto não citam valores,
+    # então um 20xx solto é sempre um ano.
+    m = re.search(r"(?<![\d/\-])(20\d{2})(?![\d/\-])", t)
+    if m:
+        year = int(m.group(1))
+        start = date(year, 1, 1)
+        end = date(year, 12, 31)
+        if year == today.year and end > today:
+            end = today
+        return start, end, f"em {year}"
 
     # --- data única dd/mm(/aaaa) ---
     dt, _ = extract_date_from_text(text)
