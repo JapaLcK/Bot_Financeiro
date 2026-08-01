@@ -706,6 +706,11 @@ DEPOSIT_VERBS = [
     # variações de "adicionar/somar" (áudio/imperativo) — mesma família aceita
     # no saldo; aqui habilita "adicione 300 na caixinha viagem".
     "adicione", "adiciona", "adicionou", "somar", "soma", "some", "somei",
+    # imperativo/infinitivo anunciado no catálogo ("deposita 200 na caixinha X")
+    # e "guardar/poupar/juntar" — verbo canônico pra guardar numa caixinha.
+    "deposita", "deposite", "guardar", "guarda", "guarde", "guardei",
+    "poupar", "poupa", "poupe", "poupei", "juntar", "junta", "junte", "juntei",
+    "coloca", "coloque", "bota", "bote",
 ]
 
 def normalize_spaces(s: str) -> str:

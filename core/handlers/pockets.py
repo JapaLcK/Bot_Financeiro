@@ -91,7 +91,11 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
         return f"Erro ao depositar: {e}"
 
 
-_WITHDRAW_VERBS = ["retirei", "retirar", "sacar", "saquei", "resgatei", "resgatar", "tirei", "tirar"]
+_WITHDRAW_VERBS = [
+    "retirei", "retirar", "sacar", "saquei", "resgatei", "resgatar", "tirei", "tirar",
+    # imperativo/presente anunciado no catálogo ("saca 50 da caixinha viagem")
+    "saca", "saque", "tira", "tire", "retira", "retire", "resgata", "resgate",
+]
 
 # "sacar tudo" / "esvaziar" / "zerar a caixinha" → saca o saldo cheio e zera
 _WITHDRAW_ALL_RX = re.compile(r"\b(tudo|esvaziar|esvazia|zerar|zera)\b", re.I)

@@ -352,15 +352,26 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
     # caixinhas
     (r"^(ver|mostrar|listar)\s+(minhas\s+)?caixinhas?$",
      "pockets.list"),
-    (r"^criar\s+caixinha\s+(.+)$",
+    # criar: infinitivo/imperativo/presente ("criar/cria/crie/nova/abrir caixinha X")
+    (r"^(criar|cria|crie|nova|novo|abrir|abre|abra)\s+caixinha\s+(.+)$",
      "pockets.create"),
-    (r"^excluir\s+caixinha\s+(.+)$",
-     "pockets.delete"),
-    (r"^deletar\s+caixinha\s+(.+)$",
+    # excluir: infinitivo/imperativo ("excluir/deletar/apagar/remover caixinha X")
+    (r"^(excluir|exclua|deletar|delete|apagar|apaga|apague|remover|remove|remova)\s+caixinha\s+(.+)$",
      "pockets.delete"),
     (r"^(coloquei|adicionei|depositei|transferi|pus|botei)\s+\d",
      "pockets.deposit"),
+    # depósito no imperativo/infinitivo COM destino explícito "caixinha"
+    # ("deposita/depositar/guarda/guardar/poupa/junta ... caixinha X"). Os verbos
+    # no passado ("depositei", "coloquei") já são pegos pela regra acima; aqui
+    # cobrem-se as formas anunciadas no catálogo ("deposita 200 na caixinha X").
+    (r"^(deposita|deposite|depositar|guarda|guarde|guardar|guardei|poupa|poupe|poupar|poupei|junta|junte|juntar|juntei|coloca|coloque|colocar|bota|bote|botar)\b.*\bcaixinha\b",
+     "pockets.deposit"),
     (r"^(retirei|saquei|tirei)\s+\d.*\bcaixinha\b",
+     "pockets.withdraw"),
+    # saque no imperativo/infinitivo COM destino explícito "caixinha"
+    # ("saca/sacar/tira/tirar/retira/retirar ... caixinha X"). Anunciado no
+    # catálogo como "saca 50 da caixinha viagem".
+    (r"^(saca|saque|sacar|tira|tire|tirar|retira|retire|retirar|resgata|resgate|resgatar)\b.*\bcaixinha\b",
      "pockets.withdraw"),
     # sacar tudo / esvaziar / zerar a caixinha (sem valor) → saque total que zera o saldo
     (r"\b(saca|sacar|saque|saquei|retira|retirar|retirei|tira|tirar|tirei|resgata|resgatar)\b.*\btudo\b.*\bcaixinha\b",
@@ -386,6 +397,14 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "funds.withdraw"),
     (r"\b(esvaziar|esvazia|esvaziei|zerar|zera|zerei)\b.*\binvestimento",
      "funds.withdraw"),
+
+    # CDI — formas interrogativas naturais ("quanto está o cdi", "como anda o
+    # cdi"). Só casa pergunta explícita sobre a taxa; não colide com criação de
+    # investimento ("cria/aporta ... % do cdi"), que começa com outro verbo.
+    (r"^(quanto|como|qual)\b.*\b(esta|está|ta|anda|ficou|foi|e|é)\b.*\bcdi\b",
+     "cdi.check"),
+    (r"^(quanto|como)\s+(esta|está|ta|anda)\s+o\s+cdi\b",
+     "cdi.check"),
 
     # categorias
     (r"^(regras|regras de categoria|regras de categorias|listar regras|ver regras)$",
@@ -653,12 +672,12 @@ def _try_alias(norm: str, original: str) -> IntentResult | None:
                     entities["launch_ids"] = ids
 
             elif intent == "pockets.create":
-                m = re.search(r"^criar\s+caixinha\s+(.+)$", norm)
+                m = re.search(r"^(?:criar|cria|crie|nova|novo|abrir|abre|abra)\s+caixinha\s+(.+)$", norm)
                 if m:
                     entities["name"] = m.group(1).strip()
 
             elif intent == "pockets.delete":
-                m = re.search(r"^(?:excluir|deletar)\s+caixinha\s+(.+)$", norm)
+                m = re.search(r"^(?:excluir|exclua|deletar|delete|apagar|apaga|apague|remover|remove|remova)\s+caixinha\s+(.+)$", norm)
                 if m:
                     entities["pocket_name"] = m.group(1).strip()
 
