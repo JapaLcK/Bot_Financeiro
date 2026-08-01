@@ -222,15 +222,20 @@ def sum_spent_in_category_period(
 ) -> float:
     """Soma o gasto de uma categoria num período arbitrário [start, end] inclusivo.
 
-    Generaliza `sum_spent_in_category_this_month` pra qualquer intervalo de
-    datas: mesma lógica (launches de conta corrente + compras no cartão), mas
-    filtrando por `criado_em`/`purchased_at` em vez do mês corrente fixo.
-    Comparação de categoria case-insensitive.
+    Usado pela resposta "quanto gastei na categoria X" do bot — espelha a
+    atribuição do DASHBOARD pra os números baterem:
+      - launches: tipo='despesa', is_internal_movement=false, por criado_em
+      - cartão: is_refund=false, atribuído ao período pelo MÊS DA FATURA
+        (credit_bills.period_end). Assim um gasto parcelado conta uma parcela
+        por mês, e não os R$ totais na data da compra.
+    Comparação de categoria case- e acento-insensível.
     """
     ensure_user(user_id)
     start_dt = datetime.combine(start_date, datetime.min.time())
     end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+    end_date_excl = end_date + timedelta(days=1)  # janela meio-aberta em period_end
     _cat = cat_norm_sql("categoria")
+    _cat_ct = cat_norm_sql("ct.categoria")
     _arg = cat_norm_sql("%s")
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -240,24 +245,26 @@ def sum_spent_in_category_period(
                   coalesce((
                     select sum(valor) from launches
                     where user_id=%s
-                      and tipo in ('despesa', 'saida')
+                      and tipo = 'despesa'
                       and {_cat} = {_arg}
                       and is_internal_movement = false
                       and criado_em >= %s
                       and criado_em <  %s
                   ), 0) +
                   coalesce((
-                    select sum(valor) from credit_transactions
-                    where user_id=%s
-                      and {_cat} = {_arg}
-                      and is_refund = false
-                      and purchased_at >= %s::date
-                      and purchased_at <= %s::date
+                    select sum(ct.valor)
+                    from credit_transactions ct
+                    join credit_bills b on b.id = ct.bill_id
+                    where ct.user_id=%s
+                      and {_cat_ct} = {_arg}
+                      and ct.is_refund = false
+                      and b.period_end >= %s
+                      and b.period_end <  %s
                   ), 0) as total
                 """,
                 (
                     user_id, categoria, start_dt, end_excl,
-                    user_id, categoria, start_date, end_date,
+                    user_id, categoria, start_date, end_date_excl,
                 ),
             )
             row = cur.fetchone()

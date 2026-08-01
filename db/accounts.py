@@ -378,6 +378,7 @@ def get_largest_expenses(
     end_date: date,
     limit: int = 5,
     categoria: str | None = None,
+    by_bill_month: bool = False,
 ):
     """Top N maiores gastos INDIVIDUAIS no período (não agregados por categoria).
 
@@ -385,12 +386,19 @@ def get_largest_expenses(
     retorna os lançamentos/compras de maior valor, um por um.
 
     Fontes:
-      - launches.tipo='despesa' AND is_internal_movement=false
+      - launches.tipo='despesa' AND is_internal_movement=false (por criado_em)
       - credit_transactions onde is_refund=false
 
+    `by_bill_month`:
+      - False (padrão): compra de cartão entra pelo período da DATA DA COMPRA
+        (purchased_at). Usado pelas tools de análise da IA.
+      - True: compra entra pelo MÊS DA FATURA (credit_bills.period_end) — mesma
+        regra do dashboard. Um gasto parcelado conta uma parcela por mês. Usado
+        pela resposta "quanto gastei" do bot, pra bater com o dashboard.
+
     Se `categoria` for informada, filtra pelos gastos daquela categoria
-    (match case-insensitive, mesmo critério de `sum_spent_in_category_period`
-    — assim a lista é sempre um subconjunto do total).
+    (match case- e acento-insensível, mesmo critério de
+    `sum_spent_in_category_period` — a lista é sempre subconjunto do total).
 
     Retorna lista [{valor, categoria, descricao, data, fonte}].
     `fonte` = 'launches' | 'credito' (frontend pode renderizar tag).
@@ -400,10 +408,23 @@ def get_largest_expenses(
 
     start_dt = datetime.combine(start_date, datetime.min.time())
     end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+    end_date_excl = end_date + timedelta(days=1)  # janela meio-aberta em period_end
 
     cat_filter = (
         f"and {cat_norm_sql('categoria')} = {cat_norm_sql('%s')}" if categoria else ""
     )
+    cat_filter_ct = (
+        f"and {cat_norm_sql('ct.categoria')} = {cat_norm_sql('%s')}" if categoria else ""
+    )
+
+    if by_bill_month:
+        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id"
+        credit_date = "and b.period_end >= %s and b.period_end < %s"
+        credit_date_params = [start_date, end_date_excl]
+    else:
+        credit_from = "from credit_transactions ct"
+        credit_date = "and ct.purchased_at >= %s::date and ct.purchased_at <= %s::date"
+        credit_date_params = [start_date, end_date]
 
     launches_params = [user_id]
     if categoria:
@@ -413,7 +434,7 @@ def get_largest_expenses(
     credit_params = [user_id]
     if categoria:
         credit_params.append(categoria)
-    credit_params += [start_date, end_date]
+    credit_params += credit_date_params
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -433,17 +454,16 @@ def get_largest_expenses(
                       {cat_filter}
                       and criado_em >= %s and criado_em < %s
                     union all
-                    select valor,
-                           coalesce(nullif(categoria, ''), 'outros') as categoria,
-                           coalesce(nullif(nota, ''), 'compra no crédito') as descricao,
-                           purchased_at as dt,
+                    select ct.valor,
+                           coalesce(nullif(ct.categoria, ''), 'outros') as categoria,
+                           coalesce(nullif(ct.nota, ''), 'compra no crédito') as descricao,
+                           ct.purchased_at as dt,
                            'credito' as fonte
-                    from credit_transactions
-                    where user_id = %s
-                      and is_refund = false
-                      {cat_filter}
-                      and purchased_at >= %s::date
-                      and purchased_at <= %s::date
+                    {credit_from}
+                    where ct.user_id = %s
+                      and ct.is_refund = false
+                      {cat_filter_ct}
+                      {credit_date}
                 ) agg
                 order by valor desc
                 limit %s
@@ -473,12 +493,21 @@ def get_top_expense_categories(
     start_date: date,
     end_date: date,
     limit: int = 5,
+    by_bill_month: bool = False,
 ):
     """Top N categorias de gasto no período.
 
     Agrega:
-      - despesas reais em launches (tipo='despesa', is_internal_movement=false)
+      - despesas reais em launches (tipo='despesa', is_internal_movement=false),
+        pela data do lançamento (criado_em)
       - compras no cartão (credit_transactions, is_refund=false)
+
+    `by_bill_month`:
+      - False (padrão): compra de cartão entra pela DATA DA COMPRA (purchased_at).
+        Usado pelas tools de análise da IA.
+      - True: compra entra pelo MÊS DA FATURA (credit_bills.period_end) — igual
+        ao dashboard. Um gasto parcelado conta uma parcela por mês. Usado pela
+        resposta "quanto gastei" do bot.
 
     NÃO inclui movimentações internas (aporte, resgate, transfer caixinha)
     nem reembolsos de cartão.
@@ -489,11 +518,21 @@ def get_top_expense_categories(
 
     start_dt = datetime.combine(start_date, datetime.min.time())
     end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+    end_date_excl = end_date + timedelta(days=1)  # janela meio-aberta em period_end
+
+    if by_bill_month:
+        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id"
+        credit_date = "and b.period_end >= %s and b.period_end < %s"
+        credit_date_params = (start_date, end_date_excl)
+    else:
+        credit_from = "from credit_transactions ct"
+        credit_date = "and ct.purchased_at >= %s::date and ct.purchased_at <= %s::date"
+        credit_date_params = (start_date, end_date)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select coalesce(nullif(categoria, ''), 'outros') as categoria,
                        sum(valor) as total
                 from (
@@ -504,12 +543,11 @@ def get_top_expense_categories(
                       and is_internal_movement = false
                       and criado_em >= %s and criado_em < %s
                     union all
-                    select categoria, valor
-                    from credit_transactions
-                    where user_id = %s
-                      and is_refund = false
-                      and purchased_at >= %s::date
-                      and purchased_at <= %s::date
+                    select ct.categoria, ct.valor
+                    {credit_from}
+                    where ct.user_id = %s
+                      and ct.is_refund = false
+                      {credit_date}
                 ) agg
                 group by coalesce(nullif(categoria, ''), 'outros')
                 order by total desc
@@ -517,7 +555,7 @@ def get_top_expense_categories(
                 """,
                 (
                     user_id, start_dt, end_excl,
-                    user_id, start_date, end_date,
+                    user_id, *credit_date_params,
                     int(limit),
                 ),
             )

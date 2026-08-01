@@ -248,7 +248,10 @@ def parse_period_from_text(text: str) -> tuple[date, date, str] | None:
     if not _has_explicit_year and (
         re.search(r"\b(este|esse|neste|nesse)\s+ano\b", t) or re.search(r"\bno ano\b", t)
     ):
-        return date(today.year, 1, 1), today, "neste ano"
+        # ano-calendário cheio (não corta em hoje) pra bater com o dashboard,
+        # que atribui gasto de cartão pelo mês da fatura — parcelas futuras do
+        # ano corrente contam.
+        return date(today.year, 1, 1), date(today.year, 12, 31), "neste ano"
 
     # --- mês passado (antes de casar nome de mês / "mês" genérico) ---
     if re.search(r"\b(mes passado|ultimo mes|mes anterior)\b", t):
@@ -264,15 +267,18 @@ def parse_period_from_text(text: str) -> tuple[date, date, str] | None:
             if num > today.month:
                 year -= 1
             last_day = calendar.monthrange(year, num)[1]
+            # mês-calendário cheio (mesmo o corrente): o dashboard conta cartão
+            # pelo mês da fatura, então parcelas que fecham depois de hoje mas
+            # dentro do mês entram.
             start = date(year, num, 1)
             end = date(year, num, last_day)
-            if end > today:
-                end = today
             return start, end, f"em {_MONTH_NAMES_PT[num - 1]}"
 
     # --- mês corrente ("este mês", "do mês", "mês") ---
     if re.search(r"\bmes\b", t):
-        return today.replace(day=1), today, "neste mês"
+        start = today.replace(day=1)
+        last_day = calendar.monthrange(today.year, today.month)[1]
+        return start, date(today.year, today.month, last_day), "neste mês"
 
     # --- ano específico ("em 2026", "de 2025") ---
     # Lookarounds excluem anos que fazem parte de uma data dd/mm/aaaa (tratada
@@ -281,11 +287,8 @@ def parse_period_from_text(text: str) -> tuple[date, date, str] | None:
     m = re.search(r"(?<![\d/\-])(20\d{2})(?![\d/\-])", t)
     if m:
         year = int(m.group(1))
-        start = date(year, 1, 1)
-        end = date(year, 12, 31)
-        if year == today.year and end > today:
-            end = today
-        return start, end, f"em {year}"
+        # ano-calendário cheio (ver comentário em "este ano").
+        return date(year, 1, 1), date(year, 12, 31), f"em {year}"
 
     # --- data única dd/mm(/aaaa) ---
     dt, _ = extract_date_from_text(text)
