@@ -462,11 +462,16 @@ async def get_financial_data(
                     period_end
                 FROM credit_bills
                 WHERE card_id = c.id
-                  AND period_start >= %s
-                  AND period_start < %s
-                ORDER BY period_start DESC
+                  AND period_end >= %s
+                  AND period_end < %s
+                ORDER BY period_end DESC
                 LIMIT 1
             ) b ON TRUE
+            -- Fatura do tile = a que FECHA/VENCE no mês visualizado (period_end),
+            -- igual ao "Gastos do mês". Antes pegava a que COMEÇA no mês
+            -- (period_start): na visão de Agosto o card dizia "Fatura Setembro
+            -- R$ 101" enquanto o cabeçalho somava R$ 145,90 da fatura de agosto
+            -- — e escondia justamente a fatura vencendo dia 8.
             WHERE c.user_id = %s
             ORDER BY c.display_order NULLS LAST, c.name
             """,
