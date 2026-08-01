@@ -5706,6 +5706,16 @@ function frequencyLabel(value) {
   }[value] || "Só no vencimento";
 }
 
+// Tag "fatura <Mês>" pra compras no cartão: a linha entra na lista pelo mês
+// da FATURA (igual ao cabeçalho), mas exibe a data da compra — a tag explica
+// por que uma compra de 09/07 aparece em agosto.
+function _billMonthTag(l) {
+  if (l.tipo !== "credito" || !l.bill_period_end) return "";
+  const d = new Date(`${l.bill_period_end}T12:00:00`);
+  if (isNaN(d)) return "";
+  return `<span class="tag x" title="Entra na fatura que fecha em ${d.toLocaleDateString("pt-BR")}">💳 fatura ${PT_MONTHS[d.getMonth()].substring(0, 3)}</span>`;
+}
+
 function describeLaunch(l) {
   const target = l.alvo || "investimento";
   if (l.nota && l.nota.startsWith("dashboard:create")) return `Criou investimento ${target}`;
@@ -6365,8 +6375,28 @@ function connect() {
 /* ═══════════════════════════════════════════════════════════════════════
    ALERTS
 ═══════════════════════════════════════════════════════════════════════ */
+// "hoje" / "ontem" / "em 09/07" a partir do timestamp real da cobrança.
+// Antes o texto hardcodava "hoje" — uma cobrança de 09/07 não-reconhecida
+// continuava anunciada como "hoje" semanas depois (lançamento fantasma).
+function _alertWhenLabel(iso) {
+  if (!iso) return "hoje";
+  const d = new Date(iso);
+  if (isNaN(d)) return "hoje";
+  const now = new Date();
+  const day = x => `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`;
+  const yest = new Date(now); yest.setDate(now.getDate() - 1);
+  if (day(d) === day(now)) return "hoje";
+  if (day(d) === day(yest)) return "ontem";
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `em ${dd}/${mm}`;
+}
+
+let _lastAlerts = [];
+
 function renderAlerts(alerts) {
   const b = document.getElementById("alert-banner");
+  _lastAlerts = alerts || [];
   if (!alerts || !alerts.length || alertsDismissed) {
     b.style.display = "none";
     b.innerHTML = "";
@@ -6377,9 +6407,9 @@ function renderAlerts(alerts) {
   alerts.forEach(a => {
     if (a.type === "recurring_charged") {
       const where = a.payment_type === "credit_card" ? "no cartão" : "da conta";
-      html += `<div class="alert-row">🐷 Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> R$ ${fmt(a.amount)} ${where} hoje. <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'">✕</button></div>`;
+      html += `<div class="alert-row">🐷 Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} ${where} ${_alertWhenLabel(a.charged_at)}. <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'">✕</button></div>`;
     } else if (a.type === "recurring_credited") {
-      html += `<div class="alert-row">🐷 Piggy recebeu <b>${escapeHtmlSafe(a.name)}</b> R$ ${fmt(a.amount)} na conta hoje. <button onclick="ackRecurringIncomeCredit(${a.credit_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'">✕</button></div>`;
+      html += `<div class="alert-row">🐷 Piggy recebeu <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} na conta ${_alertWhenLabel(a.credited_at)}. <button onclick="ackRecurringIncomeCredit(${a.credit_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'">✕</button></div>`;
     } else {
       const icon = a.type === "budget_exceeded" ? "🔴" : "⚠️";
       html += `<div class="alert-row">${icon} <b>${a.categoria}</b>: ${fmt(a.spent)} de ${fmt(a.budget)} (${a.pct}%)</div>`;
@@ -6396,33 +6426,52 @@ function renderAlerts(alerts) {
 }
 
 function dismissAlerts() {
+  // Esconde já (responsivo) e PERSISTE o reconhecimento das cobranças
+  // exibidas. Antes só setava a flag client-side — no reload o banner
+  // ressuscitava, re-anunciando cobranças antigas.
   alertsDismissed = true;
   const b = document.getElementById("alert-banner");
   b.style.display = "none";
+  _lastAlerts.forEach(a => {
+    if (a.type === "recurring_charged" && a.charge_id) ackRecurringCharge(a.charge_id, { silent: true });
+    else if (a.type === "recurring_credited" && a.credit_id) ackRecurringIncomeCredit(a.credit_id, { silent: true });
+  });
 }
 
-async function ackRecurringCharge(chargeId) {
+async function ackRecurringCharge(chargeId, opts) {
   if (!chargeId || !USER_ID) return;
   try {
-    await fetch(`${API}/recurring-expenses/${USER_ID}/charges/${chargeId}/ack`, {
+    const res = await fetch(`${API}/recurring-expenses/${USER_ID}/charges/${chargeId}/ack`, {
       method: "POST",
       credentials: "same-origin",
       headers: csrfHeaders(),
     });
-    sendRefresh();
-  } catch (_) {}
+    if (!res.ok) {
+      console.warn(`[alerts] ack charge ${chargeId} falhou: HTTP ${res.status}`);
+      return;
+    }
+    if (!(opts && opts.silent)) sendRefresh();
+  } catch (err) {
+    console.warn(`[alerts] ack charge ${chargeId} falhou:`, err);
+  }
 }
 
-async function ackRecurringIncomeCredit(creditId) {
+async function ackRecurringIncomeCredit(creditId, opts) {
   if (!creditId || !USER_ID) return;
   try {
-    await fetch(`${API}/recurring-incomes/${USER_ID}/credits/${creditId}/ack`, {
+    const res = await fetch(`${API}/recurring-incomes/${USER_ID}/credits/${creditId}/ack`, {
       method: "POST",
       credentials: "same-origin",
       headers: csrfHeaders(),
     });
-    sendRefresh();
-  } catch (_) {}
+    if (!res.ok) {
+      console.warn(`[alerts] ack credit ${creditId} falhou: HTTP ${res.status}`);
+      return;
+    }
+    if (!(opts && opts.silent)) sendRefresh();
+  } catch (err) {
+    console.warn(`[alerts] ack credit ${creditId} falhou:`, err);
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -6602,6 +6651,7 @@ function renderLaunches() {
 	          ${isInternal ? '<span class="tag interno">mov. interna</span>' : ''}
 	          ${describeLaunch(l)}
 	          ${l.categoria ? `<span class="tag x">${l.categoria}</span>` : ''}
+	          ${_billMonthTag(l)}
 	        </span>
         <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
           <span class="val ${valClass}" style="${valStyle}"

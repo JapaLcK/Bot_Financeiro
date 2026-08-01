@@ -267,6 +267,11 @@ async def get_financial_data(
     credit_union_sql = ""
     credit_union_params: list = []
     if include_credit:
+        # Alocada pelo mês em que a FATURA fecha (b.period_end) — MESMA regra
+        # do "Gastos do mês" (query 5), das categorias (query 6) e do
+        # db/analytics.list_history. Antes filtrava por purchased_at: parcela
+        # de agosto comprada em julho sumia da lista de agosto enquanto o
+        # cabeçalho a somava (lista vazia com gasto no topo).
         credit_union_sql = """
             UNION ALL
             SELECT t.id AS id,
@@ -278,12 +283,14 @@ async def get_financial_data(
                    t.created_at AS criado_em,
                    false AS is_internal_movement,
                    t.installments_total AS installments_total,
-                   t.installment_no AS installment_no
+                   t.installment_no AS installment_no,
+                   b.period_end AS bill_period_end
             FROM credit_transactions t
             JOIN credit_cards c ON c.id = t.card_id
+            JOIN credit_bills b ON b.id = t.bill_id
             WHERE t.user_id = %s
-              AND t.purchased_at >= %s::date
-              AND t.purchased_at < %s::date
+              AND b.period_end >= %s::date
+              AND b.period_end < %s::date
               AND t.is_refund = false
         """
         credit_union_params = [user_id, month_start, month_end]
@@ -311,7 +318,8 @@ async def get_financial_data(
             SELECT COUNT(*) AS total FROM (
                 SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
                        NULL::int AS installments_total,
-                       NULL::int AS installment_no
+                       NULL::int AS installment_no,
+                       NULL::date AS bill_period_end
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
@@ -326,11 +334,12 @@ async def get_financial_data(
         _q(
             f"""
             SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
-                   installments_total, installment_no
+                   installments_total, installment_no, bill_period_end
             FROM (
                 SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
                        NULL::int AS installments_total,
-                       NULL::int AS installment_no
+                       NULL::int AS installment_no,
+                       NULL::date AS bill_period_end
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
@@ -559,6 +568,7 @@ async def get_financial_data(
                     from recurring_charges rc
                     join recurring_expenses r on r.id = rc.recurring_id
                     where rc.user_id = %s and rc.acknowledged = false
+                      and rc.charged_at >= now() - interval '30 days'
                     order by rc.charged_at desc
                     limit 10
                     """,
@@ -590,6 +600,7 @@ async def get_financial_data(
                     from recurring_income_credits ric
                     join recurring_incomes r on r.id = ric.income_id
                     where ric.user_id = %s and ric.acknowledged = false
+                      and ric.credited_at >= now() - interval '30 days'
                     order by ric.credited_at desc
                     limit 10
                     """,
@@ -4906,9 +4917,13 @@ async def recurring_update_route(
 
 @app.post("/recurring-expenses/{user_id}/charges/{charge_id}/ack")
 async def recurring_charge_ack_route(request: Request, user_id: int, charge_id: int):
-    """Marca uma cobrança automática como vista (some do banner)."""
+    """Marca uma cobrança automática como vista (some do banner).
+
+    SEM gate Pro de propósito: a cobrança já aconteceu e o banner é exibido
+    pra qualquer plano — um user Free/downgrade precisa conseguir dispensá-lo,
+    senão o ack falha com 403 silencioso e o banner ressuscita pra sempre.
+    """
     _authorize_dashboard_access(request, user_id)
-    _require_pro(user_id, "recurring_expenses")
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -5046,9 +5061,12 @@ async def recurring_income_update_route(
 
 @app.post("/recurring-incomes/{user_id}/credits/{credit_id}/ack")
 async def recurring_income_credit_ack_route(request: Request, user_id: int, credit_id: int):
-    """Marca um crédito automático como visto (some do banner)."""
+    """Marca um crédito automático como visto (some do banner).
+
+    Sem gate Pro — mesmo racional do ack de cobrança: dispensar notificação
+    de algo que já aconteceu não é feature, é higiene do banner.
+    """
     _authorize_dashboard_access(request, user_id)
-    _require_pro(user_id, "recurring_expenses")
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
