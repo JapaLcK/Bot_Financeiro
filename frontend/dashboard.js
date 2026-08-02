@@ -1203,8 +1203,8 @@ function _renderInstallmentItem(g, idx = 0) {
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             ${anticipateBtn}
-            <button class="mock-cta outline" onclick='event.stopPropagation(); openInstEditModal(${JSON.stringify(g.group_id)}, ${JSON.stringify(g.name)}, ${JSON.stringify(g.categoria || "")})'>✏️ Editar</button>
-            <button class="inst-delete-btn" onclick='event.stopPropagation(); openInstDeleteModal(${JSON.stringify(g.group_id)}, ${JSON.stringify(g.name)})'>Excluir parcelamento</button>
+            <button class="mock-cta outline" onclick='event.stopPropagation(); openInstEditModal(${escapeHtmlSafe(JSON.stringify(g.group_id))}, ${escapeHtmlSafe(JSON.stringify(g.name))}, ${escapeHtmlSafe(JSON.stringify(g.categoria || ""))})'>✏️ Editar</button>
+            <button class="inst-delete-btn" onclick='event.stopPropagation(); openInstDeleteModal(${escapeHtmlSafe(JSON.stringify(g.group_id))}, ${escapeHtmlSafe(JSON.stringify(g.name))})'>Excluir parcelamento</button>
           </div>
         </div>
         <div class="parcel-rows">${parcelaRows}</div>
@@ -6413,7 +6413,7 @@ function renderAlerts(alerts) {
       html += `<div class="alert-row">🐷 Piggy recebeu <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} na conta ${_alertWhenLabel(a.credited_at)}. <button onclick="ackRecurringIncomeCredit(${a.credit_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'">✕</button></div>`;
     } else {
       const icon = a.type === "budget_exceeded" ? "🔴" : "⚠️";
-      html += `<div class="alert-row">${icon} <b>${a.categoria}</b>: ${fmt(a.spent)} de ${fmt(a.budget)} (${a.pct}%)</div>`;
+      html += `<div class="alert-row">${icon} <b>${escapeHtmlSafe(a.categoria)}</b>: ${fmt(a.spent)} de ${fmt(a.budget)} (${a.pct}%)</div>`;
     }
   });
   b.innerHTML = `
@@ -6650,8 +6650,8 @@ function renderLaunches() {
         <span class="lbl">
 	          <span class="tag ${l.tipo}">${typeLabel}</span>
 	          ${isInternal ? '<span class="tag interno">mov. interna</span>' : ''}
-	          ${describeLaunch(l)}
-	          ${l.categoria ? `<span class="tag x">${l.categoria}</span>` : ''}
+	          ${escapeHtmlSafe(describeLaunch(l))}
+	          ${l.categoria ? `<span class="tag x">${escapeHtmlSafe(l.categoria)}</span>` : ''}
 	          ${_billMonthTag(l)}
 	        </span>
         <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
