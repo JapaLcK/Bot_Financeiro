@@ -24,6 +24,15 @@ from core.observability import log_system_event_sync
 
 logger = logging.getLogger(__name__)
 
+
+def _mask_email(email: str) -> str:
+    """Reduz o email a forma não-identificável para logs (minimização LGPD)."""
+    if not email or "@" not in email:
+        return "***"
+    local, _, domain = email.partition("@")
+    return f"{local[:2]}***@{domain}"
+
+
 # ─── Constantes ───────────────────────────────────────────────────────────────
 INACTIVE_DAYS        = 7    # dias sem uso para considerar inativo
 MONTHLY_INTERVAL     = 28   # intervalo mínimo entre emails do mesmo tipo (dias)
@@ -122,7 +131,7 @@ async def _check_and_send() -> None:
                 ok = await loop.run_in_executor(None, send_reengagement_email, email, user_id)
                 if ok:
                     await loop.run_in_executor(None, db.mark_reengagement_sent, user_id)
-                    logger.info("[engagement] reengajamento → user_id=%s (%s)", user_id, email)
+                    logger.info("[engagement] reengajamento → user_id=%s (%s)", user_id, _mask_email(email))
                     log_system_event_sync(
                         "info",
                         "engagement_reengagement_sent",
@@ -141,7 +150,7 @@ async def _check_and_send() -> None:
             ok = await loop.run_in_executor(None, send_tip_email, email, user_id)
             if ok:
                 await loop.run_in_executor(None, db.mark_tip_sent, user_id)
-                logger.info("[engagement] dica → user_id=%s (%s)", user_id, email)
+                logger.info("[engagement] dica → user_id=%s (%s)", user_id, _mask_email(email))
                 log_system_event_sync(
                     "info",
                     "engagement_tip_sent",
@@ -162,7 +171,7 @@ async def _check_and_send() -> None:
             ok = await loop.run_in_executor(None, send_insight_email, email, user_id)
             if ok:
                 await loop.run_in_executor(None, db.mark_insight_sent, user_id)
-                logger.info("[engagement] insight → user_id=%s (%s)", user_id, email)
+                logger.info("[engagement] insight → user_id=%s (%s)", user_id, _mask_email(email))
                 log_system_event_sync(
                     "info",
                     "engagement_insight_sent",
@@ -242,7 +251,7 @@ async def _check_trial_ending() -> None:
         try:
             ok = await loop.run_in_executor(None, send_trial_ending_email, email, expires_at, dashboard_url)
             if ok:
-                logger.info("[trial-ending] enviado → user_id=%s (%s)", user_id, email)
+                logger.info("[trial-ending] enviado → user_id=%s (%s)", user_id, _mask_email(email))
                 log_system_event_sync(
                     "info",
                     "trial_ending_email_sent",

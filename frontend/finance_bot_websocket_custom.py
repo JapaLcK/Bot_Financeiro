@@ -3436,7 +3436,9 @@ class AIChatBody(BaseModel):
 
 
 @app.post("/ai/chat")
+@limiter.limit("12/minute")
 async def ai_chat(
+    request: Request,
     body: AIChatBody,
     user_id: int = Depends(require_pro_feature("ai_chat")),
 ):

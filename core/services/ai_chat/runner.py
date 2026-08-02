@@ -43,6 +43,10 @@ logger = logging.getLogger(__name__)
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 TEMPERATURE = 0.3
 MAX_TOOL_LOOPS = 6
+# Teto de tokens de saída por chamada — impede que uma resposta (ou um prompt
+# abusivo) gere saída ilimitada e estoure a conta de LLM. Respostas do chat são
+# curtas; 1024 é folgado. Ajustável por env.
+MAX_TOKENS = int(os.getenv("AI_CHAT_MAX_TOKENS", "1024"))
 
 # Sem timeout o SDK usa read=600s × 2 retries: uma lentidão/rate-limit da
 # OpenAI vira spinner infinito no widget. Caps p/ cair em ERROR_MSG em segundos.
@@ -215,6 +219,7 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]]) -> str:
                 temperature=TEMPERATURE,
                 messages=messages,
                 tools=SCHEMAS,
+                max_tokens=MAX_TOKENS,
             )
         except Exception as e:
             logger.error("erro na chamada OpenAI: %s", e)
