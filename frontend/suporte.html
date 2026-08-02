@@ -76,7 +76,7 @@
           </div>
         </div>
 
-        <form class="form-card" id="contact-form">
+        <form class="form-card" id="contact-form" novalidate>
           <div id="contact-msg" class="contact-msg"></div>
           <div class="field">
             <label for="nome">Nome</label>
@@ -145,7 +145,8 @@
       message: document.getElementById('msg').value.trim(),
       website: document.getElementById('website').value
     };
-    if (!body.name || !body.email || !body.message) { show('Preencha nome, e-mail e mensagem.', false); return; }
+    if (!body.name || !body.email || !body.subject || !body.message) { show('Preencha nome, e-mail, assunto e mensagem.', false); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) { show('Digite um e-mail válido (ex.: seu@email.com).', false); return; }
     var csrf = decodeURIComponent((document.cookie.split('; ').find(function(r){ return r.indexOf('csrf_token=') === 0; }) || '').split('=')[1] || '');
     var headers = { 'Content-Type': 'application/json' };
     if (csrf) headers['x-csrf-token'] = csrf;

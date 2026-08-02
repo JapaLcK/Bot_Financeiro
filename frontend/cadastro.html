@@ -38,7 +38,7 @@
       <div class="auth-logo"><img src="/brand/icon.png?v=1" alt="" /><span>PigBank</span></div>
 
       <!-- Passo 1: cadastro -->
-      <form id="form-register" onsubmit="doRegister(event)">
+      <form id="form-register" onsubmit="doRegister(event)" novalidate>
         <h1>Crie sua conta</h1>
         <p class="auth-sub">Comece sua jornada financeira agora.</p>
         <div id="reg-error" class="auth-error"></div>
@@ -112,6 +112,7 @@
         conf=document.getElementById('reg-confirm').value;
     if(!name||name.length<2)return err('reg-error','Informe seu nome (mínimo 2 caracteres).');
     if(!email)return err('reg-error','Informe o e-mail.');
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return err('reg-error','Digite um e-mail válido (ex.: seu@email.com).');
     if(!phone)return err('reg-error','Informe seu número de WhatsApp.');
     if(pass.length<8)return err('reg-error','A senha deve ter pelo menos 8 caracteres.');
     if(pass!==conf)return err('reg-error','As senhas não coincidem.');

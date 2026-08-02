@@ -715,6 +715,7 @@ async function saveCard() {
 
   if (!name) { await alertModal("Digite um apelido pro cartão.", { title: "Apelido obrigatório" }); return; }
   if (!closing_day || !due_day) { await alertModal("Informe os dias de fechamento e vencimento.", { title: "Dados incompletos" }); return; }
+  if (closing_day < 1 || closing_day > 31 || due_day < 1 || due_day > 31) { await alertModal("Os dias de fechamento e vencimento devem estar entre 1 e 31.", { title: "Dia inválido" }); return; }
   if (last4 && !/^\d{4}$/.test(last4)) { await alertModal("Últimos 4 dígitos devem ser 4 números.", { title: "Inválido" }); return; }
 
   const btn = document.getElementById("card-edit-save-btn");

@@ -807,7 +807,7 @@
 
     <!-- Aba Aporte/Resgate -->
     <div id="invest-pane-move" class="invest-pane">
-      <form class="invest-form" onsubmit="moveInvestment(event)">
+      <form class="invest-form" onsubmit="moveInvestment(event)" novalidate>
         <div class="modal-row">
           <label class="modal-label" for="move-name">Investimento</label>
           <select class="modal-inp cat-select" id="move-name" onchange="updateMoveFormVisibility()"></select>
@@ -849,7 +849,7 @@
 
     <!-- Aba Novo ativo -->
     <div id="invest-pane-create" class="invest-pane" style="display:none">
-      <form class="invest-form" onsubmit="createInvestment(event)">
+      <form class="invest-form" onsubmit="createInvestment(event)" novalidate>
         <div class="form-row">
           <div class="field">
             <label class="modal-label" for="inv-issuer">Emissor</label>
@@ -989,7 +989,7 @@
       <button class="pkt-move-btn wd"  type="button" onclick="pocketWithdrawAll()">⤓ Sacar tudo</button>
     </div>
 
-    <form class="pkt-move-form" id="pkt-move-form" onsubmit="submitPocketMove(event)">
+    <form class="pkt-move-form" id="pkt-move-form" onsubmit="submitPocketMove(event)" novalidate>
       <span class="pkt-move-form-title" id="pkt-move-form-title">Depositar</span>
       <input type="number" id="pkt-move-amount" inputmode="decimal" step="0.01" min="0.01" placeholder="Valor (R$)" required />
       <input type="text" id="pkt-move-nota" maxlength="120" placeholder="Nota (opcional)" />
@@ -1180,7 +1180,7 @@
   <div class="modal wide">
     <h3 id="card-edit-title">Novo cartão</h3>
     <p class="msub">Apelido obrigatório. Demais campos são opcionais — só preencha o que ajudar você a identificar este cartão.</p>
-    <form id="card-edit-form" onsubmit="event.preventDefault(); saveCard();">
+    <form id="card-edit-form" onsubmit="event.preventDefault(); saveCard();" novalidate>
       <input type="hidden" id="card-edit-id" />
 
       <div class="invest-form">
@@ -1290,7 +1290,7 @@
   <div class="modal">
     <h3>Editar parcelamento</h3>
     <p class="msub">Edita nome e categoria de todas as parcelas deste grupo.</p>
-    <form id="inst-edit-form" onsubmit="event.preventDefault(); saveInstallmentEdit();">
+    <form id="inst-edit-form" onsubmit="event.preventDefault(); saveInstallmentEdit();" novalidate>
       <div class="field">
         <label for="inst-edit-nome">Nome / descrição</label>
         <input type="text" id="inst-edit-nome" maxlength="200" placeholder="Ex: iPhone capa MagSafe" />

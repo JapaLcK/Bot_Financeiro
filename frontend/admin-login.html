@@ -106,7 +106,7 @@ button:disabled { opacity: .65; cursor: wait; }
     <h1>Painel administrativo</h1>
     <p>Acesso restrito ao administrador. As credenciais são validadas exclusivamente pelas variáveis de ambiente do backend.</p>
     <div class="error" id="error-box"></div>
-    <form id="login-form">
+    <form id="login-form" novalidate>
       <label for="username">Usuário</label>
       <input id="username" autocomplete="username" required />
       <label for="password">Senha</label>
@@ -155,6 +155,10 @@ async function checkSession() {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   clearError();
+  if (!document.getElementById("username").value.trim() || !document.getElementById("password").value) {
+    setError("Preencha usuário e senha.");
+    return;
+  }
   submitBtn.disabled = true;
   submitBtn.textContent = "Validando...";
 
