@@ -4,6 +4,7 @@ Ponto de entrada para todas as mensagens recebidas.
 
 Fluxo:
   1. Anexo OFX?          → trata diretamente (não depende de intent)
+  1b. Anexo CSV/PDF?     → importa como extrato bancário (mesmo pipeline)
   2. Anexo ÁUDIO?        → transcreve via Whisper e processa como texto
   3. Anexo IMAGEM?       → analisa via GPT-4o Vision e retorna dados para confirmação
   4. Ensure user no DB   → garante que o usuário existe
@@ -90,6 +91,18 @@ def _is_ofx_attachment(a) -> bool:
     fn = (getattr(a, "filename", "") or "").lower()
     ct = (getattr(a, "content_type", "") or "").lower()
     return fn.endswith(".ofx") or "ofx" in ct
+
+
+def _is_csv_attachment(a) -> bool:
+    fn = (getattr(a, "filename", "") or "").lower()
+    ct = (getattr(a, "content_type", "") or "").lower().split(";")[0].strip()
+    return fn.endswith(".csv") or ct in {"text/csv", "application/csv"}
+
+
+def _is_pdf_attachment(a) -> bool:
+    fn = (getattr(a, "filename", "") or "").lower()
+    ct = (getattr(a, "content_type", "") or "").lower().split(";")[0].strip()
+    return fn.endswith(".pdf") or ct == "application/pdf"
 
 
 def _normalize_user_id(msg: IncomingMessage) -> int:
@@ -502,6 +515,34 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
                     f"➕ Inseridas: {ins} | ♻️ Duplicadas: {dup}\n"
                     f"🏦 Saldo atual: {saldo_txt}"
                 ))]
+
+        # ------------------------------------------------------------------
+        # 1b. Anexo CSV/PDF — extrato bancário nos formatos que o usuário
+        # consegue exportar mais fácil no celular (mesmo pipeline do OFX)
+        # ------------------------------------------------------------------
+        if msg.attachments:
+            stmt_atts = [
+                (a, "csv") for a in msg.attachments if _is_csv_attachment(a)
+            ] + [
+                (a, "pdf") for a in msg.attachments if _is_pdf_attachment(a)
+            ]
+            if stmt_atts:
+                a, stmt_kind = stmt_atts[0]
+                ext = stmt_kind.upper()
+                if not getattr(a, "data", None):
+                    return [OutgoingMessage(
+                        text=f"📎 Recebi o {ext}, mas não consegui baixar o arquivo. Reenvie o .{stmt_kind} por favor."
+                    )]
+
+                uid = _normalize_user_id(msg)
+                db.ensure_user(uid)
+
+                from core.services.statement_service import handle_statement_import
+                stmt_filename = getattr(a, "filename", f"arquivo.{stmt_kind}")
+                result_text = handle_statement_import(
+                    str(uid), a.data, stmt_filename, stmt_kind
+                )
+                return [OutgoingMessage(text=format_for_platform(result_text, platform))]
 
         # ------------------------------------------------------------------
         # 2. Anexo ÁUDIO — transcreve via Whisper e processa como texto
