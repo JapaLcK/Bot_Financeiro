@@ -244,7 +244,7 @@ async def wa_verify(request: Request):
 async def wa_webhook(request: Request):
     raw = await request.body()
     signature = request.headers.get("X-Hub-Signature-256", "")
-    if APP_SECRET and not verify_webhook_signature(raw, signature, APP_SECRET):
+    if not verify_webhook_signature(raw, signature, APP_SECRET):
         logger.warning("WA webhook forbidden: invalid signature")
         log_system_event_sync(
             "warning",

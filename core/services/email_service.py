@@ -201,7 +201,11 @@ import base64 as _base64
 
 def make_unsub_url(user_id: int, email: str) -> str:
     """Gera URL de descadastro com token HMAC estável (stateless, não expira)."""
-    secret  = (os.getenv("JWT_SECRET") or "pigbank-unsub").encode()
+    secret_raw = (os.getenv("JWT_SECRET") or "").strip()
+    if not secret_raw:
+        # Fail closed: sem JWT_SECRET, não assina com constante pública (forjável).
+        raise RuntimeError("JWT_SECRET ausente — token de unsubscribe não pode ser assinado.")
+    secret  = secret_raw.encode()
     payload = f"{user_id}:{email}".encode()
     sig     = _hmac.new(secret, payload, _hashlib.sha256).digest()
     token   = _base64.urlsafe_b64encode(sig).decode().rstrip("=")

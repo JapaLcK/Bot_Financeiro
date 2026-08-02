@@ -860,6 +860,19 @@ async def _fetch_export_items(user_id: int, year: int, month: int) -> list[dict]
     return items
 
 
+def _spreadsheet_safe(v) -> str:
+    """Neutraliza formula injection em exports abertos no Excel/Sheets.
+
+    Uma célula começando com = + - @ TAB ou CR é interpretada como fórmula;
+    memos importados de banco (OFX) são texto de influência externa. Prefixa
+    com apóstrofo pra forçar tratamento como texto.
+    """
+    s = "" if v is None else str(v)
+    if s[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + s
+    return s
+
+
 async def build_csv(user_id: int, year: int, month: int) -> str | None:
     items = await _fetch_export_items(user_id, year, month)
     if not items:
@@ -873,8 +886,8 @@ async def build_csv(user_id: int, year: int, month: int) -> str | None:
             d.strftime("%Y-%m-%d") if d else "",
             it["label"],
             f"{it['sign']}{it['valor']:.2f}",
-            it["categoria"],
-            it["descricao"],
+            _spreadsheet_safe(it["categoria"]),
+            _spreadsheet_safe(it["descricao"]),
         ])
     return buf.getvalue()
 
@@ -934,8 +947,8 @@ def _render_xlsx(items: list[dict]) -> bytes:
         ws.append([
             d.strftime("%d/%m/%Y") if d else "",
             it["label"],
-            it["categoria"],
-            it["descricao"],
+            _spreadsheet_safe(it["categoria"]),
+            _spreadsheet_safe(it["descricao"]),
             round(signed, 2),
         ])
         ws.cell(row=idx, column=2).font = Font(bold=True, color=color)
@@ -3653,7 +3666,9 @@ import base64 as _base64
 
 def _verify_unsub_token(user_id: int, email: str, token: str) -> bool:
     """Verifica token de unsubscribe usando a mesma lógica do email_service."""
-    secret   = (JWT_SECRET or "pigbank-unsub").encode()
+    if not JWT_SECRET:
+        return False  # fail closed: sem segredo, nenhum token é válido
+    secret   = JWT_SECRET.encode()
     payload  = f"{user_id}:{email}".encode()
     sig      = _hmac.new(secret, payload, _hashlib.sha256).digest()
     expected = _base64.urlsafe_b64encode(sig).decode().rstrip("=")

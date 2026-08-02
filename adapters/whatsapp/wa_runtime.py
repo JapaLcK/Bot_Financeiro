@@ -88,7 +88,9 @@ class Attachment:
 
 def verify_webhook_signature(raw_body: bytes, signature_header: str, app_secret: str) -> bool:
     if not app_secret:
-        return True
+        # Fail closed: sem segredo configurado, rejeita em vez de aceitar
+        # qualquer POST não-assinado. Em prod APP_SECRET é obrigatório no boot.
+        return False
     if not signature_header or not signature_header.startswith("sha256="):
         return False
     expected_hash = hmac.new(app_secret.encode(), raw_body, hashlib.sha256).hexdigest()
