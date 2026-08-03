@@ -105,8 +105,8 @@ def send_help_menu(wa_id: str) -> None:
                 "rows": [
                     {
                         "id": "help_ofx",
-                        "title": "Extrato OFX",
-                        "description": "Importar extratos bancários (.ofx)",
+                        "title": "Importar extrato",
+                        "description": "Importar extratos bancários (.ofx, .csv, .pdf)",
                     },
                     {
                         "id": "help_categories",

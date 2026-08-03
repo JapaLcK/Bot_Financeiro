@@ -48,6 +48,44 @@ def detect_ofx_type(ofx_bytes: bytes) -> str:
     return "unknown"
 
 
+def load_user_rules_norm(user_id: int) -> list[tuple[str, str]]:
+    """Carrega as regras de categoria do usuário já normalizadas, UMA vez
+    (evita N+1 no Postgres). Compartilhada com statement_import (CSV/PDF)."""
+    rules_norm: list[tuple[str, str]] = []
+    for kw, cat in list_user_category_rules(user_id):
+        kw_n = normalize_text(kw or "")
+        cat_n = normalize_text(cat or "")
+        if kw_n and cat_n:
+            rules_norm.append((kw_n, cat_n))
+    return rules_norm
+
+
+def resolve_category(memo_norm: str, rules_norm: list[tuple[str, str]]) -> str:
+    """Resolve a categoria de um memo já normalizado: regras do usuário
+    primeiro, depois LOCAL_RULES, senão "outros". Compartilhada entre a
+    importação OFX e a de extrato CSV/PDF (statement_import)."""
+    # B) regras do usuário (em memória)
+    for kw_norm, cat_norm in rules_norm:
+        if contains_word(memo_norm, kw_norm) or (kw_norm in memo_norm):
+            return cat_norm
+
+    # C) LOCAL_RULES (sem DB)
+    for keywords, cat2 in LOCAL_RULES:
+        cat2_norm = normalize_text(cat2 or "")
+        if not cat2_norm:
+            continue
+        for kw in keywords:
+            kw2_norm = normalize_text(kw or "")
+            if not kw2_norm:
+                continue
+            if keyword_blocked(kw2_norm, memo_norm):
+                continue
+            if contains_word(memo_norm, kw2_norm) or (kw2_norm in memo_norm):
+                return cat2_norm
+
+    return "outros"
+
+
 def _extract_ledger_balance(ofx_bytes: bytes) -> Decimal | None:
     s = ofx_bytes.decode("utf-8", errors="ignore")
     m = re.search(r"<LEDGERBAL>.*?<BALAMT>\s*([-0-9.]+)", s, re.I | re.S)
@@ -104,13 +142,7 @@ def import_ofx_bytes(user_id: int, ofx_bytes: bytes, filename: str | None = None
     ledger_balance = _extract_ledger_balance(ofx_bytes)
 
     # carrega regras UMA vez (evita N+1 no Postgres)
-    _rules_raw = list_user_category_rules(user_id)
-    _rules_norm: list[tuple[str, str]] = []
-    for kw, cat in _rules_raw:
-        kw_n = normalize_text(kw or "")
-        cat_n = normalize_text(cat or "")
-        if kw_n and cat_n:
-            _rules_norm.append((kw_n, cat_n))
+    _rules_norm = load_user_rules_norm(user_id)
 
     for trn in txs:
         fitid = getattr(trn, "id", None) or getattr(trn, "fitid", None)
@@ -164,35 +196,7 @@ def import_ofx_bytes(user_id: int, ofx_bytes: bytes, filename: str | None = None
             delta = +valor
 
         memo_norm = normalize_text(memo)
-
-        categoria = None
-
-        # B) regras do usuário (em memória)
-        for kw_norm, cat_norm in _rules_norm:
-            if contains_word(memo_norm, kw_norm) or (kw_norm in memo_norm):
-                categoria = cat_norm
-                break
-
-        # C) LOCAL_RULES (sem DB)
-        if not categoria:
-            for keywords, cat2 in LOCAL_RULES:
-                cat2_norm = normalize_text(cat2 or "")
-                if not cat2_norm:
-                    continue
-                for kw in keywords:
-                    kw2_norm = normalize_text(kw or "")
-                    if not kw2_norm:
-                        continue
-                    if keyword_blocked(kw2_norm, memo_norm):
-                        continue
-                    if contains_word(memo_norm, kw2_norm) or (kw2_norm in memo_norm):
-                        categoria = cat2_norm
-                        break
-                if categoria:
-                    break
-
-        if not categoria:
-            categoria = "outros"
+        categoria = resolve_category(memo_norm, _rules_norm)
 
         is_internal = normalize_text(categoria) in INTERNAL_MOVEMENT_CATEGORIES
 

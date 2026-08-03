@@ -22,7 +22,7 @@ HELP_SECTIONS: dict[str, str] = {
         "• `saldo`\n"
         "• `gastei 50 mercado`\n"
         "• `recebi 1000 salario`\n"
-        "• Envie um arquivo `.ofx` → importa extrato ou fatura automaticamente\n"
+        "• Envie um arquivo `.ofx`, `.csv` ou `.pdf` → importa extrato ou fatura automaticamente\n"
         "\n"
         "Dica: digite `ajuda` para abrir o menu completo."
     ),
@@ -33,8 +33,8 @@ HELP_SECTIONS: dict[str, str] = {
         "• `gastei 50 mercado`\n"
         "• `saldo`\n"
         "• `gastos` ou `meus gastos` → últimos lançamentos\n\n"
-        "2) **Importe seu extrato bancário (OFX)**\n"
-        "• Exporte o arquivo `.ofx` pelo site do seu banco (conta corrente/poupança)\n"
+        "2) **Importe seu extrato bancário (OFX, CSV ou PDF)**\n"
+        "• Exporte o arquivo `.ofx`, `.csv` ou o PDF do extrato pelo site/app do seu banco\n"
         "• Arraste o arquivo direto no chat — o bot detecta e importa automaticamente\n"
         "• Duplicadas são ignoradas, pode importar o mesmo arquivo mais de uma vez\n\n"
         "3) **Importe sua fatura de cartão (OFX)**\n"
@@ -60,13 +60,15 @@ HELP_SECTIONS: dict[str, str] = {
         "• `dashboard`\n"
     ),
     "ofx": (
-        "🧾 **Importar OFX — Extrato ou Fatura**\n\n"
+        "🧾 **Importar extrato ou fatura — OFX, CSV ou PDF**\n\n"
         "O bot detecta automaticamente o tipo de arquivo e faz a importação correta.\n"
-        "Basta arrastar o `.ofx` direto no chat — sem comandos extras.\n\n"
+        "Basta arrastar o `.ofx`, `.csv` ou `.pdf` direto no chat — sem comandos extras.\n\n"
         "🏦 **Extrato bancário (conta corrente / poupança)**\n"
         "• Exporte pelo site do banco (não pelo app do cartão)\n"
         "• Importa todas as transações do período\n"
-        "• Atualiza o saldo da conta com base no `LEDGERBAL` do arquivo\n"
+        "• OFX: atualiza o saldo da conta com base no `LEDGERBAL` do arquivo\n"
+        "• CSV/PDF: o saldo é ajustado pelas transações importadas — se não bater, diga `saldo é 1500`\n"
+        "• PDF precisa ser o gerado pelo banco (escaneado/foto não funciona)\n"
         "• Duplicadas são ignoradas — pode reimportar sem problema\n\n"
         "💳 **Fatura de cartão de crédito**\n"
         "• Exporte pelo app ou site do cartão\n"
@@ -204,7 +206,7 @@ TITLE_MAP: dict[str, str] = {
 HELP_ORDER: list[tuple[str, str, str]] = [
     ("start", "Começar (visão geral)", "👋"),
     ("tutorial", "Tutorial", "🚀"),
-    ("ofx", "OFX (importar extrato ou fatura)", "🧾"),
+    ("ofx", "Importar extrato ou fatura (OFX/CSV/PDF)", "🧾"),
     ("cc", "Conta corrente", "🏦"),
     ("credit", "Cartões & Crédito", "💳"),
     ("categories", "Aprendizado de categorias", "🏷️"),
@@ -237,6 +239,8 @@ HELP_ALIASES: dict[str, str] = {
     "start": "start",
     "tutorial": "tutorial",
     "ofx": "ofx",
+    "csv": "ofx",
+    "pdf": "ofx",
     "extrato": "ofx",
     "importar": "ofx",
     "fatura ofx": "ofx",
@@ -288,7 +292,7 @@ HELP_ALIASES: dict[str, str] = {
 _SECTION_ALIASES = {
     "start": {"start", "inicio", "início", "geral", "menu"},
     "tutorial": {"tutorial", "guia"},
-    "ofx": {"ofx", "extrato", "importar", "importarofx", "fatura ofx", "importar fatura", "importar extrato"},
+    "ofx": {"ofx", "csv", "pdf", "extrato", "importar", "importarofx", "fatura ofx", "importar fatura", "importar extrato"},
     "cc": {"cc", "conta", "conta corrente", "corrente", "saldo"},
     "pockets": {"caixinhas", "caixinha", "pockets"},
     "invest": {"invest", "investimentos", "investimento"},
