@@ -677,7 +677,13 @@ async def get_financial_data(
 # ─── Monthly history ─────────────────────────────────────────────────────────
 
 async def get_monthly_history(user_id: int, n_months: int = 6) -> list:
-    """Returns last n_months of income/expense totals, oldest first."""
+    """Returns last n_months of income/expense totals, oldest first.
+
+    Janela em meses-calendário INCLUINDO o mês atual: início do mês atual
+    menos (n-1) meses. "NOW() - INTERVAL 'n months'" cortava no meio de um
+    mês extra no passado e o gráfico de "últimos 6 meses" mostrava 7 barras.
+    """
+    n_months = max(1, int(n_months))
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -686,7 +692,7 @@ async def get_monthly_history(user_id: int, n_months: int = 6) -> list:
                        tipo, SUM(valor) AS total
                 FROM launches
                 WHERE user_id = %s
-                  AND criado_em >= NOW() - INTERVAL '{int(n_months)} months'
+                  AND criado_em >= DATE_TRUNC('month', NOW()) - INTERVAL '{n_months - 1} months'
                   AND tipo IN ('receita', 'despesa')
                   AND is_internal_movement = false
                 GROUP BY mes, tipo

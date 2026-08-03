@@ -478,7 +478,9 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
                     COALESCE(SUM(valor) FILTER (WHERE tipo IN ('receita', 'entrada') AND is_internal_movement = false), 0) AS revenue,
                     COALESCE(SUM(valor) FILTER (WHERE tipo IN ('despesa', 'saida') AND is_internal_movement = false), 0) AS expenses
                 FROM launches
-                WHERE criado_em >= NOW() - INTERVAL '6 months'
+                -- meses-calendário incluindo o atual (NOW() - 6 months corta
+                -- no meio de um 7º mês e o "últimos 6 meses" mostrava 7 barras)
+                WHERE criado_em >= DATE_TRUNC('month', NOW()) - INTERVAL '5 months'
                 GROUP BY 1
                 ORDER BY 1 DESC
                 """
