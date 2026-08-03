@@ -210,6 +210,88 @@ def test_parse_pdf_sem_transacoes():
     assert parse_pdf_statement(pdf) == []
 
 
+# Texto no formato real do extrato PDF do Nubank (dados fictícios): data como
+# cabeçalho de dia, descrição multi-linha, valor sem sinal no fim do bloco e
+# sinal vindo da seção "Total de entradas"/"Total de saídas".
+_NUBANK_PDF_TEXT = """\
+Fulano de Tal da Silva
+ •••.111.222-••  0001 CPF Agência Conta
+12345678-9
+ a 01 DE AGOSTO DE 2026 02 DE AGOSTO DE 2026 VALORES EM R$
+ Saldo final do período
+ R$ 586,00
+ Saldo inicial
+ Rendimento líquido
+ Total de entradas
+ Total de saídas
+Saldo final do período
+ 608,81
+ +0,00
+ +450,00
+ -472,81
+586,00
+Movimentações
+01 AGO 2026 Total de entradas + 450,00
+Transferência recebida pelo Pix Beltrana da Silva - •••.333.444-•• - BANCO
+QUALQUER IP LTDA. (0323) Agência: 1 Conta:
+1122334455-6
+450,00
+Total de saídas - 450,00
+Aplicação RDB 450,00
+02 AGO 2026 Total de saídas - 22,81
+Transferência enviada pelo Pix CICLANO PEREIRA
+(Transferência enviada)
+22,81
+O saldo líquido corresponde ao total de depósitos e rendimentos em conta, não considerando movimentações feitas após a data mencionada.
+Extrato gerado dia 03 de agosto de 2026 às 03:21 2 de 2
+"""
+
+
+def test_parse_pdf_nubank_extrato():
+    from statement_import import (
+        extract_pdf_final_balance,
+        looks_like_nubank_statement,
+        parse_pdf_statement_text,
+    )
+
+    assert looks_like_nubank_statement(_NUBANK_PDF_TEXT)
+
+    txs = parse_pdf_statement_text(_NUBANK_PDF_TEXT)
+    assert len(txs) == 3
+
+    assert txs[0]["posted_at"] == date(2026, 8, 1)
+    assert txs[0]["amount"] == Decimal("450.00")  # seção "Total de entradas"
+    assert "Transferência recebida pelo Pix" in txs[0]["memo"]
+
+    assert txs[1]["posted_at"] == date(2026, 8, 1)
+    assert txs[1]["amount"] == Decimal("-450.00")  # seção "Total de saídas"
+    assert "Aplicação RDB" in txs[1]["memo"]
+
+    assert txs[2]["posted_at"] == date(2026, 8, 2)
+    assert txs[2]["amount"] == Decimal("-22.81")
+    assert "Transferência enviada" in txs[2]["memo"]
+
+    # o resumo/rodapé não pode virar transação nem poluir descrições
+    assert all("Saldo" not in t["memo"] for t in txs)
+
+    assert extract_pdf_final_balance(_NUBANK_PDF_TEXT) == Decimal("586.00")
+
+
+def test_parse_pdf_nubank_sem_secao_usa_palavra_chave():
+    from statement_import import parse_nubank_pdf_text
+
+    text = (
+        "Movimentações\n"
+        "05 AGO 2026\n"
+        "Transferência recebida pelo Pix AMIGO\n"
+        "100,00\n"
+        "Pagamento de boleto EMPRESA X\n"
+        "80,00\n"
+    )
+    txs = parse_nubank_pdf_text(text)
+    assert [t["amount"] for t in txs] == [Decimal("100.00"), Decimal("-80.00")]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Detecção de anexo no handle_incoming
 # ─────────────────────────────────────────────────────────────────────────────

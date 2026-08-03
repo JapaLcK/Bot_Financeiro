@@ -304,6 +304,160 @@ _PDF_AMOUNT_RE = re.compile(
 # movimentações — importá-las duplicaria valores.
 _PDF_SKIP_RE = re.compile(r"\bsaldo\b", re.I)
 
+# ── Layout Nubank ────────────────────────────────────────────────────────────
+# O extrato PDF do Nubank não tem "data + valor na mesma linha": a data é um
+# cabeçalho de dia ("01 AGO 2026 Total de entradas + 450,00"), as transações
+# vêm abaixo com a descrição em uma ou mais linhas e o valor SEM SINAL no fim
+# do bloco. O sinal vem da seção corrente ("Total de entradas"/"Total de
+# saídas") ou, na falta dela, de palavras-chave da descrição.
+
+_PT_MONTHS = {
+    "jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6,
+    "jul": 7, "ago": 8, "set": 9, "out": 10, "nov": 11, "dez": 12,
+}
+
+_NU_DAY_RE = re.compile(
+    r"^\s*(\d{1,2})\s+(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)\s+(\d{4})\b(.*)$",
+    re.I,
+)
+
+# valor no FIM da linha (fecha um bloco de transação)
+_NU_AMOUNT_END_RE = re.compile(
+    r"(?:R\$\s?)?((?:\d{1,3}(?:\.\d{3})+|\d+),\d{2})\s*$"
+)
+
+# rodapé/cabeçalho de página do Nubank — nunca é descrição de transação
+_NU_NOISE_PREFIXES = (
+    "o saldo liquido", "nao nos responsabilizamos", "asseguramos a autenticidade",
+    "nu financeira", "nu pagamentos", "cnpj", "tem alguma duvida",
+    "caso a solucao", "extrato gerado", "saldo inicial", "saldo final",
+    "rendimento liquido",
+)
+_NU_NOISE_CONTAINS = ("valores em r", "cpf agencia conta", "ouvidoria")
+
+# "Saldo final do período R$ 586,00" — usado pra reconciliar o saldo da conta
+_NU_FINAL_BALANCE_RE = re.compile(
+    r"saldo\s+final\s+do\s+per[íi]odo\s*\n?\s*R\$\s*(-?\s?[\d.,]+)",
+    re.I,
+)
+
+_INFER_CREDIT_KEYWORDS = ("recebid", "estorno", "rendimento", "deposito", "reembolso", "resgate")
+_INFER_DEBIT_KEYWORDS = (
+    "enviad", "pagamento", "compra", "aplicacao", "debito", "boleto",
+    "tarifa", "saque", "recarga",
+)
+
+
+def _infer_sign(desc_norm: str) -> int:
+    for kw in _INFER_CREDIT_KEYWORDS:
+        if kw in desc_norm:
+            return 1
+    for kw in _INFER_DEBIT_KEYWORDS:
+        if kw in desc_norm:
+            return -1
+    return -1  # sem pista, assume saída (maioria das movimentações)
+
+
+def _is_nubank_noise(line_norm: str) -> bool:
+    return any(line_norm.startswith(p) for p in _NU_NOISE_PREFIXES) or any(
+        c in line_norm for c in _NU_NOISE_CONTAINS
+    )
+
+
+def looks_like_nubank_statement(text: str) -> bool:
+    has_day_header = any(_NU_DAY_RE.match(l.strip()) for l in text.splitlines())
+    return has_day_header and "movimentacoes" in normalize_text(text)
+
+
+def parse_nubank_pdf_text(text: str) -> list[dict]:
+    """Parseia o texto do extrato PDF do Nubank (layout em blocos por dia)."""
+    txs: list[dict] = []
+    cur_date: date | None = None
+    section = 0  # +1 entradas, -1 saídas, 0 desconhecida
+    desc_parts: list[str] = []
+    started = False
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line_norm = normalize_text(line)
+
+        if not started:
+            if line_norm == "movimentacoes":
+                started = True
+            continue
+
+        day_m = _NU_DAY_RE.match(line)
+        if day_m:
+            d, mon, y = int(day_m.group(1)), day_m.group(2).lower(), int(day_m.group(3))
+            try:
+                cur_date = date(y, _PT_MONTHS[mon], d)
+            except ValueError:
+                cur_date = None
+            desc_parts = []
+            rest_norm = normalize_text(day_m.group(4))
+            if "total de entradas" in rest_norm:
+                section = 1
+            elif "total de saidas" in rest_norm:
+                section = -1
+            else:
+                section = 0
+            continue
+
+        # troca de seção dentro do mesmo dia ("Total de saídas - 450,00")
+        if line_norm.startswith("total de entradas"):
+            section = 1
+            desc_parts = []
+            continue
+        if line_norm.startswith("total de saidas"):
+            section = -1
+            desc_parts = []
+            continue
+
+        if _is_nubank_noise(line_norm):
+            desc_parts = []
+            continue
+
+        amount_m = _NU_AMOUNT_END_RE.search(line)
+        if amount_m and cur_date is not None:
+            valor = parse_br_amount(amount_m.group(1))
+            if valor is None or valor == 0:
+                desc_parts = []
+                continue
+            desc = " ".join(desc_parts + [line[: amount_m.start()].strip()])
+            desc = re.sub(r"\s{2,}", " ", desc).strip()[:200] or "(sem descrição)"
+            sign = section or _infer_sign(normalize_text(desc))
+            txs.append(
+                {
+                    "posted_at": cur_date,
+                    "amount": abs(valor) * sign,
+                    "memo": desc,
+                    "external_id": None,
+                }
+            )
+            desc_parts = []
+            if len(txs) > MAX_STATEMENT_ROWS:
+                raise StatementParseError(
+                    f"PDF com transações demais (máx {MAX_STATEMENT_ROWS})."
+                )
+            continue
+
+        # linha de descrição (transação pode quebrar em várias linhas)
+        if cur_date is not None:
+            desc_parts.append(line)
+
+    return txs
+
+
+def extract_pdf_final_balance(text: str) -> Decimal | None:
+    """Extrai o "Saldo final do período" (Nubank) pra reconciliar o saldo da
+    conta, como o OFX faz com o LEDGERBAL. Retorna None se não existir."""
+    m = _NU_FINAL_BALANCE_RE.search(text)
+    if not m:
+        return None
+    return parse_br_amount(m.group(1))
+
 
 def _extract_pdf_text(data: bytes) -> str:
     from pypdf import PdfReader
@@ -334,16 +488,27 @@ def _extract_pdf_text(data: bytes) -> str:
 
 
 def parse_pdf_statement(data: bytes) -> list[dict]:
-    """
-    Extrai transações de um PDF de extrato (texto, não escaneado).
+    """Extrai transações de um PDF de extrato (texto, não escaneado)."""
+    return parse_pdf_statement_text(_extract_pdf_text(data))
 
-    Heurística por linha: data no início + pelo menos um valor monetário.
-    Quando a linha tem mais de um valor (colunas valor + saldo, comum em
-    Itaú/BB), o primeiro é o valor da movimentação e o último é o saldo.
-    Linhas seguintes sem data/valor são continuação da descrição.
-    """
-    text = _extract_pdf_text(data)
 
+def parse_pdf_statement_text(text: str) -> list[dict]:
+    """Despacha entre os layouts conhecidos de extrato em PDF."""
+    if looks_like_nubank_statement(text):
+        txs = parse_nubank_pdf_text(text)
+        if txs:
+            return txs
+    return _parse_generic_pdf_text(text)
+
+
+def _parse_generic_pdf_text(text: str) -> list[dict]:
+    """
+    Layout genérico (Sicoob, Itaú, BB...): data no início da linha + pelo
+    menos um valor monetário na mesma linha. Quando a linha tem mais de um
+    valor (colunas valor + saldo), o primeiro é o valor da movimentação e o
+    último é o saldo. Linhas seguintes sem data/valor são continuação da
+    descrição.
+    """
     txs: list[dict] = []
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -426,7 +591,14 @@ def import_statement_bytes(
             f"Arquivo muito grande (máx {MAX_STATEMENT_BYTES // (1024 * 1024)} MB)."
         )
 
-    txs = parse_csv_statement(data) if kind == "csv" else parse_pdf_statement(data)
+    ledger_balance: Decimal | None = None
+    if kind == "csv":
+        txs = parse_csv_statement(data)
+    else:
+        pdf_text = _extract_pdf_text(data)
+        txs = parse_pdf_statement_text(pdf_text)
+        # extratos que informam o saldo final (Nubank) permitem reconciliar
+        ledger_balance = extract_pdf_final_balance(pdf_text)
 
     if not txs:
         tipo_arquivo = "CSV" if kind == "csv" else "PDF"
@@ -513,7 +685,26 @@ def import_statement_bytes(
 
     result["filename"] = filename
     result["source"] = kind
-    # CSV/PDF não trazem LEDGERBAL confiável — o saldo é ajustado apenas pelos
-    # deltas das transações inseridas (feito dentro do bulk).
-    result["reconciled"] = False
+    result["ledger_balance"] = ledger_balance
+
+    # Reconciliação (mesma regra do OFX): só quando o arquivo informa o saldo
+    # final E este é o extrato mais recente já importado. Sem saldo no arquivo,
+    # o saldo da conta fica ajustado só pelos deltas inseridos (feito no bulk).
+    can_reconcile = False
+    try:
+        from db import set_balance, get_last_ofx_import_end_date
+
+        last_dt_end = get_last_ofx_import_end_date(user_id)
+        if ledger_balance is not None and max_d is not None:
+            if last_dt_end is None or max_d >= last_dt_end:
+                can_reconcile = True
+    except Exception:
+        can_reconcile = False
+
+    if can_reconcile:
+        result["new_balance"] = set_balance(user_id, ledger_balance)
+        result["reconciled"] = True
+    else:
+        result["reconciled"] = False
+
     return result

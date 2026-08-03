@@ -73,12 +73,15 @@ def format_statement_report(rep: dict) -> str:
 
     blocks.append("💰 **Saldo atual**\n" f"{_fmt_money(new_balance)}")
 
-    # CSV/PDF não trazem o saldo oficial do banco (o OFX traz LEDGERBAL) — o
-    # saldo acima foi ajustado só pelas transações inseridas.
-    blocks.append(
-        "💡 Se o saldo não bater com o do banco, é só dizer, por exemplo: "
-        "`saldo é 1500`."
-    )
+    if rep.get("reconciled"):
+        blocks.append("✅ Saldo conferido com o saldo final informado no extrato.")
+    else:
+        # Sem saldo oficial no arquivo (o OFX traz LEDGERBAL) — o saldo acima
+        # foi ajustado só pelas transações inseridas.
+        blocks.append(
+            "💡 Se o saldo não bater com o do banco, é só dizer, por exemplo: "
+            "`saldo é 1500`."
+        )
 
     return "\n\n".join(blocks)
 
