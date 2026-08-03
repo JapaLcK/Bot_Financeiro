@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from core.audit import AuditEvent, list_audit_events, record_audit_event
+from core.crypto import encrypt_pii_optional, hash_pii_optional
 from core.sessions import (
     device_label,
     list_user_sessions,
@@ -176,27 +177,54 @@ async def update_security_contact_route(
     try:
         async with await shared.db_connect() as conn:
             async with conn.cursor() as cur:
+                # Os lookups da app usam as colunas *_hash (login por email_hash,
+                # auto-link do WhatsApp por phone_hash) — atualizar só a coluna em
+                # claro deixa o hash apontando pro valor antigo e o bot nunca
+                # reconhece o número novo.
                 if email:
                     await cur.execute(
-                        "UPDATE auth_accounts SET email = %s WHERE user_id = %s",
-                        (email, user_id),
+                        """
+                        UPDATE auth_accounts
+                        SET email = %s,
+                            email_hash = %s,
+                            email_enc = %s
+                        WHERE user_id = %s
+                        """,
+                        (
+                            email,
+                            hash_pii_optional(email, kind="email"),
+                            encrypt_pii_optional(email),
+                            user_id,
+                        ),
                     )
                 if normalized_phone:
                     await cur.execute(
                         """
                         UPDATE auth_accounts
                         SET phone_e164 = %s,
+                            phone_hash = %s,
+                            phone_enc = %s,
                             phone_status = 'pending',
                             phone_confirmed_at = NULL,
                             whatsapp_verified_at = NULL
                         WHERE user_id = %s
                         """,
-                        (normalized_phone, user_id),
+                        (
+                            normalized_phone,
+                            hash_pii_optional(normalized_phone, kind="phone"),
+                            encrypt_pii_optional(normalized_phone),
+                            user_id,
+                        ),
                     )
                 if display_name_provided:
                     await cur.execute(
-                        "UPDATE auth_accounts SET display_name = %s WHERE user_id = %s",
-                        (display_name, user_id),
+                        """
+                        UPDATE auth_accounts
+                        SET display_name = %s,
+                            display_name_enc = %s
+                        WHERE user_id = %s
+                        """,
+                        (display_name, encrypt_pii_optional(display_name), user_id),
                     )
             await conn.commit()
     except psycopg.errors.UniqueViolation as exc:
