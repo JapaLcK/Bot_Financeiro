@@ -4188,7 +4188,10 @@ async def debug_ai_payload_route(
     payload não tem nada de delivery, sabemos que é invenção.
 
     `kind` ∈ {'patterns', 'insights'}. Protegido pelo mesmo auth do dashboard.
+    Desabilitada por padrão; ligue com DEBUG_AI_ROUTES=1 em dev.
     """
+    if os.getenv("DEBUG_AI_ROUTES", "").strip().lower() not in ("1", "true", "yes"):
+        raise HTTPException(status_code=404, detail="Not found")
     _authorize_dashboard_access(request, user_id)
     from core.ai_patterns import _collect_patterns_data, _collect_insights_data
     if kind == "insights":

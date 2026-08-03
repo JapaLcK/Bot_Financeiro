@@ -412,6 +412,24 @@ def build_user_export_zip(user_id: int) -> bytes:
 def delete_user_data(user_id: int) -> dict:
     primary_email = None
     user_owned_tables = (
+        # Tabelas com coluna user_id e ON DELETE CASCADE (verificado em prod).
+        # Dependiam só do cascade; incluídas no sweep explícito + na verificação
+        # de sobra como cinto-e-suspensório, caso um DB antigo perca a FK.
+        # pocket_lots antes de pockets (child-first) por segurança de ordem.
+        "ai_messages",
+        "ai_pending_actions",
+        "recurring_charges",
+        "recurring_incomes",
+        "recurring_expenses",
+        "bill_instances",
+        "user_mfa_backup_codes",
+        "user_mfa",
+        "data_export_tokens",
+        "auth_refresh_tokens",
+        "auth_sessions",
+        "user_categories",
+        "pocket_lots",
+        "affiliates",
         "credit_cards",
         "investment_lots",
         "investments",
