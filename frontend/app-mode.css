@@ -30,6 +30,17 @@ html.pb-app .mfa-modal {
 /* Strings compridas (e-mail, IP, telefone) quebram linha em vez de esticar
    o card além da tela — era isso que "comia" palavras na borda direita */
 html.pb-app body { overflow-wrap: anywhere; }
+/* ...mas botões e rótulos de ação nunca quebram NO MEIO da palavra
+   ("Atuali-zar" não existe) — só em espaços, como texto normal */
+html.pb-app button,
+html.pb-app .btn-pill,
+html.pb-app .hbtn,
+html.pb-app .btn-sm,
+html.pb-app .pb-tab,
+html.pb-app a[class*="btn"] {
+  overflow-wrap: normal;
+  word-break: normal;
+}
 html.pb-app .layout,
 html.pb-app .main,
 html.pb-app .card,
