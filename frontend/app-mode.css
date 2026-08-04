@@ -74,10 +74,18 @@ html.pb-app body.pb-page-home { padding-top: env(safe-area-inset-top); }
 html.pb-app footer { display: none !important; }
 
 /* ─── Dashboard ────────────────────────────────────────────────────────── */
-/* Header vira barra compacta: menu ☰ + mês + atualizar. Marca é redundante
-   dentro do app; import/export são fluxos de desktop. */
-html.pb-app body.pb-page-app header .logo-img,
-html.pb-app body.pb-page-app header h1 { display: none !important; }
+/* Header compacto: ☰ + marca | mês centrado | conta. Import/export são
+   fluxos de desktop. */
+html.pb-app body.pb-page-app header .logo-img {
+  width: 28px !important;
+  height: 28px !important;
+}
+html.pb-app body.pb-page-app header h1 {
+  font-size: .95rem !important;
+  font-weight: 800;
+  letter-spacing: -.02em;
+  white-space: nowrap;
+}
 html.pb-app body.pb-page-app header .hbtn[onclick*="openOfxImport"],
 html.pb-app body.pb-page-app header .hbtn[onclick*="exportToEmail"] { display: none !important; }
 html.pb-app body.pb-page-app header {
@@ -99,7 +107,9 @@ html.pb-app body.pb-page-app .month-nav {
   display: flex;
   align-items: center;
   justify-content: center;
+  min-width: 0;
 }
+html.pb-app body.pb-page-app #month-label { white-space: nowrap; }
 html.pb-app body.pb-page-app .header-right {
   width: auto !important;
   flex: 0 0 auto !important;
