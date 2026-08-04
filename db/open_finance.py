@@ -5,6 +5,7 @@ from psycopg.types.json import Jsonb
 
 from utils_date import _tz
 
+from .cards import add_imported_credit_purchase, get_or_create_open_finance_card
 from .connection import get_conn
 from .users import ensure_user
 
@@ -600,6 +601,66 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
         conn.commit()
 
     return {"inserted": inserted, "linked": linked, "skipped_non_bank": skipped_non_bank}
+
+
+def import_open_finance_credit(user_id: int, connection_id: int | None = None) -> dict:
+    """Importa transações de contas de CRÉDITO do OF pra máquina de faturas (opção a).
+
+    Auto-cria/vincula um cartão PigBank por conta de crédito e lança cada transação em
+    `credit_transactions` (dedup por external_id), gravando o back-link `imported_credit_tx_id`.
+    Assim compras de cartão entram na fatura, não no saldo — sem furar o "sobrou".
+    """
+    ensure_user(user_id)
+    card_cache: dict[int, int] = {}
+    links: list[tuple[int, int]] = []
+    inserted = 0
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select t.id as of_tx_id, t.provider_transaction_id, t.description,
+                       t.amount, t.transaction_date, t.category,
+                       a.id as of_account_id, a.name as account_name, a.raw as account_raw
+                from open_finance_transactions t
+                join open_finance_accounts a on a.id = t.account_id
+                join open_finance_connections c on c.id = a.connection_id
+                where c.user_id = %s
+                  and t.imported_credit_tx_id is null
+                  and upper(a.type) = 'CREDIT'
+                  and (%s is null or c.id = %s)
+                order by t.transaction_date, t.id
+                """,
+                (user_id, connection_id, connection_id),
+            )
+            rows = cur.fetchall()
+
+    for r in rows:
+        of_acc_id = r["of_account_id"]
+        if of_acc_id not in card_cache:
+            card_cache[of_acc_id] = get_or_create_open_finance_card(
+                user_id, of_acc_id, r["account_name"], r["account_raw"]
+            )
+        tx_id, created = add_imported_credit_purchase(
+            user_id, card_cache[of_acc_id], r["amount"], r["category"],
+            r["transaction_date"], r["provider_transaction_id"],
+        )
+        if created:
+            inserted += 1
+        if tx_id is not None:
+            links.append((r["of_tx_id"], tx_id))
+
+    if links:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                for of_tx_id, credit_tx_id in links:
+                    cur.execute(
+                        "update open_finance_transactions set imported_credit_tx_id=%s where id=%s",
+                        (credit_tx_id, of_tx_id),
+                    )
+            conn.commit()
+
+    return {"inserted": inserted, "linked": len(links), "cards": len(card_cache)}
 
 
 def get_consolidated_balance(user_id: int) -> dict:

@@ -506,6 +506,112 @@ def get_current_open_bill_id(user_id: int, card_id: int, as_of: date):
 # Transações de crédito
 # ──────────────────────────────────────────────────────────────────────────────
 
+def credit_day_from_iso(value, default: int) -> int:
+    """Extrai o dia (1-31) de uma data ISO 'yyyy-mm-dd' do creditData; cai no default."""
+    try:
+        day = int(str(value)[8:10])
+    except (ValueError, TypeError):
+        return default
+    return max(1, min(31, day)) if 1 <= day <= 31 else default
+
+
+def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str | None, raw: dict | None) -> int:
+    """Resolve (ou cria) um cartão PigBank vinculado a uma conta de crédito do Open Finance.
+
+    Dedup pelo `open_finance_account_id`. Deriva fechamento/vencimento do creditData do
+    Pluggy (balanceCloseDate/balanceDueDate), com defaults. Desambigua o nome se colidir
+    com um cartão manual (unique(user_id, name)).
+    """
+    ensure_user(user_id)
+    credit = (raw or {}).get("creditData") or {}
+    closing_day = credit_day_from_iso(credit.get("balanceCloseDate"), 1)
+    due_day = credit_day_from_iso(credit.get("balanceDueDate"), 10)
+    base_name = (name or "Cartão").strip() or "Cartão"
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id from credit_cards where user_id=%s and open_finance_account_id=%s",
+                (user_id, of_account_id),
+            )
+            row = cur.fetchone()
+            if row:
+                return row["id"]
+
+            card_name = None
+            for cand in (base_name, f"{base_name} · Open Finance", f"{base_name} · OF{of_account_id}"):
+                cur.execute("select 1 from credit_cards where user_id=%s and name=%s", (user_id, cand))
+                if not cur.fetchone():
+                    card_name = cand
+                    break
+            if card_name is None:
+                card_name = f"{base_name} · OF{of_account_id}"
+
+            cur.execute(
+                """
+                insert into credit_cards (user_id, name, closing_day, due_day, open_finance_account_id)
+                values (%s,%s,%s,%s,%s)
+                returning id
+                """,
+                (user_id, card_name, closing_day, due_day, of_account_id),
+            )
+            card_id = cur.fetchone()["id"]
+        conn.commit()
+    return card_id
+
+
+def add_imported_credit_purchase(
+    user_id: int,
+    card_id: int,
+    amount,
+    categoria: str | None,
+    purchased_at: date,
+    external_id: str,
+    source: str = "open_finance",
+):
+    """Importa uma transação de cartão do Open Finance, idempotente por (user, source, external_id).
+
+    `amount` vem assinado (negativo = compra, positivo = pagamento/estorno). A fatura sobe
+    com compras e cai com pagamentos/estornos. Retorna (tx_id, criado: bool).
+    """
+    ensure_user(user_id)
+    amt = Decimal(str(amount))
+    valor = abs(amt)
+    is_refund = amt > 0
+    delta = -amt  # compra (amount<0) → fatura += valor; pagamento (amount>0) → fatura -= valor
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id from credit_transactions where user_id=%s and source=%s and external_id=%s",
+                (user_id, source, external_id),
+            )
+            existing = cur.fetchone()
+            if existing:
+                return existing["id"], False
+
+    bill_id = get_or_create_open_bill(user_id, card_id, purchased_at)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into credit_transactions
+                    (bill_id, user_id, card_id, valor, categoria, nota, purchased_at, is_refund, source, external_id)
+                values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                returning id
+                """,
+                (bill_id, user_id, card_id, valor, categoria, None, purchased_at, is_refund, source, external_id),
+            )
+            tx_id = cur.fetchone()["id"]
+            cur.execute(
+                "update credit_bills set total = total + %s where id=%s and user_id=%s",
+                (delta, bill_id, user_id),
+            )
+        conn.commit()
+    return tx_id, True
+
+
 def add_credit_purchase(
     user_id: int,
     card_id: int,

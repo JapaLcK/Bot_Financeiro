@@ -11,7 +11,15 @@ from core.services.pluggy_sync import (
     normalize_pluggy_account,
     normalize_pluggy_transaction,
 )
-from db import classify_open_finance_launch
+from db import classify_open_finance_launch, credit_day_from_iso
+
+
+def test_credit_day_from_iso():
+    assert credit_day_from_iso("2026-08-15", 1) == 15
+    assert credit_day_from_iso("2026-08-28T00:00:00.000Z", 1) == 28
+    assert credit_day_from_iso(None, 10) == 10
+    assert credit_day_from_iso("lixo", 7) == 7
+    assert credit_day_from_iso("2026-08-00", 5) == 5  # dia 0 inválido → default
 
 
 def test_classify_expense_and_income():

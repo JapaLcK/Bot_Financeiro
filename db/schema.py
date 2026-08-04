@@ -528,6 +528,34 @@ def init_db():
         """,
 
         # -----------------------------
+        # Open Finance ↔ crédito (Fase 1 opção a): dedup + vínculo OF→cartão
+        # -----------------------------
+        """
+        alter table credit_transactions add column if not exists source text not null default 'manual'
+        """,
+        """
+        alter table credit_transactions add column if not exists external_id text
+        """,
+        """
+        create unique index if not exists uq_credit_tx_source_external
+          on credit_transactions(user_id, source, external_id)
+          where external_id is not null
+        """,
+        """
+        alter table credit_cards add column if not exists open_finance_account_id bigint
+          references open_finance_accounts(id) on delete set null
+        """,
+        """
+        create unique index if not exists uq_credit_cards_of_account
+          on credit_cards(open_finance_account_id)
+          where open_finance_account_id is not null
+        """,
+        """
+        alter table open_finance_transactions add column if not exists imported_credit_tx_id bigint
+          references credit_transactions(id) on delete set null
+        """,
+
+        # -----------------------------
         # OFX import log
         # -----------------------------
         """
