@@ -111,6 +111,82 @@
     }
   }
 
+  // ── Visão geral estilo app: seção "Próximos vencimentos" + cabeçalho de
+  // "Últimos lançamentos" com Ver todos. Injetados FORA do #grid (que o
+  // render() do dashboard reescreve a cada snapshot).
+  function enhanceOverview() {
+    if (page !== "app") return;
+    const ov = document.getElementById("overview-view");
+    const launchesWrap = document.getElementById("launches-wrap");
+    if (!ov || !launchesWrap) return;
+
+    const bills = document.createElement("div");
+    bills.id = "pb-bills-sec";
+    bills.style.display = "none";
+    ov.insertBefore(bills, document.getElementById("launches-title") || launchesWrap);
+
+    const sec = document.createElement("div");
+    sec.className = "pb-sec";
+    sec.innerHTML = '<b>Últimos lançamentos</b><a href="#" id="pb-see-all">Ver todos</a>';
+    ov.insertBefore(sec, launchesWrap);
+    sec.querySelector("#pb-see-all").addEventListener("click", ev => {
+      ev.preventDefault();
+      document.body.classList.add("pb-launches-all");
+      ev.target.remove();
+    });
+
+    loadUpcomingBills(bills);
+  }
+
+  async function loadUpcomingBills(el) {
+    // USER_ID do dashboard é let (não vaza pro window) — valida por conta própria
+    let uid = window.USER_ID || 0;
+    if (!uid) {
+      try {
+        const rv = await fetch("/auth/validate", { credentials: "same-origin" });
+        if (!rv.ok) return;
+        uid = (await rv.json()).user_id || 0;
+      } catch (_) { return; }
+    }
+    if (!uid) return;
+    let bills = [];
+    try {
+      const r = await fetch(`/recurring-bills/${uid}`, { credentials: "same-origin" });
+      if (!r.ok) return; // sem acesso a contas → seção não aparece
+      bills = ((await r.json()).bills || []).filter(b => b.status === "pending").slice(0, 3);
+    } catch (_) { return; }
+    if (!bills.length) return;
+
+    const fmtBRL = v => Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    const receipt =
+      '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M4 2v20l2-1.5L8 22l2-1.5L12 22l2-1.5L16 22l2-1.5L20 22V2l-2 1.5L16 2l-2 1.5L12 2l-2 1.5L8 2 6 3.5 4 2Z"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>';
+    const dueLabel = due => {
+      const d = Math.round((new Date(due + "T00:00:00") - new Date().setHours(0, 0, 0, 0)) / 864e5);
+      if (d < 0)   return `<small class="late">Venceu há ${-d} dia${d === -1 ? "" : "s"}</small>`;
+      if (d === 0) return '<small class="late">Vence hoje</small>';
+      if (d === 1) return "<small>Vence amanhã</small>";
+      return `<small>Vence em ${d} dias</small>`;
+    };
+    const esc = s => String(s || "").replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+
+    el.innerHTML =
+      '<div class="pb-sec"><b>Próximos vencimentos</b><a href="#" id="pb-bills-all">Ver todos</a></div>' +
+      '<div class="pb-bills">' +
+      bills.map(b =>
+        `<div class="pb-bill"><div class="pb-bill-ico">${receipt}</div>` +
+        `<div class="pb-bill-name"><b>${esc(b.name)}</b><small>${esc(b.category || "Conta")}</small></div>` +
+        `<div class="pb-bill-val"><b>${b.amount != null ? fmtBRL(b.amount) : "R$ —"}</b>${dueLabel(b.due_date)}</div></div>`
+      ).join("") +
+      "</div>";
+    el.style.display = "";
+    el.querySelector("#pb-bills-all").addEventListener("click", ev => {
+      ev.preventDefault();
+      if (typeof window.navigateTo === "function") window.navigateTo("fixed");
+    });
+  }
+
   // Chegou pelo + de outra página: abre o modal de lançamento assim que o
   // dashboard.js terminar de definir a função (poll curto).
   function maybeOpenLaunch() {
@@ -126,7 +202,7 @@
     }, 150);
   }
 
-  function init() { fixViewport(); buildTabbar(); hardenGlyphs(); maybeOpenLaunch(); }
+  function init() { fixViewport(); buildTabbar(); hardenGlyphs(); enhanceOverview(); maybeOpenLaunch(); }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
   } else {

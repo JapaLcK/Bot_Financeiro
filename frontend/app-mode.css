@@ -88,6 +88,90 @@ html.pb-app body.pb-page-app .ov-stats {
 /* A barra rosa "+ Lançar" sai — o botão central da tab bar assume */
 html.pb-app body.pb-page-app .main-tab.tab-launch { display: none !important; }
 
+/* ─── Visão geral enxuta (só stats + vencimentos + lançamentos) ────────── */
+/* Caixinhas/cartões/categorias/gráficos continuam nas telas do menu ☰ */
+html.pb-app body.pb-page-app .main-tabs,
+html.pb-app body.pb-page-app #overview-heading,
+html.pb-app body.pb-page-app #piggy-insight-card,
+html.pb-app body.pb-page-app #overview-view .ov-section-head-merged,
+html.pb-app body.pb-page-app #overview-view .ov-section-head,
+html.pb-app body.pb-page-app #overview-view .ov-pockets,
+html.pb-app body.pb-page-app #overview-view .ov-cards,
+html.pb-app body.pb-page-app #charts-title,
+html.pb-app body.pb-page-app #charts-grid,
+html.pb-app body.pb-page-app #history-title,
+html.pb-app body.pb-page-app #history-wrap,
+html.pb-app body.pb-page-app #launches-title,
+html.pb-app body.pb-page-app #overview-view .filter-bar { display: none !important; }
+
+/* Últimos lançamentos: 5 mais recentes ("Ver todos" libera o resto) */
+html.pb-app body.pb-page-app:not(.pb-launches-all) #launches-card .row:nth-of-type(n+6),
+html.pb-app body.pb-page-app:not(.pb-launches-all) #launches-pagination { display: none !important; }
+
+/* Cabeçalho de seção com ação */
+html.pb-app .pb-sec {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 20px 0 10px;
+}
+html.pb-app .pb-sec b {
+  font-size: 1.02rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text, #fff);
+}
+html.pb-app .pb-sec a {
+  color: #FF2D8E;
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-decoration: none;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+
+/* Lista de próximos vencimentos */
+html.pb-app .pb-bills {
+  background: var(--glass-bg, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.08));
+  border-radius: 16px;
+  overflow: hidden;
+}
+html.pb-app .pb-bill {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+html.pb-app .pb-bill:last-child { border-bottom: 0; }
+html.pb-app .pb-bill-ico {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: rgba(255, 45, 142, 0.14);
+  color: #FF2D8E;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+html.pb-app .pb-bill-name { flex: 1; min-width: 0; }
+html.pb-app .pb-bill-name b {
+  display: block;
+  font-size: 0.92rem;
+  color: var(--text, #fff);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html.pb-app .pb-bill-name small { color: var(--text-3, rgba(255,255,255,.45)); font-size: 0.78rem; }
+html.pb-app .pb-bill-val { text-align: right; }
+html.pb-app .pb-bill-val b { display: block; font-size: 0.92rem; color: var(--text, #fff); }
+html.pb-app .pb-bill-val small { font-size: 0.76rem; color: #FF2D8E; font-weight: 600; }
+html.pb-app .pb-bill-val small.late { color: var(--red, #FF2D2D); }
+
 /* ─── Login / Cadastro: só o cartão, sem nav de site ───────────────────── */
 html.pb-app .nav { display: none !important; }
 

@@ -41,6 +41,18 @@ async def profile():
             "is_affiliate": False}
 
 
+@app.get("/recurring-bills/{uid}")
+async def mock_bills(uid: int):
+    """Boletos falsos pro preview da seção 'Próximos vencimentos' (modo app)."""
+    from datetime import date, timedelta
+    d = lambda n: (date.today() + timedelta(days=n)).isoformat()
+    return {"ok": True, "bills": [
+        {"id": 1, "name": "Nubank",      "category": "Fatura",      "due_date": d(5),  "amount": 145.90, "status": "pending"},
+        {"id": 2, "name": "Conta de luz", "category": "Residencial", "due_date": d(8),  "amount": 120.45, "status": "pending"},
+        {"id": 3, "name": "Água",         "category": "Saneamento",  "due_date": d(12), "amount": 44.90,  "status": "pending"},
+    ]}
+
+
 @app.websocket("/ws/{uid}")
 async def ws(sock: WebSocket, uid: str):
     await sock.accept()
