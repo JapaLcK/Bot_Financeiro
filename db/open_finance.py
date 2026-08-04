@@ -481,6 +481,158 @@ def save_open_finance_sync(connection_id: int, accounts: list[dict]) -> dict:
     return {"accounts_synced": account_count, "transactions_synced": transaction_count}
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Fase 1 — import OF → launches (analytics) + saldo consolidado
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Movimento interno = dinheiro indo pra poupança/caixinha/conta própria, NÃO gasto.
+# Baseado na taxonomia real do Pluggy (GET /categories). Caixinha do Nubank é um CDB:
+# aparece na conta como "Automatic investment"/"Fixed income" (aplicação/resgate).
+# NÃO inclui "Proceeds interests and dividends" (isso é RENDA de investimento).
+_OF_INTERNAL_CATEGORIES = (
+    "automatic investment",   # aplicação automática (Caixinha do Nubank)
+    "fixed income",           # CDB que lastreia a caixinha
+    "same person transfer",   # transferência entre contas próprias (+ variantes por prefixo)
+    "transfer - internal",
+)
+# Fallback por descrição, pra bancos sem a categoria enriquecida (Pro) do Pluggy.
+_OF_INTERNAL_KEYWORDS = (
+    "aplicacao", "aplicação", "resgate", "caixinha",
+    "poupanca", "poupança", "cofrinho",
+)
+
+
+def classify_open_finance_launch(amount, category: str | None = None, description: str | None = None) -> dict:
+    """Puro: decide tipo/valor/is_internal a partir da transação OF (amount já assinado).
+
+    Caixinha do banco (aplicação/resgate) e transferência entre contas próprias viram
+    movimento interno — ficam fora do cálculo de gastos/"sobrou" (igual `deposito_caixinha`).
+    """
+    v = Decimal(str(amount))
+    tipo = "despesa" if v < 0 else "receita"
+    cat = (category or "").strip().lower()
+    desc = (description or "").lower()
+    is_internal = (
+        any(cat == c or cat.startswith(c) for c in _OF_INTERNAL_CATEGORIES)
+        or any(k in desc for k in _OF_INTERNAL_KEYWORDS)
+    )
+    return {"tipo": tipo, "valor": abs(v), "is_internal_movement": is_internal}
+
+
+def import_open_finance_launches(user_id: int, connection_id: int | None = None) -> dict:
+    """Importa transações OF (ainda não importadas) de contas BANK como `launches`.
+
+    Modelo híbrido (Design Y): a transação vira lançamento pra alimentar sobrou/timeline/
+    budgets, mas com `delta_conta=0` — NÃO move `accounts.balance` (o saldo do banco já é
+    contado à parte, autoritativo, em `get_consolidated_balance`). Idempotente via
+    `on conflict (user_id, source, external_id)` + filtro `imported_launch_id is null`.
+    Cartão de crédito (type != BANK) fica de fora por ora.
+    """
+    ensure_user(user_id)
+    inserted = 0
+    linked = 0
+    skipped_non_bank = 0
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select t.id as of_tx_id, t.provider_transaction_id, t.description,
+                       t.amount, t.transaction_date, t.category, a.type as account_type
+                from open_finance_transactions t
+                join open_finance_accounts a on a.id = t.account_id
+                join open_finance_connections c on c.id = a.connection_id
+                where c.user_id = %s
+                  and t.imported_launch_id is null
+                  and (%s is null or c.id = %s)
+                order by t.transaction_date, t.id
+                """,
+                (user_id, connection_id, connection_id),
+            )
+            rows = cur.fetchall()
+
+            for r in rows:
+                if (r["account_type"] or "").upper() != "BANK":
+                    skipped_non_bank += 1
+                    continue
+
+                cls = classify_open_finance_launch(r["amount"], r["category"], r["description"])
+                efeitos = {
+                    "delta_conta": 0,  # analytics-only: não mexe no saldo manual
+                    "open_finance": {"provider_transaction_id": r["provider_transaction_id"]},
+                }
+                cur.execute(
+                    """
+                    insert into launches(
+                        user_id, tipo, valor, categoria, alvo, nota, criado_em, efeitos,
+                        source, external_id, posted_at, currency, imported_at, is_internal_movement
+                    )
+                    values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now(),%s)
+                    on conflict (user_id, source, external_id) do nothing
+                    returning id
+                    """,
+                    (
+                        user_id, cls["tipo"], cls["valor"], (r["category"] or "outros"),
+                        r["description"], None, r["transaction_date"], Jsonb(efeitos),
+                        "open_finance", r["provider_transaction_id"], r["transaction_date"], "BRL",
+                        cls["is_internal_movement"],
+                    ),
+                )
+                got = cur.fetchone()
+                if got:
+                    launch_id = got["id"]
+                    inserted += 1
+                else:
+                    cur.execute(
+                        "select id from launches where user_id=%s and source='open_finance' and external_id=%s",
+                        (user_id, r["provider_transaction_id"]),
+                    )
+                    ex = cur.fetchone()
+                    launch_id = ex["id"] if ex else None
+
+                if launch_id is not None:
+                    cur.execute(
+                        "update open_finance_transactions set imported_launch_id=%s where id=%s",
+                        (launch_id, r["of_tx_id"]),
+                    )
+                    linked += 1
+
+        conn.commit()
+
+    return {"inserted": inserted, "linked": linked, "skipped_non_bank": skipped_non_bank}
+
+
+def get_consolidated_balance(user_id: int) -> dict:
+    """Saldo consolidado = saldo manual + soma dos saldos das contas BANK conectadas.
+
+    Cartão (type CREDIT) fica de fora (é dívida, não saldo disponível). Auto-atualiza
+    conforme o sync refresca os saldos autoritativos dos bancos.
+    """
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select coalesce(balance, 0) as b from accounts where user_id=%s", (user_id,))
+            row = cur.fetchone()
+            manual = row["b"] if row else Decimal("0")
+
+            cur.execute(
+                """
+                select coalesce(sum(a.balance), 0) as b
+                from open_finance_accounts a
+                join open_finance_connections c on c.id = a.connection_id
+                where c.user_id=%s and upper(a.type) = 'BANK'
+                """,
+                (user_id,),
+            )
+            of_bank = cur.fetchone()["b"]
+
+    return {
+        "manual": manual,
+        "open_finance_bank": of_bank,
+        "consolidated": (manual or Decimal("0")) + (of_bank or Decimal("0")),
+    }
+
+
 def disconnect_open_finance_connection(user_id: int, connection_id: int | None = None) -> int:
     ensure_user(user_id)
 

@@ -22,6 +22,7 @@ from core.services.pluggy import (
 from db import (
     get_open_finance_connection_by_item_id,
     get_open_finance_snapshot,
+    import_open_finance_launches,
     save_open_finance_sync,
 )
 
@@ -102,12 +103,17 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
         accounts.append(account)
 
     result = save_open_finance_sync(connection["id"], accounts)
+
+    # Fase 1: importa as transações novas como launches (analytics, sem mover saldo).
+    imported = import_open_finance_launches(connection["user_id"], connection["id"])
+
     return {
         "ok": True,
         "item_id": provider_item_id,
         "connection_id": connection["id"],
         "user_id": connection["user_id"],
         **result,
+        "imported": imported,
     }
 
 
@@ -125,5 +131,6 @@ def sync_pluggy_user(user_id: int) -> dict:
         "items_synced": len(results),
         "accounts_synced": sum(r.get("accounts_synced", 0) for r in results),
         "transactions_synced": sum(r.get("transactions_synced", 0) for r in results),
+        "launches_imported": sum((r.get("imported") or {}).get("inserted", 0) for r in results),
         "results": results,
     }

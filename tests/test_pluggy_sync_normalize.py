@@ -11,6 +11,39 @@ from core.services.pluggy_sync import (
     normalize_pluggy_account,
     normalize_pluggy_transaction,
 )
+from db import classify_open_finance_launch
+
+
+def test_classify_expense_and_income():
+    assert classify_open_finance_launch(-47.90, "Restaurants", "iFood") == {
+        "tipo": "despesa", "valor": Decimal("47.90"), "is_internal_movement": False
+    }
+    assert classify_open_finance_launch(6500, "Salary", "Salário")["tipo"] == "receita"
+
+
+def test_classify_caixinha_automatic_investment_is_internal():
+    # Caixinha do Nubank = "Automatic investment" na conta corrente → interno, não gasto.
+    r = classify_open_finance_launch(-200, "Automatic investment", "Aplicação Caixinha Viagem")
+    assert r["is_internal_movement"] is True
+    assert r["tipo"] == "despesa"
+
+
+def test_classify_same_person_transfer_is_internal():
+    r = classify_open_finance_launch(-500, "Same person transfer - PIX", "Pix para mim mesmo")
+    assert r["is_internal_movement"] is True
+
+
+def test_classify_investment_income_is_not_internal():
+    # Rendimento de investimento é RENDA, não movimento interno.
+    r = classify_open_finance_launch(12.34, "Proceeds interests and dividends", "Rendimento CDB")
+    assert r["is_internal_movement"] is False
+    assert r["tipo"] == "receita"
+
+
+def test_classify_internal_by_description_fallback():
+    # Sem categoria enriquecida (Pro), cai no fallback por descrição.
+    r = classify_open_finance_launch(-150, None, "RESGATE POUPANCA")
+    assert r["is_internal_movement"] is True
 
 
 def test_extract_after_cursor_from_next_querystring():
