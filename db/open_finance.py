@@ -1,3 +1,5 @@
+import re
+import unicodedata
 from decimal import Decimal
 from datetime import datetime, timedelta
 
@@ -520,6 +522,100 @@ def classify_open_finance_launch(amount, category: str | None = None, descriptio
     return {"tipo": tipo, "valor": abs(v), "is_internal_movement": is_internal}
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Fase 2 — reconciliação OF ↔ manual (não duplicar)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Descrições manuais genéricas (sem estabelecimento) — casam por valor+data mesmo
+# sem bater o nome. Normalizadas (sem acento).
+_GENERIC_MERCHANTS = {
+    "", "almoco", "comida", "gasto", "compra", "lanche", "jantar", "cafe",
+    "diversos", "outros", "conta", "boleto", "pix",
+}
+
+RECON_AMOUNT_TOL = Decimal("0.05")
+RECON_DATE_WINDOW = 3  # dias (janela de graça: o OF chega 0-2 dias depois)
+
+
+def _normalize_merchant(s) -> str:
+    text = unicodedata.normalize("NFKD", str(s or ""))
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    text = re.sub(r"[^a-z0-9 ]", " ", text.lower())
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def merchant_similarity(a, b) -> bool:
+    """Puro: dois estabelecimentos são 'parecidos'? Substring ou token (>=3) em comum."""
+    na, nb = _normalize_merchant(a), _normalize_merchant(b)
+    if not na or not nb:
+        return False
+    if na in nb or nb in na:
+        return True
+    ta = {t for t in na.split() if len(t) >= 3}
+    tb = {t for t in nb.split() if len(t) >= 3}
+    return bool(ta & tb)
+
+
+def _is_generic_merchant(s) -> bool:
+    return _normalize_merchant(s) in _GENERIC_MERCHANTS
+
+
+def pick_reconciliation_match(valor, tx_date, description, candidates) -> dict:
+    """Puro. Decide se a transação OF casa com um lançamento manual.
+
+    candidates: [{id, valor, ref_date(date), alvo, nota}]. Retorna {launch_id, verdict}:
+      'auto' = mesclar sozinho (alto-confiança), 'ask' = perguntar (ambíguo), 'none' = sem match.
+    """
+    target = Decimal(str(valor))
+    elig = []
+    for c in candidates:
+        try:
+            cv = Decimal(str(c["valor"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if abs(cv - target) > RECON_AMOUNT_TOL:
+            continue
+        cd = c.get("ref_date")
+        if cd is None or abs((cd - tx_date).days) > RECON_DATE_WINDOW:
+            continue
+        merchant = f"{c.get('alvo') or ''} {c.get('nota') or ''}"
+        similar = merchant_similarity(description, merchant) or _is_generic_merchant(c.get("alvo"))
+        elig.append({"id": c["id"], "diff": abs((cd - tx_date).days), "similar": similar})
+
+    if not elig:
+        return {"launch_id": None, "verdict": "none"}
+
+    elig.sort(key=lambda e: (e["diff"], not e["similar"]))
+    best = elig[0]
+    # auto só quando há UM candidato claro, data apertada e estabelecimento bate (ou é genérico)
+    if len(elig) == 1 and best["diff"] <= 1 and best["similar"]:
+        return {"launch_id": best["id"], "verdict": "auto"}
+    # 2+ candidatos, data folgada ou nome diverge → perguntar, sugerindo o melhor
+    return {"launch_id": best["id"], "verdict": "ask"}
+
+
+def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date) -> list[dict]:
+    """Lançamentos manuais/OFX (não-OF) elegíveis a casar, ainda não vinculados a nenhuma OF tx."""
+    cur.execute(
+        """
+        select id, valor, coalesce(posted_at, criado_em::date) as ref_date, alvo, nota
+        from launches
+        where user_id = %s
+          and tipo = %s
+          and coalesce(source, 'manual') <> 'open_finance'
+          and is_internal_movement = false
+          and abs(valor - %s) <= %s
+          and coalesce(posted_at, criado_em::date) between %s and %s
+          and not exists (
+              select 1 from open_finance_transactions o where o.imported_launch_id = launches.id
+          )
+        """,
+        (user_id, tipo, Decimal(str(valor)), RECON_AMOUNT_TOL,
+         tx_date - timedelta(days=RECON_DATE_WINDOW), tx_date + timedelta(days=RECON_DATE_WINDOW)),
+    )
+    return cur.fetchall()
+
+
 def import_open_finance_launches(user_id: int, connection_id: int | None = None) -> dict:
     """Importa transações OF (ainda não importadas) de contas BANK como `launches`.
 
@@ -531,7 +627,8 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
     """
     ensure_user(user_id)
     inserted = 0
-    linked = 0
+    auto_merged = 0
+    pending = 0
     skipped_non_bank = 0
 
     with get_conn() as conn:
@@ -558,6 +655,36 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                     continue
 
                 cls = classify_open_finance_launch(r["amount"], r["category"], r["description"])
+
+                # Reconciliação (Fase 2): gasto/receita não-interno tenta casar com manual.
+                verdict, match_id = "none", None
+                if not cls["is_internal_movement"]:
+                    candidates = _find_manual_candidates(
+                        cur, user_id, cls["tipo"], cls["valor"], r["transaction_date"]
+                    )
+                    pick = pick_reconciliation_match(
+                        cls["valor"], r["transaction_date"], r["description"], candidates
+                    )
+                    verdict, match_id = pick["verdict"], pick["launch_id"]
+
+                if verdict == "auto":
+                    # Alto-confiança: mescla no lançamento manual — NÃO cria OF launch (1 real = 1 linha).
+                    if r["category"]:
+                        cur.execute(
+                            "update launches set categoria=%s "
+                            "where id=%s and (categoria is null or categoria in ('outros',''))",
+                            (r["category"], match_id),
+                        )
+                    cur.execute(
+                        "update open_finance_transactions "
+                        "set imported_launch_id=%s, match_launch_id=%s, reconciliation_status='auto_merged' "
+                        "where id=%s",
+                        (match_id, match_id, r["of_tx_id"]),
+                    )
+                    auto_merged += 1
+                    continue
+
+                # Sem match ('none') ou ambíguo ('ask'): cria o OF launch.
                 efeitos = {
                     "delta_conta": 0,  # analytics-only: não mexe no saldo manual
                     "open_finance": {"provider_transaction_id": r["provider_transaction_id"]},
@@ -592,15 +719,23 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                     launch_id = ex["id"] if ex else None
 
                 if launch_id is not None:
+                    status = "pending" if verdict == "ask" else "imported"
                     cur.execute(
-                        "update open_finance_transactions set imported_launch_id=%s where id=%s",
-                        (launch_id, r["of_tx_id"]),
+                        "update open_finance_transactions "
+                        "set imported_launch_id=%s, match_launch_id=%s, reconciliation_status=%s where id=%s",
+                        (launch_id, (match_id if verdict == "ask" else None), status, r["of_tx_id"]),
                     )
-                    linked += 1
+                    if verdict == "ask":
+                        pending += 1
 
         conn.commit()
 
-    return {"inserted": inserted, "linked": linked, "skipped_non_bank": skipped_non_bank}
+    return {
+        "inserted": inserted,
+        "auto_merged": auto_merged,
+        "pending": pending,
+        "skipped_non_bank": skipped_non_bank,
+    }
 
 
 def import_open_finance_credit(user_id: int, connection_id: int | None = None) -> dict:

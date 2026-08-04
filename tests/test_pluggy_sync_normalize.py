@@ -11,7 +11,72 @@ from core.services.pluggy_sync import (
     normalize_pluggy_account,
     normalize_pluggy_transaction,
 )
-from db import classify_open_finance_launch, credit_day_from_iso
+from db import (
+    classify_open_finance_launch,
+    credit_day_from_iso,
+    merchant_similarity,
+    pick_reconciliation_match,
+)
+
+
+def _cand(id, valor, ref_date, alvo=None, nota=None):
+    return {"id": id, "valor": valor, "ref_date": ref_date, "alvo": alvo, "nota": nota}
+
+
+def test_merchant_similarity():
+    assert merchant_similarity("iFood *Restaurante", "iFood") is True
+    assert merchant_similarity("NETFLIX.COM", "netflix") is True
+    assert merchant_similarity("Uber", "iFood") is False
+    assert merchant_similarity("", "iFood") is False
+
+
+def test_reconciliation_auto_merge_same_day_similar_merchant():
+    # manual "iFood 47,90" seg; OF "iFood" mesmo dia, mesmo valor → mescla sozinho.
+    r = pick_reconciliation_match(
+        Decimal("47.90"), date(2026, 7, 20), "iFood",
+        [_cand(10, Decimal("47.90"), date(2026, 7, 20), alvo="iFood")],
+    )
+    assert r == {"launch_id": 10, "verdict": "auto"}
+
+
+def test_reconciliation_auto_merge_generic_manual_description():
+    # manual genérico "almoço 50" sem estabelecimento → casa por valor+data.
+    r = pick_reconciliation_match(
+        Decimal("50"), date(2026, 7, 20), "Restaurante Sabor",
+        [_cand(11, Decimal("50"), date(2026, 7, 21), alvo="almoço")],
+    )
+    assert r["verdict"] == "auto"
+    assert r["launch_id"] == 11
+
+
+def test_reconciliation_ask_when_merchant_differs():
+    # valor e data batem, mas estabelecimento claramente diverge → perguntar.
+    r = pick_reconciliation_match(
+        Decimal("100"), date(2026, 7, 20), "Posto Shell",
+        [_cand(12, Decimal("100"), date(2026, 7, 20), alvo="Farmácia São Paulo")],
+    )
+    assert r["verdict"] == "ask"
+    assert r["launch_id"] == 12
+
+
+def test_reconciliation_ask_when_multiple_candidates():
+    r = pick_reconciliation_match(
+        Decimal("30"), date(2026, 7, 20), "Padaria",
+        [_cand(1, Decimal("30"), date(2026, 7, 20), alvo="Padaria"),
+         _cand(2, Decimal("30"), date(2026, 7, 19), alvo="Padaria")],
+    )
+    assert r["verdict"] == "ask"
+
+
+def test_reconciliation_none_when_out_of_window_or_value():
+    assert pick_reconciliation_match(
+        Decimal("47.90"), date(2026, 7, 20), "iFood",
+        [_cand(1, Decimal("47.90"), date(2026, 7, 30), alvo="iFood")],  # 10 dias fora
+    )["verdict"] == "none"
+    assert pick_reconciliation_match(
+        Decimal("47.90"), date(2026, 7, 20), "iFood",
+        [_cand(1, Decimal("99.00"), date(2026, 7, 20), alvo="iFood")],  # valor diferente
+    )["verdict"] == "none"
 
 
 def test_credit_day_from_iso():

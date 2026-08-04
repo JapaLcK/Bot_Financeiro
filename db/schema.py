@@ -556,6 +556,17 @@ def init_db():
         """,
 
         # -----------------------------
+        # Open Finance — reconciliação (Fase 2): dedup OF ↔ manual
+        # -----------------------------
+        """
+        alter table open_finance_transactions add column if not exists reconciliation_status text
+        """,
+        """
+        alter table open_finance_transactions add column if not exists match_launch_id bigint
+          references launches(id) on delete set null
+        """,
+
+        # -----------------------------
         # OFX import log
         # -----------------------------
         """
