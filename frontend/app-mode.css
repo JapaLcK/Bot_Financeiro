@@ -355,9 +355,7 @@ html.pb-app .pb-acct-head p { margin: 0; font-size: 0.88rem; color: var(--text-3
 html.pb-app .pb-acct-head img {
   width: 54px;
   height: 54px;
-  border-radius: 50%;
-  object-fit: cover;
-  box-shadow: 0 0 0 2px #FF2D8E;
+  object-fit: contain;
 }
 
 html.pb-app .pb-protect {
