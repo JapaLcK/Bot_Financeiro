@@ -12,6 +12,21 @@
  *  - Safe areas (notch / home indicator) respeitadas via env().
  */
 
+/* ─── Base: página nunca rola de lado (app não arrasta lateral) ────────── */
+html.pb-app,
+html.pb-app body {
+  max-width: 100vw;
+  overflow-x: hidden !important;
+}
+
+/* Modais sempre cabem na tela */
+html.pb-app .modal,
+html.pb-app .modal.wide,
+html.pb-app .mfa-modal {
+  width: auto !important;
+  max-width: calc(100vw - 24px) !important;
+}
+
 /* ─── Base: sem scrollbar (app não é site) ─────────────────────────────── */
 html.pb-app *::-webkit-scrollbar {
   width: 0 !important;
@@ -283,6 +298,19 @@ html.pb-app body.pb-page-settings .topbar { display: none !important; }
 html.pb-app body.pb-page-settings { padding-top: env(safe-area-inset-top); }
 
 /* ─── Settings vira "Minha conta" (estilo app) ─────────────────────────── */
+/* Paleta: o settings tem tema próprio cinza-azulado (#16181d/#1e2128) que
+   destoa do preto da marca — no app, escurece pro tom do resto do produto */
+html.pb-app body.pb-page-settings {
+  --page:         #0B0B0D;
+  --surface:      #141416;
+  --surface-2:    #1B1B1F;
+  --border:       rgba(255, 255, 255, 0.07);
+  --border-hover: rgba(255, 255, 255, 0.14);
+  --muted:        rgba(255, 255, 255, 0.55);
+  --faint:        rgba(255, 255, 255, 0.34);
+  background: #0B0B0D !important;
+}
+
 /* Cabeçalho original (breadcrumb + título por seção) sai; entra o header
    fixo "Minha conta" + banner de segurança injetados pelo app-mode.js */
 html.pb-app body.pb-page-settings .page-header { display: none !important; }
