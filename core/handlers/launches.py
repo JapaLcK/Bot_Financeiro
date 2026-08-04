@@ -1,11 +1,15 @@
 # core/handlers/launches.py
 from __future__ import annotations
 import logging
+import os
 import re
 from datetime import date, timedelta
 
 import db
-from utils_text import fmt_brl, is_internal_category, canonicalize_category_label, normalize_text
+from utils_text import (
+    fmt_brl, is_internal_category, canonicalize_category_label, normalize_text,
+    merchant_key, RECURRING_SUGGESTION_BLOCKLIST,
+)
 from utils_date import extract_date_from_text, today_tz, parse_period_from_text, month_range_today
 from core.services.category_service import infer_category, learn_from_inference
 from parsers import (
@@ -316,6 +320,57 @@ def spend_query(user_id: int, text: str, entities: dict | None = None) -> str:
 # add / add_from_entities — registra receita/despesa
 # ---------------------------------------------------------------------------
 
+def _recurring_suggestion_enabled() -> bool:
+    """Flag de kill-switch. Ligada por padrão; desliga só com env explícito."""
+    return (os.getenv("AUTO_FIX_SUGGESTION_ENABLED") or "on").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _maybe_recurring_offer(
+    user_id: int, descr: str, valor: float, categoria_final: str, criado_em, launch_id,
+) -> dict | None:
+    """Se esta despesa repete uma anterior (mesma descrição + mesmo valor, em mês
+    distinto) numa categoria elegível, devolve o payload da oferta de gasto fixo.
+    Senão, None. Nunca levanta — detecção é best-effort e não pode quebrar o
+    lançamento."""
+    if not _recurring_suggestion_enabled():
+        return None
+    try:
+        cat_canon = canonicalize_category_label(categoria_final) or categoria_final
+        if cat_canon in RECURRING_SUGGESTION_BLOCKLIST:
+            return None
+        key = merchant_key(descr)
+        if not key:
+            return None
+        when = criado_em if isinstance(criado_em, (date,)) else None
+        if when is None:
+            from datetime import datetime as _dt
+            when = criado_em if isinstance(criado_em, _dt) else today_tz()
+        from db.recurring import find_recurring_candidate
+        prior_months = find_recurring_candidate(
+            user_id, key, valor,
+            current_year=when.year, current_month=when.month,
+            exclude_launch_id=int(launch_id) if launch_id else None,
+        )
+        if prior_months < 1:
+            return None
+        name = (descr or "").strip() or (cat_canon.capitalize() if cat_canon else "Gasto fixo")
+        return {
+            "name": name,
+            "amount": float(valor),
+            "category": categoria_final,
+            "due_day": int(when.day),
+            "merchant_key": key,
+        }
+    except Exception:
+        logger.warning(
+            "detecção de gasto fixo falhou (user %s, descr=%r) — seguindo sem oferta",
+            user_id, descr, exc_info=True,
+        )
+        return None
+
+
 def add_from_entities(
     user_id: int,
     *,
@@ -395,9 +450,28 @@ def add_from_entities(
         reason=reason_final,
     )
 
+    # Detecção "essa despesa se repete → sugere gasto fixo". Só para despesa
+    # real (não movimentação interna). A oferta divide a linha de pending_actions
+    # com o botão de recategorizar; quando há oferta de recorrente ela vence
+    # (é mais valiosa) e o botão de recategorizar é suprimido nesse lançamento.
+    recurring_offer = None
+    if tipo == "despesa" and not is_int:
+        recurring_offer = _maybe_recurring_offer(
+            user_id, nota_clean, valor, categoria_final, criado_em, launch_id,
+        )
+
+    if recurring_offer:
+        try:
+            db.set_pending_action(user_id, "confirm_recurring_offer", recurring_offer)
+        except Exception:
+            logger.warning(
+                "falha ao salvar pending confirm_recurring_offer (user %s) — oferta perdida",
+                user_id, exc_info=True,
+            )
+            recurring_offer = None
     # Botão "categoria errada?" no WhatsApp (one-shot, lido por
     # _send_reply_with_optional_buttons no wa_runtime e limpo em seguida).
-    if platform == "whatsapp" and launch_id:
+    elif platform == "whatsapp" and launch_id:
         try:
             db.set_pending_action(
                 user_id,
@@ -431,6 +505,13 @@ def add_from_entities(
                 "avaliação de alerta de orçamento falhou (user %s, categoria %r) — alerta pode ter sido perdido",
                 user_id, categoria_final, exc_info=True,
             )
+
+    if recurring_offer:
+        resposta += (
+            f"\n\n💡 Você já lançou *{recurring_offer['name']}* de {fmt_brl(valor)} "
+            f"em outro mês. Quer marcar como *gasto fixo* (a Piggy lança sozinha "
+            f"todo mês)? Responda *sim* ou *não*."
+        )
 
     return resposta
 

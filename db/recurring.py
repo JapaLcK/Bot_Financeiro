@@ -414,6 +414,106 @@ def mark_recurring_charged(user_id: int, rec_id: int, ym: str) -> None:
         conn.commit()
 
 
+# ---------------------------------------------------------------------------
+# Detecção "essa despesa se repete → sugere virar gasto fixo"
+# ---------------------------------------------------------------------------
+
+def _merchant_key(text: str) -> str:
+    # import tardio: utils_text não depende de db, mas evita qualquer ordem de
+    # import na carga do módulo.
+    from utils_text import merchant_key
+    return merchant_key(text or "")
+
+
+def find_recurring_candidate(
+    user_id: int,
+    key: str,
+    amount: float,
+    *,
+    current_year: int,
+    current_month: int,
+    exclude_launch_id: int | None = None,
+) -> int:
+    """Quantas ocorrências ANTERIORES desta despesa existem em meses distintos
+    do atual (mesma descrição normalizada `key` + MESMO valor exato).
+
+    Retorna o nº de meses-calendário anteriores (≠ mês atual) em que a combinação
+    apareceu. `>= 1` ⇒ candidata a gasto fixo (repetiu em pelo menos 2 meses).
+    Retorna 0 (não sugerir) se:
+      • a combinação (merchant+valor) já foi recusada pelo usuário;
+      • já existe gasto fixo ATIVO com o mesmo valor e nome equivalente;
+      • não há repetição em mês distinto.
+
+    O casamento de descrição é feito em Python (via `merchant_key`) porque a
+    normalização remove acento/pontuação/TLD — o que o LOWER(TRIM) do SQL não faz.
+    O filtro de valor exato roda no SQL e deixa a varredura barata.
+    """
+    key = (key or "").strip()
+    if not key:
+        return 0
+    amt = Decimal(str(amount))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # 1) já recusado antes? não re-perguntar
+            cur.execute(
+                "select 1 from recurring_suggestion_dismissed "
+                "where user_id=%s and merchant_key=%s and amount=%s",
+                (user_id, key, amt),
+            )
+            if cur.fetchone():
+                return 0
+            # 2) já é gasto fixo ativo (mesmo valor + nome equivalente)?
+            cur.execute(
+                "select name from recurring_expenses "
+                "where user_id=%s and is_active=true and amount=%s",
+                (user_id, amt),
+            )
+            for r in cur.fetchall() or []:
+                if _merchant_key(r["name"]) == key:
+                    return 0
+            # 3) despesas passadas com o MESMO valor exato (casa descrição depois)
+            cur.execute(
+                """
+                select criado_em,
+                       coalesce(nullif(alvo,''), nullif(nota,'')) as descr
+                from launches
+                where user_id=%s and tipo='despesa'
+                  and is_internal_movement=false
+                  and valor=%s
+                  and (%s::bigint is null or id <> %s)
+                """,
+                (user_id, amt, exclude_launch_id, exclude_launch_id),
+            )
+            rows = cur.fetchall() or []
+    months: set[tuple[int, int]] = set()
+    for r in rows:
+        if _merchant_key(r["descr"]) != key:
+            continue
+        dt = r["criado_em"]
+        if dt is None:
+            continue
+        ym = (dt.year, dt.month)
+        if ym != (current_year, current_month):
+            months.add(ym)
+    return len(months)
+
+
+def dismiss_recurring_suggestion(user_id: int, key: str, amount: float) -> None:
+    """Registra que o usuário recusou virar gasto fixo essa combinação
+    (merchant + valor), pra não re-sugerir. Idempotente."""
+    key = (key or "").strip()
+    if not key:
+        return
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "insert into recurring_suggestion_dismissed (user_id, merchant_key, amount) "
+                "values (%s, %s, %s) on conflict do nothing",
+                (user_id, key, Decimal(str(amount))),
+            )
+        conn.commit()
+
+
 __all__ = [
     "list_recurring_expenses",
     "get_recurring_expense",
@@ -423,4 +523,6 @@ __all__ = [
     "delete_recurring_expense",
     "list_due_recurring_expenses",
     "mark_recurring_charged",
+    "find_recurring_candidate",
+    "dismiss_recurring_suggestion",
 ]

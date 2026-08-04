@@ -300,6 +300,20 @@ def init_db():
           unique (user_id, keyword)
         )
         """,
+        # Sugestões de "gasto fixo" que o usuário recusou. Quando uma despesa se
+        # repete (mesma descrição + valor em meses distintos) a Piggy oferece
+        # marcar como recorrente; se o user diz "não", grava aqui pra não
+        # re-perguntar a mesma combinação (merchant + valor). Ver
+        # find_recurring_candidate em db/recurring.py.
+        """
+        create table if not exists recurring_suggestion_dismissed (
+          user_id bigint not null references users(id) on delete cascade,
+          merchant_key text not null,
+          amount numeric not null,
+          dismissed_at timestamptz not null default now(),
+          primary key (user_id, merchant_key, amount)
+        )
+        """,
         """
         create table if not exists market_rates (
           code text not null,

@@ -23,6 +23,21 @@ def contains_word(text: str, word: str) -> bool:
     # bate palavra inteira quando possível (evita falsos positivos)
     return re.search(rf"\b{re.escape(word)}\b", text) is not None
 
+
+def merchant_key(text: str) -> str:
+    """Chave de casamento de estabelecimento para detectar recorrência.
+
+    Normaliza (lowercase, sem acento/pontuação) e remove sufixo de domínio no
+    fim, pra "NETFLIX.COM" / "netflix.com.br" baterem com "Netflix". Vazio se
+    não sobrar nada. Usada por `find_recurring_candidate` (mesma descrição +
+    mesmo valor em meses distintos → sugere gasto fixo)."""
+    norm = normalize_text(text)  # "netflix.com.br" → "netflix com br"
+    if not norm:
+        return ""
+    # remove TLD/segundo nível no FINAL apenas (não mexe no meio do nome)
+    norm = re.sub(r"\s+(com|net|org|io|app|br)(\s+br)?$", "", norm).strip()
+    return norm
+
 # Regras locais (baratas) — já cobrindo mercado/psicologo/petshop
 LOCAL_RULES = [
     # ─── Movimentações internas têm prioridade ────────────────────────────────
@@ -490,6 +505,17 @@ CATEGORY_LABELS = {
     "investimentos": "investimentos",
     "criptomoedas": "criptomoedas",
 }
+
+# Categorias onde "mesmo valor repetido" é ruído, não recorrência: compras
+# pontuais (mercado/lazer/compras online), alimentação (valor variável) e
+# movimentações internas/investimento. Nessas NÃO sugerimos gasto fixo
+# automático. As elegíveis (moradia, assinaturas, educação, saúde, pets,
+# beleza, transporte...) ficam por exclusão. Valores são rótulos canônicos
+# (comparar via canonicalize_category_label). Decisão de design registrada.
+RECURRING_SUGGESTION_BLOCKLIST = {
+    "alimentação", "mercado", "lazer", "compras online",
+    "rendimentos", "criptomoedas", "outros",
+} | INTERNAL_MOVEMENT_CATEGORIES  # inclui investimento_aporte, ajuste_saldo, etc.
 
 INVESTMENT_CATEGORY_HINTS = {
     "investimento", "investimentos",
