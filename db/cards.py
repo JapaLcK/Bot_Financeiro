@@ -570,20 +570,20 @@ def remove_single_credit_transaction(user_id: int, ct_id: int):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, bill_id, valor, is_refund from credit_transactions "
+                "select id, bill_id, valor from credit_transactions "
                 "where user_id=%s and id=%s for update",
                 (user_id, ct_id),
             )
             tx = cur.fetchone()
             if not tx:
                 return None
+            # valor é assinado (compra +, estorno -) e a fatura foi `total += valor` no insert.
+            # Reverter = `total -= valor`, uniforme pros dois casos.
             v = Decimal(str(tx["valor"]))
-            # contribuição da tx pra fatura: compra soma, estorno/pagamento subtrai.
-            contrib = -v if tx["is_refund"] else v
             cur.execute("delete from credit_transactions where user_id=%s and id=%s", (user_id, ct_id))
             cur.execute(
                 "update credit_bills set total = total - %s where id=%s and user_id=%s",
-                (contrib, tx["bill_id"], user_id),
+                (v, tx["bill_id"], user_id),
             )
         conn.commit()
     return {"removed_total": float(v), "ct_id": ct_id}
@@ -624,9 +624,12 @@ def add_imported_credit_purchase(
     """
     ensure_user(user_id)
     amt = Decimal(str(amount))
-    valor = abs(amt)
     is_refund = amt > 0
-    delta = -amt  # compra (amount<0) → fatura += valor; pagamento (amount>0) → fatura -= valor
+    # CONVENÇÃO CANÔNICA (igual add_credit_refund): valor ASSINADO — compra positiva,
+    # estorno/pagamento negativo. Fatura += valor. Assim undo_credit_transaction e todos
+    # os leitores tratam o sinal uniformemente (não subtraem estorno em dobro).
+    valor = -amt
+    tipo = "estorno" if is_refund else "credito"
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -645,18 +648,18 @@ def add_imported_credit_purchase(
             cur.execute(
                 """
                 insert into credit_transactions
-                    (bill_id, user_id, card_id, valor, categoria, nota, purchased_at, is_refund,
+                    (bill_id, user_id, card_id, tipo, valor, categoria, nota, purchased_at, is_refund,
                      source, external_id, installment_no, installments_total, group_id)
-                values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 returning id
                 """,
-                (bill_id, user_id, card_id, valor, categoria, None, purchased_at, is_refund,
+                (bill_id, user_id, card_id, tipo, valor, categoria, None, purchased_at, is_refund,
                  source, external_id, installment_no, installments_total, group_id),
             )
             tx_id = cur.fetchone()["id"]
             cur.execute(
                 "update credit_bills set total = total + %s where id=%s and user_id=%s",
-                (delta, bill_id, user_id),
+                (valor, bill_id, user_id),  # valor já assinado: compra sobe, estorno desce
             )
         conn.commit()
     return tx_id, True

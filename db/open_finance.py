@@ -1170,7 +1170,7 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
             )
             for r in cur.fetchall():
                 amt = Decimal(str(r["amount"]))
-                new_valor = abs(amt)
+                new_valor = -amt  # convenção canônica assinada (compra +, estorno -)
                 new_refund = amt > 0
                 new_cat = r["category"]
                 changed = (
@@ -1180,15 +1180,15 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
                     or r["cur_date"] != r["transaction_date"]
                 )
                 if changed:
-                    old_contrib = (-Decimal(str(r["cur_valor"]))) if r["cur_refund"] else Decimal(str(r["cur_valor"]))
-                    new_contrib = -amt  # compra soma, pagamento/estorno subtrai
+                    # fatura foi `total += valor` (assinado); ajusta pela diferença de valor.
+                    old_valor = Decimal(str(r["cur_valor"]))
                     cur.execute(
                         "update credit_transactions set valor=%s, is_refund=%s, categoria=%s, purchased_at=%s where id=%s",
                         (new_valor, new_refund, new_cat, r["transaction_date"], r["ct_id"]),
                     )
                     cur.execute(
                         "update credit_bills set total = total + %s where id=%s and user_id=%s",
-                        (new_contrib - old_contrib, r["bill_id"], user_id),
+                        (new_valor - old_valor, r["bill_id"], user_id),
                     )
                     credit_updated += 1
 
