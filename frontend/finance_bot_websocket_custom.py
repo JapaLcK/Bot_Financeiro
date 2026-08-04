@@ -1197,6 +1197,21 @@ class ConnectionManager:
     async def send_to(self, ws: WebSocket, payload: str):
         await ws.send_text(payload)
 
+    async def broadcast_to_user(self, user_id: int, payload: str) -> int:
+        """Empurra um payload pra todas as conexões ativas do usuário (best-effort).
+
+        Usado pra 'atualização ao vivo' no PWA: quando um banco sincroniza em segundo
+        plano, o servidor avisa o cliente conectado pra recarregar saldo/timeline.
+        """
+        sent = 0
+        for ws in list(self.active.get(user_id, {}).keys()):
+            try:
+                await ws.send_text(payload)
+                sent += 1
+            except Exception:
+                self.disconnect(ws, user_id)
+        return sent
+
 manager = ConnectionManager()
 
 # ─── App startup ──────────────────────────────────────────────────────────────
@@ -1509,7 +1524,7 @@ _SECURITY_HEADERS = {
         "font-src 'self' data: "
         "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
         "connect-src 'self' https: wss:; "
-        "frame-src 'self' https://cdn.pluggy.ai; "
+        "frame-src 'self' https://cdn.pluggy.ai https://connect.pluggy.ai; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self'; "

@@ -55,6 +55,16 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
     """Roda o sync fora do request (fire-and-forget), logando falhas."""
     try:
         result = await asyncio.to_thread(sync_pluggy_item, item_id)
+        # Atualização ao vivo (PWA): avisa o cliente conectado pra recarregar saldo/timeline.
+        uid = result.get("user_id") if isinstance(result, dict) else None
+        if uid:
+            try:
+                from frontend.finance_bot_websocket_custom import manager
+                await manager.broadcast_to_user(
+                    int(uid), json.dumps({"type": "open_finance_synced", "item_id": item_id})
+                )
+            except Exception:
+                pass
         await log_system_event(
             "info",
             "pluggy_sync_done",
