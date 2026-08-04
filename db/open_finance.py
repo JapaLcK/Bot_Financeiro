@@ -317,6 +317,14 @@ def count_open_finance_connections(user_id: int, provider: str = "pluggy") -> in
             return cur.fetchone()["n"]
 
 
+def list_open_finance_user_ids() -> list[int]:
+    """user_ids distintos com pelo menos 1 banco Pluggy conectado (pros ticks proativos)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select distinct user_id from open_finance_connections where provider='pluggy'")
+            return [r["user_id"] for r in cur.fetchall()]
+
+
 def list_pluggy_item_ids(user_id: int | None = None) -> list[str]:
     """Item ids Pluggy ativos (todos, ou de um usuário). Usado no refresh periódico."""
     with get_conn() as conn:

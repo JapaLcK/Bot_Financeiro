@@ -1416,6 +1416,25 @@ async def lifespan(app: FastAPI):
                 print(f"[open_finance_refresh] erro: {exc}", file=sys.stderr)
                 await asyncio.sleep(interval)
 
+    async def _open_finance_proactive():
+        # Avisos proativos de salário/reconectar (Fase 5 / P1 #6). Dormant: só roda com
+        # OF_PROACTIVE_ENABLED ligado E o template Meta configurado (senão retorna na hora).
+        if (os.getenv("OF_PROACTIVE_ENABLED") or "").strip().lower() not in ("1", "true", "yes", "on"):
+            return
+        interval = int(os.getenv("OF_PROACTIVE_INTERVAL_SEC", str(6 * 60 * 60)))
+        from core.services.open_finance_proactive import run_reconnect_notifications, run_salary_notifications
+        while True:
+            try:
+                s = await asyncio.to_thread(run_salary_notifications)
+                r = await asyncio.to_thread(run_reconnect_notifications)
+                print(f"[open_finance_proactive] salary={s} reconnect={r}", flush=True)
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[open_finance_proactive] erro: {exc}", file=sys.stderr)
+                await asyncio.sleep(interval)
+
     _elapsed = _startup_time.monotonic() - _t0
     print(f"[app] Startup interno concluído em {_elapsed:.1f}s.", flush=True)
 
@@ -1424,6 +1443,7 @@ async def lifespan(app: FastAPI):
         tasks.extend(
             [
                 asyncio.create_task(_open_finance_refresh(), name="open_finance_refresh"),
+                asyncio.create_task(_open_finance_proactive(), name="open_finance_proactive"),
                 asyncio.create_task(_wa_worker(), name="wa_worker"),
                 asyncio.create_task(_wa_daily(), name="wa_daily"),
                 asyncio.create_task(_wa_bill_reminders(), name="wa_bill_reminders"),

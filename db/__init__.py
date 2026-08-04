@@ -186,6 +186,7 @@ from .open_finance import (
     create_mock_open_finance_connection,
     get_open_finance_snapshot,
     count_open_finance_connections,
+    list_open_finance_user_ids,
     list_pluggy_item_ids,
     list_connections_needing_reconnect,
     get_open_finance_connection_by_item_id,
@@ -393,8 +394,8 @@ __all__ = [
     "get_installment_group_summaries", "rebuild_bill_totals",
     # open finance
     "create_mock_open_finance_connection", "get_open_finance_snapshot",
-    "count_open_finance_connections", "list_pluggy_item_ids",
-    "list_connections_needing_reconnect",
+    "count_open_finance_connections", "list_open_finance_user_ids",
+    "list_pluggy_item_ids", "list_connections_needing_reconnect",
     "get_open_finance_connection_by_item_id", "save_open_finance_sync",
     "save_open_finance_investments",
     "delete_open_finance_transactions", "classify_open_finance_launch",
