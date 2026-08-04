@@ -245,12 +245,22 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     missing: list[dict] = []
     if is_multi:
         from parsers import describe_valueless_launch
+        from core.handlers.launches import register_if_recurring
     for part in parts:
         if is_multi:
             info = describe_valueless_launch(part)
             if info:
                 tipo, desc = info
-                missing.append({"tipo": tipo, "desc": desc})
+                # Valor recorrente conhecido ("aluguel" que sempre é o mesmo) →
+                # lança sozinho (com aviso). Senão, enfileira pra perguntar.
+                auto = register_if_recurring(uid, tipo, desc, platform)
+                if auto is not None:
+                    # add_from_entities devolve markdown estilo Discord (**bold**);
+                    # os demais pedaços do áudio já saem formatados por
+                    # _process_audio_transaction, então formatamos este também.
+                    responses.append(format_for_platform(auto, platform))
+                else:
+                    missing.append({"tipo": tipo, "desc": desc})
                 continue
         result_text = _process_audio_transaction(uid, part, msg, platform)
         # A quebra em múltiplos lançamentos (_split_audio_transactions) pode

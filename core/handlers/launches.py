@@ -443,6 +443,71 @@ def _ask_value_question(item: dict) -> str:
     return f"🐷 Faltou o valor de *{desc}*. Quanto foi? (só o número)"
 
 
+# Quantas vezes o MESMO valor precisa ter aparecido antes (pro mesmo tipo/descrição)
+# pra ser considerado recorrente e lançado sozinho, sem perguntar.
+_RECURRING_MIN_COUNT = 2
+
+
+def infer_recurring_value(user_id: int, tipo: str, desc: str) -> float | None:
+    """Descobre o valor recorrente de uma descrição ("aluguel", "internet"...).
+
+    Retorna o valor SÓ quando a mesma descrição (mesmo tipo) já foi lançada com
+    o MESMO valor em `_RECURRING_MIN_COUNT`+ lançamentos anteriores E esse valor
+    é o dominante (sem empate). Caso contrário retorna None — o bot pergunta.
+
+    Conservador de propósito: preencher sozinho um valor errado é pior do que
+    perguntar. A comparação de descrição é por texto normalizado (minúsculas,
+    sem acento), batendo tanto em `nota` quanto em `alvo` do histórico.
+    """
+    from collections import Counter
+    from utils_text import normalize_text
+
+    target = normalize_text(desc or "").strip()
+    if not target:
+        return None
+
+    counter: Counter = Counter()
+    for r in db.list_launches_by_tipo(user_id, tipo, limit=200):
+        nota = normalize_text(r.get("nota") or "").strip()
+        alvo = normalize_text(r.get("alvo") or "").strip()
+        if target in (nota, alvo):
+            try:
+                counter[float(r["valor"])] += 1
+            except (TypeError, ValueError):
+                continue
+
+    if not counter:
+        return None
+    ranked = counter.most_common(2)
+    top_valor, top_freq = ranked[0]
+    if top_freq < _RECURRING_MIN_COUNT or top_valor <= 0:
+        return None
+    # empate no topo (dois valores igualmente frequentes) → ambíguo, pergunta.
+    if len(ranked) > 1 and ranked[1][1] == top_freq:
+        return None
+    return top_valor
+
+
+_RECURRING_NOTICE = "🔁 _Usei seu valor recorrente. Se mudou, é só corrigir._"
+
+
+def register_if_recurring(user_id: int, tipo: str, desc: str, platform: str) -> str | None:
+    """Se `desc` tem um valor recorrente conhecido, registra o lançamento na hora
+    (com aviso) e devolve a resposta. Senão, retorna None (o bot vai perguntar)."""
+    valor = infer_recurring_value(user_id, tipo, desc)
+    if valor is None:
+        return None
+    resp = add_from_entities(
+        user_id,
+        tipo=tipo,
+        valor=float(valor),
+        alvo=desc,
+        nota=desc,
+        platform=platform,
+    )
+    return f"{resp}\n{_RECURRING_NOTICE}"
+
+
 # Palavras que cancelam a pergunta de valor pendente.
 _CANCEL_WORDS = {"nao", "n", "cancelar", "cancela", "deixa", "esquece", "esquecer", "para", "pare"}
 
@@ -540,7 +605,13 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> 
             info = describe_valueless_launch(part)
             if info:
                 tipo, desc = info
-                missing.append({"tipo": tipo, "desc": desc})
+                # Valor recorrente conhecido ("aluguel" que sempre é o mesmo) →
+                # lança sozinho. Senão, enfileira pra perguntar.
+                auto = register_if_recurring(user_id, tipo, desc, platform)
+                if auto is not None:
+                    responses.append(auto)
+                else:
+                    missing.append({"tipo": tipo, "desc": desc})
         if missing:
             db.set_pending_action(
                 user_id, "multi_launch_values",
