@@ -361,6 +361,40 @@ def get_open_finance_connection_by_item_id(provider_item_id: str, provider: str 
             return cur.fetchone()
 
 
+def delete_open_finance_transactions(
+    provider_item_id: str, transaction_ids: list[str], provider: str = "pluggy"
+) -> int:
+    """Remove transações OF pelo provider_transaction_id (evento transactions/deleted da Pluggy).
+
+    Sem isso, transação deletada no banco fica órfã pra sempre (o list_transactions não a
+    traz mais, então o upsert nunca a remove). Escopo Fase 0: só as tabelas OF — quando a
+    Fase 1 popular `imported_launch_id`, aqui também terá que reverter o launch vinculado.
+    """
+    item_id = (provider_item_id or "").strip()
+    ids = [str(t).strip() for t in (transaction_ids or []) if str(t).strip()]
+    if not item_id or not ids:
+        return 0
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                delete from open_finance_transactions t
+                using open_finance_accounts a, open_finance_connections c
+                where t.account_id = a.id
+                  and a.connection_id = c.id
+                  and c.provider = %s
+                  and c.provider_item_id = %s
+                  and t.provider_transaction_id = any(%s)
+                """,
+                (provider, item_id, ids),
+            )
+            deleted = cur.rowcount
+        conn.commit()
+
+    return deleted
+
+
 def save_open_finance_sync(connection_id: int, accounts: list[dict]) -> dict:
     """
     Grava contas + transações reais puxadas da Pluggy nas tabelas OF.

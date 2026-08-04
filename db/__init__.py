@@ -183,6 +183,7 @@ from .open_finance import (
     get_open_finance_snapshot,
     get_open_finance_connection_by_item_id,
     save_open_finance_sync,
+    delete_open_finance_transactions,
     disconnect_open_finance_connection,
     save_pluggy_open_finance_item,
     update_pluggy_open_finance_item_status,
@@ -370,6 +371,7 @@ __all__ = [
     # open finance
     "create_mock_open_finance_connection", "get_open_finance_snapshot",
     "get_open_finance_connection_by_item_id", "save_open_finance_sync",
+    "delete_open_finance_transactions",
     "disconnect_open_finance_connection", "save_pluggy_open_finance_item",
     "update_pluggy_open_finance_item_status",
     # reports

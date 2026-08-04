@@ -8,8 +8,7 @@ O trabalho aqui é bloqueante (httpx + DB); chame via asyncio.to_thread a partir
 
 from __future__ import annotations
 
-import os
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -89,13 +88,6 @@ def normalize_pluggy_transaction(raw: dict) -> dict:
     }
 
 
-def _sync_window_from_date() -> str | None:
-    days = int(os.getenv("PLUGGY_SYNC_DAYS", "365") or "0")
-    if days <= 0:
-        return None
-    return (datetime.now(_tz()).date() - timedelta(days=days)).isoformat()
-
-
 def sync_pluggy_item(provider_item_id: str) -> dict:
     """Sincroniza um item Pluggy: contas + transações → tabelas OF. Idempotente."""
     connection = get_open_finance_connection_by_item_id(provider_item_id)
@@ -103,16 +95,13 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
         return {"ok": False, "reason": "connection_not_found", "item_id": provider_item_id}
 
     api_key = create_pluggy_api_key()
-    from_date = _sync_window_from_date()
 
     accounts: list[dict] = []
     for raw_account in list_pluggy_accounts(provider_item_id, api_key):
         account = normalize_pluggy_account(raw_account)
         if not account["provider_account_id"]:
             continue
-        raw_txs = list_pluggy_transactions(
-            account["provider_account_id"], api_key, from_date=from_date
-        )
+        raw_txs = list_pluggy_transactions(account["provider_account_id"], api_key)
         account["transactions"] = [
             tx for tx in (normalize_pluggy_transaction(t) for t in raw_txs) if tx["provider_transaction_id"]
         ]

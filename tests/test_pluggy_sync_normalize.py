@@ -6,10 +6,27 @@ Não tocam banco nem rede — só a conversão dado-cru-Pluggy → formato inter
 from datetime import date
 from decimal import Decimal
 
+from core.services.pluggy import _extract_after_cursor
 from core.services.pluggy_sync import (
     normalize_pluggy_account,
     normalize_pluggy_transaction,
 )
+
+
+def test_extract_after_cursor_from_next_querystring():
+    nxt = "?accountId=abc-123&after=MjAyMC0xMC0xNVQwMDowMA"
+    assert _extract_after_cursor(nxt) == "MjAyMC0xMC0xNVQwMDowMA"
+
+
+def test_extract_after_cursor_from_full_url():
+    nxt = "https://api.pluggy.ai/v2/transactions?accountId=abc&after=CURSOR99&pageSize=500"
+    assert _extract_after_cursor(nxt) == "CURSOR99"
+
+
+def test_extract_after_cursor_none_when_absent_or_empty():
+    assert _extract_after_cursor(None) is None
+    assert _extract_after_cursor("") is None
+    assert _extract_after_cursor("?accountId=abc&pageSize=500") is None
 
 
 def test_transaction_debit_positive_amount_becomes_negative():

@@ -27,6 +27,7 @@ from core.services.pluggy import (
 from core.services.pluggy_sync import sync_pluggy_item, sync_pluggy_user
 from db import (
     create_mock_open_finance_connection,
+    delete_open_finance_transactions,
     disconnect_open_finance_connection,
     get_open_finance_snapshot,
     save_pluggy_open_finance_item,
@@ -38,13 +39,13 @@ router = APIRouter()
 
 PLUGGY_INCLUDE_SANDBOX = os.getenv("PLUGGY_INCLUDE_SANDBOX", "1") != "0"
 
-# Eventos da Pluggy que devem disparar um sync de contas/transações.
+# Eventos da Pluggy que disparam um sync (puxar contas/transações).
+# transactions/deleted é tratado à parte (remove ids), não re-sincroniza.
 PLUGGY_SYNC_EVENTS = {
     "item/created",
     "item/updated",
     "transactions/created",
     "transactions/updated",
-    "transactions/deleted",
 }
 
 
@@ -197,8 +198,14 @@ async def open_finance_pluggy_webhook(request: Request):
     if item_id and status:
         await asyncio.to_thread(update_pluggy_open_finance_item_status, item_id, status, event)
 
-    # Dispara o sync pesado fora do request pros eventos que trazem dado novo.
-    if item_id and event_name in PLUGGY_SYNC_EVENTS:
+    # transactions/deleted: a Pluggy manda os ids removidos — apaga direto, senão ficam
+    # órfãos (um re-sync não os removeria, pois não voltam no list_transactions).
+    if item_id and event_name == "transactions/deleted":
+        deleted_ids = event.get("transactionIds") or event.get("transactionsIds") or []
+        if isinstance(deleted_ids, list) and deleted_ids:
+            await asyncio.to_thread(delete_open_finance_transactions, item_id, deleted_ids)
+    # Demais eventos com dado novo: dispara o sync pesado fora do request.
+    elif item_id and event_name in PLUGGY_SYNC_EVENTS:
         _schedule_pluggy_sync(item_id)
 
     await log_system_event(

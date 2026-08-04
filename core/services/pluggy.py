@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 
@@ -91,30 +92,40 @@ def list_pluggy_accounts(item_id: str, api_key: str | None = None) -> list[dict]
     return list(results) if isinstance(results, list) else []
 
 
+def _extract_after_cursor(next_value: Any) -> str | None:
+    """O /v2/transactions devolve `next` como '?accountId=..&after=<cursor>' (ou null no fim)."""
+    if not next_value:
+        return None
+    text = str(next_value)
+    query = urlparse(text).query or text.lstrip("?")
+    after = parse_qs(query).get("after")
+    return after[0] if after else None
+
+
 def list_pluggy_transactions(
     account_id: str,
     api_key: str | None = None,
     *,
-    from_date: str | None = None,
     page_size: int = 500,
-    max_pages: int = 40,
+    max_pages: int = 60,
 ) -> list[dict]:
-    """Puxa todas as transações de uma conta, paginando até acabar."""
+    """Puxa todas as transações de uma conta via /v2/transactions (paginação por cursor).
+
+    O endpoint antigo /transactions (page-based) está deprecado até 2026-12-31; o v2
+    devolve o cursor no campo `next`. Segue o cursor até `next` vir vazio.
+    """
     key = api_key or create_pluggy_api_key()
     out: list[dict] = []
-    page = 1
-    while page <= max_pages:
-        params: dict[str, Any] = {"accountId": account_id, "pageSize": page_size, "page": page}
-        if from_date:
-            params["from"] = from_date
-        data = _pluggy_get("/transactions", key, params=params)
+    params: dict[str, Any] = {"accountId": account_id, "pageSize": page_size}
+    for _ in range(max_pages):
+        data = _pluggy_get("/v2/transactions", key, params=params)
         results = data.get("results")
         if isinstance(results, list):
             out.extend(results)
-        total_pages = int(data.get("totalPages") or 1)
-        if page >= total_pages or not results:
+        after = _extract_after_cursor(data.get("next"))
+        if not after or not results:
             break
-        page += 1
+        params = {"accountId": account_id, "pageSize": page_size, "after": after}
     return out
 
 
