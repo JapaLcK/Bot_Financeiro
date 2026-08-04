@@ -550,7 +550,10 @@ def test_sitemap_lists_public_pages_only():
     assert "<loc>https://pigbankai.com/precos</loc>" in response.text
     assert "<loc>https://pigbankai.com/suporte</loc>" in response.text
     assert "<loc>https://pigbankai.com/privacy</loc>" in response.text
-    assert "<loc>https://pigbankai.com/changelog</loc>" in response.text
+    assert "<loc>https://pigbankai.com/termos</loc>" in response.text
+    # /changelog e /blog/* são Pro-only (redirecionam pro login/paywall), então
+    # não são anunciados como público no sitemap pro crawler.
+    assert "<loc>https://pigbankai.com/changelog</loc>" not in response.text
     assert "/app" not in response.text
     assert "/settings" not in response.text
 

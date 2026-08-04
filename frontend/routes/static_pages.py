@@ -230,8 +230,11 @@ async def serve_suporte():
         for g in list_guides()
     )
     template = (FRONTEND_DIR / "suporte.html").read_text(encoding="utf-8")
+    # Mesmos headers de cache das demais páginas HTML (html_file): o /suporte é
+    # montado à mão (injeta o FAQ), então precisa setar no-store explicitamente.
     return Response(content=template.replace("{{FAQ}}", faq),
-                    media_type="text/html; charset=utf-8")
+                    media_type="text/html; charset=utf-8",
+                    headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
 
 
 @router.get("/robots.txt")
