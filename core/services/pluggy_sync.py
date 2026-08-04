@@ -29,6 +29,7 @@ from db import (
     list_pluggy_item_ids,
     save_open_finance_investments,
     save_open_finance_sync,
+    sync_imported_open_finance_updates,
 )
 
 
@@ -135,6 +136,8 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
     # Fase 1: conta BANK → launches (analytics, sem mover saldo); cartão → faturas (opção a).
     imported = import_open_finance_launches(connection["user_id"], connection["id"])
     imported_credit = import_open_finance_credit(connection["user_id"], connection["id"])
+    # Propaga correções da Pluggy (transactions/updated) pros já importados (não deixa stale).
+    updated = sync_imported_open_finance_updates(connection["user_id"], connection["id"])
 
     return {
         "ok": True,
@@ -145,6 +148,7 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
         **inv_result,
         "imported": imported,
         "imported_credit": imported_credit,
+        "updated": updated,
     }
 
 

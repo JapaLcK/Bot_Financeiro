@@ -13,7 +13,7 @@ from .cards import (
     add_imported_credit_purchase,
     extract_installment_info,
     get_or_create_open_finance_card,
-    undo_credit_transaction,
+    remove_single_credit_transaction,
 )
 from .connection import get_conn
 from .users import ensure_user
@@ -33,7 +33,8 @@ def _rollback_imported_of(rows: list[dict]) -> None:
         ctx = r.get("imported_credit_tx_id")
         if ctx:
             try:
-                undo_credit_transaction(uid, ctx)
+                # remoção ÚNICA: apagar 1 parcela não pode cascatear o parcelamento inteiro.
+                remove_single_credit_transaction(uid, ctx)
             except Exception:
                 pass
         lid = r.get("imported_launch_id")
@@ -1067,7 +1068,16 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
         inst_no, inst_total = extract_installment_info(r["tx_raw"])
         group_id = None
         if inst_total:
-            key = f"{card_cache[of_acc_id]}|{(r['description'] or '').strip().lower()}|{inst_total}"
+            # Heurística da doc Pluggy: cartão + estabelecimento + nº parcelas + valor total.
+            # Sem o totalAmount, duas compras diferentes iguais (mesmo merchant/parcelas) colidiam.
+            meta = (r["tx_raw"] or {}).get("creditCardMetadata") or {}
+            total_amount = meta.get("totalAmount")
+            key = "|".join([
+                str(card_cache[of_acc_id]),
+                (r["description"] or "").strip().lower(),
+                str(inst_total),
+                str(total_amount) if total_amount is not None else "",
+            ])
             group_id = uuid5(NAMESPACE_OID, key)
         tx_id, created = add_imported_credit_purchase(
             user_id, card_cache[of_acc_id], r["amount"], r["category"],
@@ -1090,6 +1100,101 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
             conn.commit()
 
     return {"inserted": inserted, "linked": len(links), "cards": len(card_cache)}
+
+
+def sync_imported_open_finance_updates(user_id: int, connection_id: int | None = None) -> dict:
+    """Propaga CORREÇÕES da Pluggy (transactions/updated) pros registros já importados.
+
+    Sem isso, uma correção de valor/data/categoria atualizava só o espelho OF — o launch,
+    a credit_transaction e o total da fatura ficavam com o valor velho. Mexe apenas em
+    registros DO OF (source=open_finance); nunca sobrescreve lançamento manual auto-mesclado.
+    """
+    ensure_user(user_id)
+    launches_updated = 0
+    credit_updated = 0
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # 1) Launches próprios do OF (conta BANK)
+            cur.execute(
+                """
+                select o.amount, o.transaction_date, o.category, o.description,
+                       l.id as launch_id, l.valor as cur_valor, l.categoria as cur_cat,
+                       l.tipo as cur_tipo, l.is_internal_movement as cur_internal,
+                       coalesce(l.posted_at, l.criado_em::date) as cur_date
+                from open_finance_transactions o
+                join open_finance_accounts a on a.id = o.account_id
+                join open_finance_connections c on c.id = a.connection_id
+                join launches l on l.id = o.imported_launch_id
+                where c.user_id=%s and (%s is null or c.id=%s)
+                  and upper(a.type)='BANK' and coalesce(l.source,'')='open_finance'
+                """,
+                (user_id, connection_id, connection_id),
+            )
+            for r in cur.fetchall():
+                cls = classify_open_finance_launch(r["amount"], r["category"], r["description"])
+                new_cat = r["category"] or "outros"
+                changed = (
+                    Decimal(str(r["cur_valor"])) != cls["valor"]
+                    or r["cur_tipo"] != cls["tipo"]
+                    or (r["cur_cat"] or "") != new_cat
+                    or bool(r["cur_internal"]) != cls["is_internal_movement"]
+                    or r["cur_date"] != r["transaction_date"]
+                )
+                if changed:
+                    cur.execute(
+                        """
+                        update launches set valor=%s, tipo=%s, categoria=%s,
+                               is_internal_movement=%s, posted_at=%s
+                        where id=%s
+                        """,
+                        (cls["valor"], cls["tipo"], new_cat, cls["is_internal_movement"],
+                         r["transaction_date"], r["launch_id"]),
+                    )
+                    launches_updated += 1
+
+            # 2) Transações de cartão (ajusta o total da fatura pela diferença)
+            cur.execute(
+                """
+                select o.amount, o.transaction_date, o.category,
+                       ct.id as ct_id, ct.valor as cur_valor, ct.is_refund as cur_refund,
+                       ct.categoria as cur_cat, ct.purchased_at as cur_date, ct.bill_id
+                from open_finance_transactions o
+                join open_finance_accounts a on a.id = o.account_id
+                join open_finance_connections c on c.id = a.connection_id
+                join credit_transactions ct on ct.id = o.imported_credit_tx_id
+                where c.user_id=%s and (%s is null or c.id=%s)
+                  and upper(a.type)='CREDIT'
+                """,
+                (user_id, connection_id, connection_id),
+            )
+            for r in cur.fetchall():
+                amt = Decimal(str(r["amount"]))
+                new_valor = abs(amt)
+                new_refund = amt > 0
+                new_cat = r["category"]
+                changed = (
+                    Decimal(str(r["cur_valor"])) != new_valor
+                    or bool(r["cur_refund"]) != new_refund
+                    or (r["cur_cat"] or None) != (new_cat or None)
+                    or r["cur_date"] != r["transaction_date"]
+                )
+                if changed:
+                    old_contrib = (-Decimal(str(r["cur_valor"]))) if r["cur_refund"] else Decimal(str(r["cur_valor"]))
+                    new_contrib = -amt  # compra soma, pagamento/estorno subtrai
+                    cur.execute(
+                        "update credit_transactions set valor=%s, is_refund=%s, categoria=%s, purchased_at=%s where id=%s",
+                        (new_valor, new_refund, new_cat, r["transaction_date"], r["ct_id"]),
+                    )
+                    cur.execute(
+                        "update credit_bills set total = total + %s where id=%s and user_id=%s",
+                        (new_contrib - old_contrib, r["bill_id"], user_id),
+                    )
+                    credit_updated += 1
+
+        conn.commit()
+
+    return {"launches_updated": launches_updated, "credit_updated": credit_updated}
 
 
 # ──────────────────────────────────────────────────────────────────────────────

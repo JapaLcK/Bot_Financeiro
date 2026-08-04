@@ -560,6 +560,35 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
     return card_id
 
 
+def remove_single_credit_transaction(user_id: int, ct_id: int):
+    """Remove UMA transação de cartão (nunca cascateia o parcelamento), ajustando a fatura.
+
+    Ao contrário de `undo_credit_transaction`, ignora `group_id`: usado no rollback do OF
+    (transactions/deleted da Pluggy manda ids individuais — apagar 1 parcela não pode
+    apagar o parcelamento inteiro). Retorna {removed_total} ou None.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id, bill_id, valor, is_refund from credit_transactions "
+                "where user_id=%s and id=%s for update",
+                (user_id, ct_id),
+            )
+            tx = cur.fetchone()
+            if not tx:
+                return None
+            v = Decimal(str(tx["valor"]))
+            # contribuição da tx pra fatura: compra soma, estorno/pagamento subtrai.
+            contrib = -v if tx["is_refund"] else v
+            cur.execute("delete from credit_transactions where user_id=%s and id=%s", (user_id, ct_id))
+            cur.execute(
+                "update credit_bills set total = total - %s where id=%s and user_id=%s",
+                (contrib, tx["bill_id"], user_id),
+            )
+        conn.commit()
+    return {"removed_total": float(v), "ct_id": ct_id}
+
+
 def extract_installment_info(raw) -> tuple[int | None, int | None]:
     """Puro: (installment_no, installments_total) do creditCardMetadata do Pluggy.
 
