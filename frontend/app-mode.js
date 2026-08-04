@@ -107,7 +107,7 @@
     const fabIcon = document.querySelector("#piggy-fab span[aria-hidden]");
     if (fabIcon) {
       fabIcon.innerHTML =
-        '<img src="/brand/avatar.webp" alt="" style="width:40px;height:40px;' +
+        '<img src="/brand/icon.png?v=1" alt="" style="width:40px;height:40px;' +
         'border-radius:50%;display:block;object-fit:cover" />';
     }
   }
@@ -213,7 +213,7 @@
     head.className = "pb-acct-head";
     head.innerHTML =
       '<div><h1>Minha conta</h1><p>Gerencie sua conta e segurança</p></div>' +
-      '<img src="/brand/avatar.webp" alt="" />';
+      '<img src="/brand/icon.png?v=1" alt="" />';
     ph.parentNode.insertBefore(head, ph);
 
     const ban = document.createElement("div");

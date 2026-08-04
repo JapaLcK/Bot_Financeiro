@@ -3540,17 +3540,21 @@ async def conta_redirect(request: Request):
     - Autenticado sem assinatura ativa → página de planos.
     - Autenticado com `stripe_customer_id` → Stripe Customer Portal.
     """
+    # Sem auth válida → /login?next=/conta. O login renova sessão expirada em
+    # silêncio (validate→refresh) e volta pra cá; antes caía na landing com
+    # ?login_required mesmo pra usuário logado cujo access tinha expirado
+    # (navegação top-level não passa pelo interceptor de refresh).
     token = _get_auth_token_from_request(request, None)
     payload = _decode_jwt(token) if token else None
     if not payload or payload.get("type") != "auth":
-        return RedirectResponse(url=_dashboard_url("/?login_required=conta"), status_code=302)
+        return RedirectResponse(url=_dashboard_url("/login?next=/conta"), status_code=302)
 
     user_id = int(payload["sub"])
     jti = payload.get("jti")
     if jti:
         session = await asyncio.to_thread(get_active_session, jti)
         if not session or int(session.get("user_id") or 0) != user_id:
-            return RedirectResponse(url=_dashboard_url("/?login_required=conta"), status_code=302)
+            return RedirectResponse(url=_dashboard_url("/login?next=/conta"), status_code=302)
 
     if not STRIPE_SECRET_KEY:
         return RedirectResponse(url=_dashboard_url("/precos"), status_code=302)

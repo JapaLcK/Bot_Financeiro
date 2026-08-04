@@ -15,8 +15,8 @@
   .auth-error.show { display: block; }
   .auth-error.ok { background: rgba(0,240,120,.1); border-color: rgba(0,240,120,.3); color: #93f7c4; }
 </style>
-  <link rel="stylesheet" href="/app-mode.css?v=14" />
-  <script src="/app-mode.js?v=14"></script>
+  <link rel="stylesheet" href="/app-mode.css?v=15" />
+  <script src="/app-mode.js?v=15"></script>
 </head>
 <body>
 <div class="glow"></div>
@@ -85,6 +85,12 @@
   function csrfHeaders(e){e=e||{};var c=decodeURIComponent(getCookie('csrf_token')||'');if(c)e['X-CSRF-Token']=c;return e}
   async function payload(r){var t=await r.text();if(!t)return{};try{return JSON.parse(t)}catch(_){return{detail:t}}}
   function goDash(u){u=u||'/home';if(u.indexOf('DASHBOARD_URL=')===0)u=u.slice(14);if(u.indexOf('http')!==0)u=location.origin+'/'+u.replace(/^\//,'');location.replace(u)}
+  // ?next= interno (allowlist anti open-redirect) tem prioridade sobre o destino padrão
+  function nextParam(){
+    var n=new URLSearchParams(location.search).get('next')||'';
+    var ok=['/precos','/conta','/app','/home','/settings'];
+    return (n.charAt(0)==='/'&&ok.some(function(p){return n.indexOf(p)===0}))?n:null;
+  }
   function err(id,m,ok){var e=document.getElementById(id);e.textContent=m;e.classList.toggle('ok',!!ok);e.classList.add('show')}
   function clrErr(){['login-error','mfa-error'].forEach(function(i){var e=document.getElementById(i);if(e){e.classList.remove('show','ok');e.textContent=''}})}
 
@@ -99,7 +105,7 @@
         if(!rf.ok)return;
         r=await fetch('/auth/validate',{credentials:'same-origin'});
       }
-      if(r.ok)goDash('/home');
+      if(r.ok)goDash(nextParam()||'/home');
     }catch(_){/* sem rede ou sem sessão: fica no login */}
   })();
 
@@ -113,7 +119,7 @@
       var d=await payload(res);
       if(!res.ok){err('login-error',d.detail||'E-mail ou senha incorretos.');return}
       if(d.mfa_required){showMfa(d.mfa_challenge,d.email);return}
-      goDash(d.dashboard_url);
+      goDash(nextParam()||d.dashboard_url);
     }catch(e){err('login-error','Erro de conexão. Tente novamente.')}
     finally{b.disabled=false;b.textContent='Entrar'}
   }
@@ -129,7 +135,7 @@
       var res=await fetch('/auth/mfa/verify-login',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({challenge:_ch,code:code,use_backup:bk})});
       var d=await payload(res);
       if(!res.ok){err('mfa-error',d.detail||'Código inválido.');return}
-      goDash(d.dashboard_url);
+      goDash(nextParam()||d.dashboard_url);
     }catch(e){err('mfa-error','Erro de conexão. Tente novamente.')}
     finally{b.disabled=false;b.textContent='Verificar código'}
   }
