@@ -12,27 +12,30 @@
  *  - Safe areas (notch / home indicator) respeitadas via env().
  */
 
-/* ─── Base: espaço pra tab bar + safe areas ────────────────────────────── */
+/* ─── Base: espaço pra tab bar flutuante + safe areas ──────────────────── */
 html.pb-app body {
-  padding-bottom: calc(64px + env(safe-area-inset-bottom)) !important;
+  padding-bottom: calc(96px + env(safe-area-inset-bottom)) !important;
 }
 html.pb-app.pb-no-tabs body {
   padding-bottom: 0 !important;
 }
 
-/* ─── Tab bar inferior ─────────────────────────────────────────────────── */
+/* ─── Tab bar flutuante (pílula estilo WhatsApp/iOS) ───────────────────── */
 html.pb-app .pb-tabbar {
   position: fixed;
-  bottom: 0; left: 0; right: 0;
+  left: 10px; right: 10px;
+  bottom: calc(env(safe-area-inset-bottom) + 10px);
   z-index: 9999;
   display: flex;
-  align-items: stretch;
-  height: calc(60px + env(safe-area-inset-bottom));
-  padding-bottom: env(safe-area-inset-bottom);
-  background: rgba(17, 17, 17, 0.92);
-  -webkit-backdrop-filter: blur(18px);
-  backdrop-filter: blur(18px);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  align-items: center;
+  height: 66px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(24, 22, 26, 0.86);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
 }
 html.pb-app .pb-tab {
   flex: 1;
@@ -41,15 +44,17 @@ html.pb-app .pb-tab {
   align-items: center;
   justify-content: center;
   gap: 3px;
-  min-height: 44px;
-  color: rgba(255, 255, 255, 0.55);
+  min-height: 52px;
+  margin: 7px 0;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.6);
   text-decoration: none;
   font-family: "Inter", -apple-system, sans-serif;
   font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.01em;
   -webkit-tap-highlight-color: transparent;
-  transition: color 0.15s ease;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 html.pb-app .pb-tab svg {
   width: 24px;
@@ -60,21 +65,25 @@ html.pb-app .pb-tab svg {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-html.pb-app .pb-tab.active { color: #FF2D8E; }
+/* Aba ativa: casulo destacado (como o WhatsApp) */
+html.pb-app .pb-tab.active {
+  color: #FF2D8E;
+  background: rgba(255, 255, 255, 0.10);
+}
 html.pb-app .pb-tab:active { color: #FF80B8; }
 
-/* Botão central de lançamento (FAB embutido na tab bar) */
+/* Botão central de lançamento (círculo rosa dentro da pílula) */
+html.pb-app .pb-tab-fab { flex: 0 0 auto; margin: 0 4px; }
 html.pb-app .pb-tab-fab > span {
-  width: 54px;
-  height: 54px;
-  margin-top: -22px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   background: linear-gradient(135deg, #FF2D8E, #C7186B);
   display: flex;
   align-items: center;
   justify-content: center;
   color: #fff;
-  box-shadow: 0 8px 22px rgba(255, 45, 142, 0.45);
+  box-shadow: 0 6px 18px rgba(255, 45, 142, 0.45);
 }
 html.pb-app .pb-tab-fab > span svg { width: 26px; height: 26px; stroke-width: 2.4; }
 html.pb-app .pb-tab-fab:active > span { transform: scale(0.94); }
@@ -209,14 +218,18 @@ html.pb-app body.pb-page-app header #status { display: none !important; }
 /* Header em UMA linha: ☰ | ‹ mês › centralizado | conta compacta.
    (anula o header-right de largura 100% e o user-menu em linha própria
    do dashboard-mobile.css) */
-html.pb-app body.pb-page-app header { flex-wrap: nowrap !important; }
-html.pb-app body.pb-page-app .header-left { flex: 0 0 auto !important; }
+/* Duas linhas: [☰ + marca | conta] em cima, mês centralizado embaixo */
+html.pb-app body.pb-page-app header { flex-wrap: wrap !important; }
+html.pb-app body.pb-page-app .header-left { flex: 1 1 auto !important; order: 1; }
+html.pb-app body.pb-page-app .header-right { order: 2; }
 html.pb-app body.pb-page-app .month-nav {
-  flex: 1 1 auto !important;
+  order: 3;
+  flex: 1 1 100% !important;
   display: flex;
   align-items: center;
   justify-content: center;
   min-width: 0;
+  margin-top: 6px;
 }
 html.pb-app body.pb-page-app #month-label { white-space: nowrap; }
 html.pb-app body.pb-page-app .header-right {
@@ -236,10 +249,10 @@ html.pb-app body.pb-page-app .user-menu-btn .user-menu-main { display: none !imp
 
 /* Flutuantes (FAB do chat, toast) sobem acima da tab bar */
 html.pb-app #piggy-fab {
-  bottom: calc(76px + env(safe-area-inset-bottom)) !important;
+  bottom: calc(94px + env(safe-area-inset-bottom)) !important;
 }
 html.pb-app #toast {
-  bottom: calc(80px + env(safe-area-inset-bottom)) !important;
+  bottom: calc(98px + env(safe-area-inset-bottom)) !important;
 }
 
 /* ─── Settings ─────────────────────────────────────────────────────────── */
