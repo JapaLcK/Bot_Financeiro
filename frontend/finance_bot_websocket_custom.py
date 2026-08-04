@@ -4002,6 +4002,14 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao registrar lançamento: {exc}") from exc
 
+    # Reconciliação reversa (Open Finance): se o banco já importou esse gasto, funde (não duplica).
+    if not is_internal:
+        try:
+            from db import reconcile_manual_launch
+            await asyncio.to_thread(reconcile_manual_launch, int(user_id), int(launch_id))
+        except Exception:
+            pass
+
     return {
         "ok": True,
         "launch_id": int(launch_id),

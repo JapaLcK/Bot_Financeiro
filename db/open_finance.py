@@ -7,9 +7,35 @@ from psycopg.types.json import Jsonb
 
 from utils_date import _tz
 
-from .cards import add_imported_credit_purchase, get_or_create_open_finance_card
+from .accounts import delete_launch_and_rollback
+from .cards import add_imported_credit_purchase, get_or_create_open_finance_card, undo_credit_transaction
 from .connection import get_conn
 from .users import ensure_user
+
+
+def _rollback_imported_of(rows: list[dict]) -> None:
+    """Reverte os artefatos importados de um conjunto de transações OF (launches + fatura).
+
+    Cada `row` traz: user_id, imported_launch_id, imported_credit_tx_id, launch_source.
+    - Cartão: `undo_credit_transaction` (ajusta o total da fatura).
+    - Launch: só apaga se for do OF (`source='open_finance'`); se foi auto-merge num lançamento
+      MANUAL, preserva o manual (só desvincula — a OF tx some depois de qualquer jeito).
+    Cada função gerencia própria conexão; falhas são engolidas pra não travar a limpeza.
+    """
+    for r in rows:
+        uid = r.get("user_id")
+        ctx = r.get("imported_credit_tx_id")
+        if ctx:
+            try:
+                undo_credit_transaction(uid, ctx)
+            except Exception:
+                pass
+        lid = r.get("imported_launch_id")
+        if lid and (r.get("launch_source") == "open_finance"):
+            try:
+                delete_launch_and_rollback(uid, lid)
+            except Exception:
+                pass
 
 
 MOCK_OPEN_FINANCE_INSTITUTIONS = {
@@ -369,9 +395,9 @@ def delete_open_finance_transactions(
 ) -> int:
     """Remove transações OF pelo provider_transaction_id (evento transactions/deleted da Pluggy).
 
-    Sem isso, transação deletada no banco fica órfã pra sempre (o list_transactions não a
-    traz mais, então o upsert nunca a remove). Escopo Fase 0: só as tabelas OF — quando a
-    Fase 1 popular `imported_launch_id`, aqui também terá que reverter o launch vinculado.
+    P0 (integridade): antes de apagar o espelho OF, REVERTE o que foi importado —
+    o launch (Fase 1) e a transação de fatura (Fase 1a). Sem isso, deletar uma transação
+    no banco deixava launch/fatura órfãos, inflando gastos pra sempre.
     """
     item_id = (provider_item_id or "").strip()
     ids = [str(t).strip() for t in (transaction_ids or []) if str(t).strip()]
@@ -382,15 +408,29 @@ def delete_open_finance_transactions(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                delete from open_finance_transactions t
-                using open_finance_accounts a, open_finance_connections c
-                where t.account_id = a.id
-                  and a.connection_id = c.id
-                  and c.provider = %s
-                  and c.provider_item_id = %s
+                select t.id, c.user_id, t.imported_launch_id, t.imported_credit_tx_id,
+                       l.source as launch_source
+                from open_finance_transactions t
+                join open_finance_accounts a on a.id = t.account_id
+                join open_finance_connections c on c.id = a.connection_id
+                left join launches l on l.id = t.imported_launch_id
+                where c.provider = %s and c.provider_item_id = %s
                   and t.provider_transaction_id = any(%s)
                 """,
                 (provider, item_id, ids),
+            )
+            rows = cur.fetchall()
+
+    if not rows:
+        return 0
+
+    _rollback_imported_of(rows)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "delete from open_finance_transactions where id = any(%s)",
+                ([r["id"] for r in rows],),
             )
             deleted = cur.rowcount
         conn.commit()
@@ -738,6 +778,137 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
     }
 
 
+def confirm_reconciliation(user_id: int, of_tx_id: int) -> dict:
+    """Usuário confirma que a OF tx pendente é a MESMA do candidato: funde.
+
+    Apaga o OF launch (delta_conta=0, não mexe no saldo) e revincula a OF tx no lançamento
+    manual. Resultado: 1 transação real = 1 linha.
+    """
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select o.imported_launch_id, o.match_launch_id, o.reconciliation_status
+                from open_finance_transactions o
+                join open_finance_accounts a on a.id = o.account_id
+                join open_finance_connections c on c.id = a.connection_id
+                where o.id = %s and c.user_id = %s
+                """,
+                (of_tx_id, user_id),
+            )
+            row = cur.fetchone()
+
+    if not row or row["reconciliation_status"] != "pending" or not row["match_launch_id"]:
+        return {"ok": False, "reason": "not_pending"}
+
+    of_launch_id = row["imported_launch_id"]
+    manual_id = row["match_launch_id"]
+    if of_launch_id:
+        try:
+            delete_launch_and_rollback(user_id, of_launch_id)
+        except Exception:
+            pass
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update open_finance_transactions "
+                "set imported_launch_id=%s, reconciliation_status='auto_merged' where id=%s",
+                (manual_id, of_tx_id),
+            )
+        conn.commit()
+    return {"ok": True, "merged_into": manual_id}
+
+
+def reject_reconciliation(user_id: int, of_tx_id: int) -> dict:
+    """Usuário diz que são DIFERENTES: mantém os dois lançamentos, limpa o estado pendente."""
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update open_finance_transactions o
+                set reconciliation_status='imported', match_launch_id=null
+                from open_finance_accounts a, open_finance_connections c
+                where o.account_id = a.id and a.connection_id = c.id
+                  and o.id = %s and c.user_id = %s and o.reconciliation_status = 'pending'
+                """,
+                (of_tx_id, user_id),
+            )
+            n = cur.rowcount
+        conn.commit()
+    return {"ok": n > 0}
+
+
+def reconcile_manual_launch(user_id: int, launch_id: int) -> dict:
+    """Reconciliação REVERSA (P0 #3): usuário criou um lançamento manual; se já existe um OF
+    launch gêmeo (importado antes), funde — apaga o OF launch e revincula a OF tx no manual.
+
+    Chamar logo após criar um lançamento manual (bot/web). Best-effort e idempotente.
+    """
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, tipo, valor, coalesce(posted_at, criado_em::date) as ref_date,
+                       alvo, nota, coalesce(source,'manual') as source, is_internal_movement
+                from launches where id=%s and user_id=%s
+                """,
+                (launch_id, user_id),
+            )
+            m = cur.fetchone()
+            if not m or m["source"] == "open_finance" or m["is_internal_movement"]:
+                return {"ok": False, "reason": "not_manual"}
+
+            cur.execute(
+                """
+                select l.id, l.valor, coalesce(l.posted_at, l.criado_em::date) as ref_date,
+                       o.id as of_tx_id, o.description as of_desc
+                from launches l
+                join open_finance_transactions o on o.imported_launch_id = l.id
+                where l.user_id=%s and coalesce(l.source,'') = 'open_finance'
+                  and l.tipo=%s and l.is_internal_movement = false
+                  and abs(l.valor - %s) <= %s
+                  and coalesce(l.posted_at, l.criado_em::date) between %s and %s
+                  and o.reconciliation_status in ('imported','pending')
+                """,
+                (user_id, m["tipo"], m["valor"], RECON_AMOUNT_TOL,
+                 m["ref_date"] - timedelta(days=RECON_DATE_WINDOW),
+                 m["ref_date"] + timedelta(days=RECON_DATE_WINDOW)),
+            )
+            of_rows = cur.fetchall()
+
+    if not of_rows:
+        return {"ok": True, "matched": False}
+
+    manual_desc = f"{m['alvo'] or ''} {m['nota'] or ''}"
+    candidates = [
+        {"id": r["id"], "valor": r["valor"], "ref_date": r["ref_date"], "alvo": r["of_desc"], "nota": None}
+        for r in of_rows
+    ]
+    pick = pick_reconciliation_match(m["valor"], m["ref_date"], manual_desc, candidates)
+    if pick["verdict"] != "auto":
+        return {"ok": True, "matched": False, "verdict": pick["verdict"]}
+
+    of_launch_id = pick["launch_id"]
+    of_tx_id = next(r["of_tx_id"] for r in of_rows if r["id"] == of_launch_id)
+    try:
+        delete_launch_and_rollback(user_id, of_launch_id)
+    except Exception:
+        pass
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update open_finance_transactions "
+                "set imported_launch_id=%s, match_launch_id=%s, reconciliation_status='auto_merged' where id=%s",
+                (launch_id, launch_id, of_tx_id),
+            )
+        conn.commit()
+    return {"ok": True, "matched": True, "merged_of_launch": of_launch_id}
+
+
 def import_open_finance_credit(user_id: int, connection_id: int | None = None) -> dict:
     """Importa transações de contas de CRÉDITO do OF pra máquina de faturas (opção a).
 
@@ -830,10 +1001,54 @@ def get_consolidated_balance(user_id: int) -> dict:
 
 
 def disconnect_open_finance_connection(user_id: int, connection_id: int | None = None) -> int:
+    """Desconecta banco(s) e LIMPA o que foi importado (P0 integridade).
+
+    Política: reverte launches OF + transações de fatura, apaga os cartões auto-criados
+    que ficaram vazios, e só então remove a conexão (cascade nas contas/transações OF).
+    Lançamentos MANUAIS que foram auto-mesclados são preservados (só desvinculados).
+    """
     ensure_user(user_id)
 
+    # 1. junta as transações OF importadas + os cartões auto-criados desta conexão.
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute(
+                """
+                select t.id, c.user_id, t.imported_launch_id, t.imported_credit_tx_id,
+                       l.source as launch_source
+                from open_finance_transactions t
+                join open_finance_accounts a on a.id = t.account_id
+                join open_finance_connections c on c.id = a.connection_id
+                left join launches l on l.id = t.imported_launch_id
+                where c.user_id = %s and (%s is null or c.id = %s)
+                """,
+                (user_id, connection_id, connection_id),
+            )
+            rows = cur.fetchall()
+
+            cur.execute(
+                """
+                select cc.id as card_id
+                from credit_cards cc
+                join open_finance_accounts a on a.id = cc.open_finance_account_id
+                join open_finance_connections c on c.id = a.connection_id
+                where c.user_id = %s and (%s is null or c.id = %s)
+                """,
+                (user_id, connection_id, connection_id),
+            )
+            card_ids = [r["card_id"] for r in cur.fetchall()]
+
+    # 2. reverte launches/fatura importados.
+    _rollback_imported_of(rows)
+
+    # 3. apaga cartões auto-criados que ficaram sem transações + remove a conexão.
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for cid in card_ids:
+                cur.execute("select count(*) as n from credit_transactions where card_id=%s", (cid,))
+                if cur.fetchone()["n"] == 0:
+                    cur.execute("delete from credit_cards where id=%s and user_id=%s", (cid, user_id))
+
             if connection_id is None:
                 cur.execute("delete from open_finance_connections where user_id=%s", (user_id,))
             else:
