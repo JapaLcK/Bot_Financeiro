@@ -17,6 +17,7 @@ from utils_date import _tz
 from core.services.pluggy import (
     create_pluggy_api_key,
     list_pluggy_accounts,
+    list_pluggy_investments,
     list_pluggy_transactions,
     update_pluggy_item,
 )
@@ -26,6 +27,7 @@ from db import (
     import_open_finance_credit,
     import_open_finance_launches,
     list_pluggy_item_ids,
+    save_open_finance_investments,
     save_open_finance_sync,
 )
 
@@ -86,6 +88,25 @@ def normalize_pluggy_transaction(raw: dict) -> dict:
     }
 
 
+def normalize_pluggy_investment(raw: dict) -> dict:
+    """Converte o investimento cru da Pluggy pro formato de `save_open_finance_investments`."""
+    return {
+        "provider_investment_id": str(raw.get("id") or ""),
+        "name": str(raw.get("name") or raw.get("type") or "Investimento"),
+        "type": str(raw.get("type") or ""),
+        "subtype": (str(raw["subtype"]) if raw.get("subtype") else None),
+        "currency": str(raw.get("currencyCode") or "BRL"),
+        "balance": _to_decimal(raw.get("balance")),
+        "raw": raw,
+    }
+
+
+def is_caixinha(investment: dict) -> bool:
+    """Caixinha do Nubank / Cofrinho do PicPay = CDB de renda fixa (doc Pluggy)."""
+    return (str(investment.get("type") or "").upper() == "FIXED_INCOME"
+            and str(investment.get("subtype") or "").upper() == "CDB")
+
+
 def sync_pluggy_item(provider_item_id: str) -> dict:
     """Sincroniza um item Pluggy: contas + transações → tabelas OF. Idempotente."""
     connection = get_open_finance_connection_by_item_id(provider_item_id)
@@ -107,6 +128,10 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
 
     result = save_open_finance_sync(connection["id"], accounts)
 
+    # #10: investimentos (inclui Caixinha/CDB) — espelho, não vira pocket ainda.
+    investments = [normalize_pluggy_investment(i) for i in list_pluggy_investments(provider_item_id, api_key)]
+    inv_result = save_open_finance_investments(connection["id"], investments)
+
     # Fase 1: conta BANK → launches (analytics, sem mover saldo); cartão → faturas (opção a).
     imported = import_open_finance_launches(connection["user_id"], connection["id"])
     imported_credit = import_open_finance_credit(connection["user_id"], connection["id"])
@@ -117,6 +142,7 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
         "connection_id": connection["id"],
         "user_id": connection["user_id"],
         **result,
+        **inv_result,
         "imported": imported,
         "imported_credit": imported_credit,
     }

@@ -556,6 +556,25 @@ def init_db():
         """,
 
         # -----------------------------
+        # Open Finance — investimentos (#10): espelho pra caixinha (CDB) etc.
+        # -----------------------------
+        """
+        create table if not exists open_finance_investments (
+          id bigserial primary key,
+          connection_id bigint not null references open_finance_connections(id) on delete cascade,
+          provider_investment_id text not null,
+          name text,
+          type text,
+          subtype text,
+          currency text default 'BRL',
+          balance numeric,
+          raw jsonb,
+          updated_at timestamptz default now(),
+          unique(connection_id, provider_investment_id)
+        )
+        """,
+
+        # -----------------------------
         # Open Finance — reconciliação (Fase 2): dedup OF ↔ manual
         # -----------------------------
         """

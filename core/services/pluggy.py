@@ -106,6 +106,14 @@ def list_pluggy_accounts(item_id: str, api_key: str | None = None) -> list[dict]
     return list(results) if isinstance(results, list) else []
 
 
+def list_pluggy_investments(item_id: str, api_key: str | None = None) -> list[dict]:
+    """Investimentos do item — inclui Caixinha do Nubank/PicPay (FIXED_INCOME/CDB)."""
+    key = api_key or create_pluggy_api_key()
+    data = _pluggy_get("/investments", key, params={"itemId": item_id})
+    results = data.get("results")
+    return list(results) if isinstance(results, list) else []
+
+
 def _extract_after_cursor(next_value: Any) -> str | None:
     """O /v2/transactions devolve `next` como '?accountId=..&after=<cursor>' (ou null no fim)."""
     if not next_value:

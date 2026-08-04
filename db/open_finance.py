@@ -279,10 +279,23 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
             )
             transactions = cur.fetchall()
 
+            cur.execute(
+                """
+                select c.institution_name, i.id, i.name, i.type, i.subtype, i.balance
+                from open_finance_investments i
+                join open_finance_connections c on c.id = i.connection_id
+                where c.user_id=%s
+                order by i.balance desc nulls last, i.id
+                """,
+                (user_id,),
+            )
+            investments = cur.fetchall()
+
     return {
         "connections": connections,
         "accounts": accounts,
         "transactions": transactions,
+        "investments": investments,
     }
 
 
@@ -433,6 +446,36 @@ def update_pluggy_open_finance_item_status(provider_item_id: str, status: str, r
         conn.commit()
 
     return updated
+
+
+def save_open_finance_investments(connection_id: int, investments: list[dict]) -> dict:
+    """Grava (upsert) os investimentos OF — inclui Caixinha (CDB). Espelho, não vira pocket ainda."""
+    now = datetime.now(_tz())
+    count = 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for inv in investments:
+                if not inv.get("provider_investment_id"):
+                    continue
+                cur.execute(
+                    """
+                    insert into open_finance_investments (
+                        connection_id, provider_investment_id, name, type, subtype,
+                        currency, balance, raw, updated_at
+                    )
+                    values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    on conflict (connection_id, provider_investment_id)
+                    do update set name=excluded.name, type=excluded.type, subtype=excluded.subtype,
+                                  currency=excluded.currency, balance=excluded.balance,
+                                  raw=excluded.raw, updated_at=excluded.updated_at
+                    """,
+                    (connection_id, inv["provider_investment_id"], inv.get("name"), inv.get("type"),
+                     inv.get("subtype"), inv.get("currency") or "BRL", inv.get("balance") or Decimal("0"),
+                     Jsonb(inv.get("raw") or {}), now),
+                )
+                count += 1
+        conn.commit()
+    return {"investments_synced": count}
 
 
 def get_open_finance_connection_by_item_id(provider_item_id: str, provider: str = "pluggy") -> dict | None:
