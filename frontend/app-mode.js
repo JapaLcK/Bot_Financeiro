@@ -41,10 +41,11 @@
   const path = location.pathname.replace(/\/+$/, "") || "/";
   const page = PAGES[path];
 
-  // Safe areas exigem viewport-fit=cover (WebKit aplica dinamicamente)
+  // Viewport de app: safe areas + zoom travado (pinch/auto-zoom estica o
+  // layout e "come" texto nas bordas; app nativo não tem zoom de UI)
   function fixViewport() {
     const m = document.querySelector('meta[name="viewport"]');
-    if (m && !/viewport-fit/.test(m.content)) m.content += ", viewport-fit=cover";
+    if (m) m.content = "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover";
   }
 
   const TABS = [

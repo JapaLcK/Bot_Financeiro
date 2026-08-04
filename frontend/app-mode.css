@@ -27,6 +27,17 @@ html.pb-app .mfa-modal {
   max-width: calc(100vw - 24px) !important;
 }
 
+/* Strings compridas (e-mail, IP, telefone) quebram linha em vez de esticar
+   o card além da tela — era isso que "comia" palavras na borda direita */
+html.pb-app body { overflow-wrap: anywhere; }
+html.pb-app .layout,
+html.pb-app .main,
+html.pb-app .card,
+html.pb-app .settings-section {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
 /* ─── Base: sem scrollbar (app não é site) ─────────────────────────────── */
 html.pb-app *::-webkit-scrollbar {
   width: 0 !important;
