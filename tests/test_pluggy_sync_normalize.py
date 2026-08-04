@@ -115,6 +115,16 @@ def test_reconciliation_none_when_out_of_window_or_value():
     )["verdict"] == "none"
 
 
+def test_extract_installment_info():
+    from db import extract_installment_info
+    assert extract_installment_info({"creditCardMetadata": {"installmentNumber": 3, "totalInstallments": 12}}) == (3, 12)
+    # à vista (total 1 ou ausente) → sem parcela
+    assert extract_installment_info({"creditCardMetadata": {"installmentNumber": 1, "totalInstallments": 1}}) == (None, None)
+    assert extract_installment_info({"creditCardMetadata": {}}) == (None, None)
+    assert extract_installment_info({}) == (None, None)
+    assert extract_installment_info(None) == (None, None)
+
+
 def test_credit_day_from_iso():
     assert credit_day_from_iso("2026-08-15", 1) == 15
     assert credit_day_from_iso("2026-08-28T00:00:00.000Z", 1) == 28

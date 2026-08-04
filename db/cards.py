@@ -560,6 +560,20 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
     return card_id
 
 
+def extract_installment_info(raw) -> tuple[int | None, int | None]:
+    """Puro: (installment_no, installments_total) do creditCardMetadata do Pluggy.
+
+    Cada parcela vem como transação separada com installmentNumber/totalInstallments.
+    Só retorna se for parcelado de verdade (total > 1)."""
+    meta = (raw or {}).get("creditCardMetadata") or {}
+    try:
+        n = int(meta["installmentNumber"]) if meta.get("installmentNumber") is not None else None
+        total = int(meta["totalInstallments"]) if meta.get("totalInstallments") is not None else None
+    except (TypeError, ValueError):
+        return None, None
+    return (n, total) if (total and total > 1) else (None, None)
+
+
 def add_imported_credit_purchase(
     user_id: int,
     card_id: int,
@@ -568,11 +582,16 @@ def add_imported_credit_purchase(
     purchased_at: date,
     external_id: str,
     source: str = "open_finance",
+    installment_no: int | None = None,
+    installments_total: int | None = None,
+    group_id=None,
 ):
     """Importa uma transação de cartão do Open Finance, idempotente por (user, source, external_id).
 
     `amount` vem assinado (negativo = compra, positivo = pagamento/estorno). A fatura sobe
-    com compras e cai com pagamentos/estornos. Retorna (tx_id, criado: bool).
+    com compras e cai com pagamentos/estornos. Parcela (installment_no/total) e group_id
+    populam as colunas que já existem, ligando as parcelas do mesmo compra (#11).
+    Retorna (tx_id, criado: bool).
     """
     ensure_user(user_id)
     amt = Decimal(str(amount))
@@ -597,11 +616,13 @@ def add_imported_credit_purchase(
             cur.execute(
                 """
                 insert into credit_transactions
-                    (bill_id, user_id, card_id, valor, categoria, nota, purchased_at, is_refund, source, external_id)
-                values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    (bill_id, user_id, card_id, valor, categoria, nota, purchased_at, is_refund,
+                     source, external_id, installment_no, installments_total, group_id)
+                values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 returning id
                 """,
-                (bill_id, user_id, card_id, valor, categoria, None, purchased_at, is_refund, source, external_id),
+                (bill_id, user_id, card_id, valor, categoria, None, purchased_at, is_refund,
+                 source, external_id, installment_no, installments_total, group_id),
             )
             tx_id = cur.fetchone()["id"]
             cur.execute(

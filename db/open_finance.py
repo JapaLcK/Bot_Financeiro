@@ -2,13 +2,19 @@ import re
 import unicodedata
 from decimal import Decimal
 from datetime import datetime, timedelta
+from uuid import NAMESPACE_OID, uuid5
 
 from psycopg.types.json import Jsonb
 
 from utils_date import _tz
 
 from .accounts import delete_launch_and_rollback
-from .cards import add_imported_credit_purchase, get_or_create_open_finance_card, undo_credit_transaction
+from .cards import (
+    add_imported_credit_purchase,
+    extract_installment_info,
+    get_or_create_open_finance_card,
+    undo_credit_transaction,
+)
 from .connection import get_conn
 from .users import ensure_user
 
@@ -985,7 +991,7 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
             cur.execute(
                 """
                 select t.id as of_tx_id, t.provider_transaction_id, t.description,
-                       t.amount, t.transaction_date, t.category,
+                       t.amount, t.transaction_date, t.category, t.raw as tx_raw,
                        a.id as of_account_id, a.name as account_name, a.raw as account_raw
                 from open_finance_transactions t
                 join open_finance_accounts a on a.id = t.account_id
@@ -1006,9 +1012,16 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
             card_cache[of_acc_id] = get_or_create_open_finance_card(
                 user_id, of_acc_id, r["account_name"], r["account_raw"]
             )
+        # Parcelas (#11): cada parcela é uma tx separada; marca nº/total e agrupa por compra.
+        inst_no, inst_total = extract_installment_info(r["tx_raw"])
+        group_id = None
+        if inst_total:
+            key = f"{card_cache[of_acc_id]}|{(r['description'] or '').strip().lower()}|{inst_total}"
+            group_id = uuid5(NAMESPACE_OID, key)
         tx_id, created = add_imported_credit_purchase(
             user_id, card_cache[of_acc_id], r["amount"], r["category"],
             r["transaction_date"], r["provider_transaction_id"],
+            installment_no=inst_no, installments_total=inst_total, group_id=group_id,
         )
         if created:
             inserted += 1
