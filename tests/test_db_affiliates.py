@@ -55,6 +55,21 @@ def _inv(prefix: str = "in_test") -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
+def _available_commission(aff: dict, invoice_amount_cents: int) -> dict:
+    """Cria uma comissão JÁ disponível (fora da carência) vinda de um indicado
+    NOVO. Regra de negócio: cada indicado só rende comissão na 1ª cobrança, então
+    acumular várias comissões exige indicados distintos. O usuário criado aqui é
+    limpo pelo autouse `_auto_cleanup_orphan_users` do conftest (cascateia as
+    linhas de referral/comissão via FK ao apagar o user)."""
+    ruid = int(uuid.uuid4().int % 10_000_000_000)
+    ensure_user(ruid)
+    record_referral(aff["code"], ruid)
+    c = record_commission_for_invoice(ruid, _inv(), invoice_amount_cents)
+    assert c is not None, "indicado novo deveria render a 1ª comissão"
+    _make_available(c["id"])
+    return c
+
+
 def test_create_affiliate_gera_codigo_e_eh_idempotente(user_id):
     a1 = create_affiliate(user_id)
     assert a1["code"] and len(a1["code"]) == 8
@@ -137,12 +152,11 @@ def test_saque_minimo_e_ciclo_pagamento(user_id, referred_user_id):
     with pytest.raises(ValueError):
         request_payout(aff["id"])
 
-    # fatura anual de R$ 199 → +R$ 19,90; mais 30 mensais → passa de R$ 50
-    big = record_commission_for_invoice(referred_user_id, _inv(), 19900)
-    _make_available(big["id"])
+    # Mais comissões pra passar do mínimo. Cada indicado só rende a 1ª cobrança,
+    # então cada comissão nova vem de um indicado distinto (não do mesmo).
+    _available_commission(aff, 19900)          # fatura R$ 199 → +R$ 19,90
     for _ in range(15):
-        ci = record_commission_for_invoice(referred_user_id, _inv(), 1990)
-        _make_available(ci["id"])
+        _available_commission(aff, 1990)       # 15 × fatura R$ 19,90 → +R$ 1,99 cada
 
     total_expected = 199 + 1990 + 15 * 199
     assert total_expected >= MIN_PAYOUT_CENTS
@@ -194,9 +208,10 @@ def test_estorno_de_comissao(user_id, referred_user_id):
     assert stats["held_cents"] == 0
     assert stats["available_cents"] == 0
 
-    # comissão dentro de saque em andamento não estorna
-    big = record_commission_for_invoice(referred_user_id, _inv(), 100000)
-    _make_available(big["id"])
+    # comissão dentro de saque em andamento não estorna. A 1ª comissão (c) foi
+    # estornada, mas o indicado já "gastou" a 1ª cobrança (a regra conta inclusive
+    # estornada), então a nova comissão vem de outro indicado.
+    big = _available_commission(aff, 100000)  # R$ 1000 → R$ 100, acima do mínimo
     payout = request_payout(aff["id"])
     assert reverse_commission(big["id"]) is False
     reject_payout(payout["id"])
