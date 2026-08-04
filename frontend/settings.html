@@ -100,16 +100,7 @@ a { color: inherit; text-decoration: none; }
   letter-spacing: -.02em;
   color: var(--ink);
 }
-.brand-mark {
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
-  display: grid;
-  place-items: center;
-  background: linear-gradient(135deg, #FF2D8E, #C7186B);
-  font-size: .95rem;
-  box-shadow: 0 4px 12px rgba(255,45,142,.28);
-}
+.brand .logo-full { height: 30px; width: auto; display: block; }
 
 .top-actions { position: relative; z-index: 2; display: flex; gap: 8px; align-items: center; }
 .btn-topbar {
@@ -1056,10 +1047,9 @@ a { color: inherit; text-decoration: none; }
 <!-- Topbar -->
 <header class="topbar">
   <div class="topbar-inner">
-    <a class="brand" id="home-link" href="/">
-      <span class="brand-mark">🐷</span>
-      <span>PigBank</span>
-    </a>
+    <div class="brand" id="home-link">
+      <img class="logo-full" src="/brand/logo.png?v=1" alt="PigBank" />
+    </div>
     <div class="top-actions">
       <a class="btn-topbar" href="/home" id="account-link">Minha conta</a>
       <a class="btn-topbar" id="dashboard-link" href="/app">Dashboard →</a>
