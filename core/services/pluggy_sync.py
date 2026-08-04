@@ -1,0 +1,146 @@
+"""Sync real Open Finance/Pluggy — puxa contas + transações e grava nas tabelas OF.
+
+Fase 0 do plano de Open Finance: substitui o gerador mock por dados reais.
+NÃO toca no saldo manual nem em `launches` — isso é a Fase 1 (import + conciliação).
+
+O trabalho aqui é bloqueante (httpx + DB); chame via asyncio.to_thread a partir das rotas.
+"""
+
+from __future__ import annotations
+
+import os
+from datetime import date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
+from typing import Any
+
+from utils_date import _tz
+
+from core.services.pluggy import (
+    create_pluggy_api_key,
+    list_pluggy_accounts,
+    list_pluggy_transactions,
+)
+from db import (
+    get_open_finance_connection_by_item_id,
+    get_open_finance_snapshot,
+    save_open_finance_sync,
+)
+
+
+def _to_decimal(value: Any, default: str = "0") -> Decimal:
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal(default)
+
+
+def _parse_date(value: Any) -> date:
+    """Aceita 'YYYY-MM-DD', ISO com hora, ou datetime. Cai pra hoje se não der."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value or "").strip()
+    if text:
+        try:
+            return datetime.strptime(text[:10], "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    return datetime.now(_tz()).date()
+
+
+def _is_credit_account(raw: dict) -> bool:
+    kind = f"{raw.get('type') or ''} {raw.get('subtype') or ''}".upper()
+    return "CREDIT" in kind
+
+
+def normalize_pluggy_account(raw: dict) -> dict:
+    """Converte a conta crua da Pluggy no formato que `save_open_finance_sync` espera."""
+    balance = _to_decimal(raw.get("balance"))
+    # Cartão de crédito: representa o usado como saldo negativo (igual ao fluxo mock).
+    if _is_credit_account(raw) and balance > 0:
+        balance = -balance
+    return {
+        "provider_account_id": str(raw.get("id") or ""),
+        "name": str(raw.get("marketingName") or raw.get("name") or raw.get("type") or "Conta"),
+        "type": str(raw.get("type") or "BANK"),
+        "subtype": (str(raw["subtype"]) if raw.get("subtype") else None),
+        "currency": str(raw.get("currencyCode") or "BRL"),
+        "balance": balance,
+        "raw": raw,
+    }
+
+
+def normalize_pluggy_transaction(raw: dict) -> dict:
+    """Normaliza sinal do valor: negativo = saída, positivo = entrada, seja qual for a convenção da Pluggy."""
+    amount = _to_decimal(raw.get("amount"))
+    ttype = str(raw.get("type") or "").upper()
+    if ttype == "DEBIT" and amount > 0:
+        amount = -amount
+    elif ttype == "CREDIT" and amount < 0:
+        amount = abs(amount)
+    return {
+        "provider_transaction_id": str(raw.get("id") or ""),
+        "description": str(raw.get("description") or raw.get("descriptionRaw") or "Transação"),
+        "amount": amount,
+        "transaction_date": _parse_date(raw.get("date")),
+        "category": (str(raw["category"]) if raw.get("category") else None),
+        "raw": raw,
+    }
+
+
+def _sync_window_from_date() -> str | None:
+    days = int(os.getenv("PLUGGY_SYNC_DAYS", "365") or "0")
+    if days <= 0:
+        return None
+    return (datetime.now(_tz()).date() - timedelta(days=days)).isoformat()
+
+
+def sync_pluggy_item(provider_item_id: str) -> dict:
+    """Sincroniza um item Pluggy: contas + transações → tabelas OF. Idempotente."""
+    connection = get_open_finance_connection_by_item_id(provider_item_id)
+    if not connection:
+        return {"ok": False, "reason": "connection_not_found", "item_id": provider_item_id}
+
+    api_key = create_pluggy_api_key()
+    from_date = _sync_window_from_date()
+
+    accounts: list[dict] = []
+    for raw_account in list_pluggy_accounts(provider_item_id, api_key):
+        account = normalize_pluggy_account(raw_account)
+        if not account["provider_account_id"]:
+            continue
+        raw_txs = list_pluggy_transactions(
+            account["provider_account_id"], api_key, from_date=from_date
+        )
+        account["transactions"] = [
+            tx for tx in (normalize_pluggy_transaction(t) for t in raw_txs) if tx["provider_transaction_id"]
+        ]
+        accounts.append(account)
+
+    result = save_open_finance_sync(connection["id"], accounts)
+    return {
+        "ok": True,
+        "item_id": provider_item_id,
+        "connection_id": connection["id"],
+        "user_id": connection["user_id"],
+        **result,
+    }
+
+
+def sync_pluggy_user(user_id: int) -> dict:
+    """Sincroniza todos os itens Pluggy de um usuário (útil pra sync manual/testes)."""
+    snapshot = get_open_finance_snapshot(user_id)
+    items = [
+        c["provider_item_id"]
+        for c in snapshot.get("connections", [])
+        if (c.get("provider") == "pluggy" and c.get("provider_item_id"))
+    ]
+    results = [sync_pluggy_item(item_id) for item_id in items]
+    return {
+        "ok": True,
+        "items_synced": len(results),
+        "accounts_synced": sum(r.get("accounts_synced", 0) for r in results),
+        "transactions_synced": sum(r.get("transactions_synced", 0) for r in results),
+        "results": results,
+    }

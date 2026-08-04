@@ -181,6 +181,8 @@ from .cards import (
 from .open_finance import (
     create_mock_open_finance_connection,
     get_open_finance_snapshot,
+    get_open_finance_connection_by_item_id,
+    save_open_finance_sync,
     disconnect_open_finance_connection,
     save_pluggy_open_finance_item,
     update_pluggy_open_finance_item_status,
@@ -367,6 +369,7 @@ __all__ = [
     "get_installment_group_summaries", "rebuild_bill_totals",
     # open finance
     "create_mock_open_finance_connection", "get_open_finance_snapshot",
+    "get_open_finance_connection_by_item_id", "save_open_finance_sync",
     "disconnect_open_finance_connection", "save_pluggy_open_finance_item",
     "update_pluggy_open_finance_item_status",
     # reports

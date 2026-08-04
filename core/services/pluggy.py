@@ -67,6 +67,57 @@ def create_pluggy_api_key() -> str:
     return str(api_key)
 
 
+def _pluggy_get(path: str, api_key: str, params: dict[str, Any] | None = None) -> dict:
+    """GET autenticado na Pluggy. `path` começa com '/'."""
+    with httpx.Client(timeout=_pluggy_timeout()) as client:
+        resp = client.get(
+            f"{_pluggy_base_url()}{path}",
+            headers={"X-API-KEY": api_key},
+            params=params or {},
+        )
+    _raise_for_pluggy_response(resp, f"Falha ao consultar {path} na Pluggy")
+    return resp.json()
+
+
+def get_pluggy_item(item_id: str, api_key: str | None = None) -> dict:
+    key = api_key or create_pluggy_api_key()
+    return _pluggy_get(f"/items/{item_id}", key)
+
+
+def list_pluggy_accounts(item_id: str, api_key: str | None = None) -> list[dict]:
+    key = api_key or create_pluggy_api_key()
+    data = _pluggy_get("/accounts", key, params={"itemId": item_id})
+    results = data.get("results")
+    return list(results) if isinstance(results, list) else []
+
+
+def list_pluggy_transactions(
+    account_id: str,
+    api_key: str | None = None,
+    *,
+    from_date: str | None = None,
+    page_size: int = 500,
+    max_pages: int = 40,
+) -> list[dict]:
+    """Puxa todas as transações de uma conta, paginando até acabar."""
+    key = api_key or create_pluggy_api_key()
+    out: list[dict] = []
+    page = 1
+    while page <= max_pages:
+        params: dict[str, Any] = {"accountId": account_id, "pageSize": page_size, "page": page}
+        if from_date:
+            params["from"] = from_date
+        data = _pluggy_get("/transactions", key, params=params)
+        results = data.get("results")
+        if isinstance(results, list):
+            out.extend(results)
+        total_pages = int(data.get("totalPages") or 1)
+        if page >= total_pages or not results:
+            break
+        page += 1
+    return out
+
+
 def create_pluggy_connect_token(user_id: int, webhook_url: str | None = None) -> dict:
     api_key = create_pluggy_api_key()
     options: dict[str, Any] = {

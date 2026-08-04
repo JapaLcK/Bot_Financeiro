@@ -341,6 +341,112 @@ def update_pluggy_open_finance_item_status(provider_item_id: str, status: str, r
     return updated
 
 
+def get_open_finance_connection_by_item_id(provider_item_id: str, provider: str = "pluggy") -> dict | None:
+    """Localiza a conexão pelo item da Pluggy (o webhook só traz o item, não o user)."""
+    item_id = (provider_item_id or "").strip()
+    if not item_id:
+        return None
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, user_id, provider, provider_item_id, status, institution_name
+                from open_finance_connections
+                where provider=%s and provider_item_id=%s
+                limit 1
+                """,
+                (provider, item_id),
+            )
+            return cur.fetchone()
+
+
+def save_open_finance_sync(connection_id: int, accounts: list[dict]) -> dict:
+    """
+    Grava contas + transações reais puxadas da Pluggy nas tabelas OF.
+    `accounts` é uma lista de dicts já normalizados, cada um com uma lista `transactions`.
+    Idempotente: usa os mesmos ON CONFLICT (connection_id, provider_account_id) e
+    (account_id, provider_transaction_id) do fluxo mock. NÃO toca no saldo manual (isso é Fase 1).
+    """
+    now = datetime.now(_tz())
+    account_count = 0
+    transaction_count = 0
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for account in accounts:
+                cur.execute(
+                    """
+                    insert into open_finance_accounts (
+                        connection_id, provider_account_id, name, type,
+                        subtype, currency, balance, raw, updated_at
+                    )
+                    values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    on conflict (connection_id, provider_account_id)
+                    do update set name = excluded.name,
+                                  type = excluded.type,
+                                  subtype = excluded.subtype,
+                                  currency = excluded.currency,
+                                  balance = excluded.balance,
+                                  raw = excluded.raw,
+                                  updated_at = excluded.updated_at
+                    returning id
+                    """,
+                    (
+                        connection_id,
+                        account["provider_account_id"],
+                        account["name"],
+                        account["type"],
+                        account.get("subtype"),
+                        account.get("currency") or "BRL",
+                        account.get("balance") or Decimal("0"),
+                        Jsonb(account.get("raw") or {}),
+                        now,
+                    ),
+                )
+                account_db_id = cur.fetchone()["id"]
+                account_count += 1
+
+                for tx in account.get("transactions", []):
+                    cur.execute(
+                        """
+                        insert into open_finance_transactions (
+                            account_id, provider_transaction_id, description,
+                            amount, transaction_date, category, raw
+                        )
+                        values (%s,%s,%s,%s,%s,%s,%s)
+                        on conflict (account_id, provider_transaction_id)
+                        do update set description = excluded.description,
+                                      amount = excluded.amount,
+                                      transaction_date = excluded.transaction_date,
+                                      category = excluded.category,
+                                      raw = excluded.raw
+                        """,
+                        (
+                            account_db_id,
+                            tx["provider_transaction_id"],
+                            tx["description"],
+                            tx["amount"],
+                            tx["transaction_date"],
+                            tx.get("category"),
+                            Jsonb(tx.get("raw") or {}),
+                        ),
+                    )
+                    transaction_count += 1
+
+            cur.execute(
+                """
+                update open_finance_connections
+                set last_sync_at=%s, updated_at=%s
+                where id=%s
+                """,
+                (now, now, connection_id),
+            )
+        conn.commit()
+
+    return {"accounts_synced": account_count, "transactions_synced": transaction_count}
+
+
 def disconnect_open_finance_connection(user_id: int, connection_id: int | None = None) -> int:
     ensure_user(user_id)
 
