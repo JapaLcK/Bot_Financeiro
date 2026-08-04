@@ -2331,6 +2331,22 @@ async def auth_new_link_code(user_id: int = Depends(_get_current_user)):
     }
 
 
+def _open_finance_ui_enabled(user_id: int, email: str | None) -> bool:
+    """Gate da UI de Open Finance. Liga se:
+    - OF_UI_ENABLED global ligado (lançamento pra todos), OU
+    - o e-mail está em OF_UI_BETA_EMAILS (allowlist beta, case-insensitive), OU
+    - o user_id está em OF_UI_BETA_USER_IDS.
+    Default: desligado (nada muda pros usuários).
+    """
+    if (os.getenv("OF_UI_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    beta_emails = {e.strip().lower() for e in (os.getenv("OF_UI_BETA_EMAILS") or "").split(",") if e.strip()}
+    if email and str(email).strip().lower() in beta_emails:
+        return True
+    beta_ids = {i.strip() for i in (os.getenv("OF_UI_BETA_USER_IDS") or "").split(",") if i.strip()}
+    return str(user_id) in beta_ids
+
+
 @app.get("/auth/me")
 async def auth_me(user_id: int = Depends(_get_current_user)):
     """Retorna dados do usuário autenticado."""
@@ -2342,16 +2358,19 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
 
+    user_dict = dict(user)
     show_onboarding = await asyncio.to_thread(should_show_mfa_onboarding, user_id)
     mfa = await asyncio.to_thread(get_mfa_status, user_id)
     from core.services.plan_service import has_app_access, paywall_enabled
+    of_ui_enabled = _open_finance_ui_enabled(user_id, user_dict.get("email"))
     return {
         "user_id": user_id,
-        **dict(user),
+        **user_dict,
         "show_mfa_onboarding": show_onboarding,
         "mfa_enabled": bool(mfa.get("enabled")),
         "app_access": has_app_access(user_id),
         "paywall_enabled": paywall_enabled(),
+        "of_ui_enabled": of_ui_enabled,
     }
 
 
