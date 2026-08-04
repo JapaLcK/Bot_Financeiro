@@ -48,40 +48,34 @@ def _parse_date(value: Any) -> date:
     return datetime.now(_tz()).date()
 
 
-def _is_credit_account(raw: dict) -> bool:
-    kind = f"{raw.get('type') or ''} {raw.get('subtype') or ''}".upper()
-    return "CREDIT" in kind
-
-
 def normalize_pluggy_account(raw: dict) -> dict:
-    """Converte a conta crua da Pluggy no formato que `save_open_finance_sync` espera."""
-    balance = _to_decimal(raw.get("balance"))
-    # Cartão de crédito: representa o usado como saldo negativo (igual ao fluxo mock).
-    if _is_credit_account(raw) and balance > 0:
-        balance = -balance
+    """Converte a conta crua da Pluggy no formato que `save_open_finance_sync` espera.
+
+    Confia no `balance` como o Pluggy manda (cartão já vem negativo = valor devido).
+    Não mexe no sinal — a semântica de consolidação fica pra Fase 1.
+    """
     return {
         "provider_account_id": str(raw.get("id") or ""),
         "name": str(raw.get("marketingName") or raw.get("name") or raw.get("type") or "Conta"),
         "type": str(raw.get("type") or "BANK"),
         "subtype": (str(raw["subtype"]) if raw.get("subtype") else None),
         "currency": str(raw.get("currencyCode") or "BRL"),
-        "balance": balance,
+        "balance": _to_decimal(raw.get("balance")),
         "raw": raw,
     }
 
 
 def normalize_pluggy_transaction(raw: dict) -> dict:
-    """Normaliza sinal do valor: negativo = saída, positivo = entrada, seja qual for a convenção da Pluggy."""
-    amount = _to_decimal(raw.get("amount"))
-    ttype = str(raw.get("type") or "").upper()
-    if ttype == "DEBIT" and amount > 0:
-        amount = -amount
-    elif ttype == "CREDIT" and amount < 0:
-        amount = abs(amount)
+    """Confia no `amount` do Pluggy, que já vem assinado (negativo = saída, positivo = entrada).
+
+    NÃO deriva o sinal do campo `type`: no cartão, uma compra vem como type=CREDIT com
+    amount negativo — inverter pelo type transformaria compra em receita (bug pego no E2E
+    sandbox). O `type` fica só no `raw`.
+    """
     return {
         "provider_transaction_id": str(raw.get("id") or ""),
         "description": str(raw.get("description") or raw.get("descriptionRaw") or "Transação"),
-        "amount": amount,
+        "amount": _to_decimal(raw.get("amount")),
         "transaction_date": _parse_date(raw.get("date")),
         "category": (str(raw["category"]) if raw.get("category") else None),
         "raw": raw,

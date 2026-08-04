@@ -106,17 +106,17 @@ def list_pluggy_transactions(
     account_id: str,
     api_key: str | None = None,
     *,
-    page_size: int = 500,
     max_pages: int = 60,
 ) -> list[dict]:
     """Puxa todas as transações de uma conta via /v2/transactions (paginação por cursor).
 
     O endpoint antigo /transactions (page-based) está deprecado até 2026-12-31; o v2
-    devolve o cursor no campo `next`. Segue o cursor até `next` vir vazio.
+    devolve o cursor no campo `next` (null na última página) e o tamanho de página é
+    fixo no servidor — passar `pageSize` retorna HTTP 400. Segue o cursor até acabar.
     """
     key = api_key or create_pluggy_api_key()
     out: list[dict] = []
-    params: dict[str, Any] = {"accountId": account_id, "pageSize": page_size}
+    params: dict[str, Any] = {"accountId": account_id}
     for _ in range(max_pages):
         data = _pluggy_get("/v2/transactions", key, params=params)
         results = data.get("results")
@@ -125,7 +125,7 @@ def list_pluggy_transactions(
         after = _extract_after_cursor(data.get("next"))
         if not after or not results:
             break
-        params = {"accountId": account_id, "pageSize": page_size, "after": after}
+        params = {"accountId": account_id, "after": after}
     return out
 
 

@@ -29,28 +29,30 @@ def test_extract_after_cursor_none_when_absent_or_empty():
     assert _extract_after_cursor("?accountId=abc&pageSize=500") is None
 
 
-def test_transaction_debit_positive_amount_becomes_negative():
+def test_transaction_amount_sign_is_trusted_debit_negative():
+    # Boleto real do sandbox: DEBIT já vem negativo — mantém.
     tx = normalize_pluggy_transaction(
-        {"id": "t1", "description": "Mercado", "amount": 184.32, "type": "DEBIT", "date": "2026-07-20"}
+        {"id": "t1", "description": "Pagamento de boleto", "amount": -100, "type": "DEBIT", "date": "2026-08-04T18:16:16.839Z"}
     )
-    assert tx["amount"] == Decimal("-184.32")
+    assert tx["amount"] == Decimal("-100")
     assert tx["provider_transaction_id"] == "t1"
-    assert tx["transaction_date"] == date(2026, 7, 20)
+    assert tx["transaction_date"] == date(2026, 8, 4)
 
 
-def test_transaction_credit_negative_amount_becomes_positive():
+def test_transaction_credit_card_purchase_stays_negative():
+    # REGRESSÃO (bug pego no E2E): compra de cartão vem type=CREDIT com amount negativo.
+    # NÃO pode virar positivo, senão compra vira receita.
     tx = normalize_pluggy_transaction(
-        {"id": "t2", "description": "Salário", "amount": -6500, "type": "CREDIT", "date": "2026-07-01T00:00:00.000Z"}
+        {"id": "t2", "description": "NETFLIX.COM", "amount": -55.9, "type": "CREDIT", "date": "2026-08-01"}
+    )
+    assert tx["amount"] == Decimal("-55.9")
+
+
+def test_transaction_real_income_stays_positive():
+    tx = normalize_pluggy_transaction(
+        {"id": "t3", "description": "Salário", "amount": 6500, "type": "CREDIT", "date": "2026-07-01"}
     )
     assert tx["amount"] == Decimal("6500")
-    assert tx["transaction_date"] == date(2026, 7, 1)
-
-
-def test_transaction_already_signed_is_preserved():
-    tx = normalize_pluggy_transaction(
-        {"id": "t3", "description": "Uber", "amount": -38.90, "type": "DEBIT", "date": "2026-07-19"}
-    )
-    assert tx["amount"] == Decimal("-38.90")
 
 
 def test_transaction_missing_fields_have_fallbacks():
@@ -60,20 +62,22 @@ def test_transaction_missing_fields_have_fallbacks():
     assert tx["amount"] == Decimal("10")
 
 
-def test_account_credit_positive_balance_becomes_negative():
+def test_account_balance_sign_is_trusted():
+    # Cartão real do sandbox já vem negativo (valor devido) — mantém como está.
     acc = normalize_pluggy_account(
-        {"id": "a1", "name": "Cartão", "type": "CREDIT", "subtype": "CREDIT_CARD", "balance": 845.90, "currencyCode": "BRL"}
+        {"id": "a1", "marketingName": "Mastercard Black", "type": "CREDIT", "subtype": "CREDIT_CARD", "balance": -580.9, "currencyCode": "BRL"}
     )
-    assert acc["balance"] == Decimal("-845.90")
+    assert acc["balance"] == Decimal("-580.9")
     assert acc["type"] == "CREDIT"
+    assert acc["name"] == "Mastercard Black"
     assert acc["provider_account_id"] == "a1"
 
 
 def test_account_bank_balance_preserved_and_name_fallback():
     acc = normalize_pluggy_account(
-        {"id": "a2", "type": "BANK", "subtype": "CHECKING_ACCOUNT", "balance": 4320.75}
+        {"id": "a2", "type": "BANK", "subtype": "CHECKING_ACCOUNT", "balance": 21376.9}
     )
-    assert acc["balance"] == Decimal("4320.75")
+    assert acc["balance"] == Decimal("21376.9")
     assert acc["name"] == "BANK"  # sem name/marketingName → cai no type
     assert acc["currency"] == "BRL"
 
