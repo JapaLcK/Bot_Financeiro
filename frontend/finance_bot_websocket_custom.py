@@ -2815,8 +2815,14 @@ def _google_redirect_to_landing(message: str) -> RedirectResponse:
 
 @app.get("/auth/google/start")
 @limiter.limit("10/minute")
-async def auth_google_start(request: Request):
-    """Gera state, salva em cookie short-lived e redireciona pro Google."""
+async def auth_google_start(request: Request, app: int = 0):
+    """Gera state, salva em cookie short-lived e redireciona pro Google.
+
+    `app=1`: fluxo iniciado pelo app iOS (via ASWebAuthenticationSession). O
+    marcador viaja no próprio `state` (prefixo "app-"), que o Google devolve
+    intacto no callback — sem precisar de cookie extra. Assim o callback sabe
+    devolver um código de uso único pelo scheme `pigbankai://` em vez de setar
+    cookies num navegador que não é o WebView do app."""
     from core.services.google_oauth import (
         GoogleOAuthError,
         build_authorization_url,
@@ -2829,7 +2835,7 @@ async def auth_google_start(request: Request):
             detail="Login com Google ainda não está configurado neste ambiente.",
         )
 
-    state = secrets.token_urlsafe(32)
+    state = ("app-" if app == 1 else "") + secrets.token_urlsafe(32)
     try:
         url = build_authorization_url(state)
     except GoogleOAuthError as exc:
@@ -2879,6 +2885,8 @@ async def auth_google_callback(
     _log = _logging.getLogger("auth.google")
 
     cookie_state = request.cookies.get(GOOGLE_OAUTH_STATE_COOKIE) or ""
+    # Fluxo do app iOS: o state carrega o prefixo "app-" (ver /auth/google/start)
+    is_app_flow = bool(state) and state.startswith("app-")
 
     if error:
         return _google_redirect_to_landing(f"Login com Google cancelado: {error}")
@@ -2916,7 +2924,11 @@ async def auth_google_callback(
         # 3) Conta totalmente nova → cria pendente e manda pra /onboarding
         if not user_id:
             token = await asyncio.to_thread(create_pending_google_signup, sub, email, name_hint)
-            signup_response = RedirectResponse(url=f"/onboarding?token={token}", status_code=302)
+            # App: devolve o token de onboarding pelo scheme (o app abre o
+            # /onboarding no WebView). Web: redirect normal.
+            onb_url = (f"pigbankai://auth?onboarding={token}" if is_app_flow
+                       else f"/onboarding?token={token}")
+            signup_response = RedirectResponse(url=onb_url, status_code=302)
             signup_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
             return signup_response
 
@@ -2926,7 +2938,24 @@ async def auth_google_callback(
         except HTTPException as exc:
             return _google_redirect_to_landing(exc.detail)
 
-        # Login bem-sucedido → cookies + redirect pra home
+        # App iOS: NÃO seta cookies aqui (esta resposta vive no navegador nativo
+        # do ASWebAuthenticationSession, não no WebView). Em vez disso, gera um
+        # código de uso único e devolve pelo scheme; o app carrega /d/{code} no
+        # WebView, que aí sim seta os cookies e loga de verdade.
+        if is_app_flow:
+            from db import create_dashboard_session
+            code = await asyncio.to_thread(create_dashboard_session, int(user_id), 5 / 60)
+            await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
+            await log_auth_login_event(
+                email, True, user_id=user_id,
+                ip_address=get_remote_address(request),
+                user_agent=request.headers.get("user-agent"),
+            )
+            app_response = RedirectResponse(url=f"pigbankai://auth?code={code}", status_code=302)
+            app_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
+            return app_response
+
+        # Login bem-sucedido (web) → cookies + redirect pra home
         jwt_token, jti, refresh = _issue_session_token(user_id, email, request)
         success_response = RedirectResponse(url=_post_login_url(user_id), status_code=302)
         success_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
