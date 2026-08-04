@@ -799,7 +799,7 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                 join open_finance_connections c on c.id = a.connection_id
                 where c.user_id = %s
                   and t.imported_launch_id is null
-                  and (%s is null or c.id = %s)
+                  and (%s::bigint is null or c.id = %s)
                 order by t.transaction_date, t.id
                 """,
                 (user_id, connection_id, connection_id),
@@ -1051,7 +1051,7 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
                 where c.user_id = %s
                   and t.imported_credit_tx_id is null
                   and upper(a.type) = 'CREDIT'
-                  and (%s is null or c.id = %s)
+                  and (%s::bigint is null or c.id = %s)
                 order by t.transaction_date, t.id
                 """,
                 (user_id, connection_id, connection_id),
@@ -1126,7 +1126,7 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
                 join open_finance_accounts a on a.id = o.account_id
                 join open_finance_connections c on c.id = a.connection_id
                 join launches l on l.id = o.imported_launch_id
-                where c.user_id=%s and (%s is null or c.id=%s)
+                where c.user_id=%s and (%s::bigint is null or c.id=%s)
                   and upper(a.type)='BANK' and coalesce(l.source,'')='open_finance'
                 """,
                 (user_id, connection_id, connection_id),
@@ -1163,7 +1163,7 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
                 join open_finance_accounts a on a.id = o.account_id
                 join open_finance_connections c on c.id = a.connection_id
                 join credit_transactions ct on ct.id = o.imported_credit_tx_id
-                where c.user_id=%s and (%s is null or c.id=%s)
+                where c.user_id=%s and (%s::bigint is null or c.id=%s)
                   and upper(a.type)='CREDIT'
                 """,
                 (user_id, connection_id, connection_id),
@@ -1359,7 +1359,7 @@ def disconnect_open_finance_connection(user_id: int, connection_id: int | None =
                 join open_finance_accounts a on a.id = t.account_id
                 join open_finance_connections c on c.id = a.connection_id
                 left join launches l on l.id = t.imported_launch_id
-                where c.user_id = %s and (%s is null or c.id = %s)
+                where c.user_id = %s and (%s::bigint is null or c.id = %s)
                 """,
                 (user_id, connection_id, connection_id),
             )
@@ -1371,7 +1371,7 @@ def disconnect_open_finance_connection(user_id: int, connection_id: int | None =
                 from credit_cards cc
                 join open_finance_accounts a on a.id = cc.open_finance_account_id
                 join open_finance_connections c on c.id = a.connection_id
-                where c.user_id = %s and (%s is null or c.id = %s)
+                where c.user_id = %s and (%s::bigint is null or c.id = %s)
                 """,
                 (user_id, connection_id, connection_id),
             )
