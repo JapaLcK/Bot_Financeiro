@@ -202,7 +202,41 @@
     }, 150);
   }
 
-  function init() { fixViewport(); buildTabbar(); hardenGlyphs(); enhanceOverview(); maybeOpenLaunch(); }
+  // ── Settings vira "Minha conta": header com avatar + banner de segurança
+  function enhanceSettings() {
+    if (page !== "settings") return;
+    const ph = document.querySelector(".page-header");
+    if (!ph || document.querySelector(".pb-acct-head")) return;
+
+    const head = document.createElement("div");
+    head.className = "pb-acct-head";
+    head.innerHTML =
+      '<div><h1>Minha conta</h1><p>Gerencie sua conta e segurança</p></div>' +
+      '<img src="/brand/avatar.webp" alt="" />';
+    ph.parentNode.insertBefore(head, ph);
+
+    const ban = document.createElement("div");
+    ban.className = "pb-protect";
+    ban.innerHTML =
+      '<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M12 2 4 5.5v5.2c0 5 3.4 9.2 8 10.3 4.6-1.1 8-5.3 8-10.3V5.5L12 2z"/>' +
+      '<rect x="9" y="10" width="6" height="5" rx="1"/><path d="M10 10V8.5a2 2 0 0 1 4 0V10"/></svg>' +
+      '<div class="pb-protect-txt"><b>Proteja sua conta</b>' +
+      "<small>Mantenha seus dados seguros e seu acesso sempre protegido.</small></div>" +
+      "<button type=\"button\">Revisar segurança</button>";
+    head.after(ban);
+    ban.querySelector("button").addEventListener("click", () => {
+      if (typeof window.showSettingsSection === "function") window.showSettingsSection("security");
+      const sb = document.querySelector(".sidebar");
+      if (sb) sb.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+
+    const lbl = document.querySelector(".sidebar-section");
+    if (lbl) lbl.textContent = "Segurança e acesso";
+  }
+
+  function init() { fixViewport(); buildTabbar(); hardenGlyphs(); enhanceOverview(); enhanceSettings(); maybeOpenLaunch(); }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
   } else {
