@@ -450,6 +450,14 @@ def add_from_entities(
         reason=reason_final,
     )
 
+    # Reconciliação reversa (Open Finance): se o banco já importou esse gasto, funde
+    # com o lançamento que o usuário acabou de fazer — não duplica no "sobrou".
+    if not is_int:
+        try:
+            db.reconcile_manual_launch(user_id, launch_id)
+        except Exception:
+            pass
+
     # Detecção "essa despesa se repete → sugere gasto fixo". Só para despesa
     # real (não movimentação interna). A oferta divide a linha de pending_actions
     # com o botão de recategorizar; quando há oferta de recorrente ela vence
