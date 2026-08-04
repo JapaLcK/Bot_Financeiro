@@ -1,0 +1,129 @@
+/**
+ * app-mode.css — Reskin "modo app" do PigBank.
+ *
+ * TODO o arquivo é escopado sob html.pb-app (setado por app-mode.js quando o
+ * user agent contém PigBankApp, ou pbapp=1 pra preview no navegador). Sem a
+ * classe, nada aqui tem efeito — o site segue idêntico.
+ *
+ * Princípios:
+ *  - Navegação primária mora na tab bar inferior (zona do polegar).
+ *  - Chrome de site (nav de marketing, footer, topbars redundantes) some.
+ *  - Alvos de toque ≥ 44px; inputs com 16px pra não disparar zoom do iOS.
+ *  - Safe areas (notch / home indicator) respeitadas via env().
+ */
+
+/* ─── Base: espaço pra tab bar + safe areas ────────────────────────────── */
+html.pb-app body {
+  padding-bottom: calc(64px + env(safe-area-inset-bottom)) !important;
+}
+html.pb-app.pb-no-tabs body {
+  padding-bottom: 0 !important;
+}
+
+/* ─── Tab bar inferior ─────────────────────────────────────────────────── */
+html.pb-app .pb-tabbar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: stretch;
+  height: calc(60px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  background: rgba(17, 17, 17, 0.92);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+html.pb-app .pb-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 44px;
+  color: rgba(255, 255, 255, 0.55);
+  text-decoration: none;
+  font-family: "Inter", -apple-system, sans-serif;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.15s ease;
+}
+html.pb-app .pb-tab svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+html.pb-app .pb-tab.active { color: #FF2D8E; }
+html.pb-app .pb-tab:active { color: #FF80B8; }
+
+/* ─── Login / Cadastro: só o cartão, sem nav de site ───────────────────── */
+html.pb-app .nav { display: none !important; }
+
+/* ─── Home ─────────────────────────────────────────────────────────────── */
+/* Header do site some (nav vive na tab bar; conta fica em Ajustes) */
+html.pb-app body.pb-page-home > header,
+html.pb-app body.pb-page-home header:first-of-type { display: none !important; }
+html.pb-app body.pb-page-home { padding-top: env(safe-area-inset-top); }
+html.pb-app footer { display: none !important; }
+
+/* ─── Dashboard ────────────────────────────────────────────────────────── */
+/* Header vira barra compacta: menu ☰ + mês + atualizar. Marca é redundante
+   dentro do app; import/export são fluxos de desktop. */
+html.pb-app body.pb-page-app header .logo-img,
+html.pb-app body.pb-page-app header h1 { display: none !important; }
+html.pb-app body.pb-page-app header .hbtn[onclick*="openOfxImport"],
+html.pb-app body.pb-page-app header .hbtn[onclick*="exportToEmail"] { display: none !important; }
+html.pb-app body.pb-page-app header {
+  padding-top: max(10px, env(safe-area-inset-top)) !important;
+}
+
+/* Atualizar e status saem (WebSocket já atualiza sozinho; falha de conexão
+   aparece nos estados de loading) */
+html.pb-app body.pb-page-app header #refresh-btn,
+html.pb-app body.pb-page-app header #status { display: none !important; }
+
+/* Flutuantes (FAB do chat, toast) sobem acima da tab bar */
+html.pb-app #piggy-fab {
+  bottom: calc(76px + env(safe-area-inset-bottom)) !important;
+}
+html.pb-app #toast {
+  bottom: calc(80px + env(safe-area-inset-bottom)) !important;
+}
+
+/* ─── Settings ─────────────────────────────────────────────────────────── */
+/* Topbar (logo + atalhos) redundante com a tab bar */
+html.pb-app body.pb-page-settings .topbar { display: none !important; }
+html.pb-app body.pb-page-settings { padding-top: env(safe-area-inset-top); }
+
+/* ─── Comandos (guia "o que pedir") ────────────────────────────────────── */
+html.pb-app body.pb-page-comandos .nav,
+html.pb-app body.pb-page-comandos > header,
+html.pb-app body.pb-page-comandos header:first-of-type { display: none !important; }
+html.pb-app body.pb-page-comandos { padding-top: env(safe-area-inset-top); }
+
+/* ─── Ergonomia de toque (todas as páginas) ────────────────────────────── */
+html.pb-app button,
+html.pb-app .btn-pill,
+html.pb-app .hbtn,
+html.pb-app .btn-topbar,
+html.pb-app .fb-cta {
+  min-height: 44px;
+}
+html.pb-app input,
+html.pb-app select,
+html.pb-app textarea {
+  font-size: 16px !important; /* < 16px faz o iOS dar zoom no foco */
+}
+
+/* Rolagem com inércia nativa em áreas internas */
+html.pb-app .modal,
+html.pb-app .sidenav {
+  -webkit-overflow-scrolling: touch;
+}

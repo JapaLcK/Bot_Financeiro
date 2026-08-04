@@ -1,48 +1,144 @@
 import UIKit
 import Capacitor
+import LocalAuthentication
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
 
+    // ── Trava biométrica (Face ID / Touch ID / código do aparelho) ─────────
+    // Cobre o conteúdo ao ir pro background (nada de saldo no app switcher) e
+    // exige autenticação no cold launch e ao voltar depois do período de graça.
+    private var lockWindow: UIWindow?
+    private var retryButton: UIButton?
+    private var unlocked = false
+    private var authInFlight = false
+    private var backgroundedAt: Date?
+    private let gracePeriod: TimeInterval = 60
+
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
         return true
     }
 
-    func applicationWillResignActive(_ application: UIApplication) {
-        // Sent when the application is about to move from active to inactive state. This can occur for certain types of temporary interruptions (such as an incoming phone call or SMS message) or when the user quits the application and it begins the transition to the background state.
-        // Use this method to pause ongoing tasks, disable timers, and invalidate graphics rendering callbacks. Games should use this method to pause the game.
-    }
-
     func applicationDidEnterBackground(_ application: UIApplication) {
-        // Use this method to release shared resources, save user data, invalidate timers, and store enough application state information to restore your application to its current state in case it is terminated later.
-        // If your application supports background execution, this method is called instead of applicationWillTerminate: when the user quits.
-    }
-
-    func applicationWillEnterForeground(_ application: UIApplication) {
-        // Called as part of the transition from the background to the active state; here you can undo many of the changes made on entering the background.
+        backgroundedAt = Date()
+        showLockCover()
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+        if unlocked, let t = backgroundedAt, Date().timeIntervalSince(t) > gracePeriod {
+            unlocked = false
+        }
+        backgroundedAt = nil
+        if unlocked {
+            hideLockCover()
+        } else {
+            showLockCover()
+            authenticate()
+        }
+    }
+
+    private func authenticate() {
+        if authInFlight { return }
+        authInFlight = true
+        retryButton?.isHidden = true
+
+        let ctx = LAContext()
+        ctx.localizedFallbackTitle = "Usar código do iPhone"
+        var err: NSError?
+        guard ctx.canEvaluatePolicy(.deviceOwnerAuthentication, error: &err) else {
+            // Aparelho sem código configurado: não tranca o usuário pra fora.
+            authInFlight = false
+            unlocked = true
+            hideLockCover()
+            return
+        }
+        ctx.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Desbloqueie o PigBank") { ok, _ in
+            DispatchQueue.main.async {
+                self.authInFlight = false
+                if ok {
+                    self.unlocked = true
+                    self.hideLockCover()
+                } else {
+                    self.retryButton?.isHidden = false
+                }
+            }
+        }
+    }
+
+    @objc private func retryTapped() {
+        authenticate()
+    }
+
+    private func showLockCover() {
+        if lockWindow != nil { return }
+        let w = UIWindow(frame: UIScreen.main.bounds)
+        w.windowLevel = .alert + 1
+
+        let vc = UIViewController()
+        vc.view.backgroundColor = UIColor(red: 0x11 / 255.0, green: 0x11 / 255.0, blue: 0x11 / 255.0, alpha: 1)
+
+        let logo = UILabel()
+        logo.text = "🐷"
+        logo.font = .systemFont(ofSize: 64)
+        logo.translatesAutoresizingMaskIntoConstraints = false
+
+        let name = UILabel()
+        name.text = "PigBank"
+        name.textColor = .white
+        name.font = .systemFont(ofSize: 24, weight: .heavy)
+        name.translatesAutoresizingMaskIntoConstraints = false
+
+        let btn = UIButton(type: .system)
+        btn.setTitle("Desbloquear", for: .normal)
+        btn.setTitleColor(.white, for: .normal)
+        btn.titleLabel?.font = .systemFont(ofSize: 17, weight: .bold)
+        btn.backgroundColor = UIColor(red: 0xFF / 255.0, green: 0x2D / 255.0, blue: 0x8E / 255.0, alpha: 1)
+        btn.layer.cornerRadius = 24
+        btn.contentEdgeInsets = UIEdgeInsets(top: 12, left: 32, bottom: 12, right: 32)
+        btn.isHidden = true
+        btn.addTarget(self, action: #selector(retryTapped), for: .touchUpInside)
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        retryButton = btn
+
+        vc.view.addSubview(logo)
+        vc.view.addSubview(name)
+        vc.view.addSubview(btn)
+        NSLayoutConstraint.activate([
+            logo.centerXAnchor.constraint(equalTo: vc.view.centerXAnchor),
+            logo.centerYAnchor.constraint(equalTo: vc.view.centerYAnchor, constant: -40),
+            name.centerXAnchor.constraint(equalTo: vc.view.centerXAnchor),
+            name.topAnchor.constraint(equalTo: logo.bottomAnchor, constant: 8),
+            btn.centerXAnchor.constraint(equalTo: vc.view.centerXAnchor),
+            btn.topAnchor.constraint(equalTo: name.bottomAnchor, constant: 32),
+        ])
+
+        w.rootViewController = vc
+        w.makeKeyAndVisible()
+        lockWindow = w
+    }
+
+    private func hideLockCover() {
+        lockWindow?.isHidden = true
+        lockWindow = nil
+        retryButton = nil
+    }
+
+    func applicationWillResignActive(_ application: UIApplication) {
+    }
+
+    func applicationWillEnterForeground(_ application: UIApplication) {
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
-        // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
     }
 
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
-        // Called when the app was launched with a url. Feel free to add additional processing here,
-        // but if you want the App API to support tracking app url opens, make sure to keep this call
         return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
     }
 
     func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {
-        // Called when the app was launched with an activity, including Universal Links.
-        // Feel free to add additional processing here, but if you want the App API to support
-        // tracking app url opens, make sure to keep this call
         return ApplicationDelegateProxy.shared.application(application, continue: userActivity, restorationHandler: restorationHandler)
     }
 

@@ -72,6 +72,12 @@ async def catch_all(full_path: str):
         from fastapi.responses import HTMLResponse
         return HTMLResponse(_dashboard_html_cachebusted(),
                             headers={"Cache-Control": "no-store"})
+    # Rotas "bonitas" de prod → páginas correspondentes (navegação da tab bar)
+    PRETTY = {"home": "home.html", "settings": "settings.html",
+              "comandos-app": "comandos-app.html", "login": "login.html",
+              "cadastro": "cadastro.html"}
+    if full_path in PRETTY:
+        full_path = PRETTY[full_path]
     candidate = (FRONTEND / full_path).resolve()
     if FRONTEND.resolve() in candidate.parents and candidate.is_file():
         media = mimetypes.guess_type(str(candidate))[0] or "application/octet-stream"

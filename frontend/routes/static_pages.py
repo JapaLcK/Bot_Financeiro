@@ -308,6 +308,27 @@ async def serve_modals_js():
     return FileResponse(FRONTEND_DIR / "modals.js", media_type="application/javascript")
 
 
+@router.get("/app-mode.js")
+async def serve_app_mode_js():
+    """Modo app (WebView iOS): seta html.pb-app e monta a tab bar inferior.
+    Inerte no site (só ativa com UA PigBankApp ou ?pbapp=1)."""
+    return FileResponse(
+        FRONTEND_DIR / "app-mode.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@router.get("/app-mode.css")
+async def serve_app_mode_css():
+    """Estilos do modo app — tudo escopado sob html.pb-app."""
+    return FileResponse(
+        FRONTEND_DIR / "app-mode.css",
+        media_type="text/css",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @router.get("/nav-auth.js")
 async def serve_nav_auth_js():
     """Nav ciente de login nas páginas de marketing: troca 'Entrar/Começar'
