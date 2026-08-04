@@ -232,10 +232,26 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
 
     # Detecta múltiplos lançamentos no mesmo áudio
     parts = _split_audio_transactions(transcription)
+    is_multi = len(parts) > 1
 
     responses = []
     fallbacks = []
+    # Pedaços de um áudio múltiplo que vêm com verbo mas SEM valor
+    # ("gastei 500 no ifood e paguei o aluguel"). No texto digitado esse ramo
+    # já pergunta o valor (core.handlers.launches.add); aqui o áudio pré-divide
+    # a transcrição ANTES do add(), então cada pedaço vira um route() separado e
+    # o pedaço sem valor cairia no "não consegui identificar o valor". Detectamos
+    # antes de rotear e enfileiramos pra perguntar o valor — paridade com o texto.
+    missing: list[dict] = []
+    if is_multi:
+        from parsers import describe_valueless_launch
     for part in parts:
+        if is_multi:
+            info = describe_valueless_launch(part)
+            if info:
+                tipo, desc = info
+                missing.append({"tipo": tipo, "desc": desc})
+                continue
         result_text = _process_audio_transaction(uid, part, msg, platform)
         # A quebra em múltiplos lançamentos (_split_audio_transactions) pode
         # separar um pedaço real ("comprei 550 de pão doce") de um pedaço que
@@ -250,8 +266,25 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
 
     registered_something = bool(responses)
 
+    # Enfileira a pergunta de valor faltante e monta a pergunta do primeiro item.
+    # Setar o pending por ÚLTIMO garante que ele sobrevive: o route() de cada
+    # pedaço acima pode ter armado um pending próprio (ex: "categoria errada?"),
+    # mas o multi_launch_values é o que a próxima resposta do usuário resolve.
+    ask_value_question = ""
+    if missing:
+        from core.handlers.launches import _ask_value_question
+        db.set_pending_action(
+            uid, "multi_launch_values",
+            {"queue": missing, "platform": platform},
+        )
+        ask_value_question = _ask_value_question(missing[0])
+
     if registered_something:
         body = "\n\n".join(responses)
+    elif missing:
+        # Nada com valor foi registrado, mas há pedaço(s) esperando valor — a
+        # pergunta abaixo cobre a resposta; não mostra o fallback "não entendi".
+        body = ""
     else:
         # Nenhum pedaço virou lançamento válido — mostra UM fallback só
         # (não repetido por pedaço).
@@ -260,8 +293,13 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
             'Tente algo como: "gastei 50 no mercado".'
         )
 
-    # Dica de desfazer — só faz sentido se algo foi de fato registrado
-    if not registered_something:
+    if ask_value_question:
+        body = f"{body}\n\n{ask_value_question}" if body else ask_value_question
+
+    # Dica de desfazer — só faz sentido se algo foi de fato registrado. Com uma
+    # pergunta de valor pendente NÃO arma o undo: a próxima resposta é o valor,
+    # e sobrescrever o multi_launch_values com undo_audio perderia o contexto.
+    if not registered_something or missing:
         undo_hint = ""
     elif platform == "discord":
         undo_hint = "\n\n↩️ Para desfazer, diga: _desfazer_"
