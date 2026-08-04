@@ -1028,6 +1028,117 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
     return {"inserted": inserted, "linked": len(links), "cards": len(card_cache)}
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# P2 — inteligência: salário (Fase 5) e anomalia de conta (Fase 6), via dados OF
+# ──────────────────────────────────────────────────────────────────────────────
+
+def detect_recurring_income_matches(credits, value_tol_pct=Decimal("0.10"), day_tol=3) -> list:
+    """Puro. credits: [{id, valor, date}]. Retorna os ids que se repetem em MESES distintos
+    (mesmo ~valor ±10%, ~dia ±3) — candidatos a renda recorrente / salário."""
+    out = []
+    for i, c in enumerate(credits):
+        cv, cd = Decimal(str(c["valor"])), c["date"]
+        for j, o in enumerate(credits):
+            if i == j:
+                continue
+            od = o["date"]
+            if (cd.year, cd.month) == (od.year, od.month):
+                continue
+            ov = Decimal(str(o["valor"]))
+            hi = max(cv, ov)
+            if hi > 0 and abs(cv - ov) / hi <= value_tol_pct and abs(cd.day - od.day) <= day_tol:
+                out.append(c["id"])
+                break
+    return out
+
+
+def detect_open_finance_salary(user_id: int, months: int = 4) -> dict | None:
+    """Acha o crédito OF mais recente que parece salário (renda recorrente).
+
+    Base pra confirmação proativa (Fase 5). O envio WhatsApp fica dormente até ter template
+    Meta (igual o lembrete de boleto). Retorna {launch_id, valor, date} ou None.
+    """
+    ensure_user(user_id)
+    since = datetime.now(_tz()).date() - timedelta(days=months * 31)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, valor, coalesce(posted_at, criado_em::date) as date
+                from launches
+                where user_id=%s and coalesce(source,'')='open_finance' and tipo='receita'
+                  and is_internal_movement=false
+                  and coalesce(posted_at, criado_em::date) >= %s
+                order by coalesce(posted_at, criado_em::date)
+                """,
+                (user_id, since),
+            )
+            credits = cur.fetchall()
+
+    ids = set(detect_recurring_income_matches(
+        [{"id": c["id"], "valor": c["valor"], "date": c["date"]} for c in credits]
+    ))
+    recurring = [c for c in credits if c["id"] in ids]
+    if not recurring:
+        return None
+    recurring.sort(key=lambda c: (c["date"], c["valor"]))
+    cand = recurring[-1]
+    return {"launch_id": cand["id"], "valor": cand["valor"], "date": cand["date"]}
+
+
+def detect_bill_increase(expenses, threshold_pct=Decimal("0.15")) -> list:
+    """Puro. expenses: [{merchant, valor, date}]. Agrupa por estabelecimento; se aparece em
+    >=2 meses e o mais recente subiu >= threshold vs a média anterior → flag de aumento."""
+    from collections import defaultdict
+    groups: dict = defaultdict(list)
+    for e in expenses:
+        key = _normalize_merchant(e["merchant"])
+        if key:
+            groups[key].append(e)
+    out = []
+    for items in groups.values():
+        by_month = {}
+        for e in items:
+            by_month[(e["date"].year, e["date"].month)] = e  # último do mês vence
+        if len(by_month) < 2:
+            continue
+        ordered = [by_month[k] for k in sorted(by_month)]
+        latest = ordered[-1]
+        prior = ordered[:-1]
+        avg_prior = sum(Decimal(str(e["valor"])) for e in prior) / len(prior)
+        lv = Decimal(str(latest["valor"]))
+        if avg_prior > 0 and (lv - avg_prior) / avg_prior >= threshold_pct:
+            out.append({
+                "merchant": latest["merchant"],
+                "old": avg_prior,
+                "new": lv,
+                "pct": (lv - avg_prior) / avg_prior * 100,
+            })
+    return out
+
+
+def detect_open_finance_bill_increase(user_id: int, months: int = 4) -> list:
+    """Detecta contas que aumentaram usando dados OF (Fase 6) — pega até conta que o usuário
+    nem cadastrou como recorrente. Complementa `_detect_recurring_increase` (só olha manual)."""
+    ensure_user(user_id)
+    since = datetime.now(_tz()).date() - timedelta(days=months * 31)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select alvo, nota, valor, coalesce(posted_at, criado_em::date) as date
+                from launches
+                where user_id=%s and coalesce(source,'')='open_finance' and tipo='despesa'
+                  and is_internal_movement=false
+                  and coalesce(posted_at, criado_em::date) >= %s
+                """,
+                (user_id, since),
+            )
+            rows = cur.fetchall()
+    expenses = [{"merchant": (r["alvo"] or r["nota"] or ""), "valor": r["valor"], "date": r["date"]} for r in rows]
+    return detect_bill_increase(expenses)
+
+
 def get_consolidated_balance(user_id: int) -> dict:
     """Saldo consolidado = saldo manual + soma dos saldos das contas BANK conectadas.
 

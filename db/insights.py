@@ -478,6 +478,32 @@ def _detect_goals_behind(user_id: int) -> list[dict[str, Any]]:
 # Função pública
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _detect_of_bill_increase(user_id: int) -> list[dict[str, Any]]:
+    """Contas que aumentaram, detectadas via Open Finance (Fase 6) — pega até conta que o
+    usuário nem cadastrou como recorrente. Complementa `_detect_recurring_increase`."""
+    try:
+        from db import detect_open_finance_bill_increase
+        flags = detect_open_finance_bill_increase(user_id)
+    except Exception:
+        return []
+    out: list[dict[str, Any]] = []
+    for f in flags:
+        old = float(f["old"])
+        new = float(f["new"])
+        pct = float(f["pct"])
+        out.append({
+            "type": "of_bill_increase",
+            "severity": "warning" if pct >= 15 else "info",
+            "title": f"{f['merchant']} subiu {pct:.0f}%",
+            "message": f"De {fmt_brl(old)} pra {fmt_brl(new)} — detectado pelo Open Finance.",
+            "action_label": "Ver na timeline",
+            "action_view": "history",
+            "icon": "📈",
+            "key": f"of_bill_increase:{f['merchant']}:{new:.2f}",
+        })
+    return out
+
+
 def compute_active_insights(user_id: int) -> list[dict[str, Any]]:
     """Retorna lista de insights ativos do user, ordenada por severidade.
 
@@ -489,6 +515,7 @@ def compute_active_insights(user_id: int) -> list[dict[str, Any]]:
     for detector in (
         _detect_budget_warnings,
         _detect_recurring_increase,
+        _detect_of_bill_increase,
         _detect_category_spike,
         _detect_salary_burn_fast,
         _detect_goals_behind,

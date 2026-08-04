@@ -14,9 +14,45 @@ from core.services.pluggy_sync import (
 from db import (
     classify_open_finance_launch,
     credit_day_from_iso,
+    detect_bill_increase,
+    detect_recurring_income_matches,
     merchant_similarity,
     pick_reconciliation_match,
 )
+
+
+def test_detect_recurring_income_salary():
+    # salário ~mesmo valor, ~mesmo dia, em 3 meses distintos → todos recorrentes.
+    credits = [
+        {"id": 1, "valor": Decimal("6500"), "date": date(2026, 6, 5)},
+        {"id": 2, "valor": Decimal("6500"), "date": date(2026, 7, 5)},
+        {"id": 3, "valor": Decimal("6520"), "date": date(2026, 8, 6)},
+        {"id": 9, "valor": Decimal("250"), "date": date(2026, 7, 12)},  # pix avulso, não recorre
+    ]
+    ids = set(detect_recurring_income_matches(credits))
+    assert ids == {1, 2, 3}
+
+
+def test_detect_recurring_income_ignores_same_month():
+    credits = [
+        {"id": 1, "valor": Decimal("100"), "date": date(2026, 8, 1)},
+        {"id": 2, "valor": Decimal("100"), "date": date(2026, 8, 2)},  # mesmo mês → não conta
+    ]
+    assert detect_recurring_income_matches(credits) == []
+
+
+def test_detect_bill_increase():
+    exp = [
+        {"merchant": "Enel Luz", "valor": Decimal("180"), "date": date(2026, 6, 10)},
+        {"merchant": "ENEL LUZ", "valor": Decimal("185"), "date": date(2026, 7, 10)},
+        {"merchant": "Enel luz", "valor": Decimal("216"), "date": date(2026, 8, 10)},  # +18% vs média
+        {"merchant": "iFood", "valor": Decimal("50"), "date": date(2026, 7, 1)},
+        {"merchant": "iFood", "valor": Decimal("52"), "date": date(2026, 8, 1)},  # estável
+    ]
+    flagged = detect_bill_increase(exp)
+    merchants = {f["merchant"].lower() for f in flagged}
+    assert "enel luz" in merchants
+    assert not any("ifood" in m for m in merchants)
 
 
 def _cand(id, valor, ref_date, alvo=None, nota=None):
