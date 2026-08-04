@@ -4,7 +4,14 @@
   "webDir": "www",
   "server": {
     "url": "https://pigbankai.com/login",
-    "allowNavigation": ["pigbankai.com", "www.pigbankai.com"]
+    "allowNavigation": [
+      "pigbankai.com",
+      "www.pigbankai.com",
+      "accounts.google.com",
+      "*.google.com",
+      "accounts.youtube.com",
+      "*.gstatic.com"
+    ]
   },
   "ios": {
     "contentInset": "automatic",
