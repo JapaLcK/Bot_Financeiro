@@ -226,6 +226,15 @@ html.pb-app body.pb-page-app header {
 html.pb-app body.pb-page-app header #refresh-btn,
 html.pb-app body.pb-page-app header #status { display: none !important; }
 
+/* Lista branca do header: qualquer elemento fora do esperado some (mata
+   sobras/fantasmas de qualquer origem, presente ou futura) */
+html.pb-app body.pb-page-app header > *:not(.header-left):not(.header-right):not(.month-nav),
+html.pb-app body.pb-page-app header .header-left > *:not(.sidenav-toggle):not(.logo-img):not(h1),
+html.pb-app body.pb-page-app header .header-right > *:not(.user-menu),
+html.pb-app body.pb-page-app header .month-nav > *:not(.mbtn):not(#month-label) {
+  display: none !important;
+}
+
 /* Header em UMA linha: ☰ | ‹ mês › centralizado | conta compacta.
    (anula o header-right de largura 100% e o user-menu em linha própria
    do dashboard-mobile.css) */

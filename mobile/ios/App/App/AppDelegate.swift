@@ -1,6 +1,7 @@
 import UIKit
 import Capacitor
 import LocalAuthentication
+import WebKit
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -27,6 +28,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
+        hideScrollIndicators()
         if unlocked, let t = backgroundedAt, Date().timeIntervalSince(t) > gracePeriod {
             unlocked = false
         }
@@ -37,6 +39,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             showLockCover()
             authenticate()
         }
+    }
+
+    // Indicador nativo de rolagem do WKWebView desligado — app não é site.
+    // Idempotente; roda a cada ativação porque o WebView nasce depois do launch.
+    private func hideScrollIndicators() {
+        func walk(_ view: UIView) {
+            if let wk = view as? WKWebView {
+                wk.scrollView.showsVerticalScrollIndicator = false
+                wk.scrollView.showsHorizontalScrollIndicator = false
+                return
+            }
+            view.subviews.forEach(walk)
+        }
+        if let root = window?.rootViewController?.view { walk(root) }
     }
 
     private func authenticate() {
