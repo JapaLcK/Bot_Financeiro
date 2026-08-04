@@ -328,6 +328,7 @@ def add_from_entities(
     criado_em=None,
     is_internal: bool | None = None,
     platform: str = "whatsapp",
+    offer_fixed_expense: bool = True,
 ) -> str:
     """Registra um lançamento a partir de args já estruturados (sem regex).
 
@@ -432,6 +433,28 @@ def add_from_entities(
                 user_id, categoria_final, exc_info=True,
             )
 
+    # "Virar gasto fixo?" — se esta é a 2ª vez que essa despesa aparece, oferece
+    # transformá-la em recorrente. Sobrepõe o pending de recategorização (raro:
+    # só na 2ª ocorrência exata). Fica fora dos pedaços de multi-lançamento
+    # (offer_fixed_expense=False) pra não brigar com a fila de valor pendente.
+    if offer_fixed_expense and tipo == "despesa" and not is_int:
+        try:
+            # Usa o alvo limpo ("aluguel"), não a nota (que pode ser o texto todo
+            # "gastei 1500 no aluguel") — descrição enxuta pro nome do gasto fixo
+            # e pra casar as ocorrências no histórico.
+            offer = _build_fixed_expense_offer(
+                user_id, alvo_clean or nota_clean, valor, categoria_final, platform,
+            )
+            if offer:
+                offer_text, payload = offer
+                db.set_pending_action(user_id, "fixed_expense_offer", payload)
+                resposta += f"\n\n{offer_text}"
+        except Exception:
+            logger.warning(
+                "oferta de gasto fixo falhou (user %s, desc %r) — seguindo sem oferecer",
+                user_id, nota_clean or alvo_clean, exc_info=True,
+            )
+
     return resposta
 
 
@@ -504,8 +527,128 @@ def register_if_recurring(user_id: int, tipo: str, desc: str, platform: str) -> 
         alvo=desc,
         nota=desc,
         platform=platform,
+        offer_fixed_expense=False,  # pedaço de multi-lançamento não oferece gasto fixo
     )
     return f"{resp}\n{_RECURRING_NOTICE}"
+
+
+# ── "Virar gasto fixo?" — oferece na 2ª vez que uma despesa se repete ──────────
+
+# Quantas ocorrências (contando a atual) disparam a oferta. Só na 2ª exata: assim
+# a pergunta aparece UMA vez por descrição — se o user ignorar, não repete no 3º.
+_FIXED_OFFER_AT_COUNT = 2
+
+
+def _count_expense_occurrences(user_id: int, target_norm: str) -> int:
+    from utils_text import normalize_text
+    n = 0
+    for r in db.list_launches_by_tipo(user_id, "despesa", limit=200):
+        nota = normalize_text(r.get("nota") or "").strip()
+        alvo = normalize_text(r.get("alvo") or "").strip()
+        if target_norm in (nota, alvo):
+            n += 1
+    return n
+
+
+def _already_fixed_expense(user_id: int, target_norm: str) -> bool:
+    from utils_text import normalize_text
+    from db.recurring import list_recurring_expenses
+    for r in list_recurring_expenses(user_id):
+        if normalize_text(r.get("name") or "").strip() == target_norm:
+            return True
+    return False
+
+
+def _fixed_expense_offer_text(desc: str) -> str:
+    return (
+        f"🐷 Notei que *{desc}* já apareceu antes e voltou agora — tem cara de gasto que "
+        f"se repete todo mês.\n"
+        f"Quer que eu marque como *gasto fixo*? Aí eu lanço sozinha no dia certo, todo mês. "
+        f"Responda *sim* pra criar (ou *não* pra deixar quieto). 🐖"
+    )
+
+
+def _build_fixed_expense_offer(
+    user_id: int, desc: str, valor: float, categoria: str | None, platform: str,
+) -> tuple[str, dict] | None:
+    """Decide se oferece transformar a despesa `desc` em gasto fixo. Retorna
+    (texto_da_oferta, payload_do_pending) ou None.
+
+    Só oferece quando: é a 2ª ocorrência EXATA da descrição, o usuário é Pro
+    (gasto fixo é recurso PigBank+), e ainda não existe um gasto fixo com esse
+    nome. Conservador de propósito — a oferta some se qualquer condição falhar."""
+    from utils_text import normalize_text
+
+    target = normalize_text(desc or "").strip()
+    if not target:
+        return None
+    try:
+        from core.services.plan_service import is_pro
+        if not is_pro(user_id):
+            return None
+    except Exception:
+        return None
+    if _count_expense_occurrences(user_id, target) != _FIXED_OFFER_AT_COUNT:
+        return None
+    if _already_fixed_expense(user_id, target):
+        return None
+    payload = {
+        "desc": desc,
+        "valor": float(valor),
+        "categoria": (categoria or "outros"),
+        "platform": platform,
+    }
+    return _fixed_expense_offer_text(desc), payload
+
+
+_FIXED_YES = {"sim", "s", "quero", "pode", "isso", "claro", "bora", "aha", "yes", "adiciona", "adicionar", "cria", "criar", "fixo"}
+_FIXED_NO = {"nao", "n", "agora nao", "deixa", "deixa quieto", "depois", "no", "nops", "nem"}
+
+
+def resolve_fixed_expense_offer(user_id: int, text: str, pending: dict, platform: str = "whatsapp") -> str | None:
+    """Resolve a resposta à oferta de virar gasto fixo.
+
+    - "sim" → cria o gasto fixo com padrões (valor/categoria do lançamento, vence
+      hoje, débito na conta, mensal) e confirma.
+    - "não" → descarta a oferta com um ok leve.
+    - qualquer outra coisa → abandona a oferta e retorna None (o roteador trata a
+      mensagem como um comando novo — não prende o usuário)."""
+    from utils_text import normalize_text
+
+    payload = pending.get("payload", {})
+    resp_norm = normalize_text(text).strip()
+
+    if resp_norm in _FIXED_NO:
+        db.clear_pending_action(user_id)
+        return "🐷 Beleza, deixei como lançamento normal. Se mudar de ideia, é só falar."
+
+    if resp_norm not in _FIXED_YES:
+        # Não é sim nem não — o usuário seguiu em frente. Abandona a oferta.
+        db.clear_pending_action(user_id)
+        return None
+
+    db.clear_pending_action(user_id)
+    desc = payload.get("desc") or "gasto"
+    valor = float(payload.get("valor") or 0)
+    categoria = payload.get("categoria") or "outros"
+    due_day = today_tz().day
+    try:
+        from db.recurring import create_recurring_expense
+        rec = create_recurring_expense(
+            user_id, desc, valor, categoria, due_day, "account",
+            frequency="monthly", payment_mode="autopay",
+        )
+    except ValueError:
+        return (
+            "🐷 Não consegui criar o gasto fixo agora. Você pode cadastrar na aba "
+            "*Recorrentes* do app."
+        )
+    return (
+        f"✅ *Gasto fixo criado:* {rec['name']}\n"
+        f"💸 {fmt_brl(valor)} · débito na conta todo dia {due_day}\n"
+        f"Não tiro nada agora — só no dia. Pra ajustar dia/cartão, é na aba "
+        f"*Recorrentes* do app. 🐷"
+    )
 
 
 # Palavras que cancelam a pergunta de valor pendente.
@@ -552,6 +695,7 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
         alvo=head.get("desc"),
         nota=head.get("desc"),
         platform=platform,
+        offer_fixed_expense=False,  # resolução de multi-lançamento não oferece
     )
 
     if queue:
@@ -565,7 +709,8 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
     return resp
 
 
-def _register_parsed(user_id: int, parsed: dict, fallback_note: str, platform: str) -> str:
+def _register_parsed(user_id: int, parsed: dict, fallback_note: str, platform: str,
+                     offer_fixed_expense: bool = True) -> str:
     """Registra um lançamento já parseado por `parse_receita_despesa_natural`."""
     return add_from_entities(
         user_id,
@@ -578,6 +723,7 @@ def _register_parsed(user_id: int, parsed: dict, fallback_note: str, platform: s
         criado_em=parsed.get("criado_em"),
         is_internal=parsed.get("is_internal_movement", False),
         platform=platform,
+        offer_fixed_expense=offer_fixed_expense,
     )
 
 
@@ -600,7 +746,10 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> 
         for part in parts:
             p = parse_receita_despesa_natural(user_id, part)
             if p:
-                responses.append(_register_parsed(user_id, p, part, platform))
+                # Pedaço de multi-lançamento não oferece gasto fixo (evita brigar
+                # com a fila de valor pendente / empilhar perguntas).
+                responses.append(_register_parsed(user_id, p, part, platform,
+                                                  offer_fixed_expense=False))
                 continue
             info = describe_valueless_launch(part)
             if info:

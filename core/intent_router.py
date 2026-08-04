@@ -146,6 +146,15 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
         if resp is not None:
             return resp
         pending = None  # abandonado → mensagem roteia como comando novo
+
+    # Oferta de "virar gasto fixo" pendente (bot perguntou na 2ª vez que a despesa
+    # se repetiu). "sim" cria o recorrente; "não" descarta; outra coisa abandona e
+    # segue o roteamento normal.
+    if pending and pending.get("action_type") == "fixed_expense_offer":
+        resp = h_launches.resolve_fixed_expense_offer(user_id, text, pending, platform)
+        if resp is not None:
+            return resp
+        pending = None  # abandonado → mensagem roteia como comando novo
     if pending and pending.get("action_type") in {"credit_card_setup", "credit_card_set_primary", "credit_delete_card", "installment_pending", "pay_bill_choice"}:
         resp = h_credit.resolve_pending(user_id, text, pending)
         if resp is not None:

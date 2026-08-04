@@ -323,7 +323,7 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
         # quando a resposta do áudio é um lançamento de fato, não uma pergunta.
         _pend = db.get_pending_action(uid)
         _ptype = _pend.get("action_type") if _pend else None
-        if _ptype not in _RESUMABLE_PENDING_TYPES and _ptype != "multi_launch_values":
+        if _ptype not in _RESUMABLE_PENDING_TYPES and _ptype not in ("multi_launch_values", "fixed_expense_offer"):
             db.set_pending_action(uid, "undo_audio", {})
 
     return [OutgoingMessage(text=preview + body + undo_hint)]
