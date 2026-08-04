@@ -95,16 +95,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let vc = UIViewController()
         vc.view.backgroundColor = UIColor(red: 0x11 / 255.0, green: 0x11 / 255.0, blue: 0x11 / 255.0, alpha: 1)
 
-        let logo = UILabel()
-        logo.text = "🐷"
-        logo.font = .systemFont(ofSize: 64)
+        // Logo completa (marca + wordmark "PigBank"). Fallback pro texto se o
+        // asset faltar, pra nunca ficar com a tela vazia.
+        let logo = UIImageView(image: UIImage(named: "BrandLogo"))
+        logo.contentMode = .scaleAspectFit
         logo.translatesAutoresizingMaskIntoConstraints = false
 
-        let name = UILabel()
-        name.text = "PigBank"
-        name.textColor = .white
-        name.font = .systemFont(ofSize: 24, weight: .heavy)
-        name.translatesAutoresizingMaskIntoConstraints = false
+        let nameFallback = UILabel()
+        if logo.image == nil {
+            nameFallback.text = "PigBank"
+            nameFallback.textColor = .white
+            nameFallback.font = .systemFont(ofSize: 26, weight: .heavy)
+        }
+        nameFallback.translatesAutoresizingMaskIntoConstraints = false
 
         let btn = UIButton(type: .system)
         btn.setTitle("Desbloquear", for: .normal)
@@ -119,15 +122,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         retryButton = btn
 
         vc.view.addSubview(logo)
-        vc.view.addSubview(name)
+        vc.view.addSubview(nameFallback)
         vc.view.addSubview(btn)
         NSLayoutConstraint.activate([
             logo.centerXAnchor.constraint(equalTo: vc.view.centerXAnchor),
             logo.centerYAnchor.constraint(equalTo: vc.view.centerYAnchor, constant: -40),
-            name.centerXAnchor.constraint(equalTo: vc.view.centerXAnchor),
-            name.topAnchor.constraint(equalTo: logo.bottomAnchor, constant: 8),
+            logo.widthAnchor.constraint(equalToConstant: 216),
+            logo.heightAnchor.constraint(equalToConstant: 64),
+            nameFallback.centerXAnchor.constraint(equalTo: vc.view.centerXAnchor),
+            nameFallback.topAnchor.constraint(equalTo: logo.bottomAnchor, constant: 8),
             btn.centerXAnchor.constraint(equalTo: vc.view.centerXAnchor),
-            btn.topAnchor.constraint(equalTo: name.bottomAnchor, constant: 32),
+            btn.topAnchor.constraint(equalTo: nameFallback.bottomAnchor, constant: 32),
         ])
 
         w.rootViewController = vc
