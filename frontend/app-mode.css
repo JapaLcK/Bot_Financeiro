@@ -89,6 +89,32 @@ html.pb-app body.pb-page-app header {
 html.pb-app body.pb-page-app header #refresh-btn,
 html.pb-app body.pb-page-app header #status { display: none !important; }
 
+/* Header em UMA linha: ☰ | ‹ mês › centralizado | conta compacta.
+   (anula o header-right de largura 100% e o user-menu em linha própria
+   do dashboard-mobile.css) */
+html.pb-app body.pb-page-app header { flex-wrap: nowrap !important; }
+html.pb-app body.pb-page-app .header-left { flex: 0 0 auto !important; }
+html.pb-app body.pb-page-app .month-nav {
+  flex: 1 1 auto !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+html.pb-app body.pb-page-app .header-right {
+  width: auto !important;
+  flex: 0 0 auto !important;
+  flex-wrap: nowrap !important;
+}
+html.pb-app body.pb-page-app .user-menu { flex: 0 0 auto !important; }
+html.pb-app body.pb-page-app .user-menu-btn {
+  width: 44px !important;
+  min-height: 44px !important;
+  padding: 0 !important;
+  justify-content: center !important;
+  border-radius: 50% !important;
+}
+html.pb-app body.pb-page-app .user-menu-btn .user-menu-main { display: none !important; }
+
 /* Flutuantes (FAB do chat, toast) sobem acima da tab bar */
 html.pb-app #piggy-fab {
   bottom: calc(76px + env(safe-area-inset-bottom)) !important;
