@@ -45,6 +45,14 @@ def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
         reason=category_reason,
     )
 
+    # Reconciliação reversa (Open Finance): funde com o gasto que o banco já importou.
+    if not is_internal:
+        try:
+            from db import reconcile_manual_launch
+            reconcile_manual_launch(user_id, launch_id)
+        except Exception:
+            pass
+
     emoji = "💸" if tipo == "despesa" else "💰"
     cat_txt = categoria or "outros"
     return OutgoingMessage(

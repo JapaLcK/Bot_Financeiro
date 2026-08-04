@@ -24,8 +24,12 @@ from core.services.pluggy import (
     PluggyConfigError,
     create_pluggy_connect_token,
 )
+from core.services.plan_service import is_pro
+from core.services.pluggy_sync import sync_pluggy_item, sync_pluggy_user
 from db import (
+    count_open_finance_connections,
     create_mock_open_finance_connection,
+    delete_open_finance_transactions,
     disconnect_open_finance_connection,
     get_open_finance_snapshot,
     save_pluggy_open_finance_item,
@@ -36,6 +40,75 @@ from frontend.routes import shared
 router = APIRouter()
 
 PLUGGY_INCLUDE_SANDBOX = os.getenv("PLUGGY_INCLUDE_SANDBOX", "1") != "0"
+
+# Eventos da Pluggy que disparam um sync (puxar contas/transações).
+# transactions/deleted é tratado à parte (remove ids), não re-sincroniza.
+PLUGGY_SYNC_EVENTS = {
+    "item/created",
+    "item/updated",
+    "transactions/created",
+    "transactions/updated",
+}
+
+
+async def _run_pluggy_sync_bg(item_id: str) -> None:
+    """Roda o sync fora do request (fire-and-forget), logando falhas."""
+    try:
+        result = await asyncio.to_thread(sync_pluggy_item, item_id)
+        # Atualização ao vivo (PWA): avisa o cliente conectado pra recarregar saldo/timeline.
+        uid = result.get("user_id") if isinstance(result, dict) else None
+        if uid:
+            try:
+                from frontend.finance_bot_websocket_custom import manager
+                await manager.broadcast_to_user(
+                    int(uid), json.dumps({"type": "open_finance_synced", "item_id": item_id})
+                )
+            except Exception:
+                pass
+        await log_system_event(
+            "info",
+            "pluggy_sync_done",
+            f"Sync Pluggy concluído: {item_id}",
+            source="open_finance",
+            details=result,
+        )
+    except Exception as exc:  # noqa: BLE001 — background, não pode derrubar nada
+        await log_system_event(
+            "error",
+            "pluggy_sync_failed",
+            f"Sync Pluggy falhou: {item_id}: {exc}",
+            source="open_finance",
+            details={"item_id": item_id, "error": str(exc)},
+        )
+
+
+def _schedule_pluggy_sync(item_id: str) -> None:
+    if item_id:
+        asyncio.create_task(_run_pluggy_sync_bg(item_id), name=f"pluggy_sync_{item_id}")
+
+
+def _bank_limit_enabled() -> bool:
+    # Gate dormante: só bloqueia quando ligado no ambiente (como os outros gates do projeto).
+    return (os.getenv("OF_BANK_LIMIT_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+async def _enforce_bank_limit(user_id: int) -> None:
+    """Gate Pro por nº de bancos: no plano grátis, limita conexões (Fase 7)."""
+    if not _bank_limit_enabled():
+        return
+    if await asyncio.to_thread(is_pro, user_id):
+        return
+    limit = int(os.getenv("OF_FREE_BANK_LIMIT", "1"))
+    count = await asyncio.to_thread(count_open_finance_connections, user_id)
+    if count >= limit:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "OF_BANK_LIMIT",
+                "limit": limit,
+                "message": f"No plano grátis você conecta {limit} banco. Assine o Pro para conectar mais.",
+            },
+        )
 
 
 class OpenFinanceMockConnectPayload(BaseModel):
@@ -56,6 +129,7 @@ async def open_finance_snapshot_route(request: Request, user_id: int):
 @router.post("/open-finance/{user_id}/connect-token")
 async def open_finance_connect_token_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
+    await _enforce_bank_limit(user_id)
 
     webhook_url = (os.getenv("PLUGGY_WEBHOOK_URL") or "").strip()
     if not webhook_url and shared.DASHBOARD_URL.startswith("https://"):
@@ -83,6 +157,7 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
 @router.post("/open-finance/{user_id}/pluggy-item")
 async def open_finance_pluggy_item_route(request: Request, user_id: int, payload: OpenFinancePluggyItemPayload):
     shared.authorize_dashboard_access(request, user_id)
+    await _enforce_bank_limit(user_id)
     try:
         connection = await asyncio.to_thread(save_pluggy_open_finance_item, user_id, payload.item)
     except ValueError as exc:
@@ -93,11 +168,29 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         user_id,
         AuditEvent.OPEN_FINANCE_CONNECTED,
         request=request,
-        details={"provider": "pluggy", "item_id": (connection or {}).get("item_id")},
+        details={"provider": "pluggy", "item_id": (connection or {}).get("provider_item_id")},
     )
+
+    # Sync inicial: puxa contas + transações do banco recém-conectado.
+    _schedule_pluggy_sync(str((connection or {}).get("provider_item_id") or ""))
 
     snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
     return json.loads(shared.jdump({"ok": True, "connection": connection, **snapshot}))
+
+
+@router.post("/open-finance/{user_id}/sync")
+async def open_finance_sync_route(request: Request, user_id: int):
+    """Força um sync de todos os bancos Pluggy do usuário (leitura sob demanda)."""
+    shared.authorize_dashboard_access(request, user_id)
+    try:
+        result = await asyncio.to_thread(sync_pluggy_user, user_id)
+    except PluggyConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PluggyApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
+    return json.loads(shared.jdump({"ok": True, "sync": result, **snapshot}))
 
 
 def _verify_pluggy_webhook_signature(raw_body: bytes, signature_header: str, secret: str) -> bool:
@@ -142,6 +235,16 @@ async def open_finance_pluggy_webhook(request: Request):
     status = status_by_event.get(event_name)
     if item_id and status:
         await asyncio.to_thread(update_pluggy_open_finance_item_status, item_id, status, event)
+
+    # transactions/deleted: a Pluggy manda os ids removidos — apaga direto, senão ficam
+    # órfãos (um re-sync não os removeria, pois não voltam no list_transactions).
+    if item_id and event_name == "transactions/deleted":
+        deleted_ids = event.get("transactionIds") or event.get("transactionsIds") or []
+        if isinstance(deleted_ids, list) and deleted_ids:
+            await asyncio.to_thread(delete_open_finance_transactions, item_id, deleted_ids)
+    # Demais eventos com dado novo: dispara o sync pesado fora do request.
+    elif item_id and event_name in PLUGGY_SYNC_EVENTS:
+        _schedule_pluggy_sync(item_id)
 
     await log_system_event(
         "info" if event_name != "item/error" else "warning",

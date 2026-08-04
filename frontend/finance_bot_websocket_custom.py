@@ -1197,6 +1197,21 @@ class ConnectionManager:
     async def send_to(self, ws: WebSocket, payload: str):
         await ws.send_text(payload)
 
+    async def broadcast_to_user(self, user_id: int, payload: str) -> int:
+        """Empurra um payload pra todas as conexões ativas do usuário (best-effort).
+
+        Usado pra 'atualização ao vivo' no PWA: quando um banco sincroniza em segundo
+        plano, o servidor avisa o cliente conectado pra recarregar saldo/timeline.
+        """
+        sent = 0
+        for ws in list(self.active.get(user_id, {}).keys()):
+            try:
+                await ws.send_text(payload)
+                sent += 1
+            except Exception:
+                self.disconnect(ws, user_id)
+        return sent
+
 manager = ConnectionManager()
 
 # ─── App startup ──────────────────────────────────────────────────────────────
@@ -1398,6 +1413,43 @@ async def lifespan(app: FastAPI):
             except Exception as exc:
                 print(f"[account_deletion] erro: {exc}", file=sys.stderr)
 
+    async def _open_finance_refresh():
+        # Refresh periódico dos bancos conectados (P1 #5). Dormant por padrão: só roda
+        # com OF_REFRESH_ENABLED ligado (evita martelar a Pluggy no trial).
+        if (os.getenv("OF_REFRESH_ENABLED") or "").strip().lower() not in ("1", "true", "yes", "on"):
+            return
+        interval = int(os.getenv("OF_REFRESH_INTERVAL_SEC", str(6 * 60 * 60)))
+        from core.services.pluggy_sync import refresh_all_pluggy_items
+        while True:
+            try:
+                res = await asyncio.to_thread(refresh_all_pluggy_items)
+                print(f"[open_finance_refresh] {res}", flush=True)
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[open_finance_refresh] erro: {exc}", file=sys.stderr)
+                await asyncio.sleep(interval)
+
+    async def _open_finance_proactive():
+        # Avisos proativos de salário/reconectar (Fase 5 / P1 #6). Dormant: só roda com
+        # OF_PROACTIVE_ENABLED ligado E o template Meta configurado (senão retorna na hora).
+        if (os.getenv("OF_PROACTIVE_ENABLED") or "").strip().lower() not in ("1", "true", "yes", "on"):
+            return
+        interval = int(os.getenv("OF_PROACTIVE_INTERVAL_SEC", str(6 * 60 * 60)))
+        from core.services.open_finance_proactive import run_reconnect_notifications, run_salary_notifications
+        while True:
+            try:
+                s = await asyncio.to_thread(run_salary_notifications)
+                r = await asyncio.to_thread(run_reconnect_notifications)
+                print(f"[open_finance_proactive] salary={s} reconnect={r}", flush=True)
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[open_finance_proactive] erro: {exc}", file=sys.stderr)
+                await asyncio.sleep(interval)
+
     _elapsed = _startup_time.monotonic() - _t0
     print(f"[app] Startup interno concluído em {_elapsed:.1f}s.", flush=True)
 
@@ -1405,6 +1457,8 @@ async def lifespan(app: FastAPI):
     if RUN_BACKGROUND_TASKS:
         tasks.extend(
             [
+                asyncio.create_task(_open_finance_refresh(), name="open_finance_refresh"),
+                asyncio.create_task(_open_finance_proactive(), name="open_finance_proactive"),
                 asyncio.create_task(_wa_worker(), name="wa_worker"),
                 asyncio.create_task(_wa_daily(), name="wa_daily"),
                 asyncio.create_task(_wa_bill_reminders(), name="wa_bill_reminders"),
@@ -1470,7 +1524,7 @@ _SECURITY_HEADERS = {
         "font-src 'self' data: "
         "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
         "connect-src 'self' https: wss:; "
-        "frame-src 'self' https://cdn.pluggy.ai; "
+        "frame-src 'self' https://cdn.pluggy.ai https://connect.pluggy.ai; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self'; "
@@ -2277,6 +2331,22 @@ async def auth_new_link_code(user_id: int = Depends(_get_current_user)):
     }
 
 
+def _open_finance_ui_enabled(user_id: int, email: str | None) -> bool:
+    """Gate da UI de Open Finance. Liga se:
+    - OF_UI_ENABLED global ligado (lançamento pra todos), OU
+    - o e-mail está em OF_UI_BETA_EMAILS (allowlist beta, case-insensitive), OU
+    - o user_id está em OF_UI_BETA_USER_IDS.
+    Default: desligado (nada muda pros usuários).
+    """
+    if (os.getenv("OF_UI_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    beta_emails = {e.strip().lower() for e in (os.getenv("OF_UI_BETA_EMAILS") or "").split(",") if e.strip()}
+    if email and str(email).strip().lower() in beta_emails:
+        return True
+    beta_ids = {i.strip() for i in (os.getenv("OF_UI_BETA_USER_IDS") or "").split(",") if i.strip()}
+    return str(user_id) in beta_ids
+
+
 @app.get("/auth/me")
 async def auth_me(user_id: int = Depends(_get_current_user)):
     """Retorna dados do usuário autenticado."""
@@ -2288,16 +2358,19 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
 
+    user_dict = dict(user)
     show_onboarding = await asyncio.to_thread(should_show_mfa_onboarding, user_id)
     mfa = await asyncio.to_thread(get_mfa_status, user_id)
     from core.services.plan_service import has_app_access, paywall_enabled
+    of_ui_enabled = _open_finance_ui_enabled(user_id, user_dict.get("email"))
     return {
         "user_id": user_id,
-        **dict(user),
+        **user_dict,
         "show_mfa_onboarding": show_onboarding,
         "mfa_enabled": bool(mfa.get("enabled")),
         "app_access": has_app_access(user_id),
         "paywall_enabled": paywall_enabled(),
+        "of_ui_enabled": of_ui_enabled,
     }
 
 
@@ -4001,6 +4074,14 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao registrar lançamento: {exc}") from exc
+
+    # Reconciliação reversa (Open Finance): se o banco já importou esse gasto, funde (não duplica).
+    if not is_internal:
+        try:
+            from db import reconcile_manual_launch
+            await asyncio.to_thread(reconcile_manual_launch, int(user_id), int(launch_id))
+        except Exception:
+            pass
 
     return {
         "ok": True,
