@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>PigBank</title>
+  <style>
+    /* Fallback local: só aparece se o modo remoto (server.url) estiver
+       desligado ou o primeiro load falhar antes do WebView navegar. */
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 16px; background: #111111; color: #F6F4F1;
+      font-family: -apple-system, "Inter", sans-serif;
+    }
+    .dot { width: 12px; height: 12px; border-radius: 50%; background: #FF2D8E;
+           animation: pulse 1s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: .3; transform: scale(.8); } }
+    button {
+      margin-top: 8px; padding: 12px 28px; border: 0; border-radius: 999px;
+      background: #FF2D8E; color: #fff; font-size: 16px; font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <div class="dot"></div>
+  <p id="msg">Conectando ao PigBank…</p>
+  <button hidden id="retry" onclick="location.href='https://pigbankai.com/login'">Tentar de novo</button>
+  <script>
+    setTimeout(() => {
+      document.getElementById("msg").textContent = "Sem conexão. Verifique sua internet.";
+      document.getElementById("retry").hidden = false;
+    }, 6000);
+  </script>
+</body>
+</html>

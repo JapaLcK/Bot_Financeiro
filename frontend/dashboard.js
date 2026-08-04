@@ -8995,14 +8995,14 @@ async function requestAffiliatePayout() {
 /* ═══════════════════════════════════════════════════════════════════════
    INIT — valida token antes de conectar
 ═══════════════════════════════════════════════════════════════════════ */
-function _showAccessError() {
+function _showAccessError(title, msg) {
   document.body.style.cssText = "background:#111111;display:flex;align-items:center;justify-content:center;min-height:100vh;";
   document.body.innerHTML = `
     <div style="text-align:center;color:rgba(255,255,255,0.85);font-family:system-ui;max-width:400px;padding:40px">
       <div style="font-size:3rem;margin-bottom:16px">🔒</div>
-      <h2 style="margin-bottom:8px;font-size:1.4rem;font-weight:600">Link inválido ou expirado</h2>
+      <h2 style="margin-bottom:8px;font-size:1.4rem;font-weight:600">${title || "Link inválido ou expirado"}</h2>
       <p style="color:rgba(255,255,255,0.5);line-height:1.6;margin-bottom:24px">
-        Solicite um novo link digitando <strong style="color:rgba(255,255,255,0.8)">dashboard</strong> no bot.
+        ${msg || 'Solicite um novo link digitando <strong style="color:rgba(255,255,255,0.8)">dashboard</strong> no bot.'}
       </p>
       <a href="/" style="display:inline-block;padding:10px 24px;background:rgba(255,45,142,0.5);
         border:1px solid rgba(255,45,142,0.6);border-radius:12px;color:white;text-decoration:none;font-size:.9rem;">
@@ -9031,6 +9031,11 @@ function _showAccessError() {
     if (meResp.ok) {
       const me = await meResp.json();
       if (me && me.app_access === false) {
+        if (window.PB_IN_APP) {
+          // App iOS: tela neutra, sem link de compra (diretriz 3.1.1)
+          _showAccessError("Conta sem plano ativo", "Sua conta não tem um plano ativo no momento.");
+          return;
+        }
         window.location.replace("/precos?ativar=1");
         return;
       }

@@ -86,6 +86,21 @@
   function err(id,m,ok){var e=document.getElementById(id);e.textContent=m;e.classList.toggle('ok',!!ok);e.classList.add('show')}
   function clrErr(){['login-error','mfa-error'].forEach(function(i){var e=document.getElementById(i);if(e){e.classList.remove('show','ok');e.textContent=''}})}
 
+  // Sessão ainda válida (cookie vivo) → pula o login. Essencial no app iOS,
+  // que abre sempre em /login; inofensivo no navegador. Access expirado com
+  // refresh válido conta como sessão viva (renova e segue).
+  (async function(){
+    try{
+      var r=await fetch('/auth/validate',{credentials:'same-origin'});
+      if(r.status===401){
+        var rf=await fetch('/auth/refresh',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'})});
+        if(!rf.ok)return;
+        r=await fetch('/auth/validate',{credentials:'same-origin'});
+      }
+      if(r.ok)goDash('/home');
+    }catch(_){/* sem rede ou sem sessão: fica no login */}
+  })();
+
   async function doLogin(ev){ev.preventDefault();clrErr();
     var email=document.getElementById('email').value.trim(),pass=document.getElementById('senha').value;
     if(!email||!pass)return err('login-error','Preencha e-mail e senha.');

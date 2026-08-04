@@ -975,6 +975,16 @@ function showAccessError() {
   const me = await loadAuthMe();
   const _justUpgraded = new URLSearchParams(location.search).get("upgrade") === "success";
   if (me && me.app_access === false && !_justUpgraded) {
+    if (window.PB_IN_APP) {
+      // App iOS: sem link de compra (diretriz 3.1.1 da App Store)
+      document.getElementById("page-root").innerHTML = `
+        <div class="access-error">
+          <h2>Conta sem plano ativo</h2>
+          <p>Sua conta não tem um plano ativo no momento.</p>
+        </div>
+      `;
+      return;
+    }
     window.location.replace("/precos?ativar=1");
     return;
   }

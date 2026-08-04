@@ -1,0 +1,14 @@
+{
+  "appId": "com.pigbankai.app",
+  "appName": "PigBank",
+  "webDir": "www",
+  "server": {
+    "url": "https://pigbankai.com/login",
+    "allowNavigation": ["pigbankai.com", "www.pigbankai.com"]
+  },
+  "ios": {
+    "contentInset": "automatic",
+    "appendUserAgent": "PigBankApp/1.0",
+    "backgroundColor": "#111111"
+  }
+}

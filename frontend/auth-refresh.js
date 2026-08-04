@@ -72,4 +72,17 @@
     if (!ok) return resp;
     return _origFetch(input, init);
   };
+
+  // ── Modo app (iOS/Capacitor) ─────────────────────────────────────────────
+  // O WebView do app anexa "PigBankApp" ao user agent. Dentro do app as
+  // diretrizes da App Store proíbem link/CTA de compra externa, então os
+  // anchors pra /precos somem via CSS e as páginas usam window.PB_IN_APP
+  // pra trocar o redirect de paywall por uma tela neutra.
+  if (/PigBankApp/.test(navigator.userAgent)) {
+    window.PB_IN_APP = true;
+    document.documentElement.classList.add("pb-app");
+    const st = document.createElement("style");
+    st.textContent = 'html.pb-app a[href^="/precos"]{display:none !important}';
+    (document.head || document.documentElement).appendChild(st);
+  }
 })();

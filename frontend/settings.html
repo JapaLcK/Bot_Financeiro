@@ -2833,7 +2833,10 @@ async function initSettings() {
     const meResp = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
     if (meResp.ok) {
       const me = await meResp.json();
-      if (me && me.app_access === false) { window.location.replace("/precos?ativar=1"); return; }
+      if (me && me.app_access === false) {
+        // App iOS: settings fica acessível sem redirect de compra (diretriz 3.1.1)
+        if (!window.PB_IN_APP) { window.location.replace("/precos?ativar=1"); return; }
+      }
     }
   } catch (e) { /* segue; as rotas de dados protegem com 402 */ }
 
