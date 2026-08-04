@@ -234,6 +234,14 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     parts = _split_audio_transactions(transcription)
     is_multi = len(parts) > 1
 
+    # Id do último lançamento ANTES de processar este áudio. Serve pra saber se
+    # este turno REALMENTE inseriu um lançamento — uma resposta por áudio que só
+    # resolve uma pendência ("cancelar", "sim"/"não" da oferta de gasto fixo)
+    # devolve texto normal mas NÃO cria lançamento; nesse caso não se arma o undo
+    # (senão o botão "Desfazer" apagaria o lançamento ANTERIOR do usuário).
+    _pre = db.list_launches(uid, limit=1)
+    pre_launch_id = int(_pre[0]["id"]) if _pre else None
+
     responses = []
     fallbacks = []
     # Pedaços de um áudio múltiplo que vêm com verbo mas SEM valor
@@ -276,6 +284,12 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
 
     registered_something = bool(responses)
 
+    # Este turno REALMENTE inseriu um lançamento? (vs só resolver uma pendência,
+    # que devolve texto normal mas não cria lançamento). É o que decide o undo.
+    _post = db.list_launches(uid, limit=1)
+    post_launch_id = int(_post[0]["id"]) if _post else None
+    inserted_launch = post_launch_id is not None and post_launch_id != pre_launch_id
+
     # Enfileira a pergunta de valor faltante e monta a pergunta do primeiro item.
     # Setar o pending por ÚLTIMO garante que ele sobrevive: o route() de cada
     # pedaço acima pode ter armado um pending próprio (ex: "categoria errada?"),
@@ -306,10 +320,12 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     if ask_value_question:
         body = f"{body}\n\n{ask_value_question}" if body else ask_value_question
 
-    # Dica de desfazer — só faz sentido se algo foi de fato registrado. Com uma
-    # pergunta de valor pendente NÃO arma o undo: a próxima resposta é o valor,
-    # e sobrescrever o multi_launch_values com undo_audio perderia o contexto.
-    if not registered_something or missing:
+    # Dica de desfazer — só faz sentido se um lançamento foi de fato inserido
+    # NESTE turno. Uma resposta por áudio que só resolve pendência ("cancelar",
+    # "sim"/"não" da oferta de gasto fixo) não inseriu nada: armar o undo aqui
+    # ofereceria desfazer o lançamento ANTERIOR do usuário. Com pergunta de valor
+    # pendente também não arma (a próxima resposta é o valor).
+    if not inserted_launch or missing:
         undo_hint = ""
     elif platform == "discord":
         undo_hint = "\n\n↩️ Para desfazer, diga: _desfazer_"

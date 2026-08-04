@@ -147,3 +147,23 @@ def test_audio_todos_com_valor_nao_arma_pergunta(small_uid, audio):
     p = db.get_pending_action(small_uid)
     # comportamento atual do áudio: arma o undo, não a pergunta de valor
     assert p is None or p["action_type"] != "multi_launch_values"
+
+
+def test_audio_cancelar_por_audio_nao_arma_undo(small_uid, audio):
+    """P2: 'cancelar' por áudio só descarta a fila — não inseriu lançamento, logo
+    não pode armar o undo (senão o botão desfaria o ifood anterior)."""
+    audio(small_uid, "gastei 500 no ifood e paguei o aluguel")  # pergunta o aluguel
+    audio(small_uid, "cancelar")
+    p = db.get_pending_action(small_uid)
+    assert p is None or p["action_type"] != "undo_audio"
+    assert _valores(small_uid) == [("despesa", 500.0)]           # nada novo
+
+
+def test_audio_resposta_valor_arma_undo(small_uid, audio):
+    """Contraprova: responder o valor por áudio INSERE o lançamento → aí o undo
+    faz sentido e é armado."""
+    audio(small_uid, "gastei 500 no ifood e paguei o aluguel")
+    audio(small_uid, "1500")                                     # completa o aluguel
+    assert _valores(small_uid) == [("despesa", 500.0), ("despesa", 1500.0)]
+    p = db.get_pending_action(small_uid)
+    assert p and p["action_type"] == "undo_audio"

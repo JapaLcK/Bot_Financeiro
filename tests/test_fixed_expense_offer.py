@@ -103,6 +103,25 @@ def test_receita_nao_oferece(user_id, pro):
     assert "gasto fixo" not in r.lower()
 
 
+def test_sim_nao_dobra_cobranca_no_mesmo_mes(user_id, pro):
+    """P1: o gasto que dispara a oferta já foi lançado; o recorrente autopay não
+    pode debitar de novo no mesmo dia. Deve nascer com o mês corrente já cobrado."""
+    from core.services.recurring_charger import charge_due_recurring_expenses_once
+    from utils_date import today_tz
+
+    launches.add(user_id, "gastei 1500 no aluguel", {})
+    launches.add(user_id, "gastei 1500 no aluguel", {})
+    launches.resolve_fixed_expense_offer(user_id, "sim", _pending(user_id))
+
+    recs = list_recurring_expenses(user_id)
+    assert recs[0]["last_charged_ym"] == today_tz().strftime("%Y-%m")
+
+    before = len(db.list_launches(user_id, limit=50))
+    charge_due_recurring_expenses_once(today_tz())          # roda o cron de hoje
+    after = len(db.list_launches(user_id, limit=50))
+    assert after == before                                   # não debitou de novo
+
+
 # --- áudio ----------------------------------------------------------------
 
 class _Att:
@@ -141,3 +160,24 @@ def test_audio_oferece_na_segunda(small_uid, audio):
     assert "gasto fixo" in r.lower()
     # a oferta sobrevive (não foi sobrescrita pelo undo_audio)
     assert _is_offer(small_uid)
+
+
+def test_audio_recusar_oferta_nao_arma_undo(small_uid, audio):
+    """P2: responder 'não' à oferta por áudio NÃO cria lançamento — não pode
+    armar o undo (que ofereceria desfazer o lançamento anterior do usuário)."""
+    audio(small_uid, "gastei 1500 no aluguel")
+    audio(small_uid, "gastei 1500 no aluguel")   # 2ª → oferta
+    audio(small_uid, "não")                       # recusa por áudio
+    p = db.get_pending_action(small_uid)
+    assert p is None or p["action_type"] != "undo_audio"
+
+
+def test_audio_aceitar_oferta_nao_arma_undo(small_uid, audio):
+    """P2: aceitar a oferta ('sim') cria um GASTO FIXO, não um lançamento — o undo
+    não deve ser armado."""
+    audio(small_uid, "gastei 1500 no aluguel")
+    audio(small_uid, "gastei 1500 no aluguel")
+    audio(small_uid, "sim")
+    p = db.get_pending_action(small_uid)
+    assert p is None or p["action_type"] != "undo_audio"
+    assert len(list_recurring_expenses(small_uid)) == 1

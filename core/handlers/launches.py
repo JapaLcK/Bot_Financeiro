@@ -631,13 +631,20 @@ def resolve_fixed_expense_offer(user_id: int, text: str, pending: dict, platform
     desc = payload.get("desc") or "gasto"
     valor = float(payload.get("valor") or 0)
     categoria = payload.get("categoria") or "outros"
-    due_day = today_tz().day
+    today = today_tz()
+    due_day = today.day
     try:
-        from db.recurring import create_recurring_expense
+        from db.recurring import create_recurring_expense, mark_recurring_charged
         rec = create_recurring_expense(
             user_id, desc, valor, categoria, due_day, "account",
             frequency="monthly", payment_mode="autopay",
         )
+        # O gasto que disparou a oferta JÁ foi lançado agora (é a ocorrência deste
+        # mês). O recorrente nasce com due_day=hoje e start_date=hoje, então o
+        # charger autopay o consideraria "vence hoje" e debitaria de novo no mesmo
+        # dia — dobrando o lançamento. Marca este mês como já cobrado pra a 1ª
+        # cobrança automática cair só no mês que vem.
+        mark_recurring_charged(user_id, rec["id"], today.strftime("%Y-%m"))
     except ValueError:
         return (
             "🐷 Não consegui criar o gasto fixo agora. Você pode cadastrar na aba "
@@ -646,8 +653,8 @@ def resolve_fixed_expense_offer(user_id: int, text: str, pending: dict, platform
     return (
         f"✅ *Gasto fixo criado:* {rec['name']}\n"
         f"💸 {fmt_brl(valor)} · débito na conta todo dia {due_day}\n"
-        f"Não tiro nada agora — só no dia. Pra ajustar dia/cartão, é na aba "
-        f"*Recorrentes* do app. 🐷"
+        f"Não tiro nada agora — a 1ª cobrança automática é só no mês que vem. "
+        f"Pra ajustar dia/cartão, é na aba *Recorrentes* do app. 🐷"
     )
 
 
