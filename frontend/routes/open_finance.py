@@ -31,6 +31,7 @@ from db import (
     create_mock_open_finance_connection,
     delete_open_finance_transactions,
     disconnect_open_finance_connection,
+    get_open_finance_connection_by_item_id,
     get_open_finance_snapshot,
     save_pluggy_open_finance_item,
     update_pluggy_open_finance_item_status,
@@ -92,12 +93,21 @@ def _bank_limit_enabled() -> bool:
     return (os.getenv("OF_BANK_LIMIT_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
-async def _enforce_bank_limit(user_id: int) -> None:
-    """Gate Pro por nº de bancos: no plano grátis, limita conexões (Fase 7)."""
+async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> None:
+    """Gate Pro por nº de bancos: no plano grátis, limita conexões (Fase 7).
+
+    P1: reconectar/renovar um banco JÁ conectado (mesmo provider_item_id) NÃO conta como
+    banco novo — senão o usuário grátis no limite ficava travado de reautorizar o próprio
+    banco. Só bloqueia banco realmente novo.
+    """
     if not _bank_limit_enabled():
         return
     if await asyncio.to_thread(is_pro, user_id):
         return
+    if new_item_id:
+        existing = await asyncio.to_thread(get_open_finance_connection_by_item_id, str(new_item_id))
+        if existing and int(existing.get("user_id")) == int(user_id):
+            return  # upsert de item existente: reconexão, não é banco novo
     limit = int(os.getenv("OF_FREE_BANK_LIMIT", "1"))
     count = await asyncio.to_thread(count_open_finance_connections, user_id)
     if count >= limit:
@@ -129,7 +139,9 @@ async def open_finance_snapshot_route(request: Request, user_id: int):
 @router.post("/open-finance/{user_id}/connect-token")
 async def open_finance_connect_token_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
-    await _enforce_bank_limit(user_id)
+    # Não aplica o gate aqui: gerar um connect-token não conecta banco nenhum (e o widget
+    # também é usado pra RECONECTAR um banco existente). O limite é cobrado no /pluggy-item,
+    # onde já se sabe se o item é novo ou um upsert de um banco já conectado.
 
     webhook_url = (os.getenv("PLUGGY_WEBHOOK_URL") or "").strip()
     if not webhook_url and shared.DASHBOARD_URL.startswith("https://"):
@@ -157,7 +169,9 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
 @router.post("/open-finance/{user_id}/pluggy-item")
 async def open_finance_pluggy_item_route(request: Request, user_id: int, payload: OpenFinancePluggyItemPayload):
     shared.authorize_dashboard_access(request, user_id)
-    await _enforce_bank_limit(user_id)
+    item = payload.item if isinstance(payload.item, dict) else {}
+    new_item_id = item.get("id") or item.get("itemId")
+    await _enforce_bank_limit(user_id, str(new_item_id) if new_item_id else None)
     try:
         connection = await asyncio.to_thread(save_pluggy_open_finance_item, user_id, payload.item)
     except ValueError as exc:

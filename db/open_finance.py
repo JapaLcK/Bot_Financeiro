@@ -6,7 +6,7 @@ from uuid import NAMESPACE_OID, uuid5
 
 from psycopg.types.json import Jsonb
 
-from utils_date import _tz
+from utils_date import _tz, add_months, billing_period_for_close_day
 
 from .accounts import delete_launch_and_rollback
 from .cards import (
@@ -1072,11 +1072,21 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
             # Sem o totalAmount, duas compras diferentes iguais (mesmo merchant/parcelas) colidiam.
             meta = (r["tx_raw"] or {}).get("creditCardMetadata") or {}
             total_amount = meta.get("totalAmount")
+            # P2: adiciona o MÊS DE ORIGEM estimado (data da parcela menos nº parcela-1) pra separar
+            # compras idênticas feitas em meses distintos — sem quebrar o agrupamento das parcelas de
+            # UMA compra: todas back-calculam pro mesmo mês (parcela 1 em M, parcela 2 em M+1 → M).
+            origin_ym = ""
+            if inst_no and r["transaction_date"] is not None:
+                oy, om = add_months(
+                    r["transaction_date"].year, r["transaction_date"].month, -(int(inst_no) - 1)
+                )
+                origin_ym = f"{oy:04d}-{om:02d}"
             key = "|".join([
                 str(card_cache[of_acc_id]),
                 (r["description"] or "").strip().lower(),
                 str(inst_total),
                 str(total_amount) if total_amount is not None else "",
+                origin_ym,
             ])
             group_id = uuid5(NAMESPACE_OID, key)
         tx_id, created = add_imported_credit_purchase(
@@ -1100,6 +1110,31 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
             conn.commit()
 
     return {"inserted": inserted, "linked": len(links), "cards": len(card_cache)}
+
+
+def _get_or_create_open_bill_cur(cur, user_id: int, card_id: int, ref_date) -> int | None:
+    """Como get_or_create_open_bill, mas usando o cursor da transação em curso (sem abrir
+    conexão aninhada, que arriscaria lock/inconsistência no meio de um update). Retorna o
+    bill_id da fatura que contém ref_date (reabrindo se estava paga/fechada)."""
+    cur.execute("select closing_day, user_id from credit_cards where id=%s limit 1", (card_id,))
+    card = cur.fetchone()
+    if not card or int(card["user_id"]) != int(user_id):
+        return None
+    period_start, period_end = billing_period_for_close_day(ref_date, int(card["closing_day"]))
+    cur.execute(
+        """
+        insert into credit_bills (user_id, card_id, period_start, period_end, total, status)
+        values (%s,%s,%s,%s,0,'open')
+        on conflict (card_id, period_start, period_end) do update set user_id = excluded.user_id
+        returning id, status
+        """,
+        (user_id, card_id, period_start, period_end),
+    )
+    row = cur.fetchone()
+    bill_id = int(row["id"])
+    if (row.get("status") or "").lower() in ("paid", "closed"):
+        cur.execute("update credit_bills set status='open' where id=%s", (bill_id,))
+    return bill_id
 
 
 def sync_imported_open_finance_updates(user_id: int, connection_id: int | None = None) -> dict:
@@ -1158,7 +1193,8 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
                 """
                 select o.amount, o.transaction_date, o.category,
                        ct.id as ct_id, ct.valor as cur_valor, ct.is_refund as cur_refund,
-                       ct.categoria as cur_cat, ct.purchased_at as cur_date, ct.bill_id
+                       ct.categoria as cur_cat, ct.purchased_at as cur_date, ct.bill_id,
+                       ct.card_id
                 from open_finance_transactions o
                 join open_finance_accounts a on a.id = o.account_id
                 join open_finance_connections c on c.id = a.connection_id
@@ -1180,16 +1216,39 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
                     or r["cur_date"] != r["transaction_date"]
                 )
                 if changed:
-                    # fatura foi `total += valor` (assinado); ajusta pela diferença de valor.
                     old_valor = Decimal(str(r["cur_valor"]))
+                    old_bill_id = r["bill_id"]
+                    new_bill_id = old_bill_id
+                    # P1: se a data mudou de ciclo de fatura, a transação precisa MIGRAR de fatura.
+                    # Sem isso, ela mantinha o bill_id antigo e o gasto continuava preso no mês/fatura
+                    # velha (dashboard e analytics agrupam por credit_bills.period_end).
+                    if r["cur_date"] != r["transaction_date"] and r["card_id"] is not None:
+                        resolved = _get_or_create_open_bill_cur(
+                            cur, user_id, r["card_id"], r["transaction_date"]
+                        )
+                        if resolved is not None:
+                            new_bill_id = resolved
                     cur.execute(
-                        "update credit_transactions set valor=%s, is_refund=%s, categoria=%s, purchased_at=%s where id=%s",
-                        (new_valor, new_refund, new_cat, r["transaction_date"], r["ct_id"]),
+                        "update credit_transactions set valor=%s, is_refund=%s, categoria=%s, "
+                        "purchased_at=%s, bill_id=%s where id=%s",
+                        (new_valor, new_refund, new_cat, r["transaction_date"], new_bill_id, r["ct_id"]),
                     )
-                    cur.execute(
-                        "update credit_bills set total = total + %s where id=%s and user_id=%s",
-                        (new_valor - old_valor, r["bill_id"], user_id),
-                    )
+                    if new_bill_id == old_bill_id:
+                        # mesma fatura: ajusta só pela diferença de valor (fatura foi `total += valor`).
+                        cur.execute(
+                            "update credit_bills set total = total + %s where id=%s and user_id=%s",
+                            (new_valor - old_valor, old_bill_id, user_id),
+                        )
+                    else:
+                        # migrou de fatura: remove o valor antigo da fatura velha e soma o novo na nova.
+                        cur.execute(
+                            "update credit_bills set total = total - %s where id=%s and user_id=%s",
+                            (old_valor, old_bill_id, user_id),
+                        )
+                        cur.execute(
+                            "update credit_bills set total = total + %s where id=%s and user_id=%s",
+                            (new_valor, new_bill_id, user_id),
+                        )
                     credit_updated += 1
 
         conn.commit()
