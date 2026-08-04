@@ -63,6 +63,31 @@ html.pb-app .pb-tab svg {
 html.pb-app .pb-tab.active { color: #FF2D8E; }
 html.pb-app .pb-tab:active { color: #FF80B8; }
 
+/* Botão central de lançamento (FAB embutido na tab bar) */
+html.pb-app .pb-tab-fab > span {
+  width: 54px;
+  height: 54px;
+  margin-top: -22px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #FF2D8E, #C7186B);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  box-shadow: 0 8px 22px rgba(255, 45, 142, 0.45);
+}
+html.pb-app .pb-tab-fab > span svg { width: 26px; height: 26px; stroke-width: 2.4; }
+html.pb-app .pb-tab-fab:active > span { transform: scale(0.94); }
+
+/* Cards da visão geral em grade 2×2 (estilo app) */
+html.pb-app body.pb-page-app .ov-stats {
+  grid-template-columns: repeat(2, 1fr) !important;
+  gap: 10px;
+}
+
+/* A barra rosa "+ Lançar" sai — o botão central da tab bar assume */
+html.pb-app body.pb-page-app .main-tab.tab-launch { display: none !important; }
+
 /* ─── Login / Cadastro: só o cartão, sem nav de site ───────────────────── */
 html.pb-app .nav { display: none !important; }
 

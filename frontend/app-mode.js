@@ -58,6 +58,14 @@
       '<svg viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h.1a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5h.1a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1h.1a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>' },
   ];
 
+  // Lançamento: no dashboard abre o modal direto; nas outras páginas navega
+  // pro dashboard com ?lancar=1 (o init lá embaixo dispara o modal).
+  function fabLaunch(ev) {
+    ev.preventDefault();
+    if (typeof window.openLaunchModal === "function") { window.openLaunchModal(); return; }
+    location.href = "/app?lancar=1";
+  }
+
   function buildTabbar() {
     if (!page) { root.classList.add("pb-no-tabs"); return; }
     document.body.classList.add("pb-page-" + page);
@@ -65,11 +73,18 @@
     const bar = document.createElement("nav");
     bar.className = "pb-tabbar";
     bar.setAttribute("aria-label", "Navegação principal");
-    bar.innerHTML = TABS.map(t => {
+    const tabHtml = t => {
       const active = PAGES[t.href] === page;
       return `<a class="pb-tab${active ? " active" : ""}" href="${t.href}"` +
         `${active ? ' aria-current="page"' : ""}>${t.icon}<span>${t.label}</span></a>`;
-    }).join("");
+    };
+    const fabHtml =
+      '<a class="pb-tab pb-tab-fab" href="/app?lancar=1" aria-label="Lançar"><span>' +
+      '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" ' +
+      'stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span></a>';
+    bar.innerHTML =
+      tabHtml(TABS[0]) + tabHtml(TABS[1]) + fabHtml + tabHtml(TABS[2]) + tabHtml(TABS[3]);
+    bar.querySelector(".pb-tab-fab").addEventListener("click", fabLaunch);
     document.body.appendChild(bar);
   }
 
@@ -96,7 +111,22 @@
     }
   }
 
-  function init() { fixViewport(); buildTabbar(); hardenGlyphs(); }
+  // Chegou pelo + de outra página: abre o modal de lançamento assim que o
+  // dashboard.js terminar de definir a função (poll curto).
+  function maybeOpenLaunch() {
+    if (page !== "app" || qs.get("lancar") !== "1") return;
+    let tries = 0;
+    const t = setInterval(() => {
+      if (typeof window.openLaunchModal === "function") {
+        clearInterval(t);
+        window.openLaunchModal();
+      } else if (++tries > 40) {
+        clearInterval(t);
+      }
+    }, 150);
+  }
+
+  function init() { fixViewport(); buildTabbar(); hardenGlyphs(); maybeOpenLaunch(); }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
   } else {
