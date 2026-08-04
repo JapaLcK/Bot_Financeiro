@@ -12,6 +12,14 @@
  *  - Safe areas (notch / home indicator) respeitadas via env().
  */
 
+/* ─── Base: sem scrollbar (app não é site) ─────────────────────────────── */
+html.pb-app *::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+html.pb-app * { scrollbar-width: none; }
+
 /* ─── Base: espaço pra tab bar flutuante + safe areas ──────────────────── */
 html.pb-app body {
   padding-bottom: calc(84px + env(safe-area-inset-bottom)) !important;
@@ -25,7 +33,8 @@ html.pb-app .pb-tabbar {
   position: fixed;
   left: 10px; right: 10px;
   bottom: max(8px, calc(env(safe-area-inset-bottom) - 14px));
-  z-index: 9999;
+  /* Abaixo dos overlays de modal (800/900): modal aberto cobre a tab bar */
+  z-index: 700;
   display: flex;
   align-items: center;
   height: 66px;
@@ -252,6 +261,8 @@ html.pb-app body.pb-page-app .user-menu-btn .user-menu-main { display: none !imp
 /* Flutuantes (FAB do chat, toast) sobem acima da tab bar */
 html.pb-app #piggy-fab {
   bottom: calc(84px + env(safe-area-inset-bottom)) !important;
+  /* Abaixo do vidro dos modais (800): FAB não compete com botões de modal */
+  z-index: 700 !important;
 }
 html.pb-app #toast {
   bottom: calc(88px + env(safe-area-inset-bottom)) !important;
