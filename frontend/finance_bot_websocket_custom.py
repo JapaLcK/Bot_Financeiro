@@ -1398,6 +1398,24 @@ async def lifespan(app: FastAPI):
             except Exception as exc:
                 print(f"[account_deletion] erro: {exc}", file=sys.stderr)
 
+    async def _open_finance_refresh():
+        # Refresh periódico dos bancos conectados (P1 #5). Dormant por padrão: só roda
+        # com OF_REFRESH_ENABLED ligado (evita martelar a Pluggy no trial).
+        if (os.getenv("OF_REFRESH_ENABLED") or "").strip().lower() not in ("1", "true", "yes", "on"):
+            return
+        interval = int(os.getenv("OF_REFRESH_INTERVAL_SEC", str(6 * 60 * 60)))
+        from core.services.pluggy_sync import refresh_all_pluggy_items
+        while True:
+            try:
+                res = await asyncio.to_thread(refresh_all_pluggy_items)
+                print(f"[open_finance_refresh] {res}", flush=True)
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[open_finance_refresh] erro: {exc}", file=sys.stderr)
+                await asyncio.sleep(interval)
+
     _elapsed = _startup_time.monotonic() - _t0
     print(f"[app] Startup interno concluído em {_elapsed:.1f}s.", flush=True)
 
@@ -1405,6 +1423,7 @@ async def lifespan(app: FastAPI):
     if RUN_BACKGROUND_TASKS:
         tasks.extend(
             [
+                asyncio.create_task(_open_finance_refresh(), name="open_finance_refresh"),
                 asyncio.create_task(_wa_worker(), name="wa_worker"),
                 asyncio.create_task(_wa_daily(), name="wa_daily"),
                 asyncio.create_task(_wa_bill_reminders(), name="wa_bill_reminders"),

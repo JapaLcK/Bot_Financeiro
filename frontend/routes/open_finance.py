@@ -24,8 +24,10 @@ from core.services.pluggy import (
     PluggyConfigError,
     create_pluggy_connect_token,
 )
+from core.services.plan_service import is_pro
 from core.services.pluggy_sync import sync_pluggy_item, sync_pluggy_user
 from db import (
+    count_open_finance_connections,
     create_mock_open_finance_connection,
     delete_open_finance_transactions,
     disconnect_open_finance_connection,
@@ -75,6 +77,30 @@ def _schedule_pluggy_sync(item_id: str) -> None:
         asyncio.create_task(_run_pluggy_sync_bg(item_id), name=f"pluggy_sync_{item_id}")
 
 
+def _bank_limit_enabled() -> bool:
+    # Gate dormante: só bloqueia quando ligado no ambiente (como os outros gates do projeto).
+    return (os.getenv("OF_BANK_LIMIT_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+async def _enforce_bank_limit(user_id: int) -> None:
+    """Gate Pro por nº de bancos: no plano grátis, limita conexões (Fase 7)."""
+    if not _bank_limit_enabled():
+        return
+    if await asyncio.to_thread(is_pro, user_id):
+        return
+    limit = int(os.getenv("OF_FREE_BANK_LIMIT", "1"))
+    count = await asyncio.to_thread(count_open_finance_connections, user_id)
+    if count >= limit:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "OF_BANK_LIMIT",
+                "limit": limit,
+                "message": f"No plano grátis você conecta {limit} banco. Assine o Pro para conectar mais.",
+            },
+        )
+
+
 class OpenFinanceMockConnectPayload(BaseModel):
     institution: str | None = None
 
@@ -93,6 +119,7 @@ async def open_finance_snapshot_route(request: Request, user_id: int):
 @router.post("/open-finance/{user_id}/connect-token")
 async def open_finance_connect_token_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
+    await _enforce_bank_limit(user_id)
 
     webhook_url = (os.getenv("PLUGGY_WEBHOOK_URL") or "").strip()
     if not webhook_url and shared.DASHBOARD_URL.startswith("https://"):
@@ -120,6 +147,7 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
 @router.post("/open-finance/{user_id}/pluggy-item")
 async def open_finance_pluggy_item_route(request: Request, user_id: int, payload: OpenFinancePluggyItemPayload):
     shared.authorize_dashboard_access(request, user_id)
+    await _enforce_bank_limit(user_id)
     try:
         connection = await asyncio.to_thread(save_pluggy_open_finance_item, user_id, payload.item)
     except ValueError as exc:

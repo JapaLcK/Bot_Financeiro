@@ -18,12 +18,14 @@ from core.services.pluggy import (
     create_pluggy_api_key,
     list_pluggy_accounts,
     list_pluggy_transactions,
+    update_pluggy_item,
 )
 from db import (
     get_open_finance_connection_by_item_id,
     get_open_finance_snapshot,
     import_open_finance_credit,
     import_open_finance_launches,
+    list_pluggy_item_ids,
     save_open_finance_sync,
 )
 
@@ -118,6 +120,20 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
         "imported": imported,
         "imported_credit": imported_credit,
     }
+
+
+def refresh_all_pluggy_items(user_id: int | None = None) -> dict:
+    """Dispara update na Pluggy pra cada item ativo (Pluggy re-busca do banco e manda
+    webhook → sync). Usado pelo tick de refresh periódico. Falhas por item são engolidas."""
+    items = list_pluggy_item_ids(user_id)
+    triggered = 0
+    for item_id in items:
+        try:
+            update_pluggy_item(item_id)
+            triggered += 1
+        except Exception:
+            pass
+    return {"triggered": triggered, "total": len(items)}
 
 
 def sync_pluggy_user(user_id: int) -> dict:

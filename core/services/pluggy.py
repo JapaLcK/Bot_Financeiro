@@ -85,6 +85,20 @@ def get_pluggy_item(item_id: str, api_key: str | None = None) -> dict:
     return _pluggy_get(f"/items/{item_id}", key)
 
 
+def update_pluggy_item(item_id: str, api_key: str | None = None) -> dict:
+    """PATCH /items/{id}: força a Pluggy a re-buscar do banco. Ao concluir, ela manda
+    webhook (item/updated, transactions/*), que dispara o sync. Usado no refresh periódico."""
+    key = api_key or create_pluggy_api_key()
+    with httpx.Client(timeout=_pluggy_timeout()) as client:
+        resp = client.patch(
+            f"{_pluggy_base_url()}/items/{item_id}",
+            headers={"X-API-KEY": key},
+            json={},
+        )
+    _raise_for_pluggy_response(resp, f"Falha ao atualizar item {item_id} na Pluggy")
+    return resp.json()
+
+
 def list_pluggy_accounts(item_id: str, api_key: str | None = None) -> list[dict]:
     key = api_key or create_pluggy_api_key()
     data = _pluggy_get("/accounts", key, params={"itemId": item_id})

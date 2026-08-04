@@ -280,6 +280,65 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
     }
 
 
+def count_open_finance_connections(user_id: int, provider: str = "pluggy") -> int:
+    """Quantos bancos o usuário tem conectados (default: só Pluggy reais). Pro gate por nº de bancos."""
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if provider:
+                cur.execute(
+                    "select count(*) as n from open_finance_connections where user_id=%s and provider=%s",
+                    (user_id, provider),
+                )
+            else:
+                cur.execute(
+                    "select count(*) as n from open_finance_connections where user_id=%s",
+                    (user_id,),
+                )
+            return cur.fetchone()["n"]
+
+
+def list_pluggy_item_ids(user_id: int | None = None) -> list[str]:
+    """Item ids Pluggy ativos (todos, ou de um usuário). Usado no refresh periódico."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if user_id is None:
+                cur.execute("select provider_item_id from open_finance_connections where provider='pluggy'")
+            else:
+                cur.execute(
+                    "select provider_item_id from open_finance_connections where provider='pluggy' and user_id=%s",
+                    (user_id,),
+                )
+            return [r["provider_item_id"] for r in cur.fetchall() if r["provider_item_id"]]
+
+
+def list_connections_needing_reconnect(user_id: int | None = None, within_days: int = 7) -> list[dict]:
+    """Conexões em erro OU com consentimento vencendo em `within_days` dias.
+
+    Base pra um aviso proativo de 'reconectar/renovar' (P1 #5/#6). Sem isso, o dado
+    para de atualizar em silêncio — pior que não ter dado.
+    """
+    sql = """
+        select id, user_id, provider_item_id, institution_name, status,
+               consent_expires_at, last_sync_at
+        from open_finance_connections
+        where provider = 'pluggy'
+          and (
+            upper(coalesce(status, '')) in ('ERROR', 'LOGIN_ERROR', 'OUTDATED', 'WAITING_USER_INPUT')
+            or (consent_expires_at is not null
+                and consent_expires_at <= now() + make_interval(days => %s))
+          )
+    """
+    params: list = [within_days]
+    if user_id is not None:
+        sql += " and user_id = %s"
+        params.append(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
+
+
 def save_pluggy_open_finance_item(user_id: int, item: dict) -> dict:
     ensure_user(user_id)
 
