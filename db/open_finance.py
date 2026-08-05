@@ -628,10 +628,12 @@ def save_open_finance_sync(connection_id: int, accounts: list[dict]) -> dict:
                     )
                     transaction_count += 1
 
+            # Fix (b): sync com sucesso (contas puxadas) já marca a conexão ATIVA —
+            # não depende do webhook item/updated pra sair de "Pendente".
             cur.execute(
                 """
                 update open_finance_connections
-                set last_sync_at=%s, updated_at=%s
+                set status='ACTIVE', last_sync_at=%s, updated_at=%s
                 where id=%s
                 """,
                 (now, now, connection_id),
