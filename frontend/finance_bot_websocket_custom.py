@@ -500,6 +500,17 @@ async def get_financial_data(
     account = account_rows[0] if account_rows else None
     launches_total = int(launches_total_rows[0]["total"] or 0) if launches_total_rows else 0
 
+    # Saldo dos bancos conectados (Open Finance) — pro saldo consolidado no dashboard.
+    # Só contas BANK (corrente/poupança); cartão é dívida, fica na fatura.
+    of_bank_rows = await _q(
+        "SELECT COALESCE(SUM(a.balance), 0) AS b "
+        "FROM open_finance_accounts a "
+        "JOIN open_finance_connections c ON c.id = a.connection_id "
+        "WHERE c.user_id = %s AND UPPER(a.type) = 'BANK'",
+        (user_id,),
+    )
+    of_bank_balance = float(of_bank_rows[0]["b"]) if of_bank_rows else 0.0
+
     # Reformat cards (era loop dentro do bloco de queries)
     cards = []
     for r in card_rows:
@@ -652,6 +663,7 @@ async def get_financial_data(
         "month":              m,
         "is_current_month":   is_current,
         "balance":            float(account["balance"]) if account else 0.0,
+        "of_bank_balance":    of_bank_balance,  # saldo das contas bancárias conectadas (OF)
         "pockets":            [dict(r) for r in pockets],
         "investments":        [dict(r) for r in investments],
         "market_rates":       market_rates,

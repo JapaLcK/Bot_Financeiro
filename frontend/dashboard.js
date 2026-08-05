@@ -8556,7 +8556,11 @@ function render(d) {
     ? !d.is_current_month
     : (ry !== NOW.getFullYear() || rm !== NOW.getMonth() + 1);
 
-  const pat = d.balance + ni + np;
+  // Saldo consolidado: carteira manual + saldos dos bancos conectados (Open Finance).
+  // Só no mês atual (o saldo do banco é "agora"); em mês histórico mostra só o manual.
+  const ofBank = hist ? 0 : Number(d.of_bank_balance || 0);
+  const saldoAtual = d.balance + ofBank;
+  const pat = saldoAtual + ni + np;
 
   const nPk = (d.pockets||[]).length;
   const nCc = (d.credit_cards||[]).length;
@@ -8649,7 +8653,7 @@ function render(d) {
       <div class="ov-stat" style="animation-delay:0ms">
         <div class="ov-ico">${svgWallet}</div>
         <div class="ov-lbl">Saldo atual${hist?' (do mês)':''}</div>
-        <div class="ov-val"><span data-num="balance" data-val="${d.balance}">${fmt(d.balance)}</span></div>
+        <div class="ov-val"><span data-num="balance" data-val="${saldoAtual}">${fmt(saldoAtual)}</span></div>
         <div class="ov-delta">Patrimônio total <b style="color:var(--text-2)"><span data-num="pat" data-val="${pat}">${fmt(pat)}</span></b></div>
       </div>
       <div class="ov-stat" style="animation-delay:60ms">
