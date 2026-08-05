@@ -97,7 +97,7 @@ def _handle_assinar(user_id: int, platform: str) -> str:
     b = lambda s: _bold(s, platform)
     return (
         f"🐷✨ Bora pro {b('PigBank+')}?\n\n"
-        f"Aqui ó, link pra assinar com {b('7 dias grátis')} (cancela quando quiser, sem cobrança no trial):\n"
+        f"Aqui ó, link pra assinar com {b('30 dias grátis')} (cancela quando quiser, sem cobrança no trial):\n"
         f"{link}\n\n"
         f"Esse link é só seu e expira em 1h."
     )
@@ -167,7 +167,7 @@ def _handle_plano(user_id: int, platform: str) -> str:
         next_label = "Renovação"
     else:
         status_label = {
-            "trialing": "Trial em andamento (7 dias grátis)",
+            "trialing": "Trial em andamento (30 dias grátis)",
             "active": "Ativo",
             "past_due": "Pagamento em atraso",
             "canceled": "Cancelado",

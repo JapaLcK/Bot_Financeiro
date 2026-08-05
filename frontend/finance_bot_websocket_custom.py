@@ -3198,7 +3198,8 @@ async def billing_create_checkout(
             cancel_url=f"{DASHBOARD_URL}/home?upgrade=cancelled",
             metadata={"finbot_user_id": str(user_id), "interval": interval},
             subscription_data={
-                "trial_period_days": 7,
+                # Duração do trial controlável por env (sem deploy): PRO_TRIAL_DAYS (default 30).
+                "trial_period_days": int(os.getenv("PRO_TRIAL_DAYS", "30")),
                 "metadata": {"finbot_user_id": str(user_id), "interval": interval},
             },
         )

@@ -756,7 +756,7 @@ def send_pro_welcome_email(to: str, trial_end_at, dashboard_url: str = "") -> bo
     cta = f'<p style="text-align:center;margin:24px 0"><a class="btn" href="{dash}/app">🐷 Abrir meu dashboard</a></p>'
     content = f"""
       <p>🐷✨ <strong>Tá dentro do PigBank+!</strong></p>
-      <p>Sua assinatura começou agora. Os <strong>7 dias grátis</strong> vão até <strong>{trial_end}</strong> —
+      <p>Sua assinatura começou agora. Os <strong>30 dias grátis</strong> vão até <strong>{trial_end}</strong> —
       só tem cobrança depois disso, e você pode cancelar quando quiser sem ser cobrado.</p>
       <p>Agora você desbloqueou:</p>
       <ul>
@@ -772,7 +772,7 @@ def send_pro_welcome_email(to: str, trial_end_at, dashboard_url: str = "") -> bo
     html = _base_html("Bem-vindo ao PigBank+", content)
     text = (
         f"PigBank+ ativado!\n\n"
-        f"Sua assinatura começou. 7 dias grátis até {trial_end} — só tem cobrança depois.\n\n"
+        f"Sua assinatura começou. 30 dias grátis até {trial_end} — só tem cobrança depois.\n\n"
         f"Abra o dashboard: {dash}/app\n"
         f"Pra cancelar antes: mande 'cancelar plano' no bot ou acesse {dash}/conta"
     )
