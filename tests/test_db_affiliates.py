@@ -137,14 +137,15 @@ def test_saque_minimo_e_ciclo_pagamento(user_id, referred_user_id):
     with pytest.raises(ValueError):
         request_payout(aff["id"])
 
-    # fatura anual de R$ 199 → +R$ 19,90; mais 30 mensais → passa de R$ 50
-    big = record_commission_for_invoice(referred_user_id, _inv(), 19900)
+    # Só a 1ª cobrança de CADA indicado gera comissão (regra atual) → um novo
+    # indicado com fatura grande passa do mínimo de saque.
+    ru2 = int(uuid.uuid4().int % 10_000_000_000)
+    ensure_user(ru2)
+    record_referral(aff["code"], ru2)
+    big = record_commission_for_invoice(ru2, _inv(), 100000)  # R$ 1000 → R$ 100
     _make_available(big["id"])
-    for _ in range(15):
-        ci = record_commission_for_invoice(referred_user_id, _inv(), 1990)
-        _make_available(ci["id"])
 
-    total_expected = 199 + 1990 + 15 * 199
+    total_expected = 199 + 10000
     assert total_expected >= MIN_PAYOUT_CENTS
 
     payout = request_payout(aff["id"], pix_key_enc=None)
@@ -194,8 +195,12 @@ def test_estorno_de_comissao(user_id, referred_user_id):
     assert stats["held_cents"] == 0
     assert stats["available_cents"] == 0
 
-    # comissão dentro de saque em andamento não estorna
-    big = record_commission_for_invoice(referred_user_id, _inv(), 100000)
+    # comissão dentro de saque em andamento não estorna (novo indicado — só a 1ª
+    # cobrança de cada indicado gera comissão)
+    ru2 = int(uuid.uuid4().int % 10_000_000_000)
+    ensure_user(ru2)
+    record_referral(aff["code"], ru2)
+    big = record_commission_for_invoice(ru2, _inv(), 100000)
     _make_available(big["id"])
     payout = request_payout(aff["id"])
     assert reverse_commission(big["id"]) is False

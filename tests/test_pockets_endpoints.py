@@ -9,7 +9,9 @@ Cobre:
 from __future__ import annotations
 
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+
+from utils_date import _tz
 from decimal import Decimal
 
 from cryptography.fernet import Fernet
@@ -255,7 +257,9 @@ def test_pocket_withdraw_applies_ir_iof_on_gain(user_id):
     _seed(user_id)
     db.pocket_deposit_from_account(user_id, "viagem", 1000, "aporte")
     pocket = db.list_pockets(user_id, accrue=False)[0]
-    opened_at = date.today() - timedelta(days=10)
+    # No fuso do app (o saque calcula age com criado_em em _tz()). Usar date.today()
+    # naive (UTC no CI) deixava o age off-by-one em certas horas → IOF errado.
+    opened_at = datetime.now(_tz()).date() - timedelta(days=10)
 
     with db.get_conn() as conn:
         with conn.cursor() as cur:

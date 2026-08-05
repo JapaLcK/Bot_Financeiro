@@ -85,6 +85,9 @@ def test_checkout_default_uses_monthly_price(user_id, monkeypatch):
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_ANUAL", "price_anual_xyz")
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO", "")
+    # Trial lido de PRO_TRIAL_DAYS em runtime (default do código = 30). Fixa pra
+    # o teste ficar deterministico independente do ambiente.
+    monkeypatch.setenv("PRO_TRIAL_DAYS", "7")
     fake = _patch_stripe(monkeypatch)
 
     resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
@@ -111,6 +114,9 @@ def test_checkout_annual_uses_annual_price(user_id, monkeypatch):
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_ANUAL", "price_anual_xyz")
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO", "")
+    # Trial lido de PRO_TRIAL_DAYS em runtime (default do código = 30). Fixa pra
+    # o teste ficar deterministico independente do ambiente.
+    monkeypatch.setenv("PRO_TRIAL_DAYS", "7")
     fake = _patch_stripe(monkeypatch)
 
     resp = client.post("/billing/create-checkout", json={"interval": "annual"}, headers=_CSRF_HEADERS)

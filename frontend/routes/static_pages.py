@@ -230,8 +230,11 @@ async def serve_suporte():
         for g in list_guides()
     )
     template = (FRONTEND_DIR / "suporte.html").read_text(encoding="utf-8")
+    # no-store igual às outras páginas HTML (html_file); /suporte montava a Response
+    # crua e ficava de fora do padrão.
     return Response(content=template.replace("{{FAQ}}", faq),
-                    media_type="text/html; charset=utf-8")
+                    media_type="text/html; charset=utf-8",
+                    headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
 
 
 @router.get("/robots.txt")

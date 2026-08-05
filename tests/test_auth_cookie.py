@@ -550,7 +550,8 @@ def test_sitemap_lists_public_pages_only():
     assert "<loc>https://pigbankai.com/precos</loc>" in response.text
     assert "<loc>https://pigbankai.com/suporte</loc>" in response.text
     assert "<loc>https://pigbankai.com/privacy</loc>" in response.text
-    assert "<loc>https://pigbankai.com/changelog</loc>" in response.text
+    # /changelog saiu do sitemap: virou Pro-only (static_pages.py) — não é mais público.
+    assert "<loc>https://pigbankai.com/changelog</loc>" not in response.text
     assert "/app" not in response.text
     assert "/settings" not in response.text
 
