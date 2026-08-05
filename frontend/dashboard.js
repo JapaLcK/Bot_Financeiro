@@ -8074,6 +8074,67 @@ function closePayBillModal() {
   document.getElementById("pay-bill-overlay").classList.remove("open");
 }
 
+// ══ Ajustar Carteira (dinheiro fora de banco conectado — Open Finance) ══════
+// A "Carteira" é o saldo manual (accounts.balance): dinheiro em espécie + contas
+// não conectadas. O saldo dos bancos conectados vem do Open Finance e é somado
+// à parte. Ao conectar o 1º banco o usuário zera aqui o que era controle manual
+// daquele banco, senão o mesmo dinheiro conta 2x. Reusa POST /adjust-balance
+// (cria um launch de ajuste, mantendo rastreabilidade no histórico).
+let _adjustWalletState = { banks: 0, submitting: false };
+
+function _updateAdjustWalletTotal() {
+  const v = parseFloat(document.getElementById("adjust-wallet-input").value);
+  const carteira = isNaN(v) ? 0 : v;
+  document.getElementById("adjust-wallet-total").textContent = _fmtBRL(carteira + _adjustWalletState.banks);
+}
+
+function openAdjustWalletModal() {
+  const d = lastData || {};
+  const banks = Number(d.of_bank_balance || 0);
+  const carteira = Number(d.balance || 0);
+  _adjustWalletState = { banks, submitting: false };
+  document.getElementById("adjust-wallet-banks").textContent = _fmtBRL(banks);
+  const inp = document.getElementById("adjust-wallet-input");
+  inp.value = carteira.toFixed(2);
+  document.getElementById("adjust-wallet-error").textContent = "";
+  document.getElementById("adjust-wallet-overlay").classList.add("open");
+  inp.oninput = _updateAdjustWalletTotal;
+  _updateAdjustWalletTotal();
+  setTimeout(() => { inp.focus(); inp.select(); }, 50);
+}
+
+function closeAdjustWalletModal() {
+  document.getElementById("adjust-wallet-overlay").classList.remove("open");
+}
+
+async function submitAdjustWallet() {
+  if (_adjustWalletState.submitting) return;
+  const errEl = document.getElementById("adjust-wallet-error");
+  errEl.textContent = "";
+  const v = parseFloat(document.getElementById("adjust-wallet-input").value);
+  if (isNaN(v) || v < 0) { errEl.textContent = "Digite um valor válido (zero ou positivo)."; return; }
+  const btn = document.getElementById("adjust-wallet-submit");
+  _adjustWalletState.submitting = true;
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`${API}/account/${USER_ID}/adjust-balance`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ target_balance: v }),
+    });
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    closeAdjustWalletModal();
+    showToast("✓ Carteira ajustada");
+    sendRefresh();
+  } catch (err) {
+    errEl.textContent = String(err.message || err);
+  } finally {
+    _adjustWalletState.submitting = false;
+    btn.disabled = false;
+  }
+}
+
 async function submitPayBill() {
   if (payBillState.submitting) return;
   hidePayBillError();
@@ -8556,10 +8617,16 @@ function render(d) {
     ? !d.is_current_month
     : (ry !== NOW.getFullYear() || rm !== NOW.getMonth() + 1);
 
-  // Saldo consolidado: carteira manual + saldos dos bancos conectados (Open Finance).
-  // Só no mês atual (o saldo do banco é "agora"); em mês histórico mostra só o manual.
+  // Saldo consolidado: Carteira (dinheiro FORA de banco conectado — espécie, contas
+  // não conectadas) + saldos dos bancos conectados (Open Finance). Só no mês atual
+  // (o saldo do banco é "agora"); em mês histórico mostra só a Carteira manual.
+  // `d.balance` é a Carteira: ao conectar um banco, o usuário zera aqui o que era
+  // controle manual daquele banco (senão conta o mesmo dinheiro 2x). Ver "Ajustar carteira".
+  const ofBankCount = Number(d.of_bank_count || 0);
+  const hasBanks = !hist && ofBankCount > 0;
   const ofBank = hist ? 0 : Number(d.of_bank_balance || 0);
-  const saldoAtual = d.balance + ofBank;
+  const carteira = Number(d.balance || 0);
+  const saldoAtual = carteira + ofBank;
   const pat = saldoAtual + ni + np;
 
   const nPk = (d.pockets||[]).length;
@@ -8654,7 +8721,10 @@ function render(d) {
         <div class="ov-ico">${svgWallet}</div>
         <div class="ov-lbl">Saldo atual${hist?' (do mês)':''}</div>
         <div class="ov-val"><span data-num="balance" data-val="${saldoAtual}">${fmt(saldoAtual)}</span></div>
-        <div class="ov-delta">Patrimônio total <b style="color:var(--text-2)"><span data-num="pat" data-val="${pat}">${fmt(pat)}</span></b></div>
+        ${hasBanks
+          ? `<div class="ov-delta">👛 Carteira <b style="color:var(--text-2)">${fmt(carteira)}</b> · 🏦 Bancos <b style="color:var(--text-2)">${fmt(ofBank)}</b> · <button type="button" class="ov-adjust-lnk" onclick="openAdjustWalletModal()">ajustar</button></div>
+             <div class="ov-delta" style="opacity:.8">Patrimônio total <b style="color:var(--text-2)"><span data-num="pat" data-val="${pat}">${fmt(pat)}</span></b></div>`
+          : `<div class="ov-delta">Patrimônio total <b style="color:var(--text-2)"><span data-num="pat" data-val="${pat}">${fmt(pat)}</span></b></div>`}
       </div>
       <div class="ov-stat" style="animation-delay:60ms">
         <div class="ov-ico neon">${svgTrend}</div>

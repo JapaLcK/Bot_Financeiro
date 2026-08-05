@@ -25,7 +25,11 @@ from core.services.pluggy import (
     create_pluggy_connect_token,
 )
 from core.services.plan_service import is_pro
-from core.services.pluggy_sync import sync_pluggy_item, sync_pluggy_user
+from core.services.pluggy_sync import (
+    refresh_and_sync_pluggy_user,
+    sync_pluggy_item,
+    sync_pluggy_user,
+)
 from db import (
     count_open_finance_connections,
     create_mock_open_finance_connection,
@@ -198,6 +202,25 @@ async def open_finance_sync_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
     try:
         result = await asyncio.to_thread(sync_pluggy_user, user_id)
+    except PluggyConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PluggyApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
+    return json.loads(shared.jdump({"ok": True, "sync": result, **snapshot}))
+
+
+@router.post("/open-finance/{user_id}/refresh")
+async def open_finance_refresh_route(request: Request, user_id: int):
+    """Refresh manual (botão "Atualizar"): pede pra Pluggy re-buscar do banco
+    (PATCH /items), espera concluir e sincroniza — puxa transação nova, marca a
+    conexão ACTIVE e limpa "Pendente". Difere do /sync, que só relê o que a Pluggy
+    já tem sem forçar uma nova busca no banco.
+    """
+    shared.authorize_dashboard_access(request, user_id)
+    try:
+        result = await asyncio.to_thread(refresh_and_sync_pluggy_user, user_id)
     except PluggyConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except PluggyApiError as exc:

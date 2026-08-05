@@ -8,6 +8,7 @@ O trabalho aqui é bloqueante (httpx + DB); chame via asyncio.to_thread a partir
 
 from __future__ import annotations
 
+import time
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -16,6 +17,7 @@ from utils_date import _tz
 
 from core.services.pluggy import (
     create_pluggy_api_key,
+    get_pluggy_item,
     list_pluggy_accounts,
     list_pluggy_investments,
     list_pluggy_transactions,
@@ -182,4 +184,95 @@ def sync_pluggy_user(user_id: int) -> dict:
         "transactions_synced": sum(r.get("transactions_synced", 0) for r in results),
         "launches_imported": sum((r.get("imported") or {}).get("inserted", 0) for r in results),
         "results": results,
+    }
+
+
+# Status de item Pluggy que significam "ainda buscando no banco" — enquanto o item
+# está nesses estados, os dados novos ainda não chegaram, então esperamos antes de sync.
+_PLUGGY_ITEM_UPDATING = {"UPDATING", "CREATED", "WAITING_USER_ACTION"}
+
+
+def refresh_and_sync_pluggy_user(
+    user_id: int,
+    *,
+    wait_seconds: int | None = None,
+    poll_interval: float | None = None,
+) -> dict:
+    """Refresh sob demanda: pede pra Pluggy re-buscar do banco (PATCH /items),
+    espera a atualização concluir e então sincroniza. É o que o botão "Atualizar"
+    do Open Finance chama — puxa transação nova, marca a conexão ACTIVE e limpa
+    o status "Pendente".
+
+    Por que não é só sincronizar: sem webhook (ambiente de dev), o PATCH é
+    ASSÍNCRONO na Pluggy — ela re-busca do banco e só depois os dados novos ficam
+    disponíveis. Se sincronizássemos na hora, leríamos o snapshot antigo (a
+    transação que acabou de acontecer não estaria lá). Por isso esperamos o item
+    sair de UPDATING (com teto de `wait_seconds`) antes de sincronizar.
+
+    Em produção o webhook `transactions/updated` já dispara o sync sozinho; este
+    fluxo é o fallback manual e cobre o dev.
+
+    `wait_seconds` fica curto de propósito (teto abaixo do timeout do proxy) — se a
+    Pluggy demorar mais, sincronizamos o que já tem e devolvemos still_updating>0 pro
+    front pedir pra tocar "Atualizar" de novo. Configurável via OF_REFRESH_WAIT_SEC.
+    """
+    import os
+
+    if wait_seconds is None:
+        try:
+            wait_seconds = int(os.getenv("OF_REFRESH_WAIT_SEC", "18"))
+        except ValueError:
+            wait_seconds = 18
+    if poll_interval is None:
+        try:
+            poll_interval = float(os.getenv("OF_REFRESH_POLL_SEC", "2.5"))
+        except ValueError:
+            poll_interval = 2.5
+
+    snapshot = get_open_finance_snapshot(user_id)
+    items = [
+        c["provider_item_id"]
+        for c in snapshot.get("connections", [])
+        if (c.get("provider") == "pluggy" and c.get("provider_item_id"))
+    ]
+    if not items:
+        # Sem banco Pluggy (ex.: só conexão mock): nada a refrescar, só sincroniza.
+        result = sync_pluggy_user(user_id)
+        return {"ok": True, "refreshed": 0, "waited": False, "still_updating": 0, **result}
+
+    api_key = create_pluggy_api_key()
+
+    # 1. Dispara o refresh na Pluggy pra cada item (falha por item não trava o resto).
+    triggered = 0
+    for item_id in items:
+        try:
+            update_pluggy_item(item_id, api_key)
+            triggered += 1
+        except Exception:
+            pass
+
+    # 2. Espera os itens saírem de UPDATING (Pluggy terminou de re-buscar do banco).
+    #    time.sleep aqui é ok: a rota chama isto via asyncio.to_thread (fora do loop).
+    deadline = time.monotonic() + max(0, wait_seconds)
+    pending = set(items)
+    while pending and time.monotonic() < deadline:
+        time.sleep(poll_interval)
+        for item_id in list(pending):
+            try:
+                item = get_pluggy_item(item_id, api_key)
+            except Exception:
+                pending.discard(item_id)  # erro de leitura não trava o fluxo
+                continue
+            status = str(item.get("status") or "").upper()
+            if status not in _PLUGGY_ITEM_UPDATING:
+                pending.discard(item_id)
+
+    # 3. Sincroniza (idempotente): puxa contas/transações novas e marca ACTIVE.
+    result = sync_pluggy_user(user_id)
+    return {
+        "ok": True,
+        "refreshed": triggered,
+        "waited": True,
+        "still_updating": len(pending),
+        **result,
     }

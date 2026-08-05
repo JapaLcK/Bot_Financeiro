@@ -1224,7 +1224,7 @@ a { color: inherit; text-decoration: none; }
               <div class="card-title">Conexões ativas</div>
               <div class="card-sub">Bancos autorizados para este usuário</div>
             </div>
-            <button class="btn-sm" type="button" onclick="loadData()">↻ Atualizar</button>
+            <button class="btn-sm" type="button" id="of-refresh-btn" onclick="refreshOpenFinance()">↻ Atualizar</button>
           </div>
           <div class="card-body" style="padding-top:8px; padding-bottom:8px">
             <div id="connections-list">
@@ -2452,6 +2452,44 @@ async function loadData() {
     updateStats([], [], []);
     renderConnections([]); renderAccounts([]); renderTransactions([]);
     showToast(err.message || "Erro ao carregar dados", "error");
+  }
+}
+
+/* ── Refresh (botão "Atualizar") ─────────────────
+   Diferente do loadData (que só relê o snapshot): pede pra Pluggy re-buscar do
+   banco (PATCH /items), espera concluir e sincroniza — puxa transação nova, marca
+   a conexão ATIVA e limpa "Pendente". */
+async function refreshOpenFinance() {
+  if (!USER_ID) { showToast("Sessão inválida — faça login novamente", "error"); return; }
+  const btn = document.getElementById("of-refresh-btn");
+  const orig = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "↻ Atualizando…"; }
+  showToast("Buscando novidades no seu banco… pode levar alguns segundos.", "ok");
+  try {
+    const resp = await fetch(`${API}/open-finance/${USER_ID}/refresh`, authOptions({
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+    }));
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const data = await resp.json();
+    const c = data.connections  || [];
+    const a = data.accounts     || [];
+    const t = data.transactions || [];
+    updateStats(c, a, t);
+    renderConnections(c);
+    renderAccounts(a);
+    renderTransactions(t);
+    if (c.length > 0) setStep(3);
+    const sync = data.sync || {};
+    if (Number(sync.still_updating) > 0) {
+      showToast("O banco ainda está atualizando. Se faltar algo, toque em Atualizar de novo.", "error");
+    } else {
+      showToast("Tudo em dia! 🐷", "ok");
+    }
+  } catch (err) {
+    showToast(err.message || "Erro ao atualizar", "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = orig || "↻ Atualizar"; }
   }
 }
 

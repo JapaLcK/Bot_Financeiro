@@ -1163,6 +1163,36 @@
   </div>
 </div>
 
+<!-- ─── Ajustar Carteira (dinheiro fora de banco conectado — Open Finance) ── -->
+<div class="overlay" id="adjust-wallet-overlay" onclick="if(event.target===this) closeAdjustWalletModal()">
+  <div class="modal">
+    <h3>Ajustar carteira</h3>
+    <p class="msub">A <b>Carteira</b> é o dinheiro <b>fora</b> dos bancos conectados — espécie e contas que você não ligou no Open Finance. O saldo dos bancos conectados entra sozinho; não digite ele aqui.</p>
+
+    <div class="bill-balance-line">
+      <span class="lbl-k">🏦 Nos bancos conectados</span>
+      <span class="lbl-v" id="adjust-wallet-banks">R$ 0,00</span>
+    </div>
+
+    <div class="modal-row">
+      <label class="modal-label" for="adjust-wallet-input">👛 Carteira (dinheiro fora do banco)</label>
+      <input class="modal-inp" id="adjust-wallet-input" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0,00" />
+      <div style="font-size:.7rem;color:var(--text-3);margin-top:6px">Se você controlava esse banco manualmente aqui, zere: agora o saldo real vem do próprio banco.</div>
+    </div>
+    <div class="modal-error" id="adjust-wallet-error"></div>
+
+    <div class="bill-balance-line" style="margin-top:4px">
+      <span class="lbl-k">= Saldo total</span>
+      <span class="lbl-v" id="adjust-wallet-total">R$ 0,00</span>
+    </div>
+
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closeAdjustWalletModal()">Cancelar</button>
+      <button class="btn-save" type="button" id="adjust-wallet-submit" onclick="submitAdjustWallet()">Salvar</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="investment-detail-overlay">
   <div class="modal wide">
     <h3 id="investment-detail-title">Investimento</h3>

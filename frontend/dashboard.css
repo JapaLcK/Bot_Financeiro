@@ -1024,6 +1024,9 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
 .ov-val.pos { color:var(--green); } .ov-val.neg { color:var(--red); }
 .ov-delta { font-size:.74rem; font-weight:600; color:var(--text-3); font-variant-numeric:tabular-nums; }
 .ov-delta.up { color:var(--green); } .ov-delta.down { color:var(--red); }
+.ov-adjust-lnk { background:none; border:none; padding:0; cursor:pointer; font:inherit;
+  font-weight:700; color:var(--purple); text-decoration:underline; text-underline-offset:2px; }
+.ov-adjust-lnk:hover { color:var(--pink, var(--purple)); }
 
 .ov-section-lbl { font-size:.67rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
   color:var(--text-3); margin:4px 0 -8px 2px; }
