@@ -181,9 +181,17 @@ def create_email_verification(
 
 
 def confirm_email_verification(email: str, code: str) -> dict:
-    return _db_support.confirm_email_verification_impl(
+    result = _db_support.confirm_email_verification_impl(
         get_conn, get_or_create_canonical_user, create_link_code, email, code
     )
+    # Planos v2: ancora o trial de 30d no telefone do cadastro (idempotente,
+    # nunca levanta). Telefone que já usou trial herda o started_at original.
+    try:
+        from .plans import claim_trial_for_user
+        claim_trial_for_user(int(result["user_id"]))
+    except Exception:
+        pass
+    return result
 
 
 def attempt_whatsapp_phone_link(wa_id: str, current_user_id: int | None = None) -> dict:
@@ -200,9 +208,18 @@ def attempt_whatsapp_phone_link(wa_id: str, current_user_id: int | None = None) 
     )
 
     # Delega toda a lógica de match/merge ao db_support
-    return _db_support.attempt_whatsapp_phone_link_impl(
+    result = _db_support.attempt_whatsapp_phone_link_impl(
         get_conn, merge_users, wa_phone, wa_candidates, current_user_id
     )
+    # Planos v2: telefone confirmado no WhatsApp → ancora/reclama o trial
+    # (idempotente; conta que reusa número herda o trial já queimado).
+    try:
+        if (result or {}).get("status") in ("linked", "already_linked"):
+            from .plans import claim_trial_for_user
+            claim_trial_for_user(int(result.get("user_id") or current_user_id))
+    except Exception:
+        pass
+    return result
 
 
 def create_password_reset_token(email: str, minutes_valid: int = 30) -> str | None:

@@ -396,6 +396,12 @@ def add_from_entities(
     if valor <= 0:
         return "Não consegui identificar o valor. Tente: *gastei 50 no mercado*"
 
+    # Teto mensal de lançamentos do tier (Grátis no v2; no-op com v2 off).
+    # PlanLimitExceeded sobe pro handle_incoming, que responde com a mensagem
+    # amigável de upgrade — mesmo padrão das caixinhas/cartões.
+    from core.services.plan_service import check_can_create_launch
+    check_can_create_launch(user_id)
+
     alvo_clean = (alvo or "").strip()
     nota_clean = (nota or "").strip() or alvo_clean
 

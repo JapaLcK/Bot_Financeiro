@@ -127,8 +127,22 @@ WHATSAPP_NUMBER         = os.getenv("WHATSAPP_NUMBER", "")
 STRIPE_SECRET_KEY       = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET   = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PRICE_ID_PRO     = os.getenv("STRIPE_PRICE_ID_PRO", "")            # legacy: usado como fallback do mensal
-STRIPE_PRICE_ID_PRO_MENSAL = os.getenv("STRIPE_PRICE_ID_PRO_MENSAL", "")  # price_xxx Pro mensal (R$ 19,90)
-STRIPE_PRICE_ID_PRO_ANUAL  = os.getenv("STRIPE_PRICE_ID_PRO_ANUAL", "")   # price_xxx Pro anual  (R$ 199,00)
+STRIPE_PRICE_ID_PRO_MENSAL = os.getenv("STRIPE_PRICE_ID_PRO_MENSAL", "")  # price_xxx Plus mensal (R$ 19,90; nome legado "Pro")
+STRIPE_PRICE_ID_PRO_ANUAL  = os.getenv("STRIPE_PRICE_ID_PRO_ANUAL", "")   # price_xxx Plus anual  (R$ 199,00)
+# Planos v2 (escada): preços do tier Essencial (R$ ~14,90). Sem eles setados,
+# o checkout do Essencial responde 503 "não configurado" — inofensivo até o
+# Lucas criar os prices no Stripe.
+STRIPE_PRICE_ID_ESSENCIAL_MENSAL = os.getenv("STRIPE_PRICE_ID_ESSENCIAL_MENSAL", "")
+STRIPE_PRICE_ID_ESSENCIAL_ANUAL  = os.getenv("STRIPE_PRICE_ID_ESSENCIAL_ANUAL", "")
+
+
+def _stored_plan_for_price(price_id: str | None) -> str:
+    """Mapeia o price do Stripe → valor da coluna auth_accounts.plan.
+    'pro' é o valor LEGADO do tier Plus (R$ 19,90) — não renomear no banco.
+    Price desconhecido cai em 'pro' (comportamento histórico do webhook)."""
+    if price_id and price_id in (STRIPE_PRICE_ID_ESSENCIAL_MENSAL, STRIPE_PRICE_ID_ESSENCIAL_ANUAL):
+        return "essencial"
+    return "pro"
 DASHBOARD_MAGIC_LINK_MINUTES = int(os.getenv("DASHBOARD_MAGIC_LINK_MINUTES", "5"))
 DASHBOARD_SESSION_HOURS = float(os.getenv("DASHBOARD_SESSION_HOURS", "12"))
 DB_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "5"))
@@ -1903,17 +1917,41 @@ async def _get_current_user(
     return user_id
 
 
+# Planos v2: tier mínimo de cada feature paga na escada. Hoje TODAS as features
+# gated são Essencial+ (o corte Plus é OF multi-banco/agentes, gated à parte).
+# "ai_chat" é especial: no v2 o Grátis tem cota mensal — checada via
+# ai_chat_allowed, não por tier.
+_FEATURE_MIN_TIER_V2 = {
+    "recurring_expenses": "essencial",
+    "ofx_import": "essencial",
+    "investments": "essencial",
+    "export": "essencial",
+    "custom_categories": "essencial",
+    "generic": "essencial",
+}
+
+
+def _plan_gate_ok(user_id: int, feature: str) -> bool:
+    from core.services.plan_service import (
+        plans_v2_enabled, is_pro, require_min_tier, ai_chat_allowed,
+    )
+    if not plans_v2_enabled():
+        return is_pro(user_id)
+    if feature == "ai_chat":
+        return ai_chat_allowed(user_id)
+    return require_min_tier(user_id, _FEATURE_MIN_TIER_V2.get(feature, "essencial"))
+
+
 def require_pro_feature(feature: str = "generic"):
     """
-    Dependency factory que valida JWT (via _get_current_user) e exige plano Pro.
-    Uso: `Depends(require_pro_feature("ofx_import"))` em rotas Pro-only.
+    Dependency factory que valida JWT (via _get_current_user) e exige o plano
+    mínimo da feature (v1: Pro binário; v2: tier da escada / cota de IA).
+    Uso: `Depends(require_pro_feature("ofx_import"))` em rotas pagas.
     Bloqueio retorna 403 com payload `{"error": "pro_required", "feature": ...}`
     para o frontend abrir modal de upgrade contextual.
     """
-    from core.services.plan_service import is_pro
-
     async def _dep(user_id: int = Depends(_get_current_user)) -> int:
-        if not is_pro(user_id):
+        if not _plan_gate_ok(user_id, feature):
             raise HTTPException(
                 status_code=403,
                 detail={"error": "pro_required", "feature": feature},
@@ -1928,9 +1966,7 @@ def _require_pro(user_id: int, feature: str) -> None:
     Variante inline pra endpoints que ja fazem _authorize_dashboard_access no body
     (em vez de Depends). Mesmo payload de 403 que require_pro_feature.
     """
-    from core.services.plan_service import is_pro
-
-    if not is_pro(user_id):
+    if not _plan_gate_ok(user_id, feature):
         raise HTTPException(
             status_code=403,
             detail={"error": "pro_required", "feature": feature},
@@ -2392,8 +2428,14 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     user_dict = dict(user)
     show_onboarding = await asyncio.to_thread(should_show_mfa_onboarding, user_id)
     mfa = await asyncio.to_thread(get_mfa_status, user_id)
-    from core.services.plan_service import has_app_access, paywall_enabled
+    from core.services.plan_service import (
+        has_app_access, paywall_enabled, plans_v2_enabled,
+        get_plan_tier, get_trial_status,
+    )
     of_ui_enabled = _open_finance_ui_enabled(user_id, user_dict.get("email"))
+    # Planos v2: tier efetivo da escada + estado do trial (30d sem cartão).
+    plan_tier = await asyncio.to_thread(get_plan_tier, user_id)
+    trial = await asyncio.to_thread(get_trial_status, user_id, user_dict)
     return {
         "user_id": user_id,
         **user_dict,
@@ -2401,6 +2443,9 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         "mfa_enabled": bool(mfa.get("enabled")),
         "app_access": has_app_access(user_id),
         "paywall_enabled": paywall_enabled(),
+        "plans_v2_enabled": plans_v2_enabled(),
+        "plan_tier": plan_tier,
+        "trial": {"active": trial["active"], "days_left": trial["days_left"]},
         "of_ui_enabled": of_ui_enabled,
     }
 
@@ -3161,19 +3206,39 @@ async def auth_google_complete_signup(
 
 class CreateCheckoutBody(BaseModel):
     interval: str = "monthly"  # "monthly" | "annual"
+    plan: str = "plus"         # "essencial" | "plus" (default = Plus, o plano histórico)
 
 
-def _resolve_pro_price_id(interval: str) -> str:
-    """Mapeia interval -> price ID configurado nas env vars.
+def _resolve_price_id(plan: str, interval: str) -> str:
+    """Mapeia (plan, interval) -> price ID configurado nas env vars.
 
-    Mensal aceita fallback pro `STRIPE_PRICE_ID_PRO` legado pra não quebrar
-    deploys que ainda não migraram. Anual exige a env var nova.
+    Plus mensal aceita fallback pro `STRIPE_PRICE_ID_PRO` legado pra não
+    quebrar deploys que ainda não migraram. Anual exige a env var nova.
     """
+    if plan == "essencial":
+        if interval == "monthly":
+            return STRIPE_PRICE_ID_ESSENCIAL_MENSAL
+        if interval == "annual":
+            return STRIPE_PRICE_ID_ESSENCIAL_ANUAL
+        return ""
     if interval == "monthly":
         return STRIPE_PRICE_ID_PRO_MENSAL or STRIPE_PRICE_ID_PRO
     if interval == "annual":
         return STRIPE_PRICE_ID_PRO_ANUAL
     return ""
+
+
+@app.get("/billing/plans-config")
+async def billing_plans_config():
+    """Config pública da página de planos (sem auth): a /precos usa isto pra
+    decidir se mostra a escada v2 (Grátis/Essencial/Plus/Pro) ou o layout
+    legado de plano único. Flag off = página atual intacta."""
+    from core.services.plan_service import plans_v2_enabled, trial_days_total
+    return {
+        "plans_v2_enabled": plans_v2_enabled(),
+        "essencial_available": bool(STRIPE_PRICE_ID_ESSENCIAL_MENSAL),
+        "trial_days": trial_days_total(),
+    }
 
 
 @app.post("/billing/create-checkout")
@@ -3189,8 +3254,11 @@ async def billing_create_checkout(
     interval = (payload.interval if payload else "monthly")
     if interval not in ("monthly", "annual"):
         raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
+    plan = ((payload.plan if payload else "plus") or "plus").lower()
+    if plan not in ("essencial", "plus"):
+        raise HTTPException(status_code=400, detail="plan inválido (use 'essencial' ou 'plus').")
 
-    price_id = _resolve_pro_price_id(interval)
+    price_id = _resolve_price_id(plan, interval)
     if not STRIPE_SECRET_KEY or not price_id:
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
@@ -3215,7 +3283,25 @@ async def billing_create_checkout(
         set_stripe_customer(user_id, c.id)
         return c.id
 
+    # Trial no checkout:
+    # v2 ON — REGRA FECHADA: o contador é um só (30d por telefone, na vida).
+    #   Assinar DURANTE o trial aproveita só os dias restantes (senão ninguém
+    #   assina antes do fim); trial queimado/expirado = cobrança imediata.
+    # v2 OFF — comportamento legado: PRO_TRIAL_DAYS fixo (default 30).
+    from core.services.plan_service import plans_v2_enabled, get_trial_status
+    if plans_v2_enabled():
+        trial_days = int(get_trial_status(user_id)["days_left"])
+    else:
+        trial_days = int(os.getenv("PRO_TRIAL_DAYS", "30"))
+
     def _new_session(cust_id: str):
+        subscription_data = {
+            "metadata": {"finbot_user_id": str(user_id), "interval": interval, "plan": plan},
+        }
+        # Stripe exige trial_period_days >= 1; com 0 dias restantes, omitir a
+        # chave = cobrança imediata.
+        if trial_days > 0:
+            subscription_data["trial_period_days"] = trial_days
         return stripe.checkout.Session.create(
             customer=cust_id,
             payment_method_types=["card"],
@@ -3227,12 +3313,8 @@ async def billing_create_checkout(
             allow_promotion_codes=True,
             success_url=f"{DASHBOARD_URL}/home?upgrade=success",
             cancel_url=f"{DASHBOARD_URL}/home?upgrade=cancelled",
-            metadata={"finbot_user_id": str(user_id), "interval": interval},
-            subscription_data={
-                # Duração do trial controlável por env (sem deploy): PRO_TRIAL_DAYS (default 30).
-                "trial_period_days": int(os.getenv("PRO_TRIAL_DAYS", "30")),
-                "metadata": {"finbot_user_id": str(user_id), "interval": interval},
-            },
+            metadata={"finbot_user_id": str(user_id), "interval": interval, "plan": plan},
+            subscription_data=subscription_data,
         )
 
     # Recupera ou cria o customer no Stripe
@@ -3253,7 +3335,7 @@ async def billing_create_checkout(
         logging.getLogger(__name__).error("billing_checkout_stripe_error: %s", exc)
         raise HTTPException(status_code=502, detail=f"Erro no Stripe ao iniciar o checkout: {exc}")
 
-    return {"checkout_url": session.url, "interval": interval}
+    return {"checkout_url": session.url, "interval": interval, "plan": plan}
 
 
 @app.post("/billing/webhook")
@@ -3326,6 +3408,16 @@ async def billing_webhook(request: Request):
             return None
         return datetime.fromtimestamp(ts, tz=timezone.utc)
 
+    def _subscription_price_id(sub) -> str | None:
+        """Price da assinatura (primeiro item). SDK v8 não é dict — só _g."""
+        items_obj = _g(sub, "items", {})
+        data = _g(items_obj, "data", []) or []
+        if not data:
+            return None
+        price = _g(data[0], "price", {})
+        pid = _g(price, "id")
+        return pid if isinstance(pid, str) else None
+
     def _invoice_subscription_id(invoice) -> str | None:
         sub_id = _g(invoice, "subscription")
         if sub_id:
@@ -3366,16 +3458,17 @@ async def billing_webhook(request: Request):
             sub = stripe.Subscription.retrieve(sub_id)
             expires_dt = _subscription_period_end(sub)
             sub_status = _g(sub, "status") or "trialing"
-            update_user_plan(user_id, "pro", expires_dt)
+            plan_value = _stored_plan_for_price(_subscription_price_id(sub))
+            update_user_plan(user_id, plan_value, expires_dt)
             set_payment_status(user_id, sub_status)
             await log_system_event(
                 "info",
                 "billing_checkout_completed",
-                f"Checkout concluido; plano pro ate {expires_dt.date() if expires_dt else 'sem data'}.",
+                f"Checkout concluido; plano {plan_value} ate {expires_dt.date() if expires_dt else 'sem data'}.",
                 source="billing",
                 user_id=user_id,
                 details={
-                    "plan": "pro",
+                    "plan": plan_value,
                     "expires_at": expires_dt.isoformat() if expires_dt else None,
                     "status": sub_status,
                 },
@@ -3414,16 +3507,17 @@ async def billing_webhook(request: Request):
             sub = stripe.Subscription.retrieve(sub_id)
             expires_dt = _subscription_period_end(sub)
             sub_status = _g(sub, "status") or "active"
-            update_user_plan(user_id, "pro", expires_dt)
+            plan_value = _stored_plan_for_price(_subscription_price_id(sub))
+            update_user_plan(user_id, plan_value, expires_dt)
             set_payment_status(user_id, sub_status)
-            print(f"[billing] user {user_id} → pro até {expires_dt.date() if expires_dt else 'sem data'}")
+            print(f"[billing] user {user_id} → {plan_value} até {expires_dt.date() if expires_dt else 'sem data'}")
             await log_system_event(
                 "info",
                 "billing_plan_updated",
-                "Plano do usuario atualizado para pro.",
+                f"Plano do usuario atualizado para {plan_value}.",
                 source="billing",
                 user_id=user_id,
-                details={"plan": "pro", "expires_at": expires_dt.isoformat() if expires_dt else None, "status": sub_status},
+                details={"plan": plan_value, "expires_at": expires_dt.isoformat() if expires_dt else None, "status": sub_status},
             )
             # Email de confirmacao de cobranca (item 39) — so quando valor > 0
             # (invoices do trial vem com amount_paid=0 e nao precisam de notificacao).
@@ -3611,16 +3705,18 @@ async def ai_chat(
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from core.services.ai_chat import chat as ai_chat_run
+    from core.services.plan_service import ai_monthly_limit_for
 
+    monthly_limit = await asyncio.to_thread(ai_monthly_limit_for, user_id)
     reply = await asyncio.to_thread(
         ai_chat_run,
         user_id,
         text,
-        monthly_limit=AI_CHAT_MONTHLY_LIMIT,
+        monthly_limit=monthly_limit,
         platform="dashboard",
     )
     used_after = await asyncio.to_thread(_db_ai_usage, user_id)
-    return {"reply": reply, "usage": {"used": used_after, "limit": AI_CHAT_MONTHLY_LIMIT}}
+    return {"reply": reply, "usage": {"used": used_after, "limit": monthly_limit}}
 
 
 @app.get("/ai/messages")
@@ -3655,7 +3751,9 @@ async def ai_messages(
             "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
         })
     used_after = await asyncio.to_thread(_db_ai_usage, user_id)
-    return {"messages": out, "usage": {"used": used_after, "limit": AI_CHAT_MONTHLY_LIMIT}}
+    from core.services.plan_service import ai_monthly_limit_for
+    monthly_limit = await asyncio.to_thread(ai_monthly_limit_for, user_id)
+    return {"messages": out, "usage": {"used": used_after, "limit": monthly_limit}}
 
 
 def _db_ai_usage(user_id: int) -> int:
@@ -3896,12 +3994,14 @@ async def monthly_history(request: Request, user_id: int, months: int = 6):
     _authorize_dashboard_access(request, user_id)
     if not 1 <= months <= 24:
         raise HTTPException(status_code=400, detail="months must be 1-24")
-    # Free: limita janela ao history_days do plano (~1 mes). Nao retorna 403 pra
-    # nao quebrar dashboard — apenas capa silenciosamente. Frontend pode ler o
-    # plano e mostrar CTA "ver mais com Pro".
-    from core.services.plan_service import is_pro
-    if months > 1 and not is_pro(user_id):
-        months = 1
+    # Limita a janela ao history_days do plano (Grátis 1 mês, Essencial 3,
+    # Plus+ ilimitado; v1: Free 1 mês). Nao retorna 403 pra nao quebrar
+    # dashboard — apenas capa silenciosamente. Frontend pode ler o plano e
+    # mostrar CTA "ver mais" de upgrade.
+    from core.services.plan_service import history_months_cap
+    months_cap = history_months_cap(user_id)
+    if months_cap is not None and months > months_cap:
+        months = months_cap
     data = await get_monthly_history(user_id, months)
     return {"data": data}
 
@@ -3914,10 +4014,12 @@ async def daily_expenses_window(request: Request, user_id: int, days: int = 30):
     _authorize_dashboard_access(request, user_id)
     if days not in (7, 30, 90):
         raise HTTPException(status_code=400, detail="days must be 7, 30 or 90")
-    from core.services.plan_service import is_pro
+    from core.services.plan_service import history_days_cap
     effective = days
-    if days > 31 and not is_pro(user_id):
-        effective = 31
+    days_cap = history_days_cap(user_id)
+    if days_cap is not None:
+        # +1 preserva o comportamento antigo do Free (janela de 30d cabe em 31).
+        effective = min(days, days_cap + 1)
     data = await get_daily_expenses_window(user_id, effective)
     return {"data": data, "days": days, "effective_days": effective}
 
@@ -3945,7 +4047,18 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from core.services.category_service import infer_category, learn_from_inference
+    from core.services.plan_limits import PlanLimitExceeded
+    from core.services.plan_service import check_can_create_launch
     from utils_text import is_internal_category, canonicalize_category_label
+
+    # Teto mensal de lançamentos do tier (Grátis no v2; no-op com v2 off).
+    try:
+        await asyncio.to_thread(check_can_create_launch, user_id)
+    except PlanLimitExceeded as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "plan_limit", "feature": exc.feature, "message": exc.message},
+        )
 
     tipo = (payload.tipo or "").strip().lower()
     if tipo not in ("receita", "despesa", "credito"):

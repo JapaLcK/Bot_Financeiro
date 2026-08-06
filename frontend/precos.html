@@ -46,7 +46,7 @@
         <p id="precos-sub">30 dias grátis pra testar. Cancele quando quiser, sem letras miúdas.</p>
       </div>
 
-      <div class="plans">
+      <div class="plans" id="plans-v1">
         <article class="plan">
           <h3>Mensal</h3>
           <div class="plan-sub">Pra começar sem compromisso</div>
@@ -77,7 +77,72 @@
         </article>
       </div>
 
-      <p class="plans-note">🎉 30 dias grátis com cartão; a primeira cobrança só acontece depois do trial. Cancele quando quiser pelo dashboard antes do fim do trial, sem ser cobrado. Pagamentos processados pela Stripe — a PigBank nunca vê os dados do seu cartão.</p>
+      <!-- Escada v2 (Grátis/Essencial/Plus/Pro) — escondida até o backend ligar
+           PLANS_V2_ENABLED (ver /billing/plans-config). Sem classes CSS novas
+           de propósito: reusa .plan/.price/.plan-badge + estilos inline. -->
+      <div class="plans" id="plans-v2" style="display:none">
+        <article class="plan">
+          <h3>Grátis</h3>
+          <div class="plan-sub">Pra conhecer a Piggy</div>
+          <div class="price">R$ 0 <span>/ sempre</span></div>
+          <ul>
+            <li><span class="tick">✓</span> Registro por texto no WhatsApp</li>
+            <li><span class="tick">✓</span> Dashboard completo</li>
+            <li><span class="tick">✓</span> 50 lançamentos/mês · histórico de 1 mês</li>
+            <li><span class="tick">✓</span> 1 caixinha e 1 cartão</li>
+            <li><span class="tick">✓</span> Xerife de olho em gastos fora do padrão</li>
+          </ul>
+          <a class="btn btn-outline btn-block" href="/cadastro">Criar conta grátis</a>
+        </article>
+
+        <article class="plan">
+          <h3>Essencial</h3>
+          <div class="plan-sub">O manual completo, sem limites</div>
+          <div class="price">R$ 14,90 <span>/ mês</span></div>
+          <ul>
+            <li><span class="tick">✓</span> Lançamentos ilimitados · histórico de 3 meses</li>
+            <li><span class="tick">✓</span> Áudio, foto de cupom e importação OFX</li>
+            <li><span class="tick">✓</span> Caixinhas, metas e cartões ilimitados</li>
+            <li><span class="tick">✓</span> Agenda de boletos + "cabe no meu caixa?"</li>
+            <li><span class="tick">✓</span> 1 banco conectado (Open Finance)</li>
+          </ul>
+          <button class="btn btn-outline btn-block" type="button" onclick="startCheckout('monthly', this, 'essencial')">Assinar Essencial</button>
+        </article>
+
+        <article class="plan featured">
+          <span class="plan-badge">Mais completo</span>
+          <h3>Plus</h3>
+          <div class="plan-sub">Modo automático — ou R$ 199/ano (2 meses grátis)</div>
+          <div class="price">R$ 19,90 <span>/ mês</span></div>
+          <ul>
+            <li><span class="tick">✓</span> Tudo do Essencial, sem cotas</li>
+            <li><span class="tick">✓</span> Até 5 bancos conectados (Open Finance)</li>
+            <li><span class="tick">✓</span> Histórico ilimitado</li>
+            <li><span class="tick">✓</span> Todos os agentes da Piggy</li>
+            <li><span class="tick">✓</span> Piggy IA sem limites + exportar CSV/PDF</li>
+          </ul>
+          <button class="btn btn-primary btn-block" type="button" onclick="startCheckout('monthly', this, 'plus')">Assinar Plus</button>
+          <button class="btn btn-outline btn-block" type="button" style="margin-top:8px" onclick="startCheckout('annual', this, 'plus')">Plus anual — R$ 199</button>
+        </article>
+
+        <article class="plan" style="opacity:.65">
+          <span class="plan-badge" style="background:rgba(255,255,255,.12)">Em breve</span>
+          <h3>Pro</h3>
+          <div class="plan-sub">Pra quem quer o copiloto completo</div>
+          <div class="price">R$ 39,90 <span>/ mês</span></div>
+          <ul>
+            <li><span class="tick">✓</span> Modo família — carteira compartilhada</li>
+            <li><span class="tick">✓</span> Score de saúde financeira mensal</li>
+            <li><span class="tick">✓</span> Agentes sob medida + config fina</li>
+            <li><span class="tick">✓</span> Acesso antecipado às novidades</li>
+            <li><span class="tick">✓</span> Suporte prioritário</li>
+          </ul>
+          <button class="btn btn-outline btn-block" type="button" disabled>Em breve</button>
+        </article>
+      </div>
+
+      <p class="plans-note" id="plans-note-v1">🎉 30 dias grátis com cartão; a primeira cobrança só acontece depois do trial. Cancele quando quiser pelo dashboard antes do fim do trial, sem ser cobrado. Pagamentos processados pela Stripe — a PigBank nunca vê os dados do seu cartão.</p>
+      <p class="plans-note" id="plans-note-v2" style="display:none">🎉 Todo cadastro começa com <strong>30 dias de Plus grátis, sem cartão</strong>. Assine durante o teste e não pague nada até ele acabar. Pagamentos processados pela Stripe — a PigBank nunca vê os dados do seu cartão.</p>
     </section>
 
   </div>
@@ -139,18 +204,43 @@ function getCsrfToken() {
   if (s) s.textContent = "Sua conta está pronta. Escolha um plano (30 dias grátis, cancela quando quiser) pra liberar o app.";
 })();
 
-async function startCheckout(interval, btn) {
+// Escada v2: mostra os cards Grátis/Essencial/Plus/Pro quando o backend liga
+// PLANS_V2_ENABLED. Sem o flag (ou com erro), a página fica como sempre foi.
+(async function loadPlansMode(){
+  try {
+    const resp = await fetch("/billing/plans-config", { credentials: "same-origin" });
+    if (!resp.ok) return;
+    const cfg = await resp.json();
+    if (!cfg.plans_v2_enabled) return;
+    const v1 = document.getElementById("plans-v1");
+    const v2 = document.getElementById("plans-v2");
+    const n1 = document.getElementById("plans-note-v1");
+    const n2 = document.getElementById("plans-note-v2");
+    if (v1) v1.style.display = "none";
+    if (v2) v2.style.display = "";
+    if (n1) n1.style.display = "none";
+    if (n2) n2.style.display = "";
+    const t = document.getElementById("precos-title");
+    const s = document.getElementById("precos-sub");
+    if (t) t.innerHTML = 'Escolha seu <span class="grad">PigBank</span>';
+    if (s) s.textContent = "30 dias de Plus grátis pra testar, sem cartão. Depois, o plano do seu tamanho.";
+  } catch {}
+})();
+
+async function startCheckout(interval, btn, plan) {
   if (btn.classList.contains("loading")) return;
   const originalText = btn.textContent;
   btn.classList.add("loading");
   btn.textContent = "Carregando…";
+  const payload = { interval };
+  if (plan) payload.plan = plan;
 
   try {
     let resp = await fetch("/billing/create-checkout", {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json", "x-csrf-token": getCsrfToken() },
-      body: JSON.stringify({ interval }),
+      body: JSON.stringify(payload),
     });
 
     if (resp.status === 401) {
@@ -165,7 +255,7 @@ async function startCheckout(interval, btn) {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json", "x-csrf-token": getCsrfToken() },
-        body: JSON.stringify({ interval }),
+        body: JSON.stringify(payload),
       });
     }
 

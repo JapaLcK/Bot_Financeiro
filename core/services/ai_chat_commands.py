@@ -24,7 +24,7 @@ import os
 import unicodedata
 
 import db
-from core.services.plan_service import is_pro
+from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
 
 logger = logging.getLogger(__name__)
 
@@ -98,11 +98,13 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
 
     has_pending = bool(pending)
 
-    # 2. Plano determina o roteamento default.
+    # 2. Plano determina o roteamento default. v1: só Pro fala com a IA.
+    # v2: todo tier tem IA — a cota mensal do tier é quem barra (ai_chat_allowed
+    # devolve False com a cota estourada e o user cai na mensagem de upgrade).
     try:
-        user_is_pro = is_pro(user_id)
+        user_is_pro = ai_chat_allowed(user_id)
     except Exception as exc:
-        logger.warning("is_pro falhou: %s", exc)
+        logger.warning("ai_chat_allowed falhou: %s", exc)
         user_is_pro = False
 
     user_message: str | None = None
@@ -156,27 +158,36 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
             return None
         # Cai no gate Pro abaixo (mesmo se for só "piggy" puro).
 
-    # 3. Free → mensagem de upgrade.
+    # 3. Sem acesso à IA → mensagem de upgrade (ou cota estourada, no v2).
     if not user_is_pro:
         if has_pending:
-            # Edge case: tinha pending e o user virou Free no meio. Limpa
+            # Edge case: tinha pending e o user perdeu o acesso no meio. Limpa
             # pra não deixar o estado preso.
             try:
                 db.ai_clear_pending_action(user_id)
             except Exception:
                 pass
+        try:
+            from core.services.plan_service import plans_v2_enabled, get_user_limits
+            if plans_v2_enabled() and get_user_limits(user_id)["ai_conversational_enabled"]:
+                return (
+                    "🐷 Suas mensagens com a Piggy deste mês acabaram!\n"
+                    "Nos planos pagos a conversa continua: https://pigbankai.com/precos"
+                )
+        except Exception:
+            pass
         return (
             "🐷 Conversar com a IA é um recurso do PigBank+.\n"
             "Dá uma olhada nos planos: https://pigbankai.com/precos"
         )
 
-    # 4. Pro: roteia pra IA.
+    # 4. Tem acesso: roteia pra IA (cota do tier).
     from core.services.ai_chat import chat as ai_chat_run
     try:
         return ai_chat_run(
             user_id,
             user_message,
-            monthly_limit=AI_CHAT_MONTHLY_LIMIT,
+            monthly_limit=ai_monthly_limit_for(user_id),
             platform=platform,
         )
     except Exception as exc:
