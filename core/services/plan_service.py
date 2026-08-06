@@ -1,41 +1,136 @@
 """
-Helpers de plano (Free vs Pro). Lê o estado canônico de auth_accounts via
-db.get_auth_user e expõe checagens simples para o resto do app.
+Helpers de plano. Lê o estado canônico de auth_accounts via db.get_auth_user e
+expõe checagens simples para o resto do app.
+
+Dois mundos atrás do flag PLANS_V2_ENABLED (lido dinâmico, sem redeploy):
+
+  • OFF (default, produção atual): binário Free × Pro + paywall obrigatório
+    (PAYWALL_ENABLED). Comportamento 100% preservado.
+  • ON (escada v2): 4 tiers free < essencial < plus < pro. O valor 'pro' no
+    banco é ALIAS LEGADO do tier plus (R$ 19,90 — antigo "Pro", hoje "Plus");
+    o tier pro novo (R$ 39,90) usa o valor 'pro_max'. Grátis entra no app
+    (has_app_access sempre True) e os gates viram por-feature/por-tier.
+    Trial: 30 dias de Plus sem cartão, 1 por telefone na vida (db/plans.py);
+    durante o trial o usuário resolve pro tier plus (com OF capado a 1 banco
+    via get_user_limits).
 
 A FastAPI dependency `require_pro_feature` vive em
 frontend/finance_bot_websocket_custom.py para evitar import circular com
-_get_current_user — ela usa is_pro daqui.
+_get_current_user — ela usa os helpers daqui.
 """
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from db import get_auth_user
 
-from .plan_limits import PlanLimits, PlanLimitExceeded, limits_for
+from .plan_limits import (
+    PlanLimits,
+    PlanLimitExceeded,
+    limits_for,
+    limits_for_tier,
+    tier_at_least,
+)
+
+# Valores aceitos na coluna auth_accounts.plan e o tier v2 correspondente.
+_STORED_PLAN_TO_TIER = {
+    "free": "free",
+    "essencial": "essencial",
+    "pro": "plus",       # legado: assinante de R$ 19,90 (rebatizado Plus)
+    "plus": "plus",
+    "pro_max": "pro",    # tier novo de R$ 39,90 (ainda não vendido)
+}
+
+TRIAL_DAYS_DEFAULT = 30
 
 
-def is_pro(user_id: int) -> bool:
-    """
-    True se o usuário tem plano Pro ativo. Inclui usuários em trial (Stripe
-    deixa plan='pro' durante o trial; quando o pagamento falha o webhook
-    rebaixa para 'free').
+def plans_v2_enabled() -> bool:
+    """Escada de 4 tiers + trial sem cartão. Default: DESLIGADO (v1 intacta).
+    Liga setando PLANS_V2_ENABLED=true no ambiente — sem redeploy."""
+    return (os.getenv("PLANS_V2_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
 
-    Defensivo: se plan_expires_at já passou mas o webhook não rebaixou ainda
-    (evento perdido), trata como expirado.
-    """
-    user = get_auth_user(int(user_id))
-    if not user:
-        return False
-    plan = (user.get("plan") or "").lower()
-    if plan != "pro":
-        return False
+
+def trial_days_total() -> int:
+    try:
+        return int(os.getenv("PLANS_TRIAL_DAYS", str(TRIAL_DAYS_DEFAULT)))
+    except ValueError:
+        return TRIAL_DAYS_DEFAULT
+
+
+def _paid_plan_active(user: dict) -> bool:
+    """Assinatura paga (qualquer tier) vigente? Defensivo: se plan_expires_at
+    já passou mas o webhook não rebaixou ainda (evento perdido), trata como
+    expirado. plan_expires_at NULL = vitalício (grandfathered)."""
     expires_at = user.get("plan_expires_at")
     if expires_at is None:
         return True
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     return expires_at > datetime.now(timezone.utc)
+
+
+def get_trial_status(user_id: int, user: dict | None = None) -> dict:
+    """{"active": bool, "days_left": int, "started_at": datetime|None}.
+
+    Fonte: auth_accounts.trial_started_at (ancorado por telefone via
+    db.plans.claim_trial_for_user — 30 dias únicos por phone_hash, na vida;
+    cartão não zera nem estica)."""
+    started = None
+    if user is not None and "trial_started_at" in user:
+        started = user.get("trial_started_at")
+        if started is not None and started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+    else:
+        from db.plans import get_trial_started_at
+        started = get_trial_started_at(int(user_id))
+    if started is None:
+        return {"active": False, "days_left": 0, "started_at": None}
+    ends_at = started + timedelta(days=trial_days_total())
+    now = datetime.now(timezone.utc)
+    if ends_at <= now:
+        return {"active": False, "days_left": 0, "started_at": started}
+    remaining = ends_at - now
+    days_left = remaining.days + (1 if (remaining.seconds or remaining.microseconds) else 0)
+    return {"active": True, "days_left": days_left, "started_at": started}
+
+
+def get_plan_tier(user_id: int) -> str:
+    """Tier efetivo do usuário na escada v2: free | essencial | plus | pro.
+
+    Assinatura paga vigente manda; sem assinatura, trial ativo resolve pra
+    plus (a experiência do trial É o Plus); senão, free.
+    Com PLANS_V2_ENABLED off, colapsa no binário legado (pro→plus, resto free)
+    pra quem chamar isto cedo demais não ver nada diferente do is_pro."""
+    user = get_auth_user(int(user_id))
+    if not user:
+        return "free"
+    stored = (user.get("plan") or "").lower()
+    tier = _STORED_PLAN_TO_TIER.get(stored, "free")
+    if tier != "free" and _paid_plan_active(user):
+        return tier
+    if plans_v2_enabled():
+        trial = get_trial_status(user_id, user)
+        if trial["active"]:
+            return "plus"
+    return "free"
+
+
+def is_pro(user_id: int) -> bool:
+    """
+    True se o usuário tem o plano pago principal ativo (Plus, ex-"Pro" — inclui
+    trial do Stripe e, no v2, o trial de 30d sem cartão e o tier pro acima).
+
+    Semântica preservada pros 27 call sites: "posso usar as features pagas?".
+    """
+    if plans_v2_enabled():
+        return tier_at_least(get_plan_tier(int(user_id)), "plus")
+    user = get_auth_user(int(user_id))
+    if not user:
+        return False
+    plan = (user.get("plan") or "").lower()
+    if plan != "pro":
+        return False
+    return _paid_plan_active(user)
 
 
 # user_ids sempre liberados (admin/teste), mesmo sem assinatura.
@@ -50,9 +145,14 @@ def paywall_enabled() -> bool:
 
 
 def has_app_access(user_id: int) -> bool:
-    """True se o usuário pode entrar no app. Com o paywall ligado, exige
-    assinatura ativa/trial (is_pro) — menos a allowlist de admin/teste. Com o
-    paywall desligado, libera todo mundo (estado atual de produção)."""
+    """True se o usuário pode entrar no app.
+
+    v2 ON: sempre True — o Grátis entra no app e os limites são por feature
+    (o paywall binário dá lugar à escada).
+    v2 OFF: com o paywall ligado, exige assinatura ativa/trial (is_pro) —
+    menos a allowlist de admin/teste. Paywall desligado libera todo mundo."""
+    if plans_v2_enabled():
+        return True
     if not paywall_enabled():
         return True
     if int(user_id) in _ACCESS_ALLOWLIST:
@@ -61,12 +161,105 @@ def has_app_access(user_id: int) -> bool:
 
 
 def get_user_limits(user_id: int) -> PlanLimits:
-    """Retorna os limites/features aplicáveis a este usuário."""
-    return limits_for("pro" if is_pro(user_id) else "free")
+    """Retorna os limites/features aplicáveis a este usuário.
+
+    v2 ON: limites do tier; durante o trial (tier plus SEM assinatura paga),
+    Open Finance fica capado a 1 banco — gosto do automático sem liberar o
+    buffet (Pluggy cobra por conexão).
+    """
+    if not plans_v2_enabled():
+        return limits_for("pro" if is_pro(user_id) else "free")
+    tier = get_plan_tier(user_id)
+    limits = limits_for_tier(tier)
+    if tier == "plus":
+        user = get_auth_user(int(user_id))
+        stored = ((user or {}).get("plan") or "").lower()
+        paid = _STORED_PLAN_TO_TIER.get(stored, "free") != "free" and _paid_plan_active(user or {})
+        if not paid:  # trial
+            limits = {**limits, "of_banks_max": 1}
+    return limits
+
+
+def history_days_cap(user_id: int) -> int | None:
+    """Janela de histórico do plano em dias (None = ilimitado). v1: Free 30d /
+    Pro ilimitado (inalterado). v2: Grátis 30d / Essencial 90d / Plus+ ilimitado."""
+    return get_user_limits(user_id)["history_days"]
+
+
+def history_months_cap(user_id: int) -> int | None:
+    days = history_days_cap(user_id)
+    return None if days is None else max(1, days // 30)
+
+
+def feature_enabled(user_id: int, key: str) -> bool:
+    """Gate booleano de feature por tier (ex.: 'audio_enabled',
+    'image_ocr_enabled'). Com v2 off cai no binário legado is_pro."""
+    if not plans_v2_enabled():
+        return is_pro(user_id)
+    return bool(get_user_limits(user_id).get(key, False))
+
+
+def agent_kind_allowed(user_id: int, kind: str) -> bool:
+    """O tier do usuário dá direito a este agente? (escada v2: 0/0/3/6).
+
+    Com v2 OFF devolve True — o gate legado (Free 1 / Plus+ todos) mora na
+    rota de ativação e os runners não filtravam por plano no v1.
+    Usado pelos RUNNERS também: agente ativado no trial para de disparar
+    quando o usuário cai pro Grátis."""
+    if not plans_v2_enabled():
+        return True
+    from .plan_limits import AGENT_KIND_MIN_TIER
+    minimum = AGENT_KIND_MIN_TIER.get(kind, "pro")
+    return tier_at_least(get_plan_tier(int(user_id)), minimum)
+
+
+def require_min_tier(user_id: int, minimum: str) -> bool:
+    """True se o tier efetivo do usuário é >= minimum ('essencial'|'plus'|'pro').
+    Com v2 off, cai na semântica legada (is_pro pra qualquer exigência paga)."""
+    if not plans_v2_enabled():
+        return is_pro(user_id)
+    return tier_at_least(get_plan_tier(user_id), minimum)
+
+
+def ai_monthly_limit_for(user_id: int) -> int:
+    """Cota mensal de mensagens da IA pro usuário (sempre um int; tiers sem
+    cota própria caem no limite global AI_CHAT_MONTHLY_LIMIT)."""
+    from .ai_chat_commands import AI_CHAT_MONTHLY_LIMIT
+    per_tier = get_user_limits(user_id).get("ai_monthly_messages")
+    return AI_CHAT_MONTHLY_LIMIT if per_tier is None else min(per_tier, AI_CHAT_MONTHLY_LIMIT)
+
+
+def ai_chat_allowed(user_id: int) -> bool:
+    """Pode falar com a Piggy agora? v1: só Pro. v2: todo tier tem IA — a cota
+    mensal é quem limita (checada dentro do chat via monthly_limit)."""
+    if not plans_v2_enabled():
+        return is_pro(user_id)
+    if not get_user_limits(user_id)["ai_conversational_enabled"]:
+        return False
+    from db.ai_chat import get_usage_this_month
+    return get_usage_this_month(int(user_id)) < ai_monthly_limit_for(user_id)
+
+
+def check_can_create_launch(user_id: int) -> None:
+    """Levanta PlanLimitExceeded se o tier tem teto mensal de lançamentos
+    manuais e ele foi atingido. No-op com v2 off (v1 não tinha esse limite)."""
+    if not plans_v2_enabled():
+        return
+    cap = get_user_limits(user_id)["launches_month_max"]
+    if cap is None:
+        return
+    from db.plans import count_launches_this_month
+    if count_launches_this_month(user_id) >= cap:
+        raise PlanLimitExceeded(
+            "launches_month",
+            f"🐷 No Grátis você registra {cap} lançamentos por mês — e esse mês "
+            "lotou! No Essencial é ilimitado (com áudio, foto de cupom e OFX).\n"
+            "Faça upgrade: https://pigbankai.com/precos",
+        )
 
 
 def check_can_create_pocket(user_id: int) -> None:
-    """Levanta PlanLimitExceeded se Free e já atingiu o limite de caixinhas.
+    """Levanta PlanLimitExceeded se já atingiu o limite de caixinhas do tier.
     Chamado do DB layer pra blindar TODOS os canais (HTTP, bot, IA)."""
     limits = get_user_limits(user_id)
     pockets_max = limits["pockets_max"]
@@ -76,14 +269,14 @@ def check_can_create_pocket(user_id: int) -> None:
     if len(list_pockets(user_id)) >= pockets_max:
         raise PlanLimitExceeded(
             "pockets_unlimited",
-            f"🐷 No Free você cria {pockets_max} caixinha. "
-            "Com PigBank+ é ilimitado — separe sua reserva, viagens, "
+            f"🐷 No seu plano você cria {pockets_max} caixinha. "
+            "Com um plano pago é ilimitado — separe sua reserva, viagens, "
             "presentes…\nFaça upgrade: https://pigbankai.com/precos",
         )
 
 
 def check_can_create_card(user_id: int) -> None:
-    """Levanta PlanLimitExceeded se Free e já atingiu o limite de cartões."""
+    """Levanta PlanLimitExceeded se já atingiu o limite de cartões do tier."""
     limits = get_user_limits(user_id)
     cards_max = limits["cards_max"]
     if cards_max is None:
@@ -92,7 +285,7 @@ def check_can_create_card(user_id: int) -> None:
     if len(list_cards(user_id)) >= cards_max:
         raise PlanLimitExceeded(
             "cards_unlimited",
-            f"🐷 No Free você adiciona {cards_max} cartão. "
-            "Com PigBank+ você organiza todos eles em um lugar só.\n"
+            f"🐷 No seu plano você adiciona {cards_max} cartão. "
+            "Com um plano pago você organiza todos eles em um lugar só.\n"
             "Faça upgrade: https://pigbankai.com/precos",
         )

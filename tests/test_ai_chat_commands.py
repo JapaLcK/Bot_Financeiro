@@ -32,7 +32,9 @@ from core.services import ai_chat_commands as mod
 
 @pytest.fixture
 def patches(monkeypatch):
-    """Helper pra mockar is_pro, pending action e ai_chat.chat de uma vez."""
+    """Helper pra mockar o acesso à IA (ai_chat_allowed, ex-is_pro), pending
+    action e ai_chat.chat de uma vez. A chave `is_pro` do state foi mantida
+    pros testes existentes — hoje ela alimenta ai_chat_allowed."""
     state = {
         "is_pro": False,
         "pending": None,
@@ -66,7 +68,8 @@ def patches(monkeypatch):
     fake_ai_chat_mod.chat = fake_chat
     monkeypatch.setitem(sys.modules, "core.services.ai_chat", fake_ai_chat_mod)
 
-    monkeypatch.setattr(mod, "is_pro", fake_is_pro)
+    monkeypatch.setattr(mod, "ai_chat_allowed", fake_is_pro)
+    monkeypatch.setattr(mod, "ai_monthly_limit_for", lambda uid: 1000)
     monkeypatch.setattr(mod.db, "ai_get_pending_action", fake_get_pending)
     monkeypatch.setattr(mod.db, "ai_clear_pending_action", fake_clear_pending)
 

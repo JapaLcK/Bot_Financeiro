@@ -80,6 +80,24 @@ def _plan_allows_multiple(user_id: int) -> bool:
     return is_pro(user_id)
 
 
+def _v2_agents_gate(user_id: int, kind: str | None = None) -> tuple[bool, bool]:
+    """(v2_ativo, permitido). Com a escada ligada, o direito é por tier e por
+    kind (fonte única: AGENT_KIND_MIN_TIER em plan_limits): Grátis/Essencial =
+    nenhum agente; Plus = detectores da Fase A; Pro+ = todos. Com v2 off
+    devolve (False, True) — gate legado decide."""
+    try:
+        from core.services.plan_service import (
+            plans_v2_enabled, require_min_tier, agent_kind_allowed,
+        )
+    except ImportError:
+        return False, True
+    if not plans_v2_enabled():
+        return False, True
+    if kind is None:
+        return True, require_min_tier(user_id, "plus")
+    return True, agent_kind_allowed(user_id, kind)
+
+
 class ActivateBody(BaseModel):
     config: dict | None = None
 
@@ -105,7 +123,12 @@ async def agents_shelf_route(request: Request, user_id: int):
             "fired_30d": int((mine_a or {}).get("fired_30d") or 0),
             "saved_365d": float((mine_a or {}).get("saved_365d") or 0),
         })
-    return {"ok": True, "summary": summary, "catalog": catalog, "multi_allowed": multi}
+    # v2: Grátis/Essencial veem a prateleira mas não ativam (gates visíveis →
+    # descoberta/conversão); can_activate deixa o front desenhar o cadeado.
+    v2_on, v2_allowed = await asyncio.to_thread(_v2_agents_gate, user_id, None)
+    can_activate = v2_allowed if v2_on else True
+    return {"ok": True, "summary": summary, "catalog": catalog,
+            "multi_allowed": multi, "can_activate": can_activate}
 
 
 @router.post("/agents/{user_id}/{kind}/activate")
@@ -119,12 +142,23 @@ async def agents_activate_route(request: Request, user_id: int, kind: str, body:
             else "Agente desconhecido."
         raise HTTPException(status_code=400, detail=detail)
 
+    # Escada v2: gate por tier e por kind ANTES de qualquer coisa — Grátis e
+    # Essencial não ativam agente nenhum (0 na escada); Plus ativa os 3 da
+    # Fase A; kinds avançados (Fase B) exigirão Pro.
+    v2_on, v2_allowed = await asyncio.to_thread(_v2_agents_gate, user_id, kind)
+    if v2_on and not v2_allowed:
+        raise HTTPException(status_code=403, detail={"error": "pro_required", "feature": "agents"})
+
     existing = await asyncio.to_thread(get_agent, user_id, kind)
     already_active = bool(existing and existing["status"] == "active")
     # Reativar o MESMO kind não adiciona agente → não passa pelo teto. Só uma
     # ativação de kind novo precisa do direito a múltiplos. O teto é aplicado
     # DENTRO de activate_agent (mesma transação) pra fechar o TOCTOU.
-    allow_multiple = already_active or await asyncio.to_thread(_plan_allows_multiple, user_id)
+    # No v2 o teto é por kind/tier (checado acima) — múltiplos liberados.
+    if v2_on:
+        allow_multiple = True
+    else:
+        allow_multiple = already_active or await asyncio.to_thread(_plan_allows_multiple, user_id)
 
     config = (body.config if body else None) or {}
     agent = await asyncio.to_thread(activate_agent, user_id, kind, config, allow_multiple)

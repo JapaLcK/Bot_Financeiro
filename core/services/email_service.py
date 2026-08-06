@@ -132,6 +132,36 @@ def _base_html(title: str, content: str) -> str:
 </html>"""
 
 
+def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
+    """Fim do trial de 30 dias sem assinatura → downsell pro Essencial.
+
+    Parte da escada v2: o teste dá o Plus completo; quem não assina cai pro
+    Grátis (banco pausa, agentes silenciam) e este e-mail oferece a saída de
+    R$ 9,90 antes do churn. Enviado UMA vez (trial_downsell_sent_at)."""
+    base = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    content = f"""
+      <p>Oi! Seus <strong>30 dias de teste do PigBank</strong> chegaram ao fim. 🐷</p>
+      <p>Sua conta continua no plano Grátis: seus dados estão todos guardados,
+      mas o banco conectado ficou <strong>pausado</strong> e a Piggy voltou pro modo básico.</p>
+      <p>Pra continuar de onde parou:</p>
+      <ul>
+        <li><strong>Essencial — R$ 9,90/mês</strong>: banco reconectado, lançamentos
+        ilimitados com áudio e foto, boletos com lembrete.</li>
+        <li><strong>Plus — R$ 19,90/mês</strong>: tudo que você usou no teste —
+        2 bancos, os 3 agentes e a Piggy sem limites.</li>
+      </ul>
+      <p style="text-align:center;margin-top:24px">
+        <a class="btn" href="{base}/precos">Escolher meu plano</a>
+      </p>
+      <p class="warn">Preço de fundador: assinando agora, seu valor fica congelado pra sempre.</p>
+    """
+    return send_email(
+        to,
+        "Seu teste acabou — continue com a Piggy por R$ 9,90 🐷",
+        _base_html("Seu teste do PigBank acabou", content),
+    )
+
+
 def send_agent_report_email(to: str, user_id: int, subject: str, content_html: str) -> bool:
     """E-mail proativo dos Agentes do Piggy (ex.: manchete mensal do Repórter).
 

@@ -46,7 +46,7 @@
         <p id="precos-sub">30 dias grátis pra testar. Cancele quando quiser, sem letras miúdas.</p>
       </div>
 
-      <div class="plans">
+      <div class="plans" id="plans-v1">
         <article class="plan">
           <h3>Mensal</h3>
           <div class="plan-sub">Pra começar sem compromisso</div>
@@ -77,7 +77,97 @@
         </article>
       </div>
 
-      <p class="plans-note">🎉 30 dias grátis com cartão; a primeira cobrança só acontece depois do trial. Cancele quando quiser pelo dashboard antes do fim do trial, sem ser cobrado. Pagamentos processados pela Stripe — a PigBank nunca vê os dados do seu cartão.</p>
+      <!-- Escada v2 FINAL (Grátis/Essencial/Plus/Pro/Premium) — escondida até o
+           backend ligar PLANS_V2_ENABLED (ver /billing/plans-config). Sem
+           classes CSS novas de propósito: reusa .plan/.price/.plan-badge +
+           estilos inline. Toggle mensal/anual troca preços e o interval. -->
+      <!-- width breakout: a escada de 5 cards precisa de mais que os 1200px do
+           .wrap pra não ficar espremida; centraliza na página via translate. -->
+      <div id="plans-v2-wrap" style="display:none;width:min(1560px,calc(100vw - 48px));margin-left:50%;transform:translateX(-50%)">
+        <div style="display:flex;justify-content:center;gap:0;margin:0 0 26px">
+          <button type="button" id="cycle-monthly" class="btn btn-primary" style="border-radius:12px 0 0 12px" onclick="setCycle('monthly')">Mensal</button>
+          <button type="button" id="cycle-annual" class="btn btn-outline" style="border-radius:0 12px 12px 0" onclick="setCycle('annual')">Anual <span style="background:rgba(198,241,26,.16);color:#C6F11A;font-weight:700;padding:2px 9px;border-radius:999px;font-size:.82em">-17%</span></button>
+        </div>
+
+        <div class="plans" id="plans-v2" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
+          <article class="plan">
+            <h3>Grátis</h3>
+            <div class="plan-sub">Pra conhecer a Piggy</div>
+            <div class="price">R$ 0 <span>/ sempre</span></div>
+            <ul>
+              <li><span class="tick">✓</span> Registro por texto no WhatsApp</li>
+              <li><span class="tick">✓</span> Dashboard completo · 50 lançamentos/mês</li>
+              <li><span class="tick">✓</span> Histórico de 90 dias</li>
+              <li><span class="tick">✓</span> 1 caixinha e 1 cartão</li>
+              <li><span class="tick">✓</span> 1 banco conectado durante o teste de 30 dias</li>
+            </ul>
+            <a class="btn btn-outline btn-block" href="/cadastro">Criar conta grátis</a>
+          </article>
+
+          <article class="plan">
+            <h3>Essencial</h3>
+            <div class="plan-sub">Organize tudo, sem limites</div>
+            <div class="price"><span data-price-monthly style="font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;9,90</span><span data-price-annual style="display:none;font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;99</span></div>
+            <ul>
+              <li><span class="tick">✓</span> <span><strong>1&nbsp;banco conectado</strong> (Open&nbsp;Finance)</span></li>
+              <li><span class="tick">✓</span> Lançamentos ilimitados: áudio, foto de cupom, OFX</li>
+              <li><span class="tick">✓</span> Histórico de 24 meses</li>
+              <li><span class="tick">✓</span> Caixinhas, metas e cartões ilimitados</li>
+              <li><span class="tick">✓</span> Boletos com lembrete de vencimento</li>
+            </ul>
+            <button class="btn btn-outline btn-block" type="button" data-plan-btn="essencial" onclick="startCheckout(currentCycle, this, 'essencial')">Assinar Essencial</button>
+          </article>
+
+          <article class="plan featured">
+            <span class="plan-badge">★ Mais popular</span>
+            <h3>Plus</h3>
+            <div class="plan-sub">Seu dinheiro no automático</div>
+            <div class="price"><span data-price-monthly style="font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;19,90</span><span data-price-annual style="display:none;font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;199</span></div>
+            <ul>
+              <li><span class="tick">✓</span> <span><strong>2&nbsp;bancos conectados</strong> (Open&nbsp;Finance)</span></li>
+              <li><span class="tick">✓</span> <span><strong>3&nbsp;agentes</strong>: Xerife, Repórter e Carteiro</span></li>
+              <li><span class="tick">✓</span> Piggy IA sem limites</li>
+              <li><span class="tick">✓</span> Alertas de gastos fora do padrão</li>
+              <li><span class="tick">✓</span> Histórico completo + tudo do Essencial</li>
+            </ul>
+            <button class="btn btn-primary btn-block" type="button" data-plan-btn="plus" onclick="startCheckout(currentCycle, this, 'plus')">Assinar Plus</button>
+          </article>
+
+          <article class="plan">
+            <h3>Pro</h3>
+            <div class="plan-sub">Planejamento e previsão</div>
+            <div class="price"><span data-price-monthly style="font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;49,90</span><span data-price-annual style="display:none;font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;499</span></div>
+            <ul>
+              <li><span class="tick">✓</span> <span><strong>5&nbsp;bancos conectados</strong></span></li>
+              <li><span class="tick">✓</span> <span><strong>6&nbsp;agentes</strong>: + Detetive, Cofre e Barão</span></li>
+              <li><span class="tick">✓</span> Previsão de saldo 30/60/90 dias</li>
+              <li><span class="tick">✓</span> Cobranças duplicadas e caça-assinaturas</li>
+              <li><span class="tick">✓</span> Relatórios semanais + tudo do Plus</li>
+            </ul>
+            <button class="btn btn-outline btn-block" type="button" data-plan-btn="pro" onclick="startCheckout(currentCycle, this, 'pro')">Assinar Pro</button>
+          </article>
+
+          <article class="plan" style="opacity:.72">
+            <span class="plan-badge" style="background:rgba(255,255,255,.14)">💎 Em breve</span>
+            <h3>Premium</h3>
+            <div class="plan-sub">O máximo do PigBank</div>
+            <div class="price" style="font-size:1.15rem;padding:14px 0">Aguarde</div>
+            <ul>
+              <li><span class="tick">✓</span> Bancos ilimitados</li>
+              <li><span class="tick">✓</span> Todos os agentes + crie o seu</li>
+              <li><span class="tick">✓</span> Modo família</li>
+              <li><span class="tick">✓</span> Visão completa do patrimônio</li>
+              <li><span class="tick">✓</span> Suporte exclusivo</li>
+            </ul>
+            <button class="btn btn-outline btn-block" type="button" disabled>Em breve</button>
+          </article>
+        </div>
+
+        <p class="plans-note">🐷 <strong>Preço de fundador:</strong> assinando agora, seu valor fica congelado pra sempre — enquanto a assinatura estiver ativa, ele nunca sobe.</p>
+      </div>
+
+      <p class="plans-note" id="plans-note-v1">🎉 30 dias grátis com cartão; a primeira cobrança só acontece depois do trial. Cancele quando quiser pelo dashboard antes do fim do trial, sem ser cobrado. Pagamentos processados pela Stripe — a PigBank nunca vê os dados do seu cartão.</p>
+      <p class="plans-note" id="plans-note-v2" style="display:none">🎉 Todo cadastro começa com <strong>30 dias de Plus grátis, sem cartão</strong>. Assine durante o teste e não pague nada até ele acabar. Pagamentos processados pela Stripe — a PigBank nunca vê os dados do seu cartão.</p>
     </section>
 
   </div>
@@ -139,18 +229,68 @@ function getCsrfToken() {
   if (s) s.textContent = "Sua conta está pronta. Escolha um plano (30 dias grátis, cancela quando quiser) pra liberar o app.";
 })();
 
-async function startCheckout(interval, btn) {
+// Escada v2: mostra os cards Grátis/Essencial/Plus/Pro/Premium quando o
+// backend liga PLANS_V2_ENABLED. Sem o flag (ou com erro), a página fica como
+// sempre foi.
+let currentCycle = "monthly";
+
+function setCycle(cycle) {
+  currentCycle = cycle;
+  const bm = document.getElementById("cycle-monthly");
+  const ba = document.getElementById("cycle-annual");
+  if (bm) bm.className = "btn btn-block " + (cycle === "monthly" ? "btn-primary" : "btn-outline");
+  if (ba) ba.className = "btn btn-block " + (cycle === "annual" ? "btn-primary" : "btn-outline");
+  if (bm) { bm.style.borderRadius = "12px 0 0 12px"; bm.style.width = "auto"; }
+  if (ba) { ba.style.borderRadius = "0 12px 12px 0"; ba.style.width = "auto"; }
+  document.querySelectorAll("[data-price-monthly]").forEach(el => { el.style.display = cycle === "monthly" ? "" : "none"; });
+  document.querySelectorAll("[data-price-annual]").forEach(el => { el.style.display = cycle === "annual" ? "" : "none"; });
+}
+
+(async function loadPlansMode(){
+  try {
+    const resp = await fetch("/billing/plans-config", { credentials: "same-origin" });
+    if (!resp.ok) return;
+    const cfg = await resp.json();
+    if (!cfg.plans_v2_enabled) return;
+    const v1 = document.getElementById("plans-v1");
+    const v2 = document.getElementById("plans-v2-wrap");
+    const n1 = document.getElementById("plans-note-v1");
+    const n2 = document.getElementById("plans-note-v2");
+    if (v1) v1.style.display = "none";
+    if (v2) v2.style.display = "";
+    if (n1) n1.style.display = "none";
+    if (n2) n2.style.display = "";
+    const t = document.getElementById("precos-title");
+    const s = document.getElementById("precos-sub");
+    if (t) t.innerHTML = 'Escolha seu <span class="grad">PigBank</span>';
+    if (s) s.textContent = "30 dias de Plus grátis pra testar, sem cartão. Depois, o plano do seu tamanho.";
+    // Plano sem price configurado no Stripe → botão vira "Indisponível" (não
+    // deixa o usuário clicar pra tomar um erro).
+    if (!cfg.essencial_available) {
+      const b = document.querySelector('[data-plan-btn="essencial"]');
+      if (b) { b.disabled = true; b.textContent = "Indisponível"; }
+    }
+    if (!cfg.pro_available) {
+      const b = document.querySelector('[data-plan-btn="pro"]');
+      if (b) { b.disabled = true; b.textContent = "Indisponível"; }
+    }
+  } catch {}
+})();
+
+async function startCheckout(interval, btn, plan) {
   if (btn.classList.contains("loading")) return;
   const originalText = btn.textContent;
   btn.classList.add("loading");
   btn.textContent = "Carregando…";
+  const payload = { interval };
+  if (plan) payload.plan = plan;
 
   try {
     let resp = await fetch("/billing/create-checkout", {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json", "x-csrf-token": getCsrfToken() },
-      body: JSON.stringify({ interval }),
+      body: JSON.stringify(payload),
     });
 
     if (resp.status === 401) {
@@ -165,7 +305,7 @@ async function startCheckout(interval, btn) {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json", "x-csrf-token": getCsrfToken() },
-        body: JSON.stringify({ interval }),
+        body: JSON.stringify(payload),
       });
     }
 
@@ -193,6 +333,6 @@ async function startCheckout(interval, btn) {
   }
 }
 </script>
-  <script src="/nav-auth.js?v=2" defer></script>
+  <script src="/nav-auth.js?v=3" defer></script>
 </body>
 </html>

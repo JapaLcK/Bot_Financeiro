@@ -116,6 +116,11 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
     if not connection:
         return {"ok": False, "reason": "connection_not_found", "item_id": provider_item_id}
 
+    # Trial venceu sem virar assinatura: dados importados ficam, mas o sync PARA
+    # (o item nem existe mais na Pluggy). Barra webhook atrasado/replay.
+    if str(connection.get("status") or "").upper() == "PAUSED":
+        return {"ok": False, "reason": "connection_paused", "item_id": provider_item_id}
+
     api_key = create_pluggy_api_key()
 
     accounts: list[dict] = []

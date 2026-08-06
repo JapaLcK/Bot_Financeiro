@@ -301,13 +301,16 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
 
 
 def count_open_finance_connections(user_id: int, provider: str = "pluggy") -> int:
-    """Quantos bancos o usuário tem conectados (default: só Pluggy reais). Pro gate por nº de bancos."""
+    """Quantos bancos o usuário tem conectados (default: só Pluggy reais), pro
+    gate por nº de bancos. Conexão PAUSED (trial vencido) NÃO conta — senão o
+    ex-trialer que assina fica travado de reconectar o próprio banco."""
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
             if provider:
                 cur.execute(
-                    "select count(*) as n from open_finance_connections where user_id=%s and provider=%s",
+                    "select count(*) as n from open_finance_connections"
+                    " where user_id=%s and provider=%s and upper(coalesce(status,'')) <> 'PAUSED'",
                     (user_id, provider),
                 )
             else:
@@ -327,17 +330,58 @@ def list_open_finance_user_ids() -> list[int]:
 
 
 def list_pluggy_item_ids(user_id: int | None = None) -> list[str]:
-    """Item ids Pluggy ativos (todos, ou de um usuário). Usado no refresh periódico."""
+    """Item ids Pluggy ativos (todos, ou de um usuário). Usado no refresh periódico.
+
+    Conexões PAUSED ficam de fora: o item já foi deletado na Pluggy (trial venceu),
+    então não há o que refrescar/deletar de novo.
+    """
+    sql = (
+        "select provider_item_id from open_finance_connections "
+        "where provider='pluggy' and upper(coalesce(status,'')) <> 'PAUSED'"
+    )
     with get_conn() as conn:
         with conn.cursor() as cur:
             if user_id is None:
-                cur.execute("select provider_item_id from open_finance_connections where provider='pluggy'")
+                cur.execute(sql)
             else:
-                cur.execute(
-                    "select provider_item_id from open_finance_connections where provider='pluggy' and user_id=%s",
-                    (user_id,),
-                )
+                cur.execute(sql + " and user_id=%s", (user_id,))
             return [r["provider_item_id"] for r in cur.fetchall() if r["provider_item_id"]]
+
+
+def list_pluggy_connections_for_trial_sweep() -> list[dict]:
+    """Conexões Pluggy candidatas à varredura de trial vencido (todas as não-PAUSED).
+
+    A resolução de tier (trial ativo? assinatura?) fica no serviço — aqui só se lista
+    quem ainda ocupa slot pago na Pluggy."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, user_id, provider_item_id, status
+                from open_finance_connections
+                where provider='pluggy' and upper(coalesce(status,'')) <> 'PAUSED'
+                order by user_id, id
+                """
+            )
+            return cur.fetchall()
+
+
+def pause_open_finance_connection(connection_id: int) -> int:
+    """Marca a conexão como PAUSED (trial venceu sem virar assinatura).
+
+    Decisão de produto: NÃO apaga nada do que foi importado — contas, transações,
+    launches e faturas ficam visíveis; só o sync para ("reative seu banco" vira CTA
+    de upgrade). O item na Pluggy é deletado pelo serviço ANTES de chamar isto
+    (libera o slot pago do contrato)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update open_finance_connections set status='PAUSED', updated_at=now() where id=%s",
+                (connection_id,),
+            )
+            updated = cur.rowcount
+        conn.commit()
+    return updated
 
 
 def list_connections_needing_reconnect(user_id: int | None = None, within_days: int = 7) -> list[dict]:
@@ -448,6 +492,9 @@ def update_pluggy_open_finance_item_status(provider_item_id: str, status: str, r
                     raw=coalesce(%s, raw),
                     updated_at=now()
                 where provider='pluggy' and provider_item_id=%s
+                  -- PAUSED é estado local terminal (trial venceu): deletar o item na
+                  -- Pluggy dispara webhook item/deleted, que não pode sobrescrevê-lo.
+                  and upper(coalesce(status,'')) <> 'PAUSED'
                 """,
                 (status, Jsonb(raw) if raw is not None else None, item_id),
             )

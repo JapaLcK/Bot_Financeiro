@@ -101,12 +101,50 @@ def _bank_limit_enabled() -> bool:
 
 
 async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> None:
-    """Gate Pro por nº de bancos: no plano grátis, limita conexões (Fase 7).
+    """Teto de conexões OF por plano.
+
+    v2 (PLANS_V2_ENABLED): teto vem do tier — of_banks_max da escada
+    (trial 1 / Essencial 1 / Plus 2 / Pro 5 / None = ilimitado). Ativo sempre
+    que a escada estiver ligada, sem env extra.
+    v1 (flag off): gate Fase 7 legado, dormante atrás de OF_BANK_LIMIT_ENABLED.
 
     P1: reconectar/renovar um banco JÁ conectado (mesmo provider_item_id) NÃO conta como
-    banco novo — senão o usuário grátis no limite ficava travado de reautorizar o próprio
+    banco novo — senão o usuário no limite ficava travado de reautorizar o próprio
     banco. Só bloqueia banco realmente novo.
     """
+    from core.services.plan_service import plans_v2_enabled, get_user_limits
+
+    if plans_v2_enabled():
+        limit = (await asyncio.to_thread(get_user_limits, user_id)).get("of_banks_max")
+        if limit is None:
+            return  # ilimitado (Premium futuro)
+        if new_item_id:
+            existing = await asyncio.to_thread(get_open_finance_connection_by_item_id, str(new_item_id))
+            if existing and int(existing.get("user_id")) == int(user_id):
+                return  # upsert de item existente: reconexão, não é banco novo
+        if limit <= 0:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "OF_BANK_LIMIT",
+                    "limit": 0,
+                    "message": "Conectar banco faz parte dos planos pagos — no Grátis a conexão "
+                               "vale durante os 30 dias de teste. Assine pra reativar: /precos",
+                },
+            )
+        count = await asyncio.to_thread(count_open_finance_connections, user_id)
+        if count >= limit:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "OF_BANK_LIMIT",
+                    "limit": limit,
+                    "message": f"Seu plano conecta até {limit} banco{'s' if limit > 1 else ''}. "
+                               "Faça upgrade pra conectar mais: /precos",
+                },
+            )
+        return
+
     if not _bank_limit_enabled():
         return
     if await asyncio.to_thread(is_pro, user_id):

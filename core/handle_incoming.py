@@ -192,14 +192,14 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     data = getattr(a, "data", None)
     filename = getattr(a, "filename", "audio.ogg")
 
-    # Gate Pro: transcrição de áudio é Pro
+    # Gate de plano: transcrição de áudio é paga (v1: Pro; v2: Essencial+)
     uid = _normalize_user_id(msg)
     try:
-        from core.services.plan_service import is_pro
-        if not is_pro(uid):
+        from core.services.plan_service import feature_enabled
+        if not feature_enabled(uid, "audio_enabled"):
             return [OutgoingMessage(
                 text=(
-                    "🐷 Transcrever áudio é um recurso do PigBank+.\n"
+                    "🐷 Transcrever áudio é um recurso dos planos pagos.\n"
                     "Dá uma olhada nos planos: https://pigbankai.com/precos"
                 )
             )]
@@ -368,14 +368,14 @@ def _handle_image(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     data = getattr(a, "data", None)
     filename = getattr(a, "filename", "image.jpg")
 
-    # Gate Pro: leitura de cupom/comprovante por IA é Pro
+    # Gate de plano: leitura de cupom/comprovante por IA é paga (v1: Pro; v2: Essencial+)
     uid = _normalize_user_id(msg)
     try:
-        from core.services.plan_service import is_pro
-        if not is_pro(uid):
+        from core.services.plan_service import feature_enabled
+        if not feature_enabled(uid, "image_ocr_enabled"):
             return [OutgoingMessage(
                 text=(
-                    "🐷 Ler foto de cupom ou comprovante é um recurso do PigBank+.\n"
+                    "🐷 Ler foto de cupom ou comprovante é um recurso dos planos pagos.\n"
                     "Dá uma olhada nos planos: https://pigbankai.com/precos"
                 )
             )]
@@ -701,12 +701,11 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         )
         if should_try_ai_fallback:
             try:
-                from core.services.plan_service import is_pro
-                if is_pro(uid):
+                from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
+                if ai_chat_allowed(uid):
                     from core.services.ai_chat import chat as ai_chat_run
-                    from core.services.ai_chat_commands import AI_CHAT_MONTHLY_LIMIT
                     ai_reply = ai_chat_run(
-                        uid, text, monthly_limit=AI_CHAT_MONTHLY_LIMIT, platform=platform,
+                        uid, text, monthly_limit=ai_monthly_limit_for(uid), platform=platform,
                     )
                     return [OutgoingMessage(text=format_for_platform(ai_reply, platform))]
             except Exception as exc:
@@ -729,12 +728,11 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         # ------------------------------------------------------------------
         if _looks_like_help_fallback(raw_response):
             try:
-                from core.services.plan_service import is_pro
-                if is_pro(uid):
+                from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
+                if ai_chat_allowed(uid):
                     from core.services.ai_chat import chat as ai_chat_run
-                    from core.services.ai_chat_commands import AI_CHAT_MONTHLY_LIMIT
                     ai_reply = ai_chat_run(
-                        uid, text, monthly_limit=AI_CHAT_MONTHLY_LIMIT, platform=platform,
+                        uid, text, monthly_limit=ai_monthly_limit_for(uid), platform=platform,
                     )
                     return [OutgoingMessage(text=format_for_platform(ai_reply, platform))]
             except Exception as exc:

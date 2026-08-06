@@ -5454,7 +5454,7 @@ const UPGRADE_MESSAGES = {
   history_unlimited: "Histórico além de 30 dias é exclusivo do PigBank+.",
   changelog: "As notícias e resumos do mercado feitos pela Piggy são exclusivos do PigBank+. Assine pra desbloquear.",
   recurring_expenses: "A agenda de boletos e os gastos fixos são exclusivos do PigBank+. Cadastre suas contas a pagar e nunca mais perca um vencimento.",
-  agents: "No Free você ativa 1 agente. Com PigBank+ a equipe inteira de porquinhos trabalha pra você — Xerife, Repórter, Carteiro e os próximos que chegarem.",
+  agents: "Seu plano atual não ativa mais agentes. Fazendo upgrade, a equipe de porquinhos trabalha pra você — Xerife, Repórter, Carteiro e os próximos que chegarem.",
   generic: "Essa feature é exclusiva pra quem assina o PigBank+."
 };
 
@@ -9214,11 +9214,17 @@ function _renderAgentes(data) {
       card.fired_30d > 0 ? `<span class="ag-chip ag-chip-fire">⚡ ${card.fired_30d}</span>` : "",
       card.saved_365d > 0 ? `<span class="ag-chip ag-chip-money">💰 ${fmtShort(card.saved_365d)}</span>` : "",
     ].filter(Boolean).join("");
+    // can_activate vem do backend (escada v2: Grátis/Essencial não ativam).
+    // Gate visível: o card aparece normal, mas o botão vira cadeado que abre o
+    // upgrade direto — sem POST fadado a 403. Ausente (backend antigo) = true.
+    const canActivate = data.can_activate !== false;
     const btn = !card.disponivel
       ? `<button class="ag-btn ag-btn-soon" disabled>Em breve</button>`
       : active
         ? `<button class="ag-btn ag-btn-active" onclick="pauseAgent('${card.kind}')">✓ Ativo · Pausar</button>`
-        : `<button class="ag-btn ag-btn-on" onclick="activateAgent('${card.kind}')">Ativar</button>`;
+        : canActivate
+          ? `<button class="ag-btn ag-btn-on" onclick="activateAgent('${card.kind}')">Ativar</button>`
+          : `<button class="ag-btn ag-btn-on" onclick="showUpgradeModal('agents')">🔒 Ativar</button>`;
     return `
       <div class="ag-card${!card.disponivel ? " ag-card-soon" : ""}">
         <div class="ag-avatar ag-bg-${esc(card.kind)}">

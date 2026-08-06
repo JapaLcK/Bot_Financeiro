@@ -1543,6 +1543,8 @@ def init_db():
         # recriar conta com o mesmo número herda o started_at original (trial
         # já queimado). Regra: 30 dias únicos por telefone, na vida.
         """alter table auth_accounts add column if not exists trial_started_at timestamptz""",
+        # Downsell do fim do trial: 1 e-mail por conta, na vida.
+        """alter table auth_accounts add column if not exists trial_downsell_sent_at timestamptz""",
         """
         create table if not exists plan_trials (
           phone_hash text primary key,

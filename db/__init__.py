@@ -192,6 +192,8 @@ from .open_finance import (
     count_open_finance_connections,
     list_open_finance_user_ids,
     list_pluggy_item_ids,
+    list_pluggy_connections_for_trial_sweep,
+    pause_open_finance_connection,
     list_connections_needing_reconnect,
     get_open_finance_connection_by_item_id,
     save_open_finance_sync,
@@ -429,6 +431,7 @@ __all__ = [
     "sync_imported_open_finance_updates", "get_consolidated_balance",
     "disconnect_open_finance_connection", "save_pluggy_open_finance_item",
     "update_pluggy_open_finance_item_status",
+    "list_pluggy_connections_for_trial_sweep", "pause_open_finance_connection",
     # reports
     "set_daily_report_enabled", "set_daily_report_hour", "get_daily_report_prefs",
     "set_weekly_report_enabled", "set_monthly_report_enabled",
