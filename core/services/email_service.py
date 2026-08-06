@@ -132,6 +132,18 @@ def _base_html(title: str, content: str) -> str:
 </html>"""
 
 
+def send_agent_report_email(to: str, user_id: int, subject: str, content_html: str) -> bool:
+    """E-mail proativo dos Agentes do Piggy (ex.: manchete mensal do Repórter).
+
+    Usa o template do Piggy com unsubscribe — canal grátis dos agentes.
+    """
+    try:
+        unsub = make_unsub_url(user_id, to)
+    except RuntimeError:
+        unsub = ""
+    return send_email(to, subject, _piggy_html(subject, content_html, unsub))
+
+
 def send_verification_email(to: str, code: str) -> bool:
     """Envia o código de verificação de 6 dígitos para confirmar o e-mail no cadastro."""
     content = f"""

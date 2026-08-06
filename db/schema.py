@@ -1536,6 +1536,61 @@ def init_db():
         create index if not exists idx_affiliate_commissions_affiliate
           on affiliate_commissions (affiliate_id, status, available_at)
         """,
+
+        # ── Planos v2 (escada Grátis/Essencial/Plus/Pro) ─────────────────────
+        # Trial de 30 dias sem cartão. plan_trials é keyed por phone_hash e
+        # NÃO tem FK pra users de propósito: sobrevive à deleção da conta —
+        # recriar conta com o mesmo número herda o started_at original (trial
+        # já queimado). Regra: 30 dias únicos por telefone, na vida.
+        """alter table auth_accounts add column if not exists trial_started_at timestamptz""",
+        """
+        create table if not exists plan_trials (
+          phone_hash text primary key,
+          user_id bigint,
+          started_at timestamptz not null default now()
+        )
+        """,
+
+        # ── Agentes do Piggy (prateleira de jobs proativos) ──────────────────
+        # Um agente por kind por usuário (custom multiplica no futuro via
+        # config, não via linhas). status: 'active' | 'paused'.
+        """
+        create table if not exists agents (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          kind text not null,
+          config jsonb not null default '{}'::jsonb,
+          status text not null default 'active',
+          created_at timestamptz not null default now(),
+          unique (user_id, kind)
+        )
+        """,
+        """
+        create index if not exists idx_agents_user_status
+          on agents (user_id, status)
+        """,
+        # Cada disparo de agente. dedupe_key torna o runner idempotente
+        # (rodar o detector N vezes no dia não duplica alerta). valor_impacto
+        # alimenta o placar "R$ salvos"; seen_at = lido/não lido no feed.
+        """
+        create table if not exists agent_events (
+          id bigserial primary key,
+          agent_id bigint not null references agents(id) on delete cascade,
+          user_id bigint not null references users(id) on delete cascade,
+          kind text not null,
+          fired_at timestamptz not null default now(),
+          dedupe_key text not null,
+          payload jsonb not null default '{}'::jsonb,
+          channel text not null default 'dashboard',
+          valor_impacto numeric,
+          seen_at timestamptz,
+          unique (agent_id, dedupe_key)
+        )
+        """,
+        """
+        create index if not exists idx_agent_events_user_time
+          on agent_events (user_id, fired_at desc)
+        """,
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks

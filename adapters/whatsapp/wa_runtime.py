@@ -366,6 +366,57 @@ def _is_greeting(text: str) -> bool:
     return normalized in {"oi", "ola", "olá", "hello", "hi", "hey", "bom dia", "boa tarde", "boa noite"}
 
 
+# Tentativa de vincular por código ("link 123456" / "vincular 123456"). Espelha
+# os padrões do intent_classifier (account.link / account.vincular). Um número
+# SEM conta usa exatamente esse fluxo pra se vincular, então não pode ser barrado
+# pelo aviso de "crie sua conta". Usa o MESMO _normalize do classificador (que
+# troca pontuação por espaço) — senão "link: 123456" ou "link 123456." casariam
+# como vínculo lá no handle_incoming mas seriam barrados aqui, engolindo o código.
+_LINK_CODE_RE = re.compile(r"^(?:link|vincular)\s+\d{6}$")
+
+
+def _is_link_code_attempt(text: str) -> bool:
+    from core.intent_classifier import _normalize
+    return bool(_LINK_CODE_RE.match(_normalize(text or "")))
+
+
+def _signup_url() -> str:
+    from core.dashboard_links import get_dashboard_base_url
+    base = get_dashboard_base_url()
+    if not base.startswith("https://"):
+        base = "https://pigbankai.com"
+    return f"{base}/cadastro"
+
+
+def _send_no_account_notice(reply_to: str, auto_link_result: dict[str, Any], user_id: int | None = None) -> None:
+    """Número de WhatsApp sem NENHUMA conta vinculada por telefone. Sem esse
+    aviso, um comando ("gastei 50") cairia numa conta fantasma invisível (paywall
+    off / plans-v2 on) ou na mensagem de assinatura que assume conta existente
+    (paywall on) — os dois confundem quem ainda não tem cadastro. Então avisamos
+    e paramos aqui. Mandamos em TODA mensagem (nunca some em silêncio); o dedup
+    é só do log, pra não inflar o system_event_logs."""
+    _send_reply(
+        reply_to,
+        (
+            "🐷 Oi! Ainda não tenho uma conta ligada a este número de WhatsApp.\n\n"
+            "Pra eu começar a cuidar do seu dinheiro:\n"
+            f"1️⃣ Crie sua conta grátis: {_signup_url()}\n"
+            "   (use *este mesmo número* de WhatsApp)\n"
+            "2️⃣ Volte aqui e me manda um *oi* — eu vinculo na hora ✅\n\n"
+            "Já tem conta? Gere um código de vínculo no site e me manda: *link 123456*"
+        ),
+    )
+    if not _autolink_warning_already_sent(reply_to, "no_match_notice"):
+        log_system_event_sync(
+            "info",
+            "whatsapp_autolink_greeting_warning_sent",
+            "Convite de cadastro enviado a número de WhatsApp sem conta.",
+            source="wa_runtime",
+            user_id=user_id,
+            details={"wa_id": reply_to, "status": "no_match_notice"},
+        )
+
+
 def _build_autolink_warning_message(status: str, auto_link_result: dict[str, Any]) -> str | None:
     if status == "no_match":
         return (
@@ -491,8 +542,14 @@ def process_message(message: InboundMessage) -> None:
                             ),
                         )
                     return
+        elif auto_link_result["status"] == "no_match":
+            # Número sem conta alguma. Convida pro cadastro/vínculo e para aqui —
+            # EXCETO quando a própria mensagem é o código de vínculo, que precisa
+            # seguir pro handle_incoming pra ser consumido.
+            if not _is_link_code_attempt(message.text or ""):
+                _send_no_account_notice(reply_to, auto_link_result, user_id=uid)
+                return
         elif auto_link_result["status"] in {
-            "no_match",
             "multiple_accounts",
             "wa_linked_other_account",
             "account_has_other_whatsapp",

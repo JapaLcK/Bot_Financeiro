@@ -216,6 +216,21 @@ from .open_finance import (
     update_pluggy_open_finance_item_status,
 )
 
+# ── Agentes do Piggy ──────────────────────────────────────────────────────────
+from .agents import (
+    AGENT_KINDS,
+    list_agents,
+    get_agent,
+    count_active_agents,
+    activate_agent,
+    pause_agent,
+    record_agent_event,
+    list_agent_events,
+    mark_agent_events_seen,
+    agents_summary,
+    list_users_with_active_agents,
+)
+
 # ── Relatórios, Auth, Dashboard, Engajamento ──────────────────────────────────
 from .reports import (
     set_daily_report_enabled,
@@ -464,4 +479,8 @@ __all__ = [
     "compute_behavioral_patterns",
     # insights (Sprint 7)
     "compute_active_insights",
+    # agentes do Piggy
+    "AGENT_KINDS", "list_agents", "get_agent", "count_active_agents",
+    "activate_agent", "pause_agent", "record_agent_event", "list_agent_events",
+    "mark_agent_events_seen", "agents_summary", "list_users_with_active_agents",
 ]

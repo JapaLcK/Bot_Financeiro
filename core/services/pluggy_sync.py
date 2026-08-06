@@ -141,6 +141,16 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
     # Propaga correções da Pluggy (transactions/updated) pros já importados (não deixa stale).
     updated = sync_imported_open_finance_updates(connection["user_id"], connection["id"])
 
+    # Agentes do Piggy — gatilho pós-sync: Xerife roda só sobre o delta deste
+    # usuário. IMPORTANTE: depois da reconciliação/import acima (merge-silencioso
+    # primeiro, senão duplicata manual+OF viraria falso positivo). Fail-soft.
+    if imported.get("inserted") or (imported_credit or {}).get("inserted"):
+        try:
+            from core.services.piggy_agents import run_agents_for_user
+            run_agents_for_user(connection["user_id"], trigger="of_sync")
+        except Exception as exc:  # nunca derruba o sync por causa de agente
+            print(f"[pluggy_sync] agents hook: {exc}")
+
     return {
         "ok": True,
         "item_id": provider_item_id,
