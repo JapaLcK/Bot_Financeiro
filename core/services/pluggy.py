@@ -99,6 +99,27 @@ def update_pluggy_item(item_id: str, api_key: str | None = None) -> dict:
     return resp.json()
 
 
+def delete_pluggy_item(item_id: str, api_key: str | None = None) -> bool:
+    """DELETE /items/{id}: remove o item na Pluggy (libera o acesso pra reconectar).
+
+    Sem isso, desconectar no PigBank apagava só o nosso registro e o item ficava órfão
+    na Pluggy, bloqueando a reconexão ("já possui conexão com este acesso"). Retorna True
+    se removido (2xx) ou já inexistente (404); levanta PluggyApiError em erro inesperado.
+    """
+    if not item_id:
+        return False
+    key = api_key or create_pluggy_api_key()
+    with httpx.Client(timeout=_pluggy_timeout()) as client:
+        resp = client.delete(
+            f"{_pluggy_base_url()}/items/{item_id}",
+            headers={"X-API-KEY": key},
+        )
+    if resp.status_code in (200, 202, 204, 404):
+        return True
+    _raise_for_pluggy_response(resp, f"Falha ao deletar item {item_id} na Pluggy")
+    return True
+
+
 def list_pluggy_accounts(item_id: str, api_key: str | None = None) -> list[dict]:
     key = api_key or create_pluggy_api_key()
     data = _pluggy_get("/accounts", key, params={"itemId": item_id})

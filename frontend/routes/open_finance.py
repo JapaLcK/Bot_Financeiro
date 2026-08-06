@@ -22,7 +22,9 @@ from core.audit import AuditEvent, record_audit_event
 from core.services.pluggy import (
     PluggyApiError,
     PluggyConfigError,
+    create_pluggy_api_key,
     create_pluggy_connect_token,
+    delete_pluggy_item,
 )
 from core.services.plan_service import is_pro
 from core.services.pluggy_sync import (
@@ -37,6 +39,7 @@ from db import (
     disconnect_open_finance_connection,
     get_open_finance_connection_by_item_id,
     get_open_finance_snapshot,
+    list_pluggy_item_ids,
     save_pluggy_open_finance_item,
     update_pluggy_open_finance_item_status,
 )
@@ -365,6 +368,34 @@ async def open_finance_mock_connect_route(request: Request, user_id: int, payloa
 @router.delete("/open-finance/{user_id}")
 async def open_finance_disconnect_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
+
+    # Deleta os items na Pluggy ANTES do disconnect local (best-effort). Sem isso, remover
+    # a conexão apagava só o nosso registro e o item ficava órfão na Pluggy, bloqueando a
+    # reconexão ("já possui conexão com este acesso"). Falha por item não impede o
+    # disconnect local (não pioramos o comportamento antigo).
+    pluggy_item_ids = await asyncio.to_thread(list_pluggy_item_ids, user_id)
+    if pluggy_item_ids:
+        api_key = None
+        try:
+            api_key = await asyncio.to_thread(create_pluggy_api_key)
+        except Exception as exc:  # noqa: BLE001 — best-effort; segue pro disconnect local
+            await log_system_event(
+                "warning", "pluggy_disconnect_auth_failed",
+                f"Sem apiKey pra deletar items no disconnect do user {user_id}: {exc}",
+                source="open_finance", details={"user_id": user_id, "error": str(exc)},
+            )
+        if api_key:
+            for item_id in pluggy_item_ids:
+                try:
+                    await asyncio.to_thread(delete_pluggy_item, item_id, api_key)
+                except Exception as exc:  # noqa: BLE001 — best-effort por item
+                    await log_system_event(
+                        "warning", "pluggy_item_delete_failed",
+                        f"Falha ao deletar item {item_id} na Pluggy no disconnect: {exc}",
+                        source="open_finance",
+                        details={"item_id": item_id, "error": str(exc)},
+                    )
+
     deleted = await asyncio.to_thread(disconnect_open_finance_connection, user_id)
 
     if deleted:
