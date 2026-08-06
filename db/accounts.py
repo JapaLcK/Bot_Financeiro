@@ -124,6 +124,26 @@ def list_launches(user_id: int, limit: int = 10):
             return cur.fetchall()
 
 
+def list_launches_by_tipo(user_id: int, tipo: str, limit: int = 200):
+    """Lançamentos recentes de um tipo (despesa/receita) com só os campos que
+    a detecção de valor recorrente precisa (valor + descrição). Ordenado do mais
+    recente pro mais antigo."""
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select valor, alvo, nota
+                from launches
+                where user_id=%s and tipo=%s
+                order by criado_em desc, id desc
+                limit %s
+                """,
+                (user_id, tipo, int(limit)),
+            )
+            return cur.fetchall()
+
+
 def resolve_user_seq_to_id(user_id: int, user_seq: int) -> int | None:
     """Converte o `#N` que o usuário digita (user_seq) no id interno do lançamento.
 
