@@ -1475,6 +1475,24 @@ async def lifespan(app: FastAPI):
                 print(f"[open_finance_refresh] erro: {exc}", file=sys.stderr)
                 await asyncio.sleep(interval)
 
+    async def _open_finance_trial_expiry():
+        # Pausa conexões OF de trial vencido que não virou assinatura (libera o slot
+        # pago da Pluggy; dados importados ficam). Inerte com PLANS_V2_ENABLED off —
+        # o flag é relido a cada tick dentro do serviço (liga/desliga sem redeploy).
+        interval = int(os.getenv("OF_TRIAL_EXPIRY_INTERVAL_SEC", str(6 * 60 * 60)))
+        from core.services.open_finance_trial_expiry import pause_expired_trial_connections
+        while True:
+            try:
+                res = await asyncio.to_thread(pause_expired_trial_connections)
+                if not res.get("disabled"):
+                    print(f"[of_trial_expiry] {res}", flush=True)
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[of_trial_expiry] erro: {exc}", file=sys.stderr)
+                await asyncio.sleep(interval)
+
     async def _open_finance_proactive():
         # Avisos proativos de salário/reconectar (Fase 5 / P1 #6). Dormant: só roda com
         # OF_PROACTIVE_ENABLED ligado E o template Meta configurado (senão retorna na hora).
@@ -1503,6 +1521,7 @@ async def lifespan(app: FastAPI):
             [
                 asyncio.create_task(_open_finance_refresh(), name="open_finance_refresh"),
                 asyncio.create_task(_open_finance_proactive(), name="open_finance_proactive"),
+                asyncio.create_task(_open_finance_trial_expiry(), name="open_finance_trial_expiry"),
                 asyncio.create_task(_wa_worker(), name="wa_worker"),
                 asyncio.create_task(_wa_daily(), name="wa_daily"),
                 asyncio.create_task(_wa_bill_reminders(), name="wa_bill_reminders"),
