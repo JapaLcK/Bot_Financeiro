@@ -2075,3 +2075,67 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
                    animation:pig-bob 2.2s var(--ease) infinite; }
 @keyframes pig-bob { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-7px)} }
 @media (prefers-reduced-motion: reduce) { .loading-sticker { animation:none; } }
+
+/* ═══ Agentes do Piggy ═══════════════════════════════════════════════════ */
+.ag-sub { color: var(--text-2); font-size: 14px; margin: -6px 0 18px; max-width: 60ch; }
+.ag-counters { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: 13px; color: var(--text-2); }
+.ag-counter { display: inline-flex; align-items: center; gap: 6px; }
+.ag-counter b { color: var(--text); font-variant-numeric: tabular-nums; }
+.ag-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.ag-dot-on { background: var(--neon); }
+.ag-dot-off { background: var(--text-3); }
+.ag-dot-fire { background: var(--purple); }
+.ag-money { color: var(--neon); font-weight: 700; }
+
+.ag-shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 14px; }
+.ag-card {
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-radius: var(--radius); padding: 14px;
+  display: flex; flex-direction: column; gap: 9px;
+  transition: transform .15s var(--ease), border-color .15s var(--ease);
+}
+.ag-card:hover { transform: translateY(-3px); border-color: rgba(255, 45, 142, .35); }
+.ag-card-soon { opacity: .62; }
+.ag-card h3 { margin: 0; font-size: 16px; }
+.ag-desc { margin: 0; font-size: 12.5px; color: var(--text-2); line-height: 1.45; min-height: 36px; }
+.ag-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.ag-chip { font-size: 10.5px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--glass-border); color: var(--text-2); }
+.ag-chip-fire { border-color: rgba(255, 201, 77, .4); color: #FFC94D; }
+.ag-chip-money { border-color: rgba(198, 241, 26, .4); color: var(--neon); }
+
+.ag-avatar {
+  border-radius: 14px; aspect-ratio: 1.35; overflow: hidden;
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.ag-avatar svg { width: 72%; height: auto; display: block; }
+.ag-bg-xerife   { background: radial-gradient(circle at 30% 25%, #5A2140, #1E0C18); }
+.ag-bg-reporter { background: radial-gradient(circle at 70% 30%, #23404F, #0D1418); }
+.ag-bg-carteiro { background: radial-gradient(circle at 35% 70%, #4F3A16, #171006); }
+.ag-bg-detetive { background: radial-gradient(circle at 60% 25%, #33254F, #100C1B); }
+.ag-bg-cofre    { background: radial-gradient(circle at 30% 60%, #1E4A33, #08130D); }
+.ag-bg-barao    { background: radial-gradient(circle at 60% 40%, #4A3B12, #14100A); }
+.ag-bg-aviador  { background: radial-gradient(circle at 40% 30%, #16394F, #0A1218); }
+
+.ag-btn {
+  margin-top: auto; width: 100%; text-align: center; cursor: pointer;
+  font-size: 13px; font-weight: 700; border-radius: 11px; padding: 9px 0;
+  border: 1px solid transparent; font-family: inherit;
+}
+.ag-btn-on { background: var(--purple); color: #fff; }
+.ag-btn-on:hover { filter: brightness(1.08); }
+.ag-btn-active { background: transparent; border-color: var(--neon); color: var(--neon); }
+.ag-btn-soon { background: var(--glass-bg); color: var(--text-3); cursor: default; }
+
+.ag-feed-title { margin: 26px 0 12px; }
+.ag-feed { display: flex; flex-direction: column; gap: 10px; max-width: 760px; }
+.ag-event {
+  display: flex; gap: 12px; align-items: flex-start;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-radius: 14px; padding: 12px 14px;
+}
+.ag-event-new { border-color: rgba(255, 45, 142, .45); }
+.ag-event-face { width: 40px; height: 40px; border-radius: 10px; flex: none; overflow: hidden; display: flex; align-items: flex-end; justify-content: center; }
+.ag-event-face svg { width: 86%; height: auto; }
+.ag-event-body { min-width: 0; }
+.ag-event-msg { margin: 0; font-size: 13.5px; line-height: 1.45; }
+.ag-event-when { margin: 3px 0 0; font-size: 11.5px; color: var(--text-3); }

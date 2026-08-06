@@ -85,6 +85,7 @@ from db import (
     delete_launch_and_rollback,
 )
 from frontend.routes.affiliates import router as affiliates_router
+from frontend.routes.agents import router as agents_router
 from frontend.routes.analytics import router as analytics_router
 from frontend.routes.cards import router as cards_router
 from frontend.routes.open_finance import router as open_finance_router
@@ -1408,6 +1409,14 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[news_bot] erro: {exc}", file=sys.stderr)
 
+    async def _piggy_agents():
+        try:
+            await asyncio.sleep(1)
+            from core.services.piggy_agents import run_agents_loop  # noqa: PLC0415
+            await run_agents_loop()
+        except Exception as exc:
+            print(f"[agents] erro: {exc}", file=sys.stderr)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -1485,6 +1494,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_recurring_charger(), name="recurring_charger"),
                 asyncio.create_task(_proactive_ai(), name="proactive_ai"),
                 asyncio.create_task(_news_bot(), name="news_bot"),
+                asyncio.create_task(_piggy_agents(), name="piggy_agents"),
             ]
         )
     else:
@@ -4311,6 +4321,10 @@ app.include_router(analytics_router)
 
 # ─── Programa de afiliados → frontend/routes/affiliates.py ───────────────────
 app.include_router(affiliates_router)
+
+
+# ─── Agentes do Piggy → frontend/routes/agents.py ────────────────────────────
+app.include_router(agents_router)
 
 
 @app.get("/debug/ai/{user_id}/payload")

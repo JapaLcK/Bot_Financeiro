@@ -383,7 +383,7 @@ function taxProfileForAsset(assetType) {
 // Mapa view-id → elemento. Inclui as novas seções acessíveis pelo sidebar.
 const DASH_VIEWS = [
   "overview", "analytics", "history", "fixed", "budgets", "goals",
-  "categories", "installments", "cards", "investments", "affiliate"
+  "categories", "installments", "cards", "investments", "affiliate", "agentes"
 ];
 
 function setMainView(view) {
@@ -430,6 +430,7 @@ function navigateTo(view) {
   if (view === "fixed") setRecurringTab("overview");
   if (view === "goals") loadGoalsView();
   if (view === "affiliate") loadAffiliateView();
+  if (view === "agentes") loadAgentesView();
 }
 
 // ── Cartões (view dinâmica conectada ao backend) ──────────────────────
@@ -5453,6 +5454,7 @@ const UPGRADE_MESSAGES = {
   history_unlimited: "Histórico além de 30 dias é exclusivo do PigBank+.",
   changelog: "As notícias e resumos do mercado feitos pela Piggy são exclusivos do PigBank+. Assine pra desbloquear.",
   recurring_expenses: "A agenda de boletos e os gastos fixos são exclusivos do PigBank+. Cadastre suas contas a pagar e nunca mais perca um vencimento.",
+  agents: "No Free você ativa 1 agente. Com PigBank+ a equipe inteira de porquinhos trabalha pra você — Xerife, Repórter, Carteiro e os próximos que chegarem.",
   generic: "Essa feature é exclusiva pra quem assina o PigBank+."
 };
 
@@ -9143,4 +9145,139 @@ if ("serviceWorker" in navigator) {
       .then(r => console.log("[PWA] SW registered:", r.scope))
       .catch(e => console.warn("[PWA] SW failed:", e));
   });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   AGENTES DO PIGGY — prateleira, ativação e feed de disparos
+   ═══════════════════════════════════════════════════════════════════════ */
+let _agentesCache = null;
+
+async function loadAgentesView(forceFresh = false) {
+  const shelf = document.getElementById("agentes-shelf");
+  const feedEl = document.getElementById("agentes-feed");
+  if (!shelf) return;
+
+  if (_agentesCache && !forceFresh) {
+    _renderAgentes(_agentesCache);
+  } else {
+    shelf.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:26px">Chamando os porquinhos… 🐷</div>`;
+    if (feedEl) feedEl.innerHTML = "";
+  }
+
+  try {
+    const [shelfRes, feedRes] = await Promise.all([
+      fetch(`${API}/agents/${USER_ID}`, { credentials: "same-origin" }),
+      fetch(`${API}/agents/${USER_ID}/feed?limit=20`, { credentials: "same-origin" }),
+    ]);
+    const data = await readResponsePayload(shelfRes);
+    if (!shelfRes.ok) throw new Error(data.detail || "Não foi possível carregar os agentes.");
+    const feed = await readResponsePayload(feedRes);
+    data.events = feedRes.ok ? (feed.events || []) : [];
+    _agentesCache = data;
+    _renderAgentes(data);
+    // Marca o feed como lido (fire-and-forget; não bloqueia a view)
+    fetch(`${API}/agents/${USER_ID}/feed/seen`, {
+      method: "POST", credentials: "same-origin", headers: csrfHeaders(),
+    }).catch(() => {});
+  } catch (err) {
+    shelf.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:30px;color:var(--red)">Erro: ${esc(String(err.message || err))}</div>`;
+  }
+}
+
+function _renderAgentes(data) {
+  const counters = document.getElementById("agentes-counters");
+  const shelf = document.getElementById("agentes-shelf");
+  const feedEl = document.getElementById("agentes-feed");
+  if (!shelf) return;
+
+  const s = data.summary || {};
+  if (counters) {
+    counters.innerHTML = `
+      <span class="ag-counter"><i class="ag-dot ag-dot-on"></i> Ativos <b>${s.ativos || 0}</b></span>
+      <span class="ag-counter"><i class="ag-dot ag-dot-off"></i> Pausados <b>${s.pausados || 0}</b></span>
+      <span class="ag-counter"><i class="ag-dot ag-dot-fire"></i> Disparos <b>${s.disparos_mes || 0}</b></span>
+      ${s.salvos_ano > 0 ? `<span class="ag-counter ag-money">💰 ${fmt(s.salvos_ano)} salvos</span>` : ""}
+    `;
+  }
+
+  shelf.innerHTML = (data.catalog || []).map(card => {
+    const active = card.status === "active";
+    const chips = [
+      `<span class="ag-chip">${esc(card.freq)}</span>`,
+      card.fired_30d > 0 ? `<span class="ag-chip ag-chip-fire">⚡ ${card.fired_30d}</span>` : "",
+      card.saved_365d > 0 ? `<span class="ag-chip ag-chip-money">💰 ${fmtShort(card.saved_365d)}</span>` : "",
+    ].filter(Boolean).join("");
+    const btn = !card.disponivel
+      ? `<button class="ag-btn ag-btn-soon" disabled>Em breve</button>`
+      : active
+        ? `<button class="ag-btn ag-btn-active" onclick="pauseAgent('${card.kind}')">✓ Ativo · Pausar</button>`
+        : `<button class="ag-btn ag-btn-on" onclick="activateAgent('${card.kind}')">Ativar</button>`;
+    return `
+      <div class="ag-card${!card.disponivel ? " ag-card-soon" : ""}">
+        <div class="ag-avatar ag-bg-${esc(card.kind)}">
+          <svg viewBox="0 6 120 114" aria-hidden="true"><use href="#ag-pig-${esc(card.kind)}"/></svg>
+        </div>
+        <h3>${esc(card.nome)}</h3>
+        <p class="ag-desc">${esc(card.desc)}</p>
+        <div class="ag-chips">${chips}</div>
+        ${btn}
+      </div>
+    `;
+  }).join("");
+
+  if (feedEl) {
+    const events = data.events || [];
+    feedEl.innerHTML = events.length === 0
+      ? `<div class="empty" style="padding:22px">Nenhum disparo ainda. Ative um agente e ele fala assim que tiver algo que vale a pena. 🐷</div>`
+      : events.map(ev => {
+          const p = ev.payload || {};
+          return `
+            <div class="ag-event${ev.seen_at ? "" : " ag-event-new"}">
+              <div class="ag-event-face ag-bg-${esc(ev.kind)}">
+                <svg viewBox="0 6 120 114" aria-hidden="true"><use href="#ag-pig-${esc(ev.kind)}"/></svg>
+              </div>
+              <div class="ag-event-body">
+                <p class="ag-event-msg">${esc(p.mensagem || p.titulo || "Disparo")}</p>
+                <p class="ag-event-when">${esc(_agentName(ev.kind))} · ${fmtDate(ev.fired_at)}${ev.channel === "email" ? " · 📧 no seu e-mail" : ""}</p>
+              </div>
+            </div>
+          `;
+        }).join("");
+  }
+}
+
+function _agentName(kind) {
+  const card = ((_agentesCache || {}).catalog || []).find(c => c.kind === kind);
+  return card ? card.nome : kind;
+}
+
+async function activateAgent(kind) {
+  try {
+    const res = await fetch(`${API}/agents/${USER_ID}/${kind}/activate`, {
+      method: "POST", credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({}),
+    });
+    const data = await readResponsePayload(res);
+    if (res.status === 403 && (data.detail || {}).error === "pro_required") {
+      showUpgradeModal("agents");
+      return;
+    }
+    if (!res.ok) throw new Error((data.detail && data.detail.error) || data.detail || "Não deu pra ativar o agente.");
+    loadAgentesView(true);
+  } catch (err) {
+    alert(String(err.message || err));
+  }
+}
+
+async function pauseAgent(kind) {
+  try {
+    const res = await fetch(`${API}/agents/${USER_ID}/${kind}/pause`, {
+      method: "POST", credentials: "same-origin", headers: csrfHeaders(),
+    });
+    if (!res.ok) throw new Error("Não deu pra pausar o agente.");
+    loadAgentesView(true);
+  } catch (err) {
+    alert(String(err.message || err));
+  }
 }

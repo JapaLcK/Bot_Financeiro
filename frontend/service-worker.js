@@ -11,7 +11,7 @@
  * once the network is restored.
  */
 
-const CACHE_NAME = "finance-dash-v4";
+const CACHE_NAME = "finance-dash-v5";
 
 // Resources to pre-cache on install
 const PRECACHE = [
@@ -33,6 +33,7 @@ const SKIP_CACHE = [
   "/data/",
   "/open-finance/",
   "/history/",
+  "/agents/",
   "/health",
   "/admin",
   "/admin/",
