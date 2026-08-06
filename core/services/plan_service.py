@@ -199,6 +199,20 @@ def feature_enabled(user_id: int, key: str) -> bool:
     return bool(get_user_limits(user_id).get(key, False))
 
 
+def agent_kind_allowed(user_id: int, kind: str) -> bool:
+    """O tier do usuário dá direito a este agente? (escada v2: 0/0/3/6).
+
+    Com v2 OFF devolve True — o gate legado (Free 1 / Plus+ todos) mora na
+    rota de ativação e os runners não filtravam por plano no v1.
+    Usado pelos RUNNERS também: agente ativado no trial para de disparar
+    quando o usuário cai pro Grátis."""
+    if not plans_v2_enabled():
+        return True
+    from .plan_limits import AGENT_KIND_MIN_TIER
+    minimum = AGENT_KIND_MIN_TIER.get(kind, "pro")
+    return tier_at_least(get_plan_tier(int(user_id)), minimum)
+
+
 def require_min_tier(user_id: int, minimum: str) -> bool:
     """True se o tier efetivo do usuário é >= minimum ('essencial'|'plus'|'pro').
     Com v2 off, cai na semântica legada (is_pro pra qualquer exigência paga)."""

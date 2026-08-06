@@ -228,6 +228,35 @@ class TestLimits:
         plan_service.check_can_create_launch(1)  # v1 não tinha esse limite
 
 
+class TestAgentGates:
+    def test_free_e_essencial_sem_agentes(self, v2, monkeypatch):
+        _patch_user(monkeypatch, _user("free"))
+        assert plan_service.agent_kind_allowed(1, "xerife") is False
+        _patch_user(monkeypatch, _user("essencial", FUTURE))
+        assert plan_service.agent_kind_allowed(1, "xerife") is False
+
+    def test_plus_ativa_os_3_da_fase_a(self, v2, monkeypatch):
+        _patch_user(monkeypatch, _user("pro", FUTURE))  # 'pro' legado = Plus
+        for kind in ("xerife", "reporter", "carteiro"):
+            assert plan_service.agent_kind_allowed(1, kind) is True
+
+    def test_kind_desconhecido_exige_pro(self, v2, monkeypatch):
+        """Fase B (detetive/cofre/barao) e qualquer kind não mapeado → Pro+."""
+        _patch_user(monkeypatch, _user("pro", FUTURE))  # Plus
+        assert plan_service.agent_kind_allowed(1, "detetive") is False
+        _patch_user(monkeypatch, _user("pro_max", FUTURE))  # Pro novo
+        assert plan_service.agent_kind_allowed(1, "detetive") is True
+
+    def test_trial_ativa_como_plus(self, v2, monkeypatch):
+        _patch_user(monkeypatch, _user("free", trial_started=NOW))
+        assert plan_service.agent_kind_allowed(1, "xerife") is True
+
+    def test_v1_off_nao_filtra(self, monkeypatch):
+        monkeypatch.delenv("PLANS_V2_ENABLED", raising=False)
+        _patch_user(monkeypatch, _user("free"))
+        assert plan_service.agent_kind_allowed(1, "xerife") is True  # gate legado decide na rota
+
+
 class TestAIQuota:
     def test_cota_free(self, v2, monkeypatch):
         _patch_user(monkeypatch, _user("free"))

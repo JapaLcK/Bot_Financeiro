@@ -42,6 +42,17 @@ class PlanLimits(TypedDict):
 # Ordem canônica da escada. Comparações de tier usam este ranking.
 TIER_ORDER: dict[str, int] = {"free": 0, "essencial": 1, "plus": 2, "pro": 3}
 
+# Tier mínimo POR AGENTE (escada v2). Prateleira começa no Plus — Grátis e
+# Essencial têm 0 agentes (decisão 2026-08-06). Fase A = Plus+; Fase B
+# (detetive/cofre/barao, quando existirem) = Pro+. Kind não mapeado cai em
+# "pro" por segurança. Fonte única: rotas E runners leem daqui.
+AGENT_KIND_MIN_TIER: dict[str, str] = {
+    "xerife": "plus",
+    "reporter": "plus",
+    "carteiro": "plus",
+    # Fase B: "detetive": "pro", "cofre": "pro", "barao": "pro",
+}
+
 
 # Escada FINAL v3 (2026-08-06): Grátis R$0 · Essencial 9,90 · Plus 19,90 ·
 # Pro 49,90 (valor 'pro_max' no banco) · Premium engavetado ("em breve", sem

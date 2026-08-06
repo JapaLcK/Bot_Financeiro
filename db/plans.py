@@ -89,6 +89,39 @@ def get_trial_started_at(user_id: int) -> datetime | None:
     return started
 
 
+def list_trial_downsell_candidates(window_days: int = 7, trial_days: int = 30) -> list[int]:
+    """user_ids com trial vencido há até `window_days` dias, sem downsell enviado.
+
+    A janela evita e-mail atrasado em massa se o flag ligar meses depois de
+    trials antigos vencerem. O filtro fino (tier free de verdade, opt-out,
+    allowlist) é do chamador — aqui é só o funil por SQL."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select user_id from auth_accounts
+                where trial_started_at is not null
+                  and trial_downsell_sent_at is null
+                  and coalesce(engagement_opt_out, false) = false
+                  and trial_started_at + make_interval(days => %s) < now()
+                  and trial_started_at + make_interval(days => %s) > now() - make_interval(days => %s)
+                """,
+                (int(trial_days), int(trial_days), int(window_days)),
+            )
+            rows = cur.fetchall() or []
+    return [int(r["user_id"]) for r in rows]
+
+
+def mark_trial_downsell_sent(user_id: int) -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts set trial_downsell_sent_at = now() where user_id = %s",
+                (int(user_id),),
+            )
+        conn.commit()
+
+
 def count_launches_this_month(user_id: int) -> int:
     """Lançamentos do mês-calendário corrente (limite do tier Grátis)."""
     with get_conn() as conn:

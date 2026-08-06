@@ -1486,11 +1486,17 @@ async def lifespan(app: FastAPI):
         # o flag é relido a cada tick dentro do serviço (liga/desliga sem redeploy).
         interval = int(os.getenv("OF_TRIAL_EXPIRY_INTERVAL_SEC", str(6 * 60 * 60)))
         from core.services.open_finance_trial_expiry import pause_expired_trial_connections
+        from core.services.trial_downsell import send_trial_downsell_emails
         while True:
             try:
                 res = await asyncio.to_thread(pause_expired_trial_connections)
                 if not res.get("disabled"):
                     print(f"[of_trial_expiry] {res}", flush=True)
+                # Mesmo tick: downsell de fim de trial (1 e-mail por conta, na
+                # vida; janela de 7 dias). Inerte com o flag off.
+                res_ds = await asyncio.to_thread(send_trial_downsell_emails)
+                if not res_ds.get("disabled") and (res_ds.get("checked") or res_ds.get("sent")):
+                    print(f"[trial_downsell] {res_ds}", flush=True)
                 await asyncio.sleep(interval)
             except asyncio.CancelledError:
                 raise
