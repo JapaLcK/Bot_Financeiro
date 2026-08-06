@@ -100,6 +100,109 @@ def test_autolink_com_comando_nao_interrompe_para_boas_vindas(monkeypatch):
     assert replies == [("5565992741873", "uid=222 text=saldo", 222)]
 
 
+def test_numero_sem_conta_comando_bloqueia_e_convida_cadastro(monkeypatch):
+    """Número sem conta que manda um COMANDO (não saudação, não código) recebe o
+    convite de cadastro e NÃO cai no fluxo principal — sem isso o dado iria pra
+    uma conta fantasma invisível (ou pra mensagem de paywall que assume conta)."""
+    replies = []
+
+    monkeypatch.setattr(
+        "adapters.whatsapp.wa_runtime.get_or_create_canonical_user",
+        lambda provider, external_id: 111,
+    )
+    monkeypatch.setattr(
+        "adapters.whatsapp.wa_runtime.attempt_whatsapp_phone_link",
+        lambda wa_id, current_user_id=None: {"status": "no_match", "wa_phone": wa_id},
+    )
+    monkeypatch.setattr("adapters.whatsapp.wa_runtime.log_system_event_sync", lambda *a, **k: None)
+    monkeypatch.setattr("adapters.whatsapp.wa_runtime._autolink_warning_already_sent", lambda *a, **k: True)
+    monkeypatch.setattr("adapters.whatsapp.wa_runtime.send_typing_indicator", lambda *a, **k: None)
+    monkeypatch.setattr("adapters.whatsapp.wa_runtime._seen_recent", lambda message_id: False)
+    monkeypatch.setattr("adapters.whatsapp.wa_runtime._send_reply", lambda to, body: replies.append((to, body)))
+    monkeypatch.setattr(
+        "adapters.whatsapp.wa_runtime.handle_incoming",
+        lambda msg: (_ for _ in ()).throw(AssertionError("não deveria chamar o fluxo principal")),
+    )
+
+    process_message(
+        InboundMessage(
+            wa_id="5511988887777",
+            text="gastei 50 no mercado",
+            timestamp="123",
+            attachments=[],
+            raw={"id": "wamid.no-account", "type": "text"},
+        )
+    )
+
+    assert len(replies) == 1
+    to, body = replies[0]
+    assert to == "5511988887777"
+    assert "não tenho uma conta" in body.lower()
+    assert "/cadastro" in body
+
+
+def test_numero_sem_conta_com_codigo_de_vinculo_passa_pro_handler(monkeypatch):
+    """"link 123456" de um número sem conta NÃO pode ser barrado — é justamente
+    como quem se cadastrou sem telefone vincula o WhatsApp. Deve seguir pro
+    handle_incoming pra o código ser consumido."""
+    replies = []
+    handled = []
+
+    monkeypatch.setattr(
+        "adapters.whatsapp.wa_runtime.get_or_create_canonical_user",
+        lambda provider, external_id: 111,
+    )
+    monkeypatch.setattr(
+        "adapters.whatsapp.wa_runtime.attempt_whatsapp_phone_link",
+        lambda wa_id, current_user_id=None: {"status": "no_match", "wa_phone": wa_id},
+    )
+    monkeypatch.setattr(
+        "adapters.whatsapp.wa_runtime._send_no_account_notice",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("não deveria bloquear um código de vínculo")),
+    )
+    monkeypatch.setattr("adapters.whatsapp.wa_runtime.log_system_event_sync", lambda *a, **k: None)
+    monkeypatch.setattr("adapters.whatsapp.wa_runtime.send_typing_indicator", lambda *a, **k: None)
+    monkeypatch.setattr("adapters.whatsapp.wa_runtime._seen_recent", lambda message_id: False)
+    monkeypatch.setattr(
+        "adapters.whatsapp.wa_runtime._send_reply_with_optional_buttons",
+        lambda to, body, user_id=None: replies.append((to, body, user_id)),
+    )
+
+    def fake_handle_incoming(msg):
+        handled.append(msg)
+        return [OutgoingMessage(text="✅ WhatsApp vinculado!")]
+
+    monkeypatch.setattr("adapters.whatsapp.wa_runtime.handle_incoming", fake_handle_incoming)
+
+    process_message(
+        InboundMessage(
+            wa_id="5511988887777",
+            text="link 123456",
+            timestamp="123",
+            attachments=[],
+            raw={"id": "wamid.link-code", "type": "text"},
+        )
+    )
+
+    assert len(handled) == 1
+    assert handled[0].text == "link 123456"
+    assert replies == [("5511988887777", "✅ WhatsApp vinculado!", 111)]
+
+
+def test_is_link_code_attempt_espelha_normalizacao_do_classificador():
+    """Formas que o intent_classifier normaliza e roteia como vínculo têm que
+    passar pela exceção — pontuação e caixa não podem barrar o código."""
+    from adapters.whatsapp.wa_runtime import _is_link_code_attempt
+
+    for ok in ("link 123456", "vincular 123456", "link: 123456",
+               "link 123456.", "LINK 123456", "  vincular   123456  ", "Vincular: 123456"):
+        assert _is_link_code_attempt(ok) is True, ok
+
+    for no in ("gastei 50 no mercado", "link", "vincular", "link 12345",
+               "linkar 123456", "link 123456 agora", "oi"):
+        assert _is_link_code_attempt(no) is False, no
+
+
 def test_botao_parar_atualizacoes_desliga_updates_do_whatsapp(monkeypatch):
     replies = []
     updates = []
