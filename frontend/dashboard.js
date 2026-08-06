@@ -8107,12 +8107,19 @@ function closeAdjustWalletModal() {
   document.getElementById("adjust-wallet-overlay").classList.remove("open");
 }
 
+function _adjustWalletError(msg) {
+  const errEl = document.getElementById("adjust-wallet-error");
+  errEl.textContent = msg || "";
+  errEl.classList.toggle("show", Boolean(msg));  // .modal-error é display:none sem .show
+}
+
 async function submitAdjustWallet() {
   if (_adjustWalletState.submitting) return;
-  const errEl = document.getElementById("adjust-wallet-error");
-  errEl.textContent = "";
-  const v = parseFloat(document.getElementById("adjust-wallet-input").value);
-  if (isNaN(v) || v < 0) { errEl.textContent = "Digite um valor válido (zero ou positivo)."; return; }
+  _adjustWalletError("");
+  const raw = document.getElementById("adjust-wallet-input").value.trim();
+  if (raw === "") { _adjustWalletError("Digite um valor (use 0 se está tudo no banco)."); return; }
+  const v = parseFloat(raw);
+  if (isNaN(v) || v < 0) { _adjustWalletError("Digite um valor válido (zero ou positivo)."); return; }
   const btn = document.getElementById("adjust-wallet-submit");
   _adjustWalletState.submitting = true;
   btn.disabled = true;

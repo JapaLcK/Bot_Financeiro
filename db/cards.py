@@ -518,9 +518,10 @@ def credit_day_from_iso(value, default: int) -> int:
 def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str | None, raw: dict | None) -> int:
     """Resolve (ou cria) um cartão PigBank vinculado a uma conta de crédito do Open Finance.
 
-    Dedup pelo `open_finance_account_id`. Deriva fechamento/vencimento do creditData do
-    Pluggy (balanceCloseDate/balanceDueDate), com defaults. Desambigua o nome se colidir
-    com um cartão manual (unique(user_id, name)).
+    Dedup pelo `open_finance_account_id`. Se não achar, tenta ADOTAR um cartão MANUAL já
+    existente (open_finance_account_id NULL) com o mesmo nome — em vez de criar um cartão
+    novo "· Open Finance" duplicado. Só cria novo quando não há match. Deriva
+    fechamento/vencimento do creditData do Pluggy (balanceCloseDate/balanceDueDate).
     """
     ensure_user(user_id)
     credit = (raw or {}).get("creditData") or {}
@@ -537,6 +538,29 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
             row = cur.fetchone()
             if row:
                 return row["id"]
+
+            # Reconcilia com um cartão MANUAL de mesmo nome (case/trim-insensível) que ainda
+            # não tem conta OF vinculada, e ADOTA ele (vincula esta conta OF). Evita o
+            # duplicado "ultraviolet-black" + "ultraviolet-black · Open Finance".
+            cur.execute(
+                """
+                select id from credit_cards
+                where user_id=%s and open_finance_account_id is null
+                  and lower(btrim(name)) = lower(btrim(%s))
+                order by id
+                limit 1
+                """,
+                (user_id, base_name),
+            )
+            manual = cur.fetchone()
+            if manual:
+                cur.execute(
+                    "update credit_cards set open_finance_account_id=%s "
+                    "where id=%s and user_id=%s",
+                    (of_account_id, manual["id"], user_id),
+                )
+                conn.commit()
+                return manual["id"]
 
             card_name = None
             for cand in (base_name, f"{base_name} · Open Finance", f"{base_name} · OF{of_account_id}"):

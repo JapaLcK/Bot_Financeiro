@@ -504,11 +504,16 @@ async def get_financial_data(
     # Só contas BANK (corrente/poupança); cartão é dívida, fica na fatura.
     # `n` = nº de contas BANK conectadas: mesmo com saldo 0, sinaliza pro front mostrar
     # o breakdown "Carteira + Bancos" e a ação de ajustar a Carteira.
+    # DISTINCT ON (provider_account_id): reconectar cria nova conexão com a MESMA conta;
+    # sem dedup, o saldo (e a contagem) somaria em dobro. Pega a conexão mais recente.
     of_bank_rows = await _q(
-        "SELECT COALESCE(SUM(a.balance), 0) AS b, COUNT(*) AS n "
-        "FROM open_finance_accounts a "
-        "JOIN open_finance_connections c ON c.id = a.connection_id "
-        "WHERE c.user_id = %s AND UPPER(a.type) = 'BANK'",
+        "SELECT COALESCE(SUM(b), 0) AS b, COUNT(*) AS n FROM ("
+        "  SELECT DISTINCT ON (a.provider_account_id) a.balance AS b "
+        "  FROM open_finance_accounts a "
+        "  JOIN open_finance_connections c ON c.id = a.connection_id "
+        "  WHERE c.user_id = %s AND UPPER(a.type) = 'BANK' "
+        "  ORDER BY a.provider_account_id, c.id DESC"
+        ") uniq",
         (user_id,),
     )
     of_bank_balance = float(of_bank_rows[0]["b"]) if of_bank_rows else 0.0

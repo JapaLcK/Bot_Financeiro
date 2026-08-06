@@ -663,12 +663,33 @@ _OF_INTERNAL_KEYWORDS = (
     "poupanca", "poupança", "cofrinho",
 )
 
+# Pagamento de fatura de cartão: aparece nas DUAS contas (saída na corrente + entrada
+# no cartão). NÃO é gasto novo (as compras já entraram na fatura) nem estorno de compra.
+# No lado BANK vira movimento interno (não conta em gasto/sobrou); no lado CREDIT é
+# PULADO no import (senão duplica o pagamento e ainda bagunça o total da fatura).
+_OF_CREDIT_PAYMENT_CATEGORIES = ("credit card payment",)
+_OF_CREDIT_PAYMENT_KEYWORDS = (
+    "pagamento de fatura", "pagamento fatura", "pagamento de cartao",
+    "pagamento de cartão", "credit card payment", "pagamento recebido",
+)
+
+
+def is_credit_card_payment(category: str | None = None, description: str | None = None) -> bool:
+    """True se a transação é pagamento de fatura de cartão (não é compra nem gasto novo)."""
+    cat = (category or "").strip().lower()
+    desc = (description or "").lower()
+    return (
+        any(cat == c or cat.startswith(c) for c in _OF_CREDIT_PAYMENT_CATEGORIES)
+        or any(k in desc for k in _OF_CREDIT_PAYMENT_KEYWORDS)
+    )
+
 
 def classify_open_finance_launch(amount, category: str | None = None, description: str | None = None) -> dict:
     """Puro: decide tipo/valor/is_internal a partir da transação OF (amount já assinado).
 
-    Caixinha do banco (aplicação/resgate) e transferência entre contas próprias viram
-    movimento interno — ficam fora do cálculo de gastos/"sobrou" (igual `deposito_caixinha`).
+    Caixinha do banco (aplicação/resgate), transferência entre contas próprias e
+    pagamento de fatura de cartão viram movimento interno — ficam fora do cálculo de
+    gastos/"sobrou" (igual `deposito_caixinha`).
     """
     v = Decimal(str(amount))
     tipo = "despesa" if v < 0 else "receita"
@@ -677,6 +698,7 @@ def classify_open_finance_launch(amount, category: str | None = None, descriptio
     is_internal = (
         any(cat == c or cat.startswith(c) for c in _OF_INTERNAL_CATEGORIES)
         or any(k in desc for k in _OF_INTERNAL_KEYWORDS)
+        or is_credit_card_payment(category, description)
     )
     return {"tipo": tipo, "valor": abs(v), "is_internal_movement": is_internal}
 
@@ -1061,6 +1083,12 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
             rows = cur.fetchall()
 
     for r in rows:
+        # Pagamento de fatura NÃO é compra: pular. Ele aparece na conta de crédito como
+        # entrada (amount positivo) e, se importado, viraria um "estorno" que (a) duplica o
+        # pagamento já visto na conta corrente e (b) reduz errado o total da fatura. O lado
+        # BANK já o trata como movimento interno (classify_open_finance_launch).
+        if is_credit_card_payment(r["category"], r["description"]):
+            continue
         of_acc_id = r["of_account_id"]
         if of_acc_id not in card_cache:
             card_cache[of_acc_id] = get_or_create_open_finance_card(
@@ -1382,12 +1410,18 @@ def get_consolidated_balance(user_id: int) -> dict:
             row = cur.fetchone()
             manual = row["b"] if row else Decimal("0")
 
+            # Dedup por conta REAL (provider_account_id): reconectar o banco cria uma nova
+            # connection_id com a MESMA conta (a unicidade é por conexão), o que somaria o
+            # mesmo saldo 2x. DISTINCT ON pega o saldo da conexão mais recente por conta.
             cur.execute(
                 """
-                select coalesce(sum(a.balance), 0) as b
-                from open_finance_accounts a
-                join open_finance_connections c on c.id = a.connection_id
-                where c.user_id=%s and upper(a.type) = 'BANK'
+                select coalesce(sum(b), 0) as b from (
+                    select distinct on (a.provider_account_id) a.balance as b
+                    from open_finance_accounts a
+                    join open_finance_connections c on c.id = a.connection_id
+                    where c.user_id=%s and upper(a.type) = 'BANK'
+                    order by a.provider_account_id, c.id desc
+                ) uniq
                 """,
                 (user_id,),
             )
