@@ -59,3 +59,49 @@ def test_pluggy_webhook_accepts_valid_sha256_signature(monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == {"received": True}
+
+
+def test_pluggy_webhook_accepts_url_token(monkeypatch):
+    """A Pluggy nao assina o corpo; autentica pelo token na URL do webhook."""
+    async def _noop_log(*args, **kwargs):
+        return None
+
+    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "test-webhook-secret")
+    monkeypatch.setattr(open_finance_routes, "log_system_event", _noop_log)
+
+    response = TestClient(dashboard.app).post(
+        "/open-finance/pluggy/webhook?token=test-webhook-secret",
+        json={"event": "item/updated", "itemId": ""},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"received": True}
+
+
+def test_pluggy_webhook_accepts_header_token(monkeypatch):
+    """Alternativa: secret compartilhado via header custom configurado no painel."""
+    async def _noop_log(*args, **kwargs):
+        return None
+
+    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "test-webhook-secret")
+    monkeypatch.setattr(open_finance_routes, "log_system_event", _noop_log)
+
+    response = TestClient(dashboard.app).post(
+        "/open-finance/pluggy/webhook",
+        json={"event": "item/updated", "itemId": ""},
+        headers={"X-Webhook-Token": "test-webhook-secret"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"received": True}
+
+
+def test_pluggy_webhook_rejects_wrong_url_token(monkeypatch):
+    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "test-webhook-secret")
+
+    response = TestClient(dashboard.app).post(
+        "/open-finance/pluggy/webhook?token=wrong",
+        json={"event": "item/updated"},
+    )
+
+    assert response.status_code == 401

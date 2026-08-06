@@ -151,6 +151,14 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
     if not webhook_url and shared.DASHBOARD_URL.startswith("https://"):
         webhook_url = f"{shared.DASHBOARD_URL}/open-finance/pluggy/webhook"
 
+    # Anexa o secret como token na URL (a Pluggy chama de volta preservando a query).
+    # É como o webhook se autentica (a Pluggy não assina o corpo). Não duplica se já
+    # veio com token (ex.: PLUGGY_WEBHOOK_URL setado à mão com o token).
+    webhook_secret = (os.getenv("PLUGGY_WEBHOOK_SECRET") or "").strip()
+    if webhook_url and webhook_secret and "token=" not in webhook_url:
+        sep = "&" if "?" in webhook_url else "?"
+        webhook_url = f"{webhook_url}{sep}token={webhook_secret}"
+
     try:
         token_data = await asyncio.to_thread(
             create_pluggy_connect_token,
@@ -241,20 +249,60 @@ def _verify_pluggy_webhook_signature(raw_body: bytes, signature_header: str, sec
     return hmac.compare_digest(signature, expected)
 
 
+# Headers de secret compartilhado aceitos (caso configurados no painel da Pluggy).
+_PLUGGY_WEBHOOK_SECRET_HEADERS = ("x-webhook-token", "x-pluggy-token", "x-api-key")
+
+
+def _authorize_pluggy_webhook(request: Request, raw_body: bytes, secret: str) -> bool:
+    """Autentica o webhook da Pluggy.
+
+    ⚠️ A Pluggy NÃO assina o corpo com HMAC (a doc dela só oferece IP fixo +
+    header custom opcional). Então NÃO dá pra exigir `X-Pluggy-Signature` — isso
+    rejeitava todo evento real com 401. Aceitamos um secret compartilhado que a
+    GENTE controla ao registrar o webhook:
+
+    1. token na URL (`?token=<secret>`) — a URL do webhook é registrada por nós, no
+       connect-token e no painel; é o caminho principal e não depende de o painel
+       suportar header custom.
+    2. header com o secret (`X-Webhook-Token`/`X-Pluggy-Token`/`X-Api-Key`) — caso
+       você prefira configurar um header no painel.
+    3. assinatura HMAC (`X-Pluggy-Signature`) — mantida por compat/futuro; hoje a
+       Pluggy não manda, mas se um dia mandar, continua valendo.
+
+    Comparações em tempo constante. Sem secret configurado, o chamador já barra (503).
+    """
+    # 1. token na query string
+    token = request.query_params.get("token") or ""
+    if token and hmac.compare_digest(token, secret):
+        return True
+    # 2. header com o secret
+    for header_name in _PLUGGY_WEBHOOK_SECRET_HEADERS:
+        value = (request.headers.get(header_name) or "").strip()
+        if value and hmac.compare_digest(value, secret):
+            return True
+    # 3. assinatura HMAC do corpo (compat)
+    signature = request.headers.get("X-Pluggy-Signature") or ""
+    if signature and _verify_pluggy_webhook_signature(raw_body, signature, secret):
+        return True
+    return False
+
+
 @router.post("/open-finance/pluggy/webhook")
 async def open_finance_pluggy_webhook(request: Request):
     """
     Recebe eventos da Pluggy e responde rapido.
     Trabalho pesado de sync deve rodar fora do request.
+
+    Autenticação: secret compartilhado via token na URL / header (a Pluggy não
+    assina o corpo com HMAC). Ver `_authorize_pluggy_webhook`.
     """
     secret = (os.getenv("PLUGGY_WEBHOOK_SECRET") or "").strip()
     if not secret:
         raise HTTPException(status_code=503, detail="Webhook não configurado.")
 
     raw_body = await request.body()
-    received_sig = request.headers.get("X-Pluggy-Signature") or ""
-    if not _verify_pluggy_webhook_signature(raw_body, received_sig, secret):
-        raise HTTPException(status_code=401, detail="Assinatura inválida.")
+    if not _authorize_pluggy_webhook(request, raw_body, secret):
+        raise HTTPException(status_code=401, detail="Não autorizado.")
 
     try:
         event = json.loads(raw_body)
