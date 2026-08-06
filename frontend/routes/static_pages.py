@@ -237,6 +237,19 @@ async def serve_suporte():
                     headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
 
 
+@router.get("/ddf99f17-3a6c-460e-8fb5-1c2e978a24ae.html")
+async def serve_domain_verification():
+    """Arquivo de verificação de propriedade do domínio pigbankai.com.
+    Precisa ser servido na raiz do site (o serviço checa a URL exata).
+    O roteamento aqui é explícito (não há static server p/ HTML arbitrário),
+    então a rota é registrada à mão."""
+    return FileResponse(
+        FRONTEND_DIR / "ddf99f17-3a6c-460e-8fb5-1c2e978a24ae.html",
+        media_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.get("/robots.txt")
 async def serve_robots_txt():
     content = "\n".join([
