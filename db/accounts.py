@@ -124,6 +124,19 @@ def list_launches(user_id: int, limit: int = 10):
             return cur.fetchall()
 
 
+def latest_launch_id(user_id: int) -> int | None:
+    """Maior id de lançamento do usuário (ou None se não há nenhum). Usa max(id),
+    não a ordem por data — assim detecta uma inserção mesmo de lançamento
+    retroativo (criado_em no passado), cujo id é o maior mas não é o mais recente
+    por data."""
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select max(id) as mx from launches where user_id=%s", (user_id,))
+            row = cur.fetchone()
+            return int(row["mx"]) if row and row["mx"] is not None else None
+
+
 def list_launches_by_tipo(user_id: int, tipo: str, limit: int = 200):
     """Lançamentos recentes de um tipo (despesa/receita) com só os campos que
     a detecção de valor recorrente precisa (valor + descrição). Ordenado do mais

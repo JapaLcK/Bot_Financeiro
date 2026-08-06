@@ -234,13 +234,15 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     parts = _split_audio_transactions(transcription)
     is_multi = len(parts) > 1
 
-    # Id do último lançamento ANTES de processar este áudio. Serve pra saber se
+    # Maior id de lançamento ANTES de processar este áudio. Serve pra saber se
     # este turno REALMENTE inseriu um lançamento — uma resposta por áudio que só
     # resolve uma pendência ("cancelar", "sim"/"não" da oferta de gasto fixo)
     # devolve texto normal mas NÃO cria lançamento; nesse caso não se arma o undo
     # (senão o botão "Desfazer" apagaria o lançamento ANTERIOR do usuário).
-    _pre = db.list_launches(uid, limit=1)
-    pre_launch_id = int(_pre[0]["id"]) if _pre else None
+    # Usa max(id), não a ordem por data: um lançamento RETROATIVO ("gastei 50
+    # ontem no mercado") é inserido mas não é o mais recente por criado_em — o id,
+    # sim, é sempre o maior.
+    pre_launch_id = db.latest_launch_id(uid)
 
     responses = []
     fallbacks = []
@@ -286,8 +288,7 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
 
     # Este turno REALMENTE inseriu um lançamento? (vs só resolver uma pendência,
     # que devolve texto normal mas não cria lançamento). É o que decide o undo.
-    _post = db.list_launches(uid, limit=1)
-    post_launch_id = int(_post[0]["id"]) if _post else None
+    post_launch_id = db.latest_launch_id(uid)
     inserted_launch = post_launch_id is not None and post_launch_id != pre_launch_id
 
     # Enfileira a pergunta de valor faltante e monta a pergunta do primeiro item.
