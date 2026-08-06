@@ -244,6 +244,152 @@ function setCycle(cycle) {
   if (ba) { ba.style.borderRadius = "0 12px 12px 0"; ba.style.width = "auto"; }
   document.querySelectorAll("[data-price-monthly]").forEach(el => { el.style.display = cycle === "monthly" ? "" : "none"; });
   document.querySelectorAll("[data-price-annual]").forEach(el => { el.style.display = cycle === "annual" ? "" : "none"; });
+  if (typeof refreshPlanButtons === "function") refreshPlanButtons();
+}
+
+// ── Troca de plano (assinante logado) ───────────────────────────────────────
+// Regra: sem cobrança agora — o plano vira na PRÓXIMA cobrança. O backend
+// (/billing/subscription) diz o plano atual e se há troca agendada; os botões
+// dos cards mudam de "Assinar" pra "Seu plano atual / Trocar / Agendado".
+let subState = null;
+const PLAN_NAMES = { essencial: "Essencial", plus: "Plus", pro: "Pro" };
+const PLAN_PRICES = {
+  essencial: { monthly: "R$ 9,90/mês", annual: "R$ 99/ano" },
+  plus:      { monthly: "R$ 19,90/mês", annual: "R$ 199/ano" },
+  pro:       { monthly: "R$ 49,90/mês", annual: "R$ 499/ano" },
+};
+
+function fmtBrDate(iso) {
+  if (!iso) return "a data da renovação";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+async function loadSubscription() {
+  try {
+    const r = await fetch("/billing/subscription", { credentials: "same-origin" });
+    if (!r.ok) { subState = null; return; }
+    subState = await r.json();
+  } catch { subState = null; }
+}
+
+function refreshPlanButtons() {
+  document.querySelectorAll("[data-plan-btn]").forEach(btn => {
+    const p = btn.dataset.planBtn;
+    if (btn.dataset.unavailable === "1") return; // sem price configurado
+    if (!subState || (!subState.active && !subState.lifetime)) return; // deslogado/sem plano: Assinar
+    if (subState.lifetime) {
+      btn.disabled = true;
+      btn.textContent = "Você tem acesso vitalício 🐷";
+      btn.onclick = null;
+      return;
+    }
+    const sc = subState.scheduled_change;
+    if (sc && sc.plan === p) {
+      btn.disabled = false;
+      btn.textContent = `Agendado pra ${fmtBrDate(sc.effective_at)} ✓ · desfazer`;
+      btn.onclick = function () { cancelChange(btn); };
+      return;
+    }
+    if (p === subState.plan && currentCycle === (subState.interval || "monthly")) {
+      btn.disabled = true;
+      btn.textContent = "✓ Seu plano atual";
+      btn.onclick = null;
+      return;
+    }
+    btn.disabled = false;
+    btn.textContent = `Trocar pro ${PLAN_NAMES[p] || p}`;
+    btn.onclick = function () { openChangeModal(p); };
+  });
+}
+
+function _ensureChangeModal() {
+  if (document.getElementById("chg-overlay")) return;
+  const el = document.createElement("div");
+  el.id = "chg-overlay";
+  el.style.cssText = "display:none;position:fixed;inset:0;background:rgba(0,0,0,.66);backdrop-filter:blur(4px);z-index:998;align-items:center;justify-content:center;padding:20px";
+  el.innerHTML =
+    '<div style="background:#17171a;border:1px solid rgba(255,45,142,.35);border-radius:18px;max-width:430px;width:100%;padding:28px" onclick="event.stopPropagation()">' +
+    '<h3 style="margin:0 0 14px;font-size:1.15rem">Trocar de plano?</h3>' +
+    '<div id="chg-body" style="color:rgba(255,255,255,.8);font-size:.92rem;line-height:1.65"></div>' +
+    '<div style="display:flex;gap:10px;margin-top:22px">' +
+    '<button id="chg-confirm" class="btn btn-primary" style="flex:1">Confirmar troca</button>' +
+    '<button class="btn btn-outline" style="flex:1" onclick="closeChangeModal()">Cancelar</button>' +
+    "</div></div>";
+  el.addEventListener("click", closeChangeModal);
+  document.body.appendChild(el);
+}
+
+function closeChangeModal() {
+  const el = document.getElementById("chg-overlay");
+  if (el) el.style.display = "none";
+}
+
+function openChangeModal(plan) {
+  _ensureChangeModal();
+  const cur = PLAN_NAMES[subState.plan] || "seu plano atual";
+  const novo = PLAN_NAMES[plan] || plan;
+  const preco = (PLAN_PRICES[plan] || {})[currentCycle] || "";
+  const data = fmtBrDate(subState.current_period_end);
+  document.getElementById("chg-body").innerHTML =
+    `<p style="margin:0 0 10px"><strong>${cur}</strong> → <strong>${novo} (${preco})</strong></p>` +
+    "<p style=\"margin:0 0 6px\">✅ Nada é cobrado agora</p>" +
+    `<p style="margin:0 0 6px">✅ Você continua no ${cur} até <strong>${data}</strong> (período já pago)</p>` +
+    `<p style="margin:0">✅ Em ${data} seu plano vira ${novo} e a cobrança de ${preco} acontece no cartão cadastrado</p>`;
+  const confirm = document.getElementById("chg-confirm");
+  confirm.disabled = false;
+  confirm.textContent = "Confirmar troca";
+  confirm.onclick = async function () {
+    confirm.disabled = true;
+    confirm.textContent = "Agendando…";
+    try {
+      const r = await fetch("/billing/change-plan", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "x-csrf-token": getCsrfToken() },
+        body: JSON.stringify({ plan: plan, interval: currentCycle }),
+      });
+      const data2 = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = (data2.detail && data2.detail.message) ||
+          (typeof data2.detail === "string" ? data2.detail : "Não consegui agendar a troca.");
+        showToast(msg, "err");
+        confirm.disabled = false;
+        confirm.textContent = "Confirmar troca";
+        return;
+      }
+      closeChangeModal();
+      showToast(`✓ Troca agendada pra ${fmtBrDate(data2.effective_at)} — te mandei um e-mail de confirmação.`);
+      await loadSubscription();
+      refreshPlanButtons();
+    } catch {
+      showToast("Erro de conexão. Tente novamente.", "err");
+      confirm.disabled = false;
+      confirm.textContent = "Confirmar troca";
+    }
+  };
+  document.getElementById("chg-overlay").style.display = "flex";
+}
+
+async function cancelChange(btn) {
+  btn.disabled = true;
+  try {
+    const r = await fetch("/billing/cancel-change", {
+      method: "POST", credentials: "same-origin",
+      headers: { "x-csrf-token": getCsrfToken() },
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      showToast((d.detail && d.detail.message) || "Não consegui desfazer.", "err");
+      btn.disabled = false;
+      return;
+    }
+    showToast("Troca desfeita — seu plano continua como está. 🐷");
+    await loadSubscription();
+    refreshPlanButtons();
+  } catch {
+    showToast("Erro de conexão. Tente novamente.", "err");
+    btn.disabled = false;
+  }
 }
 
 (async function loadPlansMode(){
@@ -268,12 +414,15 @@ function setCycle(cycle) {
     // deixa o usuário clicar pra tomar um erro).
     if (!cfg.essencial_available) {
       const b = document.querySelector('[data-plan-btn="essencial"]');
-      if (b) { b.disabled = true; b.textContent = "Indisponível"; }
+      if (b) { b.disabled = true; b.textContent = "Indisponível"; b.dataset.unavailable = "1"; }
     }
     if (!cfg.pro_available) {
       const b = document.querySelector('[data-plan-btn="pro"]');
-      if (b) { b.disabled = true; b.textContent = "Indisponível"; }
+      if (b) { b.disabled = true; b.textContent = "Indisponível"; b.dataset.unavailable = "1"; }
     }
+    // Assinante logado: botões viram "Seu plano atual / Trocar / Agendado".
+    await loadSubscription();
+    refreshPlanButtons();
   } catch {}
 })();
 
@@ -311,10 +460,21 @@ async function startCheckout(interval, btn, plan) {
 
     if (!resp.ok) {
       let detail = "Não foi possível iniciar o checkout.";
-      try { const data = await resp.json(); if (typeof data.detail === "string") detail = data.detail; } catch {}
-      showToast(detail, "err");
+      let code = null;
+      try {
+        const data = await resp.json();
+        if (typeof data.detail === "string") detail = data.detail;
+        else if (data.detail && data.detail.message) { detail = data.detail.message; code = data.detail.error; }
+      } catch {}
       btn.classList.remove("loading");
       btn.textContent = originalText;
+      // Guarda anti-assinatura-dupla: já assina → abre a TROCA de plano em vez
+      // de deixar o clique morrer num erro.
+      if (code === "already_subscribed" && plan) {
+        await loadSubscription();
+        if (subState && subState.active) { openChangeModal(plan); return; }
+      }
+      showToast(detail, "err");
       return;
     }
 

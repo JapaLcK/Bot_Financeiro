@@ -132,6 +132,32 @@ def _base_html(title: str, content: str) -> str:
 </html>"""
 
 
+def send_plan_change_scheduled_email(to: str, new_plan_name: str, effective_date: str, dashboard_url: str = "") -> bool:
+    """Confirmação de troca de plano agendada (regra: sem cobrança agora — o
+    plano vira na data da próxima cobrança). Registro escrito pro usuário não
+    achar que o clique não fez nada."""
+    base = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    try:
+        from datetime import datetime as _dt
+        d = _dt.strptime(effective_date, "%Y-%m-%d").strftime("%d/%m/%Y")
+    except Exception:
+        d = effective_date
+    content = f"""
+      <p>Troca de plano confirmada! 🐷</p>
+      <p>Você continua no seu plano atual — que já está pago — até o fim do período.
+      Em <strong>{d}</strong> sua conta vira <strong>{new_plan_name}</strong> e a
+      primeira cobrança do plano novo acontece no cartão cadastrado.</p>
+      <div class="highlight"><p style="margin:0">✅ Nada foi cobrado agora ·
+      ✅ Mudou de ideia? Dá pra desfazer em <a href="{base}/precos">pigbankai.com/precos</a>
+      até a data da virada.</p></div>
+    """
+    return send_email(
+        to,
+        f"Troca agendada: seu PigBank vira {new_plan_name} em {d} 🐷",
+        _base_html("Troca de plano agendada", content),
+    )
+
+
 def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
     """Fim do trial de 30 dias sem assinatura → downsell pro Essencial.
 

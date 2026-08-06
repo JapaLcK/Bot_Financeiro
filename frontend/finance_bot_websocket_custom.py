@@ -139,6 +139,74 @@ STRIPE_PRICE_ID_PROMAX_MENSAL = os.getenv("STRIPE_PRICE_ID_PROMAX_MENSAL", "")
 STRIPE_PRICE_ID_PROMAX_ANUAL  = os.getenv("STRIPE_PRICE_ID_PROMAX_ANUAL", "")
 
 
+def _plan_interval_for_price(price_id: str | None) -> tuple[str | None, str | None]:
+    """Reverso do _resolve_price_id: price do Stripe → (plano, intervalo) da
+    escada. Usado pela troca de plano (comparar atual × alvo) e pelo
+    /billing/subscription. Ignora envs vazias (dict não pode ter chave "")."""
+    pairs = [
+        (STRIPE_PRICE_ID_ESSENCIAL_MENSAL, ("essencial", "monthly")),
+        (STRIPE_PRICE_ID_ESSENCIAL_ANUAL, ("essencial", "annual")),
+        (STRIPE_PRICE_ID_PRO_MENSAL, ("plus", "monthly")),
+        (STRIPE_PRICE_ID_PRO, ("plus", "monthly")),   # legado
+        (STRIPE_PRICE_ID_PRO_ANUAL, ("plus", "annual")),
+        (STRIPE_PRICE_ID_PROMAX_MENSAL, ("pro", "monthly")),
+        (STRIPE_PRICE_ID_PROMAX_ANUAL, ("pro", "annual")),
+    ]
+    for env_price, result in pairs:
+        if env_price and price_id == env_price:
+            return result
+    return (None, None)
+
+
+def _sg(obj, key, default=None):
+    """Acessor seguro pra objetos do SDK Stripe v8 (não são dicts — sempre
+    obj[k] com try/except, nunca .get). Espelho do _g do webhook."""
+    if obj is None:
+        return default
+    try:
+        v = obj[key]
+    except (KeyError, TypeError, AttributeError):
+        return default
+    return v if v is not None else default
+
+
+def _sub_price_id(sub) -> str | None:
+    """Price do primeiro item da assinatura (SDK v8: só via _sg)."""
+    items_obj = _sg(sub, "items", {})
+    data = _sg(items_obj, "data", []) or []
+    if not data:
+        return None
+    price = _sg(data[0], "price", {})
+    pid = _sg(price, "id")
+    return pid if isinstance(pid, str) else None
+
+
+def _sub_period_end_ts(sub) -> int | None:
+    """current_period_end da assinatura. API >= 2025-09 moveu pro item."""
+    ts = _sg(sub, "current_period_end")
+    if ts is None:
+        items_obj = _sg(sub, "items", {})
+        data = _sg(items_obj, "data", []) or []
+        if data:
+            ts = _sg(data[0], "current_period_end")
+    return ts
+
+
+def _find_active_subscription(stripe_mod, customer_id: str):
+    """Primeira assinatura viva do customer (active > trialing > past_due).
+    Nunca levanta: erro de API conta como 'sem assinatura' (fail-open, igual
+    aos outros gates — melhor deixar passar do que travar quem paga)."""
+    for status in ("active", "trialing", "past_due"):
+        try:
+            subs = stripe_mod.Subscription.list(customer=customer_id, status=status, limit=1)
+            data = _sg(subs, "data", []) or []
+            if data:
+                return data[0]
+        except Exception:
+            continue
+    return None
+
+
 def _stored_plan_for_price(price_id: str | None) -> str:
     """Mapeia o price do Stripe → valor da coluna auth_accounts.plan.
     'pro' é o valor LEGADO do tier Plus (R$ 19,90) — não renomear no banco.
@@ -3311,6 +3379,25 @@ async def billing_create_checkout(
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
 
+    # ── Guarda anti-assinatura-dupla ─────────────────────────────────────────
+    # Quem JÁ tem assinatura ativa nunca ganha um checkout novo (viraria duas
+    # cobranças recorrentes pro mesmo usuário). Troca de plano é outro fluxo:
+    # POST /billing/change-plan (agenda a virada pro fim do período pago).
+    if (user.get("last_payment_status") or "") == "grandfathered":
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "lifetime",
+                    "message": "Você já tem acesso vitalício de brinde — assinar um plano substituiria isso. Fala com a gente se quiser mudar."},
+        )
+    if user.get("stripe_customer_id"):
+        existing_sub = _find_active_subscription(stripe, user["stripe_customer_id"])
+        if existing_sub is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={"error": "already_subscribed",
+                        "message": "Você já tem um plano ativo. Use a troca de plano — sem cobrança dupla."},
+            )
+
     def _new_customer() -> str:
         c = stripe.Customer.create(
             email=user["email"],
@@ -3374,6 +3461,206 @@ async def billing_create_checkout(
         raise HTTPException(status_code=502, detail=f"Erro no Stripe ao iniciar o checkout: {exc}")
 
     return {"checkout_url": session.url, "interval": interval, "plan": plan}
+
+
+# ─── Troca de plano (upgrade/downgrade sem assinatura dupla) ─────────────────
+# Regra do Lucas (2026-08-06): a troca NUNCA cobra na hora — consome o período
+# já pago e vira o plano na PRÓXIMA cobrança (Subscription Schedule, proration
+# none). Vale pra upgrade, downgrade e mensal↔anual.
+
+class ChangePlanBody(BaseModel):
+    plan: str
+    interval: str = "monthly"
+
+
+@app.get("/billing/subscription")
+async def billing_subscription(user_id: int = Depends(_get_current_user)):
+    """Estado da assinatura pro front (/precos): plano/intervalo atual, fim do
+    período pago e troca agendada (se houver). Sem assinatura → active: False."""
+    import stripe
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import get_auth_user
+
+    user = await asyncio.to_thread(get_auth_user, user_id) or {}
+    if (user.get("last_payment_status") or "") == "grandfathered":
+        return {"active": True, "lifetime": True, "plan": "plus", "interval": None,
+                "current_period_end": None, "scheduled_change": None}
+    cust = user.get("stripe_customer_id")
+    if not STRIPE_SECRET_KEY or not cust:
+        return {"active": False}
+    stripe.api_key = STRIPE_SECRET_KEY
+
+    sub = await asyncio.to_thread(_find_active_subscription, stripe, cust)
+    if sub is None:
+        return {"active": False}
+
+    plan, interval = _plan_interval_for_price(_sub_price_id(sub))
+    period_end = _sub_period_end_ts(sub)
+    period_end_iso = (
+        datetime.fromtimestamp(period_end, tz=timezone.utc).date().isoformat()
+        if period_end else None
+    )
+
+    scheduled = None
+    sched_ref = _sg(sub, "schedule")
+    if sched_ref:
+        sched_id = sched_ref if isinstance(sched_ref, str) else _sg(sched_ref, "id")
+        try:
+            sched = await asyncio.to_thread(stripe.SubscriptionSchedule.retrieve, sched_id)
+            phases = _sg(sched, "phases", []) or []
+            if len(phases) >= 2:
+                nxt = phases[-1]
+                nxt_items = _sg(nxt, "items", []) or []
+                nprice = _sg(nxt_items[0], "price") if nxt_items else None
+                nprice = nprice if isinstance(nprice, str) else _sg(nprice, "id")
+                nplan, ninterval = _plan_interval_for_price(nprice)
+                nstart = _sg(nxt, "start_date")
+                if nplan and (nplan, ninterval) != (plan, interval):
+                    scheduled = {
+                        "plan": nplan, "interval": ninterval,
+                        "effective_at": (
+                            datetime.fromtimestamp(nstart, tz=timezone.utc).date().isoformat()
+                            if nstart else period_end_iso
+                        ),
+                    }
+        except Exception:
+            pass
+
+    return {"active": True, "lifetime": False, "plan": plan, "interval": interval,
+            "current_period_end": period_end_iso, "scheduled_change": scheduled}
+
+
+@app.post("/billing/change-plan")
+async def billing_change_plan(
+    payload: ChangePlanBody,
+    user_id: int = Depends(_get_current_user),
+):
+    """Agenda a troca de plano pro fim do período já pago. Sem cobrança agora;
+    a primeira fatura do plano novo sai na data da virada (cartão em arquivo)."""
+    interval = (payload.interval or "monthly").lower()
+    if interval not in ("monthly", "annual"):
+        raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
+    plan = (payload.plan or "").lower()
+    if plan not in ("essencial", "plus", "pro"):
+        raise HTTPException(status_code=400, detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
+    target_price = _resolve_price_id(plan, interval)
+    if not STRIPE_SECRET_KEY or not target_price:
+        raise HTTPException(status_code=503, detail="Esse plano ainda não está configurado.")
+
+    import stripe
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import get_auth_user
+
+    user = await asyncio.to_thread(get_auth_user, user_id) or {}
+    if (user.get("last_payment_status") or "") == "grandfathered":
+        raise HTTPException(status_code=409, detail={
+            "error": "lifetime",
+            "message": "Você tem acesso vitalício de brinde — trocar de plano substituiria isso.",
+        })
+    cust = user.get("stripe_customer_id")
+    if not cust:
+        raise HTTPException(status_code=409, detail={"error": "no_subscription"})
+    stripe.api_key = STRIPE_SECRET_KEY
+
+    sub = await asyncio.to_thread(_find_active_subscription, stripe, cust)
+    if sub is None:
+        raise HTTPException(status_code=409, detail={"error": "no_subscription"})
+
+    cur_price = _sub_price_id(sub)
+    if cur_price == target_price:
+        raise HTTPException(status_code=400, detail={
+            "error": "same_plan", "message": "Esse já é o seu plano atual."})
+
+    sub_id = _sg(sub, "id")
+    period_end = _sub_period_end_ts(sub)
+    if not sub_id or not period_end:
+        raise HTTPException(status_code=502, detail="Não consegui ler sua assinatura no Stripe.")
+
+    try:
+        sched_ref = _sg(sub, "schedule")
+        if sched_ref:
+            sched_id = sched_ref if isinstance(sched_ref, str) else _sg(sched_ref, "id")
+        else:
+            sched = await asyncio.to_thread(
+                stripe.SubscriptionSchedule.create, from_subscription=sub_id)
+            sched_id = _sg(sched, "id")
+        sched = await asyncio.to_thread(stripe.SubscriptionSchedule.retrieve, sched_id)
+        phases = _sg(sched, "phases", []) or []
+        p0_start = _sg(phases[0], "start_date") if phases else None
+        # Fase 1: plano atual até o fim do período pago. Fase 2: 1 ciclo do
+        # plano novo; depois o schedule "solta" (release) e a assinatura segue
+        # renovando no preço novo normalmente.
+        await asyncio.to_thread(
+            stripe.SubscriptionSchedule.modify,
+            sched_id,
+            end_behavior="release",
+            proration_behavior="none",
+            phases=[
+                {"items": [{"price": cur_price, "quantity": 1}],
+                 "start_date": p0_start, "end_date": period_end},
+                {"items": [{"price": target_price, "quantity": 1}], "iterations": 1},
+            ],
+        )
+    except stripe.error.StripeError as exc:
+        logging.getLogger(__name__).error("change_plan_stripe_error user=%s: %s", user_id, exc)
+        raise HTTPException(status_code=502, detail=f"O Stripe recusou a troca: {exc}")
+
+    effective_iso = datetime.fromtimestamp(period_end, tz=timezone.utc).date().isoformat()
+
+    # E-mail de confirmação do agendamento (best-effort, nunca derruba a troca)
+    try:
+        email = user.get("email")
+        if email:
+            from core.services.email_service import send_plan_change_scheduled_email
+            plan_names = {"essencial": "Essencial", "plus": "Plus", "pro": "Pro"}
+            await asyncio.to_thread(
+                send_plan_change_scheduled_email, email,
+                plan_names.get(plan, plan.title()), effective_iso, DASHBOARD_URL)
+    except Exception as exc:
+        print(f"[billing] email troca agendada user={user_id}: {exc}", file=sys.stderr)
+
+    await log_system_event(
+        "info", "billing_plan_change_scheduled",
+        f"Troca de plano agendada para {plan}/{interval} em {effective_iso}.",
+        source="billing", user_id=user_id,
+        details={"plan": plan, "interval": interval, "effective_at": effective_iso},
+    )
+    return {"ok": True, "scheduled": True, "plan": plan, "interval": interval,
+            "effective_at": effective_iso}
+
+
+@app.post("/billing/cancel-change")
+async def billing_cancel_change(user_id: int = Depends(_get_current_user)):
+    """Desfaz uma troca de plano agendada (solta o schedule; assinatura segue
+    no plano atual como se nada tivesse acontecido)."""
+    import stripe
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import get_auth_user
+
+    user = await asyncio.to_thread(get_auth_user, user_id) or {}
+    cust = user.get("stripe_customer_id")
+    if not STRIPE_SECRET_KEY or not cust:
+        raise HTTPException(status_code=409, detail={"error": "no_subscription"})
+    stripe.api_key = STRIPE_SECRET_KEY
+
+    sub = await asyncio.to_thread(_find_active_subscription, stripe, cust)
+    sched_ref = _sg(sub, "schedule") if sub is not None else None
+    if not sched_ref:
+        raise HTTPException(status_code=400, detail={"error": "no_change",
+                                                     "message": "Não há troca agendada."})
+    sched_id = sched_ref if isinstance(sched_ref, str) else _sg(sched_ref, "id")
+    try:
+        await asyncio.to_thread(stripe.SubscriptionSchedule.release, sched_id)
+    except stripe.error.StripeError as exc:
+        raise HTTPException(status_code=502, detail=f"O Stripe recusou o cancelamento: {exc}")
+    await log_system_event(
+        "info", "billing_plan_change_cancelled",
+        "Troca de plano agendada foi desfeita.", source="billing", user_id=user_id,
+    )
+    return {"ok": True}
 
 
 @app.post("/billing/webhook")
