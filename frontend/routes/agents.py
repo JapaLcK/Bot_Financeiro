@@ -43,7 +43,8 @@ AGENT_CATALOG: list[dict] = [
         "disponivel": False,
     },
     {
-        "kind": "cofre", "nome": "Cofre", "emoji": "🎯",
+        # Renomeado 2026-08-06 (era "Cofre"); o kind interno segue "cofre".
+        "kind": "cofre", "nome": "Guardião do Tesouro", "emoji": "🎯",
         "freq": "Dia do salário",
         "desc": "Acompanha suas caixinhas e sugere o aporte que adianta a meta",
         "disponivel": False,

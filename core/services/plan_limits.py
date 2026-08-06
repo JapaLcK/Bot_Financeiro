@@ -120,7 +120,7 @@ PLUS_LIMITS: PlanLimits = {
 PRO_LIMITS: PlanLimits = {
     **PLUS_LIMITS,
     "of_banks_max": 5,
-    "agents_max": 6,                     # + Detetive, Cofre, Barão
+    "agents_max": 6,                     # + Detetive, Guardião do Tesouro (kind "cofre"), Barão
 }
 
 
