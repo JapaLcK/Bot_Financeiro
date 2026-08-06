@@ -767,18 +767,22 @@ def propose_delete(user_id: int, launch_id: int) -> str:
 
 
 def undo(user_id: int) -> str:
-    rows = db.list_launches(user_id, limit=1)
-    if not rows:
+    # Último lançamento CRIADO (maior id), não o mais recente por data: "desfazer"
+    # deve remover o que o usuário acabou de lançar, mesmo que seja retroativo
+    # ("gastei 50 ontem" cria com criado_em no passado — list_launches ordena por
+    # data e miraria o lançamento de hoje, apagando o errado).
+    row = db.get_last_inserted_launch(user_id)
+    if not row:
         return "Não há lançamentos para desfazer."
-    last_id = int(rows[0]["id"])
-    display_id = int(rows[0].get("user_seq") or last_id)
+    last_id = int(row["id"])
+    display_id = int(row.get("user_seq") or last_id)
     db.set_pending_action(
         user_id,
         "delete_launch",
         {"launch_id": last_id, "display_id": display_id},
     )
-    tipo  = rows[0].get("tipo", "")
-    valor = fmt_brl(float(rows[0].get("valor") or 0))
+    tipo  = row.get("tipo", "")
+    valor = fmt_brl(float(row.get("valor") or 0))
     return (
         f"⚠️ Desfazer o último lançamento: **#{display_id}** ({tipo} {valor})?\n"
         "Confirma? Responda **sim** ou **não**."

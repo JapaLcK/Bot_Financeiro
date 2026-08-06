@@ -167,3 +167,14 @@ def test_audio_resposta_valor_arma_undo(small_uid, audio):
     assert _valores(small_uid) == [("despesa", 500.0), ("despesa", 1500.0)]
     p = db.get_pending_action(small_uid)
     assert p and p["action_type"] == "undo_audio"
+
+
+def test_audio_lancamento_retroativo_arma_undo(small_uid, audio):
+    """Regressão: um lançamento RETROATIVO ("gastei 50 ontem") é inserido mas não
+    é o mais recente por data — a detecção por max(id) tem que pegar a inserção e
+    armar o undo mesmo assim (antes, comparando por criado_em, ficava de fora)."""
+    audio(small_uid, "gastei 100 no ifood")          # lançamento de hoje
+    audio(small_uid, "gastei 50 ontem no mercado")   # retroativo: criado_em = ontem
+    assert ("despesa", 50.0) in _valores(small_uid)  # registrou de fato
+    p = db.get_pending_action(small_uid)
+    assert p and p["action_type"] == "undo_audio"    # undo armado apesar da data
