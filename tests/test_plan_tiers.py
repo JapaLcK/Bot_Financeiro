@@ -157,10 +157,21 @@ class TestTrialStatus:
 
 class TestLimits:
     def test_escada_historico(self):
-        assert FREE_LIMITS["history_days"] == 30
-        assert ESSENCIAL_LIMITS["history_days"] == 90
+        assert FREE_LIMITS["history_days"] == 90
+        assert ESSENCIAL_LIMITS["history_days"] == 730   # 24 meses
         assert PLUS_LIMITS["history_days"] is None
         assert PRO_LIMITS["history_days"] is None
+
+    def test_escada_bancos_e_agentes(self):
+        # Escada final v3: bancos 0(1 só no trial)/1/2/5 · agentes 0/0/3/6
+        assert FREE_LIMITS["of_banks_max"] == 0
+        assert ESSENCIAL_LIMITS["of_banks_max"] == 1
+        assert PLUS_LIMITS["of_banks_max"] == 2
+        assert PRO_LIMITS["of_banks_max"] == 5
+        assert FREE_LIMITS["agents_max"] == 0
+        assert ESSENCIAL_LIMITS["agents_max"] == 0
+        assert PLUS_LIMITS["agents_max"] == 3
+        assert PRO_LIMITS["agents_max"] == 6
 
     def test_tier_at_least(self):
         assert tier_at_least("plus", "essencial")
@@ -174,19 +185,19 @@ class TestLimits:
         assert limits["of_banks_max"] == 1          # trial = Plus com OF capado
         assert limits["history_days"] is None        # resto do Plus intacto
 
-    def test_plus_pago_of_5_bancos(self, v2, monkeypatch):
+    def test_plus_pago_of_2_bancos(self, v2, monkeypatch):
         _patch_user(monkeypatch, _user("pro", FUTURE))
-        assert plan_service.get_user_limits(1)["of_banks_max"] == 5
+        assert plan_service.get_user_limits(1)["of_banks_max"] == 2
 
-    def test_pro_max_of_ilimitado(self, v2, monkeypatch):
+    def test_pro_max_of_5_bancos(self, v2, monkeypatch):
         _patch_user(monkeypatch, _user("pro_max", FUTURE))
-        assert plan_service.get_user_limits(1)["of_banks_max"] is None
+        assert plan_service.get_user_limits(1)["of_banks_max"] == 5
 
     def test_history_caps(self, v2, monkeypatch):
         _patch_user(monkeypatch, _user("free"))
-        assert plan_service.history_months_cap(1) == 1
+        assert plan_service.history_months_cap(1) == 3     # 90 dias
         _patch_user(monkeypatch, _user("essencial", FUTURE))
-        assert plan_service.history_months_cap(1) == 3
+        assert plan_service.history_months_cap(1) == 24    # 24 meses
         _patch_user(monkeypatch, _user("pro", FUTURE))
         assert plan_service.history_months_cap(1) is None
 

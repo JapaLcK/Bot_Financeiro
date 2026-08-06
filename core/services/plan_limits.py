@@ -43,10 +43,13 @@ class PlanLimits(TypedDict):
 TIER_ORDER: dict[str, int] = {"free": 0, "essencial": 1, "plus": 2, "pro": 3}
 
 
+# Escada FINAL v3 (2026-08-06): Grátis R$0 · Essencial 9,90 · Plus 19,90 ·
+# Pro 49,90 (valor 'pro_max' no banco) · Premium engavetado ("em breve", sem
+# tier no código). Bancos OF: 1 só no trial / 1 / 2 / 5. Agentes: 0/0/3/6.
 FREE_LIMITS: PlanLimits = {
     "pockets_max": 1,
     "cards_max": 1,
-    "history_days": 30,
+    "history_days": 90,
     "investments_enabled": False,
     "ofx_enabled": False,
     "export_enabled": False,
@@ -58,15 +61,15 @@ FREE_LIMITS: PlanLimits = {
     "audio_enabled": False,
     "image_ocr_enabled": False,
     "bills_enabled": False,
-    "of_banks_max": 0,
-    "agents_max": 1,                     # Xerife (proativo só por e-mail)
+    "of_banks_max": 0,                   # OF só durante o trial (pausa depois)
+    "agents_max": 0,                     # agentes só nos 30d de trial
 }
 
 
 ESSENCIAL_LIMITS: PlanLimits = {
     "pockets_max": None,
     "cards_max": None,
-    "history_days": 90,
+    "history_days": 730,                 # 24 meses
     "investments_enabled": True,
     "ofx_enabled": True,
     "export_enabled": True,
@@ -78,8 +81,8 @@ ESSENCIAL_LIMITS: PlanLimits = {
     "audio_enabled": True,
     "image_ocr_enabled": True,
     "bills_enabled": True,
-    "of_banks_max": 1,
-    "agents_max": 3,                     # Xerife + Repórter + Carteiro
+    "of_banks_max": 1,                   # 1 conexão viva (pode trocar de banco)
+    "agents_max": 0,                     # prateleira de agentes começa no Plus
 }
 
 
@@ -98,14 +101,15 @@ PLUS_LIMITS: PlanLimits = {
     "audio_enabled": True,
     "image_ocr_enabled": True,
     "bills_enabled": True,
-    "of_banks_max": 5,
-    "agents_max": None,
+    "of_banks_max": 2,
+    "agents_max": 3,                     # Xerife + Repórter + Carteiro
 }
 
 
 PRO_LIMITS: PlanLimits = {
     **PLUS_LIMITS,
-    "of_banks_max": None,
+    "of_banks_max": 5,
+    "agents_max": 6,                     # + Detetive, Cofre, Barão
 }
 
 

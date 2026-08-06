@@ -129,11 +129,14 @@ STRIPE_WEBHOOK_SECRET   = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PRICE_ID_PRO     = os.getenv("STRIPE_PRICE_ID_PRO", "")            # legacy: usado como fallback do mensal
 STRIPE_PRICE_ID_PRO_MENSAL = os.getenv("STRIPE_PRICE_ID_PRO_MENSAL", "")  # price_xxx Plus mensal (R$ 19,90; nome legado "Pro")
 STRIPE_PRICE_ID_PRO_ANUAL  = os.getenv("STRIPE_PRICE_ID_PRO_ANUAL", "")   # price_xxx Plus anual  (R$ 199,00)
-# Planos v2 (escada): preços do tier Essencial (R$ ~14,90). Sem eles setados,
-# o checkout do Essencial responde 503 "não configurado" — inofensivo até o
-# Lucas criar os prices no Stripe.
+# Planos v2 (escada final): Essencial R$ 9,90/99 e Pro novo R$ 49,90/499.
+# "PROMAX" porque STRIPE_PRICE_ID_PRO_* já é o Plus (nome legado); o tier novo
+# grava 'pro_max' no banco. Sem as envs setadas, o checkout do plano responde
+# 503 "não configurado" — inofensivo até os prices existirem no Stripe.
 STRIPE_PRICE_ID_ESSENCIAL_MENSAL = os.getenv("STRIPE_PRICE_ID_ESSENCIAL_MENSAL", "")
 STRIPE_PRICE_ID_ESSENCIAL_ANUAL  = os.getenv("STRIPE_PRICE_ID_ESSENCIAL_ANUAL", "")
+STRIPE_PRICE_ID_PROMAX_MENSAL = os.getenv("STRIPE_PRICE_ID_PROMAX_MENSAL", "")
+STRIPE_PRICE_ID_PROMAX_ANUAL  = os.getenv("STRIPE_PRICE_ID_PROMAX_ANUAL", "")
 
 
 def _stored_plan_for_price(price_id: str | None) -> str:
@@ -142,6 +145,8 @@ def _stored_plan_for_price(price_id: str | None) -> str:
     Price desconhecido cai em 'pro' (comportamento histórico do webhook)."""
     if price_id and price_id in (STRIPE_PRICE_ID_ESSENCIAL_MENSAL, STRIPE_PRICE_ID_ESSENCIAL_ANUAL):
         return "essencial"
+    if price_id and price_id in (STRIPE_PRICE_ID_PROMAX_MENSAL, STRIPE_PRICE_ID_PROMAX_ANUAL):
+        return "pro_max"
     return "pro"
 DASHBOARD_MAGIC_LINK_MINUTES = int(os.getenv("DASHBOARD_MAGIC_LINK_MINUTES", "5"))
 DASHBOARD_SESSION_HOURS = float(os.getenv("DASHBOARD_SESSION_HOURS", "12"))
@@ -3225,12 +3230,13 @@ async def auth_google_complete_signup(
 
 class CreateCheckoutBody(BaseModel):
     interval: str = "monthly"  # "monthly" | "annual"
-    plan: str = "plus"         # "essencial" | "plus" (default = Plus, o plano histórico)
+    plan: str = "plus"         # "essencial" | "plus" | "pro" (default = Plus, o plano histórico)
 
 
 def _resolve_price_id(plan: str, interval: str) -> str:
     """Mapeia (plan, interval) -> price ID configurado nas env vars.
 
+    'pro' aqui é o tier NOVO de R$ 49,90 (envs PROMAX; 'pro_max' no banco).
     Plus mensal aceita fallback pro `STRIPE_PRICE_ID_PRO` legado pra não
     quebrar deploys que ainda não migraram. Anual exige a env var nova.
     """
@@ -3239,6 +3245,12 @@ def _resolve_price_id(plan: str, interval: str) -> str:
             return STRIPE_PRICE_ID_ESSENCIAL_MENSAL
         if interval == "annual":
             return STRIPE_PRICE_ID_ESSENCIAL_ANUAL
+        return ""
+    if plan == "pro":
+        if interval == "monthly":
+            return STRIPE_PRICE_ID_PROMAX_MENSAL
+        if interval == "annual":
+            return STRIPE_PRICE_ID_PROMAX_ANUAL
         return ""
     if interval == "monthly":
         return STRIPE_PRICE_ID_PRO_MENSAL or STRIPE_PRICE_ID_PRO
@@ -3250,12 +3262,13 @@ def _resolve_price_id(plan: str, interval: str) -> str:
 @app.get("/billing/plans-config")
 async def billing_plans_config():
     """Config pública da página de planos (sem auth): a /precos usa isto pra
-    decidir se mostra a escada v2 (Grátis/Essencial/Plus/Pro) ou o layout
-    legado de plano único. Flag off = página atual intacta."""
+    decidir se mostra a escada v2 (Grátis/Essencial/Plus/Pro/Premium) ou o
+    layout legado de plano único. Flag off = página atual intacta."""
     from core.services.plan_service import plans_v2_enabled, trial_days_total
     return {
         "plans_v2_enabled": plans_v2_enabled(),
         "essencial_available": bool(STRIPE_PRICE_ID_ESSENCIAL_MENSAL),
+        "pro_available": bool(STRIPE_PRICE_ID_PROMAX_MENSAL),
         "trial_days": trial_days_total(),
     }
 
@@ -3274,8 +3287,8 @@ async def billing_create_checkout(
     if interval not in ("monthly", "annual"):
         raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
     plan = ((payload.plan if payload else "plus") or "plus").lower()
-    if plan not in ("essencial", "plus"):
-        raise HTTPException(status_code=400, detail="plan inválido (use 'essencial' ou 'plus').")
+    if plan not in ("essencial", "plus", "pro"):
+        raise HTTPException(status_code=400, detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
 
     price_id = _resolve_price_id(plan, interval)
     if not STRIPE_SECRET_KEY or not price_id:
