@@ -137,6 +137,22 @@ def latest_launch_id(user_id: int) -> int | None:
             return int(row["mx"]) if row and row["mx"] is not None else None
 
 
+def get_last_inserted_launch(user_id: int):
+    """Lançamento inserido por ÚLTIMO (maior id), com os campos que o desfazer
+    usa. Diferente de `list_launches(limit=1)`, NÃO ordena por data — "desfazer"
+    deve remover o último lançamento CRIADO, mesmo que seja retroativo (criado_em
+    no passado). Retorna a row ou None."""
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id, user_seq, tipo, valor from launches "
+                "where user_id=%s order by id desc limit 1",
+                (user_id,),
+            )
+            return cur.fetchone()
+
+
 def list_launches_by_tipo(user_id: int, tipo: str, limit: int = 200):
     """Lançamentos recentes de um tipo (despesa/receita) com só os campos que
     a detecção de valor recorrente precisa (valor + descrição). Ordenado do mais
