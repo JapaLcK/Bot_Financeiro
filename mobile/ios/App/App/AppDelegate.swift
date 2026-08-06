@@ -2,6 +2,7 @@ import UIKit
 import Capacitor
 import LocalAuthentication
 import WebKit
+import AuthenticationServices
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -18,6 +19,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     private var backgroundedAt: Date?
     private let gracePeriod: TimeInterval = 60
 
+    // ── Login Google nativo (Face ID / autofill) ──────────────────────────
+    // O WebView do Google perde o autofill do iOS. Aqui o OAuth roda num
+    // ASWebAuthenticationSession (navegador nativo, com Face ID/keychain), e o
+    // servidor devolve um código de uso único pelo scheme pigbankai:// → o app
+    // carrega /d/{code} no WebView pra logar de verdade.
+    private let siteBase = "https://pigbankai.com"
+    private var authSession: ASWebAuthenticationSession?
+    private var authBridgeReady = false
+    private weak var appWebView: WKWebView?
+
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         return true
     }
@@ -29,6 +40,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func applicationDidBecomeActive(_ application: UIApplication) {
         hideScrollIndicators()
+        setupAuthBridge()
         if unlocked, let t = backgroundedAt, Date().timeIntervalSince(t) > gracePeriod {
             unlocked = false
         }
@@ -53,6 +65,64 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             view.subviews.forEach(walk)
         }
         if let root = window?.rootViewController?.view { walk(root) }
+    }
+
+    // Acha o WKWebView do Capacitor na hierarquia (nasce depois do launch)
+    private func findWebView() -> WKWebView? {
+        if let wv = appWebView { return wv }
+        var found: WKWebView?
+        func walk(_ view: UIView) {
+            if found != nil { return }
+            if let wk = view as? WKWebView { found = wk; return }
+            view.subviews.forEach(walk)
+        }
+        if let root = window?.rootViewController?.view { walk(root) }
+        appWebView = found
+        return found
+    }
+
+    // Registra o handler JS "pbAuth" uma vez, quando o WebView existe.
+    private func setupAuthBridge() {
+        if authBridgeReady { return }
+        guard let wk = findWebView() else { return }
+        wk.configuration.userContentController.add(self, name: "pbAuth")
+        authBridgeReady = true
+    }
+
+    // Inicia o OAuth do Google no navegador nativo (Face ID/autofill/SSO).
+    private func startGoogleLogin() {
+        guard let url = URL(string: "\(siteBase)/auth/google/start?app=1") else { return }
+        let session = ASWebAuthenticationSession(
+            url: url, callbackURLScheme: "pigbankai"
+        ) { [weak self] callbackURL, error in
+            guard let self = self, let cb = callbackURL else { return } // cancelou/erro
+            self.handleAuthCallback(cb)
+        }
+        session.presentationContextProvider = self
+        // false = compartilha cookies/keychain do Safari → Face ID e "manter
+        // conectado" do Google funcionam (ephemeral perderia isso).
+        session.prefersEphemeralWebBrowserSession = false
+        authSession = session
+        session.start()
+    }
+
+    // pigbankai://auth?code=X → carrega /d/X no WebView (loga).
+    // pigbankai://auth?onboarding=T → carrega /onboarding?token=T.
+    private func handleAuthCallback(_ url: URL) {
+        guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
+        let items = comps.queryItems ?? []
+        let code = items.first(where: { $0.name == "code" })?.value
+        let onboarding = items.first(where: { $0.name == "onboarding" })?.value
+
+        var dest: URL?
+        if let code = code, !code.isEmpty {
+            dest = URL(string: "\(siteBase)/d/\(code)")
+        } else if let t = onboarding, !t.isEmpty,
+                  let enc = t.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            dest = URL(string: "\(siteBase)/onboarding?token=\(enc)")
+        }
+        guard let target = dest, let wk = findWebView() else { return }
+        DispatchQueue.main.async { wk.load(URLRequest(url: target)) }
     }
 
     private func authenticate() {
@@ -163,4 +233,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return ApplicationDelegateProxy.shared.application(application, continue: userActivity, restorationHandler: restorationHandler)
     }
 
+}
+
+// Recebe o postMessage("google") do app-mode.js
+extension AppDelegate: WKScriptMessageHandler {
+    func userContentController(_ userContentController: WKUserContentController,
+                              didReceive message: WKScriptMessage) {
+        if message.name == "pbAuth", (message.body as? String) == "google" {
+            startGoogleLogin()
+        }
+    }
+}
+
+// Âncora de apresentação do ASWebAuthenticationSession
+extension AppDelegate: ASWebAuthenticationPresentationContextProviding {
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        return window ?? ASPresentationAnchor()
+    }
 }

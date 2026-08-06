@@ -1041,8 +1041,8 @@ a { color: inherit; text-decoration: none; }
 </style>
 <script src="/static/auth-refresh.js"></script>
 <script src="/modals.js"></script>
-  <link rel="stylesheet" href="/app-mode.css?v=16" />
-  <script src="/app-mode.js?v=16"></script>
+  <link rel="stylesheet" href="/app-mode.css?v=17" />
+  <script src="/app-mode.js?v=17"></script>
 </head>
 <body>
 
@@ -1081,11 +1081,11 @@ a { color: inherit; text-decoration: none; }
     <aside class="sidebar">
       <div class="sidebar-section">Conta</div>
 
-      <button class="sidebar-item" type="button" disabled>
+      <button class="sidebar-item" type="button" id="of-sidebar-item" disabled>
         <span class="sidebar-icon">🏦</span>
         <span>
-          <span class="sidebar-title">Open Finance <span class="badge-soon">em breve</span></span>
-          <span class="sidebar-sub">Integração em teste</span>
+          <span class="sidebar-title">Open Finance <span class="badge-soon" id="of-sidebar-badge">em breve</span></span>
+          <span class="sidebar-sub" id="of-sidebar-sub">Integração em teste</span>
         </span>
       </button>
 
@@ -1224,7 +1224,7 @@ a { color: inherit; text-decoration: none; }
               <div class="card-title">Conexões ativas</div>
               <div class="card-sub">Bancos autorizados para este usuário</div>
             </div>
-            <button class="btn-sm" type="button" onclick="loadData()">↻ Atualizar</button>
+            <button class="btn-sm" type="button" id="of-refresh-btn" onclick="refreshOpenFinance()">↻ Atualizar</button>
           </div>
           <div class="card-body" style="padding-top:8px; padding-bottom:8px">
             <div id="connections-list">
@@ -2455,6 +2455,44 @@ async function loadData() {
   }
 }
 
+/* ── Refresh (botão "Atualizar") ─────────────────
+   Diferente do loadData (que só relê o snapshot): pede pra Pluggy re-buscar do
+   banco (PATCH /items), espera concluir e sincroniza — puxa transação nova, marca
+   a conexão ATIVA e limpa "Pendente". */
+async function refreshOpenFinance() {
+  if (!USER_ID) { showToast("Sessão inválida — faça login novamente", "error"); return; }
+  const btn = document.getElementById("of-refresh-btn");
+  const orig = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "↻ Atualizando…"; }
+  showToast("Buscando novidades no seu banco… pode levar alguns segundos.", "ok");
+  try {
+    const resp = await fetch(`${API}/open-finance/${USER_ID}/refresh`, authOptions({
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+    }));
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const data = await resp.json();
+    const c = data.connections  || [];
+    const a = data.accounts     || [];
+    const t = data.transactions || [];
+    updateStats(c, a, t);
+    renderConnections(c);
+    renderAccounts(a);
+    renderTransactions(t);
+    if (c.length > 0) setStep(3);
+    const sync = data.sync || {};
+    if (Number(sync.still_updating) > 0) {
+      showToast("O banco ainda está atualizando. Se faltar algo, toque em Atualizar de novo.", "error");
+    } else {
+      showToast("Tudo em dia! 🐷", "ok");
+    }
+  } catch (err) {
+    showToast(err.message || "Erro ao atualizar", "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = orig || "↻ Atualizar"; }
+  }
+}
+
 /* ── Connect ─────────────────────────────────── */
 function getPluggyConnectFactory() {
   return window.PluggyConnect || window.pluggyConnect || window.PluggyConnectWidget;
@@ -2821,10 +2859,11 @@ async function initSettings() {
     return;
   }
   // Paywall: sem assinatura ativa → vai pro paywall (settings é gated).
+  let me = null;
   try {
     const meResp = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
     if (meResp.ok) {
-      const me = await meResp.json();
+      me = await meResp.json();
       if (me && me.app_access === false) {
         // App iOS: settings fica acessível sem redirect de compra (diretriz 3.1.1)
         if (!window.PB_IN_APP) { window.location.replace("/precos?ativar=1"); return; }
@@ -2832,8 +2871,25 @@ async function initSettings() {
     }
   } catch (e) { /* segue; as rotas de dados protegem com 402 */ }
 
+  // Open Finance: entrada do menu fica desabilitada até a flag OF_UI_ENABLED (beta/rollout).
+  const ofUiEnabled = !!(me && me.of_ui_enabled);
+  if (ofUiEnabled) {
+    const ofBtn = document.getElementById("of-sidebar-item");
+    if (ofBtn) {
+      ofBtn.disabled = false;
+      ofBtn.setAttribute("data-section", "open-finance");
+      ofBtn.addEventListener("click", () => showSettingsSection("open-finance"));
+      const badge = document.getElementById("of-sidebar-badge");
+      if (badge) badge.remove();
+      const sub = document.getElementById("of-sidebar-sub");
+      if (sub) sub.textContent = "Conecte seus bancos";
+    }
+  }
+
   document.getElementById("dashboard-link").href = "/app";
-  showSettingsSection(["security", "notifications", "data", "legal"].includes(params.get("view")) ? params.get("view") : "security");
+  const allowedViews = ["security", "notifications", "data", "legal"];
+  if (ofUiEnabled) allowedViews.push("open-finance");
+  showSettingsSection(allowedViews.includes(params.get("view")) ? params.get("view") : "security");
   loadData();
 
   // Vindo do onboarding pos-login: abre o modal de setup MFA automaticamente

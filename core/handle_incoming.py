@@ -339,7 +339,7 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
         # quando a resposta do áudio é um lançamento de fato, não uma pergunta.
         _pend = db.get_pending_action(uid)
         _ptype = _pend.get("action_type") if _pend else None
-        if _ptype not in _RESUMABLE_PENDING_TYPES and _ptype not in ("multi_launch_values", "fixed_expense_offer"):
+        if _ptype not in _RESUMABLE_PENDING_TYPES and _ptype not in ("multi_launch_values", "confirm_recurring_offer"):
             db.set_pending_action(uid, "undo_audio", {})
 
     return [OutgoingMessage(text=preview + body + undo_hint)]
@@ -513,7 +513,7 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     return [OutgoingMessage(text=(
         "🐷 Oi! Que bom te ver por aqui.\n\n"
         "Pra eu poder cuidar do seu dinheiro, sua conta precisa estar ativa — e "
-        f"dá pra começar com {_bold('7 dias grátis', platform)}, sem cobrança "
+        f"dá pra começar com {_bold('30 dias grátis', platform)}, sem cobrança "
         "agora e cancelando quando quiser.\n\n"
         f"👉 {link}\n\n"
         "Assim que ativar, é só me mandar uma mensagem que eu já começo a anotar "

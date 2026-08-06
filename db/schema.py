@@ -300,6 +300,20 @@ def init_db():
           unique (user_id, keyword)
         )
         """,
+        # Sugestões de "gasto fixo" que o usuário recusou. Quando uma despesa se
+        # repete (mesma descrição + valor em meses distintos) a Piggy oferece
+        # marcar como recorrente; se o user diz "não", grava aqui pra não
+        # re-perguntar a mesma combinação (merchant + valor). Ver
+        # find_recurring_candidate em db/recurring.py.
+        """
+        create table if not exists recurring_suggestion_dismissed (
+          user_id bigint not null references users(id) on delete cascade,
+          merchant_key text not null,
+          amount numeric not null,
+          dismissed_at timestamptz not null default now(),
+          primary key (user_id, merchant_key, amount)
+        )
+        """,
         """
         create table if not exists market_rates (
           code text not null,
@@ -511,6 +525,64 @@ def init_db():
         """
         create index if not exists idx_credit_tx_user_date
           on credit_transactions(user_id, purchased_at desc)
+        """,
+
+        # -----------------------------
+        # Open Finance ↔ crédito (Fase 1 opção a): dedup + vínculo OF→cartão
+        # -----------------------------
+        """
+        alter table credit_transactions add column if not exists source text not null default 'manual'
+        """,
+        """
+        alter table credit_transactions add column if not exists external_id text
+        """,
+        """
+        create unique index if not exists uq_credit_tx_source_external
+          on credit_transactions(user_id, source, external_id)
+          where external_id is not null
+        """,
+        """
+        alter table credit_cards add column if not exists open_finance_account_id bigint
+          references open_finance_accounts(id) on delete set null
+        """,
+        """
+        create unique index if not exists uq_credit_cards_of_account
+          on credit_cards(open_finance_account_id)
+          where open_finance_account_id is not null
+        """,
+        """
+        alter table open_finance_transactions add column if not exists imported_credit_tx_id bigint
+          references credit_transactions(id) on delete set null
+        """,
+
+        # -----------------------------
+        # Open Finance — investimentos (#10): espelho pra caixinha (CDB) etc.
+        # -----------------------------
+        """
+        create table if not exists open_finance_investments (
+          id bigserial primary key,
+          connection_id bigint not null references open_finance_connections(id) on delete cascade,
+          provider_investment_id text not null,
+          name text,
+          type text,
+          subtype text,
+          currency text default 'BRL',
+          balance numeric,
+          raw jsonb,
+          updated_at timestamptz default now(),
+          unique(connection_id, provider_investment_id)
+        )
+        """,
+
+        # -----------------------------
+        # Open Finance — reconciliação (Fase 2): dedup OF ↔ manual
+        # -----------------------------
+        """
+        alter table open_finance_transactions add column if not exists reconciliation_status text
+        """,
+        """
+        alter table open_finance_transactions add column if not exists match_launch_id bigint
+          references launches(id) on delete set null
         """,
 
         # -----------------------------

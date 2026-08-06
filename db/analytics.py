@@ -744,7 +744,16 @@ def list_history(
             clauses.append(search_sql)
             launches_params.extend(search_params)
         launches_sql = f"""
-          SELECT id, tipo, valor, alvo, nota, categoria, criado_em
+          SELECT id, tipo, valor, alvo, nota, categoria, criado_em,
+                 COALESCE(source, 'manual') AS origin,
+                 (SELECT c.institution_name
+                    FROM open_finance_transactions o
+                    JOIN open_finance_accounts a ON a.id = o.account_id
+                    JOIN open_finance_connections c ON c.id = a.connection_id
+                   WHERE o.imported_launch_id = launches.id LIMIT 1) AS bank_name,
+                 (SELECT o.reconciliation_status
+                    FROM open_finance_transactions o
+                   WHERE o.imported_launch_id = launches.id LIMIT 1) AS reconciliation_status
           FROM launches
           WHERE {" AND ".join(clauses)}
         """
@@ -783,7 +792,13 @@ def list_history(
             clauses.append(" AND ".join(per_term_sqls))
         credit_sql = f"""
           SELECT ct.id, 'credito' AS tipo, ct.valor,
-                 c.name AS alvo, ct.nota, ct.categoria, ct.created_at AS criado_em
+                 c.name AS alvo, ct.nota, ct.categoria, ct.created_at AS criado_em,
+                 COALESCE(ct.source, 'manual') AS origin,
+                 (SELECT conn.institution_name
+                    FROM open_finance_accounts a
+                    JOIN open_finance_connections conn ON conn.id = a.connection_id
+                   WHERE a.id = c.open_finance_account_id LIMIT 1) AS bank_name,
+                 NULL AS reconciliation_status
           FROM credit_transactions ct
           JOIN credit_cards c ON c.id = ct.card_id
           JOIN credit_bills b ON b.id = ct.bill_id
@@ -814,7 +829,8 @@ def list_history(
 
             cur.execute(
                 f"""
-                SELECT id, tipo, valor, alvo, nota, categoria, criado_em
+                SELECT id, tipo, valor, alvo, nota, categoria, criado_em,
+                       origin, bank_name, reconciliation_status
                 FROM ({union_sql}) merged
                 ORDER BY criado_em DESC, id ASC
                 LIMIT %s OFFSET %s
@@ -832,6 +848,10 @@ def list_history(
             "nota": r["nota"],
             "categoria": r["categoria"],
             "criado_em": r["criado_em"].isoformat() if r["criado_em"] else None,
+            # Origem (Open Finance): de onde veio e o estado da conciliação.
+            "origin": r["origin"],                                # manual | open_finance | ofx
+            "bank_name": r["bank_name"],                          # banco, se veio/casou com OF
+            "reconciliation_status": r["reconciliation_status"],  # imported | pending | auto_merged | None
         }
         for r in rows
     ]

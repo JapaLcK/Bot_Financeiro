@@ -1,11 +1,15 @@
 # core/handlers/launches.py
 from __future__ import annotations
 import logging
+import os
 import re
 from datetime import date, timedelta
 
 import db
-from utils_text import fmt_brl, is_internal_category, canonicalize_category_label, normalize_text
+from utils_text import (
+    fmt_brl, is_internal_category, canonicalize_category_label, normalize_text,
+    merchant_key, RECURRING_SUGGESTION_BLOCKLIST,
+)
 from utils_date import extract_date_from_text, today_tz, parse_period_from_text, month_range_today
 from core.services.category_service import infer_category, learn_from_inference
 from parsers import (
@@ -316,6 +320,57 @@ def spend_query(user_id: int, text: str, entities: dict | None = None) -> str:
 # add / add_from_entities — registra receita/despesa
 # ---------------------------------------------------------------------------
 
+def _recurring_suggestion_enabled() -> bool:
+    """Flag de kill-switch. Ligada por padrão; desliga só com env explícito."""
+    return (os.getenv("AUTO_FIX_SUGGESTION_ENABLED") or "on").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _maybe_recurring_offer(
+    user_id: int, descr: str, valor: float, categoria_final: str, criado_em, launch_id,
+) -> dict | None:
+    """Se esta despesa repete uma anterior (mesma descrição + mesmo valor, em mês
+    distinto) numa categoria elegível, devolve o payload da oferta de gasto fixo.
+    Senão, None. Nunca levanta — detecção é best-effort e não pode quebrar o
+    lançamento."""
+    if not _recurring_suggestion_enabled():
+        return None
+    try:
+        cat_canon = canonicalize_category_label(categoria_final) or categoria_final
+        if cat_canon in RECURRING_SUGGESTION_BLOCKLIST:
+            return None
+        key = merchant_key(descr)
+        if not key:
+            return None
+        when = criado_em if isinstance(criado_em, (date,)) else None
+        if when is None:
+            from datetime import datetime as _dt
+            when = criado_em if isinstance(criado_em, _dt) else today_tz()
+        from db.recurring import find_recurring_candidate
+        prior_months = find_recurring_candidate(
+            user_id, key, valor,
+            current_year=when.year, current_month=when.month,
+            exclude_launch_id=int(launch_id) if launch_id else None,
+        )
+        if prior_months < 1:
+            return None
+        name = (descr or "").strip() or (cat_canon.capitalize() if cat_canon else "Gasto fixo")
+        return {
+            "name": name,
+            "amount": float(valor),
+            "category": categoria_final,
+            "due_day": int(when.day),
+            "merchant_key": key,
+        }
+    except Exception:
+        logger.warning(
+            "detecção de gasto fixo falhou (user %s, descr=%r) — seguindo sem oferta",
+            user_id, descr, exc_info=True,
+        )
+        return None
+
+
 def add_from_entities(
     user_id: int,
     *,
@@ -328,7 +383,6 @@ def add_from_entities(
     criado_em=None,
     is_internal: bool | None = None,
     platform: str = "whatsapp",
-    offer_fixed_expense: bool = True,
 ) -> str:
     """Registra um lançamento a partir de args já estruturados (sem regex).
 
@@ -396,9 +450,36 @@ def add_from_entities(
         reason=reason_final,
     )
 
+    # Reconciliação reversa (Open Finance): se o banco já importou esse gasto, funde
+    # com o lançamento que o usuário acabou de fazer — não duplica no "sobrou".
+    if not is_int:
+        try:
+            db.reconcile_manual_launch(user_id, launch_id)
+        except Exception:
+            pass
+
+    # Detecção "essa despesa se repete → sugere gasto fixo". Só para despesa
+    # real (não movimentação interna). A oferta divide a linha de pending_actions
+    # com o botão de recategorizar; quando há oferta de recorrente ela vence
+    # (é mais valiosa) e o botão de recategorizar é suprimido nesse lançamento.
+    recurring_offer = None
+    if tipo == "despesa" and not is_int:
+        recurring_offer = _maybe_recurring_offer(
+            user_id, nota_clean, valor, categoria_final, criado_em, launch_id,
+        )
+
+    if recurring_offer:
+        try:
+            db.set_pending_action(user_id, "confirm_recurring_offer", recurring_offer)
+        except Exception:
+            logger.warning(
+                "falha ao salvar pending confirm_recurring_offer (user %s) — oferta perdida",
+                user_id, exc_info=True,
+            )
+            recurring_offer = None
     # Botão "categoria errada?" no WhatsApp (one-shot, lido por
     # _send_reply_with_optional_buttons no wa_runtime e limpo em seguida).
-    if platform == "whatsapp" and launch_id:
+    elif platform == "whatsapp" and launch_id:
         try:
             db.set_pending_action(
                 user_id,
@@ -433,27 +514,12 @@ def add_from_entities(
                 user_id, categoria_final, exc_info=True,
             )
 
-    # "Virar gasto fixo?" — se esta é a 2ª vez que essa despesa aparece, oferece
-    # transformá-la em recorrente. Sobrepõe o pending de recategorização (raro:
-    # só na 2ª ocorrência exata). Fica fora dos pedaços de multi-lançamento
-    # (offer_fixed_expense=False) pra não brigar com a fila de valor pendente.
-    if offer_fixed_expense and tipo == "despesa" and not is_int:
-        try:
-            # Usa o alvo limpo ("aluguel"), não a nota (que pode ser o texto todo
-            # "gastei 1500 no aluguel") — descrição enxuta pro nome do gasto fixo
-            # e pra casar as ocorrências no histórico.
-            offer = _build_fixed_expense_offer(
-                user_id, alvo_clean or nota_clean, valor, categoria_final, platform,
-            )
-            if offer:
-                offer_text, payload = offer
-                db.set_pending_action(user_id, "fixed_expense_offer", payload)
-                resposta += f"\n\n{offer_text}"
-        except Exception:
-            logger.warning(
-                "oferta de gasto fixo falhou (user %s, desc %r) — seguindo sem oferecer",
-                user_id, nota_clean or alvo_clean, exc_info=True,
-            )
+    if recurring_offer:
+        resposta += (
+            f"\n\n💡 Você já lançou *{recurring_offer['name']}* de {fmt_brl(valor)} "
+            f"em outro mês. Quer marcar como *gasto fixo* (a Piggy lança sozinha "
+            f"todo mês)? Responda *sim* ou *não*."
+        )
 
     return resposta
 
@@ -527,135 +593,8 @@ def register_if_recurring(user_id: int, tipo: str, desc: str, platform: str) -> 
         alvo=desc,
         nota=desc,
         platform=platform,
-        offer_fixed_expense=False,  # pedaço de multi-lançamento não oferece gasto fixo
     )
     return f"{resp}\n{_RECURRING_NOTICE}"
-
-
-# ── "Virar gasto fixo?" — oferece na 2ª vez que uma despesa se repete ──────────
-
-# Quantas ocorrências (contando a atual) disparam a oferta. Só na 2ª exata: assim
-# a pergunta aparece UMA vez por descrição — se o user ignorar, não repete no 3º.
-_FIXED_OFFER_AT_COUNT = 2
-
-
-def _count_expense_occurrences(user_id: int, target_norm: str) -> int:
-    from utils_text import normalize_text
-    n = 0
-    for r in db.list_launches_by_tipo(user_id, "despesa", limit=200):
-        nota = normalize_text(r.get("nota") or "").strip()
-        alvo = normalize_text(r.get("alvo") or "").strip()
-        if target_norm in (nota, alvo):
-            n += 1
-    return n
-
-
-def _already_fixed_expense(user_id: int, target_norm: str) -> bool:
-    from utils_text import normalize_text
-    from db.recurring import list_recurring_expenses
-    for r in list_recurring_expenses(user_id):
-        if normalize_text(r.get("name") or "").strip() == target_norm:
-            return True
-    return False
-
-
-def _fixed_expense_offer_text(desc: str) -> str:
-    return (
-        f"🐷 Notei que *{desc}* já apareceu antes e voltou agora — tem cara de gasto que "
-        f"se repete todo mês.\n"
-        f"Quer que eu marque como *gasto fixo*? Aí eu lanço sozinha no dia certo, todo mês. "
-        f"Responda *sim* pra criar (ou *não* pra deixar quieto). 🐖"
-    )
-
-
-def _build_fixed_expense_offer(
-    user_id: int, desc: str, valor: float, categoria: str | None, platform: str,
-) -> tuple[str, dict] | None:
-    """Decide se oferece transformar a despesa `desc` em gasto fixo. Retorna
-    (texto_da_oferta, payload_do_pending) ou None.
-
-    Só oferece quando: é a 2ª ocorrência EXATA da descrição, o usuário é Pro
-    (gasto fixo é recurso PigBank+), e ainda não existe um gasto fixo com esse
-    nome. Conservador de propósito — a oferta some se qualquer condição falhar."""
-    from utils_text import normalize_text
-
-    target = normalize_text(desc or "").strip()
-    if not target:
-        return None
-    try:
-        from core.services.plan_service import is_pro
-        if not is_pro(user_id):
-            return None
-    except Exception:
-        return None
-    if _count_expense_occurrences(user_id, target) != _FIXED_OFFER_AT_COUNT:
-        return None
-    if _already_fixed_expense(user_id, target):
-        return None
-    payload = {
-        "desc": desc,
-        "valor": float(valor),
-        "categoria": (categoria or "outros"),
-        "platform": platform,
-    }
-    return _fixed_expense_offer_text(desc), payload
-
-
-_FIXED_YES = {"sim", "s", "quero", "pode", "isso", "claro", "bora", "aha", "yes", "adiciona", "adicionar", "cria", "criar", "fixo"}
-_FIXED_NO = {"nao", "n", "agora nao", "deixa", "deixa quieto", "depois", "no", "nops", "nem"}
-
-
-def resolve_fixed_expense_offer(user_id: int, text: str, pending: dict, platform: str = "whatsapp") -> str | None:
-    """Resolve a resposta à oferta de virar gasto fixo.
-
-    - "sim" → cria o gasto fixo com padrões (valor/categoria do lançamento, vence
-      hoje, débito na conta, mensal) e confirma.
-    - "não" → descarta a oferta com um ok leve.
-    - qualquer outra coisa → abandona a oferta e retorna None (o roteador trata a
-      mensagem como um comando novo — não prende o usuário)."""
-    from utils_text import normalize_text
-
-    payload = pending.get("payload", {})
-    resp_norm = normalize_text(text).strip()
-
-    if resp_norm in _FIXED_NO:
-        db.clear_pending_action(user_id)
-        return "🐷 Beleza, deixei como lançamento normal. Se mudar de ideia, é só falar."
-
-    if resp_norm not in _FIXED_YES:
-        # Não é sim nem não — o usuário seguiu em frente. Abandona a oferta.
-        db.clear_pending_action(user_id)
-        return None
-
-    db.clear_pending_action(user_id)
-    desc = payload.get("desc") or "gasto"
-    valor = float(payload.get("valor") or 0)
-    categoria = payload.get("categoria") or "outros"
-    today = today_tz()
-    due_day = today.day
-    try:
-        from db.recurring import create_recurring_expense, mark_recurring_charged
-        rec = create_recurring_expense(
-            user_id, desc, valor, categoria, due_day, "account",
-            frequency="monthly", payment_mode="autopay",
-        )
-        # O gasto que disparou a oferta JÁ foi lançado agora (é a ocorrência deste
-        # mês). O recorrente nasce com due_day=hoje e start_date=hoje, então o
-        # charger autopay o consideraria "vence hoje" e debitaria de novo no mesmo
-        # dia — dobrando o lançamento. Marca este mês como já cobrado pra a 1ª
-        # cobrança automática cair só no mês que vem.
-        mark_recurring_charged(user_id, rec["id"], today.strftime("%Y-%m"))
-    except ValueError:
-        return (
-            "🐷 Não consegui criar o gasto fixo agora. Você pode cadastrar na aba "
-            "*Recorrentes* do app."
-        )
-    return (
-        f"✅ *Gasto fixo criado:* {rec['name']}\n"
-        f"💸 {fmt_brl(valor)} · débito na conta todo dia {due_day}\n"
-        f"Não tiro nada agora — a 1ª cobrança automática é só no mês que vem. "
-        f"Pra ajustar dia/cartão, é na aba *Recorrentes* do app. 🐷"
-    )
 
 
 # Palavras que cancelam a pergunta de valor pendente.
@@ -702,7 +641,6 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
         alvo=head.get("desc"),
         nota=head.get("desc"),
         platform=platform,
-        offer_fixed_expense=False,  # resolução de multi-lançamento não oferece
     )
 
     if queue:
@@ -716,8 +654,7 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
     return resp
 
 
-def _register_parsed(user_id: int, parsed: dict, fallback_note: str, platform: str,
-                     offer_fixed_expense: bool = True) -> str:
+def _register_parsed(user_id: int, parsed: dict, fallback_note: str, platform: str) -> str:
     """Registra um lançamento já parseado por `parse_receita_despesa_natural`."""
     return add_from_entities(
         user_id,
@@ -730,7 +667,6 @@ def _register_parsed(user_id: int, parsed: dict, fallback_note: str, platform: s
         criado_em=parsed.get("criado_em"),
         is_internal=parsed.get("is_internal_movement", False),
         platform=platform,
-        offer_fixed_expense=offer_fixed_expense,
     )
 
 
@@ -753,10 +689,7 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> 
         for part in parts:
             p = parse_receita_despesa_natural(user_id, part)
             if p:
-                # Pedaço de multi-lançamento não oferece gasto fixo (evita brigar
-                # com a fila de valor pendente / empilhar perguntas).
-                responses.append(_register_parsed(user_id, p, part, platform,
-                                                  offer_fixed_expense=False))
+                responses.append(_register_parsed(user_id, p, part, platform))
                 continue
             info = describe_valueless_launch(part)
             if info:

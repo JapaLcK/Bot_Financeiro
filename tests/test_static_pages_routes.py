@@ -20,7 +20,6 @@ HTML_PAGES = [
     "/onboarding",
     "/privacy",
     "/termos",
-    "/changelog",
     "/whatsapp",
     "/funcionalidades",
     "/comandos",

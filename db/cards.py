@@ -506,6 +506,189 @@ def get_current_open_bill_id(user_id: int, card_id: int, as_of: date):
 # Transações de crédito
 # ──────────────────────────────────────────────────────────────────────────────
 
+def credit_day_from_iso(value, default: int) -> int:
+    """Extrai o dia (1-31) de uma data ISO 'yyyy-mm-dd' do creditData; cai no default."""
+    try:
+        day = int(str(value)[8:10])
+    except (ValueError, TypeError):
+        return default
+    return max(1, min(31, day)) if 1 <= day <= 31 else default
+
+
+def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str | None, raw: dict | None) -> int:
+    """Resolve (ou cria) um cartão PigBank vinculado a uma conta de crédito do Open Finance.
+
+    Dedup pelo `open_finance_account_id`. Se não achar, tenta ADOTAR um cartão MANUAL já
+    existente (open_finance_account_id NULL) com o mesmo nome — em vez de criar um cartão
+    novo "· Open Finance" duplicado. Só cria novo quando não há match. Deriva
+    fechamento/vencimento do creditData do Pluggy (balanceCloseDate/balanceDueDate).
+    """
+    ensure_user(user_id)
+    credit = (raw or {}).get("creditData") or {}
+    closing_day = credit_day_from_iso(credit.get("balanceCloseDate"), 1)
+    due_day = credit_day_from_iso(credit.get("balanceDueDate"), 10)
+    base_name = (name or "Cartão").strip() or "Cartão"
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id from credit_cards where user_id=%s and open_finance_account_id=%s",
+                (user_id, of_account_id),
+            )
+            row = cur.fetchone()
+            if row:
+                return row["id"]
+
+            # Reconcilia com um cartão MANUAL de mesmo nome (case/trim-insensível) que ainda
+            # não tem conta OF vinculada, e ADOTA ele (vincula esta conta OF). Evita o
+            # duplicado "ultraviolet-black" + "ultraviolet-black · Open Finance".
+            cur.execute(
+                """
+                select id from credit_cards
+                where user_id=%s and open_finance_account_id is null
+                  and lower(btrim(name)) = lower(btrim(%s))
+                order by id
+                limit 1
+                """,
+                (user_id, base_name),
+            )
+            manual = cur.fetchone()
+            if manual:
+                cur.execute(
+                    "update credit_cards set open_finance_account_id=%s "
+                    "where id=%s and user_id=%s",
+                    (of_account_id, manual["id"], user_id),
+                )
+                conn.commit()
+                return manual["id"]
+
+            card_name = None
+            for cand in (base_name, f"{base_name} · Open Finance", f"{base_name} · OF{of_account_id}"):
+                cur.execute("select 1 from credit_cards where user_id=%s and name=%s", (user_id, cand))
+                if not cur.fetchone():
+                    card_name = cand
+                    break
+            if card_name is None:
+                card_name = f"{base_name} · OF{of_account_id}"
+
+            cur.execute(
+                """
+                insert into credit_cards (user_id, name, closing_day, due_day, open_finance_account_id)
+                values (%s,%s,%s,%s,%s)
+                returning id
+                """,
+                (user_id, card_name, closing_day, due_day, of_account_id),
+            )
+            card_id = cur.fetchone()["id"]
+        conn.commit()
+    return card_id
+
+
+def remove_single_credit_transaction(user_id: int, ct_id: int):
+    """Remove UMA transação de cartão (nunca cascateia o parcelamento), ajustando a fatura.
+
+    Ao contrário de `undo_credit_transaction`, ignora `group_id`: usado no rollback do OF
+    (transactions/deleted da Pluggy manda ids individuais — apagar 1 parcela não pode
+    apagar o parcelamento inteiro). Retorna {removed_total} ou None.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id, bill_id, valor from credit_transactions "
+                "where user_id=%s and id=%s for update",
+                (user_id, ct_id),
+            )
+            tx = cur.fetchone()
+            if not tx:
+                return None
+            # valor é assinado (compra +, estorno -) e a fatura foi `total += valor` no insert.
+            # Reverter = `total -= valor`, uniforme pros dois casos.
+            v = Decimal(str(tx["valor"]))
+            cur.execute("delete from credit_transactions where user_id=%s and id=%s", (user_id, ct_id))
+            cur.execute(
+                "update credit_bills set total = total - %s where id=%s and user_id=%s",
+                (v, tx["bill_id"], user_id),
+            )
+        conn.commit()
+    return {"removed_total": float(v), "ct_id": ct_id}
+
+
+def extract_installment_info(raw) -> tuple[int | None, int | None]:
+    """Puro: (installment_no, installments_total) do creditCardMetadata do Pluggy.
+
+    Cada parcela vem como transação separada com installmentNumber/totalInstallments.
+    Só retorna se for parcelado de verdade (total > 1)."""
+    meta = (raw or {}).get("creditCardMetadata") or {}
+    try:
+        n = int(meta["installmentNumber"]) if meta.get("installmentNumber") is not None else None
+        total = int(meta["totalInstallments"]) if meta.get("totalInstallments") is not None else None
+    except (TypeError, ValueError):
+        return None, None
+    return (n, total) if (total and total > 1) else (None, None)
+
+
+def add_imported_credit_purchase(
+    user_id: int,
+    card_id: int,
+    amount,
+    categoria: str | None,
+    purchased_at: date,
+    external_id: str,
+    source: str = "open_finance",
+    installment_no: int | None = None,
+    installments_total: int | None = None,
+    group_id=None,
+):
+    """Importa uma transação de cartão do Open Finance, idempotente por (user, source, external_id).
+
+    `amount` vem assinado (negativo = compra, positivo = pagamento/estorno). A fatura sobe
+    com compras e cai com pagamentos/estornos. Parcela (installment_no/total) e group_id
+    populam as colunas que já existem, ligando as parcelas do mesmo compra (#11).
+    Retorna (tx_id, criado: bool).
+    """
+    ensure_user(user_id)
+    amt = Decimal(str(amount))
+    is_refund = amt > 0
+    # CONVENÇÃO CANÔNICA (igual add_credit_refund): valor ASSINADO — compra positiva,
+    # estorno/pagamento negativo. Fatura += valor. Assim undo_credit_transaction e todos
+    # os leitores tratam o sinal uniformemente (não subtraem estorno em dobro).
+    valor = -amt
+    tipo = "estorno" if is_refund else "credito"
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id from credit_transactions where user_id=%s and source=%s and external_id=%s",
+                (user_id, source, external_id),
+            )
+            existing = cur.fetchone()
+            if existing:
+                return existing["id"], False
+
+    bill_id = get_or_create_open_bill(user_id, card_id, purchased_at)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into credit_transactions
+                    (bill_id, user_id, card_id, tipo, valor, categoria, nota, purchased_at, is_refund,
+                     source, external_id, installment_no, installments_total, group_id)
+                values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                returning id
+                """,
+                (bill_id, user_id, card_id, tipo, valor, categoria, None, purchased_at, is_refund,
+                 source, external_id, installment_no, installments_total, group_id),
+            )
+            tx_id = cur.fetchone()["id"]
+            cur.execute(
+                "update credit_bills set total = total + %s where id=%s and user_id=%s",
+                (valor, bill_id, user_id),  # valor já assinado: compra sobe, estorno desce
+            )
+        conn.commit()
+    return tx_id, True
+
+
 def add_credit_purchase(
     user_id: int,
     card_id: int,

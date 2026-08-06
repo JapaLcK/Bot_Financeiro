@@ -71,6 +71,48 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
             return f"✅ Lançamento registrado!\n{msg_out.text}"
         return f"⚠️ Não consegui registrar automaticamente. Tente: `{text}`"
 
+    # ── Oferta "virar gasto fixo" (despesa que se repetiu) ───────────────────
+    if action_type == "confirm_recurring_offer":
+        payload = pending.get("payload", {})
+        db.clear_pending_action(user_id)
+
+        if not confirmed:
+            # grava a recusa pra não re-sugerir a mesma combinação (merchant+valor)
+            try:
+                from db.recurring import dismiss_recurring_suggestion
+                dismiss_recurring_suggestion(
+                    user_id, payload.get("merchant_key", ""), payload.get("amount"),
+                )
+            except Exception:
+                pass
+            return "Ok, não marco como gasto fixo. 👍"
+
+        from db.recurring import create_recurring_expense, mark_recurring_charged
+        try:
+            rec = create_recurring_expense(
+                user_id,
+                payload.get("name") or "Gasto fixo",
+                float(payload.get("amount") or 0),
+                payload.get("category") or "outros",
+                int(payload.get("due_day") or 1),
+                "account",
+                payment_mode="autopay",
+            )
+            # A despesa deste mês que disparou a oferta JÁ foi lançada. O recorrente
+            # nasce com due_day=hoje e start_date=hoje, então o charger autopay o
+            # consideraria "vence hoje" e debitaria de novo no mesmo dia, dobrando o
+            # lançamento. Marca o mês corrente como já cobrado — 1ª cobrança
+            # automática cai só no mês que vem.
+            from utils_date import today_tz
+            mark_recurring_charged(user_id, rec["id"], today_tz().strftime("%Y-%m"))
+        except (ValueError, TypeError) as e:
+            return f"Não consegui criar o gasto fixo agora ({e}). Você pode cadastrar na aba *Recorrentes* do dashboard."
+        return (
+            f"✅ Pronto! *{rec['name']}* agora é *gasto fixo*: "
+            f"{fmt_brl(rec['amount'])} todo dia {rec['due_day']}. "
+            f"A Piggy lança sozinha. 🐷"
+        )
+
     # só trata deletes abaixo
     if action_type not in ("delete_launch", "delete_launch_bulk", "delete_pocket", "delete_investment"):
         return None

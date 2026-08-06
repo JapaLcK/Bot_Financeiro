@@ -500,6 +500,25 @@ async def get_financial_data(
     account = account_rows[0] if account_rows else None
     launches_total = int(launches_total_rows[0]["total"] or 0) if launches_total_rows else 0
 
+    # Saldo dos bancos conectados (Open Finance) — pro saldo consolidado no dashboard.
+    # Só contas BANK (corrente/poupança); cartão é dívida, fica na fatura.
+    # `n` = nº de contas BANK conectadas: mesmo com saldo 0, sinaliza pro front mostrar
+    # o breakdown "Carteira + Bancos" e a ação de ajustar a Carteira.
+    # DISTINCT ON (provider_account_id): reconectar cria nova conexão com a MESMA conta;
+    # sem dedup, o saldo (e a contagem) somaria em dobro. Pega a conexão mais recente.
+    of_bank_rows = await _q(
+        "SELECT COALESCE(SUM(b), 0) AS b, COUNT(*) AS n FROM ("
+        "  SELECT DISTINCT ON (a.provider_account_id) a.balance AS b "
+        "  FROM open_finance_accounts a "
+        "  JOIN open_finance_connections c ON c.id = a.connection_id "
+        "  WHERE c.user_id = %s AND UPPER(a.type) = 'BANK' "
+        "  ORDER BY a.provider_account_id, c.id DESC"
+        ") uniq",
+        (user_id,),
+    )
+    of_bank_balance = float(of_bank_rows[0]["b"]) if of_bank_rows else 0.0
+    of_bank_count = int(of_bank_rows[0]["n"]) if of_bank_rows else 0
+
     # Reformat cards (era loop dentro do bloco de queries)
     cards = []
     for r in card_rows:
@@ -652,6 +671,8 @@ async def get_financial_data(
         "month":              m,
         "is_current_month":   is_current,
         "balance":            float(account["balance"]) if account else 0.0,
+        "of_bank_balance":    of_bank_balance,  # saldo das contas bancárias conectadas (OF)
+        "of_bank_count":      of_bank_count,    # nº de contas BANK conectadas (0 = sem banco)
         "pockets":            [dict(r) for r in pockets],
         "investments":        [dict(r) for r in investments],
         "market_rates":       market_rates,
@@ -1197,6 +1218,21 @@ class ConnectionManager:
     async def send_to(self, ws: WebSocket, payload: str):
         await ws.send_text(payload)
 
+    async def broadcast_to_user(self, user_id: int, payload: str) -> int:
+        """Empurra um payload pra todas as conexões ativas do usuário (best-effort).
+
+        Usado pra 'atualização ao vivo' no PWA: quando um banco sincroniza em segundo
+        plano, o servidor avisa o cliente conectado pra recarregar saldo/timeline.
+        """
+        sent = 0
+        for ws in list(self.active.get(user_id, {}).keys()):
+            try:
+                await ws.send_text(payload)
+                sent += 1
+            except Exception:
+                self.disconnect(ws, user_id)
+        return sent
+
 manager = ConnectionManager()
 
 # ─── App startup ──────────────────────────────────────────────────────────────
@@ -1398,6 +1434,43 @@ async def lifespan(app: FastAPI):
             except Exception as exc:
                 print(f"[account_deletion] erro: {exc}", file=sys.stderr)
 
+    async def _open_finance_refresh():
+        # Refresh periódico dos bancos conectados (P1 #5). Dormant por padrão: só roda
+        # com OF_REFRESH_ENABLED ligado (evita martelar a Pluggy no trial).
+        if (os.getenv("OF_REFRESH_ENABLED") or "").strip().lower() not in ("1", "true", "yes", "on"):
+            return
+        interval = int(os.getenv("OF_REFRESH_INTERVAL_SEC", str(6 * 60 * 60)))
+        from core.services.pluggy_sync import refresh_all_pluggy_items
+        while True:
+            try:
+                res = await asyncio.to_thread(refresh_all_pluggy_items)
+                print(f"[open_finance_refresh] {res}", flush=True)
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[open_finance_refresh] erro: {exc}", file=sys.stderr)
+                await asyncio.sleep(interval)
+
+    async def _open_finance_proactive():
+        # Avisos proativos de salário/reconectar (Fase 5 / P1 #6). Dormant: só roda com
+        # OF_PROACTIVE_ENABLED ligado E o template Meta configurado (senão retorna na hora).
+        if (os.getenv("OF_PROACTIVE_ENABLED") or "").strip().lower() not in ("1", "true", "yes", "on"):
+            return
+        interval = int(os.getenv("OF_PROACTIVE_INTERVAL_SEC", str(6 * 60 * 60)))
+        from core.services.open_finance_proactive import run_reconnect_notifications, run_salary_notifications
+        while True:
+            try:
+                s = await asyncio.to_thread(run_salary_notifications)
+                r = await asyncio.to_thread(run_reconnect_notifications)
+                print(f"[open_finance_proactive] salary={s} reconnect={r}", flush=True)
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[open_finance_proactive] erro: {exc}", file=sys.stderr)
+                await asyncio.sleep(interval)
+
     _elapsed = _startup_time.monotonic() - _t0
     print(f"[app] Startup interno concluído em {_elapsed:.1f}s.", flush=True)
 
@@ -1405,6 +1478,8 @@ async def lifespan(app: FastAPI):
     if RUN_BACKGROUND_TASKS:
         tasks.extend(
             [
+                asyncio.create_task(_open_finance_refresh(), name="open_finance_refresh"),
+                asyncio.create_task(_open_finance_proactive(), name="open_finance_proactive"),
                 asyncio.create_task(_wa_worker(), name="wa_worker"),
                 asyncio.create_task(_wa_daily(), name="wa_daily"),
                 asyncio.create_task(_wa_bill_reminders(), name="wa_bill_reminders"),
@@ -1470,7 +1545,7 @@ _SECURITY_HEADERS = {
         "font-src 'self' data: "
         "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
         "connect-src 'self' https: wss:; "
-        "frame-src 'self' https://cdn.pluggy.ai; "
+        "frame-src 'self' https://cdn.pluggy.ai https://connect.pluggy.ai; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self'; "
@@ -2277,6 +2352,22 @@ async def auth_new_link_code(user_id: int = Depends(_get_current_user)):
     }
 
 
+def _open_finance_ui_enabled(user_id: int, email: str | None) -> bool:
+    """Gate da UI de Open Finance. Liga se:
+    - OF_UI_ENABLED global ligado (lançamento pra todos), OU
+    - o e-mail está em OF_UI_BETA_EMAILS (allowlist beta, case-insensitive), OU
+    - o user_id está em OF_UI_BETA_USER_IDS.
+    Default: desligado (nada muda pros usuários).
+    """
+    if (os.getenv("OF_UI_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    beta_emails = {e.strip().lower() for e in (os.getenv("OF_UI_BETA_EMAILS") or "").split(",") if e.strip()}
+    if email and str(email).strip().lower() in beta_emails:
+        return True
+    beta_ids = {i.strip() for i in (os.getenv("OF_UI_BETA_USER_IDS") or "").split(",") if i.strip()}
+    return str(user_id) in beta_ids
+
+
 @app.get("/auth/me")
 async def auth_me(user_id: int = Depends(_get_current_user)):
     """Retorna dados do usuário autenticado."""
@@ -2288,16 +2379,19 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
 
+    user_dict = dict(user)
     show_onboarding = await asyncio.to_thread(should_show_mfa_onboarding, user_id)
     mfa = await asyncio.to_thread(get_mfa_status, user_id)
     from core.services.plan_service import has_app_access, paywall_enabled
+    of_ui_enabled = _open_finance_ui_enabled(user_id, user_dict.get("email"))
     return {
         "user_id": user_id,
-        **dict(user),
+        **user_dict,
         "show_mfa_onboarding": show_onboarding,
         "mfa_enabled": bool(mfa.get("enabled")),
         "app_access": has_app_access(user_id),
         "paywall_enabled": paywall_enabled(),
+        "of_ui_enabled": of_ui_enabled,
     }
 
 
@@ -2815,8 +2909,14 @@ def _google_redirect_to_landing(message: str) -> RedirectResponse:
 
 @app.get("/auth/google/start")
 @limiter.limit("10/minute")
-async def auth_google_start(request: Request):
-    """Gera state, salva em cookie short-lived e redireciona pro Google."""
+async def auth_google_start(request: Request, app: int = 0):
+    """Gera state, salva em cookie short-lived e redireciona pro Google.
+
+    `app=1`: fluxo iniciado pelo app iOS (via ASWebAuthenticationSession). O
+    marcador viaja no próprio `state` (prefixo "app-"), que o Google devolve
+    intacto no callback — sem precisar de cookie extra. Assim o callback sabe
+    devolver um código de uso único pelo scheme `pigbankai://` em vez de setar
+    cookies num navegador que não é o WebView do app."""
     from core.services.google_oauth import (
         GoogleOAuthError,
         build_authorization_url,
@@ -2829,7 +2929,7 @@ async def auth_google_start(request: Request):
             detail="Login com Google ainda não está configurado neste ambiente.",
         )
 
-    state = secrets.token_urlsafe(32)
+    state = ("app-" if app == 1 else "") + secrets.token_urlsafe(32)
     try:
         url = build_authorization_url(state)
     except GoogleOAuthError as exc:
@@ -2879,6 +2979,8 @@ async def auth_google_callback(
     _log = _logging.getLogger("auth.google")
 
     cookie_state = request.cookies.get(GOOGLE_OAUTH_STATE_COOKIE) or ""
+    # Fluxo do app iOS: o state carrega o prefixo "app-" (ver /auth/google/start)
+    is_app_flow = bool(state) and state.startswith("app-")
 
     if error:
         return _google_redirect_to_landing(f"Login com Google cancelado: {error}")
@@ -2916,7 +3018,11 @@ async def auth_google_callback(
         # 3) Conta totalmente nova → cria pendente e manda pra /onboarding
         if not user_id:
             token = await asyncio.to_thread(create_pending_google_signup, sub, email, name_hint)
-            signup_response = RedirectResponse(url=f"/onboarding?token={token}", status_code=302)
+            # App: devolve o token de onboarding pelo scheme (o app abre o
+            # /onboarding no WebView). Web: redirect normal.
+            onb_url = (f"pigbankai://auth?onboarding={token}" if is_app_flow
+                       else f"/onboarding?token={token}")
+            signup_response = RedirectResponse(url=onb_url, status_code=302)
             signup_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
             return signup_response
 
@@ -2926,7 +3032,24 @@ async def auth_google_callback(
         except HTTPException as exc:
             return _google_redirect_to_landing(exc.detail)
 
-        # Login bem-sucedido → cookies + redirect pra home
+        # App iOS: NÃO seta cookies aqui (esta resposta vive no navegador nativo
+        # do ASWebAuthenticationSession, não no WebView). Em vez disso, gera um
+        # código de uso único e devolve pelo scheme; o app carrega /d/{code} no
+        # WebView, que aí sim seta os cookies e loga de verdade.
+        if is_app_flow:
+            from db import create_dashboard_session
+            code = await asyncio.to_thread(create_dashboard_session, int(user_id), 5 / 60)
+            await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
+            await log_auth_login_event(
+                email, True, user_id=user_id,
+                ip_address=get_remote_address(request),
+                user_agent=request.headers.get("user-agent"),
+            )
+            app_response = RedirectResponse(url=f"pigbankai://auth?code={code}", status_code=302)
+            app_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
+            return app_response
+
+        # Login bem-sucedido (web) → cookies + redirect pra home
         jwt_token, jti, refresh = _issue_session_token(user_id, email, request)
         success_response = RedirectResponse(url=_post_login_url(user_id), status_code=302)
         success_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
@@ -3096,7 +3219,8 @@ async def billing_create_checkout(
             cancel_url=f"{DASHBOARD_URL}/home?upgrade=cancelled",
             metadata={"finbot_user_id": str(user_id), "interval": interval},
             subscription_data={
-                "trial_period_days": 7,
+                # Duração do trial controlável por env (sem deploy): PRO_TRIAL_DAYS (default 30).
+                "trial_period_days": int(os.getenv("PRO_TRIAL_DAYS", "30")),
                 "metadata": {"finbot_user_id": str(user_id), "interval": interval},
             },
         )
@@ -3972,6 +4096,14 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao registrar lançamento: {exc}") from exc
+
+    # Reconciliação reversa (Open Finance): se o banco já importou esse gasto, funde (não duplica).
+    if not is_internal:
+        try:
+            from db import reconcile_manual_launch
+            await asyncio.to_thread(reconcile_manual_launch, int(user_id), int(launch_id))
+        except Exception:
+            pass
 
     return {
         "ok": True,

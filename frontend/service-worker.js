@@ -11,7 +11,7 @@
  * once the network is restored.
  */
 
-const CACHE_NAME = "finance-dash-v3";
+const CACHE_NAME = "finance-dash-v4";
 
 // Resources to pre-cache on install
 const PRECACHE = [
@@ -20,7 +20,9 @@ const PRECACHE = [
   "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js",
 ];
 
-// Never cache these (API calls, WebSocket upgrades)
+// Never cache these (API calls, WebSocket upgrades, dados financeiros).
+// Open Finance e histórico trazem saldo/transações do banco: nunca cachear
+// (privacidade no dispositivo + evita mostrar dado velho depois de um sync).
 const SKIP_CACHE = [
   "/app",
   "/settings",
@@ -29,6 +31,8 @@ const SKIP_CACHE = [
   "/export/",
   "/budgets/",
   "/data/",
+  "/open-finance/",
+  "/history/",
   "/health",
   "/admin",
   "/admin/",
