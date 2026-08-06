@@ -64,7 +64,16 @@ AGENT_CATALOG: list[dict] = [
 
 
 def _plan_allows_multiple(user_id: int) -> bool:
-    from core.services.plan_service import is_pro, plans_v2_enabled, require_min_tier
+    from core.services.plan_service import is_pro
+    # plans_v2_enabled/require_min_tier só existem quando a escada v2 está no
+    # código (feature ainda atrás de flag, não shipada aqui). Sem ela, o gate
+    # binário (is_pro) É o comportamento certo — e é exatamente o que
+    # require_min_tier faz com v2 off. Import defensivo pra a view não morrer
+    # com ImportError enquanto o plans-v2 não pousa.
+    try:
+        from core.services.plan_service import plans_v2_enabled, require_min_tier
+    except ImportError:
+        return is_pro(user_id)
     if plans_v2_enabled():
         # Escada v2: agentes ilimitados são corte do Plus (ver _FEATURE_MIN_TIER_V2).
         return require_min_tier(user_id, "plus")
@@ -102,7 +111,7 @@ async def agents_shelf_route(request: Request, user_id: int):
 @router.post("/agents/{user_id}/{kind}/activate")
 async def agents_activate_route(request: Request, user_id: int, kind: str, body: ActivateBody | None = None):
     shared.authorize_dashboard_access(request, user_id)
-    from db import AGENT_KINDS, activate_agent, count_active_agents, get_agent
+    from db import AGENT_KINDS, activate_agent, get_agent
 
     if kind not in AGENT_KINDS:
         available = {c["kind"] for c in AGENT_CATALOG if c["disponivel"]}
@@ -112,14 +121,16 @@ async def agents_activate_route(request: Request, user_id: int, kind: str, body:
 
     existing = await asyncio.to_thread(get_agent, user_id, kind)
     already_active = bool(existing and existing["status"] == "active")
-    if not already_active:
-        active_count = await asyncio.to_thread(count_active_agents, user_id)
-        if active_count >= 1 and not await asyncio.to_thread(_plan_allows_multiple, user_id):
-            # Mesmo payload de 403 do resto do app → frontend abre o modal de upgrade.
-            raise HTTPException(status_code=403, detail={"error": "pro_required", "feature": "agents"})
+    # Reativar o MESMO kind não adiciona agente → não passa pelo teto. Só uma
+    # ativação de kind novo precisa do direito a múltiplos. O teto é aplicado
+    # DENTRO de activate_agent (mesma transação) pra fechar o TOCTOU.
+    allow_multiple = already_active or await asyncio.to_thread(_plan_allows_multiple, user_id)
 
     config = (body.config if body else None) or {}
-    agent = await asyncio.to_thread(activate_agent, user_id, kind, config)
+    agent = await asyncio.to_thread(activate_agent, user_id, kind, config, allow_multiple)
+    if agent is None:
+        # Mesmo payload de 403 do resto do app → frontend abre o modal de upgrade.
+        raise HTTPException(status_code=403, detail={"error": "pro_required", "feature": "agents"})
     return {"ok": True, "agent": {
         "kind": agent["kind"], "status": agent["status"], "config": agent["config"],
     }}

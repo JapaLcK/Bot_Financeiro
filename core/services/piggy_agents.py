@@ -189,13 +189,19 @@ def _month_stats(cur, user_id: int, first: date, nxt: date) -> dict[str, float]:
     cur.execute(
         """
         select
-          coalesce(sum(valor) filter (where tipo = 'receita'), 0)                 as entrou,
-          coalesce(sum(valor) filter (where tipo in ('despesa', 'saida')), 0)     as saiu,
+          coalesce(sum(valor) filter (where tipo = 'receita'
+                                        and is_internal_movement = false), 0)      as entrou,
+          coalesce(sum(valor) filter (where tipo in ('despesa', 'saida')
+                                        and is_internal_movement = false), 0)      as saiu,
+          -- aportes vêm de deposito/saque_caixinha, que db/pockets.py grava SEMPRE
+          -- como is_internal_movement=true. Por isso o guard de movimento interno
+          -- fica NOS filtros de entrou/saiu (pra não contar transferência como
+          -- receita/despesa), e NÃO no where global — senão aportes zeraria e
+          -- "sobrou" (receitas−despesas−aportes) sairia inflado.
           coalesce(sum(valor) filter (where tipo = 'deposito_caixinha'), 0)
             - coalesce(sum(valor) filter (where tipo = 'saque_caixinha'), 0)      as aportes
         from launches
         where user_id = %s
-          and is_internal_movement = false
           and criado_em >= %s and criado_em < %s
         """,
         (user_id, first, nxt),
@@ -210,7 +216,7 @@ def _month_stats(cur, user_id: int, first: date, nxt: date) -> dict[str, float]:
 
 
 def _reporter_run_for_user(agent: dict[str, Any], today: date) -> bool:
-    from db import record_agent_event, get_user_email
+    from db import record_agent_event, get_user_email, get_auth_user
 
     user_id = agent["user_id"]
     first_this = today.replace(day=1)
@@ -256,9 +262,14 @@ def _reporter_run_for_user(agent: dict[str, Any], today: date) -> bool:
         return False  # manchete do mês já publicada
 
     # E-mail é o canal principal do Repórter. Falha de e-mail não desfaz o
-    # evento do feed — o dashboard sempre registra.
+    # evento do feed — o dashboard sempre registra. Mas respeita quem se
+    # descadastrou dos e-mails de engajamento (engagement_opt_out, setado no
+    # /unsubscribe e no comando "parar emails"): a manchete continua no feed,
+    # só o envio proativo é suprimido.
     try:
-        email = get_user_email(user_id)
+        auth = get_auth_user(user_id)
+        opted_out = bool(auth and auth.get("engagement_opt_out"))
+        email = None if opted_out else get_user_email(user_id)
         if email:
             from core.services.email_service import send_agent_report_email
             corpo = (
