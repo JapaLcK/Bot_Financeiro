@@ -3,6 +3,7 @@
  *
  * Ativação (qualquer um):
  *   - user agent contém "PigBankApp" (WebView do app iOS/Capacitor)
+ *   - PWA instalada (display-mode: standalone / navigator.standalone no iOS)
  *   - ?pbapp=1 na URL (persiste em localStorage — preview no navegador)
  *   - localStorage.pbApp === "1"
  *   Desativação no preview: ?pbapp=0
@@ -17,11 +18,23 @@
 
   let stored = null;
   try { stored = localStorage.getItem("pbApp"); } catch (_) {}
-  const inApp = /PigBankApp/.test(navigator.userAgent) || stored === "1";
+  // PWA instalada roda o mesmo "modo app" do app iOS — atualizações do site
+  // chegam nas duas cascas sem passo extra.
+  const standalone =
+    (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+    window.navigator.standalone === true;
+  const inApp = /PigBankApp/.test(navigator.userAgent) || stored === "1" || standalone;
   if (!inApp) return;
 
   const root = document.documentElement;
   root.classList.add("pb-app");
+
+  // PWA aberta na landing (start_url antiga "/"): entra pelo mesmo caminho do
+  // app iOS — /login pula direto pro /home quando a sessão está viva.
+  if (standalone && location.pathname === "/") {
+    location.replace("/login");
+    return;
+  }
 
   // Página atual → classe no body (CSS escopa por página) + aba ativa
   const PAGES = {

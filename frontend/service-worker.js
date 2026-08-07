@@ -1,5 +1,5 @@
 /**
- * Finance Dashboard – Service Worker
+ * PigBank – Service Worker
  *
  * Strategy:
  *   - HTML / auth: never cached
@@ -11,12 +11,13 @@
  * once the network is restored.
  */
 
-const CACHE_NAME = "finance-dash-v6";
+const CACHE_NAME = "pigbank-v7";
 
 // Resources to pre-cache on install
 const PRECACHE = [
   "/",
   "/manifest.json",
+  "/brand/icon-192.png",
   "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js",
 ];
 
@@ -99,24 +100,25 @@ self.addEventListener("fetch", event => {
 self.addEventListener("push", event => {
   if (!event.data) return;
   let data;
-  try { data = event.data.json(); } catch { data = { title: "Finance", body: event.data.text() }; }
+  try { data = event.data.json(); } catch { data = { title: "PigBank", body: event.data.text() }; }
   event.waitUntil(
-    self.registration.showNotification(data.title || "Finance Dashboard", {
+    self.registration.showNotification(data.title || "PigBank", {
       body:  data.body  || "",
-      icon:  "/manifest.json",
-      badge: "/manifest.json",
-      tag:   data.tag   || "finance-alert",
-      data:  { url: "/" },
+      icon:  "/brand/icon-192.png",
+      badge: "/brand/icon-192.png",
+      tag:   data.tag   || "pigbank-alert",
+      data:  { url: "/app" },
     })
   );
 });
 
 self.addEventListener("notificationclick", event => {
   event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || "/app";
   event.waitUntil(
     clients.matchAll({ type: "window" }).then(wins => {
       if (wins.length) return wins[0].focus();
-      return clients.openWindow("/");
+      return clients.openWindow(url);
     })
   );
 });

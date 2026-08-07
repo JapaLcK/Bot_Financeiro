@@ -42,9 +42,14 @@ npx cap open ios     # abre no Xcode
 
 ## Pendências (fase 2)
 
+- [x] Face ID lock — implementado direto no `AppDelegate.swift` via
+      `LocalAuthentication` (sem plugin): pede Face ID/Touch ID/código no cold
+      launch e ao voltar do background após 60s; cobre o conteúdo no app
+      switcher. **Só chega ao aparelho com um build nativo novo**
+      (`npx cap sync ios` + Archive no Xcode → TestFlight) — deploy do site
+      não atualiza código Swift.
 - [ ] Push notifications: APNs key no Apple Developer → backend envia via
       `aioapns`/`httpx` + registro do token no login (plugin já no bundle).
-- [ ] Face ID lock (plugin biométrico + `NSFaceIDUsageDescription` já no plist).
 - [ ] Conta de review da Apple: user demo com plano Pro ativo (grant manual).
 - [ ] Ficha da App Store: screenshots, descrição, App Privacy (dados: e-mail,
       telefone, dados financeiros — vinculados à identidade; sem tracking).
