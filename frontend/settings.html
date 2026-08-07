@@ -1313,8 +1313,7 @@ a { color: inherit; text-decoration: none; }
       <div class="info-banner">
         <span class="info-banner-icon">💡</span>
         <span>
-          <strong>Como funciona o Open Finance?</strong> Na versão real, você autoriza o acesso dentro do próprio app do banco — a gente nunca vê sua senha e você pode revogar quando quiser.
-          <strong>Nesta versão de teste, todos os dados são simulados.</strong>
+          <strong>Como funciona o Open Finance?</strong> Você autoriza o acesso dentro do ambiente seguro do banco, via Pluggy — a gente nunca vê sua senha e você pode revogar o acesso quando quiser.
         </span>
       </div>
 
@@ -2551,6 +2550,16 @@ function bInitials(name) {
   if (n.includes("bradesco")) return "BR";
   return (name||"?").slice(0,2).toUpperCase();
 }
+// Status da conexão Open Finance → pill. Três estados:
+//  • Conectado    — sincronizando normal (ACTIVE/UPDATED)
+//  • Pendente     — a Pluggy ainda está verificando/buscando (UPDATING/CREATED/WAITING_USER_ACTION)
+//  • Não conectado — parado, precisa reconectar (PAUSED/LOGIN_ERROR/ERROR/OUTDATED/WAITING_USER_INPUT/desconhecido)
+function connStatusPill(status) {
+  const st = String(status || "").toUpperCase();
+  if (st === "ACTIVE" || st === "ATIVO" || st === "UPDATED") return { pc: "active",  pl: "Conectado" };
+  if (st === "UPDATING" || st === "CREATED" || st === "WAITING_USER_ACTION") return { pc: "pending", pl: "Pendente" };
+  return { pc: "error", pl: "Não conectado" };
+}
 
 /* ── Render ──────────────────────────────────── */
 function renderConnections(list) {
@@ -2564,9 +2573,7 @@ function renderConnections(list) {
   el.innerHTML = list.map(c => {
     const cls = bClass(c.institution_name);
     const ini = bInitials(c.institution_name);
-    const st  = (c.status||"ativo").toLowerCase();
-    const pc  = st==="ativo"||st==="active" ? "active" : "pending";
-    const pl  = pc==="active" ? "Ativo" : "Pendente";
+    const { pc, pl } = connStatusPill(c.status);
     return `<div class="connection-row">
       <div class="conn-logo ${cls}">${esc(ini)}</div>
       <div class="conn-info">
