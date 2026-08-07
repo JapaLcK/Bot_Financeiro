@@ -36,7 +36,7 @@ def build_html(user_id: int, email: str) -> str:
       <p>Oi! Piggy por aqui. 🐷</p>
       <p>Passando para contar as novidades mais recentes do <strong>PigBank</strong>.</p>
 
-      <div class="box" style="border-left-color:#34d399;">
+      <div class="box" style="border-left-color:#C6F11A;">
         <h2 style="margin:0 0 20px;color:#fff;font-size:22px;line-height:1.35;">
           📈 Investimentos, configurações e site mais organizado
         </h2>
@@ -69,8 +69,9 @@ def build_html(user_id: int, email: str) -> str:
 
       <div class="box" style="text-align:center;margin-top:24px;">
         <a href="https://pigbankai.com/changelog"
-           style="display:inline-block;background:linear-gradient(135deg,#7c3aed,#3b82f6);color:#fff;
-                  text-decoration:none;padding:12px 28px;border-radius:12px;font-weight:700;font-size:15px;">
+           style="display:inline-block;background:#FF2D8E;color:#fff;
+                  text-decoration:none;padding:12px 28px;border-radius:999px;font-weight:700;font-size:15px;
+                  box-shadow:0 8px 24px rgba(255,45,142,.35);">
           Ver novidades
         </a>
       </div>
