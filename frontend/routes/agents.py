@@ -38,9 +38,9 @@ AGENT_CATALOG: list[dict] = [
     },
     {
         "kind": "detetive", "nome": "Detetive", "emoji": "🔍",
-        "freq": "Semanal",
+        "freq": "Contínuo · a cada sync",
         "desc": "Fareja cobranças repetidas que parecem assinatura esquecida",
-        "disponivel": False,
+        "disponivel": True,
     },
     {
         # Renomeado (era "Cofre" → "Guardião do Tesouro" → "Banqueiro"); o kind interno segue "cofre".

@@ -379,6 +379,130 @@ def run_carteiro_once(today: date | None = None) -> dict:
     return {"ok": True, "agents": len(agents), "fired": fired}
 
 
+# ── Detetive: caça-assinaturas esquecidas ────────────────────────────────────
+
+DETETIVE_LOOKBACK_MONTHS = 6   # janela pra procurar recorrência
+DETETIVE_MIN_MESES = 3         # aparece em N meses distintos = parece assinatura
+DETETIVE_MIN_VALOR = 5.0       # ignora cobrança recorrente miúda (ruído)
+
+
+def _detetive_cutoff(today: date) -> date:
+    """1º dia do mês, DETETIVE_LOOKBACK_MONTHS atrás."""
+    m = today.month - DETETIVE_LOOKBACK_MONTHS
+    y = today.year
+    while m <= 0:
+        m += 12
+        y -= 1
+    return date(y, m, 1)
+
+
+def _detetive_detect_for_user(agent: dict[str, Any], today: date) -> int:
+    """Fareja cobranças que repetem (mesmo comerciante + mesmo valor) em >=3 meses
+    distintos e ainda não foram flagradas. Um evento por assinatura (dedupe pela
+    assinatura), então rodar todo dia não vira spam. Fonte = launches (inclui OF,
+    cujo criado_em é a data real da transação)."""
+    from db import record_agent_event
+
+    user_id = agent["user_id"]
+    cutoff = _detetive_cutoff(today)
+    fired = 0
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # merchant = descrição normalizada (tira ids/datas longas e espaço extra)
+            # pra o mesmo serviço agrupar entre meses. Valor exato (tolerância = v2).
+            cur.execute(
+                r"""
+                with base as (
+                  select
+                    -- normaliza o comerciante: tira o prefixo de tipo do OF
+                    -- ("Compra no débito|", "Transferência enviada|"), ids/datas
+                    -- longas e espaço extra, pra o mesmo serviço agrupar entre meses.
+                    lower(btrim(regexp_replace(
+                      regexp_replace(
+                        regexp_replace(coalesce(alvo, nota, ''), '^.*\|', ''),
+                        '[0-9]{3,}', '', 'g'),
+                      '\s+', ' ', 'g'))) as merchant,
+                    coalesce(alvo, nota, '') as raw,
+                    round(valor::numeric, 2) as val,
+                    to_char(criado_em, 'YYYY-MM') as ym,
+                    categoria
+                  from launches
+                  where user_id = %s
+                    and tipo in ('despesa', 'saida')
+                    and is_internal_movement = false
+                    and coalesce(alvo, nota, '') <> ''
+                    and valor >= %s
+                    and criado_em >= %s
+                )
+                select merchant,
+                       val,
+                       count(distinct ym) as meses,
+                       max(ym) as ultimo,
+                       (array_agg(raw order by ym desc))[1] as descricao,
+                       (array_agg(categoria) filter (where categoria is not null))[1] as categoria
+                from base
+                where merchant <> ''
+                group by merchant, val
+                having count(distinct ym) >= %s
+                order by val desc
+                """,
+                (user_id, DETETIVE_MIN_VALOR, cutoff, DETETIVE_MIN_MESES),
+            )
+            achados = cur.fetchall() or []
+
+    for s in achados:
+        val = float(s["val"])
+        meses = int(s["meses"])
+        desc = (s["descricao"] or s["merchant"] or "").strip()
+        desc_curta = desc[:48]
+        ok = record_agent_event(
+            agent["agent_id"], user_id, "detetive",
+            dedupe_key=f"sub:{s['merchant']}:{val:.2f}",
+            payload={
+                "tipo": "assinatura",
+                "merchant": s["merchant"],
+                "descricao": desc[:120],
+                "categoria": s["categoria"],
+                "valor": val,
+                "meses": meses,
+                "titulo": f"Parece assinatura: {desc_curta}",
+                "mensagem": (
+                    f"🔍 {desc_curta} aparece há {meses} meses seguidos "
+                    f"({_fmt_brl(val)}/mês). Se for assinatura que você não usa mais, "
+                    f"cancelar libera {_fmt_brl(val * 12)} por ano. Ainda usa?"
+                ),
+            },
+            valor_impacto=val,
+        )
+        fired += 1 if ok else 0
+    return fired
+
+
+def run_detetive_once(today: date | None = None, user_id: int | None = None) -> dict:
+    """Roda o Detetive pra todos os agentes ativos (ou só um usuário).
+
+    Dedupe por assinatura, então pode rodar todo tick sem repetir alerta. No 1º
+    sync do Open Finance vira a 'auditoria de estreia': o histórico importado
+    revela as assinaturas de uma vez."""
+    from db import list_users_with_active_agents
+
+    today = today or date.today()
+    agents = list_users_with_active_agents("detetive")
+    if user_id is not None:
+        agents = [a for a in agents if a["user_id"] == user_id]
+    from core.services.plan_service import agent_kind_allowed, agents_ui_enabled
+    agents = [a for a in agents
+              if agents_ui_enabled(a["user_id"]) and agent_kind_allowed(a["user_id"], "detetive")]
+    fired = 0
+    for agent in agents:
+        try:
+            fired += _detetive_detect_for_user(agent, today)
+        except Exception as exc:
+            print(f"[agents] detetive user={agent['user_id']}: {exc}", file=sys.stderr)
+    return {"ok": True, "agents": len(agents), "fired": fired}
+
+
 # ── Orquestração ─────────────────────────────────────────────────────────────
 
 def run_all_agents_once(today: date | None = None) -> dict:
@@ -387,22 +511,27 @@ def run_all_agents_once(today: date | None = None) -> dict:
         "xerife": run_xerife_once(today),
         "reporter": run_reporter_once(today),
         "carteiro": run_carteiro_once(today),
+        "detetive": run_detetive_once(today),
     }
 
 
 def run_agents_for_user(user_id: int, trigger: str = "of_sync") -> dict:
-    """Hook pós-sync do Open Finance: roda só o Xerife, só pro usuário sincado.
+    """Hook pós-sync do Open Finance: roda Xerife (anomalia no delta) e Detetive
+    (auditoria de assinaturas no histórico importado), só pro usuário sincado.
 
     Fail-soft por contrato — quem chama (pluggy_sync) não pode quebrar por
-    causa de agente.
+    causa de agente. Cada detector é isolado pra um não derrubar o outro.
     """
     if not AGENTS_ENABLED:
         return {"ok": True, "disabled": True}
-    try:
-        return run_xerife_once(user_id=user_id)
-    except Exception as exc:
-        print(f"[agents] run_for_user({user_id}, {trigger}): {exc}", file=sys.stderr)
-        return {"ok": False, "error": str(exc)}
+    out: dict[str, Any] = {"ok": True}
+    for kind, fn in (("xerife", run_xerife_once), ("detetive", run_detetive_once)):
+        try:
+            out[kind] = fn(user_id=user_id)
+        except Exception as exc:
+            print(f"[agents] run_for_user({user_id}, {trigger}) {kind}: {exc}", file=sys.stderr)
+            out[kind] = {"ok": False, "error": str(exc)}
+    return out
 
 
 async def run_agents_loop() -> None:
