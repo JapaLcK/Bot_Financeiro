@@ -2629,9 +2629,15 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     agents_ui = _agents_ui_enabled(user_id, user_dict.get("email"))
     # Planos v2: tier efetivo da escada + estado do trial (30d via Stripe).
     plan_tier = await asyncio.to_thread(get_plan_tier, user_id)
-    # Teto de bancos do plano (0 = Free/sem OF, None = ilimitado). O front usa pra,
-    # no Free pós-trial, trocar "Conectar" por "Reative seu banco" sem abrir o widget.
-    of_banks_max = (await asyncio.to_thread(get_user_limits, user_id)).get("of_banks_max")
+    # Teto de bancos do plano (0 = Free/sem OF, None = ilimitado/sem gate na UI). O
+    # front usa pra, no Free pós-trial, trocar "Conectar" por "Reative seu banco" sem
+    # abrir o widget. SÓ sob a escada v2: com v2 OFF (rollback de emergência) o limite
+    # é governado pelo _enforce_bank_limit legado (Free ainda conecta, gate dormente),
+    # então não expomos o teto de free-tier — senão o rollback desligaria o OF na UI.
+    of_banks_max = (
+        (await asyncio.to_thread(get_user_limits, user_id)).get("of_banks_max")
+        if plans_v2_enabled() else None
+    )
     trial = await asyncio.to_thread(get_trial_status, user_id, user_dict)
     earliest_history = await asyncio.to_thread(history_earliest_date, user_id)
     # Não devolve pro cliente os blobs cifrados (redundantes — já há o claro
