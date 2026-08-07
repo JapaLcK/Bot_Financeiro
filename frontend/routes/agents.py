@@ -51,9 +51,9 @@ AGENT_CATALOG: list[dict] = [
     },
     {
         "kind": "barao", "nome": "Barão", "emoji": "🎩",
-        "freq": "Diário · Open Finance",
-        "desc": "Fareja dinheiro parado rendendo nada e acompanha seus investimentos",
-        "disponivel": False,
+        "freq": "Mensal · Open Finance",
+        "desc": "Fareja dinheiro parado rendendo nada e mostra quanto renderia no CDI",
+        "disponivel": True,
     },
     {
         "kind": "aviador", "nome": "Aviador", "emoji": "✈️",

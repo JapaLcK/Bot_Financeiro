@@ -53,7 +53,7 @@ AGENT_KIND_MIN_TIER: dict[str, str] = {
     "carteiro": "plus",
     "detetive": "pro",   # Fase B: caça-assinaturas (tier Pro/pro_max)
     "cofre": "pro",      # Fase B: Banqueiro (aporte na caixinha OF → meta)
-    # Fase B (restante): "barao": "pro",
+    "barao": "pro",      # Fase B: Barão (dinheiro parado vs CDI)
 }
 
 

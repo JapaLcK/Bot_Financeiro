@@ -580,6 +580,86 @@ def run_cofre_once(today: date | None = None, user_id: int | None = None) -> dic
     return {"ok": True, "agents": len(agents), "fired": fired}
 
 
+# ── Barão: dinheiro parado na conta corrente vs CDI ──────────────────────────
+
+BARAO_MIN_IDLE = float(os.getenv("BARAO_MIN_IDLE", "1000"))     # abaixo disso não cutuca
+BARAO_CDI_ANNUAL_PCT = float(os.getenv("CDI_ANNUAL_PCT", "10.5"))  # taxa de referência
+
+
+def _barao_detect_for_user(agent: dict[str, Any], today: date) -> int:
+    """Soma o saldo parado nas contas correntes (OF) e, se passar do mínimo, estima
+    o rendimento perdido no CDI e cutuca — 1x por mês (dedupe por YYYY-MM). NÃO
+    recomenda produto (posicionamento + regulatório): só mostra o custo de oportunidade."""
+    from db import record_agent_event
+
+    user_id = agent["user_id"]
+    cfg = agent.get("config") or {}
+    min_idle = float(cfg.get("minimo") or BARAO_MIN_IDLE)
+    cdi = float(cfg.get("cdi_anual") or BARAO_CDI_ANNUAL_PCT)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select coalesce(sum(a.balance), 0) as idle
+                from open_finance_accounts a
+                join open_finance_connections c on c.id = a.connection_id
+                where c.user_id = %s
+                  and upper(coalesce(a.type, '')) = 'BANK'
+                  and (upper(coalesce(a.subtype, '')) like '%%CHECKING%%'
+                       or a.subtype is null)
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone() or {}
+
+    idle = float(row.get("idle") or 0)
+    if idle < min_idle:
+        return 0
+
+    rende_mes = round(idle * (cdi / 100.0) / 12.0, 2)
+    ym = today.strftime("%Y-%m")
+    ok = record_agent_event(
+        agent["agent_id"], user_id, "barao",
+        dedupe_key=f"parado:{ym}",
+        payload={
+            "tipo": "parado",
+            "idle": round(idle, 2),
+            "cdi": cdi,
+            "rende_mes": rende_mes,
+            "titulo": f"{_fmt_brl(idle)} parado rendendo nada",
+            "mensagem": (
+                f"🎩 Você tem {_fmt_brl(idle)} parado na conta corrente. No CDI "
+                f"(~{cdi:.1f}% ao ano) isso renderia cerca de {_fmt_brl(rende_mes)} por mês. "
+                f"Numa caixinha que rende, esse dinheiro trabalha por você — a escolha "
+                f"do produto é sua, eu só não deixo passar batido."
+            ),
+        },
+        valor_impacto=rende_mes,
+    )
+    return 1 if ok else 0
+
+
+def run_barao_once(today: date | None = None, user_id: int | None = None) -> dict:
+    """Roda o Barão pra todos os agentes barao ativos (ou só um usuário)."""
+    from db import list_users_with_active_agents
+
+    today = today or date.today()
+    agents = list_users_with_active_agents("barao")
+    if user_id is not None:
+        agents = [a for a in agents if a["user_id"] == user_id]
+    from core.services.plan_service import agent_kind_allowed, agents_ui_enabled
+    agents = [a for a in agents
+              if agents_ui_enabled(a["user_id"]) and agent_kind_allowed(a["user_id"], "barao")]
+    fired = 0
+    for agent in agents:
+        try:
+            fired += _barao_detect_for_user(agent, today)
+        except Exception as exc:
+            print(f"[agents] barao user={agent['user_id']}: {exc}", file=sys.stderr)
+    return {"ok": True, "agents": len(agents), "fired": fired}
+
+
 # ── Orquestração ─────────────────────────────────────────────────────────────
 
 def run_all_agents_once(today: date | None = None) -> dict:
@@ -590,6 +670,7 @@ def run_all_agents_once(today: date | None = None) -> dict:
         "carteiro": run_carteiro_once(today),
         "detetive": run_detetive_once(today),
         "cofre": run_cofre_once(today),
+        "barao": run_barao_once(today),
     }
 
 
@@ -608,6 +689,7 @@ def run_agents_for_user(user_id: int, trigger: str = "of_sync") -> dict:
         ("xerife", run_xerife_once),
         ("detetive", run_detetive_once),
         ("cofre", run_cofre_once),
+        ("barao", run_barao_once),
     ):
         try:
             out[kind] = fn(user_id=user_id)
