@@ -102,3 +102,20 @@ def test_get_unsubscribe_continua_funcionando(user_id):
 
     assert res.status_code == 200
     assert _engagement_opt_out(user_id) is True
+
+
+def test_post_unsubscribe_atravessa_o_middleware_csrf(user_id):
+    """O POST do Gmail/Yahoo chega sem cookie/header CSRF — o path precisa
+    estar em CSRF_EXEMPT_PATHS, senão o middleware devolve 403 antes do
+    handler. Passa pela pilha HTTP completa (TestClient), não pelo handler
+    direto como os testes acima."""
+    from fastapi.testclient import TestClient
+
+    email = _make_auth_account(user_id)
+    token = _token_for(user_id, email)
+
+    client = TestClient(app_mod.app)
+    res = client.post(f"/unsubscribe?uid={user_id}&token={token}")
+
+    assert res.status_code == 200
+    assert _engagement_opt_out(user_id) is True

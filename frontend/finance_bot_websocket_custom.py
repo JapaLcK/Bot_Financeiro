@@ -1698,6 +1698,9 @@ CSRF_EXEMPT_PATHS = {
     "/open-finance/pluggy/webhook",
     "/wa/webhook",
     "/webhook",
+    # One-click unsubscribe (RFC 8058): POST server-to-server do Gmail/Yahoo,
+    # sem cookie de sessão — autenticado pelo token HMAC da própria URL.
+    "/unsubscribe",
 }
 
 _SECURITY_HEADERS = {
