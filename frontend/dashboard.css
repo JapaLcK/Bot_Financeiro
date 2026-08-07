@@ -2108,6 +2108,8 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
   display: flex; align-items: flex-end; justify-content: center;
 }
 .ag-avatar svg { width: 72%; height: auto; display: block; }
+.ag-avatar .ag-pig-img { height: 96%; width: auto; max-width: 88%; object-fit: contain; object-position: bottom; display: block; }
+.ag-event-face .ag-pig-img { height: 100%; width: auto; max-width: 100%; object-fit: contain; object-position: bottom; display: block; }
 .ag-bg-xerife   { background: radial-gradient(circle at 30% 25%, #5A2140, #1E0C18); }
 .ag-bg-reporter { background: radial-gradient(circle at 70% 30%, #23404F, #0D1418); }
 .ag-bg-carteiro { background: radial-gradient(circle at 35% 70%, #4F3A16, #171006); }

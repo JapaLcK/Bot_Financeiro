@@ -2557,6 +2557,8 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         get_plan_tier, get_trial_status,
     )
     of_ui_enabled = _open_finance_ui_enabled(user_id, user_dict.get("email"))
+    from core.services.plan_service import agents_ui_enabled as _agents_ui_enabled
+    agents_ui = _agents_ui_enabled(user_id, user_dict.get("email"))
     # Planos v2: tier efetivo da escada + estado do trial (30d via Stripe).
     plan_tier = await asyncio.to_thread(get_plan_tier, user_id)
     trial = await asyncio.to_thread(get_trial_status, user_id, user_dict)
@@ -2571,6 +2573,7 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         "plan_tier": plan_tier,
         "trial": {"active": trial["active"], "days_left": trial["days_left"]},
         "of_ui_enabled": of_ui_enabled,
+        "agents_ui_enabled": agents_ui,
     }
 
 

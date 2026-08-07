@@ -176,8 +176,9 @@ def run_xerife_once(today: date | None = None, user_id: int | None = None) -> di
         agents = [a for a in agents if a["user_id"] == user_id]
     # Escada v2: agente ativado no trial para de disparar quando o usuário cai
     # pro Grátis (tier sem direito ao kind). No-op com v2 off.
-    from core.services.plan_service import agent_kind_allowed
-    agents = [a for a in agents if agent_kind_allowed(a["user_id"], "xerife")]
+    from core.services.plan_service import agent_kind_allowed, agents_ui_enabled
+    agents = [a for a in agents
+              if agents_ui_enabled(a["user_id"]) and agent_kind_allowed(a["user_id"], "xerife")]
     fired = 0
     for agent in agents:
         try:
@@ -290,7 +291,7 @@ def _reporter_run_for_user(agent: dict[str, Any], today: date) -> bool:
                 f"de alguma categoria? É só perguntar no WhatsApp. 🐷</p>"
                 f"<p class=\"sig\">— Repórter, o porquinho de plantão</p>"
             )
-            send_agent_report_email(email, user_id, f"🎤 {titulo} — PigBank", corpo)
+            send_agent_report_email(email, user_id, f"🎤 {titulo} — PigBank", corpo, kind="reporter")
     except Exception as exc:
         print(f"[agents] reporter email user={user_id}: {exc}", file=sys.stderr)
     return True
@@ -304,8 +305,9 @@ def run_reporter_once(today: date | None = None) -> dict:
     if today.day > 3:
         return {"ok": True, "skipped": "fora da janela de fechamento"}
     agents = list_users_with_active_agents("reporter")
-    from core.services.plan_service import agent_kind_allowed
-    agents = [a for a in agents if agent_kind_allowed(a["user_id"], "reporter")]
+    from core.services.plan_service import agent_kind_allowed, agents_ui_enabled
+    agents = [a for a in agents
+              if agents_ui_enabled(a["user_id"]) and agent_kind_allowed(a["user_id"], "reporter")]
     sent = 0
     for agent in agents:
         try:
@@ -328,8 +330,9 @@ def run_carteiro_once(today: date | None = None) -> dict:
 
     today = today or date.today()
     agents = list_users_with_active_agents("carteiro")
-    from core.services.plan_service import agent_kind_allowed
-    agents = [a for a in agents if agent_kind_allowed(a["user_id"], "carteiro")]
+    from core.services.plan_service import agent_kind_allowed, agents_ui_enabled
+    agents = [a for a in agents
+              if agents_ui_enabled(a["user_id"]) and agent_kind_allowed(a["user_id"], "carteiro")]
     fired = 0
     for agent in agents:
         user_id = agent["user_id"]

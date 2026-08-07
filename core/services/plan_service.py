@@ -150,6 +150,37 @@ def paywall_enabled() -> bool:
     return (os.getenv("PAYWALL_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+# Allowlist padrão do beta de Agentes (usada quando AGENTS_BETA_EMAILS não está
+# setado no ambiente). Lançamento em fases: primeiro só o teste, depois geral.
+_AGENTS_BETA_EMAILS_DEFAULT = {"lucaskuramoti06@gmail.com", "hiagojo2016@gmail.com"}
+
+
+def agents_ui_enabled(user_id: int, email: str | None = None) -> bool:
+    """Gate beta da feature de Agentes (mesma mecânica do Open Finance). Liga se:
+    - AGENTS_UI_ENABLED global ligado (lançamento pra todos), OU
+    - o e-mail está no allowlist AGENTS_BETA_EMAILS (default = e-mails de teste), OU
+    - o user_id está em AGENTS_BETA_USER_IDS.
+    Default: SÓ os e-mails de teste veem/usam os agentes. Pra abrir geral, setar
+    AGENTS_UI_ENABLED=1 (aí este gate para de restringir e vale só o gate por tier)."""
+    if (os.getenv("AGENTS_UI_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    raw = os.getenv("AGENTS_BETA_EMAILS")
+    if raw is None:
+        beta_emails = _AGENTS_BETA_EMAILS_DEFAULT
+    else:
+        beta_emails = {e.strip().lower() for e in raw.split(",") if e.strip()}
+    if email is None:
+        try:
+            from db import get_user_email
+            email = get_user_email(user_id)
+        except Exception:
+            email = None
+    if email and str(email).strip().lower() in beta_emails:
+        return True
+    beta_ids = {i.strip() for i in (os.getenv("AGENTS_BETA_USER_IDS") or "").split(",") if i.strip()}
+    return str(user_id) in beta_ids
+
+
 def has_app_access(user_id: int) -> bool:
     """True se o usuário pode entrar no app.
 

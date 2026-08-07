@@ -128,7 +128,7 @@ PRO_LIMITS: PlanLimits = {
     **PLUS_LIMITS,
     "history_days": 730,                 # 24 meses
     "of_banks_max": 5,
-    "agents_max": 6,                     # + Detetive, Guardião do Tesouro (kind "cofre"), Barão
+    "agents_max": 6,                     # + Detetive, Banqueiro (kind "cofre"), Barão
 }
 
 

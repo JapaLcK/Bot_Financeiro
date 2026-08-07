@@ -9113,6 +9113,10 @@ function _showAccessError(title, msg) {
     const meResp = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
     if (meResp.ok) {
       const me = await meResp.json();
+      // Beta dos Agentes: fora do allowlist, a nav some (a API também dá 404).
+      if (me && me.agents_ui_enabled === false) {
+        document.querySelectorAll('[data-nav="agentes"]').forEach(el => { el.style.display = "none"; });
+      }
       if (me && me.app_access === false) {
         if (window.PB_IN_APP) {
           // App iOS: tela neutra, sem link de compra (diretriz 3.1.1)
@@ -9228,7 +9232,7 @@ function _renderAgentes(data) {
     return `
       <div class="ag-card${!card.disponivel ? " ag-card-soon" : ""}">
         <div class="ag-avatar ag-bg-${esc(card.kind)}">
-          <svg viewBox="0 6 120 114" aria-hidden="true"><use href="#ag-pig-${esc(card.kind)}"/></svg>
+          ${_agentArt(card.kind)}
         </div>
         <h3>${esc(card.nome)}</h3>
         <p class="ag-desc">${esc(card.desc)}</p>
@@ -9247,7 +9251,7 @@ function _renderAgentes(data) {
           return `
             <div class="ag-event${ev.seen_at ? "" : " ag-event-new"}">
               <div class="ag-event-face ag-bg-${esc(ev.kind)}">
-                <svg viewBox="0 6 120 114" aria-hidden="true"><use href="#ag-pig-${esc(ev.kind)}"/></svg>
+                ${_agentArt(ev.kind)}
               </div>
               <div class="ag-event-body">
                 <p class="ag-event-msg">${esc(p.mensagem || p.titulo || "Disparo")}</p>
@@ -9257,6 +9261,15 @@ function _renderAgentes(data) {
           `;
         }).join("");
   }
+}
+
+// Kinds com arte PNG real em /brand/agents/. O que não tiver (ex.: aviador)
+// cai no porquinho SVG placeholder — nada quebra até a arte chegar.
+const _AGENT_ART = new Set(["xerife", "reporter", "carteiro", "detetive", "cofre", "barao"]);
+function _agentArt(kind) {
+  if (_AGENT_ART.has(kind))
+    return `<img class="ag-pig-img" src="/brand/agents/${esc(kind)}.png?v=3" alt="" loading="lazy" />`;
+  return `<svg viewBox="0 6 120 114" aria-hidden="true"><use href="#ag-pig-${esc(kind)}"/></svg>`;
 }
 
 function _agentName(kind) {

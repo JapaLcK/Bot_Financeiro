@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Preview — Agentes</title>
+<link rel="stylesheet" href="/dashboard.css"/>
+<style>
+  body{background:#0a0d18;margin:0;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+  .wrap{max-width:1100px;margin:0 auto}
+  .ag-title{color:#fff;font-size:22px;font-weight:600;margin:0 0 12px}
+</style>
+</head>
+<body>
+<div class="wrap" id="agentes-view">
+  <h1 class="ag-title">🐷 Seus agentes</h1>
+  <div id="agentes-counters" class="ag-counters"></div>
+  <p class="ag-sub">Sua equipe de porquinhos trabalhando 24h nos seus dados — cada um vigia uma coisa e só fala quando vale a pena.</p>
+  <div id="agentes-shelf" class="ag-shelf"></div>
+  <p class="section-title ag-feed-title">Últimos disparos</p>
+  <div id="agentes-feed" class="ag-feed"></div>
+</div>
+<script>
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const _AGENT_ART = new Set(["xerife","reporter","carteiro","detetive","cofre","barao"]);
+function _agentArt(kind){
+  if (_AGENT_ART.has(kind))
+    return `<img class="ag-pig-img" src="/brand/agents/${esc(kind)}.png?v=3" alt="" loading="lazy" />`;
+  return `<svg viewBox="0 6 120 114" aria-hidden="true"><use href="#ag-pig-${esc(kind)}"/></svg>`;
+}
+const catalog = [
+  {kind:"xerife",nome:"Xerife",freq:"Diário · a cada sync",desc:"Alerta quando um gasto foge do seu padrão ou uma categoria estoura o limite",disponivel:true,status:"active",fired_30d:4,saved_365d:180},
+  {kind:"reporter",nome:"Repórter",freq:"Mensal",desc:"Traz a manchete do seu mês: o que entrou, o que saiu e quanto sobrou",disponivel:true,status:"active",fired_30d:1,saved_365d:0},
+  {kind:"carteiro",nome:"Carteiro",freq:"Contínuo",desc:"Não deixa boleto vencer: avisa antes, direto no seu feed",disponivel:true,status:"inactive",fired_30d:2,saved_365d:160},
+  {kind:"detetive",nome:"Detetive",freq:"Semanal",desc:"Fareja cobranças repetidas que parecem assinatura esquecida",disponivel:false,status:"inactive"},
+  {kind:"cofre",nome:"Banqueiro",freq:"Dia do salário",desc:"Acompanha suas caixinhas e sugere o aporte que adianta a meta",disponivel:false,status:"inactive"},
+  {kind:"barao",nome:"Barão",freq:"Diário · Open Finance",desc:"Fareja dinheiro parado rendendo nada e acompanha seus investimentos",disponivel:false,status:"inactive"},
+];
+const fmtShort = v => "R$ " + v;
+document.getElementById("agentes-counters").innerHTML = `
+  <span class="ag-counter"><i class="ag-dot ag-dot-on"></i> Ativos <b>2</b></span>
+  <span class="ag-counter"><i class="ag-dot ag-dot-off"></i> Pausados <b>0</b></span>
+  <span class="ag-counter"><i class="ag-dot ag-dot-fire"></i> Disparos <b>7</b></span>
+  <span class="ag-counter ag-money">💰 R$ 340 salvos</span>`;
+document.getElementById("agentes-shelf").innerHTML = catalog.map(card => {
+  const active = card.status === "active";
+  const chips = [
+    `<span class="ag-chip">${esc(card.freq)}</span>`,
+    card.fired_30d > 0 ? `<span class="ag-chip ag-chip-fire">⚡ ${card.fired_30d}</span>` : "",
+    card.saved_365d > 0 ? `<span class="ag-chip ag-chip-money">💰 ${fmtShort(card.saved_365d)}</span>` : "",
+  ].join("");
+  const btn = !card.disponivel
+    ? `<button class="ag-btn ag-btn-soon" disabled>Em breve</button>`
+    : active
+      ? `<button class="ag-btn ag-btn-active">✓ Ativo · Pausar</button>`
+      : `<button class="ag-btn ag-btn-on">Ativar</button>`;
+  return `
+    <div class="ag-card${!card.disponivel ? " ag-card-soon" : ""}">
+      <div class="ag-avatar ag-bg-${esc(card.kind)}">${_agentArt(card.kind)}</div>
+      <h3>${esc(card.nome)}</h3>
+      <p class="ag-desc">${esc(card.desc)}</p>
+      <div class="ag-chips">${chips}</div>
+      ${btn}
+    </div>`;
+}).join("");
+const events = [
+  {kind:"xerife",msg:"Gasto de R$ 320 em Restaurantes tá 3× acima da sua média.",when:"hoje",channel:"dashboard"},
+  {kind:"reporter",msg:"A manchete de julho: entraram R$ 5.200, saíram R$ 4.100, sobraram R$ 1.100.",when:"01/08",channel:"email"},
+];
+document.getElementById("agentes-feed").innerHTML = events.map(ev => `
+  <div class="ag-event ag-event-new">
+    <div class="ag-event-face ag-bg-${esc(ev.kind)}">${_agentArt(ev.kind)}</div>
+    <div class="ag-event-body">
+      <p class="ag-event-msg">${esc(ev.msg)}</p>
+      <p class="ag-event-when">${esc(catalog.find(c=>c.kind===ev.kind).nome)} · ${esc(ev.when)}${ev.channel==="email"?" · 📧 no seu e-mail":""}</p>
+    </div>
+  </div>`).join("");
+</script>
+</body>
+</html>

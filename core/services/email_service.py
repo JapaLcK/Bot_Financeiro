@@ -188,16 +188,20 @@ def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
     )
 
 
-def send_agent_report_email(to: str, user_id: int, subject: str, content_html: str) -> bool:
+def send_agent_report_email(
+    to: str, user_id: int, subject: str, content_html: str, kind: str = ""
+) -> bool:
     """E-mail proativo dos Agentes do Piggy (ex.: manchete mensal do Repórter).
 
-    Usa o template do Piggy com unsubscribe — canal grátis dos agentes.
+    Usa o template do Piggy com unsubscribe — canal grátis dos agentes. Quando
+    `kind` é um agente com arte (xerife/reporter/carteiro/detetive/cofre/barao),
+    o porquinho dele vira o banner do topo no lugar do emoji genérico.
     """
     try:
         unsub = make_unsub_url(user_id, to)
     except RuntimeError:
         unsub = ""
-    return send_email(to, subject, _piggy_html(subject, content_html, unsub))
+    return send_email(to, subject, _piggy_html(subject, content_html, unsub, agent_kind=kind))
 
 
 def send_verification_email(to: str, code: str) -> bool:
@@ -284,12 +288,26 @@ def make_unsub_url(user_id: int, email: str) -> str:
 # ─── Template simples para emails do Piggy ────────────────────────────────────
 # Menos CSS pesado que _base_html → menor chance de cair em Promoções
 
-def _piggy_html(title: str, content: str, unsub_url: str = "") -> str:
+_AGENT_ART_KINDS = {"xerife", "reporter", "carteiro", "detetive", "cofre", "barao"}
+
+
+def _piggy_html(title: str, content: str, unsub_url: str = "", agent_kind: str = "") -> str:
     unsub_line = (
         f'Não quer mais receber estes emails? '
         f'<a href="{unsub_url}" style="color:rgba(255,255,255,.35);text-decoration:underline;">Cancelar inscrição</a>'
         if unsub_url else ""
     )
+    # Banner do topo: porquinho do agente (PNG hospedado, Gmail não renderiza
+    # SVG) quando houver arte; senão o emoji genérico. URL absoluta obrigatória
+    # em e-mail — usa DASHBOARD_URL.
+    if agent_kind in _AGENT_ART_KINDS:
+        _base = (os.getenv("DASHBOARD_URL") or "https://pigbankai.com").rstrip("/")
+        pig_html = (
+            f'<img src="{_base}/brand/agents/{agent_kind}.png" alt="" width="88" '
+            f'style="width:88px;height:auto;display:inline-block;margin-bottom:10px;" />'
+        )
+    else:
+        pig_html = '<div class="pig">🐷</div>'
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -321,7 +339,7 @@ def _piggy_html(title: str, content: str, unsub_url: str = "") -> str:
 <body>
   <div class="wrap">
     <div class="hdr">
-      <div class="pig">🐷</div>
+      {pig_html}
       <h1>PigBank</h1>
       <p>Seu assistente financeiro inteligente</p>
     </div>

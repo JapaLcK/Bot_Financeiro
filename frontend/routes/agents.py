@@ -43,8 +43,8 @@ AGENT_CATALOG: list[dict] = [
         "disponivel": False,
     },
     {
-        # Renomeado 2026-08-06 (era "Cofre"); o kind interno segue "cofre".
-        "kind": "cofre", "nome": "Guardião do Tesouro", "emoji": "🎯",
+        # Renomeado (era "Cofre" → "Guardião do Tesouro" → "Banqueiro"); o kind interno segue "cofre".
+        "kind": "cofre", "nome": "Banqueiro", "emoji": "🎯",
         "freq": "Dia do salário",
         "desc": "Acompanha suas caixinhas e sugere o aporte que adianta a meta",
         "disponivel": False,
@@ -103,9 +103,18 @@ class ActivateBody(BaseModel):
     config: dict | None = None
 
 
+def _require_agents_beta(user_id: int) -> None:
+    """Gate beta: fora do allowlist, a feature de Agentes 'não existe' (404).
+    A nav do dashboard também some via /auth/me. Abrir geral = AGENTS_UI_ENABLED=1."""
+    from core.services.plan_service import agents_ui_enabled
+    if not agents_ui_enabled(user_id):
+        raise HTTPException(status_code=404, detail="Feature indisponível.")
+
+
 @router.get("/agents/{user_id}")
 async def agents_shelf_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
+    _require_agents_beta(user_id)
     from db import agents_summary, list_agents
 
     mine, summary, multi = await asyncio.gather(
@@ -135,6 +144,7 @@ async def agents_shelf_route(request: Request, user_id: int):
 @router.post("/agents/{user_id}/{kind}/activate")
 async def agents_activate_route(request: Request, user_id: int, kind: str, body: ActivateBody | None = None):
     shared.authorize_dashboard_access(request, user_id)
+    _require_agents_beta(user_id)
     from db import AGENT_KINDS, activate_agent, get_agent
 
     if kind not in AGENT_KINDS:
@@ -174,6 +184,7 @@ async def agents_activate_route(request: Request, user_id: int, kind: str, body:
 @router.post("/agents/{user_id}/{kind}/pause")
 async def agents_pause_route(request: Request, user_id: int, kind: str):
     shared.authorize_dashboard_access(request, user_id)
+    _require_agents_beta(user_id)
     from db import pause_agent
 
     changed = await asyncio.to_thread(pause_agent, user_id, kind)
@@ -185,6 +196,7 @@ async def agents_pause_route(request: Request, user_id: int, kind: str):
 @router.get("/agents/{user_id}/feed")
 async def agents_feed_route(request: Request, user_id: int, limit: int = 20):
     shared.authorize_dashboard_access(request, user_id)
+    _require_agents_beta(user_id)
     from db import list_agent_events
 
     limit = max(1, min(int(limit), 50))
@@ -195,6 +207,7 @@ async def agents_feed_route(request: Request, user_id: int, limit: int = 20):
 @router.post("/agents/{user_id}/feed/seen")
 async def agents_feed_seen_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
+    _require_agents_beta(user_id)
     from db import mark_agent_events_seen
 
     n = await asyncio.to_thread(mark_agent_events_seen, user_id)

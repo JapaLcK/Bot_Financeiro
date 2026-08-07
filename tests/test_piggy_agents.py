@@ -82,3 +82,29 @@ def test_reporter_nao_envia_email_para_quem_descadastrou(monkeypatch):
 def test_reporter_envia_email_quando_nao_descadastrado(monkeypatch):
     sent = _arm_reporter(monkeypatch, opted_out=False)
     assert len(sent) == 1
+
+
+# ── Beta dos Agentes: allowlist por e-mail (lançamento em fases) ──────────────
+
+def test_agents_ui_enabled_default_so_emails_de_teste(monkeypatch):
+    import core.services.plan_service as ps
+    monkeypatch.delenv("AGENTS_UI_ENABLED", raising=False)
+    monkeypatch.delenv("AGENTS_BETA_EMAILS", raising=False)
+    monkeypatch.delenv("AGENTS_BETA_USER_IDS", raising=False)
+    assert ps.agents_ui_enabled(1, "lucaskuramoti06@gmail.com") is True
+    assert ps.agents_ui_enabled(1, "HIAGOJO2016@gmail.com") is True   # case-insensitive
+    assert ps.agents_ui_enabled(1, "estranho@example.com") is False
+
+
+def test_agents_ui_enabled_flag_global_abre_geral(monkeypatch):
+    import core.services.plan_service as ps
+    monkeypatch.setenv("AGENTS_UI_ENABLED", "1")
+    assert ps.agents_ui_enabled(1, "qualquer@example.com") is True
+
+
+def test_agents_ui_enabled_env_sobrescreve_default(monkeypatch):
+    import core.services.plan_service as ps
+    monkeypatch.delenv("AGENTS_UI_ENABLED", raising=False)
+    monkeypatch.setenv("AGENTS_BETA_EMAILS", "novo@example.com")
+    assert ps.agents_ui_enabled(1, "novo@example.com") is True
+    assert ps.agents_ui_enabled(1, "lucaskuramoti06@gmail.com") is False
