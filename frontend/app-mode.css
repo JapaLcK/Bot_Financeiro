@@ -304,6 +304,20 @@ html.pb-app body.pb-page-app .user-menu-btn {
 }
 html.pb-app body.pb-page-app .user-menu-btn .user-menu-main { display: none !important; }
 
+/* Dropdown da conta: a regra mobile do dashboard.css (≤600px) posiciona com
+   left:0 e width:100% do pai — mas no app o botão da conta é um círculo de
+   44px, então o menu virava uma faixa de 44px colada na borda direita com o
+   texto quebrando letra a letra. Ancora à direita do botão, com largura
+   própria e sem a quebra agressiva de palavra do modo app. */
+html.pb-app .user-dropdown {
+  left: auto !important;
+  right: 0 !important;
+  width: min(300px, calc(100vw - 24px)) !important;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  overflow-wrap: normal;
+}
+
 /* Flutuantes (FAB do chat, toast) sobem acima da tab bar */
 html.pb-app #piggy-fab {
   bottom: calc(84px + env(safe-area-inset-bottom)) !important;
@@ -449,3 +463,12 @@ html.pb-app .modal,
 html.pb-app .sidenav {
   -webkit-overflow-scrolling: touch;
 }
+
+/* Menu ☰ aberto fica ACIMA da tab bar (700) e abaixo dos modais (800) —
+   sem isso a tab bar cobria os últimos itens do menu. Safe area no rodapé
+   pra rolar até o fim no iPhone. */
+html.pb-app .sidenav {
+  z-index: 760;
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+}
+html.pb-app .sidenav-backdrop.open { z-index: 750; }
