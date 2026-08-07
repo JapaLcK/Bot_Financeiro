@@ -1301,6 +1301,19 @@ a { color: inherit; text-decoration: none; }
         </div>
       </div>
 
+      <!-- Caixinhas OF ↔ metas (Banqueiro, beta) -->
+      <div class="card" id="caixinhas-card" style="display:none">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Caixinhas &amp; metas</div>
+            <div class="card-sub">Ligue uma caixinha do banco a uma meta pro Banqueiro acompanhar os aportes</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div id="caixinhas-list"></div>
+        </div>
+      </div>
+
       <!-- Transactions -->
       <div class="card">
         <div class="card-head">
@@ -2588,11 +2601,78 @@ async function loadData() {
     renderAccounts(a);
     renderTransactions(t);
     if (c.length > 0) setStep(3);
+    loadCaixinhas();
   } catch (err) {
     updateStats([], [], []);
     renderConnections([]); renderAccounts([]); renderTransactions([]);
     showToast(err.message || "Erro ao carregar dados", "error");
   }
+}
+
+/* ── Caixinhas ↔ metas (Banqueiro, beta) ─────────
+   Só aparece pros testers do beta (o endpoint devolve 404 fora do allowlist) e
+   quando o OF trouxe alguma caixinha. Vincular liga a caixinha real a uma meta
+   do PigBank pro Banqueiro detectar os aportes. */
+let _caixMetas = [];
+
+async function loadCaixinhas() {
+  const card = document.getElementById("caixinhas-card");
+  if (!USER_ID || !card) return;
+  let data;
+  try {
+    const resp = await fetch(`${API}/open-finance/${USER_ID}/caixinhas`, authOptions({ headers: authHeaders() }));
+    if (!resp.ok) { card.style.display = "none"; return; }  // 404 = fora do beta
+    data = await resp.json();
+  } catch { card.style.display = "none"; return; }
+  const cx = data.caixinhas || [];
+  if (!cx.length) { card.style.display = "none"; return; }
+  _caixMetas = data.metas || [];
+  renderCaixinhas(cx);
+  card.style.display = "";
+}
+
+function renderCaixinhas(list) {
+  const el = document.getElementById("caixinhas-list");
+  el.innerHTML = list.map(c => {
+    const opts = ['<option value="">Não vincular</option>'].concat(
+      _caixMetas.map(m => {
+        const meta = m.target_amount ? ` (meta ${fmt(m.target_amount)})` : "";
+        const sel = c.pocket_id === m.id ? " selected" : "";
+        return `<option value="${m.id}"${sel}>${esc(m.name)}${esc(meta)}</option>`;
+      })
+    ).join("");
+    const cur = c.pocket_id ? Number(c.pocket_id) : "null";
+    return `<div class="caix-row">
+      <div class="caix-info">
+        <div class="caix-name">🐷 ${esc(c.name)}</div>
+        <div class="caix-bal">${fmt(c.balance)} guardado</div>
+      </div>
+      <select class="caix-select" onchange="bindCaixinha(${Number(c.of_investment_id)}, this.value, ${cur})">${opts}</select>
+    </div>`;
+  }).join("");
+}
+
+async function bindCaixinha(ofInvestmentId, newPocketVal, currentPocketId) {
+  let body;
+  if (newPocketVal) {
+    body = { pocket_id: Number(newPocketVal), of_investment_id: ofInvestmentId };
+  } else if (currentPocketId) {
+    body = { pocket_id: currentPocketId, of_investment_id: null };  // desvincula
+  } else {
+    return;
+  }
+  try {
+    const resp = await fetch(`${API}/open-finance/${USER_ID}/caixinhas/bind`, authOptions({
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+    }));
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    showToast(newPocketVal ? "Caixinha vinculada à meta!" : "Vínculo removido.", "ok");
+  } catch (err) {
+    showToast(err.message || "Erro ao vincular", "error");
+  }
+  loadCaixinhas();
 }
 
 /* ── Refresh (botão "Atualizar") ─────────────────
@@ -3059,6 +3139,19 @@ initSettings();
 
 <!-- ── MFA Modais ─────────────────────────────────────────────────────────── -->
 <style>
+.caix-row {
+  display: flex; align-items: center; gap: 12px; padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.caix-row:last-child { border-bottom: none; }
+.caix-info { flex: 1; min-width: 0; }
+.caix-name { font-weight: 780; font-size: .88rem; color: var(--ink); }
+.caix-bal { font-size: .73rem; color: var(--faint); margin-top: 2px; }
+.caix-select {
+  flex: none; max-width: 55%; padding: 8px 10px; border-radius: var(--radius-sm);
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--ink); font-size: .8rem;
+}
+.caix-select:focus { border-color: var(--accent); outline: none; }
 .bankpick-open-btn {
   width: 100%; padding: 13px; border-radius: var(--radius-md);
   background: var(--surface-2); border: 1px dashed var(--border-hover);

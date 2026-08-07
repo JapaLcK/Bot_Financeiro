@@ -45,9 +45,9 @@ AGENT_CATALOG: list[dict] = [
     {
         # Renomeado (era "Cofre" → "Guardião do Tesouro" → "Banqueiro"); o kind interno segue "cofre".
         "kind": "cofre", "nome": "Banqueiro", "emoji": "🎯",
-        "freq": "Dia do salário",
-        "desc": "Acompanha suas caixinhas e sugere o aporte que adianta a meta",
-        "disponivel": False,
+        "freq": "Contínuo · a cada sync",
+        "desc": "Detecta aportes na sua caixinha e acompanha quanto falta pra meta",
+        "disponivel": True,
     },
     {
         "kind": "barao", "nome": "Barão", "emoji": "🎩",

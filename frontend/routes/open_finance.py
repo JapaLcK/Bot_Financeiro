@@ -222,6 +222,55 @@ async def open_finance_connectors_route(request: Request, user_id: int):
     return {"ok": True, "connectors": banks}
 
 
+def _require_agents_beta(user_id: int) -> None:
+    from core.services.plan_service import agents_ui_enabled
+    if not agents_ui_enabled(user_id):
+        raise HTTPException(status_code=404, detail="Feature indisponível.")
+
+
+@router.get("/open-finance/{user_id}/caixinhas")
+async def open_finance_caixinhas_route(request: Request, user_id: int):
+    """Banqueiro: caixinhas OF detectadas + metas do usuário, pra montar o vínculo."""
+    shared.authorize_dashboard_access(request, user_id)
+    await asyncio.to_thread(_require_agents_beta, user_id)
+    from db import list_caixinha_candidates, list_pockets
+
+    candidates = await asyncio.to_thread(list_caixinha_candidates, user_id)
+    pockets = await asyncio.to_thread(lambda: list_pockets(user_id, accrue=False))
+    metas = [
+        {"id": p["id"], "name": p["name"],
+         "target_amount": float(p["target_amount"]) if p.get("target_amount") is not None else None}
+        for p in pockets
+    ]
+    caixinhas = [
+        {"of_investment_id": c["of_investment_id"], "name": c["name"],
+         "balance": float(c["balance"] or 0),
+         "pocket_id": c["pocket_id"], "pocket_name": c["pocket_name"]}
+        for c in candidates
+    ]
+    return {"ok": True, "caixinhas": caixinhas, "metas": metas}
+
+
+class CaixinhaBindBody(BaseModel):
+    pocket_id: int
+    of_investment_id: int | None = None
+
+
+@router.post("/open-finance/{user_id}/caixinhas/bind")
+async def open_finance_caixinha_bind_route(request: Request, user_id: int, body: CaixinhaBindBody):
+    """Vincula (ou desvincula com of_investment_id=null) uma meta a uma caixinha OF."""
+    shared.authorize_dashboard_access(request, user_id)
+    await asyncio.to_thread(_require_agents_beta, user_id)
+    from db import bind_pocket_to_caixinha
+
+    ok = await asyncio.to_thread(
+        bind_pocket_to_caixinha, user_id, body.pocket_id, body.of_investment_id
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail="Não foi possível vincular (meta ou caixinha inválida).")
+    return {"ok": True}
+
+
 @router.post("/open-finance/{user_id}/connect-token")
 async def open_finance_connect_token_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)

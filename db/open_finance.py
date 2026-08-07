@@ -534,6 +534,107 @@ def save_open_finance_investments(connection_id: int, investments: list[dict]) -
     return {"investments_synced": count}
 
 
+# ── Banqueiro (agente cofre): caixinha OF ↔ meta do PigBank ───────────────────
+
+def list_caixinha_candidates(user_id: int) -> list[dict]:
+    """Caixinhas/cofrinhos OF do usuário (CDB de renda fixa OU nome de caixinha),
+    já com a meta vinculada (se houver). Alimenta a UI de vínculo do Banqueiro."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select i.id as of_investment_id, i.name, i.balance, i.type, i.subtype,
+                       p.id as pocket_id, p.name as pocket_name, p.target_amount
+                from open_finance_investments i
+                join open_finance_connections c on c.id = i.connection_id
+                left join pockets p on p.of_investment_id = i.id and p.user_id = %s
+                where c.user_id = %s
+                  and (
+                    (upper(coalesce(i.type,'')) = 'FIXED_INCOME'
+                       and upper(coalesce(i.subtype,'')) = 'CDB')
+                    or i.name ilike any (array['%%caixinha%%','%%cofrinho%%','%%reserva%%','%%objetivo%%'])
+                  )
+                order by i.balance desc nulls last
+                """,
+                (user_id, user_id),
+            )
+            return [dict(r) for r in (cur.fetchall() or [])]
+
+
+def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int | None) -> bool:
+    """Vincula (ou desvincula, of_investment_id=None) uma meta a uma caixinha OF.
+
+    Inicializa of_last_seen_balance com o saldo ATUAL da caixinha, pra o Banqueiro
+    contar só os aportes daqui pra frente (não o saldo histórico já acumulado)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if of_investment_id is None:
+                cur.execute(
+                    "update pockets set of_investment_id=null, of_last_seen_balance=null "
+                    "where id=%s and user_id=%s",
+                    (pocket_id, user_id),
+                )
+                conn.commit()
+                return cur.rowcount > 0
+            # valida que a caixinha é do usuário e pega o saldo atual
+            cur.execute(
+                """
+                select i.balance from open_finance_investments i
+                join open_finance_connections c on c.id = i.connection_id
+                where i.id=%s and c.user_id=%s
+                """,
+                (of_investment_id, user_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                return False
+            bal = row["balance"] or 0
+            # 1 caixinha OF por meta: solta qualquer vínculo anterior dessa caixinha
+            cur.execute(
+                "update pockets set of_investment_id=null, of_last_seen_balance=null "
+                "where of_investment_id=%s and user_id=%s",
+                (of_investment_id, user_id),
+            )
+            cur.execute(
+                "update pockets set of_investment_id=%s, of_last_seen_balance=%s "
+                "where id=%s and user_id=%s",
+                (of_investment_id, bal, pocket_id, user_id),
+            )
+            ok = cur.rowcount > 0
+            conn.commit()
+            return ok
+
+
+def list_banqueiro_pockets(user_id: int) -> list[dict]:
+    """Metas vinculadas a uma caixinha OF, com o saldo atual da caixinha e o último
+    saldo visto pelo Banqueiro. Fonte do detector (delta = aporte novo)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select p.id as pocket_id, p.name, p.target_amount,
+                       p.of_last_seen_balance, p.of_investment_id,
+                       i.balance as of_balance
+                from pockets p
+                join open_finance_investments i on i.id = p.of_investment_id
+                where p.user_id = %s and p.of_investment_id is not null
+                """,
+                (user_id,),
+            )
+            return [dict(r) for r in (cur.fetchall() or [])]
+
+
+def update_pocket_of_last_seen(pocket_id: int, balance) -> None:
+    """Atualiza o saldo já contabilizado pelo Banqueiro (depois de registrar aporte)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update pockets set of_last_seen_balance=%s where id=%s",
+                (balance, pocket_id),
+            )
+        conn.commit()
+
+
 def get_open_finance_connection_by_item_id(provider_item_id: str, provider: str = "pluggy") -> dict | None:
     """Localiza a conexão pelo item da Pluggy (o webhook só traz o item, não o user)."""
     item_id = (provider_item_id or "").strip()

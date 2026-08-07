@@ -503,6 +503,83 @@ def run_detetive_once(today: date | None = None, user_id: int | None = None) -> 
     return {"ok": True, "agents": len(agents), "fired": fired}
 
 
+# ── Banqueiro (cofre): aporte real na caixinha → progresso da meta ────────────
+
+COFRE_MIN_APORTE = float(os.getenv("COFRE_MIN_APORTE", "20"))  # ignora drift de juros
+
+
+def _cofre_detect_for_user(agent: dict[str, Any], today: date) -> int:
+    """Pra cada meta vinculada a uma caixinha OF, detecta aporte novo pelo delta do
+    saldo (open_finance_investments.balance) contra o último saldo visto. Absorve o
+    saldo a cada rodada pra o rendimento (juros) não acumular e virar falso aporte.
+    Só conta aporte >= COFRE_MIN_APORTE. Baseline = saldo no momento do vínculo."""
+    from db import list_banqueiro_pockets, record_agent_event, update_pocket_of_last_seen
+
+    user_id = agent["user_id"]
+    fired = 0
+    for p in list_banqueiro_pockets(user_id):
+        cur_bal = float(p["of_balance"] or 0)
+        last_raw = p["of_last_seen_balance"]
+        last = float(last_raw) if last_raw is not None else cur_bal
+        delta = round(cur_bal - last, 2)
+
+        if delta >= COFRE_MIN_APORTE:
+            nome = p["name"]
+            target = float(p["target_amount"]) if p["target_amount"] is not None else None
+            if target and cur_bal >= target:
+                titulo = f"Meta batida: {nome} 🎉"
+                msg = (f"🎯 Aporte de {_fmt_brl(delta)} na caixinha {nome} — e você "
+                       f"FECHOU a meta de {_fmt_brl(target)}! Parabéns, porquinho orgulhoso.")
+            elif target:
+                falta = round(max(target - cur_bal, 0.0), 2)
+                titulo = f"Aporte na {nome}: faltam {_fmt_brl(falta)}"
+                msg = (f"🎯 Detectei {_fmt_brl(delta)} entrando na sua caixinha {nome}. "
+                       f"Já são {_fmt_brl(cur_bal)} — faltam {_fmt_brl(falta)} pra meta de "
+                       f"{_fmt_brl(target)}. Tá voando!")
+            else:
+                titulo = f"Aporte detectado: {nome}"
+                msg = (f"🎯 Detectei {_fmt_brl(delta)} entrando na sua caixinha {nome}. "
+                       f"Total guardado: {_fmt_brl(cur_bal)}. Define uma meta pra eu "
+                       f"acompanhar quanto falta.")
+            ok = record_agent_event(
+                agent["agent_id"], user_id, "cofre",
+                dedupe_key=f"aporte:{p['pocket_id']}:{cur_bal:.2f}",
+                payload={
+                    "tipo": "aporte", "pocket_id": p["pocket_id"], "meta": nome,
+                    "aporte": delta, "saldo": round(cur_bal, 2), "target": target,
+                    "titulo": titulo, "mensagem": msg,
+                },
+                valor_impacto=delta,
+            )
+            fired += 1 if ok else 0
+
+        # Absorve o saldo atual (aporte já contado, ou juros/resgate) pra o próximo
+        # delta partir daqui — evita juros acumularem e dispararem falso aporte.
+        if last_raw is None or float(last_raw) != cur_bal:
+            update_pocket_of_last_seen(p["pocket_id"], cur_bal)
+    return fired
+
+
+def run_cofre_once(today: date | None = None, user_id: int | None = None) -> dict:
+    """Roda o Banqueiro pra todos os agentes cofre ativos (ou só um usuário)."""
+    from db import list_users_with_active_agents
+
+    today = today or date.today()
+    agents = list_users_with_active_agents("cofre")
+    if user_id is not None:
+        agents = [a for a in agents if a["user_id"] == user_id]
+    from core.services.plan_service import agent_kind_allowed, agents_ui_enabled
+    agents = [a for a in agents
+              if agents_ui_enabled(a["user_id"]) and agent_kind_allowed(a["user_id"], "cofre")]
+    fired = 0
+    for agent in agents:
+        try:
+            fired += _cofre_detect_for_user(agent, today)
+        except Exception as exc:
+            print(f"[agents] cofre user={agent['user_id']}: {exc}", file=sys.stderr)
+    return {"ok": True, "agents": len(agents), "fired": fired}
+
+
 # ── Orquestração ─────────────────────────────────────────────────────────────
 
 def run_all_agents_once(today: date | None = None) -> dict:
@@ -512,12 +589,14 @@ def run_all_agents_once(today: date | None = None) -> dict:
         "reporter": run_reporter_once(today),
         "carteiro": run_carteiro_once(today),
         "detetive": run_detetive_once(today),
+        "cofre": run_cofre_once(today),
     }
 
 
 def run_agents_for_user(user_id: int, trigger: str = "of_sync") -> dict:
-    """Hook pós-sync do Open Finance: roda Xerife (anomalia no delta) e Detetive
-    (auditoria de assinaturas no histórico importado), só pro usuário sincado.
+    """Hook pós-sync do Open Finance: roda Xerife (anomalia no delta), Detetive
+    (auditoria de assinaturas) e Banqueiro (aporte novo na caixinha vinculada),
+    só pro usuário sincado.
 
     Fail-soft por contrato — quem chama (pluggy_sync) não pode quebrar por
     causa de agente. Cada detector é isolado pra um não derrubar o outro.
@@ -525,7 +604,11 @@ def run_agents_for_user(user_id: int, trigger: str = "of_sync") -> dict:
     if not AGENTS_ENABLED:
         return {"ok": True, "disabled": True}
     out: dict[str, Any] = {"ok": True}
-    for kind, fn in (("xerife", run_xerife_once), ("detetive", run_detetive_once)):
+    for kind, fn in (
+        ("xerife", run_xerife_once),
+        ("detetive", run_detetive_once),
+        ("cofre", run_cofre_once),
+    ):
         try:
             out[kind] = fn(user_id=user_id)
         except Exception as exc:

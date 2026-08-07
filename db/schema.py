@@ -575,6 +575,22 @@ def init_db():
         """,
 
         # -----------------------------
+        # Banqueiro (agente cofre): vincula uma caixinha/meta do PigBank a um
+        # investimento OF real (Caixinha do Nubank/PicPay = CDB). of_last_seen_balance
+        # guarda o saldo já contabilizado pelo Banqueiro pra detectar o aporte por
+        # delta entre syncs (open_finance_investments.balance é sobrescrito, sem
+        # histórico). ALTER aqui (não no bloco de criação da pockets, lá em cima)
+        # porque o FK exige que open_finance_investments já exista.
+        # -----------------------------
+        """
+        alter table pockets add column if not exists of_investment_id bigint
+          references open_finance_investments(id) on delete set null
+        """,
+        """
+        alter table pockets add column if not exists of_last_seen_balance numeric
+        """,
+
+        # -----------------------------
         # Open Finance — reconciliação (Fase 2): dedup OF ↔ manual
         # -----------------------------
         """
