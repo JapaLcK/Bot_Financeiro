@@ -253,13 +253,15 @@
 
   // Login Google no app: o botão dispara o fluxo nativo (ASWebAuthenticationSession
   // com Face ID/autofill) em vez de navegar o WebView pro Google. O nativo faz
-  // o OAuth e devolve, carregando /d/{code} aqui pra logar. Fallback: se a ponte
-  // nativa não existir (build antigo), deixa o link seguir o fluxo web normal.
+  // o OAuth e devolve, carregando /d/{code} aqui pra logar. A ponte é checada
+  // NO CLIQUE (não no load): no cold launch o nativo pode registrar o handler
+  // depois do DOMContentLoaded — checar cedo perdia o fluxo com Face ID.
+  // Fallback: sem ponte (build antigo), o link segue o fluxo web normal.
   function wireGoogleLogin() {
-    const bridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.pbAuth;
-    if (!bridge) return;
     document.querySelectorAll('a[href="/auth/google/start"], a[href^="/auth/google/start"]').forEach(a => {
       a.addEventListener("click", ev => {
+        const bridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.pbAuth;
+        if (!bridge) return;
         ev.preventDefault();
         bridge.postMessage("google");
       });

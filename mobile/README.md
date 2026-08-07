@@ -48,6 +48,10 @@ npx cap open ios     # abre no Xcode
       switcher. **Só chega ao aparelho com um build nativo novo**
       (`npx cap sync ios` + Archive no Xcode → TestFlight) — deploy do site
       não atualiza código Swift.
+- [x] Login Google nativo (ASWebAuthenticationSession + scheme
+      `pigbankai://`) — Face ID/autofill do Safari no botão "Entrar com
+      Google". Também exige build nativo novo; num build antigo o botão cai
+      no fluxo web dentro do WebView, sem Face ID.
 - [ ] Push notifications: APNs key no Apple Developer → backend envia via
       `aioapns`/`httpx` + registro do token no login (plugin já no bundle).
 - [ ] Conta de review da Apple: user demo com plano Pro ativo (grant manual).

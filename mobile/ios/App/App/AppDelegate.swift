@@ -27,6 +27,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     private let siteBase = "https://pigbankai.com"
     private var authSession: ASWebAuthenticationSession?
     private var authBridgeReady = false
+    private var authBridgeRetries = 0
     private weak var appWebView: WKWebView?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
@@ -82,9 +83,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     // Registra o handler JS "pbAuth" uma vez, quando o WebView existe.
+    // No cold launch o WebView do Capacitor pode nascer DEPOIS do primeiro
+    // didBecomeActive — sem retry a ponte só era registrada quando o app
+    // voltava do background, e o botão Google caía no fluxo web (sem Face ID).
     private func setupAuthBridge() {
         if authBridgeReady { return }
-        guard let wk = findWebView() else { return }
+        guard let wk = findWebView() else {
+            if authBridgeRetries < 20 {
+                authBridgeRetries += 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                    self?.setupAuthBridge()
+                }
+            }
+            return
+        }
         wk.configuration.userContentController.add(self, name: "pbAuth")
         authBridgeReady = true
     }
