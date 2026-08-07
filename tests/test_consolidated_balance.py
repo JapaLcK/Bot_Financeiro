@@ -79,6 +79,35 @@ def test_reconectar_banco_nao_duplica_saldo(user_id):
     assert cb["open_finance_bank"] == Decimal("650.00")  # saldo da conexão mais recente
 
 
+def test_conta_em_moeda_estrangeira_fica_fora_da_soma(user_id):
+    """Sem conversão de câmbio, USD 100 não pode entrar como R$ 100 no total."""
+    db.add_launch_and_update_balance(user_id, "receita", 100, None, "seed")
+    connection = db.save_pluggy_open_finance_item(
+        user_id,
+        {"id": f"item-test-usd-{user_id}", "connector": {"id": 612, "name": "Nubank"}, "status": "UPDATED"},
+    )
+    db.save_open_finance_sync(
+        connection["id"],
+        [
+            {
+                "provider_account_id": f"acc-test-usd-{user_id}",
+                "name": "Nubank Global", "type": "BANK", "subtype": "CHECKING_ACCOUNT",
+                "currency": "USD", "balance": Decimal("100.00"), "raw": {}, "transactions": [],
+            },
+            {
+                "provider_account_id": f"acc-test-brl-{user_id}",
+                "name": "Nubank Conta", "type": "BANK", "subtype": "CHECKING_ACCOUNT",
+                "currency": "BRL", "balance": Decimal("300.00"), "raw": {}, "transactions": [],
+            },
+        ],
+    )
+
+    cb = db.get_consolidated_balance(user_id)
+    assert cb["of_bank_count"] == 1          # só a conta BRL conta
+    assert cb["open_finance_bank"] == Decimal("300.00")
+    assert cb["consolidated"] == Decimal("400.00")
+
+
 def test_handler_saldo_mostra_consolidado_com_banco(user_id):
     db.add_launch_and_update_balance(user_id, "receita", 100, None, "seed")
     _connect_fake_bank(user_id, "4320.75")

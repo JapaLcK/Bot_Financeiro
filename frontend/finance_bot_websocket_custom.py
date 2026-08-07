@@ -628,12 +628,14 @@ async def get_financial_data(
     # o breakdown "Carteira + Bancos" e a ação de ajustar a Carteira.
     # DISTINCT ON (provider_account_id): reconectar cria nova conexão com a MESMA conta;
     # sem dedup, o saldo (e a contagem) somaria em dobro. Pega a conexão mais recente.
+    # Só contas em BRL: não há conversão de câmbio — somar USD 100 como R$ 100 mente o total.
     of_bank_rows = await _q(
         "SELECT COALESCE(SUM(b), 0) AS b, COUNT(*) AS n FROM ("
         "  SELECT DISTINCT ON (a.provider_account_id) a.balance AS b "
         "  FROM open_finance_accounts a "
         "  JOIN open_finance_connections c ON c.id = a.connection_id "
         "  WHERE c.user_id = %s AND UPPER(a.type) = 'BANK' "
+        "    AND UPPER(COALESCE(a.currency, 'BRL')) = 'BRL' "
         "  ORDER BY a.provider_account_id, c.id DESC"
         ") uniq",
         (user_id,),

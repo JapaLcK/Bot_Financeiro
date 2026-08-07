@@ -1551,6 +1551,9 @@ def get_consolidated_balance(user_id: int) -> dict:
     Cartão (type CREDIT) fica de fora (é dívida, não saldo disponível). Auto-atualiza
     conforme o sync refresca os saldos autoritativos dos bancos. `of_bank_count` é o
     nº de contas BANK conectadas — 0 = sem banco, e o chamador pode mostrar só o manual.
+
+    Só contas em BRL entram na soma (e no count): o saldo manual é em reais e não há
+    conversão de câmbio — somar USD 100 como R$ 100 mentiria o total.
     """
     ensure_user(user_id)
     with get_conn() as conn:
@@ -1569,6 +1572,7 @@ def get_consolidated_balance(user_id: int) -> dict:
                     from open_finance_accounts a
                     join open_finance_connections c on c.id = a.connection_id
                     where c.user_id=%s and upper(a.type) = 'BANK'
+                      and upper(coalesce(a.currency, 'BRL')) = 'BRL'
                     order by a.provider_account_id, c.id desc
                 ) uniq
                 """,
