@@ -111,6 +111,7 @@ class PayoutRequestBody(BaseModel):
 
 
 @router.post("/api/affiliate/payout")
+@shared.limiter.limit("10/hour")
 async def affiliate_request_payout(request: Request, body: PayoutRequestBody):
     user_id = shared.resolve_dashboard_user_id(request)
     shared.raise_if_account_scheduled_for_deletion(user_id)

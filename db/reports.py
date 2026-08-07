@@ -166,6 +166,10 @@ def set_payment_status(user_id: int, status: str) -> None:
 # Verificação de email / reset de senha
 # ──────────────────────────────────────────────────────────────────────────────
 
+# Re-export: cadastro com e-mail/telefone já existente (anti-enumeração).
+AccountAlreadyExistsError = _db_support.AccountAlreadyExistsError
+
+
 def create_email_verification(
     email: str,
     password: str,

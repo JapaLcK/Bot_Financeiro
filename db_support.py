@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import random
 import secrets
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
@@ -627,6 +626,19 @@ def set_stripe_customer_impl(get_conn, user_id: int, stripe_customer_id: str) ->
         conn.commit()
 
 
+class AccountAlreadyExistsError(Exception):
+    """Cadastro tentado com e-mail/telefone que já pertence a uma conta.
+
+    Carrega o `existing_user_id` pra que o endpoint avise o dono da conta por
+    e-mail (out-of-band) e responda de forma GENÉRICA — sem revelar ao visitante
+    que a conta existe (anti-enumeração). `reason` ∈ {email, email_google, phone}.
+    """
+    def __init__(self, reason: str, existing_user_id: int | None = None):
+        super().__init__(reason)
+        self.reason = reason
+        self.existing_user_id = existing_user_id
+
+
 def create_email_verification_impl(
     get_conn,
     hash_password,
@@ -649,19 +661,21 @@ def create_email_verification_impl(
             )
             existing = cur.fetchone()
             if existing:
-                if existing["password_hash"] is None:
-                    raise ValueError(
-                        "Este e-mail já tem conta criada com Google. "
-                        "Use \"Continuar com Google\" para entrar."
-                    )
-                raise ValueError("Este e-mail já está cadastrado.")
+                # Anti-enumeração: não vaza "já existe" pro visitante. O endpoint
+                # trata AccountAlreadyExistsError respondendo genericamente e
+                # avisando o dono por e-mail.
+                reason = "email_google" if existing["password_hash"] is None else "email"
+                raise AccountAlreadyExistsError(reason, existing_user_id=existing["user_id"])
             _phone_hashes = [hash_pii_optional(c, kind="phone") for c in phone_candidates if c]
             cur.execute("select user_id from auth_accounts where phone_hash = any(%s)", (_phone_hashes,))
-            if cur.fetchone():
-                raise ValueError("Este número de WhatsApp já está em uso por outra conta.")
+            phone_row = cur.fetchone()
+            if phone_row:
+                raise AccountAlreadyExistsError("phone", existing_user_id=phone_row["user_id"])
 
     password_hash = hash_password(password)
-    code = f"{random.randint(0, 999999):06d}"
+    # Código de verificação precisa ser imprevisível (brute-force de 6 dígitos):
+    # secrets (CSPRNG) em vez de random (Mersenne Twister, previsível).
+    code = f"{secrets.randbelow(1_000_000):06d}"
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes_valid)
 
     with get_conn() as conn:
