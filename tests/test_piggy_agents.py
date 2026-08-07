@@ -38,39 +38,36 @@ def test_plan_allows_multiple_usa_tier_quando_plans_v2_presente(monkeypatch):
 
 # ── F3: Repórter respeita engagement_opt_out ─────────────────────────────────
 
-class _FakeCM:
-    """Context manager mínimo pra get_conn()/conn.cursor() — o _month_stats
-    real é substituído, então o cursor nunca é usado de verdade."""
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
-
-    def cursor(self):
-        return _FakeCM()
-
-
 def _arm_reporter(monkeypatch, *, opted_out: bool):
+    """Arma o envio de e-mail do Repórter via run_agent_emails_once (o
+    _reporter_run_for_user só registra o evento no feed; o e-mail — e o
+    respeito ao opt-out — vive no mini-digest por agente)."""
     import core.services.piggy_agents as pa
     import db
     import core.services.email_service as es
-    from datetime import date
+    import core.services.plan_service as ps
 
     sent: list = []
 
-    monkeypatch.setattr(pa, "get_conn", lambda: _FakeCM())
     monkeypatch.setattr(
-        pa, "_month_stats",
-        lambda cur, uid, a, b: {"entrou": 1000.0, "saiu": 500.0, "aportes": 100.0, "sobrou": 400.0},
+        db, "list_agents_pending_email",
+        lambda: [{"agent_id": 1, "user_id": 42, "kind": "reporter",
+                  "config": {}, "last_emailed_at": None}],
     )
-    monkeypatch.setattr(db, "record_agent_event", lambda *a, **k: True)  # manchete nova
+    monkeypatch.setattr(
+        db, "list_unemailed_events",
+        lambda agent_id: [{"id": 1, "payload": {"titulo": "A manchete de agosto",
+                                                "mensagem": "Sobrou R$ 400,00"}}],
+    )
+    monkeypatch.setattr(db, "mark_events_emailed", lambda ids: None)
+    monkeypatch.setattr(db, "touch_agent_emailed", lambda agent_id: None)
     monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": opted_out})
     monkeypatch.setattr(db, "get_user_email", lambda uid: "user@example.com")
+    monkeypatch.setattr(ps, "agents_ui_enabled", lambda *a, **k: True)
+    monkeypatch.setattr(ps, "agent_kind_allowed", lambda *a, **k: True)
     monkeypatch.setattr(es, "send_agent_report_email", lambda *a, **k: sent.append(a))
 
-    agent = {"agent_id": 1, "user_id": 42, "kind": "reporter"}
-    pa._reporter_run_for_user(agent, date(2026, 8, 5))
+    pa.run_agent_emails_once()
     return sent
 
 
