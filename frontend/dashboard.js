@@ -9246,7 +9246,7 @@ function _renderAgentes(data) {
     return `
       <div class="ag-card${!card.disponivel ? " ag-card-soon" : ""}">
         <div class="ag-avatar ag-bg-${esc(card.kind)}">
-          ${_agentArt(card.kind)}
+          ${_agentArt(card.kind, true)}
         </div>
         <h3>${esc(card.nome)}</h3>
         <p class="ag-desc">${esc(card.desc)}</p>
@@ -9280,9 +9280,16 @@ function _renderAgentes(data) {
 // Kinds com arte PNG real em /brand/agents/. O que não tiver (ex.: aviador)
 // cai no porquinho SVG placeholder — nada quebra até a arte chegar.
 const _AGENT_ART = new Set(["xerife", "reporter", "carteiro", "detetive", "cofre", "barao"]);
-function _agentArt(kind) {
-  if (_AGENT_ART.has(kind))
+function _agentArt(kind, hero = false) {
+  if (_AGENT_ART.has(kind)) {
+    // hero = a cena cinematográfica do e-mail ({kind}_hero.png, 1200x600),
+    // usada no card (object-fit:cover preenche o avatar). Sem hero = o sticker
+    // (usado no medalhão pequeno do feed).
+    if (hero)
+      return `<img src="/brand/agents/${esc(kind)}_hero.png?v=1" alt="" loading="lazy"`
+        + ` style="width:100%;height:100%;object-fit:cover;object-position:center;display:block" />`;
     return `<img class="ag-pig-img" src="/brand/agents/${esc(kind)}.png?v=3" alt="" loading="lazy" />`;
+  }
   return `<svg viewBox="0 6 120 114" aria-hidden="true"><use href="#ag-pig-${esc(kind)}"/></svg>`;
 }
 

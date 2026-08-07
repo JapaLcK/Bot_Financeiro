@@ -176,6 +176,66 @@ def mark_agent_events_seen(user_id: int) -> int:
     return n
 
 
+# ── Mini-digest por agente (batching de e-mail + teto de cadência) ────────────
+
+def list_agents_pending_email() -> list[dict[str, Any]]:
+    """Agentes ATIVOS que têm ≥1 evento ainda não enviado por e-mail. Traz o
+    last_emailed_at pro teto de cadência e o nº de eventos pendentes."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select a.id as agent_id, a.user_id, a.kind, a.config, a.last_emailed_at,
+                       count(e.id) as pendentes
+                from agents a
+                join agent_events e on e.agent_id = a.id and e.emailed_at is null
+                where a.status = 'active'
+                group by a.id, a.user_id, a.kind, a.config, a.last_emailed_at
+                """,
+            )
+            return list(cur.fetchall() or [])
+
+
+def list_unemailed_events(agent_id: int, limit: int = 20) -> list[dict[str, Any]]:
+    """Eventos do agente ainda não enviados por e-mail (mais recentes primeiro)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, kind, payload, valor_impacto, fired_at
+                from agent_events
+                where agent_id = %s and emailed_at is null
+                order by fired_at desc
+                limit %s
+                """,
+                (agent_id, limit),
+            )
+            return list(cur.fetchall() or [])
+
+
+def mark_events_emailed(event_ids: list[int]) -> int:
+    """Marca eventos como já enviados por e-mail (ou suprimidos por opt-out)."""
+    if not event_ids:
+        return 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update agent_events set emailed_at=now() where id = any(%s)",
+                (list(event_ids),),
+            )
+            n = cur.rowcount
+        conn.commit()
+    return n
+
+
+def touch_agent_emailed(agent_id: int) -> None:
+    """Registra o momento do último e-mail do agente (teto de cadência)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("update agents set last_emailed_at=now() where id=%s", (agent_id,))
+        conn.commit()
+
+
 def agents_summary(user_id: int) -> dict[str, Any]:
     """Contadores do topo da página: ativos, pausados, disparos do mês, salvos no ano."""
     with get_conn() as conn:
