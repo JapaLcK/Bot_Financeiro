@@ -555,8 +555,13 @@ function displayLabel(displayName, email) {
   return shortAccount(email);
 }
 
+// 'pro' é alias legado do Plus e 'pro_max' é o Pro novo no banco
+// (ver _STORED_PLAN_TO_TIER em core/services/plan_service.py) — traduz
+// antes de exibir pra não mostrar "PLANO PRO_MAX"/"PLANO PRO" errado.
+const PLAN_ALIASES = { pro: "plus", pro_max: "pro" };
 function planLabel(plan) {
-  const v = (plan || "free").trim().toLowerCase();
+  let v = (plan || "free").trim().toLowerCase();
+  v = PLAN_ALIASES[v] || v;
   return v === "free" ? "PLANO FREE" : `PLANO ${v.toUpperCase()}`;
 }
 

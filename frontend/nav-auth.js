@@ -62,8 +62,14 @@
       .catch(function () { location.href = "/whatsapp"; });
   }
 
+  // Traduz o valor CRU do banco pro tier vendido ao cliente antes de exibir:
+  // 'pro' é alias legado do Plus (R$ 19,90) e 'pro_max' é o Pro novo — ver
+  // _STORED_PLAN_TO_TIER em core/services/plan_service.py. Sem isso o badge
+  // mostraria "PLANO PRO" pra um assinante Plus e "PLANO PRO_MAX" pro Pro.
+  var PLAN_ALIASES = { pro: "plus", pro_max: "pro" };
   function planLabel(plan) {
     var v = (plan || "free").trim().toLowerCase();
+    v = PLAN_ALIASES[v] || v;
     return v === "free" ? "PLANO FREE" : "PLANO " + v.toUpperCase();
   }
   function shortAccount(email) {
