@@ -184,13 +184,10 @@ def confirm_email_verification(email: str, code: str) -> dict:
     result = _db_support.confirm_email_verification_impl(
         get_conn, get_or_create_canonical_user, create_link_code, email, code
     )
-    # Planos v2: ancora o trial de 30d no telefone do cadastro (idempotente,
-    # nunca levanta). Telefone que já usou trial herda o started_at original.
-    try:
-        from .plans import claim_trial_for_user
-        claim_trial_for_user(int(result["user_id"]))
-    except Exception:
-        pass
+    # Planos v2 (2026-08-06): o trial NÃO nasce mais no cadastro. Ele é uma
+    # assinatura Stripe do plano escolhido (com cartão) e só é registrado quando
+    # a assinatura trialing nasce (webhook checkout.session.completed). Cadastro
+    # novo entra Grátis.
     return result
 
 
@@ -211,14 +208,8 @@ def attempt_whatsapp_phone_link(wa_id: str, current_user_id: int | None = None) 
     result = _db_support.attempt_whatsapp_phone_link_impl(
         get_conn, merge_users, wa_phone, wa_candidates, current_user_id
     )
-    # Planos v2: telefone confirmado no WhatsApp → ancora/reclama o trial
-    # (idempotente; conta que reusa número herda o trial já queimado).
-    try:
-        if (result or {}).get("status") in ("linked", "already_linked"):
-            from .plans import claim_trial_for_user
-            claim_trial_for_user(int(result.get("user_id") or current_user_id))
-    except Exception:
-        pass
+    # Planos v2 (2026-08-06): o trial não nasce mais no vínculo do WhatsApp — é
+    # uma assinatura Stripe com cartão, registrada no webhook do checkout.
     return result
 
 

@@ -23,6 +23,7 @@ class PlanLimits(TypedDict):
     pockets_max: int | None
     cards_max: int | None
     history_days: int | None
+    history_current_month_only: bool     # Grátis: só o mês-calendário corrente
     investments_enabled: bool
     ofx_enabled: bool
     export_enabled: bool
@@ -56,31 +57,36 @@ AGENT_KIND_MIN_TIER: dict[str, str] = {
 
 # Escada FINAL v3 (2026-08-06): Grátis R$0 · Essencial 9,90 · Plus 19,90 ·
 # Pro 49,90 (valor 'pro_max' no banco) · Premium engavetado ("em breve", sem
-# tier no código). Bancos OF: 1 só no trial / 1 / 2 / 5. Agentes: 0/0/3/6.
+# tier no código). Bancos OF: 0 / 1 / 2 / 5. Agentes: 0/0/3/6.
+# Histórico (2026-08-06): Grátis só o mês corrente · Essencial 90d · Plus 12m ·
+# Pro 24m. O trial (30d) é uma assinatura Stripe do plano escolhido (com cartão)
+# — durante ele o usuário tem os limites do tier que assinou, não do Grátis.
 FREE_LIMITS: PlanLimits = {
     "pockets_max": 1,
     "cards_max": 1,
-    "history_days": 90,
+    "history_days": 31,                  # teto de segurança; o corte real é o mês corrente
+    "history_current_month_only": True,  # Grátis só enxerga o mês-calendário atual
     "investments_enabled": False,
     "ofx_enabled": False,
     "export_enabled": False,
     "ai_conversational_enabled": True,   # v2: tem cota pequena (v1 ignora — gate é is_pro)
     "ai_categorization_enabled": True,
     "recurring_expenses_enabled": False,
-    "launches_month_max": 50,
+    "launches_month_max": 30,
     "ai_monthly_messages": 20,
     "audio_enabled": False,
     "image_ocr_enabled": False,
     "bills_enabled": False,
-    "of_banks_max": 0,                   # OF só durante o trial (pausa depois)
-    "agents_max": 0,                     # agentes só nos 30d de trial
+    "of_banks_max": 0,                   # Grátis não tem Open Finance (trial usa o tier assinado)
+    "agents_max": 0,                     # Grátis não tem agentes (trial usa o tier assinado)
 }
 
 
 ESSENCIAL_LIMITS: PlanLimits = {
     "pockets_max": None,
     "cards_max": None,
-    "history_days": 730,                 # 24 meses
+    "history_days": 90,                  # 90 dias
+    "history_current_month_only": False,
     "investments_enabled": True,
     "ofx_enabled": True,
     "export_enabled": True,
@@ -100,7 +106,8 @@ ESSENCIAL_LIMITS: PlanLimits = {
 PLUS_LIMITS: PlanLimits = {
     "pockets_max": None,
     "cards_max": None,
-    "history_days": None,
+    "history_days": 365,                 # 12 meses
+    "history_current_month_only": False,
     "investments_enabled": True,
     "ofx_enabled": True,
     "export_enabled": True,
@@ -119,6 +126,7 @@ PLUS_LIMITS: PlanLimits = {
 
 PRO_LIMITS: PlanLimits = {
     **PLUS_LIMITS,
+    "history_days": 730,                 # 24 meses
     "of_banks_max": 5,
     "agents_max": 6,                     # + Detetive, Guardião do Tesouro (kind "cofre"), Barão
 }

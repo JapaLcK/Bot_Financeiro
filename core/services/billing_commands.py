@@ -138,36 +138,28 @@ def _handle_plano(user_id: int, platform: str) -> str:
     # Import defensivo: testes (e deploys sem a escada) mockam plan_service só
     # com is_pro — sem os símbolos v2, cai no comportamento legado.
     try:
-        from core.services.plan_service import plans_v2_enabled, get_plan_tier, get_trial_status
+        from core.services.plan_service import plans_v2_enabled, get_plan_tier
         _v2 = plans_v2_enabled()
     except ImportError:
         _v2 = False
     if _v2:
         tier = get_plan_tier(user_id)
-        stored_paid = plan in ("essencial", "pro", "plus", "pro_max")
 
         if tier == "free":
             return (
                 f"🐷 Plano: {b('Grátis')}\n\n"
                 f"O que vem aqui:\n"
-                f"• 50 lançamentos por mês · histórico de 90 dias\n"
+                f"• 30 lançamentos por mês · histórico do mês corrente\n"
                 f"• 1 caixinha e 1 cartão\n"
                 f"• Piggy IA com 20 mensagens/mês\n\n"
                 f"Quer bancos conectados, agentes e IA sem limite? "
                 f"Manda {b('assinar plano')} 🐷✨"
             )
 
-        # Trial de 30 dias (tier plus sem assinatura paga)
-        if tier == "plus" and not stored_paid:
-            trial = get_trial_status(user_id, user)
-            dias = trial.get("days_left") or 0
-            return (
-                f"🐷 Plano: {b('Plus (teste grátis)')}\n\n"
-                f"Faltam {b(f'{dias} dia' + ('s' if dias != 1 else ''))} do seu teste.\n"
-                f"Assinando durante o teste, você não paga nada até ele acabar. "
-                f"Manda {b('assinar plano')} 🐷✨"
-            )
-
+        # Nota: o trial de 30 dias hoje é uma assinatura Stripe do plano escolhido
+        # (status trialing) — cai no ramo pago abaixo com status_label "Período
+        # grátis em andamento" e "Primeira cobrança" na data. Não há mais o
+        # estado "Plus sem assinatura" (trial sem cartão).
         tier_name = {"essencial": "Essencial", "plus": "Plus", "pro": "Pro"}.get(tier, tier.title())
         if status == "grandfathered":
             return (

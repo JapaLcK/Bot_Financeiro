@@ -1538,10 +1538,11 @@ def init_db():
         """,
 
         # ── Planos v2 (escada Grátis/Essencial/Plus/Pro) ─────────────────────
-        # Trial de 30 dias sem cartão. plan_trials é keyed por phone_hash e
-        # NÃO tem FK pra users de propósito: sobrevive à deleção da conta —
-        # recriar conta com o mesmo número herda o started_at original (trial
-        # já queimado). Regra: 30 dias únicos por telefone, na vida.
+        # Trial de 30 dias do plano escolhido, via Stripe COM CARTÃO (2026-08-06):
+        # plan_trials registra a queima do trial por telefone. É keyed por
+        # phone_hash e NÃO tem FK pra users de propósito: sobrevive à deleção da
+        # conta — recriar conta com o mesmo número herda o started_at original
+        # (trial já queimado). Regra: 30 dias únicos por telefone, na vida.
         """alter table auth_accounts add column if not exists trial_started_at timestamptz""",
         # Downsell do fim do trial: 1 e-mail por conta, na vida.
         """alter table auth_accounts add column if not exists trial_downsell_sent_at timestamptz""",

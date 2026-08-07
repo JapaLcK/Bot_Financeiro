@@ -192,18 +192,44 @@ def _sub_period_end_ts(sub) -> int | None:
     return ts
 
 
+class StripeLookupError(Exception):
+    """A consulta ao Stripe falhou; isso não significa ausência de assinatura."""
+
+
+def _is_missing_stripe_customer(stripe_mod, exc: Exception) -> bool:
+    """Distingue customer apagado de indisponibilidade real da API."""
+    invalid_request = getattr(getattr(stripe_mod, "error", None), "InvalidRequestError", None)
+    if not isinstance(invalid_request, type) or not isinstance(exc, invalid_request):
+        return False
+    return (
+        (getattr(exc, "code", None) == "resource_missing"
+         and getattr(exc, "param", None) == "customer")
+        or "no such customer" in str(exc).lower()
+    )
+
+
 def _find_active_subscription(stripe_mod, customer_id: str):
     """Primeira assinatura viva do customer (active > trialing > past_due).
-    Nunca levanta: erro de API conta como 'sem assinatura' (fail-open, igual
-    aos outros gates — melhor deixar passar do que travar quem paga)."""
+
+    Se alguma consulta falhar e nenhuma assinatura for encontrada, levanta
+    StripeLookupError. A única exceção é um customer apagado, tratado como sem
+    assinatura para que o checkout possa recriá-lo."""
+    last_exc: Exception | None = None
     for status in ("active", "trialing", "past_due"):
         try:
             subs = stripe_mod.Subscription.list(customer=customer_id, status=status, limit=1)
             data = _sg(subs, "data", []) or []
             if data:
                 return data[0]
-        except Exception:
+        except Exception as exc:
+            if _is_missing_stripe_customer(stripe_mod, exc):
+                return None
+            last_exc = exc
             continue
+    if last_exc is not None:
+        logging.getLogger(__name__).warning(
+            "stripe_subscription_lookup_failed customer=%s: %s", customer_id, last_exc)
+        raise StripeLookupError("Não foi possível consultar as assinaturas no Stripe.") from last_exc
     return None
 
 
@@ -2531,7 +2557,7 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         get_plan_tier, get_trial_status,
     )
     of_ui_enabled = _open_finance_ui_enabled(user_id, user_dict.get("email"))
-    # Planos v2: tier efetivo da escada + estado do trial (30d sem cartão).
+    # Planos v2: tier efetivo da escada + estado do trial (30d via Stripe).
     plan_tier = await asyncio.to_thread(get_plan_tier, user_id)
     trial = await asyncio.to_thread(get_trial_status, user_id, user_dict)
     return {
@@ -3390,7 +3416,16 @@ async def billing_create_checkout(
                     "message": "Você já tem acesso vitalício de brinde — assinar um plano substituiria isso. Fala com a gente se quiser mudar."},
         )
     if user.get("stripe_customer_id"):
-        existing_sub = _find_active_subscription(stripe, user["stripe_customer_id"])
+        try:
+            existing_sub = await asyncio.to_thread(
+                _find_active_subscription, stripe, user["stripe_customer_id"])
+        except StripeLookupError:
+            # Fail-closed: sem confirmação do Stripe, não arriscamos criar uma
+            # segunda assinatura pra quem talvez já pague. Melhor pedir retry.
+            raise HTTPException(
+                status_code=503,
+                detail="Não consegui confirmar sua assinatura agora. Tenta de novo em instantes.",
+            )
         if existing_sub is not None:
             raise HTTPException(
                 status_code=409,
@@ -3408,14 +3443,18 @@ async def billing_create_checkout(
         set_stripe_customer(user_id, c.id)
         return c.id
 
-    # Trial no checkout:
-    # v2 ON — REGRA FECHADA: o contador é um só (30d por telefone, na vida).
-    #   Assinar DURANTE o trial aproveita só os dias restantes (senão ninguém
-    #   assina antes do fim); trial queimado/expirado = cobrança imediata.
+    # Trial no checkout (2026-08-06):
+    # v2 ON — 30 dias do PLANO ESCOLHIDO, com cartão. REGRA FECHADA: 1 trial por
+    #   telefone na vida — telefone elegível ganha os 30 dias; telefone que já
+    #   queimou o trial (ou já foi assinante) = cobrança imediata (0 dias). O
+    #   registro do trial acontece no webhook (checkout.session.completed), não
+    #   aqui — abandonar o checkout não queima o trial.
     # v2 OFF — comportamento legado: PRO_TRIAL_DAYS fixo (default 30).
-    from core.services.plan_service import plans_v2_enabled, get_trial_status
+    from core.services.plan_service import plans_v2_enabled, trial_days_total
     if plans_v2_enabled():
-        trial_days = int(get_trial_status(user_id)["days_left"])
+        from db.plans import is_trial_eligible_for_user
+        eligible = await asyncio.to_thread(is_trial_eligible_for_user, user_id)
+        trial_days = trial_days_total() if eligible else 0
     else:
         trial_days = int(os.getenv("PRO_TRIAL_DAYS", "30"))
 
@@ -3491,7 +3530,12 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
         return {"active": False}
     stripe.api_key = STRIPE_SECRET_KEY
 
-    sub = await asyncio.to_thread(_find_active_subscription, stripe, cust)
+    try:
+        sub = await asyncio.to_thread(_find_active_subscription, stripe, cust)
+    except StripeLookupError:
+        # Leitura de estado pode degradar suave: o front mantém os botões
+        # padrão e o guard fail-closed do checkout segura qualquer clique.
+        return {"active": False, "degraded": True}
     if sub is None:
         return {"active": False}
 
@@ -3564,7 +3608,11 @@ async def billing_change_plan(
         raise HTTPException(status_code=409, detail={"error": "no_subscription"})
     stripe.api_key = STRIPE_SECRET_KEY
 
-    sub = await asyncio.to_thread(_find_active_subscription, stripe, cust)
+    try:
+        sub = await asyncio.to_thread(_find_active_subscription, stripe, cust)
+    except StripeLookupError:
+        raise HTTPException(status_code=503,
+                            detail="O Stripe está instável agora. Tenta de novo em instantes.")
     if sub is None:
         raise HTTPException(status_code=409, detail={"error": "no_subscription"})
 
@@ -3646,7 +3694,11 @@ async def billing_cancel_change(user_id: int = Depends(_get_current_user)):
         raise HTTPException(status_code=409, detail={"error": "no_subscription"})
     stripe.api_key = STRIPE_SECRET_KEY
 
-    sub = await asyncio.to_thread(_find_active_subscription, stripe, cust)
+    try:
+        sub = await asyncio.to_thread(_find_active_subscription, stripe, cust)
+    except StripeLookupError:
+        raise HTTPException(status_code=503,
+                            detail="O Stripe está instável agora. Tenta de novo em instantes.")
     sched_ref = _sg(sub, "schedule") if sub is not None else None
     if not sched_ref:
         raise HTTPException(status_code=400, detail={"error": "no_change",
@@ -3777,7 +3829,7 @@ async def billing_webhook(request: Request):
         session = event["data"]["object"]
         user_id = _resolve_user(session)
         sub_id  = _g(session, "subscription")
-        # Trial 7d: subscription nasce status=trialing, sem invoice paga.
+        # Trial 30d: subscription nasce status=trialing, sem invoice paga.
         # Promover ja agora pra user nao ficar Free durante o trial.
         if user_id and sub_id:
             sub = stripe.Subscription.retrieve(sub_id)
@@ -3786,6 +3838,15 @@ async def billing_webhook(request: Request):
             plan_value = _stored_plan_for_price(_subscription_price_id(sub))
             update_user_plan(user_id, plan_value, expires_dt)
             set_payment_status(user_id, sub_status)
+            # Trial nasceu → registra a queima do trial no telefone (1 por
+            # telefone na vida). Idempotente; nunca levanta. Feito aqui e nao no
+            # cadastro pra abandonar o checkout nao queimar o trial de ninguem.
+            if sub_status == "trialing":
+                try:
+                    from db.plans import claim_trial_for_user
+                    await asyncio.to_thread(claim_trial_for_user, user_id)
+                except Exception:
+                    pass
             await log_system_event(
                 "info",
                 "billing_checkout_completed",
@@ -4319,14 +4380,17 @@ async def monthly_history(request: Request, user_id: int, months: int = 6):
     _authorize_dashboard_access(request, user_id)
     if not 1 <= months <= 24:
         raise HTTPException(status_code=400, detail="months must be 1-24")
-    # Limita a janela ao history_days do plano (Grátis 1 mês, Essencial 3,
-    # Plus+ ilimitado; v1: Free 1 mês). Nao retorna 403 pra nao quebrar
-    # dashboard — apenas capa silenciosamente. Frontend pode ler o plano e
-    # mostrar CTA "ver mais" de upgrade.
-    from core.services.plan_service import history_months_cap
-    months_cap = history_months_cap(user_id)
-    if months_cap is not None and months > months_cap:
-        months = months_cap
+    # Limita a janela ao histórico do plano (Grátis só o mês corrente,
+    # Essencial 3, Plus 12, Pro 24; v1: Free 1 mês). Nao retorna 403 pra nao
+    # quebrar dashboard — apenas capa silenciosamente. Frontend pode ler o plano
+    # e mostrar CTA "ver mais" de upgrade.
+    from core.services.plan_service import history_months_cap, history_current_month_only
+    if history_current_month_only(user_id):
+        months = 1                                  # Grátis: só o mês corrente
+    else:
+        months_cap = history_months_cap(user_id)
+        if months_cap is not None and months > months_cap:
+            months = months_cap
     data = await get_monthly_history(user_id, months)
     return {"data": data}
 
@@ -4339,12 +4403,17 @@ async def daily_expenses_window(request: Request, user_id: int, days: int = 30):
     _authorize_dashboard_access(request, user_id)
     if days not in (7, 30, 90):
         raise HTTPException(status_code=400, detail="days must be 7, 30 or 90")
-    from core.services.plan_service import history_days_cap
+    from core.services.plan_service import history_days_cap, history_current_month_only
     effective = days
-    days_cap = history_days_cap(user_id)
-    if days_cap is not None:
-        # +1 preserva o comportamento antigo do Free (janela de 30d cabe em 31).
-        effective = min(days, days_cap + 1)
+    if history_current_month_only(user_id):
+        # Grátis: só o mês corrente → janela = dias decorridos desde o dia 1.
+        from datetime import datetime, timezone
+        effective = min(days, datetime.now(timezone.utc).day)
+    else:
+        days_cap = history_days_cap(user_id)
+        if days_cap is not None:
+            # +1 preserva o comportamento antigo do Free (janela de 30d cabe em 31).
+            effective = min(days, days_cap + 1)
     data = await get_daily_expenses_window(user_id, effective)
     return {"data": data, "days": days, "effective_days": effective}
 

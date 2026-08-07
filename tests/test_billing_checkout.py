@@ -40,6 +40,17 @@ def _auth_user_setup(suffix: str) -> tuple[int, str, TestClient]:
 _CSRF_HEADERS = {dashboard.CSRF_HEADER_NAME: _CSRF_TOKEN}
 
 
+class _FakeStripeError(Exception):
+    pass
+
+
+class _FakeInvalidRequestError(_FakeStripeError):
+    def __init__(self, message, param=None, code=None):
+        super().__init__(message)
+        self.param = param
+        self.code = code
+
+
 class _FakeStripe:
     """Stub de stripe.Customer.create + stripe.checkout.Session.create.
 
@@ -51,6 +62,8 @@ class _FakeStripe:
         self.last_session_kwargs: dict | None = None
         self.last_customer_kwargs: dict | None = None
         self.customer_create_calls = 0
+        self.session_create_calls = 0
+        self.missing_customer_ids: set[str] = set()
 
         outer = self
 
@@ -64,11 +77,25 @@ class _FakeStripe:
         class _Session:
             @staticmethod
             def create(**kwargs):
+                outer.session_create_calls += 1
+                if kwargs.get("customer") in outer.missing_customer_ids:
+                    raise _FakeInvalidRequestError(
+                        "No such customer", param="customer", code="resource_missing")
                 outer.last_session_kwargs = kwargs
                 return SimpleNamespace(url="https://checkout.stripe.com/c/pay/test")
 
+        class _Subscription:
+            @staticmethod
+            def list(**kwargs):
+                return {"data": []}
+
         self.Customer = _Customer
+        self.Subscription = _Subscription
         self.checkout = SimpleNamespace(Session=_Session)
+        self.error = SimpleNamespace(
+            StripeError=_FakeStripeError,
+            InvalidRequestError=_FakeInvalidRequestError,
+        )
 
 
 def _patch_stripe(monkeypatch) -> _FakeStripe:
@@ -200,3 +227,120 @@ def test_checkout_reuses_existing_stripe_customer(user_id, monkeypatch):
     assert resp.status_code == 200
     assert fake.customer_create_calls == 0
     assert fake.last_session_kwargs["customer"] == "cus_existing_999"
+
+
+# ─── Guarda anti-assinatura-dupla (fail-closed, achado de review) ────────────
+
+def test_checkout_bloqueia_quem_ja_assina(user_id, monkeypatch):
+    """Customer com assinatura ativa → 409 already_subscribed (nunca 2º checkout)."""
+    uid, _, client = _auth_user_setup(f"dup-{user_id}")
+    db.set_stripe_customer(uid, "cus_ja_assina")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    fake = _patch_stripe(monkeypatch)
+
+    class _Subscription:
+        @staticmethod
+        def list(**kwargs):
+            return {"data": [{"id": "sub_viva", "schedule": None}]}
+
+    fake.Subscription = _Subscription
+
+    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["error"] == "already_subscribed"
+    assert fake.last_session_kwargs is None  # checkout NUNCA foi criado
+
+
+def test_checkout_fail_closed_com_stripe_fora(user_id, monkeypatch):
+    """Se a consulta de assinatura FALHA (API instável), o checkout responde
+    503 em vez de assumir 'sem assinatura' e arriscar cobrança dupla."""
+    uid, _, client = _auth_user_setup(f"fc-{user_id}")
+    db.set_stripe_customer(uid, "cus_stripe_fora")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    fake = _patch_stripe(monkeypatch)
+
+    class _SubscriptionBoom:
+        @staticmethod
+        def list(**kwargs):
+            raise RuntimeError("stripe 500")
+
+    fake.Subscription = _SubscriptionBoom
+
+    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    assert resp.status_code == 503, resp.text
+    assert fake.last_session_kwargs is None  # nada de checkout no escuro
+
+
+def test_checkout_recupera_customer_apagado_no_stripe(user_id, monkeypatch):
+    """Customer inexistente não é pane da API: recria e conclui o checkout."""
+    uid, _, client = _auth_user_setup(f"missing-{user_id}")
+    db.set_stripe_customer(uid, "cus_apagado")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    fake = _patch_stripe(monkeypatch)
+    fake.missing_customer_ids.add("cus_apagado")
+
+    class _MissingCustomerSubscription:
+        @staticmethod
+        def list(**kwargs):
+            raise _FakeInvalidRequestError(
+                "No such customer", param="customer", code="resource_missing")
+
+    fake.Subscription = _MissingCustomerSubscription
+
+    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+    assert fake.customer_create_calls == 1
+    assert fake.session_create_calls == 2
+    assert fake.last_session_kwargs["customer"] == "cus_test_123"
+    assert db.get_auth_user(uid)["stripe_customer_id"] == "cus_test_123"
+
+
+def test_checkout_sem_customer_segue_normal(user_id, monkeypatch):
+    """Usuário sem stripe_customer_id (nunca assinou) não consulta assinatura
+    e cria checkout normalmente — o caminho feliz continua intacto."""
+    _, _, client = _auth_user_setup(f"novo-{user_id}")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    fake = _patch_stripe(monkeypatch)
+
+    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+    assert fake.last_session_kwargs is not None
+
+
+# ─── Trial v2 (2026-08-06): 30d do plano escolhido, gated por elegibilidade ──
+
+def test_checkout_v2_elegivel_manda_trial_de_30(user_id, monkeypatch):
+    """v2 ON + telefone elegível → trial_period_days = PLANS_TRIAL_DAYS (não mais
+    PRO_TRIAL_DAYS nem os dias restantes de um trial de telefone)."""
+    _, _, client = _auth_user_setup(f"v2elig-{user_id}")
+    monkeypatch.setenv("PLANS_V2_ENABLED", "1")
+    monkeypatch.setenv("PLANS_TRIAL_DAYS", "30")
+    monkeypatch.setenv("PRO_TRIAL_DAYS", "7")  # deve ser IGNORADO no caminho v2
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    monkeypatch.setattr("db.plans.is_trial_eligible_for_user", lambda uid: True)
+    fake = _patch_stripe(monkeypatch)
+
+    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+    assert fake.last_session_kwargs["subscription_data"]["trial_period_days"] == 30
+
+
+def test_checkout_v2_inelegivel_cobra_na_hora(user_id, monkeypatch):
+    """v2 ON + telefone que já queimou o trial → sem trial_period_days (Stripe
+    cobra imediatamente). Regra: 1 trial por telefone na vida."""
+    _, _, client = _auth_user_setup(f"v2inelig-{user_id}")
+    monkeypatch.setenv("PLANS_V2_ENABLED", "1")
+    monkeypatch.setenv("PLANS_TRIAL_DAYS", "30")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    monkeypatch.setattr("db.plans.is_trial_eligible_for_user", lambda uid: False)
+    fake = _patch_stripe(monkeypatch)
+
+    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+    assert "trial_period_days" not in fake.last_session_kwargs["subscription_data"]

@@ -1,9 +1,12 @@
 """
 Camada de banco do sistema de planos v2 (escada Grátis/Essencial/Plus/Pro).
 
-Trial de 30 dias sem cartão, com trava de 1 trial por TELEFONE na vida:
-`plan_trials` é keyed por phone_hash e sobrevive à deleção da conta — recriar
-conta com o mesmo número herda o started_at original (trial já queimado).
+Trial de 30 dias do plano escolhido, via Stripe COM CARTÃO (2026-08-06), com
+trava de 1 trial por TELEFONE na vida: `plan_trials` é keyed por phone_hash e
+sobrevive à deleção da conta — recriar conta com o mesmo número herda o
+started_at original (trial já queimado). A elegibilidade é checada na criação
+do checkout (is_trial_eligible_for_user) e o registro (claim_trial_for_user)
+acontece quando a assinatura trialing nasce, não mais no cadastro.
 """
 
 from __future__ import annotations
@@ -71,6 +74,37 @@ def claim_trial_for_user(user_id: int) -> datetime | None:
     except Exception:
         logger.warning("claim_trial_for_user falhou pro user %s", user_id, exc_info=True)
         return None
+
+
+def is_trial_eligible_for_user(user_id: int) -> bool:
+    """O telefone deste usuário ainda tem direito ao trial de 30 dias?
+
+    Regra: 1 trial por telefone na vida. Elegível = o phone_hash NUNCA apareceu
+    em plan_trials (nesta conta ou em outra, mesmo deletada). Usado na criação
+    do checkout pra decidir se manda trial_period_days=30 ou cobra na hora.
+
+    Sem telefone vinculado → elegível (nada pra gatear; o registro só acontece
+    se/quando houver phone_hash). Falha de banco → elegível (fail-open: melhor
+    conceder o trial do que cobrar alguém por engano).
+    """
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select phone_hash from auth_accounts where user_id = %s",
+                    (int(user_id),),
+                )
+                row = cur.fetchone()
+                if not row or not row.get("phone_hash"):
+                    return True
+                cur.execute(
+                    "select 1 from plan_trials where phone_hash = %s",
+                    (row["phone_hash"],),
+                )
+                return cur.fetchone() is None
+    except Exception:
+        logger.warning("is_trial_eligible_for_user falhou pro user %s", user_id, exc_info=True)
+        return True
 
 
 def get_trial_started_at(user_id: int) -> datetime | None:

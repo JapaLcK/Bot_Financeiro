@@ -10,9 +10,11 @@ Dois mundos atrás do flag PLANS_V2_ENABLED (lido dinâmico, sem redeploy):
     banco é ALIAS LEGADO do tier plus (R$ 19,90 — antigo "Pro", hoje "Plus");
     o tier pro novo (R$ 39,90) usa o valor 'pro_max'. Grátis entra no app
     (has_app_access sempre True) e os gates viram por-feature/por-tier.
-    Trial: 30 dias de Plus sem cartão, 1 por telefone na vida (db/plans.py);
-    durante o trial o usuário resolve pro tier plus (com OF capado a 1 banco
-    via get_user_limits).
+    Trial (2026-08-06): 30 dias do PLANO ESCOLHIDO, via Stripe COM CARTÃO
+    (subscription trialing → cobra no dia 31). Escolheu Pro? 30 dias de Pro.
+    Nasce no checkout, não no cadastro; 1 por telefone na vida (plan_trials).
+    Durante o trial o tier vem da coluna `plan` (assinatura vigente), com os
+    limites cheios do plano assinado — cadastro novo sem assinatura = Grátis.
 
 A FastAPI dependency `require_pro_feature` vive em
 frontend/finance_bot_websocket_custom.py para evitar import circular com
@@ -45,7 +47,7 @@ TRIAL_DAYS_DEFAULT = 30
 
 
 def plans_v2_enabled() -> bool:
-    """Escada de tiers + trial sem cartão. LANÇADA 2026-08-06: default LIGADO
+    """Escada de tiers + trial via Stripe. LANÇADA 2026-08-06: default LIGADO
     (decisão do Lucas — sem flag de rollout; a /precos é hardcoded na escada).
     A env virou só FREIO DE EMERGÊNCIA: PLANS_V2_ENABLED=0/false desliga o
     comportamento v2 do backend sem redeploy se algo der errado."""
@@ -102,8 +104,10 @@ def get_trial_status(user_id: int, user: dict | None = None) -> dict:
 def get_plan_tier(user_id: int) -> str:
     """Tier efetivo do usuário na escada v2: free | essencial | plus | pro.
 
-    Assinatura paga vigente manda; sem assinatura, trial ativo resolve pra
-    plus (a experiência do trial É o Plus); senão, free.
+    Assinatura vigente manda — inclui o TRIAL, que hoje é uma assinatura Stripe
+    do plano escolhido (status trialing, plan_expires_at no futuro = fim do
+    trial), então o tier vem naturalmente da coluna `plan`. Sem assinatura
+    vigente = free (cadastro novo entra Grátis; não há mais trial sem cartão).
     Com PLANS_V2_ENABLED off, colapsa no binário legado (pro→plus, resto free)
     pra quem chamar isto cedo demais não ver nada diferente do is_pro."""
     user = get_auth_user(int(user_id))
@@ -113,17 +117,14 @@ def get_plan_tier(user_id: int) -> str:
     tier = _STORED_PLAN_TO_TIER.get(stored, "free")
     if tier != "free" and _paid_plan_active(user):
         return tier
-    if plans_v2_enabled():
-        trial = get_trial_status(user_id, user)
-        if trial["active"]:
-            return "plus"
     return "free"
 
 
 def is_pro(user_id: int) -> bool:
     """
     True se o usuário tem o plano pago principal ativo (Plus, ex-"Pro" — inclui
-    trial do Stripe e, no v2, o trial de 30d sem cartão e o tier pro acima).
+    o trial do Stripe, que hoje é uma assinatura trialing do plano escolhido, e
+    o tier pro acima).
 
     Semântica preservada pros 27 call sites: "posso usar as features pagas?".
     """
@@ -168,27 +169,28 @@ def has_app_access(user_id: int) -> bool:
 def get_user_limits(user_id: int) -> PlanLimits:
     """Retorna os limites/features aplicáveis a este usuário.
 
-    v2 ON: limites do tier; durante o trial (tier plus SEM assinatura paga),
-    Open Finance fica capado a 1 banco — gosto do automático sem liberar o
-    buffet (Pluggy cobra por conexão).
+    v2 ON: limites do tier efetivo. O trial é uma assinatura do plano escolhido,
+    então recebe os limites cheios desse plano (ex.: trial de Pro = 5 bancos no
+    Open Finance) — sem cap especial de trial.
     """
     if not plans_v2_enabled():
         return limits_for("pro" if is_pro(user_id) else "free")
-    tier = get_plan_tier(user_id)
-    limits = limits_for_tier(tier)
-    if tier == "plus":
-        user = get_auth_user(int(user_id))
-        stored = ((user or {}).get("plan") or "").lower()
-        paid = _STORED_PLAN_TO_TIER.get(stored, "free") != "free" and _paid_plan_active(user or {})
-        if not paid:  # trial
-            limits = {**limits, "of_banks_max": 1}
-    return limits
+    return limits_for_tier(get_plan_tier(user_id))
 
 
 def history_days_cap(user_id: int) -> int | None:
     """Janela de histórico do plano em dias (None = ilimitado). v1: Free 30d /
-    Pro ilimitado (inalterado). v2: Grátis 30d / Essencial 90d / Plus+ ilimitado."""
+    Pro ilimitado (inalterado). v2: Grátis mês corrente (ver
+    history_current_month_only) / Essencial 90d / Plus 365d / Pro 730d."""
     return get_user_limits(user_id)["history_days"]
+
+
+def history_current_month_only(user_id: int) -> bool:
+    """True se o tier só enxerga o mês-calendário corrente (Grátis). Os
+    endpoints de histórico cortam no dia 1 do mês em vez de usar history_days."""
+    if not plans_v2_enabled():
+        return False
+    return bool(get_user_limits(user_id).get("history_current_month_only", False))
 
 
 def history_months_cap(user_id: int) -> int | None:

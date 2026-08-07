@@ -3,9 +3,11 @@ Testes unitários da escada de planos v2 (Grátis/Essencial/Plus/Pro) + trial 30
 
 Tudo com monkeypatch — sem tocar o banco. Cobre:
   - v2 OFF: comportamento legado 100% preservado (is_pro, has_app_access, limites)
-  - v2 ON: resolução de tier ('pro' legado→plus, trial→plus, expirado→free)
-  - trial: contagem de dias, regra "30d únicos, cartão não estica"
-  - limites por tier (histórico, lançamentos/mês, cota IA, OF capado no trial)
+  - v2 ON: resolução de tier ('pro' legado→plus, expirado→free)
+  - trial (2026-08-06): virou assinatura Stripe do plano escolhido (trialing);
+    sem assinatura vigente = free (não há mais trial sem cartão → plus)
+  - get_trial_status: contagem de dias (usado por UI/e-mails)
+  - limites por tier (histórico do mês corrente no Grátis, lançamentos/mês, IA)
 """
 
 from datetime import datetime, timedelta, timezone
@@ -113,10 +115,20 @@ class TestTierResolution:
         assert plan_service.get_plan_tier(1) == "free"
         assert plan_service.has_app_access(1) is True  # Grátis ENTRA no app
 
-    def test_trial_ativo_resolve_plus(self, v2, monkeypatch):
+    def test_trial_sem_assinatura_e_free(self, v2, monkeypatch):
+        """Novo modelo: trial é assinatura Stripe. trial_started_at sozinho (sem
+        assinatura vigente) NÃO dá plus — cadastro novo entra Grátis."""
         _patch_user(monkeypatch, _user("free", trial_started=NOW - timedelta(days=5)))
-        assert plan_service.get_plan_tier(1) == "plus"
-        assert plan_service.is_pro(1) is True
+        assert plan_service.get_plan_tier(1) == "free"
+        assert plan_service.is_pro(1) is False
+
+    def test_trial_stripe_resolve_o_plano_escolhido(self, v2, monkeypatch):
+        """Trial via Stripe = assinatura trialing do plano escolhido (expires no
+        futuro). Escolheu Pro → tier pro; escolheu Plus → tier plus."""
+        _patch_user(monkeypatch, _user("pro_max", FUTURE))
+        assert plan_service.get_plan_tier(1) == "pro"
+        _patch_user(monkeypatch, _user("essencial", FUTURE))
+        assert plan_service.get_plan_tier(1) == "essencial"
 
     def test_trial_expirado_cai_pra_free(self, v2, monkeypatch):
         _patch_user(monkeypatch, _user("free", trial_started=NOW - timedelta(days=31)))
@@ -157,10 +169,12 @@ class TestTrialStatus:
 
 class TestLimits:
     def test_escada_historico(self):
-        assert FREE_LIMITS["history_days"] == 90
-        assert ESSENCIAL_LIMITS["history_days"] == 730   # 24 meses
-        assert PLUS_LIMITS["history_days"] is None
-        assert PRO_LIMITS["history_days"] is None
+        # 2026-08-06: Grátis mês corrente · Essencial 90d · Plus 12m · Pro 24m
+        assert FREE_LIMITS["history_current_month_only"] is True
+        assert ESSENCIAL_LIMITS["history_days"] == 90
+        assert ESSENCIAL_LIMITS["history_current_month_only"] is False
+        assert PLUS_LIMITS["history_days"] == 365        # 12 meses
+        assert PRO_LIMITS["history_days"] == 730         # 24 meses
 
     def test_escada_bancos_e_agentes(self):
         # Escada final v3: bancos 0(1 só no trial)/1/2/5 · agentes 0/0/3/6
@@ -179,11 +193,11 @@ class TestLimits:
         assert not tier_at_least("essencial", "plus")
         assert not tier_at_least("free", "essencial")
 
-    def test_trial_capa_of_em_1_banco(self, v2, monkeypatch):
-        _patch_user(monkeypatch, _user("free", trial_started=NOW))
-        limits = plan_service.get_user_limits(1)
-        assert limits["of_banks_max"] == 1          # trial = Plus com OF capado
-        assert limits["history_days"] is None        # resto do Plus intacto
+    def test_trial_de_pro_libera_5_bancos(self, v2, monkeypatch):
+        """Trial agora é o plano escolhido: trial de Pro (pro_max, trialing) tem
+        os 5 bancos cheios — sem cap especial de trial."""
+        _patch_user(monkeypatch, _user("pro_max", FUTURE))
+        assert plan_service.get_user_limits(1)["of_banks_max"] == 5
 
     def test_plus_pago_of_2_bancos(self, v2, monkeypatch):
         _patch_user(monkeypatch, _user("pro", FUTURE))
@@ -193,13 +207,17 @@ class TestLimits:
         _patch_user(monkeypatch, _user("pro_max", FUTURE))
         assert plan_service.get_user_limits(1)["of_banks_max"] == 5
 
-    def test_history_caps(self, v2, monkeypatch):
+    def test_free_so_mes_corrente(self, v2, monkeypatch):
         _patch_user(monkeypatch, _user("free"))
-        assert plan_service.history_months_cap(1) == 3     # 90 dias
+        assert plan_service.history_current_month_only(1) is True
+
+    def test_history_caps(self, v2, monkeypatch):
         _patch_user(monkeypatch, _user("essencial", FUTURE))
+        assert plan_service.history_months_cap(1) == 3     # 90 dias
+        _patch_user(monkeypatch, _user("pro", FUTURE))     # 'pro' legado = Plus
+        assert plan_service.history_months_cap(1) == 12    # 12 meses
+        _patch_user(monkeypatch, _user("pro_max", FUTURE))
         assert plan_service.history_months_cap(1) == 24    # 24 meses
-        _patch_user(monkeypatch, _user("pro", FUTURE))
-        assert plan_service.history_months_cap(1) is None
 
     def test_feature_enabled_por_tier(self, v2, monkeypatch):
         _patch_user(monkeypatch, _user("free"))
@@ -209,13 +227,13 @@ class TestLimits:
 
     def test_launch_cap_free(self, v2, monkeypatch):
         _patch_user(monkeypatch, _user("free"))
-        monkeypatch.setattr("db.plans.count_launches_this_month", lambda uid: 50)
+        monkeypatch.setattr("db.plans.count_launches_this_month", lambda uid: 30)
         with pytest.raises(PlanLimitExceeded):
             plan_service.check_can_create_launch(1)
 
     def test_launch_cap_free_abaixo_do_teto(self, v2, monkeypatch):
         _patch_user(monkeypatch, _user("free"))
-        monkeypatch.setattr("db.plans.count_launches_this_month", lambda uid: 49)
+        monkeypatch.setattr("db.plans.count_launches_this_month", lambda uid: 29)
         plan_service.check_can_create_launch(1)  # não levanta
 
     def test_launch_sem_cap_essencial(self, v2, monkeypatch):
@@ -247,9 +265,13 @@ class TestAgentGates:
         _patch_user(monkeypatch, _user("pro_max", FUTURE))  # Pro novo
         assert plan_service.agent_kind_allowed(1, "detetive") is True
 
-    def test_trial_ativa_como_plus(self, v2, monkeypatch):
-        _patch_user(monkeypatch, _user("free", trial_started=NOW))
+    def test_trial_stripe_ativa_agentes_do_plano(self, v2, monkeypatch):
+        """Trial é o plano escolhido: trial de Plus (assinatura trialing) libera
+        os agentes da Fase A. trial_started_at sozinho (sem assinatura) = free."""
+        _patch_user(monkeypatch, _user("pro", FUTURE))          # trial de Plus
         assert plan_service.agent_kind_allowed(1, "xerife") is True
+        _patch_user(monkeypatch, _user("free", trial_started=NOW))  # sem assinatura
+        assert plan_service.agent_kind_allowed(1, "xerife") is False
 
     def test_v1_off_nao_filtra(self, monkeypatch):
         monkeypatch.setenv("PLANS_V2_ENABLED", "0")  # freio: default agora é LIGADO
