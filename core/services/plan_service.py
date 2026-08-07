@@ -156,15 +156,12 @@ def paywall_enabled() -> bool:
 _AGENTS_BETA_EMAILS_DEFAULT = {"lucaskuramoti06@gmail.com", "hiagojo2016@gmail.com"}
 
 
-def agents_ui_enabled(user_id: int, email: str | None = None) -> bool:
-    """Gate beta da feature de Agentes (mesma mecânica do Open Finance). Liga se:
-    - AGENTS_UI_ENABLED global ligado (lançamento pra todos), OU
-    - o e-mail está no allowlist AGENTS_BETA_EMAILS (default = e-mails de teste), OU
-    - o user_id está em AGENTS_BETA_USER_IDS.
-    Default: SÓ os e-mails de teste veem/usam os agentes. Pra abrir geral, setar
-    AGENTS_UI_ENABLED=1 (aí este gate para de restringir e vale só o gate por tier)."""
-    if (os.getenv("AGENTS_UI_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on"):
-        return True
+def agents_beta_tester(user_id: int, email: str | None = None) -> bool:
+    """True SÓ pros testers explícitos do beta — e-mail no allowlist
+    AGENTS_BETA_EMAILS (default = e-mails de teste) OU id em AGENTS_BETA_USER_IDS.
+    IGNORA o flag global AGENTS_UI_ENABLED de propósito: é o que libera TODOS os
+    agentes (qualquer tier) só pra quem testa, sem afetar o público quando a
+    feature abrir geral."""
     raw = os.getenv("AGENTS_BETA_EMAILS")
     if raw is None:
         beta_emails = _AGENTS_BETA_EMAILS_DEFAULT
@@ -180,6 +177,17 @@ def agents_ui_enabled(user_id: int, email: str | None = None) -> bool:
         return True
     beta_ids = {i.strip() for i in (os.getenv("AGENTS_BETA_USER_IDS") or "").split(",") if i.strip()}
     return str(user_id) in beta_ids
+
+
+def agents_ui_enabled(user_id: int, email: str | None = None) -> bool:
+    """Gate beta da feature de Agentes (mesma mecânica do Open Finance). Liga se:
+    - AGENTS_UI_ENABLED global ligado (lançamento pra todos), OU
+    - o usuário é tester do beta (allowlist de e-mail/id — ver agents_beta_tester).
+    Default: SÓ os e-mails de teste veem/usam os agentes. Pra abrir geral, setar
+    AGENTS_UI_ENABLED=1 (aí este gate para de restringir e vale só o gate por tier)."""
+    if (os.getenv("AGENTS_UI_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    return agents_beta_tester(user_id, email)
 
 
 # Allowlist padrão do beta da lista completa de bancos (modal com busca). Mesma
@@ -291,6 +299,12 @@ def agent_kind_allowed(user_id: int, kind: str) -> bool:
     Usado pelos RUNNERS também: agente ativado no trial para de disparar
     quando o usuário cai pro Grátis."""
     if not plans_v2_enabled():
+        return True
+    # Testers do beta usam QUALQUER agente, independe do tier — pra o plano de
+    # teste (Lucas/Hiago) conseguir ver os agentes Pro (ex.: Detetive) sem
+    # precisar assinar. Não afeta o público: agents_beta_tester ignora o flag
+    # global e só casa com o allowlist explícito.
+    if agents_beta_tester(int(user_id)):
         return True
     from .plan_limits import AGENT_KIND_MIN_TIER
     minimum = AGENT_KIND_MIN_TIER.get(kind, "pro")
