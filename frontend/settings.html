@@ -1154,11 +1154,11 @@ a { color: inherit; text-decoration: none; }
     <aside class="sidebar">
       <div class="sidebar-section">Segurança e acesso</div>
 
-      <button class="sidebar-item" type="button" id="of-sidebar-item" disabled>
+      <button class="sidebar-item" type="button" id="of-sidebar-item" data-section="open-finance" onclick="showSettingsSection('open-finance')">
         <span class="sidebar-icon">🏦</span>
         <span>
-          <span class="sidebar-title">Open Finance <span class="badge-soon" id="of-sidebar-badge">em breve</span></span>
-          <span class="sidebar-sub" id="of-sidebar-sub">Integração em teste</span>
+          <span class="sidebar-title">Open Finance</span>
+          <span class="sidebar-sub" id="of-sidebar-sub">Conecte seus bancos</span>
         </span>
       </button>
 
@@ -1237,50 +1237,13 @@ a { color: inherit; text-decoration: none; }
               <div class="step"        id="step-3"></div>
             </div>
 
-            <!-- Bank list (curta — fallback fora do beta) -->
-            <div class="bank-list" id="bank-list-short">
-              <button class="bank-row active" type="button" data-bank="nubank" onclick="selectBank('nubank')">
-                <span class="bank-logo nubank">NU</span>
-                <span class="bank-info">
-                  <span class="bank-name">Nubank</span>
-                  <span class="bank-meta">Conta corrente, crédito e poupança</span>
-                </span>
-                <span class="bank-check">✓</span>
-              </button>
-
-              <button class="bank-row" type="button" data-bank="itau" onclick="selectBank('itau')">
-                <span class="bank-logo itau">IT</span>
-                <span class="bank-info">
-                  <span class="bank-name">Itaú</span>
-                  <span class="bank-meta">Conta corrente e investimentos</span>
-                </span>
-                <span class="bank-check"></span>
-              </button>
-
-              <button class="bank-row" type="button" data-bank="bradesco" onclick="selectBank('bradesco')">
-                <span class="bank-logo bradesco">BR</span>
-                <span class="bank-info">
-                  <span class="bank-name">Bradesco</span>
-                  <span class="bank-meta">Conta corrente e poupança</span>
-                </span>
-                <span class="bank-check"></span>
-              </button>
-            </div>
-
-            <!-- Lista completa (beta): abre o modal com busca -->
-            <div id="bankpick-open-wrap" style="display:none">
-              <button class="bankpick-open-btn" type="button" onclick="openBankPicker()">
-                <span aria-hidden="true">🔎</span> Ver todos os bancos
-              </button>
-            </div>
-
             <!-- Status message -->
             <div class="connect-status" id="connect-status">
               <div class="spinner"></div>
               <span id="connect-status-text">Simulando autorização...</span>
             </div>
 
-            <button class="btn-connect" type="button" onclick="connectOpenFinance()" id="connect-btn">
+            <button class="btn-connect" type="button" onclick="openBankPicker()" id="connect-btn">
               Conectar Open Finance
             </button>
 
@@ -1297,7 +1260,7 @@ a { color: inherit; text-decoration: none; }
           </div>
         </div>
 
-        <!-- Modal: Ver todos os bancos (beta) -->
+        <!-- Modal: lista de todos os bancos do Open Finance (escolha acontece no site) -->
         <div class="bankpick-overlay" id="bankpick-overlay" onclick="if(event.target===this)closeBankPicker()">
           <div class="bankpick-modal" role="dialog" aria-modal="true" aria-label="Conectar banco">
             <div class="bankpick-head">
@@ -1796,7 +1759,12 @@ window.addEventListener("storage", (event) => {
 });
 async function readApiError(resp) {
   const raw = await resp.text();
-  try { return JSON.parse(raw).detail || raw; } catch { return raw || "Erro inesperado"; }
+  try {
+    const detail = JSON.parse(raw).detail;
+    // detail pode ser string OU objeto estruturado {code, message, ...} (ex.: limite de banco por plano)
+    if (detail && typeof detail === "object") return detail.message || detail.code || raw;
+    return detail || raw;
+  } catch { return raw || "Erro inesperado"; }
 }
 
 function filenameFromDisposition(header, fallback) {
@@ -2408,27 +2376,34 @@ async function requestAccountDeletion() {
 }
 
 /* ── Bank select ─────────────────────────────── */
-let selectedBank = "nubank";
-const OPEN_FINANCE_CONNECTORS = {
-  nubank: 612,
-  itau: 601,
-  bradesco: 603,
-};
-// connectorId efetivo passado pro widget da Pluggy. Vem do mapa curto acima OU do
-// modal "Ver todos os bancos" (beta). null = não pré-seleciona (o widget lista tudo).
-let selectedConnectorId = OPEN_FINANCE_CONNECTORS[selectedBank];
-let BANK_LIST_UI_ENABLED = false;
+// A escolha do banco acontece dentro do widget da Pluggy. Não pré-selecionamos
+// nada aqui (null = o widget lista todos os bancos disponíveis).
+let selectedConnectorId = null;
 
-function selectBank(bank) {
-  selectedBank = bank;
-  selectedConnectorId = OPEN_FINANCE_CONNECTORS[bank] || null;
-  document.querySelectorAll("#bank-list-short .bank-row").forEach(r => {
-    const on = r.dataset.bank === bank;
-    r.classList.toggle("active", on);
-    const chk = r.querySelector(".bank-check");
-    if (chk) chk.textContent = on ? "✓" : "";
-  });
-  setStep(1);
+/* ── Estado do plano (Open Finance) ──────────── */
+// Teto de bancos do plano, vindo de /auth/me. 0 = Free/sem OF (pós-trial): o botão
+// vira CTA de upgrade e não abre o widget. null = ainda não carregou OU ilimitado.
+let OF_BANKS_MAX = null;
+let OF_HAS_CONNECTION = false; // há alguma conexão (mesmo pausada)? refina a copy do CTA
+
+// Reconfigura o botão "Conectar Open Finance" conforme o plano. No Free (limite 0),
+// não faz sentido abrir a Pluggy (o /pluggy-item recusaria com 402): troca por um
+// CTA de upgrade que leva pra /precos.
+function applyOfConnectButton() {
+  const btn = document.getElementById("connect-btn");
+  if (!btn) return;
+  if (OF_BANKS_MAX === 0) {
+    btn.textContent = OF_HAS_CONNECTION ? "Reative seu banco" : "Assine para conectar um banco";
+    btn.onclick = () => { window.location.href = "/precos"; };
+    btn.disabled = false;
+    btn.classList.add("btn-connect--upgrade");
+  } else {
+    btn.textContent = "Conectar Open Finance";
+    // A escolha do banco acontece no site: abre a modal com a lista de todos os
+    // bancos do Open Finance; ao confirmar, o widget da Pluggy abre já no banco escolhido.
+    btn.onclick = () => openBankPicker();
+    btn.classList.remove("btn-connect--upgrade");
+  }
 }
 
 /* ── Step bar ────────────────────────────────── */
@@ -2439,12 +2414,12 @@ function setStep(n) {
   }
 }
 
-/* ── Modal "Ver todos os bancos" (beta) ──────── */
+/* ── Modal "Conectar banco" (lista completa da Pluggy) ──────── */
 let _bankConnectors = null;   // cache da lista da Pluggy
 let _bankPickSelected = null; // {id, name}
 
 function _stripAccent(s) {
-  return (s||"").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  return (s||"").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
 function _bankInitials(name) {
   const small = new Set(["de","do","da","dos","das","e","-"]);
@@ -2458,7 +2433,9 @@ function _bankColor(hex) {
 }
 
 async function openBankPicker() {
-  if (!BANK_LIST_UI_ENABLED) return;
+  // Free (limite 0): não abre o picker — leva pro upgrade (defesa; applyOfConnectButton
+  // já roteia o botão pra /precos nesse caso).
+  if (OF_BANKS_MAX === 0) { window.location.href = "/precos"; return; }
   const ov = document.getElementById("bankpick-overlay");
   ov.classList.add("open");
   const q = document.getElementById("bankpick-search");
@@ -2489,7 +2466,7 @@ function renderBankPicker(filter) {
   const items = (_bankConnectors||[]).filter(b => _stripAccent(b.name).includes(f));
   const el = document.getElementById("bankpick-list");
   if (!items.length) {
-    el.innerHTML = `<div class="bankpick-empty">Nenhum banco encontrado para “${esc(filter)}”.</div>`;
+    el.innerHTML = `<div class="bankpick-empty">Nenhum banco encontrado para "${esc(filter)}".</div>`;
     return;
   }
   let html = "", letter = "";
@@ -2535,7 +2512,6 @@ function _syncBankPickFoot() {
 function confirmBankPicker() {
   if (!_bankPickSelected) return;
   selectedConnectorId = _bankPickSelected.id;
-  selectedBank = _stripAccent(_bankPickSelected.name).replace(/\s+/g,"-") || "custom";
   closeBankPicker();
   connectOpenFinance();
 }
@@ -2578,6 +2554,8 @@ function bInitials(name) {
 
 /* ── Render ──────────────────────────────────── */
 function renderConnections(list) {
+  OF_HAS_CONNECTION = Array.isArray(list) && list.length > 0;
+  applyOfConnectButton(); // refina a copy do CTA de upgrade (reative vs assine)
   const el = document.getElementById("connections-list");
   if (!list.length) {
     el.innerHTML = `<div class="empty-state"><div class="empty-icon">🔌</div><div class="empty-title">Nenhum banco conectado</div><div class="empty-sub">Escolha uma instituição ao lado para começar.</div></div>`;
@@ -2840,8 +2818,15 @@ async function openPluggyConnect() {
     language: "pt",
     theme: "dark",
     onSuccess: async (itemData) => {
-      await savePluggyItem(itemData);
-      showToast("Banco conectado com sucesso!", "ok");
+      try {
+        await savePluggyItem(itemData);
+        showToast("Banco conectado com sucesso!", "ok");
+      } catch (err) {
+        // Ex.: limite de bancos do plano (402 OF_BANK_LIMIT) — o banco foi autorizado na
+        // Pluggy mas o plano não comporta mais conexões. Mostra o porquê pro usuário.
+        showToast(String(err && err.message ? err.message : err) || "Não foi possível salvar a conexão.", "error");
+        setStep(1);
+      }
     },
     onError: (error) => {
       console.error("Pluggy Connect error", error);
@@ -2859,52 +2844,10 @@ async function openPluggyConnect() {
   else throw new Error("Widget da Pluggy carregou em um formato inesperado.");
 }
 
-async function connectMock() {
-  if (!USER_ID) { showToast("Sessão inválida — faça login novamente", "error"); return; }
-  const btn = document.getElementById("connect-btn");
-  const statusEl = document.getElementById("connect-status");
-  const statusText = document.getElementById("connect-status-text");
-  btn.disabled = true;
-  statusEl.classList.add("show");
-  setStep(2);
-
-  const msgs = [
-    "Iniciando autorização simulada...",
-    "Consultando a instituição...",
-    "Importando contas e transações...",
-  ];
-  for (const m of msgs) { statusText.textContent = m; await new Promise(r => setTimeout(r, 450)); }
-
-  try {
-    const resp = await fetch(`${API}/open-finance/${USER_ID}/mock-connect`, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: authHeaders({ "Content-Type":"application/json" }),
-      body: JSON.stringify({ institution: selectedBank }),
-    });
-    if (!resp.ok) throw new Error(await readApiError(resp));
-    const data = await resp.json();
-    const c = data.connections  || [];
-    const a = data.accounts     || [];
-    const t = data.transactions || [];
-    updateStats(c, a, t);
-    renderConnections(c);
-    renderAccounts(a);
-    renderTransactions(t);
-    setStep(3);
-    statusEl.classList.remove("show");
-    showToast("Banco conectado com sucesso!", "ok");
-  } catch (err) {
-    setStep(1);
-    statusEl.classList.remove("show");
-    showToast(err.message || "Erro ao conectar", "error");
-  } finally {
-    btn.disabled = false;
-  }
-}
-
 async function connectOpenFinance() {
   if (!USER_ID) { showToast("Sessão inválida — faça login novamente", "error"); return; }
+  // Free (limite 0): não abre o widget — o /pluggy-item recusaria. Leva pro upgrade.
+  if (OF_BANKS_MAX === 0) { window.location.href = "/precos"; return; }
   const btn = document.getElementById("connect-btn");
   const statusEl = document.getElementById("connect-status");
   const statusText = document.getElementById("connect-status-text");
@@ -3152,15 +3095,6 @@ async function initSettings() {
     redirectHome();
     return;
   }
-  // Beta: modal "Ver todos os bancos" (lista completa da Pluggy). Fora do allowlist
-  // (bank_list_ui=false) mantém a lista curta de sempre.
-  if (session && session.bank_list_ui) {
-    BANK_LIST_UI_ENABLED = true;
-    const wrap = document.getElementById("bankpick-open-wrap");
-    const short = document.getElementById("bank-list-short");
-    if (wrap) wrap.style.display = "";
-    if (short) short.style.display = "none";
-  }
   // Paywall: sem assinatura ativa → vai pro paywall (settings é gated).
   let me = null;
   try {
@@ -3188,6 +3122,10 @@ async function initSettings() {
       if (sub) sub.textContent = "Conecte seus bancos";
     }
   }
+
+  // Open Finance: teto de bancos do plano. 0 = Free/sem OF → botão vira CTA de upgrade.
+  OF_BANKS_MAX = (me && me.of_banks_max !== undefined) ? me.of_banks_max : null;
+  applyOfConnectButton();
 
   document.getElementById("dashboard-link").href = "/app";
   const allowedViews = ["security", "notifications", "data", "legal"];

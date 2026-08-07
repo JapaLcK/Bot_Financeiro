@@ -27,7 +27,7 @@ from core.services.pluggy import (
     delete_pluggy_item,
     list_pluggy_connectors,
 )
-from core.services.plan_service import bank_list_ui_enabled, is_pro
+from core.services.plan_service import is_pro
 from core.services.pluggy_sync import (
     refresh_and_sync_pluggy_user,
     sync_pluggy_item,
@@ -189,13 +189,11 @@ _CONNECTABLE_TYPES = {"PERSONAL_BANK"}
 
 @router.get("/open-finance/{user_id}/connectors")
 async def open_finance_connectors_route(request: Request, user_id: int):
-    """Catálogo completo de bancos da Pluggy pro modal 'Ver todos os bancos'.
+    """Catálogo completo de bancos da Pluggy pro modal "Conectar banco".
 
-    Gateado no beta (bank_list_ui_enabled): fora do allowlist devolve 403 e o front
-    mantém a lista curta de sempre. Retorna dicts enxutos (id/name/type/color/inv)."""
+    Fluxo padrão: a escolha do banco acontece no site (modal com busca) e o widget da
+    Pluggy abre já no banco escolhido. Retorna dicts enxutos (id/name/type/color/inv)."""
     shared.authorize_dashboard_access(request, user_id)
-    if not await asyncio.to_thread(bank_list_ui_enabled, user_id):
-        raise HTTPException(status_code=403, detail="Recurso em beta.")
     try:
         raw = await asyncio.to_thread(
             list_pluggy_connectors, None, include_sandbox=PLUGGY_INCLUDE_SANDBOX

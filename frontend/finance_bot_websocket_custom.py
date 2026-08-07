@@ -2598,19 +2598,12 @@ async def auth_new_link_code(request: Request, user_id: int = Depends(_get_curre
 
 
 def _open_finance_ui_enabled(user_id: int, email: str | None) -> bool:
-    """Gate da UI de Open Finance. Liga se:
-    - OF_UI_ENABLED global ligado (lançamento pra todos), OU
-    - o e-mail está em OF_UI_BETA_EMAILS (allowlist beta, case-insensitive), OU
-    - o user_id está em OF_UI_BETA_USER_IDS.
-    Default: desligado (nada muda pros usuários).
+    """UI de Open Finance liberada pra todos (novo front hardcodado).
+
+    Antes era um gate por env (OF_UI_ENABLED / OF_UI_BETA_EMAILS /
+    OF_UI_BETA_USER_IDS); o rollout terminou e agora está sempre ligado.
     """
-    if (os.getenv("OF_UI_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on"):
-        return True
-    beta_emails = {e.strip().lower() for e in (os.getenv("OF_UI_BETA_EMAILS") or "").split(",") if e.strip()}
-    if email and str(email).strip().lower() in beta_emails:
-        return True
-    beta_ids = {i.strip() for i in (os.getenv("OF_UI_BETA_USER_IDS") or "").split(",") if i.strip()}
-    return str(user_id) in beta_ids
+    return True
 
 
 @app.get("/auth/me")
@@ -2629,13 +2622,16 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     mfa = await asyncio.to_thread(get_mfa_status, user_id)
     from core.services.plan_service import (
         has_app_access, paywall_enabled, plans_v2_enabled,
-        get_plan_tier, get_trial_status, history_earliest_date,
+        get_plan_tier, get_trial_status, history_earliest_date, get_user_limits,
     )
     of_ui_enabled = _open_finance_ui_enabled(user_id, user_dict.get("email"))
     from core.services.plan_service import agents_ui_enabled as _agents_ui_enabled
     agents_ui = _agents_ui_enabled(user_id, user_dict.get("email"))
     # Planos v2: tier efetivo da escada + estado do trial (30d via Stripe).
     plan_tier = await asyncio.to_thread(get_plan_tier, user_id)
+    # Teto de bancos do plano (0 = Free/sem OF, None = ilimitado). O front usa pra,
+    # no Free pós-trial, trocar "Conectar" por "Reative seu banco" sem abrir o widget.
+    of_banks_max = (await asyncio.to_thread(get_user_limits, user_id)).get("of_banks_max")
     trial = await asyncio.to_thread(get_trial_status, user_id, user_dict)
     earliest_history = await asyncio.to_thread(history_earliest_date, user_id)
     # Não devolve pro cliente os blobs cifrados (redundantes — já há o claro
@@ -2652,6 +2648,7 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         "paywall_enabled": paywall_enabled(),
         "plans_v2_enabled": plans_v2_enabled(),
         "plan_tier": plan_tier,
+        "of_banks_max": of_banks_max,
         "trial": {"active": trial["active"], "days_left": trial["days_left"]},
         "history_earliest_date": earliest_history.isoformat() if earliest_history else None,
         "of_ui_enabled": of_ui_enabled,
