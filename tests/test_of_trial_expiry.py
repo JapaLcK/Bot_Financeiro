@@ -93,7 +93,7 @@ def sweep_env(monkeypatch, user_id):
 class TestSweep:
     def test_flag_off_tick_inerte(self, sweep_env, monkeypatch):
         _, connection, deleted = sweep_env
-        monkeypatch.delenv("PLANS_V2_ENABLED", raising=False)
+        monkeypatch.setenv("PLANS_V2_ENABLED", "0")  # freio: default agora é LIGADO
 
         res = ofte.pause_expired_trial_connections()
 

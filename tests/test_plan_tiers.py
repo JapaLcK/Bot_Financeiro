@@ -40,33 +40,33 @@ PAST = NOW - timedelta(days=10)
 
 class TestLegacyMode:
     def test_is_pro_active(self, monkeypatch):
-        monkeypatch.delenv("PLANS_V2_ENABLED", raising=False)
+        monkeypatch.setenv("PLANS_V2_ENABLED", "0")  # freio: default agora é LIGADO
         _patch_user(monkeypatch, _user("pro", FUTURE))
         assert plan_service.is_pro(1) is True
 
     def test_is_pro_lifetime_grandfathered(self, monkeypatch):
-        monkeypatch.delenv("PLANS_V2_ENABLED", raising=False)
+        monkeypatch.setenv("PLANS_V2_ENABLED", "0")  # freio: default agora é LIGADO
         _patch_user(monkeypatch, _user("pro", None))
         assert plan_service.is_pro(1) is True
 
     def test_is_pro_expired(self, monkeypatch):
-        monkeypatch.delenv("PLANS_V2_ENABLED", raising=False)
+        monkeypatch.setenv("PLANS_V2_ENABLED", "0")  # freio: default agora é LIGADO
         _patch_user(monkeypatch, _user("pro", PAST))
         assert plan_service.is_pro(1) is False
 
     def test_is_pro_free(self, monkeypatch):
-        monkeypatch.delenv("PLANS_V2_ENABLED", raising=False)
+        monkeypatch.setenv("PLANS_V2_ENABLED", "0")  # freio: default agora é LIGADO
         _patch_user(monkeypatch, _user("free"))
         assert plan_service.is_pro(1) is False
 
     def test_free_nao_ganha_trial_com_v2_off(self, monkeypatch):
         """Trial ancorado NÃO vaza pro mundo v1: só vale com o flag ligado."""
-        monkeypatch.delenv("PLANS_V2_ENABLED", raising=False)
+        monkeypatch.setenv("PLANS_V2_ENABLED", "0")  # freio: default agora é LIGADO
         _patch_user(monkeypatch, _user("free", trial_started=NOW))
         assert plan_service.is_pro(1) is False
 
     def test_paywall_block(self, monkeypatch):
-        monkeypatch.delenv("PLANS_V2_ENABLED", raising=False)
+        monkeypatch.setenv("PLANS_V2_ENABLED", "0")  # freio: default agora é LIGADO
         monkeypatch.setenv("PAYWALL_ENABLED", "true")
         _patch_user(monkeypatch, _user("free"))
         assert plan_service.has_app_access(1) is False
@@ -223,7 +223,7 @@ class TestLimits:
         plan_service.check_can_create_launch(1)  # ilimitado, nem consulta o count
 
     def test_launch_cap_noop_com_v2_off(self, monkeypatch):
-        monkeypatch.delenv("PLANS_V2_ENABLED", raising=False)
+        monkeypatch.setenv("PLANS_V2_ENABLED", "0")  # freio: default agora é LIGADO
         _patch_user(monkeypatch, _user("free"))
         plan_service.check_can_create_launch(1)  # v1 não tinha esse limite
 
@@ -252,7 +252,7 @@ class TestAgentGates:
         assert plan_service.agent_kind_allowed(1, "xerife") is True
 
     def test_v1_off_nao_filtra(self, monkeypatch):
-        monkeypatch.delenv("PLANS_V2_ENABLED", raising=False)
+        monkeypatch.setenv("PLANS_V2_ENABLED", "0")  # freio: default agora é LIGADO
         _patch_user(monkeypatch, _user("free"))
         assert plan_service.agent_kind_allowed(1, "xerife") is True  # gate legado decide na rota
 
@@ -282,7 +282,7 @@ class TestAIQuota:
         assert plan_service.ai_chat_allowed(1) is False
 
     def test_v1_so_pro_fala(self, monkeypatch):
-        monkeypatch.delenv("PLANS_V2_ENABLED", raising=False)
+        monkeypatch.setenv("PLANS_V2_ENABLED", "0")  # freio: default agora é LIGADO
         _patch_user(monkeypatch, _user("free"))
         assert plan_service.ai_chat_allowed(1) is False
         _patch_user(monkeypatch, _user("pro", FUTURE))

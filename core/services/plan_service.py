@@ -45,9 +45,14 @@ TRIAL_DAYS_DEFAULT = 30
 
 
 def plans_v2_enabled() -> bool:
-    """Escada de 4 tiers + trial sem cartão. Default: DESLIGADO (v1 intacta).
-    Liga setando PLANS_V2_ENABLED=true no ambiente — sem redeploy."""
-    return (os.getenv("PLANS_V2_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
+    """Escada de tiers + trial sem cartão. LANÇADA 2026-08-06: default LIGADO
+    (decisão do Lucas — sem flag de rollout; a /precos é hardcoded na escada).
+    A env virou só FREIO DE EMERGÊNCIA: PLANS_V2_ENABLED=0/false desliga o
+    comportamento v2 do backend sem redeploy se algo der errado."""
+    raw = (os.getenv("PLANS_V2_ENABLED") or "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return True
 
 
 def trial_days_total() -> int:

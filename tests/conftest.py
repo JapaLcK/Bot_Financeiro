@@ -13,6 +13,11 @@ os.environ.setdefault("PII_ENCRYPTION_KEY", _Fernet.generate_key().decode())
 os.environ.setdefault("PII_HASH_PEPPER", "test-pepper-for-pytest-only-must-be-32-chars-long")
 # Não polui pii_access_log durante testes (cada decrypt registra uma row).
 os.environ.setdefault("PII_AUDIT_DISABLED", "1")
+# Escada de planos v2 lançada com default LIGADO (2026-08-06). A suíte foi
+# escrita no mundo v1 (gates binários Free×Pro, mocks de is_pro), então os
+# testes rodam com o freio puxado por padrão — os testes da escada
+# (test_plan_tiers, test_of_trial_expiry, etc.) ligam com setenv("...", "1").
+os.environ.setdefault("PLANS_V2_ENABLED", "0")
 
 from db import init_db, ensure_user, get_conn
 

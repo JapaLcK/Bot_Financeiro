@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Planos — PigBank</title>
-<meta name="description" content="PigBank+ por R$ 19,90/mês ou R$ 199/ano. 30 dias grátis pra testar, cancele quando quiser." />
+<meta name="description" content="Planos PigBank: Grátis, Essencial R$ 9,90, Plus R$ 19,90 e Pro R$ 49,90. 30 dias de Plus grátis pra testar, sem cartão." />
 <link rel="canonical" href="https://pigbankai.com/precos" />
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=2" />
@@ -42,48 +42,17 @@
       <div class="section-head">
         <img src="/brand/mascot.webp" alt="" style="width:132px;height:auto;display:block;margin:0 auto 18px;filter:drop-shadow(0 10px 26px rgba(0,0,0,.5))" />
         <div class="eyebrow" id="precos-eyebrow">Planos</div>
-        <h2 id="precos-title">Escolha seu <span class="grad">PigBank+</span></h2>
-        <p id="precos-sub">30 dias grátis pra testar. Cancele quando quiser, sem letras miúdas.</p>
+        <h2 id="precos-title">Escolha seu <span class="grad">PigBank</span></h2>
+        <p id="precos-sub">30 dias de Plus grátis pra testar, sem cartão. Depois, o plano do seu tamanho.</p>
       </div>
 
-      <div class="plans" id="plans-v1">
-        <article class="plan">
-          <h3>Mensal</h3>
-          <div class="plan-sub">Pra começar sem compromisso</div>
-          <div class="price">R$ 19,90 <span>/ mês</span></div>
-          <ul>
-            <li><span class="tick">✓</span> Caixinhas, metas e cartões ilimitados</li>
-            <li><span class="tick">✓</span> Categorização automática por IA</li>
-            <li><span class="tick">✓</span> Dashboard em tempo real</li>
-            <li><span class="tick">✓</span> Histórico completo + exportar CSV/PDF</li>
-            <li><span class="tick">✓</span> Piggy IA — converse sobre suas finanças</li>
-          </ul>
-          <button class="btn btn-outline btn-block" type="button" data-interval="monthly" onclick="startCheckout('monthly', this)">Começar trial</button>
-        </article>
-
-        <article class="plan featured">
-          <span class="plan-badge">Economize 17%</span>
-          <h3>Anual</h3>
-          <div class="plan-sub">Equivale a R$ 16,58/mês</div>
-          <div class="price">R$ 199 <span>/ ano</span></div>
-          <ul>
-            <li><span class="tick">✓</span> Tudo do plano mensal</li>
-            <li><span class="tick">✓</span> 2 meses de graça no ano</li>
-            <li><span class="tick">✓</span> Cobrança única, sem surpresa</li>
-            <li><span class="tick">✓</span> Suporte prioritário</li>
-            <li><span class="tick">✓</span> Ideal pra quem já decidiu</li>
-          </ul>
-          <button class="btn btn-primary btn-block" type="button" data-interval="annual" onclick="startCheckout('annual', this)">Começar trial</button>
-        </article>
-      </div>
-
-      <!-- Escada v2 FINAL (Grátis/Essencial/Plus/Pro/Premium) — escondida até o
-           backend ligar PLANS_V2_ENABLED (ver /billing/plans-config). Sem
-           classes CSS novas de propósito: reusa .plan/.price/.plan-badge +
-           estilos inline. Toggle mensal/anual troca preços e o interval. -->
+      <!-- Escada de planos (Grátis/Essencial/Plus/Pro/Premium) — conteúdo ÚNICO
+           e hardcoded da página (lançada 2026-08-06, sem flag: nada de flash
+           de conteúdo antigo). Sem classes CSS novas de propósito: reusa
+           .plan/.price/.plan-badge + estilos inline. -->
       <!-- width breakout: a escada de 5 cards precisa de mais que os 1200px do
            .wrap pra não ficar espremida; centraliza na página via translate. -->
-      <div id="plans-v2-wrap" style="display:none;width:min(1560px,calc(100vw - 48px));margin-left:50%;transform:translateX(-50%)">
+      <div id="plans-v2-wrap" style="width:min(1560px,calc(100vw - 48px));margin-left:50%;transform:translateX(-50%)">
         <div style="display:flex;justify-content:center;gap:0;margin:0 0 26px">
           <button type="button" id="cycle-monthly" class="btn btn-primary" style="border-radius:12px 0 0 12px" onclick="setCycle('monthly')">Mensal</button>
           <button type="button" id="cycle-annual" class="btn btn-outline" style="border-radius:0 12px 12px 0" onclick="setCycle('annual')">Anual <span style="background:rgba(198,241,26,.16);color:#C6F11A;font-weight:700;padding:2px 9px;border-radius:999px;font-size:.82em">-17%</span></button>
@@ -165,9 +134,7 @@
 
         <p class="plans-note">🐷 <strong>Preço de fundador:</strong> assinando agora, seu valor fica congelado pra sempre — enquanto a assinatura estiver ativa, ele nunca sobe.</p>
       </div>
-
-      <p class="plans-note" id="plans-note-v1">🎉 30 dias grátis com cartão; a primeira cobrança só acontece depois do trial. Cancele quando quiser pelo dashboard antes do fim do trial, sem ser cobrado. Pagamentos processados pela Stripe — a PigBank nunca vê os dados do seu cartão.</p>
-      <p class="plans-note" id="plans-note-v2" style="display:none">🎉 Todo cadastro começa com <strong>30 dias de Plus grátis, sem cartão</strong>. Assine durante o teste e não pague nada até ele acabar. Pagamentos processados pela Stripe — a PigBank nunca vê os dados do seu cartão.</p>
+      <p class="plans-note" id="plans-note-v2">🎉 Todo cadastro começa com <strong>30 dias de Plus grátis, sem cartão</strong>. Assine durante o teste e não pague nada até ele acabar. Pagamentos processados pela Stripe — a PigBank nunca vê os dados do seu cartão.</p>
     </section>
 
   </div>
@@ -217,21 +184,9 @@ function getCsrfToken() {
   return m ? decodeURIComponent(m[1]) : "";
 }
 
-// Modo paywall (?ativar=1): usuário recém-cadastrado, ainda sem assinatura.
-(function applyPaywallMode(){
-  const p = new URLSearchParams(location.search);
-  if (p.get("ativar") !== "1") return;
-  const e = document.getElementById("precos-eyebrow");
-  const t = document.getElementById("precos-title");
-  const s = document.getElementById("precos-sub");
-  if (e) e.textContent = "Falta um passo";
-  if (t) t.innerHTML = 'Ative o <span class="grad">PigBank+</span> pra começar';
-  if (s) s.textContent = "Sua conta está pronta. Escolha um plano (30 dias grátis, cancela quando quiser) pra liberar o app.";
-})();
-
-// Escada v2: mostra os cards Grátis/Essencial/Plus/Pro/Premium quando o
-// backend liga PLANS_V2_ENABLED. Sem o flag (ou com erro), a página fica como
-// sempre foi.
+// Escada de planos hardcoded (lançada 2026-08-06): a página já carrega com o
+// conteúdo final — o fetch de config abaixo só desabilita botão sem price e
+// carrega o estado da assinatura (troca de plano). Sem flash de conteúdo.
 let currentCycle = "monthly";
 
 function setCycle(cycle) {
@@ -392,33 +347,21 @@ async function cancelChange(btn) {
   }
 }
 
-(async function loadPlansMode(){
+(async function loadPlansState(){
   try {
     const resp = await fetch("/billing/plans-config", { credentials: "same-origin" });
-    if (!resp.ok) return;
-    const cfg = await resp.json();
-    if (!cfg.plans_v2_enabled) return;
-    const v1 = document.getElementById("plans-v1");
-    const v2 = document.getElementById("plans-v2-wrap");
-    const n1 = document.getElementById("plans-note-v1");
-    const n2 = document.getElementById("plans-note-v2");
-    if (v1) v1.style.display = "none";
-    if (v2) v2.style.display = "";
-    if (n1) n1.style.display = "none";
-    if (n2) n2.style.display = "";
-    const t = document.getElementById("precos-title");
-    const s = document.getElementById("precos-sub");
-    if (t) t.innerHTML = 'Escolha seu <span class="grad">PigBank</span>';
-    if (s) s.textContent = "30 dias de Plus grátis pra testar, sem cartão. Depois, o plano do seu tamanho.";
-    // Plano sem price configurado no Stripe → botão vira "Indisponível" (não
-    // deixa o usuário clicar pra tomar um erro).
-    if (!cfg.essencial_available) {
-      const b = document.querySelector('[data-plan-btn="essencial"]');
-      if (b) { b.disabled = true; b.textContent = "Indisponível"; b.dataset.unavailable = "1"; }
-    }
-    if (!cfg.pro_available) {
-      const b = document.querySelector('[data-plan-btn="pro"]');
-      if (b) { b.disabled = true; b.textContent = "Indisponível"; b.dataset.unavailable = "1"; }
+    if (resp.ok) {
+      const cfg = await resp.json();
+      // Plano sem price configurado no Stripe → botão vira "Indisponível" (não
+      // deixa o usuário clicar pra tomar um erro).
+      if (!cfg.essencial_available) {
+        const b = document.querySelector('[data-plan-btn="essencial"]');
+        if (b) { b.disabled = true; b.textContent = "Indisponível"; b.dataset.unavailable = "1"; }
+      }
+      if (!cfg.pro_available) {
+        const b = document.querySelector('[data-plan-btn="pro"]');
+        if (b) { b.disabled = true; b.textContent = "Indisponível"; b.dataset.unavailable = "1"; }
+      }
     }
     // Assinante logado: botões viram "Seu plano atual / Trocar / Agendado".
     await loadSubscription();
