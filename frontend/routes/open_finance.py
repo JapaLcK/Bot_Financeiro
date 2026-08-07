@@ -215,6 +215,7 @@ async def open_finance_connectors_route(request: Request, user_id: int):
             "name": (c.get("name") or "").strip(),
             "type": c.get("type"),
             "color": (c.get("primaryColor") or "").lstrip("#"),
+            "logo": c.get("imageUrl") or "",
             "inv": "INVESTMENTS" in products,
         })
     banks.sort(key=lambda b: b["name"].lower())

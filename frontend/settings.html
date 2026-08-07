@@ -2412,8 +2412,12 @@ function renderBankPicker(filter) {
     if (L !== letter) { letter = L; html += `<div class="bankpick-alpha">${esc(L)}</div>`; }
     const sel = _bankPickSelected && _bankPickSelected.id === b.id ? " active" : "";
     const meta = b.inv ? "Conta, cartão · caixinha/investimentos" : "Conta corrente e cartão";
+    const ini = esc(_bankInitials(b.name));
+    const logo = b.logo
+      ? `<img src="${esc(b.logo)}" alt="" loading="lazy" onerror="this.remove()">`
+      : "";
     html += `<button type="button" class="bank-row bankpick-row${sel}" onclick="pickBank(${Number(b.id)}, this)" data-name="${esc(b.name)}">
-      <span class="bank-logo" style="background:${_bankColor(b.color)}">${esc(_bankInitials(b.name))}</span>
+      <span class="bank-logo bankpick-logo" style="color:${_bankColor(b.color)}">${ini}${logo}</span>
       <span class="bank-info"><span class="bank-name">${esc(b.name)}</span><span class="bank-meta">${meta}</span></span>
       <span class="bank-check">${sel ? "✓" : ""}</span>
     </button>`;
@@ -3096,6 +3100,11 @@ initSettings();
 }
 .bankpick-row { width: 100%; margin-bottom: 4px; text-align: left; }
 .bankpick-row.active { border-color: var(--accent); background: var(--accent-soft); }
+.bankpick-logo { position: relative; overflow: hidden; background: #fff; }
+.bankpick-logo img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: contain; padding: 5px; background: #fff; border-radius: inherit;
+}
 .bankpick-empty { padding: 34px 18px; text-align: center; color: var(--faint); font-size: .88rem; }
 .bankpick-foot {
   padding: 14px 18px; border-top: 1px solid var(--border);
