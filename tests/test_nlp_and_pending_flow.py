@@ -325,7 +325,7 @@ def test_free_user_segundo_cartao_recebe_mensagem_amigavel(user_id):
     route(classify("dia 5"), IncomingMessage(platform="discord", user_id=user_id, text="dia 5"))
     # Esta é a chamada que dispara create_card → PlanLimitExceeded
     response = route(classify("dia 10"), IncomingMessage(platform="discord", user_id=user_id, text="dia 10"))
-    assert "PigBank+" in response
+    assert "plano pago" in response
     assert "/precos" in response or "upgrade" in response.lower()
 
 
@@ -334,7 +334,7 @@ def test_free_user_segunda_caixinha_recebe_mensagem_amigavel(user_id):
     create_pocket(user_id, "viagem")
     msg = IncomingMessage(platform="discord", user_id=user_id, text="criar caixinha presente")
     response = route(classify(msg.text), msg)
-    assert "PigBank+" in response
+    assert "plano pago" in response
     assert "/precos" in response or "upgrade" in response.lower()
 
 
