@@ -1550,9 +1550,14 @@ def init_db():
         create table if not exists plan_trials (
           phone_hash text primary key,
           user_id bigint,
-          started_at timestamptz not null default now()
+          started_at timestamptz not null default now(),
+          model_version smallint not null default 2
         )
         """,
+        # Registros anteriores ao trial via Stripe recebem versão 1. Novos
+        # claims gravam versão 2 explicitamente; o script one-time remove só v1.
+        """alter table plan_trials add column if not exists model_version smallint not null default 1""",
+        """alter table plan_trials alter column model_version set default 2""",
 
         # ── Agentes do Piggy (prateleira de jobs proativos) ──────────────────
         # Um agente por kind por usuário (custom multiplica no futuro via

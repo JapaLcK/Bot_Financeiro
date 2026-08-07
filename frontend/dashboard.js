@@ -171,6 +171,7 @@ let filterDebounceTimer = null;
 
 const NOW = new Date();
 let viewYear = NOW.getFullYear(), viewMonth = NOW.getMonth() + 1;
+let historyEarliestDate = null;
 
 const PT_MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
                    "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -6194,12 +6195,23 @@ function updateMonthLabel() {
     PT_MONTHS[viewMonth - 1] + " " + viewYear;
   const isCurrent = viewYear === NOW.getFullYear() && viewMonth === NOW.getMonth() + 1;
   document.getElementById("btn-next").disabled = isCurrent;
+  const earliestMonth = historyEarliestDate
+    ? Number(historyEarliestDate.slice(0, 4)) * 12 + Number(historyEarliestDate.slice(5, 7))
+    : null;
+  const viewedMonth = viewYear * 12 + viewMonth;
+  document.getElementById("btn-prev").disabled = earliestMonth !== null && viewedMonth <= earliestMonth;
 }
 
 function changeMonth(d) {
-  viewMonth += d;
-  if (viewMonth > 12) { viewMonth = 1; viewYear++; }
-  if (viewMonth < 1)  { viewMonth = 12; viewYear--; }
+  const target = new Date(viewYear, viewMonth - 1 + d, 1);
+  const targetYear = target.getFullYear();
+  const targetMonth = target.getMonth() + 1;
+  if (historyEarliestDate) {
+    const earliestMonth = Number(historyEarliestDate.slice(0, 4)) * 12 + Number(historyEarliestDate.slice(5, 7));
+    if (targetYear * 12 + targetMonth < earliestMonth) return;
+  }
+  viewYear = targetYear;
+  viewMonth = targetMonth;
 
   launchesPage = 1;
   updateMonthLabel();
@@ -9113,6 +9125,8 @@ function _showAccessError(title, msg) {
     const meResp = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
     if (meResp.ok) {
       const me = await meResp.json();
+      historyEarliestDate = me?.history_earliest_date || null;
+      updateMonthLabel();
       // Beta dos Agentes: fora do allowlist, a nav some (a API também dá 404).
       if (me && me.agents_ui_enabled === false) {
         document.querySelectorAll('[data-nav="agentes"]').forEach(el => { el.style.display = "none"; });

@@ -25,6 +25,9 @@ def patches(monkeypatch):
         "pending_raises": False,
         "auth_user": {"plan": "free", "last_payment_status": None, "plan_expires_at": None},
         "dashboard_link": "https://pigbankai.com/d/TOKEN?next=/precos",
+        "plans_v2": False,
+        "trial_eligible": True,
+        "trial_eligibility_raises": False,
     }
 
     def fake_is_pro(user_id):
@@ -44,11 +47,20 @@ def patches(monkeypatch):
     import sys, types
     fake_plan_service = types.ModuleType("core.services.plan_service")
     fake_plan_service.is_pro = fake_is_pro
+    fake_plan_service.plans_v2_enabled = lambda: state["plans_v2"]
     monkeypatch.setitem(sys.modules, "core.services.plan_service", fake_plan_service)
 
     import db
     monkeypatch.setattr(db, "ai_get_pending_action", fake_get_pending, raising=False)
     monkeypatch.setattr(db, "get_auth_user", fake_get_auth, raising=False)
+    import db.plans
+
+    def fake_trial_eligible(user_id):
+        if state["trial_eligibility_raises"]:
+            raise RuntimeError("db down")
+        return state["trial_eligible"]
+
+    monkeypatch.setattr(db.plans, "is_trial_eligible_for_user", fake_trial_eligible)
 
     # build_dashboard_link foi importado direto pra namespace local do mod,
     # então patchamos a referência lá em vez de no core.dashboard_links.
@@ -245,3 +257,23 @@ def test_whatsapp_usa_single_asterisk_pra_negrito(patches):
     assert "*PigBank+*" in out
     # Não pode ter **
     assert "**PigBank+**" not in out
+
+
+def test_assinar_v2_inelegivel_nao_promete_trial(patches):
+    patches["plans_v2"] = True
+    patches["trial_eligible"] = False
+
+    out = mod.handle_billing_command(99, "assinar plano", platform="whatsapp")
+
+    assert "30 dias grátis" not in out
+    assert "cobrança imediata" in out
+
+
+def test_assinar_v2_com_consulta_indisponivel_delega_confirmacao_ao_checkout(patches):
+    patches["plans_v2"] = True
+    patches["trial_eligibility_raises"] = True
+
+    out = mod.handle_billing_command(99, "assinar plano", platform="whatsapp")
+
+    assert "30 dias grátis" not in out
+    assert "checkout confirma" in out

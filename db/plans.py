@@ -19,6 +19,14 @@ from .connection import get_conn
 logger = logging.getLogger(__name__)
 
 
+class TrialEligibilityError(RuntimeError):
+    """Não foi possível decidir com segurança se o telefone pode usar trial."""
+
+
+class TrialClaimError(RuntimeError):
+    """O trial nasceu na Stripe, mas sua trava ainda não foi persistida."""
+
+
 def claim_trial_for_user(user_id: int) -> datetime | None:
     """Ancora o trial do usuário no telefone dele (idempotente).
 
@@ -27,8 +35,9 @@ def claim_trial_for_user(user_id: int) -> datetime | None:
     - Telefone JÁ usou trial (nesta ou noutra conta, mesmo deletada) → a conta
       herda o started_at ORIGINAL; se o trial já venceu, days_left = 0.
 
-    Retorna o started_at efetivo (ou None se a conta não tem telefone).
-    Nunca levanta — falha aqui não pode quebrar cadastro/vinculação.
+    Retorna o started_at efetivo. Levanta TrialClaimError para que o webhook
+    responda com erro e a Stripe tente novamente; confirmar sem gravar a trava
+    permitiria um segundo trial depois.
     """
     try:
         with get_conn() as conn:
@@ -39,13 +48,13 @@ def claim_trial_for_user(user_id: int) -> datetime | None:
                 )
                 row = cur.fetchone()
                 if not row or not row.get("phone_hash"):
-                    return None
+                    raise TrialClaimError("Conta sem telefone para registrar o trial.")
                 phone_hash = row["phone_hash"]
 
                 cur.execute(
                     """
-                    insert into plan_trials (phone_hash, user_id, started_at)
-                    values (%s, %s, now())
+                    insert into plan_trials (phone_hash, user_id, started_at, model_version)
+                    values (%s, %s, now(), 2)
                     on conflict (phone_hash) do nothing
                     """,
                     (phone_hash, int(user_id)),
@@ -56,24 +65,27 @@ def claim_trial_for_user(user_id: int) -> datetime | None:
                 )
                 trial_row = cur.fetchone()
                 started_at = trial_row["started_at"] if trial_row else None
+                if started_at is None:
+                    raise TrialClaimError("O registro do trial não pôde ser confirmado.")
 
-                if started_at is not None:
-                    # Ancora na conta o started_at mais ANTIGO conhecido (nunca
-                    # rejuvenesce um trial já queimado).
-                    cur.execute(
-                        """
-                        update auth_accounts
-                        set trial_started_at = %s
-                        where user_id = %s
-                          and (trial_started_at is null or trial_started_at > %s)
-                        """,
-                        (started_at, int(user_id), started_at),
-                    )
+                # Ancora na conta o started_at mais ANTIGO conhecido (nunca
+                # rejuvenesce um trial já queimado).
+                cur.execute(
+                    """
+                    update auth_accounts
+                    set trial_started_at = %s
+                    where user_id = %s
+                      and (trial_started_at is null or trial_started_at > %s)
+                    """,
+                    (started_at, int(user_id), started_at),
+                )
             conn.commit()
         return started_at
-    except Exception:
+    except TrialClaimError:
+        raise
+    except Exception as exc:
         logger.warning("claim_trial_for_user falhou pro user %s", user_id, exc_info=True)
-        return None
+        raise TrialClaimError("Falha ao persistir o uso do trial.") from exc
 
 
 def is_trial_eligible_for_user(user_id: int) -> bool:
@@ -83,9 +95,9 @@ def is_trial_eligible_for_user(user_id: int) -> bool:
     em plan_trials (nesta conta ou em outra, mesmo deletada). Usado na criação
     do checkout pra decidir se manda trial_period_days=30 ou cobra na hora.
 
-    Sem telefone vinculado → elegível (nada pra gatear; o registro só acontece
-    se/quando houver phone_hash). Falha de banco → elegível (fail-open: melhor
-    conceder o trial do que cobrar alguém por engano).
+    Sem telefone vinculado → inelegível, pois não há como aplicar a regra por
+    número. Falha de banco levanta TrialEligibilityError: o checkout responde
+    503 em vez de cobrar na hora ou conceder trial repetido no escuro.
     """
     try:
         with get_conn() as conn:
@@ -96,15 +108,15 @@ def is_trial_eligible_for_user(user_id: int) -> bool:
                 )
                 row = cur.fetchone()
                 if not row or not row.get("phone_hash"):
-                    return True
+                    return False
                 cur.execute(
                     "select 1 from plan_trials where phone_hash = %s",
                     (row["phone_hash"],),
                 )
                 return cur.fetchone() is None
-    except Exception:
+    except Exception as exc:
         logger.warning("is_trial_eligible_for_user falhou pro user %s", user_id, exc_info=True)
-        return True
+        raise TrialEligibilityError("Falha ao consultar a elegibilidade do trial.") from exc
 
 
 def get_trial_started_at(user_id: int) -> datetime | None:

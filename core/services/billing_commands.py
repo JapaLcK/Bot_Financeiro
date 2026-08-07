@@ -95,9 +95,34 @@ def _handle_assinar(user_id: int, platform: str) -> str:
             "ou abre direto pigbankai.com/precos no navegador."
         )
     b = lambda s: _bold(s, platform)
+    offer_text = (
+        f"Aqui ó, link pra assinar com {b('30 dias grátis')} "
+        "(cancela quando quiser, sem cobrança no trial):"
+    )
+    try:
+        from core.services.plan_service import plans_v2_enabled
+        v2_enabled = plans_v2_enabled()
+    except ImportError:
+        v2_enabled = False
+    if v2_enabled:
+        try:
+            from db.plans import is_trial_eligible_for_user
+            eligible = is_trial_eligible_for_user(user_id)
+        except Exception:
+            eligible = None
+        if eligible is False:
+            offer_text = (
+                "Aqui ó, link pra assinar. Como esse telefone já usou o período grátis, "
+                "o checkout mostra o valor da cobrança imediata antes da confirmação:"
+            )
+        elif eligible is None:
+            offer_text = (
+                "Aqui ó, link pra assinar. O checkout confirma seu período grátis ou o "
+                "valor da primeira cobrança antes da confirmação:"
+            )
     return (
         f"🐷✨ Bora pro {b('PigBank+')}?\n\n"
-        f"Aqui ó, link pra assinar com {b('30 dias grátis')} (cancela quando quiser, sem cobrança no trial):\n"
+        f"{offer_text}\n"
         f"{link}\n\n"
         f"Esse link é só seu e expira em 1h."
     )

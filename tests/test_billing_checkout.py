@@ -12,6 +12,7 @@ Cobre:
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 from cryptography.fernet import Fernet
@@ -63,7 +64,9 @@ class _FakeStripe:
         self.last_customer_kwargs: dict | None = None
         self.customer_create_calls = 0
         self.session_create_calls = 0
+        self.session_expire_calls = 0
         self.missing_customer_ids: set[str] = set()
+        self.open_sessions: list[dict] = []
 
         outer = self
 
@@ -82,7 +85,39 @@ class _FakeStripe:
                     raise _FakeInvalidRequestError(
                         "No such customer", param="customer", code="resource_missing")
                 outer.last_session_kwargs = kwargs
-                return SimpleNamespace(url="https://checkout.stripe.com/c/pay/test")
+                session_id = f"cs_test_{outer.session_create_calls}"
+                session = {
+                    "id": session_id,
+                    "url": f"https://checkout.stripe.com/c/pay/{session_id}",
+                    "customer": kwargs.get("customer"),
+                    "metadata": kwargs.get("metadata") or {},
+                    "status": "open",
+                }
+                outer.open_sessions.append(session)
+                return SimpleNamespace(id=session_id, url=session["url"])
+
+            @staticmethod
+            def list(**kwargs):
+                customer = kwargs.get("customer")
+                if customer in outer.missing_customer_ids:
+                    raise _FakeInvalidRequestError(
+                        "No such customer", param="customer", code="resource_missing")
+                return {
+                    "data": [
+                        session for session in outer.open_sessions
+                        if session["customer"] == customer and session["status"] == "open"
+                    ]
+                }
+
+            @staticmethod
+            def expire(session_id):
+                outer.session_expire_calls += 1
+                for session in outer.open_sessions:
+                    if session["id"] == session_id:
+                        session["status"] = "expired"
+                        return session
+                raise _FakeInvalidRequestError(
+                    "No such checkout session", param="session", code="resource_missing")
 
         class _Subscription:
             @staticmethod
@@ -293,7 +328,7 @@ def test_checkout_recupera_customer_apagado_no_stripe(user_id, monkeypatch):
     resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
     assert resp.status_code == 200, resp.text
     assert fake.customer_create_calls == 1
-    assert fake.session_create_calls == 2
+    assert fake.session_create_calls == 1
     assert fake.last_session_kwargs["customer"] == "cus_test_123"
     assert db.get_auth_user(uid)["stripe_customer_id"] == "cus_test_123"
 
@@ -344,3 +379,66 @@ def test_checkout_v2_inelegivel_cobra_na_hora(user_id, monkeypatch):
     resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
     assert resp.status_code == 200, resp.text
     assert "trial_period_days" not in fake.last_session_kwargs["subscription_data"]
+
+
+def test_checkout_v2_falha_fechada_se_elegibilidade_indisponivel(user_id, monkeypatch):
+    """Sem conseguir decidir o trial, não cobra nem concede benefício no escuro."""
+    _, _, client = _auth_user_setup(f"v2fail-{user_id}")
+    monkeypatch.setenv("PLANS_V2_ENABLED", "1")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+
+    def fail(_uid):
+        from db.plans import TrialEligibilityError
+        raise TrialEligibilityError("db fora")
+
+    monkeypatch.setattr("db.plans.is_trial_eligible_for_user", fail)
+    fake = _patch_stripe(monkeypatch)
+
+    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+
+    assert resp.status_code == 503
+    assert fake.session_create_calls == 0
+
+
+def test_checkout_concorrente_reutiliza_uma_unica_sessao(user_id, monkeypatch):
+    """Duas requisições simultâneas recebem a mesma URL e criam só 1 sessão."""
+    uid, email, client_a = _auth_user_setup(f"race-{user_id}")
+    client_b = TestClient(dashboard.app)
+    client_b.cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(uid, email))
+    client_b.cookies.set(dashboard.CSRF_COOKIE_NAME, _CSRF_TOKEN)
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    fake = _patch_stripe(monkeypatch)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(executor.map(
+            lambda client: client.post("/billing/create-checkout", headers=_CSRF_HEADERS),
+            (client_a, client_b),
+        ))
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert responses[0].json()["checkout_url"] == responses[1].json()["checkout_url"]
+    assert fake.session_create_calls == 1
+
+
+def test_checkout_novo_plano_expira_sessao_aberta_incompativel(user_id, monkeypatch):
+    """Mudar a escolha mensal/anual invalida o checkout antigo antes do novo."""
+    _, _, client = _auth_user_setup(f"replace-{user_id}")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_ANUAL", "price_anual_xyz")
+    fake = _patch_stripe(monkeypatch)
+
+    first = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    second = client.post(
+        "/billing/create-checkout",
+        json={"interval": "annual"},
+        headers=_CSRF_HEADERS,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["checkout_url"] != second.json()["checkout_url"]
+    assert fake.session_create_calls == 2
+    assert fake.session_expire_calls == 1

@@ -10,7 +10,7 @@ Tudo com monkeypatch — sem tocar o banco. Cobre:
   - limites por tier (histórico do mês corrente no Grátis, lançamentos/mês, IA)
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -218,6 +218,16 @@ class TestLimits:
         assert plan_service.history_months_cap(1) == 12    # 12 meses
         _patch_user(monkeypatch, _user("pro_max", FUTURE))
         assert plan_service.history_months_cap(1) == 24    # 24 meses
+
+    def test_history_free_comeca_no_primeiro_dia_local(self, v2, monkeypatch):
+        _patch_user(monkeypatch, _user("free"))
+        now = datetime(2026, 8, 6, 12, tzinfo=timezone.utc)
+        assert plan_service.history_earliest_date(1, now) == date(2026, 8, 1)
+
+    def test_history_essencial_respeita_90_dias(self, v2, monkeypatch):
+        _patch_user(monkeypatch, _user("essencial", FUTURE))
+        now = datetime(2026, 8, 6, 12, tzinfo=timezone.utc)
+        assert plan_service.history_earliest_date(1, now) == date(2026, 5, 8)
 
     def test_feature_enabled_por_tier(self, v2, monkeypatch):
         _patch_user(monkeypatch, _user("free"))

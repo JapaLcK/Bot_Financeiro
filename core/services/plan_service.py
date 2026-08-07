@@ -22,7 +22,8 @@ _get_current_user — ela usa os helpers daqui.
 """
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from db import get_auth_user
 
@@ -222,6 +223,21 @@ def history_current_month_only(user_id: int) -> bool:
     if not plans_v2_enabled():
         return False
     return bool(get_user_limits(user_id).get("history_current_month_only", False))
+
+
+def history_earliest_date(user_id: int, now: datetime | None = None) -> date | None:
+    """Primeiro dia que o tier pode consultar; None significa sem limite."""
+    limits = get_user_limits(user_id)
+    current = now or datetime.now(timezone.utc)
+    try:
+        local_now = current.astimezone(ZoneInfo(os.getenv("TZ", "America/Sao_Paulo")))
+    except ZoneInfoNotFoundError:
+        local_now = current.astimezone(timezone.utc)
+
+    if limits.get("history_current_month_only", False):
+        return local_now.date().replace(day=1)
+    days = limits.get("history_days")
+    return None if days is None else local_now.date() - timedelta(days=int(days))
 
 
 def history_months_cap(user_id: int) -> int | None:

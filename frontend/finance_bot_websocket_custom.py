@@ -28,7 +28,9 @@ import secrets
 import sys
 import time as _startup_time
 import urllib.parse
-from datetime import datetime, date, timezone
+from contextlib import asynccontextmanager
+from datetime import datetime, date, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Dict
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, Request, Response
@@ -355,6 +357,9 @@ async def get_financial_data(
     y   = year  or now.year
     m   = month or now.month
     month_start, month_end = _month_range(y, m)
+    from core.services.plan_service import history_earliest_date
+    earliest_history_date = await asyncio.to_thread(history_earliest_date, user_id)
+    query_start = max(month_start, earliest_history_date) if earliest_history_date else month_start
     is_current = (y == now.year and m == now.month)
     page = max(int(page or 1), 1)
     limit = max(min(int(limit or 25), 100), 1)
@@ -407,7 +412,7 @@ async def get_financial_data(
               AND b.period_end < %s::date
               AND t.is_refund = false
         """
-        credit_union_params = [user_id, month_start, month_end]
+        credit_union_params = [user_id, query_start, month_end]
 
     # ───── Paraleliza queries independentes via asyncio.gather ─────
     # Cada _q() pega uma conn do pool. Antes era sequencial dentro de UMA
@@ -442,7 +447,7 @@ async def get_financial_data(
                 {credit_union_sql}
             ) merged
             """,
-            (user_id, month_start, month_end, *launch_filter_params, *credit_union_params),
+            (user_id, query_start, month_end, *launch_filter_params, *credit_union_params),
         ),
         # 4) Launches paginado
         _q(
@@ -464,7 +469,7 @@ async def get_financial_data(
             ORDER BY criado_em DESC, id ASC
             LIMIT %s OFFSET %s
             """,
-            (user_id, month_start, month_end, *launch_filter_params, *credit_union_params, limit, offset),
+            (user_id, query_start, month_end, *launch_filter_params, *credit_union_params, limit, offset),
         ),
         # 5) Monthly income/expense totals (sem internas).
         # Compras no cartão entram como 'despesa' alocadas pelo mês em que a
@@ -491,8 +496,8 @@ async def get_financial_data(
             GROUP BY tipo
             """,
             (
-                user_id, month_start, month_end,
-                user_id, month_start, month_end,
+                user_id, query_start, month_end,
+                user_id, query_start, month_end,
             ),
         ),
         # 6) Categories (despesas do mês — credit_transactions alocadas por
@@ -522,8 +527,8 @@ async def get_financial_data(
             LIMIT 10
             """,
             (
-                user_id, month_start, month_end,
-                user_id, month_start, month_end,
+                user_id, query_start, month_end,
+                user_id, query_start, month_end,
             ),
         ),
         # 7) Allocations (aportes do mês)
@@ -554,7 +559,7 @@ async def get_financial_data(
                             THEN -valor ELSE valor END) > 0
             ORDER BY bucket, total DESC
             """,
-            (user_id, month_start, month_end),
+            (user_id, query_start, month_end),
         ),
         # 8) Cards + faturas do mês via LATERAL JOIN (1 query, sem N+1)
         _q(
@@ -589,7 +594,7 @@ async def get_financial_data(
             WHERE c.user_id = %s
             ORDER BY c.display_order NULLS LAST, c.name
             """,
-            (month_start, month_end, user_id),
+            (query_start, month_end, user_id),
         ),
         # 9) Daily expenses (bar chart)
         _q(
@@ -604,7 +609,7 @@ async def get_financial_data(
             GROUP BY dia
             ORDER BY dia
             """,
-            (user_id, month_start, month_end),
+            (user_id, query_start, month_end),
         ),
         # 10) Budgets per category
         _q("SELECT categoria, budget FROM category_budgets WHERE user_id = %s", (user_id,)),
@@ -784,6 +789,7 @@ async def get_financial_data(
         "year":               y,
         "month":              m,
         "is_current_month":   is_current,
+        "history_earliest_date": earliest_history_date.isoformat() if earliest_history_date else None,
         "balance":            float(account["balance"]) if account else 0.0,
         "of_bank_balance":    of_bank_balance,  # saldo das contas bancárias conectadas (OF)
         "of_bank_count":      of_bank_count,    # nº de contas BANK conectadas (0 = sem banco)
@@ -811,7 +817,11 @@ async def get_financial_data(
 
 # ─── Monthly history ─────────────────────────────────────────────────────────
 
-async def get_monthly_history(user_id: int, n_months: int = 6) -> list:
+async def get_monthly_history(
+    user_id: int,
+    n_months: int = 6,
+    start_date: date | None = None,
+) -> list:
     """Returns last n_months of income/expense totals, oldest first.
 
     Janela em meses-calendário INCLUINDO o mês atual: início do mês atual
@@ -819,6 +829,8 @@ async def get_monthly_history(user_id: int, n_months: int = 6) -> list:
     mês extra no passado e o gráfico de "últimos 6 meses" mostrava 7 barras.
     """
     n_months = max(1, int(n_months))
+    limit_clause = "AND criado_em >= %s" if start_date else ""
+    params = (user_id, start_date) if start_date else (user_id,)
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -828,12 +840,13 @@ async def get_monthly_history(user_id: int, n_months: int = 6) -> list:
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= DATE_TRUNC('month', NOW()) - INTERVAL '{n_months - 1} months'
+                  {limit_clause}
                   AND tipo IN ('receita', 'despesa')
                   AND is_internal_movement = false
                 GROUP BY mes, tipo
                 ORDER BY mes
                 """,
-                (user_id,),
+                params,
             )
             rows = await cur.fetchall()
 
@@ -850,10 +863,20 @@ async def get_monthly_history(user_id: int, n_months: int = 6) -> list:
     return list(history.values())
 
 
-async def get_daily_expenses_window(user_id: int, days: int = 30) -> list:
+async def get_daily_expenses_window(
+    user_id: int,
+    days: int = 30,
+    start_date: date | None = None,
+) -> list:
     """Gastos (despesas de conta) por dia nos últimos ``days`` dias, mais antigo
     primeiro. Cada item: ``{"date": "YYYY-MM-DD", "total": float}``. Mesmo filtro
     do gráfico de gastos por dia do mês (tipo despesa/saida, não interno)."""
+    if start_date:
+        limit_clause = f"AND DATE(criado_em AT TIME ZONE '{TZ}') >= %s"
+        params = (user_id, start_date)
+    else:
+        limit_clause = f"AND criado_em >= NOW() - INTERVAL '{int(days)} days'"
+        params = (user_id,)
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -864,11 +887,11 @@ async def get_daily_expenses_window(user_id: int, days: int = 30) -> list:
                 WHERE user_id = %s
                   AND tipo IN ('despesa', 'saida')
                   AND is_internal_movement = false
-                  AND criado_em >= NOW() - INTERVAL '{int(days)} days'
+                  {limit_clause}
                 GROUP BY dia
                 ORDER BY dia
                 """,
-                (user_id,),
+                params,
             )
             rows = await cur.fetchall()
     return [{"date": r["dia"], "total": float(r["total"] or 0)} for r in rows]
@@ -1350,8 +1373,6 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # ─── App startup ──────────────────────────────────────────────────────────────
-
-from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -2554,7 +2575,7 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     mfa = await asyncio.to_thread(get_mfa_status, user_id)
     from core.services.plan_service import (
         has_app_access, paywall_enabled, plans_v2_enabled,
-        get_plan_tier, get_trial_status,
+        get_plan_tier, get_trial_status, history_earliest_date,
     )
     of_ui_enabled = _open_finance_ui_enabled(user_id, user_dict.get("email"))
     from core.services.plan_service import agents_ui_enabled as _agents_ui_enabled
@@ -2562,6 +2583,7 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     # Planos v2: tier efetivo da escada + estado do trial (30d via Stripe).
     plan_tier = await asyncio.to_thread(get_plan_tier, user_id)
     trial = await asyncio.to_thread(get_trial_status, user_id, user_dict)
+    earliest_history = await asyncio.to_thread(history_earliest_date, user_id)
     return {
         "user_id": user_id,
         **user_dict,
@@ -2572,6 +2594,7 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         "plans_v2_enabled": plans_v2_enabled(),
         "plan_tier": plan_tier,
         "trial": {"active": trial["active"], "days_left": trial["days_left"]},
+        "history_earliest_date": earliest_history.isoformat() if earliest_history else None,
         "of_ui_enabled": of_ui_enabled,
         "agents_ui_enabled": agents_ui,
     }
@@ -3362,6 +3385,195 @@ def _resolve_price_id(plan: str, interval: str) -> str:
     return ""
 
 
+@asynccontextmanager
+async def _billing_user_lock(user_id: int):
+    """Serializa checkouts do mesmo usuário entre processos/workers."""
+    lock_key = f"billing_checkout:{int(user_id)}"
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("select pg_advisory_lock(hashtext(%s))", (lock_key,))
+            try:
+                yield
+            finally:
+                await cur.execute("select pg_advisory_unlock(hashtext(%s))", (lock_key,))
+
+
+def _checkout_session_matches(session, user_id: int, plan: str, interval: str, price_id: str) -> bool:
+    metadata = _sg(session, "metadata", {}) or {}
+    return (
+        str(_sg(metadata, "finbot_user_id", "")) == str(user_id)
+        and _sg(metadata, "plan") == plan
+        and _sg(metadata, "interval") == interval
+        and _sg(metadata, "price_id") == price_id
+        and bool(_sg(session, "url"))
+    )
+
+
+async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interval: str, price_id: str):
+    """Cria ou reutiliza um checkout. Deve rodar sob ``_billing_user_lock``."""
+    from db import get_auth_user, set_stripe_customer
+
+    user = await asyncio.to_thread(get_auth_user, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    if (user.get("last_payment_status") or "") == "grandfathered":
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "lifetime",
+                    "message": "Você já tem acesso vitalício de brinde — assinar um plano substituiria isso. Fala com a gente se quiser mudar."},
+        )
+
+    customer_id = user.get("stripe_customer_id")
+    if customer_id:
+        try:
+            existing_sub = await asyncio.to_thread(
+                _find_active_subscription, stripe_mod, customer_id)
+        except StripeLookupError:
+            raise HTTPException(
+                status_code=503,
+                detail="Não consegui confirmar sua assinatura agora. Tenta de novo em instantes.",
+            )
+        if existing_sub is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={"error": "already_subscribed",
+                        "message": "Você já tem um plano ativo. Use a troca de plano — sem cobrança dupla."},
+            )
+
+    def _new_customer() -> str:
+        customer = stripe_mod.Customer.create(
+            email=user["email"],
+            metadata={"finbot_user_id": str(user_id)},
+            address={"country": "BR"},
+            preferred_locales=["pt-BR"],
+        )
+        set_stripe_customer(user_id, customer.id)
+        return customer.id
+
+    if not customer_id:
+        customer_id = await asyncio.to_thread(_new_customer)
+
+    # Uma sessão aberta já representa uma tentativa de assinatura. Reutiliza a
+    # equivalente e expira qualquer outra antes de permitir uma nova.
+    try:
+        sessions = await asyncio.to_thread(
+            stripe_mod.checkout.Session.list,
+            customer=customer_id,
+            status="open",
+            limit=20,
+        )
+    except Exception as exc:
+        if _is_missing_stripe_customer(stripe_mod, exc):
+            customer_id = await asyncio.to_thread(_new_customer)
+            open_sessions = []
+        else:
+            logging.getLogger(__name__).warning(
+                "billing_checkout_session_lookup_failed customer=%s", customer_id, exc_info=True)
+            raise HTTPException(
+                status_code=503,
+                detail="Não consegui confirmar seus checkouts agora. Tenta de novo em instantes.",
+            )
+    else:
+        open_sessions = list(_sg(sessions, "data", []) or [])
+
+    reusable = next(
+        (s for s in open_sessions if _checkout_session_matches(
+            s, user_id, plan, interval, price_id)),
+        None,
+    )
+    for open_session in open_sessions:
+        if reusable is not None and _sg(open_session, "id") == _sg(reusable, "id"):
+            continue
+        try:
+            await asyncio.to_thread(
+                stripe_mod.checkout.Session.expire, _sg(open_session, "id"))
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "billing_checkout_session_expire_failed session=%s",
+                _sg(open_session, "id"),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Não consegui substituir seu checkout anterior agora. Tenta de novo em instantes.",
+            )
+
+    if reusable is not None:
+        return {"checkout_url": _sg(reusable, "url"), "interval": interval, "plan": plan}
+
+    # A sessão pode ter sido concluída entre a primeira consulta e a listagem.
+    # Confere de novo imediatamente antes da criação para fechar essa corrida
+    # com o webhook/Stripe, que não participa do advisory lock local.
+    try:
+        existing_sub = await asyncio.to_thread(
+            _find_active_subscription, stripe_mod, customer_id)
+    except StripeLookupError:
+        raise HTTPException(
+            status_code=503,
+            detail="Não consegui confirmar sua assinatura agora. Tenta de novo em instantes.",
+        )
+    if existing_sub is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "already_subscribed",
+                    "message": "Você já tem um plano ativo. Use a troca de plano — sem cobrança dupla."},
+        )
+
+    # A elegibilidade só é consultada ao criar uma sessão nova. Reabrir a mesma
+    # URL preserva exatamente as condições que o usuário já viu no checkout.
+    from core.services.plan_service import plans_v2_enabled, trial_days_total
+    if plans_v2_enabled():
+        from db.plans import TrialEligibilityError, is_trial_eligible_for_user
+        try:
+            eligible = await asyncio.to_thread(is_trial_eligible_for_user, user_id)
+        except TrialEligibilityError:
+            raise HTTPException(
+                status_code=503,
+                detail="Não consegui confirmar seu período grátis agora. Tenta de novo em instantes.",
+            )
+        trial_days = trial_days_total() if eligible else 0
+    else:
+        trial_days = int(os.getenv("PRO_TRIAL_DAYS", "30"))
+
+    def _new_session(cust_id: str):
+        metadata = {
+            "finbot_user_id": str(user_id),
+            "interval": interval,
+            "plan": plan,
+            "price_id": price_id,
+        }
+        subscription_data = {"metadata": metadata.copy()}
+        if trial_days > 0:
+            subscription_data["trial_period_days"] = trial_days
+        return stripe_mod.checkout.Session.create(
+            customer=cust_id,
+            payment_method_types=["card"],
+            line_items=[{"price": price_id, "quantity": 1}],
+            mode="subscription",
+            locale="pt-BR",
+            allow_promotion_codes=True,
+            success_url=f"{DASHBOARD_URL}/home?upgrade=success",
+            cancel_url=f"{DASHBOARD_URL}/home?upgrade=cancelled",
+            metadata=metadata,
+            subscription_data=subscription_data,
+        )
+
+    try:
+        session = await asyncio.to_thread(_new_session, customer_id)
+    except stripe_mod.error.InvalidRequestError as exc:
+        if _is_missing_stripe_customer(stripe_mod, exc):
+            customer_id = await asyncio.to_thread(_new_customer)
+            session = await asyncio.to_thread(_new_session, customer_id)
+        else:
+            logging.getLogger(__name__).error("billing_checkout_invalid_request: %s", exc)
+            raise HTTPException(status_code=502, detail="Stripe recusou o checkout.")
+    except stripe_mod.error.StripeError as exc:
+        logging.getLogger(__name__).error("billing_checkout_stripe_error: %s", exc)
+        raise HTTPException(status_code=502, detail="Erro no Stripe ao iniciar o checkout.")
+
+    return {"checkout_url": session.url, "interval": interval, "plan": plan}
+
+
 @app.get("/billing/plans-config")
 async def billing_plans_config():
     """Config pública da página de planos (sem auth): a /precos usa isto pra
@@ -3398,111 +3610,20 @@ async def billing_create_checkout(
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
     import stripe
-    import sys
-    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import get_auth_user, set_stripe_customer
-
     stripe.api_key = STRIPE_SECRET_KEY
-
-    user = get_auth_user(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
-
-    # ── Guarda anti-assinatura-dupla ─────────────────────────────────────────
-    # Quem JÁ tem assinatura ativa nunca ganha um checkout novo (viraria duas
-    # cobranças recorrentes pro mesmo usuário). Troca de plano é outro fluxo:
-    # POST /billing/change-plan (agenda a virada pro fim do período pago).
-    if (user.get("last_payment_status") or "") == "grandfathered":
-        raise HTTPException(
-            status_code=409,
-            detail={"error": "lifetime",
-                    "message": "Você já tem acesso vitalício de brinde — assinar um plano substituiria isso. Fala com a gente se quiser mudar."},
-        )
-    if user.get("stripe_customer_id"):
-        try:
-            existing_sub = await asyncio.to_thread(
-                _find_active_subscription, stripe, user["stripe_customer_id"])
-        except StripeLookupError:
-            # Fail-closed: sem confirmação do Stripe, não arriscamos criar uma
-            # segunda assinatura pra quem talvez já pague. Melhor pedir retry.
-            raise HTTPException(
-                status_code=503,
-                detail="Não consegui confirmar sua assinatura agora. Tenta de novo em instantes.",
-            )
-        if existing_sub is not None:
-            raise HTTPException(
-                status_code=409,
-                detail={"error": "already_subscribed",
-                        "message": "Você já tem um plano ativo. Use a troca de plano — sem cobrança dupla."},
-            )
-
-    def _new_customer() -> str:
-        c = stripe.Customer.create(
-            email=user["email"],
-            metadata={"finbot_user_id": str(user_id)},
-            address={"country": "BR"},
-            preferred_locales=["pt-BR"],
-        )
-        set_stripe_customer(user_id, c.id)
-        return c.id
-
-    # Trial no checkout (2026-08-06):
-    # v2 ON — 30 dias do PLANO ESCOLHIDO, com cartão. REGRA FECHADA: 1 trial por
-    #   telefone na vida — telefone elegível ganha os 30 dias; telefone que já
-    #   queimou o trial (ou já foi assinante) = cobrança imediata (0 dias). O
-    #   registro do trial acontece no webhook (checkout.session.completed), não
-    #   aqui — abandonar o checkout não queima o trial.
-    # v2 OFF — comportamento legado: PRO_TRIAL_DAYS fixo (default 30).
-    from core.services.plan_service import plans_v2_enabled, trial_days_total
-    if plans_v2_enabled():
-        from db.plans import is_trial_eligible_for_user
-        eligible = await asyncio.to_thread(is_trial_eligible_for_user, user_id)
-        trial_days = trial_days_total() if eligible else 0
-    else:
-        trial_days = int(os.getenv("PRO_TRIAL_DAYS", "30"))
-
-    def _new_session(cust_id: str):
-        subscription_data = {
-            "metadata": {"finbot_user_id": str(user_id), "interval": interval, "plan": plan},
-        }
-        # Stripe exige trial_period_days >= 1; com 0 dias restantes, omitir a
-        # chave = cobrança imediata.
-        if trial_days > 0:
-            subscription_data["trial_period_days"] = trial_days
-        return stripe.checkout.Session.create(
-            customer=cust_id,
-            payment_method_types=["card"],
-            line_items=[{"price": price_id, "quantity": 1}],
-            mode="subscription",
-            locale="pt-BR",
-            # Mostra o campo "Adicionar código promocional" no checkout. Sem isso
-            # os cupons criados no Stripe não têm como ser aplicados pelo usuário.
-            allow_promotion_codes=True,
-            success_url=f"{DASHBOARD_URL}/home?upgrade=success",
-            cancel_url=f"{DASHBOARD_URL}/home?upgrade=cancelled",
-            metadata={"finbot_user_id": str(user_id), "interval": interval, "plan": plan},
-            subscription_data=subscription_data,
-        )
-
-    # Recupera ou cria o customer no Stripe
-    customer_id = user.get("stripe_customer_id") or _new_customer()
-
     try:
-        session = _new_session(customer_id)
-    except stripe.error.InvalidRequestError as exc:
-        # Customer salvo é inválido (ex.: criado em test e a chave virou live, ou
-        # deletado no Stripe) → recria e tenta de novo, sem quebrar pro usuário.
-        if "no such customer" in str(exc).lower():
-            customer_id = _new_customer()
-            session = _new_session(customer_id)
-        else:
-            logging.getLogger(__name__).error("billing_checkout_invalid_request: %s", exc)
-            raise HTTPException(status_code=502, detail=f"Stripe recusou o checkout: {exc}")
-    except stripe.error.StripeError as exc:
-        logging.getLogger(__name__).error("billing_checkout_stripe_error: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Erro no Stripe ao iniciar o checkout: {exc}")
-
-    return {"checkout_url": session.url, "interval": interval, "plan": plan}
+        async with _billing_user_lock(user_id):
+            return await _billing_checkout_for_user(
+                stripe, user_id, plan, interval, price_id)
+    except HTTPException:
+        raise
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "billing_checkout_lock_failed user=%s", user_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Não consegui iniciar o checkout agora. Tenta de novo em instantes.",
+        )
 
 
 # ─── Troca de plano (upgrade/downgrade sem assinatura dupla) ─────────────────
@@ -3842,14 +3963,11 @@ async def billing_webhook(request: Request):
             update_user_plan(user_id, plan_value, expires_dt)
             set_payment_status(user_id, sub_status)
             # Trial nasceu → registra a queima do trial no telefone (1 por
-            # telefone na vida). Idempotente; nunca levanta. Feito aqui e nao no
-            # cadastro pra abandonar o checkout nao queimar o trial de ninguem.
+            # telefone na vida). Falha precisa propagar: resposta 5xx faz a
+            # Stripe repetir o webhook até a trava ficar persistida.
             if sub_status == "trialing":
-                try:
-                    from db.plans import claim_trial_for_user
-                    await asyncio.to_thread(claim_trial_for_user, user_id)
-                except Exception:
-                    pass
+                from db.plans import claim_trial_for_user
+                await asyncio.to_thread(claim_trial_for_user, user_id)
             await log_system_event(
                 "info",
                 "billing_checkout_completed",
@@ -4387,14 +4505,19 @@ async def monthly_history(request: Request, user_id: int, months: int = 6):
     # Essencial 3, Plus 12, Pro 24; v1: Free 1 mês). Nao retorna 403 pra nao
     # quebrar dashboard — apenas capa silenciosamente. Frontend pode ler o plano
     # e mostrar CTA "ver mais" de upgrade.
-    from core.services.plan_service import history_months_cap, history_current_month_only
+    from core.services.plan_service import (
+        history_current_month_only,
+        history_earliest_date,
+        history_months_cap,
+    )
     if history_current_month_only(user_id):
         months = 1                                  # Grátis: só o mês corrente
     else:
         months_cap = history_months_cap(user_id)
         if months_cap is not None and months > months_cap:
             months = months_cap
-    data = await get_monthly_history(user_id, months)
+    earliest = await asyncio.to_thread(history_earliest_date, user_id)
+    data = await get_monthly_history(user_id, months, start_date=earliest)
     return {"data": data}
 
 
@@ -4406,18 +4529,13 @@ async def daily_expenses_window(request: Request, user_id: int, days: int = 30):
     _authorize_dashboard_access(request, user_id)
     if days not in (7, 30, 90):
         raise HTTPException(status_code=400, detail="days must be 7, 30 or 90")
-    from core.services.plan_service import history_days_cap, history_current_month_only
-    effective = days
-    if history_current_month_only(user_id):
-        # Grátis: só o mês corrente → janela = dias decorridos desde o dia 1.
-        from datetime import datetime, timezone
-        effective = min(days, datetime.now(timezone.utc).day)
-    else:
-        days_cap = history_days_cap(user_id)
-        if days_cap is not None:
-            # +1 preserva o comportamento antigo do Free (janela de 30d cabe em 31).
-            effective = min(days, days_cap + 1)
-    data = await get_daily_expenses_window(user_id, effective)
+    from core.services.plan_service import history_earliest_date
+    local_today = datetime.now(ZoneInfo(TZ)).date()
+    requested_start = local_today - timedelta(days=days)
+    earliest = await asyncio.to_thread(history_earliest_date, user_id)
+    start_date = max(requested_start, earliest) if earliest else requested_start
+    effective = max(1, (local_today - start_date).days + 1)
+    data = await get_daily_expenses_window(user_id, effective, start_date=start_date)
     return {"data": data, "days": days, "effective_days": effective}
 
 
@@ -4890,8 +5008,12 @@ async def history_list_route(
     (só estornos)."""
     _authorize_dashboard_access(request, user_id)
     from db import list_history
+    from core.services.plan_service import history_earliest_date
     fd = _parse_date_param(from_, "from")
     td = _parse_date_param(to, "to")
+    earliest = await asyncio.to_thread(history_earliest_date, user_id)
+    if earliest and (fd is None or fd < earliest):
+        fd = earliest
     result = await asyncio.to_thread(
         list_history,
         user_id, fd, td, categoria, tipo, q,
@@ -4919,7 +5041,11 @@ async def history_quick_stats_route(
     Cada um vira um card clicável que aplica filtro correspondente."""
     _authorize_dashboard_access(request, user_id)
     from db import compute_history_quick_stats
+    from core.services.plan_service import history_earliest_date
     fd, td = _resolve_analytics_window(months, from_, to)
+    earliest = await asyncio.to_thread(history_earliest_date, user_id)
+    if earliest and fd < earliest:
+        fd = earliest
     result = await asyncio.to_thread(compute_history_quick_stats, user_id, fd, td)
     return {"ok": True, **result, "window": {"from": fd.isoformat(), "to": td.isoformat()}}
 
@@ -6033,7 +6159,9 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
 
                 elif t == "get_history":
                     n       = min(max(int(payload.get("months", 6)), 1), 24)
-                    history = await get_monthly_history(user_id, n)
+                    from core.services.plan_service import history_earliest_date
+                    earliest = await asyncio.to_thread(history_earliest_date, user_id)
+                    history = await get_monthly_history(user_id, n, start_date=earliest)
                     await ws.send_text(jdump({"type": "history_data", "data": history}))
 
                 elif t == "ping":
