@@ -25,8 +25,9 @@ from core.services.pluggy import (
     create_pluggy_api_key,
     create_pluggy_connect_token,
     delete_pluggy_item,
+    list_pluggy_connectors,
 )
-from core.services.plan_service import is_pro
+from core.services.plan_service import bank_list_ui_enabled, is_pro
 from core.services.pluggy_sync import (
     refresh_and_sync_pluggy_user,
     sync_pluggy_item,
@@ -179,6 +180,45 @@ async def open_finance_snapshot_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
     snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
     return json.loads(shared.jdump({"ok": True, **snapshot}))
+
+
+# Só contas de pessoa física no modal (bate com o preview aprovado; evita os
+# duplicados "… Empresas"). Pra incluir PJ, adicionar "BUSINESS_BANK".
+_CONNECTABLE_TYPES = {"PERSONAL_BANK"}
+
+
+@router.get("/open-finance/{user_id}/connectors")
+async def open_finance_connectors_route(request: Request, user_id: int):
+    """Catálogo completo de bancos da Pluggy pro modal 'Ver todos os bancos'.
+
+    Gateado no beta (bank_list_ui_enabled): fora do allowlist devolve 403 e o front
+    mantém a lista curta de sempre. Retorna dicts enxutos (id/name/type/color/inv)."""
+    shared.authorize_dashboard_access(request, user_id)
+    if not await asyncio.to_thread(bank_list_ui_enabled, user_id):
+        raise HTTPException(status_code=403, detail="Recurso em beta.")
+    try:
+        raw = await asyncio.to_thread(
+            list_pluggy_connectors, None, include_sandbox=PLUGGY_INCLUDE_SANDBOX
+        )
+    except PluggyConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PluggyApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    banks = []
+    for c in raw:
+        if str(c.get("type") or "") not in _CONNECTABLE_TYPES:
+            continue
+        products = [str(p).upper() for p in (c.get("products") or [])]
+        banks.append({
+            "id": c.get("id"),
+            "name": (c.get("name") or "").strip(),
+            "type": c.get("type"),
+            "color": (c.get("primaryColor") or "").lstrip("#"),
+            "inv": "INVESTMENTS" in products,
+        })
+    banks.sort(key=lambda b: b["name"].lower())
+    return {"ok": True, "connectors": banks}
 
 
 @router.post("/open-finance/{user_id}/connect-token")

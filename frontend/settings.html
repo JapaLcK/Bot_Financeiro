@@ -1164,8 +1164,8 @@ a { color: inherit; text-decoration: none; }
               <div class="step"        id="step-3"></div>
             </div>
 
-            <!-- Bank list -->
-            <div class="bank-list">
+            <!-- Bank list (curta — fallback fora do beta) -->
+            <div class="bank-list" id="bank-list-short">
               <button class="bank-row active" type="button" data-bank="nubank" onclick="selectBank('nubank')">
                 <span class="bank-logo nubank">NU</span>
                 <span class="bank-info">
@@ -1194,6 +1194,13 @@ a { color: inherit; text-decoration: none; }
               </button>
             </div>
 
+            <!-- Lista completa (beta): abre o modal com busca -->
+            <div id="bankpick-open-wrap" style="display:none">
+              <button class="bankpick-open-btn" type="button" onclick="openBankPicker()">
+                <span aria-hidden="true">🔎</span> Ver todos os bancos
+              </button>
+            </div>
+
             <!-- Status message -->
             <div class="connect-status" id="connect-status">
               <div class="spinner"></div>
@@ -1213,6 +1220,33 @@ a { color: inherit; text-decoration: none; }
             <div class="connect-note">
               <span>🔒</span>
               <span>A autorização acontece dentro do ambiente seguro do banco via Pluggy. O PigBank não recebe sua senha e você pode revogar o acesso depois.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal: Ver todos os bancos (beta) -->
+        <div class="bankpick-overlay" id="bankpick-overlay" onclick="if(event.target===this)closeBankPicker()">
+          <div class="bankpick-modal" role="dialog" aria-modal="true" aria-label="Conectar banco">
+            <div class="bankpick-head">
+              <div class="bankpick-head-row">
+                <div>
+                  <div class="bankpick-title">Conectar banco</div>
+                  <div class="bankpick-sub">Busque entre as instituições disponíveis</div>
+                </div>
+                <button class="bankpick-x" type="button" onclick="closeBankPicker()" aria-label="Fechar">✕</button>
+              </div>
+              <div class="bankpick-search-wrap">
+                <span aria-hidden="true">🔎</span>
+                <input id="bankpick-search" type="text" placeholder="Buscar banco (ex: Nubank, Itaú, C6…)"
+                       autocomplete="off" oninput="renderBankPicker(this.value)">
+              </div>
+            </div>
+            <div class="bankpick-list" id="bankpick-list"></div>
+            <div class="bankpick-foot">
+              <div class="bankpick-count" id="bankpick-count">Nenhum banco selecionado</div>
+              <button class="btn-connect bankpick-go" id="bankpick-go" type="button" onclick="confirmBankPicker()" disabled>
+                Conectar Open Finance
+              </button>
             </div>
           </div>
         </div>
@@ -2294,10 +2328,15 @@ const OPEN_FINANCE_CONNECTORS = {
   itau: 601,
   bradesco: 603,
 };
+// connectorId efetivo passado pro widget da Pluggy. Vem do mapa curto acima OU do
+// modal "Ver todos os bancos" (beta). null = não pré-seleciona (o widget lista tudo).
+let selectedConnectorId = OPEN_FINANCE_CONNECTORS[selectedBank];
+let BANK_LIST_UI_ENABLED = false;
 
 function selectBank(bank) {
   selectedBank = bank;
-  document.querySelectorAll(".bank-row").forEach(r => {
+  selectedConnectorId = OPEN_FINANCE_CONNECTORS[bank] || null;
+  document.querySelectorAll("#bank-list-short .bank-row").forEach(r => {
     const on = r.dataset.bank === bank;
     r.classList.toggle("active", on);
     const chk = r.querySelector(".bank-check");
@@ -2312,6 +2351,103 @@ function setStep(n) {
     const s = document.getElementById(`step-${i}`);
     s.className = i < n ? "step done" : i===n ? "step active" : "step";
   }
+}
+
+/* ── Modal "Ver todos os bancos" (beta) ──────── */
+let _bankConnectors = null;   // cache da lista da Pluggy
+let _bankPickSelected = null; // {id, name}
+
+function _stripAccent(s) {
+  return (s||"").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+function _bankInitials(name) {
+  const small = new Set(["de","do","da","dos","das","e","-"]);
+  const parts = (name||"").replace(/[^\wÀ-ÿ\s-]/g,"").split(/\s+/).filter(w => w && !small.has(w.toLowerCase()));
+  if (parts.length >= 2) return (parts[0][0]+parts[1][0]).toUpperCase();
+  return (name||"?").replace(/[^A-Za-zÀ-ÿ]/g,"").slice(0,2).toUpperCase();
+}
+function _bankColor(hex) {
+  const c = String(hex||"").replace("#","");
+  return /^[0-9a-f]{6}$/i.test(c) ? "#"+c : "#5f6470";
+}
+
+async function openBankPicker() {
+  if (!BANK_LIST_UI_ENABLED) return;
+  const ov = document.getElementById("bankpick-overlay");
+  ov.classList.add("open");
+  const q = document.getElementById("bankpick-search");
+  q.value = "";
+  _bankPickSelected = null;
+  _syncBankPickFoot();
+  if (_bankConnectors) { renderBankPicker(""); q.focus(); return; }
+  document.getElementById("bankpick-list").innerHTML =
+    `<div class="bankpick-empty">Carregando bancos…</div>`;
+  try {
+    const resp = await fetch(`${API}/open-finance/${USER_ID}/connectors`, authOptions({ headers: authHeaders() }));
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const data = await resp.json();
+    _bankConnectors = (data.connectors || []).filter(b => b && b.name);
+    renderBankPicker("");
+    q.focus();
+  } catch (err) {
+    document.getElementById("bankpick-list").innerHTML =
+      `<div class="bankpick-empty">Não deu pra carregar a lista de bancos. Tente de novo.</div>`;
+    console.error("connectors fetch:", err);
+  }
+}
+function closeBankPicker() {
+  document.getElementById("bankpick-overlay").classList.remove("open");
+}
+function renderBankPicker(filter) {
+  const f = _stripAccent(filter).trim();
+  const items = (_bankConnectors||[]).filter(b => _stripAccent(b.name).includes(f));
+  const el = document.getElementById("bankpick-list");
+  if (!items.length) {
+    el.innerHTML = `<div class="bankpick-empty">Nenhum banco encontrado para “${esc(filter)}”.</div>`;
+    return;
+  }
+  let html = "", letter = "";
+  for (const b of items) {
+    const L = (b.name[0]||"#").toUpperCase();
+    if (L !== letter) { letter = L; html += `<div class="bankpick-alpha">${esc(L)}</div>`; }
+    const sel = _bankPickSelected && _bankPickSelected.id === b.id ? " active" : "";
+    const meta = b.inv ? "Conta, cartão · caixinha/investimentos" : "Conta corrente e cartão";
+    html += `<button type="button" class="bank-row bankpick-row${sel}" onclick="pickBank(${Number(b.id)}, this)" data-name="${esc(b.name)}">
+      <span class="bank-logo" style="background:${_bankColor(b.color)}">${esc(_bankInitials(b.name))}</span>
+      <span class="bank-info"><span class="bank-name">${esc(b.name)}</span><span class="bank-meta">${meta}</span></span>
+      <span class="bank-check">${sel ? "✓" : ""}</span>
+    </button>`;
+  }
+  el.innerHTML = html;
+}
+function pickBank(id, node) {
+  const name = node ? node.getAttribute("data-name") : "";
+  _bankPickSelected = { id, name };
+  document.querySelectorAll("#bankpick-list .bankpick-row").forEach(r => {
+    const on = r === node;
+    r.classList.toggle("active", on);
+    const chk = r.querySelector(".bank-check");
+    if (chk) chk.textContent = on ? "✓" : "";
+  });
+  _syncBankPickFoot();
+}
+function _syncBankPickFoot() {
+  const cnt = document.getElementById("bankpick-count");
+  const go = document.getElementById("bankpick-go");
+  if (_bankPickSelected) {
+    cnt.innerHTML = `Selecionado: <strong>${esc(_bankPickSelected.name)}</strong>`;
+    go.disabled = false;
+  } else {
+    cnt.textContent = "Nenhum banco selecionado";
+    go.disabled = true;
+  }
+}
+function confirmBankPicker() {
+  if (!_bankPickSelected) return;
+  selectedConnectorId = _bankPickSelected.id;
+  selectedBank = _stripAccent(_bankPickSelected.name).replace(/\s+/g,"-") || "custom";
+  closeBankPicker();
+  connectOpenFinance();
 }
 
 /* ── Category icons ──────────────────────────── */
@@ -2542,7 +2678,7 @@ async function openPluggyConnect() {
     connectToken: accessToken,
     includeSandbox: Boolean(data.includeSandbox),
     connectorTypes,
-    selectedConnectorId: OPEN_FINANCE_CONNECTORS[selectedBank],
+    selectedConnectorId: selectedConnectorId || undefined,
     products: ["ACCOUNTS", "TRANSACTIONS", "CREDIT_CARDS"],
     language: "pt",
     theme: "dark",
@@ -2852,11 +2988,21 @@ async function mfaRegenerateSubmit() {
 
 /* ── Init ────────────────────────────────────── */
 async function initSettings() {
+  let session = null;
   try {
-    await validateSettingsSession();
+    session = await validateSettingsSession();
   } catch {
     redirectHome();
     return;
+  }
+  // Beta: modal "Ver todos os bancos" (lista completa da Pluggy). Fora do allowlist
+  // (bank_list_ui=false) mantém a lista curta de sempre.
+  if (session && session.bank_list_ui) {
+    BANK_LIST_UI_ENABLED = true;
+    const wrap = document.getElementById("bankpick-open-wrap");
+    const short = document.getElementById("bank-list-short");
+    if (wrap) wrap.style.display = "";
+    if (short) short.style.display = "none";
   }
   // Paywall: sem assinatura ativa → vai pro paywall (settings é gated).
   let me = null;
@@ -2909,6 +3055,56 @@ initSettings();
 
 <!-- ── MFA Modais ─────────────────────────────────────────────────────────── -->
 <style>
+.bankpick-open-btn {
+  width: 100%; padding: 13px; border-radius: var(--radius-md);
+  background: var(--surface-2); border: 1px dashed var(--border-hover);
+  color: var(--ink); font-size: .9rem; font-weight: 780; cursor: pointer;
+  display: flex; gap: 8px; align-items: center; justify-content: center;
+  transition: border-color .15s var(--ease), transform .15s var(--ease);
+}
+.bankpick-open-btn:hover { border-color: var(--accent); transform: translateY(-1px); }
+.bankpick-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 9999;
+  display: none; align-items: center; justify-content: center; padding: 20px;
+}
+.bankpick-overlay.open { display: flex; }
+.bankpick-modal {
+  width: 100%; max-width: 560px; max-height: 82vh; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius-xl);
+  display: flex; flex-direction: column; overflow: hidden; box-shadow: var(--shadow-md);
+}
+.bankpick-head { padding: 20px 22px 14px; border-bottom: 1px solid var(--border); }
+.bankpick-head-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.bankpick-title { font-weight: 860; font-size: 1.1rem; color: var(--ink); }
+.bankpick-sub { font-size: .78rem; color: var(--faint); margin-top: 2px; }
+.bankpick-x {
+  width: 34px; height: 34px; border-radius: var(--radius-sm); background: var(--surface-2);
+  border: 1px solid var(--border); color: var(--muted); cursor: pointer; font-size: 1rem; flex-shrink: 0;
+}
+.bankpick-x:hover { border-color: var(--border-hover); color: var(--ink); }
+.bankpick-search-wrap { margin-top: 14px; position: relative; }
+.bankpick-search-wrap > span { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--faint); }
+.bankpick-search-wrap input {
+  width: 100%; padding: 12px 14px 12px 40px; border-radius: var(--radius-md);
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--ink); font-size: .9rem; outline: none;
+}
+.bankpick-search-wrap input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.bankpick-list { overflow-y: auto; padding: 6px 12px 10px; flex: 1 1 auto; min-height: 0; }
+.bankpick-alpha {
+  position: sticky; top: 0; background: var(--surface); color: var(--faint);
+  font-size: .72rem; font-weight: 860; letter-spacing: .06em; padding: 10px 8px 5px; z-index: 2;
+}
+.bankpick-row { width: 100%; margin-bottom: 4px; text-align: left; }
+.bankpick-row.active { border-color: var(--accent); background: var(--accent-soft); }
+.bankpick-empty { padding: 34px 18px; text-align: center; color: var(--faint); font-size: .88rem; }
+.bankpick-foot {
+  padding: 14px 18px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px; background: var(--surface-2);
+}
+.bankpick-count { font-size: .82rem; color: var(--muted); }
+.bankpick-count strong { color: var(--ink); }
+.bankpick-go { margin: 0 0 0 auto; width: auto; padding: 12px 22px; }
+.bankpick-go:disabled { opacity: .45; cursor: not-allowed; }
 .mfa-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 9999;
   display: none; align-items: center; justify-content: center; padding: 20px;

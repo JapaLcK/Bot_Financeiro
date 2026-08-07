@@ -182,6 +182,36 @@ def agents_ui_enabled(user_id: int, email: str | None = None) -> bool:
     return str(user_id) in beta_ids
 
 
+# Allowlist padrão do beta da lista completa de bancos (modal com busca). Mesma
+# mecânica dos Agentes/OF: lançamento em fases, primeiro só os e-mails de teste.
+_BANK_LIST_BETA_EMAILS_DEFAULT = {"lucaskuramoti06@gmail.com", "hiagojo2016@gmail.com"}
+
+
+def bank_list_ui_enabled(user_id: int, email: str | None = None) -> bool:
+    """Gate beta do modal 'Ver todos os bancos' (lista completa da Pluggy). Liga se:
+    - OF_BANK_LIST_ENABLED global ligado (lançamento pra todos), OU
+    - o e-mail está no allowlist OF_BANK_LIST_BETA_EMAILS (default = e-mails de teste), OU
+    - o user_id está em OF_BANK_LIST_BETA_USER_IDS.
+    Default: SÓ os e-mails de teste veem o modal; o resto mantém a lista curta de sempre."""
+    if (os.getenv("OF_BANK_LIST_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    raw = os.getenv("OF_BANK_LIST_BETA_EMAILS")
+    if raw is None:
+        beta_emails = _BANK_LIST_BETA_EMAILS_DEFAULT
+    else:
+        beta_emails = {e.strip().lower() for e in raw.split(",") if e.strip()}
+    if email is None:
+        try:
+            from db import get_user_email
+            email = get_user_email(user_id)
+        except Exception:
+            email = None
+    if email and str(email).strip().lower() in beta_emails:
+        return True
+    beta_ids = {i.strip() for i in (os.getenv("OF_BANK_LIST_BETA_USER_IDS") or "").split(",") if i.strip()}
+    return str(user_id) in beta_ids
+
+
 def has_app_access(user_id: int) -> bool:
     """True se o usuário pode entrar no app.
 

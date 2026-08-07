@@ -2172,7 +2172,14 @@ async def auth_validate(request: Request, response: Response):
     # Anexa flag de onboarding pra o frontend decidir se mostra o prompt.
     from db import should_show_mfa_onboarding
     show_onboarding = await asyncio.to_thread(should_show_mfa_onboarding, int(user_id))
-    return {"user_id": user_id, "show_mfa_onboarding": show_onboarding}
+    # Flag beta: modal "Ver todos os bancos" (lista completa do Open Finance).
+    from core.services.plan_service import bank_list_ui_enabled
+    bank_list_ui = await asyncio.to_thread(bank_list_ui_enabled, int(user_id))
+    return {
+        "user_id": user_id,
+        "show_mfa_onboarding": show_onboarding,
+        "bank_list_ui": bank_list_ui,
+    }
 
 
 @app.get("/auth/dashboard-profile")

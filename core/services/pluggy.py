@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -125,6 +126,41 @@ def list_pluggy_accounts(item_id: str, api_key: str | None = None) -> list[dict]
     data = _pluggy_get("/accounts", key, params={"itemId": item_id})
     results = data.get("results")
     return list(results) if isinstance(results, list) else []
+
+
+# Catálogo de connectors (bancos) cacheado em processo — muda raramente e é grande
+# (~250 itens). Chave do cache = include_sandbox; TTL configurável (default 6h).
+_CONNECTORS_CACHE: dict[bool, dict[str, Any]] = {}
+_CONNECTORS_TTL = float(os.getenv("PLUGGY_CONNECTORS_TTL", "21600"))
+
+
+def list_pluggy_connectors(
+    api_key: str | None = None, *, include_sandbox: bool = False
+) -> list[dict]:
+    """Lista os connectors (instituições) do Brasil disponíveis na Pluggy.
+
+    Cacheado em processo por `include_sandbox` (TTL `PLUGGY_CONNECTORS_TTL`). Retorna
+    os dicts crus da Pluggy (id, name, type, primaryColor, products, ...). Quando
+    include_sandbox=True, mescla os connectors de teste (dedup por id) — usado só no
+    beta pra permitir conectar o "Pluggy Bank" sem banco real."""
+    now = time.time()
+    cached = _CONNECTORS_CACHE.get(include_sandbox)
+    if cached and (now - cached["ts"]) < _CONNECTORS_TTL:
+        return cached["data"]
+
+    key = api_key or create_pluggy_api_key()
+    seen: dict[Any, dict] = {}
+    sandbox_flags = ["false"] + (["true"] if include_sandbox else [])
+    for sb in sandbox_flags:
+        data = _pluggy_get("/connectors", key, params={"countries": "BR", "sandbox": sb})
+        results = data.get("results")
+        for c in results if isinstance(results, list) else []:
+            cid = c.get("id")
+            if cid is not None:
+                seen[cid] = c
+    out = list(seen.values())
+    _CONNECTORS_CACHE[include_sandbox] = {"ts": now, "data": out}
+    return out
 
 
 def list_pluggy_investments(item_id: str, api_key: str | None = None) -> list[dict]:
