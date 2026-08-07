@@ -89,6 +89,11 @@ def send_email(
 
 
 def _base_html(title: str, content: str) -> str:
+    """Template transacional — dark premium com as cores da marca (preto #0C0C0D /
+    rosa #FF2D8E / off-white #F6F4F1), pareado com _piggy_html. Logo do Piggy
+    (PNG hospedado — Gmail não renderiza SVG) num medalhão off-white pro
+    contorno não sumir no fundo escuro."""
+    base = (os.getenv("DASHBOARD_URL") or "https://pigbankai.com").rstrip("/")
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -96,30 +101,35 @@ def _base_html(title: str, content: str) -> str:
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>{title}</title>
   <style>
-    body{{margin:0;padding:0;background:#0a0d18;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e2e8f0}}
-    .wrapper{{max-width:560px;margin:40px auto;background:#0f1320;border-radius:20px;border:1px solid rgba(255,255,255,.1);overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.5)}}
-    .header{{background:linear-gradient(135deg,#1e0a3c,#0c1a3a);padding:36px 32px;text-align:center;border-bottom:1px solid rgba(255,255,255,.08)}}
-    .logo-icon{{display:inline-block;width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#7c3aed,#3b82f6);font-size:28px;line-height:56px;text-align:center;box-shadow:0 8px 24px rgba(124,58,237,.45);margin-bottom:14px}}
-    .header h1{{margin:0;color:#fff;font-size:20px;font-weight:700;letter-spacing:-.02em}}
-    .header p{{margin:6px 0 0;color:rgba(255,255,255,.45);font-size:13px}}
-    .body{{padding:36px 32px}}
-    .body p{{line-height:1.75;margin:0 0 16px;color:rgba(255,255,255,.82);font-size:15px}}
-    .body ol,.body ul{{line-height:2;color:rgba(255,255,255,.72);font-size:14px;padding-left:20px;margin:0 0 16px}}
-    .code-box{{background:rgba(124,58,237,.12);border:1px solid rgba(124,58,237,.3);border-radius:14px;padding:20px;text-align:center;margin:24px 0}}
-    .code-box code{{font-size:40px;font-weight:800;color:#a78bfa;letter-spacing:10px}}
-    .highlight{{background:rgba(255,255,255,.05);border-left:3px solid #7c3aed;padding:14px 18px;border-radius:8px;margin:16px 0}}
-    .highlight code{{font-size:15px;color:#a78bfa;font-weight:600}}
-    .btn{{display:inline-block;background:linear-gradient(135deg,#7c3aed,#3b82f6);color:#fff!important;text-decoration:none;padding:13px 28px;border-radius:12px;font-weight:700;font-size:15px;margin:8px 0;box-shadow:0 6px 20px rgba(124,58,237,.4)}}
-    .warn{{font-size:12px;color:rgba(255,255,255,.38);text-align:center;margin-top:8px}}
-    .footer{{padding:20px 32px;background:rgba(255,255,255,.03);border-top:1px solid rgba(255,255,255,.06);font-size:12px;color:rgba(255,255,255,.3);text-align:center;line-height:1.7}}
-    .footer a{{color:#7c3aed;text-decoration:none}}
+    body{{margin:0;padding:24px 0;background:#0C0C0D;font-family:"Inter",-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#F6F4F1}}
+    .wrapper{{max-width:560px;margin:0 auto;background:#1B1B1E;border-radius:24px;border:1px solid rgba(255,255,255,.08);overflow:hidden}}
+    .bar{{height:4px;background:#FF2D8E}}
+    .header{{padding:36px 32px 24px;text-align:center}}
+    .tile{{display:inline-block;background:#F6F4F1;border-radius:20px;padding:12px;line-height:0;box-shadow:0 10px 34px rgba(255,45,142,.20)}}
+    .header h1{{margin:16px 0 0;color:#F6F4F1;font-size:20px;font-weight:800;letter-spacing:-.02em}}
+    .header h1 b{{color:#FF2D8E}}
+    .header p{{margin:6px 0 0;color:#9C9C9A;font-size:13px}}
+    .body{{padding:28px 32px 36px}}
+    .body p{{line-height:1.75;margin:0 0 16px;color:#E7E4E0;font-size:15px}}
+    .body strong{{color:#fff}}
+    .body ol,.body ul{{line-height:2;color:#CFCCC8;font-size:14px;padding-left:20px;margin:0 0 16px}}
+    .code-box{{background:rgba(255,45,142,.08);border:1px solid rgba(255,45,142,.30);border-radius:14px;padding:20px;text-align:center;margin:24px 0}}
+    .code-box code{{font-size:40px;font-weight:800;color:#FF6FB0;letter-spacing:10px}}
+    .highlight{{background:rgba(255,255,255,.05);border-left:3px solid #FF2D8E;padding:14px 18px;border-radius:0 12px 12px 0;margin:16px 0}}
+    .highlight code{{font-size:15px;color:#FF6FB0;font-weight:600}}
+    .btn{{display:inline-block;background:#FF2D8E;color:#fff!important;text-decoration:none;padding:13px 28px;border-radius:999px;font-weight:700;font-size:15px;margin:8px 0;box-shadow:0 8px 24px rgba(255,45,142,.35)}}
+    .warn{{font-size:12px;color:#7E7E7C;text-align:center;margin-top:8px}}
+    .footer{{padding:20px 32px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:#7E7E7C;text-align:center;line-height:1.7}}
+    .footer a{{color:#FF6FB0;text-decoration:none}}
+    a{{color:#FF2D8E}}
   </style>
 </head>
 <body>
   <div class="wrapper">
+    <div class="bar"></div>
     <div class="header">
-      <div class="logo-icon">🐷</div>
-      <h1>PigBank</h1>
+      <span class="tile"><img src="{base}/brand/email-logo.png" alt="PigBank" width="52" style="width:52px;height:auto;display:block"/></span>
+      <h1>Pig<b>Bank</b></h1>
       <p>Seu assistente financeiro inteligente</p>
     </div>
     <div class="body">{content}</div>
@@ -320,7 +330,8 @@ def _piggy_html(title: str, content: str, unsub_url: str = "", agent_kind: str =
         pig_html = (f'<span class="tile"><img src="{base}/brand/agents/{agent_kind}.png" '
                     f'alt="" width="150" style="width:150px;height:auto;display:block" /></span>')
     else:
-        pig_html = '<span class="tile" style="padding:16px 24px;font-size:52px;line-height:1">🐷</span>'
+        pig_html = (f'<span class="tile" style="padding:16px 20px"><img src="{base}/brand/email-logo.png" '
+                    f'alt="PigBank" width="68" style="width:68px;height:auto;display:block" /></span>')
     nome = _AGENT_LABELS.get(agent_kind, "")
     chip = f'<div><span class="chip"><span class="dot">●</span> {nome}</span></div>' if nome else ""
     hero = _AGENT_HERO.get(agent_kind)
