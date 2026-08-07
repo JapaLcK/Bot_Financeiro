@@ -320,62 +320,71 @@ def run_reporter_once(today: date | None = None) -> dict:
 
 # ── Carteiro: boletos chegando (D-3 e D-0) ───────────────────────────────────
 
-def run_carteiro_once(today: date | None = None) -> dict:
-    """Registra no feed as contas pendentes vencendo em 3 dias e no dia.
+def _carteiro_detect_for_user(agent: dict[str, Any], today: date) -> int:
+    """Registra no feed as contas pendentes do usuário vencendo em 3 dias e no dia.
 
-    Não toca em reminder_last_sent_on — essa coluna pertence ao lembrete
-    WhatsApp (dormente, wa_app._bill_reminder_tick). Dedupe própria via
-    agent_events.
-    """
-    from db import list_users_with_active_agents, record_agent_event
+    Não toca em reminder_last_sent_on — essa coluna pertence ao lembrete WhatsApp
+    (dormente, wa_app._bill_reminder_tick). Dedupe própria via agent_events."""
+    from db import record_agent_event
+
+    user_id = agent["user_id"]
+    fired = 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select b.id, b.due_date, b.amount,
+                       coalesce(b.name, r.name, 'Conta') as nome,
+                       (b.due_date - %s) as dias
+                from bill_instances b
+                left join recurring_expenses r on r.id = b.recurring_id
+                where b.user_id = %s
+                  and b.status = 'pending'
+                  and (b.due_date - %s) in (3, 0)
+                """,
+                (today, user_id, today),
+            )
+            bills = cur.fetchall() or []
+    for b in bills:
+        dias = int(b["dias"])
+        quando = "vence HOJE" if dias == 0 else f"vence em {dias} dias"
+        ok = record_agent_event(
+            agent["agent_id"], user_id, "carteiro",
+            dedupe_key=f"bill:{b['id']}:{dias}",
+            payload={
+                "tipo": "boleto",
+                "bill_id": b["id"],
+                "nome": b["nome"],
+                "valor": float(b["amount"]),
+                "vencimento": b["due_date"].isoformat(),
+                "titulo": f"{b['nome']} {quando}",
+                "mensagem": (
+                    f"📬 {b['nome']} ({_fmt_brl(float(b['amount']))}) {quando} "
+                    f"({b['due_date'].strftime('%d/%m')})."
+                ),
+            },
+        )
+        fired += 1 if ok else 0
+    return fired
+
+
+def run_carteiro_once(today: date | None = None, user_id: int | None = None) -> dict:
+    """Roda o Carteiro pra todos os agentes ativos (ou só um usuário)."""
+    from db import list_users_with_active_agents
 
     today = today or date.today()
     agents = list_users_with_active_agents("carteiro")
+    if user_id is not None:
+        agents = [a for a in agents if a["user_id"] == user_id]
     from core.services.plan_service import agent_kind_allowed, agents_ui_enabled
     agents = [a for a in agents
               if agents_ui_enabled(a["user_id"]) and agent_kind_allowed(a["user_id"], "carteiro")]
     fired = 0
     for agent in agents:
-        user_id = agent["user_id"]
         try:
-            with get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        select b.id, b.due_date, b.amount,
-                               coalesce(b.name, r.name, 'Conta') as nome,
-                               (b.due_date - %s) as dias
-                        from bill_instances b
-                        left join recurring_expenses r on r.id = b.recurring_id
-                        where b.user_id = %s
-                          and b.status = 'pending'
-                          and (b.due_date - %s) in (3, 0)
-                        """,
-                        (today, user_id, today),
-                    )
-                    bills = cur.fetchall() or []
-            for b in bills:
-                dias = int(b["dias"])
-                quando = "vence HOJE" if dias == 0 else f"vence em {dias} dias"
-                ok = record_agent_event(
-                    agent["agent_id"], user_id, "carteiro",
-                    dedupe_key=f"bill:{b['id']}:{dias}",
-                    payload={
-                        "tipo": "boleto",
-                        "bill_id": b["id"],
-                        "nome": b["nome"],
-                        "valor": float(b["amount"]),
-                        "vencimento": b["due_date"].isoformat(),
-                        "titulo": f"{b['nome']} {quando}",
-                        "mensagem": (
-                            f"📬 {b['nome']} ({_fmt_brl(float(b['amount']))}) {quando} "
-                            f"({b['due_date'].strftime('%d/%m')})."
-                        ),
-                    },
-                )
-                fired += 1 if ok else 0
+            fired += _carteiro_detect_for_user(agent, today)
         except Exception as exc:
-            print(f"[agents] carteiro user={user_id}: {exc}", file=sys.stderr)
+            print(f"[agents] carteiro user={agent['user_id']}: {exc}", file=sys.stderr)
     return {"ok": True, "agents": len(agents), "fired": fired}
 
 
