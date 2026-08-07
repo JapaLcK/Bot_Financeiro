@@ -189,19 +189,25 @@ def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
 
 
 def send_agent_report_email(
-    to: str, user_id: int, subject: str, content_html: str, kind: str = ""
+    to: str, user_id: int, subject: str, content_html: str, kind: str = "",
+    text_content: str | None = None,
 ) -> bool:
     """E-mail proativo dos Agentes do Piggy (ex.: manchete mensal do Repórter).
 
-    Usa o template do Piggy com unsubscribe — canal grátis dos agentes. Quando
-    `kind` é um agente com arte (xerife/reporter/carteiro/detetive/cofre/barao),
-    o porquinho dele vira o banner do topo no lugar do emoji genérico.
+    Template leve/transacional + versão em texto puro + remetente pessoal
+    (oi@pigbankai.com) — tudo pra cair na Principal em vez de Promoções. O
+    porquinho do agente (`kind`) vira o banner do topo.
     """
     try:
         unsub = make_unsub_url(user_id, to)
     except RuntimeError:
         unsub = ""
-    return send_email(to, subject, _piggy_html(subject, content_html, unsub, agent_kind=kind))
+    html = _piggy_html(subject, content_html, unsub, agent_kind=kind)
+    text = text_content or _html_to_text(content_html)
+    if unsub:
+        text += f"\n\n—\nCancelar inscrição: {unsub}"
+    return send_email(to, subject, html, text_body=text,
+                      from_addr=EMAIL_FROM_PIGGY)
 
 
 def send_verification_email(to: str, code: str) -> bool:
@@ -289,25 +295,43 @@ def make_unsub_url(user_id: int, email: str) -> str:
 # Menos CSS pesado que _base_html → menor chance de cair em Promoções
 
 _AGENT_ART_KINDS = {"xerife", "reporter", "carteiro", "detetive", "cofre", "barao"}
+_AGENT_LABELS = {"xerife": "Xerife", "reporter": "Repórter", "carteiro": "Carteiro",
+                 "detetive": "Detetive", "cofre": "Banqueiro", "barao": "Barão"}
+# Agentes com arte-cena "hero" (banner full-bleed no topo, 1200x600). Quem não
+# tem cai no medalhão com o sticker. Arquivo em /brand/agents/<valor>.png.
+_AGENT_HERO = {"xerife": "xerife_hero", "carteiro": "carteiro_hero",
+               "cofre": "cofre_hero", "barao": "barao_hero",
+               "reporter": "reporter_hero", "detetive": "detetive_hero"}
 
 
 def _piggy_html(title: str, content: str, unsub_url: str = "", agent_kind: str = "") -> str:
+    """Template dos agentes — dark premium com as cores da marca (preto #111 /
+    rosa #FF2D8E / neon #C6F11A / off-white). Porquinho do agente num medalhão
+    off-white (contorno legível no escuro), chip do agente, CTA e texto puro
+    pareado pelo caller. Container largo (600) pra dar impacto."""
+    base = (os.getenv("DASHBOARD_URL") or "https://pigbankai.com").rstrip("/")
     unsub_line = (
-        f'Não quer mais receber estes emails? '
-        f'<a href="{unsub_url}" style="color:rgba(255,255,255,.35);text-decoration:underline;">Cancelar inscrição</a>'
+        f'Não quer mais estes avisos? <a href="{unsub_url}">Cancelar inscrição</a>.'
         if unsub_url else ""
     )
-    # Banner do topo: porquinho do agente (PNG hospedado, Gmail não renderiza
-    # SVG) quando houver arte; senão o emoji genérico. URL absoluta obrigatória
-    # em e-mail — usa DASHBOARD_URL.
+    # Banner: porquinho do agente (PNG hospedado — Gmail não renderiza SVG) num
+    # medalhão claro pro contorno não sumir no fundo escuro.
     if agent_kind in _AGENT_ART_KINDS:
-        _base = (os.getenv("DASHBOARD_URL") or "https://pigbankai.com").rstrip("/")
-        pig_html = (
-            f'<img src="{_base}/brand/agents/{agent_kind}.png" alt="" width="88" '
-            f'style="width:88px;height:auto;display:inline-block;margin-bottom:10px;" />'
+        pig_html = (f'<span class="tile"><img src="{base}/brand/agents/{agent_kind}.png" '
+                    f'alt="" width="150" style="width:150px;height:auto;display:block" /></span>')
+    else:
+        pig_html = '<span class="tile" style="padding:16px 24px;font-size:52px;line-height:1">🐷</span>'
+    nome = _AGENT_LABELS.get(agent_kind, "")
+    chip = f'<div><span class="chip"><span class="dot">●</span> {nome}</span></div>' if nome else ""
+    hero = _AGENT_HERO.get(agent_kind)
+    if hero:
+        header = (
+            f'<div class="hero"><img src="{base}/brand/agents/{hero}.png" alt="" width="600" '
+            f'style="width:100%;display:block;border:0" /></div>'
+            f'<div class="hdr" style="padding-top:24px"><p class="brand">Pig<b>Bank</b></p>{chip}</div>'
         )
     else:
-        pig_html = '<div class="pig">🐷</div>'
+        header = f'<div class="hdr">{pig_html}<p class="brand">Pig<b>Bank</b></p>{chip}</div>'
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -315,44 +339,61 @@ def _piggy_html(title: str, content: str, unsub_url: str = "", agent_kind: str =
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>{title}</title>
   <style>
-    body{{margin:0;padding:0;background:#0a0d18;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e2e8f0}}
-    .wrap{{max-width:560px;margin:40px auto;background:#0f1320;border-radius:20px;border:1px solid rgba(255,255,255,.1);overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.5)}}
-    .hdr{{background:linear-gradient(135deg,#1e0a3c,#0c1a3a);padding:36px 32px;text-align:center;border-bottom:1px solid rgba(255,255,255,.08)}}
-    .pig{{display:inline-block;width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#7c3aed,#3b82f6);font-size:28px;line-height:56px;text-align:center;box-shadow:0 8px 24px rgba(124,58,237,.45);margin-bottom:14px}}
-    .hdr h1{{margin:0;color:#fff;font-size:20px;font-weight:700;letter-spacing:-.02em}}
-    .hdr p{{margin:6px 0 0;color:rgba(255,255,255,.45);font-size:13px}}
-    .body{{padding:32px 32px 28px;font-size:15px;line-height:1.8;color:rgba(255,255,255,.82)}}
+    body{{margin:0;padding:24px 0;background:#0C0C0D;font-family:"Inter",-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#F6F4F1}}
+    .wrap{{max-width:600px;margin:0 auto;background:#1B1B1E;border:1px solid rgba(255,255,255,.08);border-radius:24px;overflow:hidden}}
+    .bar{{height:4px;background:#FF2D8E}}
+    .hero{{line-height:0;font-size:0}}
+    .hdr{{padding:40px 44px 24px;text-align:center}}
+    .tile{{display:inline-block;background:#F6F4F1;border-radius:24px;padding:14px 22px 0;line-height:0;box-shadow:0 10px 34px rgba(255,45,142,.20)}}
+    .brand{{margin:20px 0 0;font-size:17px;font-weight:800;letter-spacing:-.02em;color:#F6F4F1}}
+    .brand b{{color:#FF2D8E}}
+    .chip{{display:inline-block;margin:20px 0 0;padding:6px 14px;border-radius:999px;background:rgba(255,45,142,.12);border:1px solid rgba(255,45,142,.30);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#FF6FB0}}
+    .chip .dot{{color:#C6F11A}}
+    .body{{padding:14px 44px 8px;font-size:16px;line-height:1.75;color:#E7E4E0}}
     .body p{{margin:0 0 16px}}
-    .body ul,.body ol{{margin:0 0 16px;padding-left:20px;color:rgba(255,255,255,.72)}}
-    .body li{{margin-bottom:6px}}
-    .body strong{{color:#fff}}
-    .cmd{{background:rgba(124,58,237,.12);border:1px solid rgba(124,58,237,.25);border-radius:8px;
-          padding:10px 16px;margin:6px 0;font-family:monospace;font-size:14px;color:#a78bfa;display:block}}
-    .box{{background:rgba(255,255,255,.04);border-left:3px solid #7c3aed;border-radius:0 10px 10px 0;padding:16px 20px;margin:20px 0}}
-    .sig{{color:rgba(255,255,255,.55);font-size:14px;margin-top:8px!important}}
-    .footer{{padding:18px 32px 24px;background:rgba(255,255,255,.02);border-top:1px solid rgba(255,255,255,.06);
-             font-size:12px;color:rgba(255,255,255,.28);line-height:1.7;text-align:center}}
-    .footer a{{color:rgba(255,255,255,.35);text-decoration:none}}
-    a{{color:#a78bfa;text-decoration:none}}
+    .body ul{{margin:0 0 16px;padding-left:20px}}
+    .body li{{margin-bottom:8px}}
+    .body strong{{color:#fff;font-weight:700}}
+    .lead{{font-size:19px;line-height:1.5;font-weight:600;color:#fff;margin:0 0 18px}}
+    .box{{background:rgba(255,45,142,.08);border-left:3px solid #FF2D8E;border-radius:0 12px 12px 0;padding:16px 20px;margin:22px 0;color:#F1D9E6;font-size:15px}}
+    .sig{{color:#9C9C9A;font-size:14px;margin:18px 0 0}}
+    .cta-wrap{{padding:8px 44px 40px;text-align:center}}
+    .cta{{display:inline-block;background:#FF2D8E;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 30px;border-radius:999px;box-shadow:0 8px 24px rgba(255,45,142,.35)}}
+    .footer{{padding:22px 44px 30px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:#7E7E7C;line-height:1.7;text-align:center}}
+    .footer a{{color:#9C9C9A;text-decoration:underline}}
+    a{{color:#FF2D8E}}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="hdr">
-      {pig_html}
-      <h1>PigBank</h1>
-      <p>Seu assistente financeiro inteligente</p>
-    </div>
+    <div class="bar"></div>
+    {header}
     <div class="body">{content}</div>
+    <div class="cta-wrap">
+      <a class="cta" href="{base}">Ver no painel &rarr;</a>
+    </div>
     <div class="footer">
-      Você recebe este email porque tem uma conta no PigBank.<br/>
-      Dúvidas? Use o comando <strong>ajuda</strong> no bot ou acesse
-      <a href="https://pigbankai.com">pigbankai.com</a><br/><br/>
+      Você recebe este e-mail porque tem uma conta no PigBank.<br/>
       {unsub_line}
     </div>
   </div>
 </body>
 </html>"""
+
+
+def _html_to_text(html: str) -> str:
+    """Versão em texto puro do corpo (transacional quase sempre tem uma; a
+    ausência é sinal de bulk pro Gmail). Strip simples, bom o bastante."""
+    import html as _htmlmod
+    import re as _re
+    t = _re.sub(r"(?i)<br\s*/?>", "\n", html)
+    t = _re.sub(r"(?i)</(p|li|div|h[1-6]|ul|ol|tr)>", "\n", t)
+    t = _re.sub(r"(?i)<li[^>]*>", "• ", t)
+    t = _re.sub(r"<[^>]+>", "", t)
+    t = _htmlmod.unescape(t)
+    t = _re.sub(r"[ \t]+", " ", t)
+    t = _re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
 
 
 # ─── Conteúdo de engajamento ──────────────────────────────────────────────────

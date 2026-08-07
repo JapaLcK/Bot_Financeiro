@@ -137,8 +137,9 @@ def _xerife_detect_for_user(agent: dict[str, Any], today: date) -> int:
                 "titulo": f"Gasto fora do padrão em {a['categoria']}",
                 "mensagem": (
                     f"{_fmt_brl(valor)} em {a['categoria']}"
-                    f"{' (' + a['descricao'] + ')' if a['descricao'] else ''} — "
-                    f"seu normal na categoria é {_fmt_brl(media)}. Tá tudo certo?"
+                    f"{' (' + a['descricao'] + ')' if a['descricao'] else ''} — bem acima do "
+                    f"seu normal ({_fmt_brl(media)}). Gasto grande fora do padrão é o que mais "
+                    f"pesa no fim do mês; fica de olho pra não deixar virar rotina."
                 ),
             },
         )
