@@ -13,8 +13,12 @@ from core.reports.reports_daily import (
 _TZ = ZoneInfo("America/Sao_Paulo")
 
 
+def _cb(value):
+    return {"manual": value, "open_finance_bank": 0, "of_bank_count": 0, "consolidated": value}
+
+
 def test_build_weekly_report_text():
-    with patch("core.reports.reports_daily.get_balance", return_value=1000), \
+    with patch("core.reports.reports_daily.get_consolidated_balance", return_value=_cb(1000)), \
          patch("core.reports.reports_daily.get_launches_by_period", return_value=[{"id": 1}, {"id": 2}, {"id": 3}]), \
          patch("core.reports.reports_daily.get_summary_by_period", return_value={"despesa": 150.0, "receita": 20.0}):
         msg = build_weekly_report_text(123)
@@ -27,7 +31,7 @@ def test_build_weekly_report_text():
 
 
 def test_build_monthly_report_text():
-    with patch("core.reports.reports_daily.get_balance", return_value=1000), \
+    with patch("core.reports.reports_daily.get_consolidated_balance", return_value=_cb(1000)), \
          patch("core.reports.reports_daily.get_launches_by_period", return_value=[{"id": 1}]), \
          patch("core.reports.reports_daily.get_summary_by_period", return_value={"despesa": 999.90, "receita": 500.0}):
         msg = build_monthly_report_text(123)
@@ -49,7 +53,7 @@ def test_weekly_closed_usa_semana_anterior():
         return {"despesa": 0.0, "receita": 0.0}
 
     with patch("core.reports.reports_daily.now_tz", return_value=fake_now), \
-         patch("core.reports.reports_daily.get_balance", return_value=0), \
+         patch("core.reports.reports_daily.get_consolidated_balance", return_value=_cb(0)), \
          patch("core.reports.reports_daily.get_launches_by_period", return_value=[]), \
          patch("core.reports.reports_daily.get_summary_by_period", side_effect=_fake_summary):
         s = build_weekly_report_summary(123, closed=True)
@@ -69,7 +73,7 @@ def test_monthly_closed_usa_mes_anterior():
         return {"despesa": 0.0, "receita": 0.0}
 
     with patch("core.reports.reports_daily.now_tz", return_value=fake_now), \
-         patch("core.reports.reports_daily.get_balance", return_value=0), \
+         patch("core.reports.reports_daily.get_consolidated_balance", return_value=_cb(0)), \
          patch("core.reports.reports_daily.get_launches_by_period", return_value=[]), \
          patch("core.reports.reports_daily.get_summary_by_period", side_effect=_fake_summary):
         s = build_monthly_report_summary(123, closed=True)

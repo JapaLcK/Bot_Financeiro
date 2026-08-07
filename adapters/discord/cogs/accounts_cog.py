@@ -19,7 +19,7 @@ from openpyxl.chart import PieChart, Reference
 from openpyxl.styles import Font, PatternFill, Alignment
 
 from db import (
-    get_balance,
+    get_consolidated_balance,
     list_launches,
     delete_launch_and_rollback,
     set_pending_action,
@@ -39,8 +39,16 @@ class AccountsCog(commands.Cog):
 
         # ── Saldo conta ───────────────────────────────────────────────────────
         if t in ("saldo", "saldo conta", "saldo da conta", "conta", "saldo geral"):
-            bal = get_balance(uid)
-            await message.reply(f"🏦 **Conta Corrente:** {fmt_brl(float(bal))}")
+            # Com banco conectado (Open Finance), o saldo real é o consolidado.
+            cb = get_consolidated_balance(uid)
+            if int(cb.get("of_bank_count") or 0) > 0:
+                await message.reply(
+                    f"💰 **Saldo total:** {fmt_brl(float(cb['consolidated'] or 0))}\n"
+                    f"  👛 Carteira: {fmt_brl(float(cb['manual'] or 0))}\n"
+                    f"  🏦 Bancos conectados: {fmt_brl(float(cb['open_finance_bank'] or 0))}"
+                )
+            else:
+                await message.reply(f"🏦 **Conta Corrente:** {fmt_brl(float(cb['manual'] or 0))}")
             return True
 
         # ── Desfazer último lançamento ────────────────────────────────────────
@@ -208,7 +216,7 @@ class AccountsCog(commands.Cog):
                 despesas_por_categoria[cat] = despesas_por_categoria.get(cat, 0.0) + valor
 
         saldo_periodo = total_rec - total_des
-        saldo_atual = get_balance(uid)
+        saldo_atual = float(get_consolidated_balance(uid)["consolidated"] or 0)
 
         # ── Dashboard tab ──────────────────────────────────────────────────
         ws_dash.append(["Período", f"{start.strftime('%d/%m/%Y')} a {end.strftime('%d/%m/%Y')}"])

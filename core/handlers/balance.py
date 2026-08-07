@@ -10,9 +10,16 @@ def check(user_id: int) -> str:
     today = today_tz()
     lines: list[str] = []
 
-    # ── Saldo da conta corrente ──────────────────────────────────────────
-    bal = float(db.get_balance(user_id) or 0)
-    lines.append(f"🏦 *Conta Corrente*: {fmt_brl(bal)}")
+    # ── Saldo da conta ───────────────────────────────────────────────────
+    # Com banco conectado (Open Finance), o saldo verdadeiro é o consolidado:
+    # Carteira (manual) + saldos autoritativos das contas bancárias sincronizadas.
+    cb = db.get_consolidated_balance(user_id)
+    if int(cb.get("of_bank_count") or 0) > 0:
+        lines.append(f"💰 *Saldo total*: {fmt_brl(float(cb['consolidated'] or 0))}")
+        lines.append(f"  👛 Carteira: {fmt_brl(float(cb['manual'] or 0))}")
+        lines.append(f"  🏦 Bancos conectados: {fmt_brl(float(cb['open_finance_bank'] or 0))}")
+    else:
+        lines.append(f"🏦 *Conta Corrente*: {fmt_brl(float(cb['manual'] or 0))}")
 
     # ── Gastos de hoje ───────────────────────────────────────────────────
     today_launches = db.get_launches_by_period(user_id, today, today)

@@ -4,7 +4,8 @@ from core.reports.reports_daily import build_daily_report_text
 
 
 def test_build_daily_report_text_usa_formato_compacto():
-    with patch("core.reports.reports_daily.get_balance", return_value=1000), \
+    with patch("core.reports.reports_daily.get_consolidated_balance",
+               return_value={"manual": 1000, "open_finance_bank": 0, "of_bank_count": 0, "consolidated": 1000}), \
          patch("core.reports.reports_daily.get_launches_by_period", return_value=[{"id": 1}, {"id": 2}]), \
          patch("core.reports.reports_daily.get_summary_by_period", return_value={"despesa": 42.90, "receita": 10.0}):
         msg = build_daily_report_text(123)
