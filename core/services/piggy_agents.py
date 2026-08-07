@@ -705,6 +705,14 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
         try:
             if not (agents_ui_enabled(user_id) and agent_kind_allowed(user_id, kind)):
                 continue
+            # Opt-out por agente: se o usuário desligou o e-mail desse agente, o feed
+            # continua mas o e-mail é suprimido (marca como enviado pra não acumular).
+            cfg = a.get("config") or {}
+            if not cfg.get("email_enabled", True):
+                pend = list_unemailed_events(agent_id)
+                if pend:
+                    mark_events_emailed([e["id"] for e in pend])
+                continue
             interval_h = _AGENT_EMAIL_INTERVAL_H.get(kind, _DEFAULT_EMAIL_INTERVAL_H)
             last = a.get("last_emailed_at")
             if last is not None and (now - last) < timedelta(hours=interval_h):

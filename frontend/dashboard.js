@@ -9243,6 +9243,16 @@ function _renderAgentes(data) {
         : canActivate
           ? `<button class="ag-btn ag-btn-on" onclick="activateAgent('${card.kind}')">Ativar</button>`
           : `<button class="ag-btn ag-btn-on" onclick="showUpgradeModal('agents')">🔒 Ativar</button>`;
+    // Opt-out por agente: quando ativo, deixa ligar/desligar o e-mail (o feed
+    // continua). Padrão = ligado. Estilo inline pra não exigir bump de cache CSS.
+    const emailOn = ((card.config || {}).email_enabled) !== false;
+    const emailToggle = (active && card.disponivel)
+      ? `<button onclick="toggleAgentEmail('${card.kind}', ${emailOn ? "false" : "true"})"
+           title="Receber os avisos deste agente por e-mail"
+           style="margin-top:8px;width:100%;padding:7px 10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:transparent;color:rgba(255,255,255,.6);font-size:.72rem;cursor:pointer">
+           📧 E-mail: <b style="color:${emailOn ? "#22c55e" : "rgba(255,255,255,.4)"}">${emailOn ? "ligado" : "desligado"}</b>
+         </button>`
+      : "";
     return `
       <div class="ag-card${!card.disponivel ? " ag-card-soon" : ""}">
         <div class="ag-avatar ag-bg-${esc(card.kind)}">
@@ -9252,6 +9262,7 @@ function _renderAgentes(data) {
         <p class="ag-desc">${esc(card.desc)}</p>
         <div class="ag-chips">${chips}</div>
         ${btn}
+        ${emailToggle}
       </div>
     `;
   }).join("");
@@ -9316,6 +9327,20 @@ async function pauseAgent(kind) {
       method: "POST", credentials: "same-origin", headers: csrfHeaders(),
     });
     if (!res.ok) throw new Error("Não deu pra pausar o agente.");
+    loadAgentesView(true);
+  } catch (err) {
+    alert(String(err.message || err));
+  }
+}
+
+async function toggleAgentEmail(kind, enabled) {
+  try {
+    const res = await fetch(`${API}/agents/${USER_ID}/${kind}/email`, {
+      method: "POST", credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) throw new Error("Não deu pra mudar o e-mail do agente.");
     loadAgentesView(true);
   } catch (err) {
     alert(String(err.message || err));

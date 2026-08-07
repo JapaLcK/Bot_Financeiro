@@ -238,6 +238,7 @@ from .agents import (
     list_unemailed_events,
     mark_events_emailed,
     touch_agent_emailed,
+    set_agent_email_enabled,
     list_users_with_active_agents,
 )
 
@@ -497,5 +498,5 @@ __all__ = [
     "activate_agent", "pause_agent", "record_agent_event", "list_agent_events",
     "mark_agent_events_seen", "agents_summary", "list_users_with_active_agents",
     "list_agents_pending_email", "list_unemailed_events", "mark_events_emailed",
-    "touch_agent_emailed",
+    "touch_agent_emailed", "set_agent_email_enabled",
 ]

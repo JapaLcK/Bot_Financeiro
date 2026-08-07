@@ -236,6 +236,22 @@ def touch_agent_emailed(agent_id: int) -> None:
         conn.commit()
 
 
+def set_agent_email_enabled(user_id: int, kind: str, enabled: bool) -> bool:
+    """Liga/desliga o envio de e-mail desse agente (grava em config.email_enabled).
+    Feed continua sempre; só o e-mail proativo é suprimido quando desligado.
+    Retorna False se o usuário não tem esse agente."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update agents set config = coalesce(config, '{}'::jsonb) || %s::jsonb "
+                "where user_id=%s and kind=%s",
+                (json.dumps({"email_enabled": bool(enabled)}), user_id, kind),
+            )
+            ok = cur.rowcount > 0
+        conn.commit()
+    return ok
+
+
 def agents_summary(user_id: int) -> dict[str, Any]:
     """Contadores do topo da página: ativos, pausados, disparos do mês, salvos no ano."""
     with get_conn() as conn:
