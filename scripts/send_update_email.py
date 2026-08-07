@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(ROOT, ".env"))
 
 import db
-from core.services.email_service import send_email, _piggy_html, make_unsub_url, EMAIL_FROM_PIGGY
+from core.services.email_service import send_email, _piggy_html, make_unsub_url, unsub_headers, EMAIL_FROM_PIGGY
 
 # ─── Conteúdo do e-mail ───────────────────────────────────────────────────────
 
@@ -146,7 +146,7 @@ def main():
             html_body=html,
             text_body=text,
             from_addr=EMAIL_FROM_PIGGY,
-            headers={"List-Unsubscribe": f"<{make_unsub_url(uid, email)}>"},
+            headers=unsub_headers(make_unsub_url(uid, email)),
         )
         status = "✅" if sent else "❌"
         print(f"  {status} {email}")

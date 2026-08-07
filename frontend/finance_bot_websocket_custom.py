@@ -35,7 +35,7 @@ from typing import Dict
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, RedirectResponse, HTMLResponse, JSONResponse
+from fastapi.responses import StreamingResponse, RedirectResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
 from pydantic import BaseModel
@@ -4431,9 +4431,8 @@ def _verify_unsub_token(user_id: int, email: str, token: str) -> bool:
     return _hmac.compare_digest(expected, token)
 
 
-@app.get("/unsubscribe")
-async def unsubscribe(uid: int, token: str):
-    # busca o email pelo user_id
+async def _apply_unsubscribe(uid: int, token: str) -> bool:
+    """Valida o token e marca o opt-out. Retorna False pra uid/token inválido."""
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -4441,12 +4440,8 @@ async def unsubscribe(uid: int, token: str):
             )
             row = await cur.fetchone()
 
-    if not row:
-        return HTMLResponse("<h2>Link inválido.</h2>", status_code=400)
-
-    email = row["email"]
-    if not _verify_unsub_token(uid, email, token):
-        return HTMLResponse("<h2>Link inválido ou expirado.</h2>", status_code=400)
+    if not row or not _verify_unsub_token(uid, row["email"], token):
+        return False
 
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
@@ -4455,6 +4450,23 @@ async def unsubscribe(uid: int, token: str):
                 (uid,),
             )
         await conn.commit()
+    return True
+
+
+@app.post("/unsubscribe")
+async def unsubscribe_one_click(uid: int, token: str):
+    """One-click unsubscribe (RFC 8058): o Gmail/Yahoo fazem POST na URL do
+    header List-Unsubscribe quando o usuário toca no botão nativo "Cancelar
+    inscrição". Sem interação — só 200 em texto puro, nada de HTML."""
+    if not await _apply_unsubscribe(uid, token):
+        return PlainTextResponse("invalid", status_code=400)
+    return PlainTextResponse("ok")
+
+
+@app.get("/unsubscribe")
+async def unsubscribe(uid: int, token: str):
+    if not await _apply_unsubscribe(uid, token):
+        return HTMLResponse("<h2>Link inválido ou expirado.</h2>", status_code=400)
 
     return HTMLResponse("""
 <!DOCTYPE html>
