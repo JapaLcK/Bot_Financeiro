@@ -648,10 +648,11 @@ def run_barao_once(today: date | None = None, user_id: int | None = None) -> dic
 _AGENT_EMAIL_INTERVAL_H = {
     "reporter": 24 * 20,   # manchete mensal
     "barao": 24 * 20,      # mensal
-    "cofre": 6,            # por aporte (raro), teto de 6h
+    "cofre": 0,            # SEM teto: manda a cada aporte detectado (dedupe já
+                           # evita duplicar; aporte é raro e positivo, não spam)
     "xerife": 24,          # no máx 1x/dia
     "carteiro": 24,        # no máx 1x/dia
-    "detetive": 24 * 7,    # no máx 1x/semana
+    "detetive": 24 * 30,   # 1x/mês
 }
 _DEFAULT_EMAIL_INTERVAL_H = 24
 
