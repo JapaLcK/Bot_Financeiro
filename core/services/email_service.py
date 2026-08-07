@@ -734,6 +734,29 @@ def send_password_reset_email(to: str, reset_url: str) -> bool:
     return send_email(to=to, subject="🔑 Redefinir senha — PigBank", html_body=html, text_body=text)
 
 
+def send_account_exists_notice(to: str, login_url: str = "", reset_url: str = "") -> bool:
+    """Aviso out-of-band enviado quando alguém tenta se cadastrar com e-mail/
+    telefone que já pertence a esta conta. Enviado NO LUGAR de revelar "já
+    existe" na resposta do cadastro (anti-enumeração)."""
+    login_url = login_url or "https://pigbankai.com/login"
+    reset_url = reset_url or login_url
+    content = f"""
+      <p>Olá!</p>
+      <p>Alguém tentou criar uma conta no <strong>PigBank</strong> usando dados que já pertencem à sua conta.</p>
+      <p><strong>Se foi você</strong>, não precisa criar outra — é só entrar:</p>
+      <p style="text-align:center"><a class="btn" href="{login_url}">🐷 Entrar na minha conta</a></p>
+      <p class="warn">Esqueceu a senha? <a href="{reset_url}">Recupere aqui</a>.<br/>
+        <strong>Se não foi você</strong>, pode ignorar este e-mail — nenhuma conta nova foi criada e nada mudou.</p>
+    """
+    html = _base_html("Você já tem conta — PigBank", content)
+    text = (
+        "Alguém tentou criar uma conta no PigBank com seus dados. "
+        f"Se foi você, entre em {login_url} (recupere a senha se precisar). "
+        "Se não foi, ignore — nada mudou."
+    )
+    return send_email(to=to, subject="🐷 Você já tem conta no PigBank", html_body=html, text_body=text)
+
+
 def send_data_export_link_email(
     to: str,
     download_url: str,

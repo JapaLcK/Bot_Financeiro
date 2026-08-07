@@ -123,8 +123,11 @@ DASHBOARD_USER_ID = os.getenv("DASHBOARD_USER_ID")
 TZ                = os.getenv("TZ", "America/Sao_Paulo")
 # JWT_SECRET e DASHBOARD_URL (leitura + sanitização do env) vêm de frontend/routes/shared.py
 # Em dev local (http://localhost) o navegador rejeita cookies Secure. Em prod
-# DASHBOARD_URL é https → Secure=True como sempre.
-COOKIE_SECURE = DASHBOARD_URL.startswith("https://")
+# DASHBOARD_URL é https → Secure=True. Blindagem: se APP_ENV=prod, força Secure
+# mesmo que DASHBOARD_URL esteja mal configurado como http:// (senão os cookies
+# de auth iriam sem o Secure em produção).
+_APP_ENV = (os.getenv("APP_ENV") or "").strip().lower()
+COOKIE_SECURE = DASHBOARD_URL.startswith("https://") or _APP_ENV in ("prod", "production")
 WHATSAPP_NUMBER         = os.getenv("WHATSAPP_NUMBER", "")
 STRIPE_SECRET_KEY       = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET   = os.getenv("STRIPE_WEBHOOK_SECRET", "")
@@ -1800,6 +1803,9 @@ EMAIL_RATE_LIMITS = {
     "register": (3, 60 * 60),
     "login": (5, 60),
     "forgot-password": (3, 60 * 60),
+    # Teto por e-mail no confirm do código de verificação (6 dígitos): impede
+    # brute-force do código mesmo com rotação de IP. 10 tentativas / 15 min.
+    "verify-email": (10, 15 * 60),
 }
 
 
@@ -2057,6 +2063,14 @@ async def _get_current_user(
         request.state.session_jti = jti
         # Atualiza last_seen com debounce; falha silenciosa.
         asyncio.create_task(asyncio.to_thread(touch_session, jti))
+    else:
+        # Token legado sem jti: não há sessão pra revogar. Se a conta trocou de
+        # senha (reset), invalida o token — senão um token roubado sobreviveria
+        # ao reset até expirar. Tokens com jti já são cobertos pela revogação
+        # de sessão feita no reset.
+        from db import get_password_changed_at
+        if await asyncio.to_thread(get_password_changed_at, user_id):
+            raise HTTPException(status_code=401, detail="Sessão expirada. Faça login novamente.")
 
     _raise_if_account_scheduled_for_deletion(user_id)
     return user_id
@@ -2231,7 +2245,7 @@ async def auth_register(request: Request, body: RegisterBody):
     """
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import create_email_verification
+    from db import create_email_verification, AccountAlreadyExistsError, get_auth_user
     from core.services.email_service import send_verification_email
 
     await _check_auth_rate_limits("register", request, body.email)
@@ -2255,6 +2269,20 @@ async def auth_register(request: Request, body: RegisterBody):
         code = create_email_verification(
             body.email, body.password, body.phone, display_name=name,
         )
+    except AccountAlreadyExistsError as exc:
+        # Anti-enumeração: e-mail/telefone já existe. NÃO revela isso — responde
+        # exatamente como no caminho normal e avisa o dono da conta por e-mail
+        # (out-of-band). O visitante não consegue distinguir "existe" de "novo".
+        # O rate-limit de cadastro (3/h por IP+e-mail) já limita spam do aviso.
+        try:
+            owner = await asyncio.to_thread(get_auth_user, exc.existing_user_id) if exc.existing_user_id else None
+            owner_email = (owner or {}).get("email")
+            if owner_email:
+                from core.services.email_service import send_account_exists_notice
+                await asyncio.to_thread(send_account_exists_notice, owner_email, f"{DASHBOARD_URL}/login")
+        except Exception as notice_exc:
+            logging.getLogger(__name__).warning("account_exists_notice falhou: %s", notice_exc)
+        return {"status": "verification_sent", "email": body.email.strip().lower()}
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
@@ -2275,6 +2303,10 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import confirm_email_verification
+
+    # Teto por e-mail (além do limite por IP do @limiter): impede brute-force
+    # do código de 6 dígitos rotacionando IP.
+    await _check_auth_rate_limits("verify-email", request, body.email)
 
     try:
         result = confirm_email_verification(body.email, body.code)
@@ -2523,6 +2555,17 @@ async def auth_reset_password(request: Request, body: ResetPasswordBody):
     if not user_id:
         raise HTTPException(status_code=400, detail="Link inválido ou expirado. Solicite um novo.")
 
+    # Segurança: um reset de senha deve encerrar TODAS as sessões e refresh
+    # tokens existentes — senão quem tinha uma sessão roubada continua dentro
+    # mesmo depois da vítima trocar a senha (que é justamente o motivo do reset).
+    from core.sessions import revoke_other_sessions
+    from core.refresh_tokens import revoke_user_refresh_tokens
+    try:
+        await asyncio.to_thread(revoke_other_sessions, int(user_id), None)
+        await asyncio.to_thread(revoke_user_refresh_tokens, int(user_id))
+    except Exception as exc:  # nunca deixa o reset falhar por causa da revogação
+        logging.getLogger(__name__).warning("reset_revoke_sessions user=%s: %s", user_id, exc)
+
     await asyncio.to_thread(
         record_audit_event,
         user_id,
@@ -2534,7 +2577,8 @@ async def auth_reset_password(request: Request, body: ResetPasswordBody):
 
 
 @app.post("/auth/link-code")
-async def auth_new_link_code(user_id: int = Depends(_get_current_user)):
+@limiter.limit("15/hour")
+async def auth_new_link_code(request: Request, user_id: int = Depends(_get_current_user)):
     """Gera um novo link_code para o usuário autenticado vincular uma nova plataforma."""
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -2591,9 +2635,14 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     plan_tier = await asyncio.to_thread(get_plan_tier, user_id)
     trial = await asyncio.to_thread(get_trial_status, user_id, user_dict)
     earliest_history = await asyncio.to_thread(history_earliest_date, user_id)
+    # Não devolve pro cliente os blobs cifrados (redundantes — já há o claro
+    # decifrado) nem o id de cliente do Stripe (interno). Só o próprio usuário
+    # vê a resposta, mas é allowlist por precaução (evita vazar colunas novas).
+    _ME_HIDDEN = {"email_enc", "display_name_enc", "phone_enc", "stripe_customer_id"}
+    safe_user = {k: v for k, v in user_dict.items() if k not in _ME_HIDDEN}
     return {
         "user_id": user_id,
-        **user_dict,
+        **safe_user,
         "show_mfa_onboarding": show_onboarding,
         "mfa_enabled": bool(mfa.get("enabled")),
         "app_access": has_app_access(user_id),
@@ -3596,7 +3645,9 @@ async def billing_plans_config():
 
 
 @app.post("/billing/create-checkout")
+@limiter.limit("20/hour")
 async def billing_create_checkout(
+    request: Request,
     payload: CreateCheckoutBody | None = None,
     user_id: int = Depends(_get_current_user),
 ):
@@ -3707,7 +3758,9 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
 
 
 @app.post("/billing/change-plan")
+@limiter.limit("15/hour")
 async def billing_change_plan(
+    request: Request,
     payload: ChangePlanBody,
     user_id: int = Depends(_get_current_user),
 ):
@@ -3784,7 +3837,7 @@ async def billing_change_plan(
         )
     except stripe.error.StripeError as exc:
         logging.getLogger(__name__).error("change_plan_stripe_error user=%s: %s", user_id, exc)
-        raise HTTPException(status_code=502, detail=f"O Stripe recusou a troca: {exc}")
+        raise HTTPException(status_code=502, detail="Não foi possível trocar seu plano agora. Tente novamente em instantes.")
 
     effective_iso = datetime.fromtimestamp(period_end, tz=timezone.utc).date().isoformat()
 
@@ -3811,7 +3864,8 @@ async def billing_change_plan(
 
 
 @app.post("/billing/cancel-change")
-async def billing_cancel_change(user_id: int = Depends(_get_current_user)):
+@limiter.limit("15/hour")
+async def billing_cancel_change(request: Request, user_id: int = Depends(_get_current_user)):
     """Desfaz uma troca de plano agendada (solta o schedule; assinatura segue
     no plano atual como se nada tivesse acontecido)."""
     import stripe
@@ -3838,7 +3892,8 @@ async def billing_cancel_change(user_id: int = Depends(_get_current_user)):
     try:
         await asyncio.to_thread(stripe.SubscriptionSchedule.release, sched_id)
     except stripe.error.StripeError as exc:
-        raise HTTPException(status_code=502, detail=f"O Stripe recusou o cancelamento: {exc}")
+        logging.getLogger(__name__).error("cancel_change_stripe_error user=%s: %s", user_id, exc)
+        raise HTTPException(status_code=502, detail="Não foi possível desfazer a troca agora. Tente novamente em instantes.")
     await log_system_event(
         "info", "billing_plan_change_cancelled",
         "Troca de plano agendada foi desfeita.", source="billing", user_id=user_id,
@@ -4162,7 +4217,8 @@ async def billing_webhook(request: Request):
 
 
 @app.post("/billing/portal")
-async def billing_portal(user_id: int = Depends(_get_current_user)):
+@limiter.limit("30/hour")
+async def billing_portal(request: Request, user_id: int = Depends(_get_current_user)):
     """
     Cria uma sessão no Stripe Customer Portal para o usuário gerenciar
     a assinatura (cancelar, trocar cartão, ver faturas).
@@ -4665,7 +4721,8 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             except Exception as exc:
-                raise HTTPException(status_code=500, detail=f"Erro ao registrar parcelamento: {exc}") from exc
+                logging.getLogger(__name__).error("registrar_parcelamento user=%s: %s", user_id, exc)
+                raise HTTPException(status_code=500, detail="Erro ao registrar parcelamento. Tente novamente.") from exc
 
             info, total = (result[0], result[1]) if isinstance(result, tuple) else (result, valor)
             return {

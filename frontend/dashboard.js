@@ -9277,9 +9277,9 @@ function _renderAgentes(data) {
   }
 }
 
-// Kinds com arte PNG real em /brand/agents/. O que não tiver (ex.: aviador)
-// cai no porquinho SVG placeholder — nada quebra até a arte chegar.
-const _AGENT_ART = new Set(["xerife", "reporter", "carteiro", "detetive", "cofre", "barao"]);
+// Kinds com arte PNG real em /brand/agents/. Kind fora deste set cai no
+// porquinho SVG placeholder — nada quebra até a arte chegar.
+const _AGENT_ART = new Set(["xerife", "reporter", "carteiro", "detetive", "cofre", "barao", "aviador"]);
 function _agentArt(kind, hero = false) {
   if (_AGENT_ART.has(kind)) {
     // hero = a cena cinematográfica do e-mail ({kind}_hero.png, 1200x600),
