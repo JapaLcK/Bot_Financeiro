@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from db.connection import get_conn
@@ -222,7 +222,7 @@ def _month_stats(cur, user_id: int, first: date, nxt: date) -> dict[str, float]:
 
 
 def _reporter_run_for_user(agent: dict[str, Any], today: date) -> bool:
-    from db import record_agent_event, get_user_email, get_auth_user
+    from db import record_agent_event
 
     user_id = agent["user_id"]
     first_this = today.replace(day=1)
@@ -264,38 +264,10 @@ def _reporter_run_for_user(agent: dict[str, Any], today: date) -> bool:
         },
         channel="email",
     )
-    if not inserted:
-        return False  # manchete do mês já publicada
-
-    # E-mail é o canal principal do Repórter. Falha de e-mail não desfaz o
-    # evento do feed — o dashboard sempre registra. Mas respeita quem se
-    # descadastrou dos e-mails de engajamento (engagement_opt_out, setado no
-    # /unsubscribe e no comando "parar emails"): a manchete continua no feed,
-    # só o envio proativo é suprimido.
-    try:
-        auth = get_auth_user(user_id)
-        opted_out = bool(auth and auth.get("engagement_opt_out"))
-        email = None if opted_out else get_user_email(user_id)
-        if email:
-            from core.services.email_service import send_agent_report_email
-            corpo = (
-                f"<p>🎤 Direto da redação, a manchete de <strong>{mes_nome}</strong>:</p>"
-                f"<div class=\"box\"><p style=\"margin:0\">"
-                f"<strong>Entrou:</strong> {_fmt_brl(stats['entrou'])}<br/>"
-                f"<strong>Saiu:</strong> {_fmt_brl(stats['saiu'])}<br/>"
-                f"<strong>Aportes nas caixinhas:</strong> {_fmt_brl(stats['aportes'])}<br/>"
-                f"<strong>Sobrou:</strong> {_fmt_brl(stats['sobrou'])}"
-                + (f" ({'+' if delta_pct >= 0 else ''}{delta_pct}% vs mês anterior)"
-                   if delta_pct is not None else "")
-                + "</p></div>"
-                f"<p>O detalhe completo tá no seu dashboard. Quer que eu abra a conta "
-                f"de alguma categoria? É só perguntar no WhatsApp. 🐷</p>"
-                f"<p class=\"sig\">— Repórter, o porquinho de plantão</p>"
-            )
-            send_agent_report_email(email, user_id, f"🎤 {titulo} — PigBank", corpo, kind="reporter")
-    except Exception as exc:
-        print(f"[agents] reporter email user={user_id}: {exc}", file=sys.stderr)
-    return True
+    # O e-mail (canal principal do Repórter) sai pelo mini-digest por agente
+    # (run_agent_emails_once), que batcheia + respeita o teto de cadência e o
+    # opt-out. Aqui só registramos o evento no feed.
+    return bool(inserted)
 
 
 def run_reporter_once(today: date | None = None) -> dict:
@@ -669,6 +641,97 @@ def run_barao_once(today: date | None = None, user_id: int | None = None) -> dic
     return {"ok": True, "agents": len(agents), "fired": fired}
 
 
+# ── Mini-digest por agente: 1 e-mail por agente, batcheado + teto de cadência ──
+
+# Intervalo mínimo (horas) entre e-mails do MESMO agente. Segura a rajada
+# (Detetive na estreia, cluster de boletos) sem precisar do digest global.
+_AGENT_EMAIL_INTERVAL_H = {
+    "reporter": 24 * 20,   # manchete mensal
+    "barao": 24 * 20,      # mensal
+    "cofre": 6,            # por aporte (raro), teto de 6h
+    "xerife": 24,          # no máx 1x/dia
+    "carteiro": 24,        # no máx 1x/dia
+    "detetive": 24 * 7,    # no máx 1x/semana
+}
+_DEFAULT_EMAIL_INTERVAL_H = 24
+
+_AGENT_EMAIL_LABEL = {
+    "xerife": "🤠 Xerife", "reporter": "🎤 Repórter", "carteiro": "📬 Carteiro",
+    "detetive": "🔍 Detetive", "cofre": "🎯 Banqueiro", "barao": "🎩 Barão",
+}
+
+
+def _esc_html(s: Any) -> str:
+    return str(s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _agent_email_subject(kind: str, events: list[dict[str, Any]]) -> str:
+    label = _AGENT_EMAIL_LABEL.get(kind, "PigBank")
+    if len(events) == 1:
+        titulo = (events[0].get("payload") or {}).get("titulo") or "novidade"
+        return f"{label} — {titulo}"[:120]
+    return f"{label} — {len(events)} novidades"
+
+
+def _compose_agent_email(kind: str, events: list[dict[str, Any]]) -> str:
+    label = _AGENT_EMAIL_LABEL.get(kind, "")
+    parts: list[str] = []
+    if len(events) > 1:
+        parts.append(f"<p>Novidades do seu {label} — {len(events)} desde o último aviso:</p>")
+    for e in events:
+        p = e.get("payload") or {}
+        parts.append(
+            f'<div class="box"><p style="margin:0"><strong>{_esc_html(p.get("titulo"))}</strong>'
+            f'<br/>{_esc_html(p.get("mensagem"))}</p></div>'
+        )
+    parts.append('<p>O detalhe completo tá no seu painel. 🐷</p>')
+    return "".join(parts)
+
+
+def run_agent_emails_once(now: datetime | None = None) -> dict:
+    """Mini-digest POR AGENTE: pra cada agente ativo com evento novo, junta os
+    eventos dele num único e-mail (com sua arte/voz) e envia — respeitando o teto
+    de cadência do kind e o opt-out. Mantém e-mails separados por agente sem spam.
+    Roda no tick horário, depois dos detectores."""
+    from db import (list_agents_pending_email, list_unemailed_events, mark_events_emailed,
+                    touch_agent_emailed, get_user_email, get_auth_user)
+    from core.services.plan_service import agent_kind_allowed, agents_ui_enabled
+
+    now = now or datetime.now(timezone.utc)
+    sent = 0
+    for a in list_agents_pending_email():
+        kind = a["kind"]; user_id = a["user_id"]; agent_id = a["agent_id"]
+        try:
+            if not (agents_ui_enabled(user_id) and agent_kind_allowed(user_id, kind)):
+                continue
+            interval_h = _AGENT_EMAIL_INTERVAL_H.get(kind, _DEFAULT_EMAIL_INTERVAL_H)
+            last = a.get("last_emailed_at")
+            if last is not None and (now - last) < timedelta(hours=interval_h):
+                continue  # teto de cadência: e-mail desse agente ainda tá no intervalo
+            events = list_unemailed_events(agent_id)
+            if not events:
+                continue
+            ids = [e["id"] for e in events]
+            auth = get_auth_user(user_id)
+            if auth and auth.get("engagement_opt_out"):
+                mark_events_emailed(ids)  # opt-out: suprime o envio (feed já mostrou)
+                continue
+            email = get_user_email(user_id)
+            if not email:
+                continue
+            from core.services.email_service import send_agent_report_email
+            send_agent_report_email(
+                email, user_id, _agent_email_subject(kind, events),
+                _compose_agent_email(kind, events), kind=kind,
+            )
+            mark_events_emailed(ids)
+            touch_agent_emailed(agent_id)
+            sent += 1
+        except Exception as exc:
+            print(f"[agents] email {kind} user={user_id}: {exc}", file=sys.stderr)
+    return {"ok": True, "sent": sent}
+
+
 # ── Orquestração ─────────────────────────────────────────────────────────────
 
 def run_all_agents_once(today: date | None = None) -> dict:
@@ -680,6 +743,7 @@ def run_all_agents_once(today: date | None = None) -> dict:
         "detetive": run_detetive_once(today),
         "cofre": run_cofre_once(today),
         "barao": run_barao_once(today),
+        "emails": run_agent_emails_once(),
     }
 
 
@@ -720,7 +784,7 @@ async def run_agents_loop() -> None:
         try:
             result = await asyncio.to_thread(run_all_agents_once)
             total = sum(
-                int(v.get("fired") or v.get("published") or 0)
+                int(v.get("fired") or v.get("published") or v.get("sent") or 0)
                 for v in result.values() if isinstance(v, dict)
             )
             if total:

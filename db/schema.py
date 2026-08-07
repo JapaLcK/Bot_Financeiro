@@ -1615,6 +1615,19 @@ def init_db():
         create index if not exists idx_agent_events_user_time
           on agent_events (user_id, fired_at desc)
         """,
+        # Mini-digest por agente: emailed_at marca o evento já enviado por e-mail
+        # (null = ainda não entrou num e-mail); last_emailed_at no agente aplica o
+        # teto de cadência (intervalo mínimo entre e-mails do mesmo agente).
+        """
+        alter table agent_events add column if not exists emailed_at timestamptz
+        """,
+        """
+        alter table agents add column if not exists last_emailed_at timestamptz
+        """,
+        """
+        create index if not exists idx_agent_events_pending_email
+          on agent_events (agent_id) where emailed_at is null
+        """,
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks
