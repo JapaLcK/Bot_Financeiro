@@ -207,7 +207,8 @@ def send_agent_report_email(
     if unsub:
         text += f"\n\n—\nCancelar inscrição: {unsub}"
     return send_email(to, subject, html, text_body=text,
-                      from_addr=EMAIL_FROM_PIGGY)
+                      from_addr=EMAIL_FROM_PIGGY,
+                      headers=unsub_headers(unsub) if unsub else None)
 
 
 def send_verification_email(to: str, code: str) -> bool:
@@ -275,6 +276,16 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
 import hashlib as _hashlib
 import hmac as _hmac
 import base64 as _base64
+
+
+def unsub_headers(unsub_url: str) -> dict:
+    """Headers de descadastro com one-click (RFC 8058): o Gmail exibe o botão
+    nativo "Cancelar inscrição" e dispara um POST na URL sem abrir página —
+    o caminho que evita a denúncia de spam. Requer o endpoint POST /unsubscribe."""
+    return {
+        "List-Unsubscribe": f"<{unsub_url}>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    }
 
 
 def make_unsub_url(user_id: int, email: str) -> str:
@@ -581,7 +592,7 @@ def send_reengagement_email(to: str, user_id: int | None = None) -> bool:
         "Faz um tempinho que você não aparece. Manda 'saldo' no bot para "
         "ver como estão suas finanças.\n\nCom carinho, Piggy"
     )
-    headers = {"List-Unsubscribe": f"<{unsub}>"} if unsub else {}
+    headers = unsub_headers(unsub) if unsub else {}
     return send_email(
         to=to,
         subject="Piggy com saudade de você",
@@ -611,7 +622,7 @@ def send_tip_email(to: str, user_id: int | None = None) -> bool:
     """
     html = _piggy_html(f"Dica do Piggy: {title}", content, unsub)
     text = f"Eita! Piggy aqui.\n\nDica do mês: {title}\n\n{subtitle}\n\nUm abraço, Piggy"
-    headers = {"List-Unsubscribe": f"<{unsub}>"} if unsub else {}
+    headers = unsub_headers(unsub) if unsub else {}
     return send_email(
         to=to,
         subject=f"Uma dica do Piggy: {title}",
@@ -647,7 +658,7 @@ def send_insight_email(to: str, user_id: int | None = None) -> bool:
         "Este conteúdo é educativo e não é recomendação de investimento.\n\n"
         "Até a próxima, Piggy"
     )
-    headers = {"List-Unsubscribe": f"<{unsub}>"} if unsub else {}
+    headers = unsub_headers(unsub) if unsub else {}
     return send_email(
         to=to,
         subject=f"O Piggy encontrou algo interessante",
