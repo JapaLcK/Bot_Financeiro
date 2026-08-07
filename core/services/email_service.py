@@ -22,6 +22,18 @@ EMAIL_FROM_PIGGY    = os.getenv("EMAIL_FROM_PIGGY",    "Piggy do PigBank <oi@pig
 SUPPORT_EMAIL       = os.getenv("SUPPORT_EMAIL",       "suporte@pigbankai.com")
 
 
+def _public_base_url() -> str:
+    """Base pública para links e imagens dos e-mails. Espelha a normalização
+    de frontend/routes/shared.py: tolera a var gravada como
+    'DASHBOARD_URL=https://…' e rejeita base não-https — e-mail é aberto fora
+    da rede local, então localhost/http viraria imagem quebrada."""
+    base = (os.getenv("DASHBOARD_URL") or "").strip()
+    if base.startswith("DASHBOARD_URL="):
+        base = base[len("DASHBOARD_URL="):]
+    base = base.rstrip("/")
+    return base if base.startswith("https://") else "https://pigbankai.com"
+
+
 def _get_resend():
     import resend
     resend.api_key = os.getenv("RESEND_API_KEY", "")
@@ -93,7 +105,7 @@ def _base_html(title: str, content: str) -> str:
     rosa #FF2D8E / off-white #F6F4F1), pareado com _piggy_html. Logo do Piggy
     (PNG hospedado — Gmail não renderiza SVG) num medalhão off-white pro
     contorno não sumir no fundo escuro."""
-    base = (os.getenv("DASHBOARD_URL") or "https://pigbankai.com").rstrip("/")
+    base = _public_base_url()
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -297,8 +309,7 @@ def make_unsub_url(user_id: int, email: str) -> str:
     payload = f"{user_id}:{email}".encode()
     sig     = _hmac.new(secret, payload, _hashlib.sha256).digest()
     token   = _base64.urlsafe_b64encode(sig).decode().rstrip("=")
-    base    = (os.getenv("DASHBOARD_URL") or "https://pigbankai.com").rstrip("/")
-    return f"{base}/unsubscribe?uid={user_id}&token={token}"
+    return f"{_public_base_url()}/unsubscribe?uid={user_id}&token={token}"
 
 
 # ─── Template simples para emails do Piggy ────────────────────────────────────
@@ -319,7 +330,7 @@ def _piggy_html(title: str, content: str, unsub_url: str = "", agent_kind: str =
     rosa #FF2D8E / neon #C6F11A / off-white). Porquinho do agente num medalhão
     off-white (contorno legível no escuro), chip do agente, CTA e texto puro
     pareado pelo caller. Container largo (600) pra dar impacto."""
-    base = (os.getenv("DASHBOARD_URL") or "https://pigbankai.com").rstrip("/")
+    base = _public_base_url()
     unsub_line = (
         f'Não quer mais estes avisos? <a href="{unsub_url}">Cancelar inscrição</a>.'
         if unsub_url else ""
