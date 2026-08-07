@@ -102,6 +102,10 @@ def get_auth_user(user_id: int) -> dict | None:
     return _db_support.get_auth_user_impl(get_conn, user_id)
 
 
+def get_password_changed_at(user_id: int):
+    return _db_support.get_password_changed_at_impl(get_conn, user_id)
+
+
 def auto_link_auth_user(target_user_id: int, current_user_id: int) -> int:
     if int(target_user_id) == int(current_user_id):
         return int(target_user_id)

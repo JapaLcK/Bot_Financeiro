@@ -2063,6 +2063,14 @@ async def _get_current_user(
         request.state.session_jti = jti
         # Atualiza last_seen com debounce; falha silenciosa.
         asyncio.create_task(asyncio.to_thread(touch_session, jti))
+    else:
+        # Token legado sem jti: não há sessão pra revogar. Se a conta trocou de
+        # senha (reset), invalida o token — senão um token roubado sobreviveria
+        # ao reset até expirar. Tokens com jti já são cobertos pela revogação
+        # de sessão feita no reset.
+        from db import get_password_changed_at
+        if await asyncio.to_thread(get_password_changed_at, user_id):
+            raise HTTPException(status_code=401, detail="Sessão expirada. Faça login novamente.")
 
     _raise_if_account_scheduled_for_deletion(user_id)
     return user_id

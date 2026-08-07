@@ -670,7 +670,15 @@ def create_email_verification_impl(
             cur.execute("select user_id from auth_accounts where phone_hash = any(%s)", (_phone_hashes,))
             phone_row = cur.fetchone()
             if phone_row:
-                raise AccountAlreadyExistsError("phone", existing_user_id=phone_row["user_id"])
+                # Telefone já em uso por outra conta. NÃO revela isso ao
+                # cadastrante: se a gente parasse aqui (ou não mandasse o código),
+                # a presença/ausência do e-mail de verificação enumeraria números
+                # de WhatsApp (o cadastrante controla o e-mail submetido). Em vez
+                # disso segue o fluxo normal — manda o código pro e-mail dele — e
+                # apenas DESCARTA o telefone disputado: a conta nasce sem WhatsApp
+                # vinculado (dá pra vincular outro número depois). A colisão de
+                # telefone fica indistinguível até o e-mail ser verificado.
+                normalized_phone = None
 
     password_hash = hash_password(password)
     # Código de verificação precisa ser imprevisível (brute-force de 6 dígitos):
@@ -735,7 +743,9 @@ def confirm_email_verification_impl(
         raise ValueError("Código expirado. Faça o cadastro novamente.")
 
     password_hash = row["password_hash"]
-    phone_e164 = normalize_phone_e164(row["phone_e164"])
+    # phone pode ser NULL: cadastro com número já em uso descarta o telefone
+    # (anti-enumeração) e cria a conta sem WhatsApp vinculado.
+    phone_e164 = normalize_phone_e164(row["phone_e164"]) if row["phone_e164"] else None
     display_name = (row.get("display_name") or "").strip() or None
     verification_id = row["id"]
     user_id = get_or_create_canonical_user("email", email)
@@ -974,8 +984,10 @@ def consume_password_reset_token_impl(get_conn, hash_password, token: str, new_p
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "update auth_accounts set password_hash = %s where user_id = %s",
-                (new_hash, user_id),
+                # password_changed_at: invalida tokens legados sem jti emitidos
+                # antes do reset (os com jti já são revogados via sessão).
+                "update auth_accounts set password_hash = %s, password_changed_at = %s where user_id = %s",
+                (new_hash, now, user_id),
             )
             cur.execute(
                 "update password_reset_tokens set used_at = %s where token = %s",
@@ -984,3 +996,16 @@ def consume_password_reset_token_impl(get_conn, hash_password, token: str, new_p
         conn.commit()
 
     return user_id
+
+
+def get_password_changed_at_impl(get_conn, user_id: int):
+    """Timestamp do último reset de senha (ou None). Usado pra invalidar tokens
+    legados sem jti emitidos antes do reset."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select password_changed_at from auth_accounts where user_id = %s",
+                (int(user_id),),
+            )
+            row = cur.fetchone()
+    return row["password_changed_at"] if row else None

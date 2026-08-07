@@ -227,6 +227,12 @@ def resolve_dashboard_user_id(request: Request) -> int:
         if not session or int(session.get("user_id") or 0) != user_id:
             raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.")
         request.state.session_jti = jti
+    else:
+        # Token de dashboard legado sem jti: se a conta trocou de senha (reset),
+        # invalida — senão um token roubado sobrevive ao reset até expirar (12h).
+        from db import get_password_changed_at
+        if get_password_changed_at(user_id):
+            raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.")
     return int(user_id)
 
 
