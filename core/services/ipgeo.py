@@ -12,6 +12,7 @@ None. Login nao pode ficar lento por causa de geolocalizacao.
 """
 from __future__ import annotations
 
+import ipaddress
 import os
 import sys
 
@@ -27,24 +28,21 @@ def _is_disabled() -> bool:
 
 
 def _is_private_ip(ip: str) -> bool:
-    """IPs privados/loopback nao tem geolocalizacao publica."""
+    """True se o IP não é um endereço público geolocalizável.
+
+    Valida o formato com `ipaddress` (o valor vem de X-Forwarded-For, controlado
+    pelo cliente) e bloqueia tudo que não seja global: privado, loopback,
+    link-local (169.254/fe80), reservado, multicast, etc. Um valor que não é um
+    IP literal válido também é bloqueado — assim nada de estranho chega ao path
+    da URL do ipapi.co.
+    """
     if not ip:
         return True
-    if ip.startswith("127.") or ip == "::1":
+    try:
+        addr = ipaddress.ip_address(ip.strip())
+    except ValueError:
         return True
-    if ip.startswith("10."):
-        return True
-    if ip.startswith("192.168."):
-        return True
-    # 172.16.0.0 — 172.31.255.255
-    if ip.startswith("172."):
-        try:
-            second = int(ip.split(".")[1])
-            if 16 <= second <= 31:
-                return True
-        except (ValueError, IndexError):
-            pass
-    return False
+    return not addr.is_global
 
 
 def lookup_city(ip: str | None) -> str | None:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import random
 import secrets
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
@@ -627,6 +626,19 @@ def set_stripe_customer_impl(get_conn, user_id: int, stripe_customer_id: str) ->
         conn.commit()
 
 
+class AccountAlreadyExistsError(Exception):
+    """Cadastro tentado com e-mail/telefone que já pertence a uma conta.
+
+    Carrega o `existing_user_id` pra que o endpoint avise o dono da conta por
+    e-mail (out-of-band) e responda de forma GENÉRICA — sem revelar ao visitante
+    que a conta existe (anti-enumeração). `reason` ∈ {email, email_google, phone}.
+    """
+    def __init__(self, reason: str, existing_user_id: int | None = None):
+        super().__init__(reason)
+        self.reason = reason
+        self.existing_user_id = existing_user_id
+
+
 def create_email_verification_impl(
     get_conn,
     hash_password,
@@ -649,19 +661,29 @@ def create_email_verification_impl(
             )
             existing = cur.fetchone()
             if existing:
-                if existing["password_hash"] is None:
-                    raise ValueError(
-                        "Este e-mail já tem conta criada com Google. "
-                        "Use \"Continuar com Google\" para entrar."
-                    )
-                raise ValueError("Este e-mail já está cadastrado.")
+                # Anti-enumeração: não vaza "já existe" pro visitante. O endpoint
+                # trata AccountAlreadyExistsError respondendo genericamente e
+                # avisando o dono por e-mail.
+                reason = "email_google" if existing["password_hash"] is None else "email"
+                raise AccountAlreadyExistsError(reason, existing_user_id=existing["user_id"])
             _phone_hashes = [hash_pii_optional(c, kind="phone") for c in phone_candidates if c]
             cur.execute("select user_id from auth_accounts where phone_hash = any(%s)", (_phone_hashes,))
-            if cur.fetchone():
-                raise ValueError("Este número de WhatsApp já está em uso por outra conta.")
+            phone_row = cur.fetchone()
+            if phone_row:
+                # Telefone já em uso por outra conta. NÃO revela isso ao
+                # cadastrante: se a gente parasse aqui (ou não mandasse o código),
+                # a presença/ausência do e-mail de verificação enumeraria números
+                # de WhatsApp (o cadastrante controla o e-mail submetido). Em vez
+                # disso segue o fluxo normal — manda o código pro e-mail dele — e
+                # apenas DESCARTA o telefone disputado: a conta nasce sem WhatsApp
+                # vinculado (dá pra vincular outro número depois). A colisão de
+                # telefone fica indistinguível até o e-mail ser verificado.
+                normalized_phone = None
 
     password_hash = hash_password(password)
-    code = f"{random.randint(0, 999999):06d}"
+    # Código de verificação precisa ser imprevisível (brute-force de 6 dígitos):
+    # secrets (CSPRNG) em vez de random (Mersenne Twister, previsível).
+    code = f"{secrets.randbelow(1_000_000):06d}"
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes_valid)
 
     with get_conn() as conn:
@@ -721,7 +743,9 @@ def confirm_email_verification_impl(
         raise ValueError("Código expirado. Faça o cadastro novamente.")
 
     password_hash = row["password_hash"]
-    phone_e164 = normalize_phone_e164(row["phone_e164"])
+    # phone pode ser NULL: cadastro com número já em uso descarta o telefone
+    # (anti-enumeração) e cria a conta sem WhatsApp vinculado.
+    phone_e164 = normalize_phone_e164(row["phone_e164"]) if row["phone_e164"] else None
     display_name = (row.get("display_name") or "").strip() or None
     verification_id = row["id"]
     user_id = get_or_create_canonical_user("email", email)
@@ -960,8 +984,10 @@ def consume_password_reset_token_impl(get_conn, hash_password, token: str, new_p
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "update auth_accounts set password_hash = %s where user_id = %s",
-                (new_hash, user_id),
+                # password_changed_at: invalida tokens legados sem jti emitidos
+                # antes do reset (os com jti já são revogados via sessão).
+                "update auth_accounts set password_hash = %s, password_changed_at = %s where user_id = %s",
+                (new_hash, now, user_id),
             )
             cur.execute(
                 "update password_reset_tokens set used_at = %s where token = %s",
@@ -970,3 +996,16 @@ def consume_password_reset_token_impl(get_conn, hash_password, token: str, new_p
         conn.commit()
 
     return user_id
+
+
+def get_password_changed_at_impl(get_conn, user_id: int):
+    """Timestamp do último reset de senha (ou None). Usado pra invalidar tokens
+    legados sem jti emitidos antes do reset."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select password_changed_at from auth_accounts where user_id = %s",
+                (int(user_id),),
+            )
+            row = cur.fetchone()
+    return row["password_changed_at"] if row else None

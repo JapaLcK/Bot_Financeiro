@@ -695,6 +695,12 @@ def init_db():
         """
         alter table auth_accounts add column if not exists last_payment_status text not null default 'inactive'
         """,
+        # Marca de "credenciais trocadas" (reset de senha). Usada pra invalidar
+        # tokens legados SEM jti após um reset — os com jti já morrem via
+        # revogação de sessão, mas os grandfathered sem jti não têm o que revogar.
+        """
+        alter table auth_accounts add column if not exists password_changed_at timestamptz
+        """,
         """
         create unique index if not exists idx_auth_accounts_phone_unique
           on auth_accounts (phone_e164)
