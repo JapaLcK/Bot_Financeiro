@@ -11,6 +11,37 @@
 <meta property="og:type" content="website" />
 <link rel="stylesheet" href="/brand.css?v=4" />
 <link rel="stylesheet" href="/site.css?v=5" />
+<style>
+  /* Planos: card único de entrada (R$ 9,90) — leva pra /precos escolher ciclo */
+  .plan-solo-wrap { display: flex; justify-content: center; padding: 10px 0 30px; }
+  .plan-solo {
+    position: relative; width: 100%; max-width: 480px;
+    background: linear-gradient(180deg, rgba(255,45,142,.12), var(--card));
+    border: 1px solid rgba(255,45,142,.4);
+    border-radius: var(--radius);
+    box-shadow: 0 24px 60px rgba(255,45,142,.16);
+    padding: 40px 34px 34px; text-align: center;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .plan-solo-trial {
+    background: var(--neon); color: var(--neon-ink);
+    font-size: .62rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+    padding: 5px 12px; border-radius: 999px; margin-bottom: 14px;
+  }
+  .plan-solo-from { color: var(--ink-2); font-size: 1rem; font-weight: 600; }
+  .plan-solo-amount { font-size: 3.2rem; font-weight: 850; letter-spacing: -.03em; line-height: 1.05; margin: 4px 0 2px; }
+  .plan-solo-amount span { font-size: 1.05rem; color: var(--ink-2); font-weight: 600; }
+  .plan-solo-feats { list-style: none; display: grid; gap: 11px; margin: 22px 0 24px; text-align: left; width: 100%; max-width: 330px; }
+  .plan-solo-feats li { display: flex; align-items: flex-start; gap: 10px; color: var(--ink-2); font-size: .9rem; line-height: 1.4; }
+  .plan-solo-feats li .tick { width: 20px; height: 20px; font-size: .7rem; margin-top: 1px; }
+  .plan-solo .btn-block { width: 100%; max-width: 330px; }
+  .plan-solo-choose { color: var(--ink-3); font-size: .82rem; margin-top: 14px; }
+  .plan-solo-choose b { color: var(--ink-2); font-weight: 700; }
+  @media (max-width: 560px) {
+    .plan-solo { padding: 32px 22px 26px; }
+    .plan-solo-amount { font-size: 2.6rem; }
+  }
+</style>
 </head>
 <body>
 <div class="glow"></div>
@@ -345,39 +376,23 @@
         <p>30 dias grátis pra testar. Cancele quando quiser, sem letras miúdas.</p>
       </div>
 
-      <div class="plans" data-reveal>
-        <article class="plan">
-          <span class="plan-trial">30 dias grátis</span>
-          <h3>Mensal</h3>
-          <div class="plan-sub">Pra começar sem compromisso</div>
-          <ul>
+      <div class="plan-solo-wrap" data-reveal>
+        <article class="plan-solo">
+          <span class="plan-solo-trial">30 dias grátis</span>
+          <div class="plan-solo-from">Acesse o PigBank por apenas</div>
+          <div class="plan-solo-amount">R$ 9,90<span>/mês</span></div>
+          <ul class="plan-solo-feats">
             <li><span class="tick">✓</span> Caixinhas, metas e cartões ilimitados</li>
             <li><span class="tick">✓</span> Categorização automática por IA</li>
             <li><span class="tick">✓</span> Dashboard em tempo real</li>
-            <li><span class="tick">✓</span> Histórico completo + exportar CSV/PDF</li>
             <li><span class="tick">✓</span> Piggy IA — converse sobre suas finanças</li>
           </ul>
-          <a class="btn btn-outline btn-block" href="/precos">Ver planos</a>
-        </article>
-
-        <article class="plan featured">
-          <span class="plan-badge">Economize 17%</span>
-          <span class="plan-trial">30 dias grátis</span>
-          <h3>Anual</h3>
-          <div class="plan-sub">Melhor custo-benefício</div>
-          <ul>
-            <li><span class="tick">✓</span> Tudo do plano mensal</li>
-            <li><span class="tick">✓</span> 2 meses de graça no ano</li>
-            <li><span class="tick">✓</span> Cobrança única, sem surpresa</li>
-            <li><span class="tick">✓</span> Suporte prioritário</li>
-            <li><span class="tick">✓</span> Ideal pra quem já decidiu</li>
-          </ul>
-          <a class="btn btn-primary btn-block" href="/precos">Ver planos</a>
+          <a class="btn btn-primary btn-lg btn-block" href="/precos">Ver planos →</a>
+          <p class="plan-solo-choose">Escolha <b>mensal</b> ou <b>anual</b> na próxima tela.</p>
         </article>
       </div>
 
       <p class="plans-note">🎉 30 dias grátis com cartão; a primeira cobrança só acontece depois do trial. Cancele quando quiser pelo dashboard antes do fim do trial, sem ser cobrado. Pagamentos processados pela Stripe — a PigBank nunca vê os dados do seu cartão.</p>
-      <div class="plans-cta"><a href="/precos">Ver todos os detalhes dos planos →</a></div>
     </section>
 
     <div class="sec-sep"></div>
@@ -491,6 +506,6 @@
     els.forEach(function (el) { io.observe(el); });
   })();
   </script>
-  <script src="/nav-auth.js?v=3" defer></script>
+  <script src="/nav-auth.js?v=5" defer></script>
 </body>
 </html>

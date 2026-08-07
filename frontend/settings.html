@@ -5,22 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Configurações — PigBank</title>
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
-<meta name="theme-color" content="#16181d" />
+<meta name="theme-color" content="#111111" />
 <script src="https://cdn.pluggy.ai/pluggy-connect/v2.7.0/pluggy-connect.js"></script>
 <link rel="stylesheet" href="/brand.css" />
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  /* Dark-neutral app palette */
-  --page:         #16181d;
-  --surface:      #1e2128;
-  --surface-2:    #23262e;
-  --border:       rgba(255,255,255,.09);
-  --border-hover: rgba(255,255,255,.16);
+  /* Paleta neutra, igual à do app PWA (#111111 + branco, sem tom azulado) */
+  --page:         #111111;
+  --surface:      #1b1b1d;
+  --surface-2:    #242427;
+  --border:       rgba(255,255,255,.08);
+  --border-hover: rgba(255,255,255,.14);
   --ink:          rgba(255,255,255,.92);
-  --muted:        rgba(200,210,240,.60);
-  --faint:        rgba(200,210,240,.34);
+  --muted:        rgba(255,255,255,.62);
+  --faint:        rgba(255,255,255,.34);
 
   /* Accent */
   --accent:     #FF2D8E;
@@ -1038,6 +1038,57 @@ a { color: inherit; text-decoration: none; }
   .stat { border-right: 0; border-bottom: 1px solid var(--border); }
   .stat:last-child { border-bottom: 0; }
 }
+
+/* ─── Visual "Minha conta" (igual ao app PWA) — web + mobile ─────────────
+   Header "Minha conta" + banner de segurança + lista "Segurança e acesso"
+   com chevron. No desktop mantém as 2 colunas; no mobile vira lista única. */
+.page-header { display: none; }               /* substituído pelo header de conta */
+
+.pb-acct-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 2px 0 18px;
+}
+.pb-acct-head h1 { font-size: clamp(1.5rem, 3vw, 1.9rem); font-weight: 820; letter-spacing: -.02em; color: var(--ink); line-height: 1.1; }
+.pb-acct-head p { margin-top: 4px; font-size: .9rem; color: var(--muted); }
+.pb-acct-head img { width: 54px; height: 54px; object-fit: contain; flex-shrink: 0; }
+
+.pb-protect {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 18px; margin-bottom: 22px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, rgba(255,45,142,.12), rgba(199,24,107,.06));
+  border: 1px solid rgba(255,45,142,.3);
+}
+.pb-protect > svg { flex: 0 0 auto; color: var(--accent); }
+.pb-protect-txt { flex: 1; min-width: 0; }
+.pb-protect-txt b { display: block; font-size: .98rem; color: var(--ink); margin-bottom: 2px; }
+.pb-protect-txt small { font-size: .82rem; color: var(--muted); line-height: 1.4; }
+.pb-protect button {
+  flex: 0 0 auto; border: 0; border-radius: 999px; padding: 11px 20px; cursor: pointer;
+  background: linear-gradient(135deg, #FF2D8E, #C7186B); color: #fff; font-weight: 700; font-size: .85rem;
+  font-family: inherit; white-space: nowrap;
+}
+.pb-protect button:hover { filter: brightness(1.06); }
+
+/* Rótulo da seção no estilo do print (título, sem caps) */
+.sidebar-section { font-size: 1rem; font-weight: 820; letter-spacing: -.01em; text-transform: none; color: var(--ink); padding: 14px 14px 10px; }
+
+/* Chevron nos itens navegáveis */
+.sidebar-item[data-section]::after {
+  content: "›"; margin-left: auto; font-size: 1.3rem; line-height: 1; color: rgba(255,255,255,.32); padding-left: 6px;
+}
+
+/* Mobile: lista vertical única (igual ao print), não chips lado a lado */
+@media (max-width: 880px) {
+  .sidebar { display: block; flex-wrap: nowrap; }
+  .sidebar-section { display: block; }
+  .sidebar-item { flex: none; width: 100%; min-width: 0; border-left: 0; border-top: 1px solid var(--border); }
+  .sidebar-item:first-of-type { border-top: 0; }
+}
+@media (max-width: 560px) {
+  .pb-protect { flex-wrap: wrap; }
+  .pb-protect button { width: 100%; }
+}
 </style>
 <script src="/static/auth-refresh.js"></script>
 <script src="/modals.js"></script>
@@ -1062,7 +1113,29 @@ a { color: inherit; text-decoration: none; }
 
 <div class="page">
 
-  <!-- Page header -->
+  <!-- Cabeçalho de conta (mesmo visual do app PWA) -->
+  <div class="pb-acct-head">
+    <div>
+      <h1>Minha conta</h1>
+      <p>Gerencie sua conta e segurança</p>
+    </div>
+    <img src="/brand/icon.png?v=1" alt="" />
+  </div>
+
+  <!-- Banner de segurança -->
+  <div class="pb-protect">
+    <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 2 4 5.5v5.2c0 5 3.4 9.2 8 10.3 4.6-1.1 8-5.3 8-10.3V5.5L12 2z"/>
+      <rect x="9" y="10" width="6" height="5" rx="1"/><path d="M10 10V8.5a2 2 0 0 1 4 0V10"/>
+    </svg>
+    <div class="pb-protect-txt">
+      <b>Proteja sua conta</b>
+      <small>Mantenha seus dados seguros e seu acesso sempre protegido.</small>
+    </div>
+    <button type="button" onclick="showSettingsSection('security')">Revisar segurança</button>
+  </div>
+
+  <!-- Page header (substituído pelo cabeçalho de conta; mantido oculto p/ o JS) -->
   <header class="page-header">
     <div class="breadcrumb">
       <a href="/">Início</a>
@@ -1079,7 +1152,7 @@ a { color: inherit; text-decoration: none; }
 
     <!-- Sidebar -->
     <aside class="sidebar">
-      <div class="sidebar-section">Conta</div>
+      <div class="sidebar-section">Segurança e acesso</div>
 
       <button class="sidebar-item" type="button" id="of-sidebar-item" disabled>
         <span class="sidebar-icon">🏦</span>
