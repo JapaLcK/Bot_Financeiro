@@ -332,6 +332,28 @@ def list_user_categories_full(
     return out
 
 
+def list_custom_category_names(user_id: int) -> list[str]:
+    """Nomes das categorias CUSTOMIZADAS (is_system=false) e não arquivadas.
+
+    Usada pela inferência de categoria (`infer_category`) pra reconhecer, num
+    lançamento, uma categoria que o usuário criou na tela mas ainda não tem
+    regra de keyword. Sem isso, "gastei 400 com minha namorada" caía em "outros"
+    mesmo o usuário tendo criado a categoria "gastos com minha namorada".
+    """
+    ensure_user(user_id)
+    ensure_user_categories_seeded(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select name from user_categories "
+                "where user_id=%s and is_system=false and is_archived=false "
+                "order by length(name) desc",
+                (user_id,),
+            )
+            rows = cur.fetchall() or []
+    return [(r["name"] if isinstance(r, dict) else r[0]) for r in rows]
+
+
 def get_user_category(user_id: int, cat_id: int) -> dict | None:
     ensure_user(user_id)
     with get_conn() as conn:

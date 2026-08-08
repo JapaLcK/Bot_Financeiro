@@ -114,6 +114,7 @@ from .categories import (
     list_user_category_rules,
     resolve_category_rule_target,
     get_uncategorized_launches,
+    list_custom_category_names,
 )
 
 # ── Ações pendentes ───────────────────────────────────────────────────────────
@@ -399,6 +400,7 @@ __all__ = [
     "delete_category_rules_by_category", "list_categories",
     "get_memorized_category", "upsert_category_rule", "list_user_category_rules",
     "resolve_category_rule_target", "get_uncategorized_launches",
+    "list_custom_category_names",
     # pending
     "set_pending_action", "get_pending_action", "clear_pending_action",
     # budgets
