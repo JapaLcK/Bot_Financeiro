@@ -13,6 +13,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 <link rel="stylesheet" href="/brand.css" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/dashboard.css" />
 <link rel="stylesheet" href="/dashboard-mobile.css" media="(max-width: 900px)" />
 <script src="/static/auth-refresh.js"></script>
@@ -39,63 +40,63 @@
 
   <div class="sidenav-section">Geral</div>
   <button class="sidenav-item active" type="button" data-nav="overview" onclick="navigateTo('overview')">
-    <span class="sn-icon">📊</span><span class="sn-label">Visão Geral</span>
+    <span class="sn-icon"><i class="ph ph-chart-bar" aria-hidden="true"></i></span><span class="sn-label">Visão Geral</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="analytics" onclick="navigateTo('analytics')">
-    <span class="sn-icon">📈</span><span class="sn-label">Análises</span>
+    <span class="sn-icon"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Análises</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="history" onclick="navigateTo('history')">
-    <span class="sn-icon">🕒</span><span class="sn-label">Histórico</span>
+    <span class="sn-icon"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i></span><span class="sn-label">Histórico</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="agentes" onclick="navigateTo('agentes')">
-    <span class="sn-icon">🐷</span><span class="sn-label">Agentes</span><span class="sn-tag new">novo</span>
+    <span class="sn-icon"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span><span class="sn-label">Agentes</span><span class="sn-tag new">novo</span>
   </button>
 
   <div class="sidenav-section">Planejamento</div>
   <button class="sidenav-item" type="button" data-nav="fixed" onclick="navigateTo('fixed')">
-    <span class="sn-icon">🔁</span><span class="sn-label">Recorrentes</span>
+    <span class="sn-icon"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span><span class="sn-label">Recorrentes</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="budgets" onclick="navigateTo('budgets')">
-    <span class="sn-icon">📝</span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span>
+    <span class="sn-icon"><i class="ph ph-note-pencil" aria-hidden="true"></i></span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="goals" onclick="navigateTo('goals')">
-    <span class="sn-icon">🎯</span><span class="sn-label">Caixinhas e metas</span><span class="sn-tag new">novo</span>
+    <span class="sn-icon"><i class="ph ph-target" aria-hidden="true"></i></span><span class="sn-label">Caixinhas e metas</span><span class="sn-tag new">novo</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="categories" onclick="navigateTo('categories')">
-    <span class="sn-icon">🏷️</span><span class="sn-label">Categorias</span>
+    <span class="sn-icon"><i class="ph ph-tag" aria-hidden="true"></i></span><span class="sn-label">Categorias</span>
   </button>
 
   <div class="sidenav-section">Crédito</div>
   <button class="sidenav-item" type="button" data-nav="installments" onclick="navigateTo('installments')">
-    <span class="sn-icon">💳</span><span class="sn-label">Parcelamentos</span>
+    <span class="sn-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Parcelamentos</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="cards" onclick="navigateTo('cards')">
-    <span class="sn-icon">💳</span><span class="sn-label">Cartões</span><span class="sn-tag new">novo</span>
+    <span class="sn-icon"><i class="ph ph-cards" aria-hidden="true"></i></span><span class="sn-label">Cartões</span><span class="sn-tag new">novo</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="investments" data-pro-feature="investments" onclick="navigateTo('investments')">
-    <span class="sn-icon">💹</span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span>
+    <span class="sn-icon"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span>
   </button>
   <!-- Só aparece pra quem é afiliado (initAffiliateNav mostra se /api/affiliate/me responder 200) -->
   <button class="sidenav-item" type="button" data-nav="affiliate" id="sidenav-affiliate" style="display:none" onclick="navigateTo('affiliate')">
-    <span class="sn-icon">🤝</span><span class="sn-label">Afiliados</span>
+    <span class="sn-icon"><i class="ph ph-handshake" aria-hidden="true"></i></span><span class="sn-label">Afiliados</span>
   </button>
 
   <div class="sidenav-footer">
     <div class="sidenav-section" style="padding-top:0">Conta</div>
     <a class="sidenav-item" href="/settings?view=security">
-      <span class="sn-icon">👤</span><span class="sn-label">Conta</span>
+      <span class="sn-icon"><i class="ph ph-user" aria-hidden="true"></i></span><span class="sn-label">Conta</span>
     </a>
     <a class="sidenav-item" href="/suporte" target="_blank" rel="noopener">
-      <span class="sn-icon">❓</span><span class="sn-label">Suporte</span>
+      <span class="sn-icon"><i class="ph ph-question" aria-hidden="true"></i></span><span class="sn-label">Suporte</span>
     </a>
     <a class="sidenav-item" href="/changelog" data-pro-feature="changelog">
-      <span class="sn-icon">📰</span><span class="sn-label">Notícias</span><span class="sn-tag">Pro</span>
+      <span class="sn-icon"><i class="ph ph-newspaper" aria-hidden="true"></i></span><span class="sn-label">Notícias</span><span class="sn-tag">Pro</span>
     </a>
     <button class="sidenav-item" type="button" onclick="connectWhatsAppFromDashboard(event)">
-      <span class="sn-icon" style="color:#22c55e">💬</span><span class="sn-label">WhatsApp</span>
+      <span class="sn-icon" style="color:#22c55e"><i class="ph ph-whatsapp-logo" aria-hidden="true"></i></span><span class="sn-label">WhatsApp</span>
     </button>
     <button class="sidenav-item" type="button" id="theme-toggle-btn" onclick="toggleTheme()">
-      <span class="sn-icon" id="theme-toggle-icon">🌙</span><span class="sn-label" id="theme-toggle-label">Modo escuro</span>
+      <span class="sn-icon" id="theme-toggle-icon"><i class="ph ph-moon" aria-hidden="true"></i></span><span class="sn-label" id="theme-toggle-label">Modo escuro</span>
     </button>
   </div>
 </aside>
@@ -104,7 +105,7 @@
 
   <header>
     <div class="header-left">
-      <button class="sidenav-toggle" type="button" aria-label="Abrir menu" onclick="toggleSidenav()">☰</button>
+      <button class="sidenav-toggle" type="button" aria-label="Abrir menu" onclick="toggleSidenav()"><i class="ph ph-list" aria-hidden="true"></i></button>
       <img class="logo-img" src="/brand/icon.png?v=1" alt="Piggy" />
       <h1>PigBank</h1>
     </div>
@@ -120,30 +121,30 @@
         <div id="dot" class="connecting"></div>
         <span id="status-text">Conectando…</span>
       </div>
-      <button class="hbtn" id="refresh-btn" onclick="sendRefresh()"><span id="ref-icon">↻</span> Atualizar</button>
-      <button class="hbtn" data-pro-feature="ofx_import" onclick="openOfxImport()">⬇ Importar OFX</button>
+      <button class="hbtn" id="refresh-btn" onclick="sendRefresh()"><span id="ref-icon"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span> Atualizar</button>
+      <button class="hbtn" data-pro-feature="ofx_import" onclick="openOfxImport()"><i class="ph ph-download-simple" aria-hidden="true"></i> Importar OFX</button>
       <input type="file" id="ofx-file-input" accept=".ofx" style="display:none" onchange="handleOfxFileSelected(event)" />
-      <button class="hbtn" data-pro-feature="export" onclick="exportToEmail()">📧 Exportar</button>
+      <button class="hbtn" data-pro-feature="export" onclick="exportToEmail()"><i class="ph ph-envelope" aria-hidden="true"></i> Exportar</button>
       <div class="user-menu" id="user-menu">
         <button class="hbtn user-menu-btn" id="user-menu-btn" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleUserMenu(event)">
           <span class="user-menu-main">
             <span class="user-dot"></span>
             <span id="user-label">Minha conta</span>
           </span>
-          <span class="hamburger-icon" aria-hidden="true">☰</span>
+          <span class="hamburger-icon" aria-hidden="true"><i class="ph ph-list" aria-hidden="true"></i></span>
         </button>
         <div class="user-dropdown" id="user-dropdown" role="menu" aria-label="Menu da conta">
           <div class="user-dropdown-head">
             <div class="user-email" id="user-email">carregando...</div>
             <div class="user-plan" id="user-plan">Plano Free</div>
           </div>
-          <a class="user-menu-link" href="/home" role="menuitem"><span class="user-menu-icon">🏠</span>Início</a>
-          <a class="user-menu-link" href="/app" role="menuitem"><span class="user-menu-icon">📊</span>Dashboard</a>
-          <a class="user-menu-link" href="/comandos-app" role="menuitem"><span class="user-menu-icon">💡</span>O que pedir</a>
-          <button class="user-menu-link" type="button" role="menuitem" onclick="connectWhatsAppFromDashboard(event)"><span class="user-menu-icon">💬</span>Conectar WhatsApp</button>
-          <a class="user-menu-link" href="/settings?view=security" role="menuitem"><span class="user-menu-icon">⚙</span>Configurações</a>
-          <a class="user-menu-link" href="/conta" role="menuitem"><span class="user-menu-icon">💳</span>Gerenciar assinatura</a>
-          <button class="user-menu-link danger" type="button" role="menuitem" onclick="logoutDashboard()"><span class="user-menu-icon">↪</span>Sair</button>
+          <a class="user-menu-link" href="/home" role="menuitem"><span class="user-menu-icon"><i class="ph ph-house" aria-hidden="true"></i></span>Início</a>
+          <a class="user-menu-link" href="/app" role="menuitem"><span class="user-menu-icon"><i class="ph ph-chart-bar" aria-hidden="true"></i></span>Dashboard</a>
+          <a class="user-menu-link" href="/comandos-app" role="menuitem"><span class="user-menu-icon"><i class="ph ph-lightbulb" aria-hidden="true"></i></span>O que pedir</a>
+          <button class="user-menu-link" type="button" role="menuitem" onclick="connectWhatsAppFromDashboard(event)"><span class="user-menu-icon"><i class="ph ph-whatsapp-logo" aria-hidden="true"></i></span>Conectar WhatsApp</button>
+          <a class="user-menu-link" href="/settings?view=security" role="menuitem"><span class="user-menu-icon"><i class="ph ph-gear" aria-hidden="true"></i></span>Configurações</a>
+          <a class="user-menu-link" href="/conta" role="menuitem"><span class="user-menu-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></span>Gerenciar assinatura</a>
+          <button class="user-menu-link danger" type="button" role="menuitem" onclick="logoutDashboard()"><span class="user-menu-icon"><i class="ph ph-sign-out" aria-hidden="true"></i></span>Sair</button>
         </div>
       </div>
     </div>
@@ -171,7 +172,7 @@
         <div id="piggy-insight-title" style="font-size:.92rem;color:var(--text);line-height:1.45;font-weight:600"></div>
         <div id="piggy-insight-message" style="font-size:.86rem;color:var(--text-2);line-height:1.4;margin-top:4px;display:none"></div>
       </div>
-      <button id="piggy-insight-cta" class="mock-cta" style="display:none">Ajustar →</button>
+      <button id="piggy-insight-cta" class="mock-cta" style="display:none">Ajustar <i class="ph ph-arrow-right" aria-hidden="true"></i></button>
     </div>
   </div>
 
@@ -275,9 +276,9 @@
       <div class="mock-card">
         <h3 id="analytics-comparative-title">Comparativo mês a mês</h3>
         <div id="analytics-comparative-list" class="tx-list">
-          <div class="bar-row"><div class="bar-icon">📅</div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:40%"></div></div></div></div>
-          <div class="bar-row"><div class="bar-icon">📅</div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:50%"></div></div></div></div>
-          <div class="bar-row"><div class="bar-icon">📅</div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:60%"></div></div></div></div>
+          <div class="bar-row"><div class="bar-icon"><i class="ph ph-calendar-dots" aria-hidden="true"></i></div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:40%"></div></div></div></div>
+          <div class="bar-row"><div class="bar-icon"><i class="ph ph-calendar-dots" aria-hidden="true"></i></div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:50%"></div></div></div></div>
+          <div class="bar-row"><div class="bar-icon"><i class="ph ph-calendar-dots" aria-hidden="true"></i></div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:60%"></div></div></div></div>
         </div>
       </div>
 
@@ -366,10 +367,10 @@
     </div>
 
     <div class="filter-tabs" id="recurring-tabs" role="tablist" style="margin:-6px 0 16px">
-      <button class="ftab active" type="button" role="tab" data-rectab="overview" onclick="setRecurringTab('overview')">📊 Visão geral</button>
-      <button class="ftab" type="button" role="tab" data-rectab="expenses" onclick="setRecurringTab('expenses')">🔻 Gastos fixos</button>
-      <button class="ftab" type="button" role="tab" data-rectab="incomes" onclick="setRecurringTab('incomes')">🔺 Receitas fixas</button>
-      <button class="ftab" type="button" role="tab" data-rectab="bills" onclick="setRecurringTab('bills')">🧾 Contas a pagar</button>
+      <button class="ftab active" type="button" role="tab" data-rectab="overview" onclick="setRecurringTab('overview')"><i class="ph ph-chart-bar" aria-hidden="true"></i> Visão geral</button>
+      <button class="ftab" type="button" role="tab" data-rectab="expenses" onclick="setRecurringTab('expenses')"><i class="ph ph-trend-down" aria-hidden="true"></i> Gastos fixos</button>
+      <button class="ftab" type="button" role="tab" data-rectab="incomes" onclick="setRecurringTab('incomes')"><i class="ph ph-trend-up" aria-hidden="true"></i> Receitas fixas</button>
+      <button class="ftab" type="button" role="tab" data-rectab="bills" onclick="setRecurringTab('bills')"><i class="ph ph-receipt" aria-hidden="true"></i> Contas a pagar</button>
     </div>
 
     <div id="recurring-overview-pane">
@@ -431,7 +432,7 @@
     <div id="recurring-bills-pane" style="display:none">
       <!-- Entrada rápida: o representante entrega o boleto → 3 campos e pronto -->
       <div class="mock-card" style="margin-bottom:14px">
-        <h3 style="margin-bottom:10px">➕ Novo boleto</h3>
+        <h3 style="margin-bottom:10px"><i class="ph ph-plus" aria-hidden="true"></i> Novo boleto</h3>
         <div class="form-row" style="align-items:flex-end;gap:8px;flex-wrap:wrap">
           <div class="field" style="flex:2;min-width:160px">
             <label for="boleto-quick-name">Descrição</label>
@@ -453,7 +454,7 @@
 
       <!-- "Tô tranquilo nesse prazo?" — o representante oferece um prazo e ele decide -->
       <div class="mock-card" style="margin-bottom:14px">
-        <h3 style="margin-bottom:6px">🤔 Tô tranquilo nesse prazo?</h3>
+        <h3 style="margin-bottom:6px"><i class="ph ph-clock" aria-hidden="true"></i> Tô tranquilo nesse prazo?</h3>
         <p style="font-size:.78rem;color:var(--text-3);margin:0 0 10px">Ofereceram um prazo? Veja como fica seu caixa até lá.</p>
         <div class="form-row" style="align-items:flex-end;gap:8px;flex-wrap:wrap">
           <div class="field" style="flex:1;min-width:130px">
@@ -470,12 +471,12 @@
       </div>
 
       <div class="mock-card" style="margin-bottom:14px">
-        <h3>🗓️ Agenda de vencimentos</h3>
+        <h3><i class="ph ph-calendar-dots" aria-hidden="true"></i> Agenda de vencimentos</h3>
         <div id="recurring-bills-agenda"></div>
       </div>
 
       <div class="mock-card">
-        <h3>✓ Pagos recentemente</h3>
+        <h3><i class="ph ph-check" aria-hidden="true"></i> Pagos recentemente</h3>
         <div id="recurring-bills-paid-list" class="tx-list"></div>
       </div>
     </div>
@@ -658,8 +659,8 @@
     <div id="installments-stats" class="stats-row"></div>
 
     <div id="installments-tabs" class="inst-tabs" role="tablist">
-      <button class="inst-tab active" data-tab="active" type="button" role="tab" onclick="setInstallmentsTab('active')">📂 Atuais</button>
-      <button class="inst-tab" data-tab="history" type="button" role="tab" onclick="setInstallmentsTab('history')">📁 Histórico</button>
+      <button class="inst-tab active" data-tab="active" type="button" role="tab" onclick="setInstallmentsTab('active')"><i class="ph ph-folder-open" aria-hidden="true"></i> Atuais</button>
+      <button class="inst-tab" data-tab="history" type="button" role="tab" onclick="setInstallmentsTab('history')"><i class="ph ph-folder" aria-hidden="true"></i> Histórico</button>
     </div>
 
     <div id="installments-folder" class="inst-folder">
@@ -685,7 +686,7 @@
     <div class="mock-header">
       <p class="section-title" style="margin:0">Investimentos</p>
       <div style="display:flex;gap:8px">
-        <button class="mock-cta outline" type="button" onclick="openInvestmentHelp()">❓ Como usar</button>
+        <button class="mock-cta outline" type="button" onclick="openInvestmentHelp()"><i class="ph ph-question" aria-hidden="true"></i> Como usar</button>
         <button class="mock-cta" type="button" onclick="openInvestmentModal()">+ Novo investimento</button>
       </div>
     </div>
@@ -762,7 +763,7 @@
     </div>
   </div>
 
-<div id="toast">✓ Atualizado</div>
+<div id="toast"><i class="ph ph-check" aria-hidden="true"></i> Atualizado</div>
 
 <div class="overlay" id="ofx-result-overlay" onclick="if(event.target===this) closeOfxResult()">
   <div class="modal wide" role="dialog" aria-labelledby="ofx-result-title">
@@ -787,7 +788,7 @@
     </div>
     <div class="modal-acts">
       <button class="btn-cancel" type="button" onclick="closeUpgradeModal()">Agora não</button>
-      <a class="btn-upgrade" href="/precos" id="upg-cta">Ver planos →</a>
+      <a class="btn-upgrade" href="/precos" id="upg-cta">Ver planos <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
     </div>
   </div>
 </div>
@@ -811,15 +812,15 @@
 
     <div class="tipo-toggle" role="radiogroup" aria-label="Tipo de lançamento">
       <button type="button" class="tipo-opt despesa active" data-tipo="despesa" onclick="setLaunchTipo('despesa')" role="radio" aria-checked="true">
-        <span class="tipo-icon">💸</span>
+        <span class="tipo-icon"><i class="ph ph-trend-down" aria-hidden="true"></i></span>
         <span>Despesa</span>
       </button>
       <button type="button" class="tipo-opt receita" data-tipo="receita" onclick="setLaunchTipo('receita')" role="radio" aria-checked="false">
-        <span class="tipo-icon">💰</span>
+        <span class="tipo-icon"><i class="ph ph-trend-up" aria-hidden="true"></i></span>
         <span>Receita</span>
       </button>
       <button type="button" class="tipo-opt credito" data-tipo="credito" onclick="setLaunchTipo('credito')" role="radio" aria-checked="false">
-        <span class="tipo-icon">💳</span>
+        <span class="tipo-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></span>
         <span>Crédito</span>
       </button>
     </div>
@@ -897,10 +898,10 @@
 
     <div class="tipo-toggle" role="radiogroup" aria-label="Operação de investimento">
       <button type="button" class="tipo-opt aporte active" data-invtab="deposit" onclick="setInvestModalTab('deposit')" role="radio" aria-checked="true">
-        <span class="tipo-icon">⬆️</span><span>Aporte</span>
+        <span class="tipo-icon"><i class="ph ph-arrow-up" aria-hidden="true"></i></span><span>Aporte</span>
       </button>
       <button type="button" class="tipo-opt resgate" data-invtab="withdraw" onclick="setInvestModalTab('withdraw')" role="radio" aria-checked="false">
-        <span class="tipo-icon">⬇️</span><span>Resgate</span>
+        <span class="tipo-icon"><i class="ph ph-arrow-down" aria-hidden="true"></i></span><span>Resgate</span>
       </button>
       <button type="button" class="tipo-opt novo-inv" data-invtab="create" onclick="setInvestModalTab('create')" role="radio" aria-checked="false">
         <span class="tipo-icon">＋</span><span>Novo ativo</span>
@@ -1139,7 +1140,7 @@
           <input class="modal-inp" id="pocket-interest-rate" type="number" min="1" max="300" step="0.01" value="100" inputmode="decimal" style="width:112px;flex:0 0 112px" />
           <span style="color:var(--text-2);font-size:.86rem;white-space:nowrap">% do CDI</span>
         </div>
-        <div style="color:var(--text-3);font-size:.78rem;margin-top:8px;line-height:1.35">💡 Valor simulado — o PigBank não custodia seu dinheiro. Use a taxa do banco onde o saldo realmente está aplicado.</div>
+        <div style="color:var(--text-3);font-size:.78rem;margin-top:8px;line-height:1.35"><i class="ph ph-lightbulb" aria-hidden="true"></i> Valor simulado — o PigBank não custodia seu dinheiro. Use a taxa do banco onde o saldo realmente está aplicado.</div>
       </div>
     </div>
 
@@ -1221,7 +1222,7 @@
     </div>
 
     <div id="pay-bill-empty" class="empty" style="display:none;padding:18px 4px;text-align:center;font-size:.85rem;color:var(--text-2)">
-      📭 Nenhuma fatura em aberto.
+      <i class="ph ph-tray" aria-hidden="true"></i> Nenhuma fatura em aberto.
     </div>
 
     <div class="bill-list" id="pay-bill-list"></div>
@@ -1246,7 +1247,7 @@
 <div class="overlay" id="pay-bill-receipt-overlay">
   <div class="modal">
     <div class="receipt-card">
-      <div class="receipt-icon">✅</div>
+      <div class="receipt-icon"><i class="ph ph-check-circle" aria-hidden="true"></i></div>
       <div class="receipt-title">Pagamento realizado</div>
       <div class="receipt-amount" id="receipt-amount">R$ 0,00</div>
       <div style="font-size:.78rem;color:var(--text-2)" id="receipt-card-line">—</div>
@@ -1270,12 +1271,12 @@
     <p class="msub">A <b>Carteira</b> é o dinheiro <b>fora</b> dos bancos conectados — espécie e contas que você não ligou no Open Finance. O saldo dos bancos conectados entra sozinho; não digite ele aqui.</p>
 
     <div class="bill-balance-line">
-      <span class="lbl-k">🏦 Nos bancos conectados</span>
+      <span class="lbl-k"><i class="ph ph-bank" aria-hidden="true"></i> Nos bancos conectados</span>
       <span class="lbl-v" id="adjust-wallet-banks">R$ 0,00</span>
     </div>
 
     <div class="modal-row">
-      <label class="modal-label" for="adjust-wallet-input">👛 Carteira (dinheiro fora do banco)</label>
+      <label class="modal-label" for="adjust-wallet-input"><i class="ph ph-wallet" aria-hidden="true"></i> Carteira (dinheiro fora do banco)</label>
       <input class="modal-inp" id="adjust-wallet-input" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0,00" />
       <div style="font-size:.7rem;color:var(--text-3);margin-top:6px">Se você controlava esse banco manualmente aqui, zere: agora o saldo real vem do próprio banco.</div>
     </div>
@@ -1511,17 +1512,17 @@
       <div class="big">🐷</div>
       <div>Oi! Pergunta o que quiser sobre suas <b>finanças</b>.<br>Sei seus saldos, gastos, cartões e mais.</div>
       <div class="piggy-suggestions">
-        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quanto eu gastei esse mês?')">💸 Quanto eu gastei esse mês?</button>
-        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quais minhas maiores categorias de gasto?')">📊 Quais minhas maiores categorias?</button>
-        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quanto tenho de saldo?')">💰 Quanto tenho de saldo?</button>
-        <button class="piggy-sugg" type="button" onclick="piggyAsk('Mostra meus últimos lançamentos')">📝 Mostra meus últimos lançamentos</button>
+        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quanto eu gastei esse mês?')"><i class="ph ph-trend-down" aria-hidden="true"></i> Quanto eu gastei esse mês?</button>
+        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quais minhas maiores categorias de gasto?')"><i class="ph ph-chart-pie" aria-hidden="true"></i> Quais minhas maiores categorias?</button>
+        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quanto tenho de saldo?')"><i class="ph ph-wallet" aria-hidden="true"></i> Quanto tenho de saldo?</button>
+        <button class="piggy-sugg" type="button" onclick="piggyAsk('Mostra meus últimos lançamentos')"><i class="ph ph-receipt" aria-hidden="true"></i> Mostra meus últimos lançamentos</button>
       </div>
     </div>
   </div>
   <div class="piggy-foot">
     <div class="piggy-input-row">
       <textarea class="piggy-input" id="piggy-input" placeholder="Pergunte algo…" rows="1" onkeydown="piggyKeyDown(event)" oninput="piggyAutoresize(this)"></textarea>
-      <button class="piggy-send" id="piggy-send" type="button" aria-label="Enviar" onclick="piggySend()">→</button>
+      <button class="piggy-send" id="piggy-send" type="button" aria-label="Enviar" onclick="piggySend()"><i class="ph ph-paper-plane-tilt" aria-hidden="true"></i></button>
     </div>
     <div class="piggy-usage" id="piggy-usage"></div>
   </div>

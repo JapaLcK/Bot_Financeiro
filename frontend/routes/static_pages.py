@@ -444,6 +444,17 @@ async def serve_brand_css():
     )
 
 
+@router.get("/phosphor.css")
+async def serve_phosphor_css():
+    """CSS dos icones Phosphor (peso Regular), self-hosted. Aponta pro
+    /fonts/Phosphor.woff2. Cache longo — muda pouco."""
+    return FileResponse(
+        FRONTEND_DIR / "phosphor.css",
+        media_type="text/css",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
 @router.get("/fonts/{name}")
 async def serve_font(name: str):
     """Serve as woff2 da Inter self-hostada. Allowlist explícita — sem path
@@ -451,6 +462,7 @@ async def serve_font(name: str):
     allowed = {
         "Inter-Regular.woff2", "Inter-Medium.woff2", "Inter-SemiBold.woff2",
         "Inter-Bold.woff2", "Inter-ExtraBold.woff2", "Inter-Black.woff2",
+        "Phosphor.woff2",  # icones Phosphor (peso Regular), self-hosted
     }
     if name not in allowed:
         return Response(status_code=404)

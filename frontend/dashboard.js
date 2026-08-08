@@ -5409,7 +5409,9 @@ function applyTheme(theme) {
   document.body.classList.toggle("light", isLight);
   const icon  = document.getElementById("theme-toggle-icon");
   const label = document.getElementById("theme-toggle-label");
-  if (icon)  icon.textContent  = isLight ? "☀️" : "🌙";
+  if (icon)  icon.innerHTML = isLight
+    ? '<i class="ph ph-sun" aria-hidden="true"></i>'
+    : '<i class="ph ph-moon" aria-hidden="true"></i>';
   if (label) label.textContent = isLight ? "Modo claro" : "Modo escuro";
 
   // Re-renderiza os gráficos da view Análises pra pegar as cores novas do tema.
