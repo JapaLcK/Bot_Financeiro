@@ -1565,16 +1565,21 @@ def get_consolidated_balance(user_id: int) -> dict:
             # Dedup por conta REAL (provider_account_id): reconectar o banco cria uma nova
             # connection_id com a MESMA conta (a unicidade é por conexão), o que somaria o
             # mesmo saldo 2x. DISTINCT ON pega o saldo da conexão mais recente por conta.
+            # PAUSED/DELETED mantêm o espelho local para histórico, mas não representam
+            # uma conexão atual e portanto não podem compor o saldo corrente.
             cur.execute(
                 """
                 select coalesce(sum(b), 0) as b, count(*) as n from (
-                    select distinct on (a.provider_account_id) a.balance as b
+                    select distinct on (a.provider_account_id)
+                        a.balance as b,
+                        upper(coalesce(c.status, '')) as connection_status
                     from open_finance_accounts a
                     join open_finance_connections c on c.id = a.connection_id
                     where c.user_id=%s and upper(a.type) = 'BANK'
                       and upper(coalesce(a.currency, 'BRL')) = 'BRL'
                     order by a.provider_account_id, c.id desc
                 ) uniq
+                where connection_status not in ('PAUSED', 'DELETED')
                 """,
                 (user_id,),
             )

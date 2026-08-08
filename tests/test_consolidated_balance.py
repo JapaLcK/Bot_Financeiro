@@ -119,6 +119,60 @@ def test_conta_em_moeda_estrangeira_fica_fora_da_soma(user_id):
     assert cb["consolidated"] == Decimal("400.00")
 
 
+@pytest.mark.parametrize("terminal_status", ["PAUSED", "DELETED"])
+def test_conexao_terminal_nao_entra_no_saldo_atual(user_id, terminal_status):
+    db.add_launch_and_update_balance(user_id, "receita", 100, None, "seed")
+    connection_id = _connect_fake_bank(user_id, "4320.75")
+
+    if terminal_status == "PAUSED":
+        db.pause_open_finance_connection(connection_id)
+    else:
+        updated = db.update_pluggy_open_finance_item_status(
+            f"item-test-{user_id}", terminal_status
+        )
+        assert updated == 1
+
+    cb = db.get_consolidated_balance(user_id)
+    assert cb["manual"] == Decimal("100")
+    assert cb["open_finance_bank"] == Decimal("0")
+    assert cb["of_bank_count"] == 0
+    assert cb["consolidated"] == Decimal("100")
+
+
+@pytest.mark.parametrize("terminal_status", ["PAUSED", "DELETED"])
+def test_conexao_terminal_mais_recente_nao_ressuscita_saldo_antigo(user_id, terminal_status):
+    _connect_fake_bank(user_id, "500.00")
+    connection = db.save_pluggy_open_finance_item(
+        user_id,
+        {"id": f"item-test-2-{user_id}", "connector": {"id": 612, "name": "Nubank"}, "status": "UPDATED"},
+    )
+    db.save_open_finance_sync(
+        connection["id"],
+        [{
+            "provider_account_id": f"acc-test-{user_id}",
+            "name": "Nubank Conta",
+            "type": "BANK",
+            "subtype": "CHECKING_ACCOUNT",
+            "currency": "BRL",
+            "balance": Decimal("650.00"),
+            "raw": {},
+            "transactions": [],
+        }],
+    )
+
+    if terminal_status == "PAUSED":
+        db.pause_open_finance_connection(connection["id"])
+    else:
+        updated = db.update_pluggy_open_finance_item_status(
+            f"item-test-2-{user_id}", terminal_status
+        )
+        assert updated == 1
+
+    cb = db.get_consolidated_balance(user_id)
+    assert cb["of_bank_count"] == 0
+    assert cb["open_finance_bank"] == Decimal("0")
+
+
 def test_handler_saldo_mostra_consolidado_com_banco(user_id, consolidated_on):
     db.add_launch_and_update_balance(user_id, "receita", 100, None, "seed")
     _connect_fake_bank(user_id, "4320.75")
