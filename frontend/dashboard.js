@@ -1169,7 +1169,7 @@ function _renderInstallmentItem(g, idx = 0) {
 
   const valorParcela = g.valor_parcela || 0;
   const anticipateBtn = g.n_pending > 0
-    ? `<button class="mock-cta outline" onclick='event.stopPropagation(); openInstAnticipateModal(${JSON.stringify(g.group_id)}, ${JSON.stringify(g.name)}, ${valorParcela}, ${parcelas.find(p => p.is_next)?.installment_no || 0}, ${g.installments_total})'>⚡ Antecipar próxima</button>`
+    ? `<button class="mock-cta outline" onclick='event.stopPropagation(); openInstAnticipateModal(${JSON.stringify(g.group_id)}, ${JSON.stringify(g.name)}, ${valorParcela}, ${parcelas.find(p => p.is_next)?.installment_no || 0}, ${g.installments_total})'><i class="ph ph-lightning" aria-hidden="true"></i> Antecipar próxima</button>`
     : "";
 
   return `
@@ -1430,12 +1430,14 @@ const CATEGORY_EMOJI_OPTIONS = [
 
 // ── Icones Phosphor p/ categorias/metas/caixinhas (shim nao-destrutivo) ──
 // Continua guardando o emoji no banco; converte pra <i> so no render.
-// Emoji sem equivalente cai no fallback (mostra o proprio emoji).
-const EMOJI_TO_PH = {"🏷":"tag","🍔":"hamburger","🛒":"shopping-cart","🚗":"car","💊":"pill","🏠":"house","🎬":"film-slate","📚":"books","📖":"book-open","📺":"television","🐾":"paw-print","✈":"airplane-tilt","🎮":"game-controller","👕":"t-shirt","🍺":"beer-stein","☕":"coffee","⛽":"gas-pump","💼":"briefcase","💻":"laptop","🎁":"gift","📈":"trend-up","💰":"coins","₿":"currency-btc","🎓":"graduation-cap","🐶":"dog","👶":"baby","🏋":"barbell","🎵":"music-notes","🎂":"cake","🎯":"target","🛟":"lifebuoy","📱":"device-mobile","💎":"diamond","📸":"camera","🎸":"guitar","🛏":"bed","🏖":"umbrella","🐷":"piggy-bank","🍽":"fork-knife","🍴":"fork-knife","🥖":"fork-knife","🍕":"pizza","🌐":"globe","💧":"drop","💡":"lightbulb","🔥":"flame","🚇":"train","🚌":"bus","❤":"heart","🔧":"wrench","🛍":"handbag","👜":"handbag","🍎":"apple-logo","🔎":"magnifying-glass","⛪":"church","🎟":"ticket","🚕":"taxi","🏦":"bank","🏢":"buildings","🏛":"bank","🦷":"tooth","🩺":"stethoscope","🛡":"shield","🧺":"basket","🧹":"broom","🎭":"mask-happy","🎤":"microphone","🎄":"tree-evergreen","💐":"flower","☁":"cloud","🍷":"wine","💇":"scissors","🖌":"paint-brush","🎨":"paint-brush","🪴":"tree","🩹":"first-aid","📄":"file-text","🧾":"receipt","📅":"calendar-dots","📊":"chart-bar","💳":"credit-card","💸":"trend-down"};
+// Fallback = icone neutro (tag): NUNCA mostra emoji.
+const EMOJI_TO_PH = {"🏷":"tag","🍔":"hamburger","🍟":"hamburger","🛒":"shopping-cart","🚗":"car","💊":"pill","🏠":"house","🎬":"film-slate","📚":"books","📖":"book-open","📺":"television","🐾":"paw-print","🖥":"desktop","🖨":"printer","✈":"airplane-tilt","🎮":"game-controller","👕":"t-shirt","👟":"sneaker-move","👜":"handbag","🍺":"beer-stein","☕":"coffee","⛽":"gas-pump","💼":"briefcase","💻":"laptop","🎁":"gift","📈":"trend-up","💰":"coins","🤝":"handshake","₿":"currency-btc","🎓":"graduation-cap","🐶":"dog","👶":"baby","🏋":"barbell","🎵":"music-notes","💄":"heart-straight","🧴":"spray-bottle","🎂":"cake","🎯":"target","🛟":"lifebuoy","📱":"device-mobile","💎":"diamond","📸":"camera","🎸":"guitar","🛏":"bed","🏖":"umbrella","🐷":"piggy-bank","🍽":"fork-knife","🍴":"fork-knife","🥖":"bread","🥩":"fork-knife","🍕":"pizza","🌐":"globe","💧":"drop","💡":"lightbulb","🔥":"flame","🚇":"train","🚌":"bus","❤":"heart","🔧":"wrench","🍎":"apple-logo","🔎":"magnifying-glass","⛪":"church","🎟":"ticket","🚕":"taxi","🏦":"bank","🏢":"buildings","🏛":"bank","🦷":"tooth","🩺":"stethoscope","🛡":"shield","🧺":"basket","🧹":"broom","🎭":"mask-happy","🎤":"microphone","🎄":"tree-evergreen","💐":"flower","☁":"cloud","🍷":"wine","💇":"scissors","🖌":"paint-brush","🎨":"paint-brush","🪴":"tree","🩹":"first-aid","📄":"file-text","🧾":"receipt","📅":"calendar-dots","📊":"chart-bar","💳":"credit-card","💸":"trend-down","📡":"broadcast"};
 function phIcon(val) {
-  const v = (val == null ? "" : String(val)).replace(/\uFE0F/g, "").trim();
-  const name = EMOJI_TO_PH[v];
-  return name ? `<i class="ph ph-${name}" aria-hidden="true"></i>` : escapeHtmlSafe(val == null ? "" : String(val));
+  const raw = val == null ? "" : String(val);
+  const v = raw.replace(/\uFE0F/g, "").trim();
+  if (!v) return "";
+  const name = EMOJI_TO_PH[v] || "tag";
+  return `<i class="ph ph-${name}" aria-hidden="true"></i>`;
 }
 
 const CATEGORY_COLOR_OPTIONS = [
@@ -1565,7 +1567,7 @@ function _renderCategoriesDistribution(categories) {
     const fillClass = pct > 30 ? "red" : pct > 15 ? "yellow" : "green";
     return `
       <div class="bar-row" style="animation-delay:${i * 70}ms">
-        <div class="bar-icon" style="color:${escapeHtmlSafe(color)}">${escapeHtmlSafe(emoji)}</div>
+        <div class="bar-icon" style="color:${escapeHtmlSafe(color)}">${phIcon(emoji)}</div>
         <div class="bar-body">
           <div class="bar-head"><span class="name">${escapeHtmlSafe(m.categoria)}</span><span class="val">${_fmtBRL(m.total)}</span></div>
           <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${pct.toFixed(1)}%"></div></div>
@@ -1901,10 +1903,10 @@ function _renderBudgetRow(b, idx = 0) {
   const fillClass = b.status === "vermelho" ? "red" : (b.status === "amarelo" ? "yellow" : "green");
   const widthPct = Math.min(100, pct);
   const subColor = b.status === "vermelho" ? "color:#FF2D2D" : "";
-  const dotEmoji = b.status === "vermelho" ? "🔴" : (b.status === "amarelo" ? "🟡" : "🟢");
+  const dotEmoji = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:middle;margin-right:5px;background:${b.status === "vermelho" ? "#ef4444" : (b.status === "amarelo" ? "#fbbf24" : "#22c55e")}"></span>`;
   let subText = `${pct.toFixed(0)}% — ${_fmtBRL(b.remaining)} restantes`;
   if (b.status === "vermelho") {
-    subText = `⚠️ ${pct.toFixed(0)}% — estourou ${_fmtBRL(-b.remaining)}`;
+    subText = `<i class="ph ph-warning" aria-hidden="true"></i> ${pct.toFixed(0)}% — estourou ${_fmtBRL(-b.remaining)}`;
   } else if (b.status === "amarelo") {
     subText = `${pct.toFixed(0)}% — ${_fmtBRL(b.remaining)} restantes. Piggy te avisa via WhatsApp.`;
   }
@@ -1972,7 +1974,7 @@ async function openBudgetEditModal(budget) {
 
   const sel = document.getElementById("budget-edit-cat");
   if (isEdit) {
-    sel.innerHTML = `<option value="${escapeHtmlSafe(budget.categoria)}" selected>${escapeHtmlSafe(budget.emoji || "🏷️")} ${escapeHtmlSafe(budget.categoria)}</option>`;
+    sel.innerHTML = `<option value="${escapeHtmlSafe(budget.categoria)}" selected>${escapeHtmlSafe(budget.categoria)}</option>`;
     sel.disabled = true;
   } else {
     sel.disabled = false;
@@ -1983,7 +1985,7 @@ async function openBudgetEditModal(budget) {
       const options = (cats || [])
         .filter(c => !c.is_archived)
         .filter(c => !usedCats.has((c.name || "").toLowerCase()))
-        .map(c => `<option value="${escapeHtmlSafe(c.name)}">${escapeHtmlSafe(c.emoji)} ${escapeHtmlSafe(c.name)}</option>`)
+        .map(c => `<option value="${escapeHtmlSafe(c.name)}">${escapeHtmlSafe(c.name)}</option>`)
         .join("");
       sel.innerHTML = options || '<option value="">— Todas categorias já têm orçamento —</option>';
     } catch (err) {
@@ -2314,11 +2316,11 @@ function _renderGoalCard(g, idx = 0) {
     const projStr = proj.toLocaleDateString("pt-BR", { month: "short", year: "numeric" });
     alertText = `<div class="goal-deadline" style="color:#FF2D2D">⚠️ Ritmo atual chega só em ${projStr}${g.target_date ? " — prazo era " + deadlineText.replace("Prazo: ", "") : ""}</div>`;
   } else if (g.indicator === "tight") {
-    alertText = `<div class="goal-deadline" style="color:#fbbf24">🟡 Ritmo apertado — pode atrasar</div>`;
+    alertText = `<div class="goal-deadline" style="color:#fbbf24">Ritmo apertado — pode atrasar</div>`;
   } else if (g.indicator === "ahead") {
     alertText = `<div class="goal-deadline" style="color:#00F078"><i class="ph ph-rocket-launch" aria-hidden="true"></i> Adiantado — no melhor caminho</div>`;
   } else if (g.indicator === "on_track") {
-    alertText = `<div class="goal-deadline" style="color:#00F078">🟢 No prazo</div>`;
+    alertText = `<div class="goal-deadline" style="color:#00F078">No prazo</div>`;
   } else if (g.indicator === "achieved") {
     alertText = `<div class="goal-deadline" style="color:#00F078">✓ Meta atingida</div>`;
   }
@@ -3034,7 +3036,7 @@ function _renderFixedView(items) {
   upEl.innerHTML = upcoming.length
     ? upcoming.map(x => `
         <div class="tx-row">
-          <div class="tx-icon" style="color:${(x.date - today) / (1000 * 60 * 60 * 24) <= 2 ? '#FF2D2D' : '#fbbf24'}">${_recurringEmoji(x.rec)}</div>
+          <div class="tx-icon" style="color:${(x.date - today) / (1000 * 60 * 60 * 24) <= 2 ? '#FF2D2D' : '#fbbf24'}">${phIcon(_recurringEmoji(x.rec))}</div>
           <div class="tx-main">
             <div class="tx-desc">${escapeHtmlSafe(x.rec.name)} · ${x.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</div>
             <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.payment_type === "credit_card" ? "Cartão " + escapeHtmlSafe(x.rec.card_name || "?") : "Débito automático"}</div>
@@ -3117,7 +3119,7 @@ function _renderRecurringRow(r) {
   const safeRecJson = JSON.stringify(r).replace(/"/g, "&quot;");
   return `
     <div class="tx-row" style="cursor:pointer" onclick="openRecurringEditModal(${safeRecJson})">
-      <div class="tx-icon">${_recurringEmoji(r)}</div>
+      <div class="tx-icon">${phIcon(_recurringEmoji(r))}</div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(r.name)}</div>
         <div class="tx-meta">${payment}${adjustText}${startText}</div>
@@ -3799,8 +3801,8 @@ function _renderBillRow(b) {
         <div class="tx-amt red">${amtLabel}</div>
         <div style="display:flex;gap:4px">
           <button class="mock-cta" style="padding:3px 9px;font-size:.72rem" onclick="payBill(${b.id}, ${b.amount || 0}, '${nameSafe}', ${variavel})">✓ Pago</button>
-          <button class="mock-cta outline" title="Editar" style="padding:3px 8px;font-size:.72rem" onclick="editBoleto(${b.id}, '${nameSafe}', ${b.amount || 0}, '${b.due_date}')">✎</button>
-          <button class="mock-cta outline" title="Apagar" style="padding:3px 8px;font-size:.72rem" onclick="deleteBoleto(${b.id}, '${nameSafe}')">🗑</button>
+          <button class="mock-cta outline" title="Editar" style="padding:3px 8px;font-size:.72rem" onclick="editBoleto(${b.id}, '${nameSafe}', ${b.amount || 0}, '${b.due_date}')"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
+          <button class="mock-cta outline" title="Apagar" style="padding:3px 8px;font-size:.72rem" onclick="deleteBoleto(${b.id}, '${nameSafe}')"><i class="ph ph-trash" aria-hidden="true"></i></button>
         </div>
       </div>
     </div>`;
@@ -3986,7 +3988,7 @@ function _renderProjection(p) {
   const accent = ok ? "#22c55e" : "#FF2D2D";
   const alvo = new Date(p.target + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "long" });
   const header = ok
-    ? `😌 Tranquilo até ${alvo} — sobra ${_fmtBRL(p.projetado)}`
+    ? `<i class="ph ph-smiley" aria-hidden="true"></i> Tranquilo até ${alvo} — sobra ${_fmtBRL(p.projetado)}`
     : `⚠️ Aperta até ${alvo} — falta ${_fmtBRL(Math.abs(p.projetado))}`;
   const line = (label, val, positive) => `
     <div style="display:flex;justify-content:space-between;font-size:.82rem;padding:2px 0">
@@ -4170,7 +4172,7 @@ function _renderRecurringIncomeView(items) {
   upEl.innerHTML = upcoming.length
     ? upcoming.map(x => `
         <div class="tx-row">
-          <div class="tx-icon" style="color:var(--green)">${_recurringIncomeEmoji(x.rec)}</div>
+          <div class="tx-icon" style="color:var(--green)">${phIcon(_recurringIncomeEmoji(x.rec))}</div>
           <div class="tx-main">
             <div class="tx-desc">${escapeHtmlSafe(x.rec.name)} · ${x.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</div>
             <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.is_primary ? "Renda principal" : "Renda extra"}</div>
@@ -4189,7 +4191,7 @@ function _renderRecurringIncomeView(items) {
         const when = r.last_amount_changed_at ? new Date(r.last_amount_changed_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : "";
         return `
           <div class="tx-row">
-            <div class="tx-icon" style="color:${delta > 0 ? "#22c55e" : "#fbbf24"}">${delta > 0 ? "🎉" : "⚠️"}</div>
+            <div class="tx-icon" style="color:${delta > 0 ? "#22c55e" : "#fbbf24"}">${delta > 0 ? '<i class="ph ph-confetti" aria-hidden="true"></i>' : '<i class="ph ph-warning" aria-hidden="true"></i>'}</div>
             <div class="tx-main">
               <div class="tx-desc">${escapeHtmlSafe(r.name)} ${delta > 0 ? "aumentou" : "diminuiu"} ${sign}${_fmtBRL(Math.abs(delta))}</div>
               <div class="tx-meta">${pct}% vs valor anterior · detectado em ${when}</div>
@@ -4228,7 +4230,7 @@ function _renderRecurringIncomeRow(r) {
   const safeRecJson = JSON.stringify(r).replace(/"/g, "&quot;");
   return `
     <div class="tx-row" style="cursor:pointer" onclick="openRecurringIncomeEditModal(${safeRecJson})">
-      <div class="tx-icon">${_recurringIncomeEmoji(r)}</div>
+      <div class="tx-icon">${phIcon(_recurringIncomeEmoji(r))}</div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(r.name)}</div>
         <div class="tx-meta">${when}${adjustText}${_futureStartHint(r.start_date)}</div>
@@ -5025,7 +5027,7 @@ function renderAnalyticsInsights(insights) {
     const action = i.action_label && i.action_view
       ? `<button class="mini-action" onclick="_switchToInsightView('${escapeJsString(i.action_view)}')" style="background:rgba(255,45,142,.12);border:none;color:var(--purple,#FF2D8E);font-size:.75rem;font-weight:600;padding:5px 10px;border-radius:6px;cursor:pointer;white-space:nowrap">${escapeHtmlSafe(i.action_label)} →</button>`
       : "";
-    const closeBtn = `<button title="Dispensar" aria-label="Dispensar" onclick="_dismissInsight('${escapeJsString(i.key)}')" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;border-radius:6px;opacity:.6" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.6">✕</button>`;
+    const closeBtn = `<button title="Dispensar" aria-label="Dispensar" onclick="_dismissInsight('${escapeJsString(i.key)}')" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;border-radius:6px;opacity:.6" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.6"><i class="ph ph-x" aria-hidden="true"></i></button>`;
     return `
       <div class="tx-row" style="border-left:3px solid ${color};padding-left:10px;align-items:flex-start">
         <div class="tx-icon">${i.icon || "🐷"}</div>
@@ -6439,7 +6441,7 @@ function renderAlerts(alerts) {
     } else if (a.type === "recurring_credited") {
       html += `<div class="alert-row">🐷 Piggy recebeu <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} na conta ${_alertWhenLabel(a.credited_at)}. <button onclick="ackRecurringIncomeCredit(${a.credit_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'">✕</button></div>`;
     } else {
-      const icon = a.type === "budget_exceeded" ? "🔴" : "⚠️";
+      const icon = a.type === "budget_exceeded" ? '<i class="ph ph-warning-circle" aria-hidden="true"></i>' : '<i class="ph ph-warning" aria-hidden="true"></i>';
       html += `<div class="alert-row">${icon} <b>${escapeHtmlSafe(a.categoria)}</b>: ${fmt(a.spent)} de ${fmt(a.budget)} (${a.pct}%)</div>`;
     }
   });
@@ -6667,7 +6669,7 @@ function renderLaunches() {
       const typeLabel  = TYPE_LABELS[l.tipo] || l.tipo.replaceAll("_", " ");
       const editable   = l.id != null;
       const editBtn    = editable
-        ? `<button class="bgt-btn launch-edit-btn" onclick="event.stopPropagation();openEditLaunchModal(${l.id})" title="Editar lançamento">✏️</button>`
+        ? `<button class="bgt-btn launch-edit-btn" onclick="event.stopPropagation();openEditLaunchModal(${l.id})" title="Editar lançamento"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>`
         : '';
       const deleteBtn  = editable
         ? `<button class="bgt-btn launch-delete-btn" onclick="event.stopPropagation();confirmDeleteLaunch(${l.id}, ${JSON.stringify(describeLaunch(l).replace(/<[^>]+>/g, '').trim()).replace(/"/g, '&quot;')}, ${l.valor}, ${l.tipo === 'credito' ? 'true' : 'false'}, ${l.installments_total || 'null'})" title="Apagar lançamento">🗑️</button>`
@@ -9107,7 +9109,7 @@ function _showAccessError(title, msg) {
   document.body.style.cssText = "background:#111111;display:flex;align-items:center;justify-content:center;min-height:100vh;";
   document.body.innerHTML = `
     <div style="text-align:center;color:rgba(255,255,255,0.85);font-family:system-ui;max-width:400px;padding:40px">
-      <div style="font-size:3rem;margin-bottom:16px">🔒</div>
+      <div style="font-size:3rem;margin-bottom:16px"><i class="ph ph-lock" aria-hidden="true"></i></div>
       <h2 style="margin-bottom:8px;font-size:1.4rem;font-weight:600">${title || "Link inválido ou expirado"}</h2>
       <p style="color:rgba(255,255,255,0.5);line-height:1.6;margin-bottom:24px">
         ${msg || 'Solicite um novo link digitando <strong style="color:rgba(255,255,255,0.8)">dashboard</strong> no bot.'}

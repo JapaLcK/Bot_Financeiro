@@ -212,7 +212,7 @@
   <p class="section-title" id="launches-title" style="display:none">Lançamentos</p>
   <div id="launches-wrap" style="display:none">
     <div class="filter-bar">
-      <input class="filter-input" id="filter-text" placeholder="🔍  Buscar por descrição ou categoria…" oninput="applyFilter()" />
+      <input class="filter-input" id="filter-text" placeholder="Buscar por descrição ou categoria…" oninput="applyFilter()" />
       <div class="filter-tabs">
         <button class="ftab active" data-type="all"          onclick="setTab(this)">Todos</button>
         <button class="ftab"        data-type="receita"      onclick="setTab(this)">Receitas</button>
@@ -232,9 +232,9 @@
       <p class="section-title" style="margin:0">Análises</p>
       <div style="display:flex;gap:8px">
         <select id="analytics-period-select" class="period-pill" aria-label="Período de análise">
-          <option value="3">📅 Últimos 3 meses</option>
-          <option value="6" selected>📅 Últimos 6 meses</option>
-          <option value="12">📅 Últimos 12 meses</option>
+          <option value="3">Últimos 3 meses</option>
+          <option value="6" selected>Últimos 6 meses</option>
+          <option value="12">Últimos 12 meses</option>
         </select>
       </div>
     </div>
@@ -303,10 +303,10 @@
       <p class="section-title" style="margin:0">Histórico</p>
       <div style="display:flex;gap:8px">
         <select id="history-period-select" class="period-pill" aria-label="Período">
-          <option value="1">📅 Últimos 30 dias</option>
-          <option value="3">📅 Últimos 3 meses</option>
-          <option value="6" selected>📅 Últimos 6 meses</option>
-          <option value="12">📅 Últimos 12 meses</option>
+          <option value="1">Últimos 30 dias</option>
+          <option value="3">Últimos 3 meses</option>
+          <option value="6" selected>Últimos 6 meses</option>
+          <option value="12">Últimos 12 meses</option>
         </select>
       </div>
     </div>
@@ -345,7 +345,7 @@
 
     <div class="search-bar" style="margin-bottom:14px">
       <input id="history-search-input" type="search"
-             placeholder="🔍 Buscar por nome, categoria ou nota… (ex: compra shopping)"
+             placeholder="Buscar por nome, categoria ou nota… (ex: compra shopping)"
              autocomplete="off" />
     </div>
 
@@ -495,7 +495,7 @@
     <div id="budgets-list-card" class="mock-card" style="margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
         <h3 style="margin:0">Por categoria</h3>
-        <div style="font-size:.72rem;color:var(--text-3)">🟢 &lt; 80% &nbsp;•&nbsp; 🟡 80–99% &nbsp;•&nbsp; 🔴 ≥ 100%</div>
+        <div style="font-size:.72rem;color:var(--text-3)"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;vertical-align:middle;margin-right:5px"></span>&lt; 80% &nbsp;•&nbsp; <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fbbf24;vertical-align:middle;margin-right:5px"></span>80–99% &nbsp;•&nbsp; <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;vertical-align:middle;margin-right:5px"></span>≥ 100%</div>
       </div>
       <div id="budgets-list" class="tx-list"></div>
     </div>
