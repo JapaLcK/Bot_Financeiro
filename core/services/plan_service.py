@@ -220,6 +220,39 @@ def bank_list_ui_enabled(user_id: int, email: str | None = None) -> bool:
     return str(user_id) in beta_ids
 
 
+# Allowlist padrão do beta do saldo consolidado (Carteira + bancos OF) no bot/
+# relatórios/chat IA. Mesma mecânica dos Agentes: primeiro só o teste, depois geral.
+_CONSOLIDATED_BETA_EMAILS_DEFAULT = {"lucaskuramoti06@gmail.com", "hiagojo2016@gmail.com"}
+
+
+def consolidated_balance_enabled(user_id: int, email: str | None = None) -> bool:
+    """Gate beta do saldo consolidado nas superfícies de leitura (WhatsApp /saldo,
+    resumos, chat IA, Discord). Liga se:
+    - OF_CONSOLIDATED_BALANCE_ENABLED global ligado (lançamento pra todos), OU
+    - o e-mail está em OF_CONSOLIDATED_BETA_EMAILS (default = e-mails de teste), OU
+    - o user_id está em OF_CONSOLIDATED_BETA_USER_IDS.
+    Default: SÓ as contas de teste veem o consolidado; o resto segue vendo a
+    Carteira manual como sempre. O dashboard web não passa por aqui (já somava
+    os bancos antes deste gate)."""
+    if (os.getenv("OF_CONSOLIDATED_BALANCE_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    raw = os.getenv("OF_CONSOLIDATED_BETA_EMAILS")
+    if raw is None:
+        beta_emails = _CONSOLIDATED_BETA_EMAILS_DEFAULT
+    else:
+        beta_emails = {e.strip().lower() for e in raw.split(",") if e.strip()}
+    if email is None:
+        try:
+            from db import get_user_email
+            email = get_user_email(user_id)
+        except Exception:
+            email = None
+    if email and str(email).strip().lower() in beta_emails:
+        return True
+    beta_ids = {i.strip() for i in (os.getenv("OF_CONSOLIDATED_BETA_USER_IDS") or "").split(",") if i.strip()}
+    return str(user_id) in beta_ids
+
+
 def has_app_access(user_id: int) -> bool:
     """True se o usuário pode entrar no app.
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from utils_date import now_tz, _tz
 from db import (
-    get_balance, get_launches_by_period, get_summary_by_period,
+    get_consolidated_balance, get_launches_by_period, get_summary_by_period,
     list_users_with_daily_report_enabled, list_identities_by_user,
     list_users_with_weekly_report_enabled, list_users_with_monthly_report_enabled,
     list_credit_card_due_reminders, mark_card_reminder_sent,
@@ -23,6 +23,19 @@ def _add_months(y: int, m: int, delta: int) -> tuple[int, int]:
     y2 = y + (m2 - 1) // 12
     m2 = (m2 - 1) % 12 + 1
     return y2, m2
+
+
+def _saldo_atual(user_id: int) -> float:
+    """Saldo verdadeiro do usuário: Carteira manual + bancos conectados (Open Finance).
+
+    Em beta (consolidated_balance_enabled): fora do allowlist de teste, mantém o
+    comportamento antigo (só a Carteira manual)."""
+    from core.services.plan_service import consolidated_balance_enabled
+
+    cb = get_consolidated_balance(user_id) or {}
+    if consolidated_balance_enabled(user_id):
+        return float(cb.get("consolidated") or 0)
+    return float(cb.get("manual") or 0)
 
 
 def _card_bill_due_date(period_end: date, closing_day: int, due_day: int) -> date:
@@ -67,7 +80,7 @@ def build_due_bill_reminders(user_id: int, today: date | None = None) -> list[di
 
 
 def build_daily_report_summary(user_id: int) -> dict[str, str]:
-    saldo = float(get_balance(user_id) or 0)
+    saldo = _saldo_atual(user_id)
 
     now      = now_tz()
     ref_date = now.date() - timedelta(days=1)   # o report roda às 9h e se refere a ontem
@@ -106,7 +119,7 @@ def build_daily_report_text(user_id: int) -> str:
 # --- resumos por período (semanal / mensal) ---
 
 def _build_period_report_summary(user_id: int, start_date: date, end_date: date) -> dict[str, str]:
-    saldo = float(get_balance(user_id) or 0)
+    saldo = _saldo_atual(user_id)
 
     launches = get_launches_by_period(user_id, start_date, end_date) or []
     summary  = get_summary_by_period(user_id, start_date, end_date)
