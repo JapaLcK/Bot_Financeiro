@@ -2384,8 +2384,12 @@ let selectedConnectorId = null;
 // vira CTA de upgrade e não abre o widget. null = ainda não carregou OU ilimitado.
 let OF_BANKS_MAX = null;
 let OF_HAS_CONNECTION = false; // há alguma conexão (mesmo pausada)? refina a copy do CTA
-let OF_CONN_COUNT = 0;        // quantos bancos já conectados (pra pré-bloquear no teto)
-let OF_CONN_NAMES = [];       // nomes das instituições já conectadas (normalizados) — reconexão
+let OF_CONN_COUNT = 0;        // bancos que contam no teto (PAUSED não conta, igual ao backend)
+let OF_CONN_NAMES = [];       // nomes das instituições que contam no teto — reconexão
+
+function _ofCountsTowardBankLimit(conn) {
+  return String((conn && conn.status) || "").toUpperCase() !== "PAUSED";
+}
 
 // Reconfigura o botão "Conectar Open Finance" conforme o plano. No Free (limite 0),
 // não faz sentido abrir a Pluggy (o /pluggy-item recusaria com 402): troca por um
@@ -2577,8 +2581,9 @@ function connStatusPill(status) {
 /* ── Render ──────────────────────────────────── */
 function renderConnections(list) {
   OF_HAS_CONNECTION = Array.isArray(list) && list.length > 0;
-  OF_CONN_COUNT = Array.isArray(list) ? list.length : 0;
-  OF_CONN_NAMES = (Array.isArray(list) ? list : []).map(c => _stripAccent(c.institution_name || ""));
+  const countedConnections = (Array.isArray(list) ? list : []).filter(_ofCountsTowardBankLimit);
+  OF_CONN_COUNT = countedConnections.length;
+  OF_CONN_NAMES = countedConnections.map(c => _stripAccent(c.institution_name || ""));
   applyOfConnectButton(); // refina a copy do CTA de upgrade (reative vs assine)
   const el = document.getElementById("connections-list");
   if (!list.length) {
