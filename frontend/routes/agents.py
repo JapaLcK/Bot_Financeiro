@@ -193,6 +193,26 @@ async def agents_pause_route(request: Request, user_id: int, kind: str):
     return {"ok": True}
 
 
+class EmailPrefBody(BaseModel):
+    enabled: bool
+
+
+@router.post("/agents/{user_id}/{kind}/email")
+async def agents_email_pref_route(request: Request, user_id: int, kind: str, body: EmailPrefBody):
+    """Liga/desliga o e-mail proativo desse agente (o feed continua). Opt-out por
+    agente — decidido na ativação ou depois, no card."""
+    shared.authorize_dashboard_access(request, user_id)
+    _require_agents_beta(user_id)
+    from db import AGENT_KINDS, set_agent_email_enabled
+
+    if kind not in AGENT_KINDS:
+        raise HTTPException(status_code=400, detail="Agente desconhecido.")
+    ok = await asyncio.to_thread(set_agent_email_enabled, user_id, kind, body.enabled)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Ative o agente antes de configurar o e-mail.")
+    return {"ok": True, "email_enabled": body.enabled}
+
+
 @router.get("/agents/{user_id}/feed")
 async def agents_feed_route(request: Request, user_id: int, limit: int = 20):
     shared.authorize_dashboard_access(request, user_id)
