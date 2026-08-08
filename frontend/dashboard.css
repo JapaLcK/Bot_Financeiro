@@ -857,6 +857,8 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   transition:all .2s var(--ease);display:flex;align-items:center;gap:5px;white-space:nowrap; }
 .hbtn:hover  { background:rgba(255,255,255,.14);color:var(--text);border-color:rgba(255,255,255,.24); }
 .hbtn:active { transform:scale(.96); }
+/* Icones dos botoes de acao (Atualizar/OFX/Exportar) em rosa da marca; nao pinta o botao de perfil */
+.hbtn:not(.user-menu-btn) .ph { color:var(--primary); }
 .user-menu { position:relative; }
 .user-menu-btn {
   max-width:220px;

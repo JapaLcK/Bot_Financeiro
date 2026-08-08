@@ -40,63 +40,63 @@
 
   <div class="sidenav-section">Geral</div>
   <button class="sidenav-item active" type="button" data-nav="overview" onclick="navigateTo('overview')">
-    <span class="sn-icon"><i class="ph ph-chart-bar" aria-hidden="true"></i></span><span class="sn-label">Visão Geral</span>
+    <span class="sn-icon" style="color:#3B82F6"><i class="ph ph-chart-bar" aria-hidden="true"></i></span><span class="sn-label">Visão Geral</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="analytics" onclick="navigateTo('analytics')">
-    <span class="sn-icon"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Análises</span>
+    <span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Análises</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="history" onclick="navigateTo('history')">
-    <span class="sn-icon"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i></span><span class="sn-label">Histórico</span>
+    <span class="sn-icon" style="color:#94A3B8"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i></span><span class="sn-label">Histórico</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="agentes" onclick="navigateTo('agentes')">
-    <span class="sn-icon"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span><span class="sn-label">Agentes</span><span class="sn-tag new">novo</span>
+    <span class="sn-icon" style="color:#FF2D8E"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span><span class="sn-label">Agentes</span><span class="sn-tag new">novo</span>
   </button>
 
   <div class="sidenav-section">Planejamento</div>
   <button class="sidenav-item" type="button" data-nav="fixed" onclick="navigateTo('fixed')">
-    <span class="sn-icon"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span><span class="sn-label">Recorrentes</span>
+    <span class="sn-icon" style="color:#14B8A6"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span><span class="sn-label">Recorrentes</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="budgets" onclick="navigateTo('budgets')">
-    <span class="sn-icon"><i class="ph ph-note-pencil" aria-hidden="true"></i></span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span>
+    <span class="sn-icon" style="color:#F59E0B"><i class="ph ph-note-pencil" aria-hidden="true"></i></span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="goals" onclick="navigateTo('goals')">
-    <span class="sn-icon"><i class="ph ph-target" aria-hidden="true"></i></span><span class="sn-label">Caixinhas e metas</span><span class="sn-tag new">novo</span>
+    <span class="sn-icon" style="color:#10B981"><i class="ph ph-target" aria-hidden="true"></i></span><span class="sn-label">Caixinhas e metas</span><span class="sn-tag new">novo</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="categories" onclick="navigateTo('categories')">
-    <span class="sn-icon"><i class="ph ph-tag" aria-hidden="true"></i></span><span class="sn-label">Categorias</span>
+    <span class="sn-icon" style="color:#A855F7"><i class="ph ph-tag" aria-hidden="true"></i></span><span class="sn-label">Categorias</span>
   </button>
 
   <div class="sidenav-section">Crédito</div>
   <button class="sidenav-item" type="button" data-nav="installments" onclick="navigateTo('installments')">
-    <span class="sn-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Parcelamentos</span>
+    <span class="sn-icon" style="color:#FB923C"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Parcelamentos</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="cards" onclick="navigateTo('cards')">
-    <span class="sn-icon"><i class="ph ph-cards" aria-hidden="true"></i></span><span class="sn-label">Cartões</span><span class="sn-tag new">novo</span>
+    <span class="sn-icon" style="color:#6366F1"><i class="ph ph-cards" aria-hidden="true"></i></span><span class="sn-label">Cartões</span><span class="sn-tag new">novo</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="investments" data-pro-feature="investments" onclick="navigateTo('investments')">
-    <span class="sn-icon"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span>
+    <span class="sn-icon" style="color:#22C55E"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span>
   </button>
   <!-- Só aparece pra quem é afiliado (initAffiliateNav mostra se /api/affiliate/me responder 200) -->
   <button class="sidenav-item" type="button" data-nav="affiliate" id="sidenav-affiliate" style="display:none" onclick="navigateTo('affiliate')">
-    <span class="sn-icon"><i class="ph ph-handshake" aria-hidden="true"></i></span><span class="sn-label">Afiliados</span>
+    <span class="sn-icon" style="color:#F43F5E"><i class="ph ph-handshake" aria-hidden="true"></i></span><span class="sn-label">Afiliados</span>
   </button>
 
   <div class="sidenav-footer">
     <div class="sidenav-section" style="padding-top:0">Conta</div>
     <a class="sidenav-item" href="/settings?view=security">
-      <span class="sn-icon"><i class="ph ph-user" aria-hidden="true"></i></span><span class="sn-label">Conta</span>
+      <span class="sn-icon" style="color:#94A3B8"><i class="ph ph-user" aria-hidden="true"></i></span><span class="sn-label">Conta</span>
     </a>
     <a class="sidenav-item" href="/suporte" target="_blank" rel="noopener">
-      <span class="sn-icon"><i class="ph ph-question" aria-hidden="true"></i></span><span class="sn-label">Suporte</span>
+      <span class="sn-icon" style="color:#60A5FA"><i class="ph ph-question" aria-hidden="true"></i></span><span class="sn-label">Suporte</span>
     </a>
     <a class="sidenav-item" href="/changelog" data-pro-feature="changelog">
-      <span class="sn-icon"><i class="ph ph-newspaper" aria-hidden="true"></i></span><span class="sn-label">Notícias</span><span class="sn-tag">Pro</span>
+      <span class="sn-icon" style="color:#F59E0B"><i class="ph ph-newspaper" aria-hidden="true"></i></span><span class="sn-label">Notícias</span><span class="sn-tag">Pro</span>
     </a>
     <button class="sidenav-item" type="button" onclick="connectWhatsAppFromDashboard(event)">
       <span class="sn-icon" style="color:#22c55e"><i class="ph ph-whatsapp-logo" aria-hidden="true"></i></span><span class="sn-label">WhatsApp</span>
     </button>
     <button class="sidenav-item" type="button" id="theme-toggle-btn" onclick="toggleTheme()">
-      <span class="sn-icon" id="theme-toggle-icon"><i class="ph ph-moon" aria-hidden="true"></i></span><span class="sn-label" id="theme-toggle-label">Modo escuro</span>
+      <span class="sn-icon" id="theme-toggle-icon" style="color:#94A3B8"><i class="ph ph-moon" aria-hidden="true"></i></span><span class="sn-label" id="theme-toggle-label">Modo escuro</span>
     </button>
   </div>
 </aside>
