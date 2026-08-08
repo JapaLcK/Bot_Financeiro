@@ -618,8 +618,8 @@ function _renderCardItem(c, idx = 0) {
 
   // Layout do cc-card muda quando NÃO tem flag nem last4 (centraliza nome)
   const ccInner = isMinimal
-    ? `<div class="cc-bg-icon">💳</div><div class="cc-nickname">${escapeHtmlSafe(c.name)}</div>`
-    : `<div class="cc-bg-icon">💳</div>
+    ? `<div class="cc-bg-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></div><div class="cc-nickname">${escapeHtmlSafe(c.name)}</div>`
+    : `<div class="cc-bg-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></div>
        <div class="cc-top">${flag}</div>
        ${number}
        <div class="cc-nickname">${escapeHtmlSafe(c.name)}</div>`;
@@ -646,9 +646,9 @@ function _renderCardItem(c, idx = 0) {
             <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${usePct.toFixed(1)}%"></div></div>
           </div>` : ""}
         <div class="cc-detail-actions">
-          ${c.open_bill?.id ? `<button class="mock-cta" onclick='event.stopPropagation(); openCardBillDetail(${c.id}, ${c.open_bill.id})'>📄 Ver fatura</button>` : ""}
-          <button class="mock-cta outline" onclick='event.stopPropagation(); openCardEditModal(${JSON.stringify(c)})'>✏️ Editar</button>
-          <button class="inst-delete-btn" onclick="event.stopPropagation(); openCardDeleteModal(${c.id}, ${JSON.stringify(c.name || '').replace(/"/g, '&quot;')})">🗑 Excluir</button>
+          ${c.open_bill?.id ? `<button class="mock-cta" onclick='event.stopPropagation(); openCardBillDetail(${c.id}, ${c.open_bill.id})'><i class="ph ph-file-text" aria-hidden="true"></i> Ver fatura</button>` : ""}
+          <button class="mock-cta outline" onclick='event.stopPropagation(); openCardEditModal(${JSON.stringify(c)})'><i class="ph ph-pencil-simple" aria-hidden="true"></i> Editar</button>
+          <button class="inst-delete-btn" onclick="event.stopPropagation(); openCardDeleteModal(${c.id}, ${JSON.stringify(c.name || '').replace(/"/g, '&quot;')})"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
         </div>
       </div>
     </details>
@@ -783,7 +783,7 @@ async function openCardDeleteModal(cardId, cardName) {
     if (openTotal > 0 || futCount > 0) {
       warning = `
         <div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;padding:12px 14px;margin:14px 0">
-          <div style="font-weight:700;color:#fca5a5;margin-bottom:6px">⚠️ Este cartão ainda tem movimentação</div>
+          <div style="font-weight:700;color:#fca5a5;margin-bottom:6px"><i class="ph ph-warning" aria-hidden="true"></i> Este cartão ainda tem movimentação</div>
           <ul style="margin:0;padding-left:20px;font-size:.86rem;line-height:1.6;color:var(--text-2)">
             ${openTotal > 0 ? `<li><strong>Fatura em aberto:</strong> ${_fmtBRL(openTotal)}</li>` : ""}
             ${futCount > 0 ? `<li><strong>${futCount} parcela${futCount === 1 ? "" : "s"} futura${futCount === 1 ? "" : "s"}</strong> agendada${futCount === 1 ? "" : "s"}</li>` : ""}
@@ -1205,7 +1205,7 @@ function _renderInstallmentItem(g, idx = 0) {
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             ${anticipateBtn}
-            <button class="mock-cta outline" onclick='event.stopPropagation(); openInstEditModal(${escapeHtmlSafe(JSON.stringify(g.group_id))}, ${escapeHtmlSafe(JSON.stringify(g.name))}, ${escapeHtmlSafe(JSON.stringify(g.categoria || ""))})'>✏️ Editar</button>
+            <button class="mock-cta outline" onclick='event.stopPropagation(); openInstEditModal(${escapeHtmlSafe(JSON.stringify(g.group_id))}, ${escapeHtmlSafe(JSON.stringify(g.name))}, ${escapeHtmlSafe(JSON.stringify(g.categoria || ""))})'><i class="ph ph-pencil-simple" aria-hidden="true"></i> Editar</button>
             <button class="inst-delete-btn" onclick='event.stopPropagation(); openInstDeleteModal(${escapeHtmlSafe(JSON.stringify(g.group_id))}, ${escapeHtmlSafe(JSON.stringify(g.name))})'>Excluir parcelamento</button>
           </div>
         </div>
@@ -1608,9 +1608,9 @@ function _ensureCategoryModal() {
             </div>
           </div>
           <div class="modal-acts" style="margin-top:18px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <button type="button" class="mock-cta outline" id="cat-edit-archive-btn" style="display:none" onclick="categoryArchiveFromModal()">📦 Arquivar</button>
+            <button type="button" class="mock-cta outline" id="cat-edit-archive-btn" style="display:none" onclick="categoryArchiveFromModal()"><i class="ph ph-archive" aria-hidden="true"></i> Arquivar</button>
             <button type="button" class="mock-cta outline" id="cat-edit-unarchive-btn" style="display:none" onclick="categoryUnarchiveFromModal()">↩️ Desarquivar</button>
-            <button type="button" class="inst-delete-btn" id="cat-edit-delete-btn" style="display:none" onclick="categoryDeleteFromModal()">🗑 Excluir</button>
+            <button type="button" class="inst-delete-btn" id="cat-edit-delete-btn" style="display:none" onclick="categoryDeleteFromModal()"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
             <span style="flex:1"></span>
             <button type="button" class="btn-cancel" onclick="closeCategoryEditModal()">Cancelar</button>
             <button type="submit" class="btn-save">Salvar</button>
@@ -1933,7 +1933,7 @@ function _ensureBudgetModal() {
             </div>
           </div>
           <div class="modal-acts" style="margin-top:18px;display:flex;gap:8px;align-items:center">
-            <button type="button" class="inst-delete-btn" id="budget-edit-delete-btn" style="display:none" onclick="budgetDeleteFromModal()">🗑 Excluir</button>
+            <button type="button" class="inst-delete-btn" id="budget-edit-delete-btn" style="display:none" onclick="budgetDeleteFromModal()"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
             <span style="flex:1"></span>
             <button type="button" class="btn-cancel" onclick="closeBudgetEditModal()">Cancelar</button>
             <button type="submit" class="btn-save">Salvar</button>
@@ -2305,7 +2305,7 @@ function _renderGoalCard(g, idx = 0) {
   } else if (g.indicator === "tight") {
     alertText = `<div class="goal-deadline" style="color:#fbbf24">🟡 Ritmo apertado — pode atrasar</div>`;
   } else if (g.indicator === "ahead") {
-    alertText = `<div class="goal-deadline" style="color:#00F078">🚀 Adiantado — no melhor caminho</div>`;
+    alertText = `<div class="goal-deadline" style="color:#00F078"><i class="ph ph-rocket-launch" aria-hidden="true"></i> Adiantado — no melhor caminho</div>`;
   } else if (g.indicator === "on_track") {
     alertText = `<div class="goal-deadline" style="color:#00F078">🟢 No prazo</div>`;
   } else if (g.indicator === "achieved") {
@@ -2397,12 +2397,12 @@ function _ensureGoalModal() {
                   <input type="number" id="goal-interest-rate" min="1" max="300" step="0.01" value="100" inputmode="decimal" style="width:112px;flex:0 0 112px" />
                   <span style="color:var(--text-2);font-size:.86rem;white-space:nowrap">% do CDI</span>
                 </div>
-                <div style="color:var(--text-3);font-size:.78rem;margin-top:8px;line-height:1.35">💡 Valor simulado — o PigBank não custodia seu dinheiro. Use a taxa do banco onde o saldo realmente está aplicado.</div>
+                <div style="color:var(--text-3);font-size:.78rem;margin-top:8px;line-height:1.35"><i class="ph ph-lightbulb" aria-hidden="true"></i> Valor simulado — o PigBank não custodia seu dinheiro. Use a taxa do banco onde o saldo realmente está aplicado.</div>
               </div>
             </div>
           </div>
           <div class="modal-acts" style="margin-top:18px;display:flex;gap:8px;align-items:center">
-            <button type="button" class="inst-delete-btn" id="goal-delete-btn" style="display:none" onclick="deleteGoalFromModal()">🗑 Excluir</button>
+            <button type="button" class="inst-delete-btn" id="goal-delete-btn" style="display:none" onclick="deleteGoalFromModal()"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
             <span style="flex:1"></span>
             <button type="button" class="btn-cancel" onclick="closeGoalEditModal()">Cancelar</button>
             <button type="submit" class="btn-save">Salvar</button>
@@ -2643,7 +2643,7 @@ function _ensureWizardOverlay() {
         </div>
 
         <div class="wizard-step" data-step="3" style="display:none">
-          <h3 style="margin:0 0 6px">💳 Seus cartões</h3>
+          <h3 style="margin:0 0 6px"><i class="ph ph-credit-card" aria-hidden="true"></i> Seus cartões</h3>
           <p class="msub" style="margin-bottom:16px">
             Tem cartão de crédito? Cadastre aqui pra a gente já contabilizar as faturas.<br/>
             <span style="font-size:.78rem">Você pode pular e adicionar depois em Cartões.</span>
@@ -2661,7 +2661,7 @@ function _ensureWizardOverlay() {
 
         <div class="wizard-step" data-step="4" style="display:none">
           <div style="text-align:center;padding:8px 0 4px">
-            <div style="font-size:3.4rem;margin-bottom:8px">🎉</div>
+            <div style="font-size:3.4rem;margin-bottom:8px"><i class="ph ph-confetti" aria-hidden="true"></i></div>
             <h3 style="margin:0 0 8px">Tudo pronto!</h3>
             <p class="msub" style="max-width:380px;margin:0 auto">
               Seu painel tá configurado. Agora é só lançar suas despesas pelo bot, WhatsApp ou aqui no dashboard.<br/>
@@ -2947,10 +2947,10 @@ function _renderFixedProGate() {
   if (ess) {
     ess.innerHTML = `
       <div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">
-        <div style="font-size:2.5rem;margin-bottom:10px">🔒</div>
+        <div style="font-size:2.5rem;margin-bottom:10px"><i class="ph ph-lock" aria-hidden="true"></i></div>
         <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Gastos Fixos é Pro</div>
         <div style="margin-bottom:14px">Cadastre suas assinaturas e contas recorrentes pra o Piggy lançar automaticamente todo mês.</div>
-        <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')">⭐ Ver Pro</button>
+        <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')"><i class="ph ph-star" aria-hidden="true"></i> Ver Pro</button>
       </div>`;
   }
 }
@@ -3227,7 +3227,7 @@ function _ensureRecurringModal() {
             </div>
           </div>
           <div class="modal-acts" style="margin-top:18px;display:flex;gap:8px;align-items:center">
-            <button type="button" class="inst-delete-btn" id="recurring-delete-btn" style="display:none" onclick="deleteRecurringFromModal()">🗑 Excluir</button>
+            <button type="button" class="inst-delete-btn" id="recurring-delete-btn" style="display:none" onclick="deleteRecurringFromModal()"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
             <span style="flex:1"></span>
             <button type="button" class="btn-cancel" onclick="closeRecurringEditModal()">Cancelar</button>
             <button type="submit" class="btn-save">Salvar</button>
@@ -3311,7 +3311,7 @@ function _toggleRecurringModeHint() {
   const amount = document.getElementById("recurring-amount");
   const name = document.getElementById("recurring-name");
   if (mode === "manual") {
-    if (hint) hint.innerHTML = "🧾 <strong>Conta a pagar:</strong> a Piggy te <strong>lembra</strong> do vencimento e <strong>nada sai da conta</strong> até você confirmar. O valor é sempre uma <strong>estimativa</strong> — você informa o valor real ao marcar como paga.";
+    if (hint) hint.innerHTML = "<i class='ph ph-receipt' aria-hidden='true'></i> <strong>Conta a pagar:</strong> a Piggy te <strong>lembra</strong> do vencimento e <strong>nada sai da conta</strong> até você confirmar. O valor é sempre uma <strong>estimativa</strong> — você informa o valor real ao marcar como paga.";
     if (title && !isEdit) title.textContent = "Nova conta a pagar";
     // Conta a pagar nunca é débito automático — o user sempre confirma na mão.
     // A "forma de pagamento" (autopay/cartão) não se aplica: esconde e fixa account.
@@ -3587,7 +3587,7 @@ async function loadRecurringOverview() {
   // ── Alerta (déficit ou no azul) ──
   const alerta = positivo
     ? `<div class="mock-card" style="border:1px solid rgba(34,197,94,.35);margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-        <div style="font-size:1.5rem">✅</div>
+        <div style="font-size:1.5rem"><i class="ph ph-check-circle" aria-hidden="true"></i></div>
         <div style="flex:1;min-width:220px">
           <div style="font-weight:700">Suas entradas cobrem os compromissos — sobra <span style="color:#22c55e">${_fmtBRL(resultado)}</span>.</div>
           <div style="font-size:.82rem;color:var(--text-3)">Mês recorrente equilibrado. Bom trabalho! 🐷</div>
@@ -3615,11 +3615,11 @@ async function loadRecurringOverview() {
       </div>
     </div>`;
   const statsRow = `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">
-    ${statCard("#22c55e", "rgba(34,197,94,.15)", "📈", "Entradas previstas", _fmtBRL(entradas), "#22c55e",
+    ${statCard("#22c55e", "rgba(34,197,94,.15)", '<i class="ph ph-chart-line-up" aria-hidden="true"></i>', "Entradas previstas", _fmtBRL(entradas), "#22c55e",
       `${receitas.length} receita${plural(receitas.length)} fixa${plural(receitas.length)}`)}
-    ${statCard("#fb7185", "rgba(251,113,133,.15)", "📉", "Saídas previstas", _fmtBRL(saidas), "#fb7185",
+    ${statCard("#fb7185", "rgba(251,113,133,.15)", '<i class="ph ph-chart-line-down" aria-hidden="true"></i>', "Saídas previstas", _fmtBRL(saidas), "#fb7185",
       `${gastos.length} gasto${plural(gastos.length)} fixo${plural(gastos.length)} + ${pend.length} boleto${plural(pend.length)}`)}
-    ${statCard(resColor, positivo ? "rgba(34,197,94,.15)" : "rgba(255,45,45,.15)", positivo ? "➕" : "➖", "Resultado previsto",
+    ${statCard(resColor, positivo ? "rgba(34,197,94,.15)" : "rgba(255,45,45,.15)", positivo ? '<i class="ph ph-plus" aria-hidden="true"></i>' : '<i class="ph ph-minus" aria-hidden="true"></i>', "Resultado previsto",
       (positivo ? "" : "- ") + _fmtBRL(Math.abs(resultado)), resColor, "Projeção até o fim do mês")}
   </div>`;
 
@@ -3635,7 +3635,7 @@ async function loadRecurringOverview() {
   }).join("") : `<div class="empty" style="padding:16px;text-align:center;color:var(--text-3)">Nada nos próximos 30 dias.</div>`;
   const vencCard = `
     <div class="mock-card" style="flex:2;min-width:300px">
-      <h3>📅 Próximos vencimentos</h3>
+      <h3><i class="ph ph-calendar-dots" aria-hidden="true"></i> Próximos vencimentos</h3>
       ${vencRows}
       ${upAll.length > upcoming.length ? `<div style="text-align:center;margin-top:10px"><a onclick="setRecurringTab('bills')" style="color:var(--pink,#FF2D8E);cursor:pointer;font-size:.84rem;font-weight:600">Ver todos os vencimentos →</a></div>` : ""}
     </div>`;
@@ -3646,7 +3646,7 @@ async function loadRecurringOverview() {
       <span style="color:var(--text-2)">${label}</span><span style="font-weight:600;color:${color}">${val}</span></div>`;
   const resumoCard = `
     <div class="mock-card">
-      <h3>📊 Resumo rápido</h3>
+      <h3><i class="ph ph-chart-bar" aria-hidden="true"></i> Resumo rápido</h3>
       ${resumoRow("Receitas fixas", _fmtBRL(totalReceitas), "#22c55e")}
       ${resumoRow("Gastos fixos", "- " + _fmtBRL(totalGastos), "#fb7185")}
       ${resumoRow("Boletos / contas", "- " + _fmtBRL(totalPend), "#fb7185")}
@@ -3759,7 +3759,7 @@ function _renderBillsView(bills) {
       ${rows}</div>`;
   }).join("");
   if (agendaEl) agendaEl.innerHTML = agendaHtml
-    || `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Nenhum boleto pendente. Adicione um acima 👆</div>`;
+    || `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Nenhum boleto pendente. Adicione um acima <i class="ph ph-hand-pointing" aria-hidden="true"></i></div>`;
 
   if (paidEl) paidEl.innerHTML = paid.length
     ? paid.slice(0, 12).map(_renderBillPaidRow).join("")
@@ -4083,10 +4083,10 @@ function _renderRecurringIncomeProGate() {
   if (primary) {
     primary.innerHTML = `
       <div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">
-        <div style="font-size:2.5rem;margin-bottom:10px">🔒</div>
+        <div style="font-size:2.5rem;margin-bottom:10px"><i class="ph ph-lock" aria-hidden="true"></i></div>
         <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Receitas fixas é Pro</div>
         <div style="margin-bottom:14px">Cadastre salário, aluguel e freelas recorrentes pra o Piggy lançar automaticamente todo mês.</div>
-        <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')">⭐ Ver Pro</button>
+        <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')"><i class="ph ph-star" aria-hidden="true"></i> Ver Pro</button>
       </div>`;
   }
 }
@@ -4305,7 +4305,7 @@ function _ensureRecurringIncomeModal() {
             </div>
           </div>
           <div class="modal-acts" style="margin-top:18px;display:flex;gap:8px;align-items:center">
-            <button type="button" class="inst-delete-btn" id="recurring-income-delete-btn" style="display:none" onclick="deleteRecurringIncomeFromModal()">🗑 Excluir</button>
+            <button type="button" class="inst-delete-btn" id="recurring-income-delete-btn" style="display:none" onclick="deleteRecurringIncomeFromModal()"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
             <span style="flex:1"></span>
             <button type="button" class="btn-cancel" onclick="closeRecurringIncomeEditModal()">Cancelar</button>
             <button type="submit" class="btn-save">Salvar</button>
@@ -8745,7 +8745,7 @@ function render(d) {
         <div class="ov-lbl">Saldo atual${hist?' (do mês)':''}</div>
         <div class="ov-val"><span data-num="balance" data-val="${saldoAtual}">${fmt(saldoAtual)}</span></div>
         ${hasBanks
-          ? `<div class="ov-delta">👛 Carteira <b style="color:var(--text-2)">${fmt(carteira)}</b> · 🏦 Bancos <b style="color:var(--text-2)">${fmt(ofBank)}</b> · <button type="button" class="ov-adjust-lnk" onclick="openAdjustWalletModal()">ajustar</button></div>
+          ? `<div class="ov-delta"><i class="ph ph-wallet" aria-hidden="true"></i> Carteira <b style="color:var(--text-2)">${fmt(carteira)}</b> · <i class="ph ph-bank" aria-hidden="true"></i> Bancos <b style="color:var(--text-2)">${fmt(ofBank)}</b> · <button type="button" class="ov-adjust-lnk" onclick="openAdjustWalletModal()">ajustar</button></div>
              <div class="ov-delta" style="opacity:.8">Patrimônio total <b style="color:var(--text-2)"><span data-num="pat" data-val="${pat}">${fmt(pat)}</span></b></div>`
           : `<div class="ov-delta">Patrimônio total <b style="color:var(--text-2)"><span data-num="pat" data-val="${pat}">${fmt(pat)}</span></b></div>`}
       </div>
@@ -8765,7 +8765,7 @@ function render(d) {
         <div class="ov-ico neon">${svgIncome}</div>
         <div class="ov-lbl">Receitas do mês</div>
         <div class="ov-val"><span data-num="inc" data-val="${inc}">${fmt(inc)}</span></div>
-        <div class="ov-delta up">💚 entradas de ${PT_MONTHS[rm-1]}</div>
+        <div class="ov-delta up"><i class="ph ph-trend-up" aria-hidden="true"></i> entradas de ${PT_MONTHS[rm-1]}</div>
       </div>
     </div>
     ${stripsHtml}
@@ -8987,7 +8987,7 @@ function _renderAffiliateView(data) {
     // voltou pro disponível, mas o afiliado precisa entender o porquê.
     const noteHtml = p.note ? `
           <div style="font-size:.75rem;margin-top:3px;color:${p.status === "rejected" ? "var(--red)" : "var(--text-3)"}">
-            ${p.status === "rejected" ? "❌ Motivo da rejeição: " : "💬 "}${esc(p.note)}
+            ${p.status === "rejected" ? '<i class="ph ph-x-circle" aria-hidden="true"></i> Motivo da rejeição: ' : '<i class="ph ph-chat-circle" aria-hidden="true"></i> '}${esc(p.note)}
           </div>` : "";
     return `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--glass-border)">
