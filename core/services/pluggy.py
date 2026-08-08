@@ -217,7 +217,10 @@ def create_pluggy_connect_token(user_id: int, webhook_url: str | None = None) ->
     if webhook_url:
         options["webhookUrl"] = webhook_url
 
-    products_env = (os.getenv("PLUGGY_PRODUCTS") or "ACCOUNTS,TRANSACTIONS,CREDIT_CARDS").strip()
+    # INVESTMENTS é obrigatório: o sync lê /investments pra achar a Caixinha
+    # (FIXED_INCOME/CDB). Se o item não coletar esse produto, /investments volta
+    # vazio e a detecção de caixinha (base do Banqueiro OF-native) quebra.
+    products_env = (os.getenv("PLUGGY_PRODUCTS") or "ACCOUNTS,TRANSACTIONS,CREDIT_CARDS,INVESTMENTS").strip()
     products = [p.strip().upper() for p in products_env.split(",") if p.strip()]
     if products:
         options["products"] = products

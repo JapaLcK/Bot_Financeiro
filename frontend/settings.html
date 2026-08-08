@@ -2384,6 +2384,8 @@ let selectedConnectorId = null;
 // vira CTA de upgrade e não abre o widget. null = ainda não carregou OU ilimitado.
 let OF_BANKS_MAX = null;
 let OF_HAS_CONNECTION = false; // há alguma conexão (mesmo pausada)? refina a copy do CTA
+let OF_CONN_COUNT = 0;        // quantos bancos já conectados (pra pré-bloquear no teto)
+let OF_CONN_NAMES = [];       // nomes das instituições já conectadas (normalizados) — reconexão
 
 // Reconfigura o botão "Conectar Open Finance" conforme o plano. No Free (limite 0),
 // não faz sentido abrir a Pluggy (o /pluggy-item recusaria com 402): troca por um
@@ -2510,6 +2512,17 @@ function _syncBankPickFoot() {
 }
 function confirmBankPicker() {
   if (!_bankPickSelected) return;
+  // Teto do plano atingido: só deixa seguir se for RECONEXÃO de um banco já
+  // conectado (mesmo nome). Banco novo abriria o widget da Pluggy só pra tomar 402
+  // no /pluggy-item — deixando item/consentimento órfão. Bloqueia antes de abrir.
+  if (OF_BANKS_MAX !== null && OF_BANKS_MAX > 0 && OF_CONN_COUNT >= OF_BANKS_MAX) {
+    const isReconnect = OF_CONN_NAMES.includes(_stripAccent(_bankPickSelected.name || ""));
+    if (!isReconnect) {
+      const n = OF_BANKS_MAX;
+      showToast(`Seu plano conecta até ${n} banco${n > 1 ? "s" : ""}. Faça upgrade pra conectar mais: /precos`, "error");
+      return;
+    }
+  }
   selectedConnectorId = _bankPickSelected.id;
   closeBankPicker();
   connectOpenFinance();
@@ -2564,6 +2577,8 @@ function connStatusPill(status) {
 /* ── Render ──────────────────────────────────── */
 function renderConnections(list) {
   OF_HAS_CONNECTION = Array.isArray(list) && list.length > 0;
+  OF_CONN_COUNT = Array.isArray(list) ? list.length : 0;
+  OF_CONN_NAMES = (Array.isArray(list) ? list : []).map(c => _stripAccent(c.institution_name || ""));
   applyOfConnectButton(); // refina a copy do CTA de upgrade (reative vs assine)
   const el = document.getElementById("connections-list");
   if (!list.length) {
@@ -2821,7 +2836,9 @@ async function openPluggyConnect() {
     includeSandbox: Boolean(data.includeSandbox),
     connectorTypes,
     selectedConnectorId: selectedConnectorId || undefined,
-    products: ["ACCOUNTS", "TRANSACTIONS", "CREDIT_CARDS"],
+    // INVESTMENTS incluído: o sync lê /investments pra achar a Caixinha (FIXED_INCOME/CDB).
+    // Precisa casar com PLUGGY_PRODUCTS do connect-token, senão o produto não é coletado.
+    products: ["ACCOUNTS", "TRANSACTIONS", "CREDIT_CARDS", "INVESTMENTS"],
     language: "pt",
     theme: "dark",
     onSuccess: async (itemData) => {

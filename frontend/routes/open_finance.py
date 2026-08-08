@@ -48,7 +48,9 @@ from frontend.routes import shared
 
 router = APIRouter()
 
-PLUGGY_INCLUDE_SANDBOX = os.getenv("PLUGGY_INCLUDE_SANDBOX", "1") != "0"
+# Default DESLIGADO: o "Pluggy Bank" (dados sintéticos) não deve aparecer no
+# catálogo em produção. Só ligar (=1) em ambiente de teste/sandbox.
+PLUGGY_INCLUDE_SANDBOX = os.getenv("PLUGGY_INCLUDE_SANDBOX", "0") == "1"
 
 # Eventos da Pluggy que disparam um sync (puxar contas/transações).
 # transactions/deleted é tratado à parte (remove ids), não re-sincroniza.
@@ -167,6 +169,48 @@ async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> N
         )
 
 
+async def _ensure_of_access_allowed(user_id: int) -> None:
+    """Barra a EMISSÃO do connect-token quando o plano não dá Open Finance nenhum
+    (of_banks_max <= 0: Free pós-trial). Diferente do teto por contagem, esse caso é
+    inequívoco — o usuário não tem banco pra adicionar nem reconexão liberada (banco
+    do Free fica pausado; reativar = upgrade). Fecha o abuso direto do endpoint e evita
+    item/consentimento órfão na Pluggy (cada conexão custa). Planos com teto > 0 seguem
+    liberados aqui pra não travar reconexão de um banco existente — a contagem é cobrada
+    no /pluggy-item, onde já se sabe se é banco novo ou upsert.
+    """
+    from core.services.plan_service import plans_v2_enabled, get_user_limits
+
+    if plans_v2_enabled():
+        limit = (await asyncio.to_thread(get_user_limits, user_id)).get("of_banks_max")
+        if limit is not None and limit <= 0:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "OF_BANK_LIMIT",
+                    "limit": 0,
+                    "message": "Conectar banco faz parte dos planos pagos — no Grátis a conexão "
+                               "vale durante os 30 dias de teste. Assine pra reativar: /precos",
+                },
+            )
+        return
+
+    # v1 legado: só barra quando o gate está ligado E o usuário não é Pro.
+    if not _bank_limit_enabled():
+        return
+    if await asyncio.to_thread(is_pro, user_id):
+        return
+    limit = int(os.getenv("OF_FREE_BANK_LIMIT", "1"))
+    if limit <= 0:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "OF_BANK_LIMIT",
+                "limit": 0,
+                "message": "Conectar banco faz parte dos planos pagos. Assine o Pro para conectar.",
+            },
+        )
+
+
 class OpenFinanceMockConnectPayload(BaseModel):
     institution: str | None = None
 
@@ -272,9 +316,12 @@ async def open_finance_caixinha_bind_route(request: Request, user_id: int, body:
 @router.post("/open-finance/{user_id}/connect-token")
 async def open_finance_connect_token_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
-    # Não aplica o gate aqui: gerar um connect-token não conecta banco nenhum (e o widget
-    # também é usado pra RECONECTAR um banco existente). O limite é cobrado no /pluggy-item,
+    # Barra só o caso inequívoco (plano sem OF): não emite token pra quem não pode
+    # conectar nada, fechando o abuso direto do endpoint e evitando item órfão na Pluggy.
+    # O TETO POR CONTAGEM (planos pagos no limite) NÃO é cobrado aqui de propósito — o
+    # widget também reconecta um banco existente, e a contagem é validada no /pluggy-item,
     # onde já se sabe se o item é novo ou um upsert de um banco já conectado.
+    await _ensure_of_access_allowed(user_id)
 
     webhook_url = (os.getenv("PLUGGY_WEBHOOK_URL") or "").strip()
     if not webhook_url and shared.DASHBOARD_URL.startswith("https://"):
