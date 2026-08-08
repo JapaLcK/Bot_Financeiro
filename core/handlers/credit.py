@@ -4,8 +4,7 @@ import logging
 import re
 from collections import defaultdict
 
-from ai_router import classify_category_with_gpt
-from core.services.category_service import learn_from_inference
+from core.services.category_service import infer_category, learn_from_inference
 from core.services.plan_limits import PlanLimitExceeded
 from db import (
     add_credit_purchase,
@@ -21,7 +20,6 @@ from db import (
     get_default_card_id,
     get_installment_group_summaries,
     get_pending_action,
-    get_memorized_category,
     get_open_bill_summary,
     list_cards,
     list_installment_groups,
@@ -376,17 +374,12 @@ def _resolve_card_from_context(user_id: int, text: str) -> tuple[dict | None, st
     return None, None
 
 
+def _infer_category_result(user_id: int, desc: str):
+    return infer_category(user_id, desc or "", allow_ai=True)
+
+
 def _infer_category(user_id: int, desc: str) -> str:
-    raw_norm = normalize_text(desc)
-    categoria = get_memorized_category(user_id, raw_norm) or "outros"
-    if categoria == "outros":
-        try:
-            categoria_gpt = classify_category_with_gpt(raw_norm, user_id=user_id, source="core.handlers.credit")
-            if categoria_gpt:
-                categoria = categoria_gpt
-        except Exception:
-            pass
-    return categoria
+    return _infer_category_result(user_id, desc).category
 
 
 def _is_natural_credit_purchase(text: str) -> bool:
@@ -490,8 +483,11 @@ def add_credit_from_entities(
         return limit_error
 
     desc_clean = (descricao or "").strip() or None
+    category_reason = "manual"
     if not categoria:
-        categoria = _infer_category(user_id, desc_clean or "")
+        inferred = _infer_category_result(user_id, desc_clean or "")
+        categoria = inferred.category
+        category_reason = inferred.reason
     nota = normalize_text(desc_clean) if desc_clean else "compra no credito"
 
     n = int(installments) if installments else 1
@@ -505,6 +501,7 @@ def add_credit_from_entities(
             nota=nota,
             categoria=categoria or "outros",
             purchased_at=purchased_at,
+            category_reason=category_reason,
         )
 
     try:
@@ -519,7 +516,7 @@ def add_credit_from_entities(
         if desc_clean:
             learn_from_inference(
                 user_id, desc_clean, categoria,
-                target_hint=desc_clean, reason="manual",
+                target_hint=desc_clean, reason=category_reason,
             )
         # Pending efêmero: o runtime do WhatsApp lê e anexa um botão "🗑️ Apagar"
         # na confirmação (consome na 1ª renderização). Demais canais ignoram;
@@ -589,6 +586,7 @@ def _create_installments(
     nota: str,
     categoria: str,
     purchased_at,
+    category_reason: str = "manual",
 ) -> str:
     """Cria as parcelas no banco e retorna a mensagem de confirmação."""
     from datetime import date as _date
@@ -612,7 +610,7 @@ def _create_installments(
             nota,
             categoria,
             target_hint=nota,
-            reason="manual",
+            reason=category_reason,
         )
         # Valor por parcela arredondado pra exibição (último ajuste de centavos
         # fica na última parcela; aqui mostramos o nominal pra UX limpa).
@@ -1232,7 +1230,8 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
             return "❌ Parcelamento cancelado."
         payload = dict(pending.get("payload") or {})
         nota = answer
-        categoria = _infer_category(user_id, nota) or payload.get("categoria") or "outros"
+        inferred = _infer_category_result(user_id, nota)
+        categoria = inferred.category or payload.get("categoria") or "outros"
         clear_pending_action(user_id)
         from datetime import date as _date
         purchased_at = _date.fromisoformat(payload["purchased_at"]) if isinstance(payload.get("purchased_at"), str) else payload.get("purchased_at")
@@ -1245,6 +1244,7 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
             nota,
             categoria,
             purchased_at,
+            inferred.reason,
         )
 
     if pending.get("action_type") != "credit_card_setup":
@@ -1864,8 +1864,10 @@ def handle(user_id: int, text: str) -> str | None:
         desc_clean = re.sub(r"\b(gasto|gastei|compra|comprei)\b", "", desc_clean, flags=re.IGNORECASE)
         desc_clean = " ".join(desc_clean.split())
 
-        categoria_base = _infer_category(user_id, desc_clean or t)
+        inferred = _infer_category_result(user_id, desc_clean or t)
+        categoria_base = inferred.category
         categoria = categoria_override or categoria_base
+        category_reason = "explicit" if categoria_override else inferred.reason
         nota = desc_clean.strip() if desc_clean.strip() else ""
 
         card_id, resolved_name = _pick_card_id(user_id, card_name)
@@ -1898,7 +1900,10 @@ def handle(user_id: int, text: str) -> str | None:
                 "Qual é o nome dessa compra? Ex: *TV Samsung*, *iPhone*, *Curso de inglês*"
             )
 
-        return _create_installments(user_id, card_id, resolved_name, float(valor), n, nota, categoria, purchased_at)
+        return _create_installments(
+            user_id, card_id, resolved_name, float(valor), n, nota, categoria,
+            purchased_at, category_reason,
+        )
 
     if re.match(r"^(?:pagar|paguei)\b", t_low):
         resp = _handle_pay_bill_command(user_id, t)

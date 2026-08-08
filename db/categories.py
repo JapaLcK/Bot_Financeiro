@@ -340,8 +340,8 @@ def list_custom_category_names(user_id: int) -> list[str]:
     regra de keyword. Sem isso, "gastei 400 com minha namorada" caía em "outros"
     mesmo o usuário tendo criado a categoria "gastos com minha namorada".
     """
-    ensure_user(user_id)
-    ensure_user_categories_seeded(user_id)
+    # Caminho quente da inferência: não faz seed lazy aqui. A tela de categorias
+    # e os writes continuam semeando; a leitura precisa ser barata e read-only.
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(

@@ -287,7 +287,7 @@ def learn_from_inference(
     target_hint: str | None = None,
     reason: str | None = None,
 ) -> None:
-    if reason in {"default", "user_rule"}:
+    if reason in {"default", "user_rule", "user_category"}:
         return
     # Aprende do ALVO LIMPO (target_hint = `alvo` extraído pelo parser) quando ele
     # existe, e NÃO do text_base inteiro. O text_base é a mensagem/transcrição

@@ -12,10 +12,17 @@ from __future__ import annotations
 import pytest
 
 import db
-from db.categories import create_user_category
+from db.categories import (
+    create_user_category,
+    list_custom_category_names,
+    list_user_category_rules,
+    set_user_category_archived,
+)
+from core.handlers.credit import try_handle_natural_credit_purchase
 from core.services.category_service import (
     custom_category_match,
     infer_category,
+    learn_from_inference,
     _distinctive_tokens,
 )
 from utils_text import normalize_text
@@ -83,7 +90,70 @@ def test_preserva_acento_do_nome_cadastrado(pro_user_id):
 
 
 def test_categoria_arquivada_nao_casa(pro_user_id):
-    from db.categories import set_user_category_archived
     cat = create_user_category(pro_user_id, "gastos com minha namorada")
     set_user_category_archived(pro_user_id, cat["id"], True)
     assert custom_category_match(pro_user_id, normalize_text("gastei 400 com minha namorada")) is None
+
+
+def test_user_category_nao_cria_regra_aprendida(pro_user_id):
+    create_user_category(pro_user_id, "gastos com minha namorada")
+
+    learn_from_inference(
+        pro_user_id,
+        "gastei 400 com minha namorada",
+        "gastos com minha namorada",
+        target_hint="minha namorada",
+        reason="user_category",
+    )
+
+    assert list_user_category_rules(pro_user_id) == []
+
+
+def test_categoria_arquivada_nao_volta_por_regra_aprendida(pro_user_id):
+    cat = create_user_category(pro_user_id, "gastos com minha namorada")
+    learn_from_inference(
+        pro_user_id,
+        "gastei 400 com minha namorada",
+        "gastos com minha namorada",
+        target_hint="minha namorada",
+        reason="user_category",
+    )
+
+    set_user_category_archived(pro_user_id, cat["id"], True)
+    res = infer_category(pro_user_id, "gastei 400 com minha namorada", allow_ai=False)
+
+    assert res.category == "outros"
+    assert res.reason == "default"
+
+
+def test_list_custom_category_names_nao_roda_seed(monkeypatch, pro_user_id):
+    def _fail_seed(_user_id):
+        raise AssertionError("inferência não deve semear categorias nesse caminho")
+
+    monkeypatch.setattr("db.categories.ensure_user_categories_seeded", _fail_seed)
+
+    assert list_custom_category_names(pro_user_id) == []
+
+
+def test_compra_natural_credito_usa_categoria_custom(pro_user_id):
+    card_id = db.create_card(pro_user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(pro_user_id, card_id)
+    create_user_category(pro_user_id, "gastos com minha namorada")
+
+    msg = try_handle_natural_credit_purchase(
+        pro_user_id,
+        "gastei 400 no crédito com minha namorada",
+    )
+
+    assert msg is not None
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select categoria, nota from credit_transactions "
+                "where user_id=%s order by id desc limit 1",
+                (pro_user_id,),
+            )
+            row = cur.fetchone()
+
+    assert row["categoria"] == "gastos com minha namorada"
+    assert row["nota"] == "minha namorada"
