@@ -1175,7 +1175,7 @@ function _renderInstallmentItem(g, idx = 0) {
   return `
     <details class="mock-card inst-card" style="animation-delay:${idx * 50}ms">
       <summary>
-        <div class="inst-icon-box">${emoji}</div>
+        <div class="inst-icon-box">${phIcon(emoji)}</div>
         <div class="inst-body">
           <div class="inst-row-1">
             <span class="inst-name">${escapeHtmlSafe(g.name)}</span>
@@ -1427,6 +1427,17 @@ const CATEGORY_EMOJI_OPTIONS = [
   "📈","💰","₿","🎓","🐶","👶","🏋️","🎵","🧴","🎂",
 ];
 
+
+// ── Icones Phosphor p/ categorias/metas/caixinhas (shim nao-destrutivo) ──
+// Continua guardando o emoji no banco; converte pra <i> so no render.
+// Emoji sem equivalente cai no fallback (mostra o proprio emoji).
+const EMOJI_TO_PH = {"🏷":"tag","🍔":"hamburger","🛒":"shopping-cart","🚗":"car","💊":"pill","🏠":"house","🎬":"film-slate","📚":"books","📖":"book-open","📺":"television","🐾":"paw-print","✈":"airplane-tilt","🎮":"game-controller","👕":"t-shirt","🍺":"beer-stein","☕":"coffee","⛽":"gas-pump","💼":"briefcase","💻":"laptop","🎁":"gift","📈":"trend-up","💰":"coins","₿":"currency-btc","🎓":"graduation-cap","🐶":"dog","👶":"baby","🏋":"barbell","🎵":"music-notes","🎂":"cake","🎯":"target","🛟":"lifebuoy","📱":"device-mobile","💎":"diamond","📸":"camera","🎸":"guitar","🛏":"bed","🏖":"umbrella","🐷":"piggy-bank","🍽":"fork-knife","🍴":"fork-knife","🥖":"fork-knife","🍕":"pizza","🌐":"globe","💧":"drop","💡":"lightbulb","🔥":"flame","🚇":"train","🚌":"bus","❤":"heart","🔧":"wrench","🛍":"handbag","👜":"handbag","🍎":"apple-logo","🔎":"magnifying-glass","⛪":"church","🎟":"ticket","🚕":"taxi","🏦":"bank","🏢":"buildings","🏛":"bank","🦷":"tooth","🩺":"stethoscope","🛡":"shield","🧺":"basket","🧹":"broom","🎭":"mask-happy","🎤":"microphone","🎄":"tree-evergreen","💐":"flower","☁":"cloud","🍷":"wine","💇":"scissors","🖌":"paint-brush","🎨":"paint-brush","🪴":"tree","🩹":"first-aid","📄":"file-text","🧾":"receipt","📅":"calendar-dots","📊":"chart-bar","💳":"credit-card","💸":"trend-down"};
+function phIcon(val) {
+  const v = (val == null ? "" : String(val)).replace(/\uFE0F/g, "").trim();
+  const name = EMOJI_TO_PH[v];
+  return name ? `<i class="ph ph-${name}" aria-hidden="true"></i>` : escapeHtmlSafe(val == null ? "" : String(val));
+}
+
 const CATEGORY_COLOR_OPTIONS = [
   "#FF2D8E","#5FA83C","#2E7FE0","#E84545","#12A892",
   "#BE8200","#7E5FE6","#E85F2A","#22C3D6","#94A3B8",
@@ -1575,7 +1586,7 @@ function _renderCategoryPill(cat, idx = 0) {
     <div class="cat-pill" style="cursor:pointer;${dim}animation-delay:${delay}ms" onclick='openCategoryEditModal(${JSON.stringify(cat)})'>
       <span class="cat-dot" style="background:${escapeHtmlSafe(cat.color)}"></span>
       <div class="cat-body">
-        <div class="cat-name">${escapeHtmlSafe(cat.emoji)} ${escapeHtmlSafe(cat.name)}${tag}</div>
+        <div class="cat-name">${phIcon(cat.emoji)} ${escapeHtmlSafe(cat.name)}${tag}</div>
         <div class="cat-val" style="color:var(--text-3)">${cat.usage_count || 0} lanç.</div>
       </div>
     </div>
@@ -1634,7 +1645,7 @@ function _renderCategoryPickers() {
       style="width:36px;height:36px;border-radius:8px;font-size:1.2rem;cursor:pointer;
              border:2px solid ${sel ? "#fff" : "transparent"};
              background:${sel ? "rgba(255,45,142,.25)" : "var(--glass-bg)"};
-             display:flex;align-items:center;justify-content:center">${e}</button>`;
+             display:flex;align-items:center;justify-content:center">${phIcon(e)}</button>`;
   }).join("");
   cPick.innerHTML = CATEGORY_COLOR_OPTIONS.map(c => {
     const sel = c === _catEditState.color;
@@ -1901,7 +1912,7 @@ function _renderBudgetRow(b, idx = 0) {
   const delay = 240 + idx * 60;
   return `
     <div class="bar-row" style="cursor:pointer;animation-delay:${delay}ms" onclick='openBudgetEditModal(${safeCatJson})'>
-      <div class="bar-icon" style="color:${escapeHtmlSafe(b.color)}">${escapeHtmlSafe(b.emoji)}</div>
+      <div class="bar-icon" style="color:${escapeHtmlSafe(b.color)}">${phIcon(b.emoji)}</div>
       <div class="bar-body">
         <div class="bar-head"><span class="name">${dotEmoji} ${escapeHtmlSafe(b.categoria)}</span><span class="val">${_fmtBRL(b.spent)} / ${_fmtBRL(b.budget)}</span></div>
         <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${widthPct.toFixed(1)}%"></div></div>
@@ -2258,10 +2269,10 @@ function _renderPocketOnlyCard(p, idx = 0) {
   return `
     <div class="goal-card" style="animation-delay:${idx * 80}ms;cursor:pointer" onclick="openPocketHistory('${escapeJsString(p.name)}')">
       <div class="goal-ring">
-        <div style="width:78px;height:78px;border-radius:50%;background:${color}22;display:flex;align-items:center;justify-content:center;font-size:1.6rem">${emoji}</div>
+        <div style="width:78px;height:78px;border-radius:50%;background:${color}22;display:flex;align-items:center;justify-content:center;font-size:1.6rem">${phIcon(emoji)}</div>
       </div>
       <div class="goal-info">
-        <div class="goal-name">${emoji} ${escapeHtmlSafe(p.name)}</div>
+        <div class="goal-name">${phIcon(emoji)} ${escapeHtmlSafe(p.name)}</div>
         <div class="goal-amt">${_fmtBRL(p.balance || 0)} guardado</div>
         <div class="goal-deadline" style="color:var(--text-3)">Caixinha sem meta — depósitos livres</div>
         <div class="goal-deadline" style="color:var(--text-3)">${p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate)}</div>
@@ -2322,7 +2333,7 @@ function _renderGoalCard(g, idx = 0) {
         <div class="ring-pct">${pct.toFixed(0)}%</div>
       </div>
       <div class="goal-info">
-        <div class="goal-name">${emoji} ${escapeHtmlSafe(g.name)}</div>
+        <div class="goal-name">${phIcon(emoji)} ${escapeHtmlSafe(g.name)}</div>
         <div class="goal-amt">${_fmtBRL(g.balance || 0)} / ${_fmtBRL(g.target_amount || 0)}</div>
         <div class="bar-track" style="margin-top:6px"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
         <div class="goal-deadline" style="color:${deadlineColor}">${deadlineText}${g.days_left !== null ? " · " + (g.days_left >= 0 ? "em " + g.days_left + " dias" : "vencido há " + (-g.days_left) + " dias") : ""}</div>
@@ -2426,7 +2437,7 @@ function _renderGoalPickers() {
       style="width:36px;height:36px;border-radius:8px;font-size:1.2rem;cursor:pointer;
              border:2px solid ${sel ? "#fff" : "transparent"};
              background:${sel ? "rgba(255,45,142,.25)" : "var(--glass-bg)"};
-             display:flex;align-items:center;justify-content:center">${e}</button>`;
+             display:flex;align-items:center;justify-content:center">${phIcon(e)}</button>`;
   }).join("");
   cPick.innerHTML = GOAL_COLOR_OPTIONS.map(c => {
     const sel = c === _goalEditState.color;
@@ -4937,7 +4948,7 @@ function renderAnalyticsMerchants(merchants, months) {
         : `${m.count}× • débito`;
     return `
       <div class="tx-row">
-        <div class="tx-icon">${emoji}</div>
+        <div class="tx-icon">${phIcon(emoji)}</div>
         <div class="tx-main">
           <div class="tx-desc" title="${escapeHtmlSafe(rawName)}">${escapeHtmlSafe(displayName)}</div>
           <div class="tx-meta">${escapeHtmlSafe(debCred)}</div>
@@ -8663,7 +8674,7 @@ function render(d) {
     const barCls = (i%2===1) ? "neon" : "";
     const jn = escapeJsString(p.name);
     return `<div class="ov-pk" role="button" tabindex="0" onclick="openPocketHistory('${jn}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openPocketHistory('${jn}');}">
-      <div class="ov-pk-top"><span class="ov-pk-ico">${emoji}</span><span>${esc(p.name)}</span></div>
+      <div class="ov-pk-top"><span class="ov-pk-ico">${phIcon(emoji)}</span><span>${esc(p.name)}</span></div>
       <div class="ov-pk-val"><span data-num="pk_${esc(p.name)}" data-val="${p.balance||0}">${fmt(p.balance||0)}</span></div>
       ${hasGoal
         ? `<div class="ov-pk-bar"><i class="${barCls}" style="width:${pct}%"></i></div><div class="ov-pk-goal">${pct}% de ${fmt(tgt)}</div>`
