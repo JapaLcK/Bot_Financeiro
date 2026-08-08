@@ -1,0 +1,57 @@
+{
+  "_comment": "Payloads prontos para POST /{WABA_ID}/message_templates (Meta WhatsApp Cloud API). Gerados/mantidos por scripts/create_whatsapp_report_templates.py. Usam parametros NOMEADOS porque o bot envia via send_template(named_body_params=...). O botao 'Desligar resumo' e opcional (so quando WA_PERIODIC_TEMPLATE_STOP_BUTTON=1).",
+  "weekly": {
+    "name": "resumo_semanal",
+    "language": "pt_BR",
+    "category": "UTILITY",
+    "parameter_format": "NAMED",
+    "components": [
+      { "type": "HEADER", "format": "TEXT", "text": "📊 Resumo semanal" },
+      {
+        "type": "BODY",
+        "text": "📊 *Resumo semanal do Bot Financeiro*\n📅 Período: {{periodo}}\n\n🏦 Saldo atual: {{saldo}}\n📉 Gastos da semana: {{gastos}}\n📈 Receitas da semana: {{receita}}\n📊 Lançamentos da semana: {{lancamentos}}",
+        "example": {
+          "body_text_named_params": [
+            { "param_name": "periodo", "example": "27/07/2026 a 02/08/2026" },
+            { "param_name": "saldo", "example": "R$ 1.000,00" },
+            { "param_name": "gastos", "example": "R$ 150,00" },
+            { "param_name": "receita", "example": "R$ 20,00" },
+            { "param_name": "lancamentos", "example": "3" }
+          ]
+        }
+      },
+      { "type": "FOOTER", "text": "Bot Financeiro" },
+      {
+        "type": "BUTTONS",
+        "buttons": [{ "type": "QUICK_REPLY", "text": "Desligar resumo" }]
+      }
+    ]
+  },
+  "monthly": {
+    "name": "resumo_mensal",
+    "language": "pt_BR",
+    "category": "UTILITY",
+    "parameter_format": "NAMED",
+    "components": [
+      { "type": "HEADER", "format": "TEXT", "text": "📊 Resumo mensal" },
+      {
+        "type": "BODY",
+        "text": "📊 *Resumo mensal do Bot Financeiro*\n📅 Período: {{periodo}}\n\n🏦 Saldo atual: {{saldo}}\n📉 Gastos do mês: {{gastos}}\n📈 Receitas do mês: {{receita}}\n📊 Lançamentos do mês: {{lancamentos}}",
+        "example": {
+          "body_text_named_params": [
+            { "param_name": "periodo", "example": "01/07/2026 a 31/07/2026" },
+            { "param_name": "saldo", "example": "R$ 1.000,00" },
+            { "param_name": "gastos", "example": "R$ 999,90" },
+            { "param_name": "receita", "example": "R$ 500,00" },
+            { "param_name": "lancamentos", "example": "1" }
+          ]
+        }
+      },
+      { "type": "FOOTER", "text": "Bot Financeiro" },
+      {
+        "type": "BUTTONS",
+        "buttons": [{ "type": "QUICK_REPLY", "text": "Desligar resumo" }]
+      }
+    ]
+  }
+}
