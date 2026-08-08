@@ -14,8 +14,95 @@ from utils_text import (
     canonicalize_category_label,
     EXACT_WORD_KEYWORDS,
     KEYWORD_BLOCKERS,
+    STOPWORDS_PT,
+    MEMORY_NOISE_TOKENS,
+    MEMORY_STOP_TOKENS,
 )
-from db import get_memorized_category, upsert_category_rule
+from db import (
+    get_memorized_category,
+    upsert_category_rule,
+    list_custom_category_names,
+)
+
+
+# Tokens genéricos que aparecem em NOMES de categoria mas não identificam a
+# categoria por si só ("gastos com minha namorada" → o que identifica é
+# "namorada", não "gastos"/"com"/"minha"). Somados aos stopwords/ruído de fala,
+# evitam que uma categoria custom bata em qualquer lançamento só por conter
+# "gastos". "outros" fica de fora de propósito (é o próprio fallback).
+# Inclui também palavras curtas de tempo/genéricas ("dia", "mes", "ano") pra
+# não deixar uma categoria como "gastos do dia" casar qualquer lançamento.
+_CUSTOM_CATEGORY_GENERIC_TOKENS = {
+    "gasto", "gastos", "gasta", "gastar",
+    "despesa", "despesas", "conta", "contas", "custo", "custos",
+    "coisa", "coisas", "geral", "gerais", "diverso", "diversos",
+    "outros", "outro", "outra", "outras",
+    "dia", "dias", "mes", "meses", "ano", "anos", "vez", "vezes",
+}
+
+# Comprimento mínimo de um token distintivo. 3 é seguro porque o match é sempre
+# palavra inteira (contains_word) — permite categorias reais e curtas como
+# "gastos com minha mãe", "pai", "pet", "bar" sem casar substrings.
+_CUSTOM_CATEGORY_MIN_TOKEN_LEN = 3
+
+
+def _distinctive_tokens(category_name: str) -> list[str]:
+    """Tokens que de fato identificam uma categoria custom pelo nome.
+
+    Remove verbos/conectores (STOPWORDS_PT), jargão bancário/de fala
+    (MEMORY_*_TOKENS) e nomes genéricos de gasto (_CUSTOM_CATEGORY_GENERIC_TOKENS),
+    mantendo só tokens com pelo menos `_CUSTOM_CATEGORY_MIN_TOKEN_LEN` letras.
+    """
+    out: list[str] = []
+    for tok in normalize_text(category_name).split():
+        if len(tok) < _CUSTOM_CATEGORY_MIN_TOKEN_LEN:
+            continue
+        if tok.isdigit():
+            continue
+        if (
+            tok in STOPWORDS_PT
+            or tok in MEMORY_NOISE_TOKENS
+            or tok in MEMORY_STOP_TOKENS
+            or tok in _CUSTOM_CATEGORY_GENERIC_TOKENS
+        ):
+            continue
+        out.append(tok)
+    return out
+
+
+def custom_category_match(user_id: int, text_norm: str) -> str | None:
+    """Casa um texto JÁ normalizado com uma categoria CUSTOM do usuário.
+
+    O usuário pode criar uma categoria na tela (ex.: "gastos com minha
+    namorada") sem cadastrar uma regra de keyword. Quando um lançamento menciona
+    um token distintivo do nome dela ("namorada"), o gasto deve ir pra essa
+    categoria — não pra "outros".
+
+    Escolhe a categoria com MAIS tokens distintivos presentes no texto; empate é
+    desfeito pelo maior comprimento total casado (nome mais específico vence).
+    Retorna o nome da categoria (como cadastrado) ou None.
+    """
+    if not text_norm:
+        return None
+
+    best_name: str | None = None
+    best_score = 0
+    best_len = 0
+    for name in list_custom_category_names(user_id) or []:
+        tokens = _distinctive_tokens(name)
+        if not tokens:
+            continue
+        matched = [tok for tok in tokens if contains_word(text_norm, tok)]
+        if not matched:
+            continue
+        score = len(matched)
+        matched_len = sum(len(tok) for tok in matched)
+        if score > best_score or (score == best_score and matched_len > best_len):
+            best_name = name
+            best_score = score
+            best_len = matched_len
+
+    return best_name
 
 
 # Tickers brasileiros (B3): 4 letras + 1 ou 2 dígitos.
@@ -108,6 +195,20 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
     cat = get_memorized_category(user_id, t)
     if cat:
         return InferResult(category=canonicalize_category_label(cat), reason="user_rule")
+
+    # B2) categoria CUSTOM criada pelo usuário (na tela) sem regra de keyword.
+    #     Se o lançamento menciona um token distintivo do nome dela, usa. Vem
+    #     antes das LOCAL_RULES porque é personalização explícita do usuário.
+    try:
+        custom_cat = custom_category_match(user_id, t)
+    except Exception:
+        custom_cat = None
+    if custom_cat:
+        # Retorna o nome EXATAMENTE como cadastrado em user_categories (pode ter
+        # acento, ex.: "saúde da família"). Não passa por canonicalize_category_label
+        # — isso removeria acentos e o lançamento deixaria de agrupar com a
+        # categoria definida pelo usuário no dashboard.
+        return InferResult(category=custom_cat, reason="user_category")
 
     # C) LOCAL_RULES
     local_cat = local_rule_category(t)

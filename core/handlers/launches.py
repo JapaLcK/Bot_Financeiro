@@ -416,7 +416,7 @@ def add_from_entities(
             # CONTRADIZ a IA vence. allow_ai=False pra não gastar 2ª chamada de LLM.
             categoria_ai = canonicalize_category_label(categoria) or categoria
             local = infer_category(user_id, nota_clean, None, allow_ai=False)
-            if local.reason in {"user_rule", "ticker_match", "local_rule"} and local.category != categoria_ai:
+            if local.reason in {"user_rule", "user_category", "ticker_match", "local_rule"} and local.category != categoria_ai:
                 logger.info(
                     "categoria da IA (%s) sobreposta por regra local (%s via %s) — nota=%r",
                     categoria_ai, local.category, local.reason, nota_clean,
