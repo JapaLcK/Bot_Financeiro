@@ -40,8 +40,11 @@ class AccountsCog(commands.Cog):
         # ── Saldo conta ───────────────────────────────────────────────────────
         if t in ("saldo", "saldo conta", "saldo da conta", "conta", "saldo geral"):
             # Com banco conectado (Open Finance), o saldo real é o consolidado.
+            # Em beta: só o allowlist de teste vê o consolidado (plan_service).
+            from core.services.plan_service import consolidated_balance_enabled
+
             cb = get_consolidated_balance(uid)
-            if int(cb.get("of_bank_count") or 0) > 0:
+            if int(cb.get("of_bank_count") or 0) > 0 and consolidated_balance_enabled(uid):
                 await message.reply(
                     f"💰 **Saldo total:** {fmt_brl(float(cb['consolidated'] or 0))}\n"
                     f"  👛 Carteira: {fmt_brl(float(cb['manual'] or 0))}\n"
@@ -216,7 +219,13 @@ class AccountsCog(commands.Cog):
                 despesas_por_categoria[cat] = despesas_por_categoria.get(cat, 0.0) + valor
 
         saldo_periodo = total_rec - total_des
-        saldo_atual = float(get_consolidated_balance(uid)["consolidated"] or 0)
+        # Em beta: consolidado só pro allowlist de teste; fora dele, Carteira manual.
+        from core.services.plan_service import consolidated_balance_enabled
+
+        _cb = get_consolidated_balance(uid)
+        saldo_atual = float(
+            (_cb["consolidated"] if consolidated_balance_enabled(uid) else _cb["manual"]) or 0
+        )
 
         # ── Dashboard tab ──────────────────────────────────────────────────
         ws_dash.append(["Período", f"{start.strftime('%d/%m/%Y')} a {end.strftime('%d/%m/%Y')}"])

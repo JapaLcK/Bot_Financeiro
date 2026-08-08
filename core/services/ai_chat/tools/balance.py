@@ -16,7 +16,13 @@ from ._base import Tool
 def _get_balance(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     # Saldo verdadeiro: Carteira manual + saldos das contas bancárias conectadas
     # via Open Finance (autoritativos, atualizados pelo sync).
+    # Em beta (consolidated_balance_enabled): fora do allowlist de teste, devolve
+    # o formato antigo (só o saldo manual), sem citar bancos conectados.
+    from core.services.plan_service import consolidated_balance_enabled
+
     cb = db.get_consolidated_balance(user_id)
+    if not consolidated_balance_enabled(user_id):
+        return {"balance": float(cb["manual"] or 0)}
     return {
         "balance": float(cb["consolidated"] or 0),
         "wallet_balance": float(cb["manual"] or 0),

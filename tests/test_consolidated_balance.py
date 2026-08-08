@@ -3,11 +3,22 @@
 Regressão do bug: conectar um banco não atualizava o saldo mostrado ao usuário —
 bot, relatórios e chat IA liam só accounts.balance (Carteira manual), ignorando os
 saldos autoritativos das contas BANK sincronizadas via Pluggy.
+
+Lançamento em fases: o consolidado fica atrás do gate consolidated_balance_enabled
+(default = só as contas de teste). Os testes de exibição ligam o gate global via
+OF_CONSOLIDATED_BALANCE_ENABLED; os de gate-off garantem a saída antiga.
 """
 from decimal import Decimal
 
+import pytest
+
 import db
 from core.handlers import balance as h_balance
+
+
+@pytest.fixture()
+def consolidated_on(monkeypatch):
+    monkeypatch.setenv("OF_CONSOLIDATED_BALANCE_ENABLED", "1")
 
 
 def _connect_fake_bank(user_id: int, balance: str = "4320.75") -> int:
@@ -108,7 +119,7 @@ def test_conta_em_moeda_estrangeira_fica_fora_da_soma(user_id):
     assert cb["consolidated"] == Decimal("400.00")
 
 
-def test_handler_saldo_mostra_consolidado_com_banco(user_id):
+def test_handler_saldo_mostra_consolidado_com_banco(user_id, consolidated_on):
     db.add_launch_and_update_balance(user_id, "receita", 100, None, "seed")
     _connect_fake_bank(user_id, "4320.75")
 
@@ -126,7 +137,7 @@ def test_handler_saldo_sem_banco_mantem_conta_corrente(user_id):
     assert "R$ 100,00" in out
 
 
-def test_ai_chat_tool_get_balance_consolidado(user_id):
+def test_ai_chat_tool_get_balance_consolidado(user_id, consolidated_on):
     from core.services.ai_chat.tools.balance import _get_balance
 
     db.add_launch_and_update_balance(user_id, "receita", 100, None, "seed")
@@ -137,3 +148,37 @@ def test_ai_chat_tool_get_balance_consolidado(user_id):
     assert res["wallet_balance"] == 100.0
     assert res["connected_banks_balance"] == 900.0
     assert res["connected_bank_accounts"] == 1
+
+
+# ── Gate beta desligado (fora do allowlist de teste): comportamento antigo ─────
+
+def test_gate_off_handler_mantem_carteira_mesmo_com_banco(user_id):
+    """Fora do beta, conectar banco NÃO muda o /saldo (segue Carteira manual)."""
+    db.add_launch_and_update_balance(user_id, "receita", 100, None, "seed")
+    _connect_fake_bank(user_id, "4320.75")
+
+    out = h_balance.check(user_id)
+    assert "Conta Corrente" in out
+    assert "R$ 100,00" in out
+    assert "Saldo total" not in out
+    assert "4.320,75" not in out
+
+
+def test_gate_off_ai_chat_tool_formato_antigo(user_id):
+    from core.services.ai_chat.tools.balance import _get_balance
+
+    db.add_launch_and_update_balance(user_id, "receita", 100, None, "seed")
+    _connect_fake_bank(user_id, "900.00")
+
+    res = _get_balance(user_id, {})
+    assert res == {"balance": 100.0}
+
+
+def test_gate_liga_por_email_de_teste(user_id, monkeypatch):
+    """O allowlist default são os e-mails de teste (hiago/lucas)."""
+    from core.services.plan_service import consolidated_balance_enabled
+
+    monkeypatch.delenv("OF_CONSOLIDATED_BALANCE_ENABLED", raising=False)
+    assert consolidated_balance_enabled(user_id, email="lucaskuramoti06@gmail.com")
+    assert consolidated_balance_enabled(user_id, email="hiagojo2016@gmail.com")
+    assert not consolidated_balance_enabled(user_id, email="outro@exemplo.com")

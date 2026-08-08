@@ -26,9 +26,16 @@ def _add_months(y: int, m: int, delta: int) -> tuple[int, int]:
 
 
 def _saldo_atual(user_id: int) -> float:
-    """Saldo verdadeiro do usuário: Carteira manual + bancos conectados (Open Finance)."""
+    """Saldo verdadeiro do usuário: Carteira manual + bancos conectados (Open Finance).
+
+    Em beta (consolidated_balance_enabled): fora do allowlist de teste, mantém o
+    comportamento antigo (só a Carteira manual)."""
+    from core.services.plan_service import consolidated_balance_enabled
+
     cb = get_consolidated_balance(user_id) or {}
-    return float(cb.get("consolidated") or 0)
+    if consolidated_balance_enabled(user_id):
+        return float(cb.get("consolidated") or 0)
+    return float(cb.get("manual") or 0)
 
 
 def _card_bill_due_date(period_end: date, closing_day: int, due_day: int) -> date:
