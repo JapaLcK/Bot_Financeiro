@@ -189,9 +189,12 @@
       loadProfile();
       if (isPaywall) return; // no paywall, os CTAs do corpo são os planos — não mexe
       // 3) CTAs de cadastro no corpo (hero, seções finais) → dashboard.
+      //    Um CTA pode declarar destino/rótulo próprios pra logado via
+      //    data-app-href / data-app-text (ex.: /agents manda pra aba de
+      //    agentes do painel). Sem eles, cai no padrão "/app".
       document.querySelectorAll('a[href="/cadastro"]').forEach(function (a) {
-        a.setAttribute("href", "/app");
-        a.textContent = "Ir para o dashboard";
+        a.setAttribute("href", a.getAttribute("data-app-href") || "/app");
+        a.textContent = a.getAttribute("data-app-text") || "Ir para o dashboard";
       });
     })
     .catch(function () {
