@@ -104,6 +104,13 @@ async def ensure_admin_tables():
                 ON auth_login_events (user_id, success, created_at DESC)
                 """
             )
+            # Suporta a detecção de spike de falha de login por IP (A09).
+            await cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_auth_login_events_ip_time
+                ON auth_login_events (ip_address, success, created_at DESC)
+                """
+            )
             await cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS system_event_logs (
@@ -143,6 +150,7 @@ async def log_auth_login_event(
 ):
     try:
         normalized_email = (email or "").strip().lower() or None
+        alert_payload = None
         async with await db_connect() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
@@ -155,7 +163,23 @@ async def log_auth_login_event(
                     (user_id, normalized_email, encrypt_pii_optional(normalized_email),
                      success, ip_address, user_agent, failure_reason),
                 )
+                # A09 — spike de falha de login: detecta na MESMA transação (já
+                # enxerga a tentativa recém-inserida) e grava o marcador de
+                # cooldown. Nunca deixa a segurança derrubar o registro de login.
+                if not success:
+                    try:
+                        from core.services.security_alerts import detect_auth_failure_spike
+                        alert_payload = await detect_auth_failure_spike(cur, ip_address=ip_address)
+                    except Exception:
+                        alert_payload = None
             await conn.commit()
+        # Dispara fora da transação: fire-and-forget, no-op sem webhook.
+        if alert_payload:
+            try:
+                from core.services.security_alerts import fire_auth_spike_alert
+                await fire_auth_spike_alert(alert_payload)
+            except Exception:
+                pass
     except Exception as exc:
         print(f"[admin] failed to record auth login event: {exc}", file=sys.stderr)
 
