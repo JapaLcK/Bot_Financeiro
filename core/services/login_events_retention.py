@@ -1,10 +1,12 @@
 """
 core/services/login_events_retention.py — Retenção de auth_login_events.
 
-Apaga eventos de login mais antigos que N dias (minimização de dados / LGPD).
+Apaga tentativas de login FALHAS mais antigas que N dias (minimização / LGPD).
 É o mecanismo que cobre as tentativas ÓRFÃS (falha de login antes de a conta
 existir, sem user_id): a exclusão de conta apaga o que tem user_id, e este job
-apaga o resto por tempo — sem precisar buscar por e-mail.
+apaga as falhas órfãs por tempo — sem precisar buscar por e-mail. Logins
+bem-sucedidos NÃO são apagados aqui (ancoram is_known_login_ip; já saem na
+exclusão de conta por user_id).
 
 Loop diário, registrado no lifespan do app.
 
@@ -36,7 +38,15 @@ def _interval_hours() -> int:
 
 
 async def purge_old_login_events() -> int:
-    """Apaga auth_login_events com mais de N dias. Retorna quantas linhas caíram.
+    """Apaga tentativas de login FALHAS com mais de N dias. Retorna quantas caíram.
+
+    Só falhas (`success = false`) de propósito:
+      - São exatamente as linhas órfãs (falha pré-conta, `user_id` nulo) que a
+        exclusão de conta não alcança — o alvo original desta retenção.
+      - Os logins BEM-SUCEDIDOS são preservados porque ancoram
+        `core.audit.is_known_login_ip` (senão um IP conhecido, mas sem login nos
+        últimos N dias, voltaria a disparar e-mail de "novo dispositivo").
+        Esses já são apagados por `user_id` na exclusão de conta.
 
     Com LOGIN_EVENTS_RETENTION_DAYS <= 0, é no-op (retorna 0)."""
     days = _retention_days()
@@ -51,7 +61,8 @@ async def purge_old_login_events() -> int:
             await cur.execute(
                 """
                 delete from auth_login_events
-                where created_at < now() - (%s || ' days')::interval
+                where success = false
+                  and created_at < now() - (%s || ' days')::interval
                 """,
                 (str(days),),
             )
