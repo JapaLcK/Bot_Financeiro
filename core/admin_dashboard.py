@@ -150,7 +150,6 @@ async def log_auth_login_event(
 ):
     try:
         normalized_email = (email or "").strip().lower() or None
-        alert_payload = None
         async with await db_connect() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
@@ -163,21 +162,15 @@ async def log_auth_login_event(
                     (user_id, normalized_email, encrypt_pii_optional(normalized_email),
                      success, ip_address, user_agent, failure_reason),
                 )
-                # A09 — spike de falha de login: detecta na MESMA transação (já
-                # enxerga a tentativa recém-inserida) e grava o marcador de
-                # cooldown. Nunca deixa a segurança derrubar o registro de login.
-                if not success:
-                    try:
-                        from core.services.security_alerts import detect_auth_failure_spike
-                        alert_payload = await detect_auth_failure_spike(cur, ip_address=ip_address)
-                    except Exception:
-                        alert_payload = None
             await conn.commit()
-        # Dispara fora da transação: fire-and-forget, no-op sem webhook.
-        if alert_payload:
+        # A09 — spike de falha de login: agenda a detecção FORA desta transação
+        # (task de fundo, conexão própria, depois do commit acima). Assim não
+        # atrasa a resposta do login, não pode abortar este commit, e a contagem
+        # enxerga as tentativas concorrentes já persistidas. Fire-and-forget.
+        if not success:
             try:
-                from core.services.security_alerts import fire_auth_spike_alert
-                await fire_auth_spike_alert(alert_payload)
+                from core.services.security_alerts import schedule_auth_failure_spike_check
+                schedule_auth_failure_spike_check(ip_address)
             except Exception:
                 pass
     except Exception as exc:
