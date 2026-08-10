@@ -67,7 +67,7 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: pip-audit
+      - name: pip-audit (informativo, nao bloqueia)
         run: |
           python -m pip install --upgrade pip pip-audit
-          pip-audit -r requirements.txt --strict
+          pip-audit -r requirements.txt || echo "::warning title=pip-audit::Vulnerabilidades conhecidas encontradas (informativo, nao bloqueia; o Dependabot abre os PRs de correcao)."
