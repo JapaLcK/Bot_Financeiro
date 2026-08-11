@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>PigBank — Monitoramento</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="stylesheet" href="/phosphor.css?v=1" />
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -278,7 +279,7 @@ button:disabled { opacity: .6; cursor: wait; }
   <section class="hero">
     <div class="hero-left">
       <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:26px">🐷</span>
+        <span style="font-size:26px"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span>
         <h1>PigBank — Monitoramento</h1>
         <span id="error-count-badge" style="display:none" class="badge badge-error">0 erros</span>
       </div>
@@ -303,12 +304,12 @@ button:disabled { opacity: .6; cursor: wait; }
 
   <!-- ── Error banner ──────────────────────────────────────────────── -->
   <div id="error-banner">
-    <span class="banner-icon">🚨</span>
+    <span class="banner-icon"><i class="ph ph-warning-octagon" aria-hidden="true"></i></span>
     <div class="banner-text">
       <strong id="banner-title">Erros críticos detectados</strong>
       <span id="banner-detail">Verifique a seção de erros abaixo.</span>
     </div>
-    <span class="banner-close" onclick="document.getElementById('error-banner').classList.remove('visible')">✕</span>
+    <span class="banner-close" onclick="document.getElementById('error-banner').classList.remove('visible')"><i class="ph ph-x" aria-hidden="true"></i></span>
   </div>
 
   <!-- ── Summary cards ─────────────────────────────────────────────── -->
@@ -318,7 +319,7 @@ button:disabled { opacity: .6; cursor: wait; }
   <section class="grid" style="margin-bottom:16px">
     <div class="card">
       <div class="section-title">
-        <h2>🔴 Erros e eventos</h2>
+        <h2><i class="ph ph-warning-circle" aria-hidden="true"></i> Erros e eventos</h2>
         <div style="display:flex;align-items:center;gap:8px">
           <div class="filter-bar" id="error-filter-bar">
             <button class="filter-btn active" data-level="all">Todos</button>
@@ -326,7 +327,7 @@ button:disabled { opacity: .6; cursor: wait; }
             <button class="filter-btn" data-level="warning">Alertas</button>
             <button class="filter-btn" data-level="info">Info</button>
           </div>
-          <button id="clear-alerts-btn" title="Ocultar alertas anteriores a este momento. Novos erros continuarão aparecendo.">🗑 Limpar</button>
+          <button id="clear-alerts-btn" title="Ocultar alertas anteriores a este momento. Novos erros continuarão aparecendo."><i class="ph ph-trash" aria-hidden="true"></i> Limpar</button>
           <span class="meta" id="error-list-meta">Últimos 20</span>
         </div>
       </div>
@@ -336,7 +337,7 @@ button:disabled { opacity: .6; cursor: wait; }
 
     <div class="card">
       <div class="section-title">
-        <h2>🩺 Saúde do sistema</h2>
+        <h2><i class="ph ph-heartbeat" aria-hidden="true"></i> Saúde do sistema</h2>
         <span class="meta" id="generated-at">Carregando...</span>
       </div>
       <div class="health-grid" id="health-grid"></div>
@@ -347,14 +348,14 @@ button:disabled { opacity: .6; cursor: wait; }
   <section class="grid">
     <div class="card">
       <div class="section-title">
-        <h2>📈 Evolução temporal</h2>
+        <h2><i class="ph ph-chart-line-up" aria-hidden="true"></i> Evolução temporal</h2>
         <span class="meta">Cadastros · Logins · Transações</span>
       </div>
       <div class="chart-wrap"><canvas id="main-chart"></canvas></div>
     </div>
     <div class="card">
       <div class="section-title">
-        <h2>💬 WhatsApp & Backend</h2>
+        <h2><i class="ph ph-chat-circle" aria-hidden="true"></i> WhatsApp & Backend</h2>
         <span class="meta">Sinais operacionais</span>
       </div>
       <div class="health-grid" id="ops-health-grid"></div>
@@ -365,7 +366,7 @@ button:disabled { opacity: .6; cursor: wait; }
   <section class="grid-2" style="margin-bottom:16px">
     <div class="card">
       <div class="section-title">
-        <h2>📋 Eventos operacionais</h2>
+        <h2><i class="ph ph-clipboard-text" aria-hidden="true"></i> Eventos operacionais</h2>
         <span class="meta">Últimos 25 (WhatsApp · Billing · Engagement)</span>
       </div>
       <div class="error-list" id="ops-list"></div>
@@ -373,7 +374,7 @@ button:disabled { opacity: .6; cursor: wait; }
     </div>
     <div class="card">
       <div class="section-title">
-        <h2>🔑 Logins recentes</h2>
+        <h2><i class="ph ph-key" aria-hidden="true"></i> Logins recentes</h2>
         <span class="meta" id="logins-meta">—</span>
       </div>
       <div id="recent-logins"></div>
@@ -385,7 +386,7 @@ button:disabled { opacity: .6; cursor: wait; }
   <section class="grid-2" style="margin-bottom:16px">
     <div class="card">
       <div class="section-title">
-        <h2>✉️ E-mails enviados</h2>
+        <h2><i class="ph ph-envelope" aria-hidden="true"></i> E-mails enviados</h2>
         <span class="meta" id="email-meta">Últimos 50</span>
       </div>
       <div style="display:flex;gap:12px;margin-bottom:12px" id="email-stats-bar"></div>
@@ -394,7 +395,7 @@ button:disabled { opacity: .6; cursor: wait; }
     </div>
     <div class="card">
       <div class="section-title">
-        <h2>👤 Cadastros recentes</h2>
+        <h2><i class="ph ph-user" aria-hidden="true"></i> Cadastros recentes</h2>
         <span class="meta">Últimos 10</span>
       </div>
       <div id="recent-signups"></div>
@@ -405,7 +406,7 @@ button:disabled { opacity: .6; cursor: wait; }
   <section class="grid-2" style="margin-bottom:16px">
     <div class="card">
       <div class="section-title">
-        <h2>🏆 Maior volume (30d)</h2>
+        <h2><i class="ph ph-trophy" aria-hidden="true"></i> Maior volume (30d)</h2>
         <span class="meta">Top usuários ativos</span>
       </div>
       <div style="overflow:auto">
@@ -420,7 +421,7 @@ button:disabled { opacity: .6; cursor: wait; }
   <!-- ── Financeiro mensal ───────────────────────────────────────────── -->
   <section class="card" style="margin-bottom:16px">
     <div class="section-title">
-      <h2>📅 Relatório mensal agregado</h2>
+      <h2><i class="ph ph-calendar-dots" aria-hidden="true"></i> Relatório mensal agregado</h2>
       <span class="meta">Últimos 6 meses</span>
     </div>
     <div style="overflow:auto">
@@ -434,7 +435,7 @@ button:disabled { opacity: .6; cursor: wait; }
   <!-- ── Programa de afiliados ──────────────────────────────────────── -->
   <section class="card" style="margin-bottom:16px">
     <div class="section-title">
-      <h2>🤝 Afiliados</h2>
+      <h2><i class="ph ph-handshake" aria-hidden="true"></i> Afiliados</h2>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <input id="aff-new-email" type="email" placeholder="email da conta" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 10px;font-size:12px;width:200px"/>
         <input id="aff-new-code" type="text" placeholder="código (opcional)" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 10px;font-size:12px;width:130px"/>
@@ -451,7 +452,7 @@ button:disabled { opacity: .6; cursor: wait; }
       </table>
     </div>
     <div class="section-title" style="margin-top:18px">
-      <h2>💸 Saques de afiliados</h2>
+      <h2><i class="ph ph-hand-coins" aria-hidden="true"></i> Saques de afiliados</h2>
       <span class="meta">Pague o Pix por fora e marque como pago aqui</span>
     </div>
     <div style="overflow:auto">
@@ -467,7 +468,7 @@ button:disabled { opacity: .6; cursor: wait; }
   <!-- ── Acessos PII (LGPD audit) ───────────────────────────────────── -->
   <section class="card">
     <div class="section-title">
-      <h2>🔐 Acessos PII</h2>
+      <h2><i class="ph ph-lock-key" aria-hidden="true"></i> Acessos PII</h2>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <input id="pii-filter-actor" type="text" placeholder="ator (ex: admin)" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 10px;font-size:12px;width:140px"/>
         <input id="pii-filter-user" type="number" placeholder="user_id" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 10px;font-size:12px;width:120px"/>
@@ -753,8 +754,8 @@ function renderErrorItem(row) {
         <button class="error-item-dismiss" title="Apagar este evento" onclick="dismissEvent(event, ${row.id})">×</button>
       </div>
       <div class="error-item-msg">${esc(row.message.slice(0,180))}${row.message.length>180?'…':''}</div>
-      ${hint   ? `<div class="error-item-source">💡 ${esc(hint)}</div>` : ''}
-      ${row.source ? `<div class="error-item-source">📍 ${esc(row.source)}</div>` : ''}
+      ${hint   ? `<div class="error-item-source"><i class="ph ph-lightbulb" aria-hidden="true"></i> ${esc(hint)}</div>` : ''}
+      ${row.source ? `<div class="error-item-source"><i class="ph ph-map-pin" aria-hidden="true"></i> ${esc(row.source)}</div>` : ''}
       <div class="expand-hint">${hintLabel}</div>
       <div class="error-item-tb">${content}</div>
     </div>`;
@@ -815,8 +816,8 @@ function applyFilter(level) {
   const base     = level === 'all' ? _visibleErrors(lastErrorData) : lastErrorData;
   const filtered = level === 'all' ? base : base.filter(e => e.level === level);
   const emptyMsg = level === 'all'
-    ? `✅ Nenhum evento encontrado.`
-    : `✅ Nenhum evento nível ${level} encontrado.`;
+    ? `<i class="ph ph-check-circle" aria-hidden="true"></i> Nenhum evento encontrado.`
+    : `<i class="ph ph-check-circle" aria-hidden="true"></i> Nenhum evento nível ${level} encontrado.`;
 
   renderPaginated({
     listElId: 'error-list',
@@ -929,7 +930,7 @@ function renderOpsList(ops) {
         <span class="error-item-time">${fRelTime(row.created_at)}</span>
       </div>
       <div class="error-item-msg">${esc(row.message.slice(0,160))}</div>
-      ${row.source ? `<div class="error-item-source">📍 ${esc(row.source)}</div>` : ''}
+      ${row.source ? `<div class="error-item-source"><i class="ph ph-map-pin" aria-hidden="true"></i> ${esc(row.source)}</div>` : ''}
       <div class="expand-hint">${hasTb ? '▼ ver traceback' : '▼ ver detalhes'}</div>
       <div class="error-item-tb">${content}</div>
     </div>`;
@@ -947,7 +948,7 @@ function renderOpsList(ops) {
 
 /* ── Signups / Logins ────────────────────────────────────────────── */
 function waStatusBadge(row) {
-  if (row.has_whatsapp_identity || row.phone_status === 'confirmed') return '<span class="badge badge-ok">WA ✓</span>';
+  if (row.has_whatsapp_identity || row.phone_status === 'confirmed') return '<span class="badge badge-ok">WA <i class="ph ph-check" aria-hidden="true"></i></span>';
   if (row.phone_status === 'pending') return '<span class="badge badge-warning">WA pendente</span>';
   return '<span class="badge badge-muted">Sem WA</span>';
 }
@@ -979,11 +980,11 @@ function renderEmails(stats, rows) {
 
   // Lista de emails paginada
   const EMAIL_TYPE_LABEL = {
-    email_sent:   { badge: '<span class="badge" style="background:rgba(74,222,128,.12);color:#4ade80;border:1px solid rgba(74,222,128,.25)">ENVIADO</span>', icon: '✉️' },
-    email_failed: { badge: '<span class="badge" style="background:rgba(248,113,113,.12);color:#f87171;border:1px solid rgba(248,113,113,.25)">FALHOU</span>',  icon: '❌' },
+    email_sent:   { badge: '<span class="badge" style="background:rgba(74,222,128,.12);color:#4ade80;border:1px solid rgba(74,222,128,.25)">ENVIADO</span>', icon: '<i class="ph ph-envelope" aria-hidden="true"></i>' },
+    email_failed: { badge: '<span class="badge" style="background:rgba(248,113,113,.12);color:#f87171;border:1px solid rgba(248,113,113,.25)">FALHOU</span>',  icon: '<i class="ph ph-x-circle" aria-hidden="true"></i>' },
   };
   const emailItem = (row) => {
-    const meta    = EMAIL_TYPE_LABEL[row.event_type] || { badge: '', icon: '📧' };
+    const meta    = EMAIL_TYPE_LABEL[row.event_type] || { badge: '', icon: '<i class="ph ph-envelope" aria-hidden="true"></i>' };
     const to      = row.details?.to      || '—';
     const subject = row.details?.subject || row.message || '—';
     const error   = row.details?.error   || '';
@@ -995,7 +996,7 @@ function renderEmails(stats, rows) {
           <span class="error-item-time">${fRelTime(row.created_at)}</span>
         </div>
         <div class="error-item-msg">${esc(subject.slice(0, 120))}${subject.length > 120 ? '…' : ''}</div>
-        ${error ? `<div class="error-item-source" style="color:#f87171">⚠️ ${esc(error.slice(0,120))}</div>` : ''}
+        ${error ? `<div class="error-item-source" style="color:#f87171"><i class="ph ph-warning" aria-hidden="true"></i> ${esc(error.slice(0,120))}</div>` : ''}
       </div>`;
   };
 
@@ -1023,7 +1024,7 @@ function renderLogins(rows) {
   const loginItem = (row) => `
     <div class="list-item">
       <strong class="${row.success ? 'status-ok' : 'status-error'}" style="color:${row.success?'#86efac':'#fca5a5'}">
-        ${row.success ? '✅ Login OK' : '❌ Falha de login'}
+        ${row.success ? '<i class="ph ph-check-circle" aria-hidden="true"></i> Login OK' : '<i class="ph ph-x-circle" aria-hidden="true"></i> Falha de login'}
       </strong>
       <small>${esc(row.email||'sem email')} · ${fRelTime(row.created_at)}<br>${esc(row.failure_reason||row.ip_address||'')}</small>
     </div>`;
@@ -1251,7 +1252,7 @@ async function loadAffiliates() {
         <td>${fmtCents(a.owed_cents)}</td>
         <td>${fmtCents(a.paid_cents)}</td>
         <td>${esc(a.pix_key || '—')}</td>
-        <td>${a.status === 'active' ? '🟢 ativo' : '🔴 desativado'}</td>
+        <td>${a.status === 'active' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:5px"></span>ativo' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:5px"></span>desativado'}</td>
         <td><button class="btn-primary" type="button" style="font-size:11px;padding:4px 10px"
           onclick="toggleAffiliateStatus(${a.id}, '${a.status === 'active' ? 'disabled' : 'active'}')">
           ${a.status === 'active' ? 'Desativar' : 'Reativar'}</button></td>
@@ -1260,9 +1261,9 @@ async function loadAffiliates() {
     const payouts = data.payouts || [];
     $id('aff-payouts').innerHTML = payouts.map(p => {
       const when = new Date(p.requested_at).toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-      const st = p.status === 'paid' ? '🟢 pago' : (p.status === 'rejected' ? '🔴 rejeitado' : '🟡 aguardando');
+      const st = p.status === 'paid' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:5px"></span>pago' : (p.status === 'rejected' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:5px"></span>rejeitado' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fbbf24;margin-right:5px"></span>aguardando');
       const actions = p.status === 'requested' ? `
-        <button class="btn-primary" type="button" style="font-size:11px;padding:4px 10px;background:#0ea5e9" onclick="showPayoutPix(${p.id})">💠 Pagar via Pix</button>
+        <button class="btn-primary" type="button" style="font-size:11px;padding:4px 10px;background:#0ea5e9" onclick="showPayoutPix(${p.id})"><i class="ph ph-sparkle" aria-hidden="true"></i> Pagar via Pix</button>
         <button class="btn-primary" type="button" style="font-size:11px;padding:4px 10px" onclick="payoutAction(${p.id}, 'paid')">Marcar pago</button>
         <button class="btn-danger" type="button" style="font-size:11px;padding:4px 10px" onclick="payoutAction(${p.id}, 'reject')">Rejeitar</button>` : '';
       return `
