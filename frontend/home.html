@@ -1258,17 +1258,24 @@ function goExplorePro() {
 (function handleUpgradeReturn() {
   const params = new URLSearchParams(window.location.search);
   const status = params.get("upgrade");
+  const sid = params.get("sid");  // id da sessão Stripe → event_id do Purchase
   if (!status) return;
 
-  // Limpa o query param da URL pra nao reaparecer em refresh.
+  // Limpa os query params da URL pra nao reaparecer em refresh.
   const cleanUrl = new URL(window.location.href);
   cleanUrl.searchParams.delete("upgrade");
+  cleanUrl.searchParams.delete("sid");
   window.history.replaceState({}, "", cleanUrl.toString());
 
   if (status === "success") {
     // Conversão de compra pro Meta Ads (só dispara na volta do pagamento,
     // não em visitas normais da /home — o ?upgrade=success já foi limpo acima).
-    if (window.fbq) fbq("track", "Purchase", { currency: "BRL" });
+    // O eventID casa com o Purchase server-side (Conversions API) → o Meta
+    // deduplica e conta a compra uma vez só, mesmo se os dois dispararem.
+    if (window.fbq) {
+      const opts = sid ? { eventID: "purchase_" + sid } : undefined;
+      fbq("track", "Purchase", { currency: "BRL" }, opts);
+    }
     // Pequeno delay pra dar o "wow effect" depois da pagina carregar
     setTimeout(() => {
       document.getElementById("welcome-pro-overlay").classList.add("open");

@@ -3661,7 +3661,7 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             mode="subscription",
             locale="pt-BR",
             allow_promotion_codes=True,
-            success_url=f"{DASHBOARD_URL}/home?upgrade=success",
+            success_url=f"{DASHBOARD_URL}/home?upgrade=success&sid={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{DASHBOARD_URL}/home?upgrade=cancelled",
             metadata=metadata,
             subscription_data=subscription_data,
@@ -4034,6 +4034,22 @@ async def billing_webhook(request: Request):
         pid = _g(price, "id")
         return pid if isinstance(pid, str) else None
 
+    def _subscription_amount(sub) -> tuple[float, str]:
+        """Valor recorrente (unit_amount) e moeda do 1º item da assinatura.
+
+        Usado no Purchase da CAPI: durante o trial o amount_total do checkout é
+        0, então mandamos o valor comprometido do plano (o que otimiza melhor).
+        """
+        items_obj = _g(sub, "items", {})
+        data = _g(items_obj, "data", []) or []
+        if not data:
+            return (0.0, "BRL")
+        price = _g(data[0], "price", {})
+        unit = _g(price, "unit_amount")  # centavos
+        cur = _g(price, "currency") or "brl"
+        value = (float(unit) / 100.0) if unit is not None else 0.0
+        return (value, str(cur).upper())
+
     def _invoice_subscription_id(invoice) -> str | None:
         sub_id = _g(invoice, "subscription")
         if sub_id:
@@ -4112,6 +4128,26 @@ async def billing_webhook(request: Request):
                 )
             except Exception as exc:
                 print(f"[billing] admin notify falhou user={user_id}: {exc}")
+            # Meta Conversions API — Purchase server-side (valor real + dedup
+            # com o pixel do navegador via event_id derivado da sessão).
+            try:
+                from core.services.meta_capi import capi_configured, send_purchase_event
+                _sid = _g(session, "id")
+                if capi_configured() and _sid:
+                    _value, _currency = _subscription_amount(sub)
+                    _capi_email = await _user_email(user_id)
+                    _evt_time = int(_g(event, "created") or _g(session, "created") or 0)
+                    await asyncio.to_thread(
+                        send_purchase_event,
+                        session_id=_sid,
+                        event_time=_evt_time,
+                        value=_value,
+                        currency=_currency,
+                        email=_capi_email,
+                        event_source_url=f"{DASHBOARD_URL}/home",
+                    )
+            except Exception as exc:
+                print(f"[billing] meta capi purchase falhou user={user_id}: {exc}")
         elif user_id:
             await log_system_event(
                 "info",
