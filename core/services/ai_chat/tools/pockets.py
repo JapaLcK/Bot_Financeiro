@@ -241,6 +241,8 @@ def _pocket_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
             msg += "\n" + followup
         return msg
     except Exception as e:
+        if "OF_POCKET_READONLY" in str(e):
+            return "🐷 Essa caixinha é sincronizada com seu banco — mova o dinheiro pelo app do banco."
         return f"🐷 Não consegui depositar: {e}"
 
 
@@ -276,6 +278,8 @@ def _pocket_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
             return f'✅ Caixinha "{canon}" esvaziada: sacado R$ {gross:.2f}{tax_txt}.'
         return f'✅ Sacado R$ {gross:.2f} da caixinha "{canon}"{tax_txt}.'
     except ValueError as e:
+        if "OF_POCKET_READONLY" in str(e):
+            return "🐷 Essa caixinha é sincronizada com seu banco — mova o dinheiro pelo app do banco."
         if "INSUFFICIENT_POCKET" in str(e):
             return f'🐷 A caixinha "{pocket_name}" não tem esse saldo.'
         return "🐷 Valor inválido pra saque."

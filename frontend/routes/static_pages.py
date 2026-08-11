@@ -205,6 +205,13 @@ async def get_blog_news(limit: int = 12):
     return {"news": news}
 
 
+@router.get("/agents")
+async def serve_agents():
+    """Galeria pública dos Agentes do Piggy — só apresenta a utilidade de cada
+    um. A ativação de fato acontece no painel (dashboard), não aqui."""
+    return html_file(FRONTEND_DIR / "agents.html")
+
+
 @router.get("/como-funciona")
 async def serve_como_funciona():
     return html_file(FRONTEND_DIR / "como-funciona.html")
@@ -275,6 +282,7 @@ async def serve_sitemap_xml():
         ("/whatsapp", "weekly", "0.8"),
         ("/funcionalidades", "weekly", "0.8"),
         ("/como-funciona", "weekly", "0.8"),
+        ("/agents", "weekly", "0.7"),
         ("/precos", "weekly", "0.7"),
         ("/suporte", "weekly", "0.7"),
         ("/privacy", "monthly", "0.4"),

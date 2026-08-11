@@ -25,7 +25,8 @@ POCKET_COLUMNS = """
     id, name, balance, description,
     target_amount, target_date, emoji, color, status,
     interest_enabled, interest_rate, interest_period,
-    interest_tax_profile, last_interest_date
+    interest_tax_profile, last_interest_date,
+    of_investment_id, source
 """
 
 
@@ -99,7 +100,8 @@ def accrue_pocket_db(cur, user_id: int, pocket_id: int, today: date | None = Non
     cur.execute(
         """
         select id, balance, interest_enabled, interest_rate,
-               interest_period, interest_tax_profile, last_interest_date
+               interest_period, interest_tax_profile, last_interest_date,
+               of_investment_id
         from pockets
         where user_id=%s and id=%s for update
         """,
@@ -108,6 +110,12 @@ def accrue_pocket_db(cur, user_id: int, pocket_id: int, today: date | None = Non
     pocket = cur.fetchone()
     if not pocket:
         raise LookupError("POCKET_NOT_FOUND")
+
+    # Caixinha vinda do Open Finance: saldo é espelho do banco (escrito no sync),
+    # sem juros interno nem lotes. Retorna o saldo como está — não deixa a máquina
+    # de accrual/lotes tocar no valor espelhado.
+    if pocket.get("of_investment_id"):
+        return Decimal(str(pocket["balance"] or 0))
 
     _ensure_pocket_lots(cur, user_id, pocket)
     if not pocket.get("interest_enabled"):
@@ -322,13 +330,17 @@ def pocket_withdraw_to_account(
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, name, balance, interest_tax_profile from pockets "
+                "select id, name, balance, interest_tax_profile, of_investment_id from pockets "
                 "where user_id=%s and lower(name)=lower(%s) for update",
                 (user_id, pocket_name),
             )
             p = cur.fetchone()
             if not p:
                 raise LookupError("POCKET_NOT_FOUND")
+            # Caixinha do banco (Open Finance) é read-only: o dinheiro está no banco,
+            # não no Pig — mover por aqui criaria saldo mentiroso que o sync sobrescreve.
+            if p.get("of_investment_id"):
+                raise ValueError("OF_POCKET_READONLY")
 
             pocket_id = p["id"]
             canon = p["name"]
@@ -591,13 +603,16 @@ def pocket_deposit_from_account(
                 raise ValueError("INSUFFICIENT_ACCOUNT")
 
             cur.execute(
-                "select id, name from pockets "
+                "select id, name, of_investment_id from pockets "
                 "where user_id=%s and lower(name)=lower(%s) for update",
                 (user_id, pocket_name),
             )
             p = cur.fetchone()
             if not p:
                 raise LookupError("POCKET_NOT_FOUND")
+            # Caixinha do banco (Open Finance) é read-only (ver pocket_withdraw_to_account).
+            if p.get("of_investment_id"):
+                raise ValueError("OF_POCKET_READONLY")
 
             pocket_id, canon = p["id"], p["name"]
             accrue_pocket_db(cur, user_id, pocket_id, today=criado_em.date())
