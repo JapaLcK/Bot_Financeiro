@@ -1999,8 +1999,8 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 .piggy-empty .big { font-size: 2.6rem; margin-bottom: 10px; }
 .piggy-empty b { color: rgba(255,255,255,.78); }
 /* Mascote (avatar.webp) no lugar do emoji/icone: FAB, avatar do header e empty-state */
-#piggy-fab img { width: 74%; height: 74%; object-fit: contain; display: block; }
-.piggy-head .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 50%; }
+#piggy-fab img { width: 84%; height: 84%; object-fit: contain; display: block; }
+.piggy-head .avatar img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .piggy-empty .big img { width: 76px; height: 76px; object-fit: contain; display: block; margin: 0 auto; }
 .piggy-suggestions {
   display: flex; flex-direction: column; gap: 6px; margin-top: 14px;
