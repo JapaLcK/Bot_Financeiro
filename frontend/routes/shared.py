@@ -18,7 +18,7 @@ from typing import Any
 
 import jwt as pyjwt
 from fastapi import HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
@@ -49,13 +49,67 @@ JWT_SECRET = (os.getenv("JWT_SECRET") or "").strip()
 AUTH_COOKIE_NAME = "auth_token"
 DASHBOARD_COOKIE_NAME = "dashboard_token"
 
+# Meta (Facebook) Pixel — injetado no <head> das páginas públicas quando setado.
+# Vazio em dev/staging → nenhum pixel é injetado (site limpo, sem rastreio).
+META_PIXEL_ID = (os.getenv("META_PIXEL_ID") or "").strip()
+
 # default_limits exige SlowAPIMiddleware (nunca registrado) — hoje é inerte;
 # só os @limiter.limit() explícitos valem. Ligar o middleware é decisão aberta.
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 
-def html_file(path: pathlib.Path) -> FileResponse:
-    response = FileResponse(path, media_type="text/html")
+def meta_pixel_snippet() -> str:
+    """Código base do Meta Pixel pra injetar no topo do <head>.
+
+    Retorna string vazia quando META_PIXEL_ID não está configurado — assim o
+    site roda sem rastreio em dev/staging sem mexer em nada.
+    """
+    if not META_PIXEL_ID:
+        return ""
+    pid = META_PIXEL_ID
+    return (
+        "<!-- Meta Pixel Code -->\n"
+        "<script>\n"
+        "!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?\n"
+        "n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;\n"
+        "n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;\n"
+        "t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,\n"
+        "document,'script','https://connect.facebook.net/en_US/fbevents.js');\n"
+        f"fbq('init', '{pid}');\n"
+        "fbq('track', 'PageView');\n"
+        "</script>\n"
+        "<noscript><img height=\"1\" width=\"1\" style=\"display:none\" "
+        f'src="https://www.facebook.com/tr?id={pid}&ev=PageView&noscript=1"/></noscript>\n'
+        "<!-- End Meta Pixel Code -->\n"
+    )
+
+
+def inject_meta_pixel(html_text: str) -> str:
+    """Insere o Meta Pixel imediatamente antes de </head> (o mais alto possível).
+
+    No-op quando não há pixel configurado ou a página não tem </head>.
+    """
+    snippet = meta_pixel_snippet()
+    if not snippet:
+        return html_text
+    idx = html_text.lower().find("</head>")
+    if idx == -1:
+        return html_text
+    return html_text[:idx] + snippet + html_text[idx:]
+
+
+def html_file(path: pathlib.Path, pixel: bool = True) -> Response:
+    """Serve um .html do frontend com cache desligado.
+
+    Com `pixel=True` (padrão) e META_PIXEL_ID setado, injeta o Meta Pixel no
+    <head>. As páginas da área logada (dashboard, settings, onboarding) passam
+    `pixel=False` — o rastreio de marketing fica só nas páginas públicas.
+    """
+    if pixel and META_PIXEL_ID:
+        text = inject_meta_pixel(path.read_text(encoding="utf-8"))
+        response: Response = Response(content=text, media_type="text/html; charset=utf-8")
+    else:
+        response = FileResponse(path, media_type="text/html")
     response.headers["Cache-Control"] = "no-store"
     response.headers["Pragma"] = "no-cache"
     return response

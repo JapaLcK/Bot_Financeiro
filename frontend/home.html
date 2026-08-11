@@ -1266,6 +1266,9 @@ function goExplorePro() {
   window.history.replaceState({}, "", cleanUrl.toString());
 
   if (status === "success") {
+    // Conversão de compra pro Meta Ads (só dispara na volta do pagamento,
+    // não em visitas normais da /home — o ?upgrade=success já foi limpo acima).
+    if (window.fbq) fbq("track", "Purchase", { currency: "BRL" });
     // Pequeno delay pra dar o "wow effect" depois da pagina carregar
     setTimeout(() => {
       document.getElementById("welcome-pro-overlay").classList.add("open");
