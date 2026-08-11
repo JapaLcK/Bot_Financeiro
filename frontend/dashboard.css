@@ -2031,14 +2031,6 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 .piggy-msg b { font-weight: 700; }
 .piggy-msg code { background: rgba(0,0,0,.3); padding: 1px 5px; border-radius: 4px; font-size: .82em; }
 .piggy-msg a { color: #FF2D8E; text-decoration: underline; }
-/* Avatar do mascote ao lado das mensagens do Piggy */
-.piggy-row.assistant { display: flex; align-items: flex-end; gap: 8px; align-self: flex-start; max-width: 94%; }
-.piggy-row.assistant .piggy-msg { max-width: 100%; }
-.piggy-msg-av {
-  width: 28px; height: 28px; border-radius: 50%; flex: 0 0 auto; overflow: hidden;
-  background: linear-gradient(135deg, #FF2D8E, #C7186B); box-shadow: 0 2px 8px rgba(255,45,142,.35);
-}
-.piggy-msg-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 .piggy-typing {
   align-self: flex-start; padding: 12px 14px;

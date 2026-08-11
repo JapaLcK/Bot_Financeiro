@@ -122,22 +122,9 @@
     const body = document.getElementById("piggy-body");
     const div = document.createElement("div");
     div.className = "piggy-msg " + role;
-    // O avatar do mascote representa o Piggy, entao tira um emoji de porquinho no comeco.
-    if (role === "assistant") content = String(content).replace(/^\s*🐷\s*/, "");
     div.innerHTML = formatPiggy(content);
     if (!animate) div.style.animation = "none";
-    if (role === "assistant") {
-      const row = document.createElement("div");
-      row.className = "piggy-row assistant";
-      const av = document.createElement("div");
-      av.className = "piggy-msg-av";
-      av.innerHTML = '<img src="/brand/avatar.webp" alt="Piggy">';
-      row.appendChild(av);
-      row.appendChild(div);
-      body.appendChild(row);
-    } else {
-      body.appendChild(div);
-    }
+    body.appendChild(div);
   }
 
   function formatPiggy(text) {
