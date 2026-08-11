@@ -51,3 +51,23 @@ jobs:
       - name: Run tests
         run: |
           PYTHONPATH=. pytest -q
+
+  # Varredura de CVE nas dependências. Não-bloqueante: sinaliza sem travar
+  # o merge/deploy (uma CVE sem fix disponível não deve segurar a main).
+  # O Dependabot (.github/dependabot.yml) abre os PRs de correção.
+  audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: pip-audit (informativo, nao bloqueia)
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r requirements.txt || echo "::warning title=pip-audit::Vulnerabilidades conhecidas encontradas (informativo, nao bloqueia; o Dependabot abre os PRs de correcao)."
