@@ -10,6 +10,7 @@
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=2" />
 <meta name="theme-color" content="#0c0c0d" />
 <link rel="stylesheet" href="/brand.css?v=4" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/site.css?v=4" />
 <style>
   /* Respostas do FAQ = corpo dos guias (.guide-prose) dentro do acordeão */
@@ -61,15 +62,15 @@
       <div class="contact-grid">
         <div class="contact-info">
           <div class="contact-item">
-            <div class="icon-box">✉️</div>
+            <div class="icon-box"><i class="ph ph-envelope" aria-hidden="true"></i></div>
             <div><h4>E-mail</h4><a href="mailto:contato@pigbankai.com">contato@pigbankai.com</a></div>
           </div>
           <div class="contact-item">
-            <div class="icon-box neon">💬</div>
+            <div class="icon-box neon"><i class="ph ph-chat-circle" aria-hidden="true"></i></div>
             <div><h4>WhatsApp</h4><a href="/wa">Abrir conversa com a Piggy →</a></div>
           </div>
           <div class="contact-item">
-            <div class="icon-box">🛟</div>
+            <div class="icon-box"><i class="ph ph-lifebuoy" aria-hidden="true"></i></div>
             <div><h4>Suporte</h4><a href="mailto:suporte@pigbankai.com">suporte@pigbankai.com</a></div>
           </div>
           <div class="contact-item">
@@ -130,7 +131,7 @@
         </div>
       </div>
     </div>
-    <p class="footer-copy">© 2026 PigBank · Feito com 🐷</p>
+    <p class="footer-copy">© 2026 PigBank · Feito com <i class="ph ph-piggy-bank" aria-hidden="true"></i></p>
   </footer>
 
 <script>
@@ -157,7 +158,7 @@
     try {
       var res = await fetch('/contact', { method: 'POST', credentials: 'same-origin', headers: headers, body: JSON.stringify(body) });
       var data = await res.json().catch(function(){ return {}; });
-      if (res.ok) { show('Mensagem enviada! Respondemos no seu e-mail em breve. 🐷', true); e.target.reset(); }
+      if (res.ok) { show('Mensagem enviada! Respondemos no seu e-mail em breve.', true); e.target.reset(); }
       else if (res.status === 429) { show('Muitas mensagens em pouco tempo. Tente mais tarde ou escreva pra contato@pigbankai.com.', false); }
       else { show(data.detail || 'Não foi possível enviar. Escreva pra contato@pigbankai.com.', false); }
     } catch (err) { show('Erro de conexão. Tente de novo ou escreva pra contato@pigbankai.com.', false); }

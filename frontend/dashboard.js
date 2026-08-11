@@ -8792,7 +8792,7 @@ function render(d) {
     const barCls = (i%2===1) ? "neon" : "";
     const clickAttr = c.id ? ` role="button" tabindex="0" data-card-id="${c.id}" data-open-bill-id="${c.bill_id || ''}" onclick="onCardRowClick(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onCardRowClick(this);}"` : '';
     return `<div class="ov-pk ov-cc"${clickAttr}>
-      <div class="ov-pk-top"><span class="ov-pk-ico">💳</span><span class="ov-cc-name">${esc(c.name)}</span><span class="ov-cc-status ${statusCls}">${statusTxt}</span></div>
+      <div class="ov-pk-top"><span class="ov-pk-ico"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="ov-cc-name">${esc(c.name)}</span><span class="ov-cc-status ${statusCls}">${statusTxt}</span></div>
       <div class="ov-cc-sub">${hasData ? (periodLabel ? `Fatura ${periodLabel}` : 'Fatura atual') : 'Sem fatura aberta'}</div>
       <div class="ov-pk-val"><span data-num="cc_${esc(c.name)}" data-val="${due}">${hasData ? fmt(due) : 'R$ —'}</span></div>
       ${showProgress ? `<div class="ov-pk-bar"><i class="${barCls}" style="width:${pctPaid}%"></i></div>` : ''}
@@ -8802,7 +8802,7 @@ function render(d) {
 
   const cardActions = `
     <button class="hbtn hbtn-pink" type="button" onclick="openCardModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Novo</button>
-    <button class="btn-pay-bill" type="button" onclick="openPayBillModal()">💳 Pagar fatura</button>`;
+    <button class="btn-pay-bill" type="button" onclick="openPayBillModal()"><i class="ph ph-credit-card" aria-hidden="true"></i> Pagar fatura</button>`;
 
   const pocketActions = `
     <button class="hbtn hbtn-pink" type="button" onclick="openGoalEditModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Nova</button>`;
@@ -8864,7 +8864,7 @@ function render(d) {
         <div class="ov-ico">${svgReceipt}</div>
         <div class="ov-lbl">Gastos do mês</div>
         <div class="ov-val"><span data-num="exp" data-val="${exp}">${fmt(exp)}</span></div>
-        <div class="ov-delta">💎 Aportes <b style="color:var(--text-2)"><span data-num="apt" data-val="${apt}">${fmt(apt)}</span></b></div>
+        <div class="ov-delta"><i class="ph ph-diamond" aria-hidden="true"></i> Aportes <b style="color:var(--text-2)"><span data-num="apt" data-val="${apt}">${fmt(apt)}</span></b></div>
       </div>
       <div class="ov-stat" style="animation-delay:180ms">
         <div class="ov-ico neon">${svgIncome}</div>

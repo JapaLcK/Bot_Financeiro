@@ -10,6 +10,7 @@
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=2" />
 <meta name="theme-color" content="#0c0c0d" />
 <link rel="stylesheet" href="/brand.css?v=4" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/site.css?v=4" />
 <style>
   #toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px); background: rgba(23,23,26,.96); border: 1px solid rgba(255,45,142,.3); color: #fff; padding: 12px 20px; border-radius: 12px; font-size: .88rem; font-weight: 600; opacity: 0; pointer-events: none; transition: all .25s; z-index: 999; backdrop-filter: blur(12px); }
@@ -65,11 +66,11 @@
             <div class="plan-sub">Pra conhecer a Piggy</div>
             <div class="price">R$ 0 <span>/ sempre</span></div>
             <ul>
-              <li><span class="tick">✓</span> Registro por texto no WhatsApp</li>
-              <li><span class="tick">✓</span> Dashboard completo · 30 lançamentos/mês</li>
-              <li><span class="tick">✓</span> Histórico do mês corrente</li>
-              <li><span class="tick">✓</span> 1 caixinha e 1 cartão</li>
-              <li><span class="tick">✓</span> Piggy IA · 20 mensagens/mês</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Registro por texto no WhatsApp</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Dashboard completo · 30 lançamentos/mês</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Histórico do mês corrente</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> 1 caixinha e 1 cartão</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Piggy IA · 20 mensagens/mês</li>
             </ul>
             <a class="btn btn-outline btn-block" href="/cadastro">Criar conta grátis</a>
           </article>
@@ -79,26 +80,26 @@
             <div class="plan-sub">Organize tudo, sem limites</div>
             <div class="price"><span data-price-monthly style="font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;9,90</span><span data-price-annual style="display:none;font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;99</span></div>
             <ul>
-              <li><span class="tick">✓</span> <span><strong>1&nbsp;banco conectado</strong> (Open&nbsp;Finance)</span></li>
-              <li><span class="tick">✓</span> Lançamentos ilimitados: áudio, foto de cupom, OFX</li>
-              <li><span class="tick">✓</span> Histórico de 90 dias</li>
-              <li><span class="tick">✓</span> Caixinhas, metas e cartões ilimitados</li>
-              <li><span class="tick">✓</span> Boletos com lembrete de vencimento</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> <span><strong>1&nbsp;banco conectado</strong> (Open&nbsp;Finance)</span></li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Lançamentos ilimitados: áudio, foto de cupom, OFX</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Histórico de 90 dias</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Caixinhas, metas e cartões ilimitados</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Boletos com lembrete de vencimento</li>
             </ul>
             <button class="btn btn-outline btn-block" type="button" data-plan-btn="essencial" onclick="startCheckout(currentCycle, this, 'essencial')">Assinar Essencial</button>
           </article>
 
           <article class="plan featured">
-            <span class="plan-badge">★ Mais popular</span>
+            <span class="plan-badge"><i class="ph ph-star" aria-hidden="true"></i> Mais popular</span>
             <h3>Plus</h3>
             <div class="plan-sub">Seu dinheiro no automático</div>
             <div class="price"><span data-price-monthly style="font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;19,90</span><span data-price-annual style="display:none;font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;199</span></div>
             <ul>
-              <li><span class="tick">✓</span> <span><strong>2&nbsp;bancos conectados</strong> (Open&nbsp;Finance)</span></li>
-              <li><span class="tick">✓</span> <span><strong>3&nbsp;agentes</strong>: Xerife, Repórter e Carteiro</span></li>
-              <li><span class="tick">✓</span> Piggy IA sem limites</li>
-              <li><span class="tick">✓</span> Alertas de gastos fora do padrão</li>
-              <li><span class="tick">✓</span> Histórico de 12 meses + tudo do Essencial</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> <span><strong>2&nbsp;bancos conectados</strong> (Open&nbsp;Finance)</span></li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> <span><strong>3&nbsp;agentes</strong>: Xerife, Repórter e Carteiro</span></li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Piggy IA sem limites</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Alertas de gastos fora do padrão</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Histórico de 12 meses + tudo do Essencial</li>
             </ul>
             <button class="btn btn-primary btn-block" type="button" data-plan-btn="plus" onclick="startCheckout(currentCycle, this, 'plus')">Assinar Plus</button>
           </article>
@@ -108,35 +109,35 @@
             <div class="plan-sub">Planejamento e previsão</div>
             <div class="price"><span data-price-monthly style="font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;49,90</span><span data-price-annual style="display:none;font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;499</span></div>
             <ul>
-              <li><span class="tick">✓</span> <span><strong>5&nbsp;bancos conectados</strong></span></li>
-              <li><span class="tick">✓</span> <span><strong>6&nbsp;agentes</strong>: + Detetive, Banqueiro e Barão</span></li>
-              <li><span class="tick">✓</span> Previsão de saldo 30/60/90 dias</li>
-              <li><span class="tick">✓</span> Histórico de 24 meses</li>
-              <li><span class="tick">✓</span> Cobranças duplicadas e caça-assinaturas</li>
-              <li><span class="tick">✓</span> Relatórios semanais + tudo do Plus</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> <span><strong>5&nbsp;bancos conectados</strong></span></li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> <span><strong>6&nbsp;agentes</strong>: + Detetive, Banqueiro e Barão</span></li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Previsão de saldo 30/60/90 dias</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Histórico de 24 meses</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Cobranças duplicadas e caça-assinaturas</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Relatórios semanais + tudo do Plus</li>
             </ul>
             <button class="btn btn-outline btn-block" type="button" data-plan-btn="pro" onclick="startCheckout(currentCycle, this, 'pro')">Assinar Pro</button>
           </article>
 
           <article class="plan" style="opacity:.72">
-            <span class="plan-badge" style="background:rgba(255,255,255,.14)">💎 Em breve</span>
+            <span class="plan-badge" style="background:rgba(255,255,255,.14)"><i class="ph ph-diamond" aria-hidden="true"></i> Em breve</span>
             <h3>Premium</h3>
             <div class="plan-sub">O máximo do PigBank</div>
             <div class="price" style="font-size:1.15rem;padding:14px 0">Aguarde</div>
             <ul>
-              <li><span class="tick">✓</span> Bancos ilimitados</li>
-              <li><span class="tick">✓</span> Todos os agentes + crie o seu</li>
-              <li><span class="tick">✓</span> Modo família</li>
-              <li><span class="tick">✓</span> Visão completa do patrimônio</li>
-              <li><span class="tick">✓</span> Suporte exclusivo</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Bancos ilimitados</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Todos os agentes + crie o seu</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Modo família</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Visão completa do patrimônio</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Suporte exclusivo</li>
             </ul>
             <button class="btn btn-outline btn-block" type="button" disabled>Em breve</button>
           </article>
         </div>
 
-        <p class="plans-note">🐷 <strong>Preço de fundador:</strong> assinando agora, seu valor fica congelado pra sempre — enquanto a assinatura estiver ativa, ele nunca sobe.</p>
+        <p class="plans-note"><i class="ph ph-piggy-bank" aria-hidden="true"></i> <strong>Preço de fundador:</strong> assinando agora, seu valor fica congelado pra sempre — enquanto a assinatura estiver ativa, ele nunca sobe.</p>
       </div>
-      <p class="plans-note" id="plans-note-v2">🎉 Todo plano vem com <strong>30 dias grátis pra testar</strong> (um teste por número). A primeira cobrança só acontece depois do trial — cancele antes pelo dashboard e não paga nada. Pagamentos processados pela Stripe — a PigBank nunca vê os dados do seu cartão.</p>
+      <p class="plans-note" id="plans-note-v2"><i class="ph ph-confetti" aria-hidden="true"></i> Todo plano vem com <strong>30 dias grátis pra testar</strong> (um teste por número). A primeira cobrança só acontece depois do trial — cancele antes pelo dashboard e não paga nada. Pagamentos processados pela Stripe — a PigBank nunca vê os dados do seu cartão.</p>
     </section>
 
   </div>
@@ -167,7 +168,7 @@
         </div>
       </div>
     </div>
-    <p class="footer-copy">© 2026 PigBank · Feito com 🐷</p>
+    <p class="footer-copy">© 2026 PigBank · Feito com <i class="ph ph-piggy-bank" aria-hidden="true"></i></p>
   </footer>
 
 <div id="toast" role="status"></div>
@@ -238,7 +239,7 @@ function refreshPlanButtons() {
     if (!subState || (!subState.active && !subState.lifetime)) return; // deslogado/sem plano: Assinar
     if (subState.lifetime) {
       btn.disabled = true;
-      btn.textContent = "Você tem acesso vitalício 🐷";
+      btn.textContent = "Você tem acesso vitalício";
       btn.onclick = null;
       return;
     }
@@ -291,9 +292,9 @@ function openChangeModal(plan) {
   const data = fmtBrDate(subState.current_period_end);
   document.getElementById("chg-body").innerHTML =
     `<p style="margin:0 0 10px"><strong>${cur}</strong> → <strong>${novo} (${preco})</strong></p>` +
-    "<p style=\"margin:0 0 6px\">✅ Nada é cobrado agora</p>" +
-    `<p style="margin:0 0 6px">✅ Você continua no ${cur} até <strong>${data}</strong> (período já pago)</p>` +
-    `<p style="margin:0">✅ Em ${data} seu plano vira ${novo} e a cobrança de ${preco} acontece no cartão cadastrado</p>`;
+    "<p style=\"margin:0 0 6px\"><i class="ph ph-check-circle" aria-hidden="true"></i> Nada é cobrado agora</p>" +
+    `<p style="margin:0 0 6px"><i class="ph ph-check-circle" aria-hidden="true"></i> Você continua no ${cur} até <strong>${data}</strong> (período já pago)</p>` +
+    `<p style="margin:0"><i class="ph ph-check-circle" aria-hidden="true"></i> Em ${data} seu plano vira ${novo} e a cobrança de ${preco} acontece no cartão cadastrado</p>`;
   const confirm = document.getElementById("chg-confirm");
   confirm.disabled = false;
   confirm.textContent = "Confirmar troca";
@@ -341,7 +342,7 @@ async function cancelChange(btn) {
       btn.disabled = false;
       return;
     }
-    showToast("Troca desfeita — seu plano continua como está. 🐷");
+    showToast("Troca desfeita — seu plano continua como está.");
     await loadSubscription();
     refreshPlanButtons();
   } catch {

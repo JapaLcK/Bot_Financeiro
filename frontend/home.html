@@ -11,6 +11,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <link rel="stylesheet" href="/brand.css" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -396,7 +397,7 @@ footer a:hover { color:var(--text); }
 
   <header>
     <div class="header-left">
-      <div class="logo">🐷</div>
+      <div class="logo"><i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
       <h1>PigBank</h1>
       <div class="nav-links">
         <a class="nav-link active" href="/home">Início</a>
@@ -419,11 +420,11 @@ footer a:hover { color:var(--text); }
             <div class="user-email-line" id="user-email">carregando...</div>
             <span class="user-plan" id="user-plan">PLANO FREE</span>
           </div>
-          <a class="dd-link" href="/home"><span class="dd-icon">🏠</span>Início</a>
-          <a class="dd-link" href="/app"><span class="dd-icon">📊</span>Dashboard</a>
-          <button class="dd-link" type="button" onclick="connectWhatsAppFromHome(event)"><span class="dd-icon">💬</span>Conectar WhatsApp</button>
-          <a class="dd-link" href="/settings?view=security"><span class="dd-icon">⚙️</span>Configurações</a>
-          <a class="dd-link" href="/conta"><span class="dd-icon">💳</span>Gerenciar assinatura</a>
+          <a class="dd-link" href="/home"><span class="dd-icon"><i class="ph ph-house" aria-hidden="true"></i></span>Início</a>
+          <a class="dd-link" href="/app"><span class="dd-icon"><i class="ph ph-chart-bar" aria-hidden="true"></i></span>Dashboard</a>
+          <button class="dd-link" type="button" onclick="connectWhatsAppFromHome(event)"><span class="dd-icon"><i class="ph ph-whatsapp-logo" aria-hidden="true"></i></span>Conectar WhatsApp</button>
+          <a class="dd-link" href="/settings?view=security"><span class="dd-icon"><i class="ph ph-gear" aria-hidden="true"></i></span>Configurações</a>
+          <a class="dd-link" href="/conta"><span class="dd-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></span>Gerenciar assinatura</a>
           <button class="dd-link danger" type="button" onclick="logoutFromHome()"><span class="dd-icon">↪</span>Sair</button>
         </div>
       </div>
@@ -434,7 +435,7 @@ footer a:hover { color:var(--text); }
 
     <div class="free-banner" id="free-banner">
       <div class="fb-text">
-        <span class="fb-emoji">🐷</span>
+        <span class="fb-emoji"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span>
         <span>Você está no <b>Free</b>. Suba pro <b>PigBank+</b> e libere <b>conversar com a IA</b>, OFX, investimentos, export e caixinhas ilimitadas — 30 dias grátis.</span>
       </div>
       <a class="fb-cta" href="/precos">Fazer upgrade</a>
@@ -453,7 +454,7 @@ footer a:hover { color:var(--text); }
       <a class="stat-card" href="/app">
         <div class="stat-head"><span class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v3m0 4v3a1 1 0 0 1-1 1H5a2 2 0 0 1-2-2V5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></span>Saldo</div>
         <div class="bignum" id="stat-balance"><span class="sk" style="height:30px;width:120px"></span></div>
-        <div class="bignum-sub">Conta corrente</div>
+        <div class="bignum-sub" id="stat-balance-sub">Conta corrente</div>
       </a>
       <a class="stat-card" href="/app">
         <div class="stat-head"><span class="stat-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 17 13.5 8.5l-4 4L2 5"/><path d="M16 17h6v-6"/></svg></span>Gastos do mês</div>
@@ -477,7 +478,7 @@ footer a:hover { color:var(--text); }
     <div class="section-title">Ações rápidas</div>
     <div class="actions-grid">
       <a class="action-card" href="/app?action=launch&tipo=despesa">
-        <div class="action-icon-lg green">➕</div>
+        <div class="action-icon-lg green"><i class="ph ph-plus" aria-hidden="true"></i></div>
         <div class="action-body">
           <div class="action-title">Lançar gasto</div>
           <div class="action-sub">Abre o lançador no dashboard</div>
@@ -485,7 +486,7 @@ footer a:hover { color:var(--text); }
         <div class="action-arrow">→</div>
       </a>
       <a class="action-card" href="/app?action=pay-bill">
-        <div class="action-icon-lg purple">💳</div>
+        <div class="action-icon-lg purple"><i class="ph ph-credit-card" aria-hidden="true"></i></div>
         <div class="action-body">
           <div class="action-title">Pagar fatura</div>
           <div class="action-sub">Abre o pagador no dashboard</div>
@@ -493,7 +494,7 @@ footer a:hover { color:var(--text); }
         <div class="action-arrow">→</div>
       </a>
       <a class="action-card" href="/app">
-        <div class="action-icon-lg blue">📊</div>
+        <div class="action-icon-lg blue"><i class="ph ph-chart-bar" aria-hidden="true"></i></div>
         <div class="action-body">
           <div class="action-title">Ver dashboard</div>
           <div class="action-sub">Gráficos e relatórios completos</div>
@@ -514,7 +515,7 @@ footer a:hover { color:var(--text); }
   </main>
 
   <footer>
-    <p>© 2026 PigBank · Feito com 🐷</p>
+    <p>© 2026 PigBank · Feito com <i class="ph ph-piggy-bank" aria-hidden="true"></i></p>
     <div style="margin-top:8px">
       <a href="/suporte">Suporte</a>·<a href="/termos">Termos</a>·<a href="/privacy">Privacidade</a>
     </div>
@@ -702,7 +703,7 @@ function renderGreeting(snapshot, email, displayName) {
     const local = (email || "").split("@")[0] || "";
     firstName = local.charAt(0).toUpperCase() + local.slice(1);
   }
-  document.getElementById("greeting-title").textContent = `${greetingByHour()}, ${firstName} 👋`;
+  document.getElementById("greeting-title").textContent = `${greetingByHour()}, ${firstName}`;
 
   const recent = (snapshot.recent_launches || []).filter(r => r.tipo !== "criar_caixinha");
   const last = recent[0];
@@ -719,8 +720,18 @@ function renderGreeting(snapshot, email, displayName) {
 
 /* ─── Render: stat cards ──────────────────────────────────────────────── */
 function renderStats(snapshot, history) {
-  // Saldo
-  document.getElementById("stat-balance").textContent = fmtBRL(snapshot.balance || 0);
+  // Saldo — espelha o Dashboard: Carteira (manual) + Bancos conectados (Open Finance).
+  // Antes mostrava só `balance`, ignorando `of_bank_balance`, e divergia do dashboard.
+  const carteira = Number(snapshot.balance || 0);
+  const ofBank   = Number(snapshot.of_bank_balance || 0);
+  const saldoAtual = carteira + ofBank;
+  document.getElementById("stat-balance").textContent = fmtBRL(saldoAtual);
+  const balSub = document.getElementById("stat-balance-sub");
+  if (balSub) {
+    balSub.textContent = (Number(snapshot.of_bank_count || 0) > 0)
+      ? `Carteira ${fmtBRL(carteira)} · Bancos ${fmtBRL(ofBank)}`
+      : "Conta corrente";
+  }
 
   // Gastos do mês + delta vs mês anterior
   const expense = snapshot.monthly_expense || 0;
@@ -813,7 +824,7 @@ function renderAlerts(snapshot) {
                  : `vence em <strong>${days} dias</strong>`;
   banner.innerHTML = `
     <div class="alert-body">
-      <div class="alert-icon">${isOverdue ? "🚨" : "⚠️"}</div>
+      <div class="alert-icon">${isOverdue ? '<i class="ph ph-warning-circle" aria-hidden="true"></i>' : '<i class="ph ph-warning" aria-hidden="true"></i>'}</div>
       <div class="alert-text">
         Fatura <strong>${escapeHtml(c.name)}</strong> de ${monthName} ${dueLabel} — ${fmtBRL(c.due_amount || 0)} em aberto
       </div>
@@ -872,7 +883,7 @@ function renderOnboarding(snapshot, profile) {
       <div class="ob-list">
         ${items.map(i => `
           <div class="ob-item ${i.done ? "done" : "todo"}" ${i.action === "whatsapp" ? `onclick="connectWhatsAppFromHome(event)"` : ""}>
-            <div class="ob-check">${i.done ? "✓" : ""}</div>
+            <div class="ob-check">${i.done ? '<i class="ph ph-check" aria-hidden="true"></i>' : ""}</div>
             <div class="ob-text">
               <div class="ob-text-title">${i.title}</div>
               ${(!i.done && i.hint) ? `<div class="ob-text-hint">${i.hint}</div>` : ""}
@@ -910,7 +921,7 @@ function renderActivity(snapshot) {
     const sign = isReceita ? "+" : "-";
     const desc = r.alvo || r.nota || "—";
     const cat  = r.categoria || (isReceita ? "outros" : "geral");
-    const emoji = isReceita ? "📥" : (isCredito ? "💳" : "💸");
+    const emoji = isReceita ? '<i class="ph ph-trend-up" aria-hidden="true"></i>' : (isCredito ? '<i class="ph ph-credit-card" aria-hidden="true"></i>' : '<i class="ph ph-trend-down" aria-hidden="true"></i>');
     return `
       <div class="activity-row">
         <div class="activity-time">${fmtTimeFull(r.criado_em)}</div>
@@ -948,7 +959,7 @@ async function loadAuthMe() {
 function showAccessError() {
   document.getElementById("page-root").innerHTML = `
     <div class="access-error">
-      <h2>🔒 Acesso restrito</h2>
+      <h2><i class="ph ph-lock" aria-hidden="true"></i> Acesso restrito</h2>
       <p>Sua sessão expirou ou você não está autenticado.</p>
       <a class="btn-pill primary" href="/">Entrar</a>
     </div>
@@ -1012,7 +1023,7 @@ function showAccessError() {
   } catch {
     document.getElementById("content").innerHTML = `
       <div class="access-error">
-        <h2>⚠️ Erro ao carregar</h2>
+        <h2><i class="ph ph-warning" aria-hidden="true"></i> Erro ao carregar</h2>
         <p>Não foi possível carregar seus dados. Tente novamente em instantes.</p>
         <a class="btn-pill ghost" href="/home">Recarregar</a>
       </div>
@@ -1121,7 +1132,7 @@ async function mfaOnboardingDismiss() {
 
 <div class="mfa-ob-overlay" id="mfa-onboarding-overlay">
   <div class="mfa-ob-card">
-    <div class="mfa-ob-icon">🔒</div>
+    <div class="mfa-ob-icon"><i class="ph ph-lock" aria-hidden="true"></i></div>
     <h2>Proteja sua conta com 2 etapas</h2>
     <p>
       Adicione uma camada extra de segurança usando um app autenticador
@@ -1217,10 +1228,10 @@ async function mfaOnboardingDismiss() {
 
 <div class="welcome-pro-overlay" id="welcome-pro-overlay">
   <div class="welcome-pro-card">
-    <div class="welcome-pro-emoji">🐷✨</div>
+    <div class="welcome-pro-emoji"><i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
     <h2>Tá dentro do PigBank+!</h2>
     <p class="welcome-pro-sub">Bora ver o que tu desbloqueou, parceiro?<br/>Os 30 dias grátis começam agora — só tem cobrança depois.</p>
-    <div class="center"><div class="welcome-pro-trial">🎉 30 dias grátis</div></div>
+    <div class="center"><div class="welcome-pro-trial"><i class="ph ph-confetti" aria-hidden="true"></i> 30 dias grátis</div></div>
     <div class="welcome-pro-feats">
       <div class="welcome-pro-feat">Caixinhas e cartões sem limite</div>
       <div class="welcome-pro-feat">Investimentos com IR e IOF no automático</div>
@@ -1263,7 +1274,7 @@ function goExplorePro() {
     const toast = document.getElementById("upgrade-cancel-toast");
     if (!toast) return;
     toast.innerHTML = `
-      <span class="emoji">🐷</span>
+      <span class="emoji"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span>
       <div class="body">Beleza, sem pressa! Quando bater a vontade de virar PigBank+, é só dar uma passada em <a href="/precos" style="color:#FF2D8E;text-decoration:underline">/precos</a>.</div>
     `;
     setTimeout(() => toast.classList.add("show"), 350);
