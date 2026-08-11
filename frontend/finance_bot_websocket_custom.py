@@ -393,6 +393,10 @@ async def get_financial_data(
     pockets = current_pockets
     investments = current_investments  # do cache
     rv_positions = current_rv_positions  # renda variável (ações/FIIs via OF), do cache
+    # Plano pago (Essencial+) tem OF ao vivo. No Grátis (pós-trial) as caixinhas do
+    # banco congelam → o front troca "Sincronizada" por "reative seu banco" (upsell).
+    from core.services.plan_service import require_min_tier as _require_min_tier
+    _of_plan_active = _require_min_tier(user_id, "essencial")
 
     # Compras no crédito viram linhas virtuais com tipo='credito' no
     # histórico — só quando o filtro permitir (no filtro "all" ou sem filtro).
@@ -812,7 +816,7 @@ async def get_financial_data(
         "balance":            float(account["balance"]) if account else 0.0,
         "of_bank_balance":    of_bank_balance,  # saldo das contas bancárias conectadas (OF)
         "of_bank_count":      of_bank_count,    # nº de contas BANK conectadas (0 = sem banco)
-        "pockets":            [dict(r) for r in pockets],
+        "pockets":            [{**dict(r), "of_plan_active": _of_plan_active} for r in pockets],
         "investments":        [dict(r) for r in investments],
         "rv_positions":       rv_positions,  # ações/FIIs via Open Finance (já são dicts)
         "rv_summary": {

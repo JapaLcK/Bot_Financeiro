@@ -589,6 +589,18 @@ def init_db():
         """
         alter table pockets add column if not exists of_last_seen_balance numeric
         """,
+        # Baseline do RENDIMENTO acumulado (open_finance_investments.raw->amountProfit)
+        # já contabilizado pelo Banqueiro. Serve pra separar aporte (você guardou) de
+        # rendimento (rendeu) no delta de saldo — senão um bom mês de juros vira "aporte".
+        """
+        alter table pockets add column if not exists of_last_seen_profit numeric
+        """,
+        # source='open_finance' marca caixinhas AUTO-CRIADAS a partir do banco (via
+        # sync do Open Finance): read-only, saldo espelhado, sem juros interno. As
+        # criadas pelo usuário ficam 'manual' (mesmo quando vinculadas a uma caixinha OF).
+        """
+        alter table pockets add column if not exists source text not null default 'manual'
+        """,
 
         # -----------------------------
         # Open Finance — reconciliação (Fase 2): dedup OF ↔ manual

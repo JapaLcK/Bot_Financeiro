@@ -30,6 +30,7 @@ from db import (
     import_open_finance_launches,
     list_pluggy_item_ids,
     save_open_finance_investments,
+    sync_open_finance_caixinhas,
     save_open_finance_sync,
     sync_imported_open_finance_updates,
 )
@@ -136,9 +137,22 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
 
     result = save_open_finance_sync(connection["id"], accounts)
 
-    # #10: investimentos (inclui Caixinha/CDB) — espelho, não vira pocket ainda.
+    # #10: investimentos (inclui Caixinha/CDB) — espelho em open_finance_investments.
     investments = [normalize_pluggy_investment(i) for i in list_pluggy_investments(provider_item_id, api_key)]
     inv_result = save_open_finance_investments(connection["id"], investments)
+
+    # Caixinhas do OF viram caixinhas do Pig automaticamente (auto-create + dedup) e o
+    # saldo do banco é espelhado nas vinculadas — mas SÓ pra planos pagos (Essencial+).
+    # No Grátis (pós-trial) o OF nem sincroniza (conexão PAUSED barra acima); este gate é
+    # a segunda trava: se o usuário caiu de plano, as caixinhas congelam (não atualizam).
+    # Renda variável (ações/FIIs) é lida à parte no snapshot, também gated. Fail-soft.
+    caixinha_result = {"caixinhas_created": 0, "caixinhas_linked": 0, "caixinhas_mirrored": 0}
+    try:
+        from core.services.plan_service import require_min_tier
+        if require_min_tier(connection["user_id"], "essencial"):
+            caixinha_result = sync_open_finance_caixinhas(connection["id"], connection["user_id"])
+    except Exception as exc:
+        print(f"[pluggy_sync] caixinha auto-import: {exc}")
 
     # Fase 1: conta BANK → launches (analytics, sem mover saldo); cartão → faturas (opção a).
     imported = import_open_finance_launches(connection["user_id"], connection["id"])
@@ -163,6 +177,7 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
         "user_id": connection["user_id"],
         **result,
         **inv_result,
+        **caixinha_result,
         "imported": imported,
         "imported_credit": imported_credit,
         "updated": updated,

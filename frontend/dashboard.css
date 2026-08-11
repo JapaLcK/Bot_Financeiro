@@ -1455,6 +1455,10 @@ body.light .mini-tag {
   margin-left:6px; vertical-align:middle;
 }
 body.light .rv-badge { background:rgba(0,180,90,.1); color:#0a7a44; border-color:rgba(0,180,90,.25); }
+/* Caixinha do banco congelada (Grátis pós-trial): vira gancho de upgrade */
+.rv-badge-stale { background:rgba(255,176,32,.16); color:#FFB020; border-color:rgba(255,176,32,.35); }
+body.light .rv-badge-stale { background:rgba(180,120,0,.1); color:#8a5a00; border-color:rgba(180,120,0,.25); }
+.goal-card.of-stale { opacity:.72; }
 .invest-head .val.b {
   font-size:1.1rem; font-weight:800; color:var(--text);
   font-variant-numeric:tabular-nums; letter-spacing:-.01em; white-space:nowrap;

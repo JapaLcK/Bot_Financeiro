@@ -2265,19 +2265,38 @@ function _renderGoalsView(goals) {
   ).join("");
 }
 
+// Caixinha vinda do banco (Open Finance): saldo espelhado, sem rendimento interno.
+function _isOfPocket(p) { return p && (p.source === "open_finance" || p.of_investment_id != null); }
+// No Grátis (pós-trial) o OF não está ativo → a caixinha do banco fica congelada.
+function _isOfStale(p) { return _isOfPocket(p) && p.of_plan_active === false; }
+function _ofPocketBadge(p) {
+  if (!_isOfPocket(p)) return "";
+  return _isOfStale(p)
+    ? `<span class="rv-badge rv-badge-stale">banco desconectado</span>`
+    : `<span class="rv-badge">via banco</span>`;
+}
+
 function _renderPocketOnlyCard(p, idx = 0) {
   const emoji = p.emoji || "🐷";
   const color = p.color || "#FF2D8E";
+  const ofPocket = _isOfPocket(p);
+  const ofStale = _isOfStale(p);
+  const line1 = ofStale ? "🔒 Banco desconectado — reative pra atualizar"
+              : ofPocket ? "Sincronizada com seu banco"
+              : "Caixinha sem meta — depósitos livres";
+  const line2 = ofStale ? "Reative seu banco (plano pago) pra o saldo voltar a atualizar"
+              : ofPocket ? "Saldo atualizado pela corretora/banco"
+              : (p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate));
   return `
-    <div class="goal-card" style="animation-delay:${idx * 80}ms;cursor:pointer" onclick="openPocketHistory('${escapeJsString(p.name)}')">
+    <div class="goal-card${ofStale ? " of-stale" : ""}" style="animation-delay:${idx * 80}ms;cursor:pointer" onclick="openPocketHistory('${escapeJsString(p.name)}')">
       <div class="goal-ring">
         <div style="width:78px;height:78px;border-radius:50%;background:${color}22;display:flex;align-items:center;justify-content:center;font-size:1.6rem">${phIcon(emoji)}</div>
       </div>
       <div class="goal-info">
-        <div class="goal-name">${phIcon(emoji)} ${escapeHtmlSafe(p.name)}</div>
+        <div class="goal-name">${phIcon(emoji)} ${escapeHtmlSafe(p.name)} ${_ofPocketBadge(p)}</div>
         <div class="goal-amt">${_fmtBRL(p.balance || 0)} guardado</div>
-        <div class="goal-deadline" style="color:var(--text-3)">Caixinha sem meta — depósitos livres</div>
-        <div class="goal-deadline" style="color:var(--text-3)">${p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate)}</div>
+        <div class="goal-deadline" style="color:var(--text-3)">${line1}</div>
+        <div class="goal-deadline" style="color:var(--text-3)">${line2}</div>
         ${p.description ? `<div class="goal-deadline" style="color:var(--text-3);font-style:italic">${escapeHtmlSafe(p.description)}</div>` : ""}
       </div>
     </div>
