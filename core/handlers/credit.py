@@ -429,6 +429,9 @@ def _clean_credit_purchase_description(text: str, card_name: str | None) -> str:
             desc,
             flags=re.IGNORECASE,
         ).strip()
+    # Remove preposição/conector solto que sobra ao tirar "...no crédito"/cartão
+    # (ex.: "no crédito com minha namorada" → "com minha namorada" → "minha namorada").
+    desc = re.sub(r"^\s*(?:com|no|na|em)\b\s*", "", desc, flags=re.IGNORECASE).strip()
     desc = re.sub(r"\s+", " ", desc).strip(" -:;,.")
     return desc
 
