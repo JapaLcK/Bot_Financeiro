@@ -1563,6 +1563,14 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[agents] erro: {exc}", file=sys.stderr)
 
+    async def _login_events_retention():
+        try:
+            await asyncio.sleep(2)
+            from core.services.login_events_retention import run_login_events_retention_loop  # noqa: PLC0415
+            await run_login_events_retention_loop()
+        except Exception as exc:
+            print(f"[login_events_retention] erro: {exc}", file=sys.stderr)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -1666,6 +1674,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_proactive_ai(), name="proactive_ai"),
                 asyncio.create_task(_news_bot(), name="news_bot"),
                 asyncio.create_task(_piggy_agents(), name="piggy_agents"),
+                asyncio.create_task(_login_events_retention(), name="login_events_retention"),
             ]
         )
     else:
