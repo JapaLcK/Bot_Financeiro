@@ -5493,6 +5493,32 @@ const UPGRADE_MESSAGES = {
   generic: "Essa feature é exclusiva pra quem assina o PigBank+."
 };
 
+// Banner de trial (B1): oferta proativa dos 30d de Plus pro Grátis. Só aparece
+// pra quem é free e não está em trial ativo; some no app iOS (CTA de compra
+// externa = rejeição Apple 3.1.1, a checagem é feita por quem chama). O "Agora
+// não" silencia por TRIAL_BANNER_SNOOZE_DAYS via localStorage.
+const TRIAL_BANNER_SNOOZE_KEY = "pb_trial_banner_snooze_until";
+const TRIAL_BANNER_SNOOZE_DAYS = 7;
+
+function maybeShowTrialBanner() {
+  const el = document.getElementById("trial-banner");
+  if (!el) return;
+  try {
+    const until = parseInt(localStorage.getItem(TRIAL_BANNER_SNOOZE_KEY) || "0", 10);
+    if (until && Date.now() < until) return;  // ainda no período de silêncio
+  } catch (e) { /* localStorage indisponível → mostra assim mesmo */ }
+  el.style.display = "block";
+}
+
+function dismissTrialBanner() {
+  const el = document.getElementById("trial-banner");
+  if (el) el.style.display = "none";
+  try {
+    const until = Date.now() + TRIAL_BANNER_SNOOZE_DAYS * 86400000;
+    localStorage.setItem(TRIAL_BANNER_SNOOZE_KEY, String(until));
+  } catch (e) { /* sem localStorage → some só nesta sessão */ }
+}
+
 function showUpgradeModal(feature) {
   const overlay = document.getElementById("upgrade-overlay");
   if (!overlay) return;
@@ -9285,6 +9311,11 @@ function _showAccessError(title, msg) {
         }
         window.location.replace("/precos?ativar=1");
         return;
+      }
+      // Banner de trial (B1): oferta dos 30d de Plus pro Grátis sem trial ativo.
+      // Nunca no app iOS (CTA de compra externa fere a diretriz 3.1.1 da Apple).
+      if (me && me.plan_tier === "free" && !(me.trial && me.trial.active) && !window.PB_IN_APP) {
+        maybeShowTrialBanner();
       }
     }
   } catch (e) { /* se /auth/me falhar, segue; o 402 protege os dados */ }

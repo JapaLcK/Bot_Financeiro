@@ -160,6 +160,28 @@
   <div id="overview-view" class="dash-view active">
   <div id="alert-banner"></div>
 
+  <!-- Banner de trial (B1) — só pro Grátis sem trial ativo; escondido no app iOS.
+       Revelado por maybeShowTrialBanner() em dashboard.js. -->
+  <div id="trial-banner" style="display:none;position:relative;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:22px;padding:20px 22px;overflow:hidden;margin-bottom:18px">
+    <div style="position:absolute;top:0;left:0;bottom:0;width:4px;background:linear-gradient(#FF2D8E,#C6F11A)"></div>
+    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+      <span style="flex-shrink:0;width:46px;height:46px;border-radius:14px;background:rgba(255,45,142,.16);color:#FF2D8E;display:inline-flex;align-items:center;justify-content:center;font-size:24px"><i class="ph ph-sparkle" aria-hidden="true"></i></span>
+      <div style="flex:1;min-width:220px">
+        <div style="color:var(--text);font-weight:600;font-size:1rem;line-height:1.3">Experimente o Plus por 30 dias grátis</div>
+        <div style="color:var(--text-2);font-size:.82rem;line-height:1.45;margin-top:3px">Conecte seu banco, ative os agentes e veja seu dinheiro trabalhar. Cancele quando quiser.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px">
+          <span style="display:inline-flex;align-items:center;gap:5px;font-size:.75rem;color:var(--text);background:rgba(255,255,255,.05);border:1px solid var(--div);padding:4px 9px;border-radius:999px"><i class="ph ph-bank" style="color:#C6F11A" aria-hidden="true"></i> Open Finance</span>
+          <span style="display:inline-flex;align-items:center;gap:5px;font-size:.75rem;color:var(--text);background:rgba(255,255,255,.05);border:1px solid var(--div);padding:4px 9px;border-radius:999px"><i class="ph ph-robot" style="color:#C6F11A" aria-hidden="true"></i> Agentes do Piggy</span>
+          <span style="display:inline-flex;align-items:center;gap:5px;font-size:.75rem;color:var(--text);background:rgba(255,255,255,.05);border:1px solid var(--div);padding:4px 9px;border-radius:999px"><i class="ph ph-clock-counter-clockwise" style="color:#C6F11A" aria-hidden="true"></i> Histórico ilimitado</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:stretch;gap:8px;flex-shrink:0">
+        <a href="/precos" style="background:#FF2D8E;color:#fff;border:none;border-radius:12px;padding:11px 18px;font-size:.88rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;text-decoration:none">Ativar teste grátis <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
+        <button type="button" onclick="dismissTrialBanner()" style="background:transparent;color:var(--text-3);border:none;font-size:.78rem;cursor:pointer;font-family:inherit">Agora não</button>
+      </div>
+    </div>
+  </div>
+
   <p class="section-title" id="overview-heading" style="margin:0 0 14px">Visão geral</p>
 
   <!-- Insight do Piggy — populado via /insights/{user_id}/current (LLM) -->

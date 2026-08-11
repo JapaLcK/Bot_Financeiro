@@ -625,6 +625,42 @@ def send_reengagement_email(to: str, user_id: int | None = None) -> bool:
     )
 
 
+def send_free_upgrade_nudge_email(to: str, user_id: int | None = None, dashboard_url: str = "") -> bool:
+    """Nudge de conversão (B2) pro usuário Grátis ativo: mostra o que o Plus
+    destrava e convida pros 30 dias de teste. Piggy: entusiasmado, sem pressão."""
+    unsub = make_unsub_url(user_id, to) if user_id else ""
+    base = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    content = f"""
+      <p>Oi! Piggy aqui. 🐷</p>
+      <p>Vi que você usa o PigBank no Grátis — e ainda tem bastante coisa boa pra
+         destravar. No <strong>Plus</strong> você ganha:</p>
+      <ul>
+        <li><strong>Open Finance</strong> — conecta seu banco e o saldo atualiza sozinho</li>
+        <li><strong>Agentes do Piggy</strong> — Xerife, Repórter e Carteiro trabalhando por você</li>
+        <li><strong>Histórico ilimitado</strong>, caixinhas e cartões sem limite</li>
+      </ul>
+      <p>Dá pra <strong>testar 30 dias grátis</strong> — se não curtir, é só cancelar antes do
+         fim e você não paga nada.</p>
+      <p style="text-align:center;margin:24px 0"><a class="btn" href="{base}/precos">Testar o Plus grátis</a></p>
+      <p class="sig">Te espero lá,<br/><strong>Piggy 🐷</strong></p>
+    """
+    html = _piggy_html("Destrave o Plus — 30 dias grátis", content, unsub)
+    text = (
+        "Oi! Piggy aqui.\n\n"
+        "No Plus você destrava Open Finance, os agentes do Piggy e histórico ilimitado. "
+        f"Dá pra testar 30 dias grátis: {base}/precos\n\nTe espero lá, Piggy"
+    )
+    headers = unsub_headers(unsub) if unsub else {}
+    return send_email(
+        to=to,
+        subject="🐷 Destrave o Plus — 30 dias grátis",
+        html_body=html,
+        text_body=text,
+        from_addr=EMAIL_FROM_PIGGY,
+        headers=headers or None,
+    )
+
+
 def send_tip_email(to: str, user_id: int | None = None) -> bool:
     """
     Envia email mensal com dica de uso do bot.

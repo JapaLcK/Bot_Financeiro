@@ -259,6 +259,30 @@ def get_users_for_engagement() -> list[dict]:
             return cur.fetchall()
 
 
+def get_free_users_for_upgrade_nudge(active_within_days: int = 30) -> list[dict]:
+    """Candidatos ao nudge de upgrade (B2): contas no plano Grátis, ativas
+    recentemente, com e-mail e sem opt-out de engajamento. A dedup de reenvio
+    fica a cargo de recent_event_exists no scheduler (sem coluna nova).
+    Nota: trialing tem plan setado pro tier escolhido → COALESCE(plan,'free')
+    já exclui quem está em trial; churned volta a plan='free' no webhook."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT user_id, email
+                FROM auth_accounts
+                WHERE engagement_opt_out = false
+                  AND email IS NOT NULL
+                  AND COALESCE(plan, 'free') = 'free'
+                  AND last_activity_at IS NOT NULL
+                  AND last_activity_at >= now() - make_interval(days => %s)
+                ORDER BY last_activity_at DESC
+                """,
+                (int(active_within_days),),
+            )
+            return cur.fetchall()
+
+
 def mark_reengagement_sent(user_id: int) -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
