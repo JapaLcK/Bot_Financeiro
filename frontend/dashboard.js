@@ -6236,6 +6236,18 @@ function renderVariableIncomePanel(d) {
   if (vs) vs.innerHTML = pos.length ? summaryHtml : "";
   if (vl) vl.innerHTML = pos.length ? listHtml
     : `<div class="empty">Nenhum ativo de renda variável. Conecte seu banco/corretora no Open Finance pra ver ações e FIIs aqui.</div>`;
+
+  // 3) Parte dedicada na Visão Geral (home): some quando não há posições.
+  const ov = document.getElementById("rv-overview");
+  if (ov) {
+    if (!pos.length) {
+      ov.style.display = "none";
+    } else {
+      ov.style.display = "";
+      const os = document.getElementById("rv-overview-summary"); if (os) os.innerHTML = summaryHtml;
+      const ol = document.getElementById("rv-overview-list"); if (ol) ol.innerHTML = listHtml;
+    }
+  }
 }
 
 function runInvestmentSimulator() {
