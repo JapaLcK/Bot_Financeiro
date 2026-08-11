@@ -384,13 +384,13 @@ function taxProfileForAsset(assetType) {
 // Mapa view-id → elemento. Inclui as novas seções acessíveis pelo sidebar.
 const DASH_VIEWS = [
   "overview", "analytics", "history", "fixed", "budgets", "goals",
-  "categories", "installments", "cards", "investments", "affiliate", "agentes"
+  "categories", "installments", "cards", "investments", "rv", "affiliate", "agentes"
 ];
 
 function setMainView(view) {
   // Free: bloqueia navegacao pra tela inteira de investimentos. Botao fica
   // visivel mas desabilitado; click abre modal de upgrade (item 17/18).
-  if (view === "investments" && !isProUser()) {
+  if ((view === "investments" || view === "rv") && !isProUser()) {
     showUpgradeModal("investments");
     return;
   }
@@ -412,6 +412,7 @@ function setMainView(view) {
     renderInvestmentsPanel(lastData);
     runInvestmentSimulator();
   }
+  if (view === "rv" && lastData) renderVariableIncomePanel(lastData);
 }
 
 // Atalho usado pelos itens do sidebar. Fecha o drawer no mobile.
@@ -6217,18 +6218,24 @@ function renderVariableIncomePanel(d) {
       </div>`;
   }).join("");
 
-  // Dois lugares: aba de Investimentos ("") e página Caixinhas e metas ("-goals").
-  // Sem posições (ou plano sem OF) → esconde os cards (não polui quem não tem).
-  ["", "-goals"].forEach(suffix => {
-    const card = document.getElementById("rv-card" + suffix);
-    if (!card) return;
-    if (!pos.length) { card.style.display = "none"; return; }
-    card.style.display = "";
-    const elS = document.getElementById("rv-summary" + suffix);
-    if (elS) elS.innerHTML = summaryHtml;
-    const elL = document.getElementById("rv-list" + suffix);
-    if (elL) elL.innerHTML = listHtml;
-  });
+  // 1) Card na aba de Investimentos: some quando não há posições.
+  const card = document.getElementById("rv-card");
+  if (card) {
+    if (!pos.length) {
+      card.style.display = "none";
+    } else {
+      card.style.display = "";
+      const s = document.getElementById("rv-summary"); if (s) s.innerHTML = summaryHtml;
+      const l = document.getElementById("rv-list"); if (l) l.innerHTML = listHtml;
+    }
+  }
+
+  // 2) Página dedicada "Renda variável": header sempre visível; mostra estado vazio.
+  const vs = document.getElementById("rv-summary-view");
+  const vl = document.getElementById("rv-list-view");
+  if (vs) vs.innerHTML = pos.length ? summaryHtml : "";
+  if (vl) vl.innerHTML = pos.length ? listHtml
+    : `<div class="empty">Nenhum ativo de renda variável. Conecte seu banco/corretora no Open Finance pra ver ações e FIIs aqui.</div>`;
 }
 
 function runInvestmentSimulator() {
