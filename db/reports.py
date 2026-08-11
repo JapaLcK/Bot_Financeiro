@@ -154,6 +154,10 @@ def update_user_plan(user_id: int, plan: str, expires_at=None) -> None:
     return _db_support.update_user_plan_impl(get_conn, user_id, plan, expires_at)
 
 
+def mark_plan_selected(user_id: int) -> None:
+    return _db_support.mark_plan_selected_impl(get_conn, user_id)
+
+
 def get_user_by_stripe_customer(stripe_customer_id: str) -> int | None:
     return _db_support.get_user_by_stripe_customer_impl(get_conn, stripe_customer_id)
 

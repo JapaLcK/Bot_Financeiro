@@ -2071,10 +2071,13 @@ def _post_login_url(user_id: int | None = None) -> str:
     """URL para a qual o usuário deve ser direcionado logo após login.
     O campo `dashboard_url` nas respostas de auth aponta para cá.
 
-    Sem assinatura ativa (paywall ligado), manda DIRETO pro paywall em vez do
-    /home — evita o flash de carregar o /home e rebater pro /precos."""
+    Cadastro novo (ou quem ainda não escolheu plano) vai DIRETO pra /precos —
+    só entra no dashboard depois de escolher um plano (mesmo o Grátis) e, nos
+    pagos, concluir o pagamento. Sem assinatura ativa (paywall ligado), idem."""
     if user_id is not None:
-        from core.services.plan_service import has_app_access
+        from core.services.plan_service import has_app_access, needs_plan_selection
+        if needs_plan_selection(int(user_id)):
+            return f"{DASHBOARD_URL}/precos?escolha=1"
         if not has_app_access(int(user_id)):
             return f"{DASHBOARD_URL}/precos?ativar=1"
     return _dashboard_url("/home")
@@ -2670,6 +2673,7 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     from core.services.plan_service import (
         has_app_access, paywall_enabled, plans_v2_enabled,
         get_plan_tier, get_trial_status, history_earliest_date, get_user_limits,
+        needs_plan_selection,
     )
     of_ui_enabled = _open_finance_ui_enabled(user_id, user_dict.get("email"))
     from core.services.plan_service import agents_ui_enabled as _agents_ui_enabled
@@ -2698,6 +2702,7 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         "show_mfa_onboarding": show_onboarding,
         "mfa_enabled": bool(mfa.get("enabled")),
         "app_access": has_app_access(user_id),
+        "needs_plan_selection": needs_plan_selection(user_id, user_dict),
         "paywall_enabled": paywall_enabled(),
         "plans_v2_enabled": plans_v2_enabled(),
         "plan_tier": plan_tier,
@@ -3737,6 +3742,32 @@ async def billing_create_checkout(
         )
 
 
+@app.post("/billing/select-free")
+@limiter.limit("20/hour")
+async def billing_select_free(
+    request: Request,
+    user_id: int = Depends(_get_current_user),
+):
+    """Escolha do plano Grátis no fim do cadastro.
+
+    Fecha o gate da /precos (plan_selected_at) e libera o dashboard sem passar
+    pelo Stripe. Recusa se o usuário já tem assinatura paga/trial vigente —
+    aí a troca é pela /precos normal, não por aqui."""
+    from db import mark_plan_selected
+    from core.services.plan_service import get_plan_tier
+
+    tier = await asyncio.to_thread(get_plan_tier, user_id)
+    if tier != "free":
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "already_subscribed",
+                    "message": "Você já tem um plano pago ativo."},
+        )
+
+    await asyncio.to_thread(mark_plan_selected, user_id)
+    return {"ok": True, "dashboard_url": _dashboard_url("/home")}
+
+
 # ─── Troca de plano (upgrade/downgrade sem assinatura dupla) ─────────────────
 # Regra do Lucas (2026-08-06): a troca NUNCA cobra na hora — consome o período
 # já pago e vira o plano na PRÓXIMA cobrança (Subscription Schedule, proration
@@ -3966,7 +3997,7 @@ async def billing_webhook(request: Request):
     import stripe
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import update_user_plan, get_user_by_stripe_customer, set_payment_status
+    from db import update_user_plan, get_user_by_stripe_customer, set_payment_status, mark_plan_selected
 
     stripe.api_key = STRIPE_SECRET_KEY
     payload    = await request.body()
@@ -4077,6 +4108,9 @@ async def billing_webhook(request: Request):
             plan_value = _stored_plan_for_price(_subscription_price_id(sub))
             update_user_plan(user_id, plan_value, expires_dt)
             set_payment_status(user_id, sub_status)
+            # Checkout concluído = plano escolhido: libera o gate da /precos
+            # (idempotente; só grava na primeira vez).
+            await asyncio.to_thread(mark_plan_selected, user_id)
             # Trial nasceu → registra a queima do trial no telefone (1 por
             # telefone na vida). Falha precisa propagar: resposta 5xx faz a
             # Stripe repetir o webhook até a trava ficar persistida.
@@ -4132,6 +4166,7 @@ async def billing_webhook(request: Request):
             plan_value = _stored_plan_for_price(_subscription_price_id(sub))
             update_user_plan(user_id, plan_value, expires_dt)
             set_payment_status(user_id, sub_status)
+            await asyncio.to_thread(mark_plan_selected, user_id)
             print(f"[billing] user {user_id} → {plan_value} até {expires_dt.date() if expires_dt else 'sem data'}")
             await log_system_event(
                 "info",

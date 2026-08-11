@@ -1580,6 +1580,22 @@ def init_db():
         """alter table auth_accounts add column if not exists trial_started_at timestamptz""",
         # Downsell do fim do trial: 1 e-mail por conta, na vida.
         """alter table auth_accounts add column if not exists trial_downsell_sent_at timestamptz""",
+        # Gate de escolha de plano no cadastro (2026-08-11): depois de criar a
+        # conta o usuário é OBRIGADO a passar pela /precos e escolher um plano
+        # (mesmo o Grátis) antes de entrar no dashboard. plan_selected_at marca
+        # o momento dessa escolha — NULL = ainda não escolheu → cai na /precos.
+        """alter table auth_accounts add column if not exists plan_selected_at timestamptz""",
+        # Backfill one-shot: contas criadas ANTES do lançamento do gate já estão
+        # no app; marca como "plano escolhido" pra não serem jogadas pra /precos.
+        # Idempotente: contas novas (created_at >= cutoff) nascem com
+        # plan_selected_at NULL e nunca são tocadas por este update, então rodar
+        # o init_db de novo num redeploy não desfaz o gate delas.
+        """
+        update auth_accounts
+           set plan_selected_at = coalesce(plan_expires_at, created_at)
+         where plan_selected_at is null
+           and created_at < timestamptz '2026-08-11 00:00:00+00'
+        """,
         """
         create table if not exists plan_trials (
           phone_hash text primary key,

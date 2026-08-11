@@ -21,11 +21,12 @@ from core.services.plan_limits import (
 )
 
 
-def _user(plan="free", expires=None, trial_started=None):
+def _user(plan="free", expires=None, trial_started=None, plan_selected=None):
     return {
         "plan": plan,
         "plan_expires_at": expires,
         "trial_started_at": trial_started,
+        "plan_selected_at": plan_selected,
     }
 
 
@@ -114,6 +115,37 @@ class TestTierResolution:
         _patch_user(monkeypatch, _user("free"))
         assert plan_service.get_plan_tier(1) == "free"
         assert plan_service.has_app_access(1) is True  # Grátis ENTRA no app
+
+
+# ─── Gate de escolha de plano no cadastro (2026-08-11) ───────────────────────
+
+class TestNeedsPlanSelection:
+    def test_cadastro_novo_sem_escolha_cai_na_precos(self, v2, monkeypatch):
+        # plan_selected_at None + Grátis = ainda não escolheu → gate ligado
+        _patch_user(monkeypatch, _user("free", plan_selected=None))
+        assert plan_service.needs_plan_selection(1) is True
+
+    def test_gratis_escolhido_libera(self, v2, monkeypatch):
+        _patch_user(monkeypatch, _user("free", plan_selected=PAST))
+        assert plan_service.needs_plan_selection(1) is False
+
+    def test_assinante_pago_ativo_nunca_trava(self, v2, monkeypatch):
+        # Pagou/entrou em trial mas o mark ainda não gravou → não trava mesmo assim
+        _patch_user(monkeypatch, _user("plus", FUTURE, plan_selected=None))
+        assert plan_service.needs_plan_selection(1) is False
+
+    def test_pago_expirado_sem_escolha_ainda_trava(self, v2, monkeypatch):
+        _patch_user(monkeypatch, _user("plus", PAST, plan_selected=None))
+        assert plan_service.needs_plan_selection(1) is True
+
+    def test_gate_dormente_com_v2_off(self, monkeypatch):
+        monkeypatch.setenv("PLANS_V2_ENABLED", "0")
+        _patch_user(monkeypatch, _user("free", plan_selected=None))
+        assert plan_service.needs_plan_selection(1) is False
+
+    def test_usuario_inexistente_nao_trava(self, v2, monkeypatch):
+        _patch_user(monkeypatch, None)
+        assert plan_service.needs_plan_selection(1) is False
 
     def test_trial_sem_assinatura_e_free(self, v2, monkeypatch):
         """Novo modelo: trial é assinatura Stripe. trial_started_at sozinho (sem

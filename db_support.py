@@ -509,7 +509,7 @@ def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
                        phone_status, phone_confirmed_at, whatsapp_verified_at,
                        engagement_opt_out, tip_email_opt_out, insight_email_opt_out,
                        whatsapp_updates_opt_out, stripe_customer_id, last_payment_status,
-                       trial_started_at
+                       trial_started_at, plan_selected_at
                 from auth_accounts
                 where user_id=%s
                 """,
@@ -587,6 +587,20 @@ def update_user_plan_impl(get_conn, user_id: int, plan: str, expires_at=None) ->
             cur.execute(
                 "update auth_accounts set plan = %s, plan_expires_at = %s where user_id = %s",
                 (plan, expires_at, user_id),
+            )
+        conn.commit()
+
+
+def mark_plan_selected_impl(get_conn, user_id: int) -> None:
+    """Marca que o usuário já escolheu um plano no cadastro (Grátis ou pago),
+    liberando o acesso ao dashboard. Idempotente: só grava na primeira vez
+    (where plan_selected_at is null) pra preservar o timestamp original."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts set plan_selected_at = now() "
+                "where user_id = %s and plan_selected_at is null",
+                (user_id,),
             )
         conn.commit()
 
