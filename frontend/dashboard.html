@@ -510,6 +510,16 @@
     <div id="goals-stats" class="stats-row"></div>
 
     <div id="goals-grid" class="mock-grid cols-2"></div>
+
+    <!-- Renda variável (ações/FIIs via Open Finance) — logo abaixo das caixinhas -->
+    <div class="mock-card" id="rv-card-goals" style="margin-top:18px;display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+        <h3 style="margin:0">Renda variável</h3>
+        <span style="font-size:.7rem;color:var(--text-3)">ações e FIIs · atualizado pela sua corretora</span>
+      </div>
+      <div id="rv-summary-goals" class="rv-summary"></div>
+      <div id="rv-list-goals"></div>
+    </div>
   </div>
 
   <div id="affiliate-view" class="dash-view">
@@ -715,6 +725,16 @@
           <span style="font-size:.7rem;color:var(--text-3)">clique em um investimento pra ver detalhes</span>
         </div>
         <div id="invest-list"></div>
+      </div>
+
+      <!-- 3b. Renda variável (ações/FIIs via Open Finance) — read-only -->
+      <div class="mock-card" id="rv-card" style="margin-bottom:14px;display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <h3 style="margin:0">Renda variável</h3>
+          <span style="font-size:.7rem;color:var(--text-3)">ações e FIIs · atualizado pela sua corretora</span>
+        </div>
+        <div id="rv-summary" class="rv-summary"></div>
+        <div id="rv-list"></div>
       </div>
 
       <!-- 4. Simulador líquido -->

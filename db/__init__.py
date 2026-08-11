@@ -223,6 +223,14 @@ from .open_finance import (
     update_pluggy_open_finance_item_status,
 )
 
+# ── Renda variável (ações/FIIs via Open Finance) ──────────────────────────────
+from .rv import (
+    list_rv_positions,
+    rv_portfolio_summary,
+    pluggy_rv_kind,
+    RV_KIND_LABELS,
+)
+
 # ── Agentes do Piggy ──────────────────────────────────────────────────────────
 from .agents import (
     AGENT_KINDS,
@@ -435,6 +443,7 @@ __all__ = [
     "list_pluggy_item_ids", "list_connections_needing_reconnect",
     "get_open_finance_connection_by_item_id", "save_open_finance_sync",
     "save_open_finance_investments",
+    "list_rv_positions", "rv_portfolio_summary", "pluggy_rv_kind", "RV_KIND_LABELS",
     "list_caixinha_candidates", "bind_pocket_to_caixinha",
     "list_banqueiro_pockets", "update_pocket_of_last_seen",
     "delete_open_finance_transactions", "classify_open_finance_launch",

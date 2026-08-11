@@ -6148,6 +6148,68 @@ function renderInvestmentsPanel(d) {
       </div>
     `;
   }).join("") : `<div class="empty">Nenhum investimento cadastrado.</div>`;
+
+  renderVariableIncomePanel(d);
+}
+
+// Renda variável (ações/FIIs) vinda do Open Finance — read-only, marcada a mercado.
+const RV_KIND_LABELS = { stock: "Ação", fii: "FII", etf: "ETF", bdr: "BDR", crypto: "Cripto", fund: "Fundo" };
+
+function fmtPnl(v, pct) {
+  const up = Number(v) >= 0;
+  const arrow = up ? "↑" : "↓";
+  const cls = up ? "pnl-up" : "pnl-down";
+  const pctTxt = (pct != null) ? ` (${(Number(pct) * 100).toFixed(2).replace(".", ",")}%)` : "";
+  return `<span class="${cls}">${arrow} ${fmt(Math.abs(Number(v)))}${pctTxt}</span>`;
+}
+
+function renderVariableIncomePanel(d) {
+  const pos = d.rv_positions || [];
+  const sum = d.rv_summary || {};
+
+  const summaryHtml = `
+    <div class="chips" style="margin-top:0;margin-bottom:6px">
+      <div class="chip"><div class="chip-lbl">Valor de mercado</div><div class="chip-val b">${fmt(sum.market_value || 0)}</div></div>
+      <div class="chip"><div class="chip-lbl">Investido</div><div class="chip-val">${fmt(sum.invested || 0)}</div></div>
+      <div class="chip"><div class="chip-lbl">Resultado</div><div class="chip-val">${fmtPnl(sum.pnl || 0)}</div></div>
+    </div>`;
+  const listHtml = pos.map(p => {
+    const day = (p.last_month_rate != null)
+      ? `<span class="mini-tag">${Number(p.last_month_rate).toFixed(2).replace(".", ",")}% no mês</span>` : "";
+    const qty = (p.quantity != null) ? `${Number(p.quantity).toLocaleString("pt-BR")} cotas` : "";
+    const px = (p.market_price != null) ? ` × ${fmt(p.market_price)}` : "";
+    return `
+      <div class="invest-card rv-card-item">
+        <div class="invest-head">
+          <div style="min-width:0">
+            <div class="invest-name">${esc(p.ticker || p.name)}
+              <span class="rv-badge">via corretora</span></div>
+            <div class="invest-meta">
+              <span class="mini-tag">${RV_KIND_LABELS[p.kind] || esc(p.kind)}</span>
+              ${qty ? `<span class="mini-tag">${qty}${px}</span>` : ""}
+              ${day}
+            </div>
+          </div>
+          <div style="text-align:right">
+            <div class="val b">${fmt(p.market_value)}</div>
+            <div style="font-size:.8rem;margin-top:2px">${fmtPnl(p.pnl, p.pnl_pct)}</div>
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+
+  // Dois lugares: aba de Investimentos ("") e página Caixinhas e metas ("-goals").
+  // Sem posições (ou plano sem OF) → esconde os cards (não polui quem não tem).
+  ["", "-goals"].forEach(suffix => {
+    const card = document.getElementById("rv-card" + suffix);
+    if (!card) return;
+    if (!pos.length) { card.style.display = "none"; return; }
+    card.style.display = "";
+    const elS = document.getElementById("rv-summary" + suffix);
+    if (elS) elS.innerHTML = summaryHtml;
+    const elL = document.getElementById("rv-list" + suffix);
+    if (elL) elL.innerHTML = listHtml;
+  });
 }
 
 function runInvestmentSimulator() {

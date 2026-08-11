@@ -66,6 +66,7 @@ from core.sessions import (
 from db import (
     accrue_all_pockets,
     accrue_all_investments,
+    list_rv_positions,
     create_investment_db,
     delete_investment,
     get_dashboard_market_rates,
@@ -292,20 +293,30 @@ async def _get_dashboard_current_state(user_id: int):
     now_mono = _startup_time.monotonic()
     cached = _dashboard_current_cache.get(int(user_id))
     if cached and now_mono - cached[0] < _DASHBOARD_CURRENT_CACHE_TTL_SECONDS:
-        return cached[1], cached[2], cached[3]
+        return cached[1], cached[2], cached[3], cached[4]
 
-    current_pockets, current_investments, market_rates = await asyncio.gather(
+    # rv_positions só LÊ open_finance_investments (não bate na rede) → cabe no gather
+    # sem estourar a latência do snapshot; a corretora é a fonte, o sync já atualizou.
+    current_pockets, current_investments, market_rates, rv_positions = await asyncio.gather(
         asyncio.to_thread(accrue_all_pockets, user_id),
         asyncio.to_thread(accrue_all_investments, user_id),
         asyncio.to_thread(get_dashboard_market_rates),
+        asyncio.to_thread(list_rv_positions, user_id),
     )
+    # Renda variável (ações/FIIs via OF) é feature paga (Essencial+). No Grátis o
+    # painel não recebe posições — a aba de investimentos já é gated, e assim o dado
+    # do banco nem trafega pra quem não tem o plano.
+    from core.services.plan_service import require_min_tier
+    if not require_min_tier(user_id, "essencial"):
+        rv_positions = []
     _dashboard_current_cache[int(user_id)] = (
         _startup_time.monotonic(),
         current_pockets,
         current_investments,
         market_rates,
+        rv_positions,
     )
-    return current_pockets, current_investments, market_rates
+    return current_pockets, current_investments, market_rates, rv_positions
 
 
 def _dashboard_launch_filter_sql(filter_type: str | None, query: str | None) -> tuple[list[str], list]:
@@ -367,7 +378,7 @@ async def get_financial_data(
     page = max(int(page or 1), 1)
     limit = max(min(int(limit or 25), 100), 1)
     offset = (page - 1) * limit
-    current_pockets, current_investments, market_rates = await _get_dashboard_current_state(user_id)
+    current_pockets, current_investments, market_rates, current_rv_positions = await _get_dashboard_current_state(user_id)
     launch_filter_clauses, launch_filter_params = _dashboard_launch_filter_sql(filter_type, query)
     launch_filter_sql = "".join(f"\n                  AND ({clause})" for clause in launch_filter_clauses)
 
@@ -381,6 +392,7 @@ async def get_financial_data(
 
     pockets = current_pockets
     investments = current_investments  # do cache
+    rv_positions = current_rv_positions  # renda variável (ações/FIIs via OF), do cache
 
     # Compras no crédito viram linhas virtuais com tipo='credito' no
     # histórico — só quando o filtro permitir (no filtro "all" ou sem filtro).
@@ -802,6 +814,12 @@ async def get_financial_data(
         "of_bank_count":      of_bank_count,    # nº de contas BANK conectadas (0 = sem banco)
         "pockets":            [dict(r) for r in pockets],
         "investments":        [dict(r) for r in investments],
+        "rv_positions":       rv_positions,  # ações/FIIs via Open Finance (já são dicts)
+        "rv_summary": {
+            "market_value": sum(p["market_value"] for p in rv_positions),
+            "invested":     sum(p["invested"] for p in rv_positions),
+            "pnl":          sum(p["pnl"] for p in rv_positions),
+        },
         "market_rates":       market_rates,
         "recent_launches":    [dict(r) for r in launches],
         "launches_pagination": {

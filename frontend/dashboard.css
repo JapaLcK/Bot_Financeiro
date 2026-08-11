@@ -1444,6 +1444,17 @@ body.light .mini-tag {
   background:linear-gradient(135deg, rgba(255,45,142,.1), rgba(199,24,107,.06));
   color:#5b21b6; border-color:rgba(255,45,142,.2);
 }
+/* Renda variável (ações/FIIs via Open Finance) */
+.pnl-up   { color:var(--green); font-weight:700; font-variant-numeric:tabular-nums; }
+.pnl-down { color:var(--red);   font-weight:700; font-variant-numeric:tabular-nums; }
+.rv-summary { margin-bottom:12px; }
+.rv-badge {
+  display:inline-flex; align-items:center; border-radius:6px; padding:1px 7px;
+  font-size:.6rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
+  background:rgba(0,240,120,.14); color:#00F078; border:1px solid rgba(0,240,120,.3);
+  margin-left:6px; vertical-align:middle;
+}
+body.light .rv-badge { background:rgba(0,180,90,.1); color:#0a7a44; border-color:rgba(0,180,90,.25); }
 .invest-head .val.b {
   font-size:1.1rem; font-weight:800; color:var(--text);
   font-variant-numeric:tabular-nums; letter-spacing:-.01em; white-space:nowrap;
