@@ -264,9 +264,11 @@ async def open_finance_connectors_route(request: Request, user_id: int):
     return {"ok": True, "connectors": banks}
 
 
-def _require_agents_beta(user_id: int) -> None:
-    from core.services.plan_service import agents_ui_enabled
-    if not agents_ui_enabled(user_id):
+def _require_caixinha_access(user_id: int) -> None:
+    # Caixinha (Open Finance) é feature paga — desacoplada do beta de agentes:
+    # qualquer plano pago (Essencial+) tem acesso à UI de vínculo, não só o beta.
+    from core.services.plan_service import require_min_tier
+    if not require_min_tier(user_id, "essencial"):
         raise HTTPException(status_code=404, detail="Feature indisponível.")
 
 
@@ -274,7 +276,7 @@ def _require_agents_beta(user_id: int) -> None:
 async def open_finance_caixinhas_route(request: Request, user_id: int):
     """Banqueiro: caixinhas OF detectadas + metas do usuário, pra montar o vínculo."""
     shared.authorize_dashboard_access(request, user_id)
-    await asyncio.to_thread(_require_agents_beta, user_id)
+    await asyncio.to_thread(_require_caixinha_access, user_id)
     from db import list_caixinha_candidates, list_pockets
 
     candidates = await asyncio.to_thread(list_caixinha_candidates, user_id)
@@ -302,7 +304,7 @@ class CaixinhaBindBody(BaseModel):
 async def open_finance_caixinha_bind_route(request: Request, user_id: int, body: CaixinhaBindBody):
     """Vincula (ou desvincula com of_investment_id=null) uma meta a uma caixinha OF."""
     shared.authorize_dashboard_access(request, user_id)
-    await asyncio.to_thread(_require_agents_beta, user_id)
+    await asyncio.to_thread(_require_caixinha_access, user_id)
     from db import bind_pocket_to_caixinha
 
     ok = await asyncio.to_thread(
