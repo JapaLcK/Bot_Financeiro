@@ -453,7 +453,7 @@ footer a:hover { color:var(--text); }
       <a class="stat-card" href="/app">
         <div class="stat-head"><span class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v3m0 4v3a1 1 0 0 1-1 1H5a2 2 0 0 1-2-2V5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></span>Saldo</div>
         <div class="bignum" id="stat-balance"><span class="sk" style="height:30px;width:120px"></span></div>
-        <div class="bignum-sub">Conta corrente</div>
+        <div class="bignum-sub" id="stat-balance-sub">Conta corrente</div>
       </a>
       <a class="stat-card" href="/app">
         <div class="stat-head"><span class="stat-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 17 13.5 8.5l-4 4L2 5"/><path d="M16 17h6v-6"/></svg></span>Gastos do mês</div>
@@ -719,8 +719,18 @@ function renderGreeting(snapshot, email, displayName) {
 
 /* ─── Render: stat cards ──────────────────────────────────────────────── */
 function renderStats(snapshot, history) {
-  // Saldo
-  document.getElementById("stat-balance").textContent = fmtBRL(snapshot.balance || 0);
+  // Saldo — espelha o Dashboard: Carteira (manual) + Bancos conectados (Open Finance).
+  // Antes mostrava só `balance`, ignorando `of_bank_balance`, e divergia do dashboard.
+  const carteira = Number(snapshot.balance || 0);
+  const ofBank   = Number(snapshot.of_bank_balance || 0);
+  const saldoAtual = carteira + ofBank;
+  document.getElementById("stat-balance").textContent = fmtBRL(saldoAtual);
+  const balSub = document.getElementById("stat-balance-sub");
+  if (balSub) {
+    balSub.textContent = (Number(snapshot.of_bank_count || 0) > 0)
+      ? `Carteira ${fmtBRL(carteira)} · Bancos ${fmtBRL(ofBank)}`
+      : "Conta corrente";
+  }
 
   // Gastos do mês + delta vs mês anterior
   const expense = snapshot.monthly_expense || 0;
