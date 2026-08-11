@@ -2265,19 +2265,38 @@ function _renderGoalsView(goals) {
   ).join("");
 }
 
+// Caixinha vinda do banco (Open Finance): saldo espelhado, sem rendimento interno.
+function _isOfPocket(p) { return p && (p.source === "open_finance" || p.of_investment_id != null); }
+// No Grátis (pós-trial) o OF não está ativo → a caixinha do banco fica congelada.
+function _isOfStale(p) { return _isOfPocket(p) && p.of_plan_active === false; }
+function _ofPocketBadge(p) {
+  if (!_isOfPocket(p)) return "";
+  return _isOfStale(p)
+    ? `<span class="rv-badge rv-badge-stale">banco desconectado</span>`
+    : `<span class="rv-badge">via banco</span>`;
+}
+
 function _renderPocketOnlyCard(p, idx = 0) {
   const emoji = p.emoji || "🐷";
   const color = p.color || "#FF2D8E";
+  const ofPocket = _isOfPocket(p);
+  const ofStale = _isOfStale(p);
+  const line1 = ofStale ? "🔒 Banco desconectado — reative pra atualizar"
+              : ofPocket ? "Sincronizada com seu banco"
+              : "Caixinha sem meta — depósitos livres";
+  const line2 = ofStale ? "Reative seu banco (plano pago) pra o saldo voltar a atualizar"
+              : ofPocket ? "Saldo atualizado pela corretora/banco"
+              : (p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate));
   return `
-    <div class="goal-card" style="animation-delay:${idx * 80}ms;cursor:pointer" onclick="openPocketHistory('${escapeJsString(p.name)}')">
+    <div class="goal-card${ofStale ? " of-stale" : ""}" style="animation-delay:${idx * 80}ms;cursor:pointer" onclick="openPocketHistory('${escapeJsString(p.name)}')">
       <div class="goal-ring">
         <div style="width:78px;height:78px;border-radius:50%;background:${color}22;display:flex;align-items:center;justify-content:center;font-size:1.6rem">${phIcon(emoji)}</div>
       </div>
       <div class="goal-info">
-        <div class="goal-name">${phIcon(emoji)} ${escapeHtmlSafe(p.name)}</div>
+        <div class="goal-name">${phIcon(emoji)} ${escapeHtmlSafe(p.name)} ${_ofPocketBadge(p)}</div>
         <div class="goal-amt">${_fmtBRL(p.balance || 0)} guardado</div>
-        <div class="goal-deadline" style="color:var(--text-3)">Caixinha sem meta — depósitos livres</div>
-        <div class="goal-deadline" style="color:var(--text-3)">${p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate)}</div>
+        <div class="goal-deadline" style="color:var(--text-3)">${line1}</div>
+        <div class="goal-deadline" style="color:var(--text-3)">${line2}</div>
         ${p.description ? `<div class="goal-deadline" style="color:var(--text-3);font-style:italic">${escapeHtmlSafe(p.description)}</div>` : ""}
       </div>
     </div>
@@ -6148,6 +6167,79 @@ function renderInvestmentsPanel(d) {
       </div>
     `;
   }).join("") : `<div class="empty">Nenhum investimento cadastrado.</div>`;
+
+  renderVariableIncomePanel(d);
+}
+
+// Renda variável (ações/FIIs) vinda do Open Finance — read-only, marcada a mercado.
+const RV_KIND_LABELS = { stock: "Ação", fii: "FII", etf: "ETF", bdr: "BDR", crypto: "Cripto", fund: "Fundo" };
+
+function fmtPnl(v, pct) {
+  const up = Number(v) >= 0;
+  const arrow = up ? "↑" : "↓";
+  const cls = up ? "pnl-up" : "pnl-down";
+  const pctTxt = (pct != null) ? ` (${(Number(pct) * 100).toFixed(2).replace(".", ",")}%)` : "";
+  return `<span class="${cls}">${arrow} ${fmt(Math.abs(Number(v)))}${pctTxt}</span>`;
+}
+
+function renderVariableIncomePanel(d) {
+  const pos = d.rv_positions || [];
+  const sum = d.rv_summary || {};
+
+  const summaryHtml = `
+    <div class="chips" style="margin-top:0;margin-bottom:6px">
+      <div class="chip"><div class="chip-lbl">Valor de mercado</div><div class="chip-val b">${fmt(sum.market_value || 0)}</div></div>
+      <div class="chip"><div class="chip-lbl">Investido</div><div class="chip-val">${fmt(sum.invested || 0)}</div></div>
+      <div class="chip"><div class="chip-lbl">Resultado</div><div class="chip-val">${fmtPnl(sum.pnl || 0)}</div></div>
+    </div>`;
+  const listHtml = pos.map(p => {
+    const day = (p.last_month_rate != null)
+      ? `<span class="mini-tag">${Number(p.last_month_rate).toFixed(2).replace(".", ",")}% no mês</span>` : "";
+    const qty = (p.quantity != null) ? `${Number(p.quantity).toLocaleString("pt-BR")} cotas` : "";
+    const px = (p.market_price != null) ? ` × ${fmt(p.market_price)}` : "";
+    return `
+      <div class="invest-card rv-card-item">
+        <div class="invest-head">
+          <div style="min-width:0">
+            <div class="invest-name">${esc(p.ticker || p.name)}
+              <span class="rv-badge">via corretora</span></div>
+            <div class="invest-meta">
+              <span class="mini-tag">${RV_KIND_LABELS[p.kind] || esc(p.kind)}</span>
+              ${qty ? `<span class="mini-tag">${qty}${px}</span>` : ""}
+              ${day}
+            </div>
+          </div>
+          <div style="text-align:right">
+            <div class="val b">${fmt(p.market_value)}</div>
+            <div style="font-size:.8rem;margin-top:2px">${fmtPnl(p.pnl, p.pnl_pct)}</div>
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+
+  // 1) Card na aba de Investimentos: some quando não há posições.
+  const card = document.getElementById("rv-card");
+  if (card) {
+    if (!pos.length) {
+      card.style.display = "none";
+    } else {
+      card.style.display = "";
+      const s = document.getElementById("rv-summary"); if (s) s.innerHTML = summaryHtml;
+      const l = document.getElementById("rv-list"); if (l) l.innerHTML = listHtml;
+    }
+  }
+
+  // 2) Parte dedicada na Visão Geral (home): some quando não há posições.
+  const ov = document.getElementById("rv-overview");
+  if (ov) {
+    if (!pos.length) {
+      ov.style.display = "none";
+    } else {
+      ov.style.display = "";
+      const os = document.getElementById("rv-overview-summary"); if (os) os.innerHTML = summaryHtml;
+      const ol = document.getElementById("rv-overview-list"); if (ol) ol.innerHTML = listHtml;
+    }
+  }
 }
 
 function runInvestmentSimulator() {

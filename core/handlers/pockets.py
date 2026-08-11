@@ -84,6 +84,8 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
     except LookupError:
         return f"Caixinha **{pocket_name}** não encontrada. Use *criar caixinha {pocket_name}*."
     except ValueError as e:
+        if "OF_POCKET_READONLY" in str(e):
+            return "Essa caixinha é sincronizada com seu banco — mova o dinheiro pelo app do banco."
         if "INSUFFICIENT_ACCOUNT" in str(e):
             return "Saldo insuficiente na conta para esse depósito."
         return "Valor inválido."
@@ -172,6 +174,8 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
         except LookupError:
             return f"Caixinha **{pocket_name}** não encontrada. Use *listar caixinhas* para ver as disponíveis."
         except ValueError as e:
+            if "OF_POCKET_READONLY" in str(e):
+                return "Essa caixinha é sincronizada com seu banco — mova o dinheiro pelo app do banco."
             if "INSUFFICIENT_POCKET" in str(e):
                 return f"A caixinha **{pocket_name}** já está zerada."
             return "Não consegui sacar."
@@ -190,6 +194,8 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
     except LookupError:
         return f"Caixinha **{pocket_name}** não encontrada. Use *listar caixinhas* para ver as disponíveis."
     except ValueError as e:
+        if "OF_POCKET_READONLY" in str(e):
+            return "Essa caixinha é sincronizada com seu banco — mova o dinheiro pelo app do banco."
         if "INSUFFICIENT_POCKET" in str(e):
             return f"Saldo insuficiente na caixinha **{pocket_name}**."
         return "Valor inválido."

@@ -606,15 +606,17 @@ def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int 
 
 
 def list_banqueiro_pockets(user_id: int) -> list[dict]:
-    """Metas vinculadas a uma caixinha OF, com o saldo atual da caixinha e o último
-    saldo visto pelo Banqueiro. Fonte do detector (delta = aporte novo)."""
+    """Caixinhas vinculadas a uma caixinha OF, com saldo e RENDIMENTO acumulado atuais
+    (do banco) + os baselines já contabilizados pelo Banqueiro. Fonte do detector:
+    delta de saldo = aporte + rendimento; `of_profit` separa os dois."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select p.id as pocket_id, p.name, p.target_amount,
-                       p.of_last_seen_balance, p.of_investment_id,
-                       i.balance as of_balance
+                select p.id as pocket_id, p.name, p.emoji, p.target_amount, p.target_date,
+                       p.of_last_seen_balance, p.of_last_seen_profit, p.of_investment_id,
+                       i.balance as of_balance,
+                       nullif(i.raw->>'amountProfit', '')::numeric as of_profit
                 from pockets p
                 join open_finance_investments i on i.id = p.of_investment_id
                 where p.user_id = %s and p.of_investment_id is not null
@@ -624,15 +626,156 @@ def list_banqueiro_pockets(user_id: int) -> list[dict]:
             return [dict(r) for r in (cur.fetchall() or [])]
 
 
-def update_pocket_of_last_seen(pocket_id: int, balance) -> None:
-    """Atualiza o saldo já contabilizado pelo Banqueiro (depois de registrar aporte)."""
+def banqueiro_pocket_pace(user_id: int, pocket_id: int, days: int = 90) -> float:
+    """Ritmo de aporte da caixinha OF (R$/mês) pelos aportes que o Banqueiro já
+    detectou. Caixinha OF não gera lançamento deposito_caixinha, então o histórico
+    vem dos eventos (cada evento carrega um array `moves` por caixinha — funciona
+    tanto pro evento único quanto pro resumo consolidado de várias caixinhas)."""
+    months = max(days / 30.0, 1.0)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "update pockets set of_last_seen_balance=%s where id=%s",
-                (balance, pocket_id),
+                """
+                select coalesce(sum((m->>'aporte')::numeric), 0) as net
+                from agent_events e,
+                     jsonb_array_elements(coalesce(e.payload->'moves', '[]'::jsonb)) m
+                where e.user_id = %s
+                  and e.kind = 'cofre'
+                  and (m->>'pocket_id')::bigint = %s
+                  and e.fired_at >= now() - make_interval(days => %s)
+                """,
+                (user_id, pocket_id, days),
             )
+            net = float((cur.fetchone() or {}).get("net") or 0)
+    return net / months
+
+
+def update_pocket_of_last_seen(pocket_id: int, balance, profit=None) -> None:
+    """Atualiza os baselines já contabilizados pelo Banqueiro (saldo e, opcionalmente,
+    rendimento acumulado) depois de processar a caixinha."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if profit is None:
+                cur.execute(
+                    "update pockets set of_last_seen_balance=%s where id=%s",
+                    (balance, pocket_id),
+                )
+            else:
+                cur.execute(
+                    "update pockets set of_last_seen_balance=%s, of_last_seen_profit=%s where id=%s",
+                    (balance, profit, pocket_id),
+                )
         conn.commit()
+
+
+# Regra de auto-import de caixinha: só investimentos com CARA de caixinha (nome ~
+# reserva/objetivo/cofrinho). Um CDB comum é investimento, não meta — não vira pocket
+# (evita "caixinha fantasma"). Decisão de produto 2026-08-11.
+_CAIXINHA_NAME_PATTERNS = ["%caixinha%", "%cofrinho%", "%reserva%", "%objetivo%", "%cofre%"]
+
+
+def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
+    """Espelha as caixinhas do Open Finance como caixinhas do Pig. Idempotente.
+
+    1. Auto-cria um pocket pra cada caixinha OF (com cara de caixinha) ainda não
+       vinculada — `source='open_finance'`, read-only, juros interno OFF.
+    2. Dedup: se já existe um pocket de mesmo nome não vinculado, VINCULA nele em
+       vez de duplicar.
+    3. Espelha o saldo do banco (`open_finance_investments.balance`) em TODAS as
+       caixinhas vinculadas (auto-criadas e vinculadas na mão).
+
+    NÃO mexe em `of_last_seen_balance` (baseline do Banqueiro) — o detector de aporte
+    continua funcionando sobre o delta como antes.
+    """
+    created = linked = mirrored = 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # 1. caixinhas OF desta conexão com cara de caixinha
+            cur.execute(
+                """
+                select i.id as of_id, i.name, coalesce(i.balance, 0) as balance,
+                       nullif(i.raw->>'amountProfit', '')::numeric as profit
+                from open_finance_investments i
+                where i.connection_id = %s
+                  and i.name ilike any (%s)
+                """,
+                (connection_id, _CAIXINHA_NAME_PATTERNS),
+            )
+            of_caixinhas = [dict(r) for r in (cur.fetchall() or [])]
+
+            for oc in of_caixinhas:
+                of_id = oc["of_id"]
+                name = (oc["name"] or "Caixinha").strip()
+                bal = oc["balance"]
+                profit = oc["profit"]  # baseline de rendimento (amountProfit), p/ o Banqueiro
+
+                # já vinculada a algum pocket deste user? nada a fazer
+                cur.execute(
+                    "select 1 from pockets where user_id=%s and of_investment_id=%s limit 1",
+                    (user_id, of_id),
+                )
+                if cur.fetchone():
+                    continue
+
+                # dedup: pocket de mesmo nome, ainda sem vínculo → vincula nele
+                cur.execute(
+                    "select id from pockets where user_id=%s and lower(name)=lower(%s) "
+                    "and of_investment_id is null limit 1",
+                    (user_id, name),
+                )
+                same = cur.fetchone()
+                if same:
+                    cur.execute(
+                        "update pockets set of_investment_id=%s, of_last_seen_balance=%s, "
+                        "of_last_seen_profit=%s, balance=%s, interest_enabled=false "
+                        "where id=%s and user_id=%s",
+                        (of_id, bal, profit, bal, same["id"], user_id),
+                    )
+                    linked += 1
+                    continue
+
+                # cria novo — resolve colisão de nome (unique(user_id,name)) com sufixo
+                new_name = name
+                suffix = 0
+                while True:
+                    cur.execute(
+                        "select 1 from pockets where user_id=%s and lower(name)=lower(%s)",
+                        (user_id, new_name),
+                    )
+                    if not cur.fetchone():
+                        break
+                    suffix += 1
+                    new_name = f"{name} (banco)" if suffix == 1 else f"{name} (banco {suffix})"
+                cur.execute(
+                    """
+                    insert into pockets(
+                        user_id, name, balance, source, of_investment_id,
+                        of_last_seen_balance, of_last_seen_profit,
+                        interest_enabled, interest_rate, interest_period,
+                        interest_tax_profile, last_interest_date
+                    )
+                    values (%s,%s,%s,'open_finance',%s,%s,%s,false,1,'cdi','regressive_ir_iof',current_date)
+                    """,
+                    (user_id, new_name, bal, of_id, bal, profit),
+                )
+                created += 1
+
+            # 3. espelha o saldo do banco em todas as caixinhas vinculadas (auto + manual)
+            cur.execute(
+                """
+                update pockets p
+                   set balance = i.balance, interest_enabled = false
+                  from open_finance_investments i
+                 where p.of_investment_id = i.id
+                   and p.user_id = %s
+                   and i.balance is not null
+                   and p.balance is distinct from i.balance
+                """,
+                (user_id,),
+            )
+            mirrored = cur.rowcount
+        conn.commit()
+    return {"caixinhas_created": created, "caixinhas_linked": linked, "caixinhas_mirrored": mirrored}
 
 
 def get_open_finance_connection_by_item_id(provider_item_id: str, provider: str = "pluggy") -> dict | None:

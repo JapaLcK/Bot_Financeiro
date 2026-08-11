@@ -486,59 +486,147 @@ def run_detetive_once(today: date | None = None, user_id: int | None = None) -> 
 
 # ── Banqueiro (cofre): aporte real na caixinha → progresso da meta ────────────
 
-COFRE_MIN_APORTE = float(os.getenv("COFRE_MIN_APORTE", "20"))  # ignora drift de juros
+COFRE_MIN_APORTE = float(os.getenv("COFRE_MIN_APORTE", "20"))   # ignora drift de juros
+_RESERVA_TOKENS = ("reserva", "emerg", "colch")                # caixinha de reserva
+_RESERVE_MONTHS = int(os.getenv("COFRE_RESERVE_MONTHS", "6"))   # meses de gasto p/ reserva
+
+
+def _is_reserva(name: str) -> bool:
+    n = (name or "").lower()
+    return any(t in n for t in _RESERVA_TOKENS)
+
+
+def _avg_monthly_expense(cur, user_id: int, days: int = 90) -> float:
+    """Gasto médio mensal (últimos N dias) — base pra sugerir meta de reserva."""
+    cur.execute(
+        """
+        select coalesce(sum(valor), 0) as saiu
+        from launches
+        where user_id=%s and tipo in ('despesa','saida')
+          and is_internal_movement=false
+          and criado_em >= now() - make_interval(days => %s)
+        """,
+        (user_id, days),
+    )
+    saiu = float((cur.fetchone() or {}).get("saiu") or 0)
+    return round(saiu / max(days / 30.0, 1.0), 2)
+
+
+def _pct(cur_bal: float, target: float) -> int:
+    return int(round(cur_bal / target * 100)) if target and target > 0 else 0
+
+
+def _ucfirst(s: str) -> str:
+    return (s[0].upper() + s[1:]) if s else s
 
 
 def _cofre_detect_for_user(agent: dict[str, Any], today: date) -> int:
-    """Pra cada meta vinculada a uma caixinha OF, detecta aporte novo pelo delta do
-    saldo (open_finance_investments.balance) contra o último saldo visto. Absorve o
-    saldo a cada rodada pra o rendimento (juros) não acumular e virar falso aporte.
-    Só conta aporte >= COFRE_MIN_APORTE. Baseline = saldo no momento do vínculo."""
-    from db import list_banqueiro_pockets, record_agent_event, update_pocket_of_last_seen
+    """Banqueiro v2: pra cada caixinha vinculada ao banco (OF), separa APORTE de
+    RENDIMENTO (via amountProfit), detecta SAÍDA, comenta progresso/ritmo nas COM meta
+    e sugere meta nas SEM meta; e quando várias se mexem numa rodada, junta num RESUMO.
+    Absorve os baselines (saldo + rendimento) a cada rodada."""
+    from db import (list_banqueiro_pockets, banqueiro_pocket_pace,
+                    record_agent_event, update_pocket_of_last_seen)
+    from db.connection import get_conn
 
     user_id = agent["user_id"]
-    fired = 0
+    moves: list[dict[str, Any]] = []
+    avg_expense: float | None = None   # calculado sob demanda (só se houver caixinha sem meta)
+
     for p in list_banqueiro_pockets(user_id):
         cur_bal = float(p["of_balance"] or 0)
-        last_raw = p["of_last_seen_balance"]
-        last = float(last_raw) if last_raw is not None else cur_bal
-        delta = round(cur_bal - last, 2)
+        last_bal = float(p["of_last_seen_balance"]) if p["of_last_seen_balance"] is not None else cur_bal
+        cur_profit = float(p["of_profit"]) if p["of_profit"] is not None else None
+        last_profit = float(p["of_last_seen_profit"]) if p["of_last_seen_profit"] is not None else None
 
-        if delta >= COFRE_MIN_APORTE:
-            nome = p["name"]
-            target = float(p["target_amount"]) if p["target_amount"] is not None else None
-            if target and cur_bal >= target:
-                titulo = f"Meta batida: {nome} 🎉"
-                msg = (f"🎯 Aporte de {_fmt_brl(delta)} na caixinha {nome} — e você "
-                       f"FECHOU a meta de {_fmt_brl(target)}! Parabéns, porquinho orgulhoso.")
-            elif target:
-                falta = round(max(target - cur_bal, 0.0), 2)
-                titulo = f"Aporte na {nome}: faltam {_fmt_brl(falta)}"
-                msg = (f"🎯 Detectei {_fmt_brl(delta)} entrando na sua caixinha {nome}. "
-                       f"Já são {_fmt_brl(cur_bal)} — faltam {_fmt_brl(falta)} pra meta de "
-                       f"{_fmt_brl(target)}. Tá voando!")
+        balance_delta = round(cur_bal - last_bal, 2)
+        # rendimento desde a última rodada (só quando o banco reporta amountProfit)
+        rendimento = round(max(cur_profit - last_profit, 0.0), 2) \
+            if (cur_profit is not None and last_profit is not None) else 0.0
+        net = round(balance_delta - rendimento, 2)   # aporte líquido (tira o rendimento)
+
+        target = float(p["target_amount"]) if p["target_amount"] is not None else None
+        nome = p["name"]
+        frag = None
+
+        if net >= COFRE_MIN_APORTE:
+            # A: APORTE (você guardou), separado do rendimento
+            frag = f"você guardou {_fmt_brl(net)} na {nome}"
+            if rendimento >= 1:
+                frag += f" (e ela rendeu {_fmt_brl(rendimento)})"
+            if target is not None:
+                # C: COM meta → progresso + ritmo/projeção
+                if cur_bal >= target:
+                    frag += f" — e FECHOU a meta de {_fmt_brl(target)}! 🎉"
+                else:
+                    falta = round(target - cur_bal, 2)
+                    frag += f" — já são {_fmt_brl(cur_bal)} ({_pct(cur_bal, target)}% da meta), faltam {_fmt_brl(falta)}"
+                    pace = banqueiro_pocket_pace(user_id, p["pocket_id"])
+                    if pace >= COFRE_MIN_APORTE:
+                        meses = max(1, round(falta / pace))
+                        frag += f". No seu ritmo (~{_fmt_brl(pace)}/mês) chega em ~{meses} {'mês' if meses == 1 else 'meses'}"
             else:
-                titulo = f"Aporte detectado: {nome}"
-                msg = (f"🎯 Detectei {_fmt_brl(delta)} entrando na sua caixinha {nome}. "
-                       f"Total guardado: {_fmt_brl(cur_bal)}. Define uma meta pra eu "
-                       f"acompanhar quanto falta.")
-            ok = record_agent_event(
-                agent["agent_id"], user_id, "cofre",
-                dedupe_key=f"aporte:{p['pocket_id']}:{cur_bal:.2f}",
-                payload={
-                    "tipo": "aporte", "pocket_id": p["pocket_id"], "meta": nome,
-                    "aporte": delta, "saldo": round(cur_bal, 2), "target": target,
-                    "titulo": titulo, "mensagem": msg,
-                },
-                valor_impacto=delta,
-            )
-            fired += 1 if ok else 0
+                # D: SEM meta → sugere uma meta (reserva usa gasto médio)
+                if avg_expense is None:
+                    with get_conn() as conn:
+                        with conn.cursor() as cur:
+                            avg_expense = _avg_monthly_expense(cur, user_id)
+                if _is_reserva(nome) and avg_expense > 0:
+                    alvo = round(avg_expense * _RESERVE_MONTHS, -1)
+                    frag += (f" — total {_fmt_brl(cur_bal)}. Reserva ideal são ~{_RESERVE_MONTHS} meses "
+                             f"de gasto (~{_fmt_brl(alvo)}). Quer que eu marque essa meta?")
+                else:
+                    frag += f" — total {_fmt_brl(cur_bal)}. Define uma meta que eu te acompanho quanto falta."
+            moves.append({"pocket_id": p["pocket_id"], "name": nome, "tipo": "aporte",
+                          "aporte": net, "rendimento": rendimento, "cur_bal": round(cur_bal, 2), "frag": frag})
 
-        # Absorve o saldo atual (aporte já contado, ou juros/resgate) pra o próximo
-        # delta partir daqui — evita juros acumularem e dispararem falso aporte.
-        if last_raw is None or float(last_raw) != cur_bal:
-            update_pocket_of_last_seen(p["pocket_id"], cur_bal)
-    return fired
+        elif net <= -COFRE_MIN_APORTE:
+            # B: SAÍDA (você tirou), tom gentil
+            saque = -net
+            frag = f"você tirou {_fmt_brl(saque)} da {nome} — agora tem {_fmt_brl(cur_bal)}"
+            if _is_reserva(nome):
+                frag += ". Reserva é pra emergência — se foi só um remaneja, de boa 💚"
+            moves.append({"pocket_id": p["pocket_id"], "name": nome, "tipo": "saque",
+                          "aporte": net, "rendimento": rendimento, "cur_bal": round(cur_bal, 2), "frag": frag})
+
+        # Absorve baselines (saldo + rendimento) pra o próximo delta partir daqui.
+        new_profit = cur_profit if cur_profit is not None else last_profit
+        if (last_bal != cur_bal) or (last_profit != new_profit):
+            update_pocket_of_last_seen(p["pocket_id"], cur_bal, new_profit)
+
+    if not moves:
+        return 0
+
+    total_aporte = round(sum(m["aporte"] for m in moves if m["aporte"] > 0), 2)
+    total_rend = round(sum(m["rendimento"] for m in moves), 2)
+
+    if len(moves) == 1:
+        m0 = moves[0]
+        emoji = "🎯" if m0["tipo"] == "aporte" else "👀"
+        titulo = f"Aporte na {m0['name']}" if m0["tipo"] == "aporte" else f"Saída da {m0['name']}"
+        mensagem = f"{emoji} {_ucfirst(m0['frag'])}."
+    else:
+        # F: RESUMO consolidado quando várias caixinhas se mexem na mesma rodada
+        titulo = "Suas caixinhas se mexeram"
+        linhas = "\n".join(f"• {_ucfirst(m['frag'])}." for m in moves)
+        mensagem = f"🐷 Resumo das suas caixinhas:\n{linhas}"
+        if total_aporte > 0:
+            mensagem += f"\n\nNo total você guardou {_fmt_brl(total_aporte)}"
+            mensagem += f" e elas renderam {_fmt_brl(total_rend)}." if total_rend >= 1 else "."
+
+    sig = "|".join(f"{m['pocket_id']}:{m['aporte']:.2f}" for m in sorted(moves, key=lambda x: x["pocket_id"]))
+    ok = record_agent_event(
+        agent["agent_id"], user_id, "cofre",
+        dedupe_key=f"cofre:{sig}",
+        payload={
+            "tipo": "resumo" if len(moves) > 1 else moves[0]["tipo"],
+            "moves": [{k: m[k] for k in ("pocket_id", "name", "aporte", "rendimento", "cur_bal")} for m in moves],
+            "total_aporte": total_aporte, "total_rendimento": total_rend,
+            "titulo": titulo, "mensagem": mensagem,
+        },
+        valor_impacto=total_aporte,
+    )
+    return 1 if ok else 0
 
 
 def run_cofre_once(today: date | None = None, user_id: int | None = None) -> dict:

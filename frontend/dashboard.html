@@ -185,6 +185,19 @@
     <div class="card"><div class="sk sk-h2"></div><div class="sk sk-line w80"></div><div class="sk sk-line w60"></div></div>
   </div>
 
+  <!-- Renda variável — parte dedicada na Visão Geral (resumo + link pra página completa) -->
+  <div class="mock-card" id="rv-overview" style="display:none;margin-top:24px;margin-bottom:18px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+      <div>
+        <h3 style="margin:0">Renda variável</h3>
+        <span style="font-size:.72rem;color:var(--text-3)">ações e FIIs · atualizado pela sua corretora</span>
+      </div>
+      <button class="mock-cta" onclick="navigateTo('investments')">Ver tudo <i class="ph ph-arrow-right" aria-hidden="true"></i></button>
+    </div>
+    <div id="rv-overview-summary" class="rv-summary"></div>
+    <div id="rv-overview-list"></div>
+  </div>
+
   <p class="section-title" id="charts-title" style="display:none">Análise do Mês</p>
   <div class="grid charts-grid" id="charts-grid" style="display:none">
     <div class="card">
@@ -715,6 +728,16 @@
           <span style="font-size:.7rem;color:var(--text-3)">clique em um investimento pra ver detalhes</span>
         </div>
         <div id="invest-list"></div>
+      </div>
+
+      <!-- 3b. Renda variável (ações/FIIs via Open Finance) — read-only -->
+      <div class="mock-card" id="rv-card" style="margin-bottom:14px;display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <h3 style="margin:0">Renda variável</h3>
+          <span style="font-size:.7rem;color:var(--text-3)">ações e FIIs · atualizado pela sua corretora</span>
+        </div>
+        <div id="rv-summary" class="rv-summary"></div>
+        <div id="rv-list"></div>
       </div>
 
       <!-- 4. Simulador líquido -->
