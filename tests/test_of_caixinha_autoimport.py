@@ -90,6 +90,35 @@ def test_dedup_binds_existing_manual_pocket(user_id):
     assert float(pk["Reserva"]["balance"]) == 777.0
 
 
+def test_zero_balance_caixinha_not_imported(user_id):
+    # Reserva/fundo com saldo 0 (ex.: Nubank "Reserva Planejada" vazia) não vira caixinha.
+    conn_id = _seed_connection(user_id)
+    _save(conn_id, [{"id": "cxz", "name": "Reserva Planejada", "type": "MUTUAL_FUND",
+                     "subtype": "INVESTMENT_FUND", "balance": 0.0}])
+    res = db.sync_open_finance_caixinhas(conn_id, user_id)
+    assert res["caixinhas_created"] == 0
+    assert "Reserva Planejada" not in _pockets(user_id)
+
+
+def test_phantom_zero_of_caixinha_is_cleaned(user_id):
+    # Fantasma já criada (saldo 0) é removida pela auto-cura no próximo sync.
+    conn_id = _seed_connection(user_id)
+    _save(conn_id, [{"id": "cxp", "name": "Reserva X", "type": "MUTUAL_FUND",
+                     "subtype": "INVESTMENT_FUND", "balance": 0.0}])
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select id from open_finance_investments where connection_id=%s and provider_investment_id='cxp'", (conn_id,))
+            of_id = cur.fetchone()["id"]
+            cur.execute(
+                "insert into pockets(user_id,name,balance,source,of_investment_id,interest_enabled) "
+                "values(%s,'Reserva X',0,'open_finance',%s,false)", (user_id, of_id))
+        conn.commit()
+    assert "Reserva X" in _pockets(user_id)          # existe antes
+    res = db.sync_open_finance_caixinhas(conn_id, user_id)
+    assert res["caixinhas_cleaned"] == 1
+    assert "Reserva X" not in _pockets(user_id)      # removida
+
+
 def test_of_pocket_is_readonly_for_deposit_and_withdraw(user_id):
     # Caixinha do banco (OF) não aceita aporte/resgate pelo Pig — read-only.
     conn_id = _seed_connection(user_id)

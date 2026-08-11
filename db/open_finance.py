@@ -690,7 +690,9 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
     created = linked = mirrored = 0
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # 1. caixinhas OF desta conexão com cara de caixinha
+            # 1. caixinhas OF desta conexão com cara de caixinha E SALDO > 0.
+            # Saldo 0 = fundo/reserva vazia (ex.: Nubank "Reserva Planejada" que o
+            # Pluggy devolve zerado) — não vira caixinha fantasma.
             cur.execute(
                 """
                 select i.id as of_id, i.name, coalesce(i.balance, 0) as balance,
@@ -698,6 +700,7 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
                 from open_finance_investments i
                 where i.connection_id = %s
                   and i.name ilike any (%s)
+                  and coalesce(i.balance, 0) > 0
                 """,
                 (connection_id, _CAIXINHA_NAME_PATTERNS),
             )
@@ -774,8 +777,25 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
                 (user_id,),
             )
             mirrored = cur.rowcount
+
+            # 4. Auto-cura: remove caixinhas AUTO-CRIADAS (source='open_finance') cujo
+            # investimento do banco está zerado/sumiu — limpa as fantasmas já criadas
+            # (ex.: "Reserva Planejada" do Nubank que veio com saldo 0).
+            cur.execute(
+                """
+                delete from pockets p
+                 using open_finance_investments i
+                 where p.of_investment_id = i.id
+                   and p.user_id = %s
+                   and p.source = 'open_finance'
+                   and coalesce(i.balance, 0) <= 0
+                """,
+                (user_id,),
+            )
+            cleaned = cur.rowcount
         conn.commit()
-    return {"caixinhas_created": created, "caixinhas_linked": linked, "caixinhas_mirrored": mirrored}
+    return {"caixinhas_created": created, "caixinhas_linked": linked,
+            "caixinhas_mirrored": mirrored, "caixinhas_cleaned": cleaned}
 
 
 def get_open_finance_connection_by_item_id(provider_item_id: str, provider: str = "pluggy") -> dict | None:
