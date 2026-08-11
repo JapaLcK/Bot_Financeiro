@@ -76,11 +76,11 @@ def create_data_export_token(
             """
             insert into data_export_tokens
               (token, user_id, expires_at, request_ip, request_user_agent,
-               delivered_to_email, delivered_to_email_enc)
-            values (%s, %s, %s, %s, %s, %s, %s)
+               delivered_to_email_enc)
+            values (%s, %s, %s, %s, %s, %s)
             """,
             (token, user_id, expires_at, request_ip, request_user_agent,
-             delivered_to_email, encrypt_pii_optional(delivered_to_email)),
+             encrypt_pii_optional(delivered_to_email)),
         )
         conn.commit()
 
