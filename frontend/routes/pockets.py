@@ -313,6 +313,7 @@ def _pocket_move_error(exc: ValueError) -> HTTPException:
         "AMOUNT_INVALID": "O valor precisa ser maior que zero.",
         "INSUFFICIENT_ACCOUNT": "Saldo da conta principal não cobre esse valor.",
         "INSUFFICIENT_POCKET": "A caixinha não tem esse valor disponível.",
+        "OF_POCKET_READONLY": "Essa caixinha é sincronizada com seu banco — mova o dinheiro pelo app do banco.",
     }
     return HTTPException(status_code=400, detail=mapping.get(msg, msg))
 

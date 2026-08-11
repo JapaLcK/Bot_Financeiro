@@ -4,6 +4,8 @@ Cobre: auto-create só pra investimento com CARA de caixinha (CDB comum fica for
 dedup por nome, espelho do saldo do banco, e o guard que impede o accrual de pocket
 tocar no saldo espelhado.
 """
+import pytest
+
 import db
 from db import get_conn
 from db.pockets import accrue_all_pockets
@@ -86,6 +88,24 @@ def test_dedup_binds_existing_manual_pocket(user_id):
     assert len(names) == 1                         # uma só (sem duplicata)
     assert pk["Reserva"]["of_investment_id"] is not None
     assert float(pk["Reserva"]["balance"]) == 777.0
+
+
+def test_of_pocket_is_readonly_for_deposit_and_withdraw(user_id):
+    # Caixinha do banco (OF) não aceita aporte/resgate pelo Pig — read-only.
+    conn_id = _seed_connection(user_id)
+    _save(conn_id, [{"id": "cx-ro", "name": "Caixinha Viagem", "type": "FIXED_INCOME",
+                     "subtype": "CDB", "balance": 500.0}])
+    db.sync_open_finance_caixinhas(conn_id, user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("update accounts set balance=1000 where user_id=%s", (user_id,))
+            if cur.rowcount == 0:
+                cur.execute("insert into accounts(user_id,name,balance) values(%s,'Carteira',1000)", (user_id,))
+        conn.commit()
+    with pytest.raises(ValueError, match="OF_POCKET_READONLY"):
+        db.pocket_deposit_from_account(user_id, "Caixinha Viagem", 100.0)
+    with pytest.raises(ValueError, match="OF_POCKET_READONLY"):
+        db.pocket_withdraw_to_account(user_id, "Caixinha Viagem", 100.0)
 
 
 def test_accrual_does_not_touch_of_pocket_balance(user_id):
