@@ -96,21 +96,21 @@
       if (r.status === 403) {
         // Plano Pro expirou ou foi rebaixado. Fecha o widget e abre upgrade.
         const data = await r.json().catch(() => ({}));
-        renderPiggyMsg("assistant", "🔒 Conversar com a IA é um recurso do PigBank+. " +
+        renderPiggyMsg("assistant", "Conversar com a IA é um recurso do PigBank+. " +
                                      "[Faça upgrade](/precos) pra liberar.", true);
         return;
       }
       if (!r.ok) {
-        renderPiggyMsg("assistant", "🐷 Deu ruim aqui. Tenta de novo em instantes.", true);
+        renderPiggyMsg("assistant", "Deu ruim aqui. Tenta de novo em instantes.", true);
         return;
       }
       const data = await r.json();
-      renderPiggyMsg("assistant", data.reply || "🐷 Sem resposta.", true);
+      renderPiggyMsg("assistant", data.reply || "Sem resposta.", true);
       updateUsage(data.usage);
     } catch (e) {
       hideTyping();
       console.error("[piggy] erro no send:", e);
-      renderPiggyMsg("assistant", "🐷 Sem conexão. Tenta de novo.", true);
+      renderPiggyMsg("assistant", "Sem conexão. Tenta de novo.", true);
     } finally {
       piggyBusy = false;
       document.getElementById("piggy-send").disabled = false;

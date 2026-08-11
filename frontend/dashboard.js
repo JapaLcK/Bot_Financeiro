@@ -1136,7 +1136,7 @@ function _instMostCommonCategory(groups) {
 function _renderInstallmentItem(g, idx = 0) {
   const emoji = _instEmoji(g.categoria);
   const catLabel = g.categoria ? (g.categoria.charAt(0).toUpperCase() + g.categoria.slice(1)) : "Sem categoria";
-  const cardLabel = `💳 ${escapeHtmlSafe(g.card_name || "Cartão")}`;
+  const cardLabel = `<i class="ph ph-credit-card" aria-hidden="true"></i> ${escapeHtmlSafe(g.card_name || "Cartão")}`;
   const purchasedFmt = g.purchased_at ? (() => {
     const [y, m, d] = g.purchased_at.split("-").map(Number);
     return `${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")}/${y}`;
@@ -2281,7 +2281,7 @@ function _renderPocketOnlyCard(p, idx = 0) {
   const color = p.color || "#FF2D8E";
   const ofPocket = _isOfPocket(p);
   const ofStale = _isOfStale(p);
-  const line1 = ofStale ? "🔒 Banco desconectado — reative pra atualizar"
+  const line1 = ofStale ? "<i class='ph ph-lock' aria-hidden='true'></i> Banco desconectado — reative pra atualizar"
               : ofPocket ? "Sincronizada com seu banco"
               : "Caixinha sem meta — depósitos livres";
   const line2 = ofStale ? "Reative seu banco (plano pago) pra o saldo voltar a atualizar"
@@ -2333,7 +2333,7 @@ function _renderGoalCard(g, idx = 0) {
     const today = new Date();
     const proj = new Date(today.getFullYear(), today.getMonth() + Math.ceil(g.projected_months), 1);
     const projStr = proj.toLocaleDateString("pt-BR", { month: "short", year: "numeric" });
-    alertText = `<div class="goal-deadline" style="color:#FF2D2D">⚠️ Ritmo atual chega só em ${projStr}${g.target_date ? " — prazo era " + deadlineText.replace("Prazo: ", "") : ""}</div>`;
+    alertText = `<div class="goal-deadline" style="color:#FF2D2D"><i class="ph ph-warning" aria-hidden="true"></i> Ritmo atual chega só em ${projStr}${g.target_date ? " — prazo era " + deadlineText.replace("Prazo: ", "") : ""}</div>`;
   } else if (g.indicator === "tight") {
     alertText = `<div class="goal-deadline" style="color:#fbbf24">Ritmo apertado — pode atrasar</div>`;
   } else if (g.indicator === "ahead") {
@@ -2640,7 +2640,7 @@ function _ensureWizardOverlay() {
 
         <div class="wizard-step" data-step="1">
           <div style="text-align:center;padding:8px 0 4px">
-            <div style="font-size:3.4rem;margin-bottom:8px">🐷</div>
+            <div style="font-size:3.4rem;margin-bottom:8px"><i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
             <h3 style="margin:0 0 8px">Bem-vindo ao PigBank!</h3>
             <p class="msub" style="max-width:380px;margin:0 auto">
               Em 3 passos rápidos seu painel fica configurado pra você começar a usar agora.<br/>
@@ -2654,7 +2654,7 @@ function _ensureWizardOverlay() {
         </div>
 
         <div class="wizard-step" data-step="2" style="display:none">
-          <h3 style="margin:0 0 6px">💰 Saldo inicial</h3>
+          <h3 style="margin:0 0 6px"><i class="ph ph-coins" aria-hidden="true"></i> Saldo inicial</h3>
           <p class="msub" style="margin-bottom:16px">
             Quanto você tem na conta corrente <strong>agora</strong>?<br/>
             <span style="font-size:.78rem">A gente cria um lançamento "Saldo inicial" pro Piggy começar a contar do número certo.</span>
@@ -2732,7 +2732,7 @@ function _wizardRenderCardsList() {
   }
   wrap.innerHTML = cards.map(c => `
     <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(255,255,255,.04);border:1px solid var(--glass-border);border-radius:10px;margin-bottom:8px">
-      <span style="font-size:1.1rem">💳</span>
+      <span style="font-size:1.1rem"><i class="ph ph-credit-card" aria-hidden="true"></i></span>
       <div style="flex:1;min-width:0">
         <div style="font-size:.88rem;color:var(--text);font-weight:600">${escapeHtmlSafe(c.name || "Cartão")}</div>
         <div style="font-size:.7rem;color:var(--text-3)">fecha dia ${c.closing_day || "?"} · vence dia ${c.due_day || "?"}</div>
@@ -3074,7 +3074,7 @@ function _renderFixedView(items) {
         const when = r.last_amount_changed_at ? new Date(r.last_amount_changed_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : "";
         return `
           <div class="tx-row">
-            <div class="tx-icon" style="color:#fbbf24">⚠️</div>
+            <div class="tx-icon" style="color:#fbbf24"><i class="ph ph-warning" aria-hidden="true"></i></div>
             <div class="tx-main">
               <div class="tx-desc">${escapeHtmlSafe(r.name)} ${delta > 0 ? "aumentou" : "diminuiu"} ${sign}${_fmtBRL(Math.abs(delta))}</div>
               <div class="tx-meta">${pct}% vs valor anterior · detectado em ${when}</div>
@@ -3356,7 +3356,7 @@ function _toggleRecurringModeHint() {
     if (amount) { amount.required = false; amount.placeholder = "estimativa, ex: 80,00"; }
     if (name) name.placeholder = "Ex: Água, Luz, Internet...";
   } else {
-    if (hint) hint.innerHTML = "⚠️ <strong>Gasto fixo:</strong> é <strong>lançado automaticamente</strong> no dia escolhido (débito na conta). Pra contas que você paga na mão (boleto), use \"Conta a pagar\".";
+    if (hint) hint.innerHTML = "<i class='ph ph-warning' aria-hidden='true'></i> <strong>Gasto fixo:</strong> é <strong>lançado automaticamente</strong> no dia escolhido (débito na conta). Pra contas que você paga na mão (boleto), use \"Conta a pagar\".";
     if (title && !isEdit) title.textContent = "Novo gasto fixo";
     if (paytypeRow) paytypeRow.style.display = "";
     if (label) label.textContent = "Valor (R$) *";
@@ -3594,9 +3594,9 @@ async function loadRecurringOverview() {
   // Próximos vencimentos (30 dias): boletos + gastos fixos + receitas fixas.
   const horizon = new Date(today.getTime() + 30 * 86400000);
   const up = [];
-  pend.forEach(b => up.push({ d: dOf(b), name: b.name || "Boleto", amt: -(b.amount || 0), tag: "🧾" }));
-  gastos.forEach(r => { const d = _nextRecurringOccurrence(r.due_day, r.start_date, r.frequency, r.due_month); if (d) up.push({ d, name: r.name || "Gasto fixo", amt: -(r.amount || 0), tag: "🔻" }); });
-  receitas.forEach(r => { const d = _nextRecurringOccurrence(r.pay_day, r.start_date, r.frequency, r.pay_month); if (d) up.push({ d, name: r.name || "Receita", amt: +(r.amount || 0), tag: "🔺" }); });
+  pend.forEach(b => up.push({ d: dOf(b), name: b.name || "Boleto", amt: -(b.amount || 0), tag: "<i class='ph ph-receipt' aria-hidden='true'></i>" }));
+  gastos.forEach(r => { const d = _nextRecurringOccurrence(r.due_day, r.start_date, r.frequency, r.due_month); if (d) up.push({ d, name: r.name || "Gasto fixo", amt: -(r.amount || 0), tag: "<i class='ph ph-trend-down' aria-hidden='true'></i>" }); });
+  receitas.forEach(r => { const d = _nextRecurringOccurrence(r.pay_day, r.start_date, r.frequency, r.pay_month); if (d) up.push({ d, name: r.name || "Receita", amt: +(r.amount || 0), tag: "<i class='ph ph-trend-up' aria-hidden='true'></i>" }); });
   const upAll = up.filter(x => x.d >= today && x.d <= horizon).sort((a, b) => a.d - b.d);
   const upcoming = upAll.slice(0, 6);
 
@@ -3622,11 +3622,11 @@ async function loadRecurringOverview() {
         <div style="font-size:1.5rem"><i class="ph ph-check-circle" aria-hidden="true"></i></div>
         <div style="flex:1;min-width:220px">
           <div style="font-weight:700">Suas entradas cobrem os compromissos — sobra <span style="color:#22c55e">${_fmtBRL(resultado)}</span>.</div>
-          <div style="font-size:.82rem;color:var(--text-3)">Mês recorrente equilibrado. Bom trabalho! 🐷</div>
+          <div style="font-size:.82rem;color:var(--text-3)">Mês recorrente equilibrado. Bom trabalho! <i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
         </div>
       </div>`
     : `<div class="mock-card" style="border:1px solid rgba(255,45,142,.4);margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-        <div style="font-size:1.5rem">⚠️</div>
+        <div style="font-size:1.5rem"><i class="ph ph-warning" aria-hidden="true"></i></div>
         <div style="flex:1;min-width:220px">
           <div style="font-weight:700">Saídas previstas maiores que entradas em <span style="color:#FF2D8E">${_fmtBRL(-resultado)}</span>.</div>
           <div style="font-size:.82rem;color:var(--text-3)">Revise contas a pagar ou planeje novas entradas para equilibrar o mês.</div>
@@ -3693,7 +3693,7 @@ async function loadRecurringOverview() {
   else { acaoMsg = "O maior peso está nos gastos fixos."; acaoTab = "expenses"; acaoCta = "Ver gastos fixos"; }
   const acaoCard = `
     <div class="mock-card">
-      <h3>🎯 Próxima ação</h3>
+      <h3><i class="ph ph-target" aria-hidden="true"></i> Próxima ação</h3>
       <div style="font-size:.88rem;color:var(--text-2);margin-bottom:10px">${acaoMsg}</div>
       <button class="mock-cta outline" style="width:100%" onclick="setRecurringTab('${acaoTab}')">${acaoCta} →</button>
     </div>`;
@@ -3772,12 +3772,12 @@ function _renderBillsView(bills) {
     <div class="stat-tile"><div class="stat-label">Ainda este mês</div>
       <div class="stat-value">${_fmtBRL(sum(mo))}</div>
       <div class="stat-delta" style="color:var(--text-3)">${mo.length} boleto(s)</div></div>
-    <div class="stat-tile"><div class="stat-label">${overdue.length ? "⚠️ Vencidos" : "Próximo"}</div>
+    <div class="stat-tile"><div class="stat-label">${overdue.length ? "<i class='ph ph-warning' aria-hidden='true'></i> Vencidos" : "Próximo"}</div>
       <div class="stat-value" style="color:${overdue.length ? 'var(--red)' : 'var(--text)'}">${overdue.length ? _fmtBRL(sum(overdue)) : proxTxt}</div>
       <div class="stat-delta" style="color:var(--text-3)">${overdue.length ? `${overdue.length} atrasado(s)` : "a vencer"}</div></div>`;
 
   const buckets = [
-    { label: "⚠️ Vencidos", color: "#FF2D2D", items: pending.filter(b => _billDaysUntil(b) < 0) },
+    { label: "<i class='ph ph-warning' aria-hidden='true'></i> Vencidos", color: "#FF2D2D", items: pending.filter(b => _billDaysUntil(b) < 0) },
     { label: "Hoje", color: "#fbbf24", items: pending.filter(b => _billDaysUntil(b) === 0) },
     { label: "Próximos 7 dias", color: "#fbbf24", items: pending.filter(b => { const n = _billDaysUntil(b); return n >= 1 && n <= 7; }) },
     { label: "Ainda este mês", color: "var(--text-2)", items: pending.filter(b => _billDaysUntil(b) > 7 && _billDate(b) <= endMonth) },
@@ -3811,7 +3811,7 @@ function _renderBillRow(b) {
   const nameSafe = escapeHtmlSafe(b.name || "").replace(/'/g, "\\'");
   return `
     <div class="tx-row">
-      <div class="tx-icon" style="color:${color}">🧾</div>
+      <div class="tx-icon" style="color:${color}"><i class="ph ph-receipt" aria-hidden="true"></i></div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(b.name || "Boleto")}${variavel ? ' <span style="font-size:.68rem;color:var(--text-3)">· valor varia</span>' : ""}</div>
         <div class="tx-meta">vence ${due.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })} · <span style="color:${color}">${quando}</span></div>
@@ -3971,7 +3971,7 @@ async function deleteBoleto(id, name) {
     if (!resp.ok) {
       throw new Error(await _errDetail(resp));
     }
-    showToast("🗑 Boleto apagado");
+    showToast(" Boleto apagado");
     loadBillsView(true);
   } catch (err) {
     await alertModal(String(err.message || err), { title: "Erro ao apagar" });
@@ -4008,7 +4008,7 @@ function _renderProjection(p) {
   const alvo = new Date(p.target + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "long" });
   const header = ok
     ? `<i class="ph ph-smiley" aria-hidden="true"></i> Tranquilo até ${alvo} — sobra ${_fmtBRL(p.projetado)}`
-    : `⚠️ Aperta até ${alvo} — falta ${_fmtBRL(Math.abs(p.projetado))}`;
+    : `<i class="ph ph-warning" aria-hidden="true"></i> Aperta até ${alvo} — falta ${_fmtBRL(Math.abs(p.projetado))}`;
   const line = (label, val, positive) => `
     <div style="display:flex;justify-content:space-between;font-size:.82rem;padding:2px 0">
       <span style="color:var(--text-2)">${label}</span>
@@ -4270,7 +4270,7 @@ function _ensureRecurringIncomeModal() {
       <div class="modal wide">
         <h3 id="recurring-income-edit-title">Nova receita fixa</h3>
         <p class="msub" style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:.78rem">
-          💰 <strong>Importante:</strong> essa receita será <strong>lançada automaticamente</strong> todo mês no dia escolhido. Se o valor variar, é só editar aqui — o Piggy registra o reajuste.
+          <i class="ph ph-coins" aria-hidden="true"></i> <strong>Importante:</strong> essa receita será <strong>lançada automaticamente</strong> todo mês no dia escolhido. Se o valor variar, é só editar aqui — o Piggy registra o reajuste.
         </p>
         <form id="recurring-income-edit-form" onsubmit="event.preventDefault(); saveRecurringIncome();">
           <div class="invest-form">
@@ -5028,7 +5028,7 @@ function renderAnalyticsInsights(insights) {
   if (!visible.length) {
     root.innerHTML = `
       <div class="empty" style="padding:24px 16px;text-align:center;color:var(--text-3);font-size:.88rem">
-        <div style="font-size:2rem;margin-bottom:6px">🐷</div>
+        <div style="font-size:2rem;margin-bottom:6px"><i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
         <div style="font-weight:600;color:var(--text-2);margin-bottom:4px">Tudo sob controle</div>
         <div>Sem alertas relevantes pra você agora. Piggy continua de olho.</div>
       </div>`;
@@ -5049,7 +5049,7 @@ function renderAnalyticsInsights(insights) {
     const closeBtn = `<button title="Dispensar" aria-label="Dispensar" onclick="_dismissInsight('${escapeJsString(i.key)}')" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;border-radius:6px;opacity:.6" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.6"><i class="ph ph-x" aria-hidden="true"></i></button>`;
     return `
       <div class="tx-row" style="border-left:3px solid ${color};padding-left:10px;align-items:flex-start">
-        <div class="tx-icon">${i.icon || "🐷"}</div>
+        <div class="tx-icon">${phIcon(i.icon || "🐷")}</div>
         <div class="tx-main" style="min-width:0">
           <div class="tx-desc" style="font-weight:600;color:var(--text-1)">${escapeHtmlSafe(i.title)}</div>
           <div class="tx-meta" style="color:var(--text-2);font-size:.84rem;line-height:1.35;white-space:normal">${escapeHtmlSafe(i.message)}</div>
@@ -5070,7 +5070,7 @@ function renderAnalyticsPatterns(patterns) {
   if (!items.length) {
     root.innerHTML = `
       <div class="empty" style="padding:24px 16px;text-align:center;color:var(--text-3);font-size:.85rem">
-        <div style="font-size:2rem;margin-bottom:6px">🐷</div>
+        <div style="font-size:2rem;margin-bottom:6px"><i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
         <div style="font-weight:600;color:var(--text-2);margin-bottom:4px">Sem padrões ainda</div>
         <div>A IA precisa de mais histórico pra detectar padrões. Continue lançando — vai aparecer aqui em breve.</div>
       </div>`;
@@ -5088,7 +5088,7 @@ function renderAnalyticsPatterns(patterns) {
     const color = toneColor[p.tone] || toneColor.neutral;
     return `
       <div class="tx-row" style="border-left:3px solid ${color};padding-left:10px;align-items:flex-start">
-        <div class="tx-icon">${p.icon || "🐷"}</div>
+        <div class="tx-icon">${phIcon(p.icon || "🐷")}</div>
         <div class="tx-main" style="min-width:0">
           <div class="tx-desc" style="font-weight:600;color:var(--text-1);white-space:normal">${escapeHtmlSafe(p.title)}</div>
           ${p.subtitle ? `<div class="tx-meta" style="color:var(--text-2);font-size:.82rem;line-height:1.4;white-space:normal;margin-top:2px">${escapeHtmlSafe(p.subtitle)}</div>` : ""}
@@ -5361,7 +5361,7 @@ function _historyRowHTML(i) {
   const valor = Number(i.valor || 0);
   const sign = isReceita ? "+" : (isCredito || isDespesa ? "-" : "");
   const amtClass = isReceita ? "green" : "red";
-  const icon = isReceita ? "💸" : (isCredito ? "💳" : "🧾");
+  const icon = isReceita ? "<i class='ph ph-trend-down' aria-hidden='true'></i>" : (isCredito ? "<i class='ph ph-credit-card' aria-hidden='true'></i>" : "<i class='ph ph-receipt' aria-hidden='true'></i>");
   const time = (i.criado_em || "").slice(11, 16);
   const desc = i.alvo || i.nota || "—";
   const meta = [];
@@ -5751,7 +5751,7 @@ function _billMonthTag(l) {
   if (l.tipo !== "credito" || !l.bill_period_end) return "";
   const d = new Date(`${l.bill_period_end}T12:00:00`);
   if (isNaN(d)) return "";
-  return `<span class="tag x" title="Entra na fatura que fecha em ${d.toLocaleDateString("pt-BR")}">💳 fatura ${PT_MONTHS[d.getMonth()].substring(0, 3)}</span>`;
+  return `<span class="tag x" title="Entra na fatura que fecha em ${d.toLocaleDateString("pt-BR")}"><i class="ph ph-credit-card" aria-hidden="true"></i> fatura ${PT_MONTHS[d.getMonth()].substring(0, 3)}</span>`;
 }
 
 function describeLaunch(l) {
@@ -6138,7 +6138,7 @@ function renderInvestmentsPanel(d) {
       <div class="chip"><div class="chip-lbl">Rend. bruto/mês <span style="opacity:.6;font-weight:400">(simulado)</span></div><div class="chip-val g">${fmt(grossMonth)}</div></div>
       <div class="chip"><div class="chip-lbl">Líquido estimado <span style="opacity:.6;font-weight:400">(simulado)</span></div><div class="chip-val">${fmt(netMonth)}</div></div>
     </div>
-    <div style="color:var(--text-3);font-size:.75rem;margin-bottom:12px;line-height:1.35">💡 Rendimentos exibidos são simulações baseadas na taxa informada. O PigBank não custodia os valores aplicados.</div>
+    <div style="color:var(--text-3);font-size:.75rem;margin-bottom:12px;line-height:1.35"><i class="ph ph-lightbulb" aria-hidden="true"></i> Rendimentos exibidos são simulações baseadas na taxa informada. O PigBank não custodia os valores aplicados.</div>
   `;
 
 	  document.getElementById("invest-list").innerHTML = invs.length ? invs.map(i => {
@@ -6529,9 +6529,9 @@ function renderAlerts(alerts) {
   alerts.forEach(a => {
     if (a.type === "recurring_charged") {
       const where = a.payment_type === "credit_card" ? "no cartão" : "da conta";
-      html += `<div class="alert-row">🐷 Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} ${where} ${_alertWhenLabel(a.charged_at)}. <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'">✕</button></div>`;
+      html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} ${where} ${_alertWhenLabel(a.charged_at)}. <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'">✕</button></div>`;
     } else if (a.type === "recurring_credited") {
-      html += `<div class="alert-row">🐷 Piggy recebeu <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} na conta ${_alertWhenLabel(a.credited_at)}. <button onclick="ackRecurringIncomeCredit(${a.credit_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'">✕</button></div>`;
+      html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy recebeu <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} na conta ${_alertWhenLabel(a.credited_at)}. <button onclick="ackRecurringIncomeCredit(${a.credit_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'">✕</button></div>`;
     } else {
       const icon = a.type === "budget_exceeded" ? '<i class="ph ph-warning-circle" aria-hidden="true"></i>' : '<i class="ph ph-warning" aria-hidden="true"></i>';
       html += `<div class="alert-row">${icon} <b>${escapeHtmlSafe(a.categoria)}</b>: ${fmt(a.spent)} de ${fmt(a.budget)} (${a.pct}%)</div>`;
@@ -6540,7 +6540,7 @@ function renderAlerts(alerts) {
   b.innerHTML = `
     <div class="alert-banner-head">
       <div class="alert-banner-body">${html}</div>
-      <button class="alert-close" type="button" aria-label="Fechar aviso" onclick="dismissAlerts()">✕</button>
+      <button class="alert-close" type="button" aria-label="Fechar aviso" onclick="dismissAlerts()"><i class="ph ph-x" aria-hidden="true"></i></button>
     </div>
   `;
   b.className = exceeded.length ? "exceeded" : "warning";
@@ -6764,7 +6764,7 @@ function renderLaunches() {
         ? `<button class="bgt-btn launch-edit-btn" onclick="event.stopPropagation();openEditLaunchModal(${l.id})" title="Editar lançamento"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>`
         : '';
       const deleteBtn  = editable
-        ? `<button class="bgt-btn launch-delete-btn" onclick="event.stopPropagation();confirmDeleteLaunch(${l.id}, ${JSON.stringify(describeLaunch(l).replace(/<[^>]+>/g, '').trim()).replace(/"/g, '&quot;')}, ${l.valor}, ${l.tipo === 'credito' ? 'true' : 'false'}, ${l.installments_total || 'null'})" title="Apagar lançamento">🗑️</button>`
+        ? `<button class="bgt-btn launch-delete-btn" onclick="event.stopPropagation();confirmDeleteLaunch(${l.id}, ${JSON.stringify(describeLaunch(l).replace(/<[^>]+>/g, '').trim()).replace(/"/g, '&quot;')}, ${l.valor}, ${l.tipo === 'credito' ? 'true' : 'false'}, ${l.installments_total || 'null'})" title="Apagar lançamento"><i class="ph ph-trash" aria-hidden="true"></i></button>`
         : '';
       return `
       <div class="row" style="${isInternal?'opacity:.75':''}">
@@ -7003,7 +7003,7 @@ function _renderEditCategoriaOptions(currentCategoria) {
   for (const c of EDIT_LAUNCH_CATEGORIES) {
     opts.push(`<option value="${c}">${c}</option>`);
   }
-  opts.push(`<option value="${EDIT_LAUNCH_CUSTOM_VALUE}">✏️ Outra (digitar)…</option>`);
+  opts.push(`<option value="${EDIT_LAUNCH_CUSTOM_VALUE}"> Outra (digitar)…</option>`);
   sel.innerHTML = opts.join("");
   if (currentCategoria) sel.value = currentCategoria;
 }
@@ -8430,7 +8430,7 @@ function getCsrfToken() {
 
 async function exportToEmail() {
   const url = `${API}/export/${USER_ID}?year=${viewYear}&month=${viewMonth}`;
-  showLaunchSuccessToast("📧 Gerando e enviando o extrato…");
+  showLaunchSuccessToast(" Gerando e enviando o extrato…");
   try {
     const resp = await fetch(url, { method: "POST", credentials: "same-origin", headers: csrfHeaders() });
     if (resp.status === 404) {
@@ -8446,7 +8446,7 @@ async function exportToEmail() {
       return;
     }
     const data = await resp.json().catch(() => ({}));
-    showLaunchSuccessToast(`📧 Extrato enviado pro seu email ${data.email || "cadastrado"}.`);
+    showLaunchSuccessToast(` Extrato enviado pro seu email ${data.email || "cadastrado"}.`);
   } catch (e) {
     showLaunchSuccessToast("Não consegui enviar agora. Tente novamente.", true);
   }
@@ -8457,7 +8457,7 @@ async function exportToEmail() {
 ═══════════════════════════════════════════════════════════════════════ */
 function buildCatChart(cats) {
   const el = document.getElementById("chart-cat"); if (!el) return;
-  const labels = cats.map(c => c.categoria === "sem categoria" ? "⚠ Sem Cat." : c.categoria);
+  const labels = cats.map(c => c.categoria === "sem categoria" ? " Sem Cat." : c.categoria);
   const data   = cats.map(c => c.total);
   const _pal = catColors();
   const colors = cats.map((_, i) => _pal[i % _pal.length]);
@@ -8888,9 +8888,9 @@ function render(d) {
             const catSafe = c.categoria.replace(/'/g,"\\'");
             return `<div class="cat-row">
               <div class="cat-hdr">
-                <span class="cat-lbl">${c.categoria==="sem categoria"?"⚠ Sem Categoria":c.categoria}</span>
+                <span class="cat-lbl">${c.categoria==="sem categoria"?"<i class='ph ph-warning' aria-hidden='true'></i> Sem Categoria":c.categoria}</span>
                 <span class="cat-val" data-num="cat_${c.categoria}" data-val="${c.total}">${fmt(c.total)}</span>
-                <button class="bgt-btn" onclick="openBudget('${catSafe}')" title="Definir limite de orçamento">✏️</button>
+                <button class="bgt-btn" onclick="openBudget('${catSafe}')" title="Definir limite de orçamento"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
               </div>
               ${hb?`<div class="cat-budget-info">${c.budget_pct}% de ${fmt(c.budget)}</div>`:""}
               <div class="bar-wrap"><div class="bar-fill" style="width:${bw}%;background:${bc}"></div></div>
@@ -9136,7 +9136,7 @@ function _renderAffiliateView(data) {
 
     <div class="mock-card">
       <h3 style="margin:0 0 10px">Comissões</h3>
-      <div class="tx-list">${commissionRows || '<div style="padding:16px 0;color:var(--text-3);font-size:.8rem">Nenhuma comissão ainda — divulgue seu link! 🐷</div>'}</div>
+      <div class="tx-list">${commissionRows || '<div style="padding:16px 0;color:var(--text-3);font-size:.8rem">Nenhuma comissão ainda — divulgue seu link! <i class="ph ph-piggy-bank" aria-hidden="true"></i></div>'}</div>
       <h3 style="margin:18px 0 10px">Saques</h3>
       <div class="tx-list">${payoutRows || '<div style="padding:16px 0;color:var(--text-3);font-size:.8rem">Nenhum saque solicitado.</div>'}</div>
     </div>
@@ -9299,7 +9299,7 @@ async function loadAgentesView(forceFresh = false) {
   if (_agentesCache && !forceFresh) {
     _renderAgentes(_agentesCache);
   } else {
-    shelf.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:26px">Chamando os porquinhos… 🐷</div>`;
+    shelf.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:26px">Chamando os porquinhos… <i class="ph ph-piggy-bank" aria-hidden="true"></i></div>`;
     if (feedEl) feedEl.innerHTML = "";
   }
 
@@ -9335,7 +9335,7 @@ function _renderAgentes(data) {
       <span class="ag-counter"><i class="ag-dot ag-dot-on"></i> Ativos <b>${s.ativos || 0}</b></span>
       <span class="ag-counter"><i class="ag-dot ag-dot-off"></i> Pausados <b>${s.pausados || 0}</b></span>
       <span class="ag-counter"><i class="ag-dot ag-dot-fire"></i> Disparos <b>${s.disparos_mes || 0}</b></span>
-      ${s.salvos_ano > 0 ? `<span class="ag-counter ag-money">💰 ${fmt(s.salvos_ano)} salvos</span>` : ""}
+      ${s.salvos_ano > 0 ? `<span class="ag-counter ag-money"><i class="ph ph-coins" aria-hidden="true"></i> ${fmt(s.salvos_ano)} salvos</span>` : ""}
     `;
   }
 
@@ -9343,8 +9343,8 @@ function _renderAgentes(data) {
     const active = card.status === "active";
     const chips = [
       `<span class="ag-chip">${esc(card.freq)}</span>`,
-      card.fired_30d > 0 ? `<span class="ag-chip ag-chip-fire">⚡ ${card.fired_30d}</span>` : "",
-      card.saved_365d > 0 ? `<span class="ag-chip ag-chip-money">💰 ${fmtShort(card.saved_365d)}</span>` : "",
+      card.fired_30d > 0 ? `<span class="ag-chip ag-chip-fire"><i class="ph ph-lightning" aria-hidden="true"></i> ${card.fired_30d}</span>` : "",
+      card.saved_365d > 0 ? `<span class="ag-chip ag-chip-money"><i class="ph ph-coins" aria-hidden="true"></i> ${fmtShort(card.saved_365d)}</span>` : "",
     ].filter(Boolean).join("");
     // can_activate vem do backend (escada v2: Grátis/Essencial não ativam).
     // Gate visível: o card aparece normal, mas o botão vira cadeado que abre o
@@ -9356,7 +9356,7 @@ function _renderAgentes(data) {
         ? `<button class="ag-btn ag-btn-active" onclick="pauseAgent('${card.kind}')">✓ Ativo · Pausar</button>`
         : canActivate
           ? `<button class="ag-btn ag-btn-on" onclick="activateAgent('${card.kind}')">Ativar</button>`
-          : `<button class="ag-btn ag-btn-on" onclick="showUpgradeModal('agents')">🔒 Ativar</button>`;
+          : `<button class="ag-btn ag-btn-on" onclick="showUpgradeModal('agents')"><i class="ph ph-lock" aria-hidden="true"></i> Ativar</button>`;
     // Opt-out por agente: quando ativo, deixa ligar/desligar o e-mail (o feed
     // continua). Padrão = ligado. Estilo inline pra não exigir bump de cache CSS.
     const emailOn = ((card.config || {}).email_enabled) !== false;
@@ -9364,7 +9364,7 @@ function _renderAgentes(data) {
       ? `<button onclick="toggleAgentEmail('${card.kind}', ${emailOn ? "false" : "true"})"
            title="Receber os avisos deste agente por e-mail"
            style="margin-top:8px;width:100%;padding:7px 10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:transparent;color:rgba(255,255,255,.6);font-size:.72rem;cursor:pointer">
-           📧 E-mail: <b style="color:${emailOn ? "#22c55e" : "rgba(255,255,255,.4)"}">${emailOn ? "ligado" : "desligado"}</b>
+           <i class="ph ph-envelope" aria-hidden="true"></i> E-mail: <b style="color:${emailOn ? "#22c55e" : "rgba(255,255,255,.4)"}">${emailOn ? "ligado" : "desligado"}</b>
          </button>`
       : "";
     return `
@@ -9384,7 +9384,7 @@ function _renderAgentes(data) {
   if (feedEl) {
     const events = data.events || [];
     feedEl.innerHTML = events.length === 0
-      ? `<div class="empty" style="padding:22px">Nenhum disparo ainda. Ative um agente e ele fala assim que tiver algo que vale a pena. 🐷</div>`
+      ? `<div class="empty" style="padding:22px">Nenhum disparo ainda. Ative um agente e ele fala assim que tiver algo que vale a pena. <i class="ph ph-piggy-bank" aria-hidden="true"></i></div>`
       : events.map(ev => {
           const p = ev.payload || {};
           return `
@@ -9394,7 +9394,7 @@ function _renderAgentes(data) {
               </div>
               <div class="ag-event-body">
                 <p class="ag-event-msg">${esc(p.mensagem || p.titulo || "Disparo")}</p>
-                <p class="ag-event-when">${esc(_agentName(ev.kind))} · ${fmtDate(ev.fired_at)}${ev.channel === "email" ? " · 📧 no seu e-mail" : ""}</p>
+                <p class="ag-event-when">${esc(_agentName(ev.kind))} · ${fmtDate(ev.fired_at)}${ev.channel === "email" ? " · <i class='ph ph-envelope' aria-hidden='true'></i> no seu e-mail" : ""}</p>
               </div>
             </div>
           `;

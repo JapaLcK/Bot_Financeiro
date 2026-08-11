@@ -80,11 +80,11 @@
 
   // Atalhos do usuário logado (mesma lista do app PWA).
   var ACCOUNT_LINKS = [
-    { icon: "🏠", label: "Início", href: "/home" },
-    { icon: "📊", label: "Dashboard", href: "/app" },
-    { icon: "💬", label: "Conectar WhatsApp", action: connectWhatsApp },
-    { icon: "⚙️", label: "Configurações", href: "/settings?view=security" },
-    { icon: "💳", label: "Gerenciar assinatura", href: "/conta" },
+    { icon: '<i class="ph ph-house" aria-hidden="true"></i>', label: "Início", href: "/home" },
+    { icon: '<i class="ph ph-chart-bar" aria-hidden="true"></i>', label: "Dashboard", href: "/app" },
+    { icon: '<i class="ph ph-whatsapp-logo" aria-hidden="true"></i>', label: "Conectar WhatsApp", action: connectWhatsApp },
+    { icon: '<i class="ph ph-gear" aria-hidden="true"></i>', label: "Configurações", href: "/settings?view=security" },
+    { icon: '<i class="ph ph-credit-card" aria-hidden="true"></i>', label: "Gerenciar assinatura", href: "/conta" },
     { icon: "↪", label: "Sair", action: function (e) { if (e) e.preventDefault(); doLogout(); }, danger: true },
   ];
 
