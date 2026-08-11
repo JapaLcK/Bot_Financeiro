@@ -1584,18 +1584,18 @@ def init_db():
         # conta o usuário é OBRIGADO a passar pela /precos e escolher um plano
         # (mesmo o Grátis) antes de entrar no dashboard. plan_selected_at marca
         # o momento dessa escolha — NULL = ainda não escolheu → cai na /precos.
-        """alter table auth_accounts add column if not exists plan_selected_at timestamptz""",
-        # Backfill one-shot: contas criadas ANTES do lançamento do gate já estão
-        # no app; marca como "plano escolhido" pra não serem jogadas pra /precos.
-        # Idempotente: contas novas (created_at >= cutoff) nascem com
-        # plan_selected_at NULL e nunca são tocadas por este update, então rodar
-        # o init_db de novo num redeploy não desfaz o gate delas.
-        """
-        update auth_accounts
-           set plan_selected_at = coalesce(plan_expires_at, created_at)
-         where plan_selected_at is null
-           and created_at < timestamptz '2026-08-11 00:00:00+00'
-        """,
+        #
+        # Backfill preciso pela fronteira REAL do rollout (sem cutoff por data
+        # chutado): o ADD COLUMN com DEFAULT now() carimba TODAS as contas que já
+        # existem no exato instante em que a migration roda pela 1ª vez — não
+        # importa quando foram criadas nem se o v2 estava ligado. Em seguida o
+        # DROP DEFAULT faz TODO cadastro novo nascer com NULL (→ cai na /precos).
+        # Idempotente: `if not exists` pula o ADD (e o backfill junto) em
+        # redeploys, então contas novas nunca são recarimbadas; DROP DEFAULT de
+        # coluna sem default é no-op. now() é STABLE → fast default (metadata),
+        # avaliado uma vez, sem reescrever a tabela.
+        """alter table auth_accounts add column if not exists plan_selected_at timestamptz default now()""",
+        """alter table auth_accounts alter column plan_selected_at drop default""",
         """
         create table if not exists plan_trials (
           phone_hash text primary key,

@@ -242,12 +242,18 @@ _GATE_EXEMPT_PREFIXES = ("/billing", "/auth", "/conta")
 
 
 def _enforce_subscription_gate(request: Request, user_id: int) -> None:
-    """Com o paywall ligado, bloqueia as rotas de dados do dashboard pra quem
-    não tem assinatura ativa/trial. Retorna 402 pro front mandar ao paywall."""
+    """Backstop server-side das rotas de dados do dashboard. Além do paywall
+    (assinatura ativa/trial), fecha o gate de escolha de plano no cadastro: sem
+    ele, um cadastro novo poderia pular a /precos batendo direto numa API
+    autenticada (ex.: /data/{id}) ou navegando pro /settings. Retorna 402 pro
+    front mandar ao paywall/escolha. As rotas de /billing, /auth e /conta são
+    isentas (são elas que resolvem o gate — checkout, /auth/me, select-free)."""
     path = request.url.path or ""
     if any(path.startswith(p) for p in _GATE_EXEMPT_PREFIXES):
         return
-    from core.services.plan_service import has_app_access
+    from core.services.plan_service import has_app_access, needs_plan_selection
+    if needs_plan_selection(user_id):
+        raise HTTPException(status_code=402, detail={"error": "plan_selection_required"})
     if not has_app_access(user_id):
         raise HTTPException(status_code=402, detail={"error": "subscription_required"})
 

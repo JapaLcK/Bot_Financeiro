@@ -3729,8 +3729,16 @@ async def billing_create_checkout(
     stripe.api_key = STRIPE_SECRET_KEY
     try:
         async with _billing_user_lock(user_id):
-            return await _billing_checkout_for_user(
+            result = await _billing_checkout_for_user(
                 stripe, user_id, plan, interval, price_id)
+        # Abrir o checkout já é "escolha de plano" no cadastro: fecha o gate da
+        # /precos agora (idempotente) pra que, ao voltar do Stripe com
+        # ?upgrade=success, o /home não bata no backstop 402 antes do webhook
+        # confirmar. As features PAGAS seguem travadas por tier até o pagamento
+        # cair — aqui só se garante o acesso base (Grátis) ao dashboard.
+        from db import mark_plan_selected
+        await asyncio.to_thread(mark_plan_selected, user_id)
+        return result
     except HTTPException:
         raise
     except Exception:

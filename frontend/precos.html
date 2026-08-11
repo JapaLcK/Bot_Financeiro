@@ -292,7 +292,7 @@ function openChangeModal(plan) {
   const data = fmtBrDate(subState.current_period_end);
   document.getElementById("chg-body").innerHTML =
     `<p style="margin:0 0 10px"><strong>${cur}</strong> → <strong>${novo} (${preco})</strong></p>` +
-    "<p style=\"margin:0 0 6px\"><i class="ph ph-check-circle" aria-hidden="true"></i> Nada é cobrado agora</p>" +
+    `<p style="margin:0 0 6px"><i class="ph ph-check-circle" aria-hidden="true"></i> Nada é cobrado agora</p>` +
     `<p style="margin:0 0 6px"><i class="ph ph-check-circle" aria-hidden="true"></i> Você continua no ${cur} até <strong>${data}</strong> (período já pago)</p>` +
     `<p style="margin:0"><i class="ph ph-check-circle" aria-hidden="true"></i> Em ${data} seu plano vira ${novo} e a cobrança de ${preco} acontece no cartão cadastrado</p>`;
   const confirm = document.getElementById("chg-confirm");
