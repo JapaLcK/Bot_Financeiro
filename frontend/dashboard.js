@@ -9171,6 +9171,13 @@ function _showAccessError(title, msg) {
 	  connect();
 	  loadUserMenuState().then(() => {
 	    if (view === "investments") setMainView("investments");
+	    // Deep-link da galeria pública /agents (botão "Ver meus agentes"):
+	    // abre a aba de agentes — só se ela estiver visível (respeita o
+	    // beta-gate agents_ui_enabled, que esconde o item acima).
+	    else if (view === "agentes") {
+	      const agNav = document.querySelector('[data-nav="agentes"]');
+	      if (agNav && agNav.style.display !== "none") navigateTo("agentes");
+	    }
 	  });
 	  // Wizard: abre auto se conta virgem (não bloqueante).
 	  maybeOpenWizardOnLoad();
