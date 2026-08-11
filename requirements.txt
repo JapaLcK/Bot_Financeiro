@@ -54,7 +54,7 @@ urllib3==2.7.0
 yarl==1.24.5
 ofxparse==0.21
 pypdf==6.15.0
-fastapi==0.115.6
+fastapi==0.141.1
 uvicorn[standard]==0.52.1
 websockets==17.0.1
 slowapi==0.1.10
