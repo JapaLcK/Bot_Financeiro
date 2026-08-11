@@ -159,10 +159,15 @@ async def goals_status_route(request: Request, user_id: int):
     from db.connection import get_conn
     from datetime import date
 
+    from core.services.plan_service import require_min_tier
+
     def _compute():
         pockets = list_pockets(user_id)
         goals = []
         today = date.today()
+        # OF ao vivo é feature paga (Essencial+): no Grátis a caixinha do banco congela
+        # e o front mostra "reative seu banco" em vez de "Sincronizada".
+        of_plan_active = require_min_tier(user_id, "essencial")
         for p in pockets:
             ta = p.get("target_amount")
             saved = float(p.get("balance") or 0)
@@ -182,6 +187,9 @@ async def goals_status_route(request: Request, user_id: int):
                     "interest_enabled": bool(p.get("interest_enabled")),
                     "interest_rate": float(p.get("interest_rate") or 1),
                     "interest_period": p.get("interest_period") or "cdi",
+                    "source": p.get("source"),
+                    "of_investment_id": p.get("of_investment_id"),
+                    "of_plan_active": of_plan_active,
                     "is_goal": False,
                     "pct_complete": None,
                     "remaining": None,
@@ -256,6 +264,9 @@ async def goals_status_route(request: Request, user_id: int):
                 "interest_enabled": bool(p.get("interest_enabled")),
                 "interest_rate": float(p.get("interest_rate") or 1),
                 "interest_period": p.get("interest_period") or "cdi",
+                "source": p.get("source"),
+                "of_investment_id": p.get("of_investment_id"),
+                "of_plan_active": of_plan_active,
                 "is_goal": True,
                 "pct_complete": round(pct, 1),
                 "remaining": round(remaining, 2),
