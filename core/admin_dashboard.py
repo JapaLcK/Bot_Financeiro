@@ -104,6 +104,13 @@ async def ensure_admin_tables():
                 ON auth_login_events (user_id, success, created_at DESC)
                 """
             )
+            # Suporta a detecção de spike de falha de login por IP (A09).
+            await cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_auth_login_events_ip_time
+                ON auth_login_events (ip_address, success, created_at DESC)
+                """
+            )
             await cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS system_event_logs (
@@ -156,6 +163,16 @@ async def log_auth_login_event(
                      success, ip_address, user_agent, failure_reason),
                 )
             await conn.commit()
+        # A09 — spike de falha de login: agenda a detecção FORA desta transação
+        # (task de fundo, conexão própria, depois do commit acima). Assim não
+        # atrasa a resposta do login, não pode abortar este commit, e a contagem
+        # enxerga as tentativas concorrentes já persistidas. Fire-and-forget.
+        if not success:
+            try:
+                from core.services.security_alerts import schedule_auth_failure_spike_check
+                schedule_auth_failure_spike_check(ip_address)
+            except Exception:
+                pass
     except Exception as exc:
         print(f"[admin] failed to record auth login event: {exc}", file=sys.stderr)
 
