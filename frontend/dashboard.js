@@ -6169,6 +6169,45 @@ function renderInvestmentsPanel(d) {
   }).join("") : `<div class="empty">Nenhum investimento cadastrado.</div>`;
 
   renderVariableIncomePanel(d);
+  renderOfFixedIncomePanel(d);
+}
+
+// Renda fixa do banco (CDB/Tesouro via Open Finance) — agregada, read-only.
+function renderOfFixedIncomePanel(d) {
+  const card = document.getElementById("of-rf-card");
+  if (!card) return;
+  const items = d.of_fixed_income || [];
+  const sum = d.of_fixed_income_summary || {};
+  if (!items.length) { card.style.display = "none"; return; }
+  card.style.display = "";
+
+  const elS = document.getElementById("of-rf-summary");
+  if (elS) elS.innerHTML = `
+    <div class="chips" style="margin-top:0;margin-bottom:6px">
+      <div class="chip"><div class="chip-lbl">Saldo</div><div class="chip-val b">${fmt(sum.balance || 0)}</div></div>
+      <div class="chip"><div class="chip-lbl">Investido</div><div class="chip-val">${fmt(sum.invested || 0)}</div></div>
+      <div class="chip"><div class="chip-lbl">Rendeu</div><div class="chip-val">${fmtPnl(sum.pnl || 0)}</div></div>
+    </div>`;
+
+  const elL = document.getElementById("of-rf-list");
+  if (!elL) return;
+  elL.innerHTML = items.map(i => {
+    const n = Number(i.count || 1);
+    const papeis = n > 1 ? `<span class="mini-tag">${n} papéis</span>` : "";
+    return `
+      <div class="invest-card rv-card-item">
+        <div class="invest-head">
+          <div style="min-width:0">
+            <div class="invest-name">${esc(i.name)} <span class="rv-badge">via banco</span></div>
+            <div class="invest-meta"><span class="mini-tag">Renda fixa</span>${papeis}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="val b">${fmt(i.balance)}</div>
+            <div style="font-size:.8rem;margin-top:2px">${fmtPnl(i.pnl, i.pnl_pct)}</div>
+          </div>
+        </div>
+      </div>`;
+  }).join("");
 }
 
 // Renda variável (ações/FIIs) vinda do Open Finance — read-only, marcada a mercado.

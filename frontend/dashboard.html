@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>PigBank</title>
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
-<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#111111" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -738,6 +738,16 @@
         </div>
         <div id="rv-summary" class="rv-summary"></div>
         <div id="rv-list"></div>
+      </div>
+
+      <!-- 3c. Renda fixa via banco (CDB/Tesouro do Open Finance) — read-only, agregada -->
+      <div class="mock-card" id="of-rf-card" style="margin-bottom:14px;display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <h3 style="margin:0">Renda fixa · via banco</h3>
+          <span style="font-size:.7rem;color:var(--text-3)">CDB e Tesouro · atualizado pelo seu banco</span>
+        </div>
+        <div id="of-rf-summary" class="rv-summary"></div>
+        <div id="of-rf-list"></div>
       </div>
 
       <!-- 4. Simulador líquido -->

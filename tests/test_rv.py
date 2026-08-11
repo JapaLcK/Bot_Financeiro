@@ -99,3 +99,25 @@ def test_zero_market_value_is_hidden(user_id):
 def test_no_of_data_returns_empty(user_id):
     assert db.list_rv_positions(user_id) == []
     assert db.rv_portfolio_summary(user_id)["count"] == 0
+
+
+# ── Renda fixa do banco (CDB/Tesouro) agregada — não vira caixinha ────────────
+def test_of_fixed_income_aggregated_and_clean(user_id):
+    NU = "CDB - NU FINANCEIRA S.A. - SOCIEDADE DE CREDITO, FINANCIAMENTO E INVESTIMENTO"
+    _seed(user_id, [
+        {"id": "cdb1", "name": NU, "type": "FIXED_INCOME", "subtype": "CDB", "balance": 1000.0, "amount": 950.0},
+        {"id": "cdb2", "name": NU, "type": "FIXED_INCOME", "subtype": "CDB", "balance": 2000.0, "amount": 1900.0},
+        {"id": "tes1", "name": "Tesouro IPCA+ 2032", "type": "FIXED_INCOME", "subtype": "TREASURY", "balance": 500.0, "amount": 480.0},
+        {"id": "cdb0", "name": NU, "type": "FIXED_INCOME", "subtype": "CDB", "balance": 0.0, "amount": 0.0},  # zero → fora
+        {"id": "eq1", "name": "PETR4", "code": "PETR4", "type": "EQUITY", "subtype": "STOCK", "balance": 900.0, "amount": 1000.0},  # RV, não RF
+    ])
+    items = db.list_of_fixed_income(user_id)
+    by = {i["name"]: i for i in items}
+    assert "CDB · Nu Financeira" in by            # nome jurídico → limpo
+    assert by["CDB · Nu Financeira"]["count"] == 2  # os 2 com saldo (o zero fora)
+    assert by["CDB · Nu Financeira"]["balance"] == pytest.approx(3000.0)
+    assert by["CDB · Nu Financeira"]["pnl"] == pytest.approx(150.0)  # 3000 - 2850
+    assert "Tesouro IPCA+ 2032" in by
+    assert "PETR4" not in by                       # equity não é renda fixa
+    summ = db.of_fixed_income_summary(user_id)
+    assert summ["balance"] == pytest.approx(3500.0)

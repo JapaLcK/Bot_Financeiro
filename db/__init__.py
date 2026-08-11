@@ -229,6 +229,8 @@ from .open_finance import (
 from .rv import (
     list_rv_positions,
     rv_portfolio_summary,
+    list_of_fixed_income,
+    of_fixed_income_summary,
     pluggy_rv_kind,
     RV_KIND_LABELS,
 )
@@ -447,6 +449,7 @@ __all__ = [
     "save_open_finance_investments",
     "sync_open_finance_caixinhas",
     "list_rv_positions", "rv_portfolio_summary", "pluggy_rv_kind", "RV_KIND_LABELS",
+    "list_of_fixed_income", "of_fixed_income_summary",
     "list_caixinha_candidates", "bind_pocket_to_caixinha",
     "list_banqueiro_pockets", "banqueiro_pocket_pace", "update_pocket_of_last_seen",
     "delete_open_finance_transactions", "classify_open_finance_launch",
