@@ -67,6 +67,7 @@ from db import (
     accrue_all_pockets,
     accrue_all_investments,
     list_rv_positions,
+    list_of_fixed_income,
     create_investment_db,
     delete_investment,
     get_dashboard_market_rates,
@@ -293,30 +294,34 @@ async def _get_dashboard_current_state(user_id: int):
     now_mono = _startup_time.monotonic()
     cached = _dashboard_current_cache.get(int(user_id))
     if cached and now_mono - cached[0] < _DASHBOARD_CURRENT_CACHE_TTL_SECONDS:
-        return cached[1], cached[2], cached[3], cached[4]
+        return cached[1], cached[2], cached[3], cached[4], cached[5]
 
-    # rv_positions só LÊ open_finance_investments (não bate na rede) → cabe no gather
-    # sem estourar a latência do snapshot; a corretora é a fonte, o sync já atualizou.
-    current_pockets, current_investments, market_rates, rv_positions = await asyncio.gather(
+    # rv_positions e of_fixed_income só LÊEM open_finance_investments (não batem na
+    # rede) → cabem no gather sem estourar latência; a corretora é a fonte, o sync já
+    # atualizou. of_fixed_income = renda fixa do banco (CDB/Tesouro) agregada.
+    (current_pockets, current_investments, market_rates,
+     rv_positions, of_fixed_income) = await asyncio.gather(
         asyncio.to_thread(accrue_all_pockets, user_id),
         asyncio.to_thread(accrue_all_investments, user_id),
         asyncio.to_thread(get_dashboard_market_rates),
         asyncio.to_thread(list_rv_positions, user_id),
+        asyncio.to_thread(list_of_fixed_income, user_id),
     )
-    # Renda variável (ações/FIIs via OF) é feature paga (Essencial+). No Grátis o
-    # painel não recebe posições — a aba de investimentos já é gated, e assim o dado
-    # do banco nem trafega pra quem não tem o plano.
+    # RV + renda fixa via OF são features pagas (Essencial+). No Grátis não trafega o
+    # dado do banco — a aba de investimentos já é gated.
     from core.services.plan_service import require_min_tier
     if not require_min_tier(user_id, "essencial"):
         rv_positions = []
+        of_fixed_income = []
     _dashboard_current_cache[int(user_id)] = (
         _startup_time.monotonic(),
         current_pockets,
         current_investments,
         market_rates,
         rv_positions,
+        of_fixed_income,
     )
-    return current_pockets, current_investments, market_rates, rv_positions
+    return current_pockets, current_investments, market_rates, rv_positions, of_fixed_income
 
 
 def _dashboard_launch_filter_sql(filter_type: str | None, query: str | None) -> tuple[list[str], list]:
@@ -378,7 +383,7 @@ async def get_financial_data(
     page = max(int(page or 1), 1)
     limit = max(min(int(limit or 25), 100), 1)
     offset = (page - 1) * limit
-    current_pockets, current_investments, market_rates, current_rv_positions = await _get_dashboard_current_state(user_id)
+    current_pockets, current_investments, market_rates, current_rv_positions, current_of_fixed_income = await _get_dashboard_current_state(user_id)
     launch_filter_clauses, launch_filter_params = _dashboard_launch_filter_sql(filter_type, query)
     launch_filter_sql = "".join(f"\n                  AND ({clause})" for clause in launch_filter_clauses)
 
@@ -393,6 +398,7 @@ async def get_financial_data(
     pockets = current_pockets
     investments = current_investments  # do cache
     rv_positions = current_rv_positions  # renda variável (ações/FIIs via OF), do cache
+    of_fixed_income = current_of_fixed_income  # renda fixa do banco (CDB/Tesouro), agregada
     # Plano pago (Essencial+) tem OF ao vivo. No Grátis (pós-trial) as caixinhas do
     # banco congelam → o front troca "Sincronizada" por "reative seu banco" (upsell).
     from core.services.plan_service import require_min_tier as _require_min_tier
@@ -823,6 +829,12 @@ async def get_financial_data(
             "market_value": sum(p["market_value"] for p in rv_positions),
             "invested":     sum(p["invested"] for p in rv_positions),
             "pnl":          sum(p["pnl"] for p in rv_positions),
+        },
+        "of_fixed_income":    of_fixed_income,  # renda fixa do banco (CDB/Tesouro), agregada
+        "of_fixed_income_summary": {
+            "balance":  sum(i["balance"] for i in of_fixed_income),
+            "invested": sum(i["invested"] for i in of_fixed_income),
+            "pnl":      sum(i["pnl"] for i in of_fixed_income),
         },
         "market_rates":       market_rates,
         "recent_launches":    [dict(r) for r in launches],

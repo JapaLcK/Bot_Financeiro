@@ -18,6 +18,7 @@ amount, balance}. `value` (preço unitário) pode vir null → fallback balance/
 """
 from __future__ import annotations
 
+import re
 from decimal import InvalidOperation
 
 from .connection import get_conn
@@ -133,3 +134,78 @@ def rv_portfolio_summary(user_id: int) -> dict:
         "pnl_pct": (pnl / invested) if invested > 0 else 0.0,
         "count": len(pos),
     }
+
+
+# ── Renda fixa do banco (Open Finance): CDB, Tesouro — NÃO vira caixinha ───────
+# Decisão 2026-08-11: o Nubank (e outros) manda os investimentos com nome jurídico
+# gigante e SEM apelido; não dá pra tratar como "caixinha". Então renda fixa do banco
+# aparece aqui, na aba de Investimentos, agregada e read-only.
+
+def _clean_of_name(name: str) -> str:
+    """Nome legível pro investimento do banco (Pluggy manda o nome jurídico completo)."""
+    n = (name or "").strip()
+    up = n.upper()
+    if up.startswith("CDB"):
+        parts = [p.strip() for p in n.split(" - ")]
+        if len(parts) > 1:
+            issuer = re.sub(r"\b(S\.?/?A\.?|SOCIEDADE.*|FINANCIAMENTO.*|LTDA.*)\b.*", "", parts[1], flags=re.I)
+            issuer = " ".join(w.capitalize() for w in issuer.split()[:3]).strip()
+            return f"CDB · {issuer}" if issuer else "CDB"
+        return "CDB"
+    if up.startswith("TESOURO"):
+        return n  # já limpo (ex.: "Tesouro IPCA+ 2032")
+    if len(n) > 40:  # fundo/previdência com nome jurídico longo
+        base = re.sub(r"\b(FUNDO DE INVESTIMENTO.*|RESPONSABILIDADE.*|LTDA.*|S\.?/?A\.?)\b.*", "", n, flags=re.I).strip()
+        base = (base or n[:38]).strip()
+        return (base[:38] + "…") if len(base) > 38 else base
+    return n
+
+
+def list_of_fixed_income(user_id: int) -> list[dict]:
+    """Renda fixa do banco (FIXED_INCOME: CDB/Tesouro) via Open Finance, agregada por
+    nome limpo, read-only. Exclui o que virou caixinha (of_investment_id vinculado) e
+    saldo <= 0. P&L = balance − amount."""
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select i.name, i.balance,
+                       nullif(i.raw->>'amount', '')::numeric as amount
+                from open_finance_investments i
+                join open_finance_connections c on c.id = i.connection_id
+                where c.user_id = %s
+                  and upper(coalesce(i.type, '')) = 'FIXED_INCOME'
+                  and coalesce(i.balance, 0) > 0
+                  and not exists (
+                    select 1 from pockets p
+                    where p.of_investment_id = i.id and p.user_id = %s
+                  )
+                """,
+                (user_id, user_id),
+            )
+            rows = [dict(r) for r in (cur.fetchall() or [])]
+
+    groups: dict[str, dict] = {}
+    for r in rows:
+        label = _clean_of_name(r.get("name"))
+        bal = _f(r.get("balance"))
+        inv = _f(r.get("amount"), bal)
+        g = groups.setdefault(label, {"name": label, "balance": 0.0, "invested": 0.0, "count": 0})
+        g["balance"] += bal
+        g["invested"] += inv
+        g["count"] += 1
+
+    out = []
+    for g in groups.values():
+        pnl = g["balance"] - g["invested"]
+        out.append({**g, "pnl": pnl, "pnl_pct": (pnl / g["invested"]) if g["invested"] > 0 else 0.0})
+    out.sort(key=lambda x: x["balance"], reverse=True)
+    return out
+
+
+def of_fixed_income_summary(user_id: int) -> dict:
+    items = list_of_fixed_income(user_id)
+    bal = sum(i["balance"] for i in items)
+    inv = sum(i["invested"] for i in items)
+    return {"balance": bal, "invested": inv, "pnl": bal - inv, "count": sum(i["count"] for i in items)}
