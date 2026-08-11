@@ -76,9 +76,6 @@
   <button class="sidenav-item" type="button" data-nav="investments" data-pro-feature="investments" onclick="navigateTo('investments')">
     <span class="sn-icon" style="color:#22C55E"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span>
   </button>
-  <button class="sidenav-item" type="button" data-nav="rv" data-pro-feature="investments" onclick="navigateTo('rv')">
-    <span class="sn-icon" style="color:#F59E0B"><i class="ph ph-trend-up" aria-hidden="true"></i></span><span class="sn-label">Renda variável</span><span class="sn-tag">Pro</span>
-  </button>
   <!-- Só aparece pra quem é afiliado (initAffiliateNav mostra se /api/affiliate/me responder 200) -->
   <button class="sidenav-item" type="button" data-nav="affiliate" id="sidenav-affiliate" style="display:none" onclick="navigateTo('affiliate')">
     <span class="sn-icon" style="color:#F43F5E"><i class="ph ph-handshake" aria-hidden="true"></i></span><span class="sn-label">Afiliados</span>
@@ -195,7 +192,7 @@
         <h3 style="margin:0">Renda variável</h3>
         <span style="font-size:.72rem;color:var(--text-3)">ações e FIIs · atualizado pela sua corretora</span>
       </div>
-      <button class="mock-cta" onclick="navigateTo('rv')">Ver tudo <i class="ph ph-arrow-right" aria-hidden="true"></i></button>
+      <button class="mock-cta" onclick="navigateTo('investments')">Ver tudo <i class="ph ph-arrow-right" aria-hidden="true"></i></button>
     </div>
     <div id="rv-overview-summary" class="rv-summary"></div>
     <div id="rv-overview-list"></div>
@@ -526,16 +523,6 @@
     <div id="goals-stats" class="stats-row"></div>
 
     <div id="goals-grid" class="mock-grid cols-2"></div>
-  </div>
-
-  <!-- Página dedicada: Renda variável (ações/FIIs via Open Finance) -->
-  <div id="rv-view" class="dash-view">
-    <div class="mock-header">
-      <p class="section-title" style="margin:0">Renda variável</p>
-    </div>
-    <p style="color:var(--text-3);font-size:.8rem;margin:-4px 0 16px">Ações e FIIs · atualizado pela sua corretora via Open Finance</p>
-    <div id="rv-summary-view" class="rv-summary"></div>
-    <div id="rv-list-view"></div>
   </div>
 
   <div id="affiliate-view" class="dash-view">

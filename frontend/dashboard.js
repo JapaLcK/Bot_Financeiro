@@ -384,13 +384,13 @@ function taxProfileForAsset(assetType) {
 // Mapa view-id → elemento. Inclui as novas seções acessíveis pelo sidebar.
 const DASH_VIEWS = [
   "overview", "analytics", "history", "fixed", "budgets", "goals",
-  "categories", "installments", "cards", "investments", "rv", "affiliate", "agentes"
+  "categories", "installments", "cards", "investments", "affiliate", "agentes"
 ];
 
 function setMainView(view) {
   // Free: bloqueia navegacao pra tela inteira de investimentos. Botao fica
   // visivel mas desabilitado; click abre modal de upgrade (item 17/18).
-  if ((view === "investments" || view === "rv") && !isProUser()) {
+  if (view === "investments" && !isProUser()) {
     showUpgradeModal("investments");
     return;
   }
@@ -412,7 +412,6 @@ function setMainView(view) {
     renderInvestmentsPanel(lastData);
     runInvestmentSimulator();
   }
-  if (view === "rv" && lastData) renderVariableIncomePanel(lastData);
 }
 
 // Atalho usado pelos itens do sidebar. Fecha o drawer no mobile.
@@ -6230,14 +6229,7 @@ function renderVariableIncomePanel(d) {
     }
   }
 
-  // 2) Página dedicada "Renda variável": header sempre visível; mostra estado vazio.
-  const vs = document.getElementById("rv-summary-view");
-  const vl = document.getElementById("rv-list-view");
-  if (vs) vs.innerHTML = pos.length ? summaryHtml : "";
-  if (vl) vl.innerHTML = pos.length ? listHtml
-    : `<div class="empty">Nenhum ativo de renda variável. Conecte seu banco/corretora no Open Finance pra ver ações e FIIs aqui.</div>`;
-
-  // 3) Parte dedicada na Visão Geral (home): some quando não há posições.
+  // 2) Parte dedicada na Visão Geral (home): some quando não há posições.
   const ov = document.getElementById("rv-overview");
   if (ov) {
     if (!pos.length) {
