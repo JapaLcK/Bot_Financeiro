@@ -8,6 +8,7 @@
 <meta name="theme-color" content="#111111" />
 <script src="https://cdn.pluggy.ai/pluggy-connect/v2.7.0/pluggy-connect.js"></script>
 <link rel="stylesheet" href="/brand.css" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -1155,7 +1156,7 @@ a { color: inherit; text-decoration: none; }
       <div class="sidebar-section">Segurança e acesso</div>
 
       <button class="sidebar-item" type="button" id="of-sidebar-item" data-section="open-finance" onclick="showSettingsSection('open-finance')">
-        <span class="sidebar-icon">🏦</span>
+        <span class="sidebar-icon"><i class="ph ph-bank" aria-hidden="true"></i></span>
         <span>
           <span class="sidebar-title">Open Finance</span>
           <span class="sidebar-sub" id="of-sidebar-sub">Conecte seus bancos</span>
@@ -1163,7 +1164,7 @@ a { color: inherit; text-decoration: none; }
       </button>
 
       <button class="sidebar-item active" type="button" data-section="security" onclick="showSettingsSection('security')">
-        <span class="sidebar-icon">🔐</span>
+        <span class="sidebar-icon"><i class="ph ph-lock-key" aria-hidden="true"></i></span>
         <span>
           <span class="sidebar-title">Segurança</span>
           <span class="sidebar-sub">Senha e sessões ativas</span>
@@ -1171,7 +1172,7 @@ a { color: inherit; text-decoration: none; }
       </button>
 
       <button class="sidebar-item" type="button" data-section="notifications" onclick="showSettingsSection('notifications')">
-        <span class="sidebar-icon">🔔</span>
+        <span class="sidebar-icon"><i class="ph ph-bell" aria-hidden="true"></i></span>
         <span>
           <span class="sidebar-title">Notificações</span>
           <span class="sidebar-sub">Alertas e lembretes</span>
@@ -1179,7 +1180,7 @@ a { color: inherit; text-decoration: none; }
       </button>
 
       <button class="sidebar-item" type="button" data-section="data" onclick="showSettingsSection('data')">
-        <span class="sidebar-icon">🗄️</span>
+        <span class="sidebar-icon"><i class="ph ph-archive" aria-hidden="true"></i></span>
         <span>
           <span class="sidebar-title">Meus dados</span>
           <span class="sidebar-sub">Exportação e exclusão</span>
@@ -1187,7 +1188,7 @@ a { color: inherit; text-decoration: none; }
       </button>
 
       <button class="sidebar-item" type="button" data-section="legal" onclick="showSettingsSection('legal')">
-        <span class="sidebar-icon">📜</span>
+        <span class="sidebar-icon"><i class="ph ph-scroll" aria-hidden="true"></i></span>
         <span>
           <span class="sidebar-title">Legal</span>
           <span class="sidebar-sub">Privacidade e termos</span>
@@ -1203,15 +1204,15 @@ a { color: inherit; text-decoration: none; }
       <div class="card" style="overflow:hidden">
         <div class="stats-strip">
           <div class="stat">
-            <div class="stat-label">🏦 Bancos</div>
+            <div class="stat-label"><i class="ph ph-bank" aria-hidden="true"></i> Bancos</div>
             <div class="stat-value" id="stat-banks">—</div>
           </div>
           <div class="stat">
-            <div class="stat-label">💳 Contas</div>
+            <div class="stat-label"><i class="ph ph-credit-card" aria-hidden="true"></i> Contas</div>
             <div class="stat-value" id="stat-accounts">—</div>
           </div>
           <div class="stat">
-            <div class="stat-label">📋 Transações</div>
+            <div class="stat-label"><i class="ph ph-clipboard-text" aria-hidden="true"></i> Transações</div>
             <div class="stat-value" id="stat-txs">—</div>
           </div>
         </div>
@@ -1254,7 +1255,7 @@ a { color: inherit; text-decoration: none; }
             </button>
 
             <div class="connect-note">
-              <span>🔒</span>
+              <span><i class="ph ph-lock" aria-hidden="true"></i></span>
               <span>A autorização acontece dentro do ambiente seguro do banco via Pluggy. O PigBank não recebe sua senha e você pode revogar o acesso depois.</span>
             </div>
           </div>
@@ -1269,10 +1270,10 @@ a { color: inherit; text-decoration: none; }
                   <div class="bankpick-title">Conectar banco</div>
                   <div class="bankpick-sub">Busque entre as instituições disponíveis</div>
                 </div>
-                <button class="bankpick-x" type="button" onclick="closeBankPicker()" aria-label="Fechar">✕</button>
+                <button class="bankpick-x" type="button" onclick="closeBankPicker()" aria-label="Fechar"><i class="ph ph-x" aria-hidden="true"></i></button>
               </div>
               <div class="bankpick-search-wrap">
-                <span aria-hidden="true">🔎</span>
+                <span aria-hidden="true"><i class="ph ph-magnifying-glass" aria-hidden="true"></i></span>
                 <input id="bankpick-search" type="text" placeholder="Buscar banco (ex: Nubank, Itaú, C6…)"
                        autocomplete="off" oninput="renderBankPicker(this.value)">
               </div>
@@ -1299,7 +1300,7 @@ a { color: inherit; text-decoration: none; }
           <div class="card-body" style="padding-top:8px; padding-bottom:8px">
             <div id="connections-list">
               <div class="empty-state">
-                <div class="empty-icon">🔌</div>
+                <div class="empty-icon"><i class="ph ph-plug" aria-hidden="true"></i></div>
                 <div class="empty-title">Nenhum banco conectado</div>
                 <div class="empty-sub">Escolha uma instituição ao lado para começar.</div>
               </div>
@@ -1311,7 +1312,7 @@ a { color: inherit; text-decoration: none; }
 
       <!-- Info banner -->
       <div class="info-banner">
-        <span class="info-banner-icon">💡</span>
+        <span class="info-banner-icon"><i class="ph ph-lightbulb" aria-hidden="true"></i></span>
         <span>
           <strong>Como funciona o Open Finance?</strong> Você autoriza o acesso dentro do ambiente seguro do banco, via Pluggy — a gente nunca vê sua senha e você pode revogar o acesso quando quiser.
         </span>
@@ -1328,7 +1329,7 @@ a { color: inherit; text-decoration: none; }
         <div class="card-body">
           <div id="accounts-list">
             <div class="empty-state">
-              <div class="empty-icon">💳</div>
+              <div class="empty-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></div>
               <div class="empty-title">Nenhuma conta ainda</div>
               <div class="empty-sub">Conecte um banco para ver suas contas e saldos aqui.</div>
             </div>
@@ -1360,7 +1361,7 @@ a { color: inherit; text-decoration: none; }
         <div class="card-body" style="padding-top:8px; padding-bottom:8px">
           <div id="transactions-list" class="tx-list">
             <div class="empty-state">
-              <div class="empty-icon">📋</div>
+              <div class="empty-icon"><i class="ph ph-clipboard-text" aria-hidden="true"></i></div>
               <div class="empty-title">Sem transações por enquanto</div>
               <div class="empty-sub">As transações aparecem aqui após você conectar um banco.</div>
             </div>
@@ -1611,7 +1612,7 @@ a { color: inherit; text-decoration: none; }
                   <div class="mini-kpi-value" id="notif-status-value">Carregando preferências</div>
                 </div>
                 <div class="info-banner">
-                  <span class="info-banner-icon">💡</span>
+                  <span class="info-banner-icon"><i class="ph ph-lightbulb" aria-hidden="true"></i></span>
                   <span>Você pode pausar dicas e insights separadamente sem afetar os fluxos do WhatsApp.</span>
                 </div>
               </div>
@@ -1775,7 +1776,7 @@ function filenameFromDisposition(header, fallback) {
 let _toastTimer;
 function showToast(msg, type="ok") {
   const el = document.getElementById("toast");
-  const icon = type==="ok" ? "✓" : type==="error" ? "✕" : "ℹ";
+  const icon = type==="ok" ? '<i class="ph ph-check-circle" aria-hidden="true"></i>' : type==="error" ? '<i class="ph ph-x-circle" aria-hidden="true"></i>' : '<i class="ph ph-info" aria-hidden="true"></i>';
   el.innerHTML = `<span>${icon}</span><span>${esc(msg)}</span>`;
   el.className = `show ${type}`;
   clearTimeout(_toastTimer);
@@ -1953,14 +1954,14 @@ async function loadSecuritySettings() {
 }
 
 const ACTIVITY_ICONS = {
-  password_reset_completed: "🔑",
-  email_changed: "✉️",
-  mfa_enabled: "🛡️",
-  mfa_disabled: "🛡️",
-  mfa_backup_codes_regenerated: "🎫",
-  open_finance_connected: "🏦",
-  open_finance_disconnected: "🏦",
-  login_from_new_ip: "🌐",
+  password_reset_completed: "key",
+  email_changed: "envelope",
+  mfa_enabled: "shield-check",
+  mfa_disabled: "shield",
+  mfa_backup_codes_regenerated: "ticket",
+  open_finance_connected: "bank",
+  open_finance_disconnected: "bank",
+  login_from_new_ip: "globe",
 };
 
 function formatActivityTime(iso) {
@@ -1994,7 +1995,7 @@ function renderActivityList(events, containerId, opts = {}) {
   }
   const slice = opts.limit ? events.slice(0, opts.limit) : events;
   container.innerHTML = slice.map((ev) => {
-    const icon = ACTIVITY_ICONS[ev.event] || "•";
+    const icon = `<i class="ph ph-${ACTIVITY_ICONS[ev.event] || "circle"}" aria-hidden="true"></i>`;
     const title = escapeHtml(ev.event_label || ev.event);
     const when = escapeHtml(formatActivityTime(ev.created_at));
     const ip = ev.ip ? escapeHtml(ev.ip) : null;
@@ -2487,7 +2488,7 @@ function renderBankPicker(filter) {
     html += `<button type="button" class="bank-row bankpick-row${sel}" onclick="pickBank(${Number(b.id)}, this)" data-name="${esc(b.name)}">
       <span class="bank-logo bankpick-logo" style="color:${_bankColor(b.color)}">${ini}${logo}</span>
       <span class="bank-info"><span class="bank-name">${esc(b.name)}</span><span class="bank-meta">${meta}</span></span>
-      <span class="bank-check">${sel ? "✓" : ""}</span>
+      <span class="bank-check">${sel ? '<i class="ph ph-check" aria-hidden="true"></i>' : ""}</span>
     </button>`;
   }
   el.innerHTML = html;
@@ -2499,7 +2500,7 @@ function pickBank(id, node) {
     const on = r === node;
     r.classList.toggle("active", on);
     const chk = r.querySelector(".bank-check");
-    if (chk) chk.textContent = on ? "✓" : "";
+    if (chk) chk.innerHTML = on ? '<i class="ph ph-check" aria-hidden="true"></i>' : "";
   });
   _syncBankPickFoot();
 }
@@ -2534,22 +2535,21 @@ function confirmBankPicker() {
 
 /* ── Category icons ──────────────────────────── */
 const CAT_ICONS = {
-  "alimentação":"🍔","comida":"🍔","restaurante":"🍔","ifood":"🍔",
-  "transporte":"🚗","uber":"🚗","99":"🚗","combustível":"⛽",
-  "saúde":"💊","farmácia":"💊","médico":"💊",
-  "lazer":"🎮","entretenimento":"🎬","streaming":"🎬",
-  "casa":"🏠","aluguel":"🏠","condomínio":"🏠",
-  "salário":"💰","renda":"💰",
-  "compras":"🛍️","compras online":"📦","mercado":"🛒","supermercado":"🛒",
-  "mercearia":"🛒","atacadão":"🛒","hortifruti":"🥦",
-  "educação":"📚","escola":"📚","curso":"📚",
-  "viagem":"✈️","hotel":"🏨",
+  "alimentação":"hamburger","comida":"hamburger","restaurante":"hamburger","ifood":"hamburger",
+  "transporte":"car","uber":"car","99":"car","combustível":"gas-pump",
+  "saúde":"pill","farmácia":"pill","médico":"pill",
+  "lazer":"game-controller","entretenimento":"film-slate","streaming":"film-slate",
+  "casa":"house","aluguel":"house","condomínio":"house",
+  "salário":"coins","renda":"coins",
+  "compras":"handbag","compras online":"package","mercado":"shopping-cart","supermercado":"shopping-cart",
+  "mercearia":"shopping-cart","atacadão":"shopping-cart","hortifruti":"basket",
+  "educação":"books","escola":"books","curso":"books",
+  "viagem":"airplane-tilt","hotel":"buildings",
 };
 function catIcon(cat) {
-  if (!cat) return "💸";
-  const k = cat.toLowerCase();
-  for (const [key,v] of Object.entries(CAT_ICONS)) if (k.includes(key)) return v;
-  return "💸";
+  let name = "trend-down";
+  if (cat) { const k = cat.toLowerCase(); for (const [key,v] of Object.entries(CAT_ICONS)) if (k.includes(key)) { name = v; break; } }
+  return `<i class="ph ph-${name}" aria-hidden="true"></i>`;
 }
 
 /* ── Bank helpers ────────────────────────────── */
@@ -2587,7 +2587,7 @@ function renderConnections(list) {
   applyOfConnectButton(); // refina a copy do CTA de upgrade (reative vs assine)
   const el = document.getElementById("connections-list");
   if (!list.length) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">🔌</div><div class="empty-title">Nenhum banco conectado</div><div class="empty-sub">Escolha uma instituição ao lado para começar.</div></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon"><i class="ph ph-plug" aria-hidden="true"></i></div><div class="empty-title">Nenhum banco conectado</div><div class="empty-sub">Escolha uma instituição ao lado para começar.</div></div>`;
     return;
   }
   el.innerHTML = list.map(c => {
@@ -2608,7 +2608,7 @@ function renderConnections(list) {
 function renderAccounts(list) {
   const el = document.getElementById("accounts-list");
   if (!list.length) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">💳</div><div class="empty-title">Nenhuma conta ainda</div><div class="empty-sub">Conecte um banco para ver suas contas e saldos aqui.</div></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></div><div class="empty-title">Nenhuma conta ainda</div><div class="empty-sub">Conecte um banco para ver suas contas e saldos aqui.</div></div>`;
     return;
   }
   el.innerHTML = `<div class="accounts-grid">${list.map(a => {
@@ -2627,7 +2627,7 @@ function renderAccounts(list) {
 function renderTransactions(list) {
   const el = document.getElementById("transactions-list");
   if (!list.length) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-title">Sem transações por enquanto</div><div class="empty-sub">As transações aparecem aqui após você conectar um banco.</div></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon"><i class="ph ph-clipboard-text" aria-hidden="true"></i></div><div class="empty-title">Sem transações por enquanto</div><div class="empty-sub">As transações aparecem aqui após você conectar um banco.</div></div>`;
     return;
   }
   el.innerHTML = list.map(t => {
@@ -2722,7 +2722,7 @@ function renderCaixinhas(list) {
     const cur = c.pocket_id ? Number(c.pocket_id) : "null";
     return `<div class="caix-row">
       <div class="caix-info">
-        <div class="caix-name">🐷 ${esc(c.name)}</div>
+        <div class="caix-name"><i class="ph ph-piggy-bank" aria-hidden="true"></i> ${esc(c.name)}</div>
         <div class="caix-bal">${fmt(c.balance)} guardado</div>
       </div>
       <select class="caix-select" onchange="bindCaixinha(${Number(c.of_investment_id)}, this.value, ${cur})">${opts}</select>
@@ -2782,7 +2782,7 @@ async function refreshOpenFinance() {
     if (Number(sync.still_updating) > 0) {
       showToast("O banco ainda está atualizando. Se faltar algo, toque em Atualizar de novo.", "error");
     } else {
-      showToast("Tudo em dia! 🐷", "ok");
+      showToast("Tudo em dia!", "ok");
     }
   } catch (err) {
     showToast(err.message || "Erro ao atualizar", "error");
@@ -3318,7 +3318,7 @@ initSettings();
     <div id="mfa-setup-step3" style="display:none">
       <h3>Códigos de backup</h3>
       <p class="sub">Guarde esses códigos em local seguro. Cada um pode ser usado uma vez se você perder o app autenticador.</p>
-      <div class="mfa-warn">⚠ Você não verá esses códigos novamente. Salve agora.</div>
+      <div class="mfa-warn"><i class="ph ph-warning" aria-hidden="true"></i> Você não verá esses códigos novamente. Salve agora.</div>
       <div class="mfa-codes" id="mfa-backup-codes-list"></div>
       <div class="mfa-actions">
         <button class="btn-cancel" type="button" onclick="copyBackupCodes()">Copiar todos</button>
@@ -3359,7 +3359,7 @@ initSettings();
     </div>
     <div id="mfa-regen-result" style="display:none">
       <h3>Novos códigos de backup</h3>
-      <div class="mfa-warn">⚠ Os anteriores foram invalidados. Salve estes agora.</div>
+      <div class="mfa-warn"><i class="ph ph-warning" aria-hidden="true"></i> Os anteriores foram invalidados. Salve estes agora.</div>
       <div class="mfa-codes" id="mfa-regen-codes-list"></div>
       <div class="mfa-actions">
         <button class="btn-cancel" type="button" onclick="copyRegenBackupCodes()">Copiar todos</button>
