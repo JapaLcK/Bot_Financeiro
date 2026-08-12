@@ -206,8 +206,9 @@ def test_ai_chat_tool_get_balance_consolidado(user_id, consolidated_on):
 
 # ── Gate beta desligado (fora do allowlist de teste): comportamento antigo ─────
 
-def test_gate_off_handler_mantem_carteira_mesmo_com_banco(user_id):
-    """Fora do beta, conectar banco NÃO muda o /saldo (segue Carteira manual)."""
+def test_gate_off_handler_mantem_carteira_mesmo_com_banco(user_id, monkeypatch):
+    """Com o freio puxado (fora do beta), conectar banco NÃO muda o /saldo."""
+    monkeypatch.setenv("OF_CONSOLIDATED_BALANCE_ENABLED", "0")
     db.add_launch_and_update_balance(user_id, "receita", 100, None, "seed")
     _connect_fake_bank(user_id, "4320.75")
 
@@ -218,7 +219,8 @@ def test_gate_off_handler_mantem_carteira_mesmo_com_banco(user_id):
     assert "4.320,75" not in out
 
 
-def test_gate_off_ai_chat_tool_formato_antigo(user_id):
+def test_gate_off_ai_chat_tool_formato_antigo(user_id, monkeypatch):
+    monkeypatch.setenv("OF_CONSOLIDATED_BALANCE_ENABLED", "0")
     from core.services.ai_chat.tools.balance import _get_balance
 
     db.add_launch_and_update_balance(user_id, "receita", 100, None, "seed")
@@ -228,11 +230,20 @@ def test_gate_off_ai_chat_tool_formato_antigo(user_id):
     assert res == {"balance": 100.0}
 
 
-def test_gate_liga_por_email_de_teste(user_id, monkeypatch):
-    """O allowlist default são os e-mails de teste (hiago/lucas)."""
+def test_gate_lancado_default_geral(user_id, monkeypatch):
+    """Lançado: sem env, TODO usuário passa no gate (o resto depende de ter banco)."""
     from core.services.plan_service import consolidated_balance_enabled
 
     monkeypatch.delenv("OF_CONSOLIDATED_BALANCE_ENABLED", raising=False)
+    assert consolidated_balance_enabled(user_id, email="lucaskuramoti06@gmail.com")
+    assert consolidated_balance_enabled(user_id, email="outro@exemplo.com")
+
+
+def test_gate_freio_volta_pro_allowlist(user_id, monkeypatch):
+    """OF_CONSOLIDATED_BALANCE_ENABLED=0 é o freio: volta pro beta (só allowlist)."""
+    from core.services.plan_service import consolidated_balance_enabled
+
+    monkeypatch.setenv("OF_CONSOLIDATED_BALANCE_ENABLED", "0")
     assert consolidated_balance_enabled(user_id, email="lucaskuramoti06@gmail.com")
     assert consolidated_balance_enabled(user_id, email="hiagojo2016@gmail.com")
     assert not consolidated_balance_enabled(user_id, email="outro@exemplo.com")
