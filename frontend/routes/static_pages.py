@@ -11,7 +11,14 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
-from frontend.routes.shared import FRONTEND_DIR, gate_pro_page, html_file, limiter, public_site_url
+from frontend.routes.shared import (
+    FRONTEND_DIR,
+    gate_pro_page,
+    html_file,
+    inject_meta_pixel,
+    limiter,
+    public_site_url,
+)
 
 router = APIRouter()
 
@@ -31,7 +38,7 @@ async def serve_landing():
 
 @router.get("/app")
 async def serve_dashboard():
-    return html_file(FRONTEND_DIR / "dashboard.html")
+    return html_file(FRONTEND_DIR / "dashboard.html", pixel=False)
 
 
 @router.get("/home")
@@ -41,7 +48,7 @@ async def serve_home():
 
 @router.get("/settings")
 async def serve_settings():
-    return html_file(FRONTEND_DIR / "settings.html")
+    return html_file(FRONTEND_DIR / "settings.html", pixel=False)
 
 
 @router.get("/reset-password")
@@ -51,7 +58,7 @@ async def serve_reset_password():
 
 @router.get("/onboarding")
 async def serve_onboarding():
-    return html_file(FRONTEND_DIR / "onboarding.html")
+    return html_file(FRONTEND_DIR / "onboarding.html", pixel=False)
 
 
 @router.get("/login")
@@ -88,7 +95,7 @@ async def serve_changelog(request: Request):
     gate = gate_pro_page(request)
     if gate is not None:
         return gate
-    return html_file(FRONTEND_DIR / "changelog.html")
+    return html_file(FRONTEND_DIR / "changelog.html", pixel=False)
 
 
 def _guide_card_html(g: dict) -> str:
@@ -160,7 +167,7 @@ async def serve_comandos_app():
     """Versao logged-in da pagina /comandos. Layout interno (mesmo header
     da home), personalizado com base no snapshot/plano. Mantém a URL
     /comandos pra landing publica intacta."""
-    return html_file(FRONTEND_DIR / "comandos-app.html")
+    return html_file(FRONTEND_DIR / "comandos-app.html", pixel=False)
 
 
 @router.get("/api/commands-catalog")
@@ -239,7 +246,9 @@ async def serve_suporte():
     template = (FRONTEND_DIR / "suporte.html").read_text(encoding="utf-8")
     # Mesmos headers de cache das demais páginas HTML (html_file): o /suporte é
     # montado à mão (injeta o FAQ), então precisa setar no-store explicitamente.
-    return Response(content=template.replace("{{FAQ}}", faq),
+    # /suporte é público → recebe o Meta Pixel como as demais páginas públicas.
+    page = inject_meta_pixel(template.replace("{{FAQ}}", faq))
+    return Response(content=page,
                     media_type="text/html; charset=utf-8",
                     headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
 

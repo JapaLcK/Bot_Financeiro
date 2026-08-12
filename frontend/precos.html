@@ -496,6 +496,8 @@ async function startCheckout(interval, btn, plan) {
 
     const data = await resp.json();
     if (data && data.checkout_url) {
+      // Meta Ads: usuário iniciou o checkout (antes de ir pra Stripe).
+      if (window.fbq) fbq("track", "InitiateCheckout", { content_category: plan || "", content_name: interval || "" });
       window.location.href = data.checkout_url;
     } else {
       showToast("Resposta inesperada do servidor.", "err");
