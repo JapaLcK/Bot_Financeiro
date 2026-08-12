@@ -81,16 +81,17 @@ def test_reporter_envia_email_quando_nao_descadastrado(monkeypatch):
     assert len(sent) == 1
 
 
-# ── Beta dos Agentes: allowlist por e-mail (lançamento em fases) ──────────────
+# ── Agentes: lançado geral, com freio de emergência pra voltar ao beta ────────
 
-def test_agents_ui_enabled_default_so_emails_de_teste(monkeypatch):
+def test_agents_ui_enabled_default_lancado_geral(monkeypatch):
+    # Lançado: sem env, TODO usuário vê os agentes. O limite Free vs pago mora
+    # no gate por tier (agent_kind_allowed), não aqui.
     import core.services.plan_service as ps
     monkeypatch.delenv("AGENTS_UI_ENABLED", raising=False)
     monkeypatch.delenv("AGENTS_BETA_EMAILS", raising=False)
     monkeypatch.delenv("AGENTS_BETA_USER_IDS", raising=False)
     assert ps.agents_ui_enabled(1, "lucaskuramoti06@gmail.com") is True
-    assert ps.agents_ui_enabled(1, "HIAGOJO2016@gmail.com") is True   # case-insensitive
-    assert ps.agents_ui_enabled(1, "estranho@example.com") is False
+    assert ps.agents_ui_enabled(1, "estranho@example.com") is True
 
 
 def test_agents_ui_enabled_flag_global_abre_geral(monkeypatch):
@@ -99,9 +100,21 @@ def test_agents_ui_enabled_flag_global_abre_geral(monkeypatch):
     assert ps.agents_ui_enabled(1, "qualquer@example.com") is True
 
 
-def test_agents_ui_enabled_env_sobrescreve_default(monkeypatch):
+def test_agents_ui_enabled_freio_volta_pro_beta(monkeypatch):
+    # AGENTS_UI_ENABLED=0 é o freio de emergência: volta pro modo beta,
+    # só a allowlist de e-mail/id passa.
     import core.services.plan_service as ps
-    monkeypatch.delenv("AGENTS_UI_ENABLED", raising=False)
+    monkeypatch.setenv("AGENTS_UI_ENABLED", "0")
+    monkeypatch.delenv("AGENTS_BETA_EMAILS", raising=False)
+    monkeypatch.delenv("AGENTS_BETA_USER_IDS", raising=False)
+    assert ps.agents_ui_enabled(1, "lucaskuramoti06@gmail.com") is True
+    assert ps.agents_ui_enabled(1, "HIAGOJO2016@gmail.com") is True   # case-insensitive
+    assert ps.agents_ui_enabled(1, "estranho@example.com") is False
+
+
+def test_agents_ui_enabled_freio_respeita_allowlist_custom(monkeypatch):
+    import core.services.plan_service as ps
+    monkeypatch.setenv("AGENTS_UI_ENABLED", "0")
     monkeypatch.setenv("AGENTS_BETA_EMAILS", "novo@example.com")
     assert ps.agents_ui_enabled(1, "novo@example.com") is True
     assert ps.agents_ui_enabled(1, "lucaskuramoti06@gmail.com") is False
