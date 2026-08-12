@@ -10,6 +10,7 @@ chamam via atributo de módulo, ex: `shared.authorize_dashboard_access`).
 
 import asyncio
 import json
+import logging
 import os
 import pathlib
 from datetime import date, datetime, timezone
@@ -295,6 +296,13 @@ def resolve_dashboard_user_id(request: Request) -> int:
 _GATE_EXEMPT_PREFIXES = ("/billing", "/auth", "/conta")
 
 
+def _is_pigbank_app(request: Request) -> bool:
+    """True se a requisição vem do WebView do app iOS (UA anexa "PigBankApp").
+    Usado pra isentar o app dos gates que forçariam a /precos — diretriz 3.1.1
+    da App Store proíbe empurrar tela de compra; o app fica no acesso base."""
+    return "PigBankApp" in (request.headers.get("user-agent") or "")
+
+
 def _enforce_subscription_gate(request: Request, user_id: int) -> None:
     """Backstop server-side das rotas de dados do dashboard. Além do paywall
     (assinatura ativa/trial), fecha o gate de escolha de plano no cadastro: sem
@@ -306,7 +314,9 @@ def _enforce_subscription_gate(request: Request, user_id: int) -> None:
     if any(path.startswith(p) for p in _GATE_EXEMPT_PREFIXES):
         return
     from core.services.plan_service import has_app_access, needs_plan_selection
-    if needs_plan_selection(user_id):
+    # App iOS não passa pelo gate de escolha (não pode comprar/escolher via web);
+    # segue governado por has_app_access e pelos limites por-feature/tier.
+    if not _is_pigbank_app(request) and needs_plan_selection(user_id):
         raise HTTPException(status_code=402, detail={"error": "plan_selection_required"})
     if not has_app_access(user_id):
         raise HTTPException(status_code=402, detail={"error": "subscription_required"})
@@ -350,6 +360,46 @@ def gate_pro_page(request: Request):
             return login_redirect
     if not is_pro(user_id):
         return RedirectResponse(url="/precos", status_code=302)
+    return None
+
+
+def gate_plan_selection(request: Request):
+    """Gate de PÁGINA do cadastro: obriga a escolher um plano na /precos antes
+    de servir o HTML do dashboard (home/app/settings). É o enforcement REAL —
+    os redirects em JS são só UX e são burláveis (JS em cache, navegação direta,
+    página sem o script). Aqui o servidor decide antes de entregar a página.
+
+    Retorna None quando pode servir (deslogado — o próprio HTML manda pro login;
+    ou já escolheu plano). Devolve RedirectResponse pra /precos quando o usuário
+    está logado e ainda não escolheu. Nunca levanta — é navegação de browser."""
+    from fastapi.responses import RedirectResponse
+    from core.services.plan_service import needs_plan_selection
+
+    # App iOS (WebView anexa "PigBankApp" ao UA): não redireciona pra tela de
+    # planos/compra — diretriz 3.1.1 da App Store. Espelha o !window.PB_IN_APP
+    # do cliente. O acesso segue governado pelos gates por-feature/tier.
+    if _is_pigbank_app(request):
+        return None
+
+    token = get_auth_token_from_request(request, None)
+    payload = decode_jwt(token) if token else None
+    # Deslogado / token inválido: deixa o HTML carregar e redirecionar pro login
+    # (comportamento atual preservado — não força /precos em quem nem logou).
+    if not payload or payload.get("type") != "auth":
+        return None
+    user_id = int(payload["sub"])
+    jti = payload.get("jti")
+    if jti:
+        session = get_active_session(jti)
+        if not session or int(session.get("user_id") or 0) != user_id:
+            return None
+    try:
+        if needs_plan_selection(user_id):
+            return RedirectResponse(url="/precos?escolha=1", status_code=302)
+    except Exception:
+        # Nunca trava a navegação por erro no gate; o backstop de dados (402) e o
+        # redirect em JS seguem valendo como rede de segurança.
+        logging.getLogger(__name__).warning("gate_plan_selection falhou", exc_info=True)
     return None
 
 
