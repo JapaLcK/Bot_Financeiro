@@ -1760,7 +1760,7 @@ _SECURITY_HEADERS = {
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.pluggy.ai https://cdn.jsdelivr.net "
-        "https://static.cloudflareinsights.com; "
+        "https://static.cloudflareinsights.com https://connect.facebook.net; "
         "style-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
         "img-src 'self' data: blob: https:; "

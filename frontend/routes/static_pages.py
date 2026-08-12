@@ -95,7 +95,7 @@ async def serve_changelog(request: Request):
     gate = gate_pro_page(request)
     if gate is not None:
         return gate
-    return html_file(FRONTEND_DIR / "changelog.html")
+    return html_file(FRONTEND_DIR / "changelog.html", pixel=False)
 
 
 def _guide_card_html(g: dict) -> str:
@@ -167,7 +167,7 @@ async def serve_comandos_app():
     """Versao logged-in da pagina /comandos. Layout interno (mesmo header
     da home), personalizado com base no snapshot/plano. Mantém a URL
     /comandos pra landing publica intacta."""
-    return html_file(FRONTEND_DIR / "comandos-app.html")
+    return html_file(FRONTEND_DIR / "comandos-app.html", pixel=False)
 
 
 @router.get("/api/commands-catalog")

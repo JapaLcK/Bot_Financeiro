@@ -1268,13 +1268,13 @@ function goExplorePro() {
   window.history.replaceState({}, "", cleanUrl.toString());
 
   if (status === "success") {
-    // Conversão de compra pro Meta Ads (só dispara na volta do pagamento,
-    // não em visitas normais da /home — o ?upgrade=success já foi limpo acima).
-    // O eventID casa com o Purchase server-side (Conversions API) → o Meta
-    // deduplica e conta a compra uma vez só, mesmo se os dois dispararem.
-    if (window.fbq) {
-      const opts = sid ? { eventID: "purchase_" + sid } : undefined;
-      fbq("track", "Purchase", { currency: "BRL" }, opts);
+    // Conversão de compra pro Meta Ads — só dispara quando há `sid` (id real da
+    // sessão de checkout, que a Stripe injeta no success_url). Sem sid = alguém
+    // abriu /home?upgrade=success na mão → NÃO conta como compra. A fonte de
+    // verdade é o Purchase server-side (Conversions API), disparado do webhook
+    // verificado; este é só o sinal do navegador, deduplicado pelo mesmo eventID.
+    if (window.fbq && sid) {
+      fbq("track", "Purchase", { currency: "BRL" }, { eventID: "purchase_" + sid });
     }
     // Pequeno delay pra dar o "wow effect" depois da pagina carregar
     setTimeout(() => {
