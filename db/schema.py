@@ -1580,6 +1580,22 @@ def init_db():
         """alter table auth_accounts add column if not exists trial_started_at timestamptz""",
         # Downsell do fim do trial: 1 e-mail por conta, na vida.
         """alter table auth_accounts add column if not exists trial_downsell_sent_at timestamptz""",
+        # Gate de escolha de plano no cadastro (2026-08-11): depois de criar a
+        # conta o usuário é OBRIGADO a passar pela /precos e escolher um plano
+        # (mesmo o Grátis) antes de entrar no dashboard. plan_selected_at marca
+        # o momento dessa escolha — NULL = ainda não escolheu → cai na /precos.
+        #
+        # Backfill preciso pela fronteira REAL do rollout (sem cutoff por data
+        # chutado): o ADD COLUMN com DEFAULT now() carimba TODAS as contas que já
+        # existem no exato instante em que a migration roda pela 1ª vez — não
+        # importa quando foram criadas nem se o v2 estava ligado. Em seguida o
+        # DROP DEFAULT faz TODO cadastro novo nascer com NULL (→ cai na /precos).
+        # Idempotente: `if not exists` pula o ADD (e o backfill junto) em
+        # redeploys, então contas novas nunca são recarimbadas; DROP DEFAULT de
+        # coluna sem default é no-op. now() é STABLE → fast default (metadata),
+        # avaliado uma vez, sem reescrever a tabela.
+        """alter table auth_accounts add column if not exists plan_selected_at timestamptz default now()""",
+        """alter table auth_accounts alter column plan_selected_at drop default""",
         """
         create table if not exists plan_trials (
           phone_hash text primary key,

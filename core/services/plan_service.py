@@ -269,6 +269,33 @@ def has_app_access(user_id: int) -> bool:
     return is_pro(int(user_id))
 
 
+def needs_plan_selection(user_id: int, user: dict | None = None) -> bool:
+    """True se o cadastro ainda NÃO escolheu um plano na /precos.
+
+    Regra de produto (2026-08-11): depois de criar a conta, o usuário é obrigado
+    a passar pela /precos e escolher um plano — mesmo o Grátis — antes de entrar
+    no dashboard. `plan_selected_at` (auth_accounts) marca essa escolha.
+
+    Nunca trava quem já tem assinatura paga/trial vigente (escolha implícita no
+    checkout) nem contas antigas (backfill em schema.py). Com o v2 desligado
+    (freio de emergência) o gate fica dormente — o fluxo legado do paywall vale.
+    """
+    if not plans_v2_enabled():
+        return False
+    if user is None:
+        user = get_auth_user(int(user_id))
+    if not user:
+        return False
+    if user.get("plan_selected_at"):
+        return False
+    # Assinante pago/trial ativo já escolheu implicitamente no checkout.
+    stored = (user.get("plan") or "").lower()
+    tier = _STORED_PLAN_TO_TIER.get(stored, "free")
+    if tier != "free" and _paid_plan_active(user):
+        return False
+    return True
+
+
 def get_user_limits(user_id: int) -> PlanLimits:
     """Retorna os limites/features aplicáveis a este usuário.
 

@@ -72,7 +72,7 @@
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> 1 caixinha e 1 cartão</li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Piggy IA · 20 mensagens/mês</li>
             </ul>
-            <a class="btn btn-outline btn-block" href="/cadastro">Criar conta grátis</a>
+            <a class="btn btn-outline btn-block" id="free-cta" href="/cadastro">Criar conta grátis</a>
           </article>
 
           <article class="plan">
@@ -292,7 +292,7 @@ function openChangeModal(plan) {
   const data = fmtBrDate(subState.current_period_end);
   document.getElementById("chg-body").innerHTML =
     `<p style="margin:0 0 10px"><strong>${cur}</strong> → <strong>${novo} (${preco})</strong></p>` +
-    "<p style=\"margin:0 0 6px\"><i class="ph ph-check-circle" aria-hidden="true"></i> Nada é cobrado agora</p>" +
+    `<p style="margin:0 0 6px"><i class="ph ph-check-circle" aria-hidden="true"></i> Nada é cobrado agora</p>` +
     `<p style="margin:0 0 6px"><i class="ph ph-check-circle" aria-hidden="true"></i> Você continua no ${cur} até <strong>${data}</strong> (período já pago)</p>` +
     `<p style="margin:0"><i class="ph ph-check-circle" aria-hidden="true"></i> Em ${data} seu plano vira ${novo} e a cobrança de ${preco} acontece no cartão cadastrado</p>`;
   const confirm = document.getElementById("chg-confirm");
@@ -351,6 +351,73 @@ async function cancelChange(btn) {
   }
 }
 
+// ── Onboarding: escolha de plano pós-cadastro ────────────────────────────────
+// Cadastro novo é jogado pra cá antes do dashboard. O card Grátis vira
+// "Continuar com o plano Grátis" (fecha o gate via /billing/select-free e entra
+// no app); os pagos seguem no fluxo normal de checkout.
+async function applyOnboardingChoice() {
+  let me = null;
+  try {
+    const r = await fetch("/auth/me", { credentials: "same-origin" });
+    if (!r.ok) return; // deslogado: mantém "Criar conta grátis" → /cadastro
+    me = await r.json();
+  } catch { return; }
+
+  const cta = document.getElementById("free-cta");
+  if (me && me.needs_plan_selection) {
+    // Guia visual: deixa claro que precisa escolher um plano pra começar.
+    const sub = document.getElementById("precos-sub");
+    if (sub) sub.textContent = "Escolha um plano pra começar — dá pra seguir no Grátis ou testar um plano pago 30 dias de graça.";
+    if (cta) {
+      cta.removeAttribute("href");
+      cta.style.cursor = "pointer";
+      cta.textContent = "Continuar com o plano Grátis";
+      cta.onclick = function (e) { e.preventDefault(); selectFree(cta); };
+    }
+  } else if (me && cta) {
+    // Já logado e com plano escolhido: o card Grátis não leva pro /cadastro.
+    cta.removeAttribute("href");
+    cta.textContent = "Seu cadastro está pronto";
+    cta.classList.add("btn-outline");
+    cta.style.opacity = ".7";
+    cta.style.cursor = "default";
+    cta.onclick = function (e) { e.preventDefault(); };
+  }
+}
+
+async function selectFree(btn) {
+  if (btn.classList.contains("loading")) return;
+  const orig = btn.textContent;
+  btn.classList.add("loading");
+  btn.textContent = "Ativando…";
+  try {
+    const r = await fetch("/billing/select-free", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "x-csrf-token": getCsrfToken() },
+    });
+    if (r.status === 401) {
+      showToast("Faça login pra continuar.", "err");
+      setTimeout(() => { window.location.href = "/login?next=" + encodeURIComponent("/precos"); }, 900);
+      return;
+    }
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const msg = (d.detail && d.detail.message) ||
+        (typeof d.detail === "string" ? d.detail : "Não consegui ativar o Grátis.");
+      showToast(msg, "err");
+      btn.classList.remove("loading");
+      btn.textContent = orig;
+      return;
+    }
+    window.location.href = d.dashboard_url || "/home";
+  } catch {
+    showToast("Erro de conexão. Tente novamente.", "err");
+    btn.classList.remove("loading");
+    btn.textContent = orig;
+  }
+}
+
 (async function loadPlansState(){
   try {
     const resp = await fetch("/billing/plans-config", { credentials: "same-origin" });
@@ -370,6 +437,8 @@ async function cancelChange(btn) {
     // Assinante logado: botões viram "Seu plano atual / Trocar / Agendado".
     await loadSubscription();
     refreshPlanButtons();
+    // Cadastro novo: card Grátis vira "Continuar com o plano Grátis".
+    await applyOnboardingChoice();
   } catch {}
 })();
 

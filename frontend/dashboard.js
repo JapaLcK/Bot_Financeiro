@@ -9303,6 +9303,13 @@ function _showAccessError(title, msg) {
       if (me && me.agents_ui_enabled === false) {
         document.querySelectorAll('[data-nav="agentes"]').forEach(el => { el.style.display = "none"; });
       }
+      // Gate de escolha de plano: cadastro novo passa pela /precos antes de
+      // acessar o app (mesmo escolhendo o Grátis). Só na web — no app iOS o gate
+      // fica de fora pra não forçar a tela de planos/compra (diretriz 3.1.1).
+      if (me && me.needs_plan_selection && !window.PB_IN_APP) {
+        window.location.replace("/precos?escolha=1");
+        return;
+      }
       if (me && me.app_access === false) {
         if (window.PB_IN_APP) {
           // App iOS: tela neutra, sem link de compra (diretriz 3.1.1)
