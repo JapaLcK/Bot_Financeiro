@@ -878,6 +878,45 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
     async def admin_auth_me(username: str = Depends(_get_current_admin)):
         return {"username": username}
 
+    @app.get("/admin/push-test")
+    async def admin_push_test(
+        user_id: int,
+        send: int = 1,
+        username: str = Depends(_get_current_admin),
+    ):
+        """Diagnóstico de push: mostra tokens do usuário e (send=1) dispara um
+        push de teste. Roda no serviço Dashboard, onde vivem as envs APNS_*.
+        Ex.: /admin/push-test?user_id=88648360  (add &send=0 pra só conferir)."""
+        import asyncio
+
+        from db import list_push_tokens
+        from core.services import push_service
+
+        tokens = await asyncio.to_thread(list_push_tokens, user_id)
+        result = {
+            "user_id": user_id,
+            "tokens": [
+                {
+                    "suffix": t["token"][-8:],
+                    "platform": t.get("platform"),
+                    "environment": t.get("environment"),
+                }
+                for t in tokens
+            ],
+            "token_count": len(tokens),
+            "apns_configured": push_service.is_configured(),
+            "sent": None,
+        }
+        if send and tokens and push_service.is_configured():
+            result["sent"] = await asyncio.to_thread(
+                push_service.send_push_to_user,
+                user_id,
+                "PigBank",
+                "Teste de notificação 🐷 — se você recebeu, o push está funcionando!",
+                collapse_id="push-test",
+            )
+        return result
+
     @app.post("/admin/auth/logout")
     async def admin_auth_logout(response: Response):
         _clear_admin_cookie(response)
