@@ -6282,7 +6282,7 @@ function renderVariableIncomePanel(d) {
       </div>`;
   }).join("");
 
-  // 1) Card na aba de Investimentos: some quando não há posições.
+  // Card na aba de Investimentos: some quando não há posições.
   const card = document.getElementById("rv-card");
   if (card) {
     if (!pos.length) {
@@ -6291,18 +6291,6 @@ function renderVariableIncomePanel(d) {
       card.style.display = "";
       const s = document.getElementById("rv-summary"); if (s) s.innerHTML = summaryHtml;
       const l = document.getElementById("rv-list"); if (l) l.innerHTML = listHtml;
-    }
-  }
-
-  // 2) Parte dedicada na Visão Geral (home): some quando não há posições.
-  const ov = document.getElementById("rv-overview");
-  if (ov) {
-    if (!pos.length) {
-      ov.style.display = "none";
-    } else {
-      ov.style.display = "";
-      const os = document.getElementById("rv-overview-summary"); if (os) os.innerHTML = summaryHtml;
-      const ol = document.getElementById("rv-overview-list"); if (ol) ol.innerHTML = listHtml;
     }
   }
 }
