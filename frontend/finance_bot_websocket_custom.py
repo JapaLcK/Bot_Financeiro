@@ -33,7 +33,7 @@ from datetime import datetime, date, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Dict
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, Request, Response
+from fastapi import BackgroundTasks, FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, RedirectResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -2348,7 +2348,7 @@ async def auth_register(request: Request, body: RegisterBody):
 
 @app.post("/auth/verify-email")
 @limiter.limit("10/minute")
-async def auth_verify_email(request: Request, response: Response, body: VerifyEmailBody):
+async def auth_verify_email(request: Request, response: Response, body: VerifyEmailBody, background_tasks: BackgroundTasks):
     """
     Confirma o código de verificação e cria a conta.
     Retorna JWT + link_code igual ao registro anterior.
@@ -2375,13 +2375,13 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
 
     await _apply_referral_attribution(request, response, int(user_id))
 
-    # Meta Conversions API — CompleteRegistration (conta criada). Fire-and-forget,
-    # nunca pode quebrar o cadastro. event_id signup_<uid> casa com o pixel do
-    # /cadastro pro Meta deduplicar.
+    # Meta Conversions API — CompleteRegistration (conta criada). Agendado como
+    # background task (roda DEPOIS da resposta) pra um Meta lento/fora nunca
+    # atrasar o cadastro. event_id signup_<uid> casa com o pixel do /cadastro.
     try:
         from core.services.meta_capi import capi_configured, registration_event_id, send_event
         if capi_configured():
-            await asyncio.to_thread(
+            background_tasks.add_task(
                 send_event,
                 event_name="CompleteRegistration",
                 event_id=registration_event_id(user_id),
@@ -3436,6 +3436,7 @@ async def auth_google_complete_signup(
     request: Request,
     response: Response,
     body: GoogleSignupCompleteBody,
+    background_tasks: BackgroundTasks,
 ):
     """Finaliza o cadastro Google: cria conta com nome + telefone."""
     from db import consume_pending_google_signup
@@ -3465,17 +3466,18 @@ async def auth_google_complete_signup(
     await _apply_referral_attribution(request, response, user_id)
 
     # Meta Conversions API — CompleteRegistration (conta criada via Google).
-    # Fire-and-forget; event_id signup_<uid> casa com o pixel pro dedup.
+    # Background task (roda após a resposta); event_id signup_<uid> casa com o
+    # pixel do /onboarding pro Meta deduplicar.
     try:
         from core.services.meta_capi import capi_configured, registration_event_id, send_event
         if capi_configured():
-            await asyncio.to_thread(
+            background_tasks.add_task(
                 send_event,
                 event_name="CompleteRegistration",
                 event_id=registration_event_id(user_id),
                 event_time=int(datetime.now(timezone.utc).timestamp()),
                 email=email,
-                event_source_url=f"{DASHBOARD_URL}/cadastro",
+                event_source_url=f"{DASHBOARD_URL}/onboarding",
             )
     except Exception as exc:
         print(f"[auth] meta capi registration (google) falhou user={user_id}: {exc}")
