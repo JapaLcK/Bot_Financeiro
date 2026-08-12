@@ -510,6 +510,10 @@ async function startCheckout(interval, btn, plan) {
     btn.textContent = originalText;
   }
 }
+
+// Meta Ads: visualização da página de planos → público de remarketing
+// "olhou o preço mas não assinou".
+if (window.fbq) fbq("track", "ViewContent", { content_name: "precos", content_category: "plans" });
 </script>
   <script src="/nav-auth.js?v=7" defer></script>
 </body>
