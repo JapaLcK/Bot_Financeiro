@@ -180,14 +180,13 @@ def agents_beta_tester(user_id: int, email: str | None = None) -> bool:
 
 
 def agents_ui_enabled(user_id: int, email: str | None = None) -> bool:
-    """Gate beta da feature de Agentes (mesma mecânica do Open Finance). Liga se:
-    - AGENTS_UI_ENABLED global ligado (lançamento pra todos), OU
-    - o usuário é tester do beta (allowlist de e-mail/id — ver agents_beta_tester).
-    Default: SÓ os e-mails de teste veem/usam os agentes. Pra abrir geral, setar
-    AGENTS_UI_ENABLED=1 (aí este gate para de restringir e vale só o gate por tier)."""
-    if (os.getenv("AGENTS_UI_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on"):
-        return True
-    return agents_beta_tester(user_id, email)
+    """Gate da feature de Agentes. LANÇADO pra todos por padrão — quem decide
+    Free vs pago é o gate por tier (agent_kind_allowed/require_min_tier), não este.
+    AGENTS_UI_ENABLED=0 é o freio de emergência: volta pro modo beta (só os
+    testers da allowlist — ver agents_beta_tester)."""
+    if (os.getenv("AGENTS_UI_ENABLED") or "").strip().lower() in ("0", "false", "no", "off"):
+        return agents_beta_tester(user_id, email)
+    return True
 
 
 # Allowlist padrão do beta da lista completa de bancos (modal com busca). Mesma
@@ -226,16 +225,15 @@ _CONSOLIDATED_BETA_EMAILS_DEFAULT = {"lucaskuramoti06@gmail.com", "hiagojo2016@g
 
 
 def consolidated_balance_enabled(user_id: int, email: str | None = None) -> bool:
-    """Gate beta do saldo consolidado nas superfícies de leitura (WhatsApp /saldo,
-    resumos, chat IA, Discord). Liga se:
-    - OF_CONSOLIDATED_BALANCE_ENABLED global ligado (lançamento pra todos), OU
-    - o e-mail está em OF_CONSOLIDATED_BETA_EMAILS (default = e-mails de teste), OU
-    - o user_id está em OF_CONSOLIDATED_BETA_USER_IDS.
-    Default: SÓ as contas de teste veem o consolidado; o resto segue vendo a
-    Carteira manual como sempre. O dashboard web não passa por aqui (já somava
+    """Gate do saldo consolidado nas superfícies de leitura (WhatsApp /saldo,
+    resumos, chat IA, Discord). LANÇADO pra todos por padrão: quem tem banco OF
+    conectado vê Carteira + bancos somados, o resto segue só a Carteira manual.
+    OF_CONSOLIDATED_BALANCE_ENABLED=0 é o freio de emergência: volta pro beta
+    (só a allowlist de e-mail/id). O dashboard web não passa por aqui (já somava
     os bancos antes deste gate)."""
-    if (os.getenv("OF_CONSOLIDATED_BALANCE_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on"):
+    if (os.getenv("OF_CONSOLIDATED_BALANCE_ENABLED") or "").strip().lower() not in ("0", "false", "no", "off"):
         return True
+    # Freio puxado: volta pro comportamento de beta (só a allowlist).
     raw = os.getenv("OF_CONSOLIDATED_BETA_EMAILS")
     if raw is None:
         beta_emails = _CONSOLIDATED_BETA_EMAILS_DEFAULT
