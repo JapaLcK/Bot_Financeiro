@@ -173,9 +173,8 @@ coisas: ganha **família** e o Open Finance passa a ser um **pool por família**
 
 - **Modelo: assinatura única do titular** (flat) cobrindo a família — **não**
   cobra por assento. Um `price_id` novo no Stripe.
-- Preço: **a definir** (placeholder na `/precos` é "Aguarde"). Ancoragem: acima
-  do Pro (R$ 49,90), já que substitui várias assinaturas. A seção 3 mostra que o
-  custo de OF cabe folgado nessa faixa.
+- Preço: **a definir**, mas a seção 3 mostra que a R$ 5,00/conexão o piso
+  saudável é **R$ 89,90–99,90/mês** (R$ 49,90 dá prejuízo com o pool cheio).
 - **Só o titular tem assinatura Stripe.** Membros ganham Premium por **direito
   derivado** da família, não por assinatura própria.
 - **Cancelou / não pagou** (`last_payment_status`, `plan_expires_at` vencido) →
@@ -190,51 +189,68 @@ coisas: ganha **família** e o Open Finance passa a ser um **pool por família**
 
 ## 3. Análise de custo — Open Finance por família
 
-O provedor de Open Finance (Pluggy) cobra, em regra, **por conexão (item) ativa
-por mês**. Chame esse valor de **`C` = custo mensal por conexão ativa**.
+O provedor de Open Finance (Pluggy) cobra **por conexão (item) ativa por mês**.
+**Valor de contrato (2026-08-12): `C` = R$ 5,00 por conexão/mês** — registrado no
+código em `core/services/plan_limits.py` (`PLUGGY_COST_PER_CONNECTION_BRL = 5`).
 
-> ⚠️ **`C` precisa vir do contrato Pluggy** — não está no código. A tabela abaixo
-> usa uma faixa ilustrativa (R$ 0,80 / R$ 1,50 / R$ 2,50 por conexão/mês) só pra
-> dimensionar a decisão. Troque pelos números reais antes de fechar preço.
+> A R$ 5,00/conexão o custo de OF **domina** a estrutura do Premium — não é um
+> detalhe. É o que decide o piso de preço do plano.
 
 ### 3.1 Os dois cenários
 
 - **Cenário A — Ilimitado por membro** (como estava no doc antigo): sem teto. O
-  custo acompanha o uso real e **o pior caso é ilimitado** — uma família com um
-  membro "colecionador" de bancos (10, 15 conexões) estoura a margem sem aviso.
+  pior caso é **ilimitado** — um membro que conecta 15 bancos custa
+  `15 × 5 = R$ 75/mês` sozinho, estourando qualquer margem sem aviso.
 - **Cenário B — Pool de 10 por família** (proposto): teto rígido de 10 conexões
-  na família toda. **O pior caso é conhecido: `10 × C`.**
+  na família toda. **Pior caso conhecido: `10 × 5 = R$ 50/mês`.**
 
-### 3.2 Custo esperado vs. pior caso
+### 3.2 Custo de OF por uso da família (C = R$ 5,00)
 
-Uso realista: cada pessoa ativa em OF mantém ~2–3 conexões. Numa família de 3,
-o **esperado** gira em torno de **~7–8 conexões** (usei 7,5 na conta).
+| Uso | Conexões (família de 3) | Custo OF/mês |
+|---|---|---|
+| Leve — 1 banco/pessoa | 3 | **R$ 15,00** |
+| Médio — 2/pessoa | 6 | **R$ 30,00** |
+| Guia — 3/pessoa | 9 | **R$ 45,00** |
+| **Pool cheio (teto B)** | 10 | **R$ 50,00** |
+| Ilimitado (A), colecionador | 15+ | **R$ 75,00+** ⚠️ sem teto |
 
-| `C` (por conexão/mês) | A: esperado (~7,5 conx) | A: **pior caso** | B: esperado (~7,5) | B: **pior caso (10)** |
-|---|---|---|---|---|
-| R$ 0,80 | ~R$ 6,00 | **ilimitado** ⚠️ | ~R$ 6,00 | **R$ 8,00** |
-| R$ 1,50 | ~R$ 11,25 | **ilimitado** ⚠️ | ~R$ 11,25 | **R$ 15,00** |
-| R$ 2,50 | ~R$ 18,75 | **ilimitado** ⚠️ | ~R$ 18,75 | **R$ 25,00** |
+### 3.3 Margem só de OF, por preço do Premium
+
+Quanto o custo de OF come da receita, antes de Stripe (~4% + R$ 0,39/cobrança),
+IA e infra:
+
+| Preço Premium/mês | OF médio (R$ 30) | OF guia (R$ 45) | Pool cheio (R$ 50) |
+|---|---|---|---|
+| **R$ 49,90** | 60% | 90% | **100%+ ❌ prejuízo** |
+| **R$ 69,90** | 43% | 64% | 72% |
+| **R$ 89,90** | 33% | 50% | 56% |
+| **R$ 99,90** | 30% | 45% | 50% |
 
 **Leitura:**
-- No **caso médio, A e B custam praticamente o mesmo** — a maioria das famílias
-  nem encosta em 10. O pool não encarece o dia a dia.
-- A diferença está no **pior caso**: A não tem teto (margem imprevisível); B
-  trava em `10 × C` (no máximo **R$ 8–25 por família/mês** dependendo de `C`).
-- Com o Premium ancorado **acima de R$ 49,90**, mesmo o pior caso do pool (R$ 25
-  com `C` alto) consome **≤ 50%** da receita **só de OF** — e o caso médio fica
-  em **~12–25%**. Sobra margem pra Stripe (~4% + R$ 0,39/cobrança), IA e infra.
+- A R$ 5,00/conexão, **R$ 49,90 não fecha**: no uso "guia" (3/pessoa) o OF já é
+  90% da receita, e com o pool cheio dá **prejuízo** antes de contar Stripe/IA.
+  (Correção do doc anterior, que dizia "cabe folgado acima de R$ 49,90" — a R$ 5
+  **não cabe**.)
+- Pra manter o pior caso de OF em **≤ ~56%** da receita, o Premium precisa ficar
+  em **R$ 89,90–99,90/mês**.
+- No caso médio (R$ 30), A e B custam igual — o pool não encarece o dia a dia; ele
+  só **trava o pior caso** em R$ 50 em vez de deixá-lo correr solto.
 
-### 3.3 Recomendação
+### 3.4 Recomendação
 
-**Adotar o Cenário B (pool de 10 por família).** Praticamente não muda o custo
-médio, mas transforma o custo de OF de **imprevisível** (ilimitado) em **teto
-conhecido**, o que é o que permite precificar o Premium com margem garantida. A
-guia de ~3 por pessoa é comunicação/UX; a trava real é a soma ≤ 10 na família.
+1. **Manter o Cenário B (pool de 10 por família).** É o que torna o custo de OF
+   previsível (teto R$ 50) — essencial a R$ 5/conexão, onde o ilimitado vira
+   risco real de margem negativa.
+2. **Precificar o Premium em R$ 89,90–99,90/mês** (não R$ 49,90). Nessa faixa,
+   até o pool cheio deixa ≥ 44% de margem bruta antes de Stripe/IA.
+3. **Alternativa, se quiser sticker mais baixo:** encolher o pool (ex.: 6–7
+   conexões → teto R$ 30–35), aceitando a guia de ~2/pessoa em vez de 3. Baixa o
+   piso de preço, mas contraria a folga de "3 por pessoa + 1". Fica como opção,
+   não como recomendação.
 
-> **Ação pendente:** substituir `C` pelo valor real do contrato Pluggy e, se
-> houver faixas por volume, recalcular. A estrutura de decisão (pool > ilimitado)
-> não muda com o valor de `C` — só a magnitude.
+> **Sensibilidade:** cada R$ 1,00 a mais/menos no `C` do contrato move o pool
+> cheio em R$ 10/mês (10 conexões). Se renegociar o Pluggy pra baixo, o piso de
+> preço cai junto.
 
 ---
 
@@ -428,10 +444,11 @@ Seguindo `tests/test_plan_tiers.py` e `tests/test_billing_checkout.py`:
 
 ## 6. Decisões em aberto (produto)
 
-1. **Preço** do Premium (mensal/anual) — a seção 3 mostra que o OF cabe folgado
-   acima de R$ 49,90.
-2. **Valor real de `C`** (custo Pluggy por conexão) — para fechar a margem.
-3. **Nome comercial** ("Modo Família" já está na `/precos`).
+1. **Preço** do Premium (mensal/anual) — a seção 3 recomenda **R$ 89,90–99,90**
+   dado o custo de OF; falta a decisão final.
+2. **Nome comercial** ("Modo Família" já está na `/precos`).
+3. **Pool de 10 vs. menor** — manter 10 (recomendado) ou encolher pra baixar o
+   piso de preço (ver 3.4, alternativa 3).
 
 ### Decisões já fechadas nesta revisão
 - Tamanho da família: **3 pessoas** (titular + 2).

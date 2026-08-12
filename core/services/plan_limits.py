@@ -43,6 +43,13 @@ class PlanLimits(TypedDict):
 # Ordem canônica da escada. Comparações de tier usam este ranking.
 TIER_ORDER: dict[str, int] = {"free": 0, "essencial": 1, "plus": 2, "pro": 3}
 
+# Custo de infraestrutura de Open Finance: o provedor (Pluggy) cobra por conexão
+# (item) ATIVA por mês. Valor de contrato (2026-08-12): R$ 5,00/conexão/mês.
+# Usado no dimensionamento de margem do Premium/Modo Família (ver
+# docs/premium_family_plan_design.md, seção 3). Não entra em nenhum gate — é
+# parâmetro de custo, não de limite. Atualizar aqui se o contrato mudar.
+PLUGGY_COST_PER_CONNECTION_BRL: int = 5
+
 # Tier mínimo POR AGENTE (escada v2). Prateleira começa no Plus — Grátis e
 # Essencial têm 0 agentes (decisão 2026-08-06). Fase A = Plus+; Fase B
 # (detetive/cofre/barao, quando existirem) = Pro+. Kind não mapeado cai em
