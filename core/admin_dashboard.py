@@ -878,6 +878,47 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
     async def admin_auth_me(username: str = Depends(_get_current_admin)):
         return {"username": username}
 
+    @app.get("/admin/grant-pro")
+    async def admin_grant_pro(
+        email: str,
+        months: int = 12,
+        username: str = Depends(_get_current_admin),
+    ):
+        """Concede plano Pro a uma conta (por e-mail) por N meses. Uso: conta
+        demo do review da Apple / grants manuais.
+        Ex.: /admin/grant-pro?email=teste@teste.com"""
+        import asyncio
+
+        from db.connection import get_conn
+
+        def _grant():
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        update auth_accounts
+                           set plan = 'pro',
+                               plan_expires_at = now() + (%s || ' months')::interval
+                         where lower(email) = lower(%s)
+                        returning user_id, email, plan, plan_expires_at
+                        """,
+                        (int(months), email.strip()),
+                    )
+                    row = cur.fetchone()
+                conn.commit()
+                return row
+
+        row = await asyncio.to_thread(_grant)
+        if not row:
+            return {"ok": False, "error": "conta não encontrada", "email": email}
+        return {
+            "ok": True,
+            "user_id": row["user_id"],
+            "email": row["email"],
+            "plan": row["plan"],
+            "plan_expires_at": str(row["plan_expires_at"]),
+        }
+
     @app.get("/admin/push-test")
     async def admin_push_test(
         user_id: int,
