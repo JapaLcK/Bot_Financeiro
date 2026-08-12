@@ -235,6 +235,13 @@ from .rv import (
     RV_KIND_LABELS,
 )
 
+# ── Push notifications (app iOS) ──────────────────────────────────────────────
+from .push import (
+    register_push_token,
+    delete_push_token,
+    list_push_tokens,
+)
+
 # ── Agentes do Piggy ──────────────────────────────────────────────────────────
 from .agents import (
     AGENT_KINDS,
@@ -451,6 +458,7 @@ __all__ = [
     "save_open_finance_investments",
     "sync_open_finance_caixinhas",
     "list_rv_positions", "rv_portfolio_summary", "pluggy_rv_kind", "RV_KIND_LABELS",
+    "register_push_token", "delete_push_token", "list_push_tokens",
     "list_of_fixed_income", "of_fixed_income_summary",
     "list_caixinha_candidates", "bind_pocket_to_caixinha",
     "list_banqueiro_pockets", "banqueiro_pocket_pace", "update_pocket_of_last_seen",

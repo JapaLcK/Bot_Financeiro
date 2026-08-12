@@ -94,6 +94,7 @@ from frontend.routes.analytics import router as analytics_router
 from frontend.routes.cards import router as cards_router
 from frontend.routes.open_finance import router as open_finance_router
 from frontend.routes.pockets import router as pockets_router
+from frontend.routes.push import router as push_router
 from frontend.routes.settings import router as settings_router
 from frontend.routes.shared import (
     AUTH_COOKIE_NAME,
@@ -6384,6 +6385,9 @@ app.include_router(settings_router)
 
 # ─── Open Finance (Pluggy + mock) → frontend/routes/open_finance.py (F1 E4) ──
 app.include_router(open_finance_router)
+
+# ─── Push notifications (app iOS) → frontend/routes/push.py ──────────────────
+app.include_router(push_router)
 
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────

@@ -268,7 +268,36 @@
     });
   }
 
-  function init() { fixViewport(); buildTabbar(); hardenGlyphs(); enhanceOverview(); enhanceSettings(); wireGoogleLogin(); maybeOpenLaunch(); }
+  // Push notification (só app iOS nativo + usuário logado). Pede pro nativo
+  // registrar no APNs; o device token volta em window.PBPush.onToken, que faz
+  // o POST autenticado (reusa os cookies de sessão do WebView). PWA/preview não
+  // têm a ponte pbPush → no-op (push em PWA é fase futura, canal diferente).
+  function pbCookie(name) {
+    const m = document.cookie.split("; ").find(r => r.startsWith(name + "="));
+    return m ? decodeURIComponent(m.split("=").slice(1).join("=")) : "";
+  }
+  function wirePush() {
+    const bridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.pbPush;
+    if (!bridge) return;      // sem ponte nativa (PWA/preview/navegador)
+    if (!page) return;        // só em página logada (home/app/settings/comandos)
+    window.PBPush = window.PBPush || {};
+    window.PBPush.onToken = function (token, environment) {
+      if (!token) return;
+      const csrf = pbCookie("csrf_token");
+      fetch("/api/push/register", {
+        method: "POST",
+        credentials: "include",
+        headers: Object.assign(
+          { "Content-Type": "application/json" },
+          csrf ? { "X-CSRF-Token": csrf } : {}
+        ),
+        body: JSON.stringify({ token: token, platform: "ios", environment: environment || "production" }),
+      }).catch(() => {});
+    };
+    bridge.postMessage("register");
+  }
+
+  function init() { fixViewport(); buildTabbar(); hardenGlyphs(); enhanceOverview(); enhanceSettings(); wireGoogleLogin(); wirePush(); maybeOpenLaunch(); }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
   } else {

@@ -16,7 +16,8 @@ aberturas, e o `login.html` pula direto pra `/home` quando a sessão está viva.
 - **Regra de push** (Anexo 1 do contrato Apple): notificação NÃO pode conter
   valor, saldo ou dado financeiro — texto genérico, detalhe só dentro do app.
 - Plugins instalados: `@capacitor/app`, `@capacitor/push-notifications`
-  (push ainda sem backend — fase 2).
+  (registro do token é nativo no `AppDelegate`, não pelo plugin JS — o site
+  remoto não carrega o runtime do Capacitor). Ver "Push notifications" abaixo.
 - Dependências nativas via **Swift Package Manager** (sem CocoaPods).
 
 ## Comandos
@@ -52,8 +53,25 @@ npx cap open ios     # abre no Xcode
       `pigbankai://`) — Face ID/autofill do Safari no botão "Entrar com
       Google". Também exige build nativo novo; num build antigo o botão cai
       no fluxo web dentro do WebView, sem Face ID.
-- [ ] Push notifications: APNs key no Apple Developer → backend envia via
-      `aioapns`/`httpx` + registro do token no login (plugin já no bundle).
+- [x] Push notifications — **infra pronta, dormente até a APNs key existir**:
+      - Entitlement `App/App.entitlements` (`aps-environment`), plugado no
+        `project.pbxproj` (Debug+Release). **No Xcode ainda falta**: target App →
+        Signing & Capabilities → **+ Capability → Push Notifications** (com
+        assinatura automática ele provisiona o App ID sozinho).
+      - `AppDelegate.swift`: handler `pbPush("register")` pede autorização e
+        registra no APNs; o device token volta pro WebView via
+        `window.PBPush.onToken(token, env)`.
+      - Frontend `app-mode.js` (`wirePush`): só em app iOS logado, faz
+        `POST /api/push/register` com o token (reusa cookies de sessão).
+      - Backend: tabela `push_tokens`, `db/push.py`, rotas em
+        `frontend/routes/push.py`, sender em `core/services/push_service.py`
+        (APNs token-based, HTTP/2 via httpx+h2).
+      - **Pra ligar o envio**, setar envs no Railway (gerar a APNs Auth Key .p8
+        no portal Apple → Keys → +): `APNS_KEY_ID`, `APNS_TEAM_ID`
+        (= `S849YDA49P`), `APNS_AUTH_KEY` (conteúdo do .p8), `APNS_TOPIC`
+        (default `com.pigbankai.app`). Sem elas o sender é no-op.
+      - **Regra Apple**: o texto do push NÃO pode conter valor/saldo (Anexo 1
+        §4) — mandar texto genérico, detalhe só dentro do app.
 - [ ] Conta de review da Apple: user demo com plano Pro ativo (grant manual).
 - [ ] Ficha da App Store: screenshots, descrição, App Privacy (dados: e-mail,
       telefone, dados financeiros — vinculados à identidade; sem tracking).

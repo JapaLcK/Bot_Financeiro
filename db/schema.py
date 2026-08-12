@@ -30,6 +30,23 @@ def init_db():
           balance numeric not null default 0
         )
         """,
+
+        # Push notifications (app iOS) — device token do APNs por aparelho.
+        # unique(token): um device que re-registra atualiza o dono (troca de
+        # conta no mesmo aparelho). environment separa sandbox/production do APNs
+        # porque o mesmo token NÃO vale nos dois ambientes.
+        """
+        create table if not exists push_tokens (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          token text not null unique,
+          platform text not null default 'ios',
+          environment text not null default 'production',
+          created_at timestamptz default now(),
+          updated_at timestamptz default now()
+        )
+        """,
+        """create index if not exists idx_push_tokens_user on push_tokens(user_id)""",
         """
         create table if not exists pockets (
           id bigserial primary key,
