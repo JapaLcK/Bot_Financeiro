@@ -363,6 +363,34 @@ def gate_pro_page(request: Request):
     return None
 
 
+def _resolve_page_user_id(request: Request) -> int | None:
+    """user_id de uma navegação de página autenticada, aceitando os DOIS cookies
+    que valem uma sessão logada: auth_token (JWT de 15min) E dashboard_token (12h).
+
+    Espelha o que /auth/validate + resolve_dashboard_user_id aceitam. Sem isto, o
+    gate acharia "deslogado" quando o access expira mas o dashboard_token ainda é
+    válido (estado normal — o front só renova o access DEPOIS que o HTML carrega),
+    servindo a página sem checar o gate. Devolve None quando nenhum cookie é uma
+    sessão válida (aí o próprio HTML manda pro login)."""
+    # 1. auth_token (JWT curto)
+    token = get_auth_token_from_request(request, None)
+    payload = decode_jwt(token) if token else None
+    if payload and payload.get("type") == "auth":
+        uid = int(payload["sub"])
+        jti = payload.get("jti")
+        if not jti:
+            return uid
+        session = get_active_session(jti)
+        if session and int(session.get("user_id") or 0) == uid:
+            return uid
+    # 2. dashboard_token (cookie de 12h) — mesma validação de sessão/jti das
+    #    rotas de dados. Levanta 401 quando inválido → tratamos como deslogado.
+    try:
+        return resolve_dashboard_user_id(request)
+    except HTTPException:
+        return None
+
+
 def gate_plan_selection(request: Request):
     """Gate de PÁGINA do cadastro: obriga a escolher um plano na /precos antes
     de servir o HTML do dashboard (home/app/settings). É o enforcement REAL —
@@ -381,18 +409,11 @@ def gate_plan_selection(request: Request):
     if _is_pigbank_app(request):
         return None
 
-    token = get_auth_token_from_request(request, None)
-    payload = decode_jwt(token) if token else None
-    # Deslogado / token inválido: deixa o HTML carregar e redirecionar pro login
+    user_id = _resolve_page_user_id(request)
+    # Deslogado / sessão inválida: deixa o HTML carregar e redirecionar pro login
     # (comportamento atual preservado — não força /precos em quem nem logou).
-    if not payload or payload.get("type") != "auth":
+    if user_id is None:
         return None
-    user_id = int(payload["sub"])
-    jti = payload.get("jti")
-    if jti:
-        session = get_active_session(jti)
-        if not session or int(session.get("user_id") or 0) != user_id:
-            return None
     try:
         if needs_plan_selection(user_id):
             return RedirectResponse(url="/precos?escolha=1", status_code=302)
