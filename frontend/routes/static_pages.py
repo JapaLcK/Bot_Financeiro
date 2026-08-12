@@ -58,7 +58,10 @@ async def serve_reset_password():
 
 @router.get("/onboarding")
 async def serve_onboarding():
-    return html_file(FRONTEND_DIR / "onboarding.html", pixel=False)
+    # Página de conclusão do cadastro via Google → parte do funil de aquisição.
+    # Recebe o pixel pra o CompleteRegistration client-side (dedup com o CAPI e
+    # cobertura do modo pixel-only, sem token da Conversions API).
+    return html_file(FRONTEND_DIR / "onboarding.html")
 
 
 @router.get("/login")

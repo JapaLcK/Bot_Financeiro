@@ -33,7 +33,7 @@ from datetime import datetime, date, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Dict
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, Request, Response
+from fastapi import BackgroundTasks, FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, RedirectResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -2348,7 +2348,7 @@ async def auth_register(request: Request, body: RegisterBody):
 
 @app.post("/auth/verify-email")
 @limiter.limit("10/minute")
-async def auth_verify_email(request: Request, response: Response, body: VerifyEmailBody):
+async def auth_verify_email(request: Request, response: Response, body: VerifyEmailBody, background_tasks: BackgroundTasks):
     """
     Confirma o código de verificação e cria a conta.
     Retorna JWT + link_code igual ao registro anterior.
@@ -2374,6 +2374,23 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
     _set_dashboard_cookie(response, int(user_id), jti=jti)
 
     await _apply_referral_attribution(request, response, int(user_id))
+
+    # Meta Conversions API — CompleteRegistration (conta criada). Agendado como
+    # background task (roda DEPOIS da resposta) pra um Meta lento/fora nunca
+    # atrasar o cadastro. event_id signup_<uid> casa com o pixel do /cadastro.
+    try:
+        from core.services.meta_capi import capi_configured, registration_event_id, send_event
+        if capi_configured():
+            background_tasks.add_task(
+                send_event,
+                event_name="CompleteRegistration",
+                event_id=registration_event_id(user_id),
+                event_time=int(datetime.now(timezone.utc).timestamp()),
+                email=body.email.strip().lower(),
+                event_source_url=f"{DASHBOARD_URL}/cadastro",
+            )
+    except Exception as exc:
+        print(f"[auth] meta capi registration falhou user={user_id}: {exc}")
 
     wa_link = _build_whatsapp_onboarding_link(user_id)
 
@@ -3419,6 +3436,7 @@ async def auth_google_complete_signup(
     request: Request,
     response: Response,
     body: GoogleSignupCompleteBody,
+    background_tasks: BackgroundTasks,
 ):
     """Finaliza o cadastro Google: cria conta com nome + telefone."""
     from db import consume_pending_google_signup
@@ -3446,6 +3464,23 @@ async def auth_google_complete_signup(
     _set_dashboard_cookie(response, user_id, jti=jti)
 
     await _apply_referral_attribution(request, response, user_id)
+
+    # Meta Conversions API — CompleteRegistration (conta criada via Google).
+    # Background task (roda após a resposta); event_id signup_<uid> casa com o
+    # pixel do /onboarding pro Meta deduplicar.
+    try:
+        from core.services.meta_capi import capi_configured, registration_event_id, send_event
+        if capi_configured():
+            background_tasks.add_task(
+                send_event,
+                event_name="CompleteRegistration",
+                event_id=registration_event_id(user_id),
+                event_time=int(datetime.now(timezone.utc).timestamp()),
+                email=email,
+                event_source_url=f"{DASHBOARD_URL}/onboarding",
+            )
+    except Exception as exc:
+        print(f"[auth] meta capi registration (google) falhou user={user_id}: {exc}")
 
     await log_auth_login_event(
         email,
@@ -3666,7 +3701,10 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             mode="subscription",
             locale="pt-BR",
             allow_promotion_codes=True,
-            success_url=f"{DASHBOARD_URL}/home?upgrade=success&sid={{CHECKOUT_SESSION_ID}}",
+            success_url=(
+                f"{DASHBOARD_URL}/home?upgrade=success&sid={{CHECKOUT_SESSION_ID}}"
+                f"&ev={'trial' if trial_days > 0 else 'purchase'}"
+            ),
             cancel_url=f"{DASHBOARD_URL}/home?upgrade=cancelled",
             metadata=metadata,
             subscription_data=subscription_data,
@@ -4170,18 +4208,30 @@ async def billing_webhook(request: Request):
                 )
             except Exception as exc:
                 print(f"[billing] admin notify falhou user={user_id}: {exc}")
-            # Meta Conversions API — Purchase server-side (valor real + dedup
-            # com o pixel do navegador via event_id derivado da sessão).
+            # Meta Conversions API — conversão server-side, deduplicada com o
+            # pixel via event_id derivado da sessão. Trial → StartTrial; compra
+            # imediata (sem trial) → Purchase. A cobrança REAL pós-trial e as
+            # renovações viram Purchase lá no invoice.paid (não aqui).
             try:
-                from core.services.meta_capi import capi_configured, send_purchase_event
+                from core.services.meta_capi import (
+                    capi_configured,
+                    purchase_event_id,
+                    send_event,
+                    trial_event_id,
+                )
                 _sid = _g(session, "id")
                 if capi_configured() and _sid:
                     _value, _currency = _subscription_amount(sub)
                     _capi_email = await _user_email(user_id)
                     _evt_time = int(_g(event, "created") or _g(session, "created") or 0)
+                    if sub_status == "trialing":
+                        _ev_name, _ev_id = "StartTrial", trial_event_id(_sid)
+                    else:
+                        _ev_name, _ev_id = "Purchase", purchase_event_id(_sid)
                     await asyncio.to_thread(
-                        send_purchase_event,
-                        session_id=_sid,
+                        send_event,
+                        event_name=_ev_name,
+                        event_id=_ev_id,
                         event_time=_evt_time,
                         value=_value,
                         currency=_currency,
@@ -4189,7 +4239,7 @@ async def billing_webhook(request: Request):
                         event_source_url=f"{DASHBOARD_URL}/home",
                     )
             except Exception as exc:
-                print(f"[billing] meta capi purchase falhou user={user_id}: {exc}")
+                print(f"[billing] meta capi checkout ({sub_status}) falhou user={user_id}: {exc}")
         elif user_id:
             await log_system_event(
                 "info",
@@ -4253,6 +4303,32 @@ async def billing_webhook(request: Request):
                         )
                 except Exception as exc:
                     print(f"[affiliates] comissao falhou user={user_id}: {exc}")
+
+                # Meta Conversions API — Purchase da cobrança REAL (fim do trial
+                # e renovações), com o valor efetivamente pago. A primeira fatura
+                # da compra imediata (billing_reason=subscription_create) já virou
+                # Purchase no checkout.session.completed, então pulamos ela aqui
+                # pra não contar duas vezes. Server-only: o usuário não está no
+                # site nesse momento (nada a deduplicar com o pixel).
+                try:
+                    from core.services.meta_capi import capi_configured, purchase_event_id, send_event
+                    _billing_reason = _g(invoice, "billing_reason")
+                    _inv_id = _g(invoice, "id")
+                    if capi_configured() and _inv_id and _billing_reason != "subscription_create":
+                        _capi_email = await _user_email(user_id)
+                        _evt_time = int(_g(event, "created") or _g(invoice, "created") or 0)
+                        await asyncio.to_thread(
+                            send_event,
+                            event_name="Purchase",
+                            event_id=purchase_event_id(_inv_id),
+                            event_time=_evt_time,
+                            value=amount_brl,
+                            currency=(_g(invoice, "currency") or "brl").upper(),
+                            email=_capi_email,
+                            event_source_url=f"{DASHBOARD_URL}/home",
+                        )
+                except Exception as exc:
+                    print(f"[billing] meta capi invoice purchase falhou user={user_id}: {exc}")
 
     elif event["type"] == "customer.subscription.trial_will_end":
         # Stripe dispara ~3 dias antes do trial acabar. Email de aviso (item 38)

@@ -141,6 +141,9 @@
       var res=await fetch('/auth/verify-email',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({email:_email,code:code})});
       var d=await payload(res);
       if(!res.ok){err('verify-error',d.detail||'Código inválido.');return}
+      // Meta Ads: conta criada. eventID casa com o CompleteRegistration
+      // server-side (CAPI) pro Meta deduplicar.
+      if(window.fbq&&d.user_id){fbq('track','CompleteRegistration',{},{eventID:'signup_'+d.user_id});}
       goDash(d.dashboard_url);
     }catch(e){err('verify-error','Erro de conexão. Tente novamente.')}
     finally{b.disabled=false;b.textContent='Confirmar'}

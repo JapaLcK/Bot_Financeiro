@@ -113,6 +113,9 @@ document.getElementById("signup-form").addEventListener("submit", async function
     });
     const data = await res.json().catch(function(){ return {}; });
     if (!res.ok) { showError(data.detail || "Não foi possível criar sua conta."); submitBtn.disabled = false; submitBtn.textContent = "Criar minha conta"; return; }
+    // Meta Ads: conta criada via Google. eventID casa com o CompleteRegistration
+    // server-side (CAPI) pro Meta deduplicar.
+    if (window.fbq && data.user_id) { fbq("track", "CompleteRegistration", {}, { eventID: "signup_" + data.user_id }); }
     window.location.replace(data.dashboard_url || "/home");
   } catch (err) { showError("Erro de conexão. Tente novamente."); submitBtn.disabled = false; submitBtn.textContent = "Criar minha conta"; }
 });
