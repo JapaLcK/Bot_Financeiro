@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from frontend.routes.shared import (
     FRONTEND_DIR,
+    gate_plan_selection,
     gate_pro_page,
     html_file,
     inject_meta_pixel,
@@ -37,17 +38,28 @@ async def serve_landing():
 
 
 @router.get("/app")
-async def serve_dashboard():
+async def serve_dashboard(request: Request):
+    # Gate server-side: cadastro sem plano escolhido é mandado pra /precos antes
+    # de receber o HTML do app (não depende do redirect em JS, que é burlável).
+    gate = gate_plan_selection(request)
+    if gate is not None:
+        return gate
     return html_file(FRONTEND_DIR / "dashboard.html", pixel=False)
 
 
 @router.get("/home")
-async def serve_home():
+async def serve_home(request: Request):
+    gate = gate_plan_selection(request)
+    if gate is not None:
+        return gate
     return html_file(FRONTEND_DIR / "home.html")
 
 
 @router.get("/settings")
-async def serve_settings():
+async def serve_settings(request: Request):
+    gate = gate_plan_selection(request)
+    if gate is not None:
+        return gate
     return html_file(FRONTEND_DIR / "settings.html", pixel=False)
 
 
