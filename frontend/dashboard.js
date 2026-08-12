@@ -1158,7 +1158,7 @@ function _renderInstallmentItem(g, idx = 0) {
   const parcelaRows = parcelas.map(p => {
     const dateBR = _fmtDateBR(p.due_date);
     if (p.is_paid) {
-      return `<div class="parcel-row paid"><div class="parcel-status-icon paid">✓</div><div class="parcel-info"><span class="parcel-name">Parcela ${p.installment_no}</span><span class="parcel-date">${dateBR}</span><span class="parcel-tag paid">paga</span></div><span class="parcel-val">${_fmtBRL(p.valor)}</span></div>`;
+      return `<div class="parcel-row paid"><div class="parcel-status-icon paid"><i class="ph ph-check" aria-hidden="true"></i></div><div class="parcel-info"><span class="parcel-name">Parcela ${p.installment_no}</span><span class="parcel-date">${dateBR}</span><span class="parcel-tag paid">paga</span></div><span class="parcel-val">${_fmtBRL(p.valor)}</span></div>`;
     }
     if (p.is_next) {
       const tagText = g.n_pending === 1 ? "última!" : "próxima";
@@ -2341,7 +2341,7 @@ function _renderGoalCard(g, idx = 0) {
   } else if (g.indicator === "on_track") {
     alertText = `<div class="goal-deadline" style="color:#00F078">No prazo</div>`;
   } else if (g.indicator === "achieved") {
-    alertText = `<div class="goal-deadline" style="color:#00F078">✓ Meta atingida</div>`;
+    alertText = `<div class="goal-deadline" style="color:#00F078"><i class="ph ph-check" aria-hidden="true"></i> Meta atingida</div>`;
   }
 
   return `
@@ -2737,7 +2737,7 @@ function _wizardRenderCardsList() {
         <div style="font-size:.88rem;color:var(--text);font-weight:600">${escapeHtmlSafe(c.name || "Cartão")}</div>
         <div style="font-size:.7rem;color:var(--text-3)">fecha dia ${c.closing_day || "?"} · vence dia ${c.due_day || "?"}</div>
       </div>
-      <span style="color:var(--green);font-size:.7rem">✓</span>
+      <span style="color:var(--green);font-size:.7rem"><i class="ph ph-check" aria-hidden="true"></i></span>
     </div>
   `).join("");
 }
@@ -3819,7 +3819,7 @@ function _renderBillRow(b) {
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
         <div class="tx-amt red">${amtLabel}</div>
         <div style="display:flex;gap:4px">
-          <button class="mock-cta" style="padding:3px 9px;font-size:.72rem" onclick="payBill(${b.id}, ${b.amount || 0}, '${nameSafe}', ${variavel})">✓ Pago</button>
+          <button class="mock-cta" style="padding:3px 9px;font-size:.72rem" onclick="payBill(${b.id}, ${b.amount || 0}, '${nameSafe}', ${variavel})"><i class="ph ph-check" aria-hidden="true"></i> Pago</button>
           <button class="mock-cta outline" title="Editar" style="padding:3px 8px;font-size:.72rem" onclick="editBoleto(${b.id}, '${nameSafe}', ${b.amount || 0}, '${b.due_date}')"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
           <button class="mock-cta outline" title="Apagar" style="padding:3px 8px;font-size:.72rem" onclick="deleteBoleto(${b.id}, '${nameSafe}')"><i class="ph ph-trash" aria-hidden="true"></i></button>
         </div>
@@ -3832,7 +3832,7 @@ function _renderBillPaidRow(b) {
   const when = b.paid_at ? new Date(b.paid_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }) : "";
   return `
     <div class="tx-row">
-      <div class="tx-icon" style="color:#22c55e">✓</div>
+      <div class="tx-icon" style="color:#22c55e"><i class="ph ph-check" aria-hidden="true"></i></div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(b.name || "Conta")}</div>
         <div class="tx-meta">paga ${when}</div>
@@ -6594,9 +6594,9 @@ function renderAlerts(alerts) {
   alerts.forEach(a => {
     if (a.type === "recurring_charged") {
       const where = a.payment_type === "credit_card" ? "no cartão" : "da conta";
-      html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} ${where} ${_alertWhenLabel(a.charged_at)}. <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'">✕</button></div>`;
+      html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} ${where} ${_alertWhenLabel(a.charged_at)}. <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
     } else if (a.type === "recurring_credited") {
-      html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy recebeu <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} na conta ${_alertWhenLabel(a.credited_at)}. <button onclick="ackRecurringIncomeCredit(${a.credit_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'">✕</button></div>`;
+      html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy recebeu <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} na conta ${_alertWhenLabel(a.credited_at)}. <button onclick="ackRecurringIncomeCredit(${a.credit_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
     } else {
       const icon = a.type === "budget_exceeded" ? '<i class="ph ph-warning-circle" aria-hidden="true"></i>' : '<i class="ph ph-warning" aria-hidden="true"></i>';
       html += `<div class="alert-row">${icon} <b>${escapeHtmlSafe(a.categoria)}</b>: ${fmt(a.spent)} de ${fmt(a.budget)} (${a.pct}%)</div>`;
@@ -7322,7 +7322,12 @@ function showLaunchError(msg) {
 
 function showLaunchSuccessToast(msg, isError = false) {
   const t = document.getElementById("launch-success-toast");
-  t.textContent = msg;
+  if (!isError && /^\s*✓/.test(msg)) {
+    t.innerHTML = `<img class="toast-sticker" src="/brand/stickers/ok.webp" alt="" />` +
+                  escapeHtmlSafe(msg.replace(/^\s*✓\s*/, ""));
+  } else {
+    t.textContent = msg;
+  }
   t.classList.toggle("error", !!isError);   // vermelho quando erro, verde no sucesso
   t.classList.add("show");
   setTimeout(() => t.classList.remove("show"), 2600);
@@ -8398,7 +8403,7 @@ function showPayReceiptModal(data, bill) {
   document.getElementById("receipt-card-line").textContent = `${cardName}${period}`;
   document.getElementById("receipt-balance").textContent = fmtBillValue(data.new_balance);
   document.getElementById("receipt-open").textContent = fmtBillValue(data.bill_due_amount);
-  document.getElementById("receipt-status").textContent = data.bill_status === "paid" ? "Paga ✓" : "Aberta";
+  document.getElementById("receipt-status").textContent = data.bill_status === "paid" ? "Paga" : "Aberta";
   document.getElementById("receipt-launch-id").textContent = data.launch_id ? `#${data.launch_id}` : "—";
   document.getElementById("pay-bill-receipt-overlay").classList.add("open");
 }
@@ -9430,7 +9435,7 @@ function _renderAgentes(data) {
     const btn = !card.disponivel
       ? `<button class="ag-btn ag-btn-soon" disabled>Em breve</button>`
       : active
-        ? `<button class="ag-btn ag-btn-active" onclick="pauseAgent('${card.kind}')">✓ Ativo · Pausar</button>`
+        ? `<button class="ag-btn ag-btn-active" onclick="pauseAgent('${card.kind}')"><i class="ph ph-check" aria-hidden="true"></i> Ativo · Pausar</button>`
         : canActivate
           ? `<button class="ag-btn ag-btn-on" onclick="activateAgent('${card.kind}')">Ativar</button>`
           : `<button class="ag-btn ag-btn-on" onclick="showUpgradeModal('agents')"><i class="ph ph-lock" aria-hidden="true"></i> Ativar</button>`;
