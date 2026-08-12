@@ -277,24 +277,34 @@
     return m ? decodeURIComponent(m.split("=").slice(1).join("=")) : "";
   }
   function wirePush() {
-    const bridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.pbPush;
-    if (!bridge) return;      // sem ponte nativa (PWA/preview/navegador)
     if (!page) return;        // só em página logada (home/app/settings/comandos)
-    window.PBPush = window.PBPush || {};
-    window.PBPush.onToken = function (token, environment) {
-      if (!token) return;
-      const csrf = pbCookie("csrf_token");
-      fetch("/api/push/register", {
-        method: "POST",
-        credentials: "include",
-        headers: Object.assign(
-          { "Content-Type": "application/json" },
-          csrf ? { "X-CSRF-Token": csrf } : {}
-        ),
-        body: JSON.stringify({ token: token, platform: "ios", environment: environment || "production" }),
-      }).catch(() => {});
-    };
-    bridge.postMessage("register");
+    // A ponte nativa pbPush pode nascer DEPOIS do DOMContentLoaded (no cold
+    // launch o AppDelegate registra o handler quando o WebView existe). Por
+    // isso tentamos por alguns segundos em vez de checar uma vez só — igual o
+    // wireGoogleLogin, que checa a ponte no clique e não no load.
+    let tries = 0;
+    (function attempt() {
+      const bridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.pbPush;
+      if (!bridge) {
+        if (++tries < 20) setTimeout(attempt, 500);  // ~10s
+        return;                 // PWA/preview/navegador: nunca aparece → no-op
+      }
+      window.PBPush = window.PBPush || {};
+      window.PBPush.onToken = function (token, environment) {
+        if (!token) return;
+        const csrf = pbCookie("csrf_token");
+        fetch("/api/push/register", {
+          method: "POST",
+          credentials: "include",
+          headers: Object.assign(
+            { "Content-Type": "application/json" },
+            csrf ? { "X-CSRF-Token": csrf } : {}
+          ),
+          body: JSON.stringify({ token: token, platform: "ios", environment: environment || "production" }),
+        }).catch(() => {});
+      };
+      bridge.postMessage("register");
+    })();
   }
 
   function init() { fixViewport(); buildTabbar(); hardenGlyphs(); enhanceOverview(); enhanceSettings(); wireGoogleLogin(); wirePush(); maybeOpenLaunch(); }
