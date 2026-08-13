@@ -1561,6 +1561,23 @@ body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
   border-radius:20px;padding:28px;width:min(360px,90vw);
   box-shadow:0 24px 60px rgba(0,0,0,.6);animation:fadeIn .25s var(--ease); }
 .modal.wide { width:min(760px,92vw);max-height:86vh;overflow:auto; }
+
+/* Modal de detalhe do lançamento: altura mínima + espaçamento generoso pra
+   não parecer "espremido" quando há pouca informação. O botão fica ancorado
+   embaixo (margin-top:auto) dando ar de limpeza. */
+.modal.launch-detail { width:min(420px,92vw);min-height:min(320px,86vh);max-height:86vh;
+  overflow:auto;display:flex;flex-direction:column; }
+.modal.launch-detail h3 { margin-bottom:14px; }
+.ld-desc { font-size:1rem;line-height:1.5;font-weight:600;color:var(--text);
+  background:rgba(255,255,255,.04);border:1px solid var(--glass-border);
+  border-radius:14px;padding:18px 16px;margin-bottom:6px;word-break:break-word; }
+.ld-meta { display:flex;flex-direction:column; }
+.ld-row { display:flex;justify-content:space-between;align-items:baseline;gap:16px;
+  padding:13px 2px;border-top:1px solid var(--div);font-size:.9rem; }
+.ld-row:first-child { border-top:none; }
+.ld-k { color:var(--text-3);flex-shrink:0; }
+.ld-v { color:var(--text);font-weight:600;text-align:right;word-break:break-word; }
+.modal.launch-detail .modal-acts { margin-top:auto;padding-top:22px; }
 .modal h3 { font-size:1rem;font-weight:650;margin-bottom:5px; }
 .modal .msub { font-size:.78rem;color:var(--text-2);margin-bottom:18px; }
 .modal-inp { width:100%;background:rgba(255,255,255,.07);border:1px solid var(--glass-border);
