@@ -119,7 +119,12 @@ function applyUserMenuState(email, plan, displayName) {
    cabeçalho e aplicar os gates de UI na hora, sem esperar o round-trip do
    /auth/dashboard-profile. Saldos e transações NUNCA entram aqui — a política
    do app é não cachear dado financeiro no dispositivo (ver service-worker.js).
-   O valor é sobrescrito pelo perfil fresco ~1 RTT depois, e limpo no logout. */
+   O valor é sobrescrito pelo perfil fresco ~1 RTT depois.
+   O cache é ESCOPADO ao USER_ID validado: o paint otimista só acontece se o
+   registro pertencer ao usuário da sessão atual. Isso evita mostrar a
+   identidade de um usuário anterior quando outra conta loga no mesmo
+   navegador — inclusive se o logout foi feito por Settings/Home (cujos
+   handlers não conhecem esta chave) e mesmo que o fetch fresco falhe. */
 const _MENU_CACHE_KEY = "pigbank_menu_v1";
 function _readMenuCache() {
   try {
@@ -127,9 +132,9 @@ function _readMenuCache() {
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
-function _writeMenuCache(email, plan, displayName) {
+function _writeMenuCache(userId, email, plan, displayName) {
   try {
-    localStorage.setItem(_MENU_CACHE_KEY, JSON.stringify({ email, plan, displayName }));
+    localStorage.setItem(_MENU_CACHE_KEY, JSON.stringify({ userId, email, plan, displayName }));
   } catch {}
 }
 function clearMenuCache() {
@@ -137,15 +142,22 @@ function clearMenuCache() {
 }
 
 async function loadUserMenuState() {
-  // Paint otimista: aplica o último chrome conhecido antes do fetch resolver.
+  // Paint otimista: aplica o último chrome conhecido ANTES do fetch resolver,
+  // mas só se o cache for do usuário já validado nesta sessão (USER_ID).
   const cached = _readMenuCache();
-  if (cached) applyUserMenuState(cached.email || "", cached.plan || "free", cached.displayName || "");
+  if (cached && USER_ID && String(cached.userId) === String(USER_ID)) {
+    applyUserMenuState(cached.email || "", cached.plan || "free", cached.displayName || "");
+  } else if (cached) {
+    // Cache de outro usuário (ou formato antigo sem userId): descarta pra não
+    // vazar identidade. Será reescrito com o perfil correto abaixo.
+    clearMenuCache();
+  }
   try {
     const res = await fetch(`${API}/auth/dashboard-profile`, { credentials: "same-origin" });
     if (!res.ok) return;
     const data = await readResponsePayload(res);
     applyUserMenuState(data.email || "", data.plan || "free", data.display_name || "");
-    _writeMenuCache(data.email || "", data.plan || "free", data.display_name || "");
+    _writeMenuCache(USER_ID, data.email || "", data.plan || "free", data.display_name || "");
   } catch {}
 }
 
