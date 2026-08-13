@@ -252,7 +252,11 @@ html.pb-app body.pb-page-app header h1 {
 }
 html.pb-app body.pb-page-app header .hbtn[onclick*="openOfxImport"],
 html.pb-app body.pb-page-app header .hbtn[onclick*="exportToEmail"] { display: none !important; }
-/* Topbar fina: o WebView já desvia do notch, sem padding extra de safe-area */
+/* Reserva a área segura do topo (notch / Dynamic Island) — o dashboard é o
+   único que faltava (home/settings/comandos já reservam). Requer viewport-fit=
+   cover no <meta viewport> pra env() reportar o inset real. */
+html.pb-app body.pb-page-app { padding-top: env(safe-area-inset-top); }
+/* Topbar fina abaixo da área segura. */
 html.pb-app body.pb-page-app header {
   padding: 8px 12px !important;
   margin-bottom: 10px !important;
