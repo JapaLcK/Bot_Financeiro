@@ -2177,6 +2177,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 .ag-bg-cofre    { background: radial-gradient(circle at 30% 60%, #1E4A33, #08130D); }
 .ag-bg-barao    { background: radial-gradient(circle at 60% 40%, #4A3B12, #14100A); }
 .ag-bg-aviador  { background: radial-gradient(circle at 40% 30%, #16394F, #0A1218); }
+.ag-bg-faria_limer { background: radial-gradient(circle at 35% 30%, #1E4A3A, #08130E); }
 
 .ag-btn {
   margin-top: auto; width: 100%; text-align: center; cursor: pointer;

@@ -729,24 +729,174 @@ def run_barao_once(today: date | None = None, user_id: int | None = None) -> dic
     return {"ok": True, "agents": len(agents), "fired": fired}
 
 
+# ── Faria Limer: acompanhamento de renda variável (ações/FIIs via OF) ─────────
+# O investidor da Faria Lima que fica de olho na sua carteira. Posicionamento +
+# regulatório: NUNCA recomenda ativo nem opina se está caro/barato — ele só
+# FOTOGRAFA a carteira e aponta fatos (resultado do mês, concentração). A decisão
+# é sempre do usuário. Read-only: a corretora é a fonte da verdade (db.rv).
+FARIA_RV_MIN_MV = float(os.getenv("FARIA_RV_MIN_MV", "100"))          # abaixo disso é ruído
+FARIA_RV_CONCENTRATION_PCT = float(os.getenv("FARIA_RV_CONCENTRATION_PCT", "40"))  # 1 ativo dominando
+
+
+def _fmt_pct_signed(v: float, places: int = 1) -> str:
+    """Percentual com sinal em pt-BR (ex.: +18,4%)."""
+    return f"{v:+.{places}f}%".replace(".", ",")
+
+
+def _weighted_month_rate(positions: list[dict]) -> float | None:
+    """Rentabilidade do mês da carteira, ponderada pelo valor de mercado das
+    posições que trazem `last_month_rate`. None se nenhuma corretora mandou a
+    taxa (campo opcional no Pluggy)."""
+    num = den = 0.0
+    for p in positions:
+        rate = p.get("last_month_rate")
+        mv = float(p.get("market_value") or 0)
+        if rate is None or mv <= 0:
+            continue
+        try:
+            num += float(rate) * mv
+        except (TypeError, ValueError):
+            continue
+        den += mv
+    return (num / den) if den > 0 else None
+
+
+def faria_limer_insights(positions: list[dict], summary: dict, ym: str) -> list[dict]:
+    """Insights FACTUAIS (não recomendação) da carteira de renda variável.
+
+    Recebe as posições de `list_rv_positions` e o resumo de
+    `rv_portfolio_summary` e devolve itens {dedupe_key, payload, valor_impacto}
+    prontos pro `record_agent_event`. Deduplicado por mês (YYYY-MM) — o Faria
+    Limer é mensal. Vazio quando a carteira é pequena ou inexistente.
+
+    Dois retratos, nunca um conselho:
+      A) retrato do mês  — valor, resultado em aberto e (quando a corretora
+         manda) a rentabilidade do mês;
+      B) concentração    — quando um único ativo domina a carteira.
+    """
+    pos = [p for p in (positions or []) if float(p.get("market_value") or 0) > 0]
+    summary = summary or {}
+    mv_total = float(summary.get("market_value") or sum(float(p["market_value"]) for p in pos))
+    if not pos or mv_total < FARIA_RV_MIN_MV:
+        return []
+
+    out: list[dict] = []
+    n = len(pos)
+    plural = "s" if n != 1 else ""
+    pnl = float(summary.get("pnl") or 0.0)
+    pnl_pct = float(summary.get("pnl_pct") or 0.0)
+
+    # A) Retrato do mês — descritivo, sem juízo de valor.
+    if summary.get("invested"):
+        result_txt = f"resultado em aberto de {_fmt_brl(pnl)} ({_fmt_pct_signed(pnl_pct * 100)})"
+    else:
+        result_txt = "sem custo de aquisição conhecido pra calcular o resultado"
+    month_rate = _weighted_month_rate(pos)
+    month_txt = (
+        f" No mês, a carteira variou ~{_fmt_pct_signed(month_rate, 2)}."
+        if month_rate is not None else ""
+    )
+    out.append({
+        "dedupe_key": f"rv_retrato:{ym}",
+        "valor_impacto": round(pnl, 2),
+        "payload": {
+            "tipo": "rv_retrato",
+            "titulo": f"Sua renda variável: {_fmt_brl(mv_total)} em {n} ativo{plural}",
+            "mensagem": (
+                f"📈 Fechamento da sua carteira de ações/FIIs: {_fmt_brl(mv_total)} em "
+                f"{n} ativo{plural}, {result_txt}.{month_txt} "
+                f"É só o retrato — não é recomendação de compra ou venda."
+            ),
+        },
+    })
+
+    # B) Concentração — fato, não conselho. Só quando há mais de um ativo e um deles domina.
+    top = max(pos, key=lambda p: float(p.get("market_value") or 0))
+    top_mv = float(top.get("market_value") or 0)
+    share = (top_mv / mv_total * 100.0) if mv_total > 0 else 0.0
+    if n >= 2 and share >= FARIA_RV_CONCENTRATION_PCT:
+        tick = top.get("ticker") or top.get("name") or "um ativo"
+        out.append({
+            "dedupe_key": f"rv_concentracao:{ym}",
+            "valor_impacto": 0.0,
+            "payload": {
+                "tipo": "rv_concentracao",
+                "titulo": f"{tick} é {share:.0f}% da sua carteira de RV",
+                "mensagem": (
+                    f"📈 {tick} concentra {share:.0f}% ({_fmt_brl(top_mv)}) da sua renda "
+                    f"variável hoje. É só um dado pra ter no radar — o que fazer com isso "
+                    f"é decisão sua."
+                ),
+            },
+        })
+
+    return out
+
+
+def _faria_limer_detect_for_user(agent: dict[str, Any], today: date) -> int:
+    """Acompanha a carteira de renda variável do usuário (via Open Finance) e grava
+    os insights factuais (retrato do mês + concentração), deduplicados por mês. Só
+    lê o espelho do sync (db.rv) — a corretora é a fonte da verdade."""
+    from db import record_agent_event, list_rv_positions, rv_portfolio_summary
+
+    user_id = agent["user_id"]
+    ym = today.strftime("%Y-%m")
+    positions = list_rv_positions(user_id)
+    summary = rv_portfolio_summary(user_id)
+
+    fired = 0
+    for ins in faria_limer_insights(positions, summary, ym):
+        ok = record_agent_event(
+            agent["agent_id"], user_id, "faria_limer",
+            dedupe_key=ins["dedupe_key"],
+            payload=ins["payload"],
+            valor_impacto=ins.get("valor_impacto", 0.0),
+        )
+        if ok:
+            fired += 1
+    return fired
+
+
+def run_faria_limer_once(today: date | None = None, user_id: int | None = None) -> dict:
+    """Roda o Faria Limer pra todos os agentes faria_limer ativos (ou só um usuário)."""
+    from db import list_users_with_active_agents
+
+    today = today or date.today()
+    agents = list_users_with_active_agents("faria_limer")
+    if user_id is not None:
+        agents = [a for a in agents if a["user_id"] == user_id]
+    from core.services.plan_service import agent_kind_allowed, agents_ui_enabled
+    agents = [a for a in agents
+              if agents_ui_enabled(a["user_id"]) and agent_kind_allowed(a["user_id"], "faria_limer")]
+    fired = 0
+    for agent in agents:
+        try:
+            fired += _faria_limer_detect_for_user(agent, today)
+        except Exception as exc:
+            print(f"[agents] faria_limer user={agent['user_id']}: {exc}", file=sys.stderr)
+    return {"ok": True, "agents": len(agents), "fired": fired}
+
+
 # ── Mini-digest por agente: 1 e-mail por agente, batcheado + teto de cadência ──
 
 # Intervalo mínimo (horas) entre e-mails do MESMO agente. Segura a rajada
 # (Detetive na estreia, cluster de boletos) sem precisar do digest global.
 _AGENT_EMAIL_INTERVAL_H = {
-    "reporter": 24 * 20,   # manchete mensal
-    "barao": 24 * 20,      # mensal
-    "cofre": 0,            # SEM teto: manda a cada aporte detectado (dedupe já
-                           # evita duplicar; aporte é raro e positivo, não spam)
-    "xerife": 24,          # no máx 1x/dia
-    "carteiro": 24,        # no máx 1x/dia
-    "detetive": 24 * 30,   # 1x/mês
+    "reporter": 24 * 20,      # manchete mensal
+    "barao": 24 * 20,         # mensal
+    "faria_limer": 24 * 20,   # retrato mensal da carteira de RV
+    "cofre": 0,               # SEM teto: manda a cada aporte detectado (dedupe já
+                              # evita duplicar; aporte é raro e positivo, não spam)
+    "xerife": 24,             # no máx 1x/dia
+    "carteiro": 24,           # no máx 1x/dia
+    "detetive": 24 * 30,      # 1x/mês
 }
 _DEFAULT_EMAIL_INTERVAL_H = 24
 
 _AGENT_EMAIL_LABEL = {
     "xerife": "🤠 Xerife", "reporter": "🎤 Repórter", "carteiro": "📬 Carteiro",
     "detetive": "🔍 Detetive", "cofre": "🎯 Banqueiro", "barao": "🎩 Barão",
+    "faria_limer": "📈 Faria Limer",
 }
 
 
@@ -840,6 +990,7 @@ def run_all_agents_once(today: date | None = None) -> dict:
         "detetive": run_detetive_once(today),
         "cofre": run_cofre_once(today),
         "barao": run_barao_once(today),
+        "faria_limer": run_faria_limer_once(today),
         "emails": run_agent_emails_once(),
     }
 
@@ -860,6 +1011,7 @@ def run_agents_for_user(user_id: int, trigger: str = "of_sync") -> dict:
         ("detetive", run_detetive_once),
         ("cofre", run_cofre_once),
         ("barao", run_barao_once),
+        ("faria_limer", run_faria_limer_once),
     ):
         try:
             out[kind] = fn(user_id=user_id)

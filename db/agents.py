@@ -12,7 +12,7 @@ from .connection import get_conn
 
 # Kinds fixos da Fase A. O catálogo de exibição (nome, descrição, arte)
 # vive no frontend/router; aqui só o que o banco precisa validar.
-AGENT_KINDS = ("xerife", "reporter", "carteiro", "detetive", "cofre", "barao")
+AGENT_KINDS = ("xerife", "reporter", "carteiro", "detetive", "cofre", "barao", "faria_limer")
 
 
 def list_agents(user_id: int) -> list[dict[str, Any]]:

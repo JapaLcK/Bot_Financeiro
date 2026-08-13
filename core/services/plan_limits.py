@@ -51,14 +51,15 @@ TIER_ORDER: dict[str, int] = {"free": 0, "essencial": 1, "plus": 2, "pro": 3}
 #
 # Regra dos planos (todos os agentes ficam liberados em Plus e Pro; o limitador
 # é a energia): Plus tem orçamento 4 → cabem os 3 baratos (1+1+2), ou 2 se um
-# for caro (⚡3). Pro tem 12 → cabem os 6 (1+1+2+2+3+3). Grátis/Essencial = 0.
+# for caro (⚡3). Pro tem 14 → cabem os 7 (1+1+2+2+2+3+3). Grátis/Essencial = 0.
 AGENT_ENERGY_COST: dict[str, int] = {
-    "reporter": 1,   # mensal, só lê o mês fechado
-    "carteiro": 1,   # contínuo, mas só checa data de boleto
-    "xerife": 2,     # diário + a cada sync, análise de anomalia
-    "barao": 2,      # mensal, mas depende de Open Finance
-    "detetive": 3,   # contínuo + varre 6 meses de histórico OF a cada sync
-    "cofre": 3,      # contínuo + acompanha caixinhas OF a cada sync
+    "reporter": 1,      # mensal, só lê o mês fechado
+    "carteiro": 1,      # contínuo, mas só checa data de boleto
+    "xerife": 2,        # diário + a cada sync, análise de anomalia
+    "barao": 2,         # mensal, mas depende de Open Finance
+    "faria_limer": 2,   # mensal, depende de Open Finance (renda variável: ações/FIIs)
+    "detetive": 3,      # contínuo + varre 6 meses de histórico OF a cada sync
+    "cofre": 3,         # contínuo + acompanha caixinhas OF a cada sync
 }
 
 # Custo default de kind não mapeado: o mais caro, por segurança.
@@ -146,8 +147,8 @@ PRO_LIMITS: PlanLimits = {
     **PLUS_LIMITS,
     "history_days": 730,                 # 24 meses
     "of_banks_max": 5,
-    "agents_max": 6,                     # legado; o limite real é a energia
-    "agents_energy_budget": 12,          # cabem os 6 (1+1+2+2+3+3)
+    "agents_max": 7,                     # legado; o limite real é a energia
+    "agents_energy_budget": 14,          # cabem os 7 (1+1+2+2+2+3+3)
 }
 
 

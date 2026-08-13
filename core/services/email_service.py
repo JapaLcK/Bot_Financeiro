@@ -328,7 +328,10 @@ def make_unsub_url(user_id: int, email: str) -> str:
 
 _AGENT_ART_KINDS = {"xerife", "reporter", "carteiro", "detetive", "cofre", "barao"}
 _AGENT_LABELS = {"xerife": "Xerife", "reporter": "Repórter", "carteiro": "Carteiro",
-                 "detetive": "Detetive", "cofre": "Banqueiro", "barao": "Barão"}
+                 "detetive": "Detetive", "cofre": "Banqueiro", "barao": "Barão",
+                 "faria_limer": "Faria Limer"}
+# Faria Limer ainda sem PNG de arte (fica no medalhão-logo até a arte chegar):
+# por isso NÃO entra em _AGENT_ART_KINDS nem _AGENT_HERO — só o label acima.
 # Agentes com arte-cena "hero" (banner full-bleed no topo, 1200x600). Quem não
 # tem cai no medalhão com o sticker. Arquivo em /brand/agents/<valor>.png.
 _AGENT_HERO = {"xerife": "xerife_hero", "carteiro": "carteiro_hero",

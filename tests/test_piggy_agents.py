@@ -118,3 +118,79 @@ def test_agents_ui_enabled_freio_respeita_allowlist_custom(monkeypatch):
     monkeypatch.setenv("AGENTS_BETA_EMAILS", "novo@example.com")
     assert ps.agents_ui_enabled(1, "novo@example.com") is True
     assert ps.agents_ui_enabled(1, "lucaskuramoti06@gmail.com") is False
+
+
+# ── Faria Limer: acompanhamento de renda variável (função pura, sem DB) ──────
+# faria_limer_insights só transforma posições+resumo (o que list_rv_positions /
+# rv_portfolio_summary já entregam) em eventos factuais — dá pra testar isolado.
+
+def _rv_summary(positions):
+    """Resumo equivalente ao rv_portfolio_summary, pra alimentar os insights."""
+    mv = sum(p["market_value"] for p in positions)
+    invested = sum(p.get("invested", 0.0) for p in positions)
+    pnl = mv - invested
+    return {"market_value": mv, "invested": invested, "pnl": pnl,
+            "pnl_pct": (pnl / invested) if invested > 0 else 0.0, "count": len(positions)}
+
+
+def test_rv_insights_carteira_vazia_ou_minima():
+    from core.services.piggy_agents import faria_limer_insights
+    assert faria_limer_insights([], {}, "2026-08") == []
+    # abaixo do mínimo (FARIA_RV_MIN_MV=100) → ruído, não dispara
+    pos = [{"ticker": "MGLU3", "market_value": 40.0, "invested": 50.0}]
+    assert faria_limer_insights(pos, _rv_summary(pos), "2026-08") == []
+
+
+def test_rv_insights_retrato_do_mes():
+    from core.services.piggy_agents import faria_limer_insights
+    pos = [
+        {"ticker": "GGRC11", "market_value": 6000.0, "invested": 5000.0, "last_month_rate": 1.2},
+        {"ticker": "ITUB4",  "market_value": 5000.0, "invested": 5000.0, "last_month_rate": 0.8},
+    ]
+    ins = faria_limer_insights(pos, _rv_summary(pos), "2026-08")
+    retrato = next(i for i in ins if i["payload"]["tipo"] == "rv_retrato")
+    assert retrato["dedupe_key"] == "rv_retrato:2026-08"
+    assert retrato["valor_impacto"] == 1000.0            # pnl = 11000 - 10000
+    msg = retrato["payload"]["mensagem"]
+    assert "2 ativos" in msg
+    assert "+10,0%" in msg                               # pnl_pct
+    # média ponderada por valor de mercado: (1,2·6000 + 0,8·5000)/11000 ≈ 1,02%
+    assert "No mês, a carteira variou ~+1,02%" in msg
+    assert "não é recomendação" in msg                   # trava anti-conselho
+
+
+def test_rv_insights_concentracao_dispara_quando_um_ativo_domina():
+    from core.services.piggy_agents import faria_limer_insights
+    pos = [
+        {"ticker": "PETR4", "market_value": 8000.0, "invested": 7000.0},
+        {"ticker": "ITUB4", "market_value": 2000.0, "invested": 2000.0},
+    ]
+    ins = faria_limer_insights(pos, _rv_summary(pos), "2026-08")
+    conc = next(i for i in ins if i["payload"]["tipo"] == "rv_concentracao")
+    assert conc["dedupe_key"] == "rv_concentracao:2026-08"
+    assert conc["valor_impacto"] == 0.0
+    assert "PETR4" in conc["payload"]["titulo"]
+    assert "80%" in conc["payload"]["titulo"]            # 8000 / 10000
+    assert "decisão sua" in conc["payload"]["mensagem"]  # sem conselho
+
+
+def test_rv_insights_carteira_equilibrada_nao_alerta_concentracao():
+    from core.services.piggy_agents import faria_limer_insights
+    pos = [
+        {"ticker": "GGRC11", "market_value": 3400.0, "invested": 3000.0},
+        {"ticker": "ITUB4",  "market_value": 3300.0, "invested": 3000.0},
+        {"ticker": "PETR4",  "market_value": 3300.0, "invested": 3000.0},
+    ]
+    ins = faria_limer_insights(pos, _rv_summary(pos), "2026-08")
+    tipos = {i["payload"]["tipo"] for i in ins}
+    assert tipos == {"rv_retrato"}                       # nenhum ativo passa de 40%
+
+
+def test_rv_insights_sem_taxa_do_mes_omite_variacao():
+    from core.services.piggy_agents import faria_limer_insights
+    # corretora não mandou last_month_rate → não inventa rentabilidade do mês
+    pos = [{"ticker": "BBAS3", "market_value": 1500.0, "invested": 1400.0}]
+    ins = faria_limer_insights(pos, _rv_summary(pos), "2026-08")
+    msg = ins[0]["payload"]["mensagem"]
+    assert "No mês" not in msg
+    assert "1 ativo" in msg and "1 ativos" not in msg     # singular correto
