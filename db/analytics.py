@@ -745,6 +745,7 @@ def list_history(
             launches_params.extend(search_params)
         launches_sql = f"""
           SELECT id, tipo, valor, alvo, nota, categoria, criado_em,
+                 installments_total, installment_no,
                  COALESCE(source, 'manual') AS origin,
                  (SELECT c.institution_name
                     FROM open_finance_transactions o
@@ -793,6 +794,7 @@ def list_history(
         credit_sql = f"""
           SELECT ct.id, 'credito' AS tipo, ct.valor,
                  c.name AS alvo, ct.nota, ct.categoria, ct.created_at AS criado_em,
+                 ct.installments_total, ct.installment_no,
                  COALESCE(ct.source, 'manual') AS origin,
                  (SELECT conn.institution_name
                     FROM open_finance_accounts a
@@ -830,6 +832,7 @@ def list_history(
             cur.execute(
                 f"""
                 SELECT id, tipo, valor, alvo, nota, categoria, criado_em,
+                       installments_total, installment_no,
                        origin, bank_name, reconciliation_status
                 FROM ({union_sql}) merged
                 ORDER BY criado_em DESC, id ASC
@@ -848,6 +851,10 @@ def list_history(
             "nota": r["nota"],
             "categoria": r["categoria"],
             "criado_em": r["criado_em"].isoformat() if r["criado_em"] else None,
+            # Parcelamento (crédito): total e nº da parcela — usado pra avisar
+            # na exclusão que o grupo inteiro será removido e pra "N/X".
+            "installments_total": r["installments_total"],
+            "installment_no": r["installment_no"],
             # Origem (Open Finance): de onde veio e o estado da conciliação.
             "origin": r["origin"],                                # manual | open_finance | ofx
             "bank_name": r["bank_name"],                          # banco, se veio/casou com OF

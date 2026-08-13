@@ -5423,6 +5423,10 @@ function _clearHistoryFilters() {
   _historyResetAndReload();
 }
 
+// Itens do Histórico atualmente renderizados — indexados pra o clique na linha
+// abrir o modal de detalhe (openHistoryDetail).
+let _renderedHistoryItems = [];
+
 function renderHistoryTimeline(payload, append = false) {
   const root = document.getElementById("history-timeline");
   const moreWrap = document.getElementById("history-load-more-wrap");
@@ -5434,7 +5438,14 @@ function renderHistoryTimeline(payload, append = false) {
   }
 
   const items = payload.items || [];
+  // Indexa os itens no array global pra o clique na linha (openHistoryDetail).
+  const _base = append ? _renderedHistoryItems.length : 0;
+  if (append) _renderedHistoryItems.push(...items);
+  else _renderedHistoryItems = items.slice();
+  items.forEach((it, n) => { it._ldx = _base + n; });
+
   if (!items.length) {
+    if (!append) _renderedHistoryItems = [];
     root.innerHTML = `<div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">Nenhum lançamento encontrado com os filtros atuais.</div>`;
     if (moreWrap) moreWrap.style.display = "none";
     return;
@@ -5523,8 +5534,9 @@ function _historyRowHTML(i) {
   if (isCredito && i.alvo)  meta.push(`Cartão ${i.alvo}`);
   if (!isCredito && i.nota && i.alvo && i.nota !== i.alvo) meta.push(i.nota);
   if (time) meta.push(time);
+  const clickable = i._ldx != null ? ` style="cursor:pointer" onclick="openHistoryDetail(${i._ldx})"` : "";
   return `
-    <div class="tx-row">
+    <div class="tx-row"${clickable}>
       <div class="tx-icon" style="color:${isReceita ? "#00F078" : (isCredito ? "#7E5FE6" : "#fbbf24")}">${icon}</div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(_truncate(desc, 60))}</div>
@@ -6973,13 +6985,8 @@ function renderLaunches() {
       const valClass   = isInternal ? '' : (l.tipo==='receita'||l.tipo==='entrada' ? 'g' : 'r');
       const valStyle   = isInternal ? 'color:var(--text-2)' : '';
       const typeLabel  = TYPE_LABELS[l.tipo] || l.tipo.replaceAll("_", " ");
-      const editable   = l.id != null;
-      const editBtn    = editable
-        ? `<button class="bgt-btn launch-edit-btn" onclick="event.stopPropagation();openEditLaunchModal(${l.id})" title="Editar lançamento"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>`
-        : '';
-      const deleteBtn  = editable
-        ? `<button class="bgt-btn launch-delete-btn" onclick="event.stopPropagation();confirmDeleteLaunch(${l.id}, ${JSON.stringify(describeLaunch(l).replace(/<[^>]+>/g, '').trim()).replace(/"/g, '&quot;')}, ${l.valor}, ${l.tipo === 'credito' ? 'true' : 'false'}, ${l.installments_total || 'null'})" title="Apagar lançamento"><i class="ph ph-trash" aria-hidden="true"></i></button>`
-        : '';
+      // Editar/Excluir migraram pro modal de detalhe (clique na linha) — sem
+      // ícones inline, que causavam toque errado no celular.
       return `
       <div class="row" style="cursor:pointer;${isInternal?'opacity:.75':''}" onclick="openLaunchDetail(${idx})">
         <span class="lbl">
@@ -6992,17 +6999,21 @@ function renderLaunches() {
         <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
           <span class="val ${valClass}" style="${valStyle}"
                 data-num="lnc_${l.criado_em}_${l.valor}" data-val="${l.valor}">${fmt(l.valor)}</span>
-          <span style="font-size:.65rem;color:var(--text-3)">${fmtDate(l.criado_em)}${editBtn}${deleteBtn}</span>
+          <span style="font-size:.65rem;color:var(--text-3)">${fmtDate(l.criado_em)}</span>
         </span>
       </div>
     `}).join("")
     + renderLaunchesPagination(meta.total || items.length, meta.total_pages || 1);
 }
 
-// Clique numa linha da Visão Geral: abre o detalhe com a descrição COMPLETA
-// (que não cabe inteira no celular) + os campos principais. Modal dedicado com
-// altura mínima e respiro — não usa o alertModal genérico (que encolhe até o
-// texto e ficava apertado com pouca informação).
+// Clique numa linha (Visão Geral OU Histórico): abre o detalhe com a descrição
+// COMPLETA + campos principais e ações Editar/Excluir. Modal dedicado com
+// altura mínima e respiro. Edit/delete roteiam por tipo (crédito vs launch),
+// então funcionam nas duas origens sem colisão de id.
+let _launchDetailCurrent = null;
+let _launchDetailSource = "overview";   // 'overview' | 'history'
+let _editDeleteReturnTo = null;         // 'history' → recarrega o histórico após a ação
+
 function _ensureLaunchDetailModal() {
   if (document.getElementById("launch-detail-overlay")) return;
   const html = `
@@ -7011,8 +7022,12 @@ function _ensureLaunchDetailModal() {
         <h3>Detalhe do lançamento</h3>
         <div class="ld-desc" id="ld-desc"></div>
         <div class="ld-meta" id="ld-meta"></div>
-        <div class="modal-acts">
-          <button type="button" class="btn-save" id="ld-close">Fechar</button>
+        <div class="modal-acts ld-acts">
+          <button type="button" class="ld-del" id="ld-delete"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
+          <span class="ld-acts-right">
+            <button type="button" class="btn-cancel" id="ld-edit"><i class="ph ph-pencil-simple" aria-hidden="true"></i> Editar</button>
+            <button type="button" class="btn-save" id="ld-close">Fechar</button>
+          </span>
         </div>
       </div>
     </div>`;
@@ -7020,6 +7035,8 @@ function _ensureLaunchDetailModal() {
   const ov = document.getElementById("launch-detail-overlay");
   ov.addEventListener("click", e => { if (e.target === ov) closeLaunchDetail(); });
   document.getElementById("ld-close").addEventListener("click", closeLaunchDetail);
+  document.getElementById("ld-edit").addEventListener("click", _launchDetailEdit);
+  document.getElementById("ld-delete").addEventListener("click", _launchDetailDelete);
   document.addEventListener("keydown", e => {
     if (e.key === "Escape" && ov.classList.contains("open")) closeLaunchDetail();
   });
@@ -7030,9 +7047,7 @@ function closeLaunchDetail() {
   if (ov) ov.classList.remove("open");
 }
 
-function openLaunchDetail(idx) {
-  const l = (_renderedLaunches || [])[idx];
-  if (!l) return;
+function _renderLaunchDetail(l) {
   _ensureLaunchDetailModal();
   const typeLabel = LAUNCH_TYPE_LABELS[l.tipo] || String(l.tipo || "").replaceAll("_", " ");
   const desc = describeLaunch(l).replace(/<[^>]+>/g, "").trim() || "—";
@@ -7047,7 +7062,45 @@ function openLaunchDetail(idx) {
     `<span class="ld-v">${escapeHtmlSafe(String(v))}</span></div>`
   ).join("");
 
+  // Editar/Excluir só com id e fora de movimentação interna (que não tem edição).
+  const editable = l.id != null && !l.is_internal_movement;
+  document.getElementById("ld-edit").style.display = editable ? "" : "none";
+  document.getElementById("ld-delete").style.display = editable ? "" : "none";
+
   document.getElementById("launch-detail-overlay").classList.add("open");
+}
+
+function openLaunchDetail(idx) {
+  const l = (_renderedLaunches || [])[idx];
+  if (!l) return;
+  _launchDetailCurrent = l;
+  _launchDetailSource = "overview";
+  _renderLaunchDetail(l);
+}
+
+function openHistoryDetail(idx) {
+  const l = (_renderedHistoryItems || [])[idx];
+  if (!l) return;
+  _launchDetailCurrent = l;
+  _launchDetailSource = "history";
+  _renderLaunchDetail(l);
+}
+
+function _launchDetailEdit() {
+  const l = _launchDetailCurrent;
+  if (!l || l.id == null) return;
+  _editDeleteReturnTo = (_launchDetailSource === "history") ? "history" : null;
+  closeLaunchDetail();
+  openEditLaunchModal(l.id, l);
+}
+
+function _launchDetailDelete() {
+  const l = _launchDetailCurrent;
+  if (!l || l.id == null) return;
+  _editDeleteReturnTo = (_launchDetailSource === "history") ? "history" : null;
+  closeLaunchDetail();
+  const descTxt = describeLaunch(l).replace(/<[^>]+>/g, "").trim();
+  confirmDeleteLaunch(l.id, descTxt, l.valor, l.tipo === "credito", l.installments_total || null);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -7301,9 +7354,11 @@ function toLocalDatetimeInput(iso) {
   return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
 }
 
-function openEditLaunchModal(launchId) {
+function openEditLaunchModal(launchId, launchObj = null) {
   if (!launchId) return;
-  const launch = (lastData?.recent_launches || []).find(l => l.id === launchId);
+  // launchObj vem do modal de detalhe (inclui itens do Histórico, que não
+  // estão em recent_launches). Fallback: procura no snapshot da Visão Geral.
+  const launch = launchObj || (lastData?.recent_launches || []).find(l => l.id === launchId);
   if (!launch) return;
 
   editingLaunchId = launchId;
@@ -7341,6 +7396,7 @@ function openEditLaunchModal(launchId) {
 function closeEditLaunchModal() {
   document.getElementById("edit-launch-overlay").classList.remove("open");
   editingLaunchId = null;
+  _editDeleteReturnTo = null;  // cancelou → não recarrega o histórico
 }
 
 function hideEditLaunchError() {
@@ -7357,6 +7413,7 @@ function showEditLaunchError(msg) {
 async function submitEditLaunch() {
   if (editLaunchSubmitting || !editingLaunchId) return;
   hideEditLaunchError();
+  const _returnToHistory = (_editDeleteReturnTo === "history");
 
   let categoria = document.getElementById("edit-launch-categoria").value;
   if (categoria === EDIT_LAUNCH_CUSTOM_VALUE) {
@@ -7432,6 +7489,9 @@ async function submitEditLaunch() {
     closeEditLaunchModal();
     showLaunchSuccessToast(editingLaunchIsCredit ? "Compra atualizada" : "Lançamento atualizado");
     sendRefreshSilent();
+    // Veio do Histórico → recarrega a timeline resetando a paginação (senão,
+    // se o usuário tinha dado "Carregar mais", recarregaria só a página N).
+    if (_returnToHistory) _historyResetAndReload();
   } catch (err) {
     showEditLaunchError("Erro: " + err.message);
   } finally {
@@ -7448,6 +7508,8 @@ let deleteLaunchInFlight = false;
 async function confirmDeleteLaunch(launchId, descricao, valor, isCredit = false, installmentsTotal = null) {
   if (deleteLaunchInFlight) return;
   if (!launchId) return;
+  const _returnToHistory = (_editDeleteReturnTo === "history");
+  _editDeleteReturnTo = null;  // consome o flag (independe do usuário confirmar)
   const valFmt = (typeof valor === "number") ? fmt(valor) : "";
   const desc   = (descricao || "").trim() || "este lançamento";
 
@@ -7506,6 +7568,8 @@ async function confirmDeleteLaunch(launchId, descricao, valor, isCredit = false,
     renderLaunches();
     showLaunchSuccessToast(msg);
     sendRefreshSilent();
+    // Veio do Histórico → recarrega resetando a paginação (ver edição acima).
+    if (_returnToHistory) _historyResetAndReload();
   } catch (err) {
     await alertModal(err.message, { title: "Erro ao apagar" });
   } finally {
