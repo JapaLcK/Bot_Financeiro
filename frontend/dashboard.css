@@ -1565,7 +1565,8 @@ body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
 /* Modal de detalhe do lançamento: altura mínima + espaçamento generoso pra
    não parecer "espremido" quando há pouca informação. O botão fica ancorado
    embaixo (margin-top:auto) dando ar de limpeza. */
-.modal.launch-detail { width:min(420px,92vw);min-height:320px;display:flex;flex-direction:column; }
+.modal.launch-detail { width:min(420px,92vw);min-height:min(320px,86vh);max-height:86vh;
+  overflow:auto;display:flex;flex-direction:column; }
 .modal.launch-detail h3 { margin-bottom:14px; }
 .ld-desc { font-size:1rem;line-height:1.5;font-weight:600;color:var(--text);
   background:rgba(255,255,255,.04);border:1px solid var(--glass-border);
