@@ -309,9 +309,23 @@ const fmtShort = n => {
     : "R$" + Number(n).toLocaleString("pt-BR",{minimumFractionDigits:0,maximumFractionDigits:0});
 };
 
+// Fuso do app (o backend agrupa tudo em America/Sao_Paulo). Exibimos as datas
+// SEMPRE nesse fuso pra não depender do timezone do dispositivo — no WebView do
+// iOS ele costuma vir em UTC, o que fazia a hora aparecer ~3h adiantada.
+const APP_TZ = "America/Sao_Paulo";
 const fmtDate = iso => {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+  let s = String(iso);
+  // Se a string vier sem timezone (naive), a coluna é timestamptz em UTC:
+  // normaliza pra UTC antes de converter, senão o JS assume hora local.
+  const hasTz = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(s);
+  if (!hasTz) s = s.replace(" ", "T") + "Z";
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleString("pt-BR", {
+    day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+    timeZone: APP_TZ,
+  });
 };
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({
@@ -4571,7 +4585,9 @@ async function loadAnalyticsView(forceFresh = false, months = null) {
   if (_analyticsCache && _analyticsCache.months === _analyticsCurrentMonths && !forceFresh) {
     renderAnalyticsView(_analyticsCache);
     _fetchAnalyticsAll(_analyticsCurrentMonths).then(fresh => {
-      if (fresh) {
+      // Só re-renderiza se algo mudou de verdade — senão reconstruía os
+      // gráficos do Chart.js a cada visita, dando flicker de "recarregando".
+      if (fresh && JSON.stringify(fresh) !== JSON.stringify(_analyticsCache)) {
         _analyticsCache = fresh;
         renderAnalyticsView(fresh);
       }
@@ -6835,10 +6851,28 @@ function renderLaunchesPagination(totalItems, totalPages) {
   return html;
 }
 
+const LAUNCH_TYPE_LABELS = {
+  deposito_caixinha: "dep. caixinha",
+  saque_caixinha: "saque caixinha",
+  aporte_investimento: "aporte invest.",
+  resgate_investimento: "resgate invest.",
+  transferencia_interna: "transf. interna",
+  pagamento_fatura: "pgto. fatura",
+  ajuste_saldo: "ajuste saldo",
+  criar_caixinha: "criar caixinha",
+  create_investment: "criar invest.",
+  delete_pocket: "remover caixinha",
+  delete_investment: "remover invest.",
+  credito: "crédito",
+};
+// Guarda os lançamentos renderizados pra o clique na linha abrir o detalhe.
+let _renderedLaunches = [];
+
 function renderLaunches() {
   if (!lastData) return;
 
   const items = lastData.recent_launches || [];
+  _renderedLaunches = items;
 
   const card = document.getElementById("launches-card");
 
@@ -6856,23 +6890,10 @@ function renderLaunches() {
 
   launchesPage = meta.page || 1;
 
-	  const TYPE_LABELS = {
-    deposito_caixinha: "dep. caixinha",
-    saque_caixinha: "saque caixinha",
-    aporte_investimento: "aporte invest.",
-    resgate_investimento: "resgate invest.",
-    transferencia_interna: "transf. interna",
-    pagamento_fatura: "pgto. fatura",
-    ajuste_saldo: "ajuste saldo",
-    criar_caixinha: "criar caixinha",
-    create_investment: "criar invest.",
-    delete_pocket: "remover caixinha",
-	    delete_investment: "remover invest.",
-    credito: "crédito"
-	  };
+	  const TYPE_LABELS = LAUNCH_TYPE_LABELS;
 
 		  card.innerHTML =
-		    items.map(l => {
+		    items.map((l, idx) => {
       const isInternal = l.is_internal_movement;
       const valClass   = isInternal ? '' : (l.tipo==='receita'||l.tipo==='entrada' ? 'g' : 'r');
       const valStyle   = isInternal ? 'color:var(--text-2)' : '';
@@ -6885,7 +6906,7 @@ function renderLaunches() {
         ? `<button class="bgt-btn launch-delete-btn" onclick="event.stopPropagation();confirmDeleteLaunch(${l.id}, ${JSON.stringify(describeLaunch(l).replace(/<[^>]+>/g, '').trim()).replace(/"/g, '&quot;')}, ${l.valor}, ${l.tipo === 'credito' ? 'true' : 'false'}, ${l.installments_total || 'null'})" title="Apagar lançamento"><i class="ph ph-trash" aria-hidden="true"></i></button>`
         : '';
       return `
-      <div class="row" style="${isInternal?'opacity:.75':''}">
+      <div class="row" style="cursor:pointer;${isInternal?'opacity:.75':''}" onclick="openLaunchDetail(${idx})">
         <span class="lbl">
 	          <span class="tag ${l.tipo}">${typeLabel}</span>
 	          ${isInternal ? '<span class="tag interno">mov. interna</span>' : ''}
@@ -6901,6 +6922,21 @@ function renderLaunches() {
       </div>
     `}).join("")
     + renderLaunchesPagination(meta.total || items.length, meta.total_pages || 1);
+}
+
+// Clique numa linha da Visão Geral: abre o detalhe com a descrição COMPLETA
+// (que não cabe inteira no celular) + os campos principais. Reusa o modal
+// genérico (corpo com white-space:pre-wrap, então as quebras de linha valem).
+function openLaunchDetail(idx) {
+  const l = (_renderedLaunches || [])[idx];
+  if (!l) return;
+  const typeLabel = LAUNCH_TYPE_LABELS[l.tipo] || String(l.tipo || "").replaceAll("_", " ");
+  const desc = describeLaunch(l).replace(/<[^>]+>/g, "").trim() || "—";
+  const lines = [desc, "", `Valor: ${fmt(l.valor)}`, `Tipo: ${typeLabel}`];
+  if (l.categoria) lines.push(`Categoria: ${l.categoria}`);
+  if (l.is_internal_movement) lines.push("Movimentação interna");
+  lines.push(`Data: ${fmtDate(l.criado_em)}`);
+  alertModal(lines.join("\n"), { title: "Detalhe do lançamento", okText: "Fechar" });
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

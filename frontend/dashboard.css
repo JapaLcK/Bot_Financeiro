@@ -839,8 +839,13 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 
 .month-nav { display:flex; align-items:center; }
 .mbtn { background:rgba(255,255,255,.07);border:1px solid var(--glass-border);color:var(--text-2);
-  width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:.95rem;
-  display:flex;align-items:center;justify-content:center;transition:all .2s var(--ease); }
+  width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:.95rem;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  /* Transição só em cor/fundo (não em `all`): evita animar opacity no
+     enable/disable, que sob o header com backdrop-filter deixava "fantasma"
+     do botão no WebView do iOS. translateZ força camada própria e mata o ghost. */
+  transition:background .2s var(--ease), color .2s var(--ease);
+  transform:translateZ(0); -webkit-backface-visibility:hidden; backface-visibility:hidden; }
 .mbtn:hover:not(:disabled) { background:rgba(255,255,255,.14);color:var(--text); }
 .mbtn:disabled { opacity:.3;cursor:default; }
 #month-label { min-width:128px;text-align:center;font-size:.8rem;font-weight:600;
