@@ -40,14 +40,12 @@ const fmtShort = v => "R$ " + v;
 document.getElementById("agentes-counters").innerHTML = `
   <span class="ag-counter"><i class="ag-dot ag-dot-on"></i> Ativos <b>2</b></span>
   <span class="ag-counter"><i class="ag-dot ag-dot-off"></i> Pausados <b>0</b></span>
-  <span class="ag-counter"><i class="ag-dot ag-dot-fire"></i> Disparos <b>7</b></span>
-  <span class="ag-counter ag-money">💰 R$ 340 salvos</span>`;
+  <span class="ag-counter"><i class="ag-dot ag-dot-fire"></i> Disparos <b>7</b></span>`;
 document.getElementById("agentes-shelf").innerHTML = catalog.map(card => {
   const active = card.status === "active";
   const chips = [
     `<span class="ag-chip">${esc(card.freq)}</span>`,
     card.fired_30d > 0 ? `<span class="ag-chip ag-chip-fire">⚡ ${card.fired_30d}</span>` : "",
-    card.saved_365d > 0 ? `<span class="ag-chip ag-chip-money">💰 ${fmtShort(card.saved_365d)}</span>` : "",
   ].join("");
   const btn = !card.disponivel
     ? `<button class="ag-btn ag-btn-soon" disabled>Em breve</button>`

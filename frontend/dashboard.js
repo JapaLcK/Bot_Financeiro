@@ -9480,7 +9480,6 @@ function _renderAgentes(data) {
       <span class="ag-counter"><i class="ag-dot ag-dot-on"></i> Ativos <b>${s.ativos || 0}</b></span>
       <span class="ag-counter"><i class="ag-dot ag-dot-off"></i> Pausados <b>${s.pausados || 0}</b></span>
       <span class="ag-counter"><i class="ag-dot ag-dot-fire"></i> Disparos <b>${s.disparos_mes || 0}</b></span>
-      ${s.salvos_ano > 0 ? `<span class="ag-counter ag-money"><i class="ph ph-coins" aria-hidden="true"></i> ${fmt(s.salvos_ano)} salvos</span>` : ""}
     `;
   }
 
@@ -9489,7 +9488,6 @@ function _renderAgentes(data) {
     const chips = [
       `<span class="ag-chip">${esc(card.freq)}</span>`,
       card.fired_30d > 0 ? `<span class="ag-chip ag-chip-fire"><i class="ph ph-lightning" aria-hidden="true"></i> ${card.fired_30d}</span>` : "",
-      card.saved_365d > 0 ? `<span class="ag-chip ag-chip-money"><i class="ph ph-coins" aria-hidden="true"></i> ${fmtShort(card.saved_365d)}</span>` : "",
     ].filter(Boolean).join("");
     // can_activate vem do backend (escada v2: Grátis/Essencial não ativam).
     // Gate visível: o card aparece normal, mas o botão vira cadeado que abre o

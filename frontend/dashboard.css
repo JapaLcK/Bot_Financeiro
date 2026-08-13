@@ -2108,7 +2108,6 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 .ag-dot-on { background: var(--neon); }
 .ag-dot-off { background: var(--text-3); }
 .ag-dot-fire { background: var(--purple); }
-.ag-money { color: var(--neon); font-weight: 700; }
 
 .ag-shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 14px; }
 .ag-card {
@@ -2124,7 +2123,6 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 .ag-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .ag-chip { font-size: 10.5px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--glass-border); color: var(--text-2); }
 .ag-chip-fire { border-color: rgba(255, 201, 77, .4); color: #FFC94D; }
-.ag-chip-money { border-color: rgba(198, 241, 26, .4); color: var(--neon); }
 
 .ag-avatar {
   border-radius: 14px; aspect-ratio: 1.35; overflow: hidden;
