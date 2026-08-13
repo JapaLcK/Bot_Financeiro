@@ -7489,7 +7489,9 @@ async function submitEditLaunch() {
     closeEditLaunchModal();
     showLaunchSuccessToast(editingLaunchIsCredit ? "Compra atualizada" : "Lançamento atualizado");
     sendRefreshSilent();
-    if (_returnToHistory) loadHistoryView(true);  // veio do Histórico → atualiza a timeline
+    // Veio do Histórico → recarrega a timeline resetando a paginação (senão,
+    // se o usuário tinha dado "Carregar mais", recarregaria só a página N).
+    if (_returnToHistory) _historyResetAndReload();
   } catch (err) {
     showEditLaunchError("Erro: " + err.message);
   } finally {
@@ -7566,7 +7568,8 @@ async function confirmDeleteLaunch(launchId, descricao, valor, isCredit = false,
     renderLaunches();
     showLaunchSuccessToast(msg);
     sendRefreshSilent();
-    if (_returnToHistory) loadHistoryView(true);  // veio do Histórico → atualiza a timeline
+    // Veio do Histórico → recarrega resetando a paginação (ver edição acima).
+    if (_returnToHistory) _historyResetAndReload();
   } catch (err) {
     await alertModal(err.message, { title: "Erro ao apagar" });
   } finally {
