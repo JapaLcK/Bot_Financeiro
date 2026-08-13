@@ -114,12 +114,38 @@ function applyUserMenuState(email, plan, displayName) {
   applyProGates();
 }
 
+/* ─── Cache do chrome do header (instant paint no cold start) ─────────────
+   Guarda só dados NÃO-financeiros do menu (nome/email/plano) pra pintar o
+   cabeçalho e aplicar os gates de UI na hora, sem esperar o round-trip do
+   /auth/dashboard-profile. Saldos e transações NUNCA entram aqui — a política
+   do app é não cachear dado financeiro no dispositivo (ver service-worker.js).
+   O valor é sobrescrito pelo perfil fresco ~1 RTT depois, e limpo no logout. */
+const _MENU_CACHE_KEY = "pigbank_menu_v1";
+function _readMenuCache() {
+  try {
+    const raw = localStorage.getItem(_MENU_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function _writeMenuCache(email, plan, displayName) {
+  try {
+    localStorage.setItem(_MENU_CACHE_KEY, JSON.stringify({ email, plan, displayName }));
+  } catch {}
+}
+function clearMenuCache() {
+  try { localStorage.removeItem(_MENU_CACHE_KEY); } catch {}
+}
+
 async function loadUserMenuState() {
+  // Paint otimista: aplica o último chrome conhecido antes do fetch resolver.
+  const cached = _readMenuCache();
+  if (cached) applyUserMenuState(cached.email || "", cached.plan || "free", cached.displayName || "");
   try {
     const res = await fetch(`${API}/auth/dashboard-profile`, { credentials: "same-origin" });
     if (!res.ok) return;
     const data = await readResponsePayload(res);
     applyUserMenuState(data.email || "", data.plan || "free", data.display_name || "");
+    _writeMenuCache(data.email || "", data.plan || "free", data.display_name || "");
   } catch {}
 }
 
@@ -247,6 +273,7 @@ async function logoutDashboard() {
       headers: csrfHeaders()
     });
   } catch {}
+  clearMenuCache();  // não deixa o chrome de um usuário vazar pro próximo login
   localStorage.setItem('finbot_logout_at', String(Date.now()));
   window.location.replace('/?logout=1');
 }
