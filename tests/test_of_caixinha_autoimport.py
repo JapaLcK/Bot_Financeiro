@@ -137,6 +137,51 @@ def test_of_pocket_is_readonly_for_deposit_and_withdraw(user_id):
         db.pocket_withdraw_to_account(user_id, "Caixinha Viagem", 100.0)
 
 
+def test_candidates_hide_unlinked_zero_balance(user_id):
+    # Nubank devolve toda posição de CDB via OF, inclusive caixinhas já esvaziadas
+    # (saldo 0). A tela de vínculo não deve listar essas — só as com saldo > 0.
+    conn_id = _seed_connection(user_id)
+    _save(conn_id, [
+        {"id": "cx-live", "name": "CDB - NU FINANCEIRA S.A.", "type": "FIXED_INCOME",
+         "subtype": "CDB", "balance": 500.0},
+        {"id": "cx-zero", "name": "CDB - NU FINANCEIRA S.A.", "type": "FIXED_INCOME",
+         "subtype": "CDB", "balance": 0.0},
+    ])
+    cands = db.list_caixinha_candidates(user_id)
+    ids = {c["of_investment_id"] for c in cands}
+    live = _of_id(conn_id, "cx-live")
+    zero = _of_id(conn_id, "cx-zero")
+    assert live in ids       # com saldo aparece
+    assert zero not in ids   # zerada e sem vínculo some da lista
+
+
+def test_candidates_keep_linked_zero_balance(user_id):
+    # Caixinha vinculada a uma meta permanece na lista mesmo zerada, pra
+    # permitir o desvínculo pela UI.
+    conn_id = _seed_connection(user_id)
+    _save(conn_id, [{"id": "cx-drained", "name": "Caixinha Viagem", "type": "FIXED_INCOME",
+                     "subtype": "CDB", "balance": 0.0}])
+    of_id = _of_id(conn_id, "cx-drained")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "insert into pockets(user_id,name,balance,source,of_investment_id,interest_enabled) "
+                "values(%s,'Minha meta',0,'open_finance',%s,false)", (user_id, of_id))
+        conn.commit()
+    ids = {c["of_investment_id"] for c in db.list_caixinha_candidates(user_id)}
+    assert of_id in ids
+
+
+def _of_id(conn_id: int, provider_investment_id: str) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id from open_finance_investments "
+                "where connection_id=%s and provider_investment_id=%s",
+                (conn_id, provider_investment_id))
+            return cur.fetchone()["id"]
+
+
 def test_accrual_does_not_touch_of_pocket_balance(user_id):
     conn_id = _seed_connection(user_id)
     _save(conn_id, [{"id": "cx4", "name": "Cofrinho férias", "type": "FIXED_INCOME",
