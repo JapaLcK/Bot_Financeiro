@@ -9,6 +9,7 @@
   --radius:        22px;
   --green:  #00F078; --neon:   #C6F11A; --red:    #FF2D2D; --blue:   #FF80B8;
   --purple: #FF2D8E; --yellow: #fbbf24;
+  --neon-ink: var(--neon);  /* lima legível: neon puro no escuro, escurece no claro (ver body.light) */
   --text:   rgba(255,255,255,0.92);
   --text-2: rgba(255,255,255,0.52);
   --text-3: rgba(255,255,255,0.28);
@@ -27,6 +28,7 @@ body.light {
   --text-2: #475569;
   --text-3: #94a3b8;
   --div:    rgba(15,23,42,0.08);
+  --neon-ink: #5E8000;  /* neon puro fica ilegível sobre fundo claro; olive-lima escuro mantém a identidade */
   --orb-opacity: .12;
 }
 
