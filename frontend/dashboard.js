@@ -9274,8 +9274,15 @@ function _showAccessError(title, msg) {
 (async () => {
   const view = params.get("view");
 
+  // /auth/validate e /auth/me são independentes (ambos por cookie — o /me não
+  // precisa do USER_ID). Disparamos os dois em paralelo pra cortar uma ida ao
+  // servidor do caminho crítico de abertura. O .catch no /me evita rejeição
+  // não tratada caso o validate falhe e a gente saia antes de consumi-lo.
+  const validatePromise = fetch(`${API}/auth/validate`, { credentials: "same-origin" });
+  const mePromise = fetch(`${API}/auth/me`, { credentials: "same-origin" }).catch(() => null);
+
   try {
-    const resp = await fetch(`${API}/auth/validate`, { credentials: "same-origin" });
+    const resp = await validatePromise;
     if (!resp.ok) { _showAccessError(); return; }
     const data = await resp.json();
     USER_ID = data.user_id;
@@ -9287,8 +9294,8 @@ function _showAccessError(title, msg) {
   // Paywall: sem assinatura ativa → manda pro paywall antes de carregar o app.
   // (As rotas de dados também devolvem 402 como reforço server-side.)
   try {
-    const meResp = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
-    if (meResp.ok) {
+    const meResp = await mePromise;
+    if (meResp && meResp.ok) {
       const me = await meResp.json();
       historyEarliestDate = me?.history_earliest_date || null;
       updateMonthLabel();

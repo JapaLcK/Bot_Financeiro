@@ -10,16 +10,24 @@
 <meta name="theme-color" content="#111111" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<!-- Aquece a conexão com os CDNs de terceiros antes de baixar os scripts. -->
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin />
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+<!-- Bibliotecas de terceiros: só usadas depois que uma view abre (gráficos /
+     drag-and-drop). Com defer não bloqueiam o parse nem o primeiro paint; a
+     ordem do documento continua garantida, então executam antes do dashboard.js. -->
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 <link rel="stylesheet" href="/brand.css" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/dashboard.css?v=2" />
 <link rel="stylesheet" href="/dashboard-mobile.css" media="(max-width: 900px)" />
-<script src="/static/auth-refresh.js"></script>
-<script src="/modals.js"></script>
+<!-- defer preserva a ordem: auth-refresh (patch do fetch) → modals → app-mode →
+     dashboard.js. Nenhum script inline depende deles durante o parse. -->
+<script defer src="/static/auth-refresh.js"></script>
+<script defer src="/modals.js"></script>
   <link rel="stylesheet" href="/app-mode.css?v=18" />
-  <script src="/app-mode.js?v=19"></script>
+  <script defer src="/app-mode.js?v=19"></script>
 </head>
 <body class="has-sidenav">
 
@@ -1530,7 +1538,7 @@
   </div>
 </div>
 
-<script src="/dashboard.js?v=4"></script>
+<script defer src="/dashboard.js?v=5"></script>
 
 <!-- ─── Chat IA widget (Piggy) — Item #49 ──────────────────────────────── -->
 
@@ -1569,7 +1577,7 @@
   </div>
 </div>
 
-<script src="/dashboard-chat.js"></script>
+<script defer src="/dashboard-chat.js"></script>
 
 </body>
 </html>
