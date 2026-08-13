@@ -6,7 +6,11 @@
 <title>Configurações — PigBank</title>
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
 <meta name="theme-color" content="#111111" />
-<script src="https://cdn.pluggy.ai/pluggy-connect/v2.7.0/pluggy-connect.js"></script>
+<!-- Widget da Pluggy: só é instanciado quando o usuário abre "conectar banco"
+     (openPluggyConnect). defer tira o download do caminho bloqueante do parse;
+     o factory (window.PluggyConnect) já estará pronto muito antes do clique. -->
+<link rel="preconnect" href="https://cdn.pluggy.ai" crossorigin />
+<script defer src="https://cdn.pluggy.ai/pluggy-connect/v2.7.0/pluggy-connect.js"></script>
 <link rel="stylesheet" href="/brand.css" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
 <style>

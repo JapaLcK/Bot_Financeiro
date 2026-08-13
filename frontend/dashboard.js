@@ -42,6 +42,32 @@ let WS_URL  = "";
 let USER_EMAIL = "";
 let USER_PLAN = "";
 
+/* ─── Loader de scripts sob demanda ──────────────────────────────────────
+   Carrega uma lib de terceiros só quando ela é realmente necessária, em vez
+   de baixá-la em todo boot. Deduplica: várias chamadas para a mesma URL
+   compartilham a mesma Promise. */
+const _scriptLoaders = {};
+function _loadScriptOnce(src) {
+  if (_scriptLoaders[src]) return _scriptLoaders[src];
+  _scriptLoaders[src] = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => { delete _scriptLoaders[src]; reject(new Error(`Falha ao carregar ${src}`)); };
+    document.head.appendChild(s);
+  });
+  return _scriptLoaders[src];
+}
+
+/* Sortable só é usado no drag-to-reorder dos cartões (ponteiro fino). Carrega
+   sob demanda pra tirar ~50KB de todo boot de quem nunca reordena cartão. */
+function ensureSortable() {
+  if (typeof window.Sortable !== "undefined") return Promise.resolve();
+  return _loadScriptOnce("https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js")
+    .catch(() => {});
+}
+
 function getCookie(name) {
   return document.cookie.split("; ").find(row => row.startsWith(`${name}=`))?.split("=")[1] || "";
 }
@@ -88,12 +114,50 @@ function applyUserMenuState(email, plan, displayName) {
   applyProGates();
 }
 
+/* ─── Cache do chrome do header (instant paint no cold start) ─────────────
+   Guarda só dados NÃO-financeiros do menu (nome/email/plano) pra pintar o
+   cabeçalho e aplicar os gates de UI na hora, sem esperar o round-trip do
+   /auth/dashboard-profile. Saldos e transações NUNCA entram aqui — a política
+   do app é não cachear dado financeiro no dispositivo (ver service-worker.js).
+   O valor é sobrescrito pelo perfil fresco ~1 RTT depois.
+   O cache é ESCOPADO ao USER_ID validado: o paint otimista só acontece se o
+   registro pertencer ao usuário da sessão atual. Isso evita mostrar a
+   identidade de um usuário anterior quando outra conta loga no mesmo
+   navegador — inclusive se o logout foi feito por Settings/Home (cujos
+   handlers não conhecem esta chave) e mesmo que o fetch fresco falhe. */
+const _MENU_CACHE_KEY = "pigbank_menu_v1";
+function _readMenuCache() {
+  try {
+    const raw = localStorage.getItem(_MENU_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function _writeMenuCache(userId, email, plan, displayName) {
+  try {
+    localStorage.setItem(_MENU_CACHE_KEY, JSON.stringify({ userId, email, plan, displayName }));
+  } catch {}
+}
+function clearMenuCache() {
+  try { localStorage.removeItem(_MENU_CACHE_KEY); } catch {}
+}
+
 async function loadUserMenuState() {
+  // Paint otimista: aplica o último chrome conhecido ANTES do fetch resolver,
+  // mas só se o cache for do usuário já validado nesta sessão (USER_ID).
+  const cached = _readMenuCache();
+  if (cached && USER_ID && String(cached.userId) === String(USER_ID)) {
+    applyUserMenuState(cached.email || "", cached.plan || "free", cached.displayName || "");
+  } else if (cached) {
+    // Cache de outro usuário (ou formato antigo sem userId): descarta pra não
+    // vazar identidade. Será reescrito com o perfil correto abaixo.
+    clearMenuCache();
+  }
   try {
     const res = await fetch(`${API}/auth/dashboard-profile`, { credentials: "same-origin" });
     if (!res.ok) return;
     const data = await readResponsePayload(res);
     applyUserMenuState(data.email || "", data.plan || "free", data.display_name || "");
+    _writeMenuCache(USER_ID, data.email || "", data.plan || "free", data.display_name || "");
   } catch {}
 }
 
@@ -221,6 +285,7 @@ async function logoutDashboard() {
       headers: csrfHeaders()
     });
   } catch {}
+  clearMenuCache();  // não deixa o chrome de um usuário vazar pro próximo login
   localStorage.setItem('finbot_logout_at', String(Date.now()));
   window.location.replace('/?logout=1');
 }
@@ -8132,11 +8197,14 @@ function _installWalletDrag(wallet) {
 
 /* Drag-to-reorder na view Cartões (#cards-grid). Cards são <details>, então
    `delay` evita conflito com click no <summary> (expandir/colapsar). */
-function setupCardsGridSort() {
-  if (typeof Sortable === "undefined") return;
+async function setupCardsGridSort() {
+  // Drag só faz sentido em ponteiro fino (mouse/trackpad). Checa antes de
+  // carregar a lib pra não baixar nada em touch.
   if (!window.matchMedia("(pointer: fine)").matches) return;
   const grid = document.getElementById("cards-grid");
   if (!grid) return;
+  await ensureSortable();
+  if (typeof Sortable === "undefined") return;   // load falhou → segue sem drag
   if (grid.__sortable) {
     try { grid.__sortable.destroy(); } catch (_) {}
   }
@@ -9274,8 +9342,15 @@ function _showAccessError(title, msg) {
 (async () => {
   const view = params.get("view");
 
+  // /auth/validate e /auth/me são independentes (ambos por cookie — o /me não
+  // precisa do USER_ID). Disparamos os dois em paralelo pra cortar uma ida ao
+  // servidor do caminho crítico de abertura. O .catch no /me evita rejeição
+  // não tratada caso o validate falhe e a gente saia antes de consumi-lo.
+  const validatePromise = fetch(`${API}/auth/validate`, { credentials: "same-origin" });
+  const mePromise = fetch(`${API}/auth/me`, { credentials: "same-origin" }).catch(() => null);
+
   try {
-    const resp = await fetch(`${API}/auth/validate`, { credentials: "same-origin" });
+    const resp = await validatePromise;
     if (!resp.ok) { _showAccessError(); return; }
     const data = await resp.json();
     USER_ID = data.user_id;
@@ -9287,8 +9362,8 @@ function _showAccessError(title, msg) {
   // Paywall: sem assinatura ativa → manda pro paywall antes de carregar o app.
   // (As rotas de dados também devolvem 402 como reforço server-side.)
   try {
-    const meResp = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
-    if (meResp.ok) {
+    const meResp = await mePromise;
+    if (meResp && meResp.ok) {
       const me = await meResp.json();
       historyEarliestDate = me?.history_earliest_date || null;
       updateMonthLabel();
