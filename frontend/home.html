@@ -972,19 +972,25 @@ function showAccessError() {
    Início mostrava skeleton e esperava /data + /history a cada abertura.
    Guardamos o último resultado em sessionStorage (some ao fechar o app; nada
    gravado no disco a longo prazo) e pintamos na hora, revalidando em seguida. */
-const _HOME_CACHE_KEY = "pb_home_v1";
+const _HOME_CACHE_PREFIX = "pb_home_";
+function _homeCacheKey(userId) { return _HOME_CACHE_PREFIX + userId; }
 function persistHomeCache(userId, snapshot, history, email, displayName) {
+  if (!userId) return;
   try {
-    sessionStorage.setItem(_HOME_CACHE_KEY,
+    sessionStorage.setItem(_homeCacheKey(userId),
       JSON.stringify({ userId, snapshot, history, email, displayName }));
   } catch {}
 }
-function restoreHomeCache() {
+// Restaura SÓ do usuário já validado (chave escopada ao userId) — nunca pinta
+// dados de outra conta que tenha usado a mesma aba, mesmo se um logout por
+// Dashboard/Settings não tiver limpado esta chave.
+function restoreHomeCache(userId) {
+  if (!userId) return;
   try {
-    const raw = sessionStorage.getItem(_HOME_CACHE_KEY);
+    const raw = sessionStorage.getItem(_homeCacheKey(userId));
     if (!raw) return;
     const c = JSON.parse(raw);
-    if (!c || !c.snapshot) return;
+    if (!c || !c.snapshot || String(c.userId) !== String(userId)) return;
     // Só os renders que dependem de snapshot/history (não de `me`/plano): a
     // passagem fresca logo abaixo revalida e completa (onboarding, banner).
     renderGreeting(c.snapshot, c.email || "", c.displayName || "");
@@ -996,17 +1002,13 @@ function restoreHomeCache() {
 function clearHomeCache() {
   try {
     Object.keys(sessionStorage).forEach(k => {
-      if (k === _HOME_CACHE_KEY || k.startsWith("pb_snap_")) sessionStorage.removeItem(k);
+      if (k.startsWith(_HOME_CACHE_PREFIX) || k.startsWith("pb_snap_")) sessionStorage.removeItem(k);
     });
   } catch {}
 }
 
 /* ─── Init ────────────────────────────────────────────────────────────── */
 (async () => {
-  // Paint instantâneo: se há cache da sessão (troca de aba), pinta AGORA, antes
-  // mesmo do validate; o fluxo abaixo revalida e substitui pelos dados frescos.
-  restoreHomeCache();
-
   // 1) Valida sessão
   let userId = 0;
   let validateData = null;
@@ -1016,6 +1018,11 @@ function clearHomeCache() {
     validateData = await r.json();
     userId = USER_ID = validateData.user_id;
   } catch { showAccessError(); return; }
+
+  // Paint instantâneo: com o USER_ID já validado, pinta o cache DESSE usuário
+  // na hora (troca de aba /home <-> /app), antes de /auth/me + /data + /history.
+  // O fluxo abaixo revalida e substitui pelos dados frescos.
+  restoreHomeCache(USER_ID);
 
   // 1.5) Onboarding MFA: aparece UMA vez para usuarios sem MFA ativado.
   // Esta e a primeira tela apos login, entao e o ponto certo para incentivar.
