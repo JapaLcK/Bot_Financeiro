@@ -6964,18 +6964,54 @@ function renderLaunches() {
 }
 
 // Clique numa linha da Visão Geral: abre o detalhe com a descrição COMPLETA
-// (que não cabe inteira no celular) + os campos principais. Reusa o modal
-// genérico (corpo com white-space:pre-wrap, então as quebras de linha valem).
+// (que não cabe inteira no celular) + os campos principais. Modal dedicado com
+// altura mínima e respiro — não usa o alertModal genérico (que encolhe até o
+// texto e ficava apertado com pouca informação).
+function _ensureLaunchDetailModal() {
+  if (document.getElementById("launch-detail-overlay")) return;
+  const html = `
+    <div class="overlay" id="launch-detail-overlay">
+      <div class="modal launch-detail">
+        <h3>Detalhe do lançamento</h3>
+        <div class="ld-desc" id="ld-desc"></div>
+        <div class="ld-meta" id="ld-meta"></div>
+        <div class="modal-acts">
+          <button type="button" class="btn-save" id="ld-close">Fechar</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML("beforeend", html);
+  const ov = document.getElementById("launch-detail-overlay");
+  ov.addEventListener("click", e => { if (e.target === ov) closeLaunchDetail(); });
+  document.getElementById("ld-close").addEventListener("click", closeLaunchDetail);
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && ov.classList.contains("open")) closeLaunchDetail();
+  });
+}
+
+function closeLaunchDetail() {
+  const ov = document.getElementById("launch-detail-overlay");
+  if (ov) ov.classList.remove("open");
+}
+
 function openLaunchDetail(idx) {
   const l = (_renderedLaunches || [])[idx];
   if (!l) return;
+  _ensureLaunchDetailModal();
   const typeLabel = LAUNCH_TYPE_LABELS[l.tipo] || String(l.tipo || "").replaceAll("_", " ");
   const desc = describeLaunch(l).replace(/<[^>]+>/g, "").trim() || "—";
-  const lines = [desc, "", `Valor: ${fmt(l.valor)}`, `Tipo: ${typeLabel}`];
-  if (l.categoria) lines.push(`Categoria: ${l.categoria}`);
-  if (l.is_internal_movement) lines.push("Movimentação interna");
-  lines.push(`Data: ${fmtDate(l.criado_em)}`);
-  alertModal(lines.join("\n"), { title: "Detalhe do lançamento", okText: "Fechar" });
+  document.getElementById("ld-desc").textContent = desc;
+
+  const rows = [["Valor", fmt(l.valor)], ["Tipo", typeLabel]];
+  if (l.categoria) rows.push(["Categoria", l.categoria]);
+  if (l.is_internal_movement) rows.push(["Movimentação", "interna"]);
+  rows.push(["Data", fmtDate(l.criado_em)]);
+  document.getElementById("ld-meta").innerHTML = rows.map(([k, v]) =>
+    `<div class="ld-row"><span class="ld-k">${escapeHtmlSafe(k)}</span>` +
+    `<span class="ld-v">${escapeHtmlSafe(String(v))}</span></div>`
+  ).join("");
+
+  document.getElementById("launch-detail-overlay").classList.add("open");
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
