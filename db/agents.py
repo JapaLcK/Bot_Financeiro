@@ -64,23 +64,44 @@ def count_active_agents(user_id: int) -> int:
 
 
 def activate_agent(
-    user_id: int, kind: str, config: dict | None = None, allow_multiple: bool = True
+    user_id: int, kind: str, config: dict | None = None, allow_multiple: bool = True,
+    energy_budget: int | None = None, energy_cost_by_kind: dict[str, int] | None = None,
 ) -> dict[str, Any] | None:
     """Cria (ou reativa) o agente. Upsert idempotente por (user_id, kind).
 
-    Com `allow_multiple=False` (plano sem direito a vários agentes), a checagem
-    de limite e a ativação acontecem na MESMA transação, serializadas por um
-    advisory lock por usuário — senão duas ativações concorrentes de kinds
-    diferentes leem count=0 e ambas ativam, furando o teto do Free (TOCTOU).
-    Retorna None quando o limite bloqueia (o usuário já tem outro agente ativo).
-    Reativar o MESMO kind nunca conta como novo agente (kind <> %s no count).
+    Dois modos de gate, ambos serializados por um advisory lock por usuário pra
+    fechar o TOCTOU (duas ativações concorrentes lendo o mesmo estado e furando
+    o limite):
+
+      • energy_budget != None (modelo de energia): soma o custo dos agentes já
+        ativos (fora o próprio kind) e bloqueia se `usado + custo(kind) > budget`.
+        Reativar o MESMO kind não recontabiliza (ele fica de fora da soma).
+      • allow_multiple=False (legado v1/v2-off): teto binário — bloqueia se já
+        houver QUALQUER outro agente ativo.
+
+    Retorna None quando o gate bloqueia. Reativar o MESMO kind nunca é bloqueado
+    (kind <> %s exclui o próprio da checagem).
     """
     if kind not in AGENT_KINDS:
         raise ValueError(f"kind inválido: {kind}")
     cfg = json.dumps(config or {})
     with get_conn() as conn:
         with conn.cursor() as cur:
-            if not allow_multiple:
+            if energy_budget is not None:
+                # Lock por usuário (liberado no fim da transação). hashtext→int4,
+                # promovido a bigint pela assinatura de 1 arg da função.
+                cur.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"agent_activate:{user_id}",))
+                cur.execute(
+                    "select kind from agents"
+                    " where user_id=%s and status='active' and kind <> %s",
+                    (user_id, kind),
+                )
+                costs = energy_cost_by_kind or {}
+                used = sum(int(costs.get(r["kind"], 0)) for r in (cur.fetchall() or []))
+                if used + int(costs.get(kind, 0)) > int(energy_budget):
+                    conn.rollback()
+                    return None
+            elif not allow_multiple:
                 # Lock por usuário (liberado no fim da transação). hashtext→int4,
                 # promovido a bigint pela assinatura de 1 arg da função.
                 cur.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"agent_activate:{user_id}",))

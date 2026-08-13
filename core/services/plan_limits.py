@@ -37,24 +37,37 @@ class PlanLimits(TypedDict):
     image_ocr_enabled: bool             # leitura de cupom/comprovante por IA
     bills_enabled: bool                 # agenda de boletos / contas a pagar
     of_banks_max: int | None            # bancos conectáveis no Open Finance (0 = sem OF)
-    agents_max: int | None              # agentes do Piggy ativos (prateleira futura)
+    agents_max: int | None              # teto de agentes ativos (legado; hoje o limite real é a energia)
+    agents_energy_budget: int           # orçamento de energia p/ ativar agentes (0 = sem agentes)
 
 
 # Ordem canônica da escada. Comparações de tier usam este ranking.
 TIER_ORDER: dict[str, int] = {"free": 0, "essencial": 1, "plus": 2, "pro": 3}
 
-# Tier mínimo POR AGENTE (escada v2). Prateleira começa no Plus — Grátis e
-# Essencial têm 0 agentes (decisão 2026-08-06). Fase A = Plus+; Fase B
-# (detetive/cofre/barao, quando existirem) = Pro+. Kind não mapeado cai em
-# "pro" por segurança. Fonte única: rotas E runners leem daqui.
-AGENT_KIND_MIN_TIER: dict[str, str] = {
-    "xerife": "plus",
-    "reporter": "plus",
-    "carteiro": "plus",
-    "detetive": "pro",   # Fase B: caça-assinaturas (tier Pro/pro_max)
-    "cofre": "pro",      # Fase B: Banqueiro (aporte na caixinha OF → meta)
-    "barao": "pro",      # Fase B: Barão (dinheiro parado vs CDI)
+# Custo de ENERGIA de cada agente (modelo 2026-08-13). Calibrado por quanto o
+# agente custa pra gente rodar: frequência + dependência de Open Finance + peso
+# de processamento. Os leves (leitura mensal) custam 1; os pesados (varredura
+# contínua de histórico OF) custam 3. Fonte única: rotas, runners e UI leem daqui.
+#
+# Regra dos planos (todos os agentes ficam liberados em Plus e Pro; o limitador
+# é a energia): Plus tem orçamento 4 → cabem os 3 baratos (1+1+2), ou 2 se um
+# for caro (⚡3). Pro tem 12 → cabem os 6 (1+1+2+2+3+3). Grátis/Essencial = 0.
+AGENT_ENERGY_COST: dict[str, int] = {
+    "reporter": 1,   # mensal, só lê o mês fechado
+    "carteiro": 1,   # contínuo, mas só checa data de boleto
+    "xerife": 2,     # diário + a cada sync, análise de anomalia
+    "barao": 2,      # mensal, mas depende de Open Finance
+    "detetive": 3,   # contínuo + varre 6 meses de histórico OF a cada sync
+    "cofre": 3,      # contínuo + acompanha caixinhas OF a cada sync
 }
+
+# Custo default de kind não mapeado: o mais caro, por segurança.
+_DEFAULT_AGENT_ENERGY_COST = 3
+
+
+def agent_energy_cost(kind: str) -> int:
+    """Energia que ativar este agente consome. Kind desconhecido → custo máximo."""
+    return AGENT_ENERGY_COST.get(kind, _DEFAULT_AGENT_ENERGY_COST)
 
 
 # Escada FINAL v3 (2026-08-06): Grátis R$0 · Essencial 9,90 · Plus 19,90 ·
@@ -81,6 +94,7 @@ FREE_LIMITS: PlanLimits = {
     "bills_enabled": False,
     "of_banks_max": 0,                   # Grátis não tem Open Finance (trial usa o tier assinado)
     "agents_max": 0,                     # Grátis não tem agentes (trial usa o tier assinado)
+    "agents_energy_budget": 0,           # Grátis não tem energia p/ agentes
 }
 
 
@@ -102,6 +116,7 @@ ESSENCIAL_LIMITS: PlanLimits = {
     "bills_enabled": True,
     "of_banks_max": 1,                   # 1 conexão viva (pode trocar de banco)
     "agents_max": 0,                     # prateleira de agentes começa no Plus
+    "agents_energy_budget": 0,           # Essencial ainda não tem energia p/ agentes
 }
 
 
@@ -122,7 +137,8 @@ PLUS_LIMITS: PlanLimits = {
     "image_ocr_enabled": True,
     "bills_enabled": True,
     "of_banks_max": 2,
-    "agents_max": 3,                     # Xerife + Repórter + Carteiro
+    "agents_max": 3,                     # legado (headline "até 3"); o limite real é a energia
+    "agents_energy_budget": 4,           # cabem os 3 baratos (1+1+2), ou 2 se um for caro (⚡3)
 }
 
 
@@ -130,7 +146,8 @@ PRO_LIMITS: PlanLimits = {
     **PLUS_LIMITS,
     "history_days": 730,                 # 24 meses
     "of_banks_max": 5,
-    "agents_max": 6,                     # + Detetive, Banqueiro (kind "cofre"), Barão
+    "agents_max": 6,                     # legado; o limite real é a energia
+    "agents_energy_budget": 12,          # cabem os 6 (1+1+2+2+3+3)
 }
 
 
