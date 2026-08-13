@@ -1578,6 +1578,12 @@ body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
 .ld-k { color:var(--text-3);flex-shrink:0; }
 .ld-v { color:var(--text);font-weight:600;text-align:right;word-break:break-word; }
 .modal.launch-detail .modal-acts { margin-top:auto;padding-top:22px; }
+.modal.launch-detail .modal-acts.ld-acts { justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px; }
+.ld-acts-right { display:flex;gap:10px;margin-left:auto; }
+.ld-del { background:transparent;border:1px solid var(--glass-border);color:#ff6b6b;
+  padding:8px 14px;border-radius:9px;cursor:pointer;font-size:.82rem;
+  display:inline-flex;align-items:center;gap:6px;transition:background .2s; }
+.ld-del:hover { background:rgba(255,45,45,.12); }
 .modal h3 { font-size:1rem;font-weight:650;margin-bottom:5px; }
 .modal .msub { font-size:.78rem;color:var(--text-2);margin-bottom:18px; }
 .modal-inp { width:100%;background:rgba(255,255,255,.07);border:1px solid var(--glass-border);
