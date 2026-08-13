@@ -277,6 +277,38 @@ function isCurrentViewData(data) {
   return Number(data?.year) === Number(viewYear) && Number(data?.month) === Number(viewMonth);
 }
 
+/* ─── Snapshot em sessionStorage: paint instantâneo entre páginas ──────────
+   O app troca /home <-> /app (Dashboard) com reload de página inteira; sem
+   isso a Visão Geral mostrava skeleton e esperava o WebSocket a cada troca.
+   Guardamos só o snapshot no ESTADO PADRÃO da aba (pág 1, filtro "all", sem
+   busca), escopado ao USER_ID. sessionStorage some quando o app é fechado de
+   vez — nada de dado financeiro gravado no disco a longo prazo. */
+function _snapSessionKey(year, month) {
+  return `pb_snap_${USER_ID}_${year}_${String(month).padStart(2, "0")}`;
+}
+function persistSnapshotToSession(data) {
+  if (!data || !data.year || !data.month || !USER_ID) return;
+  const page = data.launches_pagination?.page || 1;
+  const type = data.launches_pagination?.filter_type || "all";
+  const text = data.launches_pagination?.query || "";
+  if (page !== 1 || (type && type !== "all") || text) return; // só o estado padrão
+  try { sessionStorage.setItem(_snapSessionKey(data.year, data.month), JSON.stringify(data)); } catch {}
+}
+function restoreSnapshotFromSession() {
+  if (!USER_ID) return false;
+  try {
+    const raw = sessionStorage.getItem(_snapSessionKey(viewYear, viewMonth));
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    if (!isCurrentViewData(data)) return false;
+    lastData = data;
+    cacheMonthData(data);
+    render(data);              // pinta na hora; o WebSocket revalida em seguida
+    setLaunchesLoading(false);
+    return true;
+  } catch { return false; }
+}
+
 async function logoutDashboard() {
   try {
     await fetch(`${API}/auth/logout`, {
@@ -286,6 +318,8 @@ async function logoutDashboard() {
     });
   } catch {}
   clearMenuCache();  // não deixa o chrome de um usuário vazar pro próximo login
+  // Limpa os snapshots da sessão (defense-in-depth; já são escopados ao userId).
+  try { Object.keys(sessionStorage).forEach(k => { if (k.startsWith("pb_snap_")) sessionStorage.removeItem(k); }); } catch {}
   localStorage.setItem('finbot_logout_at', String(Date.now()));
   window.location.replace('/?logout=1');
 }
@@ -6645,6 +6679,7 @@ function connect() {
       if (!isCurrentViewData(msg.data)) return;
       lastData = msg.data;
       cacheMonthData(msg.data);
+      persistSnapshotToSession(msg.data);
       render(msg.data);
       stopSpin();
       setLaunchesLoading(false);
@@ -6655,6 +6690,7 @@ function connect() {
       if (serverYear === viewYear && serverMonth === viewMonth) {
         lastData = msg.data;
         cacheMonthData(msg.data);
+        persistSnapshotToSession(msg.data);
         render(msg.data);
         showToast();
       }
@@ -9515,6 +9551,10 @@ function _showAccessError(title, msg) {
 	  updateInvestmentRateHint();
 	  updateInvestmentTaxHint();
 	  updateMonthLabel();
+	  // Paint instantâneo: se há snapshot do mês corrente guardado na sessão
+	  // (troca de aba /home <-> /app), pinta a Visão Geral AGORA, sem esperar o
+	  // WebSocket. O connect() logo abaixo revalida e substitui pelos dados frescos.
+	  restoreSnapshotFromSession();
 	  // Dispara WS connect IMEDIATAMENTE (não espera /auth/dashboard-profile).
 	  // Antes era serial: validate → profile → connect. Agora profile + connect
 	  // rodam em paralelo, cortando ~3.5s do carregamento inicial.
