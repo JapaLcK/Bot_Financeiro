@@ -5498,7 +5498,7 @@ const UPGRADE_MESSAGES = {
 // externa = rejeição Apple 3.1.1, a checagem é feita por quem chama). O "Agora
 // não" silencia por TRIAL_BANNER_SNOOZE_DAYS via localStorage.
 const TRIAL_BANNER_SNOOZE_KEY = "pb_trial_banner_snooze_until";
-const TRIAL_BANNER_SNOOZE_DAYS = 7;
+const TRIAL_BANNER_SNOOZE_DAYS = 1;
 
 function maybeShowTrialBanner() {
   const el = document.getElementById("trial-banner");
