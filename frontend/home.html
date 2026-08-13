@@ -648,6 +648,7 @@ async function logoutFromHome() {
       headers: csrfHeaders()
     });
   } catch {}
+  clearHomeCache();  // não vaza snapshot de um usuário pro próximo login
   try { localStorage.setItem("finbot_logout_at", String(Date.now())); } catch {}
   window.location.replace("/?logout=1");
 }
@@ -966,8 +967,46 @@ function showAccessError() {
   `;
 }
 
+/* ─── Instant-paint via sessionStorage ────────────────────────────────────
+   O app troca /home <-> /app com reload de página inteira; sem isso a tela
+   Início mostrava skeleton e esperava /data + /history a cada abertura.
+   Guardamos o último resultado em sessionStorage (some ao fechar o app; nada
+   gravado no disco a longo prazo) e pintamos na hora, revalidando em seguida. */
+const _HOME_CACHE_KEY = "pb_home_v1";
+function persistHomeCache(userId, snapshot, history, email, displayName) {
+  try {
+    sessionStorage.setItem(_HOME_CACHE_KEY,
+      JSON.stringify({ userId, snapshot, history, email, displayName }));
+  } catch {}
+}
+function restoreHomeCache() {
+  try {
+    const raw = sessionStorage.getItem(_HOME_CACHE_KEY);
+    if (!raw) return;
+    const c = JSON.parse(raw);
+    if (!c || !c.snapshot) return;
+    // Só os renders que dependem de snapshot/history (não de `me`/plano): a
+    // passagem fresca logo abaixo revalida e completa (onboarding, banner).
+    renderGreeting(c.snapshot, c.email || "", c.displayName || "");
+    renderStats(c.snapshot, c.history || []);
+    renderAlerts(c.snapshot);
+    renderActivity(c.snapshot);
+  } catch {}
+}
+function clearHomeCache() {
+  try {
+    Object.keys(sessionStorage).forEach(k => {
+      if (k === _HOME_CACHE_KEY || k.startsWith("pb_snap_")) sessionStorage.removeItem(k);
+    });
+  } catch {}
+}
+
 /* ─── Init ────────────────────────────────────────────────────────────── */
 (async () => {
+  // Paint instantâneo: se há cache da sessão (troca de aba), pinta AGORA, antes
+  // mesmo do validate; o fluxo abaixo revalida e substitui pelos dados frescos.
+  restoreHomeCache();
+
   // 1) Valida sessão
   let userId = 0;
   let validateData = null;
@@ -1046,6 +1085,9 @@ function showAccessError() {
   renderOnboarding(snapshot, me);
   renderActivity(snapshot);
   renderFreeBanner(me);
+
+  // Guarda pra próxima abertura pintar na hora (troca de aba /home <-> /app).
+  persistHomeCache(USER_ID, snapshot, history, email, displayName);
 })();
 
 function renderFreeBanner(me) {
