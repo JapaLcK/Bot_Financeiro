@@ -82,21 +82,18 @@ def _plan_allows_multiple(user_id: int) -> bool:
 
 
 def _v2_agents_gate(user_id: int, kind: str | None = None) -> tuple[bool, bool]:
-    """(v2_ativo, permitido). Com a escada ligada, o direito é por tier e por
-    kind (fonte única: AGENT_KIND_MIN_TIER em plan_limits): Grátis/Essencial =
-    nenhum agente; Plus = detectores da Fase A; Pro+ = todos. Com v2 off
-    devolve (False, True) — gate legado decide."""
+    """(v2_ativo, tem_direito_a_agentes). Modelo de energia: todos os agentes
+    ficam liberados em Plus e Pro (sem trava por kind); Grátis/Essencial não têm
+    energia (orçamento 0) → nenhum agente. Este gate só responde "o tier permite
+    agentes?"; QUANTOS cabem é a energia, checada na ativação. Com v2 off devolve
+    (False, True) — gate legado decide."""
     try:
-        from core.services.plan_service import (
-            plans_v2_enabled, require_min_tier, agent_kind_allowed,
-        )
+        from core.services.plan_service import plans_v2_enabled, agents_energy_budget
     except ImportError:
         return False, True
     if not plans_v2_enabled():
         return False, True
-    if kind is None:
-        return True, require_min_tier(user_id, "plus")
-    return True, agent_kind_allowed(user_id, kind)
+    return True, agents_energy_budget(user_id) > 0
 
 
 class ActivateBody(BaseModel):
@@ -116,29 +113,44 @@ async def agents_shelf_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
     _require_agents_beta(user_id)
     from db import agents_summary, list_agents
+    from core.services.plan_limits import agent_energy_cost
+    from core.services.plan_service import agents_energy_budget, plans_v2_enabled
 
+    # Modelo de energia SÓ vale com a escada v2 ligada. Com v2 off (freio de
+    # emergência), o gate legado decide (Free 1 agente / pago todos) e a UI não
+    # deve mostrar medidor nem travar por energia — senão trava botões que o
+    # backend legado aceitaria.
+    energy_enabled = plans_v2_enabled()
     mine, summary, multi = await asyncio.gather(
         asyncio.to_thread(list_agents, user_id),
         asyncio.to_thread(agents_summary, user_id),
         asyncio.to_thread(_plan_allows_multiple, user_id),
     )
+    energy_budget = await asyncio.to_thread(agents_energy_budget, user_id) if energy_enabled else 0
     by_kind = {a["kind"]: a for a in mine}
     catalog = []
+    energy_used = 0
     for card in AGENT_CATALOG:
         mine_a = by_kind.get(card["kind"])
+        status = (mine_a or {}).get("status")
+        cost = agent_energy_cost(card["kind"]) if (energy_enabled and card.get("disponivel")) else 0
+        if status == "active":
+            energy_used += cost
         catalog.append({
             **card,
-            "status": (mine_a or {}).get("status"),
+            "status": status,
             "config": (mine_a or {}).get("config") or {},
             "fired_30d": int((mine_a or {}).get("fired_30d") or 0),
             "saved_365d": float((mine_a or {}).get("saved_365d") or 0),
+            "energy_cost": cost,
         })
-    # v2: Grátis/Essencial veem a prateleira mas não ativam (gates visíveis →
-    # descoberta/conversão); can_activate deixa o front desenhar o cadeado.
-    v2_on, v2_allowed = await asyncio.to_thread(_v2_agents_gate, user_id, None)
-    can_activate = v2_allowed if v2_on else True
+    # v2: Grátis/Essencial veem a prateleira mas não ativam (orçamento 0 → cadeado
+    # que abre o upgrade). Com v2 off, o gate legado libera (can_activate True).
+    can_activate = (energy_budget > 0) if energy_enabled else True
     return {"ok": True, "summary": summary, "catalog": catalog,
-            "multi_allowed": multi, "can_activate": can_activate}
+            "multi_allowed": multi, "can_activate": can_activate,
+            "energy_enabled": energy_enabled,
+            "energy_budget": int(energy_budget), "energy_used": int(energy_used)}
 
 
 @router.post("/agents/{user_id}/{kind}/activate")
@@ -153,29 +165,37 @@ async def agents_activate_route(request: Request, user_id: int, kind: str, body:
             else "Agente desconhecido."
         raise HTTPException(status_code=400, detail=detail)
 
-    # Escada v2: gate por tier e por kind ANTES de qualquer coisa — Grátis e
-    # Essencial não ativam agente nenhum (0 na escada); Plus ativa os 3 da
-    # Fase A; kinds avançados (Fase B) exigirão Pro.
+    # Modelo de energia: Grátis/Essencial não têm energia (orçamento 0) → nenhum
+    # agente. Plus/Pro têm todos os agentes liberados; QUANTOS cabem é a energia,
+    # enforçada dentro de activate_agent (mesma transação, fecha o TOCTOU).
     v2_on, v2_allowed = await asyncio.to_thread(_v2_agents_gate, user_id, kind)
     if v2_on and not v2_allowed:
+        # Tier sem energia p/ agentes (Grátis/Essencial) → modal de upgrade.
         raise HTTPException(status_code=403, detail={"error": "pro_required", "feature": "agents"})
-
-    existing = await asyncio.to_thread(get_agent, user_id, kind)
-    already_active = bool(existing and existing["status"] == "active")
-    # Reativar o MESMO kind não adiciona agente → não passa pelo teto. Só uma
-    # ativação de kind novo precisa do direito a múltiplos. O teto é aplicado
-    # DENTRO de activate_agent (mesma transação) pra fechar o TOCTOU.
-    # No v2 o teto é por kind/tier (checado acima) — múltiplos liberados.
-    if v2_on:
-        allow_multiple = True
-    else:
-        allow_multiple = already_active or await asyncio.to_thread(_plan_allows_multiple, user_id)
 
     config = (body.config if body else None) or {}
-    agent = await asyncio.to_thread(activate_agent, user_id, kind, config, allow_multiple)
-    if agent is None:
-        # Mesmo payload de 403 do resto do app → frontend abre o modal de upgrade.
-        raise HTTPException(status_code=403, detail={"error": "pro_required", "feature": "agents"})
+    if v2_on:
+        from core.services.plan_limits import AGENT_ENERGY_COST, agent_energy_cost
+        from core.services.plan_service import agents_energy_budget
+        budget = await asyncio.to_thread(agents_energy_budget, user_id)
+        agent = await asyncio.to_thread(
+            activate_agent, user_id, kind, config, True, budget, AGENT_ENERGY_COST,
+        )
+        if agent is None:
+            # Tem plano, mas o orçamento não comporta mais esse agente → o front
+            # mostra "sem energia" (pausar um agente ou subir pro Pro), não upgrade.
+            raise HTTPException(status_code=403, detail={
+                "error": "no_energy", "feature": "agents",
+                "cost": agent_energy_cost(kind), "budget": int(budget),
+            })
+    else:
+        existing = await asyncio.to_thread(get_agent, user_id, kind)
+        already_active = bool(existing and existing["status"] == "active")
+        # Reativar o MESMO kind não adiciona agente → não passa pelo teto legado.
+        allow_multiple = already_active or await asyncio.to_thread(_plan_allows_multiple, user_id)
+        agent = await asyncio.to_thread(activate_agent, user_id, kind, config, allow_multiple)
+        if agent is None:
+            raise HTTPException(status_code=403, detail={"error": "pro_required", "feature": "agents"})
     return {"ok": True, "agent": {
         "kind": agent["kind"], "status": agent["status"], "config": agent["config"],
     }}

@@ -2130,7 +2130,22 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 .ag-dot-on { background: var(--neon); }
 .ag-dot-off { background: var(--text-3); }
 .ag-dot-fire { background: var(--purple); }
-.ag-money { color: var(--neon); font-weight: 700; }
+
+/* Medidor de energia do plano (Plus/Pro). Ocupa a linha toda abaixo dos contadores. */
+.ag-energy {
+  flex-basis: 100%;
+  display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-top: 4px; padding: 8px 12px;
+  background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 12px;
+}
+.ag-energy-over { border-color: rgba(255, 45, 142, .5); }
+.ag-energy-label { font-size: 12.5px; color: var(--text-2); }
+.ag-energy-label b { color: var(--text); font-variant-numeric: tabular-nums; }
+.ag-pips { display: inline-flex; gap: 4px; }
+.ag-pip { width: 20px; height: 9px; border-radius: 3px; background: rgba(255, 255, 255, .1); }
+.ag-pip-on { background: linear-gradient(90deg, #FFC94D, #ffe08a); box-shadow: 0 0 8px rgba(255, 201, 77, .4); }
+.ag-pip-over { background: linear-gradient(90deg, var(--purple), #ff7ab6); }
+.ag-energy-hint { font-size: 11px; color: var(--text-3); }
 
 .ag-shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 14px; }
 .ag-card {
@@ -2146,7 +2161,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 .ag-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .ag-chip { font-size: 10.5px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--glass-border); color: var(--text-2); }
 .ag-chip-fire { border-color: rgba(255, 201, 77, .4); color: #FFC94D; }
-.ag-chip-money { border-color: rgba(198, 241, 26, .4); color: var(--neon); }
+.ag-chip-energy { border-color: rgba(255, 201, 77, .45); color: #FFC94D; font-weight: 700; }
 
 .ag-avatar {
   border-radius: 14px; aspect-ratio: 1.35; overflow: hidden;
@@ -2172,6 +2187,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 .ag-btn-on:hover { filter: brightness(1.08); }
 .ag-btn-active { background: transparent; border-color: var(--neon); color: var(--neon); }
 .ag-btn-soon { background: var(--glass-bg); color: var(--text-3); cursor: default; }
+.ag-btn-noenergy { background: var(--glass-bg); color: var(--text-3); border-color: var(--glass-border); cursor: not-allowed; }
 
 .ag-feed-title { margin: 26px 0 12px; }
 .ag-feed { display: flex; flex-direction: column; gap: 10px; max-width: 760px; }

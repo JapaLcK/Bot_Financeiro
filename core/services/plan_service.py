@@ -349,24 +349,42 @@ def feature_enabled(user_id: int, key: str) -> bool:
     return bool(get_user_limits(user_id).get(key, False))
 
 
+def agents_energy_budget(user_id: int) -> int:
+    """Orçamento de energia do tier pra ativar agentes (0 = sem agentes).
+
+    Modelo 2026-08-13: todos os agentes ficam liberados em Plus e Pro; quem
+    limita quantos você ativa é a energia. Plus 4 / Pro 12 / Grátis e Essencial 0.
+    Com v2 OFF devolve o orçamento do Plus pra quem é pago (is_pro), senão 0 —
+    espelhando a semântica legada (pago ativa agentes, grátis não)."""
+    from .plan_limits import PLUS_LIMITS, PRO_LIMITS
+    if not plans_v2_enabled():
+        return PLUS_LIMITS["agents_energy_budget"] if is_pro(user_id) else 0
+    # Testers do beta usam TODOS os agentes, independe do tier (mesma isenção do
+    # agent_kind_allowed) → orçamento cheio (Pro) pra caber a equipe inteira.
+    if agents_beta_tester(int(user_id)):
+        return PRO_LIMITS["agents_energy_budget"]
+    return int(get_user_limits(user_id).get("agents_energy_budget", 0))
+
+
 def agent_kind_allowed(user_id: int, kind: str) -> bool:
-    """O tier do usuário dá direito a este agente? (escada v2: 0/0/3/6).
+    """O tier do usuário dá direito a AGENTES? (modelo de energia: Plus/Pro sim,
+    Grátis/Essencial não). Sem trava por kind — todos os agentes ficam liberados
+    nos tiers com energia; quem limita quantos é o orçamento (checado na
+    ativação). O `kind` fica na assinatura por compat com os call sites.
 
     Com v2 OFF devolve True — o gate legado (Free 1 / Plus+ todos) mora na
     rota de ativação e os runners não filtravam por plano no v1.
     Usado pelos RUNNERS também: agente ativado no trial para de disparar
-    quando o usuário cai pro Grátis."""
+    quando o usuário cai pro Grátis (orçamento 0)."""
     if not plans_v2_enabled():
         return True
     # Testers do beta usam QUALQUER agente, independe do tier — pra o plano de
-    # teste (Lucas/Hiago) conseguir ver os agentes Pro (ex.: Detetive) sem
-    # precisar assinar. Não afeta o público: agents_beta_tester ignora o flag
-    # global e só casa com o allowlist explícito.
+    # teste (Lucas/Hiago) conseguir ver todos os agentes sem precisar assinar.
+    # Não afeta o público: agents_beta_tester ignora o flag global e só casa com
+    # o allowlist explícito.
     if agents_beta_tester(int(user_id)):
         return True
-    from .plan_limits import AGENT_KIND_MIN_TIER
-    minimum = AGENT_KIND_MIN_TIER.get(kind, "pro")
-    return tier_at_least(get_plan_tier(int(user_id)), minimum)
+    return agents_energy_budget(int(user_id)) > 0
 
 
 def require_min_tier(user_id: int, minimum: str) -> bool:

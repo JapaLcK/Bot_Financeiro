@@ -9630,33 +9630,43 @@ function _renderAgentes(data) {
   if (!shelf) return;
 
   const s = data.summary || {};
+  // Modelo de energia só vale com a escada v2 ligada (energy_enabled). Com v2 off
+  // (freio de emergência) o gate legado decide e a UI não mostra medidor nem
+  // trava por energia — senão travaria botões que o backend legado aceitaria.
+  const energyOn = data.energy_enabled === true;
+  const budget = Number(data.energy_budget || 0);
+  const used = Number(data.energy_used || 0);
   if (counters) {
     counters.innerHTML = `
       <span class="ag-counter"><i class="ag-dot ag-dot-on"></i> Ativos <b>${s.ativos || 0}</b></span>
       <span class="ag-counter"><i class="ag-dot ag-dot-off"></i> Pausados <b>${s.pausados || 0}</b></span>
       <span class="ag-counter"><i class="ag-dot ag-dot-fire"></i> Disparos <b>${s.disparos_mes || 0}</b></span>
-      ${s.salvos_ano > 0 ? `<span class="ag-counter ag-money"><i class="ph ph-coins" aria-hidden="true"></i> ${fmt(s.salvos_ano)} salvos</span>` : ""}
+      ${energyOn ? _energyMeter(used, budget) : ""}
     `;
   }
 
   shelf.innerHTML = (data.catalog || []).map(card => {
     const active = card.status === "active";
+    const cost = Number(card.energy_cost || 0);
     const chips = [
       `<span class="ag-chip">${esc(card.freq)}</span>`,
-      card.fired_30d > 0 ? `<span class="ag-chip ag-chip-fire"><i class="ph ph-lightning" aria-hidden="true"></i> ${card.fired_30d}</span>` : "",
-      card.saved_365d > 0 ? `<span class="ag-chip ag-chip-money"><i class="ph ph-coins" aria-hidden="true"></i> ${fmtShort(card.saved_365d)}</span>` : "",
+      (energyOn && card.disponivel && cost > 0) ? `<span class="ag-chip ag-chip-energy"><i class="ph ph-lightning" aria-hidden="true"></i> ${cost}</span>` : "",
     ].filter(Boolean).join("");
-    // can_activate vem do backend (escada v2: Grátis/Essencial não ativam).
-    // Gate visível: o card aparece normal, mas o botão vira cadeado que abre o
-    // upgrade direto — sem POST fadado a 403. Ausente (backend antigo) = true.
+    // can_activate vem do backend (Grátis/Essencial: orçamento 0 → sem agentes).
+    // Gate visível: o botão vira cadeado que abre o upgrade direto.
     const canActivate = data.can_activate !== false;
+    // Energia: com plano, todos os agentes ficam liberados, mas só ativa quem
+    // ainda cabe no orçamento. Com v2 off (energyOn false), nunca trava por aqui.
+    const affordable = !energyOn || (used + cost <= budget);
     const btn = !card.disponivel
       ? `<button class="ag-btn ag-btn-soon" disabled>Em breve</button>`
       : active
         ? `<button class="ag-btn ag-btn-active" onclick="pauseAgent('${card.kind}')"><i class="ph ph-check" aria-hidden="true"></i> Ativo · Pausar</button>`
-        : canActivate
-          ? `<button class="ag-btn ag-btn-on" onclick="activateAgent('${card.kind}')">Ativar</button>`
-          : `<button class="ag-btn ag-btn-on" onclick="showUpgradeModal('agents')"><i class="ph ph-lock" aria-hidden="true"></i> Ativar</button>`;
+        : !canActivate
+          ? `<button class="ag-btn ag-btn-on" onclick="showUpgradeModal('agents')"><i class="ph ph-lock" aria-hidden="true"></i> Ativar</button>`
+          : affordable
+            ? `<button class="ag-btn ag-btn-on" onclick="activateAgent('${card.kind}')">Ativar${energyOn && cost > 0 ? ` · <i class="ph ph-lightning" aria-hidden="true"></i> ${cost}` : ""}</button>`
+            : `<button class="ag-btn ag-btn-noenergy" disabled title="Pause um agente ou vá pro Pro"><i class="ph ph-lightning-slash" aria-hidden="true"></i> Sem energia</button>`;
     // Opt-out por agente: quando ativo, deixa ligar/desligar o e-mail (o feed
     // continua). Padrão = ligado. Estilo inline pra não exigir bump de cache CSS.
     const emailOn = ((card.config || {}).email_enabled) !== false;
@@ -9723,6 +9733,25 @@ function _agentName(kind) {
   return card ? card.nome : kind;
 }
 
+// Medidor de energia do plano: pips preenchidos = energia usada. Só aparece
+// pra quem tem orçamento (Plus/Pro); Grátis/Essencial (0) não veem barra.
+function _energyMeter(used, budget) {
+  if (!budget || budget <= 0) return "";
+  const over = used > budget;
+  let pips = "";
+  for (let i = 0; i < budget; i++) {
+    const on = i < used;
+    pips += `<i class="ag-pip${on ? (over ? " ag-pip-over" : " ag-pip-on") : ""}"></i>`;
+  }
+  const rem = budget - used;
+  const hint = over ? "acima do plano" : (rem > 0 ? `${rem} sobrando` : "cheio");
+  return `<span class="ag-energy${over ? " ag-energy-over" : ""}">
+    <span class="ag-energy-label"><i class="ph ph-lightning" aria-hidden="true"></i> Energia <b>${used}/${budget}</b></span>
+    <span class="ag-pips">${pips}</span>
+    <span class="ag-energy-hint">${hint}</span>
+  </span>`;
+}
+
 async function activateAgent(kind) {
   try {
     const res = await fetch(`${API}/agents/${USER_ID}/${kind}/activate`, {
@@ -9731,8 +9760,13 @@ async function activateAgent(kind) {
       body: JSON.stringify({}),
     });
     const data = await readResponsePayload(res);
-    if (res.status === 403 && (data.detail || {}).error === "pro_required") {
+    const detail = data.detail || {};
+    if (res.status === 403 && detail.error === "pro_required") {
       showUpgradeModal("agents");
+      return;
+    }
+    if (res.status === 403 && detail.error === "no_energy") {
+      alert("⚡ Sem energia no seu plano pra ativar mais esse agente. Pause um que você usa menos, ou vá pro Pro pra ter energia pra todos.");
       return;
     }
     if (!res.ok) throw new Error((data.detail && data.detail.error) || data.detail || "Não deu pra ativar o agente.");

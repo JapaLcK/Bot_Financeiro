@@ -219,6 +219,13 @@ class TestLimits:
         assert PLUS_LIMITS["agents_max"] == 3
         assert PRO_LIMITS["agents_max"] == 6
 
+    def test_orcamento_de_energia_por_plano(self):
+        # Modelo de energia (2026-08-13): Grátis/Essencial 0 · Plus 4 · Pro 12.
+        assert FREE_LIMITS["agents_energy_budget"] == 0
+        assert ESSENCIAL_LIMITS["agents_energy_budget"] == 0
+        assert PLUS_LIMITS["agents_energy_budget"] == 4
+        assert PRO_LIMITS["agents_energy_budget"] == 12
+
     def test_tier_at_least(self):
         assert tier_at_least("plus", "essencial")
         assert tier_at_least("pro", "plus")
@@ -290,26 +297,32 @@ class TestLimits:
 
 class TestAgentGates:
     def test_free_e_essencial_sem_agentes(self, v2, monkeypatch):
+        # Orçamento de energia 0 → nenhum agente (o kind não importa).
         _patch_user(monkeypatch, _user("free"))
+        assert plan_service.agents_energy_budget(1) == 0
         assert plan_service.agent_kind_allowed(1, "xerife") is False
         _patch_user(monkeypatch, _user("essencial", FUTURE))
+        assert plan_service.agents_energy_budget(1) == 0
         assert plan_service.agent_kind_allowed(1, "xerife") is False
 
-    def test_plus_ativa_os_3_da_fase_a(self, v2, monkeypatch):
-        _patch_user(monkeypatch, _user("pro", FUTURE))  # 'pro' legado = Plus
-        for kind in ("xerife", "reporter", "carteiro"):
+    def test_plus_libera_todos_os_agentes(self, v2, monkeypatch):
+        """Modelo de energia: SEM trava por kind — Plus libera todos os agentes
+        (inclusive Detetive/Banqueiro/Barão). Quem limita quantos é o orçamento
+        (⚡4), checado na ativação. 'pro' legado = Plus."""
+        _patch_user(monkeypatch, _user("pro", FUTURE))
+        assert plan_service.agents_energy_budget(1) == 4
+        for kind in ("xerife", "reporter", "carteiro", "detetive", "cofre", "barao"):
             assert plan_service.agent_kind_allowed(1, kind) is True
 
-    def test_kind_desconhecido_exige_pro(self, v2, monkeypatch):
-        """Fase B (detetive/cofre/barao) e qualquer kind não mapeado → Pro+."""
-        _patch_user(monkeypatch, _user("pro", FUTURE))  # Plus
-        assert plan_service.agent_kind_allowed(1, "detetive") is False
+    def test_pro_tem_energia_pra_todos(self, v2, monkeypatch):
         _patch_user(monkeypatch, _user("pro_max", FUTURE))  # Pro novo
-        assert plan_service.agent_kind_allowed(1, "detetive") is True
+        assert plan_service.agents_energy_budget(1) == 12
+        for kind in ("xerife", "detetive", "cofre", "barao"):
+            assert plan_service.agent_kind_allowed(1, kind) is True
 
     def test_trial_stripe_ativa_agentes_do_plano(self, v2, monkeypatch):
         """Trial é o plano escolhido: trial de Plus (assinatura trialing) libera
-        os agentes da Fase A. trial_started_at sozinho (sem assinatura) = free."""
+        agentes. trial_started_at sozinho (sem assinatura) = free = sem energia."""
         _patch_user(monkeypatch, _user("pro", FUTURE))          # trial de Plus
         assert plan_service.agent_kind_allowed(1, "xerife") is True
         _patch_user(monkeypatch, _user("free", trial_started=NOW))  # sem assinatura
@@ -319,6 +332,42 @@ class TestAgentGates:
         monkeypatch.setenv("PLANS_V2_ENABLED", "0")  # freio: default agora é LIGADO
         _patch_user(monkeypatch, _user("free"))
         assert plan_service.agent_kind_allowed(1, "xerife") is True  # gate legado decide na rota
+
+    def test_beta_tester_orcamento_cheio(self, v2, monkeypatch):
+        """Tester do beta usa TODOS os agentes independe do tier: orçamento cheio
+        (Pro) mesmo em Free, pra a isenção valer de ponta a ponta — no gate da
+        rota (budget > 0) E na checagem transacional de energia (budget comporta
+        todos). Usuário comum em Free continua sem energia."""
+        monkeypatch.setenv("AGENTS_BETA_USER_IDS", "99")
+        monkeypatch.setenv("AGENTS_BETA_EMAILS", "")  # zera a allowlist por e-mail
+        _patch_user(monkeypatch, _user("free"))
+        assert plan_service.agents_energy_budget(99) == 12
+        assert plan_service.agent_kind_allowed(99, "detetive") is True
+        assert plan_service.agents_energy_budget(1) == 0
+        assert plan_service.agent_kind_allowed(1, "xerife") is False
+
+    def test_custo_de_energia_por_agente(self):
+        from core.services.plan_limits import agent_energy_cost
+        assert agent_energy_cost("reporter") == 1
+        assert agent_energy_cost("carteiro") == 1
+        assert agent_energy_cost("xerife") == 2
+        assert agent_energy_cost("barao") == 2
+        assert agent_energy_cost("detetive") == 3
+        assert agent_energy_cost("cofre") == 3
+        assert agent_energy_cost("desconhecido") == 3  # default = o mais caro
+
+    def test_calibracao_plus_3_baratos_ou_2_caros(self):
+        """A regra 'até 3 baratos, ou 2 se caro' cai da calibração dos números:
+        os 3 baratos somam exatamente o orçamento do Plus; um caro (⚡3) só deixa
+        espaço pra mais 1 barato."""
+        from core.services.plan_limits import agent_energy_cost, PLUS_LIMITS
+        budget = PLUS_LIMITS["agents_energy_budget"]
+        baratos = (agent_energy_cost("reporter") + agent_energy_cost("carteiro")
+                   + agent_energy_cost("xerife"))
+        assert baratos == budget == 4                                  # 3 baratos = 4/4
+        assert agent_energy_cost("detetive") + agent_energy_cost("reporter") == 4  # caro + 1 = 2 agentes
+        assert (agent_energy_cost("detetive") + agent_energy_cost("reporter")
+                + agent_energy_cost("carteiro")) > budget              # não cabe um 3º
 
 
 class TestAIQuota:
