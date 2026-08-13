@@ -554,6 +554,11 @@ def list_caixinha_candidates(user_id: int) -> list[dict]:
                        and upper(coalesce(i.subtype,'')) = 'CDB')
                     or i.name ilike any (array['%%caixinha%%','%%cofrinho%%','%%reserva%%','%%objetivo%%'])
                   )
+                  -- Nubank devolve toda posição de CDB via OF, inclusive caixinhas já
+                  -- esvaziadas (saldo 0). Elas poluem a tela de vínculo sem servir pra
+                  -- nada, então só mostramos candidatos com saldo > 0 — exceto os que já
+                  -- estão vinculados a uma meta (mantidos pra permitir desvincular).
+                  and (coalesce(i.balance, 0) > 0 or p.id is not null)
                 order by i.balance desc nulls last
                 """,
                 (user_id, user_id),
