@@ -309,9 +309,62 @@ const fmtShort = n => {
     : "R$" + Number(n).toLocaleString("pt-BR",{minimumFractionDigits:0,maximumFractionDigits:0});
 };
 
+// Fuso do app (o backend agrupa tudo em America/Sao_Paulo). Exibimos as datas
+// SEMPRE nesse fuso pra não depender do timezone do dispositivo — no WebView do
+// iOS ele costuma vir em UTC, o que fazia a hora aparecer ~3h adiantada.
+const APP_TZ = "America/Sao_Paulo";
+
+// Normaliza uma string de data: se vier sem timezone (naive), a coluna é
+// timestamptz em UTC, então trata como UTC. Devolve um Date (instante) ou null.
+function _isoToDate(iso) {
+  if (!iso) return null;
+  let s = String(iso);
+  const hasTz = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(s);
+  if (!hasTz) s = s.replace(" ", "T") + "Z";
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// Partes de parede (ano/mês/dia/hora/min) de um instante num dado fuso.
+function _wallPartsInTZ(date, tz) {
+  const dtf = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  });
+  const p = {};
+  for (const part of dtf.formatToParts(date)) p[part.type] = part.value;
+  if (p.hour === "24") p.hour = "00"; // alguns engines usam 24 pra meia-noite
+  return p;
+}
+
+// Offset do fuso (em minutos) num instante: negativo p/ oeste de UTC (-180 = -03:00).
+function _tzOffsetMinutes(date, tz) {
+  const p = _wallPartsInTZ(date, tz);
+  const asUTC = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+  return Math.round((asUTC - date.getTime()) / 60000);
+}
+
+// "YYYY-MM-DDTHH:MM" interpretado como hora de PAREDE em APP_TZ -> instante ISO
+// (UTC). Ex.: 12:00 em São Paulo -> 15:00Z. Brasil não tem DST (desde 2019),
+// então o offset é estável.
+function appTzWallClockToISO(localStr) {
+  if (!localStr) return null;
+  const [datePart, timePart = "00:00"] = String(localStr).split("T");
+  const [y, mo, da] = datePart.split("-").map(Number);
+  const [h, mi] = timePart.split(":").map(Number);
+  if ([y, mo, da, h, mi].some(n => Number.isNaN(n))) return null;
+  const asUTC = Date.UTC(y, mo - 1, da, h, mi);
+  const offsetMin = _tzOffsetMinutes(new Date(asUTC), APP_TZ);
+  return new Date(asUTC - offsetMin * 60000).toISOString();
+}
+
 const fmtDate = iso => {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+  const d = _isoToDate(iso);
+  if (!d) return "—";
+  return d.toLocaleString("pt-BR", {
+    day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+    timeZone: APP_TZ,
+  });
 };
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({
@@ -4571,7 +4624,9 @@ async function loadAnalyticsView(forceFresh = false, months = null) {
   if (_analyticsCache && _analyticsCache.months === _analyticsCurrentMonths && !forceFresh) {
     renderAnalyticsView(_analyticsCache);
     _fetchAnalyticsAll(_analyticsCurrentMonths).then(fresh => {
-      if (fresh) {
+      // Só re-renderiza se algo mudou de verdade — senão reconstruía os
+      // gráficos do Chart.js a cada visita, dando flicker de "recarregando".
+      if (fresh && JSON.stringify(fresh) !== JSON.stringify(_analyticsCache)) {
         _analyticsCache = fresh;
         renderAnalyticsView(fresh);
       }
@@ -6835,10 +6890,28 @@ function renderLaunchesPagination(totalItems, totalPages) {
   return html;
 }
 
+const LAUNCH_TYPE_LABELS = {
+  deposito_caixinha: "dep. caixinha",
+  saque_caixinha: "saque caixinha",
+  aporte_investimento: "aporte invest.",
+  resgate_investimento: "resgate invest.",
+  transferencia_interna: "transf. interna",
+  pagamento_fatura: "pgto. fatura",
+  ajuste_saldo: "ajuste saldo",
+  criar_caixinha: "criar caixinha",
+  create_investment: "criar invest.",
+  delete_pocket: "remover caixinha",
+  delete_investment: "remover invest.",
+  credito: "crédito",
+};
+// Guarda os lançamentos renderizados pra o clique na linha abrir o detalhe.
+let _renderedLaunches = [];
+
 function renderLaunches() {
   if (!lastData) return;
 
   const items = lastData.recent_launches || [];
+  _renderedLaunches = items;
 
   const card = document.getElementById("launches-card");
 
@@ -6856,23 +6929,10 @@ function renderLaunches() {
 
   launchesPage = meta.page || 1;
 
-	  const TYPE_LABELS = {
-    deposito_caixinha: "dep. caixinha",
-    saque_caixinha: "saque caixinha",
-    aporte_investimento: "aporte invest.",
-    resgate_investimento: "resgate invest.",
-    transferencia_interna: "transf. interna",
-    pagamento_fatura: "pgto. fatura",
-    ajuste_saldo: "ajuste saldo",
-    criar_caixinha: "criar caixinha",
-    create_investment: "criar invest.",
-    delete_pocket: "remover caixinha",
-	    delete_investment: "remover invest.",
-    credito: "crédito"
-	  };
+	  const TYPE_LABELS = LAUNCH_TYPE_LABELS;
 
 		  card.innerHTML =
-		    items.map(l => {
+		    items.map((l, idx) => {
       const isInternal = l.is_internal_movement;
       const valClass   = isInternal ? '' : (l.tipo==='receita'||l.tipo==='entrada' ? 'g' : 'r');
       const valStyle   = isInternal ? 'color:var(--text-2)' : '';
@@ -6885,7 +6945,7 @@ function renderLaunches() {
         ? `<button class="bgt-btn launch-delete-btn" onclick="event.stopPropagation();confirmDeleteLaunch(${l.id}, ${JSON.stringify(describeLaunch(l).replace(/<[^>]+>/g, '').trim()).replace(/"/g, '&quot;')}, ${l.valor}, ${l.tipo === 'credito' ? 'true' : 'false'}, ${l.installments_total || 'null'})" title="Apagar lançamento"><i class="ph ph-trash" aria-hidden="true"></i></button>`
         : '';
       return `
-      <div class="row" style="${isInternal?'opacity:.75':''}">
+      <div class="row" style="cursor:pointer;${isInternal?'opacity:.75':''}" onclick="openLaunchDetail(${idx})">
         <span class="lbl">
 	          <span class="tag ${l.tipo}">${typeLabel}</span>
 	          ${isInternal ? '<span class="tag interno">mov. interna</span>' : ''}
@@ -6901,6 +6961,21 @@ function renderLaunches() {
       </div>
     `}).join("")
     + renderLaunchesPagination(meta.total || items.length, meta.total_pages || 1);
+}
+
+// Clique numa linha da Visão Geral: abre o detalhe com a descrição COMPLETA
+// (que não cabe inteira no celular) + os campos principais. Reusa o modal
+// genérico (corpo com white-space:pre-wrap, então as quebras de linha valem).
+function openLaunchDetail(idx) {
+  const l = (_renderedLaunches || [])[idx];
+  if (!l) return;
+  const typeLabel = LAUNCH_TYPE_LABELS[l.tipo] || String(l.tipo || "").replaceAll("_", " ");
+  const desc = describeLaunch(l).replace(/<[^>]+>/g, "").trim() || "—";
+  const lines = [desc, "", `Valor: ${fmt(l.valor)}`, `Tipo: ${typeLabel}`];
+  if (l.categoria) lines.push(`Categoria: ${l.categoria}`);
+  if (l.is_internal_movement) lines.push("Movimentação interna");
+  lines.push(`Data: ${fmtDate(l.criado_em)}`);
+  alertModal(lines.join("\n"), { title: "Detalhe do lançamento", okText: "Fechar" });
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -7145,11 +7220,13 @@ let editingLaunchIsCredit = false;
 // ISO instant → "YYYY-MM-DDTHH:MM" no fuso local do navegador (formato do
 // input datetime-local). Espelha o que o fmtDate mostra na lista.
 function toLocalDatetimeInput(iso) {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "";
-  const pad = n => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-       + `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  // Renderiza o campo datetime-local na hora de PAREDE de APP_TZ (não do
+  // device), pra bater com o que fmtDate exibe. Sem isso, no WebView UTC do
+  // iOS o campo mostrava 3h a mais que o resumo.
+  const d = _isoToDate(iso);
+  if (!d) return "";
+  const p = _wallPartsInTZ(d, APP_TZ);
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
 }
 
 function openEditLaunchModal(launchId) {
@@ -7227,9 +7304,11 @@ async function submitEditLaunch() {
   if (!editingLaunchIsCredit) {
     const dataVal = document.getElementById("edit-launch-data").value;
     if (dataVal) {
-      const d = new Date(dataVal);
-      if (isNaN(d.getTime())) { showEditLaunchError("Data inválida."); return; }
-      criadoEmISO = d.toISOString();
+      // O input é hora de parede em APP_TZ (mesmo fuso do display/edição).
+      // Converte pro instante UTC correto — não usa new Date(dataVal), que
+      // interpretaria no fuso do device (UTC no WebView iOS) e deslocaria 3h.
+      criadoEmISO = appTzWallClockToISO(dataVal);
+      if (!criadoEmISO) { showEditLaunchError("Data inválida."); return; }
     }
   }
 
