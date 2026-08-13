@@ -745,7 +745,9 @@ def list_history(
             launches_params.extend(search_params)
         launches_sql = f"""
           SELECT id, tipo, valor, alvo, nota, categoria, criado_em,
-                 installments_total, installment_no,
+                 -- launches não tem parcelamento (isso só existe em
+                 -- credit_transactions); NULL mantém as colunas do UNION.
+                 NULL::int AS installments_total, NULL::int AS installment_no,
                  COALESCE(source, 'manual') AS origin,
                  (SELECT c.institution_name
                     FROM open_finance_transactions o
