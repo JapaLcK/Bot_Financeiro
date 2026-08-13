@@ -13,11 +13,11 @@
 <!-- Aquece a conexão com os CDNs de terceiros antes de baixar os scripts. -->
 <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin />
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-<!-- Bibliotecas de terceiros: só usadas depois que uma view abre (gráficos /
-     drag-and-drop). Com defer não bloqueiam o parse nem o primeiro paint; a
-     ordem do documento continua garantida, então executam antes do dashboard.js. -->
+<!-- Chart.js: usado pela view padrão (overview). defer tira do caminho
+     bloqueante do parse, mas ainda pré-carrega durante a ociosidade, ficando
+     pronto quando os dados chegam. Sortable NÃO entra aqui: é carregado sob
+     demanda (ensureSortable) só quando o usuário reordena cartões. -->
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script defer src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 <link rel="stylesheet" href="/brand.css" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/dashboard.css?v=2" />
@@ -1538,7 +1538,7 @@
   </div>
 </div>
 
-<script defer src="/dashboard.js?v=5"></script>
+<script defer src="/dashboard.js?v=6"></script>
 
 <!-- ─── Chat IA widget (Piggy) — Item #49 ──────────────────────────────── -->
 

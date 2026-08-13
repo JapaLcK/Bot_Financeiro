@@ -42,6 +42,32 @@ let WS_URL  = "";
 let USER_EMAIL = "";
 let USER_PLAN = "";
 
+/* ─── Loader de scripts sob demanda ──────────────────────────────────────
+   Carrega uma lib de terceiros só quando ela é realmente necessária, em vez
+   de baixá-la em todo boot. Deduplica: várias chamadas para a mesma URL
+   compartilham a mesma Promise. */
+const _scriptLoaders = {};
+function _loadScriptOnce(src) {
+  if (_scriptLoaders[src]) return _scriptLoaders[src];
+  _scriptLoaders[src] = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => { delete _scriptLoaders[src]; reject(new Error(`Falha ao carregar ${src}`)); };
+    document.head.appendChild(s);
+  });
+  return _scriptLoaders[src];
+}
+
+/* Sortable só é usado no drag-to-reorder dos cartões (ponteiro fino). Carrega
+   sob demanda pra tirar ~50KB de todo boot de quem nunca reordena cartão. */
+function ensureSortable() {
+  if (typeof window.Sortable !== "undefined") return Promise.resolve();
+  return _loadScriptOnce("https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js")
+    .catch(() => {});
+}
+
 function getCookie(name) {
   return document.cookie.split("; ").find(row => row.startsWith(`${name}=`))?.split("=")[1] || "";
 }
@@ -8132,11 +8158,14 @@ function _installWalletDrag(wallet) {
 
 /* Drag-to-reorder na view Cartões (#cards-grid). Cards são <details>, então
    `delay` evita conflito com click no <summary> (expandir/colapsar). */
-function setupCardsGridSort() {
-  if (typeof Sortable === "undefined") return;
+async function setupCardsGridSort() {
+  // Drag só faz sentido em ponteiro fino (mouse/trackpad). Checa antes de
+  // carregar a lib pra não baixar nada em touch.
   if (!window.matchMedia("(pointer: fine)").matches) return;
   const grid = document.getElementById("cards-grid");
   if (!grid) return;
+  await ensureSortable();
+  if (typeof Sortable === "undefined") return;   // load falhou → segue sem drag
   if (grid.__sortable) {
     try { grid.__sortable.destroy(); } catch (_) {}
   }
