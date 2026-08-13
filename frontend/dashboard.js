@@ -9475,6 +9475,10 @@ function _renderAgentes(data) {
   if (!shelf) return;
 
   const s = data.summary || {};
+  // Modelo de energia só vale com a escada v2 ligada (energy_enabled). Com v2 off
+  // (freio de emergência) o gate legado decide e a UI não mostra medidor nem
+  // trava por energia — senão travaria botões que o backend legado aceitaria.
+  const energyOn = data.energy_enabled === true;
   const budget = Number(data.energy_budget || 0);
   const used = Number(data.energy_used || 0);
   if (counters) {
@@ -9482,7 +9486,7 @@ function _renderAgentes(data) {
       <span class="ag-counter"><i class="ag-dot ag-dot-on"></i> Ativos <b>${s.ativos || 0}</b></span>
       <span class="ag-counter"><i class="ag-dot ag-dot-off"></i> Pausados <b>${s.pausados || 0}</b></span>
       <span class="ag-counter"><i class="ag-dot ag-dot-fire"></i> Disparos <b>${s.disparos_mes || 0}</b></span>
-      ${_energyMeter(used, budget)}
+      ${energyOn ? _energyMeter(used, budget) : ""}
     `;
   }
 
@@ -9491,14 +9495,14 @@ function _renderAgentes(data) {
     const cost = Number(card.energy_cost || 0);
     const chips = [
       `<span class="ag-chip">${esc(card.freq)}</span>`,
-      (card.disponivel && cost > 0) ? `<span class="ag-chip ag-chip-energy"><i class="ph ph-lightning" aria-hidden="true"></i> ${cost}</span>` : "",
+      (energyOn && card.disponivel && cost > 0) ? `<span class="ag-chip ag-chip-energy"><i class="ph ph-lightning" aria-hidden="true"></i> ${cost}</span>` : "",
     ].filter(Boolean).join("");
     // can_activate vem do backend (Grátis/Essencial: orçamento 0 → sem agentes).
     // Gate visível: o botão vira cadeado que abre o upgrade direto.
     const canActivate = data.can_activate !== false;
-    // Modelo de energia: com plano, todos os agentes ficam liberados, mas só
-    // ativa quem ainda cabe no orçamento (usado + custo <= orçamento).
-    const affordable = used + cost <= budget;
+    // Energia: com plano, todos os agentes ficam liberados, mas só ativa quem
+    // ainda cabe no orçamento. Com v2 off (energyOn false), nunca trava por aqui.
+    const affordable = !energyOn || (used + cost <= budget);
     const btn = !card.disponivel
       ? `<button class="ag-btn ag-btn-soon" disabled>Em breve</button>`
       : active
@@ -9506,7 +9510,7 @@ function _renderAgentes(data) {
         : !canActivate
           ? `<button class="ag-btn ag-btn-on" onclick="showUpgradeModal('agents')"><i class="ph ph-lock" aria-hidden="true"></i> Ativar</button>`
           : affordable
-            ? `<button class="ag-btn ag-btn-on" onclick="activateAgent('${card.kind}')">Ativar · <i class="ph ph-lightning" aria-hidden="true"></i> ${cost}</button>`
+            ? `<button class="ag-btn ag-btn-on" onclick="activateAgent('${card.kind}')">Ativar${energyOn && cost > 0 ? ` · <i class="ph ph-lightning" aria-hidden="true"></i> ${cost}` : ""}</button>`
             : `<button class="ag-btn ag-btn-noenergy" disabled title="Pause um agente ou vá pro Pro"><i class="ph ph-lightning-slash" aria-hidden="true"></i> Sem energia</button>`;
     // Opt-out por agente: quando ativo, deixa ligar/desligar o e-mail (o feed
     // continua). Padrão = ligado. Estilo inline pra não exigir bump de cache CSS.

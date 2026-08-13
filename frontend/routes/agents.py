@@ -114,21 +114,26 @@ async def agents_shelf_route(request: Request, user_id: int):
     _require_agents_beta(user_id)
     from db import agents_summary, list_agents
     from core.services.plan_limits import agent_energy_cost
-    from core.services.plan_service import agents_energy_budget
+    from core.services.plan_service import agents_energy_budget, plans_v2_enabled
 
-    mine, summary, multi, energy_budget = await asyncio.gather(
+    # Modelo de energia SÓ vale com a escada v2 ligada. Com v2 off (freio de
+    # emergência), o gate legado decide (Free 1 agente / pago todos) e a UI não
+    # deve mostrar medidor nem travar por energia — senão trava botões que o
+    # backend legado aceitaria.
+    energy_enabled = plans_v2_enabled()
+    mine, summary, multi = await asyncio.gather(
         asyncio.to_thread(list_agents, user_id),
         asyncio.to_thread(agents_summary, user_id),
         asyncio.to_thread(_plan_allows_multiple, user_id),
-        asyncio.to_thread(agents_energy_budget, user_id),
     )
+    energy_budget = await asyncio.to_thread(agents_energy_budget, user_id) if energy_enabled else 0
     by_kind = {a["kind"]: a for a in mine}
     catalog = []
     energy_used = 0
     for card in AGENT_CATALOG:
         mine_a = by_kind.get(card["kind"])
         status = (mine_a or {}).get("status")
-        cost = agent_energy_cost(card["kind"]) if card.get("disponivel") else 0
+        cost = agent_energy_cost(card["kind"]) if (energy_enabled and card.get("disponivel")) else 0
         if status == "active":
             energy_used += cost
         catalog.append({
@@ -139,12 +144,12 @@ async def agents_shelf_route(request: Request, user_id: int):
             "saved_365d": float((mine_a or {}).get("saved_365d") or 0),
             "energy_cost": cost,
         })
-    # v2: Grátis/Essencial veem a prateleira mas não ativam (gates visíveis →
-    # descoberta/conversão); can_activate deixa o front desenhar o cadeado.
-    v2_on, v2_allowed = await asyncio.to_thread(_v2_agents_gate, user_id, None)
-    can_activate = v2_allowed if v2_on else True
+    # v2: Grátis/Essencial veem a prateleira mas não ativam (orçamento 0 → cadeado
+    # que abre o upgrade). Com v2 off, o gate legado libera (can_activate True).
+    can_activate = (energy_budget > 0) if energy_enabled else True
     return {"ok": True, "summary": summary, "catalog": catalog,
             "multi_allowed": multi, "can_activate": can_activate,
+            "energy_enabled": energy_enabled,
             "energy_budget": int(energy_budget), "energy_used": int(energy_used)}
 
 

@@ -333,6 +333,19 @@ class TestAgentGates:
         _patch_user(monkeypatch, _user("free"))
         assert plan_service.agent_kind_allowed(1, "xerife") is True  # gate legado decide na rota
 
+    def test_beta_tester_orcamento_cheio(self, v2, monkeypatch):
+        """Tester do beta usa TODOS os agentes independe do tier: orçamento cheio
+        (Pro) mesmo em Free, pra a isenção valer de ponta a ponta — no gate da
+        rota (budget > 0) E na checagem transacional de energia (budget comporta
+        todos). Usuário comum em Free continua sem energia."""
+        monkeypatch.setenv("AGENTS_BETA_USER_IDS", "99")
+        monkeypatch.setenv("AGENTS_BETA_EMAILS", "")  # zera a allowlist por e-mail
+        _patch_user(monkeypatch, _user("free"))
+        assert plan_service.agents_energy_budget(99) == 12
+        assert plan_service.agent_kind_allowed(99, "detetive") is True
+        assert plan_service.agents_energy_budget(1) == 0
+        assert plan_service.agent_kind_allowed(1, "xerife") is False
+
     def test_custo_de_energia_por_agente(self):
         from core.services.plan_limits import agent_energy_cost
         assert agent_energy_cost("reporter") == 1

@@ -356,9 +356,13 @@ def agents_energy_budget(user_id: int) -> int:
     limita quantos você ativa é a energia. Plus 4 / Pro 12 / Grátis e Essencial 0.
     Com v2 OFF devolve o orçamento do Plus pra quem é pago (is_pro), senão 0 —
     espelhando a semântica legada (pago ativa agentes, grátis não)."""
-    from .plan_limits import PLUS_LIMITS
+    from .plan_limits import PLUS_LIMITS, PRO_LIMITS
     if not plans_v2_enabled():
         return PLUS_LIMITS["agents_energy_budget"] if is_pro(user_id) else 0
+    # Testers do beta usam TODOS os agentes, independe do tier (mesma isenção do
+    # agent_kind_allowed) → orçamento cheio (Pro) pra caber a equipe inteira.
+    if agents_beta_tester(int(user_id)):
+        return PRO_LIMITS["agents_energy_budget"]
     return int(get_user_limits(user_id).get("agents_energy_budget", 0))
 
 
