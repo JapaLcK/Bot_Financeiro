@@ -163,6 +163,12 @@ async function loadUserMenuState() {
     // vazar identidade. Será reescrito com o perfil correto abaixo.
     clearMenuCache();
   }
+  // Fail-closed universal: trava os controles pagos ANTES de qualquer fetch, em
+  // TODA path — inclusive sem cache / cache de outro user / storage limpo, onde
+  // nada acima chama applyProGates e o HTML inicial fica destravado. USER_GATES
+  // começa {} → tudo vira .pro-locked até o /auth/dashboard-profile confirmar.
+  // Idempotente com o applyUserMenuState do branch de cache acima.
+  applyProGates();
   try {
     const res = await fetch(`${API}/auth/dashboard-profile`, { credentials: "same-origin" });
     if (!res.ok) return;
