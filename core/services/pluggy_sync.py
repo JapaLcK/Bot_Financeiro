@@ -207,6 +207,18 @@ def sync_pluggy_user(user_id: int) -> dict:
         if (c.get("provider") == "pluggy" and c.get("provider_item_id"))
     ]
     results = [sync_pluggy_item(item_id) for item_id in items]
+
+    # Faria Limer é whole-portfolio (agrega RV de TODAS as conexões) e mensal: roda
+    # UMA vez, depois de TODOS os itens sincronizarem, pra não gravar um retrato
+    # parcial que o dedupe mensal congelaria. Fica FORA do hook por-item de
+    # sync_pluggy_item de propósito. Fail-soft (nunca derruba o sync).
+    if results:
+        try:
+            from core.services.piggy_agents import run_faria_limer_once
+            run_faria_limer_once(user_id=user_id)
+        except Exception as exc:
+            print(f"[pluggy_sync] faria hook (user): {exc}")
+
     return {
         "ok": True,
         "items_synced": len(results),

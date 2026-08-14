@@ -294,3 +294,25 @@ def test_rv_portfolio_summary_usa_posicoes_passadas_sem_rebuscar(monkeypatch):
     assert summ["pnl"] == 1000.0
     assert summ["cost_known"] is True
     assert summ["count"] == 2
+
+
+def test_hook_por_item_nao_dispara_faria_limer(monkeypatch):
+    # run_agents_for_user roda por ITEM do Pluggy. O Faria é whole-portfolio/mensal:
+    # rodar aqui grava um retrato parcial que o dedupe mensal congela. Ele deve ficar
+    # fora deste hook (roda no fim do sync completo + no loop horário). Os detectores
+    # de delta (xerife/detetive/cofre/barao) continuam rodando por item.
+    import core.services.piggy_agents as pa
+
+    called = []
+    monkeypatch.setattr(pa, "AGENTS_ENABLED", True)
+    for name in ("run_xerife_once", "run_detetive_once", "run_cofre_once", "run_barao_once"):
+        monkeypatch.setattr(pa, name, (lambda n: (lambda **kw: called.append(n) or {"ok": True}))(name))
+    monkeypatch.setattr(
+        pa, "run_faria_limer_once",
+        lambda **kw: called.append("run_faria_limer_once") or {"ok": True},
+    )
+
+    out = pa.run_agents_for_user(42, trigger="of_sync")
+    assert "run_faria_limer_once" not in called   # não roda no hook por-item
+    assert "faria_limer" not in out
+    assert {"xerife", "detetive", "cofre", "barao"} <= set(out)  # delta agents rodaram

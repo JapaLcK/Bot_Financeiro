@@ -1031,6 +1031,12 @@ def run_agents_for_user(user_id: int, trigger: str = "of_sync") -> dict:
     (auditoria de assinaturas) e Banqueiro (aporte novo na caixinha vinculada),
     só pro usuário sincado.
 
+    NÃO inclui o Faria Limer de propósito: ele é whole-portfolio (agrega ações/FIIs
+    de TODAS as conexões) e mensal. Este hook roda por ITEM (sync_pluggy_item), então
+    dispararia com a carteira parcial no 1º item e o dedupe mensal congelaria totais/
+    concentração errados. O Faria roda num snapshot coerente: no fim de
+    sync_pluggy_user (sync completo) e no loop horário (run_all_agents_once).
+
     Fail-soft por contrato — quem chama (pluggy_sync) não pode quebrar por
     causa de agente. Cada detector é isolado pra um não derrubar o outro.
     """
@@ -1042,7 +1048,6 @@ def run_agents_for_user(user_id: int, trigger: str = "of_sync") -> dict:
         ("detetive", run_detetive_once),
         ("cofre", run_cofre_once),
         ("barao", run_barao_once),
-        ("faria_limer", run_faria_limer_once),
     ):
         try:
             out[kind] = fn(user_id=user_id)
