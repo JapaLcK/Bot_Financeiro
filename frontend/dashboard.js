@@ -41,6 +41,9 @@ let USER_ID = 0;
 let WS_URL  = "";
 let USER_EMAIL = "";
 let USER_PLAN = "";
+// Gates de feature resolvidos pelo backend (/auth/dashboard-profile). {} = tudo
+// bloqueado até o perfil chegar (default conservador). Ver applyProGates.
+let USER_GATES = {};
 
 /* ─── Loader de scripts sob demanda ──────────────────────────────────────
    Carrega uma lib de terceiros só quando ela é realmente necessária, em vez
@@ -103,9 +106,10 @@ function formatPlanLabel(plan) {
   return value.toLowerCase() === "free" ? "Plano Free" : `Plano ${value}`;
 }
 
-function applyUserMenuState(email, plan, displayName) {
+function applyUserMenuState(email, plan, displayName, gates) {
   USER_EMAIL = email || "";
   USER_PLAN = plan || "free";
+  if (gates && typeof gates === "object") USER_GATES = gates;
   document.getElementById("user-label").textContent = userMenuLabel(displayName, USER_EMAIL);
   document.getElementById("user-email").textContent = USER_EMAIL || "Minha conta";
   document.getElementById("user-plan").textContent = formatPlanLabel(USER_PLAN);
@@ -132,9 +136,9 @@ function _readMenuCache() {
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
-function _writeMenuCache(userId, email, plan, displayName) {
+function _writeMenuCache(userId, email, plan, displayName, gates) {
   try {
-    localStorage.setItem(_MENU_CACHE_KEY, JSON.stringify({ userId, email, plan, displayName }));
+    localStorage.setItem(_MENU_CACHE_KEY, JSON.stringify({ userId, email, plan, displayName, gates }));
   } catch {}
 }
 function clearMenuCache() {
@@ -146,7 +150,7 @@ async function loadUserMenuState() {
   // mas só se o cache for do usuário já validado nesta sessão (USER_ID).
   const cached = _readMenuCache();
   if (cached && USER_ID && String(cached.userId) === String(USER_ID)) {
-    applyUserMenuState(cached.email || "", cached.plan || "free", cached.displayName || "");
+    applyUserMenuState(cached.email || "", cached.plan || "free", cached.displayName || "", cached.gates || {});
   } else if (cached) {
     // Cache de outro usuário (ou formato antigo sem userId): descarta pra não
     // vazar identidade. Será reescrito com o perfil correto abaixo.
@@ -156,8 +160,8 @@ async function loadUserMenuState() {
     const res = await fetch(`${API}/auth/dashboard-profile`, { credentials: "same-origin" });
     if (!res.ok) return;
     const data = await readResponsePayload(res);
-    applyUserMenuState(data.email || "", data.plan || "free", data.display_name || "");
-    _writeMenuCache(USER_ID, data.email || "", data.plan || "free", data.display_name || "");
+    applyUserMenuState(data.email || "", data.plan || "free", data.display_name || "", data.feature_gates || {});
+    _writeMenuCache(USER_ID, data.email || "", data.plan || "free", data.display_name || "", data.feature_gates || {});
   } catch {}
 }
 
@@ -5641,43 +5645,19 @@ function toggleTheme() {
   applyTheme(saved);
 })();
 
-// ── Pro gates (visivel + desabilitado por tier) ──────────────────────────
-// Espelha a escada do backend: _STORED_PLAN_TO_TIER (core/services/plan_service)
-// + TIER_ORDER (core/services/plan_limits). USER_PLAN é o valor CRU da coluna
-// auth_accounts.plan devolvido por /auth/dashboard-profile ("free", "essencial",
-// "pro" [=Plus legado R$19,90], "plus", "pro_max" [=Pro novo]).
-const PLAN_TO_TIER = { free: "free", essencial: "essencial", pro: "plus", plus: "plus", pro_max: "pro" };
-const TIER_ORDER = { free: 0, essencial: 1, plus: 2, pro: 3 };
-// Tier mínimo que libera cada feature paga gated no dashboard. Espelha
-// plan_limits.py: investimentos/export/OFX/gastos-fixos/caixinhas/cartões e
-// histórico >30d entram já no Essencial; Novidades e agentes só do Plus pra
-// cima (gate is_pro no backend). Feature fora do mapa → exige Plus (conservador).
-const FEATURE_MIN_TIER = {
-  investments: "essencial",
-  export: "essencial",
-  ofx_import: "essencial",
-  recurring_expenses: "essencial",
-  pockets_unlimited: "essencial",
-  cards_unlimited: "essencial",
-  history_unlimited: "essencial",
-  changelog: "plus",
-  agents: "plus",
-};
-
-function userTier() {
-  return PLAN_TO_TIER[(USER_PLAN || "free").trim().toLowerCase()] || "free";
-}
-function tierAtLeast(minTier) {
-  return (TIER_ORDER[userTier()] || 0) >= (TIER_ORDER[minTier] || 0);
-}
-// True se o tier atual libera a feature (fonte da verdade continua no backend;
-// isto é só o gate visual/UX pra não deixar clicar no que já se sabe bloqueado).
+// ── Pro gates (visivel + desabilitado por feature) ───────────────────────
+// A fonte da verdade é o BACKEND: /auth/dashboard-profile devolve feature_gates
+// já resolvido (get_user_limits + is_pro cobrem assinatura expirada com webhook
+// perdido E o freio de emergência PLANS_V2_ENABLED). O front só consome — nada
+// de reconstruir tier do valor cru do plano, que divergiria nesses casos.
+// Default: tudo bloqueado até o perfil chegar (conservador — melhor travar de
+// leve por um instante que liberar indevido). USER_GATES é setado no topo.
 function featureAllowed(feature) {
-  return tierAtLeast(FEATURE_MIN_TIER[feature] || "plus");
+  return !!USER_GATES[feature];
 }
-// "Tem o plano pago principal?" (Plus+). Mantido pra checagens genéricas.
+// "Tem o plano pago principal?" (Plus+): o gate de Novidades é exatamente is_pro.
 function isProUser() {
-  return tierAtLeast("plus");
+  return featureAllowed("changelog");
 }
 
 const UPGRADE_MESSAGES = {
