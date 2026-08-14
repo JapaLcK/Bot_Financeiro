@@ -136,9 +136,12 @@ function _readMenuCache() {
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
-function _writeMenuCache(userId, email, plan, displayName, gates) {
+function _writeMenuCache(userId, email, plan, displayName) {
+  // NÃO cacheamos feature_gates: entitlement é estado que expira (assinatura
+  // vence, freio v2 liga) e cache no localStorage viraria "liberado" preso.
+  // Só o chrome não-sensível (email/plano-label/nome) é paintado do cache.
   try {
-    localStorage.setItem(_MENU_CACHE_KEY, JSON.stringify({ userId, email, plan, displayName, gates }));
+    localStorage.setItem(_MENU_CACHE_KEY, JSON.stringify({ userId, email, plan, displayName }));
   } catch {}
 }
 function clearMenuCache() {
@@ -147,10 +150,14 @@ function clearMenuCache() {
 
 async function loadUserMenuState() {
   // Paint otimista: aplica o último chrome conhecido ANTES do fetch resolver,
-  // mas só se o cache for do usuário já validado nesta sessão (USER_ID).
+  // mas só se o cache for do usuário já validado nesta sessão (USER_ID). Os
+  // gates NÃO vêm do cache (sem 4º arg) — ficam no default {} (tudo bloqueado)
+  // até o /auth/dashboard-profile fresco chegar. Fail-closed de propósito:
+  // melhor um flash de cadeado pra quem paga que liberar controle pra assinatura
+  // já expirada (ou pós-freio v2) enquanto o perfil real não confirma.
   const cached = _readMenuCache();
   if (cached && USER_ID && String(cached.userId) === String(USER_ID)) {
-    applyUserMenuState(cached.email || "", cached.plan || "free", cached.displayName || "", cached.gates || {});
+    applyUserMenuState(cached.email || "", cached.plan || "free", cached.displayName || "");
   } else if (cached) {
     // Cache de outro usuário (ou formato antigo sem userId): descarta pra não
     // vazar identidade. Será reescrito com o perfil correto abaixo.
@@ -161,7 +168,7 @@ async function loadUserMenuState() {
     if (!res.ok) return;
     const data = await readResponsePayload(res);
     applyUserMenuState(data.email || "", data.plan || "free", data.display_name || "", data.feature_gates || {});
-    _writeMenuCache(USER_ID, data.email || "", data.plan || "free", data.display_name || "", data.feature_gates || {});
+    _writeMenuCache(USER_ID, data.email || "", data.plan || "free", data.display_name || "");
   } catch {}
 }
 
