@@ -179,8 +179,8 @@ def record_or_refresh_agent_event(
     valor_impacto: float | None = None,
 ) -> bool:
     """Como record_agent_event, mas AUTO-CORRIGE: se a dedupe_key já existe e o
-    evento ainda está PENDENTE (não visto e não enviado por e-mail), atualiza
-    payload/valor_impacto/fired_at com o snapshot novo em vez de ignorar.
+    evento ainda NÃO foi enviado por e-mail, atualiza payload/valor_impacto/
+    fired_at com o snapshot novo em vez de ignorar.
 
     Serve pra eventos-retrato que devem refletir o estado coerente mais recente
     (ex.: Faria Limer mensal). O ÚNICO congelamento é o e-mail (emailed_at): o
