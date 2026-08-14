@@ -59,7 +59,10 @@ def _arm_reporter(monkeypatch, *, opted_out: bool):
         lambda agent_id: [{"id": 1, "payload": {"titulo": "A manchete de agosto",
                                                 "mensagem": "Sobrou R$ 400,00"}}],
     )
-    monkeypatch.setattr(db, "mark_events_emailed", lambda ids: None)
+    # claim devolve todos: simula "nenhum evento mudou entre leitura e envio"
+    monkeypatch.setattr(db, "claim_agent_events_for_email",
+                        lambda evs: [e["id"] for e in evs])
+    monkeypatch.setattr(db, "suppress_agent_events", lambda ids: len(ids))
     monkeypatch.setattr(db, "touch_agent_emailed", lambda agent_id: None)
     monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": opted_out})
     monkeypatch.setattr(db, "get_user_email", lambda uid: "user@example.com")
@@ -118,3 +121,533 @@ def test_agents_ui_enabled_freio_respeita_allowlist_custom(monkeypatch):
     monkeypatch.setenv("AGENTS_BETA_EMAILS", "novo@example.com")
     assert ps.agents_ui_enabled(1, "novo@example.com") is True
     assert ps.agents_ui_enabled(1, "lucaskuramoti06@gmail.com") is False
+
+
+# ── Faria Limer: acompanhamento de renda variável (função pura, sem DB) ──────
+# faria_limer_insights só transforma posições+resumo (o que list_rv_positions /
+# rv_portfolio_summary já entregam) em eventos factuais — dá pra testar isolado.
+
+def _rv_summary(positions):
+    """Resumo equivalente ao rv_portfolio_summary, pra alimentar os insights."""
+    mv = sum(p["market_value"] for p in positions)
+    invested = sum(p.get("invested", 0.0) for p in positions)
+    pnl = mv - invested
+    # espelha rv_portfolio_summary: custo confiável só quando TODA posição o traz
+    # (nos fixtures, ter `invested` = custo conhecido, salvo cost_known explícito).
+    cost_known = bool(positions) and all(
+        p.get("cost_known", "invested" in p) for p in positions
+    )
+    return {"market_value": mv, "invested": invested, "cost_known": cost_known,
+            "pnl": pnl, "pnl_pct": (pnl / invested) if invested > 0 else 0.0,
+            "count": len(positions)}
+
+
+def test_rv_insights_carteira_vazia_ou_minima():
+    from core.services.piggy_agents import faria_limer_insights
+    assert faria_limer_insights([], {}, "2026-08") == []
+    # abaixo do mínimo (FARIA_RV_MIN_MV=100) → ruído, não dispara
+    pos = [{"ticker": "MGLU3", "market_value": 40.0, "invested": 50.0}]
+    assert faria_limer_insights(pos, _rv_summary(pos), "2026-08") == []
+
+
+def test_rv_insights_retrato_do_mes():
+    from core.services.piggy_agents import faria_limer_insights
+    pos = [
+        {"ticker": "GGRC11", "market_value": 6000.0, "invested": 5000.0, "last_month_rate": 1.2},
+        {"ticker": "ITUB4",  "market_value": 5000.0, "invested": 5000.0, "last_month_rate": 0.8},
+    ]
+    ins = faria_limer_insights(pos, _rv_summary(pos), "2026-08")
+    retrato = next(i for i in ins if i["payload"]["tipo"] == "rv_retrato")
+    assert retrato["dedupe_key"] == "rv_retrato:2026-08"
+    # retrato é factual → impacto 0 (não entra em saved_365d/salvos_ano, senão o
+    # P&L não realizado seria contado como "economia" a cada snapshot mensal).
+    assert retrato["valor_impacto"] == 0.0
+    msg = retrato["payload"]["mensagem"]
+    assert "2 ativos" in msg
+    assert "+10,0%" in msg                               # pnl_pct
+    # média ponderada por valor de mercado: (1,2·6000 + 0,8·5000)/11000 ≈ 1,02%
+    assert "No mês, a carteira variou ~+1,02%" in msg
+    assert "não é recomendação" in msg                   # trava anti-conselho
+
+
+def test_rv_insights_concentracao_dispara_quando_um_ativo_domina():
+    from core.services.piggy_agents import faria_limer_insights
+    pos = [
+        {"ticker": "PETR4", "market_value": 8000.0, "invested": 7000.0},
+        {"ticker": "ITUB4", "market_value": 2000.0, "invested": 2000.0},
+    ]
+    ins = faria_limer_insights(pos, _rv_summary(pos), "2026-08")
+    conc = next(i for i in ins if i["payload"]["tipo"] == "rv_concentracao")
+    assert conc["dedupe_key"] == "rv_concentracao:2026-08"
+    assert conc["valor_impacto"] == 0.0
+    assert "PETR4" in conc["payload"]["titulo"]
+    assert "80%" in conc["payload"]["titulo"]            # 8000 / 10000
+    assert "decisão sua" in conc["payload"]["mensagem"]  # sem conselho
+
+
+def test_rv_insights_carteira_equilibrada_nao_alerta_concentracao():
+    from core.services.piggy_agents import faria_limer_insights
+    pos = [
+        {"ticker": "GGRC11", "market_value": 3400.0, "invested": 3000.0},
+        {"ticker": "ITUB4",  "market_value": 3300.0, "invested": 3000.0},
+        {"ticker": "PETR4",  "market_value": 3300.0, "invested": 3000.0},
+    ]
+    ins = faria_limer_insights(pos, _rv_summary(pos), "2026-08")
+    tipos = {i["payload"]["tipo"] for i in ins}
+    assert tipos == {"rv_retrato"}                       # nenhum ativo passa de 40%
+
+
+def test_rv_insights_sem_taxa_do_mes_omite_variacao():
+    from core.services.piggy_agents import faria_limer_insights
+    # corretora não mandou last_month_rate → não inventa rentabilidade do mês
+    pos = [{"ticker": "BBAS3", "market_value": 1500.0, "invested": 1400.0}]
+    ins = faria_limer_insights(pos, _rv_summary(pos), "2026-08")
+    msg = ins[0]["payload"]["mensagem"]
+    assert "No mês" not in msg
+    assert "1 ativo" in msg and "1 ativos" not in msg     # singular correto
+
+
+def test_rv_insights_sem_custo_conhecido_nao_inventa_resultado():
+    # Conector sem custo de aquisição: invested cai pro valor de mercado (P&L 0),
+    # mas o retrato NÃO pode mostrar "R$ 0,00 (+0,0%)" — tem que dizer que não sabe.
+    from core.services.piggy_agents import faria_limer_insights
+    pos = [
+        {"ticker": "PETR4", "market_value": 8000.0, "invested": 8000.0, "cost_known": False},
+        {"ticker": "ITUB4", "market_value": 4000.0, "invested": 4000.0, "cost_known": False},
+    ]
+    ins = faria_limer_insights(pos, _rv_summary(pos), "2026-08")
+    msg = next(i for i in ins if i["payload"]["tipo"] == "rv_retrato")["payload"]["mensagem"]
+    assert "sem custo de aquisição conhecido" in msg
+    assert "R$ 0,00" not in msg and "+0,0%" not in msg
+
+
+def test_rv_insights_concentracao_agrega_mesmo_ticker_em_conexoes_diferentes():
+    # Mesmo PETR4 em duas corretoras (30% + 30% = 60%) tem que somar como UM ativo
+    # e disparar concentração — não pode ser mascarado como dois de 30%.
+    from core.services.piggy_agents import faria_limer_insights
+    pos = [
+        {"ticker": "PETR4", "market_value": 3000.0, "invested": 3000.0},
+        {"ticker": "PETR4", "market_value": 3000.0, "invested": 3000.0},
+        {"ticker": "ITUB4", "market_value": 4000.0, "invested": 4000.0},
+    ]
+    ins = faria_limer_insights(pos, _rv_summary(pos), "2026-08")
+    conc = next(i for i in ins if i["payload"]["tipo"] == "rv_concentracao")
+    assert "PETR4" in conc["payload"]["titulo"]
+    assert "60%" in conc["payload"]["titulo"]             # 6000 / 10000, agregado
+    retrato = next(i for i in ins if i["payload"]["tipo"] == "rv_retrato")
+    assert "2 ativos" in retrato["payload"]["mensagem"]   # PETR4 agrupado + ITUB4
+
+
+def test_rv_insights_taxa_do_mes_exige_cobertura_total():
+    # Cobertura parcial: só o ITUB4 (peso pequeno) tem last_month_rate. Não pode
+    # apresentar a taxa do subconjunto como se fosse a variação da carteira toda.
+    from core.services.piggy_agents import faria_limer_insights
+    pos = [
+        {"ticker": "PETR4", "market_value": 9000.0, "invested": 8000.0},               # sem taxa
+        {"ticker": "ITUB4", "market_value": 1000.0, "invested": 900.0, "last_month_rate": 10.0},
+    ]
+    msg = faria_limer_insights(pos, _rv_summary(pos), "2026-08")[0]["payload"]["mensagem"]
+    assert "No mês" not in msg          # cobertura incompleta → omite a variação do mês
+
+
+def test_list_rv_positions_amount_zero_conta_como_custo_desconhecido(monkeypatch):
+    # amount:0 vindo do conector não é custo real — não pode virar "lucro" = valor
+    # de mercado inteiro. Fica cost_known=False e P&L 0 (custo cai pro market_value).
+    import db.rv as rv
+
+    class _Cur:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, *a, **k): pass
+        def fetchall(self):
+            return [{"of_investment_id": 1, "name": "Petrobras", "type": "EQUITY",
+                     "subtype": "STOCK", "balance": 1000.0, "currency": "BRL",
+                     "raw": {"amount": 0, "code": "PETR4"}}]
+
+    class _Conn:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def cursor(self): return _Cur()
+
+    monkeypatch.setattr(rv, "ensure_user", lambda uid: None)
+    monkeypatch.setattr(rv, "get_conn", lambda: _Conn())
+    pos = rv.list_rv_positions(1)
+    assert len(pos) == 1
+    assert pos[0]["cost_known"] is False       # amount 0 → custo desconhecido
+    assert pos[0]["invested"] == 1000.0        # fallback pro valor de mercado
+    assert pos[0]["pnl"] == 0.0                # sem lucro fantasma
+
+
+def test_rv_portfolio_summary_usa_posicoes_passadas_sem_rebuscar(monkeypatch):
+    # Passar positions deriva o resumo do MESMO snapshot — não pode reler o banco
+    # (evita misturar lista antiga com totais novos se um sync commitar no meio).
+    import db.rv as rv
+
+    def _boom(*a, **k):
+        raise AssertionError("não deveria reler list_rv_positions quando positions foi passado")
+
+    monkeypatch.setattr(rv, "list_rv_positions", _boom)
+    positions = [
+        {"market_value": 6000.0, "invested": 5000.0, "cost_known": True},
+        {"market_value": 4000.0, "invested": 4000.0, "cost_known": True},
+    ]
+    summ = rv.rv_portfolio_summary(1, positions=positions)
+    assert summ["market_value"] == 10000.0
+    assert summ["invested"] == 9000.0
+    assert summ["pnl"] == 1000.0
+    assert summ["cost_known"] is True
+    assert summ["count"] == 2
+
+
+def test_hook_por_item_nao_dispara_faria_limer(monkeypatch):
+    # run_agents_for_user roda por ITEM do Pluggy. O Faria é whole-portfolio/mensal:
+    # rodar aqui grava um retrato parcial que o dedupe mensal congela. Ele deve ficar
+    # fora deste hook (roda no fim do sync completo + no loop horário). Os detectores
+    # de delta (xerife/detetive/cofre/barao) continuam rodando por item.
+    import core.services.piggy_agents as pa
+
+    called = []
+    monkeypatch.setattr(pa, "AGENTS_ENABLED", True)
+    for name in ("run_xerife_once", "run_detetive_once", "run_cofre_once", "run_barao_once"):
+        monkeypatch.setattr(pa, name, (lambda n: (lambda **kw: called.append(n) or {"ok": True}))(name))
+    monkeypatch.setattr(
+        pa, "run_faria_limer_once",
+        lambda **kw: called.append("run_faria_limer_once") or {"ok": True},
+    )
+
+    out = pa.run_agents_for_user(42, trigger="of_sync")
+    assert "run_faria_limer_once" not in called   # não roda no hook por-item
+    assert "faria_limer" not in out
+    assert {"xerife", "detetive", "cofre", "barao"} <= set(out)  # delta agents rodaram
+
+
+def test_taxa_do_mes_pondera_pelo_valor_inicial():
+    # last_month_rate vem em %. Peso = valor no INÍCIO do mês (mv/(1+taxa/100)).
+    # Duas posições de R$100 no início, +100% e 0% → fim R$200 e R$100. Ponderar
+    # pelo valor atual daria ~+66,7%; pelo inicial dá +50% (rentabilidade real).
+    from core.services.piggy_agents import _weighted_month_rate
+    pos = [
+        {"market_value": 200.0, "last_month_rate": 100.0},
+        {"market_value": 100.0, "last_month_rate": 0.0},
+    ]
+    assert abs(_weighted_month_rate(pos) - 50.0) < 1e-6
+
+
+def test_run_faria_limer_once_respeita_kill_switch(monkeypatch):
+    # AGENTS_ENABLED=0 desliga o subsistema. Como o Faria é chamado direto do hook
+    # de sync (fora do run_agents_for_user), o guard tem que estar no runner.
+    import core.services.piggy_agents as pa
+    monkeypatch.setattr(pa, "AGENTS_ENABLED", False)
+    monkeypatch.setattr(
+        pa, "_faria_limer_detect_for_user",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("não deveria rodar")),
+    )
+    out = pa.run_faria_limer_once(user_id=42)
+    assert out.get("disabled") is True
+    assert out.get("fired") == 0
+
+
+def test_faria_detector_grava_via_upsert_autocorrigivel(monkeypatch):
+    # O detector deve usar record_or_refresh_agent_event (upsert que corrige um
+    # retrato parcial ainda pendente), não o record_agent_event first-write-wins.
+    from datetime import date
+    import db
+    import core.services.piggy_agents as pa
+
+    calls = []
+    monkeypatch.setattr(db, "list_rv_positions", lambda uid: [
+        {"ticker": "PETR4", "market_value": 8000.0, "invested": 7000.0},
+        {"ticker": "ITUB4", "market_value": 2000.0, "invested": 2000.0},
+    ])
+    monkeypatch.setattr(db, "rv_portfolio_summary", lambda uid, positions=None: {
+        "market_value": 10000.0, "invested": 9000.0, "cost_known": True,
+        "pnl": 1000.0, "pnl_pct": 1000.0 / 9000.0, "count": 2,
+    })
+    monkeypatch.setattr(db, "record_or_refresh_agent_event",
+                        lambda *a, **k: calls.append(k) or True)
+    monkeypatch.setattr(db, "record_agent_event", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("detector deve usar o upsert, não record_agent_event")))
+
+    fired = pa._faria_limer_detect_for_user({"agent_id": 1, "user_id": 42}, date(2026, 8, 13))
+    assert fired >= 1
+    keys = [k["dedupe_key"] for k in calls]
+    assert any(dk.startswith("rv_retrato:") for dk in keys)
+
+
+def test_faria_detector_apaga_concentracao_pendente_que_deixou_de_valer(monkeypatch):
+    # Run parcial gravou rv_concentracao; o run coerente vê carteira equilibrada e
+    # não reproduz o insight → o pendente (não visto/emailado) tem que ser apagado,
+    # senão o alerta falso fica elegível pro feed/e-mail o mês todo.
+    from datetime import date
+    import db
+    import core.services.piggy_agents as pa
+
+    deleted = []
+    # carteira equilibrada: 3 ativos ~33% cada → só rv_retrato, sem concentração
+    monkeypatch.setattr(db, "list_rv_positions", lambda uid: [
+        {"ticker": "GGRC11", "market_value": 3400.0, "invested": 3000.0},
+        {"ticker": "ITUB4", "market_value": 3300.0, "invested": 3000.0},
+        {"ticker": "PETR4", "market_value": 3300.0, "invested": 3000.0},
+    ])
+    monkeypatch.setattr(db, "rv_portfolio_summary", lambda uid, positions=None: {
+        "market_value": 10000.0, "invested": 9000.0, "cost_known": True,
+        "pnl": 1000.0, "pnl_pct": 1000.0 / 9000.0, "count": 3,
+    })
+    monkeypatch.setattr(db, "record_or_refresh_agent_event", lambda *a, **k: True)
+    monkeypatch.setattr(db, "delete_pending_agent_event",
+                        lambda agent_id, dedupe_key: deleted.append(dedupe_key) or True)
+
+    pa._faria_limer_detect_for_user({"agent_id": 1, "user_id": 42}, date(2026, 8, 13))
+    assert "rv_concentracao:2026-08" in deleted     # obsoleto → limpo
+    assert "rv_retrato:2026-08" not in deleted      # produzido neste run → mantido
+
+
+def test_email_do_faria_respeita_carencia_de_autocorrecao(monkeypatch):
+    # Evento do Faria só entra em e-mail depois da carência (janela em que o upsert
+    # ainda pode corrigir um snapshot parcial). Fresco → segura; vencido → envia.
+    from datetime import datetime, timedelta, timezone
+    import db
+    import core.services.piggy_agents as pa
+    import core.services.email_service as es
+    import core.services.plan_service as ps
+
+    now = datetime(2026, 8, 13, 12, 0, tzinfo=timezone.utc)
+
+    def _arm(fired_at):
+        sent, claimed = [], []
+
+        def _claim(evs):
+            ids = [e["id"] for e in evs]
+            claimed.extend(ids)
+            return ids
+
+        monkeypatch.setattr(db, "list_agents_pending_email", lambda: [
+            {"agent_id": 9, "user_id": 42, "kind": "faria_limer",
+             "config": {}, "last_emailed_at": None}])
+        monkeypatch.setattr(db, "list_unemailed_events", lambda agent_id: [
+            {"id": 7, "payload": {"titulo": "Sua renda variável",
+                                  "mensagem": "R$ 10.000,00 em 2 ativos"},
+             "fired_at": fired_at}])
+        monkeypatch.setattr(db, "claim_agent_events_for_email", _claim)
+        monkeypatch.setattr(db, "touch_agent_emailed", lambda agent_id: None)
+        monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": False})
+        monkeypatch.setattr(db, "get_user_email", lambda uid: "user@example.com")
+        monkeypatch.setattr(ps, "agents_ui_enabled", lambda *a, **k: True)
+        monkeypatch.setattr(ps, "agent_kind_allowed", lambda *a, **k: True)
+        monkeypatch.setattr(es, "send_agent_report_email", lambda *a, **k: sent.append(a))
+        pa.run_agent_emails_once(now=now)
+        return sent, claimed
+
+    # fresco (5 min): dentro da carência → não envia nem reivindica (refresh pode corrigir)
+    sent, claimed = _arm(now - timedelta(minutes=5))
+    assert sent == [] and claimed == []
+    # vencido (2h): reivindica e envia
+    sent, claimed = _arm(now - timedelta(hours=2))
+    assert len(sent) == 1 and claimed == [7]
+
+
+def test_email_pula_evento_que_mudou_entre_leitura_e_claim(monkeypatch):
+    # TOCTOU: se o claim condicional não reivindica nada (o evento foi refrescado
+    # entre a leitura e o claim — fired_at mudou), o tick NÃO envia e-mail com o
+    # payload velho em cache; o evento sai no próximo tick, já estável.
+    from datetime import datetime, timedelta, timezone
+    import db
+    import core.services.piggy_agents as pa
+    import core.services.email_service as es
+    import core.services.plan_service as ps
+
+    now = datetime(2026, 8, 13, 12, 0, tzinfo=timezone.utc)
+    sent, touched = [], []
+    monkeypatch.setattr(db, "list_agents_pending_email", lambda: [
+        {"agent_id": 9, "user_id": 42, "kind": "faria_limer",
+         "config": {}, "last_emailed_at": None}])
+    monkeypatch.setattr(db, "list_unemailed_events", lambda agent_id: [
+        {"id": 7, "payload": {"titulo": "T", "mensagem": "M"},
+         "fired_at": now - timedelta(hours=2)}])
+    monkeypatch.setattr(db, "claim_agent_events_for_email", lambda evs: [])  # ninguém
+    monkeypatch.setattr(db, "touch_agent_emailed", lambda agent_id: touched.append(agent_id))
+    monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": False})
+    monkeypatch.setattr(db, "get_user_email", lambda uid: "user@example.com")
+    monkeypatch.setattr(ps, "agents_ui_enabled", lambda *a, **k: True)
+    monkeypatch.setattr(ps, "agent_kind_allowed", lambda *a, **k: True)
+    monkeypatch.setattr(es, "send_agent_report_email", lambda *a, **k: sent.append(a))
+
+    out = pa.run_agent_emails_once(now=now)
+    assert sent == [] and touched == []
+    assert out["sent"] == 0
+
+
+def test_optout_suprime_sem_congelar(monkeypatch):
+    # Opt-out (por agente e global) usa suppress_agent_events, NÃO o claim: o
+    # evento sai da fila de e-mail mas segue vivo no feed (emailed_at continua
+    # null → upsert ainda corrige e a limpeza de obsoleto ainda remove).
+    from datetime import datetime, timedelta, timezone
+    import db
+    import core.services.piggy_agents as pa
+    import core.services.email_service as es
+    import core.services.plan_service as ps
+
+    now = datetime(2026, 8, 13, 12, 0, tzinfo=timezone.utc)
+
+    def _arm(*, email_enabled=True, optout=False):
+        suppressed, claimed = [], []
+        monkeypatch.setattr(db, "list_agents_pending_email", lambda: [
+            {"agent_id": 9, "user_id": 42, "kind": "faria_limer",
+             "config": {"email_enabled": email_enabled}, "last_emailed_at": None}])
+        monkeypatch.setattr(db, "list_unemailed_events", lambda agent_id: [
+            {"id": 7, "payload": {"titulo": "T", "mensagem": "M"},
+             "fired_at": now - timedelta(hours=2)}])
+        monkeypatch.setattr(db, "suppress_agent_events",
+                            lambda ids: suppressed.extend(ids) or len(ids))
+        monkeypatch.setattr(db, "claim_agent_events_for_email",
+                            lambda evs: claimed.extend(e["id"] for e in evs) or [])
+        monkeypatch.setattr(db, "touch_agent_emailed", lambda agent_id: None)
+        monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": optout})
+        monkeypatch.setattr(db, "get_user_email", lambda uid: "user@example.com")
+        monkeypatch.setattr(ps, "agents_ui_enabled", lambda *a, **k: True)
+        monkeypatch.setattr(ps, "agent_kind_allowed", lambda *a, **k: True)
+        monkeypatch.setattr(es, "send_agent_report_email",
+                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("não envia")))
+        pa.run_agent_emails_once(now=now)
+        return suppressed, claimed
+
+    sup, cla = _arm(email_enabled=False)
+    assert sup == [7] and cla == []      # e-mail off: suprime, sem claim/congelamento
+    sup, cla = _arm(optout=True)
+    assert sup == [7] and cla == []      # opt-out global: idem
+
+
+def test_faria_ignora_posicoes_fora_do_brl(monkeypatch):
+    # Mensagens formatam R$ — somar nominal de outra moeda mentiria no total e na
+    # concentração (R$10k + US$50k ≠ "R$ 60.000"). Posição não-BRL fica fora.
+    from datetime import date
+    import db
+    import core.services.piggy_agents as pa
+    from db.rv import rv_portfolio_summary
+
+    recorded = []
+    monkeypatch.setattr(db, "list_rv_positions", lambda uid: [
+        {"ticker": "PETR4", "market_value": 8000.0, "invested": 7000.0,
+         "cost_known": True, "currency": "BRL"},
+        {"ticker": "AAPL", "market_value": 50000.0, "invested": 30000.0,
+         "cost_known": True, "currency": "USD"},   # dominaria tudo se somasse
+    ])
+    monkeypatch.setattr(db, "rv_portfolio_summary",
+                        lambda uid, positions=None: rv_portfolio_summary(uid, positions=positions))
+    monkeypatch.setattr(db, "record_or_refresh_agent_event",
+                        lambda *a, **k: recorded.append(k) or True)
+    monkeypatch.setattr(db, "delete_pending_agent_event", lambda *a, **k: True)
+
+    pa._faria_limer_detect_for_user({"agent_id": 1, "user_id": 42}, date(2026, 8, 13))
+    tipos = {k["payload"]["tipo"]: k["payload"] for k in recorded}
+    retrato = tipos["rv_retrato"]
+    assert "R$ 8.000,00" in retrato["mensagem"]          # só o BRL
+    assert "1 ativo" in retrato["mensagem"] and "2 ativos" not in retrato["mensagem"]
+    assert "rv_concentracao" not in tipos                # 1 ativo só → sem alerta
+
+
+# ── Integração real com o banco: o SQL do pipeline de eventos ────────────────
+# Estes exercitam as queries DE VERDADE. Os testes acima mockam db.*, então um
+# erro de sintaxe no SQL passava batido (aconteceu: uma vírgula faltando no
+# ON CONFLICT derrubava todo o Faria silenciosamente, porque o detector é
+# fail-soft e só logava a exceção).
+
+def _mk_agent(user_id: int, kind: str = "faria_limer") -> int:
+    import db
+    ag = db.activate_agent(user_id, kind)
+    assert ag, "não criou o agente"
+    return ag["id"]
+
+
+def test_record_or_refresh_sql_roundtrip(user_id):
+    """Insere → re-grava igual → muda payload → congela após e-mail."""
+    import db
+    from db import get_conn
+    agent_id = _mk_agent(user_id)
+    key = "rv_retrato:2026-08"
+
+    def _row():
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select payload, fired_at, suppressed_at, seen_at, emailed_at"
+                    " from agent_events where agent_id=%s and dedupe_key=%s",
+                    (agent_id, key),
+                )
+                return cur.fetchone()
+
+    # 1) primeira gravação insere
+    assert db.record_or_refresh_agent_event(
+        agent_id, user_id, "faria_limer", key, {"v": 1}, valor_impacto=0.0) is True
+    assert _row()["payload"] == {"v": 1}
+    fired1 = _row()["fired_at"]
+
+    # 2) re-gravação IDÊNTICA não mexe (não reseta a carência de estabilidade)
+    assert db.record_or_refresh_agent_event(
+        agent_id, user_id, "faria_limer", key, {"v": 1}, valor_impacto=0.0) is False
+    assert _row()["fired_at"] == fired1
+
+    # 3) suprimido + já visto: payload novo ainda corrige, limpa suppressed_at
+    #    e renova fired_at (seen_at não congela — só o e-mail congela)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update agent_events set suppressed_at=now(), seen_at=now(),"
+                " fired_at=now() - interval '3 hours' where agent_id=%s", (agent_id,))
+        conn.commit()
+    assert db.record_or_refresh_agent_event(
+        agent_id, user_id, "faria_limer", key, {"v": 2}, valor_impacto=0.0) is True
+    r = _row()
+    assert r["payload"] == {"v": 2}
+    assert r["suppressed_at"] is None      # supressão vale pro snapshot, não pro mês
+    assert r["seen_at"] is not None        # visto no feed não impede a correção
+    assert r["fired_at"] > fired1          # idade reiniciou (payload mudou)
+
+    # 4) depois de emailado, congela de vez
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("update agent_events set emailed_at=now() where agent_id=%s", (agent_id,))
+        conn.commit()
+    assert db.record_or_refresh_agent_event(
+        agent_id, user_id, "faria_limer", key, {"v": 3}, valor_impacto=0.0) is False
+    assert _row()["payload"] == {"v": 2}
+
+
+def test_claim_unclaim_suppress_delete_sql(user_id):
+    """Claim condicional, unclaim, supressão e limpeza — contra o banco real."""
+    import db
+    from db import get_conn
+    agent_id = _mk_agent(user_id, "barao")
+    key = "parado:2026-08"
+    db.record_or_refresh_agent_event(agent_id, user_id, "barao", key, {"v": 1}, valor_impacto=1.0)
+
+    ev = db.list_unemailed_events(agent_id)
+    assert len(ev) == 1
+
+    # claim com fired_at DESATUALIZADO não reivindica (fecha o TOCTOU)
+    from datetime import timedelta
+    stale = [{"id": ev[0]["id"], "fired_at": ev[0]["fired_at"] - timedelta(hours=1)}]
+    assert db.claim_agent_events_for_email(stale) == []
+
+    # claim com fired_at correto reivindica
+    claimed = db.claim_agent_events_for_email(ev)
+    assert claimed == [ev[0]["id"]]
+    assert db.list_unemailed_events(agent_id) == []       # saiu da fila
+
+    # unclaim devolve pra fila (envio falhou → nada foi enviado)
+    assert db.unclaim_agent_events(claimed) == 1
+    assert len(db.list_unemailed_events(agent_id)) == 1
+
+    # supressão tira da fila SEM congelar: o refresh ainda corrige
+    assert db.suppress_agent_events(claimed) == 1
+    assert db.list_unemailed_events(agent_id) == []
+    assert db.record_or_refresh_agent_event(
+        agent_id, user_id, "barao", key, {"v": 2}, valor_impacto=1.0) is True
+    assert len(db.list_unemailed_events(agent_id)) == 1    # upsert limpou a supressão
+
+    # limpeza de condição que deixou de valer
+    assert db.delete_pending_agent_event(agent_id, key) is True
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select count(*) as n from agent_events where agent_id=%s", (agent_id,))
+            assert cur.fetchone()["n"] == 0

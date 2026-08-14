@@ -209,7 +209,7 @@ class TestLimits:
         assert PRO_LIMITS["history_days"] == 730         # 24 meses
 
     def test_escada_bancos_e_agentes(self):
-        # Escada final v3: bancos 0(1 só no trial)/1/2/5 · agentes 0/0/3/6
+        # Escada final v3: bancos 0(1 só no trial)/1/2/5 · agentes 0/0/3/7
         assert FREE_LIMITS["of_banks_max"] == 0
         assert ESSENCIAL_LIMITS["of_banks_max"] == 1
         assert PLUS_LIMITS["of_banks_max"] == 2
@@ -217,14 +217,14 @@ class TestLimits:
         assert FREE_LIMITS["agents_max"] == 0
         assert ESSENCIAL_LIMITS["agents_max"] == 0
         assert PLUS_LIMITS["agents_max"] == 3
-        assert PRO_LIMITS["agents_max"] == 6
+        assert PRO_LIMITS["agents_max"] == 7
 
     def test_orcamento_de_energia_por_plano(self):
-        # Modelo de energia (2026-08-13): Grátis/Essencial 0 · Plus 4 · Pro 12.
+        # Modelo de energia: Grátis/Essencial 0 · Plus 4 · Pro 14 (cabe os 7 agentes).
         assert FREE_LIMITS["agents_energy_budget"] == 0
         assert ESSENCIAL_LIMITS["agents_energy_budget"] == 0
         assert PLUS_LIMITS["agents_energy_budget"] == 4
-        assert PRO_LIMITS["agents_energy_budget"] == 12
+        assert PRO_LIMITS["agents_energy_budget"] == 14
 
     def test_tier_at_least(self):
         assert tier_at_least("plus", "essencial")
@@ -316,8 +316,8 @@ class TestAgentGates:
 
     def test_pro_tem_energia_pra_todos(self, v2, monkeypatch):
         _patch_user(monkeypatch, _user("pro_max", FUTURE))  # Pro novo
-        assert plan_service.agents_energy_budget(1) == 12
-        for kind in ("xerife", "detetive", "cofre", "barao"):
+        assert plan_service.agents_energy_budget(1) == 14
+        for kind in ("xerife", "detetive", "cofre", "barao", "faria_limer"):
             assert plan_service.agent_kind_allowed(1, kind) is True
 
     def test_trial_stripe_ativa_agentes_do_plano(self, v2, monkeypatch):
@@ -341,7 +341,7 @@ class TestAgentGates:
         monkeypatch.setenv("AGENTS_BETA_USER_IDS", "99")
         monkeypatch.setenv("AGENTS_BETA_EMAILS", "")  # zera a allowlist por e-mail
         _patch_user(monkeypatch, _user("free"))
-        assert plan_service.agents_energy_budget(99) == 12
+        assert plan_service.agents_energy_budget(99) == 14
         assert plan_service.agent_kind_allowed(99, "detetive") is True
         assert plan_service.agents_energy_budget(1) == 0
         assert plan_service.agent_kind_allowed(1, "xerife") is False
@@ -352,9 +352,18 @@ class TestAgentGates:
         assert agent_energy_cost("carteiro") == 1
         assert agent_energy_cost("xerife") == 2
         assert agent_energy_cost("barao") == 2
+        assert agent_energy_cost("faria_limer") == 2
         assert agent_energy_cost("detetive") == 3
         assert agent_energy_cost("cofre") == 3
         assert agent_energy_cost("desconhecido") == 3  # default = o mais caro
+
+    def test_calibracao_pro_cabe_os_7_agentes(self):
+        """O orçamento do Pro é calibrado pra caber a equipe inteira: a soma do
+        custo dos 7 agentes disponíveis bate exatamente com o orçamento (14)."""
+        from core.services.plan_limits import (agent_energy_cost, AGENT_ENERGY_COST,
+                                               PRO_LIMITS)
+        total = sum(agent_energy_cost(k) for k in AGENT_ENERGY_COST)
+        assert total == PRO_LIMITS["agents_energy_budget"] == 14
 
     def test_calibracao_plus_3_baratos_ou_2_caros(self):
         """A regra 'até 3 baratos, ou 2 se caro' cai da calibração dos números:

@@ -56,6 +56,12 @@ AGENT_CATALOG: list[dict] = [
         "disponivel": True,
     },
     {
+        "kind": "faria_limer", "nome": "Faria Limer", "emoji": "📈",
+        "freq": "Mensal · Open Finance",
+        "desc": "Acompanha sua renda variável (ações e FIIs): o retrato do mês e a concentração da carteira — só fatos, nunca recomendação",
+        "disponivel": True,
+    },
+    {
         "kind": "aviador", "nome": "Aviador", "emoji": "✈️",
         "freq": "Dados externos",
         "desc": "Caça passagem em promoção pros destinos que você marcar",

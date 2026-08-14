@@ -729,24 +729,250 @@ def run_barao_once(today: date | None = None, user_id: int | None = None) -> dic
     return {"ok": True, "agents": len(agents), "fired": fired}
 
 
+# ── Faria Limer: acompanhamento de renda variável (ações/FIIs via OF) ─────────
+# O investidor da Faria Lima que fica de olho na sua carteira. Posicionamento +
+# regulatório: NUNCA recomenda ativo nem opina se está caro/barato — ele só
+# FOTOGRAFA a carteira e aponta fatos (resultado do mês, concentração). A decisão
+# é sempre do usuário. Read-only: a corretora é a fonte da verdade (db.rv).
+FARIA_RV_MIN_MV = float(os.getenv("FARIA_RV_MIN_MV", "100"))          # abaixo disso é ruído
+FARIA_RV_CONCENTRATION_PCT = float(os.getenv("FARIA_RV_CONCENTRATION_PCT", "40"))  # 1 ativo dominando
+
+
+def _fmt_pct_signed(v: float, places: int = 1) -> str:
+    """Percentual com sinal em pt-BR (ex.: +18,4%)."""
+    return f"{v:+.{places}f}%".replace(".", ",")
+
+
+def _weighted_month_rate(positions: list[dict]) -> float | None:
+    """Rentabilidade do mês da carteira, ponderada pelo valor de INÍCIO do período.
+
+    `last_month_rate` vem em % (ex.: 1.2 = +1,2%). O peso correto de cada posição é
+    o valor no começo do mês (mv_atual / (1 + taxa/100)), não o valor atual — senão
+    os ganhadores pesam demais e os perdedores de menos. Ex.: duas posições de R$100
+    no início, +100% e 0%, terminam em R$200 e R$100; ponderar pelo valor atual daria
+    ~+66,7%, mas a carteira rendeu 50% (o que esta fórmula devolve).
+
+    Só devolve um número quando TODAS as posições com valor de mercado trazem a taxa
+    (campo opcional no Pluggy). Com cobertura parcial devolve None: reportar a taxa
+    de um subconjunto como se fosse a da carteira inteira enganaria.
+    """
+    num = begin_sum = den = covered = 0.0
+    for p in positions:
+        mv = float(p.get("market_value") or 0)
+        if mv <= 0:
+            continue
+        den += mv
+        rate = p.get("last_month_rate")
+        if rate is None:
+            continue
+        try:
+            r = float(rate)
+        except (TypeError, ValueError):
+            continue
+        base = 1.0 + r / 100.0
+        if base <= 0:          # perda de -100% ou mais → valor inicial indefinido
+            continue
+        begin = mv / base       # valor no início do mês = peso correto
+        num += r * begin
+        begin_sum += begin
+        covered += mv
+    # cobertura precisa ser total (tolerância a ruído de float) senão não reporta.
+    if den <= 0 or covered < den - 1e-6 or begin_sum <= 0:
+        return None
+    return num / begin_sum
+
+
+def faria_limer_insights(positions: list[dict], summary: dict, ym: str) -> list[dict]:
+    """Insights FACTUAIS (não recomendação) da carteira de renda variável.
+
+    Recebe as posições de `list_rv_positions` e o resumo de
+    `rv_portfolio_summary` e devolve itens {dedupe_key, payload, valor_impacto}
+    prontos pro `record_agent_event`. Deduplicado por mês (YYYY-MM) — o Faria
+    Limer é mensal. Vazio quando a carteira é pequena ou inexistente.
+
+    Dois retratos, nunca um conselho:
+      A) retrato do mês  — valor, resultado em aberto e (quando a corretora
+         manda) a rentabilidade do mês;
+      B) concentração    — quando um único ativo domina a carteira.
+    """
+    pos = [p for p in (positions or []) if float(p.get("market_value") or 0) > 0]
+    summary = summary or {}
+    mv_total = float(summary.get("market_value") or sum(float(p["market_value"]) for p in pos))
+    if not pos or mv_total < FARIA_RV_MIN_MV:
+        return []
+
+    out: list[dict] = []
+    # Agrupa por ativo: o mesmo ticker vindo de conexões diferentes é UMA posição
+    # só (senão a contagem de ativos e a concentração ficam distorcidas).
+    groups: dict[str, dict] = {}
+    for p in pos:
+        label = (p.get("ticker") or p.get("name") or "").strip()
+        key = label.upper() or f"__id:{p.get('of_investment_id')}"
+        g = groups.setdefault(key, {"mv": 0.0, "label": label})
+        g["mv"] += float(p.get("market_value") or 0)
+        if not g["label"] and label:
+            g["label"] = label
+    n = len(groups)
+    plural = "s" if n != 1 else ""
+    pnl = float(summary.get("pnl") or 0.0)
+    pnl_pct = float(summary.get("pnl_pct") or 0.0)
+
+    # A) Retrato do mês — descritivo, sem juízo de valor. Só mostra resultado quando
+    # o custo de aquisição é conhecido em TODAS as posições (o fallback pro valor de
+    # mercado deixa `invested` sempre positivo, então não dá pra inferir daí).
+    if summary.get("cost_known"):
+        result_txt = f"resultado em aberto de {_fmt_brl(pnl)} ({_fmt_pct_signed(pnl_pct * 100)})"
+    else:
+        result_txt = "sem custo de aquisição conhecido pra calcular o resultado"
+    month_rate = _weighted_month_rate(pos)
+    month_txt = (
+        f" No mês, a carteira variou ~{_fmt_pct_signed(month_rate, 2)}."
+        if month_rate is not None else ""
+    )
+    out.append({
+        # Impacto 0: é um retrato factual, não economia gerada pelo agente. O
+        # db.agents soma valor_impacto em saved_365d/salvos_ano — guardar o P&L
+        # não realizado aqui inflaria (12 snapshots de +R$1.000 = "R$12.000
+        # economizados") e prejuízo ainda subtrairia da conta.
+        "dedupe_key": f"rv_retrato:{ym}",
+        "valor_impacto": 0.0,
+        "payload": {
+            "tipo": "rv_retrato",
+            "titulo": f"Sua renda variável: {_fmt_brl(mv_total)} em {n} ativo{plural}",
+            "mensagem": (
+                f"📈 Fechamento da sua carteira de ações/FIIs: {_fmt_brl(mv_total)} em "
+                f"{n} ativo{plural}, {result_txt}.{month_txt} "
+                f"É só o retrato — não é recomendação de compra ou venda."
+            ),
+        },
+    })
+
+    # B) Concentração — fato, não conselho. Só quando há mais de um ativo e um deles
+    # domina. Usa os ativos AGRUPADOS (não linhas soltas por conexão), senão duas
+    # posições do mesmo ticker mascaram a concentração real.
+    top_key = max(groups, key=lambda k: groups[k]["mv"])
+    top_mv = groups[top_key]["mv"]
+    share = (top_mv / mv_total * 100.0) if mv_total > 0 else 0.0
+    if n >= 2 and share >= FARIA_RV_CONCENTRATION_PCT:
+        tick = groups[top_key]["label"] or "um ativo"
+        out.append({
+            "dedupe_key": f"rv_concentracao:{ym}",
+            "valor_impacto": 0.0,
+            "payload": {
+                "tipo": "rv_concentracao",
+                "titulo": f"{tick} é {share:.0f}% da sua carteira de RV",
+                "mensagem": (
+                    f"📈 {tick} concentra {share:.0f}% ({_fmt_brl(top_mv)}) da sua renda "
+                    f"variável hoje. É só um dado pra ter no radar — o que fazer com isso "
+                    f"é decisão sua."
+                ),
+            },
+        })
+
+    return out
+
+
+def _faria_limer_detect_for_user(agent: dict[str, Any], today: date) -> int:
+    """Acompanha a carteira de renda variável do usuário (via Open Finance) e grava
+    os insights factuais (retrato do mês + concentração), deduplicados por mês. Só
+    lê o espelho do sync (db.rv) — a corretora é a fonte da verdade."""
+    from db import (record_or_refresh_agent_event, delete_pending_agent_event,
+                    list_rv_positions, rv_portfolio_summary)
+
+    user_id = agent["user_id"]
+    ym = today.strftime("%Y-%m")
+    positions = list_rv_positions(user_id)
+    # Só posições em BRL: as mensagens formatam tudo em R$, então somar o nominal
+    # de outra moeda (ex.: US$1.000 + R$10.000 = "R$ 11.000") mentiria no total,
+    # no P&L e na concentração. Posição estrangeira fica fora do retrato até
+    # existir conversão de câmbio.
+    positions = [p for p in positions
+                 if (p.get("currency") or "BRL").upper() == "BRL"]
+    # Deriva o resumo do MESMO snapshot de posições (senão uma releitura numa outra
+    # conexão pode pegar um estado pós-sync e desalinhar totais × lista/contagem).
+    summary = rv_portfolio_summary(user_id, positions=positions)
+
+    insights = faria_limer_insights(positions, summary, ym)
+    fired = 0
+    for ins in insights:
+        # Upsert auto-corrigível: se uma execução anterior gravou um retrato parcial
+        # (corrida do tick horário com um sync multi-item) e ele ainda não foi
+        # visto/emailado, a execução coerente seguinte corrige o valor. Uma vez
+        # visto/emailado, fica congelado (não muda o número debaixo do usuário).
+        ok = record_or_refresh_agent_event(
+            agent["agent_id"], user_id, "faria_limer",
+            dedupe_key=ins["dedupe_key"],
+            payload=ins["payload"],
+            valor_impacto=ins.get("valor_impacto", 0.0),
+        )
+        if ok:
+            fired += 1
+
+    # Autocorreção no sentido inverso: condição que DEIXOU de valer. Se um run
+    # parcial gravou um evento do mês (ex.: concentração de uma carteira pela
+    # metade) e este run coerente não o reproduz, apaga o pendente — evento já
+    # visto/emailado não é tocado (a função só deleta pendente).
+    produced = {ins["dedupe_key"] for ins in insights}
+    for key in (f"rv_retrato:{ym}", f"rv_concentracao:{ym}"):
+        if key not in produced:
+            delete_pending_agent_event(agent["agent_id"], key)
+    return fired
+
+
+def run_faria_limer_once(today: date | None = None, user_id: int | None = None) -> dict:
+    """Roda o Faria Limer pra todos os agentes faria_limer ativos (ou só um usuário)."""
+    # Honra o kill switch global aqui dentro (o runner): este é chamado direto do
+    # hook de sync_pluggy_user, fora do run_agents_for_user/run_agents_loop — sem
+    # isso o AGENTS_ENABLED=0 não seguraria o Faria no caminho de sync.
+    if not AGENTS_ENABLED:
+        return {"ok": True, "disabled": True, "agents": 0, "fired": 0}
+    from db import list_users_with_active_agents
+
+    today = today or date.today()
+    agents = list_users_with_active_agents("faria_limer")
+    if user_id is not None:
+        agents = [a for a in agents if a["user_id"] == user_id]
+    from core.services.plan_service import agent_kind_allowed, agents_ui_enabled
+    agents = [a for a in agents
+              if agents_ui_enabled(a["user_id"]) and agent_kind_allowed(a["user_id"], "faria_limer")]
+    fired = 0
+    for agent in agents:
+        try:
+            fired += _faria_limer_detect_for_user(agent, today)
+        except Exception as exc:
+            print(f"[agents] faria_limer user={agent['user_id']}: {exc}", file=sys.stderr)
+    return {"ok": True, "agents": len(agents), "fired": fired}
+
+
 # ── Mini-digest por agente: 1 e-mail por agente, batcheado + teto de cadência ──
 
 # Intervalo mínimo (horas) entre e-mails do MESMO agente. Segura a rajada
 # (Detetive na estreia, cluster de boletos) sem precisar do digest global.
 _AGENT_EMAIL_INTERVAL_H = {
-    "reporter": 24 * 20,   # manchete mensal
-    "barao": 24 * 20,      # mensal
-    "cofre": 0,            # SEM teto: manda a cada aporte detectado (dedupe já
-                           # evita duplicar; aporte é raro e positivo, não spam)
-    "xerife": 24,          # no máx 1x/dia
-    "carteiro": 24,        # no máx 1x/dia
-    "detetive": 24 * 30,   # 1x/mês
+    "reporter": 24 * 20,      # manchete mensal
+    "barao": 24 * 20,         # mensal
+    "faria_limer": 24 * 20,   # retrato mensal da carteira de RV
+    "cofre": 0,               # SEM teto: manda a cada aporte detectado (dedupe já
+                              # evita duplicar; aporte é raro e positivo, não spam)
+    "xerife": 24,             # no máx 1x/dia
+    "carteiro": 24,           # no máx 1x/dia
+    "detetive": 24 * 30,      # 1x/mês
 }
 _DEFAULT_EMAIL_INTERVAL_H = 24
+
+# Carência mínima (minutos) de ESTABILIDADE antes de um evento poder entrar em
+# e-mail, por kind. fired_at renova a cada mudança real de payload (ver
+# record_or_refresh_agent_event), então a idade mede "há quanto tempo o snapshot
+# não muda": um retrato parcial (tick no meio de um sync multi-item) tem idade ~0
+# e o e-mail segura; quando a execução coerente corrige e o payload estabiliza
+# por 45min+ (< tick horário), o e-mail sai no tick seguinte — sem congelar
+# snapshot errado (emailed_at bloquearia o refresh). Mensal — atraso de 1h é inócuo.
+_AGENT_EMAIL_MIN_AGE_MIN = {"faria_limer": 45}
 
 _AGENT_EMAIL_LABEL = {
     "xerife": "🤠 Xerife", "reporter": "🎤 Repórter", "carteiro": "📬 Carteiro",
     "detetive": "🔍 Detetive", "cofre": "🎯 Banqueiro", "barao": "🎩 Barão",
+    "faria_limer": "📈 Faria Limer",
 }
 
 
@@ -782,12 +1008,26 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
     eventos dele num único e-mail (com sua arte/voz) e envia — respeitando o teto
     de cadência do kind e o opt-out. Mantém e-mails separados por agente sem spam.
     Roda no tick horário, depois dos detectores."""
-    from db import (list_agents_pending_email, list_unemailed_events, mark_events_emailed,
-                    touch_agent_emailed, get_user_email, get_auth_user)
+    from db import (list_agents_pending_email, list_unemailed_events,
+                    claim_agent_events_for_email, suppress_agent_events,
+                    unclaim_agent_events, touch_agent_emailed,
+                    get_user_email, get_auth_user)
     from core.services.plan_service import agent_kind_allowed, agents_ui_enabled
 
     now = now or datetime.now(timezone.utc)
     sent = 0
+
+    def _ripe(kind: str, events: list[dict]) -> list[dict]:
+        """Só eventos que já venceram a carência do kind (podem virar/contar como
+        e-mail). Antes disso o evento fica pendente — janela em que o upsert
+        auto-corrigível ainda pode consertar um snapshot parcial (marcar
+        emailed_at cedo, até na supressão, congelaria o valor errado)."""
+        min_age = _AGENT_EMAIL_MIN_AGE_MIN.get(kind, 0)
+        if not min_age:
+            return events
+        cutoff = now - timedelta(minutes=min_age)
+        return [e for e in events if e.get("fired_at") is not None and e["fired_at"] <= cutoff]
+
     for a in list_agents_pending_email():
         kind = a["kind"]; user_id = a["user_id"]; agent_id = a["agent_id"]
         try:
@@ -797,31 +1037,55 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
             # continua mas o e-mail é suprimido (marca como enviado pra não acumular).
             cfg = a.get("config") or {}
             if not cfg.get("email_enabled", True):
+                # Opt-out: suprime SEM marcar emailed_at (suppressed_at só tira da
+                # fila de e-mail). O evento segue vivo no feed — o upsert ainda
+                # corrige e a limpeza de obsoleto ainda remove. Por isso dispensa
+                # carência e claim condicional: suprimir não congela nada.
                 pend = list_unemailed_events(agent_id)
                 if pend:
-                    mark_events_emailed([e["id"] for e in pend])
+                    suppress_agent_events([e["id"] for e in pend])
                 continue
             interval_h = _AGENT_EMAIL_INTERVAL_H.get(kind, _DEFAULT_EMAIL_INTERVAL_H)
             last = a.get("last_emailed_at")
             if last is not None and (now - last) < timedelta(hours=interval_h):
                 continue  # teto de cadência: e-mail desse agente ainda tá no intervalo
-            events = list_unemailed_events(agent_id)
+            events = _ripe(kind, list_unemailed_events(agent_id))
             if not events:
                 continue
-            ids = [e["id"] for e in events]
             auth = get_auth_user(user_id)
             if auth and auth.get("engagement_opt_out"):
-                mark_events_emailed(ids)  # opt-out: suprime o envio (feed já mostrou)
+                # Opt-out global: mesma supressão viva (sem congelar o feed).
+                suppress_agent_events([e["id"] for e in events])
                 continue
             email = get_user_email(user_id)
             if not email:
                 continue
+            # Reivindica ANTES de enviar (fecha o TOCTOU leitura→envio→marcação):
+            # emailed_at só é setado se o evento não mudou desde a leitura (mesmo
+            # fired_at); linha refrescada no meio fica de fora e sai no próximo
+            # tick, já estável. O e-mail usa exatamente os payloads reivindicados.
+            # Trade-off deliberado: claim→envio é at-most-once (falha de envio
+            # após o claim perde o digest) — melhor que enviar e marcar a linha
+            # errada, que congela snapshot misto no feed.
+            claimed_ids = list(claim_agent_events_for_email(events))
+            events = [e for e in events if e["id"] in set(claimed_ids)]
+            if not events:
+                continue
             from core.services.email_service import send_agent_report_email
-            send_agent_report_email(
-                email, user_id, _agent_email_subject(kind, events),
-                _compose_agent_email(kind, events), kind=kind,
-            )
-            mark_events_emailed(ids)
+            try:
+                ok = send_agent_report_email(
+                    email, user_id, _agent_email_subject(kind, events),
+                    _compose_agent_email(kind, events), kind=kind,
+                )
+            except Exception:
+                unclaim_agent_events(claimed_ids)  # nada saiu → devolve pra fila
+                raise
+            if not ok:
+                # send_email não levanta: retorna False. Sem desfazer o claim, um
+                # envio falho congelaria o evento (emailed_at) sem e-mail nenhum —
+                # o feed ficaria preso num retrato velho/alerta que já não vale.
+                unclaim_agent_events(claimed_ids)
+                continue
             touch_agent_emailed(agent_id)
             sent += 1
         except Exception as exc:
@@ -840,6 +1104,7 @@ def run_all_agents_once(today: date | None = None) -> dict:
         "detetive": run_detetive_once(today),
         "cofre": run_cofre_once(today),
         "barao": run_barao_once(today),
+        "faria_limer": run_faria_limer_once(today),
         "emails": run_agent_emails_once(),
     }
 
@@ -848,6 +1113,12 @@ def run_agents_for_user(user_id: int, trigger: str = "of_sync") -> dict:
     """Hook pós-sync do Open Finance: roda Xerife (anomalia no delta), Detetive
     (auditoria de assinaturas) e Banqueiro (aporte novo na caixinha vinculada),
     só pro usuário sincado.
+
+    NÃO inclui o Faria Limer de propósito: ele é whole-portfolio (agrega ações/FIIs
+    de TODAS as conexões) e mensal. Este hook roda por ITEM (sync_pluggy_item), então
+    dispararia com a carteira parcial no 1º item e o dedupe mensal congelaria totais/
+    concentração errados. O Faria roda num snapshot coerente: no fim de
+    sync_pluggy_user (sync completo) e no loop horário (run_all_agents_once).
 
     Fail-soft por contrato — quem chama (pluggy_sync) não pode quebrar por
     causa de agente. Cada detector é isolado pra um não derrubar o outro.
