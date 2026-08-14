@@ -84,7 +84,12 @@ def list_rv_positions(user_id: int) -> list[dict]:
         if market_value <= 0:
             continue  # posição zerada/vendida — não exibe
 
-        invested = _f(raw.get("amount"), market_value)  # sem custo conhecido → P&L 0
+        # `invested_known` é None quando o conector não mandou um custo utilizável;
+        # nesse caso caímos pro valor de mercado (P&L 0) mas marcamos cost_known=False
+        # pra quem consome não confundir "R$ 0,00 de resultado" com "custo desconhecido".
+        invested_known = _f(raw.get("amount"), None)
+        cost_known = invested_known is not None
+        invested = invested_known if cost_known else market_value
         quantity = _f(raw.get("quantity")) or None
 
         # preço unitário: `value` pode vir null (validado no sandbox) → fallback.
@@ -110,6 +115,7 @@ def list_rv_positions(user_id: int) -> list[dict]:
             "market_price": market_price,
             "market_value": market_value,
             "invested": invested,
+            "cost_known": cost_known,
             "pnl": pnl,
             "pnl_pct": (pnl / invested) if invested > 0 else 0.0,
             "currency": r.get("currency") or "BRL",
@@ -127,9 +133,13 @@ def rv_portfolio_summary(user_id: int) -> dict:
     mv = sum(p["market_value"] for p in pos)
     invested = sum(p["invested"] for p in pos)
     pnl = mv - invested
+    # Só é confiável quando TODAS as posições trazem custo (senão o P&L agregado
+    # mistura custo real com fallback pro valor de mercado e subestima o retorno).
+    cost_known = bool(pos) and all(p.get("cost_known") for p in pos)
     return {
         "market_value": mv,
         "invested": invested,
+        "cost_known": cost_known,
         "pnl": pnl,
         "pnl_pct": (pnl / invested) if invested > 0 else 0.0,
         "count": len(pos),

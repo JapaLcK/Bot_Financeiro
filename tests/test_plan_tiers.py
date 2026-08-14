@@ -209,7 +209,7 @@ class TestLimits:
         assert PRO_LIMITS["history_days"] == 730         # 24 meses
 
     def test_escada_bancos_e_agentes(self):
-        # Escada final v3: bancos 0(1 só no trial)/1/2/5 · agentes 0/0/3/6
+        # Escada final v3: bancos 0(1 só no trial)/1/2/5 · agentes 0/0/3/7
         assert FREE_LIMITS["of_banks_max"] == 0
         assert ESSENCIAL_LIMITS["of_banks_max"] == 1
         assert PLUS_LIMITS["of_banks_max"] == 2
@@ -217,7 +217,7 @@ class TestLimits:
         assert FREE_LIMITS["agents_max"] == 0
         assert ESSENCIAL_LIMITS["agents_max"] == 0
         assert PLUS_LIMITS["agents_max"] == 3
-        assert PRO_LIMITS["agents_max"] == 6
+        assert PRO_LIMITS["agents_max"] == 7
 
     def test_orcamento_de_energia_por_plano(self):
         # Modelo de energia: Grátis/Essencial 0 · Plus 4 · Pro 14 (cabe os 7 agentes).

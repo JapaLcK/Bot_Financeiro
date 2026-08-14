@@ -781,13 +781,25 @@ def faria_limer_insights(positions: list[dict], summary: dict, ym: str) -> list[
         return []
 
     out: list[dict] = []
-    n = len(pos)
+    # Agrupa por ativo: o mesmo ticker vindo de conexões diferentes é UMA posição
+    # só (senão a contagem de ativos e a concentração ficam distorcidas).
+    groups: dict[str, dict] = {}
+    for p in pos:
+        label = (p.get("ticker") or p.get("name") or "").strip()
+        key = label.upper() or f"__id:{p.get('of_investment_id')}"
+        g = groups.setdefault(key, {"mv": 0.0, "label": label})
+        g["mv"] += float(p.get("market_value") or 0)
+        if not g["label"] and label:
+            g["label"] = label
+    n = len(groups)
     plural = "s" if n != 1 else ""
     pnl = float(summary.get("pnl") or 0.0)
     pnl_pct = float(summary.get("pnl_pct") or 0.0)
 
-    # A) Retrato do mês — descritivo, sem juízo de valor.
-    if summary.get("invested"):
+    # A) Retrato do mês — descritivo, sem juízo de valor. Só mostra resultado quando
+    # o custo de aquisição é conhecido em TODAS as posições (o fallback pro valor de
+    # mercado deixa `invested` sempre positivo, então não dá pra inferir daí).
+    if summary.get("cost_known"):
         result_txt = f"resultado em aberto de {_fmt_brl(pnl)} ({_fmt_pct_signed(pnl_pct * 100)})"
     else:
         result_txt = "sem custo de aquisição conhecido pra calcular o resultado"
@@ -810,12 +822,14 @@ def faria_limer_insights(positions: list[dict], summary: dict, ym: str) -> list[
         },
     })
 
-    # B) Concentração — fato, não conselho. Só quando há mais de um ativo e um deles domina.
-    top = max(pos, key=lambda p: float(p.get("market_value") or 0))
-    top_mv = float(top.get("market_value") or 0)
+    # B) Concentração — fato, não conselho. Só quando há mais de um ativo e um deles
+    # domina. Usa os ativos AGRUPADOS (não linhas soltas por conexão), senão duas
+    # posições do mesmo ticker mascaram a concentração real.
+    top_key = max(groups, key=lambda k: groups[k]["mv"])
+    top_mv = groups[top_key]["mv"]
     share = (top_mv / mv_total * 100.0) if mv_total > 0 else 0.0
     if n >= 2 and share >= FARIA_RV_CONCENTRATION_PCT:
-        tick = top.get("ticker") or top.get("name") or "um ativo"
+        tick = groups[top_key]["label"] or "um ativo"
         out.append({
             "dedupe_key": f"rv_concentracao:{ym}",
             "valor_impacto": 0.0,

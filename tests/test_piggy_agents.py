@@ -129,8 +129,14 @@ def _rv_summary(positions):
     mv = sum(p["market_value"] for p in positions)
     invested = sum(p.get("invested", 0.0) for p in positions)
     pnl = mv - invested
-    return {"market_value": mv, "invested": invested, "pnl": pnl,
-            "pnl_pct": (pnl / invested) if invested > 0 else 0.0, "count": len(positions)}
+    # espelha rv_portfolio_summary: custo confiável só quando TODA posição o traz
+    # (nos fixtures, ter `invested` = custo conhecido, salvo cost_known explícito).
+    cost_known = bool(positions) and all(
+        p.get("cost_known", "invested" in p) for p in positions
+    )
+    return {"market_value": mv, "invested": invested, "cost_known": cost_known,
+            "pnl": pnl, "pnl_pct": (pnl / invested) if invested > 0 else 0.0,
+            "count": len(positions)}
 
 
 def test_rv_insights_carteira_vazia_ou_minima():
@@ -194,3 +200,34 @@ def test_rv_insights_sem_taxa_do_mes_omite_variacao():
     msg = ins[0]["payload"]["mensagem"]
     assert "No mês" not in msg
     assert "1 ativo" in msg and "1 ativos" not in msg     # singular correto
+
+
+def test_rv_insights_sem_custo_conhecido_nao_inventa_resultado():
+    # Conector sem custo de aquisição: invested cai pro valor de mercado (P&L 0),
+    # mas o retrato NÃO pode mostrar "R$ 0,00 (+0,0%)" — tem que dizer que não sabe.
+    from core.services.piggy_agents import faria_limer_insights
+    pos = [
+        {"ticker": "PETR4", "market_value": 8000.0, "invested": 8000.0, "cost_known": False},
+        {"ticker": "ITUB4", "market_value": 4000.0, "invested": 4000.0, "cost_known": False},
+    ]
+    ins = faria_limer_insights(pos, _rv_summary(pos), "2026-08")
+    msg = next(i for i in ins if i["payload"]["tipo"] == "rv_retrato")["payload"]["mensagem"]
+    assert "sem custo de aquisição conhecido" in msg
+    assert "R$ 0,00" not in msg and "+0,0%" not in msg
+
+
+def test_rv_insights_concentracao_agrega_mesmo_ticker_em_conexoes_diferentes():
+    # Mesmo PETR4 em duas corretoras (30% + 30% = 60%) tem que somar como UM ativo
+    # e disparar concentração — não pode ser mascarado como dois de 30%.
+    from core.services.piggy_agents import faria_limer_insights
+    pos = [
+        {"ticker": "PETR4", "market_value": 3000.0, "invested": 3000.0},
+        {"ticker": "PETR4", "market_value": 3000.0, "invested": 3000.0},
+        {"ticker": "ITUB4", "market_value": 4000.0, "invested": 4000.0},
+    ]
+    ins = faria_limer_insights(pos, _rv_summary(pos), "2026-08")
+    conc = next(i for i in ins if i["payload"]["tipo"] == "rv_concentracao")
+    assert "PETR4" in conc["payload"]["titulo"]
+    assert "60%" in conc["payload"]["titulo"]             # 6000 / 10000, agregado
+    retrato = next(i for i in ins if i["payload"]["tipo"] == "rv_retrato")
+    assert "2 ativos" in retrato["payload"]["mensagem"]   # PETR4 agrupado + ITUB4
