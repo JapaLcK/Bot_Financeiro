@@ -188,9 +188,13 @@ def record_or_refresh_agent_event(
     depois. Assim uma 1ª gravação parcial (corrida com o sync multi-item) é
     corrigida pela próxima execução coerente. Retorna True se inseriu ou atualizou.
 
-    NOTA: o refresh NÃO renova fired_at — a idade do evento precisa continuar
-    contando pra carência de e-mail do agente (run_agent_emails_once) vencer;
-    renovar a cada tique deixaria o e-mail adiado pra sempre.
+    fired_at aqui significa "última MUDANÇA do snapshot": o update só dispara (e só
+    renova fired_at) quando payload/valor_impacto realmente mudam. É o que faz a
+    carência de e-mail (run_agent_emails_once) funcionar nos dois sentidos:
+      - payload estável 45min+ → idade vence → e-mail sai (re-gravações idênticas
+        a cada tick não resetam a carência — senão o e-mail adiaria pra sempre);
+      - payload recém-alterado (ex.: refresh parcial no meio de outro sync) →
+        idade zera → o e-mail segura até o snapshot estabilizar corrigido.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -201,9 +205,12 @@ def record_or_refresh_agent_event(
                 values (%s, %s, %s, %s, %s::jsonb, %s, %s)
                 on conflict (agent_id, dedupe_key) do update
                   set payload = excluded.payload,
-                      valor_impacto = excluded.valor_impacto
+                      valor_impacto = excluded.valor_impacto,
+                      fired_at = now()
                   where agent_events.seen_at is null
                     and agent_events.emailed_at is null
+                    and (agent_events.payload is distinct from excluded.payload
+                         or agent_events.valor_impacto is distinct from excluded.valor_impacto)
                 """,
                 (agent_id, user_id, kind, dedupe_key,
                  json.dumps(payload or {}), channel, valor_impacto),

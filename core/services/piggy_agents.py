@@ -954,12 +954,13 @@ _AGENT_EMAIL_INTERVAL_H = {
 }
 _DEFAULT_EMAIL_INTERVAL_H = 24
 
-# Carência mínima (minutos) antes de um evento poder entrar em e-mail, por kind.
-# Faria Limer: o retrato precisa de tempo pra se autocorrigir (upsert) caso a 1ª
-# gravação tenha pego uma carteira parcial (tick horário no meio de um sync
-# multi-item) — sem a carência, o e-mail sai no MESMO tick e congela o snapshot
-# errado (emailed_at bloqueia o refresh). 45min < tick horário: o e-mail sai no
-# tick seguinte, já corrigido. Agente mensal — atraso de 1h é inócuo.
+# Carência mínima (minutos) de ESTABILIDADE antes de um evento poder entrar em
+# e-mail, por kind. fired_at renova a cada mudança real de payload (ver
+# record_or_refresh_agent_event), então a idade mede "há quanto tempo o snapshot
+# não muda": um retrato parcial (tick no meio de um sync multi-item) tem idade ~0
+# e o e-mail segura; quando a execução coerente corrige e o payload estabiliza
+# por 45min+ (< tick horário), o e-mail sai no tick seguinte — sem congelar
+# snapshot errado (emailed_at bloquearia o refresh). Mensal — atraso de 1h é inócuo.
 _AGENT_EMAIL_MIN_AGE_MIN = {"faria_limer": 45}
 
 _AGENT_EMAIL_LABEL = {
