@@ -156,7 +156,9 @@ def test_rv_insights_retrato_do_mes():
     ins = faria_limer_insights(pos, _rv_summary(pos), "2026-08")
     retrato = next(i for i in ins if i["payload"]["tipo"] == "rv_retrato")
     assert retrato["dedupe_key"] == "rv_retrato:2026-08"
-    assert retrato["valor_impacto"] == 1000.0            # pnl = 11000 - 10000
+    # retrato é factual → impacto 0 (não entra em saved_365d/salvos_ano, senão o
+    # P&L não realizado seria contado como "economia" a cada snapshot mensal).
+    assert retrato["valor_impacto"] == 0.0
     msg = retrato["payload"]["mensagem"]
     assert "2 ativos" in msg
     assert "+10,0%" in msg                               # pnl_pct
@@ -271,3 +273,24 @@ def test_list_rv_positions_amount_zero_conta_como_custo_desconhecido(monkeypatch
     assert pos[0]["cost_known"] is False       # amount 0 → custo desconhecido
     assert pos[0]["invested"] == 1000.0        # fallback pro valor de mercado
     assert pos[0]["pnl"] == 0.0                # sem lucro fantasma
+
+
+def test_rv_portfolio_summary_usa_posicoes_passadas_sem_rebuscar(monkeypatch):
+    # Passar positions deriva o resumo do MESMO snapshot — não pode reler o banco
+    # (evita misturar lista antiga com totais novos se um sync commitar no meio).
+    import db.rv as rv
+
+    def _boom(*a, **k):
+        raise AssertionError("não deveria reler list_rv_positions quando positions foi passado")
+
+    monkeypatch.setattr(rv, "list_rv_positions", _boom)
+    positions = [
+        {"market_value": 6000.0, "invested": 5000.0, "cost_known": True},
+        {"market_value": 4000.0, "invested": 4000.0, "cost_known": True},
+    ]
+    summ = rv.rv_portfolio_summary(1, positions=positions)
+    assert summ["market_value"] == 10000.0
+    assert summ["invested"] == 9000.0
+    assert summ["pnl"] == 1000.0
+    assert summ["cost_known"] is True
+    assert summ["count"] == 2

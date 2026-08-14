@@ -129,9 +129,14 @@ def list_rv_positions(user_id: int) -> list[dict]:
     return out
 
 
-def rv_portfolio_summary(user_id: int) -> dict:
-    """Totais da carteira de renda variável (valor de mercado, investido, P&L)."""
-    pos = list_rv_positions(user_id)
+def rv_portfolio_summary(user_id: int, positions: list[dict] | None = None) -> dict:
+    """Totais da carteira de renda variável (valor de mercado, investido, P&L).
+
+    Passe `positions` (de um `list_rv_positions` já feito) pra derivar o resumo do
+    MESMO snapshot — sem isso relemos numa outra conexão e, se um sync commitar no
+    meio, o resumo mistura lista antiga com totais novos (concentração até >100%).
+    """
+    pos = positions if positions is not None else list_rv_positions(user_id)
     mv = sum(p["market_value"] for p in pos)
     invested = sum(p["invested"] for p in pos)
     pnl = mv - invested

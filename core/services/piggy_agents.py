@@ -820,8 +820,12 @@ def faria_limer_insights(positions: list[dict], summary: dict, ym: str) -> list[
         if month_rate is not None else ""
     )
     out.append({
+        # Impacto 0: é um retrato factual, não economia gerada pelo agente. O
+        # db.agents soma valor_impacto em saved_365d/salvos_ano — guardar o P&L
+        # não realizado aqui inflaria (12 snapshots de +R$1.000 = "R$12.000
+        # economizados") e prejuízo ainda subtrairia da conta.
         "dedupe_key": f"rv_retrato:{ym}",
-        "valor_impacto": round(pnl, 2),
+        "valor_impacto": 0.0,
         "payload": {
             "tipo": "rv_retrato",
             "titulo": f"Sua renda variável: {_fmt_brl(mv_total)} em {n} ativo{plural}",
@@ -867,7 +871,9 @@ def _faria_limer_detect_for_user(agent: dict[str, Any], today: date) -> int:
     user_id = agent["user_id"]
     ym = today.strftime("%Y-%m")
     positions = list_rv_positions(user_id)
-    summary = rv_portfolio_summary(user_id)
+    # Deriva o resumo do MESMO snapshot de posições (senão uma releitura numa outra
+    # conexão pode pegar um estado pós-sync e desalinhar totais × lista/contagem).
+    summary = rv_portfolio_summary(user_id, positions=positions)
 
     fired = 0
     for ins in faria_limer_insights(positions, summary, ym):
