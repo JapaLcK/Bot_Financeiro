@@ -6957,6 +6957,8 @@ let _renderedLaunches = [];
 
 // Guarda o detalhamento do "Sobrou este mês" pro modal explicativo (clique no card).
 let _sobrouDetail = null;
+// Elemento que tinha o foco antes de abrir o modal (pra restaurar ao fechar).
+let _sobrouReturnFocus = null;
 
 function renderLaunches() {
   if (!lastData) return;
@@ -7091,7 +7093,7 @@ function _ensureSobrouDetailModal() {
   if (document.getElementById("sobrou-detail-overlay")) return;
   const html = `
     <div class="overlay" id="sobrou-detail-overlay">
-      <div class="modal launch-detail sobrou-detail">
+      <div class="modal launch-detail sobrou-detail" role="dialog" aria-modal="true" aria-labelledby="sd-title">
         <h3 id="sd-title">Sobrou este mês</h3>
         <div class="msub" id="sd-sub"></div>
         <div class="ld-meta" id="sd-rows"></div>
@@ -7106,13 +7108,27 @@ function _ensureSobrouDetailModal() {
   ov.addEventListener("click", e => { if (e.target === ov) closeSobrouDetail(); });
   document.getElementById("sd-close").addEventListener("click", closeSobrouDetail);
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape" && ov.classList.contains("open")) closeSobrouDetail();
+    if (!ov.classList.contains("open")) return;
+    if (e.key === "Escape") { closeSobrouDetail(); return; }
+    // Trap de foco: o diálogo tem um único controle (Fechar). Sem isso o Tab
+    // vazaria pro dashboard atrás do overlay, contrariando aria-modal.
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const closeBtn = document.getElementById("sd-close");
+      if (closeBtn) closeBtn.focus();
+    }
   });
 }
 
 function closeSobrouDetail() {
   const ov = document.getElementById("sobrou-detail-overlay");
   if (ov) ov.classList.remove("open");
+  // Devolve o foco pra quem abriu o modal (o card), pra teclado/leitor de tela
+  // não ficarem perdidos atrás do overlay.
+  if (_sobrouReturnFocus && typeof _sobrouReturnFocus.focus === "function") {
+    _sobrouReturnFocus.focus();
+  }
+  _sobrouReturnFocus = null;
 }
 
 function openSobrouDetail() {
@@ -7139,9 +7155,15 @@ function openSobrouDetail() {
     `<span class="ld-v ${deficit ? "neg" : "pos"}">${fmt(s.sav)}</span></div>`;
 
   // Explica a divergência que confunde: saldo (acumulado) vs sobrou (só o mês).
-  const saldoNeg = s.saldoAtual < 0;
+  // Em mês histórico NÃO comparamos com o saldo: o snapshot só traz o saldo
+  // ATUAL da conta (não o saldo daquele mês) e ainda exclui Open Finance, então
+  // afirmar "seu saldo está negativo" ali seria enganoso. Mostra só a natureza
+  // do número (fluxo daquele mês).
   let note;
-  if (saldoNeg) {
+  if (s.hist) {
+    note = "Este é o fluxo de " + monthLbl + " — só receitas, gastos e aportes daquele mês. " +
+      "Não é um saldo: o saldo é acumulado e reflete o momento atual, não o fim de um mês passado.";
+  } else if (s.saldoAtual < 0) {
     note = "Seu <b>saldo</b> está negativo (" + fmt(s.saldoAtual) + "), mas ainda assim " +
       (deficit ? "o mês fechou como está acima" : "sobrou dinheiro <b>neste mês</b>") + ". " +
       "Não é contradição: o saldo é acumulado — arrasta meses anteriores, ajustes e movimentações entre contas —, " +
@@ -7155,7 +7177,13 @@ function openSobrouDetail() {
   }
   document.getElementById("sd-note").innerHTML = note;
 
+  // Guarda quem tinha o foco (o card) pra restaurar ao fechar, e joga o foco
+  // pro botão de fechar — assim o leitor de tela anuncia o diálogo e o Tab não
+  // vaza pro dashboard atrás do overlay.
+  _sobrouReturnFocus = document.activeElement;
   document.getElementById("sobrou-detail-overlay").classList.add("open");
+  const closeBtn = document.getElementById("sd-close");
+  if (closeBtn) closeBtn.focus();
 }
 
 function openHistoryDetail(idx) {
@@ -9180,7 +9208,7 @@ function render(d) {
 
   // Detalhamento do "Sobrou este mês" pro modal explicativo (clique no card).
   // Guarda exatamente o que está na tela, inclusive em mês histórico.
-  _sobrouDetail = { inc, exp, apt, sav, rate, saldoAtual, month: rm, year: ry };
+  _sobrouDetail = { inc, exp, apt, sav, rate, saldoAtual, month: rm, year: ry, hist };
 
   const nPk = (d.pockets||[]).length;
   const nCc = (d.credit_cards||[]).length;
