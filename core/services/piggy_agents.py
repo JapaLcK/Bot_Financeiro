@@ -665,7 +665,7 @@ def _barao_detect_for_user(agent: dict[str, Any], today: date) -> int:
     saldo parcial precisa ser CORRIGIDA pela execução coerente seguinte — inclusive
     a que já existe no banco de quem sincou antes deste fix. Só congela depois de
     virar e-mail (emailed_at), que é artefato imutável."""
-    from db import record_or_refresh_agent_event
+    from db import record_or_refresh_agent_event, delete_pending_agent_event
 
     user_id = agent["user_id"]
     cfg = agent.get("config") or {}
@@ -689,14 +689,22 @@ def _barao_detect_for_user(agent: dict[str, Any], today: date) -> int:
             row = cur.fetchone() or {}
 
     idle = float(row.get("idle") or 0)
+    ym = today.strftime("%Y-%m")
+    key = f"parado:{ym}"
+
     if idle < min_idle:
+        # A condição deixou de valer: ou uma gravação anterior pegou só o saldo
+        # parcial de um item, ou o usuário moveu o dinheiro. Remove o alerta
+        # pendente em vez de deixá-lo apodrecer no feed com o valor errado (e o
+        # valor_impacto somando em saved_365d). Espelha a limpeza que o Faria
+        # Limer faz na concentração. Evento já emailado não é tocado.
+        delete_pending_agent_event(agent["agent_id"], key)
         return 0
 
     rende_mes = round(idle * (cdi / 100.0) / 12.0, 2)
-    ym = today.strftime("%Y-%m")
     ok = record_or_refresh_agent_event(
         agent["agent_id"], user_id, "barao",
-        dedupe_key=f"parado:{ym}",
+        dedupe_key=key,
         payload={
             "tipo": "parado",
             "idle": round(idle, 2),
@@ -978,7 +986,10 @@ _DEFAULT_EMAIL_INTERVAL_H = 24
 # e o e-mail segura; quando a execução coerente corrige e o payload estabiliza
 # por 45min+ (< tick horário), o e-mail sai no tick seguinte — sem congelar
 # snapshot errado (emailed_at bloquearia o refresh). Mensal — atraso de 1h é inócuo.
-_AGENT_EMAIL_MIN_AGE_MIN = {"faria_limer": 45}
+# Vale pros dois agentes whole-portfolio: sem isso, o tick horário que pega um
+# snapshot parcial emailaria na mesma passada (run_agent_emails_once roda logo
+# depois dos detectores) e o emailed_at travaria a correção pelo resto do mês.
+_AGENT_EMAIL_MIN_AGE_MIN = {"faria_limer": 45, "barao": 45}
 
 _AGENT_EMAIL_LABEL = {
     "xerife": "🤠 Xerife", "reporter": "🎤 Repórter", "carteiro": "📬 Carteiro",

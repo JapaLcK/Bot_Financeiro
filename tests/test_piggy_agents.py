@@ -762,3 +762,74 @@ def test_sync_completo_sobrevive_a_import_quebrado(monkeypatch):
     out = ps.sync_pluggy_user(42)          # não pode levantar
     assert out["ok"] is True
     assert out["items_synced"] == 1
+
+
+def test_barao_remove_alerta_quando_saldo_cai_abaixo_do_minimo(user_id):
+    """P1 do Codex (2ª rodada, PR #51): se o saldo coerente fica abaixo do
+    mínimo, o detector saía cedo e o alerta parcial apodrecia no feed — com o
+    valor_impacto ainda somando em saved_365d."""
+    import db
+    from datetime import date
+    import unittest.mock as m
+    import core.services.piggy_agents as pa
+
+    ag = db.activate_agent(user_id, "barao")
+    hoje = date(2026, 8, 14)
+    db.record_or_refresh_agent_event(
+        ag["id"], user_id, "barao", f"parado:{hoje.strftime('%Y-%m')}",
+        {"tipo": "parado", "idle": 1500.0, "titulo": "R$ 1.500,00 parado rendendo nada"},
+        valor_impacto=13.13)
+    assert [e for e in db.list_agent_events(user_id, limit=5) if e["kind"] == "barao"]
+
+    # execução coerente: saldo agregado abaixo do mínimo (BARAO_MIN_IDLE=1000)
+    with m.patch.object(pa, "get_conn") as gc:
+        cur = gc.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.return_value = {"idle": 200.0}
+        assert pa._barao_detect_for_user({"agent_id": ag["id"], "user_id": user_id}, hoje) == 0
+
+    restantes = [e for e in db.list_agent_events(user_id, limit=5) if e["kind"] == "barao"]
+    assert restantes == [], "alerta obsoleto do Barão ficou no feed"
+
+
+def test_barao_tem_carencia_de_estabilidade_no_email():
+    """P1 do Codex (2ª rodada): sem entrada em _AGENT_EMAIL_MIN_AGE_MIN, um
+    snapshot parcial do tick horário seria emailado na mesma passada e o
+    emailed_at congelaria o valor errado pelo resto do mês."""
+    from core.services.piggy_agents import _AGENT_EMAIL_MIN_AGE_MIN
+    assert _AGENT_EMAIL_MIN_AGE_MIN.get("barao", 0) >= 45
+    assert _AGENT_EMAIL_MIN_AGE_MIN.get("barao") == _AGENT_EMAIL_MIN_AGE_MIN.get("faria_limer")
+
+
+def test_email_do_barao_segura_evento_recem_mudado(monkeypatch):
+    """A carência aplicada de fato no runner de e-mail, para o kind barao."""
+    from datetime import datetime, timedelta, timezone
+    import db
+    import core.services.piggy_agents as pa
+    import core.services.email_service as es
+    import core.services.plan_service as ps
+
+    now = datetime(2026, 8, 14, 12, 0, tzinfo=timezone.utc)
+
+    def _arm(fired_at):
+        sent, claimed = [], []
+        monkeypatch.setattr(db, "list_agents_pending_email", lambda: [
+            {"agent_id": 9, "user_id": 42, "kind": "barao", "config": {}, "last_emailed_at": None}])
+        monkeypatch.setattr(db, "list_unemailed_events", lambda aid: [
+            {"id": 7, "payload": {"titulo": "T", "mensagem": "M"}, "fired_at": fired_at}])
+        monkeypatch.setattr(db, "claim_agent_events_for_email",
+                            lambda evs: claimed.extend(e["id"] for e in evs) or [e["id"] for e in evs])
+        monkeypatch.setattr(db, "suppress_agent_events", lambda ids: len(ids))
+        monkeypatch.setattr(db, "unclaim_agent_events", lambda ids: len(ids))
+        monkeypatch.setattr(db, "touch_agent_emailed", lambda aid: None)
+        monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": False})
+        monkeypatch.setattr(db, "get_user_email", lambda uid: "u@e.com")
+        monkeypatch.setattr(ps, "agents_ui_enabled", lambda *a, **k: True)
+        monkeypatch.setattr(ps, "agent_kind_allowed", lambda *a, **k: True)
+        monkeypatch.setattr(es, "send_agent_report_email", lambda *a, **k: sent.append(a) or True)
+        pa.run_agent_emails_once(now=now)
+        return sent, claimed
+
+    sent, claimed = _arm(now - timedelta(minutes=5))    # snapshot recém-mudado
+    assert sent == [] and claimed == []                 # segura: pode ser parcial
+    sent, claimed = _arm(now - timedelta(hours=2))      # estável
+    assert len(sent) == 1 and claimed == [7]
