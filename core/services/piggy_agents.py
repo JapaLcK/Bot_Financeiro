@@ -744,21 +744,32 @@ def _fmt_pct_signed(v: float, places: int = 1) -> str:
 
 
 def _weighted_month_rate(positions: list[dict]) -> float | None:
-    """Rentabilidade do mês da carteira, ponderada pelo valor de mercado das
-    posições que trazem `last_month_rate`. None se nenhuma corretora mandou a
-    taxa (campo opcional no Pluggy)."""
-    num = den = 0.0
+    """Rentabilidade do mês da carteira, ponderada pelo valor de mercado.
+
+    Só devolve um número quando TODAS as posições com valor de mercado trazem
+    `last_month_rate` (campo opcional no Pluggy). Com cobertura parcial devolve
+    None: reportar a taxa de um subconjunto como se fosse a da carteira inteira
+    enganaria (ex.: holding de 90% sem taxa + 10% a +10% viraria "carteira +10%").
+    """
+    num = den = covered = 0.0
     for p in positions:
-        rate = p.get("last_month_rate")
         mv = float(p.get("market_value") or 0)
-        if rate is None or mv <= 0:
-            continue
-        try:
-            num += float(rate) * mv
-        except (TypeError, ValueError):
+        if mv <= 0:
             continue
         den += mv
-    return (num / den) if den > 0 else None
+        rate = p.get("last_month_rate")
+        if rate is None:
+            continue
+        try:
+            r = float(rate)
+        except (TypeError, ValueError):
+            continue
+        num += r * mv
+        covered += mv
+    # cobertura precisa ser total (tolerância a ruído de float) senão não reporta.
+    if den <= 0 or covered < den - 1e-6:
+        return None
+    return num / covered
 
 
 def faria_limer_insights(positions: list[dict], summary: dict, ym: str) -> list[dict]:

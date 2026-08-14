@@ -231,3 +231,43 @@ def test_rv_insights_concentracao_agrega_mesmo_ticker_em_conexoes_diferentes():
     assert "60%" in conc["payload"]["titulo"]             # 6000 / 10000, agregado
     retrato = next(i for i in ins if i["payload"]["tipo"] == "rv_retrato")
     assert "2 ativos" in retrato["payload"]["mensagem"]   # PETR4 agrupado + ITUB4
+
+
+def test_rv_insights_taxa_do_mes_exige_cobertura_total():
+    # Cobertura parcial: só o ITUB4 (peso pequeno) tem last_month_rate. Não pode
+    # apresentar a taxa do subconjunto como se fosse a variação da carteira toda.
+    from core.services.piggy_agents import faria_limer_insights
+    pos = [
+        {"ticker": "PETR4", "market_value": 9000.0, "invested": 8000.0},               # sem taxa
+        {"ticker": "ITUB4", "market_value": 1000.0, "invested": 900.0, "last_month_rate": 10.0},
+    ]
+    msg = faria_limer_insights(pos, _rv_summary(pos), "2026-08")[0]["payload"]["mensagem"]
+    assert "No mês" not in msg          # cobertura incompleta → omite a variação do mês
+
+
+def test_list_rv_positions_amount_zero_conta_como_custo_desconhecido(monkeypatch):
+    # amount:0 vindo do conector não é custo real — não pode virar "lucro" = valor
+    # de mercado inteiro. Fica cost_known=False e P&L 0 (custo cai pro market_value).
+    import db.rv as rv
+
+    class _Cur:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, *a, **k): pass
+        def fetchall(self):
+            return [{"of_investment_id": 1, "name": "Petrobras", "type": "EQUITY",
+                     "subtype": "STOCK", "balance": 1000.0, "currency": "BRL",
+                     "raw": {"amount": 0, "code": "PETR4"}}]
+
+    class _Conn:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def cursor(self): return _Cur()
+
+    monkeypatch.setattr(rv, "ensure_user", lambda uid: None)
+    monkeypatch.setattr(rv, "get_conn", lambda: _Conn())
+    pos = rv.list_rv_positions(1)
+    assert len(pos) == 1
+    assert pos[0]["cost_known"] is False       # amount 0 → custo desconhecido
+    assert pos[0]["invested"] == 1000.0        # fallback pro valor de mercado
+    assert pos[0]["pnl"] == 0.0                # sem lucro fantasma

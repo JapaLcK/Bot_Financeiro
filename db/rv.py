@@ -87,8 +87,10 @@ def list_rv_positions(user_id: int) -> list[dict]:
         # `invested_known` é None quando o conector não mandou um custo utilizável;
         # nesse caso caímos pro valor de mercado (P&L 0) mas marcamos cost_known=False
         # pra quem consome não confundir "R$ 0,00 de resultado" com "custo desconhecido".
+        # amount<=0 (ou 0 do conector) também é custo inútil: P&L viraria o valor de
+        # mercado inteiro como "lucro" — então segue como desconhecido.
         invested_known = _f(raw.get("amount"), None)
-        cost_known = invested_known is not None
+        cost_known = invested_known is not None and invested_known > 0
         invested = invested_known if cost_known else market_value
         quantity = _f(raw.get("quantity")) or None
 
