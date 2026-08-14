@@ -5647,16 +5647,16 @@ function isProUser() {
 }
 
 const UPGRADE_MESSAGES = {
-  investments: "Acompanhe sua carteira de investimentos com cálculo automático de rendimento, IR e IOF. Exclusivo do PigBank+.",
-  export: "Exportar seus lançamentos (PDF, planilha) por email é uma feature do PigBank+.",
-  pockets_unlimited: "No Free você cria 1 caixinha. Com PigBank+ é ilimitado — separe sua reserva, viagens, presentes…",
-  cards_unlimited: "No Free você cadastra 1 cartão. Com PigBank+ é ilimitado — controle todos os seus cartões em um lugar.",
-  ofx_import: "Importar extrato bancário e fatura de cartão por OFX é exclusivo do PigBank+.",
-  history_unlimited: "Histórico além de 30 dias é exclusivo do PigBank+.",
-  changelog: "As notícias e resumos do mercado feitos pela Piggy são exclusivos do PigBank+. Assine pra desbloquear.",
-  recurring_expenses: "A agenda de boletos e os gastos fixos são exclusivos do PigBank+. Cadastre suas contas a pagar e nunca mais perca um vencimento.",
+  investments: "Acompanhe sua carteira de investimentos com cálculo automático de rendimento, IR e IOF. Disponível nos planos pagos.",
+  export: "Exportar seus lançamentos (PDF, planilha) por email faz parte dos planos pagos.",
+  pockets_unlimited: "No Grátis você cria 1 caixinha. Com um plano pago fica ilimitado — separe sua reserva, viagens, presentes…",
+  cards_unlimited: "No Grátis você cadastra 1 cartão. Com um plano pago fica ilimitado — controle todos os seus cartões em um lugar.",
+  ofx_import: "Importar extrato bancário e fatura de cartão por OFX faz parte dos planos pagos.",
+  history_unlimited: "Histórico além de 30 dias faz parte dos planos pagos.",
+  changelog: "As notícias e resumos do mercado feitos pela Piggy fazem parte dos planos pagos. Assine pra desbloquear.",
+  recurring_expenses: "A agenda de boletos e os gastos fixos fazem parte dos planos pagos. Cadastre suas contas a pagar e nunca mais perca um vencimento.",
   agents: "Seu plano atual não ativa mais agentes. Fazendo upgrade, a equipe de porquinhos trabalha pra você — Xerife, Repórter, Carteiro e os próximos que chegarem.",
-  generic: "Essa feature é exclusiva pra quem assina o PigBank+."
+  generic: "Essa feature faz parte dos planos pagos do PigBank. Escolha o que faz mais sentido pra você."
 };
 
 // Banner de trial (B1): oferta proativa dos 30d de Plus pro Grátis. Só aparece
