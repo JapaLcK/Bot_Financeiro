@@ -5740,6 +5740,10 @@ function applyProGates() {
     if (featureAllowed(el.dataset.proFeature)) {
       el.classList.remove("pro-locked");
       el.removeAttribute("aria-disabled");
+      // Remove o tooltip de upgrade que o ramo bloqueado seta: como o bootstrap
+      // trava tudo primeiro (USER_GATES vazio), sem isto o title "clica pra ver
+      // os planos" ficava preso em controle liberado (Export/Investimentos).
+      el.removeAttribute("title");
       const b = el.querySelector(":scope > .pro-badge");
       if (b) b.remove();
     } else {
