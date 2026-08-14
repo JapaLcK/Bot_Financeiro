@@ -6955,6 +6955,9 @@ const LAUNCH_TYPE_LABELS = {
 // Guarda os lançamentos renderizados pra o clique na linha abrir o detalhe.
 let _renderedLaunches = [];
 
+// Guarda o detalhamento do "Sobrou este mês" pro modal explicativo (clique no card).
+let _sobrouDetail = null;
+
 function renderLaunches() {
   if (!lastData) return;
 
@@ -7076,6 +7079,83 @@ function openLaunchDetail(idx) {
   _launchDetailCurrent = l;
   _launchDetailSource = "overview";
   _renderLaunchDetail(l);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   "SOBROU ESTE MÊS" — detalhamento (clique no card da Visão Geral)
+   Mostra a conta (receitas − gastos − aportes = sobrou) e explica por que
+   isso ≠ saldo: o saldo é acumulado (arrasta meses, ajustes e movimentações)
+   e pode estar negativo mesmo num mês que sobrou.
+═══════════════════════════════════════════════════════════════════════ */
+function _ensureSobrouDetailModal() {
+  if (document.getElementById("sobrou-detail-overlay")) return;
+  const html = `
+    <div class="overlay" id="sobrou-detail-overlay">
+      <div class="modal launch-detail sobrou-detail">
+        <h3 id="sd-title">Sobrou este mês</h3>
+        <div class="msub" id="sd-sub"></div>
+        <div class="ld-meta" id="sd-rows"></div>
+        <div class="sd-note" id="sd-note"></div>
+        <div class="modal-acts">
+          <button type="button" class="btn-save" id="sd-close">Entendi</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML("beforeend", html);
+  const ov = document.getElementById("sobrou-detail-overlay");
+  ov.addEventListener("click", e => { if (e.target === ov) closeSobrouDetail(); });
+  document.getElementById("sd-close").addEventListener("click", closeSobrouDetail);
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && ov.classList.contains("open")) closeSobrouDetail();
+  });
+}
+
+function closeSobrouDetail() {
+  const ov = document.getElementById("sobrou-detail-overlay");
+  if (ov) ov.classList.remove("open");
+}
+
+function openSobrouDetail() {
+  const s = _sobrouDetail;
+  if (!s) return;
+  _ensureSobrouDetailModal();
+  const deficit = s.sav < 0;
+  const monthLbl = (PT_MONTHS[(s.month || 1) - 1] || "") +
+    (s.year ? "/" + String(s.year).slice(-2) : "");
+
+  document.getElementById("sd-title").textContent = deficit ? "Déficit do mês" : "Sobrou este mês";
+  document.getElementById("sd-sub").textContent =
+    "É o fluxo de " + monthLbl + ": o que entrou menos o que saiu no mês. Não é o seu saldo.";
+
+  const row = (k, v, cls) =>
+    `<div class="ld-row"><span class="ld-k">${escapeHtmlSafe(k)}</span>` +
+    `<span class="ld-v ${cls || ""}">${v}</span></div>`;
+
+  document.getElementById("sd-rows").innerHTML =
+    row("Receitas do mês", "+ " + fmt(s.inc), "sd-plus") +
+    row("Gastos do mês", "− " + fmt(s.exp), "sd-minus") +
+    row("Aportes (investimentos + caixinhas)", "− " + fmt(s.apt), "sd-minus") +
+    `<div class="ld-row sd-total"><span class="ld-k">${deficit ? "Déficit do mês" : "Sobrou este mês"}</span>` +
+    `<span class="ld-v ${deficit ? "neg" : "pos"}">${fmt(s.sav)}</span></div>`;
+
+  // Explica a divergência que confunde: saldo (acumulado) vs sobrou (só o mês).
+  const saldoNeg = s.saldoAtual < 0;
+  let note;
+  if (saldoNeg) {
+    note = "Seu <b>saldo</b> está negativo (" + fmt(s.saldoAtual) + "), mas ainda assim " +
+      (deficit ? "o mês fechou como está acima" : "sobrou dinheiro <b>neste mês</b>") + ". " +
+      "Não é contradição: o saldo é acumulado — arrasta meses anteriores, ajustes e movimentações entre contas —, " +
+      "enquanto este valor olha só receitas, gastos e aportes de " + monthLbl + ".";
+  } else {
+    note = "O <b>saldo</b> é acumulado (arrasta meses anteriores, ajustes e movimentações entre contas). " +
+      "Este valor considera só receitas, gastos e aportes de " + monthLbl + " — por isso os dois podem divergir.";
+  }
+  if (s.apt > 0) {
+    note += " Aportes não são gasto: viram patrimônio seu (investimentos e caixinhas), mas saem do que “sobra livre” no mês.";
+  }
+  document.getElementById("sd-note").innerHTML = note;
+
+  document.getElementById("sobrou-detail-overlay").classList.add("open");
 }
 
 function openHistoryDetail(idx) {
@@ -9098,6 +9178,10 @@ function render(d) {
   const saldoAtual = carteira + ofBank;
   const pat = saldoAtual + ni + np;
 
+  // Detalhamento do "Sobrou este mês" pro modal explicativo (clique no card).
+  // Guarda exatamente o que está na tela, inclusive em mês histórico.
+  _sobrouDetail = { inc, exp, apt, sav, rate, saldoAtual, month: rm, year: ry };
+
   const nPk = (d.pockets||[]).length;
   const nCc = (d.credit_cards||[]).length;
 
@@ -9195,9 +9279,9 @@ function render(d) {
              <div class="ov-delta" style="opacity:.8">Patrimônio total <b style="color:var(--text-2)"><span data-num="pat" data-val="${pat}">${fmt(pat)}</span></b></div>`
           : `<div class="ov-delta">Patrimônio total <b style="color:var(--text-2)"><span data-num="pat" data-val="${pat}">${fmt(pat)}</span></b></div>`}
       </div>
-      <div class="ov-stat" style="animation-delay:60ms">
+      <div class="ov-stat ov-stat-clickable" style="animation-delay:60ms" role="button" tabindex="0" aria-label="Ver como este valor foi calculado" onclick="openSobrouDetail()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openSobrouDetail();}">
         <div class="ov-ico neon">${svgTrend}</div>
-        <div class="ov-lbl">${sav>=0?'Sobrou este mês':'Déficit do mês'}</div>
+        <div class="ov-lbl">${sav>=0?'Sobrou este mês':'Déficit do mês'} <i class="ph ph-info ov-lbl-info" aria-hidden="true"></i></div>
         <div class="ov-val ${sav>=0?'pos':'neg'}"><span data-num="sav" data-val="${sav}">${fmt(sav)}</span></div>
         <div class="ov-delta ${savDeltaCls}">${savDeltaTxt}</div>
       </div>
