@@ -544,3 +544,110 @@ def test_faria_ignora_posicoes_fora_do_brl(monkeypatch):
     assert "R$ 8.000,00" in retrato["mensagem"]          # só o BRL
     assert "1 ativo" in retrato["mensagem"] and "2 ativos" not in retrato["mensagem"]
     assert "rv_concentracao" not in tipos                # 1 ativo só → sem alerta
+
+
+# ── Integração real com o banco: o SQL do pipeline de eventos ────────────────
+# Estes exercitam as queries DE VERDADE. Os testes acima mockam db.*, então um
+# erro de sintaxe no SQL passava batido (aconteceu: uma vírgula faltando no
+# ON CONFLICT derrubava todo o Faria silenciosamente, porque o detector é
+# fail-soft e só logava a exceção).
+
+def _mk_agent(user_id: int, kind: str = "faria_limer") -> int:
+    import db
+    ag = db.activate_agent(user_id, kind)
+    assert ag, "não criou o agente"
+    return ag["id"]
+
+
+def test_record_or_refresh_sql_roundtrip(user_id):
+    """Insere → re-grava igual → muda payload → congela após e-mail."""
+    import db
+    from db import get_conn
+    agent_id = _mk_agent(user_id)
+    key = "rv_retrato:2026-08"
+
+    def _row():
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select payload, fired_at, suppressed_at, seen_at, emailed_at"
+                    " from agent_events where agent_id=%s and dedupe_key=%s",
+                    (agent_id, key),
+                )
+                return cur.fetchone()
+
+    # 1) primeira gravação insere
+    assert db.record_or_refresh_agent_event(
+        agent_id, user_id, "faria_limer", key, {"v": 1}, valor_impacto=0.0) is True
+    assert _row()["payload"] == {"v": 1}
+    fired1 = _row()["fired_at"]
+
+    # 2) re-gravação IDÊNTICA não mexe (não reseta a carência de estabilidade)
+    assert db.record_or_refresh_agent_event(
+        agent_id, user_id, "faria_limer", key, {"v": 1}, valor_impacto=0.0) is False
+    assert _row()["fired_at"] == fired1
+
+    # 3) suprimido + já visto: payload novo ainda corrige, limpa suppressed_at
+    #    e renova fired_at (seen_at não congela — só o e-mail congela)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update agent_events set suppressed_at=now(), seen_at=now(),"
+                " fired_at=now() - interval '3 hours' where agent_id=%s", (agent_id,))
+        conn.commit()
+    assert db.record_or_refresh_agent_event(
+        agent_id, user_id, "faria_limer", key, {"v": 2}, valor_impacto=0.0) is True
+    r = _row()
+    assert r["payload"] == {"v": 2}
+    assert r["suppressed_at"] is None      # supressão vale pro snapshot, não pro mês
+    assert r["seen_at"] is not None        # visto no feed não impede a correção
+    assert r["fired_at"] > fired1          # idade reiniciou (payload mudou)
+
+    # 4) depois de emailado, congela de vez
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("update agent_events set emailed_at=now() where agent_id=%s", (agent_id,))
+        conn.commit()
+    assert db.record_or_refresh_agent_event(
+        agent_id, user_id, "faria_limer", key, {"v": 3}, valor_impacto=0.0) is False
+    assert _row()["payload"] == {"v": 2}
+
+
+def test_claim_unclaim_suppress_delete_sql(user_id):
+    """Claim condicional, unclaim, supressão e limpeza — contra o banco real."""
+    import db
+    from db import get_conn
+    agent_id = _mk_agent(user_id, "barao")
+    key = "parado:2026-08"
+    db.record_or_refresh_agent_event(agent_id, user_id, "barao", key, {"v": 1}, valor_impacto=1.0)
+
+    ev = db.list_unemailed_events(agent_id)
+    assert len(ev) == 1
+
+    # claim com fired_at DESATUALIZADO não reivindica (fecha o TOCTOU)
+    from datetime import timedelta
+    stale = [{"id": ev[0]["id"], "fired_at": ev[0]["fired_at"] - timedelta(hours=1)}]
+    assert db.claim_agent_events_for_email(stale) == []
+
+    # claim com fired_at correto reivindica
+    claimed = db.claim_agent_events_for_email(ev)
+    assert claimed == [ev[0]["id"]]
+    assert db.list_unemailed_events(agent_id) == []       # saiu da fila
+
+    # unclaim devolve pra fila (envio falhou → nada foi enviado)
+    assert db.unclaim_agent_events(claimed) == 1
+    assert len(db.list_unemailed_events(agent_id)) == 1
+
+    # supressão tira da fila SEM congelar: o refresh ainda corrige
+    assert db.suppress_agent_events(claimed) == 1
+    assert db.list_unemailed_events(agent_id) == []
+    assert db.record_or_refresh_agent_event(
+        agent_id, user_id, "barao", key, {"v": 2}, valor_impacto=1.0) is True
+    assert len(db.list_unemailed_events(agent_id)) == 1    # upsert limpou a supressão
+
+    # limpeza de condição que deixou de valer
+    assert db.delete_pending_agent_event(agent_id, key) is True
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select count(*) as n from agent_events where agent_id=%s", (agent_id,))
+            assert cur.fetchone()["n"] == 0

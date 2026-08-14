@@ -211,7 +211,7 @@ def record_or_refresh_agent_event(
                 on conflict (agent_id, dedupe_key) do update
                   set payload = excluded.payload,
                       valor_impacto = excluded.valor_impacto,
-                      fired_at = now()
+                      fired_at = now(),
                       suppressed_at = null
                   where agent_events.emailed_at is null
                     and (agent_events.payload is distinct from excluded.payload
