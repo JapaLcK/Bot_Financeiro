@@ -9587,6 +9587,14 @@ function _showAccessError(title, msg) {
 (async () => {
   const view = params.get("view");
 
+  // Fail-closed ANTES de qualquer await: trava os controles pagos logo no
+  // primeiro tick do bootstrap, antes de disparar/esperar /auth/validate e
+  // /auth/me. Se qualquer um travar/pendurar, os controles que dependem do
+  // interceptor de clique .pro-locked (export, gastos fixos, Novidades) não
+  // ficam no estado destravado do HTML a visita inteira. USER_GATES começa {}
+  // → tudo bloqueado até o /auth/dashboard-profile confirmar. Idempotente.
+  applyProGates();
+
   // /auth/validate e /auth/me são independentes (ambos por cookie — o /me não
   // precisa do USER_ID). Disparamos os dois em paralelo pra cortar uma ida ao
   // servidor do caminho crítico de abertura. O .catch no /me evita rejeição
