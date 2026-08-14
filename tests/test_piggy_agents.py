@@ -833,3 +833,76 @@ def test_email_do_barao_segura_evento_recem_mudado(monkeypatch):
     assert sent == [] and claimed == []                 # segura: pode ser parcial
     sent, claimed = _arm(now - timedelta(hours=2))      # estável
     assert len(sent) == 1 and claimed == [7]
+
+
+def _arm_agg_email(monkeypatch, *, kind, fired_at, sync_recente, now):
+    """Arma run_agent_emails_once pra um agente whole-portfolio."""
+    import db
+    import core.services.piggy_agents as pa
+    import core.services.email_service as es
+    import core.services.plan_service as ps
+    sent, claimed = [], []
+    monkeypatch.setattr(db, "list_agents_pending_email", lambda: [
+        {"agent_id": 9, "user_id": 42, "kind": kind, "config": {}, "last_emailed_at": None}])
+    monkeypatch.setattr(db, "list_unemailed_events", lambda aid: [
+        {"id": 7, "payload": {"titulo": "T", "mensagem": "M"}, "fired_at": fired_at}])
+    monkeypatch.setattr(db, "user_synced_within", lambda uid, mins: sync_recente)
+    monkeypatch.setattr(db, "claim_agent_events_for_email",
+                        lambda evs: claimed.extend(e["id"] for e in evs) or [e["id"] for e in evs])
+    monkeypatch.setattr(db, "suppress_agent_events", lambda ids: len(ids))
+    monkeypatch.setattr(db, "unclaim_agent_events", lambda ids: len(ids))
+    monkeypatch.setattr(db, "touch_agent_emailed", lambda aid: None)
+    monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": False})
+    monkeypatch.setattr(db, "get_user_email", lambda uid: "u@e.com")
+    monkeypatch.setattr(ps, "agents_ui_enabled", lambda *a, **k: True)
+    monkeypatch.setattr(ps, "agent_kind_allowed", lambda *a, **k: True)
+    monkeypatch.setattr(es, "send_agent_report_email", lambda *a, **k: sent.append(a) or True)
+    pa.run_agent_emails_once(now=now)
+    return sent, claimed
+
+
+def test_agregado_nao_emaila_durante_sync_em_curso(monkeypatch):
+    """P1 do Codex (3ª rodada, PR #51): um evento JÁ maduro cujo payload não muda
+    no meio de um sync multi-item continuava 'estável', virava e-mail no mesmo
+    tick, e o emailed_at recusava a correção do fim do sync — congelando o mês.
+    Um sync recente do usuário agora segura o e-mail dos agregados."""
+    from datetime import datetime, timedelta, timezone
+    now = datetime(2026, 8, 14, 12, 0, tzinfo=timezone.utc)
+    velho = now - timedelta(hours=6)          # bem além dos 45min de carência
+
+    for kind in ("barao", "faria_limer"):
+        sent, claimed = _arm_agg_email(monkeypatch, kind=kind, fired_at=velho,
+                                       sync_recente=True, now=now)
+        assert sent == [] and claimed == [], f"{kind} emailou com sync em curso"
+
+        sent, claimed = _arm_agg_email(monkeypatch, kind=kind, fired_at=velho,
+                                       sync_recente=False, now=now)
+        assert len(sent) == 1 and claimed == [7], f"{kind} não emailou com sync quieto"
+
+
+def test_sync_quiet_nao_afeta_agentes_de_delta(monkeypatch):
+    """A trava é só dos agregados: o Repórter (sem carência) sai na hora mesmo
+    com sync recente — senão um usuário que sinca sempre nunca receberia e-mail."""
+    from datetime import datetime, timedelta, timezone
+    now = datetime(2026, 8, 14, 12, 0, tzinfo=timezone.utc)
+    sent, claimed = _arm_agg_email(monkeypatch, kind="reporter",
+                                   fired_at=now - timedelta(minutes=1),
+                                   sync_recente=True, now=now)
+    assert len(sent) == 1 and claimed == [7]
+
+
+def test_falha_do_sinal_de_sync_nao_bloqueia_email(monkeypatch):
+    """O sinal é otimização: se a query explodir, o e-mail segue pela carência."""
+    from datetime import datetime, timedelta, timezone
+    import db
+    now = datetime(2026, 8, 14, 12, 0, tzinfo=timezone.utc)
+
+    def _boom(uid, mins):
+        raise RuntimeError("db fora do ar")
+
+    monkeypatch.setattr(db, "user_synced_within", _boom)
+    sent, claimed = _arm_agg_email(monkeypatch, kind="barao",
+                                   fired_at=now - timedelta(hours=6),
+                                   sync_recente=False, now=now)
+    monkeypatch.setattr(db, "user_synced_within", _boom)   # _arm sobrescreve
+    assert len(sent) == 1

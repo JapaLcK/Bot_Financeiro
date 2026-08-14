@@ -991,6 +991,13 @@ _DEFAULT_EMAIL_INTERVAL_H = 24
 # depois dos detectores) e o emailed_at travaria a correção pelo resto do mês.
 _AGENT_EMAIL_MIN_AGE_MIN = {"faria_limer": 45, "barao": 45}
 
+# Janela de silêncio pós-sync: com um item carimbado nos últimos N minutos, o
+# e-mail dos agregados espera — os itens seguintes do mesmo sync ainda podem
+# mudar a carteira. Curta o bastante pra não represar o e-mail de quem sinca de
+# hora em hora (sobram ~50min livres por hora), longa o bastante pra cobrir um
+# sync multi-item, que leva segundos.
+_SYNC_QUIET_MIN = 10
+
 _AGENT_EMAIL_LABEL = {
     "xerife": "🤠 Xerife", "reporter": "🎤 Repórter", "carteiro": "📬 Carteiro",
     "detetive": "🔍 Detetive", "cofre": "🎯 Banqueiro", "barao": "🎩 Barão",
@@ -1039,14 +1046,26 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     sent = 0
 
-    def _ripe(kind: str, events: list[dict]) -> list[dict]:
+    def _ripe(kind: str, events: list[dict], user_id: int) -> list[dict]:
         """Só eventos que já venceram a carência do kind (podem virar/contar como
         e-mail). Antes disso o evento fica pendente — janela em que o upsert
         auto-corrigível ainda pode consertar um snapshot parcial (marcar
-        emailed_at cedo, até na supressão, congelaria o valor errado)."""
+        emailed_at cedo, até na supressão, congelaria o valor errado).
+
+        Pros agregados vale uma segunda trava: um sync recente do usuário segura
+        o e-mail mesmo com o evento já maduro. Sem ela, um evento antigo cujo
+        payload NÃO muda no meio de um sync multi-item continua "estável", vira
+        e-mail no mesmo tick, e o emailed_at recusa a correção que só chega
+        quando o último item termina — congelando o valor do mês."""
         min_age = _AGENT_EMAIL_MIN_AGE_MIN.get(kind, 0)
         if not min_age:
             return events
+        try:
+            from db import user_synced_within
+            if user_synced_within(user_id, _SYNC_QUIET_MIN):
+                return []
+        except Exception as exc:      # sinal é otimização; nunca derruba o e-mail
+            print(f"[agents] sync-quiet check {kind} user={user_id}: {exc}", file=sys.stderr)
         cutoff = now - timedelta(minutes=min_age)
         return [e for e in events if e.get("fired_at") is not None and e["fired_at"] <= cutoff]
 
@@ -1071,7 +1090,7 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
             last = a.get("last_emailed_at")
             if last is not None and (now - last) < timedelta(hours=interval_h):
                 continue  # teto de cadência: e-mail desse agente ainda tá no intervalo
-            events = _ripe(kind, list_unemailed_events(agent_id))
+            events = _ripe(kind, list_unemailed_events(agent_id), user_id)
             if not events:
                 continue
             auth = get_auth_user(user_id)

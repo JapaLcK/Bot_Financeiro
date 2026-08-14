@@ -222,6 +222,7 @@ from .open_finance import (
     get_consolidated_balance,
     disconnect_open_finance_connection,
     save_pluggy_open_finance_item,
+    user_synced_within,
     update_pluggy_open_finance_item_status,
 )
 
@@ -474,7 +475,7 @@ __all__ = [
     "detect_bill_increase", "detect_open_finance_bill_increase",
     "import_open_finance_launches", "import_open_finance_credit",
     "sync_imported_open_finance_updates", "get_consolidated_balance",
-    "disconnect_open_finance_connection", "save_pluggy_open_finance_item",
+    "disconnect_open_finance_connection", "save_pluggy_open_finance_item", "user_synced_within",
     "update_pluggy_open_finance_item_status",
     "list_pluggy_connections_for_trial_sweep", "pause_open_finance_connection",
     # reports
