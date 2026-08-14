@@ -5653,7 +5653,7 @@ const UPGRADE_MESSAGES = {
   cards_unlimited: "No Grátis você cadastra 1 cartão. Com um plano pago fica ilimitado — controle todos os seus cartões em um lugar.",
   ofx_import: "Importar extrato bancário e fatura de cartão por OFX faz parte dos planos pagos.",
   history_unlimited: "Histórico além de 30 dias faz parte dos planos pagos.",
-  changelog: "As notícias e resumos do mercado feitos pela Piggy fazem parte dos planos pagos. Assine pra desbloquear.",
+  changelog: "As notícias e resumos do mercado feitos pela Piggy fazem parte dos planos Plus e Pro. Assine pra desbloquear.",
   recurring_expenses: "A agenda de boletos e os gastos fixos fazem parte dos planos pagos. Cadastre suas contas a pagar e nunca mais perca um vencimento.",
   agents: "Seu plano atual não ativa mais agentes. Fazendo upgrade, a equipe de porquinhos trabalha pra você — Xerife, Repórter, Carteiro e os próximos que chegarem.",
   generic: "Essa feature faz parte dos planos pagos do PigBank. Escolha o que faz mais sentido pra você."
