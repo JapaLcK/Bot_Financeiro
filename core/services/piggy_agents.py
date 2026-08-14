@@ -744,14 +744,19 @@ def _fmt_pct_signed(v: float, places: int = 1) -> str:
 
 
 def _weighted_month_rate(positions: list[dict]) -> float | None:
-    """Rentabilidade do mês da carteira, ponderada pelo valor de mercado.
+    """Rentabilidade do mês da carteira, ponderada pelo valor de INÍCIO do período.
 
-    Só devolve um número quando TODAS as posições com valor de mercado trazem
-    `last_month_rate` (campo opcional no Pluggy). Com cobertura parcial devolve
-    None: reportar a taxa de um subconjunto como se fosse a da carteira inteira
-    enganaria (ex.: holding de 90% sem taxa + 10% a +10% viraria "carteira +10%").
+    `last_month_rate` vem em % (ex.: 1.2 = +1,2%). O peso correto de cada posição é
+    o valor no começo do mês (mv_atual / (1 + taxa/100)), não o valor atual — senão
+    os ganhadores pesam demais e os perdedores de menos. Ex.: duas posições de R$100
+    no início, +100% e 0%, terminam em R$200 e R$100; ponderar pelo valor atual daria
+    ~+66,7%, mas a carteira rendeu 50% (o que esta fórmula devolve).
+
+    Só devolve um número quando TODAS as posições com valor de mercado trazem a taxa
+    (campo opcional no Pluggy). Com cobertura parcial devolve None: reportar a taxa
+    de um subconjunto como se fosse a da carteira inteira enganaria.
     """
-    num = den = covered = 0.0
+    num = begin_sum = den = covered = 0.0
     for p in positions:
         mv = float(p.get("market_value") or 0)
         if mv <= 0:
@@ -764,12 +769,17 @@ def _weighted_month_rate(positions: list[dict]) -> float | None:
             r = float(rate)
         except (TypeError, ValueError):
             continue
-        num += r * mv
+        base = 1.0 + r / 100.0
+        if base <= 0:          # perda de -100% ou mais → valor inicial indefinido
+            continue
+        begin = mv / base       # valor no início do mês = peso correto
+        num += r * begin
+        begin_sum += begin
         covered += mv
     # cobertura precisa ser total (tolerância a ruído de float) senão não reporta.
-    if den <= 0 or covered < den - 1e-6:
+    if den <= 0 or covered < den - 1e-6 or begin_sum <= 0:
         return None
-    return num / covered
+    return num / begin_sum
 
 
 def faria_limer_insights(positions: list[dict], summary: dict, ym: str) -> list[dict]:
@@ -890,6 +900,11 @@ def _faria_limer_detect_for_user(agent: dict[str, Any], today: date) -> int:
 
 def run_faria_limer_once(today: date | None = None, user_id: int | None = None) -> dict:
     """Roda o Faria Limer pra todos os agentes faria_limer ativos (ou só um usuário)."""
+    # Honra o kill switch global aqui dentro (o runner): este é chamado direto do
+    # hook de sync_pluggy_user, fora do run_agents_for_user/run_agents_loop — sem
+    # isso o AGENTS_ENABLED=0 não seguraria o Faria no caminho de sync.
+    if not AGENTS_ENABLED:
+        return {"ok": True, "disabled": True, "agents": 0, "fired": 0}
     from db import list_users_with_active_agents
 
     today = today or date.today()

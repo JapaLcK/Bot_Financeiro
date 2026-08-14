@@ -316,3 +316,29 @@ def test_hook_por_item_nao_dispara_faria_limer(monkeypatch):
     assert "run_faria_limer_once" not in called   # não roda no hook por-item
     assert "faria_limer" not in out
     assert {"xerife", "detetive", "cofre", "barao"} <= set(out)  # delta agents rodaram
+
+
+def test_taxa_do_mes_pondera_pelo_valor_inicial():
+    # last_month_rate vem em %. Peso = valor no INÍCIO do mês (mv/(1+taxa/100)).
+    # Duas posições de R$100 no início, +100% e 0% → fim R$200 e R$100. Ponderar
+    # pelo valor atual daria ~+66,7%; pelo inicial dá +50% (rentabilidade real).
+    from core.services.piggy_agents import _weighted_month_rate
+    pos = [
+        {"market_value": 200.0, "last_month_rate": 100.0},
+        {"market_value": 100.0, "last_month_rate": 0.0},
+    ]
+    assert abs(_weighted_month_rate(pos) - 50.0) < 1e-6
+
+
+def test_run_faria_limer_once_respeita_kill_switch(monkeypatch):
+    # AGENTS_ENABLED=0 desliga o subsistema. Como o Faria é chamado direto do hook
+    # de sync (fora do run_agents_for_user), o guard tem que estar no runner.
+    import core.services.piggy_agents as pa
+    monkeypatch.setattr(pa, "AGENTS_ENABLED", False)
+    monkeypatch.setattr(
+        pa, "_faria_limer_detect_for_user",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("não deveria rodar")),
+    )
+    out = pa.run_faria_limer_once(user_id=42)
+    assert out.get("disabled") is True
+    assert out.get("fired") == 0
