@@ -183,10 +183,11 @@ def record_or_refresh_agent_event(
     payload/valor_impacto/fired_at com o snapshot novo em vez de ignorar.
 
     Serve pra eventos-retrato que devem refletir o estado coerente mais recente
-    (ex.: Faria Limer mensal), sem re-notificar: se o evento já foi visto no feed
-    ou já entrou num e-mail, não mexe — o usuário não pode ver o número mudar
-    depois. Assim uma 1ª gravação parcial (corrida com o sync multi-item) é
-    corrigida pela próxima execução coerente. Retorna True se inseriu ou atualizou.
+    (ex.: Faria Limer mensal). O ÚNICO congelamento é o e-mail (emailed_at): o
+    artefato enviado é imutável, então depois dele o evento não muda. O feed é
+    visão viva — corrige mesmo se o usuário já viu (seen_at NÃO trava o refresh;
+    mostrar o número certo vale mais do que manter o errado que ele viu primeiro).
+    Retorna True se inseriu ou atualizou.
 
     fired_at aqui significa "última MUDANÇA do snapshot": o update só dispara (e só
     renova fired_at) quando payload/valor_impacto realmente mudam. É o que faz a
@@ -207,8 +208,7 @@ def record_or_refresh_agent_event(
                   set payload = excluded.payload,
                       valor_impacto = excluded.valor_impacto,
                       fired_at = now()
-                  where agent_events.seen_at is null
-                    and agent_events.emailed_at is null
+                  where agent_events.emailed_at is null
                     and (agent_events.payload is distinct from excluded.payload
                          or agent_events.valor_impacto is distinct from excluded.valor_impacto)
                 """,
@@ -220,21 +220,50 @@ def record_or_refresh_agent_event(
     return changed
 
 
+def claim_agent_events_for_email(events: list[dict]) -> list[int]:
+    """Reivindica eventos pro e-mail ANTES do envio, atomicamente.
+
+    Marca emailed_at SÓ se o evento não mudou desde a leitura (mesmo fired_at e
+    ainda não emailado). Fecha a janela leitura→envio→marcação: se um refresh
+    trocou o payload no meio, o fired_at mudou, a linha não é reivindicada e fica
+    de fora do e-mail deste tick (sai no próximo, já estável). Só os ids
+    retornados podem entrar no e-mail — com o payload que foi lido junto.
+    Recebe os dicts lidos (precisa de id + fired_at)."""
+    claimed: list[int] = []
+    if not events:
+        return claimed
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for e in events:
+                cur.execute(
+                    """
+                    update agent_events set emailed_at = now()
+                    where id = %s and emailed_at is null and fired_at = %s
+                    """,
+                    (e["id"], e["fired_at"]),
+                )
+                if cur.rowcount > 0:
+                    claimed.append(e["id"])
+        conn.commit()
+    return claimed
+
+
 def delete_pending_agent_event(agent_id: int, dedupe_key: str) -> bool:
-    """Remove um evento que ainda está PENDENTE (não visto e não emailado).
+    """Remove um evento que ainda está PENDENTE (não emailado).
 
     Par do record_or_refresh_agent_event pra condições que DEIXARAM de valer:
     ex. um alerta de concentração gravado a partir de um snapshot parcial que a
-    execução coerente seguinte não reproduz (carteira equilibrada). Evento já
-    visto/emailado não é tocado — histórico não se apaga debaixo do usuário.
-    Retorna True se removeu."""
+    execução coerente seguinte não reproduz (carteira equilibrada). Mesmo se o
+    usuário já viu no feed, o alerta falso sai (seen_at não protege — sumir é o
+    comportamento honesto quando a condição não vale). Evento já emailado não é
+    tocado: o artefato enviado é imutável. Retorna True se removeu."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 delete from agent_events
                 where agent_id = %s and dedupe_key = %s
-                  and seen_at is null and emailed_at is null
+                  and emailed_at is null
                 """,
                 (agent_id, dedupe_key),
             )

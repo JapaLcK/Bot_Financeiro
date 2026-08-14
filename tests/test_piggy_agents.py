@@ -59,7 +59,9 @@ def _arm_reporter(monkeypatch, *, opted_out: bool):
         lambda agent_id: [{"id": 1, "payload": {"titulo": "A manchete de agosto",
                                                 "mensagem": "Sobrou R$ 400,00"}}],
     )
-    monkeypatch.setattr(db, "mark_events_emailed", lambda ids: None)
+    # claim devolve todos: simula "nenhum evento mudou entre leitura e envio"
+    monkeypatch.setattr(db, "claim_agent_events_for_email",
+                        lambda evs: [e["id"] for e in evs])
     monkeypatch.setattr(db, "touch_agent_emailed", lambda agent_id: None)
     monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": opted_out})
     monkeypatch.setattr(db, "get_user_email", lambda uid: "user@example.com")
@@ -411,7 +413,13 @@ def test_email_do_faria_respeita_carencia_de_autocorrecao(monkeypatch):
     now = datetime(2026, 8, 13, 12, 0, tzinfo=timezone.utc)
 
     def _arm(fired_at):
-        sent, marked = [], []
+        sent, claimed = [], []
+
+        def _claim(evs):
+            ids = [e["id"] for e in evs]
+            claimed.extend(ids)
+            return ids
+
         monkeypatch.setattr(db, "list_agents_pending_email", lambda: [
             {"agent_id": 9, "user_id": 42, "kind": "faria_limer",
              "config": {}, "last_emailed_at": None}])
@@ -419,7 +427,7 @@ def test_email_do_faria_respeita_carencia_de_autocorrecao(monkeypatch):
             {"id": 7, "payload": {"titulo": "Sua renda variável",
                                   "mensagem": "R$ 10.000,00 em 2 ativos"},
              "fired_at": fired_at}])
-        monkeypatch.setattr(db, "mark_events_emailed", lambda ids: marked.extend(ids))
+        monkeypatch.setattr(db, "claim_agent_events_for_email", _claim)
         monkeypatch.setattr(db, "touch_agent_emailed", lambda agent_id: None)
         monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": False})
         monkeypatch.setattr(db, "get_user_email", lambda uid: "user@example.com")
@@ -427,11 +435,42 @@ def test_email_do_faria_respeita_carencia_de_autocorrecao(monkeypatch):
         monkeypatch.setattr(ps, "agent_kind_allowed", lambda *a, **k: True)
         monkeypatch.setattr(es, "send_agent_report_email", lambda *a, **k: sent.append(a))
         pa.run_agent_emails_once(now=now)
-        return sent, marked
+        return sent, claimed
 
-    # fresco (5 min): dentro da carência → não envia nem marca (refresh ainda pode corrigir)
-    sent, marked = _arm(now - timedelta(minutes=5))
-    assert sent == [] and marked == []
-    # vencido (2h): envia e marca
-    sent, marked = _arm(now - timedelta(hours=2))
-    assert len(sent) == 1 and marked == [7]
+    # fresco (5 min): dentro da carência → não envia nem reivindica (refresh pode corrigir)
+    sent, claimed = _arm(now - timedelta(minutes=5))
+    assert sent == [] and claimed == []
+    # vencido (2h): reivindica e envia
+    sent, claimed = _arm(now - timedelta(hours=2))
+    assert len(sent) == 1 and claimed == [7]
+
+
+def test_email_pula_evento_que_mudou_entre_leitura_e_claim(monkeypatch):
+    # TOCTOU: se o claim condicional não reivindica nada (o evento foi refrescado
+    # entre a leitura e o claim — fired_at mudou), o tick NÃO envia e-mail com o
+    # payload velho em cache; o evento sai no próximo tick, já estável.
+    from datetime import datetime, timedelta, timezone
+    import db
+    import core.services.piggy_agents as pa
+    import core.services.email_service as es
+    import core.services.plan_service as ps
+
+    now = datetime(2026, 8, 13, 12, 0, tzinfo=timezone.utc)
+    sent, touched = [], []
+    monkeypatch.setattr(db, "list_agents_pending_email", lambda: [
+        {"agent_id": 9, "user_id": 42, "kind": "faria_limer",
+         "config": {}, "last_emailed_at": None}])
+    monkeypatch.setattr(db, "list_unemailed_events", lambda agent_id: [
+        {"id": 7, "payload": {"titulo": "T", "mensagem": "M"},
+         "fired_at": now - timedelta(hours=2)}])
+    monkeypatch.setattr(db, "claim_agent_events_for_email", lambda evs: [])  # ninguém
+    monkeypatch.setattr(db, "touch_agent_emailed", lambda agent_id: touched.append(agent_id))
+    monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": False})
+    monkeypatch.setattr(db, "get_user_email", lambda uid: "user@example.com")
+    monkeypatch.setattr(ps, "agents_ui_enabled", lambda *a, **k: True)
+    monkeypatch.setattr(ps, "agent_kind_allowed", lambda *a, **k: True)
+    monkeypatch.setattr(es, "send_agent_report_email", lambda *a, **k: sent.append(a))
+
+    out = pa.run_agent_emails_once(now=now)
+    assert sent == [] and touched == []
+    assert out["sent"] == 0

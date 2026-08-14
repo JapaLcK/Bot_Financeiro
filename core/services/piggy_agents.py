@@ -1002,8 +1002,9 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
     eventos dele num único e-mail (com sua arte/voz) e envia — respeitando o teto
     de cadência do kind e o opt-out. Mantém e-mails separados por agente sem spam.
     Roda no tick horário, depois dos detectores."""
-    from db import (list_agents_pending_email, list_unemailed_events, mark_events_emailed,
-                    touch_agent_emailed, get_user_email, get_auth_user)
+    from db import (list_agents_pending_email, list_unemailed_events,
+                    claim_agent_events_for_email, touch_agent_emailed,
+                    get_user_email, get_auth_user)
     from core.services.plan_service import agent_kind_allowed, agents_ui_enabled
 
     now = now or datetime.now(timezone.utc)
@@ -1029,9 +1030,12 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
             # continua mas o e-mail é suprimido (marca como enviado pra não acumular).
             cfg = a.get("config") or {}
             if not cfg.get("email_enabled", True):
+                # Supressão também passa pelo claim condicional: se um refresh
+                # trocou o payload entre a leitura e aqui, a linha fica pendente
+                # (marcar emailed_at nela congelaria o snapshot novo sem e-mail).
                 pend = _ripe(kind, list_unemailed_events(agent_id))
                 if pend:
-                    mark_events_emailed([e["id"] for e in pend])
+                    claim_agent_events_for_email(pend)
                 continue
             interval_h = _AGENT_EMAIL_INTERVAL_H.get(kind, _DEFAULT_EMAIL_INTERVAL_H)
             last = a.get("last_emailed_at")
@@ -1040,20 +1044,29 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
             events = _ripe(kind, list_unemailed_events(agent_id))
             if not events:
                 continue
-            ids = [e["id"] for e in events]
             auth = get_auth_user(user_id)
             if auth and auth.get("engagement_opt_out"):
-                mark_events_emailed(ids)  # opt-out: suprime o envio (feed já mostrou)
+                claim_agent_events_for_email(events)  # opt-out: suprime (claim condicional)
                 continue
             email = get_user_email(user_id)
             if not email:
+                continue
+            # Reivindica ANTES de enviar (fecha o TOCTOU leitura→envio→marcação):
+            # emailed_at só é setado se o evento não mudou desde a leitura (mesmo
+            # fired_at); linha refrescada no meio fica de fora e sai no próximo
+            # tick, já estável. O e-mail usa exatamente os payloads reivindicados.
+            # Trade-off deliberado: claim→envio é at-most-once (falha de envio
+            # após o claim perde o digest) — melhor que enviar e marcar a linha
+            # errada, que congela snapshot misto no feed.
+            claimed_ids = set(claim_agent_events_for_email(events))
+            events = [e for e in events if e["id"] in claimed_ids]
+            if not events:
                 continue
             from core.services.email_service import send_agent_report_email
             send_agent_report_email(
                 email, user_id, _agent_email_subject(kind, events),
                 _compose_agent_email(kind, events), kind=kind,
             )
-            mark_events_emailed(ids)
             touch_agent_emailed(agent_id)
             sent += 1
         except Exception as exc:
