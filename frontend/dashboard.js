@@ -41,6 +41,9 @@ let USER_ID = 0;
 let WS_URL  = "";
 let USER_EMAIL = "";
 let USER_PLAN = "";
+// Gates de feature resolvidos pelo backend (/auth/dashboard-profile). {} = tudo
+// bloqueado até o perfil chegar (default conservador). Ver applyProGates.
+let USER_GATES = {};
 
 /* ─── Loader de scripts sob demanda ──────────────────────────────────────
    Carrega uma lib de terceiros só quando ela é realmente necessária, em vez
@@ -103,9 +106,10 @@ function formatPlanLabel(plan) {
   return value.toLowerCase() === "free" ? "Plano Free" : `Plano ${value}`;
 }
 
-function applyUserMenuState(email, plan, displayName) {
+function applyUserMenuState(email, plan, displayName, gates) {
   USER_EMAIL = email || "";
   USER_PLAN = plan || "free";
+  if (gates && typeof gates === "object") USER_GATES = gates;
   document.getElementById("user-label").textContent = userMenuLabel(displayName, USER_EMAIL);
   document.getElementById("user-email").textContent = USER_EMAIL || "Minha conta";
   document.getElementById("user-plan").textContent = formatPlanLabel(USER_PLAN);
@@ -133,6 +137,9 @@ function _readMenuCache() {
   } catch { return null; }
 }
 function _writeMenuCache(userId, email, plan, displayName) {
+  // NÃO cacheamos feature_gates: entitlement é estado que expira (assinatura
+  // vence, freio v2 liga) e cache no localStorage viraria "liberado" preso.
+  // Só o chrome não-sensível (email/plano-label/nome) é paintado do cache.
   try {
     localStorage.setItem(_MENU_CACHE_KEY, JSON.stringify({ userId, email, plan, displayName }));
   } catch {}
@@ -143,7 +150,11 @@ function clearMenuCache() {
 
 async function loadUserMenuState() {
   // Paint otimista: aplica o último chrome conhecido ANTES do fetch resolver,
-  // mas só se o cache for do usuário já validado nesta sessão (USER_ID).
+  // mas só se o cache for do usuário já validado nesta sessão (USER_ID). Os
+  // gates NÃO vêm do cache (sem 4º arg) — ficam no default {} (tudo bloqueado)
+  // até o /auth/dashboard-profile fresco chegar. Fail-closed de propósito:
+  // melhor um flash de cadeado pra quem paga que liberar controle pra assinatura
+  // já expirada (ou pós-freio v2) enquanto o perfil real não confirma.
   const cached = _readMenuCache();
   if (cached && USER_ID && String(cached.userId) === String(USER_ID)) {
     applyUserMenuState(cached.email || "", cached.plan || "free", cached.displayName || "");
@@ -152,11 +163,17 @@ async function loadUserMenuState() {
     // vazar identidade. Será reescrito com o perfil correto abaixo.
     clearMenuCache();
   }
+  // Fail-closed universal: trava os controles pagos ANTES de qualquer fetch, em
+  // TODA path — inclusive sem cache / cache de outro user / storage limpo, onde
+  // nada acima chama applyProGates e o HTML inicial fica destravado. USER_GATES
+  // começa {} → tudo vira .pro-locked até o /auth/dashboard-profile confirmar.
+  // Idempotente com o applyUserMenuState do branch de cache acima.
+  applyProGates();
   try {
     const res = await fetch(`${API}/auth/dashboard-profile`, { credentials: "same-origin" });
     if (!res.ok) return;
     const data = await readResponsePayload(res);
-    applyUserMenuState(data.email || "", data.plan || "free", data.display_name || "");
+    applyUserMenuState(data.email || "", data.plan || "free", data.display_name || "", data.feature_gates || {});
     _writeMenuCache(USER_ID, data.email || "", data.plan || "free", data.display_name || "");
   } catch {}
 }
@@ -542,7 +559,7 @@ const DASH_VIEWS = [
 function setMainView(view) {
   // Free: bloqueia navegacao pra tela inteira de investimentos. Botao fica
   // visivel mas desabilitado; click abre modal de upgrade (item 17/18).
-  if (view === "investments" && !isProUser()) {
+  if (view === "investments" && !featureAllowed("investments")) {
     showUpgradeModal("investments");
     return;
   }
@@ -831,7 +848,7 @@ function openCardEditModal(card) {
   const isEdit = !!(card && card.id);
   // Pro gate: bloqueia novo cadastro pra Free que já atingiu o limite.
   // Edição NUNCA bloqueia.
-  if (!isEdit && !isProUser() && _currentCards.length >= CARDS_FREE_LIMIT) {
+  if (!isEdit && !featureAllowed("cards_unlimited") && _currentCards.length >= CARDS_FREE_LIMIT) {
     showUpgradeModal("cards_unlimited");
     return;
   }
@@ -5641,22 +5658,32 @@ function toggleTheme() {
   applyTheme(saved);
 })();
 
-// ── Pro gates (visivel + desabilitado pra Free) ──────────────────────────
+// ── Pro gates (visivel + desabilitado por feature) ───────────────────────
+// A fonte da verdade é o BACKEND: /auth/dashboard-profile devolve feature_gates
+// já resolvido (get_user_limits + is_pro cobrem assinatura expirada com webhook
+// perdido E o freio de emergência PLANS_V2_ENABLED). O front só consome — nada
+// de reconstruir tier do valor cru do plano, que divergiria nesses casos.
+// Default: tudo bloqueado até o perfil chegar (conservador — melhor travar de
+// leve por um instante que liberar indevido). USER_GATES é setado no topo.
+function featureAllowed(feature) {
+  return !!USER_GATES[feature];
+}
+// "Tem o plano pago principal?" (Plus+): o gate de Novidades é exatamente is_pro.
 function isProUser() {
-  return (USER_PLAN || "free").trim().toLowerCase() === "pro";
+  return featureAllowed("changelog");
 }
 
 const UPGRADE_MESSAGES = {
-  investments: "Acompanhe sua carteira de investimentos com cálculo automático de rendimento, IR e IOF. Exclusivo do PigBank+.",
-  export: "Exportar seus lançamentos (PDF, planilha) por email é uma feature do PigBank+.",
-  pockets_unlimited: "No Free você cria 1 caixinha. Com PigBank+ é ilimitado — separe sua reserva, viagens, presentes…",
-  cards_unlimited: "No Free você cadastra 1 cartão. Com PigBank+ é ilimitado — controle todos os seus cartões em um lugar.",
-  ofx_import: "Importar extrato bancário e fatura de cartão por OFX é exclusivo do PigBank+.",
-  history_unlimited: "Histórico além de 30 dias é exclusivo do PigBank+.",
-  changelog: "As notícias e resumos do mercado feitos pela Piggy são exclusivos do PigBank+. Assine pra desbloquear.",
-  recurring_expenses: "A agenda de boletos e os gastos fixos são exclusivos do PigBank+. Cadastre suas contas a pagar e nunca mais perca um vencimento.",
+  investments: "Acompanhe sua carteira de investimentos com cálculo automático de rendimento, IR e IOF. Disponível nos planos pagos.",
+  export: "Exportar seus lançamentos (PDF, planilha) por email faz parte dos planos pagos.",
+  pockets_unlimited: "No Grátis você cria 1 caixinha. Com um plano pago fica ilimitado — separe sua reserva, viagens, presentes…",
+  cards_unlimited: "No Grátis você cadastra 1 cartão. Com um plano pago fica ilimitado — controle todos os seus cartões em um lugar.",
+  ofx_import: "Importar extrato bancário e fatura de cartão por OFX faz parte dos planos pagos.",
+  history_unlimited: "Histórico além de 30 dias faz parte dos planos pagos.",
+  changelog: "As notícias e resumos do mercado feitos pela Piggy fazem parte dos planos Plus e Pro. Assine pra desbloquear.",
+  recurring_expenses: "A agenda de boletos e os gastos fixos fazem parte dos planos pagos. Cadastre suas contas a pagar e nunca mais perca um vencimento.",
   agents: "Seu plano atual não ativa mais agentes. Fazendo upgrade, a equipe de porquinhos trabalha pra você — Xerife, Repórter, Carteiro e os próximos que chegarem.",
-  generic: "Essa feature é exclusiva pra quem assina o PigBank+."
+  generic: "Essa feature faz parte dos planos pagos do PigBank. Escolha o que faz mais sentido pra você."
 };
 
 // Banner de trial (B1): oferta proativa dos 30d de Plus pro Grátis. Só aparece
@@ -5706,17 +5733,23 @@ function closeUpgradeModal() {
 // Aplica estado visual disabled em todos os elementos com data-pro-feature
 // quando o user e Free. Idempotente — pode ser chamada varias vezes.
 function applyProGates() {
-  const isPro = isProUser();
+  // Gate POR FEATURE: cada controle libera no seu tier mínimo (Essencial já
+  // solta investimentos/OFX/export/etc; Novidades só do Plus pra cima). Antes
+  // era um único booleano is_pro, que trancava tudo pra quem era Essencial.
   document.querySelectorAll("[data-pro-feature]").forEach(el => {
-    if (isPro) {
+    if (featureAllowed(el.dataset.proFeature)) {
       el.classList.remove("pro-locked");
       el.removeAttribute("aria-disabled");
+      // Remove o tooltip de upgrade que o ramo bloqueado seta: como o bootstrap
+      // trava tudo primeiro (USER_GATES vazio), sem isto o title "clica pra ver
+      // os planos" ficava preso em controle liberado (Export/Investimentos).
+      el.removeAttribute("title");
       const b = el.querySelector(":scope > .pro-badge");
       if (b) b.remove();
     } else {
       el.classList.add("pro-locked");
       el.setAttribute("aria-disabled", "true");
-      el.setAttribute("title", "Funcionalidade do PigBank+ — clica pra fazer upgrade");
+      el.setAttribute("title", "Funcionalidade de um plano pago — clica pra ver os planos");
       if (!el.querySelector(":scope > .pro-badge")) {
         const b = document.createElement("span");
         b.className = "pro-badge";
@@ -5725,10 +5758,11 @@ function applyProGates() {
       }
     }
   });
-  // Titulo do grafico de historico reflete a janela real: 6 meses (Pro) vs 30 dias (Free).
+  // Titulo do grafico de historico reflete a janela real: 6+ meses (Plus/Pro)
+  // vs 30 dias (Free/Essencial cai no rótulo curto).
   const histTitle = document.getElementById("history-card-title");
   if (histTitle) {
-    histTitle.textContent = isPro
+    histTitle.textContent = isProUser()
       ? "Receita vs Despesa — Últimos 6 Meses"
       : "Receita vs Despesa — Últimos 30 dias";
   }
@@ -5741,7 +5775,7 @@ function applyProGates() {
 document.addEventListener("click", (e) => {
   const locked = e.target.closest(".pro-locked[data-pro-feature]");
   if (!locked) return;
-  if (isProUser()) return;
+  if (featureAllowed(locked.dataset.proFeature)) return;
   e.preventDefault();
   e.stopPropagation();
   showUpgradeModal(locked.dataset.proFeature || "generic");
@@ -8710,7 +8744,7 @@ document.addEventListener("keydown", e => {
 // ── Importar OFX (extrato bancario ou fatura de cartao) ────────────────
 function openOfxImport() {
   // Free: nao abre o picker — vai direto pro modal de upgrade.
-  if (!isProUser()) {
+  if (!featureAllowed("ofx_import")) {
     showUpgradeModal("ofx_import");
     return;
   }
@@ -9556,6 +9590,14 @@ function _showAccessError(title, msg) {
 
 (async () => {
   const view = params.get("view");
+
+  // Fail-closed ANTES de qualquer await: trava os controles pagos logo no
+  // primeiro tick do bootstrap, antes de disparar/esperar /auth/validate e
+  // /auth/me. Se qualquer um travar/pendurar, os controles que dependem do
+  // interceptor de clique .pro-locked (export, gastos fixos, Novidades) não
+  // ficam no estado destravado do HTML a visita inteira. USER_GATES começa {}
+  // → tudo bloqueado até o /auth/dashboard-profile confirmar. Idempotente.
+  applyProGates();
 
   // /auth/validate e /auth/me são independentes (ambos por cookie — o /me não
   // precisa do USER_ID). Disparamos os dois em paralelo pra cortar uma ida ao

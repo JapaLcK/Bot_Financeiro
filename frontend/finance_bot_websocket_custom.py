@@ -2257,6 +2257,24 @@ async def auth_dashboard_profile(request: Request, response: Response):
     user_id = _resolve_dashboard_user_id(request)
     _raise_if_account_scheduled_for_deletion(int(user_id))
     auth_user = await asyncio.to_thread(get_auth_user, int(user_id))
+    # Gates efetivos por feature — fonte da verdade do backend. get_user_limits e
+    # is_pro já resolvem os casos que o valor cru do plano esconde: assinatura
+    # expirada (webhook perdido) e o freio de emergência PLANS_V2_ENABLED. O front
+    # consome isto direto em vez de reconstruir tier do plano cru (que divergiria).
+    from core.services.plan_service import get_user_limits, is_pro
+    limits = await asyncio.to_thread(get_user_limits, int(user_id))
+    _is_pro = await asyncio.to_thread(is_pro, int(user_id))
+    feature_gates = {
+        "investments": bool(limits["investments_enabled"]),
+        "export": bool(limits["export_enabled"]),
+        "ofx_import": bool(limits["ofx_enabled"]),
+        "recurring_expenses": bool(limits["recurring_expenses_enabled"]),
+        "pockets_unlimited": limits["pockets_max"] is None,
+        "cards_unlimited": limits["cards_max"] is None,
+        "history_unlimited": not limits["history_current_month_only"],
+        "changelog": _is_pro,                        # Novidades: gate is_pro (Plus+)
+        "agents": limits["agents_energy_budget"] > 0,  # agentes: Plus+
+    }
     _no_store(response)
     return {
         "user_id": user_id,
@@ -2264,6 +2282,7 @@ async def auth_dashboard_profile(request: Request, response: Response):
         "display_name": (auth_user or {}).get("display_name"),
         "plan": (auth_user or {}).get("plan"),
         "whatsapp_linked": bool((auth_user or {}).get("whatsapp_verified_at")),
+        "feature_gates": feature_gates,
     }
 
 
