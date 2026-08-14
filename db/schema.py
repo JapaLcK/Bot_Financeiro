@@ -1679,6 +1679,17 @@ def init_db():
         create index if not exists idx_agent_events_pending_email
           on agent_events (agent_id) where emailed_at is null
         """,
+        # Supressão de e-mail ≠ enviado: suppressed_at tira o evento da fila de
+        # e-mail (opt-out do agente/global) SEM congelar o snapshot — emailed_at
+        # fica null, então o upsert auto-corrigível e a limpeza de obsoleto
+        # continuam valendo no feed (só o e-mail de fato enviado é imutável).
+        """
+        alter table agent_events add column if not exists suppressed_at timestamptz
+        """,
+        """
+        create index if not exists idx_agent_events_pending_email2
+          on agent_events (agent_id) where emailed_at is null and suppressed_at is null
+        """,
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks

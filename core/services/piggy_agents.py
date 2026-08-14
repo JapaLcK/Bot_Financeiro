@@ -882,6 +882,12 @@ def _faria_limer_detect_for_user(agent: dict[str, Any], today: date) -> int:
     user_id = agent["user_id"]
     ym = today.strftime("%Y-%m")
     positions = list_rv_positions(user_id)
+    # Só posições em BRL: as mensagens formatam tudo em R$, então somar o nominal
+    # de outra moeda (ex.: US$1.000 + R$10.000 = "R$ 11.000") mentiria no total,
+    # no P&L e na concentração. Posição estrangeira fica fora do retrato até
+    # existir conversão de câmbio.
+    positions = [p for p in positions
+                 if (p.get("currency") or "BRL").upper() == "BRL"]
     # Deriva o resumo do MESMO snapshot de posições (senão uma releitura numa outra
     # conexão pode pegar um estado pós-sync e desalinhar totais × lista/contagem).
     summary = rv_portfolio_summary(user_id, positions=positions)
@@ -1003,7 +1009,8 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
     de cadência do kind e o opt-out. Mantém e-mails separados por agente sem spam.
     Roda no tick horário, depois dos detectores."""
     from db import (list_agents_pending_email, list_unemailed_events,
-                    claim_agent_events_for_email, touch_agent_emailed,
+                    claim_agent_events_for_email, suppress_agent_events,
+                    unclaim_agent_events, touch_agent_emailed,
                     get_user_email, get_auth_user)
     from core.services.plan_service import agent_kind_allowed, agents_ui_enabled
 
@@ -1030,12 +1037,13 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
             # continua mas o e-mail é suprimido (marca como enviado pra não acumular).
             cfg = a.get("config") or {}
             if not cfg.get("email_enabled", True):
-                # Supressão também passa pelo claim condicional: se um refresh
-                # trocou o payload entre a leitura e aqui, a linha fica pendente
-                # (marcar emailed_at nela congelaria o snapshot novo sem e-mail).
-                pend = _ripe(kind, list_unemailed_events(agent_id))
+                # Opt-out: suprime SEM marcar emailed_at (suppressed_at só tira da
+                # fila de e-mail). O evento segue vivo no feed — o upsert ainda
+                # corrige e a limpeza de obsoleto ainda remove. Por isso dispensa
+                # carência e claim condicional: suprimir não congela nada.
+                pend = list_unemailed_events(agent_id)
                 if pend:
-                    claim_agent_events_for_email(pend)
+                    suppress_agent_events([e["id"] for e in pend])
                 continue
             interval_h = _AGENT_EMAIL_INTERVAL_H.get(kind, _DEFAULT_EMAIL_INTERVAL_H)
             last = a.get("last_emailed_at")
@@ -1046,7 +1054,8 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
                 continue
             auth = get_auth_user(user_id)
             if auth and auth.get("engagement_opt_out"):
-                claim_agent_events_for_email(events)  # opt-out: suprime (claim condicional)
+                # Opt-out global: mesma supressão viva (sem congelar o feed).
+                suppress_agent_events([e["id"] for e in events])
                 continue
             email = get_user_email(user_id)
             if not email:
@@ -1058,15 +1067,25 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
             # Trade-off deliberado: claim→envio é at-most-once (falha de envio
             # após o claim perde o digest) — melhor que enviar e marcar a linha
             # errada, que congela snapshot misto no feed.
-            claimed_ids = set(claim_agent_events_for_email(events))
-            events = [e for e in events if e["id"] in claimed_ids]
+            claimed_ids = list(claim_agent_events_for_email(events))
+            events = [e for e in events if e["id"] in set(claimed_ids)]
             if not events:
                 continue
             from core.services.email_service import send_agent_report_email
-            send_agent_report_email(
-                email, user_id, _agent_email_subject(kind, events),
-                _compose_agent_email(kind, events), kind=kind,
-            )
+            try:
+                ok = send_agent_report_email(
+                    email, user_id, _agent_email_subject(kind, events),
+                    _compose_agent_email(kind, events), kind=kind,
+                )
+            except Exception:
+                unclaim_agent_events(claimed_ids)  # nada saiu → devolve pra fila
+                raise
+            if not ok:
+                # send_email não levanta: retorna False. Sem desfazer o claim, um
+                # envio falho congelaria o evento (emailed_at) sem e-mail nenhum —
+                # o feed ficaria preso num retrato velho/alerta que já não vale.
+                unclaim_agent_events(claimed_ids)
+                continue
             touch_agent_emailed(agent_id)
             sent += 1
         except Exception as exc:

@@ -62,6 +62,7 @@ def _arm_reporter(monkeypatch, *, opted_out: bool):
     # claim devolve todos: simula "nenhum evento mudou entre leitura e envio"
     monkeypatch.setattr(db, "claim_agent_events_for_email",
                         lambda evs: [e["id"] for e in evs])
+    monkeypatch.setattr(db, "suppress_agent_events", lambda ids: len(ids))
     monkeypatch.setattr(db, "touch_agent_emailed", lambda agent_id: None)
     monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": opted_out})
     monkeypatch.setattr(db, "get_user_email", lambda uid: "user@example.com")
@@ -474,3 +475,72 @@ def test_email_pula_evento_que_mudou_entre_leitura_e_claim(monkeypatch):
     out = pa.run_agent_emails_once(now=now)
     assert sent == [] and touched == []
     assert out["sent"] == 0
+
+
+def test_optout_suprime_sem_congelar(monkeypatch):
+    # Opt-out (por agente e global) usa suppress_agent_events, NÃO o claim: o
+    # evento sai da fila de e-mail mas segue vivo no feed (emailed_at continua
+    # null → upsert ainda corrige e a limpeza de obsoleto ainda remove).
+    from datetime import datetime, timedelta, timezone
+    import db
+    import core.services.piggy_agents as pa
+    import core.services.email_service as es
+    import core.services.plan_service as ps
+
+    now = datetime(2026, 8, 13, 12, 0, tzinfo=timezone.utc)
+
+    def _arm(*, email_enabled=True, optout=False):
+        suppressed, claimed = [], []
+        monkeypatch.setattr(db, "list_agents_pending_email", lambda: [
+            {"agent_id": 9, "user_id": 42, "kind": "faria_limer",
+             "config": {"email_enabled": email_enabled}, "last_emailed_at": None}])
+        monkeypatch.setattr(db, "list_unemailed_events", lambda agent_id: [
+            {"id": 7, "payload": {"titulo": "T", "mensagem": "M"},
+             "fired_at": now - timedelta(hours=2)}])
+        monkeypatch.setattr(db, "suppress_agent_events",
+                            lambda ids: suppressed.extend(ids) or len(ids))
+        monkeypatch.setattr(db, "claim_agent_events_for_email",
+                            lambda evs: claimed.extend(e["id"] for e in evs) or [])
+        monkeypatch.setattr(db, "touch_agent_emailed", lambda agent_id: None)
+        monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": optout})
+        monkeypatch.setattr(db, "get_user_email", lambda uid: "user@example.com")
+        monkeypatch.setattr(ps, "agents_ui_enabled", lambda *a, **k: True)
+        monkeypatch.setattr(ps, "agent_kind_allowed", lambda *a, **k: True)
+        monkeypatch.setattr(es, "send_agent_report_email",
+                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("não envia")))
+        pa.run_agent_emails_once(now=now)
+        return suppressed, claimed
+
+    sup, cla = _arm(email_enabled=False)
+    assert sup == [7] and cla == []      # e-mail off: suprime, sem claim/congelamento
+    sup, cla = _arm(optout=True)
+    assert sup == [7] and cla == []      # opt-out global: idem
+
+
+def test_faria_ignora_posicoes_fora_do_brl(monkeypatch):
+    # Mensagens formatam R$ — somar nominal de outra moeda mentiria no total e na
+    # concentração (R$10k + US$50k ≠ "R$ 60.000"). Posição não-BRL fica fora.
+    from datetime import date
+    import db
+    import core.services.piggy_agents as pa
+    from db.rv import rv_portfolio_summary
+
+    recorded = []
+    monkeypatch.setattr(db, "list_rv_positions", lambda uid: [
+        {"ticker": "PETR4", "market_value": 8000.0, "invested": 7000.0,
+         "cost_known": True, "currency": "BRL"},
+        {"ticker": "AAPL", "market_value": 50000.0, "invested": 30000.0,
+         "cost_known": True, "currency": "USD"},   # dominaria tudo se somasse
+    ])
+    monkeypatch.setattr(db, "rv_portfolio_summary",
+                        lambda uid, positions=None: rv_portfolio_summary(uid, positions=positions))
+    monkeypatch.setattr(db, "record_or_refresh_agent_event",
+                        lambda *a, **k: recorded.append(k) or True)
+    monkeypatch.setattr(db, "delete_pending_agent_event", lambda *a, **k: True)
+
+    pa._faria_limer_detect_for_user({"agent_id": 1, "user_id": 42}, date(2026, 8, 13))
+    tipos = {k["payload"]["tipo"]: k["payload"] for k in recorded}
+    retrato = tipos["rv_retrato"]
+    assert "R$ 8.000,00" in retrato["mensagem"]          # só o BRL
+    assert "1 ativo" in retrato["mensagem"] and "2 ativos" not in retrato["mensagem"]
+    assert "rv_concentracao" not in tipos                # 1 ativo só → sem alerta
