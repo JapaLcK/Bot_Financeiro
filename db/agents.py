@@ -187,6 +187,10 @@ def record_or_refresh_agent_event(
     ou já entrou num e-mail, não mexe — o usuário não pode ver o número mudar
     depois. Assim uma 1ª gravação parcial (corrida com o sync multi-item) é
     corrigida pela próxima execução coerente. Retorna True se inseriu ou atualizou.
+
+    NOTA: o refresh NÃO renova fired_at — a idade do evento precisa continuar
+    contando pra carência de e-mail do agente (run_agent_emails_once) vencer;
+    renovar a cada tique deixaria o e-mail adiado pra sempre.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -197,8 +201,7 @@ def record_or_refresh_agent_event(
                 values (%s, %s, %s, %s, %s::jsonb, %s, %s)
                 on conflict (agent_id, dedupe_key) do update
                   set payload = excluded.payload,
-                      valor_impacto = excluded.valor_impacto,
-                      fired_at = now()
+                      valor_impacto = excluded.valor_impacto
                   where agent_events.seen_at is null
                     and agent_events.emailed_at is null
                 """,
@@ -208,6 +211,29 @@ def record_or_refresh_agent_event(
             changed = cur.rowcount > 0
         conn.commit()
     return changed
+
+
+def delete_pending_agent_event(agent_id: int, dedupe_key: str) -> bool:
+    """Remove um evento que ainda está PENDENTE (não visto e não emailado).
+
+    Par do record_or_refresh_agent_event pra condições que DEIXARAM de valer:
+    ex. um alerta de concentração gravado a partir de um snapshot parcial que a
+    execução coerente seguinte não reproduz (carteira equilibrada). Evento já
+    visto/emailado não é tocado — histórico não se apaga debaixo do usuário.
+    Retorna True se removeu."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                delete from agent_events
+                where agent_id = %s and dedupe_key = %s
+                  and seen_at is null and emailed_at is null
+                """,
+                (agent_id, dedupe_key),
+            )
+            deleted = cur.rowcount > 0
+        conn.commit()
+    return deleted
 
 
 def list_agent_events(user_id: int, limit: int = 20) -> list[dict[str, Any]]:

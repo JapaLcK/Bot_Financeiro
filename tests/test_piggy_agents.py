@@ -369,3 +369,69 @@ def test_faria_detector_grava_via_upsert_autocorrigivel(monkeypatch):
     assert fired >= 1
     keys = [k["dedupe_key"] for k in calls]
     assert any(dk.startswith("rv_retrato:") for dk in keys)
+
+
+def test_faria_detector_apaga_concentracao_pendente_que_deixou_de_valer(monkeypatch):
+    # Run parcial gravou rv_concentracao; o run coerente vê carteira equilibrada e
+    # não reproduz o insight → o pendente (não visto/emailado) tem que ser apagado,
+    # senão o alerta falso fica elegível pro feed/e-mail o mês todo.
+    from datetime import date
+    import db
+    import core.services.piggy_agents as pa
+
+    deleted = []
+    # carteira equilibrada: 3 ativos ~33% cada → só rv_retrato, sem concentração
+    monkeypatch.setattr(db, "list_rv_positions", lambda uid: [
+        {"ticker": "GGRC11", "market_value": 3400.0, "invested": 3000.0},
+        {"ticker": "ITUB4", "market_value": 3300.0, "invested": 3000.0},
+        {"ticker": "PETR4", "market_value": 3300.0, "invested": 3000.0},
+    ])
+    monkeypatch.setattr(db, "rv_portfolio_summary", lambda uid, positions=None: {
+        "market_value": 10000.0, "invested": 9000.0, "cost_known": True,
+        "pnl": 1000.0, "pnl_pct": 1000.0 / 9000.0, "count": 3,
+    })
+    monkeypatch.setattr(db, "record_or_refresh_agent_event", lambda *a, **k: True)
+    monkeypatch.setattr(db, "delete_pending_agent_event",
+                        lambda agent_id, dedupe_key: deleted.append(dedupe_key) or True)
+
+    pa._faria_limer_detect_for_user({"agent_id": 1, "user_id": 42}, date(2026, 8, 13))
+    assert "rv_concentracao:2026-08" in deleted     # obsoleto → limpo
+    assert "rv_retrato:2026-08" not in deleted      # produzido neste run → mantido
+
+
+def test_email_do_faria_respeita_carencia_de_autocorrecao(monkeypatch):
+    # Evento do Faria só entra em e-mail depois da carência (janela em que o upsert
+    # ainda pode corrigir um snapshot parcial). Fresco → segura; vencido → envia.
+    from datetime import datetime, timedelta, timezone
+    import db
+    import core.services.piggy_agents as pa
+    import core.services.email_service as es
+    import core.services.plan_service as ps
+
+    now = datetime(2026, 8, 13, 12, 0, tzinfo=timezone.utc)
+
+    def _arm(fired_at):
+        sent, marked = [], []
+        monkeypatch.setattr(db, "list_agents_pending_email", lambda: [
+            {"agent_id": 9, "user_id": 42, "kind": "faria_limer",
+             "config": {}, "last_emailed_at": None}])
+        monkeypatch.setattr(db, "list_unemailed_events", lambda agent_id: [
+            {"id": 7, "payload": {"titulo": "Sua renda variável",
+                                  "mensagem": "R$ 10.000,00 em 2 ativos"},
+             "fired_at": fired_at}])
+        monkeypatch.setattr(db, "mark_events_emailed", lambda ids: marked.extend(ids))
+        monkeypatch.setattr(db, "touch_agent_emailed", lambda agent_id: None)
+        monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": False})
+        monkeypatch.setattr(db, "get_user_email", lambda uid: "user@example.com")
+        monkeypatch.setattr(ps, "agents_ui_enabled", lambda *a, **k: True)
+        monkeypatch.setattr(ps, "agent_kind_allowed", lambda *a, **k: True)
+        monkeypatch.setattr(es, "send_agent_report_email", lambda *a, **k: sent.append(a))
+        pa.run_agent_emails_once(now=now)
+        return sent, marked
+
+    # fresco (5 min): dentro da carência → não envia nem marca (refresh ainda pode corrigir)
+    sent, marked = _arm(now - timedelta(minutes=5))
+    assert sent == [] and marked == []
+    # vencido (2h): envia e marca
+    sent, marked = _arm(now - timedelta(hours=2))
+    assert len(sent) == 1 and marked == [7]

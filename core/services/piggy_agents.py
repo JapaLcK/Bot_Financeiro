@@ -876,7 +876,8 @@ def _faria_limer_detect_for_user(agent: dict[str, Any], today: date) -> int:
     """Acompanha a carteira de renda variável do usuário (via Open Finance) e grava
     os insights factuais (retrato do mês + concentração), deduplicados por mês. Só
     lê o espelho do sync (db.rv) — a corretora é a fonte da verdade."""
-    from db import record_or_refresh_agent_event, list_rv_positions, rv_portfolio_summary
+    from db import (record_or_refresh_agent_event, delete_pending_agent_event,
+                    list_rv_positions, rv_portfolio_summary)
 
     user_id = agent["user_id"]
     ym = today.strftime("%Y-%m")
@@ -885,8 +886,9 @@ def _faria_limer_detect_for_user(agent: dict[str, Any], today: date) -> int:
     # conexão pode pegar um estado pós-sync e desalinhar totais × lista/contagem).
     summary = rv_portfolio_summary(user_id, positions=positions)
 
+    insights = faria_limer_insights(positions, summary, ym)
     fired = 0
-    for ins in faria_limer_insights(positions, summary, ym):
+    for ins in insights:
         # Upsert auto-corrigível: se uma execução anterior gravou um retrato parcial
         # (corrida do tick horário com um sync multi-item) e ele ainda não foi
         # visto/emailado, a execução coerente seguinte corrige o valor. Uma vez
@@ -899,6 +901,15 @@ def _faria_limer_detect_for_user(agent: dict[str, Any], today: date) -> int:
         )
         if ok:
             fired += 1
+
+    # Autocorreção no sentido inverso: condição que DEIXOU de valer. Se um run
+    # parcial gravou um evento do mês (ex.: concentração de uma carteira pela
+    # metade) e este run coerente não o reproduz, apaga o pendente — evento já
+    # visto/emailado não é tocado (a função só deleta pendente).
+    produced = {ins["dedupe_key"] for ins in insights}
+    for key in (f"rv_retrato:{ym}", f"rv_concentracao:{ym}"):
+        if key not in produced:
+            delete_pending_agent_event(agent["agent_id"], key)
     return fired
 
 
@@ -942,6 +953,14 @@ _AGENT_EMAIL_INTERVAL_H = {
     "detetive": 24 * 30,      # 1x/mês
 }
 _DEFAULT_EMAIL_INTERVAL_H = 24
+
+# Carência mínima (minutos) antes de um evento poder entrar em e-mail, por kind.
+# Faria Limer: o retrato precisa de tempo pra se autocorrigir (upsert) caso a 1ª
+# gravação tenha pego uma carteira parcial (tick horário no meio de um sync
+# multi-item) — sem a carência, o e-mail sai no MESMO tick e congela o snapshot
+# errado (emailed_at bloqueia o refresh). 45min < tick horário: o e-mail sai no
+# tick seguinte, já corrigido. Agente mensal — atraso de 1h é inócuo.
+_AGENT_EMAIL_MIN_AGE_MIN = {"faria_limer": 45}
 
 _AGENT_EMAIL_LABEL = {
     "xerife": "🤠 Xerife", "reporter": "🎤 Repórter", "carteiro": "📬 Carteiro",
@@ -988,6 +1007,18 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
 
     now = now or datetime.now(timezone.utc)
     sent = 0
+
+    def _ripe(kind: str, events: list[dict]) -> list[dict]:
+        """Só eventos que já venceram a carência do kind (podem virar/contar como
+        e-mail). Antes disso o evento fica pendente — janela em que o upsert
+        auto-corrigível ainda pode consertar um snapshot parcial (marcar
+        emailed_at cedo, até na supressão, congelaria o valor errado)."""
+        min_age = _AGENT_EMAIL_MIN_AGE_MIN.get(kind, 0)
+        if not min_age:
+            return events
+        cutoff = now - timedelta(minutes=min_age)
+        return [e for e in events if e.get("fired_at") is not None and e["fired_at"] <= cutoff]
+
     for a in list_agents_pending_email():
         kind = a["kind"]; user_id = a["user_id"]; agent_id = a["agent_id"]
         try:
@@ -997,7 +1028,7 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
             # continua mas o e-mail é suprimido (marca como enviado pra não acumular).
             cfg = a.get("config") or {}
             if not cfg.get("email_enabled", True):
-                pend = list_unemailed_events(agent_id)
+                pend = _ripe(kind, list_unemailed_events(agent_id))
                 if pend:
                     mark_events_emailed([e["id"] for e in pend])
                 continue
@@ -1005,7 +1036,7 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
             last = a.get("last_emailed_at")
             if last is not None and (now - last) < timedelta(hours=interval_h):
                 continue  # teto de cadência: e-mail desse agente ainda tá no intervalo
-            events = list_unemailed_events(agent_id)
+            events = _ripe(kind, list_unemailed_events(agent_id))
             if not events:
                 continue
             ids = [e["id"] for e in events]
