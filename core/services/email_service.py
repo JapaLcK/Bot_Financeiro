@@ -326,17 +326,18 @@ def make_unsub_url(user_id: int, email: str) -> str:
 # ─── Template simples para emails do Piggy ────────────────────────────────────
 # Menos CSS pesado que _base_html → menor chance de cair em Promoções
 
-_AGENT_ART_KINDS = {"xerife", "reporter", "carteiro", "detetive", "cofre", "barao"}
+_AGENT_ART_KINDS = {"xerife", "reporter", "carteiro", "detetive", "cofre", "barao", "faria_limer"}
 _AGENT_LABELS = {"xerife": "Xerife", "reporter": "Repórter", "carteiro": "Carteiro",
                  "detetive": "Detetive", "cofre": "Banqueiro", "barao": "Barão",
                  "faria_limer": "Faria Limer"}
-# Faria Limer ainda sem PNG de arte (fica no medalhão-logo até a arte chegar):
-# por isso NÃO entra em _AGENT_ART_KINDS nem _AGENT_HERO — só o label acima.
+# Faria Limer já com arte ligada: entra em _AGENT_ART_KINDS (medalhão) e em
+# _AGENT_HERO (banner full-bleed), além do label acima.
 # Agentes com arte-cena "hero" (banner full-bleed no topo, 1200x600). Quem não
 # tem cai no medalhão com o sticker. Arquivo em /brand/agents/<valor>.png.
 _AGENT_HERO = {"xerife": "xerife_hero", "carteiro": "carteiro_hero",
                "cofre": "cofre_hero", "barao": "barao_hero",
-               "reporter": "reporter_hero", "detetive": "detetive_hero"}
+               "reporter": "reporter_hero", "detetive": "detetive_hero",
+               "faria_limer": "faria_limer_hero"}
 
 
 def _piggy_html(title: str, content: str, unsub_url: str = "", agent_kind: str = "") -> str:
