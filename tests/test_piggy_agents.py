@@ -342,3 +342,30 @@ def test_run_faria_limer_once_respeita_kill_switch(monkeypatch):
     out = pa.run_faria_limer_once(user_id=42)
     assert out.get("disabled") is True
     assert out.get("fired") == 0
+
+
+def test_faria_detector_grava_via_upsert_autocorrigivel(monkeypatch):
+    # O detector deve usar record_or_refresh_agent_event (upsert que corrige um
+    # retrato parcial ainda pendente), não o record_agent_event first-write-wins.
+    from datetime import date
+    import db
+    import core.services.piggy_agents as pa
+
+    calls = []
+    monkeypatch.setattr(db, "list_rv_positions", lambda uid: [
+        {"ticker": "PETR4", "market_value": 8000.0, "invested": 7000.0},
+        {"ticker": "ITUB4", "market_value": 2000.0, "invested": 2000.0},
+    ])
+    monkeypatch.setattr(db, "rv_portfolio_summary", lambda uid, positions=None: {
+        "market_value": 10000.0, "invested": 9000.0, "cost_known": True,
+        "pnl": 1000.0, "pnl_pct": 1000.0 / 9000.0, "count": 2,
+    })
+    monkeypatch.setattr(db, "record_or_refresh_agent_event",
+                        lambda *a, **k: calls.append(k) or True)
+    monkeypatch.setattr(db, "record_agent_event", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("detector deve usar o upsert, não record_agent_event")))
+
+    fired = pa._faria_limer_detect_for_user({"agent_id": 1, "user_id": 42}, date(2026, 8, 13))
+    assert fired >= 1
+    keys = [k["dedupe_key"] for k in calls]
+    assert any(dk.startswith("rv_retrato:") for dk in keys)

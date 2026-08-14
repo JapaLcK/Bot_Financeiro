@@ -169,6 +169,47 @@ def record_agent_event(
     return inserted
 
 
+def record_or_refresh_agent_event(
+    agent_id: int,
+    user_id: int,
+    kind: str,
+    dedupe_key: str,
+    payload: dict | None = None,
+    channel: str = "dashboard",
+    valor_impacto: float | None = None,
+) -> bool:
+    """Como record_agent_event, mas AUTO-CORRIGE: se a dedupe_key já existe e o
+    evento ainda está PENDENTE (não visto e não enviado por e-mail), atualiza
+    payload/valor_impacto/fired_at com o snapshot novo em vez de ignorar.
+
+    Serve pra eventos-retrato que devem refletir o estado coerente mais recente
+    (ex.: Faria Limer mensal), sem re-notificar: se o evento já foi visto no feed
+    ou já entrou num e-mail, não mexe — o usuário não pode ver o número mudar
+    depois. Assim uma 1ª gravação parcial (corrida com o sync multi-item) é
+    corrigida pela próxima execução coerente. Retorna True se inseriu ou atualizou.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into agent_events
+                  (agent_id, user_id, kind, dedupe_key, payload, channel, valor_impacto)
+                values (%s, %s, %s, %s, %s::jsonb, %s, %s)
+                on conflict (agent_id, dedupe_key) do update
+                  set payload = excluded.payload,
+                      valor_impacto = excluded.valor_impacto,
+                      fired_at = now()
+                  where agent_events.seen_at is null
+                    and agent_events.emailed_at is null
+                """,
+                (agent_id, user_id, kind, dedupe_key,
+                 json.dumps(payload or {}), channel, valor_impacto),
+            )
+            changed = cur.rowcount > 0
+        conn.commit()
+    return changed
+
+
 def list_agent_events(user_id: int, limit: int = 20) -> list[dict[str, Any]]:
     with get_conn() as conn:
         with conn.cursor() as cur:

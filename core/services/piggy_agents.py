@@ -876,7 +876,7 @@ def _faria_limer_detect_for_user(agent: dict[str, Any], today: date) -> int:
     """Acompanha a carteira de renda variável do usuário (via Open Finance) e grava
     os insights factuais (retrato do mês + concentração), deduplicados por mês. Só
     lê o espelho do sync (db.rv) — a corretora é a fonte da verdade."""
-    from db import record_agent_event, list_rv_positions, rv_portfolio_summary
+    from db import record_or_refresh_agent_event, list_rv_positions, rv_portfolio_summary
 
     user_id = agent["user_id"]
     ym = today.strftime("%Y-%m")
@@ -887,7 +887,11 @@ def _faria_limer_detect_for_user(agent: dict[str, Any], today: date) -> int:
 
     fired = 0
     for ins in faria_limer_insights(positions, summary, ym):
-        ok = record_agent_event(
+        # Upsert auto-corrigível: se uma execução anterior gravou um retrato parcial
+        # (corrida do tick horário com um sync multi-item) e ele ainda não foi
+        # visto/emailado, a execução coerente seguinte corrige o valor. Uma vez
+        # visto/emailado, fica congelado (não muda o número debaixo do usuário).
+        ok = record_or_refresh_agent_event(
             agent["agent_id"], user_id, "faria_limer",
             dedupe_key=ins["dedupe_key"],
             payload=ins["payload"],
