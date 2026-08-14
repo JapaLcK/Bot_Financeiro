@@ -542,7 +542,7 @@ const DASH_VIEWS = [
 function setMainView(view) {
   // Free: bloqueia navegacao pra tela inteira de investimentos. Botao fica
   // visivel mas desabilitado; click abre modal de upgrade (item 17/18).
-  if (view === "investments" && !isProUser()) {
+  if (view === "investments" && !featureAllowed("investments")) {
     showUpgradeModal("investments");
     return;
   }
@@ -831,7 +831,7 @@ function openCardEditModal(card) {
   const isEdit = !!(card && card.id);
   // Pro gate: bloqueia novo cadastro pra Free que já atingiu o limite.
   // Edição NUNCA bloqueia.
-  if (!isEdit && !isProUser() && _currentCards.length >= CARDS_FREE_LIMIT) {
+  if (!isEdit && !featureAllowed("cards_unlimited") && _currentCards.length >= CARDS_FREE_LIMIT) {
     showUpgradeModal("cards_unlimited");
     return;
   }
@@ -5641,9 +5641,43 @@ function toggleTheme() {
   applyTheme(saved);
 })();
 
-// ── Pro gates (visivel + desabilitado pra Free) ──────────────────────────
+// ── Pro gates (visivel + desabilitado por tier) ──────────────────────────
+// Espelha a escada do backend: _STORED_PLAN_TO_TIER (core/services/plan_service)
+// + TIER_ORDER (core/services/plan_limits). USER_PLAN é o valor CRU da coluna
+// auth_accounts.plan devolvido por /auth/dashboard-profile ("free", "essencial",
+// "pro" [=Plus legado R$19,90], "plus", "pro_max" [=Pro novo]).
+const PLAN_TO_TIER = { free: "free", essencial: "essencial", pro: "plus", plus: "plus", pro_max: "pro" };
+const TIER_ORDER = { free: 0, essencial: 1, plus: 2, pro: 3 };
+// Tier mínimo que libera cada feature paga gated no dashboard. Espelha
+// plan_limits.py: investimentos/export/OFX/gastos-fixos/caixinhas/cartões e
+// histórico >30d entram já no Essencial; Novidades e agentes só do Plus pra
+// cima (gate is_pro no backend). Feature fora do mapa → exige Plus (conservador).
+const FEATURE_MIN_TIER = {
+  investments: "essencial",
+  export: "essencial",
+  ofx_import: "essencial",
+  recurring_expenses: "essencial",
+  pockets_unlimited: "essencial",
+  cards_unlimited: "essencial",
+  history_unlimited: "essencial",
+  changelog: "plus",
+  agents: "plus",
+};
+
+function userTier() {
+  return PLAN_TO_TIER[(USER_PLAN || "free").trim().toLowerCase()] || "free";
+}
+function tierAtLeast(minTier) {
+  return (TIER_ORDER[userTier()] || 0) >= (TIER_ORDER[minTier] || 0);
+}
+// True se o tier atual libera a feature (fonte da verdade continua no backend;
+// isto é só o gate visual/UX pra não deixar clicar no que já se sabe bloqueado).
+function featureAllowed(feature) {
+  return tierAtLeast(FEATURE_MIN_TIER[feature] || "plus");
+}
+// "Tem o plano pago principal?" (Plus+). Mantido pra checagens genéricas.
 function isProUser() {
-  return (USER_PLAN || "free").trim().toLowerCase() === "pro";
+  return tierAtLeast("plus");
 }
 
 const UPGRADE_MESSAGES = {
@@ -5706,9 +5740,11 @@ function closeUpgradeModal() {
 // Aplica estado visual disabled em todos os elementos com data-pro-feature
 // quando o user e Free. Idempotente — pode ser chamada varias vezes.
 function applyProGates() {
-  const isPro = isProUser();
+  // Gate POR FEATURE: cada controle libera no seu tier mínimo (Essencial já
+  // solta investimentos/OFX/export/etc; Novidades só do Plus pra cima). Antes
+  // era um único booleano is_pro, que trancava tudo pra quem era Essencial.
   document.querySelectorAll("[data-pro-feature]").forEach(el => {
-    if (isPro) {
+    if (featureAllowed(el.dataset.proFeature)) {
       el.classList.remove("pro-locked");
       el.removeAttribute("aria-disabled");
       const b = el.querySelector(":scope > .pro-badge");
@@ -5716,7 +5752,7 @@ function applyProGates() {
     } else {
       el.classList.add("pro-locked");
       el.setAttribute("aria-disabled", "true");
-      el.setAttribute("title", "Funcionalidade do PigBank+ — clica pra fazer upgrade");
+      el.setAttribute("title", "Funcionalidade de um plano pago — clica pra ver os planos");
       if (!el.querySelector(":scope > .pro-badge")) {
         const b = document.createElement("span");
         b.className = "pro-badge";
@@ -5725,10 +5761,11 @@ function applyProGates() {
       }
     }
   });
-  // Titulo do grafico de historico reflete a janela real: 6 meses (Pro) vs 30 dias (Free).
+  // Titulo do grafico de historico reflete a janela real: 6+ meses (Plus/Pro)
+  // vs 30 dias (Free/Essencial cai no rótulo curto).
   const histTitle = document.getElementById("history-card-title");
   if (histTitle) {
-    histTitle.textContent = isPro
+    histTitle.textContent = isProUser()
       ? "Receita vs Despesa — Últimos 6 Meses"
       : "Receita vs Despesa — Últimos 30 dias";
   }
@@ -5741,7 +5778,7 @@ function applyProGates() {
 document.addEventListener("click", (e) => {
   const locked = e.target.closest(".pro-locked[data-pro-feature]");
   if (!locked) return;
-  if (isProUser()) return;
+  if (featureAllowed(locked.dataset.proFeature)) return;
   e.preventDefault();
   e.stopPropagation();
   showUpgradeModal(locked.dataset.proFeature || "generic");
@@ -8710,7 +8747,7 @@ document.addEventListener("keydown", e => {
 // ── Importar OFX (extrato bancario ou fatura de cartao) ────────────────
 function openOfxImport() {
   // Free: nao abre o picker — vai direto pro modal de upgrade.
-  if (!isProUser()) {
+  if (!featureAllowed("ofx_import")) {
     showUpgradeModal("ofx_import");
     return;
   }
