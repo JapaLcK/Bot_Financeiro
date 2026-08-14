@@ -704,3 +704,61 @@ def test_claim_unclaim_suppress_delete_sql(user_id):
         with conn.cursor() as cur:
             cur.execute("select count(*) as n from agent_events where agent_id=%s", (agent_id,))
             assert cur.fetchone()["n"] == 0
+
+
+def test_barao_corrige_evento_parcial_do_mes(user_id):
+    """Achado P1 do Codex no PR #51: quem sincou ANTES do fix já tem o evento
+    parcial gravado. A execução coerente precisa corrigir esse evento — com
+    record_agent_event (DO NOTHING) o valor errado ficaria até virar o mês."""
+    import db
+    from datetime import date
+    import core.services.piggy_agents as pa
+
+    ag = db.activate_agent(user_id, "barao")
+    hoje = date(2026, 8, 14)
+    key = f"parado:{hoje.strftime('%Y-%m')}"
+
+    # estado deixado pelo bug: evento do mês com o saldo parcial do 1º item
+    db.record_or_refresh_agent_event(
+        ag["id"], user_id, "barao", key,
+        {"tipo": "parado", "idle": 1500.0, "titulo": "R$ 1.500,00 parado rendendo nada"},
+        valor_impacto=13.13)
+
+    def _idle():
+        e = [x for x in db.list_agent_events(user_id, limit=5) if x["kind"] == "barao"]
+        return float(e[0]["payload"]["idle"])
+
+    assert _idle() == 1500.0
+
+    # execução coerente (pós-fix), agora com o saldo agregado dos dois bancos
+    import unittest.mock as m
+    with m.patch.object(pa, "get_conn") as gc:
+        cur = gc.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.return_value = {"idle": 21500.0}
+        pa._barao_detect_for_user({"agent_id": ag["id"], "user_id": user_id}, hoje)
+
+    assert _idle() == 21500.0, "o evento parcial do mês NÃO foi corrigido"
+
+
+def test_sync_completo_sobrevive_a_import_quebrado(monkeypatch):
+    """Achado P2 do Codex no PR #51: o import de piggy_agents fica dentro do
+    guard. Se o módulo explodir ao importar (env malformado), o sync não pode
+    levantar depois de já ter persistido os dados financeiros."""
+    import builtins
+    import core.services.pluggy_sync as ps
+
+    monkeypatch.setattr(ps, "get_open_finance_snapshot", lambda uid: {
+        "connections": [{"provider": "pluggy", "provider_item_id": "i1"}]})
+    monkeypatch.setattr(ps, "sync_pluggy_item", lambda item: {"ok": True, "accounts_synced": 1})
+
+    real_import = builtins.__import__
+
+    def _boom(name, *a, **k):
+        if name == "core.services.piggy_agents":
+            raise ValueError("invalid literal for int(): AGENTS_INTERVAL_SEC")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", _boom)
+    out = ps.sync_pluggy_user(42)          # não pode levantar
+    assert out["ok"] is True
+    assert out["items_synced"] == 1

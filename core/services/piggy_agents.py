@@ -658,8 +658,14 @@ BARAO_CDI_ANNUAL_PCT = float(os.getenv("CDI_ANNUAL_PCT", "10.5"))  # taxa de ref
 def _barao_detect_for_user(agent: dict[str, Any], today: date) -> int:
     """Soma o saldo parado nas contas correntes (OF) e, se passar do mínimo, estima
     o rendimento perdido no CDI e cutuca — 1x por mês (dedupe por YYYY-MM). NÃO
-    recomenda produto (posicionamento + regulatório): só mostra o custo de oportunidade."""
-    from db import record_agent_event
+    recomenda produto (posicionamento + regulatório): só mostra o custo de oportunidade.
+
+    Grava via upsert auto-corrigível (não o record first-write-wins): o evento é um
+    retrato agregado, então uma gravação anterior do mesmo mês que tenha pego o
+    saldo parcial precisa ser CORRIGIDA pela execução coerente seguinte — inclusive
+    a que já existe no banco de quem sincou antes deste fix. Só congela depois de
+    virar e-mail (emailed_at), que é artefato imutável."""
+    from db import record_or_refresh_agent_event
 
     user_id = agent["user_id"]
     cfg = agent.get("config") or {}
@@ -688,7 +694,7 @@ def _barao_detect_for_user(agent: dict[str, Any], today: date) -> int:
 
     rende_mes = round(idle * (cdi / 100.0) / 12.0, 2)
     ym = today.strftime("%Y-%m")
-    ok = record_agent_event(
+    ok = record_or_refresh_agent_event(
         agent["agent_id"], user_id, "barao",
         dedupe_key=f"parado:{ym}",
         payload={

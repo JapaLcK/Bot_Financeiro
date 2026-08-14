@@ -214,11 +214,14 @@ def sync_pluggy_user(user_id: int) -> dict:
     #   Faria Limer — agrega ações/FIIs de todas as conexões (dedupe rv_*:YYYY-MM);
     #   Barão       — agrega o saldo parado de todas as contas (dedupe parado:YYYY-MM).
     # Fail-soft por agente (nunca derruba o sync, e um não impede o outro).
+    # O import fica DENTRO do try: piggy_agents faz conversões no nível do módulo
+    # (ex.: int(AGENTS_INTERVAL_SEC)), então um env malformado explodiria aqui —
+    # depois dos dados financeiros já persistidos — e derrubaria o sync inteiro.
     if results:
-        from core.services.piggy_agents import run_faria_limer_once, run_barao_once
-        for nome, fn in (("faria", run_faria_limer_once), ("barao", run_barao_once)):
+        for nome in ("faria_limer", "barao"):
             try:
-                fn(user_id=user_id)
+                import core.services.piggy_agents as _agents
+                getattr(_agents, f"run_{nome}_once")(user_id=user_id)
             except Exception as exc:
                 print(f"[pluggy_sync] {nome} hook (user): {exc}")
 
