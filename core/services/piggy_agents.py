@@ -711,6 +711,11 @@ def _barao_detect_for_user(agent: dict[str, Any], today: date) -> int:
 
 def run_barao_once(today: date | None = None, user_id: int | None = None) -> dict:
     """Roda o Barão pra todos os agentes barao ativos (ou só um usuário)."""
+    # Honra o kill switch global aqui dentro (o runner): este é chamado direto do
+    # hook de sync_pluggy_user, fora do run_agents_for_user/run_agents_loop — sem
+    # isso o AGENTS_ENABLED=0 não seguraria o Barão no caminho de sync.
+    if not AGENTS_ENABLED:
+        return {"ok": True, "disabled": True, "agents": 0, "fired": 0}
     from db import list_users_with_active_agents
 
     today = today or date.today()
@@ -1114,11 +1119,15 @@ def run_agents_for_user(user_id: int, trigger: str = "of_sync") -> dict:
     (auditoria de assinaturas) e Banqueiro (aporte novo na caixinha vinculada),
     só pro usuário sincado.
 
-    NÃO inclui o Faria Limer de propósito: ele é whole-portfolio (agrega ações/FIIs
-    de TODAS as conexões) e mensal. Este hook roda por ITEM (sync_pluggy_item), então
-    dispararia com a carteira parcial no 1º item e o dedupe mensal congelaria totais/
-    concentração errados. O Faria roda num snapshot coerente: no fim de
-    sync_pluggy_user (sync completo) e no loop horário (run_all_agents_once).
+    Só entram aqui detectores de DELTA — os que olham o que aquele item acabou de
+    trazer. Agentes whole-portfolio ficam de fora de propósito: este hook roda por
+    ITEM (sync_pluggy_item, chamado em sequência por sync_pluggy_user), então um
+    agregado dispararia com o retrato PARCIAL do 1º item e o dedupe por período
+    congelaria o valor errado até virar o mês.
+      - Faria Limer (soma ações/FIIs de todas as conexões, dedupe rv_*:YYYY-MM);
+      - Barão (soma o saldo parado de todas as contas, dedupe parado:YYYY-MM).
+    Os dois rodam num snapshot coerente: no fim de sync_pluggy_user (sync completo)
+    e no loop horário (run_all_agents_once).
 
     Fail-soft por contrato — quem chama (pluggy_sync) não pode quebrar por
     causa de agente. Cada detector é isolado pra um não derrubar o outro.
@@ -1130,7 +1139,6 @@ def run_agents_for_user(user_id: int, trigger: str = "of_sync") -> dict:
         ("xerife", run_xerife_once),
         ("detetive", run_detetive_once),
         ("cofre", run_cofre_once),
-        ("barao", run_barao_once),
     ):
         try:
             out[kind] = fn(user_id=user_id)

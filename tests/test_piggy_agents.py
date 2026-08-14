@@ -299,26 +299,79 @@ def test_rv_portfolio_summary_usa_posicoes_passadas_sem_rebuscar(monkeypatch):
     assert summ["count"] == 2
 
 
-def test_hook_por_item_nao_dispara_faria_limer(monkeypatch):
-    # run_agents_for_user roda por ITEM do Pluggy. O Faria é whole-portfolio/mensal:
-    # rodar aqui grava um retrato parcial que o dedupe mensal congela. Ele deve ficar
-    # fora deste hook (roda no fim do sync completo + no loop horário). Os detectores
-    # de delta (xerife/detetive/cofre/barao) continuam rodando por item.
+def test_hook_por_item_so_roda_detectores_de_delta(monkeypatch):
+    # run_agents_for_user roda por ITEM do Pluggy. Agentes whole-portfolio (Faria
+    # Limer e Barão) agregam TODAS as conexões e dedupam por mês: rodar aqui grava
+    # um retrato parcial que o dedupe congela até virar o mês. Os dois ficam fora
+    # deste hook (rodam no fim do sync completo + no loop horário); só os
+    # detectores de delta (xerife/detetive/cofre) seguem por item.
     import core.services.piggy_agents as pa
 
     called = []
     monkeypatch.setattr(pa, "AGENTS_ENABLED", True)
-    for name in ("run_xerife_once", "run_detetive_once", "run_cofre_once", "run_barao_once"):
+    for name in ("run_xerife_once", "run_detetive_once", "run_cofre_once",
+                 "run_barao_once", "run_faria_limer_once"):
         monkeypatch.setattr(pa, name, (lambda n: (lambda **kw: called.append(n) or {"ok": True}))(name))
-    monkeypatch.setattr(
-        pa, "run_faria_limer_once",
-        lambda **kw: called.append("run_faria_limer_once") or {"ok": True},
-    )
 
     out = pa.run_agents_for_user(42, trigger="of_sync")
-    assert "run_faria_limer_once" not in called   # não roda no hook por-item
-    assert "faria_limer" not in out
-    assert {"xerife", "detetive", "cofre", "barao"} <= set(out)  # delta agents rodaram
+    assert "run_faria_limer_once" not in called
+    assert "run_barao_once" not in called          # agregado: fora do hook por-item
+    assert "faria_limer" not in out and "barao" not in out
+    assert {"xerife", "detetive", "cofre"} <= set(out)   # delta agents rodaram
+
+
+def test_sync_completo_roda_os_agregados_uma_vez(monkeypatch):
+    # No fim de sync_pluggy_user, com o snapshot já coerente, os dois agregados
+    # rodam — uma vez cada, pro usuário sincado.
+    import core.services.pluggy_sync as ps
+    import core.services.piggy_agents as pa
+
+    chamados = []
+    monkeypatch.setattr(ps, "get_open_finance_snapshot", lambda uid: {
+        "connections": [{"provider": "pluggy", "provider_item_id": "i1"},
+                        {"provider": "pluggy", "provider_item_id": "i2"}]})
+    monkeypatch.setattr(ps, "sync_pluggy_item", lambda item: {"ok": True})
+    monkeypatch.setattr(pa, "run_faria_limer_once",
+                        lambda **kw: chamados.append(("faria", kw.get("user_id"))) or {"ok": True})
+    monkeypatch.setattr(pa, "run_barao_once",
+                        lambda **kw: chamados.append(("barao", kw.get("user_id"))) or {"ok": True})
+
+    ps.sync_pluggy_user(42)
+    assert chamados == [("faria", 42), ("barao", 42)]   # um disparo de cada, no fim
+
+
+def test_sync_completo_um_agregado_nao_derruba_o_outro(monkeypatch):
+    # Fail-soft por agente: se o Faria explode, o Barão ainda roda e o sync conclui.
+    import core.services.pluggy_sync as ps
+    import core.services.piggy_agents as pa
+
+    chamados = []
+    monkeypatch.setattr(ps, "get_open_finance_snapshot", lambda uid: {
+        "connections": [{"provider": "pluggy", "provider_item_id": "i1"}]})
+    monkeypatch.setattr(ps, "sync_pluggy_item", lambda item: {"ok": True})
+    monkeypatch.setattr(pa, "run_faria_limer_once",
+                        lambda **kw: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(pa, "run_barao_once",
+                        lambda **kw: chamados.append("barao") or {"ok": True})
+
+    out = ps.sync_pluggy_user(42)
+    assert out["ok"] is True
+    assert chamados == ["barao"]
+
+
+def test_run_barao_once_respeita_kill_switch(monkeypatch):
+    # AGENTS_ENABLED=0 desliga o subsistema. Como o Barão passou a ser chamado
+    # direto do hook de sync (fora do run_agents_for_user), o guard tem que estar
+    # no próprio runner.
+    import core.services.piggy_agents as pa
+    monkeypatch.setattr(pa, "AGENTS_ENABLED", False)
+    monkeypatch.setattr(
+        pa, "_barao_detect_for_user",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("não deveria rodar")),
+    )
+    out = pa.run_barao_once(user_id=42)
+    assert out.get("disabled") is True
+    assert out.get("fired") == 0
 
 
 def test_taxa_do_mes_pondera_pelo_valor_inicial():
