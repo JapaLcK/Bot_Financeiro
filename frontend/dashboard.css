@@ -1578,6 +1578,29 @@ body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
 .ld-k { color:var(--text-3);flex-shrink:0; }
 .ld-v { color:var(--text);font-weight:600;text-align:right;word-break:break-word; }
 .modal.launch-detail .modal-acts { margin-top:auto;padding-top:22px; }
+
+/* Detalhe do "Sobrou este mês": reusa launch-detail, com linha de total
+   destacada e a explicação saldo × sobrou embaixo. */
+.modal.sobrou-detail { min-height:auto; }
+.sobrou-detail .msub { margin-bottom:14px; }
+.sobrou-detail .ld-v.sd-plus  { color:var(--green); }
+.sobrou-detail .ld-v.sd-minus { color:var(--text-2); }
+.sobrou-detail .ld-row.sd-total { border-top:2px solid var(--div);margin-top:4px;
+  padding-top:16px;font-size:1rem; }
+.sobrou-detail .ld-row.sd-total .ld-k { color:var(--text);font-weight:650; }
+.sobrou-detail .ld-row.sd-total .ld-v { font-size:1.15rem;font-weight:750; }
+.sobrou-detail .ld-v.pos { color:var(--green); }
+.sobrou-detail .ld-v.neg { color:var(--red); }
+.sd-note { margin-top:16px;font-size:.82rem;line-height:1.55;color:var(--text-2);
+  background:rgba(255,255,255,.04);border:1px solid var(--glass-border);
+  border-radius:12px;padding:13px 14px; }
+.sd-note b { color:var(--text);font-weight:650; }
+
+/* Card "Sobrou" clicável na Visão Geral. */
+.ov-stat-clickable { cursor:pointer;transition:border-color .15s,transform .15s; }
+.ov-stat-clickable:hover { border-color:rgba(198,241,26,.28);transform:translateY(-1px); }
+.ov-stat-clickable:focus-visible { outline:2px solid var(--neon);outline-offset:2px; }
+.ov-lbl-info { font-size:.9em;opacity:.5;vertical-align:middle; }
 .modal.launch-detail .modal-acts.ld-acts { justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px; }
 .ld-acts-right { display:flex;gap:10px;margin-left:auto; }
 .ld-del { background:transparent;border:1px solid var(--glass-border);color:#ff6b6b;
