@@ -39,17 +39,23 @@ A decisão é sempre sua.
 Toda mensagem é descritiva e devolve a decisão ao usuário ("é só o retrato — não
 é recomendação", "decisão sua"). Posicionamento + regulatório: sem palpite.
 
-## Arte que falta (a "sua parte")
+## Arte (ligada)
 
-Enquanto não chega, o **SVG de fallback** (`#ag-pig-faria_limer` — porquinho com
-tela de trading em alta) e o gradiente `.ag-bg-faria_limer` já funcionam no app,
-e o e-mail cai no medalhão-logo.
+A arte final já está plugada e é o que aparece em produção:
 
-Para plugar a arte final:
+- **Assets:** `frontend/brand/agents/faria_limer_hero.png` (banner do e-mail/card) e
+  `frontend/brand/agents/faria_limer.png` (medalhão do feed).
+- **App:** `"faria_limer"` está no set `_AGENT_ART` em `frontend/dashboard.js` e
+  `frontend/preview_agentes.html`.
+- **E-mail:** `"faria_limer"` está em `_AGENT_ART_KINDS` (medalhão) e mapeado em
+  `_AGENT_HERO` → `faria_limer_hero` em `core/services/email_service.py` (o label
+  "Faria Limer" também está lá).
 
-1. Subir `frontend/brand/agents/faria_limer.png` (sticker do medalhão) e
-   `faria_limer_hero.png` (banner 1200×600 do e-mail/card).
-2. Adicionar `"faria_limer"` ao set `_AGENT_ART` em `frontend/dashboard.js` e
-   `frontend/preview_agentes.html`.
-3. Adicionar `"faria_limer"` a `_AGENT_ART_KINDS` e o hero a `_AGENT_HERO` em
-   `core/services/email_service.py` (o label "Faria Limer" já está lá).
+O **SVG de fallback** (`#ag-pig-faria_limer` — porquinho com tela de trading em
+alta) e o gradiente `.ag-bg-faria_limer` seguem no código como rede de segurança
+para quando o PNG não carregar.
+
+> **Nota de design (pendência):** o `faria_limer.png` hoje é uma redução do hero
+> (paisagem ~300×150), enquanto os medalhões dos outros agentes são retratos
+> (~290×440, sticker vertical). Vale gerar um sticker vertical dedicado quando
+> houver uma arte de origem em retrato.
