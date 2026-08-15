@@ -998,3 +998,50 @@ def test_touch_nao_mexe_em_evento_ja_emailado(user_id):
         with c.cursor() as cur:
             cur.execute("select fired_at from agent_events where user_id=%s", (user_id,))
             assert cur.fetchone()["fired_at"] < datetime.now(timezone.utc) - timedelta(hours=5)
+
+
+def test_refresh_manual_segura_email_antes_da_espera(monkeypatch):
+    """P1 do Codex (5ª rodada, PR #51): refresh_and_sync_pluggy_user dispara o
+    PATCH na Pluggy e ESPERA até OF_REFRESH_WAIT_SEC (18s) antes de chamar
+    sync_pluggy_user. O touch de lá vem depois da espera — essa janela inteira
+    ficava descoberta. O hold tem que acontecer antes do PATCH."""
+    import db
+    import core.services.pluggy_sync as ps
+
+    ordem = []
+    monkeypatch.setattr(ps, "get_open_finance_snapshot", lambda uid: {
+        "connections": [{"provider": "pluggy", "provider_item_id": "i1"}]})
+    monkeypatch.setattr(ps, "create_pluggy_api_key", lambda: "k")
+    monkeypatch.setattr(ps, "update_pluggy_item",
+                        lambda item, key=None: ordem.append("PATCH") or True)
+    monkeypatch.setattr(ps, "get_pluggy_item", lambda item, key=None: {"status": "UPDATED"})
+    monkeypatch.setattr(ps, "sync_pluggy_user",
+                        lambda uid: ordem.append("sync") or {"ok": True})
+    monkeypatch.setattr(db, "touch_pending_agent_events",
+                        lambda uid, kinds: ordem.append("hold") or 1)
+
+    ps.refresh_and_sync_pluggy_user(42, wait_seconds=0, poll_interval=0.01)
+
+    assert "hold" in ordem, "não segurou o e-mail no refresh manual"
+    assert ordem.index("hold") < ordem.index("PATCH"), \
+        f"hold precisa vir ANTES do PATCH (e da espera): {ordem}"
+
+
+def test_hold_agregados_e_fail_soft(monkeypatch):
+    """O hold nunca pode derrubar o sync — é proteção, não requisito."""
+    import db
+    import core.services.pluggy_sync as ps
+
+    def _boom(uid, kinds):
+        raise RuntimeError("db fora do ar")
+
+    monkeypatch.setattr(db, "touch_pending_agent_events", _boom)
+    ps._hold_aggregate_emails(42, "teste")          # não pode levantar
+
+    monkeypatch.setattr(ps, "get_open_finance_snapshot", lambda uid: {
+        "connections": [{"provider": "pluggy", "provider_item_id": "i1"}]})
+    monkeypatch.setattr(ps, "sync_pluggy_item", lambda item: {"ok": True})
+    import core.services.piggy_agents as pa
+    monkeypatch.setattr(pa, "run_faria_limer_once", lambda **k: {"ok": True})
+    monkeypatch.setattr(pa, "run_barao_once", lambda **k: {"ok": True})
+    assert ps.sync_pluggy_user(42)["ok"] is True

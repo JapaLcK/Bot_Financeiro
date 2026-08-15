@@ -198,6 +198,36 @@ def refresh_all_pluggy_items(user_id: int | None = None) -> dict:
     return {"triggered": triggered, "total": len(items)}
 
 
+def _hold_aggregate_emails(user_id: int, origem: str) -> None:
+    """Segura o e-mail dos agentes whole-portfolio enquanto a carteira se mexe.
+
+    Empurra a carência de estabilidade dos eventos pendentes deles, o que os
+    deixa "imaturos" e portanto não reivindicáveis pelo runner de e-mail. Tem que
+    ser chamado no PRIMEIRO ponto de cada caminho que mexe na carteira, antes de
+    qualquer espera ou I/O remoto:
+
+      • sync_pluggy_user        — antes de buscar os itens;
+      • refresh_and_sync_...    — antes do PATCH na Pluggy, porque esse fluxo
+        ainda espera OF_REFRESH_WAIT_SEC (18s por padrão) até os dados novos
+        aparecerem, e essa espera inteira ficaria descoberta se só o sync
+        segurasse.
+
+    Nenhum carimbo de conclusão (last_sync_at) enxerga essas janelas — ele só
+    existe depois que um item termina. Sem isso, um evento agregado já maduro
+    seria emailado no meio da atualização e o emailed_at recusaria a correção
+    pelo resto do mês.
+
+    Fail-soft por contrato: nunca levanta. No pior caso o e-mail sai um tick
+    depois — o oposto de uma flag de "sync em progresso", que se vazasse
+    (processo morto no meio) bloquearia o envio pra sempre."""
+    try:
+        from db import touch_pending_agent_events
+        from core.services.piggy_agents import _AGENT_EMAIL_MIN_AGE_MIN
+        touch_pending_agent_events(user_id, list(_AGENT_EMAIL_MIN_AGE_MIN))
+    except Exception as exc:
+        print(f"[pluggy_sync] hold agregados ({origem}): {exc}")
+
+
 def sync_pluggy_user(user_id: int) -> dict:
     """Sincroniza todos os itens Pluggy de um usuário (útil pra sync manual/testes)."""
     snapshot = get_open_finance_snapshot(user_id)
@@ -206,18 +236,8 @@ def sync_pluggy_user(user_id: int) -> dict:
         for c in snapshot.get("connections", [])
         if (c.get("provider") == "pluggy" and c.get("provider_item_id"))
     ]
-    # Marca o INÍCIO do sync empurrando a carência dos agregados pendentes: os
-    # itens ainda vão levar segundos buscando dados na Pluggy antes do primeiro
-    # commit, e até lá nenhum last_sync_at denuncia que há sync em curso — um
-    # evento já maduro poderia ser emailado bem nessa janela e congelar o mês.
-    # Fail-soft: no pior caso o e-mail sai um tick depois.
     if items:
-        try:
-            from db import touch_pending_agent_events
-            from core.services.piggy_agents import _AGENT_EMAIL_MIN_AGE_MIN
-            touch_pending_agent_events(user_id, list(_AGENT_EMAIL_MIN_AGE_MIN))
-        except Exception as exc:
-            print(f"[pluggy_sync] touch agregados (user): {exc}")
+        _hold_aggregate_emails(user_id, "sync_user")
 
     results = [sync_pluggy_item(item_id) for item_id in items]
 
@@ -300,6 +320,11 @@ def refresh_and_sync_pluggy_user(
         # Sem banco Pluggy (ex.: só conexão mock): nada a refrescar, só sincroniza.
         result = sync_pluggy_user(user_id)
         return {"ok": True, "refreshed": 0, "waited": False, "still_updating": 0, **result}
+
+    # Segura o e-mail dos agregados ANTES do PATCH: a espera do passo 2 leva até
+    # wait_seconds (18s por padrão) e o touch de sync_pluggy_user só acontece
+    # depois dela — essa janela inteira ficaria descoberta.
+    _hold_aggregate_emails(user_id, "refresh_user")
 
     api_key = create_pluggy_api_key()
 
