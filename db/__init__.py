@@ -255,7 +255,6 @@ from .agents import (
     record_or_refresh_agent_event,
     mark_agent_event_stale,
     claim_agent_events_for_email,
-    suppress_agent_events,
     unclaim_agent_events,
     hold_agent_emails,
     list_agent_events,
@@ -266,7 +265,6 @@ from .agents import (
     mark_events_emailed,
     touch_agent_emailed,
     set_agent_email_enabled,
-    clear_agent_email_suppression,
     list_users_with_active_agents,
 )
 
@@ -535,9 +533,9 @@ __all__ = [
     "AGENT_KINDS", "list_agents", "get_agent", "count_active_agents",
     "activate_agent", "pause_agent", "record_agent_event",
     "record_or_refresh_agent_event", "mark_agent_event_stale",
-    "claim_agent_events_for_email", "suppress_agent_events",
+    "claim_agent_events_for_email",
     "unclaim_agent_events", "hold_agent_emails", "list_agent_events",
     "mark_agent_events_seen", "agents_summary", "list_users_with_active_agents",
     "list_agents_pending_email", "list_unemailed_events", "mark_events_emailed",
-    "touch_agent_emailed", "set_agent_email_enabled", "clear_agent_email_suppression",
+    "touch_agent_emailed", "set_agent_email_enabled",
 ]

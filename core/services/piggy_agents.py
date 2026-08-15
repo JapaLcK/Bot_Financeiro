@@ -1038,7 +1038,7 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
     de cadência do kind e o opt-out. Mantém e-mails separados por agente sem spam.
     Roda no tick horário, depois dos detectores."""
     from db import (list_agents_pending_email, list_unemailed_events,
-                    claim_agent_events_for_email, suppress_agent_events,
+                    claim_agent_events_for_email,
                     unclaim_agent_events, touch_agent_emailed,
                     get_user_email, get_auth_user)
     from core.services.plan_service import agent_kind_allowed, agents_ui_enabled
@@ -1050,7 +1050,7 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
         """Só eventos que já venceram a carência do kind (podem virar/contar como
         e-mail). Antes disso o evento fica pendente — janela em que o upsert
         auto-corrigível ainda pode consertar um snapshot parcial (marcar
-        emailed_at cedo, até na supressão, congelaria o valor errado).
+        emailed_at cedo congelaria o valor errado).
 
         Pros agregados valem duas travas a mais, porque um evento antigo cujo
         payload NÃO muda no meio de um sync continua "estável" pela idade:
@@ -1082,17 +1082,12 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
         try:
             if not (agents_ui_enabled(user_id) and agent_kind_allowed(user_id, kind)):
                 continue
-            # Opt-out por agente: se o usuário desligou o e-mail desse agente, o feed
-            # continua mas o e-mail é suprimido (marca como enviado pra não acumular).
+            # Opt-out por agente: só pula. A preferência é consultada fresca aqui,
+            # a cada tick — nada é carimbado no evento. Religar (por qualquer
+            # caminho) passa a ter efeito imediato no próximo tick, sem precisar
+            # sincronizar cópia nenhuma. O evento segue vivo no feed.
             cfg = a.get("config") or {}
             if not cfg.get("email_enabled", True):
-                # Opt-out: suprime SEM marcar emailed_at (suppressed_at só tira da
-                # fila de e-mail). O evento segue vivo no feed — o upsert ainda
-                # corrige e a limpeza de obsoleto ainda remove. Por isso dispensa
-                # carência e claim condicional: suprimir não congela nada.
-                pend = list_unemailed_events(agent_id)
-                if pend:
-                    suppress_agent_events([e["id"] for e in pend])
                 continue
             interval_h = _AGENT_EMAIL_INTERVAL_H.get(kind, _DEFAULT_EMAIL_INTERVAL_H)
             last = a.get("last_emailed_at")
@@ -1103,8 +1098,9 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
                 continue
             auth = get_auth_user(user_id)
             if auth and auth.get("engagement_opt_out"):
-                # Opt-out global: mesma supressão viva (sem congelar o feed).
-                suppress_agent_events([e["id"] for e in events])
+                # Opt-out global: idem — só pula. Preferência lida fresca, nada
+                # carimbado. Religar pelo chat/settings/resubscribe volta a
+                # enviar no próximo tick sem sincronização.
                 continue
             email = get_user_email(user_id)
             if not email:

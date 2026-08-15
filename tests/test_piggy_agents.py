@@ -62,7 +62,6 @@ def _arm_reporter(monkeypatch, *, opted_out: bool):
     # claim devolve todos: simula "nenhum evento mudou entre leitura e envio"
     monkeypatch.setattr(db, "claim_agent_events_for_email",
                         lambda evs: [e["id"] for e in evs])
-    monkeypatch.setattr(db, "suppress_agent_events", lambda ids: len(ids))
     monkeypatch.setattr(db, "touch_agent_emailed", lambda agent_id: None)
     monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": opted_out})
     monkeypatch.setattr(db, "get_user_email", lambda uid: "user@example.com")
@@ -530,10 +529,10 @@ def test_email_pula_evento_que_mudou_entre_leitura_e_claim(monkeypatch):
     assert out["sent"] == 0
 
 
-def test_optout_suprime_sem_congelar(monkeypatch):
-    # Opt-out (por agente e global) usa suppress_agent_events, NÃO o claim: o
-    # evento sai da fila de e-mail mas segue vivo no feed (emailed_at continua
-    # null → upsert ainda corrige e a limpeza de obsoleto ainda remove).
+def test_optout_apenas_pula_sem_carimbar(monkeypatch):
+    # Opt-out (por agente ou global): o runner só PULA. Não envia, não reivindica
+    # e não grava nada no evento — a preferência é lida fresca a cada tick, então
+    # religar tem efeito no próximo sem estado a sincronizar.
     from datetime import datetime, timedelta, timezone
     import db
     import core.services.piggy_agents as pa
@@ -543,31 +542,34 @@ def test_optout_suprime_sem_congelar(monkeypatch):
     now = datetime(2026, 8, 13, 12, 0, tzinfo=timezone.utc)
 
     def _arm(*, email_enabled=True, optout=False):
-        suppressed, claimed = [], []
+        sent, claimed = [], []
         monkeypatch.setattr(db, "list_agents_pending_email", lambda: [
             {"agent_id": 9, "user_id": 42, "kind": "faria_limer",
              "config": {"email_enabled": email_enabled}, "last_emailed_at": None}])
         monkeypatch.setattr(db, "list_unemailed_events", lambda agent_id: [
             {"id": 7, "payload": {"titulo": "T", "mensagem": "M"},
-             "fired_at": now - timedelta(hours=2)}])
-        monkeypatch.setattr(db, "suppress_agent_events",
-                            lambda ids: suppressed.extend(ids) or len(ids))
+             "fired_at": now - timedelta(hours=2), "email_hold_until": None}])
+        monkeypatch.setattr(db, "user_synced_within", lambda uid, mins: False)
         monkeypatch.setattr(db, "claim_agent_events_for_email",
-                            lambda evs: claimed.extend(e["id"] for e in evs) or [])
+                            lambda evs: claimed.extend(e["id"] for e in evs) or [e["id"] for e in evs])
+        monkeypatch.setattr(db, "unclaim_agent_events", lambda ids: len(ids))
         monkeypatch.setattr(db, "touch_agent_emailed", lambda agent_id: None)
         monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": optout})
         monkeypatch.setattr(db, "get_user_email", lambda uid: "user@example.com")
         monkeypatch.setattr(ps, "agents_ui_enabled", lambda *a, **k: True)
         monkeypatch.setattr(ps, "agent_kind_allowed", lambda *a, **k: True)
-        monkeypatch.setattr(es, "send_agent_report_email",
-                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("não envia")))
+        monkeypatch.setattr(es, "send_agent_report_email", lambda *a, **k: sent.append(a) or True)
+        # se o código antigo tentar suprimir, o teste explode (a função nem existe mais)
         pa.run_agent_emails_once(now=now)
-        return suppressed, claimed
+        return sent, claimed
 
-    sup, cla = _arm(email_enabled=False)
-    assert sup == [7] and cla == []      # e-mail off: suprime, sem claim/congelamento
-    sup, cla = _arm(optout=True)
-    assert sup == [7] and cla == []      # opt-out global: idem
+    sent, cla = _arm(email_enabled=False)
+    assert sent == [] and cla == []      # e-mail off por agente: nem envia nem reivindica
+    sent, cla = _arm(optout=True)
+    assert sent == [] and cla == []      # opt-out global: idem
+    # controle: sem opt-out, envia normalmente
+    sent, cla = _arm()
+    assert len(sent) == 1 and cla == [7]
 
 
 def test_faria_ignora_posicoes_fora_do_brl(monkeypatch):
@@ -623,7 +625,7 @@ def test_record_or_refresh_sql_roundtrip(user_id):
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "select payload, fired_at, suppressed_at, seen_at, emailed_at"
+                    "select payload, fired_at, seen_at, emailed_at"
                     " from agent_events where agent_id=%s and dedupe_key=%s",
                     (agent_id, key),
                 )
@@ -640,19 +642,18 @@ def test_record_or_refresh_sql_roundtrip(user_id):
         agent_id, user_id, "faria_limer", key, {"v": 1}, valor_impacto=0.0) is False
     assert _row()["fired_at"] == fired1
 
-    # 3) suprimido + já visto: payload novo ainda corrige, limpa suppressed_at
-    #    e renova fired_at (seen_at não congela — só o e-mail congela)
+    # 3) já visto: payload novo ainda corrige e renova fired_at (seen_at não
+    #    congela — só o e-mail congela)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "update agent_events set suppressed_at=now(), seen_at=now(),"
+                "update agent_events set seen_at=now(),"
                 " fired_at=now() - interval '3 hours' where agent_id=%s", (agent_id,))
         conn.commit()
     assert db.record_or_refresh_agent_event(
         agent_id, user_id, "faria_limer", key, {"v": 2}, valor_impacto=0.0) is True
     r = _row()
     assert r["payload"] == {"v": 2}
-    assert r["suppressed_at"] is None      # supressão vale pro snapshot, não pro mês
     assert r["seen_at"] is not None        # visto no feed não impede a correção
     assert r["fired_at"] > fired1          # idade reiniciou (payload mudou)
 
@@ -670,8 +671,8 @@ def test_record_or_refresh_sql_roundtrip(user_id):
     assert db.list_unemailed_events(agent_id) == [], "evento emailado não pode voltar pra fila"
 
 
-def test_claim_unclaim_suppress_delete_sql(user_id):
-    """Claim condicional, unclaim, supressão e limpeza — contra o banco real."""
+def test_claim_unclaim_delete_sql(user_id):
+    """Claim condicional, unclaim e limpeza — contra o banco real."""
     import db
     from db import get_conn
     agent_id = _mk_agent(user_id, "barao")
@@ -694,13 +695,6 @@ def test_claim_unclaim_suppress_delete_sql(user_id):
     # unclaim devolve pra fila (envio falhou → nada foi enviado)
     assert db.unclaim_agent_events(claimed) == 1
     assert len(db.list_unemailed_events(agent_id)) == 1
-
-    # supressão tira da fila SEM congelar: o refresh ainda corrige
-    assert db.suppress_agent_events(claimed) == 1
-    assert db.list_unemailed_events(agent_id) == []
-    assert db.record_or_refresh_agent_event(
-        agent_id, user_id, "barao", key, {"v": 2}, valor_impacto=1.0) is True
-    assert len(db.list_unemailed_events(agent_id)) == 1    # upsert limpou a supressão
 
     # condição que deixou de valer: sai do feed e das filas, mas a linha fica
     # (soft delete) pra preservar o emailed_at, que é o dedupe de entrega
@@ -827,7 +821,6 @@ def test_email_do_barao_segura_evento_recem_mudado(monkeypatch):
             {"id": 7, "payload": {"titulo": "T", "mensagem": "M"}, "fired_at": fired_at}])
         monkeypatch.setattr(db, "claim_agent_events_for_email",
                             lambda evs: claimed.extend(e["id"] for e in evs) or [e["id"] for e in evs])
-        monkeypatch.setattr(db, "suppress_agent_events", lambda ids: len(ids))
         monkeypatch.setattr(db, "unclaim_agent_events", lambda ids: len(ids))
         monkeypatch.setattr(db, "touch_agent_emailed", lambda aid: None)
         monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": False})
@@ -858,7 +851,6 @@ def _arm_agg_email(monkeypatch, *, kind, fired_at, sync_recente, now):
     monkeypatch.setattr(db, "user_synced_within", lambda uid, mins: sync_recente)
     monkeypatch.setattr(db, "claim_agent_events_for_email",
                         lambda evs: claimed.extend(e["id"] for e in evs) or [e["id"] for e in evs])
-    monkeypatch.setattr(db, "suppress_agent_events", lambda ids: len(ids))
     monkeypatch.setattr(db, "unclaim_agent_events", lambda ids: len(ids))
     monkeypatch.setattr(db, "touch_agent_emailed", lambda aid: None)
     monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": False})
@@ -1145,7 +1137,6 @@ def test_ripe_respeita_o_hold_mesmo_com_evento_maduro(monkeypatch):
              "fired_at": velho, "email_hold_until": hold_until}])
         monkeypatch.setattr(db, "user_synced_within", lambda uid, mins: False)
         monkeypatch.setattr(db, "claim_agent_events_for_email", lambda evs: [e["id"] for e in evs])
-        monkeypatch.setattr(db, "suppress_agent_events", lambda ids: len(ids))
         monkeypatch.setattr(db, "unclaim_agent_events", lambda ids: len(ids))
         monkeypatch.setattr(db, "touch_agent_emailed", lambda aid: None)
         monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": False})
@@ -1391,121 +1382,74 @@ def test_invariante_evento_obsoleto_nao_e_reivindicado_nem_marcado_visto(user_id
     assert int(db.agents_summary(user_id)["nao_lidos"]) == 1
 
 
-def test_religar_email_reabre_evento_com_payload_estavel(user_id):
-    """Invariante: religar o e-mail volta a entregar no MESMO mês.
+def test_religar_qualquer_caminho_volta_a_entregar_sem_estado(pro_user_id):
+    """Invariante: religar o e-mail — por QUALQUER caminho — volta a entregar no
+    mês corrente, SEM precisar limpar carimbo nenhum.
 
-    A supressão era desfeita só pelo upsert, que exige mudança de payload. Mas
-    um retrato ESTÁVEL (dinheiro parado que segue igual) reescreve payload
-    idêntico — o update não dispara e a supressão sobreviveria até virar o mês,
-    deixando quem religou sem receber nada. Por isso quem limpa é o religar."""
+    A preferência (config.email_enabled / engagement_opt_out) é a única fonte da
+    verdade e é lida fresca no runner. Não há mais suppressed_at a sincronizar —
+    era daí que vinha a cadeia de bugs (religar por agente, global, sync_...).
+    O teste exercita os dois caminhos de preferência num payload ESTÁVEL, que é
+    onde o esquema antigo falhava (upsert não dispara, então nada limpava).
+
+    Usa pro_user_id porque o opt-out global escreve em auth_accounts — o gate
+    engagement_opt_out só existe pra usuário com essa linha."""
     import db
-    from db import get_conn
+    user_id = pro_user_id
 
     ag = db.activate_agent(user_id, "barao")
     key = "parado:2026-08"
     payload = {"tipo": "parado", "idle": 21500.0, "titulo": "R$ 21.500,00 parado"}
-    assert db.record_or_refresh_agent_event(
-        ag["id"], user_id, "barao", key, payload, valor_impacto=188.13) is True
-
-    def _sup():
-        with get_conn() as c:
-            with c.cursor() as cur:
-                cur.execute("select suppressed_at from agent_events where agent_id=%s",
-                            (ag["id"],))
-                return cur.fetchone()["suppressed_at"]
-
-    # usuário desliga o e-mail: o tick suprime o evento pendente
-    assert db.set_agent_email_enabled(user_id, "barao", False) is True
-    assert db.suppress_agent_events([e["id"] for e in db.list_unemailed_events(ag["id"])]) == 1
-    assert _sup() is not None
-    assert db.list_unemailed_events(ag["id"]) == []
-
-    # ticks seguintes com o MESMO valor: o upsert não dispara (payload idêntico)
-    for _ in range(3):
-        assert db.record_or_refresh_agent_event(
-            ag["id"], user_id, "barao", key, payload, valor_impacto=188.13) is False
-    assert _sup() is not None, "sem mudança de payload, só o religar pode limpar"
-
-    # usuário religa: o evento volta pra fila no mesmo mês
-    assert db.set_agent_email_enabled(user_id, "barao", True) is True
-    assert _sup() is None, "religar não reabriu o evento — usuário ficaria sem e-mail no mês"
+    db.record_or_refresh_agent_event(ag["id"], user_id, "barao", key, payload, valor_impacto=188.13)
     assert len(db.list_unemailed_events(ag["id"])) == 1
-    assert [a for a in db.list_agents_pending_email() if a["agent_id"] == ag["id"]] != []
 
+    def _entregaria():
+        # o evento está na fila E o runner passaria pelo gate de preferência?
+        na_fila = len(db.list_unemailed_events(ag["id"])) == 1
+        cfg = (db.get_agent(user_id, "barao") or {}).get("config") or {}
+        auth = db.get_auth_user(user_id) or {}
+        gate = cfg.get("email_enabled", True) and not auth.get("engagement_opt_out")
+        return na_fila and gate
 
-def test_invariante_qualquer_caminho_de_religar_reabre_o_evento(user_id):
-    """Invariante: religar o e-mail — por QUALQUER caminho — volta a entregar no
-    mês corrente.
+    assert _entregaria()
 
-    São dois: por agente (set_agent_email_enabled) e global
-    (set_engagement_opt_out, que atende configurações, o "reativar emails" do
-    chat e o resubscribe). Corrigi só o primeiro antes; o global ficou de fora e
-    o Codex pegou. O teste cobre os dois pra não sobrar caminho."""
-    import db
-    from db import get_conn
+    # caminho 1 — desliga/religa por agente. O evento nunca sai da fila (ele é
+    # só filtrado no gate); ao religar, entrega volta sem tocar em nada.
+    db.set_agent_email_enabled(user_id, "barao", False)
+    assert not _entregaria()
+    for _ in range(3):  # ticks com payload idêntico — onde o esquema antigo travava
+        db.record_or_refresh_agent_event(ag["id"], user_id, "barao", key, payload, valor_impacto=188.13)
+    db.set_agent_email_enabled(user_id, "barao", True)
+    assert _entregaria(), "religar por agente não voltou a entregar"
 
-    payload = {"tipo": "parado", "idle": 21500.0, "titulo": "R$ 21.500,00 parado"}
-
-    def _preparar(kind):
-        ag = db.activate_agent(user_id, kind)
-        key = f"parado:2026-08:{kind}"
-        db.record_or_refresh_agent_event(ag["id"], user_id, kind, key,
-                                         payload, valor_impacto=188.13)
-        ids = [e["id"] for e in db.list_unemailed_events(ag["id"])]
-        assert db.suppress_agent_events(ids) == 1
-        assert db.list_unemailed_events(ag["id"]) == []
-        return ag
-
-    # caminho 1 — por agente
-    ag = _preparar("barao")
-    assert db.set_agent_email_enabled(user_id, "barao", True) is True
-    assert len(db.list_unemailed_events(ag["id"])) == 1, "religar por agente não reabriu"
-
-    # caminho 2 — global (é o que o resubscribe e a tela de settings chamam)
-    db.suppress_agent_events([e["id"] for e in db.list_unemailed_events(ag["id"])])
-    assert db.list_unemailed_events(ag["id"]) == []
+    # caminho 2 — opt-out global (settings / chat / resubscribe passam por aqui)
+    db.set_engagement_opt_out(user_id, True)
+    assert not _entregaria()
     db.set_engagement_opt_out(user_id, False)
-    assert len(db.list_unemailed_events(ag["id"])) == 1, "religar global não reabriu"
+    assert _entregaria(), "religar global não voltou a entregar"
 
 
-def test_reabertura_nao_ressuscita_antigo_obsoleto_nem_emailado(user_id):
-    """Os recortes da reabertura: só o mês corrente, nada obsoleto, nada entregue.
-
-    Sem eles, quem passou meses com o e-mail desligado receberia tudo de uma vez
-    ao religar — e alertas que já não valem voltariam junto."""
+def test_fila_de_email_e_so_do_mes_corrente(user_id):
+    """A fila filtra por fired_at do mês: evento de mês passado sai sozinho, sem
+    carimbo. É o que evita avalanche pra quem religa após meses e o acúmulo de
+    fila — o papel que o suppressed_at cumpria, agora sem estado a manter."""
     import db
     from db import get_conn
+    from datetime import datetime, timedelta, timezone
 
     ag = db.activate_agent(user_id, "barao")
-
-    def _evento(key, **marcas):
-        db.record_or_refresh_agent_event(ag["id"], user_id, "barao", key,
-                                         {"idle": 1.0, "k": key}, valor_impacto=1.0)
-        with get_conn() as c:
-            with c.cursor() as cur:
-                cur.execute("select id from agent_events where agent_id=%s and dedupe_key=%s",
-                            (ag["id"], key))
-                ev_id = cur.fetchone()["id"]
-                cur.execute("update agent_events set suppressed_at=now() where id=%s", (ev_id,))
-                for col, val in marcas.items():
-                    cur.execute(f"update agent_events set {col}=%s where id=%s", (val, ev_id))
-            c.commit()
-        return ev_id
-
-    from datetime import datetime, timedelta, timezone
-    mes_passado = datetime.now(timezone.utc) - timedelta(days=45)
-    antigo   = _evento("parado:antigo", fired_at=mes_passado)
-    obsoleto = _evento("parado:obsoleto", stale_at=datetime.now(timezone.utc))
-    entregue = _evento("parado:entregue", emailed_at=datetime.now(timezone.utc))
-    vivo     = _evento("parado:vivo")
-
-    assert db.clear_agent_email_suppression(user_id) == 1, "devia reabrir só o evento vivo"
-
+    db.record_or_refresh_agent_event(ag["id"], user_id, "barao", "parado:corrente",
+                                     {"idle": 1.0}, valor_impacto=1.0)
+    db.record_or_refresh_agent_event(ag["id"], user_id, "barao", "parado:passado",
+                                     {"idle": 2.0}, valor_impacto=1.0)
     with get_conn() as c:
         with c.cursor() as cur:
-            cur.execute("select id, suppressed_at from agent_events where agent_id=%s", (ag["id"],))
-            sup = {r["id"]: r["suppressed_at"] for r in cur.fetchall()}
-    assert sup[vivo] is None, "evento vivo do mês devia reabrir"
-    assert sup[antigo] is not None, "evento de mês passado não pode voltar"
-    assert sup[obsoleto] is not None, "evento obsoleto não pode voltar"
-    assert sup[entregue] is not None, "evento já entregue não pode voltar"
+            cur.execute("update agent_events set fired_at = %s where dedupe_key='parado:passado'",
+                        (datetime.now(timezone.utc) - timedelta(days=45),))
+        c.commit()
+
+    fila = db.list_unemailed_events(ag["id"])
+    assert len(fila) == 1
+    assert fila[0]["payload"] == {"idle": 1.0}, "só o evento do mês corrente entra na fila"
+    # e o de mês passado continua no feed (não foi apagado, só saiu da fila)
+    assert len(db.list_agent_events(user_id, limit=10)) == 2

@@ -199,9 +199,8 @@ def record_or_refresh_agent_event(
     (list_agents_pending_email / list_unemailed_events) — não aqui.
     Retorna True se inseriu ou atualizou.
 
-    Snapshot novo também LIMPA suppressed_at: a supressão vale pro conteúdo que foi
-    suprimido, não pra dedupe_key até o fim do mês — senão um opt-out que durou um
-    tick engoliria o e-mail do mês inteiro mesmo depois do usuário religar.
+    Snapshot novo também LIMPA stale_at (ressuscita um evento que tinha deixado de
+    valer e voltou a valer).
 
     fired_at aqui significa "última MUDANÇA do snapshot": o update só dispara (e só
     renova fired_at) quando payload/valor_impacto realmente mudam. É o que faz a
@@ -222,7 +221,6 @@ def record_or_refresh_agent_event(
                   set payload = excluded.payload,
                       valor_impacto = excluded.valor_impacto,
                       fired_at = now(),
-                      suppressed_at = null,
                       stale_at = null
                   where agent_events.stale_at is not null
                      or agent_events.payload is distinct from excluded.payload
@@ -285,30 +283,6 @@ def unclaim_agent_events(event_ids: list[int]) -> int:
         with conn.cursor() as cur:
             cur.execute(
                 "update agent_events set emailed_at = null where id = any(%s)",
-                (event_ids,),
-            )
-            n = cur.rowcount
-        conn.commit()
-    return n
-
-
-def suppress_agent_events(event_ids: list[int]) -> int:
-    """Tira eventos da fila de e-mail SEM congelá-los (opt-out do agente/global).
-
-    Diferente do claim/emailed_at: suppressed_at só suprime a entrega — o evento
-    segue vivo no feed, o upsert auto-corrigível ainda atualiza e a limpeza de
-    obsoleto ainda remove (ambos checam apenas emailed_at). Incondicional de
-    propósito: suprimir uma linha recém-refrescada não congela nada, então não
-    precisa do claim condicional nem de carência. Retorna quantos marcou."""
-    if not event_ids:
-        return 0
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                update agent_events set suppressed_at = now()
-                where id = any(%s) and emailed_at is null and suppressed_at is null
-                """,
                 (event_ids,),
             )
             n = cur.rowcount
@@ -446,8 +420,8 @@ def list_agents_pending_email() -> list[dict[str, Any]]:
                        count(e.id) as pendentes
                 from agents a
                 join agent_events e on e.agent_id = a.id
-                  and e.emailed_at is null and e.suppressed_at is null
-                  and e.stale_at is null
+                  and e.emailed_at is null and e.stale_at is null
+                  and e.fired_at >= date_trunc('month', now())
                 where a.status = 'active'
                 group by a.id, a.user_id, a.kind, a.config, a.last_emailed_at
                 """,
@@ -456,16 +430,19 @@ def list_agents_pending_email() -> list[dict[str, Any]]:
 
 
 def list_unemailed_events(agent_id: int, limit: int = 20) -> list[dict[str, Any]]:
-    """Eventos do agente ainda na fila de e-mail (não enviados e não suprimidos),
-    mais recentes primeiro."""
+    """Eventos do agente elegíveis a e-mail, mais recentes primeiro.
+
+    Só o mês corrente (fired_at): evento que atravessou a virada do mês sem ser
+    enviado é notícia velha de agente mensal — sai da fila sozinho, sem precisar
+    de carimbo. É também o que evita avalanche pra quem religa após meses."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 select id, kind, payload, valor_impacto, fired_at, email_hold_until
                 from agent_events
-                where agent_id = %s and emailed_at is null and suppressed_at is null
-                  and stale_at is null
+                where agent_id = %s and emailed_at is null and stale_at is null
+                  and fired_at >= date_trunc('month', now())
                 order by fired_at desc
                 limit %s
                 """,
@@ -497,54 +474,13 @@ def touch_agent_emailed(agent_id: int) -> None:
         conn.commit()
 
 
-def clear_agent_email_suppression(user_id: int, kind: str | None = None) -> int:
-    """Reabre os eventos suprimidos quando o usuário volta a querer e-mail.
-
-    Ponto único dos dois caminhos de religar:
-      • por agente  — set_agent_email_enabled(..., True)
-      • global      — set_engagement_opt_out(..., False), que atende a tela de
-        configurações, o "reativar emails" do chat e o resubscribe do e-mail.
-    `kind=None` cobre todos os agentes (é o caso do religar global).
-
-    Precisa existir porque a supressão só era desfeita pelo upsert, e o upsert
-    exige mudança de payload: um retrato ESTÁVEL (o dinheiro parado que segue o
-    mesmo) reescreve payload idêntico, o update não dispara, e quem religou
-    ficaria sem receber até virar o mês.
-
-    Recortes deliberados: só o MÊS CORRENTE (quem passou meses desligado não deve
-    receber tudo de uma vez ao religar), nada obsoleto (stale_at) e nada já
-    entregue (emailed_at). Retorna quantos eventos reabriu."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                update agent_events set suppressed_at = null
-                where user_id = %s
-                  and (%s::text is null or kind = %s)
-                  and suppressed_at is not null
-                  and emailed_at is null and stale_at is null
-                  and fired_at >= date_trunc('month', now())
-                """,
-                (user_id, kind, kind),
-            )
-            n = cur.rowcount
-        conn.commit()
-    return n
-
-
 def set_agent_email_enabled(user_id: int, kind: str, enabled: bool) -> bool:
     """Liga/desliga o envio de e-mail desse agente (grava em config.email_enabled).
     Feed continua sempre; só o e-mail proativo é suprimido quando desligado.
 
-    RELIGAR limpa o suppressed_at dos eventos pendentes desse kind. Sem isso o
-    religamento não teria efeito no mês corrente: a supressão só era desfeita
-    pelo upsert, que exige mudança de payload — e um retrato estável (o dinheiro
-    parado que continua o mesmo) reescreve payload IDÊNTICO, então o update não
-    dispara e a supressão sobreviveria até virar o mês. Aqui é o ponto certo:
-    quem religa expressa a intenção de voltar a receber, tenha o valor mudado
-    ou não.
-
-    Evento já emailado não é tocado (nada a reabrir). Retorna False se o usuário
+    Nada além da preferência é gravado: o runner de e-mail (run_agent_emails_once)
+    consulta config.email_enabled fresco a cada tick, então religar tem efeito
+    imediato no próximo tick, sem estado a sincronizar. Retorna False se o usuário
     não tem esse agente."""
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -555,8 +491,6 @@ def set_agent_email_enabled(user_id: int, kind: str, enabled: bool) -> bool:
             )
             ok = cur.rowcount > 0
         conn.commit()
-    if ok and enabled:
-        clear_agent_email_suppression(user_id, kind)
     return ok
 
 

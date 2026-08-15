@@ -318,13 +318,6 @@ def mark_insight_sent(user_id: int) -> None:
 
 
 def set_engagement_opt_out(user_id: int, opt_out: bool) -> None:
-    """Liga/desliga TODO o e-mail proativo do usuário.
-
-    Ponto comum de quem religa: tela de configurações, "reativar emails" do chat
-    e o resubscribe pelo link do e-mail. Por isso a reabertura dos eventos
-    suprimidos dos agentes mora aqui — cobrir só um dos chamadores deixaria os
-    outros sem efeito no mês corrente.
-    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -338,11 +331,6 @@ def set_engagement_opt_out(user_id: int, opt_out: bool) -> None:
                 (opt_out, opt_out, opt_out, user_id),
             )
         conn.commit()
-    if not opt_out:
-        # Religou: reabre o que foi suprimido enquanto estava desligado. Import
-        # local pra não acoplar o módulo de relatórios ao de agentes.
-        from .agents import clear_agent_email_suppression
-        clear_agent_email_suppression(user_id)
 
 
 def set_tip_email_opt_out(user_id: int, opt_out: bool) -> None:
