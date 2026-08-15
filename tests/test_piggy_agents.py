@@ -1431,3 +1431,81 @@ def test_religar_email_reabre_evento_com_payload_estavel(user_id):
     assert _sup() is None, "religar não reabriu o evento — usuário ficaria sem e-mail no mês"
     assert len(db.list_unemailed_events(ag["id"])) == 1
     assert [a for a in db.list_agents_pending_email() if a["agent_id"] == ag["id"]] != []
+
+
+def test_invariante_qualquer_caminho_de_religar_reabre_o_evento(user_id):
+    """Invariante: religar o e-mail — por QUALQUER caminho — volta a entregar no
+    mês corrente.
+
+    São dois: por agente (set_agent_email_enabled) e global
+    (set_engagement_opt_out, que atende configurações, o "reativar emails" do
+    chat e o resubscribe). Corrigi só o primeiro antes; o global ficou de fora e
+    o Codex pegou. O teste cobre os dois pra não sobrar caminho."""
+    import db
+    from db import get_conn
+
+    payload = {"tipo": "parado", "idle": 21500.0, "titulo": "R$ 21.500,00 parado"}
+
+    def _preparar(kind):
+        ag = db.activate_agent(user_id, kind)
+        key = f"parado:2026-08:{kind}"
+        db.record_or_refresh_agent_event(ag["id"], user_id, kind, key,
+                                         payload, valor_impacto=188.13)
+        ids = [e["id"] for e in db.list_unemailed_events(ag["id"])]
+        assert db.suppress_agent_events(ids) == 1
+        assert db.list_unemailed_events(ag["id"]) == []
+        return ag
+
+    # caminho 1 — por agente
+    ag = _preparar("barao")
+    assert db.set_agent_email_enabled(user_id, "barao", True) is True
+    assert len(db.list_unemailed_events(ag["id"])) == 1, "religar por agente não reabriu"
+
+    # caminho 2 — global (é o que o resubscribe e a tela de settings chamam)
+    db.suppress_agent_events([e["id"] for e in db.list_unemailed_events(ag["id"])])
+    assert db.list_unemailed_events(ag["id"]) == []
+    db.set_engagement_opt_out(user_id, False)
+    assert len(db.list_unemailed_events(ag["id"])) == 1, "religar global não reabriu"
+
+
+def test_reabertura_nao_ressuscita_antigo_obsoleto_nem_emailado(user_id):
+    """Os recortes da reabertura: só o mês corrente, nada obsoleto, nada entregue.
+
+    Sem eles, quem passou meses com o e-mail desligado receberia tudo de uma vez
+    ao religar — e alertas que já não valem voltariam junto."""
+    import db
+    from db import get_conn
+
+    ag = db.activate_agent(user_id, "barao")
+
+    def _evento(key, **marcas):
+        db.record_or_refresh_agent_event(ag["id"], user_id, "barao", key,
+                                         {"idle": 1.0, "k": key}, valor_impacto=1.0)
+        with get_conn() as c:
+            with c.cursor() as cur:
+                cur.execute("select id from agent_events where agent_id=%s and dedupe_key=%s",
+                            (ag["id"], key))
+                ev_id = cur.fetchone()["id"]
+                cur.execute("update agent_events set suppressed_at=now() where id=%s", (ev_id,))
+                for col, val in marcas.items():
+                    cur.execute(f"update agent_events set {col}=%s where id=%s", (val, ev_id))
+            c.commit()
+        return ev_id
+
+    from datetime import datetime, timedelta, timezone
+    mes_passado = datetime.now(timezone.utc) - timedelta(days=45)
+    antigo   = _evento("parado:antigo", fired_at=mes_passado)
+    obsoleto = _evento("parado:obsoleto", stale_at=datetime.now(timezone.utc))
+    entregue = _evento("parado:entregue", emailed_at=datetime.now(timezone.utc))
+    vivo     = _evento("parado:vivo")
+
+    assert db.clear_agent_email_suppression(user_id) == 1, "devia reabrir só o evento vivo"
+
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("select id, suppressed_at from agent_events where agent_id=%s", (ag["id"],))
+            sup = {r["id"]: r["suppressed_at"] for r in cur.fetchall()}
+    assert sup[vivo] is None, "evento vivo do mês devia reabrir"
+    assert sup[antigo] is not None, "evento de mês passado não pode voltar"
+    assert sup[obsoleto] is not None, "evento obsoleto não pode voltar"
+    assert sup[entregue] is not None, "evento já entregue não pode voltar"

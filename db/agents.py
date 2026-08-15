@@ -497,6 +497,41 @@ def touch_agent_emailed(agent_id: int) -> None:
         conn.commit()
 
 
+def clear_agent_email_suppression(user_id: int, kind: str | None = None) -> int:
+    """Reabre os eventos suprimidos quando o usuário volta a querer e-mail.
+
+    Ponto único dos dois caminhos de religar:
+      • por agente  — set_agent_email_enabled(..., True)
+      • global      — set_engagement_opt_out(..., False), que atende a tela de
+        configurações, o "reativar emails" do chat e o resubscribe do e-mail.
+    `kind=None` cobre todos os agentes (é o caso do religar global).
+
+    Precisa existir porque a supressão só era desfeita pelo upsert, e o upsert
+    exige mudança de payload: um retrato ESTÁVEL (o dinheiro parado que segue o
+    mesmo) reescreve payload idêntico, o update não dispara, e quem religou
+    ficaria sem receber até virar o mês.
+
+    Recortes deliberados: só o MÊS CORRENTE (quem passou meses desligado não deve
+    receber tudo de uma vez ao religar), nada obsoleto (stale_at) e nada já
+    entregue (emailed_at). Retorna quantos eventos reabriu."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update agent_events set suppressed_at = null
+                where user_id = %s
+                  and (%s::text is null or kind = %s)
+                  and suppressed_at is not null
+                  and emailed_at is null and stale_at is null
+                  and fired_at >= date_trunc('month', now())
+                """,
+                (user_id, kind, kind),
+            )
+            n = cur.rowcount
+        conn.commit()
+    return n
+
+
 def set_agent_email_enabled(user_id: int, kind: str, enabled: bool) -> bool:
     """Liga/desliga o envio de e-mail desse agente (grava em config.email_enabled).
     Feed continua sempre; só o e-mail proativo é suprimido quando desligado.
@@ -519,21 +554,9 @@ def set_agent_email_enabled(user_id: int, kind: str, enabled: bool) -> bool:
                 (json.dumps({"email_enabled": bool(enabled)}), user_id, kind),
             )
             ok = cur.rowcount > 0
-            if ok and enabled:
-                # Só o mês corrente: quem passou meses com o e-mail desligado não
-                # deve receber tudo o que foi suprimido de uma vez ao religar. E
-                # nada de obsoleto — reabrir o que já não vale seria pior ainda.
-                cur.execute(
-                    """
-                    update agent_events set suppressed_at = null
-                    where user_id = %s and kind = %s
-                      and suppressed_at is not null
-                      and emailed_at is null and stale_at is null
-                      and fired_at >= date_trunc('month', now())
-                    """,
-                    (user_id, kind),
-                )
         conn.commit()
+    if ok and enabled:
+        clear_agent_email_suppression(user_id, kind)
     return ok
 
 
