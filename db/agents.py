@@ -260,6 +260,7 @@ def claim_agent_events_for_email(events: list[dict]) -> list[int]:
                     """
                     update agent_events set emailed_at = now()
                     where id = %s and emailed_at is null and fired_at = %s
+                      and stale_at is null
                       and (email_hold_until is null or email_hold_until <= now())
                     """,
                     (e["id"], e["fired_at"]),
@@ -313,6 +314,22 @@ def suppress_agent_events(event_ids: list[int]) -> int:
             n = cur.rowcount
         conn.commit()
     return n
+
+
+# Quem precisa considerar stale_at (inventário — manter atualizado ao mexer aqui):
+#   LEITURA — todos filtram, senão o obsoleto reaparece:
+#     list_agents (fired_30d/saved_365d) · list_agent_events (feed) ·
+#     list_agents_pending_email · list_unemailed_events · agents_summary
+#   ESCRITA — só os que decidem sobre um evento específico:
+#     claim_agent_events_for_email  → não pode reivindicar obsoleto (o filtro das
+#       queries de fila roda em memória sobre a leitura; o tombstone pode chegar
+#       depois dela, então a condição tem que estar no UPDATE)
+#     mark_agent_events_seen        → não pode marcar como visto o que o usuário
+#       não podia ver (senão ressuscita já lido, sem nunca contar como não lido)
+#     record_or_refresh_agent_event → limpa stale_at (ressuscita)
+#   ESCRITA que NÃO filtra, de propósito (marcar obsoleto ali é no-op inócuo):
+#     unclaim (as filas já excluem stale) · suppress · hold_agent_emails ·
+#     record_agent_event (kinds que não usam tombstone) · mark_events_emailed
 
 
 def mark_agent_event_stale(agent_id: int, dedupe_key: str) -> bool:
@@ -407,7 +424,8 @@ def mark_agent_events_seen(user_id: int) -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "update agent_events set seen_at=now() where user_id=%s and seen_at is null",
+                "update agent_events set seen_at=now()"
+                " where user_id=%s and seen_at is null and stale_at is null",
                 (user_id,),
             )
             n = cur.rowcount

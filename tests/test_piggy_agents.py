@@ -1328,3 +1328,64 @@ def test_evento_obsoleto_sai_das_filas_de_email(user_id):
     assert db.mark_agent_event_stale(ag["id"], key) is True
     assert db.list_unemailed_events(ag["id"]) == []
     assert [a for a in db.list_agents_pending_email() if a["agent_id"] == ag["id"]] == []
+
+
+# ── Invariantes do tombstone (stale_at) ──────────────────────────────────────
+# Testes de REGRA, não de caso: travam a propriedade em si, então pegam qualquer
+# caminho novo que esqueça o tombstone — sem depender de alguém lembrar do caso.
+
+def test_invariante_evento_obsoleto_nao_aparece_em_nenhuma_leitura(user_id):
+    """Regra: nenhuma query de leitura devolve evento obsoleto."""
+    import db
+
+    ag = db.activate_agent(user_id, "barao")
+    key = "parado:2026-08"
+    db.record_or_refresh_agent_event(ag["id"], user_id, "barao", key,
+                                     {"idle": 21500.0}, valor_impacto=188.0)
+    db.mark_agent_event_stale(ag["id"], key)
+
+    assert db.list_agent_events(user_id, limit=20) == [], "feed"
+    assert db.list_unemailed_events(ag["id"]) == [], "fila de eventos"
+    assert [a for a in db.list_agents_pending_email()
+            if a["agent_id"] == ag["id"]] == [], "fila de agentes"
+    ags = [a for a in db.list_agents(user_id) if a["kind"] == "barao"]
+    assert float(ags[0]["saved_365d"]) == 0.0 and int(ags[0]["fired_30d"]) == 0, "contadores"
+    resumo = db.agents_summary(user_id)
+    assert int(resumo["disparos_mes"]) == 0 and float(resumo["salvos_ano"]) == 0.0, "resumo"
+    assert int(resumo["nao_lidos"]) == 0, "não-lidos"
+
+
+def test_invariante_evento_obsoleto_nao_e_reivindicado_nem_marcado_visto(user_id):
+    """Regra: nenhuma ESCRITA que decide sobre um evento age sobre obsoleto.
+
+    Cobre a corrida real: o runner lê o evento vivo e o detector o marca obsoleto
+    logo depois — o filtro das filas roda em memória sobre a leitura, então a
+    condição precisa estar no próprio UPDATE."""
+    import db
+    from db import get_conn
+
+    ag = db.activate_agent(user_id, "barao")
+    key = "parado:2026-08"
+    db.record_or_refresh_agent_event(ag["id"], user_id, "barao", key,
+                                     {"idle": 21500.0}, valor_impacto=188.0)
+
+    lidos = db.list_unemailed_events(ag["id"])          # leitura: ainda vivo
+    assert len(lidos) == 1
+    db.mark_agent_event_stale(ag["id"], key)            # vira obsoleto depois
+
+    assert db.claim_agent_events_for_email(lidos) == [], \
+        "reivindicou evento obsoleto — usuário receberia e-mail de algo que não vale"
+    assert db.mark_agent_events_seen(user_id) == 0, \
+        "marcou como visto um evento que o usuário não podia ver"
+
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("select emailed_at, seen_at from agent_events where agent_id=%s",
+                        (ag["id"],))
+            row = cur.fetchone()
+    assert row["emailed_at"] is None and row["seen_at"] is None
+
+    # e ao ressuscitar, o evento conta como não lido (não herda um seen_at falso)
+    db.record_or_refresh_agent_event(ag["id"], user_id, "barao", key,
+                                     {"idle": 30000.0}, valor_impacto=262.0)
+    assert int(db.agents_summary(user_id)["nao_lidos"]) == 1
