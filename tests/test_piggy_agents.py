@@ -906,3 +906,95 @@ def test_falha_do_sinal_de_sync_nao_bloqueia_email(monkeypatch):
                                    sync_recente=False, now=now)
     monkeypatch.setattr(db, "user_synced_within", _boom)   # _arm sobrescreve
     assert len(sent) == 1
+
+
+def test_sync_empurra_carencia_dos_agregados_no_inicio(user_id):
+    """P1 do Codex (4ª rodada, PR #51): entre o início do sync e o primeiro
+    commit não existe last_sync_at pra denunciar sync em curso — os itens ainda
+    estão buscando dados na Pluggy. Um agregado já maduro poderia ser emailado
+    nessa janela. sync_pluggy_user empurra a carência antes de tocar nos itens."""
+    import db
+    from datetime import datetime, timedelta, timezone
+    from db import get_conn
+
+    ag_b = db.activate_agent(user_id, "barao")
+    ag_x = db.activate_agent(user_id, "xerife")
+    assert db.record_or_refresh_agent_event(
+        ag_b["id"], user_id, "barao", "parado:2026-08", {"idle": 1500.0}, valor_impacto=13.0)
+    assert db.record_or_refresh_agent_event(
+        ag_x["id"], user_id, "xerife", "anomalia:1", {"titulo": "x"}, valor_impacto=0.0)
+
+    antigo = datetime.now(timezone.utc) - timedelta(hours=6)
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("update agent_events set fired_at=%s where user_id=%s", (antigo, user_id))
+        c.commit()
+
+    def _fired(kind):
+        with get_conn() as c:
+            with c.cursor() as cur:
+                cur.execute("select fired_at from agent_events where user_id=%s and kind=%s",
+                            (user_id, kind))
+                row = cur.fetchone()
+                assert row is not None, f"evento do {kind} sumiu"
+                return row["fired_at"]
+
+    limite = datetime.now(timezone.utc) - timedelta(hours=5)
+    assert _fired("barao") < limite and _fired("xerife") < limite
+
+    # é o que sync_pluggy_user chama antes de tocar nos itens
+    from core.services.piggy_agents import _AGENT_EMAIL_MIN_AGE_MIN
+    n = db.touch_pending_agent_events(user_id, list(_AGENT_EMAIL_MIN_AGE_MIN))
+    assert n == 1, "devia empurrar só o agregado"
+
+    # agregado voltou a ficar imaturo — não pode virar e-mail durante o sync
+    assert _fired("barao") > datetime.now(timezone.utc) - timedelta(minutes=2)
+    # agente de delta não é tocado: a carência só existe pros whole-portfolio
+    assert _fired("xerife") < limite
+
+
+def test_sync_pluggy_user_empurra_a_carencia_antes_dos_itens(monkeypatch):
+    """O sync chama o touch ANTES de sincronizar os itens — é isso que cobre a
+    janela em que ainda não há nenhum last_sync_at pra denunciar o sync."""
+    import db
+    import core.services.pluggy_sync as ps
+
+    ordem = []
+    monkeypatch.setattr(ps, "get_open_finance_snapshot", lambda uid: {
+        "connections": [{"provider": "pluggy", "provider_item_id": "i1"},
+                        {"provider": "pluggy", "provider_item_id": "i2"}]})
+    monkeypatch.setattr(ps, "sync_pluggy_item",
+                        lambda item: ordem.append(f"item:{item}") or {"ok": True})
+    monkeypatch.setattr(db, "touch_pending_agent_events",
+                        lambda uid, kinds: ordem.append(("touch", uid, sorted(kinds))) or 1)
+    import core.services.piggy_agents as pa
+    monkeypatch.setattr(pa, "run_faria_limer_once", lambda **k: {"ok": True})
+    monkeypatch.setattr(pa, "run_barao_once", lambda **k: {"ok": True})
+
+    ps.sync_pluggy_user(42)
+
+    assert ordem[0] == ("touch", 42, ["barao", "faria_limer"]), f"touch não veio primeiro: {ordem}"
+    assert ordem[1:] == ["item:i1", "item:i2"]
+
+
+def test_touch_nao_mexe_em_evento_ja_emailado(user_id):
+    """O que já virou e-mail é imutável — o touch não pode ressuscitá-lo."""
+    import db
+    from datetime import datetime, timedelta, timezone
+    from db import get_conn
+
+    ag = db.activate_agent(user_id, "barao")
+    db.record_or_refresh_agent_event(ag["id"], user_id, "barao", "parado:2026-08",
+                                     {"idle": 1500.0}, valor_impacto=13.0)
+    antigo = datetime.now(timezone.utc) - timedelta(hours=6)
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("update agent_events set fired_at=%s, emailed_at=now() where user_id=%s",
+                        (antigo, user_id))
+        c.commit()
+
+    assert db.touch_pending_agent_events(user_id, ["barao"]) == 0
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("select fired_at from agent_events where user_id=%s", (user_id,))
+            assert cur.fetchone()["fired_at"] < datetime.now(timezone.utc) - timedelta(hours=5)

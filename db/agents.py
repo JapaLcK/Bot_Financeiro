@@ -322,6 +322,36 @@ def delete_pending_agent_event(agent_id: int, dedupe_key: str) -> bool:
     return deleted
 
 
+def touch_pending_agent_events(user_id: int, kinds: list[str]) -> int:
+    """Reinicia a carência de estabilidade dos eventos pendentes dos `kinds`.
+
+    Chamado no INÍCIO de um sync de carteira: enquanto os itens são buscados na
+    Pluggy nada foi gravado ainda, então nenhum carimbo de conclusão
+    (last_sync_at) denuncia que um sync está em curso — e um evento agregado já
+    maduro poderia ser emailado bem nessa janela, congelando o valor do mês.
+    Empurrar fired_at pra agora mantém esses eventos imaturos durante o sync.
+
+    Não usa flag de "sync em progresso" de propósito: se o processo morrer no
+    meio, uma flag ficaria presa e o e-mail nunca sairia. Aqui o pior caso é o
+    e-mail atrasar uma carência (45min) e sair no tick seguinte.
+    Só toca o que ainda não virou e-mail. Retorna quantos eventos empurrou."""
+    if not kinds:
+        return 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update agent_events set fired_at = now()
+                where user_id = %s and kind = any(%s)
+                  and emailed_at is null and suppressed_at is null
+                """,
+                (user_id, list(kinds)),
+            )
+            n = cur.rowcount
+        conn.commit()
+    return n
+
+
 def list_agent_events(user_id: int, limit: int = 20) -> list[dict[str, Any]]:
     with get_conn() as conn:
         with conn.cursor() as cur:

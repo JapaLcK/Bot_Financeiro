@@ -206,6 +206,19 @@ def sync_pluggy_user(user_id: int) -> dict:
         for c in snapshot.get("connections", [])
         if (c.get("provider") == "pluggy" and c.get("provider_item_id"))
     ]
+    # Marca o INÍCIO do sync empurrando a carência dos agregados pendentes: os
+    # itens ainda vão levar segundos buscando dados na Pluggy antes do primeiro
+    # commit, e até lá nenhum last_sync_at denuncia que há sync em curso — um
+    # evento já maduro poderia ser emailado bem nessa janela e congelar o mês.
+    # Fail-soft: no pior caso o e-mail sai um tick depois.
+    if items:
+        try:
+            from db import touch_pending_agent_events
+            from core.services.piggy_agents import _AGENT_EMAIL_MIN_AGE_MIN
+            touch_pending_agent_events(user_id, list(_AGENT_EMAIL_MIN_AGE_MIN))
+        except Exception as exc:
+            print(f"[pluggy_sync] touch agregados (user): {exc}")
+
     results = [sync_pluggy_item(item_id) for item_id in items]
 
     # Agentes whole-portfolio: rodam UMA vez, depois de TODOS os itens sincronizarem,
