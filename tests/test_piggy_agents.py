@@ -447,7 +447,7 @@ def test_faria_detector_apaga_concentracao_pendente_que_deixou_de_valer(monkeypa
         "pnl": 1000.0, "pnl_pct": 1000.0 / 9000.0, "count": 3,
     })
     monkeypatch.setattr(db, "record_or_refresh_agent_event", lambda *a, **k: True)
-    monkeypatch.setattr(db, "delete_pending_agent_event",
+    monkeypatch.setattr(db, "delete_stale_agent_event",
                         lambda agent_id, dedupe_key: deleted.append(dedupe_key) or True)
 
     pa._faria_limer_detect_for_user({"agent_id": 1, "user_id": 42}, date(2026, 8, 13))
@@ -589,7 +589,7 @@ def test_faria_ignora_posicoes_fora_do_brl(monkeypatch):
                         lambda uid, positions=None: rv_portfolio_summary(uid, positions=positions))
     monkeypatch.setattr(db, "record_or_refresh_agent_event",
                         lambda *a, **k: recorded.append(k) or True)
-    monkeypatch.setattr(db, "delete_pending_agent_event", lambda *a, **k: True)
+    monkeypatch.setattr(db, "delete_stale_agent_event", lambda *a, **k: True)
 
     pa._faria_limer_detect_for_user({"agent_id": 1, "user_id": 42}, date(2026, 8, 13))
     tipos = {k["payload"]["tipo"]: k["payload"] for k in recorded}
@@ -703,7 +703,7 @@ def test_claim_unclaim_suppress_delete_sql(user_id):
     assert len(db.list_unemailed_events(agent_id)) == 1    # upsert limpou a supressão
 
     # limpeza de condição que deixou de valer
-    assert db.delete_pending_agent_event(agent_id, key) is True
+    assert db.delete_stale_agent_event(agent_id, key) is True
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("select count(*) as n from agent_events where agent_id=%s", (agent_id,))
@@ -1228,3 +1228,33 @@ def test_feed_corrige_apos_email_e_nao_reenvia(user_id):
     assert db.list_unemailed_events(ag["id"]) == []
     pend = [a for a in db.list_agents_pending_email() if a["agent_id"] == ag["id"]]
     assert pend == [], "agente voltou pra fila de e-mail após a correção"
+
+
+def test_alerta_obsoleto_sai_do_feed_mesmo_depois_do_email(user_id):
+    """P1 do Codex (10ª rodada, PR #51): ao liberar o refresh após o e-mail eu
+    criei uma assimetria — valor errado se corrigia, mas condição que deixou de
+    valer não saía. O alerta falso ficaria visível e contando em saved_365d por
+    até 365 dias. A correção inversa segue a mesma regra do refresh."""
+    import db
+    from db import get_conn
+
+    ag = db.activate_agent(user_id, "barao")
+    key = "parado:2026-08"
+    db.record_or_refresh_agent_event(ag["id"], user_id, "barao", key,
+                                     {"idle": 21500.0}, valor_impacto=188.0)
+
+    # o alerta foi enviado por e-mail
+    lidos = db.list_unemailed_events(ag["id"])
+    assert db.claim_agent_events_for_email(lidos) == [lidos[0]["id"]]
+
+    # depois o usuário move o dinheiro: a condição deixou de valer
+    assert db.delete_stale_agent_event(ag["id"], key) is True, \
+        "alerta obsoleto não saiu do feed por já ter virado e-mail"
+
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("select count(*) as n from agent_events where agent_id=%s", (ag["id"],))
+            assert cur.fetchone()["n"] == 0
+    # e para de contar no impacto acumulado
+    ags = [a for a in db.list_agents(user_id) if a["kind"] == "barao"]
+    assert float(ags[0]["saved_365d"]) == 0.0, "valor_impacto do alerta falso ainda conta"

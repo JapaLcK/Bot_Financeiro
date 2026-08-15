@@ -312,23 +312,27 @@ def suppress_agent_events(event_ids: list[int]) -> int:
     return n
 
 
-def delete_pending_agent_event(agent_id: int, dedupe_key: str) -> bool:
-    """Remove um evento que ainda está PENDENTE (não emailado).
+def delete_stale_agent_event(agent_id: int, dedupe_key: str) -> bool:
+    """Remove um evento cuja condição DEIXOU de valer.
 
-    Par do record_or_refresh_agent_event pra condições que DEIXARAM de valer:
-    ex. um alerta de concentração gravado a partir de um snapshot parcial que a
-    execução coerente seguinte não reproduz (carteira equilibrada). Mesmo se o
-    usuário já viu no feed, o alerta falso sai (seen_at não protege — sumir é o
-    comportamento honesto quando a condição não vale). Evento já emailado não é
-    tocado: o artefato enviado é imutável. Retorna True se removeu."""
+    Par inverso do record_or_refresh_agent_event: ex. o alerta de concentração
+    que a carteira equilibrada não reproduz, ou o "dinheiro parado" depois que o
+    usuário moveu o dinheiro. Segue a MESMA regra do refresh — o feed é visão
+    viva, nada o congela:
+
+      • seen_at não protege: ter visto um alerta falso não obriga a mantê-lo;
+      • emailed_at TAMBÉM não protege. O e-mail continua na caixa do usuário
+        como retrato datado, mas manter no feed um alerta que já não vale seria
+        pior que corrigi-lo — ele segue visível e o valor_impacto continua
+        contando em saved_365d/salvos_ano por até 365 dias.
+
+    Manter o delete travado em emailed_at enquanto o refresh ignora seria
+    assimétrico: valor errado se corrige, condição falsa não sairia nunca.
+    Retorna True se removeu."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                delete from agent_events
-                where agent_id = %s and dedupe_key = %s
-                  and emailed_at is null
-                """,
+                "delete from agent_events where agent_id = %s and dedupe_key = %s",
                 (agent_id, dedupe_key),
             )
             deleted = cur.rowcount > 0

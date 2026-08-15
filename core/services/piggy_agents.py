@@ -665,7 +665,7 @@ def _barao_detect_for_user(agent: dict[str, Any], today: date) -> int:
     saldo parcial precisa ser CORRIGIDA pela execução coerente seguinte — inclusive
     a que já existe no banco de quem sincou antes deste fix. Só congela depois de
     virar e-mail (emailed_at), que é artefato imutável."""
-    from db import record_or_refresh_agent_event, delete_pending_agent_event
+    from db import record_or_refresh_agent_event, delete_stale_agent_event
 
     user_id = agent["user_id"]
     cfg = agent.get("config") or {}
@@ -698,7 +698,7 @@ def _barao_detect_for_user(agent: dict[str, Any], today: date) -> int:
         # pendente em vez de deixá-lo apodrecer no feed com o valor errado (e o
         # valor_impacto somando em saved_365d). Espelha a limpeza que o Faria
         # Limer faz na concentração. Evento já emailado não é tocado.
-        delete_pending_agent_event(agent["agent_id"], key)
+        delete_stale_agent_event(agent["agent_id"], key)
         return 0
 
     rende_mes = round(idle * (cdi / 100.0) / 12.0, 2)
@@ -895,7 +895,7 @@ def _faria_limer_detect_for_user(agent: dict[str, Any], today: date) -> int:
     """Acompanha a carteira de renda variável do usuário (via Open Finance) e grava
     os insights factuais (retrato do mês + concentração), deduplicados por mês. Só
     lê o espelho do sync (db.rv) — a corretora é a fonte da verdade."""
-    from db import (record_or_refresh_agent_event, delete_pending_agent_event,
+    from db import (record_or_refresh_agent_event, delete_stale_agent_event,
                     list_rv_positions, rv_portfolio_summary)
 
     user_id = agent["user_id"]
@@ -934,7 +934,7 @@ def _faria_limer_detect_for_user(agent: dict[str, Any], today: date) -> int:
     produced = {ins["dedupe_key"] for ins in insights}
     for key in (f"rv_retrato:{ym}", f"rv_concentracao:{ym}"):
         if key not in produced:
-            delete_pending_agent_event(agent["agent_id"], key)
+            delete_stale_agent_event(agent["agent_id"], key)
     return fired
 
 
