@@ -1694,6 +1694,13 @@ def init_db():
         """
         alter table agent_events add column if not exists email_hold_until timestamptz
         """,
+        # Soft-delete de evento cuja condição deixou de valer. Some do feed e dos
+        # contadores, mas a linha (e o emailed_at) fica: apagar de vez destruiria
+        # o dedupe de entrega, e a condição voltando no mesmo mês viraria um
+        # segundo e-mail de um agente que é mensal.
+        """
+        alter table agent_events add column if not exists stale_at timestamptz
+        """,
         """
         create index if not exists idx_agent_events_pending_email2
           on agent_events (agent_id) where emailed_at is null and suppressed_at is null

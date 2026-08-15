@@ -31,6 +31,7 @@ def list_agents(user_id: int) -> list[dict[str, Any]]:
                          coalesce(sum(valor_impacto) filter (
                            where fired_at >= now() - interval '365 days'), 0)            as saved_365d
                   from agent_events
+                  where stale_at is null
                   group by agent_id
                 ) e on e.agent_id = a.id
                 where a.user_id = %s
@@ -221,8 +222,10 @@ def record_or_refresh_agent_event(
                   set payload = excluded.payload,
                       valor_impacto = excluded.valor_impacto,
                       fired_at = now(),
-                      suppressed_at = null
-                  where agent_events.payload is distinct from excluded.payload
+                      suppressed_at = null,
+                      stale_at = null
+                  where agent_events.stale_at is not null
+                     or agent_events.payload is distinct from excluded.payload
                      or agent_events.valor_impacto is distinct from excluded.valor_impacto
                 """,
                 (agent_id, user_id, kind, dedupe_key,
@@ -312,32 +315,38 @@ def suppress_agent_events(event_ids: list[int]) -> int:
     return n
 
 
-def delete_stale_agent_event(agent_id: int, dedupe_key: str) -> bool:
-    """Remove um evento cuja condição DEIXOU de valer.
+def mark_agent_event_stale(agent_id: int, dedupe_key: str) -> bool:
+    """Tira do feed um evento cuja condição DEIXOU de valer (soft delete).
 
     Par inverso do record_or_refresh_agent_event: ex. o alerta de concentração
     que a carteira equilibrada não reproduz, ou o "dinheiro parado" depois que o
     usuário moveu o dinheiro. Segue a MESMA regra do refresh — o feed é visão
-    viva, nada o congela:
+    viva, nada o congela: nem seen_at nem emailed_at. Manter à vista um alerta
+    que já não vale seria pior que corrigi-lo, e o valor_impacto seguiria
+    contando em saved_365d/salvos_ano por até 365 dias.
 
-      • seen_at não protege: ter visto um alerta falso não obriga a mantê-lo;
-      • emailed_at TAMBÉM não protege. O e-mail continua na caixa do usuário
-        como retrato datado, mas manter no feed um alerta que já não vale seria
-        pior que corrigi-lo — ele segue visível e o valor_impacto continua
-        contando em saved_365d/salvos_ano por até 365 dias.
+    É soft delete de propósito. Apagar a linha destruiria junto o emailed_at, e
+    o dedupe de entrega mora nele: se a condição voltasse no MESMO mês, o insert
+    seguinte criaria uma linha nova com a mesma chave mensal e emailed_at null —
+    as queries de fila a tratariam como novidade e o usuário levaria um segundo
+    e-mail de um agente que é mensal (last_emailed_at atrasa, não impede).
 
-    Manter o delete travado em emailed_at enquanto o refresh ignora seria
-    assimétrico: valor errado se corrige, condição falsa não sairia nunca.
-    Retorna True se removeu."""
+    Com stale_at a linha some do feed e dos contadores, mas o histórico de
+    entrega fica. Se a condição voltar, record_or_refresh_agent_event limpa o
+    stale_at e ressuscita o evento — sem reenviar, porque emailed_at continua lá.
+    Retorna True se marcou."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "delete from agent_events where agent_id = %s and dedupe_key = %s",
+                """
+                update agent_events set stale_at = now()
+                where agent_id = %s and dedupe_key = %s and stale_at is null
+                """,
                 (agent_id, dedupe_key),
             )
-            deleted = cur.rowcount > 0
+            marked = cur.rowcount > 0
         conn.commit()
-    return deleted
+    return marked
 
 
 def hold_agent_emails(user_id: int, kinds: list[str], minutes: int) -> int:
@@ -385,7 +394,7 @@ def list_agent_events(user_id: int, limit: int = 20) -> list[dict[str, Any]]:
                 """
                 select id, kind, fired_at, payload, channel, valor_impacto, seen_at
                 from agent_events
-                where user_id=%s
+                where user_id=%s and stale_at is null
                 order by fired_at desc
                 limit %s
                 """,
@@ -420,6 +429,7 @@ def list_agents_pending_email() -> list[dict[str, Any]]:
                 from agents a
                 join agent_events e on e.agent_id = a.id
                   and e.emailed_at is null and e.suppressed_at is null
+                  and e.stale_at is null
                 where a.status = 'active'
                 group by a.id, a.user_id, a.kind, a.config, a.last_emailed_at
                 """,
@@ -437,6 +447,7 @@ def list_unemailed_events(agent_id: int, limit: int = 20) -> list[dict[str, Any]
                 select id, kind, payload, valor_impacto, fired_at, email_hold_until
                 from agent_events
                 where agent_id = %s and emailed_at is null and suppressed_at is null
+                  and stale_at is null
                 order by fired_at desc
                 limit %s
                 """,
@@ -505,7 +516,7 @@ def agents_summary(user_id: int) -> dict[str, Any]:
                   coalesce(sum(valor_impacto) filter (
                     where fired_at >= now() - interval '365 days'), 0)           as salvos_ano,
                   count(*) filter (where seen_at is null)                        as nao_lidos
-                from agent_events where user_id=%s
+                from agent_events where user_id=%s and stale_at is null
                 """,
                 (user_id,),
             )

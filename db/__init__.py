@@ -253,7 +253,7 @@ from .agents import (
     pause_agent,
     record_agent_event,
     record_or_refresh_agent_event,
-    delete_stale_agent_event,
+    mark_agent_event_stale,
     claim_agent_events_for_email,
     suppress_agent_events,
     unclaim_agent_events,
@@ -533,7 +533,7 @@ __all__ = [
     # agentes do Piggy
     "AGENT_KINDS", "list_agents", "get_agent", "count_active_agents",
     "activate_agent", "pause_agent", "record_agent_event",
-    "record_or_refresh_agent_event", "delete_stale_agent_event",
+    "record_or_refresh_agent_event", "mark_agent_event_stale",
     "claim_agent_events_for_email", "suppress_agent_events",
     "unclaim_agent_events", "hold_agent_emails", "list_agent_events",
     "mark_agent_events_seen", "agents_summary", "list_users_with_active_agents",
