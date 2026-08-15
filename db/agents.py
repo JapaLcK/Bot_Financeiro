@@ -500,7 +500,17 @@ def touch_agent_emailed(agent_id: int) -> None:
 def set_agent_email_enabled(user_id: int, kind: str, enabled: bool) -> bool:
     """Liga/desliga o envio de e-mail desse agente (grava em config.email_enabled).
     Feed continua sempre; só o e-mail proativo é suprimido quando desligado.
-    Retorna False se o usuário não tem esse agente."""
+
+    RELIGAR limpa o suppressed_at dos eventos pendentes desse kind. Sem isso o
+    religamento não teria efeito no mês corrente: a supressão só era desfeita
+    pelo upsert, que exige mudança de payload — e um retrato estável (o dinheiro
+    parado que continua o mesmo) reescreve payload IDÊNTICO, então o update não
+    dispara e a supressão sobreviveria até virar o mês. Aqui é o ponto certo:
+    quem religa expressa a intenção de voltar a receber, tenha o valor mudado
+    ou não.
+
+    Evento já emailado não é tocado (nada a reabrir). Retorna False se o usuário
+    não tem esse agente."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -509,6 +519,20 @@ def set_agent_email_enabled(user_id: int, kind: str, enabled: bool) -> bool:
                 (json.dumps({"email_enabled": bool(enabled)}), user_id, kind),
             )
             ok = cur.rowcount > 0
+            if ok and enabled:
+                # Só o mês corrente: quem passou meses com o e-mail desligado não
+                # deve receber tudo o que foi suprimido de uma vez ao religar. E
+                # nada de obsoleto — reabrir o que já não vale seria pior ainda.
+                cur.execute(
+                    """
+                    update agent_events set suppressed_at = null
+                    where user_id = %s and kind = %s
+                      and suppressed_at is not null
+                      and emailed_at is null and stale_at is null
+                      and fired_at >= date_trunc('month', now())
+                    """,
+                    (user_id, kind),
+                )
         conn.commit()
     return ok
 

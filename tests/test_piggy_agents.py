@@ -1389,3 +1389,45 @@ def test_invariante_evento_obsoleto_nao_e_reivindicado_nem_marcado_visto(user_id
     db.record_or_refresh_agent_event(ag["id"], user_id, "barao", key,
                                      {"idle": 30000.0}, valor_impacto=262.0)
     assert int(db.agents_summary(user_id)["nao_lidos"]) == 1
+
+
+def test_religar_email_reabre_evento_com_payload_estavel(user_id):
+    """Invariante: religar o e-mail volta a entregar no MESMO mês.
+
+    A supressão era desfeita só pelo upsert, que exige mudança de payload. Mas
+    um retrato ESTÁVEL (dinheiro parado que segue igual) reescreve payload
+    idêntico — o update não dispara e a supressão sobreviveria até virar o mês,
+    deixando quem religou sem receber nada. Por isso quem limpa é o religar."""
+    import db
+    from db import get_conn
+
+    ag = db.activate_agent(user_id, "barao")
+    key = "parado:2026-08"
+    payload = {"tipo": "parado", "idle": 21500.0, "titulo": "R$ 21.500,00 parado"}
+    assert db.record_or_refresh_agent_event(
+        ag["id"], user_id, "barao", key, payload, valor_impacto=188.13) is True
+
+    def _sup():
+        with get_conn() as c:
+            with c.cursor() as cur:
+                cur.execute("select suppressed_at from agent_events where agent_id=%s",
+                            (ag["id"],))
+                return cur.fetchone()["suppressed_at"]
+
+    # usuário desliga o e-mail: o tick suprime o evento pendente
+    assert db.set_agent_email_enabled(user_id, "barao", False) is True
+    assert db.suppress_agent_events([e["id"] for e in db.list_unemailed_events(ag["id"])]) == 1
+    assert _sup() is not None
+    assert db.list_unemailed_events(ag["id"]) == []
+
+    # ticks seguintes com o MESMO valor: o upsert não dispara (payload idêntico)
+    for _ in range(3):
+        assert db.record_or_refresh_agent_event(
+            ag["id"], user_id, "barao", key, payload, valor_impacto=188.13) is False
+    assert _sup() is not None, "sem mudança de payload, só o religar pode limpar"
+
+    # usuário religa: o evento volta pra fila no mesmo mês
+    assert db.set_agent_email_enabled(user_id, "barao", True) is True
+    assert _sup() is None, "religar não reabriu o evento — usuário ficaria sem e-mail no mês"
+    assert len(db.list_unemailed_events(ag["id"])) == 1
+    assert [a for a in db.list_agents_pending_email() if a["agent_id"] == ag["id"]] != []
