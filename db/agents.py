@@ -228,11 +228,16 @@ def record_or_refresh_agent_event(
 def claim_agent_events_for_email(events: list[dict]) -> list[int]:
     """Reivindica eventos pro e-mail ANTES do envio, atomicamente.
 
-    Marca emailed_at SÓ se o evento não mudou desde a leitura (mesmo fired_at e
-    ainda não emailado). Fecha a janela leitura→envio→marcação: se um refresh
-    trocou o payload no meio, o fired_at mudou, a linha não é reivindicada e fica
-    de fora do e-mail deste tick (sai no próximo, já estável). Só os ids
-    retornados podem entrar no e-mail — com o payload que foi lido junto.
+    Marca emailed_at SÓ se, no banco AGORA, o evento continua elegível:
+      • não emailado ainda;
+      • mesmo fired_at da leitura — se um refresh trocou o payload no meio, a
+        linha não é reivindicada e sai no próximo tick, já estável;
+      • sem hold vigente — o filtro de _ripe é feito em memória sobre a leitura,
+        então um sync que instale email_hold_until DEPOIS dela não seria visto
+        ali; a condição precisa ser reavaliada aqui, no update.
+
+    Fecha a janela leitura→envio→marcação. Só os ids retornados podem entrar no
+    e-mail — com o payload que foi lido junto.
     Recebe os dicts lidos (precisa de id + fired_at)."""
     claimed: list[int] = []
     if not events:
@@ -244,6 +249,7 @@ def claim_agent_events_for_email(events: list[dict]) -> list[int]:
                     """
                     update agent_events set emailed_at = now()
                     where id = %s and emailed_at is null and fired_at = %s
+                      and (email_hold_until is null or email_hold_until <= now())
                     """,
                     (e["id"], e["fired_at"]),
                 )

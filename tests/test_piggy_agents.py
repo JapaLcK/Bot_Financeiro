@@ -1150,3 +1150,39 @@ def test_ripe_respeita_o_hold_mesmo_com_evento_maduro(monkeypatch):
     assert _arm(now + timedelta(minutes=5)) == [], "hold no futuro devia segurar"
     assert len(_arm(now - timedelta(minutes=1))) == 1, "hold vencido devia liberar"
     assert len(_arm(None)) == 1, "sem hold devia liberar"
+
+
+def test_claim_recusa_evento_com_hold_instalado_depois_da_leitura(user_id):
+    """P1 do Codex (8ª rodada, PR #51): o filtro de _ripe roda em MEMÓRIA sobre a
+    leitura. Se um sync instalar email_hold_until depois dela, o claim precisa
+    recusar assim mesmo — senão o e-mail sai durante o sync e o emailed_at
+    congela o agregado do mês. Tirar o hold de fired_at removeu o CAS que antes
+    fazia esse claim falhar, então a condição tem que estar no próprio update."""
+    import db
+    from db import get_conn
+
+    ag = db.activate_agent(user_id, "barao")
+    db.record_or_refresh_agent_event(ag["id"], user_id, "barao", "parado:2026-08",
+                                     {"idle": 1500.0}, valor_impacto=13.0)
+    lidos = db.list_unemailed_events(ag["id"])
+    assert len(lidos) == 1
+    assert lidos[0]["email_hold_until"] is None      # na leitura, sem hold
+
+    # o sync instala o hold DEPOIS da leitura, antes do claim
+    assert db.hold_agent_emails(user_id, ["barao"], 10) == 1
+
+    assert db.claim_agent_events_for_email(lidos) == [], \
+        "claim aceitou evento com hold instalado após a leitura"
+
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("select emailed_at from agent_events where user_id=%s", (user_id,))
+            assert cur.fetchone()["emailed_at"] is None, "não podia ter marcado como emailado"
+
+    # o evento segue disponível pro próximo tick, depois do hold vencer
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("update agent_events set email_hold_until = now() - interval '1 minute'"
+                        " where user_id=%s", (user_id,))
+        c.commit()
+    assert db.claim_agent_events_for_email(db.list_unemailed_events(ag["id"])) == [lidos[0]["id"]]
