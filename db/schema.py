@@ -1686,6 +1686,14 @@ def init_db():
         """
         alter table agent_events add column if not exists suppressed_at timestamptz
         """,
+        # Hold de e-mail: até quando o envio dos agregados fica segurado enquanto a
+        # carteira se mexe. Coluna PRÓPRIA de propósito — fired_at é dado de
+        # negócio (data exibida, ordenação do feed, disparos_mes, saved_365d) e
+        # não pode ser empurrado por controle técnico. Expira sozinho: nada fica
+        # preso se um sync morrer no meio.
+        """
+        alter table agent_events add column if not exists email_hold_until timestamptz
+        """,
         """
         create index if not exists idx_agent_events_pending_email2
           on agent_events (agent_id) where emailed_at is null and suppressed_at is null

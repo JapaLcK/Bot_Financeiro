@@ -942,19 +942,32 @@ def test_sync_empurra_carencia_dos_agregados_no_inicio(user_id):
     limite = datetime.now(timezone.utc) - timedelta(hours=5)
     assert _fired("barao") < limite and _fired("xerife") < limite
 
-    # é o que sync_pluggy_user chama antes de tocar nos itens
-    from core.services.piggy_agents import _AGENT_EMAIL_MIN_AGE_MIN
-    n = db.touch_pending_agent_events(user_id, list(_AGENT_EMAIL_MIN_AGE_MIN))
-    assert n == 1, "devia empurrar só o agregado"
+    def _hold(kind):
+        with get_conn() as c:
+            with c.cursor() as cur:
+                cur.execute("select email_hold_until from agent_events"
+                            " where user_id=%s and kind=%s", (user_id, kind))
+                return cur.fetchone()["email_hold_until"]
 
-    # agregado voltou a ficar imaturo — não pode virar e-mail durante o sync
-    assert _fired("barao") > datetime.now(timezone.utc) - timedelta(minutes=2)
-    # agente de delta não é tocado: a carência só existe pros whole-portfolio
+    # é o que os caminhos de sync chamam antes de mexer na carteira
+    from core.services.piggy_agents import _AGENT_EMAIL_MIN_AGE_MIN
+    n = db.hold_agent_emails(user_id, list(_AGENT_EMAIL_MIN_AGE_MIN), 10)
+    assert n == 1, "devia segurar só o agregado"
+
+    # o agregado fica segurado pra frente...
+    assert _hold("barao") > datetime.now(timezone.utc)
+    # ...e o agente de delta não é tocado
+    assert _hold("xerife") is None
+
+    # P1 do Codex (7ª rodada): o hold NÃO pode mexer em fired_at — é a data que o
+    # usuário vê, a ordenação do feed e a base de disparos_mes/saved_365d. Se
+    # empurrasse, um evento de meses atrás voltaria a contar como novo.
+    assert _fired("barao") < limite, "hold não pode empurrar fired_at"
     assert _fired("xerife") < limite
 
 
-def test_sync_pluggy_user_empurra_a_carencia_antes_dos_itens(monkeypatch):
-    """O sync chama o touch ANTES de sincronizar os itens — é isso que cobre a
+def test_sync_pluggy_user_segura_email_antes_dos_itens(monkeypatch):
+    """O sync chama o hold ANTES de sincronizar os itens — é isso que cobre a
     janela em que ainda não há nenhum last_sync_at pra denunciar o sync."""
     import db
     import core.services.pluggy_sync as ps
@@ -965,20 +978,20 @@ def test_sync_pluggy_user_empurra_a_carencia_antes_dos_itens(monkeypatch):
                         {"provider": "pluggy", "provider_item_id": "i2"}]})
     monkeypatch.setattr(ps, "sync_pluggy_item",
                         lambda item: ordem.append(f"item:{item}") or {"ok": True})
-    monkeypatch.setattr(db, "touch_pending_agent_events",
-                        lambda uid, kinds: ordem.append(("touch", uid, sorted(kinds))) or 1)
+    monkeypatch.setattr(db, "hold_agent_emails",
+                        lambda uid, kinds, mins: ordem.append(("hold", uid, sorted(kinds))) or 1)
     import core.services.piggy_agents as pa
     monkeypatch.setattr(pa, "run_faria_limer_once", lambda **k: {"ok": True})
     monkeypatch.setattr(pa, "run_barao_once", lambda **k: {"ok": True})
 
     ps.sync_pluggy_user(42)
 
-    assert ordem[0] == ("touch", 42, ["barao", "faria_limer"]), f"touch não veio primeiro: {ordem}"
+    assert ordem[0] == ("hold", 42, ["barao", "faria_limer"]), f"hold não veio primeiro: {ordem}"
     assert ordem[1:] == ["item:i1", "item:i2"]
 
 
-def test_touch_nao_mexe_em_evento_ja_emailado(user_id):
-    """O que já virou e-mail é imutável — o touch não pode ressuscitá-lo."""
+def test_hold_nao_mexe_em_evento_ja_emailado(user_id):
+    """O que já virou e-mail é imutável — o hold não pode ressuscitá-lo."""
     import db
     from datetime import datetime, timedelta, timezone
     from db import get_conn
@@ -993,7 +1006,7 @@ def test_touch_nao_mexe_em_evento_ja_emailado(user_id):
                         (antigo, user_id))
         c.commit()
 
-    assert db.touch_pending_agent_events(user_id, ["barao"]) == 0
+    assert db.hold_agent_emails(user_id, ["barao"], 10) == 0
     with get_conn() as c:
         with c.cursor() as cur:
             cur.execute("select fired_at from agent_events where user_id=%s", (user_id,))
@@ -1017,8 +1030,8 @@ def test_refresh_manual_segura_email_antes_da_espera(monkeypatch):
     monkeypatch.setattr(ps, "get_pluggy_item", lambda item, key=None: {"status": "UPDATED"})
     monkeypatch.setattr(ps, "sync_pluggy_user",
                         lambda uid: ordem.append("sync") or {"ok": True})
-    monkeypatch.setattr(db, "touch_pending_agent_events",
-                        lambda uid, kinds: ordem.append("hold") or 1)
+    monkeypatch.setattr(db, "hold_agent_emails",
+                        lambda uid, kinds, mins: ordem.append("hold") or 1)
 
     ps.refresh_and_sync_pluggy_user(42, wait_seconds=0, poll_interval=0.01)
 
@@ -1032,10 +1045,10 @@ def test_hold_agregados_e_fail_soft(monkeypatch):
     import db
     import core.services.pluggy_sync as ps
 
-    def _boom(uid, kinds):
+    def _boom(uid, kinds, mins):
         raise RuntimeError("db fora do ar")
 
-    monkeypatch.setattr(db, "touch_pending_agent_events", _boom)
+    monkeypatch.setattr(db, "hold_agent_emails", _boom)
     ps._hold_aggregate_emails(42, "teste")          # não pode levantar
 
     monkeypatch.setattr(ps, "get_open_finance_snapshot", lambda uid: {
@@ -1058,8 +1071,8 @@ def test_webhook_por_item_segura_email_antes_das_leituras(monkeypatch):
     ordem = []
     monkeypatch.setattr(ps, "get_open_finance_connection_by_item_id",
                         lambda item: {"id": 1, "user_id": 42, "status": "ACTIVE"})
-    monkeypatch.setattr(db, "touch_pending_agent_events",
-                        lambda uid, kinds: ordem.append(("hold", uid)) or 1)
+    monkeypatch.setattr(db, "hold_agent_emails",
+                        lambda uid, kinds, mins: ordem.append(("hold", uid)) or 1)
     monkeypatch.setattr(ps, "create_pluggy_api_key",
                         lambda: ordem.append("api_key") or "k")
     monkeypatch.setattr(ps, "list_pluggy_accounts",
@@ -1089,8 +1102,8 @@ def test_refresh_periodico_segura_email_antes_do_patch(monkeypatch):
     monkeypatch.setattr(ps, "list_pluggy_item_ids", lambda uid=None: ["i1", "i2"])
     monkeypatch.setattr(ps, "get_open_finance_connection_by_item_id",
                         lambda item: {"user_id": 42})
-    monkeypatch.setattr(db, "touch_pending_agent_events",
-                        lambda uid, kinds: ordem.append(("hold", uid)) or 1)
+    monkeypatch.setattr(db, "hold_agent_emails",
+                        lambda uid, kinds, mins: ordem.append(("hold", uid)) or 1)
     monkeypatch.setattr(ps, "update_pluggy_item",
                         lambda item, key=None: ordem.append(f"PATCH:{item}") or True)
 
@@ -1100,3 +1113,40 @@ def test_refresh_periodico_segura_email_antes_do_patch(monkeypatch):
     assert ordem[0] == ("hold", 42), f"hold tem que vir antes do 1º PATCH: {ordem}"
     # segura uma vez por usuário, não por item
     assert len([o for o in ordem if o == ("hold", 42)]) == 1
+
+
+def test_ripe_respeita_o_hold_mesmo_com_evento_maduro(monkeypatch):
+    """O hold é o que segura o e-mail; a idade sozinha não basta, porque um
+    evento cujo payload não muda durante o sync continua 'maduro'."""
+    from datetime import datetime, timedelta, timezone
+    import db
+    import core.services.piggy_agents as pa
+    import core.services.email_service as es
+    import core.services.plan_service as ps
+
+    now = datetime(2026, 8, 15, 12, 0, tzinfo=timezone.utc)
+    velho = now - timedelta(hours=6)
+
+    def _arm(hold_until):
+        sent = []
+        monkeypatch.setattr(db, "list_agents_pending_email", lambda: [
+            {"agent_id": 9, "user_id": 42, "kind": "barao", "config": {}, "last_emailed_at": None}])
+        monkeypatch.setattr(db, "list_unemailed_events", lambda aid: [
+            {"id": 7, "payload": {"titulo": "T", "mensagem": "M"},
+             "fired_at": velho, "email_hold_until": hold_until}])
+        monkeypatch.setattr(db, "user_synced_within", lambda uid, mins: False)
+        monkeypatch.setattr(db, "claim_agent_events_for_email", lambda evs: [e["id"] for e in evs])
+        monkeypatch.setattr(db, "suppress_agent_events", lambda ids: len(ids))
+        monkeypatch.setattr(db, "unclaim_agent_events", lambda ids: len(ids))
+        monkeypatch.setattr(db, "touch_agent_emailed", lambda aid: None)
+        monkeypatch.setattr(db, "get_auth_user", lambda uid: {"engagement_opt_out": False})
+        monkeypatch.setattr(db, "get_user_email", lambda uid: "u@e.com")
+        monkeypatch.setattr(ps, "agents_ui_enabled", lambda *a, **k: True)
+        monkeypatch.setattr(ps, "agent_kind_allowed", lambda *a, **k: True)
+        monkeypatch.setattr(es, "send_agent_report_email", lambda *a, **k: sent.append(a) or True)
+        pa.run_agent_emails_once(now=now)
+        return sent
+
+    assert _arm(now + timedelta(minutes=5)) == [], "hold no futuro devia segurar"
+    assert len(_arm(now - timedelta(minutes=1))) == 1, "hold vencido devia liberar"
+    assert len(_arm(None)) == 1, "sem hold devia liberar"

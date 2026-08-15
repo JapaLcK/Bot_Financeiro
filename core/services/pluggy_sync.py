@@ -223,8 +223,10 @@ def refresh_all_pluggy_items(user_id: int | None = None) -> dict:
 def _hold_aggregate_emails(user_id: int, origem: str) -> None:
     """Segura o e-mail dos agentes whole-portfolio enquanto a carteira se mexe.
 
-    Empurra a carência de estabilidade dos eventos pendentes deles, o que os
-    deixa "imaturos" e portanto não reivindicáveis pelo runner de e-mail. Tem que
+    Carimba email_hold_until nos eventos pendentes deles, o que os torna não
+    reivindicáveis pelo runner de e-mail até o hold expirar. Coluna própria — não
+    mexe em fired_at, que é dado de negócio (data exibida, ordenação do feed,
+    disparos_mes/saved_365d). Tem que
     ser chamado no PRIMEIRO ponto de cada caminho que mexe na carteira, antes de
     qualquer espera ou I/O remoto:
 
@@ -239,13 +241,13 @@ def _hold_aggregate_emails(user_id: int, origem: str) -> None:
     seria emailado no meio da atualização e o emailed_at recusaria a correção
     pelo resto do mês.
 
-    Fail-soft por contrato: nunca levanta. No pior caso o e-mail sai um tick
-    depois — o oposto de uma flag de "sync em progresso", que se vazasse
-    (processo morto no meio) bloquearia o envio pra sempre."""
+    Fail-soft por contrato: nunca levanta. E o hold EXPIRA sozinho — o oposto de
+    uma flag de "sync em progresso", que se vazasse (processo morto no meio)
+    bloquearia o envio pra sempre. No pior caso o e-mail sai um tick depois."""
     try:
-        from db import touch_pending_agent_events
-        from core.services.piggy_agents import _AGENT_EMAIL_MIN_AGE_MIN
-        touch_pending_agent_events(user_id, list(_AGENT_EMAIL_MIN_AGE_MIN))
+        from db import hold_agent_emails
+        from core.services.piggy_agents import _AGENT_EMAIL_MIN_AGE_MIN, _SYNC_QUIET_MIN
+        hold_agent_emails(user_id, list(_AGENT_EMAIL_MIN_AGE_MIN), _SYNC_QUIET_MIN)
     except Exception as exc:
         print(f"[pluggy_sync] hold agregados ({origem}): {exc}")
 

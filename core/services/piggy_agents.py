@@ -1052,11 +1052,15 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
         auto-corrigível ainda pode consertar um snapshot parcial (marcar
         emailed_at cedo, até na supressão, congelaria o valor errado).
 
-        Pros agregados vale uma segunda trava: um sync recente do usuário segura
-        o e-mail mesmo com o evento já maduro. Sem ela, um evento antigo cujo
-        payload NÃO muda no meio de um sync multi-item continua "estável", vira
-        e-mail no mesmo tick, e o emailed_at recusa a correção que só chega
-        quando o último item termina — congelando o valor do mês."""
+        Pros agregados valem duas travas a mais, porque um evento antigo cujo
+        payload NÃO muda no meio de um sync continua "estável" pela idade:
+          1. email_hold_until — carimbado no início de cada caminho de sync
+             (pluggy_sync._hold_aggregate_emails), cobre inclusive a janela em
+             que nada foi gravado ainda;
+          2. sync recente do usuário — rede pra qualquer caminho que não tenha
+             carimbado o hold.
+        Sem elas o evento vira e-mail no mesmo tick e o emailed_at recusa a
+        correção que só chega quando o último item termina."""
         min_age = _AGENT_EMAIL_MIN_AGE_MIN.get(kind, 0)
         if not min_age:
             return events
@@ -1067,7 +1071,11 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
         except Exception as exc:      # sinal é otimização; nunca derruba o e-mail
             print(f"[agents] sync-quiet check {kind} user={user_id}: {exc}", file=sys.stderr)
         cutoff = now - timedelta(minutes=min_age)
-        return [e for e in events if e.get("fired_at") is not None and e["fired_at"] <= cutoff]
+        return [
+            e for e in events
+            if e.get("fired_at") is not None and e["fired_at"] <= cutoff
+            and (e.get("email_hold_until") is None or e["email_hold_until"] <= now)
+        ]
 
     for a in list_agents_pending_email():
         kind = a["kind"]; user_id = a["user_id"]; agent_id = a["agent_id"]

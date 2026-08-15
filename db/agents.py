@@ -322,30 +322,38 @@ def delete_pending_agent_event(agent_id: int, dedupe_key: str) -> bool:
     return deleted
 
 
-def touch_pending_agent_events(user_id: int, kinds: list[str]) -> int:
-    """Reinicia a carência de estabilidade dos eventos pendentes dos `kinds`.
+def hold_agent_emails(user_id: int, kinds: list[str], minutes: int) -> int:
+    """Segura o e-mail dos `kinds` por `minutes`, enquanto a carteira se mexe.
 
-    Chamado no INÍCIO de um sync de carteira: enquanto os itens são buscados na
-    Pluggy nada foi gravado ainda, então nenhum carimbo de conclusão
-    (last_sync_at) denuncia que um sync está em curso — e um evento agregado já
-    maduro poderia ser emailado bem nessa janela, congelando o valor do mês.
-    Empurrar fired_at pra agora mantém esses eventos imaturos durante o sync.
+    Chamado no INÍCIO de cada caminho que sincroniza: enquanto os itens são
+    buscados na Pluggy nada foi gravado ainda, então nenhum carimbo de conclusão
+    (last_sync_at) denuncia que há sync em curso — e um evento agregado já maduro
+    poderia ser emailado bem nessa janela, congelando o valor do mês.
 
-    Não usa flag de "sync em progresso" de propósito: se o processo morrer no
-    meio, uma flag ficaria presa e o e-mail nunca sairia. Aqui o pior caso é o
-    e-mail atrasar uma carência (45min) e sair no tick seguinte.
-    Só toca o que ainda não virou e-mail. Retorna quantos eventos empurrou."""
-    if not kinds:
+    Grava em coluna PRÓPRIA (email_hold_until), nunca em fired_at: aquele é dado
+    de negócio — a data que o usuário vê, a ordenação do feed e a base de
+    disparos_mes/saved_365d. Empurrá-lo faria eventos antigos reaparecerem como
+    novos e nunca envelhecerem das janelas de 30/365 dias.
+
+    Também não é flag de "sync em progresso": este hold EXPIRA sozinho, então um
+    processo morto no meio não deixa nada preso — o pior caso é o e-mail sair um
+    tick depois. Só segura o que ainda não virou e-mail; estender um hold já
+    existente é idempotente (greatest mantém o mais distante).
+    Retorna quantos eventos segurou."""
+    if not kinds or minutes <= 0:
         return 0
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                update agent_events set fired_at = now()
+                update agent_events
+                set email_hold_until = greatest(
+                        coalesce(email_hold_until, now()),
+                        now() + make_interval(mins => %s))
                 where user_id = %s and kind = any(%s)
                   and emailed_at is null and suppressed_at is null
                 """,
-                (user_id, list(kinds)),
+                (minutes, user_id, list(kinds)),
             )
             n = cur.rowcount
         conn.commit()
@@ -408,7 +416,7 @@ def list_unemailed_events(agent_id: int, limit: int = 20) -> list[dict[str, Any]
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select id, kind, payload, valor_impacto, fired_at
+                select id, kind, payload, valor_impacto, fired_at, email_hold_until
                 from agent_events
                 where agent_id = %s and emailed_at is null and suppressed_at is null
                 order by fired_at desc
