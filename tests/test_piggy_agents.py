@@ -1045,3 +1045,58 @@ def test_hold_agregados_e_fail_soft(monkeypatch):
     monkeypatch.setattr(pa, "run_faria_limer_once", lambda **k: {"ok": True})
     monkeypatch.setattr(pa, "run_barao_once", lambda **k: {"ok": True})
     assert ps.sync_pluggy_user(42)["ok"] is True
+
+
+def test_webhook_por_item_segura_email_antes_das_leituras(monkeypatch):
+    """P1 do Codex (6ª rodada, PR #51): em produção o webhook chama
+    sync_pluggy_item DIRETO (frontend/routes/open_finance.py), sem passar por
+    sync_pluggy_user — então nenhum dos wrappers segurava o e-mail nesse
+    caminho, o principal em produção."""
+    import db
+    import core.services.pluggy_sync as ps
+
+    ordem = []
+    monkeypatch.setattr(ps, "get_open_finance_connection_by_item_id",
+                        lambda item: {"id": 1, "user_id": 42, "status": "ACTIVE"})
+    monkeypatch.setattr(db, "touch_pending_agent_events",
+                        lambda uid, kinds: ordem.append(("hold", uid)) or 1)
+    monkeypatch.setattr(ps, "create_pluggy_api_key",
+                        lambda: ordem.append("api_key") or "k")
+    monkeypatch.setattr(ps, "list_pluggy_accounts",
+                        lambda item, key: ordem.append("le_contas") or [])
+    monkeypatch.setattr(ps, "save_open_finance_sync", lambda cid, accs: {})
+    monkeypatch.setattr(ps, "list_pluggy_investments", lambda item, key: [])
+    monkeypatch.setattr(ps, "save_open_finance_investments", lambda cid, invs: {})
+    monkeypatch.setattr(ps, "import_open_finance_launches", lambda uid, cid: {})
+    monkeypatch.setattr(ps, "import_open_finance_credit", lambda uid, cid: {})
+    monkeypatch.setattr(ps, "sync_imported_open_finance_updates", lambda uid, cid: {})
+
+    ps.sync_pluggy_item("item-1")
+
+    assert ("hold", 42) in ordem, "webhook não segurou o e-mail dos agregados"
+    assert ordem.index(("hold", 42)) < ordem.index("le_contas"), \
+        f"hold precisa vir ANTES das leituras remotas: {ordem}"
+
+
+def test_refresh_periodico_segura_email_antes_do_patch(monkeypatch):
+    """Mesmo P1: o tick periódico (refresh_all_pluggy_items) dispara o PATCH
+    direto. Entre o PATCH e o webhook trazer os dados, o evento maduro seguiria
+    reivindicável com o valor velho."""
+    import db
+    import core.services.pluggy_sync as ps
+
+    ordem = []
+    monkeypatch.setattr(ps, "list_pluggy_item_ids", lambda uid=None: ["i1", "i2"])
+    monkeypatch.setattr(ps, "get_open_finance_connection_by_item_id",
+                        lambda item: {"user_id": 42})
+    monkeypatch.setattr(db, "touch_pending_agent_events",
+                        lambda uid, kinds: ordem.append(("hold", uid)) or 1)
+    monkeypatch.setattr(ps, "update_pluggy_item",
+                        lambda item, key=None: ordem.append(f"PATCH:{item}") or True)
+
+    out = ps.refresh_all_pluggy_items(42)
+
+    assert out["triggered"] == 2
+    assert ordem[0] == ("hold", 42), f"hold tem que vir antes do 1º PATCH: {ordem}"
+    # segura uma vez por usuário, não por item
+    assert len([o for o in ordem if o == ("hold", 42)]) == 1

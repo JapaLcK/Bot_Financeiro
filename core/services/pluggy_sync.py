@@ -122,6 +122,14 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
     if str(connection.get("status") or "").upper() == "PAUSED":
         return {"ok": False, "reason": "connection_paused", "item_id": provider_item_id}
 
+    # Ponto comum de TODOS os caminhos que mexem na carteira — inclusive o webhook
+    # de produção, que chama esta função direto (frontend/routes/open_finance.py),
+    # sem passar por sync_pluggy_user. Segurar aqui cobre as leituras remotas
+    # abaixo, que rodam antes de qualquer commit. Os wrappers seguram mais cedo
+    # ainda (antes de listar itens / antes do PATCH e da espera); este é a rede
+    # que pega qualquer caminho novo que apareça.
+    _hold_aggregate_emails(connection["user_id"], "sync_item")
+
     api_key = create_pluggy_api_key()
 
     accounts: list[dict] = []
@@ -189,8 +197,22 @@ def refresh_all_pluggy_items(user_id: int | None = None) -> dict:
     webhook → sync). Usado pelo tick de refresh periódico. Falhas por item são engolidas."""
     items = list_pluggy_item_ids(user_id)
     triggered = 0
+    segurados: set[int] = set()
     for item_id in items:
         try:
+            # Segura o e-mail dos agregados ANTES do PATCH: daqui até o webhook
+            # trazer os dados novos, o evento maduro seguiria reivindicável com o
+            # valor velho — e o emailed_at recusaria a correção depois.
+            if user_id is not None:
+                if user_id not in segurados:
+                    _hold_aggregate_emails(user_id, "refresh_all")
+                    segurados.add(user_id)
+            else:
+                conn = get_open_finance_connection_by_item_id(item_id)
+                dono = (conn or {}).get("user_id")
+                if dono is not None and dono not in segurados:
+                    _hold_aggregate_emails(dono, "refresh_all")
+                    segurados.add(dono)
             update_pluggy_item(item_id)
             triggered += 1
         except Exception:
