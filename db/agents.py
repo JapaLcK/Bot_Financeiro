@@ -178,15 +178,24 @@ def record_or_refresh_agent_event(
     channel: str = "dashboard",
     valor_impacto: float | None = None,
 ) -> bool:
-    """Como record_agent_event, mas AUTO-CORRIGE: se a dedupe_key já existe e o
-    evento ainda NÃO foi enviado por e-mail, atualiza payload/valor_impacto/
-    fired_at com o snapshot novo em vez de ignorar.
+    """Como record_agent_event, mas AUTO-CORRIGE: se a dedupe_key já existe,
+    atualiza payload/valor_impacto/fired_at com o snapshot novo em vez de ignorar.
 
     Serve pra eventos-retrato que devem refletir o estado coerente mais recente
-    (ex.: Faria Limer mensal). O ÚNICO congelamento é o e-mail (emailed_at): o
-    artefato enviado é imutável, então depois dele o evento não muda. O feed é
-    visão viva — corrige mesmo se o usuário já viu (seen_at NÃO trava o refresh;
-    mostrar o número certo vale mais do que manter o errado que ele viu primeiro).
+    (ex.: Faria Limer e Barão, mensais). O FEED É VISÃO VIVA: nada o congela —
+    nem seen_at nem emailed_at. Mostrar o número certo vale mais do que manter o
+    errado que o usuário viu primeiro.
+
+    Em particular, ter virado e-mail NÃO congela o evento. O artefato enviado é
+    imutável por natureza (já está na caixa do usuário), mas isso não obriga o
+    feed a envelhecer junto: o e-mail é um retrato datado, o app é o estado atual,
+    e os dois divergirem é correto — cada um vale pro seu momento. Sem isso, um
+    sync que comece logo depois do envio deixaria o feed preso num valor
+    desatualizado até virar o mês, porque a janela entre reivindicar e enviar é
+    irredutível (I/O externo não é atômico com o banco).
+
+    O que impede REENVIO continua sendo emailed_at, nas queries de fila
+    (list_agents_pending_email / list_unemailed_events) — não aqui.
     Retorna True se inseriu ou atualizou.
 
     Snapshot novo também LIMPA suppressed_at: a supressão vale pro conteúdo que foi
@@ -213,9 +222,8 @@ def record_or_refresh_agent_event(
                       valor_impacto = excluded.valor_impacto,
                       fired_at = now(),
                       suppressed_at = null
-                  where agent_events.emailed_at is null
-                    and (agent_events.payload is distinct from excluded.payload
-                         or agent_events.valor_impacto is distinct from excluded.valor_impacto)
+                  where agent_events.payload is distinct from excluded.payload
+                     or agent_events.valor_impacto is distinct from excluded.valor_impacto
                 """,
                 (agent_id, user_id, kind, dedupe_key,
                  json.dumps(payload or {}), channel, valor_impacto),

@@ -656,14 +656,18 @@ def test_record_or_refresh_sql_roundtrip(user_id):
     assert r["seen_at"] is not None        # visto no feed não impede a correção
     assert r["fired_at"] > fired1          # idade reiniciou (payload mudou)
 
-    # 4) depois de emailado, congela de vez
+    # 4) depois de emailado o feed AINDA corrige — o e-mail é retrato datado, o
+    #    app é o estado atual, e divergirem é correto. O que não pode é reenviar:
+    #    isso quem impede são as queries de fila, não o upsert.
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("update agent_events set emailed_at=now() where agent_id=%s", (agent_id,))
         conn.commit()
     assert db.record_or_refresh_agent_event(
-        agent_id, user_id, "faria_limer", key, {"v": 3}, valor_impacto=0.0) is False
-    assert _row()["payload"] == {"v": 2}
+        agent_id, user_id, "faria_limer", key, {"v": 3}, valor_impacto=0.0) is True
+    assert _row()["payload"] == {"v": 3}, "feed devia refletir o valor novo"
+    assert _row()["emailed_at"] is not None, "não podia ter voltado a ficar pendente"
+    assert db.list_unemailed_events(agent_id) == [], "evento emailado não pode voltar pra fila"
 
 
 def test_claim_unclaim_suppress_delete_sql(user_id):
@@ -1186,3 +1190,41 @@ def test_claim_recusa_evento_com_hold_instalado_depois_da_leitura(user_id):
                         " where user_id=%s", (user_id,))
         c.commit()
     assert db.claim_agent_events_for_email(db.list_unemailed_events(ag["id"])) == [lidos[0]["id"]]
+
+
+def test_feed_corrige_apos_email_e_nao_reenvia(user_id):
+    """P1 do Codex (9ª rodada, PR #51): a janela entre reivindicar e enviar é
+    irredutível (I/O externo não é atômico com o banco). Em vez de encurtá-la,
+    tiramos o dano: o feed passa a corrigir mesmo depois do e-mail.
+
+    O e-mail é retrato datado, o app é o estado atual — divergirem é correto.
+    O que NÃO pode é o evento voltar pra fila e ser reenviado."""
+    import db
+    from db import get_conn
+
+    ag = db.activate_agent(user_id, "barao")
+    key = "parado:2026-08"
+    db.record_or_refresh_agent_event(ag["id"], user_id, "barao", key,
+                                     {"idle": 21500.0}, valor_impacto=188.0)
+
+    # simula o envio: claim + marca como emailado
+    lidos = db.list_unemailed_events(ag["id"])
+    assert db.claim_agent_events_for_email(lidos) == [lidos[0]["id"]]
+    assert db.list_unemailed_events(ag["id"]) == []
+
+    # sync que começou logo depois do envio traz o valor novo
+    assert db.record_or_refresh_agent_event(
+        ag["id"], user_id, "barao", key, {"idle": 25000.0}, valor_impacto=218.0) is True
+
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("select payload, emailed_at from agent_events"
+                        " where agent_id=%s and dedupe_key=%s", (ag["id"], key))
+            row = cur.fetchone()
+    assert row["payload"] == {"idle": 25000.0}, "feed ficou preso no valor velho"
+    assert row["emailed_at"] is not None, "não podia ter voltado a ficar pendente"
+
+    # e o principal: não volta pra fila de e-mail (nada de reenvio)
+    assert db.list_unemailed_events(ag["id"]) == []
+    pend = [a for a in db.list_agents_pending_email() if a["agent_id"] == ag["id"]]
+    assert pend == [], "agente voltou pra fila de e-mail após a correção"
