@@ -1453,3 +1453,36 @@ def test_fila_de_email_e_so_do_mes_corrente(user_id):
     assert fila[0]["payload"] == {"idle": 1.0}, "só o evento do mês corrente entra na fila"
     # e o de mês passado continua no feed (não foi apagado, só saiu da fila)
     assert len(db.list_agent_events(user_id, limit=10)) == 2
+
+
+def test_hold_protege_evento_com_suppressed_at_legado(user_id):
+    """P1 do Codex no af191e6: ao aposentar suppressed_at eu esqueci que o
+    hold_agent_emails ainda filtrava por ela. Uma linha do mês corrente com
+    suppressed_at legado (de antes do deploy) volta pra fila pelas queries novas,
+    mas o hold se recusava a protegê-la — então um sync sobreposto ao tick de
+    e-mail não a seguraria. O gate do hold tem que ser o MESMO da fila."""
+    import db
+    from db import get_conn
+
+    ag = db.activate_agent(user_id, "barao")
+    key = "parado:2026-08"
+    db.record_or_refresh_agent_event(ag["id"], user_id, "barao", key,
+                                     {"idle": 21500.0}, valor_impacto=188.13)
+    # simula o estado legado: linha do mês corrente carimbada antes do deploy
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("update agent_events set suppressed_at = now() where agent_id=%s",
+                        (ag["id"],))
+        c.commit()
+
+    # a fila nova já a considera elegível (não olha mais suppressed_at)...
+    assert len(db.list_unemailed_events(ag["id"])) == 1
+    # ...então o hold TEM que alcançá-la também
+    from core.services.piggy_agents import _AGENT_EMAIL_MIN_AGE_MIN
+    assert db.hold_agent_emails(user_id, list(_AGENT_EMAIL_MIN_AGE_MIN), 10) == 1, \
+        "hold não protegeu evento com suppressed_at legado"
+
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("select email_hold_until from agent_events where agent_id=%s", (ag["id"],))
+            assert cur.fetchone()["email_hold_until"] is not None

@@ -369,7 +369,7 @@ def hold_agent_emails(user_id: int, kinds: list[str], minutes: int) -> int:
                         coalesce(email_hold_until, now()),
                         now() + make_interval(mins => %s))
                 where user_id = %s and kind = any(%s)
-                  and emailed_at is null and suppressed_at is null
+                  and emailed_at is null and stale_at is null
                 """,
                 (minutes, user_id, list(kinds)),
             )
