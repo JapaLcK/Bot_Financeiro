@@ -75,6 +75,11 @@ html.pb-app .mfa-modal {
     - env(safe-area-inset-left) - env(safe-area-inset-right)) !important;
   max-height: calc(100vh - 40px
     - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+  /* Limitar a altura sem poder rolar seria pior que não limitar: o .modal
+     base (dashboard.css) não tem overflow, então os campos e os botões de
+     ação escapariam do card em vez de ficarem alcançáveis. O .wide e o
+     .launch-detail já rolam; aqui a regra vale pros 12 modais simples. */
+  overflow: auto !important;
 }
 /* O .pig-modal (alertModal/confirmModal) já tem largura própria pensada —
    min(440px, 92vw), com width:100% no mobile. Só LIMITAMOS pela área segura;
