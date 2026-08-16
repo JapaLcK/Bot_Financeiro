@@ -19,21 +19,6 @@ html.pb-app body {
   overflow-x: hidden !important;
 }
 
-/* ─── Sem preto ao puxar a tela ─────────────────────────────────────────
-   Puxar a página além do fim fazia a borracha do iOS revelar o fundo do
-   WebView — uma faixa preta que não é a página. overscroll-behavior tira o
-   arrasto elástico do documento, e o fundo explícito no html garante que,
-   onde quer que o sistema pinte o canvas fora do conteúdo, a cor seja a da
-   página e não preto solto. */
-html.pb-app {
-  background: var(--bg-page, #111111);
-  overscroll-behavior: none;
-}
-html.pb-app body {
-  overscroll-behavior: none;
-  background-color: var(--bg-page, #111111);
-}
-
 /* Modais sempre cabem na tela */
 html.pb-app .modal,
 html.pb-app .modal.wide,
