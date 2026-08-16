@@ -14,6 +14,13 @@ from .connection import get_conn
 # vive no frontend/router; aqui só o que o banco precisa validar.
 AGENT_KINDS = ("xerife", "reporter", "carteiro", "detetive", "cofre", "barao", "faria_limer")
 
+# Agentes whole-portfolio, mensais: gravam UM retrato por mês (dedupe :YYYY-MM) que
+# reflete o estado corrente. Só PRA ESTES a fila expira o e-mail na virada do mês
+# (retrato de mês passado é notícia velha). Os demais (Xerife/anomalia, Carteiro/
+# boleto, etc.) disparam a qualquer momento e o e-mail deles NÃO pode expirar por
+# mês-calendário — sairia da fila sem ser enviado se cruzasse a meia-noite do dia 1.
+MONTHLY_AGENT_KINDS = ("barao", "faria_limer")
+
 
 def list_agents(user_id: int) -> list[dict[str, Any]]:
     """Agentes do usuário + contadores (disparos 30d, R$ salvos 365d)."""
@@ -421,10 +428,12 @@ def list_agents_pending_email() -> list[dict[str, Any]]:
                 from agents a
                 join agent_events e on e.agent_id = a.id
                   and e.emailed_at is null and e.stale_at is null
-                  and e.fired_at >= date_trunc('month', now())
+                  and (not (e.kind = any(%s))
+                       or e.fired_at >= date_trunc('month', now()))
                 where a.status = 'active'
                 group by a.id, a.user_id, a.kind, a.config, a.last_emailed_at
                 """,
+                (list(MONTHLY_AGENT_KINDS),),
             )
             return list(cur.fetchall() or [])
 
@@ -432,9 +441,11 @@ def list_agents_pending_email() -> list[dict[str, Any]]:
 def list_unemailed_events(agent_id: int, limit: int = 20) -> list[dict[str, Any]]:
     """Eventos do agente elegíveis a e-mail, mais recentes primeiro.
 
-    Só o mês corrente (fired_at): evento que atravessou a virada do mês sem ser
-    enviado é notícia velha de agente mensal — sai da fila sozinho, sem precisar
-    de carimbo. É também o que evita avalanche pra quem religa após meses."""
+    Pros kinds MENSAIS (barao/faria): só o mês corrente — retrato que atravessou a
+    virada do mês é notícia velha, sai da fila sozinho, sem carimbo. É também o que
+    evita avalanche pra quem religa após meses. Pros demais (anomalia, boleto...) o
+    e-mail NÃO expira por mês: ele fica na fila até ser enviado, senão um evento
+    gravado perto da meia-noite do dia 1 se perderia."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -442,11 +453,12 @@ def list_unemailed_events(agent_id: int, limit: int = 20) -> list[dict[str, Any]
                 select id, kind, payload, valor_impacto, fired_at, email_hold_until
                 from agent_events
                 where agent_id = %s and emailed_at is null and stale_at is null
-                  and fired_at >= date_trunc('month', now())
+                  and (not (kind = any(%s))
+                       or fired_at >= date_trunc('month', now()))
                 order by fired_at desc
                 limit %s
                 """,
-                (agent_id, limit),
+                (agent_id, list(MONTHLY_AGENT_KINDS), limit),
             )
             return list(cur.fetchall() or [])
 

@@ -1558,3 +1558,37 @@ def test_sync_item_renova_hold_durante_o_sync(monkeypatch):
     # 1 no início + 1 por conta (2) + 2 páginas × 2 contas (4) = 7 renovações
     assert len(holds) >= 6, f"hold devia ser renovado ao longo do sync, veio {len(holds)}"
     assert all(o == "sync_item" for o in holds)
+
+
+def test_expiry_por_mes_so_vale_pros_agentes_mensais(user_id):
+    """P2 do Codex no e44fbc5: o filtro 'só mês corrente' que introduzi na
+    refatoração valia pra TODOS os kinds. Mas só barao/faria são mensais — um
+    Xerife (anomalia) ou Carteiro (boleto) gravado perto da virada do mês seria
+    excluído da fila permanentemente, perdendo o e-mail. O expiry é só dos mensais."""
+    import db
+    from db import get_conn
+    from datetime import datetime, timedelta, timezone
+
+    ag_x = db.activate_agent(user_id, "xerife")      # NÃO mensal
+    ag_b = db.activate_agent(user_id, "barao")       # mensal
+    db.record_agent_event(ag_x["id"], user_id, "xerife", "anomalia:1",
+                          {"titulo": "gasto alto"}, valor_impacto=0.0)
+    db.record_or_refresh_agent_event(ag_b["id"], user_id, "barao", "parado:x",
+                                     {"idle": 1.0}, valor_impacto=1.0)
+
+    # simula os dois gravados no mês passado
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("update agent_events set fired_at = %s where user_id=%s",
+                        (datetime.now(timezone.utc) - timedelta(days=40), user_id))
+        c.commit()
+
+    # o Xerife (não mensal) CONTINUA na fila — o e-mail dele não expira por mês
+    assert len(db.list_unemailed_events(ag_x["id"])) == 1, "e-mail de agente não-mensal se perdeu na virada do mês"
+    pend_x = [a for a in db.list_agents_pending_email() if a["agent_id"] == ag_x["id"]]
+    assert pend_x != [], "Xerife sumiu da fila de agentes pendentes"
+
+    # o Barão (mensal) SAI da fila — retrato de mês passado é notícia velha
+    assert db.list_unemailed_events(ag_b["id"]) == []
+    pend_b = [a for a in db.list_agents_pending_email() if a["agent_id"] == ag_b["id"]]
+    assert pend_b == []
