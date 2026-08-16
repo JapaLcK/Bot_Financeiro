@@ -5622,6 +5622,10 @@ document.addEventListener("keydown", (e) => {
 function applyTheme(theme) {
   const isLight = theme === "light";
   document.body.classList.toggle("light", isLight);
+  // espelha no <html>: o fundo do CANVAS (o que o elástico revela no app)
+  // vem do html, então ele precisa saber do tema — senão o claro fica com
+  // canvas escuro e a faixa reaparece, invertida
+  document.documentElement.classList.toggle("light", isLight);
   const icon  = document.getElementById("theme-toggle-icon");
   const label = document.getElementById("theme-toggle-label");
   if (icon)  icon.innerHTML = isLight

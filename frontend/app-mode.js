@@ -83,6 +83,9 @@
   function buildTabbar() {
     if (!page) { root.classList.add("pb-no-tabs"); return; }
     document.body.classList.add("pb-page-" + page);
+    // no <html> também: o fundo do CANVAS (o que o elástico revela) vem do
+    // html, e ele precisa acompanhar a paleta de cada tela
+    root.classList.add("pb-root-" + page);
 
     const bar = document.createElement("nav");
     bar.className = "pb-tabbar";
