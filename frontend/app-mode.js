@@ -700,8 +700,18 @@
       return false;
     }
 
+    // Segundo dedo no meio do puxão CANCELA (não pausa): deixar o estado
+    // armado fazia o primeiro touchend commitar refresh dentro de um gesto
+    // multi-touch — nas telas sem PBRefresh, um reload inteiro.
+    function cancelPull() {
+      tracking = false;
+      dragged = false;
+      if (pull > 0) spring(0);
+    }
+
     addEventListener("touchstart", ev => {
-      if (busy || ev.touches.length !== 1) return;
+      if (busy) return;
+      if (ev.touches.length !== 1) { cancelPull(); return; }
       if (ownsGesture(ev.target)) return;
       tracking = atTop();
       dragged = false;
@@ -710,7 +720,9 @@
     }, { passive: true });
 
     addEventListener("touchmove", ev => {
-      if (!tracking || busy || ev.touches.length !== 1) return;
+      if (busy) return;
+      if (ev.touches.length !== 1) { cancelPull(); return; }
+      if (!tracking) return;
       const dy = ev.touches[0].clientY - startY;
       const dx = ev.touches[0].clientX - startX;
       // Gesto horizontal (carrossel, tabela que rola de lado) não é puxão.
