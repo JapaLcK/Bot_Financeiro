@@ -203,7 +203,22 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
 
 def refresh_all_pluggy_items(user_id: int | None = None) -> dict:
     """Dispara update na Pluggy pra cada item ativo (Pluggy re-busca do banco e manda
-    webhook → sync). Usado pelo tick de refresh periódico. Falhas por item são engolidas."""
+    webhook → sync). Usado pelo tick de refresh periódico. Falhas por item são engolidas.
+
+    LIMITAÇÃO CONHECIDA (decisão de 2026-08-15): este caminho é fire-and-forget —
+    dispara o PATCH e retorna; o webhook chega depois e aciona sync_pluggy_item (que
+    aí sim renova o hold e faz heartbeat). O hold aplicado aqui dura _SYNC_QUIET_MIN
+    (10min). Se a Pluggy demorar MAIS que isso pra entregar o webhook, o hold expira
+    na janela PATCH→webhook e um retrato agregado maduro pode ser emailado com o
+    estado ANTERIOR ao refresh. Não é corrigido de propósito:
+      - probabilidade ínfima: o webhook normalmente chega em ~segundos (o refresh
+        manual assume ~18s, OF_REFRESH_WAIT_SEC); >10min é anomalia severa da Pluggy;
+      - dano marginal: o e-mail sai com o estado COMPLETO anterior (correto no
+        momento do envio), não com um snapshot parcial errado como no bug original;
+        e o feed se autocorrige quando o webhook processa.
+    Fechar 100% exigiria um worker renovando o lease enquanto o item está UPDATING
+    (processo/estado novo), custo desproporcional pro cenário. Reavaliar se surgir
+    evidência de webhook lento recorrente."""
     items = list_pluggy_item_ids(user_id)
     triggered = 0
     segurados: set[int] = set()
