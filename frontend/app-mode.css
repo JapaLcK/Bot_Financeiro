@@ -65,8 +65,19 @@ html.pb-app.pb-no-tabs body {
   padding-bottom: 0 !important;
 }
 
-/* ─── Tab bar flutuante (pílula estilo WhatsApp/iOS) ───────────────────── */
+/* ─── Tab bar flutuante — dock "menisco" ───────────────────────────────────
+   A barra NÃO é uma caixa com fundo: é um único path SVG (.pb-dock-skin)
+   desenhado pelo app-mode.js. A aba ativa não ganha um indicador que desliza —
+   a chapa derrete em volta da bolha (.pb-dock-bead), que fica encaixada num
+   soquete paramétrico. Por isso aqui não tem background/border/radius: a
+   silhueta inteira (cantos + soquete) sai do path.                          */
 html.pb-app .pb-tabbar {
+  --pb-acc: #FF2D8E;
+  /* Geometria do soquete. O JS lê estas três daqui (measure()), então uma
+     media query retempera chapa + bolha + solda de uma vez só. */
+  --pb-dock-r:  20px;   /* raio dos cantos da chapa */
+  --pb-dock-rb: 22px;   /* raio da bolha */
+  --pb-dock-s:  22px;   /* raio base do ombro (o filete da solda) */
   position: fixed;
   left: 10px; right: 10px;
   bottom: max(8px, calc(env(safe-area-inset-bottom) - 14px));
@@ -75,15 +86,42 @@ html.pb-app .pb-tabbar {
   display: flex;
   align-items: center;
   height: 66px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: rgba(24, 22, 26, 0.86);
-  -webkit-backdrop-filter: blur(24px) saturate(1.4);
-  backdrop-filter: blur(24px) saturate(1.4);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
+  /* Folga lateral: o soquete precisa de chapa entre a aba da ponta e o canto
+     arredondado — sem ela a solda encosta no canto e some */
+  padding: 0 22px;
 }
+
+/* Chapa: um path só (fill = placa, stroke = aro). O viewBox é maior que a
+   barra (folga de 4px) pra sobrar espaço pro traço do aro. */
+html.pb-app .pb-dock-skin {
+  position: absolute;
+  left: -4px; top: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  z-index: 1;
+  pointer-events: none;
+  overflow: visible;
+  filter: drop-shadow(0 12px 30px rgba(0, 0, 0, 0.55));
+}
+/* Brilho do acento: só aparece FORA da chapa (a placa é opaca) — no recorte
+   do soquete e no chão embaixo do dock */
+html.pb-app .pb-dock-glow {
+  position: absolute;
+  left: 0; top: 0;
+  width: 230px; height: 120px;
+  margin: -24px 0 0 -115px;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.55;
+  background: radial-gradient(50% 50% at 50% 50%, rgba(255, 45, 142, 0.34), transparent 70%);
+  background: radial-gradient(50% 50% at 50% 50%,
+    color-mix(in srgb, var(--pb-acc) 34%, transparent), transparent 70%);
+  will-change: transform;
+}
+
 html.pb-app .pb-tab {
+  position: relative;
+  z-index: 2;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -92,7 +130,7 @@ html.pb-app .pb-tab {
   gap: 3px;
   min-height: 52px;
   margin: 7px 0;
-  border-radius: 999px;
+  border-radius: 18px;
   color: rgba(255, 255, 255, 0.6);
   text-decoration: none;
   font-family: "Inter", -apple-system, sans-serif;
@@ -100,7 +138,7 @@ html.pb-app .pb-tab {
   font-weight: 600;
   letter-spacing: 0.01em;
   -webkit-tap-highlight-color: transparent;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition: color 0.18s ease;
 }
 html.pb-app .pb-tab svg {
   width: 24px;
@@ -111,25 +149,118 @@ html.pb-app .pb-tab svg {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-/* Aba ativa: casulo destacado (como o WhatsApp) */
-html.pb-app .pb-tab.active {
-  color: #FF2D8E;
-  background: rgba(255, 255, 255, 0.10);
+html.pb-app .pb-tab-ico {
+  display: flex;
+  transition: opacity 0.16s ease, transform 0.16s ease;
 }
+/* O ícone da aba que está DEBAIXO da bolha sai de cena — quem carrega o
+   ícone ali é a própria bolha (o rótulo continua, abaixo do soquete) */
+html.pb-app .pb-tab.pb-under .pb-tab-ico {
+  opacity: 0;
+  transform: scale(0.6);
+}
+/* Aba ativa (ou a que a bolha está prevendo, durante o arrasto) */
+html.pb-app .pb-tab.pb-live { color: var(--pb-acc); }
 html.pb-app .pb-tab:active { color: #FF80B8; }
+html.pb-app .pb-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(255, 45, 142, 0.7);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pb-acc) 70%, transparent);
+}
 
-/* Botão central de lançamento (círculo rosa dentro da pílula) */
+/* A bolha: encaixada no soquete, arrastável ao longo da barra */
+html.pb-app .pb-dock-bead {
+  position: absolute;
+  left: 0; top: 0;
+  width: calc(var(--pb-dock-rb) * 2);
+  height: calc(var(--pb-dock-rb) * 2);
+  /* o JS translada pelo CENTRO da bolha */
+  margin: calc(var(--pb-dock-rb) * -1) 0 0 calc(var(--pb-dock-rb) * -1);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #1A0209;
+  background:
+    radial-gradient(circle at 36% 24%, rgba(255, 255, 255, 0.28), transparent 46%),
+    linear-gradient(180deg, #FF4E9C, var(--pb-acc) 52%, #DE1C76);
+  background:
+    radial-gradient(circle at 36% 24%, rgba(255, 255, 255, 0.28), transparent 46%),
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--pb-acc) 92%, #fff),
+      var(--pb-acc) 52%,
+      color-mix(in srgb, var(--pb-acc) 86%, #000));
+  box-shadow:
+    0 8px 20px rgba(255, 45, 142, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.16) inset,
+    0 -5px 12px rgba(0, 0, 0, 0.22) inset;
+  box-shadow:
+    0 8px 20px color-mix(in srgb, var(--pb-acc) 45%, transparent),
+    0 0 0 1px rgba(255, 255, 255, 0.16) inset,
+    0 -5px 12px rgba(0, 0, 0, 0.22) inset;
+  touch-action: none;           /* arrasto não rola a página */
+  cursor: grab;
+  will-change: transform;
+}
+html.pb-app .pb-dock-dragging .pb-dock-bead { cursor: grabbing; }
+html.pb-app .pb-dock-bead svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+html.pb-app .pb-dock-bead-ico { display: flex; }
+/* A animação mora no SVG, não no span: o JS troca o innerHTML do span a cada
+   aba, então o SVG nasce de novo e o pop re-dispara sozinho */
+html.pb-app .pb-dock-bead-ico svg { animation: pb-bead-pop 0.22s ease-out; }
+@keyframes pb-bead-pop {
+  from { opacity: 0; transform: scale(0.55); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html.pb-app .pb-dock-bead-ico { animation: none; }
+}
+
+/* Telas estreitas (iPhone SE/mini): as abas das pontas chegam perto demais do
+   canto e a bolha fica pendurada na quina. Chapa e bolha encolhem juntas —
+   o soquete continua cabendo inteiro na chapa. */
+@media (max-width: 360px) {
+  html.pb-app .pb-tabbar {
+    --pb-dock-r:  16px;
+    --pb-dock-rb: 20px;
+    --pb-dock-s:  18px;
+    padding: 0 20px;
+  }
+  html.pb-app .pb-tab-fab > span { width: 46px; height: 46px; }
+  html.pb-app .pb-dock-bead svg { width: 20px; height: 20px; }
+}
+
+/* Botão central de lançamento. O acento do dock é a bolha — se o + também
+   fosse um disco rosa cheio, o dock teria dois "ativos" competindo. Então
+   ele vira um disco de chapa com o + e o aro no acento: continua sendo o
+   alvo mais óbvio da barra, sem disputar com a bolha.
+   (Pra voltar ao disco rosa: background e color como estavam.) */
 html.pb-app .pb-tab-fab { flex: 0 0 auto; margin: 0 4px; }
 html.pb-app .pb-tab-fab > span {
   width: 52px;
   height: 52px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #FF2D8E, #C7186B);
+  background: linear-gradient(180deg, #2E2B34, #1A181D);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  box-shadow: 0 6px 18px rgba(255, 45, 142, 0.45);
+  color: #FF2D8E;
+  color: var(--pb-acc);
+  box-shadow:
+    0 0 0 1px rgba(255, 45, 142, 0.55),
+    0 6px 16px rgba(0, 0, 0, 0.45);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--pb-acc) 55%, transparent),
+    0 6px 16px rgba(0, 0, 0, 0.45);
 }
 html.pb-app .pb-tab-fab > span svg { width: 26px; height: 26px; stroke-width: 2.4; }
 html.pb-app .pb-tab-fab:active > span { transform: scale(0.94); }

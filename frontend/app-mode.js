@@ -89,17 +89,249 @@
     bar.setAttribute("aria-label", "Navegação principal");
     const tabHtml = t => {
       const active = PAGES[t.href] === page;
-      return `<a class="pb-tab${active ? " active" : ""}" href="${t.href}"` +
-        `${active ? ' aria-current="page"' : ""}>${t.icon}<span>${t.label}</span></a>`;
+      return `<a class="pb-tab${active ? " active pb-live" : ""}" href="${t.href}"` +
+        `${active ? ' aria-current="page"' : ""}>` +
+        `<span class="pb-tab-ico">${t.icon}</span><span>${t.label}</span></a>`;
     };
     const fabHtml =
       '<a class="pb-tab pb-tab-fab" href="/app?lancar=1" aria-label="Lançar"><span>' +
       '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" ' +
       'stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span></a>';
+    // A chapa e a bolha são irmãs das abas: o path desenha a silhueta inteira
+    // (cantos + soquete) e a bolha é um elemento próprio, arrastável.
     bar.innerHTML =
-      tabHtml(TABS[0]) + tabHtml(TABS[1]) + fabHtml + tabHtml(TABS[2]) + tabHtml(TABS[3]);
+      '<div class="pb-dock-glow" aria-hidden="true"></div>' +
+      '<svg class="pb-dock-skin" aria-hidden="true" focusable="false">' +
+      '<defs>' +
+      '<linearGradient id="pbDockPlate" x1="0" y1="0" x2="0" y2="1">' +
+      '<stop offset="0" stop-color="#23212A"/><stop offset="1" stop-color="#131216"/>' +
+      "</linearGradient>" +
+      '<linearGradient id="pbDockRim" x1="0" y1="0" x2="0" y2="1">' +
+      '<stop offset="0" stop-color="#fff" stop-opacity=".24"/>' +
+      '<stop offset=".5" stop-color="#fff" stop-opacity=".07"/>' +
+      '<stop offset="1" stop-color="#fff" stop-opacity=".03"/>' +
+      "</linearGradient></defs>" +
+      '<path class="pb-dock-fill" fill="url(#pbDockPlate)" stroke="url(#pbDockRim)" stroke-width="1"/>' +
+      "</svg>" +
+      tabHtml(TABS[0]) + tabHtml(TABS[1]) + fabHtml + tabHtml(TABS[2]) + tabHtml(TABS[3]) +
+      '<span class="pb-dock-bead" aria-hidden="true"><span class="pb-dock-bead-ico"></span></span>';
     bar.querySelector(".pb-tab-fab").addEventListener("click", fabLaunch);
     document.body.appendChild(bar);
+    initDock(bar);
+  }
+
+  // ─── Dock "menisco" ──────────────────────────────────────────────────────
+  // A aba ativa não ganha um indicador que desliza: a chapa DERRETE em volta
+  // da bolha. O soquete é paramétrico — cada ombro é um círculo tangente à
+  // borda de cima E à bolha, então |C_ombro − C_bolha| = s + rb e a
+  // meia-largura do soquete cai da conta (reachOf). Tangência exata nos dois
+  // lados = solda lisa, sem quina onde a borda vira socket.
+  // r/rb/s vêm do CSS (measure() relê a cada layout) — ver --pb-dock-* lá.
+  const DK = {
+    h:    66,   // altura da chapa (bate com o CSS)
+    r:    20,   // raio dos cantos
+    rb:   22,   // raio da bolha
+    by:    2,   // profundidade do centro da bolha (+ = abaixo da borda de cima)
+    s:    22,   // raio base do ombro (o filete soldado)
+    vmax:  2.4, // px/frame que satura a inclinação por velocidade
+  };
+
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+
+  // meia-largura do soquete pra um ombro de raio s
+  function reachOf(s, rb, by) {
+    const a = (s + rb) * (s + rb) - (s - by) * (s - by);
+    return a > 0 ? Math.sqrt(a) : 0;
+  }
+  // inverso de reachOf: maior ombro cujo soquete ainda cabe em L de chapa
+  function shoulderFor(L, rb, by) {
+    return (L * L - rb * rb + by * by) / (2 * (rb + by));
+  }
+
+  // Silhueta inteira: borda de cima (com o soquete em bx) + cantos + base.
+  function socketPath(W, bx, by, sL, sR) {
+    const h = DK.h, r = DK.r, rb = DK.rb;
+    const dl = reachOf(sL, rb, by);
+    const dr = reachOf(sR, rb, by);
+    // tangência ombro↔bolha: no segmento que une os centros, a s do ombro
+    const tan = (cx, s) => {
+      const dx = bx - cx, dy = by - s;
+      const d = Math.hypot(dx, dy) || 1;
+      return [cx + (s * dx) / d, s + (s * dy) / d];
+    };
+    const a = tan(bx - dl, sL);
+    const z = tan(bx + dr, sR);
+    const n = v => v.toFixed(2);
+    return (
+      `M ${r} 0 L ${n(bx - dl)} 0` +
+      ` A ${n(sL)} ${n(sL)} 0 0 1 ${n(a[0])} ${n(a[1])}` +   // ombro de trás
+      ` A ${rb} ${rb} 0 0 0 ${n(z[0])} ${n(z[1])}` +          // a tigela
+      ` A ${n(sR)} ${n(sR)} 0 0 1 ${n(bx + dr)} 0` +          // ombro da frente
+      ` L ${W - r} 0 A ${r} ${r} 0 0 1 ${W} ${r}` +
+      ` L ${W} ${h - r} A ${r} ${r} 0 0 1 ${W - r} ${h}` +
+      ` L ${r} ${h} A ${r} ${r} 0 0 1 0 ${h - r}` +
+      ` L 0 ${r} A ${r} ${r} 0 0 1 ${r} 0 Z`
+    );
+  }
+
+  function initDock(bar) {
+    const tabs = Array.prototype.slice.call(
+      bar.querySelectorAll(".pb-tab:not(.pb-tab-fab)"));
+    const path = bar.querySelector(".pb-dock-fill");
+    const skin = bar.querySelector(".pb-dock-skin");
+    const glow = bar.querySelector(".pb-dock-glow");
+    const bead = bar.querySelector(".pb-dock-bead");
+    const beadIco = bar.querySelector(".pb-dock-bead-ico");
+    if (!tabs.length || !path || !bead) return;
+
+    const smooth = !(window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+    const home = Math.max(0, tabs.findIndex(a => a.classList.contains("active")));
+    let W = 0, stops = [], x = 0, target = 0, vel = 0, prev = 0;
+    let live = home, raf = 0, running = false, drag = null;
+
+    function measure() {
+      const cs = getComputedStyle(bar);
+      const px = (name, fallback) => {
+        const v = parseFloat(cs.getPropertyValue(name));
+        return isFinite(v) && v > 0 ? v : fallback;
+      };
+      DK.r  = px("--pb-dock-r", 20);
+      DK.rb = px("--pb-dock-rb", 22);
+      DK.s  = px("--pb-dock-s", 22);
+
+      const bb = bar.getBoundingClientRect();
+      W = bb.width;
+      stops = tabs.map(a => {
+        const r = a.getBoundingClientRect();
+        return r.left - bb.left + r.width / 2;
+      });
+      skin.setAttribute("viewBox", `-4 -4 ${W + 8} ${DK.h + 8}`);
+      target = stops[live];
+      if (!drag && !running) { x = target; prev = x; }
+      draw();
+    }
+
+    function draw() {
+      if (!W) return;
+      const q = clamp(vel / DK.vmax, -1, 1);
+      const mag = Math.abs(q);
+      const bx = clamp(x, DK.r + 1, W - DK.r - 1);
+
+      // Chapa disponível de cada lado até o canto arredondado. Se nem a
+      // tigela nua couber, a bolha sobe um tico (o soquete estreita junto) —
+      // é o que impede a solda de invadir o canto nas abas das pontas.
+      const gapL = Math.max(1, bx - DK.r);
+      const gapR = Math.max(1, W - DK.r - bx);
+      const gap = Math.min(gapL, gapR);
+      let by = DK.by;
+      if (gap < DK.rb) by = Math.min(by, -Math.sqrt(DK.rb * DK.rb - gap * gap));
+
+      // Velocidade inclina a superfície: o ombro de trás se estica, o da
+      // frente aperta (q > 0 = indo pra direita).
+      const sL = clamp(DK.s * (1 + 0.06 * mag + 0.40 * q), 0,
+        Math.max(0, shoulderFor(gapL, DK.rb, by)));
+      const sR = clamp(DK.s * (1 + 0.06 * mag - 0.40 * q), 0,
+        Math.max(0, shoulderFor(gapR, DK.rb, by)));
+
+      path.setAttribute("d", socketPath(W, bx, by, sL, sR));
+      bead.style.transform = `translate3d(${bx.toFixed(2)}px, ${by.toFixed(2)}px, 0)`;
+      if (glow) glow.style.transform = `translate3d(${bx.toFixed(2)}px, 0, 0)`;
+      // Quem está debaixo da bolha esconde o próprio ícone
+      for (let i = 0; i < tabs.length; i++) {
+        tabs[i].classList.toggle("pb-under", Math.abs(stops[i] - bx) < DK.rb + 4);
+      }
+    }
+
+    function tick() {
+      if (drag) {
+        vel = x - prev;
+        prev = x;
+      } else if (smooth) {
+        vel = (vel + (target - x) * 0.20) * 0.76;
+        x += vel;
+        prev = x;
+        if (Math.abs(target - x) < 0.2 && Math.abs(vel) < 0.2) {
+          x = target; vel = 0; running = false;
+        }
+      } else {
+        x = target; vel = 0; prev = x; running = false;
+      }
+      draw();
+      raf = running || drag ? requestAnimationFrame(tick) : 0;
+    }
+    function start() {
+      running = true;
+      if (!raf) raf = requestAnimationFrame(tick);
+    }
+
+    function setLive(i) {
+      if (i === live) return;
+      live = i;
+      tabs.forEach((a, k) => a.classList.toggle("pb-live", k === i));
+      beadIco.innerHTML = TABS[i].icon;      // reinicia o pop do ícone
+    }
+    const nearest = px => {
+      let best = 0;
+      for (let i = 1; i < stops.length; i++) {
+        if (Math.abs(stops[i] - px) < Math.abs(stops[best] - px)) best = i;
+      }
+      return best;
+    };
+    function goTo(i, navigate) {
+      setLive(i);
+      target = stops[i];
+      start();
+      if (navigate && i !== home) {
+        const href = tabs[i].getAttribute("href");
+        if (smooth) setTimeout(() => { location.href = href; }, 190);
+        else location.href = href;
+      }
+    }
+
+    beadIco.innerHTML = TABS[home].icon;
+
+    tabs.forEach((a, i) => {
+      a.addEventListener("click", ev => {
+        // clique com modificador (abrir em outra aba) segue o link normal
+        if (ev.button > 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+        ev.preventDefault();          // a chapa derrete antes de navegar
+        goTo(i, true);
+      });
+    });
+
+    // Arrasto da bolha: preview ao vivo (a aba acende ao passar) e, ao soltar,
+    // encaixa na mais próxima projetando um tico da velocidade.
+    bead.addEventListener("pointerdown", ev => {
+      if (ev.button > 0) return;
+      const bb = bar.getBoundingClientRect();
+      drag = { id: ev.pointerId, left: bb.left, off: ev.clientX - bb.left - x };
+      try { bead.setPointerCapture(ev.pointerId); } catch (_) {}
+      bar.classList.add("pb-dock-dragging");
+      start();
+      ev.preventDefault();
+    });
+    bead.addEventListener("pointermove", ev => {
+      if (!drag || ev.pointerId !== drag.id) return;
+      x = clamp(ev.clientX - drag.left - drag.off, stops[0], stops[stops.length - 1]);
+      setLive(nearest(x));
+      ev.preventDefault();
+    });
+    const drop = ev => {
+      if (!drag || (ev && ev.pointerId !== drag.id)) return;
+      drag = null;
+      bar.classList.remove("pb-dock-dragging");
+      goTo(nearest(clamp(x + vel * 5, stops[0], stops[stops.length - 1])), true);
+    };
+    bead.addEventListener("pointerup", drop);
+    bead.addEventListener("pointercancel", drop);
+
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("orientationchange", () => setTimeout(measure, 120));
+    // Fontes/ícones chegando depois mudam a largura das abas → remede
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure).catch(() => {});
   }
 
   // Glifos de texto (☰, 🐷) viram SVG/imagem — WebView pode não ter as fontes
