@@ -1086,7 +1086,7 @@ async def fetch_admin_user_detail(user_id: int, admin_user: str = "admin") -> di
                         WHERE is_internal_movement = false
                           AND criado_em >= NOW() - INTERVAL '30 days'
                     ) AS tx_30d,
-                    MAX(criado_em) AS last_tx_at
+                    MAX(criado_em) FILTER (WHERE is_internal_movement = false) AS last_tx_at
                 FROM launches
                 WHERE user_id = %s
                 """,

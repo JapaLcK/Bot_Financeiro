@@ -315,6 +315,35 @@ def test_user_detail_shape(panel_accounts):
     assert isinstance(data["recent_logins"], list)
 
 
+def test_user_detail_ignora_movimentos_internos(panel_accounts):
+    """Movimento interno (ajuste de saldo, aporte) não pode aparecer como
+    'última transação' de quem tem zero transações externas."""
+    _tag, uids = panel_accounts
+    uid = uids["free"]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into launches (user_id, tipo, valor, nota, criado_em,
+                                      is_internal_movement, source)
+                values (%s, 'despesa', 5.0, 'ajuste interno', now(), true, 'manual')
+                """,
+                (uid,),
+            )
+        conn.commit()
+    try:
+        client = _admin_client()
+        usage = client.get(f"/admin/api/users/{uid}").json()["usage"]
+        assert usage["tx_total"] == 0
+        assert usage["tx_30d"] == 0
+        assert usage["last_tx_at"] is None
+    finally:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("delete from launches where user_id = %s", (uid,))
+            conn.commit()
+
+
 def test_user_detail_404_for_unknown_account():
     client = _admin_client()
     response = client.get("/admin/api/users/999999999999")
