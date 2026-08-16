@@ -318,14 +318,18 @@
       setLive(nearest(x));
       ev.preventDefault();
     });
-    const drop = ev => {
+    const finish = (ev, canceled) => {
       if (!drag || (ev && ev.pointerId !== drag.id)) return;
       drag = null;
       bar.classList.remove("pb-dock-dragging");
+      // pointercancel = o sistema tomou o gesto no meio (giro de tela, gesto
+      // do iOS). Não é escolha do usuário: a bolha volta pra aba da página
+      // atual em vez de navegar pra onde ela tinha parado.
+      if (canceled) { goTo(home, false); return; }
       goTo(nearest(clamp(x + vel * 5, stops[0], stops[stops.length - 1])), true);
     };
-    bead.addEventListener("pointerup", drop);
-    bead.addEventListener("pointercancel", drop);
+    bead.addEventListener("pointerup", ev => finish(ev, false));
+    bead.addEventListener("pointercancel", ev => finish(ev, true));
 
     measure();
     window.addEventListener("resize", measure);

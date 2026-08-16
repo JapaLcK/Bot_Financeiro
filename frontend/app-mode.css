@@ -222,7 +222,8 @@ html.pb-app .pb-dock-bead-ico svg { animation: pb-bead-pop 0.22s ease-out; }
   to   { opacity: 1; transform: scale(1); }
 }
 @media (prefers-reduced-motion: reduce) {
-  html.pb-app .pb-dock-bead-ico { animation: none; }
+  /* mira o SVG, que é quem tem a animação (o span só é o contêiner) */
+  html.pb-app .pb-dock-bead-ico svg { animation: none; }
 }
 
 /* Telas estreitas (iPhone SE/mini): as abas das pontas chegam perto demais do
