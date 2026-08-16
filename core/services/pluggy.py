@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -186,17 +187,28 @@ def list_pluggy_transactions(
     api_key: str | None = None,
     *,
     max_pages: int = 60,
+    on_page: "Callable[[], None] | None" = None,
 ) -> list[dict]:
     """Puxa todas as transações de uma conta via /v2/transactions (paginação por cursor).
 
     O endpoint antigo /transactions (page-based) está deprecado até 2026-12-31; o v2
     devolve o cursor no campo `next` (null na última página) e o tamanho de página é
     fixo no servidor — passar `pageSize` retorna HTTP 400. Segue o cursor até acabar.
+
+    `on_page` é um heartbeat chamado antes de CADA página: como o loop pode levar
+    até max_pages requisições sequenciais (minutos), quem sincroniza usa isso pra
+    renovar o hold de e-mail dos agentes e não deixar a janela expirar no meio de
+    um sync longo. Fail-soft: falha do heartbeat nunca interrompe a busca.
     """
     key = api_key or create_pluggy_api_key()
     out: list[dict] = []
     params: dict[str, Any] = {"accountId": account_id}
     for _ in range(max_pages):
+        if on_page is not None:
+            try:
+                on_page()
+            except Exception:
+                pass
         data = _pluggy_get("/v2/transactions", key, params=params)
         results = data.get("results")
         if isinstance(results, list):

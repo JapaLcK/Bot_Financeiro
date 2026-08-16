@@ -658,8 +658,14 @@ BARAO_CDI_ANNUAL_PCT = float(os.getenv("CDI_ANNUAL_PCT", "10.5"))  # taxa de ref
 def _barao_detect_for_user(agent: dict[str, Any], today: date) -> int:
     """Soma o saldo parado nas contas correntes (OF) e, se passar do mínimo, estima
     o rendimento perdido no CDI e cutuca — 1x por mês (dedupe por YYYY-MM). NÃO
-    recomenda produto (posicionamento + regulatório): só mostra o custo de oportunidade."""
-    from db import record_agent_event
+    recomenda produto (posicionamento + regulatório): só mostra o custo de oportunidade.
+
+    Grava via upsert auto-corrigível (não o record first-write-wins): o evento é um
+    retrato agregado, então uma gravação anterior do mesmo mês que tenha pego o
+    saldo parcial precisa ser CORRIGIDA pela execução coerente seguinte — inclusive
+    a que já existe no banco de quem sincou antes deste fix. Só congela depois de
+    virar e-mail (emailed_at), que é artefato imutável."""
+    from db import record_or_refresh_agent_event, mark_agent_event_stale
 
     user_id = agent["user_id"]
     cfg = agent.get("config") or {}
@@ -683,14 +689,22 @@ def _barao_detect_for_user(agent: dict[str, Any], today: date) -> int:
             row = cur.fetchone() or {}
 
     idle = float(row.get("idle") or 0)
+    ym = today.strftime("%Y-%m")
+    key = f"parado:{ym}"
+
     if idle < min_idle:
+        # A condição deixou de valer: ou uma gravação anterior pegou só o saldo
+        # parcial de um item, ou o usuário moveu o dinheiro. Remove o alerta
+        # pendente em vez de deixá-lo apodrecer no feed com o valor errado (e o
+        # valor_impacto somando em saved_365d). Espelha a limpeza que o Faria
+        # Limer faz na concentração. Evento já emailado não é tocado.
+        mark_agent_event_stale(agent["agent_id"], key)
         return 0
 
     rende_mes = round(idle * (cdi / 100.0) / 12.0, 2)
-    ym = today.strftime("%Y-%m")
-    ok = record_agent_event(
+    ok = record_or_refresh_agent_event(
         agent["agent_id"], user_id, "barao",
-        dedupe_key=f"parado:{ym}",
+        dedupe_key=key,
         payload={
             "tipo": "parado",
             "idle": round(idle, 2),
@@ -711,6 +725,11 @@ def _barao_detect_for_user(agent: dict[str, Any], today: date) -> int:
 
 def run_barao_once(today: date | None = None, user_id: int | None = None) -> dict:
     """Roda o Barão pra todos os agentes barao ativos (ou só um usuário)."""
+    # Honra o kill switch global aqui dentro (o runner): este é chamado direto do
+    # hook de sync_pluggy_user, fora do run_agents_for_user/run_agents_loop — sem
+    # isso o AGENTS_ENABLED=0 não seguraria o Barão no caminho de sync.
+    if not AGENTS_ENABLED:
+        return {"ok": True, "disabled": True, "agents": 0, "fired": 0}
     from db import list_users_with_active_agents
 
     today = today or date.today()
@@ -876,7 +895,7 @@ def _faria_limer_detect_for_user(agent: dict[str, Any], today: date) -> int:
     """Acompanha a carteira de renda variável do usuário (via Open Finance) e grava
     os insights factuais (retrato do mês + concentração), deduplicados por mês. Só
     lê o espelho do sync (db.rv) — a corretora é a fonte da verdade."""
-    from db import (record_or_refresh_agent_event, delete_pending_agent_event,
+    from db import (record_or_refresh_agent_event, mark_agent_event_stale,
                     list_rv_positions, rv_portfolio_summary)
 
     user_id = agent["user_id"]
@@ -915,7 +934,7 @@ def _faria_limer_detect_for_user(agent: dict[str, Any], today: date) -> int:
     produced = {ins["dedupe_key"] for ins in insights}
     for key in (f"rv_retrato:{ym}", f"rv_concentracao:{ym}"):
         if key not in produced:
-            delete_pending_agent_event(agent["agent_id"], key)
+            mark_agent_event_stale(agent["agent_id"], key)
     return fired
 
 
@@ -967,7 +986,17 @@ _DEFAULT_EMAIL_INTERVAL_H = 24
 # e o e-mail segura; quando a execução coerente corrige e o payload estabiliza
 # por 45min+ (< tick horário), o e-mail sai no tick seguinte — sem congelar
 # snapshot errado (emailed_at bloquearia o refresh). Mensal — atraso de 1h é inócuo.
-_AGENT_EMAIL_MIN_AGE_MIN = {"faria_limer": 45}
+# Vale pros dois agentes whole-portfolio: sem isso, o tick horário que pega um
+# snapshot parcial emailaria na mesma passada (run_agent_emails_once roda logo
+# depois dos detectores) e o emailed_at travaria a correção pelo resto do mês.
+_AGENT_EMAIL_MIN_AGE_MIN = {"faria_limer": 45, "barao": 45}
+
+# Janela de silêncio pós-sync: com um item carimbado nos últimos N minutos, o
+# e-mail dos agregados espera — os itens seguintes do mesmo sync ainda podem
+# mudar a carteira. Curta o bastante pra não represar o e-mail de quem sinca de
+# hora em hora (sobram ~50min livres por hora), longa o bastante pra cobrir um
+# sync multi-item, que leva segundos.
+_SYNC_QUIET_MIN = 10
 
 _AGENT_EMAIL_LABEL = {
     "xerife": "🤠 Xerife", "reporter": "🎤 Repórter", "carteiro": "📬 Carteiro",
@@ -1009,7 +1038,7 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
     de cadência do kind e o opt-out. Mantém e-mails separados por agente sem spam.
     Roda no tick horário, depois dos detectores."""
     from db import (list_agents_pending_email, list_unemailed_events,
-                    claim_agent_events_for_email, suppress_agent_events,
+                    claim_agent_events_for_email,
                     unclaim_agent_events, touch_agent_emailed,
                     get_user_email, get_auth_user)
     from core.services.plan_service import agent_kind_allowed, agents_ui_enabled
@@ -1017,45 +1046,61 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     sent = 0
 
-    def _ripe(kind: str, events: list[dict]) -> list[dict]:
+    def _ripe(kind: str, events: list[dict], user_id: int) -> list[dict]:
         """Só eventos que já venceram a carência do kind (podem virar/contar como
         e-mail). Antes disso o evento fica pendente — janela em que o upsert
         auto-corrigível ainda pode consertar um snapshot parcial (marcar
-        emailed_at cedo, até na supressão, congelaria o valor errado)."""
+        emailed_at cedo congelaria o valor errado).
+
+        Pros agregados valem duas travas a mais, porque um evento antigo cujo
+        payload NÃO muda no meio de um sync continua "estável" pela idade:
+          1. email_hold_until — carimbado no início de cada caminho de sync
+             (pluggy_sync._hold_aggregate_emails), cobre inclusive a janela em
+             que nada foi gravado ainda;
+          2. sync recente do usuário — rede pra qualquer caminho que não tenha
+             carimbado o hold.
+        Sem elas o evento vira e-mail no mesmo tick e o emailed_at recusa a
+        correção que só chega quando o último item termina."""
         min_age = _AGENT_EMAIL_MIN_AGE_MIN.get(kind, 0)
         if not min_age:
             return events
+        try:
+            from db import user_synced_within
+            if user_synced_within(user_id, _SYNC_QUIET_MIN):
+                return []
+        except Exception as exc:      # sinal é otimização; nunca derruba o e-mail
+            print(f"[agents] sync-quiet check {kind} user={user_id}: {exc}", file=sys.stderr)
         cutoff = now - timedelta(minutes=min_age)
-        return [e for e in events if e.get("fired_at") is not None and e["fired_at"] <= cutoff]
+        return [
+            e for e in events
+            if e.get("fired_at") is not None and e["fired_at"] <= cutoff
+            and (e.get("email_hold_until") is None or e["email_hold_until"] <= now)
+        ]
 
     for a in list_agents_pending_email():
         kind = a["kind"]; user_id = a["user_id"]; agent_id = a["agent_id"]
         try:
             if not (agents_ui_enabled(user_id) and agent_kind_allowed(user_id, kind)):
                 continue
-            # Opt-out por agente: se o usuário desligou o e-mail desse agente, o feed
-            # continua mas o e-mail é suprimido (marca como enviado pra não acumular).
+            # Opt-out por agente: só pula. A preferência é consultada fresca aqui,
+            # a cada tick — nada é carimbado no evento. Religar (por qualquer
+            # caminho) passa a ter efeito imediato no próximo tick, sem precisar
+            # sincronizar cópia nenhuma. O evento segue vivo no feed.
             cfg = a.get("config") or {}
             if not cfg.get("email_enabled", True):
-                # Opt-out: suprime SEM marcar emailed_at (suppressed_at só tira da
-                # fila de e-mail). O evento segue vivo no feed — o upsert ainda
-                # corrige e a limpeza de obsoleto ainda remove. Por isso dispensa
-                # carência e claim condicional: suprimir não congela nada.
-                pend = list_unemailed_events(agent_id)
-                if pend:
-                    suppress_agent_events([e["id"] for e in pend])
                 continue
             interval_h = _AGENT_EMAIL_INTERVAL_H.get(kind, _DEFAULT_EMAIL_INTERVAL_H)
             last = a.get("last_emailed_at")
             if last is not None and (now - last) < timedelta(hours=interval_h):
                 continue  # teto de cadência: e-mail desse agente ainda tá no intervalo
-            events = _ripe(kind, list_unemailed_events(agent_id))
+            events = _ripe(kind, list_unemailed_events(agent_id), user_id)
             if not events:
                 continue
             auth = get_auth_user(user_id)
             if auth and auth.get("engagement_opt_out"):
-                # Opt-out global: mesma supressão viva (sem congelar o feed).
-                suppress_agent_events([e["id"] for e in events])
+                # Opt-out global: idem — só pula. Preferência lida fresca, nada
+                # carimbado. Religar pelo chat/settings/resubscribe volta a
+                # enviar no próximo tick sem sincronização.
                 continue
             email = get_user_email(user_id)
             if not email:
@@ -1114,11 +1159,15 @@ def run_agents_for_user(user_id: int, trigger: str = "of_sync") -> dict:
     (auditoria de assinaturas) e Banqueiro (aporte novo na caixinha vinculada),
     só pro usuário sincado.
 
-    NÃO inclui o Faria Limer de propósito: ele é whole-portfolio (agrega ações/FIIs
-    de TODAS as conexões) e mensal. Este hook roda por ITEM (sync_pluggy_item), então
-    dispararia com a carteira parcial no 1º item e o dedupe mensal congelaria totais/
-    concentração errados. O Faria roda num snapshot coerente: no fim de
-    sync_pluggy_user (sync completo) e no loop horário (run_all_agents_once).
+    Só entram aqui detectores de DELTA — os que olham o que aquele item acabou de
+    trazer. Agentes whole-portfolio ficam de fora de propósito: este hook roda por
+    ITEM (sync_pluggy_item, chamado em sequência por sync_pluggy_user), então um
+    agregado dispararia com o retrato PARCIAL do 1º item e o dedupe por período
+    congelaria o valor errado até virar o mês.
+      - Faria Limer (soma ações/FIIs de todas as conexões, dedupe rv_*:YYYY-MM);
+      - Barão (soma o saldo parado de todas as contas, dedupe parado:YYYY-MM).
+    Os dois rodam num snapshot coerente: no fim de sync_pluggy_user (sync completo)
+    e no loop horário (run_all_agents_once).
 
     Fail-soft por contrato — quem chama (pluggy_sync) não pode quebrar por
     causa de agente. Cada detector é isolado pra um não derrubar o outro.
@@ -1130,7 +1179,6 @@ def run_agents_for_user(user_id: int, trigger: str = "of_sync") -> dict:
         ("xerife", run_xerife_once),
         ("detetive", run_detetive_once),
         ("cofre", run_cofre_once),
-        ("barao", run_barao_once),
     ):
         try:
             out[kind] = fn(user_id=user_id)

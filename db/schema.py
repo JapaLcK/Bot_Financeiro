@@ -1679,16 +1679,31 @@ def init_db():
         create index if not exists idx_agent_events_pending_email
           on agent_events (agent_id) where emailed_at is null
         """,
-        # Supressão de e-mail ≠ enviado: suppressed_at tira o evento da fila de
-        # e-mail (opt-out do agente/global) SEM congelar o snapshot — emailed_at
-        # fica null, então o upsert auto-corrigível e a limpeza de obsoleto
-        # continuam valendo no feed (só o e-mail de fato enviado é imutável).
+        # LEGADO — não é mais lida nem escrita. A supressão de e-mail deixou de
+        # ser materializada: o opt-out (por agente / global) é consultado fresco
+        # no run_agent_emails_once, e a fila filtra por fired_at do mês corrente.
+        # Coluna mantida só por segurança de rollback; drop em migração futura.
         """
         alter table agent_events add column if not exists suppressed_at timestamptz
         """,
+        # Hold de e-mail: até quando o envio dos agregados fica segurado enquanto a
+        # carteira se mexe. Coluna PRÓPRIA de propósito — fired_at é dado de
+        # negócio (data exibida, ordenação do feed, disparos_mes, saved_365d) e
+        # não pode ser empurrado por controle técnico. Expira sozinho: nada fica
+        # preso se um sync morrer no meio.
         """
-        create index if not exists idx_agent_events_pending_email2
-          on agent_events (agent_id) where emailed_at is null and suppressed_at is null
+        alter table agent_events add column if not exists email_hold_until timestamptz
+        """,
+        # Soft-delete de evento cuja condição deixou de valer. Some do feed e dos
+        # contadores, mas a linha (e o emailed_at) fica: apagar de vez destruiria
+        # o dedupe de entrega, e a condição voltando no mesmo mês viraria um
+        # segundo e-mail de um agente que é mensal.
+        """
+        alter table agent_events add column if not exists stale_at timestamptz
+        """,
+        """
+        create index if not exists idx_agent_events_pending_email3
+          on agent_events (agent_id, fired_at) where emailed_at is null and stale_at is null
         """,
     ]
 

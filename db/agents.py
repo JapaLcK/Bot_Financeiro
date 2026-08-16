@@ -14,6 +14,13 @@ from .connection import get_conn
 # vive no frontend/router; aqui só o que o banco precisa validar.
 AGENT_KINDS = ("xerife", "reporter", "carteiro", "detetive", "cofre", "barao", "faria_limer")
 
+# Agentes whole-portfolio, mensais: gravam UM retrato por mês (dedupe :YYYY-MM) que
+# reflete o estado corrente. Só PRA ESTES a fila expira o e-mail na virada do mês
+# (retrato de mês passado é notícia velha). Os demais (Xerife/anomalia, Carteiro/
+# boleto, etc.) disparam a qualquer momento e o e-mail deles NÃO pode expirar por
+# mês-calendário — sairia da fila sem ser enviado se cruzasse a meia-noite do dia 1.
+MONTHLY_AGENT_KINDS = ("barao", "faria_limer")
+
 
 def list_agents(user_id: int) -> list[dict[str, Any]]:
     """Agentes do usuário + contadores (disparos 30d, R$ salvos 365d)."""
@@ -31,6 +38,7 @@ def list_agents(user_id: int) -> list[dict[str, Any]]:
                          coalesce(sum(valor_impacto) filter (
                            where fired_at >= now() - interval '365 days'), 0)            as saved_365d
                   from agent_events
+                  where stale_at is null
                   group by agent_id
                 ) e on e.agent_id = a.id
                 where a.user_id = %s
@@ -178,20 +186,28 @@ def record_or_refresh_agent_event(
     channel: str = "dashboard",
     valor_impacto: float | None = None,
 ) -> bool:
-    """Como record_agent_event, mas AUTO-CORRIGE: se a dedupe_key já existe e o
-    evento ainda NÃO foi enviado por e-mail, atualiza payload/valor_impacto/
-    fired_at com o snapshot novo em vez de ignorar.
+    """Como record_agent_event, mas AUTO-CORRIGE: se a dedupe_key já existe,
+    atualiza payload/valor_impacto/fired_at com o snapshot novo em vez de ignorar.
 
     Serve pra eventos-retrato que devem refletir o estado coerente mais recente
-    (ex.: Faria Limer mensal). O ÚNICO congelamento é o e-mail (emailed_at): o
-    artefato enviado é imutável, então depois dele o evento não muda. O feed é
-    visão viva — corrige mesmo se o usuário já viu (seen_at NÃO trava o refresh;
-    mostrar o número certo vale mais do que manter o errado que ele viu primeiro).
+    (ex.: Faria Limer e Barão, mensais). O FEED É VISÃO VIVA: nada o congela —
+    nem seen_at nem emailed_at. Mostrar o número certo vale mais do que manter o
+    errado que o usuário viu primeiro.
+
+    Em particular, ter virado e-mail NÃO congela o evento. O artefato enviado é
+    imutável por natureza (já está na caixa do usuário), mas isso não obriga o
+    feed a envelhecer junto: o e-mail é um retrato datado, o app é o estado atual,
+    e os dois divergirem é correto — cada um vale pro seu momento. Sem isso, um
+    sync que comece logo depois do envio deixaria o feed preso num valor
+    desatualizado até virar o mês, porque a janela entre reivindicar e enviar é
+    irredutível (I/O externo não é atômico com o banco).
+
+    O que impede REENVIO continua sendo emailed_at, nas queries de fila
+    (list_agents_pending_email / list_unemailed_events) — não aqui.
     Retorna True se inseriu ou atualizou.
 
-    Snapshot novo também LIMPA suppressed_at: a supressão vale pro conteúdo que foi
-    suprimido, não pra dedupe_key até o fim do mês — senão um opt-out que durou um
-    tick engoliria o e-mail do mês inteiro mesmo depois do usuário religar.
+    Snapshot novo também LIMPA stale_at (ressuscita um evento que tinha deixado de
+    valer e voltou a valer).
 
     fired_at aqui significa "última MUDANÇA do snapshot": o update só dispara (e só
     renova fired_at) quando payload/valor_impacto realmente mudam. É o que faz a
@@ -212,10 +228,10 @@ def record_or_refresh_agent_event(
                   set payload = excluded.payload,
                       valor_impacto = excluded.valor_impacto,
                       fired_at = now(),
-                      suppressed_at = null
-                  where agent_events.emailed_at is null
-                    and (agent_events.payload is distinct from excluded.payload
-                         or agent_events.valor_impacto is distinct from excluded.valor_impacto)
+                      stale_at = null
+                  where agent_events.stale_at is not null
+                     or agent_events.payload is distinct from excluded.payload
+                     or agent_events.valor_impacto is distinct from excluded.valor_impacto
                 """,
                 (agent_id, user_id, kind, dedupe_key,
                  json.dumps(payload or {}), channel, valor_impacto),
@@ -228,11 +244,16 @@ def record_or_refresh_agent_event(
 def claim_agent_events_for_email(events: list[dict]) -> list[int]:
     """Reivindica eventos pro e-mail ANTES do envio, atomicamente.
 
-    Marca emailed_at SÓ se o evento não mudou desde a leitura (mesmo fired_at e
-    ainda não emailado). Fecha a janela leitura→envio→marcação: se um refresh
-    trocou o payload no meio, o fired_at mudou, a linha não é reivindicada e fica
-    de fora do e-mail deste tick (sai no próximo, já estável). Só os ids
-    retornados podem entrar no e-mail — com o payload que foi lido junto.
+    Marca emailed_at SÓ se, no banco AGORA, o evento continua elegível:
+      • não emailado ainda;
+      • mesmo fired_at da leitura — se um refresh trocou o payload no meio, a
+        linha não é reivindicada e sai no próximo tick, já estável;
+      • sem hold vigente — o filtro de _ripe é feito em memória sobre a leitura,
+        então um sync que instale email_hold_until DEPOIS dela não seria visto
+        ali; a condição precisa ser reavaliada aqui, no update.
+
+    Fecha a janela leitura→envio→marcação. Só os ids retornados podem entrar no
+    e-mail — com o payload que foi lido junto.
     Recebe os dicts lidos (precisa de id + fired_at)."""
     claimed: list[int] = []
     if not events:
@@ -244,6 +265,8 @@ def claim_agent_events_for_email(events: list[dict]) -> list[int]:
                     """
                     update agent_events set emailed_at = now()
                     where id = %s and emailed_at is null and fired_at = %s
+                      and stale_at is null
+                      and (email_hold_until is null or email_hold_until <= now())
                     """,
                     (e["id"], e["fired_at"]),
                 )
@@ -274,52 +297,92 @@ def unclaim_agent_events(event_ids: list[int]) -> int:
     return n
 
 
-def suppress_agent_events(event_ids: list[int]) -> int:
-    """Tira eventos da fila de e-mail SEM congelá-los (opt-out do agente/global).
+# Quem precisa considerar stale_at (inventário — manter atualizado ao mexer aqui):
+#   LEITURA — todos filtram, senão o obsoleto reaparece:
+#     list_agents (fired_30d/saved_365d) · list_agent_events (feed) ·
+#     list_agents_pending_email · list_unemailed_events · agents_summary
+#   ESCRITA — só os que decidem sobre um evento específico:
+#     claim_agent_events_for_email  → não pode reivindicar obsoleto (o filtro das
+#       queries de fila roda em memória sobre a leitura; o tombstone pode chegar
+#       depois dela, então a condição tem que estar no UPDATE)
+#     mark_agent_events_seen        → não pode marcar como visto o que o usuário
+#       não podia ver (senão ressuscita já lido, sem nunca contar como não lido)
+#     record_or_refresh_agent_event → limpa stale_at (ressuscita)
+#   ESCRITA que NÃO filtra, de propósito (marcar obsoleto ali é no-op inócuo):
+#     unclaim (as filas já excluem stale) · suppress · hold_agent_emails ·
+#     record_agent_event (kinds que não usam tombstone) · mark_events_emailed
 
-    Diferente do claim/emailed_at: suppressed_at só suprime a entrega — o evento
-    segue vivo no feed, o upsert auto-corrigível ainda atualiza e a limpeza de
-    obsoleto ainda remove (ambos checam apenas emailed_at). Incondicional de
-    propósito: suprimir uma linha recém-refrescada não congela nada, então não
-    precisa do claim condicional nem de carência. Retorna quantos marcou."""
-    if not event_ids:
+
+def mark_agent_event_stale(agent_id: int, dedupe_key: str) -> bool:
+    """Tira do feed um evento cuja condição DEIXOU de valer (soft delete).
+
+    Par inverso do record_or_refresh_agent_event: ex. o alerta de concentração
+    que a carteira equilibrada não reproduz, ou o "dinheiro parado" depois que o
+    usuário moveu o dinheiro. Segue a MESMA regra do refresh — o feed é visão
+    viva, nada o congela: nem seen_at nem emailed_at. Manter à vista um alerta
+    que já não vale seria pior que corrigi-lo, e o valor_impacto seguiria
+    contando em saved_365d/salvos_ano por até 365 dias.
+
+    É soft delete de propósito. Apagar a linha destruiria junto o emailed_at, e
+    o dedupe de entrega mora nele: se a condição voltasse no MESMO mês, o insert
+    seguinte criaria uma linha nova com a mesma chave mensal e emailed_at null —
+    as queries de fila a tratariam como novidade e o usuário levaria um segundo
+    e-mail de um agente que é mensal (last_emailed_at atrasa, não impede).
+
+    Com stale_at a linha some do feed e dos contadores, mas o histórico de
+    entrega fica. Se a condição voltar, record_or_refresh_agent_event limpa o
+    stale_at e ressuscita o evento — sem reenviar, porque emailed_at continua lá.
+    Retorna True se marcou."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update agent_events set stale_at = now()
+                where agent_id = %s and dedupe_key = %s and stale_at is null
+                """,
+                (agent_id, dedupe_key),
+            )
+            marked = cur.rowcount > 0
+        conn.commit()
+    return marked
+
+
+def hold_agent_emails(user_id: int, kinds: list[str], minutes: int) -> int:
+    """Segura o e-mail dos `kinds` por `minutes`, enquanto a carteira se mexe.
+
+    Chamado no INÍCIO de cada caminho que sincroniza: enquanto os itens são
+    buscados na Pluggy nada foi gravado ainda, então nenhum carimbo de conclusão
+    (last_sync_at) denuncia que há sync em curso — e um evento agregado já maduro
+    poderia ser emailado bem nessa janela, congelando o valor do mês.
+
+    Grava em coluna PRÓPRIA (email_hold_until), nunca em fired_at: aquele é dado
+    de negócio — a data que o usuário vê, a ordenação do feed e a base de
+    disparos_mes/saved_365d. Empurrá-lo faria eventos antigos reaparecerem como
+    novos e nunca envelhecerem das janelas de 30/365 dias.
+
+    Também não é flag de "sync em progresso": este hold EXPIRA sozinho, então um
+    processo morto no meio não deixa nada preso — o pior caso é o e-mail sair um
+    tick depois. Só segura o que ainda não virou e-mail; estender um hold já
+    existente é idempotente (greatest mantém o mais distante).
+    Retorna quantos eventos segurou."""
+    if not kinds or minutes <= 0:
         return 0
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                update agent_events set suppressed_at = now()
-                where id = any(%s) and emailed_at is null and suppressed_at is null
+                update agent_events
+                set email_hold_until = greatest(
+                        coalesce(email_hold_until, now()),
+                        now() + make_interval(mins => %s))
+                where user_id = %s and kind = any(%s)
+                  and emailed_at is null and stale_at is null
                 """,
-                (event_ids,),
+                (minutes, user_id, list(kinds)),
             )
             n = cur.rowcount
         conn.commit()
     return n
-
-
-def delete_pending_agent_event(agent_id: int, dedupe_key: str) -> bool:
-    """Remove um evento que ainda está PENDENTE (não emailado).
-
-    Par do record_or_refresh_agent_event pra condições que DEIXARAM de valer:
-    ex. um alerta de concentração gravado a partir de um snapshot parcial que a
-    execução coerente seguinte não reproduz (carteira equilibrada). Mesmo se o
-    usuário já viu no feed, o alerta falso sai (seen_at não protege — sumir é o
-    comportamento honesto quando a condição não vale). Evento já emailado não é
-    tocado: o artefato enviado é imutável. Retorna True se removeu."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                delete from agent_events
-                where agent_id = %s and dedupe_key = %s
-                  and emailed_at is null
-                """,
-                (agent_id, dedupe_key),
-            )
-            deleted = cur.rowcount > 0
-        conn.commit()
-    return deleted
 
 
 def list_agent_events(user_id: int, limit: int = 20) -> list[dict[str, Any]]:
@@ -329,7 +392,7 @@ def list_agent_events(user_id: int, limit: int = 20) -> list[dict[str, Any]]:
                 """
                 select id, kind, fired_at, payload, channel, valor_impacto, seen_at
                 from agent_events
-                where user_id=%s
+                where user_id=%s and stale_at is null
                 order by fired_at desc
                 limit %s
                 """,
@@ -342,7 +405,8 @@ def mark_agent_events_seen(user_id: int) -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "update agent_events set seen_at=now() where user_id=%s and seen_at is null",
+                "update agent_events set seen_at=now()"
+                " where user_id=%s and seen_at is null and stale_at is null",
                 (user_id,),
             )
             n = cur.rowcount
@@ -363,28 +427,38 @@ def list_agents_pending_email() -> list[dict[str, Any]]:
                        count(e.id) as pendentes
                 from agents a
                 join agent_events e on e.agent_id = a.id
-                  and e.emailed_at is null and e.suppressed_at is null
+                  and e.emailed_at is null and e.stale_at is null
+                  and (not (e.kind = any(%s))
+                       or e.fired_at >= date_trunc('month', now()))
                 where a.status = 'active'
                 group by a.id, a.user_id, a.kind, a.config, a.last_emailed_at
                 """,
+                (list(MONTHLY_AGENT_KINDS),),
             )
             return list(cur.fetchall() or [])
 
 
 def list_unemailed_events(agent_id: int, limit: int = 20) -> list[dict[str, Any]]:
-    """Eventos do agente ainda na fila de e-mail (não enviados e não suprimidos),
-    mais recentes primeiro."""
+    """Eventos do agente elegíveis a e-mail, mais recentes primeiro.
+
+    Pros kinds MENSAIS (barao/faria): só o mês corrente — retrato que atravessou a
+    virada do mês é notícia velha, sai da fila sozinho, sem carimbo. É também o que
+    evita avalanche pra quem religa após meses. Pros demais (anomalia, boleto...) o
+    e-mail NÃO expira por mês: ele fica na fila até ser enviado, senão um evento
+    gravado perto da meia-noite do dia 1 se perderia."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select id, kind, payload, valor_impacto, fired_at
+                select id, kind, payload, valor_impacto, fired_at, email_hold_until
                 from agent_events
-                where agent_id = %s and emailed_at is null and suppressed_at is null
+                where agent_id = %s and emailed_at is null and stale_at is null
+                  and (not (kind = any(%s))
+                       or fired_at >= date_trunc('month', now()))
                 order by fired_at desc
                 limit %s
                 """,
-                (agent_id, limit),
+                (agent_id, list(MONTHLY_AGENT_KINDS), limit),
             )
             return list(cur.fetchall() or [])
 
@@ -415,7 +489,11 @@ def touch_agent_emailed(agent_id: int) -> None:
 def set_agent_email_enabled(user_id: int, kind: str, enabled: bool) -> bool:
     """Liga/desliga o envio de e-mail desse agente (grava em config.email_enabled).
     Feed continua sempre; só o e-mail proativo é suprimido quando desligado.
-    Retorna False se o usuário não tem esse agente."""
+
+    Nada além da preferência é gravado: o runner de e-mail (run_agent_emails_once)
+    consulta config.email_enabled fresco a cada tick, então religar tem efeito
+    imediato no próximo tick, sem estado a sincronizar. Retorna False se o usuário
+    não tem esse agente."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -449,7 +527,7 @@ def agents_summary(user_id: int) -> dict[str, Any]:
                   coalesce(sum(valor_impacto) filter (
                     where fired_at >= now() - interval '365 days'), 0)           as salvos_ano,
                   count(*) filter (where seen_at is null)                        as nao_lidos
-                from agent_events where user_id=%s
+                from agent_events where user_id=%s and stale_at is null
                 """,
                 (user_id,),
             )

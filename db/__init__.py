@@ -222,6 +222,7 @@ from .open_finance import (
     get_consolidated_balance,
     disconnect_open_finance_connection,
     save_pluggy_open_finance_item,
+    user_synced_within,
     update_pluggy_open_finance_item_status,
 )
 
@@ -252,10 +253,10 @@ from .agents import (
     pause_agent,
     record_agent_event,
     record_or_refresh_agent_event,
-    delete_pending_agent_event,
+    mark_agent_event_stale,
     claim_agent_events_for_email,
-    suppress_agent_events,
     unclaim_agent_events,
+    hold_agent_emails,
     list_agent_events,
     mark_agent_events_seen,
     agents_summary,
@@ -474,7 +475,7 @@ __all__ = [
     "detect_bill_increase", "detect_open_finance_bill_increase",
     "import_open_finance_launches", "import_open_finance_credit",
     "sync_imported_open_finance_updates", "get_consolidated_balance",
-    "disconnect_open_finance_connection", "save_pluggy_open_finance_item",
+    "disconnect_open_finance_connection", "save_pluggy_open_finance_item", "user_synced_within",
     "update_pluggy_open_finance_item_status",
     "list_pluggy_connections_for_trial_sweep", "pause_open_finance_connection",
     # reports
@@ -531,9 +532,9 @@ __all__ = [
     # agentes do Piggy
     "AGENT_KINDS", "list_agents", "get_agent", "count_active_agents",
     "activate_agent", "pause_agent", "record_agent_event",
-    "record_or_refresh_agent_event", "delete_pending_agent_event",
-    "claim_agent_events_for_email", "suppress_agent_events",
-    "unclaim_agent_events", "list_agent_events",
+    "record_or_refresh_agent_event", "mark_agent_event_stale",
+    "claim_agent_events_for_email",
+    "unclaim_agent_events", "hold_agent_emails", "list_agent_events",
     "mark_agent_events_seen", "agents_summary", "list_users_with_active_agents",
     "list_agents_pending_email", "list_unemailed_events", "mark_events_emailed",
     "touch_agent_emailed", "set_agent_email_enabled",

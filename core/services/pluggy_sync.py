@@ -122,14 +122,31 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
     if str(connection.get("status") or "").upper() == "PAUSED":
         return {"ok": False, "reason": "connection_paused", "item_id": provider_item_id}
 
+    # Ponto comum de TODOS os caminhos que mexem na carteira — inclusive o webhook
+    # de produção, que chama esta função direto (frontend/routes/open_finance.py),
+    # sem passar por sync_pluggy_user. Segurar aqui cobre as leituras remotas
+    # abaixo, que rodam antes de qualquer commit. Os wrappers seguram mais cedo
+    # ainda (antes de listar itens / antes do PATCH e da espera); este é a rede
+    # que pega qualquer caminho novo que apareça.
+    #
+    # `heartbeat` RENOVA o hold ao longo do sync: a busca de transações pode levar
+    # até 60 requisições paginadas por conta (minutos), passando do _SYNC_QUIET_MIN
+    # do hold inicial. Sem renovar, o hold expiraria no meio de um item longo — e
+    # como last_sync_at só é carimbado no fim, nada seguraria o e-mail nessa janela.
+    # Chamado a cada conta e a cada página. Expira sozinho se o processo morrer.
+    heartbeat = lambda: _hold_aggregate_emails(connection["user_id"], "sync_item")
+    heartbeat()
+
     api_key = create_pluggy_api_key()
 
     accounts: list[dict] = []
     for raw_account in list_pluggy_accounts(provider_item_id, api_key):
+        heartbeat()
         account = normalize_pluggy_account(raw_account)
         if not account["provider_account_id"]:
             continue
-        raw_txs = list_pluggy_transactions(account["provider_account_id"], api_key)
+        raw_txs = list_pluggy_transactions(account["provider_account_id"], api_key,
+                                           on_page=heartbeat)
         account["transactions"] = [
             tx for tx in (normalize_pluggy_transaction(t) for t in raw_txs) if tx["provider_transaction_id"]
         ]
@@ -186,16 +203,77 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
 
 def refresh_all_pluggy_items(user_id: int | None = None) -> dict:
     """Dispara update na Pluggy pra cada item ativo (Pluggy re-busca do banco e manda
-    webhook → sync). Usado pelo tick de refresh periódico. Falhas por item são engolidas."""
+    webhook → sync). Usado pelo tick de refresh periódico. Falhas por item são engolidas.
+
+    LIMITAÇÃO CONHECIDA (decisão de 2026-08-15): este caminho é fire-and-forget —
+    dispara o PATCH e retorna; o webhook chega depois e aciona sync_pluggy_item (que
+    aí sim renova o hold e faz heartbeat). O hold aplicado aqui dura _SYNC_QUIET_MIN
+    (10min). Se a Pluggy demorar MAIS que isso pra entregar o webhook, o hold expira
+    na janela PATCH→webhook e um retrato agregado maduro pode ser emailado com o
+    estado ANTERIOR ao refresh. Não é corrigido de propósito:
+      - probabilidade ínfima: o webhook normalmente chega em ~segundos (o refresh
+        manual assume ~18s, OF_REFRESH_WAIT_SEC); >10min é anomalia severa da Pluggy;
+      - dano marginal: o e-mail sai com o estado COMPLETO anterior (correto no
+        momento do envio), não com um snapshot parcial errado como no bug original;
+        e o feed se autocorrige quando o webhook processa.
+    Fechar 100% exigiria um worker renovando o lease enquanto o item está UPDATING
+    (processo/estado novo), custo desproporcional pro cenário. Reavaliar se surgir
+    evidência de webhook lento recorrente."""
     items = list_pluggy_item_ids(user_id)
     triggered = 0
+    segurados: set[int] = set()
     for item_id in items:
         try:
+            # Segura o e-mail dos agregados ANTES do PATCH: daqui até o webhook
+            # trazer os dados novos, o evento maduro seguiria reivindicável com o
+            # valor velho — e o emailed_at recusaria a correção depois.
+            if user_id is not None:
+                if user_id not in segurados:
+                    _hold_aggregate_emails(user_id, "refresh_all")
+                    segurados.add(user_id)
+            else:
+                conn = get_open_finance_connection_by_item_id(item_id)
+                dono = (conn or {}).get("user_id")
+                if dono is not None and dono not in segurados:
+                    _hold_aggregate_emails(dono, "refresh_all")
+                    segurados.add(dono)
             update_pluggy_item(item_id)
             triggered += 1
         except Exception:
             pass
     return {"triggered": triggered, "total": len(items)}
+
+
+def _hold_aggregate_emails(user_id: int, origem: str) -> None:
+    """Segura o e-mail dos agentes whole-portfolio enquanto a carteira se mexe.
+
+    Carimba email_hold_until nos eventos pendentes deles, o que os torna não
+    reivindicáveis pelo runner de e-mail até o hold expirar. Coluna própria — não
+    mexe em fired_at, que é dado de negócio (data exibida, ordenação do feed,
+    disparos_mes/saved_365d). Tem que
+    ser chamado no PRIMEIRO ponto de cada caminho que mexe na carteira, antes de
+    qualquer espera ou I/O remoto:
+
+      • sync_pluggy_user        — antes de buscar os itens;
+      • refresh_and_sync_...    — antes do PATCH na Pluggy, porque esse fluxo
+        ainda espera OF_REFRESH_WAIT_SEC (18s por padrão) até os dados novos
+        aparecerem, e essa espera inteira ficaria descoberta se só o sync
+        segurasse.
+
+    Nenhum carimbo de conclusão (last_sync_at) enxerga essas janelas — ele só
+    existe depois que um item termina. Sem isso, um evento agregado já maduro
+    seria emailado no meio da atualização e o emailed_at recusaria a correção
+    pelo resto do mês.
+
+    Fail-soft por contrato: nunca levanta. E o hold EXPIRA sozinho — o oposto de
+    uma flag de "sync em progresso", que se vazasse (processo morto no meio)
+    bloquearia o envio pra sempre. No pior caso o e-mail sai um tick depois."""
+    try:
+        from db import hold_agent_emails
+        from core.services.piggy_agents import _AGENT_EMAIL_MIN_AGE_MIN, _SYNC_QUIET_MIN
+        hold_agent_emails(user_id, list(_AGENT_EMAIL_MIN_AGE_MIN), _SYNC_QUIET_MIN)
+    except Exception as exc:
+        print(f"[pluggy_sync] hold agregados ({origem}): {exc}")
 
 
 def sync_pluggy_user(user_id: int) -> dict:
@@ -206,18 +284,27 @@ def sync_pluggy_user(user_id: int) -> dict:
         for c in snapshot.get("connections", [])
         if (c.get("provider") == "pluggy" and c.get("provider_item_id"))
     ]
+    if items:
+        _hold_aggregate_emails(user_id, "sync_user")
+
     results = [sync_pluggy_item(item_id) for item_id in items]
 
-    # Faria Limer é whole-portfolio (agrega RV de TODAS as conexões) e mensal: roda
-    # UMA vez, depois de TODOS os itens sincronizarem, pra não gravar um retrato
-    # parcial que o dedupe mensal congelaria. Fica FORA do hook por-item de
-    # sync_pluggy_item de propósito. Fail-soft (nunca derruba o sync).
+    # Agentes whole-portfolio: rodam UMA vez, depois de TODOS os itens sincronizarem,
+    # pra não gravar um retrato parcial que o dedupe por período congelaria. Ficam
+    # FORA do hook por-item de sync_pluggy_item de propósito.
+    #   Faria Limer — agrega ações/FIIs de todas as conexões (dedupe rv_*:YYYY-MM);
+    #   Barão       — agrega o saldo parado de todas as contas (dedupe parado:YYYY-MM).
+    # Fail-soft por agente (nunca derruba o sync, e um não impede o outro).
+    # O import fica DENTRO do try: piggy_agents faz conversões no nível do módulo
+    # (ex.: int(AGENTS_INTERVAL_SEC)), então um env malformado explodiria aqui —
+    # depois dos dados financeiros já persistidos — e derrubaria o sync inteiro.
     if results:
-        try:
-            from core.services.piggy_agents import run_faria_limer_once
-            run_faria_limer_once(user_id=user_id)
-        except Exception as exc:
-            print(f"[pluggy_sync] faria hook (user): {exc}")
+        for nome in ("faria_limer", "barao"):
+            try:
+                import core.services.piggy_agents as _agents
+                getattr(_agents, f"run_{nome}_once")(user_id=user_id)
+            except Exception as exc:
+                print(f"[pluggy_sync] {nome} hook (user): {exc}")
 
     return {
         "ok": True,
@@ -282,6 +369,11 @@ def refresh_and_sync_pluggy_user(
         result = sync_pluggy_user(user_id)
         return {"ok": True, "refreshed": 0, "waited": False, "still_updating": 0, **result}
 
+    # Segura o e-mail dos agregados ANTES do PATCH: a espera do passo 2 leva até
+    # wait_seconds (18s por padrão) e o touch de sync_pluggy_user só acontece
+    # depois dela — essa janela inteira ficaria descoberta.
+    _hold_aggregate_emails(user_id, "refresh_user")
+
     api_key = create_pluggy_api_key()
 
     # 1. Dispara o refresh na Pluggy pra cada item (falha por item não trava o resto).
@@ -295,9 +387,13 @@ def refresh_and_sync_pluggy_user(
 
     # 2. Espera os itens saírem de UPDATING (Pluggy terminou de re-buscar do banco).
     #    time.sleep aqui é ok: a rota chama isto via asyncio.to_thread (fora do loop).
+    #    Renova o hold a cada volta: wait_seconds é configurável (OF_REFRESH_WAIT_SEC)
+    #    e pode passar do _SYNC_QUIET_MIN — sem renovar, o hold expiraria durante a
+    #    própria espera e o e-mail poderia sair antes do sync final.
     deadline = time.monotonic() + max(0, wait_seconds)
     pending = set(items)
     while pending and time.monotonic() < deadline:
+        _hold_aggregate_emails(user_id, "refresh_user")
         time.sleep(poll_interval)
         for item_id in list(pending):
             try:

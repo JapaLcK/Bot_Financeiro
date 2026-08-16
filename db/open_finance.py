@@ -1823,3 +1823,26 @@ def disconnect_open_finance_connection(user_id: int, connection_id: int | None =
         conn.commit()
 
     return deleted
+
+
+def user_synced_within(user_id: int, minutes: int) -> bool:
+    """True se alguma conexão Open Finance do usuário sincou nos últimos N minutos.
+
+    Sinal barato de "sync possivelmente em andamento": sync_pluggy_user processa
+    os itens em sequência e cada um carimba last_sync_at ao terminar, então um
+    carimbo recente significa que os itens seguintes ainda podem estar por vir.
+    Serve pra segurar o e-mail dos agentes whole-portfolio enquanto a carteira
+    pode estar a meio caminho (ver _AGENT_EMAIL_MIN_AGE_MIN em piggy_agents)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select 1 from open_finance_connections
+                where user_id = %s
+                  and last_sync_at is not null
+                  and last_sync_at >= now() - make_interval(mins => %s)
+                limit 1
+                """,
+                (user_id, minutes),
+            )
+            return cur.fetchone() is not None
