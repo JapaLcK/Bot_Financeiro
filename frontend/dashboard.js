@@ -10082,12 +10082,15 @@ function _pbDashboardRefresh() {
       // skeleton antes do fetch e, em erro, pelo aviso — a chave morre nos
       // dois caminhos. A restauração é incondicional porque o input nasce
       // sempre vazio: qualquer valor ali é digitação do usuário.
-      const pix = document.getElementById("affiliate-pix-input");
-      const pending = pix ? pix.value : "";
       return fetch(`${API}/api/affiliate/me`, { credentials: "same-origin" })
         .then(async res => {
           const data = await readResponsePayload(res);
           if (!res.ok) throw new Error(data.detail || "refresh de afiliado falhou");
+          // A chave é lida do input VIVO no último instante antes do render:
+          // o campo segue editável durante o fetch, e um snapshot tirado
+          // antes descartaria o que foi digitado nesse meio-tempo.
+          const pix = document.getElementById("affiliate-pix-input");
+          const pending = pix ? pix.value : "";
           _affiliateCache = data;
           _renderAffiliateView(data);
           if (pending) {
