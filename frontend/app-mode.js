@@ -647,7 +647,19 @@
       spring(PTR.hold);
 
       if (typeof window.PBRefresh !== "function") {
-        // Tela que não sabe se refazer: recarrega. Ali não há estado a perder.
+        // Tela que não sabe se refazer: recarrega — MENOS com digitação
+        // pendente. Nos Ajustes os editores (nome/e-mail/telefone, senhas de
+        // exportação/exclusão) vivem no fluxo normal da página; um reload
+        // apagaria o que o usuário escreveu. "Pendente" = campo visível cujo
+        // value difere do defaultValue: os editores são preenchidos via JS
+        // (defaultValue fica vazio) e ficam display:none até abrir, então a
+        // regra dispara exatamente com um editor aberto ou senha digitada.
+        // Recusa com âmbar — o mesmo sinal de "não deu" da falha de rede.
+        const dirty = Array.prototype.some.call(
+          document.querySelectorAll("input, textarea"),
+          f => f.offsetParent !== null && f.value !== f.defaultValue
+        );
+        if (dirty) { finish(false); return; }
         setTimeout(() => location.reload(), 220);
         return;
       }
@@ -713,6 +725,10 @@
       if (busy) return;
       if (ev.touches.length !== 1) { cancelPull(); return; }
       if (ownsGesture(ev.target)) return;
+      // Arrasto que NASCE num campo de texto é gesto do campo (seleção,
+      // cursor), nunca puxão — e um puxão dali poderia virar reload por cima
+      // da digitação. Os campos vivem no fluxo normal; ownsGesture não os vê.
+      if (ev.target.closest && ev.target.closest("input, textarea, select, [contenteditable]")) return;
       tracking = atTop();
       // Retry rápido: se a molinha do ciclo anterior ainda está recolhendo,
       // o rAF dela seguiria empurrando pull pra zero por baixo do touchmove
