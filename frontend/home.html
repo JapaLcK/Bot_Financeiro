@@ -1120,11 +1120,16 @@ async function loadHomeData({ initial = false } = {}) {
 
   // Guarda pra próxima abertura pintar na hora (troca de aba /home <-> /app).
   persistHomeCache(USER_ID, snapshot, history, email, displayName);
-}
 
-// Contrato com o app-mode.js: quem sabe se refazer expõe PBRefresh.
-// Sem initial: uma falha aqui NÃO pode trocar a tela pelo erro.
-window.PBRefresh = () => loadHomeData();
+  // Contrato com o app-mode.js: quem sabe se refazer expõe PBRefresh — mas só
+  // AGORA, com a carga assentada e render bom na tela. Expor na definição do
+  // script deixava um puxão precoce correr contra a init (validate → me →
+  // primeira carga): a carga velha terminava depois e sobrescrevia a nova.
+  // E se a init morrer antes daqui (sessão inválida, paywall, erro de rede),
+  // o contrato nunca aparece — o puxão cai no reload, que é o que essas telas
+  // de erro pedem. Sem initial: falha de puxão NÃO troca a tela pelo erro.
+  window.PBRefresh = () => loadHomeData();
+}
 
 function renderFreeBanner(me) {
   const banner = document.getElementById("free-banner");
