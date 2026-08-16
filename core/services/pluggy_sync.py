@@ -128,16 +128,25 @@ def sync_pluggy_item(provider_item_id: str) -> dict:
     # abaixo, que rodam antes de qualquer commit. Os wrappers seguram mais cedo
     # ainda (antes de listar itens / antes do PATCH e da espera); este é a rede
     # que pega qualquer caminho novo que apareça.
-    _hold_aggregate_emails(connection["user_id"], "sync_item")
+    #
+    # `heartbeat` RENOVA o hold ao longo do sync: a busca de transações pode levar
+    # até 60 requisições paginadas por conta (minutos), passando do _SYNC_QUIET_MIN
+    # do hold inicial. Sem renovar, o hold expiraria no meio de um item longo — e
+    # como last_sync_at só é carimbado no fim, nada seguraria o e-mail nessa janela.
+    # Chamado a cada conta e a cada página. Expira sozinho se o processo morrer.
+    heartbeat = lambda: _hold_aggregate_emails(connection["user_id"], "sync_item")
+    heartbeat()
 
     api_key = create_pluggy_api_key()
 
     accounts: list[dict] = []
     for raw_account in list_pluggy_accounts(provider_item_id, api_key):
+        heartbeat()
         account = normalize_pluggy_account(raw_account)
         if not account["provider_account_id"]:
             continue
-        raw_txs = list_pluggy_transactions(account["provider_account_id"], api_key)
+        raw_txs = list_pluggy_transactions(account["provider_account_id"], api_key,
+                                           on_page=heartbeat)
         account["transactions"] = [
             tx for tx in (normalize_pluggy_transaction(t) for t in raw_txs) if tx["provider_transaction_id"]
         ]
@@ -363,9 +372,13 @@ def refresh_and_sync_pluggy_user(
 
     # 2. Espera os itens saírem de UPDATING (Pluggy terminou de re-buscar do banco).
     #    time.sleep aqui é ok: a rota chama isto via asyncio.to_thread (fora do loop).
+    #    Renova o hold a cada volta: wait_seconds é configurável (OF_REFRESH_WAIT_SEC)
+    #    e pode passar do _SYNC_QUIET_MIN — sem renovar, o hold expiraria durante a
+    #    própria espera e o e-mail poderia sair antes do sync final.
     deadline = time.monotonic() + max(0, wait_seconds)
     pending = set(items)
     while pending and time.monotonic() < deadline:
+        _hold_aggregate_emails(user_id, "refresh_user")
         time.sleep(poll_interval)
         for item_id in list(pending):
             try:

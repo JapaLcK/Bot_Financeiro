@@ -1486,3 +1486,75 @@ def test_hold_protege_evento_com_suppressed_at_legado(user_id):
         with c.cursor() as cur:
             cur.execute("select email_hold_until from agent_events where agent_id=%s", (ag["id"],))
             assert cur.fetchone()["email_hold_until"] is not None
+
+
+def test_list_pluggy_transactions_chama_heartbeat_por_pagina(monkeypatch):
+    """P1 do Codex no 99c1617: o loop paginado de transações pode levar minutos
+    (até 60 páginas). on_page é o heartbeat chamado ANTES de cada página, pra
+    quem sincroniza renovar o hold e não deixar a janela expirar no meio."""
+    import core.services.pluggy as pg
+
+    # 3 páginas: as duas primeiras trazem cursor 'next' (formato ?after=<cursor>
+    # que o _extract_after_cursor entende), a última não
+    paginas = [
+        {"results": [{"id": "t1"}], "next": "?after=cur1"},
+        {"results": [{"id": "t2"}], "next": "?after=cur2"},
+        {"results": [{"id": "t3"}], "next": None},
+    ]
+    chamadas = {"get": 0, "beat": 0}
+
+    def _fake_get(path, key, params=None):
+        i = chamadas["get"]; chamadas["get"] += 1
+        return paginas[i]
+    monkeypatch.setattr(pg, "_pluggy_get", _fake_get)
+
+    out = pg.list_pluggy_transactions("acc", "k", on_page=lambda: chamadas.__setitem__("beat", chamadas["beat"] + 1))
+    assert len(out) == 3
+    assert chamadas["beat"] == 3, "heartbeat tem que rodar uma vez por página"
+
+
+def test_list_pluggy_transactions_heartbeat_fail_soft(monkeypatch):
+    """Falha do heartbeat nunca interrompe a busca de transações."""
+    import core.services.pluggy as pg
+    monkeypatch.setattr(pg, "_pluggy_get",
+                        lambda path, key, params=None: {"results": [{"id": "t1"}], "next": None})
+
+    def _boom():
+        raise RuntimeError("hold falhou")
+
+    out = pg.list_pluggy_transactions("acc", "k", on_page=_boom)
+    assert out == [{"id": "t1"}]  # buscou mesmo com o heartbeat explodindo
+
+
+def test_sync_item_renova_hold_durante_o_sync(monkeypatch):
+    """Integração: sync_pluggy_item passa o heartbeat pro loop de transações, então
+    o hold é renovado ao longo de um sync com várias contas/páginas — não fica
+    preso nos 10min do carimbo inicial."""
+    import core.services.pluggy_sync as ps
+
+    holds = []
+    monkeypatch.setattr(ps, "get_open_finance_connection_by_item_id",
+                        lambda item: {"id": 1, "user_id": 42, "status": "ACTIVE"})
+    monkeypatch.setattr(ps, "_hold_aggregate_emails",
+                        lambda uid, origem: holds.append(origem))
+    monkeypatch.setattr(ps, "create_pluggy_api_key", lambda: "k")
+    monkeypatch.setattr(ps, "list_pluggy_accounts",
+                        lambda item, key: [{"id": "a1"}, {"id": "a2"}])
+    # cada conta "pagina" 2 vezes: dispara o on_page 2x por conta
+    def _txs(acc, key, on_page=None):
+        for _ in range(2):
+            if on_page: on_page()
+        return []
+    monkeypatch.setattr(ps, "list_pluggy_transactions", _txs)
+    monkeypatch.setattr(ps, "save_open_finance_sync", lambda cid, accs: {})
+    monkeypatch.setattr(ps, "list_pluggy_investments", lambda item, key: [])
+    monkeypatch.setattr(ps, "save_open_finance_investments", lambda cid, invs: {})
+    monkeypatch.setattr(ps, "import_open_finance_launches", lambda uid, cid: {})
+    monkeypatch.setattr(ps, "import_open_finance_credit", lambda uid, cid: {})
+    monkeypatch.setattr(ps, "sync_imported_open_finance_updates", lambda uid, cid: {})
+
+    ps.sync_pluggy_item("item-1")
+
+    # 1 no início + 1 por conta (2) + 2 páginas × 2 contas (4) = 7 renovações
+    assert len(holds) >= 6, f"hold devia ser renovado ao longo do sync, veio {len(holds)}"
+    assert all(o == "sync_item" for o in holds)
