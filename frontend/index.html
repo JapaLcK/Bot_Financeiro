@@ -11,8 +11,11 @@
 <meta property="og:type" content="website" />
 <script>
 /* PWA instalada (start_url antiga "/"): entra pelo app, não pela landing —
-   /login pula direto pro /home quando a sessão está viva. */
-if ((window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true) {
+   /login pula direto pro /home quando a sessão está viva.
+   Exceção: ?site=1 é o usuário PEDINDO o site pelo menu da conta ("Ir para o
+   site"). Sem essa saída, o atalho virava um pulo de volta pro /home. */
+if (!/[?&]site=1(&|$)/.test(location.search) &&
+    ((window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true)) {
   location.replace("/login");
 }
 </script>
