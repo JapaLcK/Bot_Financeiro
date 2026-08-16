@@ -591,6 +591,22 @@
     let dragged = false;    // este gesto puxou de verdade (tap nunca arma)
     let inFlight = null;    // PBRefresh pendente (o watchdog libera o ciclo, não o pedido)
 
+    // Fetches pendentes DA PÁGINA (não do puxão): o fallback de reload não
+    // pode atropelar um save em voo — o PATCH das preferências de notificação
+    // dos Ajustes, por exemplo, seria abortado e a escolha recém-aceita pela
+    // UI se perderia. Contador genérico em vez de contrato novo por página.
+    let pageFetches = 0;
+    if (window.fetch) {
+      const nativeFetch = window.fetch;
+      window.fetch = function () {
+        pageFetches++;
+        const dec = () => { pageFetches--; };
+        const r = nativeFetch.apply(this, arguments);
+        r.then(dec, dec);
+        return r;
+      };
+    }
+
     const damp = o => PTR.rubber * (1 - 1 / (o / PTR.rubber + 1));
     const atTop = () =>
       (window.scrollY || (document.scrollingElement || {}).scrollTop || 0) <= 0;
@@ -660,7 +676,9 @@
           document.querySelectorAll("input, textarea"),
           f => f.offsetParent !== null && f.value !== f.defaultValue
         );
-        if (dirty) { finish(false); return; }
+        // pageFetches: um save da página em voo (PATCH de notificação) seria
+        // abortado pelo reload — recusa e deixa ele terminar.
+        if (dirty || pageFetches > 0) { finish(false); return; }
         setTimeout(() => location.reload(), 220);
         return;
       }
@@ -672,18 +690,29 @@
         // piso de 500ms: sumir instantâneo pareceria que nada aconteceu
         setTimeout(() => finish(ok), Math.max(0, PTR.floor - (Date.now() - t0)));
       };
-      setTimeout(() => done(false), PTR.watchdog);   // pendurado conta como falha
       // A falha NÃO é engolida: vira aviso no indicador. E os PBRefresh são
       // SERIALIZADOS: o watchdog libera o ciclo visual, não o pedido — sem a
       // fila, um pedido estourado seguia vivo e podia terminar DEPOIS do
       // puxão seguinte, sobrescrevendo resposta mais nova no DOM e no cache.
-      // Na fila, o novo só dispara quando o antigo assentar; se o antigo
-      // nunca assentar, o watchdog pinta âmbar de novo — honesto e sem
-      // corrida. O catch() na fila evita rejeição não tratada do elo velho.
+      //
+      // Dois relógios, um por fase: o de fila cobre a espera atrás de um
+      // pedido pendurado; o de pedido só começa quando o PBRefresh deste
+      // ciclo dispara de verdade. Um timer único a partir do puxão deixava a
+      // espera na fila consumir a janela do pedido — âmbar antes de qualquer
+      // rede. E ciclo que estourou na fila NÃO roda depois: sem isso o
+      // "falhou" rodava silencioso quando o pedido velho enfim assentava.
+      let started = false;
       const prev = inFlight;
       const p = Promise.resolve(prev)
         .catch(() => {})
-        .then(() => window.PBRefresh());
+        .then(() => {
+          if (settled) return;                            // estourou esperando: não vira fantasma
+          started = true;
+          setTimeout(() => done(false), PTR.watchdog);    // relógio do pedido real
+          return window.PBRefresh();
+        });
+      // relógio da fila: só conta enquanto o pedido deste ciclo não começou
+      setTimeout(() => { if (!started) done(false); }, PTR.watchdog);
       inFlight = p.catch(() => {});
       p.then(() => done(true), () => done(false));
     }
