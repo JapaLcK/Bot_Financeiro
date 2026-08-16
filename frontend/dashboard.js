@@ -9781,6 +9781,11 @@ function _showAccessError(title, msg) {
 
   WS_URL = `${BASE_WS}/ws/${USER_ID}`;
 
+  // Puxar pra atualizar: o contrato só nasce com a sessão validada e o
+  // paywall vencido — os returns acima (_showAccessError, /precos) saem antes
+  // daqui e o puxão nessas telas cai no reload, que é o que elas pedem.
+  window.PBRefresh = _pbDashboardRefresh;
+
 	  updateInvestmentRateHint();
 	  updateInvestmentTaxHint();
 	  updateMonthLabel();
@@ -10042,8 +10047,12 @@ async function toggleAgentEmail(kind, enabled) {
    significa no dashboard: refazer a aba que está aberta, sem recarregar a
    página (o reload perderia filtro, mês escolhido e posição da rolagem).
 
-   Devolve promise: o indicador do puxão só some quando ela resolve. */
-window.PBRefresh = function () {
+   Devolve promise: o indicador do puxão só some quando ela resolve.
+
+   Registrado no bootstrap (não aqui): expor na definição do script deixava
+   um puxão precoce rodar com USER_ID=0 (/data/0) durante um launch lento —
+   e seguir ativo depois do _showAccessError trocar o body inteiro. */
+function _pbDashboardRefresh() {
   const active = DASH_VIEWS.find(v => {
     const el = document.getElementById(v + "-view");
     return el && el.classList.contains("active");
@@ -10079,4 +10088,4 @@ window.PBRefresh = function () {
       return fetchMonthHttp(viewYear, viewMonth, launchesPage, LAUNCHES_LIMIT)
         .then(ok => { if (ok === false) throw new Error("refresh do mês falhou"); });
   }
-};
+}

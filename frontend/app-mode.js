@@ -687,6 +687,13 @@
         if (el.nodeType !== 1) continue;
         const st = getComputedStyle(el);
         if (st.position === "fixed") return true;
+        // Popover: absoluto empilhado ACIMA do conteúdo (dropdown da conta,
+        // z-index 40). Arrastar dentro dele é gesto do popover, mesmo quando
+        // o conteúdo cabe sem rolar. Inventário (grep absolute+z-index nos
+        // CSS das 4 páginas): só o .user-dropdown está nessa faixa hoje;
+        // decoração absoluta é z=0 e pointer-events:none, nunca vira target.
+        if (st.position === "absolute" && st.zIndex !== "auto" &&
+            parseInt(st.zIndex, 10) >= 10) return true;
         if ((st.overflowY === "auto" || st.overflowY === "scroll" || st.overflowY === "overlay") &&
             el.scrollHeight > el.clientHeight + 1) return true;
       }
