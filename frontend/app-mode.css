@@ -440,6 +440,13 @@ html.pb-app body.pb-page-app .user-menu-btn {
 }
 html.pb-app body.pb-page-app .user-menu-btn .user-menu-main { display: none !important; }
 
+/* "Ir para o site" sai do menu no modo app: a landing é chrome de site, não
+   do app. Na PWA ela é inalcançável de propósito (o app-mode.js manda "/" pro
+   /login), e no WebView ela abriria o site de marketing dentro do app, sem a
+   nav dele. Na web o atalho continua lá. */
+html.pb-app .user-menu-link[data-landing],
+html.pb-app .dd-link[data-landing] { display: none !important; }
+
 /* Dropdown da conta: a regra mobile do dashboard.css (≤600px) posiciona com
    left:0 e width:100% do pai — mas no app o botão da conta é um círculo de
    44px, então o menu virava uma faixa de 44px colada na borda direita com o
