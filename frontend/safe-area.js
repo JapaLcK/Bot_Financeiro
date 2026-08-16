@@ -43,9 +43,14 @@
     "padding-bottom:env(safe-area-inset-bottom);" +
     "padding-left:env(safe-area-inset-left);" +
     "box-sizing:border-box;overscroll-behavior:none}" +
-    // elementos grudados nas bordas (nav sticky, botões flutuantes) precisam
-    // reservar por conta própria: padding no body não alcança fixed
-    "html.pb-safe [style*='position:fixed'],html.pb-safe .sticky-nav,html.pb-safe .nav{" +
-    "padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}";
+    // A nav do site é sticky com top:16px (site.css): quando gruda, o padding
+    // do body já rolou pra fora, então ela precisa do inset no próprio top.
+    "html.pb-safe .nav{top:calc(16px + env(safe-area-inset-top));" +
+    "padding-left:max(18px,env(safe-area-inset-left));" +
+    "padding-right:max(18px,env(safe-area-inset-right))}" +
+    // Fixos presos à base: margin-bottom empurra pra cima SEM sobrescrever o
+    // "bottom" que cada página escolheu (o /precos usa 26px, por exemplo).
+    "html.pb-safe #toast,html.pb-safe .toast{" +
+    "margin-bottom:env(safe-area-inset-bottom)}";
   document.head.appendChild(css);
 })();
