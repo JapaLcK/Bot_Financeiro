@@ -242,10 +242,39 @@ fixo de toda mudança de layout.
   suíte inteira** antes de rodar qualquer teste. Sem tratar isso você não tem sinal
   nenhum — nem verde, nem vermelho. Para obter baseline local:
 
+  A lista é **fixa** — são estes 9, e só estes:
+
   ```bash
-  PYTHONPATH=. python3 -m pytest -q $(python3 -m pytest -q 2>&1 \
-    | grep "^ERROR tests/" | sed 's/^ERROR /--ignore=/' | tr '\n' ' ')
+  IGNORADOS=(
+    tests/test_audio_clarification.py
+    tests/test_audio_multi_launch_ask_value.py
+    tests/test_full_handler_smoke.py
+    tests/test_handle_incoming_routing.py
+    tests/test_recurring_value.py
+    tests/test_split_audio_transactions.py
+    tests/test_whatsapp_confirmations.py
+    tests/test_whatsapp_daily_report.py
+    tests/test_whatsapp_simulation.py
+  )
+
+  # Guarda: erro de coleta fora da lista é problema SEU, não do ambiente.
+  NOVOS=$(PYTHONPATH=. python3 -m pytest -q 2>&1 \
+    | grep "^ERROR tests/" | sed 's/^ERROR //' \
+    | grep -vxF "$(printf '%s\n' "${IGNORADOS[@]}")")
+  if [ -n "$NOVOS" ]; then
+    echo "ERRO DE COLETA NOVO — corrija antes de tirar baseline:"; echo "$NOVOS"
+  else
+    PYTHONPATH=. python3 -m pytest -q "${IGNORADOS[@]/#/--ignore=}"
+  fi
   ```
+
+  **Não gere essa lista com `grep ERROR | sed s/^ERROR/--ignore=/`.** Esse atalho
+  ignora *qualquer* erro de coleta, inclusive um que a sua própria mudança acabou de
+  introduzir: um `ImportError` ou erro de sintaxe num arquivo de teste vira mais um
+  `--ignore`, a rodada seguinte passa verde e o arquivo inteiro nunca roda. Testado:
+  com um arquivo de sintaxe quebrada em `tests/`, o pipeline montou **10** `--ignore`
+  em vez de 9 e engoliu o arquivo quebrado sem uma linha de aviso. A guarda acima
+  pega esse caso — foi verificada nos dois sentidos, em `bash` e em `zsh`.
 
   Com esses 9 fora, a suíte roda em ~70s: **981–984 passam**, e as falhas restantes
   incluem sempre os **7** de `tests/test_statement_import.py`. Esses 7 **não vêm todos
