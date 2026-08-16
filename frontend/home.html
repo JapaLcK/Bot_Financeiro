@@ -1084,6 +1084,11 @@ async function loadHomeData({ initial = false } = {}) {
     if (histRes.ok) {
       const hj = await histRes.json();
       history = hj.data || [];
+    } else if (!initial) {
+      // Num puxão, /history falhando não pode virar "sem histórico": o delta
+      // mês-a-mês sumiria da tela e o persist logo abaixo gravaria o vazio por
+      // cima do cache bom. Rejeita — o indicador fica âmbar e nada é tocado.
+      throw new Error("history falhou no refresh");
     }
   } catch (err) {
     // Só a carga inicial troca a tela pelo erro — ali não há nada a perder.
