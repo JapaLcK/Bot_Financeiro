@@ -1,0 +1,273 @@
+"""Testes do painel de usuários do admin (/admin/api/users e /{user_id}).
+
+Cobrem: exigência de auth, classificação de assinatura por conta
+(_derive_account_status), agregados, filtros por status/plano, busca por
+e-mail, paginação e o drill-down individual. O resumo Stripe roda com a
+chave vazia (billing.available == False) — a API externa nunca é chamada.
+"""
+import uuid
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from fastapi.testclient import TestClient
+
+import core.admin_dashboard as admin_dashboard
+import frontend.finance_bot_websocket_custom as dashboard
+from db import ensure_user, get_conn
+
+NOW = datetime.now(timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def configured_admin(monkeypatch):
+    async def _noop_log(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(admin_dashboard, "ADMIN_DASHBOARD_PASSWORD", "secret-admin")
+    monkeypatch.setattr(admin_dashboard, "ADMIN_DASHBOARD_PASSWORD_HASH", "")
+    monkeypatch.setattr(admin_dashboard, "log_system_event", _noop_log)
+    # Stripe fora do ar nos testes: chave vazia + cache limpo entre testes.
+    monkeypatch.setattr(admin_dashboard, "STRIPE_SECRET_KEY", "")
+    monkeypatch.setattr(
+        admin_dashboard, "_billing_summary_cache", {"fetched_at": None, "data": None}
+    )
+
+
+def _admin_client() -> TestClient:
+    client = TestClient(dashboard.app, base_url="https://testserver")
+    csrf = "test-admin-csrf"
+    client.cookies.set(dashboard.CSRF_COOKIE_NAME, csrf)
+    login = client.post(
+        "/admin/auth/login",
+        headers={dashboard.CSRF_HEADER_NAME: csrf},
+        json={"username": "admin", "password": "secret-admin"},
+    )
+    assert login.status_code == 200
+    return client
+
+
+def _mk_account(email: str, *, plan: str = "free", pay: str = "inactive",
+                stripe_customer: str | None = None, expires=None) -> int:
+    uid = int(uuid.uuid4().int % 10_000_000_000)
+    ensure_user(uid)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into auth_accounts
+                    (user_id, email, password_hash, plan, last_payment_status,
+                     stripe_customer_id, plan_expires_at)
+                values (%s, %s, 'x', %s, %s, %s, %s)
+                """,
+                (uid, email, plan, pay, stripe_customer, expires),
+            )
+        conn.commit()
+    return uid
+
+
+@pytest.fixture()
+def panel_accounts():
+    """Uma conta de cada categoria; e-mails com prefixo único pra busca."""
+    tag = uuid.uuid4().hex[:8]
+    uids = {
+        "paying": _mk_account(f"panel-{tag}-paying@test.local", plan="pro",
+                              pay="active", stripe_customer="cus_test1"),
+        "trial": _mk_account(f"panel-{tag}-trial@test.local", plan="pro",
+                             pay="trialing", stripe_customer="cus_test2"),
+        "past_due": _mk_account(f"panel-{tag}-pastdue@test.local", plan="pro",
+                                pay="past_due", stripe_customer="cus_test3"),
+        "canceled": _mk_account(f"panel-{tag}-canceled@test.local", plan="pro",
+                                pay="canceled", stripe_customer="cus_test4"),
+        "granted": _mk_account(f"panel-{tag}-granted@test.local", plan="pro"),
+        "free": _mk_account(f"panel-{tag}-free@test.local"),
+    }
+    yield tag, uids
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "delete from auth_accounts where user_id = any(%s)",
+                (list(uids.values()),),
+            )
+        conn.commit()
+
+
+# ── Classificação ──────────────────────────────────────────────────────────
+
+class TestDeriveAccountStatus:
+    def _st(self, **row):
+        return admin_dashboard._derive_account_status(row, NOW)
+
+    def test_free(self):
+        assert self._st(plan="free") == "free"
+        assert self._st(plan=None) == "free"
+
+    def test_paying(self):
+        assert self._st(plan="pro", last_payment_status="active",
+                        stripe_customer_id="cus_x") == "paying"
+
+    def test_trial(self):
+        assert self._st(plan="pro", last_payment_status="trialing",
+                        stripe_customer_id="cus_x") == "trial"
+
+    def test_past_due_variants(self):
+        for pay in ("past_due", "unpaid", "incomplete"):
+            assert self._st(plan="pro", last_payment_status=pay,
+                            stripe_customer_id="cus_x") == "past_due"
+
+    def test_canceled(self):
+        assert self._st(plan="pro", last_payment_status="canceled",
+                        stripe_customer_id="cus_x") == "canceled"
+
+    def test_granted_sem_stripe(self):
+        # 'inactive' é o default NOT NULL da coluna — o estado real de um grant
+        assert self._st(plan="pro", last_payment_status="inactive",
+                        stripe_customer_id=None) == "granted"
+
+    def test_legado_com_stripe_expirado_vira_canceled(self):
+        assert self._st(plan="pro", last_payment_status="inactive",
+                        stripe_customer_id="cus_x",
+                        plan_expires_at=NOW - timedelta(days=1)) == "canceled"
+
+
+# ── Resumo Stripe (MRR / ticket médio) ─────────────────────────────────────
+
+class _FakePrice:
+    def __init__(self, unit_amount, interval, interval_count=1):
+        self.unit_amount = unit_amount
+        self.recurring = type("R", (), {"interval": interval,
+                                        "interval_count": interval_count})()
+
+
+class _FakeSub:
+    def __init__(self, status, unit_amount, interval="month"):
+        self.status = status
+        item = type("I", (), {"price": _FakePrice(unit_amount, interval)})()
+        self.items = type("Items", (), {"data": [item]})()
+
+
+def test_stripe_billing_summary_normaliza_mrr(monkeypatch):
+    import sys
+    import types
+
+    subs = [
+        _FakeSub("active", 1990),            # R$ 19,90/mês
+        _FakeSub("active", 1990),
+        _FakeSub("active", 19900, "year"),   # R$ 199,00/ano → R$ 16,58/mês
+        _FakeSub("trialing", 1990),
+        _FakeSub("past_due", 1990),
+        _FakeSub("canceled", 1990),
+    ]
+
+    class _FakeList:
+        def auto_paging_iter(self):
+            return iter(subs)
+
+    fake_stripe = types.SimpleNamespace(
+        api_key=None,
+        Subscription=types.SimpleNamespace(list=lambda **kw: _FakeList()),
+    )
+    monkeypatch.setitem(sys.modules, "stripe", fake_stripe)
+    monkeypatch.setattr(admin_dashboard, "STRIPE_SECRET_KEY", "sk_test_fake")
+
+    data = admin_dashboard._fetch_stripe_billing_sync()
+    assert data["available"] is True
+    assert data["subscriptions"] == {
+        "active": 3, "trialing": 1, "past_due": 1, "canceled": 1, "other": 0,
+    }
+    # 19,90 + 19,90 + 199/12 = 56,38
+    assert data["mrr"] == pytest.approx(56.38, abs=0.01)
+    assert data["ticket_medio"] == pytest.approx(18.79, abs=0.01)
+    assert data["trial_mrr_potencial"] == pytest.approx(19.90, abs=0.01)
+
+
+# ── Endpoint de lista ──────────────────────────────────────────────────────
+
+def test_users_endpoint_requires_admin_auth():
+    response = TestClient(dashboard.app).get("/admin/api/users")
+    assert response.status_code == 401
+
+
+def test_users_list_aggregates_and_statuses(panel_accounts):
+    tag, uids = panel_accounts
+    client = _admin_client()
+
+    data = client.get(f"/admin/api/users?q=panel-{tag}").json()
+    assert data["total"] == 6
+    by_status = {u["account_status"]: u for u in data["users"]}
+    assert set(by_status) == {"paying", "trial", "past_due", "canceled", "granted", "free"}
+    assert by_status["paying"]["user_id"] == uids["paying"]
+    assert f"panel-{tag}-paying@test.local" == by_status["paying"]["email"]
+    # Colunas cifradas nunca vazam no JSON
+    assert all("email_enc" not in u for u in data["users"])
+
+    # Agregados são da base inteira (>= os 6 do fixture, uma de cada)
+    agg = data["aggregates"]
+    for status in ("paying", "trial", "past_due", "canceled", "granted", "free"):
+        assert agg[status] >= 1
+    assert agg["total"] >= 6
+
+    # Stripe indisponível nos testes → available False, sem quebrar a resposta
+    assert data["billing"]["available"] is False
+
+
+def test_users_list_filters_by_status_and_plan(panel_accounts):
+    tag, uids = panel_accounts
+    client = _admin_client()
+
+    data = client.get(f"/admin/api/users?q=panel-{tag}&status=trial").json()
+    assert data["total"] == 1
+    assert data["users"][0]["user_id"] == uids["trial"]
+
+    data = client.get(f"/admin/api/users?q=panel-{tag}&plan=free").json()
+    assert data["total"] == 1
+    assert data["users"][0]["user_id"] == uids["free"]
+
+    # status inválido é ignorado (não explode, não filtra)
+    data = client.get(f"/admin/api/users?q=panel-{tag}&status=xpto").json()
+    assert data["total"] == 6
+
+
+def test_users_list_pagination(panel_accounts):
+    tag, _uids = panel_accounts
+    client = _admin_client()
+
+    page0 = client.get(f"/admin/api/users?q=panel-{tag}&per_page=4&page=0").json()
+    page1 = client.get(f"/admin/api/users?q=panel-{tag}&per_page=4&page=1").json()
+    assert page0["total"] == page1["total"] == 6
+    assert len(page0["users"]) == 4
+    assert len(page1["users"]) == 2
+    ids0 = {u["user_id"] for u in page0["users"]}
+    ids1 = {u["user_id"] for u in page1["users"]}
+    assert not (ids0 & ids1)
+
+
+# ── Drill-down ─────────────────────────────────────────────────────────────
+
+def test_user_detail_requires_admin_auth(panel_accounts):
+    _tag, uids = panel_accounts
+    response = TestClient(dashboard.app).get(f"/admin/api/users/{uids['paying']}")
+    assert response.status_code == 401
+
+
+def test_user_detail_shape(panel_accounts):
+    tag, uids = panel_accounts
+    client = _admin_client()
+
+    data = client.get(f"/admin/api/users/{uids['trial']}").json()
+    profile = data["profile"]
+    assert profile["user_id"] == uids["trial"]
+    assert profile["email"] == f"panel-{tag}-trial@test.local"
+    assert profile["account_status"] == "trial"
+    assert "email_enc" not in profile and "phone_enc" not in profile
+
+    usage = data["usage"]
+    assert usage["tx_total"] == 0 and usage["tx_30d"] == 0
+    assert usage["pockets_count"] == 0
+    assert isinstance(data["recent_events"], list)
+    assert isinstance(data["recent_logins"], list)
+
+
+def test_user_detail_404_for_unknown_account():
+    client = _admin_client()
+    response = client.get("/admin/api/users/999999999999")
+    assert response.status_code == 404

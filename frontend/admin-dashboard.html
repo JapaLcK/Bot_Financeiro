@@ -163,6 +163,102 @@ button:disabled { opacity: .6; cursor: wait; }
 .badge-ok      { background: rgba(34,197,94,.1);   color: #86efac; border: 1px solid rgba(34,197,94,.2); }
 .badge-info    { background: rgba(255,128,184,.1);  color: #93c5fd; border: 1px solid rgba(255,128,184,.2); }
 .badge-muted   { background: rgba(255,255,255,.05); color: var(--muted); }
+.badge-purple  { background: rgba(255,45,142,.12);  color: #f9a8d4; border: 1px solid rgba(255,45,142,.25); }
+
+/* ── Card clicável (abre painel) ─────────────────────────────────────── */
+.card-clickable { cursor: pointer; transition: border-color .15s, transform .15s; }
+.card-clickable:hover { border-color: rgba(255,128,184,.45); transform: translateY(-2px); }
+.card-clickable .metric-sub::after { content: " · clique para detalhar"; color: var(--soft); }
+
+/* ── Modal de usuários ───────────────────────────────────────────────── */
+#users-modal {
+  display: none;
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(4,10,17,.72);
+  backdrop-filter: blur(6px);
+  align-items: center; justify-content: center;
+  padding: 24px;
+}
+#users-modal.visible { display: flex; }
+.users-dialog {
+  width: min(1240px, 96vw);
+  height: min(860px, 92vh);
+  display: flex; flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: 0 24px 80px rgba(0,0,0,.5);
+  overflow: hidden;
+}
+.users-dialog-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 18px 22px 12px;
+}
+.users-dialog-head h2 { font-size: 18px; font-weight: 700; }
+.users-close { font-size: 20px; padding: 4px 10px; border-radius: 10px; }
+.users-chips {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 0 22px 12px;
+}
+.user-chip {
+  display: inline-flex; flex-direction: column; gap: 1px;
+  padding: 8px 14px; border-radius: 12px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  cursor: pointer; transition: border-color .15s;
+  min-width: 86px;
+}
+.user-chip:hover { border-color: rgba(255,128,184,.4); }
+.user-chip.active { border-color: var(--purple); background: rgba(255,45,142,.08); }
+.user-chip.static { cursor: default; }
+.user-chip.static:hover { border-color: var(--border); }
+.user-chip b { font-size: 17px; font-weight: 750; }
+.user-chip span { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; }
+.user-chip b.green  { color: var(--green); }
+.user-chip b.blue   { color: var(--blue); }
+.user-chip b.yellow { color: var(--yellow); }
+.user-chip b.red    { color: var(--red); }
+.user-chip b.purple { color: var(--purple); }
+.users-toolbar {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  padding: 0 22px 12px;
+}
+.users-toolbar input[type="text"] {
+  background: var(--panel-2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 10px; padding: 9px 12px;
+  font-size: 13px; width: 260px;
+}
+.users-body { flex: 1; overflow: auto; padding: 0 22px 8px; overscroll-behavior: contain; }
+.users-body .table th { position: sticky; top: 0; background: #0b1826; z-index: 1; }
+.users-body .table td { font-size: 12.5px; }
+.users-row { cursor: pointer; }
+.users-row:hover td { background: rgba(255,255,255,.03); }
+.users-dialog-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 10px 22px 16px; border-top: 1px solid var(--border);
+}
+.users-foot-meta { color: var(--muted); font-size: 12px; }
+.stripe-link { color: var(--blue); text-decoration: none; font-size: 12px; }
+.stripe-link:hover { text-decoration: underline; }
+
+/* Drill-down */
+#user-detail { display: none; flex: 1; overflow: auto; padding: 0 22px 16px; overscroll-behavior: contain; }
+.detail-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px; margin-bottom: 16px;
+}
+.detail-item {
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 12px; padding: 10px 14px;
+}
+.detail-item .k { color: var(--soft); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 4px; }
+.detail-item .v { font-size: 14px; font-weight: 600; word-break: break-all; }
+.detail-section-title { font-size: 13px; font-weight: 700; color: var(--muted); margin: 14px 0 8px; text-transform: uppercase; letter-spacing: .06em; }
+.detail-event {
+  display: flex; gap: 8px; align-items: baseline;
+  padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.05);
+  font-size: 12.5px;
+}
+.detail-event .t { color: var(--soft); font-size: 11px; white-space: nowrap; }
 
 /* ── Error list ──────────────────────────────────────────────────────── */
 .error-list  { display: grid; gap: 8px; }
@@ -496,6 +592,49 @@ button:disabled { opacity: .6; cursor: wait; }
   </section>
 
 </div><!-- .shell -->
+
+<!-- ── Modal de usuários (abre pelo card "Usuários") ─────────────────── -->
+<div id="users-modal" role="dialog" aria-modal="true" aria-label="Usuários e assinaturas">
+  <div class="users-dialog">
+    <div class="users-dialog-head">
+      <h2><i class="ph ph-users-three" aria-hidden="true"></i> Usuários &amp; assinaturas</h2>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="meta" id="users-billing-meta"></span>
+        <button class="users-close" onclick="closeUsersModal()" title="Fechar (Esc)"><i class="ph ph-x" aria-hidden="true"></i></button>
+      </div>
+    </div>
+
+    <div class="users-chips" id="users-chips"></div>
+
+    <div class="users-toolbar" id="users-toolbar">
+      <input type="text" id="users-search" placeholder="Buscar por e-mail…" autocomplete="off" />
+      <select id="users-sort">
+        <option value="created_at">Mais recentes primeiro</option>
+        <option value="last_activity_at">Última atividade</option>
+      </select>
+      <span class="meta" id="users-loading"></span>
+    </div>
+
+    <div class="users-body" id="users-body">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>E-mail</th><th>Status</th><th>Plano</th><th>Expira</th>
+            <th>Cadastro</th><th>Últ. atividade</th><th>Tx 30d</th><th>WA</th><th>Stripe</th>
+          </tr>
+        </thead>
+        <tbody id="users-table-body"></tbody>
+      </table>
+    </div>
+
+    <div id="user-detail"></div>
+
+    <div class="users-dialog-foot">
+      <span class="users-foot-meta" id="users-foot-meta">—</span>
+      <div class="pagination" id="users-pagination"></div>
+    </div>
+  </div>
+</div>
 
 <script>
 /* ── Constantes e estado ─────────────────────────────────────────── */
@@ -898,7 +1037,8 @@ function renderOpsHealthGrid(ops) {
 /* ── Summary cards ───────────────────────────────────────────────── */
 function renderSummary(s) {
   const cards = [
-    { label:"Usuários",          val: fInt(s.total_accounts),    sub:`+${fInt(s.accounts_30d)} em 30d` },
+    { label:"Usuários",          val: fInt(s.total_accounts),    sub:`+${fInt(s.accounts_30d)} em 30d`,
+      click:"openUsersModal()" },
     { label:"Ativos 30d",        val: fInt(s.active_users_30d),  sub:`${fInt(s.active_users_7d)} ativos 7d` },
     { label:"Logins ok 30d",     val: fInt(s.login_success_30d), sub:`${s.login_success_rate_30d}% taxa sucesso` },
     { label:"Transações 30d",    val: fInt(s.transactions_30d),  sub:"Movimentações externas" },
@@ -909,7 +1049,7 @@ function renderSummary(s) {
     { label:"Cartões em aberto", val: fMoney(s.cards_due_open),  sub:"Faturas abertas/fechadas" },
   ];
   $id('summary-cards').innerHTML = cards.map(c => `
-    <article class="card">
+    <article class="card${c.click ? ' card-clickable' : ''}"${c.click ? ` onclick="${c.click}"` : ''}>
       <div class="metric-label">${c.label}</div>
       <div class="metric-value">${c.val}</div>
       <div class="metric-sub">${c.sub}</div>
@@ -1196,6 +1336,244 @@ function onPiiFilterChange() {
     loadPiiAccess();
   }, 250);
 }
+
+/* ── Modal de usuários & assinaturas ─────────────────────────────── */
+const USER_STATUS_META = {
+  paying:   { label: 'Pagante',      cls: 'badge-ok',      chip: 'green'  },
+  trial:    { label: 'Trial',        cls: 'badge-info',    chip: 'blue'   },
+  past_due: { label: 'Inadimplente', cls: 'badge-warning', chip: 'yellow' },
+  canceled: { label: 'Cancelado',    cls: 'badge-error',   chip: 'red'    },
+  granted:  { label: 'Cortesia',     cls: 'badge-purple',  chip: 'purple' },
+  free:     { label: 'Free',         cls: 'badge-muted',   chip: ''       },
+};
+const usersState = { q: '', status: '', page: 0, perPage: 50, sort: 'created_at', open: false };
+let usersSearchDebounce = null;
+let usersController = null;
+
+function openUsersModal() {
+  usersState.open = true;
+  $id('users-modal').classList.add('visible');
+  showUsersList();
+  loadUsers();
+}
+function closeUsersModal() {
+  usersState.open = false;
+  usersController?.abort();
+  $id('users-modal').classList.remove('visible');
+}
+function showUsersList() {
+  $id('user-detail').style.display = 'none';
+  $id('users-body').style.display = '';
+  $id('users-toolbar').style.display = '';
+  $id('users-chips').style.display = '';
+}
+
+async function loadUsers() {
+  usersController?.abort();
+  usersController = new AbortController();
+  $id('users-loading').textContent = 'Carregando…';
+  const params = new URLSearchParams({
+    page: usersState.page, per_page: usersState.perPage, sort: usersState.sort,
+  });
+  if (usersState.q)      params.set('q', usersState.q);
+  if (usersState.status) params.set('status', usersState.status);
+  try {
+    const res = await fetch(`/admin/api/users?${params}`, {
+      headers: authH(), cache: 'no-store', signal: usersController.signal,
+    });
+    if (res.status === 401) { window.location.href = '/admin/login'; return; }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderUsersChips(data.aggregates, data.billing);
+    renderUsersTable(data);
+    $id('users-loading').textContent = '';
+  } catch (e) {
+    if (e?.name !== 'AbortError') {
+      $id('users-loading').textContent = 'Falha ao carregar.';
+      console.error('users:', e);
+    }
+  }
+}
+
+function renderUsersChips(agg, billing) {
+  const chips = [
+    { key: '',         label: 'Total',        val: fInt(agg.total),    chip: '' },
+    { key: 'paying',   label: 'Pagantes',     val: fInt(agg.paying),   chip: 'green' },
+    { key: 'trial',    label: 'Em trial',     val: fInt(agg.trial),    chip: 'blue' },
+    { key: 'past_due', label: 'Inadimpl.',    val: fInt(agg.past_due), chip: 'yellow' },
+    { key: 'canceled', label: 'Cancelados',   val: fInt(agg.canceled), chip: 'red' },
+    { key: 'granted',  label: 'Cortesia',     val: fInt(agg.granted),  chip: 'purple' },
+    { key: 'free',     label: 'Free',         val: fInt(agg.free),     chip: '' },
+  ];
+  let html = chips.map(c => `
+    <div class="user-chip${usersState.status === c.key ? ' active' : ''}" onclick="setUsersStatus('${c.key}')">
+      <b class="${c.chip}">${c.val}</b><span>${c.label}</span>
+    </div>`).join('');
+  html += `
+    <div class="user-chip static"><b>${fInt(agg.whatsapp_connected)}</b><span>WA conect.</span></div>`;
+  if (billing?.available) {
+    html += `
+    <div class="user-chip static"><b class="green">${fMoney(billing.mrr)}</b><span>MRR</span></div>
+    <div class="user-chip static"><b>${fMoney(billing.ticket_medio)}</b><span>Ticket médio</span></div>
+    <div class="user-chip static"><b class="blue">${fMoney(billing.trial_mrr_potencial)}</b><span>MRR em trial</span></div>`;
+    $id('users-billing-meta').textContent = `Stripe ${fRelTime(billing.fetched_at)}`;
+  } else {
+    $id('users-billing-meta').textContent = 'Stripe indisponível — contagens vêm do banco';
+  }
+  $id('users-chips').innerHTML = html;
+}
+
+function setUsersStatus(status) {
+  usersState.status = usersState.status === status ? '' : status;
+  usersState.page = 0;
+  loadUsers();
+}
+
+function renderUsersTable(data) {
+  const body = $id('users-table-body');
+  if (!data.users.length) {
+    body.innerHTML = `<tr><td colspan="9" class="empty">Nenhum usuário com esse filtro.</td></tr>`;
+  } else {
+    body.innerHTML = data.users.map(u => {
+      const meta = USER_STATUS_META[u.account_status] || USER_STATUS_META.free;
+      const stripe = u.stripe_customer_id
+        ? `<a class="stripe-link" href="https://dashboard.stripe.com/customers/${esc(u.stripe_customer_id)}"
+             target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Abrir no Stripe">
+             <i class="ph ph-arrow-square-out" aria-hidden="true"></i></a>`
+        : '—';
+      return `
+      <tr class="users-row" onclick="openUserDetail(${Number(u.user_id)})">
+        <td title="user_id ${Number(u.user_id)}">${esc(u.email || '(sem e-mail)')}</td>
+        <td><span class="badge ${meta.cls}">${meta.label}</span></td>
+        <td>${esc(u.plan || 'free')}</td>
+        <td title="${fDate(u.plan_expires_at)}">${u.plan_expires_at ? fDate(u.plan_expires_at) : '—'}</td>
+        <td title="${fDate(u.created_at)}">${fRelTime(u.created_at)}</td>
+        <td title="${fDate(u.last_activity_at)}">${fRelTime(u.last_activity_at)}</td>
+        <td>${fInt(u.tx_30d)}</td>
+        <td>${(u.has_whatsapp_identity || u.phone_status === 'confirmed') ? '<i class="ph ph-check" style="color:var(--green)" aria-hidden="true"></i>' : '—'}</td>
+        <td>${stripe}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  const totalPages = Math.max(1, Math.ceil(data.total / usersState.perPage));
+  const start = data.page * usersState.perPage;
+  $id('users-foot-meta').textContent = data.total
+    ? `${start + 1}–${start + data.users.length} de ${fInt(data.total)} conta${data.total === 1 ? '' : 's'}`
+    : '0 contas';
+  $id('users-pagination').innerHTML = totalPages <= 1 ? '' : `
+    <button class="pagination-btn" ${data.page === 0 ? 'disabled' : ''} onclick="changeUsersPage(-1)">◀</button>
+    <span class="pagination-info">Página ${data.page + 1} de ${totalPages}</span>
+    <button class="pagination-btn" ${data.page >= totalPages - 1 ? 'disabled' : ''} onclick="changeUsersPage(1)">▶</button>`;
+}
+
+function changeUsersPage(delta) {
+  usersState.page = Math.max(0, usersState.page + delta);
+  loadUsers();
+}
+
+/* ── Drill-down de um usuário ────────────────────────────────────── */
+async function openUserDetail(userId) {
+  const panel = $id('user-detail');
+  $id('users-body').style.display = 'none';
+  $id('users-toolbar').style.display = 'none';
+  $id('users-chips').style.display = 'none';
+  panel.style.display = 'block';
+  panel.innerHTML = `<div class="empty">Carregando conta ${userId}…</div>`;
+  try {
+    const res = await fetch(`/admin/api/users/${userId}`, { headers: authH(), cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    renderUserDetail(await res.json());
+  } catch (e) {
+    panel.innerHTML = `<div class="empty">Falha ao carregar a conta. <button onclick="showUsersList()">Voltar</button></div>`;
+    console.error('user-detail:', e);
+  }
+}
+
+function renderUserDetail(data) {
+  const p = data.profile, u = data.usage;
+  const meta = USER_STATUS_META[p.account_status] || USER_STATUS_META.free;
+  const item = (k, v) => `<div class="detail-item"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  const optOuts = [
+    p.engagement_opt_out && 'engajamento',
+    p.tip_email_opt_out && 'dicas',
+    p.insight_email_opt_out && 'insights',
+    p.whatsapp_updates_opt_out && 'updates WA',
+  ].filter(Boolean).join(', ') || 'nenhum';
+
+  $id('user-detail').innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;margin:4px 0 14px">
+      <button onclick="showUsersList()"><i class="ph ph-arrow-left" aria-hidden="true"></i> Voltar</button>
+      <h3 style="font-size:16px">${esc(p.email || `user ${p.user_id}`)}</h3>
+      <span class="badge ${meta.cls}">${meta.label}</span>
+      ${p.deletion_status ? `<span class="badge badge-error">exclusão: ${esc(p.deletion_status)}</span>` : ''}
+      ${p.stripe_customer_id ? `<a class="stripe-link" target="_blank" rel="noopener"
+          href="https://dashboard.stripe.com/customers/${esc(p.stripe_customer_id)}">abrir no Stripe <i class="ph ph-arrow-square-out" aria-hidden="true"></i></a>` : ''}
+    </div>
+
+    <div class="detail-grid">
+      ${item('User ID', p.user_id)}
+      ${item('Nome', esc(p.display_name || '—'))}
+      ${item('Telefone', esc(p.phone_e164 || '—'))}
+      ${item('Plano', `${esc(p.plan || 'free')}${p.plan_expires_at ? ` · expira ${fDate(p.plan_expires_at)}` : ''}`)}
+      ${item('Status pagamento', esc(p.last_payment_status || '—'))}
+      ${item('Trial iniciado', p.trial_started_at ? fDate(p.trial_started_at) : '—')}
+      ${item('Plano escolhido em', p.plan_selected_at ? fDate(p.plan_selected_at) : '—')}
+      ${item('Cadastro', fDate(p.created_at))}
+      ${item('Última atividade', p.last_activity_at ? `${fRelTime(p.last_activity_at)}` : '—')}
+      ${item('WhatsApp', (p.has_whatsapp_identity || p.phone_status === 'confirmed') ? 'conectado' : (p.phone_status || 'não conectado'))}
+      ${item('IA no mês', fInt(p.ai_messages_this_month))}
+      ${item('Opt-outs', optOuts)}
+    </div>
+
+    <div class="detail-section-title">Uso (contagens — sem conteúdo financeiro)</div>
+    <div class="detail-grid">
+      ${item('Transações (total)', fInt(u.tx_total))}
+      ${item('Transações 30d', fInt(u.tx_30d))}
+      ${item('Última transação', u.last_tx_at ? fRelTime(u.last_tx_at) : '—')}
+      ${item('Caixinhas', fInt(u.pockets_count))}
+      ${item('Investimentos', fInt(u.investments_count))}
+      ${item('Cartões', fInt(u.cards_count))}
+    </div>
+
+    <div class="detail-section-title">Eventos recentes desta conta</div>
+    ${data.recent_events.length ? data.recent_events.map(ev => `
+      <div class="detail-event">
+        ${levelBadge(ev.level)}
+        <span>${esc(ev.event_type)} — ${esc((ev.message || '').slice(0, 120))}</span>
+        <span class="t" title="${fDate(ev.created_at)}">${fRelTime(ev.created_at)}</span>
+      </div>`).join('') : '<div class="empty">Sem eventos registrados.</div>'}
+
+    <div class="detail-section-title">Logins recentes</div>
+    ${data.recent_logins.length ? data.recent_logins.map(lg => `
+      <div class="detail-event">
+        <span class="badge ${lg.success ? 'badge-ok' : 'badge-error'}">${lg.success ? 'ok' : 'falha'}</span>
+        <span>${esc(lg.ip_address || '')}${lg.failure_reason ? ` — ${esc(lg.failure_reason)}` : ''}</span>
+        <span class="t" title="${fDate(lg.created_at)}">${fRelTime(lg.created_at)}</span>
+      </div>`).join('') : '<div class="empty">Sem logins registrados.</div>'}
+  `;
+}
+
+/* Listeners do modal */
+$id('users-search').addEventListener('input', () => {
+  clearTimeout(usersSearchDebounce);
+  usersSearchDebounce = setTimeout(() => {
+    usersState.q = $id('users-search').value.trim();
+    usersState.page = 0;
+    loadUsers();
+  }, 300);
+});
+$id('users-sort').addEventListener('change', () => {
+  usersState.sort = $id('users-sort').value;
+  usersState.page = 0;
+  loadUsers();
+});
+$id('users-modal').addEventListener('click', (e) => {
+  if (e.target === $id('users-modal')) closeUsersModal();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && usersState.open) closeUsersModal();
+});
 
 /* ── Auto-refresh ────────────────────────────────────────────────── */
 function startAutoRefresh() {
