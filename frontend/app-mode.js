@@ -588,7 +588,8 @@
       window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
     let pull = 0, startY = 0, startX = 0, tracking = false, busy = false, raf = 0;
-    let dragged = false;   // este gesto puxou de verdade (tap nunca arma)
+    let dragged = false;    // este gesto puxou de verdade (tap nunca arma)
+    let inFlight = null;    // PBRefresh pendente (o watchdog libera o ciclo, não o pedido)
 
     const damp = o => PTR.rubber * (1 - 1 / (o / PTR.rubber + 1));
     const atTop = () =>
@@ -672,11 +673,19 @@
         setTimeout(() => finish(ok), Math.max(0, PTR.floor - (Date.now() - t0)));
       };
       setTimeout(() => done(false), PTR.watchdog);   // pendurado conta como falha
-      // A falha NÃO é engolida: vira aviso no indicador. Antes o catch vazio
-      // recolhia igual ao sucesso, e a tela ficava com dado velho sem dizer.
-      Promise.resolve()
-        .then(() => window.PBRefresh())
-        .then(() => done(true), () => done(false));
+      // A falha NÃO é engolida: vira aviso no indicador. E os PBRefresh são
+      // SERIALIZADOS: o watchdog libera o ciclo visual, não o pedido — sem a
+      // fila, um pedido estourado seguia vivo e podia terminar DEPOIS do
+      // puxão seguinte, sobrescrevendo resposta mais nova no DOM e no cache.
+      // Na fila, o novo só dispara quando o antigo assentar; se o antigo
+      // nunca assentar, o watchdog pinta âmbar de novo — honesto e sem
+      // corrida. O catch() na fila evita rejeição não tratada do elo velho.
+      const prev = inFlight;
+      const p = Promise.resolve(prev)
+        .catch(() => {})
+        .then(() => window.PBRefresh());
+      inFlight = p.catch(() => {});
+      p.then(() => done(true), () => done(false));
     }
 
     // Duas coisas mandam no gesto delas, e não no puxão da página:

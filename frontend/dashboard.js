@@ -10076,19 +10076,25 @@ function _pbDashboardRefresh() {
       return loadFixedView(true);
     case "goals":        return loadGoalsView(true);
     case "affiliate": {
-      // O refresh reconstrói o #affiliate-body inteiro, e a chave Pix mora
-      // num input dentro dele. O input nasce sempre vazio (nenhum caminho o
-      // preenche com dado do servidor), então qualquer valor ali é digitação
-      // do usuário — sobrevive à troca de DOM.
+      // Fetch ANTES de render: em falha o DOM não é tocado — o body (e a
+      // chave Pix digitada nele) fica como está e o indicador avisa em âmbar.
+      // O loadAffiliateView(true) não serve aqui: ele troca o body pelo
+      // skeleton antes do fetch e, em erro, pelo aviso — a chave morre nos
+      // dois caminhos. A restauração é incondicional porque o input nasce
+      // sempre vazio: qualquer valor ali é digitação do usuário.
       const pix = document.getElementById("affiliate-pix-input");
       const pending = pix ? pix.value : "";
-      return loadAffiliateView(true).then(r => {
-        if (pending) {
-          const el = document.getElementById("affiliate-pix-input");
-          if (el) el.value = pending;
-        }
-        return r;
-      });
+      return fetch(`${API}/api/affiliate/me`, { credentials: "same-origin" })
+        .then(async res => {
+          const data = await readResponsePayload(res);
+          if (!res.ok) throw new Error(data.detail || "refresh de afiliado falhou");
+          _affiliateCache = data;
+          _renderAffiliateView(data);
+          if (pending) {
+            const el = document.getElementById("affiliate-pix-input");
+            if (el) el.value = pending;
+          }
+        });
     }
     case "agentes":      return loadAgentesView(true);
     default:
