@@ -69,9 +69,18 @@ html.pb-app .mfa-overlay {
 }
 html.pb-app .modal,
 html.pb-app .modal.wide,
-html.pb-app .mfa-modal,
-html.pb-app .pig-modal {
+html.pb-app .mfa-modal {
   width: auto !important;
+  max-width: calc(100vw - 24px
+    - env(safe-area-inset-left) - env(safe-area-inset-right)) !important;
+  max-height: calc(100vh - 40px
+    - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+}
+/* O .pig-modal (alertModal/confirmModal) já tem largura própria pensada —
+   min(440px, 92vw), com width:100% no mobile. Só LIMITAMOS pela área segura;
+   pôr width:auto aqui encolheria diálogos de mensagem curta, e o !important
+   impediria a regra mobile do componente de recuperar a largura. */
+html.pb-app .pig-modal {
   max-width: calc(100vw - 24px
     - env(safe-area-inset-left) - env(safe-area-inset-right)) !important;
   max-height: calc(100vh - 40px
