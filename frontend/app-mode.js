@@ -714,6 +714,10 @@
       if (ev.touches.length !== 1) { cancelPull(); return; }
       if (ownsGesture(ev.target)) return;
       tracking = atTop();
+      // Retry rápido: se a molinha do ciclo anterior ainda está recolhendo,
+      // o rAF dela seguiria empurrando pull pra zero por baixo do touchmove
+      // — o puxão novo desabava no meio. Gesto aceito mata a molinha.
+      if (tracking && raf) { cancelAnimationFrame(raf); raf = 0; }
       dragged = false;
       startY = ev.touches[0].clientY;
       startX = ev.touches[0].clientX;
@@ -734,7 +738,10 @@
         tracking = false;
         return;
       }
-      if (!atTop()) { tracking = false; return; }
+      // Sem spring aqui o pull ficava congelado no ar: release() com
+      // tracking=false retorna cedo e nunca recolhe. Mesma família do bail
+      // de dy<=0 logo acima.
+      if (!atTop()) { tracking = false; if (pull > 0) spring(0); return; }
       if (ev.cancelable) ev.preventDefault();   // mata o elástico nativo
       dragged = true;
       pull = Math.min(PTR.max, damp(dy));
