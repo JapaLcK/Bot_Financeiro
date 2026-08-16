@@ -1458,9 +1458,12 @@ function renderUsersTable(data) {
 
   const totalPages = Math.max(1, Math.ceil(data.total / usersState.perPage));
   const start = data.page * usersState.perPage;
-  $id('users-foot-meta').textContent = data.total
+  const truncWarn = data.truncated
+    ? ' · ⚠ busca limitada às contas mais recentes — refine o termo'
+    : '';
+  $id('users-foot-meta').textContent = (data.total
     ? `${start + 1}–${start + data.users.length} de ${fInt(data.total)} conta${data.total === 1 ? '' : 's'}`
-    : '0 contas';
+    : '0 contas') + truncWarn;
   $id('users-pagination').innerHTML = totalPages <= 1 ? '' : `
     <button class="pagination-btn" ${data.page === 0 ? 'disabled' : ''} onclick="changeUsersPage(-1)">◀</button>
     <span class="pagination-info">Página ${data.page + 1} de ${totalPages}</span>

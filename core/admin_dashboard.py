@@ -741,12 +741,20 @@ def _derive_account_status(row: dict, now: datetime) -> str:
     """Classifica a conta numa categoria única de assinatura.
 
     A fonte é o par (plan, last_payment_status) mantido pelos webhooks do
-    Stripe; contas Pro sem stripe_customer_id são grants manuais (cortesia).
+    Stripe. Atenção: customer.subscription.deleted volta plan pra 'free'
+    ANTES de gravar last_payment_status='canceled' — por isso conta free com
+    pagamento cancelado é ex-assinante ('canceled'), não 'free'. Pro sem
+    status de pagamento é grant manual ('granted'), mas só enquanto
+    plan_expires_at não passou.
+
+    ESPELHO SQL: _ACCOUNT_STATUS_SQL logo abaixo tem de decidir idêntico —
+    toda mudança aqui muda lá (o teste de paridade em
+    tests/test_admin_users_panel.py compara os dois).
     """
-    plan = (row.get("plan") or "free").strip().lower()
-    if plan in ("", "free"):
-        return "free"
+    plan = (row.get("plan") or "free").strip().lower() or "free"
     pay = (row.get("last_payment_status") or "").strip().lower()
+    if plan == "free":
+        return "canceled" if pay in ("canceled", "incomplete_expired") else "free"
     if pay == "trialing":
         return "trial"
     if pay == "active":
@@ -755,14 +763,30 @@ def _derive_account_status(row: dict, now: datetime) -> str:
         return "past_due"
     if pay in ("canceled", "incomplete_expired"):
         return "canceled"
-    if not row.get("stripe_customer_id"):
-        return "granted"
-    # Pro com customer Stripe mas sem status de pagamento registrado: se já
-    # expirou trata como cancelada, senão como cortesia (estado legado raro).
     expires = row.get("plan_expires_at")
     if expires is not None and expires < now:
         return "canceled"
     return "granted"
+
+
+# Espelho em SQL de _derive_account_status, pra filtrar/agregar no banco sem
+# trazer a base inteira pro Python. Assume alias `a` pra auth_accounts.
+_ACCOUNT_STATUS_SQL = """
+    CASE
+        WHEN lower(coalesce(nullif(trim(a.plan), ''), 'free')) = 'free' THEN
+            CASE WHEN lower(coalesce(a.last_payment_status, ''))
+                      IN ('canceled', 'incomplete_expired')
+                 THEN 'canceled' ELSE 'free' END
+        WHEN lower(coalesce(a.last_payment_status, '')) = 'trialing' THEN 'trial'
+        WHEN lower(coalesce(a.last_payment_status, '')) = 'active' THEN 'paying'
+        WHEN lower(coalesce(a.last_payment_status, ''))
+             IN ('past_due', 'unpaid', 'incomplete') THEN 'past_due'
+        WHEN lower(coalesce(a.last_payment_status, ''))
+             IN ('canceled', 'incomplete_expired') THEN 'canceled'
+        WHEN a.plan_expires_at IS NOT NULL AND a.plan_expires_at < now() THEN 'canceled'
+        ELSE 'granted'
+    END
+"""
 
 
 _billing_summary_cache: dict[str, Any] = {"fetched_at": None, "data": None}
@@ -867,9 +891,14 @@ async def fetch_admin_users(
 ) -> dict[str, Any]:
     """Lista paginada de contas com classificação de assinatura + agregados.
 
-    Minimização de PII: só decifra e-mail das rows da página devolvida —
-    exceto com busca (q), que precisa decifrar a base pra casar substring.
-    Cada decrypt é auditado em pii_access_log (purpose=render_admin_users_list).
+    Agregados, filtros de status/plano e paginação rodam em SQL sobre a base
+    INTEIRA (_ACCOUNT_STATUS_SQL). A única exceção é a busca (q): e-mail é
+    cifrado no banco, então o match de substring exige decifrar — esse caminho
+    varre no máximo _ADMIN_USERS_HARD_CAP contas mais recentes e devolve
+    truncated=True quando bateu no teto.
+
+    Minimização de PII: sem busca, só as rows da página devolvida são
+    decifradas. Cada decrypt é auditado (purpose=render_admin_users_list).
     """
     q = (q or "").strip().lower()
     plan = (plan or "").strip().lower()
@@ -881,11 +910,7 @@ async def fetch_admin_users(
     order_col = "last_activity_at" if sort == "last_activity_at" else "created_at"
     now = datetime.now(timezone.utc)
 
-    async with await db_connect() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                f"""
-                SELECT
+    select_cols = f"""
                     a.user_id,
                     a.email,
                     a.email_enc,
@@ -900,48 +925,91 @@ async def fetch_admin_users(
                     a.phone_status,
                     a.whatsapp_verified_at,
                     a.deletion_status,
+                    {_ACCOUNT_STATUS_SQL} AS account_status,
                     EXISTS (
                         SELECT 1 FROM user_identities ui
                         WHERE ui.user_id = a.user_id AND ui.provider = 'whatsapp'
                     ) AS has_whatsapp_identity
+    """
+    order_sql = f"ORDER BY a.{order_col} DESC NULLS LAST, a.user_id DESC"
+
+    clauses: list[str] = []
+    params: list[Any] = []
+    if plan:
+        clauses.append("lower(coalesce(nullif(trim(a.plan), ''), 'free')) = %s")
+        params.append(plan)
+    if status:
+        clauses.append(f"{_ACCOUNT_STATUS_SQL} = %s")
+        params.append(status)
+    where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+
+    truncated = False
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            # Agregados: base inteira, sempre, independente dos filtros
+            await cur.execute(
+                f"""
+                SELECT {_ACCOUNT_STATUS_SQL} AS account_status,
+                       COUNT(*) AS n,
+                       COUNT(*) FILTER (
+                           WHERE a.phone_status = 'confirmed'
+                              OR EXISTS (
+                                  SELECT 1 FROM user_identities ui
+                                  WHERE ui.user_id = a.user_id
+                                    AND ui.provider = 'whatsapp'
+                              )
+                       ) AS wa
                 FROM auth_accounts a
-                ORDER BY {order_col} DESC NULLS LAST, a.user_id DESC
-                LIMIT %s
-                """,
-                (_ADMIN_USERS_HARD_CAP,),
+                GROUP BY 1
+                """
             )
-            rows = [dict(r) for r in await cur.fetchall()]
-
-            for row in rows:
-                row["account_status"] = _derive_account_status(row, now)
-
             aggregates: dict[str, int] = {s: 0 for s in _USER_STATUSES}
-            for row in rows:
-                aggregates[row["account_status"]] += 1
-            aggregates["total"] = len(rows)
-            aggregates["whatsapp_connected"] = sum(
-                1 for r in rows
-                if r["has_whatsapp_identity"] or r.get("phone_status") == "confirmed"
-            )
+            aggregates["whatsapp_connected"] = 0
+            for r in await cur.fetchall():
+                aggregates[r["account_status"]] = int(r["n"])
+                aggregates["whatsapp_connected"] += int(r["wa"])
+            aggregates["total"] = sum(aggregates[s] for s in _USER_STATUSES)
 
-            if plan:
-                rows = [r for r in rows if (r.get("plan") or "free").lower() == plan]
-            if status:
-                rows = [r for r in rows if r["account_status"] == status]
-
-            if q:
-                # Busca casa contra o e-mail decifrado: decifra a base filtrada
-                # inteira (batch de auditoria em quem chama).
+            if not q:
+                await cur.execute(
+                    f"SELECT COUNT(*) AS n FROM auth_accounts a {where_sql}",
+                    tuple(params),
+                )
+                total_filtered = int((await cur.fetchone())["n"])
+                await cur.execute(
+                    f"""
+                    SELECT {select_cols}
+                    FROM auth_accounts a
+                    {where_sql}
+                    {order_sql}
+                    LIMIT %s OFFSET %s
+                    """,
+                    tuple(params) + (per_page, page * per_page),
+                )
+                page_rows = [dict(r) for r in await cur.fetchall()]
+                for row in page_rows:
+                    _decrypt_admin_row(row, admin_user, "render_admin_users_list")
+            else:
+                # Busca: match contra o e-mail decifrado, varrendo as
+                # _ADMIN_USERS_HARD_CAP contas mais recentes que passam nos
+                # filtros SQL (batch de auditoria em quem chama).
+                await cur.execute(
+                    f"""
+                    SELECT {select_cols}
+                    FROM auth_accounts a
+                    {where_sql}
+                    {order_sql}
+                    LIMIT %s
+                    """,
+                    tuple(params) + (_ADMIN_USERS_HARD_CAP,),
+                )
+                rows = [dict(r) for r in await cur.fetchall()]
+                truncated = len(rows) >= _ADMIN_USERS_HARD_CAP
                 for row in rows:
                     _decrypt_admin_row(row, admin_user, "render_admin_users_list")
                 rows = [r for r in rows if q in (r.get("email") or "").lower()]
-
-            total_filtered = len(rows)
-            start = page * per_page
-            page_rows = rows[start:start + per_page]
-            if not q:
-                for row in page_rows:
-                    _decrypt_admin_row(row, admin_user, "render_admin_users_list")
+                total_filtered = len(rows)
+                page_rows = rows[page * per_page:(page + 1) * per_page]
 
             tx_by_user: dict[int, int] = {}
             if page_rows:
@@ -960,9 +1028,6 @@ async def fetch_admin_users(
 
     for row in page_rows:
         row["tx_30d"] = tx_by_user.get(int(row["user_id"]), 0)
-        # colunas _enc nunca vazam; rows fora da página não passaram pelo
-        # _decrypt_admin_row (que já as remove)
-        row.pop("email_enc", None)
 
     return {
         "generated_at": now,
@@ -972,6 +1037,7 @@ async def fetch_admin_users(
         "page": page,
         "per_page": per_page,
         "total": total_filtered,
+        "truncated": truncated,
         "filters": {"q": q, "plan": plan, "status": status, "sort": order_col},
     }
 

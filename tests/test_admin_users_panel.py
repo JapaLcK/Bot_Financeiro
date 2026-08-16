@@ -76,9 +76,14 @@ def panel_accounts():
                              pay="trialing", stripe_customer="cus_test2"),
         "past_due": _mk_account(f"panel-{tag}-pastdue@test.local", plan="pro",
                                 pay="past_due", stripe_customer="cus_test3"),
-        "canceled": _mk_account(f"panel-{tag}-canceled@test.local", plan="pro",
+        # Estado real pós-webhook customer.subscription.deleted:
+        # plan volta pra free E last_payment_status vira canceled
+        "canceled": _mk_account(f"panel-{tag}-canceled@test.local", plan="free",
                                 pay="canceled", stripe_customer="cus_test4"),
         "granted": _mk_account(f"panel-{tag}-granted@test.local", plan="pro"),
+        # Cortesia vencida: sem Stripe, plan_expires_at no passado → canceled
+        "granted_expired": _mk_account(f"panel-{tag}-grantexp@test.local", plan="pro",
+                                       expires=NOW - timedelta(days=2)),
         "free": _mk_account(f"panel-{tag}-free@test.local"),
     }
     yield tag, uids
@@ -100,6 +105,16 @@ class TestDeriveAccountStatus:
     def test_free(self):
         assert self._st(plan="free") == "free"
         assert self._st(plan=None) == "free"
+
+    def test_free_com_pagamento_cancelado_e_ex_assinante(self):
+        # customer.subscription.deleted volta plan pra 'free' e grava
+        # last_payment_status='canceled' — é ex-assinante, não free comum
+        assert self._st(plan="free", last_payment_status="canceled") == "canceled"
+
+    def test_cortesia_vencida_vira_canceled(self):
+        assert self._st(plan="pro", last_payment_status="inactive",
+                        stripe_customer_id=None,
+                        plan_expires_at=NOW - timedelta(days=1)) == "canceled"
 
     def test_paying(self):
         assert self._st(plan="pro", last_payment_status="active",
@@ -192,19 +207,37 @@ def test_users_list_aggregates_and_statuses(panel_accounts):
     client = _admin_client()
 
     data = client.get(f"/admin/api/users?q=panel-{tag}").json()
-    assert data["total"] == 6
-    by_status = {u["account_status"]: u for u in data["users"]}
-    assert set(by_status) == {"paying", "trial", "past_due", "canceled", "granted", "free"}
-    assert by_status["paying"]["user_id"] == uids["paying"]
-    assert f"panel-{tag}-paying@test.local" == by_status["paying"]["email"]
+    assert data["total"] == 7
+    assert data["truncated"] is False
+    status_by_uid = {u["user_id"]: u["account_status"] for u in data["users"]}
+    assert status_by_uid == {
+        uids["paying"]: "paying",
+        uids["trial"]: "trial",
+        uids["past_due"]: "past_due",
+        uids["canceled"]: "canceled",
+        uids["granted"]: "granted",
+        uids["granted_expired"]: "canceled",  # cortesia vencida
+        uids["free"]: "free",
+    }
+    email_by_uid = {u["user_id"]: u["email"] for u in data["users"]}
+    assert email_by_uid[uids["paying"]] == f"panel-{tag}-paying@test.local"
     # Colunas cifradas nunca vazam no JSON
     assert all("email_enc" not in u for u in data["users"])
 
-    # Agregados são da base inteira (>= os 6 do fixture, uma de cada)
+    # Paridade SQL ↔ Python: o account_status calculado pelo CASE no banco
+    # tem de bater com _derive_account_status sobre os mesmos campos crus
+    for u in data["users"]:
+        raw = dict(u)
+        if raw.get("plan_expires_at"):
+            raw["plan_expires_at"] = datetime.fromisoformat(raw["plan_expires_at"])
+        assert admin_dashboard._derive_account_status(raw, NOW) == u["account_status"], u
+
+    # Agregados são da base inteira (>= os do fixture)
     agg = data["aggregates"]
-    for status in ("paying", "trial", "past_due", "canceled", "granted", "free"):
+    for status in ("paying", "trial", "past_due", "granted", "free"):
         assert agg[status] >= 1
-    assert agg["total"] >= 6
+    assert agg["canceled"] >= 2
+    assert agg["total"] >= 7
 
     # Stripe indisponível nos testes → available False, sem quebrar a resposta
     assert data["billing"]["available"] is False
@@ -218,13 +251,18 @@ def test_users_list_filters_by_status_and_plan(panel_accounts):
     assert data["total"] == 1
     assert data["users"][0]["user_id"] == uids["trial"]
 
+    # plan=free traz o free comum E o ex-assinante (plan voltou pra free)
     data = client.get(f"/admin/api/users?q=panel-{tag}&plan=free").json()
-    assert data["total"] == 1
-    assert data["users"][0]["user_id"] == uids["free"]
+    assert data["total"] == 2
+    assert {u["user_id"] for u in data["users"]} == {uids["free"], uids["canceled"]}
+
+    # status=canceled junta ex-assinante e cortesia vencida
+    data = client.get(f"/admin/api/users?q=panel-{tag}&status=canceled").json()
+    assert {u["user_id"] for u in data["users"]} == {uids["canceled"], uids["granted_expired"]}
 
     # status inválido é ignorado (não explode, não filtra)
     data = client.get(f"/admin/api/users?q=panel-{tag}&status=xpto").json()
-    assert data["total"] == 6
+    assert data["total"] == 7
 
 
 def test_users_list_pagination(panel_accounts):
@@ -233,12 +271,22 @@ def test_users_list_pagination(panel_accounts):
 
     page0 = client.get(f"/admin/api/users?q=panel-{tag}&per_page=4&page=0").json()
     page1 = client.get(f"/admin/api/users?q=panel-{tag}&per_page=4&page=1").json()
-    assert page0["total"] == page1["total"] == 6
+    assert page0["total"] == page1["total"] == 7
     assert len(page0["users"]) == 4
-    assert len(page1["users"]) == 2
+    assert len(page1["users"]) == 3
     ids0 = {u["user_id"] for u in page0["users"]}
     ids1 = {u["user_id"] for u in page1["users"]}
     assert not (ids0 & ids1)
+
+    # Caminho SEM busca (paginação 100% em SQL): filtra por status pra
+    # não depender do resto da base, e as páginas não podem se sobrepor
+    canceled_total = client.get("/admin/api/users?status=canceled").json()["total"]
+    assert canceled_total >= 2
+    sql0 = client.get("/admin/api/users?status=canceled&per_page=1&page=0").json()
+    sql1 = client.get("/admin/api/users?status=canceled&per_page=1&page=1").json()
+    assert sql0["total"] == sql1["total"] == canceled_total
+    assert len(sql0["users"]) == len(sql1["users"]) == 1
+    assert sql0["users"][0]["user_id"] != sql1["users"][0]["user_id"]
 
 
 # ── Drill-down ─────────────────────────────────────────────────────────────
