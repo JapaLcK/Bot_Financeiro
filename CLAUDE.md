@@ -103,7 +103,19 @@ causa só** — são dois grupos de dependência ausente (§6). Os demais —
 de estado compartilhado no banco de teste. **Consequência prática:** um número de
 falhas maior que o da sua baseline não prova regressão, e um igual não prova ausência
 dela. Compare a **lista de nomes**, e na dúvida rode o arquivo suspeito isolado
-(`pytest tests/test_x.py -q`), onde o efeito de ordem não existe.
+(`pytest tests/test_x.py -q`). Isso corta a interferência **dos outros arquivos**, e só
+isso: os testes de dentro do arquivo continuam no mesmo processo, na ordem de definição,
+compartilhando estado global e as mesmas linhas de banco. Se a falha persistir isolada,
+ainda pode ser ordem interna. Para descartar, desça mais um nível: rode o teste
+**sozinho** (`pytest "tests/test_x.py::test_y" -q`) e depois varie a ordem passando os
+node IDs explicitamente na linha de comando — o pytest executa na ordem em que você os
+lista (não há plugin de ordenação instalado aqui; o único plugin é o `anyio`):
+
+```bash
+pytest -v "tests/test_x.py::test_b" "tests/test_x.py::test_a"
+```
+
+"Passou isolado" nunca é prova de que não há efeito de ordem.
 
 **Frontend também se testa.** Há Chromium com Playwright disponível
 (`/opt/pw-browsers/`, use `NODE_PATH=$(npm root -g)`). Mudou layout, mediu; não
@@ -162,22 +174,35 @@ dois PRs. A metade verificável sobe sem ficar refém da outra.
 O app iOS (Capacitor, `mobile/`) carrega `https://pigbankai.com` num WKWebView com
 `allowNavigation` para o domínio inteiro. Consequências que já causaram bug:
 
-- **Quem carrega o CSS ≠ quem é alcançável.** `app-mode.css`/`app-mode.js` são
-  carregados por **6** páginas (`login`, `cadastro`, `home`, `dashboard`,
-  `comandos-app`, `settings`). Mas qualquer rota do domínio abre no app — o "Ver
-  planos" do dashboard leva ao `/precos`, que não carrega nenhum dos dois. Por isso
-  existe o shim `frontend/safe-area.js`, incluído em outras **14** páginas.
-  As **5** restantes (`admin-login`, `admin-dashboard`, mockups e previews) não têm
-  nem um nem outro, de propósito — se alguma virar rota alcançável pelo app, precisa
-  entrar no shim.
+- **Quem carrega o CSS ≠ quem é alcançável, e não há rede de segurança.** Das **25**
+  páginas em `frontend/`, apenas **6** carregam `app-mode.css`/`app-mode.js`
+  (`login`, `cadastro`, `home`, `dashboard`, `comandos-app`, `settings`). As outras
+  **19** não têm tratamento nenhum de área segura: `env(safe-area-inset-*)` aparece em
+  **um único arquivo do repositório**, o `frontend/app-mode.css`
+  (`grep -rl safe-area-inset frontend/`). Não existe shim, fallback nem base comum —
+  se você mexer em `/precos`, `/termos`, `/onboarding` ou qualquer uma das 19, está
+  numa página sem proteção alguma.
+
+  Isso importa porque **qualquer rota do domínio abre no app**: o "Ver planos" do
+  dashboard leva ao `/precos`, que é uma das 19. Ao tornar uma dessas rotas alcançável
+  pelo app, o tratamento tem de ser adicionado — não há para onde "herdar".
 - **Existe HTML gerado em Python**, fora de qualquer template:
   `frontend/finance_bot_websocket_custom.py` devolve duas páginas standalone
   (link expirado do `/d/{code}`, descadastro). O `AppDelegate.swift` carrega o
   `/d/{code}` **direto no WebView**. Toda mudança global de frontend esquece essas
   duas — já esqueceu.
-- **O modo app é `html.pb-app`**, inerte na web. A classe da página vai no `<body>`
-  (`pb-page-*`) **e** no `<html>` (`pb-root-*`) — o fundo do canvas (o que o elástico
-  revela) vem do `<html>`, não do `<body>`.
+- **O modo app é `html.pb-app`**, inerte na web. O `app-mode.js` põe no `<html>` só
+  `pb-app` e, quando a rota não tem tab bar, `pb-no-tabs`; a classe da **página** vai
+  no `<body>` como `pb-page-*` (`app-mode.js:30`, `:84`, `:85`). Não existe
+  `pb-root-*` — CSS escrito contra esse seletor nunca casa. O escopo real é
+  `html.pb-app body.pb-page-x`.
+
+  Cuidado com o fundo que o elástico revela: ele vem do **canvas**, e o canvas herda
+  do `<html>`. Hoje nenhuma regra define `background` no `<html>` — o único fundo perto
+  da raiz é `html.pb-app body.pb-page-settings { background: #0B0B0D !important }`
+  (`app-mode.css:505`), que funciona por propagação do `<body>`. Se um dia alguém
+  pintar o `<html>`, essa propagação para de valer e o `<body>` deixa de mandar no
+  canvas.
 - **`position: fixed` não herda o padding do `body`.** Todo fixo ancorado numa borda
   precisa reservar a área segura por conta própria.
 - **Paisagem está habilitada no iPhone** (`mobile/ios/App/App/Info.plist`), então os
