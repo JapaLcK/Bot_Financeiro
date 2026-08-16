@@ -19,6 +19,21 @@ html.pb-app body {
   overflow-x: hidden !important;
 }
 
+/* ─── Sem preto ao puxar a tela ─────────────────────────────────────────
+   Puxar a página além do fim fazia a borracha do iOS revelar o fundo do
+   WebView — uma faixa preta que não é a página. overscroll-behavior tira o
+   arrasto elástico do documento, e o fundo explícito no html garante que,
+   onde quer que o sistema pinte o canvas fora do conteúdo, a cor seja a da
+   página e não preto solto. */
+html.pb-app {
+  background: var(--bg-page, #111111);
+  overscroll-behavior: none;
+}
+html.pb-app body {
+  overscroll-behavior: none;
+  background-color: var(--bg-page, #111111);
+}
+
 /* Modais sempre cabem na tela */
 html.pb-app .modal,
 html.pb-app .modal.wide,
@@ -363,9 +378,29 @@ html.pb-app .pb-bill-val small.late { color: var(--red, #FF2D2D); }
 html.pb-app .nav { display: none !important; }
 
 /* ─── Home ─────────────────────────────────────────────────────────────── */
-/* Header do site some (nav vive na tab bar; conta fica em Ajustes) */
-html.pb-app body.pb-page-home > header,
-html.pb-app body.pb-page-home header:first-of-type { display: none !important; }
+/* O header FICA — é onde mora o botão da conta. Some só a nav de links, que
+   é redundante com a tab bar. (Antes o header inteiro era escondido, e a
+   Início ficava sem nenhum acesso à conta.)
+   Atenção ao seletor: aqui o <header> mora DENTRO de .page, não é filho
+   direto do body — por isso :first-of-type, e não "> header". */
+html.pb-app body.pb-page-home header:first-of-type {
+  /* a home.html empilha o header em ≤600px (flex-direction:column) — no app
+     ele volta pra UMA linha: marca à esquerda, conta à direita */
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  flex-wrap: nowrap !important;
+  padding: 10px 14px !important;
+  margin-bottom: 14px !important;
+}
+html.pb-app body.pb-page-home .nav-links { display: none !important; }
+/* ...e a conta deixa de ocupar a linha toda (regra de ≤600px do site) */
+html.pb-app body.pb-page-home .user-menu,
+html.pb-app body.pb-page-home .header-right {
+  width: auto !important;
+  max-width: none !important;
+  flex: 0 0 auto !important;
+}
 html.pb-app body.pb-page-home { padding-top: env(safe-area-inset-top); }
 html.pb-app footer { display: none !important; }
 
@@ -431,14 +466,16 @@ html.pb-app body.pb-page-app .header-right {
   flex-wrap: nowrap !important;
 }
 html.pb-app body.pb-page-app .user-menu { flex: 0 0 auto !important; }
-html.pb-app body.pb-page-app .user-menu-btn {
+html.pb-app body.pb-page-app .user-menu-btn,
+html.pb-app body.pb-page-home .user-menu-btn {
   width: 44px !important;
   min-height: 44px !important;
   padding: 0 !important;
   justify-content: center !important;
   border-radius: 50% !important;
 }
-html.pb-app body.pb-page-app .user-menu-btn .user-menu-main { display: none !important; }
+html.pb-app body.pb-page-app .user-menu-btn .user-menu-main,
+html.pb-app body.pb-page-home .user-menu-btn .user-menu-main { display: none !important; }
 
 /* Dropdown da conta: a regra mobile do dashboard.css (≤600px) posiciona com
    left:0 e width:100% do pai — mas no app o botão da conta é um círculo de

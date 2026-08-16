@@ -346,8 +346,10 @@
     document.querySelectorAll(".sidenav-toggle").forEach(el => {
       el.innerHTML = burger;
     });
-    // Botão da conta: ícone de pessoa (era um segundo hambúrguer, confundia)
-    document.querySelectorAll(".hamburger-icon").forEach(el => {
+    // Botão da conta: ícone de pessoa. No dashboard o slot é .hamburger-icon
+    // (era um segundo hambúrguer, confundia); na Início é .user-caret, um "▾"
+    // que sozinho no círculo não diz que ali mora a conta.
+    document.querySelectorAll(".hamburger-icon, .user-caret").forEach(el => {
       el.innerHTML =
         '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" ' +
         'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
