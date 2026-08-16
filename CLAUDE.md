@@ -96,8 +96,9 @@ execução A:   9 failed, 984 passed
 execução B:  12 failed, 981 passed
 ```
 
-O núcleo estável são os **7** de `tests/test_statement_import.py` (dependem do
-`ofxparse`, §6). Os demais — `test_export_email`, `test_nlp_and_pending_flow`,
+O núcleo estável são os **7** de `tests/test_statement_import.py`, e eles **não têm uma
+causa só** — são dois grupos de dependência ausente (§6). Os demais —
+`test_export_email`, `test_nlp_and_pending_flow`,
 `test_security_alerts` — aparecem e somem entre execuções: há dependência de ordem ou
 de estado compartilhado no banco de teste. **Consequência prática:** um número de
 falhas maior que o da sua baseline não prova regressão, e um igual não prova ausência
@@ -210,7 +211,8 @@ fixo de toda mudança de layout.
   segura são inertes aqui; só dá para verificar a aritmética substituindo valores fixos.
 - **Comportamento nativo do WKWebView não é reproduzível.** `contentInset`, elástico,
   teclado: só no aparelho, depois do build.
-- **`ofxparse` não está instalado aqui** (o `pip install` falha pelo proxy). Isso não
+- **Faltam pacotes de `requirements.txt` aqui** — pelo menos `ofxparse`, `reportlab` e
+  `pypdf` (o `pip install` falha pelo proxy). A ausência do `ofxparse` não
   faz "alguns testes falharem": são **9 erros de coleta**, e o pytest **interrompe a
   suíte inteira** antes de rodar qualquer teste. Sem tratar isso você não tem sinal
   nenhum — nem verde, nem vermelho. Para obter baseline local:
@@ -221,11 +223,27 @@ fixo de toda mudança de layout.
   ```
 
   Com esses 9 fora, a suíte roda em ~70s: **981–984 passam**, e as falhas restantes
-  incluem sempre os **7** de `tests/test_statement_import.py`, que importam `ofxparse`
-  de forma indireta e não são pegos pelo `--ignore` acima.
+  incluem sempre os **7** de `tests/test_statement_import.py`. Esses 7 **não vêm todos
+  do `ofxparse`** — são dois grupos, e vale saber qual é qual, porque só o primeiro
+  desaparece se o `ofxparse` voltar:
 
-  No CI o `ofxparse` está presente (`requirements.txt:56`), então lá esses módulos
-  rodam normalmente — a exclusão é só local.
+  | testes | dependência que falta | onde estoura |
+  |---|---|---|
+  | `test_attachment_detection`, `test_import_statement_bytes_csv_idempotente`, `test_import_statement_bytes_vazio_ou_grande` | `ofxparse` (import indireto, não pego pelo `--ignore` acima) | `core/handle_incoming.py` → `core/services/ofx_service.py`; e o import tardio em `statement_import.py:583` → `ofx_import.py:8` |
+  | `test_parse_pdf_sicoob_like`, `test_parse_pdf_valor_e_saldo_na_mesma_linha`, `test_parse_pdf_sufixo_c_nao_engole_palavra`, `test_parse_pdf_sem_transacoes` | `reportlab` (helper `_make_pdf` do teste) e `pypdf` (`_extract_pdf_text`, `statement_import.py:463`) | o `_make_pdf` estoura primeiro; qualquer um dos dois ausente derruba os mesmos 4 |
+
+  Os outros dois testes de PDF do arquivo (`test_parse_pdf_nubank_extrato` e
+  `test_parse_pdf_nubank_sem_secao_usa_palavra_chave`) passam mesmo sem esses pacotes:
+  operam sobre texto puro, sem gerar nem ler PDF. E nada fora de
+  `tests/test_statement_import.py` usa `reportlab`/`pypdf`, por isso o estrago fica
+  contido nesse arquivo.
+
+  **Não trate os 7 como um bloco.** Se você mexer no parser de PDF e um desses 4 mudar
+  de mensagem — de `ImportError` para uma falha de asserção, ou vice-versa — isso é
+  sinal, não baseline.
+
+  No CI os três pacotes estão presentes (`requirements.txt:56–57,66`), então lá tudo
+  isso roda normalmente — a exclusão é só local.
 
 Nunca desligue verificação de TLS nem tire o `HTTPS_PROXY` para contornar bloqueio.
 
