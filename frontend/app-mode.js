@@ -588,6 +588,7 @@
       window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
     let pull = 0, startY = 0, startX = 0, tracking = false, busy = false, raf = 0;
+    let dragged = false;   // este gesto puxou de verdade (tap nunca arma)
 
     const damp = o => PTR.rubber * (1 - 1 / (o / PTR.rubber + 1));
     const atTop = () =>
@@ -614,17 +615,25 @@
 
     function finish(ok) {
       if (!busy) return;
-      busy = false;
       el.classList.remove("pb-ptr-busy");
       arc.style.strokeDasharray = circ.toFixed(1);   // volta a ser anel inteiro
-      if (ok) { spring(0); return; }
+      if (ok) { busy = false; spring(0); return; }
       // Falhou: avisa em âmbar em vez de recolher como se tivesse dado certo.
       // A página mantém o dado antigo na tela (é o certo — melhor dado velho
       // que tela destruída), então sem este aviso o usuário juraria que
       // atualizou.
+      //
+      // busy fica TRUE até o âmbar recolher: o pull ainda está em HOLD (66px,
+      // acima do limiar), e liberar o toque aqui deixava um TAP parado no topo
+      // commitar outro refresh — e o timeout deste âmbar recolhia o indicador
+      // do refresh novo no meio. Âmbar é estado terminal do ciclo, não idle.
       el.classList.add("pb-ptr-fail");
       arc.style.strokeDashoffset = "0";
-      setTimeout(() => { el.classList.remove("pb-ptr-fail"); spring(0); }, 900);
+      setTimeout(() => {
+        el.classList.remove("pb-ptr-fail");
+        busy = false;
+        spring(0);
+      }, 900);
     }
 
     function run() {
@@ -688,6 +697,7 @@
       if (busy || ev.touches.length !== 1) return;
       if (ownsGesture(ev.target)) return;
       tracking = atTop();
+      dragged = false;
       startY = ev.touches[0].clientY;
       startX = ev.touches[0].clientX;
     }, { passive: true });
@@ -707,6 +717,7 @@
       }
       if (!atTop()) { tracking = false; return; }
       if (ev.cancelable) ev.preventDefault();   // mata o elástico nativo
+      dragged = true;
       pull = Math.min(PTR.max, damp(dy));
       draw();
     }, { passive: false });
@@ -714,7 +725,9 @@
     function release(canceled) {
       if (!tracking || busy) { tracking = false; return; }
       tracking = false;
-      if (!canceled && pull >= PTR.threshold) run(); else spring(0);
+      // dragged: só arma se ESTE gesto puxou. Sem isso, pull retido de um
+      // ciclo anterior (ex.: o âmbar segurando em HOLD) deixava um tap commitar.
+      if (!canceled && dragged && pull >= PTR.threshold) run(); else spring(0);
     }
     addEventListener("touchend", () => release(false), { passive: true });
     // touchcancel = o SISTEMA tomou o gesto no meio (giro de tela, troca de

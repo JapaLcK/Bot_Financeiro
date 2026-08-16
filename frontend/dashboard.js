@@ -3728,10 +3728,14 @@ function setRecurringTab(tab) {
 // ── Previsão mensal: o que entra (receitas fixas) × o que sai (gastos fixos +
 // boletos) × resultado, + próximos vencimentos. Deixa explícito que é RECORRENTE
 // (não colide com "Receitas/Gastos do mês" do dashboard principal). ─────────────
-async function loadRecurringOverview() {
+async function loadRecurringOverview({ background = false } = {}) {
   const wrap = document.getElementById("recurring-overview-cards");
   if (!wrap) return;
-  wrap.innerHTML = `<div class="mock-card"><div class="empty" style="padding:16px;color:var(--text-3)">Carregando…</div></div>`;
+  // background (puxar pra atualizar): sem skeleton — o render bom fica na
+  // tela até os dados novos chegarem.
+  if (!background) {
+    wrap.innerHTML = `<div class="mock-card"><div class="empty" style="padding:16px;color:var(--text-3)">Carregando…</div></div>`;
+  }
   const j = async (url) => {
     try { const r = await fetch(url, { credentials: "same-origin" }); if (!r.ok) return null; return await r.json(); }
     catch (_) { return null; }
@@ -3741,6 +3745,13 @@ async function loadRecurringOverview() {
     j(`${API}/recurring-incomes/${USER_ID}`),
     j(`${API}/recurring-bills/${USER_ID}?include_paid=false`),
   ]);
+  // No puxão, endpoint que falhou NÃO pode virar total zerado: o j() acima
+  // converte falha em null e o reduce embaixo somaria zero por cima de números
+  // que estavam certos na tela. Rejeita sem tocar no DOM — o indicador do
+  // gesto (app-mode.js) fica âmbar e o render antigo sobrevive.
+  if (background && (exp === null || inc === null || bills === null)) {
+    throw new Error("recurring overview: fetch falhou no refresh");
+  }
 
   const gastos = ((exp && exp.recurring) || []).filter(r => r.is_active && (r.payment_mode || "autopay") === "autopay");
   const totalGastos = gastos.reduce((s, r) => s + _recMonthlyEquiv(r), 0);
@@ -6631,12 +6642,16 @@ async function fetchMonthHttp(year, month, page = 1, limit = LAUNCHES_LIMIT, { b
     stopSpin();
     setLaunchesLoading(false);
   } catch(err) {
-    if (err.name === "AbortError") return;
+    if (err.name === "AbortError") return;   // superado por outro pedido: neutro
     console.error("fetchMonthHttp error:", err);
     if (seq === monthRequestSeq && !background) {
       stopSpin();
       setLaunchesLoading(false);
     }
+    // O render antigo fica (certo), mas quem chamou precisa saber que nada
+    // veio — o puxar pra atualizar usa isto pra ficar âmbar em vez de
+    // recolher como sucesso. Callers antigos ignoram o retorno.
+    return false;
   } finally {
     if (seq === monthRequestSeq) {
       monthAbortController = null;
@@ -10045,7 +10060,8 @@ window.PBRefresh = function () {
     // sempre a de gastos deixaria a que o usuário está vendo parada, com o
     // indicador dando a entender que atualizou. Espelha o setRecurringTab.
     case "fixed":
-      if (_recurringTab === "overview") return loadRecurringOverview();
+      // background: sem skeleton, e falha REJEITA em vez de renderizar zeros
+      if (_recurringTab === "overview") return loadRecurringOverview({ background: true });
       if (_recurringTab === "incomes")  return loadRecurringIncomeView(true);
       if (_recurringTab === "bills")    return loadBillsView(true);
       return loadFixedView(true);
@@ -10058,6 +10074,9 @@ window.PBRefresh = function () {
       // atualizar tem que ir na fonte, senão o gesto mente.
       // smoothScroll off: o usuário está no topo, jogar a página nos
       // lançamentos seria roubar o lugar dele.
-      return fetchMonthHttp(viewYear, viewMonth, launchesPage, LAUNCHES_LIMIT);
+      // false = a busca falhou (o render antigo ficou): rejeita pro indicador
+      // ficar âmbar. undefined (pedido superado/stale) conta como sucesso.
+      return fetchMonthHttp(viewYear, viewMonth, launchesPage, LAUNCHES_LIMIT)
+        .then(ok => { if (ok === false) throw new Error("refresh do mês falhou"); });
   }
 };
