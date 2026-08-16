@@ -308,6 +308,12 @@ a { color: inherit; text-decoration: none; }
 .data-title { color: var(--ink); font-size: .88rem; font-weight: 780; }
 .data-sub { color: var(--muted); font-size: .75rem; line-height: 1.5; margin-top: 2px; }
 .data-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+/* "Sair da conta" no pé da página. O outro "Sair" mora na topbar, que o modo
+   app esconde por ser redundante com a tab bar — sem este aqui, não existe
+   saída de conta pelo app/PWA. (A regra de largura fica ANTES do @media de
+   880px de propósito: lá o botão volta a ocupar a linha toda.) */
+.signout { margin-top: 18px; }
+.signout .btn-danger { width: auto; min-width: 170px; padding: 0 18px; }
 .danger-panel {
   border: 1px solid rgba(220,38,38,.22);
   border-radius: var(--radius-md);
@@ -1097,7 +1103,7 @@ a { color: inherit; text-decoration: none; }
 </style>
 <script src="/static/auth-refresh.js"></script>
 <script src="/modals.js"></script>
-  <link rel="stylesheet" href="/app-mode.css?v=21" />
+  <link rel="stylesheet" href="/app-mode.css?v=22" />
   <script src="/app-mode.js?v=20"></script>
 </head>
 <body>
@@ -1705,6 +1711,20 @@ a { color: inherit; text-decoration: none; }
       </section>
 
     </main>
+  </div>
+
+  <!-- Sair da conta: fica no corpo da página (e não só na topbar) porque o
+       modo app esconde a topbar — era o único caminho de logout por lá. -->
+  <div class="data-row signout">
+    <span>
+      <span class="data-title">Sair da conta</span>
+      <span class="data-sub">Encerra a sessão neste dispositivo. Seus lançamentos e configurações continuam salvos.</span>
+    </span>
+    <span class="data-actions">
+      <button class="btn-danger" type="button" id="signout-btn" onclick="logoutSettings()">
+        <i class="ph ph-sign-out" aria-hidden="true"></i> Sair
+      </button>
+    </span>
   </div>
 </div>
 
