@@ -19,12 +19,77 @@ html.pb-app body {
   overflow-x: hidden !important;
 }
 
-/* Modais sempre cabem na tela */
+/* ─── Cor do canvas: o que o elástico revela ────────────────────────────
+   Puxar a tela além do fim mostra o canvas do documento. O html não tem
+   fundo, então o canvas herda o #111111 do body — mas a borda VISÍVEL do
+   conteúdo é ameixa, porque o roxo vem das orbs (position:absolute), que
+   rolam junto e deixam a área revelada chapada. É essa diferença que se lê
+   como "faixa preta", não preto de verdade.
+   Os tons abaixo saíram de amostra de pixel do render em 390px, não de
+   palpite: dashboard #2E111F, início #311221, o que pedir #2C101E, e
+   ajustes #0B0B0D (tem paleta própria).
+   Isto NÃO mexe no elástico — ele continua acontecendo, só deixa de revelar
+   uma cor que destoa. */
+html.pb-app.pb-root-app,
+html.pb-app.pb-root-home,
+html.pb-app.pb-root-comandos { background-color: #2E111F; }
+html.pb-app.pb-root-settings { background-color: #0B0B0D; }
+/* Modo claro do dashboard: o applyTheme espelha a classe no <html> por causa
+   desta regra. Sem ela o canvas continuaria ameixa enquanto a página vira
+   #F6F4F1 — a mesma faixa, invertida. Tom medido no claro: #E8E4E2.
+   (O tema claro só existe no dashboard: o applyTheme mora no dashboard.js,
+   carregado só por ele.) */
+html.pb-app.light.pb-root-app { background-color: #E8E4E2; }
+
+/* ─── Safe area com o WebView indo até a borda ──────────────────────────
+   contentInset "never" (capacitor.config.json) desliga o ajuste nativo nos
+   QUATRO lados: a partir daí é o CSS que reserva notch, Dynamic Island,
+   cantos arredondados e home indicator. O Info.plist habilita landscape no
+   iPhone, então as laterais contam. Em pé, e em aparelho sem notch, env()
+   vale 0 — as regras só "acendem" onde há inset de verdade.
+   (box-sizing:border-box já é global nas páginas, então o padding lateral
+   não estoura o max-width:100vw.) */
+html.pb-app body {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Modais sempre cabem na tela — e dentro da área segura. Os overlays são
+   fixed/inset:0, então o padding do body não os alcança; e 100vw/100vh
+   incluem a área do notch. São três classes diferentes de overlay no
+   produto: .overlay (dashboard), .pig-modal-overlay (modals.js) e
+   .mfa-overlay (settings). */
+html.pb-app .overlay,
+html.pb-app .pig-modal-overlay,
+html.pb-app .mfa-overlay {
+  padding: max(20px, env(safe-area-inset-top))
+           max(20px, env(safe-area-inset-right))
+           max(20px, env(safe-area-inset-bottom))
+           max(20px, env(safe-area-inset-left)) !important;
+}
 html.pb-app .modal,
 html.pb-app .modal.wide,
 html.pb-app .mfa-modal {
   width: auto !important;
-  max-width: calc(100vw - 24px) !important;
+  max-width: calc(100vw - 24px
+    - env(safe-area-inset-left) - env(safe-area-inset-right)) !important;
+  max-height: calc(100vh - 40px
+    - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+  /* Limitar a altura sem poder rolar seria pior que não limitar: o .modal
+     base (dashboard.css) não tem overflow, então os campos e os botões de
+     ação escapariam do card em vez de ficarem alcançáveis. O .wide e o
+     .launch-detail já rolam; aqui a regra vale pros 12 modais simples. */
+  overflow: auto !important;
+}
+/* O .pig-modal (alertModal/confirmModal) já tem largura própria pensada —
+   min(440px, 92vw), com width:100% no mobile. Só LIMITAMOS pela área segura;
+   pôr width:auto aqui encolheria diálogos de mensagem curta, e o !important
+   impediria a regra mobile do componente de recuperar a largura. */
+html.pb-app .pig-modal {
+  max-width: calc(100vw - 24px
+    - env(safe-area-inset-left) - env(safe-area-inset-right)) !important;
+  max-height: calc(100vh - 40px
+    - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
 }
 
 /* Strings compridas (e-mail, IP, telefone) quebram linha em vez de esticar
@@ -64,6 +129,13 @@ html.pb-app body {
 html.pb-app.pb-no-tabs body {
   padding-bottom: 0 !important;
 }
+/* Login/cadastro não têm tab bar e por isso ficavam fora das regras de safe
+   area por página. Sem isto o cartão de login entra sob o notch — e é a tela
+   de entrada do app (server.url aponta pro /login). */
+html.pb-app.pb-no-tabs body {
+  padding-top: env(safe-area-inset-top) !important;
+  padding-bottom: env(safe-area-inset-bottom) !important;
+}
 
 /* ─── Tab bar flutuante — dock "menisco" ───────────────────────────────────
    A barra NÃO é uma caixa com fundo: é um único path SVG (.pb-dock-skin)
@@ -79,7 +151,9 @@ html.pb-app .pb-tabbar {
   --pb-dock-rb: 22px;   /* raio da bolha */
   --pb-dock-s:  22px;   /* raio base do ombro (o filete da solda) */
   position: fixed;
-  left: 10px; right: 10px;
+  /* laterais: 10px normais, mas nunca por baixo do notch/cantos (landscape) */
+  left: max(10px, env(safe-area-inset-left));
+  right: max(10px, env(safe-area-inset-right));
   bottom: max(8px, calc(env(safe-area-inset-bottom) - 14px));
   /* Abaixo dos overlays de modal (800/900): modal aberto cobre a tab bar */
   z-index: 700;
@@ -471,19 +545,46 @@ html.pb-app .user-dropdown {
   left: auto !important;
   right: 0 !important;
   width: min(300px, calc(100vw - 24px)) !important;
-  max-height: calc(100vh - 120px);
+  max-height: calc(100vh - 120px - env(safe-area-inset-top));
   overflow-y: auto;
   overflow-wrap: normal;
 }
 
 /* Flutuantes (FAB do chat, toast) sobem acima da tab bar */
+/* O painel do chat é o par do FAB: mover só o botão deixaria o painel (e o
+   X de fechar) na área insegura. A altura conta também — a regra de ≤560px
+   do dashboard usa height:calc(100vh - 100px), o que põe o topo sob o
+   status bar quando o inset é real. */
+html.pb-app #piggy-panel {
+  right: calc(22px + env(safe-area-inset-right)) !important;
+  bottom: calc(88px + env(safe-area-inset-bottom)) !important;
+  width: min(400px, calc(100vw - 32px
+    - env(safe-area-inset-left) - env(safe-area-inset-right))) !important;
+  height: min(580px, calc(100vh - 130px
+    - env(safe-area-inset-top) - env(safe-area-inset-bottom))) !important;
+}
 html.pb-app #piggy-fab {
   bottom: calc(84px + env(safe-area-inset-bottom)) !important;
+  right: calc(14px + env(safe-area-inset-right)) !important;
   /* Abaixo do vidro dos modais (800): FAB não compete com botões de modal */
   z-index: 700 !important;
 }
 html.pb-app #toast {
   bottom: calc(88px + env(safe-area-inset-bottom)) !important;
+}
+/* Só o toast do dashboard é ancorado à direita. O do settings é centralizado
+   (left:50% + translateX) — pôr "right" nele faria a largura automática
+   esticar de uma borda à outra em vez de abraçar o texto. */
+html.pb-app body.pb-page-app #toast {
+  right: calc(26px + env(safe-area-inset-right)) !important;
+}
+/* Toasts centralizados: centralizar na horizontal não os torna seguros na
+   VERTICAL — presos por bottom fixo, a borda de baixo cai no home indicator. */
+html.pb-app .modal-success-toast {
+  bottom: calc(24px + env(safe-area-inset-bottom)) !important;
+}
+html.pb-app .upgrade-toast {
+  bottom: calc(32px + env(safe-area-inset-bottom)) !important;
 }
 
 /* ─── Settings ─────────────────────────────────────────────────────────── */
@@ -627,6 +728,10 @@ html.pb-app .sidenav {
    pra rolar até o fim no iPhone. */
 html.pb-app .sidenav {
   z-index: 760;
+  /* fixed não herda o padding de safe area do body: o menu reserva por conta
+     própria o topo (status bar) e a esquerda (notch deitado) */
+  padding-top: calc(18px + env(safe-area-inset-top));
+  padding-left: calc(14px + env(safe-area-inset-left));
   padding-bottom: calc(14px + env(safe-area-inset-bottom));
 }
 html.pb-app .sidenav-backdrop.open { z-index: 750; }

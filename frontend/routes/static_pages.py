@@ -377,6 +377,18 @@ async def serve_app_mode_css():
     )
 
 
+@router.get("/safe-area.js")
+async def serve_safe_area_js():
+    """Reserva de safe area para as páginas fora do modo app (precos, landing,
+    legal…). O WebView usa contentInset "never" e vai até a borda em todas as
+    rotas; o app-mode.css só cobre seis páginas. Inerte fora do app."""
+    return FileResponse(
+        FRONTEND_DIR / "safe-area.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @router.get("/nav-auth.js")
 async def serve_nav_auth_js():
     """Nav ciente de login nas páginas de marketing: troca 'Entrar/Começar'
