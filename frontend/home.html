@@ -1064,14 +1064,14 @@ let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
   // 3 e 4) Busca + render moram em loadHomeData() porque o "puxar pra
   // atualizar" do app (app-mode.js) precisa refazer exatamente este pedaço.
   _homeMe = me;
-  await loadHomeData();
+  await loadHomeData({ initial: true });
 })();
 
 /* ─── Recarga dos dados da Início ──────────────────────────────────────────
    Devolve promise: o indicador do puxão fica girando até ela resolver.
    Guarda o /auth/me da abertura — plano e e-mail não mudam a cada puxão, e
    refazer essa chamada só atrasaria o gesto. */
-async function loadHomeData() {
+async function loadHomeData({ initial = false } = {}) {
   const me = _homeMe;
   let snapshot = null, history = [];
   try {
@@ -1085,7 +1085,15 @@ async function loadHomeData() {
       const hj = await histRes.json();
       history = hj.data || [];
     }
-  } catch {
+  } catch (err) {
+    // Só a carga inicial troca a tela pelo erro — ali não há nada a perder.
+    //
+    // Num puxão a tela JÁ TEM dado bom. Trocar o #content pelo erro destruiria
+    // ele em definitivo: os renderers procuram elementos que deixariam de
+    // existir, então nem um puxão bem-sucedido depois recuperaria — só
+    // recarregando a página. Mantém o que está na tela e devolve a falha; quem
+    // avisa é o indicador do puxão (app-mode.js pinta o anel de âmbar).
+    if (!initial) throw err;
     document.getElementById("content").innerHTML = `
       <div class="access-error">
         <h2><i class="ph ph-warning" aria-hidden="true"></i> Erro ao carregar</h2>
@@ -1110,7 +1118,8 @@ async function loadHomeData() {
 }
 
 // Contrato com o app-mode.js: quem sabe se refazer expõe PBRefresh.
-window.PBRefresh = loadHomeData;
+// Sem initial: uma falha aqui NÃO pode trocar a tela pelo erro.
+window.PBRefresh = () => loadHomeData();
 
 function renderFreeBanner(me) {
   const banner = document.getElementById("free-banner");

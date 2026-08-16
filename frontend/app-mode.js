@@ -612,16 +612,29 @@
       })();
     }
 
-    function finish() {
+    function finish(ok) {
       if (!busy) return;
       busy = false;
       el.classList.remove("pb-ptr-busy");
-      spring(0);
+      arc.style.strokeDasharray = circ.toFixed(1);   // volta a ser anel inteiro
+      if (ok) { spring(0); return; }
+      // Falhou: avisa em âmbar em vez de recolher como se tivesse dado certo.
+      // A página mantém o dado antigo na tela (é o certo — melhor dado velho
+      // que tela destruída), então sem este aviso o usuário juraria que
+      // atualizou.
+      el.classList.add("pb-ptr-fail");
+      arc.style.strokeDashoffset = "0";
+      setTimeout(() => { el.classList.remove("pb-ptr-fail"); spring(0); }, 900);
     }
 
     function run() {
       busy = true;
       el.classList.add("pb-ptr-busy");
+      // O dasharray é inline (o puxão desenha o anel fechando com ele), e
+      // inline vence classe CSS — então o arco curto do "girando" tem que ser
+      // setado aqui. Sem isto o anel fica CHEIO girando, que é visualmente
+      // idêntico a um anel parado: parecia travado durante o refresh.
+      arc.style.strokeDasharray = "26 80";
       spring(PTR.hold);
 
       if (typeof window.PBRefresh !== "function") {
@@ -631,28 +644,41 @@
       }
       const t0 = Date.now();
       let settled = false;
-      const done = () => {
+      const done = ok => {
         if (settled) return;
         settled = true;
-        setTimeout(finish, Math.max(0, PTR.floor - (Date.now() - t0)));
+        // piso de 500ms: sumir instantâneo pareceria que nada aconteceu
+        setTimeout(() => finish(ok), Math.max(0, PTR.floor - (Date.now() - t0)));
       };
-      setTimeout(done, PTR.watchdog);
+      setTimeout(() => done(false), PTR.watchdog);   // pendurado conta como falha
+      // A falha NÃO é engolida: vira aviso no indicador. Antes o catch vazio
+      // recolhia igual ao sucesso, e a tela ficava com dado velho sem dizer.
       Promise.resolve()
         .then(() => window.PBRefresh())
-        .catch(() => {})          // erro de rede não pode travar o indicador
-        .then(done);
+        .then(() => done(true), () => done(false));
     }
 
-    // Área com rolagem própria manda no gesto dela — o puxão é só da página.
-    // Olha a rolagem DE VERDADE em vez de casar uma lista de classes: lista
-    // envelhece. A .mfa-modal e a .bankpick-list dos Ajustes já ficavam de
-    // fora, e lá o puxão viraria RELOAD (Ajustes não tem PBRefresh) no meio de
-    // um setup de MFA ou por cima dos códigos de backup, que aparecem uma vez.
-    function inScrollable(node) {
+    // Duas coisas mandam no gesto delas, e não no puxão da página:
+    //
+    //  1. Estar dentro de um overlay FIXO. Nesta base todo diálogo é
+    //     position:fixed (.mfa-overlay e .bankpick-overlay dos Ajustes, .overlay
+    //     do dashboard), assim como a tab bar e o FAB — arrastar em qualquer um
+    //     deles nunca deveria puxar a página atrás. Vale MESMO QUE o diálogo
+    //     não transborde: um passo curto do MFA cabe na tela, e ali o puxão
+    //     viraria reload (Ajustes não tem PBRefresh) por cima dos códigos de
+    //     backup, que só aparecem uma vez. Conteúdo de página vive no fluxo
+    //     normal e nunca cai aqui; header sticky é `sticky`, não `fixed`.
+    //
+    //  2. Ser uma área com rolagem própria dentro do fluxo (lista, tabela).
+    //
+    // Regra medida em vez de lista de classes: lista envelhece — foi ela que
+    // deixou .mfa-modal e .bankpick-list de fora na primeira versão.
+    function ownsGesture(node) {
       for (let el = node; el && el !== document.body; el = el.parentElement) {
         if (el.nodeType !== 1) continue;
-        const oy = getComputedStyle(el).overflowY;
-        if ((oy === "auto" || oy === "scroll" || oy === "overlay") &&
+        const st = getComputedStyle(el);
+        if (st.position === "fixed") return true;
+        if ((st.overflowY === "auto" || st.overflowY === "scroll" || st.overflowY === "overlay") &&
             el.scrollHeight > el.clientHeight + 1) return true;
       }
       return false;
@@ -660,7 +686,7 @@
 
     addEventListener("touchstart", ev => {
       if (busy || ev.touches.length !== 1) return;
-      if (inScrollable(ev.target)) return;
+      if (ownsGesture(ev.target)) return;
       tracking = atTop();
       startY = ev.touches[0].clientY;
       startX = ev.touches[0].clientX;
