@@ -10075,7 +10075,21 @@ function _pbDashboardRefresh() {
       if (_recurringTab === "bills")    return loadBillsView(true);
       return loadFixedView(true);
     case "goals":        return loadGoalsView(true);
-    case "affiliate":    return loadAffiliateView(true);
+    case "affiliate": {
+      // O refresh reconstrói o #affiliate-body inteiro, e a chave Pix mora
+      // num input dentro dele. O input nasce sempre vazio (nenhum caminho o
+      // preenche com dado do servidor), então qualquer valor ali é digitação
+      // do usuário — sobrevive à troca de DOM.
+      const pix = document.getElementById("affiliate-pix-input");
+      const pending = pix ? pix.value : "";
+      return loadAffiliateView(true).then(r => {
+        if (pending) {
+          const el = document.getElementById("affiliate-pix-input");
+          if (el) el.value = pending;
+        }
+        return r;
+      });
+    }
     case "agentes":      return loadAgentesView(true);
     default:
       // Visão geral e investimentos vivem do snapshot do mês.
