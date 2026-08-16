@@ -10041,7 +10041,14 @@ window.PBRefresh = function () {
     case "installments": return loadInstallmentsView(true);
     case "categories":   return loadCategoriesView(true);
     case "budgets":      return loadBudgetsView(true);
-    case "fixed":        return loadFixedView(true);
+    // "Recorrentes" tem quatro abas internas e só uma está visível. Recarregar
+    // sempre a de gastos deixaria a que o usuário está vendo parada, com o
+    // indicador dando a entender que atualizou. Espelha o setRecurringTab.
+    case "fixed":
+      if (_recurringTab === "overview") return loadRecurringOverview();
+      if (_recurringTab === "incomes")  return loadRecurringIncomeView(true);
+      if (_recurringTab === "bills")    return loadBillsView(true);
+      return loadFixedView(true);
     case "goals":        return loadGoalsView(true);
     case "affiliate":    return loadAffiliateView(true);
     case "agentes":      return loadAgentesView(true);

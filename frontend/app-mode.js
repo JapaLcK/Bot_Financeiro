@@ -643,11 +643,24 @@
         .then(done);
     }
 
+    // Área com rolagem própria manda no gesto dela — o puxão é só da página.
+    // Olha a rolagem DE VERDADE em vez de casar uma lista de classes: lista
+    // envelhece. A .mfa-modal e a .bankpick-list dos Ajustes já ficavam de
+    // fora, e lá o puxão viraria RELOAD (Ajustes não tem PBRefresh) no meio de
+    // um setup de MFA ou por cima dos códigos de backup, que aparecem uma vez.
+    function inScrollable(node) {
+      for (let el = node; el && el !== document.body; el = el.parentElement) {
+        if (el.nodeType !== 1) continue;
+        const oy = getComputedStyle(el).overflowY;
+        if ((oy === "auto" || oy === "scroll" || oy === "overlay") &&
+            el.scrollHeight > el.clientHeight + 1) return true;
+      }
+      return false;
+    }
+
     addEventListener("touchstart", ev => {
       if (busy || ev.touches.length !== 1) return;
-      // Áreas com rolagem própria (modal, menu ☰, dropdown da conta) mandam
-      // no gesto delas — o puxão é só da página.
-      if (ev.target.closest && ev.target.closest(".modal, .sidenav, .user-dropdown")) return;
+      if (inScrollable(ev.target)) return;
       tracking = atTop();
       startY = ev.touches[0].clientY;
       startX = ev.touches[0].clientX;
@@ -672,13 +685,17 @@
       draw();
     }, { passive: false });
 
-    function release() {
+    function release(canceled) {
       if (!tracking || busy) { tracking = false; return; }
       tracking = false;
-      if (pull >= PTR.threshold) run(); else spring(0);
+      if (!canceled && pull >= PTR.threshold) run(); else spring(0);
     }
-    addEventListener("touchend", release, { passive: true });
-    addEventListener("touchcancel", release, { passive: true });
+    addEventListener("touchend", () => release(false), { passive: true });
+    // touchcancel = o SISTEMA tomou o gesto no meio (giro de tela, troca de
+    // app, gesto do iOS). Não é escolha do usuário, então recolhe sem
+    // atualizar — senão um puxão interrompido viraria reload nas telas sem
+    // PBRefresh. Mesma regra que a bolha do dock usa no pointercancel.
+    addEventListener("touchcancel", () => release(true), { passive: true });
 
     // rAF congela com o app em segundo plano: ao voltar, termina a molinha.
     document.addEventListener("visibilitychange", () => {
