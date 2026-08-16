@@ -19,6 +19,22 @@ html.pb-app body {
   overflow-x: hidden !important;
 }
 
+/* ─── Cor do canvas: o que o elástico revela ────────────────────────────
+   Puxar a tela além do fim mostra o canvas do documento. O html não tem
+   fundo, então o canvas herda o #111111 do body — mas a borda VISÍVEL do
+   conteúdo é ameixa, porque o roxo vem das orbs (position:absolute), que
+   rolam junto e deixam a área revelada chapada. É essa diferença que se lê
+   como "faixa preta", não preto de verdade.
+   Os tons abaixo saíram de amostra de pixel do render em 390px, não de
+   palpite: dashboard #2E111F, início #311221, o que pedir #2C101E, e
+   ajustes #0B0B0D (tem paleta própria).
+   Isto NÃO mexe no elástico — ele continua acontecendo, só deixa de revelar
+   uma cor que destoa. */
+html.pb-app.pb-root-app,
+html.pb-app.pb-root-home,
+html.pb-app.pb-root-comandos { background-color: #2E111F; }
+html.pb-app.pb-root-settings { background-color: #0B0B0D; }
+
 /* ─── Safe area com o WebView indo até a borda ──────────────────────────
    contentInset "never" (capacitor.config.json) desliga o ajuste nativo nos
    QUATRO lados: a partir daí é o CSS que reserva notch, Dynamic Island,

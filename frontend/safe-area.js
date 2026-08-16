@@ -42,7 +42,7 @@
     "padding-right:env(safe-area-inset-right);" +
     "padding-bottom:env(safe-area-inset-bottom);" +
     "padding-left:env(safe-area-inset-left);" +
-    "box-sizing:border-box;overscroll-behavior:none}" +
+    "box-sizing:border-box}" +
     // A nav do site é sticky com top:16px (site.css): quando gruda, o padding
     // do body já rolou pra fora, então ela precisa do inset no próprio top.
     "html.pb-safe .nav{top:calc(16px + env(safe-area-inset-top));" +
