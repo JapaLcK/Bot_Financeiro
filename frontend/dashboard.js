@@ -10019,3 +10019,38 @@ async function toggleAgentEmail(kind, enabled) {
     alert(String(err.message || err));
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PUXAR PRA ATUALIZAR (app iOS / PWA)
+   ═══════════════════════════════════════════════════════════════════════
+   O gesto mora no app-mode.js — aqui só respondemos o que "atualizar"
+   significa no dashboard: refazer a aba que está aberta, sem recarregar a
+   página (o reload perderia filtro, mês escolhido e posição da rolagem).
+
+   Devolve promise: o indicador do puxão só some quando ela resolve. */
+window.PBRefresh = function () {
+  const active = DASH_VIEWS.find(v => {
+    const el = document.getElementById(v + "-view");
+    return el && el.classList.contains("active");
+  }) || "overview";
+
+  switch (active) {
+    case "analytics":    return loadAnalyticsView(true);
+    case "history":      return loadHistoryView(true);
+    case "cards":        return loadCardsView(true);
+    case "installments": return loadInstallmentsView(true);
+    case "categories":   return loadCategoriesView(true);
+    case "budgets":      return loadBudgetsView(true);
+    case "fixed":        return loadFixedView(true);
+    case "goals":        return loadGoalsView(true);
+    case "affiliate":    return loadAffiliateView(true);
+    case "agentes":      return loadAgentesView(true);
+    default:
+      // Visão geral e investimentos vivem do snapshot do mês.
+      // preferHttp: com o WS aberto o pedido volta do cache dele — puxar pra
+      // atualizar tem que ir na fonte, senão o gesto mente.
+      // smoothScroll off: o usuário está no topo, jogar a página nos
+      // lançamentos seria roubar o lugar dele.
+      return fetchMonthHttp(viewYear, viewMonth, launchesPage, LAUNCHES_LIMIT);
+  }
+};

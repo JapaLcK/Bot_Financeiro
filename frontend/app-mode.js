@@ -545,7 +545,148 @@
     })();
   }
 
-  function init() { fixViewport(); buildTabbar(); hardenGlyphs(); enhanceOverview(); enhanceSettings(); wireGoogleLogin(); wirePush(); maybeOpenLaunch(); }
+  // ─── Puxar pra atualizar ─────────────────────────────────────────────────
+  // Medido no aparelho (iPhone 17 Pro / iOS 26): o WebView NÃO reporta scrollY
+  // negativo durante o elástico do topo — ele trava em 0. Então não dá pra ler
+  // o overscroll nativo. O que dá é CANCELAR o elástico (o touchmove no topo é
+  // cancelável) e desenhar o gesto por conta própria.
+  //
+  // O conteúdo não se move junto: um transform em html/body viraria bloco de
+  // contenção e arrastaria tudo que é position:fixed — a tab bar, o FAB do
+  // chat, o toast. Só o indicador desce, por cima da página.
+  //
+  // O que "atualizar" significa é da página, não daqui: quem sabe se refazer
+  // expõe window.PBRefresh (devolvendo promise). Sem isso cai no reload — que
+  // nas telas paradas (Ajustes, O que pedir) é barato e não perde estado.
+  const PTR = {
+    threshold: 62,   // puxão que arma o refresh
+    hold:      66,   // onde o indicador para enquanto atualiza
+    rubber:   280,   // resistência: maior = elástico mais duro
+    max:      150,   // teto do puxão
+    floor:    500,   // tempo mínimo girando (sumir na hora parece que falhou)
+    watchdog: 12000, // PBRefresh pendurado não deixa o indicador girando pra sempre
+  };
+
+  function initPullToRefresh() {
+    if (!page) return;                        // só nas telas logadas do app
+    if (!("ontouchstart" in window)) return;  // preview no desktop não tem gesto
+
+    const el = document.createElement("div");
+    el.className = "pb-ptr";
+    el.setAttribute("aria-hidden", "true");
+    const r = 17, circ = 2 * Math.PI * r;
+    el.innerHTML =
+      '<span class="pb-ptr-disc"><img src="/brand/mascot.webp" alt="" />' +
+      '<svg viewBox="0 0 40 40" aria-hidden="true">' +
+      `<circle class="pb-ptr-track" cx="20" cy="20" r="${r}"/>` +
+      `<circle class="pb-ptr-arc" cx="20" cy="20" r="${r}"/></svg></span>`;
+    document.body.appendChild(el);
+    const arc = el.querySelector(".pb-ptr-arc");
+    arc.style.strokeDasharray = circ.toFixed(1);
+
+    const smooth = !(window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+    let pull = 0, startY = 0, startX = 0, tracking = false, busy = false, raf = 0;
+
+    const damp = o => PTR.rubber * (1 - 1 / (o / PTR.rubber + 1));
+    const atTop = () =>
+      (window.scrollY || (document.scrollingElement || {}).scrollTop || 0) <= 0;
+
+    function draw() {
+      const p = Math.min(1, pull / PTR.threshold);
+      el.style.transform =
+        "translate3d(0," + pull.toFixed(1) + "px,0) scale(" + (0.5 + 0.5 * p).toFixed(3) + ")";
+      el.style.opacity = Math.min(1, p * 1.6).toFixed(2);
+      if (!busy) arc.style.strokeDashoffset = (circ * (1 - p)).toFixed(1);
+    }
+
+    function spring(goal) {
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      if (!smooth) { pull = goal; draw(); return; }
+      (function step() {
+        pull += (goal - pull) * 0.22;
+        if (Math.abs(pull - goal) < 0.5) { pull = goal; raf = 0; draw(); return; }
+        draw();
+        raf = requestAnimationFrame(step);
+      })();
+    }
+
+    function finish() {
+      if (!busy) return;
+      busy = false;
+      el.classList.remove("pb-ptr-busy");
+      spring(0);
+    }
+
+    function run() {
+      busy = true;
+      el.classList.add("pb-ptr-busy");
+      spring(PTR.hold);
+
+      if (typeof window.PBRefresh !== "function") {
+        // Tela que não sabe se refazer: recarrega. Ali não há estado a perder.
+        setTimeout(() => location.reload(), 220);
+        return;
+      }
+      const t0 = Date.now();
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        setTimeout(finish, Math.max(0, PTR.floor - (Date.now() - t0)));
+      };
+      setTimeout(done, PTR.watchdog);
+      Promise.resolve()
+        .then(() => window.PBRefresh())
+        .catch(() => {})          // erro de rede não pode travar o indicador
+        .then(done);
+    }
+
+    addEventListener("touchstart", ev => {
+      if (busy || ev.touches.length !== 1) return;
+      // Áreas com rolagem própria (modal, menu ☰, dropdown da conta) mandam
+      // no gesto delas — o puxão é só da página.
+      if (ev.target.closest && ev.target.closest(".modal, .sidenav, .user-dropdown")) return;
+      tracking = atTop();
+      startY = ev.touches[0].clientY;
+      startX = ev.touches[0].clientX;
+    }, { passive: true });
+
+    addEventListener("touchmove", ev => {
+      if (!tracking || busy || ev.touches.length !== 1) return;
+      const dy = ev.touches[0].clientY - startY;
+      const dx = ev.touches[0].clientX - startX;
+      // Gesto horizontal (carrossel, tabela que rola de lado) não é puxão.
+      // Só entrega o gesto de volta enquanto o puxão ainda não pegou — no meio
+      // dele um tremido lateral não pode cancelar tudo.
+      if (pull === 0 && Math.abs(dx) > Math.abs(dy)) { tracking = false; return; }
+      if (dy <= 0) {                    // virou rolagem normal: devolve o gesto
+        if (pull > 0) spring(0);        // recolhe na molinha, não em corte seco
+        tracking = false;
+        return;
+      }
+      if (!atTop()) { tracking = false; return; }
+      if (ev.cancelable) ev.preventDefault();   // mata o elástico nativo
+      pull = Math.min(PTR.max, damp(dy));
+      draw();
+    }, { passive: false });
+
+    function release() {
+      if (!tracking || busy) { tracking = false; return; }
+      tracking = false;
+      if (pull >= PTR.threshold) run(); else spring(0);
+    }
+    addEventListener("touchend", release, { passive: true });
+    addEventListener("touchcancel", release, { passive: true });
+
+    // rAF congela com o app em segundo plano: ao voltar, termina a molinha.
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden && !raf && !busy && pull !== 0) spring(0);
+    });
+  }
+
+  function init() { fixViewport(); buildTabbar(); hardenGlyphs(); enhanceOverview(); enhanceSettings(); wireGoogleLogin(); wirePush(); maybeOpenLaunch(); initPullToRefresh(); }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
   } else {
