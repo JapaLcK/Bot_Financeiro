@@ -22,6 +22,40 @@ os.environ.setdefault("PLANS_V2_ENABLED", "0")
 from db import init_db, ensure_user, get_conn
 
 
+# ── Coleta: arquivos que dependem de `ofxparse` ──────────────────────────────
+# Sem o pacote, estes 9 arquivos estouram no IMPORT e o pytest aborta a suíte
+# inteira antes de rodar um teste — o resultado não é "alguns testes falham",
+# é sinal nenhum, nem verde nem vermelho.
+#
+# A lista é FIXA de propósito. Gerá-la a partir dos erros de coleta ("ignore
+# tudo que falhou ao importar") engoliria também um ImportError ou erro de
+# sintaxe recém-introduzido, e o arquivo quebrado nunca mais rodaria.
+#
+# A condição é a ausência do pacote, não o erro: no CI o ofxparse está no
+# requirements.txt, então nada aqui é ignorado e os 9 rodam normalmente.
+_OFXPARSE_DEPENDENTES = [
+    "test_audio_clarification.py",
+    "test_audio_multi_launch_ask_value.py",
+    "test_full_handler_smoke.py",
+    "test_handle_incoming_routing.py",
+    "test_recurring_value.py",
+    "test_split_audio_transactions.py",
+    "test_whatsapp_confirmations.py",
+    "test_whatsapp_daily_report.py",
+    "test_whatsapp_simulation.py",
+]
+
+collect_ignore = []
+try:
+    import ofxparse  # noqa: F401
+except ImportError:
+    collect_ignore = list(_OFXPARSE_DEPENDENTES)
+    print(
+        f"[conftest] ofxparse ausente — ignorando {len(collect_ignore)} arquivos "
+        "que dependem dele (no CI o pacote existe e todos rodam)."
+    )
+
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _init_schema():
