@@ -5495,6 +5495,11 @@ let _historySearchDebounce = null;
 // isto for > 0, o load-more não roda. Contador (não bool) pra aguentar reloads
 // concorrentes: um reload superado não pode zerar o gate de outro ainda em voo.
 let _historyReloadsInFlight = 0;
+// Geração de stats: cada reload bumpa e só a resposta da geração CORRENTE aplica.
+// A guarda de período não basta — dois reloads do MESMO período podem ter o stats
+// mais VELHO resolvendo por último e sobrescrevendo os contadores que o mais novo
+// já renderizou. A geração distingue reloads mesmo com período igual.
+let _historyStatsGen = 0;
 
 function _historyResetAndReload() {
   _historyFilters.page = 1;
@@ -5539,6 +5544,7 @@ async function loadHistoryView(forceFresh = false, { background = false } = {}) 
   // LISTA (cancelável, com guarda de geração); o stats atualiza os contadores
   // quando chegar. .catch pra nunca virar unhandledrejection num caminho superado.
   const statsMonths = _historyFilters.months;
+  const statsGen = ++_historyStatsGen;
   const statsP = (statsNeeded
     ? _fetchHistoryStats(statsMonths)
     : Promise.resolve(_historyStatsCache)).catch(() => null);
@@ -5553,10 +5559,12 @@ async function loadHistoryView(forceFresh = false, { background = false } = {}) 
     _historyFilters.page = 1;   // commit: o DOM vira página 1 agora
     renderHistoryTimeline(list, /*append=*/false);
     // Stats (secundário) atualiza os contadores quando chegar — sem segurar o gate
-    // nem a timeline. Guarda de período: um stats de período antigo resolvendo
-    // tarde não pode sobrescrever o atual (a virada pra async criou essa janela).
+    // nem a timeline. Guarda de GERAÇÃO: só a resposta do reload mais novo aplica.
+    // Dois reloads do mesmo período podem ter o stats mais velho resolvendo por
+    // último; sem a geração, ele sobrescreveria os contadores do mais novo (a
+    // virada do stats pra async criou essa janela). A geração subsume o período.
     statsP.then(stats => {
-      if (_historyFilters.months !== statsMonths) return;
+      if (statsGen !== _historyStatsGen) return;
       if (statsNeeded && stats) _historyStatsCache = { ...stats, months: statsMonths };
       renderHistoryStats(_historyStatsCache);
     });
