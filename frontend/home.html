@@ -1434,7 +1434,17 @@ let _wpLastFocus = null;
    (bancos de Open Finance, energia de agentes, cota da IA, janela de histórico),
    e não da /precos: aquela página anuncia previsão de saldo, caça-assinaturas e
    cobranças duplicadas, que não têm implementação nenhuma no repositório. Tela
-   de confirmação de pagamento não é lugar de promessa que ainda não roda. */
+   de confirmação de pagamento não é lugar de promessa que ainda não roda.
+
+   E "None" no plan_limits NÃO quer dizer ilimitado em todo campo, tem de ser
+   conferido um por um até onde o limite é aplicado:
+     - pockets_max / cards_max None: retorna sem checar (plan_service.py:440),
+       ilimitado de verdade;
+     - ai_monthly_messages None: cai no teto GLOBAL AI_CHAT_MONTHLY_LIMIT
+       (1000/mês por padrão) em ai_monthly_limit_for (plan_service.py:398), e o
+       runner recusa depois disso. Por isso Plus e Pro dizem "cota ampliada" e
+       não "sem limite": eles só escapam da cota de 200 do Essencial, não do
+       teto da casa. O número em si não entra na cópia porque vem de env. */
 const WP_PLANOS = {
   essencial: {
     nome: "PigBank Essencial",
@@ -1450,7 +1460,7 @@ const WP_PLANOS = {
     feats: [
       "Conecte 2 bancos pelo Open Finance",
       "Ligue seus agentes: energia para até 3",
-      "Piggy IA sem limite de mensagens",
+      "Piggy IA com cota ampliada",
       "Histórico de 12 meses, com tudo do Essencial",
     ],
   },
@@ -1459,7 +1469,7 @@ const WP_PLANOS = {
     feats: [
       "Conecte até 5 bancos pelo Open Finance",
       "Rode a equipe toda: energia para os 7 agentes",
-      "Piggy IA sem limite de mensagens",
+      "Piggy IA com cota ampliada",
       "Histórico de 24 meses, com tudo do Plus",
     ],
   },
@@ -1504,7 +1514,33 @@ function openWelcomePro({ trial = true, days = 30, plano = "plus" } = {}) {
 }
 
 function _wpOnKey(e) {
-  if (e.key === "Escape") dismissWelcomePro();
+  if (e.key === "Escape") { dismissWelcomePro(); return; }
+  if (e.key !== "Tab") return;
+
+  // aria-modal="true" AFIRMA pro leitor de tela que o resto da página não está
+  // disponível. Sem prender o Tab isso é mentira: o teclado sai do card e vai
+  // parar nos links do header atrás do overlay, que o mouse não alcança. Ou se
+  // prende o foco, ou se tira o aria-modal. Prender é o certo aqui.
+  const card = document.querySelector(".welcome-pro-card");
+  if (!card) return;
+  const alvos = card.querySelectorAll(
+    'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])');
+  if (!alvos.length) return;
+
+  const primeiro = alvos[0];
+  const ultimo = alvos[alvos.length - 1];
+  const atual = document.activeElement;
+  const foraDoCard = !card.contains(atual);
+
+  // Volta pra dentro nos dois sentidos, inclusive quando o foco já escapou
+  // (clique no fundo, foco perdido no body).
+  if (e.shiftKey && (atual === primeiro || foraDoCard)) {
+    e.preventDefault();
+    ultimo.focus();
+  } else if (!e.shiftKey && (atual === ultimo || foraDoCard)) {
+    e.preventDefault();
+    primeiro.focus();
+  }
 }
 
 function _wpClose() {
