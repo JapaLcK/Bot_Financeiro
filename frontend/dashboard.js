@@ -5553,26 +5553,28 @@ async function loadHistoryView(forceFresh = false, { background = false } = {}) 
   const statsP = (statsNeeded
     ? _fetchHistoryStats(statsMonths)
     : Promise.resolve(_historyStatsCache)).catch(() => null);
+  // Stats (secundário) é aplicado INDEPENDENTE do desfecho da lista deste reload:
+  // se a lista for superada (o `return` adiante) ou falhar, o stats fresco que já
+  // está em voo não pode ficar órfão — por isso o handler é anexado AQUI, antes do
+  // await da lista, não dentro do caminho de sucesso dela. Guarda de GERAÇÃO: só a
+  // resposta do fetch de stats mais novo aplica (subsume o período; sem ela, um
+  // stats mais velho do mesmo período resolvendo por último sobrescreveria o novo).
+  // Atualiza os contadores quando chegar, sem segurar o gate nem a timeline.
+  statsP.then(stats => {
+    if (statsGen !== _historyStatsGen) return;
+    if (statsNeeded && stats) _historyStatsCache = { ...stats, months: statsMonths };
+    renderHistoryStats(_historyStatsCache);
+  });
 
   _historyReloadsInFlight++;
   try {
     const list = await _fetchHistoryList({ ..._historyFilters, page: 1 });
     // list undefined = este load foi superado por um mais novo (troca de filtro,
-    // nova busca, puxão). Não renderiza — o mais novo é quem manda. Isso é a
-    // guarda de geração que impede o stale-overwrite no Histórico.
+    // nova busca, puxão). Não renderiza a TIMELINE — o mais novo é quem manda. (O
+    // stats já é tratado acima, independente disto.) Guarda de geração da lista.
     if (list === undefined) return;
     _historyFilters.page = 1;   // commit: o DOM vira página 1 agora
     renderHistoryTimeline(list, /*append=*/false);
-    // Stats (secundário) atualiza os contadores quando chegar — sem segurar o gate
-    // nem a timeline. Guarda de GERAÇÃO: só a resposta do reload mais novo aplica.
-    // Dois reloads do mesmo período podem ter o stats mais velho resolvendo por
-    // último; sem a geração, ele sobrescreveria os contadores do mais novo (a
-    // virada do stats pra async criou essa janela). A geração subsume o período.
-    statsP.then(stats => {
-      if (statsGen !== _historyStatsGen) return;
-      if (statsNeeded && stats) _historyStatsCache = { ...stats, months: statsMonths };
-      renderHistoryStats(_historyStatsCache);
-    });
   } catch (err) {
     // Falha REAL da lista (HTTP/rede). No puxão (background): rejeita sem tocar no
     // DOM NEM no contador — o render bom e a paginação ficam, indicador âmbar. Na
