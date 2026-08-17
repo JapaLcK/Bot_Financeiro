@@ -340,3 +340,68 @@ def test_confirm_email_verification_normaliza_telefone_armazenado_no_codigo():
             row = cur.fetchone()
 
     assert row["phone_e164"] == "5565992741873"
+
+
+def _confirm_and_read_source(email: str, *, source=None):
+    code = create_email_verification(email, "123456", "5565992741873")
+    if source is None:
+        result = confirm_email_verification(email, code)
+    else:
+        result = confirm_email_verification(email, code, source)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select signup_source from auth_accounts where user_id = %s",
+                (result["user_id"],),
+            )
+            row = cur.fetchone()
+    return result["user_id"], row["signup_source"]
+
+
+def test_confirm_email_verification_grava_signup_source():
+    # Default = 'web' quando o caller não informa origem
+    _uid, src = _confirm_and_read_source(f"src-def-{uuid.uuid4().hex[:8]}@example.com")
+    assert src == "web"
+
+    # Origem explícita (app iOS) é persistida
+    _uid, src = _confirm_and_read_source(
+        f"src-app-{uuid.uuid4().hex[:8]}@example.com", source="app"
+    )
+    assert src == "app"
+
+
+def test_confirm_email_preserva_origem_no_re_registro():
+    # O insert usa `on conflict (email) do update ... coalesce(signup_source)`:
+    # se a conta já existe, a origem da 1ª criação é preservada. O guard
+    # anti-duplicata de create_email_verification bloqueia o 2º cadastro pela
+    # API, então semeamos o 2º código direto na tabela (como o teste de
+    # normalização de telefone faz) pra exercitar o caminho on-conflict.
+    email = f"src-recad-{uuid.uuid4().hex[:8]}@example.com"
+    uid1, src1 = _confirm_and_read_source(email, source="app")
+    assert src1 == "app"
+
+    # 2º código pro mesmo e-mail, inserido direto (bypassa o guard)
+    from core.crypto import hash_pii_optional
+    from datetime import datetime, timedelta, timezone
+    code2 = "654321"
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into email_verification_codes
+                    (email, email_hash, code, password_hash, expires_at)
+                values (%s, %s, %s, 'x', %s)
+                """,
+                (email, hash_pii_optional(email, kind="email"), code2,
+                 datetime.now(timezone.utc) + timedelta(minutes=15)),
+            )
+        conn.commit()
+
+    result = confirm_email_verification(email, code2, "web")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select signup_source from auth_accounts where user_id = %s",
+                        (result["user_id"],))
+            src2 = cur.fetchone()["signup_source"]
+    assert result["user_id"] == uid1
+    assert src2 == "app"  # coalesce preservou a 1ª origem
