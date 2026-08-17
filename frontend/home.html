@@ -957,12 +957,22 @@ async function loadAuthMe() {
   } catch { return null; }
 }
 
-/* "Assentou" = o webhook checkout.session.completed já fechou o gate: o usuário
-   não seria mais barrado nem pela escolha de plano (needs_plan_selection) nem
-   pelo paywall (app_access). Cobre as duas configs (plans V2 usa
-   needs_plan_selection; paywall v1 usa app_access). */
+/* "Assentou" = o webhook checkout.session.completed já ATIVOU o plano pago que
+   a pessoa acabou de comprar. O sinal certo é o TIER PAGO ativo — não
+   needs_plan_selection (já vem false pra quem escolheu Grátis antes de fazer
+   upgrade) nem app_access sozinho (sempre true no plans V2). Enumerado:
+
+     plans V2 (plan_tier presente):
+       novo cadastro, webhook pendente ........ plan_tier 'free'  → ESPERA
+       Free existente em upgrade, pendente ..... plan_tier 'free'  → ESPERA
+       webhook caiu (inclui trial) ............. plan_tier != free → ASSENTOU
+     paywall v1 (plan_tier ausente):
+       webhook pendente ........................ app_access false  → ESPERA
+       webhook caiu (is_pro inclui trial) ...... app_access true   → ASSENTOU */
 function _checkoutSettled(me) {
-  return !!me && me.needs_plan_selection !== true && me.app_access !== false;
+  if (!me) return false;
+  if (me.plans_v2_enabled) return !!me.plan_tier && me.plan_tier !== "free";
+  return me.app_access === true;
 }
 
 /* Retorno do checkout (?upgrade=success): o webhook pode estar em trânsito.
