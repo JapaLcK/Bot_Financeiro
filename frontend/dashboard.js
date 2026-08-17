@@ -2345,13 +2345,26 @@ function _ensureGenericConfirmModal() {
 
      O trap vem do window.pigTrapTab, exposto pelo modals.js, pra não virar a
      quarta cópia do mesmo bloco. Se por algum motivo o modals.js não tiver
-     carregado, o Esc continua funcionando e o Tab só não fica preso. */
+     carregado, o Esc continua funcionando e o Tab só não fica preso.
+
+     CAPTURE + stopPropagation, e isso importa: este listener é registrado
+     preguiçosamente, na primeira chamada de confirmModal(), então em fase de
+     bolha ele rodaria DEPOIS dos listeners de Escape que a página já tinha —
+     em especial o de :9178, que fecha os modais de fatura sem checar nada.
+     O submitPayBill() abre esta confirmação COM o overlay de pagamento aberto
+     atrás; um Esc pra dispensar o aviso fecharia junto o fluxo de pagamento e
+     o valor digitado. Em captura, este handler vê a tecla primeiro e a
+     consome, então o Esc fecha só a confirmação. */
   document.addEventListener("keydown", (e) => {
     const ov = document.getElementById("generic-confirm-overlay");
     if (!ov || !ov.classList.contains("open")) return;
-    if (e.key === "Escape") { _genericModalClose(false); return; }
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      _genericModalClose(false);
+      return;
+    }
     if (window.pigTrapTab) window.pigTrapTab(e, ov.querySelector(".modal"));
-  });
+  }, true);
 }
 
 function _genericModalClose(value) {
