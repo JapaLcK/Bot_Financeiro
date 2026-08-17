@@ -381,8 +381,8 @@ footer a:hover { color:var(--text); }
 </style>
 <script src="/static/auth-refresh.js"></script>
 <script src="/modals.js"></script>
-  <link rel="stylesheet" href="/app-mode.css?v=24" />
-  <script src="/app-mode.js?v=22"></script>
+  <link rel="stylesheet" href="/app-mode.css?v=25" />
+  <script src="/app-mode.js?v=23"></script>
 </head>
 <body>
 
@@ -1009,6 +1009,7 @@ function clearHomeCache() {
 }
 
 /* ─── Init ────────────────────────────────────────────────────────────── */
+let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
 (async () => {
   // 1) Valida sessão
   let userId = 0;
@@ -1060,7 +1061,18 @@ function clearHomeCache() {
     return;
   }
 
-  // 3) Carrega snapshot + histórico em paralelo
+  // 3 e 4) Busca + render moram em loadHomeData() porque o "puxar pra
+  // atualizar" do app (app-mode.js) precisa refazer exatamente este pedaço.
+  _homeMe = me;
+  await loadHomeData({ initial: true });
+})();
+
+/* ─── Recarga dos dados da Início ──────────────────────────────────────────
+   Devolve promise: o indicador do puxão fica girando até ela resolver.
+   Guarda o /auth/me da abertura — plano e e-mail não mudam a cada puxão, e
+   refazer essa chamada só atrasaria o gesto. */
+async function loadHomeData({ initial = false } = {}) {
+  const me = _homeMe;
   let snapshot = null, history = [];
   try {
     const [dataRes, histRes] = await Promise.all([
@@ -1072,8 +1084,21 @@ function clearHomeCache() {
     if (histRes.ok) {
       const hj = await histRes.json();
       history = hj.data || [];
+    } else if (!initial) {
+      // Num puxão, /history falhando não pode virar "sem histórico": o delta
+      // mês-a-mês sumiria da tela e o persist logo abaixo gravaria o vazio por
+      // cima do cache bom. Rejeita — o indicador fica âmbar e nada é tocado.
+      throw new Error("history falhou no refresh");
     }
-  } catch {
+  } catch (err) {
+    // Só a carga inicial troca a tela pelo erro — ali não há nada a perder.
+    //
+    // Num puxão a tela JÁ TEM dado bom. Trocar o #content pelo erro destruiria
+    // ele em definitivo: os renderers procuram elementos que deixariam de
+    // existir, então nem um puxão bem-sucedido depois recuperaria — só
+    // recarregando a página. Mantém o que está na tela e devolve a falha; quem
+    // avisa é o indicador do puxão (app-mode.js pinta o anel de âmbar).
+    if (!initial) throw err;
     document.getElementById("content").innerHTML = `
       <div class="access-error">
         <h2><i class="ph ph-warning" aria-hidden="true"></i> Erro ao carregar</h2>
@@ -1084,7 +1109,6 @@ function clearHomeCache() {
     return;
   }
 
-  // 4) Renderiza tudo
   const email = (me && me.email) || PROFILE_EMAIL || "";
   const displayName = (me && me.display_name) || PROFILE_DISPLAY_NAME || "";
   renderGreeting(snapshot, email, displayName);
@@ -1096,7 +1120,16 @@ function clearHomeCache() {
 
   // Guarda pra próxima abertura pintar na hora (troca de aba /home <-> /app).
   persistHomeCache(USER_ID, snapshot, history, email, displayName);
-})();
+
+  // Contrato com o app-mode.js: quem sabe se refazer expõe PBRefresh — mas só
+  // AGORA, com a carga assentada e render bom na tela. Expor na definição do
+  // script deixava um puxão precoce correr contra a init (validate → me →
+  // primeira carga): a carga velha terminava depois e sobrescrevia a nova.
+  // E se a init morrer antes daqui (sessão inválida, paywall, erro de rede),
+  // o contrato nunca aparece — o puxão cai no reload, que é o que essas telas
+  // de erro pedem. Sem initial: falha de puxão NÃO troca a tela pelo erro.
+  window.PBRefresh = () => loadHomeData();
+}
 
 function renderFreeBanner(me) {
   const banner = document.getElementById("free-banner");

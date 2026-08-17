@@ -735,3 +735,80 @@ html.pb-app .sidenav {
   padding-bottom: calc(14px + env(safe-area-inset-bottom));
 }
 html.pb-app .sidenav-backdrop.open { z-index: 750; }
+
+/* ─── Puxar pra atualizar ──────────────────────────────────────────────────
+   O indicador desce sozinho por cima da página — o conteúdo NÃO se mexe (ver
+   o porquê no app-mode.js, initPullToRefresh). Posição e escala vêm de lá;
+   aqui fica só a aparência.
+
+   z-index 690: abaixo da tab bar (700) e dos modais (800/900), acima do
+   conteúdo. Puxar com modal aberto não deve desenhar nada por cima dele. */
+html.pb-app .pb-ptr {
+  position: fixed;
+  z-index: 690;
+  left: 50%;
+  top: calc(env(safe-area-inset-top) + 4px);
+  width: 40px;
+  height: 40px;
+  margin-left: -20px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate3d(0, 0, 0) scale(0.5);
+  will-change: transform, opacity;
+}
+
+html.pb-app .pb-ptr-disc {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #1B1A20;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+}
+html.pb-app .pb-ptr-disc img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  display: block;
+}
+
+/* O anel mora sobre o disco; -90deg faz o arco começar às 12h */
+html.pb-app .pb-ptr svg {
+  position: absolute;
+  inset: 0;
+  width: 40px;
+  height: 40px;
+  transform: rotate(-90deg);
+}
+html.pb-app .pb-ptr-track {
+  fill: none;
+  stroke: rgba(255, 45, 142, 0.22);
+  stroke-width: 2.5;
+}
+html.pb-app .pb-ptr-arc {
+  fill: none;
+  stroke: #FF2D8E;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+/* Atualizando: o arco vira um risco curto girando (indeterminado) */
+html.pb-app .pb-ptr-busy svg { animation: pb-ptr-spin 0.85s linear infinite; }
+/* O arco curto do "girando" é setado no JS, não aqui: o dasharray é estilo
+   inline (o puxão o usa pra fechar o anel) e inline vence classe. */
+html.pb-app .pb-ptr-busy .pb-ptr-arc { stroke-dashoffset: 0; }
+@keyframes pb-ptr-spin { to { transform: rotate(270deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  html.pb-app .pb-ptr-busy svg { animation: none; }
+}
+
+/* Refresh falhou: o anel fecha em âmbar e para de girar por um instante antes
+   de recolher. A página mantém o dado antigo (melhor que destruir a tela), e
+   sem este aviso o usuário juraria que atualizou. */
+html.pb-app .pb-ptr-fail svg { animation: none; }
+html.pb-app .pb-ptr-fail .pb-ptr-track { stroke: rgba(255, 176, 32, 0.22); }
+html.pb-app .pb-ptr-fail .pb-ptr-arc { stroke: #FFB020; }
