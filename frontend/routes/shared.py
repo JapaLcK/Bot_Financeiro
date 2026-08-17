@@ -303,6 +303,18 @@ def _is_pigbank_app(request: Request) -> bool:
     return "PigBankApp" in (request.headers.get("user-agent") or "")
 
 
+def signup_source_from_request(request: Request, *, google: bool = False) -> str:
+    """Origem do cadastro, gravada em auth_accounts.signup_source. Distingue web
+    de app iOS (mesmo UA que isenta o gate da /precos) pra o painel de admin
+    separar quem passou pela escolha de plano de quem entrou pelo acesso base.
+
+      web | app | google | google_app"""
+    in_app = _is_pigbank_app(request)
+    if google:
+        return "google_app" if in_app else "google"
+    return "app" if in_app else "web"
+
+
 def _enforce_subscription_gate(request: Request, user_id: int) -> None:
     """Backstop server-side das rotas de dados do dashboard. Além do paywall
     (assinatura ativa/trial), fecha o gate de escolha de plano no cadastro: sem

@@ -935,6 +935,7 @@ async def fetch_admin_users(
                     a.phone_status,
                     a.whatsapp_verified_at,
                     a.deletion_status,
+                    a.signup_source,
                     {_ACCOUNT_STATUS_SQL} AS account_status,
                     EXISTS (
                         SELECT 1 FROM user_identities ui
@@ -979,6 +980,17 @@ async def fetch_admin_users(
                 aggregates[r["account_status"]] = int(r["n"])
                 aggregates["whatsapp_connected"] += int(r["wa"])
             aggregates["total"] = sum(aggregates[s] for s in _USER_STATUSES)
+
+            # Origem do cadastro (base inteira): web × app × google × …
+            # NULL = contas anteriores à coluna → 'desconhecido'.
+            await cur.execute(
+                """
+                SELECT coalesce(signup_source, 'desconhecido') AS src, COUNT(*) AS n
+                FROM auth_accounts
+                GROUP BY 1
+                """
+            )
+            by_source = {r["src"]: int(r["n"]) for r in await cur.fetchall()}
 
             if not q:
                 await cur.execute(
@@ -1042,6 +1054,7 @@ async def fetch_admin_users(
     return {
         "generated_at": now,
         "aggregates": aggregates,
+        "by_source": by_source,
         "billing": await fetch_billing_summary(),
         "users": page_rows,
         "page": page,
@@ -1071,7 +1084,7 @@ async def fetch_admin_user_detail(user_id: int, admin_user: str = "admin") -> di
                     a.created_at, a.last_activity_at,
                     a.phone_status, a.whatsapp_verified_at, a.whatsapp_updates_opt_out,
                     a.engagement_opt_out, a.tip_email_opt_out, a.insight_email_opt_out,
-                    a.deletion_status, a.deletion_requested_at,
+                    a.deletion_status, a.deletion_requested_at, a.signup_source,
                     a.ai_messages_this_month,
                     EXISTS (
                         SELECT 1 FROM user_identities ui

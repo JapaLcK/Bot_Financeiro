@@ -77,3 +77,21 @@ def test_jti_invalido_cai_no_dashboard_token(monkeypatch):
     _patch(monkeypatch, payload={"type": "auth", "sub": "7", "jti": "x"},
            needs=True, session=None, dashboard_uid=None)
     assert shared.gate_plan_selection(_Req()) is None
+
+
+# ── Detecção da origem do cadastro (signup_source_from_request) ──────────────
+
+def test_signup_source_web_por_padrao():
+    assert shared.signup_source_from_request(_Req(ua="Mozilla/5.0")) == "web"
+
+
+def test_signup_source_app_pela_ua():
+    assert shared.signup_source_from_request(
+        _Req(ua="Mozilla/5.0 PigBankApp/1.2")) == "app"
+
+
+def test_signup_source_google_web_e_app():
+    assert shared.signup_source_from_request(
+        _Req(ua="Mozilla/5.0"), google=True) == "google"
+    assert shared.signup_source_from_request(
+        _Req(ua="PigBankApp/1.0"), google=True) == "google_app"

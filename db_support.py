@@ -731,6 +731,7 @@ def confirm_email_verification_impl(
     create_link_code,
     email: str,
     code: str,
+    source: str = "web",
 ) -> dict:
     email = email.strip().lower()
     now = datetime.now(timezone.utc)
@@ -770,8 +771,8 @@ def confirm_email_verification_impl(
                 """
                 insert into auth_accounts
                   (user_id, email, password_hash, phone_e164, display_name, phone_status,
-                   email_hash, email_enc, phone_hash, phone_enc, display_name_enc)
-                values (%s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s)
+                   email_hash, email_enc, phone_hash, phone_enc, display_name_enc, signup_source)
+                values (%s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s)
                 on conflict (email) do update
                 set user_id = excluded.user_id,
                     password_hash = excluded.password_hash,
@@ -785,14 +786,17 @@ def confirm_email_verification_impl(
                     email_enc = coalesce(auth_accounts.email_enc, excluded.email_enc),
                     phone_hash = coalesce(auth_accounts.phone_hash, excluded.phone_hash),
                     phone_enc = coalesce(auth_accounts.phone_enc, excluded.phone_enc),
-                    display_name_enc = coalesce(auth_accounts.display_name_enc, excluded.display_name_enc)
+                    display_name_enc = coalesce(auth_accounts.display_name_enc, excluded.display_name_enc),
+                    -- Preserva a origem da 1ª criação em re-registro do mesmo e-mail
+                    signup_source = coalesce(auth_accounts.signup_source, excluded.signup_source)
                 """,
                 (user_id, email, password_hash, phone_e164, display_name,
                  hash_pii_optional(email, kind="email"),
                  encrypt_pii_optional(email),
                  hash_pii_optional(phone_e164, kind="phone"),
                  encrypt_pii_optional(phone_e164),
-                 encrypt_pii_optional(display_name)),
+                 encrypt_pii_optional(display_name),
+                 source),
             )
             cur.execute(
                 "update email_verification_codes set used_at = now() where id = %s",

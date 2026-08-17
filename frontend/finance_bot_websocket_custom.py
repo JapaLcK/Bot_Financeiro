@@ -2381,8 +2381,11 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
     # do código de 6 dígitos rotacionando IP.
     await _check_auth_rate_limits("verify-email", request, body.email)
 
+    from frontend.routes.shared import signup_source_from_request
     try:
-        result = confirm_email_verification(body.email, body.code)
+        result = confirm_email_verification(
+            body.email, body.code, source=signup_source_from_request(request)
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -3467,10 +3470,12 @@ async def auth_google_complete_signup(
             detail="É necessário aceitar a Política de Privacidade.",
         )
 
+    from frontend.routes.shared import signup_source_from_request
     try:
         result = await asyncio.to_thread(
             consume_pending_google_signup,
             body.token, body.name, body.phone,
+            signup_source_from_request(request, google=True),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

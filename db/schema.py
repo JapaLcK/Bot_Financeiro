@@ -1613,6 +1613,13 @@ def init_db():
         # avaliado uma vez, sem reescrever a tabela.
         """alter table auth_accounts add column if not exists plan_selected_at timestamptz default now()""",
         """alter table auth_accounts alter column plan_selected_at drop default""",
+        # Origem do cadastro (2026-08-17): de onde a conta nasceu, pra separar
+        # no painel de admin quem se cadastrou pela web (passa pelo gate da
+        # /precos) de quem veio pelo app iOS (isento do gate — diretriz 3.1.1
+        # da Apple). Valores: 'web' | 'app' | 'google' | 'google_app' |
+        # 'whatsapp'. NULL = conta anterior a esta coluna (origem desconhecida);
+        # sem backfill por data chutado — o painel mostra "—" pra elas.
+        """alter table auth_accounts add column if not exists signup_source text""",
         """
         create table if not exists plan_trials (
           phone_hash text primary key,
