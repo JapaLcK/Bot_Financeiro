@@ -115,3 +115,54 @@ def test_signup_source_google_web_e_app():
         _Req(ua="Mozilla/5.0"), google=True) == "google"
     assert shared.signup_source_from_request(
         _Req(ua="PigBankApp/1.0"), google=True) == "google_app"
+
+
+# ── A janela entre as escritas do webhook ────────────────────────────────────
+# O webhook de checkout.session.completed grava em passos separados
+# (finance_bot_websocket_custom.py ~4245): update_user_plan/set_payment_status
+# primeiro, mark_plan_selected depois. A pergunta é se existe uma janela em que
+# o usuário já tem plano pago e o gate AINDA barra — que faria a tela de
+# "confirmando pagamento" fechar cedo e o /data devolver 402.
+#
+# Não existe, e o motivo é estrutural: needs_plan_selection NÃO lê uma flag
+# independente. Ele deriva das MESMAS colunas que update_user_plan acabou de
+# escrever (plan + plan_expires_at), e trata assinatura paga vigente como
+# escolha implícita — antes de olhar plan_selected_at. Os testes abaixo fixam
+# esse invariante nos dois sentidos.
+
+class TestJanelaEntreEscritasDoWebhook:
+    @pytest.fixture(autouse=True)
+    def _v2_ligado(self, monkeypatch):
+        monkeypatch.setattr(plan_service, "plans_v2_enabled", lambda: True)
+
+    @staticmethod
+    def _user(plan, *, plan_selected_at, expires="2099-01-01T00:00:00+00:00"):
+        from datetime import datetime
+        return {
+            "plan": plan,
+            "plan_selected_at": plan_selected_at,
+            "plan_expires_at": datetime.fromisoformat(expires) if expires else None,
+        }
+
+    def test_plano_pago_gravado_e_plan_selected_ainda_nao(self):
+        """A janela exata que preocupa: update_user_plan já commitou, o
+        mark_plan_selected ainda não. O gate NÃO barra — logo não há 402."""
+        u = self._user("plus", plan_selected_at=None)
+        assert plan_service.needs_plan_selection(1, u) is False
+
+    def test_mesmo_sem_plan_selected_o_trial_ja_vale(self):
+        """Trial nasce como assinatura vigente do plano escolhido: mesma
+        janela, mesmo resultado."""
+        u = self._user("pro", plan_selected_at=None)
+        assert plan_service.needs_plan_selection(1, u) is False
+
+    def test_cadastro_novo_sem_plano_nenhum_continua_barrado(self):
+        """O outro sentido: sem o passo do webhook, o gate tem de barrar —
+        senão este teste passaria por vacuidade."""
+        u = self._user("free", plan_selected_at=None, expires=None)
+        assert plan_service.needs_plan_selection(1, u) is True
+
+    def test_plano_pago_expirado_nao_conta_como_escolha(self):
+        """Assinatura vencida não é escolha implícita: volta a barrar."""
+        u = self._user("plus", plan_selected_at=None, expires="2020-01-01T00:00:00+00:00")
+        assert plan_service.needs_plan_selection(1, u) is True
