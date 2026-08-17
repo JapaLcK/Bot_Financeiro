@@ -563,6 +563,6 @@ def test_checkout_nao_fecha_gate_da_precos_na_abertura(user_id, monkeypatch):
                 "select plan_selected_at from auth_accounts where user_id = %s", (uid,))
             assert cur.fetchone()["plan_selected_at"] is None
 
-    # Abandono volta pra /precos; sucesso volta pra /home?upgrade=success
-    assert fake.last_session_kwargs["cancel_url"].endswith("/precos?escolha=1&upgrade=cancelled")
+    # Abandono volta pra /precos (escolha forçada); sucesso pra /home?upgrade=success
+    assert fake.last_session_kwargs["cancel_url"].endswith("/precos?escolha=1")
     assert "upgrade=success" in fake.last_session_kwargs["success_url"]

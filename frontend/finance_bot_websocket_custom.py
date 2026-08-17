@@ -3737,10 +3737,11 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
                 f"&ev={'trial' if trial_days > 0 else 'purchase'}"
             ),
             # Abandonou o checkout → volta pra /precos escolher um plano (pago
-            # ou Grátis). Sem isso, o gate não fechado deixaria a navegação
-            # seguinte redirecionar pra cá de qualquer forma; ser explícito
-            # evita um salto extra por /home.
-            cancel_url=f"{DASHBOARD_URL}/precos?escolha=1&upgrade=cancelled",
+            # ou Grátis). O escolha=1 já faz o applyOnboardingChoice mostrar
+            # "Escolha um plano pra começar" (needs_plan_selection segue true,
+            # pois o gate não fechou) — não anexo upgrade=cancelled porque
+            # /precos não consome esse marcador (o toast vive só na /home).
+            cancel_url=f"{DASHBOARD_URL}/precos?escolha=1",
             metadata=metadata,
             subscription_data=subscription_data,
         )

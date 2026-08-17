@@ -998,10 +998,16 @@ async function awaitCheckoutConfirmation(me) {
     while (Date.now() < deadline) {
       if (_checkoutSettled(me)) break;   // webhook caiu
       await wait(1500);
-      // Cada poll é abortado com o tempo que resta até o deadline (teto 6s),
-      // pra um /auth/me travado nunca segurar o loop além dos ~20s (fail-open).
+      // Cada poll é limitado ao tempo que resta até o deadline (teto 6s). O
+      // AbortController aborta o /auth/me direto; o Promise.race é o backstop
+      // pro caso do wrapper global (auth-refresh.js) engolir o abort ao renovar
+      // via /auth/refresh (que não herda o signal) — sem a corrida, um refresh
+      // travado seguraria o loop além dos ~20s e a tela nunca fecharia.
       const budget = Math.min(6000, Math.max(1000, deadline - Date.now()));
-      const fresh = await loadAuthMe(budget);
+      const fresh = await Promise.race([
+        loadAuthMe(budget),
+        new Promise((r) => setTimeout(() => r(null), budget)),
+      ]);
       if (fresh) me = fresh;
     }
   } finally {
