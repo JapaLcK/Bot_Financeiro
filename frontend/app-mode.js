@@ -713,6 +713,14 @@
       // espera na fila consumir a janela do pedido — âmbar antes de qualquer
       // rede. E ciclo que estourou na fila NÃO roda depois: sem isso o
       // "falhou" rodava silencioso quando o pedido velho enfim assentava.
+      // Estouro de relógio também SOLTA a corrente (inFlight = null): sem
+      // isso, um PBRefresh que nunca assenta envenenava a fila pra sempre —
+      // todo puxão seguinte esperava atrás dele, estourava sem nunca rodar, e
+      // o refresh morria até recarregar a página. Custo assumido ao soltar:
+      // se o pedido pendurado assentar MUITO depois, a escrita dele pode
+      // repintar dado mais velho uma vez (caso patológico; sem a fila isso
+      // acontecia com QUALQUER pedido acima do watchdog, e blindar de vez
+      // exigiria sinal de geração dentro de cada loader).
       let started = false;
       const prev = inFlight;
       const p = Promise.resolve(prev)
@@ -720,12 +728,20 @@
         .then(() => {
           if (settled) return;                            // estourou esperando: não vira fantasma
           started = true;
-          setTimeout(() => done(false), PTR.watchdog);    // relógio do pedido real
+          setTimeout(() => {                              // relógio do pedido real
+            done(false);
+            if (inFlight === chain) inFlight = null;
+          }, PTR.watchdog);
           return window.PBRefresh();
         });
       // relógio da fila: só conta enquanto o pedido deste ciclo não começou
-      setTimeout(() => { if (!started) done(false); }, PTR.watchdog);
-      inFlight = p.catch(() => {});
+      setTimeout(() => {
+        if (started) return;
+        done(false);
+        if (inFlight === chain) inFlight = null;
+      }, PTR.watchdog);
+      const chain = p.catch(() => {});
+      inFlight = chain;
       p.then(() => done(true), () => done(false));
     }
 
