@@ -267,7 +267,11 @@
             <ul>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> <span><strong>2&nbsp;bancos conectados</strong> (Open&nbsp;Finance)</span></li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> <span><strong>Agentes</strong>: energia pra até 3, você escolhe quais</span></li>
-              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Piggy IA sem limites</li>
+              <!-- 1.000 = AI_CHAT_MONTHLY_LIMIT (core/services/ai_chat_commands.py).
+                   `ai_monthly_messages: None` no PLUS_LIMITS/PRO_LIMITS NÃO é ilimitado:
+                   ai_monthly_limit_for() troca None por esse teto e o runner do chat corta
+                   ali. Mudou a env, muda aqui e na tabela comparativa também. -->
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Piggy IA · 1.000 mensagens/mês</li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Alertas de gastos fora do padrão</li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Histórico de 12 meses + tudo do Essencial</li>
             </ul>
@@ -463,9 +467,11 @@
                   <th scope="row" class="cmp-feat">Mensagens com a Piggy</th>
                   <td><span class="c-val">20<small>por mês</small></span></td>
                   <td><span class="c-val">200<small>por mês</small></span></td>
-                  <td><span class="c-val">Ilimitadas</span></td>
-                  <td><span class="c-val">Ilimitadas</span></td>
-                  <td><span class="c-val">Ilimitadas</span></td>
+                  <!-- Plus/Pro/Premium: `ai_monthly_messages: None` cai no teto GLOBAL
+                       AI_CHAT_MONTHLY_LIMIT, não em "ilimitado" (ver o card do Plus). -->
+                  <td><span class="c-val">1.000<small>por mês</small></span></td>
+                  <td><span class="c-val">1.000<small>por mês</small></span></td>
+                  <td><span class="c-val">1.000<small>por mês</small></span></td>
                 </tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Categorização automática</th>
