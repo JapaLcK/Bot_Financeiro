@@ -972,6 +972,12 @@ async function loadAuthMe(timeoutMs) {
    pro tier comprado (inclui trial, que já grava o plano pago). O checkout só
    nasce pra quem vai de free→pago, então plan != 'free' = assentou.
 
+   Espelha _paid_plan_active do servidor: precisa ser não-free E vigente —
+   plan_expires_at nulo = vitalício, senão tem de estar no futuro. Sem o check
+   de validade, uma conta com plan pago EXPIRADO (webhook de cancelamento
+   perdido) — que o servidor trata como Free e por isso deixa reabrir o
+   checkout — seria dada como assentada antes do NOVO webhook cair.
+
    Por que NÃO os proxies que tentei antes (cada um furou uma config/coorte):
      - app_access:          true sem assinatura no V2, e no legado com paywall
                             off / conta allowlisted → assentava cedo;
@@ -979,8 +985,9 @@ async function loadAuthMe(timeoutMs) {
                             fazer upgrade → assentava cedo;
      - plan_tier:           só existe no V2 (None no legado). */
 function _checkoutSettled(me) {
-  if (!me || !me.plan) return false;
-  return String(me.plan).toLowerCase() !== "free";
+  if (!me || !me.plan || String(me.plan).toLowerCase() === "free") return false;
+  if (me.plan_expires_at == null) return true;           // vitalício
+  return new Date(me.plan_expires_at) > new Date();      // vigente (não expirado)
 }
 
 /* Um /auth/me limitado: aborta o fetch direto (AbortController) E corre contra
@@ -996,15 +1003,23 @@ function _boundedAuthMe(budgetMs) {
 
 /* Retorno do checkout (?upgrade=success): o webhook pode estar em trânsito.
    Roda TODA a sequência de perfil — fetch inicial + polls — sob UM deadline
-   (~20s), cada request limitada por _boundedAuthMe. Mostra "confirmando
-   pagamento…" só se de fato precisar esperar (não pisca se já veio assentado).
+   (~20s), cada request limitada por _boundedAuthMe.
+
+   O overlay abre ANTES do primeiro request (z-index acima do welcome modal que
+   o handleUpgradeReturn abre em 450ms): senão, se o 1º /auth/me demora, o
+   usuário clicaria "Bora explorar" e navegaria pro /app SEM o bypass
+   ?upgrade=success — e o gate o mandaria pra /precos recém tendo pago. Some
+   assim que assenta (flash curto no caso de já vir pago é o preço de bloquear
+   essa navegação).
+
    FAIL-OPEN: no fim devolve o último `me` (pode ser null) e deixa seguir —
    nunca prende quem pagou numa tela de espera nem o joga pra /precos. */
 async function awaitCheckoutConfirmation() {
   const overlay = document.getElementById("checkout-confirm-overlay");
+  overlay?.classList.add("open");        // ANTES do 1º await: bloqueia o welcome modal
   const deadline = Date.now() + 20000;   // ~20s no total, pra TUDO
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  let me = null, shown = false;
+  let me = null;
   try {
     while (Date.now() < deadline) {
       const budget = Math.min(6000, Math.max(1000, deadline - Date.now()));
@@ -1012,11 +1027,10 @@ async function awaitCheckoutConfirmation() {
       if (fresh) me = fresh;
       if (_checkoutSettled(me)) break;          // webhook caiu
       if (Date.now() >= deadline) break;
-      if (!shown) { overlay?.classList.add("open"); shown = true; }  // só ao esperar
       await wait(1500);
     }
   } finally {
-    if (shown) overlay?.classList.remove("open");
+    overlay?.classList.remove("open");
   }
   return me;
 }
