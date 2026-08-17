@@ -2474,9 +2474,16 @@ async function openBankPicker() {
   document.addEventListener("keydown", _bankPickOnKey);
   const q = document.getElementById("bankpick-search");
   q.value = "";
+  /* Foco ANTES do await, não depois: o `q.focus()` só existia no ramo do cache e
+     no de sucesso, então enquanto a lista carregava — e para sempre, se o fetch
+     falhasse — o foco ficava no botão "Conectar banco" ATRÁS do overlay. O trap
+     de Tab conserta isso na tecla seguinte, mas Enter não passa pelo trap: ele
+     reativaria o botão obscurecido e chamaria openBankPicker() de novo. Assim os
+     estados de carregando e de erro também começam dentro do modal. */
+  q.focus();
   _bankPickSelected = null;
   _syncBankPickFoot();
-  if (_bankConnectors) { renderBankPicker(""); q.focus(); return; }
+  if (_bankConnectors) { renderBankPicker(""); return; }
   document.getElementById("bankpick-list").innerHTML =
     `<div class="bankpick-empty">Carregando bancos…</div>`;
   try {
@@ -2485,7 +2492,8 @@ async function openBankPicker() {
     const data = await resp.json();
     _bankConnectors = (data.connectors || []).filter(b => b && b.name);
     renderBankPicker("");
-    q.focus();
+    // sem q.focus() aqui: o foco já entrou no modal antes do await, e refocar
+    // agora roubaria o foco de quem já tivesse tabulado pra dentro do card
   } catch (err) {
     document.getElementById("bankpick-list").innerHTML =
       `<div class="bankpick-empty">Não deu pra carregar a lista de bancos. Tente de novo.</div>`;
