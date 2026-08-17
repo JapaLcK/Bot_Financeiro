@@ -5488,6 +5488,13 @@ let _historyStatsCache = null;
 let _historyRetryTimer = null;
 const _historyListChannel = makeFetchChannel(); // dedup + abort + geração
 let _historySearchDebounce = null;
+// Loads completos (nav/filtro/busca/período/puxão) em voo. O "carregar mais" e o
+// load completo dividem o MESMO canal e têm semânticas opostas (append × substitui):
+// se um append dispara enquanto um load completo está em voo, ele aborta o reload
+// da página 1 e appenda numa base que está pra sumir (mistura filtros). Enquanto
+// isto for > 0, o load-more não roda. Contador (não bool) pra aguentar reloads
+// concorrentes: um reload superado não pode zerar o gate de outro ainda em voo.
+let _historyReloadsInFlight = 0;
 
 function _historyResetAndReload() {
   _historyFilters.page = 1;
@@ -5524,6 +5531,10 @@ async function loadHistoryView(forceFresh = false, { background = false } = {}) 
   // senão dessincroniza com as páginas que ficaram na tela (e o "carregar mais"
   // seguinte pularia/duplicaria).
   const statsNeeded = !_historyStatsCache || _historyStatsCache.months !== _historyFilters.months || forceFresh;
+  // Gate o load-more: enquanto este reload está em voo, um "carregar mais" appendaria
+  // na base velha e abortaria a página 1. Contado no finally pra fechar em qualquer
+  // saída (sucesso, superado, erro, rethrow do background).
+  _historyReloadsInFlight++;
   try {
     const [stats, list] = await Promise.all([
       statsNeeded ? _fetchHistoryStats(_historyFilters.months) : Promise.resolve(_historyStatsCache),
@@ -5545,6 +5556,8 @@ async function loadHistoryView(forceFresh = false, { background = false } = {}) 
     if (background) throw err;
     _historyFilters.page = 1;
     renderHistoryTimeline(null, /*append=*/false);
+  } finally {
+    _historyReloadsInFlight--;
   }
 }
 
@@ -5822,6 +5835,13 @@ document.addEventListener("click", async (e) => {
   // Botão "Carregar mais"
   if (e.target && e.target.id === "history-load-more-btn") {
     const btn = e.target;
+    // Um load completo (nav/filtro/busca/período/puxão) em voo vai SUBSTITUIR a
+    // timeline. Paginar agora abortaria a página 1 desse reload (mesmo canal) e
+    // appendaria numa base que está pra sumir — misturando filtros e sumindo com a
+    // página 1. Ignora o clique: o reload re-renderiza o botão no fim. O botão fica
+    // como está (não o desabilito aqui, pra não deixá-lo preso se o reload for um
+    // puxão em background que falha e preserva o DOM).
+    if (_historyReloadsInFlight > 0) return;
     // NÃO muta _historyFilters.page até o append dar certo (mesma invariante do
     // loadHistoryView: contador == páginas no DOM). Passa nextPage só pro fetch;
     // se for superado ou falhar, o contador fica intacto e batendo com o DOM.
