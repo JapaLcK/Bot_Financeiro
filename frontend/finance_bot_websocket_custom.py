@@ -3732,13 +3732,17 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             mode="subscription",
             locale="pt-BR",
             allow_promotion_codes=True,
-            # `td` = dias de trial concedidos NESTA sessão. A tela de confirmação
-            # usa esse número na cópia; sem ele o front tinha que chutar 30, o que
-            # fica errado se trial_days_total()/PRO_TRIAL_DAYS mudar de valor.
+            # `td` = dias de trial concedidos NESTA sessão. `pl` = plano escolhido.
+            # A tela de confirmação usa os dois na cópia. Sem `td` o front chutava
+            # 30, que quebra se trial_days_total()/PRO_TRIAL_DAYS mudar; sem `pl`
+            # ele parabenizava TODO mundo pelo Plus, inclusive quem comprou
+            # Essencial ou Pro. O plano tem que vir na URL e não do /auth/me
+            # porque o modal abre ~450ms depois da volta, quando o webhook ainda
+            # pode não ter caído e o plano gravado ainda ser o antigo.
             success_url=(
                 f"{DASHBOARD_URL}/home?upgrade=success&sid={{CHECKOUT_SESSION_ID}}"
                 f"&ev={'trial' if trial_days > 0 else 'purchase'}"
-                f"&td={trial_days}"
+                f"&td={trial_days}&pl={plan}"
             ),
             cancel_url=f"{DASHBOARD_URL}/home?upgrade=cancelled",
             metadata=metadata,

@@ -1363,9 +1363,10 @@ async function mfaOnboardingDismiss() {
   .welcome-pro-card { padding: 22px 24px 18px; }
   .wp-mark { width: 40px; height: 40px; border-radius: 13px; margin-bottom: 12px; font-size: 1.25rem; }
   .welcome-pro-card h2 { font-size: 1.4rem; }
-  .wp-sub { font-size: .89rem; margin-bottom: 16px; }
-  .wp-feats { margin-bottom: 16px; }
-  .wp-feats li { padding: 8px 0; }
+  .wp-sub { font-size: .89rem; margin-bottom: 14px; }
+  .wp-feats { margin-bottom: 14px; }
+  .wp-feats li { padding: 7px 0; }
+  .wp-eyebrow { margin-bottom: 8px; }
 }
 
 /* quem pediu menos movimento não leva cascata nem quique */
@@ -1403,13 +1404,7 @@ async function mfaOnboardingDismiss() {
     </p>
     <h2 id="wp-title" style="--i:2">Tá dentro do PigBank+</h2>
     <p class="wp-sub" id="wp-sub" style="--i:3"></p>
-    <ul class="wp-feats" style="--i:4">
-      <li><i class="ph ph-check" aria-hidden="true"></i> Caixinhas e cartões sem limite</li>
-      <li><i class="ph ph-check" aria-hidden="true"></i> Investimentos com IR e IOF</li>
-      <li><i class="ph ph-check" aria-hidden="true"></i> Histórico completo em CSV</li>
-      <li><i class="ph ph-check" aria-hidden="true"></i> Extrato e fatura por OFX</li>
-      <li><i class="ph ph-check" aria-hidden="true"></i> Piggy IA pra falar das finanças</li>
-    </ul>
+    <ul class="wp-feats" id="wp-feats" style="--i:4"></ul>
     <div class="welcome-pro-actions" style="--i:5">
       <button class="welcome-pro-btn-primary" type="button" onclick="goExplorePro()">Abrir o dashboard</button>
       <button class="wp-btn-ghost" type="button" onclick="dismissWelcomePro()">Ficar na Início</button>
@@ -1425,9 +1420,62 @@ async function mfaOnboardingDismiss() {
    só decide se a pessoa vai pro dashboard ou fica na Início. */
 let _wpLastFocus = null;
 
-function openWelcomePro({ trial = true, days = 30 } = {}) {
+/* O checkout vende TRÊS planos (essencial, plus, pro), e a tela parabenizava
+   todo mundo pelo Plus: quem pagou Essencial via prometido o que não comprou, e
+   quem pagou Pro era recebido como o plano de metade do preço.
+
+   Os itens de cada tier saem do que EXISTE em core/services/plan_limits.py
+   (bancos de Open Finance, energia de agentes, cota da IA, janela de histórico),
+   e não da /precos: aquela página anuncia previsão de saldo, caça-assinaturas e
+   cobranças duplicadas, que não têm implementação nenhuma no repositório. Tela
+   de confirmação de pagamento não é lugar de promessa que ainda não roda. */
+const WP_PLANOS = {
+  essencial: {
+    nome: "PigBank Essencial",
+    feats: [
+      "Conecte 1 banco pelo Open Finance",
+      "Lance por áudio, foto do cupom ou OFX",
+      "Caixinhas, metas e cartões sem limite",
+      "Boletos com lembrete de vencimento",
+    ],
+  },
+  plus: {
+    nome: "PigBank+",
+    feats: [
+      "Conecte 2 bancos pelo Open Finance",
+      "Ligue seus agentes: energia para até 3",
+      "Piggy IA sem limite de mensagens",
+      "Histórico de 12 meses, com tudo do Essencial",
+    ],
+  },
+  pro: {
+    nome: "PigBank Pro",
+    feats: [
+      "Conecte até 5 bancos pelo Open Finance",
+      "Rode a equipe toda: energia para os 7 agentes",
+      "Piggy IA sem limite de mensagens",
+      "Histórico de 24 meses, com tudo do Plus",
+    ],
+  },
+};
+
+function openWelcomePro({ trial = true, days = 30, plano = "plus" } = {}) {
   const ov = document.getElementById("welcome-pro-overlay");
   if (!ov) return;
+
+  // `plano` vem da URL, então nunca entra em HTML: só serve de chave do mapa, e
+  // valor desconhecido cai no Plus, que era o texto único de antes.
+  const cfg = WP_PLANOS[String(plano).toLowerCase()] || WP_PLANOS.plus;
+  document.getElementById("wp-title").textContent = `Tá dentro do ${cfg.nome}`;
+  const ul = document.getElementById("wp-feats");
+  ul.replaceChildren(...cfg.feats.map((texto) => {
+    const li = document.createElement("li");
+    const ico = document.createElement("i");
+    ico.className = "ph ph-check";
+    ico.setAttribute("aria-hidden", "true");
+    li.append(ico, " " + texto);   // textContent: nada daqui vira markup
+    return li;
+  }));
 
   // A cópia muda com o que o backend mandou no success_url. Sem isso, quem
   // assina SEM direito a período grátis (ev=purchase, já usou o trial antes)
@@ -1480,6 +1528,7 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
   const sid = params.get("sid");  // id da sessão Stripe → event_id do evento
   const ev = params.get("ev");    // "trial" | "purchase" (definido pelo success_url)
   const td = params.get("td");    // dias de trial concedidos (0 quando ev=purchase)
+  const pl = params.get("pl");    // plano escolhido: essencial | plus | pro
   if (!status) return;
 
   // Limpa os query params da URL pra nao reaparecer em refresh.
@@ -1488,6 +1537,7 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
   cleanUrl.searchParams.delete("sid");
   cleanUrl.searchParams.delete("ev");
   cleanUrl.searchParams.delete("td");
+  cleanUrl.searchParams.delete("pl");
   window.history.replaceState({}, "", cleanUrl.toString());
 
   if (status === "success") {
@@ -1511,6 +1561,7 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
       openWelcomePro({
         trial: ev !== "purchase",
         days: Number.isFinite(dias) && dias > 0 ? dias : 30,
+        plano: pl || "plus",
       });
     }, 450);
   } else if (status === "cancelled") {
