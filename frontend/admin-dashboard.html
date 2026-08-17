@@ -1419,13 +1419,15 @@ function renderUsersChips(agg, billing, funnel) {
     </div>`).join('');
   html += `
     <div class="user-chip static"><b>${fInt(agg.whatsapp_connected)}</b><span>WA conect.</span></div>`;
-  // Funil de checkout 30d: abriram × conversão (concluíram / abriram).
+  // Funil de checkout 30d: pessoas que abriram + conversão POR SESSÃO
+  // (sessões concluídas / sessões abertas, correlação por session_id).
   if (funnel) {
-    const started = funnel.started_30d || 0;
-    const completed = funnel.completed_30d || 0;
-    const conv = started > 0 ? Math.round((completed / started) * 100) : null;
+    const people = funnel.people_30d || 0;
+    const sStarted = funnel.sessions_started_30d || 0;
+    const sCompleted = funnel.sessions_completed_30d || 0;
+    const conv = sStarted > 0 ? Math.round((sCompleted / sStarted) * 100) : null;
     html += `
-    <div class="user-chip static"><b>${fInt(started)}</b><span>Checkout 30d</span></div>
+    <div class="user-chip static"><b>${fInt(people)}</b><span>Checkout 30d</span></div>
     <div class="user-chip static"><b class="${conv !== null && conv >= 50 ? 'green' : ''}">${conv !== null ? conv + '%' : '—'}</b><span>Conversão 30d</span></div>`;
   }
   if (billing?.available) {

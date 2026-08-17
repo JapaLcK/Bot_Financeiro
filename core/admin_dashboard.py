@@ -886,61 +886,47 @@ async def fetch_billing_summary(force: bool = False) -> dict[str, Any]:
     return _billing_summary_cache["data"]
 
 
-# Telemetria do funil: as duas pontas precisam sobreviver pra a conversão 30d
-# fazer sentido. O "Limpar" do feed (bulk delete até um id) NÃO pode apagá-las
-# — senão uma limpeza de rotina do feed zeraria a métrica silenciosamente.
-_FUNNEL_EVENT_TYPES = ("billing_checkout_started", "billing_checkout_completed")
-
-
 async def _fetch_checkout_funnel(cur) -> dict[str, int]:
-    """Funil de checkout a partir de system_event_logs, por COORTE de abertura:
-    started = pessoas distintas que ABRIRAM o checkout na janela;
-    completed = as que abriram na janela E TAMBÉM concluíram na janela.
+    """Funil de checkout a partir da tabela dedicada checkout_funnel_events,
+    correlacionando abertura e conclusão pelo session_id do Stripe (a MESMA
+    tentativa). Devolve, em 30d e 7d:
 
-    O completed é subconjunto do started de propósito. Se contássemos toda
-    conclusão (billing_checkout_completed) contra o started novo, a conversão
-    estouraria 100% no 1º mês pós-deploy — billing_checkout_completed já tem
-    histórico de meses, billing_checkout_started nasce agora — e voltaria a
-    furar na borda da janela (quem abriu há 31d e concluiu há 5d). Amarrar o
-    numerador à coorte que abriu na janela mantém a razão em 0–100% e
-    semanticamente correta ('dos que abriram, quantos fecharam').
+      people_Nd            — pessoas distintas que abriram algum checkout
+      sessions_started_Nd  — sessões (tentativas) abertas
+      sessions_completed_Nd— dessas, as que concluíram (mesmo session_id)
 
-    Contagem por usuário (abrir 2x não conta 2); user_id NULL é ignorado.
+    A conversão (sessions_completed / sessions_started) é por SESSÃO: um
+    ex-assinante que comprou numa sessão e depois reabre e abandona outra tem
+    a 2ª sessão contada como não-convertida — sem a correlação por session_id
+    isso era impossível de separar (era a raiz dos 3 apontamentos anteriores).
+    Viver em tabela própria (não em system_event_logs) também torna a
+    telemetria imune ao 'Limpar'/purge do feed.
 
-    A conclusão precisa vir DEPOIS da abertura da coorte: comparamos
-    max(concluído) >= min(aberto) na janela. Sem isso, um ex-assinante que
-    concluiu antes na janela e depois reabre o checkout (e abandona) seria
-    contado como convertido pela conclusão velha. Efeito colateral aceito:
-    quem abre no fim da janela e conclui já fora dela não entra no completed
-    (subestima levemente, no sentido seguro)."""
+    Uma sessão sem session_id (raro — Stripe sempre devolve) entra em people
+    mas não nas contagens de sessão (COUNT DISTINCT ignora NULL)."""
     await cur.execute(
         """
         SELECT
-            COUNT(*) FILTER (WHERE min_start_30d IS NOT NULL) AS started_30d,
-            COUNT(*) FILTER (
-                WHERE min_start_30d IS NOT NULL
-                  AND max_comp_30d >= min_start_30d) AS completed_30d,
-            COUNT(*) FILTER (WHERE min_start_7d IS NOT NULL) AS started_7d,
-            COUNT(*) FILTER (
-                WHERE min_start_7d IS NOT NULL
-                  AND max_comp_7d >= min_start_7d) AS completed_7d
+            COUNT(DISTINCT user_id)    FILTER (WHERE w30)                AS people_30d,
+            COUNT(DISTINCT session_id) FILTER (WHERE w30)                AS sessions_started_30d,
+            COUNT(DISTINCT session_id) FILTER (WHERE w30 AND converted)  AS sessions_completed_30d,
+            COUNT(DISTINCT user_id)    FILTER (WHERE w7)                 AS people_7d,
+            COUNT(DISTINCT session_id) FILTER (WHERE w7)                 AS sessions_started_7d,
+            COUNT(DISTINCT session_id) FILTER (WHERE w7 AND converted)   AS sessions_completed_7d
         FROM (
             SELECT
-                user_id,
-                MIN(created_at) FILTER (WHERE event_type = 'billing_checkout_started'
-                    AND created_at >= NOW() - INTERVAL '30 days') AS min_start_30d,
-                MAX(created_at) FILTER (WHERE event_type = 'billing_checkout_completed'
-                    AND created_at >= NOW() - INTERVAL '30 days') AS max_comp_30d,
-                MIN(created_at) FILTER (WHERE event_type = 'billing_checkout_started'
-                    AND created_at >= NOW() - INTERVAL '7 days')  AS min_start_7d,
-                MAX(created_at) FILTER (WHERE event_type = 'billing_checkout_completed'
-                    AND created_at >= NOW() - INTERVAL '7 days')  AS max_comp_7d
-            FROM system_event_logs
-            WHERE event_type IN ('billing_checkout_started', 'billing_checkout_completed')
-              AND created_at >= NOW() - INTERVAL '30 days'
-              AND user_id IS NOT NULL
-            GROUP BY user_id
-        ) per_user
+                s.user_id,
+                s.session_id,
+                s.created_at >= NOW() - INTERVAL '30 days' AS w30,
+                s.created_at >= NOW() - INTERVAL '7 days'  AS w7,
+                (s.session_id IS NOT NULL AND EXISTS (
+                    SELECT 1 FROM checkout_funnel_events c
+                    WHERE c.kind = 'completed' AND c.session_id = s.session_id
+                )) AS converted
+            FROM checkout_funnel_events s
+            WHERE s.kind = 'started'
+              AND s.created_at >= NOW() - INTERVAL '30 days'
+        ) per_start
         """
     )
     row = await cur.fetchone()
@@ -1528,21 +1514,15 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
           - before_id: deleta eventos com id <= before_id (snapshot do client)
 
         Use sem filtros pra apagar tudo, ou só `before_id` pra "limpar tudo até este momento".
-
-        Exceção sempre aplicada: os eventos do funil de checkout
-        (_FUNNEL_EVENT_TYPES) são preservados — o painel depende deles pra
-        conversão 30d, e o "Limpar" é uma ação de UX do feed de alertas, não
-        um expurgo de telemetria de negócio.
         """
-        clauses = ["event_type <> ALL(%s)"]
-        params: list[Any] = [list(_FUNNEL_EVENT_TYPES)]
+        clauses, params = [], []
         if level in ("error", "warning", "info"):
             clauses.append("level = %s")
             params.append(level)
         if before_id is not None:
             clauses.append("id <= %s")
             params.append(int(before_id))
-        where = "WHERE " + " AND ".join(clauses)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
         async with await db_connect() as conn:
             async with conn.cursor() as cur:

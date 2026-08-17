@@ -266,125 +266,103 @@ def test_users_endpoint_requires_admin_auth():
     assert response.status_code == 401
 
 
-def test_limpar_feed_preserva_eventos_do_funil(panel_accounts):
-    """Guard do P2: o 'Limpar' (DELETE /admin/api/events?before_id=...) apaga o
-    feed mas NÃO pode zerar o funil — os eventos billing_checkout_* sobrevivem
-    ao expurgo, senão a conversão 30d some numa limpeza de rotina."""
-    _tag, uids = panel_accounts
-    client = _admin_client()
-
-    # 1 evento comum (deve ser apagado) + os 2 do funil (devem sobreviver)
-    common_id = _log_event(uids["free"], "whatsapp_webhook_received", level="info")
-    start_id = _log_event(uids["paying"], "billing_checkout_started")
-    comp_id = _log_event(uids["paying"], "billing_checkout_completed")
-    before = max(common_id, start_id, comp_id)
-
-    base_funnel = client.get("/admin/api/users").json()["checkout_funnel"]
-
-    # "Limpar tudo até este momento" (DELETE exige o header CSRF)
-    resp = client.request(
-        "DELETE", f"/admin/api/events?before_id={before}",
-        headers={dashboard.CSRF_HEADER_NAME: "test-admin-csrf"},
-    )
-    assert resp.status_code == 200
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("select count(*) n from system_event_logs where id = %s", (common_id,))
-            assert cur.fetchone()["n"] == 0, "evento comum devia ter sido apagado"
-            cur.execute(
-                "select count(*) n from system_event_logs where id = any(%s)",
-                ([start_id, comp_id],),
-            )
-            assert cur.fetchone()["n"] == 2, "eventos do funil NÃO podem ser apagados"
-
-    # E o funil continua contando a coorte
-    after_funnel = client.get("/admin/api/users").json()["checkout_funnel"]
-    assert after_funnel["started_30d"] == base_funnel["started_30d"]
-    assert after_funnel["completed_30d"] == base_funnel["completed_30d"]
-
-
-def _log_event(uid, event_type, *, days_ago=0, level="info"):
+def _funnel_event(uid, kind, session_id, *, days_ago=0):
+    """Insere um evento na tabela dedicada checkout_funnel_events."""
     from datetime import datetime, timedelta, timezone
     ts = datetime.now(timezone.utc) - timedelta(days=days_ago)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "insert into system_event_logs (level, event_type, message, source, user_id, details, created_at) "
-                "values (%s, %s, 'x', 'billing', %s, '{}'::jsonb, %s) returning id",
-                (level, event_type, uid, ts),
+                "insert into checkout_funnel_events (user_id, session_id, kind, created_at) "
+                "values (%s, %s, %s, %s)",
+                (uid, session_id, kind, ts),
             )
-            new_id = cur.fetchone()["id"]
         conn.commit()
-    return new_id
 
 
-def test_checkout_funnel_conta_pessoas_distintas(panel_accounts):
-    """checkout_funnel conta USUÁRIOS distintos: abrir 2x não vira 2 no
-    started; completed = quem abriu E concluiu na janela."""
-    _tag, uids = panel_accounts
-    client = _admin_client()
-
-    base = client.get("/admin/api/users").json()["checkout_funnel"]
-    b_started, b_completed = base["started_30d"], base["completed_30d"]
-
-    # 2 pessoas abrem o checkout; uma delas abre 2x (não deve inflar); 1 conclui
-    _log_event(uids["paying"], "billing_checkout_started")
-    _log_event(uids["paying"], "billing_checkout_started")  # 2ª abertura, mesmo user
-    _log_event(uids["trial"], "billing_checkout_started")
-    _log_event(uids["paying"], "billing_checkout_completed")
-
-    funnel = client.get("/admin/api/users").json()["checkout_funnel"]
-    assert funnel["started_30d"] == b_started + 2      # 2 pessoas, não 3 eventos
-    assert funnel["completed_30d"] == b_completed + 1  # só paying (abriu E fechou)
-
-
-def test_checkout_funnel_conversao_nunca_passa_de_100pct(panel_accounts):
-    """Guard do P1: conclusão SEM abertura na coorte (histórico anterior ao
-    recurso, ou início fora da janela) não entra no numerador — a conversão
-    fica sempre <= 100%."""
-    _tag, uids = panel_accounts
+def test_checkout_funnel_conta_pessoas_e_sessoes(panel_accounts):
+    """people conta usuários distintos; sessions_started conta sessões
+    distintas; sessions_completed liga início e fim pelo MESMO session_id."""
+    tag, uids = panel_accounts
     client = _admin_client()
 
     base = client.get("/admin/api/users").json()["checkout_funnel"]
 
-    # Conclusão histórica sem started correspondente na janela (caso do deploy)
-    _log_event(uids["canceled"], "billing_checkout_completed")
-    # Abertura antiga (fora da janela de 30d) + conclusão recente: não é coorte
-    _log_event(uids["granted"], "billing_checkout_started", days_ago=40)
-    _log_event(uids["granted"], "billing_checkout_completed")
-    # Uma coorte legítima na janela
-    _log_event(uids["paying"], "billing_checkout_started")
-    _log_event(uids["paying"], "billing_checkout_completed")
+    # paying abre 2 sessões (A e B); só A conclui. trial abre 1 sessão (C) sem concluir.
+    _funnel_event(uids["paying"], "started", f"sess_A_{tag}")
+    _funnel_event(uids["paying"], "completed", f"sess_A_{tag}")
+    _funnel_event(uids["paying"], "started", f"sess_B_{tag}")   # abandonada
+    _funnel_event(uids["trial"], "started", f"sess_C_{tag}")    # abandonada
 
-    funnel = client.get("/admin/api/users").json()["checkout_funnel"]
-    # started só ganhou o paying (o granted abriu fora da janela)
-    assert funnel["started_30d"] == base["started_30d"] + 1
-    # completed só ganhou o paying — as duas conclusões sem coorte não contam
-    assert funnel["completed_30d"] == base["completed_30d"] + 1
-    # E a razão respeita o teto
-    assert funnel["completed_30d"] <= funnel["started_30d"]
+    f = client.get("/admin/api/users").json()["checkout_funnel"]
+    assert f["people_30d"] == base["people_30d"] + 2            # paying + trial
+    assert f["sessions_started_30d"] == base["sessions_started_30d"] + 3  # A, B, C
+    assert f["sessions_completed_30d"] == base["sessions_completed_30d"] + 1  # só A
 
 
-def test_checkout_funnel_conclusao_precisa_vir_depois_da_abertura(panel_accounts):
-    """Guard do P2: ex-assinante que concluiu ANTES na janela e depois reabre
-    o checkout (e abandona) não é convertido — a conclusão velha não conta pra
-    coorte nova. Exige max(concluído) >= min(aberto)."""
-    _tag, uids = panel_accounts
+def test_checkout_funnel_conversao_por_sessao_resolve_recompra(panel_accounts):
+    """P2 (388): comprou numa sessão, cancelou, reabre outra e abandona. A
+    correlação por session_id conta a 2ª sessão como NÃO convertida — a
+    conversão por sessão nunca fica inflada pela compra velha."""
+    tag, uids = panel_accounts
     client = _admin_client()
 
     base = client.get("/admin/api/users").json()["checkout_funnel"]
 
-    # Ex-assinante: concluiu há 20d (compra antiga), reabre há 2d e abandona
-    # (sem conclusão posterior). Abriu na janela → conta no started; mas a
-    # única conclusão é ANTERIOR à reabertura → NÃO conta no completed.
-    _log_event(uids["canceled"], "billing_checkout_completed", days_ago=20)
-    _log_event(uids["canceled"], "billing_checkout_started", days_ago=2)
+    # sessão A: comprou há 20d (started+completed, mesmo id). sessão B: reabre
+    # há 2d e abandona (started sem completed).
+    _funnel_event(uids["canceled"], "started", f"sess_old_{tag}", days_ago=20)
+    _funnel_event(uids["canceled"], "completed", f"sess_old_{tag}", days_ago=20)
+    _funnel_event(uids["canceled"], "started", f"sess_new_{tag}", days_ago=2)
 
-    funnel = client.get("/admin/api/users").json()["checkout_funnel"]
-    assert funnel["started_30d"] == base["started_30d"] + 1
-    assert funnel["completed_30d"] == base["completed_30d"]  # conclusão velha não conta
-    assert funnel["completed_30d"] <= funnel["started_30d"]
+    f = client.get("/admin/api/users").json()["checkout_funnel"]
+    assert f["sessions_started_30d"] == base["sessions_started_30d"] + 2   # old + new
+    assert f["sessions_completed_30d"] == base["sessions_completed_30d"] + 1  # só a old
+    # a razão respeita o teto e a sessão nova (abandonada) não é convertida
+    assert f["sessions_completed_30d"] <= f["sessions_started_30d"]
+
+
+def test_checkout_funnel_conclusao_sem_abertura_nao_conta(panel_accounts):
+    """P1: conclusão cujo session_id nunca teve um 'started' (histórico órfão,
+    ou completed sem session_id) não infla o completed — só sessões abertas
+    entram no started, e completed é subconjunto delas."""
+    tag, uids = panel_accounts
+    client = _admin_client()
+
+    base = client.get("/admin/api/users").json()["checkout_funnel"]
+
+    # completed órfão (nenhum started com esse session_id)
+    _funnel_event(uids["free"], "completed", f"sess_orphan_{tag}")
+    # completed sem session_id
+    _funnel_event(uids["free"], "completed", None)
+
+    f = client.get("/admin/api/users").json()["checkout_funnel"]
+    # nenhuma sessão ABERTA nova → started e completed inalterados
+    assert f["sessions_started_30d"] == base["sessions_started_30d"]
+    assert f["sessions_completed_30d"] == base["sessions_completed_30d"]
+
+
+def test_checkout_funnel_imune_ao_purge_do_feed(panel_accounts):
+    """O funil vive em tabela própria (checkout_funnel_events), NÃO em
+    system_event_logs — então o 'Limpar' do feed não pode zerá-lo. Aqui isso
+    é estrutural (tabelas diferentes), mas o teste trava a garantia."""
+    tag, uids = panel_accounts
+    client = _admin_client()
+
+    _funnel_event(uids["paying"], "started", f"sess_P_{tag}")
+    _funnel_event(uids["paying"], "completed", f"sess_P_{tag}")
+    base = client.get("/admin/api/users").json()["checkout_funnel"]
+
+    # Apaga TUDO de system_event_logs
+    resp = client.request(
+        "DELETE", "/admin/api/events",
+        headers={dashboard.CSRF_HEADER_NAME: "test-admin-csrf"},
+    )
+    assert resp.status_code == 200
+
+    after = client.get("/admin/api/users").json()["checkout_funnel"]
+    assert after["sessions_started_30d"] == base["sessions_started_30d"]
+    assert after["sessions_completed_30d"] == base["sessions_completed_30d"]
 
 
 def test_users_list_aggregates_and_statuses(panel_accounts):

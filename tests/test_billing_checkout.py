@@ -444,10 +444,11 @@ def test_checkout_novo_plano_expira_sessao_aberta_incompativel(user_id, monkeypa
     assert fake.session_expire_calls == 1
 
 
-def test_checkout_loga_evento_started_no_funil(user_id, monkeypatch):
-    """Abrir o checkout com sucesso registra billing_checkout_started em
-    system_event_logs (par do billing_checkout_completed do webhook) — é o que
-    alimenta o funil de conversão no painel de admin."""
+def test_checkout_grava_started_no_funil_com_session_id(user_id, monkeypatch):
+    """Abrir o checkout com sucesso grava um 'started' na tabela dedicada
+    checkout_funnel_events, com o session_id do Stripe (o que permite
+    correlacionar com o 'completed' do webhook). O session_id NÃO vaza no
+    payload devolvido ao cliente."""
     from db import get_conn
 
     uid, _, client = _auth_user_setup(f"funnel-{user_id}")
@@ -459,23 +460,21 @@ def test_checkout_loga_evento_started_no_funil(user_id, monkeypatch):
         "/billing/create-checkout", json={"interval": "monthly"}, headers=_CSRF_HEADERS
     )
     assert resp.status_code == 200, resp.text
+    assert "session_id" not in resp.json(), "session_id não pode vazar pro cliente"
 
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                select details from system_event_logs
-                where event_type = 'billing_checkout_started' and user_id = %s
-                order by created_at desc limit 1
-                """,
+                "select session_id, kind from checkout_funnel_events "
+                "where user_id = %s and kind = 'started' order by id desc limit 1",
                 (uid,),
             )
             row = cur.fetchone()
-    assert row is not None, "evento billing_checkout_started não foi logado"
-    assert row["details"]["interval"] == "monthly"
+    assert row is not None, "'started' não foi gravado na tabela do funil"
+    assert row["session_id"] and row["session_id"].startswith("cs_test_")
 
 
-def test_checkout_falho_nao_loga_started(user_id, monkeypatch):
+def test_checkout_falho_nao_grava_started(user_id, monkeypatch):
     """Sessão que não nasce (Stripe não configurado) não polui o funil."""
     from db import get_conn
 
@@ -489,8 +488,8 @@ def test_checkout_falho_nao_loga_started(user_id, monkeypatch):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select count(*) as n from system_event_logs "
-                "where event_type = 'billing_checkout_started' and user_id = %s",
+                "select count(*) as n from checkout_funnel_events "
+                "where user_id = %s and kind = 'started'",
                 (uid,),
             )
             n = cur.fetchone()["n"]
