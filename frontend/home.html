@@ -1426,6 +1426,18 @@ async function mfaOnboardingDismiss() {
    só decide se a pessoa vai pro dashboard ou fica na Início. */
 let _wpLastFocus = null;
 
+/* "Cota ampliada" já não mentia, mas também não informava: o assinante fica
+   sem saber quantas mensagens comprou, e é justamente o número que decide se
+   ele vai esbarrar no teto. O `ia` do success_url resolve isso pelo mesmo
+   caminho que o `td` já tinha aberto — o argumento de que o valor "vem de env"
+   é o motivo de ele viajar na URL, não de ele sumir da tela. Sem `ia` (link
+   antigo, anterior ao parâmetro) a frase genérica continua valendo. */
+function _wpFeatIA(ia) {
+  return Number.isFinite(ia) && ia > 0
+    ? `Piggy IA: ${ia.toLocaleString("pt-BR")} mensagens por mês`
+    : "Piggy IA com cota ampliada";
+}
+
 /* O checkout vende TRÊS planos (essencial, plus, pro), e a tela parabenizava
    todo mundo pelo Plus: quem pagou Essencial via prometido o que não comprou, e
    quem pagou Pro era recebido como o plano de metade do preço.
@@ -1442,13 +1454,12 @@ let _wpLastFocus = null;
        ilimitado de verdade;
      - ai_monthly_messages None: cai no teto GLOBAL AI_CHAT_MONTHLY_LIMIT
        (1000/mês por padrão) em ai_monthly_limit_for (plan_service.py:398), e o
-       runner recusa depois disso. Por isso Plus e Pro dizem "cota ampliada" e
-       não "sem limite": eles só escapam da cota de 200 do Essencial, não do
-       teto da casa. O número em si não entra na cópia porque vem de env. */
+       runner recusa depois disso. Por isso Plus e Pro NÃO dizem "sem limite":
+       eles só escapam da cota de 200 do Essencial, não do teto da casa. */
 const WP_PLANOS = {
   essencial: {
     nome: "PigBank Essencial",
-    feats: [
+    feats: () => [
       "Conecte 1 banco pelo Open Finance",
       "Lance por áudio, foto do cupom ou OFX",
       "Caixinhas, metas e cartões sem limite",
@@ -1457,25 +1468,25 @@ const WP_PLANOS = {
   },
   plus: {
     nome: "PigBank+",
-    feats: [
+    feats: (ia) => [
       "Conecte 2 bancos pelo Open Finance",
       "Ligue seus agentes: energia para até 3",
-      "Piggy IA com cota ampliada",
+      _wpFeatIA(ia),
       "Histórico de 12 meses, com tudo do Essencial",
     ],
   },
   pro: {
     nome: "PigBank Pro",
-    feats: [
+    feats: (ia) => [
       "Conecte até 5 bancos pelo Open Finance",
       "Rode a equipe toda: energia para os 7 agentes",
-      "Piggy IA com cota ampliada",
+      _wpFeatIA(ia),
       "Histórico de 24 meses, com tudo do Plus",
     ],
   },
 };
 
-function openWelcomePro({ trial = true, days = 30, plano = "plus" } = {}) {
+function openWelcomePro({ trial = true, days = 30, plano = "plus", ia = null } = {}) {
   const ov = document.getElementById("welcome-pro-overlay");
   if (!ov) return;
 
@@ -1484,7 +1495,7 @@ function openWelcomePro({ trial = true, days = 30, plano = "plus" } = {}) {
   const cfg = WP_PLANOS[String(plano).toLowerCase()] || WP_PLANOS.plus;
   document.getElementById("wp-title").textContent = `Tá dentro do ${cfg.nome}`;
   const ul = document.getElementById("wp-feats");
-  ul.replaceChildren(...cfg.feats.map((texto) => {
+  ul.replaceChildren(...cfg.feats(ia).map((texto) => {
     const li = document.createElement("li");
     const ico = document.createElement("i");
     ico.className = "ph ph-check";
@@ -1571,6 +1582,7 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
   const ev = params.get("ev");    // "trial" | "purchase" (definido pelo success_url)
   const td = params.get("td");    // dias de trial concedidos (0 quando ev=purchase)
   const pl = params.get("pl");    // plano escolhido: essencial | plus | pro
+  const ia = params.get("ia");    // cota mensal de mensagens da Piggy nesse plano
   if (!status) return;
 
   // Limpa os query params da URL pra nao reaparecer em refresh.
@@ -1580,6 +1592,7 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
   cleanUrl.searchParams.delete("ev");
   cleanUrl.searchParams.delete("td");
   cleanUrl.searchParams.delete("pl");
+  cleanUrl.searchParams.delete("ia");
   window.history.replaceState({}, "", cleanUrl.toString());
 
   if (status === "success") {
@@ -1598,12 +1611,16 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
     // Pequeno delay pra dar o "wow effect" depois da pagina carregar.
     // `ev` ausente cai no texto de trial, que era o comportamento anterior:
     // link antigo na caixa de e-mail não deve virar cópia errada pro outro lado.
+    // `ia` ausente (link antigo, de antes deste parâmetro existir) NÃO vira
+    // número chutado: a linha da IA fica na frase genérica.
     setTimeout(() => {
       const dias = Number.parseInt(td, 10);
+      const cotaIA = Number.parseInt(ia, 10);
       openWelcomePro({
         trial: ev !== "purchase",
         days: Number.isFinite(dias) && dias > 0 ? dias : 30,
         plano: pl || "plus",
+        ia: Number.isFinite(cotaIA) && cotaIA > 0 ? cotaIA : null,
       });
     }, 450);
   } else if (status === "cancelled") {

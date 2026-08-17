@@ -3701,7 +3701,11 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
 
     # A elegibilidade só é consultada ao criar uma sessão nova. Reabrir a mesma
     # URL preserva exatamente as condições que o usuário já viu no checkout.
-    from core.services.plan_service import plans_v2_enabled, trial_days_total
+    from core.services.plan_service import (
+        ai_monthly_limit_for_tier,
+        plans_v2_enabled,
+        trial_days_total,
+    )
     if plans_v2_enabled():
         from db.plans import TrialEligibilityError, is_trial_eligible_for_user
         try:
@@ -3714,6 +3718,14 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
         trial_days = trial_days_total() if eligible else 0
     else:
         trial_days = int(os.getenv("PRO_TRIAL_DAYS", "30"))
+
+    # Cota mensal da IA do plano comprado. Plus e Pro têm `ai_monthly_messages:
+    # None` em plan_limits.py, o que NÃO é ilimitado: cai no teto global
+    # AI_CHAT_MONTHLY_LIMIT (1.000 por padrão, ajustável por env) e o chat corta
+    # ali. Vai na URL pelo mesmo motivo do `td`: número de backend não pode ficar
+    # chumbado no HTML, e com v2 desligado o tier efetivo de quem paga é o de
+    # cima, não o comprado (get_user_limits → limits_for("pro")).
+    ia_quota = ai_monthly_limit_for_tier(plan if plans_v2_enabled() else "pro")
 
     def _new_session(cust_id: str):
         metadata = {
@@ -3733,16 +3745,18 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             locale="pt-BR",
             allow_promotion_codes=True,
             # `td` = dias de trial concedidos NESTA sessão. `pl` = plano escolhido.
-            # A tela de confirmação usa os dois na cópia. Sem `td` o front chutava
-            # 30, que quebra se trial_days_total()/PRO_TRIAL_DAYS mudar; sem `pl`
-            # ele parabenizava TODO mundo pelo Plus, inclusive quem comprou
-            # Essencial ou Pro. O plano tem que vir na URL e não do /auth/me
-            # porque o modal abre ~450ms depois da volta, quando o webhook ainda
-            # pode não ter caído e o plano gravado ainda ser o antigo.
+            # `ia` = cota mensal de mensagens da Piggy nesse plano. A tela de
+            # confirmação usa os três na cópia. Sem `td` o front chutava 30, que
+            # quebra se trial_days_total()/PRO_TRIAL_DAYS mudar; sem `pl` ele
+            # parabenizava TODO mundo pelo Plus, inclusive quem comprou Essencial
+            # ou Pro; sem `ia` ele prometia IA "sem limite de mensagens", que o
+            # backend não entrega. Tudo isso tem que vir na URL e não do
+            # /auth/me porque o modal abre ~450ms depois da volta, quando o
+            # webhook ainda pode não ter caído e o plano gravado ainda ser o antigo.
             success_url=(
                 f"{DASHBOARD_URL}/home?upgrade=success&sid={{CHECKOUT_SESSION_ID}}"
                 f"&ev={'trial' if trial_days > 0 else 'purchase'}"
-                f"&td={trial_days}&pl={plan}"
+                f"&td={trial_days}&pl={plan}&ia={ia_quota}"
             ),
             cancel_url=f"{DASHBOARD_URL}/home?upgrade=cancelled",
             metadata=metadata,
