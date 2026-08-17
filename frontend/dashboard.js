@@ -4887,6 +4887,11 @@ async function _fetchAnalyticsAll(months, { force = false } = {}) {
     // Os 7 fetches recebem o MESMO signal — um abort cancela todos de uma vez.
     const getJson = async (url) => {
       const r = await fetch(url, { credentials: "same-origin", signal });
+      // Sem checar r.ok, um 4xx/5xx voltaria como JSON de erro "com cara de dado"
+      // e o render pintaria KPIs/gráficos vazios COMO SUCESSO — no puxão, apagando
+      // o render bom e reportando sucesso. Lança nos obrigatórios; os opcionais
+      // (optional() abaixo) engolem esse throw e viram {}.
+      if (!r.ok) throw new Error(`analytics (HTTP ${r.status}) ${url}`);
       return r.json();
     };
     // patterns/insights são opcionais: falha de rede/HTTP vira {} (não derruba a
@@ -5519,23 +5524,37 @@ async function loadHistoryView(forceFresh = false, { background = false } = {}) 
   // Stats e lista são fetched em paralelo. Stats só depende do período
   // (não dos filtros), então serve do cache se o período não mudou.
   const statsNeeded = !_historyStatsCache || _historyStatsCache.months !== _historyFilters.months || forceFresh;
-  const [stats, list] = await Promise.all([
-    statsNeeded ? _fetchHistoryStats(_historyFilters.months) : Promise.resolve(_historyStatsCache),
-    _fetchHistoryList(_historyFilters),
-  ]);
-  // list undefined = este load foi superado por um mais novo (troca de filtro,
-  // nova busca, puxão). Não renderiza — o mais novo é quem manda. Isso é a
-  // guarda de geração que impede o stale-overwrite no Histórico.
-  if (list === undefined) return;
-  if (statsNeeded && stats) _historyStatsCache = { ...stats, months: _historyFilters.months };
+  try {
+    const [stats, list] = await Promise.all([
+      statsNeeded ? _fetchHistoryStats(_historyFilters.months) : Promise.resolve(_historyStatsCache),
+      _fetchHistoryList(_historyFilters),
+    ]);
+    // list undefined = este load foi superado por um mais novo (troca de filtro,
+    // nova busca, puxão). Não renderiza — o mais novo é quem manda. Isso é a
+    // guarda de geração que impede o stale-overwrite no Histórico.
+    if (list === undefined) return;
+    if (statsNeeded && stats) _historyStatsCache = { ...stats, months: _historyFilters.months };
 
-  renderHistoryStats(_historyStatsCache);
-  renderHistoryTimeline(list, /*append=*/false);
+    renderHistoryStats(_historyStatsCache);
+    renderHistoryTimeline(list, /*append=*/false);
+  } catch (err) {
+    // Falha REAL da lista (HTTP/rede). No puxão (background): rejeita sem tocar no
+    // DOM — o render bom fica e o indicador do gesto vira âmbar. Na navegação/
+    // filtro: mostra o estado de erro (mesmo comportamento de antes, quando o
+    // payload de erro caía no renderHistoryTimeline e batia no !payload.ok).
+    if (background) throw err;
+    renderHistoryTimeline(null, /*append=*/false);
+  }
 }
 
 async function _fetchHistoryStats(months) {
   try {
     const r = await fetch(`/history/${USER_ID}/quick-stats?months=${months}`, { credentials:"same-origin" });
+    // Stats é secundário e tolerante (o refresh não falha por causa dele — ver a
+    // assimetria no corpo do PR). Mas sem checar r.ok, um 500 voltaria o payload
+    // de erro como "stats" e renderHistoryStats pintaria lixo. !ok → null →
+    // renderHistoryStats sai cedo e mantém os contadores anteriores.
+    if (!r.ok) return null;
     return await r.json();
   } catch (_) { return null; }
 }
@@ -5544,6 +5563,10 @@ async function _fetchHistoryList(filters, opts = {}) {
   const qs = _buildHistoryQuery(filters);
   const doFetch = async (signal) => {
     const r = await fetch(`/history/${USER_ID}/list?${qs}`, { credentials:"same-origin", signal });
+    // Sem checar r.ok, um 401/500 voltaria como payload de erro e o
+    // renderHistoryTimeline substituiria a timeline boa por "Erro ao carregar",
+    // reportando o puxão como sucesso. Lança pra falha REAL subir pelo canal.
+    if (!r.ok) throw new Error(`histórico (HTTP ${r.status})`);
     return await r.json();
   };
   // allowParallel = busca concorrente (ex.: digitação incremental futura): sem
