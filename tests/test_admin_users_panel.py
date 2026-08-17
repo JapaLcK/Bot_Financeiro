@@ -18,6 +18,16 @@ from db import ensure_user, get_conn
 NOW = datetime.now(timezone.utc)
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _admin_tables():
+    """system_event_logs não vem do init_db — só do ensure_admin_tables()
+    (startup do app). No CI o banco é fresco e o drill-down consulta essa
+    tabela; mesmo precedente de test_security_alerts."""
+    import asyncio
+
+    asyncio.run(admin_dashboard.ensure_admin_tables())
+
+
 @pytest.fixture(autouse=True)
 def configured_admin(monkeypatch):
     async def _noop_log(*args, **kwargs):
