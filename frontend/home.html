@@ -949,12 +949,21 @@ function escapeHtml(s) {
 }
 
 /* ─── Profile flags (whatsapp linked) ─────────────────────────────────── */
-async function loadAuthMe() {
+async function loadAuthMe(timeoutMs) {
+  // timeoutMs (opcional): aborta o fetch — sem isso um /auth/me travado ficaria
+  // pendente pra sempre e seguraria o loop de confirmação além do deadline
+  // (a tela "confirmando…" nunca fecharia). Usado só no poll pós-checkout.
+  const ctrl = timeoutMs ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
   try {
-    const res = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
+    const res = await fetch(`${API}/auth/me`, {
+      credentials: "same-origin",
+      ...(ctrl ? { signal: ctrl.signal } : {}),
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch { return null; }
+  finally { if (timer) clearTimeout(timer); }
 }
 
 /* "Assentou" = o webhook checkout.session.completed já ATIVOU o plano pago que
@@ -983,13 +992,16 @@ function _checkoutSettled(me) {
 async function awaitCheckoutConfirmation(me) {
   const overlay = document.getElementById("checkout-confirm-overlay");
   overlay?.classList.add("open");
-  const deadline = Date.now() + 20000;   // ~20s
+  const deadline = Date.now() + 20000;   // ~20s no total
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   try {
     while (Date.now() < deadline) {
       if (_checkoutSettled(me)) break;   // webhook caiu
       await wait(1500);
-      const fresh = await loadAuthMe();
+      // Cada poll é abortado com o tempo que resta até o deadline (teto 6s),
+      // pra um /auth/me travado nunca segurar o loop além dos ~20s (fail-open).
+      const budget = Math.min(6000, Math.max(1000, deadline - Date.now()));
+      const fresh = await loadAuthMe(budget);
       if (fresh) me = fresh;
     }
   } finally {
