@@ -5507,6 +5507,15 @@ async function loadHistoryView(forceFresh = false, { background = false } = {}) 
     return;
   }
 
+  // loadHistoryView é SEMPRE um load completo — renderiza append=false (substitui
+  // a timeline). A timeline, porém, é acumulada pelo "carregar mais". Se puxar
+  // pra atualizar (ou navegar de volta) depois de paginar, buscar a página
+  // corrente e renderizar substituindo deixaria só aquela página na tela ("puxei
+  // e o histórico pulou pro meio"). Volta pra página 1 aqui, no único ponto por
+  // onde todo load completo passa. O "carregar mais" NÃO passa por aqui (chama
+  // _fetchHistoryList direto e renderiza append=true), então continua paginando.
+  _historyFilters.page = 1;
+
   // Stats e lista são fetched em paralelo. Stats só depende do período
   // (não dos filtros), então serve do cache se o período não mudou.
   const statsNeeded = !_historyStatsCache || _historyStatsCache.months !== _historyFilters.months || forceFresh;
