@@ -1247,54 +1247,133 @@ async function mfaOnboardingDismiss() {
 
 <!-- ─── Welcome to PigBank+ (pós-checkout success) ─────────────────────── -->
 <style>
+/* ─── Confirmação de assinatura ────────────────────────────────────────────
+   Redesenhado para falar a mesma língua da página: fundo neutro #111 (e não o
+   azul-marinho de antes, que trazia uma segunda família de cinza), um único
+   acento (o rosa da marca, sem o lima disputando), grão igual ao do body e
+   composição assimétrica em vez de tudo centralizado. */
 .welcome-pro-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,.75);
+  position: fixed; inset: 0; background: rgba(8,8,10,.74);
   display: none; align-items: center; justify-content: center;
-  z-index: 10001; padding: 20px;
-  backdrop-filter: blur(6px);
-  animation: welcomeFade .3s ease;
+  z-index: 10001;
+  /* fixo não herda o padding do body: a área segura entra aqui, nos 4 lados,
+     porque o iPhone também abre esta página em paisagem. */
+  padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right))
+           max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  backdrop-filter: blur(14px) saturate(120%); -webkit-backdrop-filter: blur(14px) saturate(120%);
+  animation: welcomeFade .28s var(--ease);
 }
 .welcome-pro-overlay.open { display: flex; }
 @keyframes welcomeFade { from { opacity: 0; } to { opacity: 1; } }
+
 .welcome-pro-card {
-  width: min(520px, 94vw); padding: 36px 32px 30px;
-  background: linear-gradient(180deg, #1a1d2a, #14161e);
-  border: 1.5px solid rgba(255,45,142,.4);
-  border-radius: 22px; color: rgba(255,255,255,.94);
-  box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 60px rgba(255,45,142,.15);
-  position: relative; overflow: hidden;
-  animation: welcomePop .45s cubic-bezier(.16,1,.3,1);
+  position: relative; overflow: hidden auto;
+  width: min(440px, 100%); max-height: min(86dvh, 760px);
+  padding: 30px 28px 24px;
+  background:
+    radial-gradient(120% 90% at 8% -10%, rgba(255,45,142,.20), transparent 58%),
+    linear-gradient(180deg, #17171A, #121214);
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 26px; color: var(--text);
+  /* sombra tingida com o rosa do fundo, em vez de preto puro */
+  box-shadow: 0 40px 90px -24px rgba(0,0,0,.8),
+              0 24px 70px -34px rgba(255,45,142,.42),
+              inset 0 1px 0 rgba(255,255,255,.10);
+  animation: welcomePop .5s cubic-bezier(.16,1,.3,1);
 }
-@keyframes welcomePop { from { transform: scale(.9) translateY(20px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
-.welcome-pro-card::before {
-  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 4px;
-  background: linear-gradient(90deg,#FF2D8E,#FF7AB8);
+@keyframes welcomePop { from { transform: translateY(14px) scale(.97); opacity: 0; } to { transform: none; opacity: 1; } }
+/* mesmo grão do body::before: sem isto o card fica mais liso que a página */
+.welcome-pro-card::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .5;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
 }
-.welcome-pro-emoji {
-  font-size: 3rem; text-align: center; margin-bottom: 8px;
-  animation: welcomeBounce 1.2s ease infinite alternate;
+.welcome-pro-card > * { position: relative; z-index: 1; }
+
+/* entrada em cascata: transform e opacity só, nada de layout */
+@keyframes wpRise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.welcome-pro-card > * { animation: wpRise .45s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 70ms + 120ms); }
+
+.wp-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 46px; height: 46px; border-radius: 15px; margin-bottom: 18px;
+  background: linear-gradient(135deg, #FF2D8E, #C7186B);
+  box-shadow: 0 10px 26px -8px rgba(255,45,142,.7), inset 0 1px 0 rgba(255,255,255,.28);
+  font-size: 1.45rem; color: #fff;
 }
-@keyframes welcomeBounce { from { transform: translateY(0); } to { transform: translateY(-8px); } }
+.wp-eyebrow {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  font-size: .69rem; font-weight: 600; letter-spacing: .15em; text-transform: uppercase;
+  color: var(--text-3); margin-bottom: 10px;
+}
+.wp-chip {
+  color: #FF80B8; background: rgba(255,45,142,.12);
+  border: 1px solid rgba(255,45,142,.28);
+  border-radius: 7px; padding: 3px 8px; letter-spacing: .06em;
+}
 .welcome-pro-card h2 {
-  font-size: 1.6rem; font-weight: 700; text-align: center; margin-bottom: 8px;
-  background: linear-gradient(135deg,#FF2D8E,#FF7AB8);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
+  font-size: clamp(1.5rem, 6vw, 1.85rem); font-weight: 700; line-height: 1.12;
+  letter-spacing: -.028em; color: #fff; text-wrap: balance; margin-bottom: 10px;
 }
-.welcome-pro-sub { font-size: .94rem; color: rgba(255,255,255,.72); text-align: center; line-height: 1.55; margin-bottom: 22px; }
-.welcome-pro-trial { display: inline-flex; align-items: center; gap: 6px; background: rgba(198,241,26,.13); border: 1px solid rgba(198,241,26,.32); color: #C6F11A; padding: 6px 13px; border-radius: 999px; font-size: .76rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; margin: 0 auto 22px; }
-.welcome-pro-feats { display: grid; gap: 10px; margin-bottom: 26px; padding: 16px 18px; background: rgba(255,255,255,.04); border-radius: 14px; border: 1px solid rgba(255,255,255,.06); }
-.welcome-pro-feat { display: flex; align-items: center; gap: 10px; font-size: .87rem; color: rgba(255,255,255,.82); }
-.welcome-pro-feat::before { content: "✓"; color: #C6F11A; font-weight: 800; font-size: 1rem; flex-shrink: 0; }
-.welcome-pro-actions { display: flex; gap: 10px; }
+.wp-sub {
+  font-size: .93rem; font-weight: 400; line-height: 1.6; color: var(--text-2);
+  max-width: 36ch; text-wrap: pretty; margin-bottom: 24px;
+}
+
+/* lista com filetes, sem a caixa com borda e sombra de antes */
+.wp-feats { list-style: none; margin: 0 0 26px; }
+.wp-feats li {
+  /* flex-start, não center: em item de duas linhas o check centralizado pela
+     matemática cai no meio do bloco e lê como desalinhado. O 2px é ajuste
+     óptico pra ele sentar na linha de base da primeira linha. */
+  display: flex; align-items: flex-start; gap: 11px;
+  padding: 11px 0; font-size: .875rem; font-weight: 500; line-height: 1.45;
+  color: rgba(255,255,255,.84);
+  border-top: 1px solid rgba(255,255,255,.07);
+}
+.wp-feats li:last-child { border-bottom: 1px solid rgba(255,255,255,.07); }
+.wp-feats i { color: #FF80B8; font-size: 1rem; flex-shrink: 0; margin-top: 2px; }
+
+.welcome-pro-actions { display: grid; gap: 4px; }
 .welcome-pro-btn-primary {
-  flex: 1; padding: 14px 18px; border-radius: 12px; border: none;
-  background: linear-gradient(135deg,#FF2D8E,#C7186B);
-  color: #fff; font-weight: 700; font-size: .95rem; cursor: pointer;
-  transition: transform .15s, box-shadow .15s;
-  box-shadow: 0 8px 24px rgba(255,45,142,.4);
+  width: 100%; padding: 15px 18px; border-radius: 15px; border: none;
+  background: linear-gradient(135deg, #FF2D8E, #C7186B);
+  color: #fff; font: inherit; font-weight: 600; font-size: .95rem; cursor: pointer;
+  box-shadow: 0 12px 28px -10px rgba(255,45,142,.75), inset 0 1px 0 rgba(255,255,255,.22);
+  transition: transform .18s var(--ease), box-shadow .18s var(--ease), filter .18s var(--ease);
 }
-.welcome-pro-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 12px 30px rgba(255,45,142,.55); }
-.welcome-pro-card .center { text-align: center; }
+.welcome-pro-btn-primary:hover { transform: translateY(-1px); filter: brightness(1.06); box-shadow: 0 18px 36px -12px rgba(255,45,142,.85), inset 0 1px 0 rgba(255,255,255,.22); }
+.welcome-pro-btn-primary:active { transform: translateY(0) scale(.985); box-shadow: 0 8px 18px -10px rgba(255,45,142,.7), inset 0 1px 0 rgba(255,255,255,.18); }
+.wp-btn-ghost {
+  width: 100%; padding: 12px; border: none; background: none;
+  /* --text-2 e não --text-3: com alpha .32 o controle ficava com contraste
+     baixo demais pra algo clicável. */
+  color: var(--text-2); font: inherit; font-size: .855rem; font-weight: 500; cursor: pointer;
+  border-radius: 12px; transition: color .18s var(--ease), background .18s var(--ease);
+}
+.wp-btn-ghost:hover { color: var(--text); background: rgba(255,255,255,.04); }
+.wp-btn-ghost:active { transform: scale(.99); }
+.welcome-pro-btn-primary:focus-visible,
+.wp-btn-ghost:focus-visible { outline: 2px solid #FF80B8; outline-offset: 3px; }
+
+/* Telas baixas (iPhone SE e paisagem): sem isto o card passa da altura máxima,
+   entra em rolagem interna e o "Ficar na Início" fica escondido abaixo da dobra,
+   ou seja, a saída do modal some justamente em quem tem menos tela. Medido a
+   375x667: 640px de conteúdo contra 572px úteis. */
+@media (max-height: 720px) {
+  .welcome-pro-card { padding: 22px 24px 18px; }
+  .wp-mark { width: 40px; height: 40px; border-radius: 13px; margin-bottom: 12px; font-size: 1.25rem; }
+  .welcome-pro-card h2 { font-size: 1.4rem; }
+  .wp-sub { font-size: .89rem; margin-bottom: 16px; }
+  .wp-feats { margin-bottom: 16px; }
+  .wp-feats li { padding: 8px 0; }
+}
+
+/* quem pediu menos movimento não leva cascata nem quique */
+@media (prefers-reduced-motion: reduce) {
+  .welcome-pro-overlay, .welcome-pro-card, .welcome-pro-card > * { animation: none; }
+  .welcome-pro-btn-primary, .wp-btn-ghost { transition-duration: .01ms; }
+  .welcome-pro-btn-primary:hover { transform: none; }
+}
 
 /* Toast melhorado pra cancelamento — maior, mais cativante, dura mais */
 .upgrade-toast {
@@ -1316,22 +1395,24 @@ async function mfaOnboardingDismiss() {
 </style>
 
 <div class="welcome-pro-overlay" id="welcome-pro-overlay">
-  <div class="welcome-pro-card">
-    <div class="welcome-pro-emoji"><i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
-    <h2>Tá dentro do PigBank+!</h2>
-    <p class="welcome-pro-sub">Bora ver o que tu desbloqueou, parceiro?<br/>Os 30 dias grátis começam agora, só tem cobrança depois.</p>
-    <div class="center"><div class="welcome-pro-trial"><i class="ph ph-confetti" aria-hidden="true"></i> 30 dias grátis</div></div>
-    <div class="welcome-pro-feats">
-      <div class="welcome-pro-feat">Caixinhas e cartões sem limite</div>
-      <div class="welcome-pro-feat">Investimentos com IR e IOF no automático</div>
-      <div class="welcome-pro-feat">Histórico completo + exportar CSV</div>
-      <div class="welcome-pro-feat">Importar extrato e fatura por OFX</div>
-      <div class="welcome-pro-feat">Piggy IA: converse sobre suas finanças</div>
-    </div>
-    <div class="welcome-pro-actions">
-      <button class="welcome-pro-btn-primary" type="button" onclick="goExplorePro()">
-        Bora explorar →
-      </button>
+  <div class="welcome-pro-card" role="dialog" aria-modal="true" aria-labelledby="wp-title">
+    <span class="wp-mark" style="--i:0" aria-hidden="true"><i class="ph ph-piggy-bank"></i></span>
+    <p class="wp-eyebrow" style="--i:1">
+      Assinatura confirmada
+      <span class="wp-chip" id="wp-chip" hidden></span>
+    </p>
+    <h2 id="wp-title" style="--i:2">Tá dentro do PigBank+</h2>
+    <p class="wp-sub" id="wp-sub" style="--i:3"></p>
+    <ul class="wp-feats" style="--i:4">
+      <li><i class="ph ph-check" aria-hidden="true"></i> Caixinhas e cartões sem limite</li>
+      <li><i class="ph ph-check" aria-hidden="true"></i> Investimentos com IR e IOF</li>
+      <li><i class="ph ph-check" aria-hidden="true"></i> Histórico completo em CSV</li>
+      <li><i class="ph ph-check" aria-hidden="true"></i> Extrato e fatura por OFX</li>
+      <li><i class="ph ph-check" aria-hidden="true"></i> Piggy IA pra falar das finanças</li>
+    </ul>
+    <div class="welcome-pro-actions" style="--i:5">
+      <button class="welcome-pro-btn-primary" type="button" onclick="goExplorePro()">Abrir o dashboard</button>
+      <button class="wp-btn-ghost" type="button" onclick="dismissWelcomePro()">Ficar na Início</button>
     </div>
   </div>
 </div>
@@ -1339,16 +1420,66 @@ async function mfaOnboardingDismiss() {
 <div class="upgrade-toast" id="upgrade-cancel-toast" role="status"></div>
 
 <script>
+/* O modal é um dialog de verdade agora: prende o Esc, o clique fora e devolve o
+   foco pra quem o tinha antes. Sair daqui NUNCA cobra nada e nunca muda plano,
+   só decide se a pessoa vai pro dashboard ou fica na Início. */
+let _wpLastFocus = null;
+
+function openWelcomePro({ trial = true, days = 30 } = {}) {
+  const ov = document.getElementById("welcome-pro-overlay");
+  if (!ov) return;
+
+  // A cópia muda com o que o backend mandou no success_url. Sem isso, quem
+  // assina SEM direito a período grátis (ev=purchase, já usou o trial antes)
+  // lia "seus 30 dias grátis começam agora", que é falso pra essa pessoa.
+  const chip = document.getElementById("wp-chip");
+  const sub = document.getElementById("wp-sub");
+  if (trial) {
+    chip.textContent = `${days} dias grátis`;
+    chip.hidden = false;
+    sub.textContent = `Seus ${days} dias grátis começam agora. A primeira cobrança só vem depois disso, e dá pra cancelar quando quiser.`;
+  } else {
+    chip.hidden = true;
+    sub.textContent = "Sua assinatura já está ativa. Dá pra cancelar quando quiser, direto nas configurações.";
+  }
+
+  _wpLastFocus = document.activeElement;
+  ov.classList.add("open");
+  ov.querySelector(".welcome-pro-btn-primary")?.focus();
+  document.addEventListener("keydown", _wpOnKey);
+}
+
+function _wpOnKey(e) {
+  if (e.key === "Escape") dismissWelcomePro();
+}
+
+function _wpClose() {
+  document.getElementById("welcome-pro-overlay")?.classList.remove("open");
+  document.removeEventListener("keydown", _wpOnKey);
+}
+
+function dismissWelcomePro() {
+  _wpClose();
+  // devolve o foco pra onde estava, senão o teclado volta pro topo da página
+  if (_wpLastFocus && document.contains(_wpLastFocus)) _wpLastFocus.focus();
+}
+
 function goExplorePro() {
-  document.getElementById("welcome-pro-overlay").classList.remove("open");
+  _wpClose();
   window.location.href = "/app";
 }
+
+// clique no fundo escuro fecha; clique dentro do card não
+document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) => {
+  if (e.target === e.currentTarget) dismissWelcomePro();
+});
 
 (function handleUpgradeReturn() {
   const params = new URLSearchParams(window.location.search);
   const status = params.get("upgrade");
   const sid = params.get("sid");  // id da sessão Stripe → event_id do evento
   const ev = params.get("ev");    // "trial" | "purchase" (definido pelo success_url)
+  const td = params.get("td");    // dias de trial concedidos (0 quando ev=purchase)
   if (!status) return;
 
   // Limpa os query params da URL pra nao reaparecer em refresh.
@@ -1356,6 +1487,7 @@ function goExplorePro() {
   cleanUrl.searchParams.delete("upgrade");
   cleanUrl.searchParams.delete("sid");
   cleanUrl.searchParams.delete("ev");
+  cleanUrl.searchParams.delete("td");
   window.history.replaceState({}, "", cleanUrl.toString());
 
   if (status === "success") {
@@ -1371,9 +1503,15 @@ function goExplorePro() {
         fbq("track", "Purchase", { currency: "BRL" }, { eventID: "purchase_" + sid });
       }
     }
-    // Pequeno delay pra dar o "wow effect" depois da pagina carregar
+    // Pequeno delay pra dar o "wow effect" depois da pagina carregar.
+    // `ev` ausente cai no texto de trial, que era o comportamento anterior:
+    // link antigo na caixa de e-mail não deve virar cópia errada pro outro lado.
     setTimeout(() => {
-      document.getElementById("welcome-pro-overlay").classList.add("open");
+      const dias = Number.parseInt(td, 10);
+      openWelcomePro({
+        trial: ev !== "purchase",
+        days: Number.isFinite(dias) && dias > 0 ? dias : 30,
+      });
     }, 450);
   } else if (status === "cancelled") {
     const toast = document.getElementById("upgrade-cancel-toast");
