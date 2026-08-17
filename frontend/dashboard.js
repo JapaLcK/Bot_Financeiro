@@ -1684,8 +1684,8 @@ let _budgetsStatusCache = null;
 const _categoriesChannel = makeFetchChannel(); // dedup + abort + geração
 const _budgetsChannel = makeFetchChannel();     // dedup + abort + geração
 
-async function _fetchCategories(includeArchived = true, { force = false } = {}) {
-  return _categoriesChannel.run(async (signal) => {
+async function _fetchCategories(includeArchived = true, { force = false, direct = false } = {}) {
+  const doFetch = async (signal) => {
     const resp = await fetch(`${API}/categories/${USER_ID}?include_archived=${includeArchived ? "true" : "false"}`, {
       credentials: "same-origin",
       headers: csrfHeaders(),
@@ -1699,7 +1699,14 @@ async function _fetchCategories(includeArchived = true, { force = false } = {}) 
     }
     const data = await resp.json();
     return data.categories || [];
-  }, { force });
+  };
+  // direct: chamada avulsa (ex.: dropdown do modal de orçamento) que NÃO pode
+  // ser abortada por um load da view de Categorias. Fica fora do canal — sempre
+  // devolve a lista (ou lança), nunca undefined. Sem o direct, um _fetchCategories
+  // com force=true da view superaria essa e o modal receberia undefined → dropdown
+  // vazio ("todas já têm orçamento").
+  if (direct) return doFetch();
+  return _categoriesChannel.run(doFetch, { force });
 }
 
 async function loadCategoriesView(forceFresh = false, { background = false } = {}) {
@@ -2225,7 +2232,7 @@ async function openBudgetEditModal(budget) {
     sel.disabled = false;
     sel.innerHTML = '<option value="">— Carregando…</option>';
     try {
-      const cats = await _fetchCategories(false);
+      const cats = await _fetchCategories(false, { direct: true });
       const usedCats = new Set((_budgetsStatusCache?.budgets || []).map(b => (b.categoria || "").toLowerCase()));
       const options = (cats || [])
         .filter(c => !c.is_archived)
