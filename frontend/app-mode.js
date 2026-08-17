@@ -595,13 +595,25 @@
     // pode atropelar um save em voo — o PATCH das preferências de notificação
     // dos Ajustes, por exemplo, seria abortado e a escolha recém-aceita pela
     // UI se perderia. Contador genérico em vez de contrato novo por página.
+    // Mesmo padrão do auth-refresh.js, que também envelopa o window.fetch (lá
+    // pra renovar 401, aqui só pra contar). Este wrap fica por FORA do dele:
+    // o retry interno do 401 usa o fetch nativo direto, então conta como um
+    // pedido só — o contador segue ≥1 até a sequência inteira assentar.
     let pageFetches = 0;
     if (window.fetch) {
       const nativeFetch = window.fetch;
       window.fetch = function () {
         pageFetches++;
         const dec = () => { pageFetches--; };
-        const r = nativeFetch.apply(this, arguments);
+        let r;
+        try {
+          r = nativeFetch.apply(this, arguments);
+        } catch (err) {
+          // throw síncrono (argumento inválido) não pode vazar o contador —
+          // preso em >0, o reload ficaria recusado pra sempre na página.
+          dec();
+          throw err;
+        }
         r.then(dec, dec);
         return r;
       };
@@ -784,9 +796,16 @@
       const dy = ev.touches[0].clientY - startY;
       const dx = ev.touches[0].clientX - startX;
       // Gesto horizontal (carrossel, tabela que rola de lado) não é puxão.
-      // Só entrega o gesto de volta enquanto o puxão ainda não pegou — no meio
-      // dele um tremido lateral não pode cancelar tudo.
-      if (pull === 0 && Math.abs(dx) > Math.abs(dy)) { tracking = false; return; }
+      // Só entrega o gesto de volta enquanto ESTE gesto ainda não puxou — no
+      // meio dele um tremido lateral não pode cancelar tudo. O predicado é
+      // !dragged, não pull===0: um retry rápido mata a molinha do ciclo
+      // anterior deixando pull residual > 0, e com pull===0 esse resíduo
+      // desligava a detecção — um arrasto horizontal virava puxão.
+      if (!dragged && Math.abs(dx) > Math.abs(dy)) {
+        tracking = false;
+        if (pull > 0) spring(0);        // resíduo da molinha morta recolhe
+        return;
+      }
       if (dy <= 0) {                    // virou rolagem normal: devolve o gesto
         if (pull > 0) spring(0);        // recolhe na molinha, não em corte seco
         tracking = false;

@@ -161,6 +161,37 @@ espere alguém perguntar.
 **Merge só com autorização explícita do dono do repositório.** Aprovação do Codex e
 CI verde deixam o PR *pronto*; não autorizam o merge. Avise e pergunte.
 
+**O ciclo de correção também precisa de inventário — senão vira gerador de bug.**
+Registro do PR #60 (puxar pra atualizar): 14 rodadas de revisão, 21 apontamentos,
+e **quase metade nasceu das próprias correções**, não do código original. Os dois
+mecanismos que produziram isso, para nunca repetir:
+
+1. **Corrigir a instância e não a classe.** O gate do `PBRefresh` foi consertado
+   na Início sem perguntar "quem mais registra isso cedo demais?" — o dashboard
+   tinha o bug idêntico e virou a rodada seguinte. A proteção de digitação foi
+   posta nas telas de reload sem olhar as de refresh mole — a chave Pix virou a
+   rodada seguinte. A regra já estava neste arquivo (§2: "achei um caso" ≠
+   "resolvi a categoria") e vale DOBRADO para apontamento de revisor: antes de
+   responder a thread, nomear a classe e varrer os irmãos com grep. Quando a
+   varredura foi feita (rodada 3, os 12 branches do `PBRefresh`), ela achou bug
+   que o revisor não tinha visto.
+
+2. **Remendar transição em vez de enumerar a máquina.** Da rodada 7 em diante os
+   apontamentos eram todos transições de uma máquina de estados (gesto ×
+   refresh) construída um remendo por vez, reagindo ao revisor. Um único campo
+   (a chave Pix) consumiu TRÊS rodadas: sucesso, falha, edição durante o fetch —
+   três caminhos que uma tabela de estados teria mostrado de uma vez. **Se duas
+   rodadas seguidas batem no mesmo subsistema, pare de remendar: enumere
+   estados × eventos por escrito e feche tudo num commit.** A enumeração feita
+   ao final achou 2 bugs que o revisor ainda não tinha apontado.
+
+O custo disso não foi abstrato. Erros meus que chegaram a existir no branch e
+seriam produção sem o ciclo de revisão: reload por cima dos códigos de backup do
+MFA (que aparecem uma vez); totais financeiros zerados renderizados com cara de
+sucesso; cache bom sobrescrito com histórico vazio; pedido velho sobrescrevendo
+resposta mais nova; PATCH de preferências abortado no meio. Cada um entrou num
+commit que "corrigia" outra coisa.
+
 **Separe por verificabilidade, não por tamanho.** Se parte do trabalho pode ser
 comprovada agora e parte só depois (build de app, deploy, acesso a produção), abra
 dois PRs. A metade verificável sobe sem ficar refém da outra.
