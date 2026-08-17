@@ -258,34 +258,64 @@ def test_users_endpoint_requires_admin_auth():
     assert response.status_code == 401
 
 
+def _log_event(uid, event_type, *, days_ago=0):
+    from datetime import datetime, timedelta, timezone
+    ts = datetime.now(timezone.utc) - timedelta(days=days_ago)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "insert into system_event_logs (level, event_type, message, source, user_id, details, created_at) "
+                "values ('info', %s, 'x', 'billing', %s, '{}'::jsonb, %s)",
+                (event_type, uid, ts),
+            )
+        conn.commit()
+
+
 def test_checkout_funnel_conta_pessoas_distintas(panel_accounts):
     """checkout_funnel conta USUÁRIOS distintos: abrir 2x não vira 2 no
-    started; started conta quem abriu, completed quem concluiu."""
+    started; completed = quem abriu E concluiu na janela."""
     _tag, uids = panel_accounts
     client = _admin_client()
-
-    def _log(uid, event_type):
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "insert into system_event_logs (level, event_type, message, source, user_id, details) "
-                    "values ('info', %s, 'x', 'billing', %s, '{}'::jsonb)",
-                    (event_type, uid),
-                )
-            conn.commit()
 
     base = client.get("/admin/api/users").json()["checkout_funnel"]
     b_started, b_completed = base["started_30d"], base["completed_30d"]
 
     # 2 pessoas abrem o checkout; uma delas abre 2x (não deve inflar); 1 conclui
-    _log(uids["paying"], "billing_checkout_started")
-    _log(uids["paying"], "billing_checkout_started")  # 2ª abertura, mesmo user
-    _log(uids["trial"], "billing_checkout_started")
-    _log(uids["paying"], "billing_checkout_completed")
+    _log_event(uids["paying"], "billing_checkout_started")
+    _log_event(uids["paying"], "billing_checkout_started")  # 2ª abertura, mesmo user
+    _log_event(uids["trial"], "billing_checkout_started")
+    _log_event(uids["paying"], "billing_checkout_completed")
 
     funnel = client.get("/admin/api/users").json()["checkout_funnel"]
     assert funnel["started_30d"] == b_started + 2      # 2 pessoas, não 3 eventos
-    assert funnel["completed_30d"] == b_completed + 1
+    assert funnel["completed_30d"] == b_completed + 1  # só paying (abriu E fechou)
+
+
+def test_checkout_funnel_conversao_nunca_passa_de_100pct(panel_accounts):
+    """Guard do P1: conclusão SEM abertura na coorte (histórico anterior ao
+    recurso, ou início fora da janela) não entra no numerador — a conversão
+    fica sempre <= 100%."""
+    _tag, uids = panel_accounts
+    client = _admin_client()
+
+    base = client.get("/admin/api/users").json()["checkout_funnel"]
+
+    # Conclusão histórica sem started correspondente na janela (caso do deploy)
+    _log_event(uids["canceled"], "billing_checkout_completed")
+    # Abertura antiga (fora da janela de 30d) + conclusão recente: não é coorte
+    _log_event(uids["granted"], "billing_checkout_started", days_ago=40)
+    _log_event(uids["granted"], "billing_checkout_completed")
+    # Uma coorte legítima na janela
+    _log_event(uids["paying"], "billing_checkout_started")
+    _log_event(uids["paying"], "billing_checkout_completed")
+
+    funnel = client.get("/admin/api/users").json()["checkout_funnel"]
+    # started só ganhou o paying (o granted abriu fora da janela)
+    assert funnel["started_30d"] == base["started_30d"] + 1
+    # completed só ganhou o paying — as duas conclusões sem coorte não contam
+    assert funnel["completed_30d"] == base["completed_30d"] + 1
+    # E a razão respeita o teto
+    assert funnel["completed_30d"] <= funnel["started_30d"]
 
 
 def test_users_list_aggregates_and_statuses(panel_accounts):

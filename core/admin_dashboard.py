@@ -887,32 +887,45 @@ async def fetch_billing_summary(force: bool = False) -> dict[str, Any]:
 
 
 async def _fetch_checkout_funnel(cur) -> dict[str, int]:
-    """Funil de checkout a partir de system_event_logs: pessoas distintas que
-    ABRIRAM o checkout (billing_checkout_started) × as que CONCLUÍRAM
-    (billing_checkout_completed), em 30d e 7d. Por usuário distinto pra abrir
-    o checkout 2x não contar como 2 — user_id NULL (evento sem conta) é
-    ignorado no distinct. started_30d é 0 antes deste recurso ir pro ar (o
-    evento passou a ser logado agora); a conversão só fica confiável dali pra
-    frente, e o front avisa quando started=0."""
+    """Funil de checkout a partir de system_event_logs, por COORTE de abertura:
+    started = pessoas distintas que ABRIRAM o checkout na janela;
+    completed = as que abriram na janela E TAMBÉM concluíram na janela.
+
+    O completed é subconjunto do started de propósito. Se contássemos toda
+    conclusão (billing_checkout_completed) contra o started novo, a conversão
+    estouraria 100% no 1º mês pós-deploy — billing_checkout_completed já tem
+    histórico de meses, billing_checkout_started nasce agora — e voltaria a
+    furar na borda da janela (quem abriu há 31d e concluiu há 5d). Amarrar o
+    numerador à coorte que abriu na janela mantém a razão em 0–100% e
+    semanticamente correta ('dos que abriram, quantos fecharam').
+
+    Contagem por usuário (abrir 2x não conta 2); user_id NULL é ignorado.
+    Nota: quem abre no fim da janela e conclui já fora dela não entra no
+    completed (subestima levemente, no sentido seguro)."""
     await cur.execute(
         """
         SELECT
-            COUNT(DISTINCT user_id) FILTER (
-                WHERE event_type = 'billing_checkout_started'
-                  AND created_at >= NOW() - INTERVAL '30 days') AS started_30d,
-            COUNT(DISTINCT user_id) FILTER (
-                WHERE event_type = 'billing_checkout_completed'
-                  AND created_at >= NOW() - INTERVAL '30 days') AS completed_30d,
-            COUNT(DISTINCT user_id) FILTER (
-                WHERE event_type = 'billing_checkout_started'
-                  AND created_at >= NOW() - INTERVAL '7 days') AS started_7d,
-            COUNT(DISTINCT user_id) FILTER (
-                WHERE event_type = 'billing_checkout_completed'
-                  AND created_at >= NOW() - INTERVAL '7 days') AS completed_7d
-        FROM system_event_logs
-        WHERE event_type IN ('billing_checkout_started', 'billing_checkout_completed')
-          AND created_at >= NOW() - INTERVAL '30 days'
-          AND user_id IS NOT NULL
+            COUNT(*) FILTER (WHERE started_30d)                     AS started_30d,
+            COUNT(*) FILTER (WHERE started_30d AND completed_30d)   AS completed_30d,
+            COUNT(*) FILTER (WHERE started_7d)                      AS started_7d,
+            COUNT(*) FILTER (WHERE started_7d AND completed_7d)     AS completed_7d
+        FROM (
+            SELECT
+                user_id,
+                bool_or(event_type = 'billing_checkout_started'
+                        AND created_at >= NOW() - INTERVAL '30 days') AS started_30d,
+                bool_or(event_type = 'billing_checkout_completed'
+                        AND created_at >= NOW() - INTERVAL '30 days') AS completed_30d,
+                bool_or(event_type = 'billing_checkout_started'
+                        AND created_at >= NOW() - INTERVAL '7 days')  AS started_7d,
+                bool_or(event_type = 'billing_checkout_completed'
+                        AND created_at >= NOW() - INTERVAL '7 days')  AS completed_7d
+            FROM system_event_logs
+            WHERE event_type IN ('billing_checkout_started', 'billing_checkout_completed')
+              AND created_at >= NOW() - INTERVAL '30 days'
+              AND user_id IS NOT NULL
+            GROUP BY user_id
+        ) per_user
         """
     )
     row = await cur.fetchone()
