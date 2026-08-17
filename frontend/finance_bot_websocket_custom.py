@@ -4788,7 +4788,7 @@ async def unsubscribe(uid: int, token: str):
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <script src="/safe-area.js?v=1"></script>
-  <title>Descadastro — PigBank</title>
+  <title>Descadastro · PigBank</title>
   <style>
     body{margin:0;padding:0;background:#0a0d18;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
          color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh}

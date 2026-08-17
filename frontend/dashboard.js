@@ -1467,9 +1467,9 @@ async function openInstDeleteModal(group_id, name) {
     if (hasPaid) {
       body.innerHTML = `
         Excluir <b>${escapeHtmlSafe(name)}</b>?<br><br>
-        • <b>${imp.future_count}</b> parcela${futOne ? "" : "s"} futura${futOne ? "" : "s"} (${_fmtBRL(imp.future_total)}) ${futOne ? "será removida" : "serão removidas"} das faturas abertas — saldo do mês volta.<br>
+        • <b>${imp.future_count}</b> parcela${futOne ? "" : "s"} futura${futOne ? "" : "s"} (${_fmtBRL(imp.future_total)}) ${futOne ? "será removida" : "serão removidas"} das faturas abertas. Saldo do mês volta.<br>
         • <b>${imp.paid_count}</b> parcela${paidOne ? "" : "s"} já paga${paidOne ? "" : "s"} (${_fmtBRL(imp.paid_total)}) ${paidOne ? "fica" : "ficam"} no histórico (faturas pagas intactas).<br><br>
-        <span style="color:var(--red);font-weight:600">R$ ${imp.paid_total.toFixed(2).replace(".", ",")} já pago${paidOne ? "" : "s"} NÃO ${paidOne ? "volta" : "voltam"} pra conta</span> — dinheiro já saiu via fatura. Se precisar corrigir, crie um lançamento manual.
+        <span style="color:var(--red);font-weight:600">R$ ${imp.paid_total.toFixed(2).replace(".", ",")} já pago${paidOne ? "" : "s"} NÃO ${paidOne ? "volta" : "voltam"} pra conta</span>. Dinheiro já saiu via fatura. Se precisar corrigir, crie um lançamento manual.
       `;
     } else {
       body.innerHTML = `
@@ -2073,11 +2073,11 @@ function _renderBudgetRow(b, idx = 0) {
   const widthPct = Math.min(100, pct);
   const subColor = b.status === "vermelho" ? "color:#FF2D2D" : "";
   const dotEmoji = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:middle;margin-right:5px;background:${b.status === "vermelho" ? "#ef4444" : (b.status === "amarelo" ? "#fbbf24" : "#22c55e")}"></span>`;
-  let subText = `${pct.toFixed(0)}% — ${_fmtBRL(b.remaining)} restantes`;
+  let subText = `${pct.toFixed(0)}%, ${_fmtBRL(b.remaining)} restantes`;
   if (b.status === "vermelho") {
-    subText = `<i class="ph ph-warning" aria-hidden="true"></i> ${pct.toFixed(0)}% — estourou ${_fmtBRL(-b.remaining)}`;
+    subText = `<i class="ph ph-warning" aria-hidden="true"></i> ${pct.toFixed(0)}%, estourou ${_fmtBRL(-b.remaining)}`;
   } else if (b.status === "amarelo") {
-    subText = `${pct.toFixed(0)}% — ${_fmtBRL(b.remaining)} restantes. Piggy te avisa via WhatsApp.`;
+    subText = `${pct.toFixed(0)}%, ${_fmtBRL(b.remaining)} restantes. Piggy te avisa via WhatsApp.`;
   }
   const safeCatJson = JSON.stringify(b).replace(/'/g, "&apos;");
   const delay = 240 + idx * 60;
@@ -2450,9 +2450,9 @@ function _renderPocketOnlyCard(p, idx = 0) {
   const color = p.color || "#FF2D8E";
   const ofPocket = _isOfPocket(p);
   const ofStale = _isOfStale(p);
-  const line1 = ofStale ? "<i class='ph ph-lock' aria-hidden='true'></i> Banco desconectado — reative pra atualizar"
+  const line1 = ofStale ? "<i class='ph ph-lock' aria-hidden='true'></i> Banco desconectado. Reative pra atualizar"
               : ofPocket ? "Sincronizada com seu banco"
-              : "Caixinha sem meta — depósitos livres";
+              : "Caixinha sem meta: depósitos livres";
   const line2 = ofStale ? "Reative seu banco (plano pago) pra o saldo voltar a atualizar"
               : ofPocket ? "Saldo atualizado pela corretora/banco"
               : (p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate));
@@ -2502,11 +2502,11 @@ function _renderGoalCard(g, idx = 0) {
     const today = new Date();
     const proj = new Date(today.getFullYear(), today.getMonth() + Math.ceil(g.projected_months), 1);
     const projStr = proj.toLocaleDateString("pt-BR", { month: "short", year: "numeric" });
-    alertText = `<div class="goal-deadline" style="color:#FF2D2D"><i class="ph ph-warning" aria-hidden="true"></i> Ritmo atual chega só em ${projStr}${g.target_date ? " — prazo era " + deadlineText.replace("Prazo: ", "") : ""}</div>`;
+    alertText = `<div class="goal-deadline" style="color:#FF2D2D"><i class="ph ph-warning" aria-hidden="true"></i> Ritmo atual chega só em ${projStr}${g.target_date ? ", prazo era " + deadlineText.replace("Prazo: ", "") : ""}</div>`;
   } else if (g.indicator === "tight") {
-    alertText = `<div class="goal-deadline" style="color:#fbbf24">Ritmo apertado — pode atrasar</div>`;
+    alertText = `<div class="goal-deadline" style="color:#fbbf24">Ritmo apertado, pode atrasar</div>`;
   } else if (g.indicator === "ahead") {
-    alertText = `<div class="goal-deadline" style="color:#00F078"><i class="ph ph-rocket-launch" aria-hidden="true"></i> Adiantado — no melhor caminho</div>`;
+    alertText = `<div class="goal-deadline" style="color:#00F078"><i class="ph ph-rocket-launch" aria-hidden="true"></i> Adiantado, no melhor caminho</div>`;
   } else if (g.indicator === "on_track") {
     alertText = `<div class="goal-deadline" style="color:#00F078">No prazo</div>`;
   } else if (g.indicator === "achieved") {
@@ -2598,7 +2598,7 @@ function _ensureGoalModal() {
                   <input type="number" id="goal-interest-rate" min="1" max="300" step="0.01" value="100" inputmode="decimal" style="width:112px;flex:0 0 112px" />
                   <span style="color:var(--text-2);font-size:.86rem;white-space:nowrap">% do CDI</span>
                 </div>
-                <div style="color:var(--text-3);font-size:.78rem;margin-top:8px;line-height:1.35"><i class="ph ph-lightbulb" aria-hidden="true"></i> Valor simulado — o PigBank não custodia seu dinheiro. Use a taxa do banco onde o saldo realmente está aplicado.</div>
+                <div style="color:var(--text-3);font-size:.78rem;margin-top:8px;line-height:1.35"><i class="ph ph-lightbulb" aria-hidden="true"></i> Valor simulado: o PigBank não custodia seu dinheiro. Use a taxa do banco onde o saldo realmente está aplicado.</div>
               </div>
             </div>
           </div>
@@ -3512,7 +3512,7 @@ function _toggleRecurringModeHint() {
   const amount = document.getElementById("recurring-amount");
   const name = document.getElementById("recurring-name");
   if (mode === "manual") {
-    if (hint) hint.innerHTML = "<i class='ph ph-receipt' aria-hidden='true'></i> <strong>Conta a pagar:</strong> a Piggy te <strong>lembra</strong> do vencimento e <strong>nada sai da conta</strong> até você confirmar. O valor é sempre uma <strong>estimativa</strong> — você informa o valor real ao marcar como paga.";
+    if (hint) hint.innerHTML = "<i class='ph ph-receipt' aria-hidden='true'></i> <strong>Conta a pagar:</strong> a Piggy te <strong>lembra</strong> do vencimento e <strong>nada sai da conta</strong> até você confirmar. O valor é sempre uma <strong>estimativa</strong>. Você informa o valor real ao marcar como paga.";
     if (title && !isEdit) title.textContent = "Nova conta a pagar";
     // Conta a pagar nunca é débito automático — o user sempre confirma na mão.
     // A "forma de pagamento" (autopay/cartão) não se aplica: esconde e fixa account.
@@ -3659,7 +3659,7 @@ async function saveRecurring() {
 async function deleteRecurringFromModal() {
   if (!_recurringEditState.id) return;
   const ok = await confirmModal(
-    "Excluir este gasto fixo? Lançamentos passados ficam preservados — só não vai mais cobrar automaticamente.",
+    "Excluir este gasto fixo? Lançamentos passados ficam preservados. Só não vai mais cobrar automaticamente.",
     { title: "Excluir gasto fixo", okText: "Excluir", danger: true },
   );
   if (!ok) return;
@@ -3793,7 +3793,7 @@ async function loadRecurringOverview({ background = false } = {}) {
   const head = `
     <div style="margin-bottom:14px">
       <h2 style="margin:0 0 2px;font-size:1.5rem">Previsão mensal</h2>
-      <div style="font-size:.86rem;color:var(--text-3)">Veja rapidamente o que entra, o que sai e o que vence primeiro — só do que é recorrente.</div>
+      <div style="font-size:.86rem;color:var(--text-3)">Veja rapidamente o que entra, o que sai e o que vence primeiro, só do que é recorrente.</div>
     </div>`;
 
   // ── Alerta (déficit ou no azul) ──
@@ -3801,7 +3801,7 @@ async function loadRecurringOverview({ background = false } = {}) {
     ? `<div class="mock-card" style="border:1px solid rgba(34,197,94,.35);margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
         <div style="font-size:1.5rem"><i class="ph ph-check-circle" aria-hidden="true"></i></div>
         <div style="flex:1;min-width:220px">
-          <div style="font-weight:700">Suas entradas cobrem os compromissos — sobra <span style="color:#22c55e">${_fmtBRL(resultado)}</span>.</div>
+          <div style="font-weight:700">Suas entradas cobrem os compromissos. Sobra <span style="color:#22c55e">${_fmtBRL(resultado)}</span>.</div>
           <div style="font-size:.82rem;color:var(--text-3)">Mês recorrente equilibrado. Bom trabalho! <i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
         </div>
       </div>`
@@ -4187,8 +4187,8 @@ function _renderProjection(p) {
   const accent = ok ? "#22c55e" : "#FF2D2D";
   const alvo = new Date(p.target + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "long" });
   const header = ok
-    ? `<i class="ph ph-smiley" aria-hidden="true"></i> Tranquilo até ${alvo} — sobra ${_fmtBRL(p.projetado)}`
-    : `<i class="ph ph-warning" aria-hidden="true"></i> Aperta até ${alvo} — falta ${_fmtBRL(Math.abs(p.projetado))}`;
+    ? `<i class="ph ph-smiley" aria-hidden="true"></i> Tranquilo até ${alvo}, sobra ${_fmtBRL(p.projetado)}`
+    : `<i class="ph ph-warning" aria-hidden="true"></i> Aperta até ${alvo}, falta ${_fmtBRL(Math.abs(p.projetado))}`;
   const line = (label, val, positive) => `
     <div style="display:flex;justify-content:space-between;font-size:.82rem;padding:2px 0">
       <span style="color:var(--text-2)">${label}</span>
@@ -4450,7 +4450,7 @@ function _ensureRecurringIncomeModal() {
       <div class="modal wide">
         <h3 id="recurring-income-edit-title">Nova receita fixa</h3>
         <p class="msub" style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:.78rem">
-          <i class="ph ph-coins" aria-hidden="true"></i> <strong>Importante:</strong> essa receita será <strong>lançada automaticamente</strong> todo mês no dia escolhido. Se o valor variar, é só editar aqui — o Piggy registra o reajuste.
+          <i class="ph ph-coins" aria-hidden="true"></i> <strong>Importante:</strong> essa receita será <strong>lançada automaticamente</strong> todo mês no dia escolhido. Se o valor variar, é só editar aqui: o Piggy registra o reajuste.
         </p>
         <form id="recurring-income-edit-form" onsubmit="event.preventDefault(); saveRecurringIncome();">
           <div class="invest-form">
@@ -4617,7 +4617,7 @@ async function saveRecurringIncome() {
 async function deleteRecurringIncomeFromModal() {
   if (!_recurringIncomeEditState.id) return;
   const ok = await confirmModal(
-    "Excluir esta receita fixa? Lançamentos passados ficam preservados — só não vai mais lançar automaticamente.",
+    "Excluir esta receita fixa? Lançamentos passados ficam preservados. Só não vai mais lançar automaticamente.",
     { title: "Excluir receita fixa", okText: "Excluir", danger: true },
   );
   if (!ok) return;
@@ -5254,7 +5254,7 @@ function renderAnalyticsPatterns(patterns) {
       <div class="empty" style="padding:24px 16px;text-align:center;color:var(--text-3);font-size:.85rem">
         <div style="font-size:2rem;margin-bottom:6px"><i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
         <div style="font-weight:600;color:var(--text-2);margin-bottom:4px">Sem padrões ainda</div>
-        <div>A IA precisa de mais histórico pra detectar padrões. Continue lançando — vai aparecer aqui em breve.</div>
+        <div>A IA precisa de mais histórico pra detectar padrões. Continue lançando, vai aparecer aqui em breve.</div>
       </div>`;
     return;
   }
@@ -5691,13 +5691,13 @@ function isProUser() {
 const UPGRADE_MESSAGES = {
   investments: "Acompanhe sua carteira de investimentos com cálculo automático de rendimento, IR e IOF. Disponível nos planos pagos.",
   export: "Exportar seus lançamentos (PDF, planilha) por email faz parte dos planos pagos.",
-  pockets_unlimited: "No Grátis você cria 1 caixinha. Com um plano pago fica ilimitado — separe sua reserva, viagens, presentes…",
-  cards_unlimited: "No Grátis você cadastra 1 cartão. Com um plano pago fica ilimitado — controle todos os seus cartões em um lugar.",
+  pockets_unlimited: "No Grátis você cria 1 caixinha. Com um plano pago fica ilimitado: separe sua reserva, viagens, presentes…",
+  cards_unlimited: "No Grátis você cadastra 1 cartão. Com um plano pago fica ilimitado: controle todos os seus cartões em um lugar.",
   ofx_import: "Importar extrato bancário e fatura de cartão por OFX faz parte dos planos pagos.",
   history_unlimited: "Histórico além de 30 dias faz parte dos planos pagos.",
   changelog: "As notícias e resumos do mercado feitos pela Piggy fazem parte dos planos Plus e Pro. Assine pra desbloquear.",
   recurring_expenses: "A agenda de boletos e os gastos fixos fazem parte dos planos pagos. Cadastre suas contas a pagar e nunca mais perca um vencimento.",
-  agents: "Seu plano atual não ativa mais agentes. Fazendo upgrade, a equipe de porquinhos trabalha pra você — Xerife, Repórter, Carteiro e os próximos que chegarem.",
+  agents: "Seu plano atual não ativa mais agentes. Fazendo upgrade, a equipe de porquinhos trabalha pra você: Xerife, Repórter, Carteiro e os próximos que chegarem.",
   generic: "Essa feature faz parte dos planos pagos do PigBank. Escolha o que faz mais sentido pra você."
 };
 
@@ -5764,7 +5764,7 @@ function applyProGates() {
     } else {
       el.classList.add("pro-locked");
       el.setAttribute("aria-disabled", "true");
-      el.setAttribute("title", "Funcionalidade de um plano pago — clica pra ver os planos");
+      el.setAttribute("title", "Funcionalidade de um plano pago: clica pra ver os planos");
       if (!el.querySelector(":scope > .pro-badge")) {
         const b = document.createElement("span");
         b.className = "pro-badge";
@@ -5778,8 +5778,8 @@ function applyProGates() {
   const histTitle = document.getElementById("history-card-title");
   if (histTitle) {
     histTitle.textContent = isProUser()
-      ? "Receita vs Despesa — Últimos 6 Meses"
-      : "Receita vs Despesa — Últimos 30 dias";
+      ? "Receita vs Despesa (Últimos 6 Meses)"
+      : "Receita vs Despesa (Últimos 30 dias)";
   }
 }
 
@@ -7214,16 +7214,16 @@ function openSobrouDetail() {
   // do número (fluxo daquele mês).
   let note;
   if (s.hist) {
-    note = "Este é o fluxo de " + monthLbl + " — só receitas, gastos e aportes daquele mês. " +
+    note = "Este é o fluxo de " + monthLbl + ": só receitas, gastos e aportes daquele mês. " +
       "Não é um saldo: o saldo é acumulado e reflete o momento atual, não o fim de um mês passado.";
   } else if (s.saldoAtual < 0) {
     note = "Seu <b>saldo</b> está negativo (" + fmt(s.saldoAtual) + "), mas ainda assim " +
       (deficit ? "o mês fechou como está acima" : "sobrou dinheiro <b>neste mês</b>") + ". " +
-      "Não é contradição: o saldo é acumulado — arrasta meses anteriores, ajustes e movimentações entre contas —, " +
+      "Não é contradição: o saldo é acumulado, arrasta meses anteriores, ajustes e movimentações entre contas, " +
       "enquanto este valor olha só receitas, gastos e aportes de " + monthLbl + ".";
   } else {
     note = "O <b>saldo</b> é acumulado (arrasta meses anteriores, ajustes e movimentações entre contas). " +
-      "Este valor considera só receitas, gastos e aportes de " + monthLbl + " — por isso os dois podem divergir.";
+      "Este valor considera só receitas, gastos e aportes de " + monthLbl + ". Por isso os dois podem divergir.";
   }
   if (s.apt > 0) {
     note += " Aportes não são gasto: viram patrimônio seu (investimentos e caixinhas), mas saem do que “sobra livre” no mês.";
@@ -7677,9 +7677,9 @@ async function confirmDeleteLaunch(launchId, descricao, valor, isCredit = false,
   const isInstallment = isCredit && installmentsTotal && installmentsTotal > 1;
   const body = isCredit
     ? (isInstallment
-        ? `${desc}${valFmt ? ` — ${valFmt}` : ""}\n\nEsta compra faz parte de um parcelamento em ${installmentsTotal}x. **TODAS as ${installmentsTotal} parcelas** serão apagadas. Essa ação não pode ser desfeita.`
-        : `${desc}${valFmt ? ` — ${valFmt}` : ""}\n\nA compra será removida da fatura. Essa ação não pode ser desfeita.`)
-    : `${desc}${valFmt ? ` — ${valFmt}` : ""}\n\nO efeito no saldo (e em caixinhas/investimentos, se houver) será revertido. Essa ação não pode ser desfeita.`;
+        ? `${desc}${valFmt ? ` · ${valFmt}` : ""}\n\nEsta compra faz parte de um parcelamento em ${installmentsTotal}x. **TODAS as ${installmentsTotal} parcelas** serão apagadas. Essa ação não pode ser desfeita.`
+        : `${desc}${valFmt ? ` · ${valFmt}` : ""}\n\nA compra será removida da fatura. Essa ação não pode ser desfeita.`)
+    : `${desc}${valFmt ? ` · ${valFmt}` : ""}\n\nO efeito no saldo (e em caixinhas/investimentos, se houver) será revertido. Essa ação não pode ser desfeita.`;
 
   const ok = await confirmModal(body, {
     title: isCredit ? "Apagar compra no crédito" : "Apagar lançamento",
@@ -7826,7 +7826,7 @@ async function submitLaunch() {
                     : launchTipo === "credito" ? "Compra no crédito"
                     : "Despesa";
     const idLabel = data.launch_id ? `#${data.launch_id}` : "";
-    showLaunchSuccessToast(`✓ ${tipoLabel} registrada${idLabel ? " — " + idLabel : ""}`);
+    showLaunchSuccessToast(`✓ ${tipoLabel} registrada${idLabel ? " · " + idLabel : ""}`);
     sendRefresh();
   } catch (err) {
     showLaunchError(err.message || "Erro ao registrar lançamento.");
@@ -8066,7 +8066,7 @@ async function openPocketHistory(pocketName) {
   _currentPocketName = pocketName;
   _currentPocketForEdit = null;
   closePocketMove();
-  titleEl.textContent = `Histórico — ${pocketName}`;
+  titleEl.textContent = `Histórico: ${pocketName}`;
   subEl.textContent   = "Depósitos e saques desta caixinha.";
   sumEl.style.display = "none";
   if (actionsEl) actionsEl.style.display = "none";
@@ -8085,7 +8085,7 @@ async function openPocketHistory(pocketName) {
     const p = data.pocket || {};
     const t = data.totals || {};
     _currentPocketForEdit = p;
-    titleEl.textContent = `Histórico — ${p.name || pocketName}`;
+    titleEl.textContent = `Histórico: ${p.name || pocketName}`;
     const interestTxt = p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate);
     subEl.textContent = p.description ? `${p.description} · ${interestTxt}` : interestTxt;
 
@@ -9440,7 +9440,7 @@ function render(d) {
           </div>
           ${mkBlock("Investimentos", inv, "var(--blue)")}
           ${mkBlock("Caixinhas",     pkt, "var(--purple)")}
-          <div class="aporte-foot">Não conta como despesa — é alocação de patrimônio.</div>
+          <div class="aporte-foot">Não conta como despesa: é alocação de patrimônio.</div>
         `;
       })()}
     </div>
@@ -9625,7 +9625,7 @@ function _renderAffiliateView(data) {
           style="flex:1;min-width:0;padding:10px 12px;border-radius:10px;border:1px solid var(--glass-border);background:var(--glass-bg);color:var(--text);font-size:.82rem">
         <button class="mock-cta" type="button" onclick="copyAffiliateLink()">Copiar</button>
       </div>
-      ${data.status !== "active" ? '<p style="font-size:.75rem;color:var(--red);margin:10px 0 0">Seu cadastro de afiliado está desativado — o link não gera novas comissões.</p>' : ""}
+      ${data.status !== "active" ? '<p style="font-size:.75rem;color:var(--red);margin:10px 0 0">Seu cadastro de afiliado está desativado. O link não gera novas comissões.</p>' : ""}
 
       <h3 style="margin:18px 0 6px">Solicitar saque</h3>
       <p style="font-size:.78rem;color:var(--text-3);margin:0 0 10px">
@@ -9642,7 +9642,7 @@ function _renderAffiliateView(data) {
 
     <div class="mock-card">
       <h3 style="margin:0 0 10px">Comissões</h3>
-      <div class="tx-list">${commissionRows || '<div style="padding:16px 0;color:var(--text-3);font-size:.8rem">Nenhuma comissão ainda — divulgue seu link! <i class="ph ph-piggy-bank" aria-hidden="true"></i></div>'}</div>
+      <div class="tx-list">${commissionRows || '<div style="padding:16px 0;color:var(--text-3);font-size:.8rem">Nenhuma comissão ainda. Divulgue seu link! <i class="ph ph-piggy-bank" aria-hidden="true"></i></div>'}</div>
       <h3 style="margin:18px 0 10px">Saques</h3>
       <div class="tx-list">${payoutRows || '<div style="padding:16px 0;color:var(--text-3);font-size:.8rem">Nenhum saque solicitado.</div>'}</div>
     </div>
