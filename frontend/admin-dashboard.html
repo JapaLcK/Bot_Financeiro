@@ -1416,7 +1416,9 @@ function renderUsersChips(agg, billing) {
     <div class="user-chip static"><b class="green">${fMoney(billing.mrr)}</b><span>MRR</span></div>
     <div class="user-chip static"><b>${fMoney(billing.ticket_medio)}</b><span>Ticket médio</span></div>
     <div class="user-chip static"><b class="blue">${fMoney(billing.trial_mrr_potencial)}</b><span>MRR em trial</span></div>`;
-    $id('users-billing-meta').textContent = `Stripe ${fRelTime(billing.fetched_at)}`;
+    $id('users-billing-meta').textContent = billing.stale
+      ? `Stripe instável — último dado ${fRelTime(billing.fetched_at)}`
+      : `Stripe ${fRelTime(billing.fetched_at)}`;
   } else {
     $id('users-billing-meta').textContent = 'Stripe indisponível — contagens vêm do banco';
   }

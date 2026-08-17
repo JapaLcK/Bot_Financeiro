@@ -755,6 +755,12 @@ def _derive_account_status(row: dict, now: datetime) -> str:
     pay = (row.get("last_payment_status") or "").strip().lower()
     if plan == "free":
         return "canceled" if pay in ("canceled", "incomplete_expired") else "free"
+    # Expiração vem ANTES do status de pagamento: plan_service._paid_plan_active
+    # trata tier pago vencido como inativo mesmo com status 'active' (webhook
+    # perdido) — o painel tem de concordar com o entitlement real.
+    expires = row.get("plan_expires_at")
+    if expires is not None and expires < now:
+        return "canceled"
     if pay == "trialing":
         return "trial"
     if pay == "active":
@@ -762,9 +768,6 @@ def _derive_account_status(row: dict, now: datetime) -> str:
     if pay in ("past_due", "unpaid", "incomplete"):
         return "past_due"
     if pay in ("canceled", "incomplete_expired"):
-        return "canceled"
-    expires = row.get("plan_expires_at")
-    if expires is not None and expires < now:
         return "canceled"
     return "granted"
 
@@ -777,13 +780,13 @@ _ACCOUNT_STATUS_SQL = """
             CASE WHEN lower(coalesce(a.last_payment_status, ''))
                       IN ('canceled', 'incomplete_expired')
                  THEN 'canceled' ELSE 'free' END
+        WHEN a.plan_expires_at IS NOT NULL AND a.plan_expires_at < now() THEN 'canceled'
         WHEN lower(coalesce(a.last_payment_status, '')) = 'trialing' THEN 'trial'
         WHEN lower(coalesce(a.last_payment_status, '')) = 'active' THEN 'paying'
         WHEN lower(coalesce(a.last_payment_status, ''))
              IN ('past_due', 'unpaid', 'incomplete') THEN 'past_due'
         WHEN lower(coalesce(a.last_payment_status, ''))
              IN ('canceled', 'incomplete_expired') THEN 'canceled'
-        WHEN a.plan_expires_at IS NOT NULL AND a.plan_expires_at < now() THEN 'canceled'
         ELSE 'granted'
     END
 """
@@ -858,7 +861,12 @@ def _fetch_stripe_billing_sync() -> dict[str, Any]:
 
 async def fetch_billing_summary(force: bool = False) -> dict[str, Any]:
     """Wrapper cacheado (5 min) do resumo Stripe — a lista de usuários abre a
-    cada clique no card e não deve martelar a API do Stripe."""
+    cada clique no card e não deve martelar a API do Stripe.
+
+    O carimbo do cache avança TAMBÉM quando a chamada falha: o TTL vira
+    backoff de retry, senão uma queda do Stripe adicionaria a latência da
+    API falhando em toda requisição do painel. Payload bom anterior é
+    preservado com stale=True (o fetched_at interno dele mostra a idade)."""
     now = datetime.now(timezone.utc)
     cached_at = _billing_summary_cache.get("fetched_at")
     if (
@@ -869,10 +877,12 @@ async def fetch_billing_summary(force: bool = False) -> dict[str, Any]:
     ):
         return _billing_summary_cache["data"]
     data = await asyncio.to_thread(_fetch_stripe_billing_sync)
-    # Falha de API não substitui um cache bom ainda recente na memória
     if data.get("available") or _billing_summary_cache.get("data") is None:
         _billing_summary_cache["data"] = data
-        _billing_summary_cache["fetched_at"] = now
+    else:
+        # Falha com payload bom em mãos: preserva os números, marcados stale
+        _billing_summary_cache["data"] = {**_billing_summary_cache["data"], "stale": True}
+    _billing_summary_cache["fetched_at"] = now
     return _billing_summary_cache["data"]
 
 

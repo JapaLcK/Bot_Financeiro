@@ -116,6 +116,19 @@ class TestDeriveAccountStatus:
                         stripe_customer_id=None,
                         plan_expires_at=NOW - timedelta(days=1)) == "canceled"
 
+    def test_expiracao_vence_status_de_pagamento(self):
+        # Webhook de renovação perdido: status diz active/trialing mas o plano
+        # venceu — plan_service._paid_plan_active nega o entitlement, e o
+        # painel tem de concordar
+        for pay in ("active", "trialing", "past_due"):
+            assert self._st(plan="pro", last_payment_status=pay,
+                            stripe_customer_id="cus_x",
+                            plan_expires_at=NOW - timedelta(hours=1)) == "canceled"
+        # Vigente continua classificando pelo status normalmente
+        assert self._st(plan="pro", last_payment_status="active",
+                        stripe_customer_id="cus_x",
+                        plan_expires_at=NOW + timedelta(days=10)) == "paying"
+
     def test_paying(self):
         assert self._st(plan="pro", last_payment_status="active",
                         stripe_customer_id="cus_x") == "paying"
@@ -193,6 +206,39 @@ def test_stripe_billing_summary_normaliza_mrr(monkeypatch):
     assert data["mrr"] == pytest.approx(56.38, abs=0.01)
     assert data["ticket_medio"] == pytest.approx(18.79, abs=0.01)
     assert data["trial_mrr_potencial"] == pytest.approx(19.90, abs=0.01)
+
+
+def test_stripe_billing_cache_faz_backoff_apos_falha(monkeypatch):
+    """Queda do Stripe não pode virar retry a cada request: o carimbo do cache
+    avança mesmo na falha (TTL = backoff) e o payload bom fica com stale=True."""
+    import asyncio
+
+    calls = {"n": 0}
+    ok_payload = {"available": True, "mrr": 39.8, "fetched_at": "2026-01-01T00:00:00+00:00"}
+
+    def _fake_sync():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return dict(ok_payload)
+        return {"available": False, "reason": "boom"}
+
+    monkeypatch.setattr(admin_dashboard, "_fetch_stripe_billing_sync", _fake_sync)
+
+    # 1ª chamada: sucesso, entra no cache
+    data = asyncio.run(admin_dashboard.fetch_billing_summary())
+    assert data["available"] is True and "stale" not in data and calls["n"] == 1
+
+    # TTL vencido + Stripe fora: preserva números, marca stale, avança carimbo
+    admin_dashboard._billing_summary_cache["fetched_at"] = (
+        datetime.now(timezone.utc) - timedelta(seconds=400)
+    )
+    data = asyncio.run(admin_dashboard.fetch_billing_summary())
+    assert data["available"] is True and data["stale"] is True
+    assert data["mrr"] == ok_payload["mrr"] and calls["n"] == 2
+
+    # Dentro do TTL pós-falha: NÃO tenta o Stripe de novo
+    data = asyncio.run(admin_dashboard.fetch_billing_summary())
+    assert data["stale"] is True and calls["n"] == 2
 
 
 # ── Endpoint de lista ──────────────────────────────────────────────────────
