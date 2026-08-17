@@ -41,6 +41,14 @@ def configured_admin(monkeypatch):
     monkeypatch.setattr(
         admin_dashboard, "_billing_summary_cache", {"fetched_at": None, "data": None}
     )
+    # /admin/auth/login tem rate limit de 10/min (slowapi, storage em memória
+    # compartilhado entre testes). Cada _admin_client() loga; num arquivo com
+    # muitos testes isso estoura o teto e derruba o último com 429. Zera o
+    # storage por teste — não afrouxa o limite em produção.
+    try:
+        dashboard.limiter._storage.reset()
+    except Exception:
+        pass
 
 
 def _admin_client() -> TestClient:
@@ -315,6 +323,27 @@ def test_checkout_funnel_conversao_nunca_passa_de_100pct(panel_accounts):
     # completed só ganhou o paying — as duas conclusões sem coorte não contam
     assert funnel["completed_30d"] == base["completed_30d"] + 1
     # E a razão respeita o teto
+    assert funnel["completed_30d"] <= funnel["started_30d"]
+
+
+def test_checkout_funnel_conclusao_precisa_vir_depois_da_abertura(panel_accounts):
+    """Guard do P2: ex-assinante que concluiu ANTES na janela e depois reabre
+    o checkout (e abandona) não é convertido — a conclusão velha não conta pra
+    coorte nova. Exige max(concluído) >= min(aberto)."""
+    _tag, uids = panel_accounts
+    client = _admin_client()
+
+    base = client.get("/admin/api/users").json()["checkout_funnel"]
+
+    # Ex-assinante: concluiu há 20d (compra antiga), reabre há 2d e abandona
+    # (sem conclusão posterior). Abriu na janela → conta no started; mas a
+    # única conclusão é ANTERIOR à reabertura → NÃO conta no completed.
+    _log_event(uids["canceled"], "billing_checkout_completed", days_ago=20)
+    _log_event(uids["canceled"], "billing_checkout_started", days_ago=2)
+
+    funnel = client.get("/admin/api/users").json()["checkout_funnel"]
+    assert funnel["started_30d"] == base["started_30d"] + 1
+    assert funnel["completed_30d"] == base["completed_30d"]  # conclusão velha não conta
     assert funnel["completed_30d"] <= funnel["started_30d"]
 
 

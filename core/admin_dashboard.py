@@ -900,26 +900,35 @@ async def _fetch_checkout_funnel(cur) -> dict[str, int]:
     semanticamente correta ('dos que abriram, quantos fecharam').
 
     Contagem por usuário (abrir 2x não conta 2); user_id NULL é ignorado.
-    Nota: quem abre no fim da janela e conclui já fora dela não entra no
-    completed (subestima levemente, no sentido seguro)."""
+
+    A conclusão precisa vir DEPOIS da abertura da coorte: comparamos
+    max(concluído) >= min(aberto) na janela. Sem isso, um ex-assinante que
+    concluiu antes na janela e depois reabre o checkout (e abandona) seria
+    contado como convertido pela conclusão velha. Efeito colateral aceito:
+    quem abre no fim da janela e conclui já fora dela não entra no completed
+    (subestima levemente, no sentido seguro)."""
     await cur.execute(
         """
         SELECT
-            COUNT(*) FILTER (WHERE started_30d)                     AS started_30d,
-            COUNT(*) FILTER (WHERE started_30d AND completed_30d)   AS completed_30d,
-            COUNT(*) FILTER (WHERE started_7d)                      AS started_7d,
-            COUNT(*) FILTER (WHERE started_7d AND completed_7d)     AS completed_7d
+            COUNT(*) FILTER (WHERE min_start_30d IS NOT NULL) AS started_30d,
+            COUNT(*) FILTER (
+                WHERE min_start_30d IS NOT NULL
+                  AND max_comp_30d >= min_start_30d) AS completed_30d,
+            COUNT(*) FILTER (WHERE min_start_7d IS NOT NULL) AS started_7d,
+            COUNT(*) FILTER (
+                WHERE min_start_7d IS NOT NULL
+                  AND max_comp_7d >= min_start_7d) AS completed_7d
         FROM (
             SELECT
                 user_id,
-                bool_or(event_type = 'billing_checkout_started'
-                        AND created_at >= NOW() - INTERVAL '30 days') AS started_30d,
-                bool_or(event_type = 'billing_checkout_completed'
-                        AND created_at >= NOW() - INTERVAL '30 days') AS completed_30d,
-                bool_or(event_type = 'billing_checkout_started'
-                        AND created_at >= NOW() - INTERVAL '7 days')  AS started_7d,
-                bool_or(event_type = 'billing_checkout_completed'
-                        AND created_at >= NOW() - INTERVAL '7 days')  AS completed_7d
+                MIN(created_at) FILTER (WHERE event_type = 'billing_checkout_started'
+                    AND created_at >= NOW() - INTERVAL '30 days') AS min_start_30d,
+                MAX(created_at) FILTER (WHERE event_type = 'billing_checkout_completed'
+                    AND created_at >= NOW() - INTERVAL '30 days') AS max_comp_30d,
+                MIN(created_at) FILTER (WHERE event_type = 'billing_checkout_started'
+                    AND created_at >= NOW() - INTERVAL '7 days')  AS min_start_7d,
+                MAX(created_at) FILTER (WHERE event_type = 'billing_checkout_completed'
+                    AND created_at >= NOW() - INTERVAL '7 days')  AS max_comp_7d
             FROM system_event_logs
             WHERE event_type IN ('billing_checkout_started', 'billing_checkout_completed')
               AND created_at >= NOW() - INTERVAL '30 days'
