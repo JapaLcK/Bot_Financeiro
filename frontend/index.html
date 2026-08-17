@@ -22,6 +22,7 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
 <link rel="stylesheet" href="/brand.css?v=4" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/site.css?v=5" />
+<link rel="stylesheet" href="/site-redesign.css?v=1" />
 <style>
   /* Planos: card único de entrada (R$ 9,90) — leva pra /precos escolher ciclo */
   .plan-solo-wrap { display: flex; justify-content: center; padding: 10px 0 30px; }
@@ -55,8 +56,9 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
 </style>
 <script src="/safe-area.js?v=1"></script>
 </head>
-<body>
+<body class="rd">
 <div class="glow"></div>
+<div class="rd-grain" aria-hidden="true"></div>
 
   <!-- ─── Nav ─────────────────────────────────────────────────────── -->
   <nav class="nav">
@@ -518,6 +520,21 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
       });
     }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
     els.forEach(function (el) { io.observe(el); });
+  })();
+  </script>
+  <!-- Redesign: borda-holofote que segue o cursor nos cards -->
+  <script>
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) return;
+    var cards = document.querySelectorAll(".rd .card, .rd .plan-solo, .rd .phone, .rd .step");
+    cards.forEach(function (c) {
+      c.addEventListener("pointermove", function (e) {
+        var r = c.getBoundingClientRect();
+        c.style.setProperty("--mx", (e.clientX - r.left) + "px");
+        c.style.setProperty("--my", (e.clientY - r.top) + "px");
+      });
+    });
   })();
   </script>
   <script src="/nav-auth.js?v=7" defer></script>

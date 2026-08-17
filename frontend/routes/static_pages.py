@@ -37,18 +37,6 @@ async def serve_landing():
     return html_file(FRONTEND_DIR / "index.html")
 
 
-@router.get("/index-redesign.html")
-async def serve_landing_redesign():
-    """Preview do redesign da landing (avaliação visual, não-destrutivo).
-    Carrega site.css + a camada site-redesign.css. pixel=False: página de
-    avaliação não deve disparar o Meta Pixel nem poluir conversão.
-    X-Robots-Tag noindex: página pública mas não deve ser indexada nem
-    competir com / (a meta robots no HTML reforça, defesa em profundidade)."""
-    resp = html_file(FRONTEND_DIR / "index-redesign.html", pixel=False)
-    resp.headers["X-Robots-Tag"] = "noindex, nofollow"
-    return resp
-
-
 @router.get("/app")
 async def serve_dashboard(request: Request):
     # Gate server-side: cadastro sem plano escolhido é mandado pra /precos antes
@@ -491,8 +479,8 @@ async def serve_site_css():
 
 @router.get("/site-redesign.css")
 async def serve_site_redesign_css():
-    """Camada de refino do preview de redesign (só usada por index-redesign.html).
-    no-cache como o /site.css: está em iteração ativa."""
+    """Camada de refino da landing (escopada em body.rd), sobre o site.css.
+    Carregada pela index.html. no-cache como o /site.css: iteração ativa."""
     return FileResponse(
         FRONTEND_DIR / "site-redesign.css",
         media_type="text/css",

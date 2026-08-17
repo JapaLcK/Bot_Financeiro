@@ -1,7 +1,7 @@
 /* ==========================================================================
-   site-redesign.css — PREVIEW de redesign da landing (index-redesign.html).
-   Camada de refino "premium" sobre site.css. TUDO escopado em `body.rd`
-   para não afetar index.html nem as outras páginas que consomem site.css.
+   site-redesign.css — camada de refino "premium" da landing (index.html),
+   sobre site.css. TUDO escopado em `body.rd` para não afetar as outras
+   páginas que consomem site.css (só a index.html tem a classe rd).
    Paleta/tokens reaproveitados do :root de site.css (--pink, --neon, etc.).
    ========================================================================== */
 
