@@ -990,6 +990,16 @@ function _checkoutSettled(me) {
   return new Date(me.plan_expires_at) > new Date();      // vigente (não expirado)
 }
 
+/* Overlay de confirmação: aberto síncronamente no topo do init (antes de
+   qualquer await) e fechado em TODOS os caminhos de saída. Enquanto aberto,
+   cobre o welcome modal — ninguém navega pro /app sem o bypass. */
+function _openCheckoutOverlay() {
+  document.getElementById("checkout-confirm-overlay")?.classList.add("open");
+}
+function _closeCheckoutOverlay() {
+  document.getElementById("checkout-confirm-overlay")?.classList.remove("open");
+}
+
 /* Um /auth/me limitado: aborta o fetch direto (AbortController) E corre contra
    um timer (Promise.race), porque o wrapper global (auth-refresh.js) pode
    engolir o abort ao renovar via /auth/refresh, que não herda o signal. Nunca
@@ -1005,18 +1015,12 @@ function _boundedAuthMe(budgetMs) {
    Roda TODA a sequência de perfil — fetch inicial + polls — sob UM deadline
    (~20s), cada request limitada por _boundedAuthMe.
 
-   O overlay abre ANTES do primeiro request (z-index acima do welcome modal que
-   o handleUpgradeReturn abre em 450ms): senão, se o 1º /auth/me demora, o
-   usuário clicaria "Bora explorar" e navegaria pro /app SEM o bypass
-   ?upgrade=success — e o gate o mandaria pra /precos recém tendo pago. Some
-   assim que assenta (flash curto no caso de já vir pago é o preço de bloquear
-   essa navegação).
+   O overlay JÁ ESTÁ aberto quando esta função roda (aberto no topo do init,
+   antes até do /auth/validate) — aqui só o fechamos ao terminar.
 
    FAIL-OPEN: no fim devolve o último `me` (pode ser null) e deixa seguir —
    nunca prende quem pagou numa tela de espera nem o joga pra /precos. */
 async function awaitCheckoutConfirmation() {
-  const overlay = document.getElementById("checkout-confirm-overlay");
-  overlay?.classList.add("open");        // ANTES do 1º await: bloqueia o welcome modal
   const deadline = Date.now() + 20000;   // ~20s no total, pra TUDO
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   let me = null;
@@ -1030,7 +1034,7 @@ async function awaitCheckoutConfirmation() {
       await wait(1500);
     }
   } finally {
-    overlay?.classList.remove("open");
+    _closeCheckoutOverlay();
   }
   return me;
 }
@@ -1095,15 +1099,23 @@ let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
   // jogaria quem ACABOU de pagar pra /precos (webhook ainda pendente).
   const _justUpgraded = new URLSearchParams(location.search).get("upgrade") === "success";
 
+  // No retorno de checkout, o overlay sobe AQUI — síncrono, antes de QUALQUER
+  // await (inclusive o /auth/validate abaixo). É o ponto mais cedo possível:
+  // enquanto ele estiver aberto (z-index acima do welcome modal que o
+  // handleUpgradeReturn abre em 450ms), o "Bora explorar" não é clicável, então
+  // ninguém navega pro /app sem o bypass ?upgrade=success e cai no gate.
+  // Fechado por _closeCheckoutOverlay() em TODOS os caminhos de saída.
+  if (_justUpgraded) _openCheckoutOverlay();
+
   // 1) Valida sessão
   let userId = 0;
   let validateData = null;
   try {
     const r = await fetch(`${API}/auth/validate`, { credentials: "same-origin" });
-    if (!r.ok) { showAccessError(); return; }
+    if (!r.ok) { _closeCheckoutOverlay(); showAccessError(); return; }
     validateData = await r.json();
     userId = USER_ID = validateData.user_id;
-  } catch { showAccessError(); return; }
+  } catch { _closeCheckoutOverlay(); showAccessError(); return; }
 
   // Paint instantâneo: com o USER_ID já validado, pinta o cache DESSE usuário
   // na hora (troca de aba /home <-> /app), antes de /auth/me + /data + /history.
