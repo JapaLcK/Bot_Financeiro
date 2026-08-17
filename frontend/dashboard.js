@@ -248,6 +248,53 @@ let alertsDismissed  = false;
 let monthRequestSeq  = 0;
 let monthAbortController = null;
 const monthDataCache = new Map();
+
+/* ── Canal de fetch compartilhado (dedup + abort + geração) ────────────────
+   Mesmo padrão provado do fetchMonthHttp (seq + AbortController + guarda de
+   geração), empacotado pra os loaders secundários do dashboard reusarem sem
+   copiar. Cada loader instancia o seu (makeFetchChannel()).
+
+   run(fetcher, { force }) devolve uma promise que resolve pra:
+     • os dados            — quando este pedido é o mais novo (geração atual);
+     • undefined           — quando foi SUPERADO por um pedido mais novo ou
+                             ABORTADO (neutro: não renderiza, não pinta erro);
+   e REJEITA só no erro real do pedido da geração atual.
+
+   force=true cancela o pedido anterior DE VERDADE (não só zera a ref — foi o
+   que o stopgap e7badca errou, revertido em f89bcbf: zerar sem abortar deixou
+   o velho terminar e sobrescrever o novo). force=false deduplica (reaproveita
+   o pedido em curso), pro revalidate silencioso do stale-while-revalidate. */
+function makeFetchChannel() {
+  let inFlight = null, controller = null, gen = 0;
+  return {
+    run(fetcher, { force = false } = {}) {
+      if (inFlight && !force) return inFlight;   // dedup (revalidate SWR)
+      if (controller) controller.abort();         // cancela o anterior de verdade
+      const myGen = ++gen;
+      controller = new AbortController();
+      const signal = controller.signal;
+      const p = (async () => {
+        try {
+          const data = await fetcher(signal);
+          return (myGen === gen) ? data : undefined;   // superado → neutro
+        } catch (err) {
+          // Superado (por abort ou por corrida) nunca vira erro de tela: quem
+          // manda agora é o pedido mais novo. Só o erro real da geração atual
+          // sobe pro caller (pro indicador do puxão ficar âmbar).
+          if (myGen !== gen) return undefined;
+          if (err && err.name === "AbortError") return undefined;
+          throw err;
+        } finally {
+          // Só o dono atual limpa as refs — o velho abortado não pode zerar o
+          // controller/inFlight do novo que acabou de assumir.
+          if (myGen === gen) { inFlight = null; controller = null; }
+        }
+      })();
+      inFlight = p;
+      return p;
+    },
+  };
+}
 let filterDebounceTimer = null;
 
 const NOW = new Date();
@@ -616,7 +663,7 @@ const CARD_COLOR_OPTIONS = [
 let _cardEditState = { id: null, color: "purple" };
 let _currentCards = [];
 let _cardsCache = null;       // último payload do GET /cards/summary
-let _cardsFetchInFlight = null; // promise em curso pra evitar duplicação
+const _cardsChannel = makeFetchChannel(); // dedup + abort + geração
 const CARDS_FREE_LIMIT = 1; // Free plan: 1 cartão. Pro: ilimitado.
 
 function _fmtBRL(n) {
@@ -640,7 +687,7 @@ function _bestPurchaseDay(closing_day) {
 
 let _cardsRetryTimer = null;
 
-async function loadCardsView(forceFresh = false) {
+async function loadCardsView(forceFresh = false, { background = false } = {}) {
   const grid = document.getElementById("cards-grid");
   const stats = document.getElementById("cards-stats");
   if (!grid || !stats) return;
@@ -648,6 +695,9 @@ async function loadCardsView(forceFresh = false) {
   // Usa setInterval recorrente: se USER_ID demorar muito (Railway lento), continua
   // tentando até resolver, em vez de desistir após 500ms.
   if (!USER_ID) {
+    // No puxão (background) não dá pra ficar em retry silencioso: a promise
+    // precisa assentar pro indicador do gesto sair. Rejeita — vira âmbar.
+    if (background) throw new Error("cartões: sessão ainda não pronta");
     stats.innerHTML = "";
     grid.innerHTML = '<div class="empty" style="grid-column:1/-1;padding:30px;text-align:center;color:var(--text-3)"><img class="loading-sticker" src="/brand/stickers/loading.webp" alt="" />Conectando à sua conta…</div>';
     if (!_cardsRetryTimer) {
@@ -662,12 +712,23 @@ async function loadCardsView(forceFresh = false) {
     return;
   }
 
+  // Puxar pra atualizar: sem skeleton, fetch ANTES de render e falha REAL
+  // rejeita sem tocar no DOM (o render bom fica na tela, indicador âmbar).
+  if (background) {
+    const data = await _fetchCardsSummary({ force: true });
+    if (data === undefined) return;   // superado/abortado — deixa a tela como está
+    _cardsCache = data;
+    renderCardsView(data);
+    return;
+  }
+
   // Stale-while-revalidate: se já tem cache, mostra IMEDIATAMENTE (sem
   // skeleton) e refaz o fetch em background pra atualizar. Igual à Visão
   // Geral que serve do `lastData` do WebSocket.
   if (_cardsCache && !forceFresh) {
     renderCardsView(_cardsCache);
     // Revalidate silencioso (não bloqueia UI). Se mudou algo, re-renderiza.
+    // `fresh` undefined (superado) é falsy → o if pula sozinho.
     _fetchCardsSummary().then(fresh => {
       if (fresh && JSON.stringify(fresh) !== JSON.stringify(_cardsCache)) {
         _cardsCache = fresh;
@@ -687,7 +748,8 @@ async function loadCardsView(forceFresh = false) {
   grid.innerHTML = '<div class="empty" style="grid-column:1/-1;padding:30px;text-align:center;color:var(--text-3)">Carregando cartões…</div>';
 
   try {
-    const data = await _fetchCardsSummary();
+    const data = await _fetchCardsSummary({ force: true });
+    if (data === undefined) return;   // superado por um pedido mais novo
     _cardsCache = data;
     renderCardsView(data);
   } catch (err) {
@@ -696,28 +758,24 @@ async function loadCardsView(forceFresh = false) {
   }
 }
 
-// Fetch puro do summary, com dedup de requests em paralelo.
-async function _fetchCardsSummary() {
-  if (_cardsFetchInFlight) return _cardsFetchInFlight;
-  _cardsFetchInFlight = (async () => {
-    try {
-      const resp = await fetch(`${API}/cards/${USER_ID}/summary`, {
-        credentials: "same-origin",
-        headers: csrfHeaders(),
-      });
-      if (!resp.ok) {
-        const txt = await resp.text();
-        let detail = txt;
-        try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-        throw new Error(`(HTTP ${resp.status}) ${detail}`);
-      }
-      const data = await resp.json();
-      return data.cards || [];
-    } finally {
-      _cardsFetchInFlight = null;
+// Fetch puro do summary via canal (dedup + abort + geração).
+// Devolve os cartões (array), ou undefined se superado/abortado; rejeita no erro real.
+async function _fetchCardsSummary({ force = false } = {}) {
+  return _cardsChannel.run(async (signal) => {
+    const resp = await fetch(`${API}/cards/${USER_ID}/summary`, {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      signal,
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      throw new Error(`(HTTP ${resp.status}) ${detail}`);
     }
-  })();
-  return _cardsFetchInFlight;
+    const data = await resp.json();
+    return data.cards || [];
+  }, { force });
 }
 
 function renderCardsView(cards) {
@@ -1097,15 +1155,16 @@ function _instEmoji(categoria) {
 }
 
 let _instCache = null;
-let _instFetchInFlight = null;
+const _instChannel = makeFetchChannel(); // dedup + abort + geração
 let _instRetryTimer = null;
 
-async function loadInstallmentsView(forceFresh = false) {
+async function loadInstallmentsView(forceFresh = false, { background = false } = {}) {
   const stats = document.getElementById("installments-stats");
   const list = document.getElementById("installments-list");
   if (!stats || !list) return;
 
   if (!USER_ID) {
+    if (background) throw new Error("parcelamentos: sessão ainda não pronta");
     stats.innerHTML = "";
     list.innerHTML = '<div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">Conectando à sua conta…</div>';
     if (!_instRetryTimer) {
@@ -1117,6 +1176,15 @@ async function loadInstallmentsView(forceFresh = false) {
         }
       }, 250);
     }
+    return;
+  }
+
+  // Puxão: sem skeleton, fetch antes de render, falha real rejeita sem tocar DOM.
+  if (background) {
+    const data = await _fetchInstallments({ force: true });
+    if (data === undefined) return;
+    _instCache = data;
+    renderInstallmentsView(data);
     return;
   }
 
@@ -1140,7 +1208,8 @@ async function loadInstallmentsView(forceFresh = false) {
   list.innerHTML = '<div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">Carregando parcelamentos…</div>';
 
   try {
-    const data = await _fetchInstallments();
+    const data = await _fetchInstallments({ force: true });
+    if (data === undefined) return;
     _instCache = data;
     renderInstallmentsView(data);
   } catch (err) {
@@ -1149,27 +1218,22 @@ async function loadInstallmentsView(forceFresh = false) {
   }
 }
 
-async function _fetchInstallments() {
-  if (_instFetchInFlight) return _instFetchInFlight;
-  _instFetchInFlight = (async () => {
-    try {
-      const resp = await fetch(`${API}/installments/${USER_ID}/list?sort=urgency`, {
-        credentials: "same-origin",
-        headers: csrfHeaders(),
-      });
-      if (!resp.ok) {
-        const txt = await resp.text();
-        let detail = txt;
-        try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-        throw new Error(`(HTTP ${resp.status}) ${detail}`);
-      }
-      const data = await resp.json();
-      return data.installments || [];
-    } finally {
-      _instFetchInFlight = null;
+async function _fetchInstallments({ force = false } = {}) {
+  return _instChannel.run(async (signal) => {
+    const resp = await fetch(`${API}/installments/${USER_ID}/list?sort=urgency`, {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      signal,
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      throw new Error(`(HTTP ${resp.status}) ${detail}`);
     }
-  })();
-  return _instFetchInFlight;
+    const data = await resp.json();
+    return data.installments || [];
+  }, { force });
 }
 
 function _isNextMonthIso(iso) {
@@ -1617,43 +1681,48 @@ const CATEGORY_COLOR_OPTIONS = [
 
 let _categoriesCache = null;
 let _budgetsStatusCache = null;
-let _categoriesFetchInFlight = null;
-let _budgetsFetchInFlight = null;
+const _categoriesChannel = makeFetchChannel(); // dedup + abort + geração
+const _budgetsChannel = makeFetchChannel();     // dedup + abort + geração
 
-async function _fetchCategories(includeArchived = true) {
-  if (_categoriesFetchInFlight) return _categoriesFetchInFlight;
-  _categoriesFetchInFlight = (async () => {
-    try {
-      const resp = await fetch(`${API}/categories/${USER_ID}?include_archived=${includeArchived ? "true" : "false"}`, {
-        credentials: "same-origin",
-        headers: csrfHeaders(),
-      });
-      if (!resp.ok) {
-        const txt = await resp.text();
-        let detail = txt;
-        try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-        throw new Error(`(HTTP ${resp.status}) ${detail}`);
-      }
-      const data = await resp.json();
-      return data.categories || [];
-    } finally {
-      _categoriesFetchInFlight = null;
+async function _fetchCategories(includeArchived = true, { force = false } = {}) {
+  return _categoriesChannel.run(async (signal) => {
+    const resp = await fetch(`${API}/categories/${USER_ID}?include_archived=${includeArchived ? "true" : "false"}`, {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      signal,
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      throw new Error(`(HTTP ${resp.status}) ${detail}`);
     }
-  })();
-  return _categoriesFetchInFlight;
+    const data = await resp.json();
+    return data.categories || [];
+  }, { force });
 }
 
-async function loadCategoriesView(forceFresh = false) {
+async function loadCategoriesView(forceFresh = false, { background = false } = {}) {
   const grid = document.getElementById("categories-grid");
   const stats = document.getElementById("categories-stats");
   if (!grid || !stats) return;
   if (!USER_ID) {
+    if (background) throw new Error("categorias: sessão ainda não pronta");
     grid.innerHTML = '<div class="empty" style="grid-column:1/-1;padding:20px;text-align:center;color:var(--text-3)">Conectando…</div>';
     stats.innerHTML = "";
     setTimeout(() => loadCategoriesView(forceFresh), 300);
     return;
   }
   const showArchived = document.getElementById("cat-show-archived")?.checked ?? false;
+
+  // Puxão: sem skeleton, fetch antes de render, falha real rejeita sem tocar DOM.
+  if (background) {
+    const data = await _fetchCategories(true, { force: true });
+    if (data === undefined) return;
+    _categoriesCache = data;
+    renderCategoriesView(data, showArchived);
+    return;
+  }
 
   if (_categoriesCache && !forceFresh) {
     renderCategoriesView(_categoriesCache, showArchived);
@@ -1667,7 +1736,8 @@ async function loadCategoriesView(forceFresh = false) {
   stats.innerHTML = "";
 
   try {
-    const data = await _fetchCategories(true);
+    const data = await _fetchCategories(true, { force: true });
+    if (data === undefined) return;
     _categoriesCache = data;
     renderCategoriesView(data, showArchived);
   } catch (err) {
@@ -1950,37 +2020,42 @@ async function categoryDeleteFromModal() {
 // Orçamentos (view dinâmica — semáforo real)
 // ══════════════════════════════════════════════════════════════════════
 
-async function _fetchBudgetsStatus(month) {
-  if (_budgetsFetchInFlight) return _budgetsFetchInFlight;
-  _budgetsFetchInFlight = (async () => {
-    try {
-      const q = month ? `?month=${encodeURIComponent(month)}` : "";
-      const resp = await fetch(`${API}/budgets/${USER_ID}/status${q}`, {
-        credentials: "same-origin",
-        headers: csrfHeaders(),
-      });
-      if (!resp.ok) {
-        const txt = await resp.text();
-        let detail = txt;
-        try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-        throw new Error(`(HTTP ${resp.status}) ${detail}`);
-      }
-      return await resp.json();
-    } finally {
-      _budgetsFetchInFlight = null;
+async function _fetchBudgetsStatus(month, { force = false } = {}) {
+  return _budgetsChannel.run(async (signal) => {
+    const q = month ? `?month=${encodeURIComponent(month)}` : "";
+    const resp = await fetch(`${API}/budgets/${USER_ID}/status${q}`, {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      signal,
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      throw new Error(`(HTTP ${resp.status}) ${detail}`);
     }
-  })();
-  return _budgetsFetchInFlight;
+    return await resp.json();
+  }, { force });
 }
 
-async function loadBudgetsView(forceFresh = false) {
+async function loadBudgetsView(forceFresh = false, { background = false } = {}) {
   const list = document.getElementById("budgets-list");
   const stats = document.getElementById("budgets-stats");
   const title = document.getElementById("budgets-title");
   if (!list || !stats) return;
   if (!USER_ID) {
+    if (background) throw new Error("orçamentos: sessão ainda não pronta");
     list.innerHTML = '<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Conectando…</div>';
     setTimeout(() => loadBudgetsView(forceFresh), 300);
+    return;
+  }
+
+  // Puxão: sem skeleton, fetch antes de render, falha real rejeita sem tocar DOM.
+  if (background) {
+    const data = await _fetchBudgetsStatus(undefined, { force: true });
+    if (data === undefined) return;
+    _budgetsStatusCache = data;
+    renderBudgetsView(data);
     return;
   }
 
@@ -2001,7 +2076,8 @@ async function loadBudgetsView(forceFresh = false) {
   `;
 
   try {
-    const data = await _fetchBudgetsStatus();
+    const data = await _fetchBudgetsStatus(undefined, { force: true });
+    if (data === undefined) return;
     _budgetsStatusCache = data;
     renderBudgetsView(data);
   } catch (err) {
@@ -2321,36 +2397,43 @@ function _formatCdiRate(rate) {
 }
 
 let _goalsCache = null;
-let _goalsFetchInFlight = null;
+const _goalsChannel = makeFetchChannel(); // dedup + abort + geração
 
-async function _fetchGoalsStatus() {
-  if (_goalsFetchInFlight) return _goalsFetchInFlight;
-  _goalsFetchInFlight = (async () => {
-    try {
-      const resp = await fetch(`${API}/goals/${USER_ID}/status`, {
-        credentials: "same-origin",
-        headers: csrfHeaders(),
-      });
-      if (!resp.ok) {
-        const txt = await resp.text();
-        let detail = txt;
-        try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-        throw new Error(`(HTTP ${resp.status}) ${detail}`);
-      }
-      const data = await resp.json();
-      return data.goals || [];
-    } finally {
-      _goalsFetchInFlight = null;
+async function _fetchGoalsStatus({ force = false } = {}) {
+  return _goalsChannel.run(async (signal) => {
+    const resp = await fetch(`${API}/goals/${USER_ID}/status`, {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      signal,
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      throw new Error(`(HTTP ${resp.status}) ${detail}`);
     }
-  })();
-  return _goalsFetchInFlight;
+    const data = await resp.json();
+    return data.goals || [];
+  }, { force });
 }
 
-async function loadGoalsView(forceFresh = false) {
+async function loadGoalsView(forceFresh = false, { background = false } = {}) {
   const stats = document.getElementById("goals-stats");
   const grid = document.getElementById("goals-grid");
   if (!stats || !grid) return;
-  if (!USER_ID) { setTimeout(() => loadGoalsView(forceFresh), 300); return; }
+  if (!USER_ID) {
+    if (background) throw new Error("metas: sessão ainda não pronta");
+    setTimeout(() => loadGoalsView(forceFresh), 300); return;
+  }
+
+  // Puxão: sem skeleton, fetch antes de render, falha real rejeita sem tocar DOM.
+  if (background) {
+    const data = await _fetchGoalsStatus({ force: true });
+    if (data === undefined) return;
+    _goalsCache = data;
+    _renderGoalsView(data);
+    return;
+  }
 
   if (_goalsCache && !forceFresh) {
     _renderGoalsView(_goalsCache);
@@ -2369,7 +2452,8 @@ async function loadGoalsView(forceFresh = false) {
   grid.innerHTML = "";
 
   try {
-    const data = await _fetchGoalsStatus();
+    const data = await _fetchGoalsStatus({ force: true });
+    if (data === undefined) return;
     _goalsCache = data;
     _renderGoalsView(data);
   } catch (err) {
@@ -3074,42 +3158,50 @@ function _recMonthlyEquiv(r) {
 }
 
 let _recurringCache = null;
-let _recurringFetchInFlight = null;
+const _recurringChannel = makeFetchChannel(); // dedup + abort + geração
 
-async function _fetchRecurring() {
-  if (_recurringFetchInFlight) return _recurringFetchInFlight;
-  _recurringFetchInFlight = (async () => {
-    try {
-      const resp = await fetch(`${API}/recurring-expenses/${USER_ID}`, {
-        credentials: "same-origin",
-        headers: csrfHeaders(),
-      });
-      if (resp.status === 403) {
-        const data = await resp.json().catch(() => ({}));
-        if (data?.detail?.error === "pro_required") return { pro_required: true };
-      }
-      if (!resp.ok) {
-        const txt = await resp.text();
-        let detail = txt;
-        try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-        throw new Error(`(HTTP ${resp.status}) ${detail}`);
-      }
-      const data = await resp.json();
-      return data.recurring || [];
-    } finally {
-      _recurringFetchInFlight = null;
+async function _fetchRecurring({ force = false } = {}) {
+  return _recurringChannel.run(async (signal) => {
+    const resp = await fetch(`${API}/recurring-expenses/${USER_ID}`, {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      signal,
+    });
+    if (resp.status === 403) {
+      const data = await resp.json().catch(() => ({}));
+      if (data?.detail?.error === "pro_required") return { pro_required: true };
     }
-  })();
-  return _recurringFetchInFlight;
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      throw new Error(`(HTTP ${resp.status}) ${detail}`);
+    }
+    const data = await resp.json();
+    return data.recurring || [];
+  }, { force });
 }
 
-async function loadFixedView(forceFresh = false) {
+async function loadFixedView(forceFresh = false, { background = false } = {}) {
   const stats = document.getElementById("recurring-stats");
   if (!stats) return;
   if (!USER_ID) {
+    if (background) throw new Error("gastos fixos: sessão ainda não pronta");
     setTimeout(() => loadFixedView(forceFresh), 300);
     return;
   }
+
+  // Puxão: sem skeleton, fetch antes de render, falha real rejeita sem tocar DOM.
+  // undefined (superado) sai neutro; pro_required renderiza o gate (não é erro).
+  if (background) {
+    const data = await _fetchRecurring({ force: true });
+    if (data === undefined) return;
+    if (data && data.pro_required) { _renderFixedProGate(); return; }
+    _recurringCache = data;
+    _renderFixedView(data);
+    return;
+  }
+
   if (_recurringCache && !forceFresh) {
     _renderFixedView(_recurringCache);
     _fetchRecurring().then(fresh => {
@@ -3125,7 +3217,8 @@ async function loadFixedView(forceFresh = false) {
     <div class="stat-tile"><div class="stat-label">Reajustes</div><div class="sk sk-h2"></div></div>
   `;
   try {
-    const data = await _fetchRecurring();
+    const data = await _fetchRecurring({ force: true });
+    if (data === undefined) return;
     if (data && data.pro_required) {
       _renderFixedProGate();
       return;
@@ -3695,7 +3788,7 @@ const RECURRING_INCOME_CATEGORY_EMOJI = {
 // Aba ativa da view Recorrentes: "overview" | "expenses" | "incomes" | "bills"
 let _recurringTab = "overview";
 let _recurringIncomeCache = null;
-let _recurringIncomeFetchInFlight = null;
+const _recurringIncomeChannel = makeFetchChannel(); // dedup + abort + geração
 
 function setRecurringTab(tab) {
   if (!["overview", "expenses", "incomes", "bills"].includes(tab)) return;
@@ -3728,6 +3821,8 @@ function setRecurringTab(tab) {
 // ── Previsão mensal: o que entra (receitas fixas) × o que sai (gastos fixos +
 // boletos) × resultado, + próximos vencimentos. Deixa explícito que é RECORRENTE
 // (não colide com "Receitas/Gastos do mês" do dashboard principal). ─────────────
+const _recurringOverviewChannel = makeFetchChannel(); // dedup + abort + geração
+
 async function loadRecurringOverview({ background = false } = {}) {
   const wrap = document.getElementById("recurring-overview-cards");
   if (!wrap) return;
@@ -3736,22 +3831,43 @@ async function loadRecurringOverview({ background = false } = {}) {
   if (!background) {
     wrap.innerHTML = `<div class="mock-card"><div class="empty" style="padding:16px;color:var(--text-3)">Carregando…</div></div>`;
   }
-  const j = async (url) => {
-    try { const r = await fetch(url, { credentials: "same-origin" }); if (!r.ok) return null; return await r.json(); }
-    catch (_) { return null; }
-  };
-  const [exp, inc, bills] = await Promise.all([
-    j(`${API}/recurring-expenses/${USER_ID}`),
-    j(`${API}/recurring-incomes/${USER_ID}`),
-    j(`${API}/recurring-bills/${USER_ID}?include_paid=false`),
-  ]);
-  // No puxão, endpoint que falhou NÃO pode virar total zerado: o j() acima
-  // converte falha em null e o reduce embaixo somaria zero por cima de números
-  // que estavam certos na tela. Rejeita sem tocar no DOM — o indicador do
-  // gesto (app-mode.js) fica âmbar e o render antigo sobrevive.
-  if (background && (exp === null || inc === null || bills === null)) {
-    throw new Error("recurring overview: fetch falhou no refresh");
-  }
+  // Canal compartilhado (abort + geração): os 3 endpoints são independentes,
+  // mas DUAS invocações do overview podem correr juntas (navego pra
+  // Recorrentes e puxo antes do load de nav terminar). Sem guarda de geração,
+  // o de nav (mais lento) renderizaria por último e sobrescreveria o fresco do
+  // puxão — o mesmo stale-overwrite, só que na janela do load inicial. force:true
+  // sempre (o overview nunca deduplicou; sempre busca fresco) + os 3 fetches no
+  // MESMO signal, então o abort cancela os 3 de uma vez.
+  const result = await _recurringOverviewChannel.run(async (signal) => {
+    const j = async (url) => {
+      try {
+        const r = await fetch(url, { credentials: "same-origin", signal });
+        if (!r.ok) return null;
+        return await r.json();
+      } catch (err) {
+        // Abort tem que propagar (o canal converte em neutro/undefined); só a
+        // falha de rede "normal" vira null tolerável na navegação.
+        if (err && err.name === "AbortError") throw err;
+        return null;
+      }
+    };
+    const [exp, inc, bills] = await Promise.all([
+      j(`${API}/recurring-expenses/${USER_ID}`),
+      j(`${API}/recurring-incomes/${USER_ID}`),
+      j(`${API}/recurring-bills/${USER_ID}?include_paid=false`),
+    ]);
+    // No puxão, endpoint que falhou NÃO pode virar total zerado: o j() acima
+    // converte falha em null e o reduce embaixo somaria zero por cima de números
+    // que estavam certos na tela. Rejeita sem tocar no DOM — o indicador do
+    // gesto (app-mode.js) fica âmbar e o render antigo sobrevive. (Na navegação,
+    // null é tolerado: renderiza o parcial.)
+    if (background && (exp === null || inc === null || bills === null)) {
+      throw new Error("recurring overview: fetch falhou no refresh");
+    }
+    return { exp, inc, bills };
+  }, { force: true });
+  if (result === undefined) return;   // superado por outra invocação — deixa a tela
+  const { exp, inc, bills } = result;
 
   const gastos = ((exp && exp.recurring) || []).filter(r => r.is_active && (r.payment_mode || "autopay") === "autopay");
   const totalGastos = gastos.reduce((s, r) => s + _recMonthlyEquiv(r), 0);
@@ -3899,20 +4015,42 @@ function openRecurringNewFromTab() {
 }
 
 // ── Agenda de boletos (a pagar) ───────────────────────────────────────
-async function loadBillsView(forceFresh = false) {
-  const agendaEl = document.getElementById("recurring-bills-agenda");
-  if (!agendaEl) return;
-  try {
+const _billsChannel = makeFetchChannel(); // dedup + abort + geração
+
+async function _fetchBills({ force = false } = {}) {
+  return _billsChannel.run(async (signal) => {
     const resp = await fetch(`${API}/recurring-bills/${USER_ID}?include_paid=true`, {
       credentials: "same-origin",
+      signal,
     });
-    if (resp.status === 403) {
-      agendaEl.innerHTML = `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Boletos é uma feature <b>PigBank+</b>.</div>`;
-      return;
-    }
+    if (resp.status === 403) return { pro_required: true };
     if (!resp.ok) throw new Error(await resp.text());
     const data = await resp.json();
-    _renderBillsView(data.bills || []);
+    return data.bills || [];
+  }, { force });
+}
+
+async function loadBillsView(forceFresh = false, { background = false } = {}) {
+  const agendaEl = document.getElementById("recurring-bills-agenda");
+  if (!agendaEl) return;
+  const proMsg = `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Boletos é uma feature <b>PigBank+</b>.</div>`;
+
+  // Puxão: sem estado neutro por cima do render bom — falha REAL rejeita sem
+  // tocar no DOM (o indicador do gesto fica âmbar). 403 vira o aviso Pro
+  // (não é erro); superado sai neutro.
+  if (background) {
+    const data = await _fetchBills({ force: true });
+    if (data === undefined) return;
+    if (data && data.pro_required) { agendaEl.innerHTML = proMsg; return; }
+    _renderBillsView(data);
+    return;
+  }
+
+  try {
+    const data = await _fetchBills({ force: true });
+    if (data === undefined) return;
+    if (data && data.pro_required) { agendaEl.innerHTML = proMsg; return; }
+    _renderBillsView(data);
   } catch (_) {
     agendaEl.innerHTML = `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Não consegui carregar. Toque em Atualizar.</div>`;
   }
@@ -4209,40 +4347,63 @@ function _renderProjection(p) {
     </div>`;
 }
 
-async function _fetchRecurringIncomes() {
-  if (_recurringIncomeFetchInFlight) return _recurringIncomeFetchInFlight;
-  _recurringIncomeFetchInFlight = (async () => {
-    try {
-      const resp = await fetch(`${API}/recurring-incomes/${USER_ID}`, {
-        credentials: "same-origin",
-        headers: csrfHeaders(),
-      });
-      if (resp.status === 403) {
-        const data = await resp.json().catch(() => ({}));
-        if (data?.detail?.error === "pro_required") return { pro_required: true };
-      }
-      if (!resp.ok) {
-        const txt = await resp.text();
-        let detail = txt;
-        try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-        throw new Error(`(HTTP ${resp.status}) ${detail}`);
-      }
-      const data = await resp.json();
-      return data.incomes || [];
-    } finally {
-      _recurringIncomeFetchInFlight = null;
+async function _fetchRecurringIncomes({ force = false } = {}) {
+  return _recurringIncomeChannel.run(async (signal) => {
+    const resp = await fetch(`${API}/recurring-incomes/${USER_ID}`, {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      signal,
+    });
+    if (resp.status === 403) {
+      const data = await resp.json().catch(() => ({}));
+      if (data?.detail?.error === "pro_required") return { pro_required: true };
     }
-  })();
-  return _recurringIncomeFetchInFlight;
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      throw new Error(`(HTTP ${resp.status}) ${detail}`);
+    }
+    const data = await resp.json();
+    return data.incomes || [];
+  }, { force });
 }
 
-async function loadRecurringIncomeView(forceFresh = false) {
+// Puxa o total de gastos fixos pra "sobra prevista" quando o user entrou direto
+// na aba de receitas. Fire-and-forget: nunca bloqueia nem falha a view. No
+// puxão (background) o segundo render só acontece se o cache de receitas ainda
+// é o mesmo — senão sobrescreveria um render mais novo.
+function _hydrateRecurringIncomeSobra() {
+  if (_recurringCache) return;
+  const snapshot = _recurringIncomeCache;
+  _fetchRecurring().then(exp => {
+    if (exp && exp !== undefined && !exp.pro_required) {
+      _recurringCache = exp;
+      if (_recurringIncomeCache === snapshot) _renderRecurringIncomeView(_recurringIncomeCache);
+    }
+  }).catch(() => {});
+}
+
+async function loadRecurringIncomeView(forceFresh = false, { background = false } = {}) {
   const stats = document.getElementById("recurring-income-stats");
   if (!stats) return;
   if (!USER_ID) {
+    if (background) throw new Error("receitas fixas: sessão ainda não pronta");
     setTimeout(() => loadRecurringIncomeView(forceFresh), 300);
     return;
   }
+
+  // Puxão: sem skeleton, fetch antes de render, falha real rejeita sem tocar DOM.
+  if (background) {
+    const data = await _fetchRecurringIncomes({ force: true });
+    if (data === undefined) return;
+    if (data && data.pro_required) { _renderRecurringIncomeProGate(); return; }
+    _recurringIncomeCache = data;
+    _renderRecurringIncomeView(data);
+    _hydrateRecurringIncomeSobra();
+    return;
+  }
+
   if (_recurringIncomeCache && !forceFresh) {
     _renderRecurringIncomeView(_recurringIncomeCache);
     _fetchRecurringIncomes().then(fresh => {
@@ -4261,7 +4422,8 @@ async function loadRecurringIncomeView(forceFresh = false) {
     <div class="stat-tile"><div class="stat-label">Sobra prevista</div><div class="sk sk-h2"></div></div>
   `;
   try {
-    const data = await _fetchRecurringIncomes();
+    const data = await _fetchRecurringIncomes({ force: true });
+    if (data === undefined) return;
     if (data && data.pro_required) {
       _renderRecurringIncomeProGate();
       return;
@@ -4270,14 +4432,7 @@ async function loadRecurringIncomeView(forceFresh = false) {
     _renderRecurringIncomeView(data);
     // Sobra prevista precisa do total de gastos fixos: puxa em background
     // se o user entrou direto na aba de receitas.
-    if (!_recurringCache) {
-      _fetchRecurring().then(exp => {
-        if (exp && !exp.pro_required) {
-          _recurringCache = exp;
-          _renderRecurringIncomeView(_recurringIncomeCache);
-        }
-      }).catch(() => {});
-    }
+    _hydrateRecurringIncomeSobra();
   } catch (err) {
     stats.innerHTML = `<div class="empty" style="grid-column:1/-1;color:var(--red)">Erro: ${escapeHtmlSafe(String(err.message || err))}</div>`;
   }
@@ -4642,7 +4797,7 @@ async function deleteRecurringIncomeFromModal() {
 // painel personalizável que vem em breve (user vai poder ligar/desligar cards).
 let _analyticsCache = null;        // { kpis, evolution, categories, weekday, merchants, months }
 let _analyticsRetryTimer = null;
-let _analyticsFetchInFlight = null;
+const _analyticsChannel = makeFetchChannel(); // dedup + abort + geração (7 fetches, 1 signal)
 let _analyticsChartInstances = [];
 let _analyticsCurrentMonths = 6;
 
@@ -4662,13 +4817,14 @@ function _destroyAnalyticsCharts() {
   _analyticsChartInstances = [];
 }
 
-async function loadAnalyticsView(forceFresh = false, months = null) {
+async function loadAnalyticsView(forceFresh = false, months = null, { background = false } = {}) {
   if (months != null) _analyticsCurrentMonths = Math.max(1, Math.min(36, parseInt(months, 10) || 6));
 
   const statsEl = document.getElementById("analytics-stats");
   if (!statsEl) return;
 
   if (!USER_ID) {
+    if (background) throw new Error("análises: sessão ainda não pronta");
     if (!_analyticsRetryTimer) {
       _analyticsRetryTimer = setInterval(() => {
         if (USER_ID) {
@@ -4681,6 +4837,16 @@ async function loadAnalyticsView(forceFresh = false, months = null) {
     return;
   }
 
+  // Puxão: sem skeleton (Análises nunca teve), fetch antes de render, falha
+  // real rejeita sem tocar DOM (indicador âmbar). Superado sai neutro.
+  if (background) {
+    const data = await _fetchAnalyticsAll(_analyticsCurrentMonths, { force: true });
+    if (data === undefined) return;
+    _analyticsCache = data;
+    renderAnalyticsView(data);
+    return;
+  }
+
   // Stale-while-revalidate: já tem cache do mesmo período → renderiza e
   // revalida em background.
   if (_analyticsCache && _analyticsCache.months === _analyticsCurrentMonths && !forceFresh) {
@@ -4688,6 +4854,7 @@ async function loadAnalyticsView(forceFresh = false, months = null) {
     _fetchAnalyticsAll(_analyticsCurrentMonths).then(fresh => {
       // Só re-renderiza se algo mudou de verdade — senão reconstruía os
       // gráficos do Chart.js a cada visita, dando flicker de "recarregando".
+      // fresh undefined (superado) é falsy → o if pula sozinho.
       if (fresh && JSON.stringify(fresh) !== JSON.stringify(_analyticsCache)) {
         _analyticsCache = fresh;
         renderAnalyticsView(fresh);
@@ -4697,7 +4864,8 @@ async function loadAnalyticsView(forceFresh = false, months = null) {
   }
 
   try {
-    const data = await _fetchAnalyticsAll(_analyticsCurrentMonths);
+    const data = await _fetchAnalyticsAll(_analyticsCurrentMonths, { force: true });
+    if (data === undefined) return;
     _analyticsCache = data;
     renderAnalyticsView(data);
   } catch (err) {
@@ -4705,36 +4873,42 @@ async function loadAnalyticsView(forceFresh = false, months = null) {
   }
 }
 
-async function _fetchAnalyticsAll(months) {
-  if (_analyticsFetchInFlight) return _analyticsFetchInFlight;
-  _analyticsFetchInFlight = (async () => {
-    try {
-      const base = `/analytics/${USER_ID}`;
-      const qs = `?months=${months}`;
-      const [k, ev, cat, wk, tm, pat, ins] = await Promise.all([
-        fetch(`${base}/kpis${qs}`,           { credentials:"same-origin" }).then(r => r.json()),
-        fetch(`${base}/evolution${qs}`,      { credentials:"same-origin" }).then(r => r.json()),
-        fetch(`${base}/categories${qs}`,     { credentials:"same-origin" }).then(r => r.json()),
-        fetch(`${base}/weekday-pattern${qs}`,{ credentials:"same-origin" }).then(r => r.json()),
-        fetch(`${base}/top-merchants${qs}&limit=8`, { credentials:"same-origin" }).then(r => r.json()),
-        fetch(`${base}/patterns${qs}`,       { credentials:"same-origin" }).then(r => r.json()).catch(() => ({})),
-        fetch(`/insights/${USER_ID}/current`,{ credentials:"same-origin" }).then(r => r.json()).catch(() => ({})),
-      ]);
-      return {
-        kpis:       k.kpis       || null,
-        evolution:  ev.evolution || [],
-        categories: cat.categories || [],
-        weekday:    wk.weekdays  || [],
-        merchants:  tm.merchants || [],
-        patterns:   pat.patterns || [],     // Sprint 7: narrativas LLM
-        insights:   ins.insights || [],
-        months,
-      };
-    } finally {
-      _analyticsFetchInFlight = null;
-    }
-  })();
-  return _analyticsFetchInFlight;
+async function _fetchAnalyticsAll(months, { force = false } = {}) {
+  return _analyticsChannel.run(async (signal) => {
+    const base = `/analytics/${USER_ID}`;
+    const qs = `?months=${months}`;
+    // Os 7 fetches recebem o MESMO signal — um abort cancela todos de uma vez.
+    const getJson = async (url) => {
+      const r = await fetch(url, { credentials: "same-origin", signal });
+      return r.json();
+    };
+    // patterns/insights são opcionais: falha de rede/HTTP vira {} (não derruba a
+    // view). Mas o AbortError PRECISA propagar, senão um abort não cancelaria o
+    // Promise.all (o canal ficaria esperando um pedido que já foi superado).
+    const optional = async (url) => {
+      try { return await getJson(url); }
+      catch (err) { if (err && err.name === "AbortError") throw err; return {}; }
+    };
+    const [k, ev, cat, wk, tm, pat, ins] = await Promise.all([
+      getJson(`${base}/kpis${qs}`),
+      getJson(`${base}/evolution${qs}`),
+      getJson(`${base}/categories${qs}`),
+      getJson(`${base}/weekday-pattern${qs}`),
+      getJson(`${base}/top-merchants${qs}&limit=8`),
+      optional(`${base}/patterns${qs}`),
+      optional(`/insights/${USER_ID}/current`),
+    ]);
+    return {
+      kpis:       k.kpis       || null,
+      evolution:  ev.evolution || [],
+      categories: cat.categories || [],
+      weekday:    wk.weekdays  || [],
+      merchants:  tm.merchants || [],
+      patterns:   pat.patterns || [],     // Sprint 7: narrativas LLM
+      insights:   ins.insights || [],
+      months,
+    };
+  }, { force });
 }
 
 function renderAnalyticsView(data) {
@@ -5300,7 +5474,7 @@ let _historyFilters = {
 };
 let _historyStatsCache = null;
 let _historyRetryTimer = null;
-let _historyListInFlight = null;
+const _historyListChannel = makeFetchChannel(); // dedup + abort + geração
 let _historySearchDebounce = null;
 
 function _historyResetAndReload() {
@@ -5309,10 +5483,11 @@ function _historyResetAndReload() {
   loadHistoryView(true);
 }
 
-async function loadHistoryView(forceFresh = false) {
+async function loadHistoryView(forceFresh = false, { background = false } = {}) {
   const timeline = document.getElementById("history-timeline");
   if (!timeline) return;
   if (!USER_ID) {
+    if (background) throw new Error("histórico: sessão ainda não pronta");
     if (!_historyRetryTimer) {
       _historyRetryTimer = setInterval(() => {
         if (USER_ID) {
@@ -5332,6 +5507,10 @@ async function loadHistoryView(forceFresh = false) {
     statsNeeded ? _fetchHistoryStats(_historyFilters.months) : Promise.resolve(_historyStatsCache),
     _fetchHistoryList(_historyFilters),
   ]);
+  // list undefined = este load foi superado por um mais novo (troca de filtro,
+  // nova busca, puxão). Não renderiza — o mais novo é quem manda. Isso é a
+  // guarda de geração que impede o stale-overwrite no Histórico.
+  if (list === undefined) return;
   if (statsNeeded && stats) _historyStatsCache = { ...stats, months: _historyFilters.months };
 
   renderHistoryStats(_historyStatsCache);
@@ -5346,21 +5525,20 @@ async function _fetchHistoryStats(months) {
 }
 
 async function _fetchHistoryList(filters, opts = {}) {
-  if (_historyListInFlight && !opts.allowParallel) {
-    // Cancel anterior implicitamente — espera o último vencer no DOM.
-    // Suficiente pra debounce de digitação.
-    try { await _historyListInFlight; } catch (_) {}
-  }
   const qs = _buildHistoryQuery(filters);
-  _historyListInFlight = (async () => {
-    try {
-      const r = await fetch(`/history/${USER_ID}/list?${qs}`, { credentials:"same-origin" });
-      return await r.json();
-    } finally {
-      _historyListInFlight = null;
-    }
-  })();
-  return _historyListInFlight;
+  const doFetch = async (signal) => {
+    const r = await fetch(`/history/${USER_ID}/list?${qs}`, { credentials:"same-origin", signal });
+    return await r.json();
+  };
+  // allowParallel = busca concorrente (ex.: digitação incremental futura): sem
+  // canal/abort, cada pedido vive por conta própria e nenhum estrangula o
+  // outro. Nenhum caller passa allowParallel hoje; preservado de propósito.
+  if (opts.allowParallel) return doFetch();
+  // Demais chamadas (load principal, "carregar mais", puxão) passam pelo canal:
+  // abort + geração. Mata o hang-strand do antigo `await _historyListInFlight`
+  // (um list pendurado travava toda chamada seguinte) e evita que um pedido
+  // velho renderize por cima do novo. Devolve os dados, ou undefined se superado.
+  return _historyListChannel.run(doFetch, { force: true });
 }
 
 function _buildHistoryQuery(filters) {
@@ -5607,6 +5785,10 @@ document.addEventListener("click", async (e) => {
     e.target.textContent = "Carregando…";
     _historyFilters.page += 1;
     const more = await _fetchHistoryList(_historyFilters);
+    // Superado (um puxão/nova busca abortou este load-more): não faz append.
+    // Quem superou re-renderiza a timeline (com o botão) — não fica preso em
+    // "Carregando…".
+    if (more === undefined) return;
     renderHistoryTimeline(more, /*append=*/true);
     return;
   }
@@ -9486,6 +9668,16 @@ function render(d) {
    PROGRAMA DE AFILIADOS — aba só aparece pra quem é afiliado
 ═══════════════════════════════════════════════════════════════════════ */
 let _affiliateCache = null;
+const _affiliateChannel = makeFetchChannel(); // dedup + abort + geração
+
+async function _fetchAffiliate({ force = false } = {}) {
+  return _affiliateChannel.run(async (signal) => {
+    const res = await fetch(`${API}/api/affiliate/me`, { credentials: "same-origin", signal });
+    const data = await readResponsePayload(res);
+    if (!res.ok) throw new Error(data.detail || "Não foi possível carregar seus dados de afiliado.");
+    return data;
+  }, { force });
+}
 
 // Chamado no init: se o user é afiliado, mostra o item "Afiliados" no sidenav.
 async function initAffiliateNav() {
@@ -9498,10 +9690,31 @@ async function initAffiliateNav() {
   } catch {}
 }
 
-async function loadAffiliateView(forceFresh = false) {
+async function loadAffiliateView(forceFresh = false, { background = false } = {}) {
   const stats = document.getElementById("affiliate-stats");
   const body = document.getElementById("affiliate-body");
   if (!stats || !body) return;
+
+  // Puxão: sem skeleton, fetch antes de render, falha real rejeita sem tocar
+  // DOM (o body — e a chave Pix digitada nele — fica como está, indicador âmbar).
+  // O _renderAffiliateView reconstrói o input Pix, então lê-se o valor VIVO no
+  // último instante antes do render e restaura-se depois (o campo segue editável
+  // durante o fetch; um snapshot tirado antes descartaria o que foi digitado).
+  // Antes esse caminho vivia inline no _pbDashboardRefresh; agora mora aqui, no
+  // canal, junto com os outros loaders.
+  if (background) {
+    const data = await _fetchAffiliate({ force: true });
+    if (data === undefined) return;
+    const pix = document.getElementById("affiliate-pix-input");
+    const pending = pix ? pix.value : "";
+    _affiliateCache = data;
+    _renderAffiliateView(data);
+    if (pending) {
+      const el = document.getElementById("affiliate-pix-input");
+      if (el) el.value = pending;
+    }
+    return;
+  }
 
   if (_affiliateCache && !forceFresh) {
     _renderAffiliateView(_affiliateCache);
@@ -9516,9 +9729,8 @@ async function loadAffiliateView(forceFresh = false) {
   }
 
   try {
-    const res = await fetch(`${API}/api/affiliate/me`, { credentials: "same-origin" });
-    const data = await readResponsePayload(res);
-    if (!res.ok) throw new Error(data.detail || "Não foi possível carregar seus dados de afiliado.");
+    const data = await _fetchAffiliate({ force: true });
+    if (data === undefined) return;
     _affiliateCache = data;
     _renderAffiliateView(data);
   } catch (err) {
@@ -9832,11 +10044,44 @@ if ("serviceWorker" in navigator) {
    AGENTES DO PIGGY — prateleira, ativação e feed de disparos
    ═══════════════════════════════════════════════════════════════════════ */
 let _agentesCache = null;
+const _agentesChannel = makeFetchChannel(); // dedup + abort + geração (shelf+feed, 1 signal)
 
-async function loadAgentesView(forceFresh = false) {
+async function _fetchAgentes({ force = false } = {}) {
+  return _agentesChannel.run(async (signal) => {
+    const [shelfRes, feedRes] = await Promise.all([
+      fetch(`${API}/agents/${USER_ID}`, { credentials: "same-origin", signal }),
+      fetch(`${API}/agents/${USER_ID}/feed?limit=20`, { credentials: "same-origin", signal }),
+    ]);
+    const data = await readResponsePayload(shelfRes);
+    if (!shelfRes.ok) throw new Error(data.detail || "Não foi possível carregar os agentes.");
+    const feed = await readResponsePayload(feedRes);
+    data.events = feedRes.ok ? (feed.events || []) : [];
+    return data;
+  }, { force });
+}
+
+// Marca o feed como lido (fire-and-forget; não bloqueia nem falha a view).
+function _markAgentesFeedSeen() {
+  fetch(`${API}/agents/${USER_ID}/feed/seen`, {
+    method: "POST", credentials: "same-origin", headers: csrfHeaders(),
+  }).catch(() => {});
+}
+
+async function loadAgentesView(forceFresh = false, { background = false } = {}) {
   const shelf = document.getElementById("agentes-shelf");
   const feedEl = document.getElementById("agentes-feed");
   if (!shelf) return;
+
+  // Puxão: sem "Chamando os porquinhos…", fetch antes de render, falha real
+  // rejeita sem tocar DOM (indicador âmbar). Superado sai neutro.
+  if (background) {
+    const data = await _fetchAgentes({ force: true });
+    if (data === undefined) return;
+    _agentesCache = data;
+    _renderAgentes(data);
+    _markAgentesFeedSeen();
+    return;
+  }
 
   if (_agentesCache && !forceFresh) {
     _renderAgentes(_agentesCache);
@@ -9846,20 +10091,11 @@ async function loadAgentesView(forceFresh = false) {
   }
 
   try {
-    const [shelfRes, feedRes] = await Promise.all([
-      fetch(`${API}/agents/${USER_ID}`, { credentials: "same-origin" }),
-      fetch(`${API}/agents/${USER_ID}/feed?limit=20`, { credentials: "same-origin" }),
-    ]);
-    const data = await readResponsePayload(shelfRes);
-    if (!shelfRes.ok) throw new Error(data.detail || "Não foi possível carregar os agentes.");
-    const feed = await readResponsePayload(feedRes);
-    data.events = feedRes.ok ? (feed.events || []) : [];
+    const data = await _fetchAgentes({ force: true });
+    if (data === undefined) return;
     _agentesCache = data;
     _renderAgentes(data);
-    // Marca o feed como lido (fire-and-forget; não bloqueia a view)
-    fetch(`${API}/agents/${USER_ID}/feed/seen`, {
-      method: "POST", credentials: "same-origin", headers: csrfHeaders(),
-    }).catch(() => {});
+    _markAgentesFeedSeen();
   } catch (err) {
     shelf.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:30px;color:var(--red)">Erro: ${esc(String(err.message || err))}</div>`;
   }
@@ -10062,48 +10298,31 @@ function _pbDashboardRefresh() {
     return el && el.classList.contains("active");
   }) || "overview";
 
+  // Todos no MODO BACKGROUND: sem skeleton, fetch antes de render, e falha REAL
+  // rejeita sem tocar no DOM (o render bom fica, o indicador do gesto vira
+  // âmbar). Superado/abortado sai neutro (conta como sucesso). O canal
+  // compartilhado (abort + geração) de cada loader garante que um pedido velho
+  // não sobrescreva o novo.
   switch (active) {
-    case "analytics":    return loadAnalyticsView(true);
-    case "history":      return loadHistoryView(true);
-    case "cards":        return loadCardsView(true);
-    case "installments": return loadInstallmentsView(true);
-    case "categories":   return loadCategoriesView(true);
-    case "budgets":      return loadBudgetsView(true);
+    case "analytics":    return loadAnalyticsView(true, null, { background: true });
+    case "history":      return loadHistoryView(true, { background: true });
+    case "cards":        return loadCardsView(true, { background: true });
+    case "installments": return loadInstallmentsView(true, { background: true });
+    case "categories":   return loadCategoriesView(true, { background: true });
+    case "budgets":      return loadBudgetsView(true, { background: true });
     // "Recorrentes" tem quatro abas internas e só uma está visível. Recarregar
     // sempre a de gastos deixaria a que o usuário está vendo parada, com o
     // indicador dando a entender que atualizou. Espelha o setRecurringTab.
     case "fixed":
-      // background: sem skeleton, e falha REJEITA em vez de renderizar zeros
       if (_recurringTab === "overview") return loadRecurringOverview({ background: true });
-      if (_recurringTab === "incomes")  return loadRecurringIncomeView(true);
-      if (_recurringTab === "bills")    return loadBillsView(true);
-      return loadFixedView(true);
-    case "goals":        return loadGoalsView(true);
-    case "affiliate": {
-      // Fetch ANTES de render: em falha o DOM não é tocado — o body (e a
-      // chave Pix digitada nele) fica como está e o indicador avisa em âmbar.
-      // O loadAffiliateView(true) não serve aqui: ele troca o body pelo
-      // skeleton antes do fetch e, em erro, pelo aviso — a chave morre nos
-      // dois caminhos. A restauração é incondicional porque o input nasce
-      // sempre vazio: qualquer valor ali é digitação do usuário.
-      return fetch(`${API}/api/affiliate/me`, { credentials: "same-origin" })
-        .then(async res => {
-          const data = await readResponsePayload(res);
-          if (!res.ok) throw new Error(data.detail || "refresh de afiliado falhou");
-          // A chave é lida do input VIVO no último instante antes do render:
-          // o campo segue editável durante o fetch, e um snapshot tirado
-          // antes descartaria o que foi digitado nesse meio-tempo.
-          const pix = document.getElementById("affiliate-pix-input");
-          const pending = pix ? pix.value : "";
-          _affiliateCache = data;
-          _renderAffiliateView(data);
-          if (pending) {
-            const el = document.getElementById("affiliate-pix-input");
-            if (el) el.value = pending;
-          }
-        });
-    }
-    case "agentes":      return loadAgentesView(true);
+      if (_recurringTab === "incomes")  return loadRecurringIncomeView(true, { background: true });
+      if (_recurringTab === "bills")    return loadBillsView(true, { background: true });
+      return loadFixedView(true, { background: true });
+    case "goals":        return loadGoalsView(true, { background: true });
+    // Afiliado: o fetch-antes-de-render + preservação da chave Pix agora vive
+    // dentro do loadAffiliateView (modo background), não mais inline aqui.
+    case "affiliate":    return loadAffiliateView(true, { background: true });
+    case "agentes":      return loadAgentesView(true, { background: true });
     default:
       // Visão geral e investimentos vivem do snapshot do mês.
       // preferHttp: com o WS aberto o pedido volta do cache dele — puxar pra
