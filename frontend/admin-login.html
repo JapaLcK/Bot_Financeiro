@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Admin Login - PigBank</title>
 <meta name="theme-color" content="#0d1117" />
 <style>
@@ -21,7 +21,10 @@ body {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 24px;
+  /* Área segura: esta página não carrega app-mode.css e é a porta de entrada
+     do painel no celular — sem os insets o card encosta no notch em paisagem. */
+  padding: calc(24px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right))
+           calc(24px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left));
   color: var(--text);
   background:
     radial-gradient(circle at top left, rgba(20,184,166,.28), transparent 34%),
@@ -67,6 +70,11 @@ input {
   background: rgba(255,255,255,.04);
   color: var(--text);
   outline: none;
+  /* 16px é o piso: abaixo disso o Safari do iPhone dá zoom ao focar o campo
+     e não volta — o input não herda a fonte do body, então precisa ser dito. */
+  font: inherit;
+  font-size: 16px;
+  min-height: 48px;
 }
 input:focus {
   border-color: rgba(20,184,166,.6);
@@ -80,7 +88,16 @@ button {
   cursor: pointer;
   color: #03140e;
   font-weight: 700;
+  font-size: 16px;
+  min-height: 48px;
   background: linear-gradient(135deg, var(--accent), #86efac);
+  -webkit-tap-highlight-color: rgba(34,197,94,.2);
+  touch-action: manipulation;
+}
+@media (max-width: 480px) {
+  .card { padding: 24px 20px; border-radius: 20px; }
+  h1 { font-size: 23px; }
+  p { font-size: 14px; margin-bottom: 18px; }
 }
 button:disabled { opacity: .65; cursor: wait; }
 .error {
