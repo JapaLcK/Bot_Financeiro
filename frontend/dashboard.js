@@ -5495,10 +5495,11 @@ let _historySearchDebounce = null;
 // isto for > 0, o load-more não roda. Contador (não bool) pra aguentar reloads
 // concorrentes: um reload superado não pode zerar o gate de outro ainda em voo.
 let _historyReloadsInFlight = 0;
-// Geração de stats: cada reload bumpa e só a resposta da geração CORRENTE aplica.
-// A guarda de período não basta — dois reloads do MESMO período podem ter o stats
-// mais VELHO resolvendo por último e sobrescrevendo os contadores que o mais novo
-// já renderizou. A geração distingue reloads mesmo com período igual.
+// Geração de stats: só a resposta da geração CORRENTE aplica. A guarda de período
+// não basta — dois reloads do MESMO período podem ter o stats mais VELHO resolvendo
+// por último e sobrescrevendo os contadores que o mais novo já renderizou. A geração
+// só é bumpada quando um FETCH de stats novo é disparado (statsNeeded); um reload
+// só-cache NÃO bumpa, pra não invalidar um refresh ainda em voo de um reload forçado.
 let _historyStatsGen = 0;
 
 function _historyResetAndReload() {
@@ -5544,7 +5545,11 @@ async function loadHistoryView(forceFresh = false, { background = false } = {}) 
   // LISTA (cancelável, com guarda de geração); o stats atualiza os contadores
   // quando chegar. .catch pra nunca virar unhandledrejection num caminho superado.
   const statsMonths = _historyFilters.months;
-  const statsGen = ++_historyStatsGen;
+  // Bumpa a geração SÓ quando dispara um fetch novo. Um reload só-cache (re-entrar
+  // no Histórico com cache válido, statsNeeded=false) não pode invalidar um refresh
+  // de stats ainda em voo de um reload forçado anterior — senão a resposta fresca
+  // falharia a guarda de geração e os contadores ficariam velhos até o próximo forçado.
+  const statsGen = statsNeeded ? ++_historyStatsGen : _historyStatsGen;
   const statsP = (statsNeeded
     ? _fetchHistoryStats(statsMonths)
     : Promise.resolve(_historyStatsCache)).catch(() => null);
