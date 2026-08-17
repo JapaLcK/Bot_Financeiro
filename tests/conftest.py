@@ -23,11 +23,73 @@ from db import init_db, ensure_user, get_conn
 
 
 
+def _make_isolated_db(base_url: str) -> tuple[str, str] | None:
+    """Cria um database só desta execução. Devolve (url_nova, nome) ou None
+    se não for possível (sem permissão de CREATE DATABASE, por exemplo)."""
+    import psycopg
+    from urllib.parse import urlsplit, urlunsplit
+
+    name = f"pytest_{uuid.uuid4().hex[:12]}"
+    try:
+        with psycopg.connect(base_url, autocommit=True) as conn:
+            # Nome é gerado aqui (hex de uuid), não vem de fora — sem risco
+            # de injeção. Aspas duplas porque CREATE DATABASE não aceita
+            # parâmetro ligado.
+            conn.execute(f'create database "{name}"')
+    except Exception as exc:
+        print(f"[conftest] sem isolamento de banco ({exc}); usando o DATABASE_URL original")
+        return None
+    parts = urlsplit(base_url)
+    return urlunsplit(parts._replace(path=f"/{name}")), name
+
+
+def _drop_isolated_db(base_url: str, name: str) -> None:
+    import psycopg
+
+    from db.connection import close_pool
+
+    close_pool()  # solta as conexões, senão o DROP é recusado
+    try:
+        with psycopg.connect(base_url, autocommit=True) as conn:
+            # FORCE derruba conexões remanescentes (Postgres 13+).
+            conn.execute(f'drop database if exists "{name}" with (force)')
+    except Exception as exc:
+        print(f"[conftest] não consegui remover o database {name}: {exc}")
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _init_schema():
-    if not os.getenv("DATABASE_URL"):
+    """Prepara o schema — num database exclusivo desta execução.
+
+    Sem o isolamento, duas execuções simultâneas da suíte contra o mesmo
+    DATABASE_URL se destroem: a fixture `_auto_cleanup_orphan_users` abaixo
+    apaga QUALQUER usuário que apareça em `users` durante um teste, e não
+    tem como distinguir os da outra execução. O resultado são falhas em
+    testes sem relação com a mudança, que não reproduzem sozinhas.
+
+    Custa ~1s (createdb + init_db). Para inspecionar o banco depois de rodar,
+    desligue com PYTEST_DB_ISOLATION=0.
+    """
+    base_url = os.getenv("DATABASE_URL")
+    if not base_url:
         raise RuntimeError("Faltou DATABASE_URL no ambiente para rodar os testes.")
-    init_db()
+
+    isolated = None
+    if os.getenv("PYTEST_DB_ISOLATION", "1") != "0":
+        isolated = _make_isolated_db(base_url)
+
+    if isolated:
+        url, name = isolated
+        # Trocar antes de qualquer conexão: o pool de db/connection.py é lazy
+        # e só lê DATABASE_URL quando abre.
+        os.environ["DATABASE_URL"] = url
+        init_db()
+        yield
+        os.environ["DATABASE_URL"] = base_url
+        _drop_isolated_db(base_url, name)
+    else:
+        init_db()
+        yield
 
 
 @pytest.fixture(autouse=True)
