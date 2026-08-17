@@ -5531,24 +5531,35 @@ async function loadHistoryView(forceFresh = false, { background = false } = {}) 
   // senão dessincroniza com as páginas que ficaram na tela (e o "carregar mais"
   // seguinte pularia/duplicaria).
   const statsNeeded = !_historyStatsCache || _historyStatsCache.months !== _historyFilters.months || forceFresh;
-  // Gate o load-more: enquanto este reload está em voo, um "carregar mais" appendaria
-  // na base velha e abortaria a página 1. Contado no finally pra fechar em qualquer
-  // saída (sucesso, superado, erro, rethrow do background).
+  // Stats é secundário e NÃO-cancelável (o fetch não recebe signal). Fica FORA do
+  // gate e do await da timeline: se entrasse no Promise.all gateado, um reload
+  // superado cuja LISTA foi abortada mas cujo stats segue pendurado nunca chegaria
+  // ao finally (o Promise.all esperaria o stats) e o gate ficaria PRESO acima de
+  // zero — todo "carregar mais" ignorado pra sempre. O gate segue só o ciclo da
+  // LISTA (cancelável, com guarda de geração); o stats atualiza os contadores
+  // quando chegar. .catch pra nunca virar unhandledrejection num caminho superado.
+  const statsMonths = _historyFilters.months;
+  const statsP = (statsNeeded
+    ? _fetchHistoryStats(statsMonths)
+    : Promise.resolve(_historyStatsCache)).catch(() => null);
+
   _historyReloadsInFlight++;
   try {
-    const [stats, list] = await Promise.all([
-      statsNeeded ? _fetchHistoryStats(_historyFilters.months) : Promise.resolve(_historyStatsCache),
-      _fetchHistoryList({ ..._historyFilters, page: 1 }),
-    ]);
+    const list = await _fetchHistoryList({ ..._historyFilters, page: 1 });
     // list undefined = este load foi superado por um mais novo (troca de filtro,
     // nova busca, puxão). Não renderiza — o mais novo é quem manda. Isso é a
     // guarda de geração que impede o stale-overwrite no Histórico.
     if (list === undefined) return;
     _historyFilters.page = 1;   // commit: o DOM vira página 1 agora
-    if (statsNeeded && stats) _historyStatsCache = { ...stats, months: _historyFilters.months };
-
-    renderHistoryStats(_historyStatsCache);
     renderHistoryTimeline(list, /*append=*/false);
+    // Stats (secundário) atualiza os contadores quando chegar — sem segurar o gate
+    // nem a timeline. Guarda de período: um stats de período antigo resolvendo
+    // tarde não pode sobrescrever o atual (a virada pra async criou essa janela).
+    statsP.then(stats => {
+      if (_historyFilters.months !== statsMonths) return;
+      if (statsNeeded && stats) _historyStatsCache = { ...stats, months: statsMonths };
+      renderHistoryStats(_historyStatsCache);
+    });
   } catch (err) {
     // Falha REAL da lista (HTTP/rede). No puxão (background): rejeita sem tocar no
     // DOM NEM no contador — o render bom e a paginação ficam, indicador âmbar. Na
@@ -5557,7 +5568,7 @@ async function loadHistoryView(forceFresh = false, { background = false } = {}) 
     _historyFilters.page = 1;
     renderHistoryTimeline(null, /*append=*/false);
   } finally {
-    _historyReloadsInFlight--;
+    _historyReloadsInFlight--;   // solto quando a LISTA assenta — nunca preso no stats
   }
 }
 
