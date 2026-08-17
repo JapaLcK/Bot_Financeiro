@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<title>Configurações — PigBank</title>
+<title>Configurações · PigBank</title>
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
 <meta name="theme-color" content="#111111" />
 <!-- Widget da Pluggy: só é instanciado quando o usuário abre "conectar banco"
@@ -1155,7 +1155,7 @@ a { color: inherit; text-decoration: none; }
     </div>
     <h1 class="page-title">Conexões bancárias</h1>
     <p class="page-sub">
-      Conecte seus bancos via Open Finance para sincronizar saldos e transações automaticamente — sem precisar lançar nada no chat.
+      Conecte seus bancos via Open Finance para sincronizar saldos e transações automaticamente, sem precisar lançar nada no chat.
     </p>
   </header>
 
@@ -1324,7 +1324,7 @@ a { color: inherit; text-decoration: none; }
       <div class="info-banner">
         <span class="info-banner-icon"><i class="ph ph-lightbulb" aria-hidden="true"></i></span>
         <span>
-          <strong>Como funciona o Open Finance?</strong> Você autoriza o acesso dentro do ambiente seguro do banco, via Pluggy — a gente nunca vê sua senha e você pode revogar o acesso quando quiser.
+          <strong>Como funciona o Open Finance?</strong> Você autoriza o acesso dentro do ambiente seguro do banco, via Pluggy: a gente nunca vê sua senha e você pode revogar o acesso quando quiser.
         </span>
       </div>
 
@@ -1812,7 +1812,7 @@ let notificationSettingsLoaded = false;
 const SECTION_COPY = {
   "open-finance": {
     title: "Conexões bancárias",
-    sub: "Conecte seus bancos via Open Finance para sincronizar saldos e transações automaticamente — sem precisar lançar nada no chat.",
+    sub: "Conecte seus bancos via Open Finance para sincronizar saldos e transações automaticamente, sem precisar lançar nada no chat.",
   },
   security: {
     title: "Segurança",
@@ -1949,7 +1949,7 @@ function applySecuritySettings(data) {
     }
   }
   document.getElementById("security-plan-note").textContent = isPro
-    ? (data.plan_expires_at ? `Renova em ${fmtDate(data.plan_expires_at)}.` : "Acesso vitalício — sem cobrança.")
+    ? (data.plan_expires_at ? `Renova em ${fmtDate(data.plan_expires_at)}.` : "Acesso vitalício, sem cobrança.")
     : "Assine o Pro para desbloquear todos os recursos.";
   document.getElementById("security-session-value").textContent = formatSessionExpiry();
   document.getElementById("security-reset-btn").disabled = !hasEmail;
@@ -1961,7 +1961,7 @@ function applySecuritySettings(data) {
 async function loadSecuritySettings() {
   if (!USER_ID) {
     applySecuritySettings({});
-    showToast("Sessão inválida — faça login novamente", "error");
+    showToast("Sessão inválida. Faça login novamente", "error");
     return;
   }
   try {
@@ -2247,7 +2247,7 @@ function applyNotificationSettings(data) {
 
 async function loadNotificationSettings() {
   if (!USER_ID) {
-    showToast("Sessão inválida — faça login novamente", "error");
+    showToast("Sessão inválida. Faça login novamente", "error");
     return;
   }
   setNotificationControlsDisabled(true);
@@ -2782,7 +2782,7 @@ async function bindCaixinha(ofInvestmentId, newPocketVal, currentPocketId) {
    banco (PATCH /items), espera concluir e sincroniza — puxa transação nova, marca
    a conexão ATIVA e limpa "Pendente". */
 async function refreshOpenFinance() {
-  if (!USER_ID) { showToast("Sessão inválida — faça login novamente", "error"); return; }
+  if (!USER_ID) { showToast("Sessão inválida. Faça login novamente", "error"); return; }
   const btn = document.getElementById("of-refresh-btn");
   const orig = btn ? btn.textContent : "";
   if (btn) { btn.disabled = true; btn.textContent = "↻ Atualizando…"; }
@@ -2898,7 +2898,7 @@ async function openPluggyConnect() {
 }
 
 async function connectOpenFinance() {
-  if (!USER_ID) { showToast("Sessão inválida — faça login novamente", "error"); return; }
+  if (!USER_ID) { showToast("Sessão inválida. Faça login novamente", "error"); return; }
   // Free (limite 0): não abre o widget — o /pluggy-item recusaria. Leva pro upgrade.
   if (OF_BANKS_MAX === 0) { window.location.href = "/precos"; return; }
   const btn = document.getElementById("connect-btn");
@@ -3401,7 +3401,7 @@ initSettings();
 <div class="mfa-overlay" id="activity-modal-overlay" onclick="if (event.target === this) closeActivityModal()">
   <div class="mfa-modal">
     <h3>Atividade recente da conta</h3>
-    <p class="sub">Últimas ações sensíveis registradas — login de novos dispositivos, alterações de e-mail, MFA e Open Finance.</p>
+    <p class="sub">Últimas ações sensíveis registradas: login de novos dispositivos, alterações de e-mail, MFA e Open Finance.</p>
     <div id="activity-modal-list" class="activity-list"></div>
     <div class="mfa-actions">
       <button class="btn-cancel" type="button" onclick="closeActivityModal()">Fechar</button>
