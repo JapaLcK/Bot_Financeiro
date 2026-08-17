@@ -266,17 +266,57 @@ def test_users_endpoint_requires_admin_auth():
     assert response.status_code == 401
 
 
-def _log_event(uid, event_type, *, days_ago=0):
+def test_limpar_feed_preserva_eventos_do_funil(panel_accounts):
+    """Guard do P2: o 'Limpar' (DELETE /admin/api/events?before_id=...) apaga o
+    feed mas NÃO pode zerar o funil — os eventos billing_checkout_* sobrevivem
+    ao expurgo, senão a conversão 30d some numa limpeza de rotina."""
+    _tag, uids = panel_accounts
+    client = _admin_client()
+
+    # 1 evento comum (deve ser apagado) + os 2 do funil (devem sobreviver)
+    common_id = _log_event(uids["free"], "whatsapp_webhook_received", level="info")
+    start_id = _log_event(uids["paying"], "billing_checkout_started")
+    comp_id = _log_event(uids["paying"], "billing_checkout_completed")
+    before = max(common_id, start_id, comp_id)
+
+    base_funnel = client.get("/admin/api/users").json()["checkout_funnel"]
+
+    # "Limpar tudo até este momento" (DELETE exige o header CSRF)
+    resp = client.request(
+        "DELETE", f"/admin/api/events?before_id={before}",
+        headers={dashboard.CSRF_HEADER_NAME: "test-admin-csrf"},
+    )
+    assert resp.status_code == 200
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select count(*) n from system_event_logs where id = %s", (common_id,))
+            assert cur.fetchone()["n"] == 0, "evento comum devia ter sido apagado"
+            cur.execute(
+                "select count(*) n from system_event_logs where id = any(%s)",
+                ([start_id, comp_id],),
+            )
+            assert cur.fetchone()["n"] == 2, "eventos do funil NÃO podem ser apagados"
+
+    # E o funil continua contando a coorte
+    after_funnel = client.get("/admin/api/users").json()["checkout_funnel"]
+    assert after_funnel["started_30d"] == base_funnel["started_30d"]
+    assert after_funnel["completed_30d"] == base_funnel["completed_30d"]
+
+
+def _log_event(uid, event_type, *, days_ago=0, level="info"):
     from datetime import datetime, timedelta, timezone
     ts = datetime.now(timezone.utc) - timedelta(days=days_ago)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "insert into system_event_logs (level, event_type, message, source, user_id, details, created_at) "
-                "values ('info', %s, 'x', 'billing', %s, '{}'::jsonb, %s)",
-                (event_type, uid, ts),
+                "values (%s, %s, 'x', 'billing', %s, '{}'::jsonb, %s) returning id",
+                (level, event_type, uid, ts),
             )
+            new_id = cur.fetchone()["id"]
         conn.commit()
+    return new_id
 
 
 def test_checkout_funnel_conta_pessoas_distintas(panel_accounts):

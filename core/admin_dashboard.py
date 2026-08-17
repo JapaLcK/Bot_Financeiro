@@ -886,6 +886,12 @@ async def fetch_billing_summary(force: bool = False) -> dict[str, Any]:
     return _billing_summary_cache["data"]
 
 
+# Telemetria do funil: as duas pontas precisam sobreviver pra a conversão 30d
+# fazer sentido. O "Limpar" do feed (bulk delete até um id) NÃO pode apagá-las
+# — senão uma limpeza de rotina do feed zeraria a métrica silenciosamente.
+_FUNNEL_EVENT_TYPES = ("billing_checkout_started", "billing_checkout_completed")
+
+
 async def _fetch_checkout_funnel(cur) -> dict[str, int]:
     """Funil de checkout a partir de system_event_logs, por COORTE de abertura:
     started = pessoas distintas que ABRIRAM o checkout na janela;
@@ -1522,15 +1528,21 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
           - before_id: deleta eventos com id <= before_id (snapshot do client)
 
         Use sem filtros pra apagar tudo, ou só `before_id` pra "limpar tudo até este momento".
+
+        Exceção sempre aplicada: os eventos do funil de checkout
+        (_FUNNEL_EVENT_TYPES) são preservados — o painel depende deles pra
+        conversão 30d, e o "Limpar" é uma ação de UX do feed de alertas, não
+        um expurgo de telemetria de negócio.
         """
-        clauses, params = [], []
+        clauses = ["event_type <> ALL(%s)"]
+        params: list[Any] = [list(_FUNNEL_EVENT_TYPES)]
         if level in ("error", "warning", "info"):
             clauses.append("level = %s")
             params.append(level)
         if before_id is not None:
             clauses.append("id <= %s")
             params.append(int(before_id))
-        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        where = "WHERE " + " AND ".join(clauses)
 
         async with await db_connect() as conn:
             async with conn.cursor() as cur:
