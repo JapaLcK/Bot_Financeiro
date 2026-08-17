@@ -417,7 +417,7 @@ footer a:hover { color:var(--text); }
      /app antes do webhook fechar o gate. `position: fixed` = fora do fluxo, então
      estar no topo do body não muda layout nenhum. As regras CSS estão no <style>
      do <head> pelo mesmo motivo. -->
-<div class="checkout-confirm-overlay" id="checkout-confirm-overlay" role="status" aria-live="polite">
+<div class="checkout-confirm-overlay" id="checkout-confirm-overlay" role="status" aria-live="polite" tabindex="-1">
   <div class="cc-spinner" aria-hidden="true"></div>
   <div class="cc-text">Confirmando seu pagamento…</div>
   <div class="cc-sub">Só um instante enquanto o Stripe confirma. Não feche a tela.</div>
@@ -1035,16 +1035,68 @@ function _checkoutSettled(me) {
    este open roda durante o parse: no fim do documento ele não existiria ainda.
    O console.warn é proposital, se alguém mover a div de volta pro fim, o bug
    volta a ser um no-op silencioso, e silêncio aqui já custou uma rodada. */
+/* Guarda de Tab: com o overlay no ar, o teclado não pode alcançar a página
+   atrás. Em CAPTURA e engolindo a tecla — o `inert` abaixo já resolve nos
+   navegadores que o suportam, isto é o backstop pros que não. Sem os dois, o
+   Tab chega nos links do header e o Enter navega pro /app SEM ?upgrade=success,
+   caindo no gate que manda quem pagou pra /precos — a corrida que este PR
+   existe pra fechar. Não há nada focável dentro do overlay, então prender o
+   foco nele é o comportamento certo pra uma tela de espera. */
+function _ccOnKey(e) {
+  if (e.key !== "Tab") return;
+  const el = document.getElementById("checkout-confirm-overlay");
+  if (!el || !el.classList.contains("open")) return;
+  e.preventDefault();
+  e.stopPropagation();
+  el.focus({ preventScroll: true });
+}
+
+/* `inert` no resto do documento: tira do Tab e do leitor de tela tudo que não
+   é o overlay. Guardamos quem NÓS marcamos, pra não desmarcar o que já era
+   inerte por outro motivo. */
+function _ccSetInert(ligar) {
+  const ov = document.getElementById("checkout-confirm-overlay");
+  if (!ov || !document.body) return;
+  for (const filho of document.body.children) {
+    if (filho === ov || filho.tagName === "SCRIPT") continue;
+    if (ligar) {
+      if (!filho.hasAttribute("inert")) { filho.setAttribute("inert", ""); filho.dataset.ccInert = "1"; }
+    } else if (filho.dataset.ccInert) {
+      filho.removeAttribute("inert"); delete filho.dataset.ccInert;
+    }
+  }
+}
+
 function _openCheckoutOverlay() {
   const el = document.getElementById("checkout-confirm-overlay");
   if (!el) { console.warn("[checkout] overlay ausente no DOM, ordem do documento quebrada"); return; }
   el.classList.add("open");
+  el.focus({ preventScroll: true });
+  document.addEventListener("keydown", _ccOnKey, true);
+
+  /* O inert precisa de DUAS passadas. Esta função roda no topo do init, antes
+     de QUALQUER await — que é o ponto certo pro overlay, mas cedo demais pro
+     inert: nesse instante o <body> ainda está sendo parseado e
+     document.body.children tem só os primeiros elementos (medido: 2 de 7). A
+     segunda passada, no DOMContentLoaded, alcança o resto. A guarda de Tab
+     acima cobre a janela entre as duas, e é ela que impede o vazamento de
+     teclado de fato; o inert é pra tecnologia assistiva. */
+  _ccSetInert(true);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => {
+      if (el.classList.contains("open")) _ccSetInert(true);
+    }, { once: true });
+  }
 }
 function _closeCheckoutOverlay() {
   const el = document.getElementById("checkout-confirm-overlay");
   if (!el) return;
   const estavaAberto = el.classList.contains("open");
   el.classList.remove("open");
+  // desfaz a prisão do teclado ANTES de avisar quem espera: o próximo passo é
+  // o modal de boas-vindas, que precisa poder receber foco
+  document.removeEventListener("keydown", _ccOnKey, true);
+  _ccSetInert(false);
   /* Avisa quem estava esperando pra só então celebrar. O modal de boas-vindas
      não pode abrir por baixo desta tela: o z-index barra o MOUSE, mas não o
      teclado — o openWelcomePro foca o diálogo e instala o trap, então Tab+Enter
