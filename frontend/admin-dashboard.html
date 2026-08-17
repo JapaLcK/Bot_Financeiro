@@ -1392,7 +1392,7 @@ async function loadUsers() {
     if (res.status === 401) { window.location.href = '/admin/login'; return; }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    renderUsersChips(data.aggregates, data.billing);
+    renderUsersChips(data.aggregates, data.billing, data.checkout_funnel);
     renderUsersTable(data);
     $id('users-loading').textContent = '';
   } catch (e) {
@@ -1403,7 +1403,7 @@ async function loadUsers() {
   }
 }
 
-function renderUsersChips(agg, billing) {
+function renderUsersChips(agg, billing, funnel) {
   const chips = [
     { key: '',         label: 'Total',        val: fInt(agg.total),    chip: '' },
     { key: 'paying',   label: 'Pagantes',     val: fInt(agg.paying),   chip: 'green' },
@@ -1419,6 +1419,15 @@ function renderUsersChips(agg, billing) {
     </div>`).join('');
   html += `
     <div class="user-chip static"><b>${fInt(agg.whatsapp_connected)}</b><span>WA conect.</span></div>`;
+  // Funil de checkout 30d: abriram × conversão (concluíram / abriram).
+  if (funnel) {
+    const started = funnel.started_30d || 0;
+    const completed = funnel.completed_30d || 0;
+    const conv = started > 0 ? Math.round((completed / started) * 100) : null;
+    html += `
+    <div class="user-chip static"><b>${fInt(started)}</b><span>Checkout 30d</span></div>
+    <div class="user-chip static"><b class="${conv !== null && conv >= 50 ? 'green' : ''}">${conv !== null ? conv + '%' : '—'}</b><span>Conversão 30d</span></div>`;
+  }
   if (billing?.available) {
     html += `
     <div class="user-chip static"><b class="green">${fMoney(billing.mrr)}</b><span>MRR</span></div>

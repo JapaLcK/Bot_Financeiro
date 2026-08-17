@@ -3789,6 +3789,17 @@ async def billing_create_checkout(
         async with _billing_user_lock(user_id):
             result = await _billing_checkout_for_user(
                 stripe, user_id, plan, interval, price_id)
+        # Funil de checkout: registra a ABERTURA (par do billing_checkout_completed
+        # logado no webhook). started × completed dá a conversão no painel de
+        # admin. Só depois da sessão nascer de fato — sessão que falhou não conta.
+        await log_system_event(
+            "info",
+            "billing_checkout_started",
+            f"Checkout iniciado; plano {plan} ({interval}).",
+            source="billing",
+            user_id=user_id,
+            details={"plan": plan, "interval": interval},
+        )
         # Abrir o checkout já é "escolha de plano" no cadastro: fecha o gate da
         # /precos agora (idempotente) pra que, ao voltar do Stripe com
         # ?upgrade=success, o /home não bata no backstop 402 antes do webhook

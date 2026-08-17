@@ -442,3 +442,56 @@ def test_checkout_novo_plano_expira_sessao_aberta_incompativel(user_id, monkeypa
     assert first.json()["checkout_url"] != second.json()["checkout_url"]
     assert fake.session_create_calls == 2
     assert fake.session_expire_calls == 1
+
+
+def test_checkout_loga_evento_started_no_funil(user_id, monkeypatch):
+    """Abrir o checkout com sucesso registra billing_checkout_started em
+    system_event_logs (par do billing_checkout_completed do webhook) — é o que
+    alimenta o funil de conversão no painel de admin."""
+    from db import get_conn
+
+    uid, _, client = _auth_user_setup(f"funnel-{user_id}")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    _patch_stripe(monkeypatch)
+
+    resp = client.post(
+        "/billing/create-checkout", json={"interval": "monthly"}, headers=_CSRF_HEADERS
+    )
+    assert resp.status_code == 200, resp.text
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select details from system_event_logs
+                where event_type = 'billing_checkout_started' and user_id = %s
+                order by created_at desc limit 1
+                """,
+                (uid,),
+            )
+            row = cur.fetchone()
+    assert row is not None, "evento billing_checkout_started não foi logado"
+    assert row["details"]["interval"] == "monthly"
+
+
+def test_checkout_falho_nao_loga_started(user_id, monkeypatch):
+    """Sessão que não nasce (Stripe não configurado) não polui o funil."""
+    from db import get_conn
+
+    uid, _, client = _auth_user_setup(f"nofunnel-{user_id}")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "")  # 503: pagamentos off
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+
+    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    assert resp.status_code == 503
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select count(*) as n from system_event_logs "
+                "where event_type = 'billing_checkout_started' and user_id = %s",
+                (uid,),
+            )
+            n = cur.fetchone()["n"]
+    assert n == 0

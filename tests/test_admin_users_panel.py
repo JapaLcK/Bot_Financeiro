@@ -258,6 +258,36 @@ def test_users_endpoint_requires_admin_auth():
     assert response.status_code == 401
 
 
+def test_checkout_funnel_conta_pessoas_distintas(panel_accounts):
+    """checkout_funnel conta USUÁRIOS distintos: abrir 2x não vira 2 no
+    started; started conta quem abriu, completed quem concluiu."""
+    _tag, uids = panel_accounts
+    client = _admin_client()
+
+    def _log(uid, event_type):
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "insert into system_event_logs (level, event_type, message, source, user_id, details) "
+                    "values ('info', %s, 'x', 'billing', %s, '{}'::jsonb)",
+                    (event_type, uid),
+                )
+            conn.commit()
+
+    base = client.get("/admin/api/users").json()["checkout_funnel"]
+    b_started, b_completed = base["started_30d"], base["completed_30d"]
+
+    # 2 pessoas abrem o checkout; uma delas abre 2x (não deve inflar); 1 conclui
+    _log(uids["paying"], "billing_checkout_started")
+    _log(uids["paying"], "billing_checkout_started")  # 2ª abertura, mesmo user
+    _log(uids["trial"], "billing_checkout_started")
+    _log(uids["paying"], "billing_checkout_completed")
+
+    funnel = client.get("/admin/api/users").json()["checkout_funnel"]
+    assert funnel["started_30d"] == b_started + 2      # 2 pessoas, não 3 eventos
+    assert funnel["completed_30d"] == b_completed + 1
+
+
 def test_users_list_aggregates_and_statuses(panel_accounts):
     tag, uids = panel_accounts
     client = _admin_client()

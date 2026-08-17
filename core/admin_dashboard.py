@@ -886,6 +886,39 @@ async def fetch_billing_summary(force: bool = False) -> dict[str, Any]:
     return _billing_summary_cache["data"]
 
 
+async def _fetch_checkout_funnel(cur) -> dict[str, int]:
+    """Funil de checkout a partir de system_event_logs: pessoas distintas que
+    ABRIRAM o checkout (billing_checkout_started) × as que CONCLUÍRAM
+    (billing_checkout_completed), em 30d e 7d. Por usuário distinto pra abrir
+    o checkout 2x não contar como 2 — user_id NULL (evento sem conta) é
+    ignorado no distinct. started_30d é 0 antes deste recurso ir pro ar (o
+    evento passou a ser logado agora); a conversão só fica confiável dali pra
+    frente, e o front avisa quando started=0."""
+    await cur.execute(
+        """
+        SELECT
+            COUNT(DISTINCT user_id) FILTER (
+                WHERE event_type = 'billing_checkout_started'
+                  AND created_at >= NOW() - INTERVAL '30 days') AS started_30d,
+            COUNT(DISTINCT user_id) FILTER (
+                WHERE event_type = 'billing_checkout_completed'
+                  AND created_at >= NOW() - INTERVAL '30 days') AS completed_30d,
+            COUNT(DISTINCT user_id) FILTER (
+                WHERE event_type = 'billing_checkout_started'
+                  AND created_at >= NOW() - INTERVAL '7 days') AS started_7d,
+            COUNT(DISTINCT user_id) FILTER (
+                WHERE event_type = 'billing_checkout_completed'
+                  AND created_at >= NOW() - INTERVAL '7 days') AS completed_7d
+        FROM system_event_logs
+        WHERE event_type IN ('billing_checkout_started', 'billing_checkout_completed')
+          AND created_at >= NOW() - INTERVAL '30 days'
+          AND user_id IS NOT NULL
+        """
+    )
+    row = await cur.fetchone()
+    return {k: int(v or 0) for k, v in dict(row).items()}
+
+
 _ADMIN_USERS_HARD_CAP = 2000
 
 
@@ -980,6 +1013,12 @@ async def fetch_admin_users(
                 aggregates["whatsapp_connected"] += int(r["wa"])
             aggregates["total"] = sum(aggregates[s] for s in _USER_STATUSES)
 
+            # Funil de checkout (system_event_logs): quantas PESSOAS abriram o
+            # checkout × quantas concluíram, em 30d/7d. Contagem por usuário
+            # distinto (não por evento) — abrir 2x não infla o funil. A
+            # conversão é derivada no front (completed / started).
+            checkout_funnel = await _fetch_checkout_funnel(cur)
+
             if not q:
                 await cur.execute(
                     f"SELECT COUNT(*) AS n FROM auth_accounts a {where_sql}",
@@ -1042,6 +1081,7 @@ async def fetch_admin_users(
     return {
         "generated_at": now,
         "aggregates": aggregates,
+        "checkout_funnel": checkout_funnel,
         "billing": await fetch_billing_summary(),
         "users": page_rows,
         "page": page,
