@@ -378,6 +378,29 @@ footer a:hover { color:var(--text); }
   .user-dropdown { left:0; right:auto; width:min(100%,300px); }
   .nav-links { width:100%; }
 }
+
+/* Tela de confirmação pós-checkout: espera o webhook do Stripe cair antes de
+   liberar o dashboard (evita o 402 de corrida). Fail-open após ~20s.
+   MORA AQUI, no <style> do <head>, e não junto dos outros overlays lá embaixo:
+   o markup precisa estar pronto E ESTILIZADO antes do <script> que o abre
+   (síncrono, no parse). Com as regras depois do script, a janela do parse
+   renderizaria a div sem o `display:none`, o "Confirmando seu pagamento…"
+   apareceria solto no topo da página. Regra e markup andam juntos. */
+.checkout-confirm-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.8);
+  display: none; flex-direction: column; align-items: center; justify-content: center;
+  z-index: 10002; padding: 24px; text-align: center; gap: 18px;
+  backdrop-filter: blur(6px);
+}
+.checkout-confirm-overlay.open { display: flex; }
+.checkout-confirm-overlay .cc-spinner {
+  width: 44px; height: 44px; border-radius: 50%;
+  border: 3px solid rgba(255,45,142,.25); border-top-color: #FF2D8E;
+  animation: ccSpin .8s linear infinite;
+}
+@keyframes ccSpin { to { transform: rotate(360deg); } }
+.checkout-confirm-overlay .cc-text { color: rgba(255,255,255,.92); font-size: 16px; font-weight: 600; }
+.checkout-confirm-overlay .cc-sub { color: rgba(255,255,255,.6); font-size: 13px; max-width: 320px; line-height: 1.4; }
 </style>
 <script src="/static/auth-refresh.js"></script>
 <script src="/modals.js"></script>
@@ -385,6 +408,20 @@ footer a:hover { color:var(--text); }
   <script src="/app-mode.js?v=23"></script>
 </head>
 <body>
+
+<!-- Overlay de confirmação pós-checkout. FICA AQUI, no topo do <body>, porque o
+     script que o abre (_openCheckoutOverlay) roda síncrono no parse, antes de
+     qualquer await. Se a div estivesse no fim do documento, junto dos outros
+     overlays, o getElementById devolveria null e o open viraria no-op silencioso:
+     o welcome modal (450ms) ficaria clicável sem cobertura e daria pra chegar no
+     /app antes do webhook fechar o gate. `position: fixed` = fora do fluxo, então
+     estar no topo do body não muda layout nenhum. As regras CSS estão no <style>
+     do <head> pelo mesmo motivo. -->
+<div class="checkout-confirm-overlay" id="checkout-confirm-overlay" role="status" aria-live="polite">
+  <div class="cc-spinner" aria-hidden="true"></div>
+  <div class="cc-text">Confirmando seu pagamento…</div>
+  <div class="cc-sub">Só um instante enquanto o Stripe confirma. Não feche a tela.</div>
+</div>
 
 <div class="bg">
   <div class="orb orb-1"></div>
@@ -992,28 +1029,69 @@ function _checkoutSettled(me) {
 
 /* Overlay de confirmação: aberto síncronamente no topo do init (antes de
    qualquer await) e fechado em TODOS os caminhos de saída. Enquanto aberto,
-   cobre o welcome modal — ninguém navega pro /app sem o bypass. */
+   cobre o welcome modal, ninguém navega pro /app sem o bypass.
+
+   O elemento mora no TOPO do <body> (e as regras no <style> do <head>) porque
+   este open roda durante o parse: no fim do documento ele não existiria ainda.
+   O console.warn é proposital, se alguém mover a div de volta pro fim, o bug
+   volta a ser um no-op silencioso, e silêncio aqui já custou uma rodada. */
 function _openCheckoutOverlay() {
-  document.getElementById("checkout-confirm-overlay")?.classList.add("open");
+  const el = document.getElementById("checkout-confirm-overlay");
+  if (!el) { console.warn("[checkout] overlay ausente no DOM, ordem do documento quebrada"); return; }
+  el.classList.add("open");
 }
 function _closeCheckoutOverlay() {
   document.getElementById("checkout-confirm-overlay")?.classList.remove("open");
 }
 
-/* Um /auth/me limitado: aborta o fetch direto (AbortController) E corre contra
-   um timer (Promise.race), porque o wrapper global (auth-refresh.js) pode
-   engolir o abort ao renovar via /auth/refresh, que não herda o signal. Nunca
-   bloqueia mais que budgetMs. */
-function _boundedAuthMe(budgetMs) {
+/* Deadline ÚNICO do retorno de checkout. Nasce no topo do init, junto com o
+   overlay, antes do /auth/validate, e vale pra TODAS as requests que rodam
+   com o overlay levantado. Se ele nascesse só dentro de awaitCheckoutConfirmation
+   (como antes), um /auth/validate travado nunca chegaria lá: a tela "confirmando
+   pagamento…" ficaria pendente pra sempre, sem fail-open.
+   0 = fora do fluxo de checkout (nenhum limite extra no fluxo normal). */
+let _checkoutDeadline = 0;
+function _checkoutBudget(max) {
+  const left = _checkoutDeadline - Date.now();
+  return Math.min(max, Math.max(1000, left));   // piso de 1s: request de 0ms não serve pra nada
+}
+
+/* Corre uma promise de request contra o relógio. Precisa do Promise.race além
+   do AbortController porque o wrapper global (auth-refresh.js:44) renova via
+   /auth/refresh com _origFetch SEM signal, o abort do caller não alcança essa
+   renovação, então só o timer garante o teto. */
+function _raceBudget(promise, budgetMs, onTimeout) {
   return Promise.race([
-    loadAuthMe(budgetMs),
-    new Promise((r) => setTimeout(() => r(null), budgetMs)),
+    promise,
+    new Promise((r) => setTimeout(() => r(onTimeout), budgetMs)),
   ]);
 }
 
+/* Um /auth/me limitado: aborta o fetch direto (AbortController) E corre contra
+   o timer, pelo motivo acima. Nunca bloqueia mais que budgetMs. */
+function _boundedAuthMe(budgetMs) {
+  return _raceBudget(loadAuthMe(budgetMs), budgetMs, null);
+}
+
+/* O /auth/validate do retorno de checkout, sob o mesmo teto. Devolve a Response
+   ou null (estourou / falhou), o caller trata null como sessão inválida, que já
+   era o caminho de um validate !ok.
+   O .catch() é obrigatório: sem ele, um abort ou erro de rede que chegue DEPOIS
+   do timer ter vencido a corrida vira unhandled rejection no console. */
+function _boundedValidate(budgetMs) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), budgetMs);
+  const req = fetch(`${API}/auth/validate`, { credentials: "same-origin", signal: ctrl.signal })
+    .catch(() => null)
+    .finally(() => clearTimeout(timer));
+  return _raceBudget(req, budgetMs, null);
+}
+
 /* Retorno do checkout (?upgrade=success): o webhook pode estar em trânsito.
-   Roda TODA a sequência de perfil — fetch inicial + polls — sob UM deadline
-   (~20s), cada request limitada por _boundedAuthMe.
+   Roda a sequência de perfil, fetch inicial + polls, sob o deadline ÚNICO
+   criado no topo do init (_checkoutDeadline), cada request limitada por
+   _boundedAuthMe. O tempo já gasto no /auth/validate sai deste mesmo orçamento:
+   o teto de ~20s vale da abertura do overlay até o fail-open, não por etapa.
 
    O overlay JÁ ESTÁ aberto quando esta função roda (aberto no topo do init,
    antes até do /auth/validate) — aqui só o fechamos ao terminar.
@@ -1021,7 +1099,7 @@ function _boundedAuthMe(budgetMs) {
    FAIL-OPEN: no fim devolve o último `me` (pode ser null) e deixa seguir —
    nunca prende quem pagou numa tela de espera nem o joga pra /precos. */
 async function awaitCheckoutConfirmation() {
-  const deadline = Date.now() + 20000;   // ~20s no total, pra TUDO
+  const deadline = _checkoutDeadline;   // criado no init, antes do /auth/validate
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   let me = null;
   try {
@@ -1041,6 +1119,18 @@ async function awaitCheckoutConfirmation() {
 
 /* ─── Access error ────────────────────────────────────────────────────── */
 function showAccessError() {
+  // O welcome modal ("Bora ver o que tu desbloqueou") é aberto por outra IIFE,
+  // 450ms depois do retorno de checkout, sem saber como a validação terminou.
+  // Se a sessão não vale, ele fica de celebração POR CIMA do "Acesso restrito"
+  // e continua clicável, levando pro /app. Medido no harness: com o overlay já
+  // fechado, elementFromPoint no botão devolvia .welcome-pro-btn-primary.
+  // Erro de acesso e celebração são estados mutuamente exclusivos.
+  //
+  // São DUAS pontas, porque a ordem varia: se o erro chega DEPOIS dos 450ms,
+  // o modal já está aberto e o remove() abaixo resolve; se chega ANTES, não há
+  // o que remover e quem tem de desistir é o timeout, daí a flag, lida lá.
+  window._pbAccessDenied = true;
+  document.getElementById("welcome-pro-overlay")?.classList.remove("open");
   document.getElementById("page-root").innerHTML = `
     <div class="access-error">
       <h2><i class="ph ph-lock" aria-hidden="true"></i> Acesso restrito</h2>
@@ -1099,21 +1189,37 @@ let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
   // jogaria quem ACABOU de pagar pra /precos (webhook ainda pendente).
   const _justUpgraded = new URLSearchParams(location.search).get("upgrade") === "success";
 
-  // No retorno de checkout, o overlay sobe AQUI — síncrono, antes de QUALQUER
-  // await (inclusive o /auth/validate abaixo). É o ponto mais cedo possível:
-  // enquanto ele estiver aberto (z-index acima do welcome modal que o
-  // handleUpgradeReturn abre em 450ms), o "Bora explorar" não é clicável, então
-  // ninguém navega pro /app sem o bypass ?upgrade=success e cai no gate.
+  // No retorno de checkout, o relógio e o overlay sobem AQUI, síncrono, antes
+  // de QUALQUER await (inclusive o /auth/validate abaixo). É o ponto mais cedo
+  // possível, e os dois nascem JUNTOS de propósito: tudo que roda com o overlay
+  // levantado tem de estar sob o mesmo teto. Enquanto ele estiver aberto
+  // (z-index acima do welcome modal que o handleUpgradeReturn abre em 450ms), o
+  // "Bora explorar" não é clicável, então ninguém navega pro /app sem o bypass
+  // ?upgrade=success e cai no gate.
   // Fechado por _closeCheckoutOverlay() em TODOS os caminhos de saída.
-  if (_justUpgraded) _openCheckoutOverlay();
+  if (_justUpgraded) {
+    _checkoutDeadline = Date.now() + 20000;   // ~20s da abertura do overlay até o fail-open
+    _openCheckoutOverlay();
+  }
 
   // 1) Valida sessão
   let userId = 0;
   let validateData = null;
   try {
-    const r = await fetch(`${API}/auth/validate`, { credentials: "same-origin" });
-    if (!r.ok) { _closeCheckoutOverlay(); showAccessError(); return; }
-    validateData = await r.json();
+    // No retorno de checkout esta request entra no orçamento compartilhado: um
+    // /auth/validate travado (ou o /auth/refresh que o wrapper dispara e que não
+    // herda signal) deixaria o overlay pendente pra sempre, sem nunca alcançar o
+    // fail-open lá embaixo. Fora do checkout segue sem limite, como antes.
+    const r = _justUpgraded
+      ? await _boundedValidate(_checkoutBudget(8000))
+      : await fetch(`${API}/auth/validate`, { credentials: "same-origin" });
+    if (!r || !r.ok) { _closeCheckoutOverlay(); showAccessError(); return; }
+    // A leitura do corpo é a MESMA request: headers podem ter chegado e o body
+    // travar. Sem teto aqui o overlay ficaria pendente do mesmo jeito.
+    validateData = _justUpgraded
+      ? await _raceBudget(r.json().catch(() => null), _checkoutBudget(3000), null)
+      : await r.json();
+    if (!validateData) { _closeCheckoutOverlay(); showAccessError(); return; }
     userId = USER_ID = validateData.user_id;
   } catch { _closeCheckoutOverlay(); showAccessError(); return; }
 
@@ -1356,23 +1462,9 @@ async function mfaOnboardingDismiss() {
 .welcome-pro-overlay.open { display: flex; }
 @keyframes welcomeFade { from { opacity: 0; } to { opacity: 1; } }
 
-/* Tela de confirmação pós-checkout: espera o webhook do Stripe cair antes de
-   liberar o dashboard (evita o 402 de corrida). Fail-open após ~20s. */
-.checkout-confirm-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,.8);
-  display: none; flex-direction: column; align-items: center; justify-content: center;
-  z-index: 10002; padding: 24px; text-align: center; gap: 18px;
-  backdrop-filter: blur(6px);
-}
-.checkout-confirm-overlay.open { display: flex; }
-.checkout-confirm-overlay .cc-spinner {
-  width: 44px; height: 44px; border-radius: 50%;
-  border: 3px solid rgba(255,45,142,.25); border-top-color: #FF2D8E;
-  animation: ccSpin .8s linear infinite;
-}
-@keyframes ccSpin { to { transform: rotate(360deg); } }
-.checkout-confirm-overlay .cc-text { color: rgba(255,255,255,.92); font-size: 16px; font-weight: 600; }
-.checkout-confirm-overlay .cc-sub { color: rgba(255,255,255,.6); font-size: 13px; max-width: 320px; line-height: 1.4; }
+/* As regras de .checkout-confirm-overlay ficam no <style> do <head>, ver o
+   comentário lá. Não traga de volta pra cá: o script que abre o overlay roda
+   antes deste bloco ser parseado. */
 .welcome-pro-card {
   width: min(520px, 94vw); padding: 36px 32px 30px;
   background: linear-gradient(180deg, #1a1d2a, #14161e);
@@ -1432,12 +1524,6 @@ async function mfaOnboardingDismiss() {
 .upgrade-toast .body { line-height: 1.4; }
 </style>
 
-<div class="checkout-confirm-overlay" id="checkout-confirm-overlay" role="status" aria-live="polite">
-  <div class="cc-spinner" aria-hidden="true"></div>
-  <div class="cc-text">Confirmando seu pagamento…</div>
-  <div class="cc-sub">Só um instante enquanto o Stripe confirma. Não feche a tela.</div>
-</div>
-
 <div class="welcome-pro-overlay" id="welcome-pro-overlay">
   <div class="welcome-pro-card">
     <div class="welcome-pro-emoji"><i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
@@ -1496,6 +1582,11 @@ function goExplorePro() {
     }
     // Pequeno delay pra dar o "wow effect" depois da pagina carregar
     setTimeout(() => {
+      // Não celebra por cima de "Acesso restrito": se a validação de sessão já
+      // falhou (ou estourou o orçamento do retorno de checkout), o init marca
+      // esta flag e o modal não sobe. A outra ponta, erro DEPOIS do modal já
+      // aberto, é tratada no próprio showAccessError().
+      if (window._pbAccessDenied) return;
       document.getElementById("welcome-pro-overlay").classList.add("open");
     }, 450);
   } else if (status === "cancelled") {
