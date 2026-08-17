@@ -984,34 +984,40 @@ function _checkoutSettled(me) {
   return me.app_access === true;
 }
 
+/* Um /auth/me limitado: aborta o fetch direto (AbortController) E corre contra
+   um timer (Promise.race), porque o wrapper global (auth-refresh.js) pode
+   engolir o abort ao renovar via /auth/refresh, que não herda o signal. Nunca
+   bloqueia mais que budgetMs. */
+function _boundedAuthMe(budgetMs) {
+  return Promise.race([
+    loadAuthMe(budgetMs),
+    new Promise((r) => setTimeout(() => r(null), budgetMs)),
+  ]);
+}
+
 /* Retorno do checkout (?upgrade=success): o webhook pode estar em trânsito.
-   Mostra "confirmando pagamento…" e faz poll do /auth/me até assentar
-   (_checkoutSettled), por até ~20s. FAIL-OPEN: se estourar, devolve o último
-   `me` e deixa seguir — nunca prende quem pagou numa tela de espera nem o joga
-   pra /precos. */
-async function awaitCheckoutConfirmation(me) {
+   Roda TODA a sequência de perfil — fetch inicial + polls — sob UM deadline
+   (~20s), cada request limitada por _boundedAuthMe. Mostra "confirmando
+   pagamento…" só se de fato precisar esperar (não pisca se já veio assentado).
+   FAIL-OPEN: no fim devolve o último `me` (pode ser null) e deixa seguir —
+   nunca prende quem pagou numa tela de espera nem o joga pra /precos. */
+async function awaitCheckoutConfirmation() {
   const overlay = document.getElementById("checkout-confirm-overlay");
-  overlay?.classList.add("open");
-  const deadline = Date.now() + 20000;   // ~20s no total
+  const deadline = Date.now() + 20000;   // ~20s no total, pra TUDO
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  let me = null, shown = false;
   try {
     while (Date.now() < deadline) {
-      if (_checkoutSettled(me)) break;   // webhook caiu
-      await wait(1500);
-      // Cada poll é limitado ao tempo que resta até o deadline (teto 6s). O
-      // AbortController aborta o /auth/me direto; o Promise.race é o backstop
-      // pro caso do wrapper global (auth-refresh.js) engolir o abort ao renovar
-      // via /auth/refresh (que não herda o signal) — sem a corrida, um refresh
-      // travado seguraria o loop além dos ~20s e a tela nunca fecharia.
       const budget = Math.min(6000, Math.max(1000, deadline - Date.now()));
-      const fresh = await Promise.race([
-        loadAuthMe(budget),
-        new Promise((r) => setTimeout(() => r(null), budget)),
-      ]);
+      const fresh = await _boundedAuthMe(budget);
       if (fresh) me = fresh;
+      if (_checkoutSettled(me)) break;          // webhook caiu
+      if (Date.now() >= deadline) break;
+      if (!shown) { overlay?.classList.add("open"); shown = true; }  // só ao esperar
+      await wait(1500);
     }
   } finally {
-    overlay?.classList.remove("open");
+    if (shown) overlay?.classList.remove("open");
   }
   return me;
 }
@@ -1103,16 +1109,11 @@ let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
   // 2.5) Paywall: checa acesso ANTES de carregar os dados. As rotas de dados
   // devolvem 402 sem assinatura, o que cairia no "Erro ao carregar"; já /auth/me
   // não é gated e sempre carrega. Exceção: ?upgrade=success (webhook em trânsito).
-  let me = await loadAuthMe();
-  // Acabou de pagar mas o webhook ainda não caiu: espera confirmar (poll) antes
-  // de seguir, pra não bater no 402 de corrida das rotas de dados. Fail-open
-  // após ~20s — segue mesmo assim e o webhook reconcilia.
-  // O sinal de "pendente" depende da config: no plans V2 has_app_access é sempre
-  // true e o gate fica em needs_plan_selection; no paywall v1 é app_access.
-  // Espera até NENHUM dos dois barrar (webhook fechou o gate) — ou o timeout.
-  if (_justUpgraded && !_checkoutSettled(me)) {
-    me = await awaitCheckoutConfirmation(me);
-  }
+  // No retorno de checkout (?upgrade=success) TODA a sequência de perfil (fetch
+  // inicial + polls) roda dentro de awaitCheckoutConfirmation, sob um único
+  // deadline (~20s) e com cada request limitada — nenhuma pode segurar o
+  // fail-open. Fora desse caso, o fluxo normal (loadAuthMe sem timeout).
+  let me = _justUpgraded ? await awaitCheckoutConfirmation() : await loadAuthMe();
   // Gate de escolha de plano: cadastro novo tem que passar pela /precos e
   // escolher um plano (mesmo o Grátis) antes de entrar no dashboard.
   if (me && me.needs_plan_selection && !_justUpgraded && !window.PB_IN_APP) {
