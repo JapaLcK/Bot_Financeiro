@@ -1054,8 +1054,14 @@ function renderSummary(s) {
      abertura capturava o `body` em vez do card, então devolver o foco ao fechar
      não devolvia pra lugar nenhum útil. Vira um alvo de verdade: role, tabindex
      e Enter/Espaço, que é o contrato que `role="button"` promete. */
+  /* id estável: o auto-refresh de 60s chama renderSummary() e TROCA todo o DOM
+     dos cards. Guardar o elemento em _usersLastFocus não sobrevive a isso — na
+     hora de fechar, o `document.contains` falha e o foco fica num nó órfão. Por
+     isso guardamos o id e resolvemos o elemento só no fechamento, achando o
+     card NOVO. */
   const gatilho = (c) => c.click
-    ? ` role="button" tabindex="0" onclick="${c.click}"`
+    ? ` id="summary-card-${c.label.toLowerCase().replace(/[^a-z]+/g, "-")}"`
+      + ` role="button" tabindex="0" onclick="${c.click}"`
       + ` onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${c.click}}"`
     : '';
   $id('summary-cards').innerHTML = cards.map(c => `
@@ -1375,12 +1381,16 @@ let usersSearchDebounce = null;
 let usersController = null;
 
 let _usersLastFocus = null;
+let _usersLastFocusId = null;
 
 function openUsersModal(ev) {
   usersState.open = true;
-  // vem do evento, não do document.activeElement: num clique de mouse o
-  // activeElement é o body, e o foco voltaria pro topo do painel ao fechar
-  _usersLastFocus = ev?.currentTarget || document.activeElement;
+  /* Do evento, não do document.activeElement: num clique de mouse o
+     activeElement é o body. E guardamos o ID, não o nó — o auto-refresh de 60s
+     recria os cards, e um nó guardado vira órfão no meio da sessão. */
+  const alvo = ev?.currentTarget || document.activeElement;
+  _usersLastFocusId = alvo?.id || null;
+  _usersLastFocus = _usersLastFocusId ? null : alvo;
   $id('users-modal').classList.add('visible');
   showUsersList();
   loadUsers();
@@ -1391,9 +1401,14 @@ function closeUsersModal() {
   usersState.open = false;
   usersController?.abort();
   $id('users-modal').classList.remove('visible');
-  // devolve o foco pro card que abriu, senão o teclado volta pro topo do painel
-  if (_usersLastFocus && document.contains(_usersLastFocus)) _usersLastFocus.focus();
+  // resolve o alvo AGORA: se o auto-refresh recriou os cards, o id acha o card
+  // novo; o nó guardado só é usado quando não havia id
+  const volta = _usersLastFocusId
+    ? document.getElementById(_usersLastFocusId)
+    : _usersLastFocus;
+  if (volta && document.contains(volta)) volta.focus();
   _usersLastFocus = null;
+  _usersLastFocusId = null;
 }
 function showUsersList() {
   $id('user-detail').style.display = 'none';
