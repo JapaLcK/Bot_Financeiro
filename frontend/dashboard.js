@@ -5820,13 +5820,26 @@ document.addEventListener("click", async (e) => {
   }
   // Botão "Carregar mais"
   if (e.target && e.target.id === "history-load-more-btn") {
-    e.target.disabled = true;
-    e.target.textContent = "Carregando…";
+    const btn = e.target;
+    btn.disabled = true;
+    btn.textContent = "Carregando…";
     _historyFilters.page += 1;
-    const more = await _fetchHistoryList(_historyFilters);
+    let more;
+    try {
+      more = await _fetchHistoryList(_historyFilters);
+    } catch (err) {
+      // Falha REAL (HTTP/rede): o throw do canal (guard de r.ok) chega aqui, fora
+      // do try/catch do loadHistoryView. Desfaz o incremento de página (senão o
+      // próximo clique pularia uma página) e devolve o botão a um estado
+      // acionável — em vez de deixá-lo preso em "Carregando…" até um reload.
+      _historyFilters.page -= 1;
+      btn.disabled = false;
+      btn.textContent = "Tentar de novo";
+      return;
+    }
     // Superado (um puxão/nova busca abortou este load-more): não faz append.
-    // Quem superou re-renderiza a timeline (com o botão) — não fica preso em
-    // "Carregando…".
+    // Quem superou reseta a página e re-renderiza a timeline com o botão — não
+    // fica preso em "Carregando…".
     if (more === undefined) return;
     renderHistoryTimeline(more, /*append=*/true);
     return;
