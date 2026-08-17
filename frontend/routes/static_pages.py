@@ -477,6 +477,17 @@ async def serve_site_css():
     )
 
 
+@router.get("/site-redesign.css")
+async def serve_site_redesign_css():
+    """Camada de refino da landing (escopada em body.rd), sobre o site.css.
+    Carregada pela index.html. no-cache como o /site.css: iteração ativa."""
+    return FileResponse(
+        FRONTEND_DIR / "site-redesign.css",
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/brand.css")
 async def serve_brand_css():
     """Design tokens da marca (paleta, tokens semânticos, @font-face Inter).

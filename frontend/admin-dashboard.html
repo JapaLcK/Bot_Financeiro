@@ -1038,7 +1038,7 @@ function renderOpsHealthGrid(ops) {
 function renderSummary(s) {
   const cards = [
     { label:"Usuários",          val: fInt(s.total_accounts),    sub:`+${fInt(s.accounts_30d)} em 30d`,
-      click:"openUsersModal()" },
+      click:"openUsersModal(event)" },
     { label:"Ativos 30d",        val: fInt(s.active_users_30d),  sub:`${fInt(s.active_users_7d)} ativos 7d` },
     { label:"Logins ok 30d",     val: fInt(s.login_success_30d), sub:`${s.login_success_rate_30d}% taxa sucesso` },
     { label:"Transações 30d",    val: fInt(s.transactions_30d),  sub:"Movimentações externas" },
@@ -1048,8 +1048,24 @@ function renderSummary(s) {
     { label:"Investimentos",     val: fMoney(s.investments_balance), sub:"Saldo consolidado atual" },
     { label:"Cartões em aberto", val: fMoney(s.cards_due_open),  sub:"Faturas abertas/fechadas" },
   ];
+  /* O card que abre o modal era um <article> só com onclick: fora da ordem de
+     Tab, sem ativação por teclado e sem receber foco. Duas consequências — quem
+     navega por teclado não tinha como abrir o modal, e o `_usersLastFocus` da
+     abertura capturava o `body` em vez do card, então devolver o foco ao fechar
+     não devolvia pra lugar nenhum útil. Vira um alvo de verdade: role, tabindex
+     e Enter/Espaço, que é o contrato que `role="button"` promete. */
+  /* id estável: o auto-refresh de 60s chama renderSummary() e TROCA todo o DOM
+     dos cards. Guardar o elemento em _usersLastFocus não sobrevive a isso — na
+     hora de fechar, o `document.contains` falha e o foco fica num nó órfão. Por
+     isso guardamos o id e resolvemos o elemento só no fechamento, achando o
+     card NOVO. */
+  const gatilho = (c) => c.click
+    ? ` id="summary-card-${c.label.toLowerCase().replace(/[^a-z]+/g, "-")}"`
+      + ` role="button" tabindex="0" onclick="${c.click}"`
+      + ` onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${c.click}}"`
+    : '';
   $id('summary-cards').innerHTML = cards.map(c => `
-    <article class="card${c.click ? ' card-clickable' : ''}"${c.click ? ` onclick="${c.click}"` : ''}>
+    <article class="card${c.click ? ' card-clickable' : ''}"${gatilho(c)}>
       <div class="metric-label">${c.label}</div>
       <div class="metric-value">${c.val}</div>
       <div class="metric-sub">${c.sub}</div>
@@ -1364,16 +1380,35 @@ const usersState = { q: '', status: '', page: 0, perPage: 50, sort: 'created_at'
 let usersSearchDebounce = null;
 let usersController = null;
 
-function openUsersModal() {
+let _usersLastFocus = null;
+let _usersLastFocusId = null;
+
+function openUsersModal(ev) {
   usersState.open = true;
+  /* Do evento, não do document.activeElement: num clique de mouse o
+     activeElement é o body. E guardamos o ID, não o nó — o auto-refresh de 60s
+     recria os cards, e um nó guardado vira órfão no meio da sessão. */
+  const alvo = ev?.currentTarget || document.activeElement;
+  _usersLastFocusId = alvo?.id || null;
+  _usersLastFocus = _usersLastFocusId ? null : alvo;
   $id('users-modal').classList.add('visible');
   showUsersList();
   loadUsers();
+  // foco pro campo de busca, que é o primeiro controle útil do diálogo
+  $id('users-search')?.focus();
 }
 function closeUsersModal() {
   usersState.open = false;
   usersController?.abort();
   $id('users-modal').classList.remove('visible');
+  // resolve o alvo AGORA: se o auto-refresh recriou os cards, o id acha o card
+  // novo; o nó guardado só é usado quando não havia id
+  const volta = _usersLastFocusId
+    ? document.getElementById(_usersLastFocusId)
+    : _usersLastFocus;
+  if (volta && document.contains(volta)) volta.focus();
+  _usersLastFocus = null;
+  _usersLastFocusId = null;
 }
 function showUsersList() {
   $id('user-detail').style.display = 'none';
@@ -1615,8 +1650,42 @@ $id('users-sort').addEventListener('change', () => {
 $id('users-modal').addEventListener('click', (e) => {
   if (e.target === $id('users-modal')) closeUsersModal();
 });
+/* O Esc já existia; o Tab não estava preso. O modal declara aria-modal="true",
+   que AFIRMA pro leitor de tela que o resto da página não está disponível — mas
+   o teclado saía do diálogo pros controles do painel atrás dele. Mesmo defeito
+   que o Codex apontou no modal da Início (PR #70).
+
+   Os alvos são consultados a cada Tab porque o conteúdo troca: a lista de
+   usuários é paginada e o detalhe de um usuário substitui a tabela. */
+function _usersFocaveis() {
+  const dlg = document.querySelector('#users-modal .users-dialog');
+  if (!dlg) return [];
+  const sel = 'a[href], button:not([disabled]), input:not([disabled]),'
+            + ' select:not([disabled]), textarea:not([disabled]),'
+            + ' [tabindex]:not([tabindex="-1"])';
+  return [...dlg.querySelectorAll(sel)].filter(
+    (el) => el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0,
+  );
+}
+
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && usersState.open) closeUsersModal();
+  if (!usersState.open) return;
+  if (e.key === 'Escape') { closeUsersModal(); return; }
+  if (e.key !== 'Tab') return;
+
+  const dlg = document.querySelector('#users-modal .users-dialog');
+  const alvos = _usersFocaveis();
+  if (!dlg || !alvos.length) return;
+
+  const primeiro = alvos[0];
+  const ultimo = alvos[alvos.length - 1];
+  const proximo = e.shiftKey ? ultimo : primeiro;
+  const borda = e.shiftKey ? primeiro : ultimo;
+
+  if (!dlg.contains(document.activeElement) || document.activeElement === borda) {
+    e.preventDefault();
+    proximo.focus();
+  }
 });
 
 /* ── Auto-refresh ────────────────────────────────────────────────── */

@@ -395,6 +395,39 @@ def test_checkout_v2_inelegivel_cobra_na_hora(user_id, monkeypatch):
     assert "trial_period_days" not in fake.last_session_kwargs["subscription_data"]
 
 
+def _success_params(fake) -> dict:
+    from urllib.parse import parse_qs, urlparse
+    return {k: v[0] for k, v in parse_qs(urlparse(fake.last_session_kwargs["success_url"]).query).items()}
+
+
+def test_success_url_leva_cota_de_ia_do_plano_comprado(user_id, monkeypatch):
+    """A tela de confirmação prometia "Piggy IA sem limite de mensagens" pra
+    Plus e Pro, mas `ai_monthly_messages: None` cai no teto AI_CHAT_MONTHLY_LIMIT
+    e o chat corta ali. O número tem que sair do backend, junto do `td` e do
+    `pl` — chumbar no HTML é o bug que o `td` já tinha resolvido."""
+    import core.services.ai_chat_commands as aicc
+    _, _, client = _auth_user_setup(f"iaquota-{user_id}")
+    monkeypatch.setenv("PLANS_V2_ENABLED", "1")
+    monkeypatch.setattr(aicc, "AI_CHAT_MONTHLY_LIMIT", 777)
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_ESSENCIAL_MENSAL", "price_ess_abc")
+    monkeypatch.setattr("db.plans.is_trial_eligible_for_user", lambda uid: True)
+    fake = _patch_stripe(monkeypatch)
+
+    resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+    params = _success_params(fake)
+    assert params["pl"] == "plus"
+    assert params["ia"] == "777", "cota do Plus tem que ser o teto global, não 'ilimitado'"
+
+    resp = client.post("/billing/create-checkout", json={"plan": "essencial"}, headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+    params = _success_params(fake)
+    assert params["pl"] == "essencial"
+    assert params["ia"] == "200", "Essencial tem cota própria (200), menor que o teto"
+
+
 def test_checkout_v2_falha_fechada_se_elegibilidade_indisponivel(user_id, monkeypatch):
     """Sem conseguir decidir o trial, não cobra nem concede benefício no escuro."""
     _, _, client = _auth_user_setup(f"v2fail-{user_id}")

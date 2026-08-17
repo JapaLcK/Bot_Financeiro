@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Preview — Agentes</title>
+<title>Preview · Agentes</title>
 <link rel="stylesheet" href="/dashboard.css"/>
 <style>
   body{background:#0a0d18;margin:0;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
@@ -15,7 +15,7 @@
 <div class="wrap" id="agentes-view">
   <h1 class="ag-title">🐷 Seus agentes</h1>
   <div id="agentes-counters" class="ag-counters"></div>
-  <p class="ag-sub">Sua equipe de porquinhos trabalhando 24h nos seus dados — cada um vigia uma coisa e só fala quando vale a pena.</p>
+  <p class="ag-sub">Sua equipe de porquinhos trabalhando 24h nos seus dados: cada um vigia uma coisa e só fala quando vale a pena.</p>
   <div id="agentes-shelf" class="ag-shelf"></div>
   <p class="section-title ag-feed-title">Últimos disparos</p>
   <div id="agentes-feed" class="ag-feed"></div>
@@ -35,7 +35,7 @@ const catalog = [
   {kind:"detetive",nome:"Detetive",freq:"Semanal",desc:"Fareja cobranças repetidas que parecem assinatura esquecida",disponivel:false,status:"inactive"},
   {kind:"cofre",nome:"Banqueiro",freq:"Dia do salário",desc:"Acompanha suas caixinhas e sugere o aporte que adianta a meta",disponivel:false,status:"inactive"},
   {kind:"barao",nome:"Barão",freq:"Diário · Open Finance",desc:"Fareja dinheiro parado rendendo nada e acompanha seus investimentos",disponivel:false,status:"inactive"},
-  {kind:"faria_limer",nome:"Faria Limer",freq:"Mensal · Open Finance",desc:"Acompanha sua renda variável (ações e FIIs): o retrato do mês e a concentração da carteira — só fatos",disponivel:false,status:"inactive"},
+  {kind:"faria_limer",nome:"Faria Limer",freq:"Mensal · Open Finance",desc:"Acompanha sua renda variável (ações e FIIs): o retrato do mês e a concentração da carteira, só fatos",disponivel:false,status:"inactive"},
 ];
 const fmtShort = v => "R$ " + v;
 document.getElementById("agentes-counters").innerHTML = `
