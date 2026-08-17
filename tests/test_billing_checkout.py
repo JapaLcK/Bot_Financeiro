@@ -15,6 +15,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
+import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
@@ -25,6 +26,19 @@ import frontend.finance_bot_websocket_custom as dashboard
 
 
 _CSRF_TOKEN = "test-csrf-token-billing"
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """/billing/create-checkout tem rate limit de 20/hora (slowapi, storage em
+    memória compartilhado entre testes). Com muitos testes no arquivo, cada um
+    fazendo 1-2 POSTs, o teto estoura e o último cai com 429. Zera o storage
+    por teste — não afrouxa o limite em produção."""
+    try:
+        dashboard.limiter._storage.reset()
+    except Exception:
+        pass
+    yield
 
 
 def _auth_user_setup(suffix: str) -> tuple[int, str, TestClient]:
@@ -494,3 +508,35 @@ def test_checkout_falho_nao_grava_started(user_id, monkeypatch):
             )
             n = cur.fetchone()["n"]
     assert n == 0
+
+
+def test_checkout_reaproveitado_propaga_session_id_no_funil(user_id, monkeypatch):
+    """P2: quando o checkout REAPROVEITA uma sessão aberta, o 'started' precisa
+    carregar o session_id da sessão reusada — senão iria NULL e a conclusão
+    dessa sessão nunca correlacionaria no funil."""
+    from db import get_conn
+
+    uid, _, client = _auth_user_setup(f"reuse-funnel-{user_id}")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    fake = _patch_stripe(monkeypatch)
+
+    r1 = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    r2 = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    assert r1.status_code == 200 and r2.status_code == 200
+    # 2ª chamada reaproveitou a sessão da 1ª (não criou nova)
+    assert fake.session_create_calls == 1
+    assert r1.json()["checkout_url"] == r2.json()["checkout_url"]
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select session_id from checkout_funnel_events "
+                "where user_id = %s and kind = 'started' order by id",
+                (uid,),
+            )
+            sids = [row["session_id"] for row in cur.fetchall()]
+    # dois 'started' (criação + reuso), AMBOS com o mesmo session_id não-nulo
+    assert len(sids) == 2
+    assert all(s and s.startswith("cs_test_") for s in sids), sids
+    assert sids[0] == sids[1]

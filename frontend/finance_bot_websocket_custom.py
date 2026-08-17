@@ -3668,7 +3668,13 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             )
 
     if reusable is not None:
-        return {"checkout_url": _sg(reusable, "url"), "interval": interval, "plan": plan}
+        # session_id da sessão REAPROVEITADA: sem ele, o started iria com NULL
+        # e a sessão nunca correlacionaria a conclusão no funil (só entraria
+        # people, não sessions). Mesma chave que o caminho de sessão nova.
+        return {
+            "checkout_url": _sg(reusable, "url"), "interval": interval, "plan": plan,
+            "session_id": _sg(reusable, "id"),
+        }
 
     # A sessão pode ter sido concluída entre a primeira consulta e a listagem.
     # Confere de novo imediatamente antes da criação para fechar essa corrida
