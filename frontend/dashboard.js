@@ -2314,12 +2314,13 @@ async function budgetDeleteFromModal() {
 // ══════════════════════════════════════════════════════════════════════
 
 let _genericModalResolver = null;
+let _genericModalLastFocus = null;
 
 function _ensureGenericConfirmModal() {
   if (document.getElementById("generic-confirm-overlay")) return;
   const html = `
     <div class="overlay" id="generic-confirm-overlay">
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="generic-confirm-title">
         <h3 id="generic-confirm-title">Confirmar</h3>
         <p class="msub" id="generic-confirm-body" style="white-space:pre-wrap"></p>
         <div class="modal-acts" style="margin-top:18px">
@@ -2335,11 +2336,45 @@ function _ensureGenericConfirmModal() {
   });
   document.getElementById("generic-confirm-cancel").addEventListener("click", () => _genericModalClose(false));
   document.getElementById("generic-confirm-ok").addEventListener("click", () => _genericModalClose(true));
+
+  /* Este arquivo REDECLARA confirmModal/alertModal, e a dashboard.html carrega
+     dashboard.js depois de modals.js — então no dashboard quem roda é este
+     modal aqui, e o trap que o modals.js ganhou nunca era alcançado. Era o
+     furo que o Codex achou: o helper compartilhado cobria home e settings, e
+     deixava de fora justamente a página com mais chamadas de confirm/alert.
+
+     O trap vem do window.pigTrapTab, exposto pelo modals.js, pra não virar a
+     quarta cópia do mesmo bloco. Se por algum motivo o modals.js não tiver
+     carregado, o Esc continua funcionando e o Tab só não fica preso.
+
+     CAPTURE + stopPropagation, e isso importa: este listener é registrado
+     preguiçosamente, na primeira chamada de confirmModal(), então em fase de
+     bolha ele rodaria DEPOIS dos listeners de Escape que a página já tinha —
+     em especial o de :9178, que fecha os modais de fatura sem checar nada.
+     O submitPayBill() abre esta confirmação COM o overlay de pagamento aberto
+     atrás; um Esc pra dispensar o aviso fecharia junto o fluxo de pagamento e
+     o valor digitado. Em captura, este handler vê a tecla primeiro e a
+     consome, então o Esc fecha só a confirmação. */
+  document.addEventListener("keydown", (e) => {
+    const ov = document.getElementById("generic-confirm-overlay");
+    if (!ov || !ov.classList.contains("open")) return;
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      _genericModalClose(false);
+      return;
+    }
+    if (window.pigTrapTab) window.pigTrapTab(e, ov.querySelector(".modal"));
+  }, true);
 }
 
 function _genericModalClose(value) {
   const overlay = document.getElementById("generic-confirm-overlay");
   if (overlay) overlay.classList.remove("open");
+  // devolve o foco pra quem abriu, senão o teclado volta pro topo do dashboard
+  if (_genericModalLastFocus && document.contains(_genericModalLastFocus)) {
+    _genericModalLastFocus.focus();
+  }
+  _genericModalLastFocus = null;
   if (_genericModalResolver) {
     const r = _genericModalResolver;
     _genericModalResolver = null;
@@ -2361,7 +2396,9 @@ function confirmModal(message, opts = {}) {
   cancelBtn.style.display = "";
   okBtn.textContent = okText;
   okBtn.className = danger ? "inst-delete-btn" : "btn-save";
+  _genericModalLastFocus = document.activeElement;
   document.getElementById("generic-confirm-overlay").classList.add("open");
+  okBtn.focus();
   return new Promise(resolve => { _genericModalResolver = resolve; });
 }
 
@@ -2376,7 +2413,9 @@ function alertModal(message, opts = {}) {
   cancelBtn.style.display = "none";
   okBtn.textContent = okText;
   okBtn.className = "btn-save";
+  _genericModalLastFocus = document.activeElement;
   document.getElementById("generic-confirm-overlay").classList.add("open");
+  okBtn.focus();
   return new Promise(resolve => { _genericModalResolver = () => resolve(undefined); _genericModalResolver = resolve; });
 }
 
