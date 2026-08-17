@@ -5513,36 +5513,37 @@ async function loadHistoryView(forceFresh = false, { background = false } = {}) 
   }
 
   // loadHistoryView é SEMPRE um load completo — renderiza append=false (substitui
-  // a timeline). A timeline, porém, é acumulada pelo "carregar mais". Se puxar
-  // pra atualizar (ou navegar de volta) depois de paginar, buscar a página
-  // corrente e renderizar substituindo deixaria só aquela página na tela ("puxei
-  // e o histórico pulou pro meio"). Volta pra página 1 aqui, no único ponto por
-  // onde todo load completo passa. O "carregar mais" NÃO passa por aqui (chama
-  // _fetchHistoryList direto e renderiza append=true), então continua paginando.
-  _historyFilters.page = 1;
-
-  // Stats e lista são fetched em paralelo. Stats só depende do período
-  // (não dos filtros), então serve do cache se o período não mudou.
+  // a timeline, que é acumulada pelo "carregar mais"). Sem forçar página 1, puxar
+  // pra atualizar (ou navegar de volta) depois de paginar buscaria a página
+  // corrente e substituiria por só ela ("puxei e o histórico pulou pro meio").
+  //
+  // INVARIANTE: _historyFilters.page tem que bater com as páginas que estão no
+  // DOM. Por isso NÃO mutamos o contador antes de renderizar — passamos page:1 só
+  // pro fetch e só commitamos ao efetivamente renderizar. Se um refresh em
+  // background falhar (DOM preservado), o contador não pode ter ido pra 1 sozinho,
+  // senão dessincroniza com as páginas que ficaram na tela (e o "carregar mais"
+  // seguinte pularia/duplicaria).
   const statsNeeded = !_historyStatsCache || _historyStatsCache.months !== _historyFilters.months || forceFresh;
   try {
     const [stats, list] = await Promise.all([
       statsNeeded ? _fetchHistoryStats(_historyFilters.months) : Promise.resolve(_historyStatsCache),
-      _fetchHistoryList(_historyFilters),
+      _fetchHistoryList({ ..._historyFilters, page: 1 }),
     ]);
     // list undefined = este load foi superado por um mais novo (troca de filtro,
     // nova busca, puxão). Não renderiza — o mais novo é quem manda. Isso é a
     // guarda de geração que impede o stale-overwrite no Histórico.
     if (list === undefined) return;
+    _historyFilters.page = 1;   // commit: o DOM vira página 1 agora
     if (statsNeeded && stats) _historyStatsCache = { ...stats, months: _historyFilters.months };
 
     renderHistoryStats(_historyStatsCache);
     renderHistoryTimeline(list, /*append=*/false);
   } catch (err) {
     // Falha REAL da lista (HTTP/rede). No puxão (background): rejeita sem tocar no
-    // DOM — o render bom fica e o indicador do gesto vira âmbar. Na navegação/
-    // filtro: mostra o estado de erro (mesmo comportamento de antes, quando o
-    // payload de erro caía no renderHistoryTimeline e batia no !payload.ok).
+    // DOM NEM no contador — o render bom e a paginação ficam, indicador âmbar. Na
+    // navegação/filtro: renderiza o estado de erro, então o contador passa a 1.
     if (background) throw err;
+    _historyFilters.page = 1;
     renderHistoryTimeline(null, /*append=*/false);
   }
 }
@@ -5821,26 +5822,34 @@ document.addEventListener("click", async (e) => {
   // Botão "Carregar mais"
   if (e.target && e.target.id === "history-load-more-btn") {
     const btn = e.target;
+    // NÃO muta _historyFilters.page até o append dar certo (mesma invariante do
+    // loadHistoryView: contador == páginas no DOM). Passa nextPage só pro fetch;
+    // se for superado ou falhar, o contador fica intacto e batendo com o DOM.
+    const nextPage = (_historyFilters.page || 1) + 1;
     btn.disabled = true;
     btn.textContent = "Carregando…";
-    _historyFilters.page += 1;
     let more;
     try {
-      more = await _fetchHistoryList(_historyFilters);
+      more = await _fetchHistoryList({ ..._historyFilters, page: nextPage });
     } catch (err) {
       // Falha REAL (HTTP/rede): o throw do canal (guard de r.ok) chega aqui, fora
-      // do try/catch do loadHistoryView. Desfaz o incremento de página (senão o
-      // próximo clique pularia uma página) e devolve o botão a um estado
-      // acionável — em vez de deixá-lo preso em "Carregando…" até um reload.
-      _historyFilters.page -= 1;
+      // do try/catch do loadHistoryView. Botão volta acionável; contador intacto,
+      // então o retry pega a MESMA próxima página (não pula).
       btn.disabled = false;
       btn.textContent = "Tentar de novo";
       return;
     }
-    // Superado (um puxão/nova busca abortou este load-more): não faz append.
-    // Quem superou reseta a página e re-renderiza a timeline com o botão — não
-    // fica preso em "Carregando…".
-    if (more === undefined) return;
+    // Superado (um puxão/nova busca abortou este load-more): não faz append. Mas
+    // reabilita o botão AQUI — se o superador for um render bem-sucedido ele
+    // reconstrói o botão por cima (idempotente); se for um puxão em background que
+    // FALHOU (DOM preservado, sem re-render), este é o ÚNICO restore e evita o
+    // botão preso em "Carregando…". Contador nunca foi mexido → segue consistente.
+    if (more === undefined) {
+      btn.disabled = false;
+      btn.textContent = "Carregar mais";
+      return;
+    }
+    _historyFilters.page = nextPage;   // commit: só ao append com sucesso
     renderHistoryTimeline(more, /*append=*/true);
     return;
   }
