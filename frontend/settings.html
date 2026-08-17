@@ -2467,12 +2467,23 @@ async function openBankPicker() {
   // já roteia o botão pra /precos nesse caso).
   if (OF_BANKS_MAX === 0) { window.location.href = "/precos"; return; }
   const ov = document.getElementById("bankpick-overlay");
+  _bankPickLastFocus = document.activeElement;
   ov.classList.add("open");
+  // registrado aqui, antes dos returns/await abaixo, pra valer em TODOS os
+  // caminhos: lista em cache, lista carregada do servidor e erro de fetch
+  document.addEventListener("keydown", _bankPickOnKey);
   const q = document.getElementById("bankpick-search");
   q.value = "";
+  /* Foco ANTES do await, não depois: o `q.focus()` só existia no ramo do cache e
+     no de sucesso, então enquanto a lista carregava — e para sempre, se o fetch
+     falhasse — o foco ficava no botão "Conectar banco" ATRÁS do overlay. O trap
+     de Tab conserta isso na tecla seguinte, mas Enter não passa pelo trap: ele
+     reativaria o botão obscurecido e chamaria openBankPicker() de novo. Assim os
+     estados de carregando e de erro também começam dentro do modal. */
+  q.focus();
   _bankPickSelected = null;
   _syncBankPickFoot();
-  if (_bankConnectors) { renderBankPicker(""); q.focus(); return; }
+  if (_bankConnectors) { renderBankPicker(""); return; }
   document.getElementById("bankpick-list").innerHTML =
     `<div class="bankpick-empty">Carregando bancos…</div>`;
   try {
@@ -2481,15 +2492,62 @@ async function openBankPicker() {
     const data = await resp.json();
     _bankConnectors = (data.connectors || []).filter(b => b && b.name);
     renderBankPicker("");
-    q.focus();
+    // sem q.focus() aqui: o foco já entrou no modal antes do await, e refocar
+    // agora roubaria o foco de quem já tivesse tabulado pra dentro do card
   } catch (err) {
     document.getElementById("bankpick-list").innerHTML =
       `<div class="bankpick-empty">Não deu pra carregar a lista de bancos. Tente de novo.</div>`;
     console.error("connectors fetch:", err);
   }
 }
+/* O modal declara aria-modal="true", que AFIRMA pro leitor de tela que o resto
+   da página não está disponível enquanto ele está aberto. Isso era mentira em
+   dois níveis: este arquivo não tinha NENHUM handler de keydown (nem Esc), e o
+   Tab saía da lista de bancos direto pros controles das Configurações atrás do
+   overlay — sem sinal nenhum, porque o overlay continua cobrindo tudo. Mesmo
+   defeito que o Codex apontou no modal da Início (PR #70).
+
+   Os alvos são consultados a cada Tab, e não uma vez na abertura, porque a
+   lista de instituições é remontada a cada tecla digitada na busca. */
+let _bankPickLastFocus = null;
+
+function _bankPickFocaveis() {
+  const modal = document.querySelector("#bankpick-overlay .bankpick-modal");
+  if (!modal) return [];
+  const sel = 'a[href], button:not([disabled]), input:not([disabled]),'
+            + ' select:not([disabled]), textarea:not([disabled]),'
+            + ' [tabindex]:not([tabindex="-1"])';
+  return [...modal.querySelectorAll(sel)].filter(
+    (el) => el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0,
+  );
+}
+
+function _bankPickOnKey(e) {
+  if (e.key === "Escape") { closeBankPicker(); return; }
+  if (e.key !== "Tab") return;
+
+  const modal = document.querySelector("#bankpick-overlay .bankpick-modal");
+  const alvos = _bankPickFocaveis();
+  if (!modal || !alvos.length) return;
+
+  const primeiro = alvos[0];
+  const ultimo = alvos[alvos.length - 1];
+  const proximo = e.shiftKey ? ultimo : primeiro;
+  const borda = e.shiftKey ? primeiro : ultimo;
+
+  // `foco fora` cobre o caso de já ter escapado (clique no fundo, foco no body)
+  if (!modal.contains(document.activeElement) || document.activeElement === borda) {
+    e.preventDefault();
+    proximo.focus();
+  }
+}
+
 function closeBankPicker() {
   document.getElementById("bankpick-overlay").classList.remove("open");
+  document.removeEventListener("keydown", _bankPickOnKey);
+  // devolve o foco pra quem abriu, senão o teclado volta pro topo da página
+  if (_bankPickLastFocus && document.contains(_bankPickLastFocus)) _bankPickLastFocus.focus();
+  _bankPickLastFocus = null;
 }
 function renderBankPicker(filter) {
   const f = _stripAccent(filter).trim();
