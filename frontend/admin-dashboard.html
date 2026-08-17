@@ -413,6 +413,12 @@ button:disabled { opacity: .6; cursor: wait; }
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
 .table td { overflow-wrap: anywhere; }
 
+/* Fundo travado com a folha de usuários aberta (ver lockPageScroll).
+   `position: fixed` no body é o que realmente segura o iOS; o `top` negativo
+   é posto em JS para a página não pular para o topo. */
+html.modal-aberto, html.modal-aberto body { overflow: hidden; }
+html.modal-aberto body { position: fixed; width: 100%; }
+
 /* Toque: sem realce cinza do iOS e sem delay de 300ms */
 button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable, a {
   -webkit-tap-highlight-color: rgba(255,128,184,.18);
@@ -483,8 +489,12 @@ button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable
   .banner-close { min-width: 44px; min-height: 44px; display: grid; place-items: center; font-size: 20px; }
   .users-close { min-width: 44px; min-height: 44px; display: grid; place-items: center; }
   .user-chip { min-height: 52px; }
-  /* O link do Stripe é só um ícone: 12x14 de área clicável na tabela. */
-  .stripe-link { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; }
+  /* O link do Stripe é só um ícone: 12x14 de área clicável na tabela. Sobe
+     pra 44x44, com margem negativa absorvendo a altura para a linha do
+     cartão não abrir um vão — a área de toque cresce, o desenho não. */
+  .stripe-link { display: inline-flex; align-items: center;
+                 min-height: 44px; min-width: 44px;
+                 margin-top: -10px; margin-bottom: -10px; }
 
   /* Campos em 16px: abaixo disso o Safari do iPhone dá zoom no foco e não
      volta — era o "tem que ficar dando zoom" do relato. */
@@ -498,6 +508,96 @@ button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable
     min-width: 44px; min-height: 44px; margin-top: -10px; margin-bottom: -10px;
     font-size: 20px; background: rgba(255,255,255,.06);
   }
+
+  /* ══ Modal de usuários → folha de tela cheia ═══════════════════════
+     Isto é assunto de aparelho, não de largura: com o diálogo de desktop, um
+     iPhone deitado (844px, acima do corte de 820) dava 39px de lista contra
+     ~320px de cromo, e o conteúdo estourava a caixa recortada.
+
+     `100dvh` e não `100%`: `100%` de um `position: fixed` se mede pela
+     viewport de LAYOUT, que no Safari não é a área visível — era o que
+     deixava faixa morta embaixo do rodapé no aparelho. */
+  #users-modal { padding: 0; height: 100vh; height: 100dvh; }
+  .users-dialog {
+    width: 100%; max-height: none;
+    height: 100vh; height: 100dvh;
+    border-radius: 0; border: 0;
+    /* A folha inteira é UM scroller: chips e busca rolam para fora e devolvem
+       a tela para a lista. `overflow: auto` nos dois eixos — se algum dia a
+       tabela real (paisagem) ficar mais larga que a tela, ela rola aqui
+       dentro em vez de estourar a página. */
+    overflow: auto; -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .users-body, #user-detail { overflow: visible; flex: 0 0 auto; }
+  /* Barras coladas: `--panel` tem 88% de opacidade, e sobre a lista rolando
+     por baixo o texto de trás aparecia de fantasma atrás do título. Sobe pra
+     97% e mantém o blur, então continua parecendo vidro sem virar sopa. */
+  .users-dialog-head {
+    padding: 14px 14px 10px; position: sticky; top: 0; z-index: 3;
+    background: rgba(9, 18, 31, .97); backdrop-filter: blur(14px);
+  }
+  .users-dialog-head h2 { font-size: 16px; }
+
+  /* Filtros: faixa que rola (7 chips ≈ uma tela e meia).
+     Indicadores: grade de 2 colunas, recolhida por padrão — empilhados,
+     empurravam a lista ~420px pra baixo. */
+  .users-chips { display: block; flex-wrap: nowrap; padding: 0 14px 12px; }
+  .chips-filters {
+    display: flex; flex-wrap: nowrap; gap: 8px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain; scroll-snap-type: x proximity;
+  }
+  .chips-filters::-webkit-scrollbar { height: 0; }
+  .chips-toggle {
+    display: block; width: 100%; margin-top: 8px; text-align: left;
+    font-size: 12.5px; color: var(--muted); background: transparent;
+    border: 1px dashed var(--border); border-radius: 10px;
+  }
+  .chips-stats { display: none; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .chips-stats.open { display: grid; }
+  .user-chip { flex: 0 0 auto; scroll-snap-align: start; min-width: 92px; }
+  .chips-stats .user-chip { min-width: 0; }
+  .chips-stats .user-chip.wide { grid-column: 1 / -1; }
+  .chips-stats .user-chip b { overflow-wrap: anywhere; }
+
+  .users-toolbar { padding: 0 14px 12px; gap: 8px; }
+  .users-body { padding: 0 14px 8px; }
+  .users-body .table th { position: static; }
+
+  /* Rodapé numa linha só (era coluna, custava 122px de 745px) e sem o inset
+     de área segura — quem reserva isso é o padding do diálogo. */
+  .users-dialog-foot {
+    position: sticky; bottom: 0; z-index: 3;
+    flex-direction: row; align-items: center; justify-content: space-between;
+    gap: 10px; padding: 8px 14px;
+    background: rgba(9, 18, 31, .97); backdrop-filter: blur(14px);
+  }
+  .users-foot-meta { text-align: left; font-size: 11.5px; }
+  .users-dialog-foot .pagination { margin-top: 0; padding: 0; border-top: 0; gap: 8px; }
+  #user-detail { padding: 0 14px 16px; }
+  .detail-head { flex-wrap: wrap; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   CELULAR DEITADO — a folha de usuários com 390px de ALTURA
+   Empilhado como no retrato, o cromo somava 355px de 390 e sobravam 35px
+   de lista. Aqui há 844px de largura sobrando: busca e ordenação vão lado a
+   lado, o botão de indicadores entra na linha dos filtros, e o cromo cai
+   para ~210px.
+   ══════════════════════════════════════════════════════════════════ */
+@media (max-height: 520px) and (orientation: landscape) and (max-width: 950px) {
+  .users-dialog-head { padding: 8px 14px 6px; }
+  .users-chips { display: flex; align-items: center; gap: 8px; padding: 0 14px 8px; }
+  .chips-filters { flex: 1 1 auto; min-width: 0; }
+  .chips-toggle { flex: 0 0 auto; width: auto; margin-top: 0; white-space: nowrap; }
+  .chips-stats { grid-template-columns: repeat(4, 1fr); }
+  .users-toolbar { padding: 0 14px 8px; flex-wrap: nowrap; }
+  .users-toolbar input[type="text"] { flex: 1 1 auto; width: auto; }
+  .users-toolbar select { flex: 0 0 210px; width: auto; }
+  .users-dialog-foot { padding: 6px 14px; }
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -623,6 +723,9 @@ button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable
   .table.as-cards td {
     display: grid; grid-template-columns: minmax(76px, 32%) 1fr;
     gap: 10px; align-items: baseline;
+    /* `start` e não o `stretch` default: item de grade esticado fazia a
+       pílula de status virar uma barra de 246px atravessando o cartão. */
+    justify-items: start;
     padding: 4px 0; border: 0; font-size: 13px;
   }
   .table.as-cards td::before {
@@ -650,48 +753,8 @@ button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable
   /* Em modo cartão o wrapper não precisa rolar */
   .table-wrap:has(.as-cards) { overflow-x: visible; }
 
-  /* ══ Modal de usuários → folha de tela cheia ══════════════════ */
-  #users-modal { padding: 0; }
-  .users-dialog {
-    width: 100%; height: 100%; max-height: none;
-    border-radius: 0; border: 0;
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-  .users-dialog-head { padding: 14px 14px 10px; position: sticky; top: 0;
-                       background: var(--panel); z-index: 2; }
-  .users-dialog-head h2 { font-size: 16px; }
-  /* Filtros: faixa que rola (7 chips ≈ uma tela e meia).
-     Indicadores: grade de 2 colunas, sem rolagem — dá pra ler MRR e
-     conversão sem varrer a faixa inteira. */
-  .users-chips { display: block; flex-wrap: nowrap; padding: 0 14px 12px; }
-  .chips-filters {
-    display: flex; flex-wrap: nowrap; gap: 8px;
-    overflow-x: auto; -webkit-overflow-scrolling: touch;
-    overscroll-behavior-x: contain; scroll-snap-type: x proximity;
-  }
-  .chips-filters::-webkit-scrollbar { height: 0; }
-  .chips-toggle {
-    display: block; width: 100%; margin-top: 8px; text-align: left;
-    font-size: 12.5px; color: var(--muted); background: transparent;
-    border: 1px dashed var(--border); border-radius: 10px;
-  }
-  .chips-stats { display: none; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
-  .chips-stats.open { display: grid; }
-  .user-chip { flex: 0 0 auto; scroll-snap-align: start; min-width: 92px; min-height: 52px; }
-  .chips-stats .user-chip { min-width: 0; }
-  .chips-stats .user-chip.wide { grid-column: 1 / -1; }
-  .chips-stats .user-chip b { overflow-wrap: anywhere; }
-  .users-toolbar { padding: 0 14px 12px; gap: 8px; }
-  .users-body { padding: 0 14px 8px; }
-  .users-body .table th { position: static; }
-  .users-dialog-foot { flex-direction: column; align-items: stretch; gap: 10px;
-                       padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }
-  .users-foot-meta { text-align: center; }
-  #user-detail { padding: 0 14px 16px; }
   .detail-grid { grid-template-columns: 1fr; gap: 8px; }
   .detail-item .v { font-size: 13.5px; word-break: break-word; }
-  .detail-head { flex-wrap: wrap; }
 }
 
 /* ── Telas bem estreitas (≤ 360px: iPhone SE e afins) ────────────── */
@@ -1758,9 +1821,34 @@ const usersState = { q: '', status: '', page: 0, perPage: 50, sort: 'created_at'
 let usersSearchDebounce = null;
 let usersController = null;
 
+/* Trava a rolagem do fundo enquanto a folha está aberta. Sem isso, no iOS o
+   arrasto dentro do modal rola a PÁGINA atrás dele (e num navegador embutido
+   chega a arrastar a própria folha do navegador) — é o que faz o modal
+   parecer quebrado no celular. Guarda o scrollY para devolver na hora de
+   fechar, senão a página volta pro topo.
+
+   Há DOIS overlays nesta página — a folha de usuários e o QR do Pix — e os
+   dois precisam da trava; o contador evita que fechar um destrave o outro. */
+let scrollLockY = 0;
+let scrollLockCount = 0;
+function lockPageScroll() {
+  if (scrollLockCount++ > 0) return;
+  scrollLockY = window.scrollY || 0;
+  document.documentElement.classList.add('modal-aberto');
+  document.body.style.top = `-${scrollLockY}px`;
+}
+function unlockPageScroll() {
+  if (scrollLockCount === 0) return;
+  if (--scrollLockCount > 0) return;
+  document.documentElement.classList.remove('modal-aberto');
+  document.body.style.top = '';
+  window.scrollTo(0, scrollLockY);
+}
+
 function openUsersModal() {
   usersState.open = true;
   $id('users-modal').classList.add('visible');
+  lockPageScroll();
   showUsersList();
   loadUsers();
 }
@@ -1768,6 +1856,7 @@ function closeUsersModal() {
   usersState.open = false;
   usersController?.abort();
   $id('users-modal').classList.remove('visible');
+  unlockPageScroll();
 }
 function showUsersList() {
   $id('user-detail').style.display = 'none';
@@ -2203,7 +2292,10 @@ async function showPayoutPix(id) {
   const ov = document.createElement('div');
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:9999;overflow:auto;' +
     'padding:calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left))';
-  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  // Mesma trava da folha de usuários: sem ela o arrasto sobre o QR rola a
+  // página atrás no iOS.
+  const fecharPix = () => { ov.remove(); unlockPageScroll(); };
+  ov.onclick = (e) => { if (e.target === ov) fecharPix(); };
 
   const box = document.createElement('div');
   // max-height + overflow: em paisagem no celular a caixa passava da tela.
@@ -2247,11 +2339,12 @@ async function showPayoutPix(id) {
   close.type = 'button';
   close.textContent = 'Fechar';
   close.style.cssText = 'margin-top:8px;width:100%;background:transparent;border:1px solid rgba(255,255,255,.18);color:#fff;border-radius:8px;padding:8px;cursor:pointer';
-  close.onclick = () => ov.remove();
+  close.onclick = fecharPix;
 
   box.append(h, sub, img, hint, inp, copy, close);
   ov.appendChild(box);
   document.body.appendChild(ov);
+  lockPageScroll();
 }
 
 /* ── Boot ────────────────────────────────────────────────────────── */
