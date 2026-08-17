@@ -390,6 +390,29 @@ def test_user_detail_ignora_movimentos_internos(panel_accounts):
             conn.commit()
 
 
+def test_grant_pro_em_ex_assinante_classifica_como_cortesia(panel_accounts):
+    """/admin/grant-pro sobre conta com status terminal (canceled) limpa o
+    last_payment_status — senão o grant vigente apareceria como 'Cancelado'
+    no painel. Status em curso (active) fica intacto: webhook é o dono."""
+    tag, uids = panel_accounts
+    client = _admin_client()
+
+    grant = client.get(
+        f"/admin/grant-pro?email=panel-{tag}-canceled@test.local&months=2"
+    ).json()
+    assert grant["ok"] is True
+    data = client.get(f"/admin/api/users?q=panel-{tag}-canceled").json()
+    assert data["users"][0]["account_status"] == "granted"
+
+    # Assinante ativo que ganha extensão continua Pagante
+    grant = client.get(
+        f"/admin/grant-pro?email=panel-{tag}-paying@test.local&months=2"
+    ).json()
+    assert grant["ok"] is True
+    data = client.get(f"/admin/api/users?q=panel-{tag}-paying").json()
+    assert data["users"][0]["account_status"] == "paying"
+
+
 def test_user_detail_404_for_unknown_account():
     client = _admin_client()
     response = client.get("/admin/api/users/999999999999")

@@ -1346,6 +1346,14 @@ const USER_STATUS_META = {
   granted:  { label: 'Cortesia',     cls: 'badge-purple',  chip: 'purple' },
   free:     { label: 'Free',         cls: 'badge-muted',   chip: ''       },
 };
+// Aliases internos da coluna plan → nome comercial (espelha
+// _STORED_PLAN_TO_TIER de core/services/plan_service.py: 'pro' legado é o
+// tier Plus; 'pro_max' é o tier Pro novo)
+const PLAN_LABELS = { free: 'Free', essencial: 'Essencial', pro: 'Plus', plus: 'Plus', pro_max: 'Pro' };
+function planLabel(p) {
+  const k = String(p || 'free').trim().toLowerCase() || 'free';
+  return PLAN_LABELS[k] || k;
+}
 const usersState = { q: '', status: '', page: 0, perPage: 50, sort: 'created_at', open: false };
 let usersSearchDebounce = null;
 let usersController = null;
@@ -1447,7 +1455,7 @@ function renderUsersTable(data) {
       <tr class="users-row" onclick="openUserDetail(${Number(u.user_id)})">
         <td title="user_id ${Number(u.user_id)}">${esc(u.email || '(sem e-mail)')}</td>
         <td><span class="badge ${meta.cls}">${meta.label}</span></td>
-        <td>${esc(u.plan || 'free')}</td>
+        <td>${esc(planLabel(u.plan))}</td>
         <td title="${fDate(u.plan_expires_at)}">${u.plan_expires_at ? fDate(u.plan_expires_at) : '—'}</td>
         <td title="${fDate(u.created_at)}">${fRelTime(u.created_at)}</td>
         <td title="${fDate(u.last_activity_at)}">${fRelTime(u.last_activity_at)}</td>
@@ -1520,7 +1528,7 @@ function renderUserDetail(data) {
       ${item('User ID', p.user_id)}
       ${item('Nome', esc(p.display_name || '—'))}
       ${item('Telefone', esc(p.phone_e164 || '—'))}
-      ${item('Plano', `${esc(p.plan || 'free')}${p.plan_expires_at ? ` · expira ${fDate(p.plan_expires_at)}` : ''}`)}
+      ${item('Plano', `${esc(planLabel(p.plan))}${p.plan_expires_at ? ` · expira ${fDate(p.plan_expires_at)}` : ''}`)}
       ${item('Status pagamento', esc(p.last_payment_status || '—'))}
       ${item('Trial iniciado', p.trial_started_at ? fDate(p.trial_started_at) : '—')}
       ${item('Plano escolhido em', p.plan_selected_at ? fDate(p.plan_selected_at) : '—')}

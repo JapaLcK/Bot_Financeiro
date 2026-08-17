@@ -1314,7 +1314,19 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
                         """
                         update auth_accounts
                            set plan = 'pro',
-                               plan_expires_at = now() + (%s || ' months')::interval
+                               plan_expires_at = now() + (%s || ' months')::interval,
+                               -- Grant sobre ex-assinante: status terminal
+                               -- (canceled/unpaid) viraria 'Cancelado' no
+                               -- painel de usuários mesmo com o grant vigente.
+                               -- Status em curso (active/trialing/past_due)
+                               -- fica intacto: a relação Stripe segue viva e
+                               -- os webhooks continuam donos dele.
+                               last_payment_status = case
+                                   when lower(coalesce(last_payment_status, ''))
+                                        in ('canceled', 'incomplete_expired', 'unpaid')
+                                   then 'inactive'
+                                   else last_payment_status
+                               end
                          where lower(email) = lower(%s)
                         returning user_id, email, plan, plan_expires_at
                         """,
