@@ -1041,7 +1041,16 @@ function _openCheckoutOverlay() {
   el.classList.add("open");
 }
 function _closeCheckoutOverlay() {
-  document.getElementById("checkout-confirm-overlay")?.classList.remove("open");
+  const el = document.getElementById("checkout-confirm-overlay");
+  if (!el) return;
+  const estavaAberto = el.classList.contains("open");
+  el.classList.remove("open");
+  /* Avisa quem estava esperando pra só então celebrar. O modal de boas-vindas
+     não pode abrir por baixo desta tela: o z-index barra o MOUSE, mas não o
+     teclado — o openWelcomePro foca o diálogo e instala o trap, então Tab+Enter
+     ativariam "Abrir o dashboard" por baixo do overlay, indo pro /app sem
+     ?upgrade=success, onde o gate manda quem pagou de volta pra /precos. */
+  if (estavaAberto) document.dispatchEvent(new Event("pb:checkout-confirmado"));
 }
 
 /* Deadline ÚNICO do retorno de checkout. Nasce no topo do init, junto com o
@@ -1855,14 +1864,31 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
       // esta flag e o modal não sobe. A outra ponta, erro DEPOIS do modal já
       // aberto, é tratada no próprio showAccessError().
       if (window._pbAccessDenied) return;
-      const dias = Number.parseInt(td, 10);
-      const cotaIA = Number.parseInt(ia, 10);
-      openWelcomePro({
-        trial: ev !== "purchase",
-        days: Number.isFinite(dias) && dias > 0 ? dias : 30,
-        plano: pl || "plus",
-        ia: Number.isFinite(cotaIA) && cotaIA > 0 ? cotaIA : null,
-      });
+      const celebrar = () => {
+        // relido AGORA, não na hora de agendar: entre os 450ms e o fim do poll
+        // a validação pode ter falhado, e aí não se celebra
+        if (window._pbAccessDenied) return;
+        const dias = Number.parseInt(td, 10);
+        const cotaIA = Number.parseInt(ia, 10);
+        openWelcomePro({
+          trial: ev !== "purchase",
+          days: Number.isFinite(dias) && dias > 0 ? dias : 30,
+          plano: pl || "plus",
+          ia: Number.isFinite(cotaIA) && cotaIA > 0 ? cotaIA : null,
+        });
+      };
+
+      /* Com a tela de "confirmando pagamento" levantada, esperar ela fechar —
+         ver o comentário em _closeCheckoutOverlay. Ela SEMPRE fecha: o
+         awaitCheckoutConfirmation chama o close num `finally`, e o deadline de
+         20s garante o fail-open. Sem ela no ar (fluxo sem checkout, ou webhook
+         que já assentou antes dos 450ms), celebra na hora. */
+      const confirmando = document.getElementById("checkout-confirm-overlay");
+      if (confirmando && confirmando.classList.contains("open")) {
+        document.addEventListener("pb:checkout-confirmado", celebrar, { once: true });
+      } else {
+        celebrar();
+      }
     }, 450);
   } else if (status === "cancelled") {
     const toast = document.getElementById("upgrade-cancel-toast");
