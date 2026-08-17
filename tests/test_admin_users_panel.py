@@ -41,6 +41,14 @@ def configured_admin(monkeypatch):
     monkeypatch.setattr(
         admin_dashboard, "_billing_summary_cache", {"fetched_at": None, "data": None}
     )
+    # /admin/auth/login tem rate limit de 10/min (slowapi, storage em memória
+    # compartilhado entre testes). Cada _admin_client() loga; num arquivo com
+    # muitos testes isso estoura o teto e derruba o último com 429. Zera o
+    # storage por teste — não afrouxa o limite em produção.
+    try:
+        dashboard.limiter._storage.reset()
+    except Exception:
+        pass
 
 
 def _admin_client() -> TestClient:
@@ -257,6 +265,105 @@ def test_stripe_billing_cache_faz_backoff_apos_falha(monkeypatch):
 def test_users_endpoint_requires_admin_auth():
     response = TestClient(dashboard.app).get("/admin/api/users")
     assert response.status_code == 401
+
+
+def _funnel_event(uid, kind, session_id, *, days_ago=0):
+    """Insere um evento na tabela dedicada checkout_funnel_events."""
+    from datetime import datetime, timedelta, timezone
+    ts = datetime.now(timezone.utc) - timedelta(days=days_ago)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "insert into checkout_funnel_events (user_id, session_id, kind, created_at) "
+                "values (%s, %s, %s, %s)",
+                (uid, session_id, kind, ts),
+            )
+        conn.commit()
+
+
+def test_checkout_funnel_conta_pessoas_e_sessoes(panel_accounts):
+    """people conta usuários distintos; sessions_started conta sessões
+    distintas; sessions_completed liga início e fim pelo MESMO session_id."""
+    tag, uids = panel_accounts
+    client = _admin_client()
+
+    base = client.get("/admin/api/users").json()["checkout_funnel"]
+
+    # paying abre 2 sessões (A e B); só A conclui. trial abre 1 sessão (C) sem concluir.
+    _funnel_event(uids["paying"], "started", f"sess_A_{tag}")
+    _funnel_event(uids["paying"], "completed", f"sess_A_{tag}")
+    _funnel_event(uids["paying"], "started", f"sess_B_{tag}")   # abandonada
+    _funnel_event(uids["trial"], "started", f"sess_C_{tag}")    # abandonada
+
+    f = client.get("/admin/api/users").json()["checkout_funnel"]
+    assert f["people_30d"] == base["people_30d"] + 2            # paying + trial
+    assert f["sessions_started_30d"] == base["sessions_started_30d"] + 3  # A, B, C
+    assert f["sessions_completed_30d"] == base["sessions_completed_30d"] + 1  # só A
+
+
+def test_checkout_funnel_conversao_por_sessao_resolve_recompra(panel_accounts):
+    """P2 (388): comprou numa sessão, cancelou, reabre outra e abandona. A
+    correlação por session_id conta a 2ª sessão como NÃO convertida — a
+    conversão por sessão nunca fica inflada pela compra velha."""
+    tag, uids = panel_accounts
+    client = _admin_client()
+
+    base = client.get("/admin/api/users").json()["checkout_funnel"]
+
+    # sessão A: comprou há 20d (started+completed, mesmo id). sessão B: reabre
+    # há 2d e abandona (started sem completed).
+    _funnel_event(uids["canceled"], "started", f"sess_old_{tag}", days_ago=20)
+    _funnel_event(uids["canceled"], "completed", f"sess_old_{tag}", days_ago=20)
+    _funnel_event(uids["canceled"], "started", f"sess_new_{tag}", days_ago=2)
+
+    f = client.get("/admin/api/users").json()["checkout_funnel"]
+    assert f["sessions_started_30d"] == base["sessions_started_30d"] + 2   # old + new
+    assert f["sessions_completed_30d"] == base["sessions_completed_30d"] + 1  # só a old
+    # a razão respeita o teto e a sessão nova (abandonada) não é convertida
+    assert f["sessions_completed_30d"] <= f["sessions_started_30d"]
+
+
+def test_checkout_funnel_conclusao_sem_abertura_nao_conta(panel_accounts):
+    """P1: conclusão cujo session_id nunca teve um 'started' (histórico órfão,
+    ou completed sem session_id) não infla o completed — só sessões abertas
+    entram no started, e completed é subconjunto delas."""
+    tag, uids = panel_accounts
+    client = _admin_client()
+
+    base = client.get("/admin/api/users").json()["checkout_funnel"]
+
+    # completed órfão (nenhum started com esse session_id)
+    _funnel_event(uids["free"], "completed", f"sess_orphan_{tag}")
+    # completed sem session_id
+    _funnel_event(uids["free"], "completed", None)
+
+    f = client.get("/admin/api/users").json()["checkout_funnel"]
+    # nenhuma sessão ABERTA nova → started e completed inalterados
+    assert f["sessions_started_30d"] == base["sessions_started_30d"]
+    assert f["sessions_completed_30d"] == base["sessions_completed_30d"]
+
+
+def test_checkout_funnel_imune_ao_purge_do_feed(panel_accounts):
+    """O funil vive em tabela própria (checkout_funnel_events), NÃO em
+    system_event_logs — então o 'Limpar' do feed não pode zerá-lo. Aqui isso
+    é estrutural (tabelas diferentes), mas o teste trava a garantia."""
+    tag, uids = panel_accounts
+    client = _admin_client()
+
+    _funnel_event(uids["paying"], "started", f"sess_P_{tag}")
+    _funnel_event(uids["paying"], "completed", f"sess_P_{tag}")
+    base = client.get("/admin/api/users").json()["checkout_funnel"]
+
+    # Apaga TUDO de system_event_logs
+    resp = client.request(
+        "DELETE", "/admin/api/events",
+        headers={dashboard.CSRF_HEADER_NAME: "test-admin-csrf"},
+    )
+    assert resp.status_code == 200
+
+    after = client.get("/admin/api/users").json()["checkout_funnel"]
+    assert after["sessions_started_30d"] == base["sessions_started_30d"]
+    assert after["sessions_completed_30d"] == base["sessions_completed_30d"]
 
 
 def test_users_list_expoe_signup_source_e_agregado(panel_accounts):

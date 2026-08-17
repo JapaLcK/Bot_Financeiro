@@ -3673,7 +3673,13 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             )
 
     if reusable is not None:
-        return {"checkout_url": _sg(reusable, "url"), "interval": interval, "plan": plan}
+        # session_id da sessão REAPROVEITADA: sem ele, o started iria com NULL
+        # e a sessão nunca correlacionaria a conclusão no funil (só entraria
+        # people, não sessions). Mesma chave que o caminho de sessão nova.
+        return {
+            "checkout_url": _sg(reusable, "url"), "interval": interval, "plan": plan,
+            "session_id": _sg(reusable, "id"),
+        }
 
     # A sessão pode ter sido concluída entre a primeira consulta e a listagem.
     # Confere de novo imediatamente antes da criação para fechar essa corrida
@@ -3748,7 +3754,10 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
         logging.getLogger(__name__).error("billing_checkout_stripe_error: %s", exc)
         raise HTTPException(status_code=502, detail="Erro no Stripe ao iniciar o checkout.")
 
-    return {"checkout_url": session.url, "interval": interval, "plan": plan}
+    return {
+        "checkout_url": session.url, "interval": interval, "plan": plan,
+        "session_id": getattr(session, "id", None),
+    }
 
 
 @app.get("/billing/plans-config")
@@ -3794,6 +3803,13 @@ async def billing_create_checkout(
         async with _billing_user_lock(user_id):
             result = await _billing_checkout_for_user(
                 stripe, user_id, plan, interval, price_id)
+        # Funil de checkout: registra a ABERTURA na tabela dedicada, com o
+        # session_id do Stripe (par do record_checkout_completed no webhook —
+        # correlaciona a mesma tentativa). Só depois da sessão nascer de fato.
+        # session_id sai do payload do cliente (é interno do funil).
+        from db import record_checkout_started
+        _session_id = result.pop("session_id", None)
+        await asyncio.to_thread(record_checkout_started, user_id, _session_id)
         # Abrir o checkout já é "escolha de plano" no cadastro: fecha o gate da
         # /precos agora (idempotente) pra que, ao voltar do Stripe com
         # ?upgrade=success, o /home não bata no backstop 402 antes do webhook
@@ -4186,6 +4202,13 @@ async def billing_webhook(request: Request):
         session = event["data"]["object"]
         user_id = _resolve_user(session)
         sub_id  = _g(session, "subscription")
+        # Funil: registra a CONCLUSÃO na tabela dedicada, com o session_id
+        # (correlaciona com o record_checkout_started da mesma tentativa).
+        # Vale pra trial e compra imediata — os dois disparam este evento.
+        if user_id:
+            from db import record_checkout_completed
+            await asyncio.to_thread(
+                record_checkout_completed, user_id, _g(session, "id"))
         # Trial 30d: subscription nasce status=trialing, sem invoice paga.
         # Promover ja agora pra user nao ficar Free durante o trial.
         if user_id and sub_id:

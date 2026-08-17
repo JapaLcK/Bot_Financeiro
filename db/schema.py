@@ -1633,6 +1633,35 @@ def init_db():
         """alter table plan_trials add column if not exists model_version smallint not null default 1""",
         """alter table plan_trials alter column model_version set default 2""",
 
+        # ── Funil de checkout (telemetria durável, fora do log operacional) ──
+        # Vive em tabela própria, NÃO em system_event_logs, por dois motivos:
+        # (1) system_event_logs é purgável (o "Limpar" do painel, admin.py
+        #     purge, delete individual) — telemetria de negócio não pode sumir
+        #     numa limpeza de rotina;
+        # (2) session_id (id da Checkout Session do Stripe) correlaciona a
+        #     abertura com a conclusão da MESMA tentativa — sem isso, heurística
+        #     de timestamp conta errado quem comprou, cancelou e reabriu.
+        # kind: 'started' (endpoint /billing/create-checkout) | 'completed'
+        # (webhook checkout.session.completed). user_id SET NULL na exclusão
+        # da conta: o evento sobrevive (contamos sessões, não só pessoas vivas).
+        """
+        create table if not exists checkout_funnel_events (
+          id bigserial primary key,
+          user_id bigint references users(id) on delete set null,
+          session_id text,
+          kind text not null check (kind in ('started', 'completed')),
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_checkout_funnel_kind_created
+          on checkout_funnel_events (kind, created_at desc)
+        """,
+        """
+        create index if not exists idx_checkout_funnel_session
+          on checkout_funnel_events (session_id)
+        """,
+
         # ── Agentes do Piggy (prateleira de jobs proativos) ──────────────────
         # Um agente por kind por usuário (custom multiplica no futuro via
         # config, não via linhas). status: 'active' | 'paused'.

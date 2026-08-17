@@ -886,6 +886,53 @@ async def fetch_billing_summary(force: bool = False) -> dict[str, Any]:
     return _billing_summary_cache["data"]
 
 
+async def _fetch_checkout_funnel(cur) -> dict[str, int]:
+    """Funil de checkout a partir da tabela dedicada checkout_funnel_events,
+    correlacionando abertura e conclusão pelo session_id do Stripe (a MESMA
+    tentativa). Devolve, em 30d e 7d:
+
+      people_Nd            — pessoas distintas que abriram algum checkout
+      sessions_started_Nd  — sessões (tentativas) abertas
+      sessions_completed_Nd— dessas, as que concluíram (mesmo session_id)
+
+    A conversão (sessions_completed / sessions_started) é por SESSÃO: um
+    ex-assinante que comprou numa sessão e depois reabre e abandona outra tem
+    a 2ª sessão contada como não-convertida — sem a correlação por session_id
+    isso era impossível de separar (era a raiz dos 3 apontamentos anteriores).
+    Viver em tabela própria (não em system_event_logs) também torna a
+    telemetria imune ao 'Limpar'/purge do feed.
+
+    Uma sessão sem session_id (raro — Stripe sempre devolve) entra em people
+    mas não nas contagens de sessão (COUNT DISTINCT ignora NULL)."""
+    await cur.execute(
+        """
+        SELECT
+            COUNT(DISTINCT user_id)    FILTER (WHERE w30)                AS people_30d,
+            COUNT(DISTINCT session_id) FILTER (WHERE w30)                AS sessions_started_30d,
+            COUNT(DISTINCT session_id) FILTER (WHERE w30 AND converted)  AS sessions_completed_30d,
+            COUNT(DISTINCT user_id)    FILTER (WHERE w7)                 AS people_7d,
+            COUNT(DISTINCT session_id) FILTER (WHERE w7)                 AS sessions_started_7d,
+            COUNT(DISTINCT session_id) FILTER (WHERE w7 AND converted)   AS sessions_completed_7d
+        FROM (
+            SELECT
+                s.user_id,
+                s.session_id,
+                s.created_at >= NOW() - INTERVAL '30 days' AS w30,
+                s.created_at >= NOW() - INTERVAL '7 days'  AS w7,
+                (s.session_id IS NOT NULL AND EXISTS (
+                    SELECT 1 FROM checkout_funnel_events c
+                    WHERE c.kind = 'completed' AND c.session_id = s.session_id
+                )) AS converted
+            FROM checkout_funnel_events s
+            WHERE s.kind = 'started'
+              AND s.created_at >= NOW() - INTERVAL '30 days'
+        ) per_start
+        """
+    )
+    row = await cur.fetchone()
+    return {k: int(v or 0) for k, v in dict(row).items()}
+
+
 _ADMIN_USERS_HARD_CAP = 2000
 
 
@@ -981,6 +1028,11 @@ async def fetch_admin_users(
                 aggregates["whatsapp_connected"] += int(r["wa"])
             aggregates["total"] = sum(aggregates[s] for s in _USER_STATUSES)
 
+            # Funil de checkout (tabela dedicada checkout_funnel_events):
+            # pessoas que abriram × conversão POR SESSÃO (correlação por
+            # session_id), em 30d/7d.
+            checkout_funnel = await _fetch_checkout_funnel(cur)
+
             # Origem do cadastro (base inteira): web × app × google × …
             # NULL = contas anteriores à coluna → 'desconhecido'.
             await cur.execute(
@@ -1054,6 +1106,7 @@ async def fetch_admin_users(
     return {
         "generated_at": now,
         "aggregates": aggregates,
+        "checkout_funnel": checkout_funnel,
         "by_source": by_source,
         "billing": await fetch_billing_summary(),
         "users": page_rows,

@@ -269,6 +269,10 @@ from .agents import (
 )
 
 # ── Relatórios, Auth, Dashboard, Engajamento ──────────────────────────────────
+from .checkout_funnel import (
+    record_checkout_started,
+    record_checkout_completed,
+)
 from .reports import (
     set_daily_report_enabled,
     set_daily_report_hour,
@@ -489,6 +493,7 @@ __all__ = [
     "register_auth_user", "login_auth_user", "get_auth_user", "get_password_changed_at", "auto_link_auth_user",
     "create_dashboard_session", "get_dashboard_session", "consume_dashboard_session",
     "update_user_plan", "mark_plan_selected", "get_user_by_stripe_customer", "set_stripe_customer", "set_payment_status",
+    "record_checkout_started", "record_checkout_completed",
     "create_email_verification", "AccountAlreadyExistsError", "confirm_email_verification", "attempt_whatsapp_phone_link",
     "create_password_reset_token", "consume_password_reset_token",
     "update_last_activity", "get_users_for_engagement", "get_free_users_for_upgrade_nudge",

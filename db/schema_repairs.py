@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 # manter eventos com user_id nulo para investigação de incidentes).
 _USER_FK_SET_NULL_TABLES: frozenset[str] = frozenset({
     "auth_login_events",
+    # Telemetria do funil de checkout: contamos sessões (session_id), não só
+    # pessoas vivas — a conversão histórica não pode encolher quando uma conta
+    # é excluída. O evento sobrevive anonimizado (user_id nulo).
+    "checkout_funnel_events",
 })
 
 
