@@ -1038,7 +1038,7 @@ function renderOpsHealthGrid(ops) {
 function renderSummary(s) {
   const cards = [
     { label:"Usuários",          val: fInt(s.total_accounts),    sub:`+${fInt(s.accounts_30d)} em 30d`,
-      click:"openUsersModal()" },
+      click:"openUsersModal(event)" },
     { label:"Ativos 30d",        val: fInt(s.active_users_30d),  sub:`${fInt(s.active_users_7d)} ativos 7d` },
     { label:"Logins ok 30d",     val: fInt(s.login_success_30d), sub:`${s.login_success_rate_30d}% taxa sucesso` },
     { label:"Transações 30d",    val: fInt(s.transactions_30d),  sub:"Movimentações externas" },
@@ -1048,8 +1048,18 @@ function renderSummary(s) {
     { label:"Investimentos",     val: fMoney(s.investments_balance), sub:"Saldo consolidado atual" },
     { label:"Cartões em aberto", val: fMoney(s.cards_due_open),  sub:"Faturas abertas/fechadas" },
   ];
+  /* O card que abre o modal era um <article> só com onclick: fora da ordem de
+     Tab, sem ativação por teclado e sem receber foco. Duas consequências — quem
+     navega por teclado não tinha como abrir o modal, e o `_usersLastFocus` da
+     abertura capturava o `body` em vez do card, então devolver o foco ao fechar
+     não devolvia pra lugar nenhum útil. Vira um alvo de verdade: role, tabindex
+     e Enter/Espaço, que é o contrato que `role="button"` promete. */
+  const gatilho = (c) => c.click
+    ? ` role="button" tabindex="0" onclick="${c.click}"`
+      + ` onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${c.click}}"`
+    : '';
   $id('summary-cards').innerHTML = cards.map(c => `
-    <article class="card${c.click ? ' card-clickable' : ''}"${c.click ? ` onclick="${c.click}"` : ''}>
+    <article class="card${c.click ? ' card-clickable' : ''}"${gatilho(c)}>
       <div class="metric-label">${c.label}</div>
       <div class="metric-value">${c.val}</div>
       <div class="metric-sub">${c.sub}</div>
@@ -1366,9 +1376,11 @@ let usersController = null;
 
 let _usersLastFocus = null;
 
-function openUsersModal() {
+function openUsersModal(ev) {
   usersState.open = true;
-  _usersLastFocus = document.activeElement;
+  // vem do evento, não do document.activeElement: num clique de mouse o
+  // activeElement é o body, e o foco voltaria pro topo do painel ao fechar
+  _usersLastFocus = ev?.currentTarget || document.activeElement;
   $id('users-modal').classList.add('visible');
   showUsersList();
   loadUsers();
