@@ -1282,6 +1282,10 @@ async function mfaOnboardingDismiss() {
   animation: welcomePop .5s cubic-bezier(.16,1,.3,1);
 }
 @keyframes welcomePop { from { transform: translateY(14px) scale(.97); opacity: 0; } to { transform: none; opacity: 1; } }
+/* O card recebe foco programático na abertura (tabindex="-1"); anel de foco num
+   container que o usuário não navegou até seria ruído. Os botões mantêm o
+   :focus-visible deles, que é o que importa pro teclado. */
+.welcome-pro-card:focus { outline: none; }
 /* mesmo grão do body::before: sem isto o card fica mais liso que a página */
 .welcome-pro-card::after {
   content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .5;
@@ -1401,7 +1405,9 @@ async function mfaOnboardingDismiss() {
 </style>
 
 <div class="welcome-pro-overlay" id="welcome-pro-overlay">
-  <div class="welcome-pro-card" role="dialog" aria-modal="true" aria-labelledby="wp-title">
+  <!-- tabindex="-1": o foco de abertura vem pro container, não pro botão do fim
+       do card (ver openWelcomePro). Fora do Tab natural, só programático. -->
+  <div class="welcome-pro-card" role="dialog" aria-modal="true" aria-labelledby="wp-title" tabindex="-1">
     <img class="wp-mark" style="--i:0" src="/brand/icon.png?v=1" alt="" aria-hidden="true"
          width="45" height="48" />
     <p class="wp-eyebrow" style="--i:1">
@@ -1520,7 +1526,24 @@ function openWelcomePro({ trial = true, days = 30, plano = "plus", ia = null } =
 
   _wpLastFocus = document.activeElement;
   ov.classList.add("open");
-  ov.querySelector(".welcome-pro-btn-primary")?.focus();
+
+  /* O card tem `overflow: hidden auto` e `max-height: min(86dvh, 760px)`: quando
+     o conteúdo não cabe, ele rola por dentro. Focar o botão primário, que fica
+     no fim, fazia o navegador rolar o card ATÉ ELE — a tela abria com o título e
+     a cópia da confirmação acima da área visível. Medido em paisagem no
+     Chromium (o Info.plist habilita paisagem no iPhone): a 812x375 o card abria
+     com scrollTop 167 de 489px de conteúdo, com o título 50px acima do topo
+     visível; a 844x390, scrollTop 155.
+
+     O foco de abertura vai pro container, com preventScroll, e o scroll é
+     zerado na mão. Isso resolve duas coisas de uma vez: a tela abre pelo começo,
+     e o leitor de tela anuncia o diálogo pelo aria-labelledby em vez de começar
+     no meio, por um botão. O primeiro Tab leva ao botão primário normalmente. */
+  const card = ov.querySelector(".welcome-pro-card");
+  if (card) {
+    card.scrollTop = 0;
+    card.focus({ preventScroll: true });
+  }
   document.addEventListener("keydown", _wpOnKey);
 }
 
@@ -1542,13 +1565,18 @@ function _wpOnKey(e) {
   const ultimo = alvos[alvos.length - 1];
   const atual = document.activeElement;
   const foraDoCard = !card.contains(atual);
+  // O card em si recebe o foco na abertura (tabindex="-1"). Ele conta como
+  // ANTES do primeiro alvo: sem isto o Shift+Tab logo na abertura não seria
+  // interceptado — card.contains(card) é true — e o foco vazava pra página
+  // atrás do overlay, justamente o que este trap existe pra impedir.
+  const noContainer = atual === card;
 
   // Volta pra dentro nos dois sentidos, inclusive quando o foco já escapou
   // (clique no fundo, foco perdido no body).
-  if (e.shiftKey && (atual === primeiro || foraDoCard)) {
+  if (e.shiftKey && (atual === primeiro || foraDoCard || noContainer)) {
     e.preventDefault();
     ultimo.focus();
-  } else if (!e.shiftKey && (atual === ultimo || foraDoCard)) {
+  } else if (!e.shiftKey && (atual === ultimo || foraDoCard || noContainer)) {
     e.preventDefault();
     primeiro.focus();
   }
