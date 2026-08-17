@@ -573,3 +573,29 @@ def test_checkout_reaproveitado_propaga_session_id_no_funil(user_id, monkeypatch
     assert len(sids) == 2
     assert all(s and s.startswith("cs_test_") for s in sids), sids
     assert sids[0] == sids[1]
+
+
+def test_checkout_nao_fecha_gate_da_precos_na_abertura(user_id, monkeypatch):
+    """Item #2: abrir o checkout NÃO marca plan_selected_at — só o webhook
+    (pagamento completo) fecha o gate. Assim o abandonador continua obrigado a
+    escolher um plano na /precos. Confere também as URLs de retorno."""
+    from db import get_conn
+
+    uid, _, client = _auth_user_setup(f"gate-{user_id}")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    fake = _patch_stripe(monkeypatch)
+
+    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+
+    # plan_selected_at continua NULL — o gate NÃO foi fechado na abertura
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select plan_selected_at from auth_accounts where user_id = %s", (uid,))
+            assert cur.fetchone()["plan_selected_at"] is None
+
+    # Abandono volta pra /precos (escolha forçada); sucesso pra /home?upgrade=success
+    assert fake.last_session_kwargs["cancel_url"].endswith("/precos?escolha=1")
+    assert "upgrade=success" in fake.last_session_kwargs["success_url"]

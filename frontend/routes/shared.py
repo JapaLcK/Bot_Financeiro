@@ -421,6 +421,15 @@ def gate_plan_selection(request: Request):
     if _is_pigbank_app(request):
         return None
 
+    # Retorno do checkout com sucesso: o webhook checkout.session.completed
+    # (que fecha o gate via mark_plan_selected) pode ainda estar em trânsito.
+    # Não jogamos quem ACABOU de pagar de volta pra /precos — a tela de
+    # confirmação em /home espera o webhook e libera (fail-open). Espelha o
+    # bypass _justUpgraded do cliente. Só o gate de ESCOLHA é dispensado aqui;
+    # o paywall por feature/tier segue valendo normalmente.
+    if request.query_params.get("upgrade") == "success":
+        return None
+
     user_id = _resolve_page_user_id(request)
     # Deslogado / sessão inválida: deixa o HTML carregar e redirecionar pro login
     # (comportamento atual preservado — não força /precos em quem nem logou).
