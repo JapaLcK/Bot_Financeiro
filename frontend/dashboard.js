@@ -10053,24 +10053,6 @@ async function toggleAgentEmail(kind, enabled) {
    um puxão precoce rodar com USER_ID=0 (/data/0) durante um launch lento —
    e seguir ativo depois do _showAccessError trocar o body inteiro. */
 function _pbDashboardRefresh() {
-  // Puxar = quero fresco. Descarta qualquer promise de dedup em voo dos
-  // loaders antes de delegar: sem isto, um fetch que pendurou deixa
-  // `_xxxFetchInFlight` preso (o `finally` que zera só roda quando a promise
-  // assenta), e todo forceFresh seguinte reusa a promise MORTA em vez de
-  // pedir de novo — a aba trava até a página recarregar. O watchdog do gesto
-  // (app-mode.js) libera a fila DELE, mas não alcança estes dedups privados.
-  //
-  // Zerar todos, não só o da aba ativa, é de propósito: só um loader roda por
-  // puxão, então os outros já são null ou seguram uma revalidação de fundo
-  // cujo descarte é inofensivo (nenhum caller concorrente). É stopgap — o fim
-  // definitivo (loaders abortáveis com AbortSignal) é o refactor separado.
-  // Var faltando aqui = aquela aba mantém o comportamento pré-existente, não
-  // uma regressão nova.
-  _cardsFetchInFlight = _instFetchInFlight = _categoriesFetchInFlight =
-    _budgetsFetchInFlight = _goalsFetchInFlight = _recurringFetchInFlight =
-    _recurringIncomeFetchInFlight = _analyticsFetchInFlight =
-    _historyListInFlight = null;
-
   const active = DASH_VIEWS.find(v => {
     const el = document.getElementById(v + "-view");
     return el && el.classList.contains("active");
