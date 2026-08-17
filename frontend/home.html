@@ -1293,12 +1293,17 @@ async function mfaOnboardingDismiss() {
 @keyframes wpRise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 .welcome-pro-card > * { animation: wpRise .45s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 70ms + 120ms); }
 
+/* Marca oficial (/brand/icon.png), a mesma que o dashboard usa, no lugar do
+   glifo ph-piggy-bank que estava aqui. Ela é rosa sobre transparência, então
+   NÃO leva o quadrado rosa que existia antes: seria rosa sobre rosa e o
+   porquinho sumiria. Fica solta no card, com um brilho no tom dela para não
+   achatar. Observação de marca: o PNG é #FC1863 e o token da página é #FF2D8E,
+   dois rosas diferentes lado a lado. Mantive o arquivo oficial como está, não
+   é papel desta tela recolorir asset de marca. */
 .wp-mark {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 46px; height: 46px; border-radius: 15px; margin-bottom: 18px;
-  background: linear-gradient(135deg, #FF2D8E, #C7186B);
-  box-shadow: 0 10px 26px -8px rgba(255,45,142,.7), inset 0 1px 0 rgba(255,255,255,.28);
-  font-size: 1.45rem; color: #fff;
+  display: block; height: 48px; width: auto; margin-bottom: 18px;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 22px rgba(252,24,99,.45));
 }
 .wp-eyebrow {
   display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
@@ -1361,7 +1366,7 @@ async function mfaOnboardingDismiss() {
    375x667: 640px de conteúdo contra 572px úteis. */
 @media (max-height: 720px) {
   .welcome-pro-card { padding: 22px 24px 18px; }
-  .wp-mark { width: 40px; height: 40px; border-radius: 13px; margin-bottom: 12px; font-size: 1.25rem; }
+  .wp-mark { height: 40px; margin-bottom: 12px; }
   .welcome-pro-card h2 { font-size: 1.4rem; }
   .wp-sub { font-size: .89rem; margin-bottom: 14px; }
   .wp-feats { margin-bottom: 14px; }
@@ -1397,7 +1402,8 @@ async function mfaOnboardingDismiss() {
 
 <div class="welcome-pro-overlay" id="welcome-pro-overlay">
   <div class="welcome-pro-card" role="dialog" aria-modal="true" aria-labelledby="wp-title">
-    <span class="wp-mark" style="--i:0" aria-hidden="true"><i class="ph ph-piggy-bank"></i></span>
+    <img class="wp-mark" style="--i:0" src="/brand/icon.png?v=1" alt="" aria-hidden="true"
+         width="45" height="48" />
     <p class="wp-eyebrow" style="--i:1">
       Assinatura confirmada
       <span class="wp-chip" id="wp-chip" hidden></span>
