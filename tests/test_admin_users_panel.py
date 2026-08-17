@@ -65,7 +65,8 @@ def _admin_client() -> TestClient:
 
 
 def _mk_account(email: str, *, plan: str = "free", pay: str = "inactive",
-                stripe_customer: str | None = None, expires=None) -> int:
+                stripe_customer: str | None = None, expires=None,
+                source: str | None = None) -> int:
     uid = int(uuid.uuid4().int % 10_000_000_000)
     ensure_user(uid)
     with get_conn() as conn:
@@ -74,10 +75,10 @@ def _mk_account(email: str, *, plan: str = "free", pay: str = "inactive",
                 """
                 insert into auth_accounts
                     (user_id, email, password_hash, plan, last_payment_status,
-                     stripe_customer_id, plan_expires_at)
-                values (%s, %s, 'x', %s, %s, %s, %s)
+                     stripe_customer_id, plan_expires_at, signup_source)
+                values (%s, %s, 'x', %s, %s, %s, %s, %s)
                 """,
-                (uid, email, plan, pay, stripe_customer, expires),
+                (uid, email, plan, pay, stripe_customer, expires, source),
             )
         conn.commit()
     return uid
@@ -363,6 +364,34 @@ def test_checkout_funnel_imune_ao_purge_do_feed(panel_accounts):
     after = client.get("/admin/api/users").json()["checkout_funnel"]
     assert after["sessions_started_30d"] == base["sessions_started_30d"]
     assert after["sessions_completed_30d"] == base["sessions_completed_30d"]
+
+
+def test_users_list_expoe_signup_source_e_agregado(panel_accounts):
+    tag, _uids = panel_accounts
+    client = _admin_client()
+
+    # Contas com origem explícita, buscáveis pelo prefixo único
+    web = _mk_account(f"srcpanel-{tag}-web@test.local", source="web")
+    app = _mk_account(f"srcpanel-{tag}-app@test.local", source="app")
+    goog = _mk_account(f"srcpanel-{tag}-goog@test.local", source="google")
+    unknown = _mk_account(f"srcpanel-{tag}-unk@test.local")  # signup_source NULL
+    try:
+        data = client.get(f"/admin/api/users?q=srcpanel-{tag}").json()
+        src_by_uid = {u["user_id"]: u["signup_source"] for u in data["users"]}
+        assert src_by_uid == {web: "web", app: "app", goog: "google", unknown: None}
+
+        # Agregado por origem é da base inteira e conta NULL como 'desconhecido'
+        by_source = data["by_source"]
+        assert by_source.get("web", 0) >= 1
+        assert by_source.get("app", 0) >= 1
+        assert by_source.get("google", 0) >= 1
+        assert by_source.get("desconhecido", 0) >= 1
+    finally:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("delete from auth_accounts where user_id = any(%s)",
+                            ([web, app, goog, unknown],))
+            conn.commit()
 
 
 def test_users_list_aggregates_and_statuses(panel_accounts):

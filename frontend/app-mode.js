@@ -548,7 +548,319 @@
     })();
   }
 
-  function init() { fixViewport(); buildTabbar(); hardenGlyphs(); enhanceOverview(); enhanceSettings(); wireGoogleLogin(); wirePush(); maybeOpenLaunch(); }
+  // ─── Puxar pra atualizar ─────────────────────────────────────────────────
+  // Medido no aparelho (iPhone 17 Pro / iOS 26): o WebView NÃO reporta scrollY
+  // negativo durante o elástico do topo — ele trava em 0. Então não dá pra ler
+  // o overscroll nativo. O que dá é CANCELAR o elástico (o touchmove no topo é
+  // cancelável) e desenhar o gesto por conta própria.
+  //
+  // O conteúdo não se move junto: um transform em html/body viraria bloco de
+  // contenção e arrastaria tudo que é position:fixed — a tab bar, o FAB do
+  // chat, o toast. Só o indicador desce, por cima da página.
+  //
+  // O que "atualizar" significa é da página, não daqui: quem sabe se refazer
+  // expõe window.PBRefresh (devolvendo promise). Sem isso cai no reload — que
+  // nas telas paradas (Ajustes, O que pedir) é barato e não perde estado.
+  const PTR = {
+    threshold: 62,   // puxão que arma o refresh
+    hold:      66,   // onde o indicador para enquanto atualiza
+    rubber:   280,   // resistência: maior = elástico mais duro
+    max:      150,   // teto do puxão
+    floor:    500,   // tempo mínimo girando (sumir na hora parece que falhou)
+    watchdog: 12000, // PBRefresh pendurado não deixa o indicador girando pra sempre
+  };
+
+  function initPullToRefresh() {
+    if (!page) return;                        // só nas telas logadas do app
+    if (!("ontouchstart" in window)) return;  // preview no desktop não tem gesto
+
+    const el = document.createElement("div");
+    el.className = "pb-ptr";
+    el.setAttribute("aria-hidden", "true");
+    const r = 17, circ = 2 * Math.PI * r;
+    el.innerHTML =
+      '<span class="pb-ptr-disc"><img src="/brand/mascot.webp" alt="" />' +
+      '<svg viewBox="0 0 40 40" aria-hidden="true">' +
+      `<circle class="pb-ptr-track" cx="20" cy="20" r="${r}"/>` +
+      `<circle class="pb-ptr-arc" cx="20" cy="20" r="${r}"/></svg></span>`;
+    document.body.appendChild(el);
+    const arc = el.querySelector(".pb-ptr-arc");
+    arc.style.strokeDasharray = circ.toFixed(1);
+
+    const smooth = !(window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+    let pull = 0, startY = 0, startX = 0, tracking = false, busy = false, raf = 0;
+    let dragged = false;    // este gesto puxou de verdade (tap nunca arma)
+    let inFlight = null;    // PBRefresh pendente (o watchdog libera o ciclo, não o pedido)
+
+    // Fetches pendentes DA PÁGINA (não do puxão): o fallback de reload não
+    // pode atropelar um save em voo — o PATCH das preferências de notificação
+    // dos Ajustes, por exemplo, seria abortado e a escolha recém-aceita pela
+    // UI se perderia. Contador genérico em vez de contrato novo por página.
+    // Mesmo padrão do auth-refresh.js, que também envelopa o window.fetch (lá
+    // pra renovar 401, aqui só pra contar). Este wrap fica por FORA do dele:
+    // o retry interno do 401 usa o fetch nativo direto, então conta como um
+    // pedido só — o contador segue ≥1 até a sequência inteira assentar.
+    let pageFetches = 0;
+    if (window.fetch) {
+      const nativeFetch = window.fetch;
+      window.fetch = function () {
+        pageFetches++;
+        const dec = () => { pageFetches--; };
+        let r;
+        try {
+          r = nativeFetch.apply(this, arguments);
+        } catch (err) {
+          // throw síncrono (argumento inválido) não pode vazar o contador —
+          // preso em >0, o reload ficaria recusado pra sempre na página.
+          dec();
+          throw err;
+        }
+        r.then(dec, dec);
+        return r;
+      };
+    }
+
+    const damp = o => PTR.rubber * (1 - 1 / (o / PTR.rubber + 1));
+    const atTop = () =>
+      (window.scrollY || (document.scrollingElement || {}).scrollTop || 0) <= 0;
+
+    function draw() {
+      const p = Math.min(1, pull / PTR.threshold);
+      el.style.transform =
+        "translate3d(0," + pull.toFixed(1) + "px,0) scale(" + (0.5 + 0.5 * p).toFixed(3) + ")";
+      el.style.opacity = Math.min(1, p * 1.6).toFixed(2);
+      if (!busy) arc.style.strokeDashoffset = (circ * (1 - p)).toFixed(1);
+    }
+
+    function spring(goal) {
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      if (!smooth) { pull = goal; draw(); return; }
+      (function step() {
+        pull += (goal - pull) * 0.22;
+        if (Math.abs(pull - goal) < 0.5) { pull = goal; raf = 0; draw(); return; }
+        draw();
+        raf = requestAnimationFrame(step);
+      })();
+    }
+
+    function finish(ok) {
+      if (!busy) return;
+      el.classList.remove("pb-ptr-busy");
+      arc.style.strokeDasharray = circ.toFixed(1);   // volta a ser anel inteiro
+      if (ok) { busy = false; spring(0); return; }
+      // Falhou: avisa em âmbar em vez de recolher como se tivesse dado certo.
+      // A página mantém o dado antigo na tela (é o certo — melhor dado velho
+      // que tela destruída), então sem este aviso o usuário juraria que
+      // atualizou.
+      //
+      // busy fica TRUE até o âmbar recolher: o pull ainda está em HOLD (66px,
+      // acima do limiar), e liberar o toque aqui deixava um TAP parado no topo
+      // commitar outro refresh — e o timeout deste âmbar recolhia o indicador
+      // do refresh novo no meio. Âmbar é estado terminal do ciclo, não idle.
+      el.classList.add("pb-ptr-fail");
+      arc.style.strokeDashoffset = "0";
+      setTimeout(() => {
+        el.classList.remove("pb-ptr-fail");
+        busy = false;
+        spring(0);
+      }, 900);
+    }
+
+    function run() {
+      busy = true;
+      el.classList.add("pb-ptr-busy");
+      // O dasharray é inline (o puxão desenha o anel fechando com ele), e
+      // inline vence classe CSS — então o arco curto do "girando" tem que ser
+      // setado aqui. Sem isto o anel fica CHEIO girando, que é visualmente
+      // idêntico a um anel parado: parecia travado durante o refresh.
+      arc.style.strokeDasharray = "26 80";
+      spring(PTR.hold);
+
+      if (typeof window.PBRefresh !== "function") {
+        // Tela que não sabe se refazer: recarrega — MENOS com digitação
+        // pendente. Nos Ajustes os editores (nome/e-mail/telefone, senhas de
+        // exportação/exclusão) vivem no fluxo normal da página; um reload
+        // apagaria o que o usuário escreveu. "Pendente" = campo visível cujo
+        // value difere do defaultValue: os editores são preenchidos via JS
+        // (defaultValue fica vazio) e ficam display:none até abrir, então a
+        // regra dispara exatamente com um editor aberto ou senha digitada.
+        // Recusa com âmbar — o mesmo sinal de "não deu" da falha de rede.
+        const dirty = Array.prototype.some.call(
+          document.querySelectorAll("input, textarea"),
+          f => f.offsetParent !== null && f.value !== f.defaultValue
+        );
+        // pageFetches: um save da página em voo (PATCH de notificação) seria
+        // abortado pelo reload — recusa e deixa ele terminar.
+        if (dirty || pageFetches > 0) { finish(false); return; }
+        setTimeout(() => location.reload(), 220);
+        return;
+      }
+      const t0 = Date.now();
+      let settled = false;
+      const done = ok => {
+        if (settled) return;
+        settled = true;
+        // piso de 500ms: sumir instantâneo pareceria que nada aconteceu
+        setTimeout(() => finish(ok), Math.max(0, PTR.floor - (Date.now() - t0)));
+      };
+      // A falha NÃO é engolida: vira aviso no indicador. E os PBRefresh são
+      // SERIALIZADOS: o watchdog libera o ciclo visual, não o pedido — sem a
+      // fila, um pedido estourado seguia vivo e podia terminar DEPOIS do
+      // puxão seguinte, sobrescrevendo resposta mais nova no DOM e no cache.
+      //
+      // Dois relógios, um por fase: o de fila cobre a espera atrás de um
+      // pedido pendurado; o de pedido só começa quando o PBRefresh deste
+      // ciclo dispara de verdade. Um timer único a partir do puxão deixava a
+      // espera na fila consumir a janela do pedido — âmbar antes de qualquer
+      // rede. E ciclo que estourou na fila NÃO roda depois: sem isso o
+      // "falhou" rodava silencioso quando o pedido velho enfim assentava.
+      // Estouro de relógio também SOLTA a corrente (inFlight = null): sem
+      // isso, um PBRefresh que nunca assenta envenenava a fila pra sempre —
+      // todo puxão seguinte esperava atrás dele, estourava sem nunca rodar, e
+      // o refresh morria até recarregar a página. Custo assumido ao soltar:
+      // se o pedido pendurado assentar MUITO depois, a escrita dele pode
+      // repintar dado mais velho uma vez (caso patológico; sem a fila isso
+      // acontecia com QUALQUER pedido acima do watchdog, e blindar de vez
+      // exigiria sinal de geração dentro de cada loader).
+      let started = false;
+      const prev = inFlight;
+      const p = Promise.resolve(prev)
+        .catch(() => {})
+        .then(() => {
+          if (settled) return;                            // estourou esperando: não vira fantasma
+          started = true;
+          setTimeout(() => {                              // relógio do pedido real
+            done(false);
+            if (inFlight === chain) inFlight = null;
+          }, PTR.watchdog);
+          return window.PBRefresh();
+        });
+      // relógio da fila: só conta enquanto o pedido deste ciclo não começou
+      setTimeout(() => {
+        if (started) return;
+        done(false);
+        if (inFlight === chain) inFlight = null;
+      }, PTR.watchdog);
+      const chain = p.catch(() => {});
+      inFlight = chain;
+      p.then(() => done(true), () => done(false));
+    }
+
+    // Duas coisas mandam no gesto delas, e não no puxão da página:
+    //
+    //  1. Estar dentro de um overlay FIXO. Nesta base todo diálogo é
+    //     position:fixed (.mfa-overlay e .bankpick-overlay dos Ajustes, .overlay
+    //     do dashboard), assim como a tab bar e o FAB — arrastar em qualquer um
+    //     deles nunca deveria puxar a página atrás. Vale MESMO QUE o diálogo
+    //     não transborde: um passo curto do MFA cabe na tela, e ali o puxão
+    //     viraria reload (Ajustes não tem PBRefresh) por cima dos códigos de
+    //     backup, que só aparecem uma vez. Conteúdo de página vive no fluxo
+    //     normal e nunca cai aqui; header sticky é `sticky`, não `fixed`.
+    //
+    //  2. Ser uma área com rolagem própria dentro do fluxo (lista, tabela).
+    //
+    // Regra medida em vez de lista de classes: lista envelhece — foi ela que
+    // deixou .mfa-modal e .bankpick-list de fora na primeira versão.
+    function ownsGesture(node) {
+      for (let el = node; el && el !== document.body; el = el.parentElement) {
+        if (el.nodeType !== 1) continue;
+        const st = getComputedStyle(el);
+        if (st.position === "fixed") return true;
+        // Popover: absoluto empilhado ACIMA do conteúdo (dropdown da conta,
+        // z-index 40). Arrastar dentro dele é gesto do popover, mesmo quando
+        // o conteúdo cabe sem rolar. Inventário (grep absolute+z-index nos
+        // CSS das 4 páginas): só o .user-dropdown está nessa faixa hoje;
+        // decoração absoluta é z=0 e pointer-events:none, nunca vira target.
+        if (st.position === "absolute" && st.zIndex !== "auto" &&
+            parseInt(st.zIndex, 10) >= 10) return true;
+        if ((st.overflowY === "auto" || st.overflowY === "scroll" || st.overflowY === "overlay") &&
+            el.scrollHeight > el.clientHeight + 1) return true;
+      }
+      return false;
+    }
+
+    // Segundo dedo no meio do puxão CANCELA (não pausa): deixar o estado
+    // armado fazia o primeiro touchend commitar refresh dentro de um gesto
+    // multi-touch — nas telas sem PBRefresh, um reload inteiro.
+    function cancelPull() {
+      tracking = false;
+      dragged = false;
+      if (pull > 0) spring(0);
+    }
+
+    addEventListener("touchstart", ev => {
+      if (busy) return;
+      if (ev.touches.length !== 1) { cancelPull(); return; }
+      if (ownsGesture(ev.target)) return;
+      // Arrasto que NASCE num campo de texto é gesto do campo (seleção,
+      // cursor), nunca puxão — e um puxão dali poderia virar reload por cima
+      // da digitação. Os campos vivem no fluxo normal; ownsGesture não os vê.
+      if (ev.target.closest && ev.target.closest("input, textarea, select, [contenteditable]")) return;
+      tracking = atTop();
+      // Retry rápido: se a molinha do ciclo anterior ainda está recolhendo,
+      // o rAF dela seguiria empurrando pull pra zero por baixo do touchmove
+      // — o puxão novo desabava no meio. Gesto aceito mata a molinha.
+      if (tracking && raf) { cancelAnimationFrame(raf); raf = 0; }
+      dragged = false;
+      startY = ev.touches[0].clientY;
+      startX = ev.touches[0].clientX;
+    }, { passive: true });
+
+    addEventListener("touchmove", ev => {
+      if (busy) return;
+      if (ev.touches.length !== 1) { cancelPull(); return; }
+      if (!tracking) return;
+      const dy = ev.touches[0].clientY - startY;
+      const dx = ev.touches[0].clientX - startX;
+      // Gesto horizontal (carrossel, tabela que rola de lado) não é puxão.
+      // Só entrega o gesto de volta enquanto ESTE gesto ainda não puxou — no
+      // meio dele um tremido lateral não pode cancelar tudo. O predicado é
+      // !dragged, não pull===0: um retry rápido mata a molinha do ciclo
+      // anterior deixando pull residual > 0, e com pull===0 esse resíduo
+      // desligava a detecção — um arrasto horizontal virava puxão.
+      if (!dragged && Math.abs(dx) > Math.abs(dy)) {
+        tracking = false;
+        if (pull > 0) spring(0);        // resíduo da molinha morta recolhe
+        return;
+      }
+      if (dy <= 0) {                    // virou rolagem normal: devolve o gesto
+        if (pull > 0) spring(0);        // recolhe na molinha, não em corte seco
+        tracking = false;
+        return;
+      }
+      // Sem spring aqui o pull ficava congelado no ar: release() com
+      // tracking=false retorna cedo e nunca recolhe. Mesma família do bail
+      // de dy<=0 logo acima.
+      if (!atTop()) { tracking = false; if (pull > 0) spring(0); return; }
+      if (ev.cancelable) ev.preventDefault();   // mata o elástico nativo
+      dragged = true;
+      pull = Math.min(PTR.max, damp(dy));
+      draw();
+    }, { passive: false });
+
+    function release(canceled) {
+      if (!tracking || busy) { tracking = false; return; }
+      tracking = false;
+      // dragged: só arma se ESTE gesto puxou. Sem isso, pull retido de um
+      // ciclo anterior (ex.: o âmbar segurando em HOLD) deixava um tap commitar.
+      if (!canceled && dragged && pull >= PTR.threshold) run(); else spring(0);
+    }
+    addEventListener("touchend", () => release(false), { passive: true });
+    // touchcancel = o SISTEMA tomou o gesto no meio (giro de tela, troca de
+    // app, gesto do iOS). Não é escolha do usuário, então recolhe sem
+    // atualizar — senão um puxão interrompido viraria reload nas telas sem
+    // PBRefresh. Mesma regra que a bolha do dock usa no pointercancel.
+    addEventListener("touchcancel", () => release(true), { passive: true });
+
+    // rAF congela com o app em segundo plano: ao voltar, termina a molinha.
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden && !raf && !busy && pull !== 0) spring(0);
+    });
+  }
+
+  function init() { fixViewport(); buildTabbar(); hardenGlyphs(); enhanceOverview(); enhanceSettings(); wireGoogleLogin(); wirePush(); maybeOpenLaunch(); initPullToRefresh(); }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
   } else {

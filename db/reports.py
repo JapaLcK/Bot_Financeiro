@@ -192,9 +192,9 @@ def create_email_verification(
     )
 
 
-def confirm_email_verification(email: str, code: str) -> dict:
+def confirm_email_verification(email: str, code: str, source: str = "web") -> dict:
     result = _db_support.confirm_email_verification_impl(
-        get_conn, get_or_create_canonical_user, create_link_code, email, code
+        get_conn, get_or_create_canonical_user, create_link_code, email, code, source
     )
     # Planos v2 (2026-08-06): o trial NÃO nasce mais no cadastro. Ele é uma
     # assinatura Stripe do plano escolhido (com cartão) e só é registrado quando

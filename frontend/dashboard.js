@@ -3728,10 +3728,14 @@ function setRecurringTab(tab) {
 // ── Previsão mensal: o que entra (receitas fixas) × o que sai (gastos fixos +
 // boletos) × resultado, + próximos vencimentos. Deixa explícito que é RECORRENTE
 // (não colide com "Receitas/Gastos do mês" do dashboard principal). ─────────────
-async function loadRecurringOverview() {
+async function loadRecurringOverview({ background = false } = {}) {
   const wrap = document.getElementById("recurring-overview-cards");
   if (!wrap) return;
-  wrap.innerHTML = `<div class="mock-card"><div class="empty" style="padding:16px;color:var(--text-3)">Carregando…</div></div>`;
+  // background (puxar pra atualizar): sem skeleton — o render bom fica na
+  // tela até os dados novos chegarem.
+  if (!background) {
+    wrap.innerHTML = `<div class="mock-card"><div class="empty" style="padding:16px;color:var(--text-3)">Carregando…</div></div>`;
+  }
   const j = async (url) => {
     try { const r = await fetch(url, { credentials: "same-origin" }); if (!r.ok) return null; return await r.json(); }
     catch (_) { return null; }
@@ -3741,6 +3745,13 @@ async function loadRecurringOverview() {
     j(`${API}/recurring-incomes/${USER_ID}`),
     j(`${API}/recurring-bills/${USER_ID}?include_paid=false`),
   ]);
+  // No puxão, endpoint que falhou NÃO pode virar total zerado: o j() acima
+  // converte falha em null e o reduce embaixo somaria zero por cima de números
+  // que estavam certos na tela. Rejeita sem tocar no DOM — o indicador do
+  // gesto (app-mode.js) fica âmbar e o render antigo sobrevive.
+  if (background && (exp === null || inc === null || bills === null)) {
+    throw new Error("recurring overview: fetch falhou no refresh");
+  }
 
   const gastos = ((exp && exp.recurring) || []).filter(r => r.is_active && (r.payment_mode || "autopay") === "autopay");
   const totalGastos = gastos.reduce((s, r) => s + _recMonthlyEquiv(r), 0);
@@ -6635,12 +6646,16 @@ async function fetchMonthHttp(year, month, page = 1, limit = LAUNCHES_LIMIT, { b
     stopSpin();
     setLaunchesLoading(false);
   } catch(err) {
-    if (err.name === "AbortError") return;
+    if (err.name === "AbortError") return;   // superado por outro pedido: neutro
     console.error("fetchMonthHttp error:", err);
     if (seq === monthRequestSeq && !background) {
       stopSpin();
       setLaunchesLoading(false);
     }
+    // O render antigo fica (certo), mas quem chamou precisa saber que nada
+    // veio — o puxar pra atualizar usa isto pra ficar âmbar em vez de
+    // recolher como sucesso. Callers antigos ignoram o retorno.
+    return false;
   } finally {
     if (seq === monthRequestSeq) {
       monthAbortController = null;
@@ -9770,6 +9785,11 @@ function _showAccessError(title, msg) {
 
   WS_URL = `${BASE_WS}/ws/${USER_ID}`;
 
+  // Puxar pra atualizar: o contrato só nasce com a sessão validada e o
+  // paywall vencido — os returns acima (_showAccessError, /precos) saem antes
+  // daqui e o puxão nessas telas cai no reload, que é o que elas pedem.
+  window.PBRefresh = _pbDashboardRefresh;
+
 	  updateInvestmentRateHint();
 	  updateInvestmentTaxHint();
 	  updateMonthLabel();
@@ -10021,5 +10041,78 @@ async function toggleAgentEmail(kind, enabled) {
     loadAgentesView(true);
   } catch (err) {
     alert(String(err.message || err));
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PUXAR PRA ATUALIZAR (app iOS / PWA)
+   ═══════════════════════════════════════════════════════════════════════
+   O gesto mora no app-mode.js — aqui só respondemos o que "atualizar"
+   significa no dashboard: refazer a aba que está aberta, sem recarregar a
+   página (o reload perderia filtro, mês escolhido e posição da rolagem).
+
+   Devolve promise: o indicador do puxão só some quando ela resolve.
+
+   Registrado no bootstrap (não aqui): expor na definição do script deixava
+   um puxão precoce rodar com USER_ID=0 (/data/0) durante um launch lento —
+   e seguir ativo depois do _showAccessError trocar o body inteiro. */
+function _pbDashboardRefresh() {
+  const active = DASH_VIEWS.find(v => {
+    const el = document.getElementById(v + "-view");
+    return el && el.classList.contains("active");
+  }) || "overview";
+
+  switch (active) {
+    case "analytics":    return loadAnalyticsView(true);
+    case "history":      return loadHistoryView(true);
+    case "cards":        return loadCardsView(true);
+    case "installments": return loadInstallmentsView(true);
+    case "categories":   return loadCategoriesView(true);
+    case "budgets":      return loadBudgetsView(true);
+    // "Recorrentes" tem quatro abas internas e só uma está visível. Recarregar
+    // sempre a de gastos deixaria a que o usuário está vendo parada, com o
+    // indicador dando a entender que atualizou. Espelha o setRecurringTab.
+    case "fixed":
+      // background: sem skeleton, e falha REJEITA em vez de renderizar zeros
+      if (_recurringTab === "overview") return loadRecurringOverview({ background: true });
+      if (_recurringTab === "incomes")  return loadRecurringIncomeView(true);
+      if (_recurringTab === "bills")    return loadBillsView(true);
+      return loadFixedView(true);
+    case "goals":        return loadGoalsView(true);
+    case "affiliate": {
+      // Fetch ANTES de render: em falha o DOM não é tocado — o body (e a
+      // chave Pix digitada nele) fica como está e o indicador avisa em âmbar.
+      // O loadAffiliateView(true) não serve aqui: ele troca o body pelo
+      // skeleton antes do fetch e, em erro, pelo aviso — a chave morre nos
+      // dois caminhos. A restauração é incondicional porque o input nasce
+      // sempre vazio: qualquer valor ali é digitação do usuário.
+      return fetch(`${API}/api/affiliate/me`, { credentials: "same-origin" })
+        .then(async res => {
+          const data = await readResponsePayload(res);
+          if (!res.ok) throw new Error(data.detail || "refresh de afiliado falhou");
+          // A chave é lida do input VIVO no último instante antes do render:
+          // o campo segue editável durante o fetch, e um snapshot tirado
+          // antes descartaria o que foi digitado nesse meio-tempo.
+          const pix = document.getElementById("affiliate-pix-input");
+          const pending = pix ? pix.value : "";
+          _affiliateCache = data;
+          _renderAffiliateView(data);
+          if (pending) {
+            const el = document.getElementById("affiliate-pix-input");
+            if (el) el.value = pending;
+          }
+        });
+    }
+    case "agentes":      return loadAgentesView(true);
+    default:
+      // Visão geral e investimentos vivem do snapshot do mês.
+      // preferHttp: com o WS aberto o pedido volta do cache dele — puxar pra
+      // atualizar tem que ir na fonte, senão o gesto mente.
+      // smoothScroll off: o usuário está no topo, jogar a página nos
+      // lançamentos seria roubar o lugar dele.
+      // false = a busca falhou (o render antigo ficou): rejeita pro indicador
+      // ficar âmbar. undefined (pedido superado/stale) conta como sucesso.
+      return fetchMonthHttp(viewYear, viewMonth, launchesPage, LAUNCHES_LIMIT)
+        .then(ok => { if (ok === false) throw new Error("refresh do mês falhou"); });
   }
 }

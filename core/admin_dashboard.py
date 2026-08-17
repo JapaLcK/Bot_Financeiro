@@ -982,6 +982,7 @@ async def fetch_admin_users(
                     a.phone_status,
                     a.whatsapp_verified_at,
                     a.deletion_status,
+                    a.signup_source,
                     {_ACCOUNT_STATUS_SQL} AS account_status,
                     EXISTS (
                         SELECT 1 FROM user_identities ui
@@ -1027,11 +1028,21 @@ async def fetch_admin_users(
                 aggregates["whatsapp_connected"] += int(r["wa"])
             aggregates["total"] = sum(aggregates[s] for s in _USER_STATUSES)
 
-            # Funil de checkout (system_event_logs): quantas PESSOAS abriram o
-            # checkout × quantas concluíram, em 30d/7d. Contagem por usuário
-            # distinto (não por evento) — abrir 2x não infla o funil. A
-            # conversão é derivada no front (completed / started).
+            # Funil de checkout (tabela dedicada checkout_funnel_events):
+            # pessoas que abriram × conversão POR SESSÃO (correlação por
+            # session_id), em 30d/7d.
             checkout_funnel = await _fetch_checkout_funnel(cur)
+
+            # Origem do cadastro (base inteira): web × app × google × …
+            # NULL = contas anteriores à coluna → 'desconhecido'.
+            await cur.execute(
+                """
+                SELECT coalesce(signup_source, 'desconhecido') AS src, COUNT(*) AS n
+                FROM auth_accounts
+                GROUP BY 1
+                """
+            )
+            by_source = {r["src"]: int(r["n"]) for r in await cur.fetchall()}
 
             if not q:
                 await cur.execute(
@@ -1096,6 +1107,7 @@ async def fetch_admin_users(
         "generated_at": now,
         "aggregates": aggregates,
         "checkout_funnel": checkout_funnel,
+        "by_source": by_source,
         "billing": await fetch_billing_summary(),
         "users": page_rows,
         "page": page,
@@ -1125,7 +1137,7 @@ async def fetch_admin_user_detail(user_id: int, admin_user: str = "admin") -> di
                     a.created_at, a.last_activity_at,
                     a.phone_status, a.whatsapp_verified_at, a.whatsapp_updates_opt_out,
                     a.engagement_opt_out, a.tip_email_opt_out, a.insight_email_opt_out,
-                    a.deletion_status, a.deletion_requested_at,
+                    a.deletion_status, a.deletion_requested_at, a.signup_source,
                     a.ai_messages_this_month,
                     EXISTS (
                         SELECT 1 FROM user_identities ui
