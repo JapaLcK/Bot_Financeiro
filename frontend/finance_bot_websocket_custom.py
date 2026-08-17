@@ -3736,7 +3736,11 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
                 f"{DASHBOARD_URL}/home?upgrade=success&sid={{CHECKOUT_SESSION_ID}}"
                 f"&ev={'trial' if trial_days > 0 else 'purchase'}"
             ),
-            cancel_url=f"{DASHBOARD_URL}/home?upgrade=cancelled",
+            # Abandonou o checkout → volta pra /precos escolher um plano (pago
+            # ou Grátis). Sem isso, o gate não fechado deixaria a navegação
+            # seguinte redirecionar pra cá de qualquer forma; ser explícito
+            # evita um salto extra por /home.
+            cancel_url=f"{DASHBOARD_URL}/precos?escolha=1&upgrade=cancelled",
             metadata=metadata,
             subscription_data=subscription_data,
         )
@@ -3810,13 +3814,12 @@ async def billing_create_checkout(
         from db import record_checkout_started
         _session_id = result.pop("session_id", None)
         await asyncio.to_thread(record_checkout_started, user_id, _session_id)
-        # Abrir o checkout já é "escolha de plano" no cadastro: fecha o gate da
-        # /precos agora (idempotente) pra que, ao voltar do Stripe com
-        # ?upgrade=success, o /home não bata no backstop 402 antes do webhook
-        # confirmar. As features PAGAS seguem travadas por tier até o pagamento
-        # cair — aqui só se garante o acesso base (Grátis) ao dashboard.
-        from db import mark_plan_selected
-        await asyncio.to_thread(mark_plan_selected, user_id)
+        # NÃO fechamos o gate da /precos aqui. Abrir o checkout não é escolher um
+        # plano — quem abandona o Stripe tem de voltar pra /precos e escolher
+        # (pago ou Grátis). O gate só fecha quando o pagamento COMPLETA de fato,
+        # no webhook checkout.session.completed (mark_plan_selected lá). O
+        # retorno de sucesso (?upgrade=success) é tratado como "webhook em
+        # trânsito" pelo gate e pela tela de confirmação, sem cair no 402.
         return result
     except HTTPException:
         raise

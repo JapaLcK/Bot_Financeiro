@@ -18,9 +18,11 @@ import frontend.routes.shared as shared
 
 class _Req:
     """Request falso: só o que gate_plan_selection/_resolve_page_user_id tocam."""
-    def __init__(self, ua=""):
+    def __init__(self, ua="", query=None):
         self.headers = {"user-agent": ua}
         self.cookies = {}
+        # dict tem .get() como o QueryParams real — suficiente pro gate.
+        self.query_params = query or {}
 
 
 def _patch(monkeypatch, *, token="tok", payload=None, needs=True, session=None,
@@ -54,6 +56,24 @@ def test_deslogado_nao_forca_precos(monkeypatch):
     # Sem token válido em nenhum cookie: deixa o HTML carregar (ele vai pro login).
     _patch(monkeypatch, token=None, payload=None, needs=True, dashboard_uid=None)
     assert shared.gate_plan_selection(_Req()) is None
+
+
+def test_retorno_do_checkout_sucesso_nao_forca_precos(monkeypatch):
+    # ?upgrade=success = webhook em trânsito; quem acabou de pagar NÃO pode ser
+    # jogado pra /precos antes do mark_plan_selected do webhook cair. A tela de
+    # confirmação em /home espera e libera (fail-open).
+    _patch(monkeypatch, payload={"type": "auth", "sub": "7"}, needs=True)
+    assert shared.gate_plan_selection(_Req(query={"upgrade": "success"})) is None
+    # Sem o param, o gate segue redirecionando quem não escolheu plano
+    assert isinstance(shared.gate_plan_selection(_Req()), RedirectResponse)
+
+
+def test_retorno_cancelado_ainda_forca_precos(monkeypatch):
+    # ?upgrade=cancelled (abandono) NÃO é exceção — segue pro /precos escolher.
+    _patch(monkeypatch, payload={"type": "auth", "sub": "7"}, needs=True)
+    out = shared.gate_plan_selection(_Req(query={"upgrade": "cancelled"}))
+    assert isinstance(out, RedirectResponse)
+    assert out.headers["location"] == "/precos?escolha=1"
 
 
 def test_app_ios_e_isento(monkeypatch):
