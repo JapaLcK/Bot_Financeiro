@@ -1364,16 +1364,24 @@ const usersState = { q: '', status: '', page: 0, perPage: 50, sort: 'created_at'
 let usersSearchDebounce = null;
 let usersController = null;
 
+let _usersLastFocus = null;
+
 function openUsersModal() {
   usersState.open = true;
+  _usersLastFocus = document.activeElement;
   $id('users-modal').classList.add('visible');
   showUsersList();
   loadUsers();
+  // foco pro campo de busca, que é o primeiro controle útil do diálogo
+  $id('users-search')?.focus();
 }
 function closeUsersModal() {
   usersState.open = false;
   usersController?.abort();
   $id('users-modal').classList.remove('visible');
+  // devolve o foco pro card que abriu, senão o teclado volta pro topo do painel
+  if (_usersLastFocus && document.contains(_usersLastFocus)) _usersLastFocus.focus();
+  _usersLastFocus = null;
 }
 function showUsersList() {
   $id('user-detail').style.display = 'none';
@@ -1615,8 +1623,42 @@ $id('users-sort').addEventListener('change', () => {
 $id('users-modal').addEventListener('click', (e) => {
   if (e.target === $id('users-modal')) closeUsersModal();
 });
+/* O Esc já existia; o Tab não estava preso. O modal declara aria-modal="true",
+   que AFIRMA pro leitor de tela que o resto da página não está disponível — mas
+   o teclado saía do diálogo pros controles do painel atrás dele. Mesmo defeito
+   que o Codex apontou no modal da Início (PR #70).
+
+   Os alvos são consultados a cada Tab porque o conteúdo troca: a lista de
+   usuários é paginada e o detalhe de um usuário substitui a tabela. */
+function _usersFocaveis() {
+  const dlg = document.querySelector('#users-modal .users-dialog');
+  if (!dlg) return [];
+  const sel = 'a[href], button:not([disabled]), input:not([disabled]),'
+            + ' select:not([disabled]), textarea:not([disabled]),'
+            + ' [tabindex]:not([tabindex="-1"])';
+  return [...dlg.querySelectorAll(sel)].filter(
+    (el) => el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0,
+  );
+}
+
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && usersState.open) closeUsersModal();
+  if (!usersState.open) return;
+  if (e.key === 'Escape') { closeUsersModal(); return; }
+  if (e.key !== 'Tab') return;
+
+  const dlg = document.querySelector('#users-modal .users-dialog');
+  const alvos = _usersFocaveis();
+  if (!dlg || !alvos.length) return;
+
+  const primeiro = alvos[0];
+  const ultimo = alvos[alvos.length - 1];
+  const proximo = e.shiftKey ? ultimo : primeiro;
+  const borda = e.shiftKey ? primeiro : ultimo;
+
+  if (!dlg.contains(document.activeElement) || document.activeElement === borda) {
+    e.preventDefault();
+    proximo.focus();
+  }
 });
 
 /* ── Auto-refresh ────────────────────────────────────────────────── */
