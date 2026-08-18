@@ -165,18 +165,21 @@ sys.exit(0 if s.connect_ex(('127.0.0.1', $PGPORT)) != 0 else 1)
       $PGRUN "$PGBIN/pg_ctl -D $PGDATA -o '-p $PGPORT -k $PGSOCK -c listen_addresses=127.0.0.1' -l $LOGF -w -t 30 start" >/dev/null 2>&1
     fi
 
-    $PGRUN "$PGBIN/createdb -h 127.0.0.1 -p $PGPORT -U postgres bot_financeiro_test" >/dev/null 2>&1
+    # ORDEM IMPORTA: identificar antes de qualquer comando que mute.
+    # A porta pode ter sido tomada por outro processo entre o _porta_livre e o
+    # pg_ctl. Se o createdb viesse primeiro, ele criaria um database dentro do
+    # cluster de OUTRA sessão — todos aceitam conexão trust como postgres —
+    # antes de a URL ser recusada. `show data_directory` é leitura pura e
+    # portanto seguro de rodar contra servidor alheio.
     if $PGRUN "$PGBIN/pg_isready -h 127.0.0.1 -p $PGPORT -U postgres" >/dev/null 2>&1; then
-      # Responder na porta não basta: pode ser o servidor de outra sessão. Só
-      # aceita se o data_directory for o desta sessão — a suíte APAGA linhas,
-      # então apontar para o banco de outra pessoa é destrutivo.
       DDIR=$($PGRUN "$PGBIN/psql -h 127.0.0.1 -p $PGPORT -U postgres -tAc 'show data_directory'" 2>/dev/null | tr -d ' ')
       if [ "$DDIR" = "$PGDATA" ]; then
+        $PGRUN "$PGBIN/createdb -h 127.0.0.1 -p $PGPORT -U postgres bot_financeiro_test" >/dev/null 2>&1
         DB_URL="postgresql://postgres:postgres@127.0.0.1:$PGPORT/bot_financeiro_test"
         log "Postgres pronto na porta $PGPORT (data_directory conferido)."
       else
         log "AVISO: a porta $PGPORT responde, mas de outro servidor ($DDIR)."
-        log "       Não vou usá-lo — seria o banco de outra sessão."
+        log "       Não vou tocar nele — nem para criar o banco de teste."
       fi
     else
       log "AVISO: Postgres não respondeu na porta $PGPORT; veja $PGDATA/server.log."
