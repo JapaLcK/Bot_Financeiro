@@ -594,6 +594,17 @@
     let dragged = false;    // este gesto puxou de verdade (tap nunca arma)
     let inFlight = null;    // PBRefresh pendente (o watchdog libera o ciclo, não o pedido)
 
+    // Nas telas de dados (Início e views do dashboard) o CONTEÚDO desce junto
+    // com o puxão — estilo nativo do iOS — e o indicador aparece no vão que
+    // abre sob o status bar. Nas outras (Ajustes, O que pedir) mantém o antigo:
+    // só o indicador desce por cima da página. O transform mora no `.page`, o
+    // único wrapper de conteúdo; foi verificado (grep) que nenhum position:fixed
+    // é descendente dele — dock, FAB, toasts e overlays são irmãos e ficam
+    // ancorados, então mover o `.page` não arrasta o chrome (e não abre faixa
+    // vazia embaixo). Ajustes fica de fora de propósito.
+    const moveContent = (page === "home" || page === "app");
+    const contentEl = moveContent ? document.querySelector(".page") : null;
+
     // Fetches pendentes DA PÁGINA (não do puxão): o fallback de reload não
     // pode atropelar um save em voo — o PATCH das preferências de notificação
     // dos Ajustes, por exemplo, seria abortado e a escolha recém-aceita pela
@@ -623,23 +634,55 @@
     }
 
     const damp = o => PTR.rubber * (1 - 1 / (o / PTR.rubber + 1));
+    // Inverso do damp: dado um `pull`, o deslocamento de dedo que o produz.
+    // Usado pra rebasear um puxão que começa em cima da molinha de recolher —
+    // o gesto novo continua do offset residual em vez de saltar (o damp sempre
+    // recebe pull < rubber, então o denominador nunca zera).
+    const dampInv = p => PTR.rubber * p / Math.max(1, PTR.rubber - p);
+    let startPullOffset = 0;   // dy virtual do residual retido no touchstart
     const atTop = () =>
       (window.scrollY || (document.scrollingElement || {}).scrollTop || 0) <= 0;
 
     function draw() {
       const p = Math.min(1, pull / PTR.threshold);
-      el.style.transform =
-        "translate3d(0," + pull.toFixed(1) + "px,0) scale(" + (0.5 + 0.5 * p).toFixed(3) + ")";
+      if (contentEl) {
+        // Conteúdo desce por inteiro (a molinha do rAF é quem anima).
+        contentEl.style.transform =
+          pull > 0 ? "translate3d(0," + pull.toFixed(1) + "px,0)" : "";
+        // Indicador fica no vão que abriu: sobe atrás do status bar quando o
+        // puxão é curto (translate negativo + opacity 0) e desce pra ~meio do
+        // vão conforme cresce. Metade da velocidade do conteúdo = "revelado"
+        // por trás dele, não colado ao topo do conteúdo.
+        el.style.transform =
+          "translate3d(0," + ((pull - 40) * 0.5).toFixed(1) + "px,0) scale(" +
+          (0.5 + 0.5 * p).toFixed(3) + ")";
+      } else {
+        el.style.transform =
+          "translate3d(0," + pull.toFixed(1) + "px,0) scale(" + (0.5 + 0.5 * p).toFixed(3) + ")";
+      }
       el.style.opacity = Math.min(1, p * 1.6).toFixed(2);
       if (!busy) arc.style.strokeDashoffset = (circ * (1 - p)).toFixed(1);
     }
 
+    // will-change só enquanto o puxão está vivo: manter uma camada de
+    // composição permanente no `.page` (subárvore inteira) é caro. Liga ao
+    // começar o gesto/refresh, desliga quando o conteúdo assenta em 0. O `.page`
+    // não tem transition no CSS, então a molinha do rAF anima sozinha.
+    function setDragging(on) {
+      if (!contentEl) return;
+      contentEl.style.willChange = on ? "transform" : "";
+    }
+
     function spring(goal) {
       if (raf) { cancelAnimationFrame(raf); raf = 0; }
-      if (!smooth) { pull = goal; draw(); return; }
+      // Assentou no zero: solta a camada de composição do `.page`. Só quando
+      // chega em 0 — no HOLD (refresh em curso) o conteúdo continua segurado
+      // embaixo.
+      const done = () => { if (goal === 0) setDragging(false); };
+      if (!smooth) { pull = goal; draw(); done(); return; }
       (function step() {
         pull += (goal - pull) * 0.22;
-        if (Math.abs(pull - goal) < 0.5) { pull = goal; raf = 0; draw(); return; }
+        if (Math.abs(pull - goal) < 0.5) { pull = goal; raf = 0; draw(); done(); return; }
         draw();
         raf = requestAnimationFrame(step);
       })();
@@ -799,10 +842,22 @@
       // da digitação. Os campos vivem no fluxo normal; ownsGesture não os vê.
       if (ev.target.closest && ev.target.closest("input, textarea, select, [contenteditable]")) return;
       tracking = atTop();
+      startPullOffset = 0;
       // Retry rápido: se a molinha do ciclo anterior ainda está recolhendo,
       // o rAF dela seguiria empurrando pull pra zero por baixo do touchmove
       // — o puxão novo desabava no meio. Gesto aceito mata a molinha.
-      if (tracking && raf) { cancelAnimationFrame(raf); raf = 0; }
+      //
+      // Mas matar a molinha deixa `pull` no valor residual, e o primeiro
+      // touchmove o trocava por damp(dy)≈0 — com o `.page` inteiro descendo,
+      // isso é um salto visível de dezenas de px pra cima antes de seguir o
+      // dedo. Rebaseia: guarda o dy virtual do residual pra somar no touchmove,
+      // então o pull começa no residual e cresce contínuo. O offset entra SÓ no
+      // cálculo do pull — a classificação dx/dy usa o dy cru (senão o offset
+      // inflaria o dy e um swipe horizontal viraria puxão).
+      if (tracking && raf) {
+        cancelAnimationFrame(raf); raf = 0;
+        if (pull > 0) startPullOffset = dampInv(pull);
+      }
       dragged = false;
       startY = ev.touches[0].clientY;
       startX = ev.touches[0].clientX;
@@ -835,8 +890,9 @@
       // de dy<=0 logo acima.
       if (!atTop()) { tracking = false; if (pull > 0) spring(0); return; }
       if (ev.cancelable) ev.preventDefault();   // mata o elástico nativo
+      if (!dragged) setDragging(true);          // primeira amostra: arma a camada de composição
       dragged = true;
-      pull = Math.min(PTR.max, damp(dy));
+      pull = Math.min(PTR.max, damp(dy + startPullOffset));
       draw();
     }, { passive: false });
 

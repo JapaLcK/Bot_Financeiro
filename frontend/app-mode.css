@@ -737,9 +737,11 @@ html.pb-app .sidenav {
 html.pb-app .sidenav-backdrop.open { z-index: 750; }
 
 /* ─── Puxar pra atualizar ──────────────────────────────────────────────────
-   O indicador desce sozinho por cima da página — o conteúdo NÃO se mexe (ver
-   o porquê no app-mode.js, initPullToRefresh). Posição e escala vêm de lá;
-   aqui fica só a aparência.
+   Na Início e nas views do dashboard o CONTEÚDO (`.page`) desce junto com o
+   puxão e segura embaixo enquanto o refresh corre — estilo nativo do iOS — e o
+   indicador aparece no vão que abre sob o status bar. Nas demais telas (Ajustes,
+   O que pedir) só o indicador desce por cima da página. Posição e escala vêm do
+   app-mode.js (initPullToRefresh); aqui fica só a aparência.
 
    z-index 690: abaixo da tab bar (700) e dos modais (800/900), acima do
    conteúdo. Puxar com modal aberto não deve desenhar nada por cima dele. */
