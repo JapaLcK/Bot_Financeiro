@@ -586,6 +586,14 @@ def init_db():
         """,
 
         # -----------------------------
+        # Open Finance — instante real da transação (com hora), quando o banco
+        # envia. NULL = só data (cai no fallback de meia-dia local no import).
+        # -----------------------------
+        """
+        alter table open_finance_transactions add column if not exists transacted_at timestamptz
+        """,
+
+        # -----------------------------
         # OFX import log
         # -----------------------------
         """

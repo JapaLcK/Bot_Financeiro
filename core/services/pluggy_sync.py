@@ -12,6 +12,8 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from dateutil import parser as _dateutil_parser
+
 from utils_date import _tz
 
 from core.services.pluggy import (
@@ -55,6 +57,43 @@ def _parse_date(value: Any) -> date:
     return datetime.now(_tz()).date()
 
 
+def _parse_datetime(value: Any) -> datetime | None:
+    """Extrai o instante COMPLETO (com hora) de uma transação do Pluggy.
+
+    Retorna um datetime timezone-aware quando o banco envia hora real; retorna
+    None quando só há data (hora == 00:00) — nesse caso o import cai no fallback
+    de data pura, sem inventar horário. O `date` do Pluggy é ISO 8601, ex.:
+    "2026-08-14T15:30:00.000-03:00" (hora real) ou "2026-08-14T00:00:00.000Z"
+    (placeholder de só-data). A meia-noite é tratada como "sem hora".
+    """
+    dt: datetime | None = None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        # "YYYY-MM-DD" puro não carrega hora → sem horário real
+        if len(text) == 10 and text.count("-") == 2:
+            return None
+        try:
+            dt = _dateutil_parser.isoparse(text)
+        except (ValueError, TypeError, OverflowError):
+            return None
+
+    if dt is None:
+        return None
+
+    # meia-noite exata = placeholder de "só data" do provedor → sem hora real
+    if dt.hour == 0 and dt.minute == 0 and dt.second == 0 and dt.microsecond == 0:
+        return None
+
+    # garante timezone-aware; se vier naive, assume o fuso do bot
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_tz())
+    return dt
+
+
 def normalize_pluggy_account(raw: dict) -> dict:
     """Converte a conta crua da Pluggy no formato que `save_open_finance_sync` espera.
 
@@ -84,6 +123,7 @@ def normalize_pluggy_transaction(raw: dict) -> dict:
         "description": str(raw.get("description") or raw.get("descriptionRaw") or "Transação"),
         "amount": _to_decimal(raw.get("amount")),
         "transaction_date": _parse_date(raw.get("date")),
+        "transacted_at": _parse_datetime(raw.get("date")),
         "category": (str(raw["category"]) if raw.get("category") else None),
         "raw": raw,
     }

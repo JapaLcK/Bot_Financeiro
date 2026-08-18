@@ -248,6 +248,19 @@ const fmtDate = iso => {
   return new Date(iso).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
 };
 
+// Data/hora de um lançamento na lista.
+//  - has_time (manual, cartão, banco que envia hora) → "dd/mm, HH:MM" do instante real.
+//  - só data (banco que manda apenas a data) → "dd/mm" a partir de `posted_at`,
+//    lendo a string YYYY-MM-DD direto (sem new Date → sem conversão de fuso, que
+//    era o que jogava a data pro dia anterior).
+const fmtLaunchWhen = l => {
+  if (l && l.has_time && l.criado_em) return fmtDate(l.criado_em);
+  const src = l && (l.posted_at || l.criado_em);
+  if (!src) return "—";
+  const p = String(src).slice(0, 10).split("-");
+  return p.length === 3 ? `${p[2]}/${p[1]}` : fmtDate(l && l.criado_em);
+};
+
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({
   "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
 }[c]));
@@ -6657,7 +6670,7 @@ function renderLaunches() {
         <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
           <span class="val ${valClass}" style="${valStyle}"
                 data-num="lnc_${l.criado_em}_${l.valor}" data-val="${l.valor}">${fmt(l.valor)}</span>
-          <span style="font-size:.65rem;color:var(--text-3)">${fmtDate(l.criado_em)}${editBtn}${deleteBtn}</span>
+          <span style="font-size:.65rem;color:var(--text-3)">${fmtLaunchWhen(l)}${editBtn}${deleteBtn}</span>
         </span>
       </div>
     `}).join("")
@@ -6923,7 +6936,7 @@ function openEditLaunchModal(launchId) {
   const valStr = fmt(launch.valor);
   const prefix = editingLaunchIsCredit ? "compra crédito" : launch.tipo;
   document.getElementById("edit-launch-summary").textContent =
-    `${prefix} • ${valStr} • ${fmtDate(launch.criado_em)}`;
+    `${prefix} • ${valStr} • ${fmtLaunchWhen(launch)}`;
 
   _renderEditCategoriaOptions(launch.categoria);
   document.getElementById("edit-launch-categoria-custom-row").style.display = "none";

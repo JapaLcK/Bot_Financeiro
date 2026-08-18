@@ -1,7 +1,7 @@
 import re
 import unicodedata
 from decimal import Decimal
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from uuid import NAMESPACE_OID, uuid5
 
 from psycopg.types.json import Jsonb
@@ -606,13 +606,14 @@ def save_open_finance_sync(connection_id: int, accounts: list[dict]) -> dict:
                         """
                         insert into open_finance_transactions (
                             account_id, provider_transaction_id, description,
-                            amount, transaction_date, category, raw
+                            amount, transaction_date, transacted_at, category, raw
                         )
-                        values (%s,%s,%s,%s,%s,%s,%s)
+                        values (%s,%s,%s,%s,%s,%s,%s,%s)
                         on conflict (account_id, provider_transaction_id)
                         do update set description = excluded.description,
                                       amount = excluded.amount,
                                       transaction_date = excluded.transaction_date,
+                                      transacted_at = excluded.transacted_at,
                                       category = excluded.category,
                                       raw = excluded.raw
                         """,
@@ -622,6 +623,7 @@ def save_open_finance_sync(connection_id: int, accounts: list[dict]) -> dict:
                             tx["description"],
                             tx["amount"],
                             tx["transaction_date"],
+                            tx.get("transacted_at"),
                             tx.get("category"),
                             Jsonb(tx.get("raw") or {}),
                         ),
@@ -795,7 +797,8 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
             cur.execute(
                 """
                 select t.id as of_tx_id, t.provider_transaction_id, t.description,
-                       t.amount, t.transaction_date, t.category, a.type as account_type
+                       t.amount, t.transaction_date, t.transacted_at, t.category,
+                       a.type as account_type
                 from open_finance_transactions t
                 join open_finance_accounts a on a.id = t.account_id
                 join open_finance_connections c on c.id = a.connection_id
@@ -844,9 +847,21 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                     continue
 
                 # Sem match ('none') ou ambíguo ('ask'): cria o OF launch.
+                #
+                # `criado_em` (timestamptz) dirige a exibição na lista:
+                #   - banco mandou hora real (transacted_at) → usa o instante exato;
+                #   - só data → meia-dia no fuso local (evita o "escorrega 1 dia"
+                #     que acontecia gravando `date` cru como meia-noite UTC).
+                # `time_known` sinaliza pro front mostrar HH:MM só quando é real.
+                has_real_time = r["transacted_at"] is not None
+                criado_em = (
+                    r["transacted_at"] if has_real_time
+                    else datetime.combine(r["transaction_date"], time(12, 0), tzinfo=_tz())
+                )
                 efeitos = {
                     "delta_conta": 0,  # analytics-only: não mexe no saldo manual
                     "open_finance": {"provider_transaction_id": r["provider_transaction_id"]},
+                    "time_known": has_real_time,
                 }
                 cur.execute(
                     """
@@ -860,7 +875,7 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                     """,
                     (
                         user_id, cls["tipo"], cls["valor"], (r["category"] or "outros"),
-                        r["description"], None, r["transaction_date"], Jsonb(efeitos),
+                        r["description"], None, criado_em, Jsonb(efeitos),
                         "open_finance", r["provider_transaction_id"], r["transaction_date"], "BRL",
                         cls["is_internal_movement"],
                     ),

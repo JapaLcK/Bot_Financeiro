@@ -284,7 +284,9 @@ async def get_financial_data(
                    false AS is_internal_movement,
                    t.installments_total AS installments_total,
                    t.installment_no AS installment_no,
-                   b.period_end AS bill_period_end
+                   b.period_end AS bill_period_end,
+                   NULL::date AS posted_at,
+                   true AS has_time
             FROM credit_transactions t
             JOIN credit_cards c ON c.id = t.card_id
             JOIN credit_bills b ON b.id = t.bill_id
@@ -319,7 +321,9 @@ async def get_financial_data(
                 SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
                        NULL::int AS installments_total,
                        NULL::int AS installment_no,
-                       NULL::date AS bill_period_end
+                       NULL::date AS bill_period_end,
+                       NULL::date AS posted_at,
+                       true AS has_time
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
@@ -334,12 +338,19 @@ async def get_financial_data(
         _q(
             f"""
             SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
-                   installments_total, installment_no, bill_period_end
+                   installments_total, installment_no, bill_period_end, posted_at, has_time
             FROM (
                 SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
                        NULL::int AS installments_total,
                        NULL::int AS installment_no,
-                       NULL::date AS bill_period_end
+                       NULL::date AS bill_period_end,
+                       posted_at,
+                       CASE
+                         WHEN source = 'ofx' THEN false
+                         WHEN source = 'open_finance'
+                           THEN COALESCE((efeitos->>'time_known')::boolean, false)
+                         ELSE true
+                       END AS has_time
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
