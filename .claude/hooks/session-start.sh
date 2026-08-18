@@ -181,6 +181,30 @@ else
 fi
 
 # ── 4. Variáveis de ambiente da sessão ───────────────────────────────────────
+# A chave Fernet acompanha o CLUSTER, não o disparo do hook. Como o PGDATA
+# agora é reaproveitado entre startup/resume/compact, gerar chave nova a cada
+# vez deixaria ilegível todo PII escrito antes — o dado continua cifrado com a
+# chave anterior e o decrypt_pii falha. Fica persistida ao lado da porta, no
+# próprio PGDATA, com o mesmo ciclo de vida do banco que ela protege.
+#
+# É o único valor gerado aqui: JWT_SECRET e PII_HASH_PEPPER são constantes de
+# desenvolvimento (e o pepper, por definição, nunca rotaciona — core/crypto.py).
+PII_KEY=""
+PII_KEY_FILE=""
+[ -n "${PGDATA:-}" ] && [ -d "${PGDATA:-/nao-existe}" ] && PII_KEY_FILE="$PGDATA/.session_pii_key"
+
+if [ -n "$PII_KEY_FILE" ] && [ -s "$PII_KEY_FILE" ]; then
+  PII_KEY=$(cat "$PII_KEY_FILE" 2>/dev/null | tr -d '\n')
+fi
+if [ -z "$PII_KEY" ]; then
+  PII_KEY=$(python3 -c 'from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())' 2>/dev/null)
+  if [ -n "$PII_KEY_FILE" ] && [ -n "$PII_KEY" ]; then
+    printf '%s' "$PII_KEY" > "$PII_KEY_FILE" 2>/dev/null
+    chmod 600 "$PII_KEY_FILE" 2>/dev/null
+    [ "$PGRUN" = "su postgres -c" ] && chown postgres:postgres "$PII_KEY_FILE" 2>/dev/null
+  fi
+fi
+
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   {
     echo 'export PYTHONPATH="."'
@@ -195,7 +219,7 @@ if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
       echo 'export DATABASE_URL=""'
     fi
     echo 'export JWT_SECRET="dev-only-jwt-secret-32-bytes-minimum-len"'
-    echo "export PII_ENCRYPTION_KEY=\"$(python3 -c 'from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())' 2>/dev/null)\""
+    echo "export PII_ENCRYPTION_KEY=\"$PII_KEY\""
     echo 'export PII_HASH_PEPPER="dev-only-pepper-must-be-32-chars-long!!"'
     echo 'export PII_AUDIT_DISABLED=1'
     echo 'export RUN_BACKGROUND_TASKS=0'
