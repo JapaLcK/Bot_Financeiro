@@ -594,6 +594,17 @@
     let dragged = false;    // este gesto puxou de verdade (tap nunca arma)
     let inFlight = null;    // PBRefresh pendente (o watchdog libera o ciclo, não o pedido)
 
+    // Nas telas de dados (Início e views do dashboard) o CONTEÚDO desce junto
+    // com o puxão — estilo nativo do iOS — e o indicador aparece no vão que
+    // abre sob o status bar. Nas outras (Ajustes, O que pedir) mantém o antigo:
+    // só o indicador desce por cima da página. O transform mora no `.page`, o
+    // único wrapper de conteúdo; foi verificado (grep) que nenhum position:fixed
+    // é descendente dele — dock, FAB, toasts e overlays são irmãos e ficam
+    // ancorados, então mover o `.page` não arrasta o chrome (e não abre faixa
+    // vazia embaixo). Ajustes fica de fora de propósito.
+    const moveContent = (page === "home" || page === "app");
+    const contentEl = moveContent ? document.querySelector(".page") : null;
+
     // Fetches pendentes DA PÁGINA (não do puxão): o fallback de reload não
     // pode atropelar um save em voo — o PATCH das preferências de notificação
     // dos Ajustes, por exemplo, seria abortado e a escolha recém-aceita pela
@@ -628,18 +639,44 @@
 
     function draw() {
       const p = Math.min(1, pull / PTR.threshold);
-      el.style.transform =
-        "translate3d(0," + pull.toFixed(1) + "px,0) scale(" + (0.5 + 0.5 * p).toFixed(3) + ")";
+      if (contentEl) {
+        // Conteúdo desce por inteiro (a molinha do rAF é quem anima).
+        contentEl.style.transform =
+          pull > 0 ? "translate3d(0," + pull.toFixed(1) + "px,0)" : "";
+        // Indicador fica no vão que abriu: sobe atrás do status bar quando o
+        // puxão é curto (translate negativo + opacity 0) e desce pra ~meio do
+        // vão conforme cresce. Metade da velocidade do conteúdo = "revelado"
+        // por trás dele, não colado ao topo do conteúdo.
+        el.style.transform =
+          "translate3d(0," + ((pull - 40) * 0.5).toFixed(1) + "px,0) scale(" +
+          (0.5 + 0.5 * p).toFixed(3) + ")";
+      } else {
+        el.style.transform =
+          "translate3d(0," + pull.toFixed(1) + "px,0) scale(" + (0.5 + 0.5 * p).toFixed(3) + ")";
+      }
       el.style.opacity = Math.min(1, p * 1.6).toFixed(2);
       if (!busy) arc.style.strokeDashoffset = (circ * (1 - p)).toFixed(1);
     }
 
+    // will-change só enquanto o puxão está vivo: manter uma camada de
+    // composição permanente no `.page` (subárvore inteira) é caro. Liga ao
+    // começar o gesto/refresh, desliga quando o conteúdo assenta em 0. O `.page`
+    // não tem transition no CSS, então a molinha do rAF anima sozinha.
+    function setDragging(on) {
+      if (!contentEl) return;
+      contentEl.style.willChange = on ? "transform" : "";
+    }
+
     function spring(goal) {
       if (raf) { cancelAnimationFrame(raf); raf = 0; }
-      if (!smooth) { pull = goal; draw(); return; }
+      // Assentou no zero: solta a camada de composição do `.page`. Só quando
+      // chega em 0 — no HOLD (refresh em curso) o conteúdo continua segurado
+      // embaixo.
+      const done = () => { if (goal === 0) setDragging(false); };
+      if (!smooth) { pull = goal; draw(); done(); return; }
       (function step() {
         pull += (goal - pull) * 0.22;
-        if (Math.abs(pull - goal) < 0.5) { pull = goal; raf = 0; draw(); return; }
+        if (Math.abs(pull - goal) < 0.5) { pull = goal; raf = 0; draw(); done(); return; }
         draw();
         raf = requestAnimationFrame(step);
       })();
@@ -835,6 +872,7 @@
       // de dy<=0 logo acima.
       if (!atTop()) { tracking = false; if (pull > 0) spring(0); return; }
       if (ev.cancelable) ev.preventDefault();   // mata o elástico nativo
+      if (!dragged) setDragging(true);          // primeira amostra: arma a camada de composição
       dragged = true;
       pull = Math.min(PTR.max, damp(dy));
       draw();
