@@ -1,3 +1,4 @@
+import importlib.util
 import os
 import sys
 import uuid
@@ -20,6 +21,85 @@ os.environ.setdefault("PII_AUDIT_DISABLED", "1")
 os.environ.setdefault("PLANS_V2_ENABLED", "0")
 
 from db import init_db, ensure_user, get_conn
+
+
+# ── Coleta: arquivos que dependem de `ofxparse` ──────────────────────────────
+# Sem o pacote, estes 9 arquivos estouram no IMPORT e o pytest aborta a suíte
+# inteira antes de rodar um teste — o resultado não é "alguns testes falham",
+# é sinal nenhum, nem verde nem vermelho.
+#
+# A lista é FIXA de propósito. Gerá-la a partir dos erros de coleta ("ignore
+# tudo que falhou ao importar") engoliria também um ImportError ou erro de
+# sintaxe recém-introduzido, e o arquivo quebrado nunca mais rodaria.
+#
+# A condição é a ausência do pacote, não o erro: no CI o ofxparse está no
+# requirements.txt, então nada aqui é ignorado e os 9 rodam normalmente.
+_OFXPARSE_DEPENDENTES = [
+    "test_audio_clarification.py",
+    "test_audio_multi_launch_ask_value.py",
+    "test_full_handler_smoke.py",
+    "test_handle_incoming_routing.py",
+    "test_recurring_value.py",
+    "test_split_audio_transactions.py",
+    "test_whatsapp_confirmations.py",
+    "test_whatsapp_daily_report.py",
+    "test_whatsapp_simulation.py",
+]
+
+# Estes quatro NÃO estouram na coleta: importam `core.handle_incoming` ou
+# `statement_import` DENTRO do corpo do teste, e a cadeia
+# handle_incoming -> ofx_service -> ofx_import -> ofxparse só é percorrida
+# quando o teste roda. O collect_ignore acima não os alcança, então sem este
+# skip a suíte "de dependências reduzidas" ainda termina com 4 vermelhos que
+# nada têm a ver com a mudança em revisão.
+_OFXPARSE_IMPORT_TARDIO = [
+    "tests/test_statement_import.py::test_attachment_detection",
+    "tests/test_statement_import.py::test_import_statement_bytes_csv_idempotente",
+    "tests/test_statement_import.py::test_import_statement_bytes_vazio_ou_grande",
+    "tests/test_nlp_and_pending_flow.py::test_handle_incoming_clarification_tem_precedencia_sobre_fallback_ia",
+]
+
+# O alívio NÃO é automático: exige PYTEST_ALLOW_MISSING_OPTIONAL_DEPS=1.
+#
+# Detectar a ausência sozinho seria pior que o problema — se o ofxparse caísse
+# do requirements.txt por engano, ou sumisse do CI, a suíte silenciaria 9
+# arquivos e pularia 4 testes e passaria VERDE, enquanto `core.handle_incoming`
+# estaria quebrado em produção. Um ambiente de dependências reduzidas é uma
+# decisão consciente de quem o monta (o .claude/hooks/session-start.sh exporta
+# a variável); a execução normal do dev e do CI continua estourando, que é o
+# comportamento certo para dependência obrigatória faltando.
+_DEPS_REDUZIDAS = os.getenv("PYTEST_ALLOW_MISSING_OPTIONAL_DEPS") == "1"
+
+# find_spec em vez de `try: import`: `except ImportError` também captura um
+# ImportError levantado DE DENTRO de um ofxparse instalado (dependência interna
+# quebrada, por exemplo) e trataria pacote defeituoso como pacote ausente,
+# escondendo justamente o que precisa aparecer.
+_TEM_OFXPARSE = importlib.util.find_spec("ofxparse") is not None
+
+collect_ignore = []
+if _DEPS_REDUZIDAS and not _TEM_OFXPARSE:
+    collect_ignore = list(_OFXPARSE_DEPENDENTES)
+    print(
+        f"[conftest] PYTEST_ALLOW_MISSING_OPTIONAL_DEPS=1 e ofxparse ausente — "
+        f"ignorando {len(collect_ignore)} arquivos e pulando "
+        f"{len(_OFXPARSE_IMPORT_TARDIO)} testes de import tardio."
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Pula os testes que só descobrem a falta do ofxparse ao executar.
+
+    Mesma filosofia da lista de arquivos: nomes FIXOS e condição ligada à
+    ausência do pacote, não ao erro. Marcar pelo erro esconderia um
+    ImportError novo introduzido por outra mudança.
+    """
+    if _TEM_OFXPARSE or not _DEPS_REDUZIDAS:
+        return
+    motivo = pytest.mark.skip(reason="ofxparse ausente (import tardio); no CI o pacote existe")
+    alvos = set(_OFXPARSE_IMPORT_TARDIO)
+    for item in items:
+        if item.nodeid in alvos:
+            item.add_marker(motivo)
 
 
 
