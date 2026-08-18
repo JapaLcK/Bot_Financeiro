@@ -121,8 +121,14 @@ if [ -n "$PGBIN" ]; then
       chown postgres:postgres "$PGDATA" "$PGSOCK"; chmod 700 "$PGDATA"
       chmod 755 "${TMPDIR:-/tmp}" 2>/dev/null
     fi
-    $PGRUN "$PGBIN/initdb -D $PGDATA -U postgres --auth=trust" >/dev/null 2>&1 \
-      || log "AVISO: initdb falhou."
+    if ! $PGRUN "$PGBIN/initdb -D $PGDATA -U postgres --auth=trust" >/dev/null 2>&1; then
+      # Limpa o que ficou pela metade. O initdb recusa diretório NÃO-VAZIO, então
+      # qualquer resto (log parcial, arquivo de estado) transformaria uma falha
+      # transitória em permanente: toda sessão seguinte tentaria de novo e seria
+      # recusada até alguém apagar o diretório à mão.
+      log "AVISO: initdb falhou — limpando $PGDATA para a próxima tentativa."
+      rm -rf "$PGDATA" 2>/dev/null
+    fi
   fi
 
   if [ -d "$PGDATA/base" ]; then
@@ -191,7 +197,10 @@ fi
 # desenvolvimento (e o pepper, por definição, nunca rotaciona — core/crypto.py).
 PII_KEY=""
 PII_KEY_FILE=""
-[ -n "${PGDATA:-}" ] && [ -d "${PGDATA:-/nao-existe}" ] && PII_KEY_FILE="$PGDATA/.session_pii_key"
+# Só grava num cluster REALMENTE inicializado — `$PGDATA/base` é o mesmo teste
+# que o bloco acima usa. Escrever com o initdb falhado deixaria o diretório
+# não-vazio e envenenaria a próxima tentativa.
+[ -n "${PGDATA:-}" ] && [ -d "${PGDATA:-/nao-existe}/base" ] && PII_KEY_FILE="$PGDATA/.session_pii_key"
 
 if [ -n "$PII_KEY_FILE" ] && [ -s "$PII_KEY_FILE" ]; then
   PII_KEY=$(cat "$PII_KEY_FILE" 2>/dev/null | tr -d '\n')
