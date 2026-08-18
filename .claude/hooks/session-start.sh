@@ -63,7 +63,17 @@ DB_URL=""
 if [ -n "$PGBIN" ]; then
   PGDATA="${TMPDIR:-/tmp}/pgdata-${CLAUDE_SESSION_ID:-$$}"
   PGSOCK="/tmp/pgsock-${CLAUDE_SESSION_ID:-$$}"
-  PGPORT="${PGPORT:-5432}"
+  # Porta livre por sessão. Fixar 5432 faria a segunda sessão do mesmo host
+  # falhar no pg_ctl e, pior, o createdb/pg_isready seguintes conversariam com
+  # o servidor da PRIMEIRA — as duas exportariam a mesma URL e a limpeza
+  # destrutiva da suíte voltaria a se cruzar, que é o que este hook evita.
+  PGPORT="${PGPORT:-$(python3 -c "
+import socket
+s = socket.socket()
+s.bind(('127.0.0.1', 0))
+print(s.getsockname()[1])
+s.close()
+" 2>/dev/null || echo 5432)}"
 
   if [ ! -d "$PGDATA/base" ]; then
     log "inicializando Postgres em $PGDATA ..."
@@ -88,8 +98,17 @@ if [ -n "$PGBIN" ]; then
     $PGRUN "$PGBIN/pg_ctl -D $PGDATA -o '-p $PGPORT -k $PGSOCK -c listen_addresses=127.0.0.1' -l $LOGF -w -t 30 start" >/dev/null 2>&1
     $PGRUN "$PGBIN/createdb -h 127.0.0.1 -p $PGPORT -U postgres bot_financeiro_test" >/dev/null 2>&1
     if $PGRUN "$PGBIN/pg_isready -h 127.0.0.1 -p $PGPORT -U postgres" >/dev/null 2>&1; then
-      DB_URL="postgresql://postgres:postgres@127.0.0.1:$PGPORT/bot_financeiro_test"
-      log "Postgres no ar na porta $PGPORT."
+      # Responder na porta não basta: pode ser o servidor de outra sessão. Só
+      # aceita se o data_directory for o desta sessão — a suíte APAGA linhas,
+      # então apontar para o banco de outra pessoa é destrutivo.
+      DDIR=$($PGRUN "$PGBIN/psql -h 127.0.0.1 -p $PGPORT -U postgres -tAc 'show data_directory'" 2>/dev/null | tr -d ' ')
+      if [ "$DDIR" = "$PGDATA" ]; then
+        DB_URL="postgresql://postgres:postgres@127.0.0.1:$PGPORT/bot_financeiro_test"
+        log "Postgres no ar na porta $PGPORT (data_directory conferido)."
+      else
+        log "AVISO: a porta $PGPORT responde, mas de outro servidor ($DDIR)."
+        log "       Não vou usá-lo — seria o banco de outra sessão."
+      fi
     else
       log "AVISO: Postgres não subiu; veja $LOGF."
     fi
@@ -102,7 +121,16 @@ fi
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   {
     echo 'export PYTHONPATH="."'
-    [ -n "$DB_URL" ] && echo "export DATABASE_URL=\"$DB_URL\""
+    # Sem banco isolado, ZERA a variável em vez de deixar passar o valor
+    # herdado do ambiente. A suíte apaga usuários, lançamentos, caixinhas e
+    # investimentos (tests/conftest.py); herdar um DATABASE_URL apontando para
+    # base compartilhada faria `pytest` destruir dados de verdade. Zerada, o
+    # conftest recusa rodar com "Faltou DATABASE_URL" — falha segura.
+    if [ -n "$DB_URL" ]; then
+      echo "export DATABASE_URL=\"$DB_URL\""
+    else
+      echo 'export DATABASE_URL=""'
+    fi
     echo 'export JWT_SECRET="dev-only-jwt-secret-32-bytes-minimum-len"'
     echo "export PII_ENCRYPTION_KEY=\"$(python3 -c 'from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())' 2>/dev/null)\""
     echo 'export PII_HASH_PEPPER="dev-only-pepper-must-be-32-chars-long!!"'
@@ -112,5 +140,11 @@ if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   log "variáveis de ambiente exportadas."
 fi
 
-log "pronto. Rode a suíte com: python3 -m pytest -q"
+if [ -n "$DB_URL" ]; then
+  log "pronto. Rode a suíte com: python3 -m pytest -q"
+else
+  log "ATENÇÃO: sem banco isolado. DATABASE_URL foi zerado de propósito e a"
+  log "         suíte vai recusar rodar — ela apaga linhas e não pode cair"
+  log "         num banco compartilhado. Suba um Postgres antes de testar."
+fi
 exit 0
