@@ -23,32 +23,80 @@ from db import init_db, ensure_user, get_conn
 
 
 
-def _make_isolated_db(base_url: str) -> tuple[str, str] | None:
-    """Cria um database só desta execução. Devolve (url_nova, nome) ou None
-    se não for possível (sem permissão de CREATE DATABASE, por exemplo)."""
+# ── Isolamento do banco por execução ─────────────────────────────────────────
+# Cada execução da suíte trabalha num database só dela. Sem isso, duas
+# execuções simultâneas se destroem: a fixture `_auto_cleanup_orphan_users`
+# abaixo apaga QUALQUER usuário que apareça em `users` durante um teste, e não
+# tem como distinguir os da outra execução.
+#
+# A troca acontece em `pytest_configure`, que roda ANTES da coleta. Isso é
+# essencial e não é detalhe de estilo: o pytest importa os módulos de teste na
+# coleta, e módulos como `frontend/routes/shared.py` e `core/admin_dashboard.py`
+# leem DATABASE_URL no nível de módulo. Numa fixture de sessão (que roda depois
+# da coleta) esses módulos já teriam cacheado a URL antiga e as rotas async
+# continuariam batendo no banco compartilhado — o isolamento valeria só para o
+# pool síncrono.
+#
+# PYTEST_DB_ISOLATION=0 desliga, para inspecionar o banco depois da rodada.
+
+_ISOLATION: dict[str, str] = {}
+
+
+def _cached_database_url_modules() -> tuple[str, ...]:
+    """Módulos que leem DATABASE_URL no import — a razão de trocar antes da coleta.
+
+    Levantado com `grep -rn DATABASE_URL --include=*.py` e filtrando as leituras
+    a nível de módulo. `finance_bot_websocket_custom.py` também guarda a URL, mas
+    só para validar que está presente; não conecta com ela.
+    """
+    return ("frontend/routes/shared.py", "core/admin_dashboard.py")
+
+
+def pytest_configure(config):
+    base_url = os.getenv("DATABASE_URL")
+    if not base_url or os.getenv("PYTEST_DB_ISOLATION", "1") == "0":
+        return
+
     import psycopg
     from urllib.parse import urlsplit, urlunsplit
 
     name = f"pytest_{uuid.uuid4().hex[:12]}"
     try:
         with psycopg.connect(base_url, autocommit=True) as conn:
-            # Nome é gerado aqui (hex de uuid), não vem de fora — sem risco
-            # de injeção. Aspas duplas porque CREATE DATABASE não aceita
-            # parâmetro ligado.
+            # Nome gerado aqui (hex de uuid), não vem de fora — sem risco de
+            # injeção. Aspas duplas porque CREATE DATABASE não aceita parâmetro.
             conn.execute(f'create database "{name}"')
     except Exception as exc:
         print(f"[conftest] sem isolamento de banco ({exc}); usando o DATABASE_URL original")
-        return None
+        return
+
     parts = urlsplit(base_url)
-    return urlunsplit(parts._replace(path=f"/{name}")), name
+    os.environ["DATABASE_URL"] = urlunsplit(parts._replace(path=f"/{name}"))
+    _ISOLATION["base_url"] = base_url
+    _ISOLATION["name"] = name
 
 
-def _drop_isolated_db(base_url: str, name: str) -> None:
+def pytest_unconfigure(config):
+    """Remove o database desta execução.
+
+    Roda no shutdown do pytest, inclusive quando `init_db()` estoura no setup —
+    numa fixture, um erro antes do `yield` pularia a limpeza e deixaria um
+    database `pytest_*` órfão a cada tentativa falha.
+    """
+    base_url = _ISOLATION.pop("base_url", None)
+    name = _ISOLATION.pop("name", None)
+    if not base_url or not name:
+        return
+
     import psycopg
 
-    from db.connection import close_pool
+    os.environ["DATABASE_URL"] = base_url
+    try:
+        from db.connection import close_pool
 
-    close_pool()  # solta as conexões, senão o DROP é recusado
+        close_pool()  # solta as conexões, senão o DROP é recusado
+    except Exception:
+        pass
     try:
         with psycopg.connect(base_url, autocommit=True) as conn:
             # FORCE derruba conexões remanescentes (Postgres 13+).
@@ -59,37 +107,9 @@ def _drop_isolated_db(base_url: str, name: str) -> None:
 
 @pytest.fixture(scope="session", autouse=True)
 def _init_schema():
-    """Prepara o schema — num database exclusivo desta execução.
-
-    Sem o isolamento, duas execuções simultâneas da suíte contra o mesmo
-    DATABASE_URL se destroem: a fixture `_auto_cleanup_orphan_users` abaixo
-    apaga QUALQUER usuário que apareça em `users` durante um teste, e não
-    tem como distinguir os da outra execução. O resultado são falhas em
-    testes sem relação com a mudança, que não reproduzem sozinhas.
-
-    Custa ~1s (createdb + init_db). Para inspecionar o banco depois de rodar,
-    desligue com PYTEST_DB_ISOLATION=0.
-    """
-    base_url = os.getenv("DATABASE_URL")
-    if not base_url:
+    if not os.getenv("DATABASE_URL"):
         raise RuntimeError("Faltou DATABASE_URL no ambiente para rodar os testes.")
-
-    isolated = None
-    if os.getenv("PYTEST_DB_ISOLATION", "1") != "0":
-        isolated = _make_isolated_db(base_url)
-
-    if isolated:
-        url, name = isolated
-        # Trocar antes de qualquer conexão: o pool de db/connection.py é lazy
-        # e só lê DATABASE_URL quando abre.
-        os.environ["DATABASE_URL"] = url
-        init_db()
-        yield
-        os.environ["DATABASE_URL"] = base_url
-        _drop_isolated_db(base_url, name)
-    else:
-        init_db()
-        yield
+    init_db()
 
 
 @pytest.fixture(autouse=True)
