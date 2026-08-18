@@ -634,6 +634,12 @@
     }
 
     const damp = o => PTR.rubber * (1 - 1 / (o / PTR.rubber + 1));
+    // Inverso do damp: dado um `pull`, o deslocamento de dedo que o produz.
+    // Usado pra rebasear um puxão que começa em cima da molinha de recolher —
+    // o gesto novo continua do offset residual em vez de saltar (o damp sempre
+    // recebe pull < rubber, então o denominador nunca zera).
+    const dampInv = p => PTR.rubber * p / Math.max(1, PTR.rubber - p);
+    let startPullOffset = 0;   // dy virtual do residual retido no touchstart
     const atTop = () =>
       (window.scrollY || (document.scrollingElement || {}).scrollTop || 0) <= 0;
 
@@ -836,10 +842,22 @@
       // da digitação. Os campos vivem no fluxo normal; ownsGesture não os vê.
       if (ev.target.closest && ev.target.closest("input, textarea, select, [contenteditable]")) return;
       tracking = atTop();
+      startPullOffset = 0;
       // Retry rápido: se a molinha do ciclo anterior ainda está recolhendo,
       // o rAF dela seguiria empurrando pull pra zero por baixo do touchmove
       // — o puxão novo desabava no meio. Gesto aceito mata a molinha.
-      if (tracking && raf) { cancelAnimationFrame(raf); raf = 0; }
+      //
+      // Mas matar a molinha deixa `pull` no valor residual, e o primeiro
+      // touchmove o trocava por damp(dy)≈0 — com o `.page` inteiro descendo,
+      // isso é um salto visível de dezenas de px pra cima antes de seguir o
+      // dedo. Rebaseia: guarda o dy virtual do residual pra somar no touchmove,
+      // então o pull começa no residual e cresce contínuo. O offset entra SÓ no
+      // cálculo do pull — a classificação dx/dy usa o dy cru (senão o offset
+      // inflaria o dy e um swipe horizontal viraria puxão).
+      if (tracking && raf) {
+        cancelAnimationFrame(raf); raf = 0;
+        if (pull > 0) startPullOffset = dampInv(pull);
+      }
       dragged = false;
       startY = ev.touches[0].clientY;
       startX = ev.touches[0].clientX;
@@ -874,7 +892,7 @@
       if (ev.cancelable) ev.preventDefault();   // mata o elástico nativo
       if (!dragged) setDragging(true);          // primeira amostra: arma a camada de composição
       dragged = true;
-      pull = Math.min(PTR.max, damp(dy));
+      pull = Math.min(PTR.max, damp(dy + startPullOffset));
       draw();
     }, { passive: false });
 
