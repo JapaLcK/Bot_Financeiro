@@ -59,8 +59,18 @@ _EXACT: dict[str, str] = {
     "saldo da conta":           "balance.check",
     "conta":                    "balance.check",
     "saldo geral":              "balance.check",
+    "saldo atual":              "balance.check",
+    "meu saldo":                "balance.check",
+    "qual o saldo":             "balance.check",
+    "qual meu saldo":           "balance.check",
     "quanto tenho":             "balance.check",
     "quanto tem":               "balance.check",
+    "quanto eu tenho":          "balance.check",
+    "quanto de saldo":          "balance.check",
+    "quanto sobrou":            "balance.check",
+    "quanto me resta":          "balance.check",
+    "quanto resta":             "balance.check",
+    "ta quanto":                "balance.check",
     # lançamentos / gastos / despesas
     "meus lancamentos":         "launches.list",
     "meu historico":            "launches.list",
@@ -214,13 +224,38 @@ _EXACT: dict[str, str] = {
     "ajuda":                    "help",
     "help":                     "help",
     "tutorial":                 "help.tutorial",
-    # confirmações
+    # confirmações — sinais fortes de sim/não. Como o _EXACT é global (casa
+    # mesmo sem ação pendente), evitamos aqui acks ambíguos ("ok", "beleza",
+    # "certo") que a pessoa manda solto sem estar confirmando nada; esses ficam
+    # só no confirmations.py da IA, que só é consultado quando há pending.
     "sim":                      "confirm.yes",
     "s":                        "confirm.yes",
     "confirmar":                "confirm.yes",
+    "confirmo":                 "confirm.yes",
+    "confirmado":               "confirm.yes",
+    "isso":                     "confirm.yes",
+    "isso mesmo":               "confirm.yes",
+    "isso ai":                  "confirm.yes",
+    "e isso":                   "confirm.yes",
+    "aham":                     "confirm.yes",
+    "uhum":                     "confirm.yes",
+    "exato":                    "confirm.yes",
+    "exatamente":               "confirm.yes",
+    "com certeza":              "confirm.yes",
+    "pode sim":                 "confirm.yes",
+    "pode mandar":              "confirm.yes",
+    "manda bala":               "confirm.yes",
+    "positivo":                 "confirm.yes",
     "nao":                      "confirm.no",
     "nope":                     "confirm.no",
     "cancelar":                 "confirm.no",
+    "cancela":                  "confirm.no",
+    "negativo":                 "confirm.no",
+    "melhor nao":               "confirm.no",
+    "agora nao":                "confirm.no",
+    "deixa pra la":             "confirm.no",
+    "deixa quieto":             "confirm.no",
+    "nao quero":                "confirm.no",
     # desfazer
     "desfazer":                 "launches.undo",
 }
@@ -308,11 +343,11 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "credit.handle"),
 
     # despesa / receita — detecta padrão sem chamar IA
-    (r"^(gastei|paguei|comprei|debitei|gasto|mandei|enviei|pixei)\b",
+    (r"^(gastei|paguei|comprei|debitei|gasto|mandei|enviei|pixei|torrei|queimei|gastando)\b",
      "launches.add"),
-    (r"^(recebi|ganhei|entrou|caiu)\b",
+    (r"^(recebi|ganhei|entrou|caiu|pingou|pinguei|embolsei)\b",
      "launches.add"),
-    (r"^(hoje|ontem|\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?|dia\s+\d{1,2}(?:[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?)?)\b.*\b(gastei|paguei|comprei|debitei|gasto|mandei|enviei|pixei|recebi|ganhei|entrou|caiu)\b",
+    (r"^(hoje|ontem|\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?|dia\s+\d{1,2}(?:[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?)?)\b.*\b(gastei|paguei|comprei|debitei|gasto|mandei|enviei|pixei|torrei|queimei|recebi|ganhei|entrou|caiu|pingou|pinguei|embolsei)\b",
      "launches.add"),
 
     # cartões / crédito
