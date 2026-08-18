@@ -158,6 +158,7 @@ def consume_pending_google_signup(
     token: str,
     name: str,
     phone_raw: str,
+    source: str = "google",
 ) -> dict:
     """
     Finaliza o cadastro: cria auth_account (sem senha), grava auth_identities
@@ -201,8 +202,8 @@ def consume_pending_google_signup(
                 """
                 insert into auth_accounts
                   (user_id, email, password_hash, phone_e164, display_name, phone_status,
-                   email_hash, email_enc, phone_hash, phone_enc, display_name_enc)
-                values (%s, %s, NULL, %s, %s, 'pending', %s, %s, %s, %s, %s)
+                   email_hash, email_enc, phone_hash, phone_enc, display_name_enc, signup_source)
+                values (%s, %s, NULL, %s, %s, 'pending', %s, %s, %s, %s, %s, %s)
                 on conflict (email) do update
                 set phone_e164 = coalesce(auth_accounts.phone_e164, excluded.phone_e164),
                     display_name = coalesce(auth_accounts.display_name, excluded.display_name),
@@ -210,14 +211,17 @@ def consume_pending_google_signup(
                     email_enc = coalesce(auth_accounts.email_enc, excluded.email_enc),
                     phone_hash = coalesce(auth_accounts.phone_hash, excluded.phone_hash),
                     phone_enc = coalesce(auth_accounts.phone_enc, excluded.phone_enc),
-                    display_name_enc = coalesce(auth_accounts.display_name_enc, excluded.display_name_enc)
+                    display_name_enc = coalesce(auth_accounts.display_name_enc, excluded.display_name_enc),
+                    -- Preserva a origem da 1ª criação em re-registro do mesmo e-mail
+                    signup_source = coalesce(auth_accounts.signup_source, excluded.signup_source)
                 """,
                 (user_id, email, normalized_phone, name,
                  hash_pii_optional(email, kind="email"),
                  encrypt_pii_optional(email),
                  hash_pii_optional(normalized_phone, kind="phone"),
                  encrypt_pii_optional(normalized_phone),
-                 encrypt_pii_optional(name)),
+                 encrypt_pii_optional(name),
+                 source),
             )
             cur.execute(
                 """

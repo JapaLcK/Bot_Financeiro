@@ -393,6 +393,30 @@ class TestAIQuota:
         _patch_user(monkeypatch, _user("pro", FUTURE))
         assert plan_service.ai_monthly_limit_for(1) == AI_CHAT_MONTHLY_LIMIT
 
+    def test_cota_por_tier_bate_com_a_do_usuario(self, v2):
+        """ai_monthly_limit_for_tier existe pro checkout, que precisa da cota
+        antes do webhook gravar o plano. Não pode divergir da do usuário."""
+        from core.services.ai_chat_commands import AI_CHAT_MONTHLY_LIMIT
+        assert plan_service.ai_monthly_limit_for_tier("free") == 20
+        assert plan_service.ai_monthly_limit_for_tier("essencial") == 200
+        assert plan_service.ai_monthly_limit_for_tier("plus") == AI_CHAT_MONTHLY_LIMIT
+        assert plan_service.ai_monthly_limit_for_tier("pro") == AI_CHAT_MONTHLY_LIMIT
+
+    def test_cota_por_tier_nunca_e_ilimitada(self, v2, monkeypatch):
+        """`ai_monthly_messages: None` do Plus/Pro NÃO é "sem limite": é o teto
+        global, e ele acompanha a env. Se este teste voltar a dar um número
+        infinito/None, a tela de confirmação volta a mentir."""
+        import core.services.ai_chat_commands as aicc
+        monkeypatch.setattr(aicc, "AI_CHAT_MONTHLY_LIMIT", 42)
+        assert plan_service.ai_monthly_limit_for_tier("plus") == 42
+        assert plan_service.ai_monthly_limit_for_tier("pro") == 42
+        # cota própria menor que o teto continua valendo
+        assert plan_service.ai_monthly_limit_for_tier("free") == 20
+
+    def test_cota_por_tier_desconhecido_cai_no_free(self, v2):
+        assert plan_service.ai_monthly_limit_for_tier("banana") == 20
+        assert plan_service.ai_monthly_limit_for_tier("") == 20
+
     def test_free_com_cota_pode_falar(self, v2, monkeypatch):
         _patch_user(monkeypatch, _user("free"))
         monkeypatch.setattr("db.ai_chat.get_usage_this_month", lambda uid: 19)

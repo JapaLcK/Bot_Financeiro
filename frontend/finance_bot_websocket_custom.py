@@ -2381,8 +2381,11 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
     # do código de 6 dígitos rotacionando IP.
     await _check_auth_rate_limits("verify-email", request, body.email)
 
+    from frontend.routes.shared import signup_source_from_request
     try:
-        result = confirm_email_verification(body.email, body.code)
+        result = confirm_email_verification(
+            body.email, body.code, source=signup_source_from_request(request)
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -3467,10 +3470,12 @@ async def auth_google_complete_signup(
             detail="É necessário aceitar a Política de Privacidade.",
         )
 
+    from frontend.routes.shared import signup_source_from_request
     try:
         result = await asyncio.to_thread(
             consume_pending_google_signup,
             body.token, body.name, body.phone,
+            signup_source_from_request(request, google=True),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -3668,7 +3673,13 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             )
 
     if reusable is not None:
-        return {"checkout_url": _sg(reusable, "url"), "interval": interval, "plan": plan}
+        # session_id da sessão REAPROVEITADA: sem ele, o started iria com NULL
+        # e a sessão nunca correlacionaria a conclusão no funil (só entraria
+        # people, não sessions). Mesma chave que o caminho de sessão nova.
+        return {
+            "checkout_url": _sg(reusable, "url"), "interval": interval, "plan": plan,
+            "session_id": _sg(reusable, "id"),
+        }
 
     # A sessão pode ter sido concluída entre a primeira consulta e a listagem.
     # Confere de novo imediatamente antes da criação para fechar essa corrida
@@ -3690,7 +3701,11 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
 
     # A elegibilidade só é consultada ao criar uma sessão nova. Reabrir a mesma
     # URL preserva exatamente as condições que o usuário já viu no checkout.
-    from core.services.plan_service import plans_v2_enabled, trial_days_total
+    from core.services.plan_service import (
+        ai_monthly_limit_for_tier,
+        plans_v2_enabled,
+        trial_days_total,
+    )
     if plans_v2_enabled():
         from db.plans import TrialEligibilityError, is_trial_eligible_for_user
         try:
@@ -3703,6 +3718,14 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
         trial_days = trial_days_total() if eligible else 0
     else:
         trial_days = int(os.getenv("PRO_TRIAL_DAYS", "30"))
+
+    # Cota mensal da IA do plano comprado. Plus e Pro têm `ai_monthly_messages:
+    # None` em plan_limits.py, o que NÃO é ilimitado: cai no teto global
+    # AI_CHAT_MONTHLY_LIMIT (1.000 por padrão, ajustável por env) e o chat corta
+    # ali. Vai na URL pelo mesmo motivo do `td`: número de backend não pode ficar
+    # chumbado no HTML, e com v2 desligado o tier efetivo de quem paga é o de
+    # cima, não o comprado (get_user_limits → limits_for("pro")).
+    ia_quota = ai_monthly_limit_for_tier(plan if plans_v2_enabled() else "pro")
 
     def _new_session(cust_id: str):
         metadata = {
@@ -3721,11 +3744,26 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             mode="subscription",
             locale="pt-BR",
             allow_promotion_codes=True,
+            # `td` = dias de trial concedidos NESTA sessão. `pl` = plano escolhido.
+            # `ia` = cota mensal de mensagens da Piggy nesse plano. A tela de
+            # confirmação usa os três na cópia. Sem `td` o front chutava 30, que
+            # quebra se trial_days_total()/PRO_TRIAL_DAYS mudar; sem `pl` ele
+            # parabenizava TODO mundo pelo Plus, inclusive quem comprou Essencial
+            # ou Pro; sem `ia` ele prometia IA "sem limite de mensagens", que o
+            # backend não entrega. Tudo isso tem que vir na URL e não do
+            # /auth/me porque o modal abre ~450ms depois da volta, quando o
+            # webhook ainda pode não ter caído e o plano gravado ainda ser o antigo.
             success_url=(
                 f"{DASHBOARD_URL}/home?upgrade=success&sid={{CHECKOUT_SESSION_ID}}"
                 f"&ev={'trial' if trial_days > 0 else 'purchase'}"
+                f"&td={trial_days}&pl={plan}&ia={ia_quota}"
             ),
-            cancel_url=f"{DASHBOARD_URL}/home?upgrade=cancelled",
+            # Abandonou o checkout → volta pra /precos escolher um plano (pago
+            # ou Grátis). O escolha=1 já faz o applyOnboardingChoice mostrar
+            # "Escolha um plano pra começar" (needs_plan_selection segue true,
+            # pois o gate não fechou) — não anexo upgrade=cancelled porque
+            # /precos não consome esse marcador (o toast vive só na /home).
+            cancel_url=f"{DASHBOARD_URL}/precos?escolha=1",
             metadata=metadata,
             subscription_data=subscription_data,
         )
@@ -3743,7 +3781,10 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
         logging.getLogger(__name__).error("billing_checkout_stripe_error: %s", exc)
         raise HTTPException(status_code=502, detail="Erro no Stripe ao iniciar o checkout.")
 
-    return {"checkout_url": session.url, "interval": interval, "plan": plan}
+    return {
+        "checkout_url": session.url, "interval": interval, "plan": plan,
+        "session_id": getattr(session, "id", None),
+    }
 
 
 @app.get("/billing/plans-config")
@@ -3789,13 +3830,19 @@ async def billing_create_checkout(
         async with _billing_user_lock(user_id):
             result = await _billing_checkout_for_user(
                 stripe, user_id, plan, interval, price_id)
-        # Abrir o checkout já é "escolha de plano" no cadastro: fecha o gate da
-        # /precos agora (idempotente) pra que, ao voltar do Stripe com
-        # ?upgrade=success, o /home não bata no backstop 402 antes do webhook
-        # confirmar. As features PAGAS seguem travadas por tier até o pagamento
-        # cair — aqui só se garante o acesso base (Grátis) ao dashboard.
-        from db import mark_plan_selected
-        await asyncio.to_thread(mark_plan_selected, user_id)
+        # Funil de checkout: registra a ABERTURA na tabela dedicada, com o
+        # session_id do Stripe (par do record_checkout_completed no webhook —
+        # correlaciona a mesma tentativa). Só depois da sessão nascer de fato.
+        # session_id sai do payload do cliente (é interno do funil).
+        from db import record_checkout_started
+        _session_id = result.pop("session_id", None)
+        await asyncio.to_thread(record_checkout_started, user_id, _session_id)
+        # NÃO fechamos o gate da /precos aqui. Abrir o checkout não é escolher um
+        # plano — quem abandona o Stripe tem de voltar pra /precos e escolher
+        # (pago ou Grátis). O gate só fecha quando o pagamento COMPLETA de fato,
+        # no webhook checkout.session.completed (mark_plan_selected lá). O
+        # retorno de sucesso (?upgrade=success) é tratado como "webhook em
+        # trânsito" pelo gate e pela tela de confirmação, sem cair no 402.
         return result
     except HTTPException:
         raise
@@ -4181,6 +4228,13 @@ async def billing_webhook(request: Request):
         session = event["data"]["object"]
         user_id = _resolve_user(session)
         sub_id  = _g(session, "subscription")
+        # Funil: registra a CONCLUSÃO na tabela dedicada, com o session_id
+        # (correlaciona com o record_checkout_started da mesma tentativa).
+        # Vale pra trial e compra imediata — os dois disparam este evento.
+        if user_id:
+            from db import record_checkout_completed
+            await asyncio.to_thread(
+                record_checkout_completed, user_id, _g(session, "id"))
         # Trial 30d: subscription nasce status=trialing, sem invoice paga.
         # Promover ja agora pra user nao ficar Free durante o trial.
         if user_id and sub_id:
@@ -4760,7 +4814,7 @@ async def unsubscribe(uid: int, token: str):
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <script src="/safe-area.js?v=1"></script>
-  <title>Descadastro — PigBank</title>
+  <title>Descadastro · PigBank</title>
   <style>
     body{margin:0;padding:0;background:#0a0d18;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
          color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh}

@@ -1613,6 +1613,13 @@ def init_db():
         # avaliado uma vez, sem reescrever a tabela.
         """alter table auth_accounts add column if not exists plan_selected_at timestamptz default now()""",
         """alter table auth_accounts alter column plan_selected_at drop default""",
+        # Origem do cadastro (2026-08-17): de onde a conta nasceu, pra separar
+        # no painel de admin quem se cadastrou pela web (passa pelo gate da
+        # /precos) de quem veio pelo app iOS (isento do gate — diretriz 3.1.1
+        # da Apple). Valores: 'web' | 'app' | 'google' | 'google_app' |
+        # 'whatsapp'. NULL = conta anterior a esta coluna (origem desconhecida);
+        # sem backfill por data chutado — o painel mostra "—" pra elas.
+        """alter table auth_accounts add column if not exists signup_source text""",
         """
         create table if not exists plan_trials (
           phone_hash text primary key,
@@ -1625,6 +1632,35 @@ def init_db():
         # claims gravam versão 2 explicitamente; o script one-time remove só v1.
         """alter table plan_trials add column if not exists model_version smallint not null default 1""",
         """alter table plan_trials alter column model_version set default 2""",
+
+        # ── Funil de checkout (telemetria durável, fora do log operacional) ──
+        # Vive em tabela própria, NÃO em system_event_logs, por dois motivos:
+        # (1) system_event_logs é purgável (o "Limpar" do painel, admin.py
+        #     purge, delete individual) — telemetria de negócio não pode sumir
+        #     numa limpeza de rotina;
+        # (2) session_id (id da Checkout Session do Stripe) correlaciona a
+        #     abertura com a conclusão da MESMA tentativa — sem isso, heurística
+        #     de timestamp conta errado quem comprou, cancelou e reabriu.
+        # kind: 'started' (endpoint /billing/create-checkout) | 'completed'
+        # (webhook checkout.session.completed). user_id SET NULL na exclusão
+        # da conta: o evento sobrevive (contamos sessões, não só pessoas vivas).
+        """
+        create table if not exists checkout_funnel_events (
+          id bigserial primary key,
+          user_id bigint references users(id) on delete set null,
+          session_id text,
+          kind text not null check (kind in ('started', 'completed')),
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_checkout_funnel_kind_created
+          on checkout_funnel_events (kind, created_at desc)
+        """,
+        """
+        create index if not exists idx_checkout_funnel_session
+          on checkout_funnel_events (session_id)
+        """,
 
         # ── Agentes do Piggy (prateleira de jobs proativos) ──────────────────
         # Um agente por kind por usuário (custom multiplica no futuro via

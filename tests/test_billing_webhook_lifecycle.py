@@ -208,3 +208,37 @@ def test_assinatura_invalida_da_400(user_id, monkeypatch):
     r = client.post("/billing/webhook", content=b"{}",
                     headers={"stripe-signature": "bad"})
     assert r.status_code == 400
+
+
+def test_checkout_completed_grava_funil(user_id, monkeypatch):
+    """checkout.session.completed grava um 'completed' na tabela do funil, com
+    o session_id do evento — é o par do 'started' do endpoint, correlacionado
+    pelo mesmo id, que dá a conversão por sessão no painel."""
+    uid, client, fake = _setup(monkeypatch, f"funnel-{user_id}")
+    try:
+        r = _post(
+            client, fake,
+            {"type": "checkout.session.completed",
+             "data": {"object": {"id": "cs_test_funnel",
+                                  "metadata": {"finbot_user_id": str(uid)},
+                                  "subscription": "sub_fun"}}},
+            subs={"sub_fun": _fake_sub("trialing")},
+        )
+        assert r.status_code == 200, r.text
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select session_id from checkout_funnel_events "
+                    "where user_id = %s and kind = 'completed' order by id desc limit 1",
+                    (uid,),
+                )
+                row = cur.fetchone()
+        assert row is not None, "'completed' não foi gravado no funil"
+        assert row["session_id"] == "cs_test_funnel"
+    finally:
+        _cleanup_trial(uid)
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("delete from checkout_funnel_events where user_id = %s", (uid,))
+            conn.commit()

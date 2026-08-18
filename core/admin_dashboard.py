@@ -732,6 +732,488 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
     }
 
 
+# ── Painel de usuários (/admin/api/users) ────────────────────────────────────
+
+_USER_STATUSES = ("paying", "trial", "past_due", "canceled", "granted", "free")
+
+
+def _derive_account_status(row: dict, now: datetime) -> str:
+    """Classifica a conta numa categoria única de assinatura.
+
+    A fonte é o par (plan, last_payment_status) mantido pelos webhooks do
+    Stripe. Atenção: customer.subscription.deleted volta plan pra 'free'
+    ANTES de gravar last_payment_status='canceled' — por isso conta free com
+    pagamento cancelado é ex-assinante ('canceled'), não 'free'. Pro sem
+    status de pagamento é grant manual ('granted'), mas só enquanto
+    plan_expires_at não passou.
+
+    ESPELHO SQL: _ACCOUNT_STATUS_SQL logo abaixo tem de decidir idêntico —
+    toda mudança aqui muda lá (o teste de paridade em
+    tests/test_admin_users_panel.py compara os dois).
+    """
+    plan = (row.get("plan") or "free").strip().lower() or "free"
+    pay = (row.get("last_payment_status") or "").strip().lower()
+    if plan == "free":
+        return "canceled" if pay in ("canceled", "incomplete_expired") else "free"
+    # Expiração vem ANTES do status de pagamento: plan_service._paid_plan_active
+    # trata tier pago vencido como inativo mesmo com status 'active' (webhook
+    # perdido) — o painel tem de concordar com o entitlement real.
+    expires = row.get("plan_expires_at")
+    if expires is not None and expires < now:
+        return "canceled"
+    if pay == "trialing":
+        return "trial"
+    if pay == "active":
+        return "paying"
+    if pay in ("past_due", "unpaid", "incomplete"):
+        return "past_due"
+    if pay in ("canceled", "incomplete_expired"):
+        return "canceled"
+    return "granted"
+
+
+# Espelho em SQL de _derive_account_status, pra filtrar/agregar no banco sem
+# trazer a base inteira pro Python. Assume alias `a` pra auth_accounts.
+_ACCOUNT_STATUS_SQL = """
+    CASE
+        WHEN lower(coalesce(nullif(trim(a.plan), ''), 'free')) = 'free' THEN
+            CASE WHEN lower(coalesce(a.last_payment_status, ''))
+                      IN ('canceled', 'incomplete_expired')
+                 THEN 'canceled' ELSE 'free' END
+        WHEN a.plan_expires_at IS NOT NULL AND a.plan_expires_at < now() THEN 'canceled'
+        WHEN lower(coalesce(a.last_payment_status, '')) = 'trialing' THEN 'trial'
+        WHEN lower(coalesce(a.last_payment_status, '')) = 'active' THEN 'paying'
+        WHEN lower(coalesce(a.last_payment_status, ''))
+             IN ('past_due', 'unpaid', 'incomplete') THEN 'past_due'
+        WHEN lower(coalesce(a.last_payment_status, ''))
+             IN ('canceled', 'incomplete_expired') THEN 'canceled'
+        ELSE 'granted'
+    END
+"""
+
+
+_billing_summary_cache: dict[str, Any] = {"fetched_at": None, "data": None}
+_BILLING_CACHE_TTL_SECONDS = 300
+
+
+def _fetch_stripe_billing_sync() -> dict[str, Any]:
+    """Resume as assinaturas direto da API do Stripe (fonte da verdade de
+    preço): MRR, ticket médio e contagens por status. Valores anuais são
+    normalizados pra base mensal (unit_amount/12)."""
+    if not STRIPE_SECRET_KEY:
+        return {"available": False, "reason": "stripe_not_configured"}
+    import stripe
+
+    stripe.api_key = STRIPE_SECRET_KEY
+    counts = {"active": 0, "trialing": 0, "past_due": 0, "canceled": 0, "other": 0}
+    mrr = 0.0
+    trial_mrr = 0.0
+    active_amounts: list[float] = []
+    scanned = 0
+    try:
+        subs = stripe.Subscription.list(status="all", limit=100)
+        for sub in subs.auto_paging_iter():
+            scanned += 1
+            if scanned > 1000:  # guarda contra base gigante; hoje são <10
+                break
+            status = str(getattr(sub, "status", "") or "")
+            if status in ("active", "trialing", "past_due"):
+                counts[status] += 1
+            elif status in ("canceled", "incomplete_expired"):
+                counts["canceled"] += 1
+            else:
+                counts["other"] += 1
+
+            monthly = 0.0
+            items = getattr(getattr(sub, "items", None), "data", None) or []
+            if items:
+                price = getattr(items[0], "price", None)
+                unit = getattr(price, "unit_amount", None) if price else None
+                recurring = getattr(price, "recurring", None) if price else None
+                interval = str(getattr(recurring, "interval", "month") or "month")
+                interval_count = int(getattr(recurring, "interval_count", 1) or 1)
+                if unit is not None:
+                    monthly = (float(unit) / 100.0) / interval_count
+                    if interval == "year":
+                        monthly /= 12.0
+                    elif interval == "week":
+                        monthly *= 4.345
+                    elif interval == "day":
+                        monthly *= 30.0
+            if status == "active":
+                mrr += monthly
+                active_amounts.append(monthly)
+            elif status == "trialing":
+                trial_mrr += monthly
+    except Exception as exc:
+        logging.getLogger(__name__).warning("[admin] Stripe billing summary falhou: %s", exc)
+        return {"available": False, "reason": str(exc)[:200]}
+
+    return {
+        "available": True,
+        "subscriptions": counts,
+        "mrr": round(mrr, 2),
+        "ticket_medio": round(sum(active_amounts) / len(active_amounts), 2) if active_amounts else 0.0,
+        "trial_mrr_potencial": round(trial_mrr, 2),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+async def fetch_billing_summary(force: bool = False) -> dict[str, Any]:
+    """Wrapper cacheado (5 min) do resumo Stripe — a lista de usuários abre a
+    cada clique no card e não deve martelar a API do Stripe.
+
+    O carimbo do cache avança TAMBÉM quando a chamada falha: o TTL vira
+    backoff de retry, senão uma queda do Stripe adicionaria a latência da
+    API falhando em toda requisição do painel. Payload bom anterior é
+    preservado com stale=True (o fetched_at interno dele mostra a idade)."""
+    now = datetime.now(timezone.utc)
+    cached_at = _billing_summary_cache.get("fetched_at")
+    if (
+        not force
+        and cached_at is not None
+        and (now - cached_at).total_seconds() < _BILLING_CACHE_TTL_SECONDS
+        and _billing_summary_cache.get("data") is not None
+    ):
+        return _billing_summary_cache["data"]
+    data = await asyncio.to_thread(_fetch_stripe_billing_sync)
+    if data.get("available") or _billing_summary_cache.get("data") is None:
+        _billing_summary_cache["data"] = data
+    else:
+        # Falha com payload bom em mãos: preserva os números, marcados stale
+        _billing_summary_cache["data"] = {**_billing_summary_cache["data"], "stale": True}
+    _billing_summary_cache["fetched_at"] = now
+    return _billing_summary_cache["data"]
+
+
+async def _fetch_checkout_funnel(cur) -> dict[str, int]:
+    """Funil de checkout a partir da tabela dedicada checkout_funnel_events,
+    correlacionando abertura e conclusão pelo session_id do Stripe (a MESMA
+    tentativa). Devolve, em 30d e 7d:
+
+      people_Nd            — pessoas distintas que abriram algum checkout
+      sessions_started_Nd  — sessões (tentativas) abertas
+      sessions_completed_Nd— dessas, as que concluíram (mesmo session_id)
+
+    A conversão (sessions_completed / sessions_started) é por SESSÃO: um
+    ex-assinante que comprou numa sessão e depois reabre e abandona outra tem
+    a 2ª sessão contada como não-convertida — sem a correlação por session_id
+    isso era impossível de separar (era a raiz dos 3 apontamentos anteriores).
+    Viver em tabela própria (não em system_event_logs) também torna a
+    telemetria imune ao 'Limpar'/purge do feed.
+
+    Uma sessão sem session_id (raro — Stripe sempre devolve) entra em people
+    mas não nas contagens de sessão (COUNT DISTINCT ignora NULL)."""
+    await cur.execute(
+        """
+        SELECT
+            COUNT(DISTINCT user_id)    FILTER (WHERE w30)                AS people_30d,
+            COUNT(DISTINCT session_id) FILTER (WHERE w30)                AS sessions_started_30d,
+            COUNT(DISTINCT session_id) FILTER (WHERE w30 AND converted)  AS sessions_completed_30d,
+            COUNT(DISTINCT user_id)    FILTER (WHERE w7)                 AS people_7d,
+            COUNT(DISTINCT session_id) FILTER (WHERE w7)                 AS sessions_started_7d,
+            COUNT(DISTINCT session_id) FILTER (WHERE w7 AND converted)   AS sessions_completed_7d
+        FROM (
+            SELECT
+                s.user_id,
+                s.session_id,
+                s.created_at >= NOW() - INTERVAL '30 days' AS w30,
+                s.created_at >= NOW() - INTERVAL '7 days'  AS w7,
+                (s.session_id IS NOT NULL AND EXISTS (
+                    SELECT 1 FROM checkout_funnel_events c
+                    WHERE c.kind = 'completed' AND c.session_id = s.session_id
+                )) AS converted
+            FROM checkout_funnel_events s
+            WHERE s.kind = 'started'
+              AND s.created_at >= NOW() - INTERVAL '30 days'
+        ) per_start
+        """
+    )
+    row = await cur.fetchone()
+    return {k: int(v or 0) for k, v in dict(row).items()}
+
+
+_ADMIN_USERS_HARD_CAP = 2000
+
+
+async def fetch_admin_users(
+    *,
+    q: str = "",
+    plan: str = "",
+    status: str = "",
+    page: int = 0,
+    per_page: int = 50,
+    sort: str = "created_at",
+    admin_user: str = "admin",
+) -> dict[str, Any]:
+    """Lista paginada de contas com classificação de assinatura + agregados.
+
+    Agregados, filtros de status/plano e paginação rodam em SQL sobre a base
+    INTEIRA (_ACCOUNT_STATUS_SQL). A única exceção é a busca (q): e-mail é
+    cifrado no banco, então o match de substring exige decifrar — esse caminho
+    varre no máximo _ADMIN_USERS_HARD_CAP contas mais recentes e devolve
+    truncated=True quando bateu no teto.
+
+    Minimização de PII: sem busca, só as rows da página devolvida são
+    decifradas. Cada decrypt é auditado (purpose=render_admin_users_list).
+    """
+    q = (q or "").strip().lower()
+    plan = (plan or "").strip().lower()
+    status = (status or "").strip().lower()
+    if status and status not in _USER_STATUSES:
+        status = ""
+    page = max(0, int(page or 0))
+    per_page = max(1, min(int(per_page or 50), 200))
+    order_col = "last_activity_at" if sort == "last_activity_at" else "created_at"
+    now = datetime.now(timezone.utc)
+
+    select_cols = f"""
+                    a.user_id,
+                    a.email,
+                    a.email_enc,
+                    a.plan,
+                    a.plan_expires_at,
+                    a.last_payment_status,
+                    a.stripe_customer_id,
+                    a.trial_started_at,
+                    a.plan_selected_at,
+                    a.created_at,
+                    a.last_activity_at,
+                    a.phone_status,
+                    a.whatsapp_verified_at,
+                    a.deletion_status,
+                    a.signup_source,
+                    {_ACCOUNT_STATUS_SQL} AS account_status,
+                    EXISTS (
+                        SELECT 1 FROM user_identities ui
+                        WHERE ui.user_id = a.user_id AND ui.provider = 'whatsapp'
+                    ) AS has_whatsapp_identity
+    """
+    order_sql = f"ORDER BY a.{order_col} DESC NULLS LAST, a.user_id DESC"
+
+    clauses: list[str] = []
+    params: list[Any] = []
+    if plan:
+        clauses.append("lower(coalesce(nullif(trim(a.plan), ''), 'free')) = %s")
+        params.append(plan)
+    if status:
+        clauses.append(f"{_ACCOUNT_STATUS_SQL} = %s")
+        params.append(status)
+    where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+
+    truncated = False
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            # Agregados: base inteira, sempre, independente dos filtros
+            await cur.execute(
+                f"""
+                SELECT {_ACCOUNT_STATUS_SQL} AS account_status,
+                       COUNT(*) AS n,
+                       COUNT(*) FILTER (
+                           WHERE a.phone_status = 'confirmed'
+                              OR EXISTS (
+                                  SELECT 1 FROM user_identities ui
+                                  WHERE ui.user_id = a.user_id
+                                    AND ui.provider = 'whatsapp'
+                              )
+                       ) AS wa
+                FROM auth_accounts a
+                GROUP BY 1
+                """
+            )
+            aggregates: dict[str, int] = {s: 0 for s in _USER_STATUSES}
+            aggregates["whatsapp_connected"] = 0
+            for r in await cur.fetchall():
+                aggregates[r["account_status"]] = int(r["n"])
+                aggregates["whatsapp_connected"] += int(r["wa"])
+            aggregates["total"] = sum(aggregates[s] for s in _USER_STATUSES)
+
+            # Funil de checkout (tabela dedicada checkout_funnel_events):
+            # pessoas que abriram × conversão POR SESSÃO (correlação por
+            # session_id), em 30d/7d.
+            checkout_funnel = await _fetch_checkout_funnel(cur)
+
+            # Origem do cadastro (base inteira): web × app × google × …
+            # NULL = contas anteriores à coluna → 'desconhecido'.
+            await cur.execute(
+                """
+                SELECT coalesce(signup_source, 'desconhecido') AS src, COUNT(*) AS n
+                FROM auth_accounts
+                GROUP BY 1
+                """
+            )
+            by_source = {r["src"]: int(r["n"]) for r in await cur.fetchall()}
+
+            if not q:
+                await cur.execute(
+                    f"SELECT COUNT(*) AS n FROM auth_accounts a {where_sql}",
+                    tuple(params),
+                )
+                total_filtered = int((await cur.fetchone())["n"])
+                await cur.execute(
+                    f"""
+                    SELECT {select_cols}
+                    FROM auth_accounts a
+                    {where_sql}
+                    {order_sql}
+                    LIMIT %s OFFSET %s
+                    """,
+                    tuple(params) + (per_page, page * per_page),
+                )
+                page_rows = [dict(r) for r in await cur.fetchall()]
+                for row in page_rows:
+                    _decrypt_admin_row(row, admin_user, "render_admin_users_list")
+            else:
+                # Busca: match contra o e-mail decifrado, varrendo as
+                # _ADMIN_USERS_HARD_CAP contas mais recentes que passam nos
+                # filtros SQL (batch de auditoria em quem chama).
+                await cur.execute(
+                    f"""
+                    SELECT {select_cols}
+                    FROM auth_accounts a
+                    {where_sql}
+                    {order_sql}
+                    LIMIT %s
+                    """,
+                    tuple(params) + (_ADMIN_USERS_HARD_CAP,),
+                )
+                rows = [dict(r) for r in await cur.fetchall()]
+                truncated = len(rows) >= _ADMIN_USERS_HARD_CAP
+                for row in rows:
+                    _decrypt_admin_row(row, admin_user, "render_admin_users_list")
+                rows = [r for r in rows if q in (r.get("email") or "").lower()]
+                total_filtered = len(rows)
+                page_rows = rows[page * per_page:(page + 1) * per_page]
+
+            tx_by_user: dict[int, int] = {}
+            if page_rows:
+                await cur.execute(
+                    """
+                    SELECT user_id, COUNT(*) AS n
+                    FROM launches
+                    WHERE user_id = ANY(%s)
+                      AND criado_em >= NOW() - INTERVAL '30 days'
+                      AND is_internal_movement = false
+                    GROUP BY user_id
+                    """,
+                    ([int(r["user_id"]) for r in page_rows],),
+                )
+                tx_by_user = {int(r["user_id"]): int(r["n"]) for r in await cur.fetchall()}
+
+    for row in page_rows:
+        row["tx_30d"] = tx_by_user.get(int(row["user_id"]), 0)
+
+    return {
+        "generated_at": now,
+        "aggregates": aggregates,
+        "checkout_funnel": checkout_funnel,
+        "by_source": by_source,
+        "billing": await fetch_billing_summary(),
+        "users": page_rows,
+        "page": page,
+        "per_page": per_page,
+        "total": total_filtered,
+        "truncated": truncated,
+        "filters": {"q": q, "plan": plan, "status": status, "sort": order_col},
+    }
+
+
+async def fetch_admin_user_detail(user_id: int, admin_user: str = "admin") -> dict[str, Any] | None:
+    """Drill-down de uma conta pro suporte: perfil + assinatura + agregados de
+    uso + eventos recentes. LGPD: nada de conteúdo de transação — só contagens
+    e datas; e-mail/telefone/nome decifrados com auditoria individual."""
+    now = datetime.now(timezone.utc)
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT
+                    a.user_id,
+                    a.email, a.email_enc,
+                    a.phone_e164, a.phone_enc,
+                    a.display_name, a.display_name_enc,
+                    a.plan, a.plan_expires_at, a.last_payment_status,
+                    a.stripe_customer_id, a.trial_started_at, a.plan_selected_at,
+                    a.created_at, a.last_activity_at,
+                    a.phone_status, a.whatsapp_verified_at, a.whatsapp_updates_opt_out,
+                    a.engagement_opt_out, a.tip_email_opt_out, a.insight_email_opt_out,
+                    a.deletion_status, a.deletion_requested_at, a.signup_source,
+                    a.ai_messages_this_month,
+                    EXISTS (
+                        SELECT 1 FROM user_identities ui
+                        WHERE ui.user_id = a.user_id AND ui.provider = 'whatsapp'
+                    ) AS has_whatsapp_identity
+                FROM auth_accounts a
+                WHERE a.user_id = %s
+                """,
+                (int(user_id),),
+            )
+            row = await cur.fetchone()
+            if not row:
+                return None
+            profile = _decrypt_admin_row(dict(row), admin_user, "render_admin_user_detail")
+            profile["account_status"] = _derive_account_status(profile, now)
+
+            await cur.execute(
+                """
+                SELECT
+                    COUNT(*) FILTER (WHERE is_internal_movement = false) AS tx_total,
+                    COUNT(*) FILTER (
+                        WHERE is_internal_movement = false
+                          AND criado_em >= NOW() - INTERVAL '30 days'
+                    ) AS tx_30d,
+                    MAX(criado_em) FILTER (WHERE is_internal_movement = false) AS last_tx_at
+                FROM launches
+                WHERE user_id = %s
+                """,
+                (int(user_id),),
+            )
+            usage = dict(await cur.fetchone())
+
+            await cur.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM pockets      WHERE user_id = %(uid)s) AS pockets_count,
+                    (SELECT COUNT(*) FROM investments  WHERE user_id = %(uid)s) AS investments_count,
+                    (SELECT COUNT(*) FROM credit_cards WHERE user_id = %(uid)s) AS cards_count
+                """,
+                {"uid": int(user_id)},
+            )
+            usage.update(dict(await cur.fetchone()))
+
+            await cur.execute(
+                """
+                SELECT level, event_type, message, source, created_at
+                FROM system_event_logs
+                WHERE user_id = %s
+                ORDER BY created_at DESC
+                LIMIT 15
+                """,
+                (int(user_id),),
+            )
+            recent_events = [dict(r) for r in await cur.fetchall()]
+
+            await cur.execute(
+                """
+                SELECT success, failure_reason, ip_address, created_at
+                FROM auth_login_events
+                WHERE user_id = %s
+                ORDER BY created_at DESC
+                LIMIT 10
+                """,
+                (int(user_id),),
+            )
+            recent_logins = [dict(r) for r in await cur.fetchall()]
+
+    return {
+        "generated_at": now,
+        "profile": profile,
+        "usage": usage,
+        "recent_events": recent_events,
+        "recent_logins": recent_logins,
+    }
+
+
 async def log_admin_startup_warnings() -> None:
     # Coleta todos os avisos primeiro, depois faz UM único insert em batch.
     # Antes eram N chamadas sequenciais a log_system_event(), cada uma abrindo
@@ -898,7 +1380,19 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
                         """
                         update auth_accounts
                            set plan = 'pro',
-                               plan_expires_at = now() + (%s || ' months')::interval
+                               plan_expires_at = now() + (%s || ' months')::interval,
+                               -- Grant sobre ex-assinante: status terminal
+                               -- (canceled/unpaid) viraria 'Cancelado' no
+                               -- painel de usuários mesmo com o grant vigente.
+                               -- Status em curso (active/trialing/past_due)
+                               -- fica intacto: a relação Stripe segue viva e
+                               -- os webhooks continuam donos dele.
+                               last_payment_status = case
+                                   when lower(coalesce(last_payment_status, ''))
+                                        in ('canceled', 'incomplete_expired', 'unpaid')
+                                   then 'inactive'
+                                   else last_payment_status
+                               end
                          where lower(email) = lower(%s)
                         returning user_id, email, plan, plan_expires_at
                         """,
@@ -967,6 +1461,44 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
     async def admin_api_overview(days: int = 30, username: str = Depends(_get_current_admin)):
         data = await fetch_admin_overview(days=days, admin_user=username)
         data["admin_user"] = username
+        return JSONResponse(content=_json_safe(data))
+
+    @app.get("/admin/api/users")
+    async def admin_api_users(
+        q: str = "",
+        plan: str = "",
+        status: str = "",
+        page: int = 0,
+        per_page: int = 50,
+        sort: str = "created_at",
+        username: str = Depends(_get_current_admin),
+    ):
+        """Painel de usuários: lista paginada + agregados de assinatura + resumo
+        Stripe (MRR/ticket médio). Decrypts auditados num único batch."""
+        audit = pii_audit_batch()
+        audit.__enter__()
+        try:
+            data = await fetch_admin_users(
+                q=q, plan=plan, status=status, page=page,
+                per_page=per_page, sort=sort, admin_user=username,
+            )
+        finally:
+            audit.__exit__(None, None, None)
+        return JSONResponse(content=_json_safe(data))
+
+    @app.get("/admin/api/users/{user_id}")
+    async def admin_api_user_detail(
+        user_id: int,
+        username: str = Depends(_get_current_admin),
+    ):
+        audit = pii_audit_batch()
+        audit.__enter__()
+        try:
+            data = await fetch_admin_user_detail(user_id, admin_user=username)
+        finally:
+            audit.__exit__(None, None, None)
+        if data is None:
+            raise HTTPException(status_code=404, detail="Conta não encontrada.")
         return JSONResponse(content=_json_safe(data))
 
     @app.delete("/admin/api/events/{event_id}")

@@ -303,6 +303,18 @@ def _is_pigbank_app(request: Request) -> bool:
     return "PigBankApp" in (request.headers.get("user-agent") or "")
 
 
+def signup_source_from_request(request: Request, *, google: bool = False) -> str:
+    """Origem do cadastro, gravada em auth_accounts.signup_source. Distingue web
+    de app iOS (mesmo UA que isenta o gate da /precos) pra o painel de admin
+    separar quem passou pela escolha de plano de quem entrou pelo acesso base.
+
+      web | app | google | google_app"""
+    in_app = _is_pigbank_app(request)
+    if google:
+        return "google_app" if in_app else "google"
+    return "app" if in_app else "web"
+
+
 def _enforce_subscription_gate(request: Request, user_id: int) -> None:
     """Backstop server-side das rotas de dados do dashboard. Além do paywall
     (assinatura ativa/trial), fecha o gate de escolha de plano no cadastro: sem
@@ -407,6 +419,15 @@ def gate_plan_selection(request: Request):
     # planos/compra — diretriz 3.1.1 da App Store. Espelha o !window.PB_IN_APP
     # do cliente. O acesso segue governado pelos gates por-feature/tier.
     if _is_pigbank_app(request):
+        return None
+
+    # Retorno do checkout com sucesso: o webhook checkout.session.completed
+    # (que fecha o gate via mark_plan_selected) pode ainda estar em trânsito.
+    # Não jogamos quem ACABOU de pagar de volta pra /precos — a tela de
+    # confirmação em /home espera o webhook e libera (fail-open). Espelha o
+    # bypass _justUpgraded do cliente. Só o gate de ESCOLHA é dispensado aqui;
+    # o paywall por feature/tier segue valendo normalmente.
+    if request.query_params.get("upgrade") == "success":
         return None
 
     user_id = _resolve_page_user_id(request)

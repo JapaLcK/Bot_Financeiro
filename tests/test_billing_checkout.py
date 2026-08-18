@@ -15,6 +15,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
+import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
@@ -25,6 +26,19 @@ import frontend.finance_bot_websocket_custom as dashboard
 
 
 _CSRF_TOKEN = "test-csrf-token-billing"
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """/billing/create-checkout tem rate limit de 20/hora (slowapi, storage em
+    memória compartilhado entre testes). Com muitos testes no arquivo, cada um
+    fazendo 1-2 POSTs, o teto estoura e o último cai com 429. Zera o storage
+    por teste — não afrouxa o limite em produção."""
+    try:
+        dashboard.limiter._storage.reset()
+    except Exception:
+        pass
+    yield
 
 
 def _auth_user_setup(suffix: str) -> tuple[int, str, TestClient]:
@@ -381,6 +395,39 @@ def test_checkout_v2_inelegivel_cobra_na_hora(user_id, monkeypatch):
     assert "trial_period_days" not in fake.last_session_kwargs["subscription_data"]
 
 
+def _success_params(fake) -> dict:
+    from urllib.parse import parse_qs, urlparse
+    return {k: v[0] for k, v in parse_qs(urlparse(fake.last_session_kwargs["success_url"]).query).items()}
+
+
+def test_success_url_leva_cota_de_ia_do_plano_comprado(user_id, monkeypatch):
+    """A tela de confirmação prometia "Piggy IA sem limite de mensagens" pra
+    Plus e Pro, mas `ai_monthly_messages: None` cai no teto AI_CHAT_MONTHLY_LIMIT
+    e o chat corta ali. O número tem que sair do backend, junto do `td` e do
+    `pl` — chumbar no HTML é o bug que o `td` já tinha resolvido."""
+    import core.services.ai_chat_commands as aicc
+    _, _, client = _auth_user_setup(f"iaquota-{user_id}")
+    monkeypatch.setenv("PLANS_V2_ENABLED", "1")
+    monkeypatch.setattr(aicc, "AI_CHAT_MONTHLY_LIMIT", 777)
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_ESSENCIAL_MENSAL", "price_ess_abc")
+    monkeypatch.setattr("db.plans.is_trial_eligible_for_user", lambda uid: True)
+    fake = _patch_stripe(monkeypatch)
+
+    resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+    params = _success_params(fake)
+    assert params["pl"] == "plus"
+    assert params["ia"] == "777", "cota do Plus tem que ser o teto global, não 'ilimitado'"
+
+    resp = client.post("/billing/create-checkout", json={"plan": "essencial"}, headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+    params = _success_params(fake)
+    assert params["pl"] == "essencial"
+    assert params["ia"] == "200", "Essencial tem cota própria (200), menor que o teto"
+
+
 def test_checkout_v2_falha_fechada_se_elegibilidade_indisponivel(user_id, monkeypatch):
     """Sem conseguir decidir o trial, não cobra nem concede benefício no escuro."""
     _, _, client = _auth_user_setup(f"v2fail-{user_id}")
@@ -442,3 +489,113 @@ def test_checkout_novo_plano_expira_sessao_aberta_incompativel(user_id, monkeypa
     assert first.json()["checkout_url"] != second.json()["checkout_url"]
     assert fake.session_create_calls == 2
     assert fake.session_expire_calls == 1
+
+
+def test_checkout_grava_started_no_funil_com_session_id(user_id, monkeypatch):
+    """Abrir o checkout com sucesso grava um 'started' na tabela dedicada
+    checkout_funnel_events, com o session_id do Stripe (o que permite
+    correlacionar com o 'completed' do webhook). O session_id NÃO vaza no
+    payload devolvido ao cliente."""
+    from db import get_conn
+
+    uid, _, client = _auth_user_setup(f"funnel-{user_id}")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    _patch_stripe(monkeypatch)
+
+    resp = client.post(
+        "/billing/create-checkout", json={"interval": "monthly"}, headers=_CSRF_HEADERS
+    )
+    assert resp.status_code == 200, resp.text
+    assert "session_id" not in resp.json(), "session_id não pode vazar pro cliente"
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select session_id, kind from checkout_funnel_events "
+                "where user_id = %s and kind = 'started' order by id desc limit 1",
+                (uid,),
+            )
+            row = cur.fetchone()
+    assert row is not None, "'started' não foi gravado na tabela do funil"
+    assert row["session_id"] and row["session_id"].startswith("cs_test_")
+
+
+def test_checkout_falho_nao_grava_started(user_id, monkeypatch):
+    """Sessão que não nasce (Stripe não configurado) não polui o funil."""
+    from db import get_conn
+
+    uid, _, client = _auth_user_setup(f"nofunnel-{user_id}")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "")  # 503: pagamentos off
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+
+    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    assert resp.status_code == 503
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select count(*) as n from checkout_funnel_events "
+                "where user_id = %s and kind = 'started'",
+                (uid,),
+            )
+            n = cur.fetchone()["n"]
+    assert n == 0
+
+
+def test_checkout_reaproveitado_propaga_session_id_no_funil(user_id, monkeypatch):
+    """P2: quando o checkout REAPROVEITA uma sessão aberta, o 'started' precisa
+    carregar o session_id da sessão reusada — senão iria NULL e a conclusão
+    dessa sessão nunca correlacionaria no funil."""
+    from db import get_conn
+
+    uid, _, client = _auth_user_setup(f"reuse-funnel-{user_id}")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    fake = _patch_stripe(monkeypatch)
+
+    r1 = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    r2 = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    assert r1.status_code == 200 and r2.status_code == 200
+    # 2ª chamada reaproveitou a sessão da 1ª (não criou nova)
+    assert fake.session_create_calls == 1
+    assert r1.json()["checkout_url"] == r2.json()["checkout_url"]
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select session_id from checkout_funnel_events "
+                "where user_id = %s and kind = 'started' order by id",
+                (uid,),
+            )
+            sids = [row["session_id"] for row in cur.fetchall()]
+    # dois 'started' (criação + reuso), AMBOS com o mesmo session_id não-nulo
+    assert len(sids) == 2
+    assert all(s and s.startswith("cs_test_") for s in sids), sids
+    assert sids[0] == sids[1]
+
+
+def test_checkout_nao_fecha_gate_da_precos_na_abertura(user_id, monkeypatch):
+    """Item #2: abrir o checkout NÃO marca plan_selected_at — só o webhook
+    (pagamento completo) fecha o gate. Assim o abandonador continua obrigado a
+    escolher um plano na /precos. Confere também as URLs de retorno."""
+    from db import get_conn
+
+    uid, _, client = _auth_user_setup(f"gate-{user_id}")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    fake = _patch_stripe(monkeypatch)
+
+    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+
+    # plan_selected_at continua NULL — o gate NÃO foi fechado na abertura
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select plan_selected_at from auth_accounts where user_id = %s", (uid,))
+            assert cur.fetchone()["plan_selected_at"] is None
+
+    # Abandono volta pra /precos (escolha forçada); sucesso pra /home?upgrade=success
+    assert fake.last_session_kwargs["cancel_url"].endswith("/precos?escolha=1")
+    assert "upgrade=success" in fake.last_session_kwargs["success_url"]

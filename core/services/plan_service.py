@@ -395,12 +395,27 @@ def require_min_tier(user_id: int, minimum: str) -> bool:
     return tier_at_least(get_plan_tier(user_id), minimum)
 
 
+def _ai_monthly_limit(limits: PlanLimits) -> int:
+    """A regra da cota, num lugar só: `ai_monthly_messages: None` NÃO é
+    ilimitado — cai no teto global AI_CHAT_MONTHLY_LIMIT, e mesmo a cota
+    própria é capada por ele. Quem corta é core/services/ai_chat/runner.py."""
+    from .ai_chat_commands import AI_CHAT_MONTHLY_LIMIT
+    per_tier = limits.get("ai_monthly_messages")
+    return AI_CHAT_MONTHLY_LIMIT if per_tier is None else min(per_tier, AI_CHAT_MONTHLY_LIMIT)
+
+
 def ai_monthly_limit_for(user_id: int) -> int:
     """Cota mensal de mensagens da IA pro usuário (sempre um int; tiers sem
     cota própria caem no limite global AI_CHAT_MONTHLY_LIMIT)."""
-    from .ai_chat_commands import AI_CHAT_MONTHLY_LIMIT
-    per_tier = get_user_limits(user_id).get("ai_monthly_messages")
-    return AI_CHAT_MONTHLY_LIMIT if per_tier is None else min(per_tier, AI_CHAT_MONTHLY_LIMIT)
+    return _ai_monthly_limit(get_user_limits(user_id))
+
+
+def ai_monthly_limit_for_tier(tier: str) -> int:
+    """Mesma cota, mas perguntada pelo TIER em vez do usuário. O checkout
+    precisa disso: a tela de confirmação abre antes do webhook gravar o plano,
+    então não dá pra consultar o usuário — o número tem que sair do plano que
+    acabou de ser comprado e viajar no success_url."""
+    return _ai_monthly_limit(limits_for_tier(tier))
 
 
 def ai_chat_allowed(user_id: int) -> bool:

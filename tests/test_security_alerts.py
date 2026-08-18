@@ -3,6 +3,13 @@
 Integração leve: usa o banco de teste (como test_audit.py). Exercita o novo
 desenho — detecção em transação própria, depois do commit do login, com
 cooldown por IP. Cada teste usa um IP distinto pra não interferir nos outros.
+
+Os testes escrevem em duas tabelas que ninguém mais limpa: `auth_login_events`
+(as falhas sintéticas) e `system_event_logs` (o marcador de cooldown). Sem
+limpeza, uma segunda execução contra o MESMO banco herda o estado da primeira —
+o cooldown de 30min suprime o alerta e as contagens de marcador acumulam. Daí o
+fixture `_clean_test_ips` abaixo (limpa antes E depois, pra também curar um
+banco já sujo de execuções anteriores).
 """
 import asyncio
 
@@ -10,15 +17,50 @@ import pytest
 
 from core.services import admin_notify, security_alerts
 
+# IPs de teste (TEST-NET-3, RFC 5737). Exclusivos deste arquivo — o fixture de
+# limpeza apaga tudo que estiver associado a eles, então não reutilize em outro
+# módulo de teste.
+_TEST_IPS = (
+    "203.0.113.201",
+    "203.0.113.202",
+    "203.0.113.203",
+    "203.0.113.204",
+)
+
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+async def _purge_test_ips() -> None:
+    """Apaga falhas de login e marcadores de alerta dos IPs deste arquivo."""
+    from core.admin_dashboard import db_connect
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "delete from auth_login_events where ip_address = any(%s)",
+                (list(_TEST_IPS),),
+            )
+            await cur.execute(
+                "delete from system_event_logs "
+                "where event_type = 'auth_spike_alert' "
+                "  and details->>'key' = any(%s)",
+                ([f"ip:{ip}" for ip in _TEST_IPS],),
+            )
+        await conn.commit()
 
 
 @pytest.fixture(autouse=True)
 def _ensure_tables():
     from core.admin_dashboard import ensure_admin_tables
     _run(ensure_admin_tables())
+
+
+@pytest.fixture(autouse=True)
+def _clean_test_ips(_ensure_tables):
+    _run(_purge_test_ips())
+    yield
+    _run(_purge_test_ips())
 
 
 async def _insert_failures(ip: str, n: int) -> None:

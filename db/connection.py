@@ -46,6 +46,24 @@ def get_conn():
     return _get_pool().connection()
 
 
+def close_pool() -> None:
+    """Fecha o pool e zera o singleton — a próxima chamada reabre lendo
+    DATABASE_URL de novo.
+
+    Existe para a suíte: o conftest cria um database por execução e precisa
+    soltar as conexões antes de derrubá-lo no fim. Em produção o pool vive
+    enquanto o processo viver, então isto não é chamado.
+    """
+    global _pool
+    with _pool_lock:
+        if _pool is None:
+            return
+        try:
+            _pool.close()
+        finally:
+            _pool = None
+
+
 # ── comparação de categoria case- E acento-insensível ────────────────────────
 # Dados legados guardam a mesma categoria com/sem acento ("alimentacao" vs
 # "alimentação"). Pra somar/filtrar por categoria sem perder linhas, comparamos

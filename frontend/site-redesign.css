@@ -1,0 +1,165 @@
+/* ==========================================================================
+   site-redesign.css — camada de refino "premium" da landing (index.html),
+   sobre site.css. TUDO escopado em `body.rd` para não afetar as outras
+   páginas que consomem site.css (só a index.html tem a classe rd).
+   Paleta/tokens reaproveitados do :root de site.css (--pink, --neon, etc.).
+   ========================================================================== */
+
+/* ─── 1. Textura: grão sutil sobre a página (quebra o flat digital) ────── */
+.rd .rd-grain {
+  position: fixed; inset: 0; z-index: 2; pointer-events: none; opacity: .05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Glow ambiente um pouco mais rico: segunda fonte neon fria ao fundo */
+.rd .glow::after { opacity: .28; }
+.rd .glow { --_x: 0; }
+
+/* ─── 2. Tipografia: mais presença, sem trocar a fonte (Inter self-host) ─ */
+.rd .hero-title {
+  font-size: clamp(2.6rem, 5.6vw, 4.4rem);
+  letter-spacing: -.035em;
+  line-height: .98;
+  text-wrap: balance;
+}
+.rd .hero-sub { font-size: 1.12rem; line-height: 1.6; max-width: 500px; text-wrap: pretty; }
+.rd .section-head h2,
+.rd .tech-copy h2,
+.rd .cta-band h2 { letter-spacing: -.03em; text-wrap: balance; }
+.rd .section-head { max-width: 680px; margin-bottom: 60px; }
+.rd .section-head p { font-size: 1.06rem; text-wrap: pretty; }
+
+/* Headline com gradiente vivo (rosa → neon → rosa), respiração lenta */
+.rd .grad {
+  background: linear-gradient(100deg, var(--pink) 0%, #FF7AB8 40%, var(--pink) 80%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: rdGrad 9s ease-in-out infinite;
+}
+@keyframes rdGrad { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+@media (prefers-reduced-motion: reduce) { .rd .grad { animation: none; } }
+
+/* ─── 3. Nav: vidro mais refinado + borda superior de luz ──────────────── */
+.rd .nav {
+  background: rgba(18,18,20,.66);
+  border: 1px solid rgba(255,255,255,.10);
+  box-shadow: 0 10px 40px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
+}
+.rd .nav-links a { position: relative; }
+.rd .nav-links a::after {
+  content: ""; position: absolute; left: 0; right: 100%; bottom: -6px; height: 2px;
+  background: linear-gradient(90deg, var(--pink), var(--neon));
+  border-radius: 2px; transition: right .25s ease;
+}
+.rd .nav-links a:hover::after { right: 0; }
+
+/* ─── 4. Botão primário: brilho que atravessa no hover ─────────────────── */
+.rd .btn-primary { position: relative; overflow: hidden; }
+.rd .btn-primary::before {
+  content: ""; position: absolute; inset: 0; transform: translateX(-120%);
+  background: linear-gradient(105deg, transparent 30%, rgba(255,255,255,.35) 50%, transparent 70%);
+  transition: transform .6s ease;
+}
+.rd .btn-primary:hover::before { transform: translateX(120%); }
+.rd .btn-lg { padding: 15px 30px; }
+
+/* ─── 5. Cards com profundidade + borda-holofote sob o cursor ──────────── */
+.rd .card,
+.rd .plan-solo,
+.rd .phone,
+.rd .step {
+  position: relative;
+  transition: transform .22s ease, border-color .22s ease, box-shadow .22s ease;
+}
+/* halo radial que segue o mouse (--mx/--my vêm do JS) */
+.rd .card::before,
+.rd .plan-solo::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  opacity: 0; transition: opacity .25s ease;
+  background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 0),
+              rgba(255,45,142,.16), transparent 60%);
+}
+.rd .card:hover::before,
+.rd .plan-solo:hover::before { opacity: 1; }
+
+.rd .feature-card {
+  background: linear-gradient(180deg, rgba(255,255,255,.03), transparent), var(--card);
+  padding: 28px 26px 30px;
+}
+.rd .feature-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(255,45,142,.35);
+  box-shadow: 0 24px 50px rgba(255,45,142,.12), 0 8px 20px rgba(0,0,0,.4);
+}
+.rd .feature-card h3 { font-size: 1.12rem; letter-spacing: -.01em; }
+
+/* Ícones: caixa em gradiente, mais “produto” e menos flat */
+.rd .icon-box {
+  width: 50px; height: 50px; border-radius: 14px; font-size: 1.35rem;
+  background: linear-gradient(135deg, rgba(255,45,142,.22), rgba(255,45,142,.06));
+  border: 1px solid rgba(255,45,142,.32);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+}
+.rd .icon-box.neon {
+  background: linear-gradient(135deg, rgba(198,241,26,.20), rgba(198,241,26,.05));
+  border-color: rgba(198,241,26,.34);
+}
+
+/* ─── 6. Faixa de valor: chips com vidro e brilho no marcador ──────────── */
+.rd .value-strip { gap: 12px; margin: 8px 0 12px; }
+.rd .value-chip {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.10);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+  transition: border-color .2s ease, transform .2s ease;
+}
+.rd .value-chip:hover { border-color: rgba(198,241,26,.4); transform: translateY(-2px); }
+
+/* ─── 7. Steps: numeração com anel e trilho conectando ────────────────── */
+.rd .step { padding: 4px 0; }
+.rd .step-num { box-shadow: 0 8px 22px rgba(255,45,142,.35), inset 0 1px 0 rgba(255,255,255,.25); }
+
+/* ─── 8. Chat / summary / phone: elevação com sombra tingida ───────────── */
+.rd .chat-card,
+.rd .summary-card,
+.rd .phone {
+  box-shadow: 0 30px 70px rgba(0,0,0,.55), 0 0 0 1px rgba(255,45,142,.06),
+              0 12px 40px rgba(255,45,142,.08);
+}
+
+/* ─── 9. Plano: card com mais respiro e destaque de preço ──────────────── */
+.rd .plan-solo {
+  box-shadow: 0 30px 80px rgba(255,45,142,.18), inset 0 1px 0 rgba(255,255,255,.06);
+}
+.rd .plan-solo-amount { font-size: 3.6rem; letter-spacing: -.04em; }
+
+/* ─── 10. Ritmo vertical: seções respiram mais ─────────────────────────── */
+.rd .section { padding: 108px 0; }
+.rd .sec-sep {
+  height: 1px; margin: 0 auto; max-width: 1200px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.12), transparent);
+}
+.rd .cta-band {
+  padding: 68px 30px;
+  background:
+    radial-gradient(600px circle at 50% 0, rgba(255,45,142,.18), transparent 70%),
+    linear-gradient(180deg, rgba(255,45,142,.08), rgba(255,255,255,.02));
+  box-shadow: 0 30px 80px rgba(255,45,142,.12);
+}
+
+/* ─── 11. FAQ: item com hover mais claro e chevron animado ─────────────── */
+.rd .faq-item { transition: border-color .2s ease, background .2s ease; }
+.rd .faq-item:hover { border-color: rgba(255,255,255,.18); }
+.rd .faq-q .chev { transition: transform .2s ease; }
+.rd .faq-item.open .chev { transform: rotate(45deg); }
+
+/* ─── 12. Mobile: mantém o respiro sem estourar ────────────────────────── */
+@media (max-width: 900px) {
+  .rd .section { padding: 72px 0; }
+}
+@media (max-width: 560px) {
+  .rd .hero-title { font-size: clamp(2.2rem, 9vw, 3rem); }
+  .rd .plan-solo-amount { font-size: 3rem; }
+}
