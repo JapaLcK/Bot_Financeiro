@@ -45,15 +45,48 @@ _OFXPARSE_DEPENDENTES = [
     "test_whatsapp_simulation.py",
 ]
 
+# Estes quatro NÃO estouram na coleta: importam `core.handle_incoming` ou
+# `statement_import` DENTRO do corpo do teste, e a cadeia
+# handle_incoming -> ofx_service -> ofx_import -> ofxparse só é percorrida
+# quando o teste roda. O collect_ignore acima não os alcança, então sem este
+# skip a suíte "de dependências reduzidas" ainda termina com 4 vermelhos que
+# nada têm a ver com a mudança em revisão.
+_OFXPARSE_IMPORT_TARDIO = [
+    "tests/test_statement_import.py::test_attachment_detection",
+    "tests/test_statement_import.py::test_import_statement_bytes_csv_idempotente",
+    "tests/test_statement_import.py::test_import_statement_bytes_vazio_ou_grande",
+    "tests/test_nlp_and_pending_flow.py::test_handle_incoming_clarification_tem_precedencia_sobre_fallback_ia",
+]
+
 collect_ignore = []
 try:
     import ofxparse  # noqa: F401
+
+    _TEM_OFXPARSE = True
 except ImportError:
+    _TEM_OFXPARSE = False
     collect_ignore = list(_OFXPARSE_DEPENDENTES)
     print(
         f"[conftest] ofxparse ausente — ignorando {len(collect_ignore)} arquivos "
-        "que dependem dele (no CI o pacote existe e todos rodam)."
+        f"e pulando {len(_OFXPARSE_IMPORT_TARDIO)} testes de import tardio "
+        "(no CI o pacote existe e todos rodam)."
     )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Pula os testes que só descobrem a falta do ofxparse ao executar.
+
+    Mesma filosofia da lista de arquivos: nomes FIXOS e condição ligada à
+    ausência do pacote, não ao erro. Marcar pelo erro esconderia um
+    ImportError novo introduzido por outra mudança.
+    """
+    if _TEM_OFXPARSE:
+        return
+    motivo = pytest.mark.skip(reason="ofxparse ausente (import tardio); no CI o pacote existe")
+    alvos = set(_OFXPARSE_IMPORT_TARDIO)
+    for item in items:
+        if item.nodeid in alvos:
+            item.add_marker(motivo)
 
 
 
