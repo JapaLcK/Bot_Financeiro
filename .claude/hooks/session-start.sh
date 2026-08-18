@@ -17,6 +17,22 @@ cd "${CLAUDE_PROJECT_DIR:-$(pwd)}" || exit 0
 
 log() { echo "[session-start] $*"; }
 
+# O identificador da sessão chega no JSON do stdin, não no ambiente — não existe
+# CLAUDE_SESSION_ID exportado. Sem ler daqui, o fallback vira $$ (PID do shell),
+# que MUDA a cada disparo: startup, resume e compact criariam um cluster novo
+# cada um, em vez de reaproveitar o da sessão.
+SID=""
+if [ ! -t 0 ]; then   # só lê se houver algo canalizado; não trava em teste manual
+  SID=$(python3 -c "
+import sys, json
+try:
+    print((json.load(sys.stdin).get('session_id') or '')[:32])
+except Exception:
+    print('')
+" 2>/dev/null)
+fi
+SID="${SID:-${CLAUDE_SESSION_ID:-$$}}"
+
 # ── 1. Aviso de branch atrasada ──────────────────────────────────────────────
 # Branch velha mente com confiança: o grep não acha arquivo que existe na main
 # e a conclusão sai redonda e errada. Já aconteceu neste repositório.
@@ -54,48 +70,95 @@ rm -f "$REQ_TMP"
 python3 -m pip install -q --disable-pip-version-check pytest anyio 2>/dev/null
 
 # ── 3. Postgres próprio desta sessão ─────────────────────────────────────────
+# Enumerado por estado, não remendado caso a caso. O hook dispara mais de uma
+# vez na mesma sessão (startup, resume, compact), então os três estados abaixo
+# são rotina, não exceção:
+#
+#   PGDATA ausente          -> initdb, sorteia porta, persiste, sobe
+#   PGDATA + servidor vivo   -> REUSA a porta do postmaster.pid, não sobe nada
+#   PGDATA + servidor morto  -> reusa a porta persistida (ou sorteia outra se
+#                               ela foi tomada), sobe
+#
+# A porta precisa ser persistida: sorteá-la de novo num resume faria o pg_ctl
+# recusar (cluster já rodando), os testes sondarem uma porta vazia e o hook
+# zerar o DATABASE_URL — quebrando a suíte num evento de ciclo de vida normal.
+#
+# PGPORT do ambiente NÃO é herdado de propósito: um valor global no host
+# colocaria todas as sessões concorrentes na mesma porta, que é exatamente o
+# que a alocação por sessão evita.
 PGBIN=""
 for v in 17 16 15 14; do
   [ -x "/usr/lib/postgresql/$v/bin/pg_ctl" ] && PGBIN="/usr/lib/postgresql/$v/bin" && break
 done
 
-DB_URL=""
-if [ -n "$PGBIN" ]; then
-  PGDATA="${TMPDIR:-/tmp}/pgdata-${CLAUDE_SESSION_ID:-$$}"
-  PGSOCK="/tmp/pgsock-${CLAUDE_SESSION_ID:-$$}"
-  # Porta livre por sessão. Fixar 5432 faria a segunda sessão do mesmo host
-  # falhar no pg_ctl e, pior, o createdb/pg_isready seguintes conversariam com
-  # o servidor da PRIMEIRA — as duas exportariam a mesma URL e a limpeza
-  # destrutiva da suíte voltaria a se cruzar, que é o que este hook evita.
-  PGPORT="${PGPORT:-$(python3 -c "
+_porta_livre() {
+  python3 -c "
 import socket
 s = socket.socket()
 s.bind(('127.0.0.1', 0))
 print(s.getsockname()[1])
 s.close()
-" 2>/dev/null || echo 5432)}"
+" 2>/dev/null || echo ""
+}
 
+DB_URL=""
+if [ -n "$PGBIN" ]; then
+  PGDATA="${TMPDIR:-/tmp}/pgdata-${SID}"
+  PGSOCK="/tmp/pgsock-${SID}"
+  PORTFILE="$PGDATA/.session_port"
+
+  if [ "$(id -u)" = "0" ] && id postgres >/dev/null 2>&1; then
+    PGRUN="su postgres -c"
+  else
+    PGRUN="bash -c"
+  fi
+
+  # initdb só quando o cluster ainda não existe.
   if [ ! -d "$PGDATA/base" ]; then
     log "inicializando Postgres em $PGDATA ..."
     mkdir -p "$PGDATA" "$PGSOCK"
-    # initdb recusa rodar como root; se existir o usuário postgres, usa ele.
-    if [ "$(id -u)" = "0" ] && id postgres >/dev/null 2>&1; then
+    if [ "$PGRUN" = "su postgres -c" ]; then
       chown postgres:postgres "$PGDATA" "$PGSOCK"; chmod 700 "$PGDATA"
       chmod 755 "${TMPDIR:-/tmp}" 2>/dev/null
-      PGRUN="su postgres -c"
-    else
-      PGRUN="bash -c"
     fi
     $PGRUN "$PGBIN/initdb -D $PGDATA -U postgres --auth=trust" >/dev/null 2>&1 \
       || log "AVISO: initdb falhou."
-  else
-    [ "$(id -u)" = "0" ] && id postgres >/dev/null 2>&1 && PGRUN="su postgres -c" || PGRUN="bash -c"
   fi
 
   if [ -d "$PGDATA/base" ]; then
-    LOGF="$PGDATA/server.log"; : > "$LOGF"
-    [ "$PGRUN" = "su postgres -c" ] && chown postgres:postgres "$LOGF"
-    $PGRUN "$PGBIN/pg_ctl -D $PGDATA -o '-p $PGPORT -k $PGSOCK -c listen_addresses=127.0.0.1' -l $LOGF -w -t 30 start" >/dev/null 2>&1
+    VIVO=0
+    if $PGRUN "$PGBIN/pg_ctl -D $PGDATA status" >/dev/null 2>&1; then
+      VIVO=1
+    fi
+
+    if [ "$VIVO" = "1" ]; then
+      # Já rodando (resume/compact): a porta real está na linha 4 do
+      # postmaster.pid. Reusar, nunca sortear outra.
+      PGPORT=$(sed -n 4p "$PGDATA/postmaster.pid" 2>/dev/null | tr -d ' ')
+      log "Postgres desta sessão já estava no ar (porta $PGPORT)."
+    else
+      # Parado: tenta a porta persistida; se estiver ocupada, sorteia outra.
+      PGPORT=$(cat "$PORTFILE" 2>/dev/null | tr -d ' ')
+      if [ -n "$PGPORT" ] && python3 -c "
+import socket, sys
+s = socket.socket()
+sys.exit(0 if s.connect_ex(('127.0.0.1', $PGPORT)) != 0 else 1)
+" 2>/dev/null; then
+        :  # porta persistida continua livre
+      else
+        PGPORT=$(_porta_livre)
+      fi
+      [ -z "$PGPORT" ] && PGPORT=5432
+      echo "$PGPORT" > "$PORTFILE" 2>/dev/null
+      [ "$PGRUN" = "su postgres -c" ] && chown postgres:postgres "$PORTFILE" 2>/dev/null
+
+      mkdir -p "$PGSOCK"
+      [ "$PGRUN" = "su postgres -c" ] && chown postgres:postgres "$PGSOCK"
+      LOGF="$PGDATA/server.log"; : > "$LOGF"
+      [ "$PGRUN" = "su postgres -c" ] && chown postgres:postgres "$LOGF"
+      $PGRUN "$PGBIN/pg_ctl -D $PGDATA -o '-p $PGPORT -k $PGSOCK -c listen_addresses=127.0.0.1' -l $LOGF -w -t 30 start" >/dev/null 2>&1
+    fi
+
     $PGRUN "$PGBIN/createdb -h 127.0.0.1 -p $PGPORT -U postgres bot_financeiro_test" >/dev/null 2>&1
     if $PGRUN "$PGBIN/pg_isready -h 127.0.0.1 -p $PGPORT -U postgres" >/dev/null 2>&1; then
       # Responder na porta não basta: pode ser o servidor de outra sessão. Só
@@ -104,13 +167,13 @@ s.close()
       DDIR=$($PGRUN "$PGBIN/psql -h 127.0.0.1 -p $PGPORT -U postgres -tAc 'show data_directory'" 2>/dev/null | tr -d ' ')
       if [ "$DDIR" = "$PGDATA" ]; then
         DB_URL="postgresql://postgres:postgres@127.0.0.1:$PGPORT/bot_financeiro_test"
-        log "Postgres no ar na porta $PGPORT (data_directory conferido)."
+        log "Postgres pronto na porta $PGPORT (data_directory conferido)."
       else
         log "AVISO: a porta $PGPORT responde, mas de outro servidor ($DDIR)."
         log "       Não vou usá-lo — seria o banco de outra sessão."
       fi
     else
-      log "AVISO: Postgres não subiu; veja $LOGF."
+      log "AVISO: Postgres não respondeu na porta $PGPORT; veja $PGDATA/server.log."
     fi
   fi
 else
