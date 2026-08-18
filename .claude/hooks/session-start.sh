@@ -125,7 +125,13 @@ if [ -n "$PGBIN" ]; then
     mkdir -p "$PGDATA" "$PGSOCK"
     if [ "${PGRUN:-}" = "su postgres -c" ]; then
       chown postgres:postgres "$PGDATA" "$PGSOCK"; chmod 700 "$PGDATA"
-      chmod 755 "${TMPDIR:-/tmp}" 2>/dev/null
+      # O postgres precisa ATRAVESSAR o diretório-pai para chegar no PGDATA.
+      # `chmod 755` aqui seria destrutivo: com TMPDIR vazio o alvo é /tmp, e
+      # trocar 1777 por 755 tira o world-write e o sticky bit do diretório
+      # compartilhado — mktemp, pip e os hooks das outras sessões param de
+      # funcionar no host inteiro. `o+x` concede só o bit necessário e
+      # preserva o modo existente.
+      chmod o+x "${TMPDIR:-/tmp}" 2>/dev/null
     fi
     if ! $PGRUN "$PGBIN/initdb -D $PGDATA -U postgres --auth=trust" >/dev/null 2>&1; then
       # Limpa o que ficou pela metade. O initdb recusa diretório NÃO-VAZIO, então
