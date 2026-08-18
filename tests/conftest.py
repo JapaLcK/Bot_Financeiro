@@ -1,3 +1,4 @@
+import importlib.util
 import os
 import sys
 import uuid
@@ -58,18 +59,30 @@ _OFXPARSE_IMPORT_TARDIO = [
     "tests/test_nlp_and_pending_flow.py::test_handle_incoming_clarification_tem_precedencia_sobre_fallback_ia",
 ]
 
-collect_ignore = []
-try:
-    import ofxparse  # noqa: F401
+# O alívio NÃO é automático: exige PYTEST_ALLOW_MISSING_OPTIONAL_DEPS=1.
+#
+# Detectar a ausência sozinho seria pior que o problema — se o ofxparse caísse
+# do requirements.txt por engano, ou sumisse do CI, a suíte silenciaria 9
+# arquivos e pularia 4 testes e passaria VERDE, enquanto `core.handle_incoming`
+# estaria quebrado em produção. Um ambiente de dependências reduzidas é uma
+# decisão consciente de quem o monta (o .claude/hooks/session-start.sh exporta
+# a variável); a execução normal do dev e do CI continua estourando, que é o
+# comportamento certo para dependência obrigatória faltando.
+_DEPS_REDUZIDAS = os.getenv("PYTEST_ALLOW_MISSING_OPTIONAL_DEPS") == "1"
 
-    _TEM_OFXPARSE = True
-except ImportError:
-    _TEM_OFXPARSE = False
+# find_spec em vez de `try: import`: `except ImportError` também captura um
+# ImportError levantado DE DENTRO de um ofxparse instalado (dependência interna
+# quebrada, por exemplo) e trataria pacote defeituoso como pacote ausente,
+# escondendo justamente o que precisa aparecer.
+_TEM_OFXPARSE = importlib.util.find_spec("ofxparse") is not None
+
+collect_ignore = []
+if _DEPS_REDUZIDAS and not _TEM_OFXPARSE:
     collect_ignore = list(_OFXPARSE_DEPENDENTES)
     print(
-        f"[conftest] ofxparse ausente — ignorando {len(collect_ignore)} arquivos "
-        f"e pulando {len(_OFXPARSE_IMPORT_TARDIO)} testes de import tardio "
-        "(no CI o pacote existe e todos rodam)."
+        f"[conftest] PYTEST_ALLOW_MISSING_OPTIONAL_DEPS=1 e ofxparse ausente — "
+        f"ignorando {len(collect_ignore)} arquivos e pulando "
+        f"{len(_OFXPARSE_IMPORT_TARDIO)} testes de import tardio."
     )
 
 
@@ -80,7 +93,7 @@ def pytest_collection_modifyitems(config, items):
     ausência do pacote, não ao erro. Marcar pelo erro esconderia um
     ImportError novo introduzido por outra mudança.
     """
-    if _TEM_OFXPARSE:
+    if _TEM_OFXPARSE or not _DEPS_REDUZIDAS:
         return
     motivo = pytest.mark.skip(reason="ofxparse ausente (import tardio); no CI o pacote existe")
     alvos = set(_OFXPARSE_IMPORT_TARDIO)

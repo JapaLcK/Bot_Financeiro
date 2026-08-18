@@ -232,6 +232,11 @@ if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
     echo 'export PII_HASH_PEPPER="dev-only-pepper-must-be-32-chars-long!!"'
     echo 'export PII_AUDIT_DISABLED=1'
     echo 'export RUN_BACKGROUND_TASKS=0'
+    # Este ambiente monta o requirements SEM ofxparse (a wheel não constrói
+    # aqui), então autoriza a suíte a pular o que depende dele. É explícito de
+    # propósito: sem esta variável, ofxparse faltando continua estourando no
+    # CI e na máquina do dev, como deve ser para dependência obrigatória.
+    echo 'export PYTEST_ALLOW_MISSING_OPTIONAL_DEPS=1'
   } >> "$CLAUDE_ENV_FILE"
   log "variáveis de ambiente exportadas."
 fi
