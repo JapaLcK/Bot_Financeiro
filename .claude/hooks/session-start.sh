@@ -101,7 +101,13 @@ s.close()
 " 2>/dev/null || echo ""
 }
 
+# Zeradas de propósito, ANTES de qualquer uso: o ambiente remoto pode já trazer
+# PGDATA apontando para um cluster que não é nosso. Herdar essas variáveis faria
+# o hook tratar cluster alheio como próprio — e, sem PGBIN, deixaria PGRUN
+# indefinido, que sob `set -u` mata o script antes de ele zerar o DATABASE_URL.
 DB_URL=""
+PGDATA=""
+PGRUN=""
 if [ -n "$PGBIN" ]; then
   PGDATA="${TMPDIR:-/tmp}/pgdata-${SID}"
   PGSOCK="/tmp/pgsock-${SID}"
@@ -117,7 +123,7 @@ if [ -n "$PGBIN" ]; then
   if [ ! -d "$PGDATA/base" ]; then
     log "inicializando Postgres em $PGDATA ..."
     mkdir -p "$PGDATA" "$PGSOCK"
-    if [ "$PGRUN" = "su postgres -c" ]; then
+    if [ "${PGRUN:-}" = "su postgres -c" ]; then
       chown postgres:postgres "$PGDATA" "$PGSOCK"; chmod 700 "$PGDATA"
       chmod 755 "${TMPDIR:-/tmp}" 2>/dev/null
     fi
@@ -156,12 +162,12 @@ sys.exit(0 if s.connect_ex(('127.0.0.1', $PGPORT)) != 0 else 1)
       fi
       [ -z "$PGPORT" ] && PGPORT=5432
       echo "$PGPORT" > "$PORTFILE" 2>/dev/null
-      [ "$PGRUN" = "su postgres -c" ] && chown postgres:postgres "$PORTFILE" 2>/dev/null
+      [ "${PGRUN:-}" = "su postgres -c" ] && chown postgres:postgres "$PORTFILE" 2>/dev/null
 
       mkdir -p "$PGSOCK"
-      [ "$PGRUN" = "su postgres -c" ] && chown postgres:postgres "$PGSOCK"
+      [ "${PGRUN:-}" = "su postgres -c" ] && chown postgres:postgres "$PGSOCK"
       LOGF="$PGDATA/server.log"; : > "$LOGF"
-      [ "$PGRUN" = "su postgres -c" ] && chown postgres:postgres "$LOGF"
+      [ "${PGRUN:-}" = "su postgres -c" ] && chown postgres:postgres "$LOGF"
       $PGRUN "$PGBIN/pg_ctl -D $PGDATA -o '-p $PGPORT -k $PGSOCK -c listen_addresses=127.0.0.1' -l $LOGF -w -t 30 start" >/dev/null 2>&1
     fi
 
@@ -200,10 +206,11 @@ fi
 # desenvolvimento (e o pepper, por definição, nunca rotaciona — core/crypto.py).
 PII_KEY=""
 PII_KEY_FILE=""
-# Só grava num cluster REALMENTE inicializado — `$PGDATA/base` é o mesmo teste
-# que o bloco acima usa. Escrever com o initdb falhado deixaria o diretório
-# não-vazio e envenenaria a próxima tentativa.
-[ -n "${PGDATA:-}" ] && [ -d "${PGDATA:-/nao-existe}/base" ] && PII_KEY_FILE="$PGDATA/.session_pii_key"
+# A condição é a PROPRIEDADE confirmada, não a existência de um diretório:
+# DB_URL só está preenchido depois de o hook comparar o data_directory do
+# servidor com o PGDATA desta sessão. Assim a chave nunca é escrita num cluster
+# alheio nem num PGDATA com initdb falhado (que envenenaria a próxima tentativa).
+[ -n "$DB_URL" ] && [ -n "$PGDATA" ] && PII_KEY_FILE="$PGDATA/.session_pii_key"
 
 if [ -n "$PII_KEY_FILE" ] && [ -s "$PII_KEY_FILE" ]; then
   PII_KEY=$(cat "$PII_KEY_FILE" 2>/dev/null | tr -d '\n')
@@ -213,7 +220,7 @@ if [ -z "$PII_KEY" ]; then
   if [ -n "$PII_KEY_FILE" ] && [ -n "$PII_KEY" ]; then
     printf '%s' "$PII_KEY" > "$PII_KEY_FILE" 2>/dev/null
     chmod 600 "$PII_KEY_FILE" 2>/dev/null
-    [ "$PGRUN" = "su postgres -c" ] && chown postgres:postgres "$PII_KEY_FILE" 2>/dev/null
+    [ "${PGRUN:-}" = "su postgres -c" ] && chown postgres:postgres "$PII_KEY_FILE" 2>/dev/null
   fi
 fi
 
