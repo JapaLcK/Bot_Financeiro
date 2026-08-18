@@ -84,6 +84,23 @@ O CI (`.github/workflows/tests.yml`) sobe seu próprio Postgres 16 e roda `pytes
 (bloqueante) e `audit` de CVEs (não-bloqueante) em todo push e PR. Não use o CI como
 primeiro teste — ele é a confirmação, não a descoberta.
 
+**Antes de afirmar que algo "não existe", confirme contra qual árvore.** Um branch
+atrasado em relação à `main` mente com toda a confiança do mundo: o `grep` não acha o
+arquivo, o `find` não acha nada, e a conclusão sai redonda e errada. Foi o que
+aconteceu neste próprio arquivo — um branch **um** commit atrás da `main` não tinha o
+`frontend/safe-area.js` nem as classes `pb-root-*`, ambos criados pelo #56, e as duas
+coisas foram documentadas como inexistentes. Antes de escrever "não existe":
+
+```bash
+git rev-list --count HEAD..main    # 0 = em dia; qualquer outro número é um aviso
+git grep -l "<o que voce procura>" main -- <caminho>
+```
+
+`git grep <ref>` consulta a árvore daquele commit sem mexer no working tree — dá para
+conferir `main` sem trocar de branch. Vale o mesmo para revisores automáticos: o Codex
+lê a árvore **do branch**, então um achado de "isso não existe" num branch atrasado
+pode ser artefato do atraso, não um defeito. Cheque antes de aceitar.
+
 **Compare com a baseline, não com zero.** Rode a suíte **antes** de mexer e guarde o
 número. Falha que já existia não é regressão sua; falha nova é. Sem a baseline não dá
 para distinguir as duas, e sobra "os testes estão vermelhos" sem conclusão.
@@ -205,35 +222,50 @@ dois PRs. A metade verificável sobe sem ficar refém da outra.
 O app iOS (Capacitor, `mobile/`) carrega `https://pigbankai.com` num WKWebView com
 `allowNavigation` para o domínio inteiro. Consequências que já causaram bug:
 
-- **Quem carrega o CSS ≠ quem é alcançável, e não há rede de segurança.** Das **25**
-  páginas em `frontend/`, apenas **6** carregam `app-mode.css`/`app-mode.js`
-  (`login`, `cadastro`, `home`, `dashboard`, `comandos-app`, `settings`). As outras
-  **19** não têm tratamento nenhum de área segura: `env(safe-area-inset-*)` aparece em
-  **um único arquivo do repositório**, o `frontend/app-mode.css`
-  (`grep -rl safe-area-inset frontend/`). Não existe shim, fallback nem base comum —
-  se você mexer em `/precos`, `/termos`, `/onboarding` ou qualquer uma das 19, está
-  numa página sem proteção alguma.
+- **O ajuste nativo está DESLIGADO — o CSS é a única proteção.**
+  `mobile/capacitor.config.json` traz `"contentInset": "never"`, o que desliga o
+  ajuste do `UIScrollView` nos quatro lados, em todas as rotas do domínio. Antes do
+  #56 era `"automatic"` e o WebView reservava a área segura sozinho. Saiba em qual
+  dos dois mundos você está antes de somar `padding`: com `automatic`, inset em CSS
+  **duplica** o espaçamento; com `never`, a falta dele deixa conteúdo sob o notch.
+- **Quem carrega o CSS ≠ quem é alcançável.** Das **25** páginas em `frontend/`:
+
+  | quantas | o que carregam | quem |
+  |---|---|---|
+  | 6 | `app-mode.css`/`app-mode.js` | `login`, `cadastro`, `home`, `dashboard`, `comandos-app`, `settings` |
+  | 14 | o shim `frontend/safe-area.js` | as estáticas: `index`, `precos`, `termos`, `privacy`, `onboarding`, `suporte`, `agents`, `changelog`, `comandos`, `como-funciona`, `funcionalidades`, `blog-article`, `reset-password`, `whatsapp` |
+  | 5 | nada, de propósito | `admin-login`, `admin-dashboard`, `_dash_mockup`, `preview_agentes`, e o `ddf99f17-…` |
+
+  As duas páginas geradas em Python (bullet seguinte) também carregam o shim.
+  `env(safe-area-inset-*)` aparece em **seis** arquivos de `frontend/`
+  (`git grep -l safe-area-inset -- frontend/`): os dois que implementam o tratamento
+  — `app-mode.css` e `safe-area.js` — e mais quatro que trazem o próprio inset inline:
+  `home.html`, `precos.html`, `admin-login.html` e `admin-dashboard.html`. Os dois
+  últimos são páginas que, de propósito, não carregam nem o app-mode nem o shim.
 
   Isso importa porque **qualquer rota do domínio abre no app**: o "Ver planos" do
-  dashboard leva ao `/precos`, que é uma das 19. Ao tornar uma dessas rotas alcançável
-  pelo app, o tratamento tem de ser adicionado — não há para onde "herdar".
+  dashboard leva ao `/precos`, que é uma das 14 — coberta pelo shim, não pelo
+  app-mode. Se alguma das **5** virar rota alcançável pelo app, precisa entrar no
+  shim; ela não herda nada.
 - **Existe HTML gerado em Python**, fora de qualquer template:
   `frontend/finance_bot_websocket_custom.py` devolve duas páginas standalone
   (link expirado do `/d/{code}`, descadastro). O `AppDelegate.swift` carrega o
   `/d/{code}` **direto no WebView**. Toda mudança global de frontend esquece essas
   duas — já esqueceu.
-- **O modo app é `html.pb-app`**, inerte na web. O `app-mode.js` põe no `<html>` só
-  `pb-app` e, quando a rota não tem tab bar, `pb-no-tabs`; a classe da **página** vai
-  no `<body>` como `pb-page-*` (`app-mode.js:30`, `:84`, `:85`). Não existe
-  `pb-root-*` — CSS escrito contra esse seletor nunca casa. O escopo real é
-  `html.pb-app body.pb-page-x`.
+- **O modo app é `html.pb-app`**, inerte na web. A classe da página é posta em **dois
+  lugares**, e os dois importam:
 
-  Cuidado com o fundo que o elástico revela: ele vem do **canvas**, e o canvas herda
-  do `<html>`. Hoje nenhuma regra define `background` no `<html>` — o único fundo perto
-  da raiz é `html.pb-app body.pb-page-settings { background: #0B0B0D !important }`
-  (`app-mode.css:505`), que funciona por propagação do `<body>`. Se um dia alguém
-  pintar o `<html>`, essa propagação para de valer e o `<body>` deixa de mandar no
-  canvas.
+  | elemento | classe | onde | para quê |
+  |---|---|---|---|
+  | `<body>` | `pb-page-*` | `app-mode.js:85` | escopar o CSS por página |
+  | `<html>` | `pb-root-*` | `app-mode.js:88` | pintar o **canvas** |
+
+  (mais `pb-app` em `:30` e `pb-no-tabs` em `:84`, quando a rota não tem tab bar.)
+
+  O fundo que o elástico revela é o do canvas, e o canvas vem do `<html>` — por isso
+  a cor por tela está em `html.pb-app.pb-root-*` (`app-mode.css:33-36`), não no
+  `<body>`. Pintar só o `<body>` deixa a faixa do overscroll na cor errada. O modo
+  claro do dashboard depende da mesma regra (`app-mode.css:42`).
 - **`position: fixed` não herda o padding do `body`.** Todo fixo ancorado numa borda
   precisa reservar a área segura por conta própria.
 - **Paisagem está habilitada no iPhone** (`mobile/ios/App/App/Info.plist`), então os
@@ -288,12 +320,21 @@ fixo de toda mudança de layout.
     tests/test_whatsapp_simulation.py
   )
 
-  # Guarda: erro de coleta fora da lista é problema SEU, não do ambiente.
-  NOVOS=$(PYTHONPATH=. python3 -m pytest -q 2>&1 \
-    | grep "^ERROR tests/" | sed 's/^ERROR //' \
-    | grep -vxF "$(printf '%s\n' "${IGNORADOS[@]}")")
-  if [ -n "$NOVOS" ]; then
-    echo "ERRO DE COLETA NOVO — corrija antes de tirar baseline:"; echo "$NOVOS"
+  ESPERADO="No module named 'ofxparse'"
+
+  # Guarda: valida CAMINHO **e** CAUSA. Pareia cada "ERROR collecting <arquivo>"
+  # com a linha "E <causa>" seguinte — checar só o caminho deixa passar um
+  # SyntaxError novo dentro de um dos 9 (o nome do arquivo não muda).
+  ERROS=$(PYTHONPATH=. python3 -m pytest -q --collect-only 2>&1 \
+    | awk '/ERROR collecting /{f=$0; sub(/.*ERROR collecting /,"",f); sub(/ _*$/,"",f); next}
+           f && /^E /{sub(/^E +/,""); print f" | "$0; f=""}')
+
+  INESPERADOS=$(echo "$ERROS" | grep -vF "$ESPERADO" \
+    | cat - <(echo "$ERROS" | grep -F "$ESPERADO" | cut -d' ' -f1 \
+        | grep -vxF "$(printf '%s\n' "${IGNORADOS[@]}")") | grep .)
+
+  if [ -n "$INESPERADOS" ]; then
+    echo "COLETA FORA DO ESPERADO — corrija antes de tirar baseline:"; echo "$INESPERADOS"
   else
     PYTHONPATH=. python3 -m pytest -q "${IGNORADOS[@]/#/--ignore=}"
   fi
@@ -304,8 +345,14 @@ fixo de toda mudança de layout.
   introduzir: um `ImportError` ou erro de sintaxe num arquivo de teste vira mais um
   `--ignore`, a rodada seguinte passa verde e o arquivo inteiro nunca roda. Testado:
   com um arquivo de sintaxe quebrada em `tests/`, o pipeline montou **10** `--ignore`
-  em vez de 9 e engoliu o arquivo quebrado sem uma linha de aviso. A guarda acima
-  pega esse caso — foi verificada nos dois sentidos, em `bash` e em `zsh`.
+  em vez de 9 e engoliu o arquivo quebrado sem uma linha de aviso.
+
+  **E não basta conferir o caminho.** Um `SyntaxError` novo *dentro* de um dos 9 sai
+  com o mesmo nome de arquivo, então uma guarda que só compara caminhos não vê nada e
+  o arquivo inteiro deixa de rodar. Medido: com um `def quebrado(` no fim de
+  `tests/test_recurring_value.py`, a guarda por caminho imprimiu nada e a guarda por
+  causa acusou `tests/test_recurring_value.py | File "...", line 137`. Por isso o
+  bloco acima pareia arquivo **e** causa.
 
   Com esses 9 fora, a suíte roda em ~70s: **981–984 passam**, e as falhas restantes
   incluem sempre os **7** de `tests/test_statement_import.py`. Esses 7 **não vêm todos
@@ -319,9 +366,22 @@ fixo de toda mudança de layout.
 
   Os outros dois testes de PDF do arquivo (`test_parse_pdf_nubank_extrato` e
   `test_parse_pdf_nubank_sem_secao_usa_palavra_chave`) passam mesmo sem esses pacotes:
-  operam sobre texto puro, sem gerar nem ler PDF. E nada fora de
-  `tests/test_statement_import.py` usa `reportlab`/`pypdf`, por isso o estrago fica
-  contido nesse arquivo.
+  operam sobre texto puro, sem gerar nem ler PDF.
+
+  **O estrago não para nos testes.** `reportlab` também é importado em produção, no
+  `_render_pdf` de `frontend/finance_bot_websocket_custom.py:1193`, chamado pelo
+  `build_pdf` (`:1188`) da rota de exportação. Sem o pacote, exportar PDF estoura com
+  `ModuleNotFoundError` — então **este ambiente não consegue exercitar esse fluxo**.
+  Mexeu na exportação de PDF? Ela não foi validada aqui; diga isso no relato em vez de
+  chamar de testada. São três arquivos ao todo — este, o `statement_import.py` e o
+  teste:
+
+  ```bash
+  grep -rln "reportlab\|pypdf" --include="*.py" --exclude-dir=.venv --exclude-dir=.claude .
+  ```
+
+  As exclusões não são decoração: sem elas o `grep` traz também as cópias em
+  `.claude/worktrees/`, e você conta o mesmo arquivo duas vezes.
 
   **Não trate os 7 como um bloco.** Se você mexer no parser de PDF e um desses 4 mudar
   de mensagem — de `ImportError` para uma falha de asserção, ou vice-versa — isso é
