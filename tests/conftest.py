@@ -236,6 +236,7 @@ def _block_outbound_network(monkeypatch):
 
     # httpx async client — qualquer .request bloqueia
     import httpx as _httpx
+    import requests as _requests
     async def _blocked_async(*args, **kwargs):
         raise RuntimeError(
             "Outbound HTTP (async) blocked in tests. Mock the call locally."
@@ -243,6 +244,49 @@ def _block_outbound_network(monkeypatch):
     monkeypatch.setattr(_httpx.AsyncClient, "request", _blocked_async, raising=False)
     monkeypatch.setattr(_httpx.AsyncClient, "get", _blocked_async, raising=False)
     monkeypatch.setattr(_httpx.AsyncClient, "post", _blocked_async, raising=False)
+
+    # Os clientes, não só os helpers de módulo. `httpx.Client` é a forma MAIS
+    # usada em produção (8 ocorrências) — core/services/pluggy.py inteiro
+    # depende dela, com GET/POST/PATCH/DELETE autenticados contra a conta
+    # bancária real do usuário. Enquanto só os helpers eram bloqueados, esse
+    # caminho saía para a rede sem nada falhar.
+    #
+    # O bloqueio vai no `send`, não verbo a verbo: get/post/put/patch/delete
+    # chamam `request`, que chama `send`. Um ponto só cobre todos, inclusive
+    # os que ninguém lembrou de listar (foi assim que PATCH e DELETE, usados
+    # pelo Pluggy, ficaram de fora da lista original).
+    #
+    # MAS o critério não pode ser "é um httpx.Client": o TestClient do
+    # Starlette/FastAPI HERDA de httpx.Client e é como a suíte chama as próprias
+    # rotas. Bloquear por classe derrubaria 125 testes que não têm nada a ver
+    # com rede externa. O que separa os dois é o TRANSPORTE: só o HTTPTransport
+    # do httpx abre socket; o do TestClient (_TestClientTransport) e os mocks
+    # rodam in-process.
+    _transportes_de_rede = tuple(
+        t for t in (getattr(_httpx, "HTTPTransport", None), getattr(_httpx, "AsyncHTTPTransport", None)) if t
+    )
+
+    def _vai_para_a_rede(client) -> bool:
+        return isinstance(getattr(client, "_transport", None), _transportes_de_rede)
+
+    _send_sync, _send_async = _httpx.Client.send, _httpx.AsyncClient.send
+
+    def _send_guardado(self, *a, **kw):
+        if _vai_para_a_rede(self):
+            _blocked_call()
+        return _send_sync(self, *a, **kw)
+
+    async def _send_guardado_async(self, *a, **kw):
+        if _vai_para_a_rede(self):
+            _blocked_call()
+        return await _send_async(self, *a, **kw)
+
+    monkeypatch.setattr(_httpx.Client, "send", _send_guardado, raising=False)
+    monkeypatch.setattr(_httpx.AsyncClient, "send", _send_guardado_async, raising=False)
+
+    # Mesmo furo do lado do requests: os verbos do módulo estavam cobertos, os
+    # da sessão não. Session.get/post/... chamam self.request.
+    monkeypatch.setattr(_requests.Session, "request", _blocked_call, raising=False)
 
     # OpenAI — qualquer atributo do client levanta
     class _FakeOpenAIClient:
@@ -252,6 +296,21 @@ def _block_outbound_network(monkeypatch):
                 "Mock the call locally."
             )
     monkeypatch.setattr("openai.OpenAI", lambda *a, **kw: _FakeOpenAIClient())
+
+    # `ai_router.py:20` faz `from openai import OpenAI`, o que COPIA o nome para
+    # dentro do módulo no momento do import. Trocar `openai.OpenAI` não alcança
+    # essa cópia — e `core/handle_incoming.py:38` importa o ai_router na coleta,
+    # antes desta fixture rodar. Sem o patch abaixo, `_get_client()` constrói o
+    # cliente REAL e a chamada é cobrada.
+    try:
+        import ai_router as _ai_router
+
+        monkeypatch.setattr(_ai_router, "OpenAI", lambda *a, **kw: _FakeOpenAIClient())
+        # `_get_client()` guarda o cliente num global; um cliente real cacheado
+        # por outro teste sobreviveria ao patch.
+        monkeypatch.setattr(_ai_router, "_client", None, raising=False)
+    except Exception:
+        pass  # ai_router indisponível (deps faltando) — nada a proteger aqui
 
 
 def _cleanup_user(user_id: int):
