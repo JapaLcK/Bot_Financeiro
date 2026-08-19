@@ -168,17 +168,23 @@ def test_deposit_inv_not_found_em_corrida_oferece_criar():
     assert pend.call_args[0][1] == "investment_create"
 
 
-def test_deposit_saldo_insuficiente_continua_com_mensagem_propria():
+def test_deposit_saldo_insuficiente_diz_quanto_falta():
+    """"Saldo insuficiente na conta" era vago e foi o que enganou o usuário que
+    via R$ 1.387,76 na tela. A resposta agora nomeia o saldo e mostra o número
+    (a explicação Carteira x Bancos tem teste próprio em test_aporte_open_finance)."""
     with patch("core.handlers.investments.db.investment_deposit_from_account",
                side_effect=ValueError("INSUFFICIENT_ACCOUNT")), \
          patch("core.handlers.investments.db.accrue_all_investments",
                return_value=_CARTEIRA_TESOURO), \
+         patch("core.handlers.investments.db.get_consolidated_balance",
+               return_value={"manual": 50, "open_finance_bank": 0, "of_bank_count": 0}), \
          patch("core.handlers.investments.build_dashboard_link", return_value="https://app.test/d/abc"):
         msg = h_investments.deposit(
             123, "investi 999999 no tesouro direto",
             {"investment_name": "Tesouro Direto", "amount": 999999},
         )
-    assert "Saldo insuficiente na conta" in msg
+    assert "R$ 50,00" in msg
+    assert "R$ 999.999,00" in msg
 
 
 def test_deposit_sucesso_responde_com_id():
