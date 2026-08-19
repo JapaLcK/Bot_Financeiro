@@ -101,7 +101,9 @@ def _norm(txt: str) -> str:
     return "".join(c for c in base if unicodedata.category(c) != "Mn")
 
 
-_NEGATIVAS = {"nao", "não", "n", "cancelar", "cancela", "deixa", "esquece", "depois"}
+# Comparados já normalizados por _norm (minúsculo, sem acento) — por isso
+# "nao" e não "não".
+_NEGATIVAS = {"nao", "n", "cancelar", "cancela", "deixa", "esquece", "depois"}
 
 
 def _casa_investimento(alvo: str, rows: list) -> list:
@@ -210,11 +212,25 @@ def _cria_e_aporta(user_id: int, payload: dict, spec: dict) -> str:
         return "Não consegui criar o investimento agora. Tente de novo em instantes."
 
     db.clear_pending_action(user_id)
+
+    # `launch_id is None` = o investimento JÁ existia (o insert bateu no
+    # `on conflict do nothing`), e nesse caminho o create_investment_db retorna
+    # ANTES de lançar o aporte inicial — medido: saldo da conta não muda e o
+    # investimento fica com o saldo antigo. Anunciar "criado com aporte de X"
+    # aqui seria confirmar dinheiro que não saiu do lugar. Acontece por corrida
+    # (o user cadastrou pelo dashboard no meio da conversa), então em vez de só
+    # avisar, faz o aporte que ele pediu.
+    if launch_id is None:
+        return deposit(
+            user_id,
+            payload.get("text") or canon,
+            {"investment_name": canon, "amount": amount},
+        )
+
     taxa_txt = fmt_rate(spec["rate"], spec["period"])
-    id_txt = f" ID #{db.display_id_for(user_id, launch_id)}." if launch_id else ""
     return (
         f"✅ **{_format_inv_name(canon)}** criado ({taxa_txt}) "
-        f"com aporte de **{fmt_brl(amount)}**.{id_txt}\n\n"
+        f"com aporte de **{fmt_brl(amount)}**. ID #{db.display_id_for(user_id, launch_id)}.\n\n"
         "Ele já aparece no seu dashboard.\n\n" + _investment_dashboard_link(user_id)
     )
 
@@ -226,6 +242,9 @@ def resolve_pending(user_id: int, text: str, pending: dict) -> str | None:
     roteador segue o caminho normal, sem prender o usuário no fluxo.
     """
     tipo = pending.get("action_type")
+    if tipo not in ("investment_pick", "investment_create"):
+        return None  # pendente de outro fluxo: não é nosso para cancelar
+
     payload = dict(pending.get("payload") or {})
     resposta = (text or "").strip()
     amount = float(payload.get("amount") or 0)
@@ -236,8 +255,21 @@ def resolve_pending(user_id: int, text: str, pending: dict) -> str | None:
 
     if tipo == "investment_pick":
         rows = db.accrue_all_investments(user_id)
+
+        # O nome COMPLETO ganha do prefixo "criar/novo". Sem isto, quem tem um
+        # investimento chamado "Novo CDB" e responde exatamente isso cai no
+        # fluxo de criação de um "CDB" — o prefixo comeria o nome real.
+        exato = [r for r in rows if _norm(r["name"]) == _norm(resposta)]
+        if len(exato) == 1:
+            db.clear_pending_action(user_id)
+            return deposit(
+                user_id,
+                payload.get("text") or resposta,
+                {"investment_name": exato[0]["name"], "amount": amount},
+            )
+
         # "criar <nome>" durante a escolha muda para o fluxo de criação
-        m = re.match(r"^\s*(?:criar|cria|criá|novo|nova)\s+(.+)$", resposta, re.I)
+        m = re.match(r"^\s*(?:criar|cria|novo|nova)\s+(.+)$", resposta, re.I)
         if m:
             return _oferece_criar(user_id, amount, m.group(1), payload.get("text") or resposta)
 
@@ -407,8 +439,19 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
             withdraw_all=want_all,
         )
     except LookupError:
+        # Carteira vazia precisa de texto próprio: "Estes são seus
+        # investimentos:" seguido de "você ainda não tem nenhum" é contraditório.
+        rows = db.accrue_all_investments(user_id)
+        pretty = _format_inv_name(investment_name)
+        if not rows:
+            return (
+                f"Você ainda não tem investimentos, então não dá para resgatar "
+                f"de **{pretty}**.\n\n" + _investment_dashboard_link(user_id)
+            )
         return list_investments(
-            user_id, f"Não encontrei **{_format_inv_name(investment_name)}**. Estes são seus investimentos:"
+            user_id,
+            f"Não encontrei **{pretty}**. Estes são seus investimentos:",
+            rows=rows,
         )
     except ValueError as e:
         code = str(e)

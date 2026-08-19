@@ -518,3 +518,115 @@ def test_resolve_pending_devolve_none_para_pendente_alheio():
     assert h_investments.resolve_pending(
         123, "oi", {"action_type": "investment_create", "payload": {"etapa": "?"}}
     ) is None
+
+
+# ─── Achados da revisão própria (o Codex está fora do ar) ────────────────────
+
+def test_create_com_nome_que_ja_existe_nao_anuncia_aporte_falso():
+    """`create_investment_db` retorna launch_id=None quando o nome já existe —
+    e nesse caminho ele volta ANTES de lançar o aporte inicial (medido: o saldo
+    da conta não muda). Anunciar "criado com aporte de R$ 800" aqui seria
+    confirmar dinheiro que não saiu do lugar.
+
+    Acontece por corrida: o user cadastra pelo dashboard no meio da conversa.
+    """
+    pending = _pend("investment_create", amount=800.0, etapa="taxa",
+                    nome="Renda Fixa", text="Investi 800 na renda fixa")
+    rows = [{"name": "Renda Fixa", "balance": 0.0, "rate": 1.0,
+             "period": "cdi", "last_date": date(2026, 4, 16)}]
+
+    with patch("core.handlers.investments.db.create_investment_db",
+               return_value=(None, 7, "Renda Fixa")), \
+         patch("core.handlers.investments.db.clear_pending_action"), \
+         patch("core.handlers.investments.db.accrue_all_investments", return_value=rows), \
+         patch("core.handlers.investments.db.investment_deposit_from_account",
+               return_value=(44, 0.0, 800.0, "Renda Fixa")) as dep, \
+         patch("core.handlers.investments.db.display_id_for", return_value=9):
+        msg = h_investments.resolve_pending(123, "100% do CDI", pending)
+
+    # o aporte que o user pediu tem que acontecer de verdade
+    dep.assert_called_once()
+    assert dep.call_args[0][2] == 800.0
+    assert "criado" not in msg          # não existia criação nenhuma
+    assert "✅" in msg and "#9" in msg
+
+
+def test_pick_nome_que_comeca_com_novo_nao_vira_comando_criar():
+    """Quem tem "Novo CDB" e responde exatamente isso quer aportar nele —
+    o prefixo "novo" não pode comer o nome e abrir criação de um "CDB"."""
+    rows = [{"name": "Novo CDB", "balance": 100.0, "rate": 0.12,
+             "period": "yearly", "last_date": date(2026, 4, 16)}]
+    pending = _pend("investment_pick", amount=800.0, text="investi 800", alvo="")
+
+    with patch("core.handlers.investments.db.accrue_all_investments", return_value=rows), \
+         patch("core.handlers.investments.db.clear_pending_action"), \
+         patch("core.handlers.investments.db.set_pending_action") as pend, \
+         patch("core.handlers.investments.db.investment_deposit_from_account",
+               return_value=(1, 0.0, 900.0, "Novo CDB")) as dep, \
+         patch("core.handlers.investments.db.display_id_for", return_value=2):
+        msg = h_investments.resolve_pending(123, "Novo CDB", pending)
+
+    assert dep.call_args[0][1] == "Novo CDB"
+    pend.assert_not_called()            # não abriu fluxo de criação
+    assert "✅" in msg
+
+
+def test_pick_criar_nome_novo_continua_criando():
+    """A guarda acima não pode matar o caminho legítimo: "criar X" com X
+    inexistente segue para a criação."""
+    rows = [{"name": "Novo CDB", "balance": 100.0, "rate": 0.12,
+             "period": "yearly", "last_date": date(2026, 4, 16)}]
+    pending = _pend("investment_pick", amount=800.0, text="investi 800", alvo="")
+
+    with patch("core.handlers.investments.db.accrue_all_investments", return_value=rows), \
+         patch("core.handlers.investments.db.set_pending_action") as pend, \
+         patch("core.handlers.investments.db.investment_deposit_from_account") as dep:
+        h_investments.resolve_pending(123, "criar Tesouro Selic 2029", pending)
+
+    dep.assert_not_called()
+    tipo, payload = _pending(pend)
+    assert tipo == "investment_create"
+    assert payload["nome"] == "Tesouro SELIC 2029"
+
+
+def test_resolve_pending_nao_cancela_pendente_de_outro_fluxo():
+    """A negativa era checada ANTES do tipo: um "não" respondendo a uma
+    confirmação de exclusão limpava o pendente alheio e respondia "cancelei o
+    aporte"."""
+    with patch("core.handlers.investments.db.clear_pending_action") as clear:
+        out = h_investments.resolve_pending(
+            123, "não", {"action_type": "delete_launch", "payload": {}}
+        )
+    assert out is None
+    clear.assert_not_called()
+
+
+def test_withdraw_carteira_vazia_nao_se_contradiz():
+    """"Estes são seus investimentos:" seguido de "você ainda não tem
+    investimentos cadastrados" é texto contraditório."""
+    with patch("core.handlers.investments.db.investment_withdraw_to_account",
+               side_effect=LookupError("INV_NOT_FOUND")), \
+         patch("core.handlers.investments.db.accrue_all_investments", return_value=[]), \
+         patch("core.handlers.investments.build_dashboard_link", return_value="https://app.test/d/abc"):
+        msg = h_investments.withdraw(
+            123, "resgatei 100 do tesouro", {"investment_name": "tesouro", "amount": 100},
+        )
+
+    assert "Estes são seus investimentos" not in msg
+    assert "Tesouro" in msg
+    assert "https://app.test/d/abc" in msg
+
+
+def test_withdraw_com_carteira_continua_listando():
+    rows = [{"name": "CDB Inter", "balance": 500.0, "rate": 0.12,
+             "period": "yearly", "last_date": date(2026, 4, 16)}]
+    with patch("core.handlers.investments.db.investment_withdraw_to_account",
+               side_effect=LookupError("INV_NOT_FOUND")), \
+         patch("core.handlers.investments.db.accrue_all_investments", return_value=rows) as accrue, \
+         patch("core.handlers.investments.build_dashboard_link", return_value="https://app.test/d/abc"):
+        msg = h_investments.withdraw(
+            123, "resgatei 100 do tesouro", {"investment_name": "tesouro", "amount": 100},
+        )
+
+    assert "CDB Inter" in msg
+    assert accrue.call_count == 1       # a lista é reaproveitada, não buscada 2x

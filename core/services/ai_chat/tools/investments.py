@@ -189,6 +189,14 @@ def _create_investment_execute(user_id: int, args: dict[str, Any]) -> str:
             return e.message
         return f"🐷 Não consegui criar: {e}"
 
+    # `_launch_id is None` = já existia: o create_investment_db retorna antes de
+    # lançar o aporte inicial (medido: o saldo da conta não muda). Anunciar
+    # "criado com aporte" aqui confirmaria dinheiro que não saiu do lugar.
+    if _launch_id is None:
+        if not initial_amount:
+            return f'🐷 O investimento "{canon}" já existe.'
+        return _investment_deposit_execute(user_id, {"name": canon, "amount": initial_amount})
+
     if initial_amount:
         return (
             f'✅ Investimento "{canon}" criado com aporte de '
@@ -220,25 +228,27 @@ def _investment_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
         return f'✅ Aporte de R$ {amount:.2f} no "{name}" registrado.'
     except LookupError:
         # INV_NOT_FOUND. Mandar pro dashboard aqui era um beco: o user está no
-        # WhatsApp querendo aportar. Devolve a carteira pro modelo perguntar em
-        # qual aportar — e, se não houver nenhum, oferecer criar (create_investment
-        # aceita initial_amount, então cria e aporta de uma vez).
+        # WhatsApp querendo aportar. A pergunta vai NA MENSAGEM, não como
+        # instrução pro modelo: em tool de escrita, o retorno de `execute` É a
+        # resposta final que chega no WhatsApp (contrato em tools/_base.py) —
+        # não há segundo round-trip com o LLM para reformular. Texto de
+        # instrução aqui vazaria "PERGUNTE ao user..." direto pro cliente.
         try:
             existentes = [r["name"] for r in db.accrue_all_investments(user_id)]
         except Exception:
             existentes = []
         if existentes:
             return (
-                f'🐷 Não achei "{name}". Os investimentos do user são: '
+                f'🐷 Não achei "{name}" na sua carteira. Você tem: '
                 + ", ".join(existentes)
-                + ". PERGUNTE em qual desses ele quer aportar (ou se quer criar "
-                  "um novo com create_investment) — não escolha por ele."
+                + f". Em qual desses você quer aportar os R$ {amount:.2f}? "
+                  "Se for um novo, me diz o nome e quanto rende que eu crio."
             )
         return (
-            f'🐷 O user não tem nenhum investimento cadastrado, então "{name}" '
-            "não existe. PERGUNTE se ele quer criar agora: precisa do nome, da "
-            f"taxa e do período. Com a resposta, chame create_investment com "
-            f"initial_amount={amount:.2f} — cria e já lança o aporte."
+            "🐷 Você ainda não tem investimento cadastrado, então não dá pra "
+            f'aportar em "{name}" ainda. Quer que eu crie agora? Me diz o nome '
+            f"e quanto rende (ex: *cria CDB Nubank a 100% do CDI e investe "
+            f'{amount:.2f}*) que eu cadastro e já lanço o aporte.'
         )
     except ValueError as e:
         if "INSUFFICIENT_ACCOUNT" in str(e):
