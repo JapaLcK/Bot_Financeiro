@@ -105,6 +105,54 @@ def _norm(txt: str) -> str:
 # "nao" e não "não".
 _NEGATIVAS = {"nao", "n", "cancelar", "cancela", "deixa", "esquece", "depois"}
 
+_AFIRMATIVAS = {
+    "sim", "s", "isso", "pode", "claro", "ok", "quero",
+    "registrar", "registra", "registrar mesmo assim", "mesmo assim", "cadastrar",
+}
+
+
+def _saldos(user_id: int) -> dict:
+    """Carteira, bancos conectados e o consolidado — os três números que o app mostra.
+
+    `manual` é `accounts.balance`, a Carteira: dinheiro FORA dos bancos conectados.
+    Ao conectar o primeiro banco o usuário zera a Carteira de propósito, senão o
+    mesmo dinheiro conta duas vezes (ver dashboard.js, "Ajustar carteira"). Por isso
+    quem tem Open Finance costuma ter Carteira = 0 e saldo na tela > 0.
+    """
+    try:
+        cb = db.get_consolidated_balance(user_id)
+    except Exception:
+        logger.exception("get_consolidated_balance falhou user=%s", user_id)
+        return {"carteira": 0.0, "banco": 0.0, "total": 0.0, "tem_banco": False}
+    carteira = float(cb.get("manual") or 0)
+    banco = float(cb.get("open_finance_bank") or 0)
+    return {
+        "carteira": carteira,
+        "banco": banco,
+        "total": carteira + banco,
+        "tem_banco": int(cb.get("of_bank_count") or 0) > 0,
+    }
+
+
+def _msg_saldo_insuficiente(user_id: int, amount: float, acao: str = "aporte") -> str:
+    """"Saldo insuficiente na conta" era o que mais confundia: o usuário via
+    R$ 1.387,76 na tela e o bot dizia que não tinha saldo. Agora a resposta diz
+    QUAL saldo faltou e quanto ele é."""
+    s = _saldos(user_id)
+    if s["tem_banco"]:
+        return (
+            f"Sua **Carteira** tem {fmt_brl(s['carteira'])} — e é dela que sai o {acao}.\n\n"
+            f"Os {fmt_brl(s['total'])} que aparecem como saldo somam a Carteira com os "
+            f"bancos conectados ({fmt_brl(s['banco'])}). O dinheiro que está no banco "
+            "quem movimenta é você, pelo app dele; a Carteira é o que está fora "
+            "(espécie e contas não conectadas).\n\n"
+            "Se esse valor saiu mesmo da Carteira, ajuste-a no dashboard."
+        )
+    return (
+        f"Saldo insuficiente: você tem {fmt_brl(s['carteira'])} na conta e o {acao} "
+        f"é de {fmt_brl(amount)}."
+    )
+
 
 def _casa_investimento(alvo: str, rows: list) -> list:
     """Investimentos cujo nome bate com `alvo` — exato primeiro, depois parcial.
@@ -137,8 +185,42 @@ def _pergunta_qual(user_id: int, amount: float, rows: list, texto: str, alvo: st
     )
 
 
+def _aviso_open_finance(user_id: int, amount: float, nome_sugerido: str, texto: str) -> str:
+    """Banco conectado + investimento novo: avisa ANTES de gravar.
+
+    O sync do Open Finance já traz as posições de renda fixa do banco
+    (`open_finance_investments`, tipo FIXED_INCOME), então cadastrar na mão um
+    ativo que é do próprio banco cria uma segunda linha do mesmo dinheiro. Não é
+    regra nova: a caixinha vinda do OF já é read-only pelo mesmo motivo
+    (`db/pockets.py`, OF_POCKET_READONLY).
+
+    O aviso só aparece quando o investimento NÃO existe no PigBank. Para um ativo
+    que o usuário cadastrou de propósito, dizer "ele entra sozinho pelo Open
+    Finance" seria falso — e avisar em todo aporte só treinaria o usuário a
+    ignorar o aviso.
+    """
+    pretty = _format_inv_name(nome_sugerido) if nome_sugerido else ""
+    db.set_pending_action(
+        user_id,
+        "investment_create",
+        {"amount": float(amount), "text": texto, "etapa": "of_aviso", "nome": pretty},
+        minutes=10,
+    )
+    alvo = f"**{pretty}**" if pretty else "esse investimento"
+    return (
+        "🏦 Vi que você tem banco conectado.\n\n"
+        f"Se {alvo} é no próprio banco, não precisa registrar aqui: ele entra sozinho "
+        "pelo Open Finance, com o saldo se atualizando junto. Cadastrar na mão criaria "
+        "uma segunda linha do mesmo dinheiro.\n\n"
+        "Se for fora do banco conectado (uma corretora, por exemplo), responda "
+        "*registrar mesmo assim*."
+    )
+
+
 def _oferece_criar(user_id: int, amount: float, nome_sugerido: str, texto: str) -> str:
     """Não há investimento que sirva: oferece criar, já com o nome que o usuário disse."""
+    if _saldos(user_id)["tem_banco"]:
+        return _aviso_open_finance(user_id, amount, nome_sugerido, texto)
     pretty = _format_inv_name(nome_sugerido) if nome_sugerido else ""
     db.set_pending_action(
         user_id,
@@ -186,6 +268,7 @@ def _cria_e_aporta(user_id: int, payload: dict, spec: dict) -> str:
             tax_profile=spec.get("tax_profile"),
             initial_amount=amount,
             initial_note=f"Aporte inicial em {nome}",
+            debit_account=not _saldos(user_id)["tem_banco"],
         )
     except ValueError as e:
         code = str(e)
@@ -196,9 +279,9 @@ def _cria_e_aporta(user_id: int, payload: dict, spec: dict) -> str:
             # "criei o cadastro" aqui seria mentira.
             db.clear_pending_action(user_id)
             return (
-                f"Não criei **{_format_inv_name(nome)}**: seu saldo em conta não cobre "
-                f"{fmt_brl(amount)}.\n"
-                "Manda de novo com um valor que caiba, ou deposite antes.\n\n"
+                f"Não criei **{_format_inv_name(nome)}**.\n\n"
+                + _msg_saldo_insuficiente(user_id, amount)
+                + "\n\n"
                 + _investment_dashboard_link(user_id)
             )
         logger.warning("criar investimento: código inesperado user=%s code=%s", user_id, code)
@@ -289,9 +372,27 @@ def resolve_pending(user_id: int, text: str, pending: dict) -> str | None:
     if tipo == "investment_create":
         etapa = payload.get("etapa")
 
+        if etapa == "of_aviso":
+            # Só uma afirmativa explícita passa pelo aviso. Texto solto NÃO vira
+            # consentimento — senão o gate cai justamente quando o usuário está
+            # confuso, que é quando ele mais serve. A negativa já foi tratada
+            # acima; o pendente expira em 10 min e o roteador solta a mensagem
+            # se ela for outro comando claro.
+            if _norm(resposta) not in _AFIRMATIVAS:
+                return (
+                    "Só para eu não duplicar o seu dinheiro: responda "
+                    "*registrar mesmo assim* se esse investimento é fora do banco "
+                    "conectado, ou *não* para deixar o Open Finance cuidar disso."
+                )
+            if payload.get("nome"):
+                return _pergunta_taxa(user_id, payload)
+            payload["etapa"] = "nome"
+            db.set_pending_action(user_id, "investment_create", payload, minutes=10)
+            return "Beleza. Qual nome você quer dar? (ex: *CDB XP*)"
+
         if etapa == "nome":
             # "sim" confirma o nome sugerido; qualquer outra coisa vira o nome
-            if _norm(resposta) in {"sim", "s", "isso", "pode", "claro", "ok"}:
+            if _norm(resposta) in _AFIRMATIVAS:
                 if not payload.get("nome"):
                     return "Qual nome você quer dar? (ex: *CDB Nubank*)"
             else:
@@ -354,9 +455,13 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
     # Códigos vêm de db/investments.py como str(exc) — trate por TIPO e código
     # exato. Casar substring é frágil: "not found" nunca casou com
     # "INV_NOT_FOUND" (espaço × underscore) e o código cru vazava pro WhatsApp.
+    # Com banco conectado o dinheiro está no banco, não na Carteira (que fica
+    # zerada de propósito) — debitar dali inventaria uma saída. Ver
+    # investment_deposit_from_account.
     try:
         launch_id, _new_acc, _new_inv, canon = db.investment_deposit_from_account(
-            user_id, investment_name, float(amount), text
+            user_id, investment_name, float(amount), text,
+            debit_account=not _saldos(user_id)["tem_banco"],
         )
     except LookupError:
         # Corrida rara: sumiu entre a checagem acima e o aporte.
@@ -364,7 +469,7 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
     except ValueError as e:
         code = str(e)
         if code == "INSUFFICIENT_ACCOUNT":
-            return "Saldo insuficiente na conta para esse aporte.\n\n" + _investment_dashboard_link(user_id)
+            return _msg_saldo_insuficiente(user_id, float(amount)) + "\n\n" + _investment_dashboard_link(user_id)
         if code == "AMOUNT_INVALID":
             return "Valor inválido para aporte. Tente: *aportar 500 no CDB Nubank*."
         logger.warning("deposit: código inesperado user=%s inv=%s code=%s", user_id, investment_name, code)
@@ -436,6 +541,7 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
             investment_name,
             None if want_all else float(amount),
             text,
+            credit_account=not _saldos(user_id)["tem_banco"],
             withdraw_all=want_all,
         )
     except LookupError:

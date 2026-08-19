@@ -72,9 +72,14 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
     if not amount or float(amount) <= 0:
         return "Qual o valor? Tente: *coloquei 200 na caixinha viagem*"
 
+    # Com banco conectado o dinheiro está no banco, não na Carteira — mesma regra
+    # do aporte em investimento (core/handlers/investments.py::_saldos).
+    from core.handlers.investments import _saldos, _msg_saldo_insuficiente
+
     try:
         launch_id, new_acc, new_pocket, canon = db.pocket_deposit_from_account(
-            user_id, pocket_name, float(amount), text
+            user_id, pocket_name, float(amount), text,
+            debit_account=not _saldos(user_id)["tem_banco"],
         )
         return (
             f"✅ Depósito na caixinha **{canon}**: +{fmt_brl(float(amount))}\n"
@@ -87,7 +92,7 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
         if "OF_POCKET_READONLY" in str(e):
             return "Essa caixinha é sincronizada com seu banco — mova o dinheiro pelo app do banco."
         if "INSUFFICIENT_ACCOUNT" in str(e):
-            return "Saldo insuficiente na conta para esse depósito."
+            return _msg_saldo_insuficiente(user_id, float(amount), acao="depósito")
         return "Valor inválido."
     except Exception as e:
         return f"Erro ao depositar: {e}"
@@ -148,6 +153,8 @@ def _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, l
 
 
 def withdraw(user_id: int, text: str, entities: dict) -> str:
+    from core.handlers.investments import _saldos
+
     pocket_name = entities.get("pocket_name")
     amount      = entities.get("amount")
     want_all    = bool(_WITHDRAW_ALL_RX.search(text or ""))
@@ -169,7 +176,8 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
     if want_all:
         try:
             launch_id, new_acc, new_pocket, canon, taxes = db.pocket_withdraw_to_account(
-                user_id, pocket_name, None, text, withdraw_all=True
+                user_id, pocket_name, None, text, withdraw_all=True,
+                credit_account=not _saldos(user_id)["tem_banco"],
             )
         except LookupError:
             return f"Caixinha **{pocket_name}** não encontrada. Use *listar caixinhas* para ver as disponíveis."
@@ -189,7 +197,8 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
 
     try:
         launch_id, new_acc, new_pocket, canon, taxes = db.pocket_withdraw_to_account(
-            user_id, pocket_name, float(amount), text
+            user_id, pocket_name, float(amount), text,
+            credit_account=not _saldos(user_id)["tem_banco"],
         )
     except LookupError:
         return f"Caixinha **{pocket_name}** não encontrada. Use *listar caixinhas* para ver as disponíveis."
