@@ -134,6 +134,26 @@ def _saldos(user_id: int) -> dict:
     }
 
 
+def _nota_sync_of(saida: bool = True) -> str:
+    """Aviso obrigatório quando o Pig registra só metade da movimentação.
+
+    Com banco conectado o Pig anota o lado do investimento na hora, mas o lado
+    do dinheiro só aparece quando o Open Finance sincronizar. Entre uma coisa e
+    outra o patrimônio fica alto (no aporte) ou baixo (no resgate) pelo valor da
+    operação — e sem este aviso o usuário vê o número errado sem entender por quê.
+
+    Também avisa da segunda linha: a transação do banco entra como um lançamento
+    próprio e a reconciliação não a funde com o aporte (ela só casa despesa/receita
+    não-interna com lançamento manual — ver db/open_finance.py::_find_manual_candidates).
+    """
+    movimento = "saída" if saida else "entrada"
+    return (
+        f"🔄 Anotei só o lado do investimento. A {movimento} do dinheiro aparece "
+        "quando o Open Finance sincronizar — até lá o saldo do banco fica como está, "
+        "e a transação pode surgir como uma segunda linha no extrato."
+    )
+
+
 def _msg_saldo_insuficiente(user_id: int, amount: float, acao: str = "aporte") -> str:
     """"Saldo insuficiente na conta" era o que mais confundia: o usuário via
     R$ 1.387,76 na tela e o bot dizia que não tinha saldo. Agora a resposta diz
@@ -256,6 +276,7 @@ def _cria_e_aporta(user_id: int, payload: dict, spec: dict) -> str:
     """Cria o investimento e lança o aporte na mesma transação."""
     nome = payload["nome"]
     amount = float(payload["amount"])
+    tem_banco = _saldos(user_id)["tem_banco"]
     try:
         launch_id, _inv_id, canon = db.create_investment_db(
             user_id,
@@ -268,7 +289,7 @@ def _cria_e_aporta(user_id: int, payload: dict, spec: dict) -> str:
             tax_profile=spec.get("tax_profile"),
             initial_amount=amount,
             initial_note=f"Aporte inicial em {nome}",
-            debit_account=not _saldos(user_id)["tem_banco"],
+            debit_account=not tem_banco,
         )
     except ValueError as e:
         code = str(e)
@@ -314,7 +335,9 @@ def _cria_e_aporta(user_id: int, payload: dict, spec: dict) -> str:
     return (
         f"✅ **{_format_inv_name(canon)}** criado ({taxa_txt}) "
         f"com aporte de **{fmt_brl(amount)}**. ID #{db.display_id_for(user_id, launch_id)}.\n\n"
-        "Ele já aparece no seu dashboard.\n\n" + _investment_dashboard_link(user_id)
+        "Ele já aparece no seu dashboard.\n\n"
+        + (_nota_sync_of() + "\n\n" if tem_banco else "")
+        + _investment_dashboard_link(user_id)
     )
 
 
@@ -458,10 +481,11 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
     # Com banco conectado o dinheiro está no banco, não na Carteira (que fica
     # zerada de propósito) — debitar dali inventaria uma saída. Ver
     # investment_deposit_from_account.
+    tem_banco = _saldos(user_id)["tem_banco"]
     try:
         launch_id, _new_acc, _new_inv, canon = db.investment_deposit_from_account(
             user_id, investment_name, float(amount), text,
-            debit_account=not _saldos(user_id)["tem_banco"],
+            debit_account=not tem_banco,
         )
     except LookupError:
         # Corrida rara: sumiu entre a checagem acima e o aporte.
@@ -481,7 +505,8 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
         return "Não consegui registrar esse aporte agora. Tente de novo em instantes."
 
     display_id = db.display_id_for(user_id, launch_id)
-    return f"✅ Aporte de **{fmt_brl(float(amount))}** em **{canon}**. ID #{display_id}."
+    msg = f"✅ Aporte de **{fmt_brl(float(amount))}** em **{canon}**. ID #{display_id}."
+    return msg + ("\n\n" + _nota_sync_of() if tem_banco else "")
 
 
 def check_cdi() -> str:
@@ -535,13 +560,15 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
     if not want_all and (not amount or float(amount) <= 0):
         return list_investments(user_id, "Qual valor você quer resgatar?")
 
+    tem_banco = _saldos(user_id)["tem_banco"]
+
     try:
         launch_id, _new_acc, _new_inv, canon, taxes = db.investment_withdraw_to_account(
             user_id,
             investment_name,
             None if want_all else float(amount),
             text,
-            credit_account=not _saldos(user_id)["tem_banco"],
+            credit_account=not tem_banco,
             withdraw_all=want_all,
         )
     except LookupError:
@@ -578,4 +605,10 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
     if taxes and float(taxes.get("iof", 0) or 0) + float(taxes.get("ir", 0) or 0) > 0:
         tax_note = f" Líquido: **{fmt_brl(float(taxes.get('net', 0)))}**."
     verb = "Resgate total" if want_all else "Resgate"
-    return f"✅ {verb} de **{fmt_brl(gross)}** de **{canon}**.{tax_note} ID #{db.display_id_for(user_id, launch_id)}.\n\n" + list_investments(user_id)
+    nota_sync = _nota_sync_of(saida=False) + "\n\n" if tem_banco else ""
+    return (
+        f"✅ {verb} de **{fmt_brl(gross)}** de **{canon}**.{tax_note} "
+        f"ID #{db.display_id_for(user_id, launch_id)}.\n\n"
+        + nota_sync
+        + list_investments(user_id)
+    )

@@ -171,7 +171,7 @@ def test_investimento_novo_sem_banco_nao_avisa(user_id):
         user_id, "Investi 800 na renda fixa",
         {"investment_name": "renda fixa", "amount": 800},
     )
-    assert "Open Finance" not in msg
+    assert "registrar mesmo assim" not in msg
     assert db.get_pending_action(user_id)["payload"]["etapa"] == "nome"
 
 
@@ -187,7 +187,10 @@ def test_investimento_que_ja_existe_nao_avisa(user_id):
         {"investment_name": "CDB XP", "amount": 800},
     )
 
-    assert "Open Finance" not in msg
+    # o aviso de CADASTRO não aparece (é o que este teste cobre); o aviso do
+    # SYNC aparece sim, e tem teste próprio — são coisas diferentes.
+    assert "registrar mesmo assim" not in msg
+    assert "não precisa registrar aqui" not in msg
     assert "✅" in msg
 
 
@@ -322,3 +325,89 @@ def test_ia_mensagem_de_saldo_tambem_ficou_certeira(user_id):
 
     assert "Saldo insuficiente na conta pra esse aporte." not in out
     assert "R$ 50,00" in out and "R$ 800,00" in out
+
+
+# ─── o aviso do sync ────────────────────────────────────────────────────────
+#
+# Com banco conectado o Pig anota só metade da movimentação: o lado do
+# investimento entra na hora, o lado do dinheiro só quando o banco sincronizar.
+# Nesse intervalo o patrimônio fica alto (aporte) ou baixo (resgate) pelo valor
+# da operação. Sem o aviso, o usuário vê o número errado sem entender por quê —
+# foi exatamente a dúvida que apareceu no primeiro teste real.
+
+def _tem_aviso(msg: str) -> bool:
+    return "Open Finance sincronizar" in msg
+
+
+def test_aporte_com_banco_avisa_do_sync(user_id):
+    _connect_fake_bank(user_id)
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+
+    msg = h_investments.deposit(user_id, "Investi 800 na renda fixa",
+                                {"investment_name": "Renda Fixa", "amount": 800})
+
+    assert _tem_aviso(msg)
+    assert "saída" in msg          # no aporte o que falta aparecer é a saída
+    assert "segunda linha" in msg  # e a transação do banco vem como linha própria
+
+
+def test_aporte_sem_banco_nao_avisa(user_id):
+    """Sem Open Finance a Carteira é debitada na hora — não há nada a sincronizar,
+    e o aviso só confundiria."""
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+
+    msg = h_investments.deposit(user_id, "Investi 800 na renda fixa",
+                                {"investment_name": "Renda Fixa", "amount": 800})
+
+    assert not _tem_aviso(msg)
+
+
+def test_resgate_com_banco_avisa_da_entrada(user_id):
+    _connect_fake_bank(user_id)
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+    db.investment_deposit_from_account(user_id, "Renda Fixa", 800, "t", debit_account=False)
+
+    msg = h_investments.withdraw(user_id, "resgatei 300 da renda fixa",
+                                 {"investment_name": "Renda Fixa", "amount": 300})
+
+    assert _tem_aviso(msg)
+    assert "entrada" in msg        # no resgate é a entrada que falta
+
+
+def test_criacao_com_aporte_tambem_avisa(user_id):
+    _connect_fake_bank(user_id)
+
+    h_investments.deposit(user_id, "Investi 800 na renda fixa",
+                          {"investment_name": "renda fixa", "amount": 800})
+    h_investments.resolve_pending(user_id, "registrar mesmo assim",
+                                  db.get_pending_action(user_id))
+    msg = h_investments.resolve_pending(user_id, "100% do CDI",
+                                        db.get_pending_action(user_id))
+
+    assert _tem_aviso(msg)
+
+
+def test_caixinha_avisa_nos_dois_sentidos(user_id):
+    from core.handlers import pockets as h_pockets
+
+    _connect_fake_bank(user_id)
+    db.create_pocket(user_id, "Viagem")
+
+    dep = h_pockets.deposit(user_id, "coloquei 200 na caixinha viagem",
+                            {"pocket_name": "Viagem", "amount": 200})
+    saq = h_pockets.withdraw(user_id, "retirei 50 da caixinha viagem",
+                             {"pocket_name": "Viagem", "amount": 50})
+
+    assert _tem_aviso(dep) and "saída" in dep
+    assert _tem_aviso(saq) and "entrada" in saq
+
+
+def test_ia_tambem_avisa(user_id):
+    from core.services.ai_chat.tools.investments import _investment_deposit_execute
+
+    _connect_fake_bank(user_id)
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+
+    out = _investment_deposit_execute(user_id, {"name": "Renda Fixa", "amount": 800})
+    assert _tem_aviso(out)

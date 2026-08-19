@@ -24,7 +24,7 @@ from typing import Any
 import db
 from utils_text import fmt_rate
 
-from core.handlers.investments import _msg_saldo_insuficiente, _saldos
+from core.handlers.investments import _msg_saldo_insuficiente, _nota_sync_of, _saldos
 
 from ._base import Tool
 
@@ -233,7 +233,8 @@ def _investment_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
             user_id, name, amount,
             debit_account=not _saldos(user_id)["tem_banco"],
         )
-        return f'✅ Aporte de R$ {amount:.2f} no "{name}" registrado.'
+        nota = "\n\n" + _nota_sync_of() if _saldos(user_id)["tem_banco"] else ""
+        return f'✅ Aporte de R$ {amount:.2f} no "{name}" registrado.' + nota
     except LookupError:
         # INV_NOT_FOUND. Mandar pro dashboard aqui era um beco: o user está no
         # WhatsApp querendo aportar. A pergunta vai NA MENSAGEM, não como

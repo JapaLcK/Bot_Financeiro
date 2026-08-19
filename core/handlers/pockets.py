@@ -74,17 +74,19 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
 
     # Com banco conectado o dinheiro está no banco, não na Carteira — mesma regra
     # do aporte em investimento (core/handlers/investments.py::_saldos).
-    from core.handlers.investments import _saldos, _msg_saldo_insuficiente
+    from core.handlers.investments import _saldos, _msg_saldo_insuficiente, _nota_sync_of
 
+    tem_banco = _saldos(user_id)["tem_banco"]
     try:
         launch_id, new_acc, new_pocket, canon = db.pocket_deposit_from_account(
             user_id, pocket_name, float(amount), text,
-            debit_account=not _saldos(user_id)["tem_banco"],
+            debit_account=not tem_banco,
         )
         return (
             f"✅ Depósito na caixinha **{canon}**: +{fmt_brl(float(amount))}\n"
             f"🏦 Conta: {fmt_brl(float(new_acc))} • 📦 Caixinha: {fmt_brl(float(new_pocket))}\n"
             f"ID: **#{db.display_id_for(user_id, launch_id)}**"
+            + ("\n\n" + _nota_sync_of() if tem_banco else "")
         )
     except LookupError:
         return f"Caixinha **{pocket_name}** não encontrada. Use *criar caixinha {pocket_name}*."
@@ -136,7 +138,7 @@ def _pocket_name_from_text(text: str):
     return pocket or None
 
 
-def _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id, *, emptied=False):
+def _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id, *, emptied=False, nota_sync=""):
     tax_note = ""
     if taxes and (taxes.get("iof", 0) or taxes.get("ir", 0)):
         tax_note = f" • IR/IOF: {fmt_brl(float(taxes.get('ir', 0) + taxes.get('iof', 0)))}"
@@ -149,11 +151,12 @@ def _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, l
         f"{head}\n"
         f"🏦 Conta: {fmt_brl(float(new_acc))} • 📦 Caixinha: {fmt_brl(float(new_pocket))}{tax_note}\n"
         f"ID: **#{db.display_id_for(user_id, launch_id)}**"
+        + nota_sync
     )
 
 
 def withdraw(user_id: int, text: str, entities: dict) -> str:
-    from core.handlers.investments import _saldos
+    from core.handlers.investments import _saldos, _nota_sync_of
 
     pocket_name = entities.get("pocket_name")
     amount      = entities.get("amount")
@@ -190,7 +193,10 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
         except Exception as e:
             return f"Erro ao retirar: {e}"
         sacado = float(taxes.get("gross", 0)) if taxes else 0.0
-        return _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id, emptied=True)
+        return _format_withdraw_reply(
+            user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id, emptied=True,
+            nota_sync="\n\n" + _nota_sync_of(saida=False) if _saldos(user_id)["tem_banco"] else "",
+        )
 
     if not amount or float(amount) <= 0:
         return "Qual o valor? Tente: *retirei 100 da caixinha viagem*"
@@ -212,4 +218,7 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
         return f"Erro ao retirar: {e}"
     # o backend pode sacar um pouco mais que o pedido (tolerância de zeragem)
     sacado = float(taxes.get("gross", amount)) if taxes else float(amount)
-    return _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id)
+    return _format_withdraw_reply(
+        user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id,
+        nota_sync="\n\n" + _nota_sync_of(saida=False) if _saldos(user_id)["tem_banco"] else "",
+    )
