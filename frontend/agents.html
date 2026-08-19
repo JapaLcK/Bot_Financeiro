@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Agentes do Piggy · PigBank</title>
+<meta name="description" content="Conheça os Agentes do Piggy: pequenos assistentes que vigiam seus gastos, avisam sobre boletos, caçam assinaturas esquecidas e cuidam do seu dinheiro sozinhos." />
+<link rel="canonical" href="https://pigbankai.com/agents" />
+<link rel="icon" type="image/png" href="/favicon.png?v=3" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
+<meta name="theme-color" content="#0c0c0d" />
+<link rel="stylesheet" href="/brand.css?v=4" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
+<link rel="stylesheet" href="/site.css?v=5" />
+<style>
+  /* ─── Galeria de Agentes ──────────────────────────────────────── */
+  .agents-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 22px;
+  }
+  .agent-card {
+    position: relative;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: transform .22s ease, border-color .22s ease, box-shadow .22s ease;
+  }
+  .agent-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(255,45,142,.42);
+    box-shadow: 0 22px 50px rgba(0,0,0,.4);
+  }
+  .agent-card.soon { opacity: .82; }
+  .agent-hero {
+    position: relative;
+    aspect-ratio: 2 / 1;
+    overflow: hidden;
+    background: #0e0e10;
+  }
+  .agent-hero img {
+    width: 100%; height: 100%;
+    object-fit: cover; object-position: center;
+    display: block;
+  }
+  .agent-hero::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: linear-gradient(180deg, rgba(12,12,13,0) 45%, rgba(12,12,13,.85) 100%);
+    pointer-events: none;
+  }
+  .agent-name {
+    position: absolute; left: 16px; bottom: 12px; z-index: 2;
+    display: flex; align-items: center; gap: 9px;
+    font-size: 1.22rem; font-weight: 800; letter-spacing: -.01em;
+    color: #fff; text-shadow: 0 2px 12px rgba(0,0,0,.6);
+  }
+  .agent-body { padding: 18px 20px 22px; display: flex; flex-direction: column; flex: 1; }
+  .agent-desc { color: var(--ink-2); font-size: .93rem; line-height: 1.6; margin: 0; }
+  .agent-soon-tag {
+    position: absolute; top: 12px; right: 12px; z-index: 3;
+    background: rgba(0,0,0,.55); backdrop-filter: blur(4px);
+    border: 1px solid var(--line-2);
+    color: #fff; font-size: .62rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+    padding: 5px 10px; border-radius: 999px;
+  }
+
+  /* Como funciona / rodapé de conversão */
+  .agents-note {
+    max-width: 760px; margin: 46px auto 0;
+    text-align: center; color: var(--ink-3);
+    font-size: .9rem; line-height: 1.6;
+  }
+  .agents-cta { text-align: center; margin-top: 30px; }
+
+  @media (max-width: 900px) {
+    .agents-grid { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 600px) {
+    .agents-grid { grid-template-columns: 1fr; gap: 18px; }
+  }
+</style>
+<script src="/safe-area.js?v=1"></script>
+</head>
+<body>
+<div class="glow"></div>
+
+  <nav class="nav">
+    <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.png?v=1" alt="PigBank" /></a>
+    <div class="nav-links">
+      <a href="/funcionalidades">Funcionalidades</a>
+      <a href="/como-funciona">Como funciona</a>
+      <a href="/precos">Planos</a>
+      <a href="/whatsapp">WhatsApp</a>
+      <a href="/agents" class="active">Agentes</a>
+    </div>
+    <div class="nav-right">
+      <a class="link-entrar" href="/login">Entrar</a>
+      <a class="btn btn-primary" href="/cadastro">Começar agora</a>
+    </div>
+  </nav>
+
+  <div class="wrap">
+
+    <section class="section">
+      <div class="section-head">
+        <div class="pill" style="margin:0 auto 18px"><span class="tag-novo">NOVO</span> Sua equipe financeira no automático</div>
+        <h2>Os <span class="grad">Agentes</span><br>do Piggy</h2>
+        <p>Pequenos assistentes que trabalham por você nos bastidores. Cada um cuida de uma parte do seu dinheiro, vigiando gastos, avisando de boletos e caçando desperdício, sem você precisar pedir.</p>
+      </div>
+
+      <div class="agents-grid">
+
+        <!-- Xerife -->
+        <article class="agent-card">
+          <div class="agent-hero">
+            <img src="/brand/agents/xerife_hero.png?v=1" alt="Xerife" loading="lazy" />
+            <div class="agent-name">Xerife</div>
+          </div>
+          <div class="agent-body">
+            <p class="agent-desc">Fica de olho no seu padrão de gastos e dá o alerta quando algo foge da curva, ou quando uma categoria estoura o limite que você definiu.</p>
+          </div>
+        </article>
+
+        <!-- Repórter -->
+        <article class="agent-card">
+          <div class="agent-hero">
+            <img src="/brand/agents/reporter_hero.png?v=1" alt="Repórter" loading="lazy" />
+            <div class="agent-name">Repórter</div>
+          </div>
+          <div class="agent-body">
+            <p class="agent-desc">Traz a manchete do seu mês: quanto entrou, quanto saiu e quanto sobrou: o resumo direto ao ponto, sem você abrir planilha nenhuma.</p>
+          </div>
+        </article>
+
+        <!-- Carteiro -->
+        <article class="agent-card">
+          <div class="agent-hero">
+            <img src="/brand/agents/carteiro_hero.png?v=1" alt="Carteiro" loading="lazy" />
+            <div class="agent-name">Carteiro</div>
+          </div>
+          <div class="agent-body">
+            <p class="agent-desc">Não deixa boleto vencer. Avisa antes do vencimento, direto no seu feed, pra você nunca mais pagar juros por esquecimento.</p>
+          </div>
+        </article>
+
+        <!-- Detetive -->
+        <article class="agent-card">
+          <div class="agent-hero">
+            <img src="/brand/agents/detetive_hero.png?v=1" alt="Detetive" loading="lazy" />
+            <div class="agent-name">Detetive</div>
+          </div>
+          <div class="agent-body">
+            <p class="agent-desc">Fareja cobranças repetidas que parecem aquela assinatura esquecida, a que você paga todo mês e nem lembra mais que existe.</p>
+          </div>
+        </article>
+
+        <!-- Banqueiro -->
+        <article class="agent-card">
+          <div class="agent-hero">
+            <img src="/brand/agents/cofre_hero.png?v=1" alt="Banqueiro" loading="lazy" />
+            <div class="agent-name">Banqueiro</div>
+          </div>
+          <div class="agent-body">
+            <p class="agent-desc">Percebe cada aporte na sua caixinha e acompanha o quanto falta pra bater a meta. Vê seu objetivo chegando perto, real, a cada depósito.</p>
+          </div>
+        </article>
+
+        <!-- Barão -->
+        <article class="agent-card">
+          <div class="agent-hero">
+            <img src="/brand/agents/barao_hero.png?v=1" alt="Barão" loading="lazy" />
+            <div class="agent-name">Barão</div>
+          </div>
+          <div class="agent-body">
+            <p class="agent-desc">Fareja dinheiro parado rendendo nada na conta corrente e mostra, em reais, quanto ele renderia se estivesse trabalhando no CDI.</p>
+          </div>
+        </article>
+
+        <!-- Faria Limer -->
+        <article class="agent-card">
+          <div class="agent-hero">
+            <img src="/brand/agents/faria_limer_hero.png?v=1" alt="Faria Limer" loading="lazy" />
+            <div class="agent-name">Faria Limer</div>
+          </div>
+          <div class="agent-body">
+            <p class="agent-desc">Fica de olho na sua renda variável (ações e FIIs) pela sua corretora: todo mês te entrega o retrato da carteira: valor, resultado e concentração. Só fatos, nunca recomendação: a decisão é sempre sua.</p>
+          </div>
+        </article>
+
+        <!-- Aviador (em breve) -->
+        <article class="agent-card soon">
+          <span class="agent-soon-tag">Em breve</span>
+          <div class="agent-hero">
+            <img src="/brand/agents/aviador_hero.png?v=1" alt="Aviador" loading="lazy" />
+            <div class="agent-name">Aviador</div>
+          </div>
+          <div class="agent-body">
+            <p class="agent-desc">Vai caçar passagem em promoção pros destinos que você marcar, e avisar na hora que o preço cair. Ainda tá aquecendo as turbinas.</p>
+          </div>
+        </article>
+
+      </div>
+
+      <p class="agents-note">
+        Os Agentes são ativados no seu painel, quando e como você quiser: cada um trabalha em silêncio e só te chama quando tem algo que vale a pena saber.
+      </p>
+
+      <div class="agents-cta">
+        <!-- Deslogado → /cadastro. Logado → nav-auth.js reescreve pra data-app-*
+             (aba de agentes do painel). -->
+        <a class="btn btn-primary btn-lg" href="/cadastro"
+           data-app-href="/app?view=agentes" data-app-text="Ver meus agentes →">Montar minha equipe →</a>
+      </div>
+    </section>
+
+  </div>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=1" alt="" /> <span>PigBank</span></a>
+        <p>Seu dinheiro, suas regras, direto no WhatsApp, com a IA da Piggy.</p>
+      </div>
+      <div class="footer-cols">
+        <div class="footer-col"><span class="footer-title">Navegue</span>
+          <a href="/funcionalidades">Funcionalidades</a>
+          <a href="/como-funciona">Como funciona</a>
+          <a href="/precos">Planos</a>
+          <a href="/agents">Agentes</a>
+        </div>
+        <div class="footer-col"><span class="footer-title">Produto</span>
+          <a href="/whatsapp">WhatsApp</a>
+          <a href="/comandos">O que pedir</a>
+          <a href="/suporte">Suporte</a>
+        </div>
+        <div class="footer-col"><span class="footer-title">Institucional</span>
+          <a href="/termos">Termos de Uso</a>
+          <a href="/privacy">Privacidade</a>
+          <a href="mailto:contato@pigbankai.com">Contato</a>
+        </div>
+      </div>
+    </div>
+    <p class="footer-copy">© 2026 PigBank · Feito com <i class="ph ph-piggy-bank" aria-hidden="true"></i></p>
+  </footer>
+
+  <script src="/nav-auth.js?v=7" defer></script>
+</body>
+</html>

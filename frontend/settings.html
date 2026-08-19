@@ -2,25 +2,30 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Configurações — PigBank</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Configurações · PigBank</title>
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
-<meta name="theme-color" content="#16181d" />
-<script src="https://cdn.pluggy.ai/pluggy-connect/v2.7.0/pluggy-connect.js"></script>
+<meta name="theme-color" content="#111111" />
+<!-- Widget da Pluggy: só é instanciado quando o usuário abre "conectar banco"
+     (openPluggyConnect). defer tira o download do caminho bloqueante do parse;
+     o factory (window.PluggyConnect) já estará pronto muito antes do clique. -->
+<link rel="preconnect" href="https://cdn.pluggy.ai" crossorigin />
+<script defer src="https://cdn.pluggy.ai/pluggy-connect/v2.7.0/pluggy-connect.js"></script>
 <link rel="stylesheet" href="/brand.css" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  /* Dark-neutral app palette */
-  --page:         #16181d;
-  --surface:      #1e2128;
-  --surface-2:    #23262e;
-  --border:       rgba(255,255,255,.09);
-  --border-hover: rgba(255,255,255,.16);
+  /* Paleta neutra, igual à do app PWA (#111111 + branco, sem tom azulado) */
+  --page:         #111111;
+  --surface:      #1b1b1d;
+  --surface-2:    #242427;
+  --border:       rgba(255,255,255,.08);
+  --border-hover: rgba(255,255,255,.14);
   --ink:          rgba(255,255,255,.92);
-  --muted:        rgba(200,210,240,.60);
-  --faint:        rgba(200,210,240,.34);
+  --muted:        rgba(255,255,255,.62);
+  --faint:        rgba(255,255,255,.34);
 
   /* Accent */
   --accent:     #FF2D8E;
@@ -303,6 +308,12 @@ a { color: inherit; text-decoration: none; }
 .data-title { color: var(--ink); font-size: .88rem; font-weight: 780; }
 .data-sub { color: var(--muted); font-size: .75rem; line-height: 1.5; margin-top: 2px; }
 .data-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+/* "Sair da conta" no pé da página. O outro "Sair" mora na topbar, que o modo
+   app esconde por ser redundante com a tab bar — sem este aqui, não existe
+   saída de conta pelo app/PWA. (A regra de largura fica ANTES do @media de
+   880px de propósito: lá o botão volta a ocupar a linha toda.) */
+.signout { margin-top: 18px; }
+.signout .btn-danger { width: auto; min-width: 170px; padding: 0 18px; }
 .danger-panel {
   border: 1px solid rgba(220,38,38,.22);
   border-radius: var(--radius-md);
@@ -1038,11 +1049,62 @@ a { color: inherit; text-decoration: none; }
   .stat { border-right: 0; border-bottom: 1px solid var(--border); }
   .stat:last-child { border-bottom: 0; }
 }
+
+/* ─── Visual "Minha conta" (igual ao app PWA) — web + mobile ─────────────
+   Header "Minha conta" + banner de segurança + lista "Segurança e acesso"
+   com chevron. No desktop mantém as 2 colunas; no mobile vira lista única. */
+.page-header { display: none; }               /* substituído pelo header de conta */
+
+.pb-acct-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 2px 0 18px;
+}
+.pb-acct-head h1 { font-size: clamp(1.5rem, 3vw, 1.9rem); font-weight: 820; letter-spacing: -.02em; color: var(--ink); line-height: 1.1; }
+.pb-acct-head p { margin-top: 4px; font-size: .9rem; color: var(--muted); }
+.pb-acct-head img { width: 54px; height: 54px; object-fit: contain; flex-shrink: 0; }
+
+.pb-protect {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 18px; margin-bottom: 22px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, rgba(255,45,142,.12), rgba(199,24,107,.06));
+  border: 1px solid rgba(255,45,142,.3);
+}
+.pb-protect > svg { flex: 0 0 auto; color: var(--accent); }
+.pb-protect-txt { flex: 1; min-width: 0; }
+.pb-protect-txt b { display: block; font-size: .98rem; color: var(--ink); margin-bottom: 2px; }
+.pb-protect-txt small { font-size: .82rem; color: var(--muted); line-height: 1.4; }
+.pb-protect button {
+  flex: 0 0 auto; border: 0; border-radius: 999px; padding: 11px 20px; cursor: pointer;
+  background: linear-gradient(135deg, #FF2D8E, #C7186B); color: #fff; font-weight: 700; font-size: .85rem;
+  font-family: inherit; white-space: nowrap;
+}
+.pb-protect button:hover { filter: brightness(1.06); }
+
+/* Rótulo da seção no estilo do print (título, sem caps) */
+.sidebar-section { font-size: 1rem; font-weight: 820; letter-spacing: -.01em; text-transform: none; color: var(--ink); padding: 14px 14px 10px; }
+
+/* Chevron nos itens navegáveis */
+.sidebar-item[data-section]::after {
+  content: "›"; margin-left: auto; font-size: 1.3rem; line-height: 1; color: rgba(255,255,255,.32); padding-left: 6px;
+}
+
+/* Mobile: lista vertical única (igual ao print), não chips lado a lado */
+@media (max-width: 880px) {
+  .sidebar { display: block; flex-wrap: nowrap; }
+  .sidebar-section { display: block; }
+  .sidebar-item { flex: none; width: 100%; min-width: 0; border-left: 0; border-top: 1px solid var(--border); }
+  .sidebar-item:first-of-type { border-top: 0; }
+}
+@media (max-width: 560px) {
+  .pb-protect { flex-wrap: wrap; }
+  .pb-protect button { width: 100%; }
+}
 </style>
 <script src="/static/auth-refresh.js"></script>
 <script src="/modals.js"></script>
-  <link rel="stylesheet" href="/app-mode.css?v=17" />
-  <script src="/app-mode.js?v=17"></script>
+  <link rel="stylesheet" href="/app-mode.css?v=25" />
+  <script src="/app-mode.js?v=24"></script>
 </head>
 <body>
 
@@ -1062,7 +1124,29 @@ a { color: inherit; text-decoration: none; }
 
 <div class="page">
 
-  <!-- Page header -->
+  <!-- Cabeçalho de conta (mesmo visual do app PWA) -->
+  <div class="pb-acct-head">
+    <div>
+      <h1>Minha conta</h1>
+      <p>Gerencie sua conta e segurança</p>
+    </div>
+    <img src="/brand/icon.png?v=1" alt="" />
+  </div>
+
+  <!-- Banner de segurança -->
+  <div class="pb-protect">
+    <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 2 4 5.5v5.2c0 5 3.4 9.2 8 10.3 4.6-1.1 8-5.3 8-10.3V5.5L12 2z"/>
+      <rect x="9" y="10" width="6" height="5" rx="1"/><path d="M10 10V8.5a2 2 0 0 1 4 0V10"/>
+    </svg>
+    <div class="pb-protect-txt">
+      <b>Proteja sua conta</b>
+      <small>Mantenha seus dados seguros e seu acesso sempre protegido.</small>
+    </div>
+    <button type="button" onclick="showSettingsSection('security')">Revisar segurança</button>
+  </div>
+
+  <!-- Page header (substituído pelo cabeçalho de conta; mantido oculto p/ o JS) -->
   <header class="page-header">
     <div class="breadcrumb">
       <a href="/">Início</a>
@@ -1071,7 +1155,7 @@ a { color: inherit; text-decoration: none; }
     </div>
     <h1 class="page-title">Conexões bancárias</h1>
     <p class="page-sub">
-      Conecte seus bancos via Open Finance para sincronizar saldos e transações automaticamente — sem precisar lançar nada no chat.
+      Conecte seus bancos via Open Finance para sincronizar saldos e transações automaticamente, sem precisar lançar nada no chat.
     </p>
   </header>
 
@@ -1079,18 +1163,18 @@ a { color: inherit; text-decoration: none; }
 
     <!-- Sidebar -->
     <aside class="sidebar">
-      <div class="sidebar-section">Conta</div>
+      <div class="sidebar-section">Segurança e acesso</div>
 
-      <button class="sidebar-item" type="button" id="of-sidebar-item" disabled>
-        <span class="sidebar-icon">🏦</span>
+      <button class="sidebar-item" type="button" id="of-sidebar-item" data-section="open-finance" onclick="showSettingsSection('open-finance')">
+        <span class="sidebar-icon"><i class="ph ph-bank" aria-hidden="true"></i></span>
         <span>
-          <span class="sidebar-title">Open Finance <span class="badge-soon" id="of-sidebar-badge">em breve</span></span>
-          <span class="sidebar-sub" id="of-sidebar-sub">Integração em teste</span>
+          <span class="sidebar-title">Open Finance</span>
+          <span class="sidebar-sub" id="of-sidebar-sub">Conecte seus bancos</span>
         </span>
       </button>
 
       <button class="sidebar-item active" type="button" data-section="security" onclick="showSettingsSection('security')">
-        <span class="sidebar-icon">🔐</span>
+        <span class="sidebar-icon"><i class="ph ph-lock-key" aria-hidden="true"></i></span>
         <span>
           <span class="sidebar-title">Segurança</span>
           <span class="sidebar-sub">Senha e sessões ativas</span>
@@ -1098,7 +1182,7 @@ a { color: inherit; text-decoration: none; }
       </button>
 
       <button class="sidebar-item" type="button" data-section="notifications" onclick="showSettingsSection('notifications')">
-        <span class="sidebar-icon">🔔</span>
+        <span class="sidebar-icon"><i class="ph ph-bell" aria-hidden="true"></i></span>
         <span>
           <span class="sidebar-title">Notificações</span>
           <span class="sidebar-sub">Alertas e lembretes</span>
@@ -1106,7 +1190,7 @@ a { color: inherit; text-decoration: none; }
       </button>
 
       <button class="sidebar-item" type="button" data-section="data" onclick="showSettingsSection('data')">
-        <span class="sidebar-icon">🗄️</span>
+        <span class="sidebar-icon"><i class="ph ph-archive" aria-hidden="true"></i></span>
         <span>
           <span class="sidebar-title">Meus dados</span>
           <span class="sidebar-sub">Exportação e exclusão</span>
@@ -1114,7 +1198,7 @@ a { color: inherit; text-decoration: none; }
       </button>
 
       <button class="sidebar-item" type="button" data-section="legal" onclick="showSettingsSection('legal')">
-        <span class="sidebar-icon">📜</span>
+        <span class="sidebar-icon"><i class="ph ph-scroll" aria-hidden="true"></i></span>
         <span>
           <span class="sidebar-title">Legal</span>
           <span class="sidebar-sub">Privacidade e termos</span>
@@ -1130,15 +1214,15 @@ a { color: inherit; text-decoration: none; }
       <div class="card" style="overflow:hidden">
         <div class="stats-strip">
           <div class="stat">
-            <div class="stat-label">🏦 Bancos</div>
+            <div class="stat-label"><i class="ph ph-bank" aria-hidden="true"></i> Bancos</div>
             <div class="stat-value" id="stat-banks">—</div>
           </div>
           <div class="stat">
-            <div class="stat-label">💳 Contas</div>
+            <div class="stat-label"><i class="ph ph-credit-card" aria-hidden="true"></i> Contas</div>
             <div class="stat-value" id="stat-accounts">—</div>
           </div>
           <div class="stat">
-            <div class="stat-label">📋 Transações</div>
+            <div class="stat-label"><i class="ph ph-clipboard-text" aria-hidden="true"></i> Transações</div>
             <div class="stat-value" id="stat-txs">—</div>
           </div>
         </div>
@@ -1164,43 +1248,13 @@ a { color: inherit; text-decoration: none; }
               <div class="step"        id="step-3"></div>
             </div>
 
-            <!-- Bank list -->
-            <div class="bank-list">
-              <button class="bank-row active" type="button" data-bank="nubank" onclick="selectBank('nubank')">
-                <span class="bank-logo nubank">NU</span>
-                <span class="bank-info">
-                  <span class="bank-name">Nubank</span>
-                  <span class="bank-meta">Conta corrente, crédito e poupança</span>
-                </span>
-                <span class="bank-check">✓</span>
-              </button>
-
-              <button class="bank-row" type="button" data-bank="itau" onclick="selectBank('itau')">
-                <span class="bank-logo itau">IT</span>
-                <span class="bank-info">
-                  <span class="bank-name">Itaú</span>
-                  <span class="bank-meta">Conta corrente e investimentos</span>
-                </span>
-                <span class="bank-check"></span>
-              </button>
-
-              <button class="bank-row" type="button" data-bank="bradesco" onclick="selectBank('bradesco')">
-                <span class="bank-logo bradesco">BR</span>
-                <span class="bank-info">
-                  <span class="bank-name">Bradesco</span>
-                  <span class="bank-meta">Conta corrente e poupança</span>
-                </span>
-                <span class="bank-check"></span>
-              </button>
-            </div>
-
             <!-- Status message -->
             <div class="connect-status" id="connect-status">
               <div class="spinner"></div>
               <span id="connect-status-text">Simulando autorização...</span>
             </div>
 
-            <button class="btn-connect" type="button" onclick="connectOpenFinance()" id="connect-btn">
+            <button class="btn-connect" type="button" onclick="openBankPicker()" id="connect-btn">
               Conectar Open Finance
             </button>
 
@@ -1211,8 +1265,35 @@ a { color: inherit; text-decoration: none; }
             </button>
 
             <div class="connect-note">
-              <span>🔒</span>
+              <span><i class="ph ph-lock" aria-hidden="true"></i></span>
               <span>A autorização acontece dentro do ambiente seguro do banco via Pluggy. O PigBank não recebe sua senha e você pode revogar o acesso depois.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal: lista de todos os bancos do Open Finance (escolha acontece no site) -->
+        <div class="bankpick-overlay" id="bankpick-overlay" onclick="if(event.target===this)closeBankPicker()">
+          <div class="bankpick-modal" role="dialog" aria-modal="true" aria-label="Conectar banco">
+            <div class="bankpick-head">
+              <div class="bankpick-head-row">
+                <div>
+                  <div class="bankpick-title">Conectar banco</div>
+                  <div class="bankpick-sub">Busque entre as instituições disponíveis</div>
+                </div>
+                <button class="bankpick-x" type="button" onclick="closeBankPicker()" aria-label="Fechar"><i class="ph ph-x" aria-hidden="true"></i></button>
+              </div>
+              <div class="bankpick-search-wrap">
+                <span aria-hidden="true"><i class="ph ph-magnifying-glass" aria-hidden="true"></i></span>
+                <input id="bankpick-search" type="text" placeholder="Buscar banco (ex: Nubank, Itaú, C6…)"
+                       autocomplete="off" oninput="renderBankPicker(this.value)">
+              </div>
+            </div>
+            <div class="bankpick-list" id="bankpick-list"></div>
+            <div class="bankpick-foot">
+              <div class="bankpick-count" id="bankpick-count">Nenhum banco selecionado</div>
+              <button class="btn-connect bankpick-go" id="bankpick-go" type="button" onclick="confirmBankPicker()" disabled>
+                Conectar Open Finance
+              </button>
             </div>
           </div>
         </div>
@@ -1224,12 +1305,12 @@ a { color: inherit; text-decoration: none; }
               <div class="card-title">Conexões ativas</div>
               <div class="card-sub">Bancos autorizados para este usuário</div>
             </div>
-            <button class="btn-sm" type="button" onclick="loadData()">↻ Atualizar</button>
+            <button class="btn-sm" type="button" id="of-refresh-btn" onclick="refreshOpenFinance()">↻ Atualizar</button>
           </div>
           <div class="card-body" style="padding-top:8px; padding-bottom:8px">
             <div id="connections-list">
               <div class="empty-state">
-                <div class="empty-icon">🔌</div>
+                <div class="empty-icon"><i class="ph ph-plug" aria-hidden="true"></i></div>
                 <div class="empty-title">Nenhum banco conectado</div>
                 <div class="empty-sub">Escolha uma instituição ao lado para começar.</div>
               </div>
@@ -1241,10 +1322,9 @@ a { color: inherit; text-decoration: none; }
 
       <!-- Info banner -->
       <div class="info-banner">
-        <span class="info-banner-icon">💡</span>
+        <span class="info-banner-icon"><i class="ph ph-lightbulb" aria-hidden="true"></i></span>
         <span>
-          <strong>Como funciona o Open Finance?</strong> Na versão real, você autoriza o acesso dentro do próprio app do banco — a gente nunca vê sua senha e você pode revogar quando quiser.
-          <strong>Nesta versão de teste, todos os dados são simulados.</strong>
+          <strong>Como funciona o Open Finance?</strong> Você autoriza o acesso dentro do ambiente seguro do banco, via Pluggy: a gente nunca vê sua senha e você pode revogar o acesso quando quiser.
         </span>
       </div>
 
@@ -1259,11 +1339,24 @@ a { color: inherit; text-decoration: none; }
         <div class="card-body">
           <div id="accounts-list">
             <div class="empty-state">
-              <div class="empty-icon">💳</div>
+              <div class="empty-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></div>
               <div class="empty-title">Nenhuma conta ainda</div>
               <div class="empty-sub">Conecte um banco para ver suas contas e saldos aqui.</div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Caixinhas OF ↔ metas (Banqueiro, beta) -->
+      <div class="card" id="caixinhas-card" style="display:none">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Caixinhas &amp; metas</div>
+            <div class="card-sub">Ligue uma caixinha do banco a uma meta pro Banqueiro acompanhar os aportes</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div id="caixinhas-list"></div>
         </div>
       </div>
 
@@ -1278,7 +1371,7 @@ a { color: inherit; text-decoration: none; }
         <div class="card-body" style="padding-top:8px; padding-bottom:8px">
           <div id="transactions-list" class="tx-list">
             <div class="empty-state">
-              <div class="empty-icon">📋</div>
+              <div class="empty-icon"><i class="ph ph-clipboard-text" aria-hidden="true"></i></div>
               <div class="empty-title">Sem transações por enquanto</div>
               <div class="empty-sub">As transações aparecem aqui após você conectar um banco.</div>
             </div>
@@ -1529,7 +1622,7 @@ a { color: inherit; text-decoration: none; }
                   <div class="mini-kpi-value" id="notif-status-value">Carregando preferências</div>
                 </div>
                 <div class="info-banner">
-                  <span class="info-banner-icon">💡</span>
+                  <span class="info-banner-icon"><i class="ph ph-lightbulb" aria-hidden="true"></i></span>
                   <span>Você pode pausar dicas e insights separadamente sem afetar os fluxos do WhatsApp.</span>
                 </div>
               </div>
@@ -1619,6 +1712,20 @@ a { color: inherit; text-decoration: none; }
 
     </main>
   </div>
+
+  <!-- Sair da conta: fica no corpo da página (e não só na topbar) porque o
+       modo app esconde a topbar — era o único caminho de logout por lá. -->
+  <div class="data-row signout">
+    <span>
+      <span class="data-title">Sair da conta</span>
+      <span class="data-sub">Encerra a sessão neste dispositivo. Seus lançamentos e configurações continuam salvos.</span>
+    </span>
+    <span class="data-actions">
+      <button class="btn-danger" type="button" id="signout-btn" onclick="logoutSettings()">
+        <i class="ph ph-sign-out" aria-hidden="true"></i> Sair
+      </button>
+    </span>
+  </div>
 </div>
 
 <!-- Toast -->
@@ -1676,7 +1783,12 @@ window.addEventListener("storage", (event) => {
 });
 async function readApiError(resp) {
   const raw = await resp.text();
-  try { return JSON.parse(raw).detail || raw; } catch { return raw || "Erro inesperado"; }
+  try {
+    const detail = JSON.parse(raw).detail;
+    // detail pode ser string OU objeto estruturado {code, message, ...} (ex.: limite de banco por plano)
+    if (detail && typeof detail === "object") return detail.message || detail.code || raw;
+    return detail || raw;
+  } catch { return raw || "Erro inesperado"; }
 }
 
 function filenameFromDisposition(header, fallback) {
@@ -1688,7 +1800,7 @@ function filenameFromDisposition(header, fallback) {
 let _toastTimer;
 function showToast(msg, type="ok") {
   const el = document.getElementById("toast");
-  const icon = type==="ok" ? "✓" : type==="error" ? "✕" : "ℹ";
+  const icon = type==="ok" ? '<i class="ph ph-check-circle" aria-hidden="true"></i>' : type==="error" ? '<i class="ph ph-x-circle" aria-hidden="true"></i>' : '<i class="ph ph-info" aria-hidden="true"></i>';
   el.innerHTML = `<span>${icon}</span><span>${esc(msg)}</span>`;
   el.className = `show ${type}`;
   clearTimeout(_toastTimer);
@@ -1700,7 +1812,7 @@ let notificationSettingsLoaded = false;
 const SECTION_COPY = {
   "open-finance": {
     title: "Conexões bancárias",
-    sub: "Conecte seus bancos via Open Finance para sincronizar saldos e transações automaticamente — sem precisar lançar nada no chat.",
+    sub: "Conecte seus bancos via Open Finance para sincronizar saldos e transações automaticamente, sem precisar lançar nada no chat.",
   },
   security: {
     title: "Segurança",
@@ -1837,7 +1949,7 @@ function applySecuritySettings(data) {
     }
   }
   document.getElementById("security-plan-note").textContent = isPro
-    ? (data.plan_expires_at ? `Renova em ${fmtDate(data.plan_expires_at)}.` : "Acesso vitalício — sem cobrança.")
+    ? (data.plan_expires_at ? `Renova em ${fmtDate(data.plan_expires_at)}.` : "Acesso vitalício, sem cobrança.")
     : "Assine o Pro para desbloquear todos os recursos.";
   document.getElementById("security-session-value").textContent = formatSessionExpiry();
   document.getElementById("security-reset-btn").disabled = !hasEmail;
@@ -1849,7 +1961,7 @@ function applySecuritySettings(data) {
 async function loadSecuritySettings() {
   if (!USER_ID) {
     applySecuritySettings({});
-    showToast("Sessão inválida — faça login novamente", "error");
+    showToast("Sessão inválida. Faça login novamente", "error");
     return;
   }
   try {
@@ -1866,14 +1978,14 @@ async function loadSecuritySettings() {
 }
 
 const ACTIVITY_ICONS = {
-  password_reset_completed: "🔑",
-  email_changed: "✉️",
-  mfa_enabled: "🛡️",
-  mfa_disabled: "🛡️",
-  mfa_backup_codes_regenerated: "🎫",
-  open_finance_connected: "🏦",
-  open_finance_disconnected: "🏦",
-  login_from_new_ip: "🌐",
+  password_reset_completed: "key",
+  email_changed: "envelope",
+  mfa_enabled: "shield-check",
+  mfa_disabled: "shield",
+  mfa_backup_codes_regenerated: "ticket",
+  open_finance_connected: "bank",
+  open_finance_disconnected: "bank",
+  login_from_new_ip: "globe",
 };
 
 function formatActivityTime(iso) {
@@ -1907,7 +2019,7 @@ function renderActivityList(events, containerId, opts = {}) {
   }
   const slice = opts.limit ? events.slice(0, opts.limit) : events;
   container.innerHTML = slice.map((ev) => {
-    const icon = ACTIVITY_ICONS[ev.event] || "•";
+    const icon = `<i class="ph ph-${ACTIVITY_ICONS[ev.event] || "circle"}" aria-hidden="true"></i>`;
     const title = escapeHtml(ev.event_label || ev.event);
     const when = escapeHtml(formatActivityTime(ev.created_at));
     const ip = ev.ip ? escapeHtml(ev.ip) : null;
@@ -2135,7 +2247,7 @@ function applyNotificationSettings(data) {
 
 async function loadNotificationSettings() {
   if (!USER_ID) {
-    showToast("Sessão inválida — faça login novamente", "error");
+    showToast("Sessão inválida. Faça login novamente", "error");
     return;
   }
   setNotificationControlsDisabled(true);
@@ -2288,22 +2400,40 @@ async function requestAccountDeletion() {
 }
 
 /* ── Bank select ─────────────────────────────── */
-let selectedBank = "nubank";
-const OPEN_FINANCE_CONNECTORS = {
-  nubank: 612,
-  itau: 601,
-  bradesco: 603,
-};
+// A escolha do banco acontece dentro do widget da Pluggy. Não pré-selecionamos
+// nada aqui (null = o widget lista todos os bancos disponíveis).
+let selectedConnectorId = null;
 
-function selectBank(bank) {
-  selectedBank = bank;
-  document.querySelectorAll(".bank-row").forEach(r => {
-    const on = r.dataset.bank === bank;
-    r.classList.toggle("active", on);
-    const chk = r.querySelector(".bank-check");
-    if (chk) chk.textContent = on ? "✓" : "";
-  });
-  setStep(1);
+/* ── Estado do plano (Open Finance) ──────────── */
+// Teto de bancos do plano, vindo de /auth/me. 0 = Free/sem OF (pós-trial): o botão
+// vira CTA de upgrade e não abre o widget. null = ainda não carregou OU ilimitado.
+let OF_BANKS_MAX = null;
+let OF_HAS_CONNECTION = false; // há alguma conexão (mesmo pausada)? refina a copy do CTA
+let OF_CONN_COUNT = 0;        // bancos que contam no teto (PAUSED não conta, igual ao backend)
+let OF_CONN_NAMES = [];       // nomes das instituições que contam no teto — reconexão
+
+function _ofCountsTowardBankLimit(conn) {
+  return String((conn && conn.status) || "").toUpperCase() !== "PAUSED";
+}
+
+// Reconfigura o botão "Conectar Open Finance" conforme o plano. No Free (limite 0),
+// não faz sentido abrir a Pluggy (o /pluggy-item recusaria com 402): troca por um
+// CTA de upgrade que leva pra /precos.
+function applyOfConnectButton() {
+  const btn = document.getElementById("connect-btn");
+  if (!btn) return;
+  if (OF_BANKS_MAX === 0) {
+    btn.textContent = OF_HAS_CONNECTION ? "Reative seu banco" : "Assine para conectar um banco";
+    btn.onclick = () => { window.location.href = "/precos"; };
+    btn.disabled = false;
+    btn.classList.add("btn-connect--upgrade");
+  } else {
+    btn.textContent = "Conectar Open Finance";
+    // A escolha do banco acontece no site: abre a modal com a lista de todos os
+    // bancos do Open Finance; ao confirmar, o widget da Pluggy abre já no banco escolhido.
+    btn.onclick = () => openBankPicker();
+    btn.classList.remove("btn-connect--upgrade");
+  }
 }
 
 /* ── Step bar ────────────────────────────────── */
@@ -2314,24 +2444,194 @@ function setStep(n) {
   }
 }
 
+/* ── Modal "Conectar banco" (lista completa da Pluggy) ──────── */
+let _bankConnectors = null;   // cache da lista da Pluggy
+let _bankPickSelected = null; // {id, name}
+
+function _stripAccent(s) {
+  return (s||"").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+}
+function _bankInitials(name) {
+  const small = new Set(["de","do","da","dos","das","e","-"]);
+  const parts = (name||"").replace(/[^\wÀ-ÿ\s-]/g,"").split(/\s+/).filter(w => w && !small.has(w.toLowerCase()));
+  if (parts.length >= 2) return (parts[0][0]+parts[1][0]).toUpperCase();
+  return (name||"?").replace(/[^A-Za-zÀ-ÿ]/g,"").slice(0,2).toUpperCase();
+}
+function _bankColor(hex) {
+  const c = String(hex||"").replace("#","");
+  return /^[0-9a-f]{6}$/i.test(c) ? "#"+c : "#5f6470";
+}
+
+async function openBankPicker() {
+  // Free (limite 0): não abre o picker — leva pro upgrade (defesa; applyOfConnectButton
+  // já roteia o botão pra /precos nesse caso).
+  if (OF_BANKS_MAX === 0) { window.location.href = "/precos"; return; }
+  const ov = document.getElementById("bankpick-overlay");
+  _bankPickLastFocus = document.activeElement;
+  ov.classList.add("open");
+  // registrado aqui, antes dos returns/await abaixo, pra valer em TODOS os
+  // caminhos: lista em cache, lista carregada do servidor e erro de fetch
+  document.addEventListener("keydown", _bankPickOnKey);
+  const q = document.getElementById("bankpick-search");
+  q.value = "";
+  /* Foco ANTES do await, não depois: o `q.focus()` só existia no ramo do cache e
+     no de sucesso, então enquanto a lista carregava — e para sempre, se o fetch
+     falhasse — o foco ficava no botão "Conectar banco" ATRÁS do overlay. O trap
+     de Tab conserta isso na tecla seguinte, mas Enter não passa pelo trap: ele
+     reativaria o botão obscurecido e chamaria openBankPicker() de novo. Assim os
+     estados de carregando e de erro também começam dentro do modal. */
+  q.focus();
+  _bankPickSelected = null;
+  _syncBankPickFoot();
+  if (_bankConnectors) { renderBankPicker(""); return; }
+  document.getElementById("bankpick-list").innerHTML =
+    `<div class="bankpick-empty">Carregando bancos…</div>`;
+  try {
+    const resp = await fetch(`${API}/open-finance/${USER_ID}/connectors`, authOptions({ headers: authHeaders() }));
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const data = await resp.json();
+    _bankConnectors = (data.connectors || []).filter(b => b && b.name);
+    renderBankPicker("");
+    // sem q.focus() aqui: o foco já entrou no modal antes do await, e refocar
+    // agora roubaria o foco de quem já tivesse tabulado pra dentro do card
+  } catch (err) {
+    document.getElementById("bankpick-list").innerHTML =
+      `<div class="bankpick-empty">Não deu pra carregar a lista de bancos. Tente de novo.</div>`;
+    console.error("connectors fetch:", err);
+  }
+}
+/* O modal declara aria-modal="true", que AFIRMA pro leitor de tela que o resto
+   da página não está disponível enquanto ele está aberto. Isso era mentira em
+   dois níveis: este arquivo não tinha NENHUM handler de keydown (nem Esc), e o
+   Tab saía da lista de bancos direto pros controles das Configurações atrás do
+   overlay — sem sinal nenhum, porque o overlay continua cobrindo tudo. Mesmo
+   defeito que o Codex apontou no modal da Início (PR #70).
+
+   Os alvos são consultados a cada Tab, e não uma vez na abertura, porque a
+   lista de instituições é remontada a cada tecla digitada na busca. */
+let _bankPickLastFocus = null;
+
+function _bankPickFocaveis() {
+  const modal = document.querySelector("#bankpick-overlay .bankpick-modal");
+  if (!modal) return [];
+  const sel = 'a[href], button:not([disabled]), input:not([disabled]),'
+            + ' select:not([disabled]), textarea:not([disabled]),'
+            + ' [tabindex]:not([tabindex="-1"])';
+  return [...modal.querySelectorAll(sel)].filter(
+    (el) => el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0,
+  );
+}
+
+function _bankPickOnKey(e) {
+  if (e.key === "Escape") { closeBankPicker(); return; }
+  if (e.key !== "Tab") return;
+
+  const modal = document.querySelector("#bankpick-overlay .bankpick-modal");
+  const alvos = _bankPickFocaveis();
+  if (!modal || !alvos.length) return;
+
+  const primeiro = alvos[0];
+  const ultimo = alvos[alvos.length - 1];
+  const proximo = e.shiftKey ? ultimo : primeiro;
+  const borda = e.shiftKey ? primeiro : ultimo;
+
+  // `foco fora` cobre o caso de já ter escapado (clique no fundo, foco no body)
+  if (!modal.contains(document.activeElement) || document.activeElement === borda) {
+    e.preventDefault();
+    proximo.focus();
+  }
+}
+
+function closeBankPicker() {
+  document.getElementById("bankpick-overlay").classList.remove("open");
+  document.removeEventListener("keydown", _bankPickOnKey);
+  // devolve o foco pra quem abriu, senão o teclado volta pro topo da página
+  if (_bankPickLastFocus && document.contains(_bankPickLastFocus)) _bankPickLastFocus.focus();
+  _bankPickLastFocus = null;
+}
+function renderBankPicker(filter) {
+  const f = _stripAccent(filter).trim();
+  const items = (_bankConnectors||[]).filter(b => _stripAccent(b.name).includes(f));
+  const el = document.getElementById("bankpick-list");
+  if (!items.length) {
+    el.innerHTML = `<div class="bankpick-empty">Nenhum banco encontrado para "${esc(filter)}".</div>`;
+    return;
+  }
+  let html = "", letter = "";
+  for (const b of items) {
+    const L = (b.name[0]||"#").toUpperCase();
+    if (L !== letter) { letter = L; html += `<div class="bankpick-alpha">${esc(L)}</div>`; }
+    const sel = _bankPickSelected && _bankPickSelected.id === b.id ? " active" : "";
+    const meta = b.inv ? "Conta, cartão · caixinha/investimentos" : "Conta corrente e cartão";
+    const ini = esc(_bankInitials(b.name));
+    const logo = b.logo
+      ? `<img src="${esc(b.logo)}" alt="" loading="lazy" onerror="this.remove()">`
+      : "";
+    html += `<button type="button" class="bank-row bankpick-row${sel}" onclick="pickBank(${Number(b.id)}, this)" data-name="${esc(b.name)}">
+      <span class="bank-logo bankpick-logo" style="color:${_bankColor(b.color)}">${ini}${logo}</span>
+      <span class="bank-info"><span class="bank-name">${esc(b.name)}</span><span class="bank-meta">${meta}</span></span>
+      <span class="bank-check">${sel ? '<i class="ph ph-check" aria-hidden="true"></i>' : ""}</span>
+    </button>`;
+  }
+  el.innerHTML = html;
+}
+function pickBank(id, node) {
+  const name = node ? node.getAttribute("data-name") : "";
+  _bankPickSelected = { id, name };
+  document.querySelectorAll("#bankpick-list .bankpick-row").forEach(r => {
+    const on = r === node;
+    r.classList.toggle("active", on);
+    const chk = r.querySelector(".bank-check");
+    if (chk) chk.innerHTML = on ? '<i class="ph ph-check" aria-hidden="true"></i>' : "";
+  });
+  _syncBankPickFoot();
+}
+function _syncBankPickFoot() {
+  const cnt = document.getElementById("bankpick-count");
+  const go = document.getElementById("bankpick-go");
+  if (_bankPickSelected) {
+    cnt.innerHTML = `Selecionado: <strong>${esc(_bankPickSelected.name)}</strong>`;
+    go.disabled = false;
+  } else {
+    cnt.textContent = "Nenhum banco selecionado";
+    go.disabled = true;
+  }
+}
+function confirmBankPicker() {
+  if (!_bankPickSelected) return;
+  // Teto do plano atingido: só deixa seguir se for RECONEXÃO de um banco já
+  // conectado (mesmo nome). Banco novo abriria o widget da Pluggy só pra tomar 402
+  // no /pluggy-item — deixando item/consentimento órfão. Bloqueia antes de abrir.
+  if (OF_BANKS_MAX !== null && OF_BANKS_MAX > 0 && OF_CONN_COUNT >= OF_BANKS_MAX) {
+    const isReconnect = OF_CONN_NAMES.includes(_stripAccent(_bankPickSelected.name || ""));
+    if (!isReconnect) {
+      const n = OF_BANKS_MAX;
+      showToast(`Seu plano conecta até ${n} banco${n > 1 ? "s" : ""}. Faça upgrade pra conectar mais: /precos`, "error");
+      return;
+    }
+  }
+  selectedConnectorId = _bankPickSelected.id;
+  closeBankPicker();
+  connectOpenFinance();
+}
+
 /* ── Category icons ──────────────────────────── */
 const CAT_ICONS = {
-  "alimentação":"🍔","comida":"🍔","restaurante":"🍔","ifood":"🍔",
-  "transporte":"🚗","uber":"🚗","99":"🚗","combustível":"⛽",
-  "saúde":"💊","farmácia":"💊","médico":"💊",
-  "lazer":"🎮","entretenimento":"🎬","streaming":"🎬",
-  "casa":"🏠","aluguel":"🏠","condomínio":"🏠",
-  "salário":"💰","renda":"💰",
-  "compras":"🛍️","compras online":"📦","mercado":"🛒","supermercado":"🛒",
-  "mercearia":"🛒","atacadão":"🛒","hortifruti":"🥦",
-  "educação":"📚","escola":"📚","curso":"📚",
-  "viagem":"✈️","hotel":"🏨",
+  "alimentação":"hamburger","comida":"hamburger","restaurante":"hamburger","ifood":"hamburger",
+  "transporte":"car","uber":"car","99":"car","combustível":"gas-pump",
+  "saúde":"pill","farmácia":"pill","médico":"pill",
+  "lazer":"game-controller","entretenimento":"film-slate","streaming":"film-slate",
+  "casa":"house","aluguel":"house","condomínio":"house",
+  "salário":"coins","renda":"coins",
+  "compras":"handbag","compras online":"package","mercado":"shopping-cart","supermercado":"shopping-cart",
+  "mercearia":"shopping-cart","atacadão":"shopping-cart","hortifruti":"basket",
+  "educação":"books","escola":"books","curso":"books",
+  "viagem":"airplane-tilt","hotel":"buildings",
 };
 function catIcon(cat) {
-  if (!cat) return "💸";
-  const k = cat.toLowerCase();
-  for (const [key,v] of Object.entries(CAT_ICONS)) if (k.includes(key)) return v;
-  return "💸";
+  let name = "trend-down";
+  if (cat) { const k = cat.toLowerCase(); for (const [key,v] of Object.entries(CAT_ICONS)) if (k.includes(key)) { name = v; break; } }
+  return `<i class="ph ph-${name}" aria-hidden="true"></i>`;
 }
 
 /* ── Bank helpers ────────────────────────────── */
@@ -2349,20 +2649,33 @@ function bInitials(name) {
   if (n.includes("bradesco")) return "BR";
   return (name||"?").slice(0,2).toUpperCase();
 }
+// Status da conexão Open Finance → pill. Três estados:
+//  • Conectado    — sincronizando normal (ACTIVE/UPDATED)
+//  • Pendente     — a Pluggy ainda está verificando/buscando (UPDATING/CREATED/WAITING_USER_ACTION)
+//  • Não conectado — parado, precisa reconectar (PAUSED/LOGIN_ERROR/ERROR/OUTDATED/WAITING_USER_INPUT/desconhecido)
+function connStatusPill(status) {
+  const st = String(status || "").toUpperCase();
+  if (st === "ACTIVE" || st === "ATIVO" || st === "UPDATED") return { pc: "active",  pl: "Conectado" };
+  if (st === "UPDATING" || st === "CREATED" || st === "WAITING_USER_ACTION") return { pc: "pending", pl: "Pendente" };
+  return { pc: "error", pl: "Não conectado" };
+}
 
 /* ── Render ──────────────────────────────────── */
 function renderConnections(list) {
+  OF_HAS_CONNECTION = Array.isArray(list) && list.length > 0;
+  const countedConnections = (Array.isArray(list) ? list : []).filter(_ofCountsTowardBankLimit);
+  OF_CONN_COUNT = countedConnections.length;
+  OF_CONN_NAMES = countedConnections.map(c => _stripAccent(c.institution_name || ""));
+  applyOfConnectButton(); // refina a copy do CTA de upgrade (reative vs assine)
   const el = document.getElementById("connections-list");
   if (!list.length) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">🔌</div><div class="empty-title">Nenhum banco conectado</div><div class="empty-sub">Escolha uma instituição ao lado para começar.</div></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon"><i class="ph ph-plug" aria-hidden="true"></i></div><div class="empty-title">Nenhum banco conectado</div><div class="empty-sub">Escolha uma instituição ao lado para começar.</div></div>`;
     return;
   }
   el.innerHTML = list.map(c => {
     const cls = bClass(c.institution_name);
     const ini = bInitials(c.institution_name);
-    const st  = (c.status||"ativo").toLowerCase();
-    const pc  = st==="ativo"||st==="active" ? "active" : "pending";
-    const pl  = pc==="active" ? "Ativo" : "Pendente";
+    const { pc, pl } = connStatusPill(c.status);
     return `<div class="connection-row">
       <div class="conn-logo ${cls}">${esc(ini)}</div>
       <div class="conn-info">
@@ -2377,7 +2690,7 @@ function renderConnections(list) {
 function renderAccounts(list) {
   const el = document.getElementById("accounts-list");
   if (!list.length) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">💳</div><div class="empty-title">Nenhuma conta ainda</div><div class="empty-sub">Conecte um banco para ver suas contas e saldos aqui.</div></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></div><div class="empty-title">Nenhuma conta ainda</div><div class="empty-sub">Conecte um banco para ver suas contas e saldos aqui.</div></div>`;
     return;
   }
   el.innerHTML = `<div class="accounts-grid">${list.map(a => {
@@ -2396,7 +2709,7 @@ function renderAccounts(list) {
 function renderTransactions(list) {
   const el = document.getElementById("transactions-list");
   if (!list.length) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-title">Sem transações por enquanto</div><div class="empty-sub">As transações aparecem aqui após você conectar um banco.</div></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon"><i class="ph ph-clipboard-text" aria-hidden="true"></i></div><div class="empty-title">Sem transações por enquanto</div><div class="empty-sub">As transações aparecem aqui após você conectar um banco.</div></div>`;
     return;
   }
   el.innerHTML = list.map(t => {
@@ -2448,10 +2761,115 @@ async function loadData() {
     renderAccounts(a);
     renderTransactions(t);
     if (c.length > 0) setStep(3);
+    loadCaixinhas();
   } catch (err) {
     updateStats([], [], []);
     renderConnections([]); renderAccounts([]); renderTransactions([]);
     showToast(err.message || "Erro ao carregar dados", "error");
+  }
+}
+
+/* ── Caixinhas ↔ metas (Banqueiro, beta) ─────────
+   Só aparece pros testers do beta (o endpoint devolve 404 fora do allowlist) e
+   quando o OF trouxe alguma caixinha. Vincular liga a caixinha real a uma meta
+   do PigBank pro Banqueiro detectar os aportes. */
+let _caixMetas = [];
+
+async function loadCaixinhas() {
+  const card = document.getElementById("caixinhas-card");
+  if (!USER_ID || !card) return;
+  let data;
+  try {
+    const resp = await fetch(`${API}/open-finance/${USER_ID}/caixinhas`, authOptions({ headers: authHeaders() }));
+    if (!resp.ok) { card.style.display = "none"; return; }  // 404 = fora do beta
+    data = await resp.json();
+  } catch { card.style.display = "none"; return; }
+  const cx = data.caixinhas || [];
+  if (!cx.length) { card.style.display = "none"; return; }
+  _caixMetas = data.metas || [];
+  renderCaixinhas(cx);
+  card.style.display = "";
+}
+
+function renderCaixinhas(list) {
+  const el = document.getElementById("caixinhas-list");
+  el.innerHTML = list.map(c => {
+    const opts = ['<option value="">Não vincular</option>'].concat(
+      _caixMetas.map(m => {
+        const meta = m.target_amount ? ` (meta ${fmt(m.target_amount)})` : "";
+        const sel = c.pocket_id === m.id ? " selected" : "";
+        return `<option value="${m.id}"${sel}>${esc(m.name)}${esc(meta)}</option>`;
+      })
+    ).join("");
+    const cur = c.pocket_id ? Number(c.pocket_id) : "null";
+    return `<div class="caix-row">
+      <div class="caix-info">
+        <div class="caix-name"><i class="ph ph-piggy-bank" aria-hidden="true"></i> ${esc(c.name)}</div>
+        <div class="caix-bal">${fmt(c.balance)} guardado</div>
+      </div>
+      <select class="caix-select" onchange="bindCaixinha(${Number(c.of_investment_id)}, this.value, ${cur})">${opts}</select>
+    </div>`;
+  }).join("");
+}
+
+async function bindCaixinha(ofInvestmentId, newPocketVal, currentPocketId) {
+  let body;
+  if (newPocketVal) {
+    body = { pocket_id: Number(newPocketVal), of_investment_id: ofInvestmentId };
+  } else if (currentPocketId) {
+    body = { pocket_id: currentPocketId, of_investment_id: null };  // desvincula
+  } else {
+    return;
+  }
+  try {
+    const resp = await fetch(`${API}/open-finance/${USER_ID}/caixinhas/bind`, authOptions({
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+    }));
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    showToast(newPocketVal ? "Caixinha vinculada à meta!" : "Vínculo removido.", "ok");
+  } catch (err) {
+    showToast(err.message || "Erro ao vincular", "error");
+  }
+  loadCaixinhas();
+}
+
+/* ── Refresh (botão "Atualizar") ─────────────────
+   Diferente do loadData (que só relê o snapshot): pede pra Pluggy re-buscar do
+   banco (PATCH /items), espera concluir e sincroniza — puxa transação nova, marca
+   a conexão ATIVA e limpa "Pendente". */
+async function refreshOpenFinance() {
+  if (!USER_ID) { showToast("Sessão inválida. Faça login novamente", "error"); return; }
+  const btn = document.getElementById("of-refresh-btn");
+  const orig = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "↻ Atualizando…"; }
+  showToast("Buscando novidades no seu banco… pode levar alguns segundos.", "ok");
+  try {
+    const resp = await fetch(`${API}/open-finance/${USER_ID}/refresh`, authOptions({
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+    }));
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const data = await resp.json();
+    const c = data.connections  || [];
+    const a = data.accounts     || [];
+    const t = data.transactions || [];
+    updateStats(c, a, t);
+    renderConnections(c);
+    renderAccounts(a);
+    renderTransactions(t);
+    if (c.length > 0) setStep(3);
+    const sync = data.sync || {};
+    if (Number(sync.still_updating) > 0) {
+      showToast("O banco ainda está atualizando. Se faltar algo, toque em Atualizar de novo.", "error");
+    } else {
+      showToast("Tudo em dia!", "ok");
+    }
+  } catch (err) {
+    showToast(err.message || "Erro ao atualizar", "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = orig || "↻ Atualizar"; }
   }
 }
 
@@ -2504,13 +2922,22 @@ async function openPluggyConnect() {
     connectToken: accessToken,
     includeSandbox: Boolean(data.includeSandbox),
     connectorTypes,
-    selectedConnectorId: OPEN_FINANCE_CONNECTORS[selectedBank],
-    products: ["ACCOUNTS", "TRANSACTIONS", "CREDIT_CARDS"],
+    selectedConnectorId: selectedConnectorId || undefined,
+    // INVESTMENTS incluído: o sync lê /investments pra achar a Caixinha (FIXED_INCOME/CDB).
+    // Precisa casar com PLUGGY_PRODUCTS do connect-token, senão o produto não é coletado.
+    products: ["ACCOUNTS", "TRANSACTIONS", "CREDIT_CARDS", "INVESTMENTS"],
     language: "pt",
     theme: "dark",
     onSuccess: async (itemData) => {
-      await savePluggyItem(itemData);
-      showToast("Banco conectado com sucesso!", "ok");
+      try {
+        await savePluggyItem(itemData);
+        showToast("Banco conectado com sucesso!", "ok");
+      } catch (err) {
+        // Ex.: limite de bancos do plano (402 OF_BANK_LIMIT) — o banco foi autorizado na
+        // Pluggy mas o plano não comporta mais conexões. Mostra o porquê pro usuário.
+        showToast(String(err && err.message ? err.message : err) || "Não foi possível salvar a conexão.", "error");
+        setStep(1);
+      }
     },
     onError: (error) => {
       console.error("Pluggy Connect error", error);
@@ -2528,52 +2955,10 @@ async function openPluggyConnect() {
   else throw new Error("Widget da Pluggy carregou em um formato inesperado.");
 }
 
-async function connectMock() {
-  if (!USER_ID) { showToast("Sessão inválida — faça login novamente", "error"); return; }
-  const btn = document.getElementById("connect-btn");
-  const statusEl = document.getElementById("connect-status");
-  const statusText = document.getElementById("connect-status-text");
-  btn.disabled = true;
-  statusEl.classList.add("show");
-  setStep(2);
-
-  const msgs = [
-    "Iniciando autorização simulada...",
-    "Consultando a instituição...",
-    "Importando contas e transações...",
-  ];
-  for (const m of msgs) { statusText.textContent = m; await new Promise(r => setTimeout(r, 450)); }
-
-  try {
-    const resp = await fetch(`${API}/open-finance/${USER_ID}/mock-connect`, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: authHeaders({ "Content-Type":"application/json" }),
-      body: JSON.stringify({ institution: selectedBank }),
-    });
-    if (!resp.ok) throw new Error(await readApiError(resp));
-    const data = await resp.json();
-    const c = data.connections  || [];
-    const a = data.accounts     || [];
-    const t = data.transactions || [];
-    updateStats(c, a, t);
-    renderConnections(c);
-    renderAccounts(a);
-    renderTransactions(t);
-    setStep(3);
-    statusEl.classList.remove("show");
-    showToast("Banco conectado com sucesso!", "ok");
-  } catch (err) {
-    setStep(1);
-    statusEl.classList.remove("show");
-    showToast(err.message || "Erro ao conectar", "error");
-  } finally {
-    btn.disabled = false;
-  }
-}
-
 async function connectOpenFinance() {
-  if (!USER_ID) { showToast("Sessão inválida — faça login novamente", "error"); return; }
+  if (!USER_ID) { showToast("Sessão inválida. Faça login novamente", "error"); return; }
+  // Free (limite 0): não abre o widget — o /pluggy-item recusaria. Leva pro upgrade.
+  if (OF_BANKS_MAX === 0) { window.location.href = "/precos"; return; }
   const btn = document.getElementById("connect-btn");
   const statusEl = document.getElementById("connect-status");
   const statusText = document.getElementById("connect-status-text");
@@ -2814,8 +3199,9 @@ async function mfaRegenerateSubmit() {
 
 /* ── Init ────────────────────────────────────── */
 async function initSettings() {
+  let session = null;
   try {
-    await validateSettingsSession();
+    session = await validateSettingsSession();
   } catch {
     redirectHome();
     return;
@@ -2826,6 +3212,11 @@ async function initSettings() {
     const meResp = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
     if (meResp.ok) {
       me = await meResp.json();
+      // Gate de escolha de plano: cadastro novo passa pela /precos antes de
+      // acessar qualquer tela do app (só na web; app iOS fica de fora — 3.1.1).
+      if (me && me.needs_plan_selection && !window.PB_IN_APP) {
+        window.location.replace("/precos?escolha=1"); return;
+      }
       if (me && me.app_access === false) {
         // App iOS: settings fica acessível sem redirect de compra (diretriz 3.1.1)
         if (!window.PB_IN_APP) { window.location.replace("/precos?ativar=1"); return; }
@@ -2847,6 +3238,10 @@ async function initSettings() {
       if (sub) sub.textContent = "Conecte seus bancos";
     }
   }
+
+  // Open Finance: teto de bancos do plano. 0 = Free/sem OF → botão vira CTA de upgrade.
+  OF_BANKS_MAX = (me && me.of_banks_max !== undefined) ? me.of_banks_max : null;
+  applyOfConnectButton();
 
   document.getElementById("dashboard-link").href = "/app";
   const allowedViews = ["security", "notifications", "data", "legal"];
@@ -2871,6 +3266,74 @@ initSettings();
 
 <!-- ── MFA Modais ─────────────────────────────────────────────────────────── -->
 <style>
+.caix-row {
+  display: flex; align-items: center; gap: 12px; padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.caix-row:last-child { border-bottom: none; }
+.caix-info { flex: 1; min-width: 0; }
+.caix-name { font-weight: 780; font-size: .88rem; color: var(--ink); }
+.caix-bal { font-size: .73rem; color: var(--faint); margin-top: 2px; }
+.caix-select {
+  flex: none; max-width: 55%; padding: 8px 10px; border-radius: var(--radius-sm);
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--ink); font-size: .8rem;
+}
+.caix-select:focus { border-color: var(--accent); outline: none; }
+.bankpick-open-btn {
+  width: 100%; padding: 13px; border-radius: var(--radius-md);
+  background: var(--surface-2); border: 1px dashed var(--border-hover);
+  color: var(--ink); font-size: .9rem; font-weight: 780; cursor: pointer;
+  display: flex; gap: 8px; align-items: center; justify-content: center;
+  transition: border-color .15s var(--ease), transform .15s var(--ease);
+}
+.bankpick-open-btn:hover { border-color: var(--accent); transform: translateY(-1px); }
+.bankpick-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 9999;
+  display: none; align-items: center; justify-content: center; padding: 20px;
+}
+.bankpick-overlay.open { display: flex; }
+.bankpick-modal {
+  width: 100%; max-width: 560px; max-height: 82vh; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius-xl);
+  display: flex; flex-direction: column; overflow: hidden; box-shadow: var(--shadow-md);
+}
+.bankpick-head { padding: 20px 22px 14px; border-bottom: 1px solid var(--border); }
+.bankpick-head-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.bankpick-title { font-weight: 860; font-size: 1.1rem; color: var(--ink); }
+.bankpick-sub { font-size: .78rem; color: var(--faint); margin-top: 2px; }
+.bankpick-x {
+  width: 34px; height: 34px; border-radius: var(--radius-sm); background: var(--surface-2);
+  border: 1px solid var(--border); color: var(--muted); cursor: pointer; font-size: 1rem; flex-shrink: 0;
+}
+.bankpick-x:hover { border-color: var(--border-hover); color: var(--ink); }
+.bankpick-search-wrap { margin-top: 14px; position: relative; }
+.bankpick-search-wrap > span { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--faint); }
+.bankpick-search-wrap input {
+  width: 100%; padding: 12px 14px 12px 40px; border-radius: var(--radius-md);
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--ink); font-size: .9rem; outline: none;
+}
+.bankpick-search-wrap input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.bankpick-list { overflow-y: auto; padding: 6px 12px 10px; flex: 1 1 auto; min-height: 0; }
+.bankpick-alpha {
+  position: sticky; top: 0; background: var(--surface); color: var(--faint);
+  font-size: .72rem; font-weight: 860; letter-spacing: .06em; padding: 10px 8px 5px; z-index: 2;
+}
+.bankpick-row { width: 100%; margin-bottom: 4px; text-align: left; }
+.bankpick-row.active { border-color: var(--accent); background: var(--accent-soft); }
+.bankpick-logo { position: relative; overflow: hidden; background: #fff; }
+.bankpick-logo img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: contain; padding: 5px; background: #fff; border-radius: inherit;
+}
+.bankpick-empty { padding: 34px 18px; text-align: center; color: var(--faint); font-size: .88rem; }
+.bankpick-foot {
+  padding: 14px 18px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px; background: var(--surface-2);
+}
+.bankpick-count { font-size: .82rem; color: var(--muted); }
+.bankpick-count strong { color: var(--ink); }
+.bankpick-go { margin: 0 0 0 auto; width: auto; padding: 12px 22px; }
+.bankpick-go:disabled { opacity: .45; cursor: not-allowed; }
 .mfa-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 9999;
   display: none; align-items: center; justify-content: center; padding: 20px;
@@ -2942,7 +3405,7 @@ initSettings();
     <div id="mfa-setup-step3" style="display:none">
       <h3>Códigos de backup</h3>
       <p class="sub">Guarde esses códigos em local seguro. Cada um pode ser usado uma vez se você perder o app autenticador.</p>
-      <div class="mfa-warn">⚠ Você não verá esses códigos novamente. Salve agora.</div>
+      <div class="mfa-warn"><i class="ph ph-warning" aria-hidden="true"></i> Você não verá esses códigos novamente. Salve agora.</div>
       <div class="mfa-codes" id="mfa-backup-codes-list"></div>
       <div class="mfa-actions">
         <button class="btn-cancel" type="button" onclick="copyBackupCodes()">Copiar todos</button>
@@ -2983,7 +3446,7 @@ initSettings();
     </div>
     <div id="mfa-regen-result" style="display:none">
       <h3>Novos códigos de backup</h3>
-      <div class="mfa-warn">⚠ Os anteriores foram invalidados. Salve estes agora.</div>
+      <div class="mfa-warn"><i class="ph ph-warning" aria-hidden="true"></i> Os anteriores foram invalidados. Salve estes agora.</div>
       <div class="mfa-codes" id="mfa-regen-codes-list"></div>
       <div class="mfa-actions">
         <button class="btn-cancel" type="button" onclick="copyRegenBackupCodes()">Copiar todos</button>
@@ -2996,7 +3459,7 @@ initSettings();
 <div class="mfa-overlay" id="activity-modal-overlay" onclick="if (event.target === this) closeActivityModal()">
   <div class="mfa-modal">
     <h3>Atividade recente da conta</h3>
-    <p class="sub">Últimas ações sensíveis registradas — login de novos dispositivos, alterações de e-mail, MFA e Open Finance.</p>
+    <p class="sub">Últimas ações sensíveis registradas: login de novos dispositivos, alterações de e-mail, MFA e Open Finance.</p>
     <div id="activity-modal-list" class="activity-list"></div>
     <div class="mfa-actions">
       <button class="btn-cancel" type="button" onclick="closeActivityModal()">Fechar</button>

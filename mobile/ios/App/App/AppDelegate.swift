@@ -3,6 +3,7 @@ import Capacitor
 import LocalAuthentication
 import WebKit
 import AuthenticationServices
+import UserNotifications
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -27,7 +28,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     private let siteBase = "https://pigbankai.com"
     private var authSession: ASWebAuthenticationSession?
     private var authBridgeReady = false
+    private var authBridgeRetries = 0
     private weak var appWebView: WKWebView?
+
+    // ── Push notifications (APNs) ──────────────────────────────────────────
+    // O site (app-mode.js) pede o registro via postMessage("register") no
+    // handler "pbPush". O device token chega em didRegister... e é entregue de
+    // volta pro WebView (window.PBPush.onToken), que faz o POST autenticado em
+    // /api/push/register reusando os cookies de sessão.
+    private var pendingPushToken: String?
+    #if DEBUG
+    private let apnsEnvironment = "sandbox"
+    #else
+    private let apnsEnvironment = "production"
+    #endif
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         return true
@@ -41,6 +55,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func applicationDidBecomeActive(_ application: UIApplication) {
         hideScrollIndicators()
         setupAuthBridge()
+        deliverPushTokenToWeb()
         if unlocked, let t = backgroundedAt, Date().timeIntervalSince(t) > gracePeriod {
             unlocked = false
         }
@@ -82,11 +97,51 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     // Registra o handler JS "pbAuth" uma vez, quando o WebView existe.
+    // No cold launch o WebView do Capacitor pode nascer DEPOIS do primeiro
+    // didBecomeActive — sem retry a ponte só era registrada quando o app
+    // voltava do background, e o botão Google caía no fluxo web (sem Face ID).
     private func setupAuthBridge() {
         if authBridgeReady { return }
-        guard let wk = findWebView() else { return }
+        guard let wk = findWebView() else {
+            if authBridgeRetries < 20 {
+                authBridgeRetries += 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                    self?.setupAuthBridge()
+                }
+            }
+            return
+        }
         wk.configuration.userContentController.add(self, name: "pbAuth")
+        wk.configuration.userContentController.add(self, name: "pbPush")
+        UNUserNotificationCenter.current().delegate = self
         authBridgeReady = true
+    }
+
+    // ── Push: pedido de autorização + registro no APNs ─────────────────────
+    // Chamado quando o site (logado) manda pbPush("register"). Pede permissão
+    // de notificação e, se concedida, registra no APNs. O token volta em
+    // application(_:didRegisterForRemoteNotificationsWithDeviceToken:).
+    private func registerForPush() {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
+            guard granted else { return }
+            DispatchQueue.main.async {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+        }
+    }
+
+    // Entrega o device token pro WebView, que faz o POST autenticado. Se o
+    // WebView ainda não existe (cold launch), segura em pendingPushToken.
+    private func deliverPushTokenToWeb() {
+        guard let token = pendingPushToken else { return }
+        guard let wk = findWebView() else { return }
+        let js = "window.PBPush && window.PBPush.onToken && window.PBPush.onToken('\(token)','\(apnsEnvironment)')"
+        DispatchQueue.main.async {
+            wk.evaluateJavaScript(js) { _, _ in }
+        }
+        // Não zera pendingPushToken: a entrega é idempotente (o backend faz
+        // upsert por token) e permite re-entregar depois de navegações/reloads.
     }
 
     // Inicia o OAuth do Google no navegador nativo (Face ID/autofill/SSO).
@@ -225,6 +280,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func applicationWillTerminate(_ application: UIApplication) {
     }
 
+    // ── APNs: token recebido / falha ───────────────────────────────────────
+    func application(_ application: UIApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
+        pendingPushToken = hex
+        deliverPushTokenToWeb()
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        NSLog("[PigBank] Falha ao registrar push: \(error.localizedDescription)")
+    }
+
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
         return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
     }
@@ -235,13 +303,33 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
 }
 
-// Recebe o postMessage("google") do app-mode.js
+// Recebe o postMessage("google") do app-mode.js e o pbPush("register")
 extension AppDelegate: WKScriptMessageHandler {
     func userContentController(_ userContentController: WKUserContentController,
                               didReceive message: WKScriptMessage) {
         if message.name == "pbAuth", (message.body as? String) == "google" {
             startGoogleLogin()
+        } else if message.name == "pbPush", (message.body as? String) == "register" {
+            registerForPush()
         }
+    }
+}
+
+// Notificações com o app em primeiro plano + toque na notificação.
+extension AppDelegate: UNUserNotificationCenterDelegate {
+    // App aberto: ainda mostra o banner (senão o push some sem o usuário ver).
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound, .badge])
+    }
+
+    // Toque na notificação: leva pro app (WebView já carrega o /home logado).
+    // Deep link por notificação fica pra fase futura (payload traria a rota).
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        completionHandler()
     }
 }
 

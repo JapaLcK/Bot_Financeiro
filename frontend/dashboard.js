@@ -41,6 +41,35 @@ let USER_ID = 0;
 let WS_URL  = "";
 let USER_EMAIL = "";
 let USER_PLAN = "";
+// Gates de feature resolvidos pelo backend (/auth/dashboard-profile). {} = tudo
+// bloqueado até o perfil chegar (default conservador). Ver applyProGates.
+let USER_GATES = {};
+
+/* ─── Loader de scripts sob demanda ──────────────────────────────────────
+   Carrega uma lib de terceiros só quando ela é realmente necessária, em vez
+   de baixá-la em todo boot. Deduplica: várias chamadas para a mesma URL
+   compartilham a mesma Promise. */
+const _scriptLoaders = {};
+function _loadScriptOnce(src) {
+  if (_scriptLoaders[src]) return _scriptLoaders[src];
+  _scriptLoaders[src] = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => { delete _scriptLoaders[src]; reject(new Error(`Falha ao carregar ${src}`)); };
+    document.head.appendChild(s);
+  });
+  return _scriptLoaders[src];
+}
+
+/* Sortable só é usado no drag-to-reorder dos cartões (ponteiro fino). Carrega
+   sob demanda pra tirar ~50KB de todo boot de quem nunca reordena cartão. */
+function ensureSortable() {
+  if (typeof window.Sortable !== "undefined") return Promise.resolve();
+  return _loadScriptOnce("https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js")
+    .catch(() => {});
+}
 
 function getCookie(name) {
   return document.cookie.split("; ").find(row => row.startsWith(`${name}=`))?.split("=")[1] || "";
@@ -77,9 +106,10 @@ function formatPlanLabel(plan) {
   return value.toLowerCase() === "free" ? "Plano Free" : `Plano ${value}`;
 }
 
-function applyUserMenuState(email, plan, displayName) {
+function applyUserMenuState(email, plan, displayName, gates) {
   USER_EMAIL = email || "";
   USER_PLAN = plan || "free";
+  if (gates && typeof gates === "object") USER_GATES = gates;
   document.getElementById("user-label").textContent = userMenuLabel(displayName, USER_EMAIL);
   document.getElementById("user-email").textContent = USER_EMAIL || "Minha conta";
   document.getElementById("user-plan").textContent = formatPlanLabel(USER_PLAN);
@@ -88,12 +118,63 @@ function applyUserMenuState(email, plan, displayName) {
   applyProGates();
 }
 
+/* ─── Cache do chrome do header (instant paint no cold start) ─────────────
+   Guarda só dados NÃO-financeiros do menu (nome/email/plano) pra pintar o
+   cabeçalho e aplicar os gates de UI na hora, sem esperar o round-trip do
+   /auth/dashboard-profile. Saldos e transações NUNCA entram aqui — a política
+   do app é não cachear dado financeiro no dispositivo (ver service-worker.js).
+   O valor é sobrescrito pelo perfil fresco ~1 RTT depois.
+   O cache é ESCOPADO ao USER_ID validado: o paint otimista só acontece se o
+   registro pertencer ao usuário da sessão atual. Isso evita mostrar a
+   identidade de um usuário anterior quando outra conta loga no mesmo
+   navegador — inclusive se o logout foi feito por Settings/Home (cujos
+   handlers não conhecem esta chave) e mesmo que o fetch fresco falhe. */
+const _MENU_CACHE_KEY = "pigbank_menu_v1";
+function _readMenuCache() {
+  try {
+    const raw = localStorage.getItem(_MENU_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function _writeMenuCache(userId, email, plan, displayName) {
+  // NÃO cacheamos feature_gates: entitlement é estado que expira (assinatura
+  // vence, freio v2 liga) e cache no localStorage viraria "liberado" preso.
+  // Só o chrome não-sensível (email/plano-label/nome) é paintado do cache.
+  try {
+    localStorage.setItem(_MENU_CACHE_KEY, JSON.stringify({ userId, email, plan, displayName }));
+  } catch {}
+}
+function clearMenuCache() {
+  try { localStorage.removeItem(_MENU_CACHE_KEY); } catch {}
+}
+
 async function loadUserMenuState() {
+  // Paint otimista: aplica o último chrome conhecido ANTES do fetch resolver,
+  // mas só se o cache for do usuário já validado nesta sessão (USER_ID). Os
+  // gates NÃO vêm do cache (sem 4º arg) — ficam no default {} (tudo bloqueado)
+  // até o /auth/dashboard-profile fresco chegar. Fail-closed de propósito:
+  // melhor um flash de cadeado pra quem paga que liberar controle pra assinatura
+  // já expirada (ou pós-freio v2) enquanto o perfil real não confirma.
+  const cached = _readMenuCache();
+  if (cached && USER_ID && String(cached.userId) === String(USER_ID)) {
+    applyUserMenuState(cached.email || "", cached.plan || "free", cached.displayName || "");
+  } else if (cached) {
+    // Cache de outro usuário (ou formato antigo sem userId): descarta pra não
+    // vazar identidade. Será reescrito com o perfil correto abaixo.
+    clearMenuCache();
+  }
+  // Fail-closed universal: trava os controles pagos ANTES de qualquer fetch, em
+  // TODA path — inclusive sem cache / cache de outro user / storage limpo, onde
+  // nada acima chama applyProGates e o HTML inicial fica destravado. USER_GATES
+  // começa {} → tudo vira .pro-locked até o /auth/dashboard-profile confirmar.
+  // Idempotente com o applyUserMenuState do branch de cache acima.
+  applyProGates();
   try {
     const res = await fetch(`${API}/auth/dashboard-profile`, { credentials: "same-origin" });
     if (!res.ok) return;
     const data = await readResponsePayload(res);
-    applyUserMenuState(data.email || "", data.plan || "free", data.display_name || "");
+    applyUserMenuState(data.email || "", data.plan || "free", data.display_name || "", data.feature_gates || {});
+    _writeMenuCache(USER_ID, data.email || "", data.plan || "free", data.display_name || "");
   } catch {}
 }
 
@@ -167,10 +248,58 @@ let alertsDismissed  = false;
 let monthRequestSeq  = 0;
 let monthAbortController = null;
 const monthDataCache = new Map();
+
+/* ── Canal de fetch compartilhado (dedup + abort + geração) ────────────────
+   Mesmo padrão provado do fetchMonthHttp (seq + AbortController + guarda de
+   geração), empacotado pra os loaders secundários do dashboard reusarem sem
+   copiar. Cada loader instancia o seu (makeFetchChannel()).
+
+   run(fetcher, { force }) devolve uma promise que resolve pra:
+     • os dados            — quando este pedido é o mais novo (geração atual);
+     • undefined           — quando foi SUPERADO por um pedido mais novo ou
+                             ABORTADO (neutro: não renderiza, não pinta erro);
+   e REJEITA só no erro real do pedido da geração atual.
+
+   force=true cancela o pedido anterior DE VERDADE (não só zera a ref — foi o
+   que o stopgap e7badca errou, revertido em f89bcbf: zerar sem abortar deixou
+   o velho terminar e sobrescrever o novo). force=false deduplica (reaproveita
+   o pedido em curso), pro revalidate silencioso do stale-while-revalidate. */
+function makeFetchChannel() {
+  let inFlight = null, controller = null, gen = 0;
+  return {
+    run(fetcher, { force = false } = {}) {
+      if (inFlight && !force) return inFlight;   // dedup (revalidate SWR)
+      if (controller) controller.abort();         // cancela o anterior de verdade
+      const myGen = ++gen;
+      controller = new AbortController();
+      const signal = controller.signal;
+      const p = (async () => {
+        try {
+          const data = await fetcher(signal);
+          return (myGen === gen) ? data : undefined;   // superado → neutro
+        } catch (err) {
+          // Superado (por abort ou por corrida) nunca vira erro de tela: quem
+          // manda agora é o pedido mais novo. Só o erro real da geração atual
+          // sobe pro caller (pro indicador do puxão ficar âmbar).
+          if (myGen !== gen) return undefined;
+          if (err && err.name === "AbortError") return undefined;
+          throw err;
+        } finally {
+          // Só o dono atual limpa as refs — o velho abortado não pode zerar o
+          // controller/inFlight do novo que acabou de assumir.
+          if (myGen === gen) { inFlight = null; controller = null; }
+        }
+      })();
+      inFlight = p;
+      return p;
+    },
+  };
+}
 let filterDebounceTimer = null;
 
 const NOW = new Date();
 let viewYear = NOW.getFullYear(), viewMonth = NOW.getMonth() + 1;
+let historyEarliestDate = null;
 
 const PT_MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
                    "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -212,6 +341,38 @@ function isCurrentViewData(data) {
   return Number(data?.year) === Number(viewYear) && Number(data?.month) === Number(viewMonth);
 }
 
+/* ─── Snapshot em sessionStorage: paint instantâneo entre páginas ──────────
+   O app troca /home <-> /app (Dashboard) com reload de página inteira; sem
+   isso a Visão Geral mostrava skeleton e esperava o WebSocket a cada troca.
+   Guardamos só o snapshot no ESTADO PADRÃO da aba (pág 1, filtro "all", sem
+   busca), escopado ao USER_ID. sessionStorage some quando o app é fechado de
+   vez — nada de dado financeiro gravado no disco a longo prazo. */
+function _snapSessionKey(year, month) {
+  return `pb_snap_${USER_ID}_${year}_${String(month).padStart(2, "0")}`;
+}
+function persistSnapshotToSession(data) {
+  if (!data || !data.year || !data.month || !USER_ID) return;
+  const page = data.launches_pagination?.page || 1;
+  const type = data.launches_pagination?.filter_type || "all";
+  const text = data.launches_pagination?.query || "";
+  if (page !== 1 || (type && type !== "all") || text) return; // só o estado padrão
+  try { sessionStorage.setItem(_snapSessionKey(data.year, data.month), JSON.stringify(data)); } catch {}
+}
+function restoreSnapshotFromSession() {
+  if (!USER_ID) return false;
+  try {
+    const raw = sessionStorage.getItem(_snapSessionKey(viewYear, viewMonth));
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    if (!isCurrentViewData(data)) return false;
+    lastData = data;
+    cacheMonthData(data);
+    render(data);              // pinta na hora; o WebSocket revalida em seguida
+    setLaunchesLoading(false);
+    return true;
+  } catch { return false; }
+}
+
 async function logoutDashboard() {
   try {
     await fetch(`${API}/auth/logout`, {
@@ -220,6 +381,9 @@ async function logoutDashboard() {
       headers: csrfHeaders()
     });
   } catch {}
+  clearMenuCache();  // não deixa o chrome de um usuário vazar pro próximo login
+  // Limpa os snapshots da sessão (defense-in-depth; já são escopados ao userId).
+  try { Object.keys(sessionStorage).forEach(k => { if (k.startsWith("pb_snap_")) sessionStorage.removeItem(k); }); } catch {}
   localStorage.setItem('finbot_logout_at', String(Date.now()));
   window.location.replace('/?logout=1');
 }
@@ -243,9 +407,62 @@ const fmtShort = n => {
     : "R$" + Number(n).toLocaleString("pt-BR",{minimumFractionDigits:0,maximumFractionDigits:0});
 };
 
+// Fuso do app (o backend agrupa tudo em America/Sao_Paulo). Exibimos as datas
+// SEMPRE nesse fuso pra não depender do timezone do dispositivo — no WebView do
+// iOS ele costuma vir em UTC, o que fazia a hora aparecer ~3h adiantada.
+const APP_TZ = "America/Sao_Paulo";
+
+// Normaliza uma string de data: se vier sem timezone (naive), a coluna é
+// timestamptz em UTC, então trata como UTC. Devolve um Date (instante) ou null.
+function _isoToDate(iso) {
+  if (!iso) return null;
+  let s = String(iso);
+  const hasTz = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(s);
+  if (!hasTz) s = s.replace(" ", "T") + "Z";
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// Partes de parede (ano/mês/dia/hora/min) de um instante num dado fuso.
+function _wallPartsInTZ(date, tz) {
+  const dtf = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  });
+  const p = {};
+  for (const part of dtf.formatToParts(date)) p[part.type] = part.value;
+  if (p.hour === "24") p.hour = "00"; // alguns engines usam 24 pra meia-noite
+  return p;
+}
+
+// Offset do fuso (em minutos) num instante: negativo p/ oeste de UTC (-180 = -03:00).
+function _tzOffsetMinutes(date, tz) {
+  const p = _wallPartsInTZ(date, tz);
+  const asUTC = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+  return Math.round((asUTC - date.getTime()) / 60000);
+}
+
+// "YYYY-MM-DDTHH:MM" interpretado como hora de PAREDE em APP_TZ -> instante ISO
+// (UTC). Ex.: 12:00 em São Paulo -> 15:00Z. Brasil não tem DST (desde 2019),
+// então o offset é estável.
+function appTzWallClockToISO(localStr) {
+  if (!localStr) return null;
+  const [datePart, timePart = "00:00"] = String(localStr).split("T");
+  const [y, mo, da] = datePart.split("-").map(Number);
+  const [h, mi] = timePart.split(":").map(Number);
+  if ([y, mo, da, h, mi].some(n => Number.isNaN(n))) return null;
+  const asUTC = Date.UTC(y, mo - 1, da, h, mi);
+  const offsetMin = _tzOffsetMinutes(new Date(asUTC), APP_TZ);
+  return new Date(asUTC - offsetMin * 60000).toISOString();
+}
+
 const fmtDate = iso => {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+  const d = _isoToDate(iso);
+  if (!d) return "—";
+  return d.toLocaleString("pt-BR", {
+    day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+    timeZone: APP_TZ,
+  });
 };
 
 // Data/hora de um lançamento na lista.
@@ -396,13 +613,13 @@ function taxProfileForAsset(assetType) {
 // Mapa view-id → elemento. Inclui as novas seções acessíveis pelo sidebar.
 const DASH_VIEWS = [
   "overview", "analytics", "history", "fixed", "budgets", "goals",
-  "categories", "installments", "cards", "investments", "affiliate"
+  "categories", "installments", "cards", "investments", "affiliate", "agentes"
 ];
 
 function setMainView(view) {
   // Free: bloqueia navegacao pra tela inteira de investimentos. Botao fica
   // visivel mas desabilitado; click abre modal de upgrade (item 17/18).
-  if (view === "investments" && !isProUser()) {
+  if (view === "investments" && !featureAllowed("investments")) {
     showUpgradeModal("investments");
     return;
   }
@@ -443,6 +660,7 @@ function navigateTo(view) {
   if (view === "fixed") setRecurringTab("overview");
   if (view === "goals") loadGoalsView();
   if (view === "affiliate") loadAffiliateView();
+  if (view === "agentes") loadAgentesView();
 }
 
 // ── Cartões (view dinâmica conectada ao backend) ──────────────────────
@@ -458,7 +676,7 @@ const CARD_COLOR_OPTIONS = [
 let _cardEditState = { id: null, color: "purple" };
 let _currentCards = [];
 let _cardsCache = null;       // último payload do GET /cards/summary
-let _cardsFetchInFlight = null; // promise em curso pra evitar duplicação
+const _cardsChannel = makeFetchChannel(); // dedup + abort + geração
 const CARDS_FREE_LIMIT = 1; // Free plan: 1 cartão. Pro: ilimitado.
 
 function _fmtBRL(n) {
@@ -482,7 +700,7 @@ function _bestPurchaseDay(closing_day) {
 
 let _cardsRetryTimer = null;
 
-async function loadCardsView(forceFresh = false) {
+async function loadCardsView(forceFresh = false, { background = false } = {}) {
   const grid = document.getElementById("cards-grid");
   const stats = document.getElementById("cards-stats");
   if (!grid || !stats) return;
@@ -490,6 +708,9 @@ async function loadCardsView(forceFresh = false) {
   // Usa setInterval recorrente: se USER_ID demorar muito (Railway lento), continua
   // tentando até resolver, em vez de desistir após 500ms.
   if (!USER_ID) {
+    // No puxão (background) não dá pra ficar em retry silencioso: a promise
+    // precisa assentar pro indicador do gesto sair. Rejeita — vira âmbar.
+    if (background) throw new Error("cartões: sessão ainda não pronta");
     stats.innerHTML = "";
     grid.innerHTML = '<div class="empty" style="grid-column:1/-1;padding:30px;text-align:center;color:var(--text-3)"><img class="loading-sticker" src="/brand/stickers/loading.webp" alt="" />Conectando à sua conta…</div>';
     if (!_cardsRetryTimer) {
@@ -504,12 +725,23 @@ async function loadCardsView(forceFresh = false) {
     return;
   }
 
+  // Puxar pra atualizar: sem skeleton, fetch ANTES de render e falha REAL
+  // rejeita sem tocar no DOM (o render bom fica na tela, indicador âmbar).
+  if (background) {
+    const data = await _fetchCardsSummary({ force: true });
+    if (data === undefined) return;   // superado/abortado — deixa a tela como está
+    _cardsCache = data;
+    renderCardsView(data);
+    return;
+  }
+
   // Stale-while-revalidate: se já tem cache, mostra IMEDIATAMENTE (sem
   // skeleton) e refaz o fetch em background pra atualizar. Igual à Visão
   // Geral que serve do `lastData` do WebSocket.
   if (_cardsCache && !forceFresh) {
     renderCardsView(_cardsCache);
     // Revalidate silencioso (não bloqueia UI). Se mudou algo, re-renderiza.
+    // `fresh` undefined (superado) é falsy → o if pula sozinho.
     _fetchCardsSummary().then(fresh => {
       if (fresh && JSON.stringify(fresh) !== JSON.stringify(_cardsCache)) {
         _cardsCache = fresh;
@@ -529,7 +761,8 @@ async function loadCardsView(forceFresh = false) {
   grid.innerHTML = '<div class="empty" style="grid-column:1/-1;padding:30px;text-align:center;color:var(--text-3)">Carregando cartões…</div>';
 
   try {
-    const data = await _fetchCardsSummary();
+    const data = await _fetchCardsSummary({ force: true });
+    if (data === undefined) return;   // superado por um pedido mais novo
     _cardsCache = data;
     renderCardsView(data);
   } catch (err) {
@@ -538,28 +771,24 @@ async function loadCardsView(forceFresh = false) {
   }
 }
 
-// Fetch puro do summary, com dedup de requests em paralelo.
-async function _fetchCardsSummary() {
-  if (_cardsFetchInFlight) return _cardsFetchInFlight;
-  _cardsFetchInFlight = (async () => {
-    try {
-      const resp = await fetch(`${API}/cards/${USER_ID}/summary`, {
-        credentials: "same-origin",
-        headers: csrfHeaders(),
-      });
-      if (!resp.ok) {
-        const txt = await resp.text();
-        let detail = txt;
-        try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-        throw new Error(`(HTTP ${resp.status}) ${detail}`);
-      }
-      const data = await resp.json();
-      return data.cards || [];
-    } finally {
-      _cardsFetchInFlight = null;
+// Fetch puro do summary via canal (dedup + abort + geração).
+// Devolve os cartões (array), ou undefined se superado/abortado; rejeita no erro real.
+async function _fetchCardsSummary({ force = false } = {}) {
+  return _cardsChannel.run(async (signal) => {
+    const resp = await fetch(`${API}/cards/${USER_ID}/summary`, {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      signal,
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      throw new Error(`(HTTP ${resp.status}) ${detail}`);
     }
-  })();
-  return _cardsFetchInFlight;
+    const data = await resp.json();
+    return data.cards || [];
+  }, { force });
 }
 
 function renderCardsView(cards) {
@@ -629,8 +858,8 @@ function _renderCardItem(c, idx = 0) {
 
   // Layout do cc-card muda quando NÃO tem flag nem last4 (centraliza nome)
   const ccInner = isMinimal
-    ? `<div class="cc-bg-icon">💳</div><div class="cc-nickname">${escapeHtmlSafe(c.name)}</div>`
-    : `<div class="cc-bg-icon">💳</div>
+    ? `<div class="cc-bg-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></div><div class="cc-nickname">${escapeHtmlSafe(c.name)}</div>`
+    : `<div class="cc-bg-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></div>
        <div class="cc-top">${flag}</div>
        ${number}
        <div class="cc-nickname">${escapeHtmlSafe(c.name)}</div>`;
@@ -657,9 +886,9 @@ function _renderCardItem(c, idx = 0) {
             <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${usePct.toFixed(1)}%"></div></div>
           </div>` : ""}
         <div class="cc-detail-actions">
-          ${c.open_bill?.id ? `<button class="mock-cta" onclick='event.stopPropagation(); openCardBillDetail(${c.id}, ${c.open_bill.id})'>📄 Ver fatura</button>` : ""}
-          <button class="mock-cta outline" onclick='event.stopPropagation(); openCardEditModal(${JSON.stringify(c)})'>✏️ Editar</button>
-          <button class="inst-delete-btn" onclick="event.stopPropagation(); openCardDeleteModal(${c.id}, ${JSON.stringify(c.name || '').replace(/"/g, '&quot;')})">🗑 Excluir</button>
+          ${c.open_bill?.id ? `<button class="mock-cta" onclick='event.stopPropagation(); openCardBillDetail(${c.id}, ${c.open_bill.id})'><i class="ph ph-file-text" aria-hidden="true"></i> Ver fatura</button>` : ""}
+          <button class="mock-cta outline" onclick='event.stopPropagation(); openCardEditModal(${JSON.stringify(c)})'><i class="ph ph-pencil-simple" aria-hidden="true"></i> Editar</button>
+          <button class="inst-delete-btn" onclick="event.stopPropagation(); openCardDeleteModal(${c.id}, ${JSON.stringify(c.name || '').replace(/"/g, '&quot;')})"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
         </div>
       </div>
     </details>
@@ -690,7 +919,7 @@ function openCardEditModal(card) {
   const isEdit = !!(card && card.id);
   // Pro gate: bloqueia novo cadastro pra Free que já atingiu o limite.
   // Edição NUNCA bloqueia.
-  if (!isEdit && !isProUser() && _currentCards.length >= CARDS_FREE_LIMIT) {
+  if (!isEdit && !featureAllowed("cards_unlimited") && _currentCards.length >= CARDS_FREE_LIMIT) {
     showUpgradeModal("cards_unlimited");
     return;
   }
@@ -794,7 +1023,7 @@ async function openCardDeleteModal(cardId, cardName) {
     if (openTotal > 0 || futCount > 0) {
       warning = `
         <div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;padding:12px 14px;margin:14px 0">
-          <div style="font-weight:700;color:#fca5a5;margin-bottom:6px">⚠️ Este cartão ainda tem movimentação</div>
+          <div style="font-weight:700;color:#fca5a5;margin-bottom:6px"><i class="ph ph-warning" aria-hidden="true"></i> Este cartão ainda tem movimentação</div>
           <ul style="margin:0;padding-left:20px;font-size:.86rem;line-height:1.6;color:var(--text-2)">
             ${openTotal > 0 ? `<li><strong>Fatura em aberto:</strong> ${_fmtBRL(openTotal)}</li>` : ""}
             ${futCount > 0 ? `<li><strong>${futCount} parcela${futCount === 1 ? "" : "s"} futura${futCount === 1 ? "" : "s"}</strong> agendada${futCount === 1 ? "" : "s"}</li>` : ""}
@@ -939,15 +1168,16 @@ function _instEmoji(categoria) {
 }
 
 let _instCache = null;
-let _instFetchInFlight = null;
+const _instChannel = makeFetchChannel(); // dedup + abort + geração
 let _instRetryTimer = null;
 
-async function loadInstallmentsView(forceFresh = false) {
+async function loadInstallmentsView(forceFresh = false, { background = false } = {}) {
   const stats = document.getElementById("installments-stats");
   const list = document.getElementById("installments-list");
   if (!stats || !list) return;
 
   if (!USER_ID) {
+    if (background) throw new Error("parcelamentos: sessão ainda não pronta");
     stats.innerHTML = "";
     list.innerHTML = '<div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">Conectando à sua conta…</div>';
     if (!_instRetryTimer) {
@@ -959,6 +1189,15 @@ async function loadInstallmentsView(forceFresh = false) {
         }
       }, 250);
     }
+    return;
+  }
+
+  // Puxão: sem skeleton, fetch antes de render, falha real rejeita sem tocar DOM.
+  if (background) {
+    const data = await _fetchInstallments({ force: true });
+    if (data === undefined) return;
+    _instCache = data;
+    renderInstallmentsView(data);
     return;
   }
 
@@ -982,7 +1221,8 @@ async function loadInstallmentsView(forceFresh = false) {
   list.innerHTML = '<div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">Carregando parcelamentos…</div>';
 
   try {
-    const data = await _fetchInstallments();
+    const data = await _fetchInstallments({ force: true });
+    if (data === undefined) return;
     _instCache = data;
     renderInstallmentsView(data);
   } catch (err) {
@@ -991,27 +1231,22 @@ async function loadInstallmentsView(forceFresh = false) {
   }
 }
 
-async function _fetchInstallments() {
-  if (_instFetchInFlight) return _instFetchInFlight;
-  _instFetchInFlight = (async () => {
-    try {
-      const resp = await fetch(`${API}/installments/${USER_ID}/list?sort=urgency`, {
-        credentials: "same-origin",
-        headers: csrfHeaders(),
-      });
-      if (!resp.ok) {
-        const txt = await resp.text();
-        let detail = txt;
-        try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-        throw new Error(`(HTTP ${resp.status}) ${detail}`);
-      }
-      const data = await resp.json();
-      return data.installments || [];
-    } finally {
-      _instFetchInFlight = null;
+async function _fetchInstallments({ force = false } = {}) {
+  return _instChannel.run(async (signal) => {
+    const resp = await fetch(`${API}/installments/${USER_ID}/list?sort=urgency`, {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      signal,
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      throw new Error(`(HTTP ${resp.status}) ${detail}`);
     }
-  })();
-  return _instFetchInFlight;
+    const data = await resp.json();
+    return data.installments || [];
+  }, { force });
 }
 
 function _isNextMonthIso(iso) {
@@ -1147,7 +1382,7 @@ function _instMostCommonCategory(groups) {
 function _renderInstallmentItem(g, idx = 0) {
   const emoji = _instEmoji(g.categoria);
   const catLabel = g.categoria ? (g.categoria.charAt(0).toUpperCase() + g.categoria.slice(1)) : "Sem categoria";
-  const cardLabel = `💳 ${escapeHtmlSafe(g.card_name || "Cartão")}`;
+  const cardLabel = `<i class="ph ph-credit-card" aria-hidden="true"></i> ${escapeHtmlSafe(g.card_name || "Cartão")}`;
   const purchasedFmt = g.purchased_at ? (() => {
     const [y, m, d] = g.purchased_at.split("-").map(Number);
     return `${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")}/${y}`;
@@ -1169,7 +1404,7 @@ function _renderInstallmentItem(g, idx = 0) {
   const parcelaRows = parcelas.map(p => {
     const dateBR = _fmtDateBR(p.due_date);
     if (p.is_paid) {
-      return `<div class="parcel-row paid"><div class="parcel-status-icon paid">✓</div><div class="parcel-info"><span class="parcel-name">Parcela ${p.installment_no}</span><span class="parcel-date">${dateBR}</span><span class="parcel-tag paid">paga</span></div><span class="parcel-val">${_fmtBRL(p.valor)}</span></div>`;
+      return `<div class="parcel-row paid"><div class="parcel-status-icon paid"><i class="ph ph-check" aria-hidden="true"></i></div><div class="parcel-info"><span class="parcel-name">Parcela ${p.installment_no}</span><span class="parcel-date">${dateBR}</span><span class="parcel-tag paid">paga</span></div><span class="parcel-val">${_fmtBRL(p.valor)}</span></div>`;
     }
     if (p.is_next) {
       const tagText = g.n_pending === 1 ? "última!" : "próxima";
@@ -1180,13 +1415,13 @@ function _renderInstallmentItem(g, idx = 0) {
 
   const valorParcela = g.valor_parcela || 0;
   const anticipateBtn = g.n_pending > 0
-    ? `<button class="mock-cta outline" onclick='event.stopPropagation(); openInstAnticipateModal(${JSON.stringify(g.group_id)}, ${JSON.stringify(g.name)}, ${valorParcela}, ${parcelas.find(p => p.is_next)?.installment_no || 0}, ${g.installments_total})'>⚡ Antecipar próxima</button>`
+    ? `<button class="mock-cta outline" onclick='event.stopPropagation(); openInstAnticipateModal(${JSON.stringify(g.group_id)}, ${JSON.stringify(g.name)}, ${valorParcela}, ${parcelas.find(p => p.is_next)?.installment_no || 0}, ${g.installments_total})'><i class="ph ph-lightning" aria-hidden="true"></i> Antecipar próxima</button>`
     : "";
 
   return `
     <details class="mock-card inst-card" style="animation-delay:${idx * 50}ms">
       <summary>
-        <div class="inst-icon-box">${emoji}</div>
+        <div class="inst-icon-box">${phIcon(emoji)}</div>
         <div class="inst-body">
           <div class="inst-row-1">
             <span class="inst-name">${escapeHtmlSafe(g.name)}</span>
@@ -1216,7 +1451,7 @@ function _renderInstallmentItem(g, idx = 0) {
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             ${anticipateBtn}
-            <button class="mock-cta outline" onclick='event.stopPropagation(); openInstEditModal(${escapeHtmlSafe(JSON.stringify(g.group_id))}, ${escapeHtmlSafe(JSON.stringify(g.name))}, ${escapeHtmlSafe(JSON.stringify(g.categoria || ""))})'>✏️ Editar</button>
+            <button class="mock-cta outline" onclick='event.stopPropagation(); openInstEditModal(${escapeHtmlSafe(JSON.stringify(g.group_id))}, ${escapeHtmlSafe(JSON.stringify(g.name))}, ${escapeHtmlSafe(JSON.stringify(g.categoria || ""))})'><i class="ph ph-pencil-simple" aria-hidden="true"></i> Editar</button>
             <button class="inst-delete-btn" onclick='event.stopPropagation(); openInstDeleteModal(${escapeHtmlSafe(JSON.stringify(g.group_id))}, ${escapeHtmlSafe(JSON.stringify(g.name))})'>Excluir parcelamento</button>
           </div>
         </div>
@@ -1309,9 +1544,9 @@ async function openInstDeleteModal(group_id, name) {
     if (hasPaid) {
       body.innerHTML = `
         Excluir <b>${escapeHtmlSafe(name)}</b>?<br><br>
-        • <b>${imp.future_count}</b> parcela${futOne ? "" : "s"} futura${futOne ? "" : "s"} (${_fmtBRL(imp.future_total)}) ${futOne ? "será removida" : "serão removidas"} das faturas abertas — saldo do mês volta.<br>
+        • <b>${imp.future_count}</b> parcela${futOne ? "" : "s"} futura${futOne ? "" : "s"} (${_fmtBRL(imp.future_total)}) ${futOne ? "será removida" : "serão removidas"} das faturas abertas. Saldo do mês volta.<br>
         • <b>${imp.paid_count}</b> parcela${paidOne ? "" : "s"} já paga${paidOne ? "" : "s"} (${_fmtBRL(imp.paid_total)}) ${paidOne ? "fica" : "ficam"} no histórico (faturas pagas intactas).<br><br>
-        <span style="color:var(--red);font-weight:600">R$ ${imp.paid_total.toFixed(2).replace(".", ",")} já pago${paidOne ? "" : "s"} NÃO ${paidOne ? "volta" : "voltam"} pra conta</span> — dinheiro já saiu via fatura. Se precisar corrigir, crie um lançamento manual.
+        <span style="color:var(--red);font-weight:600">R$ ${imp.paid_total.toFixed(2).replace(".", ",")} já pago${paidOne ? "" : "s"} NÃO ${paidOne ? "volta" : "voltam"} pra conta</span>. Dinheiro já saiu via fatura. Se precisar corrigir, crie um lançamento manual.
       `;
     } else {
       body.innerHTML = `
@@ -1438,6 +1673,19 @@ const CATEGORY_EMOJI_OPTIONS = [
   "📈","💰","₿","🎓","🐶","👶","🏋️","🎵","🧴","🎂",
 ];
 
+
+// ── Icones Phosphor p/ categorias/metas/caixinhas (shim nao-destrutivo) ──
+// Continua guardando o emoji no banco; converte pra <i> so no render.
+// Fallback = icone neutro (tag): NUNCA mostra emoji.
+const EMOJI_TO_PH = {"🏷":"tag","🍔":"hamburger","🍟":"hamburger","🛒":"shopping-cart","🚗":"car","💊":"pill","🏠":"house","🎬":"film-slate","📚":"books","📖":"book-open","📺":"television","🐾":"paw-print","🖥":"desktop","🖨":"printer","✈":"airplane-tilt","🎮":"game-controller","👕":"t-shirt","👟":"sneaker-move","👜":"handbag","🍺":"beer-stein","☕":"coffee","⛽":"gas-pump","💼":"briefcase","💻":"laptop","🎁":"gift","📈":"trend-up","💰":"coins","🤝":"handshake","₿":"currency-btc","🎓":"graduation-cap","🐶":"dog","👶":"baby","🏋":"barbell","🎵":"music-notes","💄":"heart-straight","🧴":"spray-bottle","🎂":"cake","🎯":"target","🛟":"lifebuoy","📱":"device-mobile","💎":"diamond","📸":"camera","🎸":"guitar","🛏":"bed","🏖":"umbrella","🐷":"piggy-bank","🍽":"fork-knife","🍴":"fork-knife","🥖":"bread","🥩":"fork-knife","🍕":"pizza","🌐":"globe","💧":"drop","💡":"lightbulb","🔥":"flame","🚇":"train","🚌":"bus","❤":"heart","🔧":"wrench","🍎":"apple-logo","🔎":"magnifying-glass","⛪":"church","🎟":"ticket","🚕":"taxi","🏦":"bank","🏢":"buildings","🏛":"bank","🦷":"tooth","🩺":"stethoscope","🛡":"shield","🧺":"basket","🧹":"broom","🎭":"mask-happy","🎤":"microphone","🎄":"tree-evergreen","💐":"flower","☁":"cloud","🍷":"wine","💇":"scissors","🖌":"paint-brush","🎨":"paint-brush","🪴":"tree","🩹":"first-aid","📄":"file-text","🧾":"receipt","📅":"calendar-dots","📊":"chart-bar","💳":"credit-card","💸":"trend-down","📡":"broadcast"};
+function phIcon(val) {
+  const raw = val == null ? "" : String(val);
+  const v = raw.replace(/\uFE0F/g, "").trim();
+  if (!v) return "";
+  const name = EMOJI_TO_PH[v] || "tag";
+  return `<i class="ph ph-${name}" aria-hidden="true"></i>`;
+}
+
 const CATEGORY_COLOR_OPTIONS = [
   "#FF2D8E","#5FA83C","#2E7FE0","#E84545","#12A892",
   "#BE8200","#7E5FE6","#E85F2A","#22C3D6","#94A3B8",
@@ -1446,43 +1694,55 @@ const CATEGORY_COLOR_OPTIONS = [
 
 let _categoriesCache = null;
 let _budgetsStatusCache = null;
-let _categoriesFetchInFlight = null;
-let _budgetsFetchInFlight = null;
+const _categoriesChannel = makeFetchChannel(); // dedup + abort + geração
+const _budgetsChannel = makeFetchChannel();     // dedup + abort + geração
 
-async function _fetchCategories(includeArchived = true) {
-  if (_categoriesFetchInFlight) return _categoriesFetchInFlight;
-  _categoriesFetchInFlight = (async () => {
-    try {
-      const resp = await fetch(`${API}/categories/${USER_ID}?include_archived=${includeArchived ? "true" : "false"}`, {
-        credentials: "same-origin",
-        headers: csrfHeaders(),
-      });
-      if (!resp.ok) {
-        const txt = await resp.text();
-        let detail = txt;
-        try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-        throw new Error(`(HTTP ${resp.status}) ${detail}`);
-      }
-      const data = await resp.json();
-      return data.categories || [];
-    } finally {
-      _categoriesFetchInFlight = null;
+async function _fetchCategories(includeArchived = true, { force = false, direct = false } = {}) {
+  const doFetch = async (signal) => {
+    const resp = await fetch(`${API}/categories/${USER_ID}?include_archived=${includeArchived ? "true" : "false"}`, {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      signal,
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      throw new Error(`(HTTP ${resp.status}) ${detail}`);
     }
-  })();
-  return _categoriesFetchInFlight;
+    const data = await resp.json();
+    return data.categories || [];
+  };
+  // direct: chamada avulsa (ex.: dropdown do modal de orçamento) que NÃO pode
+  // ser abortada por um load da view de Categorias. Fica fora do canal — sempre
+  // devolve a lista (ou lança), nunca undefined. Sem o direct, um _fetchCategories
+  // com force=true da view superaria essa e o modal receberia undefined → dropdown
+  // vazio ("todas já têm orçamento").
+  if (direct) return doFetch();
+  return _categoriesChannel.run(doFetch, { force });
 }
 
-async function loadCategoriesView(forceFresh = false) {
+async function loadCategoriesView(forceFresh = false, { background = false } = {}) {
   const grid = document.getElementById("categories-grid");
   const stats = document.getElementById("categories-stats");
   if (!grid || !stats) return;
   if (!USER_ID) {
+    if (background) throw new Error("categorias: sessão ainda não pronta");
     grid.innerHTML = '<div class="empty" style="grid-column:1/-1;padding:20px;text-align:center;color:var(--text-3)">Conectando…</div>';
     stats.innerHTML = "";
     setTimeout(() => loadCategoriesView(forceFresh), 300);
     return;
   }
   const showArchived = document.getElementById("cat-show-archived")?.checked ?? false;
+
+  // Puxão: sem skeleton, fetch antes de render, falha real rejeita sem tocar DOM.
+  if (background) {
+    const data = await _fetchCategories(true, { force: true });
+    if (data === undefined) return;
+    _categoriesCache = data;
+    renderCategoriesView(data, showArchived);
+    return;
+  }
 
   if (_categoriesCache && !forceFresh) {
     renderCategoriesView(_categoriesCache, showArchived);
@@ -1496,7 +1756,8 @@ async function loadCategoriesView(forceFresh = false) {
   stats.innerHTML = "";
 
   try {
-    const data = await _fetchCategories(true);
+    const data = await _fetchCategories(true, { force: true });
+    if (data === undefined) return;
     _categoriesCache = data;
     renderCategoriesView(data, showArchived);
   } catch (err) {
@@ -1565,7 +1826,7 @@ function _renderCategoriesDistribution(categories) {
     const fillClass = pct > 30 ? "red" : pct > 15 ? "yellow" : "green";
     return `
       <div class="bar-row" style="animation-delay:${i * 70}ms">
-        <div class="bar-icon" style="color:${escapeHtmlSafe(color)}">${escapeHtmlSafe(emoji)}</div>
+        <div class="bar-icon" style="color:${escapeHtmlSafe(color)}">${phIcon(emoji)}</div>
         <div class="bar-body">
           <div class="bar-head"><span class="name">${escapeHtmlSafe(m.categoria)}</span><span class="val">${_fmtBRL(m.total)}</span></div>
           <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${pct.toFixed(1)}%"></div></div>
@@ -1586,7 +1847,7 @@ function _renderCategoryPill(cat, idx = 0) {
     <div class="cat-pill" style="cursor:pointer;${dim}animation-delay:${delay}ms" onclick='openCategoryEditModal(${JSON.stringify(cat)})'>
       <span class="cat-dot" style="background:${escapeHtmlSafe(cat.color)}"></span>
       <div class="cat-body">
-        <div class="cat-name">${escapeHtmlSafe(cat.emoji)} ${escapeHtmlSafe(cat.name)}${tag}</div>
+        <div class="cat-name">${phIcon(cat.emoji)} ${escapeHtmlSafe(cat.name)}${tag}</div>
         <div class="cat-val" style="color:var(--text-3)">${cat.usage_count || 0} lanç.</div>
       </div>
     </div>
@@ -1619,9 +1880,9 @@ function _ensureCategoryModal() {
             </div>
           </div>
           <div class="modal-acts" style="margin-top:18px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <button type="button" class="mock-cta outline" id="cat-edit-archive-btn" style="display:none" onclick="categoryArchiveFromModal()">📦 Arquivar</button>
+            <button type="button" class="mock-cta outline" id="cat-edit-archive-btn" style="display:none" onclick="categoryArchiveFromModal()"><i class="ph ph-archive" aria-hidden="true"></i> Arquivar</button>
             <button type="button" class="mock-cta outline" id="cat-edit-unarchive-btn" style="display:none" onclick="categoryUnarchiveFromModal()">↩️ Desarquivar</button>
-            <button type="button" class="inst-delete-btn" id="cat-edit-delete-btn" style="display:none" onclick="categoryDeleteFromModal()">🗑 Excluir</button>
+            <button type="button" class="inst-delete-btn" id="cat-edit-delete-btn" style="display:none" onclick="categoryDeleteFromModal()"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
             <span style="flex:1"></span>
             <button type="button" class="btn-cancel" onclick="closeCategoryEditModal()">Cancelar</button>
             <button type="submit" class="btn-save">Salvar</button>
@@ -1645,7 +1906,7 @@ function _renderCategoryPickers() {
       style="width:36px;height:36px;border-radius:8px;font-size:1.2rem;cursor:pointer;
              border:2px solid ${sel ? "#fff" : "transparent"};
              background:${sel ? "rgba(255,45,142,.25)" : "var(--glass-bg)"};
-             display:flex;align-items:center;justify-content:center">${e}</button>`;
+             display:flex;align-items:center;justify-content:center">${phIcon(e)}</button>`;
   }).join("");
   cPick.innerHTML = CATEGORY_COLOR_OPTIONS.map(c => {
     const sel = c === _catEditState.color;
@@ -1779,37 +2040,42 @@ async function categoryDeleteFromModal() {
 // Orçamentos (view dinâmica — semáforo real)
 // ══════════════════════════════════════════════════════════════════════
 
-async function _fetchBudgetsStatus(month) {
-  if (_budgetsFetchInFlight) return _budgetsFetchInFlight;
-  _budgetsFetchInFlight = (async () => {
-    try {
-      const q = month ? `?month=${encodeURIComponent(month)}` : "";
-      const resp = await fetch(`${API}/budgets/${USER_ID}/status${q}`, {
-        credentials: "same-origin",
-        headers: csrfHeaders(),
-      });
-      if (!resp.ok) {
-        const txt = await resp.text();
-        let detail = txt;
-        try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-        throw new Error(`(HTTP ${resp.status}) ${detail}`);
-      }
-      return await resp.json();
-    } finally {
-      _budgetsFetchInFlight = null;
+async function _fetchBudgetsStatus(month, { force = false } = {}) {
+  return _budgetsChannel.run(async (signal) => {
+    const q = month ? `?month=${encodeURIComponent(month)}` : "";
+    const resp = await fetch(`${API}/budgets/${USER_ID}/status${q}`, {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      signal,
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      throw new Error(`(HTTP ${resp.status}) ${detail}`);
     }
-  })();
-  return _budgetsFetchInFlight;
+    return await resp.json();
+  }, { force });
 }
 
-async function loadBudgetsView(forceFresh = false) {
+async function loadBudgetsView(forceFresh = false, { background = false } = {}) {
   const list = document.getElementById("budgets-list");
   const stats = document.getElementById("budgets-stats");
   const title = document.getElementById("budgets-title");
   if (!list || !stats) return;
   if (!USER_ID) {
+    if (background) throw new Error("orçamentos: sessão ainda não pronta");
     list.innerHTML = '<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Conectando…</div>';
     setTimeout(() => loadBudgetsView(forceFresh), 300);
+    return;
+  }
+
+  // Puxão: sem skeleton, fetch antes de render, falha real rejeita sem tocar DOM.
+  if (background) {
+    const data = await _fetchBudgetsStatus(undefined, { force: true });
+    if (data === undefined) return;
+    _budgetsStatusCache = data;
+    renderBudgetsView(data);
     return;
   }
 
@@ -1830,7 +2096,8 @@ async function loadBudgetsView(forceFresh = false) {
   `;
 
   try {
-    const data = await _fetchBudgetsStatus();
+    const data = await _fetchBudgetsStatus(undefined, { force: true });
+    if (data === undefined) return;
     _budgetsStatusCache = data;
     renderBudgetsView(data);
   } catch (err) {
@@ -1901,18 +2168,18 @@ function _renderBudgetRow(b, idx = 0) {
   const fillClass = b.status === "vermelho" ? "red" : (b.status === "amarelo" ? "yellow" : "green");
   const widthPct = Math.min(100, pct);
   const subColor = b.status === "vermelho" ? "color:#FF2D2D" : "";
-  const dotEmoji = b.status === "vermelho" ? "🔴" : (b.status === "amarelo" ? "🟡" : "🟢");
-  let subText = `${pct.toFixed(0)}% — ${_fmtBRL(b.remaining)} restantes`;
+  const dotEmoji = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:middle;margin-right:5px;background:${b.status === "vermelho" ? "#ef4444" : (b.status === "amarelo" ? "#fbbf24" : "#22c55e")}"></span>`;
+  let subText = `${pct.toFixed(0)}%, ${_fmtBRL(b.remaining)} restantes`;
   if (b.status === "vermelho") {
-    subText = `⚠️ ${pct.toFixed(0)}% — estourou ${_fmtBRL(-b.remaining)}`;
+    subText = `<i class="ph ph-warning" aria-hidden="true"></i> ${pct.toFixed(0)}%, estourou ${_fmtBRL(-b.remaining)}`;
   } else if (b.status === "amarelo") {
-    subText = `${pct.toFixed(0)}% — ${_fmtBRL(b.remaining)} restantes. Piggy te avisa via WhatsApp.`;
+    subText = `${pct.toFixed(0)}%, ${_fmtBRL(b.remaining)} restantes. Piggy te avisa via WhatsApp.`;
   }
   const safeCatJson = JSON.stringify(b).replace(/'/g, "&apos;");
   const delay = 240 + idx * 60;
   return `
     <div class="bar-row" style="cursor:pointer;animation-delay:${delay}ms" onclick='openBudgetEditModal(${safeCatJson})'>
-      <div class="bar-icon" style="color:${escapeHtmlSafe(b.color)}">${escapeHtmlSafe(b.emoji)}</div>
+      <div class="bar-icon" style="color:${escapeHtmlSafe(b.color)}">${phIcon(b.emoji)}</div>
       <div class="bar-body">
         <div class="bar-head"><span class="name">${dotEmoji} ${escapeHtmlSafe(b.categoria)}</span><span class="val">${_fmtBRL(b.spent)} / ${_fmtBRL(b.budget)}</span></div>
         <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${widthPct.toFixed(1)}%"></div></div>
@@ -1944,7 +2211,7 @@ function _ensureBudgetModal() {
             </div>
           </div>
           <div class="modal-acts" style="margin-top:18px;display:flex;gap:8px;align-items:center">
-            <button type="button" class="inst-delete-btn" id="budget-edit-delete-btn" style="display:none" onclick="budgetDeleteFromModal()">🗑 Excluir</button>
+            <button type="button" class="inst-delete-btn" id="budget-edit-delete-btn" style="display:none" onclick="budgetDeleteFromModal()"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
             <span style="flex:1"></span>
             <button type="button" class="btn-cancel" onclick="closeBudgetEditModal()">Cancelar</button>
             <button type="submit" class="btn-save">Salvar</button>
@@ -1972,18 +2239,18 @@ async function openBudgetEditModal(budget) {
 
   const sel = document.getElementById("budget-edit-cat");
   if (isEdit) {
-    sel.innerHTML = `<option value="${escapeHtmlSafe(budget.categoria)}" selected>${escapeHtmlSafe(budget.emoji || "🏷️")} ${escapeHtmlSafe(budget.categoria)}</option>`;
+    sel.innerHTML = `<option value="${escapeHtmlSafe(budget.categoria)}" selected>${escapeHtmlSafe(budget.categoria)}</option>`;
     sel.disabled = true;
   } else {
     sel.disabled = false;
     sel.innerHTML = '<option value="">— Carregando…</option>';
     try {
-      const cats = await _fetchCategories(false);
+      const cats = await _fetchCategories(false, { direct: true });
       const usedCats = new Set((_budgetsStatusCache?.budgets || []).map(b => (b.categoria || "").toLowerCase()));
       const options = (cats || [])
         .filter(c => !c.is_archived)
         .filter(c => !usedCats.has((c.name || "").toLowerCase()))
-        .map(c => `<option value="${escapeHtmlSafe(c.name)}">${escapeHtmlSafe(c.emoji)} ${escapeHtmlSafe(c.name)}</option>`)
+        .map(c => `<option value="${escapeHtmlSafe(c.name)}">${escapeHtmlSafe(c.name)}</option>`)
         .join("");
       sel.innerHTML = options || '<option value="">— Todas categorias já têm orçamento —</option>';
     } catch (err) {
@@ -2060,12 +2327,13 @@ async function budgetDeleteFromModal() {
 // ══════════════════════════════════════════════════════════════════════
 
 let _genericModalResolver = null;
+let _genericModalLastFocus = null;
 
 function _ensureGenericConfirmModal() {
   if (document.getElementById("generic-confirm-overlay")) return;
   const html = `
     <div class="overlay" id="generic-confirm-overlay">
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="generic-confirm-title">
         <h3 id="generic-confirm-title">Confirmar</h3>
         <p class="msub" id="generic-confirm-body" style="white-space:pre-wrap"></p>
         <div class="modal-acts" style="margin-top:18px">
@@ -2081,11 +2349,45 @@ function _ensureGenericConfirmModal() {
   });
   document.getElementById("generic-confirm-cancel").addEventListener("click", () => _genericModalClose(false));
   document.getElementById("generic-confirm-ok").addEventListener("click", () => _genericModalClose(true));
+
+  /* Este arquivo REDECLARA confirmModal/alertModal, e a dashboard.html carrega
+     dashboard.js depois de modals.js — então no dashboard quem roda é este
+     modal aqui, e o trap que o modals.js ganhou nunca era alcançado. Era o
+     furo que o Codex achou: o helper compartilhado cobria home e settings, e
+     deixava de fora justamente a página com mais chamadas de confirm/alert.
+
+     O trap vem do window.pigTrapTab, exposto pelo modals.js, pra não virar a
+     quarta cópia do mesmo bloco. Se por algum motivo o modals.js não tiver
+     carregado, o Esc continua funcionando e o Tab só não fica preso.
+
+     CAPTURE + stopPropagation, e isso importa: este listener é registrado
+     preguiçosamente, na primeira chamada de confirmModal(), então em fase de
+     bolha ele rodaria DEPOIS dos listeners de Escape que a página já tinha —
+     em especial o de :9178, que fecha os modais de fatura sem checar nada.
+     O submitPayBill() abre esta confirmação COM o overlay de pagamento aberto
+     atrás; um Esc pra dispensar o aviso fecharia junto o fluxo de pagamento e
+     o valor digitado. Em captura, este handler vê a tecla primeiro e a
+     consome, então o Esc fecha só a confirmação. */
+  document.addEventListener("keydown", (e) => {
+    const ov = document.getElementById("generic-confirm-overlay");
+    if (!ov || !ov.classList.contains("open")) return;
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      _genericModalClose(false);
+      return;
+    }
+    if (window.pigTrapTab) window.pigTrapTab(e, ov.querySelector(".modal"));
+  }, true);
 }
 
 function _genericModalClose(value) {
   const overlay = document.getElementById("generic-confirm-overlay");
   if (overlay) overlay.classList.remove("open");
+  // devolve o foco pra quem abriu, senão o teclado volta pro topo do dashboard
+  if (_genericModalLastFocus && document.contains(_genericModalLastFocus)) {
+    _genericModalLastFocus.focus();
+  }
+  _genericModalLastFocus = null;
   if (_genericModalResolver) {
     const r = _genericModalResolver;
     _genericModalResolver = null;
@@ -2107,7 +2409,9 @@ function confirmModal(message, opts = {}) {
   cancelBtn.style.display = "";
   okBtn.textContent = okText;
   okBtn.className = danger ? "inst-delete-btn" : "btn-save";
+  _genericModalLastFocus = document.activeElement;
   document.getElementById("generic-confirm-overlay").classList.add("open");
+  okBtn.focus();
   return new Promise(resolve => { _genericModalResolver = resolve; });
 }
 
@@ -2122,7 +2426,9 @@ function alertModal(message, opts = {}) {
   cancelBtn.style.display = "none";
   okBtn.textContent = okText;
   okBtn.className = "btn-save";
+  _genericModalLastFocus = document.activeElement;
   document.getElementById("generic-confirm-overlay").classList.add("open");
+  okBtn.focus();
   return new Promise(resolve => { _genericModalResolver = () => resolve(undefined); _genericModalResolver = resolve; });
 }
 
@@ -2150,36 +2456,43 @@ function _formatCdiRate(rate) {
 }
 
 let _goalsCache = null;
-let _goalsFetchInFlight = null;
+const _goalsChannel = makeFetchChannel(); // dedup + abort + geração
 
-async function _fetchGoalsStatus() {
-  if (_goalsFetchInFlight) return _goalsFetchInFlight;
-  _goalsFetchInFlight = (async () => {
-    try {
-      const resp = await fetch(`${API}/goals/${USER_ID}/status`, {
-        credentials: "same-origin",
-        headers: csrfHeaders(),
-      });
-      if (!resp.ok) {
-        const txt = await resp.text();
-        let detail = txt;
-        try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-        throw new Error(`(HTTP ${resp.status}) ${detail}`);
-      }
-      const data = await resp.json();
-      return data.goals || [];
-    } finally {
-      _goalsFetchInFlight = null;
+async function _fetchGoalsStatus({ force = false } = {}) {
+  return _goalsChannel.run(async (signal) => {
+    const resp = await fetch(`${API}/goals/${USER_ID}/status`, {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      signal,
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      throw new Error(`(HTTP ${resp.status}) ${detail}`);
     }
-  })();
-  return _goalsFetchInFlight;
+    const data = await resp.json();
+    return data.goals || [];
+  }, { force });
 }
 
-async function loadGoalsView(forceFresh = false) {
+async function loadGoalsView(forceFresh = false, { background = false } = {}) {
   const stats = document.getElementById("goals-stats");
   const grid = document.getElementById("goals-grid");
   if (!stats || !grid) return;
-  if (!USER_ID) { setTimeout(() => loadGoalsView(forceFresh), 300); return; }
+  if (!USER_ID) {
+    if (background) throw new Error("metas: sessão ainda não pronta");
+    setTimeout(() => loadGoalsView(forceFresh), 300); return;
+  }
+
+  // Puxão: sem skeleton, fetch antes de render, falha real rejeita sem tocar DOM.
+  if (background) {
+    const data = await _fetchGoalsStatus({ force: true });
+    if (data === undefined) return;
+    _goalsCache = data;
+    _renderGoalsView(data);
+    return;
+  }
 
   if (_goalsCache && !forceFresh) {
     _renderGoalsView(_goalsCache);
@@ -2198,7 +2511,8 @@ async function loadGoalsView(forceFresh = false) {
   grid.innerHTML = "";
 
   try {
-    const data = await _fetchGoalsStatus();
+    const data = await _fetchGoalsStatus({ force: true });
+    if (data === undefined) return;
     _goalsCache = data;
     _renderGoalsView(data);
   } catch (err) {
@@ -2263,19 +2577,38 @@ function _renderGoalsView(goals) {
   ).join("");
 }
 
+// Caixinha vinda do banco (Open Finance): saldo espelhado, sem rendimento interno.
+function _isOfPocket(p) { return p && (p.source === "open_finance" || p.of_investment_id != null); }
+// No Grátis (pós-trial) o OF não está ativo → a caixinha do banco fica congelada.
+function _isOfStale(p) { return _isOfPocket(p) && p.of_plan_active === false; }
+function _ofPocketBadge(p) {
+  if (!_isOfPocket(p)) return "";
+  return _isOfStale(p)
+    ? `<span class="rv-badge rv-badge-stale">banco desconectado</span>`
+    : `<span class="rv-badge">via banco</span>`;
+}
+
 function _renderPocketOnlyCard(p, idx = 0) {
   const emoji = p.emoji || "🐷";
   const color = p.color || "#FF2D8E";
+  const ofPocket = _isOfPocket(p);
+  const ofStale = _isOfStale(p);
+  const line1 = ofStale ? "<i class='ph ph-lock' aria-hidden='true'></i> Banco desconectado. Reative pra atualizar"
+              : ofPocket ? "Sincronizada com seu banco"
+              : "Caixinha sem meta: depósitos livres";
+  const line2 = ofStale ? "Reative seu banco (plano pago) pra o saldo voltar a atualizar"
+              : ofPocket ? "Saldo atualizado pela corretora/banco"
+              : (p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate));
   return `
-    <div class="goal-card" style="animation-delay:${idx * 80}ms;cursor:pointer" onclick="openPocketHistory('${escapeJsString(p.name)}')">
+    <div class="goal-card${ofStale ? " of-stale" : ""}" style="animation-delay:${idx * 80}ms;cursor:pointer" onclick="openPocketHistory('${escapeJsString(p.name)}')">
       <div class="goal-ring">
-        <div style="width:78px;height:78px;border-radius:50%;background:${color}22;display:flex;align-items:center;justify-content:center;font-size:1.6rem">${emoji}</div>
+        <div style="width:78px;height:78px;border-radius:50%;background:${color}22;display:flex;align-items:center;justify-content:center;font-size:1.6rem">${phIcon(emoji)}</div>
       </div>
       <div class="goal-info">
-        <div class="goal-name">${emoji} ${escapeHtmlSafe(p.name)}</div>
+        <div class="goal-name">${phIcon(emoji)} ${escapeHtmlSafe(p.name)} ${_ofPocketBadge(p)}</div>
         <div class="goal-amt">${_fmtBRL(p.balance || 0)} guardado</div>
-        <div class="goal-deadline" style="color:var(--text-3)">Caixinha sem meta — depósitos livres</div>
-        <div class="goal-deadline" style="color:var(--text-3)">${p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate)}</div>
+        <div class="goal-deadline" style="color:var(--text-3)">${line1}</div>
+        <div class="goal-deadline" style="color:var(--text-3)">${line2}</div>
         ${p.description ? `<div class="goal-deadline" style="color:var(--text-3);font-style:italic">${escapeHtmlSafe(p.description)}</div>` : ""}
       </div>
     </div>
@@ -2312,15 +2645,15 @@ function _renderGoalCard(g, idx = 0) {
     const today = new Date();
     const proj = new Date(today.getFullYear(), today.getMonth() + Math.ceil(g.projected_months), 1);
     const projStr = proj.toLocaleDateString("pt-BR", { month: "short", year: "numeric" });
-    alertText = `<div class="goal-deadline" style="color:#FF2D2D">⚠️ Ritmo atual chega só em ${projStr}${g.target_date ? " — prazo era " + deadlineText.replace("Prazo: ", "") : ""}</div>`;
+    alertText = `<div class="goal-deadline" style="color:#FF2D2D"><i class="ph ph-warning" aria-hidden="true"></i> Ritmo atual chega só em ${projStr}${g.target_date ? ", prazo era " + deadlineText.replace("Prazo: ", "") : ""}</div>`;
   } else if (g.indicator === "tight") {
-    alertText = `<div class="goal-deadline" style="color:#fbbf24">🟡 Ritmo apertado — pode atrasar</div>`;
+    alertText = `<div class="goal-deadline" style="color:#fbbf24">Ritmo apertado, pode atrasar</div>`;
   } else if (g.indicator === "ahead") {
-    alertText = `<div class="goal-deadline" style="color:#00F078">🚀 Adiantado — no melhor caminho</div>`;
+    alertText = `<div class="goal-deadline" style="color:#00F078"><i class="ph ph-rocket-launch" aria-hidden="true"></i> Adiantado, no melhor caminho</div>`;
   } else if (g.indicator === "on_track") {
-    alertText = `<div class="goal-deadline" style="color:#00F078">🟢 No prazo</div>`;
+    alertText = `<div class="goal-deadline" style="color:#00F078">No prazo</div>`;
   } else if (g.indicator === "achieved") {
-    alertText = `<div class="goal-deadline" style="color:#00F078">✓ Meta atingida</div>`;
+    alertText = `<div class="goal-deadline" style="color:#00F078"><i class="ph ph-check" aria-hidden="true"></i> Meta atingida</div>`;
   }
 
   return `
@@ -2333,7 +2666,7 @@ function _renderGoalCard(g, idx = 0) {
         <div class="ring-pct">${pct.toFixed(0)}%</div>
       </div>
       <div class="goal-info">
-        <div class="goal-name">${emoji} ${escapeHtmlSafe(g.name)}</div>
+        <div class="goal-name">${phIcon(emoji)} ${escapeHtmlSafe(g.name)}</div>
         <div class="goal-amt">${_fmtBRL(g.balance || 0)} / ${_fmtBRL(g.target_amount || 0)}</div>
         <div class="bar-track" style="margin-top:6px"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
         <div class="goal-deadline" style="color:${deadlineColor}">${deadlineText}${g.days_left !== null ? " · " + (g.days_left >= 0 ? "em " + g.days_left + " dias" : "vencido há " + (-g.days_left) + " dias") : ""}</div>
@@ -2408,12 +2741,12 @@ function _ensureGoalModal() {
                   <input type="number" id="goal-interest-rate" min="1" max="300" step="0.01" value="100" inputmode="decimal" style="width:112px;flex:0 0 112px" />
                   <span style="color:var(--text-2);font-size:.86rem;white-space:nowrap">% do CDI</span>
                 </div>
-                <div style="color:var(--text-3);font-size:.78rem;margin-top:8px;line-height:1.35">💡 Valor simulado — o PigBank não custodia seu dinheiro. Use a taxa do banco onde o saldo realmente está aplicado.</div>
+                <div style="color:var(--text-3);font-size:.78rem;margin-top:8px;line-height:1.35"><i class="ph ph-lightbulb" aria-hidden="true"></i> Valor simulado: o PigBank não custodia seu dinheiro. Use a taxa do banco onde o saldo realmente está aplicado.</div>
               </div>
             </div>
           </div>
           <div class="modal-acts" style="margin-top:18px;display:flex;gap:8px;align-items:center">
-            <button type="button" class="inst-delete-btn" id="goal-delete-btn" style="display:none" onclick="deleteGoalFromModal()">🗑 Excluir</button>
+            <button type="button" class="inst-delete-btn" id="goal-delete-btn" style="display:none" onclick="deleteGoalFromModal()"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
             <span style="flex:1"></span>
             <button type="button" class="btn-cancel" onclick="closeGoalEditModal()">Cancelar</button>
             <button type="submit" class="btn-save">Salvar</button>
@@ -2437,7 +2770,7 @@ function _renderGoalPickers() {
       style="width:36px;height:36px;border-radius:8px;font-size:1.2rem;cursor:pointer;
              border:2px solid ${sel ? "#fff" : "transparent"};
              background:${sel ? "rgba(255,45,142,.25)" : "var(--glass-bg)"};
-             display:flex;align-items:center;justify-content:center">${e}</button>`;
+             display:flex;align-items:center;justify-content:center">${phIcon(e)}</button>`;
   }).join("");
   cPick.innerHTML = GOAL_COLOR_OPTIONS.map(c => {
     const sel = c === _goalEditState.color;
@@ -2619,7 +2952,7 @@ function _ensureWizardOverlay() {
 
         <div class="wizard-step" data-step="1">
           <div style="text-align:center;padding:8px 0 4px">
-            <div style="font-size:3.4rem;margin-bottom:8px">🐷</div>
+            <div style="font-size:3.4rem;margin-bottom:8px"><i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
             <h3 style="margin:0 0 8px">Bem-vindo ao PigBank!</h3>
             <p class="msub" style="max-width:380px;margin:0 auto">
               Em 3 passos rápidos seu painel fica configurado pra você começar a usar agora.<br/>
@@ -2633,7 +2966,7 @@ function _ensureWizardOverlay() {
         </div>
 
         <div class="wizard-step" data-step="2" style="display:none">
-          <h3 style="margin:0 0 6px">💰 Saldo inicial</h3>
+          <h3 style="margin:0 0 6px"><i class="ph ph-coins" aria-hidden="true"></i> Saldo inicial</h3>
           <p class="msub" style="margin-bottom:16px">
             Quanto você tem na conta corrente <strong>agora</strong>?<br/>
             <span style="font-size:.78rem">A gente cria um lançamento "Saldo inicial" pro Piggy começar a contar do número certo.</span>
@@ -2654,7 +2987,7 @@ function _ensureWizardOverlay() {
         </div>
 
         <div class="wizard-step" data-step="3" style="display:none">
-          <h3 style="margin:0 0 6px">💳 Seus cartões</h3>
+          <h3 style="margin:0 0 6px"><i class="ph ph-credit-card" aria-hidden="true"></i> Seus cartões</h3>
           <p class="msub" style="margin-bottom:16px">
             Tem cartão de crédito? Cadastre aqui pra a gente já contabilizar as faturas.<br/>
             <span style="font-size:.78rem">Você pode pular e adicionar depois em Cartões.</span>
@@ -2672,7 +3005,7 @@ function _ensureWizardOverlay() {
 
         <div class="wizard-step" data-step="4" style="display:none">
           <div style="text-align:center;padding:8px 0 4px">
-            <div style="font-size:3.4rem;margin-bottom:8px">🎉</div>
+            <div style="font-size:3.4rem;margin-bottom:8px"><i class="ph ph-confetti" aria-hidden="true"></i></div>
             <h3 style="margin:0 0 8px">Tudo pronto!</h3>
             <p class="msub" style="max-width:380px;margin:0 auto">
               Seu painel tá configurado. Agora é só lançar suas despesas pelo bot, WhatsApp ou aqui no dashboard.<br/>
@@ -2711,12 +3044,12 @@ function _wizardRenderCardsList() {
   }
   wrap.innerHTML = cards.map(c => `
     <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(255,255,255,.04);border:1px solid var(--glass-border);border-radius:10px;margin-bottom:8px">
-      <span style="font-size:1.1rem">💳</span>
+      <span style="font-size:1.1rem"><i class="ph ph-credit-card" aria-hidden="true"></i></span>
       <div style="flex:1;min-width:0">
         <div style="font-size:.88rem;color:var(--text);font-weight:600">${escapeHtmlSafe(c.name || "Cartão")}</div>
         <div style="font-size:.7rem;color:var(--text-3)">fecha dia ${c.closing_day || "?"} · vence dia ${c.due_day || "?"}</div>
       </div>
-      <span style="color:var(--green);font-size:.7rem">✓</span>
+      <span style="color:var(--green);font-size:.7rem"><i class="ph ph-check" aria-hidden="true"></i></span>
     </div>
   `).join("");
 }
@@ -2884,42 +3217,50 @@ function _recMonthlyEquiv(r) {
 }
 
 let _recurringCache = null;
-let _recurringFetchInFlight = null;
+const _recurringChannel = makeFetchChannel(); // dedup + abort + geração
 
-async function _fetchRecurring() {
-  if (_recurringFetchInFlight) return _recurringFetchInFlight;
-  _recurringFetchInFlight = (async () => {
-    try {
-      const resp = await fetch(`${API}/recurring-expenses/${USER_ID}`, {
-        credentials: "same-origin",
-        headers: csrfHeaders(),
-      });
-      if (resp.status === 403) {
-        const data = await resp.json().catch(() => ({}));
-        if (data?.detail?.error === "pro_required") return { pro_required: true };
-      }
-      if (!resp.ok) {
-        const txt = await resp.text();
-        let detail = txt;
-        try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-        throw new Error(`(HTTP ${resp.status}) ${detail}`);
-      }
-      const data = await resp.json();
-      return data.recurring || [];
-    } finally {
-      _recurringFetchInFlight = null;
+async function _fetchRecurring({ force = false } = {}) {
+  return _recurringChannel.run(async (signal) => {
+    const resp = await fetch(`${API}/recurring-expenses/${USER_ID}`, {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      signal,
+    });
+    if (resp.status === 403) {
+      const data = await resp.json().catch(() => ({}));
+      if (data?.detail?.error === "pro_required") return { pro_required: true };
     }
-  })();
-  return _recurringFetchInFlight;
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      throw new Error(`(HTTP ${resp.status}) ${detail}`);
+    }
+    const data = await resp.json();
+    return data.recurring || [];
+  }, { force });
 }
 
-async function loadFixedView(forceFresh = false) {
+async function loadFixedView(forceFresh = false, { background = false } = {}) {
   const stats = document.getElementById("recurring-stats");
   if (!stats) return;
   if (!USER_ID) {
+    if (background) throw new Error("gastos fixos: sessão ainda não pronta");
     setTimeout(() => loadFixedView(forceFresh), 300);
     return;
   }
+
+  // Puxão: sem skeleton, fetch antes de render, falha real rejeita sem tocar DOM.
+  // undefined (superado) sai neutro; pro_required renderiza o gate (não é erro).
+  if (background) {
+    const data = await _fetchRecurring({ force: true });
+    if (data === undefined) return;
+    if (data && data.pro_required) { _renderFixedProGate(); return; }
+    _recurringCache = data;
+    _renderFixedView(data);
+    return;
+  }
+
   if (_recurringCache && !forceFresh) {
     _renderFixedView(_recurringCache);
     _fetchRecurring().then(fresh => {
@@ -2935,7 +3276,8 @@ async function loadFixedView(forceFresh = false) {
     <div class="stat-tile"><div class="stat-label">Reajustes</div><div class="sk sk-h2"></div></div>
   `;
   try {
-    const data = await _fetchRecurring();
+    const data = await _fetchRecurring({ force: true });
+    if (data === undefined) return;
     if (data && data.pro_required) {
       _renderFixedProGate();
       return;
@@ -2958,10 +3300,10 @@ function _renderFixedProGate() {
   if (ess) {
     ess.innerHTML = `
       <div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">
-        <div style="font-size:2.5rem;margin-bottom:10px">🔒</div>
+        <div style="font-size:2.5rem;margin-bottom:10px"><i class="ph ph-lock" aria-hidden="true"></i></div>
         <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Gastos Fixos é Pro</div>
         <div style="margin-bottom:14px">Cadastre suas assinaturas e contas recorrentes pra o Piggy lançar automaticamente todo mês.</div>
-        <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')">⭐ Ver Pro</button>
+        <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')"><i class="ph ph-star" aria-hidden="true"></i> Ver Pro</button>
       </div>`;
   }
 }
@@ -3034,7 +3376,7 @@ function _renderFixedView(items) {
   upEl.innerHTML = upcoming.length
     ? upcoming.map(x => `
         <div class="tx-row">
-          <div class="tx-icon" style="color:${(x.date - today) / (1000 * 60 * 60 * 24) <= 2 ? '#FF2D2D' : '#fbbf24'}">${_recurringEmoji(x.rec)}</div>
+          <div class="tx-icon" style="color:${(x.date - today) / (1000 * 60 * 60 * 24) <= 2 ? '#FF2D2D' : '#fbbf24'}">${phIcon(_recurringEmoji(x.rec))}</div>
           <div class="tx-main">
             <div class="tx-desc">${escapeHtmlSafe(x.rec.name)} · ${x.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</div>
             <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.payment_type === "credit_card" ? "Cartão " + escapeHtmlSafe(x.rec.card_name || "?") : "Débito automático"}</div>
@@ -3053,7 +3395,7 @@ function _renderFixedView(items) {
         const when = r.last_amount_changed_at ? new Date(r.last_amount_changed_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : "";
         return `
           <div class="tx-row">
-            <div class="tx-icon" style="color:#fbbf24">⚠️</div>
+            <div class="tx-icon" style="color:#fbbf24"><i class="ph ph-warning" aria-hidden="true"></i></div>
             <div class="tx-main">
               <div class="tx-desc">${escapeHtmlSafe(r.name)} ${delta > 0 ? "aumentou" : "diminuiu"} ${sign}${_fmtBRL(Math.abs(delta))}</div>
               <div class="tx-meta">${pct}% vs valor anterior · detectado em ${when}</div>
@@ -3117,7 +3459,7 @@ function _renderRecurringRow(r) {
   const safeRecJson = JSON.stringify(r).replace(/"/g, "&quot;");
   return `
     <div class="tx-row" style="cursor:pointer" onclick="openRecurringEditModal(${safeRecJson})">
-      <div class="tx-icon">${_recurringEmoji(r)}</div>
+      <div class="tx-icon">${phIcon(_recurringEmoji(r))}</div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(r.name)}</div>
         <div class="tx-meta">${payment}${adjustText}${startText}</div>
@@ -3238,7 +3580,7 @@ function _ensureRecurringModal() {
             </div>
           </div>
           <div class="modal-acts" style="margin-top:18px;display:flex;gap:8px;align-items:center">
-            <button type="button" class="inst-delete-btn" id="recurring-delete-btn" style="display:none" onclick="deleteRecurringFromModal()">🗑 Excluir</button>
+            <button type="button" class="inst-delete-btn" id="recurring-delete-btn" style="display:none" onclick="deleteRecurringFromModal()"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
             <span style="flex:1"></span>
             <button type="button" class="btn-cancel" onclick="closeRecurringEditModal()">Cancelar</button>
             <button type="submit" class="btn-save">Salvar</button>
@@ -3322,7 +3664,7 @@ function _toggleRecurringModeHint() {
   const amount = document.getElementById("recurring-amount");
   const name = document.getElementById("recurring-name");
   if (mode === "manual") {
-    if (hint) hint.innerHTML = "🧾 <strong>Conta a pagar:</strong> a Piggy te <strong>lembra</strong> do vencimento e <strong>nada sai da conta</strong> até você confirmar. O valor é sempre uma <strong>estimativa</strong> — você informa o valor real ao marcar como paga.";
+    if (hint) hint.innerHTML = "<i class='ph ph-receipt' aria-hidden='true'></i> <strong>Conta a pagar:</strong> a Piggy te <strong>lembra</strong> do vencimento e <strong>nada sai da conta</strong> até você confirmar. O valor é sempre uma <strong>estimativa</strong>. Você informa o valor real ao marcar como paga.";
     if (title && !isEdit) title.textContent = "Nova conta a pagar";
     // Conta a pagar nunca é débito automático — o user sempre confirma na mão.
     // A "forma de pagamento" (autopay/cartão) não se aplica: esconde e fixa account.
@@ -3335,7 +3677,7 @@ function _toggleRecurringModeHint() {
     if (amount) { amount.required = false; amount.placeholder = "estimativa, ex: 80,00"; }
     if (name) name.placeholder = "Ex: Água, Luz, Internet...";
   } else {
-    if (hint) hint.innerHTML = "⚠️ <strong>Gasto fixo:</strong> é <strong>lançado automaticamente</strong> no dia escolhido (débito na conta). Pra contas que você paga na mão (boleto), use \"Conta a pagar\".";
+    if (hint) hint.innerHTML = "<i class='ph ph-warning' aria-hidden='true'></i> <strong>Gasto fixo:</strong> é <strong>lançado automaticamente</strong> no dia escolhido (débito na conta). Pra contas que você paga na mão (boleto), use \"Conta a pagar\".";
     if (title && !isEdit) title.textContent = "Novo gasto fixo";
     if (paytypeRow) paytypeRow.style.display = "";
     if (label) label.textContent = "Valor (R$) *";
@@ -3469,7 +3811,7 @@ async function saveRecurring() {
 async function deleteRecurringFromModal() {
   if (!_recurringEditState.id) return;
   const ok = await confirmModal(
-    "Excluir este gasto fixo? Lançamentos passados ficam preservados — só não vai mais cobrar automaticamente.",
+    "Excluir este gasto fixo? Lançamentos passados ficam preservados. Só não vai mais cobrar automaticamente.",
     { title: "Excluir gasto fixo", okText: "Excluir", danger: true },
   );
   if (!ok) return;
@@ -3505,7 +3847,7 @@ const RECURRING_INCOME_CATEGORY_EMOJI = {
 // Aba ativa da view Recorrentes: "overview" | "expenses" | "incomes" | "bills"
 let _recurringTab = "overview";
 let _recurringIncomeCache = null;
-let _recurringIncomeFetchInFlight = null;
+const _recurringIncomeChannel = makeFetchChannel(); // dedup + abort + geração
 
 function setRecurringTab(tab) {
   if (!["overview", "expenses", "incomes", "bills"].includes(tab)) return;
@@ -3538,19 +3880,53 @@ function setRecurringTab(tab) {
 // ── Previsão mensal: o que entra (receitas fixas) × o que sai (gastos fixos +
 // boletos) × resultado, + próximos vencimentos. Deixa explícito que é RECORRENTE
 // (não colide com "Receitas/Gastos do mês" do dashboard principal). ─────────────
-async function loadRecurringOverview() {
+const _recurringOverviewChannel = makeFetchChannel(); // dedup + abort + geração
+
+async function loadRecurringOverview({ background = false } = {}) {
   const wrap = document.getElementById("recurring-overview-cards");
   if (!wrap) return;
-  wrap.innerHTML = `<div class="mock-card"><div class="empty" style="padding:16px;color:var(--text-3)">Carregando…</div></div>`;
-  const j = async (url) => {
-    try { const r = await fetch(url, { credentials: "same-origin" }); if (!r.ok) return null; return await r.json(); }
-    catch (_) { return null; }
-  };
-  const [exp, inc, bills] = await Promise.all([
-    j(`${API}/recurring-expenses/${USER_ID}`),
-    j(`${API}/recurring-incomes/${USER_ID}`),
-    j(`${API}/recurring-bills/${USER_ID}?include_paid=false`),
-  ]);
+  // background (puxar pra atualizar): sem skeleton — o render bom fica na
+  // tela até os dados novos chegarem.
+  if (!background) {
+    wrap.innerHTML = `<div class="mock-card"><div class="empty" style="padding:16px;color:var(--text-3)">Carregando…</div></div>`;
+  }
+  // Canal compartilhado (abort + geração): os 3 endpoints são independentes,
+  // mas DUAS invocações do overview podem correr juntas (navego pra
+  // Recorrentes e puxo antes do load de nav terminar). Sem guarda de geração,
+  // o de nav (mais lento) renderizaria por último e sobrescreveria o fresco do
+  // puxão — o mesmo stale-overwrite, só que na janela do load inicial. force:true
+  // sempre (o overview nunca deduplicou; sempre busca fresco) + os 3 fetches no
+  // MESMO signal, então o abort cancela os 3 de uma vez.
+  const result = await _recurringOverviewChannel.run(async (signal) => {
+    const j = async (url) => {
+      try {
+        const r = await fetch(url, { credentials: "same-origin", signal });
+        if (!r.ok) return null;
+        return await r.json();
+      } catch (err) {
+        // Abort tem que propagar (o canal converte em neutro/undefined); só a
+        // falha de rede "normal" vira null tolerável na navegação.
+        if (err && err.name === "AbortError") throw err;
+        return null;
+      }
+    };
+    const [exp, inc, bills] = await Promise.all([
+      j(`${API}/recurring-expenses/${USER_ID}`),
+      j(`${API}/recurring-incomes/${USER_ID}`),
+      j(`${API}/recurring-bills/${USER_ID}?include_paid=false`),
+    ]);
+    // No puxão, endpoint que falhou NÃO pode virar total zerado: o j() acima
+    // converte falha em null e o reduce embaixo somaria zero por cima de números
+    // que estavam certos na tela. Rejeita sem tocar no DOM — o indicador do
+    // gesto (app-mode.js) fica âmbar e o render antigo sobrevive. (Na navegação,
+    // null é tolerado: renderiza o parcial.)
+    if (background && (exp === null || inc === null || bills === null)) {
+      throw new Error("recurring overview: fetch falhou no refresh");
+    }
+    return { exp, inc, bills };
+  }, { force: true });
+  if (result === undefined) return;   // superado por outra invocação — deixa a tela
+  const { exp, inc, bills } = result;
 
   const gastos = ((exp && exp.recurring) || []).filter(r => r.is_active && (r.payment_mode || "autopay") === "autopay");
   const totalGastos = gastos.reduce((s, r) => s + _recMonthlyEquiv(r), 0);
@@ -3573,9 +3949,9 @@ async function loadRecurringOverview() {
   // Próximos vencimentos (30 dias): boletos + gastos fixos + receitas fixas.
   const horizon = new Date(today.getTime() + 30 * 86400000);
   const up = [];
-  pend.forEach(b => up.push({ d: dOf(b), name: b.name || "Boleto", amt: -(b.amount || 0), tag: "🧾" }));
-  gastos.forEach(r => { const d = _nextRecurringOccurrence(r.due_day, r.start_date, r.frequency, r.due_month); if (d) up.push({ d, name: r.name || "Gasto fixo", amt: -(r.amount || 0), tag: "🔻" }); });
-  receitas.forEach(r => { const d = _nextRecurringOccurrence(r.pay_day, r.start_date, r.frequency, r.pay_month); if (d) up.push({ d, name: r.name || "Receita", amt: +(r.amount || 0), tag: "🔺" }); });
+  pend.forEach(b => up.push({ d: dOf(b), name: b.name || "Boleto", amt: -(b.amount || 0), tag: "<i class='ph ph-receipt' aria-hidden='true'></i>" }));
+  gastos.forEach(r => { const d = _nextRecurringOccurrence(r.due_day, r.start_date, r.frequency, r.due_month); if (d) up.push({ d, name: r.name || "Gasto fixo", amt: -(r.amount || 0), tag: "<i class='ph ph-trend-down' aria-hidden='true'></i>" }); });
+  receitas.forEach(r => { const d = _nextRecurringOccurrence(r.pay_day, r.start_date, r.frequency, r.pay_month); if (d) up.push({ d, name: r.name || "Receita", amt: +(r.amount || 0), tag: "<i class='ph ph-trend-up' aria-hidden='true'></i>" }); });
   const upAll = up.filter(x => x.d >= today && x.d <= horizon).sort((a, b) => a.d - b.d);
   const upcoming = upAll.slice(0, 6);
 
@@ -3592,20 +3968,20 @@ async function loadRecurringOverview() {
   const head = `
     <div style="margin-bottom:14px">
       <h2 style="margin:0 0 2px;font-size:1.5rem">Previsão mensal</h2>
-      <div style="font-size:.86rem;color:var(--text-3)">Veja rapidamente o que entra, o que sai e o que vence primeiro — só do que é recorrente.</div>
+      <div style="font-size:.86rem;color:var(--text-3)">Veja rapidamente o que entra, o que sai e o que vence primeiro, só do que é recorrente.</div>
     </div>`;
 
   // ── Alerta (déficit ou no azul) ──
   const alerta = positivo
     ? `<div class="mock-card" style="border:1px solid rgba(34,197,94,.35);margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-        <div style="font-size:1.5rem">✅</div>
+        <div style="font-size:1.5rem"><i class="ph ph-check-circle" aria-hidden="true"></i></div>
         <div style="flex:1;min-width:220px">
-          <div style="font-weight:700">Suas entradas cobrem os compromissos — sobra <span style="color:#22c55e">${_fmtBRL(resultado)}</span>.</div>
-          <div style="font-size:.82rem;color:var(--text-3)">Mês recorrente equilibrado. Bom trabalho! 🐷</div>
+          <div style="font-weight:700">Suas entradas cobrem os compromissos. Sobra <span style="color:#22c55e">${_fmtBRL(resultado)}</span>.</div>
+          <div style="font-size:.82rem;color:var(--text-3)">Mês recorrente equilibrado. Bom trabalho! <i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
         </div>
       </div>`
     : `<div class="mock-card" style="border:1px solid rgba(255,45,142,.4);margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-        <div style="font-size:1.5rem">⚠️</div>
+        <div style="font-size:1.5rem"><i class="ph ph-warning" aria-hidden="true"></i></div>
         <div style="flex:1;min-width:220px">
           <div style="font-weight:700">Saídas previstas maiores que entradas em <span style="color:#FF2D8E">${_fmtBRL(-resultado)}</span>.</div>
           <div style="font-size:.82rem;color:var(--text-3)">Revise contas a pagar ou planeje novas entradas para equilibrar o mês.</div>
@@ -3626,11 +4002,11 @@ async function loadRecurringOverview() {
       </div>
     </div>`;
   const statsRow = `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">
-    ${statCard("#22c55e", "rgba(34,197,94,.15)", "📈", "Entradas previstas", _fmtBRL(entradas), "#22c55e",
+    ${statCard("#22c55e", "rgba(34,197,94,.15)", '<i class="ph ph-chart-line-up" aria-hidden="true"></i>', "Entradas previstas", _fmtBRL(entradas), "#22c55e",
       `${receitas.length} receita${plural(receitas.length)} fixa${plural(receitas.length)}`)}
-    ${statCard("#fb7185", "rgba(251,113,133,.15)", "📉", "Saídas previstas", _fmtBRL(saidas), "#fb7185",
+    ${statCard("#fb7185", "rgba(251,113,133,.15)", '<i class="ph ph-chart-line-down" aria-hidden="true"></i>', "Saídas previstas", _fmtBRL(saidas), "#fb7185",
       `${gastos.length} gasto${plural(gastos.length)} fixo${plural(gastos.length)} + ${pend.length} boleto${plural(pend.length)}`)}
-    ${statCard(resColor, positivo ? "rgba(34,197,94,.15)" : "rgba(255,45,45,.15)", positivo ? "➕" : "➖", "Resultado previsto",
+    ${statCard(resColor, positivo ? "rgba(34,197,94,.15)" : "rgba(255,45,45,.15)", positivo ? '<i class="ph ph-plus" aria-hidden="true"></i>' : '<i class="ph ph-minus" aria-hidden="true"></i>', "Resultado previsto",
       (positivo ? "" : "- ") + _fmtBRL(Math.abs(resultado)), resColor, "Projeção até o fim do mês")}
   </div>`;
 
@@ -3646,7 +4022,7 @@ async function loadRecurringOverview() {
   }).join("") : `<div class="empty" style="padding:16px;text-align:center;color:var(--text-3)">Nada nos próximos 30 dias.</div>`;
   const vencCard = `
     <div class="mock-card" style="flex:2;min-width:300px">
-      <h3>📅 Próximos vencimentos</h3>
+      <h3><i class="ph ph-calendar-dots" aria-hidden="true"></i> Próximos vencimentos</h3>
       ${vencRows}
       ${upAll.length > upcoming.length ? `<div style="text-align:center;margin-top:10px"><a onclick="setRecurringTab('bills')" style="color:var(--pink,#FF2D8E);cursor:pointer;font-size:.84rem;font-weight:600">Ver todos os vencimentos →</a></div>` : ""}
     </div>`;
@@ -3657,7 +4033,7 @@ async function loadRecurringOverview() {
       <span style="color:var(--text-2)">${label}</span><span style="font-weight:600;color:${color}">${val}</span></div>`;
   const resumoCard = `
     <div class="mock-card">
-      <h3>📊 Resumo rápido</h3>
+      <h3><i class="ph ph-chart-bar" aria-hidden="true"></i> Resumo rápido</h3>
       ${resumoRow("Receitas fixas", _fmtBRL(totalReceitas), "#22c55e")}
       ${resumoRow("Gastos fixos", "- " + _fmtBRL(totalGastos), "#fb7185")}
       ${resumoRow("Boletos / contas", "- " + _fmtBRL(totalPend), "#fb7185")}
@@ -3672,7 +4048,7 @@ async function loadRecurringOverview() {
   else { acaoMsg = "O maior peso está nos gastos fixos."; acaoTab = "expenses"; acaoCta = "Ver gastos fixos"; }
   const acaoCard = `
     <div class="mock-card">
-      <h3>🎯 Próxima ação</h3>
+      <h3><i class="ph ph-target" aria-hidden="true"></i> Próxima ação</h3>
       <div style="font-size:.88rem;color:var(--text-2);margin-bottom:10px">${acaoMsg}</div>
       <button class="mock-cta outline" style="width:100%" onclick="setRecurringTab('${acaoTab}')">${acaoCta} →</button>
     </div>`;
@@ -3698,20 +4074,42 @@ function openRecurringNewFromTab() {
 }
 
 // ── Agenda de boletos (a pagar) ───────────────────────────────────────
-async function loadBillsView(forceFresh = false) {
-  const agendaEl = document.getElementById("recurring-bills-agenda");
-  if (!agendaEl) return;
-  try {
+const _billsChannel = makeFetchChannel(); // dedup + abort + geração
+
+async function _fetchBills({ force = false } = {}) {
+  return _billsChannel.run(async (signal) => {
     const resp = await fetch(`${API}/recurring-bills/${USER_ID}?include_paid=true`, {
       credentials: "same-origin",
+      signal,
     });
-    if (resp.status === 403) {
-      agendaEl.innerHTML = `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Boletos é uma feature <b>PigBank+</b>.</div>`;
-      return;
-    }
+    if (resp.status === 403) return { pro_required: true };
     if (!resp.ok) throw new Error(await resp.text());
     const data = await resp.json();
-    _renderBillsView(data.bills || []);
+    return data.bills || [];
+  }, { force });
+}
+
+async function loadBillsView(forceFresh = false, { background = false } = {}) {
+  const agendaEl = document.getElementById("recurring-bills-agenda");
+  if (!agendaEl) return;
+  const proMsg = `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Boletos é uma feature <b>PigBank+</b>.</div>`;
+
+  // Puxão: sem estado neutro por cima do render bom — falha REAL rejeita sem
+  // tocar no DOM (o indicador do gesto fica âmbar). 403 vira o aviso Pro
+  // (não é erro); superado sai neutro.
+  if (background) {
+    const data = await _fetchBills({ force: true });
+    if (data === undefined) return;
+    if (data && data.pro_required) { agendaEl.innerHTML = proMsg; return; }
+    _renderBillsView(data);
+    return;
+  }
+
+  try {
+    const data = await _fetchBills({ force: true });
+    if (data === undefined) return;
+    if (data && data.pro_required) { agendaEl.innerHTML = proMsg; return; }
+    _renderBillsView(data);
   } catch (_) {
     agendaEl.innerHTML = `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Não consegui carregar. Toque em Atualizar.</div>`;
   }
@@ -3751,12 +4149,12 @@ function _renderBillsView(bills) {
     <div class="stat-tile"><div class="stat-label">Ainda este mês</div>
       <div class="stat-value">${_fmtBRL(sum(mo))}</div>
       <div class="stat-delta" style="color:var(--text-3)">${mo.length} boleto(s)</div></div>
-    <div class="stat-tile"><div class="stat-label">${overdue.length ? "⚠️ Vencidos" : "Próximo"}</div>
+    <div class="stat-tile"><div class="stat-label">${overdue.length ? "<i class='ph ph-warning' aria-hidden='true'></i> Vencidos" : "Próximo"}</div>
       <div class="stat-value" style="color:${overdue.length ? 'var(--red)' : 'var(--text)'}">${overdue.length ? _fmtBRL(sum(overdue)) : proxTxt}</div>
       <div class="stat-delta" style="color:var(--text-3)">${overdue.length ? `${overdue.length} atrasado(s)` : "a vencer"}</div></div>`;
 
   const buckets = [
-    { label: "⚠️ Vencidos", color: "#FF2D2D", items: pending.filter(b => _billDaysUntil(b) < 0) },
+    { label: "<i class='ph ph-warning' aria-hidden='true'></i> Vencidos", color: "#FF2D2D", items: pending.filter(b => _billDaysUntil(b) < 0) },
     { label: "Hoje", color: "#fbbf24", items: pending.filter(b => _billDaysUntil(b) === 0) },
     { label: "Próximos 7 dias", color: "#fbbf24", items: pending.filter(b => { const n = _billDaysUntil(b); return n >= 1 && n <= 7; }) },
     { label: "Ainda este mês", color: "var(--text-2)", items: pending.filter(b => _billDaysUntil(b) > 7 && _billDate(b) <= endMonth) },
@@ -3770,7 +4168,7 @@ function _renderBillsView(bills) {
       ${rows}</div>`;
   }).join("");
   if (agendaEl) agendaEl.innerHTML = agendaHtml
-    || `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Nenhum boleto pendente. Adicione um acima 👆</div>`;
+    || `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Nenhum boleto pendente. Adicione um acima <i class="ph ph-hand-pointing" aria-hidden="true"></i></div>`;
 
   if (paidEl) paidEl.innerHTML = paid.length
     ? paid.slice(0, 12).map(_renderBillPaidRow).join("")
@@ -3790,7 +4188,7 @@ function _renderBillRow(b) {
   const nameSafe = escapeHtmlSafe(b.name || "").replace(/'/g, "\\'");
   return `
     <div class="tx-row">
-      <div class="tx-icon" style="color:${color}">🧾</div>
+      <div class="tx-icon" style="color:${color}"><i class="ph ph-receipt" aria-hidden="true"></i></div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(b.name || "Boleto")}${variavel ? ' <span style="font-size:.68rem;color:var(--text-3)">· valor varia</span>' : ""}</div>
         <div class="tx-meta">vence ${due.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })} · <span style="color:${color}">${quando}</span></div>
@@ -3798,9 +4196,9 @@ function _renderBillRow(b) {
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
         <div class="tx-amt red">${amtLabel}</div>
         <div style="display:flex;gap:4px">
-          <button class="mock-cta" style="padding:3px 9px;font-size:.72rem" onclick="payBill(${b.id}, ${b.amount || 0}, '${nameSafe}', ${variavel})">✓ Pago</button>
-          <button class="mock-cta outline" title="Editar" style="padding:3px 8px;font-size:.72rem" onclick="editBoleto(${b.id}, '${nameSafe}', ${b.amount || 0}, '${b.due_date}')">✎</button>
-          <button class="mock-cta outline" title="Apagar" style="padding:3px 8px;font-size:.72rem" onclick="deleteBoleto(${b.id}, '${nameSafe}')">🗑</button>
+          <button class="mock-cta" style="padding:3px 9px;font-size:.72rem" onclick="payBill(${b.id}, ${b.amount || 0}, '${nameSafe}', ${variavel})"><i class="ph ph-check" aria-hidden="true"></i> Pago</button>
+          <button class="mock-cta outline" title="Editar" style="padding:3px 8px;font-size:.72rem" onclick="editBoleto(${b.id}, '${nameSafe}', ${b.amount || 0}, '${b.due_date}')"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
+          <button class="mock-cta outline" title="Apagar" style="padding:3px 8px;font-size:.72rem" onclick="deleteBoleto(${b.id}, '${nameSafe}')"><i class="ph ph-trash" aria-hidden="true"></i></button>
         </div>
       </div>
     </div>`;
@@ -3811,7 +4209,7 @@ function _renderBillPaidRow(b) {
   const when = b.paid_at ? new Date(b.paid_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }) : "";
   return `
     <div class="tx-row">
-      <div class="tx-icon" style="color:#22c55e">✓</div>
+      <div class="tx-icon" style="color:#22c55e"><i class="ph ph-check" aria-hidden="true"></i></div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(b.name || "Conta")}</div>
         <div class="tx-meta">paga ${when}</div>
@@ -3950,7 +4348,7 @@ async function deleteBoleto(id, name) {
     if (!resp.ok) {
       throw new Error(await _errDetail(resp));
     }
-    showToast("🗑 Boleto apagado");
+    showToast(" Boleto apagado");
     loadBillsView(true);
   } catch (err) {
     await alertModal(String(err.message || err), { title: "Erro ao apagar" });
@@ -3986,8 +4384,8 @@ function _renderProjection(p) {
   const accent = ok ? "#22c55e" : "#FF2D2D";
   const alvo = new Date(p.target + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "long" });
   const header = ok
-    ? `😌 Tranquilo até ${alvo} — sobra ${_fmtBRL(p.projetado)}`
-    : `⚠️ Aperta até ${alvo} — falta ${_fmtBRL(Math.abs(p.projetado))}`;
+    ? `<i class="ph ph-smiley" aria-hidden="true"></i> Tranquilo até ${alvo}, sobra ${_fmtBRL(p.projetado)}`
+    : `<i class="ph ph-warning" aria-hidden="true"></i> Aperta até ${alvo}, falta ${_fmtBRL(Math.abs(p.projetado))}`;
   const line = (label, val, positive) => `
     <div style="display:flex;justify-content:space-between;font-size:.82rem;padding:2px 0">
       <span style="color:var(--text-2)">${label}</span>
@@ -4008,40 +4406,63 @@ function _renderProjection(p) {
     </div>`;
 }
 
-async function _fetchRecurringIncomes() {
-  if (_recurringIncomeFetchInFlight) return _recurringIncomeFetchInFlight;
-  _recurringIncomeFetchInFlight = (async () => {
-    try {
-      const resp = await fetch(`${API}/recurring-incomes/${USER_ID}`, {
-        credentials: "same-origin",
-        headers: csrfHeaders(),
-      });
-      if (resp.status === 403) {
-        const data = await resp.json().catch(() => ({}));
-        if (data?.detail?.error === "pro_required") return { pro_required: true };
-      }
-      if (!resp.ok) {
-        const txt = await resp.text();
-        let detail = txt;
-        try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-        throw new Error(`(HTTP ${resp.status}) ${detail}`);
-      }
-      const data = await resp.json();
-      return data.incomes || [];
-    } finally {
-      _recurringIncomeFetchInFlight = null;
+async function _fetchRecurringIncomes({ force = false } = {}) {
+  return _recurringIncomeChannel.run(async (signal) => {
+    const resp = await fetch(`${API}/recurring-incomes/${USER_ID}`, {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      signal,
+    });
+    if (resp.status === 403) {
+      const data = await resp.json().catch(() => ({}));
+      if (data?.detail?.error === "pro_required") return { pro_required: true };
     }
-  })();
-  return _recurringIncomeFetchInFlight;
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let detail = txt;
+      try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
+      throw new Error(`(HTTP ${resp.status}) ${detail}`);
+    }
+    const data = await resp.json();
+    return data.incomes || [];
+  }, { force });
 }
 
-async function loadRecurringIncomeView(forceFresh = false) {
+// Puxa o total de gastos fixos pra "sobra prevista" quando o user entrou direto
+// na aba de receitas. Fire-and-forget: nunca bloqueia nem falha a view. No
+// puxão (background) o segundo render só acontece se o cache de receitas ainda
+// é o mesmo — senão sobrescreveria um render mais novo.
+function _hydrateRecurringIncomeSobra() {
+  if (_recurringCache) return;
+  const snapshot = _recurringIncomeCache;
+  _fetchRecurring().then(exp => {
+    if (exp && exp !== undefined && !exp.pro_required) {
+      _recurringCache = exp;
+      if (_recurringIncomeCache === snapshot) _renderRecurringIncomeView(_recurringIncomeCache);
+    }
+  }).catch(() => {});
+}
+
+async function loadRecurringIncomeView(forceFresh = false, { background = false } = {}) {
   const stats = document.getElementById("recurring-income-stats");
   if (!stats) return;
   if (!USER_ID) {
+    if (background) throw new Error("receitas fixas: sessão ainda não pronta");
     setTimeout(() => loadRecurringIncomeView(forceFresh), 300);
     return;
   }
+
+  // Puxão: sem skeleton, fetch antes de render, falha real rejeita sem tocar DOM.
+  if (background) {
+    const data = await _fetchRecurringIncomes({ force: true });
+    if (data === undefined) return;
+    if (data && data.pro_required) { _renderRecurringIncomeProGate(); return; }
+    _recurringIncomeCache = data;
+    _renderRecurringIncomeView(data);
+    _hydrateRecurringIncomeSobra();
+    return;
+  }
+
   if (_recurringIncomeCache && !forceFresh) {
     _renderRecurringIncomeView(_recurringIncomeCache);
     _fetchRecurringIncomes().then(fresh => {
@@ -4060,7 +4481,8 @@ async function loadRecurringIncomeView(forceFresh = false) {
     <div class="stat-tile"><div class="stat-label">Sobra prevista</div><div class="sk sk-h2"></div></div>
   `;
   try {
-    const data = await _fetchRecurringIncomes();
+    const data = await _fetchRecurringIncomes({ force: true });
+    if (data === undefined) return;
     if (data && data.pro_required) {
       _renderRecurringIncomeProGate();
       return;
@@ -4069,14 +4491,7 @@ async function loadRecurringIncomeView(forceFresh = false) {
     _renderRecurringIncomeView(data);
     // Sobra prevista precisa do total de gastos fixos: puxa em background
     // se o user entrou direto na aba de receitas.
-    if (!_recurringCache) {
-      _fetchRecurring().then(exp => {
-        if (exp && !exp.pro_required) {
-          _recurringCache = exp;
-          _renderRecurringIncomeView(_recurringIncomeCache);
-        }
-      }).catch(() => {});
-    }
+    _hydrateRecurringIncomeSobra();
   } catch (err) {
     stats.innerHTML = `<div class="empty" style="grid-column:1/-1;color:var(--red)">Erro: ${escapeHtmlSafe(String(err.message || err))}</div>`;
   }
@@ -4094,10 +4509,10 @@ function _renderRecurringIncomeProGate() {
   if (primary) {
     primary.innerHTML = `
       <div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">
-        <div style="font-size:2.5rem;margin-bottom:10px">🔒</div>
+        <div style="font-size:2.5rem;margin-bottom:10px"><i class="ph ph-lock" aria-hidden="true"></i></div>
         <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:6px">Receitas fixas é Pro</div>
         <div style="margin-bottom:14px">Cadastre salário, aluguel e freelas recorrentes pra o Piggy lançar automaticamente todo mês.</div>
-        <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')">⭐ Ver Pro</button>
+        <button class="mock-cta" onclick="showUpgradeModal('recurring_expenses')"><i class="ph ph-star" aria-hidden="true"></i> Ver Pro</button>
       </div>`;
   }
 }
@@ -4170,7 +4585,7 @@ function _renderRecurringIncomeView(items) {
   upEl.innerHTML = upcoming.length
     ? upcoming.map(x => `
         <div class="tx-row">
-          <div class="tx-icon" style="color:var(--green)">${_recurringIncomeEmoji(x.rec)}</div>
+          <div class="tx-icon" style="color:var(--green)">${phIcon(_recurringIncomeEmoji(x.rec))}</div>
           <div class="tx-main">
             <div class="tx-desc">${escapeHtmlSafe(x.rec.name)} · ${x.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</div>
             <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.is_primary ? "Renda principal" : "Renda extra"}</div>
@@ -4189,7 +4604,7 @@ function _renderRecurringIncomeView(items) {
         const when = r.last_amount_changed_at ? new Date(r.last_amount_changed_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : "";
         return `
           <div class="tx-row">
-            <div class="tx-icon" style="color:${delta > 0 ? "#22c55e" : "#fbbf24"}">${delta > 0 ? "🎉" : "⚠️"}</div>
+            <div class="tx-icon" style="color:${delta > 0 ? "#22c55e" : "#fbbf24"}">${delta > 0 ? '<i class="ph ph-confetti" aria-hidden="true"></i>' : '<i class="ph ph-warning" aria-hidden="true"></i>'}</div>
             <div class="tx-main">
               <div class="tx-desc">${escapeHtmlSafe(r.name)} ${delta > 0 ? "aumentou" : "diminuiu"} ${sign}${_fmtBRL(Math.abs(delta))}</div>
               <div class="tx-meta">${pct}% vs valor anterior · detectado em ${when}</div>
@@ -4228,7 +4643,7 @@ function _renderRecurringIncomeRow(r) {
   const safeRecJson = JSON.stringify(r).replace(/"/g, "&quot;");
   return `
     <div class="tx-row" style="cursor:pointer" onclick="openRecurringIncomeEditModal(${safeRecJson})">
-      <div class="tx-icon">${_recurringIncomeEmoji(r)}</div>
+      <div class="tx-icon">${phIcon(_recurringIncomeEmoji(r))}</div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(r.name)}</div>
         <div class="tx-meta">${when}${adjustText}${_futureStartHint(r.start_date)}</div>
@@ -4249,7 +4664,7 @@ function _ensureRecurringIncomeModal() {
       <div class="modal wide">
         <h3 id="recurring-income-edit-title">Nova receita fixa</h3>
         <p class="msub" style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:.78rem">
-          💰 <strong>Importante:</strong> essa receita será <strong>lançada automaticamente</strong> todo mês no dia escolhido. Se o valor variar, é só editar aqui — o Piggy registra o reajuste.
+          <i class="ph ph-coins" aria-hidden="true"></i> <strong>Importante:</strong> essa receita será <strong>lançada automaticamente</strong> todo mês no dia escolhido. Se o valor variar, é só editar aqui: o Piggy registra o reajuste.
         </p>
         <form id="recurring-income-edit-form" onsubmit="event.preventDefault(); saveRecurringIncome();">
           <div class="invest-form">
@@ -4316,7 +4731,7 @@ function _ensureRecurringIncomeModal() {
             </div>
           </div>
           <div class="modal-acts" style="margin-top:18px;display:flex;gap:8px;align-items:center">
-            <button type="button" class="inst-delete-btn" id="recurring-income-delete-btn" style="display:none" onclick="deleteRecurringIncomeFromModal()">🗑 Excluir</button>
+            <button type="button" class="inst-delete-btn" id="recurring-income-delete-btn" style="display:none" onclick="deleteRecurringIncomeFromModal()"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
             <span style="flex:1"></span>
             <button type="button" class="btn-cancel" onclick="closeRecurringIncomeEditModal()">Cancelar</button>
             <button type="submit" class="btn-save">Salvar</button>
@@ -4416,7 +4831,7 @@ async function saveRecurringIncome() {
 async function deleteRecurringIncomeFromModal() {
   if (!_recurringIncomeEditState.id) return;
   const ok = await confirmModal(
-    "Excluir esta receita fixa? Lançamentos passados ficam preservados — só não vai mais lançar automaticamente.",
+    "Excluir esta receita fixa? Lançamentos passados ficam preservados. Só não vai mais lançar automaticamente.",
     { title: "Excluir receita fixa", okText: "Excluir", danger: true },
   );
   if (!ok) return;
@@ -4441,7 +4856,7 @@ async function deleteRecurringIncomeFromModal() {
 // painel personalizável que vem em breve (user vai poder ligar/desligar cards).
 let _analyticsCache = null;        // { kpis, evolution, categories, weekday, merchants, months }
 let _analyticsRetryTimer = null;
-let _analyticsFetchInFlight = null;
+const _analyticsChannel = makeFetchChannel(); // dedup + abort + geração (7 fetches, 1 signal)
 let _analyticsChartInstances = [];
 let _analyticsCurrentMonths = 6;
 
@@ -4461,13 +4876,14 @@ function _destroyAnalyticsCharts() {
   _analyticsChartInstances = [];
 }
 
-async function loadAnalyticsView(forceFresh = false, months = null) {
+async function loadAnalyticsView(forceFresh = false, months = null, { background = false } = {}) {
   if (months != null) _analyticsCurrentMonths = Math.max(1, Math.min(36, parseInt(months, 10) || 6));
 
   const statsEl = document.getElementById("analytics-stats");
   if (!statsEl) return;
 
   if (!USER_ID) {
+    if (background) throw new Error("análises: sessão ainda não pronta");
     if (!_analyticsRetryTimer) {
       _analyticsRetryTimer = setInterval(() => {
         if (USER_ID) {
@@ -4480,12 +4896,25 @@ async function loadAnalyticsView(forceFresh = false, months = null) {
     return;
   }
 
+  // Puxão: sem skeleton (Análises nunca teve), fetch antes de render, falha
+  // real rejeita sem tocar DOM (indicador âmbar). Superado sai neutro.
+  if (background) {
+    const data = await _fetchAnalyticsAll(_analyticsCurrentMonths, { force: true });
+    if (data === undefined) return;
+    _analyticsCache = data;
+    renderAnalyticsView(data);
+    return;
+  }
+
   // Stale-while-revalidate: já tem cache do mesmo período → renderiza e
   // revalida em background.
   if (_analyticsCache && _analyticsCache.months === _analyticsCurrentMonths && !forceFresh) {
     renderAnalyticsView(_analyticsCache);
     _fetchAnalyticsAll(_analyticsCurrentMonths).then(fresh => {
-      if (fresh) {
+      // Só re-renderiza se algo mudou de verdade — senão reconstruía os
+      // gráficos do Chart.js a cada visita, dando flicker de "recarregando".
+      // fresh undefined (superado) é falsy → o if pula sozinho.
+      if (fresh && JSON.stringify(fresh) !== JSON.stringify(_analyticsCache)) {
         _analyticsCache = fresh;
         renderAnalyticsView(fresh);
       }
@@ -4494,7 +4923,8 @@ async function loadAnalyticsView(forceFresh = false, months = null) {
   }
 
   try {
-    const data = await _fetchAnalyticsAll(_analyticsCurrentMonths);
+    const data = await _fetchAnalyticsAll(_analyticsCurrentMonths, { force: true });
+    if (data === undefined) return;
     _analyticsCache = data;
     renderAnalyticsView(data);
   } catch (err) {
@@ -4502,36 +4932,47 @@ async function loadAnalyticsView(forceFresh = false, months = null) {
   }
 }
 
-async function _fetchAnalyticsAll(months) {
-  if (_analyticsFetchInFlight) return _analyticsFetchInFlight;
-  _analyticsFetchInFlight = (async () => {
-    try {
-      const base = `/analytics/${USER_ID}`;
-      const qs = `?months=${months}`;
-      const [k, ev, cat, wk, tm, pat, ins] = await Promise.all([
-        fetch(`${base}/kpis${qs}`,           { credentials:"same-origin" }).then(r => r.json()),
-        fetch(`${base}/evolution${qs}`,      { credentials:"same-origin" }).then(r => r.json()),
-        fetch(`${base}/categories${qs}`,     { credentials:"same-origin" }).then(r => r.json()),
-        fetch(`${base}/weekday-pattern${qs}`,{ credentials:"same-origin" }).then(r => r.json()),
-        fetch(`${base}/top-merchants${qs}&limit=8`, { credentials:"same-origin" }).then(r => r.json()),
-        fetch(`${base}/patterns${qs}`,       { credentials:"same-origin" }).then(r => r.json()).catch(() => ({})),
-        fetch(`/insights/${USER_ID}/current`,{ credentials:"same-origin" }).then(r => r.json()).catch(() => ({})),
-      ]);
-      return {
-        kpis:       k.kpis       || null,
-        evolution:  ev.evolution || [],
-        categories: cat.categories || [],
-        weekday:    wk.weekdays  || [],
-        merchants:  tm.merchants || [],
-        patterns:   pat.patterns || [],     // Sprint 7: narrativas LLM
-        insights:   ins.insights || [],
-        months,
-      };
-    } finally {
-      _analyticsFetchInFlight = null;
-    }
-  })();
-  return _analyticsFetchInFlight;
+async function _fetchAnalyticsAll(months, { force = false } = {}) {
+  return _analyticsChannel.run(async (signal) => {
+    const base = `/analytics/${USER_ID}`;
+    const qs = `?months=${months}`;
+    // Os 7 fetches recebem o MESMO signal — um abort cancela todos de uma vez.
+    const getJson = async (url) => {
+      const r = await fetch(url, { credentials: "same-origin", signal });
+      // Sem checar r.ok, um 4xx/5xx voltaria como JSON de erro "com cara de dado"
+      // e o render pintaria KPIs/gráficos vazios COMO SUCESSO — no puxão, apagando
+      // o render bom e reportando sucesso. Lança nos obrigatórios; os opcionais
+      // (optional() abaixo) engolem esse throw e viram {}.
+      if (!r.ok) throw new Error(`analytics (HTTP ${r.status}) ${url}`);
+      return r.json();
+    };
+    // patterns/insights são opcionais: falha de rede/HTTP vira {} (não derruba a
+    // view). Mas o AbortError PRECISA propagar, senão um abort não cancelaria o
+    // Promise.all (o canal ficaria esperando um pedido que já foi superado).
+    const optional = async (url) => {
+      try { return await getJson(url); }
+      catch (err) { if (err && err.name === "AbortError") throw err; return {}; }
+    };
+    const [k, ev, cat, wk, tm, pat, ins] = await Promise.all([
+      getJson(`${base}/kpis${qs}`),
+      getJson(`${base}/evolution${qs}`),
+      getJson(`${base}/categories${qs}`),
+      getJson(`${base}/weekday-pattern${qs}`),
+      getJson(`${base}/top-merchants${qs}&limit=8`),
+      optional(`${base}/patterns${qs}`),
+      optional(`/insights/${USER_ID}/current`),
+    ]);
+    return {
+      kpis:       k.kpis       || null,
+      evolution:  ev.evolution || [],
+      categories: cat.categories || [],
+      weekday:    wk.weekdays  || [],
+      merchants:  tm.merchants || [],
+      patterns:   pat.patterns || [],     // Sprint 7: narrativas LLM
+      insights:   ins.insights || [],
+      months,
+    };
+  }, { force });
 }
 
 function renderAnalyticsView(data) {
@@ -4948,7 +5389,7 @@ function renderAnalyticsMerchants(merchants, months) {
         : `${m.count}× • débito`;
     return `
       <div class="tx-row">
-        <div class="tx-icon">${emoji}</div>
+        <div class="tx-icon">${phIcon(emoji)}</div>
         <div class="tx-main">
           <div class="tx-desc" title="${escapeHtmlSafe(rawName)}">${escapeHtmlSafe(displayName)}</div>
           <div class="tx-meta">${escapeHtmlSafe(debCred)}</div>
@@ -5007,7 +5448,7 @@ function renderAnalyticsInsights(insights) {
   if (!visible.length) {
     root.innerHTML = `
       <div class="empty" style="padding:24px 16px;text-align:center;color:var(--text-3);font-size:.88rem">
-        <div style="font-size:2rem;margin-bottom:6px">🐷</div>
+        <div style="font-size:2rem;margin-bottom:6px"><i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
         <div style="font-weight:600;color:var(--text-2);margin-bottom:4px">Tudo sob controle</div>
         <div>Sem alertas relevantes pra você agora. Piggy continua de olho.</div>
       </div>`;
@@ -5025,10 +5466,10 @@ function renderAnalyticsInsights(insights) {
     const action = i.action_label && i.action_view
       ? `<button class="mini-action" onclick="_switchToInsightView('${escapeJsString(i.action_view)}')" style="background:rgba(255,45,142,.12);border:none;color:var(--purple,#FF2D8E);font-size:.75rem;font-weight:600;padding:5px 10px;border-radius:6px;cursor:pointer;white-space:nowrap">${escapeHtmlSafe(i.action_label)} →</button>`
       : "";
-    const closeBtn = `<button title="Dispensar" aria-label="Dispensar" onclick="_dismissInsight('${escapeJsString(i.key)}')" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;border-radius:6px;opacity:.6" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.6">✕</button>`;
+    const closeBtn = `<button title="Dispensar" aria-label="Dispensar" onclick="_dismissInsight('${escapeJsString(i.key)}')" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;border-radius:6px;opacity:.6" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.6"><i class="ph ph-x" aria-hidden="true"></i></button>`;
     return `
       <div class="tx-row" style="border-left:3px solid ${color};padding-left:10px;align-items:flex-start">
-        <div class="tx-icon">${i.icon || "🐷"}</div>
+        <div class="tx-icon">${phIcon(i.icon || "🐷")}</div>
         <div class="tx-main" style="min-width:0">
           <div class="tx-desc" style="font-weight:600;color:var(--text-1)">${escapeHtmlSafe(i.title)}</div>
           <div class="tx-meta" style="color:var(--text-2);font-size:.84rem;line-height:1.35;white-space:normal">${escapeHtmlSafe(i.message)}</div>
@@ -5049,9 +5490,9 @@ function renderAnalyticsPatterns(patterns) {
   if (!items.length) {
     root.innerHTML = `
       <div class="empty" style="padding:24px 16px;text-align:center;color:var(--text-3);font-size:.85rem">
-        <div style="font-size:2rem;margin-bottom:6px">🐷</div>
+        <div style="font-size:2rem;margin-bottom:6px"><i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
         <div style="font-weight:600;color:var(--text-2);margin-bottom:4px">Sem padrões ainda</div>
-        <div>A IA precisa de mais histórico pra detectar padrões. Continue lançando — vai aparecer aqui em breve.</div>
+        <div>A IA precisa de mais histórico pra detectar padrões. Continue lançando, vai aparecer aqui em breve.</div>
       </div>`;
     return;
   }
@@ -5067,7 +5508,7 @@ function renderAnalyticsPatterns(patterns) {
     const color = toneColor[p.tone] || toneColor.neutral;
     return `
       <div class="tx-row" style="border-left:3px solid ${color};padding-left:10px;align-items:flex-start">
-        <div class="tx-icon">${p.icon || "🐷"}</div>
+        <div class="tx-icon">${phIcon(p.icon || "🐷")}</div>
         <div class="tx-main" style="min-width:0">
           <div class="tx-desc" style="font-weight:600;color:var(--text-1);white-space:normal">${escapeHtmlSafe(p.title)}</div>
           ${p.subtitle ? `<div class="tx-meta" style="color:var(--text-2);font-size:.82rem;line-height:1.4;white-space:normal;margin-top:2px">${escapeHtmlSafe(p.subtitle)}</div>` : ""}
@@ -5097,8 +5538,21 @@ let _historyFilters = {
 };
 let _historyStatsCache = null;
 let _historyRetryTimer = null;
-let _historyListInFlight = null;
+const _historyListChannel = makeFetchChannel(); // dedup + abort + geração
 let _historySearchDebounce = null;
+// Loads completos (nav/filtro/busca/período/puxão) em voo. O "carregar mais" e o
+// load completo dividem o MESMO canal e têm semânticas opostas (append × substitui):
+// se um append dispara enquanto um load completo está em voo, ele aborta o reload
+// da página 1 e appenda numa base que está pra sumir (mistura filtros). Enquanto
+// isto for > 0, o load-more não roda. Contador (não bool) pra aguentar reloads
+// concorrentes: um reload superado não pode zerar o gate de outro ainda em voo.
+let _historyReloadsInFlight = 0;
+// Geração de stats: só a resposta da geração CORRENTE aplica. A guarda de período
+// não basta — dois reloads do MESMO período podem ter o stats mais VELHO resolvendo
+// por último e sobrescrevendo os contadores que o mais novo já renderizou. A geração
+// só é bumpada quando um FETCH de stats novo é disparado (statsNeeded); um reload
+// só-cache NÃO bumpa, pra não invalidar um refresh ainda em voo de um reload forçado.
+let _historyStatsGen = 0;
 
 function _historyResetAndReload() {
   _historyFilters.page = 1;
@@ -5106,10 +5560,11 @@ function _historyResetAndReload() {
   loadHistoryView(true);
 }
 
-async function loadHistoryView(forceFresh = false) {
+async function loadHistoryView(forceFresh = false, { background = false } = {}) {
   const timeline = document.getElementById("history-timeline");
   if (!timeline) return;
   if (!USER_ID) {
+    if (background) throw new Error("histórico: sessão ainda não pronta");
     if (!_historyRetryTimer) {
       _historyRetryTimer = setInterval(() => {
         if (USER_ID) {
@@ -5122,42 +5577,99 @@ async function loadHistoryView(forceFresh = false) {
     return;
   }
 
-  // Stats e lista são fetched em paralelo. Stats só depende do período
-  // (não dos filtros), então serve do cache se o período não mudou.
+  // loadHistoryView é SEMPRE um load completo — renderiza append=false (substitui
+  // a timeline, que é acumulada pelo "carregar mais"). Sem forçar página 1, puxar
+  // pra atualizar (ou navegar de volta) depois de paginar buscaria a página
+  // corrente e substituiria por só ela ("puxei e o histórico pulou pro meio").
+  //
+  // INVARIANTE: _historyFilters.page tem que bater com as páginas que estão no
+  // DOM. Por isso NÃO mutamos o contador antes de renderizar — passamos page:1 só
+  // pro fetch e só commitamos ao efetivamente renderizar. Se um refresh em
+  // background falhar (DOM preservado), o contador não pode ter ido pra 1 sozinho,
+  // senão dessincroniza com as páginas que ficaram na tela (e o "carregar mais"
+  // seguinte pularia/duplicaria).
   const statsNeeded = !_historyStatsCache || _historyStatsCache.months !== _historyFilters.months || forceFresh;
-  const [stats, list] = await Promise.all([
-    statsNeeded ? _fetchHistoryStats(_historyFilters.months) : Promise.resolve(_historyStatsCache),
-    _fetchHistoryList(_historyFilters),
-  ]);
-  if (statsNeeded && stats) _historyStatsCache = { ...stats, months: _historyFilters.months };
+  // Stats é secundário e NÃO-cancelável (o fetch não recebe signal). Fica FORA do
+  // gate e do await da timeline: se entrasse no Promise.all gateado, um reload
+  // superado cuja LISTA foi abortada mas cujo stats segue pendurado nunca chegaria
+  // ao finally (o Promise.all esperaria o stats) e o gate ficaria PRESO acima de
+  // zero — todo "carregar mais" ignorado pra sempre. O gate segue só o ciclo da
+  // LISTA (cancelável, com guarda de geração); o stats atualiza os contadores
+  // quando chegar. .catch pra nunca virar unhandledrejection num caminho superado.
+  const statsMonths = _historyFilters.months;
+  // Bumpa a geração SÓ quando dispara um fetch novo. Um reload só-cache (re-entrar
+  // no Histórico com cache válido, statsNeeded=false) não pode invalidar um refresh
+  // de stats ainda em voo de um reload forçado anterior — senão a resposta fresca
+  // falharia a guarda de geração e os contadores ficariam velhos até o próximo forçado.
+  const statsGen = statsNeeded ? ++_historyStatsGen : _historyStatsGen;
+  const statsP = (statsNeeded
+    ? _fetchHistoryStats(statsMonths)
+    : Promise.resolve(_historyStatsCache)).catch(() => null);
+  // Stats (secundário) é aplicado INDEPENDENTE do desfecho da lista deste reload:
+  // se a lista for superada (o `return` adiante) ou falhar, o stats fresco que já
+  // está em voo não pode ficar órfão — por isso o handler é anexado AQUI, antes do
+  // await da lista, não dentro do caminho de sucesso dela. Guarda de GERAÇÃO: só a
+  // resposta do fetch de stats mais novo aplica (subsume o período; sem ela, um
+  // stats mais velho do mesmo período resolvendo por último sobrescreveria o novo).
+  // Atualiza os contadores quando chegar, sem segurar o gate nem a timeline.
+  statsP.then(stats => {
+    if (statsGen !== _historyStatsGen) return;
+    if (statsNeeded && stats) _historyStatsCache = { ...stats, months: statsMonths };
+    renderHistoryStats(_historyStatsCache);
+  });
 
-  renderHistoryStats(_historyStatsCache);
-  renderHistoryTimeline(list, /*append=*/false);
+  _historyReloadsInFlight++;
+  try {
+    const list = await _fetchHistoryList({ ..._historyFilters, page: 1 });
+    // list undefined = este load foi superado por um mais novo (troca de filtro,
+    // nova busca, puxão). Não renderiza a TIMELINE — o mais novo é quem manda. (O
+    // stats já é tratado acima, independente disto.) Guarda de geração da lista.
+    if (list === undefined) return;
+    _historyFilters.page = 1;   // commit: o DOM vira página 1 agora
+    renderHistoryTimeline(list, /*append=*/false);
+  } catch (err) {
+    // Falha REAL da lista (HTTP/rede). No puxão (background): rejeita sem tocar no
+    // DOM NEM no contador — o render bom e a paginação ficam, indicador âmbar. Na
+    // navegação/filtro: renderiza o estado de erro, então o contador passa a 1.
+    if (background) throw err;
+    _historyFilters.page = 1;
+    renderHistoryTimeline(null, /*append=*/false);
+  } finally {
+    _historyReloadsInFlight--;   // solto quando a LISTA assenta — nunca preso no stats
+  }
 }
 
 async function _fetchHistoryStats(months) {
   try {
     const r = await fetch(`/history/${USER_ID}/quick-stats?months=${months}`, { credentials:"same-origin" });
+    // Stats é secundário e tolerante (o refresh não falha por causa dele — ver a
+    // assimetria no corpo do PR). Mas sem checar r.ok, um 500 voltaria o payload
+    // de erro como "stats" e renderHistoryStats pintaria lixo. !ok → null →
+    // renderHistoryStats sai cedo e mantém os contadores anteriores.
+    if (!r.ok) return null;
     return await r.json();
   } catch (_) { return null; }
 }
 
 async function _fetchHistoryList(filters, opts = {}) {
-  if (_historyListInFlight && !opts.allowParallel) {
-    // Cancel anterior implicitamente — espera o último vencer no DOM.
-    // Suficiente pra debounce de digitação.
-    try { await _historyListInFlight; } catch (_) {}
-  }
   const qs = _buildHistoryQuery(filters);
-  _historyListInFlight = (async () => {
-    try {
-      const r = await fetch(`/history/${USER_ID}/list?${qs}`, { credentials:"same-origin" });
-      return await r.json();
-    } finally {
-      _historyListInFlight = null;
-    }
-  })();
-  return _historyListInFlight;
+  const doFetch = async (signal) => {
+    const r = await fetch(`/history/${USER_ID}/list?${qs}`, { credentials:"same-origin", signal });
+    // Sem checar r.ok, um 401/500 voltaria como payload de erro e o
+    // renderHistoryTimeline substituiria a timeline boa por "Erro ao carregar",
+    // reportando o puxão como sucesso. Lança pra falha REAL subir pelo canal.
+    if (!r.ok) throw new Error(`histórico (HTTP ${r.status})`);
+    return await r.json();
+  };
+  // allowParallel = busca concorrente (ex.: digitação incremental futura): sem
+  // canal/abort, cada pedido vive por conta própria e nenhum estrangula o
+  // outro. Nenhum caller passa allowParallel hoje; preservado de propósito.
+  if (opts.allowParallel) return doFetch();
+  // Demais chamadas (load principal, "carregar mais", puxão) passam pelo canal:
+  // abort + geração. Mata o hang-strand do antigo `await _historyListInFlight`
+  // (um list pendurado travava toda chamada seguinte) e evita que um pedido
+  // velho renderize por cima do novo. Devolve os dados, ou undefined se superado.
+  return _historyListChannel.run(doFetch, { force: true });
 }
 
 function _buildHistoryQuery(filters) {
@@ -5248,6 +5760,10 @@ function _clearHistoryFilters() {
   _historyResetAndReload();
 }
 
+// Itens do Histórico atualmente renderizados — indexados pra o clique na linha
+// abrir o modal de detalhe (openHistoryDetail).
+let _renderedHistoryItems = [];
+
 function renderHistoryTimeline(payload, append = false) {
   const root = document.getElementById("history-timeline");
   const moreWrap = document.getElementById("history-load-more-wrap");
@@ -5259,7 +5775,14 @@ function renderHistoryTimeline(payload, append = false) {
   }
 
   const items = payload.items || [];
+  // Indexa os itens no array global pra o clique na linha (openHistoryDetail).
+  const _base = append ? _renderedHistoryItems.length : 0;
+  if (append) _renderedHistoryItems.push(...items);
+  else _renderedHistoryItems = items.slice();
+  items.forEach((it, n) => { it._ldx = _base + n; });
+
   if (!items.length) {
+    if (!append) _renderedHistoryItems = [];
     root.innerHTML = `<div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">Nenhum lançamento encontrado com os filtros atuais.</div>`;
     if (moreWrap) moreWrap.style.display = "none";
     return;
@@ -5340,7 +5863,7 @@ function _historyRowHTML(i) {
   const valor = Number(i.valor || 0);
   const sign = isReceita ? "+" : (isCredito || isDespesa ? "-" : "");
   const amtClass = isReceita ? "green" : "red";
-  const icon = isReceita ? "💸" : (isCredito ? "💳" : "🧾");
+  const icon = isReceita ? "<i class='ph ph-trend-down' aria-hidden='true'></i>" : (isCredito ? "<i class='ph ph-credit-card' aria-hidden='true'></i>" : "<i class='ph ph-receipt' aria-hidden='true'></i>");
   const time = (i.criado_em || "").slice(11, 16);
   const desc = i.alvo || i.nota || "—";
   const meta = [];
@@ -5348,8 +5871,9 @@ function _historyRowHTML(i) {
   if (isCredito && i.alvo)  meta.push(`Cartão ${i.alvo}`);
   if (!isCredito && i.nota && i.alvo && i.nota !== i.alvo) meta.push(i.nota);
   if (time) meta.push(time);
+  const clickable = i._ldx != null ? ` style="cursor:pointer" onclick="openHistoryDetail(${i._ldx})"` : "";
   return `
-    <div class="tx-row">
+    <div class="tx-row"${clickable}>
       <div class="tx-icon" style="color:${isReceita ? "#00F078" : (isCredito ? "#7E5FE6" : "#fbbf24")}">${icon}</div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(_truncate(desc, 60))}</div>
@@ -5388,10 +5912,42 @@ document.addEventListener("click", async (e) => {
   }
   // Botão "Carregar mais"
   if (e.target && e.target.id === "history-load-more-btn") {
-    e.target.disabled = true;
-    e.target.textContent = "Carregando…";
-    _historyFilters.page += 1;
-    const more = await _fetchHistoryList(_historyFilters);
+    const btn = e.target;
+    // Um load completo (nav/filtro/busca/período/puxão) em voo vai SUBSTITUIR a
+    // timeline. Paginar agora abortaria a página 1 desse reload (mesmo canal) e
+    // appendaria numa base que está pra sumir — misturando filtros e sumindo com a
+    // página 1. Ignora o clique: o reload re-renderiza o botão no fim. O botão fica
+    // como está (não o desabilito aqui, pra não deixá-lo preso se o reload for um
+    // puxão em background que falha e preserva o DOM).
+    if (_historyReloadsInFlight > 0) return;
+    // NÃO muta _historyFilters.page até o append dar certo (mesma invariante do
+    // loadHistoryView: contador == páginas no DOM). Passa nextPage só pro fetch;
+    // se for superado ou falhar, o contador fica intacto e batendo com o DOM.
+    const nextPage = (_historyFilters.page || 1) + 1;
+    btn.disabled = true;
+    btn.textContent = "Carregando…";
+    let more;
+    try {
+      more = await _fetchHistoryList({ ..._historyFilters, page: nextPage });
+    } catch (err) {
+      // Falha REAL (HTTP/rede): o throw do canal (guard de r.ok) chega aqui, fora
+      // do try/catch do loadHistoryView. Botão volta acionável; contador intacto,
+      // então o retry pega a MESMA próxima página (não pula).
+      btn.disabled = false;
+      btn.textContent = "Tentar de novo";
+      return;
+    }
+    // Superado (um puxão/nova busca abortou este load-more): não faz append. Mas
+    // reabilita o botão AQUI — se o superador for um render bem-sucedido ele
+    // reconstrói o botão por cima (idempotente); se for um puxão em background que
+    // FALHOU (DOM preservado, sem re-render), este é o ÚNICO restore e evita o
+    // botão preso em "Carregando…". Contador nunca foi mexido → segue consistente.
+    if (more === undefined) {
+      btn.disabled = false;
+      btn.textContent = "Carregar mais";
+      return;
+    }
+    _historyFilters.page = nextPage;   // commit: só ao append com sucesso
     renderHistoryTimeline(more, /*append=*/true);
     return;
   }
@@ -5418,9 +5974,15 @@ document.addEventListener("keydown", (e) => {
 function applyTheme(theme) {
   const isLight = theme === "light";
   document.body.classList.toggle("light", isLight);
+  // espelha no <html>: o fundo do CANVAS (o que o elástico revela no app)
+  // vem do html, então ele precisa saber do tema — senão o claro fica com
+  // canvas escuro e a faixa reaparece, invertida
+  document.documentElement.classList.toggle("light", isLight);
   const icon  = document.getElementById("theme-toggle-icon");
   const label = document.getElementById("theme-toggle-label");
-  if (icon)  icon.textContent  = isLight ? "☀️" : "🌙";
+  if (icon)  icon.innerHTML = isLight
+    ? '<i class="ph ph-sun" aria-hidden="true"></i>'
+    : '<i class="ph ph-moon" aria-hidden="true"></i>';
   if (label) label.textContent = isLight ? "Modo claro" : "Modo escuro";
 
   // Re-renderiza os gráficos da view Análises pra pegar as cores novas do tema.
@@ -5452,22 +6014,59 @@ function toggleTheme() {
   applyTheme(saved);
 })();
 
-// ── Pro gates (visivel + desabilitado pra Free) ──────────────────────────
+// ── Pro gates (visivel + desabilitado por feature) ───────────────────────
+// A fonte da verdade é o BACKEND: /auth/dashboard-profile devolve feature_gates
+// já resolvido (get_user_limits + is_pro cobrem assinatura expirada com webhook
+// perdido E o freio de emergência PLANS_V2_ENABLED). O front só consome — nada
+// de reconstruir tier do valor cru do plano, que divergiria nesses casos.
+// Default: tudo bloqueado até o perfil chegar (conservador — melhor travar de
+// leve por um instante que liberar indevido). USER_GATES é setado no topo.
+function featureAllowed(feature) {
+  return !!USER_GATES[feature];
+}
+// "Tem o plano pago principal?" (Plus+): o gate de Novidades é exatamente is_pro.
 function isProUser() {
-  return (USER_PLAN || "free").trim().toLowerCase() === "pro";
+  return featureAllowed("changelog");
 }
 
 const UPGRADE_MESSAGES = {
-  investments: "Acompanhe sua carteira de investimentos com cálculo automático de rendimento, IR e IOF. Exclusivo do PigBank+.",
-  export: "Exportar seus lançamentos (PDF, planilha) por email é uma feature do PigBank+.",
-  pockets_unlimited: "No Free você cria 1 caixinha. Com PigBank+ é ilimitado — separe sua reserva, viagens, presentes…",
-  cards_unlimited: "No Free você cadastra 1 cartão. Com PigBank+ é ilimitado — controle todos os seus cartões em um lugar.",
-  ofx_import: "Importar extrato bancário e fatura de cartão por OFX é exclusivo do PigBank+.",
-  history_unlimited: "Histórico além de 30 dias é exclusivo do PigBank+.",
-  changelog: "As notícias e resumos do mercado feitos pela Piggy são exclusivos do PigBank+. Assine pra desbloquear.",
-  recurring_expenses: "A agenda de boletos e os gastos fixos são exclusivos do PigBank+. Cadastre suas contas a pagar e nunca mais perca um vencimento.",
-  generic: "Essa feature é exclusiva pra quem assina o PigBank+."
+  investments: "Acompanhe sua carteira de investimentos com cálculo automático de rendimento, IR e IOF. Disponível nos planos pagos.",
+  export: "Exportar seus lançamentos (PDF, planilha) por email faz parte dos planos pagos.",
+  pockets_unlimited: "No Grátis você cria 1 caixinha. Com um plano pago fica ilimitado: separe sua reserva, viagens, presentes…",
+  cards_unlimited: "No Grátis você cadastra 1 cartão. Com um plano pago fica ilimitado: controle todos os seus cartões em um lugar.",
+  ofx_import: "Importar extrato bancário e fatura de cartão por OFX faz parte dos planos pagos.",
+  history_unlimited: "Histórico além de 30 dias faz parte dos planos pagos.",
+  changelog: "As notícias e resumos do mercado feitos pela Piggy fazem parte dos planos Plus e Pro. Assine pra desbloquear.",
+  recurring_expenses: "A agenda de boletos e os gastos fixos fazem parte dos planos pagos. Cadastre suas contas a pagar e nunca mais perca um vencimento.",
+  agents: "Seu plano atual não ativa mais agentes. Fazendo upgrade, a equipe de porquinhos trabalha pra você: Xerife, Repórter, Carteiro e os próximos que chegarem.",
+  generic: "Essa feature faz parte dos planos pagos do PigBank. Escolha o que faz mais sentido pra você."
 };
+
+// Banner de trial (B1): oferta proativa dos 30d de Plus pro Grátis. Só aparece
+// pra quem é free e não está em trial ativo; some no app iOS (CTA de compra
+// externa = rejeição Apple 3.1.1, a checagem é feita por quem chama). O "Agora
+// não" silencia por TRIAL_BANNER_SNOOZE_DAYS via localStorage.
+const TRIAL_BANNER_SNOOZE_KEY = "pb_trial_banner_snooze_until";
+const TRIAL_BANNER_SNOOZE_DAYS = 1;
+
+function maybeShowTrialBanner() {
+  const el = document.getElementById("trial-banner");
+  if (!el) return;
+  try {
+    const until = parseInt(localStorage.getItem(TRIAL_BANNER_SNOOZE_KEY) || "0", 10);
+    if (until && Date.now() < until) return;  // ainda no período de silêncio
+  } catch (e) { /* localStorage indisponível → mostra assim mesmo */ }
+  el.style.display = "block";
+}
+
+function dismissTrialBanner() {
+  const el = document.getElementById("trial-banner");
+  if (el) el.style.display = "none";
+  try {
+    const until = Date.now() + TRIAL_BANNER_SNOOZE_DAYS * 86400000;
+    localStorage.setItem(TRIAL_BANNER_SNOOZE_KEY, String(until));
+  } catch (e) { /* sem localStorage → some só nesta sessão */ }
+}
 
 function showUpgradeModal(feature) {
   const overlay = document.getElementById("upgrade-overlay");
@@ -5490,17 +6089,23 @@ function closeUpgradeModal() {
 // Aplica estado visual disabled em todos os elementos com data-pro-feature
 // quando o user e Free. Idempotente — pode ser chamada varias vezes.
 function applyProGates() {
-  const isPro = isProUser();
+  // Gate POR FEATURE: cada controle libera no seu tier mínimo (Essencial já
+  // solta investimentos/OFX/export/etc; Novidades só do Plus pra cima). Antes
+  // era um único booleano is_pro, que trancava tudo pra quem era Essencial.
   document.querySelectorAll("[data-pro-feature]").forEach(el => {
-    if (isPro) {
+    if (featureAllowed(el.dataset.proFeature)) {
       el.classList.remove("pro-locked");
       el.removeAttribute("aria-disabled");
+      // Remove o tooltip de upgrade que o ramo bloqueado seta: como o bootstrap
+      // trava tudo primeiro (USER_GATES vazio), sem isto o title "clica pra ver
+      // os planos" ficava preso em controle liberado (Export/Investimentos).
+      el.removeAttribute("title");
       const b = el.querySelector(":scope > .pro-badge");
       if (b) b.remove();
     } else {
       el.classList.add("pro-locked");
       el.setAttribute("aria-disabled", "true");
-      el.setAttribute("title", "Funcionalidade do PigBank+ — clica pra fazer upgrade");
+      el.setAttribute("title", "Funcionalidade de um plano pago: clica pra ver os planos");
       if (!el.querySelector(":scope > .pro-badge")) {
         const b = document.createElement("span");
         b.className = "pro-badge";
@@ -5509,12 +6114,13 @@ function applyProGates() {
       }
     }
   });
-  // Titulo do grafico de historico reflete a janela real: 6 meses (Pro) vs 30 dias (Free).
+  // Titulo do grafico de historico reflete a janela real: 6+ meses (Plus/Pro)
+  // vs 30 dias (Free/Essencial cai no rótulo curto).
   const histTitle = document.getElementById("history-card-title");
   if (histTitle) {
-    histTitle.textContent = isPro
-      ? "Receita vs Despesa — Últimos 6 Meses"
-      : "Receita vs Despesa — Últimos 30 dias";
+    histTitle.textContent = isProUser()
+      ? "Receita vs Despesa (Últimos 6 Meses)"
+      : "Receita vs Despesa (Últimos 30 dias)";
   }
 }
 
@@ -5525,7 +6131,7 @@ function applyProGates() {
 document.addEventListener("click", (e) => {
   const locked = e.target.closest(".pro-locked[data-pro-feature]");
   if (!locked) return;
-  if (isProUser()) return;
+  if (featureAllowed(locked.dataset.proFeature)) return;
   e.preventDefault();
   e.stopPropagation();
   showUpgradeModal(locked.dataset.proFeature || "generic");
@@ -5727,7 +6333,7 @@ function _billMonthTag(l) {
   if (l.tipo !== "credito" || !l.bill_period_end) return "";
   const d = new Date(`${l.bill_period_end}T12:00:00`);
   if (isNaN(d)) return "";
-  return `<span class="tag x" title="Entra na fatura que fecha em ${d.toLocaleDateString("pt-BR")}">💳 fatura ${PT_MONTHS[d.getMonth()].substring(0, 3)}</span>`;
+  return `<span class="tag x" title="Entra na fatura que fecha em ${d.toLocaleDateString("pt-BR")}"><i class="ph ph-credit-card" aria-hidden="true"></i> fatura ${PT_MONTHS[d.getMonth()].substring(0, 3)}</span>`;
 }
 
 function describeLaunch(l) {
@@ -6114,7 +6720,7 @@ function renderInvestmentsPanel(d) {
       <div class="chip"><div class="chip-lbl">Rend. bruto/mês <span style="opacity:.6;font-weight:400">(simulado)</span></div><div class="chip-val g">${fmt(grossMonth)}</div></div>
       <div class="chip"><div class="chip-lbl">Líquido estimado <span style="opacity:.6;font-weight:400">(simulado)</span></div><div class="chip-val">${fmt(netMonth)}</div></div>
     </div>
-    <div style="color:var(--text-3);font-size:.75rem;margin-bottom:12px;line-height:1.35">💡 Rendimentos exibidos são simulações baseadas na taxa informada. O PigBank não custodia os valores aplicados.</div>
+    <div style="color:var(--text-3);font-size:.75rem;margin-bottom:12px;line-height:1.35"><i class="ph ph-lightbulb" aria-hidden="true"></i> Rendimentos exibidos são simulações baseadas na taxa informada. O PigBank não custodia os valores aplicados.</div>
   `;
 
 	  document.getElementById("invest-list").innerHTML = invs.length ? invs.map(i => {
@@ -6143,6 +6749,106 @@ function renderInvestmentsPanel(d) {
       </div>
     `;
   }).join("") : `<div class="empty">Nenhum investimento cadastrado.</div>`;
+
+  renderVariableIncomePanel(d);
+  renderOfFixedIncomePanel(d);
+}
+
+// Renda fixa do banco (CDB/Tesouro via Open Finance) — agregada, read-only.
+function renderOfFixedIncomePanel(d) {
+  const card = document.getElementById("of-rf-card");
+  if (!card) return;
+  const items = d.of_fixed_income || [];
+  const sum = d.of_fixed_income_summary || {};
+  if (!items.length) { card.style.display = "none"; return; }
+  card.style.display = "";
+
+  const elS = document.getElementById("of-rf-summary");
+  if (elS) elS.innerHTML = `
+    <div class="chips" style="margin-top:0;margin-bottom:6px">
+      <div class="chip"><div class="chip-lbl">Saldo</div><div class="chip-val b">${fmt(sum.balance || 0)}</div></div>
+      <div class="chip"><div class="chip-lbl">Investido</div><div class="chip-val">${fmt(sum.invested || 0)}</div></div>
+      <div class="chip"><div class="chip-lbl">Rendeu</div><div class="chip-val">${fmtPnl(sum.pnl || 0)}</div></div>
+    </div>`;
+
+  const elL = document.getElementById("of-rf-list");
+  if (!elL) return;
+  elL.innerHTML = items.map(i => {
+    const n = Number(i.count || 1);
+    const papeis = n > 1 ? `<span class="mini-tag">${n} papéis</span>` : "";
+    return `
+      <div class="invest-card rv-card-item">
+        <div class="invest-head">
+          <div style="min-width:0">
+            <div class="invest-name">${esc(i.name)} <span class="rv-badge">via banco</span></div>
+            <div class="invest-meta"><span class="mini-tag">Renda fixa</span>${papeis}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="val b">${fmt(i.balance)}</div>
+            <div style="font-size:.8rem;margin-top:2px">${fmtPnl(i.pnl, i.pnl_pct)}</div>
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+// Renda variável (ações/FIIs) vinda do Open Finance — read-only, marcada a mercado.
+const RV_KIND_LABELS = { stock: "Ação", fii: "FII", etf: "ETF", bdr: "BDR", crypto: "Cripto", fund: "Fundo" };
+
+function fmtPnl(v, pct) {
+  const up = Number(v) >= 0;
+  const arrow = up ? "↑" : "↓";
+  const cls = up ? "pnl-up" : "pnl-down";
+  const pctTxt = (pct != null) ? ` (${(Number(pct) * 100).toFixed(2).replace(".", ",")}%)` : "";
+  return `<span class="${cls}">${arrow} ${fmt(Math.abs(Number(v)))}${pctTxt}</span>`;
+}
+
+function renderVariableIncomePanel(d) {
+  const pos = d.rv_positions || [];
+  const sum = d.rv_summary || {};
+
+  const summaryHtml = `
+    <div class="chips" style="margin-top:0;margin-bottom:6px">
+      <div class="chip"><div class="chip-lbl">Valor de mercado</div><div class="chip-val b">${fmt(sum.market_value || 0)}</div></div>
+      <div class="chip"><div class="chip-lbl">Investido</div><div class="chip-val">${fmt(sum.invested || 0)}</div></div>
+      <div class="chip"><div class="chip-lbl">Resultado</div><div class="chip-val">${fmtPnl(sum.pnl || 0)}</div></div>
+    </div>`;
+  const listHtml = pos.map(p => {
+    const day = (p.last_month_rate != null)
+      ? `<span class="mini-tag">${Number(p.last_month_rate).toFixed(2).replace(".", ",")}% no mês</span>` : "";
+    const qty = (p.quantity != null) ? `${Number(p.quantity).toLocaleString("pt-BR")} cotas` : "";
+    const px = (p.market_price != null) ? ` × ${fmt(p.market_price)}` : "";
+    return `
+      <div class="invest-card rv-card-item">
+        <div class="invest-head">
+          <div style="min-width:0">
+            <div class="invest-name">${esc(p.ticker || p.name)}
+              <span class="rv-badge">via corretora</span></div>
+            <div class="invest-meta">
+              <span class="mini-tag">${RV_KIND_LABELS[p.kind] || esc(p.kind)}</span>
+              ${qty ? `<span class="mini-tag">${qty}${px}</span>` : ""}
+              ${day}
+            </div>
+          </div>
+          <div style="text-align:right">
+            <div class="val b">${fmt(p.market_value)}</div>
+            <div style="font-size:.8rem;margin-top:2px">${fmtPnl(p.pnl, p.pnl_pct)}</div>
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+
+  // Card na aba de Investimentos: some quando não há posições.
+  const card = document.getElementById("rv-card");
+  if (card) {
+    if (!pos.length) {
+      card.style.display = "none";
+    } else {
+      card.style.display = "";
+      const s = document.getElementById("rv-summary"); if (s) s.innerHTML = summaryHtml;
+      const l = document.getElementById("rv-list"); if (l) l.innerHTML = listHtml;
+    }
+  }
 }
 
 function runInvestmentSimulator() {
@@ -6205,12 +6911,23 @@ function updateMonthLabel() {
     PT_MONTHS[viewMonth - 1] + " " + viewYear;
   const isCurrent = viewYear === NOW.getFullYear() && viewMonth === NOW.getMonth() + 1;
   document.getElementById("btn-next").disabled = isCurrent;
+  const earliestMonth = historyEarliestDate
+    ? Number(historyEarliestDate.slice(0, 4)) * 12 + Number(historyEarliestDate.slice(5, 7))
+    : null;
+  const viewedMonth = viewYear * 12 + viewMonth;
+  document.getElementById("btn-prev").disabled = earliestMonth !== null && viewedMonth <= earliestMonth;
 }
 
 function changeMonth(d) {
-  viewMonth += d;
-  if (viewMonth > 12) { viewMonth = 1; viewYear++; }
-  if (viewMonth < 1)  { viewMonth = 12; viewYear--; }
+  const target = new Date(viewYear, viewMonth - 1 + d, 1);
+  const targetYear = target.getFullYear();
+  const targetMonth = target.getMonth() + 1;
+  if (historyEarliestDate) {
+    const earliestMonth = Number(historyEarliestDate.slice(0, 4)) * 12 + Number(historyEarliestDate.slice(5, 7));
+    if (targetYear * 12 + targetMonth < earliestMonth) return;
+  }
+  viewYear = targetYear;
+  viewMonth = targetMonth;
 
   launchesPage = 1;
   updateMonthLabel();
@@ -6270,12 +6987,16 @@ async function fetchMonthHttp(year, month, page = 1, limit = LAUNCHES_LIMIT, { b
     stopSpin();
     setLaunchesLoading(false);
   } catch(err) {
-    if (err.name === "AbortError") return;
+    if (err.name === "AbortError") return;   // superado por outro pedido: neutro
     console.error("fetchMonthHttp error:", err);
     if (seq === monthRequestSeq && !background) {
       stopSpin();
       setLaunchesLoading(false);
     }
+    // O render antigo fica (certo), mas quem chamou precisa saber que nada
+    // veio — o puxar pra atualizar usa isto pra ficar âmbar em vez de
+    // recolher como sucesso. Callers antigos ignoram o retorno.
+    return false;
   } finally {
     if (seq === monthRequestSeq) {
       monthAbortController = null;
@@ -6364,6 +7085,7 @@ function connect() {
       if (!isCurrentViewData(msg.data)) return;
       lastData = msg.data;
       cacheMonthData(msg.data);
+      persistSnapshotToSession(msg.data);
       render(msg.data);
       stopSpin();
       setLaunchesLoading(false);
@@ -6374,6 +7096,7 @@ function connect() {
       if (serverYear === viewYear && serverMonth === viewMonth) {
         lastData = msg.data;
         cacheMonthData(msg.data);
+        persistSnapshotToSession(msg.data);
         render(msg.data);
         showToast();
       }
@@ -6421,18 +7144,18 @@ function renderAlerts(alerts) {
   alerts.forEach(a => {
     if (a.type === "recurring_charged") {
       const where = a.payment_type === "credit_card" ? "no cartão" : "da conta";
-      html += `<div class="alert-row">🐷 Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} ${where} ${_alertWhenLabel(a.charged_at)}. <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'">✕</button></div>`;
+      html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy lançou <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} ${where} ${_alertWhenLabel(a.charged_at)}. <button onclick="ackRecurringCharge(${a.charge_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
     } else if (a.type === "recurring_credited") {
-      html += `<div class="alert-row">🐷 Piggy recebeu <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} na conta ${_alertWhenLabel(a.credited_at)}. <button onclick="ackRecurringIncomeCredit(${a.credit_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'">✕</button></div>`;
+      html += `<div class="alert-row"><i class="ph ph-piggy-bank" aria-hidden="true"></i> Piggy recebeu <b>${escapeHtmlSafe(a.name)}</b> ${fmt(a.amount)} na conta ${_alertWhenLabel(a.credited_at)}. <button onclick="ackRecurringIncomeCredit(${a.credit_id})" aria-label="Marcar como visto" title="Marcar como visto" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.85rem;line-height:1;padding:2px 6px;margin-left:6px;border-radius:6px;opacity:.7;transition:opacity .15s,background .15s" onmouseover="this.style.opacity=1;this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.opacity=.7;this.style.background='none'"><i class="ph ph-x" aria-hidden="true"></i></button></div>`;
     } else {
-      const icon = a.type === "budget_exceeded" ? "🔴" : "⚠️";
+      const icon = a.type === "budget_exceeded" ? '<i class="ph ph-warning-circle" aria-hidden="true"></i>' : '<i class="ph ph-warning" aria-hidden="true"></i>';
       html += `<div class="alert-row">${icon} <b>${escapeHtmlSafe(a.categoria)}</b>: ${fmt(a.spent)} de ${fmt(a.budget)} (${a.pct}%)</div>`;
     }
   });
   b.innerHTML = `
     <div class="alert-banner-head">
       <div class="alert-banner-body">${html}</div>
-      <button class="alert-close" type="button" aria-label="Fechar aviso" onclick="dismissAlerts()">✕</button>
+      <button class="alert-close" type="button" aria-label="Fechar aviso" onclick="dismissAlerts()"><i class="ph ph-x" aria-hidden="true"></i></button>
     </div>
   `;
   b.className = exceeded.length ? "exceeded" : "warning";
@@ -6609,10 +7332,33 @@ function renderLaunchesPagination(totalItems, totalPages) {
   return html;
 }
 
+const LAUNCH_TYPE_LABELS = {
+  deposito_caixinha: "dep. caixinha",
+  saque_caixinha: "saque caixinha",
+  aporte_investimento: "aporte invest.",
+  resgate_investimento: "resgate invest.",
+  transferencia_interna: "transf. interna",
+  pagamento_fatura: "pgto. fatura",
+  ajuste_saldo: "ajuste saldo",
+  criar_caixinha: "criar caixinha",
+  create_investment: "criar invest.",
+  delete_pocket: "remover caixinha",
+  delete_investment: "remover invest.",
+  credito: "crédito",
+};
+// Guarda os lançamentos renderizados pra o clique na linha abrir o detalhe.
+let _renderedLaunches = [];
+
+// Guarda o detalhamento do "Sobrou este mês" pro modal explicativo (clique no card).
+let _sobrouDetail = null;
+// Elemento que tinha o foco antes de abrir o modal (pra restaurar ao fechar).
+let _sobrouReturnFocus = null;
+
 function renderLaunches() {
   if (!lastData) return;
 
   const items = lastData.recent_launches || [];
+  _renderedLaunches = items;
 
   const card = document.getElementById("launches-card");
 
@@ -6630,36 +7376,18 @@ function renderLaunches() {
 
   launchesPage = meta.page || 1;
 
-	  const TYPE_LABELS = {
-    deposito_caixinha: "dep. caixinha",
-    saque_caixinha: "saque caixinha",
-    aporte_investimento: "aporte invest.",
-    resgate_investimento: "resgate invest.",
-    transferencia_interna: "transf. interna",
-    pagamento_fatura: "pgto. fatura",
-    ajuste_saldo: "ajuste saldo",
-    criar_caixinha: "criar caixinha",
-    create_investment: "criar invest.",
-    delete_pocket: "remover caixinha",
-	    delete_investment: "remover invest.",
-    credito: "crédito"
-	  };
+	  const TYPE_LABELS = LAUNCH_TYPE_LABELS;
 
 		  card.innerHTML =
-		    items.map(l => {
+		    items.map((l, idx) => {
       const isInternal = l.is_internal_movement;
       const valClass   = isInternal ? '' : (l.tipo==='receita'||l.tipo==='entrada' ? 'g' : 'r');
       const valStyle   = isInternal ? 'color:var(--text-2)' : '';
       const typeLabel  = TYPE_LABELS[l.tipo] || l.tipo.replaceAll("_", " ");
-      const editable   = l.id != null;
-      const editBtn    = editable
-        ? `<button class="bgt-btn launch-edit-btn" onclick="event.stopPropagation();openEditLaunchModal(${l.id})" title="Editar lançamento">✏️</button>`
-        : '';
-      const deleteBtn  = editable
-        ? `<button class="bgt-btn launch-delete-btn" onclick="event.stopPropagation();confirmDeleteLaunch(${l.id}, ${JSON.stringify(describeLaunch(l).replace(/<[^>]+>/g, '').trim()).replace(/"/g, '&quot;')}, ${l.valor}, ${l.tipo === 'credito' ? 'true' : 'false'}, ${l.installments_total || 'null'})" title="Apagar lançamento">🗑️</button>`
-        : '';
+      // Editar/Excluir migraram pro modal de detalhe (clique na linha) — sem
+      // ícones inline, que causavam toque errado no celular.
       return `
-      <div class="row" style="${isInternal?'opacity:.75':''}">
+      <div class="row" style="cursor:pointer;${isInternal?'opacity:.75':''}" onclick="openLaunchDetail(${idx})">
         <span class="lbl">
 	          <span class="tag ${l.tipo}">${typeLabel}</span>
 	          ${isInternal ? '<span class="tag interno">mov. interna</span>' : ''}
@@ -6670,11 +7398,211 @@ function renderLaunches() {
         <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
           <span class="val ${valClass}" style="${valStyle}"
                 data-num="lnc_${l.criado_em}_${l.valor}" data-val="${l.valor}">${fmt(l.valor)}</span>
-          <span style="font-size:.65rem;color:var(--text-3)">${fmtLaunchWhen(l)}${editBtn}${deleteBtn}</span>
+          <span style="font-size:.65rem;color:var(--text-3)">${fmtLaunchWhen(l)}</span>
         </span>
       </div>
     `}).join("")
     + renderLaunchesPagination(meta.total || items.length, meta.total_pages || 1);
+}
+
+// Clique numa linha (Visão Geral OU Histórico): abre o detalhe com a descrição
+// COMPLETA + campos principais e ações Editar/Excluir. Modal dedicado com
+// altura mínima e respiro. Edit/delete roteiam por tipo (crédito vs launch),
+// então funcionam nas duas origens sem colisão de id.
+let _launchDetailCurrent = null;
+let _launchDetailSource = "overview";   // 'overview' | 'history'
+let _editDeleteReturnTo = null;         // 'history' → recarrega o histórico após a ação
+
+function _ensureLaunchDetailModal() {
+  if (document.getElementById("launch-detail-overlay")) return;
+  const html = `
+    <div class="overlay" id="launch-detail-overlay">
+      <div class="modal launch-detail">
+        <h3>Detalhe do lançamento</h3>
+        <div class="ld-desc" id="ld-desc"></div>
+        <div class="ld-meta" id="ld-meta"></div>
+        <div class="modal-acts ld-acts">
+          <button type="button" class="ld-del" id="ld-delete"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
+          <span class="ld-acts-right">
+            <button type="button" class="btn-cancel" id="ld-edit"><i class="ph ph-pencil-simple" aria-hidden="true"></i> Editar</button>
+            <button type="button" class="btn-save" id="ld-close">Fechar</button>
+          </span>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML("beforeend", html);
+  const ov = document.getElementById("launch-detail-overlay");
+  ov.addEventListener("click", e => { if (e.target === ov) closeLaunchDetail(); });
+  document.getElementById("ld-close").addEventListener("click", closeLaunchDetail);
+  document.getElementById("ld-edit").addEventListener("click", _launchDetailEdit);
+  document.getElementById("ld-delete").addEventListener("click", _launchDetailDelete);
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && ov.classList.contains("open")) closeLaunchDetail();
+  });
+}
+
+function closeLaunchDetail() {
+  const ov = document.getElementById("launch-detail-overlay");
+  if (ov) ov.classList.remove("open");
+}
+
+function _renderLaunchDetail(l) {
+  _ensureLaunchDetailModal();
+  const typeLabel = LAUNCH_TYPE_LABELS[l.tipo] || String(l.tipo || "").replaceAll("_", " ");
+  const desc = describeLaunch(l).replace(/<[^>]+>/g, "").trim() || "—";
+  document.getElementById("ld-desc").textContent = desc;
+
+  const rows = [["Valor", fmt(l.valor)], ["Tipo", typeLabel]];
+  if (l.categoria) rows.push(["Categoria", l.categoria]);
+  if (l.is_internal_movement) rows.push(["Movimentação", "interna"]);
+  rows.push(["Data", fmtLaunchWhen(l)]);
+  document.getElementById("ld-meta").innerHTML = rows.map(([k, v]) =>
+    `<div class="ld-row"><span class="ld-k">${escapeHtmlSafe(k)}</span>` +
+    `<span class="ld-v">${escapeHtmlSafe(String(v))}</span></div>`
+  ).join("");
+
+  // Editar/Excluir só com id e fora de movimentação interna (que não tem edição).
+  const editable = l.id != null && !l.is_internal_movement;
+  document.getElementById("ld-edit").style.display = editable ? "" : "none";
+  document.getElementById("ld-delete").style.display = editable ? "" : "none";
+
+  document.getElementById("launch-detail-overlay").classList.add("open");
+}
+
+function openLaunchDetail(idx) {
+  const l = (_renderedLaunches || [])[idx];
+  if (!l) return;
+  _launchDetailCurrent = l;
+  _launchDetailSource = "overview";
+  _renderLaunchDetail(l);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   "SOBROU ESTE MÊS" — detalhamento (clique no card da Visão Geral)
+   Mostra a conta (receitas − gastos − aportes = sobrou) e explica por que
+   isso ≠ saldo: o saldo é acumulado (arrasta meses, ajustes e movimentações)
+   e pode estar negativo mesmo num mês que sobrou.
+═══════════════════════════════════════════════════════════════════════ */
+function _ensureSobrouDetailModal() {
+  if (document.getElementById("sobrou-detail-overlay")) return;
+  const html = `
+    <div class="overlay" id="sobrou-detail-overlay">
+      <div class="modal launch-detail sobrou-detail" role="dialog" aria-modal="true" aria-labelledby="sd-title">
+        <h3 id="sd-title">Sobrou este mês</h3>
+        <div class="msub" id="sd-sub"></div>
+        <div class="ld-meta" id="sd-rows"></div>
+        <div class="sd-note" id="sd-note"></div>
+        <div class="modal-acts">
+          <button type="button" class="btn-save" id="sd-close">Entendi</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML("beforeend", html);
+  const ov = document.getElementById("sobrou-detail-overlay");
+  ov.addEventListener("click", e => { if (e.target === ov) closeSobrouDetail(); });
+  document.getElementById("sd-close").addEventListener("click", closeSobrouDetail);
+  document.addEventListener("keydown", e => {
+    if (!ov.classList.contains("open")) return;
+    if (e.key === "Escape") { closeSobrouDetail(); return; }
+    // Trap de foco: o diálogo tem um único controle (Fechar). Sem isso o Tab
+    // vazaria pro dashboard atrás do overlay, contrariando aria-modal.
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const closeBtn = document.getElementById("sd-close");
+      if (closeBtn) closeBtn.focus();
+    }
+  });
+}
+
+function closeSobrouDetail() {
+  const ov = document.getElementById("sobrou-detail-overlay");
+  if (ov) ov.classList.remove("open");
+  // Devolve o foco pra quem abriu o modal (o card), pra teclado/leitor de tela
+  // não ficarem perdidos atrás do overlay.
+  if (_sobrouReturnFocus && typeof _sobrouReturnFocus.focus === "function") {
+    _sobrouReturnFocus.focus();
+  }
+  _sobrouReturnFocus = null;
+}
+
+function openSobrouDetail() {
+  const s = _sobrouDetail;
+  if (!s) return;
+  _ensureSobrouDetailModal();
+  const deficit = s.sav < 0;
+  const monthLbl = (PT_MONTHS[(s.month || 1) - 1] || "") +
+    (s.year ? "/" + String(s.year).slice(-2) : "");
+
+  document.getElementById("sd-title").textContent = deficit ? "Déficit do mês" : "Sobrou este mês";
+  document.getElementById("sd-sub").textContent =
+    "É o fluxo de " + monthLbl + ": o que entrou menos o que saiu no mês. Não é o seu saldo.";
+
+  const row = (k, v, cls) =>
+    `<div class="ld-row"><span class="ld-k">${escapeHtmlSafe(k)}</span>` +
+    `<span class="ld-v ${cls || ""}">${v}</span></div>`;
+
+  document.getElementById("sd-rows").innerHTML =
+    row("Receitas do mês", "+ " + fmt(s.inc), "sd-plus") +
+    row("Gastos do mês", "− " + fmt(s.exp), "sd-minus") +
+    row("Aportes (investimentos + caixinhas)", "− " + fmt(s.apt), "sd-minus") +
+    `<div class="ld-row sd-total"><span class="ld-k">${deficit ? "Déficit do mês" : "Sobrou este mês"}</span>` +
+    `<span class="ld-v ${deficit ? "neg" : "pos"}">${fmt(s.sav)}</span></div>`;
+
+  // Explica a divergência que confunde: saldo (acumulado) vs sobrou (só o mês).
+  // Em mês histórico NÃO comparamos com o saldo: o snapshot só traz o saldo
+  // ATUAL da conta (não o saldo daquele mês) e ainda exclui Open Finance, então
+  // afirmar "seu saldo está negativo" ali seria enganoso. Mostra só a natureza
+  // do número (fluxo daquele mês).
+  let note;
+  if (s.hist) {
+    note = "Este é o fluxo de " + monthLbl + ": só receitas, gastos e aportes daquele mês. " +
+      "Não é um saldo: o saldo é acumulado e reflete o momento atual, não o fim de um mês passado.";
+  } else if (s.saldoAtual < 0) {
+    note = "Seu <b>saldo</b> está negativo (" + fmt(s.saldoAtual) + "), mas ainda assim " +
+      (deficit ? "o mês fechou como está acima" : "sobrou dinheiro <b>neste mês</b>") + ". " +
+      "Não é contradição: o saldo é acumulado, arrasta meses anteriores, ajustes e movimentações entre contas, " +
+      "enquanto este valor olha só receitas, gastos e aportes de " + monthLbl + ".";
+  } else {
+    note = "O <b>saldo</b> é acumulado (arrasta meses anteriores, ajustes e movimentações entre contas). " +
+      "Este valor considera só receitas, gastos e aportes de " + monthLbl + ". Por isso os dois podem divergir.";
+  }
+  if (s.apt > 0) {
+    note += " Aportes não são gasto: viram patrimônio seu (investimentos e caixinhas), mas saem do que “sobra livre” no mês.";
+  }
+  document.getElementById("sd-note").innerHTML = note;
+
+  // Guarda quem tinha o foco (o card) pra restaurar ao fechar, e joga o foco
+  // pro botão de fechar — assim o leitor de tela anuncia o diálogo e o Tab não
+  // vaza pro dashboard atrás do overlay.
+  _sobrouReturnFocus = document.activeElement;
+  document.getElementById("sobrou-detail-overlay").classList.add("open");
+  const closeBtn = document.getElementById("sd-close");
+  if (closeBtn) closeBtn.focus();
+}
+
+function openHistoryDetail(idx) {
+  const l = (_renderedHistoryItems || [])[idx];
+  if (!l) return;
+  _launchDetailCurrent = l;
+  _launchDetailSource = "history";
+  _renderLaunchDetail(l);
+}
+
+function _launchDetailEdit() {
+  const l = _launchDetailCurrent;
+  if (!l || l.id == null) return;
+  _editDeleteReturnTo = (_launchDetailSource === "history") ? "history" : null;
+  closeLaunchDetail();
+  openEditLaunchModal(l.id, l);
+}
+
+function _launchDetailDelete() {
+  const l = _launchDetailCurrent;
+  if (!l || l.id == null) return;
+  _editDeleteReturnTo = (_launchDetailSource === "history") ? "history" : null;
+  closeLaunchDetail();
+  const descTxt = describeLaunch(l).replace(/<[^>]+>/g, "").trim();
+  confirmDeleteLaunch(l.id, descTxt, l.valor, l.tipo === "credito", l.installments_total || null);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -6895,7 +7823,7 @@ function _renderEditCategoriaOptions(currentCategoria) {
   for (const c of EDIT_LAUNCH_CATEGORIES) {
     opts.push(`<option value="${c}">${c}</option>`);
   }
-  opts.push(`<option value="${EDIT_LAUNCH_CUSTOM_VALUE}">✏️ Outra (digitar)…</option>`);
+  opts.push(`<option value="${EDIT_LAUNCH_CUSTOM_VALUE}"> Outra (digitar)…</option>`);
   sel.innerHTML = opts.join("");
   if (currentCategoria) sel.value = currentCategoria;
 }
@@ -6919,16 +7847,20 @@ let editingLaunchIsCredit = false;
 // ISO instant → "YYYY-MM-DDTHH:MM" no fuso local do navegador (formato do
 // input datetime-local). Espelha o que o fmtDate mostra na lista.
 function toLocalDatetimeInput(iso) {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "";
-  const pad = n => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-       + `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  // Renderiza o campo datetime-local na hora de PAREDE de APP_TZ (não do
+  // device), pra bater com o que fmtDate exibe. Sem isso, no WebView UTC do
+  // iOS o campo mostrava 3h a mais que o resumo.
+  const d = _isoToDate(iso);
+  if (!d) return "";
+  const p = _wallPartsInTZ(d, APP_TZ);
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
 }
 
-function openEditLaunchModal(launchId) {
+function openEditLaunchModal(launchId, launchObj = null) {
   if (!launchId) return;
-  const launch = (lastData?.recent_launches || []).find(l => l.id === launchId);
+  // launchObj vem do modal de detalhe (inclui itens do Histórico, que não
+  // estão em recent_launches). Fallback: procura no snapshot da Visão Geral.
+  const launch = launchObj || (lastData?.recent_launches || []).find(l => l.id === launchId);
   if (!launch) return;
 
   editingLaunchId = launchId;
@@ -6966,6 +7898,7 @@ function openEditLaunchModal(launchId) {
 function closeEditLaunchModal() {
   document.getElementById("edit-launch-overlay").classList.remove("open");
   editingLaunchId = null;
+  _editDeleteReturnTo = null;  // cancelou → não recarrega o histórico
 }
 
 function hideEditLaunchError() {
@@ -6982,6 +7915,7 @@ function showEditLaunchError(msg) {
 async function submitEditLaunch() {
   if (editLaunchSubmitting || !editingLaunchId) return;
   hideEditLaunchError();
+  const _returnToHistory = (_editDeleteReturnTo === "history");
 
   let categoria = document.getElementById("edit-launch-categoria").value;
   if (categoria === EDIT_LAUNCH_CUSTOM_VALUE) {
@@ -7001,9 +7935,11 @@ async function submitEditLaunch() {
   if (!editingLaunchIsCredit) {
     const dataVal = document.getElementById("edit-launch-data").value;
     if (dataVal) {
-      const d = new Date(dataVal);
-      if (isNaN(d.getTime())) { showEditLaunchError("Data inválida."); return; }
-      criadoEmISO = d.toISOString();
+      // O input é hora de parede em APP_TZ (mesmo fuso do display/edição).
+      // Converte pro instante UTC correto — não usa new Date(dataVal), que
+      // interpretaria no fuso do device (UTC no WebView iOS) e deslocaria 3h.
+      criadoEmISO = appTzWallClockToISO(dataVal);
+      if (!criadoEmISO) { showEditLaunchError("Data inválida."); return; }
     }
   }
 
@@ -7055,6 +7991,9 @@ async function submitEditLaunch() {
     closeEditLaunchModal();
     showLaunchSuccessToast(editingLaunchIsCredit ? "Compra atualizada" : "Lançamento atualizado");
     sendRefreshSilent();
+    // Veio do Histórico → recarrega a timeline resetando a paginação (senão,
+    // se o usuário tinha dado "Carregar mais", recarregaria só a página N).
+    if (_returnToHistory) _historyResetAndReload();
   } catch (err) {
     showEditLaunchError("Erro: " + err.message);
   } finally {
@@ -7071,15 +8010,17 @@ let deleteLaunchInFlight = false;
 async function confirmDeleteLaunch(launchId, descricao, valor, isCredit = false, installmentsTotal = null) {
   if (deleteLaunchInFlight) return;
   if (!launchId) return;
+  const _returnToHistory = (_editDeleteReturnTo === "history");
+  _editDeleteReturnTo = null;  // consome o flag (independe do usuário confirmar)
   const valFmt = (typeof valor === "number") ? fmt(valor) : "";
   const desc   = (descricao || "").trim() || "este lançamento";
 
   const isInstallment = isCredit && installmentsTotal && installmentsTotal > 1;
   const body = isCredit
     ? (isInstallment
-        ? `${desc}${valFmt ? ` — ${valFmt}` : ""}\n\nEsta compra faz parte de um parcelamento em ${installmentsTotal}x. **TODAS as ${installmentsTotal} parcelas** serão apagadas. Essa ação não pode ser desfeita.`
-        : `${desc}${valFmt ? ` — ${valFmt}` : ""}\n\nA compra será removida da fatura. Essa ação não pode ser desfeita.`)
-    : `${desc}${valFmt ? ` — ${valFmt}` : ""}\n\nO efeito no saldo (e em caixinhas/investimentos, se houver) será revertido. Essa ação não pode ser desfeita.`;
+        ? `${desc}${valFmt ? ` · ${valFmt}` : ""}\n\nEsta compra faz parte de um parcelamento em ${installmentsTotal}x. **TODAS as ${installmentsTotal} parcelas** serão apagadas. Essa ação não pode ser desfeita.`
+        : `${desc}${valFmt ? ` · ${valFmt}` : ""}\n\nA compra será removida da fatura. Essa ação não pode ser desfeita.`)
+    : `${desc}${valFmt ? ` · ${valFmt}` : ""}\n\nO efeito no saldo (e em caixinhas/investimentos, se houver) será revertido. Essa ação não pode ser desfeita.`;
 
   const ok = await confirmModal(body, {
     title: isCredit ? "Apagar compra no crédito" : "Apagar lançamento",
@@ -7129,6 +8070,8 @@ async function confirmDeleteLaunch(launchId, descricao, valor, isCredit = false,
     renderLaunches();
     showLaunchSuccessToast(msg);
     sendRefreshSilent();
+    // Veio do Histórico → recarrega resetando a paginação (ver edição acima).
+    if (_returnToHistory) _historyResetAndReload();
   } catch (err) {
     await alertModal(err.message, { title: "Erro ao apagar" });
   } finally {
@@ -7149,7 +8092,12 @@ function showLaunchError(msg) {
 
 function showLaunchSuccessToast(msg, isError = false) {
   const t = document.getElementById("launch-success-toast");
-  t.textContent = msg;
+  if (!isError && /^\s*✓/.test(msg)) {
+    t.innerHTML = `<img class="toast-sticker" src="/brand/stickers/ok.webp" alt="" />` +
+                  escapeHtmlSafe(msg.replace(/^\s*✓\s*/, ""));
+  } else {
+    t.textContent = msg;
+  }
   t.classList.toggle("error", !!isError);   // vermelho quando erro, verde no sucesso
   t.classList.add("show");
   setTimeout(() => t.classList.remove("show"), 2600);
@@ -7219,7 +8167,7 @@ async function submitLaunch() {
                     : launchTipo === "credito" ? "Compra no crédito"
                     : "Despesa";
     const idLabel = data.launch_id ? `#${data.launch_id}` : "";
-    showLaunchSuccessToast(`✓ ${tipoLabel} registrada${idLabel ? " — " + idLabel : ""}`);
+    showLaunchSuccessToast(`✓ ${tipoLabel} registrada${idLabel ? " · " + idLabel : ""}`);
     sendRefresh();
   } catch (err) {
     showLaunchError(err.message || "Erro ao registrar lançamento.");
@@ -7459,7 +8407,7 @@ async function openPocketHistory(pocketName) {
   _currentPocketName = pocketName;
   _currentPocketForEdit = null;
   closePocketMove();
-  titleEl.textContent = `Histórico — ${pocketName}`;
+  titleEl.textContent = `Histórico: ${pocketName}`;
   subEl.textContent   = "Depósitos e saques desta caixinha.";
   sumEl.style.display = "none";
   if (actionsEl) actionsEl.style.display = "none";
@@ -7478,7 +8426,7 @@ async function openPocketHistory(pocketName) {
     const p = data.pocket || {};
     const t = data.totals || {};
     _currentPocketForEdit = p;
-    titleEl.textContent = `Histórico — ${p.name || pocketName}`;
+    titleEl.textContent = `Histórico: ${p.name || pocketName}`;
     const interestTxt = p.interest_enabled === false ? "Sem rendimento" : _formatCdiRate(p.interest_rate);
     subEl.textContent = p.description ? `${p.description} · ${interestTxt}` : interestTxt;
 
@@ -7966,11 +8914,14 @@ function _installWalletDrag(wallet) {
 
 /* Drag-to-reorder na view Cartões (#cards-grid). Cards são <details>, então
    `delay` evita conflito com click no <summary> (expandir/colapsar). */
-function setupCardsGridSort() {
-  if (typeof Sortable === "undefined") return;
+async function setupCardsGridSort() {
+  // Drag só faz sentido em ponteiro fino (mouse/trackpad). Checa antes de
+  // carregar a lib pra não baixar nada em touch.
   if (!window.matchMedia("(pointer: fine)").matches) return;
   const grid = document.getElementById("cards-grid");
   if (!grid) return;
+  await ensureSortable();
+  if (typeof Sortable === "undefined") return;   // load falhou → segue sem drag
   if (grid.__sortable) {
     try { grid.__sortable.destroy(); } catch (_) {}
   }
@@ -8087,6 +9038,74 @@ function closePayBillModal() {
   document.getElementById("pay-bill-overlay").classList.remove("open");
 }
 
+// ══ Ajustar Carteira (dinheiro fora de banco conectado — Open Finance) ══════
+// A "Carteira" é o saldo manual (accounts.balance): dinheiro em espécie + contas
+// não conectadas. O saldo dos bancos conectados vem do Open Finance e é somado
+// à parte. Ao conectar o 1º banco o usuário zera aqui o que era controle manual
+// daquele banco, senão o mesmo dinheiro conta 2x. Reusa POST /adjust-balance
+// (cria um launch de ajuste, mantendo rastreabilidade no histórico).
+let _adjustWalletState = { banks: 0, submitting: false };
+
+function _updateAdjustWalletTotal() {
+  const v = parseFloat(document.getElementById("adjust-wallet-input").value);
+  const carteira = isNaN(v) ? 0 : v;
+  document.getElementById("adjust-wallet-total").textContent = _fmtBRL(carteira + _adjustWalletState.banks);
+}
+
+function openAdjustWalletModal() {
+  const d = lastData || {};
+  const banks = Number(d.of_bank_balance || 0);
+  const carteira = Number(d.balance || 0);
+  _adjustWalletState = { banks, submitting: false };
+  document.getElementById("adjust-wallet-banks").textContent = _fmtBRL(banks);
+  const inp = document.getElementById("adjust-wallet-input");
+  inp.value = carteira.toFixed(2);
+  document.getElementById("adjust-wallet-error").textContent = "";
+  document.getElementById("adjust-wallet-overlay").classList.add("open");
+  inp.oninput = _updateAdjustWalletTotal;
+  _updateAdjustWalletTotal();
+  setTimeout(() => { inp.focus(); inp.select(); }, 50);
+}
+
+function closeAdjustWalletModal() {
+  document.getElementById("adjust-wallet-overlay").classList.remove("open");
+}
+
+function _adjustWalletError(msg) {
+  const errEl = document.getElementById("adjust-wallet-error");
+  errEl.textContent = msg || "";
+  errEl.classList.toggle("show", Boolean(msg));  // .modal-error é display:none sem .show
+}
+
+async function submitAdjustWallet() {
+  if (_adjustWalletState.submitting) return;
+  _adjustWalletError("");
+  const raw = document.getElementById("adjust-wallet-input").value.trim();
+  if (raw === "") { _adjustWalletError("Digite um valor (use 0 se está tudo no banco)."); return; }
+  const v = parseFloat(raw);
+  if (isNaN(v) || v < 0) { _adjustWalletError("Digite um valor válido (zero ou positivo)."); return; }
+  const btn = document.getElementById("adjust-wallet-submit");
+  _adjustWalletState.submitting = true;
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`${API}/account/${USER_ID}/adjust-balance`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ target_balance: v }),
+    });
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    closeAdjustWalletModal();
+    showToast("✓ Carteira ajustada");
+    sendRefresh();
+  } catch (err) {
+    errEl.textContent = String(err.message || err);
+  } finally {
+    _adjustWalletState.submitting = false;
+    btn.disabled = false;
+  }
+}
+
 async function submitPayBill() {
   if (payBillState.submitting) return;
   hidePayBillError();
@@ -8157,7 +9176,7 @@ function showPayReceiptModal(data, bill) {
   document.getElementById("receipt-card-line").textContent = `${cardName}${period}`;
   document.getElementById("receipt-balance").textContent = fmtBillValue(data.new_balance);
   document.getElementById("receipt-open").textContent = fmtBillValue(data.bill_due_amount);
-  document.getElementById("receipt-status").textContent = data.bill_status === "paid" ? "Paga ✓" : "Aberta";
+  document.getElementById("receipt-status").textContent = data.bill_status === "paid" ? "Paga" : "Aberta";
   document.getElementById("receipt-launch-id").textContent = data.launch_id ? `#${data.launch_id}` : "—";
   document.getElementById("pay-bill-receipt-overlay").classList.add("open");
 }
@@ -8193,7 +9212,7 @@ document.addEventListener("keydown", e => {
 // ── Importar OFX (extrato bancario ou fatura de cartao) ────────────────
 function openOfxImport() {
   // Free: nao abre o picker — vai direto pro modal de upgrade.
-  if (!isProUser()) {
+  if (!featureAllowed("ofx_import")) {
     showUpgradeModal("ofx_import");
     return;
   }
@@ -8254,7 +9273,7 @@ function getCsrfToken() {
 
 async function exportToEmail() {
   const url = `${API}/export/${USER_ID}?year=${viewYear}&month=${viewMonth}`;
-  showLaunchSuccessToast("📧 Gerando e enviando o extrato…");
+  showLaunchSuccessToast(" Gerando e enviando o extrato…");
   try {
     const resp = await fetch(url, { method: "POST", credentials: "same-origin", headers: csrfHeaders() });
     if (resp.status === 404) {
@@ -8270,7 +9289,7 @@ async function exportToEmail() {
       return;
     }
     const data = await resp.json().catch(() => ({}));
-    showLaunchSuccessToast(`📧 Extrato enviado pro seu email ${data.email || "cadastrado"}.`);
+    showLaunchSuccessToast(` Extrato enviado pro seu email ${data.email || "cadastrado"}.`);
   } catch (e) {
     showLaunchSuccessToast("Não consegui enviar agora. Tente novamente.", true);
   }
@@ -8281,7 +9300,7 @@ async function exportToEmail() {
 ═══════════════════════════════════════════════════════════════════════ */
 function buildCatChart(cats) {
   const el = document.getElementById("chart-cat"); if (!el) return;
-  const labels = cats.map(c => c.categoria === "sem categoria" ? "⚠ Sem Cat." : c.categoria);
+  const labels = cats.map(c => c.categoria === "sem categoria" ? " Sem Cat." : c.categoria);
   const data   = cats.map(c => c.total);
   const _pal = catColors();
   const colors = cats.map((_, i) => _pal[i % _pal.length]);
@@ -8569,11 +9588,21 @@ function render(d) {
     ? !d.is_current_month
     : (ry !== NOW.getFullYear() || rm !== NOW.getMonth() + 1);
 
-  // Saldo consolidado: carteira manual + saldos dos bancos conectados (Open Finance).
-  // Só no mês atual (o saldo do banco é "agora"); em mês histórico mostra só o manual.
+  // Saldo consolidado: Carteira (dinheiro FORA de banco conectado — espécie, contas
+  // não conectadas) + saldos dos bancos conectados (Open Finance). Só no mês atual
+  // (o saldo do banco é "agora"); em mês histórico mostra só a Carteira manual.
+  // `d.balance` é a Carteira: ao conectar um banco, o usuário zera aqui o que era
+  // controle manual daquele banco (senão conta o mesmo dinheiro 2x). Ver "Ajustar carteira".
+  const ofBankCount = Number(d.of_bank_count || 0);
+  const hasBanks = !hist && ofBankCount > 0;
   const ofBank = hist ? 0 : Number(d.of_bank_balance || 0);
-  const saldoAtual = d.balance + ofBank;
+  const carteira = Number(d.balance || 0);
+  const saldoAtual = carteira + ofBank;
   const pat = saldoAtual + ni + np;
+
+  // Detalhamento do "Sobrou este mês" pro modal explicativo (clique no card).
+  // Guarda exatamente o que está na tela, inclusive em mês histórico.
+  _sobrouDetail = { inc, exp, apt, sav, rate, saldoAtual, month: rm, year: ry, hist };
 
   const nPk = (d.pockets||[]).length;
   const nCc = (d.credit_cards||[]).length;
@@ -8586,7 +9615,7 @@ function render(d) {
     const barCls = (i%2===1) ? "neon" : "";
     const jn = escapeJsString(p.name);
     return `<div class="ov-pk" role="button" tabindex="0" onclick="openPocketHistory('${jn}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openPocketHistory('${jn}');}">
-      <div class="ov-pk-top"><span class="ov-pk-ico">${emoji}</span><span>${esc(p.name)}</span></div>
+      <div class="ov-pk-top"><span class="ov-pk-ico">${phIcon(emoji)}</span><span>${esc(p.name)}</span></div>
       <div class="ov-pk-val"><span data-num="pk_${esc(p.name)}" data-val="${p.balance||0}">${fmt(p.balance||0)}</span></div>
       ${hasGoal
         ? `<div class="ov-pk-bar"><i class="${barCls}" style="width:${pct}%"></i></div><div class="ov-pk-goal">${pct}% de ${fmt(tgt)}</div>`
@@ -8610,7 +9639,7 @@ function render(d) {
     const barCls = (i%2===1) ? "neon" : "";
     const clickAttr = c.id ? ` role="button" tabindex="0" data-card-id="${c.id}" data-open-bill-id="${c.bill_id || ''}" onclick="onCardRowClick(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onCardRowClick(this);}"` : '';
     return `<div class="ov-pk ov-cc"${clickAttr}>
-      <div class="ov-pk-top"><span class="ov-pk-ico">💳</span><span class="ov-cc-name">${esc(c.name)}</span><span class="ov-cc-status ${statusCls}">${statusTxt}</span></div>
+      <div class="ov-pk-top"><span class="ov-pk-ico"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="ov-cc-name">${esc(c.name)}</span><span class="ov-cc-status ${statusCls}">${statusTxt}</span></div>
       <div class="ov-cc-sub">${hasData ? (periodLabel ? `Fatura ${periodLabel}` : 'Fatura atual') : 'Sem fatura aberta'}</div>
       <div class="ov-pk-val"><span data-num="cc_${esc(c.name)}" data-val="${due}">${hasData ? fmt(due) : 'R$ —'}</span></div>
       ${showProgress ? `<div class="ov-pk-bar"><i class="${barCls}" style="width:${pctPaid}%"></i></div>` : ''}
@@ -8620,7 +9649,7 @@ function render(d) {
 
   const cardActions = `
     <button class="hbtn hbtn-pink" type="button" onclick="openCardModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Novo</button>
-    <button class="btn-pay-bill" type="button" onclick="openPayBillModal()">💳 Pagar fatura</button>`;
+    <button class="btn-pay-bill" type="button" onclick="openPayBillModal()"><i class="ph ph-credit-card" aria-hidden="true"></i> Pagar fatura</button>`;
 
   const pocketActions = `
     <button class="hbtn hbtn-pink" type="button" onclick="openGoalEditModal()" style="font-size:.7rem;padding:4px 10px;min-height:28px">+ Nova</button>`;
@@ -8667,11 +9696,14 @@ function render(d) {
         <div class="ov-ico">${svgWallet}</div>
         <div class="ov-lbl">Saldo atual${hist?' (do mês)':''}</div>
         <div class="ov-val"><span data-num="balance" data-val="${saldoAtual}">${fmt(saldoAtual)}</span></div>
-        <div class="ov-delta">Patrimônio total <b style="color:var(--text-2)"><span data-num="pat" data-val="${pat}">${fmt(pat)}</span></b></div>
+        ${hasBanks
+          ? `<div class="ov-delta"><i class="ph ph-wallet" aria-hidden="true"></i> Carteira <b style="color:var(--text-2)">${fmt(carteira)}</b> · <i class="ph ph-bank" aria-hidden="true"></i> Bancos <b style="color:var(--text-2)">${fmt(ofBank)}</b> · <button type="button" class="ov-adjust-lnk" onclick="openAdjustWalletModal()">ajustar</button></div>
+             <div class="ov-delta" style="opacity:.8">Patrimônio total <b style="color:var(--text-2)"><span data-num="pat" data-val="${pat}">${fmt(pat)}</span></b></div>`
+          : `<div class="ov-delta">Patrimônio total <b style="color:var(--text-2)"><span data-num="pat" data-val="${pat}">${fmt(pat)}</span></b></div>`}
       </div>
-      <div class="ov-stat" style="animation-delay:60ms">
+      <div class="ov-stat ov-stat-clickable" style="animation-delay:60ms" role="button" tabindex="0" aria-label="${escapeHtmlSafe((sav>=0?'Sobrou este mês':'Déficit do mês') + ': ' + fmt(sav) + '. ' + savDeltaTxt + '. Toque para ver como este valor foi calculado.')}" onclick="openSobrouDetail()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openSobrouDetail();}">
         <div class="ov-ico neon">${svgTrend}</div>
-        <div class="ov-lbl">${sav>=0?'Sobrou este mês':'Déficit do mês'}</div>
+        <div class="ov-lbl">${sav>=0?'Sobrou este mês':'Déficit do mês'} <i class="ph ph-info ov-lbl-info" aria-hidden="true"></i></div>
         <div class="ov-val ${sav>=0?'pos':'neg'}"><span data-num="sav" data-val="${sav}">${fmt(sav)}</span></div>
         <div class="ov-delta ${savDeltaCls}">${savDeltaTxt}</div>
       </div>
@@ -8679,13 +9711,13 @@ function render(d) {
         <div class="ov-ico">${svgReceipt}</div>
         <div class="ov-lbl">Gastos do mês</div>
         <div class="ov-val"><span data-num="exp" data-val="${exp}">${fmt(exp)}</span></div>
-        <div class="ov-delta">💎 Aportes <b style="color:var(--text-2)"><span data-num="apt" data-val="${apt}">${fmt(apt)}</span></b></div>
+        <div class="ov-delta"><i class="ph ph-diamond" aria-hidden="true"></i> Aportes <b style="color:var(--text-2)"><span data-num="apt" data-val="${apt}">${fmt(apt)}</span></b></div>
       </div>
       <div class="ov-stat" style="animation-delay:180ms">
         <div class="ov-ico neon">${svgIncome}</div>
         <div class="ov-lbl">Receitas do mês</div>
         <div class="ov-val"><span data-num="inc" data-val="${inc}">${fmt(inc)}</span></div>
-        <div class="ov-delta up">💚 entradas de ${PT_MONTHS[rm-1]}</div>
+        <div class="ov-delta up"><i class="ph ph-trend-up" aria-hidden="true"></i> entradas de ${PT_MONTHS[rm-1]}</div>
       </div>
     </div>
     ${stripsHtml}
@@ -8703,9 +9735,9 @@ function render(d) {
             const catSafe = c.categoria.replace(/'/g,"\\'");
             return `<div class="cat-row">
               <div class="cat-hdr">
-                <span class="cat-lbl">${c.categoria==="sem categoria"?"⚠ Sem Categoria":c.categoria}</span>
+                <span class="cat-lbl">${c.categoria==="sem categoria"?"<i class='ph ph-warning' aria-hidden='true'></i> Sem Categoria":c.categoria}</span>
                 <span class="cat-val" data-num="cat_${c.categoria}" data-val="${c.total}">${fmt(c.total)}</span>
-                <button class="bgt-btn" onclick="openBudget('${catSafe}')" title="Definir limite de orçamento">✏️</button>
+                <button class="bgt-btn" onclick="openBudget('${catSafe}')" title="Definir limite de orçamento"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
               </div>
               ${hb?`<div class="cat-budget-info">${c.budget_pct}% de ${fmt(c.budget)}</div>`:""}
               <div class="bar-wrap"><div class="bar-fill" style="width:${bw}%;background:${bc}"></div></div>
@@ -8749,7 +9781,7 @@ function render(d) {
           </div>
           ${mkBlock("Investimentos", inv, "var(--blue)")}
           ${mkBlock("Caixinhas",     pkt, "var(--purple)")}
-          <div class="aporte-foot">Não conta como despesa — é alocação de patrimônio.</div>
+          <div class="aporte-foot">Não conta como despesa: é alocação de patrimônio.</div>
         `;
       })()}
     </div>
@@ -8795,6 +9827,16 @@ function render(d) {
    PROGRAMA DE AFILIADOS — aba só aparece pra quem é afiliado
 ═══════════════════════════════════════════════════════════════════════ */
 let _affiliateCache = null;
+const _affiliateChannel = makeFetchChannel(); // dedup + abort + geração
+
+async function _fetchAffiliate({ force = false } = {}) {
+  return _affiliateChannel.run(async (signal) => {
+    const res = await fetch(`${API}/api/affiliate/me`, { credentials: "same-origin", signal });
+    const data = await readResponsePayload(res);
+    if (!res.ok) throw new Error(data.detail || "Não foi possível carregar seus dados de afiliado.");
+    return data;
+  }, { force });
+}
 
 // Chamado no init: se o user é afiliado, mostra o item "Afiliados" no sidenav.
 async function initAffiliateNav() {
@@ -8807,10 +9849,31 @@ async function initAffiliateNav() {
   } catch {}
 }
 
-async function loadAffiliateView(forceFresh = false) {
+async function loadAffiliateView(forceFresh = false, { background = false } = {}) {
   const stats = document.getElementById("affiliate-stats");
   const body = document.getElementById("affiliate-body");
   if (!stats || !body) return;
+
+  // Puxão: sem skeleton, fetch antes de render, falha real rejeita sem tocar
+  // DOM (o body — e a chave Pix digitada nele — fica como está, indicador âmbar).
+  // O _renderAffiliateView reconstrói o input Pix, então lê-se o valor VIVO no
+  // último instante antes do render e restaura-se depois (o campo segue editável
+  // durante o fetch; um snapshot tirado antes descartaria o que foi digitado).
+  // Antes esse caminho vivia inline no _pbDashboardRefresh; agora mora aqui, no
+  // canal, junto com os outros loaders.
+  if (background) {
+    const data = await _fetchAffiliate({ force: true });
+    if (data === undefined) return;
+    const pix = document.getElementById("affiliate-pix-input");
+    const pending = pix ? pix.value : "";
+    _affiliateCache = data;
+    _renderAffiliateView(data);
+    if (pending) {
+      const el = document.getElementById("affiliate-pix-input");
+      if (el) el.value = pending;
+    }
+    return;
+  }
 
   if (_affiliateCache && !forceFresh) {
     _renderAffiliateView(_affiliateCache);
@@ -8825,9 +9888,8 @@ async function loadAffiliateView(forceFresh = false) {
   }
 
   try {
-    const res = await fetch(`${API}/api/affiliate/me`, { credentials: "same-origin" });
-    const data = await readResponsePayload(res);
-    if (!res.ok) throw new Error(data.detail || "Não foi possível carregar seus dados de afiliado.");
+    const data = await _fetchAffiliate({ force: true });
+    if (data === undefined) return;
     _affiliateCache = data;
     _renderAffiliateView(data);
   } catch (err) {
@@ -8907,7 +9969,7 @@ function _renderAffiliateView(data) {
     // voltou pro disponível, mas o afiliado precisa entender o porquê.
     const noteHtml = p.note ? `
           <div style="font-size:.75rem;margin-top:3px;color:${p.status === "rejected" ? "var(--red)" : "var(--text-3)"}">
-            ${p.status === "rejected" ? "❌ Motivo da rejeição: " : "💬 "}${esc(p.note)}
+            ${p.status === "rejected" ? '<i class="ph ph-x-circle" aria-hidden="true"></i> Motivo da rejeição: ' : '<i class="ph ph-chat-circle" aria-hidden="true"></i> '}${esc(p.note)}
           </div>` : "";
     return `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--glass-border)">
@@ -8934,7 +9996,7 @@ function _renderAffiliateView(data) {
           style="flex:1;min-width:0;padding:10px 12px;border-radius:10px;border:1px solid var(--glass-border);background:var(--glass-bg);color:var(--text);font-size:.82rem">
         <button class="mock-cta" type="button" onclick="copyAffiliateLink()">Copiar</button>
       </div>
-      ${data.status !== "active" ? '<p style="font-size:.75rem;color:var(--red);margin:10px 0 0">Seu cadastro de afiliado está desativado — o link não gera novas comissões.</p>' : ""}
+      ${data.status !== "active" ? '<p style="font-size:.75rem;color:var(--red);margin:10px 0 0">Seu cadastro de afiliado está desativado. O link não gera novas comissões.</p>' : ""}
 
       <h3 style="margin:18px 0 6px">Solicitar saque</h3>
       <p style="font-size:.78rem;color:var(--text-3);margin:0 0 10px">
@@ -8951,7 +10013,7 @@ function _renderAffiliateView(data) {
 
     <div class="mock-card">
       <h3 style="margin:0 0 10px">Comissões</h3>
-      <div class="tx-list">${commissionRows || '<div style="padding:16px 0;color:var(--text-3);font-size:.8rem">Nenhuma comissão ainda — divulgue seu link! 🐷</div>'}</div>
+      <div class="tx-list">${commissionRows || '<div style="padding:16px 0;color:var(--text-3);font-size:.8rem">Nenhuma comissão ainda. Divulgue seu link! <i class="ph ph-piggy-bank" aria-hidden="true"></i></div>'}</div>
       <h3 style="margin:18px 0 10px">Saques</h3>
       <div class="tx-list">${payoutRows || '<div style="padding:16px 0;color:var(--text-3);font-size:.8rem">Nenhum saque solicitado.</div>'}</div>
     </div>
@@ -9016,7 +10078,7 @@ function _showAccessError(title, msg) {
   document.body.style.cssText = "background:#111111;display:flex;align-items:center;justify-content:center;min-height:100vh;";
   document.body.innerHTML = `
     <div style="text-align:center;color:rgba(255,255,255,0.85);font-family:system-ui;max-width:400px;padding:40px">
-      <div style="font-size:3rem;margin-bottom:16px">🔒</div>
+      <div style="font-size:3rem;margin-bottom:16px"><i class="ph ph-lock" aria-hidden="true"></i></div>
       <h2 style="margin-bottom:8px;font-size:1.4rem;font-weight:600">${title || "Link inválido ou expirado"}</h2>
       <p style="color:rgba(255,255,255,0.5);line-height:1.6;margin-bottom:24px">
         ${msg || 'Solicite um novo link digitando <strong style="color:rgba(255,255,255,0.8)">dashboard</strong> no bot.'}
@@ -9031,8 +10093,23 @@ function _showAccessError(title, msg) {
 (async () => {
   const view = params.get("view");
 
+  // Fail-closed ANTES de qualquer await: trava os controles pagos logo no
+  // primeiro tick do bootstrap, antes de disparar/esperar /auth/validate e
+  // /auth/me. Se qualquer um travar/pendurar, os controles que dependem do
+  // interceptor de clique .pro-locked (export, gastos fixos, Novidades) não
+  // ficam no estado destravado do HTML a visita inteira. USER_GATES começa {}
+  // → tudo bloqueado até o /auth/dashboard-profile confirmar. Idempotente.
+  applyProGates();
+
+  // /auth/validate e /auth/me são independentes (ambos por cookie — o /me não
+  // precisa do USER_ID). Disparamos os dois em paralelo pra cortar uma ida ao
+  // servidor do caminho crítico de abertura. O .catch no /me evita rejeição
+  // não tratada caso o validate falhe e a gente saia antes de consumi-lo.
+  const validatePromise = fetch(`${API}/auth/validate`, { credentials: "same-origin" });
+  const mePromise = fetch(`${API}/auth/me`, { credentials: "same-origin" }).catch(() => null);
+
   try {
-    const resp = await fetch(`${API}/auth/validate`, { credentials: "same-origin" });
+    const resp = await validatePromise;
     if (!resp.ok) { _showAccessError(); return; }
     const data = await resp.json();
     USER_ID = data.user_id;
@@ -9044,9 +10121,22 @@ function _showAccessError(title, msg) {
   // Paywall: sem assinatura ativa → manda pro paywall antes de carregar o app.
   // (As rotas de dados também devolvem 402 como reforço server-side.)
   try {
-    const meResp = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
-    if (meResp.ok) {
+    const meResp = await mePromise;
+    if (meResp && meResp.ok) {
       const me = await meResp.json();
+      historyEarliestDate = me?.history_earliest_date || null;
+      updateMonthLabel();
+      // Beta dos Agentes: fora do allowlist, a nav some (a API também dá 404).
+      if (me && me.agents_ui_enabled === false) {
+        document.querySelectorAll('[data-nav="agentes"]').forEach(el => { el.style.display = "none"; });
+      }
+      // Gate de escolha de plano: cadastro novo passa pela /precos antes de
+      // acessar o app (mesmo escolhendo o Grátis). Só na web — no app iOS o gate
+      // fica de fora pra não forçar a tela de planos/compra (diretriz 3.1.1).
+      if (me && me.needs_plan_selection && !window.PB_IN_APP) {
+        window.location.replace("/precos?escolha=1");
+        return;
+      }
       if (me && me.app_access === false) {
         if (window.PB_IN_APP) {
           // App iOS: tela neutra, sem link de compra (diretriz 3.1.1)
@@ -9056,14 +10146,28 @@ function _showAccessError(title, msg) {
         window.location.replace("/precos?ativar=1");
         return;
       }
+      // Banner de trial (B1): oferta dos 30d de Plus pro Grátis sem trial ativo.
+      // Nunca no app iOS (CTA de compra externa fere a diretriz 3.1.1 da Apple).
+      if (me && me.plan_tier === "free" && !(me.trial && me.trial.active) && !window.PB_IN_APP) {
+        maybeShowTrialBanner();
+      }
     }
   } catch (e) { /* se /auth/me falhar, segue; o 402 protege os dados */ }
 
   WS_URL = `${BASE_WS}/ws/${USER_ID}`;
 
+  // Puxar pra atualizar: o contrato só nasce com a sessão validada e o
+  // paywall vencido — os returns acima (_showAccessError, /precos) saem antes
+  // daqui e o puxão nessas telas cai no reload, que é o que elas pedem.
+  window.PBRefresh = _pbDashboardRefresh;
+
 	  updateInvestmentRateHint();
 	  updateInvestmentTaxHint();
 	  updateMonthLabel();
+	  // Paint instantâneo: se há snapshot do mês corrente guardado na sessão
+	  // (troca de aba /home <-> /app), pinta a Visão Geral AGORA, sem esperar o
+	  // WebSocket. O connect() logo abaixo revalida e substitui pelos dados frescos.
+	  restoreSnapshotFromSession();
 	  // Dispara WS connect IMEDIATAMENTE (não espera /auth/dashboard-profile).
 	  // Antes era serial: validate → profile → connect. Agora profile + connect
 	  // rodam em paralelo, cortando ~3.5s do carregamento inicial.
@@ -9072,6 +10176,13 @@ function _showAccessError(title, msg) {
 	  connect();
 	  loadUserMenuState().then(() => {
 	    if (view === "investments") setMainView("investments");
+	    // Deep-link da galeria pública /agents (botão "Ver meus agentes"):
+	    // abre a aba de agentes — só se ela estiver visível (respeita o
+	    // beta-gate agents_ui_enabled, que esconde o item acima).
+	    else if (view === "agentes") {
+	      const agNav = document.querySelector('[data-nav="agentes"]');
+	      if (agNav && agNav.style.display !== "none") navigateTo("agentes");
+	    }
 	  });
 	  // Wizard: abre auto se conta virgem (não bloqueante).
 	  maybeOpenWizardOnLoad();
@@ -9086,4 +10197,300 @@ if ("serviceWorker" in navigator) {
       .then(r => console.log("[PWA] SW registered:", r.scope))
       .catch(e => console.warn("[PWA] SW failed:", e));
   });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   AGENTES DO PIGGY — prateleira, ativação e feed de disparos
+   ═══════════════════════════════════════════════════════════════════════ */
+let _agentesCache = null;
+const _agentesChannel = makeFetchChannel(); // dedup + abort + geração (shelf+feed, 1 signal)
+
+async function _fetchAgentes({ force = false } = {}) {
+  return _agentesChannel.run(async (signal) => {
+    const [shelfRes, feedRes] = await Promise.all([
+      fetch(`${API}/agents/${USER_ID}`, { credentials: "same-origin", signal }),
+      fetch(`${API}/agents/${USER_ID}/feed?limit=20`, { credentials: "same-origin", signal }),
+    ]);
+    const data = await readResponsePayload(shelfRes);
+    if (!shelfRes.ok) throw new Error(data.detail || "Não foi possível carregar os agentes.");
+    const feed = await readResponsePayload(feedRes);
+    data.events = feedRes.ok ? (feed.events || []) : [];
+    return data;
+  }, { force });
+}
+
+// Marca o feed como lido (fire-and-forget; não bloqueia nem falha a view).
+function _markAgentesFeedSeen() {
+  fetch(`${API}/agents/${USER_ID}/feed/seen`, {
+    method: "POST", credentials: "same-origin", headers: csrfHeaders(),
+  }).catch(() => {});
+}
+
+async function loadAgentesView(forceFresh = false, { background = false } = {}) {
+  const shelf = document.getElementById("agentes-shelf");
+  const feedEl = document.getElementById("agentes-feed");
+  if (!shelf) return;
+
+  // Puxão: sem "Chamando os porquinhos…", fetch antes de render, falha real
+  // rejeita sem tocar DOM (indicador âmbar). Superado sai neutro.
+  if (background) {
+    const data = await _fetchAgentes({ force: true });
+    if (data === undefined) return;
+    _agentesCache = data;
+    _renderAgentes(data);
+    _markAgentesFeedSeen();
+    return;
+  }
+
+  if (_agentesCache && !forceFresh) {
+    _renderAgentes(_agentesCache);
+  } else {
+    shelf.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:26px">Chamando os porquinhos… <i class="ph ph-piggy-bank" aria-hidden="true"></i></div>`;
+    if (feedEl) feedEl.innerHTML = "";
+  }
+
+  try {
+    const data = await _fetchAgentes({ force: true });
+    if (data === undefined) return;
+    _agentesCache = data;
+    _renderAgentes(data);
+    _markAgentesFeedSeen();
+  } catch (err) {
+    shelf.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:30px;color:var(--red)">Erro: ${esc(String(err.message || err))}</div>`;
+  }
+}
+
+function _renderAgentes(data) {
+  const counters = document.getElementById("agentes-counters");
+  const shelf = document.getElementById("agentes-shelf");
+  const feedEl = document.getElementById("agentes-feed");
+  if (!shelf) return;
+
+  const s = data.summary || {};
+  // Modelo de energia só vale com a escada v2 ligada (energy_enabled). Com v2 off
+  // (freio de emergência) o gate legado decide e a UI não mostra medidor nem
+  // trava por energia — senão travaria botões que o backend legado aceitaria.
+  const energyOn = data.energy_enabled === true;
+  const budget = Number(data.energy_budget || 0);
+  const used = Number(data.energy_used || 0);
+  if (counters) {
+    counters.innerHTML = `
+      <span class="ag-counter"><i class="ag-dot ag-dot-on"></i> Ativos <b>${s.ativos || 0}</b></span>
+      <span class="ag-counter"><i class="ag-dot ag-dot-off"></i> Pausados <b>${s.pausados || 0}</b></span>
+      <span class="ag-counter"><i class="ag-dot ag-dot-fire"></i> Disparos <b>${s.disparos_mes || 0}</b></span>
+      ${energyOn ? _energyMeter(used, budget) : ""}
+    `;
+  }
+
+  shelf.innerHTML = (data.catalog || []).map(card => {
+    const active = card.status === "active";
+    const cost = Number(card.energy_cost || 0);
+    const chips = [
+      `<span class="ag-chip">${esc(card.freq)}</span>`,
+      (energyOn && card.disponivel && cost > 0) ? `<span class="ag-chip ag-chip-energy"><i class="ph ph-lightning" aria-hidden="true"></i> ${cost}</span>` : "",
+    ].filter(Boolean).join("");
+    // can_activate vem do backend (Grátis/Essencial: orçamento 0 → sem agentes).
+    // Gate visível: o botão vira cadeado que abre o upgrade direto.
+    const canActivate = data.can_activate !== false;
+    // Energia: com plano, todos os agentes ficam liberados, mas só ativa quem
+    // ainda cabe no orçamento. Com v2 off (energyOn false), nunca trava por aqui.
+    const affordable = !energyOn || (used + cost <= budget);
+    const btn = !card.disponivel
+      ? `<button class="ag-btn ag-btn-soon" disabled>Em breve</button>`
+      : active
+        ? `<button class="ag-btn ag-btn-active" onclick="pauseAgent('${card.kind}')"><i class="ph ph-check" aria-hidden="true"></i> Ativo · Pausar</button>`
+        : !canActivate
+          ? `<button class="ag-btn ag-btn-on" onclick="showUpgradeModal('agents')"><i class="ph ph-lock" aria-hidden="true"></i> Ativar</button>`
+          : affordable
+            ? `<button class="ag-btn ag-btn-on" onclick="activateAgent('${card.kind}')">Ativar${energyOn && cost > 0 ? ` · <i class="ph ph-lightning" aria-hidden="true"></i> ${cost}` : ""}</button>`
+            : `<button class="ag-btn ag-btn-noenergy" disabled title="Pause um agente ou vá pro Pro"><i class="ph ph-lightning-slash" aria-hidden="true"></i> Sem energia</button>`;
+    // Opt-out por agente: quando ativo, deixa ligar/desligar o e-mail (o feed
+    // continua). Padrão = ligado. Estilo inline pra não exigir bump de cache CSS.
+    const emailOn = ((card.config || {}).email_enabled) !== false;
+    const emailToggle = (active && card.disponivel)
+      ? `<button onclick="toggleAgentEmail('${card.kind}', ${emailOn ? "false" : "true"})"
+           title="Receber os avisos deste agente por e-mail"
+           style="margin-top:8px;width:100%;padding:7px 10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:transparent;color:rgba(255,255,255,.6);font-size:.72rem;cursor:pointer">
+           <i class="ph ph-envelope" aria-hidden="true"></i> E-mail: <b style="color:${emailOn ? "#22c55e" : "rgba(255,255,255,.4)"}">${emailOn ? "ligado" : "desligado"}</b>
+         </button>`
+      : "";
+    return `
+      <div class="ag-card${!card.disponivel ? " ag-card-soon" : ""}">
+        <div class="ag-avatar ag-bg-${esc(card.kind)}">
+          ${_agentArt(card.kind, true)}
+        </div>
+        <h3>${esc(card.nome)}</h3>
+        <p class="ag-desc">${esc(card.desc)}</p>
+        <div class="ag-chips">${chips}</div>
+        ${btn}
+        ${emailToggle}
+      </div>
+    `;
+  }).join("");
+
+  if (feedEl) {
+    const events = data.events || [];
+    feedEl.innerHTML = events.length === 0
+      ? `<div class="empty" style="padding:22px">Nenhum disparo ainda. Ative um agente e ele fala assim que tiver algo que vale a pena. <i class="ph ph-piggy-bank" aria-hidden="true"></i></div>`
+      : events.map(ev => {
+          const p = ev.payload || {};
+          return `
+            <div class="ag-event${ev.seen_at ? "" : " ag-event-new"}">
+              <div class="ag-event-face ag-bg-${esc(ev.kind)}">
+                ${_agentArt(ev.kind)}
+              </div>
+              <div class="ag-event-body">
+                <p class="ag-event-msg">${esc(p.mensagem || p.titulo || "Disparo")}</p>
+                <p class="ag-event-when">${esc(_agentName(ev.kind))} · ${fmtDate(ev.fired_at)}${ev.channel === "email" ? " · <i class='ph ph-envelope' aria-hidden='true'></i> no seu e-mail" : ""}</p>
+              </div>
+            </div>
+          `;
+        }).join("");
+  }
+}
+
+// Kinds com arte PNG real em /brand/agents/. Kind fora deste set cai no
+// porquinho SVG placeholder — nada quebra até a arte chegar.
+const _AGENT_ART = new Set(["xerife", "reporter", "carteiro", "detetive", "cofre", "barao", "aviador", "faria_limer"]);
+function _agentArt(kind, hero = false) {
+  if (_AGENT_ART.has(kind)) {
+    // hero = a cena cinematográfica do e-mail ({kind}_hero.png, 1200x600),
+    // usada no card (object-fit:cover preenche o avatar). Sem hero = o sticker
+    // (usado no medalhão pequeno do feed).
+    if (hero)
+      return `<img src="/brand/agents/${esc(kind)}_hero.png?v=1" alt="" loading="lazy"`
+        + ` style="width:100%;height:100%;object-fit:cover;object-position:center;display:block" />`;
+    return `<img class="ag-pig-img" src="/brand/agents/${esc(kind)}.png?v=3" alt="" loading="lazy" />`;
+  }
+  return `<svg viewBox="0 6 120 114" aria-hidden="true"><use href="#ag-pig-${esc(kind)}"/></svg>`;
+}
+
+function _agentName(kind) {
+  const card = ((_agentesCache || {}).catalog || []).find(c => c.kind === kind);
+  return card ? card.nome : kind;
+}
+
+// Medidor de energia do plano: pips preenchidos = energia usada. Só aparece
+// pra quem tem orçamento (Plus/Pro); Grátis/Essencial (0) não veem barra.
+function _energyMeter(used, budget) {
+  if (!budget || budget <= 0) return "";
+  const over = used > budget;
+  let pips = "";
+  for (let i = 0; i < budget; i++) {
+    const on = i < used;
+    pips += `<i class="ag-pip${on ? (over ? " ag-pip-over" : " ag-pip-on") : ""}"></i>`;
+  }
+  const rem = budget - used;
+  const hint = over ? "acima do plano" : (rem > 0 ? `${rem} sobrando` : "cheio");
+  return `<span class="ag-energy${over ? " ag-energy-over" : ""}">
+    <span class="ag-energy-label"><i class="ph ph-lightning" aria-hidden="true"></i> Energia <b>${used}/${budget}</b></span>
+    <span class="ag-pips">${pips}</span>
+    <span class="ag-energy-hint">${hint}</span>
+  </span>`;
+}
+
+async function activateAgent(kind) {
+  try {
+    const res = await fetch(`${API}/agents/${USER_ID}/${kind}/activate`, {
+      method: "POST", credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({}),
+    });
+    const data = await readResponsePayload(res);
+    const detail = data.detail || {};
+    if (res.status === 403 && detail.error === "pro_required") {
+      showUpgradeModal("agents");
+      return;
+    }
+    if (res.status === 403 && detail.error === "no_energy") {
+      alert("⚡ Sem energia no seu plano pra ativar mais esse agente. Pause um que você usa menos, ou vá pro Pro pra ter energia pra todos.");
+      return;
+    }
+    if (!res.ok) throw new Error((data.detail && data.detail.error) || data.detail || "Não deu pra ativar o agente.");
+    loadAgentesView(true);
+  } catch (err) {
+    alert(String(err.message || err));
+  }
+}
+
+async function pauseAgent(kind) {
+  try {
+    const res = await fetch(`${API}/agents/${USER_ID}/${kind}/pause`, {
+      method: "POST", credentials: "same-origin", headers: csrfHeaders(),
+    });
+    if (!res.ok) throw new Error("Não deu pra pausar o agente.");
+    loadAgentesView(true);
+  } catch (err) {
+    alert(String(err.message || err));
+  }
+}
+
+async function toggleAgentEmail(kind, enabled) {
+  try {
+    const res = await fetch(`${API}/agents/${USER_ID}/${kind}/email`, {
+      method: "POST", credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) throw new Error("Não deu pra mudar o e-mail do agente.");
+    loadAgentesView(true);
+  } catch (err) {
+    alert(String(err.message || err));
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PUXAR PRA ATUALIZAR (app iOS / PWA)
+   ═══════════════════════════════════════════════════════════════════════
+   O gesto mora no app-mode.js — aqui só respondemos o que "atualizar"
+   significa no dashboard: refazer a aba que está aberta, sem recarregar a
+   página (o reload perderia filtro, mês escolhido e posição da rolagem).
+
+   Devolve promise: o indicador do puxão só some quando ela resolve.
+
+   Registrado no bootstrap (não aqui): expor na definição do script deixava
+   um puxão precoce rodar com USER_ID=0 (/data/0) durante um launch lento —
+   e seguir ativo depois do _showAccessError trocar o body inteiro. */
+function _pbDashboardRefresh() {
+  const active = DASH_VIEWS.find(v => {
+    const el = document.getElementById(v + "-view");
+    return el && el.classList.contains("active");
+  }) || "overview";
+
+  // Todos no MODO BACKGROUND: sem skeleton, fetch antes de render, e falha REAL
+  // rejeita sem tocar no DOM (o render bom fica, o indicador do gesto vira
+  // âmbar). Superado/abortado sai neutro (conta como sucesso). O canal
+  // compartilhado (abort + geração) de cada loader garante que um pedido velho
+  // não sobrescreva o novo.
+  switch (active) {
+    case "analytics":    return loadAnalyticsView(true, null, { background: true });
+    case "history":      return loadHistoryView(true, { background: true });
+    case "cards":        return loadCardsView(true, { background: true });
+    case "installments": return loadInstallmentsView(true, { background: true });
+    case "categories":   return loadCategoriesView(true, { background: true });
+    case "budgets":      return loadBudgetsView(true, { background: true });
+    // "Recorrentes" tem quatro abas internas e só uma está visível. Recarregar
+    // sempre a de gastos deixaria a que o usuário está vendo parada, com o
+    // indicador dando a entender que atualizou. Espelha o setRecurringTab.
+    case "fixed":
+      if (_recurringTab === "overview") return loadRecurringOverview({ background: true });
+      if (_recurringTab === "incomes")  return loadRecurringIncomeView(true, { background: true });
+      if (_recurringTab === "bills")    return loadBillsView(true, { background: true });
+      return loadFixedView(true, { background: true });
+    case "goals":        return loadGoalsView(true, { background: true });
+    // Afiliado: o fetch-antes-de-render + preservação da chave Pix agora vive
+    // dentro do loadAffiliateView (modo background), não mais inline aqui.
+    case "affiliate":    return loadAffiliateView(true, { background: true });
+    case "agentes":      return loadAgentesView(true, { background: true });
+    default:
+      // Visão geral e investimentos vivem do snapshot do mês.
+      // preferHttp: com o WS aberto o pedido volta do cache dele — puxar pra
+      // atualizar tem que ir na fonte, senão o gesto mente.
+      // smoothScroll off: o usuário está no topo, jogar a página nos
+      // lançamentos seria roubar o lugar dele.
+      // false = a busca falhou (o render antigo ficou): rejeita pro indicador
+      // ficar âmbar. undefined (pedido superado/stale) conta como sucesso.
+      return fetchMonthHttp(viewYear, viewMonth, launchesPage, LAUNCHES_LIMIT)
+        .then(ok => { if (ok === false) throw new Error("refresh do mês falhou"); });
+  }
 }

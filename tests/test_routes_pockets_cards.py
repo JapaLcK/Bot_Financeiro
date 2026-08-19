@@ -29,15 +29,19 @@ def test_rotas_movidas_exigem_token():
 
 
 def test_paths_registrados_no_app():
-    paths = {r.path for r in dashboard.app.routes}
+    # FastAPI 0.116+ (Starlette 1.0) não achata mais as rotas incluídas via
+    # include_router em app.routes — elas passam a viver num _IncludedRouter
+    # opaco (sem .path). A via estável de introspecção é o schema OpenAPI, que
+    # também normaliza os conversores ({pocket_name:path} -> {pocket_name}).
+    paths = set(dashboard.app.openapi()["paths"].keys())
     expected = {
         "/pockets/{user_id}",
         "/pockets/{user_id}/{pocket_id}/meta",
         "/goals/{user_id}/status",
-        "/pockets/{user_id}/{pocket_name:path}",
-        "/pockets/{user_id}/{pocket_name:path}/deposit",
-        "/pockets/{user_id}/{pocket_name:path}/withdraw",
-        "/pockets/{user_id}/{pocket_name:path}/history",
+        "/pockets/{user_id}/{pocket_name}",
+        "/pockets/{user_id}/{pocket_name}/deposit",
+        "/pockets/{user_id}/{pocket_name}/withdraw",
+        "/pockets/{user_id}/{pocket_name}/history",
         "/cards/{user_id}",
         "/cards/{user_id}/summary",
         "/cards/{user_id}/reorder",

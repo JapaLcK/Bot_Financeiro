@@ -28,12 +28,14 @@ import secrets
 import sys
 import time as _startup_time
 import urllib.parse
-from datetime import datetime, date, timezone
+from contextlib import asynccontextmanager
+from datetime import datetime, date, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Dict
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, Request, Response
+from fastapi import BackgroundTasks, FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, RedirectResponse, HTMLResponse, JSONResponse
+from fastapi.responses import StreamingResponse, RedirectResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
 from pydantic import BaseModel
@@ -64,6 +66,8 @@ from core.sessions import (
 from db import (
     accrue_all_pockets,
     accrue_all_investments,
+    list_rv_positions,
+    list_of_fixed_income,
     create_investment_db,
     delete_investment,
     get_dashboard_market_rates,
@@ -85,10 +89,12 @@ from db import (
     delete_launch_and_rollback,
 )
 from frontend.routes.affiliates import router as affiliates_router
+from frontend.routes.agents import router as agents_router
 from frontend.routes.analytics import router as analytics_router
 from frontend.routes.cards import router as cards_router
 from frontend.routes.open_finance import router as open_finance_router
 from frontend.routes.pockets import router as pockets_router
+from frontend.routes.push import router as push_router
 from frontend.routes.settings import router as settings_router
 from frontend.routes.shared import (
     AUTH_COOKIE_NAME,
@@ -120,14 +126,130 @@ DASHBOARD_USER_ID = os.getenv("DASHBOARD_USER_ID")
 TZ                = os.getenv("TZ", "America/Sao_Paulo")
 # JWT_SECRET e DASHBOARD_URL (leitura + sanitização do env) vêm de frontend/routes/shared.py
 # Em dev local (http://localhost) o navegador rejeita cookies Secure. Em prod
-# DASHBOARD_URL é https → Secure=True como sempre.
-COOKIE_SECURE = DASHBOARD_URL.startswith("https://")
+# DASHBOARD_URL é https → Secure=True. Blindagem: se APP_ENV=prod, força Secure
+# mesmo que DASHBOARD_URL esteja mal configurado como http:// (senão os cookies
+# de auth iriam sem o Secure em produção).
+_APP_ENV = (os.getenv("APP_ENV") or "").strip().lower()
+COOKIE_SECURE = DASHBOARD_URL.startswith("https://") or _APP_ENV in ("prod", "production")
 WHATSAPP_NUMBER         = os.getenv("WHATSAPP_NUMBER", "")
 STRIPE_SECRET_KEY       = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET   = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PRICE_ID_PRO     = os.getenv("STRIPE_PRICE_ID_PRO", "")            # legacy: usado como fallback do mensal
-STRIPE_PRICE_ID_PRO_MENSAL = os.getenv("STRIPE_PRICE_ID_PRO_MENSAL", "")  # price_xxx Pro mensal (R$ 19,90)
-STRIPE_PRICE_ID_PRO_ANUAL  = os.getenv("STRIPE_PRICE_ID_PRO_ANUAL", "")   # price_xxx Pro anual  (R$ 199,00)
+STRIPE_PRICE_ID_PRO_MENSAL = os.getenv("STRIPE_PRICE_ID_PRO_MENSAL", "")  # price_xxx Plus mensal (R$ 19,90; nome legado "Pro")
+STRIPE_PRICE_ID_PRO_ANUAL  = os.getenv("STRIPE_PRICE_ID_PRO_ANUAL", "")   # price_xxx Plus anual  (R$ 199,00)
+# Planos v2 (escada final): Essencial R$ 9,90/99 e Pro novo R$ 49,90/499.
+# "PROMAX" porque STRIPE_PRICE_ID_PRO_* já é o Plus (nome legado); o tier novo
+# grava 'pro_max' no banco. Sem as envs setadas, o checkout do plano responde
+# 503 "não configurado" — inofensivo até os prices existirem no Stripe.
+STRIPE_PRICE_ID_ESSENCIAL_MENSAL = os.getenv("STRIPE_PRICE_ID_ESSENCIAL_MENSAL", "")
+STRIPE_PRICE_ID_ESSENCIAL_ANUAL  = os.getenv("STRIPE_PRICE_ID_ESSENCIAL_ANUAL", "")
+STRIPE_PRICE_ID_PROMAX_MENSAL = os.getenv("STRIPE_PRICE_ID_PROMAX_MENSAL", "")
+STRIPE_PRICE_ID_PROMAX_ANUAL  = os.getenv("STRIPE_PRICE_ID_PROMAX_ANUAL", "")
+
+
+def _plan_interval_for_price(price_id: str | None) -> tuple[str | None, str | None]:
+    """Reverso do _resolve_price_id: price do Stripe → (plano, intervalo) da
+    escada. Usado pela troca de plano (comparar atual × alvo) e pelo
+    /billing/subscription. Ignora envs vazias (dict não pode ter chave "")."""
+    pairs = [
+        (STRIPE_PRICE_ID_ESSENCIAL_MENSAL, ("essencial", "monthly")),
+        (STRIPE_PRICE_ID_ESSENCIAL_ANUAL, ("essencial", "annual")),
+        (STRIPE_PRICE_ID_PRO_MENSAL, ("plus", "monthly")),
+        (STRIPE_PRICE_ID_PRO, ("plus", "monthly")),   # legado
+        (STRIPE_PRICE_ID_PRO_ANUAL, ("plus", "annual")),
+        (STRIPE_PRICE_ID_PROMAX_MENSAL, ("pro", "monthly")),
+        (STRIPE_PRICE_ID_PROMAX_ANUAL, ("pro", "annual")),
+    ]
+    for env_price, result in pairs:
+        if env_price and price_id == env_price:
+            return result
+    return (None, None)
+
+
+def _sg(obj, key, default=None):
+    """Acessor seguro pra objetos do SDK Stripe v8 (não são dicts — sempre
+    obj[k] com try/except, nunca .get). Espelho do _g do webhook."""
+    if obj is None:
+        return default
+    try:
+        v = obj[key]
+    except (KeyError, TypeError, AttributeError):
+        return default
+    return v if v is not None else default
+
+
+def _sub_price_id(sub) -> str | None:
+    """Price do primeiro item da assinatura (SDK v8: só via _sg)."""
+    items_obj = _sg(sub, "items", {})
+    data = _sg(items_obj, "data", []) or []
+    if not data:
+        return None
+    price = _sg(data[0], "price", {})
+    pid = _sg(price, "id")
+    return pid if isinstance(pid, str) else None
+
+
+def _sub_period_end_ts(sub) -> int | None:
+    """current_period_end da assinatura. API >= 2025-09 moveu pro item."""
+    ts = _sg(sub, "current_period_end")
+    if ts is None:
+        items_obj = _sg(sub, "items", {})
+        data = _sg(items_obj, "data", []) or []
+        if data:
+            ts = _sg(data[0], "current_period_end")
+    return ts
+
+
+class StripeLookupError(Exception):
+    """A consulta ao Stripe falhou; isso não significa ausência de assinatura."""
+
+
+def _is_missing_stripe_customer(stripe_mod, exc: Exception) -> bool:
+    """Distingue customer apagado de indisponibilidade real da API."""
+    invalid_request = getattr(getattr(stripe_mod, "error", None), "InvalidRequestError", None)
+    if not isinstance(invalid_request, type) or not isinstance(exc, invalid_request):
+        return False
+    return (
+        (getattr(exc, "code", None) == "resource_missing"
+         and getattr(exc, "param", None) == "customer")
+        or "no such customer" in str(exc).lower()
+    )
+
+
+def _find_active_subscription(stripe_mod, customer_id: str):
+    """Primeira assinatura viva do customer (active > trialing > past_due).
+
+    Se alguma consulta falhar e nenhuma assinatura for encontrada, levanta
+    StripeLookupError. A única exceção é um customer apagado, tratado como sem
+    assinatura para que o checkout possa recriá-lo."""
+    last_exc: Exception | None = None
+    for status in ("active", "trialing", "past_due"):
+        try:
+            subs = stripe_mod.Subscription.list(customer=customer_id, status=status, limit=1)
+            data = _sg(subs, "data", []) or []
+            if data:
+                return data[0]
+        except Exception as exc:
+            if _is_missing_stripe_customer(stripe_mod, exc):
+                return None
+            last_exc = exc
+            continue
+    if last_exc is not None:
+        logging.getLogger(__name__).warning(
+            "stripe_subscription_lookup_failed customer=%s: %s", customer_id, last_exc)
+        raise StripeLookupError("Não foi possível consultar as assinaturas no Stripe.") from last_exc
+    return None
+
+
+def _stored_plan_for_price(price_id: str | None) -> str:
+    """Mapeia o price do Stripe → valor da coluna auth_accounts.plan.
+    'pro' é o valor LEGADO do tier Plus (R$ 19,90) — não renomear no banco.
+    Price desconhecido cai em 'pro' (comportamento histórico do webhook)."""
+    if price_id and price_id in (STRIPE_PRICE_ID_ESSENCIAL_MENSAL, STRIPE_PRICE_ID_ESSENCIAL_ANUAL):
+        return "essencial"
+    if price_id and price_id in (STRIPE_PRICE_ID_PROMAX_MENSAL, STRIPE_PRICE_ID_PROMAX_ANUAL):
+        return "pro_max"
+    return "pro"
 DASHBOARD_MAGIC_LINK_MINUTES = int(os.getenv("DASHBOARD_MAGIC_LINK_MINUTES", "5"))
 DASHBOARD_SESSION_HOURS = float(os.getenv("DASHBOARD_SESSION_HOURS", "12"))
 DB_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "5"))
@@ -173,20 +295,34 @@ async def _get_dashboard_current_state(user_id: int):
     now_mono = _startup_time.monotonic()
     cached = _dashboard_current_cache.get(int(user_id))
     if cached and now_mono - cached[0] < _DASHBOARD_CURRENT_CACHE_TTL_SECONDS:
-        return cached[1], cached[2], cached[3]
+        return cached[1], cached[2], cached[3], cached[4], cached[5]
 
-    current_pockets, current_investments, market_rates = await asyncio.gather(
+    # rv_positions e of_fixed_income só LÊEM open_finance_investments (não batem na
+    # rede) → cabem no gather sem estourar latência; a corretora é a fonte, o sync já
+    # atualizou. of_fixed_income = renda fixa do banco (CDB/Tesouro) agregada.
+    (current_pockets, current_investments, market_rates,
+     rv_positions, of_fixed_income) = await asyncio.gather(
         asyncio.to_thread(accrue_all_pockets, user_id),
         asyncio.to_thread(accrue_all_investments, user_id),
         asyncio.to_thread(get_dashboard_market_rates),
+        asyncio.to_thread(list_rv_positions, user_id),
+        asyncio.to_thread(list_of_fixed_income, user_id),
     )
+    # RV + renda fixa via OF são features pagas (Essencial+). No Grátis não trafega o
+    # dado do banco — a aba de investimentos já é gated.
+    from core.services.plan_service import require_min_tier
+    if not require_min_tier(user_id, "essencial"):
+        rv_positions = []
+        of_fixed_income = []
     _dashboard_current_cache[int(user_id)] = (
         _startup_time.monotonic(),
         current_pockets,
         current_investments,
         market_rates,
+        rv_positions,
+        of_fixed_income,
     )
-    return current_pockets, current_investments, market_rates
+    return current_pockets, current_investments, market_rates, rv_positions, of_fixed_income
 
 
 def _dashboard_launch_filter_sql(filter_type: str | None, query: str | None) -> tuple[list[str], list]:
@@ -241,11 +377,14 @@ async def get_financial_data(
     y   = year  or now.year
     m   = month or now.month
     month_start, month_end = _month_range(y, m)
+    from core.services.plan_service import history_earliest_date
+    earliest_history_date = await asyncio.to_thread(history_earliest_date, user_id)
+    query_start = max(month_start, earliest_history_date) if earliest_history_date else month_start
     is_current = (y == now.year and m == now.month)
     page = max(int(page or 1), 1)
     limit = max(min(int(limit or 25), 100), 1)
     offset = (page - 1) * limit
-    current_pockets, current_investments, market_rates = await _get_dashboard_current_state(user_id)
+    current_pockets, current_investments, market_rates, current_rv_positions, current_of_fixed_income = await _get_dashboard_current_state(user_id)
     launch_filter_clauses, launch_filter_params = _dashboard_launch_filter_sql(filter_type, query)
     launch_filter_sql = "".join(f"\n                  AND ({clause})" for clause in launch_filter_clauses)
 
@@ -259,6 +398,12 @@ async def get_financial_data(
 
     pockets = current_pockets
     investments = current_investments  # do cache
+    rv_positions = current_rv_positions  # renda variável (ações/FIIs via OF), do cache
+    of_fixed_income = current_of_fixed_income  # renda fixa do banco (CDB/Tesouro), agregada
+    # Plano pago (Essencial+) tem OF ao vivo. No Grátis (pós-trial) as caixinhas do
+    # banco congelam → o front troca "Sincronizada" por "reative seu banco" (upsell).
+    from core.services.plan_service import require_min_tier as _require_min_tier
+    _of_plan_active = _require_min_tier(user_id, "essencial")
 
     # Compras no crédito viram linhas virtuais com tipo='credito' no
     # histórico — só quando o filtro permitir (no filtro "all" ou sem filtro).
@@ -295,7 +440,7 @@ async def get_financial_data(
               AND b.period_end < %s::date
               AND t.is_refund = false
         """
-        credit_union_params = [user_id, month_start, month_end]
+        credit_union_params = [user_id, query_start, month_end]
 
     # ───── Paraleliza queries independentes via asyncio.gather ─────
     # Cada _q() pega uma conn do pool. Antes era sequencial dentro de UMA
@@ -332,7 +477,7 @@ async def get_financial_data(
                 {credit_union_sql}
             ) merged
             """,
-            (user_id, month_start, month_end, *launch_filter_params, *credit_union_params),
+            (user_id, query_start, month_end, *launch_filter_params, *credit_union_params),
         ),
         # 4) Launches paginado
         _q(
@@ -361,7 +506,7 @@ async def get_financial_data(
             ORDER BY criado_em DESC, id ASC
             LIMIT %s OFFSET %s
             """,
-            (user_id, month_start, month_end, *launch_filter_params, *credit_union_params, limit, offset),
+            (user_id, query_start, month_end, *launch_filter_params, *credit_union_params, limit, offset),
         ),
         # 5) Monthly income/expense totals (sem internas).
         # Compras no cartão entram como 'despesa' alocadas pelo mês em que a
@@ -388,8 +533,8 @@ async def get_financial_data(
             GROUP BY tipo
             """,
             (
-                user_id, month_start, month_end,
-                user_id, month_start, month_end,
+                user_id, query_start, month_end,
+                user_id, query_start, month_end,
             ),
         ),
         # 6) Categories (despesas do mês — credit_transactions alocadas por
@@ -419,8 +564,8 @@ async def get_financial_data(
             LIMIT 10
             """,
             (
-                user_id, month_start, month_end,
-                user_id, month_start, month_end,
+                user_id, query_start, month_end,
+                user_id, query_start, month_end,
             ),
         ),
         # 7) Allocations (aportes do mês)
@@ -451,7 +596,7 @@ async def get_financial_data(
                             THEN -valor ELSE valor END) > 0
             ORDER BY bucket, total DESC
             """,
-            (user_id, month_start, month_end),
+            (user_id, query_start, month_end),
         ),
         # 8) Cards + faturas do mês via LATERAL JOIN (1 query, sem N+1)
         _q(
@@ -486,7 +631,7 @@ async def get_financial_data(
             WHERE c.user_id = %s
             ORDER BY c.display_order NULLS LAST, c.name
             """,
-            (month_start, month_end, user_id),
+            (query_start, month_end, user_id),
         ),
         # 9) Daily expenses (bar chart)
         _q(
@@ -501,7 +646,7 @@ async def get_financial_data(
             GROUP BY dia
             ORDER BY dia
             """,
-            (user_id, month_start, month_end),
+            (user_id, query_start, month_end),
         ),
         # 10) Budgets per category
         _q("SELECT categoria, budget FROM category_budgets WHERE user_id = %s", (user_id,)),
@@ -513,14 +658,26 @@ async def get_financial_data(
 
     # Saldo dos bancos conectados (Open Finance) — pro saldo consolidado no dashboard.
     # Só contas BANK (corrente/poupança); cartão é dívida, fica na fatura.
+    # `n` = nº de contas BANK conectadas: mesmo com saldo 0, sinaliza pro front mostrar
+    # o breakdown "Carteira + Bancos" e a ação de ajustar a Carteira.
+    # DISTINCT ON (provider_account_id): reconectar cria nova conexão com a MESMA conta;
+    # sem dedup, o saldo (e a contagem) somaria em dobro. Pega a conexão mais recente.
+    # Só contas em BRL: não há conversão de câmbio — somar USD 100 como R$ 100 mente o total.
+    # PAUSED/DELETED continuam no banco só como histórico e ficam fora do saldo atual.
     of_bank_rows = await _q(
-        "SELECT COALESCE(SUM(a.balance), 0) AS b "
-        "FROM open_finance_accounts a "
-        "JOIN open_finance_connections c ON c.id = a.connection_id "
-        "WHERE c.user_id = %s AND UPPER(a.type) = 'BANK'",
+        "SELECT COALESCE(SUM(b), 0) AS b, COUNT(*) AS n FROM ("
+        "  SELECT DISTINCT ON (a.provider_account_id) "
+        "    a.balance AS b, UPPER(COALESCE(c.status, '')) AS connection_status "
+        "  FROM open_finance_accounts a "
+        "  JOIN open_finance_connections c ON c.id = a.connection_id "
+        "  WHERE c.user_id = %s AND UPPER(a.type) = 'BANK' "
+        "    AND UPPER(COALESCE(a.currency, 'BRL')) = 'BRL' "
+        "  ORDER BY a.provider_account_id, c.id DESC"
+        ") uniq WHERE connection_status NOT IN ('PAUSED', 'DELETED')",
         (user_id,),
     )
     of_bank_balance = float(of_bank_rows[0]["b"]) if of_bank_rows else 0.0
+    of_bank_count = int(of_bank_rows[0]["n"]) if of_bank_rows else 0
 
     # Reformat cards (era loop dentro do bloco de queries)
     cards = []
@@ -673,10 +830,24 @@ async def get_financial_data(
         "year":               y,
         "month":              m,
         "is_current_month":   is_current,
+        "history_earliest_date": earliest_history_date.isoformat() if earliest_history_date else None,
         "balance":            float(account["balance"]) if account else 0.0,
         "of_bank_balance":    of_bank_balance,  # saldo das contas bancárias conectadas (OF)
-        "pockets":            [dict(r) for r in pockets],
+        "of_bank_count":      of_bank_count,    # nº de contas BANK conectadas (0 = sem banco)
+        "pockets":            [{**dict(r), "of_plan_active": _of_plan_active} for r in pockets],
         "investments":        [dict(r) for r in investments],
+        "rv_positions":       rv_positions,  # ações/FIIs via Open Finance (já são dicts)
+        "rv_summary": {
+            "market_value": sum(p["market_value"] for p in rv_positions),
+            "invested":     sum(p["invested"] for p in rv_positions),
+            "pnl":          sum(p["pnl"] for p in rv_positions),
+        },
+        "of_fixed_income":    of_fixed_income,  # renda fixa do banco (CDB/Tesouro), agregada
+        "of_fixed_income_summary": {
+            "balance":  sum(i["balance"] for i in of_fixed_income),
+            "invested": sum(i["invested"] for i in of_fixed_income),
+            "pnl":      sum(i["pnl"] for i in of_fixed_income),
+        },
         "market_rates":       market_rates,
         "recent_launches":    [dict(r) for r in launches],
         "launches_pagination": {
@@ -699,7 +870,11 @@ async def get_financial_data(
 
 # ─── Monthly history ─────────────────────────────────────────────────────────
 
-async def get_monthly_history(user_id: int, n_months: int = 6) -> list:
+async def get_monthly_history(
+    user_id: int,
+    n_months: int = 6,
+    start_date: date | None = None,
+) -> list:
     """Returns last n_months of income/expense totals, oldest first.
 
     Janela em meses-calendário INCLUINDO o mês atual: início do mês atual
@@ -707,6 +882,8 @@ async def get_monthly_history(user_id: int, n_months: int = 6) -> list:
     mês extra no passado e o gráfico de "últimos 6 meses" mostrava 7 barras.
     """
     n_months = max(1, int(n_months))
+    limit_clause = "AND criado_em >= %s" if start_date else ""
+    params = (user_id, start_date) if start_date else (user_id,)
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -716,12 +893,13 @@ async def get_monthly_history(user_id: int, n_months: int = 6) -> list:
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= DATE_TRUNC('month', NOW()) - INTERVAL '{n_months - 1} months'
+                  {limit_clause}
                   AND tipo IN ('receita', 'despesa')
                   AND is_internal_movement = false
                 GROUP BY mes, tipo
                 ORDER BY mes
                 """,
-                (user_id,),
+                params,
             )
             rows = await cur.fetchall()
 
@@ -738,10 +916,20 @@ async def get_monthly_history(user_id: int, n_months: int = 6) -> list:
     return list(history.values())
 
 
-async def get_daily_expenses_window(user_id: int, days: int = 30) -> list:
+async def get_daily_expenses_window(
+    user_id: int,
+    days: int = 30,
+    start_date: date | None = None,
+) -> list:
     """Gastos (despesas de conta) por dia nos últimos ``days`` dias, mais antigo
     primeiro. Cada item: ``{"date": "YYYY-MM-DD", "total": float}``. Mesmo filtro
     do gráfico de gastos por dia do mês (tipo despesa/saida, não interno)."""
+    if start_date:
+        limit_clause = f"AND DATE(criado_em AT TIME ZONE '{TZ}') >= %s"
+        params = (user_id, start_date)
+    else:
+        limit_clause = f"AND criado_em >= NOW() - INTERVAL '{int(days)} days'"
+        params = (user_id,)
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -752,11 +940,11 @@ async def get_daily_expenses_window(user_id: int, days: int = 30) -> list:
                 WHERE user_id = %s
                   AND tipo IN ('despesa', 'saida')
                   AND is_internal_movement = false
-                  AND criado_em >= NOW() - INTERVAL '{int(days)} days'
+                  {limit_clause}
                 GROUP BY dia
                 ORDER BY dia
                 """,
-                (user_id,),
+                params,
             )
             rows = await cur.fetchall()
     return [{"date": r["dia"], "total": float(r["total"] or 0)} for r in rows]
@@ -1239,8 +1427,6 @@ manager = ConnectionManager()
 
 # ─── App startup ──────────────────────────────────────────────────────────────
 
-from contextlib import asynccontextmanager
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _t0 = _startup_time.monotonic()
@@ -1415,6 +1601,22 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[news_bot] erro: {exc}", file=sys.stderr)
 
+    async def _piggy_agents():
+        try:
+            await asyncio.sleep(1)
+            from core.services.piggy_agents import run_agents_loop  # noqa: PLC0415
+            await run_agents_loop()
+        except Exception as exc:
+            print(f"[agents] erro: {exc}", file=sys.stderr)
+
+    async def _login_events_retention():
+        try:
+            await asyncio.sleep(2)
+            from core.services.login_events_retention import run_login_events_retention_loop  # noqa: PLC0415
+            await run_login_events_retention_loop()
+        except Exception as exc:
+            print(f"[login_events_retention] erro: {exc}", file=sys.stderr)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -1454,6 +1656,30 @@ async def lifespan(app: FastAPI):
                 print(f"[open_finance_refresh] erro: {exc}", file=sys.stderr)
                 await asyncio.sleep(interval)
 
+    async def _open_finance_trial_expiry():
+        # Pausa conexões OF de trial vencido que não virou assinatura (libera o slot
+        # pago da Pluggy; dados importados ficam). Inerte com PLANS_V2_ENABLED off —
+        # o flag é relido a cada tick dentro do serviço (liga/desliga sem redeploy).
+        interval = int(os.getenv("OF_TRIAL_EXPIRY_INTERVAL_SEC", str(6 * 60 * 60)))
+        from core.services.open_finance_trial_expiry import pause_expired_trial_connections
+        from core.services.trial_downsell import send_trial_downsell_emails
+        while True:
+            try:
+                res = await asyncio.to_thread(pause_expired_trial_connections)
+                if not res.get("disabled"):
+                    print(f"[of_trial_expiry] {res}", flush=True)
+                # Mesmo tick: downsell de fim de trial (1 e-mail por conta, na
+                # vida; janela de 7 dias). Inerte com o flag off.
+                res_ds = await asyncio.to_thread(send_trial_downsell_emails)
+                if not res_ds.get("disabled") and (res_ds.get("checked") or res_ds.get("sent")):
+                    print(f"[trial_downsell] {res_ds}", flush=True)
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[of_trial_expiry] erro: {exc}", file=sys.stderr)
+                await asyncio.sleep(interval)
+
     async def _open_finance_proactive():
         # Avisos proativos de salário/reconectar (Fase 5 / P1 #6). Dormant: só roda com
         # OF_PROACTIVE_ENABLED ligado E o template Meta configurado (senão retorna na hora).
@@ -1482,6 +1708,7 @@ async def lifespan(app: FastAPI):
             [
                 asyncio.create_task(_open_finance_refresh(), name="open_finance_refresh"),
                 asyncio.create_task(_open_finance_proactive(), name="open_finance_proactive"),
+                asyncio.create_task(_open_finance_trial_expiry(), name="open_finance_trial_expiry"),
                 asyncio.create_task(_wa_worker(), name="wa_worker"),
                 asyncio.create_task(_wa_daily(), name="wa_daily"),
                 asyncio.create_task(_wa_bill_reminders(), name="wa_bill_reminders"),
@@ -1492,6 +1719,8 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_recurring_charger(), name="recurring_charger"),
                 asyncio.create_task(_proactive_ai(), name="proactive_ai"),
                 asyncio.create_task(_news_bot(), name="news_bot"),
+                asyncio.create_task(_piggy_agents(), name="piggy_agents"),
+                asyncio.create_task(_login_events_retention(), name="login_events_retention"),
             ]
         )
     else:
@@ -1528,6 +1757,9 @@ CSRF_EXEMPT_PATHS = {
     "/open-finance/pluggy/webhook",
     "/wa/webhook",
     "/webhook",
+    # One-click unsubscribe (RFC 8058): POST server-to-server do Gmail/Yahoo,
+    # sem cookie de sessão — autenticado pelo token HMAC da própria URL.
+    "/unsubscribe",
 }
 
 _SECURITY_HEADERS = {
@@ -1540,7 +1772,7 @@ _SECURITY_HEADERS = {
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.pluggy.ai https://cdn.jsdelivr.net "
-        "https://static.cloudflareinsights.com; "
+        "https://static.cloudflareinsights.com https://connect.facebook.net; "
         "style-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
         "img-src 'self' data: blob: https:; "
@@ -1633,6 +1865,9 @@ EMAIL_RATE_LIMITS = {
     "register": (3, 60 * 60),
     "login": (5, 60),
     "forgot-password": (3, 60 * 60),
+    # Teto por e-mail no confirm do código de verificação (6 dígitos): impede
+    # brute-force do código mesmo com rotação de IP. 10 tentativas / 15 min.
+    "verify-email": (10, 15 * 60),
 }
 
 
@@ -1848,10 +2083,13 @@ def _post_login_url(user_id: int | None = None) -> str:
     """URL para a qual o usuário deve ser direcionado logo após login.
     O campo `dashboard_url` nas respostas de auth aponta para cá.
 
-    Sem assinatura ativa (paywall ligado), manda DIRETO pro paywall em vez do
-    /home — evita o flash de carregar o /home e rebater pro /precos."""
+    Cadastro novo (ou quem ainda não escolheu plano) vai DIRETO pra /precos —
+    só entra no dashboard depois de escolher um plano (mesmo o Grátis) e, nos
+    pagos, concluir o pagamento. Sem assinatura ativa (paywall ligado), idem."""
     if user_id is not None:
-        from core.services.plan_service import has_app_access
+        from core.services.plan_service import has_app_access, needs_plan_selection
+        if needs_plan_selection(int(user_id)):
+            return f"{DASHBOARD_URL}/precos?escolha=1"
         if not has_app_access(int(user_id)):
             return f"{DASHBOARD_URL}/precos?ativar=1"
     return _dashboard_url("/home")
@@ -1890,22 +2128,54 @@ async def _get_current_user(
         request.state.session_jti = jti
         # Atualiza last_seen com debounce; falha silenciosa.
         asyncio.create_task(asyncio.to_thread(touch_session, jti))
+    else:
+        # Token legado sem jti: não há sessão pra revogar. Se a conta trocou de
+        # senha (reset), invalida o token — senão um token roubado sobreviveria
+        # ao reset até expirar. Tokens com jti já são cobertos pela revogação
+        # de sessão feita no reset.
+        from db import get_password_changed_at
+        if await asyncio.to_thread(get_password_changed_at, user_id):
+            raise HTTPException(status_code=401, detail="Sessão expirada. Faça login novamente.")
 
     _raise_if_account_scheduled_for_deletion(user_id)
     return user_id
 
 
+# Planos v2: tier mínimo de cada feature paga na escada. Hoje TODAS as features
+# gated são Essencial+ (o corte Plus é OF multi-banco/agentes, gated à parte).
+# "ai_chat" é especial: no v2 o Grátis tem cota mensal — checada via
+# ai_chat_allowed, não por tier.
+_FEATURE_MIN_TIER_V2 = {
+    "recurring_expenses": "essencial",
+    "ofx_import": "essencial",
+    "investments": "essencial",
+    "export": "essencial",
+    "custom_categories": "essencial",
+    "generic": "essencial",
+}
+
+
+def _plan_gate_ok(user_id: int, feature: str) -> bool:
+    from core.services.plan_service import (
+        plans_v2_enabled, is_pro, require_min_tier, ai_chat_allowed,
+    )
+    if not plans_v2_enabled():
+        return is_pro(user_id)
+    if feature == "ai_chat":
+        return ai_chat_allowed(user_id)
+    return require_min_tier(user_id, _FEATURE_MIN_TIER_V2.get(feature, "essencial"))
+
+
 def require_pro_feature(feature: str = "generic"):
     """
-    Dependency factory que valida JWT (via _get_current_user) e exige plano Pro.
-    Uso: `Depends(require_pro_feature("ofx_import"))` em rotas Pro-only.
+    Dependency factory que valida JWT (via _get_current_user) e exige o plano
+    mínimo da feature (v1: Pro binário; v2: tier da escada / cota de IA).
+    Uso: `Depends(require_pro_feature("ofx_import"))` em rotas pagas.
     Bloqueio retorna 403 com payload `{"error": "pro_required", "feature": ...}`
     para o frontend abrir modal de upgrade contextual.
     """
-    from core.services.plan_service import is_pro
-
     async def _dep(user_id: int = Depends(_get_current_user)) -> int:
-        if not is_pro(user_id):
+        if not _plan_gate_ok(user_id, feature):
             raise HTTPException(
                 status_code=403,
                 detail={"error": "pro_required", "feature": feature},
@@ -1920,9 +2190,7 @@ def _require_pro(user_id: int, feature: str) -> None:
     Variante inline pra endpoints que ja fazem _authorize_dashboard_access no body
     (em vez de Depends). Mesmo payload de 403 que require_pro_feature.
     """
-    from core.services.plan_service import is_pro
-
-    if not is_pro(user_id):
+    if not _plan_gate_ok(user_id, feature):
         raise HTTPException(
             status_code=403,
             detail={"error": "pro_required", "feature": feature},
@@ -1983,7 +2251,14 @@ async def auth_validate(request: Request, response: Response):
     # Anexa flag de onboarding pra o frontend decidir se mostra o prompt.
     from db import should_show_mfa_onboarding
     show_onboarding = await asyncio.to_thread(should_show_mfa_onboarding, int(user_id))
-    return {"user_id": user_id, "show_mfa_onboarding": show_onboarding}
+    # Flag beta: modal "Ver todos os bancos" (lista completa do Open Finance).
+    from core.services.plan_service import bank_list_ui_enabled
+    bank_list_ui = await asyncio.to_thread(bank_list_ui_enabled, int(user_id))
+    return {
+        "user_id": user_id,
+        "show_mfa_onboarding": show_onboarding,
+        "bank_list_ui": bank_list_ui,
+    }
 
 
 @app.get("/auth/dashboard-profile")
@@ -1993,6 +2268,24 @@ async def auth_dashboard_profile(request: Request, response: Response):
     user_id = _resolve_dashboard_user_id(request)
     _raise_if_account_scheduled_for_deletion(int(user_id))
     auth_user = await asyncio.to_thread(get_auth_user, int(user_id))
+    # Gates efetivos por feature — fonte da verdade do backend. get_user_limits e
+    # is_pro já resolvem os casos que o valor cru do plano esconde: assinatura
+    # expirada (webhook perdido) e o freio de emergência PLANS_V2_ENABLED. O front
+    # consome isto direto em vez de reconstruir tier do plano cru (que divergiria).
+    from core.services.plan_service import get_user_limits, is_pro
+    limits = await asyncio.to_thread(get_user_limits, int(user_id))
+    _is_pro = await asyncio.to_thread(is_pro, int(user_id))
+    feature_gates = {
+        "investments": bool(limits["investments_enabled"]),
+        "export": bool(limits["export_enabled"]),
+        "ofx_import": bool(limits["ofx_enabled"]),
+        "recurring_expenses": bool(limits["recurring_expenses_enabled"]),
+        "pockets_unlimited": limits["pockets_max"] is None,
+        "cards_unlimited": limits["cards_max"] is None,
+        "history_unlimited": not limits["history_current_month_only"],
+        "changelog": _is_pro,                        # Novidades: gate is_pro (Plus+)
+        "agents": limits["agents_energy_budget"] > 0,  # agentes: Plus+
+    }
     _no_store(response)
     return {
         "user_id": user_id,
@@ -2000,6 +2293,7 @@ async def auth_dashboard_profile(request: Request, response: Response):
         "display_name": (auth_user or {}).get("display_name"),
         "plan": (auth_user or {}).get("plan"),
         "whatsapp_linked": bool((auth_user or {}).get("whatsapp_verified_at")),
+        "feature_gates": feature_gates,
     }
 
 
@@ -2035,7 +2329,7 @@ async def auth_register(request: Request, body: RegisterBody):
     """
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import create_email_verification
+    from db import create_email_verification, AccountAlreadyExistsError, get_auth_user
     from core.services.email_service import send_verification_email
 
     await _check_auth_rate_limits("register", request, body.email)
@@ -2059,6 +2353,20 @@ async def auth_register(request: Request, body: RegisterBody):
         code = create_email_verification(
             body.email, body.password, body.phone, display_name=name,
         )
+    except AccountAlreadyExistsError as exc:
+        # Anti-enumeração: e-mail/telefone já existe. NÃO revela isso — responde
+        # exatamente como no caminho normal e avisa o dono da conta por e-mail
+        # (out-of-band). O visitante não consegue distinguir "existe" de "novo".
+        # O rate-limit de cadastro (3/h por IP+e-mail) já limita spam do aviso.
+        try:
+            owner = await asyncio.to_thread(get_auth_user, exc.existing_user_id) if exc.existing_user_id else None
+            owner_email = (owner or {}).get("email")
+            if owner_email:
+                from core.services.email_service import send_account_exists_notice
+                await asyncio.to_thread(send_account_exists_notice, owner_email, f"{DASHBOARD_URL}/login")
+        except Exception as notice_exc:
+            logging.getLogger(__name__).warning("account_exists_notice falhou: %s", notice_exc)
+        return {"status": "verification_sent", "email": body.email.strip().lower()}
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
@@ -2071,7 +2379,7 @@ async def auth_register(request: Request, body: RegisterBody):
 
 @app.post("/auth/verify-email")
 @limiter.limit("10/minute")
-async def auth_verify_email(request: Request, response: Response, body: VerifyEmailBody):
+async def auth_verify_email(request: Request, response: Response, body: VerifyEmailBody, background_tasks: BackgroundTasks):
     """
     Confirma o código de verificação e cria a conta.
     Retorna JWT + link_code igual ao registro anterior.
@@ -2080,8 +2388,15 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from db import confirm_email_verification
 
+    # Teto por e-mail (além do limite por IP do @limiter): impede brute-force
+    # do código de 6 dígitos rotacionando IP.
+    await _check_auth_rate_limits("verify-email", request, body.email)
+
+    from frontend.routes.shared import signup_source_from_request
     try:
-        result = confirm_email_verification(body.email, body.code)
+        result = confirm_email_verification(
+            body.email, body.code, source=signup_source_from_request(request)
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -2093,6 +2408,23 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
     _set_dashboard_cookie(response, int(user_id), jti=jti)
 
     await _apply_referral_attribution(request, response, int(user_id))
+
+    # Meta Conversions API — CompleteRegistration (conta criada). Agendado como
+    # background task (roda DEPOIS da resposta) pra um Meta lento/fora nunca
+    # atrasar o cadastro. event_id signup_<uid> casa com o pixel do /cadastro.
+    try:
+        from core.services.meta_capi import capi_configured, registration_event_id, send_event
+        if capi_configured():
+            background_tasks.add_task(
+                send_event,
+                event_name="CompleteRegistration",
+                event_id=registration_event_id(user_id),
+                event_time=int(datetime.now(timezone.utc).timestamp()),
+                email=body.email.strip().lower(),
+                event_source_url=f"{DASHBOARD_URL}/cadastro",
+            )
+    except Exception as exc:
+        print(f"[auth] meta capi registration falhou user={user_id}: {exc}")
 
     wa_link = _build_whatsapp_onboarding_link(user_id)
 
@@ -2327,6 +2659,17 @@ async def auth_reset_password(request: Request, body: ResetPasswordBody):
     if not user_id:
         raise HTTPException(status_code=400, detail="Link inválido ou expirado. Solicite um novo.")
 
+    # Segurança: um reset de senha deve encerrar TODAS as sessões e refresh
+    # tokens existentes — senão quem tinha uma sessão roubada continua dentro
+    # mesmo depois da vítima trocar a senha (que é justamente o motivo do reset).
+    from core.sessions import revoke_other_sessions
+    from core.refresh_tokens import revoke_user_refresh_tokens
+    try:
+        await asyncio.to_thread(revoke_other_sessions, int(user_id), None)
+        await asyncio.to_thread(revoke_user_refresh_tokens, int(user_id))
+    except Exception as exc:  # nunca deixa o reset falhar por causa da revogação
+        logging.getLogger(__name__).warning("reset_revoke_sessions user=%s: %s", user_id, exc)
+
     await asyncio.to_thread(
         record_audit_event,
         user_id,
@@ -2338,7 +2681,8 @@ async def auth_reset_password(request: Request, body: ResetPasswordBody):
 
 
 @app.post("/auth/link-code")
-async def auth_new_link_code(user_id: int = Depends(_get_current_user)):
+@limiter.limit("15/hour")
+async def auth_new_link_code(request: Request, user_id: int = Depends(_get_current_user)):
     """Gera um novo link_code para o usuário autenticado vincular uma nova plataforma."""
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -2355,19 +2699,12 @@ async def auth_new_link_code(user_id: int = Depends(_get_current_user)):
 
 
 def _open_finance_ui_enabled(user_id: int, email: str | None) -> bool:
-    """Gate da UI de Open Finance. Liga se:
-    - OF_UI_ENABLED global ligado (lançamento pra todos), OU
-    - o e-mail está em OF_UI_BETA_EMAILS (allowlist beta, case-insensitive), OU
-    - o user_id está em OF_UI_BETA_USER_IDS.
-    Default: desligado (nada muda pros usuários).
+    """UI de Open Finance liberada pra todos (novo front hardcodado).
+
+    Antes era um gate por env (OF_UI_ENABLED / OF_UI_BETA_EMAILS /
+    OF_UI_BETA_USER_IDS); o rollout terminou e agora está sempre ligado.
     """
-    if (os.getenv("OF_UI_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on"):
-        return True
-    beta_emails = {e.strip().lower() for e in (os.getenv("OF_UI_BETA_EMAILS") or "").split(",") if e.strip()}
-    if email and str(email).strip().lower() in beta_emails:
-        return True
-    beta_ids = {i.strip() for i in (os.getenv("OF_UI_BETA_USER_IDS") or "").split(",") if i.strip()}
-    return str(user_id) in beta_ids
+    return True
 
 
 @app.get("/auth/me")
@@ -2384,16 +2721,47 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     user_dict = dict(user)
     show_onboarding = await asyncio.to_thread(should_show_mfa_onboarding, user_id)
     mfa = await asyncio.to_thread(get_mfa_status, user_id)
-    from core.services.plan_service import has_app_access, paywall_enabled
+    from core.services.plan_service import (
+        has_app_access, paywall_enabled, plans_v2_enabled,
+        get_plan_tier, get_trial_status, history_earliest_date, get_user_limits,
+        needs_plan_selection,
+    )
     of_ui_enabled = _open_finance_ui_enabled(user_id, user_dict.get("email"))
+    from core.services.plan_service import agents_ui_enabled as _agents_ui_enabled
+    agents_ui = _agents_ui_enabled(user_id, user_dict.get("email"))
+    # Planos v2: tier efetivo da escada + estado do trial (30d via Stripe).
+    plan_tier = await asyncio.to_thread(get_plan_tier, user_id)
+    # Teto de bancos do plano (0 = Free/sem OF, None = ilimitado/sem gate na UI). O
+    # front usa pra, no Free pós-trial, trocar "Conectar" por "Reative seu banco" sem
+    # abrir o widget. SÓ sob a escada v2: com v2 OFF (rollback de emergência) o limite
+    # é governado pelo _enforce_bank_limit legado (Free ainda conecta, gate dormente),
+    # então não expomos o teto de free-tier — senão o rollback desligaria o OF na UI.
+    of_banks_max = (
+        (await asyncio.to_thread(get_user_limits, user_id)).get("of_banks_max")
+        if plans_v2_enabled() else None
+    )
+    trial = await asyncio.to_thread(get_trial_status, user_id, user_dict)
+    earliest_history = await asyncio.to_thread(history_earliest_date, user_id)
+    # Não devolve pro cliente os blobs cifrados (redundantes — já há o claro
+    # decifrado) nem o id de cliente do Stripe (interno). Só o próprio usuário
+    # vê a resposta, mas é allowlist por precaução (evita vazar colunas novas).
+    _ME_HIDDEN = {"email_enc", "display_name_enc", "phone_enc", "stripe_customer_id"}
+    safe_user = {k: v for k, v in user_dict.items() if k not in _ME_HIDDEN}
     return {
         "user_id": user_id,
-        **user_dict,
+        **safe_user,
         "show_mfa_onboarding": show_onboarding,
         "mfa_enabled": bool(mfa.get("enabled")),
         "app_access": has_app_access(user_id),
+        "needs_plan_selection": needs_plan_selection(user_id, user_dict),
         "paywall_enabled": paywall_enabled(),
+        "plans_v2_enabled": plans_v2_enabled(),
+        "plan_tier": plan_tier,
+        "of_banks_max": of_banks_max,
+        "trial": {"active": trial["active"], "days_left": trial["days_left"]},
+        "history_earliest_date": earliest_history.isoformat() if earliest_history else None,
         "of_ui_enabled": of_ui_enabled,
+        "agents_ui_enabled": agents_ui,
     }
 
 
@@ -3102,6 +3470,7 @@ async def auth_google_complete_signup(
     request: Request,
     response: Response,
     body: GoogleSignupCompleteBody,
+    background_tasks: BackgroundTasks,
 ):
     """Finaliza o cadastro Google: cria conta com nome + telefone."""
     from db import consume_pending_google_signup
@@ -3112,10 +3481,12 @@ async def auth_google_complete_signup(
             detail="É necessário aceitar a Política de Privacidade.",
         )
 
+    from frontend.routes.shared import signup_source_from_request
     try:
         result = await asyncio.to_thread(
             consume_pending_google_signup,
             body.token, body.name, body.phone,
+            signup_source_from_request(request, google=True),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -3129,6 +3500,23 @@ async def auth_google_complete_signup(
     _set_dashboard_cookie(response, user_id, jti=jti)
 
     await _apply_referral_attribution(request, response, user_id)
+
+    # Meta Conversions API — CompleteRegistration (conta criada via Google).
+    # Background task (roda após a resposta); event_id signup_<uid> casa com o
+    # pixel do /onboarding pro Meta deduplicar.
+    try:
+        from core.services.meta_capi import capi_configured, registration_event_id, send_event
+        if capi_configured():
+            background_tasks.add_task(
+                send_event,
+                event_name="CompleteRegistration",
+                event_id=registration_event_id(user_id),
+                event_time=int(datetime.now(timezone.utc).timestamp()),
+                email=email,
+                event_source_url=f"{DASHBOARD_URL}/onboarding",
+            )
+    except Exception as exc:
+        print(f"[auth] meta capi registration (google) falhou user={user_id}: {exc}")
 
     await log_auth_login_event(
         email,
@@ -3153,14 +3541,28 @@ async def auth_google_complete_signup(
 
 class CreateCheckoutBody(BaseModel):
     interval: str = "monthly"  # "monthly" | "annual"
+    plan: str = "plus"         # "essencial" | "plus" | "pro" (default = Plus, o plano histórico)
 
 
-def _resolve_pro_price_id(interval: str) -> str:
-    """Mapeia interval -> price ID configurado nas env vars.
+def _resolve_price_id(plan: str, interval: str) -> str:
+    """Mapeia (plan, interval) -> price ID configurado nas env vars.
 
-    Mensal aceita fallback pro `STRIPE_PRICE_ID_PRO` legado pra não quebrar
-    deploys que ainda não migraram. Anual exige a env var nova.
+    'pro' aqui é o tier NOVO de R$ 49,90 (envs PROMAX; 'pro_max' no banco).
+    Plus mensal aceita fallback pro `STRIPE_PRICE_ID_PRO` legado pra não
+    quebrar deploys que ainda não migraram. Anual exige a env var nova.
     """
+    if plan == "essencial":
+        if interval == "monthly":
+            return STRIPE_PRICE_ID_ESSENCIAL_MENSAL
+        if interval == "annual":
+            return STRIPE_PRICE_ID_ESSENCIAL_ANUAL
+        return ""
+    if plan == "pro":
+        if interval == "monthly":
+            return STRIPE_PRICE_ID_PROMAX_MENSAL
+        if interval == "annual":
+            return STRIPE_PRICE_ID_PROMAX_ANUAL
+        return ""
     if interval == "monthly":
         return STRIPE_PRICE_ID_PRO_MENSAL or STRIPE_PRICE_ID_PRO
     if interval == "annual":
@@ -3168,8 +3570,252 @@ def _resolve_pro_price_id(interval: str) -> str:
     return ""
 
 
+@asynccontextmanager
+async def _billing_user_lock(user_id: int):
+    """Serializa checkouts do mesmo usuário entre processos/workers."""
+    lock_key = f"billing_checkout:{int(user_id)}"
+    async with await db_connect() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("select pg_advisory_lock(hashtext(%s))", (lock_key,))
+            try:
+                yield
+            finally:
+                await cur.execute("select pg_advisory_unlock(hashtext(%s))", (lock_key,))
+
+
+def _checkout_session_matches(session, user_id: int, plan: str, interval: str, price_id: str) -> bool:
+    metadata = _sg(session, "metadata", {}) or {}
+    return (
+        str(_sg(metadata, "finbot_user_id", "")) == str(user_id)
+        and _sg(metadata, "plan") == plan
+        and _sg(metadata, "interval") == interval
+        and _sg(metadata, "price_id") == price_id
+        and bool(_sg(session, "url"))
+    )
+
+
+async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interval: str, price_id: str):
+    """Cria ou reutiliza um checkout. Deve rodar sob ``_billing_user_lock``."""
+    from db import get_auth_user, set_stripe_customer
+
+    user = await asyncio.to_thread(get_auth_user, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    if (user.get("last_payment_status") or "") == "grandfathered":
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "lifetime",
+                    "message": "Você já tem acesso vitalício de brinde — assinar um plano substituiria isso. Fala com a gente se quiser mudar."},
+        )
+
+    customer_id = user.get("stripe_customer_id")
+    if customer_id:
+        try:
+            existing_sub = await asyncio.to_thread(
+                _find_active_subscription, stripe_mod, customer_id)
+        except StripeLookupError:
+            raise HTTPException(
+                status_code=503,
+                detail="Não consegui confirmar sua assinatura agora. Tenta de novo em instantes.",
+            )
+        if existing_sub is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={"error": "already_subscribed",
+                        "message": "Você já tem um plano ativo. Use a troca de plano — sem cobrança dupla."},
+            )
+
+    def _new_customer() -> str:
+        customer = stripe_mod.Customer.create(
+            email=user["email"],
+            metadata={"finbot_user_id": str(user_id)},
+            address={"country": "BR"},
+            preferred_locales=["pt-BR"],
+        )
+        set_stripe_customer(user_id, customer.id)
+        return customer.id
+
+    if not customer_id:
+        customer_id = await asyncio.to_thread(_new_customer)
+
+    # Uma sessão aberta já representa uma tentativa de assinatura. Reutiliza a
+    # equivalente e expira qualquer outra antes de permitir uma nova.
+    try:
+        sessions = await asyncio.to_thread(
+            stripe_mod.checkout.Session.list,
+            customer=customer_id,
+            status="open",
+            limit=20,
+        )
+    except Exception as exc:
+        if _is_missing_stripe_customer(stripe_mod, exc):
+            customer_id = await asyncio.to_thread(_new_customer)
+            open_sessions = []
+        else:
+            logging.getLogger(__name__).warning(
+                "billing_checkout_session_lookup_failed customer=%s", customer_id, exc_info=True)
+            raise HTTPException(
+                status_code=503,
+                detail="Não consegui confirmar seus checkouts agora. Tenta de novo em instantes.",
+            )
+    else:
+        open_sessions = list(_sg(sessions, "data", []) or [])
+
+    reusable = next(
+        (s for s in open_sessions if _checkout_session_matches(
+            s, user_id, plan, interval, price_id)),
+        None,
+    )
+    for open_session in open_sessions:
+        if reusable is not None and _sg(open_session, "id") == _sg(reusable, "id"):
+            continue
+        try:
+            await asyncio.to_thread(
+                stripe_mod.checkout.Session.expire, _sg(open_session, "id"))
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "billing_checkout_session_expire_failed session=%s",
+                _sg(open_session, "id"),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Não consegui substituir seu checkout anterior agora. Tenta de novo em instantes.",
+            )
+
+    if reusable is not None:
+        # session_id da sessão REAPROVEITADA: sem ele, o started iria com NULL
+        # e a sessão nunca correlacionaria a conclusão no funil (só entraria
+        # people, não sessions). Mesma chave que o caminho de sessão nova.
+        return {
+            "checkout_url": _sg(reusable, "url"), "interval": interval, "plan": plan,
+            "session_id": _sg(reusable, "id"),
+        }
+
+    # A sessão pode ter sido concluída entre a primeira consulta e a listagem.
+    # Confere de novo imediatamente antes da criação para fechar essa corrida
+    # com o webhook/Stripe, que não participa do advisory lock local.
+    try:
+        existing_sub = await asyncio.to_thread(
+            _find_active_subscription, stripe_mod, customer_id)
+    except StripeLookupError:
+        raise HTTPException(
+            status_code=503,
+            detail="Não consegui confirmar sua assinatura agora. Tenta de novo em instantes.",
+        )
+    if existing_sub is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "already_subscribed",
+                    "message": "Você já tem um plano ativo. Use a troca de plano — sem cobrança dupla."},
+        )
+
+    # A elegibilidade só é consultada ao criar uma sessão nova. Reabrir a mesma
+    # URL preserva exatamente as condições que o usuário já viu no checkout.
+    from core.services.plan_service import (
+        ai_monthly_limit_for_tier,
+        plans_v2_enabled,
+        trial_days_total,
+    )
+    if plans_v2_enabled():
+        from db.plans import TrialEligibilityError, is_trial_eligible_for_user
+        try:
+            eligible = await asyncio.to_thread(is_trial_eligible_for_user, user_id)
+        except TrialEligibilityError:
+            raise HTTPException(
+                status_code=503,
+                detail="Não consegui confirmar seu período grátis agora. Tenta de novo em instantes.",
+            )
+        trial_days = trial_days_total() if eligible else 0
+    else:
+        trial_days = int(os.getenv("PRO_TRIAL_DAYS", "30"))
+
+    # Cota mensal da IA do plano comprado. Plus e Pro têm `ai_monthly_messages:
+    # None` em plan_limits.py, o que NÃO é ilimitado: cai no teto global
+    # AI_CHAT_MONTHLY_LIMIT (1.000 por padrão, ajustável por env) e o chat corta
+    # ali. Vai na URL pelo mesmo motivo do `td`: número de backend não pode ficar
+    # chumbado no HTML, e com v2 desligado o tier efetivo de quem paga é o de
+    # cima, não o comprado (get_user_limits → limits_for("pro")).
+    ia_quota = ai_monthly_limit_for_tier(plan if plans_v2_enabled() else "pro")
+
+    def _new_session(cust_id: str):
+        metadata = {
+            "finbot_user_id": str(user_id),
+            "interval": interval,
+            "plan": plan,
+            "price_id": price_id,
+        }
+        subscription_data = {"metadata": metadata.copy()}
+        if trial_days > 0:
+            subscription_data["trial_period_days"] = trial_days
+        return stripe_mod.checkout.Session.create(
+            customer=cust_id,
+            payment_method_types=["card"],
+            line_items=[{"price": price_id, "quantity": 1}],
+            mode="subscription",
+            locale="pt-BR",
+            allow_promotion_codes=True,
+            # `td` = dias de trial concedidos NESTA sessão. `pl` = plano escolhido.
+            # `ia` = cota mensal de mensagens da Piggy nesse plano. A tela de
+            # confirmação usa os três na cópia. Sem `td` o front chutava 30, que
+            # quebra se trial_days_total()/PRO_TRIAL_DAYS mudar; sem `pl` ele
+            # parabenizava TODO mundo pelo Plus, inclusive quem comprou Essencial
+            # ou Pro; sem `ia` ele prometia IA "sem limite de mensagens", que o
+            # backend não entrega. Tudo isso tem que vir na URL e não do
+            # /auth/me porque o modal abre ~450ms depois da volta, quando o
+            # webhook ainda pode não ter caído e o plano gravado ainda ser o antigo.
+            success_url=(
+                f"{DASHBOARD_URL}/home?upgrade=success&sid={{CHECKOUT_SESSION_ID}}"
+                f"&ev={'trial' if trial_days > 0 else 'purchase'}"
+                f"&td={trial_days}&pl={plan}&ia={ia_quota}"
+            ),
+            # Abandonou o checkout → volta pra /precos escolher um plano (pago
+            # ou Grátis). O escolha=1 já faz o applyOnboardingChoice mostrar
+            # "Escolha um plano pra começar" (needs_plan_selection segue true,
+            # pois o gate não fechou) — não anexo upgrade=cancelled porque
+            # /precos não consome esse marcador (o toast vive só na /home).
+            cancel_url=f"{DASHBOARD_URL}/precos?escolha=1",
+            metadata=metadata,
+            subscription_data=subscription_data,
+        )
+
+    try:
+        session = await asyncio.to_thread(_new_session, customer_id)
+    except stripe_mod.error.InvalidRequestError as exc:
+        if _is_missing_stripe_customer(stripe_mod, exc):
+            customer_id = await asyncio.to_thread(_new_customer)
+            session = await asyncio.to_thread(_new_session, customer_id)
+        else:
+            logging.getLogger(__name__).error("billing_checkout_invalid_request: %s", exc)
+            raise HTTPException(status_code=502, detail="Stripe recusou o checkout.")
+    except stripe_mod.error.StripeError as exc:
+        logging.getLogger(__name__).error("billing_checkout_stripe_error: %s", exc)
+        raise HTTPException(status_code=502, detail="Erro no Stripe ao iniciar o checkout.")
+
+    return {
+        "checkout_url": session.url, "interval": interval, "plan": plan,
+        "session_id": getattr(session, "id", None),
+    }
+
+
+@app.get("/billing/plans-config")
+async def billing_plans_config():
+    """Config pública da página de planos (sem auth): a /precos usa isto pra
+    decidir se mostra a escada v2 (Grátis/Essencial/Plus/Pro/Premium) ou o
+    layout legado de plano único. Flag off = página atual intacta."""
+    from core.services.plan_service import plans_v2_enabled, trial_days_total
+    return {
+        "plans_v2_enabled": plans_v2_enabled(),
+        "essencial_available": bool(STRIPE_PRICE_ID_ESSENCIAL_MENSAL),
+        "pro_available": bool(STRIPE_PRICE_ID_PROMAX_MENSAL),
+        "trial_days": trial_days_total(),
+    }
+
+
 @app.post("/billing/create-checkout")
+@limiter.limit("20/hour")
 async def billing_create_checkout(
+    request: Request,
     payload: CreateCheckoutBody | None = None,
     user_id: int = Depends(_get_current_user),
 ):
@@ -3181,71 +3827,286 @@ async def billing_create_checkout(
     interval = (payload.interval if payload else "monthly")
     if interval not in ("monthly", "annual"):
         raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
+    plan = ((payload.plan if payload else "plus") or "plus").lower()
+    if plan not in ("essencial", "plus", "pro"):
+        raise HTTPException(status_code=400, detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
 
-    price_id = _resolve_pro_price_id(interval)
+    price_id = _resolve_price_id(plan, interval)
     if not STRIPE_SECRET_KEY or not price_id:
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
     import stripe
+    stripe.api_key = STRIPE_SECRET_KEY
+    try:
+        async with _billing_user_lock(user_id):
+            result = await _billing_checkout_for_user(
+                stripe, user_id, plan, interval, price_id)
+        # Funil de checkout: registra a ABERTURA na tabela dedicada, com o
+        # session_id do Stripe (par do record_checkout_completed no webhook —
+        # correlaciona a mesma tentativa). Só depois da sessão nascer de fato.
+        # session_id sai do payload do cliente (é interno do funil).
+        from db import record_checkout_started
+        _session_id = result.pop("session_id", None)
+        await asyncio.to_thread(record_checkout_started, user_id, _session_id)
+        # NÃO fechamos o gate da /precos aqui. Abrir o checkout não é escolher um
+        # plano — quem abandona o Stripe tem de voltar pra /precos e escolher
+        # (pago ou Grátis). O gate só fecha quando o pagamento COMPLETA de fato,
+        # no webhook checkout.session.completed (mark_plan_selected lá). O
+        # retorno de sucesso (?upgrade=success) é tratado como "webhook em
+        # trânsito" pelo gate e pela tela de confirmação, sem cair no 402.
+        return result
+    except HTTPException:
+        raise
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "billing_checkout_lock_failed user=%s", user_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Não consegui iniciar o checkout agora. Tenta de novo em instantes.",
+        )
+
+
+@app.post("/billing/select-free")
+@limiter.limit("20/hour")
+async def billing_select_free(
+    request: Request,
+    user_id: int = Depends(_get_current_user),
+):
+    """Escolha do plano Grátis no fim do cadastro.
+
+    Fecha o gate da /precos (plan_selected_at) e libera o dashboard sem passar
+    pelo Stripe. Recusa se o usuário já tem assinatura paga/trial vigente —
+    aí a troca é pela /precos normal, não por aqui."""
+    from db import mark_plan_selected
+    from core.services.plan_service import get_plan_tier
+
+    tier = await asyncio.to_thread(get_plan_tier, user_id)
+    if tier != "free":
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "already_subscribed",
+                    "message": "Você já tem um plano pago ativo."},
+        )
+
+    await asyncio.to_thread(mark_plan_selected, user_id)
+    return {"ok": True, "dashboard_url": _dashboard_url("/home")}
+
+
+# ─── Troca de plano (upgrade/downgrade sem assinatura dupla) ─────────────────
+# Regra do Lucas (2026-08-06): a troca NUNCA cobra na hora — consome o período
+# já pago e vira o plano na PRÓXIMA cobrança (Subscription Schedule, proration
+# none). Vale pra upgrade, downgrade e mensal↔anual.
+
+class ChangePlanBody(BaseModel):
+    plan: str
+    interval: str = "monthly"
+
+
+@app.get("/billing/subscription")
+async def billing_subscription(user_id: int = Depends(_get_current_user)):
+    """Estado da assinatura pro front (/precos): plano/intervalo atual, fim do
+    período pago e troca agendada (se houver). Sem assinatura → active: False."""
+    import stripe
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import get_auth_user, set_stripe_customer
+    from db import get_auth_user
 
+    user = await asyncio.to_thread(get_auth_user, user_id) or {}
+    if (user.get("last_payment_status") or "") == "grandfathered":
+        return {"active": True, "lifetime": True, "plan": "plus", "interval": None,
+                "current_period_end": None, "scheduled_change": None}
+    cust = user.get("stripe_customer_id")
+    if not STRIPE_SECRET_KEY or not cust:
+        return {"active": False}
     stripe.api_key = STRIPE_SECRET_KEY
 
-    user = get_auth_user(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    try:
+        sub = await asyncio.to_thread(_find_active_subscription, stripe, cust)
+    except StripeLookupError:
+        # Leitura de estado pode degradar suave: o front mantém os botões
+        # padrão e o guard fail-closed do checkout segura qualquer clique.
+        return {"active": False, "degraded": True}
+    if sub is None:
+        return {"active": False}
 
-    def _new_customer() -> str:
-        c = stripe.Customer.create(
-            email=user["email"],
-            metadata={"finbot_user_id": str(user_id)},
-            address={"country": "BR"},
-            preferred_locales=["pt-BR"],
-        )
-        set_stripe_customer(user_id, c.id)
-        return c.id
+    plan, interval = _plan_interval_for_price(_sub_price_id(sub))
+    period_end = _sub_period_end_ts(sub)
+    period_end_iso = (
+        datetime.fromtimestamp(period_end, tz=timezone.utc).date().isoformat()
+        if period_end else None
+    )
 
-    def _new_session(cust_id: str):
-        return stripe.checkout.Session.create(
-            customer=cust_id,
-            payment_method_types=["card"],
-            line_items=[{"price": price_id, "quantity": 1}],
-            mode="subscription",
-            locale="pt-BR",
-            # Mostra o campo "Adicionar código promocional" no checkout. Sem isso
-            # os cupons criados no Stripe não têm como ser aplicados pelo usuário.
-            allow_promotion_codes=True,
-            success_url=f"{DASHBOARD_URL}/home?upgrade=success",
-            cancel_url=f"{DASHBOARD_URL}/home?upgrade=cancelled",
-            metadata={"finbot_user_id": str(user_id), "interval": interval},
-            subscription_data={
-                # Duração do trial controlável por env (sem deploy): PRO_TRIAL_DAYS (default 30).
-                "trial_period_days": int(os.getenv("PRO_TRIAL_DAYS", "30")),
-                "metadata": {"finbot_user_id": str(user_id), "interval": interval},
-            },
-        )
+    scheduled = None
+    sched_ref = _sg(sub, "schedule")
+    if sched_ref:
+        sched_id = sched_ref if isinstance(sched_ref, str) else _sg(sched_ref, "id")
+        try:
+            sched = await asyncio.to_thread(stripe.SubscriptionSchedule.retrieve, sched_id)
+            phases = _sg(sched, "phases", []) or []
+            if len(phases) >= 2:
+                nxt = phases[-1]
+                nxt_items = _sg(nxt, "items", []) or []
+                nprice = _sg(nxt_items[0], "price") if nxt_items else None
+                nprice = nprice if isinstance(nprice, str) else _sg(nprice, "id")
+                nplan, ninterval = _plan_interval_for_price(nprice)
+                nstart = _sg(nxt, "start_date")
+                if nplan and (nplan, ninterval) != (plan, interval):
+                    scheduled = {
+                        "plan": nplan, "interval": ninterval,
+                        "effective_at": (
+                            datetime.fromtimestamp(nstart, tz=timezone.utc).date().isoformat()
+                            if nstart else period_end_iso
+                        ),
+                    }
+        except Exception:
+            pass
 
-    # Recupera ou cria o customer no Stripe
-    customer_id = user.get("stripe_customer_id") or _new_customer()
+    return {"active": True, "lifetime": False, "plan": plan, "interval": interval,
+            "current_period_end": period_end_iso, "scheduled_change": scheduled}
+
+
+@app.post("/billing/change-plan")
+@limiter.limit("15/hour")
+async def billing_change_plan(
+    request: Request,
+    payload: ChangePlanBody,
+    user_id: int = Depends(_get_current_user),
+):
+    """Agenda a troca de plano pro fim do período já pago. Sem cobrança agora;
+    a primeira fatura do plano novo sai na data da virada (cartão em arquivo)."""
+    interval = (payload.interval or "monthly").lower()
+    if interval not in ("monthly", "annual"):
+        raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
+    plan = (payload.plan or "").lower()
+    if plan not in ("essencial", "plus", "pro"):
+        raise HTTPException(status_code=400, detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
+    target_price = _resolve_price_id(plan, interval)
+    if not STRIPE_SECRET_KEY or not target_price:
+        raise HTTPException(status_code=503, detail="Esse plano ainda não está configurado.")
+
+    import stripe
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import get_auth_user
+
+    user = await asyncio.to_thread(get_auth_user, user_id) or {}
+    if (user.get("last_payment_status") or "") == "grandfathered":
+        raise HTTPException(status_code=409, detail={
+            "error": "lifetime",
+            "message": "Você tem acesso vitalício de brinde — trocar de plano substituiria isso.",
+        })
+    cust = user.get("stripe_customer_id")
+    if not cust:
+        raise HTTPException(status_code=409, detail={"error": "no_subscription"})
+    stripe.api_key = STRIPE_SECRET_KEY
 
     try:
-        session = _new_session(customer_id)
-    except stripe.error.InvalidRequestError as exc:
-        # Customer salvo é inválido (ex.: criado em test e a chave virou live, ou
-        # deletado no Stripe) → recria e tenta de novo, sem quebrar pro usuário.
-        if "no such customer" in str(exc).lower():
-            customer_id = _new_customer()
-            session = _new_session(customer_id)
-        else:
-            logging.getLogger(__name__).error("billing_checkout_invalid_request: %s", exc)
-            raise HTTPException(status_code=502, detail=f"Stripe recusou o checkout: {exc}")
-    except stripe.error.StripeError as exc:
-        logging.getLogger(__name__).error("billing_checkout_stripe_error: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Erro no Stripe ao iniciar o checkout: {exc}")
+        sub = await asyncio.to_thread(_find_active_subscription, stripe, cust)
+    except StripeLookupError:
+        raise HTTPException(status_code=503,
+                            detail="O Stripe está instável agora. Tenta de novo em instantes.")
+    if sub is None:
+        raise HTTPException(status_code=409, detail={"error": "no_subscription"})
 
-    return {"checkout_url": session.url, "interval": interval}
+    cur_price = _sub_price_id(sub)
+    if cur_price == target_price:
+        raise HTTPException(status_code=400, detail={
+            "error": "same_plan", "message": "Esse já é o seu plano atual."})
+
+    sub_id = _sg(sub, "id")
+    period_end = _sub_period_end_ts(sub)
+    if not sub_id or not period_end:
+        raise HTTPException(status_code=502, detail="Não consegui ler sua assinatura no Stripe.")
+
+    try:
+        sched_ref = _sg(sub, "schedule")
+        if sched_ref:
+            sched_id = sched_ref if isinstance(sched_ref, str) else _sg(sched_ref, "id")
+        else:
+            sched = await asyncio.to_thread(
+                stripe.SubscriptionSchedule.create, from_subscription=sub_id)
+            sched_id = _sg(sched, "id")
+        sched = await asyncio.to_thread(stripe.SubscriptionSchedule.retrieve, sched_id)
+        phases = _sg(sched, "phases", []) or []
+        p0_start = _sg(phases[0], "start_date") if phases else None
+        # Fase 1: plano atual até o fim do período pago. Fase 2: 1 ciclo do
+        # plano novo; depois o schedule "solta" (release) e a assinatura segue
+        # renovando no preço novo normalmente.
+        await asyncio.to_thread(
+            stripe.SubscriptionSchedule.modify,
+            sched_id,
+            end_behavior="release",
+            proration_behavior="none",
+            phases=[
+                {"items": [{"price": cur_price, "quantity": 1}],
+                 "start_date": p0_start, "end_date": period_end},
+                {"items": [{"price": target_price, "quantity": 1}], "iterations": 1},
+            ],
+        )
+    except stripe.error.StripeError as exc:
+        logging.getLogger(__name__).error("change_plan_stripe_error user=%s: %s", user_id, exc)
+        raise HTTPException(status_code=502, detail="Não foi possível trocar seu plano agora. Tente novamente em instantes.")
+
+    effective_iso = datetime.fromtimestamp(period_end, tz=timezone.utc).date().isoformat()
+
+    # E-mail de confirmação do agendamento (best-effort, nunca derruba a troca)
+    try:
+        email = user.get("email")
+        if email:
+            from core.services.email_service import send_plan_change_scheduled_email
+            plan_names = {"essencial": "Essencial", "plus": "Plus", "pro": "Pro"}
+            await asyncio.to_thread(
+                send_plan_change_scheduled_email, email,
+                plan_names.get(plan, plan.title()), effective_iso, DASHBOARD_URL)
+    except Exception as exc:
+        print(f"[billing] email troca agendada user={user_id}: {exc}", file=sys.stderr)
+
+    await log_system_event(
+        "info", "billing_plan_change_scheduled",
+        f"Troca de plano agendada para {plan}/{interval} em {effective_iso}.",
+        source="billing", user_id=user_id,
+        details={"plan": plan, "interval": interval, "effective_at": effective_iso},
+    )
+    return {"ok": True, "scheduled": True, "plan": plan, "interval": interval,
+            "effective_at": effective_iso}
+
+
+@app.post("/billing/cancel-change")
+@limiter.limit("15/hour")
+async def billing_cancel_change(request: Request, user_id: int = Depends(_get_current_user)):
+    """Desfaz uma troca de plano agendada (solta o schedule; assinatura segue
+    no plano atual como se nada tivesse acontecido)."""
+    import stripe
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from db import get_auth_user
+
+    user = await asyncio.to_thread(get_auth_user, user_id) or {}
+    cust = user.get("stripe_customer_id")
+    if not STRIPE_SECRET_KEY or not cust:
+        raise HTTPException(status_code=409, detail={"error": "no_subscription"})
+    stripe.api_key = STRIPE_SECRET_KEY
+
+    try:
+        sub = await asyncio.to_thread(_find_active_subscription, stripe, cust)
+    except StripeLookupError:
+        raise HTTPException(status_code=503,
+                            detail="O Stripe está instável agora. Tenta de novo em instantes.")
+    sched_ref = _sg(sub, "schedule") if sub is not None else None
+    if not sched_ref:
+        raise HTTPException(status_code=400, detail={"error": "no_change",
+                                                     "message": "Não há troca agendada."})
+    sched_id = sched_ref if isinstance(sched_ref, str) else _sg(sched_ref, "id")
+    try:
+        await asyncio.to_thread(stripe.SubscriptionSchedule.release, sched_id)
+    except stripe.error.StripeError as exc:
+        logging.getLogger(__name__).error("cancel_change_stripe_error user=%s: %s", user_id, exc)
+        raise HTTPException(status_code=502, detail="Não foi possível desfazer a troca agora. Tente novamente em instantes.")
+    await log_system_event(
+        "info", "billing_plan_change_cancelled",
+        "Troca de plano agendada foi desfeita.", source="billing", user_id=user_id,
+    )
+    return {"ok": True}
 
 
 @app.post("/billing/webhook")
@@ -3260,7 +4121,7 @@ async def billing_webhook(request: Request):
     import stripe
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import update_user_plan, get_user_by_stripe_customer, set_payment_status
+    from db import update_user_plan, get_user_by_stripe_customer, set_payment_status, mark_plan_selected
 
     stripe.api_key = STRIPE_SECRET_KEY
     payload    = await request.body()
@@ -3318,6 +4179,32 @@ async def billing_webhook(request: Request):
             return None
         return datetime.fromtimestamp(ts, tz=timezone.utc)
 
+    def _subscription_price_id(sub) -> str | None:
+        """Price da assinatura (primeiro item). SDK v8 não é dict — só _g."""
+        items_obj = _g(sub, "items", {})
+        data = _g(items_obj, "data", []) or []
+        if not data:
+            return None
+        price = _g(data[0], "price", {})
+        pid = _g(price, "id")
+        return pid if isinstance(pid, str) else None
+
+    def _subscription_amount(sub) -> tuple[float, str]:
+        """Valor recorrente (unit_amount) e moeda do 1º item da assinatura.
+
+        Usado no Purchase da CAPI: durante o trial o amount_total do checkout é
+        0, então mandamos o valor comprometido do plano (o que otimiza melhor).
+        """
+        items_obj = _g(sub, "items", {})
+        data = _g(items_obj, "data", []) or []
+        if not data:
+            return (0.0, "BRL")
+        price = _g(data[0], "price", {})
+        unit = _g(price, "unit_amount")  # centavos
+        cur = _g(price, "currency") or "brl"
+        value = (float(unit) / 100.0) if unit is not None else 0.0
+        return (value, str(cur).upper())
+
     def _invoice_subscription_id(invoice) -> str | None:
         sub_id = _g(invoice, "subscription")
         if sub_id:
@@ -3352,22 +4239,39 @@ async def billing_webhook(request: Request):
         session = event["data"]["object"]
         user_id = _resolve_user(session)
         sub_id  = _g(session, "subscription")
-        # Trial 7d: subscription nasce status=trialing, sem invoice paga.
+        # Funil: registra a CONCLUSÃO na tabela dedicada, com o session_id
+        # (correlaciona com o record_checkout_started da mesma tentativa).
+        # Vale pra trial e compra imediata — os dois disparam este evento.
+        if user_id:
+            from db import record_checkout_completed
+            await asyncio.to_thread(
+                record_checkout_completed, user_id, _g(session, "id"))
+        # Trial 30d: subscription nasce status=trialing, sem invoice paga.
         # Promover ja agora pra user nao ficar Free durante o trial.
         if user_id and sub_id:
             sub = stripe.Subscription.retrieve(sub_id)
             expires_dt = _subscription_period_end(sub)
             sub_status = _g(sub, "status") or "trialing"
-            update_user_plan(user_id, "pro", expires_dt)
+            plan_value = _stored_plan_for_price(_subscription_price_id(sub))
+            update_user_plan(user_id, plan_value, expires_dt)
             set_payment_status(user_id, sub_status)
+            # Checkout concluído = plano escolhido: libera o gate da /precos
+            # (idempotente; só grava na primeira vez).
+            await asyncio.to_thread(mark_plan_selected, user_id)
+            # Trial nasceu → registra a queima do trial no telefone (1 por
+            # telefone na vida). Falha precisa propagar: resposta 5xx faz a
+            # Stripe repetir o webhook até a trava ficar persistida.
+            if sub_status == "trialing":
+                from db.plans import claim_trial_for_user
+                await asyncio.to_thread(claim_trial_for_user, user_id)
             await log_system_event(
                 "info",
                 "billing_checkout_completed",
-                f"Checkout concluido; plano pro ate {expires_dt.date() if expires_dt else 'sem data'}.",
+                f"Checkout concluido; plano {plan_value} ate {expires_dt.date() if expires_dt else 'sem data'}.",
                 source="billing",
                 user_id=user_id,
                 details={
-                    "plan": "pro",
+                    "plan": plan_value,
                     "expires_at": expires_dt.isoformat() if expires_dt else None,
                     "status": sub_status,
                 },
@@ -3389,6 +4293,38 @@ async def billing_webhook(request: Request):
                 )
             except Exception as exc:
                 print(f"[billing] admin notify falhou user={user_id}: {exc}")
+            # Meta Conversions API — conversão server-side, deduplicada com o
+            # pixel via event_id derivado da sessão. Trial → StartTrial; compra
+            # imediata (sem trial) → Purchase. A cobrança REAL pós-trial e as
+            # renovações viram Purchase lá no invoice.paid (não aqui).
+            try:
+                from core.services.meta_capi import (
+                    capi_configured,
+                    purchase_event_id,
+                    send_event,
+                    trial_event_id,
+                )
+                _sid = _g(session, "id")
+                if capi_configured() and _sid:
+                    _value, _currency = _subscription_amount(sub)
+                    _capi_email = await _user_email(user_id)
+                    _evt_time = int(_g(event, "created") or _g(session, "created") or 0)
+                    if sub_status == "trialing":
+                        _ev_name, _ev_id = "StartTrial", trial_event_id(_sid)
+                    else:
+                        _ev_name, _ev_id = "Purchase", purchase_event_id(_sid)
+                    await asyncio.to_thread(
+                        send_event,
+                        event_name=_ev_name,
+                        event_id=_ev_id,
+                        event_time=_evt_time,
+                        value=_value,
+                        currency=_currency,
+                        email=_capi_email,
+                        event_source_url=f"{DASHBOARD_URL}/home",
+                    )
+            except Exception as exc:
+                print(f"[billing] meta capi checkout ({sub_status}) falhou user={user_id}: {exc}")
         elif user_id:
             await log_system_event(
                 "info",
@@ -3406,16 +4342,18 @@ async def billing_webhook(request: Request):
             sub = stripe.Subscription.retrieve(sub_id)
             expires_dt = _subscription_period_end(sub)
             sub_status = _g(sub, "status") or "active"
-            update_user_plan(user_id, "pro", expires_dt)
+            plan_value = _stored_plan_for_price(_subscription_price_id(sub))
+            update_user_plan(user_id, plan_value, expires_dt)
             set_payment_status(user_id, sub_status)
-            print(f"[billing] user {user_id} → pro até {expires_dt.date() if expires_dt else 'sem data'}")
+            await asyncio.to_thread(mark_plan_selected, user_id)
+            print(f"[billing] user {user_id} → {plan_value} até {expires_dt.date() if expires_dt else 'sem data'}")
             await log_system_event(
                 "info",
                 "billing_plan_updated",
-                "Plano do usuario atualizado para pro.",
+                f"Plano do usuario atualizado para {plan_value}.",
                 source="billing",
                 user_id=user_id,
-                details={"plan": "pro", "expires_at": expires_dt.isoformat() if expires_dt else None, "status": sub_status},
+                details={"plan": plan_value, "expires_at": expires_dt.isoformat() if expires_dt else None, "status": sub_status},
             )
             # Email de confirmacao de cobranca (item 39) — so quando valor > 0
             # (invoices do trial vem com amount_paid=0 e nao precisam de notificacao).
@@ -3450,6 +4388,32 @@ async def billing_webhook(request: Request):
                         )
                 except Exception as exc:
                     print(f"[affiliates] comissao falhou user={user_id}: {exc}")
+
+                # Meta Conversions API — Purchase da cobrança REAL (fim do trial
+                # e renovações), com o valor efetivamente pago. A primeira fatura
+                # da compra imediata (billing_reason=subscription_create) já virou
+                # Purchase no checkout.session.completed, então pulamos ela aqui
+                # pra não contar duas vezes. Server-only: o usuário não está no
+                # site nesse momento (nada a deduplicar com o pixel).
+                try:
+                    from core.services.meta_capi import capi_configured, purchase_event_id, send_event
+                    _billing_reason = _g(invoice, "billing_reason")
+                    _inv_id = _g(invoice, "id")
+                    if capi_configured() and _inv_id and _billing_reason != "subscription_create":
+                        _capi_email = await _user_email(user_id)
+                        _evt_time = int(_g(event, "created") or _g(invoice, "created") or 0)
+                        await asyncio.to_thread(
+                            send_event,
+                            event_name="Purchase",
+                            event_id=purchase_event_id(_inv_id),
+                            event_time=_evt_time,
+                            value=amount_brl,
+                            currency=(_g(invoice, "currency") or "brl").upper(),
+                            email=_capi_email,
+                            event_source_url=f"{DASHBOARD_URL}/home",
+                        )
+                except Exception as exc:
+                    print(f"[billing] meta capi invoice purchase falhou user={user_id}: {exc}")
 
     elif event["type"] == "customer.subscription.trial_will_end":
         # Stripe dispara ~3 dias antes do trial acabar. Email de aviso (item 38)
@@ -3546,7 +4510,8 @@ async def billing_webhook(request: Request):
 
 
 @app.post("/billing/portal")
-async def billing_portal(user_id: int = Depends(_get_current_user)):
+@limiter.limit("30/hour")
+async def billing_portal(request: Request, user_id: int = Depends(_get_current_user)):
     """
     Cria uma sessão no Stripe Customer Portal para o usuário gerenciar
     a assinatura (cancelar, trocar cartão, ver faturas).
@@ -3603,16 +4568,18 @@ async def ai_chat(
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from core.services.ai_chat import chat as ai_chat_run
+    from core.services.plan_service import ai_monthly_limit_for
 
+    monthly_limit = await asyncio.to_thread(ai_monthly_limit_for, user_id)
     reply = await asyncio.to_thread(
         ai_chat_run,
         user_id,
         text,
-        monthly_limit=AI_CHAT_MONTHLY_LIMIT,
+        monthly_limit=monthly_limit,
         platform="dashboard",
     )
     used_after = await asyncio.to_thread(_db_ai_usage, user_id)
-    return {"reply": reply, "usage": {"used": used_after, "limit": AI_CHAT_MONTHLY_LIMIT}}
+    return {"reply": reply, "usage": {"used": used_after, "limit": monthly_limit}}
 
 
 @app.get("/ai/messages")
@@ -3647,7 +4614,9 @@ async def ai_messages(
             "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
         })
     used_after = await asyncio.to_thread(_db_ai_usage, user_id)
-    return {"messages": out, "usage": {"used": used_after, "limit": AI_CHAT_MONTHLY_LIMIT}}
+    from core.services.plan_service import ai_monthly_limit_for
+    monthly_limit = await asyncio.to_thread(ai_monthly_limit_for, user_id)
+    return {"messages": out, "usage": {"used": used_after, "limit": monthly_limit}}
 
 
 def _db_ai_usage(user_id: int) -> int:
@@ -3724,6 +4693,7 @@ async def dashboard_short_link(
 <html lang="pt-BR">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Link expirado</title>
+<script src="/safe-area.js?v=1"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#070b14;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;
@@ -3811,9 +4781,8 @@ def _verify_unsub_token(user_id: int, email: str, token: str) -> bool:
     return _hmac.compare_digest(expected, token)
 
 
-@app.get("/unsubscribe")
-async def unsubscribe(uid: int, token: str):
-    # busca o email pelo user_id
+async def _apply_unsubscribe(uid: int, token: str) -> bool:
+    """Valida o token e marca o opt-out. Retorna False pra uid/token inválido."""
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -3821,12 +4790,8 @@ async def unsubscribe(uid: int, token: str):
             )
             row = await cur.fetchone()
 
-    if not row:
-        return HTMLResponse("<h2>Link inválido.</h2>", status_code=400)
-
-    email = row["email"]
-    if not _verify_unsub_token(uid, email, token):
-        return HTMLResponse("<h2>Link inválido ou expirado.</h2>", status_code=400)
+    if not row or not _verify_unsub_token(uid, row["email"], token):
+        return False
 
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
@@ -3835,6 +4800,23 @@ async def unsubscribe(uid: int, token: str):
                 (uid,),
             )
         await conn.commit()
+    return True
+
+
+@app.post("/unsubscribe")
+async def unsubscribe_one_click(uid: int, token: str):
+    """One-click unsubscribe (RFC 8058): o Gmail/Yahoo fazem POST na URL do
+    header List-Unsubscribe quando o usuário toca no botão nativo "Cancelar
+    inscrição". Sem interação — só 200 em texto puro, nada de HTML."""
+    if not await _apply_unsubscribe(uid, token):
+        return PlainTextResponse("invalid", status_code=400)
+    return PlainTextResponse("ok")
+
+
+@app.get("/unsubscribe")
+async def unsubscribe(uid: int, token: str):
+    if not await _apply_unsubscribe(uid, token):
+        return HTMLResponse("<h2>Link inválido ou expirado.</h2>", status_code=400)
 
     return HTMLResponse("""
 <!DOCTYPE html>
@@ -3842,7 +4824,8 @@ async def unsubscribe(uid: int, token: str):
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>Descadastro — PigBank</title>
+  <script src="/safe-area.js?v=1"></script>
+  <title>Descadastro · PigBank</title>
   <style>
     body{margin:0;padding:0;background:#0a0d18;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
          color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh}
@@ -3888,13 +4871,23 @@ async def monthly_history(request: Request, user_id: int, months: int = 6):
     _authorize_dashboard_access(request, user_id)
     if not 1 <= months <= 24:
         raise HTTPException(status_code=400, detail="months must be 1-24")
-    # Free: limita janela ao history_days do plano (~1 mes). Nao retorna 403 pra
-    # nao quebrar dashboard — apenas capa silenciosamente. Frontend pode ler o
-    # plano e mostrar CTA "ver mais com Pro".
-    from core.services.plan_service import is_pro
-    if months > 1 and not is_pro(user_id):
-        months = 1
-    data = await get_monthly_history(user_id, months)
+    # Limita a janela ao histórico do plano (Grátis só o mês corrente,
+    # Essencial 3, Plus 12, Pro 24; v1: Free 1 mês). Nao retorna 403 pra nao
+    # quebrar dashboard — apenas capa silenciosamente. Frontend pode ler o plano
+    # e mostrar CTA "ver mais" de upgrade.
+    from core.services.plan_service import (
+        history_current_month_only,
+        history_earliest_date,
+        history_months_cap,
+    )
+    if history_current_month_only(user_id):
+        months = 1                                  # Grátis: só o mês corrente
+    else:
+        months_cap = history_months_cap(user_id)
+        if months_cap is not None and months > months_cap:
+            months = months_cap
+    earliest = await asyncio.to_thread(history_earliest_date, user_id)
+    data = await get_monthly_history(user_id, months, start_date=earliest)
     return {"data": data}
 
 
@@ -3906,11 +4899,13 @@ async def daily_expenses_window(request: Request, user_id: int, days: int = 30):
     _authorize_dashboard_access(request, user_id)
     if days not in (7, 30, 90):
         raise HTTPException(status_code=400, detail="days must be 7, 30 or 90")
-    from core.services.plan_service import is_pro
-    effective = days
-    if days > 31 and not is_pro(user_id):
-        effective = 31
-    data = await get_daily_expenses_window(user_id, effective)
+    from core.services.plan_service import history_earliest_date
+    local_today = datetime.now(ZoneInfo(TZ)).date()
+    requested_start = local_today - timedelta(days=days)
+    earliest = await asyncio.to_thread(history_earliest_date, user_id)
+    start_date = max(requested_start, earliest) if earliest else requested_start
+    effective = max(1, (local_today - start_date).days + 1)
+    data = await get_daily_expenses_window(user_id, effective, start_date=start_date)
     return {"data": data, "days": days, "effective_days": effective}
 
 
@@ -3937,7 +4932,18 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from core.services.category_service import infer_category, learn_from_inference
+    from core.services.plan_limits import PlanLimitExceeded
+    from core.services.plan_service import check_can_create_launch
     from utils_text import is_internal_category, canonicalize_category_label
+
+    # Teto mensal de lançamentos do tier (Grátis no v2; no-op com v2 off).
+    try:
+        await asyncio.to_thread(check_can_create_launch, user_id)
+    except PlanLimitExceeded as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "plan_limit", "feature": exc.feature, "message": exc.message},
+        )
 
     tipo = (payload.tipo or "").strip().lower()
     if tipo not in ("receita", "despesa", "credito"):
@@ -4010,7 +5016,8 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             except Exception as exc:
-                raise HTTPException(status_code=500, detail=f"Erro ao registrar parcelamento: {exc}") from exc
+                logging.getLogger(__name__).error("registrar_parcelamento user=%s: %s", user_id, exc)
+                raise HTTPException(status_code=500, detail="Erro ao registrar parcelamento. Tente novamente.") from exc
 
             info, total = (result[0], result[1]) if isinstance(result, tuple) else (result, valor)
             return {
@@ -4320,6 +5327,10 @@ app.include_router(analytics_router)
 app.include_router(affiliates_router)
 
 
+# ─── Agentes do Piggy → frontend/routes/agents.py ────────────────────────────
+app.include_router(agents_router)
+
+
 @app.get("/debug/ai/{user_id}/payload")
 async def debug_ai_payload_route(
     request: Request,
@@ -4368,8 +5379,12 @@ async def history_list_route(
     (só estornos)."""
     _authorize_dashboard_access(request, user_id)
     from db import list_history
+    from core.services.plan_service import history_earliest_date
     fd = _parse_date_param(from_, "from")
     td = _parse_date_param(to, "to")
+    earliest = await asyncio.to_thread(history_earliest_date, user_id)
+    if earliest and (fd is None or fd < earliest):
+        fd = earliest
     result = await asyncio.to_thread(
         list_history,
         user_id, fd, td, categoria, tipo, q,
@@ -4397,7 +5412,11 @@ async def history_quick_stats_route(
     Cada um vira um card clicável que aplica filtro correspondente."""
     _authorize_dashboard_access(request, user_id)
     from db import compute_history_quick_stats
+    from core.services.plan_service import history_earliest_date
     fd, td = _resolve_analytics_window(months, from_, to)
+    earliest = await asyncio.to_thread(history_earliest_date, user_id)
+    if earliest and fd < earliest:
+        fd = earliest
     result = await asyncio.to_thread(compute_history_quick_stats, user_id, fd, td)
     return {"ok": True, **result, "window": {"from": fd.isoformat(), "to": td.isoformat()}}
 
@@ -5453,6 +6472,9 @@ app.include_router(settings_router)
 # ─── Open Finance (Pluggy + mock) → frontend/routes/open_finance.py (F1 E4) ──
 app.include_router(open_finance_router)
 
+# ─── Push notifications (app iOS) → frontend/routes/push.py ──────────────────
+app.include_router(push_router)
+
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────
 
@@ -5511,7 +6533,9 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
 
                 elif t == "get_history":
                     n       = min(max(int(payload.get("months", 6)), 1), 24)
-                    history = await get_monthly_history(user_id, n)
+                    from core.services.plan_service import history_earliest_date
+                    earliest = await asyncio.to_thread(history_earliest_date, user_id)
+                    history = await get_monthly_history(user_id, n, start_date=earliest)
                     await ws.send_text(jdump({"type": "history_data", "data": history}))
 
                 elif t == "ping":

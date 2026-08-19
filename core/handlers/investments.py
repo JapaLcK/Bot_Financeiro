@@ -4,6 +4,7 @@ import re
 import db
 from utils_text import fmt_brl, fmt_rate
 from core.dashboard_links import build_dashboard_link
+from core.services.plan_limits import PlanLimitExceeded
 import logging
 
 logger = logging.getLogger(__name__)
@@ -57,8 +58,9 @@ def _format_inv_name(name: str) -> str:
     return " ".join(out)
 
 
-def list_investments(user_id: int, intro: str | None = None) -> str:
-    rows = db.accrue_all_investments(user_id)
+def list_investments(user_id: int, intro: str | None = None, rows: list | None = None) -> str:
+    if rows is None:
+        rows = db.accrue_all_investments(user_id)
     header = intro or "📈 **Sua carteira**"
     if not rows:
         return (
@@ -91,6 +93,29 @@ def list_investments(user_id: int, intro: str | None = None) -> str:
     )
 
 
+def _investment_not_found(user_id: int, investment_name: str, *, action: str) -> str:
+    """Resposta para INV_NOT_FOUND (nome não bate com nada cadastrado).
+
+    O cadastro de investimento é feito só pelo dashboard (ver `create`), então
+    a resposta precisa levar o usuário até lá. Só dizer "não encontrei" — ou
+    pior, devolver o código cru — deixa ele sem saída nenhuma.
+    """
+    rows = db.accrue_all_investments(user_id)
+    pretty = _format_inv_name(investment_name)
+    if not rows:
+        return (
+            f"Você ainda não tem nenhum investimento cadastrado, "
+            f"por isso não dá para {action} **{pretty}**.\n"
+            "Cadastre ele primeiro no dashboard — depois é só mandar o comando aqui pelo WhatsApp.\n\n"
+            + _investment_dashboard_link(user_id)
+        )
+    return list_investments(
+        user_id,
+        f"Não encontrei **{pretty}**. Estes são seus investimentos:",
+        rows=rows,
+    )
+
+
 def create(user_id: int, raw_name: str, original_text: str) -> str:
     return list_investments(
         user_id,
@@ -115,20 +140,31 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
     if not amount or float(amount) <= 0:
         return list_investments(user_id, "Qual valor você quer aportar?")
 
+    # Códigos vêm de db/investments.py como str(exc) — trate por TIPO e código
+    # exato. Casar substring é frágil: "not found" nunca casou com
+    # "INV_NOT_FOUND" (espaço × underscore) e o código cru vazava pro WhatsApp.
     try:
         launch_id, _new_acc, _new_inv, canon = db.investment_deposit_from_account(
             user_id, investment_name, float(amount), text
         )
-        display_id = db.display_id_for(user_id, launch_id)
-        return f"✅ Aporte de **{fmt_brl(float(amount))}** em **{canon}**. ID #{display_id}."
-    except Exception as e:
-        err = str(e)
-        if "not found" in err.lower():
-            return list_investments(user_id, f"Não encontrei **{investment_name}**. Estes são seus investimentos:")
-        if "saldo insuficiente" in err.lower() or "insufficient" in err.lower():
+    except LookupError:
+        return _investment_not_found(user_id, investment_name, action="aportar em")
+    except ValueError as e:
+        code = str(e)
+        if code == "INSUFFICIENT_ACCOUNT":
             return "Saldo insuficiente na conta para esse aporte.\n\n" + _investment_dashboard_link(user_id)
-        return f"Erro ao aportar: {err}"
-    return f"✅ Aporte de **{fmt_brl(float(amount))}** em **{canon}**. ID #{db.display_id_for(user_id, launch_id)}.\n\n" + list_investments(user_id)
+        if code == "AMOUNT_INVALID":
+            return "Valor inválido para aporte. Tente: *aportar 500 no CDB Nubank*."
+        logger.warning("deposit: código inesperado user=%s inv=%s code=%s", user_id, investment_name, code)
+        return "Não consegui registrar esse aporte. Confira o valor e tente de novo."
+    except PlanLimitExceeded:
+        raise  # handle_incoming responde com a mensagem amigável de upgrade
+    except Exception:
+        logger.exception("deposit falhou user=%s inv=%s", user_id, investment_name)
+        return "Não consegui registrar esse aporte agora. Tente de novo em instantes."
+
+    display_id = db.display_id_for(user_id, launch_id)
+    return f"✅ Aporte de **{fmt_brl(float(amount))}** em **{canon}**. ID #{display_id}."
 
 
 def check_cdi() -> str:
@@ -190,13 +226,21 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
             text,
             withdraw_all=want_all,
         )
-    except Exception as e:
-        err = str(e)
-        if "not found" in err.lower() or "inv_not_found" in err.lower():
-            return list_investments(user_id, f"Não encontrei **{investment_name}**. Estes são seus investimentos:")
-        if "saldo insuficiente" in err.lower() or "insufficient" in err.lower():
+    except LookupError:
+        return _investment_not_found(user_id, investment_name, action="resgatar de")
+    except ValueError as e:
+        code = str(e)
+        if code == "INSUFFICIENT_INVEST":
             return f"Saldo insuficiente no investimento **{investment_name}**.\n\n" + list_investments(user_id)
-        return f"Erro ao resgatar: {err}"
+        if code == "AMOUNT_INVALID":
+            return "Valor inválido para resgate. Tente: *resgatar 500 do CDB Nubank*."
+        logger.warning("withdraw: código inesperado user=%s inv=%s code=%s", user_id, investment_name, code)
+        return "Não consegui registrar esse resgate. Confira o valor e tente de novo."
+    except PlanLimitExceeded:
+        raise  # handle_incoming responde com a mensagem amigável de upgrade
+    except Exception:
+        logger.exception("withdraw falhou user=%s inv=%s", user_id, investment_name)
+        return "Não consegui registrar esse resgate agora. Tente de novo em instantes."
 
     gross = float(taxes.get("gross", amount or 0)) if taxes else float(amount or 0)
     tax_note = ""

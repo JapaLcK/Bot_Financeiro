@@ -30,6 +30,23 @@ def init_db():
           balance numeric not null default 0
         )
         """,
+
+        # Push notifications (app iOS) — device token do APNs por aparelho.
+        # unique(token): um device que re-registra atualiza o dono (troca de
+        # conta no mesmo aparelho). environment separa sandbox/production do APNs
+        # porque o mesmo token NÃO vale nos dois ambientes.
+        """
+        create table if not exists push_tokens (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          token text not null unique,
+          platform text not null default 'ios',
+          environment text not null default 'production',
+          created_at timestamptz default now(),
+          updated_at timestamptz default now()
+        )
+        """,
+        """create index if not exists idx_push_tokens_user on push_tokens(user_id)""",
         """
         create table if not exists pockets (
           id bigserial primary key,
@@ -575,6 +592,34 @@ def init_db():
         """,
 
         # -----------------------------
+        # Banqueiro (agente cofre): vincula uma caixinha/meta do PigBank a um
+        # investimento OF real (Caixinha do Nubank/PicPay = CDB). of_last_seen_balance
+        # guarda o saldo já contabilizado pelo Banqueiro pra detectar o aporte por
+        # delta entre syncs (open_finance_investments.balance é sobrescrito, sem
+        # histórico). ALTER aqui (não no bloco de criação da pockets, lá em cima)
+        # porque o FK exige que open_finance_investments já exista.
+        # -----------------------------
+        """
+        alter table pockets add column if not exists of_investment_id bigint
+          references open_finance_investments(id) on delete set null
+        """,
+        """
+        alter table pockets add column if not exists of_last_seen_balance numeric
+        """,
+        # Baseline do RENDIMENTO acumulado (open_finance_investments.raw->amountProfit)
+        # já contabilizado pelo Banqueiro. Serve pra separar aporte (você guardou) de
+        # rendimento (rendeu) no delta de saldo — senão um bom mês de juros vira "aporte".
+        """
+        alter table pockets add column if not exists of_last_seen_profit numeric
+        """,
+        # source='open_finance' marca caixinhas AUTO-CRIADAS a partir do banco (via
+        # sync do Open Finance): read-only, saldo espelhado, sem juros interno. As
+        # criadas pelo usuário ficam 'manual' (mesmo quando vinculadas a uma caixinha OF).
+        """
+        alter table pockets add column if not exists source text not null default 'manual'
+        """,
+
+        # -----------------------------
         # Open Finance — reconciliação (Fase 2): dedup OF ↔ manual
         # -----------------------------
         """
@@ -686,6 +731,12 @@ def init_db():
         """,
         """
         alter table auth_accounts add column if not exists last_payment_status text not null default 'inactive'
+        """,
+        # Marca de "credenciais trocadas" (reset de senha). Usada pra invalidar
+        # tokens legados SEM jti após um reset — os com jti já morrem via
+        # revogação de sessão, mas os grandfathered sem jti não têm o que revogar.
+        """
+        alter table auth_accounts add column if not exists password_changed_at timestamptz
         """,
         """
         create unique index if not exists idx_auth_accounts_phone_unique
@@ -1544,6 +1595,160 @@ def init_db():
         create index if not exists idx_affiliate_commissions_affiliate
           on affiliate_commissions (affiliate_id, status, available_at)
         """,
+
+        # ── Planos v2 (escada Grátis/Essencial/Plus/Pro) ─────────────────────
+        # Trial de 30 dias do plano escolhido, via Stripe COM CARTÃO (2026-08-06):
+        # plan_trials registra a queima do trial por telefone. É keyed por
+        # phone_hash e NÃO tem FK pra users de propósito: sobrevive à deleção da
+        # conta — recriar conta com o mesmo número herda o started_at original
+        # (trial já queimado). Regra: 30 dias únicos por telefone, na vida.
+        """alter table auth_accounts add column if not exists trial_started_at timestamptz""",
+        # Downsell do fim do trial: 1 e-mail por conta, na vida.
+        """alter table auth_accounts add column if not exists trial_downsell_sent_at timestamptz""",
+        # Gate de escolha de plano no cadastro (2026-08-11): depois de criar a
+        # conta o usuário é OBRIGADO a passar pela /precos e escolher um plano
+        # (mesmo o Grátis) antes de entrar no dashboard. plan_selected_at marca
+        # o momento dessa escolha — NULL = ainda não escolheu → cai na /precos.
+        #
+        # Backfill preciso pela fronteira REAL do rollout (sem cutoff por data
+        # chutado): o ADD COLUMN com DEFAULT now() carimba TODAS as contas que já
+        # existem no exato instante em que a migration roda pela 1ª vez — não
+        # importa quando foram criadas nem se o v2 estava ligado. Em seguida o
+        # DROP DEFAULT faz TODO cadastro novo nascer com NULL (→ cai na /precos).
+        # Idempotente: `if not exists` pula o ADD (e o backfill junto) em
+        # redeploys, então contas novas nunca são recarimbadas; DROP DEFAULT de
+        # coluna sem default é no-op. now() é STABLE → fast default (metadata),
+        # avaliado uma vez, sem reescrever a tabela.
+        """alter table auth_accounts add column if not exists plan_selected_at timestamptz default now()""",
+        """alter table auth_accounts alter column plan_selected_at drop default""",
+        # Origem do cadastro (2026-08-17): de onde a conta nasceu, pra separar
+        # no painel de admin quem se cadastrou pela web (passa pelo gate da
+        # /precos) de quem veio pelo app iOS (isento do gate — diretriz 3.1.1
+        # da Apple). Valores: 'web' | 'app' | 'google' | 'google_app' |
+        # 'whatsapp'. NULL = conta anterior a esta coluna (origem desconhecida);
+        # sem backfill por data chutado — o painel mostra "—" pra elas.
+        """alter table auth_accounts add column if not exists signup_source text""",
+        """
+        create table if not exists plan_trials (
+          phone_hash text primary key,
+          user_id bigint,
+          started_at timestamptz not null default now(),
+          model_version smallint not null default 2
+        )
+        """,
+        # Registros anteriores ao trial via Stripe recebem versão 1. Novos
+        # claims gravam versão 2 explicitamente; o script one-time remove só v1.
+        """alter table plan_trials add column if not exists model_version smallint not null default 1""",
+        """alter table plan_trials alter column model_version set default 2""",
+
+        # ── Funil de checkout (telemetria durável, fora do log operacional) ──
+        # Vive em tabela própria, NÃO em system_event_logs, por dois motivos:
+        # (1) system_event_logs é purgável (o "Limpar" do painel, admin.py
+        #     purge, delete individual) — telemetria de negócio não pode sumir
+        #     numa limpeza de rotina;
+        # (2) session_id (id da Checkout Session do Stripe) correlaciona a
+        #     abertura com a conclusão da MESMA tentativa — sem isso, heurística
+        #     de timestamp conta errado quem comprou, cancelou e reabriu.
+        # kind: 'started' (endpoint /billing/create-checkout) | 'completed'
+        # (webhook checkout.session.completed). user_id SET NULL na exclusão
+        # da conta: o evento sobrevive (contamos sessões, não só pessoas vivas).
+        """
+        create table if not exists checkout_funnel_events (
+          id bigserial primary key,
+          user_id bigint references users(id) on delete set null,
+          session_id text,
+          kind text not null check (kind in ('started', 'completed')),
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_checkout_funnel_kind_created
+          on checkout_funnel_events (kind, created_at desc)
+        """,
+        """
+        create index if not exists idx_checkout_funnel_session
+          on checkout_funnel_events (session_id)
+        """,
+
+        # ── Agentes do Piggy (prateleira de jobs proativos) ──────────────────
+        # Um agente por kind por usuário (custom multiplica no futuro via
+        # config, não via linhas). status: 'active' | 'paused'.
+        """
+        create table if not exists agents (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          kind text not null,
+          config jsonb not null default '{}'::jsonb,
+          status text not null default 'active',
+          created_at timestamptz not null default now(),
+          unique (user_id, kind)
+        )
+        """,
+        """
+        create index if not exists idx_agents_user_status
+          on agents (user_id, status)
+        """,
+        # Cada disparo de agente. dedupe_key torna o runner idempotente
+        # (rodar o detector N vezes no dia não duplica alerta). valor_impacto
+        # alimenta o placar "R$ salvos"; seen_at = lido/não lido no feed.
+        """
+        create table if not exists agent_events (
+          id bigserial primary key,
+          agent_id bigint not null references agents(id) on delete cascade,
+          user_id bigint not null references users(id) on delete cascade,
+          kind text not null,
+          fired_at timestamptz not null default now(),
+          dedupe_key text not null,
+          payload jsonb not null default '{}'::jsonb,
+          channel text not null default 'dashboard',
+          valor_impacto numeric,
+          seen_at timestamptz,
+          unique (agent_id, dedupe_key)
+        )
+        """,
+        """
+        create index if not exists idx_agent_events_user_time
+          on agent_events (user_id, fired_at desc)
+        """,
+        # Mini-digest por agente: emailed_at marca o evento já enviado por e-mail
+        # (null = ainda não entrou num e-mail); last_emailed_at no agente aplica o
+        # teto de cadência (intervalo mínimo entre e-mails do mesmo agente).
+        """
+        alter table agent_events add column if not exists emailed_at timestamptz
+        """,
+        """
+        alter table agents add column if not exists last_emailed_at timestamptz
+        """,
+        """
+        create index if not exists idx_agent_events_pending_email
+          on agent_events (agent_id) where emailed_at is null
+        """,
+        # LEGADO — não é mais lida nem escrita. A supressão de e-mail deixou de
+        # ser materializada: o opt-out (por agente / global) é consultado fresco
+        # no run_agent_emails_once, e a fila filtra por fired_at do mês corrente.
+        # Coluna mantida só por segurança de rollback; drop em migração futura.
+        """
+        alter table agent_events add column if not exists suppressed_at timestamptz
+        """,
+        # Hold de e-mail: até quando o envio dos agregados fica segurado enquanto a
+        # carteira se mexe. Coluna PRÓPRIA de propósito — fired_at é dado de
+        # negócio (data exibida, ordenação do feed, disparos_mes, saved_365d) e
+        # não pode ser empurrado por controle técnico. Expira sozinho: nada fica
+        # preso se um sync morrer no meio.
+        """
+        alter table agent_events add column if not exists email_hold_until timestamptz
+        """,
+        # Soft-delete de evento cuja condição deixou de valer. Some do feed e dos
+        # contadores, mas a linha (e o emailed_at) fica: apagar de vez destruiria
+        # o dedupe de entrega, e a condição voltando no mesmo mês viraria um
+        # segundo e-mail de um agente que é mensal.
+        """
+        alter table agent_events add column if not exists stale_at timestamptz
+        """,
+        """
+        create index if not exists idx_agent_events_pending_email3
+          on agent_events (agent_id, fired_at) where emailed_at is null and stale_at is null
+        """,
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks
@@ -1555,24 +1760,38 @@ def init_db():
     #      (deploy do Railway sobe um container novo antes do velho sair).
     # Toda a DDL eh idempotente (if not exists / or replace / where ... is null),
     # entao commit por instrucao eh seguro mesmo se o init_db rodar varias vezes.
+    # O `finally` nao e decoracao: a conexao vem do POOL e volta pra ele. Sem
+    # restaurar, ela fica em autocommit para sempre e toda transacao futura que
+    # cair nela perde a atomicidade — o rollback vira no-op e um erro no meio
+    # deixa metade da escrita gravada. Medido: depois de um init_db, 6 de 6
+    # `create_investment_db` que estouraram INSUFFICIENT_ACCOUNT deixaram o
+    # investimento criado no banco. (A trava definitiva esta no `reset` do pool,
+    # em db/connection.py; isto aqui e a primeira linha de defesa.)
     with get_conn() as conn:
         conn.autocommit = True
-        with conn.cursor() as cur:
-            for i, stmt in enumerate(ddl_statements, 1):
-                try:
-                    cur.execute(stmt)
-                except Exception as e:
-                    print(f"[init_db] erro no statement #{i}: {e}")
-                    print(stmt)
-                    raise
-
-            # Corrige FKs em users(id) que ficaram com on_delete errado
-            # porque a tabela já existia antes da FK ser declarada no schema.
-            try:
-                changes = repair_user_fk_cascades(cur)
-                if changes:
-                    print(f"[init_db] schema_repairs ajustou {len(changes)} FK(s): {changes}")
-            except Exception as e:
-                print(f"[init_db] schema_repairs falhou: {e}")
-                raise
+        try:
+            _run_ddl(conn, ddl_statements)
+        finally:
+            conn.autocommit = False
     print("[init_db] OK")
+
+
+def _run_ddl(conn, ddl_statements) -> None:
+    with conn.cursor() as cur:
+        for i, stmt in enumerate(ddl_statements, 1):
+            try:
+                cur.execute(stmt)
+            except Exception as e:
+                print(f"[init_db] erro no statement #{i}: {e}")
+                print(stmt)
+                raise
+
+        # Corrige FKs em users(id) que ficaram com on_delete errado
+        # porque a tabela já existia antes da FK ser declarada no schema.
+        try:
+            changes = repair_user_fk_cascades(cur)
+            if changes:
+                print(f"[init_db] schema_repairs ajustou {len(changes)} FK(s): {changes}")
+        except Exception as e:
+            print(f"[init_db] schema_repairs falhou: {e}")
+            raise

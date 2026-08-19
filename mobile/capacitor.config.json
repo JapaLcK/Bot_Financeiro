@@ -14,7 +14,7 @@
     ]
   },
   "ios": {
-    "contentInset": "automatic",
+    "contentInset": "never",
     "appendUserAgent": "PigBankApp/1.0",
     "backgroundColor": "#111111"
   }

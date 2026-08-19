@@ -4,6 +4,37 @@ Rascunhos para criar/aprovar no **WhatsApp Manager (Meta)**. Enquanto os
 templates não existirem e as env vars não estiverem setadas, o bot apenas ignora
 o envio periódico no WhatsApp (não envia nada, não dá erro).
 
+## Criar automaticamente (recomendado)
+
+Em vez de digitar tudo à mão no WhatsApp Manager, use o script — ele monta o
+payload no formato exato que o bot envia (**parâmetros nomeados**) e registra os
+templates na Meta:
+
+```bash
+cd "Bot Financeiro"
+
+# 1) Confira o payload (não envia nada):
+python scripts/create_whatsapp_report_templates.py --dry-run
+
+# 2) Crie os dois templates na Meta (precisa de WA_TOKEN + WA_BUSINESS_ACCOUNT_ID):
+python scripts/create_whatsapp_report_templates.py
+
+# opções: --only weekly | --only monthly | --stop-button
+```
+
+O payload de referência (mesmo conteúdo) também está em
+[`whatsapp_report_templates.json`](whatsapp_report_templates.json).
+
+> ⚠️ Os templates são criados com `parameter_format: NAMED` /
+> `body_text_named_params`. Isso é obrigatório: o bot envia por **nome**
+> (`periodo`, `saldo`, ...), então criar com posicionais (`{{1}}`, `{{2}}`) faria
+> o envio falhar.
+
+O resto deste documento descreve a criação **manual** (caso prefira o WhatsApp
+Manager) e as regras que o código espera.
+
+---
+
 ## Regras que o código espera
 
 O código envia os seguintes **parâmetros nomeados** no corpo (body) do template

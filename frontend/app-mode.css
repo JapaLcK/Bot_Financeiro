@@ -19,12 +19,77 @@ html.pb-app body {
   overflow-x: hidden !important;
 }
 
-/* Modais sempre cabem na tela */
+/* ─── Cor do canvas: o que o elástico revela ────────────────────────────
+   Puxar a tela além do fim mostra o canvas do documento. O html não tem
+   fundo, então o canvas herda o #111111 do body — mas a borda VISÍVEL do
+   conteúdo é ameixa, porque o roxo vem das orbs (position:absolute), que
+   rolam junto e deixam a área revelada chapada. É essa diferença que se lê
+   como "faixa preta", não preto de verdade.
+   Os tons abaixo saíram de amostra de pixel do render em 390px, não de
+   palpite: dashboard #2E111F, início #311221, o que pedir #2C101E, e
+   ajustes #0B0B0D (tem paleta própria).
+   Isto NÃO mexe no elástico — ele continua acontecendo, só deixa de revelar
+   uma cor que destoa. */
+html.pb-app.pb-root-app,
+html.pb-app.pb-root-home,
+html.pb-app.pb-root-comandos { background-color: #2E111F; }
+html.pb-app.pb-root-settings { background-color: #0B0B0D; }
+/* Modo claro do dashboard: o applyTheme espelha a classe no <html> por causa
+   desta regra. Sem ela o canvas continuaria ameixa enquanto a página vira
+   #F6F4F1 — a mesma faixa, invertida. Tom medido no claro: #E8E4E2.
+   (O tema claro só existe no dashboard: o applyTheme mora no dashboard.js,
+   carregado só por ele.) */
+html.pb-app.light.pb-root-app { background-color: #E8E4E2; }
+
+/* ─── Safe area com o WebView indo até a borda ──────────────────────────
+   contentInset "never" (capacitor.config.json) desliga o ajuste nativo nos
+   QUATRO lados: a partir daí é o CSS que reserva notch, Dynamic Island,
+   cantos arredondados e home indicator. O Info.plist habilita landscape no
+   iPhone, então as laterais contam. Em pé, e em aparelho sem notch, env()
+   vale 0 — as regras só "acendem" onde há inset de verdade.
+   (box-sizing:border-box já é global nas páginas, então o padding lateral
+   não estoura o max-width:100vw.) */
+html.pb-app body {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Modais sempre cabem na tela — e dentro da área segura. Os overlays são
+   fixed/inset:0, então o padding do body não os alcança; e 100vw/100vh
+   incluem a área do notch. São três classes diferentes de overlay no
+   produto: .overlay (dashboard), .pig-modal-overlay (modals.js) e
+   .mfa-overlay (settings). */
+html.pb-app .overlay,
+html.pb-app .pig-modal-overlay,
+html.pb-app .mfa-overlay {
+  padding: max(20px, env(safe-area-inset-top))
+           max(20px, env(safe-area-inset-right))
+           max(20px, env(safe-area-inset-bottom))
+           max(20px, env(safe-area-inset-left)) !important;
+}
 html.pb-app .modal,
 html.pb-app .modal.wide,
 html.pb-app .mfa-modal {
   width: auto !important;
-  max-width: calc(100vw - 24px) !important;
+  max-width: calc(100vw - 24px
+    - env(safe-area-inset-left) - env(safe-area-inset-right)) !important;
+  max-height: calc(100vh - 40px
+    - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+  /* Limitar a altura sem poder rolar seria pior que não limitar: o .modal
+     base (dashboard.css) não tem overflow, então os campos e os botões de
+     ação escapariam do card em vez de ficarem alcançáveis. O .wide e o
+     .launch-detail já rolam; aqui a regra vale pros 12 modais simples. */
+  overflow: auto !important;
+}
+/* O .pig-modal (alertModal/confirmModal) já tem largura própria pensada —
+   min(440px, 92vw), com width:100% no mobile. Só LIMITAMOS pela área segura;
+   pôr width:auto aqui encolheria diálogos de mensagem curta, e o !important
+   impediria a regra mobile do componente de recuperar a largura. */
+html.pb-app .pig-modal {
+  max-width: calc(100vw - 24px
+    - env(safe-area-inset-left) - env(safe-area-inset-right)) !important;
+  max-height: calc(100vh - 40px
+    - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
 }
 
 /* Strings compridas (e-mail, IP, telefone) quebram linha em vez de esticar
@@ -64,26 +129,73 @@ html.pb-app body {
 html.pb-app.pb-no-tabs body {
   padding-bottom: 0 !important;
 }
+/* Login/cadastro não têm tab bar e por isso ficavam fora das regras de safe
+   area por página. Sem isto o cartão de login entra sob o notch — e é a tela
+   de entrada do app (server.url aponta pro /login). */
+html.pb-app.pb-no-tabs body {
+  padding-top: env(safe-area-inset-top) !important;
+  padding-bottom: env(safe-area-inset-bottom) !important;
+}
 
-/* ─── Tab bar flutuante (pílula estilo WhatsApp/iOS) ───────────────────── */
+/* ─── Tab bar flutuante — dock "menisco" ───────────────────────────────────
+   A barra NÃO é uma caixa com fundo: é um único path SVG (.pb-dock-skin)
+   desenhado pelo app-mode.js. A aba ativa não ganha um indicador que desliza —
+   a chapa derrete em volta da bolha (.pb-dock-bead), que fica encaixada num
+   soquete paramétrico. Por isso aqui não tem background/border/radius: a
+   silhueta inteira (cantos + soquete) sai do path.                          */
 html.pb-app .pb-tabbar {
+  --pb-acc: #FF2D8E;
+  /* Geometria do soquete. O JS lê estas três daqui (measure()), então uma
+     media query retempera chapa + bolha + solda de uma vez só. */
+  --pb-dock-r:  20px;   /* raio dos cantos da chapa */
+  --pb-dock-rb: 22px;   /* raio da bolha */
+  --pb-dock-s:  22px;   /* raio base do ombro (o filete da solda) */
   position: fixed;
-  left: 10px; right: 10px;
+  /* laterais: 10px normais, mas nunca por baixo do notch/cantos (landscape) */
+  left: max(10px, env(safe-area-inset-left));
+  right: max(10px, env(safe-area-inset-right));
   bottom: max(8px, calc(env(safe-area-inset-bottom) - 14px));
   /* Abaixo dos overlays de modal (800/900): modal aberto cobre a tab bar */
   z-index: 700;
   display: flex;
   align-items: center;
   height: 66px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: rgba(24, 22, 26, 0.86);
-  -webkit-backdrop-filter: blur(24px) saturate(1.4);
-  backdrop-filter: blur(24px) saturate(1.4);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
+  /* Folga lateral: o soquete precisa de chapa entre a aba da ponta e o canto
+     arredondado — sem ela a solda encosta no canto e some */
+  padding: 0 22px;
 }
+
+/* Chapa: um path só (fill = placa, stroke = aro). O viewBox é maior que a
+   barra (folga de 4px) pra sobrar espaço pro traço do aro. */
+html.pb-app .pb-dock-skin {
+  position: absolute;
+  left: -4px; top: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  z-index: 1;
+  pointer-events: none;
+  overflow: visible;
+  filter: drop-shadow(0 12px 30px rgba(0, 0, 0, 0.55));
+}
+/* Brilho do acento: só aparece FORA da chapa (a placa é opaca) — no recorte
+   do soquete e no chão embaixo do dock */
+html.pb-app .pb-dock-glow {
+  position: absolute;
+  left: 0; top: 0;
+  width: 230px; height: 120px;
+  margin: -24px 0 0 -115px;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.55;
+  background: radial-gradient(50% 50% at 50% 50%, rgba(255, 45, 142, 0.34), transparent 70%);
+  background: radial-gradient(50% 50% at 50% 50%,
+    color-mix(in srgb, var(--pb-acc) 34%, transparent), transparent 70%);
+  will-change: transform;
+}
+
 html.pb-app .pb-tab {
+  position: relative;
+  z-index: 2;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -92,7 +204,7 @@ html.pb-app .pb-tab {
   gap: 3px;
   min-height: 52px;
   margin: 7px 0;
-  border-radius: 999px;
+  border-radius: 18px;
   color: rgba(255, 255, 255, 0.6);
   text-decoration: none;
   font-family: "Inter", -apple-system, sans-serif;
@@ -100,7 +212,7 @@ html.pb-app .pb-tab {
   font-weight: 600;
   letter-spacing: 0.01em;
   -webkit-tap-highlight-color: transparent;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition: color 0.18s ease;
 }
 html.pb-app .pb-tab svg {
   width: 24px;
@@ -111,25 +223,119 @@ html.pb-app .pb-tab svg {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-/* Aba ativa: casulo destacado (como o WhatsApp) */
-html.pb-app .pb-tab.active {
-  color: #FF2D8E;
-  background: rgba(255, 255, 255, 0.10);
+html.pb-app .pb-tab-ico {
+  display: flex;
+  transition: opacity 0.16s ease, transform 0.16s ease;
 }
+/* O ícone da aba que está DEBAIXO da bolha sai de cena — quem carrega o
+   ícone ali é a própria bolha (o rótulo continua, abaixo do soquete) */
+html.pb-app .pb-tab.pb-under .pb-tab-ico {
+  opacity: 0;
+  transform: scale(0.6);
+}
+/* Aba ativa (ou a que a bolha está prevendo, durante o arrasto) */
+html.pb-app .pb-tab.pb-live { color: var(--pb-acc); }
 html.pb-app .pb-tab:active { color: #FF80B8; }
+html.pb-app .pb-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(255, 45, 142, 0.7);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pb-acc) 70%, transparent);
+}
 
-/* Botão central de lançamento (círculo rosa dentro da pílula) */
+/* A bolha: encaixada no soquete, arrastável ao longo da barra */
+html.pb-app .pb-dock-bead {
+  position: absolute;
+  left: 0; top: 0;
+  width: calc(var(--pb-dock-rb) * 2);
+  height: calc(var(--pb-dock-rb) * 2);
+  /* o JS translada pelo CENTRO da bolha */
+  margin: calc(var(--pb-dock-rb) * -1) 0 0 calc(var(--pb-dock-rb) * -1);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #1A0209;
+  background:
+    radial-gradient(circle at 36% 24%, rgba(255, 255, 255, 0.28), transparent 46%),
+    linear-gradient(180deg, #FF4E9C, var(--pb-acc) 52%, #DE1C76);
+  background:
+    radial-gradient(circle at 36% 24%, rgba(255, 255, 255, 0.28), transparent 46%),
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--pb-acc) 92%, #fff),
+      var(--pb-acc) 52%,
+      color-mix(in srgb, var(--pb-acc) 86%, #000));
+  box-shadow:
+    0 8px 20px rgba(255, 45, 142, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.16) inset,
+    0 -5px 12px rgba(0, 0, 0, 0.22) inset;
+  box-shadow:
+    0 8px 20px color-mix(in srgb, var(--pb-acc) 45%, transparent),
+    0 0 0 1px rgba(255, 255, 255, 0.16) inset,
+    0 -5px 12px rgba(0, 0, 0, 0.22) inset;
+  touch-action: none;           /* arrasto não rola a página */
+  cursor: grab;
+  will-change: transform;
+}
+html.pb-app .pb-dock-dragging .pb-dock-bead { cursor: grabbing; }
+html.pb-app .pb-dock-bead svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+html.pb-app .pb-dock-bead-ico { display: flex; }
+/* A animação mora no SVG, não no span: o JS troca o innerHTML do span a cada
+   aba, então o SVG nasce de novo e o pop re-dispara sozinho */
+html.pb-app .pb-dock-bead-ico svg { animation: pb-bead-pop 0.22s ease-out; }
+@keyframes pb-bead-pop {
+  from { opacity: 0; transform: scale(0.55); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* mira o SVG, que é quem tem a animação (o span só é o contêiner) */
+  html.pb-app .pb-dock-bead-ico svg { animation: none; }
+}
+
+/* Telas estreitas (iPhone SE/mini): as abas das pontas chegam perto demais do
+   canto e a bolha fica pendurada na quina. Chapa e bolha encolhem juntas —
+   o soquete continua cabendo inteiro na chapa. */
+@media (max-width: 360px) {
+  html.pb-app .pb-tabbar {
+    --pb-dock-r:  16px;
+    --pb-dock-rb: 20px;
+    --pb-dock-s:  18px;
+    padding: 0 20px;
+  }
+  html.pb-app .pb-tab-fab > span { width: 46px; height: 46px; }
+  html.pb-app .pb-dock-bead svg { width: 20px; height: 20px; }
+}
+
+/* Botão central de lançamento. O acento do dock é a bolha — se o + também
+   fosse um disco rosa cheio, o dock teria dois "ativos" competindo. Então
+   ele vira um disco de chapa com o + e o aro no acento: continua sendo o
+   alvo mais óbvio da barra, sem disputar com a bolha.
+   (Pra voltar ao disco rosa: background e color como estavam.) */
 html.pb-app .pb-tab-fab { flex: 0 0 auto; margin: 0 4px; }
 html.pb-app .pb-tab-fab > span {
   width: 52px;
   height: 52px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #FF2D8E, #C7186B);
+  background: linear-gradient(180deg, #2E2B34, #1A181D);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  box-shadow: 0 6px 18px rgba(255, 45, 142, 0.45);
+  color: #FF2D8E;
+  color: var(--pb-acc);
+  box-shadow:
+    0 0 0 1px rgba(255, 45, 142, 0.55),
+    0 6px 16px rgba(0, 0, 0, 0.45);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--pb-acc) 55%, transparent),
+    0 6px 16px rgba(0, 0, 0, 0.45);
 }
 html.pb-app .pb-tab-fab > span svg { width: 26px; height: 26px; stroke-width: 2.4; }
 html.pb-app .pb-tab-fab:active > span { transform: scale(0.94); }
@@ -231,9 +437,29 @@ html.pb-app .pb-bill-val small.late { color: var(--red, #FF2D2D); }
 html.pb-app .nav { display: none !important; }
 
 /* ─── Home ─────────────────────────────────────────────────────────────── */
-/* Header do site some (nav vive na tab bar; conta fica em Ajustes) */
-html.pb-app body.pb-page-home > header,
-html.pb-app body.pb-page-home header:first-of-type { display: none !important; }
+/* O header FICA — é onde mora o botão da conta. Some só a nav de links, que
+   é redundante com a tab bar. (Antes o header inteiro era escondido, e a
+   Início ficava sem nenhum acesso à conta.)
+   Atenção ao seletor: aqui o <header> mora DENTRO de .page, não é filho
+   direto do body — por isso :first-of-type, e não "> header". */
+html.pb-app body.pb-page-home header:first-of-type {
+  /* a home.html empilha o header em ≤600px (flex-direction:column) — no app
+     ele volta pra UMA linha: marca à esquerda, conta à direita */
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  flex-wrap: nowrap !important;
+  padding: 10px 14px !important;
+  margin-bottom: 14px !important;
+}
+html.pb-app body.pb-page-home .nav-links { display: none !important; }
+/* ...e a conta deixa de ocupar a linha toda (regra de ≤600px do site) */
+html.pb-app body.pb-page-home .user-menu,
+html.pb-app body.pb-page-home .header-right {
+  width: auto !important;
+  max-width: none !important;
+  flex: 0 0 auto !important;
+}
 html.pb-app body.pb-page-home { padding-top: env(safe-area-inset-top); }
 html.pb-app footer { display: none !important; }
 
@@ -252,7 +478,11 @@ html.pb-app body.pb-page-app header h1 {
 }
 html.pb-app body.pb-page-app header .hbtn[onclick*="openOfxImport"],
 html.pb-app body.pb-page-app header .hbtn[onclick*="exportToEmail"] { display: none !important; }
-/* Topbar fina: o WebView já desvia do notch, sem padding extra de safe-area */
+/* Reserva a área segura do topo (notch / Dynamic Island) — o dashboard é o
+   único que faltava (home/settings/comandos já reservam). Requer viewport-fit=
+   cover no <meta viewport> pra env() reportar o inset real. */
+html.pb-app body.pb-page-app { padding-top: env(safe-area-inset-top); }
+/* Topbar fina abaixo da área segura. */
 html.pb-app body.pb-page-app header {
   padding: 8px 12px !important;
   margin-bottom: 10px !important;
@@ -295,23 +525,66 @@ html.pb-app body.pb-page-app .header-right {
   flex-wrap: nowrap !important;
 }
 html.pb-app body.pb-page-app .user-menu { flex: 0 0 auto !important; }
-html.pb-app body.pb-page-app .user-menu-btn {
+html.pb-app body.pb-page-app .user-menu-btn,
+html.pb-app body.pb-page-home .user-menu-btn {
   width: 44px !important;
   min-height: 44px !important;
   padding: 0 !important;
   justify-content: center !important;
   border-radius: 50% !important;
 }
-html.pb-app body.pb-page-app .user-menu-btn .user-menu-main { display: none !important; }
+html.pb-app body.pb-page-app .user-menu-btn .user-menu-main,
+html.pb-app body.pb-page-home .user-menu-btn .user-menu-main { display: none !important; }
+
+/* Dropdown da conta: a regra mobile do dashboard.css (≤600px) posiciona com
+   left:0 e width:100% do pai — mas no app o botão da conta é um círculo de
+   44px, então o menu virava uma faixa de 44px colada na borda direita com o
+   texto quebrando letra a letra. Ancora à direita do botão, com largura
+   própria e sem a quebra agressiva de palavra do modo app. */
+html.pb-app .user-dropdown {
+  left: auto !important;
+  right: 0 !important;
+  width: min(300px, calc(100vw - 24px)) !important;
+  max-height: calc(100vh - 120px - env(safe-area-inset-top));
+  overflow-y: auto;
+  overflow-wrap: normal;
+}
 
 /* Flutuantes (FAB do chat, toast) sobem acima da tab bar */
+/* O painel do chat é o par do FAB: mover só o botão deixaria o painel (e o
+   X de fechar) na área insegura. A altura conta também — a regra de ≤560px
+   do dashboard usa height:calc(100vh - 100px), o que põe o topo sob o
+   status bar quando o inset é real. */
+html.pb-app #piggy-panel {
+  right: calc(22px + env(safe-area-inset-right)) !important;
+  bottom: calc(88px + env(safe-area-inset-bottom)) !important;
+  width: min(400px, calc(100vw - 32px
+    - env(safe-area-inset-left) - env(safe-area-inset-right))) !important;
+  height: min(580px, calc(100vh - 130px
+    - env(safe-area-inset-top) - env(safe-area-inset-bottom))) !important;
+}
 html.pb-app #piggy-fab {
   bottom: calc(84px + env(safe-area-inset-bottom)) !important;
+  right: calc(14px + env(safe-area-inset-right)) !important;
   /* Abaixo do vidro dos modais (800): FAB não compete com botões de modal */
   z-index: 700 !important;
 }
 html.pb-app #toast {
   bottom: calc(88px + env(safe-area-inset-bottom)) !important;
+}
+/* Só o toast do dashboard é ancorado à direita. O do settings é centralizado
+   (left:50% + translateX) — pôr "right" nele faria a largura automática
+   esticar de uma borda à outra em vez de abraçar o texto. */
+html.pb-app body.pb-page-app #toast {
+  right: calc(26px + env(safe-area-inset-right)) !important;
+}
+/* Toasts centralizados: centralizar na horizontal não os torna seguros na
+   VERTICAL — presos por bottom fixo, a borda de baixo cai no home indicator. */
+html.pb-app .modal-success-toast {
+  bottom: calc(24px + env(safe-area-inset-bottom)) !important;
+}
+html.pb-app .upgrade-toast {
+  bottom: calc(32px + env(safe-area-inset-bottom)) !important;
 }
 
 /* ─── Settings ─────────────────────────────────────────────────────────── */
@@ -449,3 +722,95 @@ html.pb-app .modal,
 html.pb-app .sidenav {
   -webkit-overflow-scrolling: touch;
 }
+
+/* Menu ☰ aberto fica ACIMA da tab bar (700) e abaixo dos modais (800) —
+   sem isso a tab bar cobria os últimos itens do menu. Safe area no rodapé
+   pra rolar até o fim no iPhone. */
+html.pb-app .sidenav {
+  z-index: 760;
+  /* fixed não herda o padding de safe area do body: o menu reserva por conta
+     própria o topo (status bar) e a esquerda (notch deitado) */
+  padding-top: calc(18px + env(safe-area-inset-top));
+  padding-left: calc(14px + env(safe-area-inset-left));
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+}
+html.pb-app .sidenav-backdrop.open { z-index: 750; }
+
+/* ─── Puxar pra atualizar ──────────────────────────────────────────────────
+   Na Início e nas views do dashboard o CONTEÚDO (`.page`) desce junto com o
+   puxão e segura embaixo enquanto o refresh corre — estilo nativo do iOS — e o
+   indicador aparece no vão que abre sob o status bar. Nas demais telas (Ajustes,
+   O que pedir) só o indicador desce por cima da página. Posição e escala vêm do
+   app-mode.js (initPullToRefresh); aqui fica só a aparência.
+
+   z-index 690: abaixo da tab bar (700) e dos modais (800/900), acima do
+   conteúdo. Puxar com modal aberto não deve desenhar nada por cima dele. */
+html.pb-app .pb-ptr {
+  position: fixed;
+  z-index: 690;
+  left: 50%;
+  top: calc(env(safe-area-inset-top) + 4px);
+  width: 40px;
+  height: 40px;
+  margin-left: -20px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate3d(0, 0, 0) scale(0.5);
+  will-change: transform, opacity;
+}
+
+html.pb-app .pb-ptr-disc {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #1B1A20;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+}
+html.pb-app .pb-ptr-disc img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  display: block;
+}
+
+/* O anel mora sobre o disco; -90deg faz o arco começar às 12h */
+html.pb-app .pb-ptr svg {
+  position: absolute;
+  inset: 0;
+  width: 40px;
+  height: 40px;
+  transform: rotate(-90deg);
+}
+html.pb-app .pb-ptr-track {
+  fill: none;
+  stroke: rgba(255, 45, 142, 0.22);
+  stroke-width: 2.5;
+}
+html.pb-app .pb-ptr-arc {
+  fill: none;
+  stroke: #FF2D8E;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+/* Atualizando: o arco vira um risco curto girando (indeterminado) */
+html.pb-app .pb-ptr-busy svg { animation: pb-ptr-spin 0.85s linear infinite; }
+/* O arco curto do "girando" é setado no JS, não aqui: o dasharray é estilo
+   inline (o puxão o usa pra fechar o anel) e inline vence classe. */
+html.pb-app .pb-ptr-busy .pb-ptr-arc { stroke-dashoffset: 0; }
+@keyframes pb-ptr-spin { to { transform: rotate(270deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  html.pb-app .pb-ptr-busy svg { animation: none; }
+}
+
+/* Refresh falhou: o anel fecha em âmbar e para de girar por um instante antes
+   de recolher. A página mantém o dado antigo (melhor que destruir a tela), e
+   sem este aviso o usuário juraria que atualizou. */
+html.pb-app .pb-ptr-fail svg { animation: none; }
+html.pb-app .pb-ptr-fail .pb-ptr-track { stroke: rgba(255, 176, 32, 0.22); }
+html.pb-app .pb-ptr-fail .pb-ptr-arc { stroke: #FFB020; }

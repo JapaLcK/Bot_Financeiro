@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Finalize seu cadastro — PigBank</title>
+<title>Finalize seu cadastro · PigBank</title>
 <meta name="robots" content="noindex" />
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
-<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=2" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
 <meta name="theme-color" content="#0c0c0d" />
 <link rel="stylesheet" href="/brand.css?v=4" />
 <link rel="stylesheet" href="/site.css?v=4" />
@@ -21,6 +21,7 @@
   .back { display: inline-block; text-align: center; width: 100%; color: var(--ink-3); font-size: .84rem; margin-top: 16px; }
   .back:hover { color: var(--pink); }
 </style>
+<script src="/safe-area.js?v=1"></script>
 </head>
 <body>
 <div class="glow"></div>
@@ -113,6 +114,9 @@ document.getElementById("signup-form").addEventListener("submit", async function
     });
     const data = await res.json().catch(function(){ return {}; });
     if (!res.ok) { showError(data.detail || "Não foi possível criar sua conta."); submitBtn.disabled = false; submitBtn.textContent = "Criar minha conta"; return; }
+    // Meta Ads: conta criada via Google. eventID casa com o CompleteRegistration
+    // server-side (CAPI) pro Meta deduplicar.
+    if (window.fbq && data.user_id) { fbq("track", "CompleteRegistration", {}, { eventID: "signup_" + data.user_id }); }
     window.location.replace(data.dashboard_url || "/home");
   } catch (err) { showError("Erro de conexão. Tente novamente."); submitBtn.disabled = false; submitBtn.textContent = "Criar minha conta"; }
 });

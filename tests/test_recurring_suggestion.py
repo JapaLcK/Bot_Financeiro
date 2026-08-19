@@ -113,3 +113,28 @@ def test_resolve_nao_registra_recusa(user_id):
     assert resp is not None
     # a recusa foi persistida → não sugere de novo
     assert find_recurring_candidate(user_id, "revista", 55.00, current_year=2026, current_month=8) == 0
+
+
+def test_resolve_sim_nao_dobra_cobranca_no_mesmo_mes(user_id):
+    """A despesa deste mês que dispara a oferta já foi lançada; ao aceitar, o
+    gasto fixo autopay (due_day=hoje) NÃO pode debitar de novo no mesmo dia.
+    Deve nascer com o mês corrente já marcado como cobrado."""
+    from core.handlers.pending import resolve_delete
+    from core.services.recurring_charger import charge_due_recurring_expenses_once
+    from utils_date import today_tz
+    import db
+
+    today = today_tz()
+    db.set_pending_action(user_id, "confirm_recurring_offer", {
+        "name": "Aluguel", "amount": 1500.00, "category": "moradia",
+        "due_day": today.day, "merchant_key": "aluguel",
+    })
+    resolve_delete(user_id, confirmed=True)
+
+    fixos = list_recurring_expenses(user_id)
+    assert fixos and fixos[0]["last_charged_ym"] == today.strftime("%Y-%m")
+
+    before = len(db.list_launches(user_id, limit=50))
+    charge_due_recurring_expenses_once(today)      # cron de hoje
+    after = len(db.list_launches(user_id, limit=50))
+    assert after == before                          # não debitou de novo

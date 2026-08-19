@@ -192,14 +192,14 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     data = getattr(a, "data", None)
     filename = getattr(a, "filename", "audio.ogg")
 
-    # Gate Pro: transcrição de áudio é Pro
+    # Gate de plano: transcrição de áudio é paga (v1: Pro; v2: Essencial+)
     uid = _normalize_user_id(msg)
     try:
-        from core.services.plan_service import is_pro
-        if not is_pro(uid):
+        from core.services.plan_service import feature_enabled
+        if not feature_enabled(uid, "audio_enabled"):
             return [OutgoingMessage(
                 text=(
-                    "🐷 Transcrever áudio é um recurso do PigBank+.\n"
+                    "🐷 Transcrever áudio é um recurso dos planos pagos.\n"
                     "Dá uma olhada nos planos: https://pigbankai.com/precos"
                 )
             )]
@@ -232,10 +232,46 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
 
     # Detecta múltiplos lançamentos no mesmo áudio
     parts = _split_audio_transactions(transcription)
+    is_multi = len(parts) > 1
+
+    # Maior id de lançamento ANTES de processar este áudio. Serve pra saber se
+    # este turno REALMENTE inseriu um lançamento — uma resposta por áudio que só
+    # resolve uma pendência ("cancelar", "sim"/"não" da oferta de gasto fixo)
+    # devolve texto normal mas NÃO cria lançamento; nesse caso não se arma o undo
+    # (senão o botão "Desfazer" apagaria o lançamento ANTERIOR do usuário).
+    # Usa max(id), não a ordem por data: um lançamento RETROATIVO ("gastei 50
+    # ontem no mercado") é inserido mas não é o mais recente por criado_em — o id,
+    # sim, é sempre o maior.
+    pre_launch_id = db.latest_launch_id(uid)
 
     responses = []
     fallbacks = []
+    # Pedaços de um áudio múltiplo que vêm com verbo mas SEM valor
+    # ("gastei 500 no ifood e paguei o aluguel"). No texto digitado esse ramo
+    # já pergunta o valor (core.handlers.launches.add); aqui o áudio pré-divide
+    # a transcrição ANTES do add(), então cada pedaço vira um route() separado e
+    # o pedaço sem valor cairia no "não consegui identificar o valor". Detectamos
+    # antes de rotear e enfileiramos pra perguntar o valor — paridade com o texto.
+    missing: list[dict] = []
+    if is_multi:
+        from parsers import describe_valueless_launch
+        from core.handlers.launches import register_if_recurring
     for part in parts:
+        if is_multi:
+            info = describe_valueless_launch(part)
+            if info:
+                tipo, desc = info
+                # Valor recorrente conhecido ("aluguel" que sempre é o mesmo) →
+                # lança sozinho (com aviso). Senão, enfileira pra perguntar.
+                auto = register_if_recurring(uid, tipo, desc, platform)
+                if auto is not None:
+                    # add_from_entities devolve markdown estilo Discord (**bold**);
+                    # os demais pedaços do áudio já saem formatados por
+                    # _process_audio_transaction, então formatamos este também.
+                    responses.append(format_for_platform(auto, platform))
+                else:
+                    missing.append({"tipo": tipo, "desc": desc})
+                continue
         result_text = _process_audio_transaction(uid, part, msg, platform)
         # A quebra em múltiplos lançamentos (_split_audio_transactions) pode
         # separar um pedaço real ("comprei 550 de pão doce") de um pedaço que
@@ -250,8 +286,30 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
 
     registered_something = bool(responses)
 
+    # Este turno REALMENTE inseriu um lançamento? (vs só resolver uma pendência,
+    # que devolve texto normal mas não cria lançamento). É o que decide o undo.
+    post_launch_id = db.latest_launch_id(uid)
+    inserted_launch = post_launch_id is not None and post_launch_id != pre_launch_id
+
+    # Enfileira a pergunta de valor faltante e monta a pergunta do primeiro item.
+    # Setar o pending por ÚLTIMO garante que ele sobrevive: o route() de cada
+    # pedaço acima pode ter armado um pending próprio (ex: "categoria errada?"),
+    # mas o multi_launch_values é o que a próxima resposta do usuário resolve.
+    ask_value_question = ""
+    if missing:
+        from core.handlers.launches import _ask_value_question
+        db.set_pending_action(
+            uid, "multi_launch_values",
+            {"queue": missing, "platform": platform},
+        )
+        ask_value_question = _ask_value_question(missing[0])
+
     if registered_something:
         body = "\n\n".join(responses)
+    elif missing:
+        # Nada com valor foi registrado, mas há pedaço(s) esperando valor — a
+        # pergunta abaixo cobre a resposta; não mostra o fallback "não entendi".
+        body = ""
     else:
         # Nenhum pedaço virou lançamento válido — mostra UM fallback só
         # (não repetido por pedaço).
@@ -260,8 +318,15 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
             'Tente algo como: "gastei 50 no mercado".'
         )
 
-    # Dica de desfazer — só faz sentido se algo foi de fato registrado
-    if not registered_something:
+    if ask_value_question:
+        body = f"{body}\n\n{ask_value_question}" if body else ask_value_question
+
+    # Dica de desfazer — só faz sentido se um lançamento foi de fato inserido
+    # NESTE turno. Uma resposta por áudio que só resolve pendência ("cancelar",
+    # "sim"/"não" da oferta de gasto fixo) não inseriu nada: armar o undo aqui
+    # ofereceria desfazer o lançamento ANTERIOR do usuário. Com pergunta de valor
+    # pendente também não arma (a próxima resposta é o valor).
+    if not inserted_launch or missing:
         undo_hint = ""
     elif platform == "discord":
         undo_hint = "\n\n↩️ Para desfazer, diga: _desfazer_"
@@ -275,7 +340,7 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
         # quando a resposta do áudio é um lançamento de fato, não uma pergunta.
         _pend = db.get_pending_action(uid)
         _ptype = _pend.get("action_type") if _pend else None
-        if _ptype not in _RESUMABLE_PENDING_TYPES and _ptype != "multi_launch_values":
+        if _ptype not in _RESUMABLE_PENDING_TYPES and _ptype not in ("multi_launch_values", "confirm_recurring_offer"):
             db.set_pending_action(uid, "undo_audio", {})
 
     return [OutgoingMessage(text=preview + body + undo_hint)]
@@ -303,14 +368,14 @@ def _handle_image(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     data = getattr(a, "data", None)
     filename = getattr(a, "filename", "image.jpg")
 
-    # Gate Pro: leitura de cupom/comprovante por IA é Pro
+    # Gate de plano: leitura de cupom/comprovante por IA é paga (v1: Pro; v2: Essencial+)
     uid = _normalize_user_id(msg)
     try:
-        from core.services.plan_service import is_pro
-        if not is_pro(uid):
+        from core.services.plan_service import feature_enabled
+        if not feature_enabled(uid, "image_ocr_enabled"):
             return [OutgoingMessage(
                 text=(
-                    "🐷 Ler foto de cupom ou comprovante é um recurso do PigBank+.\n"
+                    "🐷 Ler foto de cupom ou comprovante é um recurso dos planos pagos.\n"
                     "Dá uma olhada nos planos: https://pigbankai.com/precos"
                 )
             )]
@@ -636,12 +701,11 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         )
         if should_try_ai_fallback:
             try:
-                from core.services.plan_service import is_pro
-                if is_pro(uid):
+                from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
+                if ai_chat_allowed(uid):
                     from core.services.ai_chat import chat as ai_chat_run
-                    from core.services.ai_chat_commands import AI_CHAT_MONTHLY_LIMIT
                     ai_reply = ai_chat_run(
-                        uid, text, monthly_limit=AI_CHAT_MONTHLY_LIMIT, platform=platform,
+                        uid, text, monthly_limit=ai_monthly_limit_for(uid), platform=platform,
                     )
                     return [OutgoingMessage(text=format_for_platform(ai_reply, platform))]
             except Exception as exc:
@@ -664,12 +728,11 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         # ------------------------------------------------------------------
         if _looks_like_help_fallback(raw_response):
             try:
-                from core.services.plan_service import is_pro
-                if is_pro(uid):
+                from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
+                if ai_chat_allowed(uid):
                     from core.services.ai_chat import chat as ai_chat_run
-                    from core.services.ai_chat_commands import AI_CHAT_MONTHLY_LIMIT
                     ai_reply = ai_chat_run(
-                        uid, text, monthly_limit=AI_CHAT_MONTHLY_LIMIT, platform=platform,
+                        uid, text, monthly_limit=ai_monthly_limit_for(uid), platform=platform,
                     )
                     return [OutgoingMessage(text=format_for_platform(ai_reply, platform))]
             except Exception as exc:

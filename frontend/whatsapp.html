@@ -3,14 +3,16 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>WhatsApp — PigBank</title>
+<title>WhatsApp · PigBank</title>
 <meta name="description" content="Controle seu dinheiro mandando mensagem no WhatsApp. Registre gastos, cartões e veja seu saldo conversando com a Piggy." />
 <link rel="canonical" href="https://pigbankai.com/whatsapp" />
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
-<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=2" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
 <meta name="theme-color" content="#0c0c0d" />
 <link rel="stylesheet" href="/brand.css?v=4" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/site.css?v=4" />
+<script src="/safe-area.js?v=1"></script>
 </head>
 <body>
 <div class="glow"></div>
@@ -21,6 +23,8 @@
       <a href="/funcionalidades">Funcionalidades</a>
       <a href="/como-funciona">Como funciona</a>
       <a href="/precos">Planos</a>
+      <a href="/whatsapp" class="active">WhatsApp</a>
+      <a href="/agents">Agentes</a>
       
     </div>
     <div class="nav-right">
@@ -38,16 +42,57 @@
         <p>O PigBank transforma mensagens simples em registros financeiros organizados. Você envia o que aconteceu, a Piggy entende, categoriza e atualiza seu saldo.</p>
       </div>
       <div class="hero-cta" style="justify-content:center;margin-bottom:8px">
-        <a class="btn btn-primary btn-lg" href="/wa">💬 Abrir conversa com a Piggy</a>
+        <a class="btn btn-primary btn-lg" href="/wa"><i class="ph ph-chat-circle" aria-hidden="true"></i> Abrir conversa com a Piggy</a>
         <a class="btn btn-outline btn-lg" href="/cadastro">Criar conta grátis</a>
       </div>
     </section>
 
+    <!-- ─── Como conectar ─────────────────────────────────────────── -->
+    <section class="section" style="padding-bottom:44px">
+      <div class="section-head" style="margin-bottom:30px">
+        <div class="eyebrow">Como conectar</div>
+        <h2>Comece em <span class="grad">3 passos</span></h2>
+        <p>Leva menos de um minuto. O segredo é usar o <b>mesmo número</b> de WhatsApp no cadastro: é ele que liga a conversa à sua conta.</p>
+      </div>
+
+      <div class="steps" style="max-width:620px;margin:0 auto 30px">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div>
+            <h3>Crie sua conta com o mesmo número</h3>
+            <p>No <a href="/cadastro" class="grad" style="text-decoration:none;font-weight:700">cadastro grátis</a>, informe o número de telefone do seu WhatsApp. É esse número que a Piggy reconhece.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div>
+            <h3>Abra a conversa com a Piggy</h3>
+            <p>Toque em <b>"Abrir conversa com a Piggy"</b> aqui embaixo. Ele abre o WhatsApp já no chat certo, com uma mensagem pronta pra enviar.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div>
+            <h3>Mande "oi" e pronto</h3>
+            <p>Na primeira mensagem a Piggy vincula seu número à sua conta automaticamente e libera todos os comandos. A partir daí é só falar: <i>"gastei 50 no mercado"</i>.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="hero-cta" style="justify-content:center">
+        <a class="btn btn-primary btn-lg" href="/wa"><i class="ph ph-chat-circle" aria-hidden="true"></i> Abrir conversa com a Piggy</a>
+      </div>
+
+      <p style="max-width:560px;margin:22px auto 0;text-align:center;color:var(--ink-2);font-size:.9rem;line-height:1.6;background:linear-gradient(180deg,rgba(198,241,26,.06),transparent);border:1px solid rgba(198,241,26,.2);border-radius:14px;padding:16px 20px">
+        <i class="ph ph-lightbulb" aria-hidden="true"></i> <b>Já falou com o bot antes de se cadastrar?</b> Sem problema. É só criar a conta com o <b>mesmo número</b> de WhatsApp que a gente junta tudo que você já registrou na sua conta.
+      </p>
+    </section>
+
     <section style="padding-bottom:40px">
       <div class="grid-3">
-        <div class="card feature-card"><div class="icon-box">💸</div><h3>Gastos e receitas</h3><p>Registre frases como "gastei 42 no almoço" ou "recebi 250 de freelance" sem abrir planilha.</p></div>
-        <div class="card feature-card"><div class="icon-box neon">💳</div><h3>Cartões e faturas</h3><p>Controle compras no crédito, parcelamentos e vencimentos com mensagens curtas.</p></div>
-        <div class="card feature-card"><div class="icon-box">📊</div><h3>Saldo e resumo</h3><p>Peça seu saldo, relatório do mês ou detalhes por categoria direto na conversa.</p></div>
+        <div class="card feature-card"><div class="icon-box"><i class="ph ph-trend-down" aria-hidden="true"></i></div><h3>Gastos e receitas</h3><p>Registre frases como "gastei 42 no almoço" ou "recebi 250 de freelance" sem abrir planilha.</p></div>
+        <div class="card feature-card"><div class="icon-box neon"><i class="ph ph-credit-card" aria-hidden="true"></i></div><h3>Cartões e faturas</h3><p>Controle compras no crédito, parcelamentos e vencimentos com mensagens curtas.</p></div>
+        <div class="card feature-card"><div class="icon-box"><i class="ph ph-chart-bar" aria-hidden="true"></i></div><h3>Saldo e resumo</h3><p>Peça seu saldo, relatório do mês ou detalhes por categoria direto na conversa.</p></div>
       </div>
     </section>
 
@@ -56,16 +101,16 @@
       <div class="chat-card" style="max-width:440px;margin:0 auto">
         <div class="chat-head"><img src="/brand/icon.png?v=1" alt="" /> <strong>PigBank</strong><span class="online"><i></i> online</span></div>
         <div class="bubble user">Gastei 89,90 no mercado no débito</div>
-        <div class="bubble bot">Registrado em <b>Mercado</b>. Seu saldo foi atualizado 👍</div>
+        <div class="bubble bot">Registrado em <b>Mercado</b>. Seu saldo foi atualizado</div>
         <div class="bubble user">Quanto gastei com comida esse mês?</div>
-        <div class="bubble bot">Você gastou <b>R$ 432,70</b> em alimentação neste mês. 🍔</div>
+        <div class="bubble bot">Você gastou <b>R$ 432,70</b> em alimentação neste mês.</div>
       </div>
     </section>
 
     <section style="padding-bottom:50px">
       <div class="grid-2">
-        <div class="card feature-card"><div class="icon-box">🔒</div><h3>Seguro para começar</h3><p>O acesso nasce pela sua conta PigBank, com vinculação do número de WhatsApp cadastrado.</p></div>
-        <div class="card feature-card"><div class="icon-box neon">⚡</div><h3>Feito para a rotina</h3><p>O fluxo é rápido pra você registrar antes de esquecer, inclusive fora de casa.</p></div>
+        <div class="card feature-card"><div class="icon-box"><i class="ph ph-lock" aria-hidden="true"></i></div><h3>Seguro para começar</h3><p>O acesso nasce pela sua conta PigBank, com vinculação do número de WhatsApp cadastrado.</p></div>
+        <div class="card feature-card"><div class="icon-box neon"><i class="ph ph-lightning" aria-hidden="true"></i></div><h3>Feito para a rotina</h3><p>O fluxo é rápido pra você registrar antes de esquecer, inclusive fora de casa.</p></div>
       </div>
     </section>
 
@@ -75,13 +120,14 @@
     <div class="wrap footer-inner">
       <div class="footer-brand">
         <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=1" alt="" /> <span>PigBank</span></a>
-        <p>Seu dinheiro, suas regras — direto no WhatsApp, com a IA da Piggy.</p>
+        <p>Seu dinheiro, suas regras, direto no WhatsApp, com a IA da Piggy.</p>
       </div>
       <div class="footer-cols">
         <div class="footer-col"><span class="footer-title">Navegue</span>
           <a href="/funcionalidades">Funcionalidades</a>
           <a href="/como-funciona">Como funciona</a>
           <a href="/precos">Planos</a>
+          <a href="/agents">Agentes</a>
           
         </div>
         <div class="footer-col"><span class="footer-title">Produto</span>
@@ -96,9 +142,9 @@
         </div>
       </div>
     </div>
-    <p class="footer-copy">© 2026 PigBank · Feito com 🐷</p>
+    <p class="footer-copy">© 2026 PigBank · Feito com <i class="ph ph-piggy-bank" aria-hidden="true"></i></p>
   </footer>
 
-  <script src="/nav-auth.js?v=2" defer></script>
+  <script src="/nav-auth.js?v=7" defer></script>
 </body>
 </html>

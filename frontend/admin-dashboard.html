@@ -2,9 +2,11 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#07121d" />
 <title>PigBank — Monitoramento</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="stylesheet" href="/phosphor.css?v=1" />
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -57,6 +59,9 @@ body {
   backdrop-filter: blur(18px);
 }
 .hero-left h1 { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
+.hero-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.hero-icon  { font-size: 26px; }
+.hero-meta  { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
 .hero-left p  { color: var(--muted); font-size: 14px; max-width: 560px; line-height: 1.6; }
 .hero-right   { display: flex; flex-direction: column; gap: 10px; align-items: flex-end; }
 .hero-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
@@ -162,6 +167,106 @@ button:disabled { opacity: .6; cursor: wait; }
 .badge-ok      { background: rgba(34,197,94,.1);   color: #86efac; border: 1px solid rgba(34,197,94,.2); }
 .badge-info    { background: rgba(255,128,184,.1);  color: #93c5fd; border: 1px solid rgba(255,128,184,.2); }
 .badge-muted   { background: rgba(255,255,255,.05); color: var(--muted); }
+.badge-purple  { background: rgba(255,45,142,.12);  color: #f9a8d4; border: 1px solid rgba(255,45,142,.25); }
+
+/* ── Card clicável (abre painel) ─────────────────────────────────────── */
+.card-clickable { cursor: pointer; transition: border-color .15s, transform .15s; }
+.card-clickable:hover { border-color: rgba(255,128,184,.45); transform: translateY(-2px); }
+.card-clickable .metric-sub::after { content: " · clique para detalhar"; color: var(--soft); }
+
+/* ── Modal de usuários ───────────────────────────────────────────────── */
+#users-modal {
+  display: none;
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(4,10,17,.72);
+  backdrop-filter: blur(6px);
+  align-items: center; justify-content: center;
+  padding: 24px;
+}
+#users-modal.visible { display: flex; }
+.users-dialog {
+  width: min(1240px, 96vw);
+  height: min(860px, 92vh);
+  display: flex; flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: 0 24px 80px rgba(0,0,0,.5);
+  overflow: hidden;
+}
+.users-dialog-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 18px 22px 12px;
+}
+.users-dialog-head h2 { font-size: 18px; font-weight: 700; }
+.users-close { font-size: 20px; padding: 4px 10px; border-radius: 10px; }
+.users-chips {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 0 22px 12px;
+}
+/* `contents` = os chips dos dois grupos entram direto na linha flex acima,
+   então o desktop fica idêntico ao que era antes da separação. */
+.chips-filters, .chips-stats { display: contents; }
+.chips-toggle { display: none; }
+.user-chip {
+  display: inline-flex; flex-direction: column; gap: 1px;
+  padding: 8px 14px; border-radius: 12px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  cursor: pointer; transition: border-color .15s;
+  min-width: 86px;
+}
+.user-chip:hover { border-color: rgba(255,128,184,.4); }
+.user-chip.active { border-color: var(--purple); background: rgba(255,45,142,.08); }
+.user-chip.static { cursor: default; }
+.user-chip.static:hover { border-color: var(--border); }
+.user-chip b { font-size: 17px; font-weight: 750; }
+.user-chip span { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; }
+.user-chip b.green  { color: var(--green); }
+.user-chip b.blue   { color: var(--blue); }
+.user-chip b.yellow { color: var(--yellow); }
+.user-chip b.red    { color: var(--red); }
+.user-chip b.purple { color: var(--purple); }
+.users-toolbar {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  padding: 0 22px 12px;
+}
+.users-toolbar input[type="text"] {
+  background: var(--panel-2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 10px; padding: 9px 12px;
+  font-size: 13px; width: 260px;
+}
+.users-body { flex: 1; overflow: auto; padding: 0 22px 8px; overscroll-behavior: contain; }
+.users-body .table th { position: sticky; top: 0; background: #0b1826; z-index: 1; }
+.users-body .table td { font-size: 12.5px; }
+.users-row { cursor: pointer; }
+.users-row:hover td { background: rgba(255,255,255,.03); }
+.users-dialog-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 10px 22px 16px; border-top: 1px solid var(--border);
+}
+.users-foot-meta { color: var(--muted); font-size: 12px; }
+.stripe-link { color: var(--blue); text-decoration: none; font-size: 12px; }
+.stripe-link:hover { text-decoration: underline; }
+
+/* Drill-down */
+#user-detail { display: none; flex: 1; overflow: auto; padding: 0 22px 16px; overscroll-behavior: contain; }
+.detail-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px; margin-bottom: 16px;
+}
+.detail-item {
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 12px; padding: 10px 14px;
+}
+.detail-item .k { color: var(--soft); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 4px; }
+.detail-item .v { font-size: 14px; font-weight: 600; word-break: break-all; }
+.detail-section-title { font-size: 13px; font-weight: 700; color: var(--muted); margin: 14px 0 8px; text-transform: uppercase; letter-spacing: .06em; }
+.detail-event {
+  display: flex; gap: 8px; align-items: baseline;
+  padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.05);
+  font-size: 12.5px;
+}
+.detail-event .t { color: var(--soft); font-size: 11px; white-space: nowrap; }
 
 /* ── Error list ──────────────────────────────────────────────────────── */
 .error-list  { display: grid; gap: 8px; }
@@ -240,6 +345,10 @@ button:disabled { opacity: .6; cursor: wait; }
 .list-item small   { color: var(--muted); font-size: 12px; line-height: 1.5; }
 .empty  { color: var(--muted); font-size: 13px; padding: 12px 0; }
 .chart-wrap { height: 300px; }
+/* O Chart.js dimensiona o canvas sozinho em modo responsive, mas se o script
+   não carregar (CDN fora) o canvas fica com os 300px default do HTML e estoura
+   a tela num iPhone SE. O max-width segura esse caso sem atrapalhar o Chart. */
+.chart-wrap canvas { max-width: 100%; }
 .filter-bar { display: flex; gap: 6px; margin-bottom: 12px; }
 .filter-btn { padding: 5px 12px; font-size: 12px; border-radius: 999px; }
 .filter-btn.active { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.2); color: var(--text); }
@@ -262,12 +371,408 @@ button:disabled { opacity: .6; cursor: wait; }
 .pagination-btn:disabled { opacity: .35; cursor: default; }
 .pagination-info { font-size: 12px; color: var(--soft); min-width: 90px; text-align: center; }
 
+/* ── Guardas anti-estouro ────────────────────────────────────────────
+   Filho de grid/flex tem `min-width: auto` por padrão: o min-content dele
+   (um e-mail longo, uma tabela larga, uma linha flex que não quebra) empurra
+   o container e vira scroll horizontal na página inteira. Estas guardas
+   valem em toda largura — foi o que mediu 398px de estouro em 320px. */
+.grid > *, .grid-2 > *, .grid-3 > *, .summary > *,
+.health-grid > *, .detail-grid > * { min-width: 0; }
+.section-title { flex-wrap: wrap; }
+.section-title > * { min-width: 0; }
+.section-title h2 { display: flex; align-items: center; gap: 6px; }
+.hero, .hero-left, .hero-right, .hero-controls { min-width: 0; }
+.error-item, .list-item, .detail-item, .health-item { min-width: 0; overflow-wrap: anywhere; }
+.detail-event { flex-wrap: wrap; }
+
+/* Campos: nunca mais largura fixa em px cravada no HTML.
+   `max-width` deixa o campo encolher; no mobile viram bloco de 100%. */
+.field    { background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+            border-radius: 10px; padding: 8px 11px; font-size: 13px; width: 100%; max-width: 220px; }
+.field-sm { max-width: 140px; }
+.field-xs { max-width: 120px; }
+
+/* Toolbar de cabeçalho de seção (criar afiliado, filtros de PII).
+   Fica em CSS e não em `style=` inline porque inline vence media query — era
+   o que impedia estas barras de virar pilha no celular. */
+.toolbar-stack { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Botão pequeno dentro de tabela/toolbar (substitui font-size/padding inline
+   no JS — inline vence media query, então não dava pra ampliar no toque). */
+.btn-xs { font-size: 11px; padding: 4px 10px; border-radius: 8px; white-space: nowrap; }
+.btn-sky { background: #0ea5e9; color: #04212e; border: 0; font-weight: 700; }
+
+/* Barra de estatísticas de e-mail (era flex inline no HTML) */
+.stats-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
+.stats-bar > div { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07);
+                   border-radius: 10px; padding: 10px 8px; text-align: center; min-width: 0; }
+.stats-bar .n { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stats-bar .l { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+/* Tabelas: wrapper que rola sozinho, sem contaminar a página */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+.table td { overflow-wrap: anywhere; }
+
+/* Fundo travado com a folha de usuários aberta (ver lockPageScroll).
+   `position: fixed` no body é o que realmente segura o iOS; o `top` negativo
+   é posto em JS para a página não pular para o topo. */
+html.modal-aberto, html.modal-aberto body { overflow: hidden; }
+html.modal-aberto body { position: fixed; width: 100%; }
+
+/* Toque: sem realce cinza do iOS e sem delay de 300ms */
+button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable, a {
+  -webkit-tap-highlight-color: rgba(255,128,184,.18);
+  touch-action: manipulation;
+}
+
+/* ── Tablet / phone landscape ────────────────────────────────────── */
 @media (max-width: 1100px) {
   .grid, .grid-3, .grid-2 { grid-template-columns: 1fr; }
-  .hero { flex-direction: column; align-items: flex-start; }
-  .hero-right { align-items: flex-start; width: 100%; }
-  .hero-controls { width: 100%; }
-  .health-grid { grid-template-columns: 1fr; }
+  .hero { flex-direction: column; align-items: stretch; }
+  .hero-right { align-items: stretch; width: 100%; }
+  .hero-controls { width: 100%; justify-content: flex-start; }
+  /* Health tiles são numéricos e curtos: 1 coluna desperdiça a tela.
+     auto-fit dá 2 colunas até ~264px de container e 1 abaixo disso. */
+  .health-grid { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+
+  /* ── Métricas: linha "rótulo → valor" em vez de tile ───────────
+     O tile de 190px não caber é matemática, não gosto: "R$ 8.813.402,10"
+     pede ~258px a 28px de fonte. Em linha, o valor recebe a largura que
+     precisa (max-content) e o rótulo quebra no que sobra.
+     280px é o piso que faz a conta fechar com folga (valor ≈171px a 21px
+     mais rótulo legível). `overflow-wrap` é a rede: se um dia entrar valor
+     maior, o texto quebra em vez de empurrar a página. */
+  .summary { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+  .summary .card {
+    display: grid; grid-template-columns: 1fr auto; align-items: center;
+    gap: 10px; padding: 12px 14px;
+  }
+  .summary .metric-label,
+  .summary .metric-sub { overflow-wrap: anywhere; }
+  .summary .metric-label { grid-column: 1; margin-bottom: 2px; font-size: 10.5px; }
+  .summary .metric-sub   { grid-column: 1; font-size: 11.5px; line-height: 1.35; }
+  .summary .metric-value {
+    grid-column: 2; grid-row: 1 / span 2; margin-bottom: 0;
+    font-size: clamp(16px, 4.4vw, 21px); white-space: nowrap;
+    font-variant-numeric: tabular-nums; text-align: right;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   TOQUE — celular em retrato (≤820px) OU em paisagem
+   Um iPhone deitado tem 844–932px de largura: acima do corte de 820px.
+   Ergonomia (alvo de 44px, campo de 16px, área segura, o que dependia de
+   hover) não é assunto de largura, é de aparelho — por isso vem numa lista
+   de media queries própria. O `max-width: 950px` na cláusula de paisagem
+   evita pegar uma janela de desktop baixa e larga.
+   ══════════════════════════════════════════════════════════════════ */
+@media (max-width: 820px),
+       (max-height: 520px) and (orientation: landscape) and (max-width: 950px) {
+
+  /* ── Área segura: esta página não carrega app-mode.css, e qualquer
+     rota do domínio abre no WebView do app. Sem isto o conteúdo entra
+     embaixo da status bar / notch. Em paisagem os insets são laterais —
+     é por isso que os quatro lados entram na conta. ───────────────── */
+  .shell {
+    padding: calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right))
+             calc(32px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
+  }
+
+  /* ── Alvos de toque (44px, Apple HIG) ─────────────────────────── */
+  button, select { min-height: 44px; padding: 10px 12px; }
+  .btn-xs { min-height: 44px; padding: 10px 12px; font-size: 12.5px; }
+  .filter-btn { min-height: 44px; padding: 10px 14px; font-size: 13px; }
+  .pagination-btn { min-height: 44px; min-width: 60px; font-size: 15px; }
+  .pagination { gap: 12px; margin-top: 14px; }
+  .pagination-info { font-size: 13px; }
+  #clear-alerts-btn { min-height: 44px; padding: 10px 12px; font-size: 12.5px; }
+  .banner-close { min-width: 44px; min-height: 44px; display: grid; place-items: center; font-size: 20px; }
+  .users-close { min-width: 44px; min-height: 44px; display: grid; place-items: center; }
+  .user-chip { min-height: 52px; }
+  /* O link do Stripe é só um ícone: 12x14 de área clicável na tabela. Sobe
+     pra 44x44, com margem negativa absorvendo a altura para a linha do
+     cartão não abrir um vão — a área de toque cresce, o desenho não. */
+  .stripe-link { display: inline-flex; align-items: center;
+                 min-height: 44px; min-width: 44px;
+                 margin-top: -10px; margin-bottom: -10px; }
+
+  /* Campos em 16px: abaixo disso o Safari do iPhone dá zoom no foco e não
+     volta — era o "tem que ficar dando zoom" do relato. */
+  input, select, textarea, .field { font-size: 16px !important; max-width: none; width: 100%; }
+  .users-toolbar input[type="text"] { width: 100%; }
+
+  /* O × de apagar evento só existia no hover — inalcançável no toque.
+     As margens negativas absorvem os 44px para a linha não inflar. */
+  .error-item-dismiss {
+    opacity: 1; order: 2; margin-left: auto;
+    min-width: 44px; min-height: 44px; margin-top: -10px; margin-bottom: -10px;
+    font-size: 20px; background: rgba(255,255,255,.06);
+  }
+
+  /* ══ Modal de usuários → folha de tela cheia ═══════════════════════
+     Isto é assunto de aparelho, não de largura: com o diálogo de desktop, um
+     iPhone deitado (844px, acima do corte de 820) dava 39px de lista contra
+     ~320px de cromo, e o conteúdo estourava a caixa recortada.
+
+     `100dvh` e não `100%`: `100%` de um `position: fixed` se mede pela
+     viewport de LAYOUT, que no Safari não é a área visível — era o que
+     deixava faixa morta embaixo do rodapé no aparelho. */
+  #users-modal { padding: 0; height: 100vh; height: 100dvh; }
+  .users-dialog {
+    width: 100%; max-height: none;
+    height: 100vh; height: 100dvh;
+    border-radius: 0; border: 0;
+    /* A folha inteira é UM scroller: chips e busca rolam para fora e devolvem
+       a tela para a lista. `overflow: auto` nos dois eixos — se algum dia a
+       tabela real (paisagem) ficar mais larga que a tela, ela rola aqui
+       dentro em vez de estourar a página. */
+    overflow: auto; -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .users-body, #user-detail { overflow: visible; flex: 0 0 auto; }
+  /* Barras coladas: `--panel` tem 88% de opacidade, e sobre a lista rolando
+     por baixo o texto de trás aparecia de fantasma atrás do título. Sobe pra
+     97% e mantém o blur, então continua parecendo vidro sem virar sopa. */
+  .users-dialog-head {
+    padding: 14px 14px 10px; position: sticky; top: 0; z-index: 3;
+    background: rgba(9, 18, 31, .97); backdrop-filter: blur(14px);
+  }
+  .users-dialog-head h2 { font-size: 16px; }
+
+  /* Filtros: faixa que rola (7 chips ≈ uma tela e meia).
+     Indicadores: grade de 2 colunas, recolhida por padrão — empilhados,
+     empurravam a lista ~420px pra baixo. */
+  .users-chips { display: block; flex-wrap: nowrap; padding: 0 14px 12px; }
+  .chips-filters {
+    display: flex; flex-wrap: nowrap; gap: 8px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain; scroll-snap-type: x proximity;
+  }
+  .chips-filters::-webkit-scrollbar { height: 0; }
+  .chips-toggle {
+    display: block; width: 100%; margin-top: 8px; text-align: left;
+    font-size: 12.5px; color: var(--muted); background: transparent;
+    border: 1px dashed var(--border); border-radius: 10px;
+  }
+  .chips-stats { display: none; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .chips-stats.open { display: grid; }
+  .user-chip { flex: 0 0 auto; scroll-snap-align: start; min-width: 92px; }
+  .chips-stats .user-chip { min-width: 0; }
+  .chips-stats .user-chip.wide { grid-column: 1 / -1; }
+  .chips-stats .user-chip b { overflow-wrap: anywhere; }
+
+  .users-toolbar { padding: 0 14px 12px; gap: 8px; }
+  .users-body { padding: 0 14px 8px; }
+  .users-body .table th { position: static; }
+
+  /* Rodapé numa linha só (era coluna, custava 122px de 745px) e sem o inset
+     de área segura — quem reserva isso é o padding do diálogo. */
+  .users-dialog-foot {
+    position: sticky; bottom: 0; z-index: 3;
+    flex-direction: row; align-items: center; justify-content: space-between;
+    gap: 10px; padding: 8px 14px;
+    background: rgba(9, 18, 31, .97); backdrop-filter: blur(14px);
+  }
+  .users-foot-meta { text-align: left; font-size: 11.5px; }
+  .users-dialog-foot .pagination { margin-top: 0; padding: 0; border-top: 0; gap: 8px; }
+  #user-detail { padding: 0 14px 16px; }
+  .detail-head { flex-wrap: wrap; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   CELULAR DEITADO — a folha de usuários com 390px de ALTURA
+   Empilhado como no retrato, o cromo somava 355px de 390 e sobravam 35px
+   de lista. Aqui há 844px de largura sobrando: busca e ordenação vão lado a
+   lado, o botão de indicadores entra na linha dos filtros, e o cromo cai
+   para ~210px.
+   ══════════════════════════════════════════════════════════════════ */
+@media (max-height: 520px) and (orientation: landscape) and (max-width: 950px) {
+  .users-dialog-head { padding: 8px 14px 6px; }
+  .users-chips { display: flex; align-items: center; gap: 8px; padding: 0 14px 8px; }
+  .chips-filters { flex: 1 1 auto; min-width: 0; }
+  .chips-toggle { flex: 0 0 auto; width: auto; margin-top: 0; white-space: nowrap; }
+  .chips-stats { grid-template-columns: repeat(4, 1fr); }
+  .users-toolbar { padding: 0 14px 8px; flex-wrap: nowrap; }
+  .users-toolbar input[type="text"] { flex: 1 1 auto; width: auto; }
+  .users-toolbar select { flex: 0 0 210px; width: auto; }
+  .users-dialog-foot { padding: 6px 14px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   ESTREITO — ≤ 820px
+   O painel nasceu para 1540px. Aqui ele deixa de ser uma planilha
+   encolhida e passa a ser uma lista: tabela vira cartão, toolbar vira
+   bloco, modal vira folha de tela cheia.
+   ══════════════════════════════════════════════════════════════════ */
+@media (max-width: 820px) {
+
+  /* ── Header fixo e compacto ───────────────────────────────────── */
+  .hero {
+    position: sticky; top: 0; z-index: 60;
+    margin: calc(-12px - env(safe-area-inset-top)) calc(-12px - env(safe-area-inset-right)) 12px
+            calc(-12px - env(safe-area-inset-left));
+    padding: calc(10px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 10px
+             calc(12px + env(safe-area-inset-left));
+    border-radius: 0; border-width: 0 0 1px;
+    background: rgba(7,18,29,.92);
+    gap: 10px;
+  }
+  .hero-left h1 { font-size: clamp(15px, 4.2vw, 19px); line-height: 1.2; margin-bottom: 0; }
+  .hero-left h1 .t-brand { display: none; }
+  .hero-left p { display: none; }
+  .hero-icon { font-size: 19px; }
+  .hero-right { gap: 6px; }
+  .hero-controls { gap: 8px; flex-wrap: nowrap; }
+  /* A linha de controles ocupa a largura toda, com 44px de altura cada.
+     Proporção 2:1 entre "Atualizar" e "Sair": atualizar é a ação principal
+     de um painel de monitoramento, mas não a ponto de ocupar 60% do header
+     (era o que dava quando o Sair ficava em `flex: 0 0 auto`). */
+  .hero-controls > * { flex: 1 1 0; min-width: 0; }
+  #window-select { flex: 0 0 84px; }
+  #refresh-btn   { flex: 2 1 0; }
+  #logout-btn    { flex: 1 1 0; }
+  /* "Auto 60s" é informação não-acionável e custa uma linha de um header
+     que já ocupa 1/5 da tela num iPhone SE. O status de atualização fica —
+     esse diz se os números na tela são de agora. */
+  .auto-badge { display: none; }
+  .hero-meta { justify-content: flex-start; flex-wrap: wrap; gap: 8px; min-height: 0; }
+  .refresh-status { text-align: left; font-size: 11px; min-height: 0; }
+
+  /* O header sticky cobre o topo da viewport, e `scrollIntoView({block:
+     'start'})` — usado pelo atalho "clique para ver os erros ↓" — alinha o
+     alvo exatamente ali. Sem esta margem o cartão para ATRÁS do header, com
+     o próprio título invisível. `--sticky-h` é medido em JS (syncStickyOffset)
+     porque a altura muda quando o badge de erro aparece ou o título quebra. */
+  .card, .hero, section { scroll-margin-top: calc(var(--sticky-h, 96px) + 12px); }
+
+  /* ── Cartões e cabeçalhos ─────────────────────────────────────── */
+  .card { padding: 14px; border-radius: 16px; }
+  .section-title { gap: 10px; margin-bottom: 12px; }
+  .section-title h2 { font-size: 15px; }
+  /* A div de controles do cabeçalho divide a linha entre filtro, "Limpar" e
+     meta. Dando 100% de base ao filtro, ele fica com uma linha só pra si e os
+     4 botões cabem sem quebrar o último pra baixo esticado. */
+  .section-title > div { width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .filter-bar { flex: 1 1 100%; width: 100%; gap: 8px; flex-wrap: wrap; margin-bottom: 0; }
+  .filter-bar .filter-btn { flex: 1 1 auto; }
+
+  /* Toolbars/forms de seção viram pilha de blocos de largura cheia.
+     O seletor precisa dos dois níveis para vencer `.section-title > div`
+     acima, que também declara display. */
+  .section-title > .toolbar-stack,
+  .toolbar-stack { display: grid; grid-template-columns: 1fr; gap: 8px; width: 100%; }
+  .toolbar-stack > * { width: 100%; max-width: none; }
+  .toolbar-stack .meta { padding-top: 2px; }
+
+  .card-clickable .metric-sub::after { content: " · toque para detalhar"; }
+
+  /* ── Health tiles ─────────────────────────────────────────────── */
+  .health-item-val { font-size: 18px; }
+  .health-item-hint { display: none; }
+
+  /* ── Banner de erro ───────────────────────────────────────────── */
+  #error-banner { gap: 10px; padding: 12px 14px; align-items: flex-start; }
+  .banner-icon { font-size: 20px; line-height: 1.3; }
+  .banner-text { min-width: 0; }
+  .banner-text strong { font-size: 14px; }
+  .banner-text span { font-size: 12.5px; overflow-wrap: anywhere; }
+
+  /* ── Listas de evento ─────────────────────────────────────────── */
+  .error-item { padding: 12px; }
+  /* Ordem no toque: [nível] [quando] ......... [×]  /  título na linha 2.
+     O título é `flex-basis:100%`, então força a quebra sozinho — assim ele
+     pode aparecer inteiro em vez de cortado com reticências. */
+  .error-item-header { gap: 8px; row-gap: 6px; }
+  .error-item-time  { order: 1; }
+  .error-item-title { white-space: normal; overflow: visible; text-overflow: clip;
+                      flex: 1 1 100%; order: 3; font-size: 13.5px; }
+  .error-item-tb { max-height: 260px; font-size: 11.5px; }
+  .expand-hint { font-size: 12.5px; padding: 4px 0; }
+  /* O × só aparecia no hover — inalcançável no toque. */
+  .error-item-dismiss {
+    opacity: 1; order: 2; margin-left: auto;
+    min-width: 44px; min-height: 44px; margin-top: -10px; margin-bottom: -10px;
+    font-size: 20px; background: rgba(255,255,255,.06);
+  }
+
+  /* ── Gráfico ──────────────────────────────────────────────────── */
+  .chart-wrap { height: 240px; }
+  .stats-bar { grid-template-columns: 1fr 1fr; }
+
+  /* ══ Tabela → cartão ═══════════════════════════════════════════
+     Nenhuma tabela deste painel cabe num celular: a de usuários tem
+     10 colunas, a de afiliados 9. Rolar na horizontal esconde metade
+     do registro; aqui cada linha vira um cartão com rótulo por campo
+     (`data-label`, posto pelos renderers). */
+  .table.as-cards { display: block; }
+  .table.as-cards thead { display: none; }
+  .table.as-cards tbody { display: block; }
+  .table.as-cards tr {
+    display: block; padding: 12px; margin-bottom: 10px;
+    background: rgba(255,255,255,.03);
+    border: 1px solid rgba(255,255,255,.07); border-radius: 14px;
+  }
+  .table.as-cards tr:last-child { margin-bottom: 0; }
+  /* INVARIANTE: o valor da célula tem de ser UM único nó. O rótulo é o
+     ::before (coluna 1) e o valor é o item seguinte (coluna 2) — texto solto
+     depois de um elemento (ex.: `<span dot></span>ativo`) conta como um
+     terceiro item de grade e cai numa linha própria. O check_labels.js
+     verifica isso; se precisar de elemento + texto, embrulhe num <span>. */
+  .table.as-cards td {
+    display: grid; grid-template-columns: minmax(76px, 32%) 1fr;
+    gap: 10px; align-items: baseline;
+    /* `start` e não o `stretch` default: item de grade esticado fazia a
+       pílula de status virar uma barra de 246px atravessando o cartão. */
+    justify-items: start;
+    padding: 4px 0; border: 0; font-size: 13px;
+  }
+  .table.as-cards td::before {
+    content: attr(data-label);
+    color: var(--soft); font-size: 10.5px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .06em; line-height: 1.5;
+  }
+  /* Campo-título do cartão (e-mail, código): sem rótulo, largura cheia */
+  .table.as-cards td[data-primary] {
+    display: block; font-size: 14px; font-weight: 650;
+    padding: 0 0 8px; margin-bottom: 6px;
+    border-bottom: 1px solid rgba(255,255,255,.06);
+  }
+  .table.as-cards td[data-primary]::before { display: none; }
+  /* Célula de ações: botões lado a lado, sem rótulo */
+  .table.as-cards td[data-actions] { display: flex; flex-wrap: wrap; gap: 8px;
+                                     padding-top: 10px; white-space: normal !important; }
+  .table.as-cards td[data-actions]::before { display: none; }
+  .table.as-cards td[data-actions]:empty { display: none; }
+  .table.as-cards td[data-actions] button { flex: 1 1 auto; }
+  /* Estado vazio: não é registro, não leva rótulo nem moldura de cartão */
+  .table.as-cards tr:has(td[colspan]) { background: none; border: 0; padding: 0; }
+  .table.as-cards td[colspan] { display: block; }
+  .table.as-cards td[colspan]::before { display: none; }
+  /* Em modo cartão o wrapper não precisa rolar */
+  .table-wrap:has(.as-cards) { overflow-x: visible; }
+
+  .detail-grid { grid-template-columns: 1fr; gap: 8px; }
+  .detail-item .v { font-size: 13.5px; word-break: break-word; }
+}
+
+/* ── Telas bem estreitas (≤ 360px: iPhone SE e afins) ────────────── */
+@media (max-width: 360px) {
+  .summary { grid-template-columns: 1fr; }
+  .card { padding: 12px; }
+  .metric-value { font-size: 19px; }
+  /* Rótulo acima do valor só nas telas mais estreitas: em 320px a coluna de
+     valor ficaria com ~166px e e-mail/chave Pix quebrariam em 3 linhas. */
+  .table.as-cards td { grid-template-columns: 1fr; gap: 2px; }
+  .table.as-cards td::before { line-height: 1.3; }
+}
+
+/* ── Sem hover (toque): o que dependia de :hover precisa existir ── */
+@media (hover: none) {
+  .error-item-dismiss { opacity: 1; }
+  .error-item:hover { background: rgba(255,255,255,.03); }
+  .card-clickable:hover { transform: none; }
 }
 </style>
 </head>
@@ -277,15 +782,18 @@ button:disabled { opacity: .6; cursor: wait; }
   <!-- ── Hero (enxuto) ────────────────────────────────────────────── -->
   <section class="hero">
     <div class="hero-left">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:26px">🐷</span>
-        <h1>PigBank — Monitoramento</h1>
+      <div class="hero-title">
+        <span class="hero-icon"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span>
+        <!-- No celular só "Monitoramento" fica visível: com a marca inteira, o
+             badge de erros não cabia na linha e o header ia a 147px (26% de um
+             iPhone SE). O <title> da aba segue completo. -->
+        <h1><span class="t-brand">PigBank — </span>Monitoramento</h1>
         <span id="error-count-badge" style="display:none" class="badge badge-error">0 erros</span>
       </div>
     </div>
     <div class="hero-right">
       <div class="hero-controls">
-        <select id="window-select" title="Janela do gráfico temporal">
+        <select id="window-select" title="Janela do gráfico temporal" aria-label="Janela do gráfico temporal">
           <option value="7">7d</option>
           <option value="30" selected>30d</option>
           <option value="60">60d</option>
@@ -294,7 +802,7 @@ button:disabled { opacity: .6; cursor: wait; }
         <button id="refresh-btn" class="btn-primary" type="button">↻</button>
         <button id="logout-btn" type="button">Sair</button>
       </div>
-      <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end">
+      <div class="hero-meta">
         <span class="auto-badge"><span class="dot"></span>Auto 60s</span>
         <span class="refresh-status" id="refresh-status"></span>
       </div>
@@ -303,12 +811,12 @@ button:disabled { opacity: .6; cursor: wait; }
 
   <!-- ── Error banner ──────────────────────────────────────────────── -->
   <div id="error-banner">
-    <span class="banner-icon">🚨</span>
+    <span class="banner-icon"><i class="ph ph-warning-octagon" aria-hidden="true"></i></span>
     <div class="banner-text">
       <strong id="banner-title">Erros críticos detectados</strong>
       <span id="banner-detail">Verifique a seção de erros abaixo.</span>
     </div>
-    <span class="banner-close" onclick="document.getElementById('error-banner').classList.remove('visible')">✕</span>
+    <span class="banner-close" onclick="document.getElementById('error-banner').classList.remove('visible')"><i class="ph ph-x" aria-hidden="true"></i></span>
   </div>
 
   <!-- ── Summary cards ─────────────────────────────────────────────── -->
@@ -318,7 +826,7 @@ button:disabled { opacity: .6; cursor: wait; }
   <section class="grid" style="margin-bottom:16px">
     <div class="card">
       <div class="section-title">
-        <h2>🔴 Erros e eventos</h2>
+        <h2><i class="ph ph-warning-circle" aria-hidden="true"></i> Erros e eventos</h2>
         <div style="display:flex;align-items:center;gap:8px">
           <div class="filter-bar" id="error-filter-bar">
             <button class="filter-btn active" data-level="all">Todos</button>
@@ -326,7 +834,7 @@ button:disabled { opacity: .6; cursor: wait; }
             <button class="filter-btn" data-level="warning">Alertas</button>
             <button class="filter-btn" data-level="info">Info</button>
           </div>
-          <button id="clear-alerts-btn" title="Ocultar alertas anteriores a este momento. Novos erros continuarão aparecendo.">🗑 Limpar</button>
+          <button id="clear-alerts-btn" title="Ocultar alertas anteriores a este momento. Novos erros continuarão aparecendo."><i class="ph ph-trash" aria-hidden="true"></i> Limpar</button>
           <span class="meta" id="error-list-meta">Últimos 20</span>
         </div>
       </div>
@@ -336,7 +844,7 @@ button:disabled { opacity: .6; cursor: wait; }
 
     <div class="card">
       <div class="section-title">
-        <h2>🩺 Saúde do sistema</h2>
+        <h2><i class="ph ph-heartbeat" aria-hidden="true"></i> Saúde do sistema</h2>
         <span class="meta" id="generated-at">Carregando...</span>
       </div>
       <div class="health-grid" id="health-grid"></div>
@@ -347,14 +855,14 @@ button:disabled { opacity: .6; cursor: wait; }
   <section class="grid">
     <div class="card">
       <div class="section-title">
-        <h2>📈 Evolução temporal</h2>
+        <h2><i class="ph ph-chart-line-up" aria-hidden="true"></i> Evolução temporal</h2>
         <span class="meta">Cadastros · Logins · Transações</span>
       </div>
       <div class="chart-wrap"><canvas id="main-chart"></canvas></div>
     </div>
     <div class="card">
       <div class="section-title">
-        <h2>💬 WhatsApp & Backend</h2>
+        <h2><i class="ph ph-chat-circle" aria-hidden="true"></i> WhatsApp & Backend</h2>
         <span class="meta">Sinais operacionais</span>
       </div>
       <div class="health-grid" id="ops-health-grid"></div>
@@ -365,7 +873,7 @@ button:disabled { opacity: .6; cursor: wait; }
   <section class="grid-2" style="margin-bottom:16px">
     <div class="card">
       <div class="section-title">
-        <h2>📋 Eventos operacionais</h2>
+        <h2><i class="ph ph-clipboard-text" aria-hidden="true"></i> Eventos operacionais</h2>
         <span class="meta">Últimos 25 (WhatsApp · Billing · Engagement)</span>
       </div>
       <div class="error-list" id="ops-list"></div>
@@ -373,7 +881,7 @@ button:disabled { opacity: .6; cursor: wait; }
     </div>
     <div class="card">
       <div class="section-title">
-        <h2>🔑 Logins recentes</h2>
+        <h2><i class="ph ph-key" aria-hidden="true"></i> Logins recentes</h2>
         <span class="meta" id="logins-meta">—</span>
       </div>
       <div id="recent-logins"></div>
@@ -385,16 +893,16 @@ button:disabled { opacity: .6; cursor: wait; }
   <section class="grid-2" style="margin-bottom:16px">
     <div class="card">
       <div class="section-title">
-        <h2>✉️ E-mails enviados</h2>
+        <h2><i class="ph ph-envelope" aria-hidden="true"></i> E-mails enviados</h2>
         <span class="meta" id="email-meta">Últimos 50</span>
       </div>
-      <div style="display:flex;gap:12px;margin-bottom:12px" id="email-stats-bar"></div>
+      <div class="stats-bar" id="email-stats-bar"></div>
       <div class="error-list" id="email-list"></div>
       <div class="pagination" id="emails-pagination"></div>
     </div>
     <div class="card">
       <div class="section-title">
-        <h2>👤 Cadastros recentes</h2>
+        <h2><i class="ph ph-user" aria-hidden="true"></i> Cadastros recentes</h2>
         <span class="meta">Últimos 10</span>
       </div>
       <div id="recent-signups"></div>
@@ -405,11 +913,11 @@ button:disabled { opacity: .6; cursor: wait; }
   <section class="grid-2" style="margin-bottom:16px">
     <div class="card">
       <div class="section-title">
-        <h2>🏆 Maior volume (30d)</h2>
+        <h2><i class="ph ph-trophy" aria-hidden="true"></i> Maior volume (30d)</h2>
         <span class="meta">Top usuários ativos</span>
       </div>
-      <div style="overflow:auto">
-        <table class="table">
+      <div class="table-wrap">
+        <table class="table as-cards">
           <thead><tr><th>Usuário</th><th>Última atividade</th><th>Transações</th><th>Fluxo</th></tr></thead>
           <tbody id="top-users"></tbody>
         </table>
@@ -420,11 +928,11 @@ button:disabled { opacity: .6; cursor: wait; }
   <!-- ── Financeiro mensal ───────────────────────────────────────────── -->
   <section class="card" style="margin-bottom:16px">
     <div class="section-title">
-      <h2>📅 Relatório mensal agregado</h2>
+      <h2><i class="ph ph-calendar-dots" aria-hidden="true"></i> Relatório mensal agregado</h2>
       <span class="meta">Últimos 6 meses</span>
     </div>
-    <div style="overflow:auto">
-      <table class="table">
+    <div class="table-wrap">
+      <table class="table as-cards">
         <thead><tr><th>Mês</th><th>Receitas</th><th>Despesas</th><th>Transações</th></tr></thead>
         <tbody id="monthly-financials"></tbody>
       </table>
@@ -434,16 +942,16 @@ button:disabled { opacity: .6; cursor: wait; }
   <!-- ── Programa de afiliados ──────────────────────────────────────── -->
   <section class="card" style="margin-bottom:16px">
     <div class="section-title">
-      <h2>🤝 Afiliados</h2>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <input id="aff-new-email" type="email" placeholder="email da conta" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 10px;font-size:12px;width:200px"/>
-        <input id="aff-new-code" type="text" placeholder="código (opcional)" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 10px;font-size:12px;width:130px"/>
+      <h2><i class="ph ph-handshake" aria-hidden="true"></i> Afiliados</h2>
+      <div class="toolbar-stack">
+        <input id="aff-new-email" class="field" type="email" placeholder="email da conta" aria-label="E-mail da conta que vira afiliado" />
+        <input id="aff-new-code" class="field field-sm" type="text" placeholder="código (opcional)" aria-label="Código do afiliado (opcional)" />
         <button class="btn-primary" type="button" onclick="createAffiliate()">+ Criar afiliado</button>
         <span class="meta" id="aff-meta">—</span>
       </div>
     </div>
-    <div style="overflow:auto">
-      <table class="table">
+    <div class="table-wrap">
+      <table class="table as-cards">
         <thead><tr>
           <th>Código</th><th>Email</th><th>%</th><th>Indicados</th><th>A pagar</th><th>Já pago</th><th>Chave Pix</th><th>Status</th><th></th>
         </tr></thead>
@@ -451,13 +959,13 @@ button:disabled { opacity: .6; cursor: wait; }
       </table>
     </div>
     <div class="section-title" style="margin-top:18px">
-      <h2>💸 Saques de afiliados</h2>
+      <h2><i class="ph ph-hand-coins" aria-hidden="true"></i> Saques de afiliados</h2>
       <span class="meta">Pague o Pix por fora e marque como pago aqui</span>
     </div>
-    <div style="overflow:auto">
-      <table class="table">
+    <div class="table-wrap">
+      <table class="table as-cards">
         <thead><tr>
-          <th>Pedido em</th><th>Afiliado</th><th>Valor</th><th>Chave Pix</th><th>Status</th><th></th>
+          <th>Afiliado</th><th>Pedido em</th><th>Valor</th><th>Chave Pix</th><th>Status</th><th></th>
         </tr></thead>
         <tbody id="aff-payouts"></tbody>
       </table>
@@ -467,11 +975,11 @@ button:disabled { opacity: .6; cursor: wait; }
   <!-- ── Acessos PII (LGPD audit) ───────────────────────────────────── -->
   <section class="card">
     <div class="section-title">
-      <h2>🔐 Acessos PII</h2>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <input id="pii-filter-actor" type="text" placeholder="ator (ex: admin)" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 10px;font-size:12px;width:140px"/>
-        <input id="pii-filter-user" type="number" placeholder="user_id" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 10px;font-size:12px;width:120px"/>
-        <select id="pii-filter-field" style="font-size:12px;padding:5px 10px">
+      <h2><i class="ph ph-lock-key" aria-hidden="true"></i> Acessos PII</h2>
+      <div class="toolbar-stack">
+        <input id="pii-filter-actor" class="field field-sm" type="text" placeholder="ator (ex: admin)" aria-label="Filtrar por ator" />
+        <input id="pii-filter-user" class="field field-xs" type="number" placeholder="user_id" aria-label="Filtrar por user_id" />
+        <select id="pii-filter-field" class="field field-sm" aria-label="Filtrar por campo">
           <option value="">Todos os campos</option>
           <option value="email">email</option>
           <option value="phone">phone</option>
@@ -483,8 +991,8 @@ button:disabled { opacity: .6; cursor: wait; }
         <span class="meta" id="pii-access-meta">—</span>
       </div>
     </div>
-    <div style="overflow:auto">
-      <table class="table">
+    <div class="table-wrap">
+      <table class="table as-cards">
         <thead><tr>
           <th>Quando</th><th>Ator</th><th>Sobre user</th><th>Campo</th><th>Propósito</th>
         </tr></thead>
@@ -495,6 +1003,62 @@ button:disabled { opacity: .6; cursor: wait; }
   </section>
 
 </div><!-- .shell -->
+
+<!-- ── Modal de usuários (abre pelo card "Usuários") ─────────────────── -->
+<div id="users-modal" role="dialog" aria-modal="true" aria-label="Usuários e assinaturas">
+  <div class="users-dialog">
+    <div class="users-dialog-head">
+      <h2><i class="ph ph-users-three" aria-hidden="true"></i> Usuários &amp; assinaturas</h2>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="meta" id="users-billing-meta"></span>
+        <button class="users-close" onclick="closeUsersModal()" title="Fechar (Esc)"><i class="ph ph-x" aria-hidden="true"></i></button>
+      </div>
+    </div>
+
+    <!-- Dois grupos: os chips de status FILTRAM (ação), o resto só INFORMA.
+         No desktop `display: contents` faz os dois grupos fluírem na mesma
+         linha flex de sempre; no celular o filtro vira faixa que rola e os
+         indicadores viram grade de 2 colunas — senão o MRR fica a cinco
+         larguras de tela de distância. -->
+    <div class="users-chips" id="users-chips">
+      <div class="chips-filters" id="users-chip-filters"></div>
+      <!-- No celular os indicadores começam recolhidos: expandidos empurravam
+           a busca e a lista ~420px pra baixo, e quem abre "Usuários" quer a
+           lista. No desktop o botão não existe e tudo aparece de uma vez. -->
+      <button type="button" class="chips-toggle" id="chips-toggle"
+              aria-expanded="false" aria-controls="users-chip-stats">Indicadores ▾</button>
+      <div class="chips-stats" id="users-chip-stats"></div>
+    </div>
+
+    <div class="users-toolbar" id="users-toolbar">
+      <input type="text" id="users-search" placeholder="Buscar por e-mail…" autocomplete="off" aria-label="Buscar por e-mail" />
+      <select id="users-sort" aria-label="Ordenação da lista">
+        <option value="created_at">Mais recentes primeiro</option>
+        <option value="last_activity_at">Última atividade</option>
+      </select>
+      <span class="meta" id="users-loading"></span>
+    </div>
+
+    <div class="users-body" id="users-body">
+      <table class="table as-cards">
+        <thead>
+          <tr>
+            <th>E-mail</th><th>Status</th><th>Plano</th><th>Origem</th><th>Expira</th>
+            <th>Cadastro</th><th>Últ. atividade</th><th>Tx 30d</th><th>WA</th><th>Stripe</th>
+          </tr>
+        </thead>
+        <tbody id="users-table-body"></tbody>
+      </table>
+    </div>
+
+    <div id="user-detail"></div>
+
+    <div class="users-dialog-foot" id="users-foot">
+      <span class="users-foot-meta" id="users-foot-meta">—</span>
+      <div class="pagination" id="users-pagination"></div>
+    </div>
+  </div>
+</div>
 
 <script>
 /* ── Constantes e estado ─────────────────────────────────────────── */
@@ -682,6 +1246,10 @@ function updateErrorBanner(errors) {
   } else {
     errorBanner.classList.remove('visible');
   }
+
+  // O badge de contagem mora dentro do header: aparecer/sumir muda a altura
+  // dele, e com ela o scroll-margin dos cartões.
+  syncStickyOffset();
 }
 
 /* ── Error list ──────────────────────────────────────────────────── */
@@ -753,8 +1321,8 @@ function renderErrorItem(row) {
         <button class="error-item-dismiss" title="Apagar este evento" onclick="dismissEvent(event, ${row.id})">×</button>
       </div>
       <div class="error-item-msg">${esc(row.message.slice(0,180))}${row.message.length>180?'…':''}</div>
-      ${hint   ? `<div class="error-item-source">💡 ${esc(hint)}</div>` : ''}
-      ${row.source ? `<div class="error-item-source">📍 ${esc(row.source)}</div>` : ''}
+      ${hint   ? `<div class="error-item-source"><i class="ph ph-lightbulb" aria-hidden="true"></i> ${esc(hint)}</div>` : ''}
+      ${row.source ? `<div class="error-item-source"><i class="ph ph-map-pin" aria-hidden="true"></i> ${esc(row.source)}</div>` : ''}
       <div class="expand-hint">${hintLabel}</div>
       <div class="error-item-tb">${content}</div>
     </div>`;
@@ -815,8 +1383,8 @@ function applyFilter(level) {
   const base     = level === 'all' ? _visibleErrors(lastErrorData) : lastErrorData;
   const filtered = level === 'all' ? base : base.filter(e => e.level === level);
   const emptyMsg = level === 'all'
-    ? `✅ Nenhum evento encontrado.`
-    : `✅ Nenhum evento nível ${level} encontrado.`;
+    ? `<i class="ph ph-check-circle" aria-hidden="true"></i> Nenhum evento encontrado.`
+    : `<i class="ph ph-check-circle" aria-hidden="true"></i> Nenhum evento nível ${level} encontrado.`;
 
   renderPaginated({
     listElId: 'error-list',
@@ -897,7 +1465,8 @@ function renderOpsHealthGrid(ops) {
 /* ── Summary cards ───────────────────────────────────────────────── */
 function renderSummary(s) {
   const cards = [
-    { label:"Usuários",          val: fInt(s.total_users),       sub:`+${fInt(s.accounts_30d)} em 30d` },
+    { label:"Usuários",          val: fInt(s.total_accounts),    sub:`+${fInt(s.accounts_30d)} em 30d`,
+      click:"openUsersModal(event)" },
     { label:"Ativos 30d",        val: fInt(s.active_users_30d),  sub:`${fInt(s.active_users_7d)} ativos 7d` },
     { label:"Logins ok 30d",     val: fInt(s.login_success_30d), sub:`${s.login_success_rate_30d}% taxa sucesso` },
     { label:"Transações 30d",    val: fInt(s.transactions_30d),  sub:"Movimentações externas" },
@@ -907,8 +1476,24 @@ function renderSummary(s) {
     { label:"Investimentos",     val: fMoney(s.investments_balance), sub:"Saldo consolidado atual" },
     { label:"Cartões em aberto", val: fMoney(s.cards_due_open),  sub:"Faturas abertas/fechadas" },
   ];
+  /* O card que abre o modal era um <article> só com onclick: fora da ordem de
+     Tab, sem ativação por teclado e sem receber foco. Duas consequências — quem
+     navega por teclado não tinha como abrir o modal, e o `_usersLastFocus` da
+     abertura capturava o `body` em vez do card, então devolver o foco ao fechar
+     não devolvia pra lugar nenhum útil. Vira um alvo de verdade: role, tabindex
+     e Enter/Espaço, que é o contrato que `role="button"` promete. */
+  /* id estável: o auto-refresh de 60s chama renderSummary() e TROCA todo o DOM
+     dos cards. Guardar o elemento em _usersLastFocus não sobrevive a isso — na
+     hora de fechar, o `document.contains` falha e o foco fica num nó órfão. Por
+     isso guardamos o id e resolvemos o elemento só no fechamento, achando o
+     card NOVO. */
+  const gatilho = (c) => c.click
+    ? ` id="summary-card-${c.label.toLowerCase().replace(/[^a-z]+/g, "-")}"`
+      + ` role="button" tabindex="0" onclick="${c.click}"`
+      + ` onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${c.click}}"`
+    : '';
   $id('summary-cards').innerHTML = cards.map(c => `
-    <article class="card">
+    <article class="card${c.click ? ' card-clickable' : ''}"${gatilho(c)}>
       <div class="metric-label">${c.label}</div>
       <div class="metric-value">${c.val}</div>
       <div class="metric-sub">${c.sub}</div>
@@ -929,7 +1514,7 @@ function renderOpsList(ops) {
         <span class="error-item-time">${fRelTime(row.created_at)}</span>
       </div>
       <div class="error-item-msg">${esc(row.message.slice(0,160))}</div>
-      ${row.source ? `<div class="error-item-source">📍 ${esc(row.source)}</div>` : ''}
+      ${row.source ? `<div class="error-item-source"><i class="ph ph-map-pin" aria-hidden="true"></i> ${esc(row.source)}</div>` : ''}
       <div class="expand-hint">${hasTb ? '▼ ver traceback' : '▼ ver detalhes'}</div>
       <div class="error-item-tb">${content}</div>
     </div>`;
@@ -947,7 +1532,7 @@ function renderOpsList(ops) {
 
 /* ── Signups / Logins ────────────────────────────────────────────── */
 function waStatusBadge(row) {
-  if (row.has_whatsapp_identity || row.phone_status === 'confirmed') return '<span class="badge badge-ok">WA ✓</span>';
+  if (row.has_whatsapp_identity || row.phone_status === 'confirmed') return '<span class="badge badge-ok">WA <i class="ph ph-check" aria-hidden="true"></i></span>';
   if (row.phone_status === 'pending') return '<span class="badge badge-warning">WA pendente</span>';
   return '<span class="badge badge-muted">Sem WA</span>';
 }
@@ -971,19 +1556,19 @@ function renderEmails(stats, rows) {
       { label: '30d enviados',  val: stats.sent_30d   || 0, color: '#FF2D8E' },
     ];
     bar.innerHTML = items.map(it => `
-      <div style="flex:1;background:rgba(255,255,255,.04);border-radius:10px;padding:10px 12px;text-align:center;border:1px solid rgba(255,255,255,.07)">
-        <div style="font-size:20px;font-weight:700;color:${it.color}">${it.val}</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">${it.label}</div>
+      <div>
+        <div class="n" style="color:${it.color}">${it.val}</div>
+        <div class="l">${it.label}</div>
       </div>`).join('');
   }
 
   // Lista de emails paginada
   const EMAIL_TYPE_LABEL = {
-    email_sent:   { badge: '<span class="badge" style="background:rgba(74,222,128,.12);color:#4ade80;border:1px solid rgba(74,222,128,.25)">ENVIADO</span>', icon: '✉️' },
-    email_failed: { badge: '<span class="badge" style="background:rgba(248,113,113,.12);color:#f87171;border:1px solid rgba(248,113,113,.25)">FALHOU</span>',  icon: '❌' },
+    email_sent:   { badge: '<span class="badge" style="background:rgba(74,222,128,.12);color:#4ade80;border:1px solid rgba(74,222,128,.25)">ENVIADO</span>', icon: '<i class="ph ph-envelope" aria-hidden="true"></i>' },
+    email_failed: { badge: '<span class="badge" style="background:rgba(248,113,113,.12);color:#f87171;border:1px solid rgba(248,113,113,.25)">FALHOU</span>',  icon: '<i class="ph ph-x-circle" aria-hidden="true"></i>' },
   };
   const emailItem = (row) => {
-    const meta    = EMAIL_TYPE_LABEL[row.event_type] || { badge: '', icon: '📧' };
+    const meta    = EMAIL_TYPE_LABEL[row.event_type] || { badge: '', icon: '<i class="ph ph-envelope" aria-hidden="true"></i>' };
     const to      = row.details?.to      || '—';
     const subject = row.details?.subject || row.message || '—';
     const error   = row.details?.error   || '';
@@ -995,7 +1580,7 @@ function renderEmails(stats, rows) {
           <span class="error-item-time">${fRelTime(row.created_at)}</span>
         </div>
         <div class="error-item-msg">${esc(subject.slice(0, 120))}${subject.length > 120 ? '…' : ''}</div>
-        ${error ? `<div class="error-item-source" style="color:#f87171">⚠️ ${esc(error.slice(0,120))}</div>` : ''}
+        ${error ? `<div class="error-item-source" style="color:#f87171"><i class="ph ph-warning" aria-hidden="true"></i> ${esc(error.slice(0,120))}</div>` : ''}
       </div>`;
   };
 
@@ -1023,7 +1608,7 @@ function renderLogins(rows) {
   const loginItem = (row) => `
     <div class="list-item">
       <strong class="${row.success ? 'status-ok' : 'status-error'}" style="color:${row.success?'#86efac':'#fca5a5'}">
-        ${row.success ? '✅ Login OK' : '❌ Falha de login'}
+        ${row.success ? '<i class="ph ph-check-circle" aria-hidden="true"></i> Login OK' : '<i class="ph ph-x-circle" aria-hidden="true"></i> Falha de login'}
       </strong>
       <small>${esc(row.email||'sem email')} · ${fRelTime(row.created_at)}<br>${esc(row.failure_reason||row.ip_address||'')}</small>
     </div>`;
@@ -1039,26 +1624,34 @@ function renderLogins(rows) {
 }
 
 /* ── Tables ──────────────────────────────────────────────────────── */
+/* `data-label` alimenta o ::before de cada célula quando a tabela vira
+   cartão no mobile (≤820px). `data-primary` marca o campo que serve de
+   título do cartão — sem rótulo e em largura cheia. */
 function renderTables(data) {
   $id('top-users').innerHTML = data.top_users.map(r => `
     <tr>
-      <td>${esc(r.email)}</td>
-      <td>${fRelTime(r.last_activity_at)}</td>
-      <td>${fInt(r.total_transactions)}</td>
-      <td>${fMoney(r.net_flow)}</td>
+      <td data-primary data-label="Usuário">${esc(r.email)}</td>
+      <td data-label="Última atividade">${fRelTime(r.last_activity_at)}</td>
+      <td data-label="Transações">${fInt(r.total_transactions)}</td>
+      <td data-label="Fluxo">${fMoney(r.net_flow)}</td>
     </tr>`).join('') || `<tr><td colspan="4" class="empty">Sem dados ainda.</td></tr>`;
 
   $id('monthly-financials').innerHTML = data.monthly_financials.map(r => `
     <tr>
-      <td>${new Intl.DateTimeFormat('pt-BR',{month:'short',year:'numeric'}).format(new Date(r.month))}</td>
-      <td>${fMoney(r.revenue)}</td>
-      <td>${fMoney(r.expenses)}</td>
-      <td>${fInt(r.transaction_count)}</td>
+      <td data-primary data-label="Mês">${new Intl.DateTimeFormat('pt-BR',{month:'short',year:'numeric'}).format(new Date(r.month))}</td>
+      <td data-label="Receitas">${fMoney(r.revenue)}</td>
+      <td data-label="Despesas">${fMoney(r.expenses)}</td>
+      <td data-label="Transações">${fInt(r.transaction_count)}</td>
     </tr>`).join('') || `<tr><td colspan="4" class="empty">Sem dados ainda.</td></tr>`;
 }
 
 /* ── Chart ───────────────────────────────────────────────────────── */
+let lastChartData = null;
+let lastChartWasNarrow = null;
 function renderChart(data) {
+  lastChartData = data;
+  const isNarrow = window.innerWidth <= 820;
+  lastChartWasNarrow = isNarrow;
   const labels = data.time_series.map(item =>
     new Intl.DateTimeFormat('pt-BR',{day:'2-digit',month:'2-digit'}).format(new Date(item.bucket)));
   const ctx = $id('main-chart');
@@ -1076,14 +1669,35 @@ function renderChart(data) {
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { labels: { color:'#dbeafe', boxWidth:12 } } },
+      // Num celular, 30 rótulos de data em ~340px viram um borrão: limita os
+      // ticks do eixo X e encolhe a legenda.
+      plugins: { legend: { labels: {
+        color:'#dbeafe', boxWidth: isNarrow ? 8 : 12,
+        font: { size: isNarrow ? 10 : 12 }, padding: isNarrow ? 8 : 10,
+      } } },
       scales: {
-        x: { ticks:{ color:'rgba(219,234,254,.6)' }, grid:{ color:'rgba(255,255,255,.05)' } },
-        y: { ticks:{ color:'rgba(219,234,254,.6)' }, grid:{ color:'rgba(255,255,255,.05)' } },
+        x: { ticks:{ color:'rgba(219,234,254,.6)', maxTicksLimit: isNarrow ? 5 : 12,
+                     maxRotation: 0, autoSkip: true, font: { size: isNarrow ? 10 : 12 } },
+             grid:{ color:'rgba(255,255,255,.05)' } },
+        y: { ticks:{ color:'rgba(219,234,254,.6)', maxTicksLimit: isNarrow ? 5 : 8,
+                     font: { size: isNarrow ? 10 : 12 } },
+             grid:{ color:'rgba(255,255,255,.05)' } },
       }
     }
   });
 }
+
+/* Redesenha o gráfico ao girar o aparelho: as opções acima dependem da
+   largura, e sem isto a rotação mantém a densidade de ticks da orientação
+   anterior. Debounce porque o resize dispara em rajada. */
+let chartResizeDebounce = null;
+window.addEventListener('resize', () => {
+  clearTimeout(chartResizeDebounce);
+  chartResizeDebounce = setTimeout(() => {
+    const narrowNow = window.innerWidth <= 820;
+    if (mainChart && lastChartData && narrowNow !== lastChartWasNarrow) renderChart(lastChartData);
+  }, 250);
+});
 
 /* ── Load ────────────────────────────────────────────────────────── */
 async function loadOverview(force=false) {
@@ -1170,11 +1784,11 @@ async function loadPiiAccess() {
     }
     root.innerHTML = data.items.map(r => `
       <tr>
-        <td title="${fDate(r.created_at)}">${fRelTime(r.created_at)}</td>
-        <td><code style="font-size:11px">${esc(r.actor)}</code></td>
-        <td>${r.subject_user_id ?? '—'}</td>
-        <td><span class="badge badge-muted">${esc(r.field||'?')}</span></td>
-        <td><small>${esc(r.purpose)}</small></td>
+        <td data-primary data-label="Quando" title="${fDate(r.created_at)}">${fRelTime(r.created_at)}</td>
+        <td data-label="Ator"><code style="font-size:11px">${esc(r.actor)}</code></td>
+        <td data-label="Sobre user">${r.subject_user_id ?? '—'}</td>
+        <td data-label="Campo"><span class="badge badge-muted">${esc(r.field||'?')}</span></td>
+        <td data-label="Propósito"><small>${esc(r.purpose)}</small></td>
       </tr>`).join('');
     $id('pii-access-meta').textContent = `${offset+1}–${offset+data.items.length} de ${data.total}`;
     $id('pii-access-pagination').innerHTML = totalPages <= 1 ? '' : `
@@ -1195,6 +1809,406 @@ function onPiiFilterChange() {
     loadPiiAccess();
   }, 250);
 }
+
+/* ── Modal de usuários & assinaturas ─────────────────────────────── */
+const USER_STATUS_META = {
+  paying:   { label: 'Pagante',      cls: 'badge-ok',      chip: 'green'  },
+  trial:    { label: 'Trial',        cls: 'badge-info',    chip: 'blue'   },
+  past_due: { label: 'Inadimplente', cls: 'badge-warning', chip: 'yellow' },
+  canceled: { label: 'Cancelado',    cls: 'badge-error',   chip: 'red'    },
+  granted:  { label: 'Cortesia',     cls: 'badge-purple',  chip: 'purple' },
+  free:     { label: 'Free',         cls: 'badge-muted',   chip: ''       },
+};
+// Aliases internos da coluna plan → nome comercial (espelha
+// _STORED_PLAN_TO_TIER de core/services/plan_service.py: 'pro' legado é o
+// tier Plus; 'pro_max' é o tier Pro novo)
+const PLAN_LABELS = { free: 'Free', essencial: 'Essencial', pro: 'Plus', plus: 'Plus', pro_max: 'Pro' };
+function planLabel(p) {
+  const k = String(p || 'free').trim().toLowerCase() || 'free';
+  return PLAN_LABELS[k] || k;
+}
+// Origem do cadastro (auth_accounts.signup_source). null = conta anterior à coluna.
+const SOURCE_LABELS = { web: 'Web', app: 'App iOS', google: 'Google', google_app: 'Google (app)' };
+function sourceLabel(s) {
+  if (!s) return '—';
+  return SOURCE_LABELS[String(s).toLowerCase()] || s;
+}
+const usersState = { q: '', status: '', page: 0, perPage: 50, sort: 'created_at', open: false };
+let usersSearchDebounce = null;
+let usersController = null;
+
+/* Trava a rolagem do fundo enquanto a folha está aberta. Sem isso, no iOS o
+   arrasto dentro do modal rola a PÁGINA atrás dele (e num navegador embutido
+   chega a arrastar a própria folha do navegador) — é o que faz o modal
+   parecer quebrado no celular. Guarda o scrollY para devolver na hora de
+   fechar, senão a página volta pro topo.
+
+   Há DOIS overlays nesta página — a folha de usuários e o QR do Pix — e os
+   dois precisam da trava; o contador evita que fechar um destrave o outro. */
+let scrollLockY = 0;
+let scrollLockCount = 0;
+function lockPageScroll() {
+  if (scrollLockCount++ > 0) return;
+  scrollLockY = window.scrollY || 0;
+  document.documentElement.classList.add('modal-aberto');
+  document.body.style.top = `-${scrollLockY}px`;
+}
+function unlockPageScroll() {
+  if (scrollLockCount === 0) return;
+  if (--scrollLockCount > 0) return;
+  document.documentElement.classList.remove('modal-aberto');
+  document.body.style.top = '';
+  window.scrollTo(0, scrollLockY);
+}
+
+let _usersLastFocus = null;
+let _usersLastFocusId = null;
+
+function openUsersModal(ev) {
+  usersState.open = true;
+  /* Do evento, não do document.activeElement: num clique de mouse o
+     activeElement é o body. E guardamos o ID, não o nó — o auto-refresh de 60s
+     recria os cards, e um nó guardado vira órfão no meio da sessão. */
+  const alvo = ev?.currentTarget || document.activeElement;
+  _usersLastFocusId = alvo?.id || null;
+  _usersLastFocus = _usersLastFocusId ? null : alvo;
+  $id('users-modal').classList.add('visible');
+  lockPageScroll();
+  showUsersList();
+  loadUsers();
+  /* O foco tem de entrar no diálogo — é o que o `aria-modal="true"` promete e o
+     que o trap de Tab abaixo pressupõe. MAS focar um campo de texto num celular
+     abre o teclado na hora, cobrindo metade da folha antes de a lista aparecer.
+     Em ponteiro grosso o foco vai para o botão de fechar: entra no diálogo do
+     mesmo jeito, sem convocar o teclado. No mouse/teclado segue na busca, que é
+     o primeiro controle útil. */
+  const toque = window.matchMedia?.('(pointer: coarse)').matches;
+  (toque ? document.querySelector('.users-close') : $id('users-search'))?.focus();
+}
+function closeUsersModal() {
+  usersState.open = false;
+  usersController?.abort();
+  $id('users-modal').classList.remove('visible');
+  unlockPageScroll();
+  // resolve o alvo AGORA: se o auto-refresh recriou os cards, o id acha o card
+  // novo; o nó guardado só é usado quando não havia id
+  const volta = _usersLastFocusId
+    ? document.getElementById(_usersLastFocusId)
+    : _usersLastFocus;
+  if (volta && document.contains(volta)) volta.focus();
+  _usersLastFocus = null;
+  _usersLastFocusId = null;
+}
+function showUsersList() {
+  $id('user-detail').style.display = 'none';
+  $id('users-body').style.display = '';
+  $id('users-toolbar').style.display = '';
+  $id('users-chips').style.display = '';
+  $id('users-foot').style.display = '';
+}
+
+async function loadUsers() {
+  usersController?.abort();
+  usersController = new AbortController();
+  $id('users-loading').textContent = 'Carregando…';
+  const params = new URLSearchParams({
+    page: usersState.page, per_page: usersState.perPage, sort: usersState.sort,
+  });
+  if (usersState.q)      params.set('q', usersState.q);
+  if (usersState.status) params.set('status', usersState.status);
+  try {
+    const res = await fetch(`/admin/api/users?${params}`, {
+      headers: authH(), cache: 'no-store', signal: usersController.signal,
+    });
+    if (res.status === 401) { window.location.href = '/admin/login'; return; }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderUsersChips(data.aggregates, data.billing, data.checkout_funnel, data.by_source);
+    renderUsersTable(data);
+    $id('users-loading').textContent = '';
+  } catch (e) {
+    if (e?.name !== 'AbortError') {
+      $id('users-loading').textContent = 'Falha ao carregar.';
+      console.error('users:', e);
+    }
+  }
+}
+
+function renderUsersChips(agg, billing, funnel, bySource) {
+  const chips = [
+    { key: '',         label: 'Total',        val: fInt(agg.total),    chip: '' },
+    { key: 'paying',   label: 'Pagantes',     val: fInt(agg.paying),   chip: 'green' },
+    { key: 'trial',    label: 'Em trial',     val: fInt(agg.trial),    chip: 'blue' },
+    { key: 'past_due', label: 'Inadimpl.',    val: fInt(agg.past_due), chip: 'yellow' },
+    { key: 'canceled', label: 'Cancelados',   val: fInt(agg.canceled), chip: 'red' },
+    { key: 'granted',  label: 'Cortesia',     val: fInt(agg.granted),  chip: 'purple' },
+    { key: 'free',     label: 'Free',         val: fInt(agg.free),     chip: '' },
+  ];
+  // Grupo 1: chips que filtram a lista.
+  const filtersHtml = chips.map(c => `
+    <div class="user-chip${usersState.status === c.key ? ' active' : ''}" onclick="setUsersStatus('${c.key}')">
+      <b class="${c.chip}">${c.val}</b><span>${c.label}</span>
+    </div>`).join('');
+
+  // Grupo 2: indicadores estáticos (só leitura).
+  let html = `
+    <div class="user-chip static"><b>${fInt(agg.whatsapp_connected)}</b><span>WA conect.</span></div>`;
+  // Funil de checkout 30d: pessoas que abriram + conversão POR SESSÃO
+  // (sessões concluídas / sessões abertas, correlação por session_id).
+  if (funnel) {
+    const people = funnel.people_30d || 0;
+    const sStarted = funnel.sessions_started_30d || 0;
+    const sCompleted = funnel.sessions_completed_30d || 0;
+    const conv = sStarted > 0 ? Math.round((sCompleted / sStarted) * 100) : null;
+    html += `
+    <div class="user-chip static"><b>${fInt(people)}</b><span>Checkout 30d</span></div>
+    <div class="user-chip static"><b class="${conv !== null && conv >= 50 ? 'green' : ''}">${conv !== null ? conv + '%' : '—'}</b><span>Conversão 30d</span></div>`;
+  }
+  // Origem do cadastro (só as origens presentes; agrupa google/google_app)
+  if (bySource) {
+    const web = bySource.web || 0;
+    const app = bySource.app || 0;
+    const google = (bySource.google || 0) + (bySource.google_app || 0);
+    const unknown = bySource.desconhecido || 0;
+    const srcChips = [
+      ['Web', web], ['App iOS', app], ['Google', google], ['Origem —', unknown],
+    ].filter(([, n]) => n > 0);
+    html += srcChips.map(([lbl, n]) =>
+      `<div class="user-chip static"><b>${fInt(n)}</b><span>${lbl}</span></div>`).join('');
+  }
+  if (billing?.available) {
+    // `wide`: valor em reais não cabe em meia largura num iPhone SE — ocupa a
+    // linha inteira da grade de indicadores em vez de quebrar o número no meio.
+    html += `
+    <div class="user-chip static wide"><b class="green">${fMoney(billing.mrr)}</b><span>MRR</span></div>
+    <div class="user-chip static wide"><b>${fMoney(billing.ticket_medio)}</b><span>Ticket médio</span></div>
+    <div class="user-chip static wide"><b class="blue">${fMoney(billing.trial_mrr_potencial)}</b><span>MRR em trial</span></div>`;
+    $id('users-billing-meta').textContent = billing.stale
+      ? `Stripe instável — último dado ${fRelTime(billing.fetched_at)}`
+      : `Stripe ${fRelTime(billing.fetched_at)}`;
+  } else {
+    $id('users-billing-meta').textContent = 'Stripe indisponível — contagens vêm do banco';
+  }
+  $id('users-chip-filters').innerHTML = filtersHtml;
+  $id('users-chip-stats').innerHTML = html;
+}
+
+function setUsersStatus(status) {
+  usersState.status = usersState.status === status ? '' : status;
+  usersState.page = 0;
+  loadUsers();
+}
+
+function renderUsersTable(data) {
+  const body = $id('users-table-body');
+  if (!data.users.length) {
+    body.innerHTML = `<tr><td colspan="10" class="empty">Nenhum usuário com esse filtro.</td></tr>`;
+  } else {
+    body.innerHTML = data.users.map(u => {
+      const meta = USER_STATUS_META[u.account_status] || USER_STATUS_META.free;
+      const stripe = u.stripe_customer_id
+        ? `<a class="stripe-link" href="https://dashboard.stripe.com/customers/${esc(u.stripe_customer_id)}"
+             target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Abrir no Stripe">
+             <i class="ph ph-arrow-square-out" aria-hidden="true"></i></a>`
+        : '—';
+      return `
+      <tr class="users-row" onclick="openUserDetail(${Number(u.user_id)})">
+        <td data-primary data-label="E-mail" title="user_id ${Number(u.user_id)}">${esc(u.email || '(sem e-mail)')}</td>
+        <td data-label="Status"><span class="badge ${meta.cls}">${meta.label}</span></td>
+        <td data-label="Plano">${esc(planLabel(u.plan))}</td>
+        <td data-label="Origem">${esc(sourceLabel(u.signup_source))}</td>
+        <td data-label="Expira" title="${fDate(u.plan_expires_at)}">${u.plan_expires_at ? fDate(u.plan_expires_at) : '—'}</td>
+        <td data-label="Cadastro" title="${fDate(u.created_at)}">${fRelTime(u.created_at)}</td>
+        <td data-label="Últ. atividade" title="${fDate(u.last_activity_at)}">${fRelTime(u.last_activity_at)}</td>
+        <td data-label="Tx 30d">${fInt(u.tx_30d)}</td>
+        <td data-label="WhatsApp">${(u.has_whatsapp_identity || u.phone_status === 'confirmed') ? '<i class="ph ph-check" style="color:var(--green)" aria-hidden="true"></i>' : '—'}</td>
+        <td data-label="Stripe">${stripe}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  const totalPages = Math.max(1, Math.ceil(data.total / usersState.perPage));
+  const start = data.page * usersState.perPage;
+  const truncWarn = data.truncated
+    ? ' · ⚠ busca limitada às contas mais recentes — refine o termo'
+    : '';
+  $id('users-foot-meta').textContent = (data.total
+    ? `${start + 1}–${start + data.users.length} de ${fInt(data.total)} conta${data.total === 1 ? '' : 's'}`
+    : '0 contas') + truncWarn;
+  $id('users-pagination').innerHTML = totalPages <= 1 ? '' : `
+    <button class="pagination-btn" ${data.page === 0 ? 'disabled' : ''} onclick="changeUsersPage(-1)">◀</button>
+    <span class="pagination-info">Página ${data.page + 1} de ${totalPages}</span>
+    <button class="pagination-btn" ${data.page >= totalPages - 1 ? 'disabled' : ''} onclick="changeUsersPage(1)">▶</button>`;
+}
+
+function changeUsersPage(delta) {
+  usersState.page = Math.max(0, usersState.page + delta);
+  loadUsers();
+}
+
+/* ── Drill-down de um usuário ────────────────────────────────────── */
+async function openUserDetail(userId) {
+  const panel = $id('user-detail');
+  $id('users-body').style.display = 'none';
+  $id('users-toolbar').style.display = 'none';
+  $id('users-chips').style.display = 'none';
+  // A paginação da lista não tem sentido olhando UMA conta — e custa ~120px
+  // de uma folha de tela cheia no celular.
+  $id('users-foot').style.display = 'none';
+  panel.style.display = 'block';
+  panel.innerHTML = `<div class="empty">Carregando conta ${userId}…</div>`;
+  try {
+    const res = await fetch(`/admin/api/users/${userId}`, { headers: authH(), cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    renderUserDetail(await res.json());
+  } catch (e) {
+    panel.innerHTML = `<div class="empty">Falha ao carregar a conta. <button onclick="showUsersList()">Voltar</button></div>`;
+    console.error('user-detail:', e);
+  }
+}
+
+function renderUserDetail(data) {
+  const p = data.profile, u = data.usage;
+  const meta = USER_STATUS_META[p.account_status] || USER_STATUS_META.free;
+  const item = (k, v) => `<div class="detail-item"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  const optOuts = [
+    p.engagement_opt_out && 'engajamento',
+    p.tip_email_opt_out && 'dicas',
+    p.insight_email_opt_out && 'insights',
+    p.whatsapp_updates_opt_out && 'updates WA',
+  ].filter(Boolean).join(', ') || 'nenhum';
+
+  $id('user-detail').innerHTML = `
+    <div class="detail-head" style="display:flex;align-items:center;gap:10px;margin:4px 0 14px">
+      <button onclick="showUsersList()"><i class="ph ph-arrow-left" aria-hidden="true"></i> Voltar</button>
+      <h3 style="font-size:16px;min-width:0;overflow-wrap:anywhere">${esc(p.email || `user ${p.user_id}`)}</h3>
+      <span class="badge ${meta.cls}">${meta.label}</span>
+      ${p.deletion_status ? `<span class="badge badge-error">exclusão: ${esc(p.deletion_status)}</span>` : ''}
+      ${p.stripe_customer_id ? `<a class="stripe-link" target="_blank" rel="noopener"
+          href="https://dashboard.stripe.com/customers/${esc(p.stripe_customer_id)}">abrir no Stripe <i class="ph ph-arrow-square-out" aria-hidden="true"></i></a>` : ''}
+    </div>
+
+    <div class="detail-grid">
+      ${item('User ID', p.user_id)}
+      ${item('Nome', esc(p.display_name || '—'))}
+      ${item('Telefone', esc(p.phone_e164 || '—'))}
+      ${item('Plano', `${esc(planLabel(p.plan))}${p.plan_expires_at ? ` · expira ${fDate(p.plan_expires_at)}` : ''}`)}
+      ${item('Origem do cadastro', esc(sourceLabel(p.signup_source)))}
+      ${item('Status pagamento', esc(p.last_payment_status || '—'))}
+      ${item('Trial iniciado', p.trial_started_at ? fDate(p.trial_started_at) : '—')}
+      ${item('Plano escolhido em', p.plan_selected_at ? fDate(p.plan_selected_at) : '—')}
+      ${item('Cadastro', fDate(p.created_at))}
+      ${item('Última atividade', p.last_activity_at ? `${fRelTime(p.last_activity_at)}` : '—')}
+      ${item('WhatsApp', (p.has_whatsapp_identity || p.phone_status === 'confirmed') ? 'conectado' : (p.phone_status || 'não conectado'))}
+      ${item('IA no mês', fInt(p.ai_messages_this_month))}
+      ${item('Opt-outs', optOuts)}
+    </div>
+
+    <div class="detail-section-title">Uso (contagens — sem conteúdo financeiro)</div>
+    <div class="detail-grid">
+      ${item('Transações (total)', fInt(u.tx_total))}
+      ${item('Transações 30d', fInt(u.tx_30d))}
+      ${item('Última transação', u.last_tx_at ? fRelTime(u.last_tx_at) : '—')}
+      ${item('Caixinhas', fInt(u.pockets_count))}
+      ${item('Investimentos', fInt(u.investments_count))}
+      ${item('Cartões', fInt(u.cards_count))}
+    </div>
+
+    <div class="detail-section-title">Eventos recentes desta conta</div>
+    ${data.recent_events.length ? data.recent_events.map(ev => `
+      <div class="detail-event">
+        ${levelBadge(ev.level)}
+        <span>${esc(ev.event_type)} — ${esc((ev.message || '').slice(0, 120))}</span>
+        <span class="t" title="${fDate(ev.created_at)}">${fRelTime(ev.created_at)}</span>
+      </div>`).join('') : '<div class="empty">Sem eventos registrados.</div>'}
+
+    <div class="detail-section-title">Logins recentes</div>
+    ${data.recent_logins.length ? data.recent_logins.map(lg => `
+      <div class="detail-event">
+        <span class="badge ${lg.success ? 'badge-ok' : 'badge-error'}">${lg.success ? 'ok' : 'falha'}</span>
+        <span>${esc(lg.ip_address || '')}${lg.failure_reason ? ` — ${esc(lg.failure_reason)}` : ''}</span>
+        <span class="t" title="${fDate(lg.created_at)}">${fRelTime(lg.created_at)}</span>
+      </div>`).join('') : '<div class="empty">Sem logins registrados.</div>'}
+  `;
+}
+
+/* Listeners do modal */
+$id('users-search').addEventListener('input', () => {
+  clearTimeout(usersSearchDebounce);
+  usersSearchDebounce = setTimeout(() => {
+    usersState.q = $id('users-search').value.trim();
+    usersState.page = 0;
+    loadUsers();
+  }, 300);
+});
+$id('users-sort').addEventListener('change', () => {
+  usersState.sort = $id('users-sort').value;
+  usersState.page = 0;
+  loadUsers();
+});
+$id('users-modal').addEventListener('click', (e) => {
+  if (e.target === $id('users-modal')) closeUsersModal();
+});
+/* Recolhe/expande os indicadores (só existe no mobile; no desktop o botão
+   está display:none e a grade aparece inteira via `display: contents`). */
+$id('chips-toggle').addEventListener('click', () => {
+  const box = $id('users-chip-stats');
+  const open = box.classList.toggle('open');
+  $id('chips-toggle').setAttribute('aria-expanded', String(open));
+  $id('chips-toggle').textContent = open ? 'Indicadores ▴' : 'Indicadores ▾';
+});
+
+/* O Esc já existia; o Tab não estava preso. O modal declara aria-modal="true",
+   que AFIRMA pro leitor de tela que o resto da página não está disponível — mas
+   o teclado saía do diálogo pros controles do painel atrás dele. Mesmo defeito
+   que o Codex apontou no modal da Início (PR #70).
+
+   Os alvos são consultados a cada Tab porque o conteúdo troca: a lista de
+   usuários é paginada e o detalhe de um usuário substitui a tabela. */
+function _usersFocaveis() {
+  const dlg = document.querySelector('#users-modal .users-dialog');
+  if (!dlg) return [];
+  const sel = 'a[href], button:not([disabled]), input:not([disabled]),'
+            + ' select:not([disabled]), textarea:not([disabled]),'
+            + ' [tabindex]:not([tabindex="-1"])';
+  return [...dlg.querySelectorAll(sel)].filter(
+    (el) => el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0,
+  );
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!usersState.open) return;
+  if (e.key === 'Escape') { closeUsersModal(); return; }
+  if (e.key !== 'Tab') return;
+
+  const dlg = document.querySelector('#users-modal .users-dialog');
+  const alvos = _usersFocaveis();
+  if (!dlg || !alvos.length) return;
+
+  const primeiro = alvos[0];
+  const ultimo = alvos[alvos.length - 1];
+  const proximo = e.shiftKey ? ultimo : primeiro;
+  const borda = e.shiftKey ? primeiro : ultimo;
+
+  if (!dlg.contains(document.activeElement) || document.activeElement === borda) {
+    e.preventDefault();
+    proximo.focus();
+  }
+});
+
+/* ── Offset do header sticky ─────────────────────────────────────────
+   Publica a altura real do header em `--sticky-h`, que a CSS usa como
+   `scroll-margin-top` dos cartões. Medir em vez de cravar um número: a
+   altura muda quando o badge de erro aparece, quando o título quebra em
+   duas linhas e entre retrato e paisagem. */
+function syncStickyOffset() {
+  const hero = document.querySelector('.hero');
+  if (!hero) return;
+  const sticky = getComputedStyle(hero).position === 'sticky';
+  document.documentElement.style.setProperty('--sticky-h', sticky ? `${hero.offsetHeight}px` : '0px');
+}
+window.addEventListener('resize', syncStickyOffset);
+window.addEventListener('orientationchange', syncStickyOffset);
 
 /* ── Auto-refresh ────────────────────────────────────────────────── */
 function startAutoRefresh() {
@@ -1242,17 +2256,17 @@ async function loadAffiliates() {
     $id('aff-meta').textContent = affs.length + ' afiliado' + (affs.length === 1 ? '' : 's');
     $id('aff-list').innerHTML = affs.map(a => `
       <tr>
-        <td style="white-space:nowrap"><code>${esc(a.code)}</code>
-          <button class="btn-primary" type="button" style="font-size:11px;padding:3px 8px;margin-left:6px"
+        <td data-primary data-label="Código"><code>${esc(a.code)}</code>
+          <button class="btn-primary btn-xs" type="button" style="margin-left:6px"
             onclick="copyAffiliateAdminLink('${esc(a.code)}', this)">⧉ Copiar link</button></td>
-        <td>${esc(a.email || '—')}</td>
-        <td>${(a.commission_bps / 100).toFixed(0)}%</td>
-        <td>${a.referrals}</td>
-        <td>${fmtCents(a.owed_cents)}</td>
-        <td>${fmtCents(a.paid_cents)}</td>
-        <td>${esc(a.pix_key || '—')}</td>
-        <td>${a.status === 'active' ? '🟢 ativo' : '🔴 desativado'}</td>
-        <td><button class="btn-primary" type="button" style="font-size:11px;padding:4px 10px"
+        <td data-label="Email">${esc(a.email || '—')}</td>
+        <td data-label="Comissão">${(a.commission_bps / 100).toFixed(0)}%</td>
+        <td data-label="Indicados">${a.referrals}</td>
+        <td data-label="A pagar">${fmtCents(a.owed_cents)}</td>
+        <td data-label="Já pago">${fmtCents(a.paid_cents)}</td>
+        <td data-label="Chave Pix">${esc(a.pix_key || '—')}</td>
+        <td data-label="Status"><span>${a.status === 'active' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:5px"></span>ativo' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:5px"></span>desativado'}</span></td>
+        <td data-actions><button class="btn-primary btn-xs" type="button"
           onclick="toggleAffiliateStatus(${a.id}, '${a.status === 'active' ? 'disabled' : 'active'}')">
           ${a.status === 'active' ? 'Desativar' : 'Reativar'}</button></td>
       </tr>`).join('') || '<tr><td colspan="9" style="color:var(--muted)">Nenhum afiliado ainda.</td></tr>';
@@ -1260,19 +2274,19 @@ async function loadAffiliates() {
     const payouts = data.payouts || [];
     $id('aff-payouts').innerHTML = payouts.map(p => {
       const when = new Date(p.requested_at).toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-      const st = p.status === 'paid' ? '🟢 pago' : (p.status === 'rejected' ? '🔴 rejeitado' : '🟡 aguardando');
+      const st = p.status === 'paid' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:5px"></span>pago' : (p.status === 'rejected' ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:5px"></span>rejeitado' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fbbf24;margin-right:5px"></span>aguardando');
       const actions = p.status === 'requested' ? `
-        <button class="btn-primary" type="button" style="font-size:11px;padding:4px 10px;background:#0ea5e9" onclick="showPayoutPix(${p.id})">💠 Pagar via Pix</button>
-        <button class="btn-primary" type="button" style="font-size:11px;padding:4px 10px" onclick="payoutAction(${p.id}, 'paid')">Marcar pago</button>
-        <button class="btn-danger" type="button" style="font-size:11px;padding:4px 10px" onclick="payoutAction(${p.id}, 'reject')">Rejeitar</button>` : '';
+        <button class="btn-primary btn-xs btn-sky" type="button" onclick="showPayoutPix(${p.id})"><i class="ph ph-sparkle" aria-hidden="true"></i> Pagar via Pix</button>
+        <button class="btn-primary btn-xs" type="button" onclick="payoutAction(${p.id}, 'paid')">Marcar pago</button>
+        <button class="btn-danger btn-xs" type="button" onclick="payoutAction(${p.id}, 'reject')">Rejeitar</button>` : '';
       return `
       <tr>
-        <td>${when}</td>
-        <td><code>${esc(p.code)}</code> ${esc(p.email || '')}</td>
-        <td><strong>${fmtCents(p.amount_cents)}</strong></td>
-        <td>${esc(p.pix_key || '—')}</td>
-        <td>${st}${p.note ? ' · ' + esc(p.note) : ''}</td>
-        <td style="white-space:nowrap">${actions}</td>
+        <td data-primary data-label="Afiliado"><code>${esc(p.code)}</code> ${esc(p.email || '')}</td>
+        <td data-label="Pedido em">${when}</td>
+        <td data-label="Valor"><strong>${fmtCents(p.amount_cents)}</strong></td>
+        <td data-label="Chave Pix">${esc(p.pix_key || '—')}</td>
+        <td data-label="Status"><span>${st}${p.note ? ' · ' + esc(p.note) : ''}</span></td>
+        <td data-actions style="white-space:nowrap">${actions}</td>
       </tr>`;
     }).join('') || '<tr><td colspan="6" style="color:var(--muted)">Nenhum saque solicitado.</td></tr>';
   } catch (e) {
@@ -1352,11 +2366,16 @@ async function showPayoutPix(id) {
   const d = await res.json();
 
   const ov = document.createElement('div');
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px';
-  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:9999;overflow:auto;' +
+    'padding:calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left))';
+  // Mesma trava da folha de usuários: sem ela o arrasto sobre o QR rola a
+  // página atrás no iOS.
+  const fecharPix = () => { ov.remove(); unlockPageScroll(); };
+  ov.onclick = (e) => { if (e.target === ov) fecharPix(); };
 
   const box = document.createElement('div');
-  box.style.cssText = 'background:#12121a;border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:22px;max-width:380px;width:100%;text-align:center';
+  // max-height + overflow: em paisagem no celular a caixa passava da tela.
+  box.style.cssText = 'background:#12121a;border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:22px;max-width:380px;width:100%;text-align:center;max-height:100%;overflow-y:auto';
 
   const h = document.createElement('h3');
   h.textContent = 'Pagar ' + fmtCents(d.amount_cents);
@@ -1369,7 +2388,7 @@ async function showPayoutPix(id) {
   const img = document.createElement('img');
   img.src = d.qr;
   img.alt = 'QR Code Pix';
-  img.style.cssText = 'width:230px;height:230px;background:#fff;border-radius:12px;padding:8px';
+  img.style.cssText = 'width:min(230px, 100%);height:auto;aspect-ratio:1;background:#fff;border-radius:12px;padding:8px';
 
   const hint = document.createElement('div');
   hint.textContent = 'Escaneie com o app do banco — chave e valor já vêm preenchidos.';
@@ -1396,14 +2415,16 @@ async function showPayoutPix(id) {
   close.type = 'button';
   close.textContent = 'Fechar';
   close.style.cssText = 'margin-top:8px;width:100%;background:transparent;border:1px solid rgba(255,255,255,.18);color:#fff;border-radius:8px;padding:8px;cursor:pointer';
-  close.onclick = () => ov.remove();
+  close.onclick = fecharPix;
 
   box.append(h, sub, img, hint, inp, copy, close);
   ov.appendChild(box);
   document.body.appendChild(ov);
+  lockPageScroll();
 }
 
 /* ── Boot ────────────────────────────────────────────────────────── */
+syncStickyOffset();
 refresh(false).then(() => { loadPiiAccess(); loadAffiliates(); }).catch(() => {
   localStorage.removeItem(tokenKey);
   window.location.href = '/admin/login';

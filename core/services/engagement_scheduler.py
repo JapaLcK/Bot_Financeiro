@@ -79,6 +79,19 @@ async def run_engagement_loop() -> None:
                 source="engagement_scheduler",
             )
 
+        # Nudge de upgrade pros Grátis (B2). Dormente até FREE_UPGRADE_NUDGE_ENABLED=1.
+        # Isolado dos demais checks — falha aqui não afeta dica/insight/reengajamento.
+        try:
+            await _check_free_upgrade_nudge()
+        except Exception as exc:
+            logger.error("[engagement] Erro no nudge de upgrade: %s", exc, exc_info=True)
+            log_system_event_sync(
+                "error",
+                "free_upgrade_nudge_error",
+                f"Erro no nudge de upgrade: {exc}",
+                source="engagement_scheduler",
+            )
+
         try:
             await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
         except asyncio.CancelledError:
@@ -261,3 +274,55 @@ async def _check_trial_ending() -> None:
                 )
         except Exception as exc:
             logger.error("[trial-ending] falha enviando user_id=%s: %s", user_id, exc)
+
+
+# ─── B2: nudge de upgrade pros Grátis ─────────────────────────────────────────
+
+async def _check_free_upgrade_nudge() -> None:
+    """Manda o e-mail de conversão pros usuários Grátis ativos (B2).
+
+    DORMENTE até FREE_UPGRADE_NUDGE_ENABLED=1 (deploy seguro). Alvo: contas free
+    ativas nos últimos FREE_UPGRADE_NUDGE_ACTIVE_DAYS dias (só quem usa = quem
+    converte). Dedup sem coluna nova, via recent_event_exists: não reenvia dentro
+    de FREE_UPGRADE_NUDGE_INTERVAL_DAYS.
+    """
+    import os
+    if (os.getenv("FREE_UPGRADE_NUDGE_ENABLED") or "").strip().lower() not in (
+        "1", "true", "yes", "on"
+    ):
+        return
+
+    import db
+    from core.services.email_service import send_free_upgrade_nudge_email
+    from core.observability import recent_event_exists
+
+    loop = asyncio.get_event_loop()
+    active_days = int(os.getenv("FREE_UPGRADE_NUDGE_ACTIVE_DAYS", "30"))
+    interval_days = float(os.getenv("FREE_UPGRADE_NUDGE_INTERVAL_DAYS", "30"))
+    dashboard_url = os.getenv("DASHBOARD_URL", "https://pigbankai.com")
+
+    users = await loop.run_in_executor(None, db.get_free_users_for_upgrade_nudge, active_days)
+    for user in users:
+        user_id = user["user_id"]
+        email = user["email"]
+        if not email:
+            continue
+        if await loop.run_in_executor(
+            None, recent_event_exists, "free_upgrade_nudge_sent", user_id, interval_days
+        ):
+            continue
+        try:
+            ok = await loop.run_in_executor(
+                None, send_free_upgrade_nudge_email, email, user_id, dashboard_url
+            )
+            if ok:
+                logger.info("[free-nudge] enviado → user_id=%s (%s)", user_id, _mask_email(email))
+                log_system_event_sync(
+                    "info",
+                    "free_upgrade_nudge_sent",
+                    "Email de nudge de upgrade (Free) enviado.",
+                    source="engagement_scheduler",
+                    user_id=user_id,
+                )
+        except Exception as exc:
+            logger.error("[free-nudge] falha enviando user_id=%s: %s", user_id, exc)

@@ -11,7 +11,15 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
-from frontend.routes.shared import FRONTEND_DIR, gate_pro_page, html_file, limiter, public_site_url
+from frontend.routes.shared import (
+    FRONTEND_DIR,
+    gate_plan_selection,
+    gate_pro_page,
+    html_file,
+    inject_meta_pixel,
+    limiter,
+    public_site_url,
+)
 
 router = APIRouter()
 
@@ -30,18 +38,29 @@ async def serve_landing():
 
 
 @router.get("/app")
-async def serve_dashboard():
-    return html_file(FRONTEND_DIR / "dashboard.html")
+async def serve_dashboard(request: Request):
+    # Gate server-side: cadastro sem plano escolhido é mandado pra /precos antes
+    # de receber o HTML do app (não depende do redirect em JS, que é burlável).
+    gate = gate_plan_selection(request)
+    if gate is not None:
+        return gate
+    return html_file(FRONTEND_DIR / "dashboard.html", pixel=False)
 
 
 @router.get("/home")
-async def serve_home():
+async def serve_home(request: Request):
+    gate = gate_plan_selection(request)
+    if gate is not None:
+        return gate
     return html_file(FRONTEND_DIR / "home.html")
 
 
 @router.get("/settings")
-async def serve_settings():
-    return html_file(FRONTEND_DIR / "settings.html")
+async def serve_settings(request: Request):
+    gate = gate_plan_selection(request)
+    if gate is not None:
+        return gate
+    return html_file(FRONTEND_DIR / "settings.html", pixel=False)
 
 
 @router.get("/reset-password")
@@ -51,6 +70,9 @@ async def serve_reset_password():
 
 @router.get("/onboarding")
 async def serve_onboarding():
+    # Página de conclusão do cadastro via Google → parte do funil de aquisição.
+    # Recebe o pixel pra o CompleteRegistration client-side (dedup com o CAPI e
+    # cobertura do modo pixel-only, sem token da Conversions API).
     return html_file(FRONTEND_DIR / "onboarding.html")
 
 
@@ -88,7 +110,7 @@ async def serve_changelog(request: Request):
     gate = gate_pro_page(request)
     if gate is not None:
         return gate
-    return html_file(FRONTEND_DIR / "changelog.html")
+    return html_file(FRONTEND_DIR / "changelog.html", pixel=False)
 
 
 def _guide_card_html(g: dict) -> str:
@@ -160,7 +182,7 @@ async def serve_comandos_app():
     """Versao logged-in da pagina /comandos. Layout interno (mesmo header
     da home), personalizado com base no snapshot/plano. Mantém a URL
     /comandos pra landing publica intacta."""
-    return html_file(FRONTEND_DIR / "comandos-app.html")
+    return html_file(FRONTEND_DIR / "comandos-app.html", pixel=False)
 
 
 @router.get("/api/commands-catalog")
@@ -205,6 +227,13 @@ async def get_blog_news(limit: int = 12):
     return {"news": news}
 
 
+@router.get("/agents")
+async def serve_agents():
+    """Galeria pública dos Agentes do Piggy — só apresenta a utilidade de cada
+    um. A ativação de fato acontece no painel (dashboard), não aqui."""
+    return html_file(FRONTEND_DIR / "agents.html")
+
+
 @router.get("/como-funciona")
 async def serve_como_funciona():
     return html_file(FRONTEND_DIR / "como-funciona.html")
@@ -230,11 +259,26 @@ async def serve_suporte():
         for g in list_guides()
     )
     template = (FRONTEND_DIR / "suporte.html").read_text(encoding="utf-8")
-    # no-store igual às outras páginas HTML (html_file); /suporte montava a Response
-    # crua e ficava de fora do padrão.
-    return Response(content=template.replace("{{FAQ}}", faq),
+    # Mesmos headers de cache das demais páginas HTML (html_file): o /suporte é
+    # montado à mão (injeta o FAQ), então precisa setar no-store explicitamente.
+    # /suporte é público → recebe o Meta Pixel como as demais páginas públicas.
+    page = inject_meta_pixel(template.replace("{{FAQ}}", faq))
+    return Response(content=page,
                     media_type="text/html; charset=utf-8",
                     headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
+
+
+@router.get("/ddf99f17-3a6c-460e-8fb5-1c2e978a24ae.html")
+async def serve_domain_verification():
+    """Arquivo de verificação de propriedade do domínio pigbankai.com.
+    Precisa ser servido na raiz do site (o serviço checa a URL exata).
+    O roteamento aqui é explícito (não há static server p/ HTML arbitrário),
+    então a rota é registrada à mão."""
+    return FileResponse(
+        FRONTEND_DIR / "ddf99f17-3a6c-460e-8fb5-1c2e978a24ae.html",
+        media_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/robots.txt")
@@ -262,6 +306,7 @@ async def serve_sitemap_xml():
         ("/whatsapp", "weekly", "0.8"),
         ("/funcionalidades", "weekly", "0.8"),
         ("/como-funciona", "weekly", "0.8"),
+        ("/agents", "weekly", "0.7"),
         ("/precos", "weekly", "0.7"),
         ("/suporte", "weekly", "0.7"),
         ("/privacy", "monthly", "0.4"),
@@ -328,6 +373,18 @@ async def serve_app_mode_css():
     return FileResponse(
         FRONTEND_DIR / "app-mode.css",
         media_type="text/css",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@router.get("/safe-area.js")
+async def serve_safe_area_js():
+    """Reserva de safe area para as páginas fora do modo app (precos, landing,
+    legal…). O WebView usa contentInset "never" e vai até a borda em todas as
+    rotas; o app-mode.css só cobre seis páginas. Inerte fora do app."""
+    return FileResponse(
+        FRONTEND_DIR / "safe-area.js",
+        media_type="application/javascript",
         headers={"Cache-Control": "public, max-age=300"},
     )
 
@@ -420,12 +477,34 @@ async def serve_site_css():
     )
 
 
+@router.get("/site-redesign.css")
+async def serve_site_redesign_css():
+    """Camada de refino da landing (escopada em body.rd), sobre o site.css.
+    Carregada pela index.html. no-cache como o /site.css: iteração ativa."""
+    return FileResponse(
+        FRONTEND_DIR / "site-redesign.css",
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/brand.css")
 async def serve_brand_css():
     """Design tokens da marca (paleta, tokens semânticos, @font-face Inter).
     Cache longo — muda pouco; querystring de versão invalida se precisar."""
     return FileResponse(
         FRONTEND_DIR / "brand.css",
+        media_type="text/css",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@router.get("/phosphor.css")
+async def serve_phosphor_css():
+    """CSS dos icones Phosphor (peso Regular), self-hosted. Aponta pro
+    /fonts/Phosphor.woff2. Cache longo — muda pouco."""
+    return FileResponse(
+        FRONTEND_DIR / "phosphor.css",
         media_type="text/css",
         headers={"Cache-Control": "public, max-age=3600"},
     )
@@ -438,6 +517,7 @@ async def serve_font(name: str):
     allowed = {
         "Inter-Regular.woff2", "Inter-Medium.woff2", "Inter-SemiBold.woff2",
         "Inter-Bold.woff2", "Inter-ExtraBold.woff2", "Inter-Black.woff2",
+        "Phosphor.woff2",  # icones Phosphor (peso Regular), self-hosted
     }
     if name not in allowed:
         return Response(status_code=404)

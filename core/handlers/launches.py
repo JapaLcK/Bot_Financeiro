@@ -396,6 +396,12 @@ def add_from_entities(
     if valor <= 0:
         return "Não consegui identificar o valor. Tente: *gastei 50 no mercado*"
 
+    # Teto mensal de lançamentos do tier (Grátis no v2; no-op com v2 off).
+    # PlanLimitExceeded sobe pro handle_incoming, que responde com a mensagem
+    # amigável de upgrade — mesmo padrão das caixinhas/cartões.
+    from core.services.plan_service import check_can_create_launch
+    check_can_create_launch(user_id)
+
     alvo_clean = (alvo or "").strip()
     nota_clean = (nota or "").strip() or alvo_clean
 
@@ -410,7 +416,7 @@ def add_from_entities(
             # CONTRADIZ a IA vence. allow_ai=False pra não gastar 2ª chamada de LLM.
             categoria_ai = canonicalize_category_label(categoria) or categoria
             local = infer_category(user_id, nota_clean, None, allow_ai=False)
-            if local.reason in {"user_rule", "ticker_match", "local_rule"} and local.category != categoria_ai:
+            if local.reason in {"user_rule", "user_category", "ticker_match", "local_rule"} and local.category != categoria_ai:
                 logger.info(
                     "categoria da IA (%s) sobreposta por regra local (%s via %s) — nota=%r",
                     categoria_ai, local.category, local.reason, nota_clean,
@@ -521,6 +527,35 @@ def add_from_entities(
             f"todo mês)? Responda *sim* ou *não*."
         )
 
+    # Nudge de onboarding: no primeiríssimo lançamento do usuário no WhatsApp,
+    # aponta o próximo passo (aprender fazendo). Dispara UMA vez — a trava é o
+    # evento em system_event_logs; user_seq == 1 é só o pré-filtro barato pra não
+    # consultar o banco a cada lançamento (e o evento ainda cobre o caso de o
+    # user_seq voltar a 1 depois de um "apagar tudo"). Só pra lançamento real
+    # (não movimentação interna) e quando não há oferta de recorrente competindo
+    # pela atenção.
+    if platform == "whatsapp" and not is_int and not recurring_offer and user_seq == 1:
+        try:
+            from core.observability import recent_event_exists, log_system_event_sync
+            if not recent_event_exists("onboarding_first_launch_nudge", user_id, within_days=36500):
+                resposta += (
+                    "\n\n🎉 Esse foi seu primeiro lançamento — viu como é rápido?\n"
+                    "Agora tenta **saldo**. Quando quiser, tem caixinhas, cartões e "
+                    "dashboard: é só mandar **ajuda**."
+                )
+                log_system_event_sync(
+                    "info",
+                    "onboarding_first_launch_nudge",
+                    "Nudge de primeiro lançamento enviado no WhatsApp.",
+                    source="launches",
+                    user_id=user_id,
+                )
+        except Exception:
+            logger.warning(
+                "nudge de primeiro lançamento falhou (user %s) — seguindo sem ele",
+                user_id, exc_info=True,
+            )
+
     return resposta
 
 
@@ -530,6 +565,71 @@ def _ask_value_question(item: dict) -> str:
     if item.get("tipo") == "receita":
         return f"🐷 Faltou o valor de *{desc}*. Quanto você recebeu? (só o número)"
     return f"🐷 Faltou o valor de *{desc}*. Quanto foi? (só o número)"
+
+
+# Quantas vezes o MESMO valor precisa ter aparecido antes (pro mesmo tipo/descrição)
+# pra ser considerado recorrente e lançado sozinho, sem perguntar.
+_RECURRING_MIN_COUNT = 2
+
+
+def infer_recurring_value(user_id: int, tipo: str, desc: str) -> float | None:
+    """Descobre o valor recorrente de uma descrição ("aluguel", "internet"...).
+
+    Retorna o valor SÓ quando a mesma descrição (mesmo tipo) já foi lançada com
+    o MESMO valor em `_RECURRING_MIN_COUNT`+ lançamentos anteriores E esse valor
+    é o dominante (sem empate). Caso contrário retorna None — o bot pergunta.
+
+    Conservador de propósito: preencher sozinho um valor errado é pior do que
+    perguntar. A comparação de descrição é por texto normalizado (minúsculas,
+    sem acento), batendo tanto em `nota` quanto em `alvo` do histórico.
+    """
+    from collections import Counter
+    from utils_text import normalize_text
+
+    target = normalize_text(desc or "").strip()
+    if not target:
+        return None
+
+    counter: Counter = Counter()
+    for r in db.list_launches_by_tipo(user_id, tipo, limit=200):
+        nota = normalize_text(r.get("nota") or "").strip()
+        alvo = normalize_text(r.get("alvo") or "").strip()
+        if target in (nota, alvo):
+            try:
+                counter[float(r["valor"])] += 1
+            except (TypeError, ValueError):
+                continue
+
+    if not counter:
+        return None
+    ranked = counter.most_common(2)
+    top_valor, top_freq = ranked[0]
+    if top_freq < _RECURRING_MIN_COUNT or top_valor <= 0:
+        return None
+    # empate no topo (dois valores igualmente frequentes) → ambíguo, pergunta.
+    if len(ranked) > 1 and ranked[1][1] == top_freq:
+        return None
+    return top_valor
+
+
+_RECURRING_NOTICE = "🔁 _Usei seu valor recorrente. Se mudou, é só corrigir._"
+
+
+def register_if_recurring(user_id: int, tipo: str, desc: str, platform: str) -> str | None:
+    """Se `desc` tem um valor recorrente conhecido, registra o lançamento na hora
+    (com aviso) e devolve a resposta. Senão, retorna None (o bot vai perguntar)."""
+    valor = infer_recurring_value(user_id, tipo, desc)
+    if valor is None:
+        return None
+    resp = add_from_entities(
+        user_id,
+        tipo=tipo,
+        valor=float(valor),
+        alvo=desc,
+        nota=desc,
+        platform=platform,
+    )
+    return f"{resp}\n{_RECURRING_NOTICE}"
 
 
 # Palavras que cancelam a pergunta de valor pendente.
@@ -629,7 +729,13 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> 
             info = describe_valueless_launch(part)
             if info:
                 tipo, desc = info
-                missing.append({"tipo": tipo, "desc": desc})
+                # Valor recorrente conhecido ("aluguel" que sempre é o mesmo) →
+                # lança sozinho. Senão, enfileira pra perguntar.
+                auto = register_if_recurring(user_id, tipo, desc, platform)
+                if auto is not None:
+                    responses.append(auto)
+                else:
+                    missing.append({"tipo": tipo, "desc": desc})
         if missing:
             db.set_pending_action(
                 user_id, "multi_launch_values",
@@ -696,18 +802,22 @@ def propose_delete(user_id: int, launch_id: int) -> str:
 
 
 def undo(user_id: int) -> str:
-    rows = db.list_launches(user_id, limit=1)
-    if not rows:
+    # Último lançamento CRIADO (maior id), não o mais recente por data: "desfazer"
+    # deve remover o que o usuário acabou de lançar, mesmo que seja retroativo
+    # ("gastei 50 ontem" cria com criado_em no passado — list_launches ordena por
+    # data e miraria o lançamento de hoje, apagando o errado).
+    row = db.get_last_inserted_launch(user_id)
+    if not row:
         return "Não há lançamentos para desfazer."
-    last_id = int(rows[0]["id"])
-    display_id = int(rows[0].get("user_seq") or last_id)
+    last_id = int(row["id"])
+    display_id = int(row.get("user_seq") or last_id)
     db.set_pending_action(
         user_id,
         "delete_launch",
         {"launch_id": last_id, "display_id": display_id},
     )
-    tipo  = rows[0].get("tipo", "")
-    valor = fmt_brl(float(rows[0].get("valor") or 0))
+    tipo  = row.get("tipo", "")
+    valor = fmt_brl(float(row.get("valor") or 0))
     return (
         f"⚠️ Desfazer o último lançamento: **#{display_id}** ({tipo} {valor})?\n"
         "Confirma? Responda **sim** ou **não**."

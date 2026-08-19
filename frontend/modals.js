@@ -169,9 +169,16 @@
       // Trigger animation on next frame
       requestAnimationFrame(() => overlay.classList.add("open"));
 
+      // quem tinha o foco antes: devolvido no close, senão o teclado volta pro
+      // topo da página depois de qualquer confirm()
+      const focoAnterior = document.activeElement;
+
       const close = (value) => {
         document.removeEventListener("keydown", onKey);
         overlay.remove();
+        if (focoAnterior && document.contains(focoAnterior) && focoAnterior.focus) {
+          focoAnterior.focus();
+        }
         resolve(value);
       };
 
@@ -185,13 +192,27 @@
         if (e.target === overlay && isConfirm) close(false);
       });
 
+      /* O modal declara role="dialog" + aria-modal="true" logo acima, o que
+         AFIRMA pro leitor de tela que o resto da página não está disponível.
+         Sem prender o Tab isso é mentira: o foco sai do card pros controles da
+         página atrás do overlay, que o mouse não alcança. Mesmo defeito que o
+         Codex apontou no modal da Início (PR #70) — e aqui pesa mais, porque
+         este arquivo é carregado por home, dashboard e settings, então cobre
+         todos os confirm()/alert() do produto de uma vez.
+
+         Os alvos são consultados a cada Tab e não uma vez, porque o corpo do
+         modal aceita HTML arbitrário (`opts.html`) e pode conter links. */
       const onKey = (e) => {
         if (e.key === "Escape") {
           if (isConfirm) close(false);
-        } else if (e.key === "Enter") {
+          return;
+        }
+        if (e.key === "Enter") {
           e.preventDefault();
           close(isConfirm ? true : undefined);
+          return;
         }
+        window.pigTrapTab(e, modal);
       };
       document.addEventListener("keydown", onKey);
 
@@ -199,6 +220,38 @@
       setTimeout(() => btnPrimary.focus(), 50);
     });
   }
+
+  /* Trap de Tab reutilizável. Esta é a QUARTA vez que o mesmo bloco ia ser
+     copiado (home.html, settings.html, admin-dashboard.html e aqui), e o Codex
+     mostrou que copiar não fecha a classe: cada cópia nova é mais um lugar pra
+     esquecer. Exposto no window porque o dashboard.js redeclara confirmModal e
+     alertModal com markup próprio (#generic-confirm-overlay) e precisa do mesmo
+     comportamento sem herdar este arquivo.
+
+     Chame de dentro de um handler de keydown, passando o elemento do diálogo.
+     Não faz nada se a tecla não for Tab, então é seguro chamar sempre. */
+  window.pigTrapTab = function (e, modal) {
+    if (!e || e.key !== "Tab" || !modal) return;
+    const sel = 'a[href], button:not([disabled]), input:not([disabled]),'
+              + ' select:not([disabled]), textarea:not([disabled]),'
+              + ' [tabindex]:not([tabindex="-1"])';
+    // consultado a cada Tab: o corpo dos diálogos é remontado em runtime
+    const alvos = [...modal.querySelectorAll(sel)].filter(
+      (el) => el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0,
+    );
+    if (!alvos.length) return;
+
+    const primeiro = alvos[0];
+    const ultimo = alvos[alvos.length - 1];
+    const proximo = e.shiftKey ? ultimo : primeiro;
+    const borda = e.shiftKey ? primeiro : ultimo;
+
+    // `fora do modal` cobre o foco que já escapou (clique no overlay, body)
+    if (!modal.contains(document.activeElement) || document.activeElement === borda) {
+      e.preventDefault();
+      proximo.focus();
+    }
+  };
 
   window.alertModal = function (message, opts) {
     return openModal({ kind: "alert", message, opts });

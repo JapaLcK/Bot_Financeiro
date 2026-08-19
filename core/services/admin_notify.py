@@ -138,3 +138,9 @@ def notify_subscription_canceled(
         f"acesso Pro até: {when}"
     )
     return _send(message)
+
+
+def notify_security_alert(message: str) -> bool:
+    """Alerta de segurança (ex.: spike de falha de login). Mensagem já formatada
+    pelo chamador. No-op silencioso sem ADMIN_NOTIFY_WEBHOOK_URL, como os demais."""
+    return _send(message)

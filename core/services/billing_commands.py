@@ -95,9 +95,34 @@ def _handle_assinar(user_id: int, platform: str) -> str:
             "ou abre direto pigbankai.com/precos no navegador."
         )
     b = lambda s: _bold(s, platform)
+    offer_text = (
+        f"Aqui ó, link pra assinar com {b('30 dias grátis')} "
+        "(cancela quando quiser, sem cobrança no trial):"
+    )
+    try:
+        from core.services.plan_service import plans_v2_enabled
+        v2_enabled = plans_v2_enabled()
+    except ImportError:
+        v2_enabled = False
+    if v2_enabled:
+        try:
+            from db.plans import is_trial_eligible_for_user
+            eligible = is_trial_eligible_for_user(user_id)
+        except Exception:
+            eligible = None
+        if eligible is False:
+            offer_text = (
+                "Aqui ó, link pra assinar. Como esse telefone já usou o período grátis, "
+                "o checkout mostra o valor da cobrança imediata antes da confirmação:"
+            )
+        elif eligible is None:
+            offer_text = (
+                "Aqui ó, link pra assinar. O checkout confirma seu período grátis ou o "
+                "valor da primeira cobrança antes da confirmação:"
+            )
     return (
         f"🐷✨ Bora pro {b('PigBank+')}?\n\n"
-        f"Aqui ó, link pra assinar com {b('30 dias grátis')} (cancela quando quiser, sem cobrança no trial):\n"
+        f"{offer_text}\n"
         f"{link}\n\n"
         f"Esse link é só seu e expira em 1h."
     )
@@ -133,6 +158,56 @@ def _handle_plano(user_id: int, platform: str) -> str:
     status = user.get("last_payment_status") or "—"
     expires = user.get("plan_expires_at")
     b = lambda s: _bold(s, platform)
+
+    # ── Escada v2 (Grátis/Essencial/Plus/Pro) ───────────────────────────────
+    # Import defensivo: testes (e deploys sem a escada) mockam plan_service só
+    # com is_pro — sem os símbolos v2, cai no comportamento legado.
+    try:
+        from core.services.plan_service import plans_v2_enabled, get_plan_tier
+        _v2 = plans_v2_enabled()
+    except ImportError:
+        _v2 = False
+    if _v2:
+        tier = get_plan_tier(user_id)
+
+        if tier == "free":
+            return (
+                f"🐷 Plano: {b('Grátis')}\n\n"
+                f"O que vem aqui:\n"
+                f"• 30 lançamentos por mês · histórico do mês corrente\n"
+                f"• 1 caixinha e 1 cartão\n"
+                f"• Piggy IA com 20 mensagens/mês\n\n"
+                f"Quer bancos conectados, agentes e IA sem limite? "
+                f"Manda {b('assinar plano')} 🐷✨"
+            )
+
+        # Nota: o trial de 30 dias hoje é uma assinatura Stripe do plano escolhido
+        # (status trialing) — cai no ramo pago abaixo com status_label "Período
+        # grátis em andamento" e "Primeira cobrança" na data. Não há mais o
+        # estado "Plus sem assinatura" (trial sem cartão).
+        tier_name = {"essencial": "Essencial", "plus": "Plus", "pro": "Pro"}.get(tier, tier.title())
+        if status == "grandfathered":
+            return (
+                f"🐷 Plano: {b(tier_name)}\n\n"
+                f"Status: {b('Ativo · acesso vitalício')}\n"
+                f"Você tem o {tier_name} de brinde, pra sempre — sem cobrança. 🐷✨"
+            )
+        status_label = {
+            "trialing": "Período grátis em andamento",
+            "active": "Ativo",
+            "past_due": "Pagamento em atraso",
+            "canceled": "Cancelado",
+            "unpaid": "Não pago",
+        }.get(status, "Ativo")
+        next_label = "Próxima renovação" if status == "active" else (
+            "Primeira cobrança" if status == "trialing" else "Expira em"
+        )
+        return (
+            f"🐷 Plano: {b(tier_name)}\n\n"
+            f"Status: {status_label}\n"
+            f"{next_label}: {b(_format_plan_expires(expires))}\n\n"
+            f"Pra cancelar: manda {b('cancelar plano')}"
+        )
 
     if not is_pro(user_id):
         return (

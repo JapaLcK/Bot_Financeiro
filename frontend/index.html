@@ -3,17 +3,62 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>PigBank — Seu assistente financeiro no WhatsApp</title>
+<title>PigBank · Seu assistente financeiro no WhatsApp</title>
 <meta name="description" content="Controle seu dinheiro direto no WhatsApp. Registre gastos, consulte saldo e acompanhe cartões em segundos com a IA da PigBank." />
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
-<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=2" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
 <meta name="theme-color" content="#0c0c0d" />
 <meta property="og:type" content="website" />
+<script>
+/* PWA instalada (start_url antiga "/"): entra pelo app, não pela landing —
+   /login pula direto pro /home quando a sessão está viva.
+   Exceção: ?site=1 é o usuário PEDINDO o site pelo menu da conta ("Ir para o
+   site"). Sem essa saída, o atalho virava um pulo de volta pro /home. */
+if (!/[?&]site=1(&|$)/.test(location.search) &&
+    ((window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true)) {
+  location.replace("/login");
+}
+</script>
 <link rel="stylesheet" href="/brand.css?v=4" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/site.css?v=5" />
+<link rel="stylesheet" href="/site-redesign.css?v=1" />
+<style>
+  /* Planos: card único de entrada (R$ 9,90) — leva pra /precos escolher ciclo */
+  .plan-solo-wrap { display: flex; justify-content: center; padding: 10px 0 30px; }
+  .plan-solo {
+    position: relative; width: 100%; max-width: 480px;
+    background: linear-gradient(180deg, rgba(255,45,142,.12), var(--card));
+    border: 1px solid rgba(255,45,142,.4);
+    border-radius: var(--radius);
+    box-shadow: 0 24px 60px rgba(255,45,142,.16);
+    padding: 40px 34px 34px; text-align: center;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .plan-solo-trial {
+    background: var(--neon); color: var(--neon-ink);
+    font-size: .62rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+    padding: 5px 12px; border-radius: 999px; margin-bottom: 14px;
+  }
+  .plan-solo-from { color: var(--ink-2); font-size: 1rem; font-weight: 600; }
+  .plan-solo-amount { font-size: 3.2rem; font-weight: 850; letter-spacing: -.03em; line-height: 1.05; margin: 4px 0 2px; }
+  .plan-solo-amount span { font-size: 1.05rem; color: var(--ink-2); font-weight: 600; }
+  .plan-solo-feats { list-style: none; display: grid; gap: 11px; margin: 22px 0 24px; text-align: left; width: 100%; max-width: 330px; }
+  .plan-solo-feats li { display: flex; align-items: flex-start; gap: 10px; color: var(--ink-2); font-size: .9rem; line-height: 1.4; }
+  .plan-solo-feats li .tick { width: 20px; height: 20px; font-size: .7rem; margin-top: 1px; }
+  .plan-solo .btn-block { width: 100%; max-width: 330px; }
+  .plan-solo-choose { color: var(--ink-3); font-size: .82rem; margin-top: 14px; }
+  .plan-solo-choose b { color: var(--ink-2); font-weight: 700; }
+  @media (max-width: 560px) {
+    .plan-solo { padding: 32px 22px 26px; }
+    .plan-solo-amount { font-size: 2.6rem; }
+  }
+</style>
+<script src="/safe-area.js?v=1"></script>
 </head>
-<body>
+<body class="rd">
 <div class="glow"></div>
+<div class="rd-grain" aria-hidden="true"></div>
 
   <!-- ─── Nav ─────────────────────────────────────────────────────── -->
   <nav class="nav">
@@ -22,6 +67,8 @@
       <a href="#funcionalidades">Funcionalidades</a>
       <a href="#como-funciona">Como funciona</a>
       <a href="/precos">Planos</a>
+      <a href="/whatsapp">WhatsApp</a>
+      <a href="/agents">Agentes</a>
       
     </div>
     <div class="nav-right">
@@ -37,9 +84,9 @@
       <div class="hero-copy">
         <div class="pill"><span class="tag-novo">NOVO</span> Seu assistente financeiro com IA no WhatsApp</div>
         <h1 class="hero-title">A sua vida financeira,<br><span class="grad">resolvida no WhatsApp.</span></h1>
-        <p class="hero-sub">Registre gastos, acompanhe seu saldo e entenda sua vida financeira conversando com a IA da PigBank — sem planilha, sem app pra baixar.</p>
+        <p class="hero-sub">Registre gastos, acompanhe seu saldo e entenda sua vida financeira conversando com a IA da PigBank. Sem planilha, sem app pra baixar.</p>
         <div class="hero-cta">
-          <a class="btn btn-primary btn-lg" href="/cadastro">Começar agora →</a>
+          <a class="btn btn-primary btn-lg" href="/cadastro">Começar agora <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
           <a class="btn btn-outline btn-lg" href="#como-funciona">Ver como funciona</a>
         </div>
         <div class="trust">
@@ -60,11 +107,11 @@
           </div>
           <div class="bubble user">Gastei R$ 50 no mercado</div>
           <div class="bubble bot">
-            Entendi! 🎯<br>
-            Categoria: <b>Alimentação</b> 🍔<br>
+            Entendi!<br>
+            Categoria: <b>Alimentação</b><br>
             Total hoje: <b>R$ 50,00</b><br>
             Saldo atual: <b>R$ 1.250,00</b><br>
-            Ótimo controle! 👏
+            Ótimo controle!
           </div>
         </div>
 
@@ -121,37 +168,37 @@
       <div class="section-head" data-reveal>
         <div class="eyebrow">Funcionalidades</div>
         <h2>Recursos que fazem<br>a <span class="grad">diferença</span></h2>
-        <p>Tudo que você precisa pra organizar sua vida financeira — sem planilha, sem app pra baixar, direto no WhatsApp.</p>
+        <p>Tudo que você precisa pra organizar sua vida financeira, sem planilha, sem app pra baixar, direto no WhatsApp.</p>
       </div>
 
       <div class="grid-3" data-reveal>
         <div class="card feature-card">
-          <div class="icon-box">💬</div>
+          <div class="icon-box"><i class="ph ph-chat-circle" aria-hidden="true"></i></div>
           <h3>Registro por conversa</h3>
-          <p>Fale como você fala. A IA entende, categoriza e registra o gasto na hora — em segundos.</p>
+          <p>Fale como você fala. A IA entende, categoriza e registra o gasto na hora, em segundos.</p>
         </div>
         <div class="card feature-card">
-          <div class="icon-box neon">🏷️</div>
+          <div class="icon-box neon"><i class="ph ph-tag" aria-hidden="true"></i></div>
           <h3>Categorização automática</h3>
           <p>Cada gasto cai na categoria certa sozinho. Você não precisa marcar nada manualmente.</p>
         </div>
         <div class="card feature-card">
-          <div class="icon-box">🐷</div>
+          <div class="icon-box"><i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
           <h3>Caixinhas &amp; metas</h3>
           <p>Separe dinheiro por objetivo e acompanhe o progresso de cada meta que você criar.</p>
         </div>
         <div class="card feature-card">
-          <div class="icon-box neon">💳</div>
+          <div class="icon-box neon"><i class="ph ph-credit-card" aria-hidden="true"></i></div>
           <h3>Cartões &amp; faturas</h3>
           <p>Limite, fatura aberta e parcelamentos de todos os seus cartões num lugar só.</p>
         </div>
         <div class="card feature-card">
-          <div class="icon-box">🔔</div>
+          <div class="icon-box"><i class="ph ph-bell" aria-hidden="true"></i></div>
           <h3>Alertas inteligentes</h3>
           <p>A Piggy te avisa quando um gasto foge do padrão ou o orçamento começa a apertar.</p>
         </div>
         <div class="card feature-card">
-          <div class="icon-box neon">🔒</div>
+          <div class="icon-box neon"><i class="ph ph-lock" aria-hidden="true"></i></div>
           <h3>Segurança &amp; privacidade</h3>
           <p>Seus dados sensíveis são cifrados. Você fica no controle das suas informações, sempre.</p>
         </div>
@@ -165,7 +212,7 @@
       <div class="section-head" data-reveal>
         <div class="eyebrow">Como funciona</div>
         <h2>Simples, rápido e<br>no seu <span class="grad">WhatsApp</span></h2>
-        <p>Em poucos minutos você já está no controle do seu dinheiro — sem planilha, sem app pra baixar.</p>
+        <p>Em poucos minutos você já está no controle do seu dinheiro, sem planilha, sem app pra baixar.</p>
       </div>
 
       <div class="how-grid">
@@ -176,7 +223,7 @@
           </div>
           <div class="step">
             <div class="step-num">2</div>
-            <div><h3>Conecte o WhatsApp</h3><p>Fale com a Piggy pelo número do bot. É onde tudo acontece — nada pra instalar.</p></div>
+            <div><h3>Conecte o WhatsApp</h3><p>Fale com a Piggy pelo número do bot. É onde tudo acontece. Nada pra instalar.</p></div>
           </div>
           <div class="step">
             <div class="step-num">3</div>
@@ -195,9 +242,9 @@
             <span class="online"><i></i> online</span>
           </div>
           <div class="bubble user">Gastei 32 no uber</div>
-          <div class="bubble bot">Anotado! 🚗<br>Categoria: <b>Transporte</b><br>Saldo atual: <b>R$ 1.218,00</b></div>
+          <div class="bubble bot">Anotado!<br>Categoria: <b>Transporte</b><br>Saldo atual: <b>R$ 1.218,00</b></div>
           <div class="bubble user">quanto sobrou esse mês?</div>
-          <div class="bubble bot">Você tem <b>R$ 1.218,00</b> 💰<br>Já guardou <b>R$ 300</b> na caixinha "Viagem". Bora? 🐷</div>
+          <div class="bubble bot">Você tem <b>R$ 1.218,00</b><br>Já guardou <b>R$ 300</b> na caixinha "Viagem". Bora?</div>
         </div>
       </div>
     </section>
@@ -208,12 +255,12 @@
         <div class="eyebrow">Tecnologia</div>
         <h2>A inteligência que<br><span class="grad">facilita sua vida</span></h2>
         <ul class="tech-list">
-          <li><span class="tick">✓</span> IA que entende português do dia a dia</li>
-          <li><span class="tick">✓</span> Categorização que aprende com você</li>
-          <li><span class="tick">✓</span> Dashboard atualizado em tempo real</li>
-          <li><span class="tick">✓</span> Tudo no WhatsApp — zero apps pra baixar</li>
+          <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> IA que entende português do dia a dia</li>
+          <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Categorização que aprende com você</li>
+          <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Dashboard atualizado em tempo real</li>
+          <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Tudo no WhatsApp, zero apps pra baixar</li>
         </ul>
-        <a class="btn btn-primary btn-lg" href="/cadastro">Começar agora →</a>
+        <a class="btn btn-primary btn-lg" href="/cadastro">Começar agora <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
       </div>
       <div class="tech-visual" data-reveal>
         <div class="hologram" aria-label="Cubo AI holográfico em wireframe">
@@ -344,39 +391,23 @@
         <p>30 dias grátis pra testar. Cancele quando quiser, sem letras miúdas.</p>
       </div>
 
-      <div class="plans" data-reveal>
-        <article class="plan">
-          <span class="plan-trial">30 dias grátis</span>
-          <h3>Mensal</h3>
-          <div class="plan-sub">Pra começar sem compromisso</div>
-          <ul>
-            <li><span class="tick">✓</span> Caixinhas, metas e cartões ilimitados</li>
-            <li><span class="tick">✓</span> Categorização automática por IA</li>
-            <li><span class="tick">✓</span> Dashboard em tempo real</li>
-            <li><span class="tick">✓</span> Histórico completo + exportar CSV/PDF</li>
-            <li><span class="tick">✓</span> Piggy IA — converse sobre suas finanças</li>
+      <div class="plan-solo-wrap" data-reveal>
+        <article class="plan-solo">
+          <span class="plan-solo-trial">30 dias grátis</span>
+          <div class="plan-solo-from">Acesse o PigBank por apenas</div>
+          <div class="plan-solo-amount">R$ 9,90<span>/mês</span></div>
+          <ul class="plan-solo-feats">
+            <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Caixinhas, metas e cartões ilimitados</li>
+            <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Categorização automática por IA</li>
+            <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Dashboard em tempo real</li>
+            <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Piggy IA: converse sobre suas finanças</li>
           </ul>
-          <a class="btn btn-outline btn-block" href="/precos">Ver planos</a>
-        </article>
-
-        <article class="plan featured">
-          <span class="plan-badge">Economize 17%</span>
-          <span class="plan-trial">30 dias grátis</span>
-          <h3>Anual</h3>
-          <div class="plan-sub">Melhor custo-benefício</div>
-          <ul>
-            <li><span class="tick">✓</span> Tudo do plano mensal</li>
-            <li><span class="tick">✓</span> 2 meses de graça no ano</li>
-            <li><span class="tick">✓</span> Cobrança única, sem surpresa</li>
-            <li><span class="tick">✓</span> Suporte prioritário</li>
-            <li><span class="tick">✓</span> Ideal pra quem já decidiu</li>
-          </ul>
-          <a class="btn btn-primary btn-block" href="/precos">Ver planos</a>
+          <a class="btn btn-primary btn-lg btn-block" href="/precos">Ver planos <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
+          <p class="plan-solo-choose">Escolha <b>mensal</b> ou <b>anual</b> na próxima tela.</p>
         </article>
       </div>
 
-      <p class="plans-note">🎉 30 dias grátis com cartão; a primeira cobrança só acontece depois do trial. Cancele quando quiser pelo dashboard antes do fim do trial, sem ser cobrado. Pagamentos processados pela Stripe — a PigBank nunca vê os dados do seu cartão.</p>
-      <div class="plans-cta"><a href="/precos">Ver todos os detalhes dos planos →</a></div>
+      <p class="plans-note"><i class="ph ph-confetti" aria-hidden="true"></i> 30 dias grátis com cartão; a primeira cobrança só acontece depois do trial. Cancele quando quiser pelo dashboard antes do fim do trial, sem ser cobrado. Pagamentos processados pela Stripe. A PigBank nunca vê os dados do seu cartão.</p>
     </section>
 
     <div class="sec-sep"></div>
@@ -392,11 +423,11 @@
       <div class="faq" data-reveal>
         <div class="faq-item">
           <button class="faq-q" type="button" aria-expanded="false">Preciso baixar algum aplicativo? <span class="chev">+</span></button>
-          <div class="faq-a"><p>Não. Tudo acontece no seu WhatsApp — é só conversar com a Piggy. O dashboard abre no navegador, sem instalar nada.</p></div>
+          <div class="faq-a"><p>Não. Tudo acontece no seu WhatsApp: é só conversar com a Piggy. O dashboard abre no navegador, sem instalar nada.</p></div>
         </div>
         <div class="faq-item">
           <button class="faq-q" type="button" aria-expanded="false">Como eu registro um gasto? <span class="chev">+</span></button>
-          <div class="faq-a"><p>Você só fala como falaria com um amigo: "gastei 50 no mercado". A IA entende, categoriza e salva na hora — em segundos.</p></div>
+          <div class="faq-a"><p>Você só fala como falaria com um amigo: "gastei 50 no mercado". A IA entende, categoriza e salva na hora, em segundos.</p></div>
         </div>
         <div class="faq-item">
           <button class="faq-q" type="button" aria-expanded="false">Meus dados estão seguros? <span class="chev">+</span></button>
@@ -404,7 +435,7 @@
         </div>
         <div class="faq-item">
           <button class="faq-q" type="button" aria-expanded="false">A PigBank mexe no meu dinheiro ou tem a senha do meu banco? <span class="chev">+</span></button>
-          <div class="faq-a"><p>Não. A PigBank não é banco nem corretora — <strong>nunca movimenta, transfere ou guarda</strong> o seu dinheiro. Se você conectar um banco, é via Open Finance oficial, <strong>só de leitura</strong> e autorizado por você: a gente nunca pede sua senha, e você revoga o acesso quando quiser.</p></div>
+          <div class="faq-a"><p>Não. A PigBank não é banco nem corretora: <strong>nunca movimenta, transfere ou guarda</strong> o seu dinheiro. Se você conectar um banco, é via Open Finance oficial, <strong>só de leitura</strong> e autorizado por você: a gente nunca pede sua senha, e você revoga o acesso quando quiser.</p></div>
         </div>
         <div class="faq-item">
           <button class="faq-q" type="button" aria-expanded="false">Tem período grátis? <span class="chev">+</span></button>
@@ -420,7 +451,7 @@
         </div>
         <div class="faq-item">
           <button class="faq-q" type="button" aria-expanded="false">A Piggy entende português do dia a dia? <span class="chev">+</span></button>
-          <div class="faq-a"><p>Entende. Você não precisa decorar comando nenhum — fala do seu jeito e a IA faz o resto.</p></div>
+          <div class="faq-a"><p>Entende. Você não precisa decorar comando nenhum: fala do seu jeito e a IA faz o resto.</p></div>
         </div>
       </div>
     </section>
@@ -429,7 +460,7 @@
     <div class="cta-band" data-reveal>
       <h2>Pronto para começar?</h2>
       <p>Sua vida financeira resolvida no WhatsApp, a partir de agora.</p>
-      <a class="btn btn-primary btn-lg" href="/cadastro">Começar agora →</a>
+      <a class="btn btn-primary btn-lg" href="/cadastro">Começar agora <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
     </div>
 
   </div>
@@ -439,13 +470,14 @@
     <div class="wrap footer-inner">
       <div class="footer-brand">
         <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=1" alt="" /> <span>PigBank</span></a>
-        <p>Seu dinheiro, suas regras — direto no WhatsApp, com a IA da Piggy.</p>
+        <p>Seu dinheiro, suas regras, direto no WhatsApp, com a IA da Piggy.</p>
       </div>
       <div class="footer-cols">
         <div class="footer-col"><span class="footer-title">Navegue</span>
           <a href="#funcionalidades">Funcionalidades</a>
           <a href="#como-funciona">Como funciona</a>
           <a href="/precos">Planos</a>
+          <a href="/agents">Agentes</a>
           
         </div>
         <div class="footer-col"><span class="footer-title">Produto</span>
@@ -460,7 +492,7 @@
         </div>
       </div>
     </div>
-    <p class="footer-copy">© 2026 PigBank · Feito com 🐷</p>
+    <p class="footer-copy">© 2026 PigBank · Feito com <i class="ph ph-piggy-bank" aria-hidden="true"></i></p>
   </footer>
 
   <!-- Reveal on scroll + FAQ acordeão (progressive enhancement) -->
@@ -490,6 +522,21 @@
     els.forEach(function (el) { io.observe(el); });
   })();
   </script>
-  <script src="/nav-auth.js?v=2" defer></script>
+  <!-- Redesign: borda-holofote que segue o cursor nos cards -->
+  <script>
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) return;
+    var cards = document.querySelectorAll(".rd .card, .rd .plan-solo, .rd .phone, .rd .step");
+    cards.forEach(function (c) {
+      c.addEventListener("pointermove", function (e) {
+        var r = c.getBoundingClientRect();
+        c.style.setProperty("--mx", (e.clientX - r.left) + "px");
+        c.style.setProperty("--my", (e.clientY - r.top) + "px");
+      });
+    });
+  })();
+  </script>
+  <script src="/nav-auth.js?v=7" defer></script>
 </body>
 </html>

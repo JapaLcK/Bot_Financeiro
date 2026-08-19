@@ -2,12 +2,13 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>O que pedir — PigBank</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>O que pedir · PigBank</title>
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
-<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=2" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
 <meta name="theme-color" content="#111111" />
 <link rel="stylesheet" href="/brand.css" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -79,15 +80,15 @@ header h1{font-size:1.05rem;font-weight:650;letter-spacing:-.02em}
 
 @media(max-width:660px){.page{padding-inline:14px}.hero{padding:24px 4px 18px}.nav-links{width:100%;justify-content:center}}
 </style>
-  <link rel="stylesheet" href="/app-mode.css?v=17" />
-  <script src="/app-mode.js?v=17"></script>
+  <link rel="stylesheet" href="/app-mode.css?v=25" />
+  <script src="/app-mode.js?v=24"></script>
 </head>
 <body>
 <div class="bg"><div class="orb orb-1"></div><div class="orb orb-2"></div><div class="orb orb-3"></div></div>
 <div class="page" id="page-root">
   <header>
     <div class="header-left">
-      <div class="logo">🐷</div>
+      <div class="logo"><i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
       <h1>PigBank</h1>
       <div class="nav-links">
         <a class="nav-link" href="/home">Início</a>
@@ -105,7 +106,7 @@ header h1{font-size:1.05rem;font-weight:650;letter-spacing:-.02em}
     <section class="hero">
       <div class="eyebrow" id="hero-eyebrow">O que pedir</div>
       <h2 id="hero-title">Pergunta do jeito que <span class="grad">sair na cabeça</span></h2>
-      <p id="hero-sub">Toca numa categoria pra ver os comandos prontos. Clica num comando pra copiar — funciona aqui e no <strong>WhatsApp</strong>.</p>
+      <p id="hero-sub">Toca numa categoria pra ver os comandos prontos. Clica num comando pra copiar: funciona aqui e no <strong>WhatsApp</strong>.</p>
     </section>
 
     <section class="section-list" id="cats-grid">
@@ -113,7 +114,7 @@ header h1{font-size:1.05rem;font-weight:650;letter-spacing:-.02em}
     </section>
 
     <div class="callout">
-      <h4>🐷 Não viu o que queria?</h4>
+      <h4><i class="ph ph-piggy-bank" aria-hidden="true"></i> Não viu o que queria?</h4>
       <p>Pergunta mesmo assim no chat. O Piggy entende português corrido e pede confirmação antes de mexer em qualquer coisa.</p>
     </div>
   </main>
@@ -125,7 +126,7 @@ const API = window.location.origin;
 function showAccessError() {
   document.getElementById("page-root").innerHTML = `
     <div class="access-error">
-      <h2>🔒 Acesso restrito</h2>
+      <h2><i class="ph ph-lock" aria-hidden="true"></i> Acesso restrito</h2>
       <p>Sua sessão expirou ou você não está autenticado.</p>
       <a class="btn-pill" href="/">Entrar</a>
     </div>

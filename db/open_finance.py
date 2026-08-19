@@ -301,13 +301,16 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
 
 
 def count_open_finance_connections(user_id: int, provider: str = "pluggy") -> int:
-    """Quantos bancos o usuário tem conectados (default: só Pluggy reais). Pro gate por nº de bancos."""
+    """Quantos bancos o usuário tem conectados (default: só Pluggy reais), pro
+    gate por nº de bancos. Conexão PAUSED (trial vencido) NÃO conta — senão o
+    ex-trialer que assina fica travado de reconectar o próprio banco."""
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
             if provider:
                 cur.execute(
-                    "select count(*) as n from open_finance_connections where user_id=%s and provider=%s",
+                    "select count(*) as n from open_finance_connections"
+                    " where user_id=%s and provider=%s and upper(coalesce(status,'')) <> 'PAUSED'",
                     (user_id, provider),
                 )
             else:
@@ -327,17 +330,58 @@ def list_open_finance_user_ids() -> list[int]:
 
 
 def list_pluggy_item_ids(user_id: int | None = None) -> list[str]:
-    """Item ids Pluggy ativos (todos, ou de um usuário). Usado no refresh periódico."""
+    """Item ids Pluggy ativos (todos, ou de um usuário). Usado no refresh periódico.
+
+    Conexões PAUSED ficam de fora: o item já foi deletado na Pluggy (trial venceu),
+    então não há o que refrescar/deletar de novo.
+    """
+    sql = (
+        "select provider_item_id from open_finance_connections "
+        "where provider='pluggy' and upper(coalesce(status,'')) <> 'PAUSED'"
+    )
     with get_conn() as conn:
         with conn.cursor() as cur:
             if user_id is None:
-                cur.execute("select provider_item_id from open_finance_connections where provider='pluggy'")
+                cur.execute(sql)
             else:
-                cur.execute(
-                    "select provider_item_id from open_finance_connections where provider='pluggy' and user_id=%s",
-                    (user_id,),
-                )
+                cur.execute(sql + " and user_id=%s", (user_id,))
             return [r["provider_item_id"] for r in cur.fetchall() if r["provider_item_id"]]
+
+
+def list_pluggy_connections_for_trial_sweep() -> list[dict]:
+    """Conexões Pluggy candidatas à varredura de trial vencido (todas as não-PAUSED).
+
+    A resolução de tier (trial ativo? assinatura?) fica no serviço — aqui só se lista
+    quem ainda ocupa slot pago na Pluggy."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, user_id, provider_item_id, status
+                from open_finance_connections
+                where provider='pluggy' and upper(coalesce(status,'')) <> 'PAUSED'
+                order by user_id, id
+                """
+            )
+            return cur.fetchall()
+
+
+def pause_open_finance_connection(connection_id: int) -> int:
+    """Marca a conexão como PAUSED (trial venceu sem virar assinatura).
+
+    Decisão de produto: NÃO apaga nada do que foi importado — contas, transações,
+    launches e faturas ficam visíveis; só o sync para ("reative seu banco" vira CTA
+    de upgrade). O item na Pluggy é deletado pelo serviço ANTES de chamar isto
+    (libera o slot pago do contrato)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update open_finance_connections set status='PAUSED', updated_at=now() where id=%s",
+                (connection_id,),
+            )
+            updated = cur.rowcount
+        conn.commit()
+    return updated
 
 
 def list_connections_needing_reconnect(user_id: int | None = None, within_days: int = 7) -> list[dict]:
@@ -448,6 +492,9 @@ def update_pluggy_open_finance_item_status(provider_item_id: str, status: str, r
                     raw=coalesce(%s, raw),
                     updated_at=now()
                 where provider='pluggy' and provider_item_id=%s
+                  -- PAUSED é estado local terminal (trial venceu): deletar o item na
+                  -- Pluggy dispara webhook item/deleted, que não pode sobrescrevê-lo.
+                  and upper(coalesce(status,'')) <> 'PAUSED'
                 """,
                 (status, Jsonb(raw) if raw is not None else None, item_id),
             )
@@ -485,6 +532,275 @@ def save_open_finance_investments(connection_id: int, investments: list[dict]) -
                 count += 1
         conn.commit()
     return {"investments_synced": count}
+
+
+# ── Banqueiro (agente cofre): caixinha OF ↔ meta do PigBank ───────────────────
+
+def list_caixinha_candidates(user_id: int) -> list[dict]:
+    """Caixinhas/cofrinhos OF do usuário (CDB de renda fixa OU nome de caixinha),
+    já com a meta vinculada (se houver). Alimenta a UI de vínculo do Banqueiro."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select i.id as of_investment_id, i.name, i.balance, i.type, i.subtype,
+                       p.id as pocket_id, p.name as pocket_name, p.target_amount
+                from open_finance_investments i
+                join open_finance_connections c on c.id = i.connection_id
+                left join pockets p on p.of_investment_id = i.id and p.user_id = %s
+                where c.user_id = %s
+                  and (
+                    (upper(coalesce(i.type,'')) = 'FIXED_INCOME'
+                       and upper(coalesce(i.subtype,'')) = 'CDB')
+                    or i.name ilike any (array['%%caixinha%%','%%cofrinho%%','%%reserva%%','%%objetivo%%'])
+                  )
+                  -- Nubank devolve toda posição de CDB via OF, inclusive caixinhas já
+                  -- esvaziadas (saldo 0). Elas poluem a tela de vínculo sem servir pra
+                  -- nada, então só mostramos candidatos com saldo > 0 — exceto os que já
+                  -- estão vinculados a uma meta (mantidos pra permitir desvincular).
+                  and (coalesce(i.balance, 0) > 0 or p.id is not null)
+                order by i.balance desc nulls last
+                """,
+                (user_id, user_id),
+            )
+            return [dict(r) for r in (cur.fetchall() or [])]
+
+
+def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int | None) -> bool:
+    """Vincula (ou desvincula, of_investment_id=None) uma meta a uma caixinha OF.
+
+    Inicializa of_last_seen_balance com o saldo ATUAL da caixinha, pra o Banqueiro
+    contar só os aportes daqui pra frente (não o saldo histórico já acumulado)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if of_investment_id is None:
+                cur.execute(
+                    "update pockets set of_investment_id=null, of_last_seen_balance=null "
+                    "where id=%s and user_id=%s",
+                    (pocket_id, user_id),
+                )
+                conn.commit()
+                return cur.rowcount > 0
+            # valida que a caixinha é do usuário e pega o saldo atual
+            cur.execute(
+                """
+                select i.balance from open_finance_investments i
+                join open_finance_connections c on c.id = i.connection_id
+                where i.id=%s and c.user_id=%s
+                """,
+                (of_investment_id, user_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                return False
+            bal = row["balance"] or 0
+            # 1 caixinha OF por meta: solta qualquer vínculo anterior dessa caixinha
+            cur.execute(
+                "update pockets set of_investment_id=null, of_last_seen_balance=null "
+                "where of_investment_id=%s and user_id=%s",
+                (of_investment_id, user_id),
+            )
+            cur.execute(
+                "update pockets set of_investment_id=%s, of_last_seen_balance=%s "
+                "where id=%s and user_id=%s",
+                (of_investment_id, bal, pocket_id, user_id),
+            )
+            ok = cur.rowcount > 0
+            conn.commit()
+            return ok
+
+
+def list_banqueiro_pockets(user_id: int) -> list[dict]:
+    """Caixinhas vinculadas a uma caixinha OF, com saldo e RENDIMENTO acumulado atuais
+    (do banco) + os baselines já contabilizados pelo Banqueiro. Fonte do detector:
+    delta de saldo = aporte + rendimento; `of_profit` separa os dois."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select p.id as pocket_id, p.name, p.emoji, p.target_amount, p.target_date,
+                       p.of_last_seen_balance, p.of_last_seen_profit, p.of_investment_id,
+                       i.balance as of_balance,
+                       nullif(i.raw->>'amountProfit', '')::numeric as of_profit
+                from pockets p
+                join open_finance_investments i on i.id = p.of_investment_id
+                where p.user_id = %s and p.of_investment_id is not null
+                """,
+                (user_id,),
+            )
+            return [dict(r) for r in (cur.fetchall() or [])]
+
+
+def banqueiro_pocket_pace(user_id: int, pocket_id: int, days: int = 90) -> float:
+    """Ritmo de aporte da caixinha OF (R$/mês) pelos aportes que o Banqueiro já
+    detectou. Caixinha OF não gera lançamento deposito_caixinha, então o histórico
+    vem dos eventos (cada evento carrega um array `moves` por caixinha — funciona
+    tanto pro evento único quanto pro resumo consolidado de várias caixinhas)."""
+    months = max(days / 30.0, 1.0)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select coalesce(sum((m->>'aporte')::numeric), 0) as net
+                from agent_events e,
+                     jsonb_array_elements(coalesce(e.payload->'moves', '[]'::jsonb)) m
+                where e.user_id = %s
+                  and e.kind = 'cofre'
+                  and (m->>'pocket_id')::bigint = %s
+                  and e.fired_at >= now() - make_interval(days => %s)
+                """,
+                (user_id, pocket_id, days),
+            )
+            net = float((cur.fetchone() or {}).get("net") or 0)
+    return net / months
+
+
+def update_pocket_of_last_seen(pocket_id: int, balance, profit=None) -> None:
+    """Atualiza os baselines já contabilizados pelo Banqueiro (saldo e, opcionalmente,
+    rendimento acumulado) depois de processar a caixinha."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if profit is None:
+                cur.execute(
+                    "update pockets set of_last_seen_balance=%s where id=%s",
+                    (balance, pocket_id),
+                )
+            else:
+                cur.execute(
+                    "update pockets set of_last_seen_balance=%s, of_last_seen_profit=%s where id=%s",
+                    (balance, profit, pocket_id),
+                )
+        conn.commit()
+
+
+# Regra de auto-import de caixinha: só investimentos com CARA de caixinha (nome ~
+# reserva/objetivo/cofrinho). Um CDB comum é investimento, não meta — não vira pocket
+# (evita "caixinha fantasma"). Decisão de produto 2026-08-11.
+_CAIXINHA_NAME_PATTERNS = ["%caixinha%", "%cofrinho%", "%reserva%", "%objetivo%", "%cofre%"]
+
+
+def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
+    """Espelha as caixinhas do Open Finance como caixinhas do Pig. Idempotente.
+
+    1. Auto-cria um pocket pra cada caixinha OF (com cara de caixinha) ainda não
+       vinculada — `source='open_finance'`, read-only, juros interno OFF.
+    2. Dedup: se já existe um pocket de mesmo nome não vinculado, VINCULA nele em
+       vez de duplicar.
+    3. Espelha o saldo do banco (`open_finance_investments.balance`) em TODAS as
+       caixinhas vinculadas (auto-criadas e vinculadas na mão).
+
+    NÃO mexe em `of_last_seen_balance` (baseline do Banqueiro) — o detector de aporte
+    continua funcionando sobre o delta como antes.
+    """
+    created = linked = mirrored = 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # 1. caixinhas OF desta conexão com cara de caixinha E SALDO > 0.
+            # Saldo 0 = fundo/reserva vazia (ex.: Nubank "Reserva Planejada" que o
+            # Pluggy devolve zerado) — não vira caixinha fantasma.
+            cur.execute(
+                """
+                select i.id as of_id, i.name, coalesce(i.balance, 0) as balance,
+                       nullif(i.raw->>'amountProfit', '')::numeric as profit
+                from open_finance_investments i
+                where i.connection_id = %s
+                  and i.name ilike any (%s)
+                  and coalesce(i.balance, 0) > 0
+                """,
+                (connection_id, _CAIXINHA_NAME_PATTERNS),
+            )
+            of_caixinhas = [dict(r) for r in (cur.fetchall() or [])]
+
+            for oc in of_caixinhas:
+                of_id = oc["of_id"]
+                name = (oc["name"] or "Caixinha").strip()
+                bal = oc["balance"]
+                profit = oc["profit"]  # baseline de rendimento (amountProfit), p/ o Banqueiro
+
+                # já vinculada a algum pocket deste user? nada a fazer
+                cur.execute(
+                    "select 1 from pockets where user_id=%s and of_investment_id=%s limit 1",
+                    (user_id, of_id),
+                )
+                if cur.fetchone():
+                    continue
+
+                # dedup: pocket de mesmo nome, ainda sem vínculo → vincula nele
+                cur.execute(
+                    "select id from pockets where user_id=%s and lower(name)=lower(%s) "
+                    "and of_investment_id is null limit 1",
+                    (user_id, name),
+                )
+                same = cur.fetchone()
+                if same:
+                    cur.execute(
+                        "update pockets set of_investment_id=%s, of_last_seen_balance=%s, "
+                        "of_last_seen_profit=%s, balance=%s, interest_enabled=false "
+                        "where id=%s and user_id=%s",
+                        (of_id, bal, profit, bal, same["id"], user_id),
+                    )
+                    linked += 1
+                    continue
+
+                # cria novo — resolve colisão de nome (unique(user_id,name)) com sufixo
+                new_name = name
+                suffix = 0
+                while True:
+                    cur.execute(
+                        "select 1 from pockets where user_id=%s and lower(name)=lower(%s)",
+                        (user_id, new_name),
+                    )
+                    if not cur.fetchone():
+                        break
+                    suffix += 1
+                    new_name = f"{name} (banco)" if suffix == 1 else f"{name} (banco {suffix})"
+                cur.execute(
+                    """
+                    insert into pockets(
+                        user_id, name, balance, source, of_investment_id,
+                        of_last_seen_balance, of_last_seen_profit,
+                        interest_enabled, interest_rate, interest_period,
+                        interest_tax_profile, last_interest_date
+                    )
+                    values (%s,%s,%s,'open_finance',%s,%s,%s,false,1,'cdi','regressive_ir_iof',current_date)
+                    """,
+                    (user_id, new_name, bal, of_id, bal, profit),
+                )
+                created += 1
+
+            # 3. espelha o saldo do banco em todas as caixinhas vinculadas (auto + manual)
+            cur.execute(
+                """
+                update pockets p
+                   set balance = i.balance, interest_enabled = false
+                  from open_finance_investments i
+                 where p.of_investment_id = i.id
+                   and p.user_id = %s
+                   and i.balance is not null
+                   and p.balance is distinct from i.balance
+                """,
+                (user_id,),
+            )
+            mirrored = cur.rowcount
+
+            # 4. Auto-cura: remove caixinhas AUTO-CRIADAS (source='open_finance') cujo
+            # investimento do banco está zerado/sumiu — limpa as fantasmas já criadas
+            # (ex.: "Reserva Planejada" do Nubank que veio com saldo 0).
+            cur.execute(
+                """
+                delete from pockets p
+                 using open_finance_investments i
+                 where p.of_investment_id = i.id
+                   and p.user_id = %s
+                   and p.source = 'open_finance'
+                   and coalesce(i.balance, 0) <= 0
+                """,
+                (user_id,),
+            )
+            cleaned = cur.rowcount
+        conn.commit()
+    return {"caixinhas_created": created, "caixinhas_linked": linked,
+            "caixinhas_mirrored": mirrored, "caixinhas_cleaned": cleaned}
 
 
 def get_open_finance_connection_by_item_id(provider_item_id: str, provider: str = "pluggy") -> dict | None:
@@ -665,12 +981,33 @@ _OF_INTERNAL_KEYWORDS = (
     "poupanca", "poupança", "cofrinho",
 )
 
+# Pagamento de fatura de cartão: aparece nas DUAS contas (saída na corrente + entrada
+# no cartão). NÃO é gasto novo (as compras já entraram na fatura) nem estorno de compra.
+# No lado BANK vira movimento interno (não conta em gasto/sobrou); no lado CREDIT é
+# PULADO no import (senão duplica o pagamento e ainda bagunça o total da fatura).
+_OF_CREDIT_PAYMENT_CATEGORIES = ("credit card payment",)
+_OF_CREDIT_PAYMENT_KEYWORDS = (
+    "pagamento de fatura", "pagamento fatura", "pagamento de cartao",
+    "pagamento de cartão", "credit card payment", "pagamento recebido",
+)
+
+
+def is_credit_card_payment(category: str | None = None, description: str | None = None) -> bool:
+    """True se a transação é pagamento de fatura de cartão (não é compra nem gasto novo)."""
+    cat = (category or "").strip().lower()
+    desc = (description or "").lower()
+    return (
+        any(cat == c or cat.startswith(c) for c in _OF_CREDIT_PAYMENT_CATEGORIES)
+        or any(k in desc for k in _OF_CREDIT_PAYMENT_KEYWORDS)
+    )
+
 
 def classify_open_finance_launch(amount, category: str | None = None, description: str | None = None) -> dict:
     """Puro: decide tipo/valor/is_internal a partir da transação OF (amount já assinado).
 
-    Caixinha do banco (aplicação/resgate) e transferência entre contas próprias viram
-    movimento interno — ficam fora do cálculo de gastos/"sobrou" (igual `deposito_caixinha`).
+    Caixinha do banco (aplicação/resgate), transferência entre contas próprias e
+    pagamento de fatura de cartão viram movimento interno — ficam fora do cálculo de
+    gastos/"sobrou" (igual `deposito_caixinha`).
     """
     v = Decimal(str(amount))
     tipo = "despesa" if v < 0 else "receita"
@@ -679,6 +1016,7 @@ def classify_open_finance_launch(amount, category: str | None = None, descriptio
     is_internal = (
         any(cat == c or cat.startswith(c) for c in _OF_INTERNAL_CATEGORIES)
         or any(k in desc for k in _OF_INTERNAL_KEYWORDS)
+        or is_credit_card_payment(category, description)
     )
     return {"tipo": tipo, "valor": abs(v), "is_internal_movement": is_internal}
 
@@ -1076,6 +1414,12 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
             rows = cur.fetchall()
 
     for r in rows:
+        # Pagamento de fatura NÃO é compra: pular. Ele aparece na conta de crédito como
+        # entrada (amount positivo) e, se importado, viraria um "estorno" que (a) duplica o
+        # pagamento já visto na conta corrente e (b) reduz errado o total da fatura. O lado
+        # BANK já o trata como movimento interno (classify_open_finance_launch).
+        if is_credit_card_payment(r["category"], r["description"]):
+            continue
         of_acc_id = r["of_account_id"]
         if of_acc_id not in card_cache:
             card_cache[of_acc_id] = get_or_create_open_finance_card(
@@ -1388,7 +1732,11 @@ def get_consolidated_balance(user_id: int) -> dict:
     """Saldo consolidado = saldo manual + soma dos saldos das contas BANK conectadas.
 
     Cartão (type CREDIT) fica de fora (é dívida, não saldo disponível). Auto-atualiza
-    conforme o sync refresca os saldos autoritativos dos bancos.
+    conforme o sync refresca os saldos autoritativos dos bancos. `of_bank_count` é o
+    nº de contas BANK conectadas — 0 = sem banco, e o chamador pode mostrar só o manual.
+
+    Só contas em BRL entram na soma (e no count): o saldo manual é em reais e não há
+    conversão de câmbio — somar USD 100 como R$ 100 mentiria o total.
     """
     ensure_user(user_id)
     with get_conn() as conn:
@@ -1397,20 +1745,35 @@ def get_consolidated_balance(user_id: int) -> dict:
             row = cur.fetchone()
             manual = row["b"] if row else Decimal("0")
 
+            # Dedup por conta REAL (provider_account_id): reconectar o banco cria uma nova
+            # connection_id com a MESMA conta (a unicidade é por conexão), o que somaria o
+            # mesmo saldo 2x. DISTINCT ON pega o saldo da conexão mais recente por conta.
+            # PAUSED/DELETED mantêm o espelho local para histórico, mas não representam
+            # uma conexão atual e portanto não podem compor o saldo corrente.
             cur.execute(
                 """
-                select coalesce(sum(a.balance), 0) as b
-                from open_finance_accounts a
-                join open_finance_connections c on c.id = a.connection_id
-                where c.user_id=%s and upper(a.type) = 'BANK'
+                select coalesce(sum(b), 0) as b, count(*) as n from (
+                    select distinct on (a.provider_account_id)
+                        a.balance as b,
+                        upper(coalesce(c.status, '')) as connection_status
+                    from open_finance_accounts a
+                    join open_finance_connections c on c.id = a.connection_id
+                    where c.user_id=%s and upper(a.type) = 'BANK'
+                      and upper(coalesce(a.currency, 'BRL')) = 'BRL'
+                    order by a.provider_account_id, c.id desc
+                ) uniq
+                where connection_status not in ('PAUSED', 'DELETED')
                 """,
                 (user_id,),
             )
-            of_bank = cur.fetchone()["b"]
+            of_row = cur.fetchone()
+            of_bank = of_row["b"]
+            of_count = int(of_row["n"] or 0)
 
     return {
         "manual": manual,
         "open_finance_bank": of_bank,
+        "of_bank_count": of_count,
         "consolidated": (manual or Decimal("0")) + (of_bank or Decimal("0")),
     }
 
@@ -1475,3 +1838,26 @@ def disconnect_open_finance_connection(user_id: int, connection_id: int | None =
         conn.commit()
 
     return deleted
+
+
+def user_synced_within(user_id: int, minutes: int) -> bool:
+    """True se alguma conexão Open Finance do usuário sincou nos últimos N minutos.
+
+    Sinal barato de "sync possivelmente em andamento": sync_pluggy_user processa
+    os itens em sequência e cada um carimba last_sync_at ao terminar, então um
+    carimbo recente significa que os itens seguintes ainda podem estar por vir.
+    Serve pra segurar o e-mail dos agentes whole-portfolio enquanto a carteira
+    pode estar a meio caminho (ver _AGENT_EMAIL_MIN_AGE_MIN em piggy_agents)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select 1 from open_finance_connections
+                where user_id = %s
+                  and last_sync_at is not null
+                  and last_sync_at >= now() - make_interval(mins => %s)
+                limit 1
+                """,
+                (user_id, minutes),
+            )
+            return cur.fetchone() is not None

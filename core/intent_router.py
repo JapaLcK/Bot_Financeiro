@@ -72,7 +72,14 @@ OUT_OF_SCOPE_MSG = (
     "Digite *ajuda* para ver o que posso fazer."
 )
 
-NOT_UNDERSTOOD_MSG = "Não entendi. Pode reformular?\nDigite *ajuda* para ver exemplos."
+NOT_UNDERSTOOD_MSG = (
+    "Não entendi bem o que você quis fazer. 🤔\n"
+    "Tenta assim:\n"
+    "• *gastei 50 no mercado* — registrar um gasto\n"
+    "• *saldo* — ver quanto você tem\n"
+    "• *recebi 1000 de salário* — registrar uma receita\n\n"
+    "Ou digite *ajuda* pra ver tudo que eu faço."
+)
 
 
 def _contextual_help_message(text: str, platform: str) -> str:

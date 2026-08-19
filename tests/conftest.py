@@ -1,3 +1,4 @@
+import importlib.util
 import os
 import sys
 import uuid
@@ -13,9 +14,175 @@ os.environ.setdefault("PII_ENCRYPTION_KEY", _Fernet.generate_key().decode())
 os.environ.setdefault("PII_HASH_PEPPER", "test-pepper-for-pytest-only-must-be-32-chars-long")
 # Não polui pii_access_log durante testes (cada decrypt registra uma row).
 os.environ.setdefault("PII_AUDIT_DISABLED", "1")
+# Escada de planos v2 lançada com default LIGADO (2026-08-06). A suíte foi
+# escrita no mundo v1 (gates binários Free×Pro, mocks de is_pro), então os
+# testes rodam com o freio puxado por padrão — os testes da escada
+# (test_plan_tiers, test_of_trial_expiry, etc.) ligam com setenv("...", "1").
+os.environ.setdefault("PLANS_V2_ENABLED", "0")
 
 from db import init_db, ensure_user, get_conn
 
+
+# ── Coleta: arquivos que dependem de `ofxparse` ──────────────────────────────
+# Sem o pacote, estes 9 arquivos estouram no IMPORT e o pytest aborta a suíte
+# inteira antes de rodar um teste — o resultado não é "alguns testes falham",
+# é sinal nenhum, nem verde nem vermelho.
+#
+# A lista é FIXA de propósito. Gerá-la a partir dos erros de coleta ("ignore
+# tudo que falhou ao importar") engoliria também um ImportError ou erro de
+# sintaxe recém-introduzido, e o arquivo quebrado nunca mais rodaria.
+#
+# A condição é a ausência do pacote, não o erro: no CI o ofxparse está no
+# requirements.txt, então nada aqui é ignorado e os 9 rodam normalmente.
+_OFXPARSE_DEPENDENTES = [
+    "test_audio_clarification.py",
+    "test_audio_multi_launch_ask_value.py",
+    "test_full_handler_smoke.py",
+    "test_handle_incoming_routing.py",
+    "test_recurring_value.py",
+    "test_split_audio_transactions.py",
+    "test_whatsapp_confirmations.py",
+    "test_whatsapp_daily_report.py",
+    "test_whatsapp_simulation.py",
+]
+
+# Estes quatro NÃO estouram na coleta: importam `core.handle_incoming` ou
+# `statement_import` DENTRO do corpo do teste, e a cadeia
+# handle_incoming -> ofx_service -> ofx_import -> ofxparse só é percorrida
+# quando o teste roda. O collect_ignore acima não os alcança, então sem este
+# skip a suíte "de dependências reduzidas" ainda termina com 4 vermelhos que
+# nada têm a ver com a mudança em revisão.
+_OFXPARSE_IMPORT_TARDIO = [
+    "tests/test_statement_import.py::test_attachment_detection",
+    "tests/test_statement_import.py::test_import_statement_bytes_csv_idempotente",
+    "tests/test_statement_import.py::test_import_statement_bytes_vazio_ou_grande",
+    "tests/test_nlp_and_pending_flow.py::test_handle_incoming_clarification_tem_precedencia_sobre_fallback_ia",
+]
+
+# O alívio NÃO é automático: exige PYTEST_ALLOW_MISSING_OPTIONAL_DEPS=1.
+#
+# Detectar a ausência sozinho seria pior que o problema — se o ofxparse caísse
+# do requirements.txt por engano, ou sumisse do CI, a suíte silenciaria 9
+# arquivos e pularia 4 testes e passaria VERDE, enquanto `core.handle_incoming`
+# estaria quebrado em produção. Um ambiente de dependências reduzidas é uma
+# decisão consciente de quem o monta (o .claude/hooks/session-start.sh exporta
+# a variável); a execução normal do dev e do CI continua estourando, que é o
+# comportamento certo para dependência obrigatória faltando.
+_DEPS_REDUZIDAS = os.getenv("PYTEST_ALLOW_MISSING_OPTIONAL_DEPS") == "1"
+
+# find_spec em vez de `try: import`: `except ImportError` também captura um
+# ImportError levantado DE DENTRO de um ofxparse instalado (dependência interna
+# quebrada, por exemplo) e trataria pacote defeituoso como pacote ausente,
+# escondendo justamente o que precisa aparecer.
+_TEM_OFXPARSE = importlib.util.find_spec("ofxparse") is not None
+
+collect_ignore = []
+if _DEPS_REDUZIDAS and not _TEM_OFXPARSE:
+    collect_ignore = list(_OFXPARSE_DEPENDENTES)
+    print(
+        f"[conftest] PYTEST_ALLOW_MISSING_OPTIONAL_DEPS=1 e ofxparse ausente — "
+        f"ignorando {len(collect_ignore)} arquivos e pulando "
+        f"{len(_OFXPARSE_IMPORT_TARDIO)} testes de import tardio."
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Pula os testes que só descobrem a falta do ofxparse ao executar.
+
+    Mesma filosofia da lista de arquivos: nomes FIXOS e condição ligada à
+    ausência do pacote, não ao erro. Marcar pelo erro esconderia um
+    ImportError novo introduzido por outra mudança.
+    """
+    if _TEM_OFXPARSE or not _DEPS_REDUZIDAS:
+        return
+    motivo = pytest.mark.skip(reason="ofxparse ausente (import tardio); no CI o pacote existe")
+    alvos = set(_OFXPARSE_IMPORT_TARDIO)
+    for item in items:
+        if item.nodeid in alvos:
+            item.add_marker(motivo)
+
+
+
+# ── Isolamento do banco por execução ─────────────────────────────────────────
+# Cada execução da suíte trabalha num database só dela. Sem isso, duas
+# execuções simultâneas se destroem: a fixture `_auto_cleanup_orphan_users`
+# abaixo apaga QUALQUER usuário que apareça em `users` durante um teste, e não
+# tem como distinguir os da outra execução.
+#
+# A troca acontece em `pytest_configure`, que roda ANTES da coleta. Isso é
+# essencial e não é detalhe de estilo: o pytest importa os módulos de teste na
+# coleta, e módulos como `frontend/routes/shared.py` e `core/admin_dashboard.py`
+# leem DATABASE_URL no nível de módulo. Numa fixture de sessão (que roda depois
+# da coleta) esses módulos já teriam cacheado a URL antiga e as rotas async
+# continuariam batendo no banco compartilhado — o isolamento valeria só para o
+# pool síncrono.
+#
+# PYTEST_DB_ISOLATION=0 desliga, para inspecionar o banco depois da rodada.
+
+_ISOLATION: dict[str, str] = {}
+
+
+def _cached_database_url_modules() -> tuple[str, ...]:
+    """Módulos que leem DATABASE_URL no import — a razão de trocar antes da coleta.
+
+    Levantado com `grep -rn DATABASE_URL --include=*.py` e filtrando as leituras
+    a nível de módulo. `finance_bot_websocket_custom.py` também guarda a URL, mas
+    só para validar que está presente; não conecta com ela.
+    """
+    return ("frontend/routes/shared.py", "core/admin_dashboard.py")
+
+
+def pytest_configure(config):
+    base_url = os.getenv("DATABASE_URL")
+    if not base_url or os.getenv("PYTEST_DB_ISOLATION", "1") == "0":
+        return
+
+    import psycopg
+    from urllib.parse import urlsplit, urlunsplit
+
+    name = f"pytest_{uuid.uuid4().hex[:12]}"
+    try:
+        with psycopg.connect(base_url, autocommit=True) as conn:
+            # Nome gerado aqui (hex de uuid), não vem de fora — sem risco de
+            # injeção. Aspas duplas porque CREATE DATABASE não aceita parâmetro.
+            conn.execute(f'create database "{name}"')
+    except Exception as exc:
+        print(f"[conftest] sem isolamento de banco ({exc}); usando o DATABASE_URL original")
+        return
+
+    parts = urlsplit(base_url)
+    os.environ["DATABASE_URL"] = urlunsplit(parts._replace(path=f"/{name}"))
+    _ISOLATION["base_url"] = base_url
+    _ISOLATION["name"] = name
+
+
+def pytest_unconfigure(config):
+    """Remove o database desta execução.
+
+    Roda no shutdown do pytest, inclusive quando `init_db()` estoura no setup —
+    numa fixture, um erro antes do `yield` pularia a limpeza e deixaria um
+    database `pytest_*` órfão a cada tentativa falha.
+    """
+    base_url = _ISOLATION.pop("base_url", None)
+    name = _ISOLATION.pop("name", None)
+    if not base_url or not name:
+        return
+
+    import psycopg
+
+    os.environ["DATABASE_URL"] = base_url
+    try:
+        from db.connection import close_pool
+
+        close_pool()  # solta as conexões, senão o DROP é recusado
+    except Exception:
+        pass
+    try:
+        with psycopg.connect(base_url, autocommit=True) as conn:
+            # FORCE derruba conexões remanescentes (Postgres 13+).
+            conn.execute(f'drop database if exists "{name}" with (force)')
+    except Exception as exc:
+        print(f"[conftest] não consegui remover o database {name}: {exc}")
 
 
 @pytest.fixture(scope="session", autouse=True)

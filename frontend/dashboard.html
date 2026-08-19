@@ -2,23 +2,32 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>PigBank</title>
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
-<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#111111" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<!-- Aquece a conexão com os CDNs de terceiros antes de baixar os scripts. -->
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin />
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+<!-- Chart.js: usado pela view padrão (overview). defer tira do caminho
+     bloqueante do parse, mas ainda pré-carrega durante a ociosidade, ficando
+     pronto quando os dados chegam. Sortable NÃO entra aqui: é carregado sob
+     demanda (ensureSortable) só quando o usuário reordena cartões. -->
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <link rel="stylesheet" href="/brand.css" />
-<link rel="stylesheet" href="/dashboard.css" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
+<link rel="stylesheet" href="/dashboard.css?v=7" />
 <link rel="stylesheet" href="/dashboard-mobile.css" media="(max-width: 900px)" />
-<script src="/static/auth-refresh.js"></script>
-<script src="/modals.js"></script>
-  <link rel="stylesheet" href="/app-mode.css?v=17" />
-  <script src="/app-mode.js?v=17"></script>
+<!-- defer preserva a ordem: auth-refresh (patch do fetch) → modals → app-mode →
+     dashboard.js. Nenhum script inline depende deles durante o parse. -->
+<script defer src="/static/auth-refresh.js"></script>
+<script defer src="/modals.js"></script>
+  <link rel="stylesheet" href="/app-mode.css?v=25" />
+  <script defer src="/app-mode.js?v=24"></script>
 </head>
 <body class="has-sidenav">
 
@@ -39,60 +48,63 @@
 
   <div class="sidenav-section">Geral</div>
   <button class="sidenav-item active" type="button" data-nav="overview" onclick="navigateTo('overview')">
-    <span class="sn-icon">📊</span><span class="sn-label">Visão Geral</span>
+    <span class="sn-icon" style="color:#3B82F6"><i class="ph ph-chart-bar" aria-hidden="true"></i></span><span class="sn-label">Visão Geral</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="analytics" onclick="navigateTo('analytics')">
-    <span class="sn-icon">📈</span><span class="sn-label">Análises</span>
+    <span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Análises</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="history" onclick="navigateTo('history')">
-    <span class="sn-icon">🕒</span><span class="sn-label">Histórico</span>
+    <span class="sn-icon" style="color:#94A3B8"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i></span><span class="sn-label">Histórico</span>
+  </button>
+  <button class="sidenav-item" type="button" data-nav="agentes" onclick="navigateTo('agentes')">
+    <span class="sn-icon" style="color:#FF2D8E"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span><span class="sn-label">Agentes</span><span class="sn-tag new">novo</span>
   </button>
 
   <div class="sidenav-section">Planejamento</div>
   <button class="sidenav-item" type="button" data-nav="fixed" onclick="navigateTo('fixed')">
-    <span class="sn-icon">🔁</span><span class="sn-label">Recorrentes</span>
+    <span class="sn-icon" style="color:#14B8A6"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span><span class="sn-label">Recorrentes</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="budgets" onclick="navigateTo('budgets')">
-    <span class="sn-icon">📝</span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span>
+    <span class="sn-icon" style="color:#F59E0B"><i class="ph ph-note-pencil" aria-hidden="true"></i></span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="goals" onclick="navigateTo('goals')">
-    <span class="sn-icon">🎯</span><span class="sn-label">Caixinhas e metas</span><span class="sn-tag new">novo</span>
+    <span class="sn-icon" style="color:#10B981"><i class="ph ph-target" aria-hidden="true"></i></span><span class="sn-label">Caixinhas e metas</span><span class="sn-tag new">novo</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="categories" onclick="navigateTo('categories')">
-    <span class="sn-icon">🏷️</span><span class="sn-label">Categorias</span>
+    <span class="sn-icon" style="color:#A855F7"><i class="ph ph-tag" aria-hidden="true"></i></span><span class="sn-label">Categorias</span>
   </button>
 
   <div class="sidenav-section">Crédito</div>
   <button class="sidenav-item" type="button" data-nav="installments" onclick="navigateTo('installments')">
-    <span class="sn-icon">💳</span><span class="sn-label">Parcelamentos</span>
+    <span class="sn-icon" style="color:#FB923C"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Parcelamentos</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="cards" onclick="navigateTo('cards')">
-    <span class="sn-icon">💳</span><span class="sn-label">Cartões</span><span class="sn-tag new">novo</span>
+    <span class="sn-icon" style="color:#6366F1"><i class="ph ph-cards" aria-hidden="true"></i></span><span class="sn-label">Cartões</span><span class="sn-tag new">novo</span>
   </button>
   <button class="sidenav-item" type="button" data-nav="investments" data-pro-feature="investments" onclick="navigateTo('investments')">
-    <span class="sn-icon">💹</span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span>
+    <span class="sn-icon" style="color:#22C55E"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span>
   </button>
   <!-- Só aparece pra quem é afiliado (initAffiliateNav mostra se /api/affiliate/me responder 200) -->
   <button class="sidenav-item" type="button" data-nav="affiliate" id="sidenav-affiliate" style="display:none" onclick="navigateTo('affiliate')">
-    <span class="sn-icon">🤝</span><span class="sn-label">Afiliados</span>
+    <span class="sn-icon" style="color:#F43F5E"><i class="ph ph-handshake" aria-hidden="true"></i></span><span class="sn-label">Afiliados</span>
   </button>
 
   <div class="sidenav-footer">
     <div class="sidenav-section" style="padding-top:0">Conta</div>
     <a class="sidenav-item" href="/settings?view=security">
-      <span class="sn-icon">👤</span><span class="sn-label">Conta</span>
+      <span class="sn-icon" style="color:#94A3B8"><i class="ph ph-user" aria-hidden="true"></i></span><span class="sn-label">Conta</span>
     </a>
     <a class="sidenav-item" href="/suporte" target="_blank" rel="noopener">
-      <span class="sn-icon">❓</span><span class="sn-label">Suporte</span>
+      <span class="sn-icon" style="color:#60A5FA"><i class="ph ph-question" aria-hidden="true"></i></span><span class="sn-label">Suporte</span>
     </a>
     <a class="sidenav-item" href="/changelog" data-pro-feature="changelog">
-      <span class="sn-icon">📰</span><span class="sn-label">Notícias</span><span class="sn-tag">Pro</span>
+      <span class="sn-icon" style="color:#F59E0B"><i class="ph ph-newspaper" aria-hidden="true"></i></span><span class="sn-label">Notícias</span><span class="sn-tag">Pro</span>
     </a>
     <button class="sidenav-item" type="button" onclick="connectWhatsAppFromDashboard(event)">
-      <span class="sn-icon" style="color:#22c55e">💬</span><span class="sn-label">WhatsApp</span>
+      <span class="sn-icon" style="color:#22c55e"><i class="ph ph-whatsapp-logo" aria-hidden="true"></i></span><span class="sn-label">WhatsApp</span>
     </button>
     <button class="sidenav-item" type="button" id="theme-toggle-btn" onclick="toggleTheme()">
-      <span class="sn-icon" id="theme-toggle-icon">🌙</span><span class="sn-label" id="theme-toggle-label">Modo escuro</span>
+      <span class="sn-icon" id="theme-toggle-icon" style="color:#94A3B8"><i class="ph ph-moon" aria-hidden="true"></i></span><span class="sn-label" id="theme-toggle-label">Modo escuro</span>
     </button>
   </div>
 </aside>
@@ -101,7 +113,7 @@
 
   <header>
     <div class="header-left">
-      <button class="sidenav-toggle" type="button" aria-label="Abrir menu" onclick="toggleSidenav()">☰</button>
+      <button class="sidenav-toggle" type="button" aria-label="Abrir menu" onclick="toggleSidenav()"><i class="ph ph-list" aria-hidden="true"></i></button>
       <img class="logo-img" src="/brand/icon.png?v=1" alt="Piggy" />
       <h1>PigBank</h1>
     </div>
@@ -117,30 +129,31 @@
         <div id="dot" class="connecting"></div>
         <span id="status-text">Conectando…</span>
       </div>
-      <button class="hbtn" id="refresh-btn" onclick="sendRefresh()"><span id="ref-icon">↻</span> Atualizar</button>
-      <button class="hbtn" data-pro-feature="ofx_import" onclick="openOfxImport()">⬇ Importar OFX</button>
+      <button class="hbtn" id="refresh-btn" onclick="sendRefresh()"><span id="ref-icon"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span> Atualizar</button>
+      <button class="hbtn" data-pro-feature="ofx_import" onclick="openOfxImport()"><i class="ph ph-download-simple" aria-hidden="true"></i> Importar OFX</button>
       <input type="file" id="ofx-file-input" accept=".ofx" style="display:none" onchange="handleOfxFileSelected(event)" />
-      <button class="hbtn" data-pro-feature="export" onclick="exportToEmail()">📧 Exportar</button>
+      <button class="hbtn" data-pro-feature="export" onclick="exportToEmail()"><i class="ph ph-envelope" aria-hidden="true"></i> Exportar</button>
       <div class="user-menu" id="user-menu">
         <button class="hbtn user-menu-btn" id="user-menu-btn" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleUserMenu(event)">
           <span class="user-menu-main">
             <span class="user-dot"></span>
             <span id="user-label">Minha conta</span>
           </span>
-          <span class="hamburger-icon" aria-hidden="true">☰</span>
+          <span class="hamburger-icon" aria-hidden="true"><i class="ph ph-list" aria-hidden="true"></i></span>
         </button>
         <div class="user-dropdown" id="user-dropdown" role="menu" aria-label="Menu da conta">
           <div class="user-dropdown-head">
             <div class="user-email" id="user-email">carregando...</div>
             <div class="user-plan" id="user-plan">Plano Free</div>
           </div>
-          <a class="user-menu-link" href="/home" role="menuitem"><span class="user-menu-icon">🏠</span>Início</a>
-          <a class="user-menu-link" href="/app" role="menuitem"><span class="user-menu-icon">📊</span>Dashboard</a>
-          <a class="user-menu-link" href="/comandos-app" role="menuitem"><span class="user-menu-icon">💡</span>O que pedir</a>
-          <button class="user-menu-link" type="button" role="menuitem" onclick="connectWhatsAppFromDashboard(event)"><span class="user-menu-icon">💬</span>Conectar WhatsApp</button>
-          <a class="user-menu-link" href="/settings?view=security" role="menuitem"><span class="user-menu-icon">⚙</span>Configurações</a>
-          <a class="user-menu-link" href="/conta" role="menuitem"><span class="user-menu-icon">💳</span>Gerenciar assinatura</a>
-          <button class="user-menu-link danger" type="button" role="menuitem" onclick="logoutDashboard()"><span class="user-menu-icon">↪</span>Sair</button>
+          <a class="user-menu-link" href="/home" role="menuitem"><span class="user-menu-icon"><i class="ph ph-house" aria-hidden="true"></i></span>Início</a>
+          <a class="user-menu-link" href="/app" role="menuitem"><span class="user-menu-icon"><i class="ph ph-chart-bar" aria-hidden="true"></i></span>Dashboard</a>
+          <a class="user-menu-link" href="/comandos-app" role="menuitem"><span class="user-menu-icon"><i class="ph ph-lightbulb" aria-hidden="true"></i></span>O que pedir</a>
+          <button class="user-menu-link" type="button" role="menuitem" onclick="connectWhatsAppFromDashboard(event)"><span class="user-menu-icon"><i class="ph ph-whatsapp-logo" aria-hidden="true"></i></span>Conectar WhatsApp</button>
+          <a class="user-menu-link" href="/settings?view=security" role="menuitem"><span class="user-menu-icon"><i class="ph ph-gear" aria-hidden="true"></i></span>Configurações</a>
+          <a class="user-menu-link" href="/conta" role="menuitem"><span class="user-menu-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></span>Gerenciar assinatura</a>
+          <a class="user-menu-link" href="/?site=1" data-landing role="menuitem"><span class="user-menu-icon"><i class="ph ph-globe" aria-hidden="true"></i></span>Ir para o site</a>
+          <button class="user-menu-link danger" type="button" role="menuitem" onclick="logoutDashboard()"><span class="user-menu-icon"><i class="ph ph-sign-out" aria-hidden="true"></i></span>Sair</button>
         </div>
       </div>
     </div>
@@ -156,6 +169,27 @@
   <div id="overview-view" class="dash-view active">
   <div id="alert-banner"></div>
 
+  <!-- Banner de trial (B1) — só pro Grátis sem trial ativo; escondido no app iOS.
+       Revelado por maybeShowTrialBanner() em dashboard.js. -->
+  <div id="trial-banner" style="display:none;position:relative;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:22px;padding:20px 22px;overflow:hidden;margin-bottom:18px">
+    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+      <span style="flex-shrink:0;width:46px;height:46px;border-radius:14px;background:rgba(255,45,142,.16);color:#FF2D8E;display:inline-flex;align-items:center;justify-content:center;font-size:24px"><i class="ph ph-sparkle" aria-hidden="true"></i></span>
+      <div style="flex:1;min-width:220px">
+        <div style="color:var(--text);font-weight:600;font-size:1rem;line-height:1.3">Experimente o Plus por 30 dias grátis</div>
+        <div style="color:var(--text-2);font-size:.82rem;line-height:1.45;margin-top:3px">Conecte seu banco, ative os agentes e veja seu dinheiro trabalhar. Cancele quando quiser.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px">
+          <span style="display:inline-flex;align-items:center;gap:5px;font-size:.75rem;color:var(--text);background:rgba(255,255,255,.05);border:1px solid var(--div);padding:4px 9px;border-radius:999px"><i class="ph ph-bank" style="color:var(--neon-ink)" aria-hidden="true"></i> Open Finance</span>
+          <span style="display:inline-flex;align-items:center;gap:5px;font-size:.75rem;color:var(--text);background:rgba(255,255,255,.05);border:1px solid var(--div);padding:4px 9px;border-radius:999px"><i class="ph ph-robot" style="color:var(--neon-ink)" aria-hidden="true"></i> Agentes do Piggy</span>
+          <span style="display:inline-flex;align-items:center;gap:5px;font-size:.75rem;color:var(--text);background:rgba(255,255,255,.05);border:1px solid var(--div);padding:4px 9px;border-radius:999px"><i class="ph ph-clock-counter-clockwise" style="color:var(--neon-ink)" aria-hidden="true"></i> Histórico ilimitado</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:stretch;gap:8px;flex-shrink:0">
+        <a href="/precos" style="background:#FF2D8E;color:#fff;border:none;border-radius:12px;padding:11px 18px;font-size:.88rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;text-decoration:none">Ativar teste grátis <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
+        <button type="button" onclick="dismissTrialBanner()" style="background:transparent;color:var(--text-3);border:none;font-size:.78rem;cursor:pointer;font-family:inherit">Agora não</button>
+      </div>
+    </div>
+  </div>
+
   <p class="section-title" id="overview-heading" style="margin:0 0 14px">Visão geral</p>
 
   <!-- Insight do Piggy — populado via /insights/{user_id}/current (LLM) -->
@@ -168,7 +202,7 @@
         <div id="piggy-insight-title" style="font-size:.92rem;color:var(--text);line-height:1.45;font-weight:600"></div>
         <div id="piggy-insight-message" style="font-size:.86rem;color:var(--text-2);line-height:1.4;margin-top:4px;display:none"></div>
       </div>
-      <button id="piggy-insight-cta" class="mock-cta" style="display:none">Ajustar →</button>
+      <button id="piggy-insight-cta" class="mock-cta" style="display:none">Ajustar <i class="ph ph-arrow-right" aria-hidden="true"></i></button>
     </div>
   </div>
 
@@ -200,7 +234,7 @@
   <p class="section-title" id="history-title" style="display:none">Histórico Mensal</p>
   <div id="history-wrap" style="display:none">
     <div class="card">
-      <h2 id="history-card-title">Receita vs Despesa — Últimos 6 Meses</h2>
+      <h2 id="history-card-title">Receita vs Despesa (Últimos 6 Meses)</h2>
       <div class="chart-wrap" style="height:230px"><canvas id="chart-history"></canvas></div>
     </div>
   </div>
@@ -208,7 +242,7 @@
   <p class="section-title" id="launches-title" style="display:none">Lançamentos</p>
   <div id="launches-wrap" style="display:none">
     <div class="filter-bar">
-      <input class="filter-input" id="filter-text" placeholder="🔍  Buscar por descrição ou categoria…" oninput="applyFilter()" />
+      <input class="filter-input" id="filter-text" placeholder="Buscar por descrição ou categoria…" oninput="applyFilter()" />
       <div class="filter-tabs">
         <button class="ftab active" data-type="all"          onclick="setTab(this)">Todos</button>
         <button class="ftab"        data-type="receita"      onclick="setTab(this)">Receitas</button>
@@ -228,9 +262,9 @@
       <p class="section-title" style="margin:0">Análises</p>
       <div style="display:flex;gap:8px">
         <select id="analytics-period-select" class="period-pill" aria-label="Período de análise">
-          <option value="3">📅 Últimos 3 meses</option>
-          <option value="6" selected>📅 Últimos 6 meses</option>
-          <option value="12">📅 Últimos 12 meses</option>
+          <option value="3">Últimos 3 meses</option>
+          <option value="6" selected>Últimos 6 meses</option>
+          <option value="12">Últimos 12 meses</option>
         </select>
       </div>
     </div>
@@ -263,7 +297,7 @@
 
     <div class="mock-grid cols-2">
       <div class="mock-card">
-        <h3>Insights do Piggy 🐷</h3>
+        <h3>Insights do Piggy</h3>
         <div id="analytics-insights-list" class="tx-list">
           <div class="empty" style="padding:16px;text-align:center;color:var(--text-3);font-size:.85rem">Carregando…</div>
         </div>
@@ -272,9 +306,9 @@
       <div class="mock-card">
         <h3 id="analytics-comparative-title">Comparativo mês a mês</h3>
         <div id="analytics-comparative-list" class="tx-list">
-          <div class="bar-row"><div class="bar-icon">📅</div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:40%"></div></div></div></div>
-          <div class="bar-row"><div class="bar-icon">📅</div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:50%"></div></div></div></div>
-          <div class="bar-row"><div class="bar-icon">📅</div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:60%"></div></div></div></div>
+          <div class="bar-row"><div class="bar-icon"><i class="ph ph-calendar-dots" aria-hidden="true"></i></div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:40%"></div></div></div></div>
+          <div class="bar-row"><div class="bar-icon"><i class="ph ph-calendar-dots" aria-hidden="true"></i></div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:50%"></div></div></div></div>
+          <div class="bar-row"><div class="bar-icon"><i class="ph ph-calendar-dots" aria-hidden="true"></i></div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:60%"></div></div></div></div>
         </div>
       </div>
 
@@ -286,7 +320,7 @@
       </div>
 
       <div class="mock-card">
-        <h3>Padrões detectados pela IA 🐷</h3>
+        <h3>Padrões detectados pela IA</h3>
         <div id="analytics-patterns-list">
           <div class="empty" style="padding:16px;text-align:center;color:var(--text-3);font-size:.85rem">Carregando…</div>
         </div>
@@ -299,10 +333,10 @@
       <p class="section-title" style="margin:0">Histórico</p>
       <div style="display:flex;gap:8px">
         <select id="history-period-select" class="period-pill" aria-label="Período">
-          <option value="1">📅 Últimos 30 dias</option>
-          <option value="3">📅 Últimos 3 meses</option>
-          <option value="6" selected>📅 Últimos 6 meses</option>
-          <option value="12">📅 Últimos 12 meses</option>
+          <option value="1">Últimos 30 dias</option>
+          <option value="3">Últimos 3 meses</option>
+          <option value="6" selected>Últimos 6 meses</option>
+          <option value="12">Últimos 12 meses</option>
         </select>
       </div>
     </div>
@@ -341,7 +375,7 @@
 
     <div class="search-bar" style="margin-bottom:14px">
       <input id="history-search-input" type="search"
-             placeholder="🔍 Buscar por nome, categoria ou nota… (ex: compra shopping)"
+             placeholder="Buscar por nome, categoria ou nota… (ex: compra shopping)"
              autocomplete="off" />
     </div>
 
@@ -363,10 +397,10 @@
     </div>
 
     <div class="filter-tabs" id="recurring-tabs" role="tablist" style="margin:-6px 0 16px">
-      <button class="ftab active" type="button" role="tab" data-rectab="overview" onclick="setRecurringTab('overview')">📊 Visão geral</button>
-      <button class="ftab" type="button" role="tab" data-rectab="expenses" onclick="setRecurringTab('expenses')">🔻 Gastos fixos</button>
-      <button class="ftab" type="button" role="tab" data-rectab="incomes" onclick="setRecurringTab('incomes')">🔺 Receitas fixas</button>
-      <button class="ftab" type="button" role="tab" data-rectab="bills" onclick="setRecurringTab('bills')">🧾 Contas a pagar</button>
+      <button class="ftab active" type="button" role="tab" data-rectab="overview" onclick="setRecurringTab('overview')"><i class="ph ph-chart-bar" aria-hidden="true"></i> Visão geral</button>
+      <button class="ftab" type="button" role="tab" data-rectab="expenses" onclick="setRecurringTab('expenses')"><i class="ph ph-trend-down" aria-hidden="true"></i> Gastos fixos</button>
+      <button class="ftab" type="button" role="tab" data-rectab="incomes" onclick="setRecurringTab('incomes')"><i class="ph ph-trend-up" aria-hidden="true"></i> Receitas fixas</button>
+      <button class="ftab" type="button" role="tab" data-rectab="bills" onclick="setRecurringTab('bills')"><i class="ph ph-receipt" aria-hidden="true"></i> Contas a pagar</button>
     </div>
 
     <div id="recurring-overview-pane">
@@ -393,7 +427,7 @@
         </div>
 
         <div class="mock-card">
-          <h3>Reajustes recentes 🐷</h3>
+          <h3>Reajustes recentes</h3>
           <div id="recurring-adjustments-list" class="tx-list"></div>
         </div>
       </div>
@@ -419,7 +453,7 @@
         </div>
 
         <div class="mock-card">
-          <h3>Reajustes recentes 🐷</h3>
+          <h3>Reajustes recentes</h3>
           <div id="recurring-income-adjustments-list" class="tx-list"></div>
         </div>
       </div>
@@ -428,7 +462,7 @@
     <div id="recurring-bills-pane" style="display:none">
       <!-- Entrada rápida: o representante entrega o boleto → 3 campos e pronto -->
       <div class="mock-card" style="margin-bottom:14px">
-        <h3 style="margin-bottom:10px">➕ Novo boleto</h3>
+        <h3 style="margin-bottom:10px"><i class="ph ph-plus" aria-hidden="true"></i> Novo boleto</h3>
         <div class="form-row" style="align-items:flex-end;gap:8px;flex-wrap:wrap">
           <div class="field" style="flex:2;min-width:160px">
             <label for="boleto-quick-name">Descrição</label>
@@ -450,7 +484,7 @@
 
       <!-- "Tô tranquilo nesse prazo?" — o representante oferece um prazo e ele decide -->
       <div class="mock-card" style="margin-bottom:14px">
-        <h3 style="margin-bottom:6px">🤔 Tô tranquilo nesse prazo?</h3>
+        <h3 style="margin-bottom:6px"><i class="ph ph-clock" aria-hidden="true"></i> Tô tranquilo nesse prazo?</h3>
         <p style="font-size:.78rem;color:var(--text-3);margin:0 0 10px">Ofereceram um prazo? Veja como fica seu caixa até lá.</p>
         <div class="form-row" style="align-items:flex-end;gap:8px;flex-wrap:wrap">
           <div class="field" style="flex:1;min-width:130px">
@@ -467,12 +501,12 @@
       </div>
 
       <div class="mock-card" style="margin-bottom:14px">
-        <h3>🗓️ Agenda de vencimentos</h3>
+        <h3><i class="ph ph-calendar-dots" aria-hidden="true"></i> Agenda de vencimentos</h3>
         <div id="recurring-bills-agenda"></div>
       </div>
 
       <div class="mock-card">
-        <h3>✓ Pagos recentemente</h3>
+        <h3><i class="ph ph-check" aria-hidden="true"></i> Pagos recentemente</h3>
         <div id="recurring-bills-paid-list" class="tx-list"></div>
       </div>
     </div>
@@ -491,7 +525,7 @@
     <div id="budgets-list-card" class="mock-card" style="margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
         <h3 style="margin:0">Por categoria</h3>
-        <div style="font-size:.72rem;color:var(--text-3)">🟢 &lt; 80% &nbsp;•&nbsp; 🟡 80–99% &nbsp;•&nbsp; 🔴 ≥ 100%</div>
+        <div style="font-size:.72rem;color:var(--text-3)"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;vertical-align:middle;margin-right:5px"></span>&lt; 80% &nbsp;•&nbsp; <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fbbf24;vertical-align:middle;margin-right:5px"></span>80–99% &nbsp;•&nbsp; <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;vertical-align:middle;margin-right:5px"></span>≥ 100%</div>
       </div>
       <div id="budgets-list" class="tx-list"></div>
     </div>
@@ -516,6 +550,112 @@
     <div id="affiliate-stats" class="stats-row"></div>
 
     <div id="affiliate-body" class="mock-grid cols-2"></div>
+  </div>
+
+  <div id="agentes-view" class="dash-view">
+    <!-- Porquinhos: symbols SVG reutilizados nos cards e no feed -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <defs>
+        <g id="pig-base">
+          <path d="M30 46 Q22 20 48 31 Q37 38 35 52 Z" fill="#E87FAC"/>
+          <path d="M90 46 Q98 20 72 31 Q83 38 85 52 Z" fill="#E87FAC"/>
+          <path d="M33 43 Q29 28 45 34 Q38 39 37 48 Z" fill="#C95A8B"/>
+          <path d="M87 43 Q91 28 75 34 Q82 39 83 48 Z" fill="#C95A8B"/>
+          <circle cx="60" cy="70" r="36" fill="#F48FB8"/>
+          <circle cx="39" cy="79" r="5.5" fill="#F7B1CC" opacity=".8"/>
+          <circle cx="81" cy="79" r="5.5" fill="#F7B1CC" opacity=".8"/>
+          <ellipse cx="60" cy="82" rx="17" ry="12" fill="#E86FA4"/>
+          <ellipse cx="54" cy="82" rx="2.6" ry="4.2" fill="#8A2F5C"/>
+          <ellipse cx="66" cy="82" rx="2.6" ry="4.2" fill="#8A2F5C"/>
+          <circle cx="46" cy="63" r="4" fill="#2A1118"/>
+          <circle cx="74" cy="63" r="4" fill="#2A1118"/>
+          <circle cx="47.4" cy="61.6" r="1.3" fill="#fff"/>
+          <circle cx="75.4" cy="61.6" r="1.3" fill="#fff"/>
+        </g>
+        <symbol id="ag-pig-xerife" viewBox="0 14 120 106">
+          <use href="#pig-base"/>
+          <path d="M40 55 Q46 51 52 54" stroke="#6B2346" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <path d="M80 55 Q74 51 68 54" stroke="#6B2346" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <ellipse cx="60" cy="38" rx="32" ry="8" fill="#7A4A22"/>
+          <path d="M44 37 Q43 16 60 16 Q77 16 76 37 Z" fill="#8F5A2B"/>
+          <rect x="44" y="31" width="32" height="6" fill="#5A3418"/>
+          <path d="M60 20 L61.8 24 L66 24.3 L62.8 27 L63.9 31 L60 28.7 L56.1 31 L57.2 27 L54 24.3 L58.2 24 Z" fill="#F2C230"/>
+        </symbol>
+        <symbol id="ag-pig-reporter" viewBox="0 10 120 110">
+          <use href="#pig-base"/>
+          <path d="M34 40 Q34 18 60 18 Q86 18 86 40 Z" fill="#3E5068"/>
+          <ellipse cx="60" cy="40" rx="26" ry="5" fill="#2C3A4B"/>
+          <circle cx="60" cy="17.5" r="2.6" fill="#2C3A4B"/>
+          <g transform="rotate(8 76 26)">
+            <rect x="67" y="18" width="18" height="12.5" rx="1.5" fill="#F5EEF1" stroke="#C9B3BD"/>
+            <text x="76" y="27" text-anchor="middle" font-size="5.4" font-weight="800" fill="#2A1118">PRESS</text>
+          </g>
+          <rect x="86" y="94" width="8" height="20" rx="4" fill="#3A2C34" transform="rotate(-24 90 104)"/>
+          <circle cx="92" cy="89" r="8.5" fill="#55677E" stroke="#2C3A4B" stroke-width="2"/>
+          <path d="M86.5 86 L97.5 86 M85.5 89 L98.5 89 M86.5 92 L97.5 92" stroke="#2C3A4B" stroke-width="1.2"/>
+        </symbol>
+        <symbol id="ag-pig-carteiro" viewBox="0 18 120 102">
+          <use href="#pig-base"/>
+          <path d="M38 40 Q38 21 60 21 Q82 21 82 40 Z" fill="#2E4C9E"/>
+          <ellipse cx="60" cy="40" rx="27" ry="5.5" fill="#233C80"/>
+          <circle cx="60" cy="30" r="4" fill="#F2C230"/>
+          <rect x="76" y="88" width="30" height="21" rx="2.5" fill="#F5EEF1" stroke="#C9B3BD"/>
+          <path d="M76 90 L91 101 L106 90" stroke="#FF2D8E" stroke-width="2" fill="none"/>
+        </symbol>
+        <symbol id="ag-pig-detetive" viewBox="0 16 120 104">
+          <use href="#pig-base"/>
+          <path d="M40 54 Q46 50 52 53" stroke="#6B2346" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <path d="M68 50 Q74 47 80 50" stroke="#6B2346" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <path d="M36 40 Q36 19 60 19 Q84 19 84 40 Z" fill="#7A5A34"/>
+          <ellipse cx="60" cy="40" rx="25" ry="5" fill="#5F4426"/>
+          <circle cx="90" cy="88" r="12" fill="rgba(198,241,26,.14)" stroke="#C9A227" stroke-width="3.2"/>
+          <path d="M98.5 96.5 L109 107" stroke="#8A6E2B" stroke-width="5" stroke-linecap="round"/>
+        </symbol>
+        <symbol id="ag-pig-cofre" viewBox="0 6 120 114">
+          <use href="#pig-base"/>
+          <rect x="51" y="30" width="18" height="5.5" rx="2.75" fill="#2A1118"/>
+          <circle cx="60" cy="16" r="8" fill="#F2C230" stroke="#C99A1E" stroke-width="2"/>
+          <rect x="57.5" y="12.5" width="5" height="7" rx="1" fill="#C99A1E"/>
+        </symbol>
+        <symbol id="ag-pig-barao" viewBox="0 2 120 118">
+          <use href="#pig-base"/>
+          <rect x="43" y="6" width="34" height="28" rx="3" fill="#1B0F16"/>
+          <rect x="43" y="26" width="34" height="7" fill="#FF2D8E"/>
+          <ellipse cx="60" cy="34" rx="27" ry="6" fill="#14090F"/>
+          <circle cx="74" cy="63" r="9" fill="rgba(255,255,255,.06)" stroke="#C9A227" stroke-width="2.2"/>
+          <path d="M80 70 Q90 82 85 96" stroke="#C9A227" stroke-width="1.8" fill="none"/>
+          <path d="M44 92 Q52 86 60 91 M60 91 Q68 86 76 92" stroke="#3A2230" stroke-width="3.2" fill="none" stroke-linecap="round"/>
+        </symbol>
+        <symbol id="ag-pig-aviador" viewBox="0 12 120 108">
+          <use href="#pig-base"/>
+          <path d="M32 46 Q32 17 60 17 Q88 17 88 46 Q74 38 60 38 Q46 38 32 46 Z" fill="#6B4A2B"/>
+          <circle cx="47" cy="42" r="7.5" fill="#9FD8E8" stroke="#3A2A1B" stroke-width="2.6"/>
+          <circle cx="73" cy="42" r="7.5" fill="#9FD8E8" stroke="#3A2A1B" stroke-width="2.6"/>
+          <path d="M54.5 42 L65.5 42 M39.5 42 L32 44 M80.5 42 L88 44" stroke="#3A2A1B" stroke-width="2.6"/>
+          <path d="M38 101 Q60 111 82 101 L82 110 Q60 118 38 110 Z" fill="#D6453A"/>
+        </symbol>
+        <symbol id="ag-pig-faria_limer" viewBox="0 8 120 112">
+          <use href="#pig-base"/>
+          <!-- tela de trading: linha de alta subindo -->
+          <rect x="34" y="14" width="52" height="34" rx="4" fill="#0E1B14" stroke="#1E4A33" stroke-width="2"/>
+          <path d="M39 40 L50 33 L58 37 L70 24 L81 19" fill="none" stroke="#00F078" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M76 19 L81 19 L81 24" fill="none" stroke="#00F078" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <!-- gravata do investidor -->
+          <path d="M56 62 L60 58 L64 62 L61 74 L59 74 Z" fill="#FF2D8E"/>
+        </symbol>
+      </defs>
+    </svg>
+
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Agentes</p>
+      <div id="agentes-counters" class="ag-counters"></div>
+    </div>
+    <p class="ag-sub">Sua equipe de porquinhos trabalhando 24h nos seus dados: cada um vigia uma coisa e só fala quando vale a pena.</p>
+
+    <div id="agentes-shelf" class="ag-shelf"></div>
+
+    <p class="section-title ag-feed-title">Últimos disparos</p>
+    <div id="agentes-feed" class="ag-feed"></div>
   </div>
 
   <div id="categories-view" class="dash-view">
@@ -558,8 +698,8 @@
     <div id="installments-stats" class="stats-row"></div>
 
     <div id="installments-tabs" class="inst-tabs" role="tablist">
-      <button class="inst-tab active" data-tab="active" type="button" role="tab" onclick="setInstallmentsTab('active')">📂 Atuais</button>
-      <button class="inst-tab" data-tab="history" type="button" role="tab" onclick="setInstallmentsTab('history')">📁 Histórico</button>
+      <button class="inst-tab active" data-tab="active" type="button" role="tab" onclick="setInstallmentsTab('active')"><i class="ph ph-folder-open" aria-hidden="true"></i> Atuais</button>
+      <button class="inst-tab" data-tab="history" type="button" role="tab" onclick="setInstallmentsTab('history')"><i class="ph ph-folder" aria-hidden="true"></i> Histórico</button>
     </div>
 
     <div id="installments-folder" class="inst-folder">
@@ -585,7 +725,7 @@
     <div class="mock-header">
       <p class="section-title" style="margin:0">Investimentos</p>
       <div style="display:flex;gap:8px">
-        <button class="mock-cta outline" type="button" onclick="openInvestmentHelp()">❓ Como usar</button>
+        <button class="mock-cta outline" type="button" onclick="openInvestmentHelp()"><i class="ph ph-question" aria-hidden="true"></i> Como usar</button>
         <button class="mock-cta" type="button" onclick="openInvestmentModal()">+ Novo investimento</button>
       </div>
     </div>
@@ -614,6 +754,26 @@
           <span style="font-size:.7rem;color:var(--text-3)">clique em um investimento pra ver detalhes</span>
         </div>
         <div id="invest-list"></div>
+      </div>
+
+      <!-- 3b. Renda variável (ações/FIIs via Open Finance) — read-only -->
+      <div class="mock-card" id="rv-card" style="margin-bottom:14px;display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <h3 style="margin:0">Renda variável</h3>
+          <span style="font-size:.7rem;color:var(--text-3)">ações e FIIs · atualizado pela sua corretora</span>
+        </div>
+        <div id="rv-summary" class="rv-summary"></div>
+        <div id="rv-list"></div>
+      </div>
+
+      <!-- 3c. Renda fixa via banco (CDB/Tesouro do Open Finance) — read-only, agregada -->
+      <div class="mock-card" id="of-rf-card" style="margin-bottom:14px;display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <h3 style="margin:0">Renda fixa · via banco</h3>
+          <span style="font-size:.7rem;color:var(--text-3)">CDB e Tesouro · atualizado pelo seu banco</span>
+        </div>
+        <div id="of-rf-summary" class="rv-summary"></div>
+        <div id="of-rf-list"></div>
       </div>
 
       <!-- 4. Simulador líquido -->
@@ -662,7 +822,7 @@
     </div>
   </div>
 
-<div id="toast">✓ Atualizado</div>
+<div id="toast"><i class="ph ph-check" aria-hidden="true"></i> Atualizado</div>
 
 <div class="overlay" id="ofx-result-overlay" onclick="if(event.target===this) closeOfxResult()">
   <div class="modal wide" role="dialog" aria-labelledby="ofx-result-title">
@@ -676,10 +836,10 @@
 
 <div class="overlay" id="upgrade-overlay" onclick="if(event.target===this) closeUpgradeModal()">
   <div class="modal upgrade-modal" role="dialog" aria-labelledby="upg-title">
-    <h3 id="upg-title">Disponível no PigBank+</h3>
-    <p class="upg-feat" id="upg-feat-msg">Essa feature é exclusiva pra quem assina.</p>
+    <h3 id="upg-title">Disponível nos planos PigBank</h3>
+    <p class="upg-feat" id="upg-feat-msg">Essa feature faz parte dos planos pagos do PigBank. Escolha o que faz mais sentido pra você.</p>
     <div class="upg-perks">
-      <div class="upg-perk">Piggy IA — converse sobre suas finanças</div>
+      <div class="upg-perk">Piggy IA: converse sobre suas finanças</div>
       <div class="upg-perk">Caixinhas e cartões ilimitados</div>
       <div class="upg-perk">Investimentos com acompanhamento automático</div>
       <div class="upg-perk">Histórico completo + exportar CSV</div>
@@ -687,7 +847,7 @@
     </div>
     <div class="modal-acts">
       <button class="btn-cancel" type="button" onclick="closeUpgradeModal()">Agora não</button>
-      <a class="btn-upgrade" href="/precos" id="upg-cta">Ver planos →</a>
+      <a class="btn-upgrade pb-keep-in-app" href="/precos" id="upg-cta">Ver planos <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
     </div>
   </div>
 </div>
@@ -711,15 +871,15 @@
 
     <div class="tipo-toggle" role="radiogroup" aria-label="Tipo de lançamento">
       <button type="button" class="tipo-opt despesa active" data-tipo="despesa" onclick="setLaunchTipo('despesa')" role="radio" aria-checked="true">
-        <span class="tipo-icon">💸</span>
+        <span class="tipo-icon"><i class="ph ph-trend-down" aria-hidden="true"></i></span>
         <span>Despesa</span>
       </button>
       <button type="button" class="tipo-opt receita" data-tipo="receita" onclick="setLaunchTipo('receita')" role="radio" aria-checked="false">
-        <span class="tipo-icon">💰</span>
+        <span class="tipo-icon"><i class="ph ph-trend-up" aria-hidden="true"></i></span>
         <span>Receita</span>
       </button>
       <button type="button" class="tipo-opt credito" data-tipo="credito" onclick="setLaunchTipo('credito')" role="radio" aria-checked="false">
-        <span class="tipo-icon">💳</span>
+        <span class="tipo-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></span>
         <span>Crédito</span>
       </button>
     </div>
@@ -797,10 +957,10 @@
 
     <div class="tipo-toggle" role="radiogroup" aria-label="Operação de investimento">
       <button type="button" class="tipo-opt aporte active" data-invtab="deposit" onclick="setInvestModalTab('deposit')" role="radio" aria-checked="true">
-        <span class="tipo-icon">⬆️</span><span>Aporte</span>
+        <span class="tipo-icon"><i class="ph ph-arrow-up" aria-hidden="true"></i></span><span>Aporte</span>
       </button>
       <button type="button" class="tipo-opt resgate" data-invtab="withdraw" onclick="setInvestModalTab('withdraw')" role="radio" aria-checked="false">
-        <span class="tipo-icon">⬇️</span><span>Resgate</span>
+        <span class="tipo-icon"><i class="ph ph-arrow-down" aria-hidden="true"></i></span><span>Resgate</span>
       </button>
       <button type="button" class="tipo-opt novo-inv" data-invtab="create" onclick="setInvestModalTab('create')" role="radio" aria-checked="false">
         <span class="tipo-icon">＋</span><span>Novo ativo</span>
@@ -1039,7 +1199,7 @@
           <input class="modal-inp" id="pocket-interest-rate" type="number" min="1" max="300" step="0.01" value="100" inputmode="decimal" style="width:112px;flex:0 0 112px" />
           <span style="color:var(--text-2);font-size:.86rem;white-space:nowrap">% do CDI</span>
         </div>
-        <div style="color:var(--text-3);font-size:.78rem;margin-top:8px;line-height:1.35">💡 Valor simulado — o PigBank não custodia seu dinheiro. Use a taxa do banco onde o saldo realmente está aplicado.</div>
+        <div style="color:var(--text-3);font-size:.78rem;margin-top:8px;line-height:1.35"><i class="ph ph-lightbulb" aria-hidden="true"></i> Valor simulado: o PigBank não custodia seu dinheiro. Use a taxa do banco onde o saldo realmente está aplicado.</div>
       </div>
     </div>
 
@@ -1121,7 +1281,7 @@
     </div>
 
     <div id="pay-bill-empty" class="empty" style="display:none;padding:18px 4px;text-align:center;font-size:.85rem;color:var(--text-2)">
-      📭 Nenhuma fatura em aberto.
+      <i class="ph ph-tray" aria-hidden="true"></i> Nenhuma fatura em aberto.
     </div>
 
     <div class="bill-list" id="pay-bill-list"></div>
@@ -1146,7 +1306,7 @@
 <div class="overlay" id="pay-bill-receipt-overlay">
   <div class="modal">
     <div class="receipt-card">
-      <div class="receipt-icon">✅</div>
+      <div class="receipt-icon"><i class="ph ph-check-circle" aria-hidden="true"></i></div>
       <div class="receipt-title">Pagamento realizado</div>
       <div class="receipt-amount" id="receipt-amount">R$ 0,00</div>
       <div style="font-size:.78rem;color:var(--text-2)" id="receipt-card-line">—</div>
@@ -1159,6 +1319,36 @@
     </div>
     <div class="modal-acts">
       <button class="btn-save" type="button" onclick="closePayReceiptModal()">Concluir</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Ajustar Carteira (dinheiro fora de banco conectado — Open Finance) ── -->
+<div class="overlay" id="adjust-wallet-overlay" onclick="if(event.target===this) closeAdjustWalletModal()">
+  <div class="modal">
+    <h3>Ajustar carteira</h3>
+    <p class="msub">A <b>Carteira</b> é o dinheiro <b>fora</b> dos bancos conectados: espécie e contas que você não ligou no Open Finance. O saldo dos bancos conectados entra sozinho; não digite ele aqui.</p>
+
+    <div class="bill-balance-line">
+      <span class="lbl-k"><i class="ph ph-bank" aria-hidden="true"></i> Nos bancos conectados</span>
+      <span class="lbl-v" id="adjust-wallet-banks">R$ 0,00</span>
+    </div>
+
+    <div class="modal-row">
+      <label class="modal-label" for="adjust-wallet-input"><i class="ph ph-wallet" aria-hidden="true"></i> Carteira (dinheiro fora do banco)</label>
+      <input class="modal-inp" id="adjust-wallet-input" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0,00" />
+      <div style="font-size:.7rem;color:var(--text-3);margin-top:6px">Se você controlava esse banco manualmente aqui, zere: agora o saldo real vem do próprio banco.</div>
+    </div>
+    <div class="modal-error" id="adjust-wallet-error"></div>
+
+    <div class="bill-balance-line" style="margin-top:4px">
+      <span class="lbl-k">= Saldo total</span>
+      <span class="lbl-v" id="adjust-wallet-total">R$ 0,00</span>
+    </div>
+
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closeAdjustWalletModal()">Cancelar</button>
+      <button class="btn-save" type="button" id="adjust-wallet-submit" onclick="submitAdjustWallet()">Salvar</button>
     </div>
   </div>
 </div>
@@ -1181,7 +1371,7 @@
 <div class="overlay" id="card-edit-overlay">
   <div class="modal wide">
     <h3 id="card-edit-title">Novo cartão</h3>
-    <p class="msub">Apelido obrigatório. Demais campos são opcionais — só preencha o que ajudar você a identificar este cartão.</p>
+    <p class="msub">Apelido obrigatório. Demais campos são opcionais. Só preencha o que ajudar você a identificar este cartão.</p>
     <form id="card-edit-form" onsubmit="event.preventDefault(); saveCard();" novalidate>
       <input type="hidden" id="card-edit-id" />
 
@@ -1358,18 +1548,18 @@
   </div>
 </div>
 
-<script src="/dashboard.js"></script>
+<script defer src="/dashboard.js?v=15"></script>
 
 <!-- ─── Chat IA widget (Piggy) — Item #49 ──────────────────────────────── -->
 
 <button id="piggy-fab" type="button" aria-label="Abrir Piggy IA" onclick="togglePiggy()">
-  <span aria-hidden="true">🐷</span>
+  <span aria-hidden="true"><img src="/brand/stickers/hello.webp" alt=""></span>
   <span class="fab-badge" id="piggy-fab-badge"></span>
 </button>
 
 <div id="piggy-panel" role="dialog" aria-labelledby="piggy-title" aria-modal="false">
   <div class="piggy-head">
-    <div class="avatar">🐷</div>
+    <div class="avatar"><img src="/brand/stickers/hello.webp" alt="Piggy"></div>
     <div class="title">
       <b id="piggy-title">Piggy</b>
       <small id="piggy-sub">IA das suas finanças</small>
@@ -1378,26 +1568,26 @@
   </div>
   <div class="piggy-body" id="piggy-body">
     <div class="piggy-empty" id="piggy-empty">
-      <div class="big">🐷</div>
+      <div class="big"><img src="/brand/stickers/hello.webp" alt="Piggy"></div>
       <div>Oi! Pergunta o que quiser sobre suas <b>finanças</b>.<br>Sei seus saldos, gastos, cartões e mais.</div>
       <div class="piggy-suggestions">
-        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quanto eu gastei esse mês?')">💸 Quanto eu gastei esse mês?</button>
-        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quais minhas maiores categorias de gasto?')">📊 Quais minhas maiores categorias?</button>
-        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quanto tenho de saldo?')">💰 Quanto tenho de saldo?</button>
-        <button class="piggy-sugg" type="button" onclick="piggyAsk('Mostra meus últimos lançamentos')">📝 Mostra meus últimos lançamentos</button>
+        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quanto eu gastei esse mês?')"><i class="ph ph-trend-down" aria-hidden="true"></i> Quanto eu gastei esse mês?</button>
+        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quais minhas maiores categorias de gasto?')"><i class="ph ph-chart-pie" aria-hidden="true"></i> Quais minhas maiores categorias?</button>
+        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quanto tenho de saldo?')"><i class="ph ph-wallet" aria-hidden="true"></i> Quanto tenho de saldo?</button>
+        <button class="piggy-sugg" type="button" onclick="piggyAsk('Mostra meus últimos lançamentos')"><i class="ph ph-receipt" aria-hidden="true"></i> Mostra meus últimos lançamentos</button>
       </div>
     </div>
   </div>
   <div class="piggy-foot">
     <div class="piggy-input-row">
       <textarea class="piggy-input" id="piggy-input" placeholder="Pergunte algo…" rows="1" onkeydown="piggyKeyDown(event)" oninput="piggyAutoresize(this)"></textarea>
-      <button class="piggy-send" id="piggy-send" type="button" aria-label="Enviar" onclick="piggySend()">→</button>
+      <button class="piggy-send" id="piggy-send" type="button" aria-label="Enviar" onclick="piggySend()"><i class="ph ph-paper-plane-tilt" aria-hidden="true"></i></button>
     </div>
     <div class="piggy-usage" id="piggy-usage"></div>
   </div>
 </div>
 
-<script src="/dashboard-chat.js"></script>
+<script defer src="/dashboard-chat.js"></script>
 
 </body>
 </html>

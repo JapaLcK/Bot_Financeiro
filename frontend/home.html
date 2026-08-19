@@ -2,15 +2,16 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>PigBank · Início</title>
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
-<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=2" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#111111" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <link rel="stylesheet" href="/brand.css" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -377,13 +378,50 @@ footer a:hover { color:var(--text); }
   .user-dropdown { left:0; right:auto; width:min(100%,300px); }
   .nav-links { width:100%; }
 }
+
+/* Tela de confirmação pós-checkout: espera o webhook do Stripe cair antes de
+   liberar o dashboard (evita o 402 de corrida). Fail-open após ~20s.
+   MORA AQUI, no <style> do <head>, e não junto dos outros overlays lá embaixo:
+   o markup precisa estar pronto E ESTILIZADO antes do <script> que o abre
+   (síncrono, no parse). Com as regras depois do script, a janela do parse
+   renderizaria a div sem o `display:none`, o "Confirmando seu pagamento…"
+   apareceria solto no topo da página. Regra e markup andam juntos. */
+.checkout-confirm-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.8);
+  display: none; flex-direction: column; align-items: center; justify-content: center;
+  z-index: 10002; padding: 24px; text-align: center; gap: 18px;
+  backdrop-filter: blur(6px);
+}
+.checkout-confirm-overlay.open { display: flex; }
+.checkout-confirm-overlay .cc-spinner {
+  width: 44px; height: 44px; border-radius: 50%;
+  border: 3px solid rgba(255,45,142,.25); border-top-color: #FF2D8E;
+  animation: ccSpin .8s linear infinite;
+}
+@keyframes ccSpin { to { transform: rotate(360deg); } }
+.checkout-confirm-overlay .cc-text { color: rgba(255,255,255,.92); font-size: 16px; font-weight: 600; }
+.checkout-confirm-overlay .cc-sub { color: rgba(255,255,255,.6); font-size: 13px; max-width: 320px; line-height: 1.4; }
 </style>
 <script src="/static/auth-refresh.js"></script>
 <script src="/modals.js"></script>
-  <link rel="stylesheet" href="/app-mode.css?v=18" />
-  <script src="/app-mode.js?v=18"></script>
+  <link rel="stylesheet" href="/app-mode.css?v=25" />
+  <script src="/app-mode.js?v=24"></script>
 </head>
 <body>
+
+<!-- Overlay de confirmação pós-checkout. FICA AQUI, no topo do <body>, porque o
+     script que o abre (_openCheckoutOverlay) roda síncrono no parse, antes de
+     qualquer await. Se a div estivesse no fim do documento, junto dos outros
+     overlays, o getElementById devolveria null e o open viraria no-op silencioso:
+     o welcome modal (450ms) ficaria clicável sem cobertura e daria pra chegar no
+     /app antes do webhook fechar o gate. `position: fixed` = fora do fluxo, então
+     estar no topo do body não muda layout nenhum. As regras CSS estão no <style>
+     do <head> pelo mesmo motivo. -->
+<div class="checkout-confirm-overlay" id="checkout-confirm-overlay" role="status" aria-live="polite" tabindex="-1">
+  <div class="cc-spinner" aria-hidden="true"></div>
+  <div class="cc-text">Confirmando seu pagamento…</div>
+  <div class="cc-sub">Só um instante enquanto o Stripe confirma. Não feche a tela.</div>
+</div>
 
 <div class="bg">
   <div class="orb orb-1"></div>
@@ -396,7 +434,7 @@ footer a:hover { color:var(--text); }
 
   <header>
     <div class="header-left">
-      <div class="logo">🐷</div>
+      <div class="logo"><i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
       <h1>PigBank</h1>
       <div class="nav-links">
         <a class="nav-link active" href="/home">Início</a>
@@ -419,12 +457,13 @@ footer a:hover { color:var(--text); }
             <div class="user-email-line" id="user-email">carregando...</div>
             <span class="user-plan" id="user-plan">PLANO FREE</span>
           </div>
-          <a class="dd-link" href="/home"><span class="dd-icon">🏠</span>Início</a>
-          <a class="dd-link" href="/app"><span class="dd-icon">📊</span>Dashboard</a>
-          <button class="dd-link" type="button" onclick="connectWhatsAppFromHome(event)"><span class="dd-icon">💬</span>Conectar WhatsApp</button>
-          <a class="dd-link" href="/settings?view=security"><span class="dd-icon">⚙️</span>Configurações</a>
-          <a class="dd-link" href="/conta"><span class="dd-icon">💳</span>Gerenciar assinatura</a>
-          <button class="dd-link danger" type="button" onclick="logoutFromHome()"><span class="dd-icon">↪</span>Sair</button>
+          <a class="dd-link" href="/home"><span class="dd-icon"><i class="ph ph-house" aria-hidden="true"></i></span>Início</a>
+          <a class="dd-link" href="/app"><span class="dd-icon"><i class="ph ph-chart-bar" aria-hidden="true"></i></span>Dashboard</a>
+          <button class="dd-link" type="button" onclick="connectWhatsAppFromHome(event)"><span class="dd-icon"><i class="ph ph-whatsapp-logo" aria-hidden="true"></i></span>Conectar WhatsApp</button>
+          <a class="dd-link" href="/settings?view=security"><span class="dd-icon"><i class="ph ph-gear" aria-hidden="true"></i></span>Configurações</a>
+          <a class="dd-link" href="/conta"><span class="dd-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></span>Gerenciar assinatura</a>
+          <a class="dd-link" href="/?site=1" data-landing><span class="dd-icon"><i class="ph ph-globe" aria-hidden="true"></i></span>Ir para o site</a>
+          <button class="dd-link danger" type="button" onclick="logoutFromHome()"><span class="dd-icon"><i class="ph ph-sign-out" aria-hidden="true"></i></span>Sair</button>
         </div>
       </div>
     </div>
@@ -434,8 +473,8 @@ footer a:hover { color:var(--text); }
 
     <div class="free-banner" id="free-banner">
       <div class="fb-text">
-        <span class="fb-emoji">🐷</span>
-        <span>Você está no <b>Free</b>. Suba pro <b>PigBank+</b> e libere <b>conversar com a IA</b>, OFX, investimentos, export e caixinhas ilimitadas — 30 dias grátis.</span>
+        <span class="fb-emoji"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span>
+        <span>Você está no <b>Free</b>. Suba pro <b>PigBank+</b> e libere <b>conversar com a IA</b>, OFX, investimentos, export e caixinhas ilimitadas. 30 dias grátis.</span>
       </div>
       <a class="fb-cta" href="/precos">Fazer upgrade</a>
     </div>
@@ -453,7 +492,7 @@ footer a:hover { color:var(--text); }
       <a class="stat-card" href="/app">
         <div class="stat-head"><span class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v3m0 4v3a1 1 0 0 1-1 1H5a2 2 0 0 1-2-2V5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></span>Saldo</div>
         <div class="bignum" id="stat-balance"><span class="sk" style="height:30px;width:120px"></span></div>
-        <div class="bignum-sub">Conta corrente</div>
+        <div class="bignum-sub" id="stat-balance-sub">Conta corrente</div>
       </a>
       <a class="stat-card" href="/app">
         <div class="stat-head"><span class="stat-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 17 13.5 8.5l-4 4L2 5"/><path d="M16 17h6v-6"/></svg></span>Gastos do mês</div>
@@ -477,7 +516,7 @@ footer a:hover { color:var(--text); }
     <div class="section-title">Ações rápidas</div>
     <div class="actions-grid">
       <a class="action-card" href="/app?action=launch&tipo=despesa">
-        <div class="action-icon-lg green">➕</div>
+        <div class="action-icon-lg green"><i class="ph ph-plus" aria-hidden="true"></i></div>
         <div class="action-body">
           <div class="action-title">Lançar gasto</div>
           <div class="action-sub">Abre o lançador no dashboard</div>
@@ -485,7 +524,7 @@ footer a:hover { color:var(--text); }
         <div class="action-arrow">→</div>
       </a>
       <a class="action-card" href="/app?action=pay-bill">
-        <div class="action-icon-lg purple">💳</div>
+        <div class="action-icon-lg purple"><i class="ph ph-credit-card" aria-hidden="true"></i></div>
         <div class="action-body">
           <div class="action-title">Pagar fatura</div>
           <div class="action-sub">Abre o pagador no dashboard</div>
@@ -493,7 +532,7 @@ footer a:hover { color:var(--text); }
         <div class="action-arrow">→</div>
       </a>
       <a class="action-card" href="/app">
-        <div class="action-icon-lg blue">📊</div>
+        <div class="action-icon-lg blue"><i class="ph ph-chart-bar" aria-hidden="true"></i></div>
         <div class="action-body">
           <div class="action-title">Ver dashboard</div>
           <div class="action-sub">Gráficos e relatórios completos</div>
@@ -514,7 +553,7 @@ footer a:hover { color:var(--text); }
   </main>
 
   <footer>
-    <p>© 2026 PigBank · Feito com 🐷</p>
+    <p>© 2026 PigBank · Feito com <i class="ph ph-piggy-bank" aria-hidden="true"></i></p>
     <div style="margin-top:8px">
       <a href="/suporte">Suporte</a>·<a href="/termos">Termos</a>·<a href="/privacy">Privacidade</a>
     </div>
@@ -555,8 +594,13 @@ function displayLabel(displayName, email) {
   return shortAccount(email);
 }
 
+// 'pro' é alias legado do Plus e 'pro_max' é o Pro novo no banco
+// (ver _STORED_PLAN_TO_TIER em core/services/plan_service.py) — traduz
+// antes de exibir pra não mostrar "PLANO PRO_MAX"/"PLANO PRO" errado.
+const PLAN_ALIASES = { pro: "plus", pro_max: "pro" };
 function planLabel(plan) {
-  const v = (plan || "free").trim().toLowerCase();
+  let v = (plan || "free").trim().toLowerCase();
+  v = PLAN_ALIASES[v] || v;
   return v === "free" ? "PLANO FREE" : `PLANO ${v.toUpperCase()}`;
 }
 
@@ -665,6 +709,7 @@ async function logoutFromHome() {
       headers: csrfHeaders()
     });
   } catch {}
+  clearHomeCache();  // não vaza snapshot de um usuário pro próximo login
   try { localStorage.setItem("finbot_logout_at", String(Date.now())); } catch {}
   window.location.replace("/?logout=1");
 }
@@ -720,7 +765,7 @@ function renderGreeting(snapshot, email, displayName) {
     const local = (email || "").split("@")[0] || "";
     firstName = local.charAt(0).toUpperCase() + local.slice(1);
   }
-  document.getElementById("greeting-title").textContent = `${greetingByHour()}, ${firstName} 👋`;
+  document.getElementById("greeting-title").textContent = `${greetingByHour()}, ${firstName}`;
 
   const recent = (snapshot.recent_launches || []).filter(r => r.tipo !== "criar_caixinha");
   const last = recent[0];
@@ -737,8 +782,18 @@ function renderGreeting(snapshot, email, displayName) {
 
 /* ─── Render: stat cards ──────────────────────────────────────────────── */
 function renderStats(snapshot, history) {
-  // Saldo
-  document.getElementById("stat-balance").textContent = fmtBRL(snapshot.balance || 0);
+  // Saldo — espelha o Dashboard: Carteira (manual) + Bancos conectados (Open Finance).
+  // Antes mostrava só `balance`, ignorando `of_bank_balance`, e divergia do dashboard.
+  const carteira = Number(snapshot.balance || 0);
+  const ofBank   = Number(snapshot.of_bank_balance || 0);
+  const saldoAtual = carteira + ofBank;
+  document.getElementById("stat-balance").textContent = fmtBRL(saldoAtual);
+  const balSub = document.getElementById("stat-balance-sub");
+  if (balSub) {
+    balSub.textContent = (Number(snapshot.of_bank_count || 0) > 0)
+      ? `Carteira ${fmtBRL(carteira)} · Bancos ${fmtBRL(ofBank)}`
+      : "Conta corrente";
+  }
 
   // Gastos do mês + delta vs mês anterior
   const expense = snapshot.monthly_expense || 0;
@@ -831,9 +886,9 @@ function renderAlerts(snapshot) {
                  : `vence em <strong>${days} dias</strong>`;
   banner.innerHTML = `
     <div class="alert-body">
-      <div class="alert-icon">${isOverdue ? "🚨" : "⚠️"}</div>
+      <div class="alert-icon">${isOverdue ? '<i class="ph ph-warning-circle" aria-hidden="true"></i>' : '<i class="ph ph-warning" aria-hidden="true"></i>'}</div>
       <div class="alert-text">
-        Fatura <strong>${escapeHtml(c.name)}</strong> de ${monthName} ${dueLabel} — ${fmtBRL(c.due_amount || 0)} em aberto
+        Fatura <strong>${escapeHtml(c.name)}</strong> de ${monthName} ${dueLabel}, ${fmtBRL(c.due_amount || 0)} em aberto
       </div>
     </div>
     <div class="alert-actions">
@@ -890,7 +945,7 @@ function renderOnboarding(snapshot, profile) {
       <div class="ob-list">
         ${items.map(i => `
           <div class="ob-item ${i.done ? "done" : "todo"}" ${i.action === "whatsapp" ? `onclick="connectWhatsAppFromHome(event)"` : ""}>
-            <div class="ob-check">${i.done ? "✓" : ""}</div>
+            <div class="ob-check">${i.done ? '<i class="ph ph-check" aria-hidden="true"></i>' : ""}</div>
             <div class="ob-text">
               <div class="ob-text-title">${i.title}</div>
               ${(!i.done && i.hint) ? `<div class="ob-text-hint">${i.hint}</div>` : ""}
@@ -928,7 +983,7 @@ function renderActivity(snapshot) {
     const sign = isReceita ? "+" : "-";
     const desc = r.alvo || r.nota || "—";
     const cat  = r.categoria || (isReceita ? "outros" : "geral");
-    const emoji = isReceita ? "📥" : (isCredito ? "💳" : "💸");
+    const emoji = isReceita ? '<i class="ph ph-trend-up" aria-hidden="true"></i>' : (isCredito ? '<i class="ph ph-credit-card" aria-hidden="true"></i>' : '<i class="ph ph-trend-down" aria-hidden="true"></i>');
     return `
       <div class="activity-row">
         <div class="activity-time">${fmtLaunchTimeHome(r)}</div>
@@ -954,36 +1009,308 @@ function escapeHtml(s) {
 }
 
 /* ─── Profile flags (whatsapp linked) ─────────────────────────────────── */
-async function loadAuthMe() {
+async function loadAuthMe(timeoutMs) {
+  // timeoutMs (opcional): aborta o fetch — sem isso um /auth/me travado ficaria
+  // pendente pra sempre e seguraria o loop de confirmação além do deadline
+  // (a tela "confirmando…" nunca fecharia). Usado só no poll pós-checkout.
+  const ctrl = timeoutMs ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
   try {
-    const res = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
+    const res = await fetch(`${API}/auth/me`, {
+      credentials: "same-origin",
+      ...(ctrl ? { signal: ctrl.signal } : {}),
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch { return null; }
+  finally { if (timer) clearTimeout(timer); }
+}
+
+/* "Assentou" = o webhook checkout.session.completed já ATIVOU o plano pago que
+   a pessoa acabou de comprar. O sinal DIRETO e único em TODAS as configs é o
+   plano gravado em auth_accounts.plan (me.plan): o webhook o troca de 'free'
+   pro tier comprado (inclui trial, que já grava o plano pago). O checkout só
+   nasce pra quem vai de free→pago, então plan != 'free' = assentou.
+
+   Espelha _paid_plan_active do servidor: precisa ser não-free E vigente —
+   plan_expires_at nulo = vitalício, senão tem de estar no futuro. Sem o check
+   de validade, uma conta com plan pago EXPIRADO (webhook de cancelamento
+   perdido) — que o servidor trata como Free e por isso deixa reabrir o
+   checkout — seria dada como assentada antes do NOVO webhook cair.
+
+   Por que NÃO os proxies que tentei antes (cada um furou uma config/coorte):
+     - app_access:          true sem assinatura no V2, e no legado com paywall
+                            off / conta allowlisted → assentava cedo;
+     - needs_plan_selection: já vem false pra quem escolheu Grátis antes de
+                            fazer upgrade → assentava cedo;
+     - plan_tier:           só existe no V2 (None no legado). */
+function _checkoutSettled(me) {
+  if (!me || !me.plan || String(me.plan).toLowerCase() === "free") return false;
+  if (me.plan_expires_at == null) return true;           // vitalício
+  return new Date(me.plan_expires_at) > new Date();      // vigente (não expirado)
+}
+
+/* Overlay de confirmação: aberto síncronamente no topo do init (antes de
+   qualquer await) e fechado em TODOS os caminhos de saída. Enquanto aberto,
+   cobre o welcome modal, ninguém navega pro /app sem o bypass.
+
+   O elemento mora no TOPO do <body> (e as regras no <style> do <head>) porque
+   este open roda durante o parse: no fim do documento ele não existiria ainda.
+   O console.warn é proposital, se alguém mover a div de volta pro fim, o bug
+   volta a ser um no-op silencioso, e silêncio aqui já custou uma rodada. */
+/* Guarda de Tab: com o overlay no ar, o teclado não pode alcançar a página
+   atrás. Em CAPTURA e engolindo a tecla — o `inert` abaixo já resolve nos
+   navegadores que o suportam, isto é o backstop pros que não. Sem os dois, o
+   Tab chega nos links do header e o Enter navega pro /app SEM ?upgrade=success,
+   caindo no gate que manda quem pagou pra /precos — a corrida que este PR
+   existe pra fechar. Não há nada focável dentro do overlay, então prender o
+   foco nele é o comportamento certo pra uma tela de espera. */
+function _ccOnKey(e) {
+  if (e.key !== "Tab") return;
+  const el = document.getElementById("checkout-confirm-overlay");
+  if (!el || !el.classList.contains("open")) return;
+  e.preventDefault();
+  e.stopPropagation();
+  el.focus({ preventScroll: true });
+}
+
+/* `inert` no resto do documento: tira do Tab e do leitor de tela tudo que não
+   é o overlay. Guardamos quem NÓS marcamos, pra não desmarcar o que já era
+   inerte por outro motivo. */
+function _ccSetInert(ligar) {
+  const ov = document.getElementById("checkout-confirm-overlay");
+  if (!ov || !document.body) return;
+  for (const filho of document.body.children) {
+    if (filho === ov || filho.tagName === "SCRIPT") continue;
+    if (ligar) {
+      if (!filho.hasAttribute("inert")) { filho.setAttribute("inert", ""); filho.dataset.ccInert = "1"; }
+    } else if (filho.dataset.ccInert) {
+      filho.removeAttribute("inert"); delete filho.dataset.ccInert;
+    }
+  }
+}
+
+function _openCheckoutOverlay() {
+  const el = document.getElementById("checkout-confirm-overlay");
+  if (!el) { console.warn("[checkout] overlay ausente no DOM, ordem do documento quebrada"); return; }
+  el.classList.add("open");
+  el.focus({ preventScroll: true });
+  document.addEventListener("keydown", _ccOnKey, true);
+
+  /* O inert precisa de DUAS passadas. Esta função roda no topo do init, antes
+     de QUALQUER await — que é o ponto certo pro overlay, mas cedo demais pro
+     inert: nesse instante o <body> ainda está sendo parseado e
+     document.body.children tem só os primeiros elementos (medido: 2 de 7). A
+     segunda passada, no DOMContentLoaded, alcança o resto. A guarda de Tab
+     acima cobre a janela entre as duas, e é ela que impede o vazamento de
+     teclado de fato; o inert é pra tecnologia assistiva. */
+  _ccSetInert(true);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => {
+      if (el.classList.contains("open")) _ccSetInert(true);
+    }, { once: true });
+  }
+}
+function _closeCheckoutOverlay() {
+  const el = document.getElementById("checkout-confirm-overlay");
+  if (!el) return;
+  const estavaAberto = el.classList.contains("open");
+  el.classList.remove("open");
+  // desfaz a prisão do teclado ANTES de avisar quem espera: o próximo passo é
+  // o modal de boas-vindas, que precisa poder receber foco
+  document.removeEventListener("keydown", _ccOnKey, true);
+  _ccSetInert(false);
+  /* Avisa quem estava esperando pra só então celebrar. O modal de boas-vindas
+     não pode abrir por baixo desta tela: o z-index barra o MOUSE, mas não o
+     teclado — o openWelcomePro foca o diálogo e instala o trap, então Tab+Enter
+     ativariam "Abrir o dashboard" por baixo do overlay, indo pro /app sem
+     ?upgrade=success, onde o gate manda quem pagou de volta pra /precos. */
+  if (estavaAberto) document.dispatchEvent(new Event("pb:checkout-confirmado"));
+}
+
+/* Deadline ÚNICO do retorno de checkout. Nasce no topo do init, junto com o
+   overlay, antes do /auth/validate, e vale pra TODAS as requests que rodam
+   com o overlay levantado. Se ele nascesse só dentro de awaitCheckoutConfirmation
+   (como antes), um /auth/validate travado nunca chegaria lá: a tela "confirmando
+   pagamento…" ficaria pendente pra sempre, sem fail-open.
+   0 = fora do fluxo de checkout (nenhum limite extra no fluxo normal). */
+let _checkoutDeadline = 0;
+function _checkoutBudget(max) {
+  const left = _checkoutDeadline - Date.now();
+  return Math.min(max, Math.max(1000, left));   // piso de 1s: request de 0ms não serve pra nada
+}
+
+/* Corre uma promise de request contra o relógio. Precisa do Promise.race além
+   do AbortController porque o wrapper global (auth-refresh.js:44) renova via
+   /auth/refresh com _origFetch SEM signal, o abort do caller não alcança essa
+   renovação, então só o timer garante o teto. */
+function _raceBudget(promise, budgetMs, onTimeout) {
+  return Promise.race([
+    promise,
+    new Promise((r) => setTimeout(() => r(onTimeout), budgetMs)),
+  ]);
+}
+
+/* Um /auth/me limitado: aborta o fetch direto (AbortController) E corre contra
+   o timer, pelo motivo acima. Nunca bloqueia mais que budgetMs. */
+function _boundedAuthMe(budgetMs) {
+  return _raceBudget(loadAuthMe(budgetMs), budgetMs, null);
+}
+
+/* O /auth/validate do retorno de checkout, sob o mesmo teto. Devolve a Response
+   ou null (estourou / falhou), o caller trata null como sessão inválida, que já
+   era o caminho de um validate !ok.
+   O .catch() é obrigatório: sem ele, um abort ou erro de rede que chegue DEPOIS
+   do timer ter vencido a corrida vira unhandled rejection no console. */
+function _boundedValidate(budgetMs) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), budgetMs);
+  const req = fetch(`${API}/auth/validate`, { credentials: "same-origin", signal: ctrl.signal })
+    .catch(() => null)
+    .finally(() => clearTimeout(timer));
+  return _raceBudget(req, budgetMs, null);
+}
+
+/* Retorno do checkout (?upgrade=success): o webhook pode estar em trânsito.
+   Roda a sequência de perfil, fetch inicial + polls, sob o deadline ÚNICO
+   criado no topo do init (_checkoutDeadline), cada request limitada por
+   _boundedAuthMe. O tempo já gasto no /auth/validate sai deste mesmo orçamento:
+   o teto de ~20s vale da abertura do overlay até o fail-open, não por etapa.
+
+   O overlay JÁ ESTÁ aberto quando esta função roda (aberto no topo do init,
+   antes até do /auth/validate) — aqui só o fechamos ao terminar.
+
+   FAIL-OPEN: no fim devolve o último `me` (pode ser null) e deixa seguir —
+   nunca prende quem pagou numa tela de espera nem o joga pra /precos. */
+async function awaitCheckoutConfirmation() {
+  const deadline = _checkoutDeadline;   // criado no init, antes do /auth/validate
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  let me = null;
+  try {
+    while (Date.now() < deadline) {
+      const budget = Math.min(6000, Math.max(1000, deadline - Date.now()));
+      const fresh = await _boundedAuthMe(budget);
+      if (fresh) me = fresh;
+      if (_checkoutSettled(me)) break;          // webhook caiu
+      if (Date.now() >= deadline) break;
+      await wait(1500);
+    }
+  } finally {
+    _closeCheckoutOverlay();
+  }
+  return me;
 }
 
 /* ─── Access error ────────────────────────────────────────────────────── */
 function showAccessError() {
+  // O welcome modal ("Bora ver o que tu desbloqueou") é aberto por outra IIFE,
+  // 450ms depois do retorno de checkout, sem saber como a validação terminou.
+  // Se a sessão não vale, ele fica de celebração POR CIMA do "Acesso restrito"
+  // e continua clicável, levando pro /app. Medido no harness: com o overlay já
+  // fechado, elementFromPoint no botão devolvia .welcome-pro-btn-primary.
+  // Erro de acesso e celebração são estados mutuamente exclusivos.
+  //
+  // São DUAS pontas, porque a ordem varia: se o erro chega DEPOIS dos 450ms,
+  // o modal já está aberto e o remove() abaixo resolve; se chega ANTES, não há
+  // o que remover e quem tem de desistir é o timeout, daí a flag, lida lá.
+  window._pbAccessDenied = true;
+  document.getElementById("welcome-pro-overlay")?.classList.remove("open");
   document.getElementById("page-root").innerHTML = `
     <div class="access-error">
-      <h2>🔒 Acesso restrito</h2>
+      <h2><i class="ph ph-lock" aria-hidden="true"></i> Acesso restrito</h2>
       <p>Sua sessão expirou ou você não está autenticado.</p>
       <a class="btn-pill primary" href="/">Entrar</a>
     </div>
   `;
 }
 
+/* ─── Instant-paint via sessionStorage ────────────────────────────────────
+   O app troca /home <-> /app com reload de página inteira; sem isso a tela
+   Início mostrava skeleton e esperava /data + /history a cada abertura.
+   Guardamos o último resultado em sessionStorage (some ao fechar o app; nada
+   gravado no disco a longo prazo) e pintamos na hora, revalidando em seguida. */
+const _HOME_CACHE_PREFIX = "pb_home_";
+function _homeCacheKey(userId) { return _HOME_CACHE_PREFIX + userId; }
+function persistHomeCache(userId, snapshot, history, email, displayName) {
+  if (!userId) return;
+  try {
+    sessionStorage.setItem(_homeCacheKey(userId),
+      JSON.stringify({ userId, snapshot, history, email, displayName }));
+  } catch {}
+}
+// Restaura SÓ do usuário já validado (chave escopada ao userId) — nunca pinta
+// dados de outra conta que tenha usado a mesma aba, mesmo se um logout por
+// Dashboard/Settings não tiver limpado esta chave.
+function restoreHomeCache(userId) {
+  if (!userId) return;
+  try {
+    const raw = sessionStorage.getItem(_homeCacheKey(userId));
+    if (!raw) return;
+    const c = JSON.parse(raw);
+    if (!c || !c.snapshot || String(c.userId) !== String(userId)) return;
+    // Só os renders que dependem de snapshot/history (não de `me`/plano): a
+    // passagem fresca logo abaixo revalida e completa (onboarding, banner).
+    renderGreeting(c.snapshot, c.email || "", c.displayName || "");
+    renderStats(c.snapshot, c.history || []);
+    renderAlerts(c.snapshot);
+    renderActivity(c.snapshot);
+  } catch {}
+}
+function clearHomeCache() {
+  try {
+    Object.keys(sessionStorage).forEach(k => {
+      if (k.startsWith(_HOME_CACHE_PREFIX) || k.startsWith("pb_snap_")) sessionStorage.removeItem(k);
+    });
+  } catch {}
+}
+
 /* ─── Init ────────────────────────────────────────────────────────────── */
+let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
 (async () => {
+  // Captura o ?upgrade=success ANTES de qualquer await: o handleUpgradeReturn()
+  // (outra IIFE) apaga esse param da URL via replaceState, e como aqui há awaits
+  // (/auth/validate, /auth/me) ele pode sumir antes de a gente ler — o que
+  // jogaria quem ACABOU de pagar pra /precos (webhook ainda pendente).
+  const _justUpgraded = new URLSearchParams(location.search).get("upgrade") === "success";
+
+  // No retorno de checkout, o relógio e o overlay sobem AQUI, síncrono, antes
+  // de QUALQUER await (inclusive o /auth/validate abaixo). É o ponto mais cedo
+  // possível, e os dois nascem JUNTOS de propósito: tudo que roda com o overlay
+  // levantado tem de estar sob o mesmo teto. Enquanto ele estiver aberto
+  // (z-index acima do welcome modal que o handleUpgradeReturn abre em 450ms), o
+  // "Abrir o dashboard" não é clicável, então ninguém navega pro /app sem o bypass
+  // ?upgrade=success e cai no gate.
+  // Fechado por _closeCheckoutOverlay() em TODOS os caminhos de saída.
+  if (_justUpgraded) {
+    _checkoutDeadline = Date.now() + 20000;   // ~20s da abertura do overlay até o fail-open
+    _openCheckoutOverlay();
+  }
+
   // 1) Valida sessão
   let userId = 0;
   let validateData = null;
   try {
-    const r = await fetch(`${API}/auth/validate`, { credentials: "same-origin" });
-    if (!r.ok) { showAccessError(); return; }
-    validateData = await r.json();
+    // No retorno de checkout esta request entra no orçamento compartilhado: um
+    // /auth/validate travado (ou o /auth/refresh que o wrapper dispara e que não
+    // herda signal) deixaria o overlay pendente pra sempre, sem nunca alcançar o
+    // fail-open lá embaixo. Fora do checkout segue sem limite, como antes.
+    const r = _justUpgraded
+      ? await _boundedValidate(_checkoutBudget(8000))
+      : await fetch(`${API}/auth/validate`, { credentials: "same-origin" });
+    if (!r || !r.ok) { _closeCheckoutOverlay(); showAccessError(); return; }
+    // A leitura do corpo é a MESMA request: headers podem ter chegado e o body
+    // travar. Sem teto aqui o overlay ficaria pendente do mesmo jeito.
+    validateData = _justUpgraded
+      ? await _raceBudget(r.json().catch(() => null), _checkoutBudget(3000), null)
+      : await r.json();
+    if (!validateData) { _closeCheckoutOverlay(); showAccessError(); return; }
     userId = USER_ID = validateData.user_id;
-  } catch { showAccessError(); return; }
+  } catch { _closeCheckoutOverlay(); showAccessError(); return; }
+
+  // Paint instantâneo: com o USER_ID já validado, pinta o cache DESSE usuário
+  // na hora (troca de aba /home <-> /app), antes de /auth/me + /data + /history.
+  // O fluxo abaixo revalida e substitui pelos dados frescos.
+  restoreHomeCache(USER_ID);
 
   // 1.5) Onboarding MFA: aparece UMA vez para usuarios sem MFA ativado.
   // Esta e a primeira tela apos login, entao e o ponto certo para incentivar.
@@ -997,8 +1324,17 @@ function showAccessError() {
   // 2.5) Paywall: checa acesso ANTES de carregar os dados. As rotas de dados
   // devolvem 402 sem assinatura, o que cairia no "Erro ao carregar"; já /auth/me
   // não é gated e sempre carrega. Exceção: ?upgrade=success (webhook em trânsito).
-  const me = await loadAuthMe();
-  const _justUpgraded = new URLSearchParams(location.search).get("upgrade") === "success";
+  // No retorno de checkout (?upgrade=success) TODA a sequência de perfil (fetch
+  // inicial + polls) roda dentro de awaitCheckoutConfirmation, sob um único
+  // deadline (~20s) e com cada request limitada — nenhuma pode segurar o
+  // fail-open. Fora desse caso, o fluxo normal (loadAuthMe sem timeout).
+  let me = _justUpgraded ? await awaitCheckoutConfirmation() : await loadAuthMe();
+  // Gate de escolha de plano: cadastro novo tem que passar pela /precos e
+  // escolher um plano (mesmo o Grátis) antes de entrar no dashboard.
+  if (me && me.needs_plan_selection && !_justUpgraded && !window.PB_IN_APP) {
+    window.location.replace("/precos?escolha=1");
+    return;
+  }
   if (me && me.app_access === false && !_justUpgraded) {
     if (window.PB_IN_APP) {
       // App iOS: sem link de compra (diretriz 3.1.1 da App Store)
@@ -1014,7 +1350,18 @@ function showAccessError() {
     return;
   }
 
-  // 3) Carrega snapshot + histórico em paralelo
+  // 3 e 4) Busca + render moram em loadHomeData() porque o "puxar pra
+  // atualizar" do app (app-mode.js) precisa refazer exatamente este pedaço.
+  _homeMe = me;
+  await loadHomeData({ initial: true });
+})();
+
+/* ─── Recarga dos dados da Início ──────────────────────────────────────────
+   Devolve promise: o indicador do puxão fica girando até ela resolver.
+   Guarda o /auth/me da abertura — plano e e-mail não mudam a cada puxão, e
+   refazer essa chamada só atrasaria o gesto. */
+async function loadHomeData({ initial = false } = {}) {
+  const me = _homeMe;
   let snapshot = null, history = [];
   try {
     const [dataRes, histRes] = await Promise.all([
@@ -1026,11 +1373,24 @@ function showAccessError() {
     if (histRes.ok) {
       const hj = await histRes.json();
       history = hj.data || [];
+    } else if (!initial) {
+      // Num puxão, /history falhando não pode virar "sem histórico": o delta
+      // mês-a-mês sumiria da tela e o persist logo abaixo gravaria o vazio por
+      // cima do cache bom. Rejeita — o indicador fica âmbar e nada é tocado.
+      throw new Error("history falhou no refresh");
     }
-  } catch {
+  } catch (err) {
+    // Só a carga inicial troca a tela pelo erro — ali não há nada a perder.
+    //
+    // Num puxão a tela JÁ TEM dado bom. Trocar o #content pelo erro destruiria
+    // ele em definitivo: os renderers procuram elementos que deixariam de
+    // existir, então nem um puxão bem-sucedido depois recuperaria — só
+    // recarregando a página. Mantém o que está na tela e devolve a falha; quem
+    // avisa é o indicador do puxão (app-mode.js pinta o anel de âmbar).
+    if (!initial) throw err;
     document.getElementById("content").innerHTML = `
       <div class="access-error">
-        <h2>⚠️ Erro ao carregar</h2>
+        <h2><i class="ph ph-warning" aria-hidden="true"></i> Erro ao carregar</h2>
         <p>Não foi possível carregar seus dados. Tente novamente em instantes.</p>
         <a class="btn-pill ghost" href="/home">Recarregar</a>
       </div>
@@ -1038,7 +1398,6 @@ function showAccessError() {
     return;
   }
 
-  // 4) Renderiza tudo
   const email = (me && me.email) || PROFILE_EMAIL || "";
   const displayName = (me && me.display_name) || PROFILE_DISPLAY_NAME || "";
   renderGreeting(snapshot, email, displayName);
@@ -1047,7 +1406,19 @@ function showAccessError() {
   renderOnboarding(snapshot, me);
   renderActivity(snapshot);
   renderFreeBanner(me);
-})();
+
+  // Guarda pra próxima abertura pintar na hora (troca de aba /home <-> /app).
+  persistHomeCache(USER_ID, snapshot, history, email, displayName);
+
+  // Contrato com o app-mode.js: quem sabe se refazer expõe PBRefresh — mas só
+  // AGORA, com a carga assentada e render bom na tela. Expor na definição do
+  // script deixava um puxão precoce correr contra a init (validate → me →
+  // primeira carga): a carga velha terminava depois e sobrescrevia a nova.
+  // E se a init morrer antes daqui (sessão inválida, paywall, erro de rede),
+  // o contrato nunca aparece — o puxão cai no reload, que é o que essas telas
+  // de erro pedem. Sem initial: falha de puxão NÃO troca a tela pelo erro.
+  window.PBRefresh = () => loadHomeData();
+}
 
 function renderFreeBanner(me) {
   const banner = document.getElementById("free-banner");
@@ -1139,7 +1510,7 @@ async function mfaOnboardingDismiss() {
 
 <div class="mfa-ob-overlay" id="mfa-onboarding-overlay">
   <div class="mfa-ob-card">
-    <div class="mfa-ob-icon">🔒</div>
+    <div class="mfa-ob-icon"><i class="ph ph-lock" aria-hidden="true"></i></div>
     <h2>Proteja sua conta com 2 etapas</h2>
     <p>
       Adicione uma camada extra de segurança usando um app autenticador
@@ -1165,54 +1536,146 @@ async function mfaOnboardingDismiss() {
 
 <!-- ─── Welcome to PigBank+ (pós-checkout success) ─────────────────────── -->
 <style>
+/* ─── Confirmação de assinatura ────────────────────────────────────────────
+   Redesenhado para falar a mesma língua da página: fundo neutro #111 (e não o
+   azul-marinho de antes, que trazia uma segunda família de cinza), um único
+   acento (o rosa da marca, sem o lima disputando), grão igual ao do body e
+   composição assimétrica em vez de tudo centralizado. */
 .welcome-pro-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,.75);
+  position: fixed; inset: 0; background: rgba(8,8,10,.74);
   display: none; align-items: center; justify-content: center;
-  z-index: 10001; padding: 20px;
-  backdrop-filter: blur(6px);
-  animation: welcomeFade .3s ease;
+  z-index: 10001;
+  /* fixo não herda o padding do body: a área segura entra aqui, nos 4 lados,
+     porque o iPhone também abre esta página em paisagem. */
+  padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right))
+           max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  backdrop-filter: blur(14px) saturate(120%); -webkit-backdrop-filter: blur(14px) saturate(120%);
+  animation: welcomeFade .28s var(--ease);
 }
 .welcome-pro-overlay.open { display: flex; }
 @keyframes welcomeFade { from { opacity: 0; } to { opacity: 1; } }
+
+/* As regras de .checkout-confirm-overlay ficam no <style> do <head>, ver o
+   comentário lá. Não traga de volta pra cá: o script que abre o overlay roda
+   antes deste bloco ser parseado. */
 .welcome-pro-card {
-  width: min(520px, 94vw); padding: 36px 32px 30px;
-  background: linear-gradient(180deg, #1a1d2a, #14161e);
-  border: 1.5px solid rgba(255,45,142,.4);
-  border-radius: 22px; color: rgba(255,255,255,.94);
-  box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 60px rgba(255,45,142,.15);
-  position: relative; overflow: hidden;
-  animation: welcomePop .45s cubic-bezier(.16,1,.3,1);
+  position: relative; overflow: hidden auto;
+  width: min(440px, 100%); max-height: min(86dvh, 760px);
+  padding: 30px 28px 24px;
+  background:
+    radial-gradient(120% 90% at 8% -10%, rgba(255,45,142,.20), transparent 58%),
+    linear-gradient(180deg, #17171A, #121214);
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 26px; color: var(--text);
+  /* sombra tingida com o rosa do fundo, em vez de preto puro */
+  box-shadow: 0 40px 90px -24px rgba(0,0,0,.8),
+              0 24px 70px -34px rgba(255,45,142,.42),
+              inset 0 1px 0 rgba(255,255,255,.10);
+  animation: welcomePop .5s cubic-bezier(.16,1,.3,1);
 }
-@keyframes welcomePop { from { transform: scale(.9) translateY(20px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
-.welcome-pro-card::before {
-  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 4px;
-  background: linear-gradient(90deg,#FF2D8E,#FF7AB8);
+@keyframes welcomePop { from { transform: translateY(14px) scale(.97); opacity: 0; } to { transform: none; opacity: 1; } }
+/* O card recebe foco programático na abertura (tabindex="-1"); anel de foco num
+   container que o usuário não navegou até seria ruído. Os botões mantêm o
+   :focus-visible deles, que é o que importa pro teclado. */
+.welcome-pro-card:focus { outline: none; }
+/* mesmo grão do body::before: sem isto o card fica mais liso que a página */
+.welcome-pro-card::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .5;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
 }
-.welcome-pro-emoji {
-  font-size: 3rem; text-align: center; margin-bottom: 8px;
-  animation: welcomeBounce 1.2s ease infinite alternate;
+.welcome-pro-card > * { position: relative; z-index: 1; }
+
+/* entrada em cascata: transform e opacity só, nada de layout */
+@keyframes wpRise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.welcome-pro-card > * { animation: wpRise .45s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 70ms + 120ms); }
+
+/* Marca oficial (/brand/icon.png), a mesma que o dashboard usa, no lugar do
+   glifo ph-piggy-bank que estava aqui. Ela é rosa sobre transparência, então
+   NÃO leva o quadrado rosa que existia antes: seria rosa sobre rosa e o
+   porquinho sumiria. Fica solta no card, com um brilho no tom dela para não
+   achatar. Observação de marca: o PNG é #FC1863 e o token da página é #FF2D8E,
+   dois rosas diferentes lado a lado. Mantive o arquivo oficial como está, não
+   é papel desta tela recolorir asset de marca. */
+.wp-mark {
+  display: block; height: 48px; width: auto; margin-bottom: 18px;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 22px rgba(252,24,99,.45));
 }
-@keyframes welcomeBounce { from { transform: translateY(0); } to { transform: translateY(-8px); } }
+.wp-eyebrow {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  font-size: .69rem; font-weight: 600; letter-spacing: .15em; text-transform: uppercase;
+  color: var(--text-3); margin-bottom: 10px;
+}
+.wp-chip {
+  color: #FF80B8; background: rgba(255,45,142,.12);
+  border: 1px solid rgba(255,45,142,.28);
+  border-radius: 7px; padding: 3px 8px; letter-spacing: .06em;
+}
 .welcome-pro-card h2 {
-  font-size: 1.6rem; font-weight: 700; text-align: center; margin-bottom: 8px;
-  background: linear-gradient(135deg,#FF2D8E,#FF7AB8);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
+  font-size: clamp(1.5rem, 6vw, 1.85rem); font-weight: 700; line-height: 1.12;
+  letter-spacing: -.028em; color: #fff; text-wrap: balance; margin-bottom: 10px;
 }
-.welcome-pro-sub { font-size: .94rem; color: rgba(255,255,255,.72); text-align: center; line-height: 1.55; margin-bottom: 22px; }
-.welcome-pro-trial { display: inline-flex; align-items: center; gap: 6px; background: rgba(198,241,26,.13); border: 1px solid rgba(198,241,26,.32); color: #C6F11A; padding: 6px 13px; border-radius: 999px; font-size: .76rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; margin: 0 auto 22px; }
-.welcome-pro-feats { display: grid; gap: 10px; margin-bottom: 26px; padding: 16px 18px; background: rgba(255,255,255,.04); border-radius: 14px; border: 1px solid rgba(255,255,255,.06); }
-.welcome-pro-feat { display: flex; align-items: center; gap: 10px; font-size: .87rem; color: rgba(255,255,255,.82); }
-.welcome-pro-feat::before { content: "✓"; color: #C6F11A; font-weight: 800; font-size: 1rem; flex-shrink: 0; }
-.welcome-pro-actions { display: flex; gap: 10px; }
+.wp-sub {
+  font-size: .93rem; font-weight: 400; line-height: 1.6; color: var(--text-2);
+  max-width: 36ch; text-wrap: pretty; margin-bottom: 24px;
+}
+
+/* lista com filetes, sem a caixa com borda e sombra de antes */
+.wp-feats { list-style: none; margin: 0 0 26px; }
+.wp-feats li {
+  /* flex-start, não center: em item de duas linhas o check centralizado pela
+     matemática cai no meio do bloco e lê como desalinhado. O 2px é ajuste
+     óptico pra ele sentar na linha de base da primeira linha. */
+  display: flex; align-items: flex-start; gap: 11px;
+  padding: 11px 0; font-size: .875rem; font-weight: 500; line-height: 1.45;
+  color: rgba(255,255,255,.84);
+  border-top: 1px solid rgba(255,255,255,.07);
+}
+.wp-feats li:last-child { border-bottom: 1px solid rgba(255,255,255,.07); }
+.wp-feats i { color: #FF80B8; font-size: 1rem; flex-shrink: 0; margin-top: 2px; }
+
+.welcome-pro-actions { display: grid; gap: 4px; }
 .welcome-pro-btn-primary {
-  flex: 1; padding: 14px 18px; border-radius: 12px; border: none;
-  background: linear-gradient(135deg,#FF2D8E,#C7186B);
-  color: #fff; font-weight: 700; font-size: .95rem; cursor: pointer;
-  transition: transform .15s, box-shadow .15s;
-  box-shadow: 0 8px 24px rgba(255,45,142,.4);
+  width: 100%; padding: 15px 18px; border-radius: 15px; border: none;
+  background: linear-gradient(135deg, #FF2D8E, #C7186B);
+  color: #fff; font: inherit; font-weight: 600; font-size: .95rem; cursor: pointer;
+  box-shadow: 0 12px 28px -10px rgba(255,45,142,.75), inset 0 1px 0 rgba(255,255,255,.22);
+  transition: transform .18s var(--ease), box-shadow .18s var(--ease), filter .18s var(--ease);
 }
-.welcome-pro-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 12px 30px rgba(255,45,142,.55); }
-.welcome-pro-card .center { text-align: center; }
+.welcome-pro-btn-primary:hover { transform: translateY(-1px); filter: brightness(1.06); box-shadow: 0 18px 36px -12px rgba(255,45,142,.85), inset 0 1px 0 rgba(255,255,255,.22); }
+.welcome-pro-btn-primary:active { transform: translateY(0) scale(.985); box-shadow: 0 8px 18px -10px rgba(255,45,142,.7), inset 0 1px 0 rgba(255,255,255,.18); }
+.wp-btn-ghost {
+  width: 100%; padding: 12px; border: none; background: none;
+  /* --text-2 e não --text-3: com alpha .32 o controle ficava com contraste
+     baixo demais pra algo clicável. */
+  color: var(--text-2); font: inherit; font-size: .855rem; font-weight: 500; cursor: pointer;
+  border-radius: 12px; transition: color .18s var(--ease), background .18s var(--ease);
+}
+.wp-btn-ghost:hover { color: var(--text); background: rgba(255,255,255,.04); }
+.wp-btn-ghost:active { transform: scale(.99); }
+.welcome-pro-btn-primary:focus-visible,
+.wp-btn-ghost:focus-visible { outline: 2px solid #FF80B8; outline-offset: 3px; }
+
+/* Telas baixas (iPhone SE e paisagem): sem isto o card passa da altura máxima,
+   entra em rolagem interna e o "Ficar na Início" fica escondido abaixo da dobra,
+   ou seja, a saída do modal some justamente em quem tem menos tela. Medido a
+   375x667: 640px de conteúdo contra 572px úteis. */
+@media (max-height: 720px) {
+  .welcome-pro-card { padding: 22px 24px 18px; }
+  .wp-mark { height: 40px; margin-bottom: 12px; }
+  .welcome-pro-card h2 { font-size: 1.4rem; }
+  .wp-sub { font-size: .89rem; margin-bottom: 14px; }
+  .wp-feats { margin-bottom: 14px; }
+  .wp-feats li { padding: 7px 0; }
+  .wp-eyebrow { margin-bottom: 8px; }
+}
+
+/* quem pediu menos movimento não leva cascata nem quique */
+@media (prefers-reduced-motion: reduce) {
+  .welcome-pro-overlay, .welcome-pro-card, .welcome-pro-card > * { animation: none; }
+  .welcome-pro-btn-primary, .wp-btn-ghost { transition-duration: .01ms; }
+  .welcome-pro-btn-primary:hover { transform: none; }
+}
 
 /* Toast melhorado pra cancelamento — maior, mais cativante, dura mais */
 .upgrade-toast {
@@ -1234,22 +1697,21 @@ async function mfaOnboardingDismiss() {
 </style>
 
 <div class="welcome-pro-overlay" id="welcome-pro-overlay">
-  <div class="welcome-pro-card">
-    <div class="welcome-pro-emoji">🐷✨</div>
-    <h2>Tá dentro do PigBank+!</h2>
-    <p class="welcome-pro-sub">Bora ver o que tu desbloqueou, parceiro?<br/>Os 30 dias grátis começam agora — só tem cobrança depois.</p>
-    <div class="center"><div class="welcome-pro-trial">🎉 30 dias grátis</div></div>
-    <div class="welcome-pro-feats">
-      <div class="welcome-pro-feat">Caixinhas e cartões sem limite</div>
-      <div class="welcome-pro-feat">Investimentos com IR e IOF no automático</div>
-      <div class="welcome-pro-feat">Histórico completo + exportar CSV</div>
-      <div class="welcome-pro-feat">Importar extrato e fatura por OFX</div>
-      <div class="welcome-pro-feat">Piggy IA — converse sobre suas finanças</div>
-    </div>
-    <div class="welcome-pro-actions">
-      <button class="welcome-pro-btn-primary" type="button" onclick="goExplorePro()">
-        Bora explorar →
-      </button>
+  <!-- tabindex="-1": o foco de abertura vem pro container, não pro botão do fim
+       do card (ver openWelcomePro). Fora do Tab natural, só programático. -->
+  <div class="welcome-pro-card" role="dialog" aria-modal="true" aria-labelledby="wp-title" tabindex="-1">
+    <img class="wp-mark" style="--i:0" src="/brand/icon.png?v=1" alt="" aria-hidden="true"
+         width="45" height="48" />
+    <p class="wp-eyebrow" style="--i:1">
+      Assinatura confirmada
+      <span class="wp-chip" id="wp-chip" hidden></span>
+    </p>
+    <h2 id="wp-title" style="--i:2">Tá dentro do PigBank+</h2>
+    <p class="wp-sub" id="wp-sub" style="--i:3"></p>
+    <ul class="wp-feats" id="wp-feats" style="--i:4"></ul>
+    <div class="welcome-pro-actions" style="--i:5">
+      <button class="welcome-pro-btn-primary" type="button" onclick="goExplorePro()">Abrir o dashboard</button>
+      <button class="wp-btn-ghost" type="button" onclick="dismissWelcomePro()">Ficar na Início</button>
     </div>
   </div>
 </div>
@@ -1257,31 +1719,257 @@ async function mfaOnboardingDismiss() {
 <div class="upgrade-toast" id="upgrade-cancel-toast" role="status"></div>
 
 <script>
+/* O modal é um dialog de verdade agora: prende o Esc, o clique fora e devolve o
+   foco pra quem o tinha antes. Sair daqui NUNCA cobra nada e nunca muda plano,
+   só decide se a pessoa vai pro dashboard ou fica na Início. */
+let _wpLastFocus = null;
+
+/* "Cota ampliada" já não mentia, mas também não informava: o assinante fica
+   sem saber quantas mensagens comprou, e é justamente o número que decide se
+   ele vai esbarrar no teto. O `ia` do success_url resolve isso pelo mesmo
+   caminho que o `td` já tinha aberto — o argumento de que o valor "vem de env"
+   é o motivo de ele viajar na URL, não de ele sumir da tela. Sem `ia` (link
+   antigo, anterior ao parâmetro) a frase genérica continua valendo. */
+function _wpFeatIA(ia) {
+  return Number.isFinite(ia) && ia > 0
+    ? `Piggy IA: ${ia.toLocaleString("pt-BR")} mensagens por mês`
+    : "Piggy IA com cota ampliada";
+}
+
+/* O checkout vende TRÊS planos (essencial, plus, pro), e a tela parabenizava
+   todo mundo pelo Plus: quem pagou Essencial via prometido o que não comprou, e
+   quem pagou Pro era recebido como o plano de metade do preço.
+
+   Os itens de cada tier saem do que EXISTE em core/services/plan_limits.py
+   (bancos de Open Finance, energia de agentes, cota da IA, janela de histórico),
+   e não da /precos: aquela página anuncia previsão de saldo, caça-assinaturas e
+   cobranças duplicadas, que não têm implementação nenhuma no repositório. Tela
+   de confirmação de pagamento não é lugar de promessa que ainda não roda.
+
+   E "None" no plan_limits NÃO quer dizer ilimitado em todo campo, tem de ser
+   conferido um por um até onde o limite é aplicado:
+     - pockets_max / cards_max None: retorna sem checar (plan_service.py:440),
+       ilimitado de verdade;
+     - ai_monthly_messages None: cai no teto GLOBAL AI_CHAT_MONTHLY_LIMIT
+       (1000/mês por padrão) em ai_monthly_limit_for (plan_service.py:398), e o
+       runner recusa depois disso. Por isso Plus e Pro NÃO dizem "sem limite":
+       eles só escapam da cota de 200 do Essencial, não do teto da casa. */
+const WP_PLANOS = {
+  essencial: {
+    nome: "PigBank Essencial",
+    feats: () => [
+      "Conecte 1 banco pelo Open Finance",
+      "Lance por áudio, foto do cupom ou OFX",
+      "Caixinhas, metas e cartões sem limite",
+      "Boletos com lembrete de vencimento",
+    ],
+  },
+  plus: {
+    nome: "PigBank+",
+    feats: (ia) => [
+      "Conecte 2 bancos pelo Open Finance",
+      "Ligue seus agentes: energia para até 3",
+      _wpFeatIA(ia),
+      "Histórico de 12 meses, com tudo do Essencial",
+    ],
+  },
+  pro: {
+    nome: "PigBank Pro",
+    feats: (ia) => [
+      "Conecte até 5 bancos pelo Open Finance",
+      "Rode a equipe toda: energia para os 7 agentes",
+      _wpFeatIA(ia),
+      "Histórico de 24 meses, com tudo do Plus",
+    ],
+  },
+};
+
+function openWelcomePro({ trial = true, days = 30, plano = "plus", ia = null } = {}) {
+  const ov = document.getElementById("welcome-pro-overlay");
+  if (!ov) return;
+
+  // `plano` vem da URL, então nunca entra em HTML: só serve de chave do mapa, e
+  // valor desconhecido cai no Plus, que era o texto único de antes.
+  const cfg = WP_PLANOS[String(plano).toLowerCase()] || WP_PLANOS.plus;
+  document.getElementById("wp-title").textContent = `Tá dentro do ${cfg.nome}`;
+  const ul = document.getElementById("wp-feats");
+  ul.replaceChildren(...cfg.feats(ia).map((texto) => {
+    const li = document.createElement("li");
+    const ico = document.createElement("i");
+    ico.className = "ph ph-check";
+    ico.setAttribute("aria-hidden", "true");
+    li.append(ico, " " + texto);   // textContent: nada daqui vira markup
+    return li;
+  }));
+
+  // A cópia muda com o que o backend mandou no success_url. Sem isso, quem
+  // assina SEM direito a período grátis (ev=purchase, já usou o trial antes)
+  // lia "seus 30 dias grátis começam agora", que é falso pra essa pessoa.
+  const chip = document.getElementById("wp-chip");
+  const sub = document.getElementById("wp-sub");
+  if (trial) {
+    chip.textContent = `${days} dias grátis`;
+    chip.hidden = false;
+    sub.textContent = `Seus ${days} dias grátis começam agora. A primeira cobrança só vem depois disso, e dá pra cancelar quando quiser.`;
+  } else {
+    chip.hidden = true;
+    sub.textContent = "Sua assinatura já está ativa. Dá pra cancelar quando quiser, direto nas configurações.";
+  }
+
+  _wpLastFocus = document.activeElement;
+  ov.classList.add("open");
+
+  /* O card tem `overflow: hidden auto` e `max-height: min(86dvh, 760px)`: quando
+     o conteúdo não cabe, ele rola por dentro. Focar o botão primário, que fica
+     no fim, fazia o navegador rolar o card ATÉ ELE — a tela abria com o título e
+     a cópia da confirmação acima da área visível. Medido em paisagem no
+     Chromium (o Info.plist habilita paisagem no iPhone): a 812x375 o card abria
+     com scrollTop 167 de 489px de conteúdo, com o título 50px acima do topo
+     visível; a 844x390, scrollTop 155.
+
+     O foco de abertura vai pro container, com preventScroll, e o scroll é
+     zerado na mão. Isso resolve duas coisas de uma vez: a tela abre pelo começo,
+     e o leitor de tela anuncia o diálogo pelo aria-labelledby em vez de começar
+     no meio, por um botão. O primeiro Tab leva ao botão primário normalmente. */
+  const card = ov.querySelector(".welcome-pro-card");
+  if (card) {
+    card.scrollTop = 0;
+    card.focus({ preventScroll: true });
+  }
+  document.addEventListener("keydown", _wpOnKey);
+}
+
+function _wpOnKey(e) {
+  if (e.key === "Escape") { dismissWelcomePro(); return; }
+  if (e.key !== "Tab") return;
+
+  // aria-modal="true" AFIRMA pro leitor de tela que o resto da página não está
+  // disponível. Sem prender o Tab isso é mentira: o teclado sai do card e vai
+  // parar nos links do header atrás do overlay, que o mouse não alcança. Ou se
+  // prende o foco, ou se tira o aria-modal. Prender é o certo aqui.
+  const card = document.querySelector(".welcome-pro-card");
+  if (!card) return;
+  const alvos = card.querySelectorAll(
+    'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])');
+  if (!alvos.length) return;
+
+  const primeiro = alvos[0];
+  const ultimo = alvos[alvos.length - 1];
+  const atual = document.activeElement;
+  const foraDoCard = !card.contains(atual);
+  // O card em si recebe o foco na abertura (tabindex="-1"). Ele conta como
+  // ANTES do primeiro alvo: sem isto o Shift+Tab logo na abertura não seria
+  // interceptado — card.contains(card) é true — e o foco vazava pra página
+  // atrás do overlay, justamente o que este trap existe pra impedir.
+  const noContainer = atual === card;
+
+  // Volta pra dentro nos dois sentidos, inclusive quando o foco já escapou
+  // (clique no fundo, foco perdido no body).
+  if (e.shiftKey && (atual === primeiro || foraDoCard || noContainer)) {
+    e.preventDefault();
+    ultimo.focus();
+  } else if (!e.shiftKey && (atual === ultimo || foraDoCard || noContainer)) {
+    e.preventDefault();
+    primeiro.focus();
+  }
+}
+
+function _wpClose() {
+  document.getElementById("welcome-pro-overlay")?.classList.remove("open");
+  document.removeEventListener("keydown", _wpOnKey);
+}
+
+function dismissWelcomePro() {
+  _wpClose();
+  // devolve o foco pra onde estava, senão o teclado volta pro topo da página
+  if (_wpLastFocus && document.contains(_wpLastFocus)) _wpLastFocus.focus();
+}
+
 function goExplorePro() {
-  document.getElementById("welcome-pro-overlay").classList.remove("open");
+  _wpClose();
   window.location.href = "/app";
 }
+
+// clique no fundo escuro fecha; clique dentro do card não
+document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) => {
+  if (e.target === e.currentTarget) dismissWelcomePro();
+});
 
 (function handleUpgradeReturn() {
   const params = new URLSearchParams(window.location.search);
   const status = params.get("upgrade");
+  const sid = params.get("sid");  // id da sessão Stripe → event_id do evento
+  const ev = params.get("ev");    // "trial" | "purchase" (definido pelo success_url)
+  const td = params.get("td");    // dias de trial concedidos (0 quando ev=purchase)
+  const pl = params.get("pl");    // plano escolhido: essencial | plus | pro
+  const ia = params.get("ia");    // cota mensal de mensagens da Piggy nesse plano
   if (!status) return;
 
-  // Limpa o query param da URL pra nao reaparecer em refresh.
+  // Limpa os query params da URL pra nao reaparecer em refresh.
   const cleanUrl = new URL(window.location.href);
   cleanUrl.searchParams.delete("upgrade");
+  cleanUrl.searchParams.delete("sid");
+  cleanUrl.searchParams.delete("ev");
+  cleanUrl.searchParams.delete("td");
+  cleanUrl.searchParams.delete("pl");
+  cleanUrl.searchParams.delete("ia");
   window.history.replaceState({}, "", cleanUrl.toString());
 
   if (status === "success") {
-    // Pequeno delay pra dar o "wow effect" depois da pagina carregar
+    // Conversão pro Meta Ads — só dispara com `sid` (id real da sessão de
+    // checkout que a Stripe injeta no success_url). Sem sid = alguém abriu a URL
+    // na mão → não conta. `ev` diz se foi início de trial (StartTrial) ou compra
+    // imediata sem trial (Purchase). A fonte de verdade é o server-side (CAPI);
+    // este é só o sinal do navegador, deduplicado pelo mesmo eventID.
+    if (window.fbq && sid) {
+      if (ev === "trial") {
+        fbq("track", "StartTrial", { currency: "BRL" }, { eventID: "trial_" + sid });
+      } else {
+        fbq("track", "Purchase", { currency: "BRL" }, { eventID: "purchase_" + sid });
+      }
+    }
+    // Pequeno delay pra dar o "wow effect" depois da pagina carregar.
+    // `ev` ausente cai no texto de trial, que era o comportamento anterior:
+    // link antigo na caixa de e-mail não deve virar cópia errada pro outro lado.
+    // `ia` ausente (link antigo, de antes deste parâmetro existir) NÃO vira
+    // número chutado: a linha da IA fica na frase genérica.
     setTimeout(() => {
-      document.getElementById("welcome-pro-overlay").classList.add("open");
+      // Não celebra por cima de "Acesso restrito": se a validação de sessão já
+      // falhou (ou estourou o orçamento do retorno de checkout), o init marca
+      // esta flag e o modal não sobe. A outra ponta, erro DEPOIS do modal já
+      // aberto, é tratada no próprio showAccessError().
+      if (window._pbAccessDenied) return;
+      const celebrar = () => {
+        // relido AGORA, não na hora de agendar: entre os 450ms e o fim do poll
+        // a validação pode ter falhado, e aí não se celebra
+        if (window._pbAccessDenied) return;
+        const dias = Number.parseInt(td, 10);
+        const cotaIA = Number.parseInt(ia, 10);
+        openWelcomePro({
+          trial: ev !== "purchase",
+          days: Number.isFinite(dias) && dias > 0 ? dias : 30,
+          plano: pl || "plus",
+          ia: Number.isFinite(cotaIA) && cotaIA > 0 ? cotaIA : null,
+        });
+      };
+
+      /* Com a tela de "confirmando pagamento" levantada, esperar ela fechar —
+         ver o comentário em _closeCheckoutOverlay. Ela SEMPRE fecha: o
+         awaitCheckoutConfirmation chama o close num `finally`, e o deadline de
+         20s garante o fail-open. Sem ela no ar (fluxo sem checkout, ou webhook
+         que já assentou antes dos 450ms), celebra na hora. */
+      const confirmando = document.getElementById("checkout-confirm-overlay");
+      if (confirmando && confirmando.classList.contains("open")) {
+        document.addEventListener("pb:checkout-confirmado", celebrar, { once: true });
+      } else {
+        celebrar();
+      }
     }, 450);
   } else if (status === "cancelled") {
     const toast = document.getElementById("upgrade-cancel-toast");
     if (!toast) return;
     toast.innerHTML = `
-      <span class="emoji">🐷</span>
+      <span class="emoji"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span>
       <div class="body">Beleza, sem pressa! Quando bater a vontade de virar PigBank+, é só dar uma passada em <a href="/precos" style="color:#FF2D8E;text-decoration:underline">/precos</a>.</div>
     `;
     setTimeout(() => toast.classList.add("show"), 350);

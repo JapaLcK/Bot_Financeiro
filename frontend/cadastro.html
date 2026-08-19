@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Criar conta — PigBank</title>
+<title>Criar conta · PigBank</title>
 <meta name="description" content="Crie sua conta PigBank e comece a organizar sua vida financeira no WhatsApp." />
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
-<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=2" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
 <meta name="theme-color" content="#0c0c0d" />
 <link rel="stylesheet" href="/brand.css?v=4" />
 <link rel="stylesheet" href="/site.css?v=4" />
@@ -16,8 +16,8 @@
   .auth-error.ok { background: rgba(0,240,120,.1); border-color: rgba(0,240,120,.3); color: #93f7c4; }
   .field .hint { font-size: .74rem; color: var(--ink-3); margin-top: 6px; }
 </style>
-  <link rel="stylesheet" href="/app-mode.css?v=17" />
-  <script src="/app-mode.js?v=17"></script>
+  <link rel="stylesheet" href="/app-mode.css?v=25" />
+  <script src="/app-mode.js?v=23"></script>
 </head>
 <body>
 <div class="glow"></div>
@@ -141,6 +141,9 @@
       var res=await fetch('/auth/verify-email',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({email:_email,code:code})});
       var d=await payload(res);
       if(!res.ok){err('verify-error',d.detail||'Código inválido.');return}
+      // Meta Ads: conta criada. eventID casa com o CompleteRegistration
+      // server-side (CAPI) pro Meta deduplicar.
+      if(window.fbq&&d.user_id){fbq('track','CompleteRegistration',{},{eventID:'signup_'+d.user_id});}
       goDash(d.dashboard_url);
     }catch(e){err('verify-error','Erro de conexão. Tente novamente.')}
     finally{b.disabled=false;b.textContent='Confirmar'}

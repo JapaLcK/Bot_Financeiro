@@ -48,12 +48,12 @@
       img.onerror = function () {
         thumb.removeChild(img);
         thumb.classList.add("article-thumb-emoji");
-        thumb.textContent = n.emoji || "📰";
+        thumb.innerHTML = '<i class="ph ph-newspaper" aria-hidden="true"></i>';
       };
       thumb.appendChild(img);
     } else {
       thumb.classList.add("article-thumb-emoji");
-      thumb.textContent = n.emoji || "📰";
+      thumb.innerHTML = '<i class="ph ph-newspaper" aria-hidden="true"></i>';
     }
     var body = el("div", "article-body");
     if (n.category) body.appendChild(el("span", "tag-cat", n.category));

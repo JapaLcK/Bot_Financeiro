@@ -78,11 +78,14 @@
   // diretrizes da App Store proíbem link/CTA de compra externa, então os
   // anchors pra /precos somem via CSS e as páginas usam window.PB_IN_APP
   // pra trocar o redirect de paywall por uma tela neutra.
+  // Exceção: elementos marcados com .pb-keep-in-app continuam visíveis — ex.:
+  // o botão "Ver planos" do modal de paywall do dashboard, que precisa
+  // redirecionar o usuário sem plano pra tela de planos.
   if (/PigBankApp/.test(navigator.userAgent)) {
     window.PB_IN_APP = true;
     document.documentElement.classList.add("pb-app");
     const st = document.createElement("style");
-    st.textContent = 'html.pb-app a[href^="/precos"]{display:none !important}';
+    st.textContent = 'html.pb-app a[href^="/precos"]:not(.pb-keep-in-app){display:none !important}';
     (document.head || document.documentElement).appendChild(st);
   }
 })();

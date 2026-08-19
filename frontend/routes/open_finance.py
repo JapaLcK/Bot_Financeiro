@@ -22,10 +22,17 @@ from core.audit import AuditEvent, record_audit_event
 from core.services.pluggy import (
     PluggyApiError,
     PluggyConfigError,
+    create_pluggy_api_key,
     create_pluggy_connect_token,
+    delete_pluggy_item,
+    list_pluggy_connectors,
 )
 from core.services.plan_service import is_pro
-from core.services.pluggy_sync import sync_pluggy_item, sync_pluggy_user
+from core.services.pluggy_sync import (
+    refresh_and_sync_pluggy_user,
+    sync_pluggy_item,
+    sync_pluggy_user,
+)
 from db import (
     count_open_finance_connections,
     create_mock_open_finance_connection,
@@ -33,6 +40,7 @@ from db import (
     disconnect_open_finance_connection,
     get_open_finance_connection_by_item_id,
     get_open_finance_snapshot,
+    list_pluggy_item_ids,
     save_pluggy_open_finance_item,
     update_pluggy_open_finance_item_status,
 )
@@ -40,7 +48,9 @@ from frontend.routes import shared
 
 router = APIRouter()
 
-PLUGGY_INCLUDE_SANDBOX = os.getenv("PLUGGY_INCLUDE_SANDBOX", "1") != "0"
+# Default DESLIGADO: o "Pluggy Bank" (dados sintéticos) não deve aparecer no
+# catálogo em produção. Só ligar (=1) em ambiente de teste/sandbox.
+PLUGGY_INCLUDE_SANDBOX = os.getenv("PLUGGY_INCLUDE_SANDBOX", "0") == "1"
 
 # Eventos da Pluggy que disparam um sync (puxar contas/transações).
 # transactions/deleted é tratado à parte (remove ids), não re-sincroniza.
@@ -94,12 +104,50 @@ def _bank_limit_enabled() -> bool:
 
 
 async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> None:
-    """Gate Pro por nº de bancos: no plano grátis, limita conexões (Fase 7).
+    """Teto de conexões OF por plano.
+
+    v2 (PLANS_V2_ENABLED): teto vem do tier — of_banks_max da escada
+    (trial 1 / Essencial 1 / Plus 2 / Pro 5 / None = ilimitado). Ativo sempre
+    que a escada estiver ligada, sem env extra.
+    v1 (flag off): gate Fase 7 legado, dormante atrás de OF_BANK_LIMIT_ENABLED.
 
     P1: reconectar/renovar um banco JÁ conectado (mesmo provider_item_id) NÃO conta como
-    banco novo — senão o usuário grátis no limite ficava travado de reautorizar o próprio
+    banco novo — senão o usuário no limite ficava travado de reautorizar o próprio
     banco. Só bloqueia banco realmente novo.
     """
+    from core.services.plan_service import plans_v2_enabled, get_user_limits
+
+    if plans_v2_enabled():
+        limit = (await asyncio.to_thread(get_user_limits, user_id)).get("of_banks_max")
+        if limit is None:
+            return  # ilimitado (Premium futuro)
+        if new_item_id:
+            existing = await asyncio.to_thread(get_open_finance_connection_by_item_id, str(new_item_id))
+            if existing and int(existing.get("user_id")) == int(user_id):
+                return  # upsert de item existente: reconexão, não é banco novo
+        if limit <= 0:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "OF_BANK_LIMIT",
+                    "limit": 0,
+                    "message": "Conectar banco faz parte dos planos pagos — no Grátis a conexão "
+                               "vale durante os 30 dias de teste. Assine pra reativar: /precos",
+                },
+            )
+        count = await asyncio.to_thread(count_open_finance_connections, user_id)
+        if count >= limit:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "OF_BANK_LIMIT",
+                    "limit": limit,
+                    "message": f"Seu plano conecta até {limit} banco{'s' if limit > 1 else ''}. "
+                               "Faça upgrade pra conectar mais: /precos",
+                },
+            )
+        return
+
     if not _bank_limit_enabled():
         return
     if await asyncio.to_thread(is_pro, user_id):
@@ -121,6 +169,48 @@ async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> N
         )
 
 
+async def _ensure_of_access_allowed(user_id: int) -> None:
+    """Barra a EMISSÃO do connect-token quando o plano não dá Open Finance nenhum
+    (of_banks_max <= 0: Free pós-trial). Diferente do teto por contagem, esse caso é
+    inequívoco — o usuário não tem banco pra adicionar nem reconexão liberada (banco
+    do Free fica pausado; reativar = upgrade). Fecha o abuso direto do endpoint e evita
+    item/consentimento órfão na Pluggy (cada conexão custa). Planos com teto > 0 seguem
+    liberados aqui pra não travar reconexão de um banco existente — a contagem é cobrada
+    no /pluggy-item, onde já se sabe se é banco novo ou upsert.
+    """
+    from core.services.plan_service import plans_v2_enabled, get_user_limits
+
+    if plans_v2_enabled():
+        limit = (await asyncio.to_thread(get_user_limits, user_id)).get("of_banks_max")
+        if limit is not None and limit <= 0:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "OF_BANK_LIMIT",
+                    "limit": 0,
+                    "message": "Conectar banco faz parte dos planos pagos — no Grátis a conexão "
+                               "vale durante os 30 dias de teste. Assine pra reativar: /precos",
+                },
+            )
+        return
+
+    # v1 legado: só barra quando o gate está ligado E o usuário não é Pro.
+    if not _bank_limit_enabled():
+        return
+    if await asyncio.to_thread(is_pro, user_id):
+        return
+    limit = int(os.getenv("OF_FREE_BANK_LIMIT", "1"))
+    if limit <= 0:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "OF_BANK_LIMIT",
+                "limit": 0,
+                "message": "Conectar banco faz parte dos planos pagos. Assine o Pro para conectar.",
+            },
+        )
+
+
 class OpenFinanceMockConnectPayload(BaseModel):
     institution: str | None = None
 
@@ -136,16 +226,116 @@ async def open_finance_snapshot_route(request: Request, user_id: int):
     return json.loads(shared.jdump({"ok": True, **snapshot}))
 
 
+# Só contas de pessoa física no modal (bate com o preview aprovado; evita os
+# duplicados "… Empresas"). Pra incluir PJ, adicionar "BUSINESS_BANK".
+_CONNECTABLE_TYPES = {"PERSONAL_BANK"}
+
+
+@router.get("/open-finance/{user_id}/connectors")
+async def open_finance_connectors_route(request: Request, user_id: int):
+    """Catálogo completo de bancos da Pluggy pro modal "Conectar banco".
+
+    Fluxo padrão: a escolha do banco acontece no site (modal com busca) e o widget da
+    Pluggy abre já no banco escolhido. Retorna dicts enxutos (id/name/type/color/inv)."""
+    shared.authorize_dashboard_access(request, user_id)
+    try:
+        raw = await asyncio.to_thread(
+            list_pluggy_connectors, None, include_sandbox=PLUGGY_INCLUDE_SANDBOX
+        )
+    except PluggyConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PluggyApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    banks = []
+    for c in raw:
+        if str(c.get("type") or "") not in _CONNECTABLE_TYPES:
+            continue
+        products = [str(p).upper() for p in (c.get("products") or [])]
+        banks.append({
+            "id": c.get("id"),
+            "name": (c.get("name") or "").strip(),
+            "type": c.get("type"),
+            "color": (c.get("primaryColor") or "").lstrip("#"),
+            "logo": c.get("imageUrl") or "",
+            "inv": "INVESTMENTS" in products,
+        })
+    banks.sort(key=lambda b: b["name"].lower())
+    return {"ok": True, "connectors": banks}
+
+
+def _require_caixinha_access(user_id: int) -> None:
+    # Caixinha (Open Finance) é feature paga — desacoplada do beta de agentes:
+    # qualquer plano pago (Essencial+) tem acesso à UI de vínculo, não só o beta.
+    from core.services.plan_service import require_min_tier
+    if not require_min_tier(user_id, "essencial"):
+        raise HTTPException(status_code=404, detail="Feature indisponível.")
+
+
+@router.get("/open-finance/{user_id}/caixinhas")
+async def open_finance_caixinhas_route(request: Request, user_id: int):
+    """Banqueiro: caixinhas OF detectadas + metas do usuário, pra montar o vínculo."""
+    shared.authorize_dashboard_access(request, user_id)
+    await asyncio.to_thread(_require_caixinha_access, user_id)
+    from db import list_caixinha_candidates, list_pockets
+
+    candidates = await asyncio.to_thread(list_caixinha_candidates, user_id)
+    pockets = await asyncio.to_thread(lambda: list_pockets(user_id, accrue=False))
+    metas = [
+        {"id": p["id"], "name": p["name"],
+         "target_amount": float(p["target_amount"]) if p.get("target_amount") is not None else None}
+        for p in pockets
+    ]
+    caixinhas = [
+        {"of_investment_id": c["of_investment_id"], "name": c["name"],
+         "balance": float(c["balance"] or 0),
+         "pocket_id": c["pocket_id"], "pocket_name": c["pocket_name"]}
+        for c in candidates
+    ]
+    return {"ok": True, "caixinhas": caixinhas, "metas": metas}
+
+
+class CaixinhaBindBody(BaseModel):
+    pocket_id: int
+    of_investment_id: int | None = None
+
+
+@router.post("/open-finance/{user_id}/caixinhas/bind")
+async def open_finance_caixinha_bind_route(request: Request, user_id: int, body: CaixinhaBindBody):
+    """Vincula (ou desvincula com of_investment_id=null) uma meta a uma caixinha OF."""
+    shared.authorize_dashboard_access(request, user_id)
+    await asyncio.to_thread(_require_caixinha_access, user_id)
+    from db import bind_pocket_to_caixinha
+
+    ok = await asyncio.to_thread(
+        bind_pocket_to_caixinha, user_id, body.pocket_id, body.of_investment_id
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail="Não foi possível vincular (meta ou caixinha inválida).")
+    return {"ok": True}
+
+
 @router.post("/open-finance/{user_id}/connect-token")
 async def open_finance_connect_token_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
-    # Não aplica o gate aqui: gerar um connect-token não conecta banco nenhum (e o widget
-    # também é usado pra RECONECTAR um banco existente). O limite é cobrado no /pluggy-item,
+    # Barra só o caso inequívoco (plano sem OF): não emite token pra quem não pode
+    # conectar nada, fechando o abuso direto do endpoint e evitando item órfão na Pluggy.
+    # O TETO POR CONTAGEM (planos pagos no limite) NÃO é cobrado aqui de propósito — o
+    # widget também reconecta um banco existente, e a contagem é validada no /pluggy-item,
     # onde já se sabe se o item é novo ou um upsert de um banco já conectado.
+    await _ensure_of_access_allowed(user_id)
 
     webhook_url = (os.getenv("PLUGGY_WEBHOOK_URL") or "").strip()
     if not webhook_url and shared.DASHBOARD_URL.startswith("https://"):
         webhook_url = f"{shared.DASHBOARD_URL}/open-finance/pluggy/webhook"
+
+    # Anexa o secret como token na URL (a Pluggy chama de volta preservando a query).
+    # É como o webhook se autentica (a Pluggy não assina o corpo). Não duplica se já
+    # veio com token (ex.: PLUGGY_WEBHOOK_URL setado à mão com o token).
+    webhook_secret = (os.getenv("PLUGGY_WEBHOOK_SECRET") or "").strip()
+    if webhook_url and webhook_secret and "token=" not in webhook_url:
+        sep = "&" if "?" in webhook_url else "?"
+        webhook_url = f"{webhook_url}{sep}token={webhook_secret}"
 
     try:
         token_data = await asyncio.to_thread(
@@ -207,6 +397,25 @@ async def open_finance_sync_route(request: Request, user_id: int):
     return json.loads(shared.jdump({"ok": True, "sync": result, **snapshot}))
 
 
+@router.post("/open-finance/{user_id}/refresh")
+async def open_finance_refresh_route(request: Request, user_id: int):
+    """Refresh manual (botão "Atualizar"): pede pra Pluggy re-buscar do banco
+    (PATCH /items), espera concluir e sincroniza — puxa transação nova, marca a
+    conexão ACTIVE e limpa "Pendente". Difere do /sync, que só relê o que a Pluggy
+    já tem sem forçar uma nova busca no banco.
+    """
+    shared.authorize_dashboard_access(request, user_id)
+    try:
+        result = await asyncio.to_thread(refresh_and_sync_pluggy_user, user_id)
+    except PluggyConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PluggyApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
+    return json.loads(shared.jdump({"ok": True, "sync": result, **snapshot}))
+
+
 def _verify_pluggy_webhook_signature(raw_body: bytes, signature_header: str, secret: str) -> bool:
     signature = (signature_header or "").strip()
     if signature.startswith("sha256="):
@@ -218,20 +427,60 @@ def _verify_pluggy_webhook_signature(raw_body: bytes, signature_header: str, sec
     return hmac.compare_digest(signature, expected)
 
 
+# Headers de secret compartilhado aceitos (caso configurados no painel da Pluggy).
+_PLUGGY_WEBHOOK_SECRET_HEADERS = ("x-webhook-token", "x-pluggy-token", "x-api-key")
+
+
+def _authorize_pluggy_webhook(request: Request, raw_body: bytes, secret: str) -> bool:
+    """Autentica o webhook da Pluggy.
+
+    ⚠️ A Pluggy NÃO assina o corpo com HMAC (a doc dela só oferece IP fixo +
+    header custom opcional). Então NÃO dá pra exigir `X-Pluggy-Signature` — isso
+    rejeitava todo evento real com 401. Aceitamos um secret compartilhado que a
+    GENTE controla ao registrar o webhook:
+
+    1. token na URL (`?token=<secret>`) — a URL do webhook é registrada por nós, no
+       connect-token e no painel; é o caminho principal e não depende de o painel
+       suportar header custom.
+    2. header com o secret (`X-Webhook-Token`/`X-Pluggy-Token`/`X-Api-Key`) — caso
+       você prefira configurar um header no painel.
+    3. assinatura HMAC (`X-Pluggy-Signature`) — mantida por compat/futuro; hoje a
+       Pluggy não manda, mas se um dia mandar, continua valendo.
+
+    Comparações em tempo constante. Sem secret configurado, o chamador já barra (503).
+    """
+    # 1. token na query string
+    token = request.query_params.get("token") or ""
+    if token and hmac.compare_digest(token, secret):
+        return True
+    # 2. header com o secret
+    for header_name in _PLUGGY_WEBHOOK_SECRET_HEADERS:
+        value = (request.headers.get(header_name) or "").strip()
+        if value and hmac.compare_digest(value, secret):
+            return True
+    # 3. assinatura HMAC do corpo (compat)
+    signature = request.headers.get("X-Pluggy-Signature") or ""
+    if signature and _verify_pluggy_webhook_signature(raw_body, signature, secret):
+        return True
+    return False
+
+
 @router.post("/open-finance/pluggy/webhook")
 async def open_finance_pluggy_webhook(request: Request):
     """
     Recebe eventos da Pluggy e responde rapido.
     Trabalho pesado de sync deve rodar fora do request.
+
+    Autenticação: secret compartilhado via token na URL / header (a Pluggy não
+    assina o corpo com HMAC). Ver `_authorize_pluggy_webhook`.
     """
     secret = (os.getenv("PLUGGY_WEBHOOK_SECRET") or "").strip()
     if not secret:
         raise HTTPException(status_code=503, detail="Webhook não configurado.")
 
     raw_body = await request.body()
-    received_sig = request.headers.get("X-Pluggy-Signature") or ""
-    if not _verify_pluggy_webhook_signature(raw_body, received_sig, secret):
-        raise HTTPException(status_code=401, detail="Assinatura inválida.")
+    if not _authorize_pluggy_webhook(request, raw_body, secret):
+        raise HTTPException(status_code=401, detail="Não autorizado.")
 
     try:
         event = json.loads(raw_body)
@@ -294,6 +543,34 @@ async def open_finance_mock_connect_route(request: Request, user_id: int, payloa
 @router.delete("/open-finance/{user_id}")
 async def open_finance_disconnect_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
+
+    # Deleta os items na Pluggy ANTES do disconnect local (best-effort). Sem isso, remover
+    # a conexão apagava só o nosso registro e o item ficava órfão na Pluggy, bloqueando a
+    # reconexão ("já possui conexão com este acesso"). Falha por item não impede o
+    # disconnect local (não pioramos o comportamento antigo).
+    pluggy_item_ids = await asyncio.to_thread(list_pluggy_item_ids, user_id)
+    if pluggy_item_ids:
+        api_key = None
+        try:
+            api_key = await asyncio.to_thread(create_pluggy_api_key)
+        except Exception as exc:  # noqa: BLE001 — best-effort; segue pro disconnect local
+            await log_system_event(
+                "warning", "pluggy_disconnect_auth_failed",
+                f"Sem apiKey pra deletar items no disconnect do user {user_id}: {exc}",
+                source="open_finance", details={"user_id": user_id, "error": str(exc)},
+            )
+        if api_key:
+            for item_id in pluggy_item_ids:
+                try:
+                    await asyncio.to_thread(delete_pluggy_item, item_id, api_key)
+                except Exception as exc:  # noqa: BLE001 — best-effort por item
+                    await log_system_event(
+                        "warning", "pluggy_item_delete_failed",
+                        f"Falha ao deletar item {item_id} na Pluggy no disconnect: {exc}",
+                        source="open_finance",
+                        details={"item_id": item_id, "error": str(exc)},
+                    )
+
     deleted = await asyncio.to_thread(disconnect_open_finance_connection, user_id)
 
     if deleted:

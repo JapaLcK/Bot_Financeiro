@@ -22,6 +22,18 @@ EMAIL_FROM_PIGGY    = os.getenv("EMAIL_FROM_PIGGY",    "Piggy do PigBank <oi@pig
 SUPPORT_EMAIL       = os.getenv("SUPPORT_EMAIL",       "suporte@pigbankai.com")
 
 
+def _public_base_url() -> str:
+    """Base pública para links e imagens dos e-mails. Espelha a normalização
+    de frontend/routes/shared.py: tolera a var gravada como
+    'DASHBOARD_URL=https://…' e rejeita base não-https — e-mail é aberto fora
+    da rede local, então localhost/http viraria imagem quebrada."""
+    base = (os.getenv("DASHBOARD_URL") or "").strip()
+    if base.startswith("DASHBOARD_URL="):
+        base = base[len("DASHBOARD_URL="):]
+    base = base.rstrip("/")
+    return base if base.startswith("https://") else "https://pigbankai.com"
+
+
 def _get_resend():
     import resend
     resend.api_key = os.getenv("RESEND_API_KEY", "")
@@ -89,6 +101,11 @@ def send_email(
 
 
 def _base_html(title: str, content: str) -> str:
+    """Template transacional — dark premium com as cores da marca (preto #0C0C0D /
+    rosa #FF2D8E / off-white #F6F4F1), pareado com _piggy_html. Logo do Piggy
+    (PNG hospedado — Gmail não renderiza SVG) num medalhão off-white pro
+    contorno não sumir no fundo escuro."""
+    base = _public_base_url()
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -96,30 +113,35 @@ def _base_html(title: str, content: str) -> str:
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>{title}</title>
   <style>
-    body{{margin:0;padding:0;background:#0a0d18;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e2e8f0}}
-    .wrapper{{max-width:560px;margin:40px auto;background:#0f1320;border-radius:20px;border:1px solid rgba(255,255,255,.1);overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.5)}}
-    .header{{background:linear-gradient(135deg,#1e0a3c,#0c1a3a);padding:36px 32px;text-align:center;border-bottom:1px solid rgba(255,255,255,.08)}}
-    .logo-icon{{display:inline-block;width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#7c3aed,#3b82f6);font-size:28px;line-height:56px;text-align:center;box-shadow:0 8px 24px rgba(124,58,237,.45);margin-bottom:14px}}
-    .header h1{{margin:0;color:#fff;font-size:20px;font-weight:700;letter-spacing:-.02em}}
-    .header p{{margin:6px 0 0;color:rgba(255,255,255,.45);font-size:13px}}
-    .body{{padding:36px 32px}}
-    .body p{{line-height:1.75;margin:0 0 16px;color:rgba(255,255,255,.82);font-size:15px}}
-    .body ol,.body ul{{line-height:2;color:rgba(255,255,255,.72);font-size:14px;padding-left:20px;margin:0 0 16px}}
-    .code-box{{background:rgba(124,58,237,.12);border:1px solid rgba(124,58,237,.3);border-radius:14px;padding:20px;text-align:center;margin:24px 0}}
-    .code-box code{{font-size:40px;font-weight:800;color:#a78bfa;letter-spacing:10px}}
-    .highlight{{background:rgba(255,255,255,.05);border-left:3px solid #7c3aed;padding:14px 18px;border-radius:8px;margin:16px 0}}
-    .highlight code{{font-size:15px;color:#a78bfa;font-weight:600}}
-    .btn{{display:inline-block;background:linear-gradient(135deg,#7c3aed,#3b82f6);color:#fff!important;text-decoration:none;padding:13px 28px;border-radius:12px;font-weight:700;font-size:15px;margin:8px 0;box-shadow:0 6px 20px rgba(124,58,237,.4)}}
-    .warn{{font-size:12px;color:rgba(255,255,255,.38);text-align:center;margin-top:8px}}
-    .footer{{padding:20px 32px;background:rgba(255,255,255,.03);border-top:1px solid rgba(255,255,255,.06);font-size:12px;color:rgba(255,255,255,.3);text-align:center;line-height:1.7}}
-    .footer a{{color:#7c3aed;text-decoration:none}}
+    body{{margin:0;padding:24px 0;background:#0C0C0D;font-family:"Inter",-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#F6F4F1}}
+    .wrapper{{max-width:560px;margin:0 auto;background:#1B1B1E;border-radius:24px;border:1px solid rgba(255,255,255,.08);overflow:hidden}}
+    .bar{{height:4px;background:#FF2D8E}}
+    .header{{padding:36px 32px 24px;text-align:center}}
+    .tile{{display:inline-block;background:#F6F4F1;border-radius:20px;padding:12px;line-height:0;box-shadow:0 10px 34px rgba(255,45,142,.20)}}
+    .header h1{{margin:16px 0 0;color:#F6F4F1;font-size:20px;font-weight:800;letter-spacing:-.02em}}
+    .header h1 b{{color:#FF2D8E}}
+    .header p{{margin:6px 0 0;color:#9C9C9A;font-size:13px}}
+    .body{{padding:28px 32px 36px}}
+    .body p{{line-height:1.75;margin:0 0 16px;color:#E7E4E0;font-size:15px}}
+    .body strong{{color:#fff}}
+    .body ol,.body ul{{line-height:2;color:#CFCCC8;font-size:14px;padding-left:20px;margin:0 0 16px}}
+    .code-box{{background:rgba(255,45,142,.08);border:1px solid rgba(255,45,142,.30);border-radius:14px;padding:20px;text-align:center;margin:24px 0}}
+    .code-box code{{font-size:40px;font-weight:800;color:#FF6FB0;letter-spacing:10px}}
+    .highlight{{background:rgba(255,255,255,.05);border-left:3px solid #FF2D8E;padding:14px 18px;border-radius:0 12px 12px 0;margin:16px 0}}
+    .highlight code{{font-size:15px;color:#FF6FB0;font-weight:600}}
+    .btn{{display:inline-block;background:#FF2D8E;color:#fff!important;text-decoration:none;padding:13px 28px;border-radius:999px;font-weight:700;font-size:15px;margin:8px 0;box-shadow:0 8px 24px rgba(255,45,142,.35)}}
+    .warn{{font-size:12px;color:#7E7E7C;text-align:center;margin-top:8px}}
+    .footer{{padding:20px 32px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:#7E7E7C;text-align:center;line-height:1.7}}
+    .footer a{{color:#FF6FB0;text-decoration:none}}
+    a{{color:#FF2D8E}}
   </style>
 </head>
 <body>
   <div class="wrapper">
+    <div class="bar"></div>
     <div class="header">
-      <div class="logo-icon">🐷</div>
-      <h1>PigBank</h1>
+      <span class="tile"><img src="{base}/brand/email-logo.png" alt="PigBank" width="52" style="width:52px;height:auto;display:block"/></span>
+      <h1>Pig<b>Bank</b></h1>
       <p>Seu assistente financeiro inteligente</p>
     </div>
     <div class="body">{content}</div>
@@ -130,6 +152,85 @@ def _base_html(title: str, content: str) -> str:
   </div>
 </body>
 </html>"""
+
+
+def send_plan_change_scheduled_email(to: str, new_plan_name: str, effective_date: str, dashboard_url: str = "") -> bool:
+    """Confirmação de troca de plano agendada (regra: sem cobrança agora — o
+    plano vira na data da próxima cobrança). Registro escrito pro usuário não
+    achar que o clique não fez nada."""
+    base = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    try:
+        from datetime import datetime as _dt
+        d = _dt.strptime(effective_date, "%Y-%m-%d").strftime("%d/%m/%Y")
+    except Exception:
+        d = effective_date
+    content = f"""
+      <p>Troca de plano confirmada! 🐷</p>
+      <p>Você continua no seu plano atual — que já está pago — até o fim do período.
+      Em <strong>{d}</strong> sua conta vira <strong>{new_plan_name}</strong> e a
+      primeira cobrança do plano novo acontece no cartão cadastrado.</p>
+      <div class="highlight"><p style="margin:0">✅ Nada foi cobrado agora ·
+      ✅ Mudou de ideia? Dá pra desfazer em <a href="{base}/precos">pigbankai.com/precos</a>
+      até a data da virada.</p></div>
+    """
+    return send_email(
+        to,
+        f"Troca agendada: seu PigBank vira {new_plan_name} em {d} 🐷",
+        _base_html("Troca de plano agendada", content),
+    )
+
+
+def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
+    """Fim do trial de 30 dias sem assinatura → downsell pro Essencial.
+
+    Parte da escada v2: o teste dá o Plus completo; quem não assina cai pro
+    Grátis (banco pausa, agentes silenciam) e este e-mail oferece a saída de
+    R$ 9,90 antes do churn. Enviado UMA vez (trial_downsell_sent_at)."""
+    base = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    content = f"""
+      <p>Oi! Seus <strong>30 dias de teste do PigBank</strong> chegaram ao fim. 🐷</p>
+      <p>Sua conta continua no plano Grátis: seus dados estão todos guardados,
+      mas o banco conectado ficou <strong>pausado</strong> e a Piggy voltou pro modo básico.</p>
+      <p>Pra continuar de onde parou:</p>
+      <ul>
+        <li><strong>Essencial — R$ 9,90/mês</strong>: banco reconectado, lançamentos
+        ilimitados com áudio e foto, boletos com lembrete.</li>
+        <li><strong>Plus — R$ 19,90/mês</strong>: tudo que você usou no teste —
+        2 bancos, os 3 agentes e a Piggy sem limites.</li>
+      </ul>
+      <p style="text-align:center;margin-top:24px">
+        <a class="btn" href="{base}/precos">Escolher meu plano</a>
+      </p>
+      <p class="warn">Preço de fundador: assinando agora, seu valor fica congelado pra sempre.</p>
+    """
+    return send_email(
+        to,
+        "Seu teste acabou — continue com a Piggy por R$ 9,90 🐷",
+        _base_html("Seu teste do PigBank acabou", content),
+    )
+
+
+def send_agent_report_email(
+    to: str, user_id: int, subject: str, content_html: str, kind: str = "",
+    text_content: str | None = None,
+) -> bool:
+    """E-mail proativo dos Agentes do Piggy (ex.: manchete mensal do Repórter).
+
+    Template leve/transacional + versão em texto puro + remetente pessoal
+    (oi@pigbankai.com) — tudo pra cair na Principal em vez de Promoções. O
+    porquinho do agente (`kind`) vira o banner do topo.
+    """
+    try:
+        unsub = make_unsub_url(user_id, to)
+    except RuntimeError:
+        unsub = ""
+    html = _piggy_html(subject, content_html, unsub, agent_kind=kind)
+    text = text_content or _html_to_text(content_html)
+    if unsub:
+        text += f"\n\n—\nCancelar inscrição: {unsub}"
+    return send_email(to, subject, html, text_body=text,
+                      from_addr=EMAIL_FROM_PIGGY,
+                      headers=unsub_headers(unsub) if unsub else None)
 
 
 def send_verification_email(to: str, code: str) -> bool:
@@ -199,6 +300,16 @@ import hmac as _hmac
 import base64 as _base64
 
 
+def unsub_headers(unsub_url: str) -> dict:
+    """Headers de descadastro com one-click (RFC 8058): o Gmail exibe o botão
+    nativo "Cancelar inscrição" e dispara um POST na URL sem abrir página —
+    o caminho que evita a denúncia de spam. Requer o endpoint POST /unsubscribe."""
+    return {
+        "List-Unsubscribe": f"<{unsub_url}>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    }
+
+
 def make_unsub_url(user_id: int, email: str) -> str:
     """Gera URL de descadastro com token HMAC estável (stateless, não expira)."""
     secret_raw = (os.getenv("JWT_SECRET") or "").strip()
@@ -209,19 +320,55 @@ def make_unsub_url(user_id: int, email: str) -> str:
     payload = f"{user_id}:{email}".encode()
     sig     = _hmac.new(secret, payload, _hashlib.sha256).digest()
     token   = _base64.urlsafe_b64encode(sig).decode().rstrip("=")
-    base    = (os.getenv("DASHBOARD_URL") or "https://pigbankai.com").rstrip("/")
-    return f"{base}/unsubscribe?uid={user_id}&token={token}"
+    return f"{_public_base_url()}/unsubscribe?uid={user_id}&token={token}"
 
 
 # ─── Template simples para emails do Piggy ────────────────────────────────────
 # Menos CSS pesado que _base_html → menor chance de cair em Promoções
 
-def _piggy_html(title: str, content: str, unsub_url: str = "") -> str:
+_AGENT_ART_KINDS = {"xerife", "reporter", "carteiro", "detetive", "cofre", "barao", "faria_limer"}
+_AGENT_LABELS = {"xerife": "Xerife", "reporter": "Repórter", "carteiro": "Carteiro",
+                 "detetive": "Detetive", "cofre": "Banqueiro", "barao": "Barão",
+                 "faria_limer": "Faria Limer"}
+# Faria Limer já com arte ligada: entra em _AGENT_ART_KINDS (medalhão) e em
+# _AGENT_HERO (banner full-bleed), além do label acima.
+# Agentes com arte-cena "hero" (banner full-bleed no topo, 1200x600). Quem não
+# tem cai no medalhão com o sticker. Arquivo em /brand/agents/<valor>.png.
+_AGENT_HERO = {"xerife": "xerife_hero", "carteiro": "carteiro_hero",
+               "cofre": "cofre_hero", "barao": "barao_hero",
+               "reporter": "reporter_hero", "detetive": "detetive_hero",
+               "faria_limer": "faria_limer_hero"}
+
+
+def _piggy_html(title: str, content: str, unsub_url: str = "", agent_kind: str = "") -> str:
+    """Template dos agentes — dark premium com as cores da marca (preto #111 /
+    rosa #FF2D8E / neon #C6F11A / off-white). Porquinho do agente num medalhão
+    off-white (contorno legível no escuro), chip do agente, CTA e texto puro
+    pareado pelo caller. Container largo (600) pra dar impacto."""
+    base = _public_base_url()
     unsub_line = (
-        f'Não quer mais receber estes emails? '
-        f'<a href="{unsub_url}" style="color:rgba(255,255,255,.35);text-decoration:underline;">Cancelar inscrição</a>'
+        f'Não quer mais estes avisos? <a href="{unsub_url}">Cancelar inscrição</a>.'
         if unsub_url else ""
     )
+    # Banner: porquinho do agente (PNG hospedado — Gmail não renderiza SVG) num
+    # medalhão claro pro contorno não sumir no fundo escuro.
+    if agent_kind in _AGENT_ART_KINDS:
+        pig_html = (f'<span class="tile"><img src="{base}/brand/agents/{agent_kind}.png" '
+                    f'alt="" width="150" style="width:150px;height:auto;display:block" /></span>')
+    else:
+        pig_html = (f'<span class="tile" style="padding:16px 20px"><img src="{base}/brand/email-logo.png" '
+                    f'alt="PigBank" width="68" style="width:68px;height:auto;display:block" /></span>')
+    nome = _AGENT_LABELS.get(agent_kind, "")
+    chip = f'<div><span class="chip"><span class="dot">●</span> {nome}</span></div>' if nome else ""
+    hero = _AGENT_HERO.get(agent_kind)
+    if hero:
+        header = (
+            f'<div class="hero"><img src="{base}/brand/agents/{hero}.png" alt="" width="600" '
+            f'style="width:100%;display:block;border:0" /></div>'
+            f'<div class="hdr" style="padding-top:24px"><p class="brand">Pig<b>Bank</b></p>{chip}</div>'
+        )
+    else:
+        header = f'<div class="hdr">{pig_html}<p class="brand">Pig<b>Bank</b></p>{chip}</div>'
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -229,44 +376,61 @@ def _piggy_html(title: str, content: str, unsub_url: str = "") -> str:
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>{title}</title>
   <style>
-    body{{margin:0;padding:0;background:#0a0d18;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e2e8f0}}
-    .wrap{{max-width:560px;margin:40px auto;background:#0f1320;border-radius:20px;border:1px solid rgba(255,255,255,.1);overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.5)}}
-    .hdr{{background:linear-gradient(135deg,#1e0a3c,#0c1a3a);padding:36px 32px;text-align:center;border-bottom:1px solid rgba(255,255,255,.08)}}
-    .pig{{display:inline-block;width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#7c3aed,#3b82f6);font-size:28px;line-height:56px;text-align:center;box-shadow:0 8px 24px rgba(124,58,237,.45);margin-bottom:14px}}
-    .hdr h1{{margin:0;color:#fff;font-size:20px;font-weight:700;letter-spacing:-.02em}}
-    .hdr p{{margin:6px 0 0;color:rgba(255,255,255,.45);font-size:13px}}
-    .body{{padding:32px 32px 28px;font-size:15px;line-height:1.8;color:rgba(255,255,255,.82)}}
+    body{{margin:0;padding:24px 0;background:#0C0C0D;font-family:"Inter",-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#F6F4F1}}
+    .wrap{{max-width:600px;margin:0 auto;background:#1B1B1E;border:1px solid rgba(255,255,255,.08);border-radius:24px;overflow:hidden}}
+    .bar{{height:4px;background:#FF2D8E}}
+    .hero{{line-height:0;font-size:0}}
+    .hdr{{padding:40px 44px 24px;text-align:center}}
+    .tile{{display:inline-block;background:#F6F4F1;border-radius:24px;padding:14px 22px 0;line-height:0;box-shadow:0 10px 34px rgba(255,45,142,.20)}}
+    .brand{{margin:20px 0 0;font-size:17px;font-weight:800;letter-spacing:-.02em;color:#F6F4F1}}
+    .brand b{{color:#FF2D8E}}
+    .chip{{display:inline-block;margin:20px 0 0;padding:6px 14px;border-radius:999px;background:rgba(255,45,142,.12);border:1px solid rgba(255,45,142,.30);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#FF6FB0}}
+    .chip .dot{{color:#C6F11A}}
+    .body{{padding:14px 44px 8px;font-size:16px;line-height:1.75;color:#E7E4E0}}
     .body p{{margin:0 0 16px}}
-    .body ul,.body ol{{margin:0 0 16px;padding-left:20px;color:rgba(255,255,255,.72)}}
-    .body li{{margin-bottom:6px}}
-    .body strong{{color:#fff}}
-    .cmd{{background:rgba(124,58,237,.12);border:1px solid rgba(124,58,237,.25);border-radius:8px;
-          padding:10px 16px;margin:6px 0;font-family:monospace;font-size:14px;color:#a78bfa;display:block}}
-    .box{{background:rgba(255,255,255,.04);border-left:3px solid #7c3aed;border-radius:0 10px 10px 0;padding:16px 20px;margin:20px 0}}
-    .sig{{color:rgba(255,255,255,.55);font-size:14px;margin-top:8px!important}}
-    .footer{{padding:18px 32px 24px;background:rgba(255,255,255,.02);border-top:1px solid rgba(255,255,255,.06);
-             font-size:12px;color:rgba(255,255,255,.28);line-height:1.7;text-align:center}}
-    .footer a{{color:rgba(255,255,255,.35);text-decoration:none}}
-    a{{color:#a78bfa;text-decoration:none}}
+    .body ul{{margin:0 0 16px;padding-left:20px}}
+    .body li{{margin-bottom:8px}}
+    .body strong{{color:#fff;font-weight:700}}
+    .lead{{font-size:19px;line-height:1.5;font-weight:600;color:#fff;margin:0 0 18px}}
+    .box{{background:rgba(255,45,142,.08);border-left:3px solid #FF2D8E;border-radius:0 12px 12px 0;padding:16px 20px;margin:22px 0;color:#F1D9E6;font-size:15px}}
+    .sig{{color:#9C9C9A;font-size:14px;margin:18px 0 0}}
+    .cta-wrap{{padding:8px 44px 40px;text-align:center}}
+    .cta{{display:inline-block;background:#FF2D8E;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 30px;border-radius:999px;box-shadow:0 8px 24px rgba(255,45,142,.35)}}
+    .footer{{padding:22px 44px 30px;border-top:1px solid rgba(255,255,255,.07);font-size:12px;color:#7E7E7C;line-height:1.7;text-align:center}}
+    .footer a{{color:#9C9C9A;text-decoration:underline}}
+    a{{color:#FF2D8E}}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="hdr">
-      <div class="pig">🐷</div>
-      <h1>PigBank</h1>
-      <p>Seu assistente financeiro inteligente</p>
-    </div>
+    <div class="bar"></div>
+    {header}
     <div class="body">{content}</div>
+    <div class="cta-wrap">
+      <a class="cta" href="{base}">Ver no painel &rarr;</a>
+    </div>
     <div class="footer">
-      Você recebe este email porque tem uma conta no PigBank.<br/>
-      Dúvidas? Use o comando <strong>ajuda</strong> no bot ou acesse
-      <a href="https://pigbankai.com">pigbankai.com</a><br/><br/>
+      Você recebe este e-mail porque tem uma conta no PigBank.<br/>
       {unsub_line}
     </div>
   </div>
 </body>
 </html>"""
+
+
+def _html_to_text(html: str) -> str:
+    """Versão em texto puro do corpo (transacional quase sempre tem uma; a
+    ausência é sinal de bulk pro Gmail). Strip simples, bom o bastante."""
+    import html as _htmlmod
+    import re as _re
+    t = _re.sub(r"(?i)<br\s*/?>", "\n", html)
+    t = _re.sub(r"(?i)</(p|li|div|h[1-6]|ul|ol|tr)>", "\n", t)
+    t = _re.sub(r"(?i)<li[^>]*>", "• ", t)
+    t = _re.sub(r"<[^>]+>", "", t)
+    t = _htmlmod.unescape(t)
+    t = _re.sub(r"[ \t]+", " ", t)
+    t = _re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
 
 
 # ─── Conteúdo de engajamento ──────────────────────────────────────────────────
@@ -454,10 +618,46 @@ def send_reengagement_email(to: str, user_id: int | None = None) -> bool:
         "Faz um tempinho que você não aparece. Manda 'saldo' no bot para "
         "ver como estão suas finanças.\n\nCom carinho, Piggy"
     )
-    headers = {"List-Unsubscribe": f"<{unsub}>"} if unsub else {}
+    headers = unsub_headers(unsub) if unsub else {}
     return send_email(
         to=to,
         subject="Piggy com saudade de você",
+        html_body=html,
+        text_body=text,
+        from_addr=EMAIL_FROM_PIGGY,
+        headers=headers or None,
+    )
+
+
+def send_free_upgrade_nudge_email(to: str, user_id: int | None = None, dashboard_url: str = "") -> bool:
+    """Nudge de conversão (B2) pro usuário Grátis ativo: mostra o que o Plus
+    destrava e convida pros 30 dias de teste. Piggy: entusiasmado, sem pressão."""
+    unsub = make_unsub_url(user_id, to) if user_id else ""
+    base = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    content = f"""
+      <p>Oi! Piggy aqui. 🐷</p>
+      <p>Vi que você usa o PigBank no Grátis — e ainda tem bastante coisa boa pra
+         destravar. No <strong>Plus</strong> você ganha:</p>
+      <ul>
+        <li><strong>Open Finance</strong> — conecta seu banco e o saldo atualiza sozinho</li>
+        <li><strong>Agentes do Piggy</strong> — Xerife, Repórter e Carteiro trabalhando por você</li>
+        <li><strong>Histórico ilimitado</strong>, caixinhas e cartões sem limite</li>
+      </ul>
+      <p>Dá pra <strong>testar 30 dias grátis</strong> — se não curtir, é só cancelar antes do
+         fim e você não paga nada.</p>
+      <p style="text-align:center;margin:24px 0"><a class="btn" href="{base}/precos">Testar o Plus grátis</a></p>
+      <p class="sig">Te espero lá,<br/><strong>Piggy 🐷</strong></p>
+    """
+    html = _piggy_html("Destrave o Plus — 30 dias grátis", content, unsub)
+    text = (
+        "Oi! Piggy aqui.\n\n"
+        "No Plus você destrava Open Finance, os agentes do Piggy e histórico ilimitado. "
+        f"Dá pra testar 30 dias grátis: {base}/precos\n\nTe espero lá, Piggy"
+    )
+    headers = unsub_headers(unsub) if unsub else {}
+    return send_email(
+        to=to,
+        subject="🐷 Destrave o Plus — 30 dias grátis",
         html_body=html,
         text_body=text,
         from_addr=EMAIL_FROM_PIGGY,
@@ -484,7 +684,7 @@ def send_tip_email(to: str, user_id: int | None = None) -> bool:
     """
     html = _piggy_html(f"Dica do Piggy: {title}", content, unsub)
     text = f"Eita! Piggy aqui.\n\nDica do mês: {title}\n\n{subtitle}\n\nUm abraço, Piggy"
-    headers = {"List-Unsubscribe": f"<{unsub}>"} if unsub else {}
+    headers = unsub_headers(unsub) if unsub else {}
     return send_email(
         to=to,
         subject=f"Uma dica do Piggy: {title}",
@@ -520,7 +720,7 @@ def send_insight_email(to: str, user_id: int | None = None) -> bool:
         "Este conteúdo é educativo e não é recomendação de investimento.\n\n"
         "Até a próxima, Piggy"
     )
-    headers = {"List-Unsubscribe": f"<{unsub}>"} if unsub else {}
+    headers = unsub_headers(unsub) if unsub else {}
     return send_email(
         to=to,
         subject=f"O Piggy encontrou algo interessante",
@@ -594,6 +794,29 @@ def send_password_reset_email(to: str, reset_url: str) -> bool:
     html = _base_html("Redefinição de senha — PigBank", content)
     text = f"Redefinição de senha — PigBank\n\nLink (expira em 30 min):\n{reset_url}"
     return send_email(to=to, subject="🔑 Redefinir senha — PigBank", html_body=html, text_body=text)
+
+
+def send_account_exists_notice(to: str, login_url: str = "", reset_url: str = "") -> bool:
+    """Aviso out-of-band enviado quando alguém tenta se cadastrar com e-mail/
+    telefone que já pertence a esta conta. Enviado NO LUGAR de revelar "já
+    existe" na resposta do cadastro (anti-enumeração)."""
+    login_url = login_url or "https://pigbankai.com/login"
+    reset_url = reset_url or login_url
+    content = f"""
+      <p>Olá!</p>
+      <p>Alguém tentou criar uma conta no <strong>PigBank</strong> usando dados que já pertencem à sua conta.</p>
+      <p><strong>Se foi você</strong>, não precisa criar outra — é só entrar:</p>
+      <p style="text-align:center"><a class="btn" href="{login_url}">🐷 Entrar na minha conta</a></p>
+      <p class="warn">Esqueceu a senha? <a href="{reset_url}">Recupere aqui</a>.<br/>
+        <strong>Se não foi você</strong>, pode ignorar este e-mail — nenhuma conta nova foi criada e nada mudou.</p>
+    """
+    html = _base_html("Você já tem conta — PigBank", content)
+    text = (
+        "Alguém tentou criar uma conta no PigBank com seus dados. "
+        f"Se foi você, entre em {login_url} (recupere a senha se precisar). "
+        "Se não foi, ignore — nada mudou."
+    )
+    return send_email(to=to, subject="🐷 Você já tem conta no PigBank", html_body=html, text_body=text)
 
 
 def send_data_export_link_email(

@@ -1,8 +1,18 @@
 name: Tests
 
+# push só na main (pega merge/commit direto); o trabalho de branch é coberto
+# pelo pull_request. Antes, `push` + `pull_request` sem filtro rodava o CI DUAS
+# vezes a cada push numa branch com PR aberto — dobrava o consumo de minutos.
 on:
   push:
+    branches: [main]
   pull_request:
+
+# Cancela runs anteriores do mesmo ref quando um novo push chega — vários
+# commits seguidos numa branch deixam de acumular runs paralelos até o fim.
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   pytest:
@@ -29,12 +39,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
 
       - name: Install dependencies
         run: |
@@ -51,3 +63,25 @@ jobs:
       - name: Run tests
         run: |
           PYTHONPATH=. pytest -q
+
+  # Varredura de CVE nas dependências. Não-bloqueante: sinaliza sem travar
+  # o merge/deploy (uma CVE sem fix disponível não deve segurar a main).
+  # O Dependabot (.github/dependabot.yml) abre os PRs de correção.
+  audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: pip-audit (informativo, nao bloqueia)
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r requirements.txt || echo "::warning title=pip-audit::Vulnerabilidades conhecidas encontradas (informativo, nao bloqueia; o Dependabot abre os PRs de correcao)."

@@ -108,7 +108,8 @@ async def analytics_top_merchants_route(
 
 
 @router.get("/insights/{user_id}/current")
-async def insights_current_route(request: Request, user_id: int, force: bool = False):
+@shared.limiter.limit("20/minute")
+async def insights_current_route(request: Request, user_id: int):
     """Insights acionáveis do Piggy, gerados via LLM (gpt-4o-mini).
 
     Recebe estado financeiro ATUAL (orçamentos, recorrentes, metas, KPIs) e
@@ -117,19 +118,21 @@ async def insights_current_route(request: Request, user_id: int, force: bool = F
     Fallback: se OPENAI_API_KEY ausente ou LLM falha, usa heurística antiga
     (`compute_active_insights`) pra não deixar o card vazio.
 
-    `?force=true` ignora cache (útil só pra debug).
+    Segurança: cada chamada é uma completion paga da LLM. Rate-limit por IP +
+    o `force` (bypass de cache) NÃO é mais exposto ao cliente — senão dava pra
+    chamar `?force=true` em loop e queimar tokens (custo/DoS de carteira).
     """
     shared.authorize_dashboard_access(request, user_id)
     from core.ai_patterns import generate_ai_insights
-    result = await asyncio.to_thread(generate_ai_insights, user_id, force=force)
+    result = await asyncio.to_thread(generate_ai_insights, user_id, force=False)
     return {"ok": True, "insights": result or []}
 
 
 @router.get("/analytics/{user_id}/patterns")
+@shared.limiter.limit("20/minute")
 async def analytics_patterns_route(
     request: Request,
     user_id: int,
-    force: bool = False,
 ):
     """Padrões comportamentais via LLM (gpt-4o-mini). Cache 24h.
 
@@ -141,9 +144,10 @@ async def analytics_patterns_route(
     Fallback: se LLM indisponível, retorna lista vazia (frontend mostra
     empty state). NÃO retorna a agregação bruta — só formato narrativo.
 
-    `?force=true` ignora cache (útil só pra debug).
+    Segurança: idem /insights — rate-limit por IP e `force` não exposto ao
+    cliente (cada chamada é uma completion paga; evita queimar tokens em loop).
     """
     shared.authorize_dashboard_access(request, user_id)
     from core.ai_patterns import generate_ai_patterns
-    result = await asyncio.to_thread(generate_ai_patterns, user_id, force=force)
+    result = await asyncio.to_thread(generate_ai_patterns, user_id, force=False)
     return {"ok": True, "patterns": result or []}

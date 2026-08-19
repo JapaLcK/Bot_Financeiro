@@ -1,8 +1,9 @@
 {
   "name": "PigBank",
   "short_name": "PigBank",
-  "description": "Dashboard financeiro pessoal em tempo real",
-  "start_url": "/",
+  "description": "PigBank — seu assistente financeiro no WhatsApp e na web",
+  "start_url": "/login",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#111111",
   "theme_color": "#111111",
@@ -10,13 +11,13 @@
   "lang": "pt-BR",
   "icons": [
     {
-      "src": "/brand/icon-192.png",
+      "src": "/brand/icon-192.png?v=2",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/brand/icon-512.png",
+      "src": "/brand/icon-512.png?v=2",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
@@ -26,8 +27,13 @@
   "shortcuts": [
     {
       "name": "Abrir Dashboard",
-      "url": "/",
+      "url": "/app",
       "description": "Ver resumo financeiro"
+    },
+    {
+      "name": "Lançar gasto",
+      "url": "/app?lancar=1",
+      "description": "Registrar um lançamento"
     }
   ]
 }

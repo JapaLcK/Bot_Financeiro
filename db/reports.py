@@ -102,6 +102,10 @@ def get_auth_user(user_id: int) -> dict | None:
     return _db_support.get_auth_user_impl(get_conn, user_id)
 
 
+def get_password_changed_at(user_id: int):
+    return _db_support.get_password_changed_at_impl(get_conn, user_id)
+
+
 def auto_link_auth_user(target_user_id: int, current_user_id: int) -> int:
     if int(target_user_id) == int(current_user_id):
         return int(target_user_id)
@@ -150,6 +154,10 @@ def update_user_plan(user_id: int, plan: str, expires_at=None) -> None:
     return _db_support.update_user_plan_impl(get_conn, user_id, plan, expires_at)
 
 
+def mark_plan_selected(user_id: int) -> None:
+    return _db_support.mark_plan_selected_impl(get_conn, user_id)
+
+
 def get_user_by_stripe_customer(stripe_customer_id: str) -> int | None:
     return _db_support.get_user_by_stripe_customer_impl(get_conn, stripe_customer_id)
 
@@ -166,6 +174,10 @@ def set_payment_status(user_id: int, status: str) -> None:
 # Verificação de email / reset de senha
 # ──────────────────────────────────────────────────────────────────────────────
 
+# Re-export: cadastro com e-mail/telefone já existente (anti-enumeração).
+AccountAlreadyExistsError = _db_support.AccountAlreadyExistsError
+
+
 def create_email_verification(
     email: str,
     password: str,
@@ -180,10 +192,15 @@ def create_email_verification(
     )
 
 
-def confirm_email_verification(email: str, code: str) -> dict:
-    return _db_support.confirm_email_verification_impl(
-        get_conn, get_or_create_canonical_user, create_link_code, email, code
+def confirm_email_verification(email: str, code: str, source: str = "web") -> dict:
+    result = _db_support.confirm_email_verification_impl(
+        get_conn, get_or_create_canonical_user, create_link_code, email, code, source
     )
+    # Planos v2 (2026-08-06): o trial NÃO nasce mais no cadastro. Ele é uma
+    # assinatura Stripe do plano escolhido (com cartão) e só é registrado quando
+    # a assinatura trialing nasce (webhook checkout.session.completed). Cadastro
+    # novo entra Grátis.
+    return result
 
 
 def attempt_whatsapp_phone_link(wa_id: str, current_user_id: int | None = None) -> dict:
@@ -200,9 +217,12 @@ def attempt_whatsapp_phone_link(wa_id: str, current_user_id: int | None = None) 
     )
 
     # Delega toda a lógica de match/merge ao db_support
-    return _db_support.attempt_whatsapp_phone_link_impl(
+    result = _db_support.attempt_whatsapp_phone_link_impl(
         get_conn, merge_users, wa_phone, wa_candidates, current_user_id
     )
+    # Planos v2 (2026-08-06): o trial não nasce mais no vínculo do WhatsApp — é
+    # uma assinatura Stripe com cartão, registrada no webhook do checkout.
+    return result
 
 
 def create_password_reset_token(email: str, minutes_valid: int = 30) -> str | None:
@@ -239,6 +259,30 @@ def get_users_for_engagement() -> list[dict]:
                 WHERE engagement_opt_out = false
                 ORDER BY last_activity_at DESC NULLS LAST
                 """
+            )
+            return cur.fetchall()
+
+
+def get_free_users_for_upgrade_nudge(active_within_days: int = 30) -> list[dict]:
+    """Candidatos ao nudge de upgrade (B2): contas no plano Grátis, ativas
+    recentemente, com e-mail e sem opt-out de engajamento. A dedup de reenvio
+    fica a cargo de recent_event_exists no scheduler (sem coluna nova).
+    Nota: trialing tem plan setado pro tier escolhido → COALESCE(plan,'free')
+    já exclui quem está em trial; churned volta a plan='free' no webhook."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT user_id, email
+                FROM auth_accounts
+                WHERE engagement_opt_out = false
+                  AND email IS NOT NULL
+                  AND COALESCE(plan, 'free') = 'free'
+                  AND last_activity_at IS NOT NULL
+                  AND last_activity_at >= now() - make_interval(days => %s)
+                ORDER BY last_activity_at DESC
+                """,
+                (int(active_within_days),),
             )
             return cur.fetchall()
 

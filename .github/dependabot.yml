@@ -1,0 +1,32 @@
+version: 2
+updates:
+  # Dependências Python (requirements.txt na raiz do repo)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+    # Agrupa updates de patch/minor num único PR pra reduzir ruído (dev solo).
+    # CVEs de segurança abrem PR próprio mesmo assim.
+    groups:
+      python-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Actions usadas nos workflows (.github/workflows)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "ci"

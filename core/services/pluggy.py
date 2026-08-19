@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import time
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -99,11 +101,67 @@ def update_pluggy_item(item_id: str, api_key: str | None = None) -> dict:
     return resp.json()
 
 
+def delete_pluggy_item(item_id: str, api_key: str | None = None) -> bool:
+    """DELETE /items/{id}: remove o item na Pluggy (libera o acesso pra reconectar).
+
+    Sem isso, desconectar no PigBank apagava só o nosso registro e o item ficava órfão
+    na Pluggy, bloqueando a reconexão ("já possui conexão com este acesso"). Retorna True
+    se removido (2xx) ou já inexistente (404); levanta PluggyApiError em erro inesperado.
+    """
+    if not item_id:
+        return False
+    key = api_key or create_pluggy_api_key()
+    with httpx.Client(timeout=_pluggy_timeout()) as client:
+        resp = client.delete(
+            f"{_pluggy_base_url()}/items/{item_id}",
+            headers={"X-API-KEY": key},
+        )
+    if resp.status_code in (200, 202, 204, 404):
+        return True
+    _raise_for_pluggy_response(resp, f"Falha ao deletar item {item_id} na Pluggy")
+    return True
+
+
 def list_pluggy_accounts(item_id: str, api_key: str | None = None) -> list[dict]:
     key = api_key or create_pluggy_api_key()
     data = _pluggy_get("/accounts", key, params={"itemId": item_id})
     results = data.get("results")
     return list(results) if isinstance(results, list) else []
+
+
+# Catálogo de connectors (bancos) cacheado em processo — muda raramente e é grande
+# (~250 itens). Chave do cache = include_sandbox; TTL configurável (default 6h).
+_CONNECTORS_CACHE: dict[bool, dict[str, Any]] = {}
+_CONNECTORS_TTL = float(os.getenv("PLUGGY_CONNECTORS_TTL", "21600"))
+
+
+def list_pluggy_connectors(
+    api_key: str | None = None, *, include_sandbox: bool = False
+) -> list[dict]:
+    """Lista os connectors (instituições) do Brasil disponíveis na Pluggy.
+
+    Cacheado em processo por `include_sandbox` (TTL `PLUGGY_CONNECTORS_TTL`). Retorna
+    os dicts crus da Pluggy (id, name, type, primaryColor, products, ...). Quando
+    include_sandbox=True, mescla os connectors de teste (dedup por id) — usado só no
+    beta pra permitir conectar o "Pluggy Bank" sem banco real."""
+    now = time.time()
+    cached = _CONNECTORS_CACHE.get(include_sandbox)
+    if cached and (now - cached["ts"]) < _CONNECTORS_TTL:
+        return cached["data"]
+
+    key = api_key or create_pluggy_api_key()
+    seen: dict[Any, dict] = {}
+    sandbox_flags = ["false"] + (["true"] if include_sandbox else [])
+    for sb in sandbox_flags:
+        data = _pluggy_get("/connectors", key, params={"countries": "BR", "sandbox": sb})
+        results = data.get("results")
+        for c in results if isinstance(results, list) else []:
+            cid = c.get("id")
+            if cid is not None:
+                seen[cid] = c
+    out = list(seen.values())
+    _CONNECTORS_CACHE[include_sandbox] = {"ts": now, "data": out}
+    return out
 
 
 def list_pluggy_investments(item_id: str, api_key: str | None = None) -> list[dict]:
@@ -129,17 +187,28 @@ def list_pluggy_transactions(
     api_key: str | None = None,
     *,
     max_pages: int = 60,
+    on_page: "Callable[[], None] | None" = None,
 ) -> list[dict]:
     """Puxa todas as transações de uma conta via /v2/transactions (paginação por cursor).
 
     O endpoint antigo /transactions (page-based) está deprecado até 2026-12-31; o v2
     devolve o cursor no campo `next` (null na última página) e o tamanho de página é
     fixo no servidor — passar `pageSize` retorna HTTP 400. Segue o cursor até acabar.
+
+    `on_page` é um heartbeat chamado antes de CADA página: como o loop pode levar
+    até max_pages requisições sequenciais (minutos), quem sincroniza usa isso pra
+    renovar o hold de e-mail dos agentes e não deixar a janela expirar no meio de
+    um sync longo. Fail-soft: falha do heartbeat nunca interrompe a busca.
     """
     key = api_key or create_pluggy_api_key()
     out: list[dict] = []
     params: dict[str, Any] = {"accountId": account_id}
     for _ in range(max_pages):
+        if on_page is not None:
+            try:
+                on_page()
+            except Exception:
+                pass
         data = _pluggy_get("/v2/transactions", key, params=params)
         results = data.get("results")
         if isinstance(results, list):
@@ -160,7 +229,10 @@ def create_pluggy_connect_token(user_id: int, webhook_url: str | None = None) ->
     if webhook_url:
         options["webhookUrl"] = webhook_url
 
-    products_env = (os.getenv("PLUGGY_PRODUCTS") or "ACCOUNTS,TRANSACTIONS,CREDIT_CARDS").strip()
+    # INVESTMENTS é obrigatório: o sync lê /investments pra achar a Caixinha
+    # (FIXED_INCOME/CDB). Se o item não coletar esse produto, /investments volta
+    # vazio e a detecção de caixinha (base do Banqueiro OF-native) quebra.
+    products_env = (os.getenv("PLUGGY_PRODUCTS") or "ACCOUNTS,TRANSACTIONS,CREDIT_CARDS,INVESTMENTS").strip()
     products = [p.strip().upper() for p in products_env.split(",") if p.strip()]
     if products:
         options["products"] = products

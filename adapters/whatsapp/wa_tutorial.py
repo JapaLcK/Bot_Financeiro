@@ -40,7 +40,7 @@ _TTL = 3600  # 1 hora — tutorial expira após isso
 
 # ── IDs de botões que pertencem ao tutorial ─────────────────────────────────
 TUTORIAL_BUTTON_IDS: set[str] = {
-    "tut_start", "tut_skip",
+    "tut_start", "tut_skip", "tut_try",
     "tut_2", "tut_cc", "tut_3", "tut_4", "tut_5", "tut_6",
     "tut_done",
     "tut_back_1", "tut_back_2", "tut_back_cc",
@@ -266,9 +266,29 @@ def _step_skip(wa_id: str) -> None:
     )
 
 
+def _step_try(wa_id: str) -> None:
+    """Onboarding "aprender fazendo": convida o usuário a mandar o primeiro
+    lançamento agora. Não guarda estado — a próxima mensagem segue o fluxo
+    normal de lançamento, e o nudge pós-primeiro-lançamento (em
+    core/handlers/launches.py) fecha o loop comemorando."""
+    _STATE.pop(wa_id, None)
+    send_text(
+        to=wa_id,
+        body=(
+            "🐷 Show! Me conta seu último gasto do seu jeito — não precisa de comando.\n\n"
+            "Tenta assim:\n"
+            "• *gastei 20 no almoço*\n"
+            "• *paguei 50 de uber*\n\n"
+            "Pode mandar aqui embaixo. 👇"
+        ),
+    )
+
+
 # ── Mapa de ações ────────────────────────────────────────────────────────────
 
 _ACTION_MAP: dict[str, object] = {
+    # onboarding "aprender fazendo"
+    "tut_try":     _step_try,
     # avanço
     "tut_start":   _step_1,
     "tut_2":       _step_2,
@@ -309,31 +329,21 @@ def send_welcome(wa_id: str, user_id: int | None = None) -> None:
         except Exception as exc:
             logger.debug("send_welcome name lookup failed: %s", exc)
 
-    header = f"🎉 Bem-vindo, {first_name}!" if first_name else "🎉 Bem-vindo ao PigBank!"
-    intro = (
-        "Sou o Piggy, seu assistente financeiro pessoal no WhatsApp.\n\n"
-        if first_name
-        else "Sou seu assistente financeiro pessoal no WhatsApp.\n\n"
-    )
+    header = f"🐷 Bem-vindo, {first_name}!" if first_name else "🐷 Bem-vindo ao PigBank!"
 
     send_interactive_buttons(
         to=wa_id,
         header=header,
         body=(
-            f"{intro}"
-            "Com apenas uma mensagem de texto, você consegue:\n\n"
-            "💰 Registrar gastos e receitas\n"
-            "📊 Consultar seu saldo em tempo real\n"
-            "💳 Gerenciar cartões, crédito e parcelas\n"
-            "📦 Criar caixinhas de poupança\n"
-            "📈 Acompanhar investimentos com rendimento\n"
-            "🧾 Importar extratos bancários (.OFX)\n"
-            "🖥️ Acessar seu dashboard interativo\n\n"
-            "Quer um tour rápido de 2 minutos? 👇"
+            "Sou o Piggy, seu assistente de finanças aqui no WhatsApp. 💚\n\n"
+            "A melhor forma de aprender é fazendo — em 10 segundos você registra "
+            "seu primeiro gasto e vê como é simples.\n\n"
+            "Bora? 👇"
         ),
         footer="PigBank — seu dinheiro, sob controle",
         buttons=[
-            {"id": "tut_start", "title": "🚀 Começar tour!"},
+            {"id": "tut_try",   "title": "🚀 Meu 1º gasto"},
+            {"id": "tut_start", "title": "📋 Tour completo"},
             {"id": "tut_skip",  "title": "⚡ Usar direto"},
         ],
     )

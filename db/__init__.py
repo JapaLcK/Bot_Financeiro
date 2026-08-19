@@ -47,6 +47,9 @@ from .accounts import (
     set_balance,
     add_launch_and_update_balance,
     list_launches,
+    list_launches_by_tipo,
+    latest_launch_id,
+    get_last_inserted_launch,
     resolve_user_seq_to_id,
     get_launch_user_seq,
     display_id_for,
@@ -111,6 +114,7 @@ from .categories import (
     list_user_category_rules,
     resolve_category_rule_target,
     get_uncategorized_launches,
+    list_custom_category_names,
 )
 
 # ── Ações pendentes ───────────────────────────────────────────────────────────
@@ -189,10 +193,18 @@ from .open_finance import (
     count_open_finance_connections,
     list_open_finance_user_ids,
     list_pluggy_item_ids,
+    list_pluggy_connections_for_trial_sweep,
+    pause_open_finance_connection,
     list_connections_needing_reconnect,
     get_open_finance_connection_by_item_id,
     save_open_finance_sync,
     save_open_finance_investments,
+    sync_open_finance_caixinhas,
+    list_caixinha_candidates,
+    bind_pocket_to_caixinha,
+    list_banqueiro_pockets,
+    banqueiro_pocket_pace,
+    update_pocket_of_last_seen,
     delete_open_finance_transactions,
     classify_open_finance_launch,
     merchant_similarity,
@@ -210,10 +222,57 @@ from .open_finance import (
     get_consolidated_balance,
     disconnect_open_finance_connection,
     save_pluggy_open_finance_item,
+    user_synced_within,
     update_pluggy_open_finance_item_status,
 )
 
+# ── Renda variável (ações/FIIs via Open Finance) ──────────────────────────────
+from .rv import (
+    list_rv_positions,
+    rv_portfolio_summary,
+    list_of_fixed_income,
+    of_fixed_income_summary,
+    pluggy_rv_kind,
+    RV_KIND_LABELS,
+)
+
+# ── Push notifications (app iOS) ──────────────────────────────────────────────
+from .push import (
+    register_push_token,
+    delete_push_token,
+    list_push_tokens,
+)
+
+# ── Agentes do Piggy ──────────────────────────────────────────────────────────
+from .agents import (
+    AGENT_KINDS,
+    list_agents,
+    get_agent,
+    count_active_agents,
+    activate_agent,
+    pause_agent,
+    record_agent_event,
+    record_or_refresh_agent_event,
+    mark_agent_event_stale,
+    claim_agent_events_for_email,
+    unclaim_agent_events,
+    hold_agent_emails,
+    list_agent_events,
+    mark_agent_events_seen,
+    agents_summary,
+    list_agents_pending_email,
+    list_unemailed_events,
+    mark_events_emailed,
+    touch_agent_emailed,
+    set_agent_email_enabled,
+    list_users_with_active_agents,
+)
+
 # ── Relatórios, Auth, Dashboard, Engajamento ──────────────────────────────────
+from .checkout_funnel import (
+    record_checkout_started,
+    record_checkout_completed,
+)
 from .reports import (
     set_daily_report_enabled,
     set_daily_report_hour,
@@ -233,21 +292,25 @@ from .reports import (
     register_auth_user,
     login_auth_user,
     get_auth_user,
+    get_password_changed_at,
     auto_link_auth_user,
     create_dashboard_session,
     get_dashboard_session,
     consume_dashboard_session,
     update_user_plan,
+    mark_plan_selected,
     get_user_by_stripe_customer,
     set_stripe_customer,
     set_payment_status,
     create_email_verification,
+    AccountAlreadyExistsError,
     confirm_email_verification,
     attempt_whatsapp_phone_link,
     create_password_reset_token,
     consume_password_reset_token,
     update_last_activity,
     get_users_for_engagement,
+    get_free_users_for_upgrade_nudge,
     mark_reengagement_sent,
     mark_tip_sent,
     mark_insight_sent,
@@ -348,6 +411,7 @@ __all__ = [
     "link_platform_identity",
     # accounts
     "get_balance", "set_balance", "add_launch_and_update_balance", "list_launches",
+    "list_launches_by_tipo", "latest_launch_id", "get_last_inserted_launch",
     "resolve_user_seq_to_id", "get_launch_user_seq", "display_id_for",
     "update_launch_category", "update_launch_fields", "update_launch_categories_bulk", "export_launches",
     "get_launches_by_period", "get_summary_by_period", "get_top_expense_categories",
@@ -368,6 +432,7 @@ __all__ = [
     "delete_category_rules_by_category", "list_categories",
     "get_memorized_category", "upsert_category_rule", "list_user_category_rules",
     "resolve_category_rule_target", "get_uncategorized_launches",
+    "list_custom_category_names",
     # pending
     "set_pending_action", "get_pending_action", "clear_pending_action",
     # budgets
@@ -401,6 +466,12 @@ __all__ = [
     "list_pluggy_item_ids", "list_connections_needing_reconnect",
     "get_open_finance_connection_by_item_id", "save_open_finance_sync",
     "save_open_finance_investments",
+    "sync_open_finance_caixinhas",
+    "list_rv_positions", "rv_portfolio_summary", "pluggy_rv_kind", "RV_KIND_LABELS",
+    "register_push_token", "delete_push_token", "list_push_tokens",
+    "list_of_fixed_income", "of_fixed_income_summary",
+    "list_caixinha_candidates", "bind_pocket_to_caixinha",
+    "list_banqueiro_pockets", "banqueiro_pocket_pace", "update_pocket_of_last_seen",
     "delete_open_finance_transactions", "classify_open_finance_launch",
     "merchant_similarity", "pick_reconciliation_match",
     "confirm_reconciliation", "reject_reconciliation", "reconcile_manual_launch",
@@ -408,8 +479,9 @@ __all__ = [
     "detect_bill_increase", "detect_open_finance_bill_increase",
     "import_open_finance_launches", "import_open_finance_credit",
     "sync_imported_open_finance_updates", "get_consolidated_balance",
-    "disconnect_open_finance_connection", "save_pluggy_open_finance_item",
+    "disconnect_open_finance_connection", "save_pluggy_open_finance_item", "user_synced_within",
     "update_pluggy_open_finance_item_status",
+    "list_pluggy_connections_for_trial_sweep", "pause_open_finance_connection",
     # reports
     "set_daily_report_enabled", "set_daily_report_hour", "get_daily_report_prefs",
     "set_weekly_report_enabled", "set_monthly_report_enabled",
@@ -418,12 +490,14 @@ __all__ = [
     "mark_daily_report_sent", "claim_daily_report_send", "was_daily_report_sent_today",
     "claim_weekly_report_send", "claim_monthly_report_send",
     "get_last_ofx_import_end_date",
-    "register_auth_user", "login_auth_user", "get_auth_user", "auto_link_auth_user",
+    "register_auth_user", "login_auth_user", "get_auth_user", "get_password_changed_at", "auto_link_auth_user",
     "create_dashboard_session", "get_dashboard_session", "consume_dashboard_session",
-    "update_user_plan", "get_user_by_stripe_customer", "set_stripe_customer", "set_payment_status",
-    "create_email_verification", "confirm_email_verification", "attempt_whatsapp_phone_link",
+    "update_user_plan", "mark_plan_selected", "get_user_by_stripe_customer", "set_stripe_customer", "set_payment_status",
+    "record_checkout_started", "record_checkout_completed",
+    "create_email_verification", "AccountAlreadyExistsError", "confirm_email_verification", "attempt_whatsapp_phone_link",
     "create_password_reset_token", "consume_password_reset_token",
-    "update_last_activity", "get_users_for_engagement", "mark_reengagement_sent",
+    "update_last_activity", "get_users_for_engagement", "get_free_users_for_upgrade_nudge",
+    "mark_reengagement_sent",
     "mark_tip_sent", "mark_insight_sent", "set_engagement_opt_out",
     "set_tip_email_opt_out", "set_insight_email_opt_out", "set_whatsapp_updates_opt_out",
     "sync_engagement_opt_out",
@@ -460,4 +534,13 @@ __all__ = [
     "compute_behavioral_patterns",
     # insights (Sprint 7)
     "compute_active_insights",
+    # agentes do Piggy
+    "AGENT_KINDS", "list_agents", "get_agent", "count_active_agents",
+    "activate_agent", "pause_agent", "record_agent_event",
+    "record_or_refresh_agent_event", "mark_agent_event_stale",
+    "claim_agent_events_for_email",
+    "unclaim_agent_events", "hold_agent_emails", "list_agent_events",
+    "mark_agent_events_seen", "agents_summary", "list_users_with_active_agents",
+    "list_agents_pending_email", "list_unemailed_events", "mark_events_emailed",
+    "touch_agent_emailed", "set_agent_email_enabled",
 ]

@@ -180,8 +180,21 @@ def _investment_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
     try:
         db.investment_deposit_from_account(user_id, name, amount)
         return f'✅ Aporte de R$ {amount:.2f} no "{name}" registrado.'
+    except LookupError:
+        # INV_NOT_FOUND: o cadastro é só pelo dashboard, então aponta o caminho.
+        return (
+            f'🐷 Não achei o investimento "{name}". '
+            "Cadastre ele no dashboard primeiro e depois manda o aporte."
+        )
+    except ValueError as e:
+        if "INSUFFICIENT_ACCOUNT" in str(e):
+            return "🐷 Saldo insuficiente na conta pra esse aporte."
+        return "🐷 Valor inválido pra aporte."
     except Exception as e:
-        return f"🐷 Não consegui aportar: {e}"
+        from core.services.plan_limits import PlanLimitExceeded
+        if isinstance(e, PlanLimitExceeded):
+            return e.message
+        return "🐷 Não consegui aportar agora. Tenta de novo em instantes."
 
 
 # ─── Write: investment_withdraw (resgate) ───────────────────────────────────
@@ -240,8 +253,14 @@ def _delete_investment_execute(user_id: int, args: dict[str, Any]) -> str:
     try:
         db.delete_investment(user_id, name)
         return f'✅ Investimento "{name}" apagado.'
-    except Exception as e:
-        return f"🐷 Não consegui apagar: {e}"
+    except LookupError:
+        return f'🐷 Não achei o investimento "{name}".'
+    except ValueError as e:
+        if "INV_NOT_ZERO" in str(e):
+            return f'🐷 O investimento "{name}" ainda tem saldo — resgata tudo antes de apagar.'
+        return f'🐷 Não consegui apagar "{name}".'
+    except Exception:
+        return "🐷 Não consegui apagar agora. Tenta de novo em instantes."
 
 
 # ─── Tools registry ─────────────────────────────────────────────────────────
