@@ -68,6 +68,8 @@ _RESUMABLE_PENDING_TYPES: frozenset[str] = frozenset({
     "credit_delete_card",
     "installment_pending",
     "pay_bill_choice",
+    "investment_pick",
+    "investment_create",
 })
 
 
