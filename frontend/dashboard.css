@@ -975,7 +975,9 @@ body.light #alert-banner.exceeded { background:rgba(220,38,38,.04); border-color
 body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-color:rgba(245,158,11,.18); }
 #alert-banner .alert-banner-head { display:flex;align-items:flex-start;justify-content:space-between;gap:12px; }
 #alert-banner .alert-banner-body { flex:1;min-width:0; }
-.alert-row { display:flex;align-items:center;gap:8px;padding:2px 0; }
+.alert-row { display:block;line-height:1.45;padding:2px 0;overflow-wrap:break-word; }
+.alert-row > b { font-weight:600; }
+.alert-row button { vertical-align:baseline; }
 .alert-close {
   appearance:none;background:transparent;border:none;color:inherit;cursor:pointer;
   font-size:1rem;line-height:1;padding:2px 4px;border-radius:6px;opacity:.72;flex-shrink:0;
