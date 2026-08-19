@@ -46,38 +46,3 @@ def test_rollback_continua_valendo_depois_do_init_db(user_id):
     assert db.list_investments(user_id) == []
     assert float(db.get_balance(user_id)) == 10.0
 
-
-# ─── O pool assíncrono do frontend tem a mesma rede ─────────────────────────
-#
-# Nenhum código liga autocommit nesse pool hoje: a guarda fecha a CLASSE, não a
-# instância. Sem ela, o dia em que alguém precisar de DDL no caminho async
-# repete o mesmo bug — e ele é silencioso, porque só aparece quando uma
-# transação estoura no meio.
-
-def test_pool_async_tambem_devolve_conexao_transacional():
-    import asyncio
-    import os
-
-    from psycopg.rows import dict_row
-    from psycopg_pool import AsyncConnectionPool
-
-    from frontend.routes.shared import _reset_conn_async
-
-    async def cenario():
-        pool = AsyncConnectionPool(
-            os.environ["DATABASE_URL"], min_size=1, max_size=2,
-            kwargs={"row_factory": dict_row}, reset=_reset_conn_async, open=False,
-        )
-        await pool.open(wait=True, timeout=10)
-        try:
-            async with pool.connection() as conn:
-                await conn.set_autocommit(True)   # simula o que o init_db faz
-            estados = []
-            for _ in range(6):
-                async with pool.connection() as conn:
-                    estados.append(conn.autocommit)
-            return estados
-        finally:
-            await pool.close()
-
-    assert asyncio.run(cenario()) == [False] * 6

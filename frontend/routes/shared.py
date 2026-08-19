@@ -164,18 +164,14 @@ _db_pool: AsyncConnectionPool | None = None
 _db_pool_lock = asyncio.Lock()
 
 
-async def _reset_conn_async(conn) -> None:
-    """Mesma rede do pool síncrono (db/connection.py::_reset_conn).
-
-    Nenhum código liga `autocommit` neste pool hoje — a guarda é para fechar a
-    classe, não a instância. Conexão em autocommit é conexão sem rollback, e o
-    envenenamento é permanente: dura o resto da vida do processo, porque o
-    psycopg_pool faz rollback ao devolver a conexão mas não desfaz o autocommit.
-    """
-    if conn.autocommit:
-        await conn.set_autocommit(False)
-
-
+# NÃO ponha `reset=` neste pool. O pool síncrono (db/connection.py::_reset_conn)
+# tem essa guarda porque lá o bug existia de verdade: o init_db ligava
+# `autocommit` numa conexão do pool e não restaurava. Aqui nada liga autocommit
+# (`git grep autocommit` confirma), e a guarda simétrica foi tentada e revertida:
+# um callback de reset async vira uma task no event loop, e o encerramento do
+# loop passa a pendurar em `asyncio.runners._cancel_all_tasks`. Medido: 33
+# testes falhando e a suíte de 87s para 268s, com o arquivo
+# tests/test_unsubscribe_one_click.py travando por completo.
 async def _get_db_pool() -> AsyncConnectionPool:
     global _db_pool
     if _db_pool is not None:
@@ -189,7 +185,6 @@ async def _get_db_pool() -> AsyncConnectionPool:
             max_size=int(os.getenv("DB_POOL_MAX", "8")),
             timeout=DB_CONNECT_TIMEOUT,
             kwargs={"row_factory": dict_row},
-            reset=_reset_conn_async,
             open=False,
         )
         await pool.open(wait=True, timeout=DB_CONNECT_TIMEOUT)
