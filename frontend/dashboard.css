@@ -1997,6 +1997,13 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 }
 #piggy-fab:hover { transform: translateY(-3px) scale(1.05); box-shadow: 0 16px 36px rgba(255,45,142,.55); }
 #piggy-fab.open { transform: rotate(360deg); }
+/* Arrastável só no app/PWA: touch-action none pro gesto não rolar a página.
+   No desktop/site a bolinha fica fixa (arrasto desligado no JS). */
+html.pb-app #piggy-fab { touch-action: none; }
+#piggy-fab.pb-dragging { transition: none !important; cursor: grabbing; }
+/* A imagem interna não intercepta ponteiro: o botão é o único alvo e evita o
+   drag nativo de imagem no desktop. */
+#piggy-fab img { pointer-events: none; -webkit-user-drag: none; user-select: none; }
 #piggy-fab .fab-badge {
   position: absolute; top: -4px; right: -4px;
   background: #ef4444; color: #fff; font-size: .58rem; font-weight: 800;
