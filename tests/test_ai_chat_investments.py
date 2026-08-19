@@ -288,3 +288,141 @@ def test_delete_investment_recusa_quando_tem_saldo(user_id):
 def test_delete_investment_recusa_nome_vazio(user_id):
     out = _delete_investment_execute(user_id, {"name": "   "})
     assert "🐷" in out
+
+
+# ─── Aporte sem o ativo cadastrado: conversar em vez de mandar pro dashboard ─
+#
+# O user está no WhatsApp querendo aportar. Antes, o INV_NOT_FOUND respondia
+# "cadastre no dashboard primeiro" — beco sem saída. Agora a tool devolve o
+# material pro modelo PERGUNTAR: qual dos existentes, ou se quer criar.
+
+# ATENÇÃO ao contrato (tools/_base.py): em tool de ESCRITA o retorno de
+# `execute` É a mensagem final entregue ao user — não há segundo round-trip com
+# o LLM para reformular. Então a pergunta tem que estar NA MENSAGEM. Texto de
+# instrução ("PERGUNTE ao user...", "chame create_investment com...") vazaria
+# literalmente pro WhatsApp. Estes testes existem para travar isso.
+
+_VAZAMENTOS = ("PERGUNTE", "create_investment", "initial_amount", "o user ",
+               "chame ", "tool")
+
+
+def _assert_sem_instrucao_vazada(msg):
+    for marca in _VAZAMENTOS:
+        assert marca not in msg, f"instrução para o modelo vazou pro user: {marca!r} em {msg!r}"
+
+
+def test_deposit_inexistente_com_carteira_pergunta_qual_na_propria_mensagem(user_id):
+    db.create_investment(user_id, "Renda Fixa BB", 0.14, "yearly")
+    db.create_investment(user_id, "CDB Inter", 0.12, "yearly")
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+
+    out = _investment_deposit_execute(user_id, {"name": "Renda Fixa", "amount": 800})
+
+    assert "dashboard" not in out.lower()      # a saída deixou de ser essa
+    assert "Renda Fixa BB" in out and "CDB Inter" in out
+    assert "?" in out                          # é uma pergunta ao user
+    _assert_sem_instrucao_vazada(out)
+
+    # e nada foi aportado às cegas
+    invs = {i["name"]: float(i["balance"]) for i in db.list_investments(user_id)}
+    assert invs["Renda Fixa BB"] == 0.0 and invs["CDB Inter"] == 0.0
+
+
+def test_deposit_inexistente_sem_carteira_oferece_criar_na_propria_mensagem(user_id):
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+
+    out = _investment_deposit_execute(user_id, {"name": "Renda Fixa", "amount": 800})
+
+    assert "dashboard" not in out.lower()
+    assert "800.00" in out                     # o valor não pode se perder
+    assert "?" in out
+    _assert_sem_instrucao_vazada(out)
+
+
+def test_create_com_nome_existente_e_aporte_nao_anuncia_criacao_falsa(user_id):
+    """create_investment_db volta antes do aporte quando o nome já existe —
+    então "criado com aporte de R$ X" seria falso nos dois pontos."""
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+
+    out = _create_investment_execute(user_id, {
+        "name": "Renda Fixa", "rate": 14, "period": "yearly", "initial_amount": 800,
+    })
+
+    assert "criado" not in out
+    # o aporte que o user pediu aconteceu de verdade
+    invs = {i["name"]: float(i["balance"]) for i in db.list_investments(user_id)}
+    assert invs["Renda Fixa"] == 800.0
+    assert float(db.get_balance(user_id)) == 200.0
+
+
+def test_create_com_nome_existente_sem_aporte_avisa_que_ja_existe(user_id):
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+
+    out = _create_investment_execute(user_id, {
+        "name": "Renda Fixa", "rate": 14, "period": "yearly",
+    })
+
+    assert "já existe" in out
+    assert "criado" not in out
+
+
+# ─── create_investment com aporte inicial ───────────────────────────────────
+
+def test_create_com_initial_amount_cria_e_aporta(user_id):
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+
+    out = _create_investment_execute(user_id, {
+        "name": "Renda Fixa", "rate": 14, "period": "yearly", "initial_amount": 800,
+    })
+
+    assert "✅" in out and "800" in out
+    invs = {i["name"]: float(i["balance"]) for i in db.list_investments(user_id)}
+    assert invs["Renda Fixa"] == 800.0
+    # o aporte saiu da conta corrente
+    assert float(db.get_balance(user_id)) == 200.0
+
+
+def test_create_sem_initial_amount_continua_comecando_zerado(user_id):
+    out = _create_investment_execute(user_id, {
+        "name": "CDB Inter", "rate": 12, "period": "yearly",
+    })
+
+    assert "✅" in out
+    invs = {i["name"]: float(i["balance"]) for i in db.list_investments(user_id)}
+    assert invs["CDB Inter"] == 0.0
+
+
+def test_create_com_aporte_maior_que_o_saldo_nao_cria_nada(user_id):
+    """Criação e aporte são a mesma transação: sem saldo, nada é gravado.
+    A resposta não pode dizer que o cadastro ficou de pé."""
+    db.add_launch_and_update_balance(user_id, "receita", 10, None, "seed")
+
+    out = _create_investment_execute(user_id, {
+        "name": "Renda Fixa", "rate": 14, "period": "yearly", "initial_amount": 800,
+    })
+
+    assert "🐷" in out and "Não criei" in out
+    assert db.list_investments(user_id) == []
+    assert float(db.get_balance(user_id)) == 10.0
+
+
+def test_create_recusa_initial_amount_invalido(user_id):
+    out = _create_investment_execute(user_id, {
+        "name": "X", "rate": 14, "period": "yearly", "initial_amount": "abc",
+    })
+    assert "🐷" in out
+    assert db.list_investments(user_id) == []
+
+
+def test_summary_de_confirmacao_mostra_o_aporte(user_id):
+    """O texto que o user confirma precisa dizer que a conta vai ser debitada."""
+    from core.services.ai_chat.tools.investments import _create_investment_summary
+
+    com = _create_investment_summary(
+        {"name": "Renda Fixa", "rate": 14, "period": "yearly", "initial_amount": 800}
+    )
+    sem = _create_investment_summary({"name": "Renda Fixa", "rate": 14, "period": "yearly"})
+
+    assert "800" in com and "aportar" in com
+    assert "800" not in sem
