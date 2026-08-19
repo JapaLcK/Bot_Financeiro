@@ -523,9 +523,14 @@ def process_message(message: InboundMessage) -> None:
                     user_id=uid,
                     details={"wa_id": message.wa_id},
                 )
+                # Onboarding: tutorial só pra cliente NOVO. status == "linked"
+                # significa que ele acabou de vincular NESTA primeira mensagem
+                # (quem já mandou mensagem antes cai em "already_linked" e não
+                # vê o tutorial). E só quando essa primeira mensagem é uma
+                # SAUDAÇÃO: se o cliente já abre com um comando ("saldo",
+                # "gastei 50..."), ele já sabe usar — a gente executa o comando
+                # e não interrompe com o tour.
                 if _is_greeting(message.text or ""):
-                    # Só interrompe para onboarding quando a mensagem era uma saudação.
-                    # Se o usuário mandou "saldo", "gastei..." etc., segue e executa o comando.
                     try:
                         send_welcome(reply_to, user_id=uid)
                     except Exception as e:
