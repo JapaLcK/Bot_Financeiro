@@ -151,27 +151,6 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
         if resp is not None:
             return resp
 
-    # Perguntas do fluxo de aporte ("em qual investimento?", "qual o nome?",
-    # "qual a taxa?"). Nas etapas de nome/taxa QUALQUER texto é resposta válida
-    # — então, sem uma saída, "saldo" viraria um investimento chamado "Saldo".
-    # A saída é a mesma regra do guard anti-órfão abaixo: outro comando claro
-    # abandona a pergunta. A família investments.* fica de fora porque
-    # "CDB Nubank" é resposta, não comando; sim/não também, que resolvem aqui.
-    if pending and pending.get("action_type") in {"investment_pick", "investment_create"}:
-        abandonou = (
-            confidence >= 0.55
-            and intent != "out_of_scope"
-            and not intent.startswith("investments.")
-            and intent not in ("confirm.yes", "confirm.no")
-        )
-        if abandonou:
-            db.clear_pending_action(user_id)
-            pending = None
-        else:
-            resp = h_investments.resolve_pending(user_id, text, pending)
-            if resp is not None:
-                return resp
-
     # -----------------------------------------------------------------------
     # 0c. Guard anti-órfão: uma confirmação destrutiva armada (delete_launch/
     #     pocket/investment esperando "sim"/"não") só vale enquanto o user está

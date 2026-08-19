@@ -24,8 +24,6 @@ from typing import Any
 import db
 from utils_text import fmt_rate
 
-from core.handlers.investments import _msg_saldo_insuficiente, _saldos
-
 from ._base import Tool
 
 
@@ -131,10 +129,7 @@ def _create_investment_summary(args: dict[str, Any]) -> str:
     period = args.get("period")
     period_pt = {"daily": "ao dia", "monthly": "ao mês", "yearly": "ao ano"}.get(period or "", period)
     rate_part = f" a {float(rate):.2f}% {period_pt}" if rate is not None else ""
-    inicial = args.get("initial_amount")
-    # o aporte debita a conta: precisa aparecer no texto que o user confirma
-    aporte_part = f" e aportar R$ {float(inicial):.2f} nele" if inicial else ""
-    return f'criar o investimento "{args.get("name")}"{rate_part}{aporte_part}'
+    return f'criar o investimento "{args.get("name")}"{rate_part}'
 
 
 def _create_investment_execute(user_id: int, args: dict[str, Any]) -> str:
@@ -150,64 +145,18 @@ def _create_investment_execute(user_id: int, args: dict[str, Any]) -> str:
         return '🐷 O period precisa ser "daily", "monthly" ou "yearly".'
     if rate_pct <= 0:
         return "🐷 A taxa precisa ser maior que zero."
-
-    initial_raw = args.get("initial_amount")
-    try:
-        initial_amount = float(initial_raw or 0)
-    except (TypeError, ValueError):
-        return "🐷 Valor do aporte inicial inválido."
-    if initial_amount < 0:
-        return "🐷 O aporte inicial não pode ser negativo."
-
     # Storage: a tabela investments guarda rate como decimal/multiplier
     # (1.00 == 100%). O dashboard multiplica por 100 pra exibir. fmt_rate
     # tolera ambas as escalas pra compat, mas o caminho consistente e
     # sempre gravar decimal.
     rate_decimal = rate_pct / 100
     try:
-        # create_investment_db (e não create_investment) porque só ele aceita
-        # aporte inicial NA MESMA transação — é o mesmo caminho do dashboard,
-        # então o ativo nasce com asset_type/indexer/tax_profile preenchidos.
-        _launch_id, _inv_id, canon = db.create_investment_db(
-            user_id,
-            name,
-            rate_decimal,
-            period,
-            "Criado pelo chat do Pig",
-            initial_amount=initial_amount or None,
-            initial_note=f"Aporte inicial em {name}" if initial_amount else None,
-            # Com banco conectado o dinheiro está no banco, não na Carteira —
-            # mesma regra do handler (core/handlers/investments.py::_saldos).
-            debit_account=not _saldos(user_id)["tem_banco"],
-        )
+        db.create_investment(user_id, name, rate_decimal, period)
+        return f'✅ Investimento "{name}" criado.'
     except ValueError as e:
-        if str(e) == "INSUFFICIENT_ACCOUNT":
-            # criação + aporte são uma transação só: sem saldo, nada foi gravado
-            return (
-                f'🐷 Não criei "{name}". '
-                + _msg_saldo_insuficiente(user_id, initial_amount)
-            )
         return f"🐷 Não consegui criar: {e}"
     except Exception as e:
-        from core.services.plan_limits import PlanLimitExceeded
-        if isinstance(e, PlanLimitExceeded):
-            return e.message
         return f"🐷 Não consegui criar: {e}"
-
-    # `_launch_id is None` = já existia: o create_investment_db retorna antes de
-    # lançar o aporte inicial (medido: o saldo da conta não muda). Anunciar
-    # "criado com aporte" aqui confirmaria dinheiro que não saiu do lugar.
-    if _launch_id is None:
-        if not initial_amount:
-            return f'🐷 O investimento "{canon}" já existe.'
-        return _investment_deposit_execute(user_id, {"name": canon, "amount": initial_amount})
-
-    if initial_amount:
-        return (
-            f'✅ Investimento "{canon}" criado com aporte de '
-            f"R$ {initial_amount:.2f}. Já aparece no seu dashboard."
-        )
-    return f'✅ Investimento "{canon}" criado.'
 
 
 # ─── Write: investment_deposit (aporte) ─────────────────────────────────────
@@ -229,38 +178,17 @@ def _investment_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
     if not name or amount <= 0:
         return "🐷 Faltou o nome do investimento ou o valor."
     try:
-        db.investment_deposit_from_account(
-            user_id, name, amount,
-            debit_account=not _saldos(user_id)["tem_banco"],
-        )
+        db.investment_deposit_from_account(user_id, name, amount)
         return f'✅ Aporte de R$ {amount:.2f} no "{name}" registrado.'
     except LookupError:
-        # INV_NOT_FOUND. Mandar pro dashboard aqui era um beco: o user está no
-        # WhatsApp querendo aportar. A pergunta vai NA MENSAGEM, não como
-        # instrução pro modelo: em tool de escrita, o retorno de `execute` É a
-        # resposta final que chega no WhatsApp (contrato em tools/_base.py) —
-        # não há segundo round-trip com o LLM para reformular. Texto de
-        # instrução aqui vazaria "PERGUNTE ao user..." direto pro cliente.
-        try:
-            existentes = [r["name"] for r in db.accrue_all_investments(user_id)]
-        except Exception:
-            existentes = []
-        if existentes:
-            return (
-                f'🐷 Não achei "{name}" na sua carteira. Você tem: '
-                + ", ".join(existentes)
-                + f". Em qual desses você quer aportar os R$ {amount:.2f}? "
-                  "Se for um novo, me diz o nome e quanto rende que eu crio."
-            )
+        # INV_NOT_FOUND: o cadastro é só pelo dashboard, então aponta o caminho.
         return (
-            "🐷 Você ainda não tem investimento cadastrado, então não dá pra "
-            f'aportar em "{name}" ainda. Quer que eu crie agora? Me diz o nome '
-            f"e quanto rende (ex: *cria CDB Nubank a 100% do CDI e investe "
-            f'{amount:.2f}*) que eu cadastro e já lanço o aporte.'
+            f'🐷 Não achei o investimento "{name}". '
+            "Cadastre ele no dashboard primeiro e depois manda o aporte."
         )
     except ValueError as e:
         if "INSUFFICIENT_ACCOUNT" in str(e):
-            return "🐷 " + _msg_saldo_insuficiente(user_id, amount)
+            return "🐷 Saldo insuficiente na conta pra esse aporte."
         return "🐷 Valor inválido pra aporte."
     except Exception as e:
         from core.services.plan_limits import PlanLimitExceeded
@@ -295,7 +223,6 @@ def _investment_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
     try:
         _lid, _acc, _inv, canon, taxes = db.investment_withdraw_to_account(
             user_id, name, None if withdraw_all else amount, withdraw_all=withdraw_all,
-            credit_account=not _saldos(user_id)["tem_banco"],
         )
         gross = float(taxes.get("gross", 0)) if taxes else 0.0
         tax = (float(taxes.get("ir", 0)) + float(taxes.get("iof", 0))) if taxes else 0.0
@@ -392,7 +319,7 @@ TOOLS: list[Tool] = [
             "type": "function",
             "function": {
                 "name": "create_investment",
-                "description": "Cria um investimento novo. Passe initial_amount pra já lançar o primeiro aporte na mesma operação (é o caso de 'quero investir 800 na renda fixa' sem o ativo existir). Sem initial_amount o saldo começa em 0 e o aporte fica pro investment_deposit. ESCRITA — pede confirmação.",
+                "description": "Cria um investimento novo (sem aporte inicial — saldo começa em 0). ESCRITA — pede confirmação. Pra aportar use investment_deposit depois.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -403,11 +330,6 @@ TOOLS: list[Tool] = [
                             "description": "Taxa em PORCENTAGEM como o user fala (ex: 14.25 → 14,25%; 100 → 100% do CDI). NÃO converter pra decimal — passa o número literal que o user disse.",
                         },
                         "period": {"type": "string", "enum": list(_PERIODS), "description": "Periodicidade da taxa: daily, monthly ou yearly."},
-                        "initial_amount": {
-                            "type": "number",
-                            "minimum": 0.01,
-                            "description": "Opcional. Valor em reais a aportar já na criação, debitado da conta corrente. Use quando o user disse quanto quer investir.",
-                        },
                     },
                     "required": ["name", "rate", "period"],
                 },
