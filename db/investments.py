@@ -849,7 +849,6 @@ def create_investment_db(
     tax_profile: str | None = None,
     initial_amount: float | Decimal | None = None,
     initial_note: str | None = None,
-    debit_account: bool = True,
 ):
     """
     Cria investimento (suporta period='cdi'). Retorna (launch_id, inv_id, canon_name).
@@ -944,16 +943,13 @@ def create_investment_db(
                 acc = cur.fetchone()
                 if not acc:
                     raise RuntimeError("ACCOUNT_MISSING")
-                # debit_account=False: dinheiro está no banco conectado, não na
-                # Carteira (ver investment_deposit_from_account).
-                if debit_account and acc["balance"] < initial:
+                if acc["balance"] < initial:
                     raise ValueError("INSUFFICIENT_ACCOUNT")
 
-                if debit_account:
-                    cur.execute(
-                        "update accounts set balance = balance - %s where user_id=%s",
-                        (initial, user_id),
-                    )
+                cur.execute(
+                    "update accounts set balance = balance - %s where user_id=%s",
+                    (initial, user_id),
+                )
                 lot_opened_at = purchase_date or today
                 lot_id = _insert_investment_lot(
                     cur, user_id, inv_id, initial, lot_opened_at, lot_opened_at,
@@ -962,7 +958,7 @@ def create_investment_db(
                 _sync_investment_from_lots(cur, user_id, inv_id)
 
                 deposit_effects = {
-                    "delta_conta": -float(initial) if debit_account else 0, "delta_pocket": None,
+                    "delta_conta": -float(initial), "delta_pocket": None,
                     "delta_invest": {"nome": canon, "delta": float(initial)},
                     "create_pocket": None, "create_investment": None,
                     "investment_lot_create": {"lot_id": lot_id, "investment_id": inv_id},
@@ -1237,18 +1233,8 @@ def investment_deposit_from_account(
     rate: float | Decimal | None = None,
     period: str | None = None,
     purchase_date: date | str | None = None,
-    debit_account: bool = True,
 ):
     """Conta → Investimento (com accrual antes). Retorna (launch_id, new_acc, new_inv, canon).
-
-    `debit_account=False` registra o aporte SEM tirar da Carteira (`accounts.balance`)
-    e grava `delta_conta: 0`. É o caso de quem tem banco conectado por Open Finance: o
-    dinheiro está no banco, não na Carteira (que fica zerada de propósito, senão o
-    mesmo dinheiro conta 2x — ver dashboard.js, "Ajustar carteira"). Debitar dali
-    inventaria uma saída que não existe. Mesmo padrão do `import_open_finance_launches`,
-    que também grava `delta_conta: 0` justamente para não mexer no saldo manual.
-    O `delta_conta` zerado é o que mantém o desfazer correto: `delete_launch_and_rollback`
-    só estorna a conta quando ele é diferente de zero (db/accounts.py:743).
 
     Parâmetros opcionais (kwargs) para suportar ativos cuja taxa muda por compra
     (Tesouro IPCA+/Prefixado, Debêntures, CRI/CRA IPCA+, CDB prefixado):
@@ -1291,7 +1277,7 @@ def investment_deposit_from_account(
             acc = cur.fetchone()
             if not acc:
                 raise RuntimeError("ACCOUNT_MISSING")
-            if debit_account and acc["balance"] < v:
+            if acc["balance"] < v:
                 raise ValueError("INSUFFICIENT_ACCOUNT")
 
             cur.execute(
@@ -1308,14 +1294,11 @@ def investment_deposit_from_account(
             # Como o lote novo abre hoje, ele não retroage.
             accrue_investment_db(cur, user_id, inv_id, today=today)
 
-            if debit_account:
-                cur.execute(
-                    "update accounts set balance = balance - %s where user_id=%s returning balance",
-                    (v, user_id),
-                )
-                new_acc = cur.fetchone()["balance"]
-            else:
-                new_acc = acc["balance"]
+            cur.execute(
+                "update accounts set balance = balance - %s where user_id=%s returning balance",
+                (v, user_id),
+            )
+            new_acc = cur.fetchone()["balance"]
 
             # Se rate==0 foi passado para selic_spread, repassa explicitamente;
             # senão, None deixa o _insert herdar do investimento.
@@ -1328,7 +1311,7 @@ def investment_deposit_from_account(
             new_inv = _sync_investment_from_lots(cur, user_id, inv_id)
 
             efeitos = {
-                "delta_conta": -float(v) if debit_account else 0, "delta_pocket": None,
+                "delta_conta": -float(v), "delta_pocket": None,
                 "delta_invest": {"nome": canon, "delta": +float(v)},
                 "create_pocket": None, "create_investment": None,
                 "investment_lot_create": {
@@ -1358,14 +1341,8 @@ def investment_withdraw_to_account(
     nota: str | None = None,
     *,
     withdraw_all: bool = False,
-    credit_account: bool = True,
 ):
     """Investimento → Conta via PEPS/FIFO. Retorna (launch_id, new_acc, new_inv, canon, tax_summary).
-
-    `credit_account=False` é o espelho do `debit_account` do aporte: com banco
-    conectado por Open Finance o dinheiro volta para o BANCO, não para a Carteira.
-    Creditar a Carteira inflaria o saldo consolidado (Carteira + bancos) com o mesmo
-    dinheiro que o sync do banco vai trazer.
 
     Se ``withdraw_all=True``, resgata o saldo cheio pós-rendimento (zera o investimento
     de forma atômica) e ignora ``amount``. Caso contrário resgata ``amount``; mas se o
@@ -1511,18 +1488,11 @@ def investment_withdraw_to_account(
 
             new_inv = _sync_investment_from_lots(cur, user_id, inv_id)
 
-            # Espelho do aporte: com banco conectado o dinheiro volta PARA O BANCO,
-            # não para a Carteira. Creditar aqui inflaria o consolidado
-            # (Carteira + bancos) com o mesmo dinheiro que o sync vai trazer.
-            if credit_account:
-                cur.execute(
-                    "update accounts set balance = balance + %s where user_id=%s returning balance",
-                    (total_net, user_id),
-                )
-                new_acc = cur.fetchone()["balance"]
-            else:
-                cur.execute("select balance from accounts where user_id=%s", (user_id,))
-                new_acc = cur.fetchone()["balance"]
+            cur.execute(
+                "update accounts set balance = balance + %s where user_id=%s returning balance",
+                (total_net, user_id),
+            )
+            new_acc = cur.fetchone()["balance"]
 
             tax_summary = {
                 "gross": float(total_gross),
@@ -1534,7 +1504,7 @@ def investment_withdraw_to_account(
                 "lots": breakdown,
             }
             efeitos = {
-                "delta_conta": +float(total_net) if credit_account else 0, "delta_pocket": None,
+                "delta_conta": +float(total_net), "delta_pocket": None,
                 "delta_invest": {"nome": canon, "delta": -float(total_gross)},
                 "create_pocket": None, "create_investment": None,
                 "investment_lot_withdrawals": lot_effects,

@@ -24,8 +24,6 @@ from typing import Any
 import db
 from utils_text import fmt_rate
 
-from core.handlers.investments import _msg_saldo_insuficiente, _saldos
-
 from ._base import Tool
 
 
@@ -176,16 +174,13 @@ def _create_investment_execute(user_id: int, args: dict[str, Any]) -> str:
             "Criado pelo chat do Pig",
             initial_amount=initial_amount or None,
             initial_note=f"Aporte inicial em {name}" if initial_amount else None,
-            # Com banco conectado o dinheiro está no banco, não na Carteira —
-            # mesma regra do handler (core/handlers/investments.py::_saldos).
-            debit_account=not _saldos(user_id)["tem_banco"],
         )
     except ValueError as e:
         if str(e) == "INSUFFICIENT_ACCOUNT":
             # criação + aporte são uma transação só: sem saldo, nada foi gravado
             return (
-                f'🐷 Não criei "{name}". '
-                + _msg_saldo_insuficiente(user_id, initial_amount)
+                f'🐷 Não criei "{name}": o saldo da conta não cobre '
+                f"R$ {initial_amount:.2f} de aporte. Manda um valor menor."
             )
         return f"🐷 Não consegui criar: {e}"
     except Exception as e:
@@ -229,10 +224,7 @@ def _investment_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
     if not name or amount <= 0:
         return "🐷 Faltou o nome do investimento ou o valor."
     try:
-        db.investment_deposit_from_account(
-            user_id, name, amount,
-            debit_account=not _saldos(user_id)["tem_banco"],
-        )
+        db.investment_deposit_from_account(user_id, name, amount)
         return f'✅ Aporte de R$ {amount:.2f} no "{name}" registrado.'
     except LookupError:
         # INV_NOT_FOUND. Mandar pro dashboard aqui era um beco: o user está no
@@ -260,7 +252,7 @@ def _investment_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
         )
     except ValueError as e:
         if "INSUFFICIENT_ACCOUNT" in str(e):
-            return "🐷 " + _msg_saldo_insuficiente(user_id, amount)
+            return "🐷 Saldo insuficiente na conta pra esse aporte."
         return "🐷 Valor inválido pra aporte."
     except Exception as e:
         from core.services.plan_limits import PlanLimitExceeded
@@ -295,7 +287,6 @@ def _investment_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
     try:
         _lid, _acc, _inv, canon, taxes = db.investment_withdraw_to_account(
             user_id, name, None if withdraw_all else amount, withdraw_all=withdraw_all,
-            credit_account=not _saldos(user_id)["tem_banco"],
         )
         gross = float(taxes.get("gross", 0)) if taxes else 0.0
         tax = (float(taxes.get("ir", 0)) + float(taxes.get("iof", 0))) if taxes else 0.0
