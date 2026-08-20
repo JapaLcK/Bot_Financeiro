@@ -399,13 +399,9 @@
         'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
         '<circle cx="12" cy="8" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>';
     });
-    // FAB do chat: mascote 3D (a logo rosa sumia no círculo rosa)
-    const fabIcon = document.querySelector("#piggy-fab span[aria-hidden]");
-    if (fabIcon) {
-      fabIcon.innerHTML =
-        '<img src="/brand/mascot.webp" alt="" style="width:52px;height:52px;' +
-        'display:block;object-fit:contain" />';
-    }
+    // FAB do chat: usa a mesma imagem do site (sticker "hello", já no HTML). O
+    // override antigo trocava pela mascote de corpo inteiro (mascot.webp), que
+    // ficava pequena e torta dentro do círculo — removido pra unificar site/app.
   }
 
   // ── Visão geral estilo app: seção "Próximos vencimentos" + cabeçalho de
