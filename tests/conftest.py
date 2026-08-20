@@ -147,8 +147,25 @@ def pytest_configure(config):
             # injeção. Aspas duplas porque CREATE DATABASE não aceita parâmetro.
             conn.execute(f'create database "{name}"')
     except Exception as exc:
-        print(f"[conftest] sem isolamento de banco ({exc}); usando o DATABASE_URL original")
-        return
+        # ABORTA — não cai de volta no DATABASE_URL original. Antes isto era um
+        # print seguido de `return`, e a suíte seguia rodando contra o banco que
+        # a pessoa passou. Como `_auto_cleanup_orphan_users` é autouse e o
+        # `_cleanup_user` faz DELETE em launches, pockets, investments, accounts,
+        # credit_* e users, um papel sem CREATEDB apontando para um banco de
+        # verdade significava apagar linhas reais — com um aviso de uma linha no
+        # meio de centenas de pontinhos verdes.
+        #
+        # Quem quer mesmo rodar sem isolamento continua tendo a porta explícita:
+        # PYTEST_DB_ISOLATION=0. A diferença é que agora é decisão, não acidente.
+        raise pytest.UsageError(
+            f"não consegui criar o database isolado desta execução ({exc}).\n"
+            "A suíte APAGA linhas (users, launches, pockets, investments, "
+            "accounts, credit_*), então rodar contra o DATABASE_URL que você "
+            "passou destruiria dado real.\n"
+            "Conserto: use um papel com CREATEDB, ou aponte o DATABASE_URL para "
+            "um Postgres descartável.\n"
+            "Para rodar sem isolamento de propósito: PYTEST_DB_ISOLATION=0."
+        )
 
     parts = urlsplit(base_url)
     os.environ["DATABASE_URL"] = urlunsplit(parts._replace(path=f"/{name}"))

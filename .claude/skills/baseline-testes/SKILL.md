@@ -22,6 +22,25 @@ tem uma linha com valor não-quotado contendo espaço (`EMAIL_FROM_NAME`, linha
 meio da saída. Não quebra a suíte — mas um erro espúrio no meio do log é
 exatamente o que faz alguém aprender a ignorar erro de verdade.
 
+## O `DATABASE_URL` precisa apontar para um Postgres descartável
+
+**A suíte apaga linhas.** O `_auto_cleanup_orphan_users` é `autouse`, roda em
+todo teste, e o `_cleanup_user` faz `DELETE` em `credit_transactions`,
+`credit_bills`, `credit_cards`, `launches`, `pockets`, `investments`, `accounts`
+e `users`.
+
+O `conftest.py` protege criando um database próprio da execução
+(`pytest_<uuid>`) e derrubando no fim. Se essa criação falhar — papel sem
+`CREATEDB`, host errado, credencial inválida — ele **aborta** com `UsageError`
+em vez de cair de volta no `DATABASE_URL` que você passou. Se você vir essa
+mensagem, o conserto é o banco, nunca contornar a guarda.
+
+Para rodar sem isolamento de propósito (inspecionar o banco depois da rodada):
+`PYTEST_DB_ISOLATION=0`. Aí a responsabilidade é sua.
+
+Neste repositório o `.env` já aponta para `localhost:5432/pigbank_ci_test` — um
+banco de teste dedicado. Se o seu não apontar, arrume antes de rodar.
+
 Durante o desenvolvimento, um arquivo só:
 
 ```bash
