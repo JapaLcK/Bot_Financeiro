@@ -144,7 +144,7 @@ def _extract_target_after_amount(text_base: str) -> str:
     if not t:
         return ""
 
-    t = re.sub(r"^\s*(gastei|gasto|paguei|pagar|comprei|debitei|mandei|enviei|pixei|recebi|receita|ganhei|adicionar|adicione|adiciona|adicionei|adicionou|somar|soma|some|somei)\b", "", t, flags=re.IGNORECASE).strip()
+    t = re.sub(r"^\s*(gastei|gasto|paguei|pagar|comprei|debitei|mandei|enviei|pixei|recebi|receita|ganhei|entrou|caiu|pingou|pinguei|embolsei|adicionar|adicione|adiciona|adicionei|adicionou|somar|soma|some|somei)\b", "", t, flags=re.IGNORECASE).strip()
     t = re.sub(r"^\s*r\$\s*", "", t, flags=re.IGNORECASE).strip()
     # Consome o valor inteiro, incl. separador de milhar + decimal ("1.234,56").
     t = re.sub(r"^\s*\d[\d.,]*", "", t, count=1).strip()
@@ -153,6 +153,21 @@ def _extract_target_after_amount(text_base: str) -> str:
     t = re.sub(r"^\s*reais?\b", "", t, flags=re.IGNORECASE).strip()
     t = re.sub(r"^\s*(de|do|da|dos|das|no|na|nos|nas|em|pra|para|ao|aos|a)\b", "", t, flags=re.IGNORECASE).strip()
     t = re.sub(r"\s+", " ", t).strip(" -:;,.")
+    # Valor por extenso ("gastei cinquenta") não é consumido pelo strip de
+    # dígito acima — sem isso, a palavra do número vazava como se fosse a
+    # descrição da compra ("cinquenta" virava alvo, categoria "outros", e o
+    # bot nunca perguntava "em que você gastou?"). `_words_to_number` sozinho
+    # não serve pra essa checagem — ele ignora token desconhecido em vez de
+    # abortar ("cinquenta mercado" também vira 50.0), então é preciso
+    # confirmar que TODO token restante é número por extenso, não só que
+    # ALGUM é.
+    if t:
+        toks = [tok for tok in re.split(r"\s+", t) if tok]
+        if toks and all(
+            tok.lower() in ("e", "de", "com", "reais", "real", "r$") or _words_to_number(tok) is not None
+            for tok in toks
+        ):
+            return ""
     return t
 
 
@@ -168,20 +183,31 @@ _STARTS_WITH_VALUE_RE = re.compile(r"^\s*(?:r\$\s*)?\d", re.IGNORECASE)
 # Verbos que iniciam um lançamento financeiro.
 _FINANCIAL_VERBS = (
     r"gastei|paguei|comprei|debitei|mandei|enviei|pix|gasto|"
-    r"recebi|ganhei|receita"
+    r"recebi|ganhei|receita|entrou|caiu|pingou|pinguei|embolsei"
 )
 
 # Conectores de soma que podem introduzir um segundo lançamento. Ordenados do
 # mais longo pro mais curto (a alternância do regex é ordenada), senão "e"
 # casaria antes de "e mais". O segundo lançamento pode começar com um verbo
 # ("e gastei 100") OU direto com um valor ("e mais 800", "mais R$ 30") — nesse
-# caso é implícito e herda o verbo/tipo do lançamento anterior.
+# caso é implícito e herda o verbo/tipo do lançamento anterior. A vírgula
+# ("50 uber, 30 café") é a mesma coisa numa lista sem repetir o conector.
 _SPLIT_TX_RE = re.compile(
-    r"\s+(?:e\s+mais|mais\s+também|e\s+também|mas\s+também|além\s+disso|também|mais|e)\s+"
+    # ",\s+" (não "\s*,\s*"): a vírgula decimal brasileira ("77,90") nunca tem
+    # espaço depois — só a vírgula de lista tem ("uber, 30 café"). Sem exigir
+    # o espaço, "77,90 mercado" virava dois lançamentos ("77" e "90 mercado").
+    r"(?:,\s+|\s+(?:e\s+mais|mais\s+também|e\s+também|mas\s+também|além\s+disso|também|mais|e)\s+)"
     rf"(?={_FINANCIAL_VERBS}|r\$|\d)",
     re.IGNORECASE,
 )
 _LEAD_VERB_RE = re.compile(rf"^\s*({_FINANCIAL_VERBS})\b", re.IGNORECASE)
+
+# Item final de uma lista SEM valor ("... 30 café e o aluguel") — o "e" acima
+# exige um valor/verbo logo depois pra não separar frases comuns ("fui ao
+# banco e ao mercado"), então "e o aluguel" nunca vira um split ali. Só entra
+# em jogo DEPOIS que _SPLIT_TX_RE já achou ≥2 partes (lista confirmada) e só
+# no ÚLTIMO pedaço — evita separar uma frase solta que só por acaso tem um "e".
+_TRAILING_VALUELESS_RE = re.compile(r"^(?P<head>.+?)\s+e\s+(?P<tail>[^\d]+)$", re.IGNORECASE)
 
 
 def split_financial_transactions(text: str) -> list[str]:
@@ -204,6 +230,11 @@ def split_financial_transactions(text: str) -> list[str]:
     cleaned = [p.strip() for p in parts if p.strip()]
     if len(cleaned) <= 1:
         return [text]
+
+    m = _TRAILING_VALUELESS_RE.match(cleaned[-1])
+    if m and _extract_valor(m.group("tail")) is None and _extract_valor(m.group("head")) is not None:
+        cleaned[-1] = m.group("head").strip()
+        cleaned.append(m.group("tail").strip())
 
     # Herança de verbo: segmentos que começam só com valor ("800 no mercado")
     # ganham o verbo do último lançamento com verbo explícito.
@@ -264,13 +295,15 @@ def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
     raw_norm = normalize_text(text_base)
 
     # tipo — receita SEMPRE exige palavra-chave explícita ("recebi"/"receita"/
-    # "ganhei"). Sem palavra-chave, uma mensagem que começa com o valor
+    # "ganhei"/"entrou"/"caiu"/"pingou"/"pinguei"/"embolsei" — o mesmo conjunto
+    # de verbos que core/intent_classifier.py já roteia pra launches.add como
+    # receita). Sem palavra-chave, uma mensagem que começa com o valor
     # ("77,90 mercado") é despesa por padrão: é o atalho mais usado pra lançar
     # gasto, então o user não precisa escrever "gastei" toda vez.
     tipo = None
     if raw_norm.startswith(("gastei ", "gasto ", "paguei ", "pagar ", "comprei ", "debitei ", "mandei ", "enviei ", "pixei ")):
         tipo = "despesa"
-    elif raw_norm.startswith(("recebi ", "receita ", "ganhei ")):
+    elif raw_norm.startswith(("recebi ", "receita ", "ganhei ", "entrou ", "caiu ", "pingou ", "pinguei ", "embolsei ")):
         tipo = "receita"
     elif "saldo" in raw_norm and raw_norm.startswith((
         "adicionar ", "adicione ", "adiciona ", "adicionei ", "adicionou ",
