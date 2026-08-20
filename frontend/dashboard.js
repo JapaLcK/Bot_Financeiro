@@ -873,16 +873,16 @@ function _renderCardItem(c, idx = 0) {
       </summary>
       <div class="cc-detail-body">
         <div class="cc-meta" style="margin:0">
-          <div class="row"><span class="label">Fatura aberta</span><span class="val ${openColor}">${_fmtBRL(openDue)}</span></div>
-          <div class="row"><span class="label">Limite</span><span class="val">${lim != null ? _fmtBRL(lim) : "—"}</span></div>
+          <div class="row"><span class="label">Fatura aberta</span><span class="val cc-money ${openColor}">${_fmtBRL(openDue)}</span></div>
+          <div class="row"><span class="label">Limite</span><span class="val cc-money">${lim != null ? _fmtBRL(lim) : "—"}</span></div>
           <div class="row"><span class="label">Melhor dia</span><span class="val">${_bestPurchaseDay(c.closing_day)}</span></div>
           <div class="row"><span class="label">Fecha em</span><span class="val">${c.closing_day ? "dia " + c.closing_day : "—"}</span></div>
           <div class="row"><span class="label">Vence em</span><span class="val">${c.due_day ? "dia " + c.due_day : "—"}</span></div>
-          <div class="row"><span class="label">Próxima fatura</span><span class="val">${_fmtBRL(c.next_bill?.total || 0)}</span></div>
+          <div class="row"><span class="label">Próxima fatura</span><span class="val cc-money">${_fmtBRL(c.next_bill?.total || 0)}</span></div>
         </div>
         ${lim != null ? `
           <div class="bar-body" style="margin-top:12px">
-            <div class="bar-head"><span class="name">Limite usado</span><span class="val">${_fmtBRL(used)} / ${_fmtBRL(lim)}</span></div>
+            <div class="bar-head"><span class="name">Limite usado</span><span class="val cc-money">${_fmtBRL(used)} / ${_fmtBRL(lim)}</span></div>
             <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${usePct.toFixed(1)}%"></div></div>
           </div>` : ""}
         <div class="cc-detail-actions">
@@ -6012,6 +6012,28 @@ function toggleTheme() {
   let saved = "dark";
   try { saved = localStorage.getItem("pigbank_theme") || "dark"; } catch(_) {}
   applyTheme(saved);
+})();
+
+// ── Esconder saldo (olho) ────────────────────────────────────────────────
+function applyHideBalance(hidden){
+  document.body.classList.toggle("balance-hidden", hidden);
+  const btn = document.getElementById("hide-balance-btn");
+  if (btn){
+    const ico = btn.querySelector("i");
+    if (ico) ico.className = hidden ? "ph ph-eye-slash" : "ph ph-eye";
+    btn.setAttribute("aria-pressed", hidden ? "true" : "false");
+    btn.title = hidden ? "Mostrar saldo" : "Esconder saldo";
+  }
+}
+function toggleHideBalance(){
+  const hidden = !document.body.classList.contains("balance-hidden");
+  try { localStorage.setItem("pigbank_hide_balance", hidden ? "1" : "0"); } catch(_){}
+  applyHideBalance(hidden);
+}
+(function initHideBalance(){
+  let v = "0";
+  try { v = localStorage.getItem("pigbank_hide_balance") || "0"; } catch(_){}
+  applyHideBalance(v === "1");
 })();
 
 // ── Pro gates (visivel + desabilitado por feature) ───────────────────────

@@ -129,6 +129,7 @@
         <div id="dot" class="connecting"></div>
         <span id="status-text">Conectando…</span>
       </div>
+      <button class="hbtn" id="hide-balance-btn" type="button" onclick="toggleHideBalance()" aria-pressed="false" title="Esconder saldo"><i class="ph ph-eye" aria-hidden="true"></i></button>
       <button class="hbtn" id="refresh-btn" onclick="sendRefresh()"><span id="ref-icon"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span> Atualizar</button>
       <button class="hbtn" data-pro-feature="ofx_import" onclick="openOfxImport()"><i class="ph ph-download-simple" aria-hidden="true"></i> Importar OFX</button>
       <input type="file" id="ofx-file-input" accept=".ofx" style="display:none" onchange="handleOfxFileSelected(event)" />

@@ -630,6 +630,10 @@ a { color: inherit; text-decoration: none; }
 }
 .positive { color: var(--green); }
 .negative { color: var(--red); }
+/* Esconder saldo (olho): respeita a preferência ligada em outra tela */
+body.balance-hidden .account-balance {
+  filter: blur(8px); -webkit-filter: blur(8px); user-select: none;
+}
 
 /* ─── Transactions ───────────────────────────── */
 .tx-list { display: flex; flex-direction: column; }
@@ -1732,6 +1736,13 @@ a { color: inherit; text-decoration: none; }
 <div id="toast"></div>
 
 <script>
+/* ── Esconder saldo (olho): aplica a preferência ligada em outra tela ── */
+(function initHideBalance(){
+  let v = "0";
+  try { v = localStorage.getItem("pigbank_hide_balance") || "0"; } catch(_){}
+  document.body.classList.toggle("balance-hidden", v === "1");
+})();
+
 /* ── Config ──────────────────────────────────── */
 const API = window.location.origin;
 const params = new URLSearchParams(window.location.search);
