@@ -2241,3 +2241,19 @@ html.pb-app #piggy-fab { touch-action: none; }
 .ag-event-body { min-width: 0; }
 .ag-event-msg { margin: 0; font-size: 13.5px; line-height: 1.45; }
 .ag-event-when { margin: 3px 0 0; font-size: 11.5px; color: var(--text-3); }
+
+/* ── Esconder saldo (olho) ────────────────────────────────────────────────
+   Borra todos os valores em R$ menos a lista de lançamentos (data-num="lnc_…")
+   e as categorias do mês (data-num="cat_…"), que continuam visíveis. */
+#hide-balance-btn { font-size: 1rem; line-height: 1; }
+body.balance-hidden [data-num]:not([data-num^="cat_"]):not([data-num^="lnc_"]),
+body.balance-hidden #pkt-hist-balance,
+body.balance-hidden #pay-bill-balance,
+body.balance-hidden #receipt-balance,
+body.balance-hidden #invest-summary .chip-val,
+body.balance-hidden #invest-list .val {
+  filter: blur(8px);
+  -webkit-filter: blur(8px);
+  user-select: none;
+  transition: filter .15s ease;
+}

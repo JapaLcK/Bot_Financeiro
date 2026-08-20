@@ -6014,6 +6014,28 @@ function toggleTheme() {
   applyTheme(saved);
 })();
 
+// ── Esconder saldo (olho) ────────────────────────────────────────────────
+function applyHideBalance(hidden){
+  document.body.classList.toggle("balance-hidden", hidden);
+  const btn = document.getElementById("hide-balance-btn");
+  if (btn){
+    const ico = btn.querySelector("i");
+    if (ico) ico.className = hidden ? "ph ph-eye-slash" : "ph ph-eye";
+    btn.setAttribute("aria-pressed", hidden ? "true" : "false");
+    btn.title = hidden ? "Mostrar saldo" : "Esconder saldo";
+  }
+}
+function toggleHideBalance(){
+  const hidden = !document.body.classList.contains("balance-hidden");
+  try { localStorage.setItem("pigbank_hide_balance", hidden ? "1" : "0"); } catch(_){}
+  applyHideBalance(hidden);
+}
+(function initHideBalance(){
+  let v = "0";
+  try { v = localStorage.getItem("pigbank_hide_balance") || "0"; } catch(_){}
+  applyHideBalance(v === "1");
+})();
+
 // ── Pro gates (visivel + desabilitado por feature) ───────────────────────
 // A fonte da verdade é o BACKEND: /auth/dashboard-profile devolve feature_gates
 // já resolvido (get_user_limits + is_pro cobrem assinatura expirada com webhook

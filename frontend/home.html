@@ -136,6 +136,11 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   font-size:.66rem; font-weight:700; letter-spacing:.1em;
   text-transform:uppercase; color:var(--text-3); margin:28px 4px 10px;
 }
+/* Esconder saldo (olho): borra os valores do Resumo */
+body.balance-hidden .bignum {
+  filter: blur(8px); -webkit-filter: blur(8px);
+  user-select: none; transition: filter .15s ease;
+}
 
 /* Free banner — CTA pra Pro, aparece só pra users no plano free */
 .free-banner {
@@ -487,7 +492,11 @@ footer a:hover { color:var(--text); }
       <a class="btn-pill primary" href="/app?action=launch">+ Lançar agora</a>
     </div>
 
-    <div class="section-title">Resumo</div>
+    <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <span>Resumo</span>
+      <button id="hide-balance-btn" type="button" onclick="toggleHideBalance()" aria-pressed="false" title="Esconder saldo"
+        style="background:none;border:0;cursor:pointer;font-size:1rem;line-height:1;padding:2px 4px;color:var(--text-2)"><i class="ph ph-eye" aria-hidden="true"></i></button>
+    </div>
     <div class="stats-grid">
       <a class="stat-card" href="/app">
         <div class="stat-head"><span class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v3m0 4v3a1 1 0 0 1-1 1H5a2 2 0 0 1-2-2V5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></span>Saldo</div>
@@ -565,6 +574,28 @@ footer a:hover { color:var(--text); }
 const API = window.location.origin;
 const PT_MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 let USER_ID = 0;
+
+/* ─── Esconder saldo (olho) ───────────────────────────────────────────── */
+function applyHideBalance(hidden){
+  document.body.classList.toggle("balance-hidden", hidden);
+  const btn = document.getElementById("hide-balance-btn");
+  if (btn){
+    const ico = btn.querySelector("i");
+    if (ico) ico.className = hidden ? "ph ph-eye-slash" : "ph ph-eye";
+    btn.setAttribute("aria-pressed", hidden ? "true" : "false");
+    btn.title = hidden ? "Mostrar saldo" : "Esconder saldo";
+  }
+}
+function toggleHideBalance(){
+  const hidden = !document.body.classList.contains("balance-hidden");
+  try { localStorage.setItem("pigbank_hide_balance", hidden ? "1" : "0"); } catch(_){}
+  applyHideBalance(hidden);
+}
+(function initHideBalance(){
+  let v = "0";
+  try { v = localStorage.getItem("pigbank_hide_balance") || "0"; } catch(_){}
+  applyHideBalance(v === "1");
+})();
 
 /* ─── Helpers ─────────────────────────────────────────────────────────── */
 function fmtBRL(n) {
