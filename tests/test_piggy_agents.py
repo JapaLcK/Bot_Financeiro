@@ -1592,3 +1592,146 @@ def test_expiry_por_mes_so_vale_pros_agentes_mensais(user_id):
     assert db.list_unemailed_events(ag_b["id"]) == []
     pend_b = [a for a in db.list_agents_pending_email() if a["agent_id"] == ag_b["id"]]
     assert pend_b == []
+
+
+# ── Detetive: cobranças duplicadas (shaping do evento, sem Postgres) ──────────
+# O SQL em si depende de DB real (verificado por inspeção/manual); aqui travamos
+# a LÓGICA PYTHON: formato da dedupe_key, tipo do payload e contagem de disparos.
+
+from datetime import date as _date
+
+
+class _FakeCursor:
+    def __init__(self, rows, sink=None):
+        self._rows = rows
+        self._sink = sink  # lista opcional que recebe (sql, params) executados
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+    def execute(self, sql=None, params=None, *a, **k):
+        if self._sink is not None:
+            self._sink.append((sql, params))
+    def fetchall(self):
+        return self._rows
+
+
+class _FakeConn:
+    def __init__(self, rows, sink=None):
+        self._rows = rows
+        self._sink = sink
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+    def cursor(self):
+        return _FakeCursor(self._rows, self._sink)
+
+
+def test_detetive_duplicate_shapes_event(monkeypatch):
+    import core.services.piggy_agents as pa
+    import db
+
+    rows = [{
+        "merchant": "netflix", "val": 39.90, "repeticoes": 2,
+        "ultimo_dia": _date(2026, 8, 15), "janela_dias": 1, "descricao": "NETFLIX.COM",
+        "categoria": "streaming",
+    }]
+    monkeypatch.setattr(pa, "get_conn", lambda: _FakeConn(rows))
+
+    captured: list = []
+    monkeypatch.setattr(db, "record_agent_event",
+                        lambda *a, **k: (captured.append((a, k)) or True))
+
+    fired = pa._detetive_duplicate_detect_for_user(
+        {"agent_id": 1, "user_id": 42}, _date(2026, 8, 19))
+
+    assert fired == 1
+    args, kw = captured[0]
+    assert args[:3] == (1, 42, "detetive")
+    assert kw["dedupe_key"] == "dup:netflix:39.90:2026-08-15"
+    assert kw["payload"]["tipo"] == "duplicada"
+    assert kw["payload"]["repeticoes"] == 2
+    assert kw["payload"]["janela_dias"] == 1
+    assert "duplicada" in kw["payload"]["titulo"].lower()
+
+
+def test_detetive_duplicate_mensagem_usa_span_real_da_ilha(monkeypatch):
+    # P2: a ilha aprovada cabe na janela (span <= DETETIVE_DUP_WINDOW_DAYS), mas
+    # pode ser 0, 1 ou 2 dias — a mensagem anuncia o span REAL (max-min), não um
+    # "até 2 dias" fixo. Pluralização e "no mesmo dia" tratados.
+    import core.services.piggy_agents as pa
+    import db
+
+    def _run(janela_dias, reps):
+        rows = [{
+            "merchant": "spotify", "val": 21.90, "repeticoes": reps,
+            "ultimo_dia": _date(2026, 8, 15), "janela_dias": janela_dias,
+            "descricao": "SPOTIFY", "categoria": "streaming",
+        }]
+        monkeypatch.setattr(pa, "get_conn", lambda: _FakeConn(rows))
+        captured: list = []
+        monkeypatch.setattr(db, "record_agent_event",
+                            lambda *a, **k: (captured.append(k) or True))
+        pa._detetive_duplicate_detect_for_user(
+            {"agent_id": 1, "user_id": 42}, _date(2026, 8, 19))
+        return captured[0]["payload"]["mensagem"]
+
+    # mesmo dia → texto próprio, sem "0 dias"
+    assert "no mesmo dia" in _run(0, 2)
+    assert "0 dia" not in _run(0, 2)
+    # singular
+    m1 = _run(1, 2)
+    assert "em 1 dia" in m1 and "1 dias" not in m1
+    # plural, no teto da janela
+    m2 = _run(2, 3)
+    assert "em 2 dias" in m2 and "3×" in m2
+    # nunca mais o "até" fixo do gap
+    assert "até" not in m1 and "até" not in m2
+
+
+def test_detetive_duplicate_criterio_tem_dois_modos_disjuntos(monkeypatch):
+    # P2 (critério): a query precisa detectar a dobrada DENTRO de um hábito longo
+    # (2+ no mesmo dia) sem reabrir o falso positivo do recorrente. Rejeitar a ilha
+    # inteira pelo span perderia a dobrada de mesmo dia. Verifica no SQL emitido
+    # que os dois modos disjuntos existem: MODO A (mesmo dia) + MODO B (ilha
+    # isolada, <= 1/dia, cabendo na janela).
+    import core.services.piggy_agents as pa
+    import db
+
+    sink: list = []
+    monkeypatch.setattr(pa, "get_conn", lambda: _FakeConn([], sink))
+    monkeypatch.setattr(db, "record_agent_event",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("sem achados não emite")))
+
+    pa._detetive_duplicate_detect_for_user(
+        {"agent_id": 1, "user_id": 42}, _date(2026, 8, 19))
+
+    sql, params = sink[0]
+    norm = " ".join(sql.split())  # colapsa espaços/quebras
+    # MODO A — pilha no mesmo dia
+    assert "group by merchant, val, ts::date" in norm
+    assert "having count(*) >= 2" in norm
+    # MODO B — ilha isolada: 1 por dia (disjunção de A) + teto de span
+    assert "repeticoes = dias_distintos" in norm
+    assert "janela_dias <= %s" in norm
+    # os dois modos entram no resultado
+    assert "union all" in norm
+    # a janela entra 2× nos params: make_interval (encadeamento) + teto do modo B
+    assert list(params).count(pa.DETETIVE_DUP_WINDOW_DAYS) == 2
+
+
+def test_detetive_duplicate_sem_achados_nao_emite(monkeypatch):
+    import core.services.piggy_agents as pa
+    import db
+
+    monkeypatch.setattr(pa, "get_conn", lambda: _FakeConn([]))
+
+    def _boom(*a, **k):
+        raise AssertionError("não deveria emitir evento sem duplicata")
+    monkeypatch.setattr(db, "record_agent_event", _boom)
+
+    fired = pa._detetive_duplicate_detect_for_user(
+        {"agent_id": 1, "user_id": 42}, _date(2026, 8, 19))
+    assert fired == 0
