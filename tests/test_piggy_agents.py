@@ -1602,27 +1602,30 @@ from datetime import date as _date
 
 
 class _FakeCursor:
-    def __init__(self, rows):
+    def __init__(self, rows, sink=None):
         self._rows = rows
+        self._sink = sink  # lista opcional que recebe (sql, params) executados
     def __enter__(self):
         return self
     def __exit__(self, *a):
         return False
-    def execute(self, *a, **k):
-        pass
+    def execute(self, sql=None, params=None, *a, **k):
+        if self._sink is not None:
+            self._sink.append((sql, params))
     def fetchall(self):
         return self._rows
 
 
 class _FakeConn:
-    def __init__(self, rows):
+    def __init__(self, rows, sink=None):
         self._rows = rows
+        self._sink = sink
     def __enter__(self):
         return self
     def __exit__(self, *a):
         return False
     def cursor(self):
-        return _FakeCursor(self._rows)
+        return _FakeCursor(self._rows, self._sink)
 
 
 def test_detetive_duplicate_shapes_event(monkeypatch):
@@ -1654,10 +1657,9 @@ def test_detetive_duplicate_shapes_event(monkeypatch):
 
 
 def test_detetive_duplicate_mensagem_usa_span_real_da_ilha(monkeypatch):
-    # P2: o clustering (gaps-and-islands) só garante gap <= janela entre vizinhos,
-    # então a ilha pode abranger bem mais dias que DETETIVE_DUP_WINDOW_DAYS.
-    # A mensagem tem que anunciar o span REAL (max-min), não o gap fixo — senão
-    # "cobrado 3× em até 2 dias" mente quando as cobranças foram nos dias 1,3,5.
+    # P2: a ilha aprovada cabe na janela (span <= DETETIVE_DUP_WINDOW_DAYS), mas
+    # pode ser 0, 1 ou 2 dias — a mensagem anuncia o span REAL (max-min), não um
+    # "até 2 dias" fixo. Pluralização e "no mesmo dia" tratados.
     import core.services.piggy_agents as pa
     import db
 
@@ -1675,17 +1677,43 @@ def test_detetive_duplicate_mensagem_usa_span_real_da_ilha(monkeypatch):
             {"agent_id": 1, "user_id": 42}, _date(2026, 8, 19))
         return captured[0]["payload"]["mensagem"]
 
-    # ilha de 4 dias (ex.: dias 1,3,5) — NÃO pode dizer o gap fixo de 2 dias
-    msg4 = _run(4, 3)
-    assert "em 4 dias" in msg4
-    assert "3×" in msg4
-    assert "2 dias" not in msg4  # não vaza o DETETIVE_DUP_WINDOW_DAYS
     # mesmo dia → texto próprio, sem "0 dias"
     assert "no mesmo dia" in _run(0, 2)
     assert "0 dia" not in _run(0, 2)
     # singular
-    assert "em 1 dia" in _run(1, 2)
-    assert "1 dias" not in _run(1, 2)
+    m1 = _run(1, 2)
+    assert "em 1 dia" in m1 and "1 dias" not in m1
+    # plural, no teto da janela
+    m2 = _run(2, 3)
+    assert "em 2 dias" in m2 and "3×" in m2
+    # nunca mais o "até" fixo do gap
+    assert "até" not in m1 and "até" not in m2
+
+
+def test_detetive_duplicate_criterio_limita_span_da_ilha(monkeypatch):
+    # P2 (critério, não só mensagem): mudar o texto não elimina o falso positivo —
+    # uma compra diária legítima encadeia numa ilha de 30–60 dias. A query TEM que
+    # exigir que a ilha inteira caiba na janela (having max-min <= janela), senão
+    # o recorrente vira "possível cobrança duplicada". Verifica o SQL emitido.
+    import core.services.piggy_agents as pa
+    import db
+
+    sink: list = []
+    monkeypatch.setattr(pa, "get_conn", lambda: _FakeConn([], sink))
+    monkeypatch.setattr(db, "record_agent_event",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("sem achados não emite")))
+
+    pa._detetive_duplicate_detect_for_user(
+        {"agent_id": 1, "user_id": 42}, _date(2026, 8, 19))
+
+    sql, params = sink[0]
+    norm = " ".join(sql.split())  # colapsa espaços/quebras pra casar o having
+    assert "having count(*) >= 2" in norm
+    # o teto de span total da ilha precisa estar no having
+    assert "(max(ts)::date - min(ts)::date) <= %s" in norm
+    # e a janela entra 2× nos params: make_interval (encadeamento) + teto do having
+    assert list(params).count(pa.DETETIVE_DUP_WINDOW_DAYS) == 2
 
 
 def test_detetive_duplicate_sem_achados_nao_emite(monkeypatch):

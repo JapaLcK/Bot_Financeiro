@@ -466,18 +466,22 @@ def _detetive_detect_for_user(agent: dict[str, Any], today: date) -> int:
 # "me cobraram em dobro". Valor mínimo mais alto e janela apertada pra evitar o
 # ruído de compras legítimas repetidas (cafezinho, ônibus).
 DETETIVE_DUP_LOOKBACK_DAYS = 60   # olha as cobranças dos últimos N dias
-DETETIVE_DUP_WINDOW_DAYS = 2      # 2+ cobranças iguais em <= N dias = parece duplicada
+DETETIVE_DUP_WINDOW_DAYS = 2      # span TOTAL da ilha <= N dias = parece duplicada
 DETETIVE_DUP_MIN_VALOR = 15.0     # ignora repetição miúda (ruído)
 
 
 def _detetive_duplicate_detect_for_user(agent: dict[str, Any], today: date) -> int:
-    """Fareja a MESMA cobrança (comerciante + valor) repetida em <= DUP_WINDOW_DAYS
-    dias — o padrão de cobrança em dobro. Fontes = launches (inclui OF) + compras
-    de cartão (credit_transactions), unidas: cobrança dupla no cartão é o caso
-    clássico. Agrupa por ILHA temporal (gaps-and-islands), então uma duplicata de
-    junho e outra de agosto viram eventos separados com contagem correta — não um
-    balaio de todos os pares dos últimos meses. Dedupe por (comerciante, valor,
-    dia da última repetição da ilha): roda todo tick sem repetir alerta."""
+    """Fareja a MESMA cobrança (comerciante + valor) repetida num burst curto
+    (span total <= DUP_WINDOW_DAYS dias) — o padrão de cobrança em dobro. Fontes =
+    launches (inclui OF) + compras de cartão (credit_transactions), unidas:
+    cobrança dupla no cartão é o caso clássico. Agrupa por ILHA temporal
+    (gaps-and-islands), então uma duplicata de junho e outra de agosto viram
+    eventos separados — não um balaio de todos os pares dos últimos meses. O
+    encadeamento por si só une lançamentos com gap <= janela entre VIZINHOS, então
+    um hábito diário de mesmo valor formaria uma ilha de 30–60 dias; por isso o
+    having exige que a ilha INTEIRA caiba na janela (max−min <= DUP_WINDOW_DAYS),
+    descartando o recorrente e mantendo só o burst. Dedupe por (comerciante,
+    valor, dia da última repetição da ilha): roda todo tick sem repetir alerta."""
     from db import record_agent_event
 
     user_id = agent["user_id"]
@@ -548,22 +552,27 @@ def _detetive_duplicate_detect_for_user(agent: dict[str, Any], today: date) -> i
                        val,
                        count(*) as repeticoes,
                        max(ts)::date as ultimo_dia,
-                       -- span REAL da ilha: o encadeamento (gaps-and-islands) só
-                       -- garante gap <= janela entre lançamentos VIZINHOS, então a
-                       -- ilha inteira pode abranger bem mais que a janela. A
-                       -- mensagem usa este span pra não afirmar um prazo falso.
+                       -- span REAL da ilha (max−min). O encadeamento só garante
+                       -- gap <= janela entre lançamentos VIZINHOS, então a ilha
+                       -- pode abranger MUITO mais que a janela (uma compra diária
+                       -- legítima de mesmo valor encadearia 30–60 dias). Usado
+                       -- pra filtrar (having) e pra mensagem não mentir o prazo.
                        (max(ts)::date - min(ts)::date) as janela_dias,
                        (array_agg(raw order by ts desc))[1] as descricao,
                        (array_agg(categoria) filter (where categoria is not null))[1] as categoria,
                        array_agg(distinct fonte) as fontes
                 from clustered
                 group by merchant, val, cluster_id
+                -- 2+ cobranças E a ilha inteira cabendo na janela: descarta o
+                -- hábito recorrente (café diário etc.), que encadeia numa ilha
+                -- longa, e mantém só o burst curto — o padrão "cobrado em dobro".
                 having count(*) >= 2
+                   and (max(ts)::date - min(ts)::date) <= %s
                 order by ultimo_dia desc, val desc
                 """,
                 (user_id, DETETIVE_DUP_MIN_VALOR, cutoff,
                  user_id, DETETIVE_DUP_MIN_VALOR, cutoff,
-                 DETETIVE_DUP_WINDOW_DAYS),
+                 DETETIVE_DUP_WINDOW_DAYS, DETETIVE_DUP_WINDOW_DAYS),
             )
             achados = cur.fetchall() or []
 
