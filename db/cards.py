@@ -285,6 +285,18 @@ def get_card_id_by_name(user_id: int, name: str) -> int | None:
                 "select id from credit_cards where user_id=%s and name=%s", (user_id, name)
             )
             row = cur.fetchone()
+            if row:
+                return row["id"]
+            # Vários call-sites passam o nome extraído de texto já minúsculo
+            # (ex.: "definir limite nubank 8000" → card="nubank"), mas o
+            # cartão é salvo com a caixa que o usuário digitou no cadastro
+            # ("Nubank") — sem isso, o comando nunca encontra o cartão.
+            cur.execute(
+                "select id from credit_cards where user_id=%s and lower(name)=lower(%s) "
+                "order by id limit 1",
+                (user_id, name),
+            )
+            row = cur.fetchone()
             return row["id"] if row else None
 
 

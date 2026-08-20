@@ -755,7 +755,42 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") -> 
     parsed = parse_receita_despesa_natural(user_id, text)
 
     if parsed:
+        if not (parsed.get("alvo") or "").strip():
+            # Valor reconhecido, mas sem descrição nenhuma ("gastei cinquenta",
+            # "gastei 50") — pergunta em vez de lançar direto em "outros" sem
+            # contexto. A resposta é resolvida em
+            # intent_router._resolve_clarification (branch launches.add, ramo
+            # "já tínhamos o valor → resposta é a descrição").
+            tipo_p = parsed["tipo"]
+            verbo_q = "recebeu" if tipo_p == "receita" else "gastou"
+            pergunta = f"🐷 Em que você {verbo_q} {fmt_brl(float(parsed['valor']))}?"
+            db.set_pending_action(user_id, "clarification", {
+                "intent": "launches.add",
+                "entities": {"tipo": tipo_p, "valor": parsed["valor"]},
+                "question": pergunta,
+                "orig_text": text,
+            })
+            return pergunta
         return _register_parsed(user_id, parsed, text, platform)
+
+    # Tem verbo + descrição mas falta o valor ("paguei o mercado", "gastei no
+    # ifood") — describe_valueless_launch já detecta isso, mas até aqui só
+    # era chamada dentro do laço de multi-lançamento; uma mensagem única com
+    # esse padrão caía direto no fallback abaixo e virava "Não consegui
+    # identificar o valor" em vez de perguntar. Mesmo pending "clarification"
+    # do ramo de descrição faltando acima — intent_router._resolve_clarification
+    # já sabe completar quando a resposta traz só o valor.
+    info = describe_valueless_launch(text)
+    if info:
+        tipo_v, desc_v = info
+        pergunta = f"🐷 Quanto foi {'de' if tipo_v == 'receita' else 'no'} *{desc_v}*?"
+        db.set_pending_action(user_id, "clarification", {
+            "intent": "launches.add",
+            "entities": {"tipo": tipo_v},
+            "question": pergunta,
+            "orig_text": text,
+        })
+        return pergunta
 
     tipo = entities.get("tipo", "despesa")
     valor = float(entities.get("valor", 0))
