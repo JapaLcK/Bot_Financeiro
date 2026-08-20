@@ -631,6 +631,14 @@ def init_db():
         """,
 
         # -----------------------------
+        # Open Finance — instante real da transação (com hora), quando o banco
+        # envia. NULL = só data (cai no fallback de meia-dia local no import).
+        # -----------------------------
+        """
+        alter table open_finance_transactions add column if not exists transacted_at timestamptz
+        """,
+
+        # -----------------------------
         # OFX import log
         # -----------------------------
         """
@@ -1878,24 +1886,38 @@ def init_db():
     #      (deploy do Railway sobe um container novo antes do velho sair).
     # Toda a DDL eh idempotente (if not exists / or replace / where ... is null),
     # entao commit por instrucao eh seguro mesmo se o init_db rodar varias vezes.
+    # O `finally` nao e decoracao: a conexao vem do POOL e volta pra ele. Sem
+    # restaurar, ela fica em autocommit para sempre e toda transacao futura que
+    # cair nela perde a atomicidade — o rollback vira no-op e um erro no meio
+    # deixa metade da escrita gravada. Medido: depois de um init_db, 6 de 6
+    # `create_investment_db` que estouraram INSUFFICIENT_ACCOUNT deixaram o
+    # investimento criado no banco. (A trava definitiva esta no `reset` do pool,
+    # em db/connection.py; isto aqui e a primeira linha de defesa.)
     with get_conn() as conn:
         conn.autocommit = True
-        with conn.cursor() as cur:
-            for i, stmt in enumerate(ddl_statements, 1):
-                try:
-                    cur.execute(stmt)
-                except Exception as e:
-                    print(f"[init_db] erro no statement #{i}: {e}")
-                    print(stmt)
-                    raise
-
-            # Corrige FKs em users(id) que ficaram com on_delete errado
-            # porque a tabela já existia antes da FK ser declarada no schema.
-            try:
-                changes = repair_user_fk_cascades(cur)
-                if changes:
-                    print(f"[init_db] schema_repairs ajustou {len(changes)} FK(s): {changes}")
-            except Exception as e:
-                print(f"[init_db] schema_repairs falhou: {e}")
-                raise
+        try:
+            _run_ddl(conn, ddl_statements)
+        finally:
+            conn.autocommit = False
     print("[init_db] OK")
+
+
+def _run_ddl(conn, ddl_statements) -> None:
+    with conn.cursor() as cur:
+        for i, stmt in enumerate(ddl_statements, 1):
+            try:
+                cur.execute(stmt)
+            except Exception as e:
+                print(f"[init_db] erro no statement #{i}: {e}")
+                print(stmt)
+                raise
+
+        # Corrige FKs em users(id) que ficaram com on_delete errado
+        # porque a tabela já existia antes da FK ser declarada no schema.
+        try:
+            changes = repair_user_fk_cascades(cur)
+            if changes:
+                print(f"[init_db] schema_repairs ajustou {len(changes)} FK(s): {changes}")
+        except Exception as e:
+            print(f"[init_db] schema_repairs falhou: {e}")
+            raise

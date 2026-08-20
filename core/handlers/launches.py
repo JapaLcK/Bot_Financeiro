@@ -527,6 +527,35 @@ def add_from_entities(
             f"todo mês)? Responda *sim* ou *não*."
         )
 
+    # Nudge de onboarding: no primeiríssimo lançamento do usuário no WhatsApp,
+    # aponta o próximo passo (aprender fazendo). Dispara UMA vez — a trava é o
+    # evento em system_event_logs; user_seq == 1 é só o pré-filtro barato pra não
+    # consultar o banco a cada lançamento (e o evento ainda cobre o caso de o
+    # user_seq voltar a 1 depois de um "apagar tudo"). Só pra lançamento real
+    # (não movimentação interna) e quando não há oferta de recorrente competindo
+    # pela atenção.
+    if platform == "whatsapp" and not is_int and not recurring_offer and user_seq == 1:
+        try:
+            from core.observability import recent_event_exists, log_system_event_sync
+            if not recent_event_exists("onboarding_first_launch_nudge", user_id, within_days=36500):
+                resposta += (
+                    "\n\n🎉 Esse foi seu primeiro lançamento — viu como é rápido?\n"
+                    "Agora tenta **saldo**. Quando quiser, tem caixinhas, cartões e "
+                    "dashboard: é só mandar **ajuda**."
+                )
+                log_system_event_sync(
+                    "info",
+                    "onboarding_first_launch_nudge",
+                    "Nudge de primeiro lançamento enviado no WhatsApp.",
+                    source="launches",
+                    user_id=user_id,
+                )
+        except Exception:
+            logger.warning(
+                "nudge de primeiro lançamento falhou (user %s) — seguindo sem ele",
+                user_id, exc_info=True,
+            )
+
     return resposta
 
 

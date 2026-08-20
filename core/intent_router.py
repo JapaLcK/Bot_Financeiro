@@ -72,7 +72,14 @@ OUT_OF_SCOPE_MSG = (
     "Digite *ajuda* para ver o que posso fazer."
 )
 
-NOT_UNDERSTOOD_MSG = "Não entendi. Pode reformular?\nDigite *ajuda* para ver exemplos."
+NOT_UNDERSTOOD_MSG = (
+    "Não entendi bem o que você quis fazer. 🤔\n"
+    "Tenta assim:\n"
+    "• *gastei 50 no mercado* — registrar um gasto\n"
+    "• *saldo* — ver quanto você tem\n"
+    "• *recebi 1000 de salário* — registrar uma receita\n\n"
+    "Ou digite *ajuda* pra ver tudo que eu faço."
+)
 
 
 def _contextual_help_message(text: str, platform: str) -> str:
@@ -150,6 +157,24 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
         resp = h_credit.resolve_pending(user_id, text, pending)
         if resp is not None:
             return resp
+
+    # Pergunta "de onde sai o dinheiro?" (funding_source_choice). Nas etapas de
+    # escolha qualquer texto poderia virar resposta, então vale a mesma regra do
+    # guard anti-órfão logo abaixo: outro comando claro abandona a pergunta e
+    # limpa a pendência. confirm.yes/no seguem para o fluxo (podem cancelar).
+    if pending and pending.get("action_type") == "funding_source_choice":
+        abandonou = (
+            confidence >= 0.55
+            and intent != "out_of_scope"
+            and intent not in ("confirm.yes", "confirm.no")
+        )
+        if abandonou:
+            db.clear_pending_action(user_id)
+            pending = None
+        else:
+            resp = h_investments.resolve_funding_choice(user_id, text, pending)
+            if resp is not None:
+                return resp
 
     # -----------------------------------------------------------------------
     # 0c. Guard anti-órfão: uma confirmação destrutiva armada (delete_launch/

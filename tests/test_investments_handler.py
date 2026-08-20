@@ -6,6 +6,19 @@ import pytest
 from core.handlers import investments as h_investments
 
 
+def _carteira_com(saldo: float):
+    """Carteira cobrindo o valor, para o teste CHEGAR na chamada que quer exercitar.
+
+    O aporte agora resolve a origem antes de tocar no banco (core/services/funding.py).
+    Sem saldo em lugar nenhum ele responde "nenhum saldo cobre" e volta — e o mock de
+    `investment_deposit_from_account` nunca é usado, o que faria o teste medir nada.
+    """
+    return patch("db.get_consolidated_balance", return_value={
+        "manual": saldo, "open_finance_bank": 0, "of_bank_count": 0,
+        "consolidated": saldo,
+    })
+
+
 def test_list_investments_capitaliza_antes_de_responder():
     rows = [
         {"name": "CDB Banco Luso", "balance": 821.91, "rate": 1.16, "period": "cdi", "last_date": date(2026, 4, 16)},
@@ -141,7 +154,8 @@ def test_deposit_investimento_inexistente_manda_pro_dashboard():
     O cadastro é exclusivo do dashboard (ver `create`), então sem o link o
     usuário fica sem saída — foi exatamente o que o INV_NOT_FOUND cru fazia.
     """
-    with patch("core.handlers.investments.db.investment_deposit_from_account",
+    with _carteira_com(1000), \
+         patch("core.handlers.investments.db.investment_deposit_from_account",
                side_effect=LookupError("INV_NOT_FOUND")), \
          patch("core.handlers.investments.db.accrue_all_investments", return_value=[]), \
          patch("core.handlers.investments.build_dashboard_link", return_value="https://app.test/d/abc"):
@@ -159,7 +173,8 @@ def test_deposit_investimento_inexistente_manda_pro_dashboard():
 def test_deposit_investimento_inexistente_com_carteira_lista_os_existentes():
     rows = [{"name": "CDB Banco Luso", "balance": 821.91, "rate": 1.16,
              "period": "cdi", "last_date": date(2026, 4, 16)}]
-    with patch("core.handlers.investments.db.investment_deposit_from_account",
+    with _carteira_com(1000), \
+         patch("core.handlers.investments.db.investment_deposit_from_account",
                side_effect=LookupError("INV_NOT_FOUND")), \
          patch("core.handlers.investments.db.accrue_all_investments", return_value=rows) as accrue, \
          patch("core.handlers.investments.build_dashboard_link", return_value="https://app.test/d/abc"):
@@ -175,17 +190,21 @@ def test_deposit_investimento_inexistente_com_carteira_lista_os_existentes():
 
 
 def test_deposit_saldo_insuficiente_continua_com_mensagem_propria():
-    with patch("core.handlers.investments.db.investment_deposit_from_account",
+    with _carteira_com(999999), \
+         patch("core.handlers.investments.db.investment_deposit_from_account",
                side_effect=ValueError("INSUFFICIENT_ACCOUNT")), \
          patch("core.handlers.investments.build_dashboard_link", return_value="https://app.test/d/abc"):
         msg = h_investments.deposit(
             123, "investi 999999 no cdb", {"investment_name": "CDB", "amount": 999999},
         )
-    assert "Saldo insuficiente na conta" in msg
+    # a mensagem agora nomeia o saldo e mostra o número, em vez do genérico
+    assert "Saldo insuficiente" in msg
+    assert "R$ 999.999,00" in msg
 
 
 def test_deposit_sucesso_responde_com_id():
-    with patch("core.handlers.investments.db.investment_deposit_from_account",
+    with _carteira_com(1000), \
+         patch("core.handlers.investments.db.investment_deposit_from_account",
                return_value=(55, 100.0, 870.0, "Tesouro Selic 2029")), \
          patch("core.handlers.investments.db.display_id_for", return_value=7):
         msg = h_investments.deposit(
@@ -202,7 +221,8 @@ def test_deposit_deixa_plan_limit_subir():
     o catch genérico não pode engoli-la."""
     from core.services.plan_limits import PlanLimitExceeded
 
-    with patch("core.handlers.investments.db.investment_deposit_from_account",
+    with _carteira_com(1000), \
+         patch("core.handlers.investments.db.investment_deposit_from_account",
                side_effect=PlanLimitExceeded("investments", "Faça upgrade!")):
         with pytest.raises(PlanLimitExceeded):
             h_investments.deposit(

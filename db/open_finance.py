@@ -1,7 +1,7 @@
 import re
 import unicodedata
 from decimal import Decimal
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from uuid import NAMESPACE_OID, uuid5
 
 from psycopg.types.json import Jsonb
@@ -922,13 +922,14 @@ def save_open_finance_sync(connection_id: int, accounts: list[dict]) -> dict:
                         """
                         insert into open_finance_transactions (
                             account_id, provider_transaction_id, description,
-                            amount, transaction_date, category, raw
+                            amount, transaction_date, transacted_at, category, raw
                         )
-                        values (%s,%s,%s,%s,%s,%s,%s)
+                        values (%s,%s,%s,%s,%s,%s,%s,%s)
                         on conflict (account_id, provider_transaction_id)
                         do update set description = excluded.description,
                                       amount = excluded.amount,
                                       transaction_date = excluded.transaction_date,
+                                      transacted_at = excluded.transacted_at,
                                       category = excluded.category,
                                       raw = excluded.raw
                         """,
@@ -938,6 +939,7 @@ def save_open_finance_sync(connection_id: int, accounts: list[dict]) -> dict:
                             tx["description"],
                             tx["amount"],
                             tx["transaction_date"],
+                            tx.get("transacted_at"),
                             tx.get("category"),
                             Jsonb(tx.get("raw") or {}),
                         ),
@@ -1133,7 +1135,8 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
             cur.execute(
                 """
                 select t.id as of_tx_id, t.provider_transaction_id, t.description,
-                       t.amount, t.transaction_date, t.category, a.type as account_type
+                       t.amount, t.transaction_date, t.transacted_at, t.category,
+                       a.type as account_type
                 from open_finance_transactions t
                 join open_finance_accounts a on a.id = t.account_id
                 join open_finance_connections c on c.id = a.connection_id
@@ -1182,9 +1185,21 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                     continue
 
                 # Sem match ('none') ou ambíguo ('ask'): cria o OF launch.
+                #
+                # `criado_em` (timestamptz) dirige a exibição na lista:
+                #   - banco mandou hora real (transacted_at) → usa o instante exato;
+                #   - só data → meia-dia no fuso local (evita o "escorrega 1 dia"
+                #     que acontecia gravando `date` cru como meia-noite UTC).
+                # `time_known` sinaliza pro front mostrar HH:MM só quando é real.
+                has_real_time = r["transacted_at"] is not None
+                criado_em = (
+                    r["transacted_at"] if has_real_time
+                    else datetime.combine(r["transaction_date"], time(12, 0), tzinfo=_tz())
+                )
                 efeitos = {
                     "delta_conta": 0,  # analytics-only: não mexe no saldo manual
                     "open_finance": {"provider_transaction_id": r["provider_transaction_id"]},
+                    "time_known": has_real_time,
                 }
                 cur.execute(
                     """
@@ -1198,7 +1213,7 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                     """,
                     (
                         user_id, cls["tipo"], cls["valor"], (r["category"] or "outros"),
-                        r["description"], None, r["transaction_date"], Jsonb(efeitos),
+                        r["description"], None, criado_em, Jsonb(efeitos),
                         "open_finance", r["provider_transaction_id"], r["transaction_date"], "BRL",
                         cls["is_internal_movement"],
                     ),
@@ -1713,15 +1728,153 @@ def detect_open_finance_bill_increase(user_id: int, months: int = 4) -> list:
     return detect_bill_increase(expenses)
 
 
+# Contas BANK que compõem o saldo corrente do usuário. Uma definição só, usada
+# pelo saldo consolidado E pela escolha de origem do lançamento — se as duas
+# divergirem, o bot recusa um aporte que a tela diz que cabe (ou o contrário).
+#
+# Dedup por conta REAL (provider_account_id): reconectar o banco cria uma nova
+# connection_id com a MESMA conta (a unicidade é por conexão), o que somaria o
+# mesmo saldo 2x. DISTINCT ON pega o saldo da conexão mais recente por conta.
+# PAUSED/DELETED mantêm o espelho local para histórico, mas não representam uma
+# conexão atual e portanto não podem compor o saldo corrente.
+# Só contas em BRL: o saldo manual é em reais e não há conversão de câmbio —
+# somar USD 100 como R$ 100 mentiria o total.
+_BANK_ACCOUNTS_SQL = """
+    select * from (
+        select distinct on (a.provider_account_id)
+            a.id, a.name, a.balance, c.institution_name,
+            upper(coalesce(c.status, '')) as connection_status
+        from open_finance_accounts a
+        join open_finance_connections c on c.id = a.connection_id
+        where c.user_id=%s and upper(a.type) = 'BANK'
+          and upper(coalesce(a.currency, 'BRL')) = 'BRL'
+        order by a.provider_account_id, c.id desc
+    ) uniq
+    where connection_status not in ('PAUSED', 'DELETED')
+"""
+
+
+def list_bank_accounts(user_id: int) -> list[dict]:
+    """Contas BANK conectadas e ativas, com saldo e rótulo para exibição.
+
+    Mesmo recorte do `get_consolidated_balance` — as duas leem `_BANK_ACCOUNTS_SQL`.
+    """
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(_BANK_ACCOUNTS_SQL + " order by balance desc nulls last, id", (user_id,))
+            rows = [dict(r) for r in (cur.fetchall() or [])]
+
+    for r in rows:
+        # "Nubank · Conta" quando os dois existem; o que houver, senão.
+        partes = [p for p in ((r.get("institution_name") or "").strip(),
+                              (r.get("name") or "").strip()) if p]
+        r["label"] = " · ".join(partes) or "Banco conectado"
+        r["balance"] = r.get("balance") or Decimal("0")
+    return rows
+
+
+def pending_bank_outflows(user_id: int) -> dict[int, Decimal]:
+    """Saídas já lançadas contra uma conta do banco que o sync ainda não refletiu.
+
+    O saldo em `open_finance_accounts` é um espelho: o Pig não escreve nele. Então um
+    aporte com origem `bank` não reduz nada, e sem esta conta o MESMO saldo autorizaria
+    infinitos lançamentos — medido: 3 aportes de R$ 800 aceitos contra R$ 1.387,76.
+
+    O corte é `criado_em > a.updated_at`: `updated_at` é carimbado a cada sync
+    (save_open_finance_sync), então lançamentos anteriores a ele já estão embutidos no
+    saldo que o banco mandou e não podem ser descontados duas vezes.
+
+    Só saídas. Resgate com destino `bank` devolve dinheiro pro banco, mas creditar
+    disponibilidade antes do sync confirmar seria adiantar dinheiro que ainda não chegou.
+
+    Devolve {of_account_id: total_pendente}.
+    """
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select (l.efeitos->'funding_source'->>'of_account_id')::bigint as of_account_id,
+                       coalesce(sum(l.valor), 0) as total
+                from launches l
+                join open_finance_accounts a
+                  on a.id = (l.efeitos->'funding_source'->>'of_account_id')::bigint
+                where l.user_id = %s
+                  and l.efeitos->'funding_source'->>'kind' = 'bank'
+                  and l.tipo in ('aporte_investimento', 'deposito_caixinha')
+                  and l.criado_em > a.updated_at
+                group by 1
+                """,
+                (user_id,),
+            )
+            return {int(r["of_account_id"]): Decimal(str(r["total"] or 0))
+                    for r in (cur.fetchall() or []) if r["of_account_id"] is not None}
+
+
+def assert_bank_covers(cur, user_id: int, of_account_id, valor) -> None:
+    """Autoriza uma saída contra uma conta do banco — DENTRO da transação que a grava.
+
+    O `funding.resolve` no serviço decide e explica; quem *autoriza* é aqui. Sem isto a
+    checagem virava check-then-act: medido com duas threads, dois aportes de R$ 800
+    simultâneos passaram contra um saldo de R$ 1.000 (R$ 1.600 gravados). O caminho da
+    Carteira nunca teve esse furo porque o `select ... for update` serializa.
+
+    O `for update` na linha da conta é o que serializa aqui: a segunda transação espera
+    a primeira commitar e então enxerga o lançamento dela no pendente.
+
+    Ordem de lock: SEMPRE depois do `accounts ... for update` que os chamadores já fazem,
+    para não inverter a ordem entre transações e criar deadlock.
+    """
+    if of_account_id is None:
+        return  # origem banco sem conta identificada: não há o que conferir
+
+    # Join na conexão para filtrar pelo DONO. Sem isso a query autorizaria contra o
+    # saldo de uma conta de outro usuário — regra dura do CLAUDE.md §5 ("toda query
+    # com WHERE user_id = %s"). Hoje todo `funding_source` nasce de
+    # funding.list_sources(user_id), mas esta função é pública em db/ e está a um
+    # chamador descuidado de virar vazamento real.
+    cur.execute(
+        """
+        select a.balance, a.updated_at
+        from open_finance_accounts a
+        join open_finance_connections c on c.id = a.connection_id
+        where a.id = %s and c.user_id = %s
+        for update of a
+        """,
+        (int(of_account_id), user_id),
+    )
+    conta = cur.fetchone()
+    if not conta:
+        # Vazio cobre dois casos que não dá para separar aqui: conta desconectada no
+        # meio do fluxo, e conta que não é deste usuário. Entre liberar os dois e
+        # negar os dois, negar é o lado seguro — o custo é o caso raro de desconexão
+        # virar uma recusa, e aí o usuário reconecta.
+        raise ValueError("INSUFFICIENT_ACCOUNT")
+    cur.execute(
+        """
+        select coalesce(sum(l.valor), 0) as total
+        from launches l
+        where l.user_id = %s
+          and l.efeitos->'funding_source'->>'kind' = 'bank'
+          and (l.efeitos->'funding_source'->>'of_account_id')::bigint = %s
+          and l.tipo in ('aporte_investimento', 'deposito_caixinha')
+          and l.criado_em > %s
+        """,
+        (user_id, int(of_account_id), conta["updated_at"]),
+    )
+    pendente = Decimal(str(cur.fetchone()["total"] or 0))
+    disponivel = Decimal(str(conta["balance"] or 0)) - pendente
+    if disponivel < Decimal(str(valor)):
+        raise ValueError("INSUFFICIENT_ACCOUNT")
+
+
 def get_consolidated_balance(user_id: int) -> dict:
     """Saldo consolidado = saldo manual + soma dos saldos das contas BANK conectadas.
 
     Cartão (type CREDIT) fica de fora (é dívida, não saldo disponível). Auto-atualiza
     conforme o sync refresca os saldos autoritativos dos bancos. `of_bank_count` é o
     nº de contas BANK conectadas — 0 = sem banco, e o chamador pode mostrar só o manual.
-
-    Só contas em BRL entram na soma (e no count): o saldo manual é em reais e não há
-    conversão de câmbio — somar USD 100 como R$ 100 mentiria o total.
     """
     ensure_user(user_id)
     with get_conn() as conn:
@@ -1730,25 +1883,8 @@ def get_consolidated_balance(user_id: int) -> dict:
             row = cur.fetchone()
             manual = row["b"] if row else Decimal("0")
 
-            # Dedup por conta REAL (provider_account_id): reconectar o banco cria uma nova
-            # connection_id com a MESMA conta (a unicidade é por conexão), o que somaria o
-            # mesmo saldo 2x. DISTINCT ON pega o saldo da conexão mais recente por conta.
-            # PAUSED/DELETED mantêm o espelho local para histórico, mas não representam
-            # uma conexão atual e portanto não podem compor o saldo corrente.
             cur.execute(
-                """
-                select coalesce(sum(b), 0) as b, count(*) as n from (
-                    select distinct on (a.provider_account_id)
-                        a.balance as b,
-                        upper(coalesce(c.status, '')) as connection_status
-                    from open_finance_accounts a
-                    join open_finance_connections c on c.id = a.connection_id
-                    where c.user_id=%s and upper(a.type) = 'BANK'
-                      and upper(coalesce(a.currency, 'BRL')) = 'BRL'
-                    order by a.provider_account_id, c.id desc
-                ) uniq
-                where connection_status not in ('PAUSED', 'DELETED')
-                """,
+                f"select coalesce(sum(balance), 0) as b, count(*) as n from ({_BANK_ACCOUNTS_SQL}) s",
                 (user_id,),
             )
             of_row = cur.fetchone()

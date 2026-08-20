@@ -72,22 +72,49 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
     if not amount or float(amount) <= 0:
         return "Qual o valor? Tente: *coloquei 200 na caixinha viagem*"
 
+    from core.handlers.investments import _pergunta_origem
+    from core.services import funding
+
+    # De onde sai o dinheiro — mesma regra do aporte em investimento.
+    escolha = funding.resolve(user_id, float(amount))
+    if "ask" in escolha:
+        return _pergunta_origem(
+            user_id, escolha["ask"], float(amount),
+            {"fluxo": "pocket_deposit", "name": pocket_name, "text": text},
+        )
+    if "insufficient" in escolha:
+        return funding.msg_insuficiente(
+            user_id, float(amount), acao="depósito",
+            sources=escolha["insufficient"]["sources"])
+
+    return deposita_com_origem(user_id, pocket_name, float(amount), text, escolha["source"])
+
+
+def deposita_com_origem(user_id: int, pocket_name: str, amount: float, text: str, source: dict) -> str:
+    """Depósito com a origem já decidida — retomado também pela resposta da pergunta."""
+    from core.services import funding
+
     try:
         launch_id, new_acc, new_pocket, canon = db.pocket_deposit_from_account(
-            user_id, pocket_name, float(amount), text
+            user_id, pocket_name, float(amount), text,
+            funding_source=funding.to_db_arg(source),
         )
-        return (
-            f"✅ Depósito na caixinha **{canon}**: +{fmt_brl(float(amount))}\n"
+        msg = (
+            f"✅ Depósito na caixinha **{canon}**: +{fmt_brl(float(amount))}"
+            f"{funding.origem_txt(source)}\n"
             f"🏦 Conta: {fmt_brl(float(new_acc))} • 📦 Caixinha: {fmt_brl(float(new_pocket))}\n"
             f"ID: **#{db.display_id_for(user_id, launch_id)}**"
         )
+        if source["kind"] == funding.BANK:
+            msg += "\n\n" + funding.nota_sync()
+        return msg
     except LookupError:
         return f"Caixinha **{pocket_name}** não encontrada. Use *criar caixinha {pocket_name}*."
     except ValueError as e:
         if "OF_POCKET_READONLY" in str(e):
             return "Essa caixinha é sincronizada com seu banco — mova o dinheiro pelo app do banco."
         if "INSUFFICIENT_ACCOUNT" in str(e):
-            return "Saldo insuficiente na conta para esse depósito."
+            return funding.msg_insuficiente(user_id, float(amount), acao="depósito")
         return "Valor inválido."
     except Exception as e:
         return f"Erro ao depositar: {e}"
@@ -131,7 +158,7 @@ def _pocket_name_from_text(text: str):
     return pocket or None
 
 
-def _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id, *, emptied=False):
+def _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id, *, emptied=False, nota=""):
     tax_note = ""
     if taxes and (taxes.get("iof", 0) or taxes.get("ir", 0)):
         tax_note = f" • IR/IOF: {fmt_brl(float(taxes.get('ir', 0) + taxes.get('iof', 0)))}"
@@ -143,11 +170,17 @@ def _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, l
     return (
         f"{head}\n"
         f"🏦 Conta: {fmt_brl(float(new_acc))} • 📦 Caixinha: {fmt_brl(float(new_pocket))}{tax_note}\n"
-        f"ID: **#{db.display_id_for(user_id, launch_id)}**"
+        f"ID: **#{db.display_id_for(user_id, launch_id)}**{nota}"
     )
 
 
 def withdraw(user_id: int, text: str, entities: dict) -> str:
+    from core.services import funding
+
+    destino = funding.resolve_destination(user_id)["source"]
+    fs = funding.to_db_arg(destino)
+    nota_destino = ("\n\n" + funding.nota_sync(saida=False)) if destino["kind"] == funding.BANK else ""
+
     pocket_name = entities.get("pocket_name")
     amount      = entities.get("amount")
     want_all    = bool(_WITHDRAW_ALL_RX.search(text or ""))
@@ -169,7 +202,8 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
     if want_all:
         try:
             launch_id, new_acc, new_pocket, canon, taxes = db.pocket_withdraw_to_account(
-                user_id, pocket_name, None, text, withdraw_all=True
+                user_id, pocket_name, None, text, withdraw_all=True,
+                funding_source=fs,
             )
         except LookupError:
             return f"Caixinha **{pocket_name}** não encontrada. Use *listar caixinhas* para ver as disponíveis."
@@ -182,14 +216,14 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
         except Exception as e:
             return f"Erro ao retirar: {e}"
         sacado = float(taxes.get("gross", 0)) if taxes else 0.0
-        return _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id, emptied=True)
+        return _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id, emptied=True, nota=nota_destino)
 
     if not amount or float(amount) <= 0:
         return "Qual o valor? Tente: *retirei 100 da caixinha viagem*"
 
     try:
         launch_id, new_acc, new_pocket, canon, taxes = db.pocket_withdraw_to_account(
-            user_id, pocket_name, float(amount), text
+            user_id, pocket_name, float(amount), text, funding_source=fs,
         )
     except LookupError:
         return f"Caixinha **{pocket_name}** não encontrada. Use *listar caixinhas* para ver as disponíveis."
@@ -203,4 +237,4 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
         return f"Erro ao retirar: {e}"
     # o backend pode sacar um pouco mais que o pedido (tolerância de zeragem)
     sacado = float(taxes.get("gross", amount)) if taxes else float(amount)
-    return _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id)
+    return _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id, nota=nota_destino)
