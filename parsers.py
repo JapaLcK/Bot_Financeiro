@@ -144,7 +144,7 @@ def _extract_target_after_amount(text_base: str) -> str:
     if not t:
         return ""
 
-    t = re.sub(r"^\s*(gastei|gasto|paguei|pagar|comprei|debitei|mandei|enviei|pixei|recebi|receita|ganhei|adicionar|adicione|adiciona|adicionei|adicionou|somar|soma|some|somei)\b", "", t, flags=re.IGNORECASE).strip()
+    t = re.sub(r"^\s*(gastei|gasto|paguei|pagar|comprei|debitei|mandei|enviei|pixei|recebi|receita|ganhei|entrou|caiu|pingou|pinguei|embolsei|adicionar|adicione|adiciona|adicionei|adicionou|somar|soma|some|somei)\b", "", t, flags=re.IGNORECASE).strip()
     t = re.sub(r"^\s*r\$\s*", "", t, flags=re.IGNORECASE).strip()
     # Consome o valor inteiro, incl. separador de milhar + decimal ("1.234,56").
     t = re.sub(r"^\s*\d[\d.,]*", "", t, count=1).strip()
@@ -164,7 +164,7 @@ def _extract_target_after_amount(text_base: str) -> str:
     if t:
         toks = [tok for tok in re.split(r"\s+", t) if tok]
         if toks and all(
-            tok.lower() in ("e", "de", "com") or _words_to_number(tok) is not None
+            tok.lower() in ("e", "de", "com", "reais", "real", "r$") or _words_to_number(tok) is not None
             for tok in toks
         ):
             return ""
@@ -183,7 +183,7 @@ _STARTS_WITH_VALUE_RE = re.compile(r"^\s*(?:r\$\s*)?\d", re.IGNORECASE)
 # Verbos que iniciam um lançamento financeiro.
 _FINANCIAL_VERBS = (
     r"gastei|paguei|comprei|debitei|mandei|enviei|pix|gasto|"
-    r"recebi|ganhei|receita"
+    r"recebi|ganhei|receita|entrou|caiu|pingou|pinguei|embolsei"
 )
 
 # Conectores de soma que podem introduzir um segundo lançamento. Ordenados do

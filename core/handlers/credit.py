@@ -319,7 +319,7 @@ def _find_card_name_in_text(user_id: int, text: str) -> str | None:
     cards = list_cards(user_id)
     for card in sorted(cards, key=lambda c: len(normalize_text(c["name"])), reverse=True):
         name_norm = normalize_text(card["name"])
-        if name_norm and name_norm in norm:
+        if name_norm and re.search(rf"\b{re.escape(name_norm)}\b", norm):
             return card["name"]
     return None
 
