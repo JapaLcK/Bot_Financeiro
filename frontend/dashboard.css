@@ -2244,14 +2244,24 @@ html.pb-app #piggy-fab { touch-action: none; }
 
 /* ── Esconder saldo (olho) ────────────────────────────────────────────────
    Borra todos os valores em R$ menos a lista de lançamentos (data-num="lnc_…")
-   e as categorias do mês (data-num="cat_…"), que continuam visíveis. */
+   e as categorias do mês (data-num="cat_…"), que continuam visíveis.
+   Modais e a view de Cartões não usam data-num, então são cobertos por
+   seletores próprios abaixo (escopados pra não borrar transações/lançamentos). */
 #hide-balance-btn { font-size: 1rem; line-height: 1; }
 body.balance-hidden [data-num]:not([data-num^="cat_"]):not([data-num^="lnc_"]),
 body.balance-hidden #pkt-hist-balance,
 body.balance-hidden #pay-bill-balance,
+body.balance-hidden #receipt-amount,
 body.balance-hidden #receipt-balance,
+body.balance-hidden #receipt-open,
 body.balance-hidden #invest-summary .chip-val,
-body.balance-hidden #invest-list .val {
+body.balance-hidden #invest-list .val,
+/* View de Cartões: stats agregados + valores por cartão (totais, limites,
+   faturas). A lista de compras da fatura fica de fora — ver #bill-detail-tx. */
+body.balance-hidden #cards-view .stat-value,
+body.balance-hidden #cards-view .val,
+/* Modal de detalhe da fatura: só os totais do resumo, não as compras. */
+body.balance-hidden #bill-detail-summary .v {
   filter: blur(8px);
   -webkit-filter: blur(8px);
   user-select: none;
