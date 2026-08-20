@@ -1095,6 +1095,48 @@ def parse_expense_income_natural(text: str):
 
     return {"kind": kind, "amount": amount, "note": note, "category": category}
 
+def parse_investment_deposit_natural(text: str):
+    """Retorna (amount, investment_name) de "investi 80 em reserva de emergencia".
+
+    Espelha `parse_pocket_deposit_natural`, mas para aporte em investimento. Existe
+    porque o Tier 2 do classificador reconhece o comando de aporte com 95% de
+    confiança e NÃO extraía entidade nenhuma — devolvia `entities={}`, o handler caía
+    em "em qual investimento?" e, pela confiança alta, a mensagem nunca chegava na IA
+    que saberia extrair. Resultado medido: nenhum aporte pelo caminho determinístico
+    conseguia completar, mesmo com o nome escrito na frase.
+
+    Aceita "no/na/em/pra/para <nome>" e o prefixo opcional "investimento".
+    """
+    raw = normalize_spaces(text.lower())
+
+    if not re.search(r"\b(investi|apliquei|aportei|aplicar|aportar|investir)\b", raw):
+        return None, None
+
+    amount = parse_money(raw)
+    if amount is None:
+        return None, None
+
+    # "investi 500 no investimento X" → o nome vem depois da palavra
+    if "investimento" in raw:
+        nome = raw.split("investimento", 1)[1].strip()
+        nome = re.sub(r"^(da|do|de|na|no|em|pra|para)\s+", "", nome).strip()
+        nome = re.sub(r"\b(hoje|ontem)\b.*$", "", nome).strip()
+        if nome:
+            return amount, nome
+
+    # "investi 80 em reserva de emergencia"
+    m = re.search(r"\b(na|no|em|pra|para)\s+([a-z0-9_\-+áàâãéèêíìîóòôõúùûç ]+)", raw)
+    if m:
+        nome = m.group(2).strip()
+        nome = re.sub(r"\b(hoje|ontem)\b.*$", "", nome).strip()
+        # corta se emendar outro comando
+        nome = re.split(r"\b(saldo|caixinha|coloquei|depositei)\b", nome)[0].strip()
+        if nome:
+            return amount, nome
+
+    return None, None
+
+
 def parse_pocket_deposit_natural(text: str):
     """
     Retorna (amount: float, pocket_name: str) ou (None, None)

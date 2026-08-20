@@ -162,6 +162,19 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
     # escolha qualquer texto poderia virar resposta, então vale a mesma regra do
     # guard anti-órfão logo abaixo: outro comando claro abandona a pergunta e
     # limpa a pendência. confirm.yes/no seguem para o fluxo (podem cancelar).
+    # Resposta à pergunta "em qual investimento?" — mesma escotilha de escape do
+    # guard anti-órfão: outro comando claro abandona a pergunta.
+    if pending and pending.get("action_type") == "investment_pick":
+        if (confidence >= 0.55 and intent != "out_of_scope"
+                and intent not in ("confirm.yes", "confirm.no")
+                and not intent.startswith("investments.")):
+            db.clear_pending_action(user_id)
+            pending = None
+        else:
+            resp = h_investments.resolve_investment_pick(user_id, text, pending)
+            if resp is not None:
+                return resp
+
     if pending and pending.get("action_type") == "funding_source_choice":
         abandonou = (
             confidence >= 0.55

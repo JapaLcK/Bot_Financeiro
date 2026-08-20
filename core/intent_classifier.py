@@ -716,6 +716,18 @@ def _try_alias(norm: str, original: str) -> IntentResult | None:
                 if m:
                     entities["pocket_name"] = m.group(1).strip()
 
+            # Sem este ramo o Tier 2 reconhecia o aporte com 0.95 e devolvia
+            # `entities={}` — o handler caía em "em qual investimento?" mesmo com o
+            # nome escrito na frase, e a confiança alta impedia a IA (Tier 3) de ver
+            # a mensagem. Medido: nenhum aporte determinístico completava.
+            elif intent == "investments.deposit":
+                from utils_text import parse_investment_deposit_natural
+                _amt, _nome = parse_investment_deposit_natural(original)
+                if _amt is not None:
+                    entities["amount"] = _amt
+                if _nome:
+                    entities["investment_name"] = _nome
+
             elif intent == "investments.create":
                 m = re.search(r"^criar\s+investimento\s+(.+)$", norm)
                 if m:
