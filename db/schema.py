@@ -1747,6 +1747,15 @@ def init_db():
         # espaço default por usuário é lazy (ver db/spaces.ensure_default_space);
         # `space_id NULL` em launches/credit_transactions = espaço default. Apagar
         # um espaço NÃO apaga lançamentos (on delete set null → caem p/ default).
+        #
+        # ISOLAMENTO POR USUÁRIO (P1 apontado na revisão): a FK de space_id NÃO
+        # pode validar só financial_spaces(id) — isso deixaria um lançamento do
+        # usuário A apontar para um espaço do usuário B. Por isso:
+        #   - launches / credit_transactions (têm user_id) usam FK COMPOSTA
+        #     (user_id, space_id) → financial_spaces(user_id, id), com
+        #     `on delete set null (space_id)` (PG15+: zera só space_id, não user_id);
+        #   - open_finance_accounts (não tem user_id) usa FK simples + TRIGGER que
+        #     valida que o espaço é do mesmo dono da conexão.
         """
         create table if not exists financial_spaces (
           id bigserial primary key,
@@ -1765,21 +1774,98 @@ def init_db():
         create unique index if not exists uq_financial_spaces_one_default
           on financial_spaces(user_id) where is_default
         """,
+        # alvo unívoco da FK composta (user_id, id). id já é PK, então (user_id, id)
+        # é trivialmente único; a constraint é necessária para poder ser referenciada.
         """
-        alter table launches add column if not exists space_id bigint
-          references financial_spaces(id) on delete set null
+        do $$ begin
+          if not exists (
+            select 1 from pg_constraint where conname = 'uq_financial_spaces_user_id'
+          ) then
+            alter table financial_spaces
+              add constraint uq_financial_spaces_user_id unique (user_id, id);
+          end if;
+        end $$
         """,
-        """
-        alter table credit_transactions add column if not exists space_id bigint
-          references financial_spaces(id) on delete set null
-        """,
+        # colunas space_id (sem FK inline — a FK composta é adicionada abaixo)
+        """alter table launches add column if not exists space_id bigint""",
+        """alter table credit_transactions add column if not exists space_id bigint""",
+        # open_finance_accounts não tem user_id → FK simples (existência + set null);
+        # a posse é garantida pelo trigger of_account_space_same_owner (abaixo).
         """
         alter table open_finance_accounts add column if not exists space_id bigint
           references financial_spaces(id) on delete set null
         """,
+        # remove FKs simples que uma versão anterior deste branch possa ter criado
+        # inline em launches/credit_transactions (idempotente; no-op em banco novo).
+        """alter table launches drop constraint if exists launches_space_id_fkey""",
+        """alter table credit_transactions drop constraint if exists credit_transactions_space_id_fkey""",
+        # FK composta launches: espaço tem de ser do MESMO usuário do lançamento.
+        """
+        do $$ begin
+          if not exists (
+            select 1 from pg_constraint where conname = 'fk_launches_space'
+          ) then
+            alter table launches add constraint fk_launches_space
+              foreign key (user_id, space_id)
+              references financial_spaces(user_id, id)
+              on delete set null (space_id);
+          end if;
+        end $$
+        """,
+        # FK composta credit_transactions (mesmo racional).
+        """
+        do $$ begin
+          if not exists (
+            select 1 from pg_constraint where conname = 'fk_credit_tx_space'
+          ) then
+            alter table credit_transactions add constraint fk_credit_tx_space
+              foreign key (user_id, space_id)
+              references financial_spaces(user_id, id)
+              on delete set null (space_id);
+          end if;
+        end $$
+        """,
+        # índices nas colunas de FK: sem eles o `on delete set null` faz seq scan
+        # ao apagar um espaço. launches usa (user_id, space_id) leftmost do índice.
         """
         create index if not exists idx_launches_user_space
           on launches(user_id, space_id, criado_em desc)
+        """,
+        """
+        create index if not exists idx_credit_tx_user_space
+          on credit_transactions(user_id, space_id)
+        """,
+        """
+        create index if not exists idx_of_accounts_space
+          on open_finance_accounts(space_id)
+        """,
+        # posse do espaço em open_finance_accounts (não tem user_id p/ FK composta):
+        # o espaço apontado tem de pertencer ao dono da conexão da conta.
+        """
+        create or replace function of_account_space_same_owner()
+        returns trigger as $$
+        begin
+          if new.space_id is not null then
+            if not exists (
+              select 1
+              from financial_spaces fs
+              join open_finance_connections c on c.id = new.connection_id
+              where fs.id = new.space_id and fs.user_id = c.user_id
+            ) then
+              raise exception
+                'space_id % nao pertence ao dono da conta OF (connection %)',
+                new.space_id, new.connection_id;
+            end if;
+          end if;
+          return new;
+        end;
+        $$ language plpgsql
+        """,
+        """drop trigger if exists trg_of_account_space_same_owner on open_finance_accounts""",
+        """
+        create trigger trg_of_account_space_same_owner
+          before insert or update of space_id on open_finance_accounts
+          for each row execute function of_account_space_same_owner()
         """,
     ]
 

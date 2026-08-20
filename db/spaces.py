@@ -81,11 +81,21 @@ def create_space(
     emoji: str | None = None,
     color: str | None = None,
 ) -> dict:
-    """Cria (ou reativa, se arquivado) um espaço não-default. Idempotente por nome."""
+    """Cria (ou reativa, se arquivado) um espaço NÃO-default. Idempotente por nome.
+
+    O nome reservado do espaço default (`DEFAULT_SPACE_NAME`) é recusado: só
+    `ensure_default_space` cria/gerencia essa linha. Sem essa guarda, criar um
+    espaço "Pessoal" colidiria com o default e o `on conflict` poderia devolver
+    (ou promover) a linha default sem querer.
+    """
     ensure_user(user_id)
     clean = (name or "").strip()
     if not clean:
         raise ValueError("nome do espaço não pode ser vazio")
+    if clean.casefold() == DEFAULT_SPACE_NAME.casefold():
+        raise ValueError(
+            f"'{DEFAULT_SPACE_NAME}' é o nome reservado do espaço default"
+        )
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
