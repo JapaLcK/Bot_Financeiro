@@ -463,6 +463,11 @@ html.pb-app body.pb-page-home .header-right {
 html.pb-app body.pb-page-home { padding-top: env(safe-area-inset-top); }
 html.pb-app footer { display: none !important; }
 
+/* ─── Notícias (/changelog) como aba do app ────────────────────────────── */
+/* .nav e footer já somem (regras globais). Ajusta só o topo pro app. */
+html.pb-app body.pb-page-changelog { padding-top: env(safe-area-inset-top); }
+html.pb-app body.pb-page-changelog .section { padding-top: 14px !important; }
+
 /* ─── Dashboard ────────────────────────────────────────────────────────── */
 /* Header compacto: ☰ + marca | mês centrado | conta. Import/export são
    fluxos de desktop. */

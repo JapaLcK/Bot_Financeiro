@@ -189,4 +189,90 @@
       if (panel && panel.classList.contains("open")) closePiggy();
     }
   });
+
+  // ── Bolinha: clique abre o chat + arrasto (só no app/PWA) ───────────────
+  (function initFab() {
+    const fab = document.getElementById("piggy-fab");
+    if (!fab) return;
+
+    let justDragged = false;
+
+    // Toque/click abre o chat — em QUALQUER contexto (site e app). Também cobre
+    // teclado (Enter/Espaço no botão dispara click). Substitui o onclick inline.
+    fab.addEventListener("click", (e) => {
+      if (justDragged) { e.preventDefault(); e.stopPropagation(); return; }
+      if (typeof window.togglePiggy === "function") window.togglePiggy();
+    });
+
+    // Arrasto: SÓ no app/PWA. No desktop/site a bolinha fica fixa.
+    if (!document.documentElement.classList.contains("pb-app")) return;
+
+    const KEY = "pbFabPos", MARGIN = 14, THRESHOLD = 6;
+    const size = () => fab.offsetWidth || 58;
+    // Deixa espaço pra tab bar embaixo e pro notch/status em cima.
+    const RESERVE_BOTTOM = 92, MIN_TOP = 54;
+    const clampTop = (y) => Math.max(MIN_TOP, Math.min(y, window.innerHeight - size() - RESERVE_BOTTOM));
+
+    // setProperty com 'important' pra vencer as regras !important do app-mode.css
+    function place(side, top) {
+      fab.style.setProperty("top", clampTop(top) + "px", "important");
+      fab.style.setProperty("bottom", "auto", "important");
+      fab.style.setProperty(side === "left" ? "left" : "right", MARGIN + "px", "important");
+      fab.style.setProperty(side === "left" ? "right" : "left", "auto", "important");
+    }
+    function save(side, top) { try { localStorage.setItem(KEY, JSON.stringify({ side, top })); } catch (_) {} }
+    function load() { try { return JSON.parse(localStorage.getItem(KEY)); } catch (_) { return null; } }
+
+    // Restaura posição salva (se houver)
+    const saved = load();
+    if (saved && (saved.side === "left" || saved.side === "right")) place(saved.side, saved.top);
+
+    let active = false, moved = false, sx = 0, sy = 0, ox = 0, oy = 0;
+
+    fab.addEventListener("pointerdown", (e) => {
+      active = true; moved = false;
+      const r = fab.getBoundingClientRect();
+      sx = e.clientX; sy = e.clientY; ox = e.clientX - r.left; oy = e.clientY - r.top;
+      try { fab.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+
+    fab.addEventListener("pointermove", (e) => {
+      if (!active) return;
+      if (!moved && Math.hypot(e.clientX - sx, e.clientY - sy) < THRESHOLD) return;
+      moved = true;
+      fab.classList.add("pb-dragging");
+      const s = size();
+      const left = Math.max(4, Math.min(e.clientX - ox, window.innerWidth - s - 4));
+      fab.style.setProperty("left", left + "px", "important");
+      fab.style.setProperty("right", "auto", "important");
+      fab.style.setProperty("top", clampTop(e.clientY - oy) + "px", "important");
+      fab.style.setProperty("bottom", "auto", "important");
+      e.preventDefault();
+    });
+
+    function end(e) {
+      if (!active) return;
+      active = false;
+      try { fab.releasePointerCapture(e.pointerId); } catch (_) {}
+      if (!moved) return; // toque curto → o click acima abre o chat
+      fab.classList.remove("pb-dragging");
+      const r = fab.getBoundingClientRect();
+      const side = (r.left + r.width / 2) < window.innerWidth / 2 ? "left" : "right";
+      // Anima o "encaixe" na lateral, depois solta a transição pro hover voltar
+      fab.style.transition = "top .18s ease, left .18s ease, right .18s ease";
+      place(side, r.top);
+      save(side, r.top);
+      setTimeout(() => { fab.style.transition = ""; }, 220);
+      justDragged = true;
+      setTimeout(() => { justDragged = false; }, 0);
+    }
+    fab.addEventListener("pointerup", end);
+    fab.addEventListener("pointercancel", end);
+
+    // Reposiciona ao virar a tela / redimensionar (re-clampa nos limites novos)
+    window.addEventListener("resize", () => {
+      const p = load();
+      if (p && (p.side === "left" || p.side === "right")) place(p.side, p.top);
+    });
+  })();
 })();

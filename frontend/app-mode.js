@@ -41,14 +41,15 @@
     "/home":         "home",
     "/app":          "app",
     "/comandos-app": "comandos",
+    "/changelog":    "changelog",
     "/settings":     "settings",
   };
   // Variantes do preview local (mock serve arquivos .html e o dash na raiz)
   if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
     Object.assign(PAGES, {
       "/home.html": "home", "/dashboard.html": "app",
-      "/comandos-app.html": "comandos", "/settings.html": "settings",
-      "/": "app",
+      "/comandos-app.html": "comandos", "/changelog.html": "changelog",
+      "/settings.html": "settings", "/": "app",
     });
   }
   const path = location.pathname.replace(/\/+$/, "") || "/";
@@ -71,6 +72,45 @@
     { href: "/settings", label: "Ajustes", icon:
       '<svg viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h.1a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5h.1a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1h.1a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>' },
   ];
+
+  // 4º lugar da tab bar: "Notícias" (/changelog) é recurso Pro. Se o plano
+  // libera, ela assume esse lugar (no lugar de "O que pedir") e some do menu
+  // lateral. Free mantém "O que pedir". A decisão fica em cache (localStorage)
+  // pra montar instantâneo; /auth/me só reconcilia depois.
+  const NEWS_TAB = { href: "/changelog", label: "Notícias", icon:
+    '<svg viewBox="0 0 24 24" width="24" height="24"><path d="M3 6a1 1 0 0 1 1-1h13a1 1 0 0 1 1 1v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M18 9h2a1 1 0 0 1 1 1v8a2 2 0 0 1-2 2"/><path d="M7 9h7M7 12h7M7 15h4"/></svg>' };
+  function newsAllowed() {
+    try { return localStorage.getItem("pbNewsTab") === "1"; } catch (_) { return false; }
+  }
+  function fourthTab() { return newsAllowed() ? NEWS_TAB : TABS[2]; } // TABS[2] = "O que pedir"
+
+  // Pergunta o plano e reconcilia o 4º tab + o item do menu lateral. Como o
+  // swap não muda posição nem quantidade de abas, atualiza o tab NO LUGAR
+  // (sem remexer no dock). Pro: "Notícias" no rodapé, fora do menu.
+  function syncNewsTab(bar) {
+    fetch("/auth/me", { credentials: "same-origin" })
+      .then(r => (r.ok ? r.json() : null))
+      .then(me => {
+        if (!me) return;
+        const isPro = ((me.plan || "free") + "").trim().toLowerCase() === "pro";
+        let prev = false;
+        try { prev = localStorage.getItem("pbNewsTab") === "1"; } catch (_) {}
+        try { localStorage.setItem("pbNewsTab", isPro ? "1" : "0"); } catch (_) {}
+        const sidenavNews = document.querySelector('.sidenav-item[href="/changelog"]');
+        if (sidenavNews) sidenavNews.style.display = isPro ? "none" : "";
+        if (isPro === prev) return; // cache já estava certo
+        const t = fourthTab();
+        const a = bar.querySelector('.pb-tab[href="/comandos-app"], .pb-tab[href="/changelog"]');
+        if (!a) return;
+        a.setAttribute("href", t.href);
+        const ico = a.querySelector(".pb-tab-ico"); if (ico) ico.innerHTML = t.icon;
+        const lbl = a.querySelector("span:last-child"); if (lbl) lbl.textContent = t.label;
+        const active = PAGES[t.href] === page;
+        a.classList.toggle("active", active);
+        if (active) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+      })
+      .catch(() => {});
+  }
 
   // Lançamento: no dashboard abre o modal direto; nas outras páginas navega
   // pro dashboard com ?lancar=1 (o init lá embaixo dispara o modal).
@@ -116,11 +156,12 @@
       "</linearGradient></defs>" +
       '<path class="pb-dock-fill" fill="url(#pbDockPlate)" stroke="url(#pbDockRim)" stroke-width="1"/>' +
       "</svg>" +
-      tabHtml(TABS[0]) + tabHtml(TABS[1]) + fabHtml + tabHtml(TABS[2]) + tabHtml(TABS[3]) +
+      tabHtml(TABS[0]) + tabHtml(TABS[1]) + fabHtml + tabHtml(fourthTab()) + tabHtml(TABS[3]) +
       '<span class="pb-dock-bead" aria-hidden="true"><span class="pb-dock-bead-ico"></span></span>';
     bar.querySelector(".pb-tab-fab").addEventListener("click", fabLaunch);
     document.body.appendChild(bar);
     initDock(bar);
+    syncNewsTab(bar);
   }
 
   // ─── Dock "menisco" ──────────────────────────────────────────────────────
