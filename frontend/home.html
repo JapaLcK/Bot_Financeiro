@@ -640,6 +640,29 @@ function fmtTimeFull(iso) {
   return d.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"}) + ` · ${time}`;
 }
 
+// Data/hora de um lançamento no widget de atividade (espelha o fmtLaunchWhen do
+// dashboard).
+//  - has_time (manual, cartão, banco que envia hora) → "hoje/ontem · HH:MM" do
+//    instante real.
+//  - só data (banco que manda apenas a data) → "hoje/ontem/dd·mm" a partir de
+//    `posted_at`, lendo a string YYYY-MM-DD direto (sem new Date → sem conversão
+//    de fuso, que jogava a data pro dia anterior e inventava um horário 21:00).
+function fmtLaunchTimeHome(l) {
+  if (l && l.has_time && l.criado_em) return fmtTimeFull(l.criado_em);
+  const src = l && (l.posted_at || l.criado_em);
+  if (!src) return "";
+  const s = String(src).slice(0, 10);           // YYYY-MM-DD
+  const p = s.split("-");
+  if (p.length !== 3) return fmtTimeFull(l && l.criado_em);
+  const now = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  const iso = dt => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  if (s === iso(now)) return "hoje";
+  if (s === iso(y))   return "ontem";
+  return `${p[2]}/${p[1]}`;
+}
+
 function nextDueDate(period_end, due_day) {
   // Próximo vencimento ≈ due_day no mês imediatamente após o period_end.
   if (!period_end || !due_day) return null;
@@ -963,7 +986,7 @@ function renderActivity(snapshot) {
     const emoji = isReceita ? '<i class="ph ph-trend-up" aria-hidden="true"></i>' : (isCredito ? '<i class="ph ph-credit-card" aria-hidden="true"></i>' : '<i class="ph ph-trend-down" aria-hidden="true"></i>');
     return `
       <div class="activity-row">
-        <div class="activity-time">${fmtTimeFull(r.criado_em)}</div>
+        <div class="activity-time">${fmtLaunchTimeHome(r)}</div>
         <div class="activity-desc">
           <div class="activity-tag ${tagClass}">${emoji}</div>
           <div style="min-width:0">
