@@ -154,7 +154,7 @@ html.pb-app .pb-tabbar {
   /* laterais: 10px normais, mas nunca por baixo do notch/cantos (landscape) */
   left: max(10px, env(safe-area-inset-left));
   right: max(10px, env(safe-area-inset-right));
-  bottom: max(8px, calc(env(safe-area-inset-bottom) - 14px));
+  bottom: 0;
   /* Abaixo dos overlays de modal (800/900): modal aberto cobre a tab bar */
   z-index: 700;
   display: flex;
