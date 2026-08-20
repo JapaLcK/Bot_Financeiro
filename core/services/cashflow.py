@@ -120,11 +120,17 @@ def project(user_id: int, target_date: date, extra_amount: float = 0.0) -> dict[
             saldo = float(cb.get("consolidated") or 0)
             balance_source = "consolidated"
     except Exception:
-        pass  # sem OF/consolidado → segue com a carteira manual
+        # Falha ao consultar o consolidado (OF/gate indisponível): NÃO dá pra
+        # afirmar que a carteira manual é o saldo completo — o usuário pode ter
+        # bancos no Open Finance que não conseguimos ler agora. Marca a origem
+        # como indisponível pra a previsão não devolver um número aparentemente
+        # confiável sem aviso; o dashboard sinaliza a incerteza. Ver banks_excluded.
+        balance_source = "unavailable"
 
     # Bancos conectados que NÃO entraram no saldo de partida (gate consolidado
     # desligado): a projeção parte só da carteira e subestima o caixa → o
-    # dashboard mostra um aviso quando isso acontece.
+    # dashboard mostra um aviso quando isso acontece. Quando o consolidado falha,
+    # balance_source == "unavailable" cobre o aviso (não sabemos of_bank_count).
     banks_excluded = of_bank_count > 0 and balance_source == "manual"
 
     receitas = 0.0

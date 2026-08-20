@@ -1631,7 +1631,7 @@ def test_detetive_duplicate_shapes_event(monkeypatch):
 
     rows = [{
         "merchant": "netflix", "val": 39.90, "repeticoes": 2,
-        "ultimo_dia": _date(2026, 8, 15), "descricao": "NETFLIX.COM",
+        "ultimo_dia": _date(2026, 8, 15), "janela_dias": 1, "descricao": "NETFLIX.COM",
         "categoria": "streaming",
     }]
     monkeypatch.setattr(pa, "get_conn", lambda: _FakeConn(rows))
@@ -1649,7 +1649,43 @@ def test_detetive_duplicate_shapes_event(monkeypatch):
     assert kw["dedupe_key"] == "dup:netflix:39.90:2026-08-15"
     assert kw["payload"]["tipo"] == "duplicada"
     assert kw["payload"]["repeticoes"] == 2
+    assert kw["payload"]["janela_dias"] == 1
     assert "duplicada" in kw["payload"]["titulo"].lower()
+
+
+def test_detetive_duplicate_mensagem_usa_span_real_da_ilha(monkeypatch):
+    # P2: o clustering (gaps-and-islands) só garante gap <= janela entre vizinhos,
+    # então a ilha pode abranger bem mais dias que DETETIVE_DUP_WINDOW_DAYS.
+    # A mensagem tem que anunciar o span REAL (max-min), não o gap fixo — senão
+    # "cobrado 3× em até 2 dias" mente quando as cobranças foram nos dias 1,3,5.
+    import core.services.piggy_agents as pa
+    import db
+
+    def _run(janela_dias, reps):
+        rows = [{
+            "merchant": "spotify", "val": 21.90, "repeticoes": reps,
+            "ultimo_dia": _date(2026, 8, 15), "janela_dias": janela_dias,
+            "descricao": "SPOTIFY", "categoria": "streaming",
+        }]
+        monkeypatch.setattr(pa, "get_conn", lambda: _FakeConn(rows))
+        captured: list = []
+        monkeypatch.setattr(db, "record_agent_event",
+                            lambda *a, **k: (captured.append(k) or True))
+        pa._detetive_duplicate_detect_for_user(
+            {"agent_id": 1, "user_id": 42}, _date(2026, 8, 19))
+        return captured[0]["payload"]["mensagem"]
+
+    # ilha de 4 dias (ex.: dias 1,3,5) — NÃO pode dizer o gap fixo de 2 dias
+    msg4 = _run(4, 3)
+    assert "em 4 dias" in msg4
+    assert "3×" in msg4
+    assert "2 dias" not in msg4  # não vaza o DETETIVE_DUP_WINDOW_DAYS
+    # mesmo dia → texto próprio, sem "0 dias"
+    assert "no mesmo dia" in _run(0, 2)
+    assert "0 dia" not in _run(0, 2)
+    # singular
+    assert "em 1 dia" in _run(1, 2)
+    assert "1 dias" not in _run(1, 2)
 
 
 def test_detetive_duplicate_sem_achados_nao_emite(monkeypatch):

@@ -548,6 +548,11 @@ def _detetive_duplicate_detect_for_user(agent: dict[str, Any], today: date) -> i
                        val,
                        count(*) as repeticoes,
                        max(ts)::date as ultimo_dia,
+                       -- span REAL da ilha: o encadeamento (gaps-and-islands) só
+                       -- garante gap <= janela entre lançamentos VIZINHOS, então a
+                       -- ilha inteira pode abranger bem mais que a janela. A
+                       -- mensagem usa este span pra não afirmar um prazo falso.
+                       (max(ts)::date - min(ts)::date) as janela_dias,
                        (array_agg(raw order by ts desc))[1] as descricao,
                        (array_agg(categoria) filter (where categoria is not null))[1] as categoria,
                        array_agg(distinct fonte) as fontes
@@ -566,6 +571,8 @@ def _detetive_duplicate_detect_for_user(agent: dict[str, Any], today: date) -> i
         val = float(s["val"])
         reps = int(s["repeticoes"])
         ultimo = s["ultimo_dia"]
+        janela = int(s["janela_dias"] or 0)  # span real da ilha (dias)
+        quando = "no mesmo dia" if janela == 0 else f"em {janela} dia{'s' if janela != 1 else ''}"
         desc = (s["descricao"] or s["merchant"] or "").strip()
         desc_curta = desc[:48]
         no_cartao = "credito" in (s.get("fontes") or [])
@@ -579,12 +586,13 @@ def _detetive_duplicate_detect_for_user(agent: dict[str, Any], today: date) -> i
                 "categoria": s["categoria"],
                 "valor": val,
                 "repeticoes": reps,
+                "janela_dias": janela,
                 "fontes": s.get("fontes") or [],
                 "titulo": f"Possível cobrança duplicada: {desc_curta}",
                 "mensagem": (
                     f"🔁 {desc_curta} foi cobrado {reps}×"
-                    f"{' no cartão' if no_cartao else ''} em até "
-                    f"{DETETIVE_DUP_WINDOW_DAYS} dias ({_fmt_brl(val)} cada). "
+                    f"{' no cartão' if no_cartao else ''} {quando} "
+                    f"({_fmt_brl(val)} cada). "
                     f"Se você não reconhece a repetição, vale conferir e, se for "
                     f"engano, contestar com o estabelecimento ou o banco."
                 ),

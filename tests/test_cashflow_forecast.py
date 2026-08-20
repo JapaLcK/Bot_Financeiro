@@ -50,6 +50,34 @@ def test_forecast_horizons_aceita_horizontes_customizados(monkeypatch):
     assert set(out["horizons"].keys()) == {"7", "15"}
 
 
+def test_project_marca_unavailable_quando_consolidado_falha(monkeypatch):
+    # P1: se a consulta ao saldo consolidado (OF/gate) falha, NÃO dá pra afirmar
+    # que a carteira manual é o saldo completo. A projeção não pode devolver um
+    # número aparentemente confiável sem aviso — marca balance_source
+    # "unavailable" pro dashboard sinalizar a incerteza.
+    import core.services.cashflow as cf
+    import db, db.accounts, db.recurring, db.recurring_income, db.bills
+
+    monkeypatch.setattr(db.accounts, "get_balance", lambda uid: 100.0)
+    monkeypatch.setattr(db.recurring, "list_recurring_expenses", lambda uid: [])
+    monkeypatch.setattr(db.recurring_income, "list_recurring_incomes", lambda uid: [])
+    monkeypatch.setattr(db.bills, "list_bills",
+                        lambda uid, include_paid=False, limit=1000: [])
+    monkeypatch.setattr(cf, "_open_card_bills_due", lambda uid, until: 0.0)
+
+    def boom(uid):
+        raise RuntimeError("Open Finance indisponível")
+    monkeypatch.setattr(db, "get_consolidated_balance", boom, raising=False)
+
+    out = cf.project(1, date.today() + timedelta(days=30))
+
+    assert out["balance_source"] == "unavailable"
+    # sem of_bank_count confiável, banks_excluded não dispara — o aviso vem da
+    # origem "unavailable"; o saldo de partida segue a carteira manual.
+    assert out["banks_excluded"] is False
+    assert out["saldo_atual"] == 100.0
+
+
 def test_card_bill_due_date_canonica_rollover_clamp_e_mesmo_dia():
     # A projeção usa a regra canônica de db/cards.py (via _open_card_bills_due),
     # não uma cópia própria — garante que não voltem a divergir.

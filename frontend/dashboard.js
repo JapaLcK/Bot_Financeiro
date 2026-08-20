@@ -4452,13 +4452,19 @@ function _renderForecast(fc) {
     <div style="font-size:.68rem;color:var(--text-3);margin-top:8px">Estimativa: saldo + receitas fixas − gastos fixos − boletos até a data. Não inclui gastos avulsos futuros.</div>`;
 }
 
-// Aviso quando a previsão parte só da carteira manual, mas o usuário tem bancos
-// conectados que não entraram no saldo (gate do consolidado desligado).
+// Aviso quando a previsão não parte do saldo consolidado: ou o usuário tem bancos
+// conectados fora do saldo (gate desligado → banks_excluded), ou a consulta ao
+// consolidado falhou e não dá pra confirmar o saldo (balance_source "unavailable").
 function _forecastBanksWarning(fc) {
-  if (!fc || !fc.banks_excluded) return "";
+  if (!fc) return "";
+  const unavailable = fc.balance_source === "unavailable";
+  if (!fc.banks_excluded && !unavailable) return "";
+  const msg = unavailable
+    ? "Não foi possível confirmar seu saldo consolidado agora — esta previsão pode não incluir o saldo dos seus bancos."
+    : "Seus bancos conectados não estão somados nesta previsão — ela usa só o saldo da sua Carteira.";
   return `<div style="display:flex;gap:6px;align-items:flex-start;margin-top:8px;padding:8px 10px;border-radius:8px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.35);font-size:.72rem;color:var(--text-2)">
     <i class="ph ph-warning" aria-hidden="true" style="color:#F59E0B;margin-top:1px"></i>
-    <span>Seus bancos conectados não estão somados nesta previsão — ela usa só o saldo da sua Carteira.</span>
+    <span>${msg}</span>
   </div>`;
 }
 
