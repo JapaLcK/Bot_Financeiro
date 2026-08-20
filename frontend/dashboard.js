@@ -4092,6 +4092,7 @@ async function _fetchBills({ force = false } = {}) {
 async function loadBillsView(forceFresh = false, { background = false } = {}) {
   const agendaEl = document.getElementById("recurring-bills-agenda");
   if (!agendaEl) return;
+  loadForecast();  // independente dos boletos; o próprio gate cuida do não-Pro
   const proMsg = `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Boletos é uma feature <b>PigBank+</b>.</div>`;
 
   // Puxão: sem estado neutro por cima do render bom — falha REAL rejeita sem
@@ -4398,12 +4399,67 @@ function _renderProjection(p) {
       ${p.receitas_previstas > 0 ? line("Receitas previstas", p.receitas_previstas, true) : ""}
       ${p.gastos_fixos_previstos > 0 ? line("Gastos fixos", p.gastos_fixos_previstos, false) : ""}
       ${line(`Boletos até lá (${p.n_boletos})`, p.boletos_ate, false)}
+      ${p.faturas_cartao > 0 ? line("Faturas de cartão até lá", p.faturas_cartao, false) : ""}
       ${p.boleto_novo > 0 ? line("Boleto novo em análise", p.boleto_novo, false) : ""}
       <div style="border-top:1px solid rgba(128,128,128,.25);margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;font-weight:700">
         <span>Projeção do caixa</span><span style="color:${accent}">${_fmtBRL(p.projetado)}</span>
       </div>
+      ${_forecastBanksWarning(p)}
       <div style="font-size:.68rem;color:var(--text-3);margin-top:6px">Estimativa: saldo + receitas fixas − gastos fixos − boletos. Não inclui gastos avulsos futuros.</div>
     </div>`;
+}
+
+// Previsão de saldo 30/60/90 dias (feature Pro). Só busca se o gate liberar; pro
+// não-Pro o card fica com o teaser travado (applyProGates + click→upgrade modal).
+const _forecastLockedMsg = `<div class="empty" style="padding:8px;color:var(--text-3)">Assine o <b>Pro</b> pra ver a previsão do seu saldo a 30, 60 e 90 dias.</div>`;
+
+async function loadForecast() {
+  const resEl = document.getElementById("forecast-result");
+  if (!resEl) return;
+  if (!featureAllowed("forecast")) { resEl.innerHTML = _forecastLockedMsg; return; }
+  resEl.innerHTML = `<div class="empty" style="color:var(--text-3);padding:8px">Calculando…</div>`;
+  try {
+    const resp = await fetch(`${API}/forecast/${USER_ID}`, { credentials: "same-origin" });
+    if (resp.status === 403) { resEl.innerHTML = _forecastLockedMsg; return; }
+    if (!resp.ok) throw new Error(await resp.text());
+    const data = await resp.json();
+    _renderForecast(data.forecast);
+  } catch (_) {
+    resEl.innerHTML = `<div class="empty" style="color:var(--text-3);padding:8px">Não consegui calcular agora.</div>`;
+  }
+}
+
+function _renderForecast(fc) {
+  const resEl = document.getElementById("forecast-result");
+  if (!resEl || !fc || !fc.horizons) return;
+  const tile = (dias, p) => {
+    if (!p) return "";
+    const ok = p.tranquilo;
+    const accent = ok ? "#22c55e" : "#FF2D2D";
+    return `
+      <div style="flex:1;min-width:120px;border-radius:10px;padding:12px;background:${ok ? 'rgba(34,197,94,.10)' : 'rgba(255,45,45,.10)'};border:1px solid ${ok ? 'rgba(34,197,94,.30)' : 'rgba(255,45,45,.30)'}">
+        <div style="font-size:.72rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em">Em ${dias} dias</div>
+        <div style="font-weight:700;font-size:1.05rem;color:${accent};margin-top:2px">${_fmtBRL(p.projetado)}</div>
+        <div style="font-size:.72rem;color:var(--text-2);margin-top:2px">${ok ? "no positivo" : "no vermelho"}</div>
+      </div>`;
+  };
+  const h = fc.horizons || {};
+  resEl.innerHTML = `
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${tile(30, h["30"])}${tile(60, h["60"])}${tile(90, h["90"])}
+    </div>
+    ${_forecastBanksWarning(fc)}
+    <div style="font-size:.68rem;color:var(--text-3);margin-top:8px">Estimativa: saldo + receitas fixas − gastos fixos − boletos até a data. Não inclui gastos avulsos futuros.</div>`;
+}
+
+// Aviso quando a previsão parte só da carteira manual, mas o usuário tem bancos
+// conectados que não entraram no saldo (gate do consolidado desligado).
+function _forecastBanksWarning(fc) {
+  if (!fc || !fc.banks_excluded) return "";
+  return `<div style="display:flex;gap:6px;align-items:flex-start;margin-top:8px;padding:8px 10px;border-radius:8px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.35);font-size:.72rem;color:var(--text-2)">
+    <i class="ph ph-warning" aria-hidden="true" style="color:#F59E0B;margin-top:1px"></i>
+    <span>Seus bancos conectados não estão somados nesta previsão — ela usa só o saldo da sua Carteira.</span>
+  </div>`;
 }
 
 async function _fetchRecurringIncomes({ force = false } = {}) {
@@ -6039,6 +6095,7 @@ const UPGRADE_MESSAGES = {
   changelog: "As notícias e resumos do mercado feitos pela Piggy fazem parte dos planos Plus e Pro. Assine pra desbloquear.",
   recurring_expenses: "A agenda de boletos e os gastos fixos fazem parte dos planos pagos. Cadastre suas contas a pagar e nunca mais perca um vencimento.",
   agents: "Seu plano atual não ativa mais agentes. Fazendo upgrade, a equipe de porquinhos trabalha pra você: Xerife, Repórter, Carteiro e os próximos que chegarem.",
+  forecast: "A previsão de saldo a 30, 60 e 90 dias é do plano Pro. Veja pra onde seu caixa caminha e planeje com folga antes do aperto chegar.",
   generic: "Essa feature faz parte dos planos pagos do PigBank. Escolha o que faz mais sentido pra você."
 };
 

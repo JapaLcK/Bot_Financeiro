@@ -460,12 +460,149 @@ def _detetive_detect_for_user(agent: dict[str, Any], today: date) -> int:
     return fired
 
 
+# ── Detetive: cobranças duplicadas ───────────────────────────────────────────
+# Diferente da assinatura (recorrência MENSAL em >=3 meses): aqui é a MESMA
+# cobrança (comerciante + valor) batendo 2+ vezes numa janela curta — o clássico
+# "me cobraram em dobro". Valor mínimo mais alto e janela apertada pra evitar o
+# ruído de compras legítimas repetidas (cafezinho, ônibus).
+DETETIVE_DUP_LOOKBACK_DAYS = 60   # olha as cobranças dos últimos N dias
+DETETIVE_DUP_WINDOW_DAYS = 2      # 2+ cobranças iguais em <= N dias = parece duplicada
+DETETIVE_DUP_MIN_VALOR = 15.0     # ignora repetição miúda (ruído)
+
+
+def _detetive_duplicate_detect_for_user(agent: dict[str, Any], today: date) -> int:
+    """Fareja a MESMA cobrança (comerciante + valor) repetida em <= DUP_WINDOW_DAYS
+    dias — o padrão de cobrança em dobro. Fontes = launches (inclui OF) + compras
+    de cartão (credit_transactions), unidas: cobrança dupla no cartão é o caso
+    clássico. Agrupa por ILHA temporal (gaps-and-islands), então uma duplicata de
+    junho e outra de agosto viram eventos separados com contagem correta — não um
+    balaio de todos os pares dos últimos meses. Dedupe por (comerciante, valor,
+    dia da última repetição da ilha): roda todo tick sem repetir alerta."""
+    from db import record_agent_event
+
+    user_id = agent["user_id"]
+    cutoff = today - timedelta(days=DETETIVE_DUP_LOOKBACK_DAYS)
+    fired = 0
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                r"""
+                with base as (
+                  -- lançamentos (dinheiro/OF): normaliza o comerciante igual ao
+                  -- passo de assinatura pra o mesmo serviço agrupar.
+                  select
+                    lower(btrim(regexp_replace(
+                      regexp_replace(
+                        regexp_replace(coalesce(alvo, nota, ''), '^.*\|', ''),
+                        '[0-9]{3,}', '', 'g'),
+                      '\s+', ' ', 'g'))) as merchant,
+                    coalesce(alvo, nota, '') as raw,
+                    round(valor::numeric, 2) as val,
+                    criado_em as ts,
+                    categoria,
+                    'launches' as fonte
+                  from launches
+                  where user_id = %s
+                    and tipo in ('despesa', 'saida')
+                    and is_internal_movement = false
+                    and coalesce(alvo, nota, '') <> ''
+                    and valor >= %s
+                    and criado_em >= %s
+                  union all
+                  -- compras no cartão de crédito (fonte separada de launches)
+                  select
+                    lower(btrim(regexp_replace(
+                      regexp_replace(
+                        regexp_replace(coalesce(nota, ''), '^.*\|', ''),
+                        '[0-9]{3,}', '', 'g'),
+                      '\s+', ' ', 'g'))) as merchant,
+                    coalesce(nota, '') as raw,
+                    round(valor::numeric, 2) as val,
+                    purchased_at::timestamptz as ts,
+                    categoria,
+                    'credito' as fonte
+                  from credit_transactions
+                  where user_id = %s
+                    and is_refund = false
+                    and coalesce(nota, '') <> ''
+                    and valor >= %s
+                    and purchased_at >= %s::date
+                ),
+                marked as (
+                  select *,
+                    case when ts - lag(ts) over w <= make_interval(days => %s)
+                         then 0 else 1 end as is_new_cluster
+                  from base
+                  where merchant <> ''
+                  window w as (partition by merchant, val order by ts)
+                ),
+                clustered as (
+                  select *,
+                    sum(is_new_cluster) over (
+                      partition by merchant, val order by ts
+                      rows between unbounded preceding and current row) as cluster_id
+                  from marked
+                )
+                select merchant,
+                       val,
+                       count(*) as repeticoes,
+                       max(ts)::date as ultimo_dia,
+                       (array_agg(raw order by ts desc))[1] as descricao,
+                       (array_agg(categoria) filter (where categoria is not null))[1] as categoria,
+                       array_agg(distinct fonte) as fontes
+                from clustered
+                group by merchant, val, cluster_id
+                having count(*) >= 2
+                order by ultimo_dia desc, val desc
+                """,
+                (user_id, DETETIVE_DUP_MIN_VALOR, cutoff,
+                 user_id, DETETIVE_DUP_MIN_VALOR, cutoff,
+                 DETETIVE_DUP_WINDOW_DAYS),
+            )
+            achados = cur.fetchall() or []
+
+    for s in achados:
+        val = float(s["val"])
+        reps = int(s["repeticoes"])
+        ultimo = s["ultimo_dia"]
+        desc = (s["descricao"] or s["merchant"] or "").strip()
+        desc_curta = desc[:48]
+        no_cartao = "credito" in (s.get("fontes") or [])
+        ok = record_agent_event(
+            agent["agent_id"], user_id, "detetive",
+            dedupe_key=f"dup:{s['merchant']}:{val:.2f}:{ultimo.isoformat()}",
+            payload={
+                "tipo": "duplicada",
+                "merchant": s["merchant"],
+                "descricao": desc[:120],
+                "categoria": s["categoria"],
+                "valor": val,
+                "repeticoes": reps,
+                "fontes": s.get("fontes") or [],
+                "titulo": f"Possível cobrança duplicada: {desc_curta}",
+                "mensagem": (
+                    f"🔁 {desc_curta} foi cobrado {reps}×"
+                    f"{' no cartão' if no_cartao else ''} em até "
+                    f"{DETETIVE_DUP_WINDOW_DAYS} dias ({_fmt_brl(val)} cada). "
+                    f"Se você não reconhece a repetição, vale conferir e, se for "
+                    f"engano, contestar com o estabelecimento ou o banco."
+                ),
+            },
+            valor_impacto=val,
+        )
+        fired += 1 if ok else 0
+    return fired
+
+
 def run_detetive_once(today: date | None = None, user_id: int | None = None) -> dict:
     """Roda o Detetive pra todos os agentes ativos (ou só um usuário).
 
-    Dedupe por assinatura, então pode rodar todo tick sem repetir alerta. No 1º
-    sync do Open Finance vira a 'auditoria de estreia': o histórico importado
-    revela as assinaturas de uma vez."""
+    Faz dois passos independentes: caça-assinaturas (recorrência mensal) e
+    cobranças duplicadas (mesma cobrança repetida numa janela curta). Ambos
+    dedupam, então pode rodar todo tick sem repetir alerta. No 1º sync do Open
+    Finance vira a 'auditoria de estreia': o histórico importado revela as
+    assinaturas e as duplicatas de uma vez."""
     from db import list_users_with_active_agents
 
     today = today or date.today()
@@ -479,6 +616,7 @@ def run_detetive_once(today: date | None = None, user_id: int | None = None) -> 
     for agent in agents:
         try:
             fired += _detetive_detect_for_user(agent, today)
+            fired += _detetive_duplicate_detect_for_user(agent, today)
         except Exception as exc:
             print(f"[agents] detetive user={agent['user_id']}: {exc}", file=sys.stderr)
     return {"ok": True, "agents": len(agents), "fired": fired}

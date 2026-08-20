@@ -60,6 +60,19 @@ def bill_period_for_month(year: int, month: int, closing_day: int) -> tuple[date
     return period_start, period_end
 
 
+def card_bill_due_date(period_end: date, closing_day: int, due_day: int) -> date:
+    """Vencimento canônico de uma fatura de cartão a partir do fim do período.
+
+    Se `due_day >= closing_day`, o vencimento cai no MESMO mês do fechamento;
+    caso contrário, rola pro mês seguinte. Regra única compartilhada por
+    parcelamentos, lembretes de vencimento, relatórios e projeção de caixa —
+    manter aqui pra não divergir (ex.: due_day == closing_day)."""
+    if int(due_day) >= int(closing_day):
+        return _safe_date(period_end.year, period_end.month, int(due_day))
+    y, m = add_months(period_end.year, period_end.month, 1)
+    return _safe_date(y, m, int(due_day))
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Cartões
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1260,14 +1273,6 @@ def list_installment_groups_detailed(user_id: int, sort: str = "urgency"):
             )
             rows = cur.fetchall()
 
-    def _due_date(period_end: date, closing_day: int, due_day: int) -> date:
-        if due_day >= closing_day:
-            return _safe_date(period_end.year, period_end.month, due_day)
-        m = period_end.month + 1
-        y = period_end.year + (m - 1) // 12
-        m = (m - 1) % 12 + 1
-        return _safe_date(y, m, due_day)
-
     groups: dict[str, dict] = {}
     for r in rows:
         gid = r["group_id"]
@@ -1286,7 +1291,7 @@ def list_installment_groups_detailed(user_id: int, sort: str = "urgency"):
                 "parcelas": [],
             }
         is_paid = r["bill_status"] != "open"
-        due = _due_date(r["period_end"], int(r["closing_day"]), int(r["due_day"]))
+        due = card_bill_due_date(r["period_end"], int(r["closing_day"]), int(r["due_day"]))
         groups[gid]["parcelas"].append({
             "tx_id": int(r["tx_id"]),
             "installment_no": int(r["installment_no"] or 0),
@@ -1850,20 +1855,12 @@ def list_installment_groups(user_id: int, limit: int = 15):
             )
             rows = cur.fetchall()
 
-    def _due_date(period_end: date, closing_day: int, due_day: int) -> date:
-        if due_day >= closing_day:
-            return date(period_end.year, period_end.month, due_day)
-        m = period_end.month + 1
-        y = period_end.year + (m - 1) // 12
-        m = (m - 1) % 12 + 1
-        return date(y, m, due_day)
-
     for r in rows:
         closing_day = int(r["closing_day"])
         due_day = int(r["due_day"])
         period_ends = r.get("pending_period_ends") or []
         r["upcoming_due_dates"] = [
-            _due_date(pe, closing_day, due_day) for pe in period_ends
+            card_bill_due_date(pe, closing_day, due_day) for pe in period_ends
         ]
     return rows
 

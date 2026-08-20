@@ -2141,9 +2141,10 @@ async def _get_current_user(
     return user_id
 
 
-# Planos v2: tier mínimo de cada feature paga na escada. Hoje TODAS as features
+# Planos v2: tier mínimo de cada feature paga na escada. Quase TODAS as features
 # gated são Essencial+ (o corte Plus é OF multi-banco/agentes, gated à parte).
-# "ai_chat" é especial: no v2 o Grátis tem cota mensal — checada via
+# "forecast" (previsão de saldo 30/60/90) é a exceção Pro+, como anunciado na
+# /precos. "ai_chat" é especial: no v2 o Grátis tem cota mensal — checada via
 # ai_chat_allowed, não por tier.
 _FEATURE_MIN_TIER_V2 = {
     "recurring_expenses": "essencial",
@@ -2151,6 +2152,7 @@ _FEATURE_MIN_TIER_V2 = {
     "investments": "essencial",
     "export": "essencial",
     "custom_categories": "essencial",
+    "forecast": "pro",
     "generic": "essencial",
 }
 
@@ -2272,9 +2274,10 @@ async def auth_dashboard_profile(request: Request, response: Response):
     # is_pro já resolvem os casos que o valor cru do plano esconde: assinatura
     # expirada (webhook perdido) e o freio de emergência PLANS_V2_ENABLED. O front
     # consome isto direto em vez de reconstruir tier do plano cru (que divergiria).
-    from core.services.plan_service import get_user_limits, is_pro
+    from core.services.plan_service import get_user_limits, is_pro, require_min_tier
     limits = await asyncio.to_thread(get_user_limits, int(user_id))
     _is_pro = await asyncio.to_thread(is_pro, int(user_id))
+    _forecast_ok = await asyncio.to_thread(require_min_tier, int(user_id), "pro")
     feature_gates = {
         "investments": bool(limits["investments_enabled"]),
         "export": bool(limits["export_enabled"]),
@@ -2285,6 +2288,7 @@ async def auth_dashboard_profile(request: Request, response: Response):
         "history_unlimited": not limits["history_current_month_only"],
         "changelog": _is_pro,                        # Novidades: gate is_pro (Plus+)
         "agents": limits["agents_energy_budget"] > 0,  # agentes: Plus+
+        "forecast": bool(_forecast_ok),              # previsão de saldo 30/60/90: Pro+
     }
     _no_store(response)
     return {
@@ -5990,6 +5994,17 @@ async def boleto_projection_route(request: Request, user_id: int, date: str, amo
     from core.services.cashflow import project
     result = await asyncio.to_thread(project, user_id, target, float(amount or 0))
     return {"ok": True, "projection": result}
+
+
+@app.get("/forecast/{user_id}")
+async def forecast_route(request: Request, user_id: int):
+    """Previsão de saldo a 30/60/90 dias (feature Pro+ da /precos). 403
+    pro_required abaixo de Pro — o dashboard usa isso pra esconder o card."""
+    _authorize_dashboard_access(request, user_id)
+    _require_pro(user_id, "forecast")
+    from core.services.cashflow import forecast_horizons
+    result = await asyncio.to_thread(forecast_horizons, user_id)
+    return {"ok": True, "forecast": result}
 
 
 @app.post("/recurring-bills/{user_id}")

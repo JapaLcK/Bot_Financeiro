@@ -17,7 +17,7 @@ não fechamento contábil.
 from __future__ import annotations
 
 import calendar
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 
@@ -61,6 +61,39 @@ def _recurring_value_in_window(day: Any, freq: str, month: Any, start: date | No
     return total
 
 
+def _open_card_bills_due(user_id: int, until: date) -> float:
+    """Saldo a pagar (total − pago) das faturas de cartão com vencimento até
+    `until` — compromissos que o saldo em conta ainda não reflete (dívida de
+    cartão não sai do saldo). Inclui 'open' (fatura corrente) e 'closed' com saldo
+    (atrasada, ainda a pagar), mesmo critério de `list_bills_with_debt`: o
+    atrasado também sai do caixa antes do alvo, então conta como saída."""
+    from db.connection import get_conn
+    from db.cards import card_bill_due_date
+
+    total = 0.0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select (b.total - coalesce(b.paid_amount, 0)) as remaining,
+                       b.period_end, c.closing_day, c.due_day
+                from credit_bills b
+                join credit_cards c on c.id = b.card_id
+                where b.user_id = %s and b.status in ('open', 'closed')
+                  and b.total > coalesce(b.paid_amount, 0)
+                """,
+                (user_id,),
+            )
+            for row in cur.fetchall() or []:
+                pe = _as_date(row["period_end"])
+                if pe is None:
+                    continue
+                due = card_bill_due_date(pe, int(row["closing_day"] or 1), int(row["due_day"] or 1))
+                if due <= until:
+                    total += float(row["remaining"] or 0)
+    return total
+
+
 def project(user_id: int, target_date: date, extra_amount: float = 0.0) -> dict[str, Any]:
     """Projeção de caixa até `target_date`, opcionalmente considerando um boleto
     novo de `extra_amount`. Ver docstring do módulo."""
@@ -70,7 +103,29 @@ def project(user_id: int, target_date: date, extra_amount: float = 0.0) -> dict[
     from db.bills import list_bills
 
     today = date.today()
+
+    # Saldo de partida: consolidado (carteira + bancos autorizados no Open Finance)
+    # quando o usuário tem banco conectado e o consolidado está liberado — senão a
+    # projeção de quem tem OF partiria só da carteira manual e ficaria errada. Mesmo
+    # critério do dashboard/relatórios (get_consolidated_balance + gate beta).
     saldo = float(get_balance(user_id))
+    balance_source = "manual"  # carteira manual; vira "consolidated" se somar OF
+    of_bank_count = 0
+    try:
+        from db import get_consolidated_balance
+        from core.services.plan_service import consolidated_balance_enabled
+        cb = get_consolidated_balance(user_id)
+        of_bank_count = int(cb.get("of_bank_count") or 0)
+        if of_bank_count > 0 and consolidated_balance_enabled(user_id):
+            saldo = float(cb.get("consolidated") or 0)
+            balance_source = "consolidated"
+    except Exception:
+        pass  # sem OF/consolidado → segue com a carteira manual
+
+    # Bancos conectados que NÃO entraram no saldo de partida (gate consolidado
+    # desligado): a projeção parte só da carteira e subestima o caixa → o
+    # dashboard mostra um aviso quando isso acontece.
+    banks_excluded = of_bank_count > 0 and balance_source == "manual"
 
     receitas = 0.0
     for inc in list_recurring_incomes(user_id):
@@ -104,20 +159,48 @@ def project(user_id: int, target_date: date, extra_amount: float = 0.0) -> dict[
             boletos += float(b.get("amount") or 0)
             n_boletos += 1
 
+    faturas_cartao = _open_card_bills_due(user_id, target_date)
+
     extra = float(extra_amount or 0)
-    projetado = saldo + receitas - gastos_fixos - boletos - extra
+    projetado = saldo + receitas - gastos_fixos - boletos - faturas_cartao - extra
     return {
         "today": today.isoformat(),
         "target": target_date.isoformat(),
         "saldo_atual": round(saldo, 2),
+        "balance_source": balance_source,
+        "of_bank_count": of_bank_count,
+        "banks_excluded": banks_excluded,
         "receitas_previstas": round(receitas, 2),
         "gastos_fixos_previstos": round(gastos_fixos, 2),
         "boletos_ate": round(boletos, 2),
         "n_boletos": n_boletos,
+        "faturas_cartao": round(faturas_cartao, 2),
         "boleto_novo": round(extra, 2),
         "projetado": round(projetado, 2),
         "tranquilo": projetado >= 0,
     }
 
 
-__all__ = ["project"]
+def forecast_horizons(user_id: int, horizons: tuple[int, ...] = (30, 60, 90)) -> dict[str, Any]:
+    """Previsão de saldo em vários horizontes (default 30/60/90 dias).
+
+    Feature paga (Pro+): reusa `project()` em hoje+N pra cada N e devolve
+    ``{"today": ..., "horizons": {"30": <projeção>, "60": ..., "90": ...}}`` —
+    formato pensado pro card do dashboard e pra tool de IA. Cada projeção mantém
+    a mesma semântica de `project` (saldo + receitas fixas − gastos fixos −
+    boletos até a data); ver docstring do módulo."""
+    today = date.today()
+    hz = {str(n): project(user_id, today + timedelta(days=n)) for n in horizons}
+    # A origem do saldo é a mesma em todos os horizontes; sobe pro topo pra o
+    # dashboard renderizar o aviso sem precisar abrir cada projeção.
+    any_h = next(iter(hz.values()), {})
+    return {
+        "today": today.isoformat(),
+        "balance_source": any_h.get("balance_source", "manual"),
+        "of_bank_count": any_h.get("of_bank_count", 0),
+        "banks_excluded": any_h.get("banks_excluded", False),
+        "horizons": hz,
+    }
+
+
+__all__ = ["project", "forecast_horizons"]

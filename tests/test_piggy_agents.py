@@ -1592,3 +1592,76 @@ def test_expiry_por_mes_so_vale_pros_agentes_mensais(user_id):
     assert db.list_unemailed_events(ag_b["id"]) == []
     pend_b = [a for a in db.list_agents_pending_email() if a["agent_id"] == ag_b["id"]]
     assert pend_b == []
+
+
+# ── Detetive: cobranças duplicadas (shaping do evento, sem Postgres) ──────────
+# O SQL em si depende de DB real (verificado por inspeção/manual); aqui travamos
+# a LÓGICA PYTHON: formato da dedupe_key, tipo do payload e contagem de disparos.
+
+from datetime import date as _date
+
+
+class _FakeCursor:
+    def __init__(self, rows):
+        self._rows = rows
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+    def execute(self, *a, **k):
+        pass
+    def fetchall(self):
+        return self._rows
+
+
+class _FakeConn:
+    def __init__(self, rows):
+        self._rows = rows
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+    def cursor(self):
+        return _FakeCursor(self._rows)
+
+
+def test_detetive_duplicate_shapes_event(monkeypatch):
+    import core.services.piggy_agents as pa
+    import db
+
+    rows = [{
+        "merchant": "netflix", "val": 39.90, "repeticoes": 2,
+        "ultimo_dia": _date(2026, 8, 15), "descricao": "NETFLIX.COM",
+        "categoria": "streaming",
+    }]
+    monkeypatch.setattr(pa, "get_conn", lambda: _FakeConn(rows))
+
+    captured: list = []
+    monkeypatch.setattr(db, "record_agent_event",
+                        lambda *a, **k: (captured.append((a, k)) or True))
+
+    fired = pa._detetive_duplicate_detect_for_user(
+        {"agent_id": 1, "user_id": 42}, _date(2026, 8, 19))
+
+    assert fired == 1
+    args, kw = captured[0]
+    assert args[:3] == (1, 42, "detetive")
+    assert kw["dedupe_key"] == "dup:netflix:39.90:2026-08-15"
+    assert kw["payload"]["tipo"] == "duplicada"
+    assert kw["payload"]["repeticoes"] == 2
+    assert "duplicada" in kw["payload"]["titulo"].lower()
+
+
+def test_detetive_duplicate_sem_achados_nao_emite(monkeypatch):
+    import core.services.piggy_agents as pa
+    import db
+
+    monkeypatch.setattr(pa, "get_conn", lambda: _FakeConn([]))
+
+    def _boom(*a, **k):
+        raise AssertionError("não deveria emitir evento sem duplicata")
+    monkeypatch.setattr(db, "record_agent_event", _boom)
+
+    fired = pa._detetive_duplicate_detect_for_user(
+        {"agent_id": 1, "user_id": 42}, _date(2026, 8, 19))
+    assert fired == 0

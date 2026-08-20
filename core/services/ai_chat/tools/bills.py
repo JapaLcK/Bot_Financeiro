@@ -270,6 +270,24 @@ def _check_cashflow(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     return p
 
 
+def _forecast_balance(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    """Previsão de saldo a 30/60/90 dias — feature Pro+ (ver /precos). Gate soft:
+    abaixo de Pro devolve convite de upgrade em vez do dado."""
+    from core.services.plan_service import require_min_tier
+    if not require_min_tier(user_id, "pro"):
+        return {
+            "error": "pro_required",
+            "message": ("A previsão de saldo 30/60/90 dias faz parte do plano Pro. "
+                        "Quer que eu te mostre como assinar?"),
+        }
+    from core.services.cashflow import forecast_horizons
+    fc = forecast_horizons(user_id)
+    fc["note"] = ("cada horizonte (30/60/90 dias) traz o saldo PROJETADO (saldo + receitas "
+                  "previstas − gastos fixos − boletos até a data) e 'tranquilo' (bool). "
+                  "Responda com a visão dos três horizontes, destacando onde aperta.")
+    return fc
+
+
 # ─── Tools registry ───────────────────────────────────────────────────────────
 
 TOOLS: list[Tool] = [
@@ -381,5 +399,25 @@ TOOLS: list[Tool] = [
         },
         is_write=False,
         execute=_check_cashflow,
+    ),
+    Tool(
+        schema={
+            "type": "function",
+            "function": {
+                "name": "forecast_balance",
+                "description": (
+                    "Previsão de saldo em 30/60/90 dias (feature Pro). Use quando o usuário quer "
+                    "uma visão do FUTURO em horizontes, sem citar uma data específica — ex: 'como "
+                    "vou estar de saldo nos próximos meses?', 'me dá a previsão de saldo', 'vou "
+                    "ter fôlego daqui pra frente?'. Retorna 'horizons' com 30/60/90 dias, cada um "
+                    "com o saldo projetado e 'tranquilo'. Se o usuário citar UMA data/prazo "
+                    "específico ('tô tranquilo dia 16?'), use check_cashflow. Se vier "
+                    "'pro_required', ofereça o upgrade com jeitinho, não despeje número nenhum."
+                ),
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        is_write=False,
+        execute=_forecast_balance,
     ),
 ]
