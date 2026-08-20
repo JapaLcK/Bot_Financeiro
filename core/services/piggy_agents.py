@@ -466,22 +466,27 @@ def _detetive_detect_for_user(agent: dict[str, Any], today: date) -> int:
 # "me cobraram em dobro". Valor mínimo mais alto e janela apertada pra evitar o
 # ruído de compras legítimas repetidas (cafezinho, ônibus).
 DETETIVE_DUP_LOOKBACK_DAYS = 60   # olha as cobranças dos últimos N dias
-DETETIVE_DUP_WINDOW_DAYS = 2      # span TOTAL da ilha <= N dias = parece duplicada
+DETETIVE_DUP_WINDOW_DAYS = 2      # teto do span da ilha isolada (modo B); mesmo dia dispensa
 DETETIVE_DUP_MIN_VALOR = 15.0     # ignora repetição miúda (ruído)
 
 
 def _detetive_duplicate_detect_for_user(agent: dict[str, Any], today: date) -> int:
-    """Fareja a MESMA cobrança (comerciante + valor) repetida num burst curto
-    (span total <= DUP_WINDOW_DAYS dias) — o padrão de cobrança em dobro. Fontes =
-    launches (inclui OF) + compras de cartão (credit_transactions), unidas:
-    cobrança dupla no cartão é o caso clássico. Agrupa por ILHA temporal
-    (gaps-and-islands), então uma duplicata de junho e outra de agosto viram
-    eventos separados — não um balaio de todos os pares dos últimos meses. O
-    encadeamento por si só une lançamentos com gap <= janela entre VIZINHOS, então
-    um hábito diário de mesmo valor formaria uma ilha de 30–60 dias; por isso o
-    having exige que a ilha INTEIRA caiba na janela (max−min <= DUP_WINDOW_DAYS),
-    descartando o recorrente e mantendo só o burst. Dedupe por (comerciante,
-    valor, dia da última repetição da ilha): roda todo tick sem repetir alerta."""
+    """Fareja a MESMA cobrança (comerciante + valor) repetida num burst curto — o
+    padrão de cobrança em dobro. Fontes = launches (inclui OF) + compras de cartão
+    (credit_transactions), unidas: cobrança dupla no cartão é o caso clássico.
+
+    Dois sinais complementares (e disjuntos), pra não perder a dobrada nem reabrir
+    falso positivo com hábito recorrente:
+      • MODO A (mesmo dia): 2+ cobranças iguais no mesmo dia civil. Mais fino que a
+        cadência diária, então pega a dobrada mesmo DENTRO de um hábito de todo dia
+        (o hábito tem 1/dia; a dobrada faz um dia ter 2).
+      • MODO B (ilha isolada): agrupa por ilha temporal (gaps-and-islands) e aceita
+        só quando há <= 1 cobrança por dia E a ilha inteira cabe na janela — cobre
+        o repost no dia seguinte sem deixar o hábito longo (ilha de 30–60 dias)
+        virar alerta.
+
+    Dedupe por (comerciante, valor, dia da repetição): roda todo tick sem repetir
+    alerta."""
     from db import record_agent_event
 
     user_id = agent["user_id"]
@@ -547,27 +552,58 @@ def _detetive_duplicate_detect_for_user(agent: dict[str, Any], today: date) -> i
                       partition by merchant, val order by ts
                       rows between unbounded preceding and current row) as cluster_id
                   from marked
+                ),
+                -- MODO A — pilha no MESMO dia: 2+ cobranças iguais no mesmo dia
+                -- civil. É um sinal mais fino que a cadência diária, então pega a
+                -- dobrada mesmo escondida DENTRO de um hábito recorrente (café de
+                -- todo dia): o hábito tem 1/dia, a dobrada faz um dia ter 2. Só
+                -- rejeitar a ilha longa pelo span perderia esse caso.
+                same_day as (
+                  select merchant, val,
+                         count(*) as repeticoes,
+                         ts::date as ultimo_dia,
+                         0 as janela_dias,
+                         (array_agg(raw order by ts desc))[1] as descricao,
+                         (array_agg(categoria) filter (where categoria is not null))[1] as categoria,
+                         array_agg(distinct fonte) as fontes
+                  from clustered
+                  group by merchant, val, ts::date
+                  having count(*) >= 2
+                ),
+                -- MODO B — ilha ISOLADA cruzando o dia (ex.: repost no dia
+                -- seguinte): 2+ cobranças, no máximo UMA por dia
+                -- (repeticoes = dias_distintos) e a ilha inteira cabendo na janela.
+                -- O "1 por dia" exclui pilhas de mesmo dia (já cobertas pelo MODO
+                -- A, sem alerta em dobro); o teto de span descarta o hábito longo.
+                island as (
+                  select merchant, val, cluster_id,
+                         count(*) as repeticoes,
+                         max(ts)::date as ultimo_dia,
+                         (max(ts)::date - min(ts)::date) as janela_dias,
+                         count(distinct ts::date) as dias_distintos,
+                         (array_agg(raw order by ts desc))[1] as descricao,
+                         (array_agg(categoria) filter (where categoria is not null))[1] as categoria,
+                         array_agg(distinct fonte) as fontes
+                  from clustered
+                  group by merchant, val, cluster_id
+                ),
+                cross_day as (
+                  select merchant, val, repeticoes, ultimo_dia, janela_dias,
+                         descricao, categoria, fontes
+                  from island
+                  where repeticoes >= 2
+                    and janela_dias <= %s
+                    and repeticoes = dias_distintos
                 )
-                select merchant,
-                       val,
-                       count(*) as repeticoes,
-                       max(ts)::date as ultimo_dia,
-                       -- span REAL da ilha (max−min). O encadeamento só garante
-                       -- gap <= janela entre lançamentos VIZINHOS, então a ilha
-                       -- pode abranger MUITO mais que a janela (uma compra diária
-                       -- legítima de mesmo valor encadearia 30–60 dias). Usado
-                       -- pra filtrar (having) e pra mensagem não mentir o prazo.
-                       (max(ts)::date - min(ts)::date) as janela_dias,
-                       (array_agg(raw order by ts desc))[1] as descricao,
-                       (array_agg(categoria) filter (where categoria is not null))[1] as categoria,
-                       array_agg(distinct fonte) as fontes
-                from clustered
-                group by merchant, val, cluster_id
-                -- 2+ cobranças E a ilha inteira cabendo na janela: descarta o
-                -- hábito recorrente (café diário etc.), que encadeia numa ilha
-                -- longa, e mantém só o burst curto — o padrão "cobrado em dobro".
-                having count(*) >= 2
-                   and (max(ts)::date - min(ts)::date) <= %s
+                select merchant, val, repeticoes, ultimo_dia, janela_dias,
+                       descricao, categoria, fontes
+                from (
+                  select merchant, val, repeticoes, ultimo_dia, janela_dias,
+                         descricao, categoria, fontes from same_day
+                  union all
+                  select merchant, val, repeticoes, ultimo_dia, janela_dias,
+                         descricao, categoria, fontes from cross_day
+                ) u
                 order by ultimo_dia desc, val desc
                 """,
                 (user_id, DETETIVE_DUP_MIN_VALOR, cutoff,

@@ -1690,11 +1690,12 @@ def test_detetive_duplicate_mensagem_usa_span_real_da_ilha(monkeypatch):
     assert "até" not in m1 and "até" not in m2
 
 
-def test_detetive_duplicate_criterio_limita_span_da_ilha(monkeypatch):
-    # P2 (critério, não só mensagem): mudar o texto não elimina o falso positivo —
-    # uma compra diária legítima encadeia numa ilha de 30–60 dias. A query TEM que
-    # exigir que a ilha inteira caiba na janela (having max-min <= janela), senão
-    # o recorrente vira "possível cobrança duplicada". Verifica o SQL emitido.
+def test_detetive_duplicate_criterio_tem_dois_modos_disjuntos(monkeypatch):
+    # P2 (critério): a query precisa detectar a dobrada DENTRO de um hábito longo
+    # (2+ no mesmo dia) sem reabrir o falso positivo do recorrente. Rejeitar a ilha
+    # inteira pelo span perderia a dobrada de mesmo dia. Verifica no SQL emitido
+    # que os dois modos disjuntos existem: MODO A (mesmo dia) + MODO B (ilha
+    # isolada, <= 1/dia, cabendo na janela).
     import core.services.piggy_agents as pa
     import db
 
@@ -1708,11 +1709,16 @@ def test_detetive_duplicate_criterio_limita_span_da_ilha(monkeypatch):
         {"agent_id": 1, "user_id": 42}, _date(2026, 8, 19))
 
     sql, params = sink[0]
-    norm = " ".join(sql.split())  # colapsa espaços/quebras pra casar o having
+    norm = " ".join(sql.split())  # colapsa espaços/quebras
+    # MODO A — pilha no mesmo dia
+    assert "group by merchant, val, ts::date" in norm
     assert "having count(*) >= 2" in norm
-    # o teto de span total da ilha precisa estar no having
-    assert "(max(ts)::date - min(ts)::date) <= %s" in norm
-    # e a janela entra 2× nos params: make_interval (encadeamento) + teto do having
+    # MODO B — ilha isolada: 1 por dia (disjunção de A) + teto de span
+    assert "repeticoes = dias_distintos" in norm
+    assert "janela_dias <= %s" in norm
+    # os dois modos entram no resultado
+    assert "union all" in norm
+    # a janela entra 2× nos params: make_interval (encadeamento) + teto do modo B
     assert list(params).count(pa.DETETIVE_DUP_WINDOW_DAYS) == 2
 
 
