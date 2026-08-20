@@ -948,6 +948,9 @@ def create_investment_db(
                     raise RuntimeError("ACCOUNT_MISSING")
                 if debita_carteira and acc["balance"] < initial:
                     raise ValueError("INSUFFICIENT_ACCOUNT")
+                if not debita_carteira:
+                    from .open_finance import assert_bank_covers
+                    assert_bank_covers(cur, user_id, funding_source.get("of_account_id"), initial)
 
                 if debita_carteira:
                     cur.execute(
@@ -1299,6 +1302,9 @@ def investment_deposit_from_account(
                 raise RuntimeError("ACCOUNT_MISSING")
             if debita_carteira and acc["balance"] < v:
                 raise ValueError("INSUFFICIENT_ACCOUNT")
+            if not debita_carteira:
+                from .open_finance import assert_bank_covers
+                assert_bank_covers(cur, user_id, funding_source.get("of_account_id"), v)
 
             cur.execute(
                 "select id, name, rate, period from investments "

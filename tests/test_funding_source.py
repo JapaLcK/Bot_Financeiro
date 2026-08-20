@@ -467,3 +467,75 @@ def test_criacao_com_aporte_inicial_usa_a_mesma_origem(user_id):
     assert invs["CDB Novo"] == 800.0
     # e o valor entra no comprometido, como qualquer outra saída
     assert funding.list_sources(user_id)[1]["balance"] == Decimal("200.00")
+
+
+# ─── corrida e isolamento ────────────────────────────────────────────────────
+#
+# O `funding.resolve` no serviço DECIDE e explica; quem AUTORIZA é
+# `db.assert_bank_covers`, dentro da transação que grava. A diferença não é
+# estética: com a checagem só no serviço, virava check-then-act. Medido com duas
+# threads antes da correção: dois aportes de R$ 800 simultâneos passaram contra
+# um saldo de R$ 1.000 (R$ 1.600 gravados). O caminho da Carteira nunca teve esse
+# furo porque o `select ... for update` serializa.
+
+def _aportes_simultaneos(user_id: int, n: int, valor: float) -> int:
+    """Dispara n aportes ao mesmo tempo com uma barreira e devolve quantos passaram."""
+    import threading
+
+    barreira = threading.Barrier(n)
+    aceitos = []
+
+    def go():
+        barreira.wait()
+        r = h_investments.deposit(
+            user_id, "investi", {"investment_name": "Renda Fixa", "amount": valor})
+        aceitos.append("✅" in r)
+
+    threads = [threading.Thread(target=go) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return sum(aceitos)
+
+
+@pytest.mark.parametrize("n,valor,saldo,teto_aceitos", [
+    (2, 800, "1000", 1),    # só um cabe
+    (5, 300, "1000", 3),    # três cabem
+    (3, 200, "1000", 3),    # todos cabem — o lock não pode recusar quem cabia
+])
+def test_simultaneos_nunca_estouram_o_saldo(user_id, n, valor, saldo, teto_aceitos):
+    _connect_fake_bank(user_id, saldo)
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+
+    aceitos = _aportes_simultaneos(user_id, n, valor)
+    investido = float(db.list_investments(user_id)[0]["balance"])
+
+    assert aceitos == teto_aceitos
+    assert investido <= float(saldo)
+
+
+def test_guard_recusa_conta_de_outro_usuario(user_id):
+    """`assert_bank_covers` é pública em db/ — precisa filtrar pelo dono, e não só
+    confiar em quem chama (CLAUDE.md §5: isolamento por usuário é regra dura)."""
+    import uuid as _uuid
+
+    outro = int(_uuid.uuid4().int % 10_000_000_000)
+    db.ensure_user(outro)
+    _connect_fake_bank(outro, "5000.00")
+    conta_alheia = db.list_bank_accounts(outro)[0]["id"]
+
+    with db.get_conn() as conn, conn.cursor() as cur:
+        with pytest.raises(ValueError, match="INSUFFICIENT_ACCOUNT"):
+            db.assert_bank_covers(cur, user_id, conta_alheia, 100)
+
+
+def test_guard_autoriza_a_propria_conta(user_id):
+    """A guarda não pode ser tão rígida a ponto de recusar o caso legítimo."""
+    _connect_fake_bank(user_id, "500.00")
+    minha = db.list_bank_accounts(user_id)[0]["id"]
+
+    with db.get_conn() as conn, conn.cursor() as cur:
+        db.assert_bank_covers(cur, user_id, minha, 400)          # cabe: não levanta
+        with pytest.raises(ValueError, match="INSUFFICIENT_ACCOUNT"):
+            db.assert_bank_covers(cur, user_id, minha, 600)      # não cabe

@@ -1812,6 +1812,63 @@ def pending_bank_outflows(user_id: int) -> dict[int, Decimal]:
                     for r in (cur.fetchall() or []) if r["of_account_id"] is not None}
 
 
+def assert_bank_covers(cur, user_id: int, of_account_id, valor) -> None:
+    """Autoriza uma saída contra uma conta do banco — DENTRO da transação que a grava.
+
+    O `funding.resolve` no serviço decide e explica; quem *autoriza* é aqui. Sem isto a
+    checagem virava check-then-act: medido com duas threads, dois aportes de R$ 800
+    simultâneos passaram contra um saldo de R$ 1.000 (R$ 1.600 gravados). O caminho da
+    Carteira nunca teve esse furo porque o `select ... for update` serializa.
+
+    O `for update` na linha da conta é o que serializa aqui: a segunda transação espera
+    a primeira commitar e então enxerga o lançamento dela no pendente.
+
+    Ordem de lock: SEMPRE depois do `accounts ... for update` que os chamadores já fazem,
+    para não inverter a ordem entre transações e criar deadlock.
+    """
+    if of_account_id is None:
+        return  # origem banco sem conta identificada: não há o que conferir
+
+    # Join na conexão para filtrar pelo DONO. Sem isso a query autorizaria contra o
+    # saldo de uma conta de outro usuário — regra dura do CLAUDE.md §5 ("toda query
+    # com WHERE user_id = %s"). Hoje todo `funding_source` nasce de
+    # funding.list_sources(user_id), mas esta função é pública em db/ e está a um
+    # chamador descuidado de virar vazamento real.
+    cur.execute(
+        """
+        select a.balance, a.updated_at
+        from open_finance_accounts a
+        join open_finance_connections c on c.id = a.connection_id
+        where a.id = %s and c.user_id = %s
+        for update of a
+        """,
+        (int(of_account_id), user_id),
+    )
+    conta = cur.fetchone()
+    if not conta:
+        # Vazio cobre dois casos que não dá para separar aqui: conta desconectada no
+        # meio do fluxo, e conta que não é deste usuário. Entre liberar os dois e
+        # negar os dois, negar é o lado seguro — o custo é o caso raro de desconexão
+        # virar uma recusa, e aí o usuário reconecta.
+        raise ValueError("INSUFFICIENT_ACCOUNT")
+    cur.execute(
+        """
+        select coalesce(sum(l.valor), 0) as total
+        from launches l
+        where l.user_id = %s
+          and l.efeitos->'funding_source'->>'kind' = 'bank'
+          and (l.efeitos->'funding_source'->>'of_account_id')::bigint = %s
+          and l.tipo in ('aporte_investimento', 'deposito_caixinha')
+          and l.criado_em > %s
+        """,
+        (user_id, int(of_account_id), conta["updated_at"]),
+    )
+    pendente = Decimal(str(cur.fetchone()["total"] or 0))
+    disponivel = Decimal(str(conta["balance"] or 0)) - pendente
+    if disponivel < Decimal(str(valor)):
+        raise ValueError("INSUFFICIENT_ACCOUNT")
+
+
 def get_consolidated_balance(user_id: int) -> dict:
     """Saldo consolidado = saldo manual + soma dos saldos das contas BANK conectadas.
 

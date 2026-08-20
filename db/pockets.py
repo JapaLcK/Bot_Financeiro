@@ -615,6 +615,9 @@ def pocket_deposit_from_account(
                 raise RuntimeError("ACCOUNT_MISSING")
             if debita_carteira and Decimal(str(acc["balance"])) < v:
                 raise ValueError("INSUFFICIENT_ACCOUNT")
+            if not debita_carteira:
+                from .open_finance import assert_bank_covers
+                assert_bank_covers(cur, user_id, funding_source.get("of_account_id"), v)
 
             cur.execute(
                 "select id, name, of_investment_id from pockets "
