@@ -6349,6 +6349,13 @@ async def create_investment_route(request: Request, user_id: int, payload: Inves
     try:
         create_note = _investment_action_note("Criou investimento", name, payload.issuer, payload.note)
         initial_note = _investment_action_note("Aporte inicial em", name)
+        # O aporte inicial é uma saída de dinheiro como qualquer outra — precisa
+        # resolver a origem igual à rota de aporte, senão criar um investimento já
+        # com valor continua recusado para quem tem banco conectado.
+        from core.services import funding as _funding
+
+        _src = (await asyncio.to_thread(
+            _funding.resolve_deterministic, user_id, payload.initial_amount or 0))["source"]
         launch_id, inv_id, canon = await asyncio.to_thread(
             create_investment_db,
             user_id,
@@ -6365,9 +6372,12 @@ async def create_investment_route(request: Request, user_id: int, payload: Inves
             tax_profile=payload.tax_profile,
             initial_amount=payload.initial_amount,
             initial_note=initial_note,
+            funding_source=_funding.to_db_arg(_src) if payload.initial_amount else None,
         )
     except Exception as exc:
-        message = "Saldo insuficiente na conta para o aporte inicial." if str(exc) == "INSUFFICIENT_ACCOUNT" else str(exc)
+        message = (_funding.msg_insuficiente(user_id, payload.initial_amount or 0,
+                                             acao="aporte inicial")
+                   if str(exc) == "INSUFFICIENT_ACCOUNT" else str(exc))
         raise HTTPException(status_code=400, detail=message) from exc
 
     _invalidate_dashboard_current_cache(user_id)

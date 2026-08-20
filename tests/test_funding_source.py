@@ -357,3 +357,113 @@ def test_caixinha_tambem_pergunta_e_retoma(user_id):
     assert "✅" in msg and "saindo do Nubank" in msg
     assert float(db.get_balance(user_id)) == 500.0            # Carteira intacta
     assert float(db.list_pockets(user_id)[0]["balance"]) == 200.0
+
+
+# ─── o mesmo saldo do banco não pode ser gasto duas vezes ────────────────────
+#
+# O saldo em `open_finance_accounts` é espelho: o Pig não escreve nele, então um
+# lançamento com origem `bank` não o reduz. Sem descontar o que já foi comprometido
+# desde o último sync, o MESMO saldo autorizava lançamentos infinitos — medido antes
+# da correção: 3 aportes de R$ 800 aceitos contra R$ 1.387,76, total R$ 2.400.
+
+def test_saldo_do_banco_nao_pode_ser_gasto_duas_vezes(user_id):
+    _connect_fake_bank(user_id, "1387.76")
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+
+    primeiro = h_investments.deposit(
+        user_id, "investi 800", {"investment_name": "Renda Fixa", "amount": 800})
+    segundo = h_investments.deposit(
+        user_id, "investi 800", {"investment_name": "Renda Fixa", "amount": 800})
+
+    assert "✅" in primeiro
+    assert "✅" not in segundo
+    assert float(db.list_investments(user_id)[0]["balance"]) == 800.0
+
+
+def test_o_que_sobra_do_banco_continua_disponivel(user_id):
+    """O desconto é do comprometido, não um bloqueio da conta inteira."""
+    _connect_fake_bank(user_id, "1000.00")
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+
+    h_investments.deposit(user_id, "investi 600", {"investment_name": "Renda Fixa", "amount": 600})
+    fontes = funding.list_sources(user_id)
+    banco = next(f for f in fontes if f["kind"] == funding.BANK)
+
+    assert banco["espelho"] == Decimal("1000.00")
+    assert banco["comprometido"] == Decimal("600")
+    assert banco["balance"] == Decimal("400.00")
+
+    ok = h_investments.deposit(user_id, "investi 400", {"investment_name": "Renda Fixa", "amount": 400})
+    assert "✅" in ok
+
+
+def test_sync_novo_zera_o_comprometido(user_id):
+    """O corte é `criado_em > updated_at`: o que veio antes do sync já está embutido
+    no saldo que o banco mandou e não pode ser descontado duas vezes."""
+    _connect_fake_bank(user_id, "1000.00")
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+    h_investments.deposit(user_id, "investi 600", {"investment_name": "Renda Fixa", "amount": 600})
+    assert funding.list_sources(user_id)[1]["comprometido"] == Decimal("600")
+
+    # o banco sincroniza e manda o saldo já debitado
+    _connect_fake_bank(user_id, "400.00")
+
+    banco = funding.list_sources(user_id)[1]
+    assert banco["comprometido"] == Decimal("0")
+    assert banco["balance"] == Decimal("400.00")
+
+
+def test_desfazer_devolve_a_disponibilidade(user_id):
+    _connect_fake_bank(user_id, "1000.00")
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+    source = funding.resolve(user_id, 600)["source"]
+    launch_id, *_ = db.investment_deposit_from_account(
+        user_id, "Renda Fixa", 600, "t", funding_source=funding.to_db_arg(source))
+    assert funding.list_sources(user_id)[1]["balance"] == Decimal("400")
+
+    db.delete_launch_and_rollback(user_id, launch_id)
+    assert funding.list_sources(user_id)[1]["balance"] == Decimal("1000.00")
+
+
+def test_caixinha_tambem_compromete(user_id):
+    _connect_fake_bank(user_id, "500.00")
+    db.create_pocket(user_id, "Viagem")
+
+    h_pockets.deposit(user_id, "coloquei 300 na caixinha viagem",
+                      {"pocket_name": "Viagem", "amount": 300})
+
+    assert funding.list_sources(user_id)[1]["balance"] == Decimal("200.00")
+
+
+def test_mensagem_explica_o_comprometido(user_id):
+    _connect_fake_bank(user_id, "1000.00")
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+    h_investments.deposit(user_id, "investi 600", {"investment_name": "Renda Fixa", "amount": 600})
+
+    msg = funding.msg_insuficiente(user_id, 800)
+
+    assert "R$ 400,00 disponíveis" in msg
+    assert "R$ 1.000,00 no banco" in msg
+    assert "R$ 600,00 já lançados aqui" in msg
+
+
+# ─── criar investimento já com valor inicial ────────────────────────────────
+
+def test_criacao_com_aporte_inicial_usa_a_mesma_origem(user_id):
+    """A rota de criação manda `initial_amount` — que é uma saída de dinheiro como
+    outra qualquer. Sem resolver a origem ali, criar um investimento já com valor
+    continuava recusado para quem tem banco conectado."""
+    _connect_fake_bank(user_id, "1000.00")
+
+    source = funding.resolve_deterministic(user_id, 800)["source"]
+    db.create_investment_db(
+        user_id, "CDB Novo", 0.14, "yearly", "criado",
+        initial_amount=800, initial_note="aporte inicial",
+        funding_source=funding.to_db_arg(source),
+    )
+
+    assert float(db.get_balance(user_id)) == 0.0          # Carteira intacta
+    invs = {i["name"]: float(i["balance"]) for i in db.list_investments(user_id)}
+    assert invs["CDB Novo"] == 800.0
+    # e o valor entra no comprometido, como qualquer outra saída
+    assert funding.list_sources(user_id)[1]["balance"] == Decimal("200.00")

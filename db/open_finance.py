@@ -1774,6 +1774,44 @@ def list_bank_accounts(user_id: int) -> list[dict]:
     return rows
 
 
+def pending_bank_outflows(user_id: int) -> dict[int, Decimal]:
+    """Saídas já lançadas contra uma conta do banco que o sync ainda não refletiu.
+
+    O saldo em `open_finance_accounts` é um espelho: o Pig não escreve nele. Então um
+    aporte com origem `bank` não reduz nada, e sem esta conta o MESMO saldo autorizaria
+    infinitos lançamentos — medido: 3 aportes de R$ 800 aceitos contra R$ 1.387,76.
+
+    O corte é `criado_em > a.updated_at`: `updated_at` é carimbado a cada sync
+    (save_open_finance_sync), então lançamentos anteriores a ele já estão embutidos no
+    saldo que o banco mandou e não podem ser descontados duas vezes.
+
+    Só saídas. Resgate com destino `bank` devolve dinheiro pro banco, mas creditar
+    disponibilidade antes do sync confirmar seria adiantar dinheiro que ainda não chegou.
+
+    Devolve {of_account_id: total_pendente}.
+    """
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select (l.efeitos->'funding_source'->>'of_account_id')::bigint as of_account_id,
+                       coalesce(sum(l.valor), 0) as total
+                from launches l
+                join open_finance_accounts a
+                  on a.id = (l.efeitos->'funding_source'->>'of_account_id')::bigint
+                where l.user_id = %s
+                  and l.efeitos->'funding_source'->>'kind' = 'bank'
+                  and l.tipo in ('aporte_investimento', 'deposito_caixinha')
+                  and l.criado_em > a.updated_at
+                group by 1
+                """,
+                (user_id,),
+            )
+            return {int(r["of_account_id"]): Decimal(str(r["total"] or 0))
+                    for r in (cur.fetchall() or []) if r["of_account_id"] is not None}
+
+
 def get_consolidated_balance(user_id: int) -> dict:
     """Saldo consolidado = saldo manual + soma dos saldos das contas BANK conectadas.
 

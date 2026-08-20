@@ -45,13 +45,26 @@ def list_sources(user_id: int) -> list[dict]:
         "of_account_id": None,
         "label": "Carteira",
         "balance": _dec(cb.get("manual")),
+        "espelho": _dec(cb.get("manual")),
+        "comprometido": Decimal("0"),
     }]
+    # O saldo do banco é espelho: o Pig não escreve nele, então um lançamento com
+    # origem `bank` não o reduz. Sem descontar o que já foi comprometido desde o
+    # último sync, o MESMO saldo autorizaria lançamentos infinitos.
+    pendentes = db.pending_bank_outflows(user_id)
     for conta in db.list_bank_accounts(user_id):
+        conta_id = int(conta["id"])
+        espelho = _dec(conta.get("balance"))
+        comprometido = _dec(pendentes.get(conta_id))
         fontes.append({
             "kind": BANK,
-            "of_account_id": int(conta["id"]),
+            "of_account_id": conta_id,
             "label": conta["label"],
-            "balance": _dec(conta.get("balance")),
+            # `balance` é o DISPONÍVEL — é ele que decide. `espelho` é o que o banco
+            # mandou no último sync, e é o número que aparece na tela.
+            "balance": max(espelho - comprometido, Decimal("0")),
+            "espelho": espelho,
+            "comprometido": comprometido,
         })
     return fontes
 
@@ -180,11 +193,31 @@ def msg_insuficiente(user_id: int, amount, acao: str = "aporte", sources: list |
         )
 
     linhas = [f"• **Carteira**: {fmt_brl(float(saldo_carteira))}"]
-    linhas += [f"• **{b['label']}**: {fmt_brl(float(b['balance']))}" for b in bancos]
+    tem_comprometido = False
+    for b in bancos:
+        comprometido = b.get("comprometido") or Decimal("0")
+        if comprometido > 0:
+            tem_comprometido = True
+            linhas.append(
+                f"• **{b['label']}**: {fmt_brl(float(b['balance']))} disponíveis "
+                f"({fmt_brl(float(b.get('espelho') or 0))} no banco, "
+                f"{fmt_brl(float(comprometido))} já lançados aqui e ainda não sincronizados)"
+            )
+        else:
+            linhas.append(f"• **{b['label']}**: {fmt_brl(float(b['balance']))}")
+
+    rodape = (
+        "\n\nA **Carteira** é o dinheiro fora dos bancos conectados (espécie e contas "
+        "que você não ligou) — por isso ela costuma ficar zerada depois que você conecta "
+        "um banco."
+    )
+    if tem_comprometido:
+        rodape += (
+            "\n\nO valor já lançado sai do disponível até o banco sincronizar, para você "
+            "não comprometer o mesmo dinheiro duas vezes."
+        )
     return (
         f"Nenhum dos seus saldos cobre {fmt_brl(float(v))} de {acao}:\n\n"
         + "\n".join(linhas)
-        + "\n\nA **Carteira** é o dinheiro fora dos bancos conectados (espécie e contas "
-        "que você não ligou) — por isso ela costuma ficar zerada depois que você conecta "
-        "um banco."
+        + rodape
     )
