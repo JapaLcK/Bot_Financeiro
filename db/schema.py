@@ -1741,6 +1741,46 @@ def init_db():
         create index if not exists idx_agent_events_pending_email3
           on agent_events (agent_id, fired_at) where emailed_at is null and stale_at is null
         """,
+
+        # ─── Espaços financeiros (Fase 1) ───────────────────────────────────────
+        # Segmentam a vida financeira em áreas (Pessoal, Casa, Fazenda). O
+        # espaço default por usuário é lazy (ver db/spaces.ensure_default_space);
+        # `space_id NULL` em launches/credit_transactions = espaço default. Apagar
+        # um espaço NÃO apaga lançamentos (on delete set null → caem p/ default).
+        """
+        create table if not exists financial_spaces (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          name text not null,
+          emoji text not null default '🏦',
+          color text not null default '#7c3aed',
+          is_default boolean not null default false,
+          is_archived boolean not null default false,
+          created_at timestamptz not null default now(),
+          unique (user_id, name)
+        )
+        """,
+        # garante no máximo 1 default por usuário
+        """
+        create unique index if not exists uq_financial_spaces_one_default
+          on financial_spaces(user_id) where is_default
+        """,
+        """
+        alter table launches add column if not exists space_id bigint
+          references financial_spaces(id) on delete set null
+        """,
+        """
+        alter table credit_transactions add column if not exists space_id bigint
+          references financial_spaces(id) on delete set null
+        """,
+        """
+        alter table open_finance_accounts add column if not exists space_id bigint
+          references financial_spaces(id) on delete set null
+        """,
+        """
+        create index if not exists idx_launches_user_space
+          on launches(user_id, space_id, criado_em desc)
+        """,
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks

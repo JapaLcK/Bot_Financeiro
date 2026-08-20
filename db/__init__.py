@@ -81,6 +81,14 @@ from .pockets import (
     delete_pocket,
 )
 
+# ── Espaços financeiros ───────────────────────────────────────────────────────
+from .spaces import (
+    ensure_default_space,
+    get_default_space_id,
+    list_spaces,
+    create_space,
+)
+
 # ── Investimentos e CDI ───────────────────────────────────────────────────────
 from .investments import (
     create_investment,
@@ -421,6 +429,8 @@ __all__ = [
     # pockets
     "list_pockets", "pocket_withdraw_to_account", "create_pocket",
     "pocket_deposit_from_account", "delete_pocket",
+    # espaços financeiros
+    "ensure_default_space", "get_default_space_id", "list_spaces", "create_space",
     # investments
     "create_investment", "create_investment_db", "delete_investment", "list_investments",
     "list_users_with_investments", "accrue_all_investments", "accrue_investment_db",
