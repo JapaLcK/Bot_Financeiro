@@ -1728,15 +1728,58 @@ def detect_open_finance_bill_increase(user_id: int, months: int = 4) -> list:
     return detect_bill_increase(expenses)
 
 
+# Contas BANK que compõem o saldo corrente do usuário. Uma definição só, usada
+# pelo saldo consolidado E pela escolha de origem do lançamento — se as duas
+# divergirem, o bot recusa um aporte que a tela diz que cabe (ou o contrário).
+#
+# Dedup por conta REAL (provider_account_id): reconectar o banco cria uma nova
+# connection_id com a MESMA conta (a unicidade é por conexão), o que somaria o
+# mesmo saldo 2x. DISTINCT ON pega o saldo da conexão mais recente por conta.
+# PAUSED/DELETED mantêm o espelho local para histórico, mas não representam uma
+# conexão atual e portanto não podem compor o saldo corrente.
+# Só contas em BRL: o saldo manual é em reais e não há conversão de câmbio —
+# somar USD 100 como R$ 100 mentiria o total.
+_BANK_ACCOUNTS_SQL = """
+    select * from (
+        select distinct on (a.provider_account_id)
+            a.id, a.name, a.balance, c.institution_name,
+            upper(coalesce(c.status, '')) as connection_status
+        from open_finance_accounts a
+        join open_finance_connections c on c.id = a.connection_id
+        where c.user_id=%s and upper(a.type) = 'BANK'
+          and upper(coalesce(a.currency, 'BRL')) = 'BRL'
+        order by a.provider_account_id, c.id desc
+    ) uniq
+    where connection_status not in ('PAUSED', 'DELETED')
+"""
+
+
+def list_bank_accounts(user_id: int) -> list[dict]:
+    """Contas BANK conectadas e ativas, com saldo e rótulo para exibição.
+
+    Mesmo recorte do `get_consolidated_balance` — as duas leem `_BANK_ACCOUNTS_SQL`.
+    """
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(_BANK_ACCOUNTS_SQL + " order by balance desc nulls last, id", (user_id,))
+            rows = [dict(r) for r in (cur.fetchall() or [])]
+
+    for r in rows:
+        # "Nubank · Conta" quando os dois existem; o que houver, senão.
+        partes = [p for p in ((r.get("institution_name") or "").strip(),
+                              (r.get("name") or "").strip()) if p]
+        r["label"] = " · ".join(partes) or "Banco conectado"
+        r["balance"] = r.get("balance") or Decimal("0")
+    return rows
+
+
 def get_consolidated_balance(user_id: int) -> dict:
     """Saldo consolidado = saldo manual + soma dos saldos das contas BANK conectadas.
 
     Cartão (type CREDIT) fica de fora (é dívida, não saldo disponível). Auto-atualiza
     conforme o sync refresca os saldos autoritativos dos bancos. `of_bank_count` é o
     nº de contas BANK conectadas — 0 = sem banco, e o chamador pode mostrar só o manual.
-
-    Só contas em BRL entram na soma (e no count): o saldo manual é em reais e não há
-    conversão de câmbio — somar USD 100 como R$ 100 mentiria o total.
     """
     ensure_user(user_id)
     with get_conn() as conn:
@@ -1745,25 +1788,8 @@ def get_consolidated_balance(user_id: int) -> dict:
             row = cur.fetchone()
             manual = row["b"] if row else Decimal("0")
 
-            # Dedup por conta REAL (provider_account_id): reconectar o banco cria uma nova
-            # connection_id com a MESMA conta (a unicidade é por conexão), o que somaria o
-            # mesmo saldo 2x. DISTINCT ON pega o saldo da conexão mais recente por conta.
-            # PAUSED/DELETED mantêm o espelho local para histórico, mas não representam
-            # uma conexão atual e portanto não podem compor o saldo corrente.
             cur.execute(
-                """
-                select coalesce(sum(b), 0) as b, count(*) as n from (
-                    select distinct on (a.provider_account_id)
-                        a.balance as b,
-                        upper(coalesce(c.status, '')) as connection_status
-                    from open_finance_accounts a
-                    join open_finance_connections c on c.id = a.connection_id
-                    where c.user_id=%s and upper(a.type) = 'BANK'
-                      and upper(coalesce(a.currency, 'BRL')) = 'BRL'
-                    order by a.provider_account_id, c.id desc
-                ) uniq
-                where connection_status not in ('PAUSED', 'DELETED')
-                """,
+                f"select coalesce(sum(balance), 0) as b, count(*) as n from ({_BANK_ACCOUNTS_SQL}) s",
                 (user_id,),
             )
             of_row = cur.fetchone()

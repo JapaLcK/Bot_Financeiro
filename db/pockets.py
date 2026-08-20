@@ -308,8 +308,11 @@ def pocket_withdraw_to_account(
     nota: str | None = None,
     *,
     withdraw_all: bool = False,
+    funding_source: dict | None = None,
 ):
     """Caixinha → Conta via FIFO. Retorna (launch_id, new_acc, new_pocket, canon, tax_summary).
+
+    `funding_source` é o DESTINO — ver investment_withdraw_to_account.
 
     Se ``withdraw_all=True``, saca o saldo cheio pós-rendimento (zera a caixinha de
     forma atômica) e ignora ``amount``. Caso contrário saca ``amount``; mas se o valor
@@ -461,11 +464,15 @@ def pocket_withdraw_to_account(
             new_pocket = _sync_pocket_from_lots(cur, user_id, pocket_id)
 
             cur.execute("select balance from accounts where user_id=%s for update", (user_id,))
-            cur.execute(
-                "update accounts set balance = balance + %s where user_id=%s returning balance",
-                (total_net, user_id),
-            )
-            new_acc = cur.fetchone()["balance"]
+            if funding_source is None:
+                cur.execute(
+                    "update accounts set balance = balance + %s where user_id=%s returning balance",
+                    (total_net, user_id),
+                )
+                new_acc = cur.fetchone()["balance"]
+            else:
+                cur.execute("select balance from accounts where user_id=%s", (user_id,))
+                new_acc = cur.fetchone()["balance"]
 
             tax_summary = {
                 "gross": float(total_gross),
@@ -477,7 +484,8 @@ def pocket_withdraw_to_account(
                 "lots": breakdown,
             }
             efeitos = {
-                "delta_conta": float(+total_net),
+                "delta_conta": float(+total_net) if funding_source is None else 0,
+                "funding_source": funding_source,
                 "delta_pocket": {"nome": canon, "delta": float(-total_gross)},
                 "delta_invest": None, "create_pocket": None, "create_investment": None,
                 "pocket_lot_withdrawals": lot_effects,
@@ -583,9 +591,14 @@ def create_pocket(
 
 
 def pocket_deposit_from_account(
-    user_id: int, pocket_name: str, amount: float, nota: str | None = None
+    user_id: int, pocket_name: str, amount: float, nota: str | None = None,
+    *, funding_source: dict | None = None,
 ):
-    """Conta → Caixinha. Retorna (launch_id, new_account_balance, new_pocket_balance, canon_name)."""
+    """Conta → Caixinha. Retorna (launch_id, new_account_balance, new_pocket_balance, canon_name).
+
+    `funding_source`: mesma regra do aporte em investimento — ver
+    `investment_deposit_from_account` em db/investments.py. `None` = Carteira.
+    """
     ensure_user(user_id)
     v = Decimal(str(amount))
     if v <= 0:
@@ -595,11 +608,12 @@ def pocket_deposit_from_account(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            debita_carteira = funding_source is None
             cur.execute("select balance from accounts where user_id=%s for update", (user_id,))
             acc = cur.fetchone()
             if not acc:
                 raise RuntimeError("ACCOUNT_MISSING")
-            if Decimal(str(acc["balance"])) < v:
+            if debita_carteira and Decimal(str(acc["balance"])) < v:
                 raise ValueError("INSUFFICIENT_ACCOUNT")
 
             cur.execute(
@@ -617,17 +631,21 @@ def pocket_deposit_from_account(
             pocket_id, canon = p["id"], p["name"]
             accrue_pocket_db(cur, user_id, pocket_id, today=criado_em.date())
 
-            cur.execute(
-                "update accounts set balance = balance - %s where user_id=%s returning balance",
-                (v, user_id),
-            )
-            new_acc = cur.fetchone()["balance"]
+            if debita_carteira:
+                cur.execute(
+                    "update accounts set balance = balance - %s where user_id=%s returning balance",
+                    (v, user_id),
+                )
+                new_acc = cur.fetchone()["balance"]
+            else:
+                new_acc = acc["balance"]
 
             lot_id = _insert_pocket_lot(cur, user_id, pocket_id, v, criado_em.date(), criado_em.date())
             new_pocket = _sync_pocket_from_lots(cur, user_id, pocket_id)
 
             efeitos = {
-                "delta_conta": float(-v),
+                "delta_conta": float(-v) if debita_carteira else 0,
+                "funding_source": funding_source,
                 "delta_pocket": {"nome": canon, "delta": float(+v)},
                 "delta_invest": None, "create_pocket": None, "create_investment": None,
                 "pocket_lot_create": {"lot_id": lot_id, "pocket_id": pocket_id},

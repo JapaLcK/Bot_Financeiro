@@ -6383,6 +6383,13 @@ async def deposit_investment_route(request: Request, user_id: int, payload: Inve
     _authorize_dashboard_access(request, user_id)
     if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="Valor deve ser maior que zero.")
+    # De onde sai o dinheiro. Sem `source` no payload, a regra determinística
+    # decide (Carteira quando cobre, senão o banco) — ver core/services/funding.py.
+    # A resposta devolve a origem usada, para a tela poder mostrar.
+    from core.services import funding
+
+    source = (await asyncio.to_thread(
+        funding.resolve_deterministic, user_id, payload.amount))["source"]
     try:
         launch_id, new_acc, new_inv, canon = await asyncio.to_thread(
             investment_deposit_from_account,
@@ -6393,6 +6400,7 @@ async def deposit_investment_route(request: Request, user_id: int, payload: Inve
             rate=payload.rate,
             period=payload.period,
             purchase_date=payload.purchase_date,
+            funding_source=funding.to_db_arg(source),
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="Investimento não encontrado.") from exc
@@ -6418,6 +6426,11 @@ async def withdraw_investment_route(request: Request, user_id: int, payload: Inv
     _authorize_dashboard_access(request, user_id)
     if not payload.withdraw_all and (payload.amount is None or payload.amount <= 0):
         raise HTTPException(status_code=400, detail="Valor deve ser maior que zero.")
+    # Destino do resgate: com banco conectado o dinheiro volta pro banco, não pra
+    # Carteira (ver core/services/funding.py::resolve_destination).
+    from core.services import funding as _funding
+
+    _destino = (await asyncio.to_thread(_funding.resolve_destination, user_id))["source"]
     try:
         launch_id, new_acc, new_inv, canon, tax_summary = await asyncio.to_thread(
             investment_withdraw_to_account,
@@ -6426,6 +6439,7 @@ async def withdraw_investment_route(request: Request, user_id: int, payload: Inv
             payload.amount,
             payload.note or _investment_action_note("Resgate de", payload.name),
             withdraw_all=bool(payload.withdraw_all),
+            funding_source=_funding.to_db_arg(_destino),
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="Investimento não encontrado.") from exc

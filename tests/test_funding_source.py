@@ -1,0 +1,359 @@
+"""Origem explícita das movimentações de dinheiro.
+
+O bug: `accounts.balance` (a Carteira) fazia dois papéis — saldo mantido pelo Pig E
+teste de "você tem dinheiro para isso?". Ao conectar um banco por Open Finance, o
+produto pede para zerar a Carteira (senão o mesmo dinheiro conta 2x), e o saldo real
+passa a vir do sync. A leitura foi migrada para esse mundo; a escrita não. Resultado:
+app mostrando R$ 1.387,76 e o bot respondendo "Saldo insuficiente na conta" a um
+aporte de R$ 800.
+
+Aqui a origem vira explícita: `carteira` debita e exige cobertura; `bank` não toca em
+`accounts.balance` e grava `delta_conta: 0`.
+"""
+from decimal import Decimal
+from unittest.mock import patch
+
+import pytest
+
+import db
+from core.handlers import investments as h_investments
+from core.handlers import pockets as h_pockets
+from core.services import funding
+
+
+def _connect_fake_bank(user_id: int, balance: str = "1387.76", nome: str = "Conta") -> int:
+    connection = db.save_pluggy_open_finance_item(
+        user_id,
+        {"id": f"item-{user_id}-{nome}", "connector": {"id": 612, "name": "Nubank"},
+         "status": "UPDATED"},
+    )
+    db.save_open_finance_sync(
+        connection["id"],
+        [{
+            "provider_account_id": f"acc-{user_id}-{nome}",
+            "name": nome,
+            "type": "BANK",
+            "subtype": "CHECKING_ACCOUNT",
+            "currency": "BRL",
+            "balance": Decimal(balance),
+            "raw": {},
+            "transactions": [],
+        }],
+    )
+    return connection["id"]
+
+
+# ─── a regra de escolha ──────────────────────────────────────────────────────
+
+def test_sem_banco_e_com_carteira_usa_a_carteira(user_id):
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    r = funding.resolve(user_id, 800)
+    assert r["source"]["kind"] == funding.CARTEIRA
+
+
+def test_carteira_zerada_com_banco_usa_o_banco(user_id):
+    """O caso do relato: Carteira R$ 0,00, banco com R$ 1.387,76, aporte de R$ 800."""
+    _connect_fake_bank(user_id)
+    r = funding.resolve(user_id, 800)
+    assert r["source"]["kind"] == funding.BANK
+    assert r["source"]["label"] == "Nubank · Conta"
+
+
+def test_as_duas_cobrem_vira_pergunta(user_id):
+    _connect_fake_bank(user_id)
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    r = funding.resolve(user_id, 800)
+    assert [f["kind"] for f in r["ask"]] == [funding.CARTEIRA, funding.BANK]
+
+
+def test_uma_fonte_so_nunca_vira_pergunta(user_id):
+    """Quem tem a Carteira zerada não pode levar um round-trip extra a cada aporte."""
+    _connect_fake_bank(user_id)
+    assert "ask" not in funding.resolve(user_id, 800)
+
+
+def test_nada_cobre_devolve_insuficiente_com_as_fontes(user_id):
+    _connect_fake_bank(user_id, "100.00")
+    r = funding.resolve(user_id, 800)
+    assert [f["label"] for f in r["insufficient"]["sources"]] == ["Carteira", "Nubank · Conta"]
+
+
+def test_deterministico_nunca_devolve_insuficiente(user_id):
+    """Dashboard, Discord e chat da IA indexam ["source"] direto — devolver
+    `insufficient` aqui virava KeyError e 500 em vez de 400. Achado por
+    tests/test_pockets_endpoints.py."""
+    _connect_fake_bank(user_id, "10.00")
+    r = funding.resolve_deterministic(user_id, 99999)
+    assert r["source"]["kind"] == funding.CARTEIRA   # cai na Carteira; o db recusa depois
+
+
+def test_deterministico_prefere_a_carteira_quando_ela_cobre(user_id):
+    _connect_fake_bank(user_id)
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    assert funding.resolve_deterministic(user_id, 800)["source"]["kind"] == funding.CARTEIRA
+
+
+def test_destino_do_resgate_nao_pergunta(user_id):
+    """No destino a escolha não muda o razão (delta_conta é 0 com qualquer banco),
+    então entre dois bancos só mudaria o rótulo — não vale um round-trip."""
+    _connect_fake_bank(user_id, "500.00", nome="Conta A")
+    _connect_fake_bank(user_id, "900.00", nome="Conta B")
+    r = funding.resolve_destination(user_id)
+    assert r["source"]["kind"] == funding.BANK
+
+
+def test_sem_banco_o_resgate_volta_pra_carteira(user_id):
+    assert funding.resolve_destination(user_id)["source"]["kind"] == funding.CARTEIRA
+
+
+# ─── o efeito no razão ───────────────────────────────────────────────────────
+
+def test_aporte_com_origem_banco_nao_debita_a_carteira(user_id):
+    _connect_fake_bank(user_id)
+    db.create_investment(user_id, "Reserva de Emergencia", 0.14, "yearly")
+
+    msg = h_investments.deposit(
+        user_id, "Investi 800 na renda fixa",
+        {"investment_name": "Reserva de Emergencia", "amount": 800},
+    )
+
+    assert "✅" in msg
+    assert "saindo do Nubank" in msg          # a origem fica visível
+    assert float(db.get_balance(user_id)) == 0.0
+    invs = {i["name"]: float(i["balance"]) for i in db.list_investments(user_id)}
+    assert invs["Reserva de Emergencia"] == 800.0
+
+
+def test_aporte_sem_banco_continua_debitando(user_id):
+    db.create_investment(user_id, "CDB XP", 0.12, "yearly")
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+
+    msg = h_investments.deposit(
+        user_id, "investi 800 no cdb xp", {"investment_name": "CDB XP", "amount": 800},
+    )
+
+    assert float(db.get_balance(user_id)) == 200.0
+    assert "saindo do" not in msg             # sem banco não há o que desambiguar
+
+
+def test_desfazer_aporte_do_banco_nao_cria_dinheiro(user_id):
+    """`delta_conta` é o que o desfazer estorna (db/accounts.py). Se ficasse -800 sem
+    o débito ter acontecido, desfazer CRIARIA R$ 800 na Carteira. É a única falha
+    desta mudança que erraria na direção do dinheiro do usuário."""
+    _connect_fake_bank(user_id)
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+    source = funding.resolve(user_id, 800)["source"]
+
+    launch_id, _a, _i, _c = db.investment_deposit_from_account(
+        user_id, "Renda Fixa", 800, "t", funding_source=funding.to_db_arg(source))
+
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select efeitos from launches where id=%s", (launch_id,))
+        efeitos = cur.fetchone()["efeitos"]
+    assert efeitos["delta_conta"] == 0
+    assert efeitos["funding_source"]["kind"] == "bank"   # proveniência para a etapa 2
+
+    db.delete_launch_and_rollback(user_id, launch_id)
+    assert float(db.get_balance(user_id)) == 0.0
+
+
+def test_resgate_com_banco_nao_credita_a_carteira(user_id):
+    _connect_fake_bank(user_id)
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+    db.investment_deposit_from_account(
+        user_id, "Renda Fixa", 800, "t", funding_source={"kind": "bank"})
+
+    msg = h_investments.withdraw(
+        user_id, "resgatei 300 da renda fixa",
+        {"investment_name": "Renda Fixa", "amount": 300},
+    )
+
+    assert "para o Nubank" in msg
+    assert float(db.get_balance(user_id)) == 0.0
+
+
+def test_caixinha_nos_dois_sentidos(user_id):
+    _connect_fake_bank(user_id)
+    db.create_pocket(user_id, "Viagem")
+
+    dep = h_pockets.deposit(user_id, "coloquei 200 na caixinha viagem",
+                            {"pocket_name": "Viagem", "amount": 200})
+    saq = h_pockets.withdraw(user_id, "retirei 50 da caixinha viagem",
+                             {"pocket_name": "Viagem", "amount": 50})
+
+    assert "saindo do Nubank" in dep
+    assert float(db.get_balance(user_id)) == 0.0
+    assert "sincronizar" in saq                # aviso do sync também na saída
+    pockets = {p["name"]: float(p["balance"]) for p in db.list_pockets(user_id)}
+    assert pockets["Viagem"] == 150.0
+
+
+# ─── a pergunta ──────────────────────────────────────────────────────────────
+
+def test_pergunta_quando_as_duas_cobrem(user_id):
+    _connect_fake_bank(user_id)
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+
+    msg = h_investments.deposit(
+        user_id, "investi 800 na renda fixa",
+        {"investment_name": "Renda Fixa", "amount": 800},
+    )
+
+    assert "De onde sai" in msg
+    assert "1. **Carteira**" in msg and "2. **Nubank · Conta**" in msg
+    pend = db.get_pending_action(user_id)
+    assert pend["action_type"] == "funding_source_choice"
+    # nada foi lançado antes da escolha
+    assert float(db.list_investments(user_id)[0]["balance"]) == 0.0
+
+
+def test_resposta_com_numero_lanca_da_origem_escolhida(user_id):
+    _connect_fake_bank(user_id)
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+
+    h_investments.deposit(user_id, "investi 800 na renda fixa",
+                          {"investment_name": "Renda Fixa", "amount": 800})
+    msg = h_investments.resolve_funding_choice(
+        user_id, "2", db.get_pending_action(user_id))
+
+    assert "✅" in msg and "saindo do Nubank" in msg
+    assert float(db.get_balance(user_id)) == 1000.0   # escolheu o banco: Carteira intacta
+    assert db.get_pending_action(user_id) is None
+
+
+def test_resposta_pela_carteira_debita(user_id):
+    _connect_fake_bank(user_id)
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+
+    h_investments.deposit(user_id, "investi 800 na renda fixa",
+                          {"investment_name": "Renda Fixa", "amount": 800})
+    h_investments.resolve_funding_choice(user_id, "1", db.get_pending_action(user_id))
+
+    assert float(db.get_balance(user_id)) == 200.0
+
+
+def test_resposta_pelo_nome_tambem_vale(user_id):
+    _connect_fake_bank(user_id)
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+
+    h_investments.deposit(user_id, "investi 800 na renda fixa",
+                          {"investment_name": "Renda Fixa", "amount": 800})
+    msg = h_investments.resolve_funding_choice(
+        user_id, "nubank", db.get_pending_action(user_id))
+
+    assert "saindo do Nubank" in msg
+
+
+def test_texto_solto_reperunta_sem_lancar(user_id):
+    _connect_fake_bank(user_id)
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+
+    h_investments.deposit(user_id, "investi 800 na renda fixa",
+                          {"investment_name": "Renda Fixa", "amount": 800})
+    msg = h_investments.resolve_funding_choice(
+        user_id, "sei lá", db.get_pending_action(user_id))
+
+    assert "Não entendi de onde sai" in msg
+    assert db.get_pending_action(user_id) is not None      # pendência preservada
+    assert float(db.list_investments(user_id)[0]["balance"]) == 0.0
+
+
+def test_cancelar_limpa_a_pendencia(user_id):
+    _connect_fake_bank(user_id)
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+
+    h_investments.deposit(user_id, "investi 800 na renda fixa",
+                          {"investment_name": "Renda Fixa", "amount": 800})
+    msg = h_investments.resolve_funding_choice(
+        user_id, "cancelar", db.get_pending_action(user_id))
+
+    assert "cancelei" in msg.lower()
+    assert db.get_pending_action(user_id) is None
+
+
+def test_resolve_funding_choice_ignora_pendencia_alheia(user_id):
+    assert h_investments.resolve_funding_choice(
+        user_id, "1", {"action_type": "delete_launch", "payload": {}}) is None
+
+
+def test_pendencia_bloqueia_o_fallback_de_ia():
+    """Sem isso, a resposta "1" classifica como baixa confiança e o fallback de IA
+    sequestra o turno (core/handle_incoming.py:692), perdendo a pergunta — e o
+    pending de desfazer do fluxo de áudio sobrescreve a pergunta (:345).
+
+    Importar `handle_incoming` puxa `ofxparse`, ausente neste ambiente (CLAUDE.md §6);
+    no CI o pacote existe e o teste roda.
+    """
+    pytest.importorskip("ofxparse", reason="ausente localmente; presente no CI")
+    from core.handle_incoming import _RESUMABLE_PENDING_TYPES
+    assert "funding_source_choice" in _RESUMABLE_PENDING_TYPES
+
+
+# ─── a mensagem que enganou ──────────────────────────────────────────────────
+
+def test_mensagem_sem_banco_mostra_o_numero(user_id):
+    db.add_launch_and_update_balance(user_id, "receita", 50, None, "seed")
+    msg = funding.msg_insuficiente(user_id, 800)
+    assert "R$ 50,00" in msg and "R$ 800,00" in msg
+    assert "Saldo insuficiente na conta para esse aporte." not in msg
+
+
+def test_mensagem_com_banco_lista_cada_saldo(user_id):
+    _connect_fake_bank(user_id, "100.00")
+    msg = funding.msg_insuficiente(user_id, 800)
+    assert "**Carteira**: R$ 0,00" in msg
+    assert "**Nubank · Conta**: R$ 100,00" in msg
+    assert "fora dos bancos conectados" in msg   # explica POR QUE a Carteira é zero
+
+
+# ─── as outras superfícies ───────────────────────────────────────────────────
+
+def test_chat_da_ia_segue_a_mesma_regra(user_id):
+    from core.services.ai_chat.tools.investments import _investment_deposit_execute
+
+    _connect_fake_bank(user_id)
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+
+    out = _investment_deposit_execute(user_id, {"name": "Renda Fixa", "amount": 800})
+
+    assert "✅" in out and "saindo do Nubank" in out
+    assert float(db.get_balance(user_id)) == 0.0
+
+
+def test_dashboard_nao_recusa_mais_quem_tem_banco(user_id, monkeypatch):
+    """A rota do dashboard tinha o bug idêntico ao do bot: devolvia
+    "Saldo insuficiente na conta." para quem tem banco conectado."""
+    _connect_fake_bank(user_id)
+    db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
+
+    source = funding.resolve_deterministic(user_id, 800)["source"]
+    db.investment_deposit_from_account(
+        user_id, "Renda Fixa", 800, "aporte", funding_source=funding.to_db_arg(source))
+
+    assert float(db.get_balance(user_id)) == 0.0
+    assert float(db.list_investments(user_id)[0]["balance"]) == 800.0
+
+
+def test_caixinha_tambem_pergunta_e_retoma(user_id):
+    """A retomada da caixinha passa por outro módulo (pockets.deposita_com_origem);
+    sem teste próprio, um erro de assinatura só apareceria em produção."""
+    _connect_fake_bank(user_id, "1000.00")
+    db.add_launch_and_update_balance(user_id, "receita", 500, None, "seed")
+    db.create_pocket(user_id, "Viagem")
+
+    pergunta = h_pockets.deposit(user_id, "coloquei 200 na caixinha viagem",
+                                 {"pocket_name": "Viagem", "amount": 200})
+    assert "De onde sai" in pergunta
+
+    msg = h_investments.resolve_funding_choice(
+        user_id, "2", db.get_pending_action(user_id))
+
+    assert "✅" in msg and "saindo do Nubank" in msg
+    assert float(db.get_balance(user_id)) == 500.0            # Carteira intacta
+    assert float(db.list_pockets(user_id)[0]["balance"]) == 200.0

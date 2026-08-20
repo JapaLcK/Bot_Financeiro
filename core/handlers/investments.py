@@ -10,6 +10,96 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _pergunta_origem(user_id: int, fontes: list, amount: float, retomar: dict) -> str:
+    """Mais de um saldo cobre o valor: o usuário escolhe de onde sai.
+
+    Mesmo formato do "qual fatura você quer pagar?" (core/handlers/credit.py::
+    _ask_which_bill): opções numeradas e resposta pelo número. `retomar` guarda o que
+    reexecutar depois da escolha, para a resposta não perder o contexto.
+    """
+    db.set_pending_action(
+        user_id,
+        "funding_source_choice",
+        {
+            "amount": float(amount),
+            "retomar": retomar,
+            "fontes": [
+                {"kind": f["kind"], "of_account_id": f["of_account_id"],
+                 "label": f["label"], "balance": float(f["balance"])}
+                for f in fontes
+            ],
+        },
+        minutes=10,
+    )
+    linhas = [f"De onde sai {fmt_brl(float(amount))}?", ""]
+    for i, f in enumerate(fontes, start=1):
+        linhas.append(f"{i}. **{f['label']}** — {fmt_brl(float(f['balance']))}")
+    linhas += ["", "Responda com o número (ex: *1*) ou *cancelar*."]
+    return "\n".join(linhas)
+
+
+def resolve_funding_choice(user_id: int, text: str, pending: dict) -> str | None:
+    """Resposta à pergunta "de onde sai o dinheiro?".
+
+    Devolve None quando a mensagem não é resposta a esta pergunta — aí o roteador
+    segue o caminho normal em vez de prender o usuário no fluxo.
+    """
+    from core.services import funding
+    from utils_text import normalize_text
+
+    if pending.get("action_type") != "funding_source_choice":
+        return None
+
+    payload = dict(pending.get("payload") or {})
+    resposta = (text or "").strip()
+    norm = normalize_text(resposta)
+
+    if norm in ("nao", "n", "cancelar", "cancela"):
+        db.clear_pending_action(user_id)
+        return "❌ Beleza, cancelei."
+
+    fontes = payload.get("fontes") or []
+    escolhida = None
+    if norm.isdigit() and 1 <= int(norm) <= len(fontes):
+        escolhida = fontes[int(norm) - 1]
+    else:
+        # aceita o nome também ("carteira", "nubank") — o número é só o atalho
+        alvo = _norm_txt(resposta)
+        if alvo:
+            casam = [f for f in fontes if alvo in _norm_txt(f["label"])]
+            if len(casam) == 1:
+                escolhida = casam[0]
+
+    if escolhida is None:
+        linhas = [f"{i}. **{f['label']}**" for i, f in enumerate(fontes, start=1)]
+        return ("Não entendi de onde sai. Responda com o número:\n\n"
+                + "\n".join(linhas) + "\n\nOu *cancelar*.")
+
+    db.clear_pending_action(user_id)
+    retomar = payload.get("retomar") or {}
+    amount = float(payload.get("amount") or 0)
+    source = {
+        "kind": escolhida["kind"],
+        "of_account_id": escolhida.get("of_account_id"),
+        "label": escolhida.get("label"),
+    }
+
+    if retomar.get("fluxo") == "investment_deposit":
+        return _aporta(user_id, retomar.get("name"), amount,
+                       retomar.get("text") or resposta, source)
+    if retomar.get("fluxo") == "pocket_deposit":
+        from core.handlers import pockets as _pockets
+        return _pockets.deposita_com_origem(
+            user_id, retomar.get("name"), amount, retomar.get("text") or resposta, source)
+    return None
+
+
+def _norm_txt(txt: str) -> str:
+    import unicodedata
+    base = unicodedata.normalize("NFD", (txt or "").strip().lower())
+    return "".join(c for c in base if unicodedata.category(c) != "Mn")
+
+
 def _investment_dashboard_link(user_id: int) -> str:
     link = build_dashboard_link(user_id, view="investments")
     if not link:
@@ -140,19 +230,48 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
     if not amount or float(amount) <= 0:
         return list_investments(user_id, "Qual valor você quer aportar?")
 
+    from core.services import funding
+
+    # De onde sai o dinheiro. Com banco conectado a Carteira fica zerada de
+    # propósito, então exigir cobertura nela recusava aporte de quem tem saldo.
+    escolha = funding.resolve(user_id, float(amount))
+    if "ask" in escolha:
+        return _pergunta_origem(
+            user_id, escolha["ask"], float(amount),
+            {"fluxo": "investment_deposit", "name": investment_name, "text": text},
+        )
+    if "insufficient" in escolha:
+        return (
+            funding.msg_insuficiente(
+                user_id, float(amount), sources=escolha["insufficient"]["sources"])
+            + "\n\n" + _investment_dashboard_link(user_id)
+        )
+    return _aporta(user_id, investment_name, float(amount), text, escolha["source"])
+
+
+def _aporta(user_id: int, investment_name: str, amount: float, text: str, source: dict) -> str:
+    """Executa o aporte com a origem já decidida.
+
+    Separado de `deposit` porque a resposta da pergunta "de onde sai?" retoma por aqui
+    — sem isso o contexto (investimento, valor, texto original) se perderia.
+    """
+    from core.services import funding
+
     # Códigos vêm de db/investments.py como str(exc) — trate por TIPO e código
     # exato. Casar substring é frágil: "not found" nunca casou com
     # "INV_NOT_FOUND" (espaço × underscore) e o código cru vazava pro WhatsApp.
     try:
         launch_id, _new_acc, _new_inv, canon = db.investment_deposit_from_account(
-            user_id, investment_name, float(amount), text
+            user_id, investment_name, float(amount), text,
+            funding_source=funding.to_db_arg(source),
         )
     except LookupError:
         return _investment_not_found(user_id, investment_name, action="aportar em")
     except ValueError as e:
         code = str(e)
         if code == "INSUFFICIENT_ACCOUNT":
-            return "Saldo insuficiente na conta para esse aporte.\n\n" + _investment_dashboard_link(user_id)
+            return (funding.msg_insuficiente(user_id, float(amount))
+                    + "\n\n" + _investment_dashboard_link(user_id))
         if code == "AMOUNT_INVALID":
             return "Valor inválido para aporte. Tente: *aportar 500 no CDB Nubank*."
         logger.warning("deposit: código inesperado user=%s inv=%s code=%s", user_id, investment_name, code)
@@ -164,7 +283,11 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
         return "Não consegui registrar esse aporte agora. Tente de novo em instantes."
 
     display_id = db.display_id_for(user_id, launch_id)
-    return f"✅ Aporte de **{fmt_brl(float(amount))}** em **{canon}**. ID #{display_id}."
+    msg = (f"✅ Aporte de **{fmt_brl(float(amount))}** em **{canon}**"
+           f"{funding.origem_txt(source)}. ID #{display_id}.")
+    if source["kind"] == funding.BANK:
+        msg += "\n\n" + funding.nota_sync()
+    return msg
 
 
 def check_cdi() -> str:
@@ -218,6 +341,13 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
     if not want_all and (not amount or float(amount) <= 0):
         return list_investments(user_id, "Qual valor você quer resgatar?")
 
+    from core.services import funding
+
+    # Destino do resgate: com banco conectado o dinheiro volta pro banco, não pra
+    # Carteira — creditar a Carteira inflaria o consolidado com o mesmo dinheiro
+    # que o sync devolve. Não pergunta (ver funding.resolve_destination).
+    destino = funding.resolve_destination(user_id)["source"]
+
     try:
         launch_id, _new_acc, _new_inv, canon, taxes = db.investment_withdraw_to_account(
             user_id,
@@ -225,6 +355,7 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
             None if want_all else float(amount),
             text,
             withdraw_all=want_all,
+            funding_source=funding.to_db_arg(destino),
         )
     except LookupError:
         return _investment_not_found(user_id, investment_name, action="resgatar de")
@@ -247,4 +378,10 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
     if taxes and float(taxes.get("iof", 0) or 0) + float(taxes.get("ir", 0) or 0) > 0:
         tax_note = f" Líquido: **{fmt_brl(float(taxes.get('net', 0)))}**."
     verb = "Resgate total" if want_all else "Resgate"
-    return f"✅ {verb} de **{fmt_brl(gross)}** de **{canon}**.{tax_note} ID #{db.display_id_for(user_id, launch_id)}.\n\n" + list_investments(user_id)
+    destino_txt = (f", para o {destino['label']}" if destino["kind"] == funding.BANK else "")
+    nota = ("\n\n" + funding.nota_sync(saida=False)) if destino["kind"] == funding.BANK else ""
+    return (
+        f"✅ {verb} de **{fmt_brl(gross)}** de **{canon}**{destino_txt}.{tax_note} "
+        f"ID #{db.display_id_for(user_id, launch_id)}.{nota}\n\n"
+        + list_investments(user_id)
+    )

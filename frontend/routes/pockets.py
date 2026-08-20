@@ -326,9 +326,14 @@ async def pocket_deposit_route(request: Request, user_id: int, pocket_name: str,
     if not name:
         raise HTTPException(status_code=400, detail="Nome da caixinha é obrigatório.")
     nota = (payload.nota or "").strip() or None
+    from core.services import funding
+
+    source = (await asyncio.to_thread(
+        funding.resolve_deterministic, int(user_id), payload.amount))["source"]
     try:
         launch_id, new_acc, new_pocket, canon = await asyncio.to_thread(
             pocket_deposit_from_account, int(user_id), name, payload.amount, nota,
+            funding_source=funding.to_db_arg(source),
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="Caixinha não encontrada.") from exc
@@ -353,9 +358,13 @@ async def pocket_withdraw_route(request: Request, user_id: int, pocket_name: str
     if not name:
         raise HTTPException(status_code=400, detail="Nome da caixinha é obrigatório.")
     nota = (payload.nota or "").strip() or None
+    from core.services import funding
+
     try:
         launch_id, new_acc, new_pocket, canon, taxes = await asyncio.to_thread(
             pocket_withdraw_to_account, int(user_id), name, payload.amount, nota,
+            funding_source=funding.to_db_arg(
+                (await asyncio.to_thread(funding.resolve_destination, int(user_id)))["source"]),
             withdraw_all=bool(payload.withdraw_all),
         )
     except LookupError as exc:
