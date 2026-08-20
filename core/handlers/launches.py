@@ -470,8 +470,13 @@ def add_from_entities(
     # (é mais valiosa) e o botão de recategorizar é suprimido nesse lançamento.
     recurring_offer = None
     if tipo == "despesa" and not is_int:
+        # merchant_key precisa da mesma prioridade alvo>nota que a query em
+        # find_recurring_candidate usa pro lançamento anterior (coalesce(alvo,
+        # nota)) — nota_clean sozinho é a frase toda ("gastei 44,90 na
+        # netflix"), que nunca bate com o alvo limpo ("netflix") gravado no mês
+        # passado, e a oferta nunca dispara mesmo quando a despesa repete.
         recurring_offer = _maybe_recurring_offer(
-            user_id, nota_clean, valor, categoria_final, criado_em, launch_id,
+            user_id, alvo_clean or nota_clean, valor, categoria_final, criado_em, launch_id,
         )
 
     if recurring_offer:

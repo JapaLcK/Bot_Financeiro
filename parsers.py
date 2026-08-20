@@ -264,13 +264,15 @@ def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
     raw_norm = normalize_text(text_base)
 
     # tipo — receita SEMPRE exige palavra-chave explícita ("recebi"/"receita"/
-    # "ganhei"). Sem palavra-chave, uma mensagem que começa com o valor
+    # "ganhei"/"entrou"/"caiu"/"pingou"/"pinguei"/"embolsei" — o mesmo conjunto
+    # de verbos que core/intent_classifier.py já roteia pra launches.add como
+    # receita). Sem palavra-chave, uma mensagem que começa com o valor
     # ("77,90 mercado") é despesa por padrão: é o atalho mais usado pra lançar
     # gasto, então o user não precisa escrever "gastei" toda vez.
     tipo = None
     if raw_norm.startswith(("gastei ", "gasto ", "paguei ", "pagar ", "comprei ", "debitei ", "mandei ", "enviei ", "pixei ")):
         tipo = "despesa"
-    elif raw_norm.startswith(("recebi ", "receita ", "ganhei ")):
+    elif raw_norm.startswith(("recebi ", "receita ", "ganhei ", "entrou ", "caiu ", "pingou ", "pinguei ", "embolsei ")):
         tipo = "receita"
     elif "saldo" in raw_norm and raw_norm.startswith((
         "adicionar ", "adicione ", "adiciona ", "adicionei ", "adicionou ",

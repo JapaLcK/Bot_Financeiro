@@ -1672,12 +1672,7 @@ def handle(user_id: int, text: str) -> str | None:
 
     if t_low.startswith("padrao ") or t_low.startswith("padrão "):
         name = re.sub(r"^padr[aã]o\s+", "", t, flags=re.IGNORECASE).strip()
-        card_id = get_card_id_by_name(user_id, name)
-        if not card_id:
-            return f"❌ Não achei o cartão '{name}'. Crie com: criar cartao {name} fecha 10 vence 17"
-
-        set_default_card(user_id, card_id)
-        return f"✅ Cartão padrão definido: {name}"
+        return _ask_set_primary_flow(user_id, name)
 
     if t_low in ("cartoes", "cartões", "listar cartoes", "listar cartões"):
         cards = list_cards(user_id)
@@ -1819,11 +1814,15 @@ def handle(user_id: int, text: str) -> str | None:
                 known_id = get_card_id_by_name(user_id, raw_name)
                 if known_id:
                     card_name = raw_name
-                # Se não achou pelo nome exato, tenta via _find_card_name_in_text
-                if card_name is None:
-                    found = _find_card_name_in_text(user_id, t)
-                    if found:
-                        card_name = found
+        # Sem "cartao X" no texto (ex.: "no Nubank", sem a palavra "cartão") ou
+        # nome não bateu: procura qualquer nome de cartão real do usuário em
+        # qualquer lugar do texto. Roda mesmo sem match de `mc` — antes só
+        # rodava DENTRO do `if mc:`, então "parcelar 600 em 3x no Nubank"
+        # nunca resolvia o cartão nem removia "no Nubank" da descrição.
+        if card_name is None:
+            found = _find_card_name_in_text(user_id, t)
+            if found:
+                card_name = found
 
         # ── descrição (o que sobrar) ─────────────────────────────────────────
         desc_clean = rest2
@@ -1861,6 +1860,14 @@ def handle(user_id: int, text: str) -> str | None:
         desc_clean = re.sub(r"\bem\b", "", desc_clean, flags=re.IGNORECASE)
         # remove trecho do cartão (incluindo palavras de parada como "padrao")
         desc_clean = re.sub(r"(?:no\s+)?cart[aã]o\s+\S+(?:\s+\S+)*", "", desc_clean, flags=re.IGNORECASE)
+        # remove o nome do cartão quando veio sem a palavra "cartão" (ex.: "no
+        # Nubank") — sem isso, "parcelar 600 em 3x no Nubank" deixava "no
+        # Nubank" como se fosse a descrição da compra, em vez de perguntar o
+        # nome (ver resolução de card_name acima).
+        if card_name:
+            desc_clean = re.sub(
+                rf"\b(?:no|na|do|da)?\s*{re.escape(card_name)}\b", "", desc_clean, flags=re.IGNORECASE,
+            )
         # remove "categoria X" / "cat X"
         desc_clean = re.sub(r"\bcat(?:egoria)?[:\s]+\S+", "", desc_clean, flags=re.IGNORECASE)
         # remove stop-words soltas que sobraram
