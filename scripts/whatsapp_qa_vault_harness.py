@@ -474,6 +474,24 @@ def cena_9_quanto_gastei():
     ok2 = "EXCEÇÃO" not in r2 and "R$" in r2
     sc.check(ok2, "\"qto gastei ontem\" (Pro, via fallback de IA) → total do dia anterior")
     sc.note(f"resposta a 'qto gastei ontem' (Pro): {r2!r}")
+    if "não teve gastos" in r2.lower() or "nao teve gastos" in r2.lower():
+        DISCREPANCIAS.append(
+            "Item 9: 'qto gastei ontem' respondeu 'você não teve gastos ontem' com um gasto real "
+            "seedado pra ontem (via 'ontem gastei 90 no mercado', mesmo user, turno anterior). "
+            "CAUSA RAIZ (investigada e confirmada, não corrigida — mudança de infra fora do escopo "
+            "deste piloto): a sessão do Postgres não tem timezone fixado em NENHUM lugar do app "
+            "(sem `SET TIME ZONE` em db/connection.py). O app grava datas relativas ('ontem') "
+            "usando America/Sao_Paulo (utils_date.today_tz()), mas ao ler de volta um `timestamptz`, "
+            "psycopg reinterpreta o instante sob o timezone DA SESSÃO — nesta máquina, "
+            "America/New_York (herdado do SO, `SHOW timezone` confirma). Medido direto: um "
+            "lançamento gravado com criado_em='2026-08-19 00:00 -03:00' (correto, meia-noite em "
+            "São Paulo) volta do banco como '2026-08-18 23:00 -04:00' — um dia inteiro mais cedo. "
+            "Isso não é específico da IA: qualquer código que compara `criado_em.date()` (relatórios, "
+            "'hoje'/'ontem', vencimento de fatura, contas a pagar) está sujeito ao mesmo erro sempre "
+            "que o timezone da sessão do Postgres divergir de America/Sao_Paulo o suficiente pra "
+            "cruzar meia-noite. Não verificado se produção (Railway) tem esse problema — depende do "
+            "timezone configurado lá, que não foi possível checar deste ambiente."
+        )
 
     sc.set_veredict("✅" if all(x[0] for x in sc.checklist) else "🔍")
 

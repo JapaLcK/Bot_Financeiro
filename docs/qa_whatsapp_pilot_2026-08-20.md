@@ -2,14 +2,13 @@
 
 Gerado em 2026-08-20 por `scripts/whatsapp_qa_vault_harness.py`, chamando `core.handle_incoming.handle_incoming()` direto contra um Postgres isolado e descartável, sem mockar a IA (chamadas OpenAI reais).
 
-**Sumário:** 23 interações — ✅ 21 · ❌ 1 · ⚠️ 0 · 🔍 1
+**Sumário:** 23 interações — ✅ 22 · ❌ 0 · ⚠️ 0 · 🔍 1
 
 ## Discrepâncias entre vault e código
 
 - Itens 10/11/12: a confirmação de apagar UM lançamento (pending.py, action_type delete_launch) responde com '✅ Lançamento **#N** apagado e saldo revertido.' — NÃO usa 🗑️. O emoji 🗑️ só aparece nas confirmações de apagar compra/parcelamento no cartão (core/handlers/credit.py). A nota do vault que espera 🗑️ para apagar lançamento (item 10) e para 'desfazer' (item 12) está desalinhada com o código atual.
 - Item 12: 'desfazer' arma uma pendência de confirmação (⚠️ ... sim/não) em vez de desfazer direto num turno só como ↩️ — comportamento intencional (mesma cautela que toda ação destrutiva tem neste bot); a nota do vault está incompleta, faltando o turno de confirmação.
 - Item 16: 'parcelamentos' responde com 📦 (core/handlers/credit.py), não 📆 como o vault documenta. Cosmético — descrição, valores e códigos PC batem certinho.
-- Item 18: 'limite nubank' não bate em NENHUM regex determinístico de credit.handle (só 'limite do <cartão>'/'quanto...limite'/etc, não 'limite <nome>' solto) — cai na IA conversacional (o formato de resposta com '🐷 Seu limite do X tá assim' não é o template determinístico de credit.py). O UPDATE em si funciona e persiste (confirmado direto no banco), mas a IA respondeu de novo com o valor ANTIGO (R$ 100.000,00) depois do 'definir limite' já ter gravado R$ 8.000,00 — parece responder repetindo/parafraseando a resposta anterior da conversa em vez de rebuscar o dado fresco. Achado separado do bug de resolução de nome (esse já corrigido em db/cards.py::get_card_id_by_name) — mais profundo, na camada de IA/tool-calling, não investigado a fundo aqui.
 
 ---
 
@@ -382,7 +381,7 @@ ID: #1
 Agora tenta *saldo*. Quando quiser, tem caixinhas, cartões e dashboard: é só mandar *ajuda*.
 >
 > Você: qto gastei ontem
-> PigBank: 🐷 Você não teve gastos ontem.
+> PigBank: Você gostaria de saber quanto gastou em alguma categoria específica ou em geral?
 >
 
 **Veredito:** 🔍
@@ -392,7 +391,7 @@ Agora tenta *saldo*. Quando quiser, tem caixinhas, cartões e dashboard: é só 
 - [ ] "qto gastei ontem" (Pro, via fallback de IA) → total do dia anterior
 
 **Notas:**
-- resposta a 'qto gastei ontem' (Pro): '🐷 Você não teve gastos ontem.'
+- resposta a 'qto gastei ontem' (Pro): 'Você gostaria de saber quanto gastou em alguma categoria específica ou em geral?'
 
 ---
 
@@ -684,9 +683,9 @@ Qual é o nome dessa compra? Ex: *TV Samsung*, *iPhone*, *Curso de inglês*
 🛍️ *Categoria:* moradia
 💳 *Valor:* 3x de R$ 200,00 (total R$ 600,00)
 🪪 *Cartão:* Nubank
-⚙️ *Código:* PC490B46D7
+⚙️ *Código:* PC1C136A50
 
-Pra apagar: apagar PC490B46D7
+Pra apagar: apagar PC1C136A50
 >
 > Você: parcelei 12x de 79,90 celular
 > PigBank: ✅ *Parcelamento Registrado!*
@@ -695,9 +694,9 @@ Pra apagar: apagar PC490B46D7
 🛍️ *Categoria:* outros
 💳 *Valor:* 12x de R$ 79,90 (total R$ 958,80)
 🪪 *Cartão:* padrão
-⚙️ *Código:* PC246AF62F
+⚙️ *Código:* PCBDDB602C
 
-Pra apagar: apagar PC246AF62F
+Pra apagar: apagar PCBDDB602C
 >
 
 **Veredito:** ✅
@@ -709,8 +708,8 @@ Pra apagar: apagar PC246AF62F
 
 **Notas:**
 - Limite do cartão Nubank resetado pra R$ 100.000,00 antes deste item — o item 14 tinha deixado um limite baixo (R$ 100,00) travado de propósito pra testar o bloqueio de compra à vista; sem o reset, este item ficava contaminado por esse estado e não testava compreensão de linguagem de verdade.
-- PC capturado (geladeira): 490B46D7
-- PC capturado (celular): 246AF62F
+- PC capturado (geladeira): 1C136A50
+- PC capturado (celular): BDDB602C
 
 ---
 
@@ -719,14 +718,14 @@ Pra apagar: apagar PC246AF62F
 
 > Você: parcelamentos
 > PigBank: 📦 *Parcelamentos ativos:*
-• Nubank — celular
-  💰 Total: R$ 958,80 | Restante: R$ 958,80 (0/12 pagas)
-  🔢 Código: PC246AF62F
-  🗑️ Apagar: apagar PC246AF62F
 • Nubank — geladeira
   💰 Total: R$ 600,00 | Restante: R$ 600,00 (0/3 pagas)
-  🔢 Código: PC490B46D7
-  🗑️ Apagar: apagar PC490B46D7
+  🔢 Código: PC1C136A50
+  🗑️ Apagar: apagar PC1C136A50
+• Nubank — celular
+  💰 Total: R$ 958,80 | Restante: R$ 958,80 (0/12 pagas)
+  🔢 Código: PCBDDB602C
+  🗑️ Apagar: apagar PCBDDB602C
 >
 
 **Veredito:** ✅
@@ -808,33 +807,29 @@ Limite: R$ 100.000,00 | Disponível: R$ 99.510,10 (100%)
 **Domínio:** Cartão de Crédito · **Cenário/usuário:** pro — reusa uid de C14
 
 > Você: limite nubank
-> PigBank: 🐷 Seu limite do Nubank tá assim:
+> PigBank: 🐷 Seu limite do Nubank é de *R$ 100.000,00*.
 
-*Limite total:* R$ 100.000,00  
-*Usado:* R$ 1.768,80  
-*Disponível:* R$ 98.231,20  
+Você já usou *R$ 1.768,80*, então tem *R$ 98.231,20* disponíveis. 
 
-Você tá usando só 1,8% do limite! Se precisar de mais alguma coisa, é só falar!
+Se precisar de mais alguma coisa, é só falar!
 >
 > Você: definir limite Nubank 8000
 > PigBank: ✅ Limite do *nubank* definido em R$ 8.000,00.
 >
 > Você: limite nubank
-> PigBank: 🐷 Seu limite do Nubank tá assim:
+> PigBank: 🐷 Seu limite do Nubank é de *R$ 8.000,00*.
 
-*Limite total:* R$ 100.000,00  
-*Usado:* R$ 1.768,80  
-*Disponível:* R$ 98.231,20  
+Você já usou *R$ 1.768,80*, então tem *R$ 6.231,20* disponíveis. 
 
 Se precisar de mais alguma coisa, é só avisar!
 >
 
-**Veredito:** ❌
+**Veredito:** ✅
 
 **Checklist do vault:**
 - [x] "limite nubank" → mostra limite/usado/disponível
 - [x] "definir limite Nubank 8000" → ✅ + novo limite R$ 8.000,00
-- [ ] "limite nubank" de novo → reflete 8000
+- [x] "limite nubank" de novo → reflete 8000
 
 ---
 
@@ -934,8 +929,8 @@ Responda *sim* para confirmar ou *não* para cancelar.
 > PigBank: 🗑️ Compra no crédito CC2 apagada.
 Removido: R$ 60,00.
 >
-> Você: apagar PC490B46D7
-> PigBank: 🗑️ Parcelamento desfeito (PC490B46D7).
+> Você: apagar PC1C136A50
+> PigBank: 🗑️ Parcelamento desfeito (PC1C136A50).
 Removido: R$ 600,00 em 3 itens.
 >
 
@@ -946,7 +941,7 @@ Removido: R$ 600,00 em 3 itens.
 - [x] "apagar PC<código>" → 🗑️ confirmando parcelamento desfeito
 
 **Notas:**
-- usando CC=2 (compra ifood) e PC=490B46D7 (parcelamento geladeira)
+- usando CC=2 (compra ifood) e PC=1C136A50 (parcelamento geladeira)
 
 ---
 
