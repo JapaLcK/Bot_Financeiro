@@ -178,8 +178,18 @@ def _investment_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
     if not name or amount <= 0:
         return "🐷 Faltou o nome do investimento ou o valor."
     try:
-        db.investment_deposit_from_account(user_id, name, amount)
-        return f'✅ Aporte de R$ {amount:.2f} no "{name}" registrado.'
+        # Origem determinística: em tool de escrita o retorno de `execute` É a
+        # resposta final (contrato em tools/_base.py), então não há como perguntar
+        # aqui — a regra vive em funding.resolve_deterministic.
+        from core.services import funding
+
+        source = funding.resolve_deterministic(user_id, amount)["source"]
+        db.investment_deposit_from_account(
+            user_id, name, amount, funding_source=funding.to_db_arg(source))
+        msg = f'✅ Aporte de R$ {amount:.2f} no "{name}" registrado{funding.origem_txt(source)}.'
+        if source["kind"] == funding.BANK:
+            msg += "\n\n" + funding.nota_sync()
+        return msg
     except LookupError:
         # INV_NOT_FOUND: o cadastro é só pelo dashboard, então aponta o caminho.
         return (
@@ -188,7 +198,8 @@ def _investment_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
         )
     except ValueError as e:
         if "INSUFFICIENT_ACCOUNT" in str(e):
-            return "🐷 Saldo insuficiente na conta pra esse aporte."
+            from core.services import funding
+            return "🐷 " + funding.msg_insuficiente(user_id, amount)
         return "🐷 Valor inválido pra aporte."
     except Exception as e:
         from core.services.plan_limits import PlanLimitExceeded
@@ -221,8 +232,12 @@ def _investment_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
     if not withdraw_all and amount <= 0:
         return "🐷 Faltou o valor (ou peça pra 'resgatar tudo')."
     try:
+        from core.services import funding
+
+        destino = funding.resolve_destination(user_id)["source"]
         _lid, _acc, _inv, canon, taxes = db.investment_withdraw_to_account(
             user_id, name, None if withdraw_all else amount, withdraw_all=withdraw_all,
+            funding_source=funding.to_db_arg(destino),
         )
         gross = float(taxes.get("gross", 0)) if taxes else 0.0
         tax = (float(taxes.get("ir", 0)) + float(taxes.get("iof", 0))) if taxes else 0.0

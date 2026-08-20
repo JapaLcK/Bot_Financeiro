@@ -164,17 +164,22 @@ class InvestmentsCog(commands.Cog):
             await message.reply(self._investments_text(uid, "Em qual investimento você quer aportar?"))
             return True
 
+        # Origem determinística: o Discord não arma pendência para perguntar
+        # (ver core/services/funding.py::resolve_deterministic).
+        from core.services import funding
+
+        source = funding.resolve_deterministic(uid, float(amount))["source"]
         try:
             launch_id, new_acc, new_inv, canon = investment_deposit_from_account(
-                uid, investment_name=name, amount=float(amount), nota=message.content
+                uid, investment_name=name, amount=float(amount), nota=message.content,
+                funding_source=funding.to_db_arg(source),
             )
         except LookupError:
             await message.reply(self._investments_text(uid, f"Não achei esse investimento: **{name}**."))
             return True
         except ValueError as e:
             if str(e) == "INSUFFICIENT_ACCOUNT":
-                bal = get_balance(uid)
-                await message.reply(f"Saldo insuficiente na conta. Conta: {fmt_brl(float(bal))}")
+                await message.reply(funding.msg_insuficiente(uid, float(amount)))
             else:
                 await message.reply("Valor inválido.")
             return True
@@ -207,9 +212,13 @@ class InvestmentsCog(commands.Cog):
             await message.reply(self._investments_text(uid, "De qual investimento você quer resgatar?"))
             return True
 
+        from core.services import funding
+
+        destino = funding.resolve_destination(uid)["source"]
         try:
             launch_id, new_acc, new_inv, canon, taxes = investment_withdraw_to_account(
-                uid, investment_name=name, amount=float(amount), nota=message.content
+                uid, investment_name=name, amount=float(amount), nota=message.content,
+                funding_source=funding.to_db_arg(destino),
             )
         except LookupError:
             await message.reply(self._investments_text(uid, f"Não achei esse investimento: **{name}**."))
