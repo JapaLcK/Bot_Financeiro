@@ -2,7 +2,7 @@
 
 Gerado em 2026-08-20 por `scripts/whatsapp_qa_vault_harness.py`, chamando `core.handle_incoming.handle_incoming()` direto contra um Postgres isolado e descartável, sem mockar a IA (chamadas OpenAI reais).
 
-**Sumário:** 23 interações — ✅ 12 · ❌ 4 · ⚠️ 0 · 🔍 7
+**Sumário:** 23 interações — ✅ 12 · ❌ 6 · ⚠️ 0 · 🔍 5
 
 ## Discrepâncias entre vault e código
 
@@ -691,37 +691,42 @@ Pra apagar: apagar CC2
 **Domínio:** Cartão de Crédito · **Cenário/usuário:** pro — reusa uid de C14
 
 > Você: parcelar 600 em 3x no Nubank
-> PigBank: ❌ Compra não registrada no cartão *Nubank*.
-💳 Limite total: R$ 100,00
-📌 Já usado: R$ 210,00
-🟢 Disponível: R$ 0,00
-🧾 Tentativa de compra: R$ 600,00
-⚠️ Excede o limite em R$ 600,00.
+> PigBank: ✅ *Parcelamento Registrado!*
+
+📝 *Descrição:* no Nubank
+🛍️ *Categoria:* outros
+💳 *Valor:* 3x de R$ 200,00 (total R$ 600,00)
+🪪 *Cartão:* padrão
+⚙️ *Código:* PC793B8310
+
+Pra apagar: apagar PC793B8310
 >
 > Você: geladeira
-> PigBank: 🐷 Oi! O que você precisa sobre a geladeira? Se for um gasto ou algo relacionado a finanças, me dá mais detalhes!
+> PigBank: 🐷 O que você precisa saber sobre a geladeira? Se for uma compra ou gasto, me dá os detalhes!
 >
 > Você: parcelei 12x de 79,90 celular
-> PigBank: ❌ Compra não registrada no cartão *Nubank*.
-💳 Limite total: R$ 100,00
-📌 Já usado: R$ 210,00
-🟢 Disponível: R$ 0,00
-🧾 Tentativa de compra: R$ 958,80
-⚠️ Excede o limite em R$ 958,80.
+> PigBank: ✅ *Parcelamento Registrado!*
+
+📝 *Descrição:* celular
+🛍️ *Categoria:* outros
+💳 *Valor:* 12x de R$ 79,90 (total R$ 958,80)
+🪪 *Cartão:* padrão
+⚙️ *Código:* PC1618CC23
+
+Pra apagar: apagar PC1618CC23
 >
 
-**Veredito:** 🔍
+**Veredito:** ❌
 
 **Checklist do vault:**
 - [ ] "parcelar 600 em 3x no Nubank" → pergunta o nome da compra
 - [ ] "geladeira" → ✅ Parcelamento Registrado + 3x de R$ 200,00 + PC<código>
-- [ ] "parcelei 12x de 79,90 celular" direto → ✅ Parcelamento Registrado + 12x de R$ 79,90 + PC
+- [x] "parcelei 12x de 79,90 celular" direto → ✅ Parcelamento Registrado + 12x de R$ 79,90 + PC
 
 **Notas:**
-- AVISO: este cenário reusa o cartão Nubank do item 14, que terminou com limite baixo (R$ 100,00) travado de propósito pra testar o bloqueio de compra. O spec do piloto não manda resetar o limite antes deste item — se o parcelamento também for bloqueado, é consequência desse estado compartilhado (achado válido: parcelamento respeita o mesmo limite de compra à vista), não necessariamente falha de compreensão de linguagem.
+- Limite do cartão Nubank resetado pra R$ 100.000,00 antes deste item — o item 14 tinha deixado um limite baixo (R$ 100,00) travado de propósito pra testar o bloqueio de compra à vista; sem o reset, este item ficava contaminado por esse estado e não testava compreensão de linguagem de verdade.
 - PC capturado (geladeira): None
-- PC capturado (celular): None
-- Veredito 🔍 em vez de ❌: bloqueio por limite (ver aviso acima), não erro de compreensão — precisa de re-teste com limite alto pra separar as duas causas.
+- PC capturado (celular): 1618CC23
 
 ---
 
@@ -729,16 +734,21 @@ Pra apagar: apagar CC2
 **Domínio:** Cartão de Crédito · **Cenário/usuário:** pro — reusa uid de C14
 
 > Você: parcelamentos
-> PigBank: 📭 Você não tem parcelamentos registrados.
+> PigBank: 📦 *Parcelamentos ativos:*
+• Nubank — celular
+  💰 Total: R$ 958,80 | Restante: R$ 958,80 (0/12 pagas)
+  🔢 Código: PC1618CC23
+  🗑️ Apagar: apagar PC1618CC23
+• Nubank — no Nubank
+  💰 Total: R$ 600,00 | Restante: R$ 600,00 (0/3 pagas)
+  🔢 Código: PC793B8310
+  🗑️ Apagar: apagar PC793B8310
 >
 
-**Veredito:** 🔍
+**Veredito:** ❌
 
 **Checklist do vault:**
 - [ ] "parcelamentos" → 📆 + lista com geladeira e celular + códigos PC
-
-**Notas:**
-- Nenhum parcelamento foi criado no item 15 (bloqueado pelo limite herdado do item 14) — esta lista vazia é consequência disso, não um teste limpo de listagem.
 
 ---
 
@@ -747,8 +757,16 @@ Pra apagar: apagar CC2
 
 > Você: fatura Nubank
 > PigBank: 💳 Fatura atual (Nubank) 11/08/26 → 10/09/26
-Total: R$ 210,00 | Pago: R$ 0,00 | Em aberto: R$ 210,00
-Limite: R$ 100,00 | Disponível: R$ 0,00 (-110%)
+Total: R$ 489,90 | Pago: R$ 0,00 | Em aberto: R$ 489,90
+Limite: R$ 100.000,00 | Disponível: R$ 99.510,10 (100%)
+
+📦 *Parcelamentos nesta fatura:*
+  📌 celular
+     Parcela *1/12* — R$ 79,90
+     ↳ Ainda faltam *11* parcela(s) = R$ 878,90
+  📌 no Nubank
+     Parcela *1/3* — R$ 200,00
+     ↳ Ainda faltam *2* parcela(s) = R$ 400,00
 
 🧾 *Outras compras:*
   • R$ 60,00 | alimentação | 20/08/26 | 60 ifood
@@ -758,7 +776,40 @@ Limite: R$ 100,00 | Disponível: R$ 0,00 (-110%)
 > PigBank: 🧾 *Faturas em aberto (por mês):*
 
 📅 *Setembro/2026:*
-• Nubank: Total R$ 210,00 | Pago R$ 0,00 | Em aberto R$ 210,00
+• Nubank: Total R$ 489,90 | Pago R$ 0,00 | Em aberto R$ 489,90
+
+📅 *Outubro/2026:*
+• Nubank: Total R$ 279,90 | Pago R$ 0,00 | Em aberto R$ 279,90
+
+📅 *Novembro/2026:*
+• Nubank: Total R$ 279,90 | Pago R$ 0,00 | Em aberto R$ 279,90
+
+📅 *Dezembro/2026:*
+• Nubank: Total R$ 79,90 | Pago R$ 0,00 | Em aberto R$ 79,90
+
+📅 *Janeiro/2027:*
+• Nubank: Total R$ 79,90 | Pago R$ 0,00 | Em aberto R$ 79,90
+
+📅 *Fevereiro/2027:*
+• Nubank: Total R$ 79,90 | Pago R$ 0,00 | Em aberto R$ 79,90
+
+📅 *Março/2027:*
+• Nubank: Total R$ 79,90 | Pago R$ 0,00 | Em aberto R$ 79,90
+
+📅 *Abril/2027:*
+• Nubank: Total R$ 79,90 | Pago R$ 0,00 | Em aberto R$ 79,90
+
+📅 *Maio/2027:*
+• Nubank: Total R$ 79,90 | Pago R$ 0,00 | Em aberto R$ 79,90
+
+📅 *Junho/2027:*
+• Nubank: Total R$ 79,90 | Pago R$ 0,00 | Em aberto R$ 79,90
+
+📅 *Julho/2027:*
+• Nubank: Total R$ 79,90 | Pago R$ 0,00 | Em aberto R$ 79,90
+
+📅 *Agosto/2027:*
+• Nubank: Total R$ 79,90 | Pago R$ 0,00 | Em aberto R$ 79,90
 >
 
 **Veredito:** ✅
@@ -773,30 +824,26 @@ Limite: R$ 100,00 | Disponível: R$ 0,00 (-110%)
 **Domínio:** Cartão de Crédito · **Cenário/usuário:** pro — reusa uid de C14
 
 > Você: limite nubank
-> PigBank: 🐷 Seu limite do Nubank tá assim:
+> PigBank: 🐷 Aqui estão os detalhes do seu limite do Nubank:
 
-*Limite total:* R$ 100,00  
-*Usado:* R$ 210,00  
-*Disponível:* R$ 0,00  
+*Limite total:* R$ 100.000,00  
+*Usado:* R$ 1.768,80  
+*Disponível:* R$ 98.231,20  
 
-Parece que você ultrapassou o limite. Se precisar de ajuda com isso, é só falar!
+Você tá usando só *1,8%* do limite. Se precisar de mais alguma coisa, é só avisar!
 >
 > Você: definir limite Nubank 8000
 > PigBank: ❓ Não encontrei o cartão. Verifique o nome com: *cartões*
 >
 > Você: limite nubank 8000
-> PigBank: 🐷 Seu limite do Nubank ainda tá em R$ 100,00, e você já usou R$ 210,00. Não tá liberado o limite de R$ 8.000,00. 
+> PigBank: 🐷 Seu limite do Nubank é de R$ 100.000,00, e você já usou R$ 1.768,80. Isso significa que ainda tem R$ 98.231,20 disponíveis. 
 
-Se precisar de ajuda pra entender isso ou resolver, me avisa!
+Se você quer saber algo específico sobre esse limite ou se precisa de ajuda com outra coisa, é só falar!
 >
 > Você: limite nubank
-> PigBank: 🐷 Seu limite do Nubank tá assim:
+> PigBank: 🐷 Seu limite do Nubank é de R$ 100.000,00. Você já usou R$ 1.768,80, então ainda tem R$ 98.231,20 disponíveis. 
 
-*Limite total:* R$ 100,00  
-*Usado:* R$ 210,00  
-*Disponível:* R$ 0,00  
-
-Você ultrapassou o limite. Se precisar de ajuda com isso, é só avisar!
+Se precisar de mais alguma informação, é só avisar!
 >
 
 **Veredito:** ❌
@@ -807,7 +854,7 @@ Você ultrapassou o limite. Se precisar de ajuda com isso, é só avisar!
 - [ ] "limite nubank" de novo → reflete 8000
 
 **Notas:**
-- 1ª tentativa "definir limite Nubank 8000" não achou o cartão; variação "limite nubank 8000" → '🐷 Seu limite do Nubank ainda tá em R$ 100,00, e você já usou R$ 210,00. Não tá liberado o limite de R$ 8.000,00. \n\nSe precisar de ajuda pra entender isso ou resolver, me avisa!'
+- 1ª tentativa "definir limite Nubank 8000" não achou o cartão; variação "limite nubank 8000" → '🐷 Seu limite do Nubank é de R$ 100.000,00, e você já usou R$ 1.768,80. Isso significa que ainda tem R$ 98.231,20 disponíveis. \n\nSe você quer saber algo específico sobre esse limite ou se precisa de ajuda com outra coisa, é só falar!'
 
 ---
 

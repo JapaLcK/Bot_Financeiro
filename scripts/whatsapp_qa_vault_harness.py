@@ -632,12 +632,11 @@ def cena_15_parcelamento():
     sc = Scenario("15. Registrar parcelamento", "Cartão de Crédito", "pro — reusa uid de C14")
     SCENARIOS.append(sc)
     uid = C14_STATE["uid"]
-    sc.note("AVISO: este cenário reusa o cartão Nubank do item 14, que terminou com "
-             "limite baixo (R$ 100,00) travado de propósito pra testar o bloqueio de "
-             "compra. O spec do piloto não manda resetar o limite antes deste item — "
-             "se o parcelamento também for bloqueado, é consequência desse estado "
-             "compartilhado (achado válido: parcelamento respeita o mesmo limite de "
-             "compra à vista), não necessariamente falha de compreensão de linguagem.")
+    db.set_card_limit(uid, C14_STATE["card_id"], 100000.0)
+    sc.note("Limite do cartão Nubank resetado pra R$ 100.000,00 antes deste item — o item 14 "
+             "tinha deixado um limite baixo (R$ 100,00) travado de propósito pra testar o "
+             "bloqueio de compra à vista; sem o reset, este item ficava contaminado por esse "
+             "estado e não testava compreensão de linguagem de verdade.")
 
     r1 = sc.turn(uid, "parcelar 600 em 3x no Nubank")
     ok1 = "?" in r1 and ("nome" in r1.lower() or "descri" in r1.lower())
