@@ -14,3 +14,13 @@ smoke_db.py
 debug_rules.pyc
 ROADMAP_SAAS.md
 register_whatsapp.json
+
+# Skills instaladas via `npx skills add` (globais em ~/.claude/skills)
+# `/*` e não `/`: excluir o DIRETÓRIO faz o git nem descer nele, e nenhuma
+# negação abaixo é avaliada. Excluindo o conteúdo, o `!` volta a funcionar.
+.claude/skills/*
+# As skills do PRÓPRIO repositório são conhecimento do PigBank e precisam
+# viajar: valem para quem clonar e para as sessões na web, que não enxergam
+# o ~/.claude/ de ninguém.
+!.claude/skills/baseline-testes/
+skills-lock.json
