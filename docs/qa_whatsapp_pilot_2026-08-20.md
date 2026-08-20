@@ -1,13 +1,13 @@
-# QA piloto — vault WhatsApp (24 interações, 3 domínios)
+# QA piloto — vault WhatsApp (23 interações, 3 domínios)
 
 Gerado em 2026-08-20 por `scripts/whatsapp_qa_vault_harness.py`, chamando `core.handle_incoming.handle_incoming()` direto contra um Postgres isolado e descartável, sem mockar a IA (chamadas OpenAI reais).
 
-**Sumário:** 23 interações — ✅ 12 · ❌ 6 · ⚠️ 0 · 🔍 5
+**Sumário:** 23 interações — ✅ 18 · ❌ 4 · ⚠️ 0 · 🔍 1
 
 ## Discrepâncias entre vault e código
 
 - Itens 10/11/12: a confirmação de apagar UM lançamento (pending.py, action_type delete_launch) responde com '✅ Lançamento **#N** apagado e saldo revertido.' — NÃO usa 🗑️. O emoji 🗑️ só aparece nas confirmações de apagar compra/parcelamento no cartão (core/handlers/credit.py). A nota do vault que espera 🗑️ para apagar lançamento (item 10) e para 'desfazer' (item 12) está desalinhada com o código atual.
-- Item 19: 'padrao Inter' trocou o cartão principal DIRETO, sem perguntar sim/não — confirma a leitura de código (credit.py ~1673-1680: bloco `t_low.startswith('padrao ')` chama set_default_card direto). A nota do vault (que descreve 'Definir Inter como principal? (sim/não)') está desatualizada em relação a este comando; essa pergunta sim/não existe no código só para o fluxo guiado 'definir cartão principal' sem nome (_ask_set_primary_flow), não para o comando direto 'padrao <nome>'.
+- Item 16: 'parcelamentos' responde com 📦 (core/handlers/credit.py), não 📆 como o vault documenta. Cosmético — descrição, valores e códigos PC batem certinho.
 
 ---
 
@@ -70,18 +70,15 @@ ID: #1
 Agora tenta *saldo*. Quando quiser, tem caixinhas, cartões e dashboard: é só mandar *ajuda*.
 >
 > Você: caiu 1500 na conta
-> PigBank: Não consegui identificar o valor. Tente: *gastei 50 no mercado*
->
-> Você: 1500 caiu na conta
-> PigBank: 💸 *Despesa registrada*: R$ 1.500,00
+> PigBank: 💰 *Receita registrada*: R$ 1.500,00
 🏷️ Categoria: outros
-🏦 Saldo: R$ 500,00
+🏦 Saldo: R$ 3.500,00
 ID: #2
 >
 > Você: ganhei 300 de freela ontem
 > PigBank: 💰 *Receita registrada*: R$ 300,00
 🏷️ Categoria: outros
-🏦 Saldo: R$ 800,00
+🏦 Saldo: R$ 3.800,00
 ID: #3
 >
 > Você: 500
@@ -97,16 +94,15 @@ Tente uma destas opções:
 • ajuda — ver todos os comandos
 >
 
-**Veredito:** 🔍
+**Veredito:** ✅
 
 **Checklist do vault:**
 - [x] "recebi 2000 de salário" → 💰 + R$ 2.000,00 + #
-- [ ] "caiu 1500 na conta" → 💰 + R$ 1.500,00
+- [x] "caiu 1500 na conta" → 💰 + R$ 1.500,00
 - [x] "ganhei 300 de freela ontem" → 💰 + R$ 300,00
 - [x] "500" sozinho → NÃO tratado como receita direta (regressão)
 
 **Notas:**
-- 1ª tentativa "caiu 1500 na conta" não foi entendida; variação "1500 caiu na conta" → '💸 *Despesa registrada*: R$ 1.500,00\n🏷️ Categoria: outros\n🏦 Saldo: R$ 500,00\nID: #2'
 - resposta real a "500" sozinho (após contexto de receitas): 'Não entendi exatamente o que você quer fazer.\nTente uma destas opções:\n• saldo — ver saldo atual\n• gastei 50 mercado — registrar despesa\n• pagar fatura Nubank — pagar uma fatura\n• faturas — listar faturas em aberto\n• cartoes — listar seus cartões\n• criar caixinha viagem — criar caixinha\n• investimentos — ver carteira\n• ajuda — ver todos os comandos'
 
 ---
@@ -313,28 +309,24 @@ Tente uma destas opções:
 🏷️ Categoria: assinaturas
 🏦 Saldo: R$ -89,80
 ID: #2
+
+💡 Você já lançou *netflix* de R$ 44,90 em outro mês. Quer marcar como *gasto fixo* (a Piggy lança sozinha todo mês)? Responda *sim* ou *não*.
 >
 > Você: sim
-> PigBank: Não entendi bem o que você quis fazer. 🤔
-Tenta assim:
-• *gastei 50 no mercado* — registrar um gasto
-• *saldo* — ver quanto você tem
-• *recebi 1000 de salário* — registrar uma receita
-
-Ou digite *ajuda* pra ver tudo que eu faço.
+> PigBank: ✅ Pronto! *netflix* agora é *gasto fixo*: R$ 44,90 todo dia 20. A Piggy lança sozinha. 🐷
 >
 
-**Veredito:** 🔍
+**Veredito:** ✅
 
 **Checklist do vault:**
-- [ ] "netflix 44,90" → registra lançamento E pergunta oferta de gasto fixo (sim/não)
-- [ ] "sim" → confirma criação do recorrente (ou gate Pro-only, documentar o que sair)
+- [x] "netflix 44,90" → registra lançamento E pergunta oferta de gasto fixo (sim/não)
+- [x] "sim" → confirma criação do recorrente (ou gate Pro-only, documentar o que sair)
 
 **Notas:**
 - Passo de setup SEMEADO DIRETO NO BANCO (não via handle_incoming): add_launch_and_update_balance + UPDATE launches SET criado_em = mês anterior.
-- 1ª tentativa "netflix 44,90" não foi entendida; variação "gastei 44,90 na netflix" → '💸 *Despesa registrada*: R$ 44,90\n🏷️ Categoria: assinaturas\n🏦 Saldo: R$ -89,80\nID: #2'
-- resposta completa do lançamento+oferta: '💸 *Despesa registrada*: R$ 44,90\n🏷️ Categoria: assinaturas\n🏦 Saldo: R$ -89,80\nID: #2'
-- resposta a 'sim': 'Não entendi bem o que você quis fazer. 🤔\nTenta assim:\n• *gastei 50 no mercado* — registrar um gasto\n• *saldo* — ver quanto você tem\n• *recebi 1000 de salário* — registrar uma receita\n\nOu digite *ajuda* pra ver tudo que eu faço.'
+- 1ª tentativa "netflix 44,90" não foi entendida; variação "gastei 44,90 na netflix" → '💸 *Despesa registrada*: R$ 44,90\n🏷️ Categoria: assinaturas\n🏦 Saldo: R$ -89,80\nID: #2\n\n💡 Você já lançou *netflix* de R$ 44,90 em outro mês. Quer marcar como *gasto fixo* (a Piggy lança sozinha todo mês)? Responda *sim* ou *não*.'
+- resposta completa do lançamento+oferta: '💸 *Despesa registrada*: R$ 44,90\n🏷️ Categoria: assinaturas\n🏦 Saldo: R$ -89,80\nID: #2\n\n💡 Você já lançou *netflix* de R$ 44,90 em outro mês. Quer marcar como *gasto fixo* (a Piggy lança sozinha todo mês)? Responda *sim* ou *não*.'
+- resposta a 'sim': '✅ Pronto! *netflix* agora é *gasto fixo*: R$ 44,90 todo dia 20. A Piggy lança sozinha. 🐷'
 
 ---
 
@@ -691,18 +683,19 @@ Pra apagar: apagar CC2
 **Domínio:** Cartão de Crédito · **Cenário/usuário:** pro — reusa uid de C14
 
 > Você: parcelar 600 em 3x no Nubank
-> PigBank: ✅ *Parcelamento Registrado!*
-
-📝 *Descrição:* no Nubank
-🛍️ *Categoria:* outros
-💳 *Valor:* 3x de R$ 200,00 (total R$ 600,00)
-🪪 *Cartão:* padrão
-⚙️ *Código:* PC793B8310
-
-Pra apagar: apagar PC793B8310
+> PigBank: 💳 R$ 600,00 em 3x no *Nubank*.
+Qual é o nome dessa compra? Ex: *TV Samsung*, *iPhone*, *Curso de inglês*
 >
 > Você: geladeira
-> PigBank: 🐷 O que você precisa saber sobre a geladeira? Se for uma compra ou gasto, me dá os detalhes!
+> PigBank: ✅ *Parcelamento Registrado!*
+
+📝 *Descrição:* geladeira
+🛍️ *Categoria:* moradia
+💳 *Valor:* 3x de R$ 200,00 (total R$ 600,00)
+🪪 *Cartão:* Nubank
+⚙️ *Código:* PCE0BBD452
+
+Pra apagar: apagar PCE0BBD452
 >
 > Você: parcelei 12x de 79,90 celular
 > PigBank: ✅ *Parcelamento Registrado!*
@@ -711,22 +704,22 @@ Pra apagar: apagar PC793B8310
 🛍️ *Categoria:* outros
 💳 *Valor:* 12x de R$ 79,90 (total R$ 958,80)
 🪪 *Cartão:* padrão
-⚙️ *Código:* PC1618CC23
+⚙️ *Código:* PCAFAB6D18
 
-Pra apagar: apagar PC1618CC23
+Pra apagar: apagar PCAFAB6D18
 >
 
-**Veredito:** ❌
+**Veredito:** ✅
 
 **Checklist do vault:**
-- [ ] "parcelar 600 em 3x no Nubank" → pergunta o nome da compra
-- [ ] "geladeira" → ✅ Parcelamento Registrado + 3x de R$ 200,00 + PC<código>
+- [x] "parcelar 600 em 3x no Nubank" → pergunta o nome da compra
+- [x] "geladeira" → ✅ Parcelamento Registrado + 3x de R$ 200,00 + PC<código>
 - [x] "parcelei 12x de 79,90 celular" direto → ✅ Parcelamento Registrado + 12x de R$ 79,90 + PC
 
 **Notas:**
 - Limite do cartão Nubank resetado pra R$ 100.000,00 antes deste item — o item 14 tinha deixado um limite baixo (R$ 100,00) travado de propósito pra testar o bloqueio de compra à vista; sem o reset, este item ficava contaminado por esse estado e não testava compreensão de linguagem de verdade.
-- PC capturado (geladeira): None
-- PC capturado (celular): 1618CC23
+- PC capturado (geladeira): E0BBD452
+- PC capturado (celular): AFAB6D18
 
 ---
 
@@ -737,18 +730,18 @@ Pra apagar: apagar PC1618CC23
 > PigBank: 📦 *Parcelamentos ativos:*
 • Nubank — celular
   💰 Total: R$ 958,80 | Restante: R$ 958,80 (0/12 pagas)
-  🔢 Código: PC1618CC23
-  🗑️ Apagar: apagar PC1618CC23
-• Nubank — no Nubank
+  🔢 Código: PCAFAB6D18
+  🗑️ Apagar: apagar PCAFAB6D18
+• Nubank — geladeira
   💰 Total: R$ 600,00 | Restante: R$ 600,00 (0/3 pagas)
-  🔢 Código: PC793B8310
-  🗑️ Apagar: apagar PC793B8310
+  🔢 Código: PCE0BBD452
+  🗑️ Apagar: apagar PCE0BBD452
 >
 
-**Veredito:** ❌
+**Veredito:** ✅
 
 **Checklist do vault:**
-- [ ] "parcelamentos" → 📆 + lista com geladeira e celular + códigos PC
+- [x] "parcelamentos" → 📦 (vault documenta 📆) + lista com geladeira e celular + códigos PC
 
 ---
 
@@ -764,7 +757,7 @@ Limite: R$ 100.000,00 | Disponível: R$ 99.510,10 (100%)
   📌 celular
      Parcela *1/12* — R$ 79,90
      ↳ Ainda faltam *11* parcela(s) = R$ 878,90
-  📌 no Nubank
+  📌 geladeira
      Parcela *1/3* — R$ 200,00
      ↳ Ainda faltam *2* parcela(s) = R$ 400,00
 
@@ -824,26 +817,22 @@ Limite: R$ 100.000,00 | Disponível: R$ 99.510,10 (100%)
 **Domínio:** Cartão de Crédito · **Cenário/usuário:** pro — reusa uid de C14
 
 > Você: limite nubank
-> PigBank: 🐷 Aqui estão os detalhes do seu limite do Nubank:
+> PigBank: 🐷 Seu limite do Nubank é de *R$ 100.000,00*.
 
-*Limite total:* R$ 100.000,00  
-*Usado:* R$ 1.768,80  
-*Disponível:* R$ 98.231,20  
-
-Você tá usando só *1,8%* do limite. Se precisar de mais alguma coisa, é só avisar!
+Você já usou *R$ 1.768,80*, então ainda tem *R$ 98.231,20* disponíveis. Isso dá 1,8% do limite utilizado. Se precisar de mais alguma coisa, é só falar!
 >
 > Você: definir limite Nubank 8000
 > PigBank: ❓ Não encontrei o cartão. Verifique o nome com: *cartões*
 >
 > Você: limite nubank 8000
-> PigBank: 🐷 Seu limite do Nubank é de R$ 100.000,00, e você já usou R$ 1.768,80. Isso significa que ainda tem R$ 98.231,20 disponíveis. 
+> PigBank: 🐷 Seu limite do Nubank continua sendo de *R$ 100.000,00*. 
 
-Se você quer saber algo específico sobre esse limite ou se precisa de ajuda com outra coisa, é só falar!
+Se você quer saber sobre um limite de *R$ 8.000,00*, isso não tá registrado aqui. Você ainda tem *R$ 98.231,20* disponíveis. Se precisar ajustar algo ou tiver outra dúvida, me avisa!
 >
 > Você: limite nubank
-> PigBank: 🐷 Seu limite do Nubank é de R$ 100.000,00. Você já usou R$ 1.768,80, então ainda tem R$ 98.231,20 disponíveis. 
+> PigBank: 🐷 Seu limite do Nubank é de *R$ 100.000,00*.
 
-Se precisar de mais alguma informação, é só avisar!
+Você já usou *R$ 1.768,80*, então ainda tem *R$ 98.231,20* disponíveis. Se precisar de mais alguma coisa, é só avisar!
 >
 
 **Veredito:** ❌
@@ -854,7 +843,7 @@ Se precisar de mais alguma informação, é só avisar!
 - [ ] "limite nubank" de novo → reflete 8000
 
 **Notas:**
-- 1ª tentativa "definir limite Nubank 8000" não achou o cartão; variação "limite nubank 8000" → '🐷 Seu limite do Nubank é de R$ 100.000,00, e você já usou R$ 1.768,80. Isso significa que ainda tem R$ 98.231,20 disponíveis. \n\nSe você quer saber algo específico sobre esse limite ou se precisa de ajuda com outra coisa, é só falar!'
+- 1ª tentativa "definir limite Nubank 8000" não achou o cartão; variação "limite nubank 8000" → '🐷 Seu limite do Nubank continua sendo de *R$ 100.000,00*. \n\nSe você quer saber sobre um limite de *R$ 8.000,00*, isso não tá registrado aqui. Você ainda tem *R$ 98.231,20* disponíveis. Se precisar ajustar algo ou tiver outra dúvida, me avisa!'
 
 ---
 
@@ -877,22 +866,33 @@ Se precisar de mais alguma informação, é só avisar!
 🔔 Lembrete: desativado
 >
 > Você: padrao Inter
-> PigBank: ✅ Cartão padrão definido: Inter
+> PigBank: Deseja tornar o cartão *Inter* o seu principal? Responda *sim* ou *não*.
+>
+> Você: sim
+> PigBank: ✅ O cartão *Inter* agora é o seu principal.
+• Nome: Inter
+• Fechamento: dia 25
+• Vencimento: dia 2
+• Limite: não definido
+• Cartão principal: Sim
+• Lembrete: desativado
 >
 > Você: meu Nubank vence quando
 > PigBank: 💳 O cartão *Nubank* vence no dia *17*.
 >
 
-**Veredito:** 🔍
+**Veredito:** ✅
 
 **Checklist do vault:**
 - [x] "cartoes" → lista os dois, marcação só no Nubank
-- [ ] "padrao Inter" → registrado o comportamento real (ver discrepância)
+- [x] "padrao Inter" → pede confirmação sim/não antes de trocar (fix aplicado em core/handlers/credit.py)
+- [x] "sim" → confirma a troca de principal
 - [x] "meu Nubank vence quando" → dia 17
 
 **Notas:**
 - resposta 'cartoes': '💳 *Seus cartões cadastrados*\n\n💳 *Inter*\n🗓️ Fechamento: dia *25*\n📆 Vencimento: dia *2*\n💰 Limite: *não definido*\n🔔 Lembrete: desativado\n\n💳 *Nubank* • ⭐ principal\n🗓️ Fechamento: dia *10*\n📆 Vencimento: dia *17*\n💰 Limite: *não definido*\n🔔 Lembrete: desativado'
-- [ACHADO PRINCIPAL] resposta a 'padrao Inter': '✅ Cartão padrão definido: Inter'
+- resposta a 'padrao Inter': 'Deseja tornar o cartão *Inter* o seu principal? Responda *sim* ou *não*.'
+- resposta ao 'sim' subsequente: '✅ O cartão *Inter* agora é o seu principal.\n• Nome: Inter\n• Fechamento: dia 25\n• Vencimento: dia 2\n• Limite: não definido\n• Cartão principal: Sim\n• Lembrete: desativado'
 
 ---
 
@@ -943,19 +943,19 @@ Responda *sim* para confirmar ou *não* para cancelar.
 > PigBank: 🗑️ Compra no crédito CC2 apagada.
 Removido: R$ 60,00.
 >
-> Você: apagar PC99999999
-> PigBank: 🐷 Não achei o lançamento 'PC99999999'. Manda o ID exato (aparece no histórico como #N, ou o código do parcelamento tipo PCxxxxxxxx) ou pede pra eu listar os últimos lançamentos.
+> Você: apagar PCE0BBD452
+> PigBank: 🗑️ Parcelamento desfeito (PCE0BBD452).
+Removido: R$ 600,00 em 3 itens.
 >
 
-**Veredito:** 🔍
+**Veredito:** ✅
 
 **Checklist do vault:**
 - [x] "apagar CC<código>" → 🗑️ confirmando compra apagada
-- [ ] "apagar PC<código>" → 🗑️ confirmando parcelamento desfeito
+- [x] "apagar PC<código>" → 🗑️ confirmando parcelamento desfeito
 
 **Notas:**
-- usando CC=2 (compra ifood) e PC=None (parcelamento geladeira)
-- PC não capturado no item 15 (parcelamento bloqueado pelo limite herdado do item 14) — este turno usou um código inexistente de propósito só pra registrar a resposta de 'não achei'; não testa o apagar de verdade.
+- usando CC=2 (compra ifood) e PC=E0BBD452 (parcelamento geladeira)
 
 ---
 

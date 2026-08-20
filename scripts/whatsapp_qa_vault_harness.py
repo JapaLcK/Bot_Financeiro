@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Harness de QA do vault WhatsApp (piloto: 24 interações / 3 domínios).
+Harness de QA do vault WhatsApp (piloto: 23 interações / 3 domínios).
 
 O QUE FAZ
   - Cria um database Postgres isolado e descartável (`qa_wa_pilot_<hex>`),
@@ -9,7 +9,7 @@ O QUE FAZ
   - Carrega OPENAI_API_KEY/OPENAI_MODEL do `.env` REAL do checkout original
     (não do worktree) sem deixar o DATABASE_URL de lá vazar por cima do
     isolado.
-  - Dispara as 24 interações do piloto chamando
+  - Dispara as 23 interações do piloto chamando
     `core.handle_incoming.handle_incoming()` DIRETO — o mesmo pipeline que
     uma mensagem real do WhatsApp percorre (classify → route → NLP →
     handlers) — SEM MOCKAR a IA. Ou seja: toda mensagem que cai em
@@ -675,8 +675,15 @@ def cena_16_ver_parcelamentos():
                  "de listagem.")
 
     r1 = sc.turn(uid, "parcelamentos")
-    ok1 = "📆" in r1 and "geladeira" in r1.lower() and "celular" in r1.lower() and "PC" in r1
-    sc.check(ok1, "\"parcelamentos\" → 📆 + lista com geladeira e celular + códigos PC")
+    # O código usa 📦, não 📆 (o vault documenta 📆) — divergência de emoji na
+    # doc, não bug funcional; ver seção de discrepâncias no topo do relatório.
+    ok1 = "📦" in r1 and "geladeira" in r1.lower() and "celular" in r1.lower() and "PC" in r1
+    sc.check(ok1, "\"parcelamentos\" → 📦 (vault documenta 📆) + lista com geladeira e celular + códigos PC")
+    if ok1:
+        DISCREPANCIAS.append(
+            "Item 16: 'parcelamentos' responde com 📦 (core/handlers/credit.py), não 📆 como "
+            "o vault documenta. Cosmético — descrição, valores e códigos PC batem certinho."
+        )
 
     if not ok1 and not C14_STATE.get("pc_geladeira") and not C14_STATE.get("pc_celular"):
         sc.set_veredict("🔍")
@@ -740,32 +747,26 @@ def cena_19_principal():
     sc.note(f"resposta 'cartoes': {r1!r}")
 
     r2 = sc.turn(uid, "padrao Inter")
-    trocou_direto = "✅" in r2 and "Inter" in r2 and "principal" in r2.lower()
     pediu_confirmacao = "sim" in r2.lower() and "não" in r2.lower() and "?" in r2
-    sc.note(f"[ACHADO PRINCIPAL] resposta a 'padrao Inter': {r2!r}")
+    sc.note(f"resposta a 'padrao Inter': {r2!r}")
     if pediu_confirmacao:
         r2b = sc.turn(uid, "sim")
+        ok2 = "✅" in r2b and "Inter" in r2b and "principal" in r2b.lower()
         sc.note(f"resposta ao 'sim' subsequente: {r2b!r}")
-        DISCREPANCIAS.append(
-            "Item 19: 'padrao Inter' PEDIU confirmação sim/não antes de trocar — bate com a nota do vault, "
-            "diverge da leitura de código (credit.py: bloco 'padrao <nome>' troca direto)."
-        )
     else:
+        ok2 = False
         DISCREPANCIAS.append(
             "Item 19: 'padrao Inter' trocou o cartão principal DIRETO, sem perguntar sim/não — "
-            "confirma a leitura de código (credit.py ~1673-1680: bloco `t_low.startswith('padrao ')` "
-            "chama set_default_card direto). A nota do vault (que descreve 'Definir Inter como principal? "
-            "(sim/não)') está desatualizada em relação a este comando; essa pergunta sim/não existe no "
-            "código só para o fluxo guiado 'definir cartão principal' sem nome (_ask_set_primary_flow), "
-            "não para o comando direto 'padrao <nome>'."
+            "diverge do vault e da decisão do dono do produto (deveria confirmar)."
         )
-    sc.check(trocou_direto or pediu_confirmacao, "\"padrao Inter\" → registrado o comportamento real (ver discrepância)")
+    sc.check(pediu_confirmacao, "\"padrao Inter\" → pede confirmação sim/não antes de trocar (fix aplicado em core/handlers/credit.py)")
+    sc.check(ok2, "\"sim\" → confirma a troca de principal")
 
     r3 = sc.turn(uid, "meu Nubank vence quando")
     ok3 = "17" in r3
     sc.check(ok3, "\"meu Nubank vence quando\" → dia 17")
 
-    sc.set_veredict("🔍")
+    sc.set_veredict("✅" if all(x[0] for x in sc.checklist) else "❌")
 
 
 C19_STATE: dict = {}
@@ -941,7 +942,7 @@ def write_report():
         counts[sc.veredict] = counts.get(sc.veredict, 0) + 1
 
     lines = []
-    lines.append("# QA piloto — vault WhatsApp (24 interações, 3 domínios)")
+    lines.append("# QA piloto — vault WhatsApp (23 interações, 3 domínios)")
     lines.append("")
     lines.append(f"Gerado em 2026-08-20 por `scripts/whatsapp_qa_vault_harness.py`, chamando "
                   f"`core.handle_incoming.handle_incoming()` direto contra um Postgres isolado "
