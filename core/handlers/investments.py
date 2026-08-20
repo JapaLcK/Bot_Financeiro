@@ -10,6 +10,93 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _norm_nome(txt: str) -> str:
+    """Comparação de nomes tolerante a acento e caixa."""
+    import unicodedata
+
+    base = unicodedata.normalize("NFD", (txt or "").strip().lower())
+    return "".join(c for c in base if unicodedata.category(c) != "Mn")
+
+
+def _casa_investimento(alvo: str, rows: list) -> list:
+    """Investimentos cujo nome bate com `alvo` — exato primeiro, depois parcial.
+
+    1 item = escolha clara; vários = ambíguo (quem decide é o usuário, porque aportar
+    no investimento errado só se desfaz com resgate, que recolhe IR/IOF); 0 = não achou.
+    """
+    alvo_n = _norm_nome(alvo)
+    if not alvo_n:
+        return []
+    exatos = [r for r in rows if _norm_nome(r["name"]) == alvo_n]
+    if exatos:
+        return exatos
+    return [r for r in rows if alvo_n in _norm_nome(r["name"]) or _norm_nome(r["name"]) in alvo_n]
+
+
+def _pergunta_qual_investimento(user_id: int, amount: float, rows: list, texto: str) -> str:
+    """Pergunta em qual investimento aportar — e ARMA a pendência para ouvir a resposta.
+
+    Antes o bot perguntava "Em qual investimento você quer aportar?" e não guardava
+    nada: a resposta do usuário virava mensagem nova, era reclassificada do zero e — se
+    ele tivesse uma caixinha de mesmo nome — caía na caixinha. Pergunta sem pendência é
+    beco sem saída.
+    """
+    db.set_pending_action(
+        user_id,
+        "investment_pick",
+        {"amount": float(amount), "text": texto,
+         "nomes": [r["name"] for r in rows]},
+        minutes=10,
+    )
+    linhas = [f"{i}. **{_format_inv_name(r['name'])}**" for i, r in enumerate(rows, start=1)]
+    return (
+        f"Em qual investimento você quer aportar {fmt_brl(float(amount))}?\n\n"
+        + "\n".join(linhas)
+        + "\n\nResponda com o número (ex: *1*) ou o nome. Para desistir, *cancelar*."
+    )
+
+
+def resolve_investment_pick(user_id: int, text: str, pending: dict) -> str | None:
+    """Resposta à pergunta "em qual investimento?".
+
+    Devolve None quando a mensagem não é resposta a esta pergunta — aí o roteador
+    segue o caminho normal em vez de prender o usuário.
+    """
+    from utils_text import normalize_text
+
+    if pending.get("action_type") != "investment_pick":
+        return None
+
+    payload = dict(pending.get("payload") or {})
+    resposta = (text or "").strip()
+    norm = normalize_text(resposta)
+
+    if norm in ("nao", "n", "cancelar", "cancela"):
+        db.clear_pending_action(user_id)
+        return "❌ Beleza, cancelei o aporte."
+
+    nomes = payload.get("nomes") or []
+    escolhido = None
+    if norm.isdigit() and 1 <= int(norm) <= len(nomes):
+        escolhido = nomes[int(norm) - 1]
+    else:
+        achados = _casa_investimento(resposta, [{"name": n} for n in nomes])
+        if len(achados) == 1:
+            escolhido = achados[0]["name"]
+
+    if escolhido is None:
+        linhas = [f"{i}. **{_format_inv_name(n)}**" for i, n in enumerate(nomes, start=1)]
+        return ("Não entendi qual. Responda com o número:\n\n"
+                + "\n".join(linhas) + "\n\nOu *cancelar*.")
+
+    db.clear_pending_action(user_id)
+    return deposit(
+        user_id,
+        payload.get("text") or resposta,
+        {"investment_name": escolhido, "amount": float(payload.get("amount") or 0)},
+    )
+
+
 def _pergunta_origem(user_id: int, fontes: list, amount: float, retomar: dict) -> str:
     """Mais de um saldo cobre o valor: o usuário escolhe de onde sai.
 
@@ -225,10 +312,26 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
     investment_name = entities.get("investment_name")
     amount = entities.get("amount")
 
-    if not investment_name:
-        return list_investments(user_id, "Em qual investimento você quer aportar?")
     if not amount or float(amount) <= 0:
         return list_investments(user_id, "Qual valor você quer aportar?")
+
+    # Resolve o NOME antes de qualquer coisa. Sem nome, ou com nome que não bate,
+    # o bot pergunta E FICA ESPERANDO (pendência armada) — antes ele perguntava e
+    # não ouvia, e a resposta solta era reclassificada do zero.
+    rows = db.accrue_all_investments(user_id)
+    achados = _casa_investimento(investment_name, rows) if investment_name else []
+    if len(achados) == 1:
+        investment_name = achados[0]["name"]
+    elif rows and len(achados) > 1:
+        return _pergunta_qual_investimento(user_id, float(amount), achados, text)
+    elif rows:
+        # nome não bateu com nada: mostra a carteira inteira e espera a escolha
+        intro = (f"Não encontrei **{_format_inv_name(investment_name)}**."
+                 if investment_name else "")
+        msg = _pergunta_qual_investimento(user_id, float(amount), rows, text)
+        return f"{intro}\n\n{msg}" if intro else msg
+    elif not investment_name:
+        return list_investments(user_id, "Em qual investimento você quer aportar?")
 
     from core.services import funding
 
