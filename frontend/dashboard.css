@@ -2256,10 +2256,12 @@ body.balance-hidden #receipt-balance,
 body.balance-hidden #receipt-open,
 body.balance-hidden #invest-summary .chip-val,
 body.balance-hidden #invest-list .val,
-/* View de Cartões: stats agregados + valores por cartão (totais, limites,
-   faturas). A lista de compras da fatura fica de fora — ver #bill-detail-tx. */
+/* View de Cartões: stats agregados (todos em R$) + só os valores monetários
+   por cartão, marcados com .cc-money no dashboard.js (fatura, limite, próxima
+   fatura, limite usado). Os campos de dia (Melhor dia/Fecha/Vence em) usam .val
+   puro e NÃO borram. A lista de compras da fatura fica de fora — ver #bill-detail-tx. */
 body.balance-hidden #cards-view .stat-value,
-body.balance-hidden #cards-view .val,
+body.balance-hidden #cards-view .val.cc-money,
 /* Modal de detalhe da fatura: só os totais do resumo, não as compras. */
 body.balance-hidden #bill-detail-summary .v {
   filter: blur(8px);

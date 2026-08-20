@@ -873,16 +873,16 @@ function _renderCardItem(c, idx = 0) {
       </summary>
       <div class="cc-detail-body">
         <div class="cc-meta" style="margin:0">
-          <div class="row"><span class="label">Fatura aberta</span><span class="val ${openColor}">${_fmtBRL(openDue)}</span></div>
-          <div class="row"><span class="label">Limite</span><span class="val">${lim != null ? _fmtBRL(lim) : "—"}</span></div>
+          <div class="row"><span class="label">Fatura aberta</span><span class="val cc-money ${openColor}">${_fmtBRL(openDue)}</span></div>
+          <div class="row"><span class="label">Limite</span><span class="val cc-money">${lim != null ? _fmtBRL(lim) : "—"}</span></div>
           <div class="row"><span class="label">Melhor dia</span><span class="val">${_bestPurchaseDay(c.closing_day)}</span></div>
           <div class="row"><span class="label">Fecha em</span><span class="val">${c.closing_day ? "dia " + c.closing_day : "—"}</span></div>
           <div class="row"><span class="label">Vence em</span><span class="val">${c.due_day ? "dia " + c.due_day : "—"}</span></div>
-          <div class="row"><span class="label">Próxima fatura</span><span class="val">${_fmtBRL(c.next_bill?.total || 0)}</span></div>
+          <div class="row"><span class="label">Próxima fatura</span><span class="val cc-money">${_fmtBRL(c.next_bill?.total || 0)}</span></div>
         </div>
         ${lim != null ? `
           <div class="bar-body" style="margin-top:12px">
-            <div class="bar-head"><span class="name">Limite usado</span><span class="val">${_fmtBRL(used)} / ${_fmtBRL(lim)}</span></div>
+            <div class="bar-head"><span class="name">Limite usado</span><span class="val cc-money">${_fmtBRL(used)} / ${_fmtBRL(lim)}</span></div>
             <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${usePct.toFixed(1)}%"></div></div>
           </div>` : ""}
         <div class="cc-detail-actions">
