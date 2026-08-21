@@ -74,22 +74,13 @@
     return a;
   }
 
-  // Geração: o 1º load (linha de baixo) NÃO passa pela serialização do PTR no
-  // app-mode.js, então um pull durante um load inicial lento dispara um 2º
-  // request em paralelo. Se o inicial chegar por último, repintaria cards
-  // velhos (ou limparia com um snapshot vazio antigo) por cima dos novos. Cada
-  // load carimba uma geração; só a mais recente pinta o DOM — resposta superada
-  // (inicial ou refresh velho) vira no-op.
-  var _gen = 0;
   function load() {
-    var myGen = ++_gen;
     // non-OK vira reject: cai no catch (tratado como falha transitória), não é
     // confundido com "genuinamente sem notícias" — senão um 502 no meio de um
     // pull-to-refresh apagaria os cards que já estavam na tela.
     return fetch("/api/blog/news?limit=12", { headers: { Accept: "application/json" } })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)); })
       .then(function (data) {
-        if (myGen !== _gen) return;   // superado por um load mais novo: não pinta
         var news = (data && data.news) || [];
         if (!news.length) {
           // 200 com lista vazia = genuinamente sem notícias: limpa e mostra o
@@ -105,9 +96,6 @@
         if (empty) empty.style.display = "none"; // some com o estado vazio
       })
       .catch(function (err) {
-        // Superado por um load mais novo: não mexe no DOM nem propaga — quem
-        // reporta sucesso/falha pro indicador é o load atual.
-        if (myGen !== _gen) return;
         // Falha de rede / non-OK: preserva o que já está renderizado (um refresh
         // que falha não pode apagar cards bons). Só no 1º load, sem nada ainda,
         // esconde a seção pra deixar o estado vazio à mostra.

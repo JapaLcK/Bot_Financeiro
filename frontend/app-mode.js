@@ -640,11 +640,11 @@
     // mora no `.page`, o único wrapper de conteúdo; dock, FAB, toasts e overlays
     // são irmãos do `.page` e ficam ancorados, então mover o `.page` não arrasta
     // o chrome (e não abre faixa vazia embaixo).
-    // ponytail: em Ajustes o `#bankpick-overlay` (position:fixed) É descendente
-    // do `.page` — exceção ao "nenhum fixed descendente" das outras telas. É
-    // inofensivo: é um modal full-screen que só existe com `.open` e bloqueia o
-    // gesto quando aberto, então nunca desliza junto. Mover pra fora do `.page`
-    // se algum dia virar um fixed visível durante o puxão.
+    // Em Ajustes o `#bankpick-overlay` (position:fixed) é filho direto do
+    // <body>, IRMÃO do `.page` (não descendente — confirmado no DOM). Então o
+    // transform do puxão não vira o containing block dele nem o desloca. Se um
+    // dia mover pra DENTRO do `.page`, o transform passaria a arrastá-lo — aí
+    // volta pra fora, ou bloqueia abrir enquanto o transform estiver ativo.
     const moveContent = (page === "home" || page === "app" ||
                          page === "settings" || page === "changelog");
     const contentEl = moveContent ? document.querySelector(".page") : null;
@@ -765,6 +765,15 @@
       arc.style.strokeDasharray = "26 80";
       spring(PTR.hold);
 
+      // Fetch de página em voo (save PATCH, load inicial, qualquer loader)
+      // RECUSA o refresh — vale pros DOIS caminhos, custom e reload. Sem isto
+      // um PBRefresh custom (settings/news) disparava um GET em paralelo a um
+      // PATCH/GET pendente, e a resposta velha podia chegar por último
+      // sobrescrevendo o estado novo no DOM. O pageFetches conta todo
+      // window.fetch (wrap acima), então cobre save de notificação/contato,
+      // load inicial do news/open-finance e os loaders de cada aba de uma vez.
+      // Recusa com âmbar — o mesmo sinal de "não deu" da falha de rede.
+      if (pageFetches > 0) { finish(false); return; }
       if (typeof window.PBRefresh !== "function") {
         // Tela que não sabe se refazer: recarrega — MENOS com digitação
         // pendente. Nos Ajustes os editores (nome/e-mail/telefone, senhas de
@@ -778,9 +787,7 @@
           document.querySelectorAll("input, textarea"),
           f => f.offsetParent !== null && f.value !== f.defaultValue
         );
-        // pageFetches: um save da página em voo (PATCH de notificação) seria
-        // abortado pelo reload — recusa e deixa ele terminar.
-        if (dirty || pageFetches > 0) { finish(false); return; }
+        if (dirty) { finish(false); return; }
         setTimeout(() => location.reload(), 220);
         return;
       }

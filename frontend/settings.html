@@ -1973,8 +1973,10 @@ async function loadSecuritySettings({ propagate = false } = {}) {
     showToast(err.message || "Erro ao carregar segurança", "error");
   }
   // await pro PTR só assentar quando TUDO da aba terminou (senão o indicador
-  // some com atividade/sessões ainda em voo).
-  await Promise.all([loadActivityLog(), loadSessionsList()]);
+  // some com atividade/sessões ainda em voo). E propaga a falha delas: sem o
+  // {propagate}, uma falha de atividade/sessões era engolida e o refresh
+  // reportava sucesso mesmo tendo trocado o conteúdo por placeholder.
+  await Promise.all([loadActivityLog({ propagate }), loadSessionsList({ propagate })]);
 }
 
 const ACTIVITY_ICONS = {
@@ -2039,10 +2041,12 @@ function renderActivityList(events, containerId, opts = {}) {
 
 let _activityCache = [];
 
-async function loadActivityLog() {
+async function loadActivityLog({ propagate = false } = {}) {
   const container = document.getElementById("activity-list");
   if (!USER_ID || !container) return;
-  container.innerHTML = '<div class="activity-loading">Carregando…</div>';
+  // No refresh (propagate) NÃO troca por "Carregando…": preserva o conteúdo
+  // atual, pra uma falha transitória não apagar dado válido antes de propagar.
+  if (!propagate) container.innerHTML = '<div class="activity-loading">Carregando…</div>';
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/activity?limit=10`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
@@ -2052,6 +2056,7 @@ async function loadActivityLog() {
     const showAllBtn = document.getElementById("activity-show-all-btn");
     if (showAllBtn) showAllBtn.hidden = _activityCache.length <= 3;
   } catch (err) {
+    if (propagate) throw err;   // refresh: preserva conteúdo, PTR vira âmbar
     container.innerHTML = '<div class="activity-empty">Não foi possível carregar a atividade.</div>';
   }
 }
@@ -2104,10 +2109,10 @@ function renderSessionsList(sessions) {
   }).join("");
 }
 
-async function loadSessionsList() {
+async function loadSessionsList({ propagate = false } = {}) {
   const container = document.getElementById("sessions-list");
   if (!USER_ID || !container) return;
-  container.innerHTML = '<div class="activity-loading">Carregando…</div>';
+  if (!propagate) container.innerHTML = '<div class="activity-loading">Carregando…</div>';
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/sessions`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
@@ -2118,6 +2123,7 @@ async function loadSessionsList() {
     const btn = document.getElementById("sessions-revoke-others-btn");
     if (btn) btn.hidden = otherCount === 0;
   } catch (err) {
+    if (propagate) throw err;   // refresh: preserva conteúdo, PTR vira âmbar
     container.innerHTML = '<div class="activity-empty">Não foi possível carregar as sessões.</div>';
   }
 }
@@ -2281,14 +2287,7 @@ async function loadNotificationSettings({ propagate = false } = {}) {
   if (refreshErr) throw refreshErr;   // PTR: propaga a falha depois do finally
 }
 
-// Save de notificação em voo. O PBRefresh (pull-to-refresh) da aba encadeia
-// atrás dele: sem isso, puxar durante um PATCH dispara um GET em paralelo que,
-// com estado pré-PATCH, podia chegar por último e sobrescrever o save no DOM.
-// Os controles ficam disabled durante o save, então há no máximo um em voo.
-let _notifSave = null;
 async function updateNotificationSettings(patch) {
-  let _doneSave;
-  _notifSave = new Promise(function (r) { _doneSave = r; });
   setNotificationControlsDisabled(true);
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/notifications`, {
@@ -2317,7 +2316,6 @@ async function updateNotificationSettings(patch) {
     document.getElementById("notif-insight-email").disabled = !hasEmail;
     document.getElementById("notif-whatsapp-updates").disabled = !hasWhatsapp;
     document.getElementById("notif-daily-hour").disabled = !anyScheduled;
-    _doneSave();   // libera o PBRefresh que estava enfileirado atrás do save
   }
 }
 
@@ -2776,7 +2774,10 @@ async function loadData({ propagate = false } = {}) {
     renderAccounts(a);
     renderTransactions(t);
     if (c.length > 0) setStep(3);
-    loadCaixinhas();
+    // await + propaga: sem isso o loadData soltava o indicador do PTR antes do
+    // caixinhas assentar (segundo pull podia sobrepor) e uma falha transitória
+    // escondia o card já renderizado com o refresh reportando sucesso.
+    await loadCaixinhas({ propagate });
   } catch (err) {
     // propagate (PTR): preserva o que está renderizado e rejeita (âmbar). Sem
     // isso, uma falha transitória apagava conexões/contas/transações da tela.
@@ -2793,15 +2794,25 @@ async function loadData({ propagate = false } = {}) {
    do PigBank pro Banqueiro detectar os aportes. */
 let _caixMetas = [];
 
-async function loadCaixinhas() {
+async function loadCaixinhas({ propagate = false } = {}) {
   const card = document.getElementById("caixinhas-card");
   if (!USER_ID || !card) return;
   let data;
   try {
     const resp = await fetch(`${API}/open-finance/${USER_ID}/caixinhas`, authOptions({ headers: authHeaders() }));
-    if (!resp.ok) { card.style.display = "none"; return; }  // 404 = fora do beta
+    if (!resp.ok) {
+      if (resp.status === 404) { card.style.display = "none"; return; }  // 404 = fora do beta (legítimo)
+      throw new Error("HTTP " + resp.status);                            // 5xx/transitório
+    }
     data = await resp.json();
-  } catch { card.style.display = "none"; return; }
+  } catch (err) {
+    // No refresh (propagate) preserva o card já renderizado e propaga — sem
+    // isso uma falha transitória escondia caixinhas válidas. No load normal,
+    // mantém o comportamento antigo (esconde).
+    if (propagate) throw err;
+    card.style.display = "none";
+    return;
+  }
   const cx = data.caixinhas || [];
   if (!cx.length) { card.style.display = "none"; return; }
   _caixMetas = data.metas || [];
@@ -3025,12 +3036,16 @@ async function disconnectAll() {
 /* ── MFA (TOTP) ──────────────────────────────── */
 let _mfaStatus = { enabled: false, has_pending_secret: false, backup_codes_remaining: 0 };
 
-async function loadMfaStatus() {
+async function loadMfaStatus({ propagate = false } = {}) {
   try {
     const resp = await fetch(`${API}/auth/mfa/status`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
     _mfaStatus = await resp.json();
-  } catch {
+  } catch (err) {
+    // No refresh (propagate) preserva _mfaStatus e propaga: sem isso, um erro
+    // transitório no /auth/mfa/status virava "MFA desativado" na tela (oferecendo
+    // ativar de novo) e o PTR ainda reportava sucesso.
+    if (propagate) throw err;
     _mfaStatus = { enabled: false, has_pending_secret: false, backup_codes_remaining: 0 };
   }
   applyMfaUi();
@@ -3290,14 +3305,9 @@ window.PBRefresh = () => {
   // (propagate:true) pro indicador do PTR virar âmbar em vez de fingir sucesso.
   const view = new URLSearchParams(location.search).get("view") || "security";
   if (view === "security")
-    return Promise.all([loadSecuritySettings({ propagate: true }), loadMfaStatus()]);
+    return Promise.all([loadSecuritySettings({ propagate: true }), loadMfaStatus({ propagate: true })]);
   if (view === "notifications")
-    // Encadeia atrás de um save em voo: o GET só roda depois que o PATCH
-    // assentar, então não repinta com estado pré-PATCH nem reabilita os
-    // controles no meio do save. (catch pra um save que falhou não abortar o
-    // refresh — ele revalida de qualquer forma.)
-    return Promise.resolve(_notifSave).catch(function () {})
-      .then(function () { return loadNotificationSettings({ propagate: true }); });
+    return loadNotificationSettings({ propagate: true });
   if (view === "open-finance")
     return loadData({ propagate: true });
   return Promise.resolve();   // data / legal: nada dinâmico a atualizar
