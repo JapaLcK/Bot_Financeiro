@@ -1861,6 +1861,7 @@ function toggleSecurityEdit(kind, force) {
   if (show) document.getElementById(`security-${kind}-input`).focus();
 }
 
+let _securitySave = null;
 async function saveSecurityContact(kind) {
   const input = document.getElementById(`security-${kind}-input`);
   const rawValue = input.value;
@@ -1882,6 +1883,11 @@ async function saveSecurityContact(kind) {
   else if (kind === "name") body = { display_name: value };
   else return;
 
+  // Save de contato em voo — o PBRefresh da aba security encadeia atrás dele
+  // (mesma razão do notif): um GET que capturou estado pré-PATCH chegando por
+  // último sobrescreveria o nome/e-mail/telefone salvo.
+  let _doneSave;
+  _securitySave = new Promise(function (r) { _doneSave = r; });
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/security/contact`, {
       method: "PATCH",
@@ -1903,6 +1909,8 @@ async function saveSecurityContact(kind) {
     notificationSettingsLoaded = false;
   } catch (err) {
     showToast(err.message || "Erro ao salvar dado", "error");
+  } finally {
+    _doneSave();   // libera o PBRefresh enfileirado atrás do save
   }
 }
 
@@ -1960,6 +1968,15 @@ function applySecuritySettings(data) {
 // propagate=true (pull-to-refresh): rejeita em falha pro indicador do PTR virar
 // âmbar, e NÃO zera a tela (preserva o que já estava). No load inicial / troca de
 // aba (propagate=false) mantém o comportamento antigo: degrada mostrando vazio.
+// Espera TODAS as branches assentarem e só então propaga a 1ª falha. Diferente
+// de Promise.all, que rejeita na 1ª falha e solta o indicador com GETs ainda em
+// voo — um deles podia terminar depois e sobrescrever um save feito nesse meio.
+async function awaitAllPropagate(promises) {
+  const results = await Promise.allSettled(promises);
+  const failed = results.find(function (r) { return r.status === "rejected"; });
+  if (failed) throw failed.reason;
+}
+
 async function loadSecuritySettings({ propagate = false } = {}) {
   if (!USER_ID) {
     if (propagate) throw new Error("Sessão inválida");
@@ -1977,11 +1994,10 @@ async function loadSecuritySettings({ propagate = false } = {}) {
     applySecuritySettings({});
     showToast(err.message || "Erro ao carregar segurança", "error");
   }
-  // await pro PTR só assentar quando TUDO da aba terminou (senão o indicador
-  // some com atividade/sessões ainda em voo). E propaga a falha delas: sem o
-  // {propagate}, uma falha de atividade/sessões era engolida e o refresh
-  // reportava sucesso mesmo tendo trocado o conteúdo por placeholder.
-  await Promise.all([loadActivityLog({ propagate }), loadSessionsList({ propagate })]);
+  // Espera atividade E sessões assentarem (não só a 1ª a falhar) e então
+  // propaga a falha — senão o indicador soltava com uma delas ainda em voo,
+  // que podia repintar por cima depois. {propagate} preserva o conteúdo atual.
+  await awaitAllPropagate([loadActivityLog({ propagate }), loadSessionsList({ propagate })]);
 }
 
 const ACTIVITY_ICONS = {
@@ -2292,7 +2308,14 @@ async function loadNotificationSettings({ propagate = false } = {}) {
   if (refreshErr) throw refreshErr;   // PTR: propaga a falha depois do finally
 }
 
+// Save de notificação em voo. O PBRefresh da aba encadeia atrás dele: puxar
+// durante um PATCH dispararia um GET que, com estado pré-PATCH, podia chegar
+// por último e sobrescrever o save. Controles ficam disabled durante o save,
+// então há no máximo um em voo.
+let _notifSave = null;
 async function updateNotificationSettings(patch) {
+  let _doneSave;
+  _notifSave = new Promise(function (r) { _doneSave = r; });
   setNotificationControlsDisabled(true);
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/notifications`, {
@@ -2321,6 +2344,7 @@ async function updateNotificationSettings(patch) {
     document.getElementById("notif-insight-email").disabled = !hasEmail;
     document.getElementById("notif-whatsapp-updates").disabled = !hasWhatsapp;
     document.getElementById("notif-daily-hour").disabled = !anyScheduled;
+    _doneSave();   // libera o PBRefresh enfileirado atrás do save
   }
 }
 
@@ -2760,6 +2784,12 @@ function updateStats(connections, accounts, transactions) {
 }
 
 /* ── Load ────────────────────────────────────── */
+// Geração: o loadData inicial (chamado no initSettings, no parse) roda ANTES do
+// DOMContentLoaded onde o app-mode.js instala o wrap de pageFetches — então um
+// pull durante um load inicial lento dispara um 2º loadData e o inicial, se
+// chegar por último, sobrescreveria as conexões/contas/txs mais novas. Só a
+// geração mais recente pinta; resposta superada vira no-op.
+let _dataGen = 0;
 async function loadData({ propagate = false } = {}) {
   if (!USER_ID) {
     if (propagate) throw new Error("Sessão inválida");
@@ -2767,10 +2797,12 @@ async function loadData({ propagate = false } = {}) {
     updateStats([], [], []);
     return;
   }
+  const myGen = ++_dataGen;
   try {
     const resp = await fetch(`${API}/open-finance/${USER_ID}`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
+    if (myGen !== _dataGen) return;   // superado por um loadData mais novo: não pinta
     const c = data.connections  || [];
     const a = data.accounts     || [];
     const t = data.transactions || [];
@@ -2784,6 +2816,7 @@ async function loadData({ propagate = false } = {}) {
     // escondia o card já renderizado com o refresh reportando sucesso.
     await loadCaixinhas({ propagate });
   } catch (err) {
+    if (myGen !== _dataGen) return;   // superado: não mexe no DOM nem propaga
     // propagate (PTR): preserva o que está renderizado e rejeita (âmbar). Sem
     // isso, uma falha transitória apagava conexões/contas/transações da tela.
     if (propagate) throw err;
@@ -3310,9 +3343,18 @@ window.PBRefresh = () => {
   // (propagate:true) pro indicador do PTR virar âmbar em vez de fingir sucesso.
   const view = new URLSearchParams(location.search).get("view") || "security";
   if (view === "security")
-    return Promise.all([loadSecuritySettings({ propagate: true }), loadMfaStatus({ propagate: true })]);
+    // Encadeia atrás de um save de contato em voo; espera TODAS as branches
+    // (security + MFA, e dentro da security, atividade + sessões) antes de soltar.
+    return Promise.resolve(_securitySave).catch(function () {})
+      .then(function () { return awaitAllPropagate([
+        loadSecuritySettings({ propagate: true }),
+        loadMfaStatus({ propagate: true }),
+      ]); });
   if (view === "notifications")
-    return loadNotificationSettings({ propagate: true });
+    // Encadeia atrás de um save de notificação em voo: o GET só roda depois que
+    // o PATCH assentar, então não repinta com estado pré-PATCH.
+    return Promise.resolve(_notifSave).catch(function () {})
+      .then(function () { return loadNotificationSettings({ propagate: true }); });
   if (view === "open-finance")
     return loadData({ propagate: true });
   return Promise.resolve();   // data / legal: nada dinâmico a atualizar

@@ -765,15 +765,6 @@
       arc.style.strokeDasharray = "26 80";
       spring(PTR.hold);
 
-      // Fetch de página em voo (save PATCH, load inicial, qualquer loader)
-      // RECUSA o refresh — vale pros DOIS caminhos, custom e reload. Sem isto
-      // um PBRefresh custom (settings/news) disparava um GET em paralelo a um
-      // PATCH/GET pendente, e a resposta velha podia chegar por último
-      // sobrescrevendo o estado novo no DOM. O pageFetches conta todo
-      // window.fetch (wrap acima), então cobre save de notificação/contato,
-      // load inicial do news/open-finance e os loaders de cada aba de uma vez.
-      // Recusa com âmbar — o mesmo sinal de "não deu" da falha de rede.
-      if (pageFetches > 0) { finish(false); return; }
       if (typeof window.PBRefresh !== "function") {
         // Tela que não sabe se refazer: recarrega — MENOS com digitação
         // pendente. Nos Ajustes os editores (nome/e-mail/telefone, senhas de
@@ -782,12 +773,16 @@
         // value difere do defaultValue: os editores são preenchidos via JS
         // (defaultValue fica vazio) e ficam display:none até abrir, então a
         // regra dispara exatamente com um editor aberto ou senha digitada.
+        // pageFetches: um save da página em voo (PATCH) seria abortado pelo
+        // reload — recusa e deixa ele terminar. (Só vale pro caminho de reload:
+        // no caminho custom, gatear o refresh no contador global trava o gesto
+        // se um fetch pendura além do watchdog — a serialização é por-view.)
         // Recusa com âmbar — o mesmo sinal de "não deu" da falha de rede.
         const dirty = Array.prototype.some.call(
           document.querySelectorAll("input, textarea"),
           f => f.offsetParent !== null && f.value !== f.defaultValue
         );
-        if (dirty) { finish(false); return; }
+        if (dirty || pageFetches > 0) { finish(false); return; }
         setTimeout(() => location.reload(), 220);
         return;
       }
