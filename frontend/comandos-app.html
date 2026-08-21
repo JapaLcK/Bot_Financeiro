@@ -80,8 +80,9 @@ header h1{font-size:1.05rem;font-weight:650;letter-spacing:-.02em}
 
 @media(max-width:660px){.page{padding-inline:14px}.hero{padding:24px 4px 18px}.nav-links{width:100%;justify-content:center}}
 </style>
-  <link rel="stylesheet" href="/app-mode.css?v=31" />
-  <script src="/app-mode.js?v=31"></script>
+  <link rel="stylesheet" href="/app-mode.css?v=34" />
+  <script src="/app-mode.js?v=34"></script>
+  <script src="/pb-nav.js?v=5"></script>
 </head>
 <body>
 <div class="bg"><div class="orb orb-1"></div><div class="orb orb-2"></div><div class="orb orb-3"></div></div>
@@ -121,6 +122,12 @@ header h1{font-size:1.05rem;font-weight:650;letter-spacing:-.02em}
 </div>
 
 <script>
+/* Contrato pb-nav: o código da página vive num init re-chamável — sem
+   let/const no topo do script (re-execução no mesmo documento estoura
+   SyntaxError de redeclaração). No load MPA o PBNav.boot roda os inits;
+   num mount client-side é o motor quem roda. */
+window.PBPages = window.PBPages || {};
+(PBPages.comandos = PBPages.comandos || { inits: [] }).inits.push(function () {
 const API = window.location.origin;
 
 function showAccessError() {
@@ -207,6 +214,8 @@ function renderCatalog(catalog, snap, plan) {
 
   renderCatalog(catalog, snap, plan);
 })();
+});
 </script>
+<script data-pb-boot>window.PBNav ? PBNav.boot("comandos") : PBPages.comandos.inits.forEach(f => f());</script>
 </body>
 </html>
