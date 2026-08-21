@@ -10260,13 +10260,15 @@ function _showAccessError(title, msg) {
 	  // do profile resolver.
 	  connect();
 	  loadUserMenuState().then(() => {
+	    // Deep-link por ?view=X (gaveta da /home aponta pra cá). investments
+	    // mantém o caminho antigo (setMainView direto); overview é o default.
+	    // Os demais abrem via navigateTo — mas só se o item do sidenav existir
+	    // e estiver visível, respeitando os beta-gates (ex.: agents_ui_enabled)
+	    // e o pro-gate, igual ao clique manual.
 	    if (view === "investments") setMainView("investments");
-	    // Deep-link da galeria pública /agents (botão "Ver meus agentes"):
-	    // abre a aba de agentes — só se ela estiver visível (respeita o
-	    // beta-gate agents_ui_enabled, que esconde o item acima).
-	    else if (view === "agentes") {
-	      const agNav = document.querySelector('[data-nav="agentes"]');
-	      if (agNav && agNav.style.display !== "none") navigateTo("agentes");
+	    else if (view && view !== "overview") {
+	      const navEl = document.querySelector(`[data-nav="${view}"]`);
+	      if (navEl && navEl.style.display !== "none") navigateTo(view);
 	    }
 	  });
 	  // Wizard: abre auto se conta virgem (não bloqueante).
