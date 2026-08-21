@@ -113,11 +113,14 @@
   const swap = mutate =>
     document.startViewTransition(mutate).finished.catch(() => {});
 
-  // currentKey NÃO é setado aqui: ele muda dentro do callback do swap, atômico
-  // com a mutação do DOM. Setar só depois do .finished abria uma janela (os
-  // ~320ms do fade) em que um tap novo desmontava com a chave velha e gravava
-  // o DOM da página nova no cache da antiga (apontamento do Codex no #118).
-  function finish(key, path, push) {
+  // Roda DENTRO do callback do swap, atômico com a mutação do DOM: currentKey,
+  // histórico e dock mudam juntos ou não mudam nada. Qualquer um deixado pra
+  // depois do .finished abria janela de ~320ms em que um tap novo supersede e
+  // o estado racha — a chave velha envenenava o cache (rodada 2 do Codex) e o
+  // pushState nunca registrado deixava a navegação seguinte empurrar URL
+  // duplicada, quebrando o Back (rodada 4).
+  function commit(key, path, push) {
+    currentKey = key;
     // try/catch: histórico lança em origem opaca (preview/embeds) — a troca
     // de tela nunca pode morrer por causa do pushState.
     if (push) { try { history.pushState({ pb: key }, "", path + location.hash); } catch (_) {} }
@@ -142,13 +145,11 @@
       setRootClass(key);
       window.PBRefresh = e.refresh;
       window.scrollTo(0, e.scrollY);
-      currentKey = key;              // atômico com o DOM (ver finish)
+      commit(key, path, push);
+      // Dado fresco em background, reusando o contrato do puxar-pra-atualizar:
+      // dado velho na tela agora, dado novo repintando quando chegar.
+      if (window.PBRefresh) { try { window.PBRefresh(); } catch (_) {} }
     });
-    if (my !== seq) return;
-    finish(key, path, push);
-    // Dado fresco em background, reusando o contrato do puxar-pra-atualizar:
-    // dado velho na tela agora, dado novo repintando quando chegar.
-    if (window.PBRefresh) { try { window.PBRefresh(); } catch (_) {} }
   }
 
   // Scripts externos da página nova que o documento ainda não tem (dedupe por
@@ -206,11 +207,9 @@
       document.body.className = (bodyClass ? bodyClass + " " : "") + "pb-page-" + key;
       setRootClass(key);
       window.scrollTo(0, 0);
-      currentKey = key;       // atômico com o DOM (ver finish)
       runInits(key);          // síncrono entra no snapshot; o resto é async normal
+      commit(key, path, push);
     });
-    if (my !== seq) return;
-    finish(key, path, push);
   }
 
   // Prefetch: o HTML das outras abas é aquecido em background logo após o
