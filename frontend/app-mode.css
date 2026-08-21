@@ -12,6 +12,19 @@
  *  - Safe areas (notch / home indicator) respeitadas via env().
  */
 
+/* ─── Transição entre telas ──────────────────────────────────────────────
+   Trocar de aba é navegação de documento (location.href) — sem isto o WebView
+   pisca em branco entre as páginas. navigation: auto = cross-fade nativo entre
+   a página que sai e a que entra (WebKit iOS 18.2+ e Chrome; o app roda iOS 26).
+   Atenção: é uma at-rule GLOBAL — não dá pra escopar por html.pb-app como o
+   resto deste arquivo. Então vale pra navegação entre quaisquer páginas que
+   carregam este CSS, no app E no site web (desktop/mobile) — aceito de
+   propósito. Progressive enhancement: sem suporte, navega igual. */
+@view-transition { navigation: auto; }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*) { animation-duration: 0s !important; }
+}
+
 /* ─── Base: página nunca rola de lado (app não arrasta lateral) ────────── */
 html.pb-app,
 html.pb-app body {
