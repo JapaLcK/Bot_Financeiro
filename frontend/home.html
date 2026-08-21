@@ -73,6 +73,39 @@ header {
 }
 .sidenav-toggle:hover { background:rgba(255,255,255,.08); color:var(--text); }
 html.pb-app body.pb-page-home .sidenav-toggle { display:inline-flex; }
+
+/* ─── Gaveta lateral (portada da dashboard.css) ───────────────────────── */
+.sidenav {
+  position:fixed; top:0; left:0; bottom:0; width:260px; box-sizing:border-box;
+  z-index:60; display:flex; flex-direction:column; padding:18px 14px 14px;
+  padding-top:calc(18px + env(safe-area-inset-top));
+  padding-bottom:calc(14px + env(safe-area-inset-bottom));
+  background:#0f1422; box-shadow:4px 0 24px rgba(0,0,0,.5);
+  overflow-y:auto; transform:translateX(-100%); transition:transform .25s var(--ease);
+}
+.sidenav.open { transform:translateX(0); }
+.sidenav::-webkit-scrollbar { width:6px; }
+.sidenav::-webkit-scrollbar-thumb { background:rgba(255,255,255,.08); border-radius:3px; }
+.sidenav-brand { display:flex; align-items:center; gap:10px; padding:6px 8px 16px; border-bottom:1px solid var(--div); margin-bottom:12px; }
+.sidenav-brand .logo { width:38px; height:38px; object-fit:contain; display:block; background:none; box-shadow:none; border-radius:0; }
+.sidenav-brand .brand-text { display:flex; flex-direction:column; line-height:1.15; min-width:0; }
+.sidenav-brand .brand-name { font-size:.92rem; font-weight:700; color:var(--text); letter-spacing:-.01em; }
+.sidenav-brand .brand-sub  { font-size:.66rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.08em; }
+.sidenav-section { font-size:.62rem; text-transform:uppercase; letter-spacing:.1em; color:var(--text-3); padding:14px 10px 6px; }
+.sidenav-item {
+  display:flex; align-items:center; gap:11px; width:100%; padding:9px 11px; margin:1px 0;
+  background:transparent; border:1px solid transparent; border-radius:10px;
+  color:var(--text-2); font-size:.83rem; font-weight:500; text-align:left;
+  cursor:pointer; transition:all .18s var(--ease); text-decoration:none; font-family:inherit;
+}
+.sidenav-item:hover:not([disabled]) { background:rgba(255,255,255,.06); color:var(--text); border-color:rgba(255,255,255,.07); }
+.sidenav-item .sn-icon { width:22px; height:22px; border-radius:7px; display:inline-flex; align-items:center; justify-content:center; font-size:.92rem; flex-shrink:0; background:rgba(255,255,255,.04); color:var(--text-2); }
+.sidenav-item .sn-label { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sidenav-item .sn-tag { font-size:.55rem; font-weight:700; padding:2px 6px; border-radius:6px; letter-spacing:.06em; text-transform:uppercase; background:rgba(251,191,36,.18); color:#fbbf24; }
+.sidenav-item .sn-tag.new { background:rgba(198,241,26,.18); color:#C6F11A; }
+.sidenav-footer { margin-top:auto; padding-top:12px; border-top:1px solid var(--div); display:flex; flex-direction:column; gap:2px; }
+.sidenav-backdrop { display:none; }
+.sidenav-backdrop.open { display:block; position:fixed; inset:0; z-index:59; background:rgba(0,0,0,.55); backdrop-filter:blur(1px); }
 header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 
 .nav-links { display:flex; gap:4px; margin-left:8px; flex-wrap:wrap; }
@@ -447,11 +480,50 @@ footer a:hover { color:var(--text); }
   <div class="orb orb-4"></div>
 </div>
 
+<!-- Gaveta lateral (igual à do dashboard). Só é alcançável no app: o ☰ que a
+     abre fica escondido na web. Os itens são as views do dashboard, então
+     deep-linkam pra /app?view=X (o dashboard.js abre a view certa no load). -->
+<div class="sidenav-backdrop" id="sidenav-backdrop" onclick="toggleSidenav(false)"></div>
+<aside class="sidenav" id="sidenav" aria-label="Navegação principal" inert>
+  <div class="sidenav-brand">
+    <img class="logo" src="/brand/icon.png?v=1" alt="" />
+    <div class="brand-text">
+      <span class="brand-name">PigBank</span>
+      <span class="brand-sub">Assistente financeiro</span>
+    </div>
+  </div>
+
+  <div class="sidenav-section">Geral</div>
+  <a class="sidenav-item" href="/app?view=overview"><span class="sn-icon" style="color:#3B82F6"><i class="ph ph-chart-bar" aria-hidden="true"></i></span><span class="sn-label">Visão Geral</span></a>
+  <a class="sidenav-item" href="/app?view=analytics"><span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Análises</span></a>
+  <a class="sidenav-item" href="/app?view=history"><span class="sn-icon" style="color:#94A3B8"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i></span><span class="sn-label">Histórico</span></a>
+  <a class="sidenav-item" data-nav="agentes" href="/app?view=agentes"><span class="sn-icon" style="color:#FF2D8E"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span><span class="sn-label">Agentes</span><span class="sn-tag new">novo</span></a>
+
+  <div class="sidenav-section">Planejamento</div>
+  <a class="sidenav-item" href="/app?view=fixed"><span class="sn-icon" style="color:#14B8A6"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span><span class="sn-label">Recorrentes</span></a>
+  <a class="sidenav-item" href="/app?view=budgets"><span class="sn-icon" style="color:#F59E0B"><i class="ph ph-note-pencil" aria-hidden="true"></i></span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span></a>
+  <a class="sidenav-item" href="/app?view=goals"><span class="sn-icon" style="color:#10B981"><i class="ph ph-target" aria-hidden="true"></i></span><span class="sn-label">Caixinhas e metas</span><span class="sn-tag new">novo</span></a>
+  <a class="sidenav-item" href="/app?view=categories"><span class="sn-icon" style="color:#A855F7"><i class="ph ph-tag" aria-hidden="true"></i></span><span class="sn-label">Categorias</span></a>
+
+  <div class="sidenav-section">Crédito</div>
+  <a class="sidenav-item" href="/app?view=installments"><span class="sn-icon" style="color:#FB923C"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Parcelamentos</span></a>
+  <a class="sidenav-item" href="/app?view=cards"><span class="sn-icon" style="color:#6366F1"><i class="ph ph-cards" aria-hidden="true"></i></span><span class="sn-label">Cartões</span><span class="sn-tag new">novo</span></a>
+  <a class="sidenav-item" href="/app?view=investments"><span class="sn-icon" style="color:#22C55E"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span></a>
+
+  <div class="sidenav-footer">
+    <div class="sidenav-section" style="padding-top:0">Conta</div>
+    <a class="sidenav-item" href="/settings?view=security"><span class="sn-icon" style="color:#94A3B8"><i class="ph ph-user" aria-hidden="true"></i></span><span class="sn-label">Conta</span></a>
+    <a class="sidenav-item" href="/suporte" target="_blank" rel="noopener"><span class="sn-icon" style="color:#60A5FA"><i class="ph ph-question" aria-hidden="true"></i></span><span class="sn-label">Suporte</span></a>
+    <a class="sidenav-item" href="/changelog"><span class="sn-icon" style="color:#F59E0B"><i class="ph ph-newspaper" aria-hidden="true"></i></span><span class="sn-label">Notícias</span><span class="sn-tag">Pro</span></a>
+    <button class="sidenav-item" type="button" onclick="connectWhatsAppFromHome(event)"><span class="sn-icon" style="color:#22c55e"><i class="ph ph-whatsapp-logo" aria-hidden="true"></i></span><span class="sn-label">WhatsApp</span></button>
+  </div>
+</aside>
+
 <div class="page" id="page-root">
 
   <header>
     <div class="header-left">
-      <button class="sidenav-toggle" type="button" aria-label="Abrir menu" aria-haspopup="menu" onclick="toggleUserMenu(event)"><i class="ph ph-list" aria-hidden="true"></i></button>
+      <button class="sidenav-toggle" type="button" aria-label="Abrir menu" aria-controls="sidenav" aria-expanded="false" onclick="toggleSidenav(true)"><i class="ph ph-list" aria-hidden="true"></i></button>
       <img class="logo-img" src="/brand/icon.png?v=1" alt="Piggy" />
       <h1>PigBank</h1>
       <div class="nav-links">
@@ -745,6 +817,42 @@ document.addEventListener("click", e => {
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeUserMenu(); });
 
+/* ─── Gaveta lateral (mesma lógica do dashboard.js) ───────────────────── */
+function toggleSidenav(force) {
+  const nav = document.getElementById("sidenav");
+  const bd  = document.getElementById("sidenav-backdrop");
+  if (!nav) return;
+  const open = (typeof force === "boolean") ? force : !nav.classList.contains("open");
+  nav.classList.toggle("open", open);
+  // Fechada, a gaveta só sai da tela (translateX) — sem inert, seus links
+  // continuariam no tab order. inert tira do foco/AT quando fechada.
+  nav.toggleAttribute("inert", !open);
+  if (bd) bd.classList.toggle("open", open);
+  const tog = document.querySelector(".sidenav-toggle");
+  if (tog) tog.setAttribute("aria-expanded", String(open));
+  // Foco preso na gaveta: enquanto aberta, TODO o resto (irmãos do body — o
+  // #page-root com o header/☰, e a .pb-tabbar que o app-mode.js injeta direto
+  // no body) fica inert. Assim o Tab não escapa pro fundo coberto e, ao passar
+  // do último item, volta pro primeiro. Fechar libera tudo ANTES de devolver o
+  // foco pro ☰ (que mora dentro do #page-root).
+  Array.from(document.body.children).forEach(el => {
+    if (el !== nav && el !== bd) el.toggleAttribute("inert", open);
+  });
+  // Foco segue a gaveta: abrir → 1º item; fechar (backdrop/ESC) → ☰.
+  if (open) {
+    const first = nav.querySelector(".sidenav-item");
+    if (first) first.focus();
+  } else if (tog) {
+    tog.focus();
+  }
+}
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    const nav = document.getElementById("sidenav");
+    if (nav && nav.classList.contains("open")) toggleSidenav(false);
+  }
+});
+
 /* ─── Logout / Connect WhatsApp ───────────────────────────────────────── */
 async function logoutFromHome() {
   try {
@@ -797,6 +905,15 @@ async function loadProfile() {
     document.getElementById("user-email").textContent = PROFILE_EMAIL || "Minha conta";
     document.getElementById("user-plan").textContent  = planLabel(plan);
   } catch {}
+}
+
+// Beta-gate dos Agentes (freio de emergência / allowlist). O flag vem do
+// /auth/me — NÃO do /auth/dashboard-profile, que só traz feature_gates de
+// plano. Esconde o item da gaveta quando off, igual ao dashboard.js:10215.
+function applyAgentsGate(me) {
+  if (me && me.agents_ui_enabled === false) {
+    document.querySelectorAll('[data-nav="agentes"]').forEach(el => { el.style.display = "none"; });
+  }
 }
 
 /* ─── Render: greeting ────────────────────────────────────────────────── */
@@ -1398,6 +1515,7 @@ let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
   // 3 e 4) Busca + render moram em loadHomeData() porque o "puxar pra
   // atualizar" do app (app-mode.js) precisa refazer exatamente este pedaço.
   _homeMe = me;
+  applyAgentsGate(me);
   await loadHomeData({ initial: true });
 })();
 
