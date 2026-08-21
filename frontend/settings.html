@@ -1903,6 +1903,12 @@ async function saveSecurityContact(kind) {
     // o input ficava com o texto pré-save (ex.: com espaços) e o valor
     // canonicalizado do backend só apareceria no rótulo, não ao reabrir.
     toggleSecurityEdit(kind, false);
+    // Invalida qualquer loadSecuritySettings em voo: os inputs de segurança NÃO
+    // ficam disabled durante o load (diferente de notificações), então um GET
+    // do "↻ Atualizar" ou do PTR pode ter partido antes deste PATCH e chegar
+    // por último. Sem bumpar a geração, esse GET veria myGen === _securityGen e
+    // repintaria o contato pré-PATCH por cima do que acabou de ser salvo.
+    ++_securityGen;
     applySecuritySettings(data);
     const labels = { email: "E-mail atualizado", phone: "Telefone atualizado", name: value ? "Nome atualizado" : "Nome removido" };
     showToast(labels[kind] || "Dado atualizado", "ok");
