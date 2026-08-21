@@ -55,6 +55,10 @@
   const path = location.pathname.replace(/\/+$/, "") || "/";
   const page = PAGES[path];
 
+  // pb-root-* no <html> aqui no <head> (síncrono) = paleta por página já no 1º
+  // paint. Só no buildTabbar (DOMContentLoaded) fazia o Ajustes piscar de cor.
+  if (page) root.classList.add("pb-root-" + page);
+
   // Viewport de app: safe areas + zoom travado (pinch/auto-zoom estica o
   // layout e "come" texto nas bordas; app nativo não tem zoom de UI)
   function fixViewport() {
