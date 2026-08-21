@@ -2130,20 +2130,28 @@ function renderSessionsList(sessions) {
   }).join("");
 }
 
+// Geração: uma revogação de sessão faz DELETE + loadSessionsList(); se o usuário
+// puxa nesse meio, o GET do refresh capturou a lista PRÉ-revogação e podia chegar
+// por último, re-renderizando a sessão revogada. Cada load carimba geração; só a
+// mais recente pinta, então o estado final é sempre o pós-revogação.
+let _sessionsGen = 0;
 async function loadSessionsList({ propagate = false } = {}) {
   const container = document.getElementById("sessions-list");
   if (!USER_ID || !container) return;
   if (!propagate) container.innerHTML = '<div class="activity-loading">Carregando…</div>';
+  const myGen = ++_sessionsGen;
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/sessions`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
+    if (myGen !== _sessionsGen) return;   // superado por um load mais novo: não pinta
     const sessions = Array.isArray(data.sessions) ? data.sessions : [];
     renderSessionsList(sessions);
     const otherCount = sessions.filter(s => !s.is_current).length;
     const btn = document.getElementById("sessions-revoke-others-btn");
     if (btn) btn.hidden = otherCount === 0;
   } catch (err) {
+    if (myGen !== _sessionsGen) return;   // superado: não mexe no DOM nem propaga
     if (propagate) throw err;   // refresh: preserva conteúdo, PTR vira âmbar
     container.innerHTML = '<div class="activity-empty">Não foi possível carregar as sessões.</div>';
   }
