@@ -82,9 +82,14 @@
     root.classList.add("pb-root-" + key);
   }
 
-  // Desmonta a página atual pro cache: nós do body (menos shell), estilos
-  // marcados, título, rolagem e o PBRefresh dela. DOM fica VIVO desanexado —
-  // estado (um passo de MFA aberto, um campo digitado) sobrevive ao vaivém.
+  // Desmonta a página atual: nós do body (menos shell), estilos marcados,
+  // título, rolagem e o PBRefresh dela. Só vai pro CACHE se a init assentou —
+  // a prova é o window.PBRefresh presente (o contrato é exposto no FIM da
+  // carga; ver home.html). Cachear página inacabada congelava o esqueleto pra
+  // sempre: a init em voo morre ao consultar DOM desanexado e nunca é re-rodada
+  // (apontamento do Codex no #118). Página sem o contrato (comandos) nunca
+  // cacheia: remonta fresca — os listeners dela são todos de nó, re-init limpa.
+  // DOM cacheado fica VIVO desanexado — estado (campo digitado) sobrevive.
   function unmountCurrent() {
     if (!currentKey) return;
     const e = {
@@ -99,7 +104,7 @@
       .forEach(s => { e.styles.push(s); s.remove(); });
     Array.prototype.slice.call(document.body.childNodes)
       .forEach(n => { if (!isShell(n)) e.nodes.appendChild(n); });
-    cache[currentKey] = e;
+    if (e.refresh) cache[currentKey] = e;   // assentou: pode voltar do cache
     window.PBRefresh = undefined;
   }
 
@@ -108,8 +113,11 @@
   const swap = mutate =>
     document.startViewTransition(mutate).finished.catch(() => {});
 
+  // currentKey NÃO é setado aqui: ele muda dentro do callback do swap, atômico
+  // com a mutação do DOM. Setar só depois do .finished abria uma janela (os
+  // ~320ms do fade) em que um tap novo desmontava com a chave velha e gravava
+  // o DOM da página nova no cache da antiga (apontamento do Codex no #118).
   function finish(key, path, push) {
-    currentKey = key;
     // try/catch: histórico lança em origem opaca (preview/embeds) — a troca
     // de tela nunca pode morrer por causa do pushState.
     if (push) { try { history.pushState({ pb: key }, "", path + location.hash); } catch (_) {} }
@@ -121,6 +129,7 @@
       if (my !== seq) return;
       unmountCurrent();
       const e = cache[key];
+      delete cache[key];             // os nós voltam pro DOM; a entrada morreu
       e.styles.forEach(s => document.head.appendChild(s));
       document.body.insertBefore(e.nodes, mountPoint());
       document.title = e.title;
@@ -128,6 +137,7 @@
       setRootClass(key);
       window.PBRefresh = e.refresh;
       window.scrollTo(0, e.scrollY);
+      currentKey = key;              // atômico com o DOM (ver finish)
     });
     if (my !== seq) return;
     finish(key, path, push);
@@ -191,15 +201,45 @@
       document.body.className = (bodyClass ? bodyClass + " " : "") + "pb-page-" + key;
       setRootClass(key);
       window.scrollTo(0, 0);
+      currentKey = key;       // atômico com o DOM (ver finish)
       runInits(key);          // síncrono entra no snapshot; o resto é async normal
     });
     if (my !== seq) return;
     finish(key, path, push);
   }
 
+  // Prefetch: o HTML das outras abas é aquecido em background logo após o
+  // load e a cada troca. Sem isso, o fetch acontecia NO tap — a rede que a
+  // recarga escondia atrás da piscada virava tela parada (medido no GATE 1:
+  // "demora muito"). Com o texto já baixado, o mount é imediato. O HTML é só
+  // o shell (esqueleto); dado vivo vem da init/PBRefresh — não fica velho.
+  const warm = {};   // key → html (null = em voo)
+  function warmUp() {
+    Object.keys(ROUTES).forEach(path => {
+      const key = ROUTES[path];
+      if (key === currentKey || cache[key] || warm[key] !== undefined) return;
+      warm[key] = null;
+      fetch(path, { credentials: "same-origin", headers: { Accept: "text/html" } })
+        .then(r => (r.ok && !r.redirected ? r.text() : Promise.reject()))
+        .then(html => { warm[key] = html; })
+        .catch(() => { delete warm[key]; });
+    });
+  }
+
   async function navigate(path, key, push) {
     const my = ++seq;                            // só a navegação mais recente monta
-    if (cache[key]) return mountCached(key, path, push, my);
+    const t0 = performance.now();
+    const log = via => console.log("[pb-nav]", key, via,
+      Math.round(performance.now() - t0) + "ms");
+    if (cache[key]) { await mountCached(key, path, push, my); log("cache"); return; }
+    if (warm[key]) {                             // prefetch pronto: sem rede no tap
+      const html = warm[key];
+      delete warm[key];
+      await mountNew(key, path, html, push, my);
+      log("warm");
+      setTimeout(warmUp, 400);
+      return;
+    }
     try {
       const r = await fetch(path, {
         credentials: "same-origin",
@@ -212,6 +252,8 @@
       const html = await r.text();
       if (my !== seq) return;
       await mountNew(key, path, html, push, my);
+      log("fetch");
+      setTimeout(warmUp, 400);
     } catch (_) {
       if (my === seq) hard(path);                // timeout/rede: cai no MPA
     }
@@ -251,6 +293,8 @@
         // marca os estilos de head desta página pra viajarem com ela no swap
         document.querySelectorAll("head style:not([data-pb-page])")
           .forEach(s => s.setAttribute("data-pb-page", key));
+        // aquece as outras abas depois que a carga da página assentar
+        setTimeout(warmUp, 1200);
       }
       runInits(key);
     },
