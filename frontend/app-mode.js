@@ -241,7 +241,10 @@
     const smooth = !(window.matchMedia &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
-    const home = Math.max(0, tabs.findIndex(a => a.classList.contains("active")));
+    // let, não const: o onNavigate do pb-nav reaponta a "aba da página atual"
+    // a cada swap client-side. Com const a atribuição lançava TypeError
+    // (engolido), home ficava na aba de boot e voltar pra ela não navegava.
+    let home = Math.max(0, tabs.findIndex(a => a.classList.contains("active")));
     let W = 0, stops = [], x = 0, target = 0, vel = 0, prev = 0;
     let live = home, raf = 0, running = false, drag = null;
 
@@ -402,6 +405,9 @@
     if (window.PBNav && PBNav.enabled) {
       PBNav.onNavigate = key => {
         livePage = key;   // callbacks assíncronos (syncNewsTab) leem a página viva
+        // Glifos de texto (☰, ▾) da página recém-montada: o hardenGlyphs do
+        // boot não alcança DOM que chegou por swap — re-roda (é idempotente).
+        hardenGlyphs();
         const i = tabs.findIndex(a => PAGES[a.getAttribute("href")] === key);
         if (i < 0) return;
         home = i;

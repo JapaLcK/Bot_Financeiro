@@ -121,7 +121,12 @@
     // try/catch: histórico lança em origem opaca (preview/embeds) — a troca
     // de tela nunca pode morrer por causa do pushState.
     if (push) { try { history.pushState({ pb: key }, "", path + location.hash); } catch (_) {} }
-    if (window.PBNav.onNavigate) { try { window.PBNav.onNavigate(key); } catch (_) {} }
+    // erro do hook NÃO derruba a navegação, mas também não é engolido mudo:
+    // um catch vazio escondeu um TypeError que quebrava o dock (Codex, #118)
+    if (window.PBNav.onNavigate) {
+      try { window.PBNav.onNavigate(key); }
+      catch (e) { console.error("[pb-nav] onNavigate", e); }
+    }
   }
 
   async function mountCached(key, path, push, my) {
