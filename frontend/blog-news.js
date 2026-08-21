@@ -74,21 +74,54 @@
     return a;
   }
 
-  fetch("/api/blog/news?limit=12", { headers: { Accept: "application/json" } })
-    .then(function (r) { return r.ok ? r.json() : { news: [] }; })
-    .then(function (data) {
-      var news = (data && data.news) || [];
-      if (!news.length) {
-        // Sem notícias ainda (bot não rodou) — esconde a seção em vez de mostrar vazio.
-        section.style.display = "none";
-        return;
-      }
-      grid.textContent = "";
-      news.forEach(function (n) { grid.appendChild(card(n)); });
-      section.style.display = ""; // revela (começa oculta pra não piscar vazio)
-      if (empty) empty.style.display = "none"; // some com o estado vazio
-    })
-    .catch(function () {
-      section.style.display = "none";
-    });
+  // Geração: o 1º load (linha de baixo) roda no defer, ANTES do DOMContentLoaded
+  // onde o app-mode.js instala o wrap de pageFetches — então esse fetch inicial
+  // NÃO é contado pelo guard do PTR. Um pull durante um load inicial lento
+  // dispara um 2º request; se o inicial chegar por último, repintaria cards
+  // velhos (ou limparia com snapshot vazio). Cada load carimba uma geração; só
+  // a mais recente pinta — resposta superada (inicial ou refresh velho) é no-op.
+  var _gen = 0;
+  function load() {
+    var myGen = ++_gen;
+    // non-OK vira reject: cai no catch (tratado como falha transitória), não é
+    // confundido com "genuinamente sem notícias" — senão um 502 no meio de um
+    // pull-to-refresh apagaria os cards que já estavam na tela.
+    return fetch("/api/blog/news?limit=12", { headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)); })
+      .then(function (data) {
+        if (myGen !== _gen) return;   // superado por um load mais novo: não pinta
+        var news = (data && data.news) || [];
+        if (!news.length) {
+          // 200 com lista vazia = genuinamente sem notícias: limpa e mostra o
+          // estado vazio (vale pro 1º load e pra um refresh que esvaziou).
+          grid.textContent = "";
+          section.style.display = "none";
+          if (empty) empty.style.display = "";
+          return;
+        }
+        grid.textContent = "";
+        news.forEach(function (n) { grid.appendChild(card(n)); });
+        section.style.display = ""; // revela (começa oculta pra não piscar vazio)
+        if (empty) empty.style.display = "none"; // some com o estado vazio
+      })
+      .catch(function (err) {
+        // Superado por um load mais novo: não mexe no DOM nem propaga — quem
+        // reporta sucesso/falha pro indicador é o load atual.
+        if (myGen !== _gen) return;
+        // Falha de rede / non-OK: preserva o que já está renderizado (um refresh
+        // que falha não pode apagar cards bons). Só no 1º load, sem nada ainda,
+        // esconde a seção pra deixar o estado vazio à mostra.
+        if (!grid.children.length) section.style.display = "none";
+        // Re-lança: o PTR (app-mode.js) decide sucesso/falha pela promise —
+        // engolir aqui fazia o indicador reportar sucesso mesmo caindo a rede.
+        throw err;
+      });
+  }
+
+  // Pull-to-refresh do modo app (app-mode.js chama window.PBRefresh e espera a
+  // promise). Sem isso o gesto caía no reload da página inteira.
+  window.PBRefresh = load;
+  // 1º load não é aguardado por ninguém: engole a rejeição (já tratada
+  // visualmente) pra não virar unhandled promise rejection no console.
+  load().catch(function () {});
 })();

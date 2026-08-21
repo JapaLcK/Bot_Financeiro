@@ -672,15 +672,18 @@
     let dragged = false;    // este gesto puxou de verdade (tap nunca arma)
     let inFlight = null;    // PBRefresh pendente (o watchdog libera o ciclo, não o pedido)
 
-    // Nas telas de dados (Início e views do dashboard) o CONTEÚDO desce junto
-    // com o puxão — estilo nativo do iOS — e o indicador aparece no vão que
-    // abre sob o status bar. Nas outras (Ajustes, O que pedir) mantém o antigo:
-    // só o indicador desce por cima da página. O transform mora no `.page`, o
-    // único wrapper de conteúdo; foi verificado (grep) que nenhum position:fixed
-    // é descendente dele — dock, FAB, toasts e overlays são irmãos e ficam
-    // ancorados, então mover o `.page` não arrasta o chrome (e não abre faixa
-    // vazia embaixo). Ajustes fica de fora de propósito.
-    const moveContent = (page === "home" || page === "app");
+    // Nas telas do app o CONTEÚDO desce junto com o puxão — estilo nativo do
+    // iOS — e o indicador aparece no vão que abre sob o status bar. O transform
+    // mora no `.page`, o único wrapper de conteúdo; dock, FAB, toasts e overlays
+    // são irmãos do `.page` e ficam ancorados, então mover o `.page` não arrasta
+    // o chrome (e não abre faixa vazia embaixo).
+    // Em Ajustes o `#bankpick-overlay` (position:fixed) é filho direto do
+    // <body>, IRMÃO do `.page` (não descendente — confirmado no DOM). Então o
+    // transform do puxão não vira o containing block dele nem o desloca. Se um
+    // dia mover pra DENTRO do `.page`, o transform passaria a arrastá-lo — aí
+    // volta pra fora, ou bloqueia abrir enquanto o transform estiver ativo.
+    const moveContent = (page === "home" || page === "app" ||
+                         page === "settings" || page === "changelog");
     const contentEl = moveContent ? document.querySelector(".page") : null;
 
     // Fetches pendentes DA PÁGINA (não do puxão): o fallback de reload não
@@ -807,13 +810,15 @@
         // value difere do defaultValue: os editores são preenchidos via JS
         // (defaultValue fica vazio) e ficam display:none até abrir, então a
         // regra dispara exatamente com um editor aberto ou senha digitada.
+        // pageFetches: um save da página em voo (PATCH) seria abortado pelo
+        // reload — recusa e deixa ele terminar. (Só vale pro caminho de reload:
+        // no caminho custom, gatear o refresh no contador global trava o gesto
+        // se um fetch pendura além do watchdog — a serialização é por-view.)
         // Recusa com âmbar — o mesmo sinal de "não deu" da falha de rede.
         const dirty = Array.prototype.some.call(
           document.querySelectorAll("input, textarea"),
           f => f.offsetParent !== null && f.value !== f.defaultValue
         );
-        // pageFetches: um save da página em voo (PATCH de notificação) seria
-        // abortado pelo reload — recusa e deixa ele terminar.
         if (dirty || pageFetches > 0) { finish(false); return; }
         setTimeout(() => location.reload(), 220);
         return;

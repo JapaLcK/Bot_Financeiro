@@ -13,8 +13,8 @@
 <link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/site.css?v=4" />
 <script src="/safe-area.js?v=1"></script>
-  <link rel="stylesheet" href="/app-mode.css?v=29" />
-  <script src="/app-mode.js?v=33"></script>
+  <link rel="stylesheet" href="/app-mode.css?v=34" />
+  <script src="/app-mode.js?v=34"></script>
 </head>
 <body>
 <div class="glow"></div>
@@ -35,6 +35,9 @@
     </div>
   </nav>
 
+  <!-- .page: wrapper que o pull-to-refresh do modo app desliza (app-mode.js).
+       Inerte na web (sem CSS próprio); só serve de alvo pro transform. -->
+  <div class="page">
   <div class="wrap">
 
     <section class="section">
@@ -57,6 +60,7 @@
       </p>
     </section>
 
+  </div>
   </div>
 
   <footer class="footer">
@@ -89,6 +93,6 @@
   </footer>
 
   <script src="/nav-auth.js?v=7" defer></script>
-  <script src="/blog-news.js?v=2" defer></script>
+  <script src="/blog-news.js?v=5" defer></script>
 </body>
 </html>

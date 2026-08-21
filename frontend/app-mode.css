@@ -54,6 +54,8 @@ html.pb-app body {
 html.pb-app.pb-root-app,
 html.pb-app.pb-root-home,
 html.pb-app.pb-root-comandos { background-color: #2E111F; }
+/* Notícias: canvas = --bg do site.css, pro vão do pull-to-refresh casar. */
+html.pb-app.pb-root-changelog { background-color: #0c0c0d; }
 /* Paleta do Ajustes no <html> (não no body): pb-root-settings vem do <head> e
    pega o 1º paint; body.pb-page-settings só chega no DOMContentLoaded e piscava.
    As vars herdam pro body. */

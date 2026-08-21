@@ -1107,8 +1107,8 @@ body.balance-hidden .account-balance {
 </style>
 <script src="/static/auth-refresh.js"></script>
 <script src="/modals.js"></script>
-  <link rel="stylesheet" href="/app-mode.css?v=29" />
-  <script src="/app-mode.js?v=33"></script>
+  <link rel="stylesheet" href="/app-mode.css?v=34" />
+  <script src="/app-mode.js?v=34"></script>
 </head>
 <body>
 
@@ -1275,32 +1275,10 @@ body.balance-hidden .account-balance {
           </div>
         </div>
 
-        <!-- Modal: lista de todos os bancos do Open Finance (escolha acontece no site) -->
-        <div class="bankpick-overlay" id="bankpick-overlay" onclick="if(event.target===this)closeBankPicker()">
-          <div class="bankpick-modal" role="dialog" aria-modal="true" aria-label="Conectar banco">
-            <div class="bankpick-head">
-              <div class="bankpick-head-row">
-                <div>
-                  <div class="bankpick-title">Conectar banco</div>
-                  <div class="bankpick-sub">Busque entre as instituições disponíveis</div>
-                </div>
-                <button class="bankpick-x" type="button" onclick="closeBankPicker()" aria-label="Fechar"><i class="ph ph-x" aria-hidden="true"></i></button>
-              </div>
-              <div class="bankpick-search-wrap">
-                <span aria-hidden="true"><i class="ph ph-magnifying-glass" aria-hidden="true"></i></span>
-                <input id="bankpick-search" type="text" placeholder="Buscar banco (ex: Nubank, Itaú, C6…)"
-                       autocomplete="off" oninput="renderBankPicker(this.value)">
-              </div>
-            </div>
-            <div class="bankpick-list" id="bankpick-list"></div>
-            <div class="bankpick-foot">
-              <div class="bankpick-count" id="bankpick-count">Nenhum banco selecionado</div>
-              <button class="btn-connect bankpick-go" id="bankpick-go" type="button" onclick="confirmBankPicker()" disabled>
-                Conectar Open Finance
-              </button>
-            </div>
-          </div>
-        </div>
+        <!-- O #bankpick-overlay mora FORA do .page (no fim do body, junto dos
+             mfa-overlays): é position:fixed e o pull-to-refresh transforma o
+             .page, o que o tornaria contêiner de bloco de um fixed descendente
+             e deslocaria o overlay se aberto durante um refresh lento. -->
 
         <!-- Status card -->
         <div class="card">
@@ -1883,6 +1861,7 @@ function toggleSecurityEdit(kind, force) {
   if (show) document.getElementById(`security-${kind}-input`).focus();
 }
 
+let _securitySave = null;
 async function saveSecurityContact(kind) {
   const input = document.getElementById(`security-${kind}-input`);
   const rawValue = input.value;
@@ -1904,6 +1883,11 @@ async function saveSecurityContact(kind) {
   else if (kind === "name") body = { display_name: value };
   else return;
 
+  // Save de contato em voo — o PBRefresh da aba security encadeia atrás dele
+  // (mesma razão do notif): um GET que capturou estado pré-PATCH chegando por
+  // último sobrescreveria o nome/e-mail/telefone salvo.
+  let _doneSave;
+  _securitySave = new Promise(function (r) { _doneSave = r; });
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/security/contact`, {
       method: "PATCH",
@@ -1913,13 +1897,20 @@ async function saveSecurityContact(kind) {
     });
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
-    applySecuritySettings(data);
+    // Fecha o editor ANTES de aplicar: applySecuritySettings só sincroniza o
+    // input quando editing(kind) é false (a preservação de rascunho é pro
+    // pull-to-refresh, não pro próprio save). Se aplicasse com o editor aberto,
+    // o input ficava com o texto pré-save (ex.: com espaços) e o valor
+    // canonicalizado do backend só apareceria no rótulo, não ao reabrir.
     toggleSecurityEdit(kind, false);
+    applySecuritySettings(data);
     const labels = { email: "E-mail atualizado", phone: "Telefone atualizado", name: value ? "Nome atualizado" : "Nome removido" };
     showToast(labels[kind] || "Dado atualizado", "ok");
     notificationSettingsLoaded = false;
   } catch (err) {
     showToast(err.message || "Erro ao salvar dado", "error");
+  } finally {
+    _doneSave();   // libera o PBRefresh enfileirado atrás do save
   }
 }
 
@@ -1928,20 +1919,25 @@ function applySecuritySettings(data) {
   const phoneStatus = data.phone_status === "confirmed" || data.whatsapp_verified_at ? "confirmado" : "pendente";
   const phoneDisplay = data.phone ? formatPhoneBR(data.phone) : "";
   const displayName = (data.display_name || "").trim();
+  // Editor aberto (#security-{kind}-edit.show) = rascunho do usuário no input.
+  // Um refresh (pull-to-refresh) não pode sobrescrever o que ele está digitando;
+  // atualiza só o texto de exibição, deixa o input como está.
+  const editing = (kind) =>
+    document.getElementById(`security-${kind}-edit`)?.classList.contains("show");
   const nameValueEl = document.getElementById("security-name-value");
   if (nameValueEl) {
     nameValueEl.textContent = displayName || "Não definido";
-    document.getElementById("security-name-input").value = displayName;
+    if (!editing("name")) document.getElementById("security-name-input").value = displayName;
     document.getElementById("security-name-edit-btn").textContent = displayName ? "Alterar" : "Adicionar";
   }
   document.getElementById("security-email-value").textContent = displayValue(data.email);
-  document.getElementById("security-email-input").value = data.email || "";
+  if (!editing("email")) document.getElementById("security-email-input").value = data.email || "";
   document.getElementById("security-email-edit-btn").textContent = hasEmail ? "Alterar" : "Adicionar";
   document.getElementById("security-email-note").textContent = hasEmail
     ? "Usado para login, notificações por e-mail e recuperação de senha."
     : "Adicione um e-mail para ativar notificações e reset de senha.";
   document.getElementById("security-phone-value").textContent = displayValue(phoneDisplay);
-  document.getElementById("security-phone-input").value = phoneDisplay;
+  if (!editing("phone")) document.getElementById("security-phone-input").value = phoneDisplay;
   document.getElementById("security-phone-edit-btn").textContent = data.phone ? "Alterar" : "Adicionar";
   document.getElementById("security-phone-note").textContent = data.phone ? `WhatsApp ${phoneStatus}.` : "Nenhum telefone vinculado a esta conta.";
   document.getElementById("security-plan-value").textContent = displayValue(data.plan, "Plano não identificado");
@@ -1969,8 +1965,21 @@ function applySecuritySettings(data) {
     : "Vincule um e-mail à conta antes de solicitar reset de senha.";
 }
 
-async function loadSecuritySettings() {
+// propagate=true (pull-to-refresh): rejeita em falha pro indicador do PTR virar
+// âmbar, e NÃO zera a tela (preserva o que já estava). No load inicial / troca de
+// aba (propagate=false) mantém o comportamento antigo: degrada mostrando vazio.
+// Espera TODAS as branches assentarem e só então propaga a 1ª falha. Diferente
+// de Promise.all, que rejeita na 1ª falha e solta o indicador com GETs ainda em
+// voo — um deles podia terminar depois e sobrescrever um save feito nesse meio.
+async function awaitAllPropagate(promises) {
+  const results = await Promise.allSettled(promises);
+  const failed = results.find(function (r) { return r.status === "rejected"; });
+  if (failed) throw failed.reason;
+}
+
+async function loadSecuritySettings({ propagate = false } = {}) {
   if (!USER_ID) {
+    if (propagate) throw new Error("Sessão inválida");
     applySecuritySettings({});
     showToast("Sessão inválida. Faça login novamente", "error");
     return;
@@ -1981,11 +1990,14 @@ async function loadSecuritySettings() {
     const data = await resp.json();
     applySecuritySettings(data);
   } catch (err) {
+    if (propagate) throw err;
     applySecuritySettings({});
     showToast(err.message || "Erro ao carregar segurança", "error");
   }
-  loadActivityLog();
-  loadSessionsList();
+  // Espera atividade E sessões assentarem (não só a 1ª a falhar) e então
+  // propaga a falha — senão o indicador soltava com uma delas ainda em voo,
+  // que podia repintar por cima depois. {propagate} preserva o conteúdo atual.
+  await awaitAllPropagate([loadActivityLog({ propagate }), loadSessionsList({ propagate })]);
 }
 
 const ACTIVITY_ICONS = {
@@ -2050,10 +2062,12 @@ function renderActivityList(events, containerId, opts = {}) {
 
 let _activityCache = [];
 
-async function loadActivityLog() {
+async function loadActivityLog({ propagate = false } = {}) {
   const container = document.getElementById("activity-list");
   if (!USER_ID || !container) return;
-  container.innerHTML = '<div class="activity-loading">Carregando…</div>';
+  // No refresh (propagate) NÃO troca por "Carregando…": preserva o conteúdo
+  // atual, pra uma falha transitória não apagar dado válido antes de propagar.
+  if (!propagate) container.innerHTML = '<div class="activity-loading">Carregando…</div>';
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/activity?limit=10`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
@@ -2063,6 +2077,7 @@ async function loadActivityLog() {
     const showAllBtn = document.getElementById("activity-show-all-btn");
     if (showAllBtn) showAllBtn.hidden = _activityCache.length <= 3;
   } catch (err) {
+    if (propagate) throw err;   // refresh: preserva conteúdo, PTR vira âmbar
     container.innerHTML = '<div class="activity-empty">Não foi possível carregar a atividade.</div>';
   }
 }
@@ -2115,20 +2130,29 @@ function renderSessionsList(sessions) {
   }).join("");
 }
 
-async function loadSessionsList() {
+// Geração: uma revogação de sessão faz DELETE + loadSessionsList(); se o usuário
+// puxa nesse meio, o GET do refresh capturou a lista PRÉ-revogação e podia chegar
+// por último, re-renderizando a sessão revogada. Cada load carimba geração; só a
+// mais recente pinta, então o estado final é sempre o pós-revogação.
+let _sessionsGen = 0;
+async function loadSessionsList({ propagate = false } = {}) {
   const container = document.getElementById("sessions-list");
   if (!USER_ID || !container) return;
-  container.innerHTML = '<div class="activity-loading">Carregando…</div>';
+  if (!propagate) container.innerHTML = '<div class="activity-loading">Carregando…</div>';
+  const myGen = ++_sessionsGen;
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/sessions`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
+    if (myGen !== _sessionsGen) return;   // superado por um load mais novo: não pinta
     const sessions = Array.isArray(data.sessions) ? data.sessions : [];
     renderSessionsList(sessions);
     const otherCount = sessions.filter(s => !s.is_current).length;
     const btn = document.getElementById("sessions-revoke-others-btn");
     if (btn) btn.hidden = otherCount === 0;
   } catch (err) {
+    if (myGen !== _sessionsGen) return;   // superado: não mexe no DOM nem propaga
+    if (propagate) throw err;   // refresh: preserva conteúdo, PTR vira âmbar
     container.innerHTML = '<div class="activity-empty">Não foi possível carregar as sessões.</div>';
   }
 }
@@ -2256,12 +2280,14 @@ function applyNotificationSettings(data) {
   ].join(" · ");
 }
 
-async function loadNotificationSettings() {
+async function loadNotificationSettings({ propagate = false } = {}) {
   if (!USER_ID) {
+    if (propagate) throw new Error("Sessão inválida");
     showToast("Sessão inválida. Faça login novamente", "error");
     return;
   }
   setNotificationControlsDisabled(true);
+  let refreshErr = null;
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/notifications`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
@@ -2269,7 +2295,10 @@ async function loadNotificationSettings() {
     applyNotificationSettings(data);
     notificationSettingsLoaded = true;
   } catch (err) {
-    showToast(err.message || "Erro ao carregar notificações", "error");
+    // propagate (PTR): guarda o erro e re-lança DEPOIS do finally, pra o
+    // indicador virar âmbar sem pular a reabilitação dos controles.
+    if (propagate) refreshErr = err;
+    else showToast(err.message || "Erro ao carregar notificações", "error");
   } finally {
     const daily = document.getElementById("notif-daily-report")?.checked;
     const anyScheduled = daily
@@ -2284,9 +2313,17 @@ async function loadNotificationSettings() {
     document.getElementById("notif-whatsapp-updates").disabled = !hasWhatsapp;
     document.getElementById("notif-daily-hour").disabled = !anyScheduled;
   }
+  if (refreshErr) throw refreshErr;   // PTR: propaga a falha depois do finally
 }
 
+// Save de notificação em voo. O PBRefresh da aba encadeia atrás dele: puxar
+// durante um PATCH dispararia um GET que, com estado pré-PATCH, podia chegar
+// por último e sobrescrever o save. Controles ficam disabled durante o save,
+// então há no máximo um em voo.
+let _notifSave = null;
 async function updateNotificationSettings(patch) {
+  let _doneSave;
+  _notifSave = new Promise(function (r) { _doneSave = r; });
   setNotificationControlsDisabled(true);
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/notifications`, {
@@ -2315,6 +2352,7 @@ async function updateNotificationSettings(patch) {
     document.getElementById("notif-insight-email").disabled = !hasEmail;
     document.getElementById("notif-whatsapp-updates").disabled = !hasWhatsapp;
     document.getElementById("notif-daily-hour").disabled = !anyScheduled;
+    _doneSave();   // libera o PBRefresh enfileirado atrás do save
   }
 }
 
@@ -2754,16 +2792,25 @@ function updateStats(connections, accounts, transactions) {
 }
 
 /* ── Load ────────────────────────────────────── */
-async function loadData() {
+// Geração: o loadData inicial (chamado no initSettings, no parse) roda ANTES do
+// DOMContentLoaded onde o app-mode.js instala o wrap de pageFetches — então um
+// pull durante um load inicial lento dispara um 2º loadData e o inicial, se
+// chegar por último, sobrescreveria as conexões/contas/txs mais novas. Só a
+// geração mais recente pinta; resposta superada vira no-op.
+let _dataGen = 0;
+async function loadData({ propagate = false } = {}) {
   if (!USER_ID) {
+    if (propagate) throw new Error("Sessão inválida");
     renderConnections([]); renderAccounts([]); renderTransactions([]);
     updateStats([], [], []);
     return;
   }
+  const myGen = ++_dataGen;
   try {
     const resp = await fetch(`${API}/open-finance/${USER_ID}`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
+    if (myGen !== _dataGen) return;   // superado por um loadData mais novo: não pinta
     const c = data.connections  || [];
     const a = data.accounts     || [];
     const t = data.transactions || [];
@@ -2772,8 +2819,15 @@ async function loadData() {
     renderAccounts(a);
     renderTransactions(t);
     if (c.length > 0) setStep(3);
-    loadCaixinhas();
+    // await + propaga: sem isso o loadData soltava o indicador do PTR antes do
+    // caixinhas assentar (segundo pull podia sobrepor) e uma falha transitória
+    // escondia o card já renderizado com o refresh reportando sucesso.
+    await loadCaixinhas({ propagate });
   } catch (err) {
+    if (myGen !== _dataGen) return;   // superado: não mexe no DOM nem propaga
+    // propagate (PTR): preserva o que está renderizado e rejeita (âmbar). Sem
+    // isso, uma falha transitória apagava conexões/contas/transações da tela.
+    if (propagate) throw err;
     updateStats([], [], []);
     renderConnections([]); renderAccounts([]); renderTransactions([]);
     showToast(err.message || "Erro ao carregar dados", "error");
@@ -2786,15 +2840,25 @@ async function loadData() {
    do PigBank pro Banqueiro detectar os aportes. */
 let _caixMetas = [];
 
-async function loadCaixinhas() {
+async function loadCaixinhas({ propagate = false } = {}) {
   const card = document.getElementById("caixinhas-card");
   if (!USER_ID || !card) return;
   let data;
   try {
     const resp = await fetch(`${API}/open-finance/${USER_ID}/caixinhas`, authOptions({ headers: authHeaders() }));
-    if (!resp.ok) { card.style.display = "none"; return; }  // 404 = fora do beta
+    if (!resp.ok) {
+      if (resp.status === 404) { card.style.display = "none"; return; }  // 404 = fora do beta (legítimo)
+      throw new Error("HTTP " + resp.status);                            // 5xx/transitório
+    }
     data = await resp.json();
-  } catch { card.style.display = "none"; return; }
+  } catch (err) {
+    // No refresh (propagate) preserva o card já renderizado e propaga — sem
+    // isso uma falha transitória escondia caixinhas válidas. No load normal,
+    // mantém o comportamento antigo (esconde).
+    if (propagate) throw err;
+    card.style.display = "none";
+    return;
+  }
   const cx = data.caixinhas || [];
   if (!cx.length) { card.style.display = "none"; return; }
   _caixMetas = data.metas || [];
@@ -3018,12 +3082,16 @@ async function disconnectAll() {
 /* ── MFA (TOTP) ──────────────────────────────── */
 let _mfaStatus = { enabled: false, has_pending_secret: false, backup_codes_remaining: 0 };
 
-async function loadMfaStatus() {
+async function loadMfaStatus({ propagate = false } = {}) {
   try {
     const resp = await fetch(`${API}/auth/mfa/status`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
     _mfaStatus = await resp.json();
-  } catch {
+  } catch (err) {
+    // No refresh (propagate) preserva _mfaStatus e propaga: sem isso, um erro
+    // transitório no /auth/mfa/status virava "MFA desativado" na tela (oferecendo
+    // ativar de novo) e o PTR ainda reportava sucesso.
+    if (propagate) throw err;
     _mfaStatus = { enabled: false, has_pending_secret: false, backup_codes_remaining: 0 };
   }
   applyMfaUi();
@@ -3273,7 +3341,62 @@ async function initSettings() {
   }
 }
 initSettings();
+
+// Pull-to-refresh do modo app: re-busca os dados da aba visível (sem re-rodar
+// auth/paywall). app-mode.js chama window.PBRefresh e espera a promise — sem
+// isso o gesto caía no reload, que abortava saves de preferência em voo.
+window.PBRefresh = () => {
+  // Atualiza SÓ os dados da aba visível (loadData é de Open Finance; rodá-lo em
+  // toda aba apagava OF numa view onde nem aparece). Cada loader propaga falha
+  // (propagate:true) pro indicador do PTR virar âmbar em vez de fingir sucesso.
+  const view = new URLSearchParams(location.search).get("view") || "security";
+  if (view === "security")
+    // Encadeia atrás de um save de contato em voo; espera TODAS as branches
+    // (security + MFA, e dentro da security, atividade + sessões) antes de soltar.
+    return Promise.resolve(_securitySave).catch(function () {})
+      .then(function () { return awaitAllPropagate([
+        loadSecuritySettings({ propagate: true }),
+        loadMfaStatus({ propagate: true }),
+      ]); });
+  if (view === "notifications")
+    // Encadeia atrás de um save de notificação em voo: o GET só roda depois que
+    // o PATCH assentar, então não repinta com estado pré-PATCH.
+    return Promise.resolve(_notifSave).catch(function () {})
+      .then(function () { return loadNotificationSettings({ propagate: true }); });
+  if (view === "open-finance")
+    return loadData({ propagate: true });
+  return Promise.resolve();   // data / legal: nada dinâmico a atualizar
+};
 </script>
+
+<!-- Seletor de banco do Open Finance — FORA do .page (position:fixed; o
+     pull-to-refresh transforma o .page). Populado por JS via getElementById,
+     então a posição no DOM não importa pro comportamento. -->
+<div class="bankpick-overlay" id="bankpick-overlay" onclick="if(event.target===this)closeBankPicker()">
+  <div class="bankpick-modal" role="dialog" aria-modal="true" aria-label="Conectar banco">
+    <div class="bankpick-head">
+      <div class="bankpick-head-row">
+        <div>
+          <div class="bankpick-title">Conectar banco</div>
+          <div class="bankpick-sub">Busque entre as instituições disponíveis</div>
+        </div>
+        <button class="bankpick-x" type="button" onclick="closeBankPicker()" aria-label="Fechar"><i class="ph ph-x" aria-hidden="true"></i></button>
+      </div>
+      <div class="bankpick-search-wrap">
+        <span aria-hidden="true"><i class="ph ph-magnifying-glass" aria-hidden="true"></i></span>
+        <input id="bankpick-search" type="text" placeholder="Buscar banco (ex: Nubank, Itaú, C6…)"
+               autocomplete="off" oninput="renderBankPicker(this.value)">
+      </div>
+    </div>
+    <div class="bankpick-list" id="bankpick-list"></div>
+    <div class="bankpick-foot">
+      <div class="bankpick-count" id="bankpick-count">Nenhum banco selecionado</div>
+      <button class="btn-connect bankpick-go" id="bankpick-go" type="button" onclick="confirmBankPicker()" disabled>
+        Conectar Open Finance
+      </button>
+    </div>
+  </div>
+</div>
 
 <!-- ── MFA Modais ─────────────────────────────────────────────────────────── -->
 <style>
