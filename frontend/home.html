@@ -830,12 +830,14 @@ function toggleSidenav(force) {
   if (bd) bd.classList.toggle("open", open);
   const tog = document.querySelector(".sidenav-toggle");
   if (tog) tog.setAttribute("aria-expanded", String(open));
-  // Foco preso na gaveta: enquanto aberta, o resto da página (#page-root, que
-  // inclui o header/☰) fica inert — o Tab não escapa pro fundo coberto e, ao
-  // passar do último item, volta pro primeiro. Fechar libera o fundo ANTES de
-  // devolver o foco pro ☰ (que mora dentro do #page-root).
-  const root = document.getElementById("page-root");
-  if (root) root.toggleAttribute("inert", open);
+  // Foco preso na gaveta: enquanto aberta, TODO o resto (irmãos do body — o
+  // #page-root com o header/☰, e a .pb-tabbar que o app-mode.js injeta direto
+  // no body) fica inert. Assim o Tab não escapa pro fundo coberto e, ao passar
+  // do último item, volta pro primeiro. Fechar libera tudo ANTES de devolver o
+  // foco pro ☰ (que mora dentro do #page-root).
+  Array.from(document.body.children).forEach(el => {
+    if (el !== nav && el !== bd) el.toggleAttribute("inert", open);
+  });
   // Foco segue a gaveta: abrir → 1º item; fechar (backdrop/ESC) → ☰.
   if (open) {
     const first = nav.querySelector(".sidenav-item");
