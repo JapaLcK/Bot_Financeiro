@@ -231,16 +231,21 @@
     const t0 = performance.now();
     const log = via => console.log("[pb-nav]", key, via,
       Math.round(performance.now() - t0) + "ms");
-    if (cache[key]) { await mountCached(key, path, push, my); log("cache"); return; }
-    if (warm[key]) {                             // prefetch pronto: sem rede no tap
-      const html = warm[key];
-      delete warm[key];
-      await mountNew(key, path, html, push, my);
-      log("warm");
-      setTimeout(warmUp, 400);
-      return;
-    }
+    // O try cobre TODOS os ramos (cache, warm e fetch): mountNew também rejeita
+    // fora da rede do tap — ex.: script externo da página nova falhando ao
+    // carregar (home puxa auth-refresh/modals quando o boot foi no comandos).
+    // Sem isso o ramo warm deixava o usuário preso na tela velha, porque o
+    // go() já tinha assumido a navegação (apontamento do Codex no #118).
     try {
+      if (cache[key]) { await mountCached(key, path, push, my); log("cache"); return; }
+      if (warm[key]) {                           // prefetch pronto: sem rede no tap
+        const html = warm[key];
+        delete warm[key];
+        await mountNew(key, path, html, push, my);
+        log("warm");
+        setTimeout(warmUp, 400);
+        return;
+      }
       const r = await fetch(path, {
         credentials: "same-origin",
         headers: { Accept: "text/html" },
@@ -255,7 +260,7 @@
       log("fetch");
       setTimeout(warmUp, 400);
     } catch (_) {
-      if (my === seq) hard(path);                // timeout/rede: cai no MPA
+      if (my === seq) hard(path);                // qualquer falha: cai no MPA
     }
   }
 

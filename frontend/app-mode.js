@@ -54,6 +54,12 @@
   }
   const path = location.pathname.replace(/\/+$/, "") || "/";
   const page = PAGES[path];
+  // A página VIVA: igual a `page` no load, atualizada pelo pb-nav a cada troca
+  // client-side. Callback assíncrono que decide "aba ativa" (o /auth/me do
+  // syncNewsTab) tem que olhar pra cá — o const de boot fica velho depois de
+  // um swap e reconciliava contra a página errada (Codex, #118). Antes do SPA
+  // o reload descartava o callback pendente; agora ele sobrevive à troca.
+  let livePage = page;
 
   // pb-root-* no <html> aqui no <head> (síncrono) = paleta por página já no 1º
   // paint. Só no buildTabbar (DOMContentLoaded) fazia o Ajustes piscar de cor.
@@ -109,7 +115,7 @@
         a.setAttribute("href", t.href);
         const ico = a.querySelector(".pb-tab-ico"); if (ico) ico.innerHTML = t.icon;
         const lbl = a.querySelector("span:last-child"); if (lbl) lbl.textContent = t.label;
-        const active = PAGES[t.href] === page;
+        const active = PAGES[t.href] === livePage; // viva, não a de boot (SPA)
         a.classList.toggle("active", active);
         if (active) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
       })
@@ -395,6 +401,7 @@
     // página atual, referência do pointercancel e do clique-na-mesma-aba).
     if (window.PBNav && PBNav.enabled) {
       PBNav.onNavigate = key => {
+        livePage = key;   // callbacks assíncronos (syncNewsTab) leem a página viva
         const i = tabs.findIndex(a => PAGES[a.getAttribute("href")] === key);
         if (i < 0) return;
         home = i;
