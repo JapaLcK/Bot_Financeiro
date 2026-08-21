@@ -9,17 +9,20 @@ chamam via atributo de módulo, ex: `shared.authorize_dashboard_access`).
 """
 
 import asyncio
+import functools
+import hashlib
 import json
 import logging
 import os
 import pathlib
+import re
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
 import jwt as pyjwt
 from fastapi import HTTPException, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 from fastapi.security import HTTPAuthorizationCredentials
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
@@ -99,6 +102,42 @@ def inject_meta_pixel(html_text: str) -> str:
     return html_text[:idx] + snippet + html_text[idx:]
 
 
+# ─── Cache-buster dos assets (?v=) ───────────────────────────────────────────
+# Antes o `?v=N` de app-mode.css/js, pb-nav.js etc. era hardcoded no <head> de
+# cada HTML e bumpado à mão a cada deploy — o que dava merge conflict toda vez
+# que duas PRs mexiam no mesmo asset em paralelo (v=31 vs v=33 na mesma linha).
+# Agora o número no HTML é ignorado: reescrevemos `?v=N` no serve-time com um
+# hash do conteúdo do próprio arquivo. Zero bump manual → zero conflito, e a
+# invalidação passa a ser exata (só muda quando o arquivo muda de verdade).
+_ASSET_VER_RE = re.compile(r"(/[A-Za-z0-9_.-]+\.(?:css|js))\?v=\d+")
+
+
+@functools.lru_cache(maxsize=256)
+def _asset_hash(name: str, _mtime_ns: int) -> str:
+    # `_mtime_ns` entra na chave do cache só pra forçar recomputo quando o
+    # arquivo muda em disco (dev sem restart); não é usado no corpo.
+    data = (FRONTEND_DIR / name).read_bytes()
+    return hashlib.blake2b(data, digest_size=6).hexdigest()
+
+
+def stamp_asset_versions(html_text: str) -> str:
+    """Troca o `?v=N` de cada CSS/JS de frontend/ por um hash do conteúdo.
+
+    Aplicado em TODA saída de HTML (template, gerado em Python, montado à mão) —
+    ver os call sites em static_pages.py e no monólito. Assets fora de
+    FRONTEND_DIR ficam intactos.
+    """
+    def repl(m: "re.Match[str]") -> str:
+        url = m.group(1)             # ex: /app-mode.css
+        try:
+            mtime_ns = (FRONTEND_DIR / url[1:]).stat().st_mtime_ns
+        except OSError:
+            return m.group(0)        # arquivo não existe aqui → deixa como está
+        return f"{url}?v={_asset_hash(url[1:], mtime_ns)}"
+
+    return _ASSET_VER_RE.sub(repl, html_text)
+
+
 def html_file(path: pathlib.Path, pixel: bool = True) -> Response:
     """Serve um .html do frontend com cache desligado.
 
@@ -106,11 +145,11 @@ def html_file(path: pathlib.Path, pixel: bool = True) -> Response:
     <head>. As páginas da área logada (dashboard, settings, onboarding) passam
     `pixel=False` — o rastreio de marketing fica só nas páginas públicas.
     """
+    text = path.read_text(encoding="utf-8")
     if pixel and META_PIXEL_ID:
-        text = inject_meta_pixel(path.read_text(encoding="utf-8"))
-        response: Response = Response(content=text, media_type="text/html; charset=utf-8")
-    else:
-        response = FileResponse(path, media_type="text/html")
+        text = inject_meta_pixel(text)
+    response = Response(content=stamp_asset_versions(text),
+                        media_type="text/html; charset=utf-8")
     response.headers["Cache-Control"] = "no-store"
     response.headers["Pragma"] = "no-cache"
     return response

@@ -270,6 +270,15 @@ O app iOS (Capacitor, `mobile/`) carrega `https://pigbankai.com` num WKWebView c
   precisa reservar a área segura por conta própria.
 - **Paisagem está habilitada no iPhone** (`mobile/ios/App/App/Info.plist`), então os
   insets laterais contam. Não trate área segura como assunto de topo.
+- **O cache-buster `?v=N` de CSS/JS é reescrito no serve-time — não bumpe à mão.**
+  `stamp_asset_versions` (`frontend/routes/shared.py`) troca o `?v=N` de qualquer
+  `*.css`/`*.js` de `frontend/` por um hash do conteúdo do arquivo, em toda saída de
+  HTML (o funil `html_file`, `/suporte`, `/blog/{slug}` e as duas páginas geradas em
+  Python). O número hardcoded no `<head>` (ex.: `app-mode.css?v=29`) é **ignorado** —
+  está lá só como resquício; mexer nele não faz nada. A invalidação passou a ser
+  automática (muda o arquivo → muda o hash). Antes cada asset era bumpado à mão em
+  ~8 HTMLs por PR e `v=31` vs `v=33` na mesma linha dava merge conflict a cada duas
+  PRs paralelas. Asset servido de fora de `frontend/` fica intacto.
 
 ### Componentes fragmentados
 
