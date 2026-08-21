@@ -75,13 +75,19 @@
   }
 
   function load() {
+    // non-OK vira reject: cai no catch (tratado como falha transitória), não é
+    // confundido com "genuinamente sem notícias" — senão um 502 no meio de um
+    // pull-to-refresh apagaria os cards que já estavam na tela.
     return fetch("/api/blog/news?limit=12", { headers: { Accept: "application/json" } })
-      .then(function (r) { return r.ok ? r.json() : { news: [] }; })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)); })
       .then(function (data) {
         var news = (data && data.news) || [];
         if (!news.length) {
-          // Sem notícias ainda (bot não rodou) — esconde a seção em vez de mostrar vazio.
+          // 200 com lista vazia = genuinamente sem notícias: limpa e mostra o
+          // estado vazio (vale pro 1º load e pra um refresh que esvaziou).
+          grid.textContent = "";
           section.style.display = "none";
+          if (empty) empty.style.display = "";
           return;
         }
         grid.textContent = "";
@@ -90,7 +96,10 @@
         if (empty) empty.style.display = "none"; // some com o estado vazio
       })
       .catch(function () {
-        section.style.display = "none";
+        // Falha de rede / non-OK: preserva o que já está renderizado (um refresh
+        // que falha não pode apagar cards bons). Só no 1º load, sem nada ainda,
+        // esconde a seção pra deixar o estado vazio à mostra.
+        if (!grid.children.length) section.style.display = "none";
       });
   }
 
