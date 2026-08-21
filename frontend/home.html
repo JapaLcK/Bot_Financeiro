@@ -62,12 +62,17 @@ header {
   box-shadow:0 4px 24px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.12);
 }
 .header-left { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
-.logo {
-  width:36px;height:36px;border-radius:10px;
-  background:linear-gradient(135deg,#FF2D8E,#C7186B);
-  display:flex;align-items:center;justify-content:center;font-size:1rem;
-  box-shadow:0 4px 12px rgba(255,45,142,.4);
+.logo-img { width:36px;height:36px;object-fit:contain;display:block; }
+/* só no app: na web a home já tem nav-links + botão de conta, então o ☰
+   (que abre o mesmo dropdown) seria um controle duplicado. */
+.sidenav-toggle {
+  display:none;align-items:center;justify-content:center;
+  width:38px;height:38px;border-radius:50%;
+  background:transparent;border:none;color:var(--text-2);cursor:pointer;font-size:1.05rem;
+  transition:background .2s var(--ease),color .2s var(--ease);
 }
+.sidenav-toggle:hover { background:rgba(255,255,255,.08); color:var(--text); }
+html.pb-app body.pb-page-home .sidenav-toggle { display:inline-flex; }
 header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 
 .nav-links { display:flex; gap:4px; margin-left:8px; flex-wrap:wrap; }
@@ -96,6 +101,13 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 }
 .user-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .user-caret { color:var(--text-2); font-size:.7rem; }
+.user-av { display:none; }
+/* no app o botão de conta é um círculo: some o ▾, entra o ícone de pessoa */
+html.pb-app body.pb-page-home .user-caret { display:none !important; }
+html.pb-app body.pb-page-home .user-av {
+  display:inline-flex; align-items:center; justify-content:center;
+  font-size:1.15rem; color:var(--text-2);
+}
 
 .user-dropdown {
   position:absolute; top:calc(100% + 8px); right:0; width:280px;
@@ -439,7 +451,8 @@ footer a:hover { color:var(--text); }
 
   <header>
     <div class="header-left">
-      <div class="logo"><i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
+      <button class="sidenav-toggle" type="button" aria-label="Abrir menu" aria-haspopup="menu" onclick="toggleUserMenu(event)"><i class="ph ph-list" aria-hidden="true"></i></button>
+      <img class="logo-img" src="/brand/icon.png?v=1" alt="Piggy" />
       <h1>PigBank</h1>
       <div class="nav-links">
         <a class="nav-link active" href="/home">Início</a>
@@ -456,6 +469,7 @@ footer a:hover { color:var(--text); }
             <span class="user-label" id="user-label">Minha conta</span>
           </span>
           <span class="user-caret">▾</span>
+          <span class="user-av" aria-hidden="true"><i class="ph ph-user"></i></span>
         </button>
         <div class="user-dropdown" id="user-dropdown" role="menu">
           <div class="user-dropdown-head">
