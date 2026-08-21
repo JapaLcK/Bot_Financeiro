@@ -21,8 +21,16 @@
    carregam este CSS, no app E no site web (desktop/mobile) — aceito de
    propósito. Progressive enhancement: sem suporte, navega igual. */
 @view-transition { navigation: auto; }
+/* Duração explícita: o padrão do WebView vinha ~instantâneo (~15ms medido no
+   device) — o fade não dava pra ver. E o quadro VELHO fica opaco embaixo
+   (animation: none) enquanto o NOVO entra por cima (fade-in). Não é o cross-fade
+   simétrico dos dois meio-transparentes — assim não há o "dip" escuro no meio,
+   e o velho segura por cima do vão preto de ~1 frame da recarga. */
+::view-transition-old(root) { animation: none; }
+::view-transition-new(root) { animation: pb-vt-fade .32s ease both; }
+@keyframes pb-vt-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  ::view-transition-group(*) { animation-duration: 0s !important; }
+  ::view-transition-new(root) { animation-duration: .001s; }
 }
 
 /* ─── Base: página nunca rola de lado (app não arrasta lateral) ────────── */
