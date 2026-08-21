@@ -523,7 +523,7 @@ footer a:hover { color:var(--text); }
 
   <header>
     <div class="header-left">
-      <button class="sidenav-toggle" type="button" aria-label="Abrir menu" aria-controls="sidenav" onclick="toggleSidenav(true)"><i class="ph ph-list" aria-hidden="true"></i></button>
+      <button class="sidenav-toggle" type="button" aria-label="Abrir menu" aria-controls="sidenav" aria-expanded="false" onclick="toggleSidenav(true)"><i class="ph ph-list" aria-hidden="true"></i></button>
       <img class="logo-img" src="/brand/icon.png?v=1" alt="Piggy" />
       <h1>PigBank</h1>
       <div class="nav-links">
@@ -825,6 +825,8 @@ function toggleSidenav(force) {
   const open = (typeof force === "boolean") ? force : !nav.classList.contains("open");
   nav.classList.toggle("open", open);
   if (bd) bd.classList.toggle("open", open);
+  const tog = document.querySelector(".sidenav-toggle");
+  if (tog) tog.setAttribute("aria-expanded", String(open));
 }
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
