@@ -455,7 +455,8 @@ footer a:hover { color:var(--text); }
 <script src="/static/auth-refresh.js"></script>
 <script src="/modals.js"></script>
   <link rel="stylesheet" href="/app-mode.css?v=29" />
-  <script src="/app-mode.js?v=30"></script>
+  <script src="/app-mode.js?v=31"></script>
+  <script src="/pb-nav.js?v=1"></script>
 </head>
 <body>
 
@@ -657,6 +658,12 @@ footer a:hover { color:var(--text); }
 </div>
 
 <script>
+/* Contrato pb-nav: o código da página vive num init re-chamável — sem
+   let/const no topo do script (re-execução no mesmo documento estoura
+   SyntaxError de redeclaração). No load MPA o PBNav.boot roda os inits;
+   num mount client-side é o motor quem roda. */
+window.PBPages = window.PBPages || {};
+(PBPages.home = PBPages.home || { inits: [] }).inits.push(function () {
 const API = window.location.origin;
 const PT_MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 let USER_ID = 0;
@@ -1628,6 +1635,14 @@ async function mfaOnboardingDismiss() {
   await _markMfaOnboardingSeen();
   closeMfaOnboardingOverlay();
 }
+
+/* Handlers chamados por onclick= no HTML: dentro do init eles deixaram de
+   nascer globais — expõe exatamente os que o markup usa. */
+Object.assign(window, {
+  toggleHideBalance, toggleSidenav, logoutFromHome, connectWhatsAppFromHome,
+  mfaOnboardingActivate, mfaOnboardingDismiss,
+});
+});
 </script>
 
 <!-- ── MFA Onboarding overlay ─────────────────────────────────────────────── -->
@@ -1882,6 +1897,10 @@ async function mfaOnboardingDismiss() {
 <div class="upgrade-toast" id="upgrade-cancel-toast" role="status"></div>
 
 <script>
+/* Contrato pb-nav (mesmo esquema do script de cima; este e o de cima só
+   conversam pelo evento pb:checkout-confirmado, então cada um vira um init). */
+window.PBPages = window.PBPages || {};
+(PBPages.home = PBPages.home || { inits: [] }).inits.push(function () {
 /* O modal é um dialog de verdade agora: prende o Esc, o clique fora e devolve o
    foco pra quem o tinha antes. Sair daqui NUNCA cobra nada e nunca muda plano,
    só decide se a pessoa vai pro dashboard ou fica na Início. */
@@ -2140,7 +2159,12 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
     setTimeout(() => toast.classList.remove("show"), 9350);
   }
 })();
+
+/* Handlers de onclick= deste script (modal de boas-vindas Pro). */
+Object.assign(window, { dismissWelcomePro, goExplorePro });
+});
 </script>
+<script data-pb-boot>window.PBNav ? PBNav.boot("home") : PBPages.home.inits.forEach(f => f());</script>
 
 </body>
 </html>

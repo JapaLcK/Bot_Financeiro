@@ -377,6 +377,18 @@ async def serve_app_mode_css():
     )
 
 
+@router.get("/pb-nav.js")
+async def serve_pb_nav_js():
+    """Navegação client-side entre as abas do modo app (troca de tela sem
+    recarregar o documento — elimina a piscada da navegação no WebView).
+    Inerte sem a flag pbspa; carregado só pelas páginas convertidas."""
+    return FileResponse(
+        FRONTEND_DIR / "pb-nav.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @router.get("/safe-area.js")
 async def serve_safe_area_js():
     """Reserva de safe area para as páginas fora do modo app (precos, landing,

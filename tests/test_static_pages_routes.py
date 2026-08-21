@@ -73,6 +73,15 @@ def test_auth_refresh_js_com_cache_publico():
     assert resp.headers["cache-control"] == "public, max-age=300"
 
 
+def test_pb_nav_js_com_cache_publico():
+    resp = client.get("/pb-nav.js")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/javascript")
+    assert resp.headers["cache-control"] == "public, max-age=300"
+    # o motor exige o contrato: sem PBNav.boot as páginas convertidas não iniciam
+    assert "PBNav" in resp.text and "boot" in resp.text
+
+
 def test_service_worker_headers():
     resp = client.get("/service-worker.js")
     assert resp.status_code == 200

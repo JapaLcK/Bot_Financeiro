@@ -333,8 +333,12 @@
       start();
       if (navigate && i !== home) {
         const href = tabs[i].getAttribute("href");
-        if (smooth) setTimeout(() => { location.href = href; }, 190);
-        else location.href = href;
+        // pb-nav (se ativo e a rota é convertida) troca a tela sem recarregar;
+        // o onNavigate lá embaixo sincroniza o dock quando o mount terminar.
+        // Senão, navegação de documento igual sempre foi.
+        const nav = () => { if (!(window.PBNav && PBNav.go(href))) location.href = href; };
+        if (smooth) setTimeout(nav, 190);
+        else nav();
       }
     }
 
@@ -384,6 +388,26 @@
     window.addEventListener("orientationchange", () => setTimeout(measure, 120));
     // Fontes/ícones chegando depois mudam a largura das abas → remede
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure).catch(() => {});
+
+    // Navegação client-side (pb-nav.js): o motor troca a tela sem recarregar,
+    // então o dock é o MESMO objeto vivo — aqui ele se sincroniza ao fim de
+    // cada mount (tap ou botão voltar): bolha, aba ativa e "home" (a aba da
+    // página atual, referência do pointercancel e do clique-na-mesma-aba).
+    if (window.PBNav && PBNav.enabled) {
+      PBNav.onNavigate = key => {
+        const i = tabs.findIndex(a => PAGES[a.getAttribute("href")] === key);
+        if (i < 0) return;
+        home = i;
+        setLive(i);
+        target = stops[i];
+        start();
+        tabs.forEach((a, k) => {
+          a.classList.toggle("active", k === i);
+          if (k === i) a.setAttribute("aria-current", "page");
+          else a.removeAttribute("aria-current");
+        });
+      };
+    }
   }
 
   // Glifos de texto (☰, 🐷) viram SVG/imagem — WebView pode não ter as fontes
