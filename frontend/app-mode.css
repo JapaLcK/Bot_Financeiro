@@ -33,7 +33,19 @@ html.pb-app body {
 html.pb-app.pb-root-app,
 html.pb-app.pb-root-home,
 html.pb-app.pb-root-comandos { background-color: #2E111F; }
-html.pb-app.pb-root-settings { background-color: #0B0B0D; }
+/* Paleta do Ajustes no <html> (não no body): pb-root-settings vem do <head> e
+   pega o 1º paint; body.pb-page-settings só chega no DOMContentLoaded e piscava.
+   As vars herdam pro body. */
+html.pb-app.pb-root-settings {
+  --page:         #0B0B0D;
+  --surface:      #141416;
+  --surface-2:    #1B1B1F;
+  --border:       rgba(255, 255, 255, 0.07);
+  --border-hover: rgba(255, 255, 255, 0.14);
+  --muted:        rgba(255, 255, 255, 0.55);
+  --faint:        rgba(255, 255, 255, 0.34);
+  background-color: #0B0B0D;
+}
 /* Modo claro do dashboard: o applyTheme espelha a classe no <html> por causa
    desta regra. Sem ela o canvas continuaria ameixa enquanto a página vira
    #F6F4F1 — a mesma faixa, invertida. Tom medido no claro: #E8E4E2.
@@ -593,23 +605,13 @@ html.pb-app .upgrade-toast {
 }
 
 /* ─── Settings ─────────────────────────────────────────────────────────── */
-/* Topbar (logo + atalhos) redundante com a tab bar */
-html.pb-app body.pb-page-settings .topbar { display: none !important; }
+/* Topbar redundante com a tab bar. Escondida pelo pb-root-* (1º paint), senão a
+   barra azulada piscava junto com a paleta. */
+html.pb-app.pb-root-settings .topbar { display: none !important; }
 html.pb-app body.pb-page-settings { padding-top: env(safe-area-inset-top); }
 
 /* ─── Settings vira "Minha conta" (estilo app) ─────────────────────────── */
-/* Paleta: o settings tem tema próprio cinza-azulado (#16181d/#1e2128) que
-   destoa do preto da marca — no app, escurece pro tom do resto do produto */
-html.pb-app body.pb-page-settings {
-  --page:         #0B0B0D;
-  --surface:      #141416;
-  --surface-2:    #1B1B1F;
-  --border:       rgba(255, 255, 255, 0.07);
-  --border-hover: rgba(255, 255, 255, 0.14);
-  --muted:        rgba(255, 255, 255, 0.55);
-  --faint:        rgba(255, 255, 255, 0.34);
-  background: #0B0B0D !important;
-}
+/* Paleta movida pra html.pb-app.pb-root-settings (1º paint); aqui só estrutural. */
 
 /* Cabeçalho original (breadcrumb + título por seção) sai; entra o header
    fixo "Minha conta" + banner de segurança injetados pelo app-mode.js */
