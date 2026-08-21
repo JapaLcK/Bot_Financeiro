@@ -830,6 +830,15 @@ function toggleSidenav(force) {
   if (bd) bd.classList.toggle("open", open);
   const tog = document.querySelector(".sidenav-toggle");
   if (tog) tog.setAttribute("aria-expanded", String(open));
+  // Foco segue a gaveta: ao abrir vai pro 1º item; ao fechar (backdrop/ESC)
+  // volta pro ☰ — senão o Tab passeia pela página coberta, e o ESC deixaria
+  // o foco preso num link que acabou de virar inert.
+  if (open) {
+    const first = nav.querySelector(".sidenav-item");
+    if (first) first.focus();
+  } else if (tog) {
+    tog.focus();
+  }
 }
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") {

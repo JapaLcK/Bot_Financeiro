@@ -10265,8 +10265,12 @@ function _showAccessError(title, msg) {
 	    // Os demais abrem via navigateTo — mas só se o item do sidenav existir
 	    // e estiver visível, respeitando os beta-gates (ex.: agents_ui_enabled)
 	    // e o pro-gate, igual ao clique manual.
+	    // affiliate fica de fora: seu item (#sidenav-affiliate) só vira visível
+	    // depois do initAffiliateNav() (fire-and-forget, abaixo), então o check
+	    // de visibilidade correria com ele. A gaveta da /home não linka affiliate,
+	    // e ele nunca foi deep-linkável por URL — manter fora não regride nada.
 	    if (view === "investments") setMainView("investments");
-	    else if (view && view !== "overview") {
+	    else if (view && view !== "overview" && view !== "affiliate") {
 	      const navEl = document.querySelector(`[data-nav="${view}"]`);
 	      if (navEl && navEl.style.display !== "none") navigateTo(view);
 	    }
