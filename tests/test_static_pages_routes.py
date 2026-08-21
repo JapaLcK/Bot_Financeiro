@@ -5,9 +5,12 @@ registrada no app e respondendo com o mesmo status/content-type/headers.
 Nenhuma toca banco — TestClient sem lifespan basta.
 """
 
+import re
+
 from fastapi.testclient import TestClient
 
 import frontend.finance_bot_websocket_custom as dashboard
+from frontend.routes.shared import FRONTEND_DIR, _asset_hash, stamp_asset_versions
 
 client = TestClient(dashboard.app)
 
@@ -36,6 +39,31 @@ def test_html_pages_respondem_com_no_store():
         assert resp.status_code == 200, path
         assert resp.headers["content-type"].startswith("text/html"), path
         assert resp.headers["cache-control"] == "no-store", path
+
+
+def test_stamp_asset_versions_usa_hash_de_conteudo():
+    # Número hardcoded no HTML é ignorado e trocado pelo hash do arquivo real.
+    mtime = (FRONTEND_DIR / "app-mode.css").stat().st_mtime_ns
+    esperado = _asset_hash("app-mode.css", mtime)
+    out = stamp_asset_versions('<link href="/app-mode.css?v=29">')
+    assert f"/app-mode.css?v={esperado}" in out
+    assert "?v=29" not in out
+    # Assets distintos → hashes distintos (não é um número global compartilhado).
+    js = re.search(r"/app-mode\.js\?v=(\w+)", stamp_asset_versions('"/app-mode.js?v=1"'))
+    assert js and js.group(1) != esperado
+    # Asset que não existe em frontend/ fica intacto.
+    assert stamp_asset_versions('"/naoexiste.js?v=7"') == '"/naoexiste.js?v=7"'
+
+
+def test_home_serve_app_mode_com_cache_buster_de_hash():
+    # A página logada real: o ?v= servido tem que ser hash, nunca o v=29 do arquivo.
+    html = client.get("/home").text
+    m = re.search(r"/app-mode\.css\?v=([0-9a-f]+)", html)
+    assert m, "app-mode.css deveria aparecer com ?v=<hash>"
+    assert m.group(1) != "29"
+    assert m.group(1) == _asset_hash(
+        "app-mode.css", (FRONTEND_DIR / "app-mode.css").stat().st_mtime_ns
+    )
 
 
 def test_health():

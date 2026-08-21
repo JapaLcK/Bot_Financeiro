@@ -19,6 +19,7 @@ from frontend.routes.shared import (
     inject_meta_pixel,
     limiter,
     public_site_url,
+    stamp_asset_versions,
 )
 
 router = APIRouter()
@@ -159,7 +160,7 @@ async def serve_blog_guide(slug: str, request: Request):
         .replace("{{BODY}}", guide["body"])            # HTML confiável (nosso)
         .replace("{{MORE_GUIDES}}", more)
     )
-    return Response(content=page, media_type="text/html; charset=utf-8")
+    return Response(content=stamp_asset_versions(page), media_type="text/html; charset=utf-8")
 
 
 @router.get("/whatsapp")
@@ -262,7 +263,7 @@ async def serve_suporte():
     # Mesmos headers de cache das demais páginas HTML (html_file): o /suporte é
     # montado à mão (injeta o FAQ), então precisa setar no-store explicitamente.
     # /suporte é público → recebe o Meta Pixel como as demais páginas públicas.
-    page = inject_meta_pixel(template.replace("{{FAQ}}", faq))
+    page = stamp_asset_versions(inject_meta_pixel(template.replace("{{FAQ}}", faq)))
     return Response(content=page,
                     media_type="text/html; charset=utf-8",
                     headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
