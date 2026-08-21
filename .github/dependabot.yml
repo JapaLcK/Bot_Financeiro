@@ -6,6 +6,11 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
+    # Janela de segurança: espera N dias após publicação antes de abrir PR,
+    # pra não puxar uma versão recém-comprometida (supply-chain).
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
@@ -26,6 +31,9 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
     labels:
       - "dependencies"
     commit-message:
