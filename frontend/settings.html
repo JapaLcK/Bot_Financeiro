@@ -2281,7 +2281,14 @@ async function loadNotificationSettings({ propagate = false } = {}) {
   if (refreshErr) throw refreshErr;   // PTR: propaga a falha depois do finally
 }
 
+// Save de notificação em voo. O PBRefresh (pull-to-refresh) da aba encadeia
+// atrás dele: sem isso, puxar durante um PATCH dispara um GET em paralelo que,
+// com estado pré-PATCH, podia chegar por último e sobrescrever o save no DOM.
+// Os controles ficam disabled durante o save, então há no máximo um em voo.
+let _notifSave = null;
 async function updateNotificationSettings(patch) {
+  let _doneSave;
+  _notifSave = new Promise(function (r) { _doneSave = r; });
   setNotificationControlsDisabled(true);
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/notifications`, {
@@ -2310,6 +2317,7 @@ async function updateNotificationSettings(patch) {
     document.getElementById("notif-insight-email").disabled = !hasEmail;
     document.getElementById("notif-whatsapp-updates").disabled = !hasWhatsapp;
     document.getElementById("notif-daily-hour").disabled = !anyScheduled;
+    _doneSave();   // libera o PBRefresh que estava enfileirado atrás do save
   }
 }
 
@@ -3284,7 +3292,12 @@ window.PBRefresh = () => {
   if (view === "security")
     return Promise.all([loadSecuritySettings({ propagate: true }), loadMfaStatus()]);
   if (view === "notifications")
-    return loadNotificationSettings({ propagate: true });
+    // Encadeia atrás de um save em voo: o GET só roda depois que o PATCH
+    // assentar, então não repinta com estado pré-PATCH nem reabilita os
+    // controles no meio do save. (catch pra um save que falhou não abortar o
+    // refresh — ele revalida de qualquer forma.)
+    return Promise.resolve(_notifSave).catch(function () {})
+      .then(function () { return loadNotificationSettings({ propagate: true }); });
   if (view === "open-finance")
     return loadData({ propagate: true });
   return Promise.resolve();   // data / legal: nada dinâmico a atualizar
