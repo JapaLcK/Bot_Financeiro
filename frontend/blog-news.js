@@ -74,21 +74,28 @@
     return a;
   }
 
-  fetch("/api/blog/news?limit=12", { headers: { Accept: "application/json" } })
-    .then(function (r) { return r.ok ? r.json() : { news: [] }; })
-    .then(function (data) {
-      var news = (data && data.news) || [];
-      if (!news.length) {
-        // Sem notícias ainda (bot não rodou) — esconde a seção em vez de mostrar vazio.
+  function load() {
+    return fetch("/api/blog/news?limit=12", { headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : { news: [] }; })
+      .then(function (data) {
+        var news = (data && data.news) || [];
+        if (!news.length) {
+          // Sem notícias ainda (bot não rodou) — esconde a seção em vez de mostrar vazio.
+          section.style.display = "none";
+          return;
+        }
+        grid.textContent = "";
+        news.forEach(function (n) { grid.appendChild(card(n)); });
+        section.style.display = ""; // revela (começa oculta pra não piscar vazio)
+        if (empty) empty.style.display = "none"; // some com o estado vazio
+      })
+      .catch(function () {
         section.style.display = "none";
-        return;
-      }
-      grid.textContent = "";
-      news.forEach(function (n) { grid.appendChild(card(n)); });
-      section.style.display = ""; // revela (começa oculta pra não piscar vazio)
-      if (empty) empty.style.display = "none"; // some com o estado vazio
-    })
-    .catch(function () {
-      section.style.display = "none";
-    });
+      });
+  }
+
+  // Pull-to-refresh do modo app (app-mode.js chama window.PBRefresh e espera a
+  // promise). Sem isso o gesto caía no reload da página inteira.
+  window.PBRefresh = load;
+  load();
 })();

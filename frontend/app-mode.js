@@ -631,15 +631,18 @@
     let dragged = false;    // este gesto puxou de verdade (tap nunca arma)
     let inFlight = null;    // PBRefresh pendente (o watchdog libera o ciclo, não o pedido)
 
-    // Nas telas de dados (Início e views do dashboard) o CONTEÚDO desce junto
-    // com o puxão — estilo nativo do iOS — e o indicador aparece no vão que
-    // abre sob o status bar. Nas outras (Ajustes, O que pedir) mantém o antigo:
-    // só o indicador desce por cima da página. O transform mora no `.page`, o
-    // único wrapper de conteúdo; foi verificado (grep) que nenhum position:fixed
-    // é descendente dele — dock, FAB, toasts e overlays são irmãos e ficam
-    // ancorados, então mover o `.page` não arrasta o chrome (e não abre faixa
-    // vazia embaixo). Ajustes fica de fora de propósito.
-    const moveContent = (page === "home" || page === "app");
+    // Nas telas do app o CONTEÚDO desce junto com o puxão — estilo nativo do
+    // iOS — e o indicador aparece no vão que abre sob o status bar. O transform
+    // mora no `.page`, o único wrapper de conteúdo; dock, FAB, toasts e overlays
+    // são irmãos do `.page` e ficam ancorados, então mover o `.page` não arrasta
+    // o chrome (e não abre faixa vazia embaixo).
+    // ponytail: em Ajustes o `#bankpick-overlay` (position:fixed) É descendente
+    // do `.page` — exceção ao "nenhum fixed descendente" das outras telas. É
+    // inofensivo: é um modal full-screen que só existe com `.open` e bloqueia o
+    // gesto quando aberto, então nunca desliza junto. Mover pra fora do `.page`
+    // se algum dia virar um fixed visível durante o puxão.
+    const moveContent = (page === "home" || page === "app" ||
+                         page === "settings" || page === "changelog");
     const contentEl = moveContent ? document.querySelector(".page") : null;
 
     // Fetches pendentes DA PÁGINA (não do puxão): o fallback de reload não

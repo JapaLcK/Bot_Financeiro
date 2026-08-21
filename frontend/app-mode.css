@@ -34,6 +34,8 @@ html.pb-app.pb-root-app,
 html.pb-app.pb-root-home,
 html.pb-app.pb-root-comandos { background-color: #2E111F; }
 html.pb-app.pb-root-settings { background-color: #0B0B0D; }
+/* Notícias: canvas = --bg do site.css, pro vão do pull-to-refresh casar. */
+html.pb-app.pb-root-changelog { background-color: #0c0c0d; }
 /* Modo claro do dashboard: o applyTheme espelha a classe no <html> por causa
    desta regra. Sem ela o canvas continuaria ameixa enquanto a página vira
    #F6F4F1 — a mesma faixa, invertida. Tom medido no claro: #E8E4E2.
