@@ -333,7 +333,11 @@
       start();
       if (navigate && i !== home) {
         const href = tabs[i].getAttribute("href");
-        if (smooth) setTimeout(() => { location.href = href; }, 190);
+        // 60ms (era 190): o delay do melt somava ao tempo já parado da recarga
+        // — com o cross-fade das View Transitions, o quadro velho fica congelado
+        // durante a navegação, então quanto menos espera antes de começar,
+        // menos "trava". A bolha ainda começa a deslizar; só não espera terminar.
+        if (smooth) setTimeout(() => { location.href = href; }, 60);
         else location.href = href;
       }
     }
