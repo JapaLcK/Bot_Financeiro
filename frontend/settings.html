@@ -2298,10 +2298,12 @@ function applyNotificationSettings(data) {
   ].join(" · ");
 }
 
-// Geração: reachable só quando um pull-to-refresh cai em cima do primeiro load
-// da aba (o PTR já encadeia atrás de _notifSave). Guard uniforme com os demais
-// loaders: o load antigo não repinta nem tinge o PTR de âmbar. O finally
-// (reabilitação dos controles) segue rodando sempre, idempotente sobre o DOM.
+// Geração: reachable quando um pull-to-refresh cai em cima do primeiro load da
+// aba (o PTR já encadeia atrás de _notifSave). O load antigo não repinta, não
+// tinge o PTR de âmbar E não reabilita os controles — este último importa
+// porque a reabilitação é o que sustenta o invariante "no máximo um save":
+// reabilitar cedo (com o GET novo ainda em voo) deixaria um PATCH concorrente
+// ser sobrescrito pelo GET pré-PATCH. Só a geração corrente restaura.
 let _notifGen = 0;
 async function loadNotificationSettings({ propagate = false } = {}) {
   if (!USER_ID) {
@@ -2328,18 +2330,25 @@ async function loadNotificationSettings({ propagate = false } = {}) {
     else if (propagate) refreshErr = err;
     else showToast(err.message || "Erro ao carregar notificações", "error");
   } finally {
-    const daily = document.getElementById("notif-daily-report")?.checked;
-    const anyScheduled = daily
-      || document.getElementById("notif-weekly-report")?.checked
-      || document.getElementById("notif-monthly-report")?.checked;
-    const destinationText = document.getElementById("notif-email-value")?.textContent || "";
-    const hasEmail = !destinationText.startsWith("E-mail não vinculado");
-    const hasWhatsapp = !destinationText.includes("WhatsApp não vinculado");
-    setNotificationControlsDisabled(false);
-    document.getElementById("notif-tip-email").disabled = !hasEmail;
-    document.getElementById("notif-insight-email").disabled = !hasEmail;
-    document.getElementById("notif-whatsapp-updates").disabled = !hasWhatsapp;
-    document.getElementById("notif-daily-hour").disabled = !anyScheduled;
+    // Só a geração corrente reabilita os controles. Um load superado NÃO pode
+    // reabilitar enquanto o GET mais novo ainda está em voo — senão o usuário
+    // dispara um PATCH cujos controles/estado o GET pré-PATCH sobrescreveria,
+    // furando o invariante "no máximo um save". O load mais novo restaura no
+    // próprio finally (e, como é o último a assentar, sempre restaura).
+    if (myGen === _notifGen) {
+      const daily = document.getElementById("notif-daily-report")?.checked;
+      const anyScheduled = daily
+        || document.getElementById("notif-weekly-report")?.checked
+        || document.getElementById("notif-monthly-report")?.checked;
+      const destinationText = document.getElementById("notif-email-value")?.textContent || "";
+      const hasEmail = !destinationText.startsWith("E-mail não vinculado");
+      const hasWhatsapp = !destinationText.includes("WhatsApp não vinculado");
+      setNotificationControlsDisabled(false);
+      document.getElementById("notif-tip-email").disabled = !hasEmail;
+      document.getElementById("notif-insight-email").disabled = !hasEmail;
+      document.getElementById("notif-whatsapp-updates").disabled = !hasWhatsapp;
+      document.getElementById("notif-daily-hour").disabled = !anyScheduled;
+    }
   }
   if (refreshErr) throw refreshErr;   // PTR: propaga a falha depois do finally
 }
