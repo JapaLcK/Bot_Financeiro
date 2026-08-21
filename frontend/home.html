@@ -830,9 +830,13 @@ function toggleSidenav(force) {
   if (bd) bd.classList.toggle("open", open);
   const tog = document.querySelector(".sidenav-toggle");
   if (tog) tog.setAttribute("aria-expanded", String(open));
-  // Foco segue a gaveta: ao abrir vai pro 1º item; ao fechar (backdrop/ESC)
-  // volta pro ☰ — senão o Tab passeia pela página coberta, e o ESC deixaria
-  // o foco preso num link que acabou de virar inert.
+  // Foco preso na gaveta: enquanto aberta, o resto da página (#page-root, que
+  // inclui o header/☰) fica inert — o Tab não escapa pro fundo coberto e, ao
+  // passar do último item, volta pro primeiro. Fechar libera o fundo ANTES de
+  // devolver o foco pro ☰ (que mora dentro do #page-root).
+  const root = document.getElementById("page-root");
+  if (root) root.toggleAttribute("inert", open);
+  // Foco segue a gaveta: abrir → 1º item; fechar (backdrop/ESC) → ☰.
   if (open) {
     const first = nav.querySelector(".sidenav-item");
     if (first) first.focus();
@@ -898,12 +902,16 @@ async function loadProfile() {
     document.getElementById("user-label").textContent = displayLabel(PROFILE_DISPLAY_NAME, PROFILE_EMAIL);
     document.getElementById("user-email").textContent = PROFILE_EMAIL || "Minha conta";
     document.getElementById("user-plan").textContent  = planLabel(plan);
-    // Beta-gate dos Agentes: esconde o item da gaveta quando desligado
-    // (mesma regra do dashboard.js — freio de emergência / allowlist).
-    if (data.agents_ui_enabled === false) {
-      document.querySelectorAll('[data-nav="agentes"]').forEach(el => { el.style.display = "none"; });
-    }
   } catch {}
+}
+
+// Beta-gate dos Agentes (freio de emergência / allowlist). O flag vem do
+// /auth/me — NÃO do /auth/dashboard-profile, que só traz feature_gates de
+// plano. Esconde o item da gaveta quando off, igual ao dashboard.js:10215.
+function applyAgentsGate(me) {
+  if (me && me.agents_ui_enabled === false) {
+    document.querySelectorAll('[data-nav="agentes"]').forEach(el => { el.style.display = "none"; });
+  }
 }
 
 /* ─── Render: greeting ────────────────────────────────────────────────── */
@@ -1505,6 +1513,7 @@ let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
   // 3 e 4) Busca + render moram em loadHomeData() porque o "puxar pra
   // atualizar" do app (app-mode.js) precisa refazer exatamente este pedaço.
   _homeMe = me;
+  applyAgentsGate(me);
   await loadHomeData({ initial: true });
 })();
 
