@@ -63,13 +63,16 @@ header {
 }
 .header-left { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
 .logo-img { width:36px;height:36px;object-fit:contain;display:block; }
+/* só no app: na web a home já tem nav-links + botão de conta, então o ☰
+   (que abre o mesmo dropdown) seria um controle duplicado. */
 .sidenav-toggle {
-  display:inline-flex;align-items:center;justify-content:center;
+  display:none;align-items:center;justify-content:center;
   width:38px;height:38px;border-radius:50%;
   background:transparent;border:none;color:var(--text-2);cursor:pointer;font-size:1.05rem;
   transition:background .2s var(--ease),color .2s var(--ease);
 }
 .sidenav-toggle:hover { background:rgba(255,255,255,.08); color:var(--text); }
+html.pb-app body.pb-page-home .sidenav-toggle { display:inline-flex; }
 header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
 
 .nav-links { display:flex; gap:4px; margin-left:8px; flex-wrap:wrap; }
