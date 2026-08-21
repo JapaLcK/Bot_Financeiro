@@ -14,10 +14,12 @@
 
 /* ─── Transição entre telas ──────────────────────────────────────────────
    Trocar de aba é navegação de documento (location.href) — sem isto o WebView
-   pisca em branco entre as páginas. navigation: auto = cross-fade nativo do
-   WebKit entre a que sai e a que entra (iOS 18.2+; o app roda iOS 26). Vale só
-   entre páginas que carregam este CSS (as do app); pro resto, navega igual.
-   Progressive enhancement: sem suporte, é ignorado. */
+   pisca em branco entre as páginas. navigation: auto = cross-fade nativo entre
+   a página que sai e a que entra (WebKit iOS 18.2+ e Chrome; o app roda iOS 26).
+   Atenção: é uma at-rule GLOBAL — não dá pra escopar por html.pb-app como o
+   resto deste arquivo. Então vale pra navegação entre quaisquer páginas que
+   carregam este CSS, no app E no site web (desktop/mobile) — aceito de
+   propósito. Progressive enhancement: sem suporte, navega igual. */
 @view-transition { navigation: auto; }
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*) { animation-duration: 0s !important; }
