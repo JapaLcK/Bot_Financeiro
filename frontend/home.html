@@ -484,7 +484,7 @@ footer a:hover { color:var(--text); }
      abre fica escondido na web. Os itens são as views do dashboard, então
      deep-linkam pra /app?view=X (o dashboard.js abre a view certa no load). -->
 <div class="sidenav-backdrop" id="sidenav-backdrop" onclick="toggleSidenav(false)"></div>
-<aside class="sidenav" id="sidenav" aria-label="Navegação principal">
+<aside class="sidenav" id="sidenav" aria-label="Navegação principal" inert>
   <div class="sidenav-brand">
     <img class="logo" src="/brand/icon.png?v=1" alt="" />
     <div class="brand-text">
@@ -497,7 +497,7 @@ footer a:hover { color:var(--text); }
   <a class="sidenav-item" href="/app?view=overview"><span class="sn-icon" style="color:#3B82F6"><i class="ph ph-chart-bar" aria-hidden="true"></i></span><span class="sn-label">Visão Geral</span></a>
   <a class="sidenav-item" href="/app?view=analytics"><span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Análises</span></a>
   <a class="sidenav-item" href="/app?view=history"><span class="sn-icon" style="color:#94A3B8"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i></span><span class="sn-label">Histórico</span></a>
-  <a class="sidenav-item" href="/app?view=agentes"><span class="sn-icon" style="color:#FF2D8E"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span><span class="sn-label">Agentes</span><span class="sn-tag new">novo</span></a>
+  <a class="sidenav-item" data-nav="agentes" href="/app?view=agentes"><span class="sn-icon" style="color:#FF2D8E"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span><span class="sn-label">Agentes</span><span class="sn-tag new">novo</span></a>
 
   <div class="sidenav-section">Planejamento</div>
   <a class="sidenav-item" href="/app?view=fixed"><span class="sn-icon" style="color:#14B8A6"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span><span class="sn-label">Recorrentes</span></a>
@@ -824,6 +824,9 @@ function toggleSidenav(force) {
   if (!nav) return;
   const open = (typeof force === "boolean") ? force : !nav.classList.contains("open");
   nav.classList.toggle("open", open);
+  // Fechada, a gaveta só sai da tela (translateX) — sem inert, seus links
+  // continuariam no tab order. inert tira do foco/AT quando fechada.
+  nav.toggleAttribute("inert", !open);
   if (bd) bd.classList.toggle("open", open);
   const tog = document.querySelector(".sidenav-toggle");
   if (tog) tog.setAttribute("aria-expanded", String(open));
@@ -886,6 +889,11 @@ async function loadProfile() {
     document.getElementById("user-label").textContent = displayLabel(PROFILE_DISPLAY_NAME, PROFILE_EMAIL);
     document.getElementById("user-email").textContent = PROFILE_EMAIL || "Minha conta";
     document.getElementById("user-plan").textContent  = planLabel(plan);
+    // Beta-gate dos Agentes: esconde o item da gaveta quando desligado
+    // (mesma regra do dashboard.js — freio de emergência / allowlist).
+    if (data.agents_ui_enabled === false) {
+      document.querySelectorAll('[data-nav="agentes"]').forEach(el => { el.style.display = "none"; });
+    }
   } catch {}
 }
 
