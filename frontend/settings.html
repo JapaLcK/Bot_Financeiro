@@ -1275,32 +1275,10 @@ body.balance-hidden .account-balance {
           </div>
         </div>
 
-        <!-- Modal: lista de todos os bancos do Open Finance (escolha acontece no site) -->
-        <div class="bankpick-overlay" id="bankpick-overlay" onclick="if(event.target===this)closeBankPicker()">
-          <div class="bankpick-modal" role="dialog" aria-modal="true" aria-label="Conectar banco">
-            <div class="bankpick-head">
-              <div class="bankpick-head-row">
-                <div>
-                  <div class="bankpick-title">Conectar banco</div>
-                  <div class="bankpick-sub">Busque entre as instituições disponíveis</div>
-                </div>
-                <button class="bankpick-x" type="button" onclick="closeBankPicker()" aria-label="Fechar"><i class="ph ph-x" aria-hidden="true"></i></button>
-              </div>
-              <div class="bankpick-search-wrap">
-                <span aria-hidden="true"><i class="ph ph-magnifying-glass" aria-hidden="true"></i></span>
-                <input id="bankpick-search" type="text" placeholder="Buscar banco (ex: Nubank, Itaú, C6…)"
-                       autocomplete="off" oninput="renderBankPicker(this.value)">
-              </div>
-            </div>
-            <div class="bankpick-list" id="bankpick-list"></div>
-            <div class="bankpick-foot">
-              <div class="bankpick-count" id="bankpick-count">Nenhum banco selecionado</div>
-              <button class="btn-connect bankpick-go" id="bankpick-go" type="button" onclick="confirmBankPicker()" disabled>
-                Conectar Open Finance
-              </button>
-            </div>
-          </div>
-        </div>
+        <!-- O #bankpick-overlay mora FORA do .page (no fim do body, junto dos
+             mfa-overlays): é position:fixed e o pull-to-refresh transforma o
+             .page, o que o tornaria contêiner de bloco de um fixed descendente
+             e deslocaria o overlay se aberto durante um refresh lento. -->
 
         <!-- Status card -->
         <div class="card">
@@ -1928,20 +1906,25 @@ function applySecuritySettings(data) {
   const phoneStatus = data.phone_status === "confirmed" || data.whatsapp_verified_at ? "confirmado" : "pendente";
   const phoneDisplay = data.phone ? formatPhoneBR(data.phone) : "";
   const displayName = (data.display_name || "").trim();
+  // Editor aberto (#security-{kind}-edit.show) = rascunho do usuário no input.
+  // Um refresh (pull-to-refresh) não pode sobrescrever o que ele está digitando;
+  // atualiza só o texto de exibição, deixa o input como está.
+  const editing = (kind) =>
+    document.getElementById(`security-${kind}-edit`)?.classList.contains("show");
   const nameValueEl = document.getElementById("security-name-value");
   if (nameValueEl) {
     nameValueEl.textContent = displayName || "Não definido";
-    document.getElementById("security-name-input").value = displayName;
+    if (!editing("name")) document.getElementById("security-name-input").value = displayName;
     document.getElementById("security-name-edit-btn").textContent = displayName ? "Alterar" : "Adicionar";
   }
   document.getElementById("security-email-value").textContent = displayValue(data.email);
-  document.getElementById("security-email-input").value = data.email || "";
+  if (!editing("email")) document.getElementById("security-email-input").value = data.email || "";
   document.getElementById("security-email-edit-btn").textContent = hasEmail ? "Alterar" : "Adicionar";
   document.getElementById("security-email-note").textContent = hasEmail
     ? "Usado para login, notificações por e-mail e recuperação de senha."
     : "Adicione um e-mail para ativar notificações e reset de senha.";
   document.getElementById("security-phone-value").textContent = displayValue(phoneDisplay);
-  document.getElementById("security-phone-input").value = phoneDisplay;
+  if (!editing("phone")) document.getElementById("security-phone-input").value = phoneDisplay;
   document.getElementById("security-phone-edit-btn").textContent = data.phone ? "Alterar" : "Adicionar";
   document.getElementById("security-phone-note").textContent = data.phone ? `WhatsApp ${phoneStatus}.` : "Nenhum telefone vinculado a esta conta.";
   document.getElementById("security-plan-value").textContent = displayValue(data.plan, "Plano não identificado");
@@ -1969,8 +1952,12 @@ function applySecuritySettings(data) {
     : "Vincule um e-mail à conta antes de solicitar reset de senha.";
 }
 
-async function loadSecuritySettings() {
+// propagate=true (pull-to-refresh): rejeita em falha pro indicador do PTR virar
+// âmbar, e NÃO zera a tela (preserva o que já estava). No load inicial / troca de
+// aba (propagate=false) mantém o comportamento antigo: degrada mostrando vazio.
+async function loadSecuritySettings({ propagate = false } = {}) {
   if (!USER_ID) {
+    if (propagate) throw new Error("Sessão inválida");
     applySecuritySettings({});
     showToast("Sessão inválida. Faça login novamente", "error");
     return;
@@ -1981,11 +1968,13 @@ async function loadSecuritySettings() {
     const data = await resp.json();
     applySecuritySettings(data);
   } catch (err) {
+    if (propagate) throw err;
     applySecuritySettings({});
     showToast(err.message || "Erro ao carregar segurança", "error");
   }
-  loadActivityLog();
-  loadSessionsList();
+  // await pro PTR só assentar quando TUDO da aba terminou (senão o indicador
+  // some com atividade/sessões ainda em voo).
+  await Promise.all([loadActivityLog(), loadSessionsList()]);
 }
 
 const ACTIVITY_ICONS = {
@@ -2256,12 +2245,14 @@ function applyNotificationSettings(data) {
   ].join(" · ");
 }
 
-async function loadNotificationSettings() {
+async function loadNotificationSettings({ propagate = false } = {}) {
   if (!USER_ID) {
+    if (propagate) throw new Error("Sessão inválida");
     showToast("Sessão inválida. Faça login novamente", "error");
     return;
   }
   setNotificationControlsDisabled(true);
+  let refreshErr = null;
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/notifications`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
@@ -2269,7 +2260,10 @@ async function loadNotificationSettings() {
     applyNotificationSettings(data);
     notificationSettingsLoaded = true;
   } catch (err) {
-    showToast(err.message || "Erro ao carregar notificações", "error");
+    // propagate (PTR): guarda o erro e re-lança DEPOIS do finally, pra o
+    // indicador virar âmbar sem pular a reabilitação dos controles.
+    if (propagate) refreshErr = err;
+    else showToast(err.message || "Erro ao carregar notificações", "error");
   } finally {
     const daily = document.getElementById("notif-daily-report")?.checked;
     const anyScheduled = daily
@@ -2284,6 +2278,7 @@ async function loadNotificationSettings() {
     document.getElementById("notif-whatsapp-updates").disabled = !hasWhatsapp;
     document.getElementById("notif-daily-hour").disabled = !anyScheduled;
   }
+  if (refreshErr) throw refreshErr;   // PTR: propaga a falha depois do finally
 }
 
 async function updateNotificationSettings(patch) {
@@ -2754,8 +2749,9 @@ function updateStats(connections, accounts, transactions) {
 }
 
 /* ── Load ────────────────────────────────────── */
-async function loadData() {
+async function loadData({ propagate = false } = {}) {
   if (!USER_ID) {
+    if (propagate) throw new Error("Sessão inválida");
     renderConnections([]); renderAccounts([]); renderTransactions([]);
     updateStats([], [], []);
     return;
@@ -2774,6 +2770,9 @@ async function loadData() {
     if (c.length > 0) setStep(3);
     loadCaixinhas();
   } catch (err) {
+    // propagate (PTR): preserva o que está renderizado e rejeita (âmbar). Sem
+    // isso, uma falha transitória apagava conexões/contas/transações da tela.
+    if (propagate) throw err;
     updateStats([], [], []);
     renderConnections([]); renderAccounts([]); renderTransactions([]);
     showToast(err.message || "Erro ao carregar dados", "error");
@@ -3278,13 +3277,48 @@ initSettings();
 // auth/paywall). app-mode.js chama window.PBRefresh e espera a promise — sem
 // isso o gesto caía no reload, que abortava saves de preferência em voo.
 window.PBRefresh = () => {
+  // Atualiza SÓ os dados da aba visível (loadData é de Open Finance; rodá-lo em
+  // toda aba apagava OF numa view onde nem aparece). Cada loader propaga falha
+  // (propagate:true) pro indicador do PTR virar âmbar em vez de fingir sucesso.
   const view = new URLSearchParams(location.search).get("view") || "security";
-  const jobs = [loadData()];
-  if (view === "security") jobs.push(loadSecuritySettings(), loadMfaStatus());
-  if (view === "notifications") jobs.push(loadNotificationSettings());
-  return Promise.all(jobs);
+  if (view === "security")
+    return Promise.all([loadSecuritySettings({ propagate: true }), loadMfaStatus()]);
+  if (view === "notifications")
+    return loadNotificationSettings({ propagate: true });
+  if (view === "open-finance")
+    return loadData({ propagate: true });
+  return Promise.resolve();   // data / legal: nada dinâmico a atualizar
 };
 </script>
+
+<!-- Seletor de banco do Open Finance — FORA do .page (position:fixed; o
+     pull-to-refresh transforma o .page). Populado por JS via getElementById,
+     então a posição no DOM não importa pro comportamento. -->
+<div class="bankpick-overlay" id="bankpick-overlay" onclick="if(event.target===this)closeBankPicker()">
+  <div class="bankpick-modal" role="dialog" aria-modal="true" aria-label="Conectar banco">
+    <div class="bankpick-head">
+      <div class="bankpick-head-row">
+        <div>
+          <div class="bankpick-title">Conectar banco</div>
+          <div class="bankpick-sub">Busque entre as instituições disponíveis</div>
+        </div>
+        <button class="bankpick-x" type="button" onclick="closeBankPicker()" aria-label="Fechar"><i class="ph ph-x" aria-hidden="true"></i></button>
+      </div>
+      <div class="bankpick-search-wrap">
+        <span aria-hidden="true"><i class="ph ph-magnifying-glass" aria-hidden="true"></i></span>
+        <input id="bankpick-search" type="text" placeholder="Buscar banco (ex: Nubank, Itaú, C6…)"
+               autocomplete="off" oninput="renderBankPicker(this.value)">
+      </div>
+    </div>
+    <div class="bankpick-list" id="bankpick-list"></div>
+    <div class="bankpick-foot">
+      <div class="bankpick-count" id="bankpick-count">Nenhum banco selecionado</div>
+      <button class="btn-connect bankpick-go" id="bankpick-go" type="button" onclick="confirmBankPicker()" disabled>
+        Conectar Open Finance
+      </button>
+    </div>
+  </div>
+</div>
 
 <!-- ── MFA Modais ─────────────────────────────────────────────────────────── -->
 <style>

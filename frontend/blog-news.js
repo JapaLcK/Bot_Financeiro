@@ -95,16 +95,21 @@
         section.style.display = ""; // revela (começa oculta pra não piscar vazio)
         if (empty) empty.style.display = "none"; // some com o estado vazio
       })
-      .catch(function () {
+      .catch(function (err) {
         // Falha de rede / non-OK: preserva o que já está renderizado (um refresh
         // que falha não pode apagar cards bons). Só no 1º load, sem nada ainda,
         // esconde a seção pra deixar o estado vazio à mostra.
         if (!grid.children.length) section.style.display = "none";
+        // Re-lança: o PTR (app-mode.js) decide sucesso/falha pela promise —
+        // engolir aqui fazia o indicador reportar sucesso mesmo caindo a rede.
+        throw err;
       });
   }
 
   // Pull-to-refresh do modo app (app-mode.js chama window.PBRefresh e espera a
   // promise). Sem isso o gesto caía no reload da página inteira.
   window.PBRefresh = load;
-  load();
+  // 1º load não é aguardado por ninguém: engole a rejeição (já tratada
+  // visualmente) pra não virar unhandled promise rejection no console.
+  load().catch(function () {});
 })();
