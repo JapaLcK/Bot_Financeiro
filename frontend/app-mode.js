@@ -54,6 +54,12 @@
   }
   const path = location.pathname.replace(/\/+$/, "") || "/";
   const page = PAGES[path];
+  // A página VIVA: igual a `page` no load, atualizada pelo pb-nav a cada troca
+  // client-side. Callback assíncrono que decide "aba ativa" (o /auth/me do
+  // syncNewsTab) tem que olhar pra cá — o const de boot fica velho depois de
+  // um swap e reconciliava contra a página errada (Codex, #118). Antes do SPA
+  // o reload descartava o callback pendente; agora ele sobrevive à troca.
+  let livePage = page;
 
   // pb-root-* no <html> aqui no <head> (síncrono) = paleta por página já no 1º
   // paint. Só no buildTabbar (DOMContentLoaded) fazia o Ajustes piscar de cor.
@@ -109,7 +115,7 @@
         a.setAttribute("href", t.href);
         const ico = a.querySelector(".pb-tab-ico"); if (ico) ico.innerHTML = t.icon;
         const lbl = a.querySelector("span:last-child"); if (lbl) lbl.textContent = t.label;
-        const active = PAGES[t.href] === page;
+        const active = PAGES[t.href] === livePage; // viva, não a de boot (SPA)
         a.classList.toggle("active", active);
         if (active) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
       })
@@ -235,7 +241,10 @@
     const smooth = !(window.matchMedia &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
-    const home = Math.max(0, tabs.findIndex(a => a.classList.contains("active")));
+    // let, não const: o onNavigate do pb-nav reaponta a "aba da página atual"
+    // a cada swap client-side. Com const a atribuição lançava TypeError
+    // (engolido), home ficava na aba de boot e voltar pra ela não navegava.
+    let home = Math.max(0, tabs.findIndex(a => a.classList.contains("active")));
     let W = 0, stops = [], x = 0, target = 0, vel = 0, prev = 0;
     let live = home, raf = 0, running = false, drag = null;
 
@@ -333,8 +342,12 @@
       start();
       if (navigate && i !== home) {
         const href = tabs[i].getAttribute("href");
-        if (smooth) setTimeout(() => { location.href = href; }, 190);
-        else location.href = href;
+        // pb-nav (se ativo e a rota é convertida) troca a tela sem recarregar;
+        // o onNavigate lá embaixo sincroniza o dock quando o mount terminar.
+        // Senão, navegação de documento igual sempre foi.
+        const nav = () => { if (!(window.PBNav && PBNav.go(href))) location.href = href; };
+        if (smooth) setTimeout(nav, 190);
+        else nav();
       }
     }
 
@@ -384,6 +397,30 @@
     window.addEventListener("orientationchange", () => setTimeout(measure, 120));
     // Fontes/ícones chegando depois mudam a largura das abas → remede
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure).catch(() => {});
+
+    // Navegação client-side (pb-nav.js): o motor troca a tela sem recarregar,
+    // então o dock é o MESMO objeto vivo — aqui ele se sincroniza ao fim de
+    // cada mount (tap ou botão voltar): bolha, aba ativa e "home" (a aba da
+    // página atual, referência do pointercancel e do clique-na-mesma-aba).
+    if (window.PBNav && PBNav.enabled) {
+      PBNav.onNavigate = key => {
+        livePage = key;   // callbacks assíncronos (syncNewsTab) leem a página viva
+        // Glifos de texto (☰, ▾) da página recém-montada: o hardenGlyphs do
+        // boot não alcança DOM que chegou por swap — re-roda (é idempotente).
+        hardenGlyphs();
+        const i = tabs.findIndex(a => PAGES[a.getAttribute("href")] === key);
+        if (i < 0) return;
+        home = i;
+        setLive(i);
+        target = stops[i];
+        start();
+        tabs.forEach((a, k) => {
+          a.classList.toggle("active", k === i);
+          if (k === i) a.setAttribute("aria-current", "page");
+          else a.removeAttribute("aria-current");
+        });
+      };
+    }
   }
 
   // Glifos de texto (☰, 🐷) viram SVG/imagem — WebView pode não ter as fontes
