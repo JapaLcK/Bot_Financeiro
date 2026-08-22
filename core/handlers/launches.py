@@ -88,6 +88,13 @@ _INTERNAL_TIPOS = {
 def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, original_text: str = "") -> str:
     entities = entities or {}
 
+    # "liste os gastos com <categoria>" chega aqui como launches.list, mas a
+    # listagem geral ignora categoria e mostra os últimos N de tudo. Se o texto
+    # menciona uma categoria, delega pro caminho categoria-aware (spend_query),
+    # que resolve categoria custom + período. Sem categoria → listagem normal.
+    if _extract_query_category(original_text):
+        return spend_query(user_id, original_text, entities=entities)
+
     target_date = _parse_date_entity(entities, original_text)
 
     if target_date:
@@ -259,6 +266,22 @@ def _extract_query_category(text: str) -> str | None:
     return canonicalize_category_label(cat) or cat
 
 
+def _resolve_query_category(user_id: int, text: str) -> str | None:
+    """Categoria mencionada numa pergunta, resolvida pro rótulo REAL salvo.
+
+    Uma categoria custom ("gastos com namorada") é falada como "...com namorada",
+    e `_extract_query_category` devolve só "namorada" — que não bate por igualdade
+    com o rótulo salvo. `custom_category_match` resolve o token pro nome real da
+    categoria do usuário; sem match custom, cai no extrator textual (categorias
+    do sistema como "mercado" batem direto).
+    """
+    from core.services.category_service import custom_category_match
+    resolved = custom_category_match(user_id, normalize_text(text))
+    if resolved:
+        return resolved
+    return _extract_query_category(text)
+
+
 def spend_query(user_id: int, text: str, entities: dict | None = None) -> str:
     """Responde "quanto gastei [na categoria X] [período]" com o total gasto.
 
@@ -275,7 +298,7 @@ def spend_query(user_id: int, text: str, entities: dict | None = None) -> str:
         start, end = month_range_today()
         period_label = "neste mês"
 
-    categoria = _extract_query_category(text)
+    categoria = _resolve_query_category(user_id, text)
 
     if categoria:
         total = db.sum_spent_in_category_period(user_id, categoria, start, end)
