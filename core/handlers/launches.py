@@ -285,22 +285,22 @@ def _resolve_query_category(user_id: int, text: str) -> str | None:
     extracted = _extract_query_category(text)
     if not extracted:
         return None
-    # 1) categoria de sistema (mercado, saúde, lazer...) vence tudo
-    if normalize_text(extracted) in CATEGORY_LABELS:
-        return canonicalize_category_label(extracted)
-    # 2) categoria custom por token distintivo ("...com namorada"). Casa só no
-    #    TRECHO da categoria (extracted), nunca no texto inteiro: senão "quanto
-    #    gastei esta semana" casaria uma custom "fim de semana" pelo token de
-    #    período "semana", que o _extract_query_category já removeu de propósito.
-    match = custom_category_match(user_id, normalize_text(extracted))
-    if match:
-        return match
-    # 3) o texto extraído é, ipsis litteris, o nome de uma categoria custom
     norm = normalize_text(extracted)
+    # 1) categoria de sistema (mercado, saúde, lazer...) vence tudo
+    if norm in CATEGORY_LABELS:
+        return canonicalize_category_label(extracted)
+    # 2) nome de categoria custom EXATO — antes do fuzzy por token. Senão
+    #    "cachorro" resolveria pra "cachorro do vizinho": no empate o
+    #    custom_category_match mantém o 1º, e list_custom_category_names ordena
+    #    por length desc, então o nome mais longo ganharia da categoria exata.
     for name in db.list_custom_category_names(user_id) or []:
         if normalize_text(name) == norm:
             return name
-    return None
+    # 3) categoria custom por token distintivo ("...com namorada"). Casa só no
+    #    TRECHO da categoria (extracted), nunca no texto inteiro: senão "quanto
+    #    gastei esta semana" casaria uma custom "fim de semana" pelo token de
+    #    período "semana", que o _extract_query_category já removeu de propósito.
+    return custom_category_match(user_id, norm)
 
 
 def spend_query(user_id: int, text: str, entities: dict | None = None) -> str:
