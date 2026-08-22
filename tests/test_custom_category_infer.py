@@ -19,6 +19,7 @@ from db.categories import (
     set_user_category_archived,
 )
 from core.handlers.credit import try_handle_natural_credit_purchase
+from core.handlers.launches import list_launches
 from core.services.category_service import (
     custom_category_match,
     infer_category,
@@ -133,6 +134,63 @@ def test_list_custom_category_names_nao_roda_seed(monkeypatch, pro_user_id):
     monkeypatch.setattr("db.categories.ensure_user_categories_seeded", _fail_seed)
 
     assert list_custom_category_names(pro_user_id) == []
+
+
+def test_auto_aprendizado_nao_rouba_token_de_categoria_custom(pro_user_id):
+    # Regressão do cliente (pedromaeda35): "namorada cinema" casa cinema→lazer
+    # (LOCAL_RULES) e o auto-aprendizado gravava namorada→lazer, sequestrando
+    # todo lançamento com "namorada" pra lazer — a categoria custom nunca era
+    # alcançada. O guard local não pega porque "namorada" não está nas LOCAL_RULES.
+    create_user_category(pro_user_id, "gastos com minha namorada")
+
+    learn_from_inference(pro_user_id, "namorada cinema", "lazer", reason="local_rule")
+
+    # nenhuma regra aprendida contém "namorada" (o token pertence à categoria custom)
+    rules = list_user_category_rules(pro_user_id)
+    assert not any("namorada" in kw for kw, _ in rules)
+
+    # e um gasto com namorada cai na categoria custom, não em lazer
+    res = infer_category(pro_user_id, "gastei 400 com minha namorada", allow_ai=False)
+    assert res.category == "gastos com minha namorada"
+    assert res.reason == "user_category"
+
+
+def test_guard_nao_bloqueia_token_neutro(pro_user_id):
+    # O guard é preciso: "cinema" não é token de nenhuma categoria custom e é
+    # canonicamente lazer → continua sendo aprendido normalmente.
+    create_user_category(pro_user_id, "gastos com minha namorada")
+    learn_from_inference(pro_user_id, "fui no cinema", "lazer", reason="local_rule")
+    assert db.get_memorized_category(pro_user_id, "fui no cinema") == "lazer"
+
+
+def test_list_launches_com_categoria_filtra_pela_custom(pro_user_id):
+    # "me liste os gastos com namorada" caía em launches.list e mostrava os
+    # últimos N de TODAS as categorias. Agora resolve a categoria custom e
+    # responde só o gasto dela (BUG 1).
+    create_user_category(pro_user_id, "gastos com minha namorada")
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 111, "cinema", None,
+        categoria="gastos com minha namorada",
+    )
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 50, "mercado", None, categoria="mercado",
+    )
+
+    resp = list_launches(pro_user_id, original_text="me liste os gastos com namorada")
+
+    assert "111" in resp                     # o gasto da categoria aparece
+    assert "namorada" in resp.lower()        # respondeu sobre a categoria certa
+    assert "mercado" not in resp.lower()     # gasto de outra categoria não vaza
+    assert "Últimos" not in resp             # não é a listagem geral
+
+
+def test_list_launches_sem_categoria_lista_geral(pro_user_id):
+    # sem categoria mencionada, segue a listagem geral (não delega)
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 50, "mercado", None, categoria="mercado",
+    )
+    resp = list_launches(pro_user_id, original_text="meus lançamentos")
+    assert "Últimos" in resp
 
 
 def test_compra_natural_credito_usa_categoria_custom(pro_user_id):
