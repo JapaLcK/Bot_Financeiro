@@ -16,10 +16,18 @@ já foram gravadas — em qualquer cliente que criou categoria custom antes do f
 Reusa `custom_category_match` — a MESMA função do guard — então detecta
 exatamente a classe que o guard previne, sem reimplementar a heurística em SQL.
 
+ATENÇÃO: `user_category_rules` não registra proveniência — não dá pra saber, pela
+linha, se uma regra foi auto-aprendida (veneno) ou criada DE PROPÓSITO pelo
+usuário via "linkar" (que não passa pelo guard). Uma regra deliberada
+`cinema -> lazer` de quem tem a custom "cinema da família" apareceria aqui como
+colisão, mas apagá-la seria perder config do usuário. Por isso `--apply` exige
+`--user`: rode global em dry-run, revise a lista, e só então aplique cliente a
+cliente conferindo que nenhuma daquelas regras é intencional.
+
 Uso:
-    .venv/bin/python -m scripts.cleanup_poisoned_category_rules            # dry-run (só reporta)
-    .venv/bin/python -m scripts.cleanup_poisoned_category_rules --apply    # deleta de verdade
-    .venv/bin/python -m scripts.cleanup_poisoned_category_rules --user 314149836
+    .venv/bin/python -m scripts.cleanup_poisoned_category_rules              # dry-run global (só reporta)
+    .venv/bin/python -m scripts.cleanup_poisoned_category_rules --user 314149836            # dry-run de 1 user
+    .venv/bin/python -m scripts.cleanup_poisoned_category_rules --user 314149836 --apply    # deleta (revisado)
 """
 from __future__ import annotations
 
@@ -63,6 +71,12 @@ def main() -> None:
                     help="deleta de verdade (sem isso, só reporta — dry-run)")
     ap.add_argument("--user", type=int, help="limita a um único user_id")
     args = ap.parse_args()
+
+    # Segurança: apagar exige escopo de 1 user (revisão manual), porque uma regra
+    # colidente pode ter sido criada de propósito e não há como distinguir em lote.
+    if args.apply and not args.user:
+        ap.error("--apply exige --user: revise a lista global (dry-run) e aplique "
+                 "cliente a cliente, conferindo que nenhuma regra é intencional.")
 
     user_ids = [args.user] if args.user else _all_user_ids()
     total = 0

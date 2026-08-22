@@ -233,6 +233,28 @@ def test_list_launches_sem_categoria_lista_geral(pro_user_id):
     assert "Últimos" in resp
 
 
+def test_resolve_query_category_ignora_periodo(pro_user_id):
+    # Codex P2: custom cujo token é palavra de período não pode sequestrar uma
+    # pergunta de período. "quanto gastei esta semana" NÃO é a categoria custom
+    # "fim de semana" — o match só vale no trecho da categoria (extracted), e
+    # "semana" foi removido pelo _extract_query_category.
+    from core.handlers.launches import _resolve_query_category
+    create_user_category(pro_user_id, "fim de semana")
+    assert _resolve_query_category(pro_user_id, "quanto gastei esta semana") is None
+    # mas mencionar a categoria explicitamente ainda resolve
+    assert _resolve_query_category(pro_user_id, "quanto gastei com fim de semana") == "fim de semana"
+
+
+def test_cleanup_script_apply_exige_user(monkeypatch):
+    # Codex P1: --apply global apagaria regras criadas de propósito (sem coluna
+    # de proveniência). --apply exige --user pra forçar revisão cliente a cliente.
+    import sys
+    from scripts.cleanup_poisoned_category_rules import main
+    monkeypatch.setattr(sys, "argv", ["cleanup", "--apply"])
+    with pytest.raises(SystemExit):
+        main()
+
+
 def test_compra_natural_credito_usa_categoria_custom(pro_user_id):
     card_id = db.create_card(pro_user_id, "Nubank", closing_day=10, due_day=17)
     db.set_default_card(pro_user_id, card_id)
