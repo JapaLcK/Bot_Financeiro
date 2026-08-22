@@ -11,7 +11,7 @@
  * once the network is restored.
  */
 
-const CACHE_NAME = "pigbank-v7";
+const CACHE_NAME = "pigbank-v8";  // v8: limpa HTML de pagina logada que o v7 cacheou
 
 // Resources to pre-cache on install
 const PRECACHE = [
@@ -24,8 +24,15 @@ const PRECACHE = [
 // Never cache these (API calls, WebSocket upgrades, dados financeiros).
 // Open Finance e histórico trazem saldo/transações do banco: nunca cachear
 // (privacidade no dispositivo + evita mostrar dado velho depois de um sync).
+// /home e /comandos-app entram aqui por causa do pb-nav: navegação de
+// documento chega como mode "navigate" e o handler abaixo já a ignora, mas o
+// fetch do motor client-side NÃO — sem esta linha o SW interceptava a troca de
+// aba (latência de acordar o worker) e ainda guardava HTML de página logada
+// no cache, contra o "HTML / auth: never cached" do topo deste arquivo.
 const SKIP_CACHE = [
   "/app",
+  "/home",
+  "/comandos-app",
   "/settings",
   "/auth/",
   "/ws/",

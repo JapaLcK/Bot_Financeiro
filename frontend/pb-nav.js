@@ -110,6 +110,50 @@
 
   function mountPoint() { return document.querySelector(".pb-tabbar"); }
 
+  // ── Cronômetro por fase ────────────────────────────────────────────────
+  // "demora ~5s" não diz ONDE. Cada troca mede rede (ter o HTML), scripts
+  // (externos da página nova), mutate (DOM + inits, síncrono) e vt (a
+  // animação inteira até .finished). Com ?pbdebug=1 o resultado aparece na
+  // PRÓPRIA tela — o aparelho é o único lugar onde isso se mede, e nem sempre
+  // há Mac com o Web Inspector do lado.
+  const debug = (() => {
+    if (qs.get("pbdebug") === "0") { try { localStorage.removeItem("pbDebug"); } catch (_) {} }
+    if (qs.get("pbdebug") === "1") { try { localStorage.setItem("pbDebug", "1"); } catch (_) {} }
+    try { return localStorage.getItem("pbDebug") === "1"; } catch (_) { return false; }
+  })();
+
+  function stopwatch(key) {
+    const t0 = performance.now();
+    let last = t0;
+    const parts = [];
+    return {
+      mark(name) {
+        const now = performance.now();
+        parts.push(name + " " + Math.round(now - last));
+        last = now;
+      },
+      done(via) {
+        const total = Math.round(performance.now() - t0);
+        const line = "[pb-nav] " + key + " " + via + " " + total + "ms (" + parts.join(", ") + ")";
+        console.log(line);
+        if (debug) showDebug(line);
+      },
+    };
+  }
+
+  function showDebug(line) {
+    let box = document.getElementById("pb-nav-debug");
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "pb-nav-debug";
+      box.style.cssText = "position:fixed;left:8px;right:8px;top:env(safe-area-inset-top,8px);" +
+        "z-index:99999;background:rgba(0,0,0,.86);color:#C6F11A;font:600 11px/1.45 ui-monospace,monospace;" +
+        "padding:8px 10px;border-radius:10px;pointer-events:none;white-space:pre-wrap;";
+      document.documentElement.appendChild(box);   // fora do body: sobrevive ao swap
+    }
+    box.textContent = line;
+  }
+
   const swap = mutate =>
     document.startViewTransition(mutate).finished.catch(() => {});
 
@@ -132,7 +176,7 @@
     }
   }
 
-  async function mountCached(key, path, push, my) {
+  async function mountCached(key, path, push, my, sw) {
     await swap(() => {
       if (my !== seq) return;
       unmountCurrent();
@@ -146,10 +190,12 @@
       window.PBRefresh = e.refresh;
       window.scrollTo(0, e.scrollY);
       commit(key, path, push);
+      sw.mark("mutate");
       // Dado fresco em background, reusando o contrato do puxar-pra-atualizar:
       // dado velho na tela agora, dado novo repintando quando chegar.
       if (window.PBRefresh) { try { window.PBRefresh(); } catch (_) {} }
     });
+    sw.mark("vt");
   }
 
   // Scripts externos da página nova que o documento ainda não tem (dedupe por
@@ -166,10 +212,12 @@
     })));
   }
 
-  async function mountNew(key, path, html, push, my) {
+  async function mountNew(key, path, html, push, my, sw) {
     const doc = new DOMParser().parseFromString(html, "text/html");
+    sw.mark("parse");
 
     await ensureExternalScripts(doc);
+    sw.mark("scripts");
     if (my !== seq) return;
 
     // Executa os scripts inline UMA vez por página (data-pb-boot fica de fora:
@@ -209,7 +257,9 @@
       window.scrollTo(0, 0);
       runInits(key);          // síncrono entra no snapshot; o resto é async normal
       commit(key, path, push);
+      sw.mark("mutate");
     });
+    sw.mark("vt");
   }
 
   // Prefetch: o HTML das outras abas é aquecido em background logo após o
@@ -217,36 +267,45 @@
   // recarga escondia atrás da piscada virava tela parada (medido no GATE 1:
   // "demora muito"). Com o texto já baixado, o mount é imediato. O HTML é só
   // o shell (esqueleto); dado vivo vem da init/PBRefresh — não fica velho.
-  const warm = {};   // key → html (null = em voo)
+  const warm = {};       // key → html pronto (null = ainda em voo)
+  const inflight = {};   // key → promise do html em voo (o tap espera ESTA)
   function warmUp() {
     Object.keys(ROUTES).forEach(path => {
       const key = ROUTES[path];
       if (key === currentKey || cache[key] || warm[key] !== undefined) return;
       warm[key] = null;
-      fetch(path, { credentials: "same-origin", headers: { Accept: "text/html" } })
+      inflight[key] = fetch(path, { credentials: "same-origin", headers: { Accept: "text/html" } })
         .then(r => (r.ok && !r.redirected ? r.text() : Promise.reject()))
-        .then(html => { warm[key] = html; })
-        .catch(() => { delete warm[key]; });
+        .then(html => { warm[key] = html; delete inflight[key]; return html; })
+        .catch(() => { delete warm[key]; delete inflight[key]; return null; });
     });
   }
 
   async function navigate(path, key, push) {
     const my = ++seq;                            // só a navegação mais recente monta
-    const t0 = performance.now();
-    const log = via => console.log("[pb-nav]", key, via,
-      Math.round(performance.now() - t0) + "ms");
+    const sw = stopwatch(key);
     // O try cobre TODOS os ramos (cache, warm e fetch): mountNew também rejeita
     // fora da rede do tap — ex.: script externo da página nova falhando ao
     // carregar (home puxa auth-refresh/modals quando o boot foi no comandos).
     // Sem isso o ramo warm deixava o usuário preso na tela velha, porque o
     // go() já tinha assumido a navegação (apontamento do Codex no #118).
     try {
-      if (cache[key]) { await mountCached(key, path, push, my); log("cache"); return; }
-      if (warm[key]) {                           // prefetch pronto: sem rede no tap
-        const html = warm[key];
+      if (cache[key]) {
+        await mountCached(key, path, push, my, sw);
+        sw.done("cache");
+        return;
+      }
+      // Prefetch: pronto OU em voo. Esperar o pedido que já está na rede é
+      // sempre melhor que abrir um segundo — antes, `warm[key]` null (em voo)
+      // era falsy e caía no fetch, duplicando a rede no tap.
+      if (warm[key] !== undefined) {
+        const html = await Promise.resolve(warm[key] || inflight[key]);
+        sw.mark("net(warm)");
         delete warm[key];
-        await mountNew(key, path, html, push, my);
-        log("warm");
+        if (my !== seq) return;
+        if (!html) { hard(path); return; }
+        await mountNew(key, path, html, push, my, sw);
+        sw.done("warm");
         setTimeout(warmUp, 400);
         return;
       }
@@ -259,9 +318,10 @@
       // Redirect = auth/gate (login, /precos): fluxo de verdade, navegação real
       if (r.redirected || !r.ok) { hard(path); return; }
       const html = await r.text();
+      sw.mark("net");
       if (my !== seq) return;
-      await mountNew(key, path, html, push, my);
-      log("fetch");
+      await mountNew(key, path, html, push, my, sw);
+      sw.done("fetch");
       setTimeout(warmUp, 400);
     } catch (_) {
       if (my === seq) hard(path);                // qualquer falha: cai no MPA
