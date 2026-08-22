@@ -8,7 +8,7 @@ from datetime import date, timedelta
 import db
 from utils_text import (
     fmt_brl, is_internal_category, canonicalize_category_label, normalize_text,
-    merchant_key, RECURRING_SUGGESTION_BLOCKLIST,
+    merchant_key, RECURRING_SUGGESTION_BLOCKLIST, CATEGORY_LABELS,
 )
 from utils_date import extract_date_from_text, today_tz, parse_period_from_text, month_range_today
 from core.services.category_service import infer_category, learn_from_inference
@@ -89,10 +89,13 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
     entities = entities or {}
 
     # "liste os gastos com <categoria>" chega aqui como launches.list, mas a
-    # listagem geral ignora categoria e mostra os últimos N de tudo. Se o texto
-    # menciona uma categoria, delega pro caminho categoria-aware (spend_query),
-    # que resolve categoria custom + período. Sem categoria → listagem normal.
-    if _extract_query_category(original_text):
+    # listagem geral ignora categoria e mostra os últimos N de tudo. Só delega pro
+    # caminho categoria-aware (spend_query) quando o texto menciona uma categoria
+    # que EXISTE de fato (sistema ou custom). "liste os gastos no cartão" não é
+    # categoria — cai na listagem geral em vez de responder "R$ 0 em cartao".
+    # ponytail: spend_query responde total+top5, não a lista cronológica da
+    # categoria; upgrade pra listagem cronológica filtrada se pedirem.
+    if _resolve_query_category(user_id, original_text):
         return spend_query(user_id, original_text, entities=entities)
 
     target_date = _parse_date_entity(entities, original_text)
@@ -267,19 +270,33 @@ def _extract_query_category(text: str) -> str | None:
 
 
 def _resolve_query_category(user_id: int, text: str) -> str | None:
-    """Categoria mencionada numa pergunta, resolvida pro rótulo REAL salvo.
+    """Categoria REAL mencionada numa pergunta, ou None se não houver.
 
-    Uma categoria custom ("gastos com namorada") é falada como "...com namorada",
-    e `_extract_query_category` devolve só "namorada" — que não bate por igualdade
-    com o rótulo salvo. `custom_category_match` resolve o token pro nome real da
-    categoria do usuário; sem match custom, cai no extrator textual (categorias
-    do sistema como "mercado" batem direto).
+    Retorna só quando a categoria de fato EXISTE — categoria de sistema
+    ("mercado", "saúde") ou custom do usuário ("gastos com namorada"). Texto solto
+    depois de "com/no/na" que não é categoria nenhuma ("no cartão", "com a família
+    toda") devolve None: senão a listagem geral fica escondida atrás de uma
+    pseudo-categoria vazia ("você não teve gastos em cartao").
+
+    Categoria de SISTEMA homônima vence a custom: quem tem custom "saúde da minha
+    mãe" e pergunta "gastei com saúde" quer a saúde do sistema, não a custom.
     """
     from core.services.category_service import custom_category_match
-    resolved = custom_category_match(user_id, normalize_text(text))
-    if resolved:
-        return resolved
-    return _extract_query_category(text)
+    extracted = _extract_query_category(text)
+    # 1) categoria de sistema (mercado, saúde, lazer...) vence tudo
+    if extracted and normalize_text(extracted) in CATEGORY_LABELS:
+        return canonicalize_category_label(extracted)
+    # 2) categoria custom por token distintivo ("...com namorada")
+    match = custom_category_match(user_id, normalize_text(text))
+    if match:
+        return match
+    # 3) o texto extraído é, ipsis litteris, o nome de uma categoria custom
+    if extracted:
+        norm = normalize_text(extracted)
+        for name in db.list_custom_category_names(user_id) or []:
+            if normalize_text(name) == norm:
+                return name
+    return None
 
 
 def spend_query(user_id: int, text: str, entities: dict | None = None) -> str:
@@ -298,7 +315,10 @@ def spend_query(user_id: int, text: str, entities: dict | None = None) -> str:
         start, end = month_range_today()
         period_label = "neste mês"
 
-    categoria = _resolve_query_category(user_id, text)
+    # Categoria real (sistema/custom) vence; se nada real casar, cai no extrator
+    # textual — preserva o "você não teve gastos em <X>" quando o usuário pergunta
+    # por uma categoria que ele não usa, e o branch geral quando não há categoria.
+    categoria = _resolve_query_category(user_id, text) or _extract_query_category(text)
 
     if categoria:
         total = db.sum_spent_in_category_period(user_id, categoria, start, end)

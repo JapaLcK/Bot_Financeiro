@@ -19,7 +19,7 @@ from db.categories import (
     set_user_category_archived,
 )
 from core.handlers.credit import try_handle_natural_credit_purchase
-from core.handlers.launches import list_launches
+from core.handlers.launches import list_launches, spend_query
 from core.services.category_service import (
     custom_category_match,
     infer_category,
@@ -182,6 +182,46 @@ def test_list_launches_com_categoria_filtra_pela_custom(pro_user_id):
     assert "namorada" in resp.lower()        # respondeu sobre a categoria certa
     assert "mercado" not in resp.lower()     # gasto de outra categoria não vaza
     assert "Últimos" not in resp             # não é a listagem geral
+
+
+def test_list_launches_nao_categoria_cai_na_geral(pro_user_id):
+    # "no cartão" casa o regex com/no/na mas "cartao" NÃO é categoria (nem
+    # sistema nem custom) → não deve delegar pra spend_query e responder
+    # "não teve gastos em cartao", escondendo os lançamentos reais. Cai na
+    # listagem geral (comportamento pré-fix).
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 50, "mercado", None, categoria="mercado",
+    )
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 30, "uber", None, categoria="transporte",
+    )
+    resp = list_launches(pro_user_id, original_text="liste os gastos no cartão")
+    assert "Últimos" in resp
+    assert "mercado" in resp.lower()
+    assert "não teve gastos" not in resp.lower()
+
+
+def test_list_launches_frase_solta_nao_vira_pseudo_categoria(pro_user_id):
+    # "com a família toda" → "a familia toda" não é categoria → listagem geral.
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 50, "mercado", None, categoria="mercado",
+    )
+    resp = list_launches(pro_user_id, original_text="liste os gastos com a família toda")
+    assert "Últimos" in resp
+    assert "não teve gastos" not in resp.lower()
+
+
+def test_spend_query_sistema_vence_custom_homonima(pro_user_id):
+    # Regressão: custom "saúde da minha mãe" (token "saude") sombreava a
+    # categoria de SISTEMA "saúde". "quanto gastei com saúde" deve somar a saúde
+    # do sistema (>0), não a custom (que fica em R$ 0).
+    create_user_category(pro_user_id, "saúde da minha mãe")
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 240, "consulta", None, categoria="saúde",
+    )
+    resp = spend_query(pro_user_id, "quanto gastei com saúde")
+    assert "240" in resp
+    assert "não teve gastos" not in resp.lower()
 
 
 def test_list_launches_sem_categoria_lista_geral(pro_user_id):
