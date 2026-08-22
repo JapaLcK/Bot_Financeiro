@@ -1910,6 +1910,14 @@ async function saveSecurityContact(kind) {
     // repintaria o contato pré-PATCH por cima do que acabou de ser salvo.
     ++_securityGen;
     applySecuritySettings(data);
+    // Bumpar a geração cancela o fan-out do load em voo (ele retorna ANTES de
+    // loadActivityLog/loadSessionsList) e este save não dispara load novo pra
+    // refazê-lo — sem isto os dois painéis ficariam presos em "Carregando…" até
+    // um refresh manual. Refazer aqui também é freshness legítima: trocar
+    // e-mail/telefone escreve um evento na atividade. Sem await e sem propagate:
+    // os filhos têm geração própria e um erro aqui não pode virar rejeição solta.
+    loadActivityLog();
+    loadSessionsList();
     const labels = { email: "E-mail atualizado", phone: "Telefone atualizado", name: value ? "Nome atualizado" : "Nome removido" };
     showToast(labels[kind] || "Dado atualizado", "ok");
     notificationSettingsLoaded = false;

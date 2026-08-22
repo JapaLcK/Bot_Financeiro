@@ -259,6 +259,68 @@ def test_resolve_query_category_exato_vence_fuzzy(pro_user_id):
     ) == "cachorro do vizinho"
 
 
+def test_spend_query_honra_date_filter_resolvido(pro_user_id):
+    # Codex P2: após a clarificação ("gastos com saúde dia 4" + "abril"), o router
+    # grava a data ISO em entities e RE-EXECUTA com o original_text inalterado.
+    # "dia 4" não é período pro parse textual, então sem ler entities a resposta
+    # virava o total do MÊS todo em vez do dia pedido.
+    from datetime import datetime, time, timedelta
+    from utils_date import today_tz
+
+    dia = today_tz().replace(day=4)
+    if dia > today_tz():                       # dia 4 ainda não chegou neste mês
+        dia = (dia.replace(day=1) - timedelta(days=1)).replace(day=4)
+    outro = dia + timedelta(days=1)
+
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 30, "consulta", None, categoria="saúde",
+        criado_em=datetime.combine(dia, time(12, 0)),
+    )
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 500, "exame", None, categoria="saúde",
+        criado_em=datetime.combine(outro, time(12, 0)),
+    )
+
+    resp = spend_query(
+        pro_user_id,
+        "gastos com saúde dia 4",
+        entities={"date_filter": dia.isoformat()},
+    )
+    assert "30,00" in resp          # só o dia pedido
+    assert "530" not in resp        # não o mês inteiro
+
+
+def test_spend_query_periodo_do_texto_vence_date_filter(pro_user_id):
+    # Guarda da correção acima: date_filter é só FALLBACK. Se o texto traz um
+    # período de verdade, ele vence — senão "em julho" (mês inteiro) colapsaria
+    # no único dia que estiver em entities.
+    from datetime import datetime, time, timedelta
+    from utils_date import today_tz
+
+    ref = today_tz().replace(day=15)
+    if ref >= today_tz():
+        ref = (ref.replace(day=1) - timedelta(days=1)).replace(day=15)
+    mes_label = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho",
+                 "agosto", "setembro", "outubro", "novembro", "dezembro"][ref.month - 1]
+
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 70, "consulta", None, categoria="saúde",
+        criado_em=datetime.combine(ref, time(12, 0)),
+    )
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 90, "exame", None, categoria="saúde",
+        criado_em=datetime.combine(ref + timedelta(days=1), time(12, 0)),
+    )
+
+    # entities aponta pra UM dia, mas o texto pede o mês → o mês vence
+    resp = spend_query(
+        pro_user_id,
+        f"quanto gastei com saúde em {mes_label}",
+        entities={"date_filter": ref.isoformat()},
+    )
+    assert "160,00" in resp
+
+
 def test_cleanup_script_apply_exige_user(monkeypatch):
     # Codex P1: --apply global apagaria regras criadas de propósito (sem coluna
     # de proveniência). --apply exige --user pra forçar revisão cliente a cliente.
