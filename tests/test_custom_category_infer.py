@@ -245,6 +245,20 @@ def test_resolve_query_category_ignora_periodo(pro_user_id):
     assert _resolve_query_category(pro_user_id, "quanto gastei com fim de semana") == "fim de semana"
 
 
+def test_resolve_query_category_exato_vence_fuzzy(pro_user_id):
+    # Codex: com customs sobrepostas, "cachorro" deve resolver pra a categoria
+    # EXATA "cachorro", não pra "cachorro do vizinho" (que o fuzzy pegaria por
+    # empate + ordenação length desc).
+    from core.handlers.launches import _resolve_query_category
+    create_user_category(pro_user_id, "cachorro")
+    create_user_category(pro_user_id, "cachorro do vizinho")
+    assert _resolve_query_category(pro_user_id, "quanto gastei com cachorro") == "cachorro"
+    # e mencionar a mais específica ainda resolve ela (tem 2 tokens no texto)
+    assert _resolve_query_category(
+        pro_user_id, "quanto gastei com cachorro do vizinho"
+    ) == "cachorro do vizinho"
+
+
 def test_cleanup_script_apply_exige_user(monkeypatch):
     # Codex P1: --apply global apagaria regras criadas de propósito (sem coluna
     # de proveniência). --apply exige --user pra forçar revisão cliente a cliente.
