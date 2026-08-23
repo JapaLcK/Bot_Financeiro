@@ -85,6 +85,13 @@ _INTERNAL_TIPOS = {
 }
 
 
+# Pergunta explicitamente por dinheiro que ENTROU. Só é consultado pra decidir se
+# delega pro spend_query (que é expense-only); normalize_text já tirou o acento.
+_PEDE_RECEITA_RE = re.compile(
+    r"\b(receitas?|ganhos?|entradas?|recebimentos?|recebi|ganhei|faturamento)\b"
+)
+
+
 def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, original_text: str = "") -> str:
     entities = entities or {}
 
@@ -95,7 +102,15 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
     # categoria — cai na listagem geral em vez de responder "R$ 0 em cartao".
     # ponytail: spend_query responde total+top5, não a lista cronológica da
     # categoria; upgrade pra listagem cronológica filtrada se pedirem.
-    if _resolve_query_category(user_id, original_text):
+    #
+    # E NÃO delega pergunta por RECEITA: spend_query soma só tipo='despesa'
+    # (sum_spent_in_category_period), então "liste as receitas em rendimentos"
+    # — rendimentos é categoria de receita (dividendos, juros) — respondia
+    # "você não teve gastos em rendimentos" e escondia o lançamento. Nesse caso
+    # cai na listagem geral, que preserva os dois tipos.
+    if _resolve_query_category(user_id, original_text) and not _PEDE_RECEITA_RE.search(
+        normalize_text(original_text)
+    ):
         return spend_query(user_id, original_text, entities=entities)
 
     target_date = _parse_date_entity(entities, original_text)

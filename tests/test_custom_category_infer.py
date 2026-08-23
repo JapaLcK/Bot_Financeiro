@@ -321,6 +321,30 @@ def test_spend_query_periodo_do_texto_vence_date_filter(pro_user_id):
     assert "160,00" in resp
 
 
+def test_list_launches_receita_em_categoria_nao_delega(pro_user_id):
+    # Codex P2: spend_query soma só tipo='despesa' (sum_spent_in_category_period).
+    # "rendimentos" é categoria de RECEITA (dividendos, juros), então delegar
+    # respondia "você não teve gastos em rendimentos" e sumia com o lançamento.
+    db.add_launch_and_update_balance(
+        pro_user_id, "receita", 300, "dividendos itau", None, categoria="rendimentos",
+    )
+    resp = list_launches(pro_user_id, original_text="liste as receitas em rendimentos")
+    assert "300" in resp
+    assert "não teve gastos" not in resp.lower()
+
+
+def test_list_launches_gasto_em_categoria_ainda_delega(pro_user_id):
+    # Guarda da correção acima: a palavra de receita não pode desligar a
+    # delegação para perguntas de GASTO — senão volta o bug original
+    # (listar os últimos 10 de tudo em vez da categoria pedida).
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 80, "farmacia", None, categoria="saúde",
+    )
+    resp = list_launches(pro_user_id, original_text="liste os gastos com saúde")
+    assert "80" in resp
+    assert "Últimos" not in resp        # foi pro caminho categoria-aware
+
+
 def test_cleanup_script_apply_exige_user(monkeypatch):
     # Codex P1: --apply global apagaria regras criadas de propósito (sem coluna
     # de proveniência). --apply exige --user pra forçar revisão cliente a cliente.
