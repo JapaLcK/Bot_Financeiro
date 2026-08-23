@@ -1903,6 +1903,26 @@ async function saveSecurityContact(kind) {
     // o input ficava com o texto pré-save (ex.: com espaços) e o valor
     // canonicalizado do backend só apareceria no rótulo, não ao reabrir.
     toggleSecurityEdit(kind, false);
+    // Invalida qualquer loadSecuritySettings em voo: os inputs de segurança NÃO
+    // ficam disabled durante o load (diferente de notificações), então um GET
+    // do "↻ Atualizar" ou do PTR pode ter partido antes deste PATCH e chegar
+    // por último. Sem bumpar a geração, esse GET veria myGen === _securityGen e
+    // repintaria o contato pré-PATCH por cima do que acabou de ser salvo.
+    ++_securityGen;
+    // Bumpar a geração cancela o fan-out do load em voo (ele retorna ANTES de
+    // loadActivityLog/loadSessionsList) e este save não dispara load novo pra
+    // refazê-lo — sem isto os dois painéis ficariam presos em "Carregando…" até
+    // um refresh manual. Refazer aqui também é freshness legítima: trocar
+    // e-mail/telefone escreve um evento na atividade. Sem await e sem propagate:
+    // os filhos têm geração própria e um erro aqui não pode virar rejeição solta.
+    // ANTES do applySecuritySettings: se o apply estourasse no meio, o catch
+    // abaixo engolia em toast e o fan-out do load invalidado nunca seria refeito.
+    // Inerte hoje (o apply só toca ids que existem nesta página, e nenhum teste
+    // cobre o cenário); é de graça e tira a dependência. Ordem não muda nada:
+    // os filhos são async e não tocam em nenhum #security-* (pintam
+    // #activity-list / #sessions-list e os botões deles).
+    loadActivityLog();
+    loadSessionsList();
     applySecuritySettings(data);
     const labels = { email: "E-mail atualizado", phone: "Telefone atualizado", name: value ? "Nome atualizado" : "Nome removido" };
     showToast(labels[kind] || "Dado atualizado", "ok");
@@ -1977,6 +1997,23 @@ async function awaitAllPropagate(promises) {
   if (failed) throw failed.reason;
 }
 
+// Geração: saveSecurityContact, o reset de senha (sendPasswordResetEmail) e o
+// "↻ Atualizar" do card "Dados da conta" recarregam a segurança fora do PTR; puxar no
+// meio deixa dois loads em voo e o antigo repintava os campos por último. Os
+// filhos (atividade/sessões) têm geração própria — aqui só gato a pintura do
+// painel de segurança.
+//
+// Invariante: O BUMPER MAIS RECENTE DE _securityGen É DONO DO FAN-OUT
+// (atividade + sessões) E DO DESFECHO. Dois lugares bumpam: saveSecurityContact
+// e este load. Um load superado sai calado nos três pontos de saída — o guard do
+// sucesso, o do catch, e a re-checagem depois do fan-out: não pinta e não
+// propaga erro. Nos dois primeiros ele sai ANTES do fan-out, e quem o superou é
+// quem dispara os filhos; no terceiro os filhos já rodaram.
+// Sem isso os dois painéis ficavam presos no "Carregando…" estático de
+// #activity-list / #sessions-list até troca de seção — era o que acontecia
+// quando a geração corrente saía por throw (propagate) antes do fan-out,
+// deixando o load superado sem ninguém pra refazê-lo.
+let _securityGen = 0;
 async function loadSecuritySettings({ propagate = false } = {}) {
   if (!USER_ID) {
     if (propagate) throw new Error("Sessão inválida");
@@ -1984,20 +2021,39 @@ async function loadSecuritySettings({ propagate = false } = {}) {
     showToast("Sessão inválida. Faça login novamente", "error");
     return;
   }
+  const myGen = ++_securityGen;
+  let ownErr = null;
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/security`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
+    if (myGen !== _securityGen) return;   // superado: não pinta nem dispara os filhos (quem superou faz os dois)
     applySecuritySettings(data);
   } catch (err) {
-    if (propagate) throw err;
-    applySecuritySettings({});
-    showToast(err.message || "Erro ao carregar segurança", "error");
+    if (myGen !== _securityGen) return;   // superado: não repinta nem propaga
+    // propagate (PTR): não zera a tela (preserva o conteúdo atual), guarda o erro
+    // e re-lança DEPOIS do fan-out, pro indicador virar âmbar sem deixar os
+    // filhos órfãos. Sair por throw aqui quebrava o invariante acima — esta
+    // geração é a dona do fan-out e ninguém mais o refaria.
+    if (propagate) ownErr = err;
+    else {
+      applySecuritySettings({});
+      showToast(err.message || "Erro ao carregar segurança", "error");
+    }
   }
   // Espera atividade E sessões assentarem (não só a 1ª a falhar) e então
   // propaga a falha — senão o indicador soltava com uma delas ainda em voo,
   // que podia repintar por cima depois. {propagate} preserva o conteúdo atual.
-  await awaitAllPropagate([loadActivityLog({ propagate }), loadSessionsList({ propagate })]);
+  // Erro do pai ganha do erro do filho (é mais informativo).
+  await awaitAllPropagate([loadActivityLog({ propagate }), loadSessionsList({ propagate })])
+    .catch(function (childErr) { if (!ownErr) ownErr = childErr; });
+  // Re-checa a geração: o fan-out são mais dois GETs, e um ↻/save no meio pode
+  // ter superado este load. É a outra metade da regra que os guards
+  // acima já aplicam — eles descartam o SUCESSO de um load superado, este
+  // descarta o ERRO. Limite aceito: a geração nova pode não pintar (em voo, ou
+  // falhando também) e aí o PTR resolve verde com a tela possivelmente zerada —
+  // o toast de erro do caminho propagate:false é o sinal que sobra.
+  if (ownErr && myGen === _securityGen) throw ownErr;
 }
 
 const ACTIVITY_ICONS = {
@@ -2062,21 +2118,30 @@ function renderActivityList(events, containerId, opts = {}) {
 
 let _activityCache = [];
 
+// Geração (par do _sessionsGen): loadSecuritySettings dispara atividade E sessões
+// juntas, e uma ação de segurança que recarrega no meio de um pull-to-refresh
+// deixa dois loads em voo; o antigo, chegando por último, re-renderizava um
+// _activityCache stale — que também alimenta o modal (openActivityModal). Só a
+// geração mais nova pinta.
+let _activityGen = 0;
 async function loadActivityLog({ propagate = false } = {}) {
   const container = document.getElementById("activity-list");
   if (!USER_ID || !container) return;
   // No refresh (propagate) NÃO troca por "Carregando…": preserva o conteúdo
   // atual, pra uma falha transitória não apagar dado válido antes de propagar.
   if (!propagate) container.innerHTML = '<div class="activity-loading">Carregando…</div>';
+  const myGen = ++_activityGen;
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/activity?limit=10`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
+    if (myGen !== _activityGen) return;   // superado por um load mais novo: não pinta
     _activityCache = Array.isArray(data.events) ? data.events : [];
     renderActivityList(_activityCache, "activity-list", { limit: 3 });
     const showAllBtn = document.getElementById("activity-show-all-btn");
     if (showAllBtn) showAllBtn.hidden = _activityCache.length <= 3;
   } catch (err) {
+    if (myGen !== _activityGen) return;   // superado: não mexe no DOM nem propaga
     if (propagate) throw err;   // refresh: preserva conteúdo, PTR vira âmbar
     container.innerHTML = '<div class="activity-empty">Não foi possível carregar a atividade.</div>';
   }
@@ -2280,38 +2345,57 @@ function applyNotificationSettings(data) {
   ].join(" · ");
 }
 
+// Geração: reachable quando um pull-to-refresh cai em cima do primeiro load da
+// aba (o PTR já encadeia atrás de _notifSave). O load antigo não repinta, não
+// tinge o PTR de âmbar E não reabilita os controles — este último importa
+// porque a reabilitação é o que sustenta o invariante "no máximo um save":
+// reabilitar cedo (com o GET novo ainda em voo) deixaria um PATCH concorrente
+// ser sobrescrito pelo GET pré-PATCH. Só a geração corrente restaura.
+let _notifGen = 0;
 async function loadNotificationSettings({ propagate = false } = {}) {
   if (!USER_ID) {
     if (propagate) throw new Error("Sessão inválida");
     showToast("Sessão inválida. Faça login novamente", "error");
     return;
   }
+  const myGen = ++_notifGen;
   setNotificationControlsDisabled(true);
   let refreshErr = null;
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/notifications`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
-    applyNotificationSettings(data);
-    notificationSettingsLoaded = true;
+    if (myGen === _notifGen) {   // só a geração mais nova pinta
+      applyNotificationSettings(data);
+      notificationSettingsLoaded = true;
+    }
   } catch (err) {
+    // Superado por um load mais novo: não repinta nem transforma o PTR em âmbar.
+    if (myGen !== _notifGen) { /* segue pro finally, refreshErr fica null */ }
     // propagate (PTR): guarda o erro e re-lança DEPOIS do finally, pra o
     // indicador virar âmbar sem pular a reabilitação dos controles.
-    if (propagate) refreshErr = err;
+    else if (propagate) refreshErr = err;
     else showToast(err.message || "Erro ao carregar notificações", "error");
   } finally {
-    const daily = document.getElementById("notif-daily-report")?.checked;
-    const anyScheduled = daily
-      || document.getElementById("notif-weekly-report")?.checked
-      || document.getElementById("notif-monthly-report")?.checked;
-    const destinationText = document.getElementById("notif-email-value")?.textContent || "";
-    const hasEmail = !destinationText.startsWith("E-mail não vinculado");
-    const hasWhatsapp = !destinationText.includes("WhatsApp não vinculado");
-    setNotificationControlsDisabled(false);
-    document.getElementById("notif-tip-email").disabled = !hasEmail;
-    document.getElementById("notif-insight-email").disabled = !hasEmail;
-    document.getElementById("notif-whatsapp-updates").disabled = !hasWhatsapp;
-    document.getElementById("notif-daily-hour").disabled = !anyScheduled;
+    // Só a geração corrente reabilita os controles. Um load superado NÃO pode
+    // reabilitar enquanto o GET mais novo ainda está em voo — senão o usuário
+    // dispara um PATCH cujos controles/estado o GET pré-PATCH sobrescreveria,
+    // furando o invariante "no máximo um save". O load mais novo restaura no
+    // próprio finally (e, como é o último a assentar, sempre restaura).
+    if (myGen === _notifGen) {
+      const daily = document.getElementById("notif-daily-report")?.checked;
+      const anyScheduled = daily
+        || document.getElementById("notif-weekly-report")?.checked
+        || document.getElementById("notif-monthly-report")?.checked;
+      const destinationText = document.getElementById("notif-email-value")?.textContent || "";
+      const hasEmail = !destinationText.startsWith("E-mail não vinculado");
+      const hasWhatsapp = !destinationText.includes("WhatsApp não vinculado");
+      setNotificationControlsDisabled(false);
+      document.getElementById("notif-tip-email").disabled = !hasEmail;
+      document.getElementById("notif-insight-email").disabled = !hasEmail;
+      document.getElementById("notif-whatsapp-updates").disabled = !hasWhatsapp;
+      document.getElementById("notif-daily-hour").disabled = !anyScheduled;
+    }
   }
   if (refreshErr) throw refreshErr;   // PTR: propaga a falha depois do finally
 }
@@ -2806,11 +2890,12 @@ async function loadData({ propagate = false } = {}) {
     return;
   }
   const myGen = ++_dataGen;
+  let ownErr = null;
   try {
     const resp = await fetch(`${API}/open-finance/${USER_ID}`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
-    if (myGen !== _dataGen) return;   // superado por um loadData mais novo: não pinta
+    if (myGen !== _dataGen) return;   // superado: não pinta nem chama o caixinhas (quem superou faz os dois)
     const c = data.connections  || [];
     const a = data.accounts     || [];
     const t = data.transactions || [];
@@ -2819,19 +2904,33 @@ async function loadData({ propagate = false } = {}) {
     renderAccounts(a);
     renderTransactions(t);
     if (c.length > 0) setStep(3);
-    // await + propaga: sem isso o loadData soltava o indicador do PTR antes do
-    // caixinhas assentar (segundo pull podia sobrepor) e uma falha transitória
-    // escondia o card já renderizado com o refresh reportando sucesso.
-    await loadCaixinhas({ propagate });
   } catch (err) {
     if (myGen !== _dataGen) return;   // superado: não mexe no DOM nem propaga
-    // propagate (PTR): preserva o que está renderizado e rejeita (âmbar). Sem
-    // isso, uma falha transitória apagava conexões/contas/transações da tela.
-    if (propagate) throw err;
-    updateStats([], [], []);
-    renderConnections([]); renderAccounts([]); renderTransactions([]);
-    showToast(err.message || "Erro ao carregar dados", "error");
+    // propagate (PTR): preserva o que está renderizado e guarda o erro pra
+    // rejeitar DEPOIS do caixinhas (âmbar). Sem isso, uma falha transitória
+    // apagava conexões/contas/transações da tela.
+    if (propagate) ownErr = err;
+    else {
+      updateStats([], [], []);
+      renderConnections([]); renderAccounts([]); renderTransactions([]);
+      showToast(err.message || "Erro ao carregar dados", "error");
+    }
   }
+  // Caixinhas FORA do try — mesmo invariante do fan-out de segurança (documentado
+  // acima de loadSecuritySettings): o bumper mais recente de _dataGen é dono do
+  // loadCaixinhas e do desfecho, e loadData é o único que bumpa. Dentro do try ele
+  // ficava órfão quando esta geração falhava com propagate (sai por throw antes) e
+  // a anterior caía no guard de geração — ninguém o chamava.
+  // await + propaga: sem isso o loadData soltava o indicador do PTR antes do
+  // caixinhas assentar (segundo pull podia sobrepor) e uma falha transitória
+  // escondia o card já renderizado com o refresh reportando sucesso.
+  // Erro do pai ganha do erro do filho (é mais informativo).
+  await loadCaixinhas({ propagate }).catch(function (childErr) { if (!ownErr) ownErr = childErr; });
+  // Re-checa a geração pelo mesmo motivo do loadSecuritySettings: o await acima é
+  // mais um GET, e um loadData mais novo (2º pull, disconnectAll) que
+  // tenha superado este é o dono do desfecho — o erro desta geração morta não
+  // pode tingir o PTR de âmbar por cima do dado fresco que a nova pintou.
+  if (ownErr && myGen === _dataGen) throw ownErr;
 }
 
 /* ── Caixinhas ↔ metas (Banqueiro, beta) ─────────
@@ -2840,30 +2939,52 @@ async function loadData({ propagate = false } = {}) {
    do PigBank pro Banqueiro detectar os aportes. */
 let _caixMetas = [];
 
+// Geração: chamado pelo loadData (que já checa _dataGen, mas o fetch próprio
+// reabre a janela) e pelo bindCaixinha (o onchange do <select> de cada linha do
+// card); puxar no meio deixa dois em voo e o antigo re-renderizava o card stale
+// (ou escondia um recém-mostrado). Só a geração mais nova mexe no card.
+let _caixGen = 0;
 async function loadCaixinhas({ propagate = false } = {}) {
   const card = document.getElementById("caixinhas-card");
   if (!USER_ID || !card) return;
-  let data;
+  const myGen = ++_caixGen;
+  // A pintura fica DENTRO do try (como no loadData e no loadSecuritySettings):
+  // fora dela um throw do renderCaixinhas subia pro catch do loadData e, com
+  // propagate:false, apagava conexões/contas/transações que tinham acabado de
+  // renderizar com sucesso; com o caixinhas já fora do try do loadData, viraria
+  // rejeição solta.
+  // O preço: com propagate:false um bug no renderCaixinhas cai no mesmo catch de
+  // um GET que falhou e vira "esconde o card". Sem toast de propósito — este card
+  // é beta e só aparece pra uma allowlist; um toast de erro numa tela onde o card
+  // nem devia existir é pior que a ausência dele, e o fetch com propagate:false
+  // já era silencioso desde antes. Mas erro de render é BUG, não falha
+  // transitória: vai pro console.error abaixo. Com propagate:true nada muda —
+  // rejeita e o PTR fica âmbar.
   try {
     const resp = await fetch(`${API}/open-finance/${USER_ID}/caixinhas`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) {
-      if (resp.status === 404) { card.style.display = "none"; return; }  // 404 = fora do beta (legítimo)
+      if (resp.status === 404) { if (myGen === _caixGen) card.style.display = "none"; return; }  // 404 = fora do beta (legítimo)
       throw new Error("HTTP " + resp.status);                            // 5xx/transitório
     }
-    data = await resp.json();
+    const data = await resp.json();
+    if (myGen !== _caixGen) return;   // superado por um load mais novo: não pinta
+    const cx = data.caixinhas || [];
+    if (!cx.length) { card.style.display = "none"; return; }
+    _caixMetas = data.metas || [];
+    renderCaixinhas(cx);
+    card.style.display = "";
   } catch (err) {
+    if (myGen !== _caixGen) return;   // superado: não mexe no card nem propaga
     // No refresh (propagate) preserva o card já renderizado e propaga — sem
     // isso uma falha transitória escondia caixinhas válidas. No load normal,
-    // mantém o comportamento antigo (esconde).
+    // mantém o comportamento antigo (esconde) + console.error, pro throw de
+    // render não sumir sem deixar rastro. _caixMetas pode ter ficado com as metas
+    // novas e o card escondido: inerte, renderCaixinhas é o único leitor e o
+    // loadCaixinhas reatribui _caixMetas antes de cada render.
     if (propagate) throw err;
+    console.error("loadCaixinhas:", err);
     card.style.display = "none";
-    return;
   }
-  const cx = data.caixinhas || [];
-  if (!cx.length) { card.style.display = "none"; return; }
-  _caixMetas = data.metas || [];
-  renderCaixinhas(cx);
-  card.style.display = "";
 }
 
 function renderCaixinhas(list) {
@@ -3082,12 +3203,21 @@ async function disconnectAll() {
 /* ── MFA (TOTP) ──────────────────────────────── */
 let _mfaStatus = { enabled: false, has_pending_secret: false, backup_codes_remaining: 0 };
 
+// Geração: mfaSetupStep2Submit/mfaDisableSubmit/mfaRegenerateSubmit recarregam o status;
+// puxar-pra-atualizar no meio deixa dois GETs em voo e o antigo, por último,
+// sobrescrevia _mfaStatus — que decide qual modal o toggle abre (onMfaToggleClick),
+// não só o texto. Só a geração mais nova assenta.
+let _mfaGen = 0;
 async function loadMfaStatus({ propagate = false } = {}) {
+  const myGen = ++_mfaGen;
   try {
     const resp = await fetch(`${API}/auth/mfa/status`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
-    _mfaStatus = await resp.json();
+    const status = await resp.json();
+    if (myGen !== _mfaGen) return;   // superado: não assenta (preserva o load mais novo)
+    _mfaStatus = status;
   } catch (err) {
+    if (myGen !== _mfaGen) return;   // superado: não mexe no estado nem propaga
     // No refresh (propagate) preserva _mfaStatus e propaga: sem isso, um erro
     // transitório no /auth/mfa/status virava "MFA desativado" na tela (oferecendo
     // ativar de novo) e o PTR ainda reportava sucesso.
