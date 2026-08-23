@@ -149,6 +149,29 @@ pytest -v "tests/test_x.py::test_b" "tests/test_x.py::test_a"
 > bateria inteira de testes de área segura que era estruturalmente cega ao erro que
 > estava sendo cometido, porque `env(safe-area-inset-*)` vale 0 no navegador headless.
 
+**Verde no teste não é "funciona no WhatsApp".** Já se repetiu: implementei, os testes
+passaram, e no aparelho nada funcionava — ou porque o teste não media nada, ou porque
+não cobria o que o usuário faz de verdade. Três regras, cada uma contra uma causa:
+
+1. **Prove que o teste falha sem o fix.** Antes de dizer "pronto": reverta o fix, rode
+   o teste, veja **vermelho**; reponha o fix, veja **verde**. Se ele passa com e sem a
+   correção, é teste tautológico — escrito junto com o código, afirmando o que o código
+   faz, verde por construção. Conserte o teste antes de reportar o resultado. (É a 1ª
+   das duas perguntas acima, virada em rotina obrigatória.)
+2. **Separe "verificado aqui" de "só no aparelho/deploy", explícito no relato.** O app
+   carrega o site ao vivo, então mudança de frontend só aparece **depois do deploy**
+   (§5), e vários fluxos — WhatsApp real, envio, `ofxparse`/`reportlab` ausentes (§6) —
+   este ambiente não exercita. Diga em qual dos dois mundos a mudança foi provada;
+   silêncio sobre o não-verificado lê-se como verificado (§7).
+3. **Cubra o input que o usuário digita, não o que você projetou.** Um teste com
+   `"gastei 50 no mercado"` bonitinho passa e não prova nada sobre acento, áudio, duas
+   transações na mesma frase, gíria, ordem trocada — a classe de bug que mais quebra no
+   WhatsApp. É a 2ª pergunta acima aplicada à entrada: que mensagem real este teste
+   nunca veria? Lembre que os testes de WhatsApp (`test_whatsapp_simulation.py` e
+   irmãos) mockam o LLM/NLP e o envio — um bug na interpretação real ou no roteamento
+   real passa batido, então o teste verde só cobre a lógica intermediária, não o comando
+   ponta a ponta.
+
 **Verifique que não quebrou nada em volta.** Toda regra nova de CSS global, todo
 helper alterado, toda mudança de schema: confira o caminho vizinho, não só o que você
 consertou. `git diff` antes do commit, lido de ponta a ponta.
