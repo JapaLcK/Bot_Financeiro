@@ -314,6 +314,16 @@ def spend_query(user_id: int, text: str, entities: dict | None = None) -> str:
     period = parse_period_from_text(text)
     if period:
         start, end, period_label = period
+    elif (dia := _parse_date_entity(entities or {}, "")):
+        # date_filter JÁ RESOLVIDO (clarificação "gastos com saúde dia 4" + "abril"
+        # → ISO em entities) vence o mês corrente: o re-execute do router reusa o
+        # original_text inalterado, onde "dia 4" não é período reconhecível.
+        # Só quando o texto não trouxe período — senão "julho" (mês inteiro)
+        # colapsaria num único dia. Texto vazio no 2º arg: sem fallback textual,
+        # o texto já foi consultado acima.
+        start = end = dia
+        lbl = _fmt_date_label(dia)
+        period_label = lbl if lbl in ("hoje", "ontem") else f"em {lbl}"
     else:
         # sem período reconhecido → mês corrente cheio (igual ao dashboard)
         start, end = month_range_today()
