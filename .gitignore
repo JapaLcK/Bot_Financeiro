@@ -24,3 +24,6 @@ register_whatsapp.json
 # o ~/.claude/ de ninguém.
 !.claude/skills/baseline-testes/
 skills-lock.json
+
+# Harness de testes de frontend (tests/frontend/): dependência local, não viaja.
+node_modules/

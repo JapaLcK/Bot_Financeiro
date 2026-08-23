@@ -1909,6 +1909,20 @@ async function saveSecurityContact(kind) {
     // por último. Sem bumpar a geração, esse GET veria myGen === _securityGen e
     // repintaria o contato pré-PATCH por cima do que acabou de ser salvo.
     ++_securityGen;
+    // Bumpar a geração cancela o fan-out do load em voo (ele retorna ANTES de
+    // loadActivityLog/loadSessionsList) e este save não dispara load novo pra
+    // refazê-lo — sem isto os dois painéis ficariam presos em "Carregando…" até
+    // um refresh manual. Refazer aqui também é freshness legítima: trocar
+    // e-mail/telefone escreve um evento na atividade. Sem await e sem propagate:
+    // os filhos têm geração própria e um erro aqui não pode virar rejeição solta.
+    // ANTES do applySecuritySettings: se o apply estourasse no meio, o catch
+    // abaixo engolia em toast e o fan-out do load invalidado nunca seria refeito.
+    // Inerte hoje (o apply só toca ids que existem nesta página, e nenhum teste
+    // cobre o cenário); é de graça e tira a dependência. Ordem não muda nada:
+    // os filhos são async e não tocam em nenhum #security-* (pintam
+    // #activity-list / #sessions-list e os botões deles).
+    loadActivityLog();
+    loadSessionsList();
     applySecuritySettings(data);
     const labels = { email: "E-mail atualizado", phone: "Telefone atualizado", name: value ? "Nome atualizado" : "Nome removido" };
     showToast(labels[kind] || "Dado atualizado", "ok");
@@ -1983,11 +1997,22 @@ async function awaitAllPropagate(promises) {
   if (failed) throw failed.reason;
 }
 
-// Geração: saveSecurityContact e o reset de senha (:2235) recarregam a segurança
-// fora do PTR; puxar no meio deixa dois loads em voo e o antigo repintava os
-// campos por último. Os filhos (atividade/sessões) têm geração própria — aqui só
-// gato a pintura do painel de segurança. Superado pula o fan-out: o load mais
-// novo o refaz, e não deixo a falha de um load velho tingir o PTR de âmbar.
+// Geração: saveSecurityContact, o reset de senha (sendPasswordResetEmail) e o
+// "↻ Atualizar" do card "Dados da conta" recarregam a segurança fora do PTR; puxar no
+// meio deixa dois loads em voo e o antigo repintava os campos por último. Os
+// filhos (atividade/sessões) têm geração própria — aqui só gato a pintura do
+// painel de segurança.
+//
+// Invariante: O BUMPER MAIS RECENTE DE _securityGen É DONO DO FAN-OUT
+// (atividade + sessões) E DO DESFECHO. Dois lugares bumpam: saveSecurityContact
+// e este load. Um load superado sai calado nos três pontos de saída — o guard do
+// sucesso, o do catch, e a re-checagem depois do fan-out: não pinta e não
+// propaga erro. Nos dois primeiros ele sai ANTES do fan-out, e quem o superou é
+// quem dispara os filhos; no terceiro os filhos já rodaram.
+// Sem isso os dois painéis ficavam presos no "Carregando…" estático de
+// #activity-list / #sessions-list até troca de seção — era o que acontecia
+// quando a geração corrente saía por throw (propagate) antes do fan-out,
+// deixando o load superado sem ninguém pra refazê-lo.
 let _securityGen = 0;
 async function loadSecuritySettings({ propagate = false } = {}) {
   if (!USER_ID) {
@@ -1997,22 +2022,38 @@ async function loadSecuritySettings({ propagate = false } = {}) {
     return;
   }
   const myGen = ++_securityGen;
+  let ownErr = null;
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/security`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
-    if (myGen !== _securityGen) return;   // superado: não pinta (o load mais novo refaz o fan-out)
+    if (myGen !== _securityGen) return;   // superado: não pinta nem dispara os filhos (quem superou faz os dois)
     applySecuritySettings(data);
   } catch (err) {
     if (myGen !== _securityGen) return;   // superado: não repinta nem propaga
-    if (propagate) throw err;
-    applySecuritySettings({});
-    showToast(err.message || "Erro ao carregar segurança", "error");
+    // propagate (PTR): não zera a tela (preserva o conteúdo atual), guarda o erro
+    // e re-lança DEPOIS do fan-out, pro indicador virar âmbar sem deixar os
+    // filhos órfãos. Sair por throw aqui quebrava o invariante acima — esta
+    // geração é a dona do fan-out e ninguém mais o refaria.
+    if (propagate) ownErr = err;
+    else {
+      applySecuritySettings({});
+      showToast(err.message || "Erro ao carregar segurança", "error");
+    }
   }
   // Espera atividade E sessões assentarem (não só a 1ª a falhar) e então
   // propaga a falha — senão o indicador soltava com uma delas ainda em voo,
   // que podia repintar por cima depois. {propagate} preserva o conteúdo atual.
-  await awaitAllPropagate([loadActivityLog({ propagate }), loadSessionsList({ propagate })]);
+  // Erro do pai ganha do erro do filho (é mais informativo).
+  await awaitAllPropagate([loadActivityLog({ propagate }), loadSessionsList({ propagate })])
+    .catch(function (childErr) { if (!ownErr) ownErr = childErr; });
+  // Re-checa a geração: o fan-out são mais dois GETs, e um ↻/save no meio pode
+  // ter superado este load. É a outra metade da regra que os guards
+  // acima já aplicam — eles descartam o SUCESSO de um load superado, este
+  // descarta o ERRO. Limite aceito: a geração nova pode não pintar (em voo, ou
+  // falhando também) e aí o PTR resolve verde com a tela possivelmente zerada —
+  // o toast de erro do caminho propagate:false é o sinal que sobra.
+  if (ownErr && myGen === _securityGen) throw ownErr;
 }
 
 const ACTIVITY_ICONS = {
@@ -2849,11 +2890,12 @@ async function loadData({ propagate = false } = {}) {
     return;
   }
   const myGen = ++_dataGen;
+  let ownErr = null;
   try {
     const resp = await fetch(`${API}/open-finance/${USER_ID}`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
-    if (myGen !== _dataGen) return;   // superado por um loadData mais novo: não pinta
+    if (myGen !== _dataGen) return;   // superado: não pinta nem chama o caixinhas (quem superou faz os dois)
     const c = data.connections  || [];
     const a = data.accounts     || [];
     const t = data.transactions || [];
@@ -2862,19 +2904,33 @@ async function loadData({ propagate = false } = {}) {
     renderAccounts(a);
     renderTransactions(t);
     if (c.length > 0) setStep(3);
-    // await + propaga: sem isso o loadData soltava o indicador do PTR antes do
-    // caixinhas assentar (segundo pull podia sobrepor) e uma falha transitória
-    // escondia o card já renderizado com o refresh reportando sucesso.
-    await loadCaixinhas({ propagate });
   } catch (err) {
     if (myGen !== _dataGen) return;   // superado: não mexe no DOM nem propaga
-    // propagate (PTR): preserva o que está renderizado e rejeita (âmbar). Sem
-    // isso, uma falha transitória apagava conexões/contas/transações da tela.
-    if (propagate) throw err;
-    updateStats([], [], []);
-    renderConnections([]); renderAccounts([]); renderTransactions([]);
-    showToast(err.message || "Erro ao carregar dados", "error");
+    // propagate (PTR): preserva o que está renderizado e guarda o erro pra
+    // rejeitar DEPOIS do caixinhas (âmbar). Sem isso, uma falha transitória
+    // apagava conexões/contas/transações da tela.
+    if (propagate) ownErr = err;
+    else {
+      updateStats([], [], []);
+      renderConnections([]); renderAccounts([]); renderTransactions([]);
+      showToast(err.message || "Erro ao carregar dados", "error");
+    }
   }
+  // Caixinhas FORA do try — mesmo invariante do fan-out de segurança (documentado
+  // acima de loadSecuritySettings): o bumper mais recente de _dataGen é dono do
+  // loadCaixinhas e do desfecho, e loadData é o único que bumpa. Dentro do try ele
+  // ficava órfão quando esta geração falhava com propagate (sai por throw antes) e
+  // a anterior caía no guard de geração — ninguém o chamava.
+  // await + propaga: sem isso o loadData soltava o indicador do PTR antes do
+  // caixinhas assentar (segundo pull podia sobrepor) e uma falha transitória
+  // escondia o card já renderizado com o refresh reportando sucesso.
+  // Erro do pai ganha do erro do filho (é mais informativo).
+  await loadCaixinhas({ propagate }).catch(function (childErr) { if (!ownErr) ownErr = childErr; });
+  // Re-checa a geração pelo mesmo motivo do loadSecuritySettings: o await acima é
+  // mais um GET, e um loadData mais novo (2º pull, disconnectAll) que
+  // tenha superado este é o dono do desfecho — o erro desta geração morta não
+  // pode tingir o PTR de âmbar por cima do dado fresco que a nova pintou.
+  if (ownErr && myGen === _dataGen) throw ownErr;
 }
 
 /* ── Caixinhas ↔ metas (Banqueiro, beta) ─────────
@@ -2884,37 +2940,51 @@ async function loadData({ propagate = false } = {}) {
 let _caixMetas = [];
 
 // Geração: chamado pelo loadData (que já checa _dataGen, mas o fetch próprio
-// reabre a janela) e pelo bind (:2910); puxar no meio deixa dois em voo e o
-// antigo re-renderizava o card stale (ou escondia um recém-mostrado). Só a
-// geração mais nova mexe no card.
+// reabre a janela) e pelo bindCaixinha (o onchange do <select> de cada linha do
+// card); puxar no meio deixa dois em voo e o antigo re-renderizava o card stale
+// (ou escondia um recém-mostrado). Só a geração mais nova mexe no card.
 let _caixGen = 0;
 async function loadCaixinhas({ propagate = false } = {}) {
   const card = document.getElementById("caixinhas-card");
   if (!USER_ID || !card) return;
   const myGen = ++_caixGen;
-  let data;
+  // A pintura fica DENTRO do try (como no loadData e no loadSecuritySettings):
+  // fora dela um throw do renderCaixinhas subia pro catch do loadData e, com
+  // propagate:false, apagava conexões/contas/transações que tinham acabado de
+  // renderizar com sucesso; com o caixinhas já fora do try do loadData, viraria
+  // rejeição solta.
+  // O preço: com propagate:false um bug no renderCaixinhas cai no mesmo catch de
+  // um GET que falhou e vira "esconde o card". Sem toast de propósito — este card
+  // é beta e só aparece pra uma allowlist; um toast de erro numa tela onde o card
+  // nem devia existir é pior que a ausência dele, e o fetch com propagate:false
+  // já era silencioso desde antes. Mas erro de render é BUG, não falha
+  // transitória: vai pro console.error abaixo. Com propagate:true nada muda —
+  // rejeita e o PTR fica âmbar.
   try {
     const resp = await fetch(`${API}/open-finance/${USER_ID}/caixinhas`, authOptions({ headers: authHeaders() }));
     if (!resp.ok) {
       if (resp.status === 404) { if (myGen === _caixGen) card.style.display = "none"; return; }  // 404 = fora do beta (legítimo)
       throw new Error("HTTP " + resp.status);                            // 5xx/transitório
     }
-    data = await resp.json();
+    const data = await resp.json();
+    if (myGen !== _caixGen) return;   // superado por um load mais novo: não pinta
+    const cx = data.caixinhas || [];
+    if (!cx.length) { card.style.display = "none"; return; }
+    _caixMetas = data.metas || [];
+    renderCaixinhas(cx);
+    card.style.display = "";
   } catch (err) {
     if (myGen !== _caixGen) return;   // superado: não mexe no card nem propaga
     // No refresh (propagate) preserva o card já renderizado e propaga — sem
     // isso uma falha transitória escondia caixinhas válidas. No load normal,
-    // mantém o comportamento antigo (esconde).
+    // mantém o comportamento antigo (esconde) + console.error, pro throw de
+    // render não sumir sem deixar rastro. _caixMetas pode ter ficado com as metas
+    // novas e o card escondido: inerte, renderCaixinhas é o único leitor e o
+    // loadCaixinhas reatribui _caixMetas antes de cada render.
     if (propagate) throw err;
+    console.error("loadCaixinhas:", err);
     card.style.display = "none";
-    return;
   }
-  if (myGen !== _caixGen) return;   // superado por um load mais novo: não pinta
-  const cx = data.caixinhas || [];
-  if (!cx.length) { card.style.display = "none"; return; }
-  _caixMetas = data.metas || [];
-  renderCaixinhas(cx);
-  card.style.display = "";
 }
 
 function renderCaixinhas(list) {
@@ -3133,7 +3203,7 @@ async function disconnectAll() {
 /* ── MFA (TOTP) ──────────────────────────────── */
 let _mfaStatus = { enabled: false, has_pending_secret: false, backup_codes_remaining: 0 };
 
-// Geração: enable/disable/regenerate (:3184,:3232,:3271) recarregam o status;
+// Geração: mfaSetupStep2Submit/mfaDisableSubmit/mfaRegenerateSubmit recarregam o status;
 // puxar-pra-atualizar no meio deixa dois GETs em voo e o antigo, por último,
 // sobrescrevia _mfaStatus — que decide qual modal o toggle abre (onMfaToggleClick),
 // não só o texto. Só a geração mais nova assenta.
