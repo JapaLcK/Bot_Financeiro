@@ -24,6 +24,22 @@ class _DashboardHandler(logging.Handler):
     """
     Handler que espelha WARNING e ERROR no dashboard (tabela system_event_logs).
     Só grava se DATABASE_URL estiver configurado.
+
+    ponytail: `emit` chama `log_system_event_sync` direto — um psycopg.connect()
+    + INSERT bloqueante POR REGISTRO, sem pool e sem fila. Teto: como este handler
+    fica no ROOT logger, qualquer `warning()`/`error()` de qualquer módulo paga a
+    conta, e no processo web (uvicorn) ela é paga DENTRO do event loop, travando
+    todas as conexões enquanto dura. Medido em localhost: 11,3 ms na 1ª chamada e
+    2,1–3,7 ms por chamada em série, contra 0,02 ms sem o handler; com banco remoto
+    cada connect ainda paga o RTT (não medido daqui — produção inacessível). Foi
+    barato até aqui porque warning em produção é raro; o que assusta é o caso em
+    que ele deixa de ser — um laço quente logando por requisição. Já obrigou
+    contorno em pelo menos um ponto: `frontend/routes/shared.py` loga a queda da
+    página de erro uma vez por TRANSIÇÃO (flag `_error_degraded`) em vez de por
+    requisição, senão um bot varrendo URL vira um INSERT por 404.
+    Upgrade: `logging.handlers.QueueHandler` + `QueueListener` (stdlib) tira o
+    INSERT do caller; ou reusar o pool async em vez de abrir conexão por registro.
+    Transversal (mexe no logger de todo o processo) — não é o PR da página de erro.
     """
 
     def emit(self, record: logging.LogRecord) -> None:
