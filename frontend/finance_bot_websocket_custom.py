@@ -116,6 +116,7 @@ from frontend.routes.shared import (
     raise_if_account_scheduled_for_deletion as _raise_if_account_scheduled_for_deletion,
     resolve_analytics_window as _resolve_analytics_window,
     resolve_dashboard_user_id as _resolve_dashboard_user_id,
+    stamp_asset_versions as _stamp_asset_versions,
 )
 from frontend.routes.static_pages import router as static_pages_router
 
@@ -4719,7 +4720,7 @@ Solicite um novo link digitando <strong style="color:rgba(255,255,255,.8)">dashb
 Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</p>
 <a href="/">← Página inicial</a>
 </div></body></html>""".replace("__MAGIC_LINK_MINUTES__", str(DASHBOARD_MAGIC_LINK_MINUTES))
-        return HTMLResponse(content=expired_html, status_code=401)
+        return HTMLResponse(content=_stamp_asset_versions(expired_html), status_code=401)
 
     # next: rotas internas permitidas pra evitar open-redirect. Tem prioridade sobre view.
     _ALLOWED_NEXT_PREFIXES = ("/precos", "/conta", "/app", "/home", "/settings")
@@ -4822,7 +4823,7 @@ async def unsubscribe(uid: int, token: str):
     if not await _apply_unsubscribe(uid, token):
         return HTMLResponse("<h2>Link inválido ou expirado.</h2>", status_code=400)
 
-    return HTMLResponse("""
+    return HTMLResponse(_stamp_asset_versions("""
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -4851,7 +4852,7 @@ async def unsubscribe(uid: int, token: str):
   </div>
 </body>
 </html>
-""")
+"""))
 
 
 # ─── HTTP API routes ─────────────────────────────────────────────────────────
