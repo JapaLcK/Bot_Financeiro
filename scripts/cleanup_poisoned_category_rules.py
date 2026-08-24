@@ -24,6 +24,11 @@ colisão, mas apagá-la seria perder config do usuário. Por isso `--apply` exig
 `--user`: rode global em dry-run, revise a lista, e só então aplique cliente a
 cliente conferindo que nenhuma daquelas regras é intencional.
 
+O dry-run é READ-ONLY de verdade: nenhuma das duas leituras (`_all_user_ids`,
+`_rules_somente_leitura`) escreve, e `--user` inexistente aborta em vez de ser
+criado. Sem isso o próprio conselho de segurança deste script ("rode o dry-run
+primeiro") criava dado em produção.
+
 Uso:
     .venv/bin/python -m scripts.cleanup_poisoned_category_rules              # dry-run global (só reporta)
     .venv/bin/python -m scripts.cleanup_poisoned_category_rules --user 314149836            # dry-run de 1 user
@@ -34,7 +39,6 @@ from __future__ import annotations
 import argparse
 
 import db
-from db.categories import list_user_category_rules
 from core.services.category_service import custom_category_match
 from utils_text import normalize_text
 
@@ -46,10 +50,46 @@ def _all_user_ids() -> list[int]:
     return [r["id"] if isinstance(r, dict) else r[0] for r in rows]
 
 
+def _user_existe(user_id: int) -> bool:
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select 1 from users where id=%s", (user_id,))
+        return cur.fetchone() is not None
+
+
+def _rules_somente_leitura(user_id: int) -> list[tuple[str, str]]:
+    """As regras do usuário, SEM `ensure_user`. Mesma query, sem o write.
+
+    `list_user_category_rules` (db/categories.py) abre com `ensure_user`, que
+    INSERE linha em `users` E em `accounts` e commita antes de devolver lista
+    nenhuma. Num script cujo argumento de segurança inteiro é "rode o dry-run
+    primeiro", isso significava que o dry-run CRIAVA em produção o cliente que o
+    operador digitou errado — e reportava "0 regras", com cara de nada a fazer.
+
+    Não é caso isolado do `--user`: todo leitor de regra do repo passa pelo
+    mesmo `ensure_user` (`list_category_rules`, `get_memorized_category`,
+    `list_user_category_rules`), não existe versão read-only pra reusar. Por
+    isso a query mora aqui, e é a ÚNICA porta de leitura do script.
+    """
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select keyword, category from user_category_rules "
+            "where user_id=%s order by length(keyword) desc",
+            (user_id,),
+        )
+        rows = cur.fetchall() or []
+    return [
+        (
+            (r["keyword"] if isinstance(r, dict) else r[0]) or "",
+            (r["category"] if isinstance(r, dict) else r[1]) or "",
+        )
+        for r in rows
+    ]
+
+
 def find_poisoned(user_id: int) -> list[tuple[str, str, str]]:
     """[(keyword, categoria_da_regra, categoria_custom_que_ela_rouba)]."""
     out: list[tuple[str, str, str]] = []
-    for keyword, category in list_user_category_rules(user_id):
+    for keyword, category in _rules_somente_leitura(user_id):
         custom = custom_category_match(user_id, normalize_text(keyword))
         if custom and normalize_text(custom) != normalize_text(category or ""):
             out.append((keyword, category, custom))
@@ -77,6 +117,12 @@ def main() -> None:
     if args.apply and not args.user:
         ap.error("--apply exige --user: revise a lista global (dry-run) e aplique "
                  "cliente a cliente, conferindo que nenhuma regra é intencional.")
+
+    # `--user` digitado errado não pode virar "0 regras, nada a fazer": aborta.
+    # (O write que ele causava morreu em `_rules_somente_leitura`; isto é o
+    # aviso, pra não confundir "cliente limpo" com "cliente que não existe".)
+    if args.user is not None and not _user_existe(args.user):
+        ap.error(f"user {args.user} não existe — confira o id.")
 
     user_ids = [args.user] if args.user else _all_user_ids()
     total = 0
