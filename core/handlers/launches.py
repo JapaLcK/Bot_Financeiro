@@ -189,10 +189,14 @@ def _fora_do_nome_da_categoria(text: str, categoria: str | None) -> str:
         query à semana corrente — lançamento antigo sumia calado.
 
     Aqui o corte é do TRECHO casado (`_ultimo_trecho_do_nome`): sai a ocorrência,
-    não o valor. Sem trecho contíguo — nome resolvido por fuzzy
-    (`custom_category_match`) ou por alias, quando o que o usuário digitou não é
-    o nome inteiro — cai na última ocorrência de cada palavra do nome, que é o
-    máximo que dá pra remover sem inventar alinhamento.
+    não o valor. Sem trecho contíguo — o usuário digitou só PARTE do nome
+    ("...com namorada" pra `gastos com minha namorada`, resolvido pelo fuzzy de
+    `custom_category_match`) — sai só a palavra do nome que está no PEDIDO que
+    resolveu a categoria (`_extract_query_category`, a mesma entrada que
+    `_resolve_query_category` passa pro fuzzy). Palavra do nome que NÃO aparece
+    nesse pedido nunca foi rótulo nesta frase: é do usuário e fica. Remover toda
+    palavra do rótulo comia o "gastos" de "me liste os gastos com namorada" — o
+    eixo TIPO zerava e a listagem de despesa voltava com receita junto.
 
     A forma do texto é PRESERVADA (só `_` vira espaço) porque `_resolve_period`
     precisa de "03/04" inteiro; `normalize_text` transformaria a barra em espaço
@@ -223,8 +227,22 @@ def _fora_do_nome_da_categoria(text: str, categoria: str | None) -> str:
     if trecho:
         fora = set(range(*trecho))
     else:
+        # Só é rótulo a palavra do nome que o usuário DIGITOU no pedido — as
+        # outras ele não escreveu, então nenhuma ocorrência delas no texto veio
+        # do nome. `_extract_query_category` devolve exatamente o trecho que
+        # `_resolve_query_category` deu pro fuzzy casar a categoria.
+        # ponytail: heurística com teto conhecido — nome ABREVIADO e cru
+        # ("gastos com namorada" pra `gastos com minha namorada`) tem as mesmas
+        # palavras de "me liste os gastos com namorada", então os dois leem
+        # despesa. Separá-los exige saber a intenção, não mais texto; se virar
+        # queixa, o caminho é o usuário escrever o nome inteiro (aí volta a ser
+        # trecho contíguo e o rótulo sai todo).
+        pedido = normalize_text(_extract_query_category(text) or "")
+        casadas = set(pedido.replace("_", " ").split())
         fora = set()
         for palavra in nome:
+            if palavra not in casadas:
+                continue
             cand = [i for i, t in enumerate(toks) if t == palavra and i not in fora]
             if cand:
                 fora.add(cand[-1])

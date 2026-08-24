@@ -516,6 +516,20 @@ def test_lista_inclui_cartao(pro_user_id):
     ("liste os gastos em gastos com minha namorada",
                                                   "gastos com minha namorada", "despesa"),
     ("liste os ganhos em ganhos com meu freela",  "ganhos com meu freela",     "receita"),
+    # RODADA 14 — e quando o usuário digita o nome INCOMPLETO ("namorada" em vez
+    # de "minha namorada"), não existe trecho contíguo e cai no fallback. Ele
+    # removia toda palavra do rótulo, inclusive a que só existe como PERGUNTA
+    # nesta frase: some o único "gastos" e a listagem de despesa volta com
+    # receita junto. Só sai do texto a palavra do nome que está no PEDIDO
+    # (`_extract_query_category` → "namorada"/"freela").
+    ("me liste os gastos com namorada",           "gastos com minha namorada", "despesa"),
+    ("me liste os ganhos com freela",             "ganhos com meu freela",     "receita"),
+    # O TETO da regra, fixado de propósito: tirando o "me liste os", sobra
+    # exatamente o nome abreviado — e as duas leituras usam as MESMAS palavras.
+    # Como só "namorada" resolveu a categoria, o "gastos" conta como pergunta e
+    # o tipo vira despesa. O nome CRU E COMPLETO ("gastos com minha namorada",
+    # a linha da RODADA 8 acima) segue neutro.
+    ("gastos com namorada",                       "gastos com minha namorada", "despesa"),
     # e o que já funcionava continua
     ("quanto gastei em lazer",                    "lazer",                     "despesa"),
     ("liste os lancamentos em lazer",             "lazer",                     None),
@@ -548,6 +562,13 @@ def test_tipo_pedido_ignora_o_nome_da_categoria(frase, categoria, esperado):
     # este já passava ANTES (o "quanto" não colide com nenhuma palavra do nome):
     # é guarda de que o corte por trecho não come a instrução, não discriminante.
     ("quanto foi o total da obra",          "total da obra",   True),
+    # RODADA 14, o mesmo P2 no eixo FORMATO: nome digitado INCOMPLETO ("obra"
+    # por "total da obra nova") → sem trecho contíguo → o fallback comia o
+    # "total" que o usuário escreveu e devolvia LISTA pra quem pediu número.
+    ("qual o total com obra",               "total da obra nova", True),
+    # guarda, NÃO discriminante: palavra do rótulo que não está no texto não tem
+    # ocorrência pra remover, então o fallback velho já acertava esta.
+    ("liste os lancamentos com obra",       "total da obra",   False),
 ])
 def test_pede_total_ignora_o_nome_da_categoria(frase, categoria, esperado):
     from core.handlers.launches import _pede_total
@@ -604,6 +625,38 @@ def test_palavra_de_total_do_usuario_sobrevive_ao_nome(pro_user_id):
     )
     assert "Você gastou **R$ 350,00**" in resp      # formato TOTAL
     assert "🧾 **Lançamentos em" not in resp        # e não o cabeçalho da LISTA
+
+
+@pytest.mark.parametrize("nome,frase,tipo_pedido", [
+    ("gastos com minha namorada", "me liste os gastos com namorada",  "despesa"),
+    ("ganhos com meu freela",     "me liste os ganhos com freela",    "receita"),
+])
+def test_nome_incompleto_nao_come_a_instrucao(pro_user_id, nome, frase, tipo_pedido):
+    # RODADA 14, ponta a ponta. O usuário digita o nome PELA METADE — é o que ele
+    # faz no WhatsApp: a categoria se chama "gastos com minha namorada" e ele
+    # escreve "com namorada". Sem trecho contíguo, o fallback removia toda
+    # palavra do rótulo e levava junto o único "gastos" da frase, que era a
+    # INSTRUÇÃO dele → `_tipo_pedido` None → a lista de despesa vinha com a
+    # receita junto (e a de receita, com a despesa).
+    create_user_category(pro_user_id, nome)
+    base = _hoje_as(9)
+    db.add_launch_and_update_balance(
+        pro_user_id, "receita", 300, "estorno da loja", None,
+        categoria=nome, criado_em=base,
+    )
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 40, "compra da loja", None,
+        categoria=nome, criado_em=base,
+    )
+    _ruido_mais_recente(pro_user_id, base)
+
+    resp = list_launches(pro_user_id, original_text=frase)
+    dentro, fora = ("40,00", "300,00") if tipo_pedido == "despesa" else ("300,00", "40,00")
+    assert dentro in resp
+    assert fora not in resp
+    # e a categoria certa foi resolvida (não caiu na listagem geral, que traria
+    # o ruído de mercado)
+    assert "mercado" not in resp.lower()
 
 
 @pytest.mark.parametrize("nome", [
