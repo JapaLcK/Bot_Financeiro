@@ -37,6 +37,10 @@ from fastapi import BackgroundTasks, FastAPI, WebSocket, WebSocketDisconnect, HT
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, RedirectResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from fastapi.utils import is_body_allowed_for_status_code
+from starlette.exceptions import HTTPException as StarletteHTTPException
 import uvicorn
 from pydantic import BaseModel
 from slowapi.util import get_remote_address
@@ -106,6 +110,7 @@ from frontend.routes.shared import (
     dashboard_current_cache as _dashboard_current_cache,
     db_connect,
     decode_jwt as _decode_jwt,
+    error_page_response,
     get_auth_token_from_request as _get_auth_token_from_request,
     invalidate_dashboard_current_cache as _invalidate_dashboard_current_cache,
     jdump,
@@ -117,6 +122,8 @@ from frontend.routes.shared import (
     resolve_analytics_window as _resolve_analytics_window,
     resolve_dashboard_user_id as _resolve_dashboard_user_id,
     stamp_asset_versions as _stamp_asset_versions,
+    vary_accept,
+    wants_html,
 )
 from frontend.routes.static_pages import router as static_pages_router
 
@@ -1788,12 +1795,22 @@ _SECURITY_HEADERS = {
     ),
 }
 
-@app.middleware("http")
-async def security_headers_middleware(request: Request, call_next):
-    response = await call_next(request)
+def _with_security_headers(response: Response) -> Response:
+    """Aplica os _SECURITY_HEADERS numa resposta.
+
+    Usado pelo middleware abaixo e pelos DOIS pontos que respondem fora do
+    alcance dele: o short-circuit do csrf_middleware (registrado depois, logo
+    mais externo) e o handler do ServerErrorMiddleware (fora de todo middleware
+    de usuário). Os dois agora devolvem documento HTML nosso, e HTML sem
+    `frame-ancestors 'none'`/`X-Frame-Options` é enquadrável."""
     for header, value in _SECURITY_HEADERS.items():
         response.headers.setdefault(header, value)
     return response
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    return _with_security_headers(await call_next(request))
 
 
 def _make_csrf_token() -> str:
@@ -1822,10 +1839,26 @@ async def csrf_middleware(request: Request, call_next):
     if request.method.upper() not in CSRF_SAFE_METHODS and not _csrf_exempt(request.url.path):
         header_token = request.headers.get(CSRF_HEADER_NAME) or ""
         if not token or not header_token or not secrets.compare_digest(token, header_token):
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "Token CSRF inválido ou ausente."},
-                headers={"Cache-Control": "no-store"},
+            # HOJE nenhum caminho conhecido cai aqui por navegação: o CSRF só
+            # olha método não-seguro, e o produto não tem submit de formulário —
+            # os 13 `<form>` de frontend/*.html não têm um `method=`/`action=`
+            # sequer (9 com `onsubmit=`, 4 com addEventListener("submit"), todos
+            # em fetch), o callback do Google é @app.get, e fetch sem Accept
+            # manda */* → ramo JSON. O ramo HTML fica assim mesmo: no dia em que
+            # um POST de navegação existir (um <form> comum, um retorno de
+            # provedor externo), ele não pode depender de alguém ter lembrado
+            # deste bloco pra não despejar JSON cru numa aba do navegador. E o
+            # middleware não passa por exception handler nenhum, então isto só
+            # pode ser decidido aqui.
+            # _with_security_headers porque este return não passa pelo
+            # security_headers_middleware (csrf é o mais externo dos dois).
+            return _with_security_headers(
+                error_page_response(403) if wants_html(request)
+                else vary_accept(JSONResponse(
+                    status_code=403,
+                    content={"detail": "Token CSRF inválido ou ausente."},
+                    headers={"Cache-Control": "no-store"},
+                ))
             )
 
     response = await call_next(request)
@@ -1944,14 +1977,65 @@ app.state.limiter = limiter  # instância compartilhada em frontend/routes/share
 
 
 async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
-    return JSONResponse(
+    if wants_html(request):
+        return error_page_response(429, headers={"Retry-After": "60"})
+    return vary_accept(JSONResponse(
         status_code=429,
         content={"detail": RATE_LIMIT_DETAIL},
         headers={"Retry-After": "60"},
-    )
+    ))
 
 
 app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+
+
+# Erro que chega por NAVEGAÇÃO (Accept: text/html — barra de endereço, link,
+# WebView do app, fetch do pb-nav.js) responde página; chamada de API continua
+# no JSON de hoje, delegado aos handlers padrão do FastAPI (mesmo corpo,
+# mesmo Content-Type, mesmo exc.headers).
+async def http_exception_page_handler(request: Request, exc: StarletteHTTPException):
+    if not is_body_allowed_for_status_code(exc.status_code):  # 204/304 não podem ter corpo
+        return Response(status_code=exc.status_code, headers=getattr(exc, "headers", None))
+    if wants_html(request):
+        # exc.headers carrega o Allow do 405 e o WWW-Authenticate do 401 — o
+        # error_page_response filtra o resto (allowlist em shared.py).
+        return error_page_response(exc.status_code, headers=getattr(exc, "headers", None))
+    return vary_accept(await http_exception_handler(request, exc))
+
+
+async def validation_exception_page_handler(request: Request, exc: RequestValidationError):
+    if wants_html(request):
+        return error_page_response(422)
+    return vary_accept(await request_validation_exception_handler(request, exc))
+
+
+async def unhandled_exception_page_handler(request: Request, exc: Exception):
+    """Handler do ServerErrorMiddleware (o mais externo de todos).
+
+    Cobre exceção levantada em middleware FORA do admin_error_logging (CORS,
+    security_headers, csrf) — sem isto o Starlette devolve o
+    `PlainTextResponse("Internal Server Error")` dele. O corpo JSON é o mesmo do
+    middleware do admin, de propósito: não criar um terceiro formato de erro.
+
+    O ServerErrorMiddleware re-levanta a exceção depois de chamar o handler
+    (starlette/middleware/errors.py:186), então o uvicorn continua logando.
+    """
+    # _with_security_headers: aqui é FORA de todo middleware de usuário, então
+    # o security_headers_middleware nunca vê esta resposta.
+    return _with_security_headers(
+        error_page_response(500) if wants_html(request)
+        else vary_accept(JSONResponse(status_code=500, content={"error": "Erro interno do servidor."}))
+    )
+
+
+# StarletteHTTPException (não a do FastAPI): o 404/405 automático do router
+# levanta a do Starlette — registrar só a subclasse deixaria o caso principal fora.
+app.add_exception_handler(StarletteHTTPException, http_exception_page_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_page_handler)
+# Exception (não 500): o Starlette tira esta chave do ExceptionMiddleware e a usa
+# como handler do ServerErrorMiddleware (applications.py:85-95).
+app.add_exception_handler(Exception, unhandled_exception_page_handler)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -4821,7 +4905,18 @@ async def unsubscribe_one_click(uid: int, token: str):
 @app.get("/unsubscribe")
 async def unsubscribe(uid: int, token: str):
     if not await _apply_unsubscribe(uid, token):
-        return HTMLResponse("<h2>Link inválido ou expirado.</h2>", status_code=400)
+        # Mesmo perfil do 410 do link de exportação: link de e-mail, navegação
+        # pura, sem chance de retry — um `<h2>` solto era a última superfície de
+        # erro do produto sem documento decente. Continua 400 (o POST one-click
+        # do RFC 8058 responde 400 no mesmo caso), mas com texto próprio: o 400
+        # genérico é o dos 422 de validação e não diria o que fazer. O token é um
+        # HMAC de user_id:email sem validade — quebra se o e-mail mudou depois do
+        # envio, ou se o link veio truncado pelo cliente de e-mail.
+        return error_page_response(400, text=(
+            "Link inválido",
+            "Este link de descadastro não vale mais. Você pode cancelar os e-mails "
+            "em Configurações → Notificações, ou mandar “parar emails” pro bot.",
+        ))
 
     return HTMLResponse(_stamp_asset_versions("""
 <!DOCTYPE html>

@@ -228,12 +228,12 @@ O app iOS (Capacitor, `mobile/`) carrega `https://pigbankai.com` num WKWebView c
   #56 era `"automatic"` e o WebView reservava a área segura sozinho. Saiba em qual
   dos dois mundos você está antes de somar `padding`: com `automatic`, inset em CSS
   **duplica** o espaçamento; com `never`, a falta dele deixa conteúdo sob o notch.
-- **Quem carrega o CSS ≠ quem é alcançável.** Das **25** páginas em `frontend/`:
+- **Quem carrega o CSS ≠ quem é alcançável.** Das **26** páginas em `frontend/`:
 
   | quantas | o que carregam | quem |
   |---|---|---|
-  | 6 | `app-mode.css`/`app-mode.js` | `login`, `cadastro`, `home`, `dashboard`, `comandos-app`, `settings` |
-  | 14 | o shim `frontend/safe-area.js` | as estáticas: `index`, `precos`, `termos`, `privacy`, `onboarding`, `suporte`, `agents`, `changelog`, `comandos`, `como-funciona`, `funcionalidades`, `blog-article`, `reset-password`, `whatsapp` |
+  | 6 | `app-mode.css`/`app-mode.js` | `login`, `cadastro`, `home`, `dashboard`, `comandos-app`, `settings` — mais a `changelog`, que carrega **os dois** (`changelog.html:15` shim, `:16-17` app-mode) e está contada na linha de baixo |
+  | 15 | o shim `frontend/safe-area.js` | as estáticas: `index`, `precos`, `termos`, `privacy`, `onboarding`, `suporte`, `agents`, `changelog`, `comandos`, `como-funciona`, `funcionalidades`, `blog-article`, `reset-password`, `whatsapp` — mais a `error`, que **não é rota**: é template servido pelo `error_page_response` (`frontend/routes/shared.py`) em quase toda URL que dá erro. Quase: as **4** exceções são `/webhook` e `/wa/webhook` (403 `text/plain` "forbidden", `adapters/whatsapp/wa_app.py:224,241,255`) e `/fonts/{name}` e `/brand/{path}` (404 de corpo vazio, `static_pages.py:536,559,564,567`) — endpoints de máquina e de subrecurso, que de propósito não gastam 1,4 KB de HTML |
   | 5 | nada, de propósito | `admin-login`, `admin-dashboard`, `_dash_mockup`, `preview_agentes`, e o `ddf99f17-…` |
 
   As duas páginas geradas em Python (bullet seguinte) também carregam o shim.
@@ -273,8 +273,13 @@ O app iOS (Capacitor, `mobile/`) carrega `https://pigbankai.com` num WKWebView c
 - **O cache-buster `?v=N` de CSS/JS é reescrito no serve-time — não bumpe à mão.**
   `stamp_asset_versions` (`frontend/routes/shared.py`) troca o `?v=N` de qualquer
   `*.css`/`*.js` de `frontend/` por um hash do conteúdo do arquivo, em toda saída de
-  HTML (o funil `html_file`, `/suporte`, `/blog/{slug}` e as duas páginas geradas em
-  Python). O número hardcoded no `<head>` (ex.: `app-mode.css?v=29`) é **ignorado** —
+  HTML — os **6** call sites: o funil `html_file`, `/suporte`, `/blog/{slug}`, as duas
+  páginas geradas em Python e a **página de erro** (`error_page_response`, onde o stamp
+  é aplicado no cache do template, não por requisição: trocar um asset sem reiniciar o
+  processo deixa só ESSA página com o hash velho até o restart). A página de erro **não**
+  passa pelo `html_file` — aquele funil injeta o Meta Pixel, e ela fica fora do rastreio
+  de propósito; se você "reusar o html_file" pra ganhar o stamp, reintroduz o pixel
+  calado. O número hardcoded no `<head>` (ex.: `app-mode.css?v=29`) é **ignorado** —
   está lá só como resquício; mexer nele não faz nada. A invalidação passou a ser
   automática (muda o arquivo → muda o hash). Antes cada asset era bumpado à mão em
   ~8 HTMLs por PR e `v=31` vs `v=33` na mesma linha dava merge conflict a cada duas

@@ -1288,9 +1288,23 @@ async def admin_error_logging_middleware(request: Request, call_next):
             },
         )
 
+        # Navegação (Accept: text/html) recebe página; API segue no JSON de hoje.
+        # Import dentro da função de propósito: core/ não importa frontend/ no
+        # topo (shared.py roda load_app_env() no import) e este é caminho frio.
+        # Qualquer falha aqui cai no JSONResponse — o pior caso é o de hoje.
+        try:
+            from frontend.routes.shared import wants_html, error_page_response
+            if wants_html(request):
+                return error_page_response(status_code)
+        except Exception:
+            pass
+
+        # Vary inline (não pelo helper): se o import acima falhou, o helper também
+        # não existe — e este ramo tem que sair de pé de qualquer jeito.
         return JSONResponse(
             status_code=status_code,
             content={"error": user_msg},
+            headers={"Vary": "Accept"},
         )
 
 

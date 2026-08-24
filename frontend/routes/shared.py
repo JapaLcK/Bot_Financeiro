@@ -17,6 +17,7 @@ import os
 import pathlib
 import re
 from datetime import date, datetime, timezone
+from html import escape
 from decimal import Decimal
 from typing import Any
 
@@ -124,8 +125,9 @@ def stamp_asset_versions(html_text: str) -> str:
     """Troca o `?v=N` de cada CSS/JS de frontend/ por um hash do conteúdo.
 
     Aplicado em TODA saída de HTML (template, gerado em Python, montado à mão) —
-    ver os call sites em static_pages.py e no monólito. Assets fora de
-    FRONTEND_DIR ficam intactos.
+    ver os call sites: `html_file` logo abaixo, `error_page_response` (no cache do
+    template), static_pages.py e as duas páginas geradas no monólito. Assets fora
+    de FRONTEND_DIR ficam intactos.
     """
     def repl(m: "re.Match[str]") -> str:
         url = m.group(1)             # ex: /app-mode.css
@@ -152,6 +154,202 @@ def html_file(path: pathlib.Path, pixel: bool = True) -> Response:
                         media_type="text/html; charset=utf-8")
     response.headers["Cache-Control"] = "no-store"
     response.headers["Pragma"] = "no-cache"
+    return response
+
+
+# ─── Página de erro HTML (navegação) ─────────────────────────────────────────
+# Texto SEMPRE constante do servidor: exc.detail nunca chega aqui — ele carrega
+# str(exc) de exceção arbitrária (finance_bot_websocket_custom.py:3208), nem
+# sempre é string (dict/lista nos 422) e vaza nome de parâmetro interno
+# (parse_date_param).
+_ERROR_TEXTS = {
+    404: ("Página não encontrada", "Este endereço não existe ou mudou de lugar."),
+    # 405 herda o texto do 404 de propósito: o Allow já diz que o recurso existe,
+    # mas para quem navegou é o mesmo beco sem saída — não vale uma tela própria.
+    405: ("Página não encontrada", "Este endereço não existe ou mudou de lugar."),
+    401: ("Acesso negado", "Você não tem acesso a esta página. Entre na sua conta e tente de novo."),
+    403: ("Acesso negado", "Você não tem acesso a esta página. Entre na sua conta e tente de novo."),
+    # 410 é hoje só o link de download da exportação (finance_bot_websocket_custom.py:3203),
+    # clicado DE DENTRO do e-mail — navegação pura. O default 4xx tirava a única
+    # instrução acionável da tela, por isso ele tem texto próprio.
+    410: ("Link expirado", "Este link já foi usado ou passou da validade. Peça um novo em Configurações → Meus dados."),
+    429: ("Muitas tentativas", "Você fez muitas requisições em pouco tempo. Aguarde um instante."),
+    400: ("Requisição inválida", "Não consegui entender esse pedido."),
+    422: ("Requisição inválida", "Não consegui entender esse pedido."),
+    503: ("Serviço indisponível", "Estamos com instabilidade. Tente novamente em instantes."),
+}
+_ERROR_DEFAULT_4XX = ("Não deu pra abrir", "Algo nesse pedido não está certo.")
+_ERROR_DEFAULT_5XX = ("Algo deu errado do nosso lado", "Já registramos o problema. Tente de novo em instantes.")
+
+_error_template: str | None = None
+# Já logamos a queda pro fallback? Sem isto o warning sai POR REQUISIÇÃO, e no
+# processo web o root logger carrega o _DashboardHandler (core/observability.py:23),
+# que faz psycopg.connect() + INSERT bloqueante dentro do event loop — um connect
+# por registro. Medido aqui, chamando logging.warning() em série com e sem o
+# handler, contra o Postgres em localhost: 11,3 ms na 1ª chamada, 3,7 ms/chamada
+# em 10 e 2,1 ms/chamada em 25, contra 0,02 ms com o handler fora. Cada connect
+# paga o RTT até o banco, então com Postgres remoto (produção) a conta é maior —
+# quanto, não dá pra medir daqui (CLAUDE.md §6: produção inacessível). Loga na
+# transição pro estado degradado e cala enquanto ele durar.
+_error_degraded = False
+
+# Só estes headers do exc.headers são repassados à página. O resto é descartado
+# porque quem monta o exc não sabe que a resposta virou HTML: um Content-Length
+# vindo dali mata a conexão (h11: "Too much data for declared Content-Length") e
+# um Content-Type rotula ~1,4 KB de HTML como application/json. `location` também
+# fica de fora: todo 3xx do repo é RedirectResponse (que não passa por aqui) — não
+# há um `raise HTTPException` 3xx sequer —, então na prática ele só faria um 404
+# sair com Location.
+_ERROR_PASSTHROUGH_HEADERS = frozenset({"allow", "www-authenticate", "retry-after"})
+
+# Último recurso quando nem o template abre (não entrou no deploy, permissão,
+# disco). Autossuficiente: nada de arquivo, nada de import, mesmos placeholders.
+# Sem CSS/JS externo de propósito (só style inline e um <a href="/">), então não
+# passa nem precisa passar pelo `stamp_asset_versions` — não há `?v=` aqui.
+_ERROR_FALLBACK_HTML = (
+    '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">'
+    '<meta name="viewport" content="width=device-width,initial-scale=1">'
+    '<meta name="robots" content="noindex"><title>{{CODE}} — {{TITLE}} | PigBank</title></head>'
+    '<body style="background:#070b14;color:#fff;font-family:sans-serif;text-align:center;padding:64px 24px">'
+    "<h1>{{CODE}}</h1><h2>{{TITLE}}</h2><p>{{MESSAGE}}</p>"
+    '<p><a href="/" style="color:#a78bfa">← Página inicial</a></p></body></html>'
+)
+
+
+def wants_html(request: Request) -> bool:
+    """True quando a requisição é navegação (browser/WebView), não chamada de API.
+
+    Só o Accept: `*/*` NÃO conta — é o que o fetch de API e o TestClient mandam,
+    e é o que mantém o contrato JSON (o front lê `detail` dali).
+
+    ponytail: comparação por substring, sem q-values — `text/html;q=0.1,
+    application/json;q=0.9` cai no ramo HTML. Inclusive `text/html;q=0`, que é a
+    forma padrão de dizer "NÃO me mande isto": é o único caso em que a
+    simplificação faz o oposto do pedido em vez de só ignorar a preferência.
+    Fica assim de propósito — separar `q=0` de `q=0.5` já é parsear Accept, e
+    zero clientes nossos mandam qualquer q (pb-nav.js:226,255 pede text/html;
+    blog-news.js:89 pede application/json; o resto é fetch sem Accept → */*).
+    Accept duplicado também: o Starlette devolve só a primeira ocorrência, então
+    dois headers caem no ramo da primeira — navegador nenhum duplica Accept.
+    Se algum dia importar: a stdlib não tem parser de Accept e o werkzeug (cujo
+    `http.parse_accept_header` resolveria) NÃO está no requirements.txt — só chega
+    transitivamente no venv local, então contar com ele quebraria no CI/produção.
+    São ~10 linhas à mão (split por vírgula, ler o `q=`, ordenar) ou assumir a
+    dependência de propósito."""
+    # Case-insensitive: media type não tem caixa (RFC 7231 §3.1.1.1) — sem o
+    # .lower() um `Accept: TEXT/HTML` caía no ramo JSON.
+    return "text/html" in (request.headers.get("accept") or "").lower()
+
+
+def vary_accept(response: Response) -> Response:
+    """Marca a resposta como dependente do Accept (ramo JSON dos erros).
+
+    O ramo HTML já sai marcado do `error_page_response`. `add_vary_header` soma
+    ao Vary existente em vez de sobrescrever (o CORS depois soma o `Origin`)."""
+    response.headers.add_vary_header("Accept")
+    return response
+
+
+def error_page_response(status_code: int, headers: dict | None = None,
+                        text: tuple[str, str] | None = None) -> Response:
+    """Página de erro HTML preservando o status (nada de soft-404) e no-store.
+
+    `{{CODE}}`/`{{TITLE}}`/`{{MESSAGE}}` do error.html saem do mapa fixo
+    `_ERROR_TEXTS` acima, mas o escape é por CONSTRUÇÃO e não por regra escrita:
+    título e mensagem passam por `html.escape()` e a troca é em UMA passagem (ver
+    abaixo). Constante do servidor não tem nada para escapar, então o custo é zero
+    e a garantia deixa de depender de quem lê este parágrafo.
+
+    `text=(titulo, mensagem)` sobrepõe o mapa para o caso em que o status já está
+    tomado por outra coisa e a tela ficaria sem instrução — hoje só o `/unsubscribe`
+    com token inválido, que é 400 como qualquer 422 de validação mas precisa dizer o
+    que fazer. Continua sendo para constante do servidor (é texto de produto, não
+    eco de entrada), só que agora um deslize ali sai escapado em vez de virar HTML.
+
+    NÃO passa pelo `html_file`: aquele funil injeta o Meta Pixel, e a página de erro
+    fica fora do rastreio de marketing por decisão explícita. O que ela precisa dele
+    — o `stamp_asset_versions` — está aplicado abaixo, no cache do template.
+
+    Sem caminho de falha: é a resposta de último recurso, então uma exceção aqui
+    viraria 500 + `http_unhandled_exception` no log a cada 404 de bot varrendo URL.
+    """
+    global _error_template, _error_degraded
+    default = _ERROR_DEFAULT_5XX if status_code >= 500 else _ERROR_DEFAULT_4XX
+    # Desempacotamento que NÃO pode estourar (a promessa do parágrafo acima): um
+    # `text=` de aridade errada levantava `ValueError: not enough values to
+    # unpack` — medido com `text=("so-um-item",)` — e um call site errado bastava
+    # para todo 404 daquela rota virar 500 + `http_unhandled_exception`. O
+    # isinstance cobre o resto: `len()` de um não-Sized levanta TypeError, e
+    # `escape()` de um não-str também. Fora do contrato → cai no texto do mapa.
+    if not (isinstance(text, tuple) and len(text) == 2
+            and all(isinstance(t, str) for t in text)):
+        text = _ERROR_TEXTS.get(status_code, default)
+    title, message = text
+    template = _error_template
+    if template is None:
+        try:
+            # Contrato do error.html — esta função é o único consumidor dele, e a
+            # nota mora aqui e não lá dentro porque comentário em HTML VIAJA no
+            # corpo de toda resposta de erro (era o caso; saiu). Quem for editar o
+            # arquivo precisa saber de duas coisas: os três placeholders abaixo são
+            # obrigatórios (a validação seguinte rejeita o arquivo sem eles), e nada
+            # de CDN — só CSS inline e o `/safe-area.js` do próprio domínio, porque
+            # esta página roda justamente quando algo já quebrou.
+            # `raw`, não `text`: `text` é o parâmetro de override do título/
+            # mensagem acima — reusar o nome aqui seria shadowing silencioso.
+            raw = (FRONTEND_DIR / "error.html").read_text(encoding="utf-8")
+            # Arquivo que ABRE mas veio pela metade (deploy interrompido, rsync
+            # cortado, disco cheio) é o mesmo problema do arquivo ausente — e sem
+            # esta checagem viraria cache envenenado até o restart. `</html>` é a
+            # última linha (pega truncamento no fim, e o vazio de graça) e os TRÊS
+            # placeholders precisam estar lá: truncamento não é a única corrupção —
+            # lixo no meio, ou um `{{MESSAGE}}</html>` de 50 bytes, passava sem
+            # {{CODE}}/{{TITLE}} e ia ao usuário sem o código do erro na tela.
+            if not all(p in raw for p in ("{{CODE}}", "{{TITLE}}", "{{MESSAGE}}")) \
+                    or not raw.rstrip().endswith("</html>"):
+                raise ValueError(f"error.html incompleto ({len(raw)} bytes)")
+            # Stamp aqui, JUNTO do cache, e não na montagem do corpo: o
+            # `?v=` do <script src="/safe-area.js"> do error.html precisa do
+            # hash como qualquer outra saída de HTML (senão é a única URL de
+            # asset do produto que nunca invalida), mas re-hashear a cada
+            # requisição pagaria um stat() por 404 de bot varrendo URL. O
+            # preço é que trocar o safe-area.js sem reiniciar o processo deixa
+            # ESTA página com o hash velho até o restart — em deploy o
+            # processo reinicia, e o html_file/static_pages (que releem o
+            # arquivo por requisição) continuam pegando na hora.
+            template = _error_template = stamp_asset_versions(raw)
+            _error_degraded = False  # arquivo voltou: pode logar a próxima queda
+        except Exception as exc:
+            # O fallback NÃO é cacheado: se o arquivo voltar (deploy pela metade),
+            # a próxima requisição tenta de novo em vez de degradar até o restart.
+            # Um log por TRANSIÇÃO, não por requisição (ver _error_degraded acima):
+            # como nada é cacheado aqui, logar sempre transformaria um bot varrendo
+            # URL em um INSERT síncrono por 404. Sem exc_info: ~25 linhas de
+            # traceback não dizem mais que o repr (tipo + caminho).
+            if not _error_degraded:
+                _error_degraded = True
+                logging.getLogger(__name__).warning(
+                    "error.html indisponível (%r) — servindo fallback embutido", exc
+                )
+            template = _ERROR_FALLBACK_HTML
+    # Escape + UMA passagem, no lugar dos três `.replace()` encadeados. Os dois
+    # defeitos eram do encadeamento, não do texto: (1) o valor entrava cru, então
+    # qualquer deslize no `text=` renderizava HTML; (2) a ordem CODE→TITLE→MESSAGE
+    # reexpandia placeholder que caísse DENTRO de um valor — um título contendo
+    # `{{MESSAGE}}` era reescrito pelo replace seguinte. O escape sozinho não
+    # resolve o (2): `html.escape` não toca em chaves. A passagem única resolve os
+    # dois. `re` e não `str.format`/`Template`: o template tem CSS cheia de chaves.
+    valores = {"{{CODE}}": str(status_code),
+               "{{TITLE}}": escape(title), "{{MESSAGE}}": escape(message)}
+    body = re.sub(r"\{\{(?:CODE|TITLE|MESSAGE)\}\}", lambda m: valores[m.group()], template)
+    response = Response(content=body, status_code=status_code, media_type="text/html; charset=utf-8")
+    for key, value in (headers or {}).items():
+        if key.lower() in _ERROR_PASSTHROUGH_HEADERS:
+            response.headers[key] = value
+    response.headers["Cache-Control"] = "no-store"
+    # A mesma URL devolve HTML ou JSON conforme o Accept — sem isto um CDN pode
+    # servir a página de erro para uma chamada de API (e vice-versa).
+    response.headers.add_vary_header("Accept")
     return response
 
 
