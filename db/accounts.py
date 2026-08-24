@@ -537,6 +537,176 @@ def get_largest_expenses(
     ]
 
 
+# Nenhum writer atual escreve 'entrada'/'saida', mas MUITO read path de produção
+# ainda trata esses valores como tipo, espalhado por core/, db/ e frontend/ —
+# `evaluate_after_expense`, `_xerife_detect_for_user`, `_month_stats`,
+# `compute_evolution`, `get_budgets_status_for_month`, o resumo de
+# `list_launches`, o bloco inteiro de db/analytics.py e o SQL de
+# `_fetch_admin_overview_inner`, entre outros. A contagem exata fica de fora de
+# propósito: não há comando que a produza sem falso positivo, e número de
+# comentário que ninguém consegue reproduzir envelhece errado. Para ver a lista
+# de hoje:
+#   grep -rn "'entrada'\|'saida'" --include="*.py" core/ db/ frontend/
+# Filtrar só o valor moderno deixaria a linha legada invisível na lista E fora
+# do total.
+_TIPO_ALIASES = {
+    "despesa": ("despesa", "saida"),
+    "saida": ("despesa", "saida"),
+    "receita": ("receita", "entrada"),
+    "entrada": ("receita", "entrada"),
+}
+
+
+def list_launches_by_category(
+    user_id: int,
+    categoria: str,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    tipo: str | None = None,
+    limit: int = 20,
+) -> tuple[list[dict], dict]:
+    """Lançamentos de UMA categoria, mais recente primeiro (launches + cartão).
+
+    Difere de `get_largest_expenses` (que ordena por valor e é expense-only):
+    aqui a lista é cronológica e inclui RECEITA — é o que responde "liste as
+    receitas em rendimentos".
+
+    - `tipo`: 'despesa' | 'receita' | None (ambos), case-insensitive. Aceita os
+      valores LEGADOS 'saida'/'entrada' junto (mesmo `tipo in (...)` de
+      `evaluate_after_expense` e `_xerife_detect_for_user`): uma linha antiga com
+      tipo='entrada' ficaria invisível E fora do total, que é a pior classe de
+      erro num caminho de dinheiro. Valor DESCONHECIDO ('xyz') não filtra nada e
+      devolve os dois tipos: degradar pra lista VAZIA num caminho de dinheiro
+      esconde dinheiro, degradar pra "os dois" só mostra a mais. A perna do cartão
+      só entra quando tipo pede despesa ou nada — compra no crédito nunca é
+      receita.
+    - `start_date`/`end_date`: opcionais. None → sem janela (últimos N da
+      categoria, sem filtrar por mês).
+    - A compra de cartão entra pelo MÊS DA FATURA (credit_bills.period_end),
+      mesma regra do dashboard e do `sum_spent_in_category_period`. Sem flag: o
+      `by_bill_month` que `get_largest_expenses` expõe nunca foi chamado com
+      False aqui, e uma janela alternativa que ninguém pede é só mais um SQL pra
+      manter em sincronia.
+    - Match de categoria case- e acento-insensível (mesmo `cat_norm_sql`).
+    - Tipos internos de gerenciamento (criar_caixinha & cia) ficam de fora;
+      `is_internal_movement` NÃO é filtrado de propósito: senão "liste os
+      lançamentos em investimento_aporte" voltaria vazio. Consequência: numa
+      categoria de movimento interno (pagamento_fatura, aporte) o total daqui é
+      MAIOR que o de `sum_spent_in_category_period`, que filtra
+      `is_internal_movement = false` (`sum_spent_in_category_period`, db/budgets.py).
+
+    Retorna `(rows, resumo)`:
+    - rows: [{tipo, valor, categoria, descricao, data, fonte, user_seq}], no
+      máximo `limit`. `fonte` = 'launches' | 'credito'; `user_seq` é None no
+      crédito (não existe "#N" pra apagar). `data` é um `date`.
+    - resumo: {"n_total", "despesa", "receita"} sobre TODAS as linhas que casam,
+      não só as `limit` devolvidas — os totais vêm de window aggregates, que o
+      Postgres calcula ANTES do LIMIT. Sem isso o chamador somaria só as linhas
+      exibidas e imprimiria um total errado com cara de total certo.
+    """
+    ensure_user(user_id)
+
+    _cat = cat_norm_sql("categoria")
+    _cat_ct = cat_norm_sql("ct.categoria")
+    _arg = cat_norm_sql("%s")
+
+    params: list = [user_id, categoria]
+    launch_filters = ""
+    # tipo fora do dicionário ('DESPESA', 'xyz') → NENHUM filtro. Ver docstring:
+    # `_TIPO_ALIASES.get(tipo, (tipo,))` filtrava por um valor que não existe na
+    # coluna e devolvia lista vazia com n_total=0 — dinheiro sumido, sem erro.
+    aliases = _TIPO_ALIASES.get(str(tipo).strip().lower()) if tipo else None
+    if aliases:
+        launch_filters += " and tipo = any(%s)"
+        params.append(list(aliases))
+    if start_date:
+        launch_filters += " and criado_em >= %s"
+        params.append(datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        launch_filters += " and criado_em < %s"
+        params.append(datetime.combine(end_date + timedelta(days=1), datetime.min.time()))
+
+    credit_sql = ""
+    if aliases is None or "despesa" in aliases:
+        credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id"
+        credit_date_col = "b.period_end"
+        credit_filters = ""
+        params_credit: list = [user_id, categoria]
+        if start_date:
+            credit_filters += f" and {credit_date_col} >= %s"
+            params_credit.append(start_date)
+        if end_date:
+            credit_filters += f" and {credit_date_col} < %s"
+            params_credit.append(end_date + timedelta(days=1))
+        credit_sql = f"""
+                    union all
+                    select 'despesa' as tipo,
+                           ct.valor,
+                           coalesce(nullif(ct.categoria, ''), 'outros') as categoria,
+                           coalesce(nullif(ct.nota, ''), 'compra no crédito') as descricao,
+                           ct.purchased_at::timestamp as dt,
+                           'credito' as fonte,
+                           null::int as user_seq
+                    {credit_from}
+                    where ct.user_id = %s
+                      and {_cat_ct} = {_arg}
+                      and ct.is_refund = false
+                      {credit_filters}
+        """
+        params += params_credit
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                select tipo, valor, categoria, descricao, dt, fonte, user_seq,
+                       count(*) over () as n_total,
+                       coalesce(sum(valor) filter (
+                           where tipo in ('despesa', 'saida')) over (), 0) as tot_despesa,
+                       coalesce(sum(valor) filter (
+                           where tipo in ('receita', 'entrada')) over (), 0) as tot_receita
+                from (
+                    select tipo,
+                           valor,
+                           coalesce(nullif(categoria, ''), 'outros') as categoria,
+                           coalesce(nullif(alvo, ''), nullif(nota, ''), '—') as descricao,
+                           criado_em as dt,
+                           'launches' as fonte,
+                           user_seq
+                    from launches
+                    where user_id = %s
+                      and {_cat} = {_arg}
+                      and tipo not in ('criar_caixinha', 'delete_pocket',
+                                       'create_investment', 'delete_investment')
+                      {launch_filters}
+                    {credit_sql}
+                ) agg
+                order by dt desc, user_seq desc nulls last
+                limit %s
+                """,
+                (*params, int(limit)),
+            )
+            rows = cur.fetchall()
+
+    resumo = {
+        "n_total": int(rows[0]["n_total"]) if rows else 0,
+        "despesa": float(rows[0]["tot_despesa"] or 0) if rows else 0.0,
+        "receita": float(rows[0]["tot_receita"] or 0) if rows else 0.0,
+    }
+    return [
+        {
+            "tipo": r["tipo"],
+            "valor": float(r["valor"] or 0),
+            "categoria": r["categoria"],
+            "descricao": r["descricao"],
+            "data": r["dt"].date() if hasattr(r["dt"], "date") else r["dt"],
+            "fonte": r["fonte"],
+            "user_seq": r["user_seq"],
+        }
+        for r in rows
+    ], resumo
+
+
 def get_top_expense_categories(
     user_id: int,
     start_date: date,
