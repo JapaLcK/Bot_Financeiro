@@ -210,9 +210,9 @@ _ERROR_FALLBACK_HTML = (
     '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">'
     '<meta name="viewport" content="width=device-width,initial-scale=1">'
     '<meta name="robots" content="noindex"><title>{{CODE}} — {{TITLE}} | PigBank</title></head>'
-    '<body style="background:#070b14;color:#fff;font-family:sans-serif;text-align:center;padding:64px 24px">'
+    '<body style="background:#050506;color:#fff;font-family:sans-serif;text-align:center;padding:64px 24px">'
     "<h1>{{CODE}}</h1><h2>{{TITLE}}</h2><p>{{MESSAGE}}</p>"
-    '<p><a href="/" style="color:#a78bfa">← Página inicial</a></p></body></html>'
+    '<p><a href="/" style="color:#FF2D8E">← Página inicial</a></p></body></html>'
 )
 
 
