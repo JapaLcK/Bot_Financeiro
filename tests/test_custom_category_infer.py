@@ -510,6 +510,12 @@ def test_lista_inclui_cartao(pro_user_id):
     ("quanto gastei em gastos com minha namorada",
                                                   "gastos com minha namorada", "despesa"),
     ("quanto entrou em ganhos com meu freela",    "ganhos com meu freela",     "receita"),
+    # ...INCLUSIVE quando ela é a MESMA palavra do nome. O corte por conjunto
+    # de tokens apagava as duas ocorrências e a instrução do usuário sumia
+    # junto com o rótulo (é a raiz dos dois P2 do Codex, aqui no eixo TIPO).
+    ("liste os gastos em gastos com minha namorada",
+                                                  "gastos com minha namorada", "despesa"),
+    ("liste os ganhos em ganhos com meu freela",  "ganhos com meu freela",     "receita"),
     # e o que já funcionava continua
     ("quanto gastei em lazer",                    "lazer",                     "despesa"),
     ("liste os lancamentos em lazer",             "lazer",                     None),
@@ -534,6 +540,14 @@ def test_tipo_pedido_ignora_o_nome_da_categoria(frase, categoria, esperado):
     ("gastos com minha namorada",           "gastos com minha namorada", False),
     # palavra de total que faz parte do NOME não pede total (mesma regra do tipo)
     ("gastos com total da obra",            "total da obra",   False),
+    # ...mas a MESMA palavra escrita pelo usuário FORA do nome continua
+    # pedindo o número. P2 do Codex: com o corte por conjunto de tokens os
+    # DOIS "total" sumiam e o handler devolvia a LISTA pra quem pediu total.
+    ("qual o total de gastos com total da obra", "total da obra", True),
+    ("me mostra o total gasto com total da obra", "total da obra", True),
+    # este já passava ANTES (o "quanto" não colide com nenhuma palavra do nome):
+    # é guarda de que o corte por trecho não come a instrução, não discriminante.
+    ("quanto foi o total da obra",          "total da obra",   True),
 ])
 def test_pede_total_ignora_o_nome_da_categoria(frase, categoria, esperado):
     from core.handlers.launches import _pede_total
@@ -571,6 +585,83 @@ def test_nome_da_categoria_nao_esconde_receita(pro_user_id, categoria, frase, cu
     assert "40,00" in resp
     assert "não teve gastos" not in resp.lower()
     assert "mercado" not in resp.lower()
+
+
+def test_palavra_de_total_do_usuario_sobrevive_ao_nome(pro_user_id):
+    # P2 do Codex, ponta a ponta: "total" é o nome da categoria E o pedido do
+    # usuário. Apagando os dois, o handler responde a LISTA pra quem pediu o
+    # número. O e2e é necessário porque o unit acima prova o gate, não a resposta.
+    create_user_category(pro_user_id, "total da obra")
+    base = _hoje_as(9)
+    for i, v in enumerate((100, 250)):
+        db.add_launch_and_update_balance(
+            pro_user_id, "despesa", v, f"material {i}", None,
+            categoria="total da obra", criado_em=base + timedelta(minutes=i),
+        )
+
+    resp = list_launches(
+        pro_user_id, original_text="qual o total de gastos com total da obra"
+    )
+    assert "Você gastou **R$ 350,00**" in resp      # formato TOTAL
+    assert "🧾 **Lançamentos em" not in resp        # e não o cabeçalho da LISTA
+
+
+@pytest.mark.parametrize("nome", [
+    "fim de semana",            # P2 do Codex: "semana" → semana corrente
+    "festa junina de julho",    # irmão: nome de mês → julho inteiro
+    "reforma do mes passado",   # irmão: "mes passado" → mês anterior
+])
+def test_nome_da_categoria_nao_vira_filtro_de_data(pro_user_id, nome):
+    # P2 do Codex, a metade CALADA da mesma raiz: `_resolve_period` lia o texto
+    # CRU, então a palavra de período que faz parte do NOME virava janela e
+    # lançamento antigo sumia da lista sem uma linha de aviso. É a rodada 3
+    # espelhada — lá o período roubava a categoria, aqui a categoria rouba o
+    # período.
+    create_user_category(pro_user_id, nome)
+    base = _hoje_as(9)
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 4000, "churrasco antigo", None,
+        categoria=nome, criado_em=base - timedelta(days=90),
+    )
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 77, "pizza de hoje", None,
+        categoria=nome, criado_em=base,
+    )
+    _ruido_mais_recente(pro_user_id, base)
+
+    resp = list_launches(pro_user_id, original_text=f"liste os lançamentos em {nome}")
+    assert "churrasco antigo" in resp       # 90 dias atrás: fora de QUALQUER
+    assert "4.000,00" in resp               # janela que o nome sugeriria
+    assert "pizza de hoje" in resp
+    assert "(de sempre)" in resp            # e o escopo anunciado é "sem janela"
+
+
+def test_periodo_do_nome_nao_encolhe_o_total(pro_user_id):
+    # o mesmo roubo de janela no caminho de TOTAL (`_total_categoria`), onde ele
+    # não esconde linha: esconde dinheiro dentro de um número só.
+    create_user_category(pro_user_id, "fim de semana")
+    hoje = today_tz()
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 4000, "churrasco do dia 1", None,
+        categoria="fim de semana",
+        criado_em=datetime.combine(hoje.replace(day=1), time(0, 5)),
+    )
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 77, "pizza de hoje", None,
+        categoria="fim de semana", criado_em=_hoje_as(9),
+    )
+
+    resp = spend_query(pro_user_id, "quanto gastei em fim de semana")
+    # o rótulo é o discriminante que vale em QUALQUER dia do mês: com o texto
+    # cru o "semana" do nome dava "esta semana"; o default do caminho de total é
+    # o mês corrente.
+    assert "neste mês" in resp
+    # "semana" solto não serve: o NOME da categoria sai no rótulo da resposta
+    # ("em **fim de semana**"). O que não pode aparecer é a JANELA.
+    assert "esta semana" not in resp
+    # e o número do mês inteiro (nos dias em que a semana corrente não começa no
+    # dia 1, este é também o que a janela roubada escondia)
+    assert "R$ 4.077,00" in resp
 
 
 def test_lista_nao_vaza_entre_usuarios(pro_user_id):

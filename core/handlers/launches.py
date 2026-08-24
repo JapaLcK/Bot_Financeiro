@@ -127,21 +127,76 @@ _PEDE_TOTAL_RE = re.compile(
 )
 
 
-def _fora_do_nome_da_categoria(text: str, categoria: str | None) -> str:
-    """`text` normalizado, sem os tokens que formam o NOME da categoria resolvida.
+# Palavras de ligacao que o usuario intercala no meio do nome sem mudar o nome:
+# o rotulo canonico `pagamento_fatura` e digitado "pagamento DE fatura", e o
+# trecho casado tem que ser o mesmo nos dois. Nao entram no comeco do trecho
+# (so entre duas palavras do nome ja casadas).
+_LIGACAO_NO_NOME = {"de", "da", "do", "dos", "das", "e"}
 
-    Os dois eixos (TIPO e FORMATO) só podem ler palavra que o usuário escreveu
-    COMO pergunta. Palavra que faz parte do nome da categoria é rótulo, não
-    pedido: "gastos com minha namorada" digitado cru É o nome da categoria, e ler
-    o "gastos" dele forçava expense-only e escondia a RECEITA lançada lá — a
-    categoria da queixa original, na docstring de tests/test_custom_category_infer.py.
+
+def _ultimo_trecho_do_nome(toks: list[str], nome: list[str]) -> tuple[int, int] | None:
+    """Índices [i, j) do ÚLTIMO trecho de `toks` que soletra `nome`, ou None.
+
+    Critério de desempate quando o nome INTEIRO cabe em dois lugares: fica o
+    último, porque o nome é o que vem DEPOIS do conector que
+    `_extract_query_category` usou pra achá-lo ("gastos com <nome>",
+    "lançamentos em <nome>") e a instrução do usuário vem antes.
+
+    MEDIDO: trocar este `range` pelo crescente (revert "11 ultimo trecho vira o
+    primeiro") deixa a suíte VERDE — em "qual o total de gastos com total da
+    obra" o trecho é o mesmo nos dois sentidos, porque o "total" solto do começo
+    não soletra o nome inteiro. Ou seja: é desempate, não é o conserto. Quem
+    conserta os dois P2 é casar TRECHO em vez de subtrair TOKEN
+    (`_fora_do_nome_da_categoria`), e ESSE revert fica vermelho.
+    """
+    for i in range(len(toks) - 1, -1, -1):
+        j = i
+        k = 0
+        while j < len(toks) and k < len(nome):
+            if toks[j] == nome[k]:
+                k += 1
+            elif k == 0 or toks[j] not in _LIGACAO_NO_NOME:
+                break
+            j += 1
+        if k == len(nome):
+            return i, j
+    return None
+
+
+def _fora_do_nome_da_categoria(text: str, categoria: str | None) -> str:
+    """`text` sem a OCORRÊNCIA do NOME da categoria resolvida (forma preservada).
+
+    Todo leitor de intenção do caminho de categoria lê ESTA saída, nunca o texto
+    cru: os dois eixos (`_tipo_pedido`, `_pede_total`) e o período
+    (`_resolve_period`, via `_responder_categoria`). Palavra que faz parte do
+    nome da categoria é rótulo, não pedido: "gastos com minha namorada" digitado
+    cru É o nome da categoria, e ler o "gastos" dele forçava expense-only e
+    escondia a RECEITA lançada lá — a categoria da queixa original, na docstring
+    de tests/test_custom_category_infer.py.
 
     O corte anterior era POSICIONAL (tudo antes do primeiro "com|em|no|na") e
-    errava exatamente na forma que o usuário digita: sem preposição ANTES do
-    nome, a primeira preposição é a de DENTRO do nome ("gastos │com│ minha
-    namorada") e a palavra de tipo do próprio nome sobrava do lado da pergunta.
-    Aqui o corte é factual, não posicional — a categoria já foi RESOLVIDA por
-    `_resolve_query_category`, então dá pra remover o nome dela.
+    errava a forma que o usuário digita: sem preposição ANTES do nome, a
+    primeira preposição é a de DENTRO do nome ("gastos │com│ minha namorada") e
+    a palavra de tipo do próprio nome sobrava do lado da pergunta.
+
+    O corte seguinte era por CONJUNTO DE TOKENS, e errava nos dois sentidos —
+    apagava toda palavra com aquele valor, inclusive a que o usuário escreveu
+    como instrução dele:
+      - "qual o total de gastos com total da obra" perdia OS DOIS "total" e
+        virava lista quando o pedido era um número;
+      - "liste os lançamentos em fim de semana" perdia o "semana" do NOME, mas
+        quem lia período (`_resolve_period`) recebia o texto CRU e restringia a
+        query à semana corrente — lançamento antigo sumia calado.
+
+    Aqui o corte é do TRECHO casado (`_ultimo_trecho_do_nome`): sai a ocorrência,
+    não o valor. Sem trecho contíguo — nome resolvido por fuzzy
+    (`custom_category_match`) ou por alias, quando o que o usuário digitou não é
+    o nome inteiro — cai na última ocorrência de cada palavra do nome, que é o
+    máximo que dá pra remover sem inventar alinhamento.
+
+    A forma do texto é PRESERVADA (só `_` vira espaço) porque `_resolve_period`
+    precisa de "03/04" inteiro; `normalize_text` transformaria a barra em espaço
+    e a data sumiria. Quem lê por regex normaliza depois.
 
     `_` vira espaço nos DOIS lados. Os cinco rótulos canônicos com underscore
     (`pagamento_fatura`, `investimento_aporte`, `investimento_resgate`,
@@ -152,11 +207,37 @@ def _fora_do_nome_da_categoria(text: str, categoria: str | None) -> str:
     RÓTULO casava `_PEDE_GASTO_RE`: "liste os lançamentos em pagamento de
     fatura" — pergunta neutra — virava expense-only por causa do próprio nome.
     """
-    norm = normalize_text(text).replace("_", " ")
+    raw = (text or "").replace("_", " ")
     if not categoria:
-        return norm
-    nome = set(normalize_text(categoria).replace("_", " ").split())
-    return " ".join(tk for tk in norm.split() if tk not in nome)
+        return raw
+    nome = normalize_text(categoria).replace("_", " ").split()
+    if not nome:
+        return raw
+
+    # posição de cada palavra no texto ORIGINAL, pra poder recortar preservando
+    # o resto (barras, acentos, maiúsculas).
+    marcas = list(re.finditer(r"\w+", raw))
+    toks = [normalize_text(m.group()) for m in marcas]
+
+    trecho = _ultimo_trecho_do_nome(toks, nome)
+    if trecho:
+        fora = set(range(*trecho))
+    else:
+        fora = set()
+        for palavra in nome:
+            cand = [i for i, t in enumerate(toks) if t == palavra and i not in fora]
+            if cand:
+                fora.add(cand[-1])
+    if not fora:
+        return raw
+
+    pedacos = []
+    pos = 0
+    for i in sorted(fora):
+        pedacos.append(raw[pos:marcas[i].start()])
+        pos = marcas[i].end()
+    pedacos.append(raw[pos:])
+    return " ".join(pedacos)
 
 
 def _pede_total(text: str, categoria: str | None) -> bool:
@@ -166,7 +247,9 @@ def _pede_total(text: str, categoria: str | None) -> bool:
     o número; "mostra" ali é educação, "quanto" é o pedido). O contrário — lista
     vencendo — deixaria "quanto" sem efeito nenhum na maioria das frases reais.
     """
-    return bool(_PEDE_TOTAL_RE.search(_fora_do_nome_da_categoria(text, categoria)))
+    return bool(_PEDE_TOTAL_RE.search(
+        normalize_text(_fora_do_nome_da_categoria(text, categoria))
+    ))
 
 
 def _tipo_pedido(text: str, categoria: str | None) -> str | None:
@@ -191,7 +274,7 @@ def _tipo_pedido(text: str, categoria: str | None) -> str | None:
     correto sem interpretar negação, que é análise de linguagem e não é o que
     este gate faz. Nenhuma das duas → None também.
     """
-    fora = _fora_do_nome_da_categoria(text, categoria)
+    fora = normalize_text(_fora_do_nome_da_categoria(text, categoria))
     tem_gasto = bool(_PEDE_GASTO_RE.search(fora))
     tem_receita = bool(_PEDE_RECEITA_RE.search(fora))
     if tem_gasto and tem_receita:
@@ -303,10 +386,14 @@ def _desc(row: dict) -> str:
 
 
 def _listar_categoria(
-    user_id: int, categoria: str, text: str,
+    user_id: int, categoria: str, pergunta: str,
     entities: dict | None = None, tipo: str | None = None,
 ) -> str:
     """Listagem cronológica dos lançamentos de uma categoria (launches + cartão).
+
+    `pergunta` é o texto JÁ sem o nome da categoria (`_fora_do_nome_da_categoria`,
+    aplicado em `_responder_categoria`) — é ele que decide o período, senão o
+    nome vira filtro de data.
 
     Sem período no texto → sem janela: mostra os últimos N da categoria, e o
     sumário diz "(de sempre)". Uma lista que descarta linhas de uma janela não
@@ -333,7 +420,7 @@ def _listar_categoria(
     Em pagamento_fatura/aporte a lista mostra e soma o que o outro ignora — é a
     diferença entre "o que aconteceu nesta categoria" e "quanto você gastou".
     """
-    start, end, period_label = _resolve_period(text, entities)
+    start, end, period_label = _resolve_period(pergunta, entities)
     rows, resumo = db.list_launches_by_category(
         user_id, categoria, start, end, tipo=tipo, limit=_limit_pedido(entities),
     )
@@ -720,9 +807,12 @@ def _total_despesa(
 
 
 def _total_categoria(
-    user_id: int, categoria: str, text: str, entities: dict | None, tipo: str | None,
+    user_id: int, categoria: str, pergunta: str, entities: dict | None, tipo: str | None,
 ) -> str:
     """Total de uma categoria honrando o eixo TIPO, com o ESCOPO no rótulo.
+
+    `pergunta` é o texto JÁ sem o nome da categoria (`_fora_do_nome_da_categoria`,
+    aplicado em `_responder_categoria`) — é ele que decide o período.
 
     Sem período no texto → mês corrente, e o rótulo DIZ "neste mês". É a mesma
     janela default do resto do `spend_query` e do dashboard; a alternativa ("de
@@ -734,7 +824,7 @@ def _total_categoria(
     caminho expense-only e respondia "você não teve gastos em rendimentos" com a
     receita no banco.
     """
-    start, end, period_label = _resolve_period(text, entities)
+    start, end, period_label = _resolve_period(pergunta, entities)
     if start is None:
         start, end = month_range_today()
         period_label = "neste mês"
@@ -773,10 +863,18 @@ def _responder_categoria(
     lugar — uma 2ª rodada de `list_custom_category_names` + `custom_category_match`
     por request, e duas guardas pra manter em sincronia.
     """
+    # Os TRÊS leitores de intenção daqui pra baixo leem o MESMO texto cortado:
+    # tipo, formato e PERÍODO (`_tipo_pedido` e `_pede_total` refazem o corte
+    # dentro deles — mesma entrada, mesma saída, custo de um `finditer` numa
+    # frase). O período era o que faltava: ele lia o texto CRU, então o nome da
+    # categoria envenenava a janela — custom "fim de semana" fazia "liste os
+    # lançamentos em fim de semana" virar consulta da semana corrente,
+    # escondendo os lançamentos antigos sem dizer nada.
+    pergunta = _fora_do_nome_da_categoria(text, categoria)
     tipo = _tipo_pedido(text, categoria)
     if _pede_total(text, categoria):
-        return _total_categoria(user_id, categoria, text, entities, tipo)
-    return _listar_categoria(user_id, categoria, text, entities, tipo)
+        return _total_categoria(user_id, categoria, pergunta, entities, tipo)
+    return _listar_categoria(user_id, categoria, pergunta, entities, tipo)
 
 
 def spend_query(user_id: int, text: str, entities: dict | None = None) -> str:
