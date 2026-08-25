@@ -283,3 +283,33 @@ def test_cinco_respostas_concorrentes_nenhuma_e_descartada(user_id):
     feitos = _registrados(user_id)
     assert {v for _, v in feitos} == {100.0, 200.0, 300.0, 400.0, 500.0}, (
         f"valor descartado em silêncio — gravados: {sorted(v for _, v in feitos)}")
+
+
+def test_falha_depois_do_commit_nao_devolve_item_nem_duplica(user_id, monkeypatch):
+    """P1 (4ª rodada do Codex): exceção APÓS o lançamento já gravado.
+
+    `add_launch_and_update_balance` commita e só depois roda o acessório
+    (aprender a regra, armar ofertas). Se o acessório estoura, quem chamou não
+    distingue "não gravou" de "gravou e falhou no acessório" — e a devolução
+    põe o item de volta, fazendo a próxima resposta registrar o MESMO gasto e
+    dobrar o saldo.
+
+    Depois da correção o acessório não sobe exceção: o lançamento fica, a fila
+    avança, e o saldo muda uma vez só.
+    """
+    velho = _armar_fila(user_id)
+
+    def estoura(*a, **k):
+        raise RuntimeError("upsert da regra caiu")
+
+    monkeypatch.setattr(launches, "learn_from_inference", estoura)
+
+    resp = launches.resolve_multi_launch_value(user_id, "800", velho)
+
+    feitos = [(a, v) for a, v in _registrados(user_id) if a == "aluguel"]
+    assert len(feitos) == 1 and feitos[0][1] == 800.0, feitos
+    assert resp, "o usuário tem que receber a confirmação, não um erro"
+
+    fila = (db.get_pending_action(user_id) or {}).get("payload", {}).get("queue", [])
+    assert [i["desc"] for i in fila] == ["luz"], (
+        f"o item já gravado foi devolvido pra fila — duplicaria: {fila}")

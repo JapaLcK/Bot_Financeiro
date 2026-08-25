@@ -455,13 +455,24 @@ def add_from_entities(
         is_internal_movement=is_int,
     )
 
-    learn_from_inference(
-        user_id,
-        nota_clean,
-        categoria_final,
-        target_hint=alvo_clean,
-        reason=reason_final,
-    )
+    # DEPOIS DO COMMIT nada pode subir exceção. O lançamento e o saldo já
+    # existem; quem chamou não tem como distinguir "não gravou" de "gravou e
+    # falhou no acessório", e na fila de multi-lançamento essa confusão faz o
+    # item ser devolvido e o MESMO gasto ser registrado de novo, dobrando o
+    # saldo. Aprender a regra e armar as ofertas são melhor-esforço: se
+    # falharem, o usuário fica sem a comodidade, não sem o dinheiro.
+    try:
+        learn_from_inference(
+            user_id,
+            nota_clean,
+            categoria_final,
+            target_hint=alvo_clean,
+            reason=reason_final,
+        )
+    except Exception:
+        logger.exception(
+            "learn_from_inference falhou depois do commit (user %s, lancamento %s)",
+            user_id, launch_id)
 
     # Reconciliação reversa (Open Finance): se o banco já importou esse gasto, funde
     # com o lançamento que o usuário acabou de fazer — não duplica no "sobrou".
@@ -482,9 +493,17 @@ def add_from_entities(
         # nota)) — nota_clean sozinho é a frase toda ("gastei 44,90 na
         # netflix"), que nunca bate com o alvo limpo ("netflix") gravado no mês
         # passado, e a oferta nunca dispara mesmo quando a despesa repete.
-        recurring_offer = _maybe_recurring_offer(
-            user_id, alvo_clean or nota_clean, valor, categoria_final, criado_em, launch_id,
-        )
+        try:
+            recurring_offer = _maybe_recurring_offer(
+                user_id, alvo_clean or nota_clean, valor, categoria_final,
+                criado_em, launch_id,
+            )
+        except Exception:
+            # Pós-commit: melhor perder a oferta que subir exceção (ver o
+            # comentário do learn_from_inference acima).
+            logger.exception(
+                "_maybe_recurring_offer falhou depois do commit (user %s, lancamento %s)",
+                user_id, launch_id)
 
     if recurring_offer:
         try:
@@ -780,8 +799,23 @@ def _devolve_head(user_id: int, head: dict, platform: str) -> None:
     tentativas acabarem, é melhor perder a devolução do que gravar por cima de
     um item já registrado — o `raise` de quem chamou ainda avisa o usuário.
     """
-    for _ in range(4):
+    # Sem teto fixo, pela mesma razão do laço de reivindicação: cada colisão
+    # significa que outra devolução venceu, então a fila cresceu e o laço
+    # converge. O teto é cinto de segurança, do tamanho inicial.
+    tentativas = 0
+    teto = None
+    while True:
+        tentativas += 1
         atual = db.get_pending_action(user_id)
+        if teto is None:
+            fila_ini = ((atual or {}).get("payload") or {}).get("queue") or []
+            teto = len(fila_ini) + 5
+        if tentativas > teto:
+            logger.warning(
+                "_devolve_head: %d tentativas (teto %d) para o user %s — "
+                "item %r não foi devolvido", tentativas, teto, user_id,
+                head.get("desc"))
+            return
         if not atual or atual.get("action_type") != "multi_launch_values":
             # Condicional, não upsert: duas devoluções simultâneas veriam as
             # duas a fila vazia e a última apagaria a primeira. Quem perder a
