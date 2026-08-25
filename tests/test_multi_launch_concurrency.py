@@ -355,6 +355,50 @@ def test_falha_depois_do_commit_nao_devolve_item_nem_duplica(user_id, monkeypatc
         f"o item já gravado foi devolvido pra fila — duplicaria: {fila}")
 
 
+def test_oferta_final_condicional_nao_sobrescreve_fila_restaurada(user_id, monkeypatch):
+    """P2 (6ª rodada do Codex): oferta do último item não atropela recuperação.
+
+    A thread do último item calcula `resto=[]` antes de registrar. Enquanto ela
+    está dentro de `add_from_entities`, outra recuperação pode recriar a fila.
+    A oferta de recategorização do último item precisa ser condicional, senão o
+    `set_pending_action` incondicional apaga a fila restaurada.
+    """
+    ultimo = {"desc": "luz", "tipo": "despesa"}
+    devolvido = {"desc": "aluguel", "tipo": "despesa"}
+    db.set_pending_action(
+        user_id, "multi_launch_values",
+        {"queue": [ultimo], "platform": "whatsapp"},
+    )
+    pending = db.get_pending_action(user_id)
+
+    class CategoriaFake:
+        category = "outros"
+        reason = "test"
+
+    monkeypatch.setattr(
+        "core.services.plan_service.check_can_create_launch",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(launches, "infer_category", lambda *_a, **_k: CategoriaFake())
+    monkeypatch.setattr(launches, "learn_from_inference", lambda *_a, **_k: None)
+    monkeypatch.setattr(launches, "_maybe_recurring_offer", lambda *_a, **_k: None)
+    monkeypatch.setattr(launches.db, "reconcile_manual_launch", lambda *_a, **_k: None)
+
+    def registra_enquanto_recupera(*_a, **_k):
+        launches._devolve_head(user_id, devolvido, "whatsapp")
+        return 999, 2, 0
+
+    monkeypatch.setattr(
+        launches.db, "add_launch_and_update_balance", registra_enquanto_recupera)
+
+    launches.resolve_multi_launch_value(user_id, "200", pending)
+
+    p = db.get_pending_action(user_id) or {}
+    assert p.get("action_type") == "multi_launch_values", p
+    fila = (p.get("payload") or {}).get("queue", [])
+    assert [i["desc"] for i in fila] == ["aluguel"], fila
+
+
 def test_devolucao_desaloja_oferta_de_conveniencia(user_id):
     """P2 (4ª rodada do Codex): a linha ocupada por OUTRA pendência.
 

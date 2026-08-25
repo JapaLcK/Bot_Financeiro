@@ -384,6 +384,7 @@ def add_from_entities(
     is_internal: bool | None = None,
     platform: str = "whatsapp",
     suppress_pending: bool = False,
+    conditional_pending: bool = False,
 ) -> str:
     """Registra um lançamento a partir de args já estruturados (sem regex).
 
@@ -399,6 +400,11 @@ def add_from_entities(
     oferta. A tabela tem UMA linha por usuário, então a oferta atropelaria a
     fila de lançamentos múltiplos que o chamador acabou de gravar. Usado só por
     `resolve_multi_launch_value`, quando ainda sobrou item na fila.
+
+    `conditional_pending=True`: cria ofertas de conveniência só se nenhuma
+    pendência apareceu desde o commit do lançamento. Usado no último item da
+    fila de multi-lançamento: outra recuperação pode ter recriado a fila entre
+    a reivindicação e a oferta final.
     """
     if valor <= 0:
         return "Não consegui identificar o valor. Tente: *gastei 50 no mercado*"
@@ -507,7 +513,14 @@ def add_from_entities(
 
     if recurring_offer:
         try:
-            db.set_pending_action(user_id, "confirm_recurring_offer", recurring_offer)
+            if conditional_pending:
+                gravou_pending = db.create_pending_action_if_absent(
+                    user_id, "confirm_recurring_offer", recurring_offer)
+            else:
+                db.set_pending_action(user_id, "confirm_recurring_offer", recurring_offer)
+                gravou_pending = True
+            if not gravou_pending:
+                recurring_offer = None
         except Exception:
             logger.warning(
                 "falha ao salvar pending confirm_recurring_offer (user %s) — oferta perdida",
@@ -518,11 +531,16 @@ def add_from_entities(
     # _send_reply_with_optional_buttons no wa_runtime e limpo em seguida).
     elif platform == "whatsapp" and launch_id and not suppress_pending:
         try:
-            db.set_pending_action(
-                user_id,
-                "recategorize_launch_offer",
-                {"launch_id": int(launch_id), "user_seq": int(user_seq)},
-            )
+            recat_payload = {"launch_id": int(launch_id), "user_seq": int(user_seq)}
+            if conditional_pending:
+                db.create_pending_action_if_absent(
+                    user_id, "recategorize_launch_offer", recat_payload)
+            else:
+                db.set_pending_action(
+                    user_id,
+                    "recategorize_launch_offer",
+                    recat_payload,
+                )
         except Exception:
             logger.warning(
                 "falha ao salvar pending recategorize_launch_offer (user %s, launch %s) — botão de recategorizar não vai aparecer",
@@ -751,11 +769,11 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
                 return None
             continue
 
-        # `suppress_pending` porque `pending_actions` tem uma linha só por
-        # usuário: a oferta de "categoria errada?" apagaria a fila que o CAS
-        # logo acima acabou de gravar. (Antes o atropelo era ao contrário — a
-        # fila era escrita depois e matava a oferta, que ainda saía impressa
-        # no texto sem pendência nenhuma por trás.)
+        # Enquanto ainda há resto, suprime ofertas: `pending_actions` tem uma
+        # linha só por usuário e a oferta apagaria a fila que o CAS acabou de
+        # gravar. No último item, a oferta ainda pode aparecer, mas só com
+        # criação condicional: se uma recuperação recriou a fila durante o
+        # registro, a fila vence.
         try:
             resp = add_from_entities(
                 user_id,
@@ -765,6 +783,7 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
                 nota=head.get("desc"),
                 platform=platform,
                 suppress_pending=bool(resto),
+                conditional_pending=not bool(resto),
             )
         except Exception:
             # O item já saiu da fila (é o que impede a duplicação), mas o
