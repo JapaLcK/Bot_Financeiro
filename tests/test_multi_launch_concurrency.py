@@ -434,3 +434,39 @@ def test_controle_devolucao_nao_atropela_uma_fila_de_verdade(user_id):
 
     fila = (db.get_pending_action(user_id) or {}).get("payload", {}).get("queue", [])
     assert [i["desc"] for i in fila] == ["aluguel", "luz"], fila
+
+
+def test_pergunta_o_head_atual_nao_o_resto_velho(user_id, monkeypatch):
+    """Codex: `resto` fica velho se outra tarefa registra enquanto esta demora.
+
+    Cena: fila [aluguel, luz]. A tarefa A reivindica 'aluguel'. Enquanto ela
+    registra, a tarefa B termina 'luz' e esvazia a fila. A responde ao usuário
+    com o `resto` que ela calculou lá atrás e pergunta "Quanto foi luz?" — de
+    algo já registrado. A resposta do usuário chega sem item na fila.
+
+    Simulo o atraso esvaziando a fila dentro do registro de A.
+    """
+    velho = _armar_fila(user_id)
+    real = launches.add_from_entities
+
+    def registra_e_esvazia(*a, **k):
+        r = real(*a, **k)
+        db.clear_pending_action(user_id)      # a outra tarefa terminou a fila
+        return r
+
+    monkeypatch.setattr(launches, "add_from_entities", registra_e_esvazia)
+
+    resp = launches.resolve_multi_launch_value(user_id, "800", velho)
+
+    assert "luz" not in (resp or "").lower(), (
+        f"perguntou por item já registrado: {resp!r}")
+
+
+def test_controle_com_a_fila_intacta_a_pergunta_continua_saindo(user_id):
+    """Controle: sem interferência, o próximo item ainda é perguntado.
+
+    Sem isto, o teste acima passaria num código que parou de perguntar.
+    """
+    velho = _armar_fila(user_id)
+    resp = launches.resolve_multi_launch_value(user_id, "800", velho)
+    assert "luz" in (resp or "").lower(), resp

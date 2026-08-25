@@ -713,34 +713,18 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
     # compare-and-swap abaixo as duas leem a mesma fila, gravam o MESMO item
     # duas vezes e o segundo valor some sem uma palavra.
     #
-    # Sem teto fixo de tentativas: cada colisão de CAS significa que OUTRA
-    # tarefa avançou a fila, então a fila encolheu e o laço converge. Um teto de
-    # 4 descartava calado o valor do usuário quando 5+ respostas concorriam — o
-    # `on_message` do Discord não limita a duas. O limite real é o tamanho da
-    # fila; o `len(queue) + 2` é só cinto de segurança contra fila que cresce
-    # por um caminho que eu não previ, e nesse caso é melhor devolver None do
-    # que girar para sempre.
-    tentativas = 0
-    teto = None  # definido na 1a volta, a partir da fila inicial
+    # Sem teto de tentativas, e sem contador. Perder o CAS significa que outra
+    # tarefa mexeu na fila; as concorrentes são finitas, então quando elas
+    # acabarem o nosso CAS vence. QUALQUER teto por tamanho de fila é errado na
+    # premissa: o `_devolve_head` FAZ a fila crescer quando um registro falha,
+    # então ela não só encolhe — foi por isso que as duas versões anteriores
+    # (teto 4, e depois `len(fila) + 5`) descartavam o valor do usuário em
+    # silêncio. A saída é a fila sumir, tratada logo abaixo.
     while True:
-        tentativas += 1
         payload = pending.get("payload") or {}
         queue: list[dict] = list(payload.get("queue") or [])
         if not queue:
             db.clear_pending_action(user_id)
-            return None
-        if teto is None:
-            # Pelo tamanho INICIAL da fila: a atual já encolheu por causa das
-            # outras tarefas, e medir por ela faz desistir no meio.
-            teto = len(queue) + 5
-        if tentativas > teto:
-            # Só chega aqui se a fila estiver crescendo em vez de encolher, o
-            # que nenhum caminho conhecido faz. Devolver None é melhor que
-            # girar: o roteador ainda trata a mensagem como comando novo.
-            logger.warning(
-                "resolve_multi_launch_value: %d tentativas (teto %d, fila "
-                "agora %d) para o user %s — desistindo",
-                tentativas, teto, len(queue), user_id)
             return None
 
         if resp_norm in _CANCEL_WORDS:
@@ -795,8 +779,16 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
             _devolve_head(user_id, head, platform)
             raise
 
-        if resto:
-            return f"{resp}\n\n{_ask_value_question(resto[0])}"
+        # RELÊ antes de perguntar: `resto` é do momento da reivindicação. Se
+        # outra tarefa registrou itens enquanto esta demorava, perguntar pelo
+        # `resto[0]` velho pede um valor de algo JÁ registrado — e a resposta
+        # do usuário chega sem item correspondente na fila.
+        depois = db.get_pending_action(user_id)
+        fila_agora = []
+        if depois and depois.get("action_type") == "multi_launch_values":
+            fila_agora = (depois.get("payload") or {}).get("queue") or []
+        if fila_agora:
+            return f"{resp}\n\n{_ask_value_question(fila_agora[0])}"
         # fila vazia: não re-arma multi_launch_values. O add_from_entities acima já
         # gravou o pending de "categoria errada?" (WhatsApp), que fica valendo.
         return resp
