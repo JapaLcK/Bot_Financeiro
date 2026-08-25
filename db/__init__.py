@@ -128,6 +128,7 @@ from .categories import (
 # ── Ações pendentes ───────────────────────────────────────────────────────────
 from .pending import (
     advance_pending_action,
+    create_pending_action_if_absent,
     set_pending_action,
     get_pending_action,
     clear_pending_action,

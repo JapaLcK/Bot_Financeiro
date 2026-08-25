@@ -57,6 +57,32 @@ def advance_pending_action(user_id: int, action_type: str,
     return gravou
 
 
+
+def create_pending_action_if_absent(user_id: int, action_type: str, payload: dict,
+                                    minutes: int = 10) -> bool:
+    """Cria a pendência SÓ SE o usuário não tiver nenhuma. Devolve True se criou.
+
+    Irmã do `advance_pending_action` para o caso "não havia linha". O
+    `set_pending_action` faz upsert incondicional: duas devoluções simultâneas
+    (dois itens reivindicados que estouraram, ex. os dois batendo o teto de
+    plano) veem a fila vazia e cada uma grava a SUA — a última apaga a primeira
+    e um item some. Aqui a segunda insere zero linhas, devolve False, e quem
+    chamou relê e prepende na fila que a primeira acabou de criar.
+    """
+    ensure_user(user_id)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "insert into pending_actions (user_id, action_type, payload, expires_at) "
+                "values (%s, %s, %s, %s) on conflict (user_id) do nothing",
+                (user_id, action_type, Jsonb(payload), expires_at),
+            )
+            criou = cur.rowcount == 1
+        conn.commit()
+    return criou
+
+
 def set_pending_action(user_id: int, action_type: str, payload: dict, minutes: int = 10):
     """Cria/atualiza uma ação pendente de confirmação (persistente no Postgres)."""
     ensure_user(user_id)

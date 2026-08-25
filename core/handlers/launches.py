@@ -762,10 +762,15 @@ def _devolve_head(user_id: int, head: dict, platform: str) -> None:
     for _ in range(4):
         atual = db.get_pending_action(user_id)
         if not atual or atual.get("action_type") != "multi_launch_values":
-            db.set_pending_action(
-                user_id, "multi_launch_values",
-                {"queue": [head], "platform": platform})
-            return
+            # Condicional, não upsert: duas devoluções simultâneas veriam as
+            # duas a fila vazia e a última apagaria a primeira. Quem perder a
+            # inserção volta ao topo do laço e prepende na fila que a outra
+            # acabou de criar.
+            if db.create_pending_action_if_absent(
+                    user_id, "multi_launch_values",
+                    {"queue": [head], "platform": platform}):
+                return
+            continue
         antigo = atual.get("payload") or {}
         fila = [head] + list(antigo.get("queue") or [])
         if db.advance_pending_action(

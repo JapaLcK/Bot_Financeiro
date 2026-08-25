@@ -209,3 +209,38 @@ def test_item_que_estourou_volta_pra_fila_mesmo_com_outra_thread_avancando(user_
     fila = (db.get_pending_action(user_id) or {}).get("payload", {}).get("queue", [])
     assert [i["desc"] for i in fila] == ["aluguel"], (
         f"o item que estourou sumiu — fila ficou {fila}")
+
+
+def test_duas_devolucoes_simultaneas_com_fila_vazia_nao_perdem_item(user_id):
+    """P2 (2ª rodada do Codex): dois itens que estouram juntos, fila já vazia.
+
+    Cena: os dois últimos itens são reivindicados por tarefas diferentes e
+    AMBOS os registros estouram (ex.: os dois batem o teto de plano). As duas
+    devoluções veem "não há pendência" e cada uma quer criar a sua. Com upsert
+    incondicional a última apaga a primeira e um item some.
+
+    Precisa de threads de verdade com barreira: em sequência a segunda já
+    encontraria a fila criada e nunca passaria pelo ramo que tem o defeito.
+    """
+    db.clear_pending_action(user_id)
+
+    largada = threading.Barrier(2)
+    erros: list[BaseException] = []
+
+    def devolve(desc: str):
+        try:
+            largada.wait(timeout=10)
+            launches._devolve_head(user_id, {"desc": desc, "tipo": "despesa"}, "whatsapp")
+        except BaseException as exc:  # noqa: BLE001 — o teste precisa ver
+            erros.append(exc)
+
+    ts = [threading.Thread(target=devolve, args=(d,)) for d in ("aluguel", "luz")]
+    for th in ts:
+        th.start()
+    for th in ts:
+        th.join(timeout=30)
+
+    assert not erros, erros
+    fila = (db.get_pending_action(user_id) or {}).get("payload", {}).get("queue", [])
+    nomes = sorted(i["desc"] for i in fila)
+    assert nomes == ["aluguel", "luz"], f"item perdido — fila ficou {fila}"
