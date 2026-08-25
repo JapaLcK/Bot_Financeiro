@@ -50,9 +50,11 @@ def test_variable_bill_stores_pending_and_accepts_bare_amount(monkeypatch):
 
 
 def test_non_numeric_reply_abandons_bill_question(monkeypatch):
-    clear = Mock()
+    # O abandono virou condicional (compare-and-swap com o payload lido) para
+    # não apagar uma pendência que outra tarefa tenha posto no lugar.
+    abandona = Mock(return_value=True)
     mark = Mock()
-    monkeypatch.setattr("db.clear_pending_action", clear)
+    monkeypatch.setattr("db.advance_pending_action", abandona)
     monkeypatch.setattr("db.bills.mark_bill_paid", mark)
     pending = {
         "action_type": "bill_amount_expected",
@@ -60,7 +62,8 @@ def test_non_numeric_reply_abandons_bill_question(monkeypatch):
     }
 
     assert bills.resolve_bill_amount(7, "mostra meu saldo", pending) is None
-    clear.assert_called_once_with(7)
+    abandona.assert_called_once_with(
+        7, "bill_amount_expected", {"bill_id": 41, "bill_name": "Luz"}, None)
     mark.assert_not_called()
 
 
@@ -237,3 +240,52 @@ def test_devolucao_nao_atropela_pendencia_mais_nova(monkeypatch):
     p = db.get_pending_action(uid) or {}
     assert p.get("action_type") == "confirm_recurring_offer", (
         f"a devolução atropelou a pendência mais nova — ficou {p.get('action_type')}")
+
+
+def test_abandono_nao_apaga_pendencia_mais_nova(monkeypatch):
+    """P2 do Codex: o abandono usava clear incondicional.
+
+    Resposta não-monetária abandona a pergunta. Se outra tarefa trocou a
+    pendência por uma confirmação nova nesse meio tempo — já mostrada ao
+    usuário —, o clear apagava aquela e a deixava órfã.
+
+    Terceira instância da mesma família neste PR (reivindicar, devolver,
+    abandonar): toda escrita na linha de pendência precisa ser condicional.
+    """
+    import uuid
+    import db
+    from core.handlers import bills as H
+
+    uid = int(uuid.uuid4().int % 10_000_000_000)
+    db.ensure_user(uid)
+    payload = {"bill_id": 41, "bill_name": "Luz"}
+    db.set_pending_action(uid, "bill_amount_expected", payload)
+    pending = db.get_pending_action(uid)
+
+    # a outra tarefa trocou a pendência depois que esta leu
+    db.set_pending_action(uid, "confirm_recurring_offer", {"name": "Luz"})
+
+    assert H.resolve_bill_amount(uid, "sei la", pending) is None
+
+    p = db.get_pending_action(uid) or {}
+    assert p.get("action_type") == "confirm_recurring_offer", (
+        f"o abandono apagou a pendência mais nova — ficou {p.get('action_type')}")
+
+
+def test_controle_abandono_normal_ainda_limpa_a_pergunta(monkeypatch):
+    """Controle: sem concorrência, abandonar continua apagando de verdade.
+
+    Sem isto, o teste acima passaria num código que nunca abandona nada.
+    """
+    import uuid
+    import db
+    from core.handlers import bills as H
+
+    uid = int(uuid.uuid4().int % 10_000_000_000)
+    db.ensure_user(uid)
+    db.set_pending_action(uid, "bill_amount_expected",
+                          {"bill_id": 41, "bill_name": "Luz"})
+    pending = db.get_pending_action(uid)
+
+    assert H.resolve_bill_amount(uid, "sei la", pending) is None
+    assert db.get_pending_action(uid) is None, "a pergunta deveria ter sido abandonada"

@@ -127,9 +127,14 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     casou = re.fullmatch(
         r"(?:R\$\s*)?(-\s*)?\d[\d.,\s]*(?:\s*(?:reais?|rs))?", raw, re.I)
     if not casou:
-        from db import clear_pending_action
+        # CONDICIONAL, não clear: entre a leitura desta pendência e agora,
+        # outra tarefa pode ter posto uma confirmação nova no lugar — que já
+        # apareceu na tela do usuário. Apagar por cima a deixaria órfã. Só
+        # abandonamos a pergunta se ela ainda for a que lemos.
+        from db import advance_pending_action
 
-        clear_pending_action(user_id)
+        advance_pending_action(
+            user_id, "bill_amount_expected", pending.get("payload") or {}, None)
         return None
 
     amount = parse_money(raw)
