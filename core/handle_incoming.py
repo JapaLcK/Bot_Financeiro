@@ -694,8 +694,17 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         has_resumable_pending = False
         try:
             _pend = db.get_pending_action(uid)
-            if _pend and _pend.get("action_type") in _RESUMABLE_PENDING_TYPES:
+            _pt = (_pend or {}).get("action_type")
+            if _pt in _RESUMABLE_PENDING_TYPES:
                 has_resumable_pending = True
+                if _pt == "bill_amount_expected":
+                    # Só suprime a IA para o que o handler determinístico
+                    # consegue responder. Sem isto, o Pro que MUDA DE ASSUNTO
+                    # perde o fallback: o `resolve_bill_amount` abandona a
+                    # pergunta e devolve None, mas a IA já tinha sido pulada, e
+                    # ele recebe ajuda genérica em vez do que paga para ter.
+                    from core.handlers.bills import parece_resposta_de_valor
+                    has_resumable_pending = parece_resposta_de_valor(text)
         except Exception:
             has_resumable_pending = False
 

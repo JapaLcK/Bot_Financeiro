@@ -186,6 +186,32 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None) -> d
 
     name = bill["name"] or "Conta"
     categoria = bill["category"] or "outros"
+
+    # RESERVA a conta ANTES de debitar. A ordem inversa (debitar e depois
+    # atualizar o status) tem dois modos de falha caros: duas requisições
+    # concorrentes criam DOIS lançamentos porque as duas leem `pending`; e uma
+    # falha entre os dois commits deixa o débito feito com a conta ainda
+    # pendente, então a próxima tentativa debita de novo.
+    #
+    # Com a reserva primeiro, o `where status='pending'` serializa: só uma
+    # requisição transita a conta, e as outras recebem None. A falha entre os
+    # dois passos passa a ser conta marcada paga sem débito — erro conservador
+    # (subregistra) em vez de inventar dinheiro, e visível no extrato da conta.
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update bill_instances
+                   set status='paid', paid_at=now(), paid_amount=%s
+                 where id=%s and user_id=%s and status='pending'
+                """,
+                (Decimal(str(valor)), int(bill_id), int(user_id)),
+            )
+            reservou = cur.rowcount == 1
+        conn.commit()
+    if not reservou:
+        return None
+
     launch_id, _seq, _bal = add_launch_and_update_balance(
         user_id, "despesa", valor, alvo=f"conta:{name}", nota=f"Pagamento · {name}",
         categoria=categoria, is_internal_movement=False,
@@ -193,12 +219,8 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None) -> d
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                update bill_instances
-                   set status='paid', paid_at=now(), paid_amount=%s, launch_id=%s
-                 where id=%s and user_id=%s and status='pending'
-                """,
-                (Decimal(str(valor)), launch_id, int(bill_id), int(user_id)),
+                "update bill_instances set launch_id=%s where id=%s and user_id=%s",
+                (launch_id, int(bill_id), int(user_id)),
             )
         conn.commit()
     return get_bill(user_id, bill_id)

@@ -1,3 +1,4 @@
+import pathlib
 import pytest
 from unittest.mock import Mock
 
@@ -14,10 +15,12 @@ def test_variable_bill_stores_pending_and_accepts_bare_amount(monkeypatch):
     }
     monkeypatch.setattr("db.bills.list_bills", lambda *_args, **_kwargs: [bill])
     monkeypatch.setattr("db.bills.mark_bill_paid", Mock())
+    # A gravação da pergunta virou condicional (insert-if-absent), para não
+    # atropelar uma pendência que outra tarefa tenha armado no meio.
     monkeypatch.setattr(
-        "db.set_pending_action",
-        lambda uid, kind, payload: pending.update(
-            user_id=uid, action_type=kind, payload=payload
+        "db.create_pending_action_if_absent",
+        lambda uid, kind, payload: bool(
+            pending.update(user_id=uid, action_type=kind, payload=payload) or True
         ),
     )
 
@@ -289,3 +292,57 @@ def test_controle_abandono_normal_ainda_limpa_a_pergunta(monkeypatch):
 
     assert H.resolve_bill_amount(uid, "sei la", pending) is None
     assert db.get_pending_action(uid) is None, "a pergunta deveria ter sido abandonada"
+
+
+def test_pro_que_muda_de_assunto_nao_perde_o_fallback_de_ia():
+    """P2 do Codex: regressão que EU introduzi ao pôr o tipo na lista.
+
+    A lista suprime o fallback de IA. Para a resposta de valor isso é o certo.
+    Mas o Pro que muda de assunto tem a pergunta abandonada e recebe `None` do
+    handler — e a IA já tinha sido pulada, então ele fica com ajuda genérica em
+    vez do que paga para ter.
+
+    Agora só suprime o que o handler determinístico consegue responder.
+    """
+    from core.handlers.bills import parece_resposta_de_valor
+    for resposta in ("132", "132,50", "R$ 132", "-10", "132 reais"):
+        assert parece_resposta_de_valor(resposta), resposta
+    for outro in ("mostra meu saldo", "quanto gastei esse mes", "ajuda", "fatura", ""):
+        assert not parece_resposta_de_valor(outro), outro
+
+
+def test_reserva_a_conta_antes_de_debitar(monkeypatch):
+    """P1 do Codex: débito acontecia ANTES da transição de status.
+
+    Falha entre os dois commits deixava o saldo debitado com a conta ainda
+    pendente — e a próxima resposta debitava de novo. Agora a conta é reservada
+    primeiro: quem não consegue a transição recebe None e não debita nada.
+    """
+    import db.bills as B
+
+    chamadas = []
+    monkeypatch.setattr(
+        "db.accounts.add_launch_and_update_balance",
+        lambda *a, **k: chamadas.append(a) or (99, 1, -100.0),
+    )
+    fonte = pathlib.Path("db/bills.py").read_text()
+    i = fonte.index("def mark_bill_paid")
+    corpo = fonte[i:fonte.index("\ndef ", i + 10)]
+    reserva = corpo.index("set status='paid'")
+    debito = corpo.index("add_launch_and_update_balance(")
+    assert reserva < debito, (
+        "o débito voltou a acontecer antes da reserva da conta")
+
+
+def test_o_gate_da_ia_realmente_consulta_o_refinamento():
+    """Amarra o USO, não só a existência da função.
+
+    O teste acima confere que `parece_resposta_de_valor` classifica certo — mas
+    passaria mesmo se o `handle_incoming` ignorasse a função. Este falha se
+    alguém voltar a suprimir a IA por pertinência pura.
+    """
+    fonte = pathlib.Path("core/handle_incoming.py").read_text()
+    i = fonte.index("has_resumable_pending = True")
+    trecho = fonte[i:i + 800]
+    assert "parece_resposta_de_valor" in trecho, (
+        "o gate voltou a suprimir a IA só por pertinência na lista")

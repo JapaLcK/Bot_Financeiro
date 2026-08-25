@@ -90,14 +90,24 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
     # originou a pergunta. Assim a resposta natural (só "132,50") não cai no
     # classificador/na IA sem contexto.
     if best.get("variable_amount") and amount is None:
-        from db import set_pending_action
+        from db import create_pending_action_if_absent
 
         nome = (best.get("name") or "conta")
-        set_pending_action(
+        # CONDICIONAL: entre o roteador ler "sem pendência" e chegar aqui,
+        # outra tarefa pode ter armado uma confirmação que já apareceu na tela
+        # do usuário. Gravar por cima a deixaria órfã. Perdendo a corrida, a
+        # pergunta sai sem contexto salvo — e por isso o texto abaixo muda para
+        # pedir a forma completa, que funciona sem estado nenhum.
+        guardou = create_pending_action_if_absent(
             user_id,
             "bill_amount_expected",
             {"bill_id": int(best["id"]), "bill_name": nome},
         )
+        if not guardou:
+            return (
+                f"A conta de *{nome}* tem valor variável. Quanto veio este mês?\n"
+                f"Manda assim: *paguei {nome.lower()} 132,50*"
+            )
         return (
             f"A conta de *{nome}* tem valor variável. Quanto veio este mês?\n"
             "Pode mandar só o valor, por exemplo: *132,50*"
@@ -111,6 +121,21 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
         f"✅ Conta paga: *{paid.get('name')}* — {fmt_brl(val)} lançado e "
         f"categorizado. Tá tudo em dia! 🐷"
     )
+
+
+
+_RESPOSTA_DE_VALOR_RE = re.compile(
+    r"(?:R\$\s*)?(-\s*)?\d[\d.,\s]*(?:\s*(?:reais?|rs))?", re.I)
+
+
+def parece_resposta_de_valor(text: str) -> bool:
+    """A mensagem pode ser a resposta da pergunta de valor de conta variável?
+
+    Usado pelo `handle_incoming` para decidir se suprime o fallback de IA. Só
+    suprime o que esta função consegue responder: quem muda de assunto continua
+    tendo a IA, que é o que ele paga para ter.
+    """
+    return bool(_RESPOSTA_DE_VALOR_RE.fullmatch((text or "").strip()))
 
 
 def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
