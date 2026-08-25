@@ -156,12 +156,33 @@ def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
         amount = None
 
     if bill.get("variable_amount") and amount is None:
+        # Mesma pendência do handler determinístico (core/handlers/bills.py):
+        # sem ela a pergunta saía sem estado nenhum e o número da resposta
+        # voltava pra IA sem contexto — a issue #132 reaberta pelo lado do Pro,
+        # já que "quitei a luz" classifica out_of_scope e chega aqui.
+        from db import claim_pending_action
+
         nome = bill.get("name") or "conta"
+        guardou = claim_pending_action(
+            user_id, "bill_amount_expected",
+            {"bill_id": int(bill["id"]), "bill_name": nome},
+        )
+        if not guardou:
+            return (f"🐷 A conta de *{nome}* tem valor variável. Quanto veio este mês? "
+                    f"Ex: *paguei {str(nome).lower()} 132,50*")
         return (f"🐷 A conta de *{nome}* tem valor variável. Quanto veio este mês? "
-                f"Ex: *paguei {str(nome).lower()} 132,50*")
+                f"Pode mandar só o valor, por exemplo: *132,50*")
 
     try:
         paid = mark_bill_paid(user_id, int(bill["id"]), amount)
+    except ValueError as e:
+        if str(e) != "VALOR_INVALIDO":
+            return f"🐷 Não consegui registrar o pagamento: {e}"
+        # Valor não finito ou que arredonda para R$ 0,00 (a IA repassa o que o
+        # usuário escreveu). Sem isto o usuário lia "VALOR_INVALIDO" na tela.
+        nome = bill.get("name") or "conta"
+        return (f"🐷 O valor da *{nome}* precisa ser maior que zero. "
+                f"Quanto veio este mês?")
     except Exception as e:
         return f"🐷 Não consegui registrar o pagamento: {e}"
     if paid is None:

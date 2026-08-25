@@ -61,6 +61,10 @@ _HELP_FALLBACK_MARKERS: tuple[str, ...] = (
 #
 # NÃO inclui ofertas one-shot (recategorize_launch_offer, undo_audio): essas não
 # são perguntas e não devem bloquear a IA nas mensagens seguintes.
+#
+# Esta é UMA das três enumerações de "isto é pergunta?" que existem no código;
+# as outras duas (e o que diverge entre elas) estão listadas em db/pending.py,
+# no bloco de ORDEM DE PRIORIDADE.
 _RESUMABLE_PENDING_TYPES: frozenset[str] = frozenset({
     "clarification",
     "credit_card_setup",
@@ -74,6 +78,13 @@ _RESUMABLE_PENDING_TYPES: frozenset[str] = frozenset({
     # respondida com um número solto, que classifica como out_of_scope. Sem
     # estar aqui, o usuário Pro tem a resposta sequestrada pela IA e a conta
     # fica sem pagar — que é o bug da issue #132 sobrevivendo para quem paga.
+    #
+    # Suprime SEMPRE, sem tentar adivinhar antes se a mensagem "parece um
+    # valor". Medido: o refinamento salvava 1 de 5 mudanças de assunto (as
+    # outras 4 já voltam pra IA pelo fallback 6b abaixo) e, em troca, mandava
+    # pra IA as 5 formas faladas de responder o valor ("foi 132", "acho que
+    # 132", "uns 132", "veio 132 reais", "deu 132,50") — que agora o
+    # `resolve_bill_amount` aceita.
     "bill_amount_expected",
 })
 
@@ -347,7 +358,13 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
         # quando a resposta do áudio é um lançamento de fato, não uma pergunta.
         _pend = db.get_pending_action(uid)
         _ptype = _pend.get("action_type") if _pend else None
-        if _ptype not in _RESUMABLE_PENDING_TYPES and _ptype not in ("multi_launch_values", "confirm_recurring_offer"):
+        # `bill_pay_amount` é a pergunta de valor do botão "✅ Já paguei"
+        # (adapters/whatsapp/wa_runtime.py) — não está em
+        # `_RESUMABLE_PENDING_TYPES` porque o consumidor dela é o próprio
+        # runtime, então precisa ser nomeada aqui à mão. Terceira enumeração de
+        # "isto é pergunta?"; as três estão listadas em db/pending.py.
+        if _ptype not in _RESUMABLE_PENDING_TYPES and _ptype not in (
+                "multi_launch_values", "confirm_recurring_offer", "bill_pay_amount"):
             db.set_pending_action(uid, "undo_audio", {})
 
     return [OutgoingMessage(text=preview + body + undo_hint)]
@@ -694,17 +711,8 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         has_resumable_pending = False
         try:
             _pend = db.get_pending_action(uid)
-            _pt = (_pend or {}).get("action_type")
-            if _pt in _RESUMABLE_PENDING_TYPES:
+            if _pend and _pend.get("action_type") in _RESUMABLE_PENDING_TYPES:
                 has_resumable_pending = True
-                if _pt == "bill_amount_expected":
-                    # Só suprime a IA para o que o handler determinístico
-                    # consegue responder. Sem isto, o Pro que MUDA DE ASSUNTO
-                    # perde o fallback: o `resolve_bill_amount` abandona a
-                    # pergunta e devolve None, mas a IA já tinha sido pulada, e
-                    # ele recebe ajuda genérica em vez do que paga para ter.
-                    from core.handlers.bills import parece_resposta_de_valor
-                    has_resumable_pending = parece_resposta_de_valor(text)
         except Exception:
             has_resumable_pending = False
 

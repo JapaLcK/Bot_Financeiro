@@ -128,6 +128,7 @@ from .categories import (
 # ── Ações pendentes ───────────────────────────────────────────────────────────
 from .pending import (
     advance_pending_action,
+    claim_pending_action,
     create_pending_action_if_absent,
     set_pending_action,
     get_pending_action,
@@ -450,7 +451,8 @@ __all__ = [
     "list_custom_category_names",
     # pending
     "set_pending_action", "get_pending_action", "clear_pending_action",
-    "advance_pending_action",
+    "advance_pending_action", "create_pending_action_if_absent",
+    "claim_pending_action",
     # budgets
     "list_budgets", "get_budget", "upsert_budget", "delete_budget",
     "list_user_categories", "sum_spent_in_category_this_month",

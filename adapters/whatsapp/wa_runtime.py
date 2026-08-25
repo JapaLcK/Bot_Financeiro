@@ -9,6 +9,7 @@ import threading
 import time
 import traceback
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any
 
 from adapters.whatsapp.wa_client import (
@@ -42,6 +43,7 @@ from core.observability import log_system_event_sync
 from core.types import IncomingMessage
 from db import (
     attempt_whatsapp_phone_link,
+    claim_pending_action,
     clear_pending_action,
     get_conn,
     get_or_create_canonical_user,
@@ -739,19 +741,50 @@ def process_message(message: InboundMessage) -> None:
                     return
                 # Valor variável (água/luz): o estimado não serve — pergunta quanto
                 # veio e a próxima mensagem (número) fecha o pagamento.
+                #
+                # DIVERGE de propósito (por enquanto) do `bill_amount_expected`
+                # de core/handlers/bills.py, que é a MESMA pergunta feita por
+                # texto: aqui o tipo é `bill_pay_amount`, o prazo é 30 min e o
+                # `clear` acontece antes do pagamento (sem compare-and-swap na
+                # hora de pagar). Isto não passa pelo `handle_incoming` — o
+                # consumidor está logo abaixo, na linha :896 deste arquivo,
+                # antes da chamada do handle_incoming em :1021 —, então não
+                # precisa de `_RESUMABLE_PENDING_TYPES` e não sofre o sequestro
+                # pela IA. Unificar os dois é issue separada: este fluxo tem
+                # "cancelar", valor estimado no texto e re-pergunta própria, e
+                # mexer nele sem teste de botão é troca de bug conhecido por
+                # bug novo.
+                #
+                # A GRAVAÇÃO, porém, é o mesmo recurso disputado (a linha única
+                # de `pending_actions`), então usa `claim_pending_action` como
+                # os outros dois: tocar este botão não pode apagar uma pergunta
+                # viva (um valor já digitado, uma fila de multi-lançamento, uma
+                # confirmação de apagar).
                 if bill.get("variable_amount"):
+                    nome_conta = bill.get("name") or "conta"
                     try:
-                        set_pending_action(
+                        guardou = claim_pending_action(
                             uid, "bill_pay_amount",
                             {"bill_id": bill_id, "name": bill.get("name")}, minutes=30,
                         )
                     except Exception as exc:
-                        logger.warning("WA set bill_pay_amount pending failed: %s", exc)
+                        logger.warning("WA claim bill_pay_amount pending failed: %s", exc)
+                        guardou = False
                     est = bill.get("amount")
                     hint = f" (estimado {fmt_brl(est)})" if est else ""
+                    if not guardou:
+                        # Perdeu para outra pergunta: sem a pendência, o número
+                        # solto não fecha nada aqui. Pede a forma completa, que
+                        # funciona sem estado nenhum (cai no `try_pay_from_text`).
+                        _send_reply(
+                            reply_to,
+                            f"Quanto veio a conta de *{nome_conta}* este mês?{hint}\n"
+                            f"Manda assim: *paguei {str(nome_conta).lower()} 132,50*",
+                        )
+                        return
                     _send_reply(
                         reply_to,
-                        f"Quanto veio a conta de *{bill.get('name')}* este mês?{hint}\n"
+                        f"Quanto veio a conta de *{nome_conta}* este mês?{hint}\n"
                         f"É só mandar o valor. Ex: *132,50*",
                     )
                     return
@@ -877,7 +910,14 @@ def process_message(message: InboundMessage) -> None:
                     amount = parse_money(txt)
                 except Exception:
                     amount = None
-                if amount is None or amount <= 0:
+                # Arredonda para centavos e recusa não finito ANTES de pagar:
+                # "0,001" passava no `> 0` e o `mark_bill_paid` respondia com o
+                # erro genérico, perdendo a pendência. Aqui a pergunta fica de
+                # pé e o usuário responde de novo. Mesma regra do
+                # `resolve_bill_amount` (core/handlers/bills.py).
+                if amount is not None and isfinite(amount):
+                    amount = round(amount, 2)
+                if amount is None or not isfinite(amount) or amount <= 0:
                     # não entendeu o valor → re-pergunta, mantém o pending
                     _send_reply(reply_to, f"Não peguei o valor. Manda só o número da conta de *{name}*. Ex: *132,50* (ou *cancelar*)")
                     return

@@ -86,6 +86,90 @@ def create_pending_action_if_absent(user_id: int, action_type: str, payload: dic
     return criou
 
 
+# ---------------------------------------------------------------------------
+# ORDEM DE PRIORIDADE DA LINHA ÚNICA DE `pending_actions`
+# ---------------------------------------------------------------------------
+# `pending_actions` tem UMA linha por usuário (`on conflict (user_id)`), então
+# todo fluxo que quer lembrar de algo disputa o mesmo espaço. Só existem dois
+# degraus, porque só isso é preciso para decidir quem cede:
+#
+#   1. PERGUNTAS — o bot parou e espera uma resposta que ele NÃO consegue
+#      reconstruir sozinho: quanto veio a conta, qual cartão, confirma apagar,
+#      qual o valor do item da fila. Perder isso perde dinheiro ou trabalho já
+#      feito pelo usuário. É tudo o que NÃO está na lista abaixo. Nunca é
+#      desalojado: quem chega depois é que se vira sem estado.
+#
+#   2. OFERTAS DE CONVENIÊNCIA (a lista) — o bot já concluiu o trabalho e
+#      anexou um BOTÃO à resposta: "categoria errada?", "quer desfazer?". Elas
+#      são consumidas no mesmo turno em que nascem, pelo
+#      `_send_reply_with_optional_buttons` (adapters/whatsapp/wa_runtime.py:
+#      181-211), que faz `clear_pending_action` antes de enviar. Se ainda
+#      estiverem de pé no turno seguinte é porque o botão não foi tocado —
+#      ignorar é a resposta mais comum, e o usuário refaz pelo comando normal
+#      ("muda a categoria do #12"). Pode ser desalojada por qualquer pergunta.
+#
+# `confirm_recurring_offer` ESTEVE nesta lista e não é oferta: o nome engana. O
+# bot pergunta "isso virou gasto fixo? (sim ou não)" em TEXTO e ela NÃO é
+# consumida pelo runtime — sobrevive para o turno seguinte de propósito, porque
+# o "sim" é a resposta dela. Desalojando-a, o "sim" seguinte caía em "não
+# entendi bem o que você quis fazer" e derrubava as DUAS pendências: o Spotify
+# não virava gasto fixo e a pergunta da conta morria junto. É pergunta.
+#
+# Sem esse degrau, a gravação condicional recusava por causa de QUALQUER linha:
+# um "gastei 50 no mercado" deixava a oferta de recategorizar de pé por 10 min
+# e o "paguei a luz" seguinte já não conseguia guardar de qual conta falava.
+_OFERTAS_DE_CONVENIENCIA: frozenset[str] = frozenset({
+    "recategorize_launch_offer",
+    "undo_audio",
+})
+
+# OBSERVAÇÃO (não unificado neste PR): "isto é pergunta?" está enumerado em
+# TRÊS lugares, com conteúdos diferentes e nenhum deles importa o outro:
+#   1. esta lista (pelo avesso: pergunta é o que NÃO está aqui);
+#   2. `_RESUMABLE_PENDING_TYPES` (core/handle_incoming.py), que decide se a IA
+#      é suprimida;
+#   3. um literal inline em core/handle_incoming.py (~:357), que decide se o
+#      `undo_audio` pode sobrescrever a pendência.
+# Divergem: `bill_pay_amount` só existe na (3); `multi_launch_values` e
+# `confirm_recurring_offer` só existem na (3). Cada nova pendência precisa ser
+# lembrada nos três. Unificar é issue separada — as três perguntas são
+# diferentes ("cede a linha?", "suprime a IA?", "pode sobrescrever?") e juntar
+# sem enumerar estado × evento troca bug conhecido por bug novo.
+
+
+def claim_pending_action(user_id: int, action_type: str, payload: dict,
+                         minutes: int = 10) -> bool:
+    """Arma uma PERGUNTA na linha do usuário. True se conseguiu.
+
+    Linha livre → insere (condicional, para duas tarefas simultâneas não se
+    apagarem). Ocupada por oferta de conveniência → desaloja, condicionado ao
+    que foi lido, para não atropelar algo que chegou no meio. Ocupada por outra
+    pergunta → devolve False, e quem chamou degrada para o texto que funciona
+    sem estado.
+
+    Mesmo desenho do `_devolve_head` (core/handlers/launches.py), com a
+    diferença de que lá o CAS roda em laço: lá o que se perde é um lançamento
+    do usuário, aqui é só o contexto de uma pergunta que tem texto de
+    recuperação.
+    """
+    # ponytail: uma tentativa só. Perder a corrida cai no texto degradado, que
+    # funciona; virar laço só se aparecer disputa de verdade nessa linha.
+    atual = get_pending_action(user_id)
+    if atual is None:
+        return create_pending_action_if_absent(user_id, action_type, payload, minutes)
+    # A MESMA pergunta de novo (tocou "Já paguei" na conta A e depois na B;
+    # disse "paguei a luz" e depois "paguei a água") não é disputa: a primeira
+    # já morreu na tela do usuário e a segunda é o que ele acabou de pedir.
+    # Continua CAS — quem perder a corrida cai no texto degradado.
+    if (atual["action_type"] not in _OFERTAS_DE_CONVENIENCIA
+            and atual["action_type"] != action_type):
+        return False
+    return advance_pending_action(
+        user_id, atual["action_type"], atual.get("payload") or {},
+        payload, minutes, new_action_type=action_type,
+    )
+
+
 def set_pending_action(user_id: int, action_type: str, payload: dict, minutes: int = 10):
     """Cria/atualiza uma ação pendente de confirmação (persistente no Postgres)."""
     ensure_user(user_id)

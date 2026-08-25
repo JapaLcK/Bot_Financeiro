@@ -14,6 +14,7 @@ core/handlers/recurring.py (payment_mode='manual'). Ver [[db/bills.py]].
 from __future__ import annotations
 
 import re
+from math import isfinite
 
 from utils_text import fmt_brl, normalize_text, parse_money
 
@@ -90,15 +91,15 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
     # originou a pergunta. Assim a resposta natural (só "132,50") não cai no
     # classificador/na IA sem contexto.
     if best.get("variable_amount") and amount is None:
-        from db import create_pending_action_if_absent
+        from db import claim_pending_action
 
         nome = (best.get("name") or "conta")
-        # CONDICIONAL: entre o roteador ler "sem pendência" e chegar aqui,
-        # outra tarefa pode ter armado uma confirmação que já apareceu na tela
-        # do usuário. Gravar por cima a deixaria órfã. Perdendo a corrida, a
-        # pergunta sai sem contexto salvo — e por isso o texto abaixo muda para
-        # pedir a forma completa, que funciona sem estado nenhum.
-        guardou = create_pending_action_if_absent(
+        # `claim_pending_action` respeita a ordem de prioridade escrita em
+        # db/pending.py: desaloja oferta de conveniência ("categoria errada?"),
+        # cede para outra PERGUNTA. Só quando cede é que a pergunta sai sem
+        # contexto salvo — e aí o texto abaixo pede a forma completa, que
+        # funciona sem estado nenhum.
+        guardou = claim_pending_action(
             user_id,
             "bill_amount_expected",
             {"bill_id": int(best["id"]), "bill_name": nome},
@@ -113,7 +114,20 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
             "Pode mandar só o valor, por exemplo: *132,50*"
         )
 
-    paid = mark_bill_paid(user_id, int(best["id"]), amount)
+    try:
+        paid = mark_bill_paid(user_id, int(best["id"]), amount)
+    except ValueError as exc:
+        if str(exc) != "VALOR_INVALIDO":
+            raise
+        # Valor que o `mark_bill_paid` recusa: não finito ("paguei luz" com 400
+        # dígitos) ou que arredonda para R$ 0,00 ("paguei luz 0,001"). É
+        # digitação, não falha do sistema — sem traduzir aqui, o handler global
+        # responde "Ocorreu um erro interno" com stack trace no log.
+        nome = best.get("name") or "conta"
+        return (
+            f"O valor da *{nome}* precisa ser maior que zero.\n"
+            f"Manda assim: *paguei {str(nome).lower()} 132,50*"
+        )
     if paid is None:
         return None
     val = paid.get("paid_amount") or paid.get("amount") or 0
@@ -124,18 +138,24 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
 
 
 
-_RESPOSTA_DE_VALOR_RE = re.compile(
-    r"(?:R\$\s*)?(-\s*)?\d[\d.,\s]*(?:\s*(?:reais?|rs))?", re.I)
-
-
-def parece_resposta_de_valor(text: str) -> bool:
-    """A mensagem pode ser a resposta da pergunta de valor de conta variável?
-
-    Usado pelo `handle_incoming` para decidir se suprime o fallback de IA. Só
-    suprime o que esta função consegue responder: quem muda de assunto continua
-    tendo a IA, que é o que ele paga para ter.
-    """
-    return bool(_RESPOSTA_DE_VALOR_RE.fullmatch((text or "").strip()))
+# Enchimento falado antes do número: "foi 132", "acho que 132", "uns 132",
+# "veio 132 reais", "deu 132,50". É `fullmatch`, então TODA palavra antes do
+# número tem que estar nesta lista — "gastei 132 no mercado" não casa e a
+# pergunta é abandonada para o roteamento normal, que é o certo.
+_ENCHIMENTO = (r"(?:foi|era|eh|e|de|da|do|deu|veio|custou|saiu|ficou|acho|que"
+               r"|uns|umas|um|uma|tipo|mais|ou|menos|deve|ter|dado|ai)")
+_UNIDADE = r"(?:reais?|real|rs|pila|conto|contos|mango|mangos)"
+# O sinal é capturado de propósito: `parse_money("-10")` devolve 10.0, então
+# sem o grupo (1) um "-10" viraria pagamento de R$ 10.
+# NADA de `\s` dentro do número: com ele, "132 50" colava em 13250 e pagava
+# R$ 13.250,00 sem confirmação.
+_VALOR_RE = re.compile(
+    rf"(?:{_ENCHIMENTO}\s+)*(?:R\$\s*)?(-\s*)?\d[\d.,]*(?:\s*{_UNIDADE})?[.!]?",
+    re.I)
+# Só dígitos, separadores e espaço, mas que não casou como valor: "132 50",
+# "1.2.3.4", "132\n50". O bot ACABOU de pedir um número, então isso é digitação
+# errada — re-pergunta em vez de abandonar (e em vez de pagar 13.250).
+_NUMERO_AMBIGUO_RE = re.compile(r"[\d.,\s]+")
 
 
 def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
@@ -145,13 +165,12 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     roteamento normal, em vez de extrair por engano um número de outro comando.
     """
     raw = (text or "").strip()
-    # O sinal entra no padrão de propósito: `parse_money("-10")` devolve 10.0,
-    # então sem capturá-lo aqui um "-10" viraria pagamento de R$ 10. Casando o
-    # sinal, a resposta cai na validação abaixo, que mantém a pergunta viva em
-    # vez de descartar a pendência e jogar o usuário no fallback genérico.
-    casou = re.fullmatch(
-        r"(?:R\$\s*)?(-\s*)?\d[\d.,\s]*(?:\s*(?:reais?|rs))?", raw, re.I)
+    nome = (pending.get("payload") or {}).get("bill_name") or "conta"
+    casou = _VALOR_RE.fullmatch(raw)
     if not casou:
+        if _NUMERO_AMBIGUO_RE.fullmatch(raw):
+            return (f"Não entendi o valor da *{nome}*. Manda só o número, "
+                    f"por exemplo: *132,50*")
         # CONDICIONAL, não clear: entre a leitura desta pendência e agora,
         # outra tarefa pode ter posto uma confirmação nova no lugar — que já
         # apareceu na tela do usuário. Apagar por cima a deixaria órfã. Só
@@ -163,8 +182,22 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
         return None
 
     amount = parse_money(raw)
-    if casou.group(1) or amount is None or amount <= 0:
-        nome = pending.get("payload", {}).get("bill_name") or "conta"
+    # Arredonda para centavos ANTES de validar: "0,001" passava no `> 0`,
+    # gravava paid_amount=0.001 e respondia "R$ 0,00 lançado" — mensagem e dado
+    # divergentes. Agora vira 0.0 e cai na validação abaixo.
+    if amount is not None:
+        amount = round(amount, 2)
+    if amount is None:
+        # Casou o formato mas o `parse_money` não extraiu nada ("1.2.3.4",
+        # "1,,,2"): dizer "precisa ser maior que zero" para um texto que não é
+        # negativo confunde. Mesma mensagem do número ambíguo.
+        return (f"Não entendi o valor da *{nome}*. Manda só o número, "
+                f"por exemplo: *132,50*")
+    # `isfinite` junto com o `<= 0`: `parse_money("1"*400)` devolve `inf`, que
+    # passa no `> 0` e só seria recusado lá no `mark_bill_paid` — depois de a
+    # pendência já ter sido reivindicada, virando "erro interno" para o usuário.
+    # Aqui a pergunta continua de pé e ele responde de novo.
+    if casou.group(1) or not isfinite(amount) or amount <= 0:
         return f"O valor da *{nome}* precisa ser maior que zero. Quanto veio este mês?"
 
     from db import advance_pending_action, create_pending_action_if_absent

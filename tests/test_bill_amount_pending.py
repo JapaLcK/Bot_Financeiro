@@ -1,4 +1,3 @@
-import pathlib
 import pytest
 from unittest.mock import Mock
 
@@ -15,10 +14,10 @@ def test_variable_bill_stores_pending_and_accepts_bare_amount(monkeypatch):
     }
     monkeypatch.setattr("db.bills.list_bills", lambda *_args, **_kwargs: [bill])
     monkeypatch.setattr("db.bills.mark_bill_paid", Mock())
-    # A gravação da pergunta virou condicional (insert-if-absent), para não
-    # atropelar uma pendência que outra tarefa tenha armado no meio.
+    # A gravação da pergunta passa pelo `claim_pending_action`, que respeita a
+    # ordem de prioridade da linha única (db/pending.py).
     monkeypatch.setattr(
-        "db.create_pending_action_if_absent",
+        "db.claim_pending_action",
         lambda uid, kind, payload: bool(
             pending.update(user_id=uid, action_type=kind, payload=payload) or True
         ),
@@ -85,18 +84,6 @@ def test_zero_keeps_bill_question_pending(monkeypatch):
     assert "maior que zero" in response
     clear.assert_not_called()
     mark.assert_not_called()
-
-
-def test_pergunta_de_valor_esta_na_lista_que_barra_a_ia():
-    """P1 do Codex: sem isto, o usuário Pro tem a resposta sequestrada pela IA.
-
-    Um número solto classifica como `out_of_scope`. O `handle_incoming` decide
-    entregar à IA olhando `_RESUMABLE_PENDING_TYPES`; se o tipo não estiver lá,
-    a IA responde antes de `route()` chegar no resolvedor — e a conta fica sem
-    pagar. É o bug da issue #132 sobrevivendo justamente para quem paga.
-    """
-    from core.handle_incoming import _RESUMABLE_PENDING_TYPES
-    assert "bill_amount_expected" in _RESUMABLE_PENDING_TYPES
 
 
 def test_conversa_inteira_numero_solto_paga_a_conta(monkeypatch):
@@ -294,55 +281,936 @@ def test_controle_abandono_normal_ainda_limpa_a_pergunta(monkeypatch):
     assert db.get_pending_action(uid) is None, "a pergunta deveria ter sido abandonada"
 
 
-def test_pro_que_muda_de_assunto_nao_perde_o_fallback_de_ia():
-    """P2 do Codex: regressão que EU introduzi ao pôr o tipo na lista.
+# ---------------------------------------------------------------------------
+# Comportamento, não texto de arquivo.
+#
+# As duas versões anteriores destes dois testes liam `db/bills.py` e
+# `core/handle_incoming.py` com `pathlib.read_text()` e procuravam palavras.
+# Medido: com o gate mutado para `... or True` e com o `and status='pending'`
+# removido do UPDATE de reserva, os 13 testes do arquivo passavam. Media
+# palavra, não comportamento.
+# ---------------------------------------------------------------------------
 
-    A lista suprime o fallback de IA. Para a resposta de valor isso é o certo.
-    Mas o Pro que muda de assunto tem a pergunta abandonada e recebe `None` do
-    handler — e a IA já tinha sido pulada, então ele fica com ajuda genérica em
-    vez do que paga para ter.
+def _monta_conta_variavel(uid, nome="Luz"):
+    """Cria uma recorrente manual de valor variável e a instância do mês."""
+    from datetime import date
+    import db
+    import db.bills as B
+    import db.recurring as R
 
-    Agora só suprime o que o handler determinístico consegue responder.
+    db.ensure_user(uid)
+    rec = R.create_recurring_expense(uid, nome, None, "conta", 10, "account",
+                                     payment_mode="manual", variable_amount=True)
+    B.ensure_bill_instance(rec["id"], uid, date(2026, 8, 10), 0)
+    return [b for b in B.list_bills(uid, include_paid=False)][0]
+
+
+def _diga(uid, texto):
+    from core.types import IncomingMessage
+    import core.handle_incoming as HI
+
+    msg = IncomingMessage(platform="whatsapp", user_id=uid, text=texto,
+                          message_id="x", attachments=[], external_id="e", raw={})
+    saida = HI.handle_incoming(msg)
+    return saida[0].text if saida else ""
+
+
+@pytest.fixture
+def ia_espia(monkeypatch):
+    """Mocka a IA e devolve a lista de mensagens que chegaram nela."""
+    import core.services.ai_chat as AC
+
+    vistas: list[str] = []
+    monkeypatch.setattr(AC, "chat",
+                        lambda uid, text, **kw: vistas.append(text) or "[IA]")
+    monkeypatch.setattr("core.services.plan_service.ai_chat_allowed", lambda u: True)
+    return vistas
+
+
+def test_reserva_serializa_duas_respostas_e_debita_uma_vez(monkeypatch):
+    """P1 do Codex, agora medido no banco em vez de lido no arquivo.
+
+    O `and status='pending'` do UPDATE de reserva é o que serializa duas
+    requisições concorrentes. Sem ele, as duas reservam e as duas debitam.
+    A barreira dentro do `get_bill` força o intercalamento que produz o bug:
+    as DUAS leem a conta ainda pendente antes de qualquer UPDATE.
     """
-    from core.handlers.bills import parece_resposta_de_valor
-    for resposta in ("132", "132,50", "R$ 132", "-10", "132 reais"):
-        assert parece_resposta_de_valor(resposta), resposta
-    for outro in ("mostra meu saldo", "quanto gastei esse mes", "ajuda", "fatura", ""):
-        assert not parece_resposta_de_valor(outro), outro
-
-
-def test_reserva_a_conta_antes_de_debitar(monkeypatch):
-    """P1 do Codex: débito acontecia ANTES da transição de status.
-
-    Falha entre os dois commits deixava o saldo debitado com a conta ainda
-    pendente — e a próxima resposta debitava de novo. Agora a conta é reservada
-    primeiro: quem não consegue a transição recebe None e não debita nada.
-    """
+    import threading
+    import uuid
+    import db
     import db.bills as B
 
-    chamadas = []
-    monkeypatch.setattr(
-        "db.accounts.add_launch_and_update_balance",
-        lambda *a, **k: chamadas.append(a) or (99, 1, -100.0),
-    )
-    fonte = pathlib.Path("db/bills.py").read_text()
-    i = fonte.index("def mark_bill_paid")
-    corpo = fonte[i:fonte.index("\ndef ", i + 10)]
-    reserva = corpo.index("set status='paid'")
-    debito = corpo.index("add_launch_and_update_balance(")
-    assert reserva < debito, (
-        "o débito voltou a acontecer antes da reserva da conta")
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+
+    barreira = threading.Barrier(2, timeout=10)
+    ja_sincronizou: set[int] = set()
+    real_get_bill = B.get_bill
+
+    def get_bill_sincronizado(u, bid):
+        b = real_get_bill(u, bid)
+        tid = threading.get_ident()
+        if tid not in ja_sincronizou:
+            ja_sincronizou.add(tid)
+            barreira.wait()      # as duas já leram 'pending'
+        return b
+
+    monkeypatch.setattr(B, "get_bill", get_bill_sincronizado)
+
+    resultados = []
+
+    def paga():
+        try:
+            resultados.append(B.mark_bill_paid(uid, int(conta["id"]), 100.0))
+        except Exception as exc:                      # pragma: no cover
+            resultados.append(exc)
+
+    ts = [threading.Thread(target=paga) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+
+    lancamentos = db.list_launches(uid, limit=10)
+    assert len(lancamentos) == 1, f"debitou {len(lancamentos)}x: {lancamentos}"
+    assert sum(r is None for r in resultados) == 1, (
+        f"a perdedora deveria receber None: {resultados}")
 
 
-def test_o_gate_da_ia_realmente_consulta_o_refinamento():
-    """Amarra o USO, não só a existência da função.
+def test_gate_da_ia_nao_deixa_o_numero_chegar_na_ia(ia_espia):
+    """Amarra o COMPORTAMENTO do gate, não a presença do tipo numa lista.
 
-    O teste acima confere que `parece_resposta_de_valor` classifica certo — mas
-    passaria mesmo se o `handle_incoming` ignorasse a função. Este falha se
-    alguém voltar a suprimir a IA por pertinência pura.
+    Com a pergunta viva, "132" tem que pagar a conta sem passar pela IA. Falha
+    se `bill_amount_expected` sair de `_RESUMABLE_PENDING_TYPES` — e falharia
+    também se o gate voltasse a filtrar a mensagem antes de suprimir.
     """
-    fonte = pathlib.Path("core/handle_incoming.py").read_text()
-    i = fonte.index("has_resumable_pending = True")
-    trecho = fonte[i:i + 800]
-    assert "parece_resposta_de_valor" in trecho, (
-        "o gate voltou a suprimir a IA só por pertinência na lista")
+    import uuid
+    import db
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+
+    assert "valor variável" in _diga(uid, "paguei a luz")
+    ia_espia.clear()
+
+    resposta = _diga(uid, "132")
+
+    assert not ia_espia, f"a IA sequestrou a resposta: {ia_espia}"
+    assert "Conta paga" in resposta, resposta
+    conta = B.list_bills(uid, include_paid=True)[0]
+    assert conta["status"] == "paid" and float(conta["paid_amount"]) == 132.0
+    assert db.get_pending_action(uid) is None
+
+
+def test_pergunta_de_valor_desaloja_oferta_de_conveniencia(ia_espia):
+    """Achado 1 do Tester: a sequência mais comum do produto.
+
+    Qualquer lançamento deixa `recategorize_launch_offer` de pé por 10 min. Com
+    a gravação puramente condicional, o "paguei a luz" seguinte não conseguia
+    guardar de qual conta falava e o "132" ia pra IA — a issue #132 inteira de
+    volta. Oferta de conveniência cede para pergunta (ordem em db/pending.py).
+    """
+    import uuid
+    import db
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+
+    _diga(uid, "gastei 50 no mercado")
+    assert (db.get_pending_action(uid) or {}).get("action_type") == \
+        "recategorize_launch_offer", "premissa do teste sumiu: o lançamento não deixa oferta"
+
+    pergunta = _diga(uid, "paguei a luz")
+    assert "só o valor" in pergunta, pergunta
+    assert (db.get_pending_action(uid) or {}).get("action_type") == "bill_amount_expected"
+
+    ia_espia.clear()
+    resposta = _diga(uid, "132")
+    assert not ia_espia, f"a IA sequestrou a resposta: {ia_espia}"
+    assert "Conta paga" in resposta, resposta
+    conta = B.list_bills(uid, include_paid=True)[0]
+    assert conta["status"] == "paid" and float(conta["paid_amount"]) == 132.0
+
+
+def test_ordem_de_prioridade_da_linha_de_pendencias():
+    """O outro lado da ordem escrita em db/pending.py: pergunta não cede.
+
+    Sem isto, `claim_pending_action` poderia desalojar tudo e o teste acima
+    passaria igual — inclusive atropelando a clarification de um lançamento,
+    que carrega o valor já informado pelo usuário.
+    """
+    import uuid
+    import db
+
+    nova = {"bill_id": 41, "bill_name": "Luz"}
+
+    # 1. linha livre → arma
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
+    assert db.claim_pending_action(uid, "bill_amount_expected", nova) is True
+    assert (db.get_pending_action(uid) or {}).get("action_type") == "bill_amount_expected"
+
+    # 2. ocupada por OFERTA DE CONVENIÊNCIA → desaloja
+    for oferta in ("recategorize_launch_offer", "undo_audio"):
+        uid = int(uuid.uuid4().int % 1_000_000_000)
+        db.ensure_user(uid)
+        db.set_pending_action(uid, oferta, {"launch_id": 9})
+        assert db.claim_pending_action(uid, "bill_amount_expected", nova) is True, oferta
+        atual = db.get_pending_action(uid) or {}
+        assert atual.get("action_type") == "bill_amount_expected", oferta
+        assert atual.get("payload") == nova, oferta
+
+    # 3. ocupada por PERGUNTA → cede, e a pergunta antiga fica intacta
+    # `confirm_recurring_offer` está aqui, e não entre as ofertas: ela pergunta
+    # "sim ou não" em texto e o runtime NÃO a consome no turno em que nasce.
+    for pergunta in ("clarification", "multi_launch_values", "credit_card_setup",
+                     "delete_launch", "confirm_recurring_offer",
+                     "bill_pay_amount"):
+        uid = int(uuid.uuid4().int % 1_000_000_000)
+        db.ensure_user(uid)
+        db.set_pending_action(uid, pergunta, {"valor": 77.9})
+        assert db.claim_pending_action(uid, "bill_amount_expected", nova) is False, pergunta
+        atual = db.get_pending_action(uid) or {}
+        assert atual.get("action_type") == pergunta, pergunta
+        assert atual.get("payload") == {"valor": 77.9}, pergunta
+
+    # 4. ocupada pela MESMA pergunta → substitui. Não é disputa: é o usuário
+    # falando da outra conta ("paguei a luz" e depois "paguei a água"), e a
+    # primeira pergunta já morreu na tela dele.
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
+    db.set_pending_action(uid, "bill_amount_expected", {"bill_id": 7, "bill_name": "Agua"})
+    assert db.claim_pending_action(uid, "bill_amount_expected", nova) is True
+    assert (db.get_pending_action(uid) or {}).get("payload") == nova
+
+
+@pytest.mark.parametrize("resposta", [
+    "132", "132,50", "R$ 132", "132 reais", "132 real", "132 pila",
+    "foi 132", "acho que 132", "uns 132", "veio 132 reais", "deu 132,50",
+    "132.50", "1.132,50",
+])
+def test_formas_faladas_de_responder_o_valor_pagam_a_conta(ia_espia, resposta):
+    """Achado 2 do Tester: as 5 formas faladas iam todas para a IA.
+
+    Elas são a resposta natural a "quanto veio este mês?". Antes, o gate
+    filtrava por "parece um número" e mandava tudo isso pra IA com a conta em
+    aberto — número solto na mão da IA, que é exatamente a issue #132.
+    """
+    import uuid
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+    _diga(uid, "paguei a luz")
+    ia_espia.clear()
+
+    texto = _diga(uid, resposta)
+
+    assert not ia_espia, f"{resposta!r} foi parar na IA"
+    assert "Conta paga" in texto, f"{resposta!r} → {texto!r}"
+    conta = B.list_bills(uid, include_paid=True)[0]
+    assert conta["status"] == "paid", resposta
+
+
+@pytest.mark.parametrize("ambiguo,esperado", [
+    ("132 50", 13250.0),      # parse_money cola o espaço
+    ("1 32", 132.0),
+    ("1.2.3.4", None),
+    ("1,,,2", None),
+    ("132\n50", None),
+])
+def test_numero_com_espaco_nao_paga_e_mantem_a_pergunta(ambiguo, esperado):
+    """`132 50` pagava R$ 13.250,00 sem confirmação.
+
+    A regex antiga aceitava `\\s` dentro do número e o `parse_money` colava.
+    Agora esses textos re-perguntam e a conta continua pendente. O `esperado`
+    documenta o que o `parse_money` faria com eles se chegassem lá.
+    """
+    import uuid
+    import db
+    import db.bills as B
+    from utils_text import parse_money
+
+    try:
+        assert parse_money(ambiguo) == esperado, "premissa mudou: parse_money"
+    except Exception:
+        assert esperado is None
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+    from core.handlers import bills as H
+    from db.bills import list_bills
+
+    conta = list_bills(uid, include_paid=False)[0]
+    db.set_pending_action(uid, "bill_amount_expected",
+                          {"bill_id": int(conta["id"]), "bill_name": "Luz"})
+    r = H.resolve_bill_amount(uid, ambiguo, db.get_pending_action(uid))
+
+    assert r and "Não entendi o valor" in r, f"{ambiguo!r} → {r!r}"
+    depois = B.list_bills(uid, include_paid=True)[0]
+    assert depois["status"] == "pending", f"{ambiguo!r} pagou a conta"
+    assert (db.get_pending_action(uid) or {}).get("action_type") == "bill_amount_expected"
+    assert db.list_launches(uid, limit=5) == [] or \
+        len(db.list_launches(uid, limit=5)) == 0
+
+
+def test_numero_dentro_de_outro_comando_nao_paga_a_conta():
+    """Mata a mutação `re.fullmatch` → `re.search`.
+
+    Nenhum teste mandava número+palavras ao `resolve_bill_amount`: com `search`,
+    "132 no mercado" pagaria a conta de luz. Aqui ele tem que abandonar a
+    pergunta e devolver None para o roteamento normal.
+    """
+    import uuid
+    import db
+    import db.bills as B
+    from core.handlers import bills as H
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+    for comando in ("132 no mercado", "gastei 132 no mercado",
+                    "apaga o gasto 132", "quanto gastei em 132"):
+        db.set_pending_action(uid, "bill_amount_expected",
+                              {"bill_id": int(conta["id"]), "bill_name": "Luz"})
+        assert H.resolve_bill_amount(uid, comando, db.get_pending_action(uid)) is None, \
+            f"{comando!r} foi tratado como valor"
+        assert B.list_bills(uid, include_paid=True)[0]["status"] == "pending", comando
+        assert db.get_pending_action(uid) is None, f"{comando!r} não abandonou a pergunta"
+
+
+def test_centavos_abaixo_de_um_centavo_nao_viram_pagamento_de_zero():
+    """A mensagem dizia "R$ 0,00 lançado" e o dado gravado era 0.001."""
+    import uuid
+    import db
+    import db.bills as B
+    from core.handlers import bills as H
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+    db.set_pending_action(uid, "bill_amount_expected",
+                          {"bill_id": int(conta["id"]), "bill_name": "Luz"})
+
+    r = H.resolve_bill_amount(uid, "0,001", db.get_pending_action(uid))
+
+    assert "maior que zero" in r, r
+    assert B.list_bills(uid, include_paid=True)[0]["status"] == "pending"
+
+
+def test_dois_assuntos_diferentes_em_sequencia_pelo_handle_incoming(ia_espia):
+    """A classe cega: dois assuntos seguidos, com estado real no banco.
+
+    Os testes com mock e o ponta-a-ponta por `route(classify(...))` pulam o
+    `handle_incoming`, e é lá que mora a competição pela linha única de
+    `pending_actions` e o gate da IA. Os dois piores achados do Tester só
+    apareceram aqui.
+    """
+    import uuid
+    import db
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+
+    primeiro = _diga(uid, "gastei 50 no mercado")
+    assert "Despesa registrada" in primeiro, primeiro
+
+    _diga(uid, "paguei a luz")
+    # muda de assunto no meio: a pergunta é abandonada e o comando roda
+    saldo = _diga(uid, "saldo")
+    assert "Conta Corrente" in saldo, saldo
+    assert db.get_pending_action(uid) is None
+    assert B.list_bills(uid, include_paid=True)[0]["status"] == "pending"
+
+    # e a conta ainda pode ser paga pela forma completa, sem estado nenhum
+    final = _diga(uid, "paguei luz 132,50")
+    assert "Conta paga" in final, final
+    conta = B.list_bills(uid, include_paid=True)[0]
+    assert conta["status"] == "paid" and float(conta["paid_amount"]) == 132.5
+
+
+def test_tool_da_ia_tambem_guarda_de_qual_conta_falava():
+    """Achado 3 do Tester: a MESMA pergunta existe em três lugares.
+
+    `quitei a luz` / `ja paguei a luz` classificam out_of_scope e vão pra IA,
+    que chama `pay_bill`. Essa versão da pergunta não guardava estado nenhum —
+    o número da resposta voltava pra IA sem contexto, reabrindo a issue #132
+    pelo lado do Pro. Agora ela arma a mesma pendência do handler.
+    """
+    import uuid
+    import db
+    from core.services.ai_chat.tools.bills import _pay_bill_execute
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+
+    resposta = _pay_bill_execute(uid, {"name": "luz"})
+
+    assert "valor variável" in resposta, resposta
+    atual = db.get_pending_action(uid) or {}
+    assert atual.get("action_type") == "bill_amount_expected", atual
+    assert atual.get("payload") == {"bill_id": int(conta["id"]), "bill_name": "Luz"}
+
+    # e o número seguinte, pelo caminho real, paga a conta
+    import db.bills as B
+    assert "Conta paga" in _diga(uid, "132")
+    assert B.list_bills(uid, include_paid=True)[0]["status"] == "paid"
+
+
+# ---------------------------------------------------------------------------
+# 2ª rodada do Tester.
+#
+# LIMITE CONHECIDO: nada aqui (nem no resto da suíte) exercita
+# `adapters/whatsapp/wa_runtime.py`, que é a única camada que decide se uma
+# pendência sobrevive ao turno — o `_send_reply_with_optional_buttons`
+# (wa_runtime.py:181-211) consome `undo_audio` e `recategorize_launch_offer`
+# antes de enviar a resposta. Cobrir isso pede simular o payload interativo do
+# WhatsApp, que nenhum teste do repo monta hoje. Consequência prática: a
+# afirmação "oferta de conveniência é consumida no mesmo turno", que é o
+# critério da lista em db/pending.py, está verificada por leitura, não por
+# teste. Foi lendo esse código que se descobriu que `confirm_recurring_offer`
+# NÃO é consumida — o achado 2 desta rodada.
+# ---------------------------------------------------------------------------
+
+def test_falha_no_debito_devolve_a_conta_e_a_retentativa_paga(monkeypatch):
+    """A inversão (reservar antes de debitar) perdia o gasto para sempre.
+
+    Medido antes do conserto: a conta ficava 'paid' sem lançamento, o saldo não
+    era debitado, o gasto sumia do extrato e a retentativa devolvia None
+    ("Essa conta não está mais pendente") — sem caminho no bot para reabrir.
+    """
+    import uuid
+    import db
+    import db.accounts as ACC
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+
+    def _estoura(*_a, **_k):
+        raise RuntimeError("pool esgotado")
+
+    monkeypatch.setattr(ACC, "add_launch_and_update_balance", _estoura)
+    with pytest.raises(RuntimeError):
+        B.mark_bill_paid(uid, int(conta["id"]), 100.0)
+
+    depois = B.list_bills(uid, include_paid=True)[0]
+    assert depois["status"] == "pending", "a conta ficou fechada sem lançamento"
+    assert depois["paid_amount"] is None and depois["launch_id"] is None
+    assert db.list_launches(uid, limit=5) == []
+
+    monkeypatch.undo()
+    pago = B.mark_bill_paid(uid, int(conta["id"]), 100.0)
+    assert pago is not None, "a retentativa não conseguiu pagar"
+    assert pago["status"] == "paid" and float(pago["paid_amount"]) == 100.0
+    assert len(db.list_launches(uid, limit=5)) == 1
+
+
+def test_devolucao_nao_reabre_conta_que_ja_tem_lancamento(monkeypatch):
+    """Controle do teste acima: a devolução é condicionada, não incondicional.
+
+    Se, entre a reserva e a falha, a conta já tiver um lançamento ligado, ela
+    NÃO pode voltar para 'pending' — isso duplicaria o débito na retentativa.
+    """
+    import uuid
+    import db
+    import db.accounts as ACC
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+    real = ACC.add_launch_and_update_balance
+
+    def _lanca_e_estoura(*a, **k):
+        lid, seq, bal = real(*a, **k)
+        with db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("update bill_instances set launch_id=%s where id=%s",
+                            (lid, int(conta["id"])))
+            conn.commit()
+        raise RuntimeError("caiu depois de debitar")
+
+    monkeypatch.setattr(ACC, "add_launch_and_update_balance", _lanca_e_estoura)
+    with pytest.raises(RuntimeError):
+        B.mark_bill_paid(uid, int(conta["id"]), 100.0)
+
+    depois = B.list_bills(uid, include_paid=True)[0]
+    assert depois["status"] == "paid", "reabriu uma conta que já tinha lançamento"
+
+
+@pytest.mark.parametrize("valor", [float("inf"), float("-inf"), float("nan")])
+def test_valor_absurdo_e_recusado_antes_da_reserva(valor):
+    """`parse_money("1"*400)` devolve `inf` — alcançável sem mock nenhum.
+
+    Sem a guarda, a reserva gravava `paid_amount = Infinity` (o Postgres
+    `numeric` aceita) e só o `add_launch` estourava, DEPOIS: conta fechada com
+    valor infinito no dashboard.
+    """
+    import uuid
+    import db
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+
+    with pytest.raises(ValueError):
+        B.mark_bill_paid(uid, int(conta["id"]), valor)
+
+    depois = B.list_bills(uid, include_paid=True)[0]
+    assert depois["status"] == "pending", f"{valor} reservou a conta"
+    assert depois["paid_amount"] is None
+    assert db.list_launches(uid, limit=5) == []
+
+
+def test_valor_gigante_finito_ainda_paga():
+    """Controle do teste acima: a guarda de finitude não pode virar teto.
+
+    Um teto de R$ 1 bi chegou a existir neste branch e transformava
+    "paguei luz 2000000000" — que a `main` pagava — em "erro interno" com a
+    conta ainda pendente. Regra de negócio nova disfarçada de validação.
+    """
+    import uuid
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+
+    pago = B.mark_bill_paid(uid, int(conta["id"]), 2_000_000_000.0)
+    assert pago is not None and pago["status"] == "paid"
+    assert float(pago["paid_amount"]) == 2_000_000_000.0
+
+
+def test_numero_gigante_pela_conversa_nao_fecha_a_conta(ia_espia):
+    """O caminho real do `inf`: 400 dígitos como resposta da pergunta.
+
+    `parse_money` devolve `inf`, que passa em qualquer `> 0`. A guarda de
+    finitude do `resolve_bill_amount` responde a mensagem de valor inválido
+    ANTES de reivindicar a pendência: conta pendente, saldo intacto, pergunta
+    de pé e nenhum "erro interno" com stack trace no log.
+    """
+    import uuid
+    import db
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+    _diga(uid, "paguei a luz")
+
+    resposta = _diga(uid, "1" * 400)
+
+    assert "maior que zero" in resposta, resposta
+    assert "erro interno" not in resposta.lower(), resposta
+    conta = B.list_bills(uid, include_paid=True)[0]
+    assert conta["status"] == "pending" and conta["paid_amount"] is None
+    assert db.list_launches(uid, limit=5) == []
+    assert (db.get_pending_action(uid) or {}).get("action_type") == "bill_amount_expected"
+
+
+def test_sim_da_oferta_de_gasto_fixo_sobrevive_a_pergunta_de_conta(ia_espia):
+    """Achado 2: `confirm_recurring_offer` é PERGUNTA, não oferta descartável.
+
+    Classificada como oferta, ela era desalojada pelo "paguei a luz" e o "sim"
+    seguinte levava "não entendi bem o que você quis fazer" — derrubando as
+    DUAS pendências: o Spotify não virava gasto fixo e a pergunta da conta
+    morria junto. Agora a conta é que cede, para o texto degradado.
+
+    Este teste também mata a mutação que apaga o ramo `if not guardou:`: sem
+    ele a resposta seria "Pode mandar só o valor" com a pergunta NÃO salva, e o
+    "132" cairia na IA com a conta em aberto.
+    """
+    import uuid
+    import db
+    import db.bills as B
+    import db.recurring as R
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+    db.set_pending_action(uid, "confirm_recurring_offer", {
+        "name": "Spotify", "amount": 21.9, "category": "assinaturas",
+        "due_day": 10, "merchant_key": "spotify",
+    })
+
+    pergunta = _diga(uid, "paguei a luz")
+    assert "Manda assim" in pergunta, f"não degradou: {pergunta!r}"
+    assert (db.get_pending_action(uid) or {}).get("action_type") == \
+        "confirm_recurring_offer", "a oferta de gasto fixo foi desalojada"
+
+    confirmacao = _diga(uid, "sim")
+    assert "gasto fixo" in confirmacao, confirmacao
+    assert "Spotify" in [r["name"] for r in R.list_recurring_expenses(uid)]
+
+    # e a conta, que degradou, ainda é pagável pela forma completa
+    final = _diga(uid, "paguei luz 132,50")
+    assert "Conta paga" in final, final
+    assert B.list_bills(uid, include_paid=True)[0]["status"] == "paid"
+
+
+def test_gravacao_em_linha_livre_nao_atropela_quem_chegou_no_meio(monkeypatch):
+    """A linha livre grava condicional, não com `set_pending_action`.
+
+    Entre esta tarefa ler "linha livre" e escrever, outra armou uma pergunta
+    que já apareceu na tela do usuário. O insert condicional não pega, e é a
+    dela que fica.
+    """
+    import uuid
+    import db
+    import db.pending as P
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
+    real = P.get_pending_action
+
+    def leu_livre(u):
+        lido = real(u)                       # None: a linha está livre
+        db.set_pending_action(uid, "clarification", {"valor": 77.9})
+        return lido
+
+    monkeypatch.setattr(P, "get_pending_action", leu_livre)
+
+    assert db.claim_pending_action(uid, "bill_amount_expected",
+                                   {"bill_id": 41, "bill_name": "Luz"}) is False
+    monkeypatch.undo()
+    atual = db.get_pending_action(uid) or {}
+    assert atual.get("action_type") == "clarification", atual
+    assert atual.get("payload") == {"valor": 77.9}
+
+
+def test_desalojamento_e_condicionado_ao_que_foi_lido(monkeypatch):
+    """O desalojamento é compare-and-swap, não `set_pending_action`.
+
+    Esta tarefa leu uma oferta de conveniência (desalojável), mas antes de
+    escrever a linha virou uma PERGUNTA. O CAS não pega, e a pergunta nova
+    sobrevive — sem ele, a oferta lida autorizava atropelar a pergunta.
+    """
+    import uuid
+    import db
+    import db.pending as P
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
+    db.set_pending_action(uid, "recategorize_launch_offer", {"launch_id": 9})
+    real = P.get_pending_action
+
+    def leu_a_oferta(u):
+        lido = real(u)                       # a oferta, desalojável
+        db.set_pending_action(uid, "clarification", {"valor": 77.9})
+        return lido
+
+    monkeypatch.setattr(P, "get_pending_action", leu_a_oferta)
+
+    assert db.claim_pending_action(uid, "bill_amount_expected",
+                                   {"bill_id": 41, "bill_name": "Luz"}) is False
+    monkeypatch.undo()
+    atual = db.get_pending_action(uid) or {}
+    assert atual.get("action_type") == "clarification", atual
+    assert atual.get("payload") == {"valor": 77.9}
+
+
+def test_nan_nao_paga_silenciosamente_o_valor_estimado_da_conta():
+    """`nan` não é "sem valor informado".
+
+    `float("nan") > 0` é False, então sem a guarda de finitude o `nan` cai no
+    fallback `else float(bill["amount"])` e paga o valor estimado da conta sem
+    ninguém pedir. Só aparece em conta que TEM valor estimado — por isso este
+    teste não usa a conta variável (estimado 0) dos outros.
+    """
+    import uuid
+    from datetime import date
+    import db
+    import db.bills as B
+    import db.recurring as R
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
+    rec = R.create_recurring_expense(uid, "Internet", 100.0, "conta", 10, "account",
+                                     payment_mode="manual")
+    B.ensure_bill_instance(rec["id"], uid, date(2026, 8, 10), 100.0)
+    conta = [b for b in B.list_bills(uid) if b["status"] == "pending"][0]
+
+    with pytest.raises(ValueError):
+        B.mark_bill_paid(uid, int(conta["id"]), float("nan"))
+
+    depois = B.list_bills(uid, include_paid=True)[0]
+    assert depois["status"] == "pending", "nan pagou o valor estimado da conta"
+    assert db.list_launches(uid, limit=5) == []
+
+
+def test_controle_a_espia_da_ia_dispara_de_verdade(ia_espia):
+    """Controle POSITIVO da fixture `ia_espia`.
+
+    Os outros usos dela são todos `assert not ia_espia`. Se o `monkeypatch`
+    errasse o alvo (nome do módulo, função renomeada), a lista ficaria vazia
+    para sempre e os seis passariam de graça, sem medir nada. Aqui a mensagem
+    é justamente a que TEM que cair na IA: usuário sem pendência nenhuma,
+    pergunta fora do escopo financeiro.
+    """
+    import uuid
+    import db
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
+
+    resposta = _diga(uid, "qual a capital da mongolia")
+
+    assert ia_espia == ["qual a capital da mongolia"], (
+        f"a espiã não capturou nada — o monkeypatch não está no alvo: {ia_espia}")
+    assert resposta == "[IA]", resposta
+
+
+# ── C1: o centavo invisível nos QUATRO caminhos de pagamento ────────────────
+# Todos convergem para `db.bills.mark_bill_paid`, e é lá que o arredondamento
+# para centavos mora. Estes testes batem em cada porta de entrada, porque a
+# tradução do erro (a MENSAGEM que o usuário lê) é responsabilidade de cada
+# chamador — e era ela que dizia "R$ 0,00 lançado".
+
+def test_centavo_invisivel_pelo_texto_nao_paga(monkeypatch):
+    """"paguei luz 0,001" respondia "✅ Conta paga — R$ 0,00" com 0.001 no banco."""
+    import uuid
+    import db.bills as B
+    from core.handlers import bills as H
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+
+    r = H.try_pay_from_text(uid, "paguei luz 0,001")
+
+    assert r and "maior que zero" in r, r
+    assert "0,00 lançado" not in r
+    conta = B.list_bills(uid, include_paid=True)[0]
+    assert conta["status"] == "pending" and conta["paid_amount"] is None
+
+
+def test_controle_valor_normal_pelo_texto_ainda_paga():
+    """Controle negativo do teste acima: a guarda não pode recusar o caso bom."""
+    import uuid
+    import db.bills as B
+    from core.handlers import bills as H
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+
+    r = H.try_pay_from_text(uid, "paguei luz 132,50")
+
+    assert "Conta paga" in r, r
+    conta = B.list_bills(uid, include_paid=True)[0]
+    assert conta["status"] == "paid" and float(conta["paid_amount"]) == 132.5
+
+
+def test_centavo_invisivel_pela_tool_da_ia_nao_paga():
+    import uuid
+    import db.bills as B
+    from core.services.ai_chat.tools.bills import _pay_bill_execute
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+
+    r = _pay_bill_execute(uid, {"name": "Luz", "amount": 0.001})
+
+    assert "maior que zero" in r, r
+    assert "VALOR_INVALIDO" not in r, "o texto cru da exceção vazou para o usuário"
+    conta = B.list_bills(uid, include_paid=True)[0]
+    assert conta["status"] == "pending" and conta["paid_amount"] is None
+
+
+def test_controle_valor_normal_pela_tool_da_ia_ainda_paga():
+    import uuid
+    import db.bills as B
+    from core.services.ai_chat.tools.bills import _pay_bill_execute
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+
+    r = _pay_bill_execute(uid, {"name": "Luz", "amount": 132.5})
+
+    assert "Conta paga" in r, r
+    assert float(B.list_bills(uid, include_paid=True)[0]["paid_amount"]) == 132.5
+
+
+def test_centavo_invisivel_direto_no_mark_bill_paid_nao_reserva():
+    """O quarto caminho é a rota web (`/recurring-bills/.../pay`), que chama o
+    `mark_bill_paid` direto e já traduz o `ValueError`."""
+    import uuid
+    import db
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+
+    with pytest.raises(ValueError):
+        B.mark_bill_paid(uid, int(conta["id"]), 0.001)
+
+    depois = B.list_bills(uid, include_paid=True)[0]
+    assert depois["status"] == "pending" and depois["paid_amount"] is None
+    assert db.list_launches(uid, limit=5) == []
+
+
+def test_valor_gigante_finito_pela_conversa_paga_como_na_main(ia_espia):
+    """C3: o teto de R$ 1 bi transformava isto em "erro interno" e a conta
+    ficava pendente. Na `main` paga; tem que continuar pagando."""
+    import uuid
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+
+    r = _diga(uid, "paguei luz 2000000000")
+
+    assert "Conta paga" in r, r
+    assert "erro interno" not in r.lower()
+    conta = B.list_bills(uid, include_paid=True)[0]
+    assert conta["status"] == "paid" and float(conta["paid_amount"]) == 2_000_000_000.0
+
+
+# ── C2: o botão "✅ Já paguei" também disputa a linha única de pendências ────
+
+def _toca_ja_paguei(monkeypatch, uid, bill_id):
+    """Roda o `process_message` real com o clique do botão do lembrete."""
+    import adapters.whatsapp.wa_runtime as wr
+    from adapters.whatsapp.wa_parse import InboundMessage
+
+    respostas: list[str] = []
+    monkeypatch.setattr(wr, "get_or_create_canonical_user", lambda p, e: uid)
+    monkeypatch.setattr(wr, "attempt_whatsapp_phone_link",
+                        lambda wa_id, current_user_id=None: {"status": "already_linked", "user_id": uid})
+    monkeypatch.setattr(wr, "log_system_event_sync", lambda *a, **k: None)
+    monkeypatch.setattr(wr, "_send_reply", lambda to, body: respostas.append(body))
+    wr.process_message(InboundMessage(
+        wa_id="5511999998888", text="", timestamp="1", attachments=[],
+        raw={"id": f"wamid.{bill_id}", "type": "interactive",
+             "interactive": {"type": "button_reply",
+                             "button_reply": {"id": f"bill_paid:{bill_id}"}}},
+    ))
+    return respostas
+
+
+def _manda_texto_no_wa(monkeypatch, uid, texto):
+    """Mesma porta, mensagem de texto (a resposta com o valor)."""
+    import adapters.whatsapp.wa_runtime as wr
+    from adapters.whatsapp.wa_parse import InboundMessage
+
+    respostas: list[str] = []
+    monkeypatch.setattr(wr, "get_or_create_canonical_user", lambda p, e: uid)
+    monkeypatch.setattr(wr, "attempt_whatsapp_phone_link",
+                        lambda wa_id, current_user_id=None: {"status": "already_linked", "user_id": uid})
+    monkeypatch.setattr(wr, "log_system_event_sync", lambda *a, **k: None)
+    monkeypatch.setattr(wr, "send_typing_indicator", lambda *a, **k: None)
+    monkeypatch.setattr(wr, "_seen_recent", lambda message_id: False)
+    monkeypatch.setattr(wr, "_send_reply", lambda to, body: respostas.append(body))
+    monkeypatch.setattr(wr, "_send_reply_with_optional_buttons",
+                        lambda to, body, user_id=None: respostas.append(body))
+    wr.process_message(InboundMessage(
+        wa_id="5511999998888", text=texto, timestamp="2", attachments=[],
+        raw={"id": f"wamid.txt.{texto}", "type": "text"},
+    ))
+    return respostas
+
+
+def test_botao_ja_paguei_nao_destroi_pergunta_viva(monkeypatch):
+    """C2: `set_pending_action` incondicional apagava QUALQUER pergunta.
+
+    Aqui a vítima é uma `clarification` com o valor que o usuário já digitou —
+    perdê-la perde o dinheiro dele. O botão cede e pede a forma completa, que
+    funciona sem estado nenhum.
+    """
+    import uuid
+    import db
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+    db.set_pending_action(uid, "clarification", {"valor": 77.9})
+
+    respostas = _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
+
+    atual = db.get_pending_action(uid) or {}
+    assert atual.get("action_type") == "clarification", atual
+    assert atual.get("payload") == {"valor": 77.9}, "o valor já digitado sumiu"
+    assert respostas and "paguei luz" in respostas[-1].lower(), respostas
+
+
+def test_controle_botao_ja_paguei_em_linha_livre_guarda_a_pergunta(monkeypatch):
+    """Controle negativo: sem pergunta viva, o botão continua guardando."""
+    import uuid
+    import db
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+
+    respostas = _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
+
+    atual = db.get_pending_action(uid) or {}
+    assert atual.get("action_type") == "bill_pay_amount", atual
+    assert atual["payload"]["bill_id"] == int(conta["id"])
+    assert "É só mandar o valor" in respostas[-1], respostas
+
+
+def test_botao_ja_paguei_desaloja_oferta_de_conveniencia(monkeypatch):
+    """A sequência comum: lançou algo (deixa a oferta de recategorizar) e toca
+    o botão do lembrete. Oferta cede para pergunta."""
+    import uuid
+    import db
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+    db.set_pending_action(uid, "recategorize_launch_offer", {"launch_id": 9})
+
+    _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
+
+    assert (db.get_pending_action(uid) or {}).get("action_type") == "bill_pay_amount"
+
+
+def test_segundo_botao_ja_paguei_substitui_a_propria_pergunta(monkeypatch):
+    """Dois lembretes na tela: toca o de Luz e depois o de Água.
+
+    A mesma pergunta de novo não é disputa — a primeira já morreu na tela. Sem
+    esta regra, o `claim` recusaria e a Água só seria pagável por texto até a
+    pendência da Luz expirar (30 min).
+    """
+    import uuid
+    import db
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    luz = _monta_conta_variavel(uid, "Luz")
+    _monta_conta_variavel(uid, "Agua")
+    agua = [b for b in db.bills.list_bills(uid, include_paid=False) if b["name"] == "Agua"][0]
+
+    _toca_ja_paguei(monkeypatch, uid, int(luz["id"]))
+    _toca_ja_paguei(monkeypatch, uid, int(agua["id"]))
+
+    atual = db.get_pending_action(uid) or {}
+    assert atual.get("action_type") == "bill_pay_amount"
+    assert atual["payload"]["bill_id"] == int(agua["id"]), atual
+
+
+def test_centavo_invisivel_pelo_botao_do_whatsapp_nao_paga(monkeypatch):
+    """Quarto caminho do C1: o valor digitado depois do botão."""
+    import uuid
+    import db
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+    _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
+
+    respostas = _manda_texto_no_wa(monkeypatch, uid, "0,001")
+
+    assert "Não peguei o valor" in respostas[-1], respostas
+    depois = B.list_bills(uid, include_paid=True)[0]
+    assert depois["status"] == "pending" and depois["paid_amount"] is None
+    assert (db.get_pending_action(uid) or {}).get("action_type") == "bill_pay_amount", \
+        "a pergunta tem que continuar de pé para o usuário responder de novo"
+
+
+def test_controle_valor_normal_pelo_botao_do_whatsapp_paga(monkeypatch):
+    import uuid
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+    _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
+
+    respostas = _manda_texto_no_wa(monkeypatch, uid, "132,50")
+
+    assert "Conta paga" in respostas[-1], respostas
+    depois = B.list_bills(uid, include_paid=True)[0]
+    assert depois["status"] == "paid" and float(depois["paid_amount"]) == 132.5
