@@ -123,6 +123,22 @@ _OFERTAS_DE_CONVENIENCIA: frozenset[str] = frozenset({
     "undo_audio",
 })
 
+# A MESMA pergunta ("quanto veio a conta este mês?") feita por DUAS portas: por
+# texto/IA ela vira `bill_amount_expected` (core/handlers/bills.py,
+# core/services/ai_chat/tools/bills.py) e pelo botão "✅ Já paguei" vira
+# `bill_pay_amount` (adapters/whatsapp/wa_runtime.py). Os tipos são diferentes
+# só porque cada porta tem o seu consumidor; para decidir quem cede a linha,
+# contam como uma pergunta só.
+#
+# Sem isto o botão perdia o claim para a pergunta de texto de OUTRA conta: quem
+# tinha dito "paguei a luz" e depois tocou "Já paguei" na ÁGUA via a pergunta da
+# Água na tela, mandava "132,50" e pagava a LUZ. Vale a pergunta mais recente —
+# é a que o usuário está lendo.
+_PERGUNTA_DE_VALOR_DE_CONTA: frozenset[str] = frozenset({
+    "bill_amount_expected",
+    "bill_pay_amount",
+})
+
 # OBSERVAÇÃO (não unificado neste PR): "isto é pergunta?" está enumerado em
 # TRÊS lugares, com conteúdos diferentes e nenhum deles importa o outro:
 #   1. esta lista (pelo avesso: pergunta é o que NÃO está aqui);
@@ -158,11 +174,17 @@ def claim_pending_action(user_id: int, action_type: str, payload: dict,
     if atual is None:
         return create_pending_action_if_absent(user_id, action_type, payload, minutes)
     # A MESMA pergunta de novo (tocou "Já paguei" na conta A e depois na B;
-    # disse "paguei a luz" e depois "paguei a água") não é disputa: a primeira
-    # já morreu na tela do usuário e a segunda é o que ele acabou de pedir.
+    # disse "paguei a luz" e depois "paguei a água"; disse "paguei a luz" e
+    # depois tocou "Já paguei" na água) não é disputa: a primeira já morreu na
+    # tela do usuário e a segunda é o que ele acabou de pedir. "Mesma pergunta"
+    # é por tipo igual OU pelo grupo das duas portas acima.
     # Continua CAS — quem perder a corrida cai no texto degradado.
-    if (atual["action_type"] not in _OFERTAS_DE_CONVENIENCIA
-            and atual["action_type"] != action_type):
+    mesma_pergunta = (
+        atual["action_type"] == action_type
+        or (atual["action_type"] in _PERGUNTA_DE_VALOR_DE_CONTA
+            and action_type in _PERGUNTA_DE_VALOR_DE_CONTA)
+    )
+    if atual["action_type"] not in _OFERTAS_DE_CONVENIENCIA and not mesma_pergunta:
         return False
     return advance_pending_action(
         user_id, atual["action_type"], atual.get("payload") or {},

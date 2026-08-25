@@ -158,6 +158,23 @@ _VALOR_RE = re.compile(
 _NUMERO_AMBIGUO_RE = re.compile(r"[\d.,\s]+")
 
 
+def limpa_pontuacao_final(raw: str) -> str:
+    """Tira o ponto/exclamação do FIM antes de entregar ao `parse_money`.
+
+    Mesma armadilha do `\\s` comentada acima, por outra porta: "132,50." tem
+    vírgula E ponto, o `parse_money` decide o decimal pelo ÚLTIMO separador,
+    toma a vírgula por milhar e devolve 13250.0 — R$ 13.250,00 no lugar de
+    R$ 132,50 ("0,50." vira 50, "9,99." vira 999). O `_VALOR_RE` aceita `[.!]?`
+    no fim de propósito (quem escreve "132,50." está respondendo, não mudando de
+    assunto), então quem tem de limpar é quem chama.
+
+    Não corrigido no `parse_money`: o bug é dele e é anterior a este PR, mas ele
+    é chamado por dezenas de fluxos e mexer nele aqui é troca de bug conhecido
+    por bug novo. Issue separada.
+    """
+    return (raw or "").rstrip(" .!")
+
+
 def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     """Conclui uma conta variável quando a resposta é somente um valor.
 
@@ -181,7 +198,7 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
             user_id, "bill_amount_expected", pending.get("payload") or {}, None)
         return None
 
-    amount = parse_money(raw)
+    amount = parse_money(limpa_pontuacao_final(raw))
     # Arredonda para centavos ANTES de validar: "0,001" passava no `> 0`,
     # gravava paid_amount=0.001 e respondia "R$ 0,00 lançado" — mensagem e dado
     # divergentes. Agora vira 0.0 e cai na validação abaixo.
@@ -238,4 +255,4 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     )
 
 
-__all__ = ["resolve_bill_amount", "try_pay_from_text"]
+__all__ = ["limpa_pontuacao_final", "resolve_bill_amount", "try_pay_from_text"]

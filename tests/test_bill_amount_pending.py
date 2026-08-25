@@ -466,8 +466,7 @@ def test_ordem_de_prioridade_da_linha_de_pendencias():
     # `confirm_recurring_offer` está aqui, e não entre as ofertas: ela pergunta
     # "sim ou não" em texto e o runtime NÃO a consome no turno em que nasce.
     for pergunta in ("clarification", "multi_launch_values", "credit_card_setup",
-                     "delete_launch", "confirm_recurring_offer",
-                     "bill_pay_amount"):
+                     "delete_launch", "confirm_recurring_offer"):
         uid = int(uuid.uuid4().int % 1_000_000_000)
         db.ensure_user(uid)
         db.set_pending_action(uid, pergunta, {"valor": 77.9})
@@ -484,6 +483,24 @@ def test_ordem_de_prioridade_da_linha_de_pendencias():
     db.set_pending_action(uid, "bill_amount_expected", {"bill_id": 7, "bill_name": "Agua"})
     assert db.claim_pending_action(uid, "bill_amount_expected", nova) is True
     assert (db.get_pending_action(uid) or {}).get("payload") == nova
+
+    # 5. ocupada pela mesma pergunta feita pela OUTRA PORTA (`bill_pay_amount`,
+    # do botão "✅ Já paguei") → também substitui. É "quanto veio a conta?" nas
+    # duas, só muda quem consome a resposta. Deixar isso como disputa fazia o
+    # botão perder o claim e o número pagar a conta ERRADA.
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
+    db.set_pending_action(uid, "bill_pay_amount", {"bill_id": 7, "name": "Agua"})
+    assert db.claim_pending_action(uid, "bill_amount_expected", nova) is True
+    assert (db.get_pending_action(uid) or {}).get("payload") == nova
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
+    db.set_pending_action(uid, "bill_amount_expected", nova)
+    assert db.claim_pending_action(uid, "bill_pay_amount", {"bill_id": 7, "name": "Agua"}) is True
+    atual = db.get_pending_action(uid) or {}
+    assert atual.get("action_type") == "bill_pay_amount"
+    assert atual.get("payload") == {"bill_id": 7, "name": "Agua"}
 
 
 @pytest.mark.parametrize("resposta", [
@@ -1214,3 +1231,101 @@ def test_controle_valor_normal_pelo_botao_do_whatsapp_paga(monkeypatch):
     assert "Conta paga" in respostas[-1], respostas
     depois = B.list_bills(uid, include_paid=True)[0]
     assert depois["status"] == "paid" and float(depois["paid_amount"]) == 132.5
+
+
+# ── C3: as DUAS portas da mesma pergunta, no mesmo usuário ──────────────────
+# A classe que nenhum teste do arquivo cobria: cada porta era testada sozinha
+# (texto com texto, botão com botão). O bug morava exatamente no encadeamento
+# das duas.
+
+def test_botao_de_uma_conta_substitui_a_pergunta_de_texto_de_outra(monkeypatch):
+    """"paguei a luz" → toca "✅ Já paguei" na ÁGUA → "132,50" paga a ÁGUA.
+
+    A última pergunta é a que está na tela do usuário. Antes, o botão perdia o
+    `claim` (tipos diferentes: `bill_amount_expected` × `bill_pay_amount`), a
+    pergunta da Luz continuava armada e comia o número: pagava a LUZ, a conta
+    errada, com a Água ainda pendente.
+    """
+    import uuid
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid, "Luz")
+    _monta_conta_variavel(uid, "Agua")
+    agua = [b for b in B.list_bills(uid, include_paid=False) if b["name"] == "Agua"][0]
+
+    _manda_texto_no_wa(monkeypatch, uid, "paguei a luz")
+    _toca_ja_paguei(monkeypatch, uid, int(agua["id"]))
+    respostas = _manda_texto_no_wa(monkeypatch, uid, "132,50")
+
+    estado = {b["name"]: (b["status"], float(b.get("paid_amount") or 0))
+              for b in B.list_bills(uid, include_paid=True)}
+    assert "Agua" in respostas[-1], respostas
+    assert estado["Agua"] == ("paid", 132.5), estado
+    assert estado["Luz"][0] == "pending", estado
+
+
+def test_pergunta_de_texto_depois_do_botao_nao_muda_a_conta(monkeypatch):
+    """A ordem inversa: o consumidor do botão intercepta o "paguei a luz"
+    (não é número → re-pergunta) e a Água continua sendo a conta em jogo."""
+    import uuid
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid, "Luz")
+    _monta_conta_variavel(uid, "Agua")
+    agua = [b for b in B.list_bills(uid, include_paid=False) if b["name"] == "Agua"][0]
+
+    _toca_ja_paguei(monkeypatch, uid, int(agua["id"]))
+    _manda_texto_no_wa(monkeypatch, uid, "paguei a luz")
+    _manda_texto_no_wa(monkeypatch, uid, "132,50")
+
+    estado = {b["name"]: (b["status"], float(b.get("paid_amount") or 0))
+              for b in B.list_bills(uid, include_paid=True)}
+    assert estado["Agua"] == ("paid", 132.5), estado
+    assert estado["Luz"][0] == "pending", estado
+
+
+# ── C4: ponto final não multiplica o valor por cem ──────────────────────────
+
+@pytest.mark.parametrize("resposta,esperado", [
+    ("132,50.", 132.5),
+    ("0,50.", 0.5),
+    ("9,99.", 9.99),
+    ("R$ 132,50.", 132.5),
+    ("132,50!", 132.5),
+])
+def test_ponto_final_na_resposta_de_texto_nao_paga_cem_vezes(monkeypatch, resposta, esperado):
+    """"132,50." tem vírgula E ponto: o `parse_money` lia a vírgula como milhar
+    e devolvia 13250.0. O `_VALOR_RE` aceita a pontuação final de propósito, então
+    quem limpa é o `resolve_bill_amount`."""
+    import uuid
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+    _manda_texto_no_wa(monkeypatch, uid, "paguei a luz")
+
+    _manda_texto_no_wa(monkeypatch, uid, resposta)
+
+    conta = [b for b in B.list_bills(uid, include_paid=True) if b["name"] == "Luz"][0]
+    assert (conta["status"], float(conta["paid_amount"] or 0)) == ("paid", esperado)
+
+
+@pytest.mark.parametrize("resposta,esperado", [
+    ("132,50.", 132.5),
+    ("0,50.", 0.5),
+])
+def test_ponto_final_na_resposta_do_botao_nao_paga_cem_vezes(monkeypatch, resposta, esperado):
+    """Mesma pergunta, outra porta: o consumidor do botão tinha o mesmo furo."""
+    import uuid
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+    _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
+
+    _manda_texto_no_wa(monkeypatch, uid, resposta)
+
+    depois = [b for b in B.list_bills(uid, include_paid=True) if b["name"] == "Luz"][0]
+    assert (depois["status"], float(depois["paid_amount"] or 0)) == ("paid", esperado)

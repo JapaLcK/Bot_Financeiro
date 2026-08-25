@@ -759,7 +759,10 @@ def process_message(message: InboundMessage) -> None:
                 # de `pending_actions`), então usa `claim_pending_action` como
                 # os outros dois: tocar este botão não pode apagar uma pergunta
                 # viva (um valor já digitado, uma fila de multi-lançamento, uma
-                # confirmação de apagar).
+                # confirmação de apagar). Para o `claim`, porém, as duas portas
+                # contam como a MESMA pergunta (`_PERGUNTA_DE_VALOR_DE_CONTA`,
+                # db/pending.py): tocar aqui substitui a pergunta de valor que
+                # veio por texto, senão o número seguinte pagaria a outra conta.
                 if bill.get("variable_amount"):
                     nome_conta = bill.get("name") or "conta"
                     try:
@@ -905,9 +908,13 @@ def process_message(message: InboundMessage) -> None:
                         pass
                     _send_reply(reply_to, f"Ok, deixei a conta de *{name}* pendente. Quando pagar é só avisar. 🐷")
                     return
+                from core.handlers.bills import limpa_pontuacao_final
                 from utils_text import parse_money, fmt_brl
                 try:
-                    amount = parse_money(txt)
+                    # Mesma limpeza do `resolve_bill_amount`: sem ela "132,50."
+                    # vira 13250.0 no `parse_money` e paga R$ 13.250,00. Esta é
+                    # a outra porta da MESMA pergunta, então tem o mesmo furo.
+                    amount = parse_money(limpa_pontuacao_final(txt))
                 except Exception:
                     amount = None
                 # Arredonda para centavos e recusa não finito ANTES de pagar:
