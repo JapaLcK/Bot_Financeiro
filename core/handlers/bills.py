@@ -131,12 +131,28 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
         nome = pending.get("payload", {}).get("bill_name") or "conta"
         return f"O valor da *{nome}* precisa ser maior que zero. Quanto veio este mês?"
 
-    from db import clear_pending_action
+    from db import advance_pending_action, set_pending_action
     from db.bills import mark_bill_paid
 
     payload = pending.get("payload") or {}
-    paid = mark_bill_paid(user_id, int(payload["bill_id"]), amount)
-    clear_pending_action(user_id)
+
+    # REIVINDICA antes de pagar. Duas respostas concorrentes (Discord, ou duas
+    # plataformas ligadas) leem a mesma pendência e as duas chegam no
+    # `mark_bill_paid`, que cria o lançamento que debita o saldo ANTES da
+    # atualização condicional de status: só uma conta muda de status, mas os
+    # DOIS lançamentos existem. Quem perde o compare-and-swap sai sem fazer
+    # nada — o vencedor responde. Mesmo desenho do PR #128 na fila de
+    # multi-lançamento.
+    if not advance_pending_action(user_id, "bill_amount_expected", payload, None):
+        return None
+
+    try:
+        paid = mark_bill_paid(user_id, int(payload["bill_id"]), amount)
+    except Exception:
+        # Devolve a pergunta: sem isso o usuário perde a pendência e o valor
+        # que digitou, e a conta continua em aberto sem ninguém avisar.
+        set_pending_action(user_id, "bill_amount_expected", payload)
+        raise
     if paid is None:
         return "Essa conta não está mais pendente."
     val = paid.get("paid_amount") or paid.get("amount") or 0

@@ -31,14 +31,19 @@ def test_variable_bill_stores_pending_and_accepts_bare_amount(monkeypatch):
 
     paid = {"name": "Luz", "paid_amount": 132.5}
     mark = Mock(return_value=paid)
-    clear = Mock()
+    # A reivindicação atômica (compare-and-swap) roda ANTES do pagamento, para
+    # duas respostas concorrentes não criarem dois lançamentos. Aqui ela vence.
+    reivindica = Mock(return_value=True)
     monkeypatch.setattr("db.bills.mark_bill_paid", mark)
-    monkeypatch.setattr("db.clear_pending_action", clear)
+    monkeypatch.setattr("db.advance_pending_action", reivindica)
 
     response = bills.resolve_bill_amount(7, "132,50", pending)
 
     mark.assert_called_once_with(7, 41, 132.5)
-    clear.assert_called_once_with(7)
+    # A pendência é apagada pela própria reivindicação (grava None se o payload
+    # ainda for o lido), não mais por um clear incondicional.
+    reivindica.assert_called_once_with(
+        7, "bill_amount_expected", {"bill_id": 41, "bill_name": "Luz"}, None)
     assert "Conta paga" in response
     assert "R$ 132,50" in response
 
@@ -127,3 +132,41 @@ def test_conversa_inteira_numero_solto_paga_a_conta(monkeypatch):
     resposta = diga("132")
     assert resposta and "Conta paga" in resposta, f"o número não pagou a conta: {resposta!r}"
     assert pago["paid_amount"] == 132.0
+
+
+def test_duas_respostas_simultaneas_pagam_a_conta_uma_vez_so(monkeypatch):
+    """P1 do Codex: sem reivindicação atômica, dois lançamentos para uma conta.
+
+    `mark_bill_paid` cria o lançamento que debita o saldo ANTES da atualização
+    condicional de status. Duas respostas concorrentes leem a mesma pendência,
+    as duas chegam lá, e só uma conta muda de status — mas os DOIS lançamentos
+    existem. Com o compare-and-swap, quem perde sai sem fazer nada.
+
+    Determinístico: as duas chamadas usam o MESMO `pending` (o que as duas
+    tarefas teriam lido), que é o mesmo intercalamento da corrida.
+    """
+    import uuid
+    import db
+    import db.bills
+    from core.handlers import bills as H
+
+    uid = int(uuid.uuid4().int % 10_000_000_000)
+    db.ensure_user(uid)
+    payload = {"bill_id": 41, "bill_name": "Luz"}
+    db.set_pending_action(uid, "bill_amount_expected", payload)
+    pending = db.get_pending_action(uid)
+
+    pagamentos = []
+
+    def _mark(u, bid, amt):
+        pagamentos.append((bid, amt))
+        return {"name": "Luz", "paid_amount": amt}
+
+    monkeypatch.setattr(db.bills, "mark_bill_paid", _mark)
+
+    r1 = H.resolve_bill_amount(uid, "132", pending)
+    r2 = H.resolve_bill_amount(uid, "132", pending)   # a leitura velha
+
+    assert len(pagamentos) == 1, f"a conta foi paga {len(pagamentos)}x: {pagamentos}"
+    assert r1 and "Conta paga" in r1
+    assert r2 is None, f"a segunda deveria sair calada, devolveu {r2!r}"
