@@ -470,3 +470,32 @@ def test_controle_com_a_fila_intacta_a_pergunta_continua_saindo(user_id):
     velho = _armar_fila(user_id)
     resp = launches.resolve_multi_launch_value(user_id, "800", velho)
     assert "luz" in (resp or "").lower(), resp
+
+
+def test_oferta_final_nao_apaga_fila_restaurada_por_devolucao(user_id, monkeypatch):
+    """Codex: a oferta de 'categoria errada?' sobrescrevia fila restaurada.
+
+    Cena: duas tarefas pegam os últimos itens. A de trás falha e o
+    `_devolve_head` restaura o item dela; a da frente ainda está dentro do
+    `add_from_entities`, calculou `resto` vazio, e grava a oferta por cima —
+    apagando a fila restaurada e sumindo com o lançamento que falhou.
+
+    Simulo devolvendo um item durante o registro.
+    """
+    velho = _armar_fila(user_id)
+    db.set_pending_action(user_id, "multi_launch_values",
+                          {"queue": [{"desc": "aluguel", "tipo": "despesa"}],
+                           "platform": "whatsapp"})
+    real = launches.add_from_entities
+
+    def registra_e_devolve(*a, **k):
+        r = real(*a, **k)
+        launches._devolve_head(user_id, {"desc": "gas", "tipo": "despesa"}, "whatsapp")
+        return r
+
+    monkeypatch.setattr(launches, "add_from_entities", registra_e_devolve)
+    launches.resolve_multi_launch_value(user_id, "800", velho)
+
+    p = db.get_pending_action(user_id) or {}
+    assert p.get("action_type") == "multi_launch_values", (
+        f"a oferta apagou a fila restaurada — ficou {p.get('action_type')}")
