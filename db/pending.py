@@ -10,6 +10,49 @@ from .connection import get_conn
 from .users import ensure_user
 
 
+def advance_pending_action(user_id: int, action_type: str,
+                           old_payload: dict, new_payload: dict | None,
+                           minutes: int = 10) -> bool:
+    """Avança (ou apaga) a pendência SÓ SE ela ainda for `old_payload`.
+
+    Compare-and-swap. Duas respostas do mesmo usuário chegam em POSTs separados
+    do Meta e cada POST vira uma thread (`adapters/whatsapp/wa_app.py:320`).
+    Sem isso as duas leem a mesma fila, registram o MESMO item e o segundo valor
+    some. Aqui a segunda escrita não pega: o Postgres serializa o UPDATE na
+    linha, a condição `payload = <o que eu li>` já não vale, `rowcount` volta 0 e
+    quem chamou relê a fila e reavalia.
+
+    Sem lock de propósito. Um `pg_advisory_xact_lock` numa conexão dedicada
+    segura uma conexão do pool durante todo o trabalho: com o pool em 8, oito
+    usuários simultâneos consomem o pool só em locks e o bot inteiro para.
+
+    Devolve True se gravou, False se outra thread já tinha avançado. Gravar
+    renova o prazo (`minutes`), como o `set_pending_action` que ela substitui —
+    senão uma fila longa expiraria 10 min depois da PRIMEIRA pergunta, não da
+    última resposta.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if new_payload is None:
+                cur.execute(
+                    "delete from pending_actions "
+                    "where user_id = %s and action_type = %s and payload = %s",
+                    (user_id, action_type, Jsonb(old_payload)),
+                )
+            else:
+                cur.execute(
+                    "update pending_actions "
+                    "set payload = %s, created_at = now(), expires_at = %s "
+                    "where user_id = %s and action_type = %s and payload = %s",
+                    (Jsonb(new_payload),
+                     datetime.now(timezone.utc) + timedelta(minutes=minutes),
+                     user_id, action_type, Jsonb(old_payload)),
+                )
+            gravou = cur.rowcount == 1
+        conn.commit()
+    return gravou
+
+
 def set_pending_action(user_id: int, action_type: str, payload: dict, minutes: int = 10):
     """Cria/atualiza uma ação pendente de confirmação (persistente no Postgres)."""
     ensure_user(user_id)
