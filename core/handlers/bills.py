@@ -186,8 +186,20 @@ def agrupamento_de_milhar_ok(raw: str) -> bool:
     Regra: com dois ou mais pontos, todo grupo depois do primeiro precisa ter
     exatamente 3 dígitos (1.234.567 ✓, 1.23.456 ✗); com um ponto só, valem 3
     (milhar: 1.200) ou 1-2 (decimal: 132.50) — a mesma heurística que o
-    `parse_money` já usa. Vírgula presente manda: os pontos antes dela são
-    milhar, e o que vem depois é a casa decimal (1.132,50 ✓, 1.23.456,00 ✗).
+    `parse_money` já usa. Vírgula presente corta o decimal, e a mesma regra vale
+    para o que sobra antes dela.
+
+    O CRITÉRIO não é "o usuário digitou certo?", é "o erro dele vira dinheiro
+    errado?". Por isso um ponto solto mal agrupado passa quando há vírgula:
+
+        1.23,45   → 123,45      1.2,34  → 12,34      12.34,56 → 1.234,56
+
+    Nos três, apagar o ponto fora do lugar devolve exatamente o valor que a
+    pessoa parecia querer — o bot acerta a intenção, e recusar seria pedir para
+    redigitar algo já entendido. Já com DOIS pontos a leitura muda de ordem de
+    grandeza (1.23.456 → 123.456,00 quando o provável era 1.234,56), e aí sim
+    recusa. Foi apontado como incoerência na revisão do #133 e mantido de
+    propósito; se um dia isso mudar, mude por medição de dano, não por simetria.
 
     Não corrigido no `parse_money` pelo mesmo motivo do `limpa_pontuacao_final`:
     dezenas de fluxos chamam aquilo. Issue separada.

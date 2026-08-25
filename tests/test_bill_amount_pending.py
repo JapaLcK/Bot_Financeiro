@@ -1410,3 +1410,26 @@ def test_controle_milhar_legitimo_pelo_botao_paga(monkeypatch, resposta, esperad
 
     depois = B.list_bills(uid, include_paid=True)[0]
     assert (depois["status"], float(depois["paid_amount"] or 0)) == ("paid", esperado)
+
+
+@pytest.mark.parametrize("resposta,esperado", [
+    ("1.23,45", 123.45),
+    ("1.2,34", 12.34),
+    ("12.34,56", 1234.56),
+])
+def test_ponto_mal_agrupado_com_virgula_paga_o_que_a_pessoa_quis(resposta, esperado):
+    """Decisão de produto, apontada na revisão do #133 e mantida de propósito.
+
+    O critério não é "o usuário digitou certo?", é "o erro dele vira dinheiro
+    errado?". Aqui não vira: apagar o ponto fora do lugar devolve o valor que a
+    pessoa parecia querer. Recusar seria pedir para redigitar algo já entendido.
+
+    Contraste com `1.23.456`, que é recusado: lá a leitura muda de ordem de
+    grandeza (123.456,00 quando o provável era 1.234,56).
+    """
+    from core.handlers.bills import agrupamento_de_milhar_ok, limpa_pontuacao_final
+    from utils_text import parse_money
+
+    limpo = limpa_pontuacao_final(resposta)
+    assert agrupamento_de_milhar_ok(limpo), f"{resposta} deveria ser aceito"
+    assert parse_money(limpo) == esperado
