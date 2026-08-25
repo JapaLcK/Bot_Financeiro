@@ -733,14 +733,7 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
             # `PlanLimitExceeded` quando o usuário do Grátis bate o teto do mês
             # (`core/services/plan_service.py`) e quem captura é o
             # `core/handle_incoming.py`, que só responde o texto de upgrade.
-            if novo_payload is None:
-                db.set_pending_action(user_id, "multi_launch_values", payload)
-            else:
-                # Se este CAS falhar, outra thread já é dona da fila — deixar
-                # como está é o certo, gravar por cima ressuscitaria item já
-                # registrado.
-                db.advance_pending_action(
-                    user_id, "multi_launch_values", novo_payload, payload)
+            _devolve_head(user_id, head, platform)
             raise
 
         if resto:
@@ -750,6 +743,35 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
         return resp
 
     return None
+
+
+
+def _devolve_head(user_id: int, head: dict, platform: str) -> None:
+    """Põe `head` de volta na FRENTE da fila que existir agora.
+
+    O item foi reivindicado (tirado da fila) antes de registrar, e o registro
+    estourou — sem devolver, ele some. Restaurar o payload ANTIGO não serve:
+    entre a reivindicação e a falha, outra thread pode ter avançado ou apagado
+    a fila, e gravar o estado velho por cima ressuscitaria um item que ela já
+    registrou. Por isso relemos e prependemos ao que estiver lá.
+
+    CAS em laço porque a fila pode mudar entre a leitura e a escrita. Se as
+    tentativas acabarem, é melhor perder a devolução do que gravar por cima de
+    um item já registrado — o `raise` de quem chamou ainda avisa o usuário.
+    """
+    for _ in range(4):
+        atual = db.get_pending_action(user_id)
+        if not atual or atual.get("action_type") != "multi_launch_values":
+            db.set_pending_action(
+                user_id, "multi_launch_values",
+                {"queue": [head], "platform": platform})
+            return
+        antigo = atual.get("payload") or {}
+        fila = [head] + list(antigo.get("queue") or [])
+        if db.advance_pending_action(
+                user_id, "multi_launch_values", antigo,
+                {"queue": fila, "platform": antigo.get("platform", platform)}):
+            return
 
 
 def _register_parsed(user_id: int, parsed: dict, fallback_note: str, platform: str) -> str:

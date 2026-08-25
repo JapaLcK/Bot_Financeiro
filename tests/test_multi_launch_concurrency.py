@@ -15,6 +15,7 @@ motivo errado. O que a suíte guarda são os dois casos determinísticos abaixo.
 """
 from __future__ import annotations
 
+import pytest
 import threading
 
 import db
@@ -181,3 +182,30 @@ if __name__ == "__main__":
 
     print(f"SEM  CAS: {placar(False)}/{RODADAS} rodadas corretas")
     print(f"COM  CAS: {placar(True)}/{RODADAS} rodadas corretas")
+
+
+def test_item_que_estourou_volta_pra_fila_mesmo_com_outra_thread_avancando(user_id, monkeypatch):
+    """P2 do Codex, pelo caminho real: `resolve_multi_launch_value` com exceção.
+
+    Cena: fila [aluguel, luz]. A thread A reivindica 'aluguel'; ANTES de ela
+    registrar, a thread B avança a fila (registra 'luz'). Aí o registro de A
+    estoura (teto de plano). O payload que A tinha em mãos não existe mais.
+
+    Código antigo: tentava restaurar o estado velho, o CAS falhava, e 'aluguel'
+    sumia. Código novo: relê e prepende na fila que existir.
+    """
+    pending = _armar_fila(user_id)
+
+    def estoura_e_avanca_por_baixo(*a, **k):
+        # simula a thread B tendo avançado a fila enquanto A trabalhava
+        db.clear_pending_action(user_id)
+        raise RuntimeError("teto de plano")
+
+    monkeypatch.setattr(launches, "add_from_entities", estoura_e_avanca_por_baixo)
+
+    with pytest.raises(RuntimeError):
+        launches.resolve_multi_launch_value(user_id, "800", pending)
+
+    fila = (db.get_pending_action(user_id) or {}).get("payload", {}).get("queue", [])
+    assert [i["desc"] for i in fila] == ["aluguel"], (
+        f"o item que estourou sumiu — fila ficou {fila}")
