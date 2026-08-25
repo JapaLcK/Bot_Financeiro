@@ -207,7 +207,7 @@ _ERROR_PASSTHROUGH_HEADERS = frozenset({"allow", "www-authenticate", "retry-afte
 # Sem CSS/JS externo de propósito (só style inline e um <a href="/">), então não
 # passa nem precisa passar pelo `stamp_asset_versions` — não há `?v=` aqui.
 _ERROR_FALLBACK_HTML = (
-    '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">'
+    '<!DOCTYPE html><html lang="pt-BR" style="background:#050506"><head><meta charset="UTF-8">'
     '<meta name="viewport" content="width=device-width,initial-scale=1">'
     '<meta name="robots" content="noindex"><title>{{CODE}} — {{TITLE}} | PigBank</title></head>'
     '<body style="background:#050506;color:#fff;font-family:sans-serif;text-align:center;padding:64px 24px">'
