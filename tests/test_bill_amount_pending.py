@@ -1,3 +1,4 @@
+import pytest
 from unittest.mock import Mock
 
 from core.handlers import bills
@@ -170,3 +171,69 @@ def test_duas_respostas_simultaneas_pagam_a_conta_uma_vez_so(monkeypatch):
     assert len(pagamentos) == 1, f"a conta foi paga {len(pagamentos)}x: {pagamentos}"
     assert r1 and "Conta paga" in r1
     assert r2 is None, f"a segunda deveria sair calada, devolveu {r2!r}"
+
+
+def test_valor_negativo_mantem_a_pergunta_e_nao_paga(monkeypatch):
+    """P2 do Codex: `-10` caía no ramo de texto não-monetário.
+
+    A pendência era descartada e o usuário ia pro fallback genérico, tendo que
+    recomeçar. E há uma armadilha: `parse_money("-10")` devolve **10.0**, então
+    apenas aceitar o sinal faria o bot pagar R$ 10 de um "-10". Por isso o sinal
+    é capturado e tratado como valor inválido.
+    """
+    import uuid
+    import db
+    import db.bills
+    from core.handlers import bills as H
+
+    uid = int(uuid.uuid4().int % 10_000_000_000)
+    db.ensure_user(uid)
+    payload = {"bill_id": 41, "bill_name": "Luz"}
+    db.set_pending_action(uid, "bill_amount_expected", payload)
+
+    pagou = []
+    monkeypatch.setattr(db.bills, "mark_bill_paid",
+                        lambda u, b, a: pagou.append(a) or {"name": "Luz", "paid_amount": a})
+
+    for entrada in ("-10", "R$ -5", "- 10"):
+        db.set_pending_action(uid, "bill_amount_expected", payload)
+        r = H.resolve_bill_amount(uid, entrada, db.get_pending_action(uid))
+        assert r and "maior que zero" in r, f"{entrada!r} devolveu {r!r}"
+        p = db.get_pending_action(uid) or {}
+        assert p.get("action_type") == "bill_amount_expected", (
+            f"{entrada!r} descartou a pergunta")
+
+    assert pagou == [], f"valor negativo virou pagamento: {pagou}"
+
+
+def test_devolucao_nao_atropela_pendencia_mais_nova(monkeypatch):
+    """P2 do Codex: a devolução usava upsert incondicional.
+
+    Se o pagamento estoura depois da reivindicação e, nesse meio tempo, outra
+    tarefa armou uma pendência nova (uma confirmação já mostrada ao usuário),
+    gravar por cima deixaria aquela órfã.
+    """
+    import uuid
+    import db
+    import db.bills
+    from core.handlers import bills as H
+
+    uid = int(uuid.uuid4().int % 10_000_000_000)
+    db.ensure_user(uid)
+    payload = {"bill_id": 41, "bill_name": "Luz"}
+    db.set_pending_action(uid, "bill_amount_expected", payload)
+    pending = db.get_pending_action(uid)
+
+    def _estoura(u, b, a):
+        # a outra tarefa armou a dela enquanto esta trabalhava
+        db.set_pending_action(uid, "confirm_recurring_offer", {"name": "Luz"})
+        raise RuntimeError("banco caiu")
+
+    monkeypatch.setattr(db.bills, "mark_bill_paid", _estoura)
+
+    with pytest.raises(RuntimeError):
+        H.resolve_bill_amount(uid, "132", pending)
+
+    p = db.get_pending_action(uid) or {}
+    assert p.get("action_type") == "confirm_recurring_offer", (
+        f"a devolução atropelou a pendência mais nova — ficou {p.get('action_type')}")

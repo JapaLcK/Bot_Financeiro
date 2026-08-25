@@ -120,18 +120,24 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     roteamento normal, em vez de extrair por engano um número de outro comando.
     """
     raw = (text or "").strip()
-    if not re.fullmatch(r"(?:R\$\s*)?\d[\d.,\s]*(?:\s*(?:reais?|rs))?", raw, re.I):
+    # O sinal entra no padrão de propósito: `parse_money("-10")` devolve 10.0,
+    # então sem capturá-lo aqui um "-10" viraria pagamento de R$ 10. Casando o
+    # sinal, a resposta cai na validação abaixo, que mantém a pergunta viva em
+    # vez de descartar a pendência e jogar o usuário no fallback genérico.
+    casou = re.fullmatch(
+        r"(?:R\$\s*)?(-\s*)?\d[\d.,\s]*(?:\s*(?:reais?|rs))?", raw, re.I)
+    if not casou:
         from db import clear_pending_action
 
         clear_pending_action(user_id)
         return None
 
     amount = parse_money(raw)
-    if amount is None or amount <= 0:
+    if casou.group(1) or amount is None or amount <= 0:
         nome = pending.get("payload", {}).get("bill_name") or "conta"
         return f"O valor da *{nome}* precisa ser maior que zero. Quanto veio este mês?"
 
-    from db import advance_pending_action, set_pending_action
+    from db import advance_pending_action, create_pending_action_if_absent
     from db.bills import mark_bill_paid
 
     payload = pending.get("payload") or {}
@@ -151,7 +157,14 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     except Exception:
         # Devolve a pergunta: sem isso o usuário perde a pendência e o valor
         # que digitou, e a conta continua em aberto sem ninguém avisar.
-        set_pending_action(user_id, "bill_amount_expected", payload)
+        #
+        # CONDICIONAL, não upsert: entre a reivindicação e a falha, outra
+        # tarefa pode ter armado uma pendência nova (uma confirmação que já
+        # apareceu na tela do usuário). Gravar por cima deixaria aquela órfã.
+        # Se já há algo lá, a pergunta desta conta é a que se perde — e ela é
+        # recuperável mandando "paguei a luz" de novo.
+        create_pending_action_if_absent(
+            user_id, "bill_amount_expected", payload)
         raise
     if paid is None:
         return "Essa conta não está mais pendente."
