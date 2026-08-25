@@ -669,8 +669,10 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
     resp_norm = normalize_text(text).strip()
     valor = _extract_valor(text)
 
-    # Duas respostas do mesmo usuário chegam em POSTs separados do Meta e cada
-    # POST vira uma thread (`adapters/whatsapp/wa_app.py:320`). Sem o
+    # Duas respostas do mesmo usuário podem ser processadas em paralelo pelo
+    # Discord (`discord_bot.py:122`, `on_message` async sem lock, em processo
+    # separado do uvicorn). O webhook do WhatsApp sozinho não corre — enfileira
+    # e um worker único consome. Sem o
     # compare-and-swap abaixo as duas leem a mesma fila, gravam o MESMO item
     # duas vezes e o segundo valor some sem uma palavra.
     #

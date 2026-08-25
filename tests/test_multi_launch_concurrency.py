@@ -2,9 +2,9 @@
 Duas respostas para a MESMA fila `multi_launch_values` não podem gravar o mesmo
 item duas vezes.
 
-O caminho é real: `adapters/whatsapp/wa_app.py:320` roda cada POST do Meta em
-`asyncio.to_thread(process_payload, ...)`, e o Meta entrega duas mensagens
-seguidas em dois POSTs. Antes do compare-and-swap (`db.advance_pending_action`)
+O caminho é real pelo Discord: `adapters/discord/discord_bot.py:122` é um
+`on_message` async sem lock, num processo separado do uvicorn. Duas mensagens
+seguidas do mesmo usuário viram duas tarefas concorrentes. Antes do compare-and-swap (`db.advance_pending_action`)
 as duas threads liam a mesma fila, as duas gravavam o item da FRENTE e o
 segundo valor sumia sem uma palavra.
 
