@@ -86,15 +86,21 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
             nomes = ", ".join(b.get("name") or "?" for b in ties[:5])
             return f"Você tem contas a pagar pendentes: {nomes}. Qual delas você pagou?"
 
-    # Conta de valor variável (água/luz) sem valor informado: o estimado não
-    # serve. Pede o valor real de forma explícita (sem estado — funciona em
-    # qualquer canal). Se o usuário já disse o valor ("paguei 132 de água"),
-    # `amount` vem preenchido e segue direto.
+    # Conta de valor variável (água/luz) sem valor informado: guarda qual conta
+    # originou a pergunta. Assim a resposta natural (só "132,50") não cai no
+    # classificador/na IA sem contexto.
     if best.get("variable_amount") and amount is None:
+        from db import set_pending_action
+
         nome = (best.get("name") or "conta")
+        set_pending_action(
+            user_id,
+            "bill_amount_expected",
+            {"bill_id": int(best["id"]), "bill_name": nome},
+        )
         return (
             f"A conta de *{nome}* tem valor variável. Quanto veio este mês?\n"
-            f"Manda assim: *paguei {nome.lower()} 132,50*"
+            "Pode mandar só o valor, por exemplo: *132,50*"
         )
 
     paid = mark_bill_paid(user_id, int(best["id"]), amount)
@@ -107,4 +113,37 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
     )
 
 
-__all__ = ["try_pay_from_text"]
+def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
+    """Conclui uma conta variável quando a resposta é somente um valor.
+
+    Texto que não seja estritamente monetário abandona a pergunta e volta ao
+    roteamento normal, em vez de extrair por engano um número de outro comando.
+    """
+    raw = (text or "").strip()
+    if not re.fullmatch(r"(?:R\$\s*)?\d[\d.,\s]*(?:\s*(?:reais?|rs))?", raw, re.I):
+        from db import clear_pending_action
+
+        clear_pending_action(user_id)
+        return None
+
+    amount = parse_money(raw)
+    if amount is None or amount <= 0:
+        nome = pending.get("payload", {}).get("bill_name") or "conta"
+        return f"O valor da *{nome}* precisa ser maior que zero. Quanto veio este mês?"
+
+    from db import clear_pending_action
+    from db.bills import mark_bill_paid
+
+    payload = pending.get("payload") or {}
+    paid = mark_bill_paid(user_id, int(payload["bill_id"]), amount)
+    clear_pending_action(user_id)
+    if paid is None:
+        return "Essa conta não está mais pendente."
+    val = paid.get("paid_amount") or paid.get("amount") or 0
+    return (
+        f"✅ Conta paga: *{paid.get('name')}* — {fmt_brl(val)} lançado e "
+        f"categorizado. Tá tudo em dia! 🐷"
+    )
+
+
+__all__ = ["resolve_bill_amount", "try_pay_from_text"]
