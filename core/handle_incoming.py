@@ -70,6 +70,11 @@ _RESUMABLE_PENDING_TYPES: frozenset[str] = frozenset({
     "pay_bill_choice",
     "funding_source_choice",
     "investment_pick",
+    # A pergunta de valor de conta variável ("quanto veio este mês?") é
+    # respondida com um número solto, que classifica como out_of_scope. Sem
+    # estar aqui, o usuário Pro tem a resposta sequestrada pela IA e a conta
+    # fica sem pagar — que é o bug da issue #132 sobrevivendo para quem paga.
+    "bill_amount_expected",
 })
 
 
