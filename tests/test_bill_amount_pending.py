@@ -1329,3 +1329,84 @@ def test_ponto_final_na_resposta_do_botao_nao_paga_cem_vezes(monkeypatch, respos
 
     depois = [b for b in B.list_bills(uid, include_paid=True) if b["name"] == "Luz"][0]
     assert (depois["status"], float(depois["paid_amount"] or 0)) == ("paid", esperado)
+
+
+# ── Milhar malformado: "1.23.456" pagava R$ 123.456,00 ──────────────────────
+# O `parse_money` apaga TODOS os pontos quando o último grupo tem 3 dígitos, e
+# o `_VALOR_RE` aceitava qualquer arranjo de pontos. Erro de digitação logo
+# depois de "manda só o número" virava conta paga com valor inflado, calado.
+
+_MALFORMADOS = ["1.23.456", "1.2.345", "1.23.456,00"]
+# Os legítimos importam mais: recusar entrada válida é pior que o bug.
+_LEGITIMOS = [("1.200", 1200.0), ("132.50", 132.5), ("132,50", 132.5),
+              ("1.132,50", 1132.5), ("12.345", 12345.0),
+              ("1.234.567", 1234567.0)]
+
+
+@pytest.mark.parametrize("resposta", _MALFORMADOS)
+def test_milhar_malformado_pelo_texto_nao_paga(monkeypatch, resposta):
+    import uuid
+    import db
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+    _manda_texto_no_wa(monkeypatch, uid, "paguei a luz")
+
+    respostas = _manda_texto_no_wa(monkeypatch, uid, resposta)
+
+    assert "Não entendi o valor" in respostas[-1], respostas
+    conta = B.list_bills(uid, include_paid=True)[0]
+    assert conta["status"] == "pending" and conta["paid_amount"] is None
+    assert (db.get_pending_action(uid) or {}).get("action_type") == "bill_amount_expected", \
+        "a pergunta tem que continuar viva para o usuário redigitar"
+
+
+@pytest.mark.parametrize("resposta,esperado", _LEGITIMOS)
+def test_controle_milhar_legitimo_pelo_texto_paga(monkeypatch, resposta, esperado):
+    import uuid
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+    _manda_texto_no_wa(monkeypatch, uid, "paguei a luz")
+
+    _manda_texto_no_wa(monkeypatch, uid, resposta)
+
+    conta = B.list_bills(uid, include_paid=True)[0]
+    assert (conta["status"], float(conta["paid_amount"] or 0)) == ("paid", esperado)
+
+
+@pytest.mark.parametrize("resposta", _MALFORMADOS)
+def test_milhar_malformado_pelo_botao_nao_paga(monkeypatch, resposta):
+    """Mesma pergunta, outra porta: o consumidor do botão tinha o mesmo furo."""
+    import uuid
+    import db
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+    _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
+
+    respostas = _manda_texto_no_wa(monkeypatch, uid, resposta)
+
+    assert "Não peguei o valor" in respostas[-1], respostas
+    depois = B.list_bills(uid, include_paid=True)[0]
+    assert depois["status"] == "pending" and depois["paid_amount"] is None
+    assert (db.get_pending_action(uid) or {}).get("action_type") == "bill_pay_amount", \
+        "a pergunta tem que continuar viva para o usuário redigitar"
+
+
+@pytest.mark.parametrize("resposta,esperado", _LEGITIMOS)
+def test_controle_milhar_legitimo_pelo_botao_paga(monkeypatch, resposta, esperado):
+    import uuid
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+    _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
+
+    _manda_texto_no_wa(monkeypatch, uid, resposta)
+
+    depois = B.list_bills(uid, include_paid=True)[0]
+    assert (depois["status"], float(depois["paid_amount"] or 0)) == ("paid", esperado)

@@ -908,13 +908,16 @@ def process_message(message: InboundMessage) -> None:
                         pass
                     _send_reply(reply_to, f"Ok, deixei a conta de *{name}* pendente. Quando pagar é só avisar. 🐷")
                     return
-                from core.handlers.bills import limpa_pontuacao_final
+                from core.handlers.bills import (agrupamento_de_milhar_ok,
+                                                 limpa_pontuacao_final)
                 from utils_text import parse_money, fmt_brl
                 try:
                     # Mesma limpeza do `resolve_bill_amount`: sem ela "132,50."
                     # vira 13250.0 no `parse_money` e paga R$ 13.250,00. Esta é
                     # a outra porta da MESMA pergunta, então tem o mesmo furo.
-                    amount = parse_money(limpa_pontuacao_final(txt))
+                    # Idem o milhar malformado: "1.23.456" pagaria R$ 123.456.
+                    limpo = limpa_pontuacao_final(txt)
+                    amount = parse_money(limpo) if agrupamento_de_milhar_ok(limpo) else None
                 except Exception:
                     amount = None
                 # Arredonda para centavos e recusa não finito ANTES de pagar:

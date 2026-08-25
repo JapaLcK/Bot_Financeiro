@@ -175,6 +175,37 @@ def limpa_pontuacao_final(raw: str) -> str:
     return (raw or "").rstrip(" .!")
 
 
+def agrupamento_de_milhar_ok(raw: str) -> bool:
+    """False quando o ponto de milhar está malformado ("1.23.456").
+
+    O `parse_money` decide o significado do ponto pelo TAMANHO do último grupo:
+    se tem 3 dígitos, apaga TODOS os pontos. Então "1.23.456" (erro de
+    digitação) vira 123456.0 e "1.2.345" vira 12345.0 — a conta seria paga com
+    valor inflado, em silêncio, logo depois de o bot pedir "manda só o número".
+
+    Regra: com dois ou mais pontos, todo grupo depois do primeiro precisa ter
+    exatamente 3 dígitos (1.234.567 ✓, 1.23.456 ✗); com um ponto só, valem 3
+    (milhar: 1.200) ou 1-2 (decimal: 132.50) — a mesma heurística que o
+    `parse_money` já usa. Vírgula presente manda: os pontos antes dela são
+    milhar, e o que vem depois é a casa decimal (1.132,50 ✓, 1.23.456,00 ✗).
+
+    Não corrigido no `parse_money` pelo mesmo motivo do `limpa_pontuacao_final`:
+    dezenas de fluxos chamam aquilo. Issue separada.
+    """
+    m = re.search(r"\d[\d.,\s]*", raw or "")
+    if not m:
+        return True
+    num = m.group(0).strip().replace(" ", "")
+    if "," in num:
+        num = num[:num.rfind(",")]
+    grupos = num.split(".")
+    if len(grupos) == 1:
+        return True
+    if len(grupos) == 2:
+        return len(grupos[1]) in (1, 2, 3)
+    return all(len(g) == 3 for g in grupos[1:])
+
+
 def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     """Conclui uma conta variável quando a resposta é somente um valor.
 
@@ -198,7 +229,8 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
             user_id, "bill_amount_expected", pending.get("payload") or {}, None)
         return None
 
-    amount = parse_money(limpa_pontuacao_final(raw))
+    limpo = limpa_pontuacao_final(raw)
+    amount = parse_money(limpo) if agrupamento_de_milhar_ok(limpo) else None
     # Arredonda para centavos ANTES de validar: "0,001" passava no `> 0`,
     # gravava paid_amount=0.001 e respondia "R$ 0,00 lançado" — mensagem e dado
     # divergentes. Agora vira 0.0 e cai na validação abaixo.
