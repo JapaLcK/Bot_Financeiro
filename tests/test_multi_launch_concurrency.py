@@ -499,3 +499,43 @@ def test_oferta_final_nao_apaga_fila_restaurada_por_devolucao(user_id, monkeypat
     p = db.get_pending_action(user_id) or {}
     assert p.get("action_type") == "multi_launch_values", (
         f"a oferta apagou a fila restaurada — ficou {p.get('action_type')}")
+
+
+def test_oferta_de_gasto_fixo_sai_quando_a_fila_e_restaurada(user_id, monkeypatch):
+    """Codex: duas perguntas incompatíveis na mesma resposta.
+
+    A tarefa do último item cria a oferta de gasto fixo ("responda sim ou
+    não"); outra tarefa, falhando, substitui essa pendência por uma fila
+    restaurada. O texto da oferta fica órfão em `resp`, e a resposta sai com
+    duas perguntas. Um "sim" não é valor — descartaria o item restaurado.
+    """
+    velho = _armar_fila(user_id)
+    real = launches.add_from_entities
+
+    def registra_com_oferta_e_devolve(*a, **k):
+        r = real(*a, **k)
+        r += ("\n\n💡 Você já lançou *aluguel* de R$ 800,00 em outro mês. "
+              "Quer marcar como *gasto fixo* (a Piggy lança sozinha todo mês)? "
+              "Responda *sim* ou *não*.")
+        launches._devolve_head(user_id, {"desc": "gas", "tipo": "despesa"}, "whatsapp")
+        return r
+
+    monkeypatch.setattr(launches, "add_from_entities", registra_com_oferta_e_devolve)
+    resp = launches.resolve_multi_launch_value(user_id, "800", velho) or ""
+
+    assert "sim* ou *não" not in resp, (
+        f"duas perguntas incompatíveis na mesma resposta:\n{resp}")
+    assert "Quanto foi" in resp or "Faltou o valor" in resp, resp
+
+
+def test_controle_oferta_de_gasto_fixo_sobrevive_sem_fila(user_id):
+    """Controle: sem fila restaurada, o convite continua saindo.
+
+    Sem isto, o teste acima passaria num código que apagasse a oferta sempre.
+    """
+    texto = ("💸 Despesa registrada: R$ 800,00\n\n💡 Você já lançou *aluguel* de "
+             "R$ 800,00 em outro mês. Quer marcar como *gasto fixo* (a Piggy "
+             "lança sozinha todo mês)? Responda *sim* ou *não*.")
+    assert "sim* ou *não" in texto
+    assert "sim* ou *não" not in launches._sem_oferta_de_gasto_fixo(texto)
+    assert "Despesa registrada" in launches._sem_oferta_de_gasto_fixo(texto)

@@ -788,6 +788,13 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
         if depois and depois.get("action_type") == "multi_launch_values":
             fila_agora = (depois.get("payload") or {}).get("queue") or []
         if fila_agora:
+            # Se a oferta de gasto fixo foi criada e outra tarefa a substituiu
+            # por esta fila restaurada, o texto dela ficou órfão em `resp`:
+            # sairiam DUAS perguntas incompatíveis ("responda sim ou não" e
+            # "quanto foi X?"), e um "sim" não é valor — descartaria o
+            # lançamento restaurado. A pendência que vale é a fila; o convite
+            # sai do texto.
+            resp = _sem_oferta_de_gasto_fixo(resp)
             return f"{resp}\n\n{_ask_value_question(fila_agora[0])}"
         # fila vazia: não re-arma multi_launch_values. O add_from_entities acima já
         # gravou o pending de "categoria errada?" (WhatsApp), que fica valendo.
@@ -795,6 +802,22 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
 
     return None
 
+
+
+
+_OFERTA_GASTO_FIXO_RE = re.compile(
+    r"\n\n💡 Você já lançou .*?Responda \*sim\* ou \*não\*\.", re.DOTALL)
+
+
+def _sem_oferta_de_gasto_fixo(texto: str) -> str:
+    """Tira o convite de gasto fixo de uma resposta já montada.
+
+    Usado quando a pendência da oferta foi substituída por uma fila restaurada:
+    o convite pede "sim ou não" e a fila pede um valor. Deixar os dois no mesmo
+    texto faz o usuário responder "sim", que não é valor — e o item restaurado
+    é descartado.
+    """
+    return _OFERTA_GASTO_FIXO_RE.sub("", texto)
 
 
 def _devolve_head(user_id: int, head: dict, platform: str) -> None:
