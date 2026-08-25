@@ -7,9 +7,16 @@
  * DENTRO de um documento só (fetch + swap em startViewTransition): sem
  * navegação de documento, o vão não existe.
  *
- * Ativação (POC): modo app (html.pb-app) + flag pbspa. Liga com ?pbspa=1
- * (persiste em localStorage, igual ao pbapp), desliga com ?pbspa=0.
- * Teste no iPhone: Safari → https://pigbankai.com/home?pbapp=1&pbspa=1
+ * Ativação (POC): modo app (html.pb-app) + flag pbspa, desligada por padrão.
+ * DENTRO do app, ?pbspa=1 liga e ?pbspa=0 desliga; a flag vive em
+ * sessionStorage — morre com a sessão da aba/app e não fica gravada no
+ * aparelho. FORA do modo app a query não faz nada: nem liga, nem grava. Era
+ * esse o buraco — um link ?pbspa=1 aberto no navegador armava a flag pra
+ * sempre, sem UI de saída, e o motor acordava sozinho quando o app abrisse,
+ * sem ninguém ter pedido. A chave pbSpa antiga do localStorage é apagada em
+ * todo load (higiene) e ninguém mais a lê.
+ * Teste no iPhone: no APP instalado, /home?pbspa=1 — não há como entrar em
+ * modo app pelo Safari (o preview ?pbapp=1 foi removido do app-mode.js).
  *
  * Contrato por página (só as ROUTES abaixo):
  *   - scripts inline embrulhados em (PBPages.<key> ||= {inits:[]}).inits.push(fn)
@@ -34,13 +41,50 @@
   "use strict";
 
   const qs = new URLSearchParams(location.search);
-  if (qs.get("pbspa") === "0") { try { localStorage.removeItem("pbSpa"); } catch (_) {} }
-  if (qs.get("pbspa") === "1") { try { localStorage.setItem("pbSpa", "1"); } catch (_) {} }
-  let flag = null;
-  try { flag = localStorage.getItem("pbSpa"); } catch (_) {}
 
-  // pb-app já está no <html> (app-mode.js roda antes, síncrono no head)
-  const enabled = document.documentElement.classList.contains("pb-app") &&
+  // Modo app já decidido antes daqui. Atenção: html.pb-app tem DOIS setters,
+  // e os dois rodam síncronos no <head>, sem defer:
+  //   - auth-refresh.js:84-86 (só UA PigBankApp; também liga PB_IN_APP)
+  //   - app-mode.js:46 (decisão em :42 — UA PigBankApp OU PWA standalone)
+  // Nas duas únicas páginas que carregam este arquivo os dois já executaram:
+  // home.html:455 (auth-refresh) e :458 (app-mode), antes do :459 daqui;
+  // comandos-app.html:84 (app-mode, sem auth-refresh) antes do :85. Ou seja,
+  // a classe pb-app já está no <html> quando esta linha executa — por isso o
+  // gate abaixo pode usar a classe, e não repetir o sinal de ambiente
+  // (UA/standalone) do app-mode. Se mexer em qualquer um dos dois setters,
+  // lembre que este gate depende dos dois.
+  const inApp = document.documentElement.classList.contains("pb-app");
+
+  // Higiene da chave legada. A versão anterior gravava pbSpa no localStorage a
+  // partir de ?pbspa=1, inclusive fora do modo app e sem UI de saída — quem
+  // clicou num link de QA carrega a flag no aparelho até hoje. Este removeItem
+  // limpa sozinho no primeiro load; o destravamento em si vem do gate, que
+  // parou de LER o localStorage.
+  // O try/catch é obrigatório: esta linha toca storage e, com storage
+  // bloqueado (Safari privado, cookies off), o acesso ESTOURA. Sem o catch a
+  // exceção mataria o resto do arquivo — inclusive o window.PBNav que o dock
+  // do app-mode chama em toda troca de aba.
+  try { localStorage.removeItem("pbSpa"); } catch (_) {}
+
+  // O atalho de QA só existe DENTRO do modo app, e só pela sessão:
+  // sessionStorage morre com a aba/app, então ?pbspa=1 serve pra testar sem
+  // virar trava permanente, e ?pbspa=0 continua a saída explícita. Fora do
+  // modo app nada é lido nem gravado. Mesmo try/catch, mesmo motivo (são
+  // acessos a storage); se estourar, flag fica null e o motor não liga.
+  let flag = null;
+  try {
+    if (inApp) {
+      if (qs.get("pbspa") === "0") sessionStorage.removeItem("pbSpa");
+      if (qs.get("pbspa") === "1") sessionStorage.setItem("pbSpa", "1");
+      flag = sessionStorage.getItem("pbSpa");
+    }
+  } catch (_) {}
+
+  // inApp entra aqui de novo de propósito, mesmo já sendo condição pra flag
+  // existir: nenhum teste separa as duas barreiras (sem o guard de cima a flag
+  // nem chega a ser lida fora do app), mas afrouxar UMA delas sozinha não pode
+  // bastar pra religar o motor num navegador comum.
+  const enabled = inApp &&
     flag === "1" &&
     typeof document.startViewTransition === "function" &&
     typeof DOMParser === "function";

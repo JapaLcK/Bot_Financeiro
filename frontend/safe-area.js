@@ -13,20 +13,25 @@
  * ou montar tab bar — só o respiro das bordas. A landing, por exemplo,
  * precisa continuar mostrando a nav dela (é o caminho de volta pro app).
  *
- * Inerte fora do app: sem o user agent do app (nem PWA instalada, nem
- * ?pbapp=1), não faz nada.
+ * Inerte fora do app: sem o user agent do app e sem ícone instalado, não faz
+ * nada. Navegador comum não tem como entrar — o preview ?pbapp=1 foi removido.
  */
 (() => {
-  let stored = null;
-  try { stored = localStorage.getItem("pbApp"); } catch (_) {}
   const standalone =
     (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
     window.navigator.standalone === true;
-  const inApp =
-    /PigBankApp/.test(navigator.userAgent) ||
-    stored === "1" ||
-    new URLSearchParams(location.search).get("pbapp") === "1" ||
-    standalone;
+
+  // Mesma condição do app-mode.js, repetida na unha: a página que carrega os
+  // dois (changelog.html) põe ESTE script antes, então não dá pra ler a classe
+  // pb-app dele — e /precos & landing carregam só este. Se mudar aqui, mude lá.
+  //
+  // Não há assimetria entre os dois arquivos: nenhum dos dois GRAVA nada, e
+  // nenhum LÊ storage ou query pra decidir. A condição é puramente derivada do
+  // ambiente (UA do app nativo ou ícone instalado), então os dois chegam sempre
+  // à mesma resposta sem precisar combinar estado. A única escrita que sobrou
+  // no par mora no app-mode.js e é uma limpeza: removeItem da chave legada
+  // localStorage.pbApp, do preview ?pbapp=1 que foi removido.
+  const inApp = /PigBankApp/.test(navigator.userAgent) || standalone;
   if (!inApp) return;
 
   document.documentElement.classList.add("pb-safe");

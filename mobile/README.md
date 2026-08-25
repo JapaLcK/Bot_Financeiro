@@ -9,10 +9,19 @@ aberturas, e o `login.html` pula direto pra `/home` quando a sessão está viva.
 - **Modo remoto** (`server.url` no `capacitor.config.json`): o WebView carrega o
   site de produção. Deploy do site = update do app, sem passar pela App Store
   (só mudanças nativas exigem novo build).
-- **User agent** ganha o sufixo `PigBankApp/1.0`. O frontend usa isso
-  (`window.PB_IN_APP` em `auth-refresh.js`) pra esconder CTAs de upgrade e
-  trocar o redirect de paywall por tela neutra — exigência da diretriz 3.1.1
-  da App Store (sem link de compra externa dentro do app).
+- **User agent** ganha o sufixo `PigBankApp/1.0` (`capacitor.config.json:18`).
+  **Este sufixo sustenta o LAYOUT INTEIRO do app**, não só as regras da App
+  Store: depois que o preview `?pbapp=1` foi removido, ele e o ícone instalado
+  (`display-mode: standalone`) são os ÚNICOS gatilhos de `html.pb-app`
+  (`frontend/app-mode.js`) e de `html.pb-safe` (`frontend/safe-area.js`) — sem
+  ele o app abre com layout de site: nav, footer, sem tab bar, desenhando sob o
+  notch. Quem for mexer aqui: os dois arquivos e o servidor
+  (`frontend/routes/shared.py:548`) casam por SUBSTRING `PigBankApp`, então
+  trocar o número da versão é seguro; trocar o NOME quebra tudo.
+  Além do layout, o mesmo UA vira `window.PB_IN_APP` (`auth-refresh.js`), que
+  esconde CTAs de upgrade e troca o redirect de paywall por tela neutra —
+  exigência da diretriz 3.1.1 da App Store (sem link de compra externa dentro
+  do app).
 - **Regra de push** (Anexo 1 do contrato Apple): notificação NÃO pode conter
   valor, saldo ou dado financeiro — texto genérico, detalhe só dentro do app.
 - Plugins instalados: `@capacitor/app`, `@capacitor/push-notifications`
