@@ -8,6 +8,116 @@
 
 ---
 
+## 0. Regras permanentes — leia antes de escrever qualquer linha
+
+**Estas regras valem para toda alteração de código deste repositório**, sem exceção:
+implementação, correção, refatoração, arquivo novo. Não são um checklist de abertura
+— elas valem durante o trabalho inteiro, e de novo a cada nova tarefa da mesma sessão.
+
+**Antes de começar, leia o `CLAUDE.md` relevante.** Este arquivo para processo;
+`docs/CLAUDE.md` para domínio (tabelas, endpoints, integrações). Se existir um
+`CLAUDE.md` mais específico dentro da área que você vai mexer, ele também vale — e o
+mais específico ganha quando os dois falarem do mesmo assunto.
+
+### 0.1 Procure antes de criar
+
+Antes de escrever **qualquer** função, classe, helper, utilitário, componente,
+módulo, endpoint, serviço, arquivo ou abstração: **procure se já existe**. Este
+repositório tem 300+ arquivos Python e 15 anos-pessoa de código acumulado em
+`dashboard.js` — a chance de o que você precisa já existir é alta, e a de você
+não achar sem procurar é ainda maior.
+
+```bash
+grep -rn "nome_provavel\|conceito" --include="*.py" --exclude-dir=.venv --exclude-dir=.claude .
+git grep -n "conceito" -- frontend/
+```
+
+Nunca crie função nova porque criar é mais rápido que procurar. Ordem de preferência,
+nesta ordem:
+
+1. **reutilizar** uma função existente;
+2. **estender** uma existente, quando fizer sentido para os dois chamadores;
+3. **extrair** o comportamento comum, quando houver reutilização real (não especulada);
+4. só então **criar** algo novo.
+
+Não copie-e-cole lógica para outro lugar. Duas funções com nomes diferentes fazendo
+essencialmente a mesma coisa são um bug esperando o dia em que só uma for corrigida —
+já aconteceu aqui (`handlers/credit.py` × `core/handlers/credit.py`, ver
+`docs/refactor_plan.md`).
+
+### 0.2 Escreva o mínimo que resolve
+
+A solução preferida é a mais simples que resolve **corretamente** o problema. Evite:
+abstração prematura, wrapper desnecessário, helper de uso único, código defensivo
+exagerado, sistema genérico para problema específico, camada nova de arquitetura,
+comentário explicando o óbvio, duplicação, boilerplate, e funcionalidade que ninguém
+pediu.
+
+Não "melhore" área não relacionada. Não transforme mudança pequena em refatoração
+grande. Isso **não** vale para o que nunca se simplifica: validação em fronteira de
+confiança, tratamento de erro que evita perda de dado, segurança, acessibilidade, e
+o que foi explicitamente pedido.
+
+### 0.3 Mudanças cirúrgicas
+
+Para bug e feature pequena: mudança pequena e localizada. Não altere arquivo que não
+precisa mudar, não renomeie sem necessidade, não reformate arquivo inteiro para trocar
+três linhas, não misture refatoração não relacionada com feature. **O diff deve ser o
+menor possível sem comprometer a solução** — e o revisor mede o PR pelo que ele tem de
+ler, não pelo que você achou bonito de arrumar no caminho.
+
+### 0.4 Entenda o fluxo antes de mexer
+
+Nunca altere funcionalidade importante olhando só o trecho isolado. Antes de tocar em
+**autenticação, MFA, pagamentos, Open Finance, WebSocket, navegação, estado global,
+service worker ou cache**, levante o fluxo inteiro: quem chama, quem escuta, quais
+callbacks, quais eventos, quais imports, quais endpoints relacionados, quais efeitos
+colaterais. É o mesmo inventário do §2, e a §5 lista onde ele já foi pago caro.
+
+### 0.5 Organização de arquivos é prioridade
+
+Arquivo grande demais não é tradição a ser respeitada. Se um arquivo acumula
+responsabilidades diferentes, divida por assunto:
+
+```text
+dashboard/                 em vez de     dashboard.js
+  boletos.js                             // 10.587 linhas, 414 funções
+  cartoes.js
+  investimentos.js
+```
+
+Ao criar arquivo novo: uma responsabilidade clara, nome que a reflita, diretório
+apropriado. Nada de `utils.js`/`helpers.js`/`common.js`/`misc.js` gigantes onde coisa
+não relacionada é despejada. Ao mexer num arquivo já enorme, pergunte se o novo código
+não cabe melhor num módulo separado.
+
+O oposto também é erro: não estilhace em dezenas de arquivos minúsculos sem ganho.
+O alvo é **coesão alta, acoplamento baixo, estrutura fácil de navegar**.
+
+### 0.6 Respeite a arquitetura atual
+
+Não introduza framework, biblioteca ou padrão arquitetural novo porque seria a forma
+mais moderna. Antes de adicionar dependência, veja se o projeto ou a própria
+plataforma já resolvem (o navegador tem módulos ES, `<dialog>`, `Intl`, View
+Transitions; o Postgres tem constraint). Alteração local segue o padrão existente,
+salvo decisão explícita de migração.
+
+### 0.7 Uma fonte de verdade
+
+Antes de adicionar constante, configuração, status, string, regra de negócio, lista ou
+mapeamento: veja se já existe a fonte oficial daquilo. Não mantenha duas versões da
+mesma regra em lugares diferentes. Quando a duplicação for inevitável (ex.: HTML
+estático que não consegue importar Python), **um teste tem que comparar as duas** —
+é o que já se faz com o subset de ícones (`tests/test_phosphor_subset.py`).
+
+### 0.8 Otimize para quem vem depois
+
+Entre duas soluções equivalentes, prefira a que tem menos código, menos estado, menos
+dependências, reutiliza o que existe, deixa claro de quem é cada responsabilidade e
+vai ser mais fácil de mudar. Não otimize só para a implementação de hoje funcionar.
+
+---
+
 ## 1. Antes de escrever a primeira linha
 
 **Entenda a queixa antes de diagnosticar.** Relato de usuário quase nunca é
@@ -73,12 +183,19 @@ export JWT_SECRET="…"                    # 32+ bytes
 export PII_ENCRYPTION_KEY="…" PII_HASH_PEPPER="…"
 export PII_AUDIT_DISABLED=1 RUN_BACKGROUND_TASKS=0
 
-PYTHONPATH=. python3 -m pytest -q                 # tudo
-PYTHONPATH=. python3 -m pytest tests/test_x.py -q # durante o desenvolvimento
+PY=/Users/<user>/Desktop/bot/bot_wa/.venv/bin/python   # na máquina local; ver §6a
+PYTHONPATH=. $PY -m pytest -q                 # tudo
+PYTHONPATH=. $PY -m pytest tests/test_x.py -q # durante o desenvolvimento
 ```
 
-Use `python3 -m pytest`, não `pytest` solto — o binário no PATH pode ser de outro
-interpretador, sem as dependências instaladas.
+Use `<interpretador> -m pytest`, nunca `pytest` solto — o binário no PATH costuma ser
+de outro interpretador, sem as dependências. **Na máquina local o `python3` do PATH
+(Homebrew) não tem nem `fastapi` nem `pytest`**: use o do `.venv` da raiz, que tem
+tudo (§6a). No sandbox da web o interpretador é o `python3` mesmo, e aí valem as
+exclusões do §6b.
+
+**Frontend:** `npm run test:frontend` (`node --test tests/frontend/*.test.mjs`, com
+Playwright). O `package.json` da raiz existe só para isso — não há build de JS.
 
 O CI (`.github/workflows/tests.yml`) sobe seu próprio Postgres 16 e roda `pytest`
 (bloqueante) e `audit` de CVEs (não-bloqueante) em todo push e PR. Não use o CI como
@@ -285,6 +402,86 @@ O app iOS (Capacitor, `mobile/`) carrega `https://pigbankai.com` num WKWebView c
   ~8 HTMLs por PR e `v=31` vs `v=33` na mesma linha dava merge conflict a cada duas
   PRs paralelas. Asset servido de fora de `frontend/` fica intacto.
 
+### Frontend: como a navegação funciona hoje
+
+Não há build, não há bundler, não há framework: o `package.json` da raiz existe **só**
+para o harness de testes de frontend (`node --test tests/frontend/*.test.mjs`, com
+Playwright). O HTML é escrito à mão e servido pelo FastAPI; templating de servidor
+existe em dois lugares só, por `str.replace("{{X}}")` (`/blog/{slug}` e o `{{FAQ}}` do
+`/suporte`, ambos em `frontend/routes/static_pages.py`).
+
+Três mundos convivem, e confundi-los produz bug:
+
+| | como navega | quem |
+|---|---|---|
+| **Páginas públicas** | MPA clássico, request por clique | `index`, `precos`, `funcionalidades`, `termos`, `privacy`, `suporte`, `blog/*`, `whatsapp`, … |
+| **Área logada** | MPA clássico **também**, com muito JS por página | `dashboard`, `settings`, `home`, `onboarding` |
+| **POC de SPA** | `fetch` + troca de DOM, **desligado por padrão** | só `/home` e `/comandos-app`, só no app |
+
+**O POC de SPA é o `frontend/pb-nav.js`, e ele NÃO está ligado em produção.** Ler o
+cabeçalho do arquivo antes de tocar em navegação. O que ele é, exatamente:
+
+- Ativa só quando as **três** condições valem: modo app (`html.pb-app`) **e** a flag
+  `pbspa` em `sessionStorage` (ligada por `?pbspa=1` dentro do app, desligada por
+  padrão, morre com a sessão) **e** a rota estar em `ROUTES` — que hoje tem **duas**
+  entradas: `/home` e `/comandos-app` (`pb-nav.js:93`).
+- Quando ativo: `fetch` da próxima página, swap dos nós dentro de
+  `document.startViewTransition`, `history.pushState`, cache por página (nós, estilos,
+  título, scroll) e re-execução dos inits. Existe para matar a piscada preta do
+  WKWebView entre documentos, não para virar SPA.
+- **Contrato por página convertida**: script inline embrulhado em
+  `(PBPages.<key> ||= {inits:[]}).inits.push(fn)`, e o último script marcado
+  `data-pb-boot` chamando `PBNav.boot("<key>")`. Quebrar esse contrato quebra a página
+  no app e não quebra nada no navegador — o pior tipo de bug daqui.
+- **Fallback sempre-navega**: qualquer erro (fetch, timeout de 5s, redirect de auth,
+  rota não convertida) cai em `location.href`. O pior caso é o comportamento de hoje.
+
+Ao escrever qualquer coisa nova, o default é **MPA**. Não descreva nem trate a área
+logada como SPA, e não presuma que uma migração para framework aconteceu: ela não
+aconteceu, nem está decidida.
+
+### `dashboard.js`: 10.587 linhas num arquivo só
+
+É o maior passivo de organização do repositório e o exemplo vivo da §0.5: **414
+funções e 159 `const/let` no escopo global**, 35 seções demarcadas por comentário,
+491 KB. Nasceu de um `<script>` inline extraído do `dashboard.html` ("refactor Fase 1:
+CSP script-src").
+
+Três fatos que decidem qualquer mexida ali:
+
+- **`dashboard.html` tem 139 handlers inline** (`onclick="abrirX()"`) chamando **86
+  nomes** distintos. Eles funcionam porque o arquivo é script clássico e tudo no topo
+  é global. `settings.html` tem 61 handlers inline e `home.html` tem 11.
+- **Trocar por `<script type="module">` sem mais nada quebra os 139** — módulo tem
+  escopo próprio, os nomes somem do `window`, o botão para de funcionar **sem erro
+  visível**. Enquanto os handlers inline existirem, qualquer divisão precisa devolver
+  os 86 nomes ao `window` e ter teste que compare a lista com o HTML.
+- **Esses handlers inline são também o que segura o `'unsafe-inline'`** no
+  `script-src` da CSP. A Fase 1 já tirou o `<script>` inline; matar os handlers é o
+  que falta para fechar o `script-src`.
+
+Ao adicionar funcionalidade nova de dashboard, **prefira arquivo novo** a mais uma
+seção nesse arquivo — e ele precisa de rota própria em `static_pages.py` (ver abaixo).
+
+### Assets: não há `StaticFiles` mount
+
+Cada CSS/JS servido tem **uma rota `@router.get` escrita à mão** em
+`frontend/routes/static_pages.py`. Arquivo novo em `frontend/` **não é servido
+sozinho** — sem a rota, ele dá 404 e o sintoma aparece só no navegador.
+
+Cuidado ao mexer em cache aqui: o `stamp_asset_versions` reescreve `?v=` **no HTML**.
+Um `import "./x.js"` dentro de um JS **nunca é carimbado** — módulo ES importado por
+outro módulo não pode receber `immutable` enquanto não tiver hash no nome.
+
+### Service worker e PWA
+
+`frontend/service-worker.js` (`CACHE_NAME` versionado à mão, hoje `pigbank-v7`):
+HTML e auth nunca são cacheados, assets são network-first com fallback de cache,
+API e WebSocket passam direto. O `manifest.json` tem `start_url: "/login"` — e a
+`index.html` tem um guard no topo que manda a PWA instalada para `/login`, com saída
+por `?site=1`. Mexeu na estratégia de cache? Bumpe o `CACHE_NAME`, senão o aparelho
+que já instalou continua com o SW velho.
+
 ### Componentes fragmentados
 
 Três overlays (`.overlay`, `.pig-modal-overlay`, `.mfa-overlay`) e quatro modais
@@ -295,25 +492,67 @@ fixo de toda mudança de layout.
 
 ### Backend
 
-- **`db/` é um pacote**, não o `db.py` único que o `docs/CLAUDE.md` descreve — aquele
-  arquivo está desatualizado nesse ponto. As rotas também estão divididas em
-  `frontend/routes/`.
+- **`db/` é um pacote** com ~30 módulos por domínio, não um `db.py` único. O DDL de
+  todas as tabelas vive em `db/schema.py::init_db()` — é a fonte de verdade do schema
+  (§0.7), e o `docs/CLAUDE.md` aponta para lá em vez de repetir a lista.
+- **O monólito ainda existe e ainda cresce.**
+  `frontend/finance_bot_websocket_custom.py` tem ~14,5 mil linhas e concentra auth,
+  MFA, billing, WebSocket, dashboard e o `ConnectionManager`. Parte das rotas já saiu
+  para `frontend/routes/` (`static_pages`, `settings`, `pockets`, `cards`,
+  `analytics`, `open_finance`, `push`, `agents`, `affiliates`, `shared`), registradas
+  por `include_router`. **Rota nova vai para um router de `frontend/routes/`** — não
+  para o monólito. O plano completo está em `docs/refactor_plan.md`.
 - **Isolamento por usuário é regra dura**: toda query com `WHERE user_id = %s`.
   Nunca vazar dado entre usuários.
+- **`launch.py` sobe dois processos**: o uvicorn (que atende o `$PORT` do Railway) e o
+  `bot.py` do Discord. Um `web` no Procfile, dois processos filhos.
+- **Tarefas de fundo sobem no startup do app** quando `RUN_BACKGROUND_TASKS != "0"`
+  (agendadores de investimento, Open Finance, engajamento, cobrança recorrente…).
+  Em teste e no `dashboard_dev.py` isso é desligado — se você ligar sem querer num
+  ambiente com banco real, elas escrevem.
 
 ---
 
-## 6. Limites deste ambiente (não são bugs, não tente contornar)
+## 6. Limites do ambiente (não são bugs, não tente contornar)
 
-- **A produção não é acessível.** O proxy bloqueia `pigbankai.com` (403). Não dá para
-  conferir o comportamento real do site daqui.
+**Antes de tudo: descubra em QUAL ambiente você está.** São dois, com limites
+diferentes, e confundi-los já produziu documentação errada neste próprio arquivo.
+
+```bash
+ls -d /Users/<user>/Desktop/bot/bot_wa/.venv   # existe → máquina local
+python3 -c "import fastapi" 2>&1 | tail -1     # ModuleNotFoundError → não é o venv
+```
+
+### 6a. Máquina local (macOS)
+
+- **Existe um `.venv` na raiz do repositório com TODOS os pacotes**, inclusive
+  `ofxparse`, `reportlab` e `pypdf`. Nada do §6b abaixo se aplica aqui: não há
+  `--ignore`, não há os 9 erros de coleta, e os 7 testes de `test_statement_import.py`
+  não têm por que falhar por dependência.
+- **O `python3` do PATH (Homebrew) NÃO tem os pacotes** — nem `fastapi`, nem
+  `psycopg`, nem `pytest`. Rodar `python3 -m pytest` dá `ModuleNotFoundError` e isso
+  **não é falha de teste**. Use o interpretador do venv, com caminho absoluto:
+
+  ```bash
+  PYTHONPATH=. /Users/<user>/Desktop/bot/bot_wa/.venv/bin/python -m pytest -q
+  ```
+
+  Vale também a partir de um worktree de `.claude/worktrees/` — o venv da raiz serve
+  os dois.
+- **As variáveis de ambiente continuam obrigatórias** (§3). Sem elas o import de
+  `frontend/finance_bot_websocket_custom.py` chama `sys.exit(1)` na linha 277
+  (`DATABASE_URL`) e o pytest morre com `INTERNALERROR` — de novo, não é falha de
+  teste.
+- **A produção é acessível** por HTTP a partir daqui (medido: `GET https://pigbankai.com/`
+  → 200, assets idem). `HEAD` responde 405 com `Allow: GET`, e isso é o roteamento
+  sendo estrito, não uma falha. Antes de afirmar que algo está no ar, busque.
+
+### 6b. Sandbox do Claude Code na web
+
+- **A produção não é acessível**: o proxy bloqueia `pigbankai.com` (403).
 - **CDNs são bloqueados.** Chart.js e afins falham; `applyTheme` do dashboard, por
   exemplo, lança no meio por causa disso. Saiba disso ao interpretar um teste.
-- **`env(safe-area-inset-*)` vale sempre 0** no Chromium headless. Regras de área
-  segura são inertes aqui; só dá para verificar a aritmética substituindo valores fixos.
-- **Comportamento nativo do WKWebView não é reproduzível.** `contentInset`, elástico,
-  teclado: só no aparelho, depois do build.
-- **Faltam pacotes de `requirements.txt` aqui** — pelo menos `ofxparse`, `reportlab` e
+- **Faltam pacotes de `requirements.txt`** — pelo menos `ofxparse`, `reportlab` e
   `pypdf` (o `pip install` falha pelo proxy). A ausência do `ofxparse` não
   faz "alguns testes falharem": são **9 erros de coleta**, e o pytest **interrompe a
   suíte inteira** antes de rodar qualquer teste. Sem tratar isso você não tem sinal
@@ -402,7 +641,17 @@ fixo de toda mudança de layout.
   sinal, não baseline.
 
   No CI os três pacotes estão presentes (`requirements.txt:56–57,66`), então lá tudo
-  isso roda normalmente — a exclusão é só local.
+  isso roda normalmente — a exclusão é só do sandbox.
+
+### 6c. Vale nos dois ambientes
+
+- **`env(safe-area-inset-*)` vale sempre 0** no Chromium headless. Regras de área
+  segura são inertes ali; só dá para verificar a aritmética substituindo valores fixos.
+- **Comportamento nativo do WKWebView não é reproduzível.** `contentInset`, elástico,
+  teclado: só no aparelho, depois do build.
+- **Exportar PDF depende de `reportlab`** (`_render_pdf`,
+  `frontend/finance_bot_websocket_custom.py`). Onde o pacote falta, esse fluxo não é
+  exercitável — diga isso no relato em vez de chamar de testado.
 
 Nunca desligue verificação de TLS nem tire o `HTTPS_PROXY` para contornar bloqueio.
 
