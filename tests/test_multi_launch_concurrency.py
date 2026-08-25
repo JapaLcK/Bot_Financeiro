@@ -1,0 +1,541 @@
+"""
+Duas respostas para a MESMA fila `multi_launch_values` não podem gravar o mesmo
+item duas vezes.
+
+O caminho é real pelo Discord: `adapters/discord/discord_bot.py:122` é um
+`on_message` async sem lock, num processo separado do uvicorn. Duas mensagens
+seguidas do mesmo usuário viram duas tarefas concorrentes. Antes do compare-and-swap (`db.advance_pending_action`)
+as duas threads liam a mesma fila, as duas gravavam o item da FRENTE e o
+segundo valor sumia sem uma palavra.
+
+O `__main__` no fim deste arquivo é o controle negativo: roda as duas threads
+20 vezes COM e SEM o CAS e imprime o placar. Ele não está na suíte de propósito
+— a metade "sem CAS" é uma corrida, e corrida perdida vira teste vermelho por
+motivo errado. O que a suíte guarda são os dois casos determinísticos abaixo.
+"""
+from __future__ import annotations
+
+import pytest
+import threading
+
+import db
+from core.handlers import launches
+
+
+def _armar_fila(user_id: int) -> dict:
+    """Deixa o usuário com a fila [aluguel, luz] e devolve o pending lido.
+
+    Esse dict é o que as duas threads teriam em mãos: as duas leem a pendência
+    antes de qualquer uma escrever.
+    """
+    launches.add(user_id, "recebi 100 de x e paguei o aluguel e paguei a luz", {})
+    p = db.get_pending_action(user_id)
+    assert [i["desc"] for i in p["payload"]["queue"]] == ["aluguel", "luz"]
+    return p
+
+
+def _registrados(user_id: int) -> set[tuple[str, float]]:
+    """(alvo, valor) das despesas — a receita de armação fica de fora."""
+    return {
+        ((r.get("alvo") or "").strip(), float(r["valor"]))
+        for r in db.list_launches(user_id, limit=20)
+        if r["tipo"] == "despesa"
+    }
+
+
+def test_leitura_velha_nao_grava_o_mesmo_item_duas_vezes(user_id):
+    """A segunda chamada usa o pending JÁ VELHO (o que a outra thread leu).
+
+    Sem CAS ela grava "aluguel" de novo e a luz morre na fila. Com CAS ela
+    perde a escrita, relê a fila encurtada e responde a luz. Determinístico:
+    é o mesmo interleaving da corrida, só que serializado.
+    """
+    velho = _armar_fila(user_id)
+
+    launches.resolve_multi_launch_value(user_id, "800", velho)
+    launches.resolve_multi_launch_value(user_id, "200", velho)
+
+    assert _registrados(user_id) == {("aluguel", 800.0), ("luz", 200.0)}
+    p = db.get_pending_action(user_id)
+    assert p is None or p["action_type"] != "multi_launch_values"
+
+
+def test_duas_threads_simultaneas(user_id):
+    """A corrida de verdade, com as duas threads soltas ao mesmo tempo.
+
+    Qual thread pega qual item depende de quem vence o CAS — por isso a
+    asserção é sobre o CONJUNTO: cada valor num item, nenhum item repetido.
+    """
+    velho = _armar_fila(user_id)
+
+    largada = threading.Barrier(2)
+    erros: list[BaseException] = []
+
+    def responde(valor_txt: str):
+        try:
+            largada.wait(timeout=10)
+            launches.resolve_multi_launch_value(user_id, valor_txt, velho)
+        except BaseException as exc:  # noqa: BLE001 — o teste precisa ver
+            erros.append(exc)
+
+    ts = [threading.Thread(target=responde, args=(v,)) for v in ("800", "200")]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(timeout=30)
+
+    assert not erros, erros
+    feitos = _registrados(user_id)
+    assert len(feitos) == 2, feitos
+    assert {alvo for alvo, _ in feitos} == {"aluguel", "luz"}, feitos
+    assert {v for _, v in feitos} == {800.0, 200.0}, feitos
+
+
+def test_teto_de_plano_devolve_o_item_pra_fila(user_id, monkeypatch):
+    """O item sai da fila ANTES do registro — se o registro estoura, ele volta.
+
+    `check_can_create_launch` levanta `PlanLimitExceeded` quando o usuário do
+    Grátis bate o teto do mês. Sem devolver, o lançamento sumiria calado: a
+    fila já tinha sido encurtada e ninguém mais perguntaria por ele.
+    """
+    _armar_fila(user_id)
+
+    def estoura(*_a, **_kw):
+        raise RuntimeError("teto do plano")
+
+    monkeypatch.setattr("core.services.plan_service.check_can_create_launch", estoura)
+    try:
+        launches.resolve_multi_launch_value(user_id, "800", db.get_pending_action(user_id))
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("a exceção deveria ter subido")
+
+    p = db.get_pending_action(user_id)
+    assert p["action_type"] == "multi_launch_values"
+    assert [i["desc"] for i in p["payload"]["queue"]] == ["aluguel", "luz"]
+
+
+# ── Controle negativo (fora da suíte) ────────────────────────────────────────
+# `python3 tests/test_multi_launch_concurrency.py` → placar com e sem o CAS.
+if __name__ == "__main__":
+    import os
+    import sys
+    import uuid
+
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from db.connection import get_conn
+
+    RODADAS = 20
+
+    def _sem_cas(user_id, action_type, old_payload, new_payload, minutes=10):
+        """O que a `main` fazia: escreve sem conferir o que estava lá."""
+        if new_payload is None:
+            db.clear_pending_action(user_id)
+        else:
+            db.set_pending_action(user_id, action_type, new_payload)
+        return True
+
+    def _limpa(uid):
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                for t in ("launches", "pending_actions", "user_category_rules"):
+                    cur.execute(f"delete from {t} where user_id = %s", (uid,))
+                cur.execute("delete from users where id = %s", (uid,))
+            conn.commit()
+
+    def placar(com_cas: bool) -> int:
+        original = db.advance_pending_action
+        if not com_cas:
+            db.advance_pending_action = _sem_cas  # launches.db é o mesmo módulo
+        ok = 0
+        try:
+            for _ in range(RODADAS):
+                uid = int(uuid.uuid4().int % 10_000_000_000)
+                db.ensure_user(uid)
+                try:
+                    velho = _armar_fila(uid)
+                    largada = threading.Barrier(2)
+
+                    def responde(v):
+                        try:
+                            largada.wait(timeout=10)
+                            launches.resolve_multi_launch_value(uid, v, velho)
+                        except Exception:
+                            pass
+
+                    ts = [threading.Thread(target=responde, args=(v,))
+                          for v in ("800", "200")]
+                    for t in ts:
+                        t.start()
+                    for t in ts:
+                        t.join(timeout=30)
+                    feitos = _registrados(uid)
+                    if ({a for a, _ in feitos} == {"aluguel", "luz"}
+                            and {v for _, v in feitos} == {800.0, 200.0}):
+                        ok += 1
+                finally:
+                    _limpa(uid)
+        finally:
+            db.advance_pending_action = original
+        return ok
+
+    print(f"SEM  CAS: {placar(False)}/{RODADAS} rodadas corretas")
+    print(f"COM  CAS: {placar(True)}/{RODADAS} rodadas corretas")
+
+
+def test_item_que_estourou_volta_pra_fila_mesmo_com_outra_thread_avancando(user_id, monkeypatch):
+    """P2 do Codex, pelo caminho real: `resolve_multi_launch_value` com exceção.
+
+    Cena: fila [aluguel, luz]. A thread A reivindica 'aluguel'; ANTES de ela
+    registrar, a thread B avança a fila (registra 'luz'). Aí o registro de A
+    estoura (teto de plano). O payload que A tinha em mãos não existe mais.
+
+    Código antigo: tentava restaurar o estado velho, o CAS falhava, e 'aluguel'
+    sumia. Código novo: relê e prepende na fila que existir.
+    """
+    pending = _armar_fila(user_id)
+
+    def estoura_e_avanca_por_baixo(*a, **k):
+        # simula a thread B tendo avançado a fila enquanto A trabalhava
+        db.clear_pending_action(user_id)
+        raise RuntimeError("teto de plano")
+
+    monkeypatch.setattr(launches, "add_from_entities", estoura_e_avanca_por_baixo)
+
+    with pytest.raises(RuntimeError):
+        launches.resolve_multi_launch_value(user_id, "800", pending)
+
+    fila = (db.get_pending_action(user_id) or {}).get("payload", {}).get("queue", [])
+    assert [i["desc"] for i in fila] == ["aluguel"], (
+        f"o item que estourou sumiu — fila ficou {fila}")
+
+
+def test_duas_devolucoes_simultaneas_com_fila_vazia_nao_perdem_item(user_id):
+    """P2 (2ª rodada do Codex): dois itens que estouram juntos, fila já vazia.
+
+    Cena: os dois últimos itens são reivindicados por tarefas diferentes e
+    AMBOS os registros estouram (ex.: os dois batem o teto de plano). As duas
+    devoluções veem "não há pendência" e cada uma quer criar a sua. Com upsert
+    incondicional a última apaga a primeira e um item some.
+
+    Precisa de threads de verdade com barreira: em sequência a segunda já
+    encontraria a fila criada e nunca passaria pelo ramo que tem o defeito.
+    """
+    db.clear_pending_action(user_id)
+
+    largada = threading.Barrier(2)
+    erros: list[BaseException] = []
+
+    def devolve(desc: str):
+        try:
+            largada.wait(timeout=10)
+            launches._devolve_head(user_id, {"desc": desc, "tipo": "despesa"}, "whatsapp")
+        except BaseException as exc:  # noqa: BLE001 — o teste precisa ver
+            erros.append(exc)
+
+    ts = [threading.Thread(target=devolve, args=(d,)) for d in ("aluguel", "luz")]
+    for th in ts:
+        th.start()
+    for th in ts:
+        th.join(timeout=30)
+
+    assert not erros, erros
+    fila = (db.get_pending_action(user_id) or {}).get("payload", {}).get("queue", [])
+    nomes = sorted(i["desc"] for i in fila)
+    assert nomes == ["aluguel", "luz"], f"item perdido — fila ficou {fila}"
+
+
+def test_devolucao_continua_apos_cinco_colisoes_com_fila_vazia(user_id, monkeypatch):
+    """P2 (5ª rodada do Codex): recuperação não pode ter teto aditivo.
+
+    Quando vários itens já foram reivindicados e todos falham depois que a fila
+    foi apagada, uma devolução pode perder a inserção condicional para as outras
+    várias vezes seguidas. Com `len([]) + 5`, a sexta volta desistia antes de
+    restaurar o item.
+    """
+    head = {"desc": "aluguel", "tipo": "despesa"}
+    tentativas = 0
+    gravado: dict = {}
+
+    monkeypatch.setattr(launches.db, "get_pending_action", lambda _uid: None)
+
+    def cria(_uid, action_type, payload, minutes=10):
+        nonlocal tentativas
+        tentativas += 1
+        if tentativas <= 5:
+            return False
+        gravado["action_type"] = action_type
+        gravado["payload"] = payload
+        return True
+
+    monkeypatch.setattr(launches.db, "create_pending_action_if_absent", cria)
+    monkeypatch.setattr(
+        launches.db,
+        "advance_pending_action",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("não deveria atualizar fila inexistente")),
+    )
+
+    launches._devolve_head(user_id, head, "whatsapp")
+
+    assert tentativas == 6
+    assert gravado == {
+        "action_type": "multi_launch_values",
+        "payload": {"queue": [head], "platform": "whatsapp"},
+    }
+
+
+def test_cinco_respostas_concorrentes_nenhuma_e_descartada(user_id):
+    """P2 (3ª rodada do Codex): teto fixo de 4 tentativas descartava valor.
+
+    Com 5 respostas concorrendo, uma tarefa podia perder o CAS quatro vezes
+    seguidas (uma para cada vencedora), esgotar o laço e devolver None — o
+    valor que o usuário digitou sumia sem uma palavra. O `on_message` do
+    Discord não limita a duas.
+
+    Cinco itens na fila, cinco respostas soltas ao mesmo tempo: os cinco
+    valores têm que virar cinco lançamentos.
+    """
+    launches.add(user_id, "recebi 1 de x e paguei o aluguel e paguei a luz "
+                          "e paguei a agua e paguei o gas e paguei o wifi", {})
+    velho = db.get_pending_action(user_id)
+    assert len(velho["payload"]["queue"]) == 5, velho["payload"]["queue"]
+
+    largada = threading.Barrier(5)
+    erros: list[BaseException] = []
+
+    def responde(valor_txt: str):
+        try:
+            largada.wait(timeout=15)
+            launches.resolve_multi_launch_value(user_id, valor_txt, velho)
+        except BaseException as exc:  # noqa: BLE001
+            erros.append(exc)
+
+    valores = ("100", "200", "300", "400", "500")
+    ts = [threading.Thread(target=responde, args=(v,)) for v in valores]
+    for th in ts:
+        th.start()
+    for th in ts:
+        th.join(timeout=60)
+
+    assert not erros, erros
+    feitos = _registrados(user_id)
+    assert {v for _, v in feitos} == {100.0, 200.0, 300.0, 400.0, 500.0}, (
+        f"valor descartado em silêncio — gravados: {sorted(v for _, v in feitos)}")
+
+
+def test_falha_depois_do_commit_nao_devolve_item_nem_duplica(user_id, monkeypatch):
+    """P1 (4ª rodada do Codex): exceção APÓS o lançamento já gravado.
+
+    `add_launch_and_update_balance` commita e só depois roda o acessório
+    (aprender a regra, armar ofertas). Se o acessório estoura, quem chamou não
+    distingue "não gravou" de "gravou e falhou no acessório" — e a devolução
+    põe o item de volta, fazendo a próxima resposta registrar o MESMO gasto e
+    dobrar o saldo.
+
+    Depois da correção o acessório não sobe exceção: o lançamento fica, a fila
+    avança, e o saldo muda uma vez só.
+    """
+    velho = _armar_fila(user_id)
+
+    def estoura(*a, **k):
+        raise RuntimeError("upsert da regra caiu")
+
+    monkeypatch.setattr(launches, "learn_from_inference", estoura)
+
+    resp = launches.resolve_multi_launch_value(user_id, "800", velho)
+
+    feitos = [(a, v) for a, v in _registrados(user_id) if a == "aluguel"]
+    assert len(feitos) == 1 and feitos[0][1] == 800.0, feitos
+    assert resp, "o usuário tem que receber a confirmação, não um erro"
+
+    fila = (db.get_pending_action(user_id) or {}).get("payload", {}).get("queue", [])
+    assert [i["desc"] for i in fila] == ["luz"], (
+        f"o item já gravado foi devolvido pra fila — duplicaria: {fila}")
+
+
+def test_oferta_final_condicional_nao_sobrescreve_fila_restaurada(user_id, monkeypatch):
+    """P2 (6ª rodada do Codex): oferta do último item não atropela recuperação.
+
+    A thread do último item calcula `resto=[]` antes de registrar. Enquanto ela
+    está dentro de `add_from_entities`, outra recuperação pode recriar a fila.
+    A oferta de recategorização do último item precisa ser condicional, senão o
+    `set_pending_action` incondicional apaga a fila restaurada.
+    """
+    ultimo = {"desc": "luz", "tipo": "despesa"}
+    devolvido = {"desc": "aluguel", "tipo": "despesa"}
+    db.set_pending_action(
+        user_id, "multi_launch_values",
+        {"queue": [ultimo], "platform": "whatsapp"},
+    )
+    pending = db.get_pending_action(user_id)
+
+    class CategoriaFake:
+        category = "outros"
+        reason = "test"
+
+    monkeypatch.setattr(
+        "core.services.plan_service.check_can_create_launch",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(launches, "infer_category", lambda *_a, **_k: CategoriaFake())
+    monkeypatch.setattr(launches, "learn_from_inference", lambda *_a, **_k: None)
+    monkeypatch.setattr(launches, "_maybe_recurring_offer", lambda *_a, **_k: None)
+    monkeypatch.setattr(launches.db, "reconcile_manual_launch", lambda *_a, **_k: None)
+
+    def registra_enquanto_recupera(*_a, **_k):
+        launches._devolve_head(user_id, devolvido, "whatsapp")
+        return 999, 2, 0
+
+    monkeypatch.setattr(
+        launches.db, "add_launch_and_update_balance", registra_enquanto_recupera)
+
+    launches.resolve_multi_launch_value(user_id, "200", pending)
+
+    p = db.get_pending_action(user_id) or {}
+    assert p.get("action_type") == "multi_launch_values", p
+    fila = (p.get("payload") or {}).get("queue", [])
+    assert [i["desc"] for i in fila] == ["aluguel"], fila
+
+
+def test_devolucao_desaloja_oferta_de_conveniencia(user_id):
+    """P2 (4ª rodada do Codex): a linha ocupada por OUTRA pendência.
+
+    Outra tarefa terminou o último item da fila e armou `recategorize_launch_offer`.
+    A devolução do item que estourou não consegue inserir (a linha por usuário
+    está ocupada por um tipo diferente), gira até o teto e o lançamento some.
+
+    Fila com dinheiro vale mais que oferta de conveniência: desaloja.
+    """
+    db.set_pending_action(user_id, "recategorize_launch_offer",
+                          {"user_seq": 1, "launch_id": 999})
+
+    launches._devolve_head(user_id, {"desc": "aluguel", "tipo": "despesa"}, "whatsapp")
+
+    p = db.get_pending_action(user_id) or {}
+    assert p.get("action_type") == "multi_launch_values", (
+        f"item não devolvido — pendência ficou {p.get('action_type')}")
+    fila = (p.get("payload") or {}).get("queue", [])
+    assert [i["desc"] for i in fila] == ["aluguel"], fila
+
+
+def test_controle_devolucao_nao_atropela_uma_fila_de_verdade(user_id):
+    """Controle do teste acima: desalojar não pode comer fila real.
+
+    Se o que está lá JÁ é uma fila de multi-lançamento, o item tem que ser
+    somado a ela, não substituí-la.
+    """
+    db.set_pending_action(user_id, "multi_launch_values",
+                          {"queue": [{"desc": "luz", "tipo": "despesa"}],
+                           "platform": "whatsapp"})
+
+    launches._devolve_head(user_id, {"desc": "aluguel", "tipo": "despesa"}, "whatsapp")
+
+    fila = (db.get_pending_action(user_id) or {}).get("payload", {}).get("queue", [])
+    assert [i["desc"] for i in fila] == ["aluguel", "luz"], fila
+
+
+def test_pergunta_o_head_atual_nao_o_resto_velho(user_id, monkeypatch):
+    """Codex: `resto` fica velho se outra tarefa registra enquanto esta demora.
+
+    Cena: fila [aluguel, luz]. A tarefa A reivindica 'aluguel'. Enquanto ela
+    registra, a tarefa B termina 'luz' e esvazia a fila. A responde ao usuário
+    com o `resto` que ela calculou lá atrás e pergunta "Quanto foi luz?" — de
+    algo já registrado. A resposta do usuário chega sem item na fila.
+
+    Simulo o atraso esvaziando a fila dentro do registro de A.
+    """
+    velho = _armar_fila(user_id)
+    real = launches.add_from_entities
+
+    def registra_e_esvazia(*a, **k):
+        r = real(*a, **k)
+        db.clear_pending_action(user_id)      # a outra tarefa terminou a fila
+        return r
+
+    monkeypatch.setattr(launches, "add_from_entities", registra_e_esvazia)
+
+    resp = launches.resolve_multi_launch_value(user_id, "800", velho)
+
+    assert "luz" not in (resp or "").lower(), (
+        f"perguntou por item já registrado: {resp!r}")
+
+
+def test_controle_com_a_fila_intacta_a_pergunta_continua_saindo(user_id):
+    """Controle: sem interferência, o próximo item ainda é perguntado.
+
+    Sem isto, o teste acima passaria num código que parou de perguntar.
+    """
+    velho = _armar_fila(user_id)
+    resp = launches.resolve_multi_launch_value(user_id, "800", velho)
+    assert "luz" in (resp or "").lower(), resp
+
+
+def test_oferta_final_nao_apaga_fila_restaurada_por_devolucao(user_id, monkeypatch):
+    """Codex: a oferta de 'categoria errada?' sobrescrevia fila restaurada.
+
+    Cena: duas tarefas pegam os últimos itens. A de trás falha e o
+    `_devolve_head` restaura o item dela; a da frente ainda está dentro do
+    `add_from_entities`, calculou `resto` vazio, e grava a oferta por cima —
+    apagando a fila restaurada e sumindo com o lançamento que falhou.
+
+    Simulo devolvendo um item durante o registro.
+    """
+    velho = _armar_fila(user_id)
+    db.set_pending_action(user_id, "multi_launch_values",
+                          {"queue": [{"desc": "aluguel", "tipo": "despesa"}],
+                           "platform": "whatsapp"})
+    real = launches.add_from_entities
+
+    def registra_e_devolve(*a, **k):
+        r = real(*a, **k)
+        launches._devolve_head(user_id, {"desc": "gas", "tipo": "despesa"}, "whatsapp")
+        return r
+
+    monkeypatch.setattr(launches, "add_from_entities", registra_e_devolve)
+    launches.resolve_multi_launch_value(user_id, "800", velho)
+
+    p = db.get_pending_action(user_id) or {}
+    assert p.get("action_type") == "multi_launch_values", (
+        f"a oferta apagou a fila restaurada — ficou {p.get('action_type')}")
+
+
+def test_oferta_de_gasto_fixo_sai_quando_a_fila_e_restaurada(user_id, monkeypatch):
+    """Codex: duas perguntas incompatíveis na mesma resposta.
+
+    A tarefa do último item cria a oferta de gasto fixo ("responda sim ou
+    não"); outra tarefa, falhando, substitui essa pendência por uma fila
+    restaurada. O texto da oferta fica órfão em `resp`, e a resposta sai com
+    duas perguntas. Um "sim" não é valor — descartaria o item restaurado.
+    """
+    velho = _armar_fila(user_id)
+    real = launches.add_from_entities
+
+    def registra_com_oferta_e_devolve(*a, **k):
+        r = real(*a, **k)
+        r += ("\n\n💡 Você já lançou *aluguel* de R$ 800,00 em outro mês. "
+              "Quer marcar como *gasto fixo* (a Piggy lança sozinha todo mês)? "
+              "Responda *sim* ou *não*.")
+        launches._devolve_head(user_id, {"desc": "gas", "tipo": "despesa"}, "whatsapp")
+        return r
+
+    monkeypatch.setattr(launches, "add_from_entities", registra_com_oferta_e_devolve)
+    resp = launches.resolve_multi_launch_value(user_id, "800", velho) or ""
+
+    assert "sim* ou *não" not in resp, (
+        f"duas perguntas incompatíveis na mesma resposta:\n{resp}")
+    assert "Quanto foi" in resp or "Faltou o valor" in resp, resp
+
+
+def test_controle_oferta_de_gasto_fixo_sobrevive_sem_fila(user_id):
+    """Controle: sem fila restaurada, o convite continua saindo.
+
+    Sem isto, o teste acima passaria num código que apagasse a oferta sempre.
+    """
+    texto = ("💸 Despesa registrada: R$ 800,00\n\n💡 Você já lançou *aluguel* de "
+             "R$ 800,00 em outro mês. Quer marcar como *gasto fixo* (a Piggy "
+             "lança sozinha todo mês)? Responda *sim* ou *não*.")
+    assert "sim* ou *não" in texto
+    assert "sim* ou *não" not in launches._sem_oferta_de_gasto_fixo(texto)
+    assert "Despesa registrada" in launches._sem_oferta_de_gasto_fixo(texto)

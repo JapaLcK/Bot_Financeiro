@@ -383,6 +383,8 @@ def add_from_entities(
     criado_em=None,
     is_internal: bool | None = None,
     platform: str = "whatsapp",
+    suppress_pending: bool = False,
+    conditional_pending: bool = False,
 ) -> str:
     """Registra um lançamento a partir de args já estruturados (sem regex).
 
@@ -392,6 +394,17 @@ def add_from_entities(
 
     Toda lógica compartilhada (categorização, learn, DB write, botão WhatsApp,
     alerta de orçamento) vive aqui — fonte única de verdade.
+
+    `suppress_pending=True`: não grava oferta nenhuma em `pending_actions` (nem
+    a de recorrente, nem o botão de recategorizar) e não imprime o texto da
+    oferta. A tabela tem UMA linha por usuário, então a oferta atropelaria a
+    fila de lançamentos múltiplos que o chamador acabou de gravar. Usado só por
+    `resolve_multi_launch_value`, quando ainda sobrou item na fila.
+
+    `conditional_pending=True`: cria ofertas de conveniência só se nenhuma
+    pendência apareceu desde o commit do lançamento. Usado no último item da
+    fila de multi-lançamento: outra recuperação pode ter recriado a fila entre
+    a reivindicação e a oferta final.
     """
     if valor <= 0:
         return "Não consegui identificar o valor. Tente: *gastei 50 no mercado*"
@@ -448,13 +461,24 @@ def add_from_entities(
         is_internal_movement=is_int,
     )
 
-    learn_from_inference(
-        user_id,
-        nota_clean,
-        categoria_final,
-        target_hint=alvo_clean,
-        reason=reason_final,
-    )
+    # DEPOIS DO COMMIT nada pode subir exceção. O lançamento e o saldo já
+    # existem; quem chamou não tem como distinguir "não gravou" de "gravou e
+    # falhou no acessório", e na fila de multi-lançamento essa confusão faz o
+    # item ser devolvido e o MESMO gasto ser registrado de novo, dobrando o
+    # saldo. Aprender a regra e armar as ofertas são melhor-esforço: se
+    # falharem, o usuário fica sem a comodidade, não sem o dinheiro.
+    try:
+        learn_from_inference(
+            user_id,
+            nota_clean,
+            categoria_final,
+            target_hint=alvo_clean,
+            reason=reason_final,
+        )
+    except Exception:
+        logger.exception(
+            "learn_from_inference falhou depois do commit (user %s, lancamento %s)",
+            user_id, launch_id)
 
     # Reconciliação reversa (Open Finance): se o banco já importou esse gasto, funde
     # com o lançamento que o usuário acabou de fazer — não duplica no "sobrou".
@@ -469,19 +493,34 @@ def add_from_entities(
     # com o botão de recategorizar; quando há oferta de recorrente ela vence
     # (é mais valiosa) e o botão de recategorizar é suprimido nesse lançamento.
     recurring_offer = None
-    if tipo == "despesa" and not is_int:
+    if tipo == "despesa" and not is_int and not suppress_pending:
         # merchant_key precisa da mesma prioridade alvo>nota que a query em
         # find_recurring_candidate usa pro lançamento anterior (coalesce(alvo,
         # nota)) — nota_clean sozinho é a frase toda ("gastei 44,90 na
         # netflix"), que nunca bate com o alvo limpo ("netflix") gravado no mês
         # passado, e a oferta nunca dispara mesmo quando a despesa repete.
-        recurring_offer = _maybe_recurring_offer(
-            user_id, alvo_clean or nota_clean, valor, categoria_final, criado_em, launch_id,
-        )
+        try:
+            recurring_offer = _maybe_recurring_offer(
+                user_id, alvo_clean or nota_clean, valor, categoria_final,
+                criado_em, launch_id,
+            )
+        except Exception:
+            # Pós-commit: melhor perder a oferta que subir exceção (ver o
+            # comentário do learn_from_inference acima).
+            logger.exception(
+                "_maybe_recurring_offer falhou depois do commit (user %s, lancamento %s)",
+                user_id, launch_id)
 
     if recurring_offer:
         try:
-            db.set_pending_action(user_id, "confirm_recurring_offer", recurring_offer)
+            if conditional_pending:
+                gravou_pending = db.create_pending_action_if_absent(
+                    user_id, "confirm_recurring_offer", recurring_offer)
+            else:
+                db.set_pending_action(user_id, "confirm_recurring_offer", recurring_offer)
+                gravou_pending = True
+            if not gravou_pending:
+                recurring_offer = None
         except Exception:
             logger.warning(
                 "falha ao salvar pending confirm_recurring_offer (user %s) — oferta perdida",
@@ -490,13 +529,18 @@ def add_from_entities(
             recurring_offer = None
     # Botão "categoria errada?" no WhatsApp (one-shot, lido por
     # _send_reply_with_optional_buttons no wa_runtime e limpo em seguida).
-    elif platform == "whatsapp" and launch_id:
+    elif platform == "whatsapp" and launch_id and not suppress_pending:
         try:
-            db.set_pending_action(
-                user_id,
-                "recategorize_launch_offer",
-                {"launch_id": int(launch_id), "user_seq": int(user_seq)},
-            )
+            recat_payload = {"launch_id": int(launch_id), "user_seq": int(user_seq)}
+            if conditional_pending:
+                db.create_pending_action_if_absent(
+                    user_id, "recategorize_launch_offer", recat_payload)
+            else:
+                db.set_pending_action(
+                    user_id,
+                    "recategorize_launch_offer",
+                    recat_payload,
+                )
         except Exception:
             logger.warning(
                 "falha ao salvar pending recategorize_launch_offer (user %s, launch %s) — botão de recategorizar não vai aparecer",
@@ -651,47 +695,175 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
     - resposta de cancelamento → descarta o que faltava.
     - resposta sem valor (o user mudou de assunto) → abandona a pendência e
       retorna None pra que o roteador processe a mensagem normalmente.
+
+    Duas respostas simultâneas: a fila avança por compare-and-swap
+    (`db.advance_pending_action`) ANTES do registro, então a segunda thread
+    perde o CAS, relê a fila já encurtada e responde o item seguinte em vez de
+    registrar o mesmo de novo. Sem lock — ver o porquê em `db/pending.py`.
     """
     from utils_text import normalize_text
 
-    payload = pending.get("payload", {})
-    queue: list[dict] = list(payload.get("queue") or [])
-    if not queue:
-        db.clear_pending_action(user_id)
-        return None
-
     resp_norm = normalize_text(text).strip()
-    if resp_norm in _CANCEL_WORDS:
-        db.clear_pending_action(user_id)
-        restantes = ", ".join(i.get("desc", "?") for i in queue)
-        return f"❌ Beleza, deixei de lado: {restantes}."
-
     valor = _extract_valor(text)
-    if valor is None or valor <= 0:
-        # Não é um valor — o usuário mudou de assunto. Abandona a pendência e
-        # deixa o roteador tratar a mensagem como um comando novo.
-        db.clear_pending_action(user_id)
-        return None
 
-    head = queue.pop(0)
-    resp = add_from_entities(
-        user_id,
-        tipo=head.get("tipo", "despesa"),
-        valor=float(valor),
-        alvo=head.get("desc"),
-        nota=head.get("desc"),
-        platform=platform,
-    )
+    # Duas respostas do mesmo usuário podem ser processadas em paralelo pelo
+    # Discord (`discord_bot.py:122`, `on_message` async sem lock, em processo
+    # separado do uvicorn). O webhook do WhatsApp sozinho não corre — enfileira
+    # e um worker único consome. Sem o
+    # compare-and-swap abaixo as duas leem a mesma fila, gravam o MESMO item
+    # duas vezes e o segundo valor some sem uma palavra.
+    #
+    # Sem teto de tentativas, e sem contador. Perder o CAS significa que outra
+    # tarefa mexeu na fila; as concorrentes são finitas, então quando elas
+    # acabarem o nosso CAS vence. QUALQUER teto por tamanho de fila é errado na
+    # premissa: o `_devolve_head` FAZ a fila crescer quando um registro falha,
+    # então ela não só encolhe — foi por isso que as duas versões anteriores
+    # (teto 4, e depois `len(fila) + 5`) descartavam o valor do usuário em
+    # silêncio. A saída é a fila sumir, tratada logo abaixo.
+    while True:
+        payload = pending.get("payload") or {}
+        queue: list[dict] = list(payload.get("queue") or [])
+        if not queue:
+            db.clear_pending_action(user_id)
+            return None
 
-    if queue:
-        db.set_pending_action(
-            user_id, "multi_launch_values",
-            {"queue": queue, "platform": platform},
-        )
-        return f"{resp}\n\n{_ask_value_question(queue[0])}"
-    # fila vazia: não re-arma multi_launch_values. O add_from_entities acima já
-    # gravou o pending de "categoria errada?" (WhatsApp), que fica valendo.
-    return resp
+        if resp_norm in _CANCEL_WORDS:
+            db.clear_pending_action(user_id)
+            restantes = ", ".join(i.get("desc", "?") for i in queue)
+            return f"❌ Beleza, deixei de lado: {restantes}."
+
+        if valor is None or valor <= 0:
+            # Não é um valor — o usuário mudou de assunto. Abandona a pendência e
+            # deixa o roteador tratar a mensagem como um comando novo.
+            db.clear_pending_action(user_id)
+            return None
+
+        head, resto = queue[0], queue[1:]
+
+        # Tira o head da fila ANTES de registrar: é isso que impede a outra
+        # thread de registrar o MESMO item. Fila vazia = apaga a pendência; o
+        # `add_from_entities` grava logo abaixo a dele ("categoria errada?").
+        novo_payload = {"queue": resto, "platform": platform} if resto else None
+        if not db.advance_pending_action(
+                user_id, "multi_launch_values", payload, novo_payload):
+            # Outra thread avançou a fila entre a leitura e agora. Relê e
+            # reavalia: o item que sobrou é o próximo, não este.
+            pending = db.get_pending_action(user_id)
+            if not pending or pending.get("action_type") != "multi_launch_values":
+                return None
+            continue
+
+        # Enquanto ainda há resto, suprime ofertas: `pending_actions` tem uma
+        # linha só por usuário e a oferta apagaria a fila que o CAS acabou de
+        # gravar. No último item, a oferta ainda pode aparecer, mas só com
+        # criação condicional: se uma recuperação recriou a fila durante o
+        # registro, a fila vence.
+        try:
+            resp = add_from_entities(
+                user_id,
+                tipo=head.get("tipo", "despesa"),
+                valor=float(valor),
+                alvo=head.get("desc"),
+                nota=head.get("desc"),
+                platform=platform,
+                suppress_pending=bool(resto),
+                conditional_pending=not bool(resto),
+            )
+        except Exception:
+            # O item já saiu da fila (é o que impede a duplicação), mas o
+            # trabalho não aconteceu — sem devolver, o lançamento some calado.
+            # Não é hipótese: `check_can_create_launch` levanta
+            # `PlanLimitExceeded` quando o usuário do Grátis bate o teto do mês
+            # (`core/services/plan_service.py`) e quem captura é o
+            # `core/handle_incoming.py`, que só responde o texto de upgrade.
+            _devolve_head(user_id, head, platform)
+            raise
+
+        # RELÊ antes de perguntar: `resto` é do momento da reivindicação. Se
+        # outra tarefa registrou itens enquanto esta demorava, perguntar pelo
+        # `resto[0]` velho pede um valor de algo JÁ registrado — e a resposta
+        # do usuário chega sem item correspondente na fila.
+        depois = db.get_pending_action(user_id)
+        fila_agora = []
+        if depois and depois.get("action_type") == "multi_launch_values":
+            fila_agora = (depois.get("payload") or {}).get("queue") or []
+        if fila_agora:
+            # Se a oferta de gasto fixo foi criada e outra tarefa a substituiu
+            # por esta fila restaurada, o texto dela ficou órfão em `resp`:
+            # sairiam DUAS perguntas incompatíveis ("responda sim ou não" e
+            # "quanto foi X?"), e um "sim" não é valor — descartaria o
+            # lançamento restaurado. A pendência que vale é a fila; o convite
+            # sai do texto.
+            resp = _sem_oferta_de_gasto_fixo(resp)
+            return f"{resp}\n\n{_ask_value_question(fila_agora[0])}"
+        # fila vazia: não re-arma multi_launch_values. O add_from_entities acima já
+        # gravou o pending de "categoria errada?" (WhatsApp), que fica valendo.
+        return resp
+
+    return None
+
+
+
+
+_OFERTA_GASTO_FIXO_RE = re.compile(
+    r"\n\n💡 Você já lançou .*?Responda \*sim\* ou \*não\*\.", re.DOTALL)
+
+
+def _sem_oferta_de_gasto_fixo(texto: str) -> str:
+    """Tira o convite de gasto fixo de uma resposta já montada.
+
+    Usado quando a pendência da oferta foi substituída por uma fila restaurada:
+    o convite pede "sim ou não" e a fila pede um valor. Deixar os dois no mesmo
+    texto faz o usuário responder "sim", que não é valor — e o item restaurado
+    é descartado.
+    """
+    return _OFERTA_GASTO_FIXO_RE.sub("", texto)
+
+
+def _devolve_head(user_id: int, head: dict, platform: str) -> None:
+    """Põe `head` de volta na FRENTE da fila que existir agora.
+
+    O item foi reivindicado (tirado da fila) antes de registrar, e o registro
+    estourou — sem devolver, ele some. Restaurar o payload ANTIGO não serve:
+    entre a reivindicação e a falha, outra thread pode ter avançado ou apagado
+    a fila, e gravar o estado velho por cima ressuscitaria um item que ela já
+    registrou. Por isso relemos e prependemos ao que estiver lá.
+
+    CAS em laço porque a fila pode mudar entre a leitura e a escrita. A
+    recuperação precisa ir até uma escrita condicional vencer; se ela desistir
+    cedo, o item que já saiu da fila some.
+    """
+    while True:
+        atual = db.get_pending_action(user_id)
+        if atual and atual.get("action_type") != "multi_launch_values":
+            # A linha está ocupada por OUTRA pendência — tipicamente a oferta
+            # de "categoria errada?" que outra tarefa acabou de armar ao
+            # terminar a fila. Sem desalojar, o insert condicional perde todas
+            # as tentativas e o item some. Fila com dinheiro do usuário vale
+            # mais que uma oferta de conveniência: desaloja, condicionado ao
+            # que está lá, para não atropelar uma fila real.
+            if db.advance_pending_action(
+                    user_id, atual["action_type"], atual.get("payload") or {},
+                    {"queue": [head], "platform": platform},
+                    new_action_type="multi_launch_values"):
+                return
+            continue
+        if not atual:
+            # Condicional, não upsert: duas devoluções simultâneas veriam as
+            # duas a fila vazia e a última apagaria a primeira. Quem perder a
+            # inserção volta ao topo do laço e prepende na fila que a outra
+            # acabou de criar.
+            if db.create_pending_action_if_absent(
+                    user_id, "multi_launch_values",
+                    {"queue": [head], "platform": platform}):
+                return
+            continue
+        antigo = atual.get("payload") or {}
+        fila = [head] + list(antigo.get("queue") or [])
+        if db.advance_pending_action(
+                user_id, "multi_launch_values", antigo,
+                {"queue": fila, "platform": antigo.get("platform", platform)}):
+            return
 
 
 def _register_parsed(user_id: int, parsed: dict, fallback_note: str, platform: str) -> str:
