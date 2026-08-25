@@ -244,3 +244,42 @@ def test_duas_devolucoes_simultaneas_com_fila_vazia_nao_perdem_item(user_id):
     fila = (db.get_pending_action(user_id) or {}).get("payload", {}).get("queue", [])
     nomes = sorted(i["desc"] for i in fila)
     assert nomes == ["aluguel", "luz"], f"item perdido — fila ficou {fila}"
+
+
+def test_cinco_respostas_concorrentes_nenhuma_e_descartada(user_id):
+    """P2 (3ª rodada do Codex): teto fixo de 4 tentativas descartava valor.
+
+    Com 5 respostas concorrendo, uma tarefa podia perder o CAS quatro vezes
+    seguidas (uma para cada vencedora), esgotar o laço e devolver None — o
+    valor que o usuário digitou sumia sem uma palavra. O `on_message` do
+    Discord não limita a duas.
+
+    Cinco itens na fila, cinco respostas soltas ao mesmo tempo: os cinco
+    valores têm que virar cinco lançamentos.
+    """
+    launches.add(user_id, "recebi 1 de x e paguei o aluguel e paguei a luz "
+                          "e paguei a agua e paguei o gas e paguei o wifi", {})
+    velho = db.get_pending_action(user_id)
+    assert len(velho["payload"]["queue"]) == 5, velho["payload"]["queue"]
+
+    largada = threading.Barrier(5)
+    erros: list[BaseException] = []
+
+    def responde(valor_txt: str):
+        try:
+            largada.wait(timeout=15)
+            launches.resolve_multi_launch_value(user_id, valor_txt, velho)
+        except BaseException as exc:  # noqa: BLE001
+            erros.append(exc)
+
+    valores = ("100", "200", "300", "400", "500")
+    ts = [threading.Thread(target=responde, args=(v,)) for v in valores]
+    for th in ts:
+        th.start()
+    for th in ts:
+        th.join(timeout=60)
+
+    assert not erros, erros
+    feitos = _registrados(user_id)
+    assert {v for _, v in feitos} == {100.0, 200.0, 300.0, 400.0, 500.0}, (
+        f"valor descartado em silêncio — gravados: {sorted(v for _, v in feitos)}")

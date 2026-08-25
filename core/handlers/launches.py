@@ -676,13 +676,34 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
     # compare-and-swap abaixo as duas leem a mesma fila, gravam o MESMO item
     # duas vezes e o segundo valor some sem uma palavra.
     #
-    # ponytail: 4 tentativas bastam para as 2 threads que o Meta gera por
-    # usuário; cada CAS que vence encurta a fila, então não há laço infinito.
-    for _ in range(4):
+    # Sem teto fixo de tentativas: cada colisão de CAS significa que OUTRA
+    # tarefa avançou a fila, então a fila encolheu e o laço converge. Um teto de
+    # 4 descartava calado o valor do usuário quando 5+ respostas concorriam — o
+    # `on_message` do Discord não limita a duas. O limite real é o tamanho da
+    # fila; o `len(queue) + 2` é só cinto de segurança contra fila que cresce
+    # por um caminho que eu não previ, e nesse caso é melhor devolver None do
+    # que girar para sempre.
+    tentativas = 0
+    teto = None  # definido na 1a volta, a partir da fila inicial
+    while True:
+        tentativas += 1
         payload = pending.get("payload") or {}
         queue: list[dict] = list(payload.get("queue") or [])
         if not queue:
             db.clear_pending_action(user_id)
+            return None
+        if teto is None:
+            # Pelo tamanho INICIAL da fila: a atual já encolheu por causa das
+            # outras tarefas, e medir por ela faz desistir no meio.
+            teto = len(queue) + 5
+        if tentativas > teto:
+            # Só chega aqui se a fila estiver crescendo em vez de encolher, o
+            # que nenhum caminho conhecido faz. Devolver None é melhor que
+            # girar: o roteador ainda trata a mensagem como comando novo.
+            logger.warning(
+                "resolve_multi_launch_value: %d tentativas (teto %d, fila "
+                "agora %d) para o user %s — desistindo",
+                tentativas, teto, len(queue), user_id)
             return None
 
         if resp_norm in _CANCEL_WORDS:
