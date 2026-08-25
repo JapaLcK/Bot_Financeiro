@@ -246,6 +246,46 @@ def test_duas_devolucoes_simultaneas_com_fila_vazia_nao_perdem_item(user_id):
     assert nomes == ["aluguel", "luz"], f"item perdido — fila ficou {fila}"
 
 
+def test_devolucao_continua_apos_cinco_colisoes_com_fila_vazia(user_id, monkeypatch):
+    """P2 (5ª rodada do Codex): recuperação não pode ter teto aditivo.
+
+    Quando vários itens já foram reivindicados e todos falham depois que a fila
+    foi apagada, uma devolução pode perder a inserção condicional para as outras
+    várias vezes seguidas. Com `len([]) + 5`, a sexta volta desistia antes de
+    restaurar o item.
+    """
+    head = {"desc": "aluguel", "tipo": "despesa"}
+    tentativas = 0
+    gravado: dict = {}
+
+    monkeypatch.setattr(launches.db, "get_pending_action", lambda _uid: None)
+
+    def cria(_uid, action_type, payload, minutes=10):
+        nonlocal tentativas
+        tentativas += 1
+        if tentativas <= 5:
+            return False
+        gravado["action_type"] = action_type
+        gravado["payload"] = payload
+        return True
+
+    monkeypatch.setattr(launches.db, "create_pending_action_if_absent", cria)
+    monkeypatch.setattr(
+        launches.db,
+        "advance_pending_action",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("não deveria atualizar fila inexistente")),
+    )
+
+    launches._devolve_head(user_id, head, "whatsapp")
+
+    assert tentativas == 6
+    assert gravado == {
+        "action_type": "multi_launch_values",
+        "payload": {"queue": [head], "platform": "whatsapp"},
+    }
+
+
 def test_cinco_respostas_concorrentes_nenhuma_e_descartada(user_id):
     """P2 (3ª rodada do Codex): teto fixo de 4 tentativas descartava valor.
 

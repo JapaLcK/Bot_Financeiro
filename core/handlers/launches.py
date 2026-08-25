@@ -795,27 +795,12 @@ def _devolve_head(user_id: int, head: dict, platform: str) -> None:
     a fila, e gravar o estado velho por cima ressuscitaria um item que ela já
     registrou. Por isso relemos e prependemos ao que estiver lá.
 
-    CAS em laço porque a fila pode mudar entre a leitura e a escrita. Se as
-    tentativas acabarem, é melhor perder a devolução do que gravar por cima de
-    um item já registrado — o `raise` de quem chamou ainda avisa o usuário.
+    CAS em laço porque a fila pode mudar entre a leitura e a escrita. A
+    recuperação precisa ir até uma escrita condicional vencer; se ela desistir
+    cedo, o item que já saiu da fila some.
     """
-    # Sem teto fixo, pela mesma razão do laço de reivindicação: cada colisão
-    # significa que outra devolução venceu, então a fila cresceu e o laço
-    # converge. O teto é cinto de segurança, do tamanho inicial.
-    tentativas = 0
-    teto = None
     while True:
-        tentativas += 1
         atual = db.get_pending_action(user_id)
-        if teto is None:
-            fila_ini = ((atual or {}).get("payload") or {}).get("queue") or []
-            teto = len(fila_ini) + 5
-        if tentativas > teto:
-            logger.warning(
-                "_devolve_head: %d tentativas (teto %d) para o user %s — "
-                "item %r não foi devolvido", tentativas, teto, user_id,
-                head.get("desc"))
-            return
         if atual and atual.get("action_type") != "multi_launch_values":
             # A linha está ocupada por OUTRA pendência — tipicamente a oferta
             # de "categoria errada?" que outra tarefa acabou de armar ao
