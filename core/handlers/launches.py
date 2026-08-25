@@ -816,7 +816,20 @@ def _devolve_head(user_id: int, head: dict, platform: str) -> None:
                 "item %r não foi devolvido", tentativas, teto, user_id,
                 head.get("desc"))
             return
-        if not atual or atual.get("action_type") != "multi_launch_values":
+        if atual and atual.get("action_type") != "multi_launch_values":
+            # A linha está ocupada por OUTRA pendência — tipicamente a oferta
+            # de "categoria errada?" que outra tarefa acabou de armar ao
+            # terminar a fila. Sem desalojar, o insert condicional perde todas
+            # as tentativas e o item some. Fila com dinheiro do usuário vale
+            # mais que uma oferta de conveniência: desaloja, condicionado ao
+            # que está lá, para não atropelar uma fila real.
+            if db.advance_pending_action(
+                    user_id, atual["action_type"], atual.get("payload") or {},
+                    {"queue": [head], "platform": platform},
+                    new_action_type="multi_launch_values"):
+                return
+            continue
+        if not atual:
             # Condicional, não upsert: duas devoluções simultâneas veriam as
             # duas a fila vazia e a última apagaria a primeira. Quem perder a
             # inserção volta ao topo do laço e prepende na fila que a outra

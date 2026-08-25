@@ -313,3 +313,40 @@ def test_falha_depois_do_commit_nao_devolve_item_nem_duplica(user_id, monkeypatc
     fila = (db.get_pending_action(user_id) or {}).get("payload", {}).get("queue", [])
     assert [i["desc"] for i in fila] == ["luz"], (
         f"o item já gravado foi devolvido pra fila — duplicaria: {fila}")
+
+
+def test_devolucao_desaloja_oferta_de_conveniencia(user_id):
+    """P2 (4ª rodada do Codex): a linha ocupada por OUTRA pendência.
+
+    Outra tarefa terminou o último item da fila e armou `recategorize_launch_offer`.
+    A devolução do item que estourou não consegue inserir (a linha por usuário
+    está ocupada por um tipo diferente), gira até o teto e o lançamento some.
+
+    Fila com dinheiro vale mais que oferta de conveniência: desaloja.
+    """
+    db.set_pending_action(user_id, "recategorize_launch_offer",
+                          {"user_seq": 1, "launch_id": 999})
+
+    launches._devolve_head(user_id, {"desc": "aluguel", "tipo": "despesa"}, "whatsapp")
+
+    p = db.get_pending_action(user_id) or {}
+    assert p.get("action_type") == "multi_launch_values", (
+        f"item não devolvido — pendência ficou {p.get('action_type')}")
+    fila = (p.get("payload") or {}).get("queue", [])
+    assert [i["desc"] for i in fila] == ["aluguel"], fila
+
+
+def test_controle_devolucao_nao_atropela_uma_fila_de_verdade(user_id):
+    """Controle do teste acima: desalojar não pode comer fila real.
+
+    Se o que está lá JÁ é uma fila de multi-lançamento, o item tem que ser
+    somado a ela, não substituí-la.
+    """
+    db.set_pending_action(user_id, "multi_launch_values",
+                          {"queue": [{"desc": "luz", "tipo": "despesa"}],
+                           "platform": "whatsapp"})
+
+    launches._devolve_head(user_id, {"desc": "aluguel", "tipo": "despesa"}, "whatsapp")
+
+    fila = (db.get_pending_action(user_id) or {}).get("payload", {}).get("queue", [])
+    assert [i["desc"] for i in fila] == ["aluguel", "luz"], fila

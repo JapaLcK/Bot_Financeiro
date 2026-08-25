@@ -12,7 +12,8 @@ from .users import ensure_user
 
 def advance_pending_action(user_id: int, action_type: str,
                            old_payload: dict, new_payload: dict | None,
-                           minutes: int = 10) -> bool:
+                           minutes: int = 10,
+                           new_action_type: str | None = None) -> bool:
     """Avança (ou apaga) a pendência SÓ SE ela ainda for `old_payload`.
 
     Compare-and-swap. Duas respostas do mesmo usuário podem ser processadas em
@@ -46,9 +47,11 @@ def advance_pending_action(user_id: int, action_type: str,
             else:
                 cur.execute(
                     "update pending_actions "
-                    "set payload = %s, created_at = now(), expires_at = %s "
+                    "set action_type = %s, payload = %s, created_at = now(), "
+                    "    expires_at = %s "
                     "where user_id = %s and action_type = %s and payload = %s",
-                    (Jsonb(new_payload),
+                    (new_action_type or action_type,
+                     Jsonb(new_payload),
                      datetime.now(timezone.utc) + timedelta(minutes=minutes),
                      user_id, action_type, Jsonb(old_payload)),
                 )
