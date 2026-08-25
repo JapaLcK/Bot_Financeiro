@@ -257,15 +257,15 @@ O app iOS (Capacitor, `mobile/`) carrega `https://pigbankai.com` num WKWebView c
 
   | elemento | classe | onde | para quê |
   |---|---|---|---|
-  | `<body>` | `pb-page-*` | `app-mode.js:85` | escopar o CSS por página |
-  | `<html>` | `pb-root-*` | `app-mode.js:88` | pintar o **canvas** |
+  | `<body>` | `pb-page-*` | `app-mode.js:151` | escopar o CSS por página |
+  | `<html>` | `pb-root-*` | `app-mode.js:82` (`<head>`, 1º paint) e `:154` | pintar o **canvas** |
 
-  (mais `pb-app` em `:30` e `pb-no-tabs` em `:84`, quando a rota não tem tab bar.)
+  (mais `pb-app` em `:46` e `pb-no-tabs` em `:150`, quando a rota não tem tab bar.)
 
   O fundo que o elástico revela é o do canvas, e o canvas vem do `<html>` — por isso
-  a cor por tela está em `html.pb-app.pb-root-*` (`app-mode.css:33-36`), não no
+  a cor por tela está em `html.pb-app.pb-root-*` (`app-mode.css:54-71`), não no
   `<body>`. Pintar só o `<body>` deixa a faixa do overscroll na cor errada. O modo
-  claro do dashboard depende da mesma regra (`app-mode.css:42`).
+  claro do dashboard depende da mesma regra (`app-mode.css:77`).
 - **`position: fixed` não herda o padding do `body`.** Todo fixo ancorado numa borda
   precisa reservar a área segura por conta própria.
 - **Paisagem está habilitada no iPhone** (`mobile/ios/App/App/Info.plist`), então os

@@ -360,7 +360,7 @@ async def serve_modals_js():
 @router.get("/app-mode.js")
 async def serve_app_mode_js():
     """Modo app (WebView iOS): seta html.pb-app e monta a tab bar inferior.
-    Inerte no site (só ativa com UA PigBankApp ou ?pbapp=1)."""
+    Inerte no site (só ativa com UA PigBankApp ou ícone instalado)."""
     return FileResponse(
         FRONTEND_DIR / "app-mode.js",
         media_type="application/javascript",

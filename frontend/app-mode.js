@@ -1,29 +1,45 @@
 /**
  * app-mode.js — Ativa o "modo app" do PigBank e monta a tab bar inferior.
  *
- * Ativação (qualquer um):
- *   - user agent contém "PigBankApp" (WebView do app iOS/Capacitor)
- *   - PWA instalada (display-mode: standalone / navigator.standalone no iOS)
- *   - ?pbapp=1 na URL (persiste em localStorage — preview no navegador)
- *   - localStorage.pbApp === "1"
- *   Desativação no preview: ?pbapp=0
+ * Ativação — dois gatilhos, os dois derivados do AMBIENTE:
+ *   - user agent contém "PigBankApp" (o app iOS/Capacitor manda PigBankApp/1.0)
+ *   - ícone instalado / PWA (display-mode: standalone, ou navigator.standalone
+ *     no iOS)
+ *
+ * Não existe atalho de navegador. O preview ?pbapp=1 foi REMOVIDO: nada que
+ * o usuário toque — link, query, storage — liga o modo app. O preview antigo
+ * gravava localStorage.pbApp pra sempre e sem UI de saída, e travou o Safari
+ * de um usuário de verdade; qualquer link velho (histórico, autocomplete,
+ * bookmark, WhatsApp) reabria a armadilha. Quem já tinha ficado preso se
+ * destrava sozinho no primeiro load desta versão — porque o gate abaixo parou
+ * de LER a chave, não porque alguém a apague. Único resíduo: o removeItem, que
+ * é higiene.
+ *
+ * QA que precisa ver o layout de app: abra no app de verdade, ou falsifique o
+ * user agent no devtools (Safari: Desenvolvedor → User Agent; Chrome: Network
+ * conditions) — spoof vale só naquela sessão do inspetor e não grava nada no
+ * aparelho.
  *
  * Deve ser incluído no <head> (sem defer) pra classe pb-app existir antes do
  * primeiro paint — evita o "pulo" de layout do chrome de site sumindo.
  */
 (() => {
-  const qs = new URLSearchParams(location.search);
-  if (qs.get("pbapp") === "0") { try { localStorage.removeItem("pbApp"); } catch (_) {} }
-  if (qs.get("pbapp") === "1") { try { localStorage.setItem("pbApp", "1"); } catch (_) {} }
+  // Higiene, não destravamento. Quem visitou ?pbapp=1 antes desta versão já
+  // volta ao site no primeiro load, e o mérito é do GATE: ele não lê mais
+  // storage nenhum pra decidir. Esta linha só apaga uma chave legada que
+  // ninguém consulta.
+  // O try/catch, esse sim, é obrigatório: é a ÚNICA linha do arquivo que toca
+  // storage, e com storage bloqueado (Safari privado, cookies off) o acesso
+  // ESTOURA. Sem o catch a exceção mataria o script antes do classList.add e o
+  // app nativo abriria com layout de site (nav, footer, sem tab bar).
+  try { localStorage.removeItem("pbApp"); } catch (_) {}
 
-  let stored = null;
-  try { stored = localStorage.getItem("pbApp"); } catch (_) {}
   // PWA instalada roda o mesmo "modo app" do app iOS — atualizações do site
   // chegam nas duas cascas sem passo extra.
   const standalone =
     (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
     window.navigator.standalone === true;
-  const inApp = /PigBankApp/.test(navigator.userAgent) || stored === "1" || standalone;
+  const inApp = /PigBankApp/.test(navigator.userAgent) || standalone;
   if (!inApp) return;
 
   const root = document.documentElement;
@@ -44,7 +60,7 @@
     "/changelog":    "changelog",
     "/settings":     "settings",
   };
-  // Variantes do preview local (mock serve arquivos .html e o dash na raiz)
+  // Variantes do servidor local de dev (mock serve .html e o dash na raiz)
   if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
     Object.assign(PAGES, {
       "/home.html": "home", "/dashboard.html": "app",
@@ -523,7 +539,12 @@
 
   // Chegou pelo + de outra página: abre o modal de lançamento assim que o
   // dashboard.js terminar de definir a função (poll curto).
+  // A query fica declarada AQUI, no único lugar que a consome: ela não
+  // participa do gate do modo app (isso é só UA/standalone) e, solta no topo do
+  // arquivo, parecia resíduo do preview ?pbapp=1 removido — candidata a virar
+  // ReferenceError na próxima limpeza.
   function maybeOpenLaunch() {
+    const qs = new URLSearchParams(location.search);
     if (page !== "app" || qs.get("lancar") !== "1") return;
     let tries = 0;
     const t = setInterval(() => {
@@ -589,8 +610,8 @@
 
   // Push notification (só app iOS nativo + usuário logado). Pede pro nativo
   // registrar no APNs; o device token volta em window.PBPush.onToken, que faz
-  // o POST autenticado (reusa os cookies de sessão do WebView). PWA/preview não
-  // têm a ponte pbPush → no-op (push em PWA é fase futura, canal diferente).
+  // o POST autenticado (reusa os cookies de sessão do WebView). PWA e navegador
+  // NÃO têm a ponte pbPush → no-op (push em PWA é fase futura, canal diferente).
   function pbCookie(name) {
     const m = document.cookie.split("; ").find(r => r.startsWith(name + "="));
     return m ? decodeURIComponent(m.split("=").slice(1).join("=")) : "";
@@ -606,7 +627,7 @@
       const bridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.pbPush;
       if (!bridge) {
         if (++tries < 20) setTimeout(attempt, 500);  // ~10s
-        return;                 // PWA/preview/navegador: nunca aparece → no-op
+        return;                 // PWA/navegador: a ponte nunca aparece → no-op
       }
       window.PBPush = window.PBPush || {};
       window.PBPush.onToken = function (token, environment) {
@@ -650,7 +671,7 @@
 
   function initPullToRefresh() {
     if (!page) return;                        // só nas telas logadas do app
-    if (!("ontouchstart" in window)) return;  // preview no desktop não tem gesto
+    if (!("ontouchstart" in window)) return;  // desktop (PWA/devtools) não tem gesto
 
     const el = document.createElement("div");
     el.className = "pb-ptr";

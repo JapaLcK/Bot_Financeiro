@@ -2,8 +2,8 @@
  * app-mode.css — Reskin "modo app" do PigBank.
  *
  * TODO o arquivo é escopado sob html.pb-app (setado por app-mode.js quando o
- * user agent contém PigBankApp, ou pbapp=1 pra preview no navegador). Sem a
- * classe, nada aqui tem efeito — o site segue idêntico.
+ * user agent contém PigBankApp, ou o ícone está instalado). Sem a classe,
+ * nada aqui tem efeito — o site segue idêntico.
  *
  * Princípios:
  *  - Navegação primária mora na tab bar inferior (zona do polegar).
