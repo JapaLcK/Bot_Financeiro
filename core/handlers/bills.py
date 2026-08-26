@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 
-from utils_text import (_TRACOS, fmt_brl, limpa_pontuacao_final,
+from utils_text import (_ENCHIMENTO, _TRACOS, fmt_brl, limpa_pontuacao_final,
                         normalize_text, parse_money, valor_perigoso)
 
 _PAY_RE = re.compile(r"^(ja\s+)?(paguei|quitei)\b")
@@ -177,18 +177,18 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
 
 
 
-# Enchimento falado antes do número: "foi 132", "acho que 132", "uns 132",
-# "veio 132 reais", "deu 132,50". É `fullmatch`, então TODA palavra antes do
-# número tem que estar nesta lista — "gastei 132 no mercado" não casa e a
-# pergunta é abandonada para o roteamento normal, que é o certo.
-_ENCHIMENTO = (r"(?:foi|era|eh|e|de|da|do|deu|veio|custou|saiu|ficou|acho|que"
-               r"|uns|umas|um|uma|tipo|mais|ou|menos|deve|ter|dado|ai)")
+# `_ENCHIMENTO` vem do `utils_text`: enchimento falado antes do número ("foi
+# 132", "acho que 132", "uns 132", "veio 132 reais"). É `fullmatch`, então TODA
+# palavra antes do número tem que estar naquela lista — "gastei 132 no mercado"
+# não casa e a pergunta é abandonada para o roteamento normal, que é o certo.
+# A MESMA lista decide, no `_sinal_negativo`, se o que vem antes de um traço é
+# conteúdo; por isso ela mora lá e não aqui.
 _UNIDADE = r"(?:reais?|real|rs|pila|conto|contos|mango|mangos)"
-# O grupo (1) do sinal ficou aqui só como documentação da forma: quem recusa
-# negativo agora é o `valor_perigoso`, que trata as SEIS grafias de traço — o
-# ASCII `-` mais as cinco do `_TRACOS` (U+2212 menos matemático, U+2013 en
-# dash, U+2014 em dash, U+2010 hífen, U+2011 hífen não-quebrável) — e o
-# "menos 10" falado. O `endswith("-")` de antes deixava passar as outras cinco.
+# O grupo (1) do sinal ficou aqui só como documentação da FORMA: quem recusa
+# negativo agora é a tabela-verdade do `utils_text._sinal_negativo`, que decide
+# por POSIÇÃO do traço, trata as dez grafias do `_TRACOS` e o "menos" falado.
+# Sozinho, este grupo recusava "-10" e deixava passar "luz - 132"; a tabela
+# separa sinal de separador de prosa.
 # NADA de `\s` dentro do número: com ele, "132 50" colava em 13250 e pagava
 # R$ 13.250,00 sem confirmação.
 _VALOR_RE = re.compile(
@@ -229,7 +229,9 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     Os traços são normalizados ANTES da forma, não só dentro do
     `valor_perigoso`: `−10` (U+2212, o que o teclado do iOS produz) não casa o
     `_VALOR_RE`, e sem esta linha ele abandonaria a pergunta em silêncio em vez
-    de recusar com ela viva.
+    de recusar com ela viva. O "menos" falado não precisa da mesma normalização
+    aqui: ele está no `_ENCHIMENTO`, então "menos 10" já casa a forma e chega ao
+    `valor_perigoso`, que o recusa.
     """
     raw = (text or "").strip().translate(_TRACOS)
     nome = (pending.get("payload") or {}).get("bill_name") or "conta"

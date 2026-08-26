@@ -1790,6 +1790,13 @@ def test_clarification_com_payload_torto_nao_estoura():
     ("0", "nao_positivo"),
     ("0,001", "nao_positivo"),      # arredonda para R$ 0,00
     ("1" * 400, "nao_positivo"),    # parse_money devolve inf
+    ("‒10", "nao_positivo"),      # figure dash, fora da lista de cinco
+    ("―10", "nao_positivo"),      # horizontal bar, idem
+    ("foi - 10", "nao_positivo"),   # enchimento + sinal separado (rodada 6)
+    ("paguei - 10", "nao_positivo"),
+    ("menos10", "nao_positivo"),
+    (",50", "nao_entendi"),         # 7ª forma: 50,00 no lugar de 0,50
+    (".50", "nao_entendi"),
     ("132 50", "nao_entendi"),      # 13.250 se passasse
     ("paguei 132 50", "nao_entendi"),  # o dano não some com uma palavra na frente
     ("1.23.456", "nao_entendi"),    # 123.456 se passasse
@@ -1797,9 +1804,10 @@ def test_clarification_com_payload_torto_nao_estoura():
 def test_contrato_do_valor_perigoso_recusa(entrada, motivo):
     """Fonte única das quatro portas, do lado que RECUSA.
 
-    O sinal negativo não é um caractere: as SEIS grafias de traço (o ASCII mais
-    as cinco do `_TRACOS`) e o "menos 10" falado chegam todos ao `parse_money`
-    como positivos.
+    O sinal negativo não é um caractere: as onze grafias de traço (o ASCII mais
+    as dez do `_TRACOS`) e o "menos 10" falado chegam todos ao `parse_money`
+    como positivos. A tabela-verdade completa — POSIÇÃO do traço × o que o
+    cerca — está em `tests/test_valor_sinal.py`; aqui ficam os reprodutores.
 
     O "menos" falado só é visto quando há bloco de dígitos: `menos cinquenta`
     NÃO está aqui porque `valor_perigoso("menos cinquenta", 50.0)` devolve
@@ -1888,6 +1896,9 @@ def test_botao_ja_paguei_aceita_o_valor_dentro_da_frase(monkeypatch, resposta, e
     ("\u221210", "maior que zero"),          # U+2212
     ("\u201310", "maior que zero"),          # en dash
     ("menos 10", "maior que zero"),
+    ("foi - 10", "maior que zero"),       # rodada 6: enchimento + sinal solto
+    ("paguei - 10", "maior que zero"),
+    (",50", "Não peguei o valor"),        # 7ª forma: 50,00 no lugar de 0,50
     ("0", "maior que zero"),
     ("0,001", "maior que zero"),
     ("1" * 400, "maior que zero"),        # parse_money devolve inf
@@ -2560,6 +2571,11 @@ def test_controle_negativo_dano_antes_do_abandono_prende_o_comando(monkeypatch, 
 
 @pytest.mark.parametrize("resposta,fragmento", [
     ("-10", "maior que zero"), ("−10", "maior que zero"),
+    # Rodada 6: enchimento/verbo + sinal SEPARADO por espaço. Os quatro casam
+    # o `_VALOR_RE` (o enchimento está lá) e passavam como R$ 10,00 positivo.
+    ("foi - 10", "maior que zero"), ("deu − 10", "maior que zero"),
+    ("uns - 10", "maior que zero"), ("menos 10", "maior que zero"),
+    (",50", "Não entendi o valor"),   # 7ª forma: 50,00 no lugar de 0,50
     ("0", "maior que zero"), ("132 50", "Não entendi o valor"),
     ("1.23.456", "Não entendi o valor"),
 ])

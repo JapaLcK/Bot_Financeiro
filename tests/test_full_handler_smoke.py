@@ -552,6 +552,9 @@ _PERIGOSOS_COM_PREFIXO = [
     for e, s in [("-10", "maior que zero"), ("132 50", "Não entendi o valor"),
                  ("132 50 reais", "Não entendi o valor"),
                  ("1.23.456", "Não entendi o valor"),
+                 # Rodada 6: sinal separado por espaço depois de enchimento.
+                 ("- 10", "maior que zero"), ("foi - 10", "maior que zero"),
+                 (",50", "Não entendi o valor"),   # 7ª forma
                  ("0,001", "maior que zero"), ("1" * 400, "maior que zero")]
     for p in ("", "paguei ")
 ]
@@ -1059,6 +1062,9 @@ def test_controle_negativo_pontuacao_so_no_fim_da_mensagem(
 _PROSA_PERIGOSA = [
     ("132 -", "maior que zero"),      # traço que TERMINA a expressão = sinal
     ("paguei 132 -", "maior que zero"),
+    ("uns - 10", "maior que zero"),   # enchimento + sinal separado (rodada 6)
+    ("paguei - 10", "maior que zero"),
+    ("R$ ,50", "Não entendi o valor"),  # 7ª forma: 50,00 no lugar de 0,50
     ("(10)", "maior que zero"),       # negativo contábil
     ("132 50 no mercado", "Não entendi o valor"),
     ("paguei 1.23.456 da luz", "Não entendi o valor"),
