@@ -280,3 +280,45 @@ test("home: Esc no onboarding de MFA marca como visto, não só fecha", async ()
     assert.equal(vistos.length, 1, "o Esc fechou sem marcar como visto");
   } finally { await page.close(); }
 });
+
+// ── empilhamento: só o diálogo de cima responde ao Esc ──────────────────────
+
+test("home: Esc não dispensa o onboarding de MFA quando há diálogo por cima", async () => {
+  const page = await newPage();
+  const vistos = [];
+  try {
+    // Cenário real: retorno de checkout de quem ainda não tem MFA. O
+    // `loadHomeData` abre o onboarding de segurança e, ~450ms depois, o
+    // `openWelcomePro` sobe o card de boas-vindas POR CIMA. Os dois handlers
+    // são de bolha e o de baixo faz um POST que marca "visto" PARA SEMPRE:
+    // dispensar a celebração perdia, calado, o convite de proteger a conta.
+    //
+    // Os dois overlays são abertos pela classe, e não pelas funções que os
+    // abrem, porque na home elas NÃO são globais (contrato do PBPages). O par
+    // que discrimina é com o teste anterior: descoberto, o Esc marca; coberto,
+    // não encosta.
+    await page.route("**/auth/mfa/onboarding-seen", (route) => {
+      vistos.push(1);
+      route.fulfill(json({}));
+    });
+    await page.goto(`${ORIGIN}/home.html`);
+    await page.waitForFunction(() => !!document.getElementById("welcome-pro-overlay"));
+
+    const cobre = await page.evaluate(() => {
+      document.getElementById("mfa-onboarding-overlay").classList.add("open");
+      document.getElementById("welcome-pro-overlay").classList.add("open");
+      const topo = document.elementFromPoint(
+        Math.floor(innerWidth / 2), Math.floor(innerHeight / 2));
+      return document.getElementById("welcome-pro-overlay").contains(topo);
+    });
+    assert.equal(cobre, true, "pré-condição: o card de boas-vindas tem que estar por cima");
+
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(150);
+
+    assert.equal(vistos.length, 0,
+      "o Esc do diálogo de cima marcou o onboarding de MFA como visto para sempre");
+    assert.equal(await aberto(page, "mfa-onboarding-overlay"), true,
+      "o diálogo de baixo tinha que continuar de pé");
+  } finally { await page.close(); }
+});
