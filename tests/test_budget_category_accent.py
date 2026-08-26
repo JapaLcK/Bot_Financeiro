@@ -308,3 +308,56 @@ def test_get_budget_e_upsert_deterministicos_com_gemeas(user_id):
     assert {b["categoria"]: b["budget"] for b in db.budgets.list_budgets(user_id)} == {
         "cafe": 777.0, "café": 250.0,  # o limite da gêmea sobrevive
     }
+
+
+# ── donut × get_budget: com gêmeas, os dois têm que mostrar o MESMO limite ───
+# O SELECT de orçamentos do donut (`finance_bot_websocket_custom.py:675`) vira
+# `budget_by_key = {cat_key: budget}` — dict, última linha vence. Sem `order
+# by`, quem vencia era a ordem de inserção: a tela mostrava 250 e o bot
+# respondia 100 pela MESMA categoria. Daí o `ORDER BY categoria DESC` lá (o
+# menor nome vem por último e ganha o dict) = `CAT_CANON_ORDER` do `get_budget`.
+
+def _donut(user_id: int) -> tuple[dict[str, float | None], list[str]]:
+    """({categoria da fatia: budget exibido}, [tipos de alerta])."""
+    data = asyncio.run(dashboard.get_financial_data(user_id))
+    return (
+        {c["categoria"]: c.get("budget") for c in data["expense_categories"]},
+        [a["type"] for a in data["alerts"]],
+    )
+
+
+def _cenario_gemeas(user_id: int, *orcamentos: tuple[str, float]) -> None:
+    """Par gêmeo ('cafe' 40 × 'café' 250) + uma categoria sem gêmea (controle
+    positivo). Gasto de 37,10 cruza 80% de 40 e NÃO cruza 80% de 250."""
+    _orcamento_bruto(user_id, *orcamentos)
+    _orcamento_bruto(user_id, ("carne", 80.0))
+    _gasto(user_id, "café", 37.10)
+    _gasto(user_id, "carne", 20.0)
+
+
+def _assert_gemeas_coerentes(user_id: int) -> None:
+    assert db.budgets.get_budget(user_id, "CAFÉ") == {"categoria": "cafe", "budget": 40.0}
+    fatias, alertas = _donut(user_id)
+    # a fatia gêmea mostra o limite canônico (40), não o da outra grafia (250);
+    # 'carne' é o controle positivo: sem gêmea, o limite não muda
+    assert fatias == {"café": 40.0, "carne": 80.0}
+    # e o alerta de 85% do donut só sai porque grudou o limite certo (92.8%)
+    assert alertas == ["budget_warning"]
+    # o alerta do bot (core/budget_alerts) usa o mesmo desempate
+    alerta = evaluate_after_expense(user_id, "café", 37.10, datetime.now(timezone.utc))
+    assert alerta is not None and (alerta.categoria, alerta.budget) == ("cafe", 40.0)
+
+
+def test_donut_com_gemeas_sem_acento_inserida_primeiro(user_id):
+    """Controle negativo: tirando o `ORDER BY categoria DESC` do SELECT 10 do
+    donut, medido no Postgres local — 'café' vence o dict e a fatia sai com
+    budget 250.0, sem alerta nenhum."""
+    _cenario_gemeas(user_id, ("cafe", 40.0), ("café", 250.0))
+    _assert_gemeas_coerentes(user_id)
+
+
+def test_donut_com_gemeas_com_acento_inserida_primeiro(user_id):
+    """Mesma asserção com a ordem de inserção invertida — é a ordem que decidia
+    o vencedor antes do `ORDER BY`."""
+    _cenario_gemeas(user_id, ("café", 250.0), ("cafe", 40.0))
+    _assert_gemeas_coerentes(user_id)

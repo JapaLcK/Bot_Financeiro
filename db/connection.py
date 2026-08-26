@@ -109,3 +109,11 @@ CAT_META_SQL = (
     "  from user_categories where user_id = %s "
     f" order by {cat_norm_sql('name')}, is_system desc, name asc"
 )
+
+
+# Desempate canônico entre GÊMEAS de `category_budgets` (única só no par EXATO
+# (user_id, categoria): 'cafe' e 'café' coexistem em dado legado). Mesma regra
+# do `CAT_META_SQL` acima, sem o `is_system` — que essa tabela não tem: vence o
+# menor nome alfabético. Fonte única de quem ganha; sem isto cada leitor
+# desempata pela ordem de inserção e o donut mostra um limite e o bot outro.
+CAT_CANON_ORDER = " order by categoria limit 1"

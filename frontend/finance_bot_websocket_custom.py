@@ -665,9 +665,16 @@ async def get_financial_data(
             (user_id, query_start, month_end),
         ),
         # 10) Budgets per category
+        # ORDER BY ... DESC é DE PROPÓSITO, não engano: `budget_by_key` abaixo é
+        # um dict por cat_key, então a ÚLTIMA linha lida vence. Com gêmeas
+        # legadas ('cafe' 100 e 'café' 250 na mesma conta) o donut tem que
+        # mostrar o MESMO limite que o `get_budget` devolve, e esse desempate é
+        # `CAT_CANON_ORDER` (db/connection.py): menor nome alfabético, que em
+        # DESC vem por último e ganha o dict. Trocar para ASC inverte o
+        # desempate: a tela passa a mostrar um limite e o bot a responder outro.
         _q(
             f"SELECT categoria, budget, {cat_norm_sql('categoria')} AS cat_key "
-            "FROM category_budgets WHERE user_id = %s",
+            "FROM category_budgets WHERE user_id = %s ORDER BY categoria DESC",
             (user_id,),
         ),
     )

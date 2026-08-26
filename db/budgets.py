@@ -22,20 +22,13 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from .connection import get_conn, cat_norm_sql, CAT_META_SQL
+from .connection import get_conn, cat_norm_sql, CAT_META_SQL, CAT_CANON_ORDER
 from .users import ensure_user
 
 
 # Comparação de categoria case- E acento-insensível (fonte única: db/connection.py).
 _CAT_EQ    = f"{cat_norm_sql('categoria')} = {cat_norm_sql('%s')}"
 _CAT_CT_EQ = f"{cat_norm_sql('ct.categoria')} = {cat_norm_sql('%s')}"
-
-# `category_budgets` é única só no par EXATO (user_id, categoria): 'cafe' e
-# 'café' coexistem em dado legado, então um WHERE normalizado casa as DUAS.
-# Desempate = o mesmo do catálogo (`CAT_META_SQL`, db/connection.py): menor
-# nome alfabético (não há `is_system` aqui). Sem isto, qual linha o fetchone
-# devolve depende da ordem de inserção — medido no Postgres local.
-_CANON_ORDER = " order by categoria limit 1"
 
 # Mesma lista que `core/budget_alerts.py` filtra como interna.
 _INTERNAL_CATEGORIES = {
@@ -69,7 +62,7 @@ def get_budget(user_id: int, categoria: str) -> dict[str, Any] | None:
         with conn.cursor() as cur:
             cur.execute(
                 "select categoria, budget from category_budgets "
-                f"where user_id=%s and {_CAT_EQ}{_CANON_ORDER}",
+                f"where user_id=%s and {_CAT_EQ}{CAT_CANON_ORDER}",
                 (user_id, categoria),
             )
             row = cur.fetchone()
@@ -97,7 +90,7 @@ def upsert_budget(user_id: int, categoria: str, budget: float) -> tuple[str, boo
         with conn.cursor() as cur:
             cur.execute(
                 "select categoria from category_budgets "
-                f"where user_id=%s and {_CAT_EQ}{_CANON_ORDER}",
+                f"where user_id=%s and {_CAT_EQ}{CAT_CANON_ORDER}",
                 (user_id, cat),
             )
             existing = cur.fetchone()

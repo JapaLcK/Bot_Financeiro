@@ -22,7 +22,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Iterable
 
-from db.connection import get_conn, cat_norm_sql
+from db.connection import get_conn, cat_norm_sql, CAT_CANON_ORDER
 from utils_text import fmt_brl
 
 # Comparacao de categoria case- E acento-insensivel (fonte unica: db/connection.py).
@@ -113,7 +113,7 @@ def evaluate_after_expense(
             with conn.cursor() as cur:
                 cur.execute(
                     "select categoria, budget from category_budgets "
-                    f"where user_id = %s and {_CAT_EQ}",
+                    f"where user_id = %s and {_CAT_EQ}{CAT_CANON_ORDER}",
                     (user_id, cat),
                 )
                 bgt_row = cur.fetchone()
