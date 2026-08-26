@@ -1844,7 +1844,7 @@ function _renderCategoryPill(cat, idx = 0) {
     : (cat.is_system ? '<span style="font-size:.62rem;color:var(--text-3);margin-left:6px">padrão</span>' : '');
   const delay = 200 + idx * 30;
   return `
-    <div class="cat-pill" style="cursor:pointer;${dim}animation-delay:${delay}ms" onclick='openCategoryEditModal(${JSON.stringify(cat)})'>
+    <div class="cat-pill" style="cursor:pointer;${dim}animation-delay:${delay}ms" onclick='openCategoryEditModal(${escapeHtmlSafe(JSON.stringify(cat))})'>
       <span class="cat-dot" style="background:${escapeHtmlSafe(cat.color)}"></span>
       <div class="cat-body">
         <div class="cat-name">${phIcon(cat.emoji)} ${escapeHtmlSafe(cat.name)}${tag}</div>
@@ -9817,11 +9817,11 @@ function render(d) {
             const hb  = c.budget != null;
             const bw  = hb ? Math.min(c.budget_pct,100) : Math.round(c.total/mx*100);
             const bc  = hb ? (c.budget_pct>100?"var(--red)":c.budget_pct>85?"var(--yellow)":"var(--green)") : catColors()[i%catColors().length];
-            const catSafe = c.categoria.replace(/'/g,"\\'");
+            const catSafe = escapeJsString(c.categoria);
             return `<div class="cat-row">
               <div class="cat-hdr">
-                <span class="cat-lbl">${c.categoria==="sem categoria"?"<i class='ph ph-warning' aria-hidden='true'></i> Sem Categoria":c.categoria}</span>
-                <span class="cat-val" data-num="cat_${c.categoria}" data-val="${c.total}">${fmt(c.total)}</span>
+                <span class="cat-lbl">${c.categoria==="sem categoria"?"<i class='ph ph-warning' aria-hidden='true'></i> Sem Categoria":esc(c.categoria)}</span>
+                <span class="cat-val" data-num="cat_${esc(c.categoria)}" data-val="${c.total}">${fmt(c.total)}</span>
                 <button class="bgt-btn" onclick="openBudget('${catSafe}')" title="Definir limite de orçamento"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
               </div>
               ${hb?`<div class="cat-budget-info">${c.budget_pct}% de ${fmt(c.budget)}</div>`:""}
