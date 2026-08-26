@@ -395,10 +395,12 @@ def test_clarification_de_recorrente_nao_vira_despesa_avulsa(pro_uid, spy_ai):
 # Porta 3 (numeração em `core/intent_router.py`): a fila do `multi_launch_values`
 # (`core/handlers/launches.py::resolve_multi_launch_value`).
 #
-# Usuário GRÁTIS de propósito: para o Pro a IA sequestra o turno antes
-# (`multi_launch_values` está fora de `_RESUMABLE_PENDING_TYPES`), e a porta
-# fica escondida. É esse mascaramento que fez a rodada 1 concluir, errado, que
-# ela não reproduzia.
+# Usuário GRÁTIS de propósito: quando estes casos foram escritos, para o Pro a
+# IA sequestrava o turno antes e a porta ficava escondida — é esse mascaramento
+# que fez a rodada 1 concluir, errado, que ela não reproduzia. O #142 fechou o
+# buraco (`multi_launch_values` ganhou `suprime_ia=True` no `_REGISTRO` de
+# `db/pending.py`, e `tests/test_pending_registry.py` prende isso pelo Pro),
+# então hoje o Grátis é só o caminho mais curto, não o único que enxerga.
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
