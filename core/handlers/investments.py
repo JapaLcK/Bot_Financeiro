@@ -72,7 +72,8 @@ def resolve_investment_pick(user_id: int, text: str, pending: dict) -> str | Non
     norm = normalize_text(resposta)
 
     if norm in ("nao", "n", "cancelar", "cancela"):
-        db.clear_pending_action(user_id)
+        # Abandono: condicional para não apagar pendência de outra tarefa.
+        db.consume_pending_action(user_id, pending)
         return "❌ Beleza, cancelei o aporte."
 
     nomes = payload.get("nomes") or []
@@ -89,7 +90,10 @@ def resolve_investment_pick(user_id: int, text: str, pending: dict) -> str | Non
         return ("Não entendi qual. Responda com o número:\n\n"
                 + "\n".join(linhas) + "\n\nOu *cancelar*.")
 
-    db.clear_pending_action(user_id)
+    # Porteiro: o `deposit` movimenta dinheiro. Se a linha já não é a que
+    # lemos, outra tarefa consumiu a pergunta — não aporta duas vezes.
+    if not db.consume_pending_action(user_id, pending):
+        return None
     return deposit(
         user_id,
         payload.get("text") or resposta,
@@ -142,7 +146,7 @@ def resolve_funding_choice(user_id: int, text: str, pending: dict) -> str | None
     norm = normalize_text(resposta)
 
     if norm in ("nao", "n", "cancelar", "cancela"):
-        db.clear_pending_action(user_id)
+        db.consume_pending_action(user_id, pending)
         return "❌ Beleza, cancelei."
 
     fontes = payload.get("fontes") or []
@@ -162,7 +166,9 @@ def resolve_funding_choice(user_id: int, text: str, pending: dict) -> str | None
         return ("Não entendi de onde sai. Responda com o número:\n\n"
                 + "\n".join(linhas) + "\n\nOu *cancelar*.")
 
-    db.clear_pending_action(user_id)
+    # Porteiro: retoma um fluxo que debita da fonte escolhida.
+    if not db.consume_pending_action(user_id, pending):
+        return None
     retomar = payload.get("retomar") or {}
     amount = float(payload.get("amount") or 0)
     source = {

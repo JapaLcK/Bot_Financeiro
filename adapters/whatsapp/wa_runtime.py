@@ -44,7 +44,7 @@ from core.types import IncomingMessage
 from db import (
     attempt_whatsapp_phone_link,
     claim_pending_action,
-    clear_pending_action,
+    consume_pending_action,
     get_conn,
     get_or_create_canonical_user,
     get_pending_action,
@@ -184,10 +184,13 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
 
     # Botão de desfazer (one-shot após áudio processado)
     if pending and pending.get("action_type") == "undo_audio":
-        # Limpa imediatamente — só aparece uma vez
+        # Limpa imediatamente — só aparece uma vez. CONDICIONAL: se outra tarefa
+        # já armou uma PERGUNTA nesta linha, apagar por cima a deixaria órfã.
+        # Perder é inofensivo — o botão não depende da linha para funcionar
+        # (`WA_UNDO_LAUNCH_ID` injeta "desfazer" no classificador).
         if user_id is not None:
             try:
-                clear_pending_action(int(user_id))
+                consume_pending_action(int(user_id), pending)
             except Exception as exc:
                 logger.warning("WA clear undo_audio pending failed: %s", exc)
         logger.info("WA sending undo button to=%s", to_wa_id)
@@ -208,7 +211,7 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
         launch_id = (pending.get("payload") or {}).get("launch_id")
         if user_id is not None:
             try:
-                clear_pending_action(int(user_id))
+                consume_pending_action(int(user_id), pending)
             except Exception as exc:
                 logger.warning("WA clear recategorize_offer pending failed: %s", exc)
         if launch_id:
@@ -239,7 +242,7 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
         tx_id = (pending.get("payload") or {}).get("tx_id")
         if user_id is not None:
             try:
-                clear_pending_action(int(user_id))
+                consume_pending_action(int(user_id), pending)
             except Exception as exc:
                 logger.warning("WA clear delete_credit_purchase pending failed: %s", exc)
         if tx_id:
@@ -888,8 +891,13 @@ def process_message(message: InboundMessage) -> None:
                 pending_recat = None
             if pending_recat and pending_recat.get("action_type") == "recategorize_launch_text":
                 launch_id = (pending_recat.get("payload") or {}).get("launch_id")
+                # Porteiro: `_apply_recategorize` reescreve a categoria do
+                # lançamento. Se a linha já não é esta, o texto responde a outra
+                # pergunta — cair fora deixa o roteador tratá-lo normalmente.
                 try:
-                    clear_pending_action(uid)
+                    if not consume_pending_action(uid, pending_recat):
+                        pending_recat = None
+                        launch_id = None
                 except Exception as exc:
                     logger.warning("WA clear recat_text pending failed: %s", exc)
                 if launch_id:
@@ -905,7 +913,9 @@ def process_message(message: InboundMessage) -> None:
                 txt = (message.text or "").strip()
                 if txt.lower() in {"cancelar", "cancela", "nao", "não", "deixa", "depois"}:
                     try:
-                        clear_pending_action(uid)
+                        # Abandono, condicional: se perdeu, não havia nada
+                        # nosso para abandonar.
+                        consume_pending_action(uid, pending_recat)
                     except Exception:
                         pass
                     _send_reply(reply_to, f"Ok, deixei a conta de *{name}* pendente. Quando pagar é só avisar. 🐷")
@@ -933,10 +943,19 @@ def process_message(message: InboundMessage) -> None:
                     # não entendeu o valor → re-pergunta, mantém o pending
                     _send_reply(reply_to, f"Não peguei o valor. Manda só o número da conta de *{name}*. Ex: *132,50* (ou *cancelar*)")
                     return
+                # REIVINDICA antes de pagar, e condicionado ao que foi lido:
+                # duas respostas concorrentes chegariam as duas ao
+                # `mark_bill_paid` e debitariam o saldo duas vezes. Quem perde
+                # sai sem fazer nada — o vencedor responde. Mesmo desenho do
+                # `resolve_bill_amount` (core/handlers/bills.py), que é a outra
+                # porta da MESMA pergunta.
                 try:
-                    clear_pending_action(uid)
+                    reivindicou = consume_pending_action(uid, pending_recat)
                 except Exception as exc:
                     logger.warning("WA clear bill_pay_amount pending failed: %s", exc)
+                    reivindicou = False
+                if not reivindicou:
+                    return
                 if bill_id:
                     from db.bills import mark_bill_paid
                     try:

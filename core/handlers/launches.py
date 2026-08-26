@@ -724,18 +724,20 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
         payload = pending.get("payload") or {}
         queue: list[dict] = list(payload.get("queue") or [])
         if not queue:
-            db.clear_pending_action(user_id)
+            # Abandono, condicional: a fila acabou, mas outra tarefa pode ter
+            # armado uma pergunta nova nesta linha entre a leitura e agora.
+            db.consume_pending_action(user_id, pending)
             return None
 
         if resp_norm in _CANCEL_WORDS:
-            db.clear_pending_action(user_id)
+            db.consume_pending_action(user_id, pending)
             restantes = ", ".join(i.get("desc", "?") for i in queue)
             return f"❌ Beleza, deixei de lado: {restantes}."
 
         if valor is None or valor <= 0:
             # Não é um valor — o usuário mudou de assunto. Abandona a pendência e
             # deixa o roteador tratar a mensagem como um comando novo.
-            db.clear_pending_action(user_id)
+            db.consume_pending_action(user_id, pending)
             return None
 
         head, resto = queue[0], queue[1:]
@@ -745,7 +747,8 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
         # `add_from_entities` grava logo abaixo a dele ("categoria errada?").
         novo_payload = {"queue": resto, "platform": platform} if resto else None
         if not db.advance_pending_action(
-                user_id, "multi_launch_values", payload, novo_payload):
+                user_id, "multi_launch_values", payload, novo_payload,
+                old_created_at=pending.get("created_at")):
             # Outra thread avançou a fila entre a leitura e agora. Relê e
             # reavalia: o item que sobrou é o próximo, não este.
             pending = db.get_pending_action(user_id)
@@ -845,7 +848,8 @@ def _devolve_head(user_id: int, head: dict, platform: str) -> None:
             if db.advance_pending_action(
                     user_id, atual["action_type"], atual.get("payload") or {},
                     {"queue": [head], "platform": platform},
-                    new_action_type="multi_launch_values"):
+                    new_action_type="multi_launch_values",
+                    old_created_at=atual.get("created_at")):
                 return
             continue
         if not atual:
@@ -862,7 +866,8 @@ def _devolve_head(user_id: int, head: dict, platform: str) -> None:
         fila = [head] + list(antigo.get("queue") or [])
         if db.advance_pending_action(
                 user_id, "multi_launch_values", antigo,
-                {"queue": fila, "platform": antigo.get("platform", platform)}):
+                {"queue": fila, "platform": antigo.get("platform", platform)},
+                old_created_at=atual.get("created_at")):
             return
 
 

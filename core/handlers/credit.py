@@ -11,6 +11,7 @@ from db import (
     add_credit_purchase_installments,
     card_name_exists,
     clear_pending_action,
+    consume_pending_action,
     create_card,
     delete_card,
     get_card_by_id,
@@ -237,11 +238,13 @@ def _handle_pay_bill_command(user_id: int, text: str) -> str | None:
     return _ask_which_bill(user_id, candidates, amount)
 
 
-def _resolve_pay_bill_choice(user_id: int, text: str, pending: dict) -> str:
+def _resolve_pay_bill_choice(user_id: int, text: str, pending: dict) -> str | None:
     answer = (text or "").strip()
     norm = normalize_text(answer)
     if not answer or norm in ("nao", "cancelar", "cancela", "n"):
-        clear_pending_action(user_id)
+        # Abandono: condicional, para não apagar uma pendência que outra tarefa
+        # armou entre a leitura e agora.
+        consume_pending_action(user_id, pending)
         return "❌ Pagamento cancelado."
 
     payload = dict(pending.get("payload") or {})
@@ -256,12 +259,12 @@ def _resolve_pay_bill_choice(user_id: int, text: str, pending: dict) -> str:
     try:
         rows = list_open_bills(user_id)
     except Exception as e:
-        clear_pending_action(user_id)
+        consume_pending_action(user_id, pending)
         return f"❌ Erro ao consultar faturas: {e}"
 
     candidates = [dict(r) for r in rows if int(r["id"]) in bill_ids and _bill_due(r) > 0]
     if not candidates:
-        clear_pending_action(user_id)
+        consume_pending_action(user_id, pending)
         return "📭 Nenhuma das faturas listadas continua em aberto."
 
     chosen: dict | None = None
@@ -302,7 +305,10 @@ def _resolve_pay_bill_choice(user_id: int, text: str, pending: dict) -> str:
         lines.append("Ou *cancelar* para abortar.")
         return "\n".join(lines)
 
-    clear_pending_action(user_id)
+    # Porteiro: `_execute_pay_bill` paga. Se a linha já não é a que lemos,
+    # outra tarefa consumiu esta escolha — pagar de novo duplicaria o débito.
+    if not consume_pending_action(user_id, pending):
+        return None
     return _execute_pay_bill(user_id, chosen, amount)
 
 
@@ -1039,6 +1045,11 @@ def _ask_credit_limit_or_finish(user_id: int, payload: dict) -> str:
 
 
 def _finish_card_setup(user_id: int, card_id: int, ask_primary: bool) -> str:
+    # Os dois `clear_pending_action` abaixo são INCONDICIONAIS de propósito, e
+    # são os únicos do arquivo. Não há pendência lida aqui, e um dos caminhos
+    # que chega até esta função (`_ask_credit_limit_or_finish`) reescreve a
+    # linha antes de chamar — um compare-and-swap contra o que o chamador leu
+    # falharia sempre e prenderia o cadastro de cartão por 20 min.
     card = get_card_by_id(user_id, card_id)
     if not card:
         clear_pending_action(user_id)
@@ -1156,7 +1167,7 @@ def _resolve_set_primary(user_id: int, text: str, pending: dict) -> str | None:
 
     if payload.get("step") == "choose":
         if _is_no(answer):
-            clear_pending_action(user_id)
+            consume_pending_action(user_id, pending)
             return "Perfeito. Mantive o cartão principal atual."
         card_name = _find_card_name_in_text(user_id, answer) or answer.strip()
         card_id = get_card_id_by_name(user_id, card_name)
@@ -1168,21 +1179,23 @@ def _resolve_set_primary(user_id: int, text: str, pending: dict) -> str | None:
 
     card_id = payload.get("card_id")
     if not card_id:
-        clear_pending_action(user_id)
+        consume_pending_action(user_id, pending)
         return None
     card = get_card_by_id(user_id, int(card_id))
     if not card:
-        clear_pending_action(user_id)
+        consume_pending_action(user_id, pending)
         return "❌ Não achei esse cartão."
 
     if _is_yes(answer):
+        # Consome ANTES de escrever: depois, o CAS não protegeria nada.
+        if not consume_pending_action(user_id, pending):
+            return None
         set_default_card(user_id, int(card_id))
-        clear_pending_action(user_id)
         card = get_card_by_id(user_id, int(card_id))
         return f"✅ O cartão **{card['name']}** agora é o seu principal.\n{_card_summary(card)}"
 
     if _is_no(answer):
-        clear_pending_action(user_id)
+        consume_pending_action(user_id, pending)
         return "Perfeito. Mantive o cartão principal atual."
 
     return f"Responda **sim** para tornar **{card['name']}** o principal ou **não** para cancelar."
@@ -1192,21 +1205,24 @@ def _resolve_delete_card(user_id: int, text: str, pending: dict) -> str | None:
     payload = dict(pending.get("payload") or {})
     card_id = payload.get("card_id")
     if not card_id:
-        clear_pending_action(user_id)
+        consume_pending_action(user_id, pending)
         return None
 
     card = get_card_by_id(user_id, int(card_id))
     card_name = payload.get("card_name") or (card["name"] if card else "esse cartão")
 
     if _is_yes(text):
+        # Porteiro, ANTES do delete: `delete_card` leva faturas e transações
+        # junto. Quem perde o CAS não apaga — o "sim" era de outra pergunta.
+        if not consume_pending_action(user_id, pending):
+            return None
         deleted = delete_card(user_id, int(card_id))
-        clear_pending_action(user_id)
         if not deleted:
             return f"❌ Não consegui excluir o cartão **{card_name}**."
         return f"✅ Cartão **{card_name}** excluído com sucesso."
 
     if _is_no(text):
-        clear_pending_action(user_id)
+        consume_pending_action(user_id, pending)
         return f"Perfeito. Mantive o cartão **{card_name}**."
 
     return f"Responda **sim** para excluir **{card_name}** ou **não** para cancelar."
@@ -1229,13 +1245,15 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
     if pending.get("action_type") == "installment_pending":
         answer = (text or "").strip()
         if not answer or normalize_text(answer) in ("nao", "cancelar", "cancela"):
-            clear_pending_action(user_id)
+            consume_pending_action(user_id, pending)
             return "❌ Parcelamento cancelado."
         payload = dict(pending.get("payload") or {})
         nota = answer
         inferred = _infer_category_result(user_id, nota)
         categoria = inferred.category or payload.get("categoria") or "outros"
-        clear_pending_action(user_id)
+        # Porteiro: `_create_installments` cria N lançamentos de dinheiro.
+        if not consume_pending_action(user_id, pending):
+            return None
         from datetime import date as _date
         purchased_at = _date.fromisoformat(payload["purchased_at"]) if isinstance(payload.get("purchased_at"), str) else payload.get("purchased_at")
         return _create_installments(
@@ -1258,13 +1276,13 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
     answer = (text or "").strip()
 
     if _is_no(answer) and step not in {"reminder_opt_in", "credit_limit_ask", "set_primary", "duplicate_card_name", "confirm_delete_existing_card"}:
-        clear_pending_action(user_id)
+        consume_pending_action(user_id, pending)
         return "❌ Cadastro de cartão cancelado."
 
     # ── Novo step: nome duplicado detectado ──────────────────────────────────
     if step == "duplicate_card_name":
         if _is_no(answer):
-            clear_pending_action(user_id)
+            consume_pending_action(user_id, pending)
             return "❌ Cadastro de cartão cancelado."
 
         if _is_delete(answer):
@@ -1309,7 +1327,7 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
                     due_day=int(payload["due_day"]),
                 )
             except PlanLimitExceeded as exc:
-                clear_pending_action(user_id)
+                consume_pending_action(user_id, pending)
                 return exc.message
             first_card = int(payload.get("existing_count") or 0) == 0
             if first_card:
@@ -1338,13 +1356,15 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         existing_name = payload.get("existing_card_name", "")
 
         if _is_yes(answer) and existing_id:
+            # Porteiro, ANTES do delete: apagar um cartão leva faturas e
+            # transações junto, e o clear posterior não protegeria nada.
+            if not consume_pending_action(user_id, pending):
+                return None
             deleted = delete_card(user_id, int(existing_id))
             if not deleted:
-                clear_pending_action(user_id)
                 return f"❌ Não consegui excluir o cartão **{existing_name}**. Tente novamente."
 
             # Após excluir, pergunta se quer criar um cartão com o mesmo nome agora
-            clear_pending_action(user_id)
             return (
                 f"✅ Cartão **{existing_name}** excluído com sucesso.\n\n"
                 f"Se quiser criar um novo cartão com esse nome, use:\n"
@@ -1411,7 +1431,7 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
                 due_day=due_day,
             )
         except PlanLimitExceeded as exc:
-            clear_pending_action(user_id)
+            consume_pending_action(user_id, pending)
             return exc.message
         payload["card_id"] = card_id
         first_card = int(payload.get("existing_count") or 0) == 0
@@ -1464,17 +1484,19 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         card_id = int(payload["card_id"])
         card = get_card_by_id(user_id, card_id)
         if not card:
-            clear_pending_action(user_id)
+            consume_pending_action(user_id, pending)
             return "❌ Não achei esse cartão para definir como principal."
         if _is_yes(answer):
+            if not consume_pending_action(user_id, pending):
+                return None
             set_default_card(user_id, card_id)
-            clear_pending_action(user_id)
             card = get_card_by_id(user_id, card_id)
             return f"✅ Perfeito. O cartão **{card['name']}** agora é o seu principal.\n{_card_summary(card)}"
-        clear_pending_action(user_id)
+        consume_pending_action(user_id, pending)
         return f"Perfeito. Mantive o cartão principal atual.\n{_card_summary(card)}"
 
-    clear_pending_action(user_id)
+    # Limpeza de estado: step desconhecido. Ignora o resultado do CAS.
+    consume_pending_action(user_id, pending)
     return None
 
 

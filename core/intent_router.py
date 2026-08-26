@@ -177,7 +177,9 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
         if (confidence >= 0.55 and intent != "out_of_scope"
                 and intent not in ("confirm.yes", "confirm.no")
                 and not intent.startswith("investments.")):
-            db.clear_pending_action(user_id)
+            # Abandono: condicional para não apagar uma pendência que outra
+            # tarefa acabou de armar. Perder = não havia nada nosso lá.
+            db.consume_pending_action(user_id, pending)
             pending = None
         else:
             resp = h_investments.resolve_investment_pick(user_id, text, pending)
@@ -191,7 +193,7 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
             and intent not in ("confirm.yes", "confirm.no")
         )
         if abandonou:
-            db.clear_pending_action(user_id)
+            db.consume_pending_action(user_id, pending)
             pending = None
         else:
             resp = h_investments.resolve_funding_choice(user_id, text, pending)
@@ -214,7 +216,7 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
             and intent not in ("confirm.yes", "confirm.no")
             and intent != "out_of_scope"
             and confidence >= 0.55):
-        db.clear_pending_action(user_id)
+        db.consume_pending_action(user_id, pending)
         pending = None
 
     # -----------------------------------------------------------------------
@@ -546,8 +548,12 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
     original_entities = dict(payload.get("entities") or {})
     orig_text        = payload.get("orig_text", "")
 
-    # limpa o pending antes de executar
-    db.clear_pending_action(user_id)
+    # Consome ANTES de executar, e condicionado ao que foi lido: a intent
+    # original é re-executada abaixo (pode registrar/gastar). Se a linha já não
+    # é esta, outra tarefa a substituiu — o texto do usuário responde a OUTRA
+    # pergunta, e re-executar a antiga duplicaria a ação.
+    if not db.consume_pending_action(user_id, clarif):
+        return NOT_UNDERSTOOD_MSG
 
     # se o usuário negou / cancelou explicitamente
     resp_norm = user_response.strip().lower()

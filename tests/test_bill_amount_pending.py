@@ -38,15 +38,14 @@ def test_variable_bill_stores_pending_and_accepts_bare_amount(monkeypatch):
     # duas respostas concorrentes não criarem dois lançamentos. Aqui ela vence.
     reivindica = Mock(return_value=True)
     monkeypatch.setattr("db.bills.mark_bill_paid", mark)
-    monkeypatch.setattr("db.advance_pending_action", reivindica)
+    monkeypatch.setattr("db.consume_pending_action", reivindica)
 
     response = bills.resolve_bill_amount(7, "132,50", pending)
 
     mark.assert_called_once_with(7, 41, 132.5)
     # A pendência é apagada pela própria reivindicação (grava None se o payload
     # ainda for o lido), não mais por um clear incondicional.
-    reivindica.assert_called_once_with(
-        7, "bill_amount_expected", {"bill_id": 41, "bill_name": "Luz"}, None)
+    reivindica.assert_called_once_with(7, pending)
     assert "Conta paga" in response
     assert "R$ 132,50" in response
 
@@ -56,7 +55,7 @@ def test_non_numeric_reply_abandons_bill_question(monkeypatch):
     # não apagar uma pendência que outra tarefa tenha posto no lugar.
     abandona = Mock(return_value=True)
     mark = Mock()
-    monkeypatch.setattr("db.advance_pending_action", abandona)
+    monkeypatch.setattr("db.consume_pending_action", abandona)
     monkeypatch.setattr("db.bills.mark_bill_paid", mark)
     pending = {
         "action_type": "bill_amount_expected",
@@ -64,8 +63,7 @@ def test_non_numeric_reply_abandons_bill_question(monkeypatch):
     }
 
     assert bills.resolve_bill_amount(7, "mostra meu saldo", pending) is None
-    abandona.assert_called_once_with(
-        7, "bill_amount_expected", {"bill_id": 41, "bill_name": "Luz"}, None)
+    abandona.assert_called_once_with(7, pending)
     mark.assert_not_called()
 
 

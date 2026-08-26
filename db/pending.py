@@ -13,7 +13,8 @@ from .users import ensure_user
 def advance_pending_action(user_id: int, action_type: str,
                            old_payload: dict, new_payload: dict | None,
                            minutes: int = 10,
-                           new_action_type: str | None = None) -> bool:
+                           new_action_type: str | None = None,
+                           old_created_at: datetime | None = None) -> bool:
     """Avança (ou apaga) a pendência SÓ SE ela ainda for `old_payload`.
 
     Compare-and-swap. Duas respostas do mesmo usuário podem ser processadas em
@@ -35,30 +36,68 @@ def advance_pending_action(user_id: int, action_type: str,
     renova o prazo (`minutes`), como o `set_pending_action` que ela substitui —
     senão uma fila longa expiraria 10 min depois da PRIMEIRA pergunta, não da
     última resposta.
+
+    `old_created_at` fecha o ABA. Só `(action_type, payload)` identifica o
+    CONTEÚDO da linha, não a instância: se outra tarefa consome a pendência e o
+    usuário repete o MESMO comando, nasce uma linha nova de conteúdo idêntico e
+    o CAS de quem estava atrasado passa — executando a ação duas vezes, que é
+    exatamente o que ele existe para impedir. `created_at` é reescrito a cada
+    gravação (`set_pending_action`, o UPDATE abaixo, o default do INSERT), então
+    serve de versão da linha. Passe sempre que tiver a linha lida em mãos.
     """
+    versao = "" if old_created_at is None else " and created_at = %s"
+    extra: tuple = () if old_created_at is None else (old_created_at,)
     with get_conn() as conn:
         with conn.cursor() as cur:
             if new_payload is None:
                 cur.execute(
                     "delete from pending_actions "
-                    "where user_id = %s and action_type = %s and payload = %s",
-                    (user_id, action_type, Jsonb(old_payload)),
+                    "where user_id = %s and action_type = %s and payload = %s"
+                    + versao,
+                    (user_id, action_type, Jsonb(old_payload)) + extra,
                 )
             else:
                 cur.execute(
                     "update pending_actions "
                     "set action_type = %s, payload = %s, created_at = now(), "
                     "    expires_at = %s "
-                    "where user_id = %s and action_type = %s and payload = %s",
+                    "where user_id = %s and action_type = %s and payload = %s"
+                    + versao,
                     (new_action_type or action_type,
                      Jsonb(new_payload),
                      datetime.now(timezone.utc) + timedelta(minutes=minutes),
-                     user_id, action_type, Jsonb(old_payload)),
+                     user_id, action_type, Jsonb(old_payload)) + extra,
                 )
             gravou = cur.rowcount == 1
         conn.commit()
     return gravou
 
+
+
+def consume_pending_action(user_id: int, pending: dict) -> bool:
+    """Apaga a pendência SÓ SE ela ainda for a que você leu. True se apagou.
+
+    Atalho do `advance_pending_action(..., None)` para o caso mais comum: quem
+    consome tem a linha em mãos e quer apagar *aquela*, não "o que estiver lá".
+    `clear_pending_action` apaga incondicionalmente — se outra tarefa (Discord,
+    ou a outra plataforma do mesmo usuário) armou uma pergunta nova no
+    meio-tempo, ela some e o usuário fica com uma pergunta na tela cuja resposta
+    já não resolve nada.
+
+    False significa "a linha que eu li não está mais lá". Quem perde:
+
+    - **dinheiro ou destrutivo** (pagar, apagar, registrar) — NÃO executa. O
+      False é o porteiro: sem ele as duas tarefas executam a mesma ação.
+    - **abandono / limpeza de estado** — segue e ignora o resultado: se perdeu,
+      não havia nada seu para abandonar.
+    """
+    return advance_pending_action(
+        user_id,
+        pending.get("action_type") or "",
+        pending.get("payload") or {},
+        None,
+        old_created_at=pending.get("created_at"),
+    )
 
 
 def create_pending_action_if_absent(user_id: int, action_type: str, payload: dict,
@@ -103,7 +142,7 @@ def create_pending_action_if_absent(user_id: int, action_type: str, payload: dic
 #      anexou um BOTÃO à resposta: "categoria errada?", "quer desfazer?". Elas
 #      são consumidas no mesmo turno em que nascem, pelo
 #      `_send_reply_with_optional_buttons` (adapters/whatsapp/wa_runtime.py:
-#      181-211), que faz `clear_pending_action` antes de enviar. Se ainda
+#      181-211), que faz `consume_pending_action` antes de enviar. Se ainda
 #      estiverem de pé no turno seguinte é porque o botão não foi tocado —
 #      ignorar é a resposta mais comum, e o usuário refaz pelo comando normal
 #      ("muda a categoria do #12"). Pode ser desalojada por qualquer pergunta.
@@ -192,6 +231,7 @@ def claim_pending_action(user_id: int, action_type: str, payload: dict,
     return advance_pending_action(
         user_id, atual["action_type"], atual.get("payload") or {},
         payload, minutes, new_action_type=action_type,
+        old_created_at=atual.get("created_at"),
     )
 
 
@@ -233,7 +273,18 @@ def get_pending_action(user_id: int):
         return None
 
     if row["expires_at"] <= datetime.now(timezone.utc):
-        clear_pending_action(user_id)
+        # Condicional no prazo, não `clear`: entre esta leitura e o delete outra
+        # tarefa pode ter armado uma pendência NOVA (prazo novo). Duas leituras
+        # simultâneas da linha vencida se atropelavam — a segunda apagava a
+        # pendência que a primeira tinha acabado de criar.
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "delete from pending_actions "
+                    "where user_id = %s and expires_at <= now()",
+                    (user_id,),
+                )
+            conn.commit()
         return None
 
     return row
