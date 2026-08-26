@@ -2,7 +2,7 @@
 db/schema.py — DDL e inicialização do banco de dados.
 """
 from .connection import get_conn
-from .schema_repairs import repair_user_fk_cascades
+from .schema_repairs import ensure_plan_trials_user_fk, repair_user_fk_cascades
 
 
 def init_db():
@@ -1631,7 +1631,12 @@ def init_db():
         """
         create table if not exists plan_trials (
           phone_hash text primary key,
-          user_id bigint,
+          -- SET NULL, nunca CASCADE: a linha tem que sobreviver à deleção da
+          -- conta (a trava é por telefone, na vida), mas o user_id de uma conta
+          -- apagada é resíduo — nunca é lido, e as consultas casam por
+          -- phone_hash. Bancos que já existiam ganham a FK pelo
+          -- `ensure_plan_trials_user_fk`.
+          user_id bigint references users(id) on delete set null,
           started_at timestamptz not null default now(),
           model_version smallint not null default 2
         )
@@ -1915,6 +1920,8 @@ def _run_ddl(conn, ddl_statements) -> None:
         # Corrige FKs em users(id) que ficaram com on_delete errado
         # porque a tabela já existia antes da FK ser declarada no schema.
         try:
+            if ensure_plan_trials_user_fk(cur):
+                print("[init_db] schema_repairs criou a FK de plan_trials.user_id")
             changes = repair_user_fk_cascades(cur)
             if changes:
                 print(f"[init_db] schema_repairs ajustou {len(changes)} FK(s): {changes}")

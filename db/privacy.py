@@ -534,18 +534,14 @@ def delete_user_data(user_id: int) -> dict:
                 if _column_exists(cur, "credit_bills", "user_id"):
                     cur.execute("delete from credit_bills where user_id = %s", (user_id,))
 
-            # `plan_trials` NÃO é apagada de propósito: ela é keyed por
-            # phone_hash e registra a queima do trial (30 dias por telefone, na
-            # vida). Apagar devolveria um trial novo a cada conta recriada com o
-            # mesmo número — a regra de abuso depende de ela sobreviver.
-            #
-            # Mas o `user_id` da linha é RESÍDUO: só é escrito no insert
-            # (db/plans.py:56) e nunca lido — as duas consultas de lá casam por
-            # phone_hash. Deixá-lo mantém um identificador de conta apagada sem
-            # função nenhuma. Anular preserva a trava e corta o vínculo, que é o
-            # mesmo desenho do `checkout_funnel_events` (on delete set null).
-            if _table_exists(cur, "plan_trials") and _column_exists(cur, "plan_trials", "user_id"):
-                cur.execute("update plan_trials set user_id = null where user_id = %s", (user_id,))
+            # `plan_trials` não aparece em `user_owned_tables` de propósito: a
+            # linha é keyed por phone_hash e segura a trava de 30 dias de teste
+            # por telefone, na vida — apagar devolveria um trial novo a cada
+            # conta recriada com o mesmo número. O `user_id` dela é desvinculado
+            # pela FK `on delete set null` (db/schema_repairs.py), e não por um
+            # UPDATE aqui: um UPDATE perde a corrida com um
+            # `claim_trial_for_user` que commite depois dele, e a varredura
+            # pós-commit nunca revisita esta tabela.
 
             for table in user_owned_tables:
                 if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
