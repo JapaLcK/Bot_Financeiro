@@ -1,0 +1,2257 @@
+diff --git a/core/handle_incoming.py b/core/handle_incoming.py
+index f322bd5..32cd894 100644
+--- a/core/handle_incoming.py
++++ b/core/handle_incoming.py
+@@ -137,11 +137,13 @@ def _bold(text: str, platform: str) -> str:
+ def _split_audio_transactions(text: str) -> list[str]:
+     """Separa múltiplos lançamentos num único áudio.
+ 
+-    Wrapper fino sobre `parsers.split_financial_transactions` — a mesma lógica
+-    é usada no path de texto digitado (`core.handlers.launches.add`).
++    Wrapper fino sobre `parsers.split_with_origin` — a mesma lógica é usada no
++    path de texto digitado (`core.handlers.launches.add`). O `_handle_audio`
++    chama `split_with_origin` direto porque precisa também da flag "o valor que
++    o usuário falou foi descartado na divisão"; aqui fica só a lista.
+     """
+-    from parsers import split_financial_transactions
+-    return split_financial_transactions(text)
++    from parsers import split_with_origin
++    return split_with_origin(text)[0]
+ 
+ 
+ def _process_audio_transaction(uid: int, transcription: str, msg: IncomingMessage, platform: str) -> str:
+@@ -233,7 +235,8 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage]
+     preview = f'🎙️ {prefix}Entendi: "{transcription}"{prefix}\n\n'
+ 
+     # Detecta múltiplos lançamentos no mesmo áudio
+-    parts = _split_audio_transactions(transcription)
++    from parsers import split_with_origin
++    parts, valor_descartado = split_with_origin(transcription)
+     is_multi = len(parts) > 1
+ 
+     # Maior id de lançamento ANTES de processar este áudio. Serve pra saber se
+@@ -254,25 +257,24 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage]
+     # a transcrição ANTES do add(), então cada pedaço vira um route() separado e
+     # o pedaço sem valor cairia no "não consegui identificar o valor". Detectamos
+     # antes de rotear e enfileiramos pra perguntar o valor — paridade com o texto.
++    # O `triage_part` é o MESMO do texto (era uma cópia deste laço, e a cópia
++    # daqui ficou sem o guarda de alvo vazio: "gastei 30 e 45" falado gravava
++    # dois lançamentos em "outros" sem perguntar nada).
+     missing: list[dict] = []
+     if is_multi:
+-        from parsers import describe_valueless_launch
+-        from core.handlers.launches import register_if_recurring
++        from core.handlers.launches import triage_part
+     for part in parts:
+         if is_multi:
+-            info = describe_valueless_launch(part)
+-            if info:
+-                tipo, desc = info
+-                # Valor recorrente conhecido ("aluguel" que sempre é o mesmo) →
+-                # lança sozinho (com aviso). Senão, enfileira pra perguntar.
+-                auto = register_if_recurring(uid, tipo, desc, platform)
+-                if auto is not None:
+-                    # add_from_entities devolve markdown estilo Discord (**bold**);
+-                    # os demais pedaços do áudio já saem formatados por
+-                    # _process_audio_transaction, então formatamos este também.
+-                    responses.append(format_for_platform(auto, platform))
+-                else:
+-                    missing.append({"tipo": tipo, "desc": desc})
++            auto, item = triage_part(uid, part, platform,
++                                     allow_recurring=not valor_descartado)
++            if auto is not None:
++                # add_from_entities devolve markdown estilo Discord (**bold**);
++                # os demais pedaços do áudio já saem formatados por
++                # _process_audio_transaction, então formatamos este também.
++                responses.append(format_for_platform(auto, platform))
++                continue
++            if item is not None:
++                missing.append(item)
+                 continue
+         result_text = _process_audio_transaction(uid, part, msg, platform)
+         # A quebra em múltiplos lançamentos (_split_audio_transactions) pode
+@@ -299,15 +301,22 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage]
+     # mas o multi_launch_values é o que a próxima resposta do usuário resolve.
+     ask_value_question = ""
+     if missing:
+-        from core.handlers.launches import _ask_value_question
+-        db.set_pending_action(
+-            uid, "multi_launch_values",
+-            {"queue": missing, "platform": platform},
+-        )
+-        ask_value_question = _ask_value_question(missing[0])
++        from core.handlers.launches import _ask_value_question, enqueue_missing
++        # `enqueue_missing` avisa o que a fila ANTERIOR levou junto — a linha de
++        # `pending_actions` é uma só por usuário.
++        aviso = enqueue_missing(uid, missing, platform)
++        ask_value_question = _ask_value_question(missing[0], len(missing) - 1)
++        if aviso:
++            ask_value_question = f"{aviso}\n\n{ask_value_question}"
+ 
+     if registered_something:
+-        body = "\n\n".join(responses)
++        from core.handlers.launches import FIRST_LAUNCH_NUDGE, move_nudge_to_end
++        # Mesma correção do texto: a saudação de primeiro lançamento sai UMA vez,
++        # no fim do lote, e não colada no primeiro pedaço do áudio.
++        body = move_nudge_to_end(
++            "\n\n".join(responses),
++            format_for_platform(FIRST_LAUNCH_NUDGE, platform),
++        )
+     elif missing:
+         # Nada com valor foi registrado, mas há pedaço(s) esperando valor — a
+         # pergunta abaixo cobre a resposta; não mostra o fallback "não entendi".
+diff --git a/core/handlers/launches.py b/core/handlers/launches.py
+index d197165..2e51d7a 100644
+--- a/core/handlers/launches.py
++++ b/core/handlers/launches.py
+@@ -14,9 +14,14 @@ from utils_date import extract_date_from_text, today_tz, parse_period_from_text,
+ from core.services.category_service import infer_category, learn_from_inference
+ from parsers import (
+     parse_receita_despesa_natural,
+-    split_financial_transactions,
++    split_with_origin,
+     describe_valueless_launch,
++    tipo_from_verb,
+     _extract_valor,
++    _extract_target_after_amount,
++    _STARTS_WITH_VALUE_RE,
++    _LEAD_VERB_RE,
++    _PT_ALL,
+ )
+ 
+ logger = logging.getLogger(__name__)
+@@ -371,6 +376,41 @@ def _maybe_recurring_offer(
+         return None
+ 
+ 
++def _drain_live_queue(user_id: int) -> str:
++    """Larga a fila de perguntas que está viva e devolve o aviso — ou "".
++
++    `pending_actions` tem UMA linha por usuário: registrar um lançamento grava
++    a oferta de "categoria errada?" (ou a de gasto fixo) por cima da fila de
++    `multi_launch_values`, e o dinheiro que estava esperando pergunta sumia sem
++    uma palavra. Medido: "gastei 30 e 45" e depois "gastei 20 no mercado"
++    deixava a fila apagada, R$ 30,00 e R$ 45,00 evaporados, e a resposta era só
++    o lançamento de R$ 20,00.
++
++    Fica AQUI, e não em cada chamador, porque `add_from_entities` é por onde
++    todo lançamento passa — texto, áudio, tool da IA e a confirmação de foto de
++    cupom (`core/handlers/pending.py`). Pelo roteador o caso nem chega: a fila
++    é resolvida ou descartada com aviso antes (`core/intent_router.py`); quem
++    entra por fora dele é que atropelava.
++
++    Não fecha os outros 40 sítios que escrevem em `pending_actions` (contados:
++    48 chamadas de `set_pending_action` em 12 arquivos de produção, das quais 8
++    são deste arquivo). Quase todos são alcançados pelo roteador, que já trata a
++    fila primeiro. As duas exceções conhecidas são os slash-commands do Discord
++    (`adapters/discord/cogs/accounts_cog.py:150` e `investments_cog.py:143`):
++    eles não passam pelo roteador, então `/apagar` com uma fila viva ainda a
++    apaga calado. Ficaram de fora de propósito — precisam de um aviso no
++    embed de confirmação, que é outro PR.
++    """
++    p = db.get_pending_action(user_id)
++    if not p or p.get("action_type") != "multi_launch_values":
++        return ""
++    fila = (p.get("payload") or {}).get("queue") or []
++    if not fila:
++        return ""
++    db.clear_pending_action(user_id)
++    return _discard_queue(fila)
++
++
+ def add_from_entities(
+     user_id: int,
+     *,
+@@ -383,6 +423,7 @@ def add_from_entities(
+     criado_em=None,
+     is_internal: bool | None = None,
+     platform: str = "whatsapp",
++    suppress_pending: bool = False,
+ ) -> str:
+     """Registra um lançamento a partir de args já estruturados (sem regex).
+ 
+@@ -392,6 +433,13 @@ def add_from_entities(
+ 
+     Toda lógica compartilhada (categorização, learn, DB write, botão WhatsApp,
+     alerta de orçamento) vive aqui — fonte única de verdade.
++
++    `suppress_pending=True`: não grava oferta nenhuma em `pending_actions`.
++    A tabela tem UMA linha por usuário, então a oferta atropelaria a fila de
++    lançamentos múltiplos que o chamador acabou de gravar. Antes o atropelo
++    acontecia ao contrário (a fila era escrita depois e matava a oferta), o que
++    ainda imprimia o texto da oferta de recorrente com a pendência já perdida —
++    o "sim" do usuário não confirmava nada.
+     """
+     if valor <= 0:
+         return "Não consegui identificar o valor. Tente: *gastei 50 no mercado*"
+@@ -468,8 +516,12 @@ def add_from_entities(
+     # real (não movimentação interna). A oferta divide a linha de pending_actions
+     # com o botão de recategorizar; quando há oferta de recorrente ela vence
+     # (é mais valiosa) e o botão de recategorizar é suprimido nesse lançamento.
++    # A escrita em `pending_actions` logo abaixo apaga a linha do usuário — e
++    # se o que estava lá era uma fila de perguntas, ela leva dinheiro junto.
++    aviso_fila = "" if suppress_pending else _drain_live_queue(user_id)
++
+     recurring_offer = None
+-    if tipo == "despesa" and not is_int:
++    if tipo == "despesa" and not is_int and not suppress_pending:
+         # merchant_key precisa da mesma prioridade alvo>nota que a query em
+         # find_recurring_candidate usa pro lançamento anterior (coalesce(alvo,
+         # nota)) — nota_clean sozinho é a frase toda ("gastei 44,90 na
+@@ -490,7 +542,7 @@ def add_from_entities(
+             recurring_offer = None
+     # Botão "categoria errada?" no WhatsApp (one-shot, lido por
+     # _send_reply_with_optional_buttons no wa_runtime e limpo em seguida).
+-    elif platform == "whatsapp" and launch_id:
++    elif platform == "whatsapp" and launch_id and not suppress_pending:
+         try:
+             db.set_pending_action(
+                 user_id,
+@@ -505,6 +557,8 @@ def add_from_entities(
+ 
+     emoji = "💸" if tipo == "despesa" else "💰"
+     resposta = (
++        f"{aviso_fila}\n\n" if aviso_fila else ""
++    ) + (
+         f"{emoji} **{tipo.capitalize()} registrada**: {fmt_brl(valor)}\n"
+         f"🏷️ Categoria: {categoria_final}\n"
+         f"🏦 Saldo: {fmt_brl(float(new_balance))}\n"
+@@ -543,11 +597,7 @@ def add_from_entities(
+         try:
+             from core.observability import recent_event_exists, log_system_event_sync
+             if not recent_event_exists("onboarding_first_launch_nudge", user_id, within_days=36500):
+-                resposta += (
+-                    "\n\n🎉 Esse foi seu primeiro lançamento — viu como é rápido?\n"
+-                    "Agora tenta **saldo**. Quando quiser, tem caixinhas, cartões e "
+-                    "dashboard: é só mandar **ajuda**."
+-                )
++                resposta += FIRST_LAUNCH_NUDGE
+                 log_system_event_sync(
+                     "info",
+                     "onboarding_first_launch_nudge",
+@@ -564,12 +614,126 @@ def add_from_entities(
+     return resposta
+ 
+ 
+-def _ask_value_question(item: dict) -> str:
+-    """Pergunta amigável pelo valor de um lançamento que veio sem número."""
++FIRST_LAUNCH_NUDGE = (
++    "\n\n🎉 Esse foi seu primeiro lançamento — viu como é rápido?\n"
++    "Agora tenta **saldo**. Quando quiser, tem caixinhas, cartões e "
++    "dashboard: é só mandar **ajuda**."
++)
++
++
++def move_nudge_to_end(body: str, nudge: str = FIRST_LAUNCH_NUDGE) -> str:
++    """A saudação de primeiro lançamento vai pro FIM do lote.
++
++    Quem cola o nudge é o `add_from_entities`, no lançamento que disparou ele.
++    Numa mensagem com dois ("gastei 30 no uber e 45 no ifood") esse é o
++    PRIMEIRO — e a saudação de boas-vindas aparecia no meio da resposta, entre
++    um lançamento e outro. Aqui ela é recortada e recolada no fim, uma vez só.
++
++    `nudge` existe pro áudio: lá os pedaços já passaram pelo
++    `format_for_platform`, e no WhatsApp o `**saldo**` do texto acima já virou
++    `*saldo*` — o chamador passa a versão formatada pra comparação bater.
++    """
++    if nudge not in body:
++        return body
++    return body.replace(nudge, "") + nudge
++
++
++def _fila_sufixo(restantes: int) -> str:
++    """Avisa que a pergunta atual não é a última.
++
++    Sem isto, quem manda "gastei 30 e 45" lê só "Em que você gastou R$ 30,00?"
++    e acha que os R$ 45 sumiram.
++    """
++    if restantes <= 0:
++        return ""
++    if restantes == 1:
++        return "\n_Já já pergunto do outro._"
++    return f"\n_Já já pergunto dos outros {restantes}._"
++
++
++def _ask_value_question(item: dict, restantes: int = 0) -> str:
++    """Pergunta amigável pelo pedaço que faltou no lançamento.
++
++    A fila tem dois tipos de item e a pergunta é o espelho um do outro:
++    tem `desc` e falta o valor ("paguei o aluguel"), ou tem `valor` e falta o
++    destino ("gastei 30 e 45"). O segundo caso existe porque o ramo de
++    múltiplos lançamentos registrava direto em `outros`, sem o guarda de alvo
++    vazio que o caminho de valor único já tinha.
++
++    `restantes` = quantos itens ficam na fila DEPOIS deste.
++    """
++    sufixo = _fila_sufixo(restantes)
++    if item.get("valor") is not None:
++        verbo = "recebeu" if item.get("tipo") == "receita" else "gastou"
++        return f"🐷 Em que você {verbo} {fmt_brl(float(item['valor']))}?{sufixo}"
+     desc = item.get("desc") or "esse lançamento"
++    # "Faltou o valor" seria mentira no caso novo: em "gastei 30 no uber e no
++    # ifood" o usuário DEU um valor — ele é que serve para dois destinos e não
++    # dá pra saber de qual. A pergunta acima vale nos dois casos.
+     if item.get("tipo") == "receita":
+-        return f"🐷 Faltou o valor de *{desc}*. Quanto você recebeu? (só o número)"
+-    return f"🐷 Faltou o valor de *{desc}*. Quanto foi? (só o número)"
++        return f"🐷 Quanto você recebeu de *{desc}*? (só o número){sufixo}"
++    return f"🐷 Quanto foi gasto em *{desc}*? (só o número){sufixo}"
++
++
++def _item_label(item: dict) -> str:
++    """Como o item aparece na lista de 'deixei de lado'."""
++    return item.get("desc") or fmt_brl(float(item.get("valor") or 0))
++
++
++def triage_part(user_id: int, part: str, platform: str,
++                parsed: dict | None = None,
++                allow_recurring: bool = True) -> tuple[str | None, dict | None]:
++    """O que fazer com UM pedaço de uma mensagem com vários lançamentos.
++
++    Devolve `(resposta_pronta, item_pra_fila)`. `(None, None)` quer dizer
++    "pedaço normal — registre do seu jeito".
++
++    Existe porque texto (`add`, aqui) e áudio (`core.handle_incoming`) tinham
++    DUAS cópias deste laço, e a do áudio ficou sem o guarda de alvo vazio: um
++    "gastei 30 e 45" falado gravava dois lançamentos em `outros` sem perguntar
++    nada.
++
++    `parsed` é o resultado de `parse_receita_despesa_natural` quando quem chama
++    já parseou (é o caso do texto). O áudio passa `None` de propósito: lá o
++    parse roda depois, dentro do `_process_audio_transaction`, e repeti-lo aqui
++    dobraria as chamadas de `infer_category` (e o aprendizado que elas geram).
++
++    `allow_recurring=False` quando o pedaço nasceu de "um valor, vários
++    destinos" (`parsers.split_with_origin` devolve essa flag). Aí o usuário
++    ACABOU de digitar um número e nós o descartamos de propósito — preencher do
++    histórico contradiz o que ele escreveu. Medido: com 3 gastos de R$25 no
++    uber, "gastei 30 no uber e no ifood" gravava R$ 25,00. Em "... 30 café e o
++    aluguel" o usuário não deu valor nenhum pro aluguel, e aí o preenchimento
++    pelo histórico continua valendo.
++    """
++    if parsed is not None:
++        if not (parsed.get("alvo") or "").strip():
++            # "gastei 30 e 45": valor sem destino nenhum. O caminho de valor
++            # único já pergunta em que foi; este ramo gravava em "outros".
++            return None, {"tipo": parsed["tipo"], "valor": float(parsed["valor"])}
++        return None, None
++    else:
++        # Áudio: tira a DATA antes de procurar o destino, os mesmos dois passos
++        # que o `parse_receita_despesa_natural` faz no ramo do texto (o `alvo`
++        # de lá sai de `text_base`, já sem a data). Sem isto, "gastei 30 hoje e
++        # 45 ontem" digitado PERGUNTA o destino e falado gravava dois `outros`
++        # mudos — "hoje"/"ontem"/"dia 10/05" sobravam como alvo.
++        _, sem_data = extract_date_from_text(part)
++        base = (sem_data or part).strip()
++        valor = _extract_valor(base)
++        if valor is not None and valor > 0 and not _extract_target_after_amount(base):
++            return None, {"tipo": tipo_from_verb(base), "valor": float(valor)}
++
++    info = describe_valueless_launch(part)
++    if not info:
++        return None, None
++    tipo, desc = info
++    # Valor recorrente conhecido ("aluguel" que sempre é o mesmo) → lança
++    # sozinho. Senão, enfileira pra perguntar.
++    auto = register_if_recurring(user_id, tipo, desc, platform) if allow_recurring else None
++    if auto is not None:
++        return auto, None
++    return None, {"tipo": tipo, "desc": desc}
+ 
+ 
+ # Quantas vezes o MESMO valor precisa ter aparecido antes (pro mesmo tipo/descrição)
+@@ -641,57 +805,335 @@ def register_if_recurring(user_id: int, tipo: str, desc: str, platform: str) ->
+ _CANCEL_WORDS = {"nao", "n", "cancelar", "cancela", "deixa", "esquece", "esquecer", "para", "pare"}
+ 
+ 
+-def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform: str = "whatsapp") -> str | None:
++# Intents que também são destino plausível de gasto (ver `_is_other_command`).
++_DEST_LIKE_INTENTS = {"credit.handle", "launches.list", "investments.list", "pockets.list"}
++
++# Palavras que são destino plausível mesmo compartilhando a intent com um
++# comando de verdade. "conta" cai em `balance.check` — a MESMA intent de
++# "saldo" —, então tirá-la pela intent levaria "saldo" junto. É a única entre
++# as 507 palavras varridas nessa situação.
++_DEST_LIKE_WORDS = {"conta"}
++
++# Palavras que acompanham um valor por extenso sem nomear lugar nenhum
++# ("cem reais", "trinta contos").
++_VALUE_ONLY_WORDS = (
++    {"reais", "real", "conto", "contos", "pila", "pilas", "mango", "mangos",
++     "centavo", "centavos", "mil", "milhao", "milhoes", "e", "de"}
++    | {normalize_text(w) for w in _PT_ALL}
++)
++
++
++def _is_value_not_target(text: str) -> bool:
++    """A resposta traz um VALOR no lugar do destino?
++
++    Três formas, e só estas três:
++      - começa pelo valor — "99", "R$ 100", "100 no mercado";
++      - abre com verbo de lançamento e traz valor — "gastei 60 e 70";
++      - é o valor por extenso e nada mais — "cem reais" (comum no áudio).
++
++    O guarda anterior era "tem número em QUALQUER posição", e isso descartava
++    destino verdadeiro. Medidos 6 de 7: "posto 24 horas", "farmacia 24h",
++    "padaria 2 irmaos", "cinema 3d", "loja 25 de marco", "mercado 3 coracoes".
++
++    ponytail: um destino que COMEÇA por número ("25 de marco" sozinho) ainda
++    cai no descarte — separá-lo de "100 no mercado" pede o classificador; até
++    lá o descarte pelo menos avisa.
+     """
+-    Resolve a pergunta de valor pendente de um lançamento múltiplo. O bot havia
+-    perguntado "quanto foi *aluguel*?"; esta resposta traz o valor.
+-
+-    - resposta com valor → registra o item da frente da fila; se sobra fila,
+-      pergunta o próximo; senão encerra.
+-    - resposta de cancelamento → descarta o que faltava.
+-    - resposta sem valor (o user mudou de assunto) → abandona a pendência e
+-      retorna None pra que o roteador processe a mensagem normalmente.
++    if _STARTS_WITH_VALUE_RE.match(text):
++        return True
++    if _extract_valor(text) is None:
++        return False
++    if _LEAD_VERB_RE.match(text):
++        return True
++    return all(p in _VALUE_ONLY_WORDS
++               for p in re.findall(r"[a-z]+", normalize_text(text)))
++
++
++# Ruído de conversa: não nomeia destino nenhum e também não é troca de
++# assunto. Medido no estado B ANTES deste guarda: "kkkkk", "kkk", "ok" e "aff"
++# viravam um lançamento de R$ 30,00 em "outros" com essa nota — e o
++# `learn_from_inference` aprendia a associação. "😂" e "??" já caíam fora por
++# não terem letra nenhuma; agora os dois grupos têm o mesmo destino.
++_NOISE_RE = re.compile(
++    r"o?k+|(?:ha|he|hi)+h?|rs+|a+f+|hm+|ah+|eh+|uai|opa|oi+|eita|ata|vish|sla|"
++    r"blz|vlw|valeu|obrigad[oa]"
++)
++
++
++def _is_noise(text: str) -> bool:
++    """A resposta não nomeia nada — risada, interjeição, emoji, vazio.
++
++    Conservador por desenho: só o que está na lista. Um destino que o
++    dicionário não conhece ("salao da rita") NÃO cai aqui — descartar a fila
++    por não reconhecer o nome do lugar perderia dinheiro de verdade.
++    """
++    t = normalize_text(text).strip()
++    if not re.search(r"[a-z]", t):      # emoji, "??", pontuação, string vazia
++        return True
++    return bool(_NOISE_RE.fullmatch(t))
++
++
++def _other_target_named(text: str, desc: str | None) -> bool:
++    """A resposta à pergunta "quanto foi gasto em *uber*?" nomeia OUTRO destino?
++
++    "30", "R$ 30,50" e "30 no uber" respondem a pergunta. "gastei 100 no
++    mercado" é um lançamento novo — e aproveitar o 100 pro item da fila grava
++    na categoria errada (medido: R$ 100,00 em *transporte*, o "mercado" jogado
++    fora). Mesma coisa com uma mensagem múltipla nova ("gastei 50 no mercado e
++    no posto" gravava R$ 50,00 no *ifood*).
++
++    Destino sem letra nenhuma não conta: "-50" deixa "50" como resto, e isso é
++    o próprio valor, não um lugar.
++    """
++    alvo = normalize_text(_extract_target_after_amount(text).strip())
++    if not alvo or not re.search(r"[a-z]", alvo):
++        return False
++    return alvo != normalize_text(desc or "")
++
++
++def _discard_queue(queue: list[dict]) -> str:
++    """A frase de "larguei a fila". Quem chama já apagou a pendência.
++
++    Uma frase só para todo mundo: o "cancelar" explícito e as respostas que não
++    servem de destino (comando, número, emoji, branco). Antes, só o "cancelar"
++    avisava — as outras limpavam a fila caladas e o dinheiro sumia junto
++    (medido: responder "fatura" à pergunta dos R$ 300,00 devolvia a lista de
++    cartões e os R$ 300,00 + R$ 45,00 evaporavam sem uma palavra).
++    """
++    return "❌ Beleza, deixei de lado: " + ", ".join(_item_label(i) for i in queue) + "."
++
++
++def enqueue_missing(user_id: int, missing: list[dict], platform: str) -> str:
++    """Grava a fila de perguntas e devolve o aviso do que a fila ANTERIOR levou.
++
++    `pending_actions` tem uma linha por usuário, então gravar a fila nova apaga
++    a antiga. Medido: "gastei 30 e 45" e, em seguida, "gastei 60 e 70" deixava
++    a fila [60, 70] e os R$ 30,00 e R$ 45,00 evaporavam sem uma palavra.
++
++    O aviso é a MESMA frase do descarte (`_discard_queue`) — uma regra só para
++    a classe inteira. Devolve "" quando não havia fila.
++
++    Os dois únicos escritores de `multi_launch_values` chamam aqui: o texto
++    (`add`) e o áudio (`core.handle_incoming._handle_audio`).
++    """
++    velha = db.get_pending_action(user_id)
++    aviso = ""
++    if velha and velha.get("action_type") == "multi_launch_values":
++        fila = (velha.get("payload") or {}).get("queue") or []
++        if fila:
++            aviso = _discard_queue(fila)
++    db.set_pending_action(user_id, "multi_launch_values",
++                          {"queue": missing, "platform": platform})
++    return aviso
++
++
++def _is_other_command(text: str) -> bool:
++    """A resposta é um comando conhecido do bot, e não um destino de gasto?
++
++    Só os dois níveis DETERMINÍSTICOS do classificador (tabela exata + regex de
++    alias): precisa valer sem `OPENAI_API_KEY` e sem chamada de rede. Medido
++    contra as 483 palavras de `CATEGORY_KEYWORDS`: uma única ("comprei online")
++    casa alguma regra, e casa `launches.add` — que o teste de valor logo acima
++    já resolve. Por isso `launches.add` fica de fora daqui.
++
++    E fora também as intents cujo nome é, antes de tudo, um lugar onde dinheiro
++    vai: quem responde "fatura", "extrato", "cartão", "investimento" ou
++    "caixinha" à pergunta "em que você gastou R$ 300,00?" está nomeando o
++    DESTINO, não pedindo o relatório. "saldo", "ajuda", "relatório" e "resumo"
++    continuam comandos — ninguém gasta dinheiro "no saldo".
++
++    "conta" é o mesmo caso, mas não sai pela intent: ela cai em `balance.check`
++    junto com "saldo". Vai pela palavra (`_DEST_LIKE_WORDS`) — "paguei a conta"
++    é destino; "qual meu saldo" não.
++    """
++    from core.intent_classifier import _try_exact, _try_alias, _normalize
++    norm = _normalize(text)
++    if norm in _DEST_LIKE_WORDS:
++        return False
++    res = _try_exact(norm) or _try_alias(norm, text)
++    return (res is not None
++            and res.intent != "launches.add"
++            and res.intent not in _DEST_LIKE_INTENTS)
++
++
++def resolve_multi_launch_value(user_id: int, text: str, _pending_ignorado=None,
++                               platform: str = "whatsapp") -> str | None:
++    """
++    Resolve a pergunta pendente de um lançamento múltiplo.
++
++    ══════════════════════════════════════════════════════════════════════════
++    A MÁQUINA DE ESTADOS DA FILA `multi_launch_values` — ESTADOS × EVENTOS
++    ══════════════════════════════════════════════════════════════════════════
++    Enumerada por escrito, e de uma vez, porque remendar transição a transição
++    é o que gerou as três rodadas anteriores de bloqueio (CLAUDE.md §4). Cada
++    célula abaixo foi MEDIDA antes da correção, não suposta.
++
++    ESTADOS (o que a frente da fila está esperando):
++
++    | | frente da fila                | pergunta que o bot fez         |
++    |---|---|---|
++    | **A** | tem `desc`, falta `valor` | "Quanto foi gasto em *uber*?"  |
++    | **B** | tem `valor`, falta `desc` | "Em que você gastou R$ 30,00?" |
++    | **V** | fila vazia / sem pendência | nenhuma                       |
++
++    EVENTOS × ESTADOS — "antes" é o que estava medido; "agora" é o que passou a
++    valer. Onde só há um texto, antes == agora (nada mudou).
++
++    | evento                         | A (falta valor)                         | B (falta destino)              |
++    |---|---|---|
++    | valor válido ("30")            | REGISTRA no `desc` da frente            | DESCARTA (o valor não vira nome) |
++    | zero ("0")                     | antes: ABANDONAVA em silêncio → "não entendi", fila sumia. agora: REPETE a pergunta | REPETE a pergunta (`_is_noise`: não tem letra) |
++    | negativo ("-50")               | REGISTRA R$ 50,00 — o sinal não é do número, é do `tipo` do item (despesa sai do saldo). Escrever "-50" numa despesa é a forma natural de dizer saída; recusar seria pedir pro usuário adivinhar | REPETE a pergunta |
++    | "R$ 30,50" / "trinta reais"    | REGISTRA R$ 30,50 / R$ 30,00            | DESCARTA (é valor, não destino) |
++    | texto que não é valor ("sei la")| antes: ABANDONAVA em silêncio. agora: DESCARTA com aviso | REGISTRA com esse destino (nome que o dicionário não conhece ainda é destino de verdade) |
++    | comando determinístico ("saldo")| antes: respondia o saldo e a fila sumia calada. agora: DESCARTA com aviso | DESCARTA com aviso |
++    | pergunta ("quanto gastei?")    | antes: respondia e a fila sumia calada. agora: DESCARTA com aviso | DESCARTA com aviso |
++    | outro lançamento ("gastei 100 no mercado") | antes: gravava R$ 100,00 na categoria do *uber*. agora: DESCARTA com aviso (`_other_target_named`) | DESCARTA com aviso |
++    | mensagem multi nova ("gastei 50 no mercado e no posto") | antes: gravava R$ 50,00 no *ifood*. agora: DESCARTA com aviso | DESCARTA com aviso |
++    | vazio / emoji ("", "😂")       | antes: ABANDONAVA em silêncio. agora: REPETE a pergunta | REPETE a pergunta |
++    | "cancelar" / "deixa" / "não"   | DESCARTA com aviso                      | DESCARTA com aviso |
++    | destino repetindo a pergunta ("30 no uber") | REGISTRA (o alvo citado é o próprio `desc`) | — |
++    | destino COM número ("posto 24 horas") | REGISTRA R$ 24,00 — ver ressalva em `_is_value_not_target` | REGISTRA com esse destino |
++    | áudio                          | idêntico ao texto: a transcrição entra pelo mesmo `route()` | idem |
++    | fila vazia / pendência sumiu (V)| limpa e devolve `None`                 | idem |
++    | duas respostas simultâneas     | CAS (`db.advance_pending_action`): a 2ª perde, relê e responde o item seguinte | idem |
++    | exceção no meio do registro    | o item volta pra fila e a exceção sobe (`PlanLimitExceeded` do tier Grátis) | idem |
++    | TTL de 10 min estoura          | `get_pending_action` devolve None e o roteador nem chega aqui: a fila morre CALADA | idem |
++
++    REGISTRA = grava o lançamento, tira o item da fila (por CAS) e, se sobrou
++    item, já faz a próxima pergunta.
++
++    DESCARTA = limpa a pendência e devolve a MESMA frase do "cancelar",
++    listando o que foi largado (`_discard_queue`). Uma frase só para a classe
++    inteira. O preço, aceito: a mensagem que causou o descarte NÃO é
++    reprocessada como comando — quem responde "qual meu saldo" recebe o aviso e
++    reenvia o comando. Trocar isso por "avisa E responde" exige o roteador
++    prefixar o aviso, o que muda o tipo de retorno desta função (hoje `str |
++    None`) e das 7 chamadas que os testes fazem — não vale o preço aqui.
++
++    REPETE = a fila fica de pé e a pergunta sai de novo. Vale quando o usuário
++    não DISSE nada (emoji, branco, risada) ou disse um número que não serve
++    ("0"): não há o que descartar nem o que registrar.
++
++    ponytail: o TTL é o único caminho que ainda perde a fila sem uma palavra, e
++    não dá pra fechar daqui — avisar exige mensagem ATIVA do bot (job varrendo
++    `pending_actions` vencidas), não uma resposta. Está fora deste PR de
++    propósito; o custo é 10 min de silêncio e o usuário reenvia.
++
++    Nada disso usa lock. A pendência avança por compare-and-swap
++    (`db.advance_pending_action`): a gravação exige que a fila ainda seja a que
++    foi lida. Duas respostas simultâneas do mesmo usuário chegam em POSTs
++    separados do Meta, cada um numa thread (`adapters/whatsapp/wa_app.py:320`);
++    a segunda perde o CAS, relê a fila já avançada e responde o item seguinte.
++
++    Quem mais mexe nesta fila, e onde: `enqueue_missing` (fila nova por cima de
++    uma viva → avisa com a mesma frase) e `_drain_live_queue` (lançamento que
++    entra por fora do roteador → avisa com a mesma frase).
+     """
+     from utils_text import normalize_text
+ 
+-    payload = pending.get("payload", {})
+-    queue: list[dict] = list(payload.get("queue") or [])
+-    if not queue:
+-        db.clear_pending_action(user_id)
+-        return None
++    # `_pending_ignorado` existe só pra não quebrar as 7 chamadas posicionais
++    # que já estavam nos testes antigos; o nome diz o que ele faz. A fila vem
++    # SEMPRE do banco: reaproveitar o dict lido lá fora era o que fazia duas
++    # chamadas registrarem o primeiro item duas vezes.
++    #
++    # ponytail: 4 tentativas bastam para as 2 threads que o Meta gera por
++    # usuário; cada CAS que vence encurta a fila, então não há laço infinito.
++    for _ in range(4):
++        fresh = db.get_pending_action(user_id)
++        if fresh is None or fresh.get("action_type") != "multi_launch_values":
++            return None
++        payload: dict = fresh.get("payload") or {}
++        queue: list[dict] = list(payload.get("queue") or [])
++        if not queue:
++            db.clear_pending_action(user_id)
++            return None
+ 
+-    resp_norm = normalize_text(text).strip()
+-    if resp_norm in _CANCEL_WORDS:
+-        db.clear_pending_action(user_id)
+-        restantes = ", ".join(i.get("desc", "?") for i in queue)
+-        return f"❌ Beleza, deixei de lado: {restantes}."
+-
+-    valor = _extract_valor(text)
+-    if valor is None or valor <= 0:
+-        # Não é um valor — o usuário mudou de assunto. Abandona a pendência e
+-        # deixa o roteador tratar a mensagem como um comando novo.
+-        db.clear_pending_action(user_id)
+-        return None
++        def _apaga() -> bool:
++            return db.advance_pending_action(
++                user_id, "multi_launch_values", payload, None)
+ 
+-    head = queue.pop(0)
+-    resp = add_from_entities(
+-        user_id,
+-        tipo=head.get("tipo", "despesa"),
+-        valor=float(valor),
+-        alvo=head.get("desc"),
+-        nota=head.get("desc"),
+-        platform=platform,
+-    )
++        resp_norm = normalize_text(text).strip()
++        if resp_norm in _CANCEL_WORDS:
++            if not _apaga():
++                continue
++            return _discard_queue(queue)
++
++        head, resto = queue[0], queue[1:]
++        if head.get("valor") is not None:
++            # Estado B: a pergunta foi "em que você gastou R$30?" — a resposta
++            # deveria ser o destino. Não sendo, a fila (que tem dinheiro dentro)
++            # é descartada COM AVISO.
++            desc = text.strip()
++            if _is_noise(desc):
++                # Ruído de conversa não é destino nem troca de assunto: a fila
++                # (que tem dinheiro dentro) fica de pé e a pergunta se repete.
++                return _ask_value_question(head, len(resto))
++            if _is_value_not_target(desc) or _is_other_command(desc):
++                if not _apaga():
++                    continue
++                return _discard_queue(queue)
++            args = dict(tipo=head.get("tipo", "despesa"), valor=float(head["valor"]),
++                        alvo=desc, nota=desc)
++        else:
++            # Estado A: faltava o valor. A ordem importa e é esta:
++            #   1. é um valor utilizável (e não nomeia outro destino) → REGISTRA
++            #   2. não disse nada, ou disse "0" → REPETE, fila intacta
++            #   3. qualquer outra coisa → DESCARTA COM AVISO
++            # A checagem do valor vem ANTES da de ruído porque "-50" e "0" não
++            # têm letra e cairiam em `_is_noise` — "-50" é resposta boa (vira
++            # R$ 50,00), "0" não é.
++            valor = _extract_valor(text)
++            if (valor is not None and valor > 0
++                    and not _other_target_named(text, head.get("desc"))):
++                args = dict(tipo=head.get("tipo", "despesa"), valor=float(valor),
++                            alvo=head.get("desc"), nota=head.get("desc"))
++            elif (valor is not None and valor <= 0) or _is_noise(text):
++                return _ask_value_question(head, len(resto))
++            else:
++                # Comando, pergunta, texto solto ou OUTRO lançamento: não é
++                # resposta. Antes daqui a fila ia embora em silêncio — o
++                # usuário via "não entendi" (ou o saldo) e os lançamentos que
++                # ele tinha pedido sumiam sem uma palavra.
++                if not _apaga():
++                    continue
++                return _discard_queue(queue)
++
++        # Tira o head da fila ANTES de registrar: é isso que impede a outra
++        # thread de registrar o MESMO item. Fila vazia = apaga a pendência; o
++        # `add_from_entities` grava logo abaixo a dele ("categoria errada?").
++        novo = {"queue": resto, "platform": platform} if resto else None
++        if not db.advance_pending_action(
++                user_id, "multi_launch_values", payload, novo):
++            continue
++
++        # `suppress_pending` porque `pending_actions` tem uma linha só por
++        # usuário: a oferta de "categoria errada?" apagaria a fila que o CAS
++        # logo acima acabou de gravar.
++        try:
++            resp = add_from_entities(user_id, platform=platform,
++                                     suppress_pending=bool(resto), **args)
++        except Exception:
++            # O item já saiu da fila (é o que impede a duplicação), mas o
++            # trabalho não aconteceu — sem devolver, o dinheiro some calado.
++            # Não é hipótese: `check_can_create_launch` levanta
++            # `PlanLimitExceeded` quando o usuário do Grátis bate o teto do mês
++            # (`core/services/plan_service.py`), e quem captura é o
++            # `core/handle_incoming.py`, que só responde o texto de upgrade.
++            if novo is None:
++                db.set_pending_action(user_id, "multi_launch_values", payload)
++            else:
++                # Se este CAS falhar, outra thread já é dona da fila — deixar
++                # como está é o certo, gravar por cima ressuscitaria item já
++                # registrado.
++                db.advance_pending_action(
++                    user_id, "multi_launch_values", novo, payload)
++            raise
++        if resto:
++            return f"{resp}\n\n{_ask_value_question(resto[0], len(resto) - 1)}"
++        return resp
+ 
+-    if queue:
+-        db.set_pending_action(
+-            user_id, "multi_launch_values",
+-            {"queue": queue, "platform": platform},
+-        )
+-        return f"{resp}\n\n{_ask_value_question(queue[0])}"
+-    # fila vazia: não re-arma multi_launch_values. O add_from_entities acima já
+-    # gravou o pending de "categoria errada?" (WhatsApp), que fica valendo.
+-    return resp
++    return None
+ 
+ 
+ def _register_parsed(user_id: int, parsed: dict, fallback_note: str, platform: str) -> str:
+@@ -718,38 +1160,38 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp") ->
+         return credit_response
+ 
+     # Múltiplos lançamentos na mesma mensagem ("gastei 500 no ifood e mais 800
+-    # no mercado") — separa e registra cada um. split_financial_transactions só
++    # no mercado") — separa e registra cada um. split_with_origin só
+     # devolve >1 item quando detecta de fato mais de um lançamento. Pedaços com
+     # verbo mas SEM valor ("... e paguei o aluguel") viram pergunta: o bot
+     # registra o que deu, enfileira os que faltam valor e pergunta um a um.
+-    parts = split_financial_transactions(text)
++    parts, valor_descartado = split_with_origin(text)
+     if len(parts) > 1:
+         responses = []
+         missing: list[dict] = []
+         for part in parts:
+             p = parse_receita_despesa_natural(user_id, part)
+-            if p:
++            resp, item = triage_part(user_id, part, platform, parsed=p,
++                                     allow_recurring=not valor_descartado)
++            if resp is not None:
++                responses.append(resp)
++            elif item is not None:
++                missing.append(item)
++            elif p:
+                 responses.append(_register_parsed(user_id, p, part, platform))
+-                continue
+-            info = describe_valueless_launch(part)
+-            if info:
+-                tipo, desc = info
+-                # Valor recorrente conhecido ("aluguel" que sempre é o mesmo) →
+-                # lança sozinho. Senão, enfileira pra perguntar.
+-                auto = register_if_recurring(user_id, tipo, desc, platform)
+-                if auto is not None:
+-                    responses.append(auto)
+-                else:
+-                    missing.append({"tipo": tipo, "desc": desc})
+         if missing:
+-            db.set_pending_action(
+-                user_id, "multi_launch_values",
+-                {"queue": missing, "platform": platform},
+-            )
+-            question = _ask_value_question(missing[0])
+-            return "\n\n".join(responses + [question]) if responses else question
++            aviso = enqueue_missing(user_id, missing, platform)
++            question = _ask_value_question(missing[0], len(missing) - 1)
++            if aviso:
++                question = f"{aviso}\n\n{question}"
++            if not responses:
++                return question
++            # A saudação vai pro fim dos LANÇAMENTOS, não da mensagem: a
++            # pergunta é o que o usuário tem que responder agora, e fica por
++            # último.
++            corpo = move_nudge_to_end("\n\n".join(responses))
++            return f"{corpo}\n\n{question}"
+         if responses:
+-            return "\n\n".join(responses)
++            return move_nudge_to_end("\n\n".join(responses))
+         # nenhum pedaço virou lançamento válido — cai no fluxo single abaixo
+ 
+     parsed = parse_receita_despesa_natural(user_id, text)
+diff --git a/core/intent_router.py b/core/intent_router.py
+index 2ebe939..89cdd26 100644
+--- a/core/intent_router.py
++++ b/core/intent_router.py
+@@ -147,9 +147,13 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
+ 
+     # Pergunta de valor pendente de um lançamento múltiplo ("... e paguei o
+     # aluguel" sem número → "quanto foi o aluguel?"). A resposta com valor
+-    # registra o item; sem valor, abandona e segue o roteamento normal.
++    # registra o item; qualquer outra coisa é tratada DENTRO do handler, que
++    # devolve texto em todos os casos (aviso de descarte ou a pergunta de novo)
++    # — a tabela estados × eventos está em `resolve_multi_launch_value`. O
++    # `None` daqui pra baixo só acontece quando a fila já não existe.
+     if pending and pending.get("action_type") == "multi_launch_values":
+-        resp = h_launches.resolve_multi_launch_value(user_id, text, pending, platform)
++        # sem passar `pending`: a fila é relida DENTRO do lock, no handler.
++        resp = h_launches.resolve_multi_launch_value(user_id, text, platform=platform)
+         if resp is not None:
+             return resp
+         pending = None  # abandonado → mensagem roteia como comando novo
+diff --git a/core/services/quick_entry.py b/core/services/quick_entry.py
+index bb7a3fc..2824347 100644
+--- a/core/services/quick_entry.py
++++ b/core/services/quick_entry.py
+@@ -1,5 +1,8 @@
+ from core.types import OutgoingMessage
+-from parsers import parse_receita_despesa_natural
++from parsers import (
++    parse_receita_despesa_natural, split_financial_transactions,
++    _extract_valor, _extract_target_after_amount,
++)
+ from db import ensure_user, add_launch_and_update_balance
+ from utils_text import fmt_brl
+ from core.services.category_service import learn_from_inference
+@@ -11,6 +14,28 @@ def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
+     if credit_response is not None:
+         return OutgoingMessage(text=credit_response)
+ 
++    # Múltiplos lançamentos na mesma mensagem. Sem isto, "gastei 30 no uber e
++    # 45 no ifood" virava UM lançamento de R$30 com alvo "uber e 45 no ifood" —
++    # o mesmo bug que `core.handlers.launches.add` já resolvia, mas este
++    # caminho (Discord e a confirmação de pendência do WhatsApp em
++    # `core/handlers/pending.py`) não passava pelo separador.
++    #
++    # Só divide quando TODO pedaço é um lançamento completo (valor E destino).
++    # Este caminho não tem fila de perguntas como o `launches.add` — se um
++    # pedaço vem sem destino ("gastei 30 e 45") ele viraria um `outros` mudo, e
++    # se vem sem valor ("... e o aluguel") ele sumiria sem aviso. Com a
++    # checagem, mensagem assim cai no parse único lá embaixo, que é exatamente
++    # o que a `main` faz — nada é inventado nem perdido em silêncio.
++    # A checagem usa `_extract_valor`/`_extract_target_after_amount` de
++    # propósito, não `parse_receita_despesa_natural`: o parse chama
++    # `infer_category` (que aprende), e a recursão abaixo já vai chamá-lo.
++    parts = split_financial_transactions(text)
++    if len(parts) > 1 and all(
++        _extract_valor(p) and _extract_target_after_amount(p).strip() for p in parts
++    ):
++        msgs = [m for p in parts if (m := handle_quick_entry(user_id, p)) is not None]
++        return OutgoingMessage(text="\n\n".join(m.text for m in msgs)) if msgs else None
++
+     parsed = parse_receita_despesa_natural(user_id, text)
+     if not parsed:
+         return None
+diff --git a/db/__init__.py b/db/__init__.py
+index ca51724..1968589 100644
+--- a/db/__init__.py
++++ b/db/__init__.py
+@@ -127,6 +127,7 @@ from .categories import (
+ 
+ # ── Ações pendentes ───────────────────────────────────────────────────────────
+ from .pending import (
++    advance_pending_action,
+     set_pending_action,
+     get_pending_action,
+     clear_pending_action,
+@@ -448,6 +449,7 @@ __all__ = [
+     "list_custom_category_names",
+     # pending
+     "set_pending_action", "get_pending_action", "clear_pending_action",
++    "advance_pending_action",
+     # budgets
+     "list_budgets", "get_budget", "upsert_budget", "delete_budget",
+     "list_user_categories", "sum_spent_in_category_this_month",
+diff --git a/db/pending.py b/db/pending.py
+index 6d97184..9e5e721 100644
+--- a/db/pending.py
++++ b/db/pending.py
+@@ -10,6 +10,49 @@ from .connection import get_conn
+ from .users import ensure_user
+ 
+ 
++def advance_pending_action(user_id: int, action_type: str,
++                           old_payload: dict, new_payload: dict | None,
++                           minutes: int = 10) -> bool:
++    """Avança (ou apaga) a pendência SÓ SE ela ainda for `old_payload`.
++
++    Compare-and-swap. Duas respostas do mesmo usuário chegam em POSTs separados
++    do Meta e cada POST vira uma thread (`adapters/whatsapp/wa_app.py:320`).
++    Sem isso as duas leem a mesma fila, registram o MESMO item e o segundo valor
++    some. Aqui a segunda escrita não pega: o Postgres serializa o UPDATE na
++    linha, a condição `payload = <o que eu li>` já não vale, `rowcount` volta 0 e
++    quem chamou relê a fila e reavalia.
++
++    Substituiu um `pg_advisory_xact_lock` que segurava uma conexão inteira do
++    pool durante todo o trabalho: com `DB_POOL_MAX_SYNC=8`, oito usuários
++    simultâneos consumiam o pool só em locks e o bot inteiro parava.
++
++    Devolve True se gravou, False se outra thread já tinha avançado. Gravar
++    renova o prazo (`minutes`), como o `set_pending_action` que ela substitui —
++    senão uma fila longa expiraria 10 min depois da PRIMEIRA pergunta, não da
++    última resposta.
++    """
++    with get_conn() as conn:
++        with conn.cursor() as cur:
++            if new_payload is None:
++                cur.execute(
++                    "delete from pending_actions "
++                    "where user_id = %s and action_type = %s and payload = %s",
++                    (user_id, action_type, Jsonb(old_payload)),
++                )
++            else:
++                cur.execute(
++                    "update pending_actions "
++                    "set payload = %s, created_at = now(), expires_at = %s "
++                    "where user_id = %s and action_type = %s and payload = %s",
++                    (Jsonb(new_payload),
++                     datetime.now(timezone.utc) + timedelta(minutes=minutes),
++                     user_id, action_type, Jsonb(old_payload)),
++                )
++            gravou = cur.rowcount == 1
++        conn.commit()
++    return gravou
++
++
+ def set_pending_action(user_id: int, action_type: str, payload: dict, minutes: int = 10):
+     """Cria/atualiza uma ação pendente de confirmação (persistente no Postgres)."""
+     ensure_user(user_id)
+diff --git a/parsers.py b/parsers.py
+index f13ac04..db822a7 100644
+--- a/parsers.py
++++ b/parsers.py
+@@ -1,5 +1,5 @@
+ import re
+-from utils_text import normalize_text, is_internal_category, parse_money
++from utils_text import normalize_text, is_internal_category, parse_money, guess_category
+ from utils_date import extract_date_from_text
+ from core.services.category_service import infer_category, learn_from_explicit_category
+ 
+@@ -202,6 +202,44 @@ _SPLIT_TX_RE = re.compile(
+ )
+ _LEAD_VERB_RE = re.compile(rf"^\s*({_FINANCIAL_VERBS})\b", re.IGNORECASE)
+ 
++# Preposição que antecede o destino ("na farmacia", "de luz", "o aluguel").
++_PREP_RE = re.compile(
++    r"^\s*(?:de|do|da|dos|das|no|na|nos|nas|em|pra|para|ao|aos|a|o|os|as)\s+",
++    re.IGNORECASE,
++)
++# Locativo = ONDE o dinheiro foi ("no ifood", "na farmacia"). É o único
++# vínculo que autoriza repetir um valor em dois destinos (`_split_shared_amount`).
++_LOC_PREP_RE = re.compile(r"^\s*(?:no|na|nos|nas|em|pra|para|ao|aos)\s+", re.IGNORECASE)
++# Um segundo valor SEM conector nenhum entre os dois lançamentos
++# ("35 padaria 80 farmacia", "gastei 30 no uber 45 no ifood").
++#
++# ÓRFÃ DE PROPÓSITO: nada aqui a usa hoje. Três rodadas tentaram dividir nessa
++# posição por sintaxe e as três inventaram dinheiro — "gastei 80 na corrida
++# 99887 no uber" (um gasto) e "gastei 35 na padaria 80 na farmacia" (dois) têm
++# a MESMA forma, e separá-las exige conhecimento de mundo. Ela fica como
++# DETECTOR de ambiguidade para o PR A2: onde ela casa, quem decide é a IA.
++_BARE_AMOUNT_RE = re.compile(r"\s+(?=(?:r\$\s*)?\d[\d.,]*\s+\S)", re.IGNORECASE)
++
++
++def _known_dest(text: str) -> str | None:
++    """Categoria do destino, sem a preposição — None quando não reconhece.
++
++    É o único freio contra tratar como dinheiro todo número que na verdade é
++    unidade ("20 litros"), quantidade ("3 cervejas"), data ("15 de janeiro"),
++    hora, parcela ou identificador de cartão.
++
++    ponytail: heurística de palavra-chave (`guess_category`), erra pro lado
++    conservador — destino que o dicionário não conhece ("45 no salão da
++    esquina") simplesmente não divide, e o comportamento fica o de hoje.
++    Trocar por casamento aproximado/LLM só quando isso doer de verdade.
++    """
++    first = _PREP_RE.sub("", (text or "").strip()).split()
++    if not first:
++        return None
++    cat = guess_category(first[0])
++    return None if cat == "outros" else cat
++
++
+ # Item final de uma lista SEM valor ("... 30 café e o aluguel") — o "e" acima
+ # exige um valor/verbo logo depois pra não separar frases comuns ("fui ao
+ # banco e ao mercado"), então "e o aluguel" nunca vira um split ali. Só entra
+@@ -210,7 +248,78 @@ _LEAD_VERB_RE = re.compile(rf"^\s*({_FINANCIAL_VERBS})\b", re.IGNORECASE)
+ _TRAILING_VALUELESS_RE = re.compile(r"^(?P<head>.+?)\s+e\s+(?P<tail>[^\d]+)$", re.IGNORECASE)
+ 
+ 
++def _split_shared_amount(seg: str) -> list[str]:
++    """UM valor e VÁRIOS destinos ("gastei 30 no uber e no ifood") → um
++    lançamento SEM valor por destino. Quem responde é o usuário.
++
++    O valor é DESCARTADO de propósito. A frase tem duas leituras — R$30 no
++    total, ou R$30 em cada — e escolher uma inventa dinheiro. Repetir o valor
++    nos dois lados (o que este código fazia antes) gravava R$90 para
++    "gastei 45 no mercado e no posto" e R$200 para "gastei 100 no uber e no
++    ifood". Perguntar os dois tira a dúvida inteira em vez de chutar metade
++    dela: "Quanto foi gasto em *uber*?" e, em seguida, "... em *ifood*?".
++
++    Quem faz a pergunta é a fila que já existia (`multi_launch_values`, em
++    `core.handlers.launches`): os pedaços saem daqui exatamente na forma que
++    `describe_valueless_launch` já sabe ler ("gastei uber"), a mesma de
++    "... 30 café e o aluguel". Como o número do usuário foi jogado fora aqui,
++    o `split_with_origin` marca esses pedaços — sem a marca o preenchimento por
++    valor recorrente devolvia um valor do histórico no lugar do que ele
++    digitou (medido: R$ 25,00 no lugar de "30").
++
++    Só divide quando TODOS os lados resolvem para categorias CONHECIDAS e
++    DIFERENTES entre si, e quando cada lado depois do primeiro traz o LOCATIVO
++    dele ("e **no** ifood"). Não é para evitar dobrar dinheiro — não há mais
++    dinheiro em jogo —, é para não transformar UMA coisa em VÁRIAS perguntas:
++
++    | frase                                        | por quê não divide |
++    |---|---|
++    | `gastei 80 no banho e tosa`                  | sem preposição no 2º lado: é um serviço só |
++    | `paguei 50 de agua e luz`                    | genitivo, e mesma categoria |
++    | `gastei 150 na compra de mercado e de farmacia` | genitivo: "de X" descreve a compra, não um segundo lugar |
++    | `gastei 30 no uber e no ifood e na padaria`  | ifood e padaria são a MESMA categoria (alimentação) |
++
++    A lista inteira é tratada, não só o primeiro " e " (era o teto marcado
++    aqui). Com o teto, "gastei 30 no uber e no ifood e na padaria" perguntava
++    "Quanto foi gasto em *ifood e na padaria*?" — uma pergunta sem sentido, e a
++    resposta gravava um lançamento com esse nome. Agora ou todos os destinos
++    são distintos e conhecidos (N perguntas limpas), ou não divide nada e a
++    frase vira um lançamento só, como na `main`.
++    """
++    m = _TRAILING_VALUELESS_RE.match(seg)
++    if not m:
++        return [seg]
++    head, tail = m.group("head").strip(), m.group("tail").strip()
++    # tail com valor é "cento e vinte no mercado": o "e" é do número, não da lista.
++    if _extract_valor(head) is None or _extract_valor(tail) is not None:
++        return [seg]
++    destinos = [_extract_target_after_amount(head)] + [
++        t.strip() for t in re.split(r"\s+e\s+", tail)
++    ]
++    if not all(_LOC_PREP_RE.match(d) for d in destinos[1:]):
++        return [seg]
++    cats = [_known_dest(d) for d in destinos]
++    if any(c is None for c in cats) or len(set(cats)) != len(cats):
++        return [seg]
++    # O verbo tem que sobreviver: é dele que sai o tipo, e sem ele o
++    # `describe_valueless_launch` devolve None e o pedaço SUMIRIA. Sem verbo
++    # explícito a frase começa pelo valor, e isso é despesa por padrão.
++    m_verbo = _LEAD_VERB_RE.match(head)
++    verbo = m_verbo.group(1) if m_verbo else "gastei"
++    novos = [f"{verbo} {d}" for d in destinos]
++    # Número dentro do nome do destino ("no posto 24 horas") viraria valor de
++    # novo no pedaço sem verbo-valor — R$24 inventado. Aí não divide.
++    if any(_extract_valor(n) is not None for n in novos):
++        return [seg]
++    return novos
++
++
+ def split_financial_transactions(text: str) -> list[str]:
++    """Só os pedaços — ver `split_with_origin` para a procedência deles."""
++    return split_with_origin(text)[0]
++
++
++def split_with_origin(text: str) -> tuple[list[str], bool]:
+     """
+     Detecta múltiplos lançamentos numa única mensagem (texto ou áudio) e os
+     separa.
+@@ -225,11 +334,31 @@ def split_financial_transactions(text: str) -> list[str]:
+     soma mexidas do mesmo tipo (despesa com despesa, receita com receita).
+ 
+     Retorna lista com um único item se não detectar múltiplos lançamentos.
++
++    O segundo elemento diz se o valor que o USUÁRIO digitou foi DESCARTADO na
++    divisão (`_split_shared_amount`). É a diferença entre:
++
++      - "... 30 café e o aluguel" → False. O usuário não deu valor pro aluguel;
++        preencher do histórico ("aluguel é sempre 1500") é um recurso legítimo.
++      - "gastei 30 no uber e no ifood" → True. Ele DEU 30 e nós jogamos fora de
++        propósito, porque não dá pra saber de qual destino é. Aqui o histórico
++        contradiz o número que ele acabou de digitar: medido, com 3 gastos de
++        R$25 no uber, o bot gravava R$25 e o 30 sumia. Quem lê a flag é o
++        `core.handlers.launches.triage_part(allow_recurring=...)`.
+     """
++    if not text:
++        return [text or ""], False
+     parts = _SPLIT_TX_RE.split(text)
+     cleaned = [p.strip() for p in parts if p.strip()]
++    valor_descartado = False
++    if len(cleaned) == 1:
++        # Um valor, vários destinos → um pedaço SEM valor por destino, pra
++        # perguntar todos. Só no texto de UM lançamento: num pedaço de lista o
++        # "e" final já é tratado pelo `_TRAILING_VALUELESS_RE` abaixo.
++        cleaned = _split_shared_amount(cleaned[0])
++        valor_descartado = len(cleaned) > 1
+     if len(cleaned) <= 1:
+-        return [text]
++        return [text], False
+ 
+     m = _TRAILING_VALUELESS_RE.match(cleaned[-1])
+     if m and _extract_valor(m.group("tail")) is None and _extract_valor(m.group("head")) is not None:
+@@ -249,12 +378,18 @@ def split_financial_transactions(text: str) -> list[str]:
+             result.append(f"{last_verb} {seg}")
+         else:
+             result.append(seg)
+-    return result
++    return result, valor_descartado
+ 
+ 
+ _RECEITA_VERBS = {"recebi", "receita", "ganhei"}
+ 
+ 
++def tipo_from_verb(text: str) -> str:
++    """"receita" quando o trecho abre com verbo de entrada, senão "despesa"."""
++    m = _LEAD_VERB_RE.match(text or "")
++    return "receita" if m and m.group(1).lower() in _RECEITA_VERBS else "despesa"
++
++
+ def describe_valueless_launch(text: str) -> tuple[str, str] | None:
+     """
+     Para um trecho que parece um lançamento mas está SEM valor ("paguei o
+diff --git a/tests/test_audio_multi_launch_ask_value.py b/tests/test_audio_multi_launch_ask_value.py
+index 1bd132d..b3de1fc 100644
+--- a/tests/test_audio_multi_launch_ask_value.py
++++ b/tests/test_audio_multi_launch_ask_value.py
+@@ -178,3 +178,40 @@ def test_audio_lancamento_retroativo_arma_undo(small_uid, audio):
+     assert ("despesa", 50.0) in _valores(small_uid)  # registrou de fato
+     p = db.get_pending_action(small_uid)
+     assert p and p["action_type"] == "undo_audio"    # undo armado apesar da data
++
++
++def test_audio_um_valor_dois_destinos_pergunta_os_dois(small_uid, audio):
++    """A regra nova do dono vale igual no áudio: o separador é o MESMO
++    (`_split_audio_transactions` é um wrapper de `split_financial_transactions`)
++    e o enfileiramento passa pelo mesmo `triage_part`.
++
++    Antes: dois lançamentos de R$ 30,00 (R$ 60,00 de um "gastei 30").
++    """
++    r = audio(small_uid, "gastei 30 no uber e no ifood")
++
++    assert _valores(small_uid) == []
++    assert db.get_balance(small_uid) == Decimal("0")
++    assert "uber" in r.lower() and "quanto" in r.lower(), r
++    p = db.get_pending_action(small_uid)
++    assert p and p["action_type"] == "multi_launch_values"
++    assert [i["desc"] for i in p["payload"]["queue"]] == ["uber", "ifood"]
++
++
++def test_audio_valor_recorrente_nao_sobrescreve_numero_falado(small_uid, audio):
++    """Paridade com o texto: falar "gastei 30 no uber e no ifood" com histórico
++    de R$25 no uber não pode gravar R$ 25,00.
++
++    O áudio tem seu PRÓPRIO laço de `triage_part` (o `_handle_audio` pré-divide
++    a transcrição), então a flag `allow_recurring` precisa chegar nos dois
++    caminhos — foi assim que a cópia do áudio já ficou sem um guarda antes.
++    """
++    from core.handlers import launches
++    for _ in range(3):
++        launches.add_from_entities(small_uid, tipo="despesa", valor=25.0,
++                                   alvo="uber", nota="uber")
++
++    r = audio(small_uid, "gastei 30 no uber e no ifood")
++
++    assert "recorrente" not in r.lower(), r
++    assert "Quanto foi gasto em *uber*" in r, r
++    assert _valores(small_uid, limit=20) == [("despesa", 25.0)] * 3
+diff --git a/tests/test_launches_multi_add.py b/tests/test_launches_multi_add.py
+index 5b706a8..90fc670 100644
+--- a/tests/test_launches_multi_add.py
++++ b/tests/test_launches_multi_add.py
+@@ -60,3 +60,91 @@ def test_lancamento_unico_continua_funcionando(user_id):
+ def test_conector_mais_sozinho(user_id):
+     launches.add(user_id, "gastei 40 no almoço mais 15 no café", {})
+     assert _valores(user_id) == [("despesa", 40.0), ("despesa", 15.0)]
++
++
++# ── separador ausente / valor compartilhado ─────────────────────────────────
++
++def _cats(user_id, limit=10):
++    rows = sorted(db.list_launches(user_id, limit=limit), key=lambda r: r["id"])
++    return [(r["categoria"], float(r["valor"])) for r in rows]
++
++
++def test_sem_separador_fica_um_lancamento_so(user_id):
++    # PR A1: sem separador explícito não se divide. Esta frase são DOIS gastos
++    # e vira um só (os R$80 entram na nota, não no saldo) — o preço, aceito, de
++    # não inventar dinheiro em "gastei 80 na corrida 99887 no uber", que tem a
++    # mesma forma. Quem separa as duas é o PR A2 (IA). Igual à `main`.
++    launches.add(user_id, "35 padaria 80 farmacia", {})
++    assert _cats(user_id) == [("alimentação", 35.0)]
++
++
++def test_controle_com_separador_continua_dois(user_id):
++    # sem este controle o teste acima passaria num separador que parou de
++    # dividir qualquer coisa.
++    launches.add(user_id, "35 padaria e 80 farmacia", {})
++    assert _cats(user_id) == [("alimentação", 35.0), ("saúde", 80.0)]
++
++
++def test_um_valor_dois_destinos_pergunta_os_dois(user_id):
++    """A regra do dono: um valor e dois destinos é ambíguo, então pergunta.
++
++    "gastei 30 no uber e no ifood" pode ser R$ 30,00 no total ou R$ 30,00 em
++    cada. Repetir o valor (o que este PR fazia antes) gravava R$ 60,00 —
++    dinheiro que o usuário nunca disse ter gasto.
++    """
++    msg = launches.add(user_id, "gastei 30 no uber e no ifood", {})
++    assert _cats(user_id) == []                       # nada gravado sozinho
++    assert db.get_balance(user_id) == Decimal("0")
++    assert "Quanto foi gasto em *uber*?" in msg, msg
++
++    fila = db.get_pending_action(user_id)
++    assert fila["action_type"] == "multi_launch_values"
++    assert [i["desc"] for i in fila["payload"]["queue"]] == ["uber", "ifood"]
++
++    r1 = launches.resolve_multi_launch_value(user_id, "30")
++    assert "Quanto foi gasto em *ifood*?" in r1, r1
++    launches.resolve_multi_launch_value(user_id, "20")
++    assert _cats(user_id) == [("transporte", 30.0), ("alimentação", 20.0)]
++
++
++def test_um_valor_dois_destinos_nao_grava_o_dobro(user_id):
++    # a frase que o Manager mediu: gravava R$ 90,00 de um "gastei 45".
++    launches.add(user_id, "gastei 45 no mercado e no posto", {})
++    assert _cats(user_id) == []
++    assert db.get_balance(user_id) == Decimal("0")
++
++
++def test_dois_destinos_da_mesma_coisa_nao_dobram_o_gasto(user_id):
++    # "banho e tosa" é UM serviço: repetir o valor cobraria R$160 de quem
++    # gastou R$80.
++    launches.add(user_id, "gastei 80 no banho e tosa", {})
++    assert _valores(user_id) == [("despesa", 80.0)]
++    assert db.get_balance(user_id) == Decimal("-80")
++
++
++def test_dois_destinos_da_mesma_categoria_nao_dividem(user_id):
++    launches.add(user_id, "paguei 50 de agua e luz", {})
++    assert _valores(user_id) == [("despesa", 50.0)]
++
++
++def test_valores_sem_destino_perguntam_em_vez_de_lancar(user_id):
++    # "gastei 30 e 45": dois valores, nenhum destino. O ramo multi registrava
++    # os dois em "outros"; agora pergunta em que foi cada um.
++    msg = launches.add(user_id, "gastei 30 e 45", {})
++    assert _valores(user_id) == []
++    assert "Em que você gastou" in msg
++
++    p = db.get_pending_action(user_id)
++    assert p and p["action_type"] == "multi_launch_values"
++    assert [i["valor"] for i in p["payload"]["queue"]] == [30.0, 45.0]
++
++    # responde o primeiro → registra e pergunta o segundo
++    r1 = launches.resolve_multi_launch_value(user_id, "uber")
++    assert _cats(user_id) == [("transporte", 30.0)]
++    assert "Em que você gastou" in r1
++
++    # responde o segundo → registra e a fila esvazia
++    launches.resolve_multi_launch_value(user_id, "ifood")
++    assert _cats(user_id) == [("transporte", 30.0), ("alimentação", 45.0)]
++    p = db.get_pending_action(user_id)
++    assert p is None or p["action_type"] != "multi_launch_values"
+diff --git a/tests/test_multi_launch_ask_value.py b/tests/test_multi_launch_ask_value.py
+index f8c4789..97ae3a4 100644
+--- a/tests/test_multi_launch_ask_value.py
++++ b/tests/test_multi_launch_ask_value.py
+@@ -104,12 +104,20 @@ def test_cancelar_descarta_pendencia(user_id):
+     assert p is None or p["action_type"] != "multi_launch_values"
+ 
+ 
+-def test_resposta_sem_valor_abandona_e_retorna_none(user_id):
++def test_resposta_sem_valor_descarta_com_aviso(user_id):
++    """Mudar de assunto no meio da fila AVISA o que ficou pra trás.
++
++    Antes esta função devolvia None aqui e o roteador respondia o saldo — a
++    fila sumia calada e o usuário não ficava sabendo que o aluguel que ele
++    pediu não ia mais ser lançado. Agora a fila é descartada com a mesma frase
++    do "cancelar". O preço: o "qual meu saldo" não é reprocessado; o usuário
++    reenvia.
++    """
+     launches.add(user_id, "gastei 500 no ifood e paguei o aluguel", {})
+     # user muda de assunto — não é valor
+     resp = launches.resolve_multi_launch_value(user_id, "qual meu saldo", _pending(user_id))
+ 
+-    assert resp is None  # roteador segue normal
++    assert "aluguel" in resp.lower()  # avisou o que largou
+     assert _valores(user_id) == [("despesa", 500.0)]  # nada registrado a mais
+     assert _pending(user_id) is None  # pendência abandonada
+ 
+diff --git a/tests/test_multi_launch_guards.py b/tests/test_multi_launch_guards.py
+new file mode 100644
+index 0000000..faa3b07
+--- /dev/null
++++ b/tests/test_multi_launch_guards.py
+@@ -0,0 +1,821 @@
++"""
++Os freios do separador de múltiplos lançamentos — segunda rodada.
++
++A primeira rodada validou o separador contra frases escolhidas à mão e passou
++verde; frases banais derrubaram tudo depois. Cada teste aqui vem de um caso
++REPRODUZIDO no banco, e cada bloco traz o controle negativo do lado (a frase
++quase idêntica que TEM que continuar dividindo) — sem ele o teste passaria
++igual num separador que simplesmente parou de dividir qualquer coisa.
++"""
++from __future__ import annotations
++
++import threading
++import time
++import uuid
++
++import pytest
++
++import db
++from core.handlers import launches
++from core.services.quick_entry import handle_quick_entry
++from parsers import split_financial_transactions as split
++
++
++def _cats(user_id, limit=10):
++    rows = sorted(db.list_launches(user_id, limit=limit), key=lambda r: r["id"])
++    return [(r["categoria"], float(r["valor"])) for r in rows]
++
++
++# ── 1. número de referência não é dinheiro ──────────────────────────────────
++
++@pytest.mark.parametrize("txt", [
++    "gastei 80 na corrida 99887 do uber",
++    "gastei 50 no pedido 1234 do ifood",
++    "paguei 150 boleto 12345 da luz",
++    "paguei 90 na nota 5567 do mercado",
++    "paguei 100 apartamento 302 do condominio",
++    "gastei 30 na mesa 12 do restaurante",
++])
++def test_numero_de_referencia_nao_vira_lancamento(txt):
++    assert split(txt) == [txt]
++
++
++# ── 2. quantidade não é dinheiro ────────────────────────────────────────────
++
++@pytest.mark.parametrize("txt", [
++    "gastei 60 no ifood 2 pizzas",
++    "comprei 100 no mercado 12 cervejas",
++    "gastei 150 na farmacia 3 remedios",
++    "gastei 5000 na reforma 3 quartos",
++    "comprei 2000 na loja 3 moveis",
++    "gastei 60 no cinema 3 filmes",
++    "paguei 300 na oficina 4 pneus",
++    "gastei 250 na loja 2 tenis",
++    "paguei 120 no bar 4 chopps",
++    "comprei 500 na loja 3 roupas",
++])
++def test_quantidade_nao_vira_lancamento(txt):
++    assert split(txt) == [txt]
++
++
++@pytest.mark.parametrize("txt", [
++    "35 padaria 80 farmacia",
++    "gastei 35 na padaria 80 na farmacia",
++])
++def test_sem_conector_nao_divide_nem_quando_sao_dois_gastos(txt):
++    """Estes SÃO dois gastos, e mesmo assim ficam em um pedaço só.
++
++    É o preço, cobrado de propósito, de exigir separador explícito: estas duas
++    frases têm a MESMA forma de `gastei 80 na corrida 99887 no uber` (um gasto
++    só) e de `gastei 60 no ifood 2 pizzas` (quantidade). Três rodadas tentaram
++    separá-las por sintaxe e as três inventaram dinheiro.
++
++    Quem vai decidir isto é o PR A2 (a IA), usando `_BARE_AMOUNT_RE` como
++    detector de ambiguidade. Enquanto isso, deixar um lançamento de fora é
++    ruim; inventar R$ 99.887 de "corrida 99887" é pior. No harness de
++    categorização são o `B8.19` e o `B8.20`, e voltam a ❌ aqui de propósito.
++    """
++    assert split(txt) == [txt]
++
++
++@pytest.mark.parametrize("txt,esperado", [
++    # CONTROLE de 1, 2 e do teste acima: COM separador, continua dividindo.
++    # Sem estes, a bateria inteira passaria num separador que parou de dividir
++    # qualquer coisa.
++    ("gastei 30 no uber e 45 no ifood", ["gastei 30 no uber", "gastei 45 no ifood"]),
++    ("35 padaria e 80 farmacia", ["35 padaria", "80 farmacia"]),
++    ("gastei 35 na padaria, 80 na farmacia",
++     ["gastei 35 na padaria", "gastei 80 na farmacia"]),
++    # um valor, dois destinos: divide em dois pedaços SEM valor — o bot
++    # pergunta os dois em vez de escolher uma leitura do R$ 30,00.
++    ("gastei 30 no uber e no ifood", ["gastei uber", "gastei no ifood"]),
++])
++def test_controle_com_separador_ainda_divide(txt, esperado):
++    assert split(txt) == esperado
++
++
++@pytest.mark.parametrize("txt", [
++    # genitivo no 2º lado: "de X" descreve a compra, não é um segundo lugar.
++    # Aceitá-lo dobrava o valor em 10.298 de 10.414 frases da varredura.
++    "gastei 150 na compra de mercado e de farmacia",
++    "gastei 40 no lanche de padaria e de mercado",
++    "gastei 120 na conta de luz e de internet",
++    "paguei 45 na taxa de entrega e de servico",
++])
++def test_genitivo_no_segundo_lado_nao_dobra_o_valor(txt):
++    assert split(txt) == [txt]
++
++
++def test_referencia_nao_estraga_o_lancamento_verdadeiro(user_id):
++    # o dano era duplo: além do R$99.887 inventado, o gasto real virava
++    # `outros` com a descrição cortada em "gastei 80 na corrida".
++    launches.add(user_id, "gastei 80 na corrida 99887 do uber", {})
++    assert _cats(user_id) == [("transporte", 80.0)]
++
++
++# ── 3. nome de estabelecimento com " e " não dobra o valor ──────────────────
++
++@pytest.mark.parametrize("txt", [
++    "gastei 45 no mercado e padaria",
++    "paguei 30 no bar e mercearia do ze",
++    "gastei 300 no hotel e restaurante",
++    "gastei 500 no hotel e spa",
++    "paguei 250 na clinica e estetica",
++    "gastei 90 no bar e boliche",
++    "gastei 100 de mercado e farmacia",
++    "paguei 80 de uber e almoco",
++    # sem preposição no segundo lado, "o aluguel" é um lançamento SEM valor,
++    # não um segundo destino: repetir os R$500 inventava dinheiro.
++    "gastei 500 no ifood e o aluguel",
++])
++def test_sem_preposicao_no_segundo_lado_nao_divide(txt):
++    assert split(txt) == [txt]
++
++
++def test_controle_com_preposicao_no_segundo_lado_divide():
++    # os dois pedaços saem SEM valor: viram duas perguntas, não dois R$ 45,00.
++    assert split("gastei 45 no mercado e na padaria") == [
++        "gastei mercado", "gastei na padaria",
++    ]
++
++
++def test_nome_composto_nao_dobra_o_saldo(user_id):
++    launches.add(user_id, "gastei 45 no mercado e padaria", {})
++    assert [v for _, v in _cats(user_id)] == [45.0]
++
++
++# ── 4. a pergunta da fila tem escotilha de saída ────────────────────────────
++
++def _pergunta_destino(user_id):
++    msg = launches.add(user_id, "gastei 30 e 45", {})
++    assert "Em que você gastou" in msg, msg
++    return msg
++
++
++@pytest.mark.parametrize("resposta", [
++    "qual meu saldo",   # comando
++    "100 no mercado",   # traz um valor
++])
++def test_resposta_que_nao_serve_de_destino_descarta_e_avisa(user_id, resposta):
++    """A fila do estado B tem DINHEIRO dentro; largá-la calada é o bug.
++
++    Medido antes: `add("gastei 300 e 45")` → pergunta; resposta "fatura" →
++    `None`, pendência limpa, ZERO lançamentos, e a resposta que o usuário via
++    era a lista de cartões. Os R$ 300,00 e os R$ 45,00 sumiam sem uma palavra.
++    A frase é a MESMA do "cancelar" — não existe uma segunda.
++    """
++    _pergunta_destino(user_id)
++    r = launches.resolve_multi_launch_value(user_id, resposta)
++    assert r == "❌ Beleza, deixei de lado: R$ 30,00, R$ 45,00.", r
++    assert _cats(user_id) == []           # não virou ('outros', 30, '👍')
++    assert db.get_pending_action(user_id) is None
++
++
++def test_cancelar_usa_a_mesma_frase(user_id):
++    # controle de que é UM caminho só: se alguém escrever uma segunda frase
++    # para o descarte, este teste cai.
++    _pergunta_destino(user_id)
++    assert (launches.resolve_multi_launch_value(user_id, "cancelar")
++            == "❌ Beleza, deixei de lado: R$ 30,00, R$ 45,00.")
++
++
++@pytest.mark.parametrize("resposta", [
++    "kkkkk", "kkk", "ok", "aff",   # medidos: viravam ('outros', 30) com essa nota
++    "👍", "😂", "??", "   ", "",   # sem letra nenhuma
++    # "99" é o app de corrida E um valor. Antes descartava a fila; repetir a
++    # pergunta não perde nada e deixa o usuário desempatar.
++    "99",
++])
++def test_ruido_repete_a_pergunta_em_vez_de_gravar_ou_descartar(user_id, resposta):
++    """Ruído de conversa não é destino nem troca de assunto.
++
++    Medido antes: "kkkkk" respondido à pergunta dos R$ 30,00 gravava
++    ('outros', 30,00) com a nota "kkkkk" — e o `learn_from_inference` aprendia
++    a associação. Descartar também não serve: quem manda "kkk" não pediu pra
++    largar o dinheiro. A fila fica de pé e a pergunta se repete.
++    """
++    _pergunta_destino(user_id)
++    r = launches.resolve_multi_launch_value(user_id, resposta)
++    assert "Em que você gastou R$ 30,00?" in r, r
++    assert "deixei de lado" not in r, r
++    assert _cats(user_id) == []
++    fila = db.get_pending_action(user_id)
++    assert fila and fila["action_type"] == "multi_launch_values", fila
++    assert [float(i["valor"]) for i in fila["payload"]["queue"]] == [30.0, 45.0]
++
++
++def test_controle_ruido_nao_engole_destino_desconhecido(user_id):
++    """Controle negativo do guarda acima: se ele passar do ponto, todo destino
++    que o dicionário não conhece vira "ruído" e a pergunta nunca termina."""
++    _pergunta_destino(user_id)
++    r = launches.resolve_multi_launch_value(user_id, "salao da rita")
++    assert "Despesa registrada" in r, r
++    assert [v for _, v in _cats(user_id)] == [30.0]
++
++
++@pytest.mark.parametrize("resposta,categoria", [
++    ("fatura", "outros"),
++    ("extrato", "outros"),
++    ("cartao", "outros"),
++    ("investimento", "investimentos"),
++    ("caixinha", "outros"),
++])
++def test_palavra_que_e_destino_plausivel_registra(user_id, resposta, categoria):
++    """`fatura`/`extrato`/`cartão`/`investimento`/`caixinha` são lugares onde
++    dinheiro vai. Respondidas à pergunta "em que você gastou?", são o DESTINO,
++    não um comando — antes caíam no descarte junto com a fila."""
++    _pergunta_destino(user_id)
++    r = launches.resolve_multi_launch_value(user_id, resposta)
++    assert r is not None and "deixei de lado" not in r, r
++    assert _cats(user_id) == [(categoria, 30.0)]
++
++
++@pytest.mark.parametrize("resposta", ["saldo", "ajuda", "relatorio", "resumo"])
++def test_controle_comando_de_verdade_continua_comando(user_id, resposta):
++    # controle negativo do estreitamento acima: se ele passar do ponto, estas
++    # quatro viram descrição de gasto ("gastei R$30 no saldo").
++    _pergunta_destino(user_id)
++    r = launches.resolve_multi_launch_value(user_id, resposta)
++    assert r == "❌ Beleza, deixei de lado: R$ 30,00, R$ 45,00.", r
++    assert _cats(user_id) == []
++
++
++def test_controle_destino_de_verdade_ainda_registra(user_id):
++    _pergunta_destino(user_id)
++    launches.resolve_multi_launch_value(user_id, "mercado")
++    assert _cats(user_id) == [("mercado", 30.0)]
++
++
++# ── 5. pendência relida do banco, não do dict recebido ──────────────────────
++
++def test_pendencia_obsoleta_nao_perde_o_segundo_valor(user_id):
++    _pergunta_destino(user_id)
++    velha = db.get_pending_action(user_id)      # lida UMA vez, usada DUAS
++    launches.resolve_multi_launch_value(user_id, "uber", velha)
++    launches.resolve_multi_launch_value(user_id, "ifood", velha)
++    # com a fila vindo do dict velho, o segundo lançamento saía R$30 de novo
++    # e os R$45 sumiam.
++    assert _cats(user_id) == [("transporte", 30.0), ("alimentação", 45.0)]
++
++
++# ── 6. quick_entry não inventa nem engole ───────────────────────────────────
++
++def test_quick_entry_nao_lanca_valor_sem_destino(user_id):
++    handle_quick_entry(user_id, "gastei 30 e 45")
++    # não tem fila de perguntas aqui: o certo é NÃO virar dois `outros` mudos.
++    assert [c for c, _ in _cats(user_id)] != ["outros", "outros"]
++    assert len(_cats(user_id)) <= 1
++
++
++def test_quick_entry_nao_engole_pedaco_sem_valor(user_id):
++    handle_quick_entry(user_id, "gastei 500 no ifood, 30 café e o aluguel")
++    # "o aluguel" não pode sumir calado levando junto os outros dois pedaços
++    # como se tudo tivesse sido registrado.
++    assert len(_cats(user_id)) <= 1
++
++
++def test_controle_quick_entry_ainda_divide_o_que_esta_completo(user_id):
++    handle_quick_entry(user_id, "gastei 30 no uber e 45 no ifood")
++    assert _cats(user_id) == [("transporte", 30.0), ("alimentação", 45.0)]
++
++
++# ── 7 e 8. as duas frases pedidas pelo dono ─────────────────────────────────
++
++def test_saudacao_de_primeiro_lancamento_sai_no_fim_do_lote(user_id):
++    msg = launches.add(user_id, "gastei 30 no uber e 45 no ifood", {},
++                       platform="whatsapp")
++    # sem esta linha o teste passaria vazio num ambiente onde o nudge não
++    # dispara (ele depende de user_seq == 1 e do evento de onboarding).
++    assert "primeiro lançamento" in msg, msg
++    assert msg.endswith(launches.FIRST_LAUNCH_NUDGE)
++    assert msg.count("primeiro lançamento") == 1
++
++
++def test_pergunta_avisa_que_tem_mais_na_fila(user_id):
++    msg = launches.add(user_id, "gastei 30 e 45", {})
++    assert "Já já pergunto do outro" in msg, msg
++    # respondido o primeiro, o aviso some (não sobra ninguém depois do último)
++    r = launches.resolve_multi_launch_value(user_id, "uber")
++    assert "Já já pergunto" not in r, r
++
++
++# ── 9. duas respostas ao mesmo tempo ────────────────────────────────────────
++
++def test_duas_respostas_simultaneas_nao_perdem_o_segundo_valor(user_id):
++    """Dois POSTs do Meta viram duas threads (`wa_app.py:320`) e chegam juntos.
++
++    Sem exclusão mútua as duas leem a fila ANTES de qualquer uma escrever:
++    gravam R$ 30,00 DUAS vezes e os R$ 45,00 somem. Reler a pendência do banco
++    não resolve (as duas leituras acontecem antes da primeira escrita) — quem
++    resolve é o compare-and-swap de `db.advance_pending_action`: a segunda
++    gravação exige que a fila ainda seja a que ela leu, não é, e ela relê.
++
++    Controle negativo medido: com a condição `payload = <o que li>` fora do
++    UPDATE, 0 de 20 rodadas acertam (as 20 gravam [30,00 · 30,00]); com ela,
++    20 de 20 acertam.
++    """
++    _pergunta_destino(user_id)            # fila: R$ 30,00 e R$ 45,00
++    erros: list[BaseException] = []
++
++    def responder(texto: str):
++        try:
++            launches.resolve_multi_launch_value(user_id, texto)
++        except BaseException as e:        # noqa: BLE001 - o teste quer ver
++            erros.append(e)
++
++    ts = [threading.Thread(target=responder, args=(t,)) for t in ("uber", "ifood")]
++    for t in ts:
++        t.start()
++    for t in ts:
++        t.join(timeout=30)
++
++    assert not erros, erros
++    cats = _cats(user_id)
++    assert sorted(v for _, v in cats) == [30.0, 45.0], cats
++    assert sorted(c for c, _ in cats) == ["alimentação", "transporte"], cats
++    # fila vazia (o pending que sobra é o "categoria errada?" do último add)
++    pend = db.get_pending_action(user_id)
++    assert pend is None or pend["action_type"] != "multi_launch_values", pend
++
++
++# ── 10. áudio e texto decidem igual ─────────────────────────────────────────
++
++# Os dois ramos do `triage_part`: o texto entrega o `parsed`, o áudio não.
++# A data era a diferença — "gastei 30 hoje" digitado PERGUNTA o destino, falado
++# gravava ('outros', 30) mudo, porque "hoje" sobrava como alvo.
++PEDACOS_PARIDADE = [
++    "gastei 30 hoje",
++    "45 ontem",
++    "gastei 50 dia 10/05",
++    "recebi 200 hoje",
++    "gastei 30",
++    "gastei 30 no uber",
++    "gastei 30 hoje no mercado",
++    "comprei 100 ontem no mercado",
++    "recebi 500 do salario",
++    "paguei o aluguel",
++    "gastei 45 no ifood",
++    "recebi 1000",
++    "fui ao banco",
++]
++
++
++@pytest.mark.parametrize("part", PEDACOS_PARIDADE)
++def test_triage_part_texto_e_audio_decidem_igual(user_id, part):
++    from parsers import parse_receita_despesa_natural
++    texto = launches.triage_part(user_id, part, "whatsapp",
++                                 parsed=parse_receita_despesa_natural(user_id, part))
++    audio = launches.triage_part(user_id, part, "whatsapp")
++    assert texto == audio, f"{part!r}: texto={texto} áudio={audio}"
++
++
++def test_paridade_cobre_os_treze_pedacos():
++    # sem isto, apagar uma linha da lista acima deixaria o teste verde medindo
++    # menos.
++    assert len(PEDACOS_PARIDADE) == 13
++
++
++# ── 11. o separador não trava com uma parede de números ─────────────────────
++
++def test_separador_nao_trava_com_4000_caracteres_de_numeros():
++    """Antes do PR A1 este texto levava 1.609 ms (medido): cada número era um
++    ponto de corte candidato e cada candidato refazia o parse do trecho todo.
++    Uma mensagem de WhatsApp cabe em 4.096 caracteres, então isto é entrada
++    de usuário, não caso teórico."""
++    txt = ("12 " * 1400)[:4000]
++    t0 = time.perf_counter()
++    split(txt)
++    dt_ms = (time.perf_counter() - t0) * 1000
++    assert dt_ms < 5, f"{dt_ms:.1f} ms para 4000 caracteres"
++
++
++# ── 12. o mecanismo de concorrência não pode derrubar o resto do bot ────────
++#
++# O primeiro conserto da corrida do bloco 9 foi um `pg_advisory_xact_lock` que
++# segurava uma conexão INTEIRA do pool enquanto o trabalho de dentro pedia
++# outra. Com `DB_POOL_MAX_SYNC=8` isso media: 8 usuários simultâneos = 0
++# sucessos e 8 erros, e um NONO usuário não conseguia nem listar lançamentos.
++# Os três testes abaixo são o que sobrou daquelas sondas.
++
++def test_cas_recusa_gravar_por_cima_de_fila_ja_avancada(user_id):
++    """O compare-and-swap em si: só grava se a fila ainda for a que foi lida."""
++    fila_a = {"queue": [{"tipo": "despesa", "valor": 30.0}], "platform": "whatsapp"}
++    fila_b = {"queue": [{"tipo": "despesa", "valor": 45.0}], "platform": "whatsapp"}
++    db.set_pending_action(user_id, "multi_launch_values", fila_a)
++
++    # quem leu `fila_a` e ainda vale: grava
++    assert db.advance_pending_action(user_id, "multi_launch_values", fila_a, fila_b)
++    # quem leu `fila_a` DEPOIS de alguém já ter avançado: não grava
++    assert not db.advance_pending_action(user_id, "multi_launch_values", fila_a, None)
++    # a fila continua sendo a de quem venceu, intacta
++    assert db.get_pending_action(user_id)["payload"] == fila_b
++    # e o apagar também é condicional
++    assert db.advance_pending_action(user_id, "multi_launch_values", fila_b, None)
++    assert db.get_pending_action(user_id) is None
++
++
++def test_pool_aguenta_um_usuario_por_conexao_disponivel():
++    """Uma resposta por usuário, todas ao mesmo tempo, tantas quantas o pool
++    comporta. Com o lock antigo: ok=0, erros=8."""
++    from db.connection import _get_pool
++    n = _get_pool().max_size
++    uids = []
++    for _ in range(n):
++        u = int(uuid.uuid4().int % 10_000_000_000)
++        db.ensure_user(u)
++        launches.add(u, "gastei 30 e 45", {})
++        uids.append(u)
++    largada = threading.Barrier(n, timeout=15)
++    ok: list[float] = []
++    erros: list[str] = []
++
++    def responder(u):
++        try:
++            largada.wait()
++            launches.resolve_multi_launch_value(u, "uber")
++            ok.append(1.0)
++        except BaseException as e:          # noqa: BLE001 - o teste quer ver
++            erros.append(f"{type(e).__name__}: {e}")
++
++    ts = [threading.Thread(target=responder, args=(u,)) for u in uids]
++    for t in ts:
++        t.start()
++    for t in ts:
++        t.join(timeout=45)
++    try:
++        assert not erros, erros
++        assert len(ok) == n, f"{len(ok)} de {n}"
++        assert not [t for t in ts if t.is_alive()], "thread presa"
++    finally:
++        for u in uids:
++            db.clear_pending_action(u)
++
++
++def test_rajada_de_lancamento_multiplo_nao_atrasa_quem_so_quer_o_saldo():
++    """Raio de alcance: com o pool todo ocupado por lançamento múltiplo, um
++    usuário sem relação nenhuma com isso ainda consulta. Com o lock antigo a
++    consulta nem começava (BrokenBarrierError)."""
++    from db.connection import _get_pool
++    n = _get_pool().max_size
++    uids = []
++    for _ in range(n):
++        u = int(uuid.uuid4().int % 10_000_000_000)
++        db.ensure_user(u)
++        launches.add(u, "gastei 30 e 45", {})
++        uids.append(u)
++    solto = int(uuid.uuid4().int % 10_000_000_000)
++    db.ensure_user(solto)
++
++    entrou = threading.Barrier(n + 1, timeout=15)
++
++    def rajada(u):
++        entrou.wait()
++        for _ in range(6):
++            launches.resolve_multi_launch_value(u, "uber")
++            launches.add(u, "gastei 30 e 45", {})
++
++    ts = [threading.Thread(target=rajada, args=(u,), daemon=True) for u in uids]
++    for t in ts:
++        t.start()
++    entrou.wait()
++    t0 = time.perf_counter()
++    db.list_launches(solto, limit=5)
++    dt = time.perf_counter() - t0
++    for t in ts:
++        t.join(30)
++    for u in uids:
++        db.clear_pending_action(u)
++    assert dt < 5, f"{dt:.2f}s para uma consulta de terceiro"
++
++
++# ── 13. destino verdadeiro que TEM número não é valor ───────────────────────
++
++# Todos com número no meio do nome. O guarda anterior lia "tem número" como
++# "não é destino" e descartava a fila (6 de 7 medidos).
++DESTINOS_COM_NUMERO = [
++    "posto 24 horas",
++    "farmacia 24h",
++    "padaria 2 irmaos",
++    "cinema 3d",
++    "loja 25 de marco",
++    "mercado 3 coracoes",
++]
++
++
++@pytest.mark.parametrize("destino", DESTINOS_COM_NUMERO)
++def test_destino_com_numero_registra_em_vez_de_descartar(user_id, destino):
++    _pergunta_destino(user_id)                      # fila: R$ 30,00 e R$ 45,00
++    r = launches.resolve_multi_launch_value(user_id, destino)
++    assert r is not None and "deixei de lado" not in r, r
++    assert [v for _, v in _cats(user_id)] == [30.0]
++    # e a fila continua viva pro segundo valor
++    assert launches.resolve_multi_launch_value(user_id, "ifood") is not None
++    assert sorted(v for _, v in _cats(user_id)) == [30.0, 45.0]
++
++
++@pytest.mark.parametrize("destino", DESTINOS_COM_NUMERO)
++def test_controle_o_guarda_antigo_descartaria_os_seis(destino):
++    """Controle negativo: sem o conserto, os seis caem no descarte.
++
++    O critério anterior era literalmente `_extract_valor(resposta) is not
++    None` — e os seis TÊM um número que o `_extract_valor` lê. Sem esta linha,
++    o teste acima passaria igual num guarda que nunca descartou nada.
++    """
++    from parsers import _extract_valor
++    assert _extract_valor(destino) is not None, "o guarda antigo não pegaria"
++    assert not launches._is_value_not_target(destino)
++
++
++@pytest.mark.parametrize("resposta", [
++    "R$ 100",          # valor com símbolo
++    "cem reais",       # valor por extenso (comum no áudio)
++    "gastei 60 e 70",  # mensagem nova de lançamento, não destino
++])
++def test_resposta_que_e_valor_continua_descartando(user_id, resposta):
++    # o outro lado do estreitamento: se ele passar do ponto, isto vira
++    # ('outros', 30, 'cem reais').
++    _pergunta_destino(user_id)
++    r = launches.resolve_multi_launch_value(user_id, resposta)
++    assert r == "❌ Beleza, deixei de lado: R$ 30,00, R$ 45,00.", r
++    assert _cats(user_id) == []
++
++
++def test_conta_e_destino_plausivel_mas_saldo_nao(user_id):
++    """"conta" cai em `balance.check`, a MESMA intent de "saldo" — por isso a
++    exceção é pela palavra, não pela intent. Único termo assim entre as 507
++    varridas."""
++    _pergunta_destino(user_id)
++    r = launches.resolve_multi_launch_value(user_id, "conta")
++    assert r is not None and "deixei de lado" not in r, r
++    assert [v for _, v in _cats(user_id)] == [30.0]
++    # controle: as duas continuam comando (o achado original tem teste no
++    # bloco 4; aqui é a garantia de que a exceção não vazou pra intent)
++    assert launches._is_other_command("saldo")
++    assert launches._is_other_command("qual meu saldo")
++
++
++# ── 14. fila nova não engole a antiga em silêncio ───────────────────────────
++
++def test_fila_nova_avisa_o_que_a_antiga_levou(user_id):
++    """`pending_actions` tem UMA linha por usuário: gravar a fila nova apaga a
++    antiga. Medido antes: "gastei 30 e 45" e logo "gastei 60 e 70" deixava a
++    fila [60, 70] e os R$ 30,00 e R$ 45,00 sumiam sem uma palavra."""
++    launches.add(user_id, "gastei 30 e 45", {})
++    msg = launches.add(user_id, "gastei 60 e 70", {})
++    assert msg.startswith("❌ Beleza, deixei de lado: R$ 30,00, R$ 45,00."), msg
++    assert "Em que você gastou R$ 60,00?" in msg, msg
++    # a fila nova ficou inteira
++    fila = db.get_pending_action(user_id)["payload"]["queue"]
++    assert [float(i["valor"]) for i in fila] == [60.0, 70.0], fila
++
++
++def test_controle_primeira_fila_nao_avisa_descarte_nenhum(user_id):
++    # sem este controle, o teste acima passaria num código que grudasse o
++    # aviso em TODA pergunta de fila.
++    msg = launches.add(user_id, "gastei 30 e 45", {})
++    assert "deixei de lado" not in msg, msg
++
++
++def test_o_aviso_da_fila_nova_e_a_mesma_frase_do_descarte(user_id):
++    """Um caminho só: texto (`launches.add`) e áudio
++    (`core.handle_incoming._handle_audio`) chamam o MESMO `enqueue_missing`, e
++    ele reusa o `_discard_queue` do cancelamento."""
++    assert launches.enqueue_missing(
++        user_id, [{"tipo": "despesa", "valor": 30.0}], "whatsapp") == ""
++    aviso = launches.enqueue_missing(
++        user_id, [{"tipo": "despesa", "valor": 60.0}], "whatsapp")
++    assert aviso == "❌ Beleza, deixei de lado: R$ 30,00."
++    assert aviso == launches._discard_queue([{"tipo": "despesa", "valor": 30.0}])
++
++
++# ── 15. o item não some quando o registro estoura ───────────────────────────
++
++def _estoura_no_teto(monkeypatch):
++    """Simula o teto mensal do Grátis dentro do `add_from_entities`."""
++    import core.services.plan_service as ps
++    from core.services.plan_limits import PlanLimitExceeded
++    def estoura(_uid):
++        raise PlanLimitExceeded("launches_month", "teto do mês")
++    monkeypatch.setattr(ps, "check_can_create_launch", estoura)
++    return PlanLimitExceeded
++
++
++def test_teto_de_plano_no_meio_da_fila_nao_apaga_o_item(user_id, monkeypatch):
++    """Roteiro real: usuário do Grátis manda "gastei 30 e 45", responde "uber"
++    e bate o teto. O compare-and-swap encurta a fila e faz COMMIT antes de
++    chamar o `add_from_entities`; sem devolver a fila, os R$ 30,00 somem e o
++    usuário só vê a mensagem de upgrade.
++
++    Medido sem o conserto: fila antes [30.0, 45.0] → fila depois [45.0],
++    lançamentos [].
++    """
++    _pergunta_destino(user_id)
++    exc = _estoura_no_teto(monkeypatch)
++
++    with pytest.raises(exc):
++        launches.resolve_multi_launch_value(user_id, "uber")
++
++    fila = db.get_pending_action(user_id)
++    assert fila and fila["action_type"] == "multi_launch_values", fila
++    assert [float(i["valor"]) for i in fila["payload"]["queue"]] == [30.0, 45.0]
++    assert _cats(user_id) == []
++
++    # e o teto passando, os dois valores ainda entram — a fila não ficou torta
++    monkeypatch.undo()
++    launches.resolve_multi_launch_value(user_id, "uber")
++    launches.resolve_multi_launch_value(user_id, "ifood")
++    assert sorted(v for _, v in _cats(user_id)) == [30.0, 45.0]
++
++
++def test_teto_no_ULTIMO_item_tambem_devolve_a_fila(user_id, monkeypatch):
++    """O caminho do `novo is None`: quando o item é o último, o CAS APAGA a
++    linha em vez de encurtá-la, então devolver exige recriá-la."""
++    launches.add(user_id, "gastei 30 e 45", {})
++    launches.resolve_multi_launch_value(user_id, "uber")      # sobra [45.0]
++    exc = _estoura_no_teto(monkeypatch)
++
++    with pytest.raises(exc):
++        launches.resolve_multi_launch_value(user_id, "ifood")
++
++    fila = db.get_pending_action(user_id)
++    assert fila and fila["action_type"] == "multi_launch_values", fila
++    assert [float(i["valor"]) for i in fila["payload"]["queue"]] == [45.0]
++
++
++def test_controle_o_cas_continua_impedindo_duplicata(user_id):
++    """Controle negativo do conserto acima: devolver a fila no erro não pode
++    virar 'reivindicar depois de trabalhar'. Duas respostas simultâneas
++    continuam produzindo DOIS lançamentos distintos, não dois iguais."""
++    _pergunta_destino(user_id)
++    erros: list[BaseException] = []
++
++    def responder(texto):
++        try:
++            launches.resolve_multi_launch_value(user_id, texto)
++        except BaseException as e:          # noqa: BLE001 - o teste quer ver
++            erros.append(e)
++
++    ts = [threading.Thread(target=responder, args=(t,)) for t in ("uber", "ifood")]
++    for t in ts:
++        t.start()
++    for t in ts:
++        t.join(timeout=30)
++    assert not erros, erros
++    assert sorted(v for _, v in _cats(user_id)) == [30.0, 45.0]
++
++
++# ── 16. lançamento normal em cima de fila viva não a engole calada ──────────
++
++def test_lancamento_normal_depois_de_fila_viva_avisa(user_id):
++    """A irmã do bloco 14, e a mais comum: QUALQUER lançamento seguinte grava
++    a oferta de "categoria errada?" por cima da fila (`pending_actions` tem uma
++    linha por usuário).
++
++    Medido antes: "gastei 30 e 45" e depois "gastei 20 no mercado" deixava a
++    fila apagada, R$ 30,00 e R$ 45,00 evaporados, e a resposta era só o
++    lançamento de R$ 20,00 — nenhuma palavra sobre os outros dois.
++    """
++    launches.add(user_id, "gastei 30 e 45", {})
++    msg = launches.add(user_id, "gastei 20 no mercado", {})
++    assert msg.startswith("❌ Beleza, deixei de lado: R$ 30,00, R$ 45,00."), msg
++    assert "Despesa registrada" in msg, msg
++    assert [v for _, v in _cats(user_id)] == [20.0]
++
++
++def test_controle_lancamento_sem_fila_viva_nao_avisa_nada(user_id):
++    # sem este controle, o teste acima passaria num código que grudasse o
++    # aviso em TODO lançamento.
++    msg = launches.add(user_id, "gastei 20 no mercado", {})
++    assert "deixei de lado" not in msg, msg
++
++
++def test_aviso_vale_para_qualquer_entrada_de_lancamento(user_id):
++    """O guarda está no `add_from_entities`, não no `launches.add` — então
++    vale também pra tool da IA e pra confirmação de foto de cupom, que chamam
++    a mesma função."""
++    launches.add(user_id, "gastei 30 e 45", {})
++    msg = launches.add_from_entities(user_id, tipo="despesa", valor=20.0,
++                                     alvo="mercado", nota="mercado")
++    assert msg.startswith("❌ Beleza, deixei de lado: R$ 30,00, R$ 45,00."), msg
++
++
++# ── 17. o valor recorrente não sobrescreve o número que o usuário digitou ───
++
++def _seed(uid, valor, desc, n=3):
++    for _ in range(n):
++        launches.add_from_entities(uid, tipo="despesa", valor=float(valor),
++                                   alvo=desc, nota=desc)
++
++
++def test_valor_recorrente_nao_sobrescreve_numero_digitado(user_id):
++    """"gastei 30 no uber e no ifood" com histórico de R$25 no uber.
++
++    O pedaço sai da divisão SEM valor de propósito (o 30 pode ser o total ou o
++    de cada um). O recurso de valor recorrente via "item sem valor" e preenchia
++    com o histórico: medido, o bot gravava R$ 25,00 — um número que o usuário
++    não digitou, contradizendo o 30 que ele acabou de escrever.
++    """
++    _seed(user_id, 25, "uber")
++    msg = launches.add(user_id, "gastei 30 no uber e no ifood", {})
++
++    assert "recorrente" not in msg.lower(), msg
++    assert "Quanto foi gasto em *uber*" in msg, msg
++    assert [v for _, v in _cats(user_id, limit=20)] == [25.0, 25.0, 25.0]  # só o histórico
++
++
++def test_controle_valor_recorrente_continua_valendo_sem_valor_digitado(user_id):
++    """O controle negativo: em "... e paguei o aluguel" o usuário NÃO deu valor
++    pro aluguel — o histórico pode preencher, e tem que continuar preenchendo.
++    Sem este teste, o de cima passaria num código que só desligou o recurso."""
++    _seed(user_id, 1500, "aluguel", n=2)
++    msg = launches.add(user_id, "gastei 500 no ifood e paguei o aluguel", {})
++
++    assert "recorrente" in msg.lower(), msg
++    assert sorted(v for _, v in _cats(user_id, limit=20)) == [500.0, 1500.0, 1500.0, 1500.0]
++
++
++# ── 18. estado A: nenhuma resposta faz a fila sumir calada ──────────────────
++
++@pytest.mark.parametrize("resposta", [
++    "0",            # número que não serve
++    "",             # branco
++    "😂",           # emoji
++    "kkkkk",        # risada
++])
++def test_estado_a_resposta_vazia_repete_a_pergunta(user_id, resposta):
++    launches.add(user_id, "gastei 30 no uber e no ifood", {})
++    msg = launches.resolve_multi_launch_value(user_id, resposta)
++
++    assert "Quanto foi gasto em *uber*" in msg, msg
++    fila = db.get_pending_action(user_id)
++    assert fila and fila["action_type"] == "multi_launch_values", fila
++    assert len(fila["payload"]["queue"]) == 2, fila
++    assert _cats(user_id) == []
++
++
++@pytest.mark.parametrize("resposta", [
++    "sei la",                          # texto que não é valor
++    "saldo",                           # comando determinístico
++    "quanto eu gastei esse mes?",      # pergunta
++    "gastei 100 no mercado",           # outro lançamento
++    "gastei 50 no mercado e no posto", # mensagem múltipla nova
++])
++def test_estado_a_nao_resposta_descarta_com_aviso(user_id, resposta):
++    """Medido antes: os cinco abandonavam a fila em silêncio, e dois deles
++    ("gastei 100 no mercado", "gastei 50 no mercado e no posto") ainda gravavam
++    o valor novo na categoria do item da fila — R$ 100,00 em *transporte*."""
++    launches.add(user_id, "gastei 30 no uber e no ifood", {})
++    msg = launches.resolve_multi_launch_value(user_id, resposta)
++
++    assert msg == "❌ Beleza, deixei de lado: uber, ifood.", msg
++    assert db.get_pending_action(user_id) is None
++    assert _cats(user_id) == []
++
++
++def test_controle_estado_a_valor_de_verdade_continua_registrando(user_id):
++    """Sem este controle, os dois blocos acima passariam num código que
++    descartasse ou repetisse SEMPRE, sem nunca registrar nada."""
++    launches.add(user_id, "gastei 30 no uber e no ifood", {})
++    msg = launches.resolve_multi_launch_value(user_id, "R$ 12,50")
++
++    assert "R$ 12,50" in msg and "Quanto foi gasto em *ifood*" in msg, msg
++    assert [v for _, v in _cats(user_id)] == [12.5]
++
++
++def test_estado_a_aceita_o_destino_repetido_na_resposta(user_id):
++    """"30 no uber" é resposta, não lançamento novo: o alvo citado é o mesmo da
++    pergunta. Só um alvo DIFERENTE descarta."""
++    launches.add(user_id, "gastei 30 no uber e no ifood", {})
++    msg = launches.resolve_multi_launch_value(user_id, "30 no uber")
++
++    assert "R$ 30,00" in msg, msg
++    assert [v for _, v in _cats(user_id)] == [30.0]
++
++
++def test_estado_a_negativo_vira_despesa_positiva(user_id):
++    """"-50" é o jeito natural de escrever saída; o sinal do lançamento vem do
++    `tipo`, não do número. Registrado como R$ 50,00 de despesa — decisão
++    escrita na tabela de `resolve_multi_launch_value`, não acidente."""
++    launches.add(user_id, "gastei 30 no uber e no ifood", {})
++    launches.resolve_multi_launch_value(user_id, "-50")
++    assert [v for _, v in _cats(user_id)] == [50.0]
++
++
++# ── 19. três destinos: ou N perguntas limpas, ou nenhuma ────────────────────
++
++def test_tres_destinos_distintos_viram_tres_perguntas():
++    assert split("gastei 30 no uber e no ifood e na farmacia") == [
++        "gastei uber", "gastei no ifood", "gastei na farmacia"]
++
++
++def test_tres_destinos_com_categoria_repetida_nao_divide():
++    """ifood e padaria são a MESMA categoria (alimentação) — a regra de
++    categorias distintas vale pra lista inteira. Antes a segunda pergunta saía
++    como "Quanto foi gasto em *ifood e na padaria*?", um destino que não
++    existe, e a resposta gravava um lançamento com esse nome."""
++    txt = "gastei 30 no uber e no ifood e na padaria"
++    assert split(txt) == [txt]
++
++
++def test_controle_dois_destinos_continua_dividindo():
++    assert split("gastei 30 no uber e no ifood") == ["gastei uber", "gastei no ifood"]
+diff --git a/tests/test_quick_entry_multi.py b/tests/test_quick_entry_multi.py
+new file mode 100644
+index 0000000..805da52
+--- /dev/null
++++ b/tests/test_quick_entry_multi.py
+@@ -0,0 +1,54 @@
++"""
++`handle_quick_entry` também separa múltiplos lançamentos.
++
++Era o irmão esquecido de `core.handlers.launches.add`: chamava
++`parse_receita_despesa_natural` direto, sem o separador. Resultado medido antes
++da correção: "gastei 30 no uber e 45 no ifood" gravava UM lançamento de R$30
++com alvo "uber e 45 no ifood" — R$45 perdidos, e a categoria vindo do destino
++errado.
++
++Não é só o Discord (`adapters/discord/discord_bot.py:209`): a confirmação de
++pendência do WhatsApp (`core/handlers/pending.py:68`) passa pelo mesmo caminho.
++"""
++from __future__ import annotations
++
++import db
++from core.services.quick_entry import handle_quick_entry
++
++
++def _cats(user_id):
++    rows = sorted(db.list_launches(user_id, limit=10), key=lambda r: r["id"])
++    return [(r["categoria"], float(r["valor"])) for r in rows]
++
++
++def test_dois_lancamentos_na_mesma_mensagem(user_id):
++    msg = handle_quick_entry(user_id, "gastei 30 no uber e 45 no ifood")
++    assert msg is not None
++    assert _cats(user_id) == [("transporte", 30.0), ("alimentação", 45.0)]
++    assert msg.text.count("registrada") == 2
++
++
++def test_separador_ausente_fica_um_lancamento_so(user_id):
++    # PR A1: sem separador explícito não se divide (o PR A2 decide estas com
++    # IA). Mesmo comportamento da `main` e do `launches.add`.
++    handle_quick_entry(user_id, "35 padaria 80 farmacia")
++    assert _cats(user_id) == [("alimentação", 35.0)]
++
++
++def test_controle_com_separador_continua_dois(user_id):
++    handle_quick_entry(user_id, "35 padaria e 80 farmacia")
++    assert _cats(user_id) == [("alimentação", 35.0), ("saúde", 80.0)]
++
++
++def test_nao_dobra_gasto_de_uma_coisa_so(user_id):
++    handle_quick_entry(user_id, "gastei 80 no banho e tosa")
++    assert [v for _, v in _cats(user_id)] == [80.0]
++
++
++def test_lancamento_unico_continua_igual(user_id):
++    msg = handle_quick_entry(user_id, "gastei 50 no mercado")
++    assert msg is not None and _cats(user_id) == [("mercado", 50.0)]
++
++
++def test_texto_que_nao_e_lancamento_continua_none(user_id):
++    assert handle_quick_entry(user_id, "bom dia") is None
+diff --git a/tests/test_split_audio_transactions.py b/tests/test_split_audio_transactions.py
+index c4422c3..9455485 100644
+--- a/tests/test_split_audio_transactions.py
++++ b/tests/test_split_audio_transactions.py
+@@ -77,3 +77,70 @@ def test_e_conjuncao_sem_valor_nao_quebra():
+ @pytest.mark.parametrize("txt", ["", "   "])
+ def test_vazio(txt):
+     assert split(txt) == [txt]
++
++
++# ── separador AUSENTE entre dois lançamentos ("35 padaria 80 farmacia") ──────
++# PR A1: NÃO divide. Estas frases são mesmo dois lançamentos, mas têm a forma
++# idêntica à de "gastei 80 na corrida 99887 no uber" (um só) e "gastei 60 no
++# ifood 2 pizzas" (quantidade) — três rodadas tentaram separá-las por sintaxe e
++# as três inventaram dinheiro. Quem decide passa a ser o PR A2 (IA).
++
++@pytest.mark.parametrize("txt", [
++    "35 padaria 80 farmacia",
++    "gastei 35 na padaria 80 na farmacia",
++    "gastei R$ 30 no uber R$ 45 no ifood",
++])
++def test_separador_ausente_nao_divide(txt):
++    assert split(txt) == [txt]
++
++
++@pytest.mark.parametrize("txt,esperado", [
++    # CONTROLE: com separador, continua dividindo — inclusive o pedaço do meio
++    # que perdeu o corte por ausência de separador.
++    ("35 padaria e 80 farmacia", ["35 padaria", "80 farmacia"]),
++    ("gastei 30 no uber, 45 no ifood e 20 na padaria",
++     ["gastei 30 no uber", "gastei 45 no ifood", "gastei 20 na padaria"]),
++])
++def test_controle_com_separador_divide(txt, esperado):
++    assert split(txt) == esperado
++
++
++def test_um_valor_dois_destinos_pergunta_os_dois():
++    # decisão do dono: um valor para dois destinos é ambíguo — o R$30 pode ser
++    # o total ou o de cada um. Sai em dois pedaços SEM valor, e o bot pergunta
++    # os dois. Áudio e texto usam o MESMO separador, então a regra é uma só.
++    assert split("gastei 30 no uber e no ifood") == ["gastei uber", "gastei no ifood"]
++
++
++# ── rede de proteção: repetir/dividir aqui INVENTA gasto ─────────────────────
++# Cada um destes tem um " e " ou um segundo número que NÃO é um segundo
++# lançamento: metade do mesmo serviço, item de lista, unidade, quantidade,
++# data, hora, parcela, identificador de cartão, ou o "e" de dentro do número.
++
++@pytest.mark.parametrize("txt", [
++    "gastei cento e vinte no mercado",
++    "gastei 80 no banho e tosa",
++    "paguei 50 de agua e luz",
++    "comprei 100 de arroz e feijão",
++    "paguei 100 de uber e gasolina",   # mesma categoria nos dois → não divide
++    "gastei 50 no posto 20 litros",
++    "comprei 3 cervejas 15 reais",
++    "paguei 100 do cartão 1234",
++    "gastei 30 no uber dia 15",
++    "gastei 30 no uber 15 de janeiro",
++    "gastei 100 no mercado às 15h",
++    "gastei 100 no cartão em 3x",
++    "parcelei 300 em 6 vezes",
++])
++def test_rede_de_protecao_nao_divide(txt):
++    assert split(txt) == [txt]
++
++
++def test_item_final_sem_valor_continua_perguntando_nao_repetindo():
++    # "e o aluguel" NÃO herda os R$30 do café — vira um pedaço sem valor, que
++    # o launches.add enfileira pra perguntar "quanto foi?".
++    assert split("gastei 500 no ifood, 30 café e o aluguel") == [
++        "gastei 500 no ifood",
++        "gastei 30 café",
++        "gastei o aluguel",
++    ]

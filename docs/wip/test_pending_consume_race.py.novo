@@ -1,0 +1,113 @@
+"""O consumidor de pendência só pode apagar a pendência QUE ELE LEU.
+
+Cenário do achado: o WhatsApp lê a pergunta "quanto veio a conta?" e, entre a
+leitura e o clear, o Discord (processo separado) instala a MESMA pergunta de
+outra conta — o que `claim_pending_action` passou a permitir quando as duas
+portas da pergunta de valor viraram "a mesma pergunta". Com o clear
+incondicional, o WhatsApp apagava a pergunta NOVA e o usuário ficava olhando
+uma pergunta na tela cuja resposta não resolvia mais nada.
+
+Roda contra o Postgres de teste — o CAS é uma condição no UPDATE/DELETE, então
+não dá para verificar com mock.
+"""
+import pytest
+
+import db
+
+
+def test_consumir_nao_apaga_a_pendencia_que_chegou_depois(user_id):
+    db.set_pending_action(user_id, "bill_pay_amount",
+                          {"bill_id": 1, "name": "Luz"})
+    lida = db.get_pending_action(user_id)
+
+    # outra tarefa instala a pergunta NOVA (outra conta, outra porta)
+    assert db.claim_pending_action(
+        user_id, "bill_amount_expected", {"bill_id": 2, "bill_name": "Água"})
+
+    # o consumidor da pergunta velha não é mais o dono da linha
+    assert db.consume_pending_action(user_id, lida) is False
+
+    atual = db.get_pending_action(user_id)
+    assert atual is not None, "a pergunta nova foi apagada por quem consumiu a velha"
+    assert atual["action_type"] == "bill_amount_expected"
+    assert atual["payload"]["bill_id"] == 2
+
+
+def test_consumir_apaga_quando_a_pendencia_ainda_e_a_lida(user_id):
+    """Controle positivo: sem corrida, consumir continua limpando."""
+    db.set_pending_action(user_id, "bill_pay_amount",
+                          {"bill_id": 1, "name": "Luz"})
+    lida = db.get_pending_action(user_id)
+
+    assert db.consume_pending_action(user_id, lida) is True
+    assert db.get_pending_action(user_id) is None
+
+
+def test_leitura_de_vencida_apaga_so_a_linha_vencida(user_id, monkeypatch):
+    """A própria LEITURA era um consumidor incondicional: ao achar a linha
+    expirada, `get_pending_action` fazia `clear_pending_action`. Duas leituras
+    simultâneas da mesma vencida se atropelavam — a primeira apagava e gravava
+    uma pergunta nova, a segunda apagava a pergunta nova."""
+    from db import pending as m
+
+    m.set_pending_action(user_id, "delete_launch", {"launch_id": 9}, minutes=-1)
+    monkeypatch.setattr(m, "clear_pending_action", lambda uid: pytest.fail(
+        "a leitura apagou a linha sem conferir se ainda era a que leu"))
+
+    assert m.get_pending_action(user_id) is None
+    assert _linhas(user_id) == 0, "a linha vencida tinha que ter sumido"
+
+
+def _linhas(user_id: int) -> int:
+    from db.connection import get_conn
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select count(*) as n from pending_actions where user_id = %s",
+                        (user_id,))
+            return cur.fetchone()["n"]
+
+
+def test_confirmacao_perdida_nao_apaga_e_nao_executa(user_id, monkeypatch):
+    """`resolve_delete` é o consumidor do "sim". Quem perde o CAS não apaga o
+    lançamento e não encosta na pendência que ficou no lugar."""
+    from core.handlers import pending as h_pending
+
+    db.set_pending_action(user_id, "delete_launch",
+                          {"launch_id": 77, "display_id": 12})
+    # a leitura de dentro do resolve_delete acontece aqui; a corrida entra logo
+    # depois, trocando a linha
+    original_get = db.get_pending_action
+
+    def get_e_corre(uid):
+        row = original_get(uid)
+        monkeypatch.setattr(db, "get_pending_action", original_get)
+        db.set_pending_action(uid, "bill_amount_expected", {"bill_id": 5})
+        return row
+
+    apagados = []
+    monkeypatch.setattr(db, "get_pending_action", get_e_corre)
+    monkeypatch.setattr(db, "delete_launch_and_rollback",
+                        lambda uid, lid: apagados.append(lid))
+
+    resp = h_pending.resolve_delete(user_id, confirmed=True)
+
+    assert resp == h_pending.PENDENCIA_MUDOU
+    assert apagados == []
+    assert db.get_pending_action(user_id)["action_type"] == "bill_amount_expected"
+
+
+def test_confirmacao_sem_corrida_apaga_o_lancamento(user_id, monkeypatch):
+    """Controle positivo do mesmo caminho."""
+    from core.handlers import pending as h_pending
+
+    db.set_pending_action(user_id, "delete_launch",
+                          {"launch_id": 77, "display_id": 12})
+    apagados = []
+    monkeypatch.setattr(db, "delete_launch_and_rollback",
+                        lambda uid, lid: apagados.append(lid))
+
+    resp = h_pending.resolve_delete(user_id, confirmed=True)
+
+    assert "#12" in resp and "apagado" in resp
+    assert apagados == [77]
+    assert db.get_pending_action(user_id) is None
