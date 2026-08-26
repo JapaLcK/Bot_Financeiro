@@ -253,6 +253,31 @@
     }
   };
 
+  /* Registra Esc + trap de Tab para um diálogo que abre e fecha pela classe
+     `.open` no overlay. Um listener persistente, guardado pelo `.open`: não faz
+     nada enquanto o diálogo estiver fechado, e não há `removeEventListener`
+     para alguém esquecer de chamar no fechamento.
+
+     Existe porque o `pigTrapTab` sozinho NÃO fechava a classe. Ele resolve o
+     Tab e deixa para cada chamador o bloco de "o meu overlay está aberto? o Esc
+     fecha?" — que era exatamente o que faltava em SETE diálogos (issue #76).
+     Copiar o bloco pela oitava vez era o erro que este arquivo já tinha
+     aprendido a não cometer.
+
+     Em fase de BOLHA, sem `stopPropagation`, de propósito: quem precisa vencer
+     um listener de baixo (o `#generic-confirm-overlay` do dashboard.js, que
+     abre POR CIMA de um fluxo de pagamento) registra em captura e consome a
+     tecla. Se este helper consumisse o Esc, ele é que atropelaria o diálogo de
+     cima. */
+  window.pigModalKeys = function (overlayId, close) {
+    document.addEventListener("keydown", function (e) {
+      const ov = document.getElementById(overlayId);
+      if (!ov || !ov.classList.contains("open")) return;
+      if (e.key === "Escape") { close(); return; }
+      window.pigTrapTab(e, ov);
+    });
+  };
+
   window.alertModal = function (message, opts) {
     return openModal({ kind: "alert", message, opts });
   };

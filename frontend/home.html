@@ -1613,6 +1613,9 @@ function closeMfaOnboardingOverlay() {
   const ov = document.getElementById("mfa-onboarding-overlay");
   if (ov) ov.classList.remove("open");
 }
+// Esc = "Agora não", não o fechamento cru: o dismiss marca como visto no
+// servidor. Fechando sem marcar, o overlay volta no próximo login.
+window.pigModalKeys && pigModalKeys("mfa-onboarding-overlay", function () { mfaOnboardingDismiss(); });
 
 async function _markMfaOnboardingSeen() {
   try {
