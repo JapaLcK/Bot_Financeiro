@@ -1,6 +1,7 @@
 """
 db/pending.py — Ações pendentes de confirmação (ex: "apagar lançamento?").
 """
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import NamedTuple
 
@@ -124,6 +125,37 @@ def create_pending_action_if_absent(user_id: int, action_type: str, payload: dic
             criou = cur.rowcount == 1
         conn.commit()
     return criou
+
+
+@contextmanager
+def restore_pending_on_error(user_id: int, pending: dict, minutes: int = 10):
+    """Devolve a pendência se o trabalho reivindicado estourar, e re-levanta.
+
+    `consume_pending_action` roda ANTES do trabalho (é o porteiro que impede a
+    segunda thread de executar a mesma ação). Se o trabalho levanta, a pergunta
+    já foi apagada: o usuário perde a confirmação, não recebe nada útil e refaz
+    o fluxo do zero — regressão contra o `clear` que vinha DEPOIS.
+
+    A devolução é `create_pending_action_if_absent`, nunca `set_pending_action`:
+    entre a reivindicação e a falha outra tarefa pode ter armado uma pergunta
+    nova, que já apareceu na tela do usuário. Gravar por cima a deixaria órfã —
+    uma operação antiga não sobrescreve uma pendência mais nova. Se já há algo
+    lá, o que se perde é a pendência desta operação, recuperável repetindo o
+    comando.
+
+    `minutes` é o prazo do fluxo que armou a pergunta (crédito usa 20, o valor
+    de conta do WhatsApp usa 30) — devolver com o default encurtaria o prazo.
+    """
+    try:
+        yield
+    except Exception:
+        create_pending_action_if_absent(
+            user_id,
+            pending.get("action_type") or "",
+            pending.get("payload") or {},
+            minutes,
+        )
+        raise
 
 
 # ---------------------------------------------------------------------------

@@ -197,6 +197,39 @@ def test_valor_negativo_mantem_a_pergunta_e_nao_paga(monkeypatch):
     assert pagou == [], f"valor negativo virou pagamento: {pagou}"
 
 
+def test_devolucao_repoe_a_pergunta_quando_o_pagamento_estoura(monkeypatch):
+    """Controle NEGATIVO que faltava para a devolução da porta de texto.
+
+    Medido: o grupo só tinha a corrida abaixo, e ela passa igual com a
+    devolução desligada (com o rollback fora, ninguém escreve e a pergunta nova
+    sobrevive do mesmo jeito). Sem este caso, tirar o `with` de
+    `resolve_bill_amount` não deixava uma linha vermelha.
+    """
+    import uuid
+    import db
+    import db.bills
+    from core.handlers import bills as H
+
+    uid = int(uuid.uuid4().int % 10_000_000_000)
+    db.ensure_user(uid)
+    payload = {"bill_id": 41, "bill_name": "Luz"}
+    db.set_pending_action(uid, "bill_amount_expected", payload)
+    pending = db.get_pending_action(uid)
+
+    def _estoura(u, b, a):
+        raise RuntimeError("banco caiu")
+
+    monkeypatch.setattr(db.bills, "mark_bill_paid", _estoura)
+
+    with pytest.raises(RuntimeError):
+        H.resolve_bill_amount(uid, "132", pending)
+
+    volta = db.get_pending_action(uid) or {}
+    assert volta.get("action_type") == "bill_amount_expected", (
+        f"a pergunta não voltou — ficou {volta.get('action_type')!r}")
+    assert volta.get("payload") == payload, volta
+
+
 def test_devolucao_nao_atropela_pendencia_mais_nova(monkeypatch):
     """P2 do Codex: a devolução usava upsert incondicional.
 
@@ -1535,3 +1568,57 @@ def test_botao_ja_paguei_com_pergunta_viva_tambem_nao_anuncia_o_comando(monkeypa
     assert "132,50" not in corpo, corpo
     assert "Qual foi o valor?" in corpo, corpo
     assert (db.get_pending_action(uid) or {}).get("action_type") == "clarification"
+
+
+# ── devolução da pergunta quando o pagamento estoura (porta do BOTÃO) ────────
+# A porta de texto (`resolve_bill_amount`) já devolve desde o PR #133; esta é a
+# outra porta da MESMA pergunta e prometia "Tente em instantes" sem ter para
+# onde voltar — a pendência tinha sido reivindicada e o próximo número não
+# pagaria nada.
+
+def test_botao_devolve_pergunta_quando_o_pagamento_estoura(monkeypatch):
+    """Negativo: sem o `with` em wa_runtime.py, a pendência some e isto fica vermelho."""
+    import uuid
+    import db
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+    _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
+    payload = (db.get_pending_action(uid) or {}).get("payload")
+
+    def _estoura(*a, **k):
+        raise RuntimeError("banco caiu")
+
+    monkeypatch.setattr(B, "mark_bill_paid", _estoura)
+    respostas = _manda_texto_no_wa(monkeypatch, uid, "132,50")
+
+    assert "Tente em instantes" in respostas[-1], respostas
+    volta = db.get_pending_action(uid) or {}
+    assert volta.get("action_type") == "bill_pay_amount", (
+        f"a pergunta não voltou — ficou {volta.get('action_type')!r}; "
+        "'Tente em instantes' vira mentira")
+    assert volta.get("payload") == payload, volta
+    assert B.list_bills(uid, include_paid=True)[0]["status"] == "pending"
+
+
+def test_botao_devolucao_nao_atropela_pergunta_mais_nova(monkeypatch):
+    """Corrida: a devolução é condicional, não upsert."""
+    import uuid
+    import db
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+    _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
+
+    def _estoura(*a, **k):
+        db.set_pending_action(uid, "clarification", {"valor": 77.9})
+        raise RuntimeError("banco caiu")
+
+    monkeypatch.setattr(B, "mark_bill_paid", _estoura)
+    _manda_texto_no_wa(monkeypatch, uid, "132,50")
+
+    volta = db.get_pending_action(uid) or {}
+    assert volta.get("action_type") == "clarification", (
+        f"a devolução atropelou a pergunta mais nova — ficou {volta.get('action_type')!r}")

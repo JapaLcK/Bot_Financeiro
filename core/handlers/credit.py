@@ -27,6 +27,7 @@ from db import (
     list_open_bills,
     pay_bill_amount,
     resolve_installment_group_id,
+    restore_pending_on_error,
     set_card_limit,
     set_default_card,
     set_pending_action,
@@ -1190,8 +1191,10 @@ def _resolve_set_primary(user_id: int, text: str, pending: dict) -> str | None:
         # Consome ANTES de escrever: depois, o CAS não protegeria nada.
         if not consume_pending_action(user_id, pending):
             return None
-        set_default_card(user_id, int(card_id))
-        card = get_card_by_id(user_id, int(card_id))
+        # Devolve a pergunta se a escrita estourar — senão a confirmação some.
+        with restore_pending_on_error(user_id, pending, 20):
+            set_default_card(user_id, int(card_id))
+            card = get_card_by_id(user_id, int(card_id))
         return f"✅ O cartão **{card['name']}** agora é o seu principal.\n{_card_summary(card)}"
 
     if _is_no(answer):
@@ -1216,7 +1219,10 @@ def _resolve_delete_card(user_id: int, text: str, pending: dict) -> str | None:
         # junto. Quem perde o CAS não apaga — o "sim" era de outra pergunta.
         if not consume_pending_action(user_id, pending):
             return None
-        deleted = delete_card(user_id, int(card_id))
+        # Devolve a confirmação se o delete em cascata estourar (FK, timeout):
+        # sem isso o usuário perde a pergunta e refaz "excluir cartão X".
+        with restore_pending_on_error(user_id, pending, 20):
+            deleted = delete_card(user_id, int(card_id))
         if not deleted:
             return f"❌ Não consegui excluir o cartão **{card_name}**."
         return f"✅ Cartão **{card_name}** excluído com sucesso."
@@ -1360,7 +1366,11 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
             # transações junto, e o clear posterior não protegeria nada.
             if not consume_pending_action(user_id, pending):
                 return None
-            deleted = delete_card(user_id, int(existing_id))
+            # O que se perde aqui não é só a confirmação: o payload carrega o
+            # cadastro inteiro (card_name, closing_day, due_day, ask_primary),
+            # e a mensagem de erro abaixo ainda diz "Tente novamente".
+            with restore_pending_on_error(user_id, pending, 20):
+                deleted = delete_card(user_id, int(existing_id))
             if not deleted:
                 return f"❌ Não consegui excluir o cartão **{existing_name}**. Tente novamente."
 
@@ -1489,8 +1499,9 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         if _is_yes(answer):
             if not consume_pending_action(user_id, pending):
                 return None
-            set_default_card(user_id, card_id)
-            card = get_card_by_id(user_id, card_id)
+            with restore_pending_on_error(user_id, pending, 20):
+                set_default_card(user_id, card_id)
+                card = get_card_by_id(user_id, card_id)
             return f"✅ Perfeito. O cartão **{card['name']}** agora é o seu principal.\n{_card_summary(card)}"
         consume_pending_action(user_id, pending)
         return f"Perfeito. Mantive o cartão principal atual.\n{_card_summary(card)}"

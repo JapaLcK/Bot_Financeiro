@@ -134,6 +134,7 @@ from .pending import (
     sobrevive_a_audio,
     claim_pending_action,
     create_pending_action_if_absent,
+    restore_pending_on_error,
     set_pending_action,
     get_pending_action,
     clear_pending_action,
@@ -457,7 +458,7 @@ __all__ = [
     "set_pending_action", "get_pending_action", "clear_pending_action",
     "advance_pending_action", "consume_pending_action",
     "eh_oferta_de_conveniencia", "suprime_fallback_de_ia", "sobrevive_a_audio",
-    "create_pending_action_if_absent",
+    "create_pending_action_if_absent", "restore_pending_on_error",
     "claim_pending_action",
     # budgets
     "list_budgets", "get_budget", "upsert_budget", "delete_budget",

@@ -94,11 +94,16 @@ def resolve_investment_pick(user_id: int, text: str, pending: dict) -> str | Non
     # lemos, outra tarefa consumiu a pergunta — não aporta duas vezes.
     if not db.consume_pending_action(user_id, pending):
         return None
-    return deposit(
-        user_id,
-        payload.get("text") or resposta,
-        {"investment_name": escolhido, "amount": float(payload.get("amount") or 0)},
-    )
+    # `_aporta` já trata o que falha DEPOIS de o dinheiro andar; o que sobe até
+    # aqui é o que estoura ANTES (teto de plano, falha ao ler a carteira). Nesses
+    # casos nada se moveu e a pergunta tem de voltar, senão o usuário responde
+    # "2", leva a mensagem de upgrade e a escolha some junto.
+    with db.restore_pending_on_error(user_id, pending):
+        return deposit(
+            user_id,
+            payload.get("text") or resposta,
+            {"investment_name": escolhido, "amount": float(payload.get("amount") or 0)},
+        )
 
 
 def _pergunta_origem(user_id: int, fontes: list, amount: float, retomar: dict) -> str:
@@ -177,13 +182,14 @@ def resolve_funding_choice(user_id: int, text: str, pending: dict) -> str | None
         "label": escolhida.get("label"),
     }
 
-    if retomar.get("fluxo") == "investment_deposit":
-        return _aporta(user_id, retomar.get("name"), amount,
-                       retomar.get("text") or resposta, source)
-    if retomar.get("fluxo") == "pocket_deposit":
-        from core.handlers import pockets as _pockets
-        return _pockets.deposita_com_origem(
-            user_id, retomar.get("name"), amount, retomar.get("text") or resposta, source)
+    with db.restore_pending_on_error(user_id, pending):
+        if retomar.get("fluxo") == "investment_deposit":
+            return _aporta(user_id, retomar.get("name"), amount,
+                           retomar.get("text") or resposta, source)
+        if retomar.get("fluxo") == "pocket_deposit":
+            from core.handlers import pockets as _pockets
+            return _pockets.deposita_com_origem(
+                user_id, retomar.get("name"), amount, retomar.get("text") or resposta, source)
     return None
 
 
