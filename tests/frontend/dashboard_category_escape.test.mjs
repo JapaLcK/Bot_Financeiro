@@ -178,3 +178,116 @@ test("visão geral: categoria com aspas duplas não escapa do data-num", async (
   assert.equal(r.budget, 'pao " quente');
   await page.close();
 });
+
+/* ──────────────────────────────────────────────────────────────────────
+ * Varredura por CONSTRUTO (não por nome de variável).
+ *
+ * O caso da pílula (acima) foi achado procurando `${...categoria...}`. Isso
+ * deixou passar 6 irmãos, porque o dado entrava por `JSON.stringify(obj)` ou
+ * por uma variável com outro nome (`safeCatJson`, `safeRecJson`, `nameSafe`).
+ * O construto é sempre o mesmo: **texto do usuário dentro de um atributo
+ * `on*=` de HTML**, com escape artesanal que cobre só metade dos caracteres.
+ *
+ * O que cada um fazia antes:
+ *   dashboard.js:890  `onclick='…openCardEditModal(${JSON.stringify(c)})'`    sem escape
+ *   dashboard.js:891  `onclick="…(${JSON.stringify(n).replace(/"/g,'&quot;')})"` só `"`
+ *   dashboard.js:1418 `onclick='…openInstAnticipateModal(${JSON.stringify(g.name)}…)'` sem escape
+ *   dashboard.js:2178 `JSON.stringify(b).replace(/'/g, "&apos;")`             só `'`
+ *   dashboard.js:3459 `JSON.stringify(r).replace(/"/g, "&quot;")`             só `"`
+ *   dashboard.js:4189 `escapeHtmlSafe(name).replace(/'/g, "\\'")`             ordem invertida
+ *   dashboard.js:4705 `JSON.stringify(r).replace(/"/g, "&quot;")`             só `"`
+ *
+ * O `&` é o furo comum: nenhum deles escapava. Um nome com `&quot;` LITERAL
+ * (que é como o texto chega quando alguém escreve HTML no WhatsApp) é
+ * decodificado pelo parser DEPOIS do escape e vira `"` cru dentro do JSON —
+ * SyntaxError na compilação do handler, linha inclicável. O `4189` é a mesma
+ * doença por outra porta: escapar HTML ANTES de escapar a string JS faz o
+ * `&#39;` voltar a ser `'` dentro de `'…'` e fechar o literal.
+ *
+ * VENENO cobre os três de uma vez: entidade literal, `&` solto e apóstrofo.
+ * ────────────────────────────────────────────────────────────────────── */
+
+const VENENO = `pao &quot;quente&quot; & mcdonald's`;
+
+/** Renderiza `window[fn](arg)`, injeta no DOM, clica em `sel` e devolve o que
+    o handler recebeu. `got === "NADA"` = handler não rodou (atributo quebrado). */
+const clicar = (page, fn, arg, sel, handler) => page.evaluate(([fn, arg, sel, handler]) => {
+  window.__got = "NADA";
+  window[handler] = (...a) => { window.__got = a; };
+  const host = document.createElement("div");
+  host.innerHTML = window[fn](arg);
+  document.body.appendChild(host);
+  const el = host.querySelector(sel);
+  let erro = null;
+  try { el.click(); } catch (e) { erro = String(e); }
+  return { achou: !!el, onclick: el?.getAttribute("onclick"), got: window.__got, erro };
+}, [fn, arg, sel, handler]);
+
+/** Um fixture por renderer: [rótulo, função, objeto, seletor, handler, ler o nome]. */
+const casos = (nome) => [
+  ["_renderBudgetRow (:2181, aspas simples)",
+   "_renderBudgetRow",
+   { categoria: nome, spent: 30, budget: 100, pct: 30, remaining: 70, status: "verde", color: "#22c55e", emoji: "🍞" },
+   ".bar-row", "openBudgetEditModal", (a) => a[0]?.categoria],
+
+  ["_renderCardItem editar (:890, aspas simples)",
+   "_renderCardItem",
+   { id: 7, name: nome, color: "purple", credit_limit: 1000, credit_used: 100, closing_day: 5, due_day: 12 },
+   ".cc-detail-actions .mock-cta.outline", "openCardEditModal", (a) => a[0]?.name],
+
+  ["_renderCardItem excluir (:891, aspas DUPLAS)",
+   "_renderCardItem",
+   { id: 7, name: nome, color: "purple", credit_limit: 1000, credit_used: 100, closing_day: 5, due_day: 12 },
+   ".cc-detail-actions .inst-delete-btn", "openCardDeleteModal", (a) => a[1]],
+
+  ["_renderInstallmentItem antecipar (:1418, aspas simples)",
+   "_renderInstallmentItem",
+   { group_id: "g1", name: nome, categoria: "mercado", total: 300, paid_amount: 100, remaining_amount: 200,
+     installments_total: 3, n_paid: 1, n_pending: 2, valor_parcela: 100, next_due_date: "2026-09-10",
+     purchased_at: "2026-07-10",
+     parcelas: [
+       { installment_no: 1, valor: 100, due_date: "2026-07-10", is_paid: true },
+       { installment_no: 2, valor: 100, due_date: "2026-08-10", is_next: true },
+       { installment_no: 3, valor: 100, due_date: "2026-09-10" },
+     ] },
+   ".inst-detail-body .mock-cta.outline", "openInstAnticipateModal", (a) => a[1]],
+
+  ["_renderRecurringRow (:3459, aspas DUPLAS)",
+   "_renderRecurringRow",
+   { id: 3, name: nome, amount: 50, frequency: "monthly", pay_day: 10, payment_type: "debit" },
+   ".tx-row", "openRecurringEditModal", (a) => a[0]?.name],
+
+  ["_renderRecurringIncomeRow (:4705, aspas DUPLAS)",
+   "_renderRecurringIncomeRow",
+   { id: 4, name: nome, amount: 900, frequency: "monthly", pay_day: 5, is_primary: true },
+   ".tx-row", "openRecurringIncomeEditModal", (a) => a[0]?.name],
+
+  ["_renderBillRow apagar (:4189, string JS dentro do atributo)",
+   "_renderBillRow",
+   { id: 9, name: nome, amount: 80, due_date: "2026-09-15" },
+   'button[title="Apagar"]', "deleteBoleto", (a) => a[1]],
+];
+
+for (const [rotulo, fn, obj, sel, handler, ler] of casos(VENENO)) {
+  test(`${rotulo}: nome com & e apóstrofo não quebra o handler`, async () => {
+    const page = await loadDashboardJs();
+    const r = await clicar(page, fn, obj, sel, handler);
+    assert.equal(r.achou, true, `seletor ${sel} não achou nada`);
+    assert.equal(r.erro, null);
+    assert.notEqual(r.got, "NADA", `handler não rodou; onclick saiu: ${r.onclick}`);
+    assert.equal(ler(r.got), VENENO, "o handler recebeu o nome corrompido");
+    await page.close();
+  });
+}
+
+// Controle positivo do grupo: o caminho legítimo (nome sem nada especial)
+// continua entregando o objeto inteiro ao handler.
+for (const [rotulo, fn, obj, sel, handler, ler] of casos("padaria do ze")) {
+  test(`${rotulo}: nome comum continua funcionando (controle positivo)`, async () => {
+    const page = await loadDashboardJs();
+    const r = await clicar(page, fn, obj, sel, handler);
+    assert.equal(r.erro, null);
+    assert.equal(ler(r.got), "padaria do ze");
+    await page.close();
+  });
+}
