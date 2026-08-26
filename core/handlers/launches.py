@@ -718,9 +718,9 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
     # A ACEITAÇÃO continua sendo o `_extract_valor` — o mesmo desta função antes
     # do PR, então "10 mil", "cinquenta" e "paguei 132 no mercado" seguem
     # entrando. O `valor_perigoso` só olha o que já foi aceito.
-    # O texto LIMPO vai para os dois: com o cru, `agrupamento_de_milhar_ok`
-    # via o grupo vazio depois do ponto de "132." e recusava o que a `main`
-    # registrava.
+    # O texto LIMPO por causa do `_extract_valor`: sem a limpeza
+    # "132,50. foi isso" registra R$ 13.250,00 e "1.234,56, foi isso" não
+    # registra nada. O `valor_perigoso` limpa por dentro, não depende daqui.
     limpo = limpa_pontuacao_final(text or "")
     valor = _extract_valor(limpo)
     perigo = valor_perigoso(limpo, valor)

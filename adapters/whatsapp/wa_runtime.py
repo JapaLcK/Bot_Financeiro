@@ -958,9 +958,9 @@ def process_message(message: InboundMessage) -> None:
                 # é o compartilhado: `parse_money("-10")` devolve 10.0, então
                 # sem ele responder "-10" pagava R$ 10,00.
                 try:
-                    # O texto LIMPO vai para os dois: com o cru, o
-                    # `agrupamento_de_milhar_ok` via o grupo vazio depois do
-                    # ponto de "132." e recusava o que a `main` pagava.
+                    # O texto LIMPO por causa do `parse_money`: sem a
+                    # limpeza "1.500." vira `None` e "132,50. foi isso" paga
+                    # R$ 13.250,00. O `valor_perigoso` limpa por dentro.
                     limpo = limpa_pontuacao_final(txt)
                     amount = parse_money(limpo)
                     perigo = valor_perigoso(limpo, amount)

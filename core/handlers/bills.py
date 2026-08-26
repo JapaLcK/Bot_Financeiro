@@ -247,9 +247,9 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
         consume_pending_action(user_id, pending)
         return None
 
-    # A forma é de valor. Agora o DANO, sobre o texto JÁ limpo — passar o cru
-    # fazia `agrupamento_de_milhar_ok("132.")` ver o grupo vazio depois do
-    # ponto e recusar "132." e "1.500.", que a `main` pagava.
+    # A forma é de valor. Agora o DANO, sobre o texto JÁ limpo — o
+    # `parse_money` precisa da limpeza ("1.500." vira `None` sem ela). O
+    # `valor_perigoso` faz a dele por dentro e não depende desta linha.
     limpo = limpa_pontuacao_final(raw)
     perigo = valor_perigoso(limpo, parse_money(limpo))
     if perigo == "nao_positivo":
