@@ -274,10 +274,9 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
         # outra tarefa pode ter posto uma confirmação nova no lugar — que já
         # apareceu na tela do usuário. Apagar por cima a deixaria órfã. Só
         # abandonamos a pergunta se ela ainda for a que lemos.
-        from db import advance_pending_action
+        from db import consume_pending_action
 
-        advance_pending_action(
-            user_id, "bill_amount_expected", pending.get("payload") or {}, None)
+        consume_pending_action(user_id, pending)
         return None
 
     limpo = limpa_pontuacao_final(raw)
@@ -300,7 +299,7 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     if casou.group(1) or not isfinite(amount) or amount <= 0:
         return f"O valor da *{nome}* precisa ser maior que zero. Quanto veio este mês?"
 
-    from db import advance_pending_action, create_pending_action_if_absent
+    from db import consume_pending_action, create_pending_action_if_absent
     from db.bills import mark_bill_paid
 
     payload = pending.get("payload") or {}
@@ -312,7 +311,7 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     # DOIS lançamentos existem. Quem perde o compare-and-swap sai sem fazer
     # nada — o vencedor responde. Mesmo desenho do PR #128 na fila de
     # multi-lançamento.
-    if not advance_pending_action(user_id, "bill_amount_expected", payload, None):
+    if not consume_pending_action(user_id, pending):
         return None
 
     try:

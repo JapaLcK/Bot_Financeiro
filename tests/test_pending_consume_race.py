@@ -150,3 +150,30 @@ def test_leitura_de_pendencia_vencida_nao_apaga_a_nova(user_id, monkeypatch):
     nova = db.get_pending_action(user_id)
     assert nova is not None, "a limpeza da vencida apagou a pendência nova"
     assert nova["action_type"] == "bill_amount_expected"
+
+
+# ── ABA: pendência recriada com conteúdo idêntico ───────────────────────────
+
+def test_consumo_nao_apaga_pendencia_identica_recriada(user_id):
+    """`(action_type, payload)` identifica o CONTEÚDO, não a instância da linha.
+
+    Outra tarefa consome e executa; o usuário repete o MESMO comando e nasce uma
+    linha nova de conteúdo idêntico. Sem o `created_at` no predicado, o worker
+    atrasado consome ESSA e executa a ação de novo — o dobro do que o CAS existe
+    para impedir. Apontado pelo Codex no PR #141.
+    """
+    db.set_pending_action(user_id, "funding_source_choice", {"amount": 500.0})
+    lida = db.get_pending_action(user_id)
+
+    assert db.consume_pending_action(user_id, lida) is True
+
+    # o usuário repete o comando: pendência nova, payload idêntico
+    db.set_pending_action(user_id, "funding_source_choice", {"amount": 500.0})
+    nova = db.get_pending_action(user_id)
+    assert nova["created_at"] != lida["created_at"], "resolução de relógio insuficiente"
+
+    # o worker atrasado volta com a linha VELHA em mãos
+    assert db.consume_pending_action(user_id, lida) is False
+    ainda = db.get_pending_action(user_id)
+    assert ainda is not None, "consumiu a instância nova achando que era a velha"
+    assert ainda["created_at"] == nova["created_at"]

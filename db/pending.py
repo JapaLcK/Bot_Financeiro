@@ -13,7 +13,8 @@ from .users import ensure_user
 def advance_pending_action(user_id: int, action_type: str,
                            old_payload: dict, new_payload: dict | None,
                            minutes: int = 10,
-                           new_action_type: str | None = None) -> bool:
+                           new_action_type: str | None = None,
+                           old_created_at: datetime | None = None) -> bool:
     """Avança (ou apaga) a pendência SÓ SE ela ainda for `old_payload`.
 
     Compare-and-swap. Duas respostas do mesmo usuário podem ser processadas em
@@ -35,25 +36,37 @@ def advance_pending_action(user_id: int, action_type: str,
     renova o prazo (`minutes`), como o `set_pending_action` que ela substitui —
     senão uma fila longa expiraria 10 min depois da PRIMEIRA pergunta, não da
     última resposta.
+
+    `old_created_at` fecha o ABA. Só `(action_type, payload)` identifica o
+    CONTEÚDO da linha, não a instância: se outra tarefa consome a pendência e o
+    usuário repete o MESMO comando, nasce uma linha nova de conteúdo idêntico e
+    o CAS de quem estava atrasado passa — executando a ação duas vezes, que é
+    exatamente o que ele existe para impedir. `created_at` é reescrito a cada
+    gravação (`set_pending_action`, o UPDATE abaixo, o default do INSERT), então
+    serve de versão da linha. Passe sempre que tiver a linha lida em mãos.
     """
+    versao = "" if old_created_at is None else " and created_at = %s"
+    extra: tuple = () if old_created_at is None else (old_created_at,)
     with get_conn() as conn:
         with conn.cursor() as cur:
             if new_payload is None:
                 cur.execute(
                     "delete from pending_actions "
-                    "where user_id = %s and action_type = %s and payload = %s",
-                    (user_id, action_type, Jsonb(old_payload)),
+                    "where user_id = %s and action_type = %s and payload = %s"
+                    + versao,
+                    (user_id, action_type, Jsonb(old_payload)) + extra,
                 )
             else:
                 cur.execute(
                     "update pending_actions "
                     "set action_type = %s, payload = %s, created_at = now(), "
                     "    expires_at = %s "
-                    "where user_id = %s and action_type = %s and payload = %s",
+                    "where user_id = %s and action_type = %s and payload = %s"
+                    + versao,
                     (new_action_type or action_type,
                      Jsonb(new_payload),
                      datetime.now(timezone.utc) + timedelta(minutes=minutes),
-                     user_id, action_type, Jsonb(old_payload)),
+                     user_id, action_type, Jsonb(old_payload)) + extra,
                 )
             gravou = cur.rowcount == 1
         conn.commit()
@@ -83,6 +96,7 @@ def consume_pending_action(user_id: int, pending: dict) -> bool:
         pending.get("action_type") or "",
         pending.get("payload") or {},
         None,
+        old_created_at=pending.get("created_at"),
     )
 
 
@@ -217,6 +231,7 @@ def claim_pending_action(user_id: int, action_type: str, payload: dict,
     return advance_pending_action(
         user_id, atual["action_type"], atual.get("payload") or {},
         payload, minutes, new_action_type=action_type,
+        old_created_at=atual.get("created_at"),
     )
 
 
