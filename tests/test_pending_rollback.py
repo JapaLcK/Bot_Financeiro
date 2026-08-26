@@ -403,3 +403,68 @@ def test_funding_choice_falha_depois_do_commit_nao_rearma(monkeypatch, fluxo, no
         f"{fluxo}: pergunta re-armada com o dinheiro já debitado — a próxima "
         "resposta depositaria de novo")
     assert float(db.get_balance(user_id)) == 400.0
+
+
+# ── a JANELA AMBÍGUA: a exceção sai DO PRÓPRIO `conn.commit()` ───────────────
+# P1 do Codex no PR #144. A fronteira do "dá para repetir" não é o `return` da
+# função transacional: é a primeira TENTATIVA de commit. Se a conexão cai
+# enquanto o Postgres confirma o COMMIT, a chamada levanta com a transação já
+# gravada — de fora, idêntico a uma falha antes dela. Devolver a pergunta ali
+# faz a próxima resposta do usuário aportar/depositar DE NOVO, e não há chave de
+# idempotência que segure.
+#
+# A simulação é fiel, não é mock de conveniência: o commit é executado DE
+# VERDADE (o dinheiro anda, e o teste confere o saldo) e só então a chamada
+# levanta. `db.connection.commits_ambiguos` é o que separa este caso do de cima.
+
+@pytest.mark.parametrize("fluxo,nome,modulo", FLUXOS, ids=FLUXO_IDS)
+def test_funding_choice_commit_ambiguo_nao_rearma(monkeypatch, fluxo, nome, modulo):
+    """Negativo por causa: sem o `if commits_ambiguos() == antes` em
+    `db/pending.py`, a pendência volta e ESTE caso fica vermelho — e só ele.
+    Os dois `..._devolve_quando_o_banco_cai_de_verdade` (falha ANTES do commit)
+    continuam verdes, que é o controle positivo do par."""
+    import contextlib
+    import importlib
+    import psycopg
+
+    user_id = _uid()
+    _carteira(user_id)
+    _cria_destino(user_id, fluxo, nome)
+    pending = _pending_funding_para(user_id, fluxo, nome)
+
+    armado = {"on": False}
+    commit_real = psycopg.Connection.commit
+
+    def commit_e_perde_a_conexao(self):
+        commit_real(self)  # o Postgres CONFIRMA
+        if armado["on"]:
+            armado["on"] = False
+            raise psycopg.OperationalError("connection lost while committing")
+
+    monkeypatch.setattr(psycopg.Connection, "commit", commit_e_perde_a_conexao)
+
+    # Arma só a transação do dinheiro: o `ensure_user` da mesma função commita
+    # antes, por outro `get_conn` (o de db/users.py), e não pode disparar.
+    M = importlib.import_module(modulo)
+    get_conn_real = M.get_conn
+
+    @contextlib.contextmanager
+    def get_conn_armado():
+        with get_conn_real() as conn:
+            armado["on"] = True
+            try:
+                yield conn
+            finally:
+                armado["on"] = False
+
+    monkeypatch.setattr(M, "get_conn", get_conn_armado)
+
+    with pytest.raises(psycopg.OperationalError):
+        H_inv.resolve_funding_choice(user_id, "1", pending)
+
+    assert float(db.get_balance(user_id)) == 400.0, (
+        f"{fluxo}: o commit não passou — a janela ambígua não foi simulada, "
+        "o teste não mede nada")
+    assert db.get_pending_action(user_id) is None, (
+        f"{fluxo}: pergunta re-armada com o commit já confirmado — responder a "
+        "origem de novo debitaria a carteira duas vezes")

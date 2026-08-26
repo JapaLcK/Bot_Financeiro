@@ -8,7 +8,7 @@ from typing import NamedTuple
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from .connection import get_conn
+from .connection import commits_ambiguos, get_conn
 from .users import ensure_user
 
 
@@ -145,16 +145,32 @@ def restore_pending_on_error(user_id: int, pending: dict, minutes: int = 10):
 
     `minutes` é o prazo do fluxo que armou a pergunta (crédito usa 20, o valor
     de conta do WhatsApp usa 30) — devolver com o default encurtaria o prazo.
+
+    NÃO devolve se algum `commit()` chegou a estourar no meio (`commits_ambiguos`):
+    a conexão que cai ENQUANTO o Postgres confirma o COMMIT levanta com a
+    transação possivelmente gravada, e de fora isso é idêntico a uma falha antes
+    dela. Devolver a pergunta ali faz a próxima resposta REPETIR um trabalho já
+    commitado — um aporte debita a origem e credita o destino duas vezes, sem
+    chave de idempotência que segure (Codex, PR #144). Errar para o lado de não
+    devolver custa a pergunta, que o usuário refaz repetindo o comando; errar
+    para o outro custa dinheiro, que não tem retentativa.
+
+    A fronteira NÃO é o `return` da função transacional: é a primeira tentativa
+    de commit. Por isso a checagem é genérica (vale para os 8 sites e para
+    qualquer commit no caminho, inclusive o implícito do `with get_conn()`) em
+    vez de uma lista de exceções "seguras" por site.
     """
+    antes = commits_ambiguos()
     try:
         yield
     except Exception:
-        create_pending_action_if_absent(
-            user_id,
-            pending.get("action_type") or "",
-            pending.get("payload") or {},
-            minutes,
-        )
+        if commits_ambiguos() == antes:
+            create_pending_action_if_absent(
+                user_id,
+                pending.get("action_type") or "",
+                pending.get("payload") or {},
+                minutes,
+            )
         raise
 
 

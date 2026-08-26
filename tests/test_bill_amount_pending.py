@@ -1622,3 +1622,73 @@ def test_botao_devolucao_nao_atropela_pergunta_mais_nova(monkeypatch):
     volta = db.get_pending_action(uid) or {}
     assert volta.get("action_type") == "clarification", (
         f"a devolução atropelou a pergunta mais nova — ficou {volta.get('action_type')!r}")
+
+
+def test_commit_ambiguo_do_pagamento_nao_rearma_a_pergunta(monkeypatch):
+    """A janela ambígua do P1 do Codex, no caminho da conta.
+
+    `mark_bill_paid` reserva a conta, cria o lançamento que debita e só então
+    liga o `launch_id`. Se a conexão cai ENQUANTO o Postgres confirma o COMMIT
+    do lançamento, o débito passa e a chamada levanta — e o `except` de
+    `mark_bill_paid` devolve a conta para `pending`, achando que nada gravou.
+
+    Medido (`db.connection.commits_ambiguos` sobe 1): saldo 1000 → 900 com a
+    conta de volta em `pending`; responder o valor de novo leva a 800. Débito
+    dobrado, sem retentativa. Por isso a devolução da pergunta não pode
+    acontecer aqui.
+
+    Negativo por causa: com o `if commits_ambiguos() == antes` fora de
+    `db/pending.py`, a pendência volta e este caso fica vermelho.
+    """
+    import contextlib
+    import datetime
+    import uuid
+    import psycopg
+    import db
+    import db.accounts
+    import db.bills
+    from core.handlers import bills as H
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
+    db.add_launch_and_update_balance(uid, "receita", 1000.0, None, "seed")
+    bill = db.bills.create_boleto(uid, "Luz", 100.0, datetime.date.today(),
+                                  category="moradia")
+    payload = {"bill_id": int(bill["id"]), "bill_name": "Luz"}
+    db.set_pending_action(uid, "bill_amount_expected", payload)
+    pending = db.get_pending_action(uid)
+
+    armado = {"on": False}
+    commit_real = psycopg.Connection.commit
+
+    def commit_e_perde_a_conexao(self):
+        commit_real(self)  # o Postgres CONFIRMA o débito
+        if armado["on"]:
+            armado["on"] = False
+            raise psycopg.OperationalError("connection lost while committing")
+
+    monkeypatch.setattr(psycopg.Connection, "commit", commit_e_perde_a_conexao)
+
+    # Arma só a transação do lançamento (a que move o dinheiro): a reserva da
+    # conta e a devolução compensatória usam outros `get_conn`, de db/bills.py.
+    gc_real = db.accounts.get_conn
+
+    @contextlib.contextmanager
+    def gc_armado():
+        with gc_real() as conn:
+            armado["on"] = True
+            try:
+                yield conn
+            finally:
+                armado["on"] = False
+
+    monkeypatch.setattr(db.accounts, "get_conn", gc_armado)
+
+    with pytest.raises(psycopg.OperationalError):
+        H.resolve_bill_amount(uid, "100", pending)
+
+    assert float(db.get_balance(uid)) == 900.0, (
+        "o commit não passou — a janela ambígua não foi simulada")
+    assert db.get_pending_action(uid) is None, (
+        "pergunta re-armada com o débito já confirmado — responder o valor de "
+        "novo debitaria a conta duas vezes")
