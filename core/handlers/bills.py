@@ -299,7 +299,7 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     if casou.group(1) or not isfinite(amount) or amount <= 0:
         return f"O valor da *{nome}* precisa ser maior que zero. Quanto veio este mês?"
 
-    from db import consume_pending_action, create_pending_action_if_absent
+    from db import consume_pending_action, restore_pending_on_error
     from db.bills import mark_bill_paid
 
     payload = pending.get("payload") or {}
@@ -314,20 +314,11 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     if not consume_pending_action(user_id, pending):
         return None
 
-    try:
+    # Devolve a pergunta se o pagamento estourar: sem isso o usuário perde a
+    # pendência e o valor que digitou, e a conta continua em aberto sem ninguém
+    # avisar. Prazo 10 min, o mesmo do `claim` que a armou (:144).
+    with restore_pending_on_error(user_id, pending):
         paid = mark_bill_paid(user_id, int(payload["bill_id"]), amount)
-    except Exception:
-        # Devolve a pergunta: sem isso o usuário perde a pendência e o valor
-        # que digitou, e a conta continua em aberto sem ninguém avisar.
-        #
-        # CONDICIONAL, não upsert: entre a reivindicação e a falha, outra
-        # tarefa pode ter armado uma pendência nova (uma confirmação que já
-        # apareceu na tela do usuário). Gravar por cima deixaria aquela órfã.
-        # Se já há algo lá, a pergunta desta conta é a que se perde — e ela é
-        # recuperável mandando "paguei a luz" de novo.
-        create_pending_action_if_absent(
-            user_id, "bill_amount_expected", payload)
-        raise
     if paid is None:
         return "Essa conta não está mais pendente."
     val = paid.get("paid_amount") or paid.get("amount") or 0

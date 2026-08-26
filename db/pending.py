@@ -1,13 +1,14 @@
 """
 db/pending.py — Ações pendentes de confirmação (ex: "apagar lançamento?").
 """
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import NamedTuple
 
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from .connection import get_conn
+from .connection import commits_ambiguos, get_conn
 from .users import ensure_user
 
 
@@ -124,6 +125,53 @@ def create_pending_action_if_absent(user_id: int, action_type: str, payload: dic
             criou = cur.rowcount == 1
         conn.commit()
     return criou
+
+
+@contextmanager
+def restore_pending_on_error(user_id: int, pending: dict, minutes: int = 10):
+    """Devolve a pendência se o trabalho reivindicado estourar, e re-levanta.
+
+    `consume_pending_action` roda ANTES do trabalho (é o porteiro que impede a
+    segunda thread de executar a mesma ação). Se o trabalho levanta, a pergunta
+    já foi apagada: o usuário perde a confirmação, não recebe nada útil e refaz
+    o fluxo do zero — regressão contra o `clear` que vinha DEPOIS.
+
+    A devolução é `create_pending_action_if_absent`, nunca `set_pending_action`:
+    entre a reivindicação e a falha outra tarefa pode ter armado uma pergunta
+    nova, que já apareceu na tela do usuário. Gravar por cima a deixaria órfã —
+    uma operação antiga não sobrescreve uma pendência mais nova. Se já há algo
+    lá, o que se perde é a pendência desta operação, recuperável repetindo o
+    comando.
+
+    `minutes` é o prazo do fluxo que armou a pergunta (crédito usa 20, o valor
+    de conta do WhatsApp usa 30) — devolver com o default encurtaria o prazo.
+
+    NÃO devolve se algum `commit()` chegou a estourar no meio (`commits_ambiguos`):
+    a conexão que cai ENQUANTO o Postgres confirma o COMMIT levanta com a
+    transação possivelmente gravada, e de fora isso é idêntico a uma falha antes
+    dela. Devolver a pergunta ali faz a próxima resposta REPETIR um trabalho já
+    commitado — um aporte debita a origem e credita o destino duas vezes, sem
+    chave de idempotência que segure (Codex, PR #144). Errar para o lado de não
+    devolver custa a pergunta, que o usuário refaz repetindo o comando; errar
+    para o outro custa dinheiro, que não tem retentativa.
+
+    A fronteira NÃO é o `return` da função transacional: é a primeira tentativa
+    de commit. Por isso a checagem é genérica (vale para os 8 sites e para
+    qualquer commit no caminho, inclusive o implícito do `with get_conn()`) em
+    vez de uma lista de exceções "seguras" por site.
+    """
+    antes = commits_ambiguos()
+    try:
+        yield
+    except Exception:
+        if commits_ambiguos() == antes:
+            create_pending_action_if_absent(
+                user_id,
+                pending.get("action_type") or "",
+                pending.get("payload") or {},
+                minutes,
+            )
+        raise
 
 
 # ---------------------------------------------------------------------------

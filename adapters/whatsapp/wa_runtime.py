@@ -48,6 +48,7 @@ from db import (
     get_conn,
     get_or_create_canonical_user,
     get_pending_action,
+    restore_pending_on_error,
     set_pending_action,
     set_whatsapp_updates_opt_out,
     update_launch_category,
@@ -959,7 +960,13 @@ def process_message(message: InboundMessage) -> None:
                 if bill_id:
                     from db.bills import mark_bill_paid
                     try:
-                        paid = mark_bill_paid(uid, int(bill_id), amount)
+                        # Devolve a pergunta se o pagamento estourar: sem isso o
+                        # "Tente em instantes" é mentira — a pendência já foi e o
+                        # próximo número não paga nada. Prazo 30 min, o mesmo com
+                        # que ela foi armada (:773). Mesmo desenho da outra porta
+                        # desta pergunta (core/handlers/bills.py::resolve_bill_amount).
+                        with restore_pending_on_error(uid, pending_recat, 30):
+                            paid = mark_bill_paid(uid, int(bill_id), amount)
                     except Exception as exc:
                         logger.exception("WA bill_pay_amount mark failed bill=%s: %s", bill_id, exc)
                         _send_reply(reply_to, "Não consegui registrar o pagamento agora. Tente em instantes.")

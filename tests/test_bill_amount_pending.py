@@ -197,6 +197,39 @@ def test_valor_negativo_mantem_a_pergunta_e_nao_paga(monkeypatch):
     assert pagou == [], f"valor negativo virou pagamento: {pagou}"
 
 
+def test_devolucao_repoe_a_pergunta_quando_o_pagamento_estoura(monkeypatch):
+    """Controle NEGATIVO que faltava para a devolução da porta de texto.
+
+    Medido: o grupo só tinha a corrida abaixo, e ela passa igual com a
+    devolução desligada (com o rollback fora, ninguém escreve e a pergunta nova
+    sobrevive do mesmo jeito). Sem este caso, tirar o `with` de
+    `resolve_bill_amount` não deixava uma linha vermelha.
+    """
+    import uuid
+    import db
+    import db.bills
+    from core.handlers import bills as H
+
+    uid = int(uuid.uuid4().int % 10_000_000_000)
+    db.ensure_user(uid)
+    payload = {"bill_id": 41, "bill_name": "Luz"}
+    db.set_pending_action(uid, "bill_amount_expected", payload)
+    pending = db.get_pending_action(uid)
+
+    def _estoura(u, b, a):
+        raise RuntimeError("banco caiu")
+
+    monkeypatch.setattr(db.bills, "mark_bill_paid", _estoura)
+
+    with pytest.raises(RuntimeError):
+        H.resolve_bill_amount(uid, "132", pending)
+
+    volta = db.get_pending_action(uid) or {}
+    assert volta.get("action_type") == "bill_amount_expected", (
+        f"a pergunta não voltou — ficou {volta.get('action_type')!r}")
+    assert volta.get("payload") == payload, volta
+
+
 def test_devolucao_nao_atropela_pendencia_mais_nova(monkeypatch):
     """P2 do Codex: a devolução usava upsert incondicional.
 
@@ -1535,3 +1568,127 @@ def test_botao_ja_paguei_com_pergunta_viva_tambem_nao_anuncia_o_comando(monkeypa
     assert "132,50" not in corpo, corpo
     assert "Qual foi o valor?" in corpo, corpo
     assert (db.get_pending_action(uid) or {}).get("action_type") == "clarification"
+
+
+# ── devolução da pergunta quando o pagamento estoura (porta do BOTÃO) ────────
+# A porta de texto (`resolve_bill_amount`) já devolve desde o PR #133; esta é a
+# outra porta da MESMA pergunta e prometia "Tente em instantes" sem ter para
+# onde voltar — a pendência tinha sido reivindicada e o próximo número não
+# pagaria nada.
+
+def test_botao_devolve_pergunta_quando_o_pagamento_estoura(monkeypatch):
+    """Negativo: sem o `with` em wa_runtime.py, a pendência some e isto fica vermelho."""
+    import uuid
+    import db
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+    _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
+    payload = (db.get_pending_action(uid) or {}).get("payload")
+
+    def _estoura(*a, **k):
+        raise RuntimeError("banco caiu")
+
+    monkeypatch.setattr(B, "mark_bill_paid", _estoura)
+    respostas = _manda_texto_no_wa(monkeypatch, uid, "132,50")
+
+    assert "Tente em instantes" in respostas[-1], respostas
+    volta = db.get_pending_action(uid) or {}
+    assert volta.get("action_type") == "bill_pay_amount", (
+        f"a pergunta não voltou — ficou {volta.get('action_type')!r}; "
+        "'Tente em instantes' vira mentira")
+    assert volta.get("payload") == payload, volta
+    assert B.list_bills(uid, include_paid=True)[0]["status"] == "pending"
+
+
+def test_botao_devolucao_nao_atropela_pergunta_mais_nova(monkeypatch):
+    """Corrida: a devolução é condicional, não upsert."""
+    import uuid
+    import db
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+    _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
+
+    def _estoura(*a, **k):
+        db.set_pending_action(uid, "clarification", {"valor": 77.9})
+        raise RuntimeError("banco caiu")
+
+    monkeypatch.setattr(B, "mark_bill_paid", _estoura)
+    _manda_texto_no_wa(monkeypatch, uid, "132,50")
+
+    volta = db.get_pending_action(uid) or {}
+    assert volta.get("action_type") == "clarification", (
+        f"a devolução atropelou a pergunta mais nova — ficou {volta.get('action_type')!r}")
+
+
+def test_commit_ambiguo_do_pagamento_nao_rearma_a_pergunta(monkeypatch):
+    """A janela ambígua do P1 do Codex, no caminho da conta.
+
+    `mark_bill_paid` reserva a conta, cria o lançamento que debita e só então
+    liga o `launch_id`. Se a conexão cai ENQUANTO o Postgres confirma o COMMIT
+    do lançamento, o débito passa e a chamada levanta — e o `except` de
+    `mark_bill_paid` devolve a conta para `pending`, achando que nada gravou.
+
+    Medido (`db.connection.commits_ambiguos` sobe 1): saldo 1000 → 900 com a
+    conta de volta em `pending`; responder o valor de novo leva a 800. Débito
+    dobrado, sem retentativa. Por isso a devolução da pergunta não pode
+    acontecer aqui.
+
+    Negativo por causa: com o `if commits_ambiguos() == antes` fora de
+    `db/pending.py`, a pendência volta e este caso fica vermelho.
+    """
+    import contextlib
+    import datetime
+    import uuid
+    import psycopg
+    import db
+    import db.accounts
+    import db.bills
+    from core.handlers import bills as H
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
+    db.add_launch_and_update_balance(uid, "receita", 1000.0, None, "seed")
+    bill = db.bills.create_boleto(uid, "Luz", 100.0, datetime.date.today(),
+                                  category="moradia")
+    payload = {"bill_id": int(bill["id"]), "bill_name": "Luz"}
+    db.set_pending_action(uid, "bill_amount_expected", payload)
+    pending = db.get_pending_action(uid)
+
+    armado = {"on": False}
+    commit_real = psycopg.Connection.commit
+
+    def commit_e_perde_a_conexao(self):
+        commit_real(self)  # o Postgres CONFIRMA o débito
+        if armado["on"]:
+            armado["on"] = False
+            raise psycopg.OperationalError("connection lost while committing")
+
+    monkeypatch.setattr(psycopg.Connection, "commit", commit_e_perde_a_conexao)
+
+    # Arma só a transação do lançamento (a que move o dinheiro): a reserva da
+    # conta e a devolução compensatória usam outros `get_conn`, de db/bills.py.
+    gc_real = db.accounts.get_conn
+
+    @contextlib.contextmanager
+    def gc_armado():
+        with gc_real() as conn:
+            armado["on"] = True
+            try:
+                yield conn
+            finally:
+                armado["on"] = False
+
+    monkeypatch.setattr(db.accounts, "get_conn", gc_armado)
+
+    with pytest.raises(psycopg.OperationalError):
+        H.resolve_bill_amount(uid, "100", pending)
+
+    assert float(db.get_balance(uid)) == 900.0, (
+        "o commit não passou — a janela ambígua não foi simulada")
+    assert db.get_pending_action(uid) is None, (
+        "pergunta re-armada com o débito já confirmado — responder o valor de "
+        "novo debitaria a conta duas vezes")
