@@ -2,8 +2,11 @@
 db/schema.py — DDL e inicialização do banco de dados.
 """
 from .connection import get_conn
-from .schema_repairs import (SCHEMA_REPAIRS_LOCK, ensure_plan_trials_user_fk,
-                             repair_user_fk_cascades)
+from .schema_repairs import ensure_plan_trials_user_fk, repair_user_fk_cascades
+
+# Chave do advisory lock que serializa o init_db INTEIRO entre instâncias.
+# Valor arbitrário e estável; só precisa não colidir com outro lock do processo.
+SCHEMA_INIT_LOCK = 728_531_004
 
 
 def init_db():
@@ -1920,35 +1923,45 @@ def init_db():
 
 def _run_ddl(conn, ddl_statements) -> None:
     with conn.cursor() as cur:
-        for i, stmt in enumerate(ddl_statements, 1):
-            try:
-                cur.execute(stmt)
-            except Exception as e:
-                print(f"[init_db] erro no statement #{i}: {e}")
-                print(stmt)
-                raise
-
-        # Corrige FKs em users(id) que ficaram com on_delete errado
-        # porque a tabela já existia antes da FK ser declarada no schema.
+        # O init INTEIRO sob advisory lock, e não só os reparos do fim.
         #
-        # Sob advisory lock: os dois reparos são "olha o catálogo, depois faz
-        # ALTER", e um deploy do Railway sobe o container novo ANTES de o velho
-        # sair (ver o comentário mais acima neste arquivo). Sem serializar, as
-        # duas instâncias passam juntas pela checagem, o primeiro ALTER vence e o
-        # segundo estoura — `duplicate_object` no `ensure_`, `does not exist` no
-        # `repair_` — abortando o init daquela instância.
+        # `if not exists` NÃO é atômico: a checagem e a criação são passos
+        # separados, então duas instâncias que subam juntas — o deploy do Railway
+        # levanta o container novo ANTES de o velho sair, ver o comentário logo
+        # acima — podem ver a mesma tabela/índice ausente e a perdedora estoura
+        # com "already exists". Isso vale para TODO `create ... if not exists`
+        # deste arquivo, não só para o índice ou a FK mais recentes; no PR #152
+        # o revisor apontou um statement por vez até ficar claro que a classe é o
+        # bloco inteiro. Um lock, uma vez, cobre os ~200 statements.
         #
-        # Lock de SESSÃO, não de transação: esta conexão está em autocommit, e um
+        # Não conflita com o autocommit explicado logo acima: advisory lock não
+        # trava tabela nenhuma, então cada DDL continua soltando os locks DELE na
+        # hora e leitura concorrente segue livre. O que ele impede é exatamente o
+        # item (2) daquele comentário — duas instâncias em init paralelo. O custo
+        # é a segunda esperar a primeira terminar.
+        #
+        # Lock de SESSÃO, não de transação: a conexão está em autocommit, e um
         # `pg_advisory_xact_lock` soltaria no fim do próprio SELECT que o toma.
-        cur.execute("select pg_advisory_lock(%s)", (SCHEMA_REPAIRS_LOCK,))
+        cur.execute("select pg_advisory_lock(%s)", (SCHEMA_INIT_LOCK,))
         try:
-            if ensure_plan_trials_user_fk(cur):
-                print("[init_db] schema_repairs criou a FK de plan_trials.user_id")
-            changes = repair_user_fk_cascades(cur)
-            if changes:
-                print(f"[init_db] schema_repairs ajustou {len(changes)} FK(s): {changes}")
-        except Exception as e:
-            print(f"[init_db] schema_repairs falhou: {e}")
-            raise
+            for i, stmt in enumerate(ddl_statements, 1):
+                try:
+                    cur.execute(stmt)
+                except Exception as e:
+                    print(f"[init_db] erro no statement #{i}: {e}")
+                    print(stmt)
+                    raise
+
+            # Corrige FKs em users(id) que ficaram com on_delete errado
+            # porque a tabela já existia antes da FK ser declarada no schema.
+            try:
+                if ensure_plan_trials_user_fk(cur):
+                    print("[init_db] schema_repairs criou a FK de plan_trials.user_id")
+                changes = repair_user_fk_cascades(cur)
+                if changes:
+                    print(f"[init_db] schema_repairs ajustou {len(changes)} FK(s): {changes}")
+            except Exception as e:
+                print(f"[init_db] schema_repairs falhou: {e}")
+                raise
         finally:
-            cur.execute("select pg_advisory_unlock(%s)", (SCHEMA_REPAIRS_LOCK,))
+            cur.execute("select pg_advisory_unlock(%s)", (SCHEMA_INIT_LOCK,))
