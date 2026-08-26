@@ -67,9 +67,7 @@
 
 /* ─── 5. Cards com profundidade + borda-holofote sob o cursor ──────────── */
 .rd .card,
-.rd .plan-solo,
-.rd .phone,
-.rd .step {
+.rd .plan-solo {
   position: relative;
   transition: transform .22s ease, border-color .22s ease, box-shadow .22s ease;
 }
@@ -117,14 +115,10 @@
 }
 .rd .value-chip:hover { border-color: rgba(198,241,26,.4); transform: translateY(-2px); }
 
-/* ─── 7. Steps: numeração com anel e trilho conectando ────────────────── */
-.rd .step { padding: 4px 0; }
-.rd .step-num { box-shadow: 0 8px 22px rgba(255,45,142,.35), inset 0 1px 0 rgba(255,255,255,.25); }
-
-/* ─── 8. Chat / summary / phone: elevação com sombra tingida ───────────── */
+/* ─── 8. Chat / summary: elevação com sombra tingida ───────────────────── */
+/* (não há seção 7: era a dos .rd .step, removida junto com o markup) */
 .rd .chat-card,
-.rd .summary-card,
-.rd .phone {
+.rd .summary-card {
   box-shadow: 0 30px 70px rgba(0,0,0,.55), 0 0 0 1px rgba(255,45,142,.06),
               0 12px 40px rgba(255,45,142,.08);
 }
@@ -162,4 +156,168 @@
 @media (max-width: 560px) {
   .rd .hero-title { font-size: clamp(2.2rem, 9vw, 3rem); }
   .rd .plan-solo-amount { font-size: 3rem; }
+}
+
+/* ─── 13. Como funciona: trilho de 3 cards que abre no hover ───────────── */
+/* Um card aberto por vez: os anteriores ficam com check (is-done), os
+   seguintes com anel tracejado (is-idle). Estados vêm do IIFE da index. */
+.rd .hiw-rail {
+  --hiw-ease: cubic-bezier(.45,0,0,1);   /* NÃO usar --ease: brand.css tem outra curva */
+  --hiw-wa: #25D366;
+  display: flex; flex-direction: column; gap: 14px; margin-top: 44px;
+}
+/* altura em rem, não px: com fonte-raiz grande (ajuste de acessibilidade do
+   navegador, que não é zoom) a caixa precisa crescer junto com o texto. */
+@media (min-width: 900px) { .rd .hiw-rail { flex-direction: row; height: 41.25rem; } }
+
+.rd .hiw-card {
+  position: relative; display: flex; flex-direction: column; justify-content: space-between;
+  min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg);
+  background: var(--card); padding: 28px 26px 30px; flex: 1 1 0;
+  /* ponytail: redimensionar cruzando 899→900px pisca os 3 cards em 54px por
+     ~150ms (abaixo é flex:none/basis auto, acima é basis 0 com transition de
+     flex-grow saindo do zero). Basis não-zero muda a razão aberto/fechado e
+     derruba a asserção "aberto ≥ 2× fechado"; sair disso pede transicionar
+     outra propriedade que não flex-grow. Só quem redimensiona/gira vê. */
+  transition: flex-grow .6s var(--hiw-ease), background-color .6s var(--hiw-ease),
+              border-color .6s var(--hiw-ease), box-shadow .6s var(--hiw-ease);
+  cursor: pointer;
+}
+.rd .hiw-card:focus-visible { outline: 2px solid var(--pink); outline-offset: 3px; }
+@media (min-width: 900px) { .rd .hiw-card.is-open { flex-grow: 2.7; } }
+@media (max-width: 899px) {
+  .rd .hiw-rail { gap: 12px; }
+  /* flex-basis:0 do desktop faria o card ignorar o conteúdo e travar na
+     min-height: aberto, a demo transbordava por cima do rodapé. */
+  .rd .hiw-card { flex: none; min-height: 7.375rem; transition: none; }
+  .rd .hiw-card.is-open { min-height: 35rem; }
+}
+.rd .hiw-card.is-open { background: var(--card-2); border-color: var(--line-2); box-shadow: var(--shadow); }
+.rd .hiw-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px; }
+.rd .hiw-num { font-size: 1.9rem; font-weight: 800; color: var(--ink-3); letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+.rd .hiw-card.is-open .hiw-num { color: var(--pink); }
+.rd .hiw-card.is-done .hiw-num { color: var(--neon); }
+.rd .hiw-head h3 { font-size: 1.55rem; font-weight: 700; letter-spacing: -.03em; }
+
+.rd .hiw-foot { margin-top: auto; padding-top: 22px; }
+.rd .hiw-foot h4 { font-size: 1.12rem; font-weight: 700; letter-spacing: -.02em; text-wrap: balance; }
+
+/* miolo: os três estados empilhados na mesma célula */
+.rd .hiw-stage { flex: 1 1 auto; display: grid; place-items: center; margin: 22px 0 0; min-height: 0; }
+.rd .hiw-state { grid-area: 1/1; width: 100%; opacity: 0; visibility: hidden; transition: opacity .35s ease; }
+.rd .hiw-card.is-open .hiw-demo { opacity: 1; visibility: visible; transition-delay: .18s; }
+.rd .hiw-card.is-done .hiw-done { opacity: 1; visibility: visible; transition-delay: .1s; }
+.rd .hiw-card.is-idle .hiw-idle { opacity: 1; visibility: visible; }
+/* O JS põe .is-esperando enquanto o trilho não apareceu na tela: sem isso o chat
+   do card 1 termina de animar ~1290px antes da dobra. Sem JS a classe não existe
+   e as animações rodam no parse, como antes. */
+.rd .hiw-rail.is-esperando .hiw-card.is-open * { animation: none; }
+/* done/idle saem do fluxo e ancoram pelo CÍRCULO no meio do CARD (altura igual
+   nos três): 37px = metade dos 74px do .hiw-tick/.hiw-ring. Centrar o BLOCO
+   desalinharia — o done tem duas linhas de texto e o idle uma. */
+.rd .hiw-done, .rd .hiw-idle {
+  position: absolute; top: calc(50% - 37px);
+  left: 26px; right: 26px; width: auto;   /* = padding lateral do .hiw-card */
+}
+@media (max-width: 899px) {
+  .rd .hiw-card:not(.is-open) .hiw-stage { display: none; }
+  .rd .hiw-card:not(.is-open) { justify-content: center; }
+  .rd .hiw-card:not(.is-open) .hiw-foot { display: none; }
+}
+
+/* estado concluído */
+.rd .hiw-done { text-align: center; }
+.rd .hiw-tick {
+  width: 74px; height: 74px; margin: 0 auto 18px; border-radius: 50%; background: var(--neon);
+  display: grid; place-items: center;
+  box-shadow: 0 0 0 12px rgba(198,241,26,.10), 0 0 46px rgba(198,241,26,.30);
+}
+.rd .hiw-tick svg { width: 34px; height: 34px; fill: none; stroke: var(--neon-ink); stroke-width: 3.4; stroke-linecap: round; stroke-linejoin: round; }
+.rd .hiw-done b { display: block; font-size: 1rem; font-weight: 700; }
+.rd .hiw-done span { display: block; margin-top: 6px; color: var(--ink-3); font-size: .85rem; }
+
+/* estado ocioso */
+.rd .hiw-idle { text-align: center; color: var(--ink-3); }
+.rd .hiw-ring { width: 74px; height: 74px; margin: 0 auto 18px; border-radius: 50%; border: 1px dashed var(--line-2); display: grid; place-items: center; }
+.rd .hiw-ring svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.rd .hiw-idle span { font-size: .85rem; }
+
+/* painéis de demo */
+.rd .hiw-panel { background: var(--bg); border: 1px solid var(--line); border-radius: 18px; padding: 16px; }
+.rd .hiw-panel-top {
+  display: flex; align-items: center; justify-content: space-between; color: var(--ink-3);
+  font-size: .74rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 14px;
+}
+.rd .hiw-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--hiw-wa); display: inline-block; margin-right: 7px; vertical-align: 1px; }
+
+/* chat */
+.rd .hiw-chat { display: flex; flex-direction: column; gap: 10px; }
+.rd .hiw-msg { max-width: 82%; padding: 10px 13px; border-radius: 14px; font-size: .92rem; line-height: 1.42; opacity: 0; }
+.rd .hiw-card.is-open .hiw-msg { animation: hiw-pop .45s var(--hiw-ease) forwards; }
+.rd .hiw-msg.out { align-self: flex-end; background: #134D3C; border-bottom-right-radius: 5px; }
+.rd .hiw-msg.in { align-self: flex-start; background: #1E1E22; border-bottom-left-radius: 5px; }
+.rd .hiw-msg time { display: block; margin-top: 4px; font-size: .66rem; color: rgba(255,255,255,.35); text-align: right; }
+@keyframes hiw-pop { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.rd .hiw-d1 { animation-delay: .35s; } .rd .hiw-d2 { animation-delay: .95s; }
+.rd .hiw-d3 { animation-delay: 1.55s; } .rd .hiw-d4 { animation-delay: 2.15s; }
+
+.rd .hiw-qr {
+  display: flex; align-items: center; gap: 14px; margin-bottom: 14px; padding: 12px; border-radius: 14px;
+  background: color-mix(in srgb, var(--hiw-wa) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--hiw-wa) 22%, transparent);
+}
+.rd .hiw-qr svg { width: 38px; height: 38px; flex: none; fill: var(--hiw-wa); }
+.rd .hiw-qr b { display: block; font-size: .92rem; }
+.rd .hiw-qr span { color: var(--ink-2); font-size: .8rem; }
+
+/* recibo do Piggy */
+.rd .hiw-receipt { margin-top: 12px; border-radius: 14px; border: 1px solid rgba(255,45,142,.28); background: var(--pink-soft); padding: 13px 14px; opacity: 0; }
+.rd .hiw-card.is-open .hiw-receipt { animation: hiw-pop .5s var(--hiw-ease) .8s forwards; }
+.rd .hiw-row { display: flex; justify-content: space-between; align-items: center; font-size: .86rem; }
+.rd .hiw-row + .hiw-row { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.08); }
+.rd .hiw-k { color: var(--ink-2); }
+.rd .hiw-v { font-weight: 700; font-variant-numeric: tabular-nums; }
+.rd .hiw-tag { font-size: .7rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: rgba(255,45,142,.22); color: #FFA9D0; }
+
+/* gráficos */
+.rd .hiw-charts { display: grid; gap: 12px; }
+.rd .hiw-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.rd .hiw-kpi { background: var(--bg); border: 1px solid var(--line); border-radius: 16px; padding: 13px 15px; }
+.rd .hiw-kpi span { display: block; color: var(--ink-3); font-size: .72rem; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; }
+.rd .hiw-kpi b { display: block; margin-top: 5px; font-size: 1.32rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.rd .hiw-kpi b.neg { color: var(--neg); } .rd .hiw-kpi b.pos { color: var(--neon); }
+.rd .hiw-donut { display: flex; align-items: center; gap: 18px; }
+.rd .hiw-donut svg { width: 118px; height: 118px; flex: none; transform: rotate(-90deg); }
+/* nada de stroke-dashoffset aqui: os offsets vêm dos atributos do SVG (que a
+   CSS venceria), e é o que põe cada fatia depois da anterior. */
+.rd .hiw-donut circle { fill: none; stroke-width: 11; }
+.rd .hiw-card.is-open .hiw-donut circle { animation: hiw-draw .9s var(--hiw-ease) .25s backwards; }
+@keyframes hiw-draw { from { stroke-dasharray: 0 264; } }
+.rd .hiw-legend { list-style: none; display: grid; gap: 9px; font-size: .86rem; flex: 1; }
+.rd .hiw-legend li { display: flex; align-items: center; gap: 9px; color: var(--ink-2); }
+.rd .hiw-legend i { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.rd .hiw-legend b { margin-left: auto; color: var(--ink); font-variant-numeric: tabular-nums; }
+.rd .hiw-spark { position: relative; }
+.rd .hiw-spark svg { width: 100%; height: 78px; display: block; overflow: visible; }
+.rd .hiw-line {
+  fill: none; stroke: var(--pink); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 340; stroke-dashoffset: 340;
+}
+.rd .hiw-card.is-open .hiw-line { animation: hiw-trace 1.1s var(--hiw-ease) .35s forwards; }
+@keyframes hiw-trace { to { stroke-dashoffset: 0; } }
+.rd .hiw-grid { stroke: rgba(255,255,255,.06); stroke-width: 1; }
+.rd .hiw-cap { fill: var(--pink); }
+.rd .hiw-months { display: flex; justify-content: space-between; color: var(--ink-3); font-size: .68rem; margin-top: 6px; letter-spacing: .04em; }
+
+/* CTA logo abaixo do trilho */
+.rd .hiw-cta { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 16px; margin-top: 32px; }
+.rd .hiw-cta p { color: var(--ink-2); }
+
+/* Escopado no trilho de propósito: um `*` global mataria as transições da
+   página inteira (nav, botões, FAQ, reveal). */
+@media (prefers-reduced-motion: reduce) {
+  .rd .hiw-rail, .rd .hiw-rail * {
+    animation-duration: .001ms !important; animation-delay: 0s !important; transition-duration: .001ms !important;
+  }
+  .rd .hiw-msg, .rd .hiw-receipt { opacity: 1; }
 }
