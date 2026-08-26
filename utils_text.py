@@ -6,6 +6,7 @@ Helpers de texto: normalização, parse de valores, regras locais e utilitários
 import re
 import unicodedata
 from decimal import Decimal
+from math import isfinite
 
 def normalize_text(text: str) -> str:
     text = (text or "").strip().lower()
@@ -877,6 +878,308 @@ def parse_money(text: str) -> float | None:
         return float(raw)
     except ValueError:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Pergunta de valor: o filtro de DANO das quatro portas.
+#
+# As quatro portas estão numeradas UMA vez, em
+# `core.intent_router.abandona_pergunta_de_valor`. Cada uma tem a SUA aceitação
+# ("isto é um valor?") — a porta 1 exige a mensagem inteira, as outras três
+# usam o `_extract_valor` — e todas dividem o predicado abaixo, que só responde
+# "este valor é perigoso?".
+# ---------------------------------------------------------------------------
+
+# O mesmo recorte que o `parse_money` faz sobre a frase.
+_BLOCO_NUM_RE = re.compile(r"\d[\d.,\s]*")
+# O sinal negativo NÃO é um caractere. Medido: `-10` era recusado por
+# `endswith("-")`, mas `−10` (U+2212, o que o teclado do iOS e o Whisper
+# produzem), `–10` (en dash do autocorretor) e `‑10` (hífen não-quebrável de
+# texto colado) passavam e pagavam R$ 10,00 — `parse_money` ignora o sinal.
+#
+# O BLOCO U+2010–U+2015 inteiro, não uma lista de cinco: a lista anterior
+# pulava o U+2012 (figure dash) e o U+2015 (horizontal bar), e medido
+# `que ‒ 10` pagava R$ 10,00 positivo enquanto `que – 10` era recusado. Mais o
+# menos matemático U+2212 (que é `Sm`, não `Pd`) e as duas formas de largura
+# variante do teclado CJK, U+FE63 (small) e U+FF0D (fullwidth). Dez ao todo.
+_TRACOS = str.maketrans(dict.fromkeys(
+    [chr(c) for c in range(0x2010, 0x2016)] + ["\u2212", "\ufe63", "\uff0d"],
+    "-"))
+
+# Enchimento falado antes do número: "foi 132", "acho que 132", "uns 132".
+# FONTE ÚNICA das duas perguntas que dependem dela: `core.handlers.bills` monta
+# o `_VALOR_RE` (a aceitação da porta 1) com esta lista, e o `_sinal_negativo`
+# abaixo a usa para decidir se o que vem antes de um traço é conteúdo. Divergir
+# faz `foi - 10` voltar a pagar R$ 10,00 positivo.
+_ENCHIMENTO_PALAVRAS = ("foi", "era", "eh", "e", "de", "da", "do", "deu",
+                        "veio", "custou", "saiu", "ficou", "acho", "que", "uns",
+                        "umas", "um", "uma", "tipo", "mais", "ou", "menos",
+                        "deve", "ter", "dado", "ai")
+_ENCHIMENTO = "(?:%s)" % "|".join(_ENCHIMENTO_PALAVRAS)
+# Verbos que ABREM um lançamento. Também não são conteúdo para efeito de sinal:
+# "paguei - 10" é R$ -10, não "paguei — 10". Mesmos 12 do prefixo que o
+# `core.intent_router._resolve_clarification` corta da descrição; o
+# `parsers._extract_target_after_amount` tem um SUPERSET (inclui "entrou",
+# "caiu", "somei"…) porque lá o trabalho é outro. `test_valor_sinal.py`
+# compara as três listas.
+_VERBOS_LANCAMENTO = ("gastei", "gasto", "paguei", "pagar", "comprei",
+                      "debitei", "mandei", "enviei", "pixei", "recebi",
+                      "receita", "ganhei")
+# O que pode preceder um traço sem tirar dele o papel de sinal.
+_SEM_CONTEUDO = (frozenset(_ENCHIMENTO_PALAVRAS) | frozenset(_VERBOS_LANCAMENTO)
+                 | {"r$", "rs"})
+# "menos 10" é sinal com as MESMAS regras do traço, então vira um traço antes
+# de a tabela rodar — em vez de virar mais uma condição empilhada. Duas
+# exceções, as duas medidas e as duas APROXIMAÇÃO, não sinal: "mais ou menos
+# 10" (por volta de 10) e "menos de/que 10" (abaixo de 10).
+# `(?![a-z])` no lugar do `\b` do fim: "menos10" (sem espaço) não tem
+# boundary entre "s" e "1", e medido ele pagava R$ 10,00 positivo.
+_MENOS_RE = re.compile(r"(?<!\bou )\bmenos(?![a-z])(?!\s+(?:de|que)\b)")
+
+
+def limpa_pontuacao_final(raw: str) -> str:
+    """Tira o ponto/exclamação do FIM antes de entregar ao `parse_money`.
+
+    "132,50." tem vírgula E ponto, o `parse_money` decide o decimal pelo ÚLTIMO
+    separador, toma a vírgula por milhar e devolve 13250.0 — R$ 13.250,00 no
+    lugar de R$ 132,50 ("0,50." vira 50, "9,99." vira 999). Quem escreve
+    "132,50." está respondendo, não mudando de assunto.
+
+    O mesmo ponto no MEIO da frase faz o mesmo estrago, e o `rstrip` não o
+    alcança: medido nas quatro portas, "paguei 132,50. foi isso" paga
+    R$ 13.250,00 na `main` E no branch, porque a pontuação de prosa fica presa
+    dentro do bloco numérico que o `parse_money` recorta. Por isso a limpeza
+    vale para o fim da MENSAGEM e para o fim do BLOCO — os dois são pontuação,
+    não separador decimal:
+
+        paguei 132,50. foi isso  -> paguei 132,50 foi isso   (132,50, não 13.250)
+        1.234,56, foi isso       -> 1.234,56 foi isso        (antes: nada)
+
+    O que sobra depois do número continua no texto: ele é a descrição que
+    categoriza o lançamento na porta 2.
+
+    Não corrigido no `parse_money`: o bug é dele e é anterior a este PR, mas ele
+    é chamado por dezenas de fluxos e mexer nele aqui é troca de bug conhecido
+    por bug novo. Issue separada.
+    """
+    limpo = (raw or "").rstrip(" .!")
+    bloco = _BLOCO_NUM_RE.search(limpo)
+    if not bloco:
+        return limpo
+    resto = limpo[bloco.end():]
+    return (limpo[:bloco.start()] + bloco.group(0).rstrip(" .,")
+            + (" " if resto else "") + resto)
+
+
+def agrupamento_de_milhar_ok(raw: str) -> bool:
+    """False quando o ponto de milhar está malformado ("1.23.456").
+
+    O `parse_money` decide o significado do ponto pelo TAMANHO do último grupo:
+    se tem 3 dígitos, apaga TODOS os pontos. Então "1.23.456" (erro de
+    digitação) vira 123456.0 e "1.2.345" vira 12345.0 — a conta seria paga com
+    valor inflado, em silêncio, logo depois de o bot pedir "manda só o número".
+
+    Regra: com dois ou mais pontos, todo grupo depois do primeiro precisa ter
+    exatamente 3 dígitos (1.234.567 OK, 1.23.456 não); com um ponto só, valem 3
+    (milhar: 1.200) ou 1-2 (decimal: 132.50) — a mesma heurística que o
+    `parse_money` já usa. Vírgula presente corta o decimal, e a mesma regra vale
+    para o que sobra antes dela.
+
+    O CRITÉRIO não é "o usuário digitou certo?", é "o erro dele vira dinheiro
+    errado?". Por isso um ponto solto mal agrupado passa quando há vírgula:
+
+        1.23,45   -> 123,45      1.2,34  -> 12,34      12.34,56 -> 1.234,56
+
+    Nos três, apagar o ponto fora do lugar devolve exatamente o valor que a
+    pessoa parecia querer — o bot acerta a intenção, e recusar seria pedir para
+    redigitar algo já entendido. Já com DOIS pontos a leitura muda de ordem de
+    grandeza (1.23.456 -> 123.456,00 quando o provável era 1.234,56), e aí sim
+    recusa. Foi apontado como incoerência na revisão do #133 e mantido de
+    propósito; se um dia isso mudar, mude por medição de dano, não por simetria.
+
+    Não corrigido no `parse_money` pelo mesmo motivo do `limpa_pontuacao_final`:
+    dezenas de fluxos chamam aquilo. Issue separada.
+    """
+    m = _BLOCO_NUM_RE.search(raw or "")
+    if not m:
+        return True
+    num = m.group(0).strip().replace(" ", "")
+    if "," in num:
+        num = num[:num.rfind(",")]
+    grupos = num.split(".")
+    if len(grupos) == 1:
+        return True
+    if len(grupos) == 2:
+        return len(grupos[1]) in (1, 2, 3)
+    return all(len(g) == 3 for g in grupos[1:])
+
+
+def _espaco_ambiguo(bloco: str) -> bool:
+    r"""True quando o espaço DENTRO do número não é agrupamento de milhar.
+
+    O `[\d.,\s]*` do `parse_money` apaga o espaço, então "132 50" vira 13250 e
+    paga R$ 13.250,00 sem confirmação. Mas recusar todo espaço encolhe a
+    aceitação: `1 500`, `1 500,00`, `R$ 1 500`, `12 345` e `1 000 000` são
+    milhar separado por espaço e o `parse_money` acerta os cinco.
+
+    "A `main` aceita os cinco" vale só nas portas 2, 3 e 4. Na porta 1 NÃO:
+    medido, `_VALOR_RE.fullmatch` é False nos cinco (não há `\s` dentro do
+    número), então lá eles caem no `_NUMERO_AMBIGUO_RE` e recebem "Não entendi
+    o valor" com a pergunta viva — que é o que a `main` já fazia em quatro
+    deles; no `R$ 1 500` ela abandonava a pergunta. Ver
+    `test_porta_da_conta_repergunta_no_milhar_com_espaco_como_na_main`.
+
+    O que separa os dois é o TAMANHO do grupo depois do espaço: milhar tem
+    exatamente 3 dígitos ("1 500"), digitação errada tem outro número deles
+    ("132 50"). Só isso é medido aqui.
+
+    EXCEÇÃO, e é a metade que faltava: espaço logo DEPOIS de um separador
+    decimal não é agrupamento nenhum. "132, 50" é R$ 132,50 — o `parse_money`
+    devolve 132.5 e a `main` aceitava —, mas a regra dos 3 dígitos via "50"
+    como milhar malformado e recusava. Idem "132 , 50", "132. 50", "1.234, 56"
+    e "132, 5". Por isso o grupo só é medido quando o pedaço ANTERIOR não
+    termina em `,` ou `.`.
+
+    TETO conhecido: "1234 567" (grupo inicial de 4) passa como 1234567, porque
+    a regra olha só os grupos depois do primeiro. Não vale código a mais — quem
+    digita assim quis mesmo 1.234.567.
+    """
+    partes = bloco.split()
+    return any(not anterior.endswith((",", "."))
+               and len(re.match(r"\d*", p).group(0)) != 3
+               for anterior, p in zip(partes, partes[1:]) if p[:1].isdigit())
+
+
+def _sinal_negativo(antes: str, depois: str) -> bool:
+    r"""TABELA-VERDADE do sinal: o traço é SINAL ou é separador de PROSA?
+
+    `antes` e `depois` são o que sobra dos dois lados do bloco numérico, já em
+    minúsculas, com as grafias de traço normalizadas para `-` (`_TRACOS`) e com
+    o `menos` por extenso já virado `-` (`_MENOS_RE`). O `parse_money` IGNORA o
+    sinal — `parse_money("-10")` é 10.0 —, então quem decide é esta tabela.
+
+    Ela substitui três remendos que trataram "colado nos dígitos", "prefixo
+    inteiro" e "termina a expressão" como casos diferentes. Cada remendo
+    consertou uma forma e quebrou outra; o último aceitava `foi - 10` como
+    R$ 10,00 positivo e recusava `foi -10`.
+
+    | # | traço  | o que o cerca                     | veredito | exemplo               |
+    |---|--------|-----------------------------------|----------|-----------------------|
+    | 1 | ANTES  | nada                              | SINAL    | `-10`, `- 10`         |
+    | 2 | ANTES  | só espaço                         | SINAL    | `  - 10`              |
+    | 3 | ANTES  | moeda                             | SINAL    | `R$ -10`, `R$ - 10`   |
+    | 4 | ANTES  | enchimento (`_ENCHIMENTO`)        | SINAL    | `foi - 10`, `uns − 10`|
+    | 5 | ANTES  | verbo (`_VERBOS_LANCAMENTO`)      | SINAL    | `paguei - 10`         |
+    | 6 | ANTES  | outro traço                       | SINAL    | `- - 10`, `--10`      |
+    | 7 | ANTES  | combinação de 2-6                 | SINAL    | `foi r$ - 10`         |
+    | 8 | ANTES  | palavra de CONTEÚDO, em qualquer  | prosa    | `luz - 132`,          |
+    |   |        | posição antes do número           |          | `foi - luz 132`       |
+    | 9 | DEPOIS | nada depois do traço              | SINAL    | `132 -`, `10-`, `132 --` |
+    |10 | DEPOIS | qualquer coisa depois do traço    | prosa    | `132 — luz`,          |
+    |   |        |                                   |          | `foi 132 - da luz`    |
+    |11 | ()     | `(` antes e `)` depois            | SINAL    | `(10)`, `foi (10)`    |
+
+    DOIS EIXOS QUE NÃO SÃO EIXOS, e é por isso que os remendos falharam:
+
+    - **colado × separado por espaço**: `-10` e `- 10` têm o MESMO veredito em
+      toda linha. Tratá-los como casos diferentes foi a regressão da rodada 5.
+    - **o que vem depois do NÚMERO** (vazio · espaço · unidade `reais`/`pila` ·
+      prosa `da luz` · `)`): só importa na linha 9/11. Com o traço ANTES,
+      `- 10`, `- 10 reais` e `- 10 da luz` são os três sinal.
+
+    FORMULAÇÃO EM UMA FRASE — o traço é SINAL quando nada de CONTEÚDO o separa
+    do número, de um lado ou do outro: antes dele só espaço, moeda, enchimento
+    ou verbo (linhas 1-7); depois dele, nada (linha 9).
+
+    Isto NÃO é a formulação do plano ("separador de prosa quando uma palavra de
+    conteúdo vem antes dele **e** há conteúdo depois do número"): aquele **e**
+    não fecha a célula `luz - 132`, que não tem nada depois do número e mesmo
+    assim é prosa (a `main` paga R$ 132,00 e o teste
+    `test_clarification_prosa_registra_o_valor_certo` prende). A condição
+    "conteúdo depois" vale só para o traço que vem DEPOIS do número, onde ela é
+    a linha 10 — por isso a tabela separa por POSIÇÃO em vez de somar as duas.
+
+    TETO conhecido: `luz -132` é prosa por esta tabela (linha 8) e paga
+    R$ 132,00. A `main` também paga, e "conteúdo antes" foi a regra escolhida;
+    se um dia o colado tiver que ganhar do conteúdo, mude a linha 8, não
+    acrescente uma 12ª.
+    """
+    # Linha 9: só traço depois do número (um ou vários), nada mais.
+    if depois.strip() and set(depois.strip()) == {"-"}:
+        return True
+    # Linha 11: negativo contábil.
+    if antes.rstrip().endswith("(") and depois.lstrip().startswith(")"):
+        return True
+    # Linhas 1-8. Parênteses não são tokens (senão `(- 10)` escapava da 6).
+    tokens = re.findall(r"-|[^\s\-()]+", antes)
+    return "-" in tokens and all(t == "-" or t in _SEM_CONTEUDO for t in tokens)
+
+
+def valor_perigoso(texto: str, valor: float | None) -> str | None:
+    """"Este valor vira dinheiro errado?" — o predicado de dano das 4 portas.
+
+    Recebe o TEXTO do usuário e o valor que a porta JÁ aceitou (cada porta tem
+    a sua aceitação; ver `core.intent_router.abandona_pergunta_de_valor`).
+    Devolve `None` quando não há perigo, ou o motivo:
+
+    - `"nao_positivo"` — negativo escrito com sinal, zero, centavo invisível
+      ("0,001" gravava 0.001 e a mensagem dizia "R$ 0,00 lançado") ou não
+      finito (`parse_money("1" * 400)` devolve `inf`, que passa no `> 0` e só
+      seria recusado lá no `mark_bill_paid`, DEPOIS de a pendência ter sido
+      reivindicada, virando "erro interno" para o usuário);
+    - `"nao_entendi"` — o texto fala de um valor mas QUAL valor é ambíguo
+      ("132 50" -> 13.250, "1.23.456" -> 123.456, ",50" -> 50 em vez de 0,50).
+      O bot ACABOU de pedir um número, então isso é digitação errada: quem
+      chama re-pergunta em vez de abandonar a pergunta.
+
+    Quem decide `"nao_positivo"` por causa de um traço é a TABELA-VERDADE do
+    `_sinal_negativo` acima — não uma condição empilhada aqui.
+
+    NÃO impõe aceitação: um texto sem valor nenhum ("saldo") devolve `None`
+    daqui, e é a porta que decide o que fazer com ele. Foi a versão anterior
+    (uma função só, com a aceitação embutida) que unificou as quatro portas na
+    mais frouxa e fez "codigo 8888 valor 132" pagar R$ 8.888,00.
+
+    TETO do sinal negativo, medido — ele NÃO é "qualquer grafia":
+
+    - só é olhado quando existe um bloco de DÍGITOS. `valor_perigoso(
+      "menos cinquenta", 50.0)` devolve `None` — o `menos` vira traço, mas não
+      há bloco numérico para ele cercar —, e como `_extract_valor(
+      "menos cinquenta")` é 50.0, isso vira R$ 50,00 nas portas 2 e 3;
+    - só é olhado em volta do PRIMEIRO bloco. `valor_perigoso(
+      "codigo 8888 valor -132", 8888.0)` devolve `None`.
+
+    Nenhum dos dois é regressão (a `main` também pagava), e consertar mexe na
+    aceitação das portas, não neste predicado. Fica descrito, não corrigido.
+    """
+    # A MESMA limpeza que o chamador aplica antes do `parse_money`, e pelo mesmo
+    # motivo: a pontuação no fim do bloco numérico é prosa, não separador. Sem
+    # ela o grupo vazio depois do ponto de "paguei 132. foi isso" virava
+    # "milhar malformado" e recusava o que a `main` registra. Chamar aqui em vez
+    # de confiar no chamador é o que a rodada 4 ensinou — lá o `valor_perigoso`
+    # recebeu o texto cru e "132." foi recusado. É idempotente.
+    t = _MENOS_RE.sub("-", limpa_pontuacao_final(texto).translate(_TRACOS).lower())
+    bloco = _BLOCO_NUM_RE.search(t)
+    if bloco:
+        if _espaco_ambiguo(bloco.group(0)) or not agrupamento_de_milhar_ok(t):
+            return "nao_entendi"
+        # Separador decimal SEM parte inteira. `parse_money(",50")` e
+        # `parse_money(".50")` devolvem 50.0 — R$ 50,00 no lugar de R$ 0,50,
+        # 100x, e o `_BLOCO_NUM_RE` recorta só o "50" porque exige dígito na
+        # frente. A porta 1 já re-perguntava (`,50` não casa o `_VALOR_RE` e cai
+        # no `_NUMERO_AMBIGUO_RE`); as portas 2, 3 e 4 pagavam, na `main` e no
+        # branch. Mesmo veredito das outras digitações ambíguas: re-pergunta com
+        # a pendência viva, em vez de escolher entre 0,50 e 50 no escuro.
+        if bloco.start() and t[bloco.start() - 1] in ",.":
+            return "nao_entendi"
+        if _sinal_negativo(t[:bloco.start()], t[bloco.end():]):
+            return "nao_positivo"
+    if valor is None:
+        return None
+    # Arredonda para centavos ANTES de comparar: "0,001" passava no `> 0`.
+    if not isfinite(valor) or round(valor, 2) <= 0:
+        return "nao_positivo"
+    return None
 
 
 def parse_pt_number(text: str) -> float | None:

@@ -14,9 +14,9 @@ core/handlers/recurring.py (payment_mode='manual'). Ver [[db/bills.py]].
 from __future__ import annotations
 
 import re
-from math import isfinite
 
-from utils_text import fmt_brl, normalize_text, parse_money
+from utils_text import (_ENCHIMENTO, _TRACOS, fmt_brl, limpa_pontuacao_final,
+                        normalize_text, parse_money, valor_perigoso)
 
 _PAY_RE = re.compile(r"^(ja\s+)?(paguei|quitei)\b")
 _STOP_TOKENS = {
@@ -177,15 +177,18 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
 
 
 
-# Enchimento falado antes do número: "foi 132", "acho que 132", "uns 132",
-# "veio 132 reais", "deu 132,50". É `fullmatch`, então TODA palavra antes do
-# número tem que estar nesta lista — "gastei 132 no mercado" não casa e a
-# pergunta é abandonada para o roteamento normal, que é o certo.
-_ENCHIMENTO = (r"(?:foi|era|eh|e|de|da|do|deu|veio|custou|saiu|ficou|acho|que"
-               r"|uns|umas|um|uma|tipo|mais|ou|menos|deve|ter|dado|ai)")
+# `_ENCHIMENTO` vem do `utils_text`: enchimento falado antes do número ("foi
+# 132", "acho que 132", "uns 132", "veio 132 reais"). É `fullmatch`, então TODA
+# palavra antes do número tem que estar naquela lista — "gastei 132 no mercado"
+# não casa e a pergunta é abandonada para o roteamento normal, que é o certo.
+# A MESMA lista decide, no `_sinal_negativo`, se o que vem antes de um traço é
+# conteúdo; por isso ela mora lá e não aqui.
 _UNIDADE = r"(?:reais?|real|rs|pila|conto|contos|mango|mangos)"
-# O sinal é capturado de propósito: `parse_money("-10")` devolve 10.0, então
-# sem o grupo (1) um "-10" viraria pagamento de R$ 10.
+# O grupo (1) do sinal ficou aqui só como documentação da FORMA: quem recusa
+# negativo agora é a tabela-verdade do `utils_text._sinal_negativo`, que decide
+# por POSIÇÃO do traço, trata as dez grafias do `_TRACOS` e o "menos" falado.
+# Sozinho, este grupo recusava "-10" e deixava passar "luz - 132"; a tabela
+# separa sinal de separador de prosa.
 # NADA de `\s` dentro do número: com ele, "132 50" colava em 13250 e pagava
 # R$ 13.250,00 sem confirmação.
 _VALOR_RE = re.compile(
@@ -197,79 +200,46 @@ _VALOR_RE = re.compile(
 _NUMERO_AMBIGUO_RE = re.compile(r"[\d.,\s]+")
 
 
-def limpa_pontuacao_final(raw: str) -> str:
-    """Tira o ponto/exclamação do FIM antes de entregar ao `parse_money`.
-
-    Mesma armadilha do `\\s` comentada acima, por outra porta: "132,50." tem
-    vírgula E ponto, o `parse_money` decide o decimal pelo ÚLTIMO separador,
-    toma a vírgula por milhar e devolve 13250.0 — R$ 13.250,00 no lugar de
-    R$ 132,50 ("0,50." vira 50, "9,99." vira 999). O `_VALOR_RE` aceita `[.!]?`
-    no fim de propósito (quem escreve "132,50." está respondendo, não mudando de
-    assunto), então quem tem de limpar é quem chama.
-
-    Não corrigido no `parse_money`: o bug é dele e é anterior a este PR, mas ele
-    é chamado por dezenas de fluxos e mexer nele aqui é troca de bug conhecido
-    por bug novo. Issue separada.
-    """
-    return (raw or "").rstrip(" .!")
-
-
-def agrupamento_de_milhar_ok(raw: str) -> bool:
-    """False quando o ponto de milhar está malformado ("1.23.456").
-
-    O `parse_money` decide o significado do ponto pelo TAMANHO do último grupo:
-    se tem 3 dígitos, apaga TODOS os pontos. Então "1.23.456" (erro de
-    digitação) vira 123456.0 e "1.2.345" vira 12345.0 — a conta seria paga com
-    valor inflado, em silêncio, logo depois de o bot pedir "manda só o número".
-
-    Regra: com dois ou mais pontos, todo grupo depois do primeiro precisa ter
-    exatamente 3 dígitos (1.234.567 ✓, 1.23.456 ✗); com um ponto só, valem 3
-    (milhar: 1.200) ou 1-2 (decimal: 132.50) — a mesma heurística que o
-    `parse_money` já usa. Vírgula presente corta o decimal, e a mesma regra vale
-    para o que sobra antes dela.
-
-    O CRITÉRIO não é "o usuário digitou certo?", é "o erro dele vira dinheiro
-    errado?". Por isso um ponto solto mal agrupado passa quando há vírgula:
-
-        1.23,45   → 123,45      1.2,34  → 12,34      12.34,56 → 1.234,56
-
-    Nos três, apagar o ponto fora do lugar devolve exatamente o valor que a
-    pessoa parecia querer — o bot acerta a intenção, e recusar seria pedir para
-    redigitar algo já entendido. Já com DOIS pontos a leitura muda de ordem de
-    grandeza (1.23.456 → 123.456,00 quando o provável era 1.234,56), e aí sim
-    recusa. Foi apontado como incoerência na revisão do #133 e mantido de
-    propósito; se um dia isso mudar, mude por medição de dano, não por simetria.
-
-    Não corrigido no `parse_money` pelo mesmo motivo do `limpa_pontuacao_final`:
-    dezenas de fluxos chamam aquilo. Issue separada.
-    """
-    m = re.search(r"\d[\d.,\s]*", raw or "")
-    if not m:
-        return True
-    num = m.group(0).strip().replace(" ", "")
-    if "," in num:
-        num = num[:num.rfind(",")]
-    grupos = num.split(".")
-    if len(grupos) == 1:
-        return True
-    if len(grupos) == 2:
-        return len(grupos[1]) in (1, 2, 3)
-    return all(len(g) == 3 for g in grupos[1:])
-
-
 def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     """Conclui uma conta variável quando a resposta é somente um valor.
 
     Texto que não seja estritamente monetário abandona a pergunta e volta ao
     roteamento normal, em vez de extrair por engano um número de outro comando.
+    A aceitação é o `_VALOR_RE` — a mensagem INTEIRA tem que ser o valor. É a
+    porta mais estrita das quatro, de propósito: aqui o `parse_money` roda sobre
+    a frase toda, e afrouxar para "tem um número dentro" fez, medido,
+    "codigo 8888 valor 132" pagar R$ 8.888,00, "no dia 20 foram 450" pagar
+    R$ 20,00 e "dia 12/05 132" pagar R$ 12,00.
+
+    Esta porta NÃO consulta o `abandona_pergunta_de_valor` (o passo 1 das
+    portas 2, 3 e 4; a numeração está em `core/intent_router.py`). Medido sobre
+    o alfabeto inteiro do `_VALOR_RE` — 44.289 strings (7 números × 9 unidades
+    × 703 prefixos do `_ENCHIMENTO`), todas casando o `fullmatch`: ZERO
+    classificam num intent de `ABANDONA` com `allow_ai=False`. O portão de
+    forma já é mais estrito que o passo 1, então ele não teria entrada
+    alcançável aqui. A enumeração está em
+    `tests/test_bill_amount_pending.py::test_porta_1_nao_precisa_do_passo_1_alfabeto_inteiro_do_valor_re`.
+
+    ORDEM: o abandono por forma vem ANTES do dano. O contrário prendia o
+    usuário: `quanto gastei em 12 05`, `resumo do mes 08 2026` e `apagar 0`
+    (nenhum dos três casa o `_VALOR_RE`) morriam no "Não entendi o valor da
+    *Luz*" / "precisa ser maior que zero" com a pendência de pé, e a repetição
+    idêntica dava a mesma recusa.
+
+    Os traços são normalizados ANTES da forma, não só dentro do
+    `valor_perigoso`: `−10` (U+2212, o que o teclado do iOS produz) não casa o
+    `_VALOR_RE`, e sem esta linha ele abandonaria a pergunta em silêncio em vez
+    de recusar com ela viva. O "menos" falado não precisa da mesma normalização
+    aqui: ele está no `_ENCHIMENTO`, então "menos 10" já casa a forma e chega ao
+    `valor_perigoso`, que o recusa.
     """
-    raw = (text or "").strip()
+    raw = (text or "").strip().translate(_TRACOS)
     nome = (pending.get("payload") or {}).get("bill_name") or "conta"
-    casou = _VALOR_RE.fullmatch(raw)
-    if not casou:
+    nao_entendi = (f"Não entendi o valor da *{nome}*. Manda só o número, "
+                   f"por exemplo: *132,50*")
+    if not _VALOR_RE.fullmatch(raw):
         if _NUMERO_AMBIGUO_RE.fullmatch(raw):
-            return (f"Não entendi o valor da *{nome}*. Manda só o número, "
-                    f"por exemplo: *132,50*")
+            return nao_entendi
         # CONDICIONAL, não clear: entre a leitura desta pendência e agora,
         # outra tarefa pode ter posto uma confirmação nova no lugar — que já
         # apareceu na tela do usuário. Apagar por cima a deixaria órfã. Só
@@ -279,25 +249,24 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
         consume_pending_action(user_id, pending)
         return None
 
+    # A forma é de valor. Agora o DANO, sobre o texto JÁ limpo — o
+    # `parse_money` precisa da limpeza ("1.500." vira `None` sem ela). O
+    # `valor_perigoso` faz a dele por dentro e não depende desta linha.
     limpo = limpa_pontuacao_final(raw)
-    amount = parse_money(limpo) if agrupamento_de_milhar_ok(limpo) else None
-    # Arredonda para centavos ANTES de validar: "0,001" passava no `> 0`,
-    # gravava paid_amount=0.001 e respondia "R$ 0,00 lançado" — mensagem e dado
-    # divergentes. Agora vira 0.0 e cai na validação abaixo.
-    if amount is not None:
-        amount = round(amount, 2)
+    perigo = valor_perigoso(limpo, parse_money(limpo))
+    if perigo == "nao_positivo":
+        return f"O valor da *{nome}* precisa ser maior que zero. Quanto veio este mês?"
+    if perigo == "nao_entendi":
+        return nao_entendi
+
+    amount = parse_money(limpo)
     if amount is None:
         # Casou o formato mas o `parse_money` não extraiu nada ("1.2.3.4",
         # "1,,,2"): dizer "precisa ser maior que zero" para um texto que não é
         # negativo confunde. Mesma mensagem do número ambíguo.
-        return (f"Não entendi o valor da *{nome}*. Manda só o número, "
-                f"por exemplo: *132,50*")
-    # `isfinite` junto com o `<= 0`: `parse_money("1"*400)` devolve `inf`, que
-    # passa no `> 0` e só seria recusado lá no `mark_bill_paid` — depois de a
-    # pendência já ter sido reivindicada, virando "erro interno" para o usuário.
-    # Aqui a pergunta continua de pé e ele responde de novo.
-    if casou.group(1) or not isfinite(amount) or amount <= 0:
-        return f"O valor da *{nome}* precisa ser maior que zero. Quanto veio este mês?"
+        return nao_entendi
+    # Centavos: o `valor_perigoso` já recusou o que arredonda para zero.
+    amount = round(amount, 2)
 
     from db import consume_pending_action, restore_pending_on_error
     from db.bills import mark_bill_paid
@@ -328,4 +297,4 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
     )
 
 
-__all__ = ["limpa_pontuacao_final", "resolve_bill_amount", "try_pay_from_text"]
+__all__ = ["resolve_bill_amount", "try_pay_from_text"]

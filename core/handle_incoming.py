@@ -511,7 +511,12 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     ))]
 
 
-def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
+def handle_incoming(msg: IncomingMessage, *,
+                    ignora_pendencias: bool = False) -> list[OutgoingMessage]:
+    # `ignora_pendencias`: repassado cru ao `route()`. Um chamador só — a
+    # porta 4 (`adapters/whatsapp/wa_runtime.py`), quando o CAS de abandono
+    # dela perde para uma pergunta NOVA que outra tarefa acabou de pôr na
+    # linha. Ver a docstring do `route()`.
     platform = msg.platform
 
     try:
@@ -707,7 +712,8 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         # ------------------------------------------------------------------
         # 6. Roteia → executa → obtém resposta bruta
         # ------------------------------------------------------------------
-        raw_response = route(intent_result, msg_normalized)
+        raw_response = route(intent_result, msg_normalized,
+                             ignora_pendencias=ignora_pendencias)
 
         # ------------------------------------------------------------------
         # 6b. Post-route fallback: o bot tradicional reconheceu intent mas
