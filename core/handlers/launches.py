@@ -685,7 +685,8 @@ def register_if_recurring(user_id: int, tipo: str, desc: str, platform: str) -> 
 _CANCEL_WORDS = {"nao", "n", "cancelar", "cancela", "deixa", "esquece", "esquecer", "para", "pare"}
 
 
-def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform: str = "whatsapp") -> str | None:
+def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform: str = "whatsapp",
+                               outro_comando: bool = False) -> str | None:
     """
     Resolve a pergunta de valor pendente de um lançamento múltiplo. O bot havia
     perguntado "quanto foi *aluguel*?"; esta resposta traz o valor.
@@ -695,16 +696,46 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
     - resposta de cancelamento → descarta o que faltava.
     - resposta sem valor (o user mudou de assunto) → abandona a pendência e
       retorna None pra que o roteador processe a mensagem normalmente.
+    - `outro_comando` (passo 1, resolvido no `route()` por
+      `abandona_pergunta_de_valor`) → mesmo abandono, mas para texto que TEM
+      valor e ainda assim é comando ("apagar 42" registrava R$ 42,00 no
+      aluguel).
 
     Duas respostas simultâneas: a fila avança por compare-and-swap
     (`db.advance_pending_action`) ANTES do registro, então a segunda thread
     perde o CAS, relê a fila já encurtada e responde o item seguinte em vez de
     registrar o mesmo de novo. Sem lock — ver o porquê em `db/pending.py`.
     """
-    from utils_text import normalize_text
+    from utils_text import limpa_pontuacao_final, normalize_text, valor_perigoso
 
     resp_norm = normalize_text(text).strip()
-    valor = _extract_valor(text)
+    # Porta 3 da pergunta de valor (a numeração das quatro está em
+    # `core/intent_router.py::abandona_pergunta_de_valor`), e até aqui a única
+    # sem filtro nenhum: o `_extract_valor` sozinho gravava R$ 10,00 para "-10",
+    # R$ 13.250,00 para "132 50" e para "132,50.", R$ 123.456,00 para
+    # "1.23.456", `0.001` para "0,001" e `inf` (→ "erro interno") para 400 uns.
+    #
+    # A ACEITAÇÃO continua sendo o `_extract_valor` — o mesmo desta função antes
+    # do PR, então "10 mil", "cinquenta" e "paguei 132 no mercado" seguem
+    # entrando. O `valor_perigoso` só olha o que já foi aceito.
+    # O texto LIMPO vai para os dois: com o cru, `agrupamento_de_milhar_ok`
+    # via o grupo vazio depois do ponto de "132." e recusava o que a `main`
+    # registrava.
+    limpo = limpa_pontuacao_final(text or "")
+    valor = _extract_valor(limpo)
+    perigo = valor_perigoso(limpo, valor)
+
+    if outro_comando:
+        # Passo 1: o intent diz que isto nunca seria a resposta ("apagar 42",
+        # "quanto gastei em 132"). Vem ANTES do valor de propósito — os dois
+        # têm número, e o `_extract_valor` diria 42.
+        #
+        # CAS, não `clear_pending_action`: `pending_actions` é uma linha por
+        # usuário e outra tarefa pode ter posto uma pergunta nova aqui entre a
+        # leitura de `pending` e agora — que já apareceu na tela. Mesmo padrão
+        # das portas 1 e 4.
+        db.consume_pending_action(user_id, pending)
+        return None
 
     # Duas respostas do mesmo usuário podem ser processadas em paralelo pelo
     # Discord (`discord_bot.py:122`, `on_message` async sem lock, em processo
@@ -733,6 +764,16 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
             db.consume_pending_action(user_id, pending)
             restantes = ", ".join(i.get("desc", "?") for i in queue)
             return f"❌ Beleza, deixei de lado: {restantes}."
+
+        if perigo:
+            # Fala do valor, mas o valor não serve. Recusa MANTENDO a pergunta
+            # viva e a fila intacta (nada de CAS aqui — não avançamos nada):
+            # apagar a pendência jogaria o usuário no fallback genérico e o
+            # resto da fila sumiria com ela.
+            recusa = ("O valor precisa ser maior que zero."
+                      if perigo == "nao_positivo"
+                      else "Não entendi o valor. Manda só o número, por exemplo: *132,50*")
+            return f"{recusa}\n\n{_ask_value_question(queue[0])}"
 
         if valor is None or valor <= 0:
             # Não é um valor — o usuário mudou de assunto. Abandona a pendência e

@@ -9,7 +9,6 @@ import threading
 import time
 import traceback
 from dataclasses import dataclass
-from math import isfinite
 from typing import Any
 
 from adapters.whatsapp.wa_client import (
@@ -38,6 +37,7 @@ from adapters.whatsapp.wa_commands_menu import (
     send_commands_section,
 )
 from core.handle_incoming import handle_incoming
+from core.intent_router import abandona_pergunta_de_valor
 from core.handlers import report as h_report
 from core.observability import log_system_event_sync
 from core.types import IncomingMessage
@@ -905,6 +905,24 @@ def process_message(message: InboundMessage) -> None:
                     _send_reply(reply_to, _apply_recategorize(uid, int(launch_id), message.text))
                     return
 
+            # Passo 1 da pergunta de valor, na porta 4 (a numeração das quatro
+            # está em `core/intent_router.py::abandona_pergunta_de_valor`): o
+            # usuário respondeu com outro comando ("saldo", "apagar 42"), e a
+            # decisão é do intent, não da forma — "apagar 42" tem um número e
+            # pagaria a conta com R$ 42,00.
+            if (pending_recat
+                    and pending_recat.get("action_type") == "bill_pay_amount"
+                    and abandona_pergunta_de_valor(message.text or "")):
+                try:
+                    # CAS, não clear: `pending_actions` é uma linha por usuário
+                    # e outra tarefa pode ter posto uma pergunta nova aqui entre
+                    # o `get_pending_action` acima e agora — que já apareceu na
+                    # tela. Só abandonamos a pergunta se ela ainda for a nossa.
+                    consume_pending_action(uid, pending_recat)
+                except Exception as exc:
+                    logger.warning("WA drop bill_pay_amount pending failed: %s", exc)
+                pending_recat = None  # segue pro roteamento normal
+
             # Conta a pagar de valor variável: o usuário tocou "✅ Já paguei" e
             # agora está mandando o valor real que veio no boleto.
             if pending_recat and pending_recat.get("action_type") == "bill_pay_amount":
@@ -921,29 +939,31 @@ def process_message(message: InboundMessage) -> None:
                         pass
                     _send_reply(reply_to, f"Ok, deixei a conta de *{name}* pendente. Quando pagar é só avisar. 🐷")
                     return
-                from core.handlers.bills import (agrupamento_de_milhar_ok,
-                                                 limpa_pontuacao_final)
-                from utils_text import parse_money, fmt_brl
+                from utils_text import (fmt_brl, limpa_pontuacao_final,
+                                        parse_money, valor_perigoso)
+                # Porta 4. A ACEITAÇÃO é o `parse_money` sobre o texto limpo —
+                # a mesma da `main`, que aqui nunca exigiu forma: "paguei 132",
+                # "132 da luz" e "veio 132,50 esse mes" pagam. O filtro de DANO
+                # é o compartilhado: `parse_money("-10")` devolve 10.0, então
+                # sem ele responder "-10" pagava R$ 10,00.
                 try:
-                    # Mesma limpeza do `resolve_bill_amount`: sem ela "132,50."
-                    # vira 13250.0 no `parse_money` e paga R$ 13.250,00. Esta é
-                    # a outra porta da MESMA pergunta, então tem o mesmo furo.
-                    # Idem o milhar malformado: "1.23.456" pagaria R$ 123.456.
+                    # O texto LIMPO vai para os dois: com o cru, o
+                    # `agrupamento_de_milhar_ok` via o grupo vazio depois do
+                    # ponto de "132." e recusava o que a `main` pagava.
                     limpo = limpa_pontuacao_final(txt)
-                    amount = parse_money(limpo) if agrupamento_de_milhar_ok(limpo) else None
+                    amount = parse_money(limpo)
+                    perigo = valor_perigoso(limpo, amount)
                 except Exception:
-                    amount = None
-                # Arredonda para centavos e recusa não finito ANTES de pagar:
-                # "0,001" passava no `> 0` e o `mark_bill_paid` respondia com o
-                # erro genérico, perdendo a pendência. Aqui a pergunta fica de
-                # pé e o usuário responde de novo. Mesma regra do
-                # `resolve_bill_amount` (core/handlers/bills.py).
-                if amount is not None and isfinite(amount):
-                    amount = round(amount, 2)
-                if amount is None or not isfinite(amount) or amount <= 0:
-                    # não entendeu o valor → re-pergunta, mantém o pending
-                    _send_reply(reply_to, f"Não peguei o valor. Manda só o número da conta de *{name}*. Ex: *132,50* (ou *cancelar*)")
+                    amount, perigo = None, "nao_entendi"
+                if perigo or amount is None:
+                    # recusa → re-pergunta, mantém o pending de pé (descartá-lo
+                    # jogaria o usuário no fallback genérico).
+                    if perigo == "nao_positivo":
+                        _send_reply(reply_to, f"O valor da conta de *{name}* precisa ser maior que zero. Quanto veio? Ex: *132,50* (ou *cancelar*)")
+                    else:
+                        _send_reply(reply_to, f"Não peguei o valor. Manda só o número da conta de *{name}*. Ex: *132,50* (ou *cancelar*)")
                     return
+                amount = round(amount, 2)
                 # REIVINDICA antes de pagar, e condicionado ao que foi lido:
                 # duas respostas concorrentes chegariam as duas ao
                 # `mark_bill_paid` e debitariam o saldo duas vezes. Quem perde

@@ -6,6 +6,7 @@ Helpers de texto: normalização, parse de valores, regras locais e utilitários
 import re
 import unicodedata
 from decimal import Decimal
+from math import isfinite
 
 def normalize_text(text: str) -> str:
     text = (text or "").strip().lower()
@@ -877,6 +878,173 @@ def parse_money(text: str) -> float | None:
         return float(raw)
     except ValueError:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Pergunta de valor: o filtro de DANO das quatro portas.
+#
+# As quatro portas estão numeradas UMA vez, em
+# `core.intent_router.abandona_pergunta_de_valor`. Cada uma tem a SUA aceitação
+# ("isto é um valor?") — a porta 1 exige a mensagem inteira, as outras três
+# usam o `_extract_valor` — e todas dividem o predicado abaixo, que só responde
+# "este valor é perigoso?".
+# ---------------------------------------------------------------------------
+
+# O mesmo recorte que o `parse_money` faz sobre a frase.
+_BLOCO_NUM_RE = re.compile(r"\d[\d.,\s]*")
+# O sinal negativo NÃO é um caractere. Medido: `-10` era recusado por
+# `endswith("-")`, mas `−10` (U+2212, o que o teclado do iOS e o Whisper
+# produzem), `–10` (en dash do autocorretor) e `‑10` (hífen não-quebrável de
+# texto colado) passavam e pagavam R$ 10,00 — `parse_money` ignora o sinal.
+_TRACOS = str.maketrans({"\u2212": "-", "\u2013": "-", "\u2014": "-",
+                         "\u2010": "-", "\u2011": "-"})
+
+
+def limpa_pontuacao_final(raw: str) -> str:
+    """Tira o ponto/exclamação do FIM antes de entregar ao `parse_money`.
+
+    "132,50." tem vírgula E ponto, o `parse_money` decide o decimal pelo ÚLTIMO
+    separador, toma a vírgula por milhar e devolve 13250.0 — R$ 13.250,00 no
+    lugar de R$ 132,50 ("0,50." vira 50, "9,99." vira 999). Quem escreve
+    "132,50." está respondendo, não mudando de assunto.
+
+    Não corrigido no `parse_money`: o bug é dele e é anterior a este PR, mas ele
+    é chamado por dezenas de fluxos e mexer nele aqui é troca de bug conhecido
+    por bug novo. Issue separada.
+    """
+    return (raw or "").rstrip(" .!")
+
+
+def agrupamento_de_milhar_ok(raw: str) -> bool:
+    """False quando o ponto de milhar está malformado ("1.23.456").
+
+    O `parse_money` decide o significado do ponto pelo TAMANHO do último grupo:
+    se tem 3 dígitos, apaga TODOS os pontos. Então "1.23.456" (erro de
+    digitação) vira 123456.0 e "1.2.345" vira 12345.0 — a conta seria paga com
+    valor inflado, em silêncio, logo depois de o bot pedir "manda só o número".
+
+    Regra: com dois ou mais pontos, todo grupo depois do primeiro precisa ter
+    exatamente 3 dígitos (1.234.567 OK, 1.23.456 não); com um ponto só, valem 3
+    (milhar: 1.200) ou 1-2 (decimal: 132.50) — a mesma heurística que o
+    `parse_money` já usa. Vírgula presente corta o decimal, e a mesma regra vale
+    para o que sobra antes dela.
+
+    O CRITÉRIO não é "o usuário digitou certo?", é "o erro dele vira dinheiro
+    errado?". Por isso um ponto solto mal agrupado passa quando há vírgula:
+
+        1.23,45   -> 123,45      1.2,34  -> 12,34      12.34,56 -> 1.234,56
+
+    Nos três, apagar o ponto fora do lugar devolve exatamente o valor que a
+    pessoa parecia querer — o bot acerta a intenção, e recusar seria pedir para
+    redigitar algo já entendido. Já com DOIS pontos a leitura muda de ordem de
+    grandeza (1.23.456 -> 123.456,00 quando o provável era 1.234,56), e aí sim
+    recusa. Foi apontado como incoerência na revisão do #133 e mantido de
+    propósito; se um dia isso mudar, mude por medição de dano, não por simetria.
+
+    Não corrigido no `parse_money` pelo mesmo motivo do `limpa_pontuacao_final`:
+    dezenas de fluxos chamam aquilo. Issue separada.
+    """
+    m = _BLOCO_NUM_RE.search(raw or "")
+    if not m:
+        return True
+    num = m.group(0).strip().replace(" ", "")
+    if "," in num:
+        num = num[:num.rfind(",")]
+    grupos = num.split(".")
+    if len(grupos) == 1:
+        return True
+    if len(grupos) == 2:
+        return len(grupos[1]) in (1, 2, 3)
+    return all(len(g) == 3 for g in grupos[1:])
+
+
+def _espaco_ambiguo(bloco: str) -> bool:
+    r"""True quando o espaço DENTRO do número não é agrupamento de milhar.
+
+    O `[\d.,\s]*` do `parse_money` apaga o espaço, então "132 50" vira 13250 e
+    paga R$ 13.250,00 sem confirmação. Mas recusar todo espaço encolhe a
+    aceitação: `1 500`, `1 500,00`, `R$ 1 500`, `12 345` e `1 000 000` são
+    milhar separado por espaço e o `parse_money` acerta os cinco.
+
+    "A `main` aceita os cinco" vale só nas portas 2, 3 e 4. Na porta 1 NÃO:
+    medido, `_VALOR_RE.fullmatch` é False nos cinco (não há `\s` dentro do
+    número), então lá eles caem no `_NUMERO_AMBIGUO_RE` e recebem "Não entendi
+    o valor" com a pergunta viva — que é o que a `main` já fazia em quatro
+    deles; no `R$ 1 500` ela abandonava a pergunta. Ver
+    `test_porta_da_conta_repergunta_no_milhar_com_espaco_como_na_main`.
+
+    O que separa os dois é o TAMANHO do grupo depois do espaço: milhar tem
+    exatamente 3 dígitos ("1 500"), digitação errada tem outro número deles
+    ("132 50"). Só isso é medido aqui.
+
+    TETO conhecido: "1234 567" (grupo inicial de 4) passa como 1234567, porque
+    a regra olha só os grupos depois do primeiro. Não vale código a mais — quem
+    digita assim quis mesmo 1.234.567.
+    """
+    partes = bloco.split()
+    return any(len(re.match(r"\d*", p).group(0)) != 3
+               for p in partes[1:] if p[:1].isdigit())
+
+
+def valor_perigoso(texto: str, valor: float | None) -> str | None:
+    """"Este valor vira dinheiro errado?" — o predicado de dano das 4 portas.
+
+    Recebe o TEXTO do usuário e o valor que a porta JÁ aceitou (cada porta tem
+    a sua aceitação; ver `core.intent_router.abandona_pergunta_de_valor`).
+    Devolve `None` quando não há perigo, ou o motivo:
+
+    - `"nao_positivo"` — negativo escrito com sinal, zero, centavo invisível
+      ("0,001" gravava 0.001 e a mensagem dizia "R$ 0,00 lançado") ou não
+      finito (`parse_money("1" * 400)` devolve `inf`, que passa no `> 0` e só
+      seria recusado lá no `mark_bill_paid`, DEPOIS de a pendência ter sido
+      reivindicada, virando "erro interno" para o usuário);
+    - `"nao_entendi"` — o texto fala de um valor mas QUAL valor é ambíguo
+      ("132 50" -> 13.250, "1.23.456" -> 123.456). O bot ACABOU de pedir um
+      número, então isso é digitação errada: quem chama re-pergunta em vez de
+      abandonar a pergunta.
+
+    NÃO impõe aceitação: um texto sem valor nenhum ("saldo") devolve `None`
+    daqui, e é a porta que decide o que fazer com ele. Foi a versão anterior
+    (uma função só, com a aceitação embutida) que unificou as quatro portas na
+    mais frouxa e fez "codigo 8888 valor 132" pagar R$ 8.888,00.
+
+    TETO do sinal negativo, medido — ele NÃO é "qualquer grafia":
+
+    - só é olhado quando existe um bloco de DÍGITOS. `valor_perigoso(
+      "menos cinquenta", 50.0)` devolve `None`, e como `_extract_valor(
+      "menos cinquenta")` é 50.0, isso vira R$ 50,00 nas portas 2 e 3;
+    - só é olhado em volta do PRIMEIRO bloco. `valor_perigoso(
+      "codigo 8888 valor -132", 8888.0)` devolve `None`.
+
+    Nenhum dos dois é regressão (a `main` também pagava), e consertar mexe na
+    aceitação das portas, não neste predicado. Fica descrito, não corrigido.
+    """
+    t = (texto or "").translate(_TRACOS)
+    bloco = _BLOCO_NUM_RE.search(t)
+    if bloco:
+        if _espaco_ambiguo(bloco.group(0)) or not agrupamento_de_milhar_ok(t):
+            return "nao_entendi"
+        # `parse_money` ignora o sinal: sem isto "-10" vira pagamento de R$ 10.
+        antes = re.sub(r"r\$\s*$", "", t[:bloco.start()].rstrip(),
+                       flags=re.I).rstrip().lower()
+        depois = t[bloco.end():].lstrip()
+        negativo = (
+            antes.endswith("-")
+            or depois.startswith("-")            # "10-"
+            # "menos 10" é negativo; "mais ou menos 10" é "por volta de 10" —
+            # `menos` está no `_ENCHIMENTO` da porta 1 justamente por isso.
+            or (re.search(r"(?:^|\s)menos$", antes)
+                and not re.search(r"(?:^|\s)ou\s+menos$", antes))
+            or (antes.endswith("(") and depois.startswith(")"))  # contábil
+        )
+        if negativo:
+            return "nao_positivo"
+    if valor is None:
+        return None
+    # Arredonda para centavos ANTES de comparar: "0,001" passava no `> 0`.
+    if not isfinite(valor) or round(valor, 2) <= 0:
+        return "nao_positivo"
+    return None
 
 
 def parse_pt_number(text: str) -> float | None:

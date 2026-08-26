@@ -962,12 +962,25 @@ def classify_with_context(
 # Função principal
 # ---------------------------------------------------------------------------
 
-def classify(text: str, user_id: int | None = None) -> IntentResult:
+def classify(text: str, user_id: int | None = None, *, allow_ai: bool = True) -> IntentResult:
     """
     Classifica a intenção do texto em 3 tiers.
     Retorna IntentResult com intent, confidence, entities, etc.
 
     user_id: quando fornecido, aplica rate limiting no Tier 3 (chamada à IA).
+    allow_ai=False: só os tiers 1 e 2 (determinísticos). No lugar do tier 3 sai
+        o mesmo `out_of_scope 0.0` com que ele já degrada hoje quando não há
+        `OPENAI_API_KEY` e quando o usuário não é Pro. Tem um único chamador em
+        produção — o `abandona_pergunta_de_valor`
+        (`core/intent_router.py`), o passo 1 das portas 2, 3 e 4 da pergunta de
+        valor, que precisa saber se a resposta é OUTRO comando: com o tier 3 no
+        meio, uma alucinação do LLM viraria abandono da pergunta e a fila do
+        usuário seria apagada.
+
+        Com o default `True` os DOIS `if not allow_ai` abaixo são inalcançáveis,
+        então nenhum chamador existente muda de comportamento. (O
+        `_is_boleto_ai_query` continua vindo antes dos dois: "132 no boleto"
+        sai `out_of_scope 0.4` mesmo com `allow_ai=False`.)
     """
     norm = _normalize(text)
 
@@ -982,6 +995,8 @@ def classify(text: str, user_id: int | None = None) -> IntentResult:
     # de Tier 1/2 e o domain-hint, que senão mandariam pra launches.add ou
     # out_of_scope (→ IA conversacional criava orçamento por engano).
     if _has_recurrence_marker(norm) or _has_bill_marker(norm):
+        if not allow_ai:
+            return IntentResult(intent="out_of_scope", confidence=0.0)
         return _classify_with_ai(text, user_id=user_id)
 
     # Tier 1
@@ -998,4 +1013,6 @@ def classify(text: str, user_id: int | None = None) -> IntentResult:
         return IntentResult(intent="out_of_scope", confidence=0.4)
 
     # Tier 3
+    if not allow_ai:
+        return IntentResult(intent="out_of_scope", confidence=0.0)
     return _classify_with_ai(text, user_id=user_id)
