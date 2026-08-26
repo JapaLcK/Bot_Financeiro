@@ -116,18 +116,37 @@ def ensure_plan_trials_user_fk(cur) -> bool:
     """
     cur.execute(
         """
-        select 1 from pg_constraint
+        select convalidated from pg_constraint
          where contype = 'f'
            and conrelid = 'plan_trials'::regclass
            and confrelid = 'users'::regclass
         """
     )
-    if cur.fetchone():
+    atual = cur.fetchone()
+    if atual and atual["convalidated"]:
         return False
 
-    # Linhas de contas já apagadas antes desta migration apontam para um
-    # users(id) que não existe mais; o ALTER validaria e falharia. Anula antes —
-    # é o mesmo destino que a FK dará a elas daqui pra frente.
+    criou = False
+    if not atual:
+        # NOT VALID primeiro, e a ordem é o conserto: ele instala a constraint
+        # sem varrer as linhas existentes, mas JÁ a aplica a toda escrita nova.
+        # Fazer a limpeza antes do ALTER (a versão anterior) deixava um vão: o
+        # `_run_ddl` roda em autocommit, então limpeza e ALTER são transações
+        # separadas, e um `claim_trial_for_user` do container velho — que ainda
+        # atende webhooks durante o deploy — podia inserir um órfão NOVO no meio
+        # e derrubar a validação do ALTER, abortando o init da instância. Depois
+        # do NOT VALID, escrita nova não consegue mais criar órfão.
+        logger.info("[schema_repairs] criando FK plan_trials.user_id -> users(id) ON DELETE SET NULL (NOT VALID)")
+        cur.execute(
+            "alter table plan_trials "
+            "add constraint plan_trials_user_id_fkey "
+            "foreign key (user_id) references users(id) on delete set null "
+            "not valid"
+        )
+        criou = True
+
+    # Só as linhas de contas apagadas ANTES da constraint existir. Depois do
+    # NOT VALID nenhuma nova aparece, então esta limpeza converge.
     cur.execute(
         """
         update plan_trials set user_id = null
@@ -135,13 +154,12 @@ def ensure_plan_trials_user_fk(cur) -> bool:
            and not exists (select 1 from users u where u.id = plan_trials.user_id)
         """
     )
-    logger.info("[schema_repairs] criando FK plan_trials.user_id -> users(id) ON DELETE SET NULL")
-    cur.execute(
-        "alter table plan_trials "
-        "add constraint plan_trials_user_id_fkey "
-        "foreign key (user_id) references users(id) on delete set null"
-    )
-    return True
+    # Separado do ADD de propósito: se o processo morrer entre os dois, a
+    # constraint fica NOT VALID — ainda protegendo escrita nova — e a subida
+    # seguinte cai aqui pelo `convalidated` e termina o trabalho.
+    logger.info("[schema_repairs] validando FK plan_trials_user_id_fkey")
+    cur.execute("alter table plan_trials validate constraint plan_trials_user_id_fkey")
+    return criou
 
 
 def _decode_action(code: str) -> str:

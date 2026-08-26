@@ -1644,6 +1644,16 @@ def init_db():
         """,
         # Registros anteriores ao trial via Stripe recebem versão 1. Novos
         # claims gravam versão 2 explicitamente; o script one-time remove só v1.
+        # O Postgres NÃO cria índice no lado que REFERENCIA. Sem este, todo
+        # `delete from users` varre a plan_trials inteira atrás das linhas a
+        # anular — e ela cresce para sempre (uma por telefone que já usou o
+        # teste), com o job de exclusão processando até 50 contas por lote.
+        # Parcial: as linhas já desvinculadas (user_id nulo) são a maioria com o
+        # tempo e não interessam à busca.
+        """
+        create index if not exists idx_plan_trials_user_id
+          on plan_trials (user_id) where user_id is not null
+        """,
         """alter table plan_trials add column if not exists model_version smallint not null default 1""",
         """alter table plan_trials alter column model_version set default 2""",
 

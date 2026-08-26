@@ -143,3 +143,38 @@ def test_criar_a_fk_e_idempotente():
                 "a FK já existe (o init_db criou) — a função tentou criar de novo"
             )
         conn.commit()
+
+
+def test_fk_da_trava_esta_validada_e_indexada():
+    """Duas coisas que o `create constraint` sozinho não dá.
+
+    - VALIDADA: a constraint nasce NOT VALID (para fechar o vão entre a limpeza
+      dos órfãos e o ALTER, com o container velho ainda atendendo webhooks) e
+      só depois é validada. Parar no NOT VALID protegeria escrita nova mas
+      deixaria órfão antigo passando pela verificação.
+    - INDEXADA: o Postgres NÃO cria índice no lado que REFERENCIA. Sem ele, todo
+      `delete from users` varre a plan_trials inteira — que cresce para sempre.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select convalidated from pg_constraint
+                 where contype = 'f'
+                   and conrelid = 'plan_trials'::regclass
+                   and confrelid = 'users'::regclass
+                """
+            )
+            fk = cur.fetchone()
+            cur.execute(
+                """
+                select indexdef from pg_indexes
+                 where tablename = 'plan_trials'
+                   and indexdef ilike '%%(user_id)%%'
+                """
+            )
+            idx = cur.fetchall()
+        conn.commit()
+
+    assert fk is not None and fk["convalidated"], "a FK ficou NOT VALID"
+    assert idx, "sem índice em plan_trials(user_id): cada exclusão varre a tabela inteira"
