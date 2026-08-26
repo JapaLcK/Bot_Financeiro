@@ -534,6 +534,15 @@ def delete_user_data(user_id: int) -> dict:
                 if _column_exists(cur, "credit_bills", "user_id"):
                     cur.execute("delete from credit_bills where user_id = %s", (user_id,))
 
+            # `plan_trials` não aparece em `user_owned_tables` de propósito: a
+            # linha é keyed por phone_hash e segura a trava de 30 dias de teste
+            # por telefone, na vida — apagar devolveria um trial novo a cada
+            # conta recriada com o mesmo número. O `user_id` dela é desvinculado
+            # pela FK `on delete set null` (db/schema_repairs.py), e não por um
+            # UPDATE aqui: um UPDATE perde a corrida com um
+            # `claim_trial_for_user` que commite depois dele, e a varredura
+            # pós-commit nunca revisita esta tabela.
+
             for table in user_owned_tables:
                 if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
                     cur.execute(f"delete from {table} where user_id = %s", (user_id,))
