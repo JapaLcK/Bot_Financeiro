@@ -213,41 +213,134 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
       <div class="section-head" data-reveal>
         <div class="eyebrow">Como funciona</div>
         <h2>Simples, rápido e<br>no seu <span class="grad">WhatsApp</span></h2>
-        <p>Em poucos minutos você já está no controle do seu dinheiro, sem planilha, sem app pra baixar.</p>
       </div>
 
-      <div class="how-grid">
-        <div class="steps" data-reveal>
-          <div class="step">
-            <div class="step-num">1</div>
-            <div><h3>Crie sua conta</h3><p>Grátis e em segundos, entrando com o Google. Sem cadastro chato.</p></div>
-          </div>
-          <div class="step">
-            <div class="step-num">2</div>
-            <div><h3>Conecte o WhatsApp</h3><p>Fale com a Piggy pelo número do bot. É onde tudo acontece. Nada pra instalar.</p></div>
-          </div>
-          <div class="step">
-            <div class="step-num">3</div>
-            <div><h3>Registre falando</h3><p>"Gastei R$ 50 no mercado" e pronto: a IA entende, categoriza e salva na hora.</p></div>
-          </div>
-          <div class="step">
-            <div class="step-num">4</div>
-            <div><h3>Acompanhe tudo</h3><p>Saldo, gastos, caixinhas e metas no dashboard, atualizados em tempo real.</p></div>
-          </div>
-        </div>
+      <div class="hiw-rail">
 
-        <div class="phone" data-reveal>
-          <div class="phone-notch"></div>
-          <div class="chat-head">
-            <img src="/brand/icon.png?v=1" alt="" /> <strong>PigBank</strong>
-            <span class="online"><i></i> online</span>
+        <article class="hiw-card is-open" tabindex="0" aria-current="step">
+          <div class="hiw-head"><span class="hiw-num">01</span><h3>Conexão</h3></div>
+          <div class="hiw-stage">
+            <div class="hiw-state hiw-demo">
+              <div class="hiw-panel">
+                <div class="hiw-panel-top"><span><span class="hiw-dot"></span>WhatsApp</span><span>Piggy</span></div>
+                <div class="hiw-qr">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.46 1.32 4.96L2 22l5.25-1.38a9.9 9.9 0 0 0 4.79 1.22h.01c5.46 0 9.9-4.45 9.9-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2Zm0 18.15h-.01a8.2 8.2 0 0 1-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.2 8.2 0 0 1-1.26-4.38c0-4.54 3.7-8.23 8.25-8.23 2.2 0 4.27.86 5.83 2.42a8.18 8.18 0 0 1 2.41 5.82c0 4.54-3.7 8.23-8.24 8.23Z"/></svg>
+                  <div><b>+55 11 91234-5678</b><span>salve o número e mande um “oi”</span></div>
+                </div>
+                <div class="hiw-chat">
+                  <div class="hiw-msg out hiw-d1">oi<time>09:12</time></div>
+                  <div class="hiw-msg in hiw-d2">Oi! Sou o Piggy 🐷 Me conta seus gastos como você contaria pra um amigo — texto, áudio ou foto do comprovante.<time>09:12</time></div>
+                  <div class="hiw-msg out hiw-d3">gastei 32 no almoço<time>09:12</time></div>
+                </div>
+              </div>
+            </div>
+            <div class="hiw-state hiw-done">
+              <div class="hiw-tick"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5 9.5 18 20 6.5"/></svg></div>
+              <b>WhatsApp conectado</b><span>abrindo o próximo passo…</span>
+            </div>
+            <div class="hiw-state hiw-idle">
+              <div class="hiw-ring"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/></svg></div>
+              <span>passo 1 de 3</span>
+            </div>
           </div>
-          <div class="bubble user">Gastei 32 no uber</div>
-          <div class="bubble bot">Anotado!<br>Categoria: <b>Transporte</b><br>Saldo atual: <b>R$ 1.218,00</b></div>
-          <div class="bubble user">quanto sobrou esse mês?</div>
-          <div class="bubble bot">Você tem <b>R$ 1.218,00</b><br>Já guardou <b>R$ 300</b> na caixinha "Viagem". Bora?</div>
-        </div>
+          <div class="hiw-foot">
+            <h4>Sem app, sem cadastro chato</h4>
+          </div>
+        </article>
+
+        <article class="hiw-card is-idle" tabindex="0">
+          <div class="hiw-head"><span class="hiw-num">02</span><h3>Resposta</h3></div>
+          <div class="hiw-stage">
+            <div class="hiw-state hiw-demo">
+              <div class="hiw-panel">
+                <div class="hiw-panel-top"><span><span class="hiw-dot"></span>Piggy responde</span><span>0,8 s</span></div>
+                <div class="hiw-chat">
+                  <div class="hiw-msg out hiw-d1">gastei 32 no almoço<time>09:12</time></div>
+                  <div class="hiw-msg in hiw-d2">Anotado! 🐷<time>09:12</time></div>
+                </div>
+                <div class="hiw-receipt">
+                  <div class="hiw-row"><span class="hiw-k">Almoço</span><span class="hiw-v">R$ 32,00</span></div>
+                  <div class="hiw-row"><span class="hiw-k">Categoria</span><span class="hiw-tag">Alimentação</span></div>
+                  <div class="hiw-row"><span class="hiw-k">Restam hoje</span><span class="hiw-v" style="color:var(--neon)">R$ 18,00</span></div>
+                </div>
+                <div class="hiw-chat" style="margin-top:12px">
+                  <div class="hiw-msg in hiw-d4">Esse é o 4º almoço fora essa semana — R$ 121 no total. Quer que eu te avise quando passar de R$ 150?<time>09:12</time></div>
+                </div>
+              </div>
+            </div>
+            <div class="hiw-state hiw-done">
+              <div class="hiw-tick"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5 9.5 18 20 6.5"/></svg></div>
+              <b>Gasto registrado</b><span>abrindo o próximo passo…</span>
+            </div>
+            <div class="hiw-state hiw-idle">
+              <div class="hiw-ring"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/></svg></div>
+              <span>passo 2 de 3</span>
+            </div>
+          </div>
+          <div class="hiw-foot">
+            <h4>Categorizado antes de você guardar o celular</h4>
+          </div>
+        </article>
+
+        <article class="hiw-card is-idle" tabindex="0">
+          <div class="hiw-head"><span class="hiw-num">03</span><h3>Painel</h3></div>
+          <div class="hiw-stage">
+            <div class="hiw-state hiw-demo">
+              <div class="hiw-charts">
+                <div class="hiw-kpis">
+                  <div class="hiw-kpi"><span>Gasto do mês</span><b class="neg">R$ 2.148</b></div>
+                  <div class="hiw-kpi"><span>Sobra prevista</span><b class="pos">R$ 612</b></div>
+                </div>
+                <div class="hiw-panel">
+                  <div class="hiw-panel-top"><span>Para onde foi</span><span>Agosto</span></div>
+                  <div class="hiw-donut">
+                    <svg viewBox="0 0 100 100" aria-hidden="true">
+                      <circle cx="50" cy="50" r="42" stroke="#FF2D8E" stroke-dasharray="109 155"></circle>
+                      <circle cx="50" cy="50" r="42" stroke="#2E7FE0" stroke-dasharray="64 200" stroke-dashoffset="-111"></circle>
+                      <circle cx="50" cy="50" r="42" stroke="#C6F11A" stroke-dasharray="40 224" stroke-dashoffset="-177"></circle>
+                      <circle cx="50" cy="50" r="42" stroke="#5a5a62" stroke-dasharray="43 221" stroke-dashoffset="-219"></circle>
+                    </svg>
+                    <ul class="hiw-legend">
+                      <li><i style="background:#FF2D8E"></i>Alimentação <b>42%</b></li>
+                      <li><i style="background:#2E7FE0"></i>Transporte <b>25%</b></li>
+                      <li><i style="background:#C6F11A"></i>Lazer <b>16%</b></li>
+                      <li><i style="background:#5a5a62"></i>Outros <b>17%</b></li>
+                    </ul>
+                  </div>
+                </div>
+                <div class="hiw-panel hiw-spark">
+                  <div class="hiw-panel-top"><span>Gasto por mês</span><span>−18% vs. março</span></div>
+                  <svg viewBox="0 0 280 70" preserveAspectRatio="none" aria-hidden="true">
+                    <line class="hiw-grid" x1="0" y1="18" x2="280" y2="18"></line>
+                    <line class="hiw-grid" x1="0" y1="44" x2="280" y2="44"></line>
+                    <path class="hiw-line" d="M4,58 L50,52 L96,54 L142,40 L188,42 L234,24 L276,14"></path>
+                    <circle class="hiw-cap" cx="276" cy="14" r="4"></circle>
+                  </svg>
+                  <div class="hiw-months"><span>MAR</span><span>ABR</span><span>MAI</span><span>JUN</span><span>JUL</span><span>AGO</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="hiw-state hiw-done">
+              <div class="hiw-tick"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5 9.5 18 20 6.5"/></svg></div>
+              <b>Painel atualizado</b><span>em tempo real</span>
+            </div>
+            <div class="hiw-state hiw-idle">
+              <div class="hiw-ring"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/></svg></div>
+              <span>passo 3 de 3</span>
+            </div>
+          </div>
+          <div class="hiw-foot">
+            <h4>O mês inteiro, sem você abrir nada</h4>
+          </div>
+        </article>
+
       </div>
+
+      <div class="hiw-cta" data-reveal>
+        <p>A conta leva alguns segundos e é grátis pra testar.</p>
+        <a class="btn btn-primary" href="/cadastro">Criar minha conta <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
+      </div>
+
     </section>
 
     <!-- ─── IA / Tecnologia ───────────────────────────────────────── -->
@@ -528,7 +621,7 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
   (function () {
     var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduce) return;
-    var cards = document.querySelectorAll(".rd .card, .rd .plan-solo, .rd .phone, .rd .step");
+    var cards = document.querySelectorAll(".rd .card, .rd .plan-solo");
     cards.forEach(function (c) {
       c.addEventListener("pointermove", function (e) {
         var r = c.getBoundingClientRect();
@@ -536,6 +629,90 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
         c.style.setProperty("--my", (e.clientY - r.top) + "px");
       });
     });
+  })();
+  </script>
+  <!-- Como funciona: um card aberto por vez; hover/foco/clique assume o controle -->
+  <script>
+  (function () {
+    var rail = document.querySelector(".hiw-rail");
+    var cards = rail ? rail.querySelectorAll(".hiw-card") : [];
+    if (!cards.length) return;
+
+    var active = 0, timer = null, comecou = false, tocado = false, dentro = false;
+
+    function paint() {
+      for (var i = 0; i < cards.length; i++) {
+        var aberto = i === active;
+        cards[i].classList.toggle("is-open", aberto);
+        cards[i].classList.toggle("is-done", i < active);
+        cards[i].classList.toggle("is-idle", i > active);
+        if (aberto) cards[i].setAttribute("aria-current", "step");
+        else cards[i].removeAttribute("aria-current");
+      }
+    }
+
+    // Autoplay só onde dá para parar antes: em touch não há hover, o conteúdo
+    // trocaria sozinho sob o dedo. Reduced-motion também fica parado no card 1.
+    var mm = window.matchMedia;
+    var autoplay = !!mm && !mm("(prefers-reduced-motion: reduce)").matches
+                        && mm("(hover: hover) and (pointer: fine)").matches;
+
+    /** O ciclo roda só depois de o trilho aparecer, com ninguém tendo decidido
+        por clique/foco e sem o mouse em cima. Todo evento reavalia isto. */
+    function sincronizar() {
+      var rodar = comecou && autoplay && !tocado && !dentro;
+      if (rodar && !timer) timer = setInterval(function () { active = (active + 1) % cards.length; paint(); }, 6000);
+      if (!rodar && timer) { clearInterval(timer); timer = null; }
+    }
+
+    /** mousemove só PAUSA o ciclo; clique e foco são deliberados e param de vez. */
+    function open(i) {
+      return function (e) {
+        rail.classList.remove("is-esperando");   // quem interagiu já viu o trilho
+        if (e.type === "mousemove") dentro = true; else tocado = true;
+        if (i !== active) { active = i; paint(); }   // mousemove chega dezenas de vezes por segundo
+        sincronizar();
+      };
+    }
+
+    for (var i = 0; i < cards.length; i++) {
+      var go = open(i);
+      // mousemove, não mouseenter: rolar a página com o cursor PARADO trazia um
+      // card para debaixo dele e matava o autoplay sem ninguém ter interagido.
+      // O preço: com o cursor imóvel e o trilho subindo por baixo dele o Chrome
+      // só emite mouseenter, então o ciclo segue trocando os cards até o
+      // primeiro pixel de movimento — "mouse em cima pausa" só vale depois disso.
+      cards[i].addEventListener("mousemove", go);
+      cards[i].addEventListener("focus", go);
+      cards[i].addEventListener("click", go);
+    }
+    // um handler no trilho, não três nos cards: sair de um card para o vizinho
+    // não é sair do trilho. Atravessar a caminho do CTA vira pausa, não morte.
+    // Não há blur/focusout equivalente DE PROPÓSITO: tabular até um card é ato
+    // deliberado (marca tocado) e não se desfaz ao sair; mover o mouse não é.
+    rail.addEventListener("mouseleave", function () { dentro = false; sincronizar(); });
+
+    /** Solta as animações da demo e libera o ciclo — uma vez só, ao aparecer. */
+    function comecar() {
+      rail.classList.remove("is-esperando");
+      comecou = true;
+      sincronizar();
+    }
+
+    paint();
+    // O trilho começa quando entra na tela, não no load: senão o chat do card 1
+    // termina de animar bem antes da dobra. Sem observer, começa na hora.
+    if ("IntersectionObserver" in window) {
+      rail.classList.add("is-esperando");
+      var io = new IntersectionObserver(function (entries, obs) {
+        if (!entries[0].isIntersecting) return;
+        obs.unobserve(rail);
+        comecar();
+      }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
+      io.observe(rail);
+    } else {
+      comecar();
+    }
   })();
   </script>
   <script src="/nav-auth.js?v=7" defer></script>
