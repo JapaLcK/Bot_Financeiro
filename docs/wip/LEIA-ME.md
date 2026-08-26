@@ -46,12 +46,66 @@ lançamentos sem teto de plano e passa dos 4096 chars do WhatsApp.
   **Rodar sempre em duas colunas (`main` × branch)**: foi assim que se descobriu que
   uma tabela de "X → 0" comparava o branch com ele mesmo.
 
-## Lições que custaram caro (as três que mais geraram retrabalho)
+## Sete regras, tiradas de erros medidos — não de teoria
 
-1. **Consertar a classe, não a instância.** Quatro achados do #133 nasceram de eu
-   consertar um site e deixar o irmão ao lado.
-2. **Todo teste precisa de controle negativo E positivo.** Desligue o conserto: o teste
-   tem de falhar. Mantenha um controle que prove que o caminho legítimo ainda funciona —
-   senão o teste passa num código que recusa tudo.
-3. **A conversa real acha o que o diff não mostra.** Os dois piores defeitos do #133 só
-   apareceram rodando o produto com estado de outro fluxo no banco.
+Vinte achados nos PRs #128 e #133. **Cerca de metade nasceu dos próprios consertos.**
+Cada regra abaixo tem o erro que a gerou.
+
+**1. Escreva a regra antes dos consertos.**
+A tabela `pending_actions` tem **uma linha por usuário** e ~100 lugares que escrevem ou
+consomem nela. A disciplina — gravar e apagar só se ainda for o que você leu — só foi
+escrita na oitava rodada (`claim_pending_action`, com a ordem de prioridade). Se tivesse
+sido escrita na primeira, a maioria das rodadas não teria existido.
+
+**2. Antes de dizer "consertado", faça grep dos irmãos.**
+A pergunta não é "consertei o que ele apontou?", é "quem mais faz isto?". Escrita
+incondicional apareceu em reivindicar, devolver, abandonar, gravação inicial e consumir —
+consertadas uma por rodada. O arredondamento foi corrigido em 1 lugar de 4 (um deles 50
+linhas acima, no mesmo arquivo). O ponto final, em 1 porta de 2.
+
+**3. Todo teste precisa dos DOIS controles.**
+Desligue o conserto: o teste tem de falhar. E mantenha um caso provando que o caminho
+legítimo ainda funciona — senão o teste passa num código que recusa tudo. Quatro testes
+desta sessão não mediam nada: dois liam o *texto do arquivo* com `read_text()` + `index()`,
+um chamava a função nova direto sem passar pelo caminho alterado, e um controle negativo
+foi injetado num caso **que já estava vermelho** — o número saía igual com e sem o conserto.
+Injete a falha onde ela discrimina: num caso verde.
+
+**4. Nunca cite número que você não mediu nesta sessão, contra a baseline certa.**
+Repeti "baseline 1348" várias vezes; a `main` tinha **1312** — o 1348 era estado
+intermediário do próprio branch. Rode a suíte nas duas árvores, hoje. Número que sobe
+sozinho parece ganho e não é. Vale igual para varreduras: **rode em duas colunas**, senão
+você compara o branch com ele mesmo (aconteceu, com uma tabela de "122 mil erros → 652"
+que na verdade era zero na `main`).
+
+**5. Rode a conversa, não a função.**
+Os dois piores defeitos só apareceram mandando **duas mensagens de assuntos diferentes**
+pelo `handle_incoming`, com estado real de outro fluxo no banco. Teste que chama a função
+isolada com mock é cego para essa classe inteira — e era o caso de 11 dos 13 testes que o
+PR trazia. Um deles: `paguei a luz` logo depois de `gastei 50 no mercado` reproduzia o bug
+original inteiro, sequencial, um usuário só.
+
+**6. Ataque antes de empurrar.**
+A revisão automática deve ser **confirmação, não descoberta**. Quando o time voltou a
+rodar antes do push, o Tester achou **11 defeitos** que a revisão não tinha pegado, e os
+dois piores estavam em código que parecia pronto. E não sugira pular a revisão: parece
+economia, é parar de olhar para nada ser encontrado.
+
+**7. Quando a decisão parecer escolha entre dois males, procure a terceira opção.**
+Escolhi entre "debitar duas vezes" e "perder o débito", chamei a segunda de erro
+conservador e segui. Não era escolha: faltava um passo — reservar, debitar, e **desfazer
+a reserva** se o débito falhar. A versão que eu tinha chamado de conservadora perdia
+dinheiro do usuário de forma permanente, sem retentativa possível.
+
+## Duas coisas que valem como critério, não como regra
+
+**Para validação de entrada:** o critério não é "o usuário digitou certo?", é **"o erro
+dele vira dinheiro errado?"**. `1.23.456` é recusado porque pagaria 100× a mais;
+`1.23,45` passa porque o bot acerta a intenção. Sem esse critério escrito, a validação
+apara forma por forma até recusar entrada válida — que é pior que o bug.
+
+**Para prioridade entre pendências:** pergunta que espera resposta nunca é desalojada;
+oferta de conveniência cede. E o teste de qual é qual é observável: oferta de conveniência
+é a que o `_send_reply_with_optional_buttons` consome no mesmo turno. Classifiquei
+`confirm_recurring_offer` como oferta sem olhar isso, e o "sim" do usuário passou a matar
+duas pendências de uma vez.
