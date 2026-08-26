@@ -9,11 +9,15 @@ Idempotência de instância: UNIQUE(recurring_id, due_date).
 """
 from __future__ import annotations
 
+import logging
 from datetime import date
 from decimal import Decimal
+from math import isfinite
 from typing import Any
 
 from .connection import get_conn
+
+logger = logging.getLogger(__name__)
 
 
 def _row(r: Any) -> dict[str, Any]:
@@ -180,25 +184,86 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None) -> d
     if not bill or bill["status"] == "paid":
         return None
 
-    valor = float(amount) if (amount is not None and float(amount) > 0) else float(bill["amount"] or 0)
+    # Valida ANTES da reserva. `parse_money("1"*400)` devolve `inf` sem mock
+    # nenhum: sem esta guarda a reserva grava `paid_amount = Infinity` (o
+    # Postgres `numeric` aceita), o `add_launch` estoura depois no JSON, e a
+    # conta fica fechada com valor infinito no dashboard.
+    if amount is not None and not isfinite(float(amount)):
+        raise ValueError("VALOR_INVALIDO")
+    # Arredonda para centavos AQUI, e não em cada chamador: os quatro caminhos
+    # de pagamento (texto, tool da IA, botão do WhatsApp, rota web) passam por
+    # esta função. Sem isso, "paguei luz 0,001" gravava paid_amount=0.001 e a
+    # resposta dizia "R$ 0,00 lançado" — mensagem e dado divergentes.
+    valor = round(float(amount), 2) if (amount is not None and float(amount) > 0) else float(bill["amount"] or 0)
     if valor <= 0:
         raise ValueError("VALOR_INVALIDO")
 
     name = bill["name"] or "Conta"
     categoria = bill["category"] or "outros"
-    launch_id, _seq, _bal = add_launch_and_update_balance(
-        user_id, "despesa", valor, alvo=f"conta:{name}", nota=f"Pagamento · {name}",
-        categoria=categoria, is_internal_movement=False,
-    )
+
+    # RESERVA a conta ANTES de debitar. A ordem inversa (debitar e depois
+    # atualizar o status) tem dois modos de falha caros: duas requisições
+    # concorrentes criam DOIS lançamentos porque as duas leem `pending`; e uma
+    # falha entre os dois commits deixa o débito feito com a conta ainda
+    # pendente, então a próxima tentativa debita de novo.
+    #
+    # Com a reserva primeiro, o `where status='pending'` serializa: só uma
+    # requisição transita a conta, e as outras recebem None.
+    #
+    # A janela entre os dois passos NÃO é erro conservador — foi o que se
+    # pensou, e está errado. Medido: conta 'paid' sem lançamento, saldo não
+    # debitado, gasto fora do extrato, e a retentativa devolve None ("essa
+    # conta não está mais pendente") porque não há caminho no bot para reabrir
+    # a conta. É perda permanente, pior que o débito duplo, que ao menos é
+    # visível. Por isso o débito abaixo DESFAZ a reserva se estourar.
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 update bill_instances
-                   set status='paid', paid_at=now(), paid_amount=%s, launch_id=%s
+                   set status='paid', paid_at=now(), paid_amount=%s
                  where id=%s and user_id=%s and status='pending'
                 """,
-                (Decimal(str(valor)), launch_id, int(bill_id), int(user_id)),
+                (Decimal(str(valor)), int(bill_id), int(user_id)),
+            )
+            reservou = cur.rowcount == 1
+        conn.commit()
+    if not reservou:
+        return None
+
+    try:
+        launch_id, _seq, _bal = add_launch_and_update_balance(
+            user_id, "despesa", valor, alvo=f"conta:{name}", nota=f"Pagamento · {name}",
+            categoria=categoria, is_internal_movement=False,
+        )
+    except Exception:
+        # Devolve a conta para 'pending' para a retentativa funcionar.
+        # Condicionado à assinatura exata que a reserva deixou (paid + sem
+        # launch_id): se algo já tiver ligado um lançamento nesta conta, não
+        # reabre. O erro da devolução não pode mascarar o erro original.
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        update bill_instances
+                           set status='pending', paid_at=null, paid_amount=null
+                         where id=%s and user_id=%s and status='paid'
+                           and launch_id is null
+                        """,
+                        (int(bill_id), int(user_id)),
+                    )
+                conn.commit()
+        except Exception:
+            logger.exception(
+                "falha ao devolver a conta %s do usuario %s para pending — "
+                "ela ficou paga sem lançamento", bill_id, user_id)
+        raise
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update bill_instances set launch_id=%s where id=%s and user_id=%s",
+                (launch_id, int(bill_id), int(user_id)),
             )
         conn.commit()
     return get_bill(user_id, bill_id)

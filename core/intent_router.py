@@ -145,6 +145,15 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
 
     pending = db.get_pending_action(user_id)
 
+    # Resposta à pergunta de valor de uma conta variável. Precisa acontecer
+    # antes do roteamento por intent: um número sozinho costuma ser classificado
+    # como out_of_scope e não carregaria qual conta o bot acabou de perguntar.
+    if pending and pending.get("action_type") == "bill_amount_expected":
+        resp = h_bills.resolve_bill_amount(user_id, text, pending)
+        if resp is not None:
+            return resp
+        pending = None  # outro comando abandona a pergunta e roteia normalmente
+
     # Pergunta de valor pendente de um lançamento múltiplo ("... e paguei o
     # aluguel" sem número → "quanto foi o aluguel?"). A resposta com valor
     # registra o item; sem valor, abandona e segue o roteamento normal.

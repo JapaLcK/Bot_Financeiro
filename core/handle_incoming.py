@@ -61,6 +61,10 @@ _HELP_FALLBACK_MARKERS: tuple[str, ...] = (
 #
 # NÃO inclui ofertas one-shot (recategorize_launch_offer, undo_audio): essas não
 # são perguntas e não devem bloquear a IA nas mensagens seguintes.
+#
+# Esta é UMA das três enumerações de "isto é pergunta?" que existem no código;
+# as outras duas (e o que diverge entre elas) estão listadas em db/pending.py,
+# no bloco de ORDEM DE PRIORIDADE.
 _RESUMABLE_PENDING_TYPES: frozenset[str] = frozenset({
     "clarification",
     "credit_card_setup",
@@ -70,6 +74,18 @@ _RESUMABLE_PENDING_TYPES: frozenset[str] = frozenset({
     "pay_bill_choice",
     "funding_source_choice",
     "investment_pick",
+    # A pergunta de valor de conta variável ("quanto veio este mês?") é
+    # respondida com um número solto, que classifica como out_of_scope. Sem
+    # estar aqui, o usuário Pro tem a resposta sequestrada pela IA e a conta
+    # fica sem pagar — que é o bug da issue #132 sobrevivendo para quem paga.
+    #
+    # Suprime SEMPRE, sem tentar adivinhar antes se a mensagem "parece um
+    # valor". Medido: o refinamento salvava 1 de 5 mudanças de assunto (as
+    # outras 4 já voltam pra IA pelo fallback 6b abaixo) e, em troca, mandava
+    # pra IA as 5 formas faladas de responder o valor ("foi 132", "acho que
+    # 132", "uns 132", "veio 132 reais", "deu 132,50") — que agora o
+    # `resolve_bill_amount` aceita.
+    "bill_amount_expected",
 })
 
 
@@ -342,7 +358,13 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
         # quando a resposta do áudio é um lançamento de fato, não uma pergunta.
         _pend = db.get_pending_action(uid)
         _ptype = _pend.get("action_type") if _pend else None
-        if _ptype not in _RESUMABLE_PENDING_TYPES and _ptype not in ("multi_launch_values", "confirm_recurring_offer"):
+        # `bill_pay_amount` é a pergunta de valor do botão "✅ Já paguei"
+        # (adapters/whatsapp/wa_runtime.py) — não está em
+        # `_RESUMABLE_PENDING_TYPES` porque o consumidor dela é o próprio
+        # runtime, então precisa ser nomeada aqui à mão. Terceira enumeração de
+        # "isto é pergunta?"; as três estão listadas em db/pending.py.
+        if _ptype not in _RESUMABLE_PENDING_TYPES and _ptype not in (
+                "multi_launch_values", "confirm_recurring_offer", "bill_pay_amount"):
             db.set_pending_action(uid, "undo_audio", {})
 
     return [OutgoingMessage(text=preview + body + undo_hint)]
