@@ -261,3 +261,145 @@ def test_funding_choice_devolucao_nao_atropela_pergunta_mais_nova(monkeypatch):
 
     volta = db.get_pending_action(user_id) or {}
     assert volta.get("action_type") == "bill_amount_expected", volta
+
+
+# ── o CAMINHO DE PRODUÇÃO dos dois fluxos de `funding_source_choice` ─────────
+# Os seis casos acima trocam `_aporta`/`deposit` por uma função que levanta —
+# o que EU escrevi, não o que roda. Em produção quem executa é
+# `_pockets.deposita_com_origem` / `_aporta`, e as duas ENGOLIAM toda `Exception`
+# e devolviam string: o `restore_pending_on_error` nunca via falha operacional
+# nenhuma, a pendência ficava consumida e responder a origem de novo não repetia
+# o depósito. P2 do Codex no PR #144.
+#
+# Aqui a falha é de banco DE VERDADE, dentro de `pocket_deposit_from_account` /
+# `investment_deposit_from_account`: o `get_conn` do módulo de `db/` levanta
+# `OperationalError`, como se o Postgres tivesse caído no meio.
+
+def _pending_funding_para(uid: int, fluxo: str, nome: str) -> dict:
+    db.set_pending_action(uid, "funding_source_choice", {
+        "amount": 500.0,
+        "retomar": {"fluxo": fluxo, "name": nome, "text": f"coloquei 500 em {nome}"},
+        "fontes": [{"kind": "account", "of_account_id": None,
+                    "label": "Carteira", "balance": 900.0}],
+    })
+    return db.get_pending_action(uid)
+
+
+def _carteira(uid: int, valor: float = 900.0) -> None:
+    db.add_launch_and_update_balance(uid, "receita", valor, None, "seed")
+
+
+FLUXOS = [
+    ("pocket_deposit", "Viagem", "db.pockets"),
+    ("investment_deposit", "CDB Nubank", "db.investments"),
+]
+FLUXO_IDS = [f[0] for f in FLUXOS]
+
+
+def _cria_destino(uid: int, fluxo: str, nome: str) -> None:
+    if fluxo == "pocket_deposit":
+        db.create_pocket(uid, nome)
+    else:
+        db.create_investment(uid, nome, 0.1, "yearly")
+
+
+@pytest.mark.parametrize("fluxo,nome,modulo", FLUXOS, ids=FLUXO_IDS)
+def test_funding_choice_devolve_quando_o_banco_cai_de_verdade(
+        monkeypatch, fluxo, nome, modulo):
+    """Negativo do conserto do P2: com o `except Exception` devolvendo string
+    (o código de antes), nada sobe, a pendência não volta e isto fica vermelho."""
+    import importlib
+    import psycopg
+
+    user_id = _uid()
+    _carteira(user_id)
+    _cria_destino(user_id, fluxo, nome)
+    pending = _pending_funding_para(user_id, fluxo, nome)
+
+    def _banco_fora(*a, **k):
+        raise psycopg.OperationalError("connection to server was lost")
+
+    monkeypatch.setattr(importlib.import_module(modulo), "get_conn", _banco_fora)
+
+    with pytest.raises(psycopg.OperationalError):
+        H_inv.resolve_funding_choice(user_id, "1", pending)
+
+    volta = db.get_pending_action(user_id) or {}
+    assert volta.get("action_type") == "funding_source_choice", (
+        f"{fluxo}: a pendência não voltou — ficou {volta.get('action_type')!r}; "
+        "responder a origem de novo não repetiria o depósito")
+    assert (volta.get("payload") or {}).get("retomar", {}).get("fluxo") == fluxo
+    assert float(db.get_balance(user_id)) == 900.0, "o dinheiro andou mesmo assim"
+
+
+@pytest.mark.parametrize("fluxo,nome,modulo", FLUXOS, ids=FLUXO_IDS)
+def test_funding_choice_caminho_feliz_de_verdade_consome(monkeypatch, fluxo, nome, modulo):
+    """Positivo do mesmo grupo: sem falha o depósito acontece de verdade e a
+    pendência não fica para trás. Sem isto o grupo passaria num código que só
+    devolve pendência e nunca deposita."""
+    user_id = _uid()
+    _carteira(user_id)
+    _cria_destino(user_id, fluxo, nome)
+    pending = _pending_funding_para(user_id, fluxo, nome)
+
+    resposta = H_inv.resolve_funding_choice(user_id, "1", pending)
+
+    assert "✅" in (resposta or ""), resposta
+    assert db.get_pending_action(user_id) is None
+    assert float(db.get_balance(user_id)) == 400.0
+
+
+# ── o outro lado: recusa legítima NÃO re-arma ────────────────────────────────
+# Saldo insuficiente / destino inexistente se repetiriam igual. Re-armar
+# prenderia o usuário respondendo uma escolha que nunca vai funcionar — e a
+# pendência `funding_source_choice` suprime o fallback de IA por 10 minutos.
+
+RECUSAS = [
+    ("pocket_deposit", "Viagem", 100.0, True, "saldo insuficiente"),
+    ("pocket_deposit", "Nao Existe", 900.0, False, "caixinha inexistente"),
+    ("investment_deposit", "CDB Nubank", 100.0, True, "saldo insuficiente"),
+    ("investment_deposit", "Nao Existe", 900.0, False, "investimento inexistente"),
+]
+
+
+@pytest.mark.parametrize("fluxo,nome,saldo,cria,caso", RECUSAS,
+                         ids=[f"{r[0]}-{r[4]}" for r in RECUSAS])
+def test_funding_choice_recusa_legitima_nao_rearma(fluxo, nome, saldo, cria, caso):
+    user_id = _uid()
+    _carteira(user_id, saldo)
+    if cria:
+        _cria_destino(user_id, fluxo, nome)
+    pending = _pending_funding_para(user_id, fluxo, nome)
+
+    resposta = H_inv.resolve_funding_choice(user_id, "1", pending)
+
+    assert resposta, f"{caso}: recusa sem texto nenhum"
+    assert db.get_pending_action(user_id) is None, (
+        f"{caso}: a pergunta foi re-armada — o usuário fica preso repetindo "
+        "uma escolha que nunca vai funcionar")
+    assert float(db.get_balance(user_id)) == saldo
+
+
+# ── falha DEPOIS do commit: o dinheiro andou, re-armar depositaria duas vezes ─
+
+@pytest.mark.parametrize("fluxo,nome,modulo", FLUXOS, ids=FLUXO_IDS)
+def test_funding_choice_falha_depois_do_commit_nao_rearma(monkeypatch, fluxo, nome, modulo):
+    """`db.display_id_for` roda DEPOIS do commit. Se ela subisse, a devolução
+    re-armaria a pergunta e a próxima resposta do usuário depositaria de novo."""
+    user_id = _uid()
+    _carteira(user_id)
+    _cria_destino(user_id, fluxo, nome)
+    pending = _pending_funding_para(user_id, fluxo, nome)
+
+    def _estoura(*a, **k):
+        raise Estourou("banco caiu logo depois do commit")
+
+    monkeypatch.setattr(db, "display_id_for", _estoura)
+
+    resposta = H_inv.resolve_funding_choice(user_id, "1", pending)
+
+    assert "✅" in (resposta or ""), f"{fluxo}: o sucesso virou erro — {resposta!r}"
+    assert db.get_pending_action(user_id) is None, (
+        f"{fluxo}: pergunta re-armada com o dinheiro já debitado — a próxima "
+        "resposta depositaria de novo")
+    assert float(db.get_balance(user_id)) == 400.0
