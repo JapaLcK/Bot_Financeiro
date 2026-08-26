@@ -160,7 +160,16 @@
   // animação inteira até .finished). Com ?pbdebug=1 o resultado aparece na
   // PRÓPRIA tela — o aparelho é o único lugar onde isso se mede, e nem sempre
   // há Mac com o Web Inspector do lado.
-  const debug = (() => {
+  //
+  // `enabled &&` na frente, e isso não é otimização: este arquivo carrega em
+  // TODA página do domínio, e o gate acima promete que ele não encosta no
+  // localStorage quando o motor está desligado — é o que o
+  // `tests/frontend/pb_nav_gate.test.mjs` afirma, para que religar a leitura da
+  // chave legada `pbSpa` não passe batido. Sem o curto-circuito, o
+  // cronômetro lia `pbDebug` em toda visita ao site público e derrubava essa
+  // asserção. O flag só significa alguma coisa quando há troca de página para
+  // medir, e troca só existe com o motor ligado.
+  const debug = enabled && (() => {
     if (qs.get("pbdebug") === "0") { try { localStorage.removeItem("pbDebug"); } catch (_) {} }
     if (qs.get("pbdebug") === "1") { try { localStorage.setItem("pbDebug", "1"); } catch (_) {} }
     try { return localStorage.getItem("pbDebug") === "1"; } catch (_) { return false; }
