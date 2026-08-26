@@ -28,11 +28,23 @@ from db.pending import _REGISTRO
 from core.types import IncomingMessage
 
 
+# função → (índice posicional, nome) do argumento que INTRODUZ um tipo.
 _ESCRITORES = {
-    "set_pending_action",
-    "claim_pending_action",
-    "create_pending_action_if_absent",
+    "set_pending_action": (1, "action_type"),
+    "claim_pending_action": (1, "action_type"),
+    "create_pending_action_if_absent": (1, "action_type"),
+    # O `action_type` posicional do `advance_pending_action` é o tipo LIDO, não
+    # um tipo novo — quem introduz tipo ali é o `new_action_type`, e só quando
+    # ele existe. É uma porta de escrita de verdade: o `_devolve_head`
+    # (core/handlers/launches.py) cria a fila `multi_launch_values` por ela.
+    # Sem esta entrada, um tipo que só nascesse de uma transição ficava fora da
+    # varredura — e o teste de órfão ainda mandaria APAGAR a linha legítima
+    # dele do registro. Apontado pelo Codex no PR #142.
+    "advance_pending_action": (5, "new_action_type"),
 }
+# Nestas, o argumento é opcional: ausente = a chamada não introduz tipo nenhum
+# (é um avanço ou um delete), então não é gravação para efeito da varredura.
+_OPCIONAL = {"advance_pending_action"}
 _RAIZ = pathlib.Path(__file__).resolve().parent.parent
 _IGNORADOS = {".venv", ".claude", ".git", "tests", "node_modules"}
 
@@ -43,18 +55,18 @@ _IGNORADOS = {".venv", ".claude", ".git", "tests", "node_modules"}
 _ENCANAMENTO = "db/pending.py"
 
 
-def _arg_action_type(no: ast.Call) -> ast.expr | None:
-    """O `action_type` da chamada, seja posicional ou por palavra-chave.
+def _arg_do_tipo(no: ast.Call, posicao: int, nome: str) -> ast.expr | None:
+    """O argumento que introduz o tipo, seja posicional ou por palavra-chave.
 
     `db.set_pending_action(user_id=uid, action_type="x", payload={})` é uma
     chamada válida e escapava da varredura, que só olhava `no.args[1]` — o tipo
     novo ficaria fora do registro, cairia nas três colunas False e o teste que
     existe para pegar isso passaria. Apontado pelo Codex no PR #142.
     """
-    if len(no.args) >= 2:
-        return no.args[1]
+    if len(no.args) > posicao:
+        return no.args[posicao]
     for kw in no.keywords:
-        if kw.arg == "action_type":
+        if kw.arg == nome:
             return kw.value
     return None
 
@@ -82,9 +94,11 @@ def _varre_gravacoes() -> tuple[dict[str, set[str]], list[str]]:
             nome = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", None)
             if nome not in _ESCRITORES:
                 continue
-            alvo = _arg_action_type(no)
+            alvo = _arg_do_tipo(no, *_ESCRITORES[nome])
             if isinstance(alvo, ast.Constant) and isinstance(alvo.value, str):
                 achados.setdefault(alvo.value, set()).add(rel)
+            elif alvo is None and nome in _OPCIONAL:
+                continue          # avanço/delete: não introduz tipo nenhum
             elif rel != _ENCANAMENTO:
                 dinamicas.append(f"{rel}:{no.lineno} ({nome})")
     return achados, dinamicas
