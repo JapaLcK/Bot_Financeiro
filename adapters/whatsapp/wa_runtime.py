@@ -321,13 +321,20 @@ def _apply_recategorize(user_id: int, launch_id: int, raw_categoria: str) -> str
 
     `launch_id` é o id INTERNO (vem do payload do botão). O display usa user_seq.
     """
-    from utils_text import canonicalize_category_label  # local import (evita ciclo)
-    from db import display_id_for
+    from db import display_id_for, ensure_user_category, resolve_category_input  # local (evita ciclo)
 
     cat = (raw_categoria or "").strip()
     if not cat:
         return "Categoria inválida. Tente novamente."
-    canon = canonicalize_category_label(cat) or cat.lower()
+    try:
+        # lê o catálogo do usuário: exceção de banco aqui matava o turno inteiro
+        # (a pendência já foi apagada) e o usuário não recebia resposta nenhuma.
+        canon = resolve_category_input(user_id, cat, create=True)
+    except Exception as exc:
+        logger.exception("WA recategorize resolve failed launch=%s: %s", launch_id, exc)
+        return "Não consegui atualizar agora. Tente de novo em instantes."
+    if not canon:
+        return "Categoria inválida. Tente novamente."
     try:
         ok = update_launch_category(user_id, launch_id, canon)
     except Exception as exc:
@@ -335,6 +342,7 @@ def _apply_recategorize(user_id: int, launch_id: int, raw_categoria: str) -> str
         return "Não consegui atualizar agora. Tente de novo em instantes."
     if not ok:
         return "Lançamento não encontrado (talvez já tenha sido apagado)."
+    ensure_user_category(user_id, canon)
     display = display_id_for(user_id, launch_id)
     return f"✅ Categoria do lançamento #{display} atualizada para *{canon}*."
 

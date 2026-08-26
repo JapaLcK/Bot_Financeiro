@@ -5018,7 +5018,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
     from core.services.category_service import infer_category, learn_from_inference
     from core.services.plan_limits import PlanLimitExceeded
     from core.services.plan_service import check_can_create_launch
-    from utils_text import is_internal_category, canonicalize_category_label
+    from utils_text import is_internal_category
 
     # Teto mensal de lançamentos do tier (Grátis no v2; no-op com v2 off).
     try:
@@ -5071,8 +5071,13 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         card_name = card.get("name") or "cartão"
 
         nota = nota_in or alvo or f"compra no crédito ({card_name})"
+        # Sinal de aprendizado: SÓ o que o usuário escreveu. A nota acima e o
+        # `card_name` trazem o nome do CARTÃO — aprender deles criava a regra
+        # "nubank → <categoria>", que casa por substring e sequestrava todo
+        # gasto que citasse o cartão. Sem texto do usuário, não se aprende.
+        sinal_aprendizado = nota_in or alvo or ""
         inferred = await asyncio.to_thread(infer_category, int(user_id), nota, explicit)
-        categoria = canonicalize_category_label(inferred.category) or "outros"
+        categoria = inferred.category or "outros"
 
         purchased_at = await asyncio.to_thread(today_tz)
 
@@ -5092,9 +5097,9 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
                 await asyncio.to_thread(
                     learn_from_inference,
                     int(user_id),
-                    nota,
+                    sinal_aprendizado,
                     categoria,
-                    target_hint=alvo or card_name,
+                    target_hint=alvo,
                     reason=inferred.reason,
                 )
             except ValueError as exc:
@@ -5133,9 +5138,9 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
             await asyncio.to_thread(
                 learn_from_inference,
                 int(user_id),
-                nota,
+                sinal_aprendizado,
                 categoria,
-                target_hint=alvo or card_name,
+                target_hint=alvo,
                 reason=inferred.reason,
             )
         except ValueError as exc:
@@ -5162,7 +5167,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
 
     nota = nota_in or alvo or ("receita registrada pelo dashboard" if tipo == "receita" else "despesa registrada pelo dashboard")
     inferred = await asyncio.to_thread(infer_category, int(user_id), nota, explicit)
-    categoria = canonicalize_category_label(inferred.category) or "outros"
+    categoria = inferred.category or "outros"
     is_internal = is_internal_category(categoria)
 
     try:
@@ -5234,14 +5239,19 @@ async def update_launch_route(
 
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from utils_text import canonicalize_category_label
+    from db import CATEGORY_NAME_MAX_LEN, ensure_user_category, resolve_category_input
 
     categoria_norm: str | None = None
     if payload.categoria is not None:
         raw = payload.categoria.strip()
         if not raw:
             raise HTTPException(status_code=400, detail="Categoria não pode ser vazia.")
-        categoria_norm = canonicalize_category_label(raw) or raw.lower()
+        categoria_norm = await asyncio.to_thread(resolve_category_input, user_id, raw, create=True)
+        if not categoria_norm:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Categoria inválida (máx. {CATEGORY_NAME_MAX_LEN} caracteres).",
+            )
 
     nota_norm: str | None = None
     if payload.nota is not None:
@@ -5273,6 +5283,10 @@ async def update_launch_route(
     )
     if not changed:
         raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
+    if categoria_norm:
+        # criar a categoria só DEPOIS do UPDATE: antes, um id inexistente
+        # devolvia 404 e ainda assim deixava a categoria órfã no catálogo.
+        await asyncio.to_thread(ensure_user_category, user_id, categoria_norm)
     _invalidate_dashboard_current_cache(user_id)
     return {
         "ok": True,
@@ -5326,14 +5340,19 @@ async def update_credit_transaction_route(
 
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from utils_text import canonicalize_category_label
+    from db import CATEGORY_NAME_MAX_LEN, ensure_user_category, resolve_category_input
 
     categoria_norm: str | None = None
     if payload.categoria is not None:
         raw = payload.categoria.strip()
         if not raw:
             raise HTTPException(status_code=400, detail="Categoria não pode ser vazia.")
-        categoria_norm = canonicalize_category_label(raw) or raw.lower()
+        categoria_norm = await asyncio.to_thread(resolve_category_input, user_id, raw, create=True)
+        if not categoria_norm:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Categoria inválida (máx. {CATEGORY_NAME_MAX_LEN} caracteres).",
+            )
 
     nota_norm: str | None = None
     if payload.nota is not None:
@@ -5353,6 +5372,11 @@ async def update_credit_transaction_route(
     )
     if not changed:
         raise HTTPException(status_code=404, detail="Compra no crédito não encontrada.")
+    if categoria_norm:
+        # crédito não guarda `alvo` — só a `nota`, que pode ser frase gerada
+        # ("compra no crédito (Nubank)"). Aprender dela ensinava o nome do
+        # CARTÃO como estabelecimento, então aqui só se garante o catálogo.
+        await asyncio.to_thread(ensure_user_category, user_id, categoria_norm)
     _invalidate_dashboard_current_cache(user_id)
     return {
         "ok": True,

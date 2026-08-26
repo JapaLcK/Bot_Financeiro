@@ -89,10 +89,18 @@ def _recategorize_launch_summary(args: dict[str, Any]) -> str:
 
 def _recategorize_launch_execute(user_id: int, args: dict[str, Any]) -> str:
     from db.accounts import update_launch_fields
+    from db.categories import ensure_user_category, resolve_category_input
     launch_id = int(args.get("launch_id") or 0)
-    new_category = (args.get("new_category") or "").strip()
+    new_category = resolve_category_input(
+        user_id, args.get("new_category") or "", create=True
+    )
+    if not new_category:
+        return "🐷 Faltou a categoria nova. Manda de novo."
     ok = update_launch_fields(user_id, launch_id, categoria=new_category)
     if ok:
+        # criar só depois do UPDATE: launch_id inexistente não pode deixar
+        # categoria órfã no catálogo.
+        ensure_user_category(user_id, new_category)
         return f"✅ Lançamento #{launch_id} agora é {new_category}."
     return f"🐷 Não consegui atualizar o lançamento #{launch_id}."
 

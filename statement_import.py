@@ -579,7 +579,7 @@ def import_statement_bytes(
     o mesmo bulk idempotente do OFX. Retorna o report pro bot responder.
     """
     # imports tardios: mantém os parsers utilizáveis/testáveis sem DB
-    from db import import_ofx_launches_bulk
+    from db import import_ofx_launches_bulk, resolve_category_input, user_category_display_map
     from ofx_import import load_user_rules_norm, resolve_category
 
     if kind not in {"csv", "pdf"}:
@@ -612,6 +612,7 @@ def import_statement_bytes(
     tz = _tz()
 
     rules_norm = load_user_rules_norm(user_id)
+    display_map = user_category_display_map(user_id)
 
     launches_rows: list[dict] = []
     occurrences: Counter[tuple] = Counter()
@@ -639,6 +640,9 @@ def import_statement_bytes(
 
         memo_norm = normalize_text(memo)
         categoria = resolve_category(memo_norm, rules_norm)
+        categoria = resolve_category_input(
+            user_id, categoria, display_map=display_map
+        ) or categoria
         is_internal = normalize_text(categoria) in INTERNAL_MOVEMENT_CATEGORIES
 
         if trn.get("external_id"):
