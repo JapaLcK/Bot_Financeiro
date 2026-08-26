@@ -129,6 +129,15 @@ elas se separam — não escolha uma e comece a codar.
 > status bar). Foi tratada a errada. A pergunta que resolvia era uma só:
 > "como fica com a tela parada, sem tocar?"
 
+**Se a decisão parecer escolha entre dois males, procure a terceira opção.** Quase
+sempre falta um passo, não falta coragem para escolher o mal menor.
+
+> `mark_bill_paid` debitava e só então marcava a conta como paga: falha no meio →
+> retentativa **debita duas vezes**. Inverti a ordem e chamei de "erro conservador":
+> falha no meio → conta paga sem débito, **sem retentativa possível**, o gasto some para
+> sempre. Não era escolha entre os dois: faltava desfazer a reserva quando o débito
+> falha. A versão "conservadora" era a pior das três.
+
 **Planeje antes, e por escrito.** Para qualquer coisa além de uma correção local:
 liste o que vai mudar, onde, e o que pode quebrar — antes de editar. Se o plano
 tem mais de três passos ou toca em mais de um arquivo, mostre-o e confirme.
@@ -222,6 +231,40 @@ pode ser artefato do atraso, não um defeito. Cheque antes de aceitar.
 número. Falha que já existia não é regressão sua; falha nova é. Sem a baseline não dá
 para distinguir as duas, e sobra "os testes estão vermelhos" sem conclusão.
 
+**Teste de regressão escrito para provar um conserto precisa dos DOIS controles.**
+Vale para o **grupo** de testes daquele conserto, não para cada teste isolado:
+
+- **negativo** — desligue o conserto e rode o grupo: pelo menos um caso tem de falhar.
+  Injete a falha **onde ela discrimina**: num caso que estava verde, nunca num que já
+  estava vermelho. Se o resultado sai igual com e sem o conserto, o grupo não mede nada.
+- **positivo** — um caso no grupo provando que o caminho legítimo continua funcionando,
+  quando o conserto *restringe* algo (validação, guarda, recusa). Sem ele, o grupo passa
+  num código que recusa tudo — que é pior que o bug.
+
+**Isto não vale para teste unitário comum**: caminho de erro, invariante, função pura,
+tabela de entrada/saída. Ali não há "conserto para desligar" nem "caminho legítimo" a
+provar, e cobrar mutação vira cerimônia.
+
+> Quatro testes de uma sessão só não mediam nada: dois liam o *texto do arquivo* com
+> `read_text()` + `index()` procurando o nome de uma função; um chamava a função nova
+> direto, sem passar pelo caminho alterado; e um controle negativo foi injetado num caso
+> que já falhava. Os três consertos que eles "cobriam" podiam ser desligados sem uma
+> linha vermelha.
+
+**Rode a conversa, não a função.** Teste que chama o handler isolado, com `db` mockado,
+é cego para a classe de bug que mais aparece aqui: o estado que **outro fluxo** deixou no
+banco. Um teste vale quando manda **duas mensagens de assuntos diferentes** pelo
+`handle_incoming`, com estado real.
+
+> No PR #133, 11 dos 13 testes eram mockados e o único ponta a ponta pulava o
+> `handle_incoming`. Os dois piores defeitos só apareceram na conversa: `paguei a luz`
+> logo depois de `gastei 50 no mercado` reproduzia o bug original inteiro — sequencial,
+> um usuário, sem corrida nenhuma.
+
+**Varredura combinatória se roda em DUAS COLUNAS** (`main` × branch). Uma tabela de
+"122.014 erros → 652" parecia um conserto enorme; medida contra a `main`, os grupos já
+valiam zero lá — a varredura comparava o branch com uma versão anterior dele mesmo.
+
 **A baseline local oscila — compare por nome de teste, não por contagem.** Duas
 execuções idênticas, seguidas, deram resultados diferentes:
 
@@ -291,6 +334,18 @@ verde, mesmo parecendo trivial.
 Nunca deixe thread sem resposta e nunca afirme que threads estão respondidas sem
 abrir e conferir. **Se você pediu revisão, é sua obrigação ir ler o parecer** — não
 espere alguém perguntar.
+
+**Ataque antes de empurrar. O parecer do Codex tem de ser confirmação, não descoberta.**
+Se ele está achando coisa, o ataque não foi feito. Rode o Tester (e o Manager) **antes**
+do push, não depois do apontamento — é a diferença entre revisar e terceirizar a revisão.
+
+> No PR #133 o Codex apontou 9 vezes. Quando o time passou a atacar antes do push, o
+> Tester achou **11 defeitos que o Codex não tinha pegado**, e os dois piores estavam em
+> código já aprovado: o PR não consertava o bug no caminho comum, e o pagamento perdia
+> dinheiro de forma permanente.
+
+E **nunca sugira pular a revisão**. Parece economia de tempo; o efeito real é parar de
+olhar para nada ser encontrado.
 
 **Merge só com autorização explícita do dono do repositório.** Aprovação do Codex e
 CI verde deixam o PR *pronto*; não autorizam o merge. Avise e pergunte.
@@ -481,6 +536,75 @@ API e WebSocket passam direto. O `manifest.json` tem `start_url: "/login"` — e
 `index.html` tem um guard no topo que manda a PWA instalada para `/login`, com saída
 por `?site=1`. Mexeu na estratégia de cache? Bumpe o `CACHE_NAME`, senão o aparelho
 que já instalou continua com o SW velho.
+
+### `pending_actions`: uma linha por usuário, ~100 lugares mexendo nela
+
+A tabela de pendências guarda **uma linha por usuário**. Toda escrita compete com todas
+as outras: ~48 pontos gravam e 57 consomem. Escrever ou apagar sem condição atropela a
+pendência que outra tarefa acabou de pôr lá — e o usuário responde uma pergunta que o bot
+fez e leva "não entendi", ou pior, o valor dele vai para a pergunta errada.
+
+**A disciplina é gravar e apagar só se ainda for o que você leu:**
+
+- `db.claim_pending_action` para gravar (aplica a ordem de prioridade);
+- `db.advance_pending_action(uid, tipo_lido, payload_lido, None)` para consumir;
+- `db.create_pending_action_if_absent` quando só se cria se não houver nada.
+
+`set_pending_action` e `clear_pending_action` crus só quando você **não leu nada antes** —
+e diga por quê num comentário.
+
+**A ordem de prioridade** (`db/pending.py`): PERGUNTA nunca é desalojada; OFERTA DE
+CONVENIÊNCIA cede; a mesma pergunta por outra porta substitui. O teste de qual é qual é
+observável, não é opinião: **oferta de conveniência é a que o
+`_send_reply_with_optional_buttons` consome no mesmo turno** (`wa_runtime.py`). Classificar
+sem olhar isso já custou caro — `confirm_recurring_offer` foi posta como oferta, e o "sim"
+do usuário passou a matar duas pendências de uma vez.
+
+> Escrita incondicional apareceu **cinco vezes** no mesmo PR — reivindicar, devolver,
+> abandonar, gravar e consumir — corrigida uma por rodada porque ninguém varreu os irmãos.
+> Antes de fechar qualquer conserto aqui, `grep` os outros pontos.
+
+**Três listas, três perguntas diferentes — avalie o tipo contra cada uma, não copie
+de uma para as outras.** Elas divergem de propósito; pertencer a cada uma significa
+coisas distintas:
+
+| lista | pertencer significa | pergunta nova… |
+|---|---|---|
+| `_OFERTAS_DE_CONVENIENCIA` (`db/pending.py`) | **pode ser desalojada** por uma pergunta | fica **fora** — dentro, o `claim_pending_action` a apaga |
+| `_RESUMABLE_PENDING_TYPES` (`core/handle_incoming.py`) | **suprime o fallback da IA** enquanto está de pé | entra **só se** a resposta chegar pelo `handle_incoming` |
+| literal inline (`core/handle_incoming.py`, no ramo de áudio) | **não é sobrescrita** por `undo_audio` | entra se um áudio no meio dela puder atropelá-la |
+
+O critério de cada uma é observável, não é gosto:
+
+- **é oferta de conveniência?** só se o `_send_reply_with_optional_buttons`
+  (`wa_runtime.py`) a consome no mesmo turno. Se ela espera resposta do usuário, é
+  pergunta — mesmo tendo "offer" no nome.
+- **precisa suprimir a IA?** só se a resposta natural do usuário chega até o
+  `handle_incoming`. `bill_pay_amount` está **fora** de propósito: o runtime do WhatsApp
+  a consome antes, e incluí-la suprimiria a IA sem motivo.
+
+Copiar de uma lista para a outra causa bug silencioso nos dois sentidos: pergunta posta
+em `_OFERTAS_DE_CONVENIENCIA` perde o estado sem aviso; tipo já consumido pelo runtime
+posto em `_RESUMABLE_PENDING_TYPES` tira do usuário Pro a IA que ele paga.
+
+**Dívida:** unificar as três é o pré-requisito das issues #130, #134 e #136 — enquanto
+forem três, cada pendência nova exige avaliar os três predicados à mão.
+
+### Validação de entrada: o critério é o dano, não a boa digitação
+
+A pergunta não é "o usuário digitou certo?", é **"o erro dele vira dinheiro errado?"**.
+
+- `1.23.456` é recusado: pagaria R$ 123.456 quando o provável era R$ 1.234,56.
+- `1.23,45` passa: paga R$ 123,45, que é o que a pessoa quis dizer. Recusar seria pedir
+  para redigitar algo que o bot entendeu.
+
+Sem esse critério a validação apara forma por forma até recusar entrada válida — que é
+pior que o bug. E recusar tem de **manter a pergunta viva**: descartar a pendência joga o
+usuário no fallback genérico e ele recomeça o fluxo.
+
+`parse_money` aceita quase qualquer coisa e devolve um número (`132 50` → 13250,
+`132,50.` → 13250, `1"*400` → `inf`). É a raiz de três apontamentos seguidos e é chamado
+por dezenas de fluxos: valide **antes** de entregar a ele, não mexa nele sem PR próprio.
 
 ### Componentes fragmentados
 
