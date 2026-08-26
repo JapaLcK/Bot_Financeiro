@@ -30,6 +30,13 @@ from .users import ensure_user
 _CAT_EQ    = f"{cat_norm_sql('categoria')} = {cat_norm_sql('%s')}"
 _CAT_CT_EQ = f"{cat_norm_sql('ct.categoria')} = {cat_norm_sql('%s')}"
 
+# `category_budgets` é única só no par EXATO (user_id, categoria): 'cafe' e
+# 'café' coexistem em dado legado, então um WHERE normalizado casa as DUAS.
+# Desempate = o mesmo do catálogo (`CAT_META_SQL`, db/connection.py): menor
+# nome alfabético (não há `is_system` aqui). Sem isto, qual linha o fetchone
+# devolve depende da ordem de inserção — medido no Postgres local.
+_CANON_ORDER = " order by categoria limit 1"
+
 # Mesma lista que `core/budget_alerts.py` filtra como interna.
 _INTERNAL_CATEGORIES = {
     "investimento_aporte",
@@ -62,7 +69,7 @@ def get_budget(user_id: int, categoria: str) -> dict[str, Any] | None:
         with conn.cursor() as cur:
             cur.execute(
                 "select categoria, budget from category_budgets "
-                f"where user_id=%s and {_CAT_EQ}",
+                f"where user_id=%s and {_CAT_EQ}{_CANON_ORDER}",
                 (user_id, categoria),
             )
             row = cur.fetchone()
@@ -90,16 +97,18 @@ def upsert_budget(user_id: int, categoria: str, budget: float) -> tuple[str, boo
         with conn.cursor() as cur:
             cur.execute(
                 "select categoria from category_budgets "
-                f"where user_id=%s and {_CAT_EQ}",
+                f"where user_id=%s and {_CAT_EQ}{_CANON_ORDER}",
                 (user_id, cat),
             )
             existing = cur.fetchone()
             if existing:
                 canon = existing["categoria"]
+                # Pela grafia EXATA da canônica: com gêmeas legadas o
+                # `{_CAT_EQ}` casa as duas e o update apagaria o limite da outra.
                 cur.execute(
                     "update category_budgets set budget=%s "
-                    f"where user_id=%s and {_CAT_EQ}",
-                    (Decimal(str(budget)), user_id, cat),
+                    "where user_id=%s and categoria=%s",
+                    (Decimal(str(budget)), user_id, canon),
                 )
                 conn.commit()
                 return canon, False
@@ -358,6 +367,7 @@ def get_budgets_status_for_month(
                 )
                 select
                   b.categoria,
+                  {cat_norm_sql('b.categoria')} as cat_key,
                   b.budget::float as budget,
                   coalesce(sa.total, 0)::float as spent,
                   uc.emoji,
@@ -378,7 +388,12 @@ def get_budgets_status_for_month(
 
     total_budget = 0.0
     total_spent = 0.0
-    at_risk = 0
+    # Gêmeas legadas ('cafe' e 'café' na mesma conta) casam com o MESMO gasto:
+    # cada linha mostra o gasto contra o próprio limite, mas o total soma o
+    # gasto UMA vez por categoria normalizada. `total_budget` NÃO deduplica —
+    # os dois limites foram criados pelo usuário.
+    spent_counted: set[str] = set()
+    at_risk_cats: set[str] = set()
     budgets_out: list[dict[str, Any]] = []
     for r in rows:
         budget = float(r["budget"] or 0)
@@ -391,9 +406,11 @@ def get_budgets_status_for_month(
         else:
             status = "verde"
         if status != "verde":
-            at_risk += 1
+            at_risk_cats.add(r["cat_key"])
         total_budget += budget
-        total_spent += spent
+        if r["cat_key"] not in spent_counted:
+            spent_counted.add(r["cat_key"])
+            total_spent += spent
         budgets_out.append({
             "categoria": r["categoria"],
             "emoji": r["emoji"] or "🏷️",
@@ -414,7 +431,7 @@ def get_budgets_status_for_month(
             "spent": round(total_spent, 2),
             "pct": round(total_pct, 1),
             "remaining": round(total_budget - total_spent, 2),
-            "at_risk": at_risk,
+            "at_risk": len(at_risk_cats),
         },
     }
 

@@ -225,3 +225,86 @@ def test_catalogo_normal_continua_trazendo_emoji_de_cada_categoria(user_id):
     assert {c["name"]: (c["total"], c["emoji"]) for c in cats} == {
         "cafe": (11.0, "☕"), "carne": (73.0, "🥩"),
     }
+
+
+# ── orçamentos gêmeos legados: 2 linhas, mas o gasto conta UMA vez no total ──
+# `category_budgets` também é única só no par EXATO (user_id, categoria), então
+# 'cafe' e 'café' coexistem em dado gravado antes da normalização. Com o gasto
+# casado por valor normalizado (c48f554), o MESMO gasto entra nas duas linhas e
+# dobrava `totals.spent`/`at_risk`. Decisão do dono: as duas linhas continuam,
+# cada uma com o limite que o usuário criou; só o TOTAL conta o gasto uma vez.
+
+def _orcamento_bruto(user_id: int, *linhas: tuple[str, float]):
+    """Insere direto: `upsert_budget` não cria mais gêmea (cai na existente)."""
+    from db.connection import get_conn
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for cat, val in linhas:
+                cur.execute(
+                    "insert into category_budgets (user_id, categoria, budget) "
+                    "values (%s, %s, %s)",
+                    (user_id, cat, val),
+                )
+        conn.commit()
+
+
+def test_orcamentos_gemeos_contam_o_gasto_uma_vez_no_total(user_id):
+    """Controle negativo: trocando o `if r["cat_key"] not in spent_counted`
+    por `total_spent += spent` incondicional (db/budgets.py), medido no
+    Postgres local: totals.spent volta a 74.2 e remaining a 275.8."""
+    _orcamento_bruto(user_id, ("cafe", 100.0), ("café", 250.0))
+    _gasto(user_id, "café", 37.10)
+
+    status = get_budgets_status_for_month(user_id)
+    # nada é fundido: as duas linhas aparecem com o limite que o user criou
+    assert [(b["categoria"], b["budget"], b["spent"]) for b in status["budgets"]] == [
+        ("cafe", 100.0, 37.1), ("café", 250.0, 37.1),
+    ]
+    # e o total soma o gasto UMA vez (limites NÃO deduplicam: 100 + 250)
+    assert status["totals"]["budget"] == 350.0
+    assert status["totals"]["spent"] == 37.1
+    assert status["totals"]["remaining"] == 312.9
+
+
+def test_at_risk_conta_uma_vez_por_categoria_normalizada(user_id):
+    """Controle negativo: voltando `at_risk` para o contador `+= 1` por linha,
+    medido: at_risk 2 com uma categoria só em risco."""
+    _orcamento_bruto(user_id, ("cafe", 40.0), ("café", 45.0))
+    _gasto(user_id, "café", 37.10)
+
+    status = get_budgets_status_for_month(user_id)
+    assert [b["status"] for b in status["budgets"]] == ["amarelo", "amarelo"]
+    assert status["totals"]["at_risk"] == 1
+    assert status["totals"]["spent"] == 37.1
+
+
+def test_sem_gemeas_os_totais_continuam_somando_tudo(user_id):
+    """Controle positivo: a dedup não pode subtrair gasto de categorias
+    genuinamente diferentes, nem esconder a segunda em risco."""
+    _orcamento_bruto(user_id, ("cafe", 40.0), ("carne", 80.0))
+    _gasto(user_id, "cafe", 37.10)
+    _gasto(user_id, "carne", 75.0)
+
+    totals = get_budgets_status_for_month(user_id)["totals"]
+    assert totals["budget"] == 120.0
+    assert totals["spent"] == 112.1
+    assert totals["at_risk"] == 2
+
+
+def test_get_budget_e_upsert_deterministicos_com_gemeas(user_id):
+    """Com gêmeas, `fetchone()` sem `order by` devolvia a linha da ORDEM DE
+    INSERÇÃO (medido: 'café' quando ela é inserida primeiro) e o UPDATE casava
+    as DUAS, apagando o limite da outra (medido: 777.0 nas duas).
+
+    Desempate = o mesmo do catálogo: menor nome alfabético → 'cafe'.
+    """
+    _orcamento_bruto(user_id, ("café", 250.0), ("cafe", 100.0))  # acentuada 1º
+
+    assert db.budgets.get_budget(user_id, "CAFÉ") == {"categoria": "cafe", "budget": 100.0}
+
+    canon, created = db.budgets.upsert_budget(user_id, "Café", 777.0)
+    assert (canon, created) == ("cafe", False)
+    assert {b["categoria"]: b["budget"] for b in db.budgets.list_budgets(user_id)} == {
+        "cafe": 777.0, "café": 250.0,  # o limite da gêmea sobrevive
+    }
