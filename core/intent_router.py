@@ -13,9 +13,9 @@ from __future__ import annotations
 import re
 
 import db
-from core.intent_classifier import IntentResult
+from core.intent_classifier import IntentResult, classify
 from core.types import IncomingMessage
-from utils_text import normalize_text
+from utils_text import limpa_pontuacao_final, normalize_text, valor_perigoso
 
 # handlers
 from core.handlers import (
@@ -107,10 +107,103 @@ def _should_redirect_launches_list_to_help(text: str) -> bool:
     return first in {"gasto", "gastos", "despesa", "despesas", "lancamento", "lancamentos", "historico", "extrato"}
 
 
-def route(result: IntentResult, msg: IncomingMessage) -> str:
+# ---------------------------------------------------------------------------
+# Passo 1 da pergunta de valor. As QUATRO portas são numeradas aqui, e só
+# aqui — qualquer comentário sobre "a porta N" no repositório se refere a esta
+# lista (o passo 1 em si vale para as portas 2, 3 e 4; ver a nota no fim):
+#
+#   porta 1  conta variável, por texto  core/handlers/bills.py::resolve_bill_amount
+#   porta 2  QUALQUER `clarification`  este arquivo, `_clarification_abandonada`
+#            no `route()` — não só a de `launches.add`: a de `recurring.add`, a
+#            de `funds.add_ask` e as genéricas da IA passam pela mesma escotilha.
+#            O filtro não é o intent da pergunta, é o `_ja_tem_o_valor`.
+#   porta 3  fila do multi-lançamento  core/handlers/launches.py::resolve_multi_launch_value
+#   porta 4  botão "✅ Já paguei"      adapters/whatsapp/wa_runtime.py (roda ANTES
+#                                      do handle_incoming, por isso importa daqui)
+#
+# A porta 1 é a única que NÃO consulta o `abandona_pergunta_de_valor`: o portão
+# de forma dela (`_VALOR_RE.fullmatch`) já é mais estrito. Ver
+# `core/handlers/bills.py::resolve_bill_amount`.
+#
+# MUNDO FECHADO, de propósito. A versão anterior era o contrário — abandonava a
+# pergunta para qualquer intent fora de uma lista de permitidos — e isso apagou
+# a fila inteira de um multi-lançamento quando o usuário respondeu "132 no
+# cartao" (`credit.handle` 0.95). Numa blacklist sobre um oráculo ilimitado,
+# todo intent novo e toda alucinação do LLM nascem destruindo pendência; numa
+# whitelist, nascem inertes. O default seguro é NÃO abandonar: a pergunta
+# continua de pé, e o dado do usuário nunca some por engano.
+#
+# Os seis abaixo foram medidos um a um com `classify(..., allow_ai=False)`:
+#   balance.check        "saldo"                 1.0
+#   launches.list        "extrato", "meus gastos"  1.0
+#   launches.delete      "apagar 42"             0.95
+#   launches.spend_query "quanto gastei em 132", "quanto gastei em maio"  0.95
+#   pockets.list         "caixinhas"             1.0
+#   report.monthly       "resumo do mes"         1.0
+#
+# `credit.handle` ficou de FORA por medição, não por esquecimento: "fatura" é
+# 1.0 e "132 no cartao" é 0.95 — mesmo intent, e o segundo é uma resposta
+# legítima ("foram 132, no cartão"). O único corte por confiança que os separa
+# (== 1.0) também derrubaria "fatura do cartao" (0.95), então não é corte
+# limpo.
+#
+# O PREÇO de deixá-lo fora, MEDIDO nas quatro portas com "fatura",
+# "fatura do cartao", "meus cartoes" e "cartao nubank" — não é "o usuário
+# repete o comando", e é diferente em cada porta:
+#
+#   porta 1  custo ZERO: o `_VALOR_RE` não casa, a pergunta é abandonada e o
+#            comando de cartão roda normalmente.
+#   porta 3  custo ZERO: o `_extract_valor` não acha valor, mesmo efeito.
+#   porta 2  LAÇO INDEFINIDO **medido com a IA desligada**: a pergunta volta
+#            ("Quanto foi no *luz*?") e a pendência é RE-ARMADA a cada turno
+#            (medido: `expires_at` cresce em cada resposta), então ela nunca
+#            expira e o comando de cartão nunca roda enquanto o usuário
+#            insistir nele. Em produção o `classify_with_context` roda ANTES do
+#            re-armar (no `_resolve_clarification`) e pode despachar o comando,
+#            encurtando ou eliminando o laço — saída de LLM, não mensurável
+#            aqui.
+#   porta 4  laço, mas com saída: a pergunta volta ("Não peguei o valor") e a
+#            pendência NÃO é reescrita (`expires_at` não muda), então o laço
+#            morre nos 10 min contados da pergunta original.
+#
+# Ainda assim o cartão fica fora: o laço da porta 2 custa turnos, e apagar a
+# fila de quem respondeu "132 no cartao" custa o lançamento do usuário.
+ABANDONA = {
+    "balance.check", "launches.list", "launches.delete",
+    "launches.spend_query", "pockets.list", "report.monthly",
+}
+
+
+def abandona_pergunta_de_valor(text: str) -> bool:
+    """True quando a resposta a uma pergunta de valor é OUTRO comando.
+
+    `allow_ai=False`: só os tiers 1 e 2, que são determinísticos e não fazem
+    rede. Duas razões, as duas medidas:
+
+    - a porta 4 roda ANTES do `handle_incoming`, e "132" (a resposta mais comum
+      daquela pergunta) cai no tier 3 — consultar com IA custaria uma chamada
+      de LLM por conta paga;
+    - com o tier 3 no meio, o oráculo volta a ser ilimitado. Sem ele, "132",
+      "cinquenta" e "132 todo mes" caem em `out_of_scope 0.0` e "132 no boleto"
+      em `out_of_scope 0.4` (tier 2) — nenhum deles está no `ABANDONA`, então
+      nunca abandonam nada, que é exatamente o comportamento da `main`.
+    """
+    return classify((text or "").strip(), allow_ai=False).intent in ABANDONA
+
+
+def route(result: IntentResult, msg: IncomingMessage, *,
+          ignora_pendencias: bool = False) -> str:
     """
     Ponto de entrada único do roteador.
     Retorna o texto de resposta (ainda não formatado por plataforma).
+
+    `ignora_pendencias=True`: roteia a mensagem como comando novo SEM olhar a
+    linha de `pending_actions`. Um chamador só — a porta 4
+    (`adapters/whatsapp/wa_runtime.py`), quando o CAS de abandono dela falha:
+    aí a linha já é de OUTRA tarefa, com uma pergunta que o usuário acabou de
+    ver na tela, e deixar as guardas abaixo rodarem faria o comando velho
+    abandoná-la (o `resolve_bill_amount` a apaga; o `resolve_multi_launch_value`
+    apaga a fila inteira). Ver o mesmo tratamento na porta 2, logo abaixo.
     """
     user_id  = int(msg.user_id)
     text     = (msg.text or "").strip()
@@ -139,16 +232,38 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
     #    Se o bot fez uma pergunta e está esperando resposta, usa esta mensagem
     #    para completar a intent original em vez de classificar do zero.
     # -----------------------------------------------------------------------
-    clarif = h_pending.get_pending_clarification(user_id)
+    clarif = None if ignora_pendencias else h_pending.get_pending_clarification(user_id)
     if clarif:
-        return _resolve_clarification(clarif, text, user_id, platform, external_id)
+        if _clarification_abandonada(clarif, text):
+            # Porta 2. Mesma escotilha de escape do `investment_pick` e do
+            # `funding_source_choice` logo abaixo: outro comando claro abandona
+            # a pergunta em vez de ser engolido por ela ("Quanto foi no *luz*?"
+            # + "saldo" virava "Quanto foi no *luz saldo*?").
+            #
+            # CONDICIONAL, não `clear_pending_action`: entre o
+            # `get_pending_clarification` acima e agora, outra tarefa pode ter
+            # posto uma pergunta NOVA na linha (é uma linha por usuário) — que
+            # já apareceu na tela. Apagar por cima a deixaria órfã.
+            #
+            # E o CAS que falha vale para o TURNO INTEIRO, não só para o
+            # DELETE: a linha agora é da pergunta nova, e sem esta linha o
+            # `get_pending_action` abaixo a recarregava e o comando velho
+            # ("saldo") ia parar no `resolve_bill_amount` dela — deixando
+            # órfã exatamente a pergunta que o CAS protegeu.
+            ignora_pendencias = not db.consume_pending_action(user_id, clarif)
+        else:
+            return _resolve_clarification(clarif, text, user_id, platform, external_id)
 
-    pending = db.get_pending_action(user_id)
+    pending = None if ignora_pendencias else db.get_pending_action(user_id)
 
     # Resposta à pergunta de valor de uma conta variável. Precisa acontecer
     # antes do roteamento por intent: um número sozinho costuma ser classificado
     # como out_of_scope e não carregaria qual conta o bot acabou de perguntar.
     if pending and pending.get("action_type") == "bill_amount_expected":
+        # Sem o passo 1 aqui de propósito: o portão de forma da porta 1
+        # (`_VALOR_RE.fullmatch`) já é mais estrito que o
+        # `abandona_pergunta_de_valor` — medido, nenhuma das 44.289 strings que
+        # ele casa cai no `ABANDONA`. Ver `resolve_bill_amount`.
         resp = h_bills.resolve_bill_amount(user_id, text, pending)
         if resp is not None:
             return resp
@@ -158,7 +273,9 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
     # aluguel" sem número → "quanto foi o aluguel?"). A resposta com valor
     # registra o item; sem valor, abandona e segue o roteamento normal.
     if pending and pending.get("action_type") == "multi_launch_values":
-        resp = h_launches.resolve_multi_launch_value(user_id, text, pending, platform)
+        resp = h_launches.resolve_multi_launch_value(
+            user_id, text, pending, platform,
+            outro_comando=abandona_pergunta_de_valor(text))
         if resp is not None:
             return resp
         pending = None  # abandonado → mensagem roteia como comando novo
@@ -536,6 +653,76 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
     return OUT_OF_SCOPE_MSG
 
 
+def _ja_tem_o_valor(entities: dict | None) -> bool:
+    """A `clarification` pendente já traz o valor, então ela pede a DESCRIÇÃO.
+
+    Fonte única dos dois lugares que precisam da distinção (a escotilha de
+    abandono e o ramo `launches.add` do `_resolve_clarification`) — se elas
+    divergirem, uma pergunta de descrição vira pergunta de valor e o dinheiro já
+    digitado some.
+
+    São 5 produtores de `clarification`, e 4 deles foram lidos um a um:
+
+      grava `entities["valor"]`  →  pede DESCRIÇÃO/destino, nunca abandona
+        `core/handlers/launches.py:981`  "Em que você gastou R$ 50?"
+        `_ask_add_destination` (este arquivo)  "Onde você quer adicionar…?"
+      NÃO grava  →  pede VALOR, pode abandonar
+        `core/handlers/launches.py:1001`  "Quanto foi no *luz*?"
+        `core/handlers/recurring.py:97`   "Qual o valor desse recorrente?"
+
+    O 5º é o esclarecimento genérico da IA (`result.needs_clarification`, no
+    `route()`): as `entities` vêm do LLM e NÃO são mensuráveis aqui. Ele cai no
+    ramo fail-safe do `try` abaixo quando o campo vier torto, e no `> 0` quando
+    vier limpo.
+
+    (`launches.py:959` NÃO é produtor de `clarification` — é o
+    `multi_launch_values`, a porta 3.)
+
+    Não olha o `orig_text`: uma versão anterior somava
+    `_extract_valor(orig_text)` e classificava "gasto fixo aluguel todo dia 10"
+    como "já tem o valor" por causa do *dia* 10 — a mesma pergunta se comportava
+    de dois jeitos conforme o texto original ter ou não um dígito, e nenhum
+    teste prendia a cláusula.
+    """
+    try:
+        return float((entities or {}).get("valor") or 0) > 0
+    except (AttributeError, TypeError, ValueError):
+        return True
+
+
+def _clarification_abandonada(clarif: dict, text: str) -> bool:
+    """True quando a resposta é OUTRO comando claro, não a resposta à pergunta.
+
+    Porta 2 do passo 1 (`abandona_pergunta_de_valor`). Quem decide é o INTENT,
+    não a forma do texto: "gastei 132" e "apagar 42" têm os dois um número.
+
+    Vale para TODA `clarification`, não só a de `launches.add`: roda no
+    `route()`, antes de o `_resolve_clarification` olhar o `intent` do payload,
+    então a de `recurring.add`, a de `funds.add_ask` e as genéricas da IA
+    passam por aqui também. O único filtro por payload é o `_ja_tem_o_valor`.
+
+    Antes disso, uma condição que nada tem a ver com o classificador: **a
+    pergunta ainda não pode ter o valor.** Toda `clarification` que pede a
+    DESCRIÇÃO já gravou `entities["valor"]`; as que pedem o VALOR não têm nada
+    lá. Abandonar uma pergunta de descrição descartaria em silêncio o dinheiro
+    que o usuário JÁ digitou ("gastei 50" + "extrato" perderia os R$ 50), então
+    ela nunca abandona.
+
+    O que NÃO é comando claro segue para o `_resolve_clarification`, que aceita
+    o valor, recusa o valor perigoso ou re-pergunta — a pergunta continua viva
+    em todos os três casos.
+    """
+    payload = clarif.get("payload")
+    if not isinstance(payload, dict):
+        # Nenhum produtor grava payload não-dict hoje; sem esta linha um dado
+        # torto viraria AttributeError → "erro interno" em loop, com a
+        # pendência nunca sendo limpa.
+        return False
+    if _ja_tem_o_valor(payload.get("entities")):
+        return False
+    return abandona_pergunta_de_valor(text)
+
+
 def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platform: str, external_id: str) -> str:
     """
     O bot tinha feito uma pergunta e está esperando a resposta do usuário.
@@ -637,23 +824,61 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
         from parsers import _extract_valor
         tipo = (original_entities.get("tipo") or "despesa").lower()
         verbo = "recebi" if tipo == "receita" else "gastei"
-        if _extract_valor(user_response) is not None:
+        resposta = limpa_pontuacao_final(user_response.strip())
+        if _ja_tem_o_valor(original_entities):
+            # já tínhamos o valor → a resposta é a descrição/alvo que faltava.
+            # Testado ANTES de parsear a resposta como valor: "gastei 50" +
+            # "mercado 20" tem um número na resposta e virava R$ 2.050,00.
+            #
+            # O " - " não é enfeite. O `parse_money` cola dois grupos de
+            # dígitos separados por espaço, então o combinado "gastei 50 0"
+            # (resposta "0" a uma pergunta de DESCRIÇÃO) virava R$ 500,00 e
+            # "gastei 50 20 no mercado" virava R$ 5.020,00. Medido: com o
+            # traço, os dois voltam a R$ 50,00 — o traço não está em
+            # `[\d.,\s]` e o recorte para no primeiro número.
+            combined = f"{orig_text} - {resposta}".strip()
+        else:
+            valor = _extract_valor(resposta)
+            perigo = valor_perigoso(resposta, valor)
+            if perigo:
+                # Porta 2. Recusa MANTÉM a pergunta viva: re-arma o mesmo
+                # payload (o `orig_text` não cresce) e repete a pergunta
+                # guardada. Descartar a pendência jogaria o usuário no fallback
+                # genérico e o valor já digitado sumiria.
+                #
+                # CONDICIONAL, como os quatro CAS das outras portas. O
+                # `consume_pending_action` no topo desta função já apagou a
+                # linha, então o primitivo certo é o "insere só se não houver" e
+                # NÃO o `advance_pending_action` (o CAS não acharia old_payload
+                # nenhum e não gravaria nada — a pergunta morreria no caso
+                # normal). `set_pending_action` é upsert incondicional: entre o
+                # consumo e aqui, outra tarefa pode ter posto uma pergunta NOVA
+                # na linha (é uma por usuário) — que já apareceu na tela — e o
+                # upsert a atropelava. Medido com a corrida injetada.
+                db.create_pending_action_if_absent(
+                    user_id, "clarification", payload)
+                recusa = ("O valor precisa ser maior que zero."
+                          if perigo == "nao_positivo"
+                          else "Não entendi o valor. Manda só o número, por exemplo: *132,50*")
+                return f"{recusa}\n\n{payload.get('question') or 'Qual foi o valor? Tente: *150*'}"
+            if valor is None:
+                # ainda sem valor reconhecível — refaz a pergunta e mantém o
+                # pending pra não perder a descrição original.
+                db.set_pending_action(user_id, "clarification", payload)
+                return payload.get("question") or "Qual foi o valor? Tente: *150*"
             # resposta trouxe o VALOR que faltava → descrição vem do texto
             # original (sem o verbo, pra não duplicar "gastei 150 gastei ...").
+            #
+            # O texto do USUÁRIO, não `fmt_brl(valor)`: medido, "paguei a luz" +
+            # "132 no mercado" grava categoria *mercado* com o texto cru e
+            # *moradia* com o valor re-renderizado — a palavra que a pessoa
+            # digitou é o que categoriza. Só a pontuação final sai
+            # (`limpa_pontuacao_final`), senão "132,50." vira R$ 13.250,00.
             desc = re.sub(
                 r"^\s*(gastei|gasto|paguei|pagar|comprei|debitei|mandei|enviei|pixei|recebi|receita|ganhei)\b",
                 "", orig_text, flags=re.IGNORECASE,
             ).strip()
-            combined = f"{verbo} {user_response.strip()} {desc}".strip()
-        elif original_entities.get("valor") or _extract_valor(orig_text) is not None:
-            # já tínhamos o valor (no texto/entidades) → a resposta é a
-            # descrição/alvo que faltava. O orig_text já carrega tipo + valor.
-            combined = f"{orig_text} {user_response.strip()}".strip()
-        else:
-            # ainda sem valor reconhecível — refaz a pergunta e mantém o pending
-            # pra não perder a descrição original.
-            db.set_pending_action(user_id, "clarification", payload)
-            return payload.get("question") or "Qual foi o valor? Tente: *150*"
+            combined = f"{verbo} {resposta} {desc}".strip()
         return _execute("launches.add", user_id, combined, original_entities, platform, external_id)
 
     # demais intents (ex: launches.list "dia 4 de qual mês?") → extrai data
