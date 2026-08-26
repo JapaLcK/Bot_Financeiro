@@ -10,7 +10,7 @@ Duas tabelas distintas:
   texto da categoria.
 """
 import logging
-import re
+import unicodedata
 
 from .connection import get_conn
 from .users import ensure_user
@@ -231,15 +231,19 @@ def get_uncategorized_launches(user_id: int, limit: int = 20) -> list[dict]:
 def _normalize_category_name(name: str) -> str:
     """Normaliza nome de categoria pro storage (lowercase, trim, espaços únicos).
 
-    Caracteres de controle viram espaço antes do collapse: o Postgres RECUSA
-    o NUL em texto (`psycopg.DataError`), então um PATCH com NUL na categoria
-    virava 500 — a `main` respondia 200 porque passava pelo `normalize_text`,
-    que já filtrava. `str.split()` só quebra em whitespace: os controles
-    abaixo de 0x20 fora dela passavam inteiros e ficavam gravados."""
-    return " ".join(_CONTROL_CHARS_RE.sub(" ", name or "").lower().strip().split())
-
-
-_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+    Controles (Cc) e formatadores invisíveis (Cf) viram espaço antes do
+    collapse. Cc porque o Postgres RECUSA o NUL em texto (`psycopg.DataError`),
+    e um PATCH com NUL na categoria virava 500 — a `main` respondia 200 porque
+    passava pelo `normalize_text`, que já filtrava. Cf porque zero-width
+    (U+200B) e override bidi (U+202E) são invisíveis: "cafe" e "cafe"+U+200B
+    ficariam como duas fatias idênticas na tela, que é exatamente o bug que
+    esta normalização existe pra matar. `str.split()` só quebra em whitespace —
+    nenhuma das duas classes passa por ela."""
+    limpo = "".join(
+        " " if unicodedata.category(c) in ("Cc", "Cf") else c
+        for c in (name or "")
+    )
+    return " ".join(limpo.lower().split())
 
 
 def ensure_user_categories_seeded(user_id: int) -> None:

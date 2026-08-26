@@ -530,8 +530,8 @@ def test_nul_byte_na_categoria_nao_derruba_a_rota(pro_user_id, porta):
     `psycopg.DataError` — 500 onde a `main` dava 200 (ela passava pelo
     `normalize_text`, que filtra).
 
-    Controle negativo: sem o `_CONTROL_CHARS_RE` no
-    `_normalize_category_name`, as duas portas devolvem 500.
+    Controle negativo: sem o filtro de Cc no `_normalize_category_name`, as
+    duas portas devolvem 500.
     """
     alvo_id = {
         "launches": _novo_launch,
@@ -556,6 +556,35 @@ def test_nul_byte_na_categoria_nao_derruba_a_rota(pro_user_id, porta):
     assert all(
         ord(c) >= 0x20 for nome in _todos_os_nomes(pro_user_id) for c in nome
     ), _todos_os_nomes(pro_user_id)
+
+
+def test_invisivel_nao_fica_gravado(pro_user_id):
+    """Zero-width (U+200B) e override bidi (U+202E) são INVISÍVEIS e o filtro
+    antigo parava em \\x7f. `str.split()` não os vê (não são whitespace), então
+    eles ficavam GRAVADOS no lançamento e na linha de `user_categories` —
+    "cafe" e "cafe\u200b" viram duas fatias visualmente idênticas no dashboard
+    (é o bug que este PR existe pra matar, por outro eixo), e o U+202E ainda
+    inverte a ordem do que a tela mostra.
+
+    Digitado UMA vez só, de propósito: na segunda vez o `display_map` já
+    reencontra o nome pelo `normalize_text` e o teste passaria sem o conserto.
+
+    Controle negativo: com o filtro só em Cc, o gravado volta com os dois
+    invisíveis e os dois asserts caem.
+    """
+    launch_id = _novo_launch(pro_user_id)
+    client = TestClient(dashboard.app)
+    headers = _auth(client, pro_user_id)
+
+    r = client.patch(
+        f"/launches/{pro_user_id}/{launch_id}",
+        json={"categoria": "\u202ecafe\u200b da manha"}, headers=headers,
+    )
+    assert r.status_code == 200, r.text
+
+    gravado = _categoria_do_launch(pro_user_id, launch_id)
+    assert gravado == "cafe da manha", repr(gravado)
+    assert _nomes_custom(pro_user_id) == ["cafe da manha"], _nomes_custom(pro_user_id)
 
 
 @pytest.mark.parametrize("pago", [False, True])

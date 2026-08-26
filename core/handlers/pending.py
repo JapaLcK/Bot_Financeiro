@@ -27,9 +27,11 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
         if not confirmed:
             return "❌ Lançamento cancelado. Se quiser corrigir, escreva o comando manualmente."
 
-        # Caminho novo: prévia estruturada. Registra EXATAMENTE o que o usuário
-        # confirmou — categoria e data da prévia — sem re-inferir do texto. É o
-        # que corrige "Amazônia" virar "compras online" na re-classificação.
+        # Caminho novo: prévia estruturada. Registra a categoria e a data DA
+        # PRÉVIA, sem re-inferir do texto — é o que corrige "Amazônia" virar
+        # "compras online" na re-classificação. A grafia ainda passa pela
+        # normalização de storage (`_normalize_category_name`): 'Comida
+        # Japonesa' é gravado como 'comida japonesa'.
         if payload.get("valor") is not None and payload.get("categoria"):
             from core.handlers.launches import add_from_entities
 
