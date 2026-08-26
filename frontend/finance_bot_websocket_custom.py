@@ -1692,13 +1692,19 @@ async def lifespan(app: FastAPI):
         # pago da Pluggy; dados importados ficam). Inerte com PLANS_V2_ENABLED off —
         # o flag é relido a cada tick dentro do serviço (liga/desliga sem redeploy).
         interval = int(os.getenv("OF_TRIAL_EXPIRY_INTERVAL_SEC", str(6 * 60 * 60)))
-        from core.services.open_finance_trial_expiry import pause_expired_trial_connections
+        from core.services.agents_energy_sweep import enforce_agents_energy_budget
+        from core.services.open_finance_trial_expiry import enforce_of_bank_limits
         from core.services.trial_downsell import send_trial_downsell_emails
         while True:
             try:
-                res = await asyncio.to_thread(pause_expired_trial_connections)
+                res = await asyncio.to_thread(enforce_of_bank_limits)
                 if not res.get("disabled"):
-                    print(f"[of_trial_expiry] {res}", flush=True)
+                    print(f"[of_bank_limits] {res}", flush=True)
+                # Mesmo tick, mesma pergunta: o que ficou acima do teto depois
+                # de uma queda de plano. Agentes acima do orçamento de energia.
+                res_ag = await asyncio.to_thread(enforce_agents_energy_budget)
+                if not res_ag.get("disabled") and (res_ag.get("paused") or res_ag.get("errors")):
+                    print(f"[agents_energy] {res_ag}", flush=True)
                 # Mesmo tick: downsell de fim de trial (1 e-mail por conta, na
                 # vida; janela de 7 dias). Inerte com o flag off.
                 res_ds = await asyncio.to_thread(send_trial_downsell_emails)
