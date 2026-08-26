@@ -160,11 +160,20 @@
   // animação inteira até .finished). Com ?pbdebug=1 o resultado aparece na
   // PRÓPRIA tela — o aparelho é o único lugar onde isso se mede, e nem sempre
   // há Mac com o Web Inspector do lado.
-  const debug = (() => {
+  // PREGUIÇOSO de propósito. Como IIFE no escopo do módulo, isto lia o
+  // localStorage em TODA página que carrega o pb-nav — inclusive fora do modo
+  // app e com o motor desligado —, quebrando a garantia que o gate tem desde
+  // que existe: ele não toca storage antes de decidir. O cronômetro só é usado
+  // dentro de uma troca de página, ou seja, depois de o gate ter passado; ler
+  // ali não custa nada e não vaza para quem nunca liga o SPA.
+  let _debug = null;
+  function debugOn() {
+    if (_debug !== null) return _debug;
     if (qs.get("pbdebug") === "0") { try { localStorage.removeItem("pbDebug"); } catch (_) {} }
     if (qs.get("pbdebug") === "1") { try { localStorage.setItem("pbDebug", "1"); } catch (_) {} }
-    try { return localStorage.getItem("pbDebug") === "1"; } catch (_) { return false; }
-  })();
+    try { _debug = localStorage.getItem("pbDebug") === "1"; } catch (_) { _debug = false; }
+    return _debug;
+  }
 
   function stopwatch(key) {
     const t0 = performance.now();
@@ -180,7 +189,7 @@
         const total = Math.round(performance.now() - t0);
         const line = "[pb-nav] " + key + " " + via + " " + total + "ms (" + parts.join(", ") + ")";
         console.log(line);
-        if (debug) showDebug(line);
+        if (debugOn()) showDebug(line);
       },
     };
   }
