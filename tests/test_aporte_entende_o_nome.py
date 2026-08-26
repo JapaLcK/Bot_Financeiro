@@ -174,5 +174,5 @@ def test_pendencia_bloqueia_o_fallback_de_ia():
     """Sem isso, a resposta "1" cai como baixa confiança e a IA sequestra o turno
     (core/handle_incoming.py), que foi como a caixinha entrou na conversa."""
     pytest.importorskip("ofxparse", reason="ausente localmente; presente no CI")
-    from core.handle_incoming import _RESUMABLE_PENDING_TYPES
-    assert "investment_pick" in _RESUMABLE_PENDING_TYPES
+    from db import suprime_fallback_de_ia
+    assert suprime_fallback_de_ia("investment_pick")

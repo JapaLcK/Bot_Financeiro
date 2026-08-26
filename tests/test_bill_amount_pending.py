@@ -379,7 +379,7 @@ def test_gate_da_ia_nao_deixa_o_numero_chegar_na_ia(ia_espia):
     """Amarra o COMPORTAMENTO do gate, não a presença do tipo numa lista.
 
     Com a pergunta viva, "132" tem que pagar a conta sem passar pela IA. Falha
-    se `bill_amount_expected` sair de `_RESUMABLE_PENDING_TYPES` — e falharia
+    se `bill_amount_expected` perder o `suprime_ia` no registro — e falharia
     também se o gate voltasse a filtrar a mensagem antes de suprimir.
     """
     import uuid

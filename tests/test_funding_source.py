@@ -291,8 +291,8 @@ def test_pendencia_bloqueia_o_fallback_de_ia():
     no CI o pacote existe e o teste roda.
     """
     pytest.importorskip("ofxparse", reason="ausente localmente; presente no CI")
-    from core.handle_incoming import _RESUMABLE_PENDING_TYPES
-    assert "funding_source_choice" in _RESUMABLE_PENDING_TYPES
+    from db import suprime_fallback_de_ia
+    assert suprime_fallback_de_ia("funding_source_choice")
 
 
 # ─── a mensagem que enganou ──────────────────────────────────────────────────
