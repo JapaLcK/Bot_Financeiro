@@ -279,6 +279,22 @@ def describe_valueless_launch(text: str) -> tuple[str, str] | None:
     return tipo, desc
 
 
+# Verbos que marcam dinheiro que ENTROU, no formato de prefixo usado pelo
+# startswith abaixo (com o espaço). Módulo-level porque os handlers de consulta
+# ("o que caiu em rendimentos") precisam do MESMO conjunto — lista duplicada lá
+# foi o que fez "caiu"/"pingou"/"embolsei" caírem no caminho expense-only.
+#
+# ACOPLAMENTO EM MÃO ÚNICA — leia antes de acrescentar verbo aqui:
+# `_PEDE_RECEITA_RE` (core/handlers/launches.py) é derivado desta tupla, então
+# tudo que entra aqui passa a marcar CONSULTA como pergunta de receita. Só verbo
+# de RECEITA entra. Verbo de LANÇAMENTO que não é pergunta de receita
+# ("respingou 200 do freela") mudaria em silêncio o tipo detectado nas consultas;
+# se precisar de um desses, ponha na lista do startswith, não nesta tupla.
+RECEITA_START_VERBS = (
+    "recebi ", "receita ", "ganhei ", "entrou ", "caiu ", "pingou ", "pinguei ", "embolsei ",
+)
+
+
 def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
     text_clean = (raw_text or "").strip()
     if not text_clean:
@@ -303,7 +319,7 @@ def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
     tipo = None
     if raw_norm.startswith(("gastei ", "gasto ", "paguei ", "pagar ", "comprei ", "debitei ", "mandei ", "enviei ", "pixei ")):
         tipo = "despesa"
-    elif raw_norm.startswith(("recebi ", "receita ", "ganhei ", "entrou ", "caiu ", "pingou ", "pinguei ", "embolsei ")):
+    elif raw_norm.startswith(RECEITA_START_VERBS):
         tipo = "receita"
     elif "saldo" in raw_norm and raw_norm.startswith((
         "adicionar ", "adicione ", "adiciona ", "adicionei ", "adicionou ",
