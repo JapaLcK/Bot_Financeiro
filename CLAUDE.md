@@ -231,11 +231,19 @@ pode ser artefato do atraso, não um defeito. Cheque antes de aceitar.
 número. Falha que já existia não é regressão sua; falha nova é. Sem a baseline não dá
 para distinguir as duas, e sobra "os testes estão vermelhos" sem conclusão.
 
-**Todo teste precisa dos DOIS controles.** O negativo (desligue o conserto — o teste
-tem de falhar) e o positivo (um caso provando que o caminho legítimo ainda funciona).
-Sem o positivo, o teste passa num código que recusa tudo, que é pior que o bug. E
-**injete a falha onde ela discrimina**: num caso que estava verde, nunca num que já
-estava vermelho — se o número sai igual com e sem o conserto, o controle não mediu nada.
+**Teste de regressão escrito para provar um conserto precisa dos DOIS controles.**
+Vale para o **grupo** de testes daquele conserto, não para cada teste isolado:
+
+- **negativo** — desligue o conserto e rode o grupo: pelo menos um caso tem de falhar.
+  Injete a falha **onde ela discrimina**: num caso que estava verde, nunca num que já
+  estava vermelho. Se o resultado sai igual com e sem o conserto, o grupo não mede nada.
+- **positivo** — um caso no grupo provando que o caminho legítimo continua funcionando,
+  quando o conserto *restringe* algo (validação, guarda, recusa). Sem ele, o grupo passa
+  num código que recusa tudo — que é pior que o bug.
+
+**Isto não vale para teste unitário comum**: caminho de erro, invariante, função pura,
+tabela de entrada/saída. Ali não há "conserto para desligar" nem "caminho legítimo" a
+provar, e cobrar mutação vira cerimônia.
 
 > Quatro testes de uma sessão só não mediam nada: dois liam o *texto do arquivo* com
 > `read_text()` + `index()` procurando o nome de uma função; um chamava a função nova
