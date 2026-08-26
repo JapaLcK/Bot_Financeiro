@@ -44,7 +44,10 @@ def test_credit_purchase_pending_renders_delete_button(monkeypatch):
         wr, "get_pending_action",
         lambda uid: {"action_type": "delete_credit_purchase", "payload": {"tx_id": 42}},
     )
-    monkeypatch.setattr(wr, "clear_pending_action", lambda uid: cleared.append(uid))
+    monkeypatch.setattr(
+        wr, "consume_pending_action",
+        lambda uid, pending: cleared.append(uid) or True,
+    )
     monkeypatch.setattr(wr, "send_interactive_buttons", lambda **kw: sent.append(kw))
 
     wr._send_reply_with_optional_buttons("5511999998888", "✅ Compra registrada! CC42", user_id=7)

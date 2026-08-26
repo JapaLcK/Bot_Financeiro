@@ -724,18 +724,20 @@ def resolve_multi_launch_value(user_id: int, text: str, pending: dict, platform:
         payload = pending.get("payload") or {}
         queue: list[dict] = list(payload.get("queue") or [])
         if not queue:
-            db.clear_pending_action(user_id)
+            # Abandono, condicional: a fila acabou, mas outra tarefa pode ter
+            # armado uma pergunta nova nesta linha entre a leitura e agora.
+            db.consume_pending_action(user_id, pending)
             return None
 
         if resp_norm in _CANCEL_WORDS:
-            db.clear_pending_action(user_id)
+            db.consume_pending_action(user_id, pending)
             restantes = ", ".join(i.get("desc", "?") for i in queue)
             return f"❌ Beleza, deixei de lado: {restantes}."
 
         if valor is None or valor <= 0:
             # Não é um valor — o usuário mudou de assunto. Abandona a pendência e
             # deixa o roteador tratar a mensagem como um comando novo.
-            db.clear_pending_action(user_id)
+            db.consume_pending_action(user_id, pending)
             return None
 
         head, resto = queue[0], queue[1:]

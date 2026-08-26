@@ -61,6 +61,31 @@ def advance_pending_action(user_id: int, action_type: str,
 
 
 
+def consume_pending_action(user_id: int, pending: dict) -> bool:
+    """Apaga a pendência SÓ SE ela ainda for a que você leu. True se apagou.
+
+    Atalho do `advance_pending_action(..., None)` para o caso mais comum: quem
+    consome tem a linha em mãos e quer apagar *aquela*, não "o que estiver lá".
+    `clear_pending_action` apaga incondicionalmente — se outra tarefa (Discord,
+    ou a outra plataforma do mesmo usuário) armou uma pergunta nova no
+    meio-tempo, ela some e o usuário fica com uma pergunta na tela cuja resposta
+    já não resolve nada.
+
+    False significa "a linha que eu li não está mais lá". Quem perde:
+
+    - **dinheiro ou destrutivo** (pagar, apagar, registrar) — NÃO executa. O
+      False é o porteiro: sem ele as duas tarefas executam a mesma ação.
+    - **abandono / limpeza de estado** — segue e ignora o resultado: se perdeu,
+      não havia nada seu para abandonar.
+    """
+    return advance_pending_action(
+        user_id,
+        pending.get("action_type") or "",
+        pending.get("payload") or {},
+        None,
+    )
+
+
 def create_pending_action_if_absent(user_id: int, action_type: str, payload: dict,
                                     minutes: int = 10) -> bool:
     """Cria a pendência SÓ SE o usuário não tiver nenhuma. Devolve True se criou.
@@ -103,7 +128,7 @@ def create_pending_action_if_absent(user_id: int, action_type: str, payload: dic
 #      anexou um BOTÃO à resposta: "categoria errada?", "quer desfazer?". Elas
 #      são consumidas no mesmo turno em que nascem, pelo
 #      `_send_reply_with_optional_buttons` (adapters/whatsapp/wa_runtime.py:
-#      181-211), que faz `clear_pending_action` antes de enviar. Se ainda
+#      181-211), que faz `consume_pending_action` antes de enviar. Se ainda
 #      estiverem de pé no turno seguinte é porque o botão não foi tocado —
 #      ignorar é a resposta mais comum, e o usuário refaz pelo comando normal
 #      ("muda a categoria do #12"). Pode ser desalojada por qualquer pergunta.
@@ -233,7 +258,18 @@ def get_pending_action(user_id: int):
         return None
 
     if row["expires_at"] <= datetime.now(timezone.utc):
-        clear_pending_action(user_id)
+        # Condicional no prazo, não `clear`: entre esta leitura e o delete outra
+        # tarefa pode ter armado uma pendência NOVA (prazo novo). Duas leituras
+        # simultâneas da linha vencida se atropelavam — a segunda apagava a
+        # pendência que a primeira tinha acabado de criar.
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "delete from pending_actions "
+                    "where user_id = %s and expires_at <= now()",
+                    (user_id,),
+                )
+            conn.commit()
         return None
 
     return row
